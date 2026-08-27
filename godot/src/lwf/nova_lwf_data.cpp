@@ -2,7 +2,7 @@
 
 #include "resource_index/nova_resource_root.h"
 
-#include <audio/sound_selector.h>
+#include <runtime/audio/sound_selector.h>
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>

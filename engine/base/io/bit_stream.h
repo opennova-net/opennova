@@ -21,7 +21,7 @@
 #include <cstring>
 #include <vector>
 
-#include <io/le.h>
+#include <base/io/le.h>
 
 namespace opennova {
 namespace io {

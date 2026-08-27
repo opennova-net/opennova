@@ -9,7 +9,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
-#include <def/def.h>
+#include <formats/def/def.h>
 
 #include <cstdint>
 #include <unordered_map>

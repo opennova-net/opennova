@@ -1,4 +1,4 @@
-#include "world/spawn_select.h"
+#include <runtime/world/spawn_select.h>
 
 #include <algorithm>
 #include <array>
@@ -6,12 +6,12 @@
 #include <cstdlib>
 #include <vector>
 
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/entity.h" // Entity
-#include "world/game_type.h"
-#include "world/world.h"  // World, EntityRegistry registry
-#include "world/zone_chain.h"
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/entity.h> // Entity
+#include <runtime/world/game_type.h>
+#include <runtime/world/world.h>  // World, EntityRegistry registry
+#include <runtime/world/zone_chain.h>
 
 namespace opennova::world {
 

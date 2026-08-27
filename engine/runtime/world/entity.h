@@ -11,9 +11,9 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <world/weapon_fsm.h>
+#include <runtime/world/weapon_fsm.h>
 
-#include "world/geom.h"
+#include <runtime/world/geom.h>
 
 namespace opennova::world {
 

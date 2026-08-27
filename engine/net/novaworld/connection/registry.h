@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <npwire/peer_addr.h> // opennova::PeerAddr / PeerAddrHash (moved out of this header)
+#include <net/npwire/peer_addr.h> // opennova::PeerAddr / PeerAddrHash (moved out of this header)
 
 namespace opennova {
 

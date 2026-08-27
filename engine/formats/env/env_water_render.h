@@ -1,6 +1,6 @@
 #pragma once
 
-#include "env/env_weather.h" // CloudScrollState: the water UV offsets ride the layer-1 cloud accumulators
+#include <formats/env/env_weather.h> // CloudScrollState: the water UV offsets ride the layer-1 cloud accumulators
 
 #include <cstdint>
 #include <vector>

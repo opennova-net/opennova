@@ -19,7 +19,7 @@
 
 #include <cstdint>
 
-#include "world/death_camera.h"
+#include <runtime/world/death_camera.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;

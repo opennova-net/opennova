@@ -3,9 +3,9 @@
 // source directory.
 #include "object/nova_object_data_internal.h"
 
-#include <renderer/material_classify.h>
-#include <renderer/material_descriptor.h>
-#include <threedi/threedi_ctrl_catalog.h>
+#include <runtime/renderer/material_classify.h>
+#include <runtime/renderer/material_descriptor.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include "util/texture_path_resolver.h"
 

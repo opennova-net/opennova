@@ -1,13 +1,13 @@
-#include <novaworld/gate_response.h>
+#include <net/novaworld/gate_response.h>
 
-#include <napi/literal.h>
+#include <net/napi/literal.h>
 
 #include <cctype>
 #include <cstdlib>
 #include <string>
 #include <vector>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova {
 

@@ -9,11 +9,11 @@
 // executes every 62nd tick [orig: WacScript_AdvanceTick @0x4f81b1].
 #include <cstdio>
 
-#include "mission/event_runtime.h"
-#include "wac/compiler.h"
-#include "wac/wac_system.h"
-#include "world/ai.h"
-#include "world/world.h"
+#include <runtime/mission/event_runtime.h>
+#include <runtime/wac/compiler.h>
+#include <runtime/wac/wac_system.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 using namespace opennova;
 using world::World;

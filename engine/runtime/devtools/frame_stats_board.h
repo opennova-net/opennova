@@ -14,7 +14,7 @@
 // the render-frame index every call keys on is a parameter.
 #pragma once
 
-#include <devtools/frame_stats_slots.h>
+#include <runtime/devtools/frame_stats_slots.h>
 
 #include <array>
 #include <cstdint>

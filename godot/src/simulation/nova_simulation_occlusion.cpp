@@ -3,10 +3,10 @@
 // dictionaries + debug round spawn).
 #include "simulation/nova_simulation_internal.h"
 
-#include <netsim/connection_fan.h>
-#include <netsim/entity_wire_bridge.h> // entity_class_of (the host's own rows)
-#include <renderer/light_runtime.h> // sun_visibility_factor — the quality->scale owner
-#include <world/vehicle_motor.h> // carrier_pose_fixed + VehicleTraits probe boxes
+#include <net/netsim/connection_fan.h>
+#include <net/netsim/entity_wire_bridge.h> // entity_class_of (the host's own rows)
+#include <runtime/renderer/light_runtime.h> // sun_visibility_factor — the quality->scale owner
+#include <runtime/world/vehicle_motor.h> // carrier_pose_fixed + VehicleTraits probe boxes
 
 #include <unordered_set>
 

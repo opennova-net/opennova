@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "gameprofile/required_resources.h"
+#include <base/gameprofile/required_resources.h>
 
 static int passed = 0;
 static int failed = 0;

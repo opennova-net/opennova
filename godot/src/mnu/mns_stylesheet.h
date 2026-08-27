@@ -6,8 +6,8 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <mns/mns.h>
-#include <mns/mns_document.h>
+#include <formats/mns/mns.h>
+#include <formats/mns/mns_document.h>
 
 #include <vector>
 

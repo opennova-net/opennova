@@ -4,9 +4,9 @@
 //  @ 0x63bf60 -> the Draw vtable family, cited per pass below]
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
-#include "menu/menu_frame_internal.h"
+#include <runtime/menu/menu_frame_internal.h>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <climits>

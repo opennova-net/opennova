@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "adm/adm.h"
+#include <formats/adm/adm.h>
 
 static int failures = 0;
 #define CHECK(c)                                                                     \

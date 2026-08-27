@@ -2,9 +2,9 @@
 // map. [orig: HUD_ParseHudposToken @ 0x59F370; CRenderState_SetLayerVisibility
 //  @ 0x59B0F0]
 
-#include "hud/hud_declutter.h"
+#include <runtime/hud/hud_declutter.h>
 
-#include "io/strutil.h"
+#include <base/io/strutil.h>
 
 namespace opennova::hud {
 

@@ -1,13 +1,13 @@
 // The local player's loadout orchestration — witness map in player_loadout.h.
-#include "world/player_loadout.h"
+#include <runtime/world/player_loadout.h>
 
 #include <algorithm>
 
-#include <io/log.h>
-#include <io/strutil.h>
+#include <base/io/log.h>
+#include <base/io/strutil.h>
 
-#include "world/entity.h"
-#include "world/world.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

@@ -5,10 +5,10 @@
 // the next wire sample without becoming an invented wire field.
 // [orig: RoundData_SpawnRound @0x4EC0D0; remote body update]
 
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 
 #include <cstdio>
 

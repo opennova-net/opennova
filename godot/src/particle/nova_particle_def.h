@@ -10,7 +10,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <particle/particle.h>
+#include <formats/particle/particle.h>
 
 #include "nova_particle_curve_ref.h"
 #include "nova_particle_graphic_layer.h"

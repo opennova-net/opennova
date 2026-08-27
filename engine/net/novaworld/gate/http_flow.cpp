@@ -1,9 +1,9 @@
-#include "novaworld/http_flow.h"
+#include <net/novaworld/http_flow.h>
 
 #include <cctype>
 #include <cstdlib> // std::atoi
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova {
 namespace {

@@ -9,8 +9,8 @@
 #include <cstring>
 #include <string>
 
-#include <world/wire_body_sound.h>
-#include <world/world.h>
+#include <runtime/world/wire_body_sound.h>
+#include <runtime/world/world.h>
 
 using namespace opennova;
 using namespace opennova::world;

@@ -19,12 +19,12 @@
 #include <cstdint>
 #include <vector>
 
-#include <aip/aip.h>
+#include <formats/aip/aip.h>
 
-#include "mission/bms.h"
-#include "world/entity.h"
-#include "world/geom.h"
-#include "world/player_loadout.h"
+#include <formats/mission/bms.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/player_loadout.h>
 
 #include <functional>
 #include <string>

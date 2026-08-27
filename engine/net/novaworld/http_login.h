@@ -1,6 +1,6 @@
 #pragma once
 
-#include <novacrypto/epask.h>
+#include <net/novacrypto/epask.h>
 
 #include <map>
 #include <string>

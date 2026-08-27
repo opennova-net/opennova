@@ -9,7 +9,7 @@
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"
-#include "avatars/avatars.h"
+#include <formats/avatars/avatars.h>
 
 namespace {
 

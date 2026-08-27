@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include <npwire/entity_class.h> // EntityClass (the §5.10b replication class)
+#include <net/npwire/entity_class.h> // EntityClass (the §5.10b replication class)
 
 namespace opennova {
 

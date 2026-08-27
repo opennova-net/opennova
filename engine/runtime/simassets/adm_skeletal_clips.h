@@ -14,8 +14,8 @@
 #ifndef OPENNOVA_SIMASSETS_ADM_SKELETAL_CLIPS_H
 #define OPENNOVA_SIMASSETS_ADM_SKELETAL_CLIPS_H
 
-#include <anim/anim_sample.h>
-#include <anim/skeletal_pose.h>
+#include <runtime/anim/anim_sample.h>
+#include <runtime/anim/skeletal_pose.h>
 
 #include <string>
 #include <unordered_map>

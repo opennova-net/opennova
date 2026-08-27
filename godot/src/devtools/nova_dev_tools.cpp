@@ -1,7 +1,7 @@
 #include "nova_dev_tools.h"
 
 #if OPENNOVA_DEVTOOLS
-#include <devtools/stats_window.h>
+#include <runtime/devtools/stats_window.h>
 #endif
 
 namespace godot {

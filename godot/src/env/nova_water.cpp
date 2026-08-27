@@ -18,8 +18,8 @@
 #include "render/nova_framefx.h"
 #include "object/nova_object_shader_cache.h"
 
-#include <renderer/render_order.h>
-#include <terrain/quadtree.h> // water_pass_active (retail's g_WaterActive)
+#include <runtime/renderer/render_order.h>
+#include <runtime/terrain/quadtree.h> // water_pass_active (retail's g_WaterActive)
 #include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 

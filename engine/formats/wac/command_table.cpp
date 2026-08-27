@@ -1,8 +1,8 @@
-#include "wac/command.h"
+#include <formats/wac/command.h>
 
 #include <cctype>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::wac {
 

@@ -10,8 +10,8 @@
 //  right-aligned at x 620 via HUD_DrawTextRightAlignedScaled (ex sub_580BC0) -> HUD_DrawTextRightAligned_HalfBright,
 //  all in g_hudLabelFontLarge.]
 
-#include <hud/hud_frame.h>
-#include <hud/end_round_statistics.h>
+#include <runtime/hud/hud_frame.h>
+#include <runtime/hud/end_round_statistics.h>
 
 namespace opennova::hud {
 

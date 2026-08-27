@@ -1,9 +1,9 @@
-#include "npruntime/weapon_table_build.h"
+#include <net/npruntime/weapon_table_build.h>
 
-#include <io/strutil.h>
-#include <simassets/adm_clip_index.h>
-#include <world/ammo_table.h>
-#include <world/entity.h>
+#include <base/io/strutil.h>
+#include <runtime/simassets/adm_clip_index.h>
+#include <runtime/world/ammo_table.h>
+#include <runtime/world/entity.h>
 
 #include <algorithm>
 #include <cctype>

@@ -1,7 +1,7 @@
 // Static terrain-shadow collector: admission, projected page intersection,
 // selected-LOD/all-ROBJ ordering, and the page content stamp.
-#include <terrain/terrain_static_shadow.h>
-#include <mission/placement_traits.h>
+#include <runtime/terrain/terrain_static_shadow.h>
+#include <runtime/mission/placement_traits.h>
 
 #include <cstdio>
 #include <cmath>

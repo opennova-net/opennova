@@ -14,16 +14,16 @@
 // disagree on any layer (envelope, NWU, flat-TLV, scrk direction, the hk
 // echo, the 0x43/0x83 framing), this test fails.
 
-#include <novaworld/client_session.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
-#include <npwire/protocol_message.h>
-#include <novaworld/lobby_session.h>
+#include <net/novaworld/client_session.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
+#include <net/npwire/protocol_message.h>
+#include <net/novaworld/lobby_session.h>
 
-#include <napi/envelope.h>
-#include <napi/session.h>
-#include <napi/tlv.h>
-#include <novacrypto/nwu.h>
+#include <net/napi/envelope.h>
+#include <net/napi/session.h>
+#include <net/napi/tlv.h>
+#include <net/novacrypto/nwu.h>
 
 #include <array>
 #include <cstdio>

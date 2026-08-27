@@ -10,8 +10,8 @@
 #include <string>
 #include <vector>
 
-#include "wac/bytecode.h"
-#include "wac/compiler.h"
+#include <formats/wac/bytecode.h>
+#include <runtime/wac/compiler.h>
 
 namespace fs = std::filesystem;
 using namespace opennova::wac;

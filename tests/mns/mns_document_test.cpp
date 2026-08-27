@@ -16,8 +16,8 @@
 
    Runs from the repo root (ctest WORKING_DIRECTORY), like mnu_compat. */
 
-#include "mns/mns.h"
-#include "mns/mns_document.h"
+#include <formats/mns/mns.h>
+#include <formats/mns/mns_document.h>
 
 #include "common/test_expect.h"
 

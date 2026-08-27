@@ -1,4 +1,4 @@
-#include <terrain/terrain_static_shadow_raster.h>
+#include <runtime/terrain/terrain_static_shadow_raster.h>
 
 // [orig: Terrain_CollectAndRenderTileModels @0x60D5BF..0x60DA4F:
 // the alt DOT3 light pass apply @0x60D794, black PROJSHAD geometry

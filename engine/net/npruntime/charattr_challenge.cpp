@@ -5,7 +5,7 @@
 // [orig: CharAttr_LoadFromDef @0x412140 (the loader this file reproduces),
 //  AnimMap_GetSlotChecksum @0x412aa0 (row select + hash),
 //  AnimMap_SetSlotProperty @0x412890 (the property clear)]
-#include "npruntime/charattr_challenge.h"
+#include <net/npruntime/charattr_challenge.h>
 
 #include <algorithm>
 #include <array>
@@ -15,7 +15,7 @@
 #include <string>
 #include <string_view>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::np {
 

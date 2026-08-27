@@ -19,11 +19,11 @@
    table, bones from the .adm's anim_reset .bad, all names matched
    case-insensitively over the flat directory. */
 
-#include <anim/anim_sample.h>
+#include <runtime/anim/anim_sample.h>
 
-#include <adm/adm.h>
-#include <bad/bad.h>
-#include <threedi/threedi_3di3.h>
+#include <formats/adm/adm.h>
+#include <formats/bad/bad.h>
+#include <formats/threedi/threedi_3di3.h>
 
 #include <algorithm>
 #include <cctype>

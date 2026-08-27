@@ -8,11 +8,11 @@
 
 #include "simulation/nova_simulation.h"
 
-#include <io/perf_clock.h> // the opt-in profiling clock (opennova::io::perf_now_us)
-#include <simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)
-#include <threedi/threedi_ctrl_catalog.h>
-#include <wac/compiler.h>
-#include <world/turret_window.h>
+#include <base/io/perf_clock.h> // the opt-in profiling clock (opennova::io::perf_now_us)
+#include <runtime/simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)
+#include <formats/threedi/threedi_ctrl_catalog.h>
+#include <runtime/wac/compiler.h>
+#include <runtime/world/turret_window.h>
 
 #include <algorithm>
 #include <array>
@@ -23,39 +23,39 @@
 #include <string>
 #include <utility>
 
-#include "netsim/connection.h"
-#include "netsim/entity_wire_bridge.h" // build_player_uplink (joiner-side C2S 0x0C body)
+#include <net/netsim/connection.h>
+#include <net/netsim/entity_wire_bridge.h> // build_player_uplink (joiner-side C2S 0x0C body)
 
-#include <npwire/entity_class.h> // class_from_tag (§5.10b *_function -> wire class)
-#include <npwire/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
+#include <net/npwire/entity_class.h> // class_from_tag (§5.10b *_function -> wire class)
+#include <net/npwire/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
-#include <npruntime/client_replica_present.h> // the client-replica present composition (ADR 0031)
-#include <npruntime/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)
-#include <npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
-#include <npruntime/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
-#include <npruntime/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
-#include <npruntime/ammo_table_build.h>   // build_ammo_table + round_type resolve (§5.60)
-#include <npruntime/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
-#include <npruntime/score_rules_build.h> // build_score_rules (score.ini -> world.score_rules)
-#include <npwire/game_type.h>              // game_type::for_mission_mode
+#include <net/npruntime/client_replica_present.h> // the client-replica present composition (ADR 0031)
+#include <net/npruntime/server_message_dispatch.h> // dispatch_session_replies (local loopback gameplay C2S)
+#include <net/npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
+#include <net/npruntime/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
+#include <net/npruntime/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
+#include <net/npruntime/ammo_table_build.h>   // build_ammo_table + round_type resolve (§5.60)
+#include <net/npruntime/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
+#include <net/npruntime/score_rules_build.h> // build_score_rules (score.ini -> world.score_rules)
+#include <net/npwire/game_type.h>              // game_type::for_mission_mode
 
-#include <def/def.h> // def_parse_weapons_memory / def_free_weapons
+#include <formats/def/def.h> // def_parse_weapons_memory / def_free_weapons
 
-#include <mission/bms.h>
-#include <mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
-#include <mission/mission_systems.h>
-#include <mission/placement_traits.h> // visual_item_id_for_runtime_type / kPlayerVisualItemId
-#include <anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
-#include <io/bam.h>           // bam_add/bam_sar: the FP roll term composition
-#include <io/strutil.h>       // iequals: the loadout sub-variant ammo-class compare
-#include <world/angle.h>
-#include <simassets/model_builders.h> // the sim-side .3di derivations (ADR 0028)
-#include <simassets/pose_inputs.h>    // seat/mount pose predicates + aim inputs (ADR 0028)
-#include <world/mount_controls.h>     // heat-glow + emplaced turret CTRL sources (ADR 0028)
-#include <world/player_spawn.h>
-#include <world/spawn_select.h>
-#include <world/vehicle_attach.h> // player_toggle_vehicle_mount (the USE-ITEM toggle)
-#include <world/vehicle_mount.h>  // resolve_mounted_ammo_slot (phase-8 route)
+#include <formats/mission/bms.h>
+#include <formats/mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
+#include <runtime/mission/mission_systems.h>
+#include <runtime/mission/placement_traits.h> // visual_item_id_for_runtime_type / kPlayerVisualItemId
+#include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
+#include <base/io/bam.h>           // bam_add/bam_sar: the FP roll term composition
+#include <base/io/strutil.h>       // iequals: the loadout sub-variant ammo-class compare
+#include <runtime/world/angle.h>
+#include <runtime/simassets/model_builders.h> // the sim-side .3di derivations (ADR 0028)
+#include <runtime/simassets/pose_inputs.h>    // seat/mount pose predicates + aim inputs (ADR 0028)
+#include <runtime/world/mount_controls.h>     // heat-glow + emplaced turret CTRL sources (ADR 0028)
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/spawn_select.h>
+#include <runtime/world/vehicle_attach.h> // player_toggle_vehicle_mount (the USE-ITEM toggle)
+#include <runtime/world/vehicle_mount.h>  // resolve_mounted_ammo_slot (phase-8 route)
 
 #include "env/nova_weather_core.h" // kIrisSample* classification codes
 #include "object/nova_item_database.h"

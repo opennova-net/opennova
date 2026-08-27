@@ -6,7 +6,7 @@
 // Catches encoder regressions that the full-bake byte-parity tests
 // might mask.
 
-#include <cpt/cpt.h>
+#include <formats/cpt/cpt.h>
 #include "common/test_paths.h"
 
 #include <cstdint>

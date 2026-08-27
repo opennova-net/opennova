@@ -5,7 +5,7 @@
 #include "nova_terrain_tile_info.h"
 #include "nova_terrain_foliage_def.h"
 
-#include <terrain/foliage_detail_collector.h>
+#include <runtime/terrain/foliage_detail_collector.h>
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>

@@ -5,12 +5,12 @@
 #include "wac_startup.h"
 #include "netsim/conn_fan_test_util.h"
 
-#include <mission/event_runtime.h>
-#include <netsim/loopback_channel.h>
-#include <npwire/ingame_decode.h>
-#include <wac/wac_system.h>
-#include <world/ai.h>
-#include <world/world.h>
+#include <runtime/mission/event_runtime.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/npwire/ingame_decode.h>
+#include <runtime/wac/wac_system.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 #include <chrono>
 #include <cstdio>

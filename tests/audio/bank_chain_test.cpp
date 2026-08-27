@@ -2,7 +2,7 @@
 // witnessed six-slot table with the expansion pair ahead of the statics, and
 // the four static names alone when no expansion is active.
 
-#include <audio/bank_chain.h>
+#include <runtime/audio/bank_chain.h>
 
 #include <cstdio>
 #include <string>

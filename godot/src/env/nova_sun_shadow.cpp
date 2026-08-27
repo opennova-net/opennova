@@ -4,7 +4,7 @@
 
 #include <array>
 
-#include <renderer/render_slot_shadow.h>
+#include <runtime/renderer/render_slot_shadow.h>
 
 #include "env/nova_mission_environment.h"
 #include "env/nova_water.h"

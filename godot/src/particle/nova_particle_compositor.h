@@ -12,7 +12,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
-#include <renderer/particle_frame.h>
+#include <runtime/renderer/particle_frame.h>
 
 namespace godot {
 

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "renderer/uv_anim.h"
-#include "threedi/threedi_3di3.h"
-#include "threedi/threedi_ctrl_catalog.h"
+#include <runtime/renderer/uv_anim.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 #include <array>
 #include <cstdint>
 #include <string>

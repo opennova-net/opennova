@@ -1,4 +1,4 @@
-#include <novaworld/connection/manager.h>
+#include <net/novaworld/connection/manager.h>
 
 #include "../common/test_expect.h"
 

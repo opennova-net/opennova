@@ -1,13 +1,13 @@
-#include "wac/vm.h"
+#include <runtime/wac/vm.h>
 
 #include <cctype>
 #include <cstring>
 
-#include "wac/bytecode.h"
-#include "wac/command.h"
-#include "world/world.h"
+#include <formats/wac/bytecode.h>
+#include <formats/wac/command.h>
+#include <runtime/world/world.h>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::wac {
 namespace {

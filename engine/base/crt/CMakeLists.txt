@@ -7,8 +7,9 @@ add_library(opennova_crt STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/crt_rng.cpp
 )
 
+# engine/ is the one public include root (ADR 0040): <base/<lib>/file.h>.
 target_include_directories(opennova_crt
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../..
 )
 
 target_compile_features(opennova_crt PUBLIC cxx_std_17)

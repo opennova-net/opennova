@@ -6,7 +6,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
-#include "sbf/sbf.h"
+#include <formats/sbf/sbf.h>
 
 #include "nova_sbf_bank.h"
 

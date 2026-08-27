@@ -1,6 +1,6 @@
 #pragma once
 
-#include <npruntime/join_session_policy.h>
+#include <net/npruntime/join_session_policy.h>
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>

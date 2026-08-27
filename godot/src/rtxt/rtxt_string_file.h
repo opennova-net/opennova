@@ -10,7 +10,7 @@
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
-#include <rtxt/rtxt.h>
+#include <formats/rtxt/rtxt.h>
 
 namespace godot {
 

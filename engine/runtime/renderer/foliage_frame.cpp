@@ -2,9 +2,9 @@
 // grouping, wind clocks, and anchor gating moved down from the shell
 // dispatcher as a structural translation of the same decisions.
 
-#include "renderer/foliage_frame.h"
+#include <runtime/renderer/foliage_frame.h>
 
-#include <terrain/quadtree.h>
+#include <runtime/terrain/quadtree.h>
 
 #include <algorithm>
 #include <cmath>

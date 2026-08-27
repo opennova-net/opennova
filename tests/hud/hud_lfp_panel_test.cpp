@@ -3,7 +3,7 @@
 // [orig: HUD_DrawZoneStatusPanel @0x5A2480; HUD_DrawZoneMarker @0x5986F0;
 //  the state inputs @0x598825..0x598934]
 
-#include <hud/hud_lfp_panel.h>
+#include <runtime/hud/hud_lfp_panel.h>
 
 #include <cstdio>
 #include <string>

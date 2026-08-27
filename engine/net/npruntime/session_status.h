@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-#include "npruntime/game_config.h"
+#include <net/npruntime/game_config.h>
 
 namespace opennova::world {
 class World;

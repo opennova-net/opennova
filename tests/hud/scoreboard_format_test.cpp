@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <string>
 
-#include <hud/hud_scoreboard.h>
+#include <runtime/hud/hud_scoreboard.h>
 
 using namespace opennova::hud;
 

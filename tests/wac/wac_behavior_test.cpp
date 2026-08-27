@@ -4,9 +4,9 @@
 #include <cstdio>
 #include <string>
 
-#include "wac/compiler.h"
-#include "wac/wac_system.h"
-#include "world/world.h"
+#include <runtime/wac/compiler.h>
+#include <runtime/wac/wac_system.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::wac;
 using namespace opennova::world;

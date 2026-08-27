@@ -12,10 +12,10 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <cpt/cpt_io.h>
-#include <terrain_query/coords.h>
-#include <terrain_query/height_field.h>
-#include <trn/trn_io.h>
+#include <formats/cpt/cpt_io.h>
+#include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/height_field.h>
+#include <formats/trn/trn_io.h>
 
 #include "resource_index/nova_resource_root.h"
 

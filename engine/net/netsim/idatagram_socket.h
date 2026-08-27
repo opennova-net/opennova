@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <npwire/peer_addr.h> // opennova::PeerAddr
+#include <net/npwire/peer_addr.h> // opennova::PeerAddr
 
 namespace opennova::netsim {
 

@@ -7,9 +7,9 @@
 #include <cmath>
 #include <cstdint>
 
-#include "world/ai.h"
-#include "world/entity.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

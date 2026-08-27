@@ -3,8 +3,8 @@
 // [orig: MapOverlay_UpdateOrCreateSlot @0x5BEA60; update_minimap_overlay_entity
 // @0x5BEC10; update_map_overlay_timers @0x5BFCE0]
 
-#include <netsim/client_replica_pipeline.h>
-#include <npwire/ingame_message_id.h>
+#include <net/netsim/client_replica_pipeline.h>
+#include <net/npwire/ingame_message_id.h>
 
 #include <cstdio>
 #include <vector>

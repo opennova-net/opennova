@@ -12,9 +12,9 @@
 // @0x606180; PolyTrn_RenderTile
 // @0x60DF39..0x60E0AF]
 
-#include <terrain/terrain_tile_composition_cache.h>
-#include <terrain/texture_preprocess.h>
-#include <terrain_query/terrain_scorch_record.h>
+#include <runtime/terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain/texture_preprocess.h>
+#include <runtime/terrain_query/terrain_scorch_record.h>
 
 #include <array>
 #include <cstddef>

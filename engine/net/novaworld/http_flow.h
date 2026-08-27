@@ -5,10 +5,10 @@
 #include <utility>
 #include <vector>
 
-#include "novaworld/gsb.h"        // GsbResponse / gsb_parse_response (reused)
-#include "novaworld/http_login.h" // CookieJar / LoginFormField / build_login_post_body / parse_joi_connection_string
+#include <net/novaworld/gsb.h>        // GsbResponse / gsb_parse_response (reused)
+#include <net/novaworld/http_login.h> // CookieJar / LoginFormField / build_login_post_body / parse_joi_connection_string
 
-#include <novacrypto/epask.h> // EpaskParams / epask_to_string / epask_from_string
+#include <net/novacrypto/epask.h> // EpaskParams / epask_to_string / epask_from_string
 
 // P7 Part 2 — the NovaWorld lobby HTTP orchestration, moved out of the Godot binding so the binding
 // becomes a pure HTTPRequest pump (ADR 0010 / .agents/network.md: protocol/framing/sequencing in libs,

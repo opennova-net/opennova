@@ -7,7 +7,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <environment/environment_state.h>
+#include <runtime/environment/environment_state.h>
 
 #include "env/env_file.h"
 #include "object/nova_object_model.h"

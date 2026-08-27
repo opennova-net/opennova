@@ -12,16 +12,16 @@
 // This is the scripted behavior a live host shows when a player mounts the
 // Stryker gun; the test pins it deterministically against the shipped mission.
 // Gated on OPENNOVA_JO_DIR (skip-as-pass without a JO install).
-#include "mission/event_runtime.h"
-#include "mission/promote.h"
+#include <runtime/mission/event_runtime.h>
+#include <runtime/mission/promote.h>
 
-#include "mission/bms.h"
+#include <formats/mission/bms.h>
 
-#include "world/ai.h"
-#include "world/player_spawn.h"
-#include "world/vehicle_motor.h"
-#include "world/vehicle_mount.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_mount.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <cstdio>

@@ -8,11 +8,11 @@
 
 #include "rtxt/rtxt_string_file.h"
 
-#include <hud/end_round_overlay.h>
-#include <hud/end_round_statistics.h>
-#include <hud/feed_format.h>
-#include <npruntime/stat_screen_feed.h>
-#include <world/game_type.h>
+#include <runtime/hud/end_round_overlay.h>
+#include <runtime/hud/end_round_statistics.h>
+#include <runtime/hud/feed_format.h>
+#include <net/npruntime/stat_screen_feed.h>
+#include <runtime/world/game_type.h>
 
 #include <algorithm>
 #include <functional>

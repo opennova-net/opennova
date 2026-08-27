@@ -106,9 +106,10 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
 )
 
+# engine/ is the one public include root (ADR 0040): <net/<lib>/file.h>.
 target_include_directories(opennova_net
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 # The Shape A chain: net -> runtime -> base -> formats -> io (all PUBLIC).

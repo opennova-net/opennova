@@ -16,8 +16,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <foliage/runtime.h>
-#include <renderer/foliage_frame.h>
+#include <formats/foliage/runtime.h>
+#include <runtime/renderer/foliage_frame.h>
 
 #include <array>
 #include <cstdint>

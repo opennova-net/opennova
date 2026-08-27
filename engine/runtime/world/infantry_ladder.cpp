@@ -7,11 +7,11 @@
 
 #include <cmath>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
-#include "world/ai.h"
-#include "world/infantry_ladder.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/infantry_ladder.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

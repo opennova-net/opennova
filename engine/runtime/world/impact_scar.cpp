@@ -4,12 +4,12 @@
 //  Scar_TextureForId @0x5CC360; Scar_RadiusForId @0x5CC3B0;
 //  Impact_SpawnGlassEffectsOrScar @0x5CF1B0]
 
-#include "world/impact_scar.h"
+#include <runtime/world/impact_scar.h>
 
 #include <cmath>
 
-#include "world/collision.h"
-#include "world/world.h"
+#include <runtime/world/collision.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

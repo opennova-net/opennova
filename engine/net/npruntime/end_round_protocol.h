@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include <npwire/ingame_decode.h>
-#include <world/match.h>
+#include <net/npwire/ingame_decode.h>
+#include <runtime/world/match.h>
 
 namespace opennova::np {
 

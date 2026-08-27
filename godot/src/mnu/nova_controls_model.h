@@ -6,7 +6,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
-#include "controls/binding_set.h"
+#include <runtime/controls/binding_set.h>
 
 namespace godot {
 

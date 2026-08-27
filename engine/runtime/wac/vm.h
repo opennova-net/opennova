@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "wac/program.h"
+#include <formats/wac/program.h>
 
 namespace opennova::world {
 class World;

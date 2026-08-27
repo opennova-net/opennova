@@ -2,7 +2,7 @@
 // [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0; style build
 // CEffectEmitterPool_ResetAndBuildStyles @ 0x5DB3A0].
 
-#include <renderer/tracer_frame.h>
+#include <runtime/renderer/tracer_frame.h>
 
 #include <cmath>
 #include <cstdio>

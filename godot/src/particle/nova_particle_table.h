@@ -4,7 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
-#include <particle/particle.h>
+#include <formats/particle/particle.h>
 
 namespace godot {
 

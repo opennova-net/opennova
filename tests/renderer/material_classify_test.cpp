@@ -4,10 +4,10 @@
 // shader_tag in the original OED's gMaterialInfoTable (relocated as the test
 // oracle tests/renderer/material_info_oracle.h).
 
-#include "renderer/material_classify.h"
-#include "renderer/object_shader_template.h"
-#include "renderer/material_descriptor.h"
-#include "threedi/threedi_3di3.h"
+#include <runtime/renderer/material_classify.h>
+#include <runtime/renderer/object_shader_template.h>
+#include <runtime/renderer/material_descriptor.h>
+#include <formats/threedi/threedi_3di3.h>
 
 #include "renderer/material_info_oracle.h"
 

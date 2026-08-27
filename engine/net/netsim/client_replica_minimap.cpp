@@ -5,11 +5,11 @@
 //  NapiNPClientMsg_0x06B @0x425520 -> update_minimap_overlay_entity @0x5BEC10;
 //  update_map_overlay_timers @0x5BFCE0]
 
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_decode.h>
-#include <world/entity.h>          // retail_pool_capacity (the handle gates)
-#include <world/minimap_overlay.h> // minimap_team_color (the ONE index home)
+#include <net/npwire/ingame_decode.h>
+#include <runtime/world/entity.h>          // retail_pool_capacity (the handle gates)
+#include <runtime/world/minimap_overlay.h> // minimap_team_color (the ONE index home)
 
 #include <unordered_map>
 

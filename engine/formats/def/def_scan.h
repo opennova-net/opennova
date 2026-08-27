@@ -13,7 +13,7 @@
 // of those turning external later would collide. Hence the namespace; the family
 // TUs pull it in wholesale, so no call site changes.
 
-#include "def/def.h"
+#include <formats/def/def.h>
 
 #include <stddef.h>
 #include <stdlib.h>

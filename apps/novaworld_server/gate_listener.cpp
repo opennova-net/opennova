@@ -3,10 +3,10 @@
 #include "server_config.h"
 
 #include <net_sockets.h>
-#include <napi/envelope.h>
-#include <novacrypto/nwu.h>
-#include <novaworld/gate_probe.h>
-#include <novaworld/unknown_tracker.h>
+#include <net/napi/envelope.h>
+#include <net/novacrypto/nwu.h>
+#include <net/novaworld/gate_probe.h>
+#include <net/novaworld/unknown_tracker.h>
 
 #include <chrono>
 #include <cstdio>

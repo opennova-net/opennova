@@ -7,10 +7,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include <npwire/ingame_decode.h> // EntityClass + WeaponReload (a per-family decode-header split candidate)
+#include <net/npwire/ingame_decode.h> // EntityClass + WeaponReload (a per-family decode-header split candidate)
 
-#include "netsim/client_state.h"
-#include "netsim/session_transport.h"
+#include <net/netsim/client_state.h>
+#include <net/netsim/session_transport.h>
 
 namespace opennova::world {
 class IRootMotionSource;

@@ -5,7 +5,7 @@
 // Witnesses: weapon table [orig: @0x830bf0], item attrib tables
 // [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-160],
 // ammo table [orig: @0x813500].
-#include "def/def.h"
+#include <formats/def/def.h>
 
 #include <cstdio>
 

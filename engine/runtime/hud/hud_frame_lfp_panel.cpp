@@ -5,8 +5,8 @@
 // the walk that puts it on screen. The feed (world/lfp_feed.h) supplies one
 // HudLfpZone per list entry.
 
-#include <hud/hud_frame.h>
-#include <hud/hud_lfp_panel.h>
+#include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_lfp_panel.h>
 
 #include <algorithm>
 #include <array>

@@ -4,7 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <env/env_celestial.h>
+#include <formats/env/env_celestial.h>
 
 namespace godot {
 

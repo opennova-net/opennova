@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "def/def.h"
+#include <formats/def/def.h>
 
 static int type_of(const char *type_token) {
     char buf[256];

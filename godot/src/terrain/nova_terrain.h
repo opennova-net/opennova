@@ -17,7 +17,7 @@
 #include "nova_terrain_data.h"
 #include "nova_terrain_static_shadow_rasterizer.h"
 #include "nova_terrain_tile_cache_device.h"
-#include <terrain/terrain_frame.h>
+#include <runtime/terrain/terrain_frame.h>
 
 #include <cstdint>
 #include <optional>

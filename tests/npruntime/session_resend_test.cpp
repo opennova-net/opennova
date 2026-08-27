@@ -4,15 +4,15 @@
 // reconstructed packet 1 back through the receiver so its queued packet 2 drains. The tests also
 // pin key validation, malformed-body rejection, current-ACK retransmit headers, and ACK retirement.
 
-#include <npruntime/joiner_connection.h>
-#include <npruntime/napi_np_connection.h>
-#include <npruntime/napi_np_protocol.h>
-#include <npruntime/napi_np_server_ctx.h>
+#include <net/npruntime/joiner_connection.h>
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_protocol.h>
+#include <net/npruntime/napi_np_server_ctx.h>
 
-#include <npwire/nw_session_framing.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_keys.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_keys.h>
 
 #include <cstdint>
 #include <cstdio>

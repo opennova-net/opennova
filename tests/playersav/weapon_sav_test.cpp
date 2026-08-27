@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "common/test_expect.h"
-#include "playersav/weapon_sav.h"
+#include <formats/playersav/weapon_sav.h>
 
 using namespace opennova::playersav;
 

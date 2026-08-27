@@ -2,7 +2,7 @@
 // Expectations are TEST_EXPECT (real assertions under the Release ctest
 // config, where assert() would compile away).
 
-#include "mns/mns.h"
+#include <formats/mns/mns.h>
 
 #include "common/test_expect.h"
 

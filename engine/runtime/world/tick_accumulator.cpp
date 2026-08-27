@@ -1,4 +1,4 @@
-#include "world/tick_accumulator.h"
+#include <runtime/world/tick_accumulator.h>
 
 namespace opennova::world {
 

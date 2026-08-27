@@ -1,10 +1,10 @@
 // [orig: EntityPool_FindByNetId @ 0x4f0a20 (the pool-0-first net-id resolve); docs/net/novaworld-net-re.md]
-#include "world/entity_registry.h"
+#include <runtime/world/entity_registry.h>
 
 #include <algorithm>
 #include <cctype>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::world {
 namespace {

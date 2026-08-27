@@ -1,4 +1,4 @@
-#include "bink/bink.h"
+#include <formats/bink/bink.h>
 
 #include <algorithm>
 #include <cstdint>

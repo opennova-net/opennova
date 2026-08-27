@@ -1,13 +1,13 @@
-#include "world/vehicle_attach.h"
+#include <runtime/world/vehicle_attach.h>
 
 #include <bitset>
 #include <cmath>
 #include <cstdint>
 
-#include "world/ai.h"
-#include "world/collision.h"
-#include "world/weapon_fsm.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/weapon_fsm.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

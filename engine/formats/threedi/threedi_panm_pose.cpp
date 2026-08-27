@@ -1,11 +1,11 @@
 // Model-level PANM pose evaluation — moved verbatim from the shell adapter's
 // ObjectData runtime evaluation (ADR 0028); the Godot binding's only
 // residue there was Dictionary marshalling and Transform3D boxing.
-#include "threedi/threedi_panm_pose.h"
+#include <formats/threedi/threedi_panm_pose.h>
 
-#include "threedi/threedi_ctrl_catalog.h"
-#include "threedi/threedi_panm.h"
-#include "threedi/threedi_panm_runtime.h"
+#include <formats/threedi/threedi_ctrl_catalog.h>
+#include <formats/threedi/threedi_panm.h>
+#include <formats/threedi/threedi_panm_runtime.h>
 
 #include <algorithm>
 

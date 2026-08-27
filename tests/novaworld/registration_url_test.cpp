@@ -1,5 +1,5 @@
-#include <novacrypto/url_cipher.h>
-#include <novaworld/registration_url.h>
+#include <net/novacrypto/url_cipher.h>
+#include <net/novaworld/registration_url.h>
 
 #include <cstdio>
 #include <string>

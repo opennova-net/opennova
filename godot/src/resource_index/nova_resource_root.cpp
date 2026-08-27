@@ -5,9 +5,9 @@
 #include "util/engine_caches.h"
 #include "util/texture_path_resolver.h"
 
-#include <gameprofile/gameprofile.h>
-#include <gameprofile/required_resources.h>
-#include <vfs/vfs.h>
+#include <base/gameprofile/gameprofile.h>
+#include <base/gameprofile/required_resources.h>
+#include <base/vfs/vfs.h>
 
 #include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/os.hpp>

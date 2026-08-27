@@ -6,8 +6,8 @@
 // actual dial endpoint from decoded NK. NI/NP are proxy/display slots and can
 // disagree with NK on live NovaWorld joins.
 
-#include <novacrypto/url_cipher.h>
-#include <novaworld/http_login.h>
+#include <net/novacrypto/url_cipher.h>
+#include <net/novaworld/http_login.h>
 
 #include <cstdio>
 #include <string>

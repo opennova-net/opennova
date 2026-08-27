@@ -1,5 +1,5 @@
-#include <terrain/texture_preprocess.h>
-#include <terrain_query/height_field.h>
+#include <runtime/terrain/texture_preprocess.h>
+#include <runtime/terrain_query/height_field.h>
 
 #include <algorithm>
 #include <cmath>

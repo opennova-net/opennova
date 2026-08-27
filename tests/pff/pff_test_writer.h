@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "pff/pff.h"
+#include <formats/pff/pff.h>
 
 typedef struct PffTestEntry {
     const char *name;       /* logical name (<=16 modern, <=12 legacy) */

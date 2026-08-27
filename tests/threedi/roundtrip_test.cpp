@@ -5,7 +5,7 @@
 #include "common/dirent_compat.h"
 #include <sys/stat.h>
 
-#include "threedi/threedi_3di3.h"
+#include <formats/threedi/threedi_3di3.h>
 #include "common/test_paths.h"
 
 static int has_extension(const char *name, const char *ext) {

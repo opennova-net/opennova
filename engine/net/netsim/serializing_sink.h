@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-#include <world/net_command_sink.h>
+#include <runtime/world/net_command_sink.h>
 
-#include "netsim/session_transport.h"
+#include <net/netsim/session_transport.h>
 
 namespace opennova::netsim {
 

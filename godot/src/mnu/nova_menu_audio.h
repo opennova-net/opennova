@@ -6,7 +6,7 @@
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <audio/sound_selector.h>
+#include <runtime/audio/sound_selector.h>
 
 namespace godot {
 

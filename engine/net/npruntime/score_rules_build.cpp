@@ -1,4 +1,4 @@
-#include "npruntime/score_rules_build.h"
+#include <net/npruntime/score_rules_build.h>
 
 namespace opennova::np {
 

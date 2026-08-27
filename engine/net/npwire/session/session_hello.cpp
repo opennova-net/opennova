@@ -1,8 +1,8 @@
-#include <npwire/session_hello.h>
+#include <net/npwire/session_hello.h>
 
 #include <cctype>
 #include <cstring>
-#include <napi/tlv.h>
+#include <net/napi/tlv.h>
 
 namespace opennova {
 

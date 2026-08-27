@@ -18,8 +18,8 @@
 #include <cstdint>
 #include <vector>
 
-#include <hud/hud_scoreboard.h>
-#include <netsim/client_state.h>
+#include <runtime/hud/hud_scoreboard.h>
+#include <net/netsim/client_state.h>
 
 namespace opennova::netsim {
 

@@ -5,7 +5,7 @@
 //  Light_SelectAndEnableForDraw @ 0x5ab9d0; the batch-entry 3-cap
 //  collect_render_objects_for_batch @ 0x5d9229;
 //  Light_GetPointLightParams @ 0x5a9180; Light_TickGenBlock @ 0x5a8ae0].
-#include "renderer/light_scene.h"
+#include <runtime/renderer/light_scene.h>
 
 #include <cmath>
 #include <cstdlib>

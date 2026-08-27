@@ -6,7 +6,7 @@
 // (no retail asset). Navigation correctness is validated at the retail-launch
 // step; this guards the files parse + carry the right screens. See
 // assets/README.md.
-#include <mnu/mnu.h>
+#include <formats/mnu/mnu.h>
 
 #include <cstdio>
 #include <fstream>

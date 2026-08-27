@@ -2,8 +2,8 @@
 
 #include "resource_index/nova_resource_root.h"
 
-#include <mission/bms.h>     // AttribFlags / AreaTrigger / Trigger bit names
-#include <mission/mission.h> // kItemIdOffset (pins ITEM_ID_OFFSET below)
+#include <formats/mission/bms.h>     // AttribFlags / AreaTrigger / Trigger bit names
+#include <formats/mission/mission.h> // kItemIdOffset (pins ITEM_ID_OFFSET below)
 
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>

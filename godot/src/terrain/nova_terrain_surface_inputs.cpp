@@ -7,8 +7,8 @@
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
-#include <terrain/texture_preprocess.h>
-#include <til/til_overlay_bake.h>
+#include <runtime/terrain/texture_preprocess.h>
+#include <formats/til/til_overlay_bake.h>
 
 #include <algorithm>
 #include <cmath>

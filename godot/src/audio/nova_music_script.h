@@ -13,7 +13,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 namespace godot {
 

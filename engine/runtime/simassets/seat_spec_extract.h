@@ -11,9 +11,9 @@
 #ifndef OPENNOVA_SIMASSETS_SEAT_SPEC_EXTRACT_H
 #define OPENNOVA_SIMASSETS_SEAT_SPEC_EXTRACT_H
 
-#include <def/def.h>
-#include <mission/promote.h>
-#include <threedi/threedi_3di3.h>
+#include <formats/def/def.h>
+#include <runtime/mission/promote.h>
+#include <formats/threedi/threedi_3di3.h>
 
 #include <algorithm>
 #include <cstdint>

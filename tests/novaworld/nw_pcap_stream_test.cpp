@@ -4,7 +4,7 @@
 // Crafts an inline pcap (build_pcap_udp), writes it to a temp file, and compares.
 // No fixtures, runs in CI.
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>

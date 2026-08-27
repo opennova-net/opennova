@@ -8,26 +8,26 @@
 // It NEVER links godot-cpp (godot-cpp is a separate SCons build, not in this CMake graph). Separate from
 // the matchmaking apps/novaworld_server (gate/lobby/HTTP) — this is the authoritative game server.
 
-#include <npwire/net_ports.h>
-#include <npwire/game_type.h>
-#include <npruntime/host_session.h> // the host owner loop, promoted to engine/net/npruntime (P7/A3)
-#include <npruntime/session_status.h>
-#include <inmatch/session.h>
+#include <net/npwire/net_ports.h>
+#include <net/npwire/game_type.h>
+#include <net/npruntime/host_session.h> // the host owner loop, promoted to engine/net/npruntime (P7/A3)
+#include <net/npruntime/session_status.h>
+#include <net/inmatch/session.h>
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
 #include "net_sockets.h"         // net::startup / udp_bind / ScopedSocket
 #include "environment_startup.h" // mission-selected ENV/BMS -> World::network_env
 #include "wac_startup.h"         // resource-root WAC layers + retail startup order
 
-#include <mission/event_runtime.h> // BmsEventSystem
-#include <mission/mission.h> // MissionDocument
-#include <mission/promote.h> // promote_mission
-#include <rtxt/rtxt.h>        // the gametext "Server" strings (STRSRV_MEDREQ)
+#include <runtime/mission/event_runtime.h> // BmsEventSystem
+#include <formats/mission/mission.h> // MissionDocument
+#include <runtime/mission/promote.h> // promote_mission
+#include <formats/rtxt/rtxt.h>        // the gametext "Server" strings (STRSRV_MEDREQ)
 
-#include <wac/wac_system.h>
+#include <runtime/wac/wac_system.h>
 
-#include <world/ai.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 #include <atomic>
 #include <cerrno>
@@ -42,7 +42,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
-#include <io/log.h>
+#include <base/io/log.h>
 
 namespace {
 

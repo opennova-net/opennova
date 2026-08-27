@@ -5,9 +5,9 @@
 // AmmoDef_LookupByName @ 0x409870; docs/net/novaworld-net-re.md §5.60]
 #pragma once
 
-#include <def/def.h>
-#include <world/ammo_table.h>
-#include <world/weapon_table.h>
+#include <formats/def/def.h>
+#include <runtime/world/ammo_table.h>
+#include <runtime/world/weapon_table.h>
 
 namespace opennova::np {
 

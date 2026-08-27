@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <terrain_query/coords.h>
+#include <runtime/terrain_query/coords.h>
 
 namespace opennova::hud {
 

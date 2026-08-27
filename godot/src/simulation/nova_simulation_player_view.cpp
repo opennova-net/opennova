@@ -2,10 +2,10 @@
 // binoculars / scope), camera mode, and the composed view read.
 #include "simulation/nova_simulation_internal.h"
 
-#include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
-#include <npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
-#include <terrain_query/height_field.h> // the death camera's terrain probe
-#include <world/vehicle_motor.h> // carrier_pose_fixed — the mounted camera's carrier read
+#include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
+#include <net/npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
+#include <runtime/terrain_query/height_field.h> // the death camera's terrain probe
+#include <runtime/world/vehicle_motor.h> // carrier_pose_fixed — the mounted camera's carrier read
 
 #include <climits>
 #include <cmath>

@@ -1,11 +1,11 @@
 // The fire-sound legs on the logic clock — witness map in world/fire_sound.h.
-#include "world/fire_sound.h"
+#include <runtime/world/fire_sound.h>
 
-#include "world/ammo_table.h"
-#include "world/round_sim.h"
-#include "world/weapon_fsm.h"
-#include "world/weapon_table.h"
-#include "world/world.h"
+#include <runtime/world/ammo_table.h>
+#include <runtime/world/round_sim.h>
+#include <runtime/world/weapon_fsm.h>
+#include <runtime/world/weapon_table.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 

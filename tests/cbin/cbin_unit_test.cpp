@@ -7,7 +7,7 @@
 #include <iostream>
 #include <vector>
 
-#include "cbin/cbin.h"
+#include <formats/cbin/cbin.h>
 
 static int test_count = 0;
 static int fail_count = 0;

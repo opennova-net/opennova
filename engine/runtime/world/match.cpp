@@ -1,14 +1,14 @@
-#include "world/match.h"
+#include <runtime/world/match.h>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <utility>
 
-#include "world/ai.h"
-#include "world/collision.h"
-#include "world/game_type.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/game_type.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 namespace {

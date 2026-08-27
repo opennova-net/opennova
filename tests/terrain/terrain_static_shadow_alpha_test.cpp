@@ -1,7 +1,7 @@
 // Static terrain-shadow page handoff: a device raster starts from the
 // composed DOT3 alpha, changes covered samples, and commits the resulting
 // light term without ever touching page RGB.
-#include <terrain/terrain_static_shadow_alpha.h>
+#include <runtime/terrain/terrain_static_shadow_alpha.h>
 
 #include <array>
 #include <cstdint>

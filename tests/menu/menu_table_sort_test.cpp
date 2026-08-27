@@ -2,7 +2,7 @@
 // direction polarity and the companion array.
 // [orig: compare_table_rows @0x63E9C0; quicksort_dual_array @0x651AB0]
 
-#include <menu/menu_table_sort.h>
+#include <runtime/menu/menu_table_sort.h>
 
 #include <cstdio>
 

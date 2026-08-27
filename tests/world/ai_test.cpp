@@ -6,12 +6,12 @@
 #include <cstring>
 #include <vector>
 
-#include "terrain_query/height_field.h"
-#include "world/ai.h"
-#include "world/body_anim.h"
-#include "world/collision.h"
-#include "world/muzzle_pose.h"
-#include "world/world.h"
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/body_anim.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/muzzle_pose.h>
+#include <runtime/world/world.h>
 
 #include <array>
 #include <unordered_map>

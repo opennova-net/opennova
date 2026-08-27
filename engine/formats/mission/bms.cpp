@@ -1,5 +1,5 @@
 // BMS mission file parser implementation.
-#include "mission/bms.h"
+#include <formats/mission/bms.h>
 
 #include <cstdlib>
 #include <cstring>

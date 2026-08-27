@@ -1,9 +1,9 @@
-#include "world/minimap_footprint.h"
+#include <runtime/world/minimap_footprint.h>
 
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/entity.h"
-#include "world/occlusion.h"
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/occlusion.h>
 
 #include <cmath>
 

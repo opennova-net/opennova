@@ -2,7 +2,7 @@
 // and the kill-on-transition rule.
 // [orig: Entity_ApplyVehicleCollisionDamage @0x4E6620]
 
-#include <world/vehicle_collision_damage.h>
+#include <runtime/world/vehicle_collision_damage.h>
 
 #include <cstdio>
 

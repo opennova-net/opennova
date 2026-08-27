@@ -13,10 +13,10 @@
 #include <vector>
 
 #include "common/test_expect.h"
-#include "mission/bms.h"
-#include "mission/mission_catalog.h"
-#include "resource_index/resource_index.h"
-#include "rtxt/rtxt.h"
+#include <formats/mission/bms.h>
+#include <runtime/mission/mission_catalog.h>
+#include <base/resource_index/resource_index.h>
+#include <formats/rtxt/rtxt.h>
 
 namespace {
 

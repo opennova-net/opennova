@@ -12,24 +12,24 @@
 // the pre-compression value — the codec is intentionally lossy). This guard must
 // stay green through every phase.
 
-#include "netsim/connection_fan.h"
-#include "netsim/entity_wire_bridge.h"
-#include "netsim/loopback_channel.h"
-#include "netsim/client_replica_pipeline.h"
-#include "netsim/serializing_sink.h"
+#include <net/netsim/connection_fan.h>
+#include <net/netsim/entity_wire_bridge.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/netsim/client_replica_pipeline.h>
+#include <net/netsim/serializing_sink.h>
 
 #include "conn_fan_test_util.h"
 
-#include <io/bam.h>
-#include <npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
-#include <npwire/ingame_message_id.h>
-#include <npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
-#include <terrain_query/height_field.h>
-#include <world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
-#include <world/entity.h>
-#include <world/geom.h>
-#include <world/vehicle_attach.h>
-#include <world/world.h>
+#include <base/io/bam.h>
+#include <net/npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <cstdlib>

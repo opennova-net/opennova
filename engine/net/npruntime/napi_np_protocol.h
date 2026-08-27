@@ -1,9 +1,9 @@
 #pragma once
 
-#include "npruntime/napi_np_server_ctx.h"
+#include <net/npruntime/napi_np_server_ctx.h>
 
-#include <npwire/peer_addr.h> // opennova::PeerAddr
-#include <npwire/protocol_message.h>     // opennova::ProtocolMessage
+#include <net/npwire/peer_addr.h> // opennova::PeerAddr
+#include <net/npwire/protocol_message.h>     // opennova::ProtocolMessage
 // np::GameConfig (the consolidated server-state config) arrives via napi_np_server_ctx.h (ADR 0013).
 
 #include <cstddef>

@@ -21,8 +21,8 @@
 #include <cstring>
 #include <vector>
 
-#include <io/fixed.h>
-#include <io/le.h>
+#include <base/io/fixed.h>
+#include <base/io/le.h>
 
 namespace opennova {
 namespace io {

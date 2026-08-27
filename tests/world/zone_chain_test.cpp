@@ -4,13 +4,13 @@
 // objects: zone 1 team 1, zone 2 x2 neutral, zone 3 team 2; 6003/6004 base markers).
 // [orig: ZoneSlotChain_* @0x4A2350..0x4A2DE0; Server_ResolveSpawnTargetHandle @0x4fe110;
 //  find_spawn_entity_for_team @0x4fc810]
-#include "world/entity.h"
-#include "world/collision.h"
-#include "world/game_type.h"
-#include "world/spawn_select.h"
-#include "world/world.h"
-#include "world/zone_capture.h"
-#include "world/zone_chain.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/game_type.h>
+#include <runtime/world/spawn_select.h>
+#include <runtime/world/world.h>
+#include <runtime/world/zone_capture.h>
+#include <runtime/world/zone_chain.h>
 
 #include <cstdio>
 

@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-#include "world/infantry.h"
+#include <runtime/world/infantry.h>
 
 namespace opennova::world {
 

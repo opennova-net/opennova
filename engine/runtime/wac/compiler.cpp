@@ -1,17 +1,17 @@
-#include "wac/compiler.h"
+#include <runtime/wac/compiler.h>
 
 #include <cctype>
 #include <cstdlib>
 #include <string>
 
-#include "wac/bytecode.h"
-#include "wac/command.h"
-#include "wac/lexer.h"
-#include "wac/parser.h"
-#include "world/entity_registry.h"
-#include "world/var_store.h"
+#include <formats/wac/bytecode.h>
+#include <formats/wac/command.h>
+#include <formats/wac/lexer.h>
+#include <formats/wac/parser.h>
+#include <runtime/world/entity_registry.h>
+#include <runtime/world/var_store.h>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::wac {
 namespace {

@@ -7,9 +7,9 @@
 #ifndef OPENNOVA_SIMASSETS_MOUNTED_POSE_H
 #define OPENNOVA_SIMASSETS_MOUNTED_POSE_H
 
-#include <threedi/threedi_3di3.h>
-#include <threedi/threedi_ctrl_catalog.h>
-#include <world/vehicle_mount.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
+#include <runtime/world/vehicle_mount.h>
 
 #include <cstdint>
 #include <vector>

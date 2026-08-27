@@ -1,8 +1,8 @@
 // prune_stale_hosts backstop: rows whose updated_at is older than the
 // window are removed; fresh rows survive; host_players cascade away.
 
-#include <novaworld/db/sqlite.h>
-#include <novaworld/host_repository.h>
+#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/host_repository.h>
 
 #include <cstdio>
 #include <fstream>

@@ -1,12 +1,12 @@
-#include "netsim/item_replication_catalog.h"
+#include <net/netsim/item_replication_catalog.h>
 
 #include <cstring>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
 
-#include <def/def.h>
-#include <io/strutil.h>
+#include <formats/def/def.h>
+#include <base/io/strutil.h>
 
 namespace opennova::netsim {
 

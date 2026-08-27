@@ -1,9 +1,9 @@
 // Time-domain skeletal pose evaluation — moved from the shell adapter's
 // skeletal evaluator (ADR 0028); the Godot binding's residue was Transform3D
 // boxing around exactly this math.
-#include "anim/skeletal_pose.h"
+#include <runtime/anim/skeletal_pose.h>
 
-#include "anim/aim_overlay.h"
+#include <runtime/anim/aim_overlay.h>
 
 #include <cmath>
 

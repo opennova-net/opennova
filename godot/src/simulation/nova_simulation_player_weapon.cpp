@@ -6,7 +6,7 @@
 // wire request records (net-re §5.62).
 #include "simulation/nova_simulation_internal.h"
 
-#include <def/def.h> // the weapon.def flag mirrors pinned below
+#include <formats/def/def.h> // the weapon.def flag mirrors pinned below
 
 using namespace novasim;
 

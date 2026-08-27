@@ -10,8 +10,8 @@
 #include <string_view>
 #include <vector>
 
-#include "world/entity.h"
-#include "world/geom.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
 
 namespace opennova::world {
 

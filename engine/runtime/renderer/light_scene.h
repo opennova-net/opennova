@@ -177,7 +177,7 @@
 // proofs above.
 #pragma once
 
-#include <renderer/light_runtime.h>
+#include <runtime/renderer/light_runtime.h>
 
 #include <array>
 #include <cstddef>

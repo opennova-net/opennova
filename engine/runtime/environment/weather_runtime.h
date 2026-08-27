@@ -15,10 +15,10 @@
 // RE record: docs/env/env-tod-re.md.
 #pragma once
 
-#include "environment/environment_state.h"
+#include <runtime/environment/environment_state.h>
 
-#include <env/env_water_render.h>
-#include <env/env_weather_core.h>
+#include <formats/env/env_water_render.h>
+#include <formats/env/env_weather_core.h>
 
 #include <cstdint>
 #include <vector>

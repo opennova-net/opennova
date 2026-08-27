@@ -14,7 +14,7 @@
 #include <string>
 #include <unordered_map>
 
-#include <resource_index/resource_index.h>
+#include <base/resource_index/resource_index.h>
 
 namespace godot {
 

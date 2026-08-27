@@ -1,4 +1,4 @@
-#include <novacrypto/url_cipher.h>
+#include <net/novacrypto/url_cipher.h>
 
 #include <cstdio>
 #include <string>

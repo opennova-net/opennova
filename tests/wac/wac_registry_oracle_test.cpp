@@ -5,8 +5,8 @@
 #include <cstdio>
 #include <cstring>
 
-#include "wac/command.h"
-#include "wac/param_type.h"
+#include <formats/wac/command.h>
+#include <formats/wac/param_type.h>
 
 using namespace opennova::wac;
 

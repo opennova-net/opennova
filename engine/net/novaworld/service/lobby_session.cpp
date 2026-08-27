@@ -1,6 +1,6 @@
-#include <novaworld/lobby_session.h>
+#include <net/novaworld/lobby_session.h>
 
-#include <novaworld/host_repository.h>
+#include <net/novaworld/host_repository.h>
 
 #include <algorithm>
 #include <chrono>
@@ -11,7 +11,7 @@
 #include <random>
 #include <sstream>
 #include <utility>
-#include <io/log.h>
+#include <base/io/log.h>
 
 namespace opennova {
 

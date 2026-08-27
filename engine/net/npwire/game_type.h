@@ -15,9 +15,9 @@
 // through the NetProtocol binding (godot/src/network/nova_net_protocol.h).
 
 #include <cstdint>
-#include <world/game_type.h>
+#include <runtime/world/game_type.h>
 
-#include <mission/bms.h> // bms::AttribFlags — the mission-header game-mode bits
+#include <formats/mission/bms.h> // bms::AttribFlags — the mission-header game-mode bits
 
 namespace opennova::game_type {
 

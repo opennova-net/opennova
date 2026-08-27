@@ -7,7 +7,7 @@
 // [orig: dispatch table @0x82ABD4 -> Entity_UpdateEnvSoundEmitter @0x4a8080;
 //  soundloop parse ItemDef_ParseProperty @0x49fec4]
 
-#include <audio/envs_markers.h>
+#include <runtime/audio/envs_markers.h>
 
 #include <cstdio>
 #include <cstring>

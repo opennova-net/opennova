@@ -27,11 +27,11 @@
 #define OPENNOVA_ARMRY_FIXTURE ""
 #endif
 
-#include "terrain_query/height_field.h"
-#include "threedi/threedi_3di3.h"
-#include "world/collision.h"
-#include "world/occlusion.h"
-#include "world/world.h"
+#include <runtime/terrain_query/height_field.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/occlusion.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;

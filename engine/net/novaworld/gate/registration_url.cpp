@@ -1,6 +1,6 @@
-#include <novaworld/registration_url.h>
+#include <net/novaworld/registration_url.h>
 
-#include <novacrypto/url_cipher.h>
+#include <net/novacrypto/url_cipher.h>
 
 namespace opennova {
 

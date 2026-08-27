@@ -3,10 +3,10 @@
 #include "resource_index/nova_resource_root.h"
 #include "util/nova_data_format.h"
 
-#include <def/def.h>
-#include <hud/hud_math.h>
-#include <hud/loading_screen.h>
-#include <hud/view_effects.h>
+#include <formats/def/def.h>
+#include <runtime/hud/hud_math.h>
+#include <runtime/hud/loading_screen.h>
+#include <runtime/hud/view_effects.h>
 
 // The GDScript-facing mirrors are pinned to the engine's witnessed values —
 // a drifted copy here would silently split the native expiry policy from the

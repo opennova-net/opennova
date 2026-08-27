@@ -1,6 +1,6 @@
-#include "netsim/client_roster_tags.h"
+#include <net/netsim/client_roster_tags.h>
 
-#include <world/friendly_tag_gates.h>
+#include <runtime/world/friendly_tag_gates.h>
 
 #include <algorithm>
 #include <cstdint>

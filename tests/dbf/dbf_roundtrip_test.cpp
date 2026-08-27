@@ -9,7 +9,7 @@
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"
-#include "dbf/dbf.h"
+#include <formats/dbf/dbf.h>
 
 namespace {
 

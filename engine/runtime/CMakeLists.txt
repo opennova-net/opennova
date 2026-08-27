@@ -189,12 +189,12 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/zone_chain.cpp
 )
 
+# engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.
+# The mission runtime half is <runtime/mission/...>; the document model is
+# <formats/mission/...> — the group in the path keeps the two apart.
 target_include_directories(opennova_runtime
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        # The runtime mission half's headers (the format half's <mission/...>
-        # headers propagate from opennova_formats — disjoint sets, one prefix).
-    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 # The Shape A chain: runtime -> base -> formats -> io (all PUBLIC).

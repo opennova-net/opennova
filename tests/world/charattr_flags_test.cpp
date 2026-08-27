@@ -5,11 +5,11 @@
 // [orig: CharAttr_LoadFromDef @0x412140 (the per-class ATTRIBUTES word at
 //  g_CharAttr row +0x28, names @0x813F18); AnimMap_IsSlotActive @0x4125e0 (the
 //  reader); AnimMap_SetSlotProperty @0x412890 (the 0x41 clear)]
-#include "world/entity.h"
-#include "world/friendly_tags.h"
-#include "world/world.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/friendly_tags.h>
+#include <runtime/world/world.h>
 
-#include <npruntime/charattr_challenge.h>
+#include <net/npruntime/charattr_challenge.h>
 
 #include <cstdio>
 #include <cstring>

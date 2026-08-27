@@ -4,16 +4,16 @@
 // player's replicated input moves the vehicle on the authority.
 // [orig: ItemDef_ParsePhysicsProperty @0x49d870; Entity_UpdateVehiclePhysics @0x48af00;
 //  drive gate @0x48b0ff; net-re §5.13 drive-authority witness 2026-07-04]
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/entity.h"
-#include "world/vehicle_attach.h"
-#include "world/vehicle_motor.h"
-#include "world/vehicle_sound.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_sound.h>
+#include <runtime/world/world.h>
 
-#include "def/def.h"
+#include <formats/def/def.h>
 
 #include <cmath>
 #include <cstdio>

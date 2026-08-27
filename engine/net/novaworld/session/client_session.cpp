@@ -1,14 +1,14 @@
-#include <novaworld/client_session.h>
+#include <net/novaworld/client_session.h>
 
-#include <napi/envelope.h>
-#include <napi/tlv.h>
-#include <novacrypto/nwu.h>
-#include <npwire/session_keys.h>
+#include <net/napi/envelope.h>
+#include <net/napi/tlv.h>
+#include <net/novacrypto/nwu.h>
+#include <net/npwire/session_keys.h>
 
 #include <array>
 #include <cstdlib>
 #include <utility>
-#include <npwire/nw_session_framing.h>
+#include <net/npwire/nw_session_framing.h>
 
 namespace opennova {
 

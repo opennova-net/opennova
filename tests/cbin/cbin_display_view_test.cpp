@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "cbin/cbin.h"
+#include <formats/cbin/cbin.h>
 #include "common/test_expect.h"
 
 #ifndef OPENNOVA_SOURCE_DIR

@@ -2,13 +2,13 @@
 
 #include "environment_startup.h"
 
-#include <mission/event_runtime.h>
-#include <mission/mission_systems.h>
-#include <wac/compiler.h>
-#include <wac/program.h>
-#include <wac/wac_system.h>
-#include <world/ai.h>
-#include <world/world.h>
+#include <runtime/mission/event_runtime.h>
+#include <runtime/mission/mission_systems.h>
+#include <runtime/wac/compiler.h>
+#include <formats/wac/program.h>
+#include <runtime/wac/wac_system.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 #include <array>
 #include <fstream>

@@ -4,10 +4,10 @@
 #include <optional>
 #include <vector>
 
-#include <world/player_spawn.h> // world::kRetailPlayerMinEntitySlot (canonical)
+#include <runtime/world/player_spawn.h> // world::kRetailPlayerMinEntitySlot (canonical)
 
-#include "npruntime/napi_np_connection.h"
-#include "npruntime/napi_np_server_ctx.h"
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_server_ctx.h>
 
 // P3 — the World-driven host-side player spawn (§5.2a steps 1-2 / §5.2b). Replaces the
 // fixture/game_runtime spawn-gate: the listen-server host runs its own server-side spawn machinery

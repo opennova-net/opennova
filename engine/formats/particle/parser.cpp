@@ -1,4 +1,4 @@
-#include "particle/parser.h"
+#include <formats/particle/parser.h>
 
 #include <algorithm>
 #include <cctype>
@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::particle {
 

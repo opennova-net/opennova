@@ -4,11 +4,11 @@
 #include "nova_terrain_foliage_map.h"
 #include "nova_terrain_tile_info.h"
 
-#include <til/til_io.h>
-#include <terrain_query/coords.h>
-#include <terrain_query/height_field.h>
-#include <terrain/lighting.h>
-#include <terrain_query/terrain_raycast.h>
+#include <formats/til/til_io.h>
+#include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain/lighting.h>
+#include <runtime/terrain_query/terrain_raycast.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>

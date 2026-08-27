@@ -1,4 +1,4 @@
-#include "renderer/particle_frame.h"
+#include <runtime/renderer/particle_frame.h>
 
 // [orig: CParticleEmitter_BuildBillboardQuads @ 0x5e6d60;
 // CParticleEmitter_ComputeViewDepths @ 0x5e7580;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <renderer/light_scene.h>
+#include <runtime/renderer/light_scene.h>
 
 #include <array>
 #include <cstddef>

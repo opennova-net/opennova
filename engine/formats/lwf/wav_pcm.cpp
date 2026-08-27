@@ -1,4 +1,4 @@
-#include "lwf/wav_pcm.h"
+#include <formats/lwf/wav_pcm.h>
 
 #include <cstring>
 

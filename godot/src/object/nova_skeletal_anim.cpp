@@ -9,12 +9,12 @@
 #include <godot_cpp/variant/quaternion.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <bad/bad.h>
+#include <formats/bad/bad.h>
 
-#include <adm/adm.h>
-#include <anim/aim_overlay.h> // the torso-bend overlay [orig: @0x4b1290]
-#include <anim/skeletal_pose.h>
-#include <world/body_anim.h>
+#include <formats/adm/adm.h>
+#include <runtime/anim/aim_overlay.h> // the torso-bend overlay [orig: @0x4b1290]
+#include <runtime/anim/skeletal_pose.h>
+#include <runtime/world/body_anim.h>
 
 #include <utility>
 #include <godot_cpp/variant/utility_functions.hpp>

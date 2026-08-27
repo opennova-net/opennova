@@ -1,11 +1,11 @@
-#include "particle/emitter.h"
+#include <runtime/particle/emitter.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 
-#include "particle/particle.h"
+#include <formats/particle/particle.h>
 
 namespace opennova::particle {
 

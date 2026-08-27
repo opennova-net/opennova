@@ -15,8 +15,8 @@
 // global pushes, EnvLightState publication, and texture handles.
 #pragma once
 
-#include <env/env.h>
-#include <env/tod_clock.h>
+#include <formats/env/env.h>
+#include <formats/env/tod_clock.h>
 
 #include <cstdint>
 

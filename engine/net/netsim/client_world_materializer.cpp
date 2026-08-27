@@ -1,8 +1,8 @@
-#include "netsim/client_world_materializer.h"
+#include <net/netsim/client_world_materializer.h>
 
-#include <npwire/ingame_message_id.h>
-#include <world/angle.h>
-#include <world/world.h>
+#include <net/npwire/ingame_message_id.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <unordered_map>

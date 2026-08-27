@@ -5,8 +5,8 @@
 // cumulative since init) without the AABB plumbing the engine maintains
 // in `UpdateAllParticles @ 0x5f3be0`.
 
-#include <particle/emitter.h>
-#include <particle/particle.h>
+#include <runtime/particle/emitter.h>
+#include <formats/particle/particle.h>
 
 #include <cmath>
 #include <cstdio>

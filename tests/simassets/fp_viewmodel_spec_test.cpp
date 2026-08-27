@@ -2,7 +2,7 @@
 // [orig: Player_RenderFirstPersonViewModel @ 0x4ded60; the emplaced arms
 // omission @ 0x4dedc7; the CharacterEntity arms source @0x4df05f/@0x4deff4].
 
-#include <simassets/fp_viewmodel_spec.h>
+#include <runtime/simassets/fp_viewmodel_spec.h>
 
 #include <cstdio>
 

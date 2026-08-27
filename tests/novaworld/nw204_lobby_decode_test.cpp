@@ -16,12 +16,12 @@
 //   - the 0x42 join carries the CU var set; the 892B ClientRequestVerifyResult
 //     carries SessIdString + a "Cookie" var-list of CD-key/hardware identity.
 
-#include <napi/envelope.h>
-#include <napi/tlv.h>
-#include <novacrypto/nwu.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/napi/envelope.h>
+#include <net/napi/tlv.h>
+#include <net/novacrypto/nwu.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
 #include <cstdint>
 #include <cstdio>

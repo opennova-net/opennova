@@ -6,7 +6,7 @@
 // address silently leaks rows. The packing direction is equally load-bearing —
 // retail's _connectlog.txt reads the four payload bytes positionally, so the
 // other endianness prints "1.0.0.127" for 127.0.0.1 (verified 2026-04-27).
-#include <npwire/peer_addr.h>
+#include <net/npwire/peer_addr.h>
 
 #include <array>
 #include <cstdio>

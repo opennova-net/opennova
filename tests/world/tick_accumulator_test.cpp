@@ -5,7 +5,7 @@
 
 #include "common/test_expect.h"
 
-#include <world/tick_accumulator.h>
+#include <runtime/world/tick_accumulator.h>
 
 int main() {
     using opennova::world::TickAccumulator;

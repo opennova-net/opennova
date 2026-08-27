@@ -11,10 +11,10 @@
 //  @0x598866/@0x599009..0x59902b, the distance @0x5990ac..0x599108]
 // Witness record: docs/interface/hud-re.md "AAS zone status panel".
 
-#include "world/entity.h"
-#include "world/spawn_select.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/spawn_select.h>
 
-#include <hud/hud_frame.h>
+#include <runtime/hud/hud_frame.h>
 
 #include <functional>
 #include <vector>

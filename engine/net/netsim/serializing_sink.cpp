@@ -1,4 +1,4 @@
-#include "netsim/serializing_sink.h"
+#include <net/netsim/serializing_sink.h>
 
 namespace opennova::netsim {
 

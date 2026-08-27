@@ -1,9 +1,9 @@
 #pragma once
 
-#include "mission/event_runtime.h"
-#include "wac/wac_system.h"
-#include "world/ai.h"
-#include "world/world.h"
+#include <runtime/mission/event_runtime.h>
+#include <runtime/wac/wac_system.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 namespace opennova::mission {
 

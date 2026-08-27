@@ -12,8 +12,8 @@
 // each seat box, then the labels, and the local player's own-seat X LAST so it
 // is never painted over by a later seat.
 
-#include <hud/hud_frame.h>
-#include <hud/hud_vehicle_panel.h>
+#include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_vehicle_panel.h>
 
 #include <string>
 

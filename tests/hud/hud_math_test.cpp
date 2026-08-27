@@ -7,7 +7,7 @@
 // [orig: @0x5939d0], the round-icon count [orig: @0x599b9c], and the crosshair
 // spread projection/sum/row/gate [orig: @0x592640].
 
-#include <hud/hud_math.h>
+#include <runtime/hud/hud_math.h>
 
 #include <cstdio>
 

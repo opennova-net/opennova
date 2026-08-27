@@ -6,13 +6,13 @@
 // C2S 0x2E medic request the way the reload request already travels.
 #include "simulation/nova_simulation_internal.h"
 
-#include <npruntime/napi_np_server_ctx.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npruntime/napi_np_server_ctx.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 #include "rtxt/rtxt_string_file.h"
 
-#include <world/deploy_screen_feed.h>
-#include <world/spawn_select.h>
+#include <runtime/world/deploy_screen_feed.h>
+#include <runtime/world/spawn_select.h>
 
 #include <algorithm>
 

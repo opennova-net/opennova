@@ -1,8 +1,8 @@
-#include "world/vehicle_panel_feed.h"
+#include <runtime/world/vehicle_panel_feed.h>
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
-#include <hud/hud_vehicle_panel.h>
+#include <runtime/hud/hud_vehicle_panel.h>
 
 #include <cstdio>
 

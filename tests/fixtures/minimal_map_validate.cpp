@@ -10,8 +10,8 @@
 //
 // The .env leg was already a load-check rather than a byte compare (text EOLs differ), so it is
 // unchanged in substance.
-#include <env/env.h>
-#include <mission/mission.h>
+#include <formats/env/env.h>
+#include <formats/mission/mission.h>
 
 #include <algorithm>
 #include <cstdio>

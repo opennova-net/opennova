@@ -1,19 +1,19 @@
-#include "npruntime/host_session.h"
-#include <io/perf_clock.h>
+#include <net/npruntime/host_session.h>
+#include <base/io/perf_clock.h>
 
-#include "npruntime/server_session.h" // set_connection_mode / set_transport_mode / create_session / ...
-#include "npruntime/server_spawn.h"   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
-#include "npruntime/server_tick.h"    // Server_TickUpdate
+#include <net/npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / ...
+#include <net/npruntime/server_spawn.h>   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
+#include <net/npruntime/server_tick.h>    // Server_TickUpdate
 
-#include <netsim/connection_fan.h> // set_entity_send_budget (the BANDWIDTH cap)
-#include <npwire/ingame_decode.h> // OrganicSpawnBatch / OrganicSpawnRecord
-#include <npwire/ingame_encode.h> // encode_organic_spawn_batch
-#include <npwire/nw_session_framing.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_keys.h>
+#include <net/netsim/connection_fan.h> // set_entity_send_budget (the BANDWIDTH cap)
+#include <net/npwire/ingame_decode.h> // OrganicSpawnBatch / OrganicSpawnRecord
+#include <net/npwire/ingame_encode.h> // encode_organic_spawn_batch
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_keys.h>
 
-#include <world/entity.h>
-#include <world/world.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <chrono>

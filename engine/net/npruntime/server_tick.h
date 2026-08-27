@@ -3,11 +3,11 @@
 #include <cstdint>
 #include <vector>
 
-#include <npwire/protocol_message.h> // JO_ENGINE_TICK_RATE
+#include <net/npwire/protocol_message.h> // JO_ENGINE_TICK_RATE
 
-#include <npwire/session_hello.h> // DisconnectEvent
+#include <net/npwire/session_hello.h> // DisconnectEvent
 
-#include "npruntime/napi_np_server_ctx.h" // NapiNPServerCtx
+#include <net/npruntime/napi_np_server_ctx.h> // NapiNPServerCtx
 
 namespace opennova::np {
 

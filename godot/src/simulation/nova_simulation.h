@@ -24,63 +24,63 @@
 #include <unordered_set>
 #include <vector>
 
-#include <mission/event_runtime.h>
-#include <mission/promote.h>
-#include <hud/end_round_overlay.h> // EndRoundOverlayInput (the end-round ladder feed)
-#include <hud/hud_frame.h> // HudVehiclePanelState / HudLfpZone (the panel feed seams)
-#include <hud/hud_minimap.h>
-#include <playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
-#include <terrain_query/height_field.h>
-#include <terrain_query/surface_type_map.h>
-#include <wac/wac_system.h>
+#include <runtime/mission/event_runtime.h>
+#include <runtime/mission/promote.h>
+#include <runtime/hud/end_round_overlay.h> // EndRoundOverlayInput (the end-round ladder feed)
+#include <runtime/hud/hud_frame.h> // HudVehiclePanelState / HudLfpZone (the panel feed seams)
+#include <runtime/hud/hud_minimap.h>
+#include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/surface_type_map.h>
+#include <runtime/wac/wac_system.h>
 
 namespace godot {
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
 }
 
 #include "wac/nova_wac_program.h"
-#include <def/def.h> // the retained weapon.def parse (S6b)
-#include <simassets/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
-#include <world/player_loadout.h> // the moved loadout cluster (S7b, ADR 0028)
-#include <world/player_weapon.h> // the moved equipped-weapon cluster (S7a, ADR 0028)
-#include <world/present_rows.h> // the engine-owned PF_* present-row layout (ADR 0031)
-#include <simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
-#include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
-#include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
-#include <simassets/mounted_pose.h> // reusable PANM part matrices for mounted attachments
-#include <inmatch/session.h>
-#include <world/ai.h>
-#include <world/tick_accumulator.h>
-#include <world/collision.h>
-#include <world/occlusion.h>
-#include <world/player_input.h>
-#include <world/player_look.h>
-#include <world/player_spawn.h>
-#include <world/player_view.h>
-#include <world/round_sim.h> // the hit-zone damage tables (re-exported statics)
-#include <world/spawn_select.h>
-#include <world/weapon_fsm.h>
-#include <world/weapon_inventory.h>
-#include <world/world.h>
-#include <score/score.h> // the retained score.ini parse (score_config_)
+#include <formats/def/def.h> // the retained weapon.def parse (S6b)
+#include <runtime/simassets/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
+#include <runtime/world/player_loadout.h> // the moved loadout cluster (S7b, ADR 0028)
+#include <runtime/world/player_weapon.h> // the moved equipped-weapon cluster (S7a, ADR 0028)
+#include <runtime/world/present_rows.h> // the engine-owned PF_* present-row layout (ADR 0031)
+#include <runtime/simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
+#include <runtime/simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
+#include <runtime/simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
+#include <runtime/simassets/mounted_pose.h> // reusable PANM part matrices for mounted attachments
+#include <net/inmatch/session.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/tick_accumulator.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/occlusion.h>
+#include <runtime/world/player_input.h>
+#include <runtime/world/player_look.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/player_view.h>
+#include <runtime/world/round_sim.h> // the hit-zone damage tables (re-exported statics)
+#include <runtime/world/spawn_select.h>
+#include <runtime/world/weapon_fsm.h>
+#include <runtime/world/weapon_inventory.h>
+#include <runtime/world/world.h>
+#include <formats/score/score.h> // the retained score.ini parse (score_config_)
 
 #include "mission/nova_mission_data.h"
-#include <simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
+#include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
-#include "netsim/loopback_channel.h"          // host_loop_ (the host's own dcb-2 client)
-#include "netsim/item_replication_catalog.h" // canonical items.def replication traits
-#include "netsim/client_world_materializer.h" // header-only joiner pools 1..3
-#include "netsim/udp_session_transport.h"     // PeerLink::transport (the LAN per-peer transport)
+#include <net/netsim/loopback_channel.h>          // host_loop_ (the host's own dcb-2 client)
+#include <net/netsim/item_replication_catalog.h> // canonical items.def replication traits
+#include <net/netsim/client_world_materializer.h> // header-only joiner pools 1..3
+#include <net/netsim/udp_session_transport.h>     // PeerLink::transport (the LAN per-peer transport)
 
-#include <npwire/peer_addr.h>    // PeerAddr / PeerAddrHash
+#include <net/npwire/peer_addr.h>    // PeerAddr / PeerAddrHash
 #include "network/nova_udp_pump.h"
 
-#include <mission/bms.h>                      // bms::File (persisted so ctx_.mission outlives the match)
-#include <npruntime/napi_np_server_ctx.h>     // NapiNPServerCtx / GameConfig / ConnectionMode / SocketMode
-#include <npruntime/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
-#include <npruntime/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
-#include <npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
-#include <npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
+#include <formats/mission/bms.h>                      // bms::File (persisted so ctx_.mission outlives the match)
+#include <net/npruntime/napi_np_server_ctx.h>     // NapiNPServerCtx / GameConfig / ConnectionMode / SocketMode
+#include <net/npruntime/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
+#include <net/npruntime/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
+#include <net/npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
+#include <net/npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
 #include "simulation/nova_inmatch_session_values.h"
 #include "devtools/nova_frame_stats.h"

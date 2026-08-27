@@ -6,7 +6,7 @@
 // [orig: Entity_UpdateAllEntities @ 0x4c225a; Entity_UpdateEnvSoundEmitter
 // @ 0x4a8080], tick-unit keep-alives, and the per-frame live-slot mix
 // [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0].
-#include "audio/ambient_mixer.h"
+#include <runtime/audio/ambient_mixer.h>
 #include "common/test_expect.h"
 
 #include <cmath>

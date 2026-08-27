@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "world/entity.h"
-#include "world/vehicle_mount.h" // SeatSelectionMode default args
+#include <runtime/world/entity.h>
+#include <runtime/world/vehicle_mount.h> // SeatSelectionMode default args
 
 // EntityCommands: the shared host-authoritative command layer. Split from
 // the world.h umbrella (W3-7); World holds it by value and world.h

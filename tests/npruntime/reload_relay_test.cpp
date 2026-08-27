@@ -10,22 +10,22 @@
 // are the broadcast path); a pre-spawn connection receives nothing; a malformed short 0x25 is
 // dropped without any send.
 
-#include <npruntime/napi_np_connection.h>
-#include <npruntime/napi_np_server_ctx.h>
-#include <npruntime/server_message_dispatch.h>
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_server_ctx.h>
+#include <net/npruntime/server_message_dispatch.h>
 
-#include <netsim/connection.h>
-#include <netsim/loopback_channel.h>
-#include <netsim/session_transport.h>
-#include <netsim/udp_session_transport.h>
+#include <net/netsim/connection.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/netsim/session_transport.h>
+#include <net/netsim/udp_session_transport.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/protocol_message.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/protocol_message.h>
 
-#include <world/ai.h>
-#include <world/player_spawn.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <cstdio>

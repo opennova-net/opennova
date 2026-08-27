@@ -1,4 +1,4 @@
-#include "threedi/threedi_panm_runtime.h"
+#include <formats/threedi/threedi_panm_runtime.h>
 
 #include <math.h>
 #include <stdint.h>

@@ -13,15 +13,15 @@
 //  0x47DBD1, the airborne loop @0x47E283..0x47E344, the grounded loop
 //  @0x47E960..0x47EC1F, the tail @0x47EEEE; the bike test @0x47B32D..0x47B375]
 
-#include "world/ai.h"
-#include "world/entity.h"
-#include "world/ground_conform.h"
-#include "world/vehicle_attach.h"
-#include "world/vehicle_motor.h"
-#include "world/vehicle_suspension.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/ground_conform.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_suspension.h>
+#include <runtime/world/world.h>
 
-#include "def/def.h"
+#include <formats/def/def.h>
 
 #include <cstdio>
 #include <cstring>

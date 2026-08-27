@@ -3,13 +3,13 @@
 // Every routine cites its original; the pipeline runs in the render float world
 // (see occlusion.h header notes on the (-y, z, x)/65536 mapping).
 
-#include "world/occlusion.h"
+#include <runtime/world/occlusion.h>
 
 #include <cmath>
 #include <cstring>
 
-#include "world/angle.h"
-#include "world/world.h"
+#include <runtime/world/angle.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

@@ -1,11 +1,11 @@
 // The wire-fed remote body's footstep/foley consume — witness map in
 // world/wire_body_sound.h; the authority sibling is
 // AiSystem::infantry_anim_sound_pass (world/infantry_sound.cpp).
-#include "world/wire_body_sound.h"
+#include <runtime/world/wire_body_sound.h>
 
-#include "audio/footstep_slot.h"
-#include "terrain_query/surface_type_map.h"
-#include "world/world.h"
+#include <runtime/audio/footstep_slot.h>
+#include <runtime/terrain_query/surface_type_map.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 #include <string>

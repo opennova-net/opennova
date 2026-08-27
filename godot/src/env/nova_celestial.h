@@ -12,7 +12,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 
-#include <environment/celestial_frame.h>
+#include <runtime/environment/celestial_frame.h>
 
 #include "env/env_file.h"
 #include "env/nova_glare_occlusion.h"

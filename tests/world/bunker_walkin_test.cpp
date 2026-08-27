@@ -12,19 +12,19 @@
 // whether the capsule reaches the interior. Diagnostic/report-only while the
 // divergence is open; flip the verdict to an assert once the walk-in works.
 // Gated on OPENNOVA_JO_DIR (skip-as-pass without a JO install).
-#include "mission/bms.h"
-#include "mission/promote.h"
+#include <formats/mission/bms.h>
+#include <runtime/mission/promote.h>
 
-#include "def/def.h"
-#include "resource_index/resource_index.h"
-#include "simassets/collision_resolve.h"
-#include "simassets/model_builders.h"
-#include "simassets/sim_model_cache.h"
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/collision_detail.h"
-#include "world/world.h"
+#include <formats/def/def.h>
+#include <base/resource_index/resource_index.h>
+#include <runtime/simassets/collision_resolve.h>
+#include <runtime/simassets/model_builders.h>
+#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/collision_detail.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstdint>

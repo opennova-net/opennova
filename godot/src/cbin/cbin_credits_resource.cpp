@@ -13,7 +13,7 @@
 #include "cbin_asset_lookup.h"
 #include "util/nova_data_format.h"
 
-#include "cbin/cbin.h"
+#include <formats/cbin/cbin.h>
 
 namespace godot {
 

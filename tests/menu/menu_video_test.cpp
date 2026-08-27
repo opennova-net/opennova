@@ -3,7 +3,7 @@
 // (docs/mnu/menu-re.md "The menu backdrop (Bink underlay)";
 // [orig: UI_CreateMenuBinkVideos @ 0x54b590]).
 
-#include "menu/menu_video.h"
+#include <runtime/menu/menu_video.h>
 
 #include <cstdio>
 #include <cstring>

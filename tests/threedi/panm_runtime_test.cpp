@@ -3,7 +3,7 @@
 #include <string.h>
 #include <math.h>
 
-#include "threedi/threedi_panm_runtime.h"
+#include <formats/threedi/threedi_panm_runtime.h>
 
 static int expect_eq(const char *label, int32_t got, int32_t expected) {
     if (got != expected) {

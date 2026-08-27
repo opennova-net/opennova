@@ -1,6 +1,6 @@
-#include "audio/sound_selector.h"
+#include <runtime/audio/sound_selector.h>
 
-#include <lwf/lwf.h>
+#include <formats/lwf/lwf.h>
 
 namespace opennova::audio {
 

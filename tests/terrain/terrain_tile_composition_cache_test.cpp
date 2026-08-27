@@ -1,7 +1,7 @@
 // TerrainTileCompositionCache -- the portable page request/compiler seam for
 // retail's composed terrain texture cache. Tests observe only request results,
 // completion publications, invalidation, and spatial resident lookup.
-#include <terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain/terrain_tile_composition_cache.h>
 
 #include <array>
 #include <cmath>

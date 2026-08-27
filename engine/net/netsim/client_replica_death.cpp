@@ -1,7 +1,7 @@
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/wire_handle.h>
-#include <world/entity.h>
+#include <net/npwire/wire_handle.h>
+#include <runtime/world/entity.h>
 
 #include <utility>
 #include <cstddef>

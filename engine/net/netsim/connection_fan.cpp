@@ -1,5 +1,5 @@
-#include "netsim/connection_fan.h"
-#include <io/perf_clock.h>
+#include <net/netsim/connection_fan.h>
+#include <base/io/perf_clock.h>
 
 #include <algorithm>
 #include <cmath>
@@ -8,15 +8,15 @@
 #include <utility>
 #include <vector>
 
-#include <npwire/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink
-#include <npwire/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
-#include <npwire/game_type.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/wire_handle.h>
-#include <world/geom.h>              // to_fixed
-#include <world/vehicle_mount.h>
+#include <net/npwire/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink
+#include <net/npwire/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
+#include <net/npwire/game_type.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/wire_handle.h>
+#include <runtime/world/geom.h>              // to_fixed
+#include <runtime/world/vehicle_mount.h>
 
-#include "netsim/entity_wire_bridge.h" // health_classification_byte (the field-17 pack)
+#include <net/netsim/entity_wire_bridge.h> // health_classification_byte (the field-17 pack)
 
 namespace opennova::netsim {
 

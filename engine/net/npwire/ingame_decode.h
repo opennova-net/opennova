@@ -22,7 +22,7 @@
 // [orig: NapiNPClientMsg_0x00D @ 0x432C40]  — pool-entity spawn batch.
 // [orig: NapiNPClientMsg_0x020 @ 0x425C00]  — bulk pool-3 entity sync.
 
-#include <npwire/entity_class.h>
+#include <net/npwire/entity_class.h>
 
 #include <array>
 #include <cstddef>

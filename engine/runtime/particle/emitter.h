@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "particle/particle.h"
+#include <formats/particle/particle.h>
 
 namespace opennova::particle {
 

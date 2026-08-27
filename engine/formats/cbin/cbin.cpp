@@ -4,7 +4,7 @@
 //  20-byte header + fwrite, and the per-4-byte cipher loop @ 0x75e348
 //  (rol key,7; byte ^= key&0xFF). Witnessed read-only; see docs/credits/cbin-re.md
 //  (PAR-R5, D-CBIN), MATCHING.]
-#include "cbin/cbin.h"
+#include <formats/cbin/cbin.h>
 
 #include <algorithm>
 #include <cstdio>

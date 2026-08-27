@@ -14,8 +14,8 @@
 // engine/formats/score/score.h). Awards are looked up BY NAME, which needs no slot
 // arithmetic and cannot silently drift if the row layout is ever witnessed differently.
 
-#include <score/score.h>
-#include <world/world.h>
+#include <formats/score/score.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 

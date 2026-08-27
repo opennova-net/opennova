@@ -2,13 +2,13 @@
 
 #include <vector>
 
-#include <npwire/ingame_decode.h>   // EntityClass / PlayerExtendedUplink
-#include <npwire/replication_model.h> // GameEntitySnapshot
-#include <world/ai.h>                  // AiEntity (engine-frame live pose)
-#include <world/entity.h>
-#include <world/world.h>
+#include <net/npwire/ingame_decode.h>   // EntityClass / PlayerExtendedUplink
+#include <net/npwire/replication_model.h> // GameEntitySnapshot
+#include <runtime/world/ai.h>                  // AiEntity (engine-frame live pose)
+#include <runtime/world/entity.h>
+#include <runtime/world/world.h>
 
-#include "netsim/player_intent.h" // PlayerIntent
+#include <net/netsim/player_intent.h> // PlayerIntent
 
 namespace opennova::netsim {
 

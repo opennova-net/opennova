@@ -6,7 +6,7 @@
 #include "nova_sbf_bank.h"
 #include "util/nova_data_format.h"
 
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 #include <godot_cpp/classes/file_access.hpp>
 

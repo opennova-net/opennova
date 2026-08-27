@@ -1,4 +1,4 @@
-#include "threedi/threedi_ctrl_catalog.h"
+#include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include <cstddef>
 #include <cstdint>

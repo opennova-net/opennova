@@ -5,7 +5,7 @@
 // provide raw frames and receive stable entry identities, exact UV placements,
 // and fully preprocessed page pixels without depending on Godot.
 
-#include <renderer/particle_frame.h>
+#include <runtime/renderer/particle_frame.h>
 
 #include <cstddef>
 #include <cstdint>

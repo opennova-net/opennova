@@ -5,7 +5,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <napi/session.h>
+#include <net/napi/session.h>
 
 #include <string>
 #include <utility>

@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-#include <novaworld/gate_response.h>
+#include <net/novaworld/gate_response.h>
 
 namespace opennova {
 

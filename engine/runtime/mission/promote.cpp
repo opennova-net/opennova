@@ -1,9 +1,9 @@
 // Mission -> world promotion. See mission/promote.h + notes/world/ai_movement.md §10.
-#include "mission/promote.h"
+#include <runtime/mission/promote.h>
 
-#include "world/ai.h"
-#include "world/vehicle_part_anim.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/vehicle_part_anim.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <limits>

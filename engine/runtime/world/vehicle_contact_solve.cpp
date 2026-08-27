@@ -1,4 +1,4 @@
-#include "world/vehicle_motor.h"
+#include <runtime/world/vehicle_motor.h>
 
 // Split out of vehicle_motor.cpp (the oversize-TU ratchet). Motion only — every
 // body is unchanged, and each original-code citation moved with the code it
@@ -14,9 +14,9 @@
 
 #include "vehicle_motor_detail.h"
 
-#include "world/angle.h"
-#include "world/vehicle_suspension.h"
-#include "world/world.h"
+#include <runtime/world/angle.h>
+#include <runtime/world/vehicle_suspension.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 namespace detail {

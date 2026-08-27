@@ -1,4 +1,4 @@
-#include "world/collision.h"
+#include <runtime/world/collision.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -6,14 +6,14 @@
 // CollisionModel bounds and the fixed-point matrix operations: the section AABB /
 // bound-sphere derivation plus the Q22 transform, inverse and pose builders.
 
-#include "world/angle.h"
-#include "world/dir_table.h"
+#include <runtime/world/angle.h>
+#include <runtime/world/dir_table.h>
 #include <algorithm>
 #include <cmath>
 
 #include "collision_detail.h"
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

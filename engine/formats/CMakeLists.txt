@@ -122,13 +122,12 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/parser.cpp
 )
 
-# Every format's public include/ keeps its historical <domain>/... include shape.
+# engine/ is the one public include root (ADR 0040): <formats/<domain>/file.h>.
+# wac's front end lives here as <formats/wac/...>; the compiler/VM are
+# <runtime/wac/...> — the group in the path keeps the two apart.
 target_include_directories(opennova_formats
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        # wac's front-end headers; the compiler/VM headers stay in
-        # engine/runtime/wac's include/wac/ (disjoint header sets, one prefix).
-    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 target_link_libraries(opennova_formats PUBLIC opennova_io opennova_crt)

@@ -23,7 +23,7 @@
 #include <sstream>
 #include <string>
 
-#include "mnu/mnu.h"
+#include <formats/mnu/mnu.h>
 
 static bool read_file(const char *path, std::string &out) {
   std::ifstream f(path, std::ios::binary);

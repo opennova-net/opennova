@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "wac/param_type.h"
+#include <formats/wac/param_type.h>
 
 namespace opennova::wac {
 

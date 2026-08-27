@@ -1,13 +1,13 @@
 // weapon.sav reader/writer — see include/playersav/weapon_sav.h for the
 // witnessed layout and the [orig:] citations.
 
-#include "playersav/weapon_sav.h"
+#include <formats/playersav/weapon_sav.h>
 
 #include <cstdlib>
 #include <cstring>
 
-#include <io/byte_reader.h>
-#include <io/byte_writer.h>
+#include <base/io/byte_reader.h>
+#include <base/io/byte_writer.h>
 
 namespace opennova::playersav {
 namespace {

@@ -2,35 +2,35 @@
 // table and the socketless transport mode. The IDA-faithful in-process listen-server bring-up
 // state writes [orig: SinglePlayer_StartMission @0x561af0].
 
-#include "npruntime/server_session.h"
-#include "npruntime/host_session.h"
-#include "npruntime/joiner_connection.h"
-#include "npruntime/server_message_dispatch.h"
-#include "npruntime/server_spawn.h"
-#include "npruntime/session_status.h"
-#include "npruntime/server_tick.h"
+#include <net/npruntime/server_session.h>
+#include <net/npruntime/host_session.h>
+#include <net/npruntime/joiner_connection.h>
+#include <net/npruntime/server_message_dispatch.h>
+#include <net/npruntime/server_spawn.h>
+#include <net/npruntime/session_status.h>
+#include <net/npruntime/server_tick.h>
 
-#include "netsim/connection_fan.h"
-#include "netsim/loopback_channel.h"
-#include "netsim/idatagram_socket.h"
-#include "netsim/udp_session_transport.h"
+#include <net/netsim/connection_fan.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/netsim/idatagram_socket.h>
+#include <net/netsim/udp_session_transport.h>
 
-#include <npwire/nw_session_framing.h>
-#include <npwire/entity_class.h>
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/entity_class.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
-#include <world/ai.h>
-#include <world/collision.h>
-#include <world/game_type.h>
-#include <world/player_spawn.h>
-#include <world/spawn_select.h>
-#include <world/vehicle_attach.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/game_type.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/spawn_select.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 #include <algorithm>

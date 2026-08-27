@@ -6,19 +6,19 @@
 // moves on the host). [orig: Player_BuildTag0CInputBody @0x42A550; inverse of
 // NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9.]
 
-#include "netsim/connection_fan.h"
-#include "netsim/entity_wire_bridge.h"
-#include "netsim/loopback_channel.h"
+#include <net/netsim/connection_fan.h>
+#include <net/netsim/entity_wire_bridge.h>
+#include <net/netsim/loopback_channel.h>
 
 #include "conn_fan_test_util.h"
 
-#include <npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
-#include <npwire/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/geom.h>
-#include <world/vehicle_attach.h>
-#include <world/world.h>
+#include <net/npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
+#include <net/npwire/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstdint>

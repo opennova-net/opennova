@@ -7,8 +7,8 @@
 #include <iostream>
 #include <string>
 
-#include "controls/binding_set.h"
-#include "controls/controls.h"
+#include <runtime/controls/binding_set.h>
+#include <runtime/controls/controls.h>
 
 namespace {
 

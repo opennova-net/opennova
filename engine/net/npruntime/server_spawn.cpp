@@ -1,10 +1,10 @@
-#include "npruntime/server_spawn.h"
+#include <net/npruntime/server_spawn.h>
 
-#include <world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
-#include <world/spawn_select.h> // resolve_player_spawn_pose / world_has_spawn_zone
-#include <world/world.h>        // World, registry, cached
+#include <runtime/world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
+#include <runtime/world/spawn_select.h> // resolve_player_spawn_pose / world_has_spawn_zone
+#include <runtime/world/world.h>        // World, registry, cached
 
-#include <npwire/game_type.h>
+#include <net/npwire/game_type.h>
 
 #include <algorithm>
 #include <array>

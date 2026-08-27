@@ -1,9 +1,9 @@
-#include "wac/parser.h"
+#include <formats/wac/parser.h>
 
 #include <array>
 
-#include "wac/command.h"
-#include "wac/lexer.h"
+#include <formats/wac/command.h>
+#include <formats/wac/lexer.h>
 
 // [orig: Script_Compile @0x4f31f0 — the shunting-yard statement/expression parser (operator
 //  precedence via Script_GetOperatorPrecedence, parameters via WacScript_ResolveParameter @0x4f2920)]

@@ -1,6 +1,6 @@
-#include "bink/bink.h"
+#include <formats/bink/bink.h>
 
-#include "bink/bink_tables.h"
+#include <formats/bink/bink_tables.h>
 
 #include <algorithm>
 #include <array>

@@ -13,8 +13,8 @@
 // PROJSHAD submits @0x60D960..0x60D97D; temp-blue composite
 // @0x60E0C6..0x60E19D]
 
-#include <terrain/terrain_static_shadow_alpha.h>
-#include <terrain/terrain_static_shadow.h>
+#include <runtime/terrain/terrain_static_shadow_alpha.h>
+#include <runtime/terrain/terrain_static_shadow.h>
 
 #include <array>
 #include <cstddef>

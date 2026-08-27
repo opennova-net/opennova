@@ -20,10 +20,10 @@
 // gate that guards the Entity_CanEnterVehicle consult is ported at the ARRIVED
 // branch below.
 
-#include "world/ai.h"
-#include "world/entity.h"
-#include "world/vehicle_mount.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/vehicle_mount.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cmath>

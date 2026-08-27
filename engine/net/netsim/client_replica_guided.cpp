@@ -23,10 +23,10 @@
 // class (the ammo.def turnrate fields are parsed and carried already);
 // presentation of the flown missile (model + trail) is the host's follow-up.
 
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_message_id.h>
 
 #include <cstddef>
 #include <cstdint>

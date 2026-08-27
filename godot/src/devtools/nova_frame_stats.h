@@ -7,7 +7,7 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <devtools/frame_stats_board.h>
+#include <runtime/devtools/frame_stats_board.h>
 
 #include <cstdint>
 

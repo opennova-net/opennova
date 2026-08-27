@@ -1,6 +1,6 @@
-#include "world/player_look.h"
+#include <runtime/world/player_look.h>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
 namespace opennova::world {
 

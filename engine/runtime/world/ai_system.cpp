@@ -1,5 +1,5 @@
-#include "world/ai.h"
-#include <io/perf_clock.h>
+#include <runtime/world/ai.h>
+#include <base/io/perf_clock.h>
 
 // Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -7,20 +7,20 @@
 // The AI event queue and the AiSystem core: registration, per-entity rows, and the
 // tick that drives every handler above.
 
-#include "terrain_query/height_field.h"
-#include "world/angle.h"
-#include "world/body_anim.h"
-#include "world/vehicle_attach.h"
-#include "world/vehicle_motor.h"
-#include "world/vehicle_part_anim.h"
-#include "world/vehicle_sound.h"
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/body_anim.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_part_anim.h>
+#include <runtime/world/vehicle_sound.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 
 #include "ai_detail.h"
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

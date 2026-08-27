@@ -16,9 +16,9 @@
 //   host's server name and rules and our host's differ. A separate non-default 0x76 regression pins
 //   configured sourcing. World-stream bodies are built from our own World, so those stay order-only.
 
-#include <npwire/wire_capture.h>
+#include <net/npwire/wire_capture.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>

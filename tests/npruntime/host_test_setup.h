@@ -5,10 +5,10 @@
 // configure_session_runtime) rather than a bare configure_session_runtime(). After this the host is
 // is_in_session + (when authority) host_running, so the gated handshake legs admit a join.
 
-#include <npruntime/napi_np_protocol.h>
-#include <npruntime/server_session.h>
+#include <net/npruntime/napi_np_protocol.h>
+#include <net/npruntime/server_session.h>
 
-#include <netsim/session_transport.h>
+#include <net/netsim/session_transport.h>
 
 namespace opennova::np::test {
 

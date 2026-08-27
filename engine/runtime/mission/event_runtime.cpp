@@ -1,6 +1,6 @@
-#include "mission/event_runtime.h"
+#include <runtime/mission/event_runtime.h>
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::mission {
 

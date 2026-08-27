@@ -3,7 +3,7 @@
 // adjust_rect_to_text_size @ 0x6575f0; CSpinListWnd_CreateUpDownChildren
 // @ 0x64b8b0; the ITEM color parse @ 0x64bd10/@ 0x64b220].
 
-#include <mnu/mnu_layout.h>
+#include <formats/mnu/mnu_layout.h>
 
 #include <cmath>
 #include <cstdio>

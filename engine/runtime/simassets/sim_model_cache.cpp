@@ -1,6 +1,6 @@
-#include "simassets/sim_model_cache.h"
+#include <runtime/simassets/sim_model_cache.h>
 
-#include <resource_index/resource_index.h>
+#include <base/resource_index/resource_index.h>
 
 #include <cstdlib>
 #include <vector>

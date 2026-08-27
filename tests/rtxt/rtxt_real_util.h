@@ -8,7 +8,7 @@
 //   * check_parity() runs parse -> write -> byte-compare through engine/formats/rtxt.
 #pragma once
 
-#include <rtxt/rtxt.h>
+#include <formats/rtxt/rtxt.h>
 
 #include <cstdint>
 #include <cstdio>

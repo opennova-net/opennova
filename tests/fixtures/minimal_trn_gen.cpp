@@ -7,7 +7,7 @@
 //
 // Emit with OPENNOVA_WRITE_MINIMAL_FIXTURES=1; else guard the config loads and
 // carries the expected references.
-#include <trn/trn_io.h>
+#include <formats/trn/trn_io.h>
 
 #include <cstdio>
 #include <cstdlib>

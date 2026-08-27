@@ -7,8 +7,8 @@
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"
-#include "mission/bms.h"
-#include "mission/mission.h"
+#include <formats/mission/bms.h>
+#include <formats/mission/mission.h>
 
 namespace {
 

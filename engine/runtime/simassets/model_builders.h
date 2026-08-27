@@ -7,9 +7,9 @@
 // translations, with their [orig] witnesses, now linkable by any engine
 // consumer and testable headless.
 
-#include <threedi/threedi_3di3.h>
-#include <world/collision.h>
-#include <world/occlusion.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/occlusion.h>
 
 namespace opennova::simassets {
 

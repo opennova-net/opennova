@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "mns/mns.h"
+#include <formats/mns/mns.h>
 
 namespace mns {
 

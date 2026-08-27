@@ -12,13 +12,13 @@
 //   filters  — team red=1/blue=2, char medic..engineer bits; class/type masks
 //              [orig: @0x502666/@0x502693/@0x502716].
 
-#include <npruntime/weapon_table_build.h>
-#include <npruntime/ammo_table_build.h>
-#include <npruntime/loadout_submit.h>
+#include <net/npruntime/weapon_table_build.h>
+#include <net/npruntime/ammo_table_build.h>
+#include <net/npruntime/loadout_submit.h>
 
-#include <def/def.h>
-#include <resource_index/resource_index.h>
-#include <vfs/vfs.h>
+#include <formats/def/def.h>
+#include <base/resource_index/resource_index.h>
+#include <base/vfs/vfs.h>
 
 #include <cstdio>
 #include <cstdlib>

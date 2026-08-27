@@ -1,4 +1,4 @@
-#include "mnu/mnu_layout.h"
+#include <formats/mnu/mnu_layout.h>
 
 #include <algorithm>
 #include <cctype>

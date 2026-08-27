@@ -20,10 +20,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include <threedi/threedi_3di3.h>
-#include <threedi/threedi_panm.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_panm.h>
 
-#include <renderer/material_eval.h>
+#include <runtime/renderer/material_eval.h>
 
 #include "resource_index/nova_resource_root.h"
 

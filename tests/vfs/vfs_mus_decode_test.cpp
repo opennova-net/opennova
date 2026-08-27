@@ -5,7 +5,7 @@
    headerless MUS cipher experimented with in PR #53 is intentionally outside
    VFS auto-decode; without an explicit SCR/PFF marker it is just opaque bytes. */
 
-#include "vfs/vfs_decode.h"
+#include <base/vfs/vfs_decode.h>
 
 #include <cstdint>
 #include <cstdio>

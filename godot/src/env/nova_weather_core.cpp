@@ -1,8 +1,8 @@
 #include "env/nova_weather_core.h"
 
-#include <env/env_water_render.h> // water_uv_state rides the layer-1 cloud accumulators
+#include <formats/env/env_water_render.h> // water_uv_state rides the layer-1 cloud accumulators
 
-#include <renderer/light_runtime.h>
+#include <runtime/renderer/light_runtime.h>
 
 #include <algorithm>
 

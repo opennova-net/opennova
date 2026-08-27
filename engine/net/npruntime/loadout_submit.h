@@ -8,13 +8,13 @@
 // LocalPlayerLoadout buffer.
 #pragma once
 
-#include <npruntime/joiner_connection.h>
-#include <npwire/ingame_decode.h>
+#include <net/npruntime/joiner_connection.h>
+#include <net/npwire/ingame_decode.h>
 
-#include <playersav/weapon_sav.h>
-#include <world/player_loadout.h>
-#include <world/weapon_inventory.h>
-#include <world/world.h>
+#include <formats/playersav/weapon_sav.h>
+#include <runtime/world/player_loadout.h>
+#include <runtime/world/weapon_inventory.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 

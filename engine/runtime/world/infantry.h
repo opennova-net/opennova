@@ -7,8 +7,8 @@
 #include <cstdint>
 #include <unordered_map>
 
-#include "world/body_anim.h"
-#include "world/entity.h" // EntityHandle (the combat-pass target/focus fields)
+#include <runtime/world/body_anim.h>
+#include <runtime/world/entity.h> // EntityHandle (the combat-pass target/focus fields)
 
 namespace opennova::world {
 

@@ -1,20 +1,20 @@
-#include "world/vehicle_motor.h"
+#include <runtime/world/vehicle_motor.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
 #include "vehicle_motor_detail.h"
 
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/geom.h"
-#include "world/vehicle_part_anim.h"
-#include "world/vehicle_sound.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/vehicle_part_anim.h>
+#include <runtime/world/vehicle_sound.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

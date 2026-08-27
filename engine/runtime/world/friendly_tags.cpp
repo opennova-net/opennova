@@ -1,10 +1,10 @@
-#include "world/friendly_tags.h"
-#include "world/friendly_tag_gates.h"
+#include <runtime/world/friendly_tags.h>
+#include <runtime/world/friendly_tag_gates.h>
 
 #include <algorithm>
 #include <cstdint>
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

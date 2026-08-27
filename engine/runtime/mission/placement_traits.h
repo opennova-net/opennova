@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-#include <mission/mission.h> // kItemIdOffset (formats/mission)
+#include <formats/mission/mission.h> // kItemIdOffset (formats/mission)
 
 namespace opennova::mission {
 

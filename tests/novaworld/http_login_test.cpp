@@ -10,8 +10,8 @@
 // handle_login_post in register_legacy_login_routes) so a green here means
 // a real POST from this body authenticates without booting a socket.
 
-#include <novacrypto/epask.h>
-#include <novaworld/http_login.h>
+#include <net/novacrypto/epask.h>
+#include <net/novaworld/http_login.h>
 
 #include <cstdio>
 #include <map>

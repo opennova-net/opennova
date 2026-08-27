@@ -2,7 +2,7 @@
 // [orig: WeaponAction_ProcessFrame @ 0x540e60 + the wpn_std_* handlers @ 0x542920..
 //  0x543500; Anim_InitActions @ 0x541fa0; docs/net/novaworld-net-re.md §5.62]
 
-#include "world/weapon_fsm.h"
+#include <runtime/world/weapon_fsm.h>
 
 #include <cstring>
 

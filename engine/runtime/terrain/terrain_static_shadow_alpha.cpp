@@ -1,4 +1,4 @@
-#include <terrain/terrain_static_shadow_alpha.h>
+#include <runtime/terrain/terrain_static_shadow_alpha.h>
 
 // [orig: Terrain_CollectAndRenderTileModels temp-blue result
 // @0x60D5BF..0x60DA4F; PSDepthAlpha zero-RGB ONE/ONE page composite

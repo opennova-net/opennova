@@ -1,6 +1,6 @@
-#include <trn/trn_io.h>
+#include <formats/trn/trn_io.h>
 
-#include <foliage/foliage.h>
+#include <formats/foliage/foliage.h>
 
 #include <cmath>
 #include <cstdio>

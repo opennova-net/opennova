@@ -3,14 +3,14 @@
 // active-send interval instead emits a NEW header-only sequence; the resulting gap makes the peer
 // request reconstruction of the retained semantic packet through 0x44/0x84.
 
-#include <npruntime/client_runtime.h>
-#include <npruntime/napi_np_protocol.h>
+#include <net/npruntime/client_runtime.h>
+#include <net/npruntime/napi_np_protocol.h>
 
 #include "host_test_setup.h"
 
-#include <npwire/nw_session_framing.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
 #include <cstdint>
 #include <cstdio>

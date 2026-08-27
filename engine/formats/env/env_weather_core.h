@@ -8,7 +8,7 @@
 #ifndef OPENNOVA_ENV_WEATHER_CORE_H
 #define OPENNOVA_ENV_WEATHER_CORE_H
 
-#include "env/env_weather.h"
+#include <formats/env/env_weather.h>
 
 #include <cstdint>
 

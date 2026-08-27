@@ -1,8 +1,8 @@
-#include "world/lfp_feed.h"
+#include <runtime/world/lfp_feed.h>
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
-#include <hud/hud_lfp_panel.h>
+#include <runtime/hud/hud_lfp_panel.h>
 
 #include <cmath>
 #include <cstdint>

@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 static int passed = 0, failed = 0;
 #define CHECK(cond, msg) do { if (!(cond)) { \

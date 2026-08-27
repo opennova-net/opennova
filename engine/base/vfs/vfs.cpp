@@ -1,8 +1,8 @@
-#include "vfs/vfs.h"
+#include <base/vfs/vfs.h>
 
-#include "vfs/vfs_decode.h"
+#include <base/vfs/vfs_decode.h>
 
-#include <pff/pff.h>
+#include <formats/pff/pff.h>
 
 #include <algorithm>
 #include <cctype>
@@ -11,7 +11,7 @@
 #include <fstream>
 #include <unordered_map>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace fs = std::filesystem;
 

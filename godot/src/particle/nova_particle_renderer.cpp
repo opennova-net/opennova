@@ -48,10 +48,10 @@
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <particle/emitter.h>
-#include <renderer/particle_atlas.h>
-#include <renderer/particle_color.h>
-#include <renderer/particle_frame.h>
+#include <runtime/particle/emitter.h>
+#include <runtime/renderer/particle_atlas.h>
+#include <runtime/renderer/particle_color.h>
+#include <runtime/renderer/particle_frame.h>
 
 #include "nova_particle_compositor.h"
 #include "render/nova_framefx.h"

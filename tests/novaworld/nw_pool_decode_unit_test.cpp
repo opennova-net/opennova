@@ -9,15 +9,15 @@
 // protocol reassembly + the §5.11 / §5.12 pool decoders end to end, on a few
 // dozen bytes — so the decoders stay covered in CI without the .scratch capture.
 
-#include <napi/envelope.h>
-#include <novacrypto/nwu.h>
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_keys.h>
-#include <npwire/wire_capture.h>
+#include <net/napi/envelope.h>
+#include <net/novacrypto/nwu.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_keys.h>
+#include <net/npwire/wire_capture.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cmath>
 #include <cstdint>

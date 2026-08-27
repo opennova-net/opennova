@@ -2,13 +2,13 @@
 // to be materialized from the decoded initial-state stream, at the exact packed
 // handles the host sent, before world-side deploy/mount/collision consumers run.
 
-#include <netsim/client_replica_pipeline.h>
-#include <netsim/client_world_materializer.h>
+#include <net/netsim/client_replica_pipeline.h>
+#include <net/netsim/client_world_materializer.h>
 
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
-#include <world/angle.h>
-#include <world/world.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cmath>

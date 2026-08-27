@@ -2,7 +2,7 @@
 // LOD, cadence, scoring/assignment, dominant-light, march, and drape-color
 // laws of docs/render/render-lighting-re.md ("the render-slot side").
 
-#include "renderer/render_slot_shadow.h"
+#include <runtime/renderer/render_slot_shadow.h>
 
 #include <cmath>
 #include <cstdio>

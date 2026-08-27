@@ -7,7 +7,7 @@
 // mission_mis_parser.cpp reads it. Only these two entry points cross a TU boundary;
 // every section writer and token parser stays private to its own file.
 
-#include "mission/mission.h"
+#include <formats/mission/mission.h>
 
 #include <string>
 #include <vector>

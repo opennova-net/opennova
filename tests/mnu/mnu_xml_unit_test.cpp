@@ -3,7 +3,7 @@
 #include <iostream>
 #include <string>
 
-#include "mnu/mnu_xml.h"
+#include <formats/mnu/mnu_xml.h>
 
 namespace {
 

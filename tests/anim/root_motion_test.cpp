@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#include "bad/bad.h"
+#include <formats/bad/bad.h>
 
 static int failures = 0;
 #define CHECK(c)                                                                       \

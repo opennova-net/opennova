@@ -7,15 +7,15 @@
 #include <algorithm>
 #include <cmath>
 
-#include <io/bam.h>
-#include <terrain_query/height_field.h>
+#include <base/io/bam.h>
+#include <runtime/terrain_query/height_field.h>
 
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/infantry_internal.h"
-#include "world/infantry_ladder.h"
-#include "world/vehicle_attach.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/infantry_internal.h>
+#include <runtime/world/infantry_ladder.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

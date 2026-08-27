@@ -11,8 +11,8 @@
 // only re-emits cached strings.
 #pragma once
 
-#include <devtools/imgui_pass.h>
-#include <devtools/frame_stats_board.h>
+#include <runtime/devtools/imgui_pass.h>
+#include <runtime/devtools/frame_stats_board.h>
 
 #include <array>
 #include <cstdint>

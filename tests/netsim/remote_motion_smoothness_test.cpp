@@ -27,14 +27,14 @@
 // The control leg (gap=1) pins the full-rate regime; the chase must remain
 // smooth when records arrive every tick.
 
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <terrain_query/height_field.h>
-#include <world/infantry.h> // IRootMotionSource stub for the root-motion legs
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/infantry.h> // IRootMotionSource stub for the root-motion legs
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 
 #include <algorithm>
 #include <cstdint>

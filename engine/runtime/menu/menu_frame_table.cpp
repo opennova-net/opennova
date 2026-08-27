@@ -3,7 +3,7 @@
 // header/body row heights, and row hit-testing.
 // [orig: CUITable_Render @ 0x6411d0; CTableWnd_RecalcLayout @ 0x63f1a0]
 
-#include "menu/menu_frame_internal.h"
+#include <runtime/menu/menu_frame_internal.h>
 
 #include <algorithm>
 #include <cstdint>

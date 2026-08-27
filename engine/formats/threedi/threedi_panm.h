@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#include "threedi/threedi_3di3.h"
+#include <formats/threedi/threedi_3di3.h>
 
 typedef enum ThreediTranslateAxis {
     THREEDI_TRANS_NONE = 0,

@@ -1,4 +1,4 @@
-#include <terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain/terrain_tile_composition_cache.h>
 
 // [orig: PolyTrn_RenderTile @ 0x60DA70; 128-slot cache dword_319A2E4;
 // docs/tiles/til-re.md]

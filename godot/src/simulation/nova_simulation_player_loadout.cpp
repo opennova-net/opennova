@@ -3,14 +3,14 @@
 // profile, and the weapon/ammo table feeds.
 #include "simulation/nova_simulation_internal.h"
 
-#include <npruntime/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
+#include <net/npruntime/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
-#include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
-#include <mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
-#include <npwire/ingame_message_id.h>
-#include <simassets/fp_viewmodel_spec.h> // the FP viewmodel submit rule
-#include <netsim/client_roster_tags.h> // the joiner's player walk of the tag pass
-#include <world/friendly_tags.h> // the D-HUD-20 tag gather
+#include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
+#include <runtime/mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
+#include <net/npwire/ingame_message_id.h>
+#include <runtime/simassets/fp_viewmodel_spec.h> // the FP viewmodel submit rule
+#include <net/netsim/client_roster_tags.h> // the joiner's player walk of the tag pass
+#include <runtime/world/friendly_tags.h> // the D-HUD-20 tag gather
 
 #include "hud/friendly_tag_flags.h" // the HudOverlay flag word the feed packs
 

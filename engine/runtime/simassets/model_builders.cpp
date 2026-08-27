@@ -1,7 +1,7 @@
 // Sim-side model derivations from a parsed .3di (ADR 0028). Bodies moved
 // verbatim from the shell adapter's nova_simulation_internal.h; the [orig]
 // witnesses ride with them.
-#include "simassets/model_builders.h"
+#include <runtime/simassets/model_builders.h>
 
 #include <algorithm>
 #include <cmath>

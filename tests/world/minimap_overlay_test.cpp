@@ -1,8 +1,8 @@
-#include <world/collision.h>
-#include <world/entity.h>
-#include <world/minimap_footprint.h>
-#include <world/minimap_overlay.h>
-#include <world/occlusion.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/minimap_footprint.h>
+#include <runtime/world/minimap_overlay.h>
+#include <runtime/world/occlusion.h>
 
 #include <cstdio>
 

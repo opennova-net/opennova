@@ -1,6 +1,6 @@
-#include "environment/weather_runtime.h"
+#include <runtime/environment/weather_runtime.h>
 
-#include <renderer/light_runtime.h>
+#include <runtime/renderer/light_runtime.h>
 
 #include <algorithm>
 #include <array>

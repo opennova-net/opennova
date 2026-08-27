@@ -4,10 +4,10 @@
 // hold-pose ladder both the motor path and the decode-only joiner path share,
 // and the fire/switch stamps. Witness: world-wac-ai-re.md §14.8.
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
-#include "world/ai.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

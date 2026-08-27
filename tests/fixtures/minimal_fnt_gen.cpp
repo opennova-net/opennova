@@ -6,7 +6,7 @@
 // byte-stable, and the label glyphs the authored menus use must have pixels.
 #include "minimal_fnt_builder.h"
 
-#include <fnt/fnt.h>
+#include <formats/fnt/fnt.h>
 
 #include <cstdio>
 #include <cstring>

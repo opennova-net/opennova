@@ -11,7 +11,7 @@
 #include "nova_frame_stats.h"
 
 #if OPENNOVA_DEVTOOLS
-#include <devtools/game_dev_tools.h>
+#include <runtime/devtools/game_dev_tools.h>
 
 #include <memory>
 #endif

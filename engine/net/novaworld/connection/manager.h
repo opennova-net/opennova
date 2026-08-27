@@ -1,6 +1,6 @@
 #pragma once
 
-#include <novaworld/connection/registry.h>
+#include <net/novaworld/connection/registry.h>
 
 #include <cstdint>
 #include <functional>

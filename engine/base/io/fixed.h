@@ -8,7 +8,7 @@
 
 #include <cstdint>
 
-#include <io/le.h>
+#include <base/io/le.h>
 
 namespace opennova {
 namespace io {

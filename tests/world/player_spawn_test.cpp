@@ -2,13 +2,13 @@
 // player-infantry entity, PlayerBodyInput ports the 8-way input mapping
 // [orig: Player_PackInputStateToEntity @0x4df450], and the infantry motor's local-player
 // branch drives + mirrors the pose to the registry Entity (the S2C 0x0A source).
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/geom.h"
-#include "world/infantry.h"
-#include "world/player_input.h"
-#include "world/player_spawn.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/player_input.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstdio>

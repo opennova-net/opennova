@@ -13,8 +13,8 @@
 #include <cstdint>
 #include <vector>
 
-#include <mission/bms.h>
-#include <mission/mission.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/mission.h>
 
 namespace godot {
 

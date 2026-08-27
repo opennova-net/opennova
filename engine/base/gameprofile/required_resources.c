@@ -1,7 +1,7 @@
 /* The witnessed boot-required resource manifest (ENG-6). Every row is
    transcribed from the R8 record (docs/required-resources.md) — that file is
    the witness source; edits land there first and here in the same change. */
-#include "gameprofile/required_resources.h"
+#include <base/gameprofile/required_resources.h>
 
 #include <ctype.h>
 #include <stddef.h>

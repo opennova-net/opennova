@@ -1,6 +1,6 @@
-#include "world/minimap_overlay.h"
+#include <runtime/world/minimap_overlay.h>
 
-#include "world/entity.h"
+#include <runtime/world/entity.h>
 
 #include <algorithm>
 

@@ -6,10 +6,10 @@
 #include <cstring>
 #include <vector>
 
-#include "world/fire_sound.h"
-#include "world/round_sim.h"
-#include "world/weapon_fsm.h"
-#include "world/world.h"
+#include <runtime/world/fire_sound.h>
+#include <runtime/world/round_sim.h>
+#include <runtime/world/weapon_fsm.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 

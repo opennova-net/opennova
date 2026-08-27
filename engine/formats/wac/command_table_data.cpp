@@ -1,6 +1,6 @@
 // Authoritative checked-in WAC command registry.
 // Recovered from the Jointops.exe command table @0x82D290 and maintained here.
-#include "wac/command.h"
+#include <formats/wac/command.h>
 
 namespace opennova::wac {
 

@@ -1,9 +1,9 @@
-#include "simassets/adm_clip_index.h"
+#include <runtime/simassets/adm_clip_index.h>
 
-#include <adm/adm.h>
-#include <bad/bad.h>
-#include <io/strutil.h>
-#include <resource_index/resource_index.h>
+#include <formats/adm/adm.h>
+#include <formats/bad/bad.h>
+#include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
 
 namespace opennova::simassets {
 

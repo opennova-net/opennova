@@ -1,4 +1,4 @@
-#include "threedi/threedi_3di3.h"
+#include <formats/threedi/threedi_3di3.h>
 
 // Split out of threedi_3di3.cpp (quality campaign W3-3). Motion only — every body
 // is unchanged. (The original file carried no original-code citations; engine/formats/threedi
@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <io/fixed.h>
+#include <base/io/fixed.h>
 
 using opennova::io::read_u32_le;
 using opennova::io::read_s32_le;

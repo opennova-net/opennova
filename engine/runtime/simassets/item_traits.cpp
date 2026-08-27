@@ -3,12 +3,12 @@
 // read that went through the item database's getter surface now reads the
 // DefItemDef row directly; the getters were field-for-field projections, so
 // the miss defaults (0 / empty / TYPE unset) are preserved exactly.
-#include "simassets/item_traits.h"
+#include <runtime/simassets/item_traits.h>
 
-#include <io/strutil.h>
-#include <mission/mission.h>
-#include <world/ai.h>
-#include <world/player_spawn.h>
+#include <base/io/strutil.h>
+#include <formats/mission/mission.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/player_spawn.h>
 
 #include <algorithm>
 #include <string>

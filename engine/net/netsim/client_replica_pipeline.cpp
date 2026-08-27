@@ -1,16 +1,16 @@
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
 #include "client_replica_body_arbitration.h"
 
-#include "netsim/entity_wire_bridge.h" // class_for_type_id (default resolver)
-#include <terrain_query/height_field.h>        // remote-person terrain settle
-#include <world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
-#include <world/infantry.h>            // IRootMotionSource + the anim flag/state tables
-#include <world/world.h>               // exact mission PRNG seed
-#include <npwire/game_type.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/wire_handle.h>
-#include <io/bam.h>                      // wrapped retail pitch chase
+#include <net/netsim/entity_wire_bridge.h> // class_for_type_id (default resolver)
+#include <runtime/terrain_query/height_field.h>        // remote-person terrain settle
+#include <runtime/world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
+#include <runtime/world/infantry.h>            // IRootMotionSource + the anim flag/state tables
+#include <runtime/world/world.h>               // exact mission PRNG seed
+#include <net/npwire/game_type.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/wire_handle.h>
+#include <base/io/bam.h>                      // wrapped retail pitch chase
 
 #include <algorithm>
 #include <cmath>

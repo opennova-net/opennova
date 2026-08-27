@@ -12,10 +12,10 @@
 // @0x60D421..0x60D450, projection/submit @0x60D465..0x60D97D; the loader
 // strip walk every renderer pass performs; see docs/terrain/terrain-re.md]
 
-#include <terrain/terrain_static_shadow.h>
-#include <terrain/terrain_static_shadow_raster.h>
+#include <runtime/terrain/terrain_static_shadow.h>
+#include <runtime/terrain/terrain_static_shadow_raster.h>
 
-#include <renderer/material_eval.h>
+#include <runtime/renderer/material_eval.h>
 
 #include <array>
 #include <cstdint>

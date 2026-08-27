@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <string>
 
-#include "mnu/mnu.h"
+#include <formats/mnu/mnu.h>
 
 namespace mnu {
 

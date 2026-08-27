@@ -16,8 +16,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "mission/bms.h"
-#include "world/system.h"
+#include <formats/mission/bms.h>
+#include <runtime/world/system.h>
 
 namespace opennova::mission {
 

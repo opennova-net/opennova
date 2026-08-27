@@ -11,7 +11,7 @@
 // and settings persistence stay with the shell).
 #pragma once
 
-#include <devtools/imgui_pass.h>
+#include <runtime/devtools/imgui_pass.h>
 
 #include <cstdint>
 #include <string>

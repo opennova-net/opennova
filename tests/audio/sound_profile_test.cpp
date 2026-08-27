@@ -5,7 +5,7 @@
 // float param columns, the med/crs percent rows). The retail-corpus spot check
 // (JO_ASSETS' sndprof.def, 49 profiles) runs only when the env var points at a
 // local install — SKIP-AS-PASS otherwise (docs/asset-gated-tests.md).
-#include "audio/sound_profile.h"
+#include <runtime/audio/sound_profile.h>
 #include "common/test_expect.h"
 
 #include <cstdio>

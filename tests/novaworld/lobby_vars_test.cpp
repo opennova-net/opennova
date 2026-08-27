@@ -3,10 +3,10 @@
 // ClientHostUpdate NapiMessage serialization, the NW-S5 identity set, and the host:port split.
 // Server-free, Godot-free — the independent ctest-green bar for the B2 move.
 
-#include "novaworld/lobby_vars.h"
+#include <net/novaworld/lobby_vars.h>
 
-#include <napi/session.h>
-#include <napi/tlv.h>
+#include <net/napi/session.h>
+#include <net/napi/tlv.h>
 
 #include <cstdint>
 #include <cstdio>

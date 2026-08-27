@@ -1,6 +1,6 @@
-#include <novacrypto/pubcrypto.h>
+#include <net/novacrypto/pubcrypto.h>
 
-#include <novacrypto/crc32.h>
+#include <net/novacrypto/crc32.h>
 
 #include <stdexcept>
 

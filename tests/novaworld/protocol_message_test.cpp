@@ -1,4 +1,4 @@
-#include <npwire/protocol_message.h>
+#include <net/npwire/protocol_message.h>
 
 #include <cstdio>
 #include <string>

@@ -12,12 +12,12 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
-#include <resource_index/resource_index.h>
-#include <simassets/model_builders.h>
-#include <simassets/sim_model_cache.h>
-#include <threedi/threedi_3di3.h>
-#include <world/collision.h>
-#include <world/occlusion.h>
+#include <base/resource_index/resource_index.h>
+#include <runtime/simassets/model_builders.h>
+#include <runtime/simassets/sim_model_cache.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/occlusion.h>
 
 namespace {
 

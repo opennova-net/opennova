@@ -1,7 +1,7 @@
 #pragma once
 
-#include <novaworld/db/sqlite.h>
-#include <novaworld/lobby_session.h>      // LobbyState
+#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/lobby_session.h>      // LobbyState
 
 #include <cstdint>
 #include <optional>

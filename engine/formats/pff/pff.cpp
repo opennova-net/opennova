@@ -4,7 +4,7 @@
    Structural port of the Jointops.exe file subsystem; addresses are cited inline and
    the algorithms are documented in notes/vfs/phase0_ida_verification.md. */
 
-#include "pff/pff.h"
+#include <formats/pff/pff.h>
 
 #include "pff_internal.h"
 

@@ -19,37 +19,37 @@
 //      (NOT the dvxi5 fallback), and a HostClient ClientRuntime folds it off the loopback. Guards that
 //      the host's own local view is no longer starved and anchors correctly.
 
-#include <npruntime/charattr_challenge.h>
-#include <npruntime/client_runtime.h>
-#include <npruntime/host_session.h>
-#include <npruntime/napi_np_connection.h>
-#include <npruntime/napi_np_protocol.h>
-#include <npruntime/server_spawn.h>
-#include <npruntime/server_tick.h>
+#include <net/npruntime/charattr_challenge.h>
+#include <net/npruntime/client_runtime.h>
+#include <net/npruntime/host_session.h>
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_protocol.h>
+#include <net/npruntime/server_spawn.h>
+#include <net/npruntime/server_tick.h>
 
 #include "host_test_setup.h"
 
-#include <netsim/connection.h>
-#include <netsim/client_replica_pipeline.h>
-#include <netsim/idatagram_socket.h>
-#include <netsim/loopback_channel.h>
-#include <netsim/session_transport.h>
-#include <netsim/udp_session_transport.h>
+#include <net/netsim/connection.h>
+#include <net/netsim/client_replica_pipeline.h>
+#include <net/netsim/idatagram_socket.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/netsim/session_transport.h>
+#include <net/netsim/udp_session_transport.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/nw_session_framing.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
-#include <novacrypto/crc32.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
+#include <net/novacrypto/crc32.h>
 
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/geom.h>
-#include <world/player_spawn.h>
-#include <world/vehicle_attach.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cmath>

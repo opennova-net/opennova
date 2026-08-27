@@ -5,8 +5,8 @@
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 
-#include <pcx/pcx.h>
-#include <pcx/pcx_io.h>
+#include <formats/pcx/pcx.h>
+#include <formats/pcx/pcx_io.h>
 
 #include <cstring>
 #include <string>

@@ -2,9 +2,9 @@
 // emit_burst, gravity/drag integration, and seeded-RNG determinism. Engine
 // reference: CParticleEmitter_AdvanceFrame @ 0x5e6570 et al.
 
-#include <particle/emitter.h>
-#include <particle/parser.h>
-#include <particle/particle.h>
+#include <runtime/particle/emitter.h>
+#include <formats/particle/parser.h>
+#include <formats/particle/particle.h>
 
 #include <algorithm>
 #include <cmath>

@@ -3,8 +3,8 @@
 // helpers, themselves cited ports) onto the typed draw list.
 // [orig: HUD_RenderAllOverlays @ 0x5a8070 -> HUD_RenderOverlays @ 0x5a7bb0]
 
-#include "hud/hud_frame.h"
-#include "hud/hud_medic_cross.h"
+#include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_medic_cross.h>
 
 #include <algorithm>
 #include <cmath>

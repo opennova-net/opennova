@@ -1,9 +1,9 @@
 // Third-person body aim overlay -- see aim_overlay.h.
 // [orig: Entity_BuildBoneTransformMatrices @ 0x4b1290; docs/world/world-wac-ai-re.md section 14]
 
-#include "anim/aim_overlay.h"
+#include <runtime/anim/aim_overlay.h>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
 namespace opennova::anim {
 

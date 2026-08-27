@@ -1,4 +1,4 @@
-#include "pcx/pcx_io.h"
+#include <formats/pcx/pcx_io.h>
 
 #include <algorithm>
 #include <fstream>

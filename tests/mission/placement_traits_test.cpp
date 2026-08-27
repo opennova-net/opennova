@@ -9,7 +9,7 @@
 //  water applied by every collector, buildings included).]
 #include <cstdio>
 
-#include "mission/placement_traits.h"
+#include <runtime/mission/placement_traits.h>
 
 using namespace opennova::mission;
 

@@ -1,6 +1,6 @@
-#include <novacrypto/epask.h>
+#include <net/novacrypto/epask.h>
 
-#include <novacrypto/nwu.h>
+#include <net/novacrypto/nwu.h>
 
 #include <chrono>
 #include <cstdint>

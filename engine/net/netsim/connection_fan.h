@@ -4,12 +4,12 @@
 #include <cstdint>
 #include <vector>
 
-#include <npwire/replication_model.h> // PlayerReplicationState, GameEntitySnapshot
-#include <world/world.h>
+#include <net/npwire/replication_model.h> // PlayerReplicationState, GameEntitySnapshot
+#include <runtime/world/world.h>
 
-#include "netsim/connection.h"
-#include "netsim/entity_wire_bridge.h"
-#include "netsim/session_transport.h"
+#include <net/netsim/connection.h>
+#include <net/netsim/entity_wire_bridge.h>
+#include <net/netsim/session_transport.h>
 
 namespace opennova::netsim {
 

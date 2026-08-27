@@ -1,6 +1,6 @@
-#include "mission/authoring.h"
+#include <formats/mission/authoring.h>
 
-#include "def/def.h"
+#include <formats/def/def.h>
 
 namespace opennova::mission::authoring {
 

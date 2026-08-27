@@ -20,8 +20,8 @@
 // minimal per batch codec, both vehicle poses, every frame-update sub-block),
 // so the vectors cover the same branch surface the round-trip suite does.
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
 
 #include <cstdint>
 #include <cstdio>

@@ -6,7 +6,7 @@
 // descriptor. Backend adapters select their own checked-in shader resources
 // and bind the capabilities; the engine never emits backend shader source.
 
-#include "renderer/material_classify.h"
+#include <runtime/renderer/material_classify.h>
 
 #include <cstdint>
 

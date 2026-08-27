@@ -1,8 +1,8 @@
 #include "lan_probe_client.h"
 
-#include <npwire/nw_session_framing.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
 #include "net_sockets.h"
 

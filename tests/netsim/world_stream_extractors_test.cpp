@@ -4,13 +4,13 @@
 // Organic->0, Item->1, Building->2, Marker->3). This proves each extractor reads the right pool
 // into the right wire batch AND that the batch round-trips its witnessed decoder field-identically.
 
-#include "netsim/entity_wire_bridge.h"
+#include <net/netsim/entity_wire_bridge.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
-#include <world/entity.h>
-#include <world/geom.h>
-#include <world/world.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <cstdio>

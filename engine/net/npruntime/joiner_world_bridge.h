@@ -1,18 +1,18 @@
 #pragma once
 
-#include "npruntime/client_runtime.h"
+#include <net/npruntime/client_runtime.h>
 
-#include <netsim/client_state.h>
-#include <netsim/client_world_materializer.h>
+#include <net/netsim/client_state.h>
+#include <net/netsim/client_world_materializer.h>
 
-#include <mission/promote.h> // ItemSeatSpec (the binding-fed per-type seat table)
-#include <simassets/seat_spec_extract.h> // item_seat_spec_for_type (the installed-table probe)
-#include <world/collision.h> // CollisionWorld::ResolveState (per-replica resolver state)
-#include <world/entity.h>
-#include <world/player_loadout.h>
-#include <world/player_weapon.h>
-#include <world/weapon_inventory.h>
-#include <world/world.h>
+#include <runtime/mission/promote.h> // ItemSeatSpec (the binding-fed per-type seat table)
+#include <runtime/simassets/seat_spec_extract.h> // item_seat_spec_for_type (the installed-table probe)
+#include <runtime/world/collision.h> // CollisionWorld::ResolveState (per-replica resolver state)
+#include <runtime/world/entity.h>
+#include <runtime/world/player_loadout.h>
+#include <runtime/world/player_weapon.h>
+#include <runtime/world/weapon_inventory.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cstddef>

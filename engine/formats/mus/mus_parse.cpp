@@ -4,7 +4,7 @@
    SCR0 file header parser at Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
    MU01 chunk pointer fixup at Jointops.exe!AudioVM_FixupPointers @ 0x00672470. */
 
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 #include <stdio.h>
 #include <stdlib.h>

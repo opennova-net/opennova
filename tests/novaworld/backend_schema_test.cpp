@@ -3,7 +3,7 @@
 // SQL syntax errors and seed regressions at CI time before the standalone
 // server boots them in production.
 
-#include <novaworld/db/sqlite.h>
+#include <net/novaworld/db/sqlite.h>
 
 #include "../common/test_expect.h"
 

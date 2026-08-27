@@ -13,26 +13,26 @@
 // rejects further fire until the 0x25 relay refills; a no-clip weapon (clipsize -1) never
 // rejects; a table-less host accepts without bookkeeping.
 
-#include <npruntime/napi_np_connection.h>
-#include <npruntime/napi_np_protocol.h>
-#include <npruntime/napi_np_server_ctx.h>
-#include <npruntime/server_message_dispatch.h>
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_protocol.h>
+#include <net/npruntime/napi_np_server_ctx.h>
+#include <net/npruntime/server_message_dispatch.h>
 
-#include <netsim/connection.h>
-#include <netsim/loopback_channel.h>
-#include <netsim/session_transport.h>
-#include <netsim/udp_session_transport.h>
+#include <net/netsim/connection.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/netsim/session_transport.h>
+#include <net/netsim/udp_session_transport.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/nw_session_framing.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_keys.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_keys.h>
 
-#include <world/ai.h>
-#include <world/player_spawn.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstdint>

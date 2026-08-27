@@ -10,7 +10,7 @@
 // Default: regenerate each table in memory, assert it byte-matches the
 // committed file and round-trips (parse->write is byte-stable). Run with
 // OPENNOVA_WRITE_MINIMAL_FIXTURES=1 to (re)write the committed files.
-#include <rtxt/rtxt.h>
+#include <formats/rtxt/rtxt.h>
 
 #include <cstdint>
 #include <cstdio>

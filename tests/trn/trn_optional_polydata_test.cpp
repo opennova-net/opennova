@@ -4,8 +4,8 @@
 // handles that shape without regressions (the polydata is consumer-enforced
 // at the TerrainData level, not the trn_io level).
 
-#include <trn/trn.h>
-#include <trn/trn_io.h>
+#include <formats/trn/trn.h>
+#include <formats/trn/trn_io.h>
 
 #include <cstdio>
 #include <sstream>

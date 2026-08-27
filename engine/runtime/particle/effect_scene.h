@@ -7,8 +7,8 @@
 #include <string_view>
 #include <vector>
 
-#include "particle/emitter.h"
-#include "particle/particle.h"
+#include <runtime/particle/emitter.h>
+#include <formats/particle/particle.h>
 
 namespace opennova::particle {
 

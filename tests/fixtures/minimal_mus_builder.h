@@ -8,8 +8,8 @@
 #ifndef OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H
 #define OPENNOVA_TESTS_MINIMAL_MUS_BUILDER_H
 
-#include <mus/mus.h>
-#include <sbf/sbf.h>
+#include <formats/mus/mus.h>
+#include <formats/sbf/sbf.h>
 
 #include <cstdint>
 #include <cstdio>

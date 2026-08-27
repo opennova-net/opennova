@@ -3,8 +3,8 @@
 // This catches both writer bugs (fields not emitted) and parser bugs (fields
 // not re-readable from our own output).
 
-#include <particle/parser.h>
-#include <particle/particle.h>
+#include <formats/particle/parser.h>
+#include <formats/particle/particle.h>
 
 #include <cmath>
 #include <cstdio>

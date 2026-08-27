@@ -1,9 +1,9 @@
-#include <menu/menu_table_sort.h>
+#include <runtime/menu/menu_table_sort.h>
 
 #include <algorithm>
 #include <cstdlib>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::menu {
 

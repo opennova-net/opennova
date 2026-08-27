@@ -1,7 +1,7 @@
 // lwf::wav_decode_pcm16 — the RIFF walk, the PCM8/PCM16 normalizations, and
 // the IMA-ADPCM block decode (hand-computed against the IMA step/index
 // tables), moved from the shell adapter's WavLoader.
-#include <lwf/wav_pcm.h>
+#include <formats/lwf/wav_pcm.h>
 
 #include <cstdint>
 #include <cstdio>

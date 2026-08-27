@@ -1,7 +1,7 @@
 #pragma once
 
-#include "mission/bms.h"
-#include "mission/promote.h" // PromoteOptions::AiProfileRow (the install row)
+#include <formats/mission/bms.h>
+#include <runtime/mission/promote.h> // PromoteOptions::AiProfileRow (the install row)
 
 #include <cstdint>
 #include <functional>

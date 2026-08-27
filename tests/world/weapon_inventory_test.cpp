@@ -7,9 +7,9 @@
 #include <cstdio>
 #include <cstring>
 
-#include "world/player_weapon.h"
-#include "world/weapon_inventory.h"
-#include "world/world.h"
+#include <runtime/world/player_weapon.h>
+#include <runtime/world/weapon_inventory.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 

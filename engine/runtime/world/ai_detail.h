@@ -7,12 +7,12 @@
 // anim lookup, and the BAM/distance/PRNG primitives the handlers and the waypoint
 // and combat legs all reach for.
 
-#include "world/ai.h"
+#include <runtime/world/ai.h>
 
 #include <cmath>
 #include <cstdint>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
 namespace opennova::world {
 

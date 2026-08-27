@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "world/entity.h"
-#include "world/geom.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
 
 // The vehicle mount/claim surface: MountedPose + its provider seam, the
 // control-occupant claim/release family, attach-heading presnap, occupant

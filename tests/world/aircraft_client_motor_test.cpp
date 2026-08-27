@@ -8,12 +8,12 @@
 //  @0x491F50..0x491FA5; the #553 `air_attitude.h` duplicate of these legs was
 //  folded here 2026-08-21]
 
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/vehicle_motor.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/world.h>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
 #include <cstdio>
 #include <cstdlib>

@@ -2,9 +2,9 @@
 // parent-local extraction mirrors the proven pre-repo Godot port (adm
 // adm_import_plugin.cpp) and the original engine's pose chain. See anim_sample.h.
 
-#include "anim/anim_sample.h"
+#include <runtime/anim/anim_sample.h>
 
-#include "bad/bad.h"
+#include <formats/bad/bad.h>
 
 #include <cmath>
 

@@ -2,10 +2,10 @@
 // Player/Infantry row: lean decay, the remote arms-dip integrator, and the
 // recoil chase. Split from client_replica_pipeline.cpp (size ratchet — the
 // infantry_ladder.cpp precedent).
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <world/entity.h> // kMoveOrderLean* (the wire move_input bits)
-#include <io/bam.h>
+#include <runtime/world/entity.h> // kMoveOrderLean* (the wire move_input bits)
+#include <base/io/bam.h>
 
 namespace opennova::netsim {
 

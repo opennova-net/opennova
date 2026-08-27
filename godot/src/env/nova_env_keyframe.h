@@ -4,7 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
 
-#include <env/env.h>
+#include <formats/env/env.h>
 
 namespace godot {
 

@@ -6,7 +6,7 @@
 // wire structure the standalone server's nw_udp_listener will see after
 // decode_protocol_packet.
 
-#include <novaworld/lobby_session.h>
+#include <net/novaworld/lobby_session.h>
 
 #include "../common/test_expect.h"
 

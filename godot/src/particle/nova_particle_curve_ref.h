@@ -3,7 +3,7 @@
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/core/class_db.hpp>
 
-#include <particle/particle.h>
+#include <formats/particle/particle.h>
 
 namespace godot {
 

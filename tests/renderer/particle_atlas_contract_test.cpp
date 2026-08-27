@@ -1,4 +1,4 @@
-#include <renderer/particle_atlas.h>
+#include <runtime/renderer/particle_atlas.h>
 
 #include <array>
 #include <cmath>

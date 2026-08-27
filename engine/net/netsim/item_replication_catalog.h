@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <npwire/entity_class.h>
+#include <net/npwire/entity_class.h>
 
 struct DefItemsFile;
 

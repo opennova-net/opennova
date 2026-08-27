@@ -9,17 +9,17 @@
 // Witness record: docs/interface/hud-re.md; per-element policy math lives in
 // hud/hud_math.h and stays the single source.
 
-#include "hud/game_font.h"
-#include "hud/hud_declutter.h"
-#include "hud/hud_math.h"
-#include "hud/hud_scoreboard.h"
-#include "hud/hud_minimap.h"
+#include <runtime/hud/game_font.h>
+#include <runtime/hud/hud_declutter.h>
+#include <runtime/hud/hud_math.h>
+#include <runtime/hud/hud_scoreboard.h>
+#include <runtime/hud/hud_minimap.h>
 
 #include <array>
 #include <cstdint>
 #include <string>
 
-#include <hud/hud_vehicle_panel.h> // the seat-marker policy
+#include <runtime/hud/hud_vehicle_panel.h> // the seat-marker policy
 #include <vector>
 
 namespace opennova::hud {

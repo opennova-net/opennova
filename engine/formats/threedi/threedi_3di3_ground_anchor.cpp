@@ -17,7 +17,7 @@
 // apply their own coordinate convention exactly once (see
 // ObjectData::get_ground_anchor, which feeds the result through godot_vec3).
 
-#include "threedi/threedi_3di3.h"
+#include <formats/threedi/threedi_3di3.h>
 
 #include <stddef.h>
 

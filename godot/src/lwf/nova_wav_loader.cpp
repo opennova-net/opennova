@@ -3,7 +3,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <lwf/wav_pcm.h>
+#include <formats/lwf/wav_pcm.h>
 
 #include <cstring>
 #include <string>

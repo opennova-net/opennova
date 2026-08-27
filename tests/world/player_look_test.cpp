@@ -3,7 +3,7 @@
 // zoom divide, the flipmouse Y sense, and the ±80° pitch clamps with the +40°
 // up-limit while prone. [orig: Input_ProcessMouseAxisBindings @ 0x499680; axis
 // cases 166/164 @ 0x4e109d/@ 0x4e0fed]
-#include "world/player_look.h"
+#include <runtime/world/player_look.h>
 
 #include <cstdint>
 #include <cstdio>

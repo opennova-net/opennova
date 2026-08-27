@@ -6,13 +6,13 @@
 #ifndef OPENNOVA_WORLD_MOUNT_CONTROLS_H
 #define OPENNOVA_WORLD_MOUNT_CONTROLS_H
 
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/turret_window.h"
-#include "world/weapon_fsm.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/turret_window.h>
+#include <runtime/world/weapon_fsm.h>
+#include <runtime/world/world.h>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
 #include <cstdint>
 

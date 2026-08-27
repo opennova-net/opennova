@@ -8,9 +8,9 @@
 //     lobby session, and upsert_host must run), and
 //   * list_hosts_by_game must scope the per-game GSB feeds (jop vs dfx2).
 
-#include <novaworld/db/sqlite.h>
-#include <novaworld/host_repository.h>
-#include <novaworld/lobby_session.h>
+#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/host_repository.h>
+#include <net/novaworld/lobby_session.h>
 
 #include <cstdio>
 #include <fstream>

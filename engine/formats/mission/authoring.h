@@ -1,7 +1,7 @@
 #ifndef OPENNOVA_MISSION_AUTHORING_H
 #define OPENNOVA_MISSION_AUTHORING_H
 
-#include "mission/mission.h"
+#include <formats/mission/mission.h>
 
 namespace opennova::mission::authoring {
 

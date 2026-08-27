@@ -1,4 +1,4 @@
-#include "threedi/threedi_panm.h"
+#include <formats/threedi/threedi_panm.h>
 
 #include <stddef.h>
 #include <stdio.h>

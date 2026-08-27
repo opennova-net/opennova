@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-#include <npwire/character_id.h>
+#include <net/npwire/character_id.h>
 
 namespace opennova {
 

@@ -9,8 +9,8 @@
 //
 // Gated on OPENNOVA_JO_DIR so CI and fixture-only runs skip it:
 //   OPENNOVA_JO_DIR="C:\...\Joint Operations Combined Arms" ctest -R env_jo_install
-#include <env/env.h>
-#include <vfs/vfs.h>
+#include <formats/env/env.h>
+#include <base/vfs/vfs.h>
 
 #include <cctype>
 #include <cmath>

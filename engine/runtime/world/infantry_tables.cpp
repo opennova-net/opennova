@@ -6,7 +6,7 @@
 // entries dumped index-by-index from the IDB (173..239 = the uniform death-family
 // value 0x82; the wpn_* rows 240..251 are 0).
 
-#include "world/infantry.h"
+#include <runtime/world/infantry.h>
 
 #include <cmath>
 

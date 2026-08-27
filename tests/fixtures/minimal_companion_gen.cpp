@@ -7,8 +7,8 @@
 // both are authored empty-but-valid from scratch (engine/formats/dbf + engine/formats/lwf
 // writers). Same contract as minimal_rtxt_gen: default guards byte-stability
 // against the committed files; OPENNOVA_WRITE_MINIMAL_FIXTURES=1 rewrites.
-#include <dbf/dbf.h>
-#include <lwf/lwf.h>
+#include <formats/dbf/dbf.h>
+#include <formats/lwf/lwf.h>
 
 #include <cstdint>
 #include <cstdio>

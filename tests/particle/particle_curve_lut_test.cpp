@@ -6,8 +6,8 @@
 // CParticleDef_ParseProperties (`scale_func @ 0x5eafdd`, etc.) which set bits
 // 0x02 (reverse) / 0x01 (inverse) on each curve.
 
-#include <particle/parser.h>
-#include <particle/particle.h>
+#include <formats/particle/parser.h>
+#include <formats/particle/particle.h>
 
 #include <array>
 #include <cmath>

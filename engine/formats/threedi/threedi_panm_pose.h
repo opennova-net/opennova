@@ -11,7 +11,7 @@
 #ifndef OPENNOVA_THREEDI_PANM_POSE_H
 #define OPENNOVA_THREEDI_PANM_POSE_H
 
-#include <threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_3di3.h>
 
 #include <cstdint>
 #include <vector>

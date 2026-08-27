@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include <npwire/protocol_message.h>
+#include <net/npwire/protocol_message.h>
 
 namespace opennova {
 

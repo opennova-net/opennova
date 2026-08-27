@@ -8,7 +8,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
 
-#include <fnt/fnt.h>
+#include <formats/fnt/fnt.h>
 
 namespace godot {
 

@@ -4,24 +4,24 @@
 
 #include <net_datagram_socket.h>
 #include <net_sockets.h>
-#include <napi/envelope.h>
-#include <napi/tlv.h>
-#include <novacrypto/nwu.h>
-#include <novaworld/connection/manager.h>
-#include <novaworld/db/sqlite.h>
-#include <novaworld/host_repository.h>
-#include <novaworld/lobby_session.h>
-#include <npwire/nw_session_framing.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
-#include <novaworld/session_protocol.h>
-#include <novaworld/unknown_tracker.h>
+#include <net/napi/envelope.h>
+#include <net/napi/tlv.h>
+#include <net/novacrypto/nwu.h>
+#include <net/novaworld/connection/manager.h>
+#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/host_repository.h>
+#include <net/novaworld/lobby_session.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
+#include <net/novaworld/session_protocol.h>
+#include <net/novaworld/unknown_tracker.h>
 
-#include <mission/bms.h>
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/world.h>
+#include <formats/mission/bms.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <chrono>

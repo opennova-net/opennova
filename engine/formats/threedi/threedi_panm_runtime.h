@@ -7,8 +7,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "threedi/threedi_ctrl_catalog.h"
-#include "threedi/threedi_panm.h"
+#include <formats/threedi/threedi_ctrl_catalog.h>
+#include <formats/threedi/threedi_panm.h>
 
 #ifdef __cplusplus
 extern "C" {

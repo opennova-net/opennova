@@ -1,11 +1,11 @@
 #include "menu_video_underlay.h"
-#include <io/perf_clock.h>
+#include <base/io/perf_clock.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
-#include <menu/menu_frame.h>
+#include <runtime/menu/menu_frame.h>
 
 #include <algorithm>
 #include <cstdint>

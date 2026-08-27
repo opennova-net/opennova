@@ -1,4 +1,4 @@
-#include <terrain/terrain_tile_composer.h>
+#include <runtime/terrain/terrain_tile_composer.h>
 
 // [orig: PolyTrn_RenderTile @ 0x60DA70; tile overlay submission
 // Terrain_DrawTileOverlays2D @ 0x5C79C0 (jodemo.exe); docs/tiles/til-re.md]

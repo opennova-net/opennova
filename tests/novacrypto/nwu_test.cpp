@@ -1,4 +1,4 @@
-#include <novacrypto/nwu.h>
+#include <net/novacrypto/nwu.h>
 
 #include <cstdio>
 #include <cstring>

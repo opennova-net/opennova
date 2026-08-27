@@ -8,12 +8,12 @@
 // [orig: vertical add @0x4B7CE0..0x4B7CEF then the resolver call @0x4B7CF4
 //  and lift @0x4B7CFE..0x4B7D0A; Entity_MovementCollisionResolver @0x4B2BD0]
 
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <world/infantry.h>
+#include <runtime/world/infantry.h>
 
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 
 #include <cstdint>
 #include <cstdio>

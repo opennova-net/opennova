@@ -23,17 +23,17 @@
 // NW_GOLDEN_VEHICLE_SESSION (capture, DEFAULT_* fallback) + NW_ITEMS_DEF (the
 // §5.10b class table); skips clean when either is absent.
 
-#include <netsim/connection_fan.h>
-#include <netsim/client_replica_pipeline.h>
+#include <net/netsim/connection_fan.h>
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/wire_capture.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/wire_capture.h>
 
-#include <def/def.h>
-#include <scr/scr.h>
+#include <formats/def/def.h>
+#include <formats/scr/scr.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cmath>
 #include <cstdint>

@@ -21,32 +21,32 @@
 // hold branches; exact silent-drop/accept boundary; a dead loopback victim releases at
 // spawn health without a second respawn implementation.
 
-#include <npruntime/ammo_table_build.h>
-#include <npruntime/napi_np_connection.h>
-#include <npruntime/napi_np_server_ctx.h>
-#include <npruntime/server_message_dispatch.h>
-#include <npruntime/server_tick.h>
+#include <net/npruntime/ammo_table_build.h>
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_server_ctx.h>
+#include <net/npruntime/server_message_dispatch.h>
+#include <net/npruntime/server_tick.h>
 
-#include <netsim/connection.h>
-#include <netsim/loopback_channel.h>
-#include <netsim/client_replica_pipeline.h>
-#include <netsim/entity_wire_bridge.h>
-#include <netsim/session_transport.h>
-#include <netsim/udp_session_transport.h>
+#include <net/netsim/connection.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/netsim/client_replica_pipeline.h>
+#include <net/netsim/entity_wire_bridge.h>
+#include <net/netsim/session_transport.h>
+#include <net/netsim/udp_session_transport.h>
 
-#include <npwire/protocol_message.h>
-#include <npwire/replication_model.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/replication_model.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 
-#include <terrain_query/height_field.h>
+#include <runtime/terrain_query/height_field.h>
 
-#include <world/ai.h>
-#include <world/collision.h>
-#include <world/geom.h>
-#include <world/infantry.h>
-#include <world/player_spawn.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <array>

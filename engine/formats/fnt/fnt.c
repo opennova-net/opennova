@@ -1,4 +1,4 @@
-#include "fnt/fnt.h"
+#include <formats/fnt/fnt.h>
 
 #include <stdlib.h>
 #include <string.h>

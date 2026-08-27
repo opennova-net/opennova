@@ -1,6 +1,6 @@
 #pragma once
 
-#include <novaworld/db/sqlite.h>
+#include <net/novaworld/db/sqlite.h>
 
 #include <cstdint>
 #include <optional>

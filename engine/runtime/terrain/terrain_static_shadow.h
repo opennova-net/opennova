@@ -11,8 +11,8 @@
 // @0x60D465..0x60D54F; selected LOD/all-ROBJ submit
 // @0x60D881..0x60D971]
 
-#include <terrain/terrain_tile_composition_cache.h>
-#include <terrain/terrain_tile_light_epoch.h>
+#include <runtime/terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain/terrain_tile_light_epoch.h>
 
 #include <array>
 #include <cstddef>

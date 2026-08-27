@@ -1,6 +1,6 @@
-#include "audio/sound_profile.h"
+#include <runtime/audio/sound_profile.h>
 
-#include "io/strutil.h"
+#include <base/io/strutil.h>
 
 #include <cstdio>
 #include <cstdlib>

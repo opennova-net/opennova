@@ -1,6 +1,6 @@
-#include <hud/hud_vehicle_panel.h>
+#include <runtime/hud/hud_vehicle_panel.h>
 
-#include <hud/hud_math.h>
+#include <runtime/hud/hud_math.h>
 
 namespace opennova::hud {
 

@@ -4,7 +4,7 @@
 // [orig: SoundBank_PlayTriggerEntries @ 0x75ccd0, PRNG_ScaledRandom @ 0x75be50, seed @ 0x85A3DC]:
 //   state = ROL32(state + ROL32(state, 11), 3); pick = (count * (state & 0xFF)) >> 8;
 //   seed 0x2B0749C1. Expected values below were computed with an independent implementation.
-#include "audio/sound_selector.h"
+#include <runtime/audio/sound_selector.h>
 #include "common/test_expect.h"
 
 using opennova::audio::SoundSelector;

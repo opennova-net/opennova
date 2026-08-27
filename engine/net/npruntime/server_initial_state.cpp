@@ -1,7 +1,7 @@
-#include "npruntime/server_initial_state.h"
+#include <net/npruntime/server_initial_state.h>
 
-#include "npruntime/batch_chunker.h" // np::slice_batch_pages (the shared byte-budget pager, ADR 0013)
-#include "npruntime/server_tick.h" // Server_RerollPlayerTickSeed
+#include <net/npruntime/batch_chunker.h> // np::slice_batch_pages (the shared byte-budget pager, ADR 0013)
+#include <net/npruntime/server_tick.h> // Server_RerollPlayerTickSeed
 
 #include <algorithm>
 #include <array>
@@ -11,16 +11,16 @@
 #include <string>
 #include <vector>
 
-#include <mission/bms.h>                  // bms::File, bms::encode_loaded_header_blob (0x0B body)
-#include <netsim/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
-#include <npwire/game_type.h>          // is_waypoint_family (the §5.32 selector)
-#include <npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
-#include <npwire/ingame_message_id.h>
-#include <world/entity.h>                 // world::Entity (0x0F spawn pose)
-#include <world/geom.h>                   // world::to_fixed (0x0F spawn pose)
-#include <world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
-#include <world/world.h>
-#include <io/log.h>
+#include <formats/mission/bms.h>                  // bms::File, bms::encode_loaded_header_blob (0x0B body)
+#include <net/netsim/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
+#include <net/npwire/game_type.h>          // is_waypoint_family (the §5.32 selector)
+#include <net/npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
+#include <net/npwire/ingame_message_id.h>
+#include <runtime/world/entity.h>                 // world::Entity (0x0F spawn pose)
+#include <runtime/world/geom.h>                   // world::to_fixed (0x0F spawn pose)
+#include <runtime/world/spawn_select.h>           // world_has_spawn_zone (0x0F gameFlags bit0)
+#include <runtime/world/world.h>
+#include <base/io/log.h>
 
 namespace opennova::np {
 

@@ -4,7 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
 
-#include <particle/particle.h>
+#include <formats/particle/particle.h>
 
 #include "nova_particle_curve_ref.h"
 

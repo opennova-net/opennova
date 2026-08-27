@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#include "threedi/threedi_panm.h"
+#include <formats/threedi/threedi_panm.h>
 
 static int expect_eq(const char *label, uint8_t got, uint8_t expected) {
     if (got != expected) {

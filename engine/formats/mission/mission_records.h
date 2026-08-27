@@ -7,7 +7,7 @@
 // edits (ADR 0017), plus the entity-vector plumbing they share. The facade owns the
 // document; this owns the shape of what comes out of it.
 
-#include "mission/mission.h"
+#include <formats/mission/mission.h>
 
 #include <cstdint>
 #include <string>

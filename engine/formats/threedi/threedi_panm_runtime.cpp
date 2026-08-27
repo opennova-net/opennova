@@ -1,8 +1,8 @@
-#include "threedi/threedi_panm_runtime.h"
+#include <formats/threedi/threedi_panm_runtime.h>
 
 // The renderer/effects-side owner of the CRT recurrence (the simulation's
 // owner is World::crt_rand; both spell the same MSVC formula).
-#include "crt/crt_rng.h"
+#include <base/crt/crt_rng.h>
 
 #include <string.h>
 

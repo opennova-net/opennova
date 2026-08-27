@@ -18,18 +18,18 @@
 #include <memory>
 #include <vector>
 
-#include <netsim/connection.h>            // netsim::TransportMode
-#include <netsim/idatagram_socket.h>      // netsim::IDatagramSocket
-#include <netsim/session_transport.h>     // netsim::ISessionTransport / Datagram
-#include <netsim/udp_session_transport.h> // netsim::UdpSessionTransport
+#include <net/netsim/connection.h>            // netsim::TransportMode
+#include <net/netsim/idatagram_socket.h>      // netsim::IDatagramSocket
+#include <net/netsim/session_transport.h>     // netsim::ISessionTransport / Datagram
+#include <net/netsim/udp_session_transport.h> // netsim::UdpSessionTransport
 
-#include <npwire/peer_addr.h> // opennova::PeerAddr
-#include <npwire/protocol_message.h>
+#include <net/npwire/peer_addr.h> // opennova::PeerAddr
+#include <net/npwire/protocol_message.h>
 
-#include "npruntime/napi_np_connection.h"
-#include "npruntime/napi_np_protocol.h"  // HostAcceptEvent + the server protocol entry points
-#include "npruntime/napi_np_server_ctx.h"
-#include "npruntime/server_tick.h" // ServerTickPerf
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_protocol.h>  // HostAcceptEvent + the server protocol entry points
+#include <net/npruntime/napi_np_server_ctx.h>
+#include <net/npruntime/server_tick.h> // ServerTickPerf
 
 namespace opennova::np {
 

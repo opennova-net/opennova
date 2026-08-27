@@ -43,7 +43,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "world/entity.h"
+#include <runtime/world/entity.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;

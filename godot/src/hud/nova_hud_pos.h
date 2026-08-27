@@ -15,7 +15,7 @@
 #include <godot_cpp/variant/vector3i.hpp>
 #include <godot_cpp/variant/vector4i.hpp>
 
-#include <def/def.h>
+#include <formats/def/def.h>
 
 namespace godot {
 

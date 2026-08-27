@@ -1,6 +1,6 @@
 #include "util/nova_data_format.h"
 
-#include "vfs/vfs_decode.h"
+#include <base/vfs/vfs_decode.h>
 
 #include <godot_cpp/classes/file_access.hpp>
 

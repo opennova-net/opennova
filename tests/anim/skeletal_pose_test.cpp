@@ -2,9 +2,9 @@
 // shell adapter's skeletal evaluator (S3, ADR 0028): frame-window selection
 // (loop wrap / hold-last / one-frame window), blend endpoints, the BN## tag
 // parse, and the .bad bind-rest transpose+orthonormalize.
-#include <anim/aim_overlay.h>
-#include <anim/anim_sample.h>
-#include <anim/skeletal_pose.h>
+#include <runtime/anim/aim_overlay.h>
+#include <runtime/anim/anim_sample.h>
+#include <runtime/anim/skeletal_pose.h>
 
 #include <cmath>
 #include <cstdio>

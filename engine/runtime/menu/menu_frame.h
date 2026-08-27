@@ -10,10 +10,10 @@
 //  CStaticWnd_Render @ 0x657b10, CEditWnd_Render @ 0x6619e0, ...)]
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
-#include "hud/game_font.h"
-#include "menu/menu_edit.h"
-#include "mnu/mnu.h"
-#include "mnu/mnu_layout.h"
+#include <runtime/hud/game_font.h>
+#include <runtime/menu/menu_edit.h>
+#include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_layout.h>
 
 #include <cstdint>
 #include <map>

@@ -1,10 +1,10 @@
-#include "terrain/terrain_static_shadow.h"
+#include <runtime/terrain/terrain_static_shadow.h>
 
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250; static admission
 // @0x60D421..0x60D450; projected bounds/page reject @0x60D465..0x60D54F;
 // selected LOD/all-ROBJ submission @0x60D881..0x60D971]
 
-#include <mission/placement_traits.h>
+#include <runtime/mission/placement_traits.h>
 
 #include <algorithm>
 #include <cmath>

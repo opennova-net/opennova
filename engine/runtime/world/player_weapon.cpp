@@ -3,18 +3,18 @@
 // install bake, and the presentation-event assembly are unchanged; the two
 // wire legs (the joiner's fired descriptor, the reload relay) became output
 // records the embedder's net layer routes.
-#include "world/player_weapon.h"
+#include <runtime/world/player_weapon.h>
 
-#include "world/vehicle_mount.h"
+#include <runtime/world/vehicle_mount.h>
 
-#include "world/ai.h"
-#include "world/infantry.h"
-#include "world/round_sim.h"
-#include "world/throwables.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/round_sim.h>
+#include <runtime/world/throwables.h>
+#include <runtime/world/world.h>
 
-#include <io/bam.h>
-#include <io/strutil.h>
+#include <base/io/bam.h>
+#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <cmath>

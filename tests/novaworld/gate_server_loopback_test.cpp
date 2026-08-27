@@ -1,9 +1,9 @@
 #include "net_sockets.h"
 
-#include <napi/envelope.h>
-#include <novacrypto/nwu.h>
-#include <novaworld/gate_probe.h>
-#include <novaworld/gate_response.h>
+#include <net/napi/envelope.h>
+#include <net/novacrypto/nwu.h>
+#include <net/novaworld/gate_probe.h>
+#include <net/novaworld/gate_response.h>
 
 #include <chrono>
 #include <cstdio>

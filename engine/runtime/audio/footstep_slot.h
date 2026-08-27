@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "audio/sound_profile.h"
+#include <runtime/audio/sound_profile.h>
 
 namespace opennova::audio {
 

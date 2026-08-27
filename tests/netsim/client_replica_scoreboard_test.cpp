@@ -15,11 +15,11 @@
 #include <cstdint>
 #include <vector>
 
-#include <netsim/client_replica_pipeline.h>
-#include <netsim/client_scoreboard_view.h>
-#include <npwire/game_type.h>
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/netsim/client_replica_pipeline.h>
+#include <net/netsim/client_scoreboard_view.h>
+#include <net/npwire/game_type.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_message_id.h>
 
 #include <string>
 

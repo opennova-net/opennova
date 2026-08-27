@@ -14,7 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <simassets/sim_collision_pose.h>
+#include <runtime/simassets/sim_collision_pose.h>
 
 #include "object/nova_entity_index.h"
 #include "object/nova_object_model.h"

@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "def/def.h"
+#include <formats/def/def.h>
 
 static const DefItemDef *find_by_id(const DefItemsFile *items, int id) {
     for (size_t i = 0; i < items->count; ++i) {

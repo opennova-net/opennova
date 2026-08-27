@@ -3,7 +3,7 @@
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/input.hpp>
 
-#include "controls/controls.h"
+#include <runtime/controls/controls.h>
 
 using namespace godot;
 

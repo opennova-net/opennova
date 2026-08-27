@@ -1,4 +1,4 @@
-#include "hud/hud_scoreboard.h"
+#include <runtime/hud/hud_scoreboard.h>
 
 #include <cstdio>
 

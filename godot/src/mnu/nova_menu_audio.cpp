@@ -7,8 +7,8 @@
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <lwf/lwf.h>
-#include <menu/menu_sound.h>
+#include <formats/lwf/lwf.h>
+#include <runtime/menu/menu_sound.h>
 
 using namespace godot;
 

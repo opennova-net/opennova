@@ -9,11 +9,11 @@
 #ifndef OPENNOVA_SIMASSETS_SIM_COLLISION_POSE_H
 #define OPENNOVA_SIMASSETS_SIM_COLLISION_POSE_H
 
-#include <anim/aim_overlay.h>
-#include <simassets/adm_skeletal_clips.h>
-#include <threedi/threedi_3di3.h>
-#include <world/collision.h>
-#include <world/muzzle_pose.h>
+#include <runtime/anim/aim_overlay.h>
+#include <runtime/simassets/adm_skeletal_clips.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/muzzle_pose.h>
 
 #include <cstdint>
 #include <memory>

@@ -1,4 +1,4 @@
-#include <terrain/lighting.h>
+#include <runtime/terrain/lighting.h>
 
 #include <cmath>
 #include <cstdio>
