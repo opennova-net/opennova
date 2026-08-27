@@ -117,101 +117,17 @@ func _clear_pending_session() -> void:
 	_host_config = {}
 
 
-# Retail's ClientAuth does not invent a network-only player id: it uploads the
-# two profile character selections packed from Avatars.def. The bit-pack lives
-# at the engine home, engine/net/npwire/character_id.h (bound as
-# NetProtocol.pack_character_id), and the companion avatar byte is the selected
-# combo's head voice unless the profile has an explicit override.
-# [orig: PlayerProfile_InitDefaults @0x54BB40,
-#  lookup_entity_slot_and_pack_entry @0x57AD40,
-#  Avatars_ResolveSelectionIndex (ex sub_57AE60) @0x57AE60, CNapiServerInfo_SerializeToSession @0x4C3650]
-static func _join_character_selection(
-		db: AvatarDatabase, nat_index: int, div_index: int,
-		combo_index: int, expected_alignment: int) -> Dictionary:
-	if db == null or nat_index < 0 or nat_index >= db.get_nationality_count():
-		return {}
-	var nat: Dictionary = db.get_nationality(nat_index)
-	if int(nat.get("alignment", -1)) != expected_alignment:
-		return {}
-	if div_index < 0 or div_index >= db.get_division_count(nat_index):
-		return {}
-	if combo_index < 0 or combo_index >= db.get_combo_count(nat_index, div_index):
-		return {}
-	var div: Dictionary = db.get_division(nat_index, div_index)
-	var combo: Dictionary = db.get_combo(nat_index, div_index, combo_index)
-	if nat.is_empty() or div.is_empty() or combo.is_empty():
-		return {}
-	var packed_id := NetProtocol.pack_character_id(
-			int(nat.get("id", 0)), int(div.get("id", 0)),
-			int(combo.get("id", 0)), expected_alignment)
-	var head: Dictionary = combo.get("head", {})
-	return {
-		"character_id": packed_id,
-		"avatar": int(head.get("voice", 1)),
-	}
-
-
-# Retail's per-side default: the first Avatars.def combo of the side's alignment
-# [orig: lookup_entity_slot_and_pack_entry @0x57AD40 <- PlayerProfile_InitDefaults
-# @0x54BB40; a saved id the registry no longer resolves is reallocated to the
-# same default by PlayerSession_InitFromProfile @0x50ca80].
-static func _first_join_character_selection(
-		db: AvatarDatabase, alignment: int) -> Dictionary:
-	if db == null:
-		return {}
-	var resolved: Dictionary = db.resolve_character_id(
-			db.first_character_id(alignment), alignment)
-	if resolved.is_empty():
-		return {}
-	return _join_character_selection(db,
-			int(resolved.get("nationality_index", -1)),
-			int(resolved.get("division_index", -1)),
-			int(resolved.get("combo_index", -1)), alignment)
-
-
-# The profile-to-wire projection (a public test seam). `selection` is the
-# PLAYER_INFO profile (PlayerCharacterSelectionState's shape): side_profiles
-# [blue, red] each carrying that side's nationality/division/combo tree indices
-# and player_class -- the two side blocks retail uploads as CI0/CI1, CTA/CTB and
-# VCA/VCB [orig: CNapiServerInfo_SerializeToSession @0x4C3650 <- the profile's two
-# 0x8006 side blocks; PlayerProfile_InitDefaults @0x54BB40 for a fresh profile].
-# A side that is absent or no longer resolves takes the retail default: the first
-# combo of its alignment, class 8.
+# The joiner's profile-to-wire projection (a public test seam): retail does not
+# invent a network-only player id, it packs the two profile character
+# selections from Avatars.def plus the two class and avatar bytes. The
+# projection, its per-side defaults and its witnesses are the engine's
+# (net/npruntime/join_character_profile.h via AvatarDatabase); `selection` is
+# the PLAYER_INFO profile (PlayerCharacterSelectionState's shape).
 static func character_join_profile_from_database(
 		db: AvatarDatabase, selection: Dictionary = {}) -> Dictionary:
-	var side_selections: Array[Dictionary] = [
-		_first_join_character_selection(db, 0),
-		_first_join_character_selection(db, 1),
-	]
-	var player_classes := [8, 8]
-	var saved_sides: Array = selection.get("side_profiles", [])
-	for side in mini(saved_sides.size(), 2):
-		if not (saved_sides[side] is Dictionary):
-			continue
-		var saved: Dictionary = saved_sides[side]
-		if saved.is_empty():
-			continue
-		var saved_character := _join_character_selection(db,
-				int(saved.get("nationality", -1)),
-				int(saved.get("division", -1)),
-				int(saved.get("combo", -1)), side)
-		if not saved_character.is_empty():
-			side_selections[side] = saved_character
-		var saved_class := int(saved.get("player_class", 8))
-		if saved_class >= 5 and saved_class <= 9:
-			player_classes[side] = saved_class
-	return {
-		"character_ids": [
-			int(side_selections[0].get("character_id", 0)),
-			int(side_selections[1].get("character_id", 0)),
-		],
-		"player_classes": player_classes,
-		"avatars": [
-			int(side_selections[0].get("avatar", 1)),
-			int(side_selections[1].get("avatar", 1)),
-		],
-		"team_request": -1,
-	}
+	if db == null:
+		return {}
+	return db.character_join_profile(selection)
 
 
 func _build_join_character_profile(

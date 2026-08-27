@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <formats/avatars/preview_animation.h>
+#include <net/npruntime/character_registry.h>
 
 #include <cstdint>
 #include <vector>
@@ -76,6 +77,12 @@ private:
 	std::vector<Part> parts;
 	std::vector<Nationality> nationalities;
 	std::vector<Diagnostic> diagnostics;
+	// The engine's wire-identity registry over the tree above (rebuilt lazily
+	// after any model mutation): every packed-id decode, per-side default and
+	// sex row is its witnessed walk.
+	mutable opennova::npruntime::CharacterRegistry registry_;
+	mutable bool registry_dirty_ = true;
+	const opennova::npruntime::CharacterRegistry &character_registry() const;
 	String source_path;
 	String last_error;
 	bool loaded = false;
@@ -182,6 +189,12 @@ public:
 	// order) whose nationality alignment matches; no match -> the first combo of
 	// all; empty -> 0 (retail: lookup_entity_slot_and_pack_entry @0x57ad40, see docs/playerinfo/avatars-re.md).
 	int first_character_id(int alignment) const;
+	// The joiner's profile-to-wire projection (net/npruntime/
+	// join_character_profile.h): `selection` is the PLAYER_INFO profile shape
+	// (side_profiles [blue, red] each carrying nationality/division/combo tree
+	// indices and player_class). Returns character_ids / player_classes /
+	// avatars (two each) and team_request -1.
+	Dictionary character_join_profile(const Dictionary &p_selection = Dictionary()) const;
 	// Native projection consumed by Simulation's portable character-traits
 	// table. File order is retained and duplicate packed ids are first-wins,
 	// matching resolve_character_id's registry walk.

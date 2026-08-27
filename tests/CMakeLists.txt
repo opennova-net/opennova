@@ -864,6 +864,13 @@ target_include_directories(minimap_markers_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(minimap_markers_test PRIVATE cxx_std_17)
 add_test(NAME minimap_markers COMMAND minimap_markers_test)
 
+# The character registry (npruntime/character_registry.h): the packed-id
+# decode, the per-side default walk, and the joiner profile projection
+# (npruntime/join_character_profile.h).
+add_executable(character_registry_test npruntime/character_registry_test.cpp)
+target_link_libraries(character_registry_test PRIVATE opennova_net)
+add_test(NAME character_registry COMMAND character_registry_test)
+
 add_executable(stat_screen_feed_test hud/stat_screen_feed_test.cpp)
 target_link_libraries(stat_screen_feed_test PRIVATE opennova_runtime opennova_net)
 target_include_directories(stat_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
