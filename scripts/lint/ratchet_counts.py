@@ -180,7 +180,7 @@ def count_engine_stdout_prints() -> int:
 
 GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|print_debug)\s*\(")
 # The shipping Godot layer routes diagnostics through push_error/push_warning,
-# print_verbose, or the F3 debug system.
+# print_verbose, or the dev tools (F3).
 GD_PRINT_ALLOWLIST: set[str] = {
     # Hidden release-build CLI: stdout/stderr is its user interface.
     "godot/modtools/pack_game_cli.gd",
@@ -193,7 +193,7 @@ CPP_CONSOLE = re.compile(
 
 def count_gd_prints_outside_debug() -> int:
     """Raw print() family in the shipping godot layer (W1-2): the sanctioned
-    channels are push_error/push_warning, print_verbose, and the F3 overlay.
+    channels are push_error/push_warning, print_verbose, and the dev tools (F3).
     godot/tests and the GUT addon are out of scope (probes print by design).
     godot/src is C++-only (ADR 0034 d6); its .gd leg here is a tripwire."""
     count = 0

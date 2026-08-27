@@ -1,6 +1,7 @@
 {
   "citation_allowlist_engine": [
     "bfc1",
+    "devtools",
     "gameprofile",
     "io",
     "pcapio",
@@ -18,7 +19,7 @@
     "has_method_guards": 0,
     "oversize_cpp_files": 1,
     "oversize_gd_files": 1,
-    "test_private_pokes": 99
+    "test_private_pokes": 95
   },
   "dict_contract_allowlist": [
     "player_profile.gd|static func load_character_profile(",
@@ -34,15 +35,12 @@
     "effect_world.gd|func get_debug_draw_list_report()",
     "game_render_diagnostics.gd|func to_json_value()",
     "effect_light_report.gd|func to_json_value()",
-    "debug_snapshot_writer.gd|static func capture(",
-    "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",
     "debug_entity_picker.gd|static func pick_at_crosshair(",
     "game_packer.gd|static func pack(",
     "game_packer.gd|static func stage_loose(",
     "game_packer.gd|static func export_game(",
     "game_packer.gd|static func stage_retail(",
-    "game_run_session.gd|func get_state()",
-    "mission_presentation.gd|const _SESSION_PERF_SLOTS"
+    "game_run_session.gd|func get_state()"
   ]
 }
