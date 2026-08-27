@@ -143,6 +143,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_trace.cpp    # target views, broad phase, trace_projectile
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_world.cpp    # instance registry + the proximity table build
     ${CMAKE_CURRENT_SOURCE_DIR}/world/occlusion.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/iris_march.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_ladder.cpp         # the D-COL-5 climb legs
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_board.cpp           # the 123..127 command legs (ex-D-INF-2)

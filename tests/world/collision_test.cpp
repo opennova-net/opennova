@@ -21,6 +21,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/iris_march.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -452,6 +453,33 @@ void test_iris_candidate_blink_is_not_global_building_walk() {
             rig.world, rig.soldier, point, iris);
     CHECK(iris.hit_count == 0);
     CHECK(iris.flags == 0);
+}
+
+// ---------------------------------------------------------------------------
+// The iris exposure march (world/iris_march.h): outdoors with an empty
+// candidate slice every sample reports the full sun level and the interior
+// light group is cleared; without a local player the march is empty.
+void test_iris_march_outdoor_levels_and_group_clear() {
+    Rig rig(box_model(1, 0, 2.0, 2.0, 2.0), 100.0, 100.0);
+    rig.move_soldier(5.0, 10.0, 1.0);
+    rig.world.cached.local_player = rig.soldier;
+    OcclusionWorld occlusion;
+
+    const int32_t cam[3] = {fx(0.0), fx(10.0), fx(1.5)};
+    int32_t end[3] = {fx(8.0), fx(10.0), fx(1.5)};
+    const int32_t sun[3] = {0, 0, fx(200.0)};
+    IrisMarch march;
+    compute_iris_march(rig.world, rig.cw, occlusion, cam, end, sun, march);
+    CHECK(march.count == IrisMarch::kSampleCount);
+    for (int i = 0; i < march.count; ++i) CHECK(march.samples[i] == 8);
+    CHECK(!march.interior_group_entity.valid());
+    CHECK(march.interior_group_section == 0);
+
+    rig.world.cached.local_player = EntityHandle{};
+    IrisMarch none;
+    none.count = 3;
+    compute_iris_march(rig.world, rig.cw, occlusion, cam, end, sun, none);
+    CHECK(none.count == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -5054,6 +5082,7 @@ int main() {
     test_blink_query_and_refresh();
     test_negative_static_slot_candidates_and_blink();
     test_iris_candidate_blink_is_not_global_building_walk();
+    test_iris_march_outdoor_levels_and_group_clear();
     test_clip_segment_uses_nearest_candidate_and_indoors_terrain_gate();
     test_candidate_sun_segment_includes_pool1_dynamics();
     test_pool1_source_slice_uses_itemdef_gate_not_vehicle_traits();
