@@ -29,15 +29,19 @@ ask the user; do not download one.
 
 ## 2. Preflight the GDExtension
 
-- Fresh worktree: initialize submodules, then run
-  `bash scripts/build_godot.sh`. Nothing Godot-side works without the DLL.
+- Fresh worktree: initialize submodules, then run `bash scripts/bootstrap_godot.sh`
+  (it installs GUT and the imgui-godot addon `OnedUi` draws through;
+  `scripts/build_godot.sh` does NOT run it), then `bash scripts/build_godot.sh`.
+  Nothing Godot-side works without the DLL, and without the addon `OnedUi` has
+  no ImGui context.
 - If `godot/src/` behavior looks stale, rebuild and fully stop every running
   Godot/ONED process. GDExtension registration does not hot-reload, and a live
   process can hold the DLL lock.
 - After a fresh checkout or resource-heavy branch switch, run
   `"$GODOT_BIN" --headless --path godot --import` once.
-- A stale or missing DLL usually appears as parse errors naming `Nova*`
-  classes or silently dropped GUT scripts.
+- A stale or missing DLL usually appears as parse errors naming engine classes
+  (`Simulation`, `Terrain`, `ResourceRoot`, `DevTools`, `OnedUi`, ...) or
+  silently dropped GUT scripts.
 
 ## 3. Game data
 

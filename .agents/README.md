@@ -26,8 +26,10 @@ divergences in its §8 catalog):
   from the witnessed retail chain (phase counter + sub-blocks + priority/budget
   entity loop), with the verify loop (`scripts/net/diff_0a.py` + the golden) and
   the current ported-vs-not state.
-- `.agents/retail-lan-parity.md` — MCP-first four-topology retail/OpenNova LAN
-  probing without the retired generated Python parity matrix.
+- `.agents/retail-lan-parity.md` — onHook-first four-topology retail/OpenNova LAN
+  probing without the retired generated Python parity matrix. onHook is an
+  external `opennova-int` executable passed as `-OnHookMcpPath`, never a
+  registered MCP server: without it, report the parity leg as blocked.
 
 ## Working Rules
 

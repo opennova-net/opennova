@@ -7,10 +7,16 @@ Use this runbook to probe the four Joint Operations LAN paths:
 3. OpenNova host to retail joiner (`OR`);
 4. OpenNova host to OpenNova joiner (`OO`).
 
-The onHook MCP bridge is the primary retail probe. The former Python corpus
-exporter, generated matrix, manifest, and verifier are retired. A run is
-evidence only for the exact mission, game type, expansion, binaries, retail
-trees, hook build, port, and callsigns recorded with it.
+The onHook MCP bridge is the primary retail probe. It is NOT a registered MCP
+server in this environment and never appears in an agent's tool list: it is an
+external `opennova-int` executable (`onhook-mcp.exe`) that the repository
+adapter shells out to, located by the mandatory `-OnHookMcpPath` argument. An
+agent that does not have that executable on disk cannot run any retail leg of
+this runbook and must report the parity leg as BLOCKED rather than hunt for an
+onHook tool or substitute a different probe. The former Python corpus exporter,
+generated matrix, manifest, and verifier are retired. A run is evidence only
+for the exact mission, game type, expansion, binaries, retail trees, hook
+build, port, and callsigns recorded with it.
 
 ## Safety and evidence
 
@@ -55,9 +61,10 @@ the current retail automation are 32786 through 32789. Numeric game type zero
 is valid Deathmatch; `auto` is discovery-only and is not a verdict-bearing
 input.
 
-For a cold retail-to-retail session, the lower-level MCP call is
-`onhook_run_lan_pair`. Preserve both returned run and instance IDs and stop
-them with `onhook_stop_run`. Prefer the repository topology runner when
+For a cold retail-to-retail session, the lower-level call is
+`onhook_run_lan_pair`, a method of the external onHook executable and invoked
+through it, not a tool the agent can call directly. Preserve both returned run
+and instance IDs and stop them with `onhook_stop_run`. Prefer the repository topology runner when
 comparing all four paths because it applies the same capture, readiness, and
 artifact layout to each cell.
 
