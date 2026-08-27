@@ -75,6 +75,7 @@ godot/.godot/
 godot/exports/
 .godot-bin/
 godot/addons/gut/
+godot/addons/imgui-godot/
 
 CLAUDE.local.md
 .superpowers/

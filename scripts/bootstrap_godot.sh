@@ -23,3 +23,8 @@ mkdir -p "$dst"
 cp -r "$src/addons/gut/." "$dst/"
 
 echo "GUT plugin installed at godot/addons/gut (version: $(grep '^version=' "$dst/plugin.cfg" | cut -d'"' -f2))"
+
+# The imgui-godot addon (the Dear ImGui bridge for the in-engine dev tools, ADR 0039)
+# rides the same bootstrap; it has its own script so the packaging job can install
+# only it (an export must never carry GUT).
+"$root/scripts/bootstrap_imgui_godot.sh"

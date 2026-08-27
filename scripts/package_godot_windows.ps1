@@ -49,6 +49,15 @@ $ProgressPreference = "SilentlyContinue"  # keeps Invoke-WebRequest fast on larg
 $ROOT = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location $ROOT
 
+# The imgui-godot addon (the ImGui bridge for ONED's surface and the game's dev
+# tools, ADR 0039) must be installed for BOTH export modes: ONED ships it always,
+# the game's export plugin keeps it for a debug export and strips it from a
+# release export (export_presets.cfg imgui/debug, imgui/release). Only the addon
+# script runs here: an export must never carry GUT.
+Write-Host "=== Installing the imgui-godot addon ==="
+& bash "scripts/bootstrap_imgui_godot.sh"
+if ($LASTEXITCODE -ne 0) { throw "bootstrap_imgui_godot.sh failed (exit $LASTEXITCODE)" }
+
 # Read Godot apps' component version from project.godot
 $projectGodot = Get-Content "$ROOT\godot\project.godot" -Raw
 if ($projectGodot -notmatch '(?m)^config/version\s*=\s*"([^"]+)"') {
@@ -391,12 +400,28 @@ if (-not (Test-Path $SHIPPED_DLL)) {
 }
 $dllLeaf = Split-Path $SHIPPED_DLL -Leaf
 
+# Godot exports every GDExtension library beside the exe. ONED's ImGui surface
+# needs the imgui-godot addon's own library in BOTH modes (it rides the dev zip),
+# so its export keeps the addon; the game's release export strips it (the game
+# zip carries the library only for a debug export, whose dev tools use it).
+$imguiLibs = @(Get-ChildItem -LiteralPath $DIST -Filter "libimgui-godot-native.*" -File -ErrorAction SilentlyContinue)
+if ($imguiLibs.Count -eq 0) {
+    throw "The exports are missing the imgui-godot addon library beside the exes (is the addon installed and enabled?)"
+}
+function Copy-ImGuiAddonLibraries {
+    param([string]$StageDir)
+    foreach ($lib in $imguiLibs) {
+        Copy-Item -LiteralPath $lib.FullName -Destination (Join-Path $StageDir $lib.Name) -Force
+    }
+}
+
 Write-Host "=== Packaging $(Split-Path $APPS_ZIP -Leaf) (dev build) ==="
 $devStage = New-StageDir -Name ".stage-opennova-windows"
 foreach ($exe in @($MODTOOLS_EXE, $RUNTIME_EXE)) {
     Copy-Item -LiteralPath $exe -Destination (Join-Path $devStage (Split-Path $exe -Leaf)) -Force
 }
 Copy-Item -LiteralPath $SHIPPED_DLL -Destination (Join-Path $devStage $dllLeaf) -Force
+Copy-ImGuiAddonLibraries -StageDir $devStage
 Copy-GameSources -AssetsStageDir (Join-Path $devStage "assets")
 Compress-Stage -StageDir $devStage -ZipPath $APPS_ZIP
 
@@ -404,6 +429,7 @@ Write-Host "=== Packaging $(Split-Path $GAME_ZIP -Leaf) (tagged-release build) =
 $gameStage = New-StageDir -Name ".stage-opennova-game-windows"
 Copy-Item -LiteralPath $RUNTIME_EXE -Destination (Join-Path $gameStage "opennova.exe") -Force
 Copy-Item -LiteralPath $SHIPPED_DLL -Destination (Join-Path $gameStage $dllLeaf) -Force
+if ($ExportMode -eq "debug") { Copy-ImGuiAddonLibraries -StageDir $gameStage }
 Invoke-PackGame -AssetsDir (Join-Path $devStage "assets") -GameDir $gameStage
 Compress-Stage -StageDir $gameStage -ZipPath $GAME_ZIP
 
