@@ -8,7 +8,7 @@
 #include <limits>
 
 #include "common/test_paths.h"
-#include "threedi/threedi_3di3.h"
+#include <formats/threedi/threedi_3di3.h>
 
 static int failures = 0;
 

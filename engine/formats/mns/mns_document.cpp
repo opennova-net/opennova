@@ -1,4 +1,4 @@
-#include "mns/mns_document.h"
+#include <formats/mns/mns_document.h>
 
 #include <algorithm>
 #include <cctype>

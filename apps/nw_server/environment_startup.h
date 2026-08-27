@@ -1,7 +1,7 @@
 #pragma once
 
-#include <mission/bms.h>
-#include <world/world.h>
+#include <formats/mission/bms.h>
+#include <runtime/world/world.h>
 
 #include <filesystem>
 #include <istream>

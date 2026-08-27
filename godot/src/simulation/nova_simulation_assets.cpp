@@ -4,11 +4,11 @@
 #include "simulation/nova_simulation_internal.h"
 #include "network/item_replication_catalog_adapter.h"
 
-#include <simassets/item_traits.h>
-#include <simassets/mounted_pose.h>      // the native mounted-pose resolver (S4, ADR 0028)
-#include <simassets/seat_spec_extract.h> // the native seat-spec extraction (S4, ADR 0028)
-#include <threedi/threedi_ctrl_catalog.h>
-#include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
+#include <runtime/simassets/item_traits.h>
+#include <runtime/simassets/mounted_pose.h>      // the native mounted-pose resolver (S4, ADR 0028)
+#include <runtime/simassets/seat_spec_extract.h> // the native seat-spec extraction (S4, ADR 0028)
+#include <formats/threedi/threedi_ctrl_catalog.h>
+#include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
 #include <algorithm>
 #include <array>

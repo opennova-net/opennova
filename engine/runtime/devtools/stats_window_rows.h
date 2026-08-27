@@ -8,7 +8,7 @@
 // Included by stats_window.cpp only.
 #pragma once
 
-#include <devtools/frame_stats_slots.h>
+#include <runtime/devtools/frame_stats_slots.h>
 
 namespace opennova::devtools {
 

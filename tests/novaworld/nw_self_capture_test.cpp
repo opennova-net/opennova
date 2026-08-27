@@ -32,24 +32,24 @@
 // the same commit (the newly implemented tag, or its D-NET entry) — never
 // regenerate to make an unexplained diff pass.
 
-#include <npruntime/client_runtime.h>
-#include <npruntime/host_session.h> // the host owner loop (SAME loop apps/nw_server runs)
+#include <net/npruntime/client_runtime.h>
+#include <net/npruntime/host_session.h> // the host owner loop (SAME loop apps/nw_server runs)
 
-#include <netsim/idatagram_socket.h>
-#include <netsim/loopback_channel.h>
+#include <net/netsim/idatagram_socket.h>
+#include <net/netsim/loopback_channel.h>
 
-#include <npwire/ingame_decode.h>          // PlayerExtendedUplink (the §5.10 0x0C body)
-#include <npwire/ingame_message_catalog.h> // ingame_message_name
-#include <npwire/wire_capture.h>           // CaptureDatagram / decode_capture_to_messages
+#include <net/npwire/ingame_decode.h>          // PlayerExtendedUplink (the §5.10 0x0C body)
+#include <net/npwire/ingame_message_catalog.h> // ingame_message_name
+#include <net/npwire/wire_capture.h>           // CaptureDatagram / decode_capture_to_messages
 
-#include <mission/bms.h>
+#include <formats/mission/bms.h>
 
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/geom.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/world.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <algorithm>
 #include <cstdint>

@@ -1,4 +1,4 @@
-#include <novaworld/connection/registry.h>
+#include <net/novaworld/connection/registry.h>
 
 #include "../common/test_expect.h"
 

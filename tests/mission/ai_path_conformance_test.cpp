@@ -23,28 +23,28 @@
 // REPORT MODE: set OPENNOVA_AI_PATH_REPORT=1 to dump the full per-slot table
 // (authored group/waypoint/wp_number + brain waypoint state + travel). That dump
 // is the diagnosis surface; the assertions below are the regression pins.
-#include "mission/event_runtime.h"
-#include "mission/promote.h"
+#include <runtime/mission/event_runtime.h>
+#include <runtime/mission/promote.h>
 
-#include "mission/bms.h"
+#include <formats/mission/bms.h>
 
-#include "world/ai.h"
-#include "world/collision.h"
-#include "world/occlusion.h"
-#include "simassets/collision_resolve.h"
-#include "simassets/sim_collision_pose.h"
-#include "simassets/sim_model_cache.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/occlusion.h>
+#include <runtime/simassets/collision_resolve.h>
+#include <runtime/simassets/sim_collision_pose.h>
+#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/world/world.h>
 
-#include <def/def.h>
-#include <resource_index/resource_index.h>
-#include <simassets/seat_spec_extract.h>
-#include <threedi/threedi_3di3.h>
-#include <simassets/adm_root_motion.h>
-#include <simassets/item_traits.h>
-#include <cpt/cpt_io.h>
-#include <trn/trn_io.h>
-#include <terrain_query/height_field.h>
+#include <formats/def/def.h>
+#include <base/resource_index/resource_index.h>
+#include <runtime/simassets/seat_spec_extract.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <runtime/simassets/adm_root_motion.h>
+#include <runtime/simassets/item_traits.h>
+#include <formats/cpt/cpt_io.h>
+#include <formats/trn/trn_io.h>
+#include <runtime/terrain_query/height_field.h>
 #include <sstream>
 
 #include <algorithm>

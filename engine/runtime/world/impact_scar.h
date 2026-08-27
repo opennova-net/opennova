@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "world/entity.h"
+#include <runtime/world/entity.h>
 
 namespace opennova::world {
 

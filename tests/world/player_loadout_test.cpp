@@ -6,8 +6,8 @@
 //  @ 0x565cd0; Player_InitPlayer @ 0x4e15f0]
 #include <cstdio>
 
-#include "world/player_loadout.h"
-#include "world/world.h"
+#include <runtime/world/player_loadout.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 

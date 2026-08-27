@@ -12,7 +12,7 @@
    budget hits zero. We model that with an explicit `halt` flag set by the
    handlers and inspected by the dispatch loop. */
 
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 #include <stdint.h>
 #include <stdio.h>

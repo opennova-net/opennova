@@ -14,8 +14,8 @@
 //  window feeding Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe);
 //  render_terrain_sector_batch @ 0x6096f0 — the per-batch family select]
 
-#include <terrain/foliage_detail_collector.h>
-#include <terrain/quadtree.h>
+#include <runtime/terrain/foliage_detail_collector.h>
+#include <runtime/terrain/quadtree.h>
 
 #include <cstdint>
 #include <vector>

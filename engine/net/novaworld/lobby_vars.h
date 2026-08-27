@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include <napi/session.h> // ClientVar / NapiMessage / make_client_host_request / make_client_host_update
+#include <net/napi/session.h> // ClientVar / NapiMessage / make_client_host_request / make_client_host_update
 
 // P7 Part 2 (B2) — the NovaWorld lobby var-builders + identity set, moved out of the Godot bindings
 // so they become pure pumps (ADR 0010 / .agents/network.md: lobby payloads belong in engine/net/novaworld,

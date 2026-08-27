@@ -5,7 +5,7 @@
 #include <deque>
 #include <vector>
 
-#include "netsim/session_transport.h" // Datagram, ISessionTransport
+#include <net/netsim/session_transport.h> // Datagram, ISessionTransport
 
 namespace opennova::netsim {
 

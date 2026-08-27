@@ -1,4 +1,4 @@
-#include "npruntime/integrity_challenge_profile.h"
+#include <net/npruntime/integrity_challenge_profile.h>
 
 namespace opennova::np {
 namespace {

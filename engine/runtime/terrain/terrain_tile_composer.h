@@ -7,11 +7,11 @@
 // [orig: PolyTrn_RenderTile @ 0x60DA70 — base colormap MODULATE2X pass, .til
 // overlay quads, DOT3 light pass; the .cpp carries the per-pass witnesses.]
 
-#include <terrain/terrain_tile_composition_cache.h>
-#include <terrain/terrain_tile_light_epoch.h>
-#include <terrain/terrain_scorch.h>
-#include <terrain/texture_preprocess.h>
-#include <til/til.h>
+#include <runtime/terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain/terrain_tile_light_epoch.h>
+#include <runtime/terrain/terrain_scorch.h>
+#include <runtime/terrain/texture_preprocess.h>
+#include <formats/til/til.h>
 
 #include <array>
 

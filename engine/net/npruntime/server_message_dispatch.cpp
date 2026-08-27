@@ -1,43 +1,43 @@
-#include "npruntime/server_message_dispatch.h"
+#include <net/npruntime/server_message_dispatch.h>
 
 
-#include "npruntime/integrity_challenge_profile.h"
-#include "npruntime/end_round_protocol.h"
-#include <npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
-#include "npruntime/server_spawn.h" // Server_ReservePlayerTeam (0x04/spawn identity)
-#include "npruntime/server_tick.h" // Server_StageHostDisconnect
-#include "npruntime/session_status.h"
-#include "npruntime/weapon_table_build.h" // loadout_entry_permitted / resolve_loadout_ammo (D-NET-141)
+#include <net/npruntime/integrity_challenge_profile.h>
+#include <net/npruntime/end_round_protocol.h>
+#include <net/npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
+#include <net/npruntime/server_spawn.h> // Server_ReservePlayerTeam (0x04/spawn identity)
+#include <net/npruntime/server_tick.h> // Server_StageHostDisconnect
+#include <net/npruntime/session_status.h>
+#include <net/npruntime/weapon_table_build.h> // loadout_entry_permitted / resolve_loadout_ammo (D-NET-141)
 
-#include <netsim/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
+#include <net/netsim/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
-#include <npwire/game_type.h>       // is_waypoint_family / is_stock_coop (§5.32, D-NET-203/205)
-#include <npwire/wire_handle.h>     // is_batch_end_sentinel / kInvalid (the wire handle home)
-#include <npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
-#include <npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
-#include <npwire/ingame_message_id.h>
-#include <npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
+#include <net/npwire/game_type.h>       // is_waypoint_family / is_stock_coop (§5.32, D-NET-203/205)
+#include <net/npwire/wire_handle.h>     // is_batch_end_sentinel / kInvalid (the wire handle home)
+#include <net/npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
+#include <net/npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
-#include <world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
-#include <world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
-#include <world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
-#include <world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
-#include <world/world.h>  // world::World::registry (the authoritative roster, §6.9)
-#include <audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
-#include <world/zone_chain.h>    // zone_chain_frontier_zone — the 0x1E ev-0x3A deploy hint
+#include <runtime/world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
+#include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
+#include <runtime/world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
+#include <runtime/world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
+#include <runtime/world/world.h>  // world::World::registry (the authoritative roster, §6.9)
+#include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
+#include <runtime/world/zone_chain.h>    // zone_chain_frontier_zone — the 0x1E ev-0x3A deploy hint
 
-#include <world/vehicle_mount.h>
-#include <world/ai.h>
-#include <world/angle.h>
-#include <world/geom.h>
-#include <world/infantry.h>
+#include <runtime/world/vehicle_mount.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/infantry.h>
 
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <iterator>
 #include <utility>
-#include <io/le.h>
+#include <base/io/le.h>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>

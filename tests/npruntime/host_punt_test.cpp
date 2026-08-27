@@ -9,24 +9,24 @@
 // fatal (C2S 0x20 "PUNT WCRC" / C2S 0x21 "PUNT ACRC"), so the SILENCE is pinned here
 // instead (D-NET-181).
 
-#include <npruntime/client_runtime.h>
-#include <npruntime/joiner_connection.h>
-#include <npruntime/host_session.h>
-#include <npruntime/napi_np_protocol.h>
-#include <npruntime/server_session.h>
-#include <npruntime/server_spawn.h>
-#include <npruntime/server_tick.h>
+#include <net/npruntime/client_runtime.h>
+#include <net/npruntime/joiner_connection.h>
+#include <net/npruntime/host_session.h>
+#include <net/npruntime/napi_np_protocol.h>
+#include <net/npruntime/server_session.h>
+#include <net/npruntime/server_spawn.h>
+#include <net/npruntime/server_tick.h>
 
-#include <netsim/idatagram_socket.h>
-#include <netsim/udp_session_transport.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/nw_session_framing.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
-#include <world/ai.h>
-#include <world/player_spawn.h>
-#include <world/world.h>
+#include <net/netsim/idatagram_socket.h>
+#include <net/netsim/udp_session_transport.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cstdint>

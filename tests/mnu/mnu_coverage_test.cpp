@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include "mnu/mnu.h"
+#include <formats/mnu/mnu.h>
 
 static std::string upper(std::string s) {
   for (char &c : s) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));

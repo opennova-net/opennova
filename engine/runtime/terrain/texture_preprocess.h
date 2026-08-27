@@ -1,6 +1,6 @@
 #pragma once
 
-#include <trn/trn.h>
+#include <formats/trn/trn.h>
 
 #include <cstdint>
 #include <vector>

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "world/entity.h"
+#include <runtime/world/entity.h>
 
 // The entity-command network seam: INetCommandSink + the in-process
 // LocalSink default. Split from the world.h umbrella (W3-7) so wire-side

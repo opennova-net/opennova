@@ -1,8 +1,8 @@
 #include "nwu_lobby_session.h"
 
-#include <napi/envelope.h>
-#include <novaworld/gate_probe.h>
-#include <novaworld/lobby_vars.h> // parse_host_port + the CU/identity builders
+#include <net/napi/envelope.h>
+#include <net/novaworld/gate_probe.h>
+#include <net/novaworld/lobby_vars.h> // parse_host_port + the CU/identity builders
 
 #include <cstring>
 #include <random>

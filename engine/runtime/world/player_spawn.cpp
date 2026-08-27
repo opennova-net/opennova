@@ -1,12 +1,12 @@
-#include "world/player_spawn.h"
+#include <runtime/world/player_spawn.h>
 
-#include "world/angle.h"
-#include "world/ai.h"           // AiSystem, AiEntity
-#include "world/collision.h"
-#include "world/entity_spawn.h" // entity_reset_to_spawn_state
-#include "world/geom.h"         // to_fixed
-#include "world/infantry.h"     // anim_state
-#include "world/world.h"        // World, registry, cached
+#include <runtime/world/angle.h>
+#include <runtime/world/ai.h>           // AiSystem, AiEntity
+#include <runtime/world/collision.h>
+#include <runtime/world/entity_spawn.h> // entity_reset_to_spawn_state
+#include <runtime/world/geom.h>         // to_fixed
+#include <runtime/world/infantry.h>     // anim_state
+#include <runtime/world/world.h>        // World, registry, cached
 
 namespace opennova::world {
 

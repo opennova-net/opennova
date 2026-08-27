@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <vfs/vfs.h>
+#include <base/vfs/vfs.h>
 
 namespace opennova {
 

@@ -10,7 +10,7 @@
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"
-#include "lwf/lwf.h"
+#include <formats/lwf/lwf.h>
 
 namespace {
 

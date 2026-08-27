@@ -7,13 +7,13 @@
 // (world::CollisionWorld / OcclusionWorld, SimModelCache, the pose provider).
 #pragma once
 
-#include <def/def.h>
-#include <mission/placement_traits.h> // the visual-item policy home
-#include <simassets/sim_collision_pose.h>
-#include <simassets/sim_model_cache.h>
-#include <world/collision.h>
-#include <world/occlusion.h>
-#include <world/world.h>
+#include <formats/def/def.h>
+#include <runtime/mission/placement_traits.h> // the visual-item policy home
+#include <runtime/simassets/sim_collision_pose.h>
+#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/occlusion.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <string>

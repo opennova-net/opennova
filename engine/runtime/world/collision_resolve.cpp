@@ -1,5 +1,5 @@
-#include "world/collision.h"
-#include <io/perf_clock.h>
+#include <runtime/world/collision.h>
+#include <base/io/perf_clock.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -7,15 +7,15 @@
 // Contact resolution — the vehicle hull and entity resolvers — plus the debug views
 // the F3 overlay reads.
 
-#include "world/angle.h"
-#include "world/dir_table.h"
+#include <runtime/world/angle.h>
+#include <runtime/world/dir_table.h>
 #include <cmath>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
 #include "collision_detail.h"
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

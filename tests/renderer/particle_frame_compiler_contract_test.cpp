@@ -1,5 +1,5 @@
-#include <renderer/particle_frame.h>
-#include <renderer/particle_color.h>
+#include <runtime/renderer/particle_frame.h>
+#include <runtime/renderer/particle_color.h>
 
 #include <cmath>
 #include <cstdio>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "npruntime/napi_np_server_ctx.h"
+#include <net/npruntime/napi_np_server_ctx.h>
 
 // Host bring-up sequence — the in-process listen-server creation path (§5.0), mirroring the
 // witnessed order [orig: SinglePlayer_StartMission @0x561af0]:

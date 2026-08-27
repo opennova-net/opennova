@@ -46,21 +46,21 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
-#include <io/perf_clock.h>
+#include <base/io/perf_clock.h>
 
-#include "audio/footstep_slot.h"
-#include <io/bam.h>
-#include <terrain_query/height_field.h>
+#include <runtime/audio/footstep_slot.h>
+#include <base/io/bam.h>
+#include <runtime/terrain_query/height_field.h>
 
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/dir_table.h"
-#include "world/infantry_ladder.h"
-#include "world/infantry_internal.h"
-#include "world/player_view.h" // player_view_floor_eye_to_terrain (the on-foot local eye leg)
-#include "world/vehicle_attach.h"
-#include "world/world.h" // registry.get for the local-player AiEntity->Entity mirror
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/dir_table.h>
+#include <runtime/world/infantry_ladder.h>
+#include <runtime/world/infantry_internal.h>
+#include <runtime/world/player_view.h> // player_view_floor_eye_to_terrain (the on-foot local eye leg)
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h> // registry.get for the local-player AiEntity->Entity mirror
 
 namespace opennova::world {
 

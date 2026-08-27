@@ -3,7 +3,7 @@
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include "audio/bank_chain.h"
+#include <runtime/audio/bank_chain.h>
 #include "simulation/nova_simulation.h"
 
 #include <string>

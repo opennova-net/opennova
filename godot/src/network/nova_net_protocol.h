@@ -4,10 +4,10 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <npruntime/game_config.h>
-#include <npwire/game_type.h>
-#include <npwire/net_ports.h>
-#include <npwire/wire_handle.h>
+#include <net/npruntime/game_config.h>
+#include <net/npwire/game_type.h>
+#include <net/npwire/net_ports.h>
+#include <net/npwire/wire_handle.h>
 
 namespace godot {
 

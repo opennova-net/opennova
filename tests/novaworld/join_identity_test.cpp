@@ -1,5 +1,5 @@
-#include <novaworld/join_identity.h>
-#include <novacrypto/pubcrypto.h>
+#include <net/novaworld/join_identity.h>
+#include <net/novacrypto/pubcrypto.h>
 
 #include <cstdint>
 #include <cstdio>

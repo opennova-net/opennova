@@ -17,10 +17,10 @@
 // and asserts both rows HOLD across the mover loop: the gun keeps its 0x0D
 // spawn pose bit-for-bit, and the gunner keeps riding the (static) gun.
 
-#include <netsim/client_replica_pipeline.h>
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/entity_class.h>
-#include <npwire/ingame_decode.h>
+#include <net/npwire/entity_class.h>
+#include <net/npwire/ingame_decode.h>
 
 #include <cmath>
 #include <cstdint>

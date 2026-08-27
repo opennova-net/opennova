@@ -1,7 +1,7 @@
-#include "renderer/material_eval.h"
+#include <runtime/renderer/material_eval.h>
 
-#include "crt/crt_rng.h"
-#include "threedi/threedi_ctrl_catalog.h"
+#include <base/crt/crt_rng.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include <algorithm>
 #include <array>

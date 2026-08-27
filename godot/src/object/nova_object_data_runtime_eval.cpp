@@ -3,10 +3,10 @@
 // evaluation on the retail clock.
 #include "object/nova_object_data_internal.h"
 
-#include <renderer/light_runtime.h>
-#include <renderer/material_eval.h>
-#include <threedi/threedi_panm_pose.h> // liveness / noise / clock (one impl with the engine)
-#include <threedi/threedi_panm_runtime.h>
+#include <runtime/renderer/light_runtime.h>
+#include <runtime/renderer/material_eval.h>
+#include <formats/threedi/threedi_panm_pose.h> // liveness / noise / clock (one impl with the engine)
+#include <formats/threedi/threedi_panm_runtime.h>
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/variant/transform3d.hpp>

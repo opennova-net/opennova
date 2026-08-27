@@ -9,8 +9,8 @@
 #include <cstdio>
 #include <vector>
 
-#include "anim/aim_overlay.h"
-#include <io/bam.h>
+#include <runtime/anim/aim_overlay.h>
+#include <base/io/bam.h>
 
 using namespace opennova::anim;
 

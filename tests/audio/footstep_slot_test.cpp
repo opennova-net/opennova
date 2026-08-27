@@ -6,7 +6,7 @@
 #include <cstdio>
 #include <string>
 
-#include <audio/footstep_slot.h>
+#include <runtime/audio/footstep_slot.h>
 
 using namespace opennova::audio;
 

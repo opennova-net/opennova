@@ -1,9 +1,9 @@
 // Runtime material inputs for the terrain PROJSHAD pass: the shared retail
 // AlphaGen/UV evaluator, time and controlled diffuse flipbooks, and the
 // file-effect rule that ignores material AlphaGen.
-#include <terrain/terrain_static_shadow_geometry.h>
+#include <runtime/terrain/terrain_static_shadow_geometry.h>
 
-#include <threedi/threedi_ctrl_catalog.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include <cmath>
 #include <cstdio>

@@ -1,4 +1,4 @@
-#include "netsim/client_scoreboard_view.h"
+#include <net/netsim/client_scoreboard_view.h>
 
 namespace opennova::netsim {
 

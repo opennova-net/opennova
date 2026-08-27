@@ -1,11 +1,11 @@
-#include <novaworld/gsb.h>
+#include <net/novaworld/gsb.h>
 
-#include <novacrypto/nwu.h>
+#include <net/novacrypto/nwu.h>
 
 #include <cstring>
 #include <string>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova {
 

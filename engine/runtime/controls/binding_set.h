@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-#include "controls/controls.h"
+#include <runtime/controls/controls.h>
 #include <cstddef>
 
 namespace opennova::controls {

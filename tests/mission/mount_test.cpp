@@ -8,12 +8,12 @@
 #include <cstdio>
 #include <memory>
 
-#include "mission/event_runtime.h"
-#include "mission/bms.h"
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/vehicle_attach.h"
-#include "world/world.h"
+#include <runtime/mission/event_runtime.h>
+#include <formats/mission/bms.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h>
 
 using namespace opennova;
 using world::AiBrain;

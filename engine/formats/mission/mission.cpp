@@ -1,4 +1,4 @@
-#include "mission/mission.h"
+#include <formats/mission/mission.h>
 
 // MissionDocument: the in-memory mission and its mutation operations. The .mis
 // text form and the typed-record conversions each live in their own TU beside

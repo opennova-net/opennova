@@ -17,9 +17,9 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 
-#include <audio/music_policy.h>
+#include <runtime/audio/music_policy.h>
 
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 namespace godot {
 

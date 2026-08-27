@@ -1,4 +1,4 @@
-#include "npruntime/session_status.h"
+#include <net/npruntime/session_status.h>
 
 #include <algorithm>
 #include <array>
@@ -8,10 +8,10 @@
 #include <string>
 #include <utility>
 
-#include <io/le.h>
-#include <npwire/game_type.h>
-#include <world/match.h>
-#include <world/world.h>
+#include <base/io/le.h>
+#include <net/npwire/game_type.h>
+#include <runtime/world/match.h>
+#include <runtime/world/world.h>
 
 namespace opennova::np {
 namespace gtype = opennova::game_type;

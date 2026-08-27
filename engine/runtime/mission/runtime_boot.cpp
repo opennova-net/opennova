@@ -1,9 +1,9 @@
 // S9 (ADR 0028): the mission boot policy — see runtime_boot.h for the order
 // contract. The file-resolution rules here are structural translations of the
 // shell resolvers they replace; each carries its witness.
-#include "mission/runtime_boot.h"
+#include <runtime/mission/runtime_boot.h>
 
-#include <aip/aip.h>
+#include <formats/aip/aip.h>
 
 #include <cctype>
 #include <cstring>

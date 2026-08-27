@@ -1,8 +1,8 @@
-#include "threedi/threedi_compare.h"
+#include <formats/threedi/threedi_compare.h>
 
-#include <io/le.h>
+#include <base/io/le.h>
 
-#include "threedi/threedi.h"
+#include <formats/threedi/threedi.h>
 
 #include <ctype.h>
 #include <math.h>

@@ -8,8 +8,8 @@
 // The frames witnessed here drive the §5.10 cross-witness in
 // docs/net/novaworld-net-re.md and let nw_pp regress on either side.
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
 
 #include <array>
 #include <cassert>

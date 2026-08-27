@@ -4,8 +4,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "world/sound_emitter_mailbox.h"
-#include "world/world.h"
+#include <runtime/world/sound_emitter_mailbox.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 

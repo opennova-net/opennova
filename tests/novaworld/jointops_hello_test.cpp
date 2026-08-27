@@ -6,12 +6,12 @@
 // by CNapiNetwork_Init @ 0x4ca4a0. The default NOVAWORLDUDP hello remains
 // unchanged, so the per-PN identity selector cannot regress the lobby path.
 
-#include <novaworld/client_session.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/novaworld/client_session.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
-#include <napi/envelope.h>
-#include <novacrypto/nwu.h>
+#include <net/napi/envelope.h>
+#include <net/novacrypto/nwu.h>
 
 #include <array>
 #include <cstdint>

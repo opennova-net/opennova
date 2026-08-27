@@ -6,9 +6,9 @@
 #include <map>
 #include <string>
 
-#include <netsim/connection.h>             // netsim::Connection, netsim::TransportMode
-#include <npwire/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
-#include <npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
+#include <net/netsim/connection.h>             // netsim::Connection, netsim::TransportMode
+#include <net/npwire/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
+#include <net/npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 
 namespace opennova::np {
 

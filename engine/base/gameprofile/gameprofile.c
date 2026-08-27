@@ -1,4 +1,4 @@
-#include "gameprofile/gameprofile.h"
+#include <base/gameprofile/gameprofile.h>
 
 #include <stddef.h>
 #include <ctype.h>

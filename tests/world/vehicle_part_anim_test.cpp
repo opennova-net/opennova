@@ -6,12 +6,12 @@
 // [orig: Entity_UpdatePartSpinAccumulator @0x4928B0; the spawn seed
 //  @0x40EE70..0x40EE94; the register reads @0x492ACA / @0x4929B4]
 
-#include "world/ai.h"
-#include "world/entity.h"
-#include "world/vehicle_attach.h"
-#include "world/vehicle_motor.h"
-#include "world/vehicle_part_anim.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_part_anim.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 

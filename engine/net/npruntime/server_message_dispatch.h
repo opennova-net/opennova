@@ -5,10 +5,10 @@
 #include <string>
 #include <vector>
 
-#include <npwire/protocol_message.h>
+#include <net/npwire/protocol_message.h>
 
-#include "npruntime/game_config.h" // np::GameConfig — the reactive reply handlers read it
-#include "npruntime/napi_np_connection.h"
+#include <net/npruntime/game_config.h> // np::GameConfig — the reactive reply handlers read it
+#include <net/npruntime/napi_np_connection.h>
 
 // The roster identity (team @entity+344, wire handle) is read THROUGH each connection's
 // link.owned_entity from the live registry (D-NET-132 / §6.9). Forward-declared so world/world.h stays

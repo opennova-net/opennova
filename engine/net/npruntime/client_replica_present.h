@@ -7,22 +7,22 @@
 // witness citations travel with each body.
 #pragma once
 
-#include <npruntime/joiner_world_bridge.h> // client_entity_for_handle
+#include <net/npruntime/joiner_world_bridge.h> // client_entity_for_handle
 
-#include <netsim/client_state.h>
-#include <npwire/entity_class.h>
+#include <net/netsim/client_state.h>
+#include <net/npwire/entity_class.h>
 
-#include <anim/aim_overlay.h>
-#include <io/bam.h>
-#include <mission/promote.h>
-#include <simassets/pose_inputs.h>
-#include <simassets/seat_spec_extract.h>
-#include <world/angle.h>
-#include <world/entity.h>
-#include <world/infantry.h>
-#include <world/mount_controls.h>
-#include <world/present_rows.h>
-#include <world/turret_window.h>
+#include <runtime/anim/aim_overlay.h>
+#include <base/io/bam.h>
+#include <runtime/mission/promote.h>
+#include <runtime/simassets/pose_inputs.h>
+#include <runtime/simassets/seat_spec_extract.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/mount_controls.h>
+#include <runtime/world/present_rows.h>
+#include <runtime/world/turret_window.h>
 
 #include <cstdint>
 #include <vector>

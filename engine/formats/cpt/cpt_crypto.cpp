@@ -1,4 +1,4 @@
-#include "cpt/crypto.h"
+#include <formats/cpt/crypto.h>
 
 // The TPM1 payload cipher (docs/terrain/terrain-re.md, the TPM1 tile-mesh format): every
 // vertex/index payload is rotate-crypted [orig: TrnGen.exe MeshData_LoadFromFile @0x404100;

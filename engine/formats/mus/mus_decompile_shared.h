@@ -4,7 +4,7 @@
 /* Shared MUS decompile helpers: name resolution, control-flow analysis, and
    stack-based expression reconstruction used by mus_decompile.cpp. */
 
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 #include "mus_decode.h"  /* Instruction, kOps, disassemble() */
 

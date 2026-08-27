@@ -11,8 +11,8 @@
 // flag-derivation checks below pin the faithful "gate bit set iff source field
 // non-zero" behavior; the length checks pin the exact byte layout.
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
 
 #include <cstdint>
 #include <cstdio>

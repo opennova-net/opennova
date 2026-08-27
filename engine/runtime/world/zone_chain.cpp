@@ -1,8 +1,8 @@
 // Advance & Secure zone-slot chain (net-re §5.61). Structural translation of the
 // retail ZoneSlotChain_* cluster (ex-"CWeaponSlotManager", inline @ 0x24D1EBC).
-#include "world/zone_chain.h"
+#include <runtime/world/zone_chain.h>
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

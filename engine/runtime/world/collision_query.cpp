@@ -1,4 +1,4 @@
-#include "world/collision.h"
+#include <runtime/world/collision.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -7,14 +7,14 @@
 // projectile face and polygon raycasts, and the contact-force accumulation. Each
 // takes a CollisionTargetView and touches no world state.
 
-#include "world/ammo_table.h" // kAmmoFlagIgnorFoilage
-#include "world/angle.h"
+#include <runtime/world/ammo_table.h> // kAmmoFlagIgnorFoilage
+#include <runtime/world/angle.h>
 #include <algorithm>
 #include <cmath>
 
 #include "collision_detail.h"
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

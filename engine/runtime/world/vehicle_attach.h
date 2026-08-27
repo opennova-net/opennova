@@ -12,8 +12,8 @@
 
 #include <cstdint>
 
-#include "world/entity.h"
-#include "world/vehicle_mount.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/vehicle_mount.h>
 
 namespace opennova::world {
 

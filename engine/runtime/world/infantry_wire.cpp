@@ -1,5 +1,5 @@
-#include "world/ai.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

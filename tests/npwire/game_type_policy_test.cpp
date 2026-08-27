@@ -6,10 +6,10 @@
 // [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0; lookup_entity_slot_and_pack_entry
 //  @ 0x57AD40; Config_SetDefaults; dfx2med sub_402770]
 
-#include <mission/bms.h>
-#include <npruntime/game_config.h>
-#include <npwire/game_type.h>
-#include <npwire/session_hello.h>
+#include <formats/mission/bms.h>
+#include <net/npruntime/game_config.h>
+#include <net/npwire/game_type.h>
+#include <net/npwire/session_hello.h>
 
 #include <cstdio>
 #include <string>

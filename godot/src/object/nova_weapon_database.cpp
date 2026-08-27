@@ -4,8 +4,8 @@
 
 #include <godot_cpp/variant/packed_float32_array.hpp>
 
-#include <def/def.h>
-#include <world/player_loadout.h> // armory class policy (ADR 0016: one impl)
+#include <formats/def/def.h>
+#include <runtime/world/player_loadout.h> // armory class policy (ADR 0016: one impl)
 
 #include <algorithm>
 #include <cstdio>

@@ -1,7 +1,7 @@
-#include <devtools/game_dev_tools.h>
+#include <runtime/devtools/game_dev_tools.h>
 
-#include <devtools/demo_window.h>
-#include <devtools/stats_window.h>
+#include <runtime/devtools/demo_window.h>
+#include <runtime/devtools/stats_window.h>
 
 namespace opennova::devtools {
 

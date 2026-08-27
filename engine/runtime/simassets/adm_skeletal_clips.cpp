@@ -1,12 +1,12 @@
 // The engine-side skeletal clip set — the adapter evaluator's load/eval
 // pipeline moved verbatim onto ResourceIndex + the anim lib (ADR 0028).
-#include "simassets/adm_skeletal_clips.h"
+#include <runtime/simassets/adm_skeletal_clips.h>
 
-#include <adm/adm.h>
-#include <anim/aim_overlay.h>
-#include <bad/bad.h>
-#include <io/strutil.h>
-#include <resource_index/resource_index.h>
+#include <formats/adm/adm.h>
+#include <runtime/anim/aim_overlay.h>
+#include <formats/bad/bad.h>
+#include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
 
 #include <algorithm>
 #include <utility>

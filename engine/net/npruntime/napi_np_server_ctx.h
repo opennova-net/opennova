@@ -8,8 +8,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "npruntime/game_config.h"       // np::GameConfig — the ONE consolidated server-state config
-#include "npruntime/napi_np_connection.h"
+#include <net/npruntime/game_config.h>       // np::GameConfig — the ONE consolidated server-state config
+#include <net/npruntime/napi_np_connection.h>
 
 // Forward declarations — the runtime holds non-owning pointers to the authoritative world and
 // the in-match replication seam. No World/codec headers are pulled into this header, and there

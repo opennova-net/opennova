@@ -1,4 +1,4 @@
-#include "particle/effect_scene.h"
+#include <runtime/particle/effect_scene.h>
 
 // [orig: CEffectWorld_InternEffectHandle @ 0x5f7310;
 // CEffectWorld_SpawnEmitterAtPosition @ 0x5f6df0;

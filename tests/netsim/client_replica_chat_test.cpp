@@ -8,9 +8,9 @@
 #include <memory>
 #include <vector>
 
-#include <hud/feed_format.h>
-#include <netsim/client_replica_pipeline.h>
-#include <npwire/ingame_message_id.h>
+#include <runtime/hud/feed_format.h>
+#include <net/netsim/client_replica_pipeline.h>
+#include <net/npwire/ingame_message_id.h>
 
 using namespace opennova;
 using namespace opennova::netsim;

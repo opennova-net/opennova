@@ -1,4 +1,4 @@
-#include <foliage/foliage.h>
+#include <formats/foliage/foliage.h>
 
 #include <cstdio>
 

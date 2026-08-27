@@ -13,7 +13,7 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
-#include <env/env_water_render.h>
+#include <formats/env/env_water_render.h>
 
 namespace godot {
 

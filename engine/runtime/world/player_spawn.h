@@ -8,7 +8,7 @@
 
 #include <cstdint>
 
-#include "world/entity.h" // EntityHandle, Vec3
+#include <runtime/world/entity.h> // EntityHandle, Vec3
 
 namespace opennova::world {
 

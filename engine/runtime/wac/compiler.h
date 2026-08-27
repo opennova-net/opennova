@@ -11,8 +11,8 @@
 #include <string_view>
 #include <vector>
 
-#include "wac/ast.h"
-#include "wac/program.h"
+#include <formats/wac/ast.h>
+#include <formats/wac/program.h>
 
 namespace opennova::world {
 class EntityRegistry;

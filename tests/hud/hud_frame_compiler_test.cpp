@@ -3,10 +3,10 @@
 // [orig: HUD_RenderOverlays @ 0x5a7bb0; CGameFont_MeasureText @ 0x674e70;
 //  CGameFont_DrawText @ 0x6752c0]
 
-#include <hud/game_font.h>
-#include <hud/hud_frame.h>
-#include <hud/hud_math.h>
-#include <hud/hud_message_log.h>
+#include <runtime/hud/game_font.h>
+#include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_math.h>
+#include <runtime/hud/hud_message_log.h>
 
 #include <algorithm>
 #include <cmath>

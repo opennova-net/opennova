@@ -3,9 +3,9 @@
 // produces draw data, the Stats window arms and disarms the board's capture
 // on its visibility edges and formats a drained window, and the ImGui ABI
 // fingerprint is the pinned one (the imgui-godot addon rejects any other).
-#include <devtools/game_dev_tools.h>
-#include <devtools/imgui_abi.h>
-#include <devtools/stats_window.h>
+#include <runtime/devtools/game_dev_tools.h>
+#include <runtime/devtools/imgui_abi.h>
+#include <runtime/devtools/stats_window.h>
 
 #include <imgui.h>
 

@@ -1,4 +1,4 @@
-#include "world/ai.h"
+#include <runtime/world/ai.h>
 
 // Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -6,13 +6,13 @@
 // Waypoint targeting and movement (P1: GROUND_FOLLOWWP), plus the vehicle-physics
 // AI/parked input staging.
 
-#include "world/angle.h"
+#include <runtime/world/angle.h>
 #include <algorithm>
 #include <cmath>
 
 #include "ai_detail.h"
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

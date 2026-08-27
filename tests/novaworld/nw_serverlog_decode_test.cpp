@@ -20,7 +20,7 @@
 // Skips cleanly when NW_PROFILE_SPH_DIR is unset (CI stays green); point it at
 // the folder containing host.sph / client.sph.
 
-#include <npwire/serverlog_decode.h>
+#include <net/npwire/serverlog_decode.h>
 
 #include <cstdint>
 #include <cstdio>

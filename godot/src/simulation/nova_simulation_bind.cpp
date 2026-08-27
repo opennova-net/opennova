@@ -3,7 +3,7 @@
 
 #include "rtxt/rtxt_string_file.h" // the gametext table type the end-round / deploy feeds bind
 
-#include <threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
+#include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
 
 using namespace novasim;
 

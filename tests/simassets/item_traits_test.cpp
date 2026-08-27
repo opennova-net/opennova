@@ -6,10 +6,10 @@
 // throwable class scan with last-wins duplicate ids, and the D-AI-5 weapon
 // seed. Parser token semantics are def's own tests; exotic fields are stamped
 // post-parse so this file pins only the FOLD's mapping.
-#include <def/def.h>
-#include <simassets/item_traits.h>
-#include <world/ai.h>
-#include <world/world.h>
+#include <formats/def/def.h>
+#include <runtime/simassets/item_traits.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 #include <cstring>

@@ -1,5 +1,5 @@
 // Forgiving XML parser implementation matching NovaLogic's MNU parser.
-#include "mnu/mnu_xml.h"
+#include <formats/mnu/mnu_xml.h>
 
 #include <algorithm>
 #include <cctype>
@@ -7,7 +7,7 @@
 #include <fstream>
 #include <sstream>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace mnu_xml {
 

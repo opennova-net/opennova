@@ -8,12 +8,12 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <terrain/terrain_frame.h>
-#include <terrain/terrain_scorch.h>
-#include <terrain/terrain_static_shadow_alpha.h>
-#include <terrain/terrain_static_shadow_planner.h>
-#include <terrain/terrain_tile_composer.h>
-#include <terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain/terrain_frame.h>
+#include <runtime/terrain/terrain_scorch.h>
+#include <runtime/terrain/terrain_static_shadow_alpha.h>
+#include <runtime/terrain/terrain_static_shadow_planner.h>
+#include <runtime/terrain/terrain_tile_composer.h>
+#include <runtime/terrain/terrain_tile_composition_cache.h>
 
 #include <array>
 #include <cstdint>

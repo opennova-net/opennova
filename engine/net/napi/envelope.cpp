@@ -1,6 +1,6 @@
-#include <napi/envelope.h>
+#include <net/napi/envelope.h>
 
-#include <novacrypto/crc32.h>
+#include <net/novacrypto/crc32.h>
 
 #include <cstring>
 

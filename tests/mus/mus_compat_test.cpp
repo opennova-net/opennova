@@ -4,7 +4,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 #ifndef MUS_FIXTURE_DIR
 #define MUS_FIXTURE_DIR "fixtures/mus"

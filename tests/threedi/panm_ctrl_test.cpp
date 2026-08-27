@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-#include "threedi/threedi.h"
-#include "threedi/threedi_3di3.h"
+#include <formats/threedi/threedi.h>
+#include <formats/threedi/threedi_3di3.h>
 #include "common/test_paths.h"
 
 static const ThreediChunk *find_first_chunk(const ThreediChunk *chunk,

@@ -10,10 +10,10 @@
 #include <unordered_set>
 #include <vector>
 
-#include <novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
-#include <novaworld/lobby_session.h>
-#include <npwire/protocol_message.h>
-#include <npruntime/host_session.h>
+#include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
+#include <net/novaworld/lobby_session.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npruntime/host_session.h>
 
 namespace opennova {
 class ConnectionManager;

@@ -1,6 +1,6 @@
-#include <devtools/stats_window.h>
+#include <runtime/devtools/stats_window.h>
 
-#include <devtools/stats_window_rows.h>
+#include <runtime/devtools/stats_window_rows.h>
 
 #include <imgui.h>
 

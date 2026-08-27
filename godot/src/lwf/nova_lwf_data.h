@@ -11,7 +11,7 @@
 
 #include <cstdint>
 
-#include <lwf/lwf.h>
+#include <formats/lwf/lwf.h>
 
 namespace godot {
 

@@ -1,6 +1,6 @@
-#include "particle/particle.h"
+#include <formats/particle/particle.h>
 
-#include "io/strutil.h"
+#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <array>

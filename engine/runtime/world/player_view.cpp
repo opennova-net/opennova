@@ -2,16 +2,16 @@
 // [orig: CNetPlayerInterp_Setup @ 0x4df36e; ThirdPersonCamera_Update @ 0x437af0;
 //  Player_ToggleWeaponScope @ 0x4df0c0..0x4df401]
 
-#include "world/player_view.h"
+#include <runtime/world/player_view.h>
 
 #include <cmath>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
-#include "terrain_query/height_field.h"
-#include "world/angle.h"
-#include "world/geom.h"
-#include "world/tp_camera_mount.h"
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/tp_camera_mount.h>
 
 namespace opennova::world {
 

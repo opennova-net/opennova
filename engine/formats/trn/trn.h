@@ -1,6 +1,6 @@
 #pragma once
 
-#include <foliage/foliage.h>
+#include <formats/foliage/foliage.h>
 
 #include <array>
 #include <string>

@@ -4,10 +4,10 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <novaworld/client_session.h>
-#include <novaworld/gate_probe.h>
-#include <npwire/net_ports.h>
-#include <novaworld/lobby_vars.h>   // opennova::HostRegistration
+#include <net/novaworld/client_session.h>
+#include <net/novaworld/gate_probe.h>
+#include <net/npwire/net_ports.h>
+#include <net/novaworld/lobby_vars.h>   // opennova::HostRegistration
 
 #include "network/nwu_lobby_session.h"
 

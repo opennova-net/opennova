@@ -1,26 +1,26 @@
 // Round flight and presentation, with authoritative consequences carried explicitly
 // per round. See round_sim.h and docs/net/novaworld-net-re.md §5.60.
-#include "world/round_sim.h"
+#include <runtime/world/round_sim.h>
 
-#include "world/fire_sound.h"
+#include <runtime/world/fire_sound.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
-#include "world/ai.h"
-#include "world/ammo_table.h"
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/impact_scar.h"
-#include "world/infantry.h"
-#include "world/round_move_effect.h"
-#include "world/throwables.h"
-#include "world/weapon_table.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/ammo_table.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/impact_scar.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/round_move_effect.h>
+#include <runtime/world/throwables.h>
+#include <runtime/world/weapon_table.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

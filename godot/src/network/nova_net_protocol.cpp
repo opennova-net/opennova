@@ -1,10 +1,10 @@
 #include "nova_net_protocol.h"
 
-#include <npruntime/game_config.h>
-#include <npwire/game_type.h>
-#include <npwire/net_ports.h>
-#include <npwire/session_hello.h>
-#include <npwire/wire_handle.h>
+#include <net/npruntime/game_config.h>
+#include <net/npwire/game_type.h>
+#include <net/npwire/net_ports.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/wire_handle.h>
 
 namespace godot {
 

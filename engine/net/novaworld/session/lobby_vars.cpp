@@ -1,4 +1,4 @@
-#include "novaworld/lobby_vars.h"
+#include <net/novaworld/lobby_vars.h>
 
 #include <algorithm>
 #include <array>

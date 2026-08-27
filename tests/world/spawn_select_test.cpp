@@ -1,10 +1,10 @@
 // Player spawn-point selection (net-re §5.2c/§5.61): one operation owns the
 // picked-zone pose and the exact no-pick per-mode marker chains.
 // [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
-#include "world/entity.h"
-#include "world/spawn_select.h"
-#include "world/world.h"
-#include "io/crt_rand.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/spawn_select.h>
+#include <runtime/world/world.h>
+#include <base/io/crt_rand.h>
 
 #include <cmath>
 #include <cstdio>

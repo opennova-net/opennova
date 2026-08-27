@@ -1,7 +1,7 @@
 // ADM animation definition file parser — pure C implementation.
 // Parses key/value pairs from .adm text files.
 
-#include "adm/adm.h"
+#include <formats/adm/adm.h>
 
 #include <ctype.h>
 #include <stdio.h>

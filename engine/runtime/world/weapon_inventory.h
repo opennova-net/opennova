@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-#include "world/weapon_table.h"
+#include <runtime/world/weapon_table.h>
 
 namespace opennova::world {
 

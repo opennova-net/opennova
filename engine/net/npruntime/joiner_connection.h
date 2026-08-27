@@ -1,12 +1,12 @@
 #pragma once
 
-#include "npruntime/charattr_challenge.h"
-#include "npruntime/integrity_challenge_profile.h"
-#include "npruntime/napi_np_connection.h"
+#include <net/npruntime/charattr_challenge.h>
+#include <net/npruntime/integrity_challenge_profile.h>
+#include <net/npruntime/napi_np_connection.h>
 
-#include <npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
-#include <npwire/protocol_message.h>  // ProtocolMessage
-#include <npwire/session_hello.h>     // DisconnectEvent
+#include <net/npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
+#include <net/npwire/protocol_message.h>  // ProtocolMessage
+#include <net/npwire/session_hello.h>     // DisconnectEvent
 
 #include <cstddef>
 #include <cstdint>

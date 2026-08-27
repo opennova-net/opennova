@@ -7,7 +7,7 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 
-#include <env/env_weather_core.h>
+#include <formats/env/env_weather_core.h>
 
 namespace godot {
 

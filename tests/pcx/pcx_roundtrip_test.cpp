@@ -1,5 +1,5 @@
-#include <pcx/pcx.h>
-#include <pcx/pcx_io.h>
+#include <formats/pcx/pcx.h>
+#include <formats/pcx/pcx_io.h>
 
 #include <cstdio>
 #include <string>

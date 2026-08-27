@@ -1,6 +1,6 @@
-#include "npruntime/stat_screen_feed.h"
+#include <net/npruntime/stat_screen_feed.h>
 
-#include <hud/end_round_overlay.h> // stat_field_string_index
+#include <runtime/hud/end_round_overlay.h> // stat_field_string_index
 
 #include <cstdio>
 #include <cstdint>

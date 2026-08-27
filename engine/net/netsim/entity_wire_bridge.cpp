@@ -1,17 +1,17 @@
-#include "netsim/entity_wire_bridge.h"
+#include <net/netsim/entity_wire_bridge.h>
 
 #include <cmath>      // std::lround
 
-#include <npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
-#include <npwire/wire_handle.h>   // the wire-side handle packing (pinned below)
-#include <terrain_query/height_field.h>  // TerrainHeightField::valid
-#include <world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
-#include <world/entity.h>      // EntityHandle (pinned below)
-#include <world/geom.h>        // to_fixed / from_fixed
-#include <world/player_spawn.h> // kPlayerInfantryTypeId (pinned below)
-#include <world/infantry.h>    // kInfantryAirborneGap / remote body state
-#include <world/spawn_select.h> // is_player_spawn_marker_type
-#include <world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
+#include <net/npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
+#include <net/npwire/wire_handle.h>   // the wire-side handle packing (pinned below)
+#include <runtime/terrain_query/height_field.h>  // TerrainHeightField::valid
+#include <runtime/world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
+#include <runtime/world/entity.h>      // EntityHandle (pinned below)
+#include <runtime/world/geom.h>        // to_fixed / from_fixed
+#include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId (pinned below)
+#include <runtime/world/infantry.h>    // kInfantryAirborneGap / remote body state
+#include <runtime/world/spawn_select.h> // is_player_spawn_marker_type
+#include <runtime/world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
 
 namespace opennova::netsim {
 

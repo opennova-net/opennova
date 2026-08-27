@@ -9,7 +9,7 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 
-#include <renderer/render_order.h>
+#include <runtime/renderer/render_order.h>
 
 #include "env/env_axes.h"
 #include "env/env_render_camera.h"

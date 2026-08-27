@@ -8,7 +8,7 @@
 #ifndef OPENNOVA_WORLD_MUZZLE_POSE_H
 #define OPENNOVA_WORLD_MUZZLE_POSE_H
 
-#include "world/entity.h"
+#include <runtime/world/entity.h>
 
 #include <cstdint>
 

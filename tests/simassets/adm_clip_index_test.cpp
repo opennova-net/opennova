@@ -9,8 +9,8 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
-#include <resource_index/resource_index.h>
-#include <simassets/adm_clip_index.h>
+#include <base/resource_index/resource_index.h>
+#include <runtime/simassets/adm_clip_index.h>
 
 int main() {
     using opennova::simassets::AdmClipIndex;

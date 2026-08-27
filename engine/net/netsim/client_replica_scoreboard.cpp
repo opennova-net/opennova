@@ -28,10 +28,10 @@
 // [orig: Player_ComputeScore @0x500A80]. `slot_id` is authoritative, not the
 // row's position.
 
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_message_id.h>
 
 #include <cstddef>
 #include <cstdint>

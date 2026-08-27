@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include <novaworld/lobby_vars.h>
+#include <net/novaworld/lobby_vars.h>
 
 namespace godot {
 

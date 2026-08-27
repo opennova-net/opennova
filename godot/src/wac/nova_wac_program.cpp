@@ -4,7 +4,7 @@
 
 #include <godot_cpp/variant/dictionary.hpp>
 
-#include <wac/compiler.h>
+#include <runtime/wac/compiler.h>
 
 #include <string>
 #include <vector>

@@ -3,7 +3,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 
-#include "audio/sound_selector.h"
+#include <runtime/audio/sound_selector.h>
 
 namespace godot {
 

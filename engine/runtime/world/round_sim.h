@@ -55,9 +55,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "world/entity.h"
-#include "world/geom.h"
-#include "world/tracer_trails.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/tracer_trails.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;

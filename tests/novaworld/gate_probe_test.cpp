@@ -1,5 +1,5 @@
-#include <novacrypto/nwu.h>
-#include <novaworld/gate_probe.h>
+#include <net/novacrypto/nwu.h>
+#include <net/novaworld/gate_probe.h>
 
 #include <cstdio>
 #include <cstring>

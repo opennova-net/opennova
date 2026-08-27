@@ -5,7 +5,7 @@
 // See docs/interface/hud-re.md §Waypoint HUD.
 #include <cstdio>
 
-#include "world/waypoint_track.h"
+#include <runtime/world/waypoint_track.h>
 
 using namespace opennova::world;
 

@@ -19,11 +19,11 @@
 // the capture is absent (.scratch is untracked) so CI stays green; the .sph
 // cross-check is skipped independently if its file is absent.
 
-#include <npwire/ingame_decode.h>
-#include <npwire/serverlog_decode.h>
-#include <npwire/wire_capture.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/serverlog_decode.h>
+#include <net/npwire/wire_capture.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>

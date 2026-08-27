@@ -2,7 +2,7 @@
 // encoded, terrain_name="Dvxi5", creator="Brophy") and verifies the
 // header decode + depth buffer shape.
 
-#include <cpt/cpt.h>
+#include <formats/cpt/cpt.h>
 #include "common/test_paths.h"
 
 #include <cstdio>

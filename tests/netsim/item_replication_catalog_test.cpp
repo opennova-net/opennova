@@ -1,6 +1,6 @@
-#include <netsim/item_replication_catalog.h>
+#include <net/netsim/item_replication_catalog.h>
 
-#include <def/def.h>
+#include <formats/def/def.h>
 
 #include <cstdio>
 #include <cstring>

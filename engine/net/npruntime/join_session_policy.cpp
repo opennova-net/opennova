@@ -1,6 +1,6 @@
-#include "npruntime/join_session_policy.h"
+#include <net/npruntime/join_session_policy.h>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::np {
 

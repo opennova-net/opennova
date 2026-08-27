@@ -18,10 +18,10 @@
 // green; the decoder regression coverage that runs without the capture lives in
 // the inline-pcap unit tests (nw_pool_decode_unit_test).
 
-#include <npwire/ingame_decode.h>
-#include <npwire/wire_capture.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/wire_capture.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>

@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "sbf/sbf.h"
+#include <formats/sbf/sbf.h>
 
 #ifndef SBF_FIXTURE_DIR
 #define SBF_FIXTURE_DIR "fixtures/sbf"

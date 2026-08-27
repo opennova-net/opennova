@@ -1,5 +1,5 @@
-#include <napi/session.h>
-#include <napi/tlv.h>
+#include <net/napi/session.h>
+#include <net/napi/tlv.h>
 
 #include <cstdio>
 #include <string>

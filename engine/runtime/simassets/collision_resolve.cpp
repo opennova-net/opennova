@@ -1,13 +1,13 @@
 #include <array>
-#include "simassets/collision_resolve.h"
+#include <runtime/simassets/collision_resolve.h>
 
-#include <simassets/model_builders.h>
-#include <threedi/threedi_3di3.h>
-#include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
+#include <runtime/simassets/model_builders.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
-#include <io/strutil.h>
-#include <mission/mission.h> // kItemIdOffset
-#include <world/player_spawn.h> // kPlayerInfantryTypeId
+#include <base/io/strutil.h>
+#include <formats/mission/mission.h> // kItemIdOffset
+#include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
 
 #include <algorithm>
 #include <climits>

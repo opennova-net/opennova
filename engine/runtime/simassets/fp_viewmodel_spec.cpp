@@ -1,4 +1,4 @@
-#include "simassets/fp_viewmodel_spec.h"
+#include <runtime/simassets/fp_viewmodel_spec.h>
 
 namespace opennova::simassets {
 

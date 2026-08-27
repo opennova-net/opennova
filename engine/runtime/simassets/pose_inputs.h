@@ -5,11 +5,11 @@
 #ifndef OPENNOVA_SIMASSETS_POSE_INPUTS_H
 #define OPENNOVA_SIMASSETS_POSE_INPUTS_H
 
-#include <anim/aim_overlay.h>
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/infantry.h>
-#include <world/vehicle_mount.h>
+#include <runtime/anim/aim_overlay.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/vehicle_mount.h>
 
 namespace opennova::simassets {
 

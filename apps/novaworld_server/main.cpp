@@ -14,10 +14,10 @@
 #include "session_store.h"
 #endif
 
-#include <novaworld/connection/manager.h>
-#include <novaworld/db/sqlite.h>
-#include <novaworld/host_repository.h>
-#include <novaworld/unknown_tracker.h>
+#include <net/novaworld/connection/manager.h>
+#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/host_repository.h>
+#include <net/novaworld/unknown_tracker.h>
 
 #include <atomic>
 #include <chrono>
@@ -28,7 +28,7 @@
 #include <sstream>
 #include <thread>
 #include <cstdlib>
-#include <io/log.h>
+#include <base/io/log.h>
 
 namespace {
 

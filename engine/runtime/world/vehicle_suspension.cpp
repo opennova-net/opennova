@@ -8,12 +8,12 @@
 //  Suspension_CompressWheelQuadratic @0x45CFB0; Suspension_OscillateWheelFast
 //  @0x45D110]
 
-#include "world/vehicle_suspension.h"
+#include <runtime/world/vehicle_suspension.h>
 
-#include "world/ground_conform.h"
-#include "world/vehicle_attach.h"
-#include "world/vehicle_motor.h"
-#include "world/world.h"
+#include <runtime/world/ground_conform.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cmath>

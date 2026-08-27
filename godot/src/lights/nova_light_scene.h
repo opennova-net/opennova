@@ -17,9 +17,9 @@
 
 #include <vector>
 
-#include <renderer/light_scene.h>
-#include <renderer/light_terrain_pass.h>
-#include <renderer/render_slot_shadow.h>
+#include <runtime/renderer/light_scene.h>
+#include <runtime/renderer/light_terrain_pass.h>
+#include <runtime/renderer/render_slot_shadow.h>
 
 namespace godot {
 

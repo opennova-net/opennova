@@ -1,5 +1,5 @@
 // Literal vectors independently calculated from the recovered instructions.
-#include <foliage/runtime.h>
+#include <formats/foliage/runtime.h>
 
 #include <cmath>
 #include <cstdio>

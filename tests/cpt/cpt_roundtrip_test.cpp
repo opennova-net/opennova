@@ -1,5 +1,5 @@
-#include <cpt/cpt.h>
-#include <cpt/cpt_io.h>
+#include <formats/cpt/cpt.h>
+#include <formats/cpt/cpt_io.h>
 
 #include <cstdint>
 #include <cstdio>

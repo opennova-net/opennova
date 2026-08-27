@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "gameprofile/gameprofile.h"
+#include <base/gameprofile/gameprofile.h>
 
 static int passed = 0;
 static int failed = 0;

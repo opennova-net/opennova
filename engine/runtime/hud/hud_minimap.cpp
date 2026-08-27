@@ -1,12 +1,12 @@
-#include "hud/hud_minimap.h"
+#include <runtime/hud/hud_minimap.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 
-#include "hud/hud_math.h"
-#include "hud/hud_medic_cross.h"
-#include <io/bam.h>
+#include <runtime/hud/hud_math.h>
+#include <runtime/hud/hud_medic_cross.h>
+#include <base/io/bam.h>
 
 namespace opennova::hud {
 

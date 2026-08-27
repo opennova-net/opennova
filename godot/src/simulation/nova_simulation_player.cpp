@@ -3,12 +3,12 @@
 // sibling nova_simulation_player_{view,weapon,loadout}.cpp TUs.
 #include "simulation/nova_simulation_internal.h"
 
-#include <mission/bms.h>
-#include <npwire/game_type.h>
-#include <world/music_vars.h>
-#include <world/player_view.h>
+#include <formats/mission/bms.h>
+#include <net/npwire/game_type.h>
+#include <runtime/world/music_vars.h>
+#include <runtime/world/player_view.h>
 
-#include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
+#include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 
 using namespace novasim;
 

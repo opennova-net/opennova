@@ -13,12 +13,12 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <napi/envelope.h>
-#include <novaworld/client_session.h>
-#include <novaworld/gate_response.h>
-#include <novaworld/gsb.h>
-#include <novaworld/http_flow.h>
-#include <novaworld/lobby_vars.h>
+#include <net/napi/envelope.h>
+#include <net/novaworld/client_session.h>
+#include <net/novaworld/gate_response.h>
+#include <net/novaworld/gsb.h>
+#include <net/novaworld/http_flow.h>
+#include <net/novaworld/lobby_vars.h>
 
 #include <cstdio>
 #include <cstdlib>

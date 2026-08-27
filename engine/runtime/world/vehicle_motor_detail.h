@@ -15,8 +15,8 @@
 #include <algorithm>
 #include <cstdint>
 
-#include "world/collision.h"
-#include "world/vehicle_motor.h"
+#include <runtime/world/collision.h>
+#include <runtime/world/vehicle_motor.h>
 
 namespace opennova::world {
 

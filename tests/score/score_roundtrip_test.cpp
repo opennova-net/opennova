@@ -13,7 +13,7 @@
 // parses, carries the 12 shipped blocks, and that its Co-op row 2 reads
 // ENEMYKILL 5 -- the value the S2C 0x81 score mirror reproduces in the retail
 // capture (5, 10, 20, ... 220). Unset, that half prints a skip line and passes.
-#include <score/score.h>
+#include <formats/score/score.h>
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"

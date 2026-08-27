@@ -1,6 +1,6 @@
-#include "renderer/material_eval.h"
-#include "crt/crt_rng.h"
-#include "threedi/threedi_panm_runtime.h"
+#include <runtime/renderer/material_eval.h>
+#include <base/crt/crt_rng.h>
+#include <formats/threedi/threedi_panm_runtime.h>
 
 #include <cmath>
 #include <cstdlib>

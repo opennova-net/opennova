@@ -5,7 +5,7 @@
 // embedder (Simulation) carries wiring only. The .til/.tsd format access
 // lives in the .cpp.
 
-#include <terrain_query/surface_type_map.h>
+#include <runtime/terrain_query/surface_type_map.h>
 
 #include <cstdint>
 #include <functional>

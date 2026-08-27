@@ -1,7 +1,7 @@
-#include <renderer/light_scene.h>
+#include <runtime/renderer/light_scene.h>
 
-#include <renderer/light_scene_internal.h>
-#include <renderer/material_eval.h>
+#include <runtime/renderer/light_scene_internal.h>
+#include <runtime/renderer/material_eval.h>
 
 #include <algorithm>
 #include <cmath>

@@ -19,9 +19,10 @@ add_library(opennova_base STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_decode.cpp
 )
 
+# engine/ is the one public include root (ADR 0040): <base/<lib>/file.h>.
 target_include_directories(opennova_base
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 target_link_libraries(opennova_base PUBLIC opennova_io opennova_formats)

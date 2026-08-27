@@ -9,9 +9,9 @@
 // the same rows through world::collect_friendly_tags' slot walk over its
 // authored World.
 
-#include "netsim/client_state.h"
+#include <net/netsim/client_state.h>
 
-#include <world/friendly_tags.h>
+#include <runtime/world/friendly_tags.h>
 
 #include <cstdint>
 #include <functional>

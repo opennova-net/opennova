@@ -1,4 +1,4 @@
-#include "trn/trn_io.h"
+#include <formats/trn/trn_io.h>
 
 #include <algorithm>
 #include <cstdlib>

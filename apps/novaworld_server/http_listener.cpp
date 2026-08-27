@@ -8,13 +8,13 @@
 #include "session_store.h"
 #include "template_engine.h"
 
-#include <novacrypto/pubcrypto.h>
-#include <novaworld/connection/manager.h>
-#include <novaworld/db/sqlite.h>
-#include <novaworld/gsb.h>
-#include <novaworld/host_repository.h>
-#include <novaworld/join_identity.h>
-#include <novaworld/unknown_tracker.h>
+#include <net/novacrypto/pubcrypto.h>
+#include <net/novaworld/connection/manager.h>
+#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/gsb.h>
+#include <net/novaworld/host_repository.h>
+#include <net/novaworld/join_identity.h>
+#include <net/novaworld/unknown_tracker.h>
 
 #include <crow.h>
 

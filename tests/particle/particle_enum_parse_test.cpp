@@ -1,8 +1,8 @@
 // Verifies the typed enum projections (BlendMode, move bits, particle flags,
 // CurveRef inverse) parse and stringify correctly against fixture content.
 
-#include <particle/particle.h>
-#include <particle/parser.h>
+#include <formats/particle/particle.h>
+#include <formats/particle/parser.h>
 
 #include <cstdio>
 #include <fstream>

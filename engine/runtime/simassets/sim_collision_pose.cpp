@@ -4,19 +4,19 @@
 // identity on every matrix entry the collision applier reads, so the PANM leg
 // hands the evaluator's matrices straight through; the skeletal leg composes
 // the same FK/deformation in native rows.
-#include "simassets/sim_collision_pose.h"
+#include <runtime/simassets/sim_collision_pose.h>
 
-#include "simassets/pose_inputs.h"
+#include <runtime/simassets/pose_inputs.h>
 
-#include <anim/aim_overlay.h>
-#include <io/strutil.h>
-#include <threedi/threedi_ctrl_catalog.h>
-#include <threedi/threedi_panm_pose.h>
-#include <world/ai.h>
-#include <world/angle.h>
-#include <world/infantry.h>
-#include <world/mount_controls.h>
-#include <world/world.h>
+#include <runtime/anim/aim_overlay.h>
+#include <base/io/strutil.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
+#include <formats/threedi/threedi_panm_pose.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/mount_controls.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstring>

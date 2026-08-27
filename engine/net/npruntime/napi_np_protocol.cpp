@@ -1,23 +1,23 @@
-#include "npruntime/napi_np_protocol.h"
+#include <net/npruntime/napi_np_protocol.h>
 
-#include "npruntime/server_initial_state.h"    // Server_SendInitialGameStateToPlayer (the §5.2a burst)
-#include "npruntime/server_message_dispatch.h" // dispatch_session_replies (the reactive §5.1 replies)
-#include "npruntime/server_spawn.h"            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
+#include <net/npruntime/server_initial_state.h>    // Server_SendInitialGameStateToPlayer (the §5.2a burst)
+#include <net/npruntime/server_message_dispatch.h> // dispatch_session_replies (the reactive §5.1 replies)
+#include <net/npruntime/server_spawn.h>            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
 
-#include <npwire/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
-#include <npwire/ingame_message_id.h>
-#include <npwire/nw_session_framing.h>
-#include <npwire/protocol_message.h> // make_protocol_message (frame the burst messages)
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/npwire/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h> // make_protocol_message (frame the burst messages)
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
-#include <netsim/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
+#include <net/netsim/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/geom.h> // to_fixed
-#include <world/vehicle_attach.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h> // to_fixed
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h>
 
 #include <cctype>
 #include <cstdio>

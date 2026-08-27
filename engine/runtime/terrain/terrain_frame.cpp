@@ -2,11 +2,11 @@
 // scene snapshot, moved down from the shell adapter's self-driven loop as a
 // structural translation of the same decisions.
 
-#include "terrain/terrain_frame.h"
+#include <runtime/terrain/terrain_frame.h>
 
-#include <cpt/cpt.h>
-#include <terrain_query/coords.h>
-#include <trn/trn.h>
+#include <formats/cpt/cpt.h>
+#include <runtime/terrain_query/coords.h>
+#include <formats/trn/trn.h>
 
 #include <algorithm>
 #include <cmath>

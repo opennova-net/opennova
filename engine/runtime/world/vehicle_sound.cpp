@@ -1,4 +1,4 @@
-#include "world/vehicle_sound.h"
+#include <runtime/world/vehicle_sound.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -6,10 +6,10 @@
 #include <string>
 #include <utility>
 
-#include "audio/sound_profile.h"
-#include "world/geom.h"
-#include "world/vehicle_motor.h"
-#include "world/world.h"
+#include <runtime/audio/sound_profile.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

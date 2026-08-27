@@ -1,11 +1,11 @@
-#include <terrain/terrain_static_shadow_geometry.h>
+#include <runtime/terrain/terrain_static_shadow_geometry.h>
 
-#include <io/strutil.h>
-#include <renderer/material_classify.h>
-#include <renderer/material_eval.h>
-#include <renderer/object_shader_template.h>
-#include <threedi/threedi_3di3.h>
-#include <threedi/threedi_strip_decode.h>
+#include <base/io/strutil.h>
+#include <runtime/renderer/material_classify.h>
+#include <runtime/renderer/material_eval.h>
+#include <runtime/renderer/object_shader_template.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_strip_decode.h>
 
 #include <algorithm>
 #include <cstring>

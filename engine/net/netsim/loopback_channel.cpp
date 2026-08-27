@@ -1,4 +1,4 @@
-#include "netsim/loopback_channel.h"
+#include <net/netsim/loopback_channel.h>
 
 #include <utility>
 

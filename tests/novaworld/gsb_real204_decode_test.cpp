@@ -14,7 +14,7 @@
 // reconciled. Row dword1 is the host's IPv4 in in_addr order (the ping target,
 // D-NET-190) — genuine rows must decode to real public addresses, not 0.0.0.0.
 
-#include <novaworld/gsb.h>
+#include <net/novaworld/gsb.h>
 
 #include <cstdint>
 #include <cstdio>

@@ -27,17 +27,17 @@
 //           strings, live UT uptime), not builder logic.
 //   The full byte diff is printed below for the record.
 
-#include <npruntime/lan_discovery.h>
-#include <npruntime/napi_np_protocol.h>
+#include <net/npruntime/lan_discovery.h>
+#include <net/npruntime/napi_np_protocol.h>
 
 #include "host_test_setup.h"
 
-#include <npwire/peer_addr.h>
-#include <npwire/nw_session_framing.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/npwire/peer_addr.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>

@@ -2,13 +2,13 @@
 // the retained def rows + the sim's parse cache (ADR 0028), composed with the
 // same slot/clamp validations the Dictionary ingest applied, so the emitted
 // typed table is the exact production composition.
-#include "simassets/seat_spec_extract.h"
+#include <runtime/simassets/seat_spec_extract.h>
 
-#include <io/strutil.h>
-#include <world/mount_controls.h> // turret_limit_bam
-#include <world/world.h>
-#include <mission/mission.h> // kItemIdOffset (items.def id <-> wire type id)
-#include <threedi/threedi_3di3.h>
+#include <base/io/strutil.h>
+#include <runtime/world/mount_controls.h> // turret_limit_bam
+#include <runtime/world/world.h>
+#include <formats/mission/mission.h> // kItemIdOffset (items.def id <-> wire type id)
+#include <formats/threedi/threedi_3di3.h>
 
 #include <algorithm>
 #include <array>

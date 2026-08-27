@@ -1,5 +1,5 @@
-#include "world/collision.h"
-#include <io/perf_clock.h>
+#include <runtime/world/collision.h>
+#include <base/io/perf_clock.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -12,7 +12,7 @@
 
 #include "collision_detail.h"
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

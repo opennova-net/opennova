@@ -1,6 +1,6 @@
-#include "npwire/ingame_encode.h"
-#include "npwire/wire_handle.h"
-#include <io/le.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/wire_handle.h>
+#include <base/io/le.h>
 
 #include <algorithm>
 #include <limits>

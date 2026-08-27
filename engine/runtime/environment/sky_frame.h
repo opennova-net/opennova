@@ -9,8 +9,8 @@
 // colors; see docs/env/env-tod-re.md.
 #pragma once
 
-#include "environment/environment_state.h"
-#include "environment/weather_runtime.h"
+#include <runtime/environment/environment_state.h>
+#include <runtime/environment/weather_runtime.h>
 
 namespace opennova::env {
 

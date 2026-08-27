@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "world/ammo_table.h"
+#include <runtime/world/ammo_table.h>
 
 namespace opennova::world {
 

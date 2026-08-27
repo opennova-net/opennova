@@ -1,9 +1,9 @@
-#include <npruntime/client_runtime.h>
+#include <net/npruntime/client_runtime.h>
 
-#include <npwire/nw_session_framing.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
 #include <algorithm>
 #include <cstdint>

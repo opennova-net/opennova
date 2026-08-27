@@ -1,4 +1,4 @@
-#include "audio/bank_chain.h"
+#include <runtime/audio/bank_chain.h>
 
 namespace opennova::audio {
 

@@ -3,10 +3,10 @@
 // attachment look-at frame, and mission-euler extraction, in native rows math
 // (the Godot Transform3D round trip contributed no semantics — its basis
 // conversions are reproduced here explicitly).
-#include "simassets/mounted_pose.h"
+#include <runtime/simassets/mounted_pose.h>
 
-#include <threedi/threedi_panm_pose.h>
-#include <world/angle.h>
+#include <formats/threedi/threedi_panm_pose.h>
+#include <runtime/world/angle.h>
 
 #include <algorithm>
 #include <cmath>

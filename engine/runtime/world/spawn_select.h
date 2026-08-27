@@ -14,8 +14,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "world/entity.h" // Entity, EntityHandle
-#include "world/geom.h"   // Vec3
+#include <runtime/world/entity.h> // Entity, EntityHandle
+#include <runtime/world/geom.h>   // Vec3
 
 namespace opennova::world {
 

@@ -2,21 +2,21 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/nova_simulation_internal.h"
-#include <npruntime/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
+#include <net/npruntime/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 
 #include <cmath>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
 
-#include <netsim/client_state.h> // minimap_team_argb (the ONE palette home)
-#include <netsim/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
-#include <world/zone_chain.h> // zone_chain_zone_info_byte
-#include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
-#include <world/minimap_footprint.h> // the OOBJ occlusion ground-slice footprint mesh
-#include <world/minimap_overlay.h>   // classifier + the blip draw policy
-#include <renderer/tracer_frame.h> // the styled tracer-ribbon compile
-#include <world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
+#include <net/netsim/client_state.h> // minimap_team_argb (the ONE palette home)
+#include <net/netsim/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
+#include <runtime/world/zone_chain.h> // zone_chain_zone_info_byte
+#include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
+#include <runtime/world/minimap_footprint.h> // the OOBJ occlusion ground-slice footprint mesh
+#include <runtime/world/minimap_overlay.h>   // classifier + the blip draw policy
+#include <runtime/renderer/tracer_frame.h> // the styled tracer-ribbon compile
+#include <runtime/world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 
 using namespace novasim;
 

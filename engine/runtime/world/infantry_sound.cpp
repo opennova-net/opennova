@@ -9,12 +9,12 @@
 
 #include <cstdio>
 
-#include "audio/footstep_slot.h"
-#include <io/bam.h>
-#include <terrain_query/height_field.h>
+#include <runtime/audio/footstep_slot.h>
+#include <base/io/bam.h>
+#include <runtime/terrain_query/height_field.h>
 
-#include "world/ai.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 #include <cstdint>
 #include <string>
 

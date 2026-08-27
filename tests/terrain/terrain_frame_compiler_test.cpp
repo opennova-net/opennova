@@ -2,10 +2,10 @@
 // snapshot invariants, the sector-window walk, front-to-back order, the shared
 // emission budget, the LOD-family fallback, the foliage detail-cell handoff,
 // and the engine-side MVP/frustum path.
-#include <terrain/terrain_frame.h>
+#include <runtime/terrain/terrain_frame.h>
 
-#include <cpt/cpt.h>
-#include <trn/trn.h>
+#include <formats/cpt/cpt.h>
+#include <formats/trn/trn.h>
 
 #include <cmath>
 #include <cstdio>

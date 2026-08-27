@@ -10,9 +10,9 @@
 #include <cmath>
 #include <vector>
 
-#include "terrain_query/height_field.h"
-#include "world/ai.h"
-#include "world/world.h"
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;

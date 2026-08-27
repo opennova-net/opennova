@@ -1,7 +1,7 @@
 // The "Recent Messages" (J-key) window's layout policy.
 // [orig: HUD_DrawMessageLog @0x5B9D70; Viewport_ScreenToVirtual @0x5D2C70]
 
-#include <hud/hud_message_log.h>
+#include <runtime/hud/hud_message_log.h>
 
 #include <cstdio>
 

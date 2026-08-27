@@ -1,6 +1,6 @@
-#include "npwire/ingame_decode.h"
+#include <net/npwire/ingame_decode.h>
 
-#include "npwire/wire_handle.h"
+#include <net/npwire/wire_handle.h>
 
 #include "../wire_cursor.h"
 

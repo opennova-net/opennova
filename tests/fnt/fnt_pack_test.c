@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "fnt/fnt.h"
+#include <formats/fnt/fnt.h>
 
 static int passed = 0;
 static int failed = 0;

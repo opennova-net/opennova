@@ -9,8 +9,8 @@
 // re-pack.
 #pragma once
 
-#include <def/def.h>
-#include <world/world.h>
+#include <formats/def/def.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <functional>

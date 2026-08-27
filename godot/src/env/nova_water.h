@@ -12,9 +12,9 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 
-#include <environment/sky_frame.h>
-#include <environment/water_frame.h>
-#include <environment/water_mirror.h>
+#include <runtime/environment/sky_frame.h>
+#include <runtime/environment/water_frame.h>
+#include <runtime/environment/water_mirror.h>
 
 #include "env/nova_water_core.h"
 #include "terrain/nova_terrain_data.h"

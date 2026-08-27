@@ -16,14 +16,14 @@
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250; PROJSHAD submit
 // @0x60D960..0x60D97D; see docs/terrain/terrain-re.md]
 
-#include <terrain_query/height_field.h>
+#include <runtime/terrain_query/height_field.h>
 
-#include <terrain/terrain_static_shadow.h>
-#include <terrain/terrain_static_shadow_alpha.h>
-#include <terrain/terrain_static_shadow_geometry.h>
-#include <terrain/terrain_static_shadow_raster.h>
-#include <terrain/terrain_tile_composition_cache.h>
-#include <terrain/terrain_tile_light_epoch.h>
+#include <runtime/terrain/terrain_static_shadow.h>
+#include <runtime/terrain/terrain_static_shadow_alpha.h>
+#include <runtime/terrain/terrain_static_shadow_geometry.h>
+#include <runtime/terrain/terrain_static_shadow_raster.h>
+#include <runtime/terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain/terrain_tile_light_epoch.h>
 
 #include <array>
 #include <cstdint>

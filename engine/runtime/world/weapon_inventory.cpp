@@ -1,11 +1,11 @@
 // Structural translations of the witnessed loadout/switching originals — see
 // weapon_inventory.h for the model overview and docs/net/novaworld-net-re.md
 // §5.57/§5.58 + the 2026-07-18 loadout grill for the witness record.
-#include "world/weapon_inventory.h"
+#include <runtime/world/weapon_inventory.h>
 
 #include <cstdio>
 
-#include "io/strutil.h"
+#include <base/io/strutil.h>
 
 namespace opennova::world {
 

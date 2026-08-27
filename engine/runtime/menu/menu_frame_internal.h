@@ -3,7 +3,7 @@
 // Private storage shared by the menu-frame compiler translation units.
 // [orig: CUIElement_Draw @ 0x64a8a0; CStaticWnd_Render @ 0x657b10]
 
-#include "menu/menu_frame.h"
+#include <runtime/menu/menu_frame.h>
 
 namespace opennova::menu {
 

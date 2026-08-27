@@ -2,7 +2,7 @@
 // window. These cases pin its semantic interface — explicit capture edges,
 // atomic drains, and true per-render-frame peaks when a fixed-tick producer
 // writes several times — ported from the retired GUT frame_stats_board_test.
-#include <devtools/frame_stats_board.h>
+#include <runtime/devtools/frame_stats_board.h>
 
 #include <cstdio>
 #include <cstring>

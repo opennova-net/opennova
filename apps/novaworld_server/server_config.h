@@ -1,6 +1,6 @@
 #pragma once
 
-#include <novaworld/gate_probe.h>
+#include <net/novaworld/gate_probe.h>
 #include <cstdint>
 #include <filesystem>
 #include <string>

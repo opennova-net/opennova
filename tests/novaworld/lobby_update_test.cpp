@@ -1,4 +1,4 @@
-#include <novaworld/lobby_update.h>
+#include <net/novaworld/lobby_update.h>
 
 #include <cstdio>
 #include <string>

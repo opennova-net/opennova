@@ -1,4 +1,4 @@
-#include "world/entity_spawn.h"
+#include <runtime/world/entity_spawn.h>
 
 namespace opennova::world {
 

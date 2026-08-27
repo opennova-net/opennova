@@ -1,7 +1,7 @@
-#include "renderer/material_classify.h"
+#include <runtime/renderer/material_classify.h>
 
-#include "renderer/material_descriptor.h"
-#include "threedi/threedi_3di3.h"
+#include <runtime/renderer/material_descriptor.h>
+#include <formats/threedi/threedi_3di3.h>
 
 namespace renderer {
 

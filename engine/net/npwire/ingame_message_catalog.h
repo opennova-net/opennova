@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "npwire/ingame_message_id.h"
+#include <net/npwire/ingame_message_id.h>
 
 // Canonical catalog of in-game NAPI message tags (mirrors the §4 dispatch tables
 // + §5.x field maps in docs/net/novaworld-net-re.md). Single source of truth for

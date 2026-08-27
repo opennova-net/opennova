@@ -8,7 +8,7 @@
 #include <cstring>
 #include <vector>
 
-#include <io/fixed.h>
+#include <base/io/fixed.h>
 
 namespace opennova {
 namespace io {

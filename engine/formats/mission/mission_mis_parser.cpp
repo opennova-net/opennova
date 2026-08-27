@@ -9,7 +9,7 @@
 #include "mission_detail.h"
 #include "mission_records.h"
 
-#include "mission/authoring.h" // entity_kind_for_item_type: items.def TYPE -> BMS pool
+#include <formats/mission/authoring.h> // entity_kind_for_item_type: items.def TYPE -> BMS pool
 
 #include <cstdint>
 #include <cstdlib>

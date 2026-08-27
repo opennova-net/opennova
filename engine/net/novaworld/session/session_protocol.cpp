@@ -1,6 +1,6 @@
-#include <novaworld/session_protocol.h>
+#include <net/novaworld/session_protocol.h>
 
-#include <npwire/session_hello.h>
+#include <net/npwire/session_hello.h>
 
 namespace opennova {
 

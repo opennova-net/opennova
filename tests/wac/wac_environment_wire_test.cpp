@@ -1,15 +1,15 @@
 // WAC-authored weather must survive an external base-sample refresh and be
 // observable through the real S2C 0x0A phase-2 projection.
 
-#include "wac/compiler.h"
-#include "wac/wac_system.h"
+#include <runtime/wac/compiler.h>
+#include <runtime/wac/wac_system.h>
 
 #include "netsim/conn_fan_test_util.h"
 
-#include <netsim/entity_wire_bridge.h>
-#include <netsim/loopback_channel.h>
-#include <npwire/ingame_decode.h>
-#include <world/world.h>
+#include <net/netsim/entity_wire_bridge.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/npwire/ingame_decode.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 #include <vector>

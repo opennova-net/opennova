@@ -10,10 +10,10 @@
 //  driver @0x5a568e..0x5a5793]
 // Witness record: docs/interface/hud-re.md "Mounted-vehicle panel".
 
-#include "world/entity.h"
+#include <runtime/world/entity.h>
 
-#include <def/def.h>
-#include <hud/hud_frame.h>
+#include <formats/def/def.h>
+#include <runtime/hud/hud_frame.h>
 
 #include <vector>
 

@@ -18,33 +18,33 @@
 //       host/join capture's S2C order on the common tags. Order-only (body byte-parity is deferred: our
 //       world stream is built from our own minimal World, not the capture's mission).
 
-#include <npruntime/host_session.h> // the host owner loop (promoted to engine/net/npruntime; SAME loop main.cpp runs)
+#include <net/npruntime/host_session.h> // the host owner loop (promoted to engine/net/npruntime; SAME loop main.cpp runs)
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter (for the host loop)
 
-#include <npruntime/client_runtime.h>
-#include <npruntime/napi_np_connection.h>
-#include <npruntime/napi_np_protocol.h>
-#include <npruntime/server_session.h>
-#include <npruntime/server_spawn.h>
+#include <net/npruntime/client_runtime.h>
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_protocol.h>
+#include <net/npruntime/server_session.h>
+#include <net/npruntime/server_spawn.h>
 
 #include "host_test_setup.h"
 
-#include <netsim/udp_session_transport.h>
+#include <net/netsim/udp_session_transport.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/wire_capture.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/wire_capture.h>
 
-#include <mission/bms.h>
+#include <formats/mission/bms.h>
 
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/geom.h>
-#include <world/player_spawn.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
 
 #include "net_sockets.h"
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cstddef>
 #include <cstdint>

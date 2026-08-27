@@ -4,8 +4,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
-#include <particle/parser.h>
-#include <particle/particle.h>
+#include <formats/particle/parser.h>
+#include <formats/particle/particle.h>
 
 #include "nova_particle_def.h"
 #include "nova_particle_effect.h"

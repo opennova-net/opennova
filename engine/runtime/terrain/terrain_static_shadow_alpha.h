@@ -9,7 +9,7 @@
 // [orig: Terrain_CollectAndRenderTileModels @0x60D5BF..0x60DA4F;
 // PolyTrn_RenderTile @0x60E0C6..0x60E19D]
 
-#include <terrain/terrain_tile_composer.h>
+#include <runtime/terrain/terrain_tile_composer.h>
 
 #include <array>
 #include <cstdint>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <netsim/client_state.h>
+#include <net/netsim/client_state.h>
 
 #include <cstdint>
 

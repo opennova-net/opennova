@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "world/ai.h"
+#include <runtime/world/ai.h>
 
 namespace opennova::world {
 

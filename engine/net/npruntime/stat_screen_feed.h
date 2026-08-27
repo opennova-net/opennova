@@ -11,7 +11,7 @@
 //  StatScreen_ShowCallback (ex sub_562840) @0x562840 (hides RADIO_TAB_* when non-team, selects OVERALL);
 //  stat_filter_tab_handler @0x562140 (tab 1 = team 2 rows, tab 2 = team 1)]
 
-#include <npwire/ingame_decode.h>
+#include <net/npwire/ingame_decode.h>
 
 #include <cstdint>
 #include <string>

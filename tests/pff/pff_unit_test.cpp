@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdint.h>
 
-#include "pff/pff.h"
+#include <formats/pff/pff.h>
 #include "pff/pff_test_writer.h"
 
 static int passed = 0;

@@ -8,12 +8,12 @@
 
 #include "simulation/nova_simulation_internal.h"
 
-#include <hud/feed_format.h>
-#include <hud/score_fanfare.h> // the 0x81 tone ladder
-#include <netsim/client_state.h>
-#include <world/entity.h>
-#include <world/lfp_feed.h>
-#include <world/vehicle_panel_feed.h>
+#include <runtime/hud/feed_format.h>
+#include <runtime/hud/score_fanfare.h> // the 0x81 tone ladder
+#include <net/netsim/client_state.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/lfp_feed.h>
+#include <runtime/world/vehicle_panel_feed.h>
 
 using namespace novasim;
 

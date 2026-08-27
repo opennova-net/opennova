@@ -11,7 +11,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
-#include <mission/placement_traits.h>
+#include <runtime/mission/placement_traits.h>
 
 #include "object/nova_item_database.h"
 #include "object/nova_avatar_database.h"

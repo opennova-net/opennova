@@ -1,4 +1,4 @@
-#include "terrain/lighting.h"
+#include <runtime/terrain/lighting.h>
 
 // [orig: init_terrain_lighting_color_ramps @0x604ee0; sample_terrain_colormap_tinted @0x606030;
 //  generate_foliage_instances_0 @0x5ffdd0 — lighting.h carries the per-function sites]

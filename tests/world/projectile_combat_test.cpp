@@ -5,10 +5,10 @@
 #include <stdexcept>
 #include <vector>
 
-#include "crt/crt_rng.h"
-#include "terrain_query/height_field.h"
-#include "world/collision.h"
-#include "world/world.h"
+#include <base/crt/crt_rng.h>
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 

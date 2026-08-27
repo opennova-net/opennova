@@ -23,8 +23,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "world/collision.h"
-#include "world/entity.h"
+#include <runtime/world/collision.h>
+#include <runtime/world/entity.h>
 
 namespace opennova::world {
 

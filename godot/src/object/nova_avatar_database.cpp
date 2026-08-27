@@ -3,10 +3,10 @@
 #include "resource_index/nova_resource_root.h"
 #include "util/nova_data_format.h"
 
-#include <avatars/avatars.h>
-#include <avatars/preview_animation.h>
-#include <npwire/character_id.h>
-#include <threedi/threedi_ctrl_catalog.h>
+#include <formats/avatars/avatars.h>
+#include <formats/avatars/preview_animation.h>
+#include <net/npwire/character_id.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include "object/nova_object_model.h"
 

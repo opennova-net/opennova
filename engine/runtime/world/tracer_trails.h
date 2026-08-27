@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "world/geom.h"
+#include <runtime/world/geom.h>
 
 namespace opennova::world {
 

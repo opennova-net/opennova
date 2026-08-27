@@ -3,9 +3,9 @@
 // The class spans several TUs; see nova_simulation_internal.h for the map.
 #include "simulation/nova_simulation_internal.h"
 
-#include <mission/runtime_boot.h> // the S9 boot order + file-resolution policy
-#include <npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
-#include <terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
+#include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
+#include <net/npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
+#include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 
 using namespace novasim;
 

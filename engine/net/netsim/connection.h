@@ -3,9 +3,9 @@
 #include <array>
 #include <cstdint>
 
-#include <world/entity.h> // EntityHandle
+#include <runtime/world/entity.h> // EntityHandle
 
-#include "netsim/session_transport.h" // ISessionTransport
+#include <net/netsim/session_transport.h> // ISessionTransport
 
 namespace opennova::netsim {
 

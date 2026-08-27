@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "common/test_expect.h"
-#include "resource_index/resource_index.h"
+#include <base/resource_index/resource_index.h>
 
 namespace {
 

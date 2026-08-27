@@ -2,13 +2,13 @@
 // device cache. Synthetic cases pin page density, quadrant-locked source
 // sampling, DOT3 byte order, .til atlas orientation, tint/alpha, clipping, and
 // painter order. The optional CP12 leg follows docs/asset-gated-tests.md.
-#include <terrain/terrain_tile_composer.h>
-#include <terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain/terrain_tile_composer.h>
+#include <runtime/terrain/terrain_tile_composition_cache.h>
 
-#include <til/til.h>
-#include <til/til_io.h>
-#include <til/til_overlay_bake.h>
-#include <vfs/vfs.h>
+#include <formats/til/til.h>
+#include <formats/til/til_io.h>
+#include <formats/til/til_overlay_bake.h>
+#include <base/vfs/vfs.h>
 
 #include <algorithm>
 #include <array>

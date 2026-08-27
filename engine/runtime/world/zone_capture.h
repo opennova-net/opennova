@@ -26,8 +26,8 @@
 #include <variant>
 #include <vector>
 
-#include "world/entity.h"
-#include "world/zone_chain.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/zone_chain.h>
 
 namespace opennova::world {
 

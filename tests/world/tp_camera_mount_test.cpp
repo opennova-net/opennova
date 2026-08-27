@@ -3,8 +3,8 @@
 //  @0x437D10 — the clearances @0x438409..0x438456, the slope march
 //  @0x43846E..0x438619]
 
-#include <world/tp_camera_mount.h>
-#include <world/player_view.h>
+#include <runtime/world/tp_camera_mount.h>
+#include <runtime/world/player_view.h>
 
 #include <cmath>
 #include <cstdio>

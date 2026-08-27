@@ -1,7 +1,7 @@
-#include "vfs/vfs_decode.h"
+#include <base/vfs/vfs_decode.h>
 
-#include <bfc1/bfc1.h>
-#include <scr/scr.h>
+#include <formats/bfc1/bfc1.h>
+#include <formats/scr/scr.h>
 
 namespace opennova {
 namespace {

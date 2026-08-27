@@ -15,15 +15,15 @@
 #include "nw_udp_listener.h"
 #include "server_config.h"
 
-#include <napi/session.h>            // make_client_host_request, ClientVar
-#include <novaworld/client_session.h>
-#include <novaworld/connection/manager.h>
-#include <npruntime/client_runtime.h>
-#include <npruntime/joiner_connection.h>
-#include <npwire/nw_session_framing.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/napi/session.h>            // make_client_host_request, ClientVar
+#include <net/novaworld/client_session.h>
+#include <net/novaworld/connection/manager.h>
+#include <net/npruntime/client_runtime.h>
+#include <net/npruntime/joiner_connection.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
 #include "net_sockets.h"
 

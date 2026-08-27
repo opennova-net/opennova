@@ -1,6 +1,6 @@
 #pragma once
 
-#include <npwire/net_ports.h>
+#include <net/npwire/net_ports.h>
 
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/packet_peer_udp.hpp>

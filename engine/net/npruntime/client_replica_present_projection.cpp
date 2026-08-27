@@ -1,6 +1,6 @@
-#include "npruntime/client_replica_present_projection.h"
+#include <net/npruntime/client_replica_present_projection.h>
 
-#include "npruntime/client_replica_present.h"
+#include <net/npruntime/client_replica_present.h>
 
 #include <algorithm>
 

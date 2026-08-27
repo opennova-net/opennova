@@ -2,8 +2,8 @@
 // while importing .mis text.
 
 #include "common/test_expect.h"
-#include "def/def.h"
-#include "mission/authoring.h"
+#include <formats/def/def.h>
+#include <formats/mission/authoring.h>
 
 using opennova::mission::EntityKind;
 namespace authoring = opennova::mission::authoring;

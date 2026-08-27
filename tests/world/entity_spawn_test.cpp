@@ -1,7 +1,7 @@
 // entity_reset_to_spawn_state — the gate-clear + position-backup half of the host
 // player-spawn machine [orig: Entity_ResetToSpawnState @0x4B9610 / net-re §5.2b step 5].
-#include "world/entity.h"
-#include "world/entity_spawn.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/entity_spawn.h>
 
 #include <cstdio>
 

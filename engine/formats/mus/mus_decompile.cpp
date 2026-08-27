@@ -21,7 +21,7 @@
    stack-based expression reconstruction) live in mus_decompile_shared.h; the
    linear text-emission machinery (Buf + decompile_block) stays here. */
 
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 #include <stdarg.h>
 #include <stdint.h>

@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "cbin/cbin.h"
+#include <formats/cbin/cbin.h>
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be defined"

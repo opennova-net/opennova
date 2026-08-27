@@ -12,7 +12,7 @@
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"
-#include "avatars/avatars.h"
+#include <formats/avatars/avatars.h>
 
 #define SETSTR(field, val) std::snprintf((field), sizeof(field), "%s", (val))
 

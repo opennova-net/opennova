@@ -8,7 +8,7 @@
 
 #include <cstdint>
 
-#include "environment/environment_state.h"
+#include <runtime/environment/environment_state.h>
 
 namespace opennova::env {
 

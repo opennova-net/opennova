@@ -21,9 +21,9 @@
 //   loop].
 #pragma once
 
-#include "environment/environment_state.h"
+#include <runtime/environment/environment_state.h>
 
-#include <env/env_celestial.h>
+#include <formats/env/env_celestial.h>
 
 namespace opennova::env {
 

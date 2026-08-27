@@ -1,6 +1,6 @@
-#include "npruntime/loadout_submit.h"
+#include <net/npruntime/loadout_submit.h>
 
-#include <world/weapon_table.h>
+#include <runtime/world/weapon_table.h>
 
 #include <vector>
 

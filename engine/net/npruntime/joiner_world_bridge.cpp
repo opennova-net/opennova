@@ -1,25 +1,25 @@
 // S10a (ADR 0028): the joiner's per-frame world<->net bridge, moved verbatim
 // from the Godot binding's nova_simulation_net.cpp. See joiner_world_bridge.h
 // for the ownership split; every phase keeps its original witnesses.
-#include "npruntime/joiner_world_bridge.h"
+#include <net/npruntime/joiner_world_bridge.h>
 
-#include <netsim/client_replica_pipeline.h>
-#include <netsim/entity_wire_bridge.h> // build_player_uplink (the C2S 0x0C body)
+#include <net/netsim/client_replica_pipeline.h>
+#include <net/netsim/entity_wire_bridge.h> // build_player_uplink (the C2S 0x0C body)
 
-#include <npwire/ingame_decode.h>    // kRoundEventFlag* (the fire-mode byte)
-#include <npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
+#include <net/npwire/ingame_decode.h>    // kRoundEventFlag* (the fire-mode byte)
+#include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 
-#include <world/ai.h>
-#include <world/angle.h>
-#include <world/destruction.h>   // destruction_notify_item_damage (S2C 0x13 net kill)
-#include <world/entity_spawn.h>  // entity_reset_to_spawn_state (redeploy release)
-#include <world/geom.h>
-#include <world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
-#include <world/player_spawn.h>
-#include <world/vehicle_attach.h>
-#include <world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
-#include <world/vehicle_mount.h> // resolve_mounted_ammo_slot (phase-8 route)
-#include <world/weapon_table.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/destruction.h>   // destruction_notify_item_damage (S2C 0x13 net kill)
+#include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state (redeploy release)
+#include <runtime/world/geom.h>
+#include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
+#include <runtime/world/vehicle_mount.h> // resolve_mounted_ammo_slot (phase-8 route)
+#include <runtime/world/weapon_table.h>
 
 #include <algorithm>
 #include <cmath>

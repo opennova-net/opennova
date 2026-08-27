@@ -1,6 +1,6 @@
-#include "threedi/threedi_ctrl_catalog.h"
+#include <formats/threedi/threedi_ctrl_catalog.h>
 
-#include "io/strutil.h"
+#include <base/io/strutil.h>
 
 #include <cstddef>
 

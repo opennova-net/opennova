@@ -2,9 +2,9 @@
 // bones/skinning, collision volumes, lights and user points.
 #include "object/nova_object_data_internal.h"
 
-#include <simassets/model_builders.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
-#include <threedi/threedi_strip_decode.h> // the strip decode + material lookup (one impl with terrain)
-#include <world/ai.h> // part_anim_rate_from_seconds / part_anim_step (ADR 0016: one impl)
+#include <runtime/simassets/model_builders.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
+#include <formats/threedi/threedi_strip_decode.h> // the strip decode + material lookup (one impl with terrain)
+#include <runtime/world/ai.h> // part_anim_rate_from_seconds / part_anim_step (ADR 0016: one impl)
 
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>

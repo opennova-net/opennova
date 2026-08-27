@@ -3,7 +3,7 @@
 // [orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0;
 //  GText_ParseFormatTag @ 0x674200; CGameFont_ReadLine @ 0x676480]
 
-#include "hud/game_font.h"
+#include <runtime/hud/game_font.h>
 
 #include <algorithm>
 #include <cmath>

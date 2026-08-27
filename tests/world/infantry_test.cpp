@@ -20,7 +20,7 @@
 //     local player's camera roll chain stays level on side slopes.
 #include <cmath>
 #include <memory>
-#include <io/bam.h>
+#include <base/io/bam.h>
 #include <cstdint>
 #include <cstdio>
 #include <array>
@@ -28,10 +28,10 @@
 #include <set>
 #include <vector>
 
-#include "terrain_query/height_field.h"
-#include "world/ai.h"
-#include "world/player_input.h"
-#include "world/world.h"
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/player_input.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;

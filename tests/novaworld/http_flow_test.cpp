@@ -2,10 +2,10 @@
 // and the NWJoin handshake driven bytes-in/bytes-out (no Godot). Exercises the URL builders, the
 // LoginStep/JoinStep machines, and the cookie glue against synthetic server responses.
 
-#include "novaworld/http_flow.h"
+#include <net/novaworld/http_flow.h>
 
-#include "novaworld/gsb.h"
-#include <novacrypto/epask.h>
+#include <net/novaworld/gsb.h>
+#include <net/novacrypto/epask.h>
 
 #include <cstdio>
 #include <string>

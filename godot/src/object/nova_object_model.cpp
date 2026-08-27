@@ -19,7 +19,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "object/nova_object_shader_cache.h"
-#include <renderer/render_order.h>
+#include <runtime/renderer/render_order.h>
 
 namespace godot {
 

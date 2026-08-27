@@ -1,16 +1,16 @@
 #include "nova_item_database.h"
 #include "resource_index/nova_resource_root.h"
 
-#include <mission/mission.h> // kItemIdOffset
-#include <simassets/seat_spec_extract.h>
-#include <simassets/sim_model_cache.h>
+#include <formats/mission/mission.h> // kItemIdOffset
+#include <runtime/simassets/seat_spec_extract.h>
+#include <runtime/simassets/sim_model_cache.h>
 
 #include "mission/nova_mission_data.h"
 #include "resource_index/nova_resource_root.h"
 #include "util/nova_data_format.h"
 
-#include <audio/envs_markers.h>
-#include <def/def.h>
+#include <runtime/audio/envs_markers.h>
+#include <formats/def/def.h>
 
 #include <algorithm>
 #include <vector>

@@ -16,12 +16,12 @@
 // per line: "<srcport> <frame> <udp_payload_hex>"). Skips cleanly when unset so
 // CI stays green until a sanitized fixture slice is committed.
 
-#include <napi/envelope.h>
-#include <napi/tlv.h>
-#include <novacrypto/nwu.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/napi/envelope.h>
+#include <net/napi/tlv.h>
+#include <net/novacrypto/nwu.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
 #include <algorithm>
 #include <cstdint>

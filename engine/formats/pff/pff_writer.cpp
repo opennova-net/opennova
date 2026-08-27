@@ -12,7 +12,7 @@
    The flat-array form (pff_write_archive) is a thin wrapper for tests and the future dir packer.
    Mirrors the layout verified in notes/vfs/phase0_ida_verification.md (PFF_Open @ 0x7682e0). */
 
-#include "pff/pff.h"
+#include <formats/pff/pff.h>
 
 #include "pff_internal.h"
 

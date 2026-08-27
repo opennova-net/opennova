@@ -1,6 +1,6 @@
-#include <npwire/protocol_message.h>
+#include <net/npwire/protocol_message.h>
 
-#include <novacrypto/nwu.h>
+#include <net/novacrypto/nwu.h>
 
 #include <algorithm>
 #include <iterator>

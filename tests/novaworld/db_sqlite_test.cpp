@@ -1,4 +1,4 @@
-#include <novaworld/db/sqlite.h>
+#include <net/novaworld/db/sqlite.h>
 
 #include "../common/test_expect.h"
 

@@ -11,12 +11,12 @@
 //
 // Gated on OPENNOVA_JO_DIR; mission selectable with OPENNOVA_BMS (default
 // 05TRcoop.bms), tick budget with OPENNOVA_TICKS (default 40000 ≈ 10 min).
-#include "mission/bms.h"
-#include "mission/event_runtime.h"
-#include "mission/promote.h"
+#include <formats/mission/bms.h>
+#include <runtime/mission/event_runtime.h>
+#include <runtime/mission/promote.h>
 
-#include "world/ai.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cstdint>

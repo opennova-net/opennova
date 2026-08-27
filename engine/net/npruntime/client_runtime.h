@@ -1,11 +1,11 @@
 #pragma once
 
-#include "npruntime/joiner_connection.h"
+#include <net/npruntime/joiner_connection.h>
 
-#include <netsim/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
-#include <netsim/session_transport.h>        // ISessionTransport
+#include <net/netsim/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
+#include <net/netsim/session_transport.h>        // ISessionTransport
 
-#include <npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
+#include <net/npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
 
 #include <cstddef>
 #include <cstdint>

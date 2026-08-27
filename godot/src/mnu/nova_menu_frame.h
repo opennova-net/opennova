@@ -12,8 +12,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
-#include <fnt/fnt.h>
-#include <menu/menu_frame.h>
+#include <formats/fnt/fnt.h>
+#include <runtime/menu/menu_frame.h>
 
 #include <memory>
 #include <vector>

@@ -1,4 +1,4 @@
-#include "world/ai.h"
+#include <runtime/world/ai.h>
 
 // Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -6,14 +6,14 @@
 // P2 ground combat: target acquisition and the perception gates, engagement
 // relations, line of sight, ally alerting, AI fire, and command handling.
 
-#include "terrain_query/height_field.h"
-#include "world/angle.h"
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
 #include <algorithm>
 #include <cmath>
 
 #include "ai_detail.h"
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

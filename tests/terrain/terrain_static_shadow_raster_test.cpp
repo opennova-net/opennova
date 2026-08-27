@@ -2,7 +2,7 @@
 // into a 2x temporary DOT3-light surface, then linearly resolves temp blue into
 // the destination page alpha. These synthetic pins cover opaque, depth-tested,
 // and material-alpha-tested fragments without any Godot dependency.
-#include <terrain/terrain_static_shadow_raster.h>
+#include <runtime/terrain/terrain_static_shadow_raster.h>
 
 #include <algorithm>
 #include <array>

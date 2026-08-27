@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
-#include <npwire/entity_class.h> // EntityClass
-#include <npwire/ingame_decode.h> // EndRoundStats (the 0x56 board)
-#include <world/guided_missile_flight.h> // the stng pursuit integrator (D-NET-64)
+#include <net/npwire/entity_class.h> // EntityClass
+#include <net/npwire/ingame_decode.h> // EndRoundStats (the 0x56 board)
+#include <runtime/world/guided_missile_flight.h> // the stng pursuit integrator (D-NET-64)
 
 namespace opennova::netsim {
 

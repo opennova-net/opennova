@@ -8,7 +8,7 @@
 // the HUD_DrawEntityLabel entry bails @0x5a39eb..0x5a39ff]
 // Witness record: docs/interface/hud-re.md (D-HUD-20).
 
-#include "world/entity.h"
+#include <runtime/world/entity.h>
 
 #include <cstdint>
 #include <functional>

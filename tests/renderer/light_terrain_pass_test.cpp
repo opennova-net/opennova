@@ -8,7 +8,7 @@
 //  @0x6095f9..0x6098bc; Lighting_InitTextures @0x5A94F0;
 //  Texture_GenerateProceduralFalloffTexture @0x5A92C0]
 
-#include <renderer/light_terrain_pass.h>
+#include <runtime/renderer/light_terrain_pass.h>
 
 #include <cmath>
 #include <cstdio>

@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "world/impact_scar.h"
+#include <runtime/world/impact_scar.h>
 
 namespace renderer {
 

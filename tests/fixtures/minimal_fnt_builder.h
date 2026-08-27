@@ -9,7 +9,7 @@
 #ifndef OPENNOVA_TESTS_MINIMAL_FNT_BUILDER_H
 #define OPENNOVA_TESTS_MINIMAL_FNT_BUILDER_H
 
-#include <fnt/fnt.h>
+#include <formats/fnt/fnt.h>
 
 #include <cstdint>
 #include <cstring>

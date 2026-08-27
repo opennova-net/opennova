@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "pff/pff_test_writer.h"
-#include "vfs/vfs.h"
-#include "vfs/vfs_decode.h"
+#include <base/vfs/vfs.h>
+#include <base/vfs/vfs_decode.h>
 
 namespace fs = std::filesystem;
 using opennova::Vfs;

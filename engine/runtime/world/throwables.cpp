@@ -1,19 +1,19 @@
 // Throwables: the thrown-round class motors, placed-device conversion, and the
 // device think/detonate chain. Witness record: docs/world/world-wac-ai-re.md §27
 // (engine-research 2026-07-20, retail Jointops.exe kong IDB).
-#include "world/throwables.h"
+#include <runtime/world/throwables.h>
 
 #include <cmath>
 #include <cstring>
 
-#include "io/strutil.h"
-#include "terrain_query/height_field.h"
-#include "world/angle.h"
-#include "world/ammo_table.h"
-#include "world/collision.h"
-#include "world/round_sim.h"
-#include "world/vehicle_motor.h"
-#include "world/world.h"
+#include <base/io/strutil.h>
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/ammo_table.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/round_sim.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

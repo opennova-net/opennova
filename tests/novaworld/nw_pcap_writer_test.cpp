@@ -7,8 +7,8 @@
 // comparable if both decode through one pipeline. If the streaming and
 // in-memory writers ever drift, this fails.
 
-#include <pcapio/pcap_reader.h>
-#include <pcapio/pcap_writer.h>
+#include <base/pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_writer.h>
 
 #include <cstdio>
 #include <cstdint>

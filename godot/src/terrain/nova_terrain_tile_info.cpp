@@ -2,7 +2,7 @@
 
 #include "nova_terrain_tile_entry.h"
 
-#include <til/til_io.h>
+#include <formats/til/til_io.h>
 
 #include "util/nova_data_format.h"
 

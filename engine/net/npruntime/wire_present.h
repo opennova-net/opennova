@@ -10,8 +10,8 @@
 
 #include <cstdint>
 
-#include "mission/placement_traits.h"
-#include "npwire/wire_handle.h"
+#include <runtime/mission/placement_traits.h>
+#include <net/npwire/wire_handle.h>
 
 namespace opennova::npruntime {
 

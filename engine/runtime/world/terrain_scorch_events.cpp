@@ -1,6 +1,6 @@
-#include "world/terrain_scorch_events.h"
+#include <runtime/world/terrain_scorch_events.h>
 
-#include <crt/crt_rng.h>
+#include <base/crt/crt_rng.h>
 
 namespace opennova::world {
 namespace {

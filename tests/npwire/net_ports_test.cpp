@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "common/test_expect.h"
-#include "npwire/net_ports.h"
+#include <net/npwire/net_ports.h>
 
 int main() {
 	using opennova::kRetailLanPortMax;

@@ -14,12 +14,12 @@
 // ServerHello crafted from the real library codecs (the same calls
 // apps/novaworld_server makes). No sockets.
 
-#include <novaworld/client_session.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/novaworld/client_session.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
-#include <napi/envelope.h>
-#include <novacrypto/nwu.h>
+#include <net/napi/envelope.h>
+#include <net/novacrypto/nwu.h>
 
 #include <cstdint>
 #include <cstdio>

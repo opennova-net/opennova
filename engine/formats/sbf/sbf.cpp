@@ -7,7 +7,7 @@
    Chunk decode: jointops!Audio_StreamNextChunk @ 0x004ED7D0 +
                  jointops!audio_channel_compute_mix_coefficients @ 0x007BD4B0 */
 
-#include "sbf/sbf.h"
+#include <formats/sbf/sbf.h>
 
 #include <ctype.h>
 #include <stdio.h>

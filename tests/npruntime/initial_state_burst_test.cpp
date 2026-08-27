@@ -7,23 +7,23 @@
 // (5) the full world-stream pages every pool (0x10/0x0D/0x0C/0x20) and conditionally emits the
 // mission-text-backed 0x7E briefing pair; only the conditional 0x45 terrain stays absent here.
 
-#include <npruntime/server_initial_state.h>
-#include <npruntime/server_session.h>
-#include <npruntime/server_spawn.h>
+#include <net/npruntime/server_initial_state.h>
+#include <net/npruntime/server_session.h>
+#include <net/npruntime/server_spawn.h>
 
 #include "host_test_setup.h"
 
-#include <netsim/loopback_channel.h>
+#include <net/netsim/loopback_channel.h>
 
-#include <mission/bms.h>
-#include <mission/mission.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/mission.h>
 
-#include <npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
+#include <net/npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
 
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/player_spawn.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
 
 #include <cstddef>
 #include <cstdio>

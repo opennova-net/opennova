@@ -19,8 +19,8 @@
 // output (each chunk payload is independently encrypted, so raw chunks can be
 // spliced freely), plus hand-framed chunks for the malformed cases.
 
-#include <novacrypto/nwu.h>
-#include <novaworld/gsb.h>
+#include <net/novacrypto/nwu.h>
+#include <net/novaworld/gsb.h>
 
 #include <cstdint>
 #include <cstdio>

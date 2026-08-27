@@ -4,9 +4,9 @@
 // [orig: render_terrain_sector_batch @0x6095f9..0x6098bc;
 //  Light_SetupTerrainProjectedPass @0x5aa830; Lighting_InitTextures @0x5a94f0;
 //  Texture_GenerateProceduralFalloffTexture @0x5a92c0]
-#include <renderer/light_terrain_pass.h>
+#include <runtime/renderer/light_terrain_pass.h>
 
-#include <renderer/light_scene_internal.h>
+#include <runtime/renderer/light_scene_internal.h>
 
 #include <algorithm>
 #include <cmath>

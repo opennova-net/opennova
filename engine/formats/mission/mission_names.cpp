@@ -8,7 +8,7 @@
 
 #include "mission_detail.h"
 
-#include "mission/bms.h"
+#include <formats/mission/bms.h>
 
 namespace opennova::mission::detail {
 

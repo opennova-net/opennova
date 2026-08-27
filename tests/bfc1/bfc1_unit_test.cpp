@@ -1,4 +1,4 @@
-#include "bfc1/bfc1.h"
+#include <formats/bfc1/bfc1.h>
 
 #include <cstdint>
 #include <cstring>

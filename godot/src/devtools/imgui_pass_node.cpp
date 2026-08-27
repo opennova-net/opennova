@@ -6,8 +6,8 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <devtools/imgui_abi.h>
-#include <devtools/imgui_pass.h>
+#include <runtime/devtools/imgui_abi.h>
+#include <runtime/devtools/imgui_pass.h>
 
 #include <climits>
 

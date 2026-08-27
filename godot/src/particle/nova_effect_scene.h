@@ -10,7 +10,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
-#include <particle/effect_scene.h>
+#include <runtime/particle/effect_scene.h>
 
 #include "nova_particle_file.h"
 

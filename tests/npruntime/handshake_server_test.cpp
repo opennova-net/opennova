@@ -14,32 +14,32 @@
 // the joiner-side framer; the server's internally-generated SCRK is recovered from the ServerAuth reply,
 // so the encrypted 0x83 replies decode without any test accessor.
 
-#include <npruntime/napi_np_protocol.h>
-#include <npruntime/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
-#include <npruntime/integrity_challenge_profile.h>
-#include <npruntime/lan_discovery.h>
-#include <npruntime/server_message_dispatch.h>
-#include <npruntime/server_spawn.h>
-#include <npruntime/server_tick.h>
-#include <npruntime/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
+#include <net/npruntime/napi_np_protocol.h>
+#include <net/npruntime/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
+#include <net/npruntime/integrity_challenge_profile.h>
+#include <net/npruntime/lan_discovery.h>
+#include <net/npruntime/server_message_dispatch.h>
+#include <net/npruntime/server_spawn.h>
+#include <net/npruntime/server_tick.h>
+#include <net/npruntime/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
-#include <def/def.h>
-#include <world/ai.h>
-#include <world/vehicle_attach.h>
-#include <world/world.h>
+#include <formats/def/def.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h>
 
 #include "common/test_paths.h"
 #include "host_test_setup.h"
 
-#include <netsim/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
-#include <netsim/udp_session_transport.h>
+#include <net/netsim/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
+#include <net/netsim/udp_session_transport.h>
 
-#include <npwire/ingame_decode.h> // WeaponLoadout / decode_weapon_loadout (the 0x5A reply check)
-#include <npwire/ingame_message_id.h>
-#include <npwire/nw_session_framing.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/npwire/ingame_decode.h> // WeaponLoadout / decode_weapon_loadout (the 0x5A reply check)
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
 #include <array>
 #include <algorithm>

@@ -4,6 +4,7 @@
 # io/strutil.h needs C++17 and is only included by C++17 libs).
 add_library(opennova_io INTERFACE)
 
+# engine/ is the one public include root (ADR 0040): <base/<lib>/file.h>.
 target_include_directories(opennova_io
-    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/..
+    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/../..
 )

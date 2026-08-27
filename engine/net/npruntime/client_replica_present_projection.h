@@ -1,8 +1,8 @@
 #pragma once
 
-#include <mission/promote.h>
-#include <netsim/client_state.h>
-#include <world/weapon_table.h>
+#include <runtime/mission/promote.h>
+#include <net/netsim/client_state.h>
+#include <runtime/world/weapon_table.h>
 
 #include <vector>
 

@@ -1,5 +1,5 @@
-#include "world/collision.h"
-#include <io/perf_clock.h>
+#include <runtime/world/collision.h>
+#include <base/io/perf_clock.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -8,13 +8,13 @@
 // sound LOS/occlusion queries and the static-segment test.
 
 #include <cmath>
-#include <terrain_query/height_field.h>
-#include <terrain_query/terrain_raycast.h>
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/terrain_raycast.h>
 
 #include "collision_detail.h"
-#include "world/geom.h"
+#include <runtime/world/geom.h>
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

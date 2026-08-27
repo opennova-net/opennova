@@ -6,7 +6,7 @@
 //  @0x540e35..0x540e58; arrays filled by ItemDef_ParseProperty @0x49eb00
 //  from `addeweap[C|G] <bone> <itemid> [down up right left]`]
 
-#include <world/turret_window.h>
+#include <runtime/world/turret_window.h>
 
 #include <cstdio>
 

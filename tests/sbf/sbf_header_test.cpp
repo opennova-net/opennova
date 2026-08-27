@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
-#include "sbf/sbf.h"
+#include <formats/sbf/sbf.h>
 
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \

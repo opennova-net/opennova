@@ -6,16 +6,16 @@
 //  - Entity_UpdateVehiclePhysics @0x48af00: parked stamp @0x48c002-0x48c02d + the
 //    AI-driver leg @0x48bc12-0x48c034
 //  - the player deploy group stamp @0x519fd0 (commandGroup = 1)
-#include "world/ai.h"
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/entity.h"
-#include "world/player_spawn.h"
-#include "world/vehicle_attach.h"
-#include "world/vehicle_mount.h"
-#include "world/vehicle_motor.h"
-#include "world/vehicle_part_anim.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_mount.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_part_anim.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstdio>

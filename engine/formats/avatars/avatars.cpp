@@ -9,7 +9,7 @@
  * is byte-identical on the second write and model-equal across the parse.
  */
 
-#include "avatars/avatars.h"
+#include <formats/avatars/avatars.h>
 
 #include <ctype.h>
 #include <stdio.h>

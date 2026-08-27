@@ -1,7 +1,7 @@
 #pragma once
 
-#include <npruntime/lan_discovery.h>
-#include <npwire/net_ports.h>
+#include <net/npruntime/lan_discovery.h>
+#include <net/npwire/net_ports.h>
 
 #include "net_sockets.h"
 

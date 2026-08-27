@@ -7,14 +7,14 @@
 #include <utility>
 #include <vector>
 
-#include <io/bit_stream.h>
-#include <io/byte_reader.h>
-#include <io/byte_writer.h>
-#include <io/bam.h>
-#include <io/log.h>
-#include <io/fixed.h>
-#include <io/le.h>
-#include <io/strutil.h>
+#include <base/io/bit_stream.h>
+#include <base/io/byte_reader.h>
+#include <base/io/byte_writer.h>
+#include <base/io/bam.h>
+#include <base/io/log.h>
+#include <base/io/fixed.h>
+#include <base/io/le.h>
+#include <base/io/strutil.h>
 
 #include "common/test_expect.h"
 

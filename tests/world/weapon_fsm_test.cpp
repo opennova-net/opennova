@@ -8,7 +8,7 @@
 #include <cstring>
 #include <string>
 
-#include "world/weapon_fsm.h"
+#include <runtime/world/weapon_fsm.h>
 
 using namespace opennova::world;
 namespace wa = opennova::world::weapon_action;

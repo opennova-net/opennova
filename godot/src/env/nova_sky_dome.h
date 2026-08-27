@@ -9,7 +9,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 
-#include <environment/sky_frame.h>
+#include <runtime/environment/sky_frame.h>
 
 namespace godot {
 

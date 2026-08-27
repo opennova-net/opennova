@@ -24,8 +24,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "npwire/ingame_decode.h"
-#include "npwire/replication_model.h" // PlayerReplicationState — the §5.1 reply encoders' host-side input
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/replication_model.h> // PlayerReplicationState — the §5.1 reply encoders' host-side input
 
 namespace opennova {
 

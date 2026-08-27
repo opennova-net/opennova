@@ -1,9 +1,9 @@
-#include "wac/lexer.h"
+#include <formats/wac/lexer.h>
 
 #include <array>
 #include <cctype>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 // [orig: Script_Compile @0x4f31f0 — the tokenizer half: keywords IF/THEN/ELSE/ELSEIF/END,
 //  DO/DORND/DOSEQ/NEXT, PLOOP/GLOOP, VAR/ARRAY, RUN, ENTER/LEAVE and the operator set;

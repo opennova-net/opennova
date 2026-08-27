@@ -6,23 +6,23 @@
 #include <cmath>
 #include <cstring>
 
-#include <npruntime/session_status.h>
-#include <terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
-#include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
-#include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
-#include <npwire/ingame_message_id.h>
-#include <hud/feed_format.h> // the witnessed feed line/color policy
-#include <netsim/client_scoreboard_view.h> // the Tab board's draw-time projection
-#include <world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
-#include <npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
-#include <vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
-#include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
-#include <world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
-#include <world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
-#include <world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
-#include <rtxt/rtxt.h>
-#include <world/destruction.h>  // destruction_notify_item_damage (S2C 0x13 net kill)
-#include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
+#include <net/npruntime/session_status.h>
+#include <runtime/terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
+#include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
+#include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
+#include <net/npwire/ingame_message_id.h>
+#include <runtime/hud/feed_format.h> // the witnessed feed line/color policy
+#include <net/netsim/client_scoreboard_view.h> // the Tab board's draw-time projection
+#include <runtime/world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
+#include <net/npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
+#include <base/vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
+#include <net/npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
+#include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
+#include <runtime/world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
+#include <runtime/world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
+#include <formats/rtxt/rtxt.h>
+#include <runtime/world/destruction.h>  // destruction_notify_item_damage (S2C 0x13 net kill)
+#include <runtime/world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/os.hpp>

@@ -1,6 +1,6 @@
 #include "def_scan.h"
 
-#include "def/def.h" // DEF_WEAPON_FLAG_* / DEF_ITEM_ATTRIB_* (the tables initialize from them)
+#include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_ITEM_ATTRIB_* (the tables initialize from them)
 
 // Split out of def.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.

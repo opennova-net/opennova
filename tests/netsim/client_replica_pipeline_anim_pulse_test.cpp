@@ -14,10 +14,10 @@
 // and re-dispatching a presented state is a same-state no-op at the model), and
 // presentation dispatches the pulse before the current state.
 
-#include <netsim/client_replica_pipeline.h>
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
 
 #include <cstdint>
 #include <cstdio>

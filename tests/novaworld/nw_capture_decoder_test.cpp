@@ -13,14 +13,14 @@
 // no fixtures) and, when present, on the real 3-player probe3_again capture (the
 // strong multi-client / fragmented / real-SCRK case; skips clean when absent).
 
-#include <napi/envelope.h>
-#include <novacrypto/nwu.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
-#include <npwire/wire_capture.h>
+#include <net/napi/envelope.h>
+#include <net/novacrypto/nwu.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
+#include <net/npwire/wire_capture.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cstdint>
 #include <cstdio>

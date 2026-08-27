@@ -1,6 +1,6 @@
-#include "world/player_input.h"
+#include <runtime/world/player_input.h>
 
-#include "world/ai.h"
+#include <runtime/world/ai.h>
 
 namespace opennova::world {
 

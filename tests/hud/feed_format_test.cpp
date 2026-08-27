@@ -6,8 +6,8 @@
 #include <cstdio>
 #include <string>
 
-#include <hud/feed_format.h>
-#include <npwire/ingame_decode.h>
+#include <runtime/hud/feed_format.h>
+#include <net/npwire/ingame_decode.h>
 
 using namespace opennova;
 using namespace opennova::hud;

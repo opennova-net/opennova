@@ -1,4 +1,4 @@
-#include "def/def.h"
+#include <formats/def/def.h>
 
 // The .def umbrella: the legacy single-entry parse plus the loadout weight and
 // encumbrance helpers. One TU per file family lives beside this one (quality

@@ -14,25 +14,25 @@
 //   the host + one peer, not the capture's full ASH_G3D entity set, so the bodies cannot byte-match
 //   (the same deferral npruntime_golden_lan_join documents). Per-tag counts are printed for the record.
 
-#include <npruntime/napi_np_connection.h>
-#include <npruntime/napi_np_server_ctx.h>
-#include <npruntime/server_tick.h>
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_server_ctx.h>
+#include <net/npruntime/server_tick.h>
 
-#include <netsim/connection.h>           // TransportMode
-#include <netsim/entity_wire_bridge.h>   // class_for_type_id
-#include <netsim/udp_session_transport.h>
+#include <net/netsim/connection.h>           // TransportMode
+#include <net/netsim/entity_wire_bridge.h>   // class_for_type_id
+#include <net/netsim/udp_session_transport.h>
 
-#include <npwire/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink / decode_frame_update
-#include <npwire/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
-#include <npwire/wire_capture.h>  // CaptureDatagram / InGameMessage / decode_capture_to_messages
+#include <net/npwire/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink / decode_frame_update
+#include <net/npwire/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
+#include <net/npwire/wire_capture.h>  // CaptureDatagram / InGameMessage / decode_capture_to_messages
 
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/geom.h>
-#include <world/player_spawn.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cstddef>
 #include <cstdint>

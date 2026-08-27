@@ -26,21 +26,21 @@
 // 0x0C-only datagram (the common case); if none exists in the capture, the C2S half is logged + skipped,
 // not faked (faithful-port — never invent the captured datagram).
 
-#include <npruntime/client_runtime.h>
+#include <net/npruntime/client_runtime.h>
 
-#include <netsim/entity_wire_bridge.h> // class_for_type_id
-#include <netsim/client_replica_pipeline.h>
+#include <net/netsim/entity_wire_bridge.h> // class_for_type_id
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/nw_session_framing.h>  // nw_decode_inbound
-#include <npwire/protocol_message.h>    // decode_protocol_packet_plaintext
-#include <npwire/session_hello.h>       // parse_client_auth / parse_server_auth
-#include <npwire/wire_capture.h>        // decode_capture_to_messages
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/nw_session_framing.h>  // nw_decode_inbound
+#include <net/npwire/protocol_message.h>    // decode_protocol_packet_plaintext
+#include <net/npwire/session_hello.h>       // parse_client_auth / parse_server_auth
+#include <net/npwire/wire_capture.h>        // decode_capture_to_messages
 
-#include <world/geom.h> // from_fixed
+#include <runtime/world/geom.h> // from_fixed
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <cmath>
 #include <cstddef>

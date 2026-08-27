@@ -1,4 +1,4 @@
-#include "def/def.h"
+#include <formats/def/def.h>
 
 // Split out of def.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.

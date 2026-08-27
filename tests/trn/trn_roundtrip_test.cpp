@@ -1,5 +1,5 @@
-#include <trn/trn.h>
-#include <trn/trn_io.h>
+#include <formats/trn/trn.h>
+#include <formats/trn/trn_io.h>
 
 #include <cmath>
 #include <cstdio>

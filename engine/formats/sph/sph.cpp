@@ -1,4 +1,4 @@
-#include "sph/sph.h"
+#include <formats/sph/sph.h>
 
 namespace opennova::sph {
 

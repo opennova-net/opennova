@@ -1,7 +1,7 @@
 // See ammo_table_build.h. docs/net/novaworld-net-re.md §5.60.
-#include "npruntime/ammo_table_build.h"
+#include <net/npruntime/ammo_table_build.h>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::np {
 

@@ -9,7 +9,7 @@
 //  GText_ParseFormatTag @ 0x674200; CGameFont_ReadLine @ 0x676480]
 // Witness record: docs/fonts/fnt-re.md.
 
-#include <fnt/fnt.h>
+#include <formats/fnt/fnt.h>
 
 #include <cstdint>
 #include <vector>

@@ -4,8 +4,8 @@
 //   no bare file header, tags in the order GSB / FLDS / SVRS / XXXX.
 // Per-chunk decrypt (nwu_encrypt, the SUBTRACT chain) must yield the values.
 
-#include <novacrypto/nwu.h>
-#include <novaworld/gsb.h>
+#include <net/novacrypto/nwu.h>
+#include <net/novaworld/gsb.h>
 
 #include <cstdint>
 #include <cstdio>

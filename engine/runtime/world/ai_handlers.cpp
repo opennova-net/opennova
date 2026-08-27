@@ -1,4 +1,4 @@
-#include "world/ai.h"
+#include <runtime/world/ai.h>
 
 // Split out of ai.cpp (quality campaign W3-3). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -6,13 +6,13 @@
 // Target scoring, the AI state-name table, and one handler per AI state — plus the
 // dispatch table itself, which is why AiSystem::row is defined here.
 
-#include "world/angle.h"
+#include <runtime/world/angle.h>
 #include <algorithm>
 #include <cmath>
 
 #include "ai_detail.h"
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

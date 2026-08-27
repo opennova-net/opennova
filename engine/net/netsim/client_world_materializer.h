@@ -1,12 +1,12 @@
 #pragma once
 
-#include "netsim/client_state.h"
+#include <net/netsim/client_state.h>
 
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
 
-#include <world/entity_registry.h>
+#include <runtime/world/entity_registry.h>
 
 namespace opennova::world {
 class World;

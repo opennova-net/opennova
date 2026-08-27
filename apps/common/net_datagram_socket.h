@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <netsim/idatagram_socket.h> // netsim::IDatagramSocket
-#include <npwire/peer_addr.h>     // opennova::PeerAddr
+#include <net/netsim/idatagram_socket.h> // netsim::IDatagramSocket
+#include <net/npwire/peer_addr.h>     // opennova::PeerAddr
 
 #include "net_sockets.h" // opennova::net (apps/common)
 

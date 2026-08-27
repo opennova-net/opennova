@@ -1,6 +1,6 @@
-#include "mns/mns.h"
+#include <formats/mns/mns.h>
 
-#include "mns/mns_document.h"
+#include <formats/mns/mns_document.h>
 
 // [orig: NapiXML_ExpandVariablesInText @0x63a000 — the %VAR% expansion over the table that
 //  Menu_InitShellResources @0x552500 loads via NapiConfigMap_LoadIncludeFile @0x63b970 ->

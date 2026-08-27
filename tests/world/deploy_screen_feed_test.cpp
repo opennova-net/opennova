@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include <world/deploy_screen_feed.h>
+#include <runtime/world/deploy_screen_feed.h>
 
 using namespace opennova::world;
 

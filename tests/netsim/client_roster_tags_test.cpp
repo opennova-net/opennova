@@ -9,8 +9,8 @@
 #include <memory>
 #include <vector>
 
-#include <netsim/client_roster_tags.h>
-#include <netsim/client_state.h>
+#include <net/netsim/client_roster_tags.h>
+#include <net/netsim/client_state.h>
 
 using namespace opennova;
 using namespace opennova::netsim;

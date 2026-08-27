@@ -1,4 +1,4 @@
-#include <novacrypto/epask.h>
+#include <net/novacrypto/epask.h>
 
 #include <cstdio>
 #include <stdexcept>

@@ -2,10 +2,10 @@
 // shell adapter (S3, ADR 0028): LOD-effective node selection, liveness,
 // register resolution, and the part-indexed pose array with its
 // base-transform fallback, pinned over a hand-built Threedi3di3.
-#include <threedi/threedi_3di3.h>
-#include <threedi/threedi_ctrl_catalog.h>
-#include <threedi/threedi_panm.h>
-#include <threedi/threedi_panm_pose.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
+#include <formats/threedi/threedi_panm.h>
+#include <formats/threedi/threedi_panm_pose.h>
 
 #include <cmath>
 #include <cstdio>

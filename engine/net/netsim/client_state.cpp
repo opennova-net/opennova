@@ -4,7 +4,7 @@
 // every S2C entity handler runs before touching a row
 // [orig: e.g. NapiNPClientMsg_EntityDeath @0x42eb50 — pool nibble < 5, slot <
 //  the pool's capacity, base + slot * stride].
-#include "netsim/client_state.h"
+#include <net/netsim/client_state.h>
 #include <cstdint>
 
 namespace opennova::netsim {

@@ -13,7 +13,7 @@
    spelling so mus_decompile.cpp needed only an #include + deletion of the moved
    definitions, with no reference renames. */
 
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 #include <stdint.h>
 #include <stdlib.h>

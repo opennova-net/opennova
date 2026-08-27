@@ -18,8 +18,8 @@
 //
 // [orig: sub_402D20 @0x402D20.]
 
-#include "terrain_query/coords.h"
-#include "terrain_query/height_field.h"
+#include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/height_field.h>
 
 #include <algorithm>
 #include <cmath>

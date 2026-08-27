@@ -11,8 +11,8 @@
 // [orig: Viewport_ScreenToVirtual @0x5b9e23/@0x5b9e33]; the text rows stay in
 // screen pixels [orig: HUD_DrawTextAligned_HalfBright (ex sub_5D2F20) @0x5b9ebc/@0x5b9f02 takes viewport x/y].
 
-#include <hud/hud_frame.h>
-#include <hud/hud_message_log.h>
+#include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_message_log.h>
 
 #include <algorithm>
 

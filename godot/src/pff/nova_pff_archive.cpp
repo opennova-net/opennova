@@ -1,7 +1,7 @@
 #include "pff/nova_pff_archive.h"
 
-#include <gameprofile/gameprofile.h>
-#include <vfs/vfs_decode.h>
+#include <base/gameprofile/gameprofile.h>
+#include <base/vfs/vfs_decode.h>
 
 #include <godot_cpp/classes/project_settings.hpp>
 

@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <world/infantry.h>
+#include <runtime/world/infantry.h>
 
 namespace opennova {
 class ResourceIndex;

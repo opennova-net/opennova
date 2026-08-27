@@ -1,4 +1,4 @@
-#include "cpt/cpt_io.h"
+#include <formats/cpt/cpt_io.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -7,9 +7,9 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
-#include <io/bit_stream.h>
-#include <io/le.h>
-#include <io/log.h>
+#include <base/io/bit_stream.h>
+#include <base/io/le.h>
+#include <base/io/log.h>
 
 // [orig: Terrain_LoadLodStorage @0x603550 — the CDEP/DPTH/POLY/NMAP chunk reader with the CBitStream
 //  variable-width tile-index codec; DPTH magic @0x6037b2, CDEP magic @0x60361f]

@@ -1,4 +1,4 @@
-#include <terrain/foliage_detail_collector.h>
+#include <runtime/terrain/foliage_detail_collector.h>
 
 #include <cmath>
 #include <cstdint>

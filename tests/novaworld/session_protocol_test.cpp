@@ -1,4 +1,4 @@
-#include <novaworld/session_protocol.h>
+#include <net/novaworld/session_protocol.h>
 
 #include <cstdio>
 

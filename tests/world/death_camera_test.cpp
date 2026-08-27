@@ -6,7 +6,7 @@
 #include <cstdio>
 #include <cstdint>
 
-#include <world/death_camera.h>
+#include <runtime/world/death_camera.h>
 
 using namespace opennova::world;
 

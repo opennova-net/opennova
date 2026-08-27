@@ -5,7 +5,7 @@
 #ifndef OPENNOVA_WORLD_ENTITY_SPAWN_H
 #define OPENNOVA_WORLD_ENTITY_SPAWN_H
 
-#include "world/entity.h"
+#include <runtime/world/entity.h>
 
 namespace opennova::world {
 

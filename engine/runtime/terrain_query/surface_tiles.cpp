@@ -1,10 +1,10 @@
 // D-SND-15: the placed-tile surface-override resolvers. Witness maps on the
 // declarations (surface_tiles.h); the format access (.til placements, the
 // .TSD table parser) stays behind this translation unit.
-#include "terrain_query/surface_tiles.h"
+#include <runtime/terrain_query/surface_tiles.h>
 
-#include <til/til_io.h>
-#include <til/til_tsd.h>
+#include <formats/til/til_io.h>
+#include <formats/til/til_tsd.h>
 
 namespace opennova::terrain {
 

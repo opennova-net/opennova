@@ -10,7 +10,7 @@
 #ifndef OPENNOVA_ANIM_SKELETAL_POSE_H
 #define OPENNOVA_ANIM_SKELETAL_POSE_H
 
-#include "anim/anim_sample.h"
+#include <runtime/anim/anim_sample.h>
 
 #include <string>
 #include <vector>

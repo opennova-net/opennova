@@ -7,15 +7,15 @@
 // registers drive local physics between records. Plus the stale-record
 // coast-down (an abandoned boat predicts to a stop).
 
-#include "terrain_query/height_field.h"
-#include "world/ai.h"
-#include "world/vehicle_motor.h"
-#include "world/angle.h"
-#include "world/geom.h"
-#include "world/vehicle_attach.h"
-#include "world/world.h"
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/world.h>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
 #include <cmath>
 #include <cstdio>

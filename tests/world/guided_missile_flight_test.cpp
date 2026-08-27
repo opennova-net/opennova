@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "world/guided_missile_flight.h"
+#include <runtime/world/guided_missile_flight.h>
 
 using namespace opennova::world;
 

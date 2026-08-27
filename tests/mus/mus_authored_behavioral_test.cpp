@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <vector>
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \

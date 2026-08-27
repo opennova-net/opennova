@@ -11,8 +11,8 @@
 #include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <novaworld/client_session.h>
-#include <novaworld/gate_response.h>
+#include <net/novaworld/client_session.h>
+#include <net/novaworld/gate_response.h>
 
 #include <cstdint>
 #include <functional>

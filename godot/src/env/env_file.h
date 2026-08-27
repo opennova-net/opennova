@@ -8,7 +8,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <env/env.h>
+#include <formats/env/env.h>
 
 #include "env/nova_env_keyframe.h"
 #include "resource_index/nova_resource_root.h"

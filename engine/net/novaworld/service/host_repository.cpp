@@ -1,4 +1,4 @@
-#include <novaworld/host_repository.h>
+#include <net/novaworld/host_repository.h>
 
 namespace opennova::hostdb {
 

@@ -16,8 +16,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
-#include <fnt/fnt.h>
-#include <hud/hud_frame.h>
+#include <formats/fnt/fnt.h>
+#include <runtime/hud/hud_frame.h>
 
 #include <array>
 

@@ -1,6 +1,6 @@
 #include "client_replica_body_arbitration.h"
 
-#include <world/infantry.h>
+#include <runtime/world/infantry.h>
 
 namespace opennova::netsim {
 

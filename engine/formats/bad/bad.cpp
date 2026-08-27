@@ -1,9 +1,9 @@
 // BAD animation file parser — pure C implementation.
 // Reads the binary format directly into flat BadFile structs.
 
-#include "bad/bad.h"
+#include <formats/bad/bad.h>
 
-#include <io/le.h>
+#include <base/io/le.h>
 
 #include <stdio.h>
 #include <stdlib.h>

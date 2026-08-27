@@ -1,6 +1,6 @@
-#include "renderer/uv_anim.h"
+#include <runtime/renderer/uv_anim.h>
 
-#include "threedi/threedi_panm.h"
+#include <formats/threedi/threedi_panm.h>
 
 #include <cmath>
 

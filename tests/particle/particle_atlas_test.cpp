@@ -4,7 +4,7 @@
 // implementation uses a horizontal shelf pack (layers laid left-to-right;
 // atlas height = max layer height).
 
-#include <particle/particle.h>
+#include <formats/particle/particle.h>
 
 #include <array>
 #include <cmath>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <bink/bink.h>
+#include <formats/bink/bink.h>
 
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -8,7 +8,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <menu/menu_video.h>
+#include <runtime/menu/menu_video.h>
 
 #include <array>
 #include <memory>

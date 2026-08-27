@@ -11,10 +11,10 @@
 
 #include "object/nova_object_shader_cache.h"
 
-#include <renderer/material_classify.h>
-#include <renderer/object_shader_template.h>
-#include <renderer/render_order.h>
-#include <threedi/threedi_3di3.h>
+#include <runtime/renderer/material_classify.h>
+#include <runtime/renderer/object_shader_template.h>
+#include <runtime/renderer/render_order.h>
+#include <formats/threedi/threedi_3di3.h>
 
 namespace godot {
 

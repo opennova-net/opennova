@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "adm/adm.h"
+#include <formats/adm/adm.h>
 #include "common/test_paths.h"
 
 int main(void) {

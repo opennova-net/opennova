@@ -2,27 +2,27 @@
 // retail S2C lifecycle seam. The conversion tick broadcasts 0x59 to every
 // in-match remote (never the host loopback); the removal tick broadcasts 0x12.
 
-#include <npruntime/napi_np_connection.h>
-#include <npruntime/napi_np_server_ctx.h>
-#include <npruntime/server_tick.h>
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_server_ctx.h>
+#include <net/npruntime/server_tick.h>
 
-#include <netsim/loopback_channel.h>
-#include <netsim/session_transport.h>
-#include <netsim/udp_session_transport.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/netsim/session_transport.h>
+#include <net/netsim/udp_session_transport.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_message_id.h>
 
-#include <terrain_query/height_field.h>
+#include <runtime/terrain_query/height_field.h>
 
-#include <world/ai.h>
-#include <world/ammo_table.h>
-#include <world/geom.h>
-#include <world/player_spawn.h>
-#include <world/round_sim.h>
-#include <world/throwables.h>
-#include <world/vehicle_motor.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/ammo_table.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/round_sim.h>
+#include <runtime/world/throwables.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/world.h>
 
 #include <cstdint>
 #include <cstdio>

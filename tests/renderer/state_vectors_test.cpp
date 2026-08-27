@@ -46,13 +46,13 @@
 // uv-anim vectors over engine/runtime/renderer/uv_anim
 // [orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0].
 
-#include "renderer/light_runtime.h"
-#include "renderer/material_classify.h"
-#include "renderer/object_shader_template.h"
-#include "renderer/render_order.h"
-#include "renderer/uv_anim.h"
-#include "renderer/material_descriptor.h"
-#include "threedi/threedi_3di3.h"
+#include <runtime/renderer/light_runtime.h>
+#include <runtime/renderer/material_classify.h>
+#include <runtime/renderer/object_shader_template.h>
+#include <runtime/renderer/render_order.h>
+#include <runtime/renderer/uv_anim.h>
+#include <runtime/renderer/material_descriptor.h>
+#include <formats/threedi/threedi_3di3.h>
 
 #include <cstdint>
 #include <cstdio>

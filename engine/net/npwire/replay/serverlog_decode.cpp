@@ -1,8 +1,8 @@
-#include "npwire/serverlog_decode.h"
+#include <net/npwire/serverlog_decode.h>
 
 #include "../wire_cursor.h"
 
-#include <sph/sph.h>
+#include <formats/sph/sph.h>
 
 #include <cstring>
 

@@ -4,9 +4,9 @@
 // fallback rule, and the .aip profile-speed resolution (parse, dedup order,
 // trim/lowercase, unauthored-row exclusion).
 
-#include <mission/runtime_boot.h>
+#include <runtime/mission/runtime_boot.h>
 
-#include <aip/aip.h>
+#include <formats/aip/aip.h>
 
 #include <cstdio>
 #include <cstring>

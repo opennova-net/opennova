@@ -1,17 +1,17 @@
-#include "world/world.h"
-#include <io/perf_clock.h>
+#include <runtime/world/world.h>
+#include <base/io/perf_clock.h>
 
 #include <algorithm>
 #include <cmath>
 #include <utility>
 #include <vector>
 
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/vehicle_attach.h"
-#include "world/vehicle_sound.h"
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_sound.h>
 
-#include "world/ai.h" // AiSystem / AiEntity / ai_apply_command — the AI-change command target
+#include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 
 namespace opennova::world {
 

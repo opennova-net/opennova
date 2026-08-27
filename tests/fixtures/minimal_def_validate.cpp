@@ -4,7 +4,7 @@
 // are authored from scratch (no retail asset); this guards that they load and
 // carry the minimal content a joined player needs (a person to spawn as, a
 // selectable rifle, its round). See assets/README.md.
-#include <def/def.h>
+#include <formats/def/def.h>
 
 #include <cstdio>
 #include <cstring>

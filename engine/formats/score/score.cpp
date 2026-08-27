@@ -1,6 +1,6 @@
-#include "score/score.h"
+#include <formats/score/score.h>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 #include <cstdio>
 #include <cstdlib>

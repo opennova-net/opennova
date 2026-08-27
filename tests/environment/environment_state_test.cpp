@@ -4,11 +4,11 @@
 // clock views, the weather-driven targets/currents split, the NVG rewrite,
 // generation discipline, the reset/prewarm epoch, the network wire units, and
 // the shader-global publication policy. RE record: docs/env/env-tod-re.md.
-#include <environment/environment_state.h>
-#include <environment/water_frame.h>
-#include <environment/weather_runtime.h>
-#include <env/env_celestial.h>
-#include <env/env_weather.h>
+#include <runtime/environment/environment_state.h>
+#include <runtime/environment/water_frame.h>
+#include <runtime/environment/weather_runtime.h>
+#include <formats/env/env_celestial.h>
+#include <formats/env/env_weather.h>
 
 #include <cmath>
 #include <cstdio>

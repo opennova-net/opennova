@@ -1,7 +1,7 @@
-#include <novaworld/http_login.h>
+#include <net/novaworld/http_login.h>
 
-#include <novacrypto/epask.h>
-#include <novacrypto/url_cipher.h>
+#include <net/novacrypto/epask.h>
+#include <net/novacrypto/url_cipher.h>
 
 #include <cstdio>
 

@@ -1,9 +1,9 @@
-#include "npruntime/client_runtime.h"
-#include <io/perf_clock.h>
+#include <net/npruntime/client_runtime.h>
+#include <base/io/perf_clock.h>
 
-#include <npwire/wire_handle.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/wire_handle.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 
 #include <utility>
 #include <cmath>

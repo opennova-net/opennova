@@ -8,7 +8,7 @@
 // helpers. They stay header-inline because every one is a few lines and all four
 // TUs below use some of them.
 
-#include "mission/mission.h"
+#include <formats/mission/mission.h>
 
 #include <algorithm>
 #include <cctype>
@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova::mission::detail {
 

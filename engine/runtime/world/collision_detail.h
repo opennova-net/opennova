@@ -7,12 +7,12 @@
 // BAM conversion constants, and the two lookups the queries and the resolvers both
 // need. Header-inline because each is a handful of lines on a hot path.
 
-#include "world/collision.h"
+#include <runtime/world/collision.h>
 
 #include <cmath>
 #include <cstdint>
 
-#include <io/bam.h>
+#include <base/io/bam.h>
 
 namespace opennova::world {
 

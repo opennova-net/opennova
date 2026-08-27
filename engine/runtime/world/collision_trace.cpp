@@ -1,4 +1,4 @@
-#include "world/collision.h"
+#include <runtime/world/collision.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
 // unchanged, and each original-code citation moved with the code it annotates.
@@ -6,16 +6,16 @@
 // The projectile trace: target views, the broad phase, trace_projectile itself, and
 // the blink refresh that rides the same view cache.
 
-#include "world/angle.h"
+#include <runtime/world/angle.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <stdexcept>
-#include <terrain_query/height_field.h>
+#include <runtime/terrain_query/height_field.h>
 
 #include "collision_detail.h"
 
-#include "world/world.h"
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

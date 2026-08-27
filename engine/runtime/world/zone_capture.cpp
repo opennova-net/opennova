@@ -1,13 +1,13 @@
-#include "world/zone_capture.h"
+#include <runtime/world/zone_capture.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
 
-#include "world/collision.h"
-#include "world/spawn_select.h"
-#include "world/world.h"
+#include <runtime/world/collision.h>
+#include <runtime/world/spawn_select.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

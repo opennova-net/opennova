@@ -1,8 +1,8 @@
 // UnknownTracker unit tests: record/dedup semantics, sample cap, distinct
 // keys, DB flush + upsert against the real 0004 migration, and snapshot.
 
-#include <novaworld/db/sqlite.h>
-#include <novaworld/unknown_tracker.h>
+#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/unknown_tracker.h>
 
 #include "../common/test_expect.h"
 

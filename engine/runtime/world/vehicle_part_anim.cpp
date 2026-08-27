@@ -5,11 +5,11 @@
 //  the HELO twin @0x48FA70 (profile type 1, decay 46603); the wheel phase
 //  increment @0x48C4C5..0x48C4F4 / the watercraft form @0x48E9F0..0x48E9F9]
 
-#include "world/vehicle_part_anim.h"
+#include <runtime/world/vehicle_part_anim.h>
 
-#include "world/ai.h"
-#include "world/vehicle_motor.h"
-#include "world/world.h"
+#include <runtime/world/ai.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

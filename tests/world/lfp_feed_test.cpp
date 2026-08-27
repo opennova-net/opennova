@@ -1,10 +1,10 @@
 // The AAS zone status panel feed: list order, the timer join, the viewer's
 // distance/cylinder tests, and the contest counts.
 // [orig: HUD_DrawZoneStatusPanel @0x5a2480; HUD_DrawZoneMarker @0x5986f0]
-#include "world/entity.h"
-#include "world/lfp_feed.h"
-#include "world/spawn_select.h"
-#include "world/world.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/lfp_feed.h>
+#include <runtime/world/spawn_select.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 

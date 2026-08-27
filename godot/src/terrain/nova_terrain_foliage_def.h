@@ -4,7 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
-#include <foliage/foliage.h>
+#include <formats/foliage/foliage.h>
 
 namespace godot {
 

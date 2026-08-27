@@ -5,7 +5,7 @@
 // Starts disabled (DISABLED TRUE in tests/CMakeLists.txt) until the full
 // 77-file corpus is mirrored into fixtures/particle/.
 
-#include <particle/parser.h>
+#include <formats/particle/parser.h>
 
 #include <cstdio>
 #include <filesystem>

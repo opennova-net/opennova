@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <world/weapon_fsm.h>
+#include <runtime/world/weapon_fsm.h>
 
 namespace opennova::world {
 

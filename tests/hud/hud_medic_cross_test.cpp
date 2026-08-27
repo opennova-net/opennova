@@ -2,7 +2,7 @@
 // friendly-tag medic plate, the map medic marker, and the help-screen icons.
 // [orig: HUD_DrawMedicCrossQuad @0x59BCB0]
 
-#include <hud/hud_medic_cross.h>
+#include <runtime/hud/hud_medic_cross.h>
 
 #include <cmath>
 #include <cstdio>

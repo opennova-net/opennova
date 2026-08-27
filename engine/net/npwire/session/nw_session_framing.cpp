@@ -1,8 +1,8 @@
-#include <npwire/nw_session_framing.h>
+#include <net/npwire/nw_session_framing.h>
 
-#include <napi/envelope.h>
-#include <novacrypto/nwu.h>
-#include <npwire/session_keys.h>
+#include <net/napi/envelope.h>
+#include <net/novacrypto/nwu.h>
+#include <net/npwire/session_keys.h>
 
 #include <random>
 

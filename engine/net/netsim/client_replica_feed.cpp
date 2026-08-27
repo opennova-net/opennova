@@ -18,10 +18,10 @@
 // String resolution ($A/$B against the roster, the STRCND lookup, the team
 // suffix) happens in the HUD feed model where the name table lives.
 
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_message_id.h>
 
 #include <cstddef>
 #include <cstdint>

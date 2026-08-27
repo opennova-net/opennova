@@ -38,9 +38,9 @@
 // The connection state machine owns the pull replies because it owns reliable
 // sequencing. This reducer owns only the header and reassembly state.
 
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_decode.h>
+#include <net/npwire/ingame_decode.h>
 
 #include <algorithm>
 #include <cstddef>

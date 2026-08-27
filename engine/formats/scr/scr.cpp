@@ -1,4 +1,4 @@
-#include "scr/scr.h"
+#include <formats/scr/scr.h>
 
 #include <string.h>
 

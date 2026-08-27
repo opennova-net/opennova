@@ -1,19 +1,19 @@
 // Item destruction — see world/destruction.h for the witness map.
-#include "world/destruction.h"
+#include <runtime/world/destruction.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
-#include "io/bam.h"
-#include "crt/crt_rng.h"
-#include "terrain_query/height_field.h"
-#include "world/angle.h"
-#include "world/collision.h"
-#include "world/dir_table.h"
-#include "world/infantry.h"
-#include "world/vehicle_motor.h"
-#include "world/world.h"
+#include <base/io/bam.h>
+#include <base/crt/crt_rng.h>
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/dir_table.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/vehicle_motor.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 

@@ -5,8 +5,8 @@
 // per present frame.
 #include "simulation/nova_simulation_internal.h"
 
-#include <renderer/scar_draw_list.h>
-#include <world/impact_scar.h>
+#include <runtime/renderer/scar_draw_list.h>
+#include <runtime/world/impact_scar.h>
 
 using namespace novasim;
 

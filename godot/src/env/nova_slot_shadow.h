@@ -14,7 +14,7 @@
 
 #include <vector>
 
-#include <renderer/render_slot_shadow.h>
+#include <runtime/renderer/render_slot_shadow.h>
 
 namespace godot {
 

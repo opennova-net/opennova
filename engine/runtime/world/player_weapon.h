@@ -9,11 +9,11 @@
 //  WeaponAction_Reload @ 0x5430b0 / WeaponAction_Recoil @ 0x542dd0]
 #pragma once
 
-#include "world/player_view.h"
-#include "world/round_ring.h"
-#include "world/vehicle_mount.h"
-#include "world/weapon_fsm.h"
-#include "world/weapon_inventory.h"
+#include <runtime/world/player_view.h>
+#include <runtime/world/round_ring.h>
+#include <runtime/world/vehicle_mount.h>
+#include <runtime/world/weapon_fsm.h>
+#include <runtime/world/weapon_inventory.h>
 
 #include <cstdint>
 #include <functional>

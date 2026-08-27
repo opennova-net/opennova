@@ -11,13 +11,13 @@
 #include <string>
 #include <vector>
 
-#include "terrain_query/height_field.h"
-#include "terrain_query/surface_tiles.h"
-#include "terrain_query/surface_type_map.h"
-#include <til/til.h>
-#include <til/til_io.h>
-#include "world/ai.h"
-#include "world/world.h"
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/surface_tiles.h>
+#include <runtime/terrain_query/surface_type_map.h>
+#include <formats/til/til.h>
+#include <formats/til/til_io.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;

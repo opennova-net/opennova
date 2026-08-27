@@ -6,9 +6,9 @@
 
 #include <utility>
 
-#include "wac/program.h"
-#include "wac/vm.h"
-#include "world/system.h"
+#include <formats/wac/program.h>
+#include <runtime/wac/vm.h>
+#include <runtime/world/system.h>
 
 namespace opennova::wac {
 

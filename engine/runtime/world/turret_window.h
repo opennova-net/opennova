@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include <world/angle.h>
-#include <world/weapon_table.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/weapon_table.h>
 
 namespace opennova::world {
 

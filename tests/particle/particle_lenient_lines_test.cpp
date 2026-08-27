@@ -1,4 +1,4 @@
-#include <particle/parser.h>
+#include <formats/particle/parser.h>
 
 #include <cstdio>
 #include <sstream>

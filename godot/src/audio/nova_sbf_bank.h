@@ -12,7 +12,7 @@
 
 #include <cstdint>
 
-#include "sbf/sbf.h"
+#include <formats/sbf/sbf.h>
 
 namespace godot {
 

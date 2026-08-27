@@ -30,10 +30,10 @@
 #include <string>
 #include <vector>
 
-#include "world/collision.h"
-#include "world/entity.h"
-#include "world/infantry.h"
-#include "world/world.h"
+#include <runtime/world/collision.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/world.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;

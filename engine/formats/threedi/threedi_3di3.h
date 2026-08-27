@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
-#include "threedi/threedi.h"
+#include <formats/threedi/threedi.h>
 
 #if defined(_MSC_VER) && !defined(__cplusplus)
 // MSVC's C mode lacks _Static_assert; alias to C++ static_assert.

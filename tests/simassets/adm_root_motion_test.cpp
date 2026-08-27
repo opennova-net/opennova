@@ -20,9 +20,9 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
-#include <resource_index/resource_index.h>
-#include <simassets/adm_root_motion.h>
-#include <world/infantry.h>
+#include <base/resource_index/resource_index.h>
+#include <runtime/simassets/adm_root_motion.h>
+#include <runtime/world/infantry.h>
 
 int main() {
     using opennova::simassets::AdmRootMotion;

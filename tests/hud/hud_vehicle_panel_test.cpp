@@ -1,7 +1,7 @@
 // The mounted-vehicle panel policy: seat-marker colour banding and geometry.
 // [orig: HUD_DrawVehicleHealthBars @0x5A4FD0]
 
-#include <hud/hud_vehicle_panel.h>
+#include <runtime/hud/hud_vehicle_panel.h>
 
 #include <cstdio>
 

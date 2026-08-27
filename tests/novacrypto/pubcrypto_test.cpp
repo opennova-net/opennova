@@ -1,4 +1,4 @@
-#include <novacrypto/pubcrypto.h>
+#include <net/novacrypto/pubcrypto.h>
 
 #include <cstdio>
 #include <string>

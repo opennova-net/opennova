@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "world/entity.h"
-#include "world/system.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/system.h>
 
 namespace opennova::world {
 

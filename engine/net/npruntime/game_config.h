@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include <npwire/protocol_message.h>
+#include <net/npwire/protocol_message.h>
 
 // GameConfig — the ONE consolidated in-match server-state config (ADR 0013, D-NET-132; §6.9). It
 // merges the three formerly-separate reimpl structs (NapiGameSettings §6.4, ServerRules, and the

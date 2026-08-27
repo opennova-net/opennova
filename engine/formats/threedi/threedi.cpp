@@ -1,6 +1,6 @@
-#include "threedi/threedi.h"
+#include <formats/threedi/threedi.h>
 
-#include "threedi/threedi_3di3.h" // THREEDI_3DI3_PARENT_FLAG / _LENGTH_MASK
+#include <formats/threedi/threedi_3di3.h> // THREEDI_3DI3_PARENT_FLAG / _LENGTH_MASK
 
 #include <errno.h>
 #include <stdio.h>

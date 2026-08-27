@@ -2,7 +2,7 @@
 
 #include <godot_cpp/classes/ref.hpp>
 
-#include <netsim/item_replication_catalog.h>
+#include <net/netsim/item_replication_catalog.h>
 
 #include <memory>
 

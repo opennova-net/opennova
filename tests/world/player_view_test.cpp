@@ -8,11 +8,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "terrain_query/height_field.h"
-#include "world/angle.h"
-#include "world/player_view.h"
-#include "world/tp_camera_mount.h"
-#include "world/weapon_fsm.h"
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/player_view.h>
+#include <runtime/world/tp_camera_mount.h>
+#include <runtime/world/weapon_fsm.h>
 
 using namespace opennova::world;
 

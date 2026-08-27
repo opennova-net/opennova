@@ -1,8 +1,8 @@
 // MNU menu file parser implementation.
 // Converts generic XML nodes from mnu_xml into typed MNU structures.
-#include "mnu/mnu.h"
+#include <formats/mnu/mnu.h>
 
-#include "mnu/mnu_xml.h"
+#include <formats/mnu/mnu_xml.h>
 
 #include <algorithm>
 #include <cctype>
@@ -10,7 +10,7 @@
 #include <fstream>
 #include <sstream>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace mnu {
 

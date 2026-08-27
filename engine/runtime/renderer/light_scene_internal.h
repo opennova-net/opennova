@@ -2,8 +2,8 @@
 // light_terrain_pass.cpp). Not part of the library's public surface.
 #pragma once
 
-#include <renderer/light_scene.h>
-#include <renderer/material_eval.h>
+#include <runtime/renderer/light_scene.h>
+#include <runtime/renderer/material_eval.h>
 
 #include <array>
 #include <cstdint>

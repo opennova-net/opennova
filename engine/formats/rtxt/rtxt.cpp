@@ -1,6 +1,6 @@
-#include "rtxt/rtxt.h"
+#include <formats/rtxt/rtxt.h>
 
-#include <io/le.h>
+#include <base/io/le.h>
 
 #include <algorithm>
 #include <cctype>

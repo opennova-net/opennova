@@ -6,8 +6,8 @@
 
 #include <cstdint>
 
-#include <def/def.h>
-#include <world/weapon_table.h>
+#include <formats/def/def.h>
+#include <runtime/world/weapon_table.h>
 
 namespace opennova {
 class ResourceIndex;

@@ -3,7 +3,7 @@
 
 #include <cstdio>
 
-#include <rtxt/rtxt.h>
+#include <formats/rtxt/rtxt.h>
 
 namespace rtxt_test {
 

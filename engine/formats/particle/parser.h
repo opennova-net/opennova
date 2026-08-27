@@ -5,7 +5,7 @@
 #include <ostream>
 #include <string>
 
-#include "particle/particle.h"
+#include <formats/particle/particle.h>
 
 namespace opennova::particle {
 

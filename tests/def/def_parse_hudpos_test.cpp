@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "def/def.h"
+#include <formats/def/def.h>
 #include "common/test_paths.h"
 
 int main(void) {

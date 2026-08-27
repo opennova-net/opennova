@@ -15,8 +15,8 @@
 // We test the geometric properties (dominance, range bounds, shell radii)
 // rather than byte-exact matches against the FPU stream.
 
-#include <particle/emitter.h>
-#include <particle/particle.h>
+#include <runtime/particle/emitter.h>
+#include <formats/particle/particle.h>
 
 #include <algorithm>
 #include <cmath>

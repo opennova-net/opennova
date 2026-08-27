@@ -27,23 +27,23 @@
 //   nw_pp <capture-path> --parity-events # stable packet/event verifier stream
 //   NW_INGAME_HEXCAP=<hexcap> nw_pp     # env-driven, hexcap only (test contract)
 
-#include <def/def.h>
-#include <napi/envelope.h>
-#include <napi/tlv.h>
-#include <novacrypto/nwu.h>
-#include <npwire/game_type.h>
-#include <npwire/wire_handle.h>
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_message_catalog.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/serverlog_decode.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
-#include <npwire/wire_capture.h>
-#include <scr/scr.h>
+#include <formats/def/def.h>
+#include <net/napi/envelope.h>
+#include <net/napi/tlv.h>
+#include <net/novacrypto/nwu.h>
+#include <net/npwire/game_type.h>
+#include <net/npwire/wire_handle.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_message_catalog.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/serverlog_decode.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
+#include <net/npwire/wire_capture.h>
+#include <formats/scr/scr.h>
 
-#include <pcapio/pcap_reader.h>
+#include <base/pcapio/pcap_reader.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -60,7 +60,7 @@
 #include <utility>
 #include <vector>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 using namespace opennova;
 

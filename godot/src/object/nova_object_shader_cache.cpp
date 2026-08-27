@@ -2,11 +2,11 @@
 
 #include "object/nova_object_model.h"
 
-#include "renderer/material_classify.h"
-#include "renderer/material_descriptor.h"
-#include "renderer/object_shader_template.h"
-#include "renderer/render_order.h"
-#include "threedi/threedi_3di3.h"
+#include <runtime/renderer/material_classify.h>
+#include <runtime/renderer/material_descriptor.h>
+#include <runtime/renderer/object_shader_template.h>
+#include <runtime/renderer/render_order.h>
+#include <formats/threedi/threedi_3di3.h>
 
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/image.hpp>

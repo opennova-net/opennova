@@ -1,12 +1,12 @@
-#include "mission/mission_catalog.h"
+#include <runtime/mission/mission_catalog.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstring>
 
-#include <mission/bms.h>
-#include <resource_index/resource_index.h>
-#include <rtxt/rtxt.h>
+#include <formats/mission/bms.h>
+#include <base/resource_index/resource_index.h>
+#include <formats/rtxt/rtxt.h>
 
 namespace opennova::mission_catalog {
 

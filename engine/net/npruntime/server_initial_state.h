@@ -3,8 +3,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "npruntime/napi_np_connection.h"
-#include "npruntime/napi_np_server_ctx.h"
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_server_ctx.h>
 
 // P3 — [orig: Server_SendInitialGameStateToPlayer @0x51bba0]. The two-track initial-state burst
 // machine: it advances one connection's InitialStateBurst cursor and emits the §5.2a load sequence,

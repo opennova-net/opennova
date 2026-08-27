@@ -9,8 +9,8 @@
 //
 // What is worth guarding is what RETAIL needs from these files: that each one is present, that
 // it decodes, and that the colormap is big enough to be split.
-#include <pcx/pcx.h>
-#include <pcx/pcx_io.h>
+#include <formats/pcx/pcx.h>
+#include <formats/pcx/pcx_io.h>
 
 #include <algorithm>
 #include <cstdint>

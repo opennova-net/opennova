@@ -1,9 +1,9 @@
 // The §5.10b class-tag dispatch table (docs/net/novaworld-net-re.md §5.10b).
 // Seeded from the item's *_function class-tag in items.def at load time
 // [orig: ItemDef+356].
-#include "npwire/entity_class.h"
+#include <net/npwire/entity_class.h>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace opennova {
 

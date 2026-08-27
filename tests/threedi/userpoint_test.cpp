@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "threedi/threedi_3di3.h"
+#include <formats/threedi/threedi_3di3.h>
 
 static int failures = 0;
 

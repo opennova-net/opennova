@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "foliage/foliage.h"
+#include <formats/foliage/foliage.h>
 
 namespace opennova::foliage {
 

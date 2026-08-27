@@ -1,7 +1,7 @@
 // The PLAYER_INFO loadout weight + encumbrance math, ported from the binary and
 // pinned to the witnessed formula/thresholds [orig: calculate_loadout_weight
 // @ 0x55f1f0; update_player_info_weight_and_weapon_icons @ 0x55f480].
-#include <def/def.h>
+#include <formats/def/def.h>
 
 #include <cmath>
 #include <cstdio>

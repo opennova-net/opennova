@@ -1,4 +1,4 @@
-#include <renderer/particle_atlas.h>
+#include <runtime/renderer/particle_atlas.h>
 
 #include <algorithm>
 #include <cmath>
@@ -7,7 +7,7 @@
 #include <numeric>
 #include <utility>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace renderer {
 namespace {

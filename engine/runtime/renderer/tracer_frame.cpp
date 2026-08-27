@@ -1,4 +1,4 @@
-#include "renderer/tracer_frame.h"
+#include <runtime/renderer/tracer_frame.h>
 
 #include <algorithm>
 #include <array>

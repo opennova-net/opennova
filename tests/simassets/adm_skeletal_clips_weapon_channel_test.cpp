@@ -40,12 +40,12 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
-#include <anim/aim_overlay.h>
-#include <anim/anim_sample.h>
-#include <anim/skeletal_pose.h>
-#include <bad/bad.h>
-#include <resource_index/resource_index.h>
-#include <simassets/adm_skeletal_clips.h>
+#include <runtime/anim/aim_overlay.h>
+#include <runtime/anim/anim_sample.h>
+#include <runtime/anim/skeletal_pose.h>
+#include <formats/bad/bad.h>
+#include <base/resource_index/resource_index.h>
+#include <runtime/simassets/adm_skeletal_clips.h>
 
 using opennova::anim::PoseBone;
 using opennova::anim::Quat;

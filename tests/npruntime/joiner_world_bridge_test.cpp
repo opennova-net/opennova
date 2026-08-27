@@ -6,16 +6,16 @@
 // depth (health folds, mount sync, mirrors) is covered by the GUT net suites
 // and the S10 live A/B; this test locks the portable sequencing contract.
 
-#include <npruntime/client_runtime.h>
-#include <npruntime/joiner_world_bridge.h>
+#include <net/npruntime/client_runtime.h>
+#include <net/npruntime/joiner_world_bridge.h>
 
-#include <world/ai.h>
-#include <world/entity.h>
-#include <world/player_spawn.h>
-#include <world/player_loadout.h>
-#include <world/player_weapon.h>
-#include <world/weapon_inventory.h>
-#include <world/world.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/player_loadout.h>
+#include <runtime/world/player_weapon.h>
+#include <runtime/world/weapon_inventory.h>
+#include <runtime/world/world.h>
 
 #include <cstdio>
 #include <string>

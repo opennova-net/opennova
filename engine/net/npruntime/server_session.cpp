@@ -1,10 +1,10 @@
-#include "npruntime/server_session.h"
-#include "npruntime/server_initial_state.h"
-#include "npruntime/server_message_dispatch.h"
+#include <net/npruntime/server_session.h>
+#include <net/npruntime/server_initial_state.h>
+#include <net/npruntime/server_message_dispatch.h>
 
-#include "npruntime/server_spawn.h" // Server_InitNewRoundState (§5.2a step 1)
+#include <net/npruntime/server_spawn.h> // Server_InitNewRoundState (§5.2a step 1)
 
-#include <world/world.h> // World::crt_rand — the session-seeded CRT stream
+#include <runtime/world/world.h> // World::crt_rand — the session-seeded CRT stream
 
 namespace opennova::np {
 

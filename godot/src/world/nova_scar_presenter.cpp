@@ -13,8 +13,8 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <renderer/scar_draw_list.h>
-#include <world/impact_scar.h>
+#include <runtime/renderer/scar_draw_list.h>
+#include <runtime/world/impact_scar.h>
 
 #include <vector>
 

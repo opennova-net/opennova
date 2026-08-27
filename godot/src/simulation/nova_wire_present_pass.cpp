@@ -5,9 +5,9 @@
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <npruntime/wire_present.h>
-#include <world/present_rows.h>
-#include <world/tick_accumulator.h>
+#include <net/npruntime/wire_present.h>
+#include <runtime/world/present_rows.h>
+#include <runtime/world/tick_accumulator.h>
 
 #include "nova_simulation.h"
 #include "object/nova_object_data.h"

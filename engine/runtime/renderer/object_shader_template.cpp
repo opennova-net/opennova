@@ -1,4 +1,4 @@
-#include "renderer/object_shader_template.h"
+#include <runtime/renderer/object_shader_template.h>
 
 namespace renderer {
 

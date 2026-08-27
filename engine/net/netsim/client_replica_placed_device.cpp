@@ -8,12 +8,12 @@
 //  @0x50A270 -> S2C 0x12 [u16 handle] -> NapiNPClientMsg_0x012 @0x425EE0 ->
 //  Entity_Destroy @0x43e810].
 
-#include "netsim/client_replica_pipeline.h"
+#include <net/netsim/client_replica_pipeline.h>
 
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/wire_handle.h>
-#include <world/entity.h> // retail_pool_capacity (the handle gate)
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/wire_handle.h>
+#include <runtime/world/entity.h> // retail_pool_capacity (the handle gate)
 
 #include <cstddef>
 #include <cstdint>

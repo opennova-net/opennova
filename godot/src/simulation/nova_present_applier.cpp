@@ -10,8 +10,8 @@
 
 #include <algorithm>
 
-#include <mission/placement_traits.h>
-#include <simassets/sim_collision_pose.h>
+#include <runtime/mission/placement_traits.h>
+#include <runtime/simassets/sim_collision_pose.h>
 
 #include "simulation/nova_present_stats.h"
 #include "simulation/nova_simulation.h"

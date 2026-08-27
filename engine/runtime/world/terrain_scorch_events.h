@@ -1,6 +1,6 @@
 #pragma once
 
-#include <terrain_query/terrain_scorch_record.h>
+#include <runtime/terrain_query/terrain_scorch_record.h>
 
 #include <cstddef>
 #include <cstdint>

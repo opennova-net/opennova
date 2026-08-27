@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-#include <anim/anim_sample.h>
+#include <runtime/anim/anim_sample.h>
 
 namespace godot {
 

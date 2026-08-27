@@ -3,7 +3,7 @@
 // participation in page identity, the sub-quantum light reuse rule, and the
 // per-job material tick (time never moves the state revision or page
 // identity; a raster samples the tick it was given).
-#include <terrain/terrain_static_shadow_planner.h>
+#include <runtime/terrain/terrain_static_shadow_planner.h>
 
 #include <algorithm>
 #include <cstdio>

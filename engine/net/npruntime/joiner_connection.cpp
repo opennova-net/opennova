@@ -1,14 +1,14 @@
-#include "npruntime/joiner_connection.h"
+#include <net/npruntime/joiner_connection.h>
 
 #include <cstring>
-#include <mission/bms.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/nw_session_framing.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
-#include <novacrypto/crc32.h>
-#include <vfs/vfs.h>
+#include <formats/mission/bms.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
+#include <net/novacrypto/crc32.h>
+#include <base/vfs/vfs.h>
 
 #include <algorithm>
 #include <chrono>

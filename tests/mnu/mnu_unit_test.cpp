@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "mnu/mnu.h"
+#include <formats/mnu/mnu.h>
 
 namespace {
 

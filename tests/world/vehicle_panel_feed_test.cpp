@@ -2,11 +2,11 @@
 // order, and the per-marker rows (pair placement, occupancy, digits, own seat).
 // [orig: Entity_BuildWeaponSlotList @0x434c60; HUD_DrawVehicleHealthBars
 //  @0x5a4fd0 — seats @0x5a5112, emplacements @0x5a53b7, driver @0x5a568e]
-#include "world/entity.h"
-#include "world/vehicle_panel_feed.h"
-#include "world/world.h"
+#include <runtime/world/entity.h>
+#include <runtime/world/vehicle_panel_feed.h>
+#include <runtime/world/world.h>
 
-#include <hud/hud_vehicle_panel.h>
+#include <runtime/hud/hud_vehicle_panel.h>
 
 #include <cstdio>
 #include <cstring>

@@ -9,8 +9,8 @@
 
 #include <godot_cpp/core/math.hpp>
 
-#include <world/ai.h> // kPartAnimPhaseOne (the PLAYPARTANIM phase domain)
-#include <world/infantry.h>
+#include <runtime/world/ai.h> // kPartAnimPhaseOne (the PLAYPARTANIM phase domain)
+#include <runtime/world/infantry.h>
 
 #include <limits>
 

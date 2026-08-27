@@ -11,7 +11,7 @@
 // visible-key list, which keeps the far-slot pool's working set below its
 // 16-bit-index capacity (see foliage-re.md D-FOLIAGE-13).
 
-#include <terrain/quadtree.h>
+#include <runtime/terrain/quadtree.h>
 
 #include <cstdint>
 #include <vector>

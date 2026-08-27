@@ -1,28 +1,28 @@
-#include "npruntime/server_tick.h"
-#include "npruntime/end_round_protocol.h"
-#include "npruntime/server_message_dispatch.h" // build_player_list_message
-#include <io/perf_clock.h>
+#include <net/npruntime/server_tick.h>
+#include <net/npruntime/end_round_protocol.h>
+#include <net/npruntime/server_message_dispatch.h> // build_player_list_message
+#include <base/io/perf_clock.h>
 
 #include <cmath>
 #include <cstdint>
 #include <vector>
 
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
-#include <npwire/nw_session_framing.h> // per-player 0x61 tick-seed roll
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
-#include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
-#include <world/ai.h>                  // AiEntity::see_all (the team-kill exemption)
-#include <world/collision.h>           // stable replication LOS view epoch
-#include <world/geom.h>                // to_fixed
-#include <world/infantry.h>            // drown death animation selection
-#include <world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
-#include <world/spawn_select.h>         // sorted SpawnZoneList index for capture events
-#include <world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
-#include <world/world.h>               // World::run_logic_tick
-#include <world/zone_capture.h>        // the 1 Hz AS capture pass (slice 2)
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/nw_session_framing.h> // per-player 0x61 tick-seed roll
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
+#include <net/netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
+#include <runtime/world/ai.h>                  // AiEntity::see_all (the team-kill exemption)
+#include <runtime/world/collision.h>           // stable replication LOS view epoch
+#include <runtime/world/geom.h>                // to_fixed
+#include <runtime/world/infantry.h>            // drown death animation selection
+#include <runtime/world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
+#include <runtime/world/spawn_select.h>         // sorted SpawnZoneList index for capture events
+#include <runtime/world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
+#include <runtime/world/world.h>               // World::run_logic_tick
+#include <runtime/world/zone_capture.h>        // the 1 Hz AS capture pass (slice 2)
 
 #include <algorithm>
 #include <string>

@@ -1,4 +1,4 @@
-#include <novacrypto/crc32.h>
+#include <net/novacrypto/crc32.h>
 
 #include <cstdio>
 #include <cstring>

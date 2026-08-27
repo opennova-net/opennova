@@ -9,7 +9,7 @@
 //  HUD_DrawFriendlyTagsPass gates @0x5a44c7..0x5a44f8 / @0x5a4552..0x5a457d]
 // Witness record: docs/interface/hud-re.md (D-HUD-20).
 
-#include "world/entity.h"
+#include <runtime/world/entity.h>
 
 #include <cstdint>
 

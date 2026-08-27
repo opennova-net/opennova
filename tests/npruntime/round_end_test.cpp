@@ -6,30 +6,30 @@
 // @0x51ad6f — dead local player without the SinglePlayerRespawn attrib (0x40)], the
 // round-end latch + host effect [orig: Server_ProcessRoundEnd @0x5164f0], and the
 // post-round respawn hold [orig: the g_spawn_success_gate check @0x519af6].
-#include <npruntime/napi_np_connection.h>
-#include <npruntime/napi_np_server_ctx.h>
-#include <npruntime/server_message_dispatch.h>
-#include <npruntime/server_tick.h>
-#include <npruntime/end_round_protocol.h>
+#include <net/npruntime/napi_np_connection.h>
+#include <net/npruntime/napi_np_server_ctx.h>
+#include <net/npruntime/server_message_dispatch.h>
+#include <net/npruntime/server_tick.h>
+#include <net/npruntime/end_round_protocol.h>
 
-#include <mission/event_runtime.h>
+#include <runtime/mission/event_runtime.h>
 
-#include <netsim/loopback_channel.h>
+#include <net/netsim/loopback_channel.h>
 
-#include <npwire/replication_model.h>
-#include <npwire/ingame_decode.h>
-#include <npwire/ingame_encode.h>
-#include <npwire/ingame_message_id.h>
+#include <net/npwire/replication_model.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 
-#include <world/ai.h>
-#include <world/collision.h>
-#include <world/game_type.h>
-#include <world/player_spawn.h>
-#include <world/world.h>
-#include <world/zone_chain.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/game_type.h>
+#include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
+#include <runtime/world/zone_chain.h>
 
-#include <wac/compiler.h>
-#include <wac/wac_system.h>
+#include <runtime/wac/compiler.h>
+#include <runtime/wac/wac_system.h>
 
 #include <algorithm>
 #include <cstdint>

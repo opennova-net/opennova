@@ -6,7 +6,7 @@
 // until reset. Sim correctness stops depending on render-resource lifetimes;
 // a headless embedder parses only this side.
 
-#include <threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_3di3.h>
 
 #include <string>
 #include <unordered_map>

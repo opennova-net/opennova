@@ -2,10 +2,10 @@
 // dispatch witnesses. Structural translation of the shell resolver it
 // replaces (nova_mission_audio.gd _is_envs_item/_resolve_slot_sets, the
 // faithful STRATEGY_ITEM_SOUNDLOOP path).
-#include "audio/envs_markers.h"
+#include <runtime/audio/envs_markers.h>
 
-#include <io/strutil.h>
-#include <mission/mission.h> // kItemIdOffset (BMS type id -> items.def id)
+#include <base/io/strutil.h>
+#include <formats/mission/mission.h> // kItemIdOffset (BMS type id -> items.def id)
 
 #include <cstring>
 #include <unordered_map>

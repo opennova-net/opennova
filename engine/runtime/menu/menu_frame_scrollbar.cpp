@@ -4,7 +4,7 @@
 // private scrollbar operations.
 // [orig: CScrollWnd_Render @ 0x64c5c0; CUIScrollbar_CalcThumbRect @ 0x64cba0]
 
-#include "menu/menu_frame_internal.h"
+#include <runtime/menu/menu_frame_internal.h>
 
 #include <algorithm>
 #include <cstdint>

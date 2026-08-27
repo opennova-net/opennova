@@ -1,7 +1,7 @@
 #pragma once
 
-#include <world/player_input.h>
-#include <world/tick_accumulator.h>
+#include <runtime/world/player_input.h>
+#include <runtime/world/tick_accumulator.h>
 
 #include <cstdint>
 #include <string>

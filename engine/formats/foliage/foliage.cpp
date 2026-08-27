@@ -1,4 +1,4 @@
-#include "foliage/foliage.h"
+#include <formats/foliage/foliage.h>
 
 // Foliage-def normalization and world->foliagemap helpers.
 // [orig: jodemo Foliage_BuildPatchData @0x5C0240 / Terrain_GetFoliageMapValue @0x5C65E0]

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <novaworld/gate_probe.h>
+#include <net/novaworld/gate_probe.h>
 #include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -10,9 +10,9 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <novaworld/client_session.h>
-#include <novaworld/http_flow.h>
-#include <novaworld/lobby_vars.h>
+#include <net/novaworld/client_session.h>
+#include <net/novaworld/http_flow.h>
+#include <net/novaworld/lobby_vars.h>
 
 #include "network/nwu_lobby_session.h"
 

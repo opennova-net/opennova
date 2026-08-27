@@ -13,26 +13,26 @@
 // joiner's C2S 0x0C uplink drains through its connection and SNAPs its remote-peer entity; (c)
 // a 0x0C for the host's own player is drained but REJECTED (the §5.38a host-SNAP split).
 
-#include "netsim/connection.h"
-#include "netsim/connection_fan.h"
-#include "netsim/entity_wire_bridge.h"
-#include "netsim/loopback_channel.h"
-#include "netsim/client_replica_pipeline.h"
-#include "netsim/session_transport.h"
-#include "netsim/udp_session_transport.h"
+#include <net/netsim/connection.h>
+#include <net/netsim/connection_fan.h>
+#include <net/netsim/entity_wire_bridge.h>
+#include <net/netsim/loopback_channel.h>
+#include <net/netsim/client_replica_pipeline.h>
+#include <net/netsim/session_transport.h>
+#include <net/netsim/udp_session_transport.h>
 
 #include "conn_fan_test_util.h"
 
-#include <npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
-#include <npwire/ingame_message_id.h>
-#include <npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
-#include <world/ai.h>                // AiSystem / AiEntity (engine-frame mirror)
-#include <world/angle.h>
-#include <world/entity.h>
-#include <world/geom.h>
-#include <world/player_spawn.h> // spawn_player / spawn_remote_player
-#include <world/vehicle_attach.h> // entity_process_vehicle_attach / detach (0x26/0x27)
-#include <world/world.h>
+#include <net/npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
+#include <net/npwire/ingame_message_id.h>
+#include <net/npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
+#include <runtime/world/ai.h>                // AiSystem / AiEntity (engine-frame mirror)
+#include <runtime/world/angle.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/geom.h>
+#include <runtime/world/player_spawn.h> // spawn_player / spawn_remote_player
+#include <runtime/world/vehicle_attach.h> // entity_process_vehicle_attach / detach (0x26/0x27)
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstdint>

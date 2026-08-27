@@ -7,9 +7,9 @@
 //  @ 0x64ae20; CListWnd_DrawItems @ 0x643f30]
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
-#include <menu/menu_edit.h>
-#include <menu/menu_frame.h>
-#include <mnu/mnu.h>
+#include <runtime/menu/menu_edit.h>
+#include <runtime/menu/menu_frame.h>
+#include <formats/mnu/mnu.h>
 
 #include <cstdio>
 #include <cstring>

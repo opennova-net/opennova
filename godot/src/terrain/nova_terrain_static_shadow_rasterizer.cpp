@@ -10,11 +10,11 @@
 #include "object/nova_object_data.h"
 #include "terrain/nova_terrain_data.h"
 
-#include <terrain/terrain_static_shadow.h>
-#include <terrain/terrain_static_shadow_geometry.h>
-#include <terrain/terrain_static_shadow_planner.h>
+#include <runtime/terrain/terrain_static_shadow.h>
+#include <runtime/terrain/terrain_static_shadow_geometry.h>
+#include <runtime/terrain/terrain_static_shadow_planner.h>
 
-#include <terrain_query/height_field.h>
+#include <runtime/terrain_query/height_field.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>

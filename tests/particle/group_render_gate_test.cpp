@@ -2,7 +2,7 @@
 // pass, the far pass, and always.
 // [orig: CParticleGroup_RenderChildren @0x5E5890]
 
-#include <particle/group_render_gate.h>
+#include <runtime/particle/group_render_gate.h>
 
 #include <cstdio>
 #include <initializer_list>

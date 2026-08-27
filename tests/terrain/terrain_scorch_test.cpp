@@ -1,10 +1,10 @@
 // Permanent terrain scorch routing, registry (sector buckets, per-frame
 // stamp, generation), mip, and page-composition oracle. These are distinct
 // from world::ScarCache's entity-surface decals.
-#include <terrain/terrain_scorch.h>
-#include <terrain/terrain_tile_composer.h>
-#include <crt/crt_rng.h>
-#include <world/terrain_scorch_events.h>
+#include <runtime/terrain/terrain_scorch.h>
+#include <runtime/terrain/terrain_tile_composer.h>
+#include <base/crt/crt_rng.h>
+#include <runtime/world/terrain_scorch_events.h>
 
 #include <algorithm>
 #include <array>

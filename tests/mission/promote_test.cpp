@@ -7,10 +7,10 @@
 #include <cstring>
 #include <memory>
 
-#include "mission/promote.h"
-#include "world/ai.h"
-#include "world/friendly_tags.h"
-#include "world/world.h"
+#include <runtime/mission/promote.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/friendly_tags.h>
+#include <runtime/world/world.h>
 
 using namespace opennova;
 using namespace opennova::world;

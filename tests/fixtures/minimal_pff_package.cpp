@@ -12,7 +12,7 @@
 // generated music banks over the committed ones. It SKIPS clean unless asked, because it
 // writes files: OPENNOVA_BUILD_MINIMAL_PFF=1 or OPENNOVA_MINIMAL_INSTALL=<dir>. See
 // assets/README.md.
-#include <pff/pff.h>
+#include <formats/pff/pff.h>
 
 #include <algorithm>
 #include <cstdint>

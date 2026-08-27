@@ -1,7 +1,7 @@
 // LoopbackChannel — FIFO ordering + directionality (the in-process transport-mode-1
 // byte path, ADR 0011 Decision 2).
 
-#include "netsim/loopback_channel.h"
+#include <net/netsim/loopback_channel.h>
 
 #include <cstdio>
 

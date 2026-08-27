@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include <hud/end_round_overlay.h>
-#include <hud/end_round_statistics.h>
+#include <runtime/hud/end_round_overlay.h>
+#include <runtime/hud/end_round_statistics.h>
 
 using namespace opennova::hud;
 

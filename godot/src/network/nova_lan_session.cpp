@@ -3,7 +3,7 @@
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
-#include <npruntime/lan_discovery.h>
+#include <net/npruntime/lan_discovery.h>
 
 #include <cstdint>
 #include <cstring>

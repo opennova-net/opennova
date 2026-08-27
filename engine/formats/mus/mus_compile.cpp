@@ -43,7 +43,7 @@
              | IDENT '.' IDENT '(' [ expr ] ')'                   // qualified method
 */
 
-#include "mus/mus.h"
+#include <formats/mus/mus.h>
 
 #include <stdint.h>
 #include <stdio.h>

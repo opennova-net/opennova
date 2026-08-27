@@ -28,14 +28,14 @@
 #include <string>
 #include <vector>
 
-#include "resource_index/resource_index.h"
-#include "simassets/collision_resolve.h"
-#include "simassets/model_builders.h"
-#include "simassets/sim_model_cache.h"
-#include "terrain_query/height_field.h"
-#include "world/ai.h"
-#include "world/collision.h"
-#include "world/world.h"
+#include <base/resource_index/resource_index.h>
+#include <runtime/simassets/collision_resolve.h>
+#include <runtime/simassets/model_builders.h>
+#include <runtime/simassets/sim_model_cache.h>
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/world.h>
 
 namespace {
 

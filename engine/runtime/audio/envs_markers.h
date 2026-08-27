@@ -1,7 +1,7 @@
 #pragma once
 
-#include <def/def.h>
-#include <mission/bms.h>
+#include <formats/def/def.h>
+#include <formats/mission/bms.h>
 
 #include <array>
 #include <cstdint>

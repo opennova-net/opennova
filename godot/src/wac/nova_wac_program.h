@@ -6,7 +6,7 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <wac/program.h>
+#include <formats/wac/program.h>
 
 #include <utility>
 

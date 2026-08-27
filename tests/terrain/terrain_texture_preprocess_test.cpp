@@ -1,4 +1,4 @@
-#include <terrain/texture_preprocess.h>
+#include <runtime/terrain/texture_preprocess.h>
 
 #include <cstdint>
 #include <cstdio>

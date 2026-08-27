@@ -6,7 +6,7 @@
 // names] tail — so rid, ip, the named fields, AND the player list all survive
 // the wire.
 
-#include <novaworld/gsb.h>
+#include <net/novaworld/gsb.h>
 
 #include <cstdio>
 #include <cstdint>

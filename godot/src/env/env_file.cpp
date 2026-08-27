@@ -8,9 +8,9 @@
 #include "util/pcx_texture_bridge.h"
 #include "util/texture_path_resolver.h"
 
-#include <env/env_celestial.h>
-#include <env/tod_clock.h>
-#include <env/env_weather.h>
+#include <formats/env/env_celestial.h>
+#include <formats/env/tod_clock.h>
+#include <formats/env/env_weather.h>
 
 #include <algorithm>
 #include <sstream>

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "env/env.h" // Vec3
+#include <formats/env/env.h> // Vec3
 
 // Celestial-side render state math: sun glare, the celestial body alphas,
 // the star field, glare occlusion, and the sky-dome constants + mesh

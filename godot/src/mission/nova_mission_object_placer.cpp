@@ -4,8 +4,8 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 
-#include <simassets/model_builders.h>
-#include <world/entity.h>
+#include <runtime/simassets/model_builders.h>
+#include <runtime/world/entity.h>
 
 #include "env/nova_water.h"
 #include "mission/nova_mission_data.h"

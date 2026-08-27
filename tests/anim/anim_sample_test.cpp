@@ -8,9 +8,9 @@
 //   3. world<->local self-consistency on the real BINOC.bad fixture (catches sign /
 //      multiply-order bugs; space-independent).
 
-#include "anim/anim_sample.h"
+#include <runtime/anim/anim_sample.h>
 
-#include "bad/bad.h"
+#include <formats/bad/bad.h>
 
 #include <cmath>
 #include <cstdio>

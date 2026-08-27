@@ -10,8 +10,8 @@
 //  Player_InitPlayer @ 0x4e15f0]
 #pragma once
 
-#include "world/player_weapon.h"
-#include "world/weapon_inventory.h"
+#include <runtime/world/player_weapon.h>
+#include <runtime/world/weapon_inventory.h>
 
 #include <cstdint>
 #include <string>

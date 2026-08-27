@@ -1,6 +1,6 @@
 // Crypto round-trip through the canonical CPT codec helpers.
 
-#include <cpt/crypto.h>
+#include <formats/cpt/crypto.h>
 #include <cstdint>
 #include <cstdio>
 #include <vector>

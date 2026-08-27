@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <string>
 
-#include <hud/score_fanfare.h>
+#include <runtime/hud/score_fanfare.h>
 
 using namespace opennova::hud;
 

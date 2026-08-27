@@ -12,7 +12,7 @@
 //  Foliage_GenerateModelTileInstances @ 0x600980;
 //  Foliage_RenderFarPatches @ 0x60a659..0x60a694]
 
-#include <foliage/runtime.h>
+#include <formats/foliage/runtime.h>
 
 #include <array>
 #include <cstdint>

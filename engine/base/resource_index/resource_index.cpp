@@ -1,6 +1,6 @@
-#include "resource_index/resource_index.h"
+#include <base/resource_index/resource_index.h>
 
-#include <vfs/vfs.h>
+#include <base/vfs/vfs.h>
 
 #include <algorithm>
 #include <cctype>
@@ -9,7 +9,7 @@
 #include <filesystem>
 #include <system_error>
 
-#include <io/strutil.h>
+#include <base/io/strutil.h>
 
 namespace fs = std::filesystem;
 

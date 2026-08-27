@@ -4,8 +4,8 @@
 // the yaw-zero local conversion ((-y, x, z)/65536 over the raw authored
 // ints), the armory attrib gate, addeweap anchors with the parent-root
 // fallback, the child recursion, and the runtime-metadata filter.
-#include <def/def.h>
-#include <simassets/seat_spec_extract.h>
+#include <formats/def/def.h>
+#include <runtime/simassets/seat_spec_extract.h>
 
 #include <cmath>
 #include <cstdio>

@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "common/test_paths.h"
-#include "threedi/threedi.h"
-#include "threedi/threedi_compare.h"
+#include <formats/threedi/threedi.h>
+#include <formats/threedi/threedi_compare.h>
 
 static int expect_true(int condition, const char *message)
 {

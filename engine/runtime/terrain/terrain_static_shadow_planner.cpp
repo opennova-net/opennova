@@ -1,6 +1,6 @@
-#include <terrain/terrain_static_shadow_planner.h>
+#include <runtime/terrain/terrain_static_shadow_planner.h>
 
-#include <mission/placement_traits.h>
+#include <runtime/mission/placement_traits.h>
 
 #include <algorithm>
 #include <cmath>

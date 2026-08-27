@@ -4,8 +4,8 @@
 // MENUMUS.SBF/BIN + GAMEMUS.SBF/BIN]. Always-on; nothing is committed.
 #include "minimal_mus_builder.h"
 
-#include <mus/mus.h>
-#include <sbf/sbf.h>
+#include <formats/mus/mus.h>
+#include <formats/sbf/sbf.h>
 
 #include <cstdio>
 #include <cstring>

@@ -1,14 +1,14 @@
-#include "npwire/wire_capture.h"
+#include <net/npwire/wire_capture.h>
 
 #include <memory>
 #include <unordered_map>
 #include <utility>
 
-#include <napi/envelope.h>
-#include <novacrypto/nwu.h>
-#include <npwire/protocol_message.h>
-#include <npwire/session_hello.h>
-#include <npwire/session_keys.h>
+#include <net/napi/envelope.h>
+#include <net/novacrypto/nwu.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
+#include <net/npwire/session_keys.h>
 
 namespace opennova {
 namespace {
