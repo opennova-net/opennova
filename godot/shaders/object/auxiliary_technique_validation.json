@@ -152,7 +152,8 @@
         {"file": "BmTxMirrT.fx", "symbols": ["technique TSegTexMirrorFFP", "bool useps=false"]}
       ],
       "runtime_evidence": [
-        {"path": "godot/game/retail_video_quality_policy.gd", "tokens": ["QualityControl.new(&\"SHADERUSAGE\", \"2\")", "driver.set_widget_disabled(id, true)"]}
+        {"path": "engine/runtime/menu/options_policy.h", "tokens": ["{\"SHADERUSAGE\", \"2\"}"]},
+        {"path": "godot/game/retail_video_quality_policy.gd", "tokens": ["driver.set_widget_disabled(id, true)"]}
       ],
       "raster_probes": [],
       "bounded_residuals": []

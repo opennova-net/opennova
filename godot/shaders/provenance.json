@@ -6,7 +6,8 @@
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
     "fixture_contract": "retail_reference_highest_retail_selectable_v2",
     "shader_usage_level": 2,
-    "locked_menu_policy": "godot/game/retail_video_quality_policy.gd",
+    "locked_menu_policy": "engine/runtime/menu/options_policy.h",
+    "locked_menu_shell": "godot/game/retail_video_quality_policy.gd",
     "object_technique_validation": "godot/shaders/object/technique_validation.json",
     "object_pass_class_validation": "godot/shaders/object/auxiliary_technique_validation.json",
     "screenshots_allowed_only_after_validation": true
