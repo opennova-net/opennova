@@ -35,8 +35,9 @@ integration is not a one-off.
    state, the ImGui context binding — and the window sets each product composes
    onto it. The game's dev tools (`GameDevTools`): `FrameStatsBoard` (the
    fixed-slot per-frame accumulator, transcribed from the retired GDScript board
-   with the same semantics and slot names), `StatsWindow` (the first real window:
-   the retired Stats page's row tree over the board) and `DemoWindow` (ImGui's
+   with the same semantics and slot names), `GameWindow` (the mandatory hosted
+   runtime surface plus typed Play/Interact requests), `StatsWindow` (the
+   retired Stats page's row tree over the board) and `DemoWindow` (ImGui's
    demo, the docking/multi-viewport smoke test). ONED's run surface (`OnedUi`):
    the one window over the fields it owns, the state the app pushes and a typed
    request queue the app drains. New windows are `Window` subclasses registered
@@ -62,13 +63,17 @@ integration is not a one-off.
    is why `display/window/subwindows/embed_subwindows` is off project-wide.
    `ImGuiPassNode` (`godot/src/devtools/`) hands the context to the engine once
    (`ImGuiGD.GetImGuiPtrs`) and runs the engine's layout pass in a `_process`
-   just under the addon's render pass; `DevTools` (the game) adds the open
-   state, the `open_changed` signal and the Stats-row read seam, `OnedUi` (ONED)
+   just under the addon's render pass; `DevTools` (the game) adds the open and
+   input-mode state, the `SubViewport` adapter, its signals, and the Stats-row
+   read seam, `OnedUi` (ONED)
    the field seeds/reads, the pushed state and `take_request`/`push_request`.
    `FrameStats` is the board's binding: the slot enum constants, the hot-path
    `add`, the capture edge and `drain()` into a typed `FrameStatsWindow` record.
-   The game shell's only involvement is F3 (`DevTools.toggle`) and the
-   mouse/pick-click policy on `open_changed`; ONED's app
+   A debug-windowed `GameRuntimeRoot` keeps the complete `MainGame` scene in one
+   always-updating `SubViewport`; it composites that viewport directly while
+   F3 is closed and hands the same texture to `GameWindow` while F3 is open.
+   The game shell owns the Play/Interact input gate and debug-pick policy;
+   ONED's app
    (`godot/modtools/oned_app.gd`) seeds
    the surface and executes its requests — process spawning, the native
    directory dialogs and settings persistence stay in GDScript. `Simulation`
@@ -86,9 +91,10 @@ integration is not a one-off.
    keeps it in both modes. The packaging script stages the addon library into
    the dev zip always and into the game zip only for a debug export.
 5. **Docking and multi-viewport are required.** `attach_imgui` sets
-   `ImGuiConfigFlags_DockingEnable | ViewportsEnable`; the layout pass draws a
-   passthru dockspace over the game window so windows dock to its edges and to
-   each other without stealing the game's mouse in the empty area.
+   `ImGuiConfigFlags_DockingEnable | ViewportsEnable`; the game layout is an
+   opaque application workspace. On first use, Game owns the center and Stats
+   starts in a roughly 30% right dock; an existing ImGui layout is preserved.
+   Game cannot close, collapse, or undock, while other tools remain detachable.
 6. **Hard cut.** The GDScript overlay, its page framework, the pages, the
    typed resolvers, the snapshot writer and the GDScript board are deleted;
    F3 opens the ImGui tools. What survives under `godot/game/debug/` has other
@@ -108,7 +114,9 @@ integration is not a one-off.
   node-path assertions in its test are gone; the app is ~30 lines shorter and
   its tests drive the same typed seam the mouse does.
 - The release GDExtension carries ImGui's code for ONED; the shipped game never
-  reaches it (no addon, no `DevTools` body).
+  reaches it (no addon, no `DevTools` body). Release, headless, and missing-addon
+  starts hand `MainGame` directly to the scene tree, so they incur no persistent
+  `SubViewport` composite.
 - Adding a slot is one line in `frame_stats_slots.h`; the engine enum, the
   `FrameStats` constants and the Stats rows follow.
 - The addon is a build-time download like the sqlite amalgamation and GUT:
@@ -129,11 +137,16 @@ integration is not a one-off.
 - `tests/devtools/frame_stats_board_test` pins the board's capture edges,
   atomic drains and per-frame peaks; `tests/devtools/devtools_test` pins the
   ABI fingerprint and the `ImGuiIO` size, the docking/viewport policy on
-  attach, a layout pass producing draw data, the Stats window's capture
-  gating and formatting, and the external feed.
+  attach, the mandatory Game window and first-use layout, responsive viewport
+  sizing, typed input requests, the Stats window's capture gating and
+  formatting, and the external feed.
 - `godot/tests/game/main_game_lifecycle_test.gd` pins the F3 edge: input
-  suspended, mouse freed, capture armed, world still ticking, pick clicks on,
-  everything restored on close, closed across a menu round-trip.
+  suspended in Interact, mouse freed, capture armed, world still ticking, pick
+  clicks on, Play recapturing normal gameplay, Escape returning to Interact
+  before closing, and teardown clearing the mode.
+- `godot/tests/game/game_runtime_root_test.gd` pins the debug/direct startup
+  decision; `game_runtime_root_window_probe.gd` exercises the real addon,
+  shared texture, first layout, responsive resize, and F3 routing in a window.
 - `tests/devtools/oned_ui_test` pins ONED's surface: open from construction,
   a layout pass from the seeded state, the FIFO request queue, the field
   round trip; `godot/tests/oned_app_test.gd` drives the app over the seam.

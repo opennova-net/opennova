@@ -1,16 +1,56 @@
 #include <runtime/devtools/game_dev_tools.h>
 
 #include <runtime/devtools/demo_window.h>
+#include <runtime/devtools/game_window.h>
 #include <runtime/devtools/stats_window.h>
 
 namespace opennova::devtools {
 
-GameDevTools::GameDevTools() : pass_(ImGuiPassOptions{}) {
+namespace {
+
+ImGuiPassOptions game_pass_options() {
+	ImGuiPassOptions options;
+	// The Game window owns the Play/Interact-aware Escape policy.
+	options.escape_closes = false;
+	return options;
+}
+
+}  // namespace
+
+GameDevTools::GameDevTools() : pass_(game_pass_options()) {
+	auto game = std::make_unique<GameWindow>();
+	game_window_ = game.get();
+	game->open = true;
+	pass_.register_window(std::move(game));
 	auto stats = std::make_unique<StatsWindow>();
 	stats_window_ = stats.get();
 	stats->open = true;
 	pass_.register_window(std::move(stats));
 	pass_.register_window(std::make_unique<DemoWindow>());
+}
+
+void GameDevTools::set_game_viewport(GameViewport *viewport) {
+	game_window_->set_viewport(viewport);
+}
+
+void GameDevTools::set_game_play_available(bool available) {
+	game_window_->set_play_available(available);
+}
+
+void GameDevTools::set_game_input_mode(GameInputMode mode) {
+	game_window_->set_input_mode(mode);
+}
+
+void GameDevTools::reset_game_input_mode() {
+	game_window_->reset_input_mode();
+}
+
+void GameDevTools::request_game_escape() {
+	game_window_->request_escape();
+}
+
+bool GameDevTools::take_game_request(GameWindowRequest &request) {
+	return game_window_->take_request(request);
 }
 
 void GameDevTools::set_frame_stats(FrameStatsBoard *board) {

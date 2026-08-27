@@ -61,6 +61,7 @@ var _state: int = State.MENU
 var _shell_wired := false
 # The in-engine dev tools' seam: F3 opens them, the mouse policy follows them.
 var _dev_tools: DevTools
+var _dev_tools_pick_active := false
 var _debug_adapter: GameDebugAdapter
 # The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
 # the set survives dev-tools toggles; cleared on every world load.
@@ -122,6 +123,7 @@ func _init() -> void:
 	_dev_tools.name = "DevTools"
 	_dev_tools.set_frame_stats(_frame_stats)
 	_dev_tools.open_changed.connect(_on_dev_tools_open_changed)
+	_dev_tools.game_input_mode_changed.connect(_on_dev_tools_game_input_mode_changed)
 	add_child(_dev_tools)
 	_world_load.load_failed.connect(_on_world_load_failed)
 
@@ -300,6 +302,12 @@ func _ready() -> void:
 # reports unhandled even after emitting pressed; without this early claim the same
 # Esc closes ARMORY and then immediately opens PAUSE.
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey:
+		var tools_key := event as InputEventKey
+		if tools_key.pressed and not tools_key.echo and tools_key.keycode == KEY_ESCAPE \
+				and _dev_tools.handle_game_escape():
+			get_viewport().set_input_as_handled()
+			return
 	if _state != State.ARMORY or not (event is InputEventKey):
 		return
 	var key := event as InputEventKey
@@ -336,8 +344,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if key.keycode == DEV_TOOLS_KEY:
-		_dev_tools.toggle()
-		get_viewport().set_input_as_handled()
+		if _dev_tools.handle_tools_toggle():
+			get_viewport().set_input_as_handled()
 		return
 	if key.keycode == PICK_KEY and key.shift_pressed and is_gameplay_input_active() \
 			and _world != null and _world.is_loaded():
@@ -372,16 +380,38 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-# The dev tools' open edge. While they are up the mouse is free: clicks on the
-# world ray-pick into the same list F6 feeds. Every close path (F3, Escape, the
-# menu) reaches this signal.
+# The workspace's shell policy. Interact owns the cursor and world click-pick;
+# Play reuses the normal gameplay gate and capture route without hiding ImGui.
 func _on_dev_tools_open_changed(open: bool) -> void:
-	if _world != null:
-		_world.set_pick_click_enabled(open)
+	_refresh_dev_tools_game_state()
 	if open:
 		# A press begun before F3 must not turn into a mount action when Shift is
 		# released behind the tools.
 		_use_latched = false
+
+
+func _on_dev_tools_game_input_mode_changed(_playing: bool) -> void:
+	_sync_dev_tools_pick_policy()
+
+
+func _is_game_play_available() -> bool:
+	return _state == State.WORLD and not _round_ended and not _world_load_pending \
+			and _end_screen == null and _world != null and _world.is_loaded()
+
+
+func _refresh_dev_tools_game_state() -> void:
+	var available := _is_game_play_available()
+	_dev_tools.set_game_play_available(available)
+	_sync_dev_tools_pick_policy()
+
+
+func _sync_dev_tools_pick_policy() -> void:
+	var enabled := is_dev_tools_open() and not _dev_tools.is_game_playing() \
+			and _is_game_play_available()
+	if _world == null or enabled == _dev_tools_pick_active:
+		return
+	_dev_tools_pick_active = enabled
+	_world.set_pick_click_enabled(enabled)
 
 
 func is_dev_tools_open() -> bool:
@@ -431,7 +461,8 @@ func is_root_render_stats_measured() -> bool:
 
 
 func is_gameplay_input_active() -> bool:
-	return _state == State.WORLD and not is_dev_tools_open() and not _round_ended
+	return _state == State.WORLD and not _round_ended \
+			and (not is_dev_tools_open() or _dev_tools.is_game_playing())
 
 
 # --- End of mission (SP) -------------------------------------------------------
@@ -755,6 +786,7 @@ func _begin_world_load() -> void:
 	_shell_presentation.begin_world_load(
 			_menu_shell, _world, _hud, _on_world_loaded, _on_world_load_failed)
 	_state = State.WORLD
+	_refresh_dev_tools_game_state()
 
 
 
@@ -1073,7 +1105,9 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 
 func _process(delta: float) -> void:
 	if _shutdown_prepared:
+		_dev_tools.set_game_play_available(false)
 		return
+	_refresh_dev_tools_game_state()
 	var stats_on: bool = _frame_phase_sampler.begin_shell_control()
 	if not _debug_pose_env.is_empty() and _state == State.WORLD:
 		_debug_pose_env = DebugPoseEnv.apply(_debug_pose_env,
@@ -1087,8 +1121,9 @@ func _process(delta: float) -> void:
 	_frame_phase_sampler.sample_render(_render_stats, get_viewport(), _menu_shell)
 	var dev_tools_open := is_dev_tools_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
+	var dev_tools_interacting := dev_tools_open and not _dev_tools.is_game_playing()
 	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND] \
-			or dev_tools_open or _end_screen != null or not _world.is_loaded():
+			or dev_tools_interacting or _end_screen != null or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	# The end-of-mission lead-in: the world keeps ticking; the score/failed screen

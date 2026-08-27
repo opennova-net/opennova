@@ -843,12 +843,18 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 	var dev_tools: DevTools = _shell.get_dev_tools()
 	assert_not_null(dev_tools, "the shell owns its dev tools from construction")
 	assert_false(dev_tools.is_available(), "headless runs never attach an ImGui context")
+	var mode_edges: Array[bool] = []
+	dev_tools.game_input_mode_changed.connect(
+			func(playing: bool) -> void: mode_edges.append(playing))
 	assert_true(_shell.is_gameplay_input_active())
 	var tick_before := int(runtime.get_sim().get_logic_tick())
 	dev_tools.toggle()
 	assert_true(_shell.is_dev_tools_open())
 	assert_false(_shell.is_gameplay_input_active(),
 			"the public input gate closes on the same F3 edge")
+	assert_true(dev_tools.is_game_play_available(),
+			"a live normal gameplay state enables the Game window's Play action")
+	assert_false(dev_tools.is_game_playing(), "F3 always opens in Interact")
 	var board: FrameStats = _shell.get_frame_stats()
 	assert_true(board.is_capture_active(),
 			"the Stats window (open by default) arms the board's capture on the F3 edge")
@@ -879,30 +885,73 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 	assert_not_null(_shell.find_child("PickToast", true, false),
 			"the crosshair pick confirms every attempt with a toast")
 
-	dev_tools.set_open(false)
+	dev_tools.set_game_playing(true)
+	await get_tree().process_frame
+	assert_true(dev_tools.is_game_playing(), "Play latches through the DevTools seam")
+	assert_true(_shell.is_gameplay_input_active(),
+			"Play reopens the normal gameplay-input gate under the workspace")
+	if DisplayServer.get_name() != "headless":
+		assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_CAPTURED,
+				"Play captures through the existing player-input path")
+	else:
+		assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE,
+				"headless accepts the capture request but has no cursor to capture")
+	assert_null(world.get_node_or_null("PickClickCatcher"),
+			"Play disables Interact's world-click picker")
+
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	escape.physical_keycode = KEY_ESCAPE
+	escape.pressed = true
+	get_viewport().push_input(escape)
+	await get_tree().process_frame
+	assert_true(_shell.is_dev_tools_open(), "the first Play Escape keeps F3 open")
+	assert_false(dev_tools.is_game_playing(), "the first Play Escape returns to Interact")
+	assert_false(_shell.is_gameplay_input_active(), "Interact suspends gameplay again")
+	assert_eq(String(_shell.get_game_debug_adapter().get_mcp_game_state()["shell"]["state"]),
+			"world", "the consumed Play Escape never opens the pause menu")
+	assert_not_null(world.get_node_or_null("PickClickCatcher"),
+			"Interact restores debug picking")
+
+	get_viewport().push_input(escape)
 	await get_tree().process_frame
 	assert_false(_shell.is_dev_tools_open())
 	assert_true(_shell.is_gameplay_input_active(),
-			"closing the tools restores the gameplay-input policy")
+			"the second Escape closes F3 and restores ordinary gameplay")
 	assert_false(board.is_capture_active(),
 			"closing the tools releases the board's capture")
 	assert_null(world.get_node_or_null("PickClickCatcher"),
 			"closing removes the click picker")
+	assert_eq(mode_edges, [true, false], "Play and Interact emit one ordered mode edge each")
 
 	dev_tools.toggle()
 	await get_tree().process_frame
 	assert_not_null(world.get_node_or_null("PickClickCatcher"))
-	dev_tools.toggle()
+	dev_tools.set_game_playing(true)
+	assert_true(dev_tools.is_game_playing())
+	var f3 := InputEventKey.new()
+	f3.keycode = KEY_F3
+	f3.physical_keycode = KEY_F3
+	f3.pressed = true
+	get_viewport().push_input(f3)
 	await get_tree().process_frame
 	assert_false(_shell.is_dev_tools_open())
+	assert_false(dev_tools.is_game_playing(), "F3 closes directly from Play and resets mode")
 	assert_null(world.get_node_or_null("PickClickCatcher"),
 			"F3 again removes the click picker through the same open edge")
+
+	dev_tools.toggle()
+	dev_tools.set_game_playing(true)
+	assert_true(dev_tools.is_game_playing())
 
 	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	assert_false(_shell.is_dev_tools_open(),
-			"returning to the menu cannot reopen closed tools")
+	assert_true(_shell.is_dev_tools_open(), "the workspace may remain open in the menu")
+	assert_false(dev_tools.is_game_play_available(), "menu state disables Play")
+	assert_false(dev_tools.is_game_playing(),
+			"world teardown cannot leave gameplay capture or mode latched")
+	dev_tools.set_open(false)
 	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
