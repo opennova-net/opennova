@@ -37,6 +37,7 @@ jobs:
       CMAKE_GENERATOR: Ninja
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
+      HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,6 +53,27 @@ jobs:
           git lfs install --local
           git lfs pull
           git lfs fsck --objects
+
+      # The extracted retail asset tree lives in the private
+      # opennova-net/opennova-reference-assets repository (its README). With the
+      # REFERENCE_ASSETS_TOKEN secret (a fine-grained token with contents: read on
+      # that repository) the checkout below lands beside the tree and the
+      # asset-gated tests run against it instead of reporting Skipped
+      # (docs/asset-gated-tests.md); without the secret the gates stay closed.
+      - name: Check out the reference assets
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: opennova-net/opennova-reference-assets
+          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+          path: .reference-assets
+
+      - name: Point the asset gates at the reference assets
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        shell: bash
+        run: |
+          echo "OPENNOVA_JO_ASSETS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
+          echo "OPENNOVA_MISSION_CORPUS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v5
         with:
@@ -290,6 +312,7 @@ jobs:
     needs: [build-gdextension-windows]
     env:
       GODOT_VERSION: 4.6.1-stable
+      HAVE_REFERENCE_ASSETS: ${{ secrets.REFERENCE_ASSETS_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -302,6 +325,27 @@ jobs:
           git lfs install --local
           git lfs pull
           git lfs fsck --objects
+
+      # The extracted retail asset tree lives in the private
+      # opennova-net/opennova-reference-assets repository (its README). With the
+      # REFERENCE_ASSETS_TOKEN secret (a fine-grained token with contents: read on
+      # that repository) the checkout below lands beside the tree and the
+      # asset-gated tests run against it instead of reporting Skipped
+      # (docs/asset-gated-tests.md); without the secret the gates stay closed.
+      - name: Check out the reference assets
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: opennova-net/opennova-reference-assets
+          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+          path: .reference-assets
+
+      - name: Point the asset gates at the reference assets
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        shell: bash
+        run: |
+          echo "OPENNOVA_JO_ASSETS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
+          echo "OPENNOVA_MISSION_CORPUS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
 
       - name: Cache Godot binary
         uses: actions/cache@v4
