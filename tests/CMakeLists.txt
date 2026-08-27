@@ -1035,10 +1035,9 @@ foreach(name emitter emit_shape translate effect_scene_contract)
     target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME particle_${name} COMMAND particle_${name}_test)
 endforeach()
-
-# Smoke test stays disabled until the full 77-file corpus is mirrored into
-# fixtures/particle/ (registered DISABLED so the target still builds).
-set_tests_properties(particle_smoke_all_fixtures PROPERTIES DISABLED TRUE)
+# particle_smoke_all_fixtures is mixed: the committed fixtures/particle sweep
+# always runs; the extracted retail corpus leg rides OPENNOVA_JO_ASSETS
+# (SKIP-LEG without it).
 
 # CBIN tests
 add_executable(cbin_unit_test cbin/cbin_unit_test.cpp)

@@ -38,7 +38,7 @@ partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
 | `cdep_constraint` | quantized [min,max] of the 256 pixels of a block (CDEP depth constraint) | documented in-code; full CDEP bitstream grill pending |
 | `lighting` | terrain lighting colors + per-position modulation | **retail** `terrain_sector_compute_lighting @ 0x5c7550`; `Terrain_SetLightingColors @ 0x5C4B10` / `Terrain_GetModulatedColorAtPos @ 0x5C5FE0` are jodemo-era names with no kong function at those addresses (unverified — env-tod-re's VERIFY-pending); fog via `Render_SetFogState @ 0x58a950` → `CD3DDevice_SetFogParameters @ 0x677960` |
 | `texture_preprocess` | byte-faithful detail coefficient map, DBlend normalization, and paired near/far mip chains | **retail** `Texture_GenerateNormalMap @ 0x58c070`, `PolyTrn_InitTextures @ 0x60aaa0`, `GTexture_Downsample2x2_RGBA8 @ 0x687000`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270` |
-| `mesh_simp` | mesh simplification (edge-collapse) | **BYTE-IDENTICAL — verified** by the since-retired `dvd4_parity` (canonical `.cpt`) + `parametric_parity` sweeps (the tracked gate today is `tests/cpt/cpt_roundtrip_test`; the corpus byte diff is run by hand) (Sample/Gradient/Checker64/Perlin, 4.6–6.8 MB CPTs each) all produce byte-identical output. The in-code "divergence point / vertex 1223" logging is leftover debug scaffolding from when parity was being achieved, now inert. `parametric_parity` is ctest-`DISABLED` only for CI runtime cost (~5 min), not for any correctness gap |
+| `mesh_simp` | mesh simplification (edge-collapse) | **BYTE-IDENTICAL — verified** (2026-06) by the since-retired `dvd4_parity` (canonical `.cpt`) + `parametric_parity` sweeps over the Sample/Gradient/Checker64/Perlin TrnGen corpus (4.6–6.8 MB CPTs each, no longer carried in `fixtures/`); the tracked gate today is `tests/cpt/cpt_roundtrip_test` over the committed `assets/mnml.cpt` plus the gated retail `.cpt` sweep. The in-code "divergence point / vertex 1223" logging is leftover debug scaffolding from when parity was being achieved, now inert |
 | `tpm` (`engine/formats/tpm`, ex `mesh_data` here) | the TPM1 tile-mesh container (.tml/.tms) read/write | **TrnGen.exe** `MeshData_LoadFromFile @ 0x404100`, `MeshData_WriteToFile @ 0x403FE0` (the addresses are TrnGen's — kong retail holds `CAdminServer_*` there); §The TPM1 tile-mesh format below |
 | `packing` (`engine/formats/tpm/src`, ex here) | the TPM1 on-disk index codecs | **TrnGen.exe** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) + the unpack/10-bit pair `@ 0x403DD0/0x403E70/0x403EF0` |
 | `tristrip` (incl. the ex-`mesh_data` remap pass) | strip conversion + the cache-order vertex remap the bake runs before writing .tms | **TrnGen.exe** `sub_4068E0` (strips), `sub_404480` via thunk `sub_404610` (remap) |
@@ -58,8 +58,8 @@ The tile-mesh container the bake writes and the CPT export re-reads. Reimpl:
 `engine/formats/tpm` (read/write + the index codecs; magic-shaped lib name,
 precedent bfc1, since the two extensions share one format), with the
 strip/remap bake pass staying in `engine/runtime/terrain` (`tristrip`).
-Fixture: `fixtures/terrain/sample/S0_00_00.tml`; byte gate: ctest
-`tpm1_roundtrip`.
+The retail `S0_00_00.tml` sample and its `tpm1_roundtrip` byte gate were
+retired with the retail terrain corpus; the format record below stands.
 
 - **Header (12 bytes)** [orig: `MeshData_LoadFromFile @ 0x404100`, TrnGen.exe]: magic
   `TPM1` (0x314D5054), `tile_x u16`, `tile_y u16`, `vertex_count u16`,
@@ -68,8 +68,8 @@ Fixture: `fixtures/terrain/sample/S0_00_00.tml`; byte gate: ctest
 - **LOD sections**: the in-memory MeshData carries 16 12-byte LOD entries;
   the FILE carries 8 — every OTHER entry (indices 0,2,…,14). Per-section
   12-byte header: a pointer placeholder u32 (written as 0; the reader's
-  32-byte roundtrip tolerance in `tpm1_roundtrip` covers stale writer
-  pointers in retail files), `face_count u32`, `max_index u16`, `flags u16`
+  32-byte roundtrip tolerance, pinned by the retired `tpm1_roundtrip`, covers
+  stale writer pointers in retail files), `face_count u32`, `max_index u16`, `flags u16`
   (bit 1 = triangle strip).
 - **Three index-codec tiers by `max_index`** [orig: the pack/unpack family
   `@ 0x403CD0/0x403DD0/0x403E70/0x403EF0`]: ≤256 → byte-packed (3 bytes per
