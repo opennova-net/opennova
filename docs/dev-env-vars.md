@@ -43,7 +43,7 @@ the strays, and new hooks land here in the same PR that adds them.
 
 | Var | Effect |
 |---|---|
-| `NOVA_VM_WEAPON=<WPN_*>` | viewmodel weapon override — the `body_holds_probe` / `game_world_test` A/B seam |
+| `NOVA_VM_WEAPON=<WPN_*>` | viewmodel weapon override — the `game_world_test` A/B seam |
 | `GODOT_BIN=<path>` | which Godot binary the sh scripts use (else `scripts/godot_bin.sh` resolves `.godot-bin/`) |
 | `NW_RESOURCE_DIR=<dir>` | the retail install an `NW_SP_MISSION` probe mounts |
 | `NOVA_RESOURCE_DIR=<dir>` | the loose or PFF-mounted retail game directory a probe hands to `ResourceRoot.mount_runtime`; the widest of the resource-dir names, read by ~30 `godot/tests/*_probe.gd` scripts including the four `00trg_*` probes (`00trg_briefing`, `00trg_rock_collision`, `00trg_world_state`, `00trg_zone_chain`), each of which fails fast when it is unset |

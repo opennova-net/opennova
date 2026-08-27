@@ -6,6 +6,10 @@
 
 #include <formats/def/def.h>
 #include "common/test_paths.h"
+#include "common/retail_paths.h"
+
+#include <ctype.h>
+#include <string>
 
 static int expect_str(const char *what, const char *got, const char *want) {
     if (strcmp(got, want) != 0) {
@@ -351,6 +355,56 @@ static int test_item_def_allocator_defaults(void) {
     def_free_items(&items);
     return bad;
 }
+/* The per-item particle-effect slots on the retail items.def (SKIP-LEG without
+   OPENNOVA_JO_ASSETS): the shipped table authors particlefx rows, and DBuggy1
+   (101291) anchors Effect_whiteExhaust at the model's FX00 user point — the row
+   the effect-attach pass consumes. [orig: ItemDef_ParseProperty @ 0x49eb00] */
+static int test_retail_particlefx_rows(void) {
+    const std::string path = retail::asset_file("items.def");
+    if (path.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS carrying items.def");
+    DefItemsFile items;
+    memset(&items, 0, sizeof(items));
+    if (def_parse_items(path.c_str(), &items) != 0) {
+        fprintf(stderr, "FAIL: retail items.def did not parse: %s\n", path.c_str());
+        return 1;
+    }
+    size_t with_fx = 0;
+    const DefItemDef *buggy = NULL;
+    for (size_t i = 0; i < items.count; ++i) {
+        if (items.entries[i].particlefx.effect[0] != '\0') ++with_fx;
+        if (items.entries[i].id == 101291) buggy = &items.entries[i];
+    }
+    printf("retail items.def: %zu items, %zu author particlefx\n", items.count, with_fx);
+    int rc = 0;
+    if (with_fx == 0) {
+        fprintf(stderr, "FAIL: no retail item authors particlefx\n");
+        rc = 1;
+    }
+    if (buggy == NULL) {
+        fprintf(stderr, "FAIL: DBuggy1 (101291) is not in the retail items.def\n");
+        rc = 1;
+    } else {
+        printf("retail items.def: DBuggy1 particlefx %s @ %s\n", buggy->particlefx.effect,
+               buggy->particlefx.userpoint);
+        std::string fx(buggy->particlefx.effect);
+        for (size_t i = 0; i < fx.size(); ++i) fx[i] = (char)tolower((unsigned char)fx[i]);
+        if (fx != "effect_whiteexhaust") {
+            fprintf(stderr, "FAIL: DBuggy1 particlefx effect '%s', expected Effect_whiteExhaust\n",
+                    buggy->particlefx.effect);
+            rc = 1;
+        }
+        std::string up(buggy->particlefx.userpoint);
+        for (size_t i = 0; i < up.size(); ++i) up[i] = (char)toupper((unsigned char)up[i]);
+        if (up != "FX00") {
+            fprintf(stderr, "FAIL: DBuggy1 particlefx user point '%s', expected FX00\n",
+                    buggy->particlefx.userpoint);
+            rc = 1;
+        }
+    }
+    def_free_items(&items);
+    return rc;
+}
+
 int main(void) {
     if (test_item_def_allocator_defaults() != 0) {
         return 1;
@@ -976,6 +1030,10 @@ int main(void) {
         return 1;
     }
     def_free_items(&shadow_items);
+
+    if (test_retail_particlefx_rows() != 0) {
+        return 1;
+    }
 
     printf("PASS: items parsing OK\n");
     return 0;

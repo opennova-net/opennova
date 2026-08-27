@@ -100,7 +100,8 @@ public:
 	                        int weapon_variant = 0, int weapon_prev_variant = 0,
 	                        int primary_variant = 0, int source_variant = 0) const;
 
-private:
+	// The loaded clip records, public for diagnostics/tests (frame counts,
+	// loop flags): the composed-pose path above is the consumer seam.
 	struct LoadedClip {
 		std::string key; // as authored (lookups fold)
 		anim::Clip clip;
@@ -108,6 +109,8 @@ private:
 
 	const LoadedClip *find_clip(const std::string &key) const;
 	const LoadedClip *find_clip_variant(const std::string &key, int variant) const;
+
+private:
 	void splice_weapon_channel(std::vector<anim::PoseBone> &pose,
 	                           const std::string &weapon_key,
 	                           double weapon_seconds,

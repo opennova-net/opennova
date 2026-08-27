@@ -856,7 +856,8 @@ Notable outliers:
   correct `Effect_SGvBody`, but never wins: effect names key case-insensitively so the two
   collide, archive entries walk in uppercased-name order (`SHOTGNFX.PTL` < `US_BLOOD.PTU`),
   and first registration wins — then one unresolved member clears the effect whole. Pinned by
-  `godot/tests/gore_set_catalog_probe.gd` so a future load-order change cannot silently turn
+  the `particle_gore_set_catalog` ctest (`tests/particle/gore_set_catalog_test.cpp`, gated on
+  `OPENNOVA_JO_DIR`) so a future load-order change cannot silently turn
   this into a divergence. `[orig: PFF_Open @ 0x7682e0 sorts by uppercased name;
   CEffectBank_ResolveAllEntries @ 0x5e4920 — miss break @0x5e495d, ClearAll @0x5e49be]`
 

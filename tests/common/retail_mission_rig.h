@@ -98,7 +98,10 @@ public:
 
 	// Mount `root_dir` (packed install first, loose tree otherwise), read
 	// `mission_name` through the mount and parse it; items.def when present.
-	bool open(const std::string &root_dir, const std::string &mission_name, std::string &error);
+	// `expansion` names the expansion mount to prefer (e.g. "revx02"); the caller
+	// checks index.mounted_expansion() when the leg depends on it.
+	bool open(const std::string &root_dir, const std::string &mission_name, std::string &error,
+			const std::string &expansion = std::string());
 	// The S9 boot (runtime_boot.h) over the opened mission.
 	bool boot(const BootOptions &options, std::string &error);
 

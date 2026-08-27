@@ -3,6 +3,14 @@
 #include <runtime/world/minimap_footprint.h>
 #include <runtime/world/minimap_overlay.h>
 #include <runtime/world/occlusion.h>
+#include <runtime/world/entity_registry.h>
+#include "common/retail_mission_rig.h"
+#include "common/retail_paths.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 #include <cstdio>
 
@@ -20,6 +28,51 @@ world::Entity base_entity() {
 	entity.team = 1;
 	entity.zone_number = 6;
 	return entity;
+}
+
+// The persistent overlay set on 00TRg (SKIP-LEG without the retail data): the
+// retail oracle's first persistent 0x40 walk covers pool-2 slots 2..25 — every
+// classifier-visible pool-2 entity in the promoted mission, no more, no fewer.
+// 00TRg is the important negative control: no Advance & Secure zone chain.
+void test_00trg_persistent_overlay_set() {
+	const std::string install = retail::install();
+	const std::string assets = retail::assets();
+	if (install.empty() && assets.empty()) {
+		retail::skip_leg("OPENNOVA_JO_DIR (revx02) or OPENNOVA_JO_ASSETS carrying 00TRg.bms");
+		return;
+	}
+	opennova::testrig::RetailMissionRig rig;
+	std::string error;
+	bool opened = !install.empty() && rig.open(install, "00TRg.bms", error, "revx02") &&
+			rig.index.mounted_expansion() == "revx02";
+	if (!opened && !assets.empty()) opened = rig.open(assets, "00TRg.bms", error);
+	if (!opened) {
+		retail::skip_leg("a mount carrying 00TRg.bms");
+		return;
+	}
+	opennova::testrig::BootOptions options;
+	if (!rig.boot(options, error)) {
+		std::fprintf(stderr, "FAIL: 00TRg boots for the overlay leg: %s\n", error.c_str());
+		++failures;
+		return;
+	}
+	std::vector<uint16_t> handles;
+	int pool2 = 0;
+	const size_t cap = rig.world.registry.pool_capacity(2);
+	for (size_t slot = 0; slot < cap; ++slot) {
+		const world::EntityHandle h = world::EntityHandle::make(2, static_cast<uint16_t>(slot));
+		const world::Entity *e = rig.world.registry.get(h);
+		if (e == nullptr) continue;
+		++pool2;
+		if (world::classify_minimap_overlay(*e).visible) handles.push_back(h.packed);
+	}
+	std::sort(handles.begin(), handles.end());
+	std::printf("minimap 00TRg: %d pool-2 entities, %zu persistent overlay handles:", pool2, handles.size());
+	for (uint16_t h : handles) std::printf(" 0x%04x", unsigned(h));
+	std::printf("\n");
+	std::vector<uint16_t> expected;
+	for (uint16_t h = 0x2002; h < 0x201a; ++h) expected.push_back(h);
+	CHECK(handles == expected, "00TRg's persistent overlay set is pool-2 slots 2..25 (the retail 0x40 walk)");
 }
 
 } // namespace
@@ -316,6 +369,8 @@ int main() {
 				13 * k, 25 * k, 8 * k, 27 * k}),
 				"yaw 0 footprint uses the compensated entity basis");
 	}
+
+	test_00trg_persistent_overlay_set();
 
 	if (failures != 0) return 1;
 	std::printf("minimap_overlay_test OK\n");

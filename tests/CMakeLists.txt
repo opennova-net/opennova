@@ -1209,7 +1209,7 @@ add_test(NAME waypoint_track COMMAND waypoint_track_test)
 # Entity_ClassifyForMinimap: definition/entity marker classification shared by
 # every server producer before packet cadence/recipient policy.
 add_executable(minimap_overlay_test world/minimap_overlay_test.cpp)
-target_link_libraries(minimap_overlay_test PRIVATE opennova_runtime)
+target_link_libraries(minimap_overlay_test PRIVATE opennova_runtime opennova_test_rig)
 target_include_directories(minimap_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(minimap_overlay_test PRIVATE cxx_std_17)
 add_test(NAME minimap_overlay COMMAND minimap_overlay_test)
@@ -1346,7 +1346,7 @@ add_test(NAME ground_height COMMAND ground_height_test)
 # lifecycle, flag-table commit rules, gravity/landing/fall damage, slope slide —
 # each against the witnessed constants, over synthetic clips + height fields.
 add_executable(infantry_test world/infantry_test.cpp)
-target_link_libraries(infantry_test PRIVATE opennova_runtime)
+target_link_libraries(infantry_test PRIVATE opennova_runtime opennova_test_rig)
 target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(infantry_test PRIVATE cxx_std_17)
 # Like player_spawn_test below, MSVC coalesces this file's many scoped World
@@ -2458,6 +2458,7 @@ opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_
 # install) or OPENNOVA_JO_ASSETS (an extracted tree), per test header.
 foreach(port
         world/truck_rest_00tra world/rock_collision_00trg world/ai_corpse world/ai_threat
+        world/ai_muzzle_pose
         world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
         mission/native_assets_00trg mission/lose_flow_04tr)
     get_filename_component(port_name ${port} NAME)
@@ -2465,6 +2466,23 @@ foreach(port
     target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
     opennova_add_gated_test(${port_name} COMMAND ${port_name}_test)
 endforeach()
+
+# The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
+# each mounts the retail data through ResourceIndex itself and is Skipped
+# without OPENNOVA_JO_ASSETS / OPENNOVA_JO_DIR.
+foreach(gated
+        anim/reload_clips_us01 anim/weapon_action_clips
+        npruntime/remote_body_state npruntime/held_weapon_attach npruntime/authored_payload_00trg
+        particle/gore_set_catalog)
+    get_filename_component(gated_name ${gated} NAME)
+    get_filename_component(gated_dir ${gated} DIRECTORY)
+    add_executable(${gated_dir}_${gated_name}_test ${gated}_test.cpp)
+    target_link_libraries(${gated_dir}_${gated_name}_test PRIVATE opennova_net opennova_runtime)
+    target_include_directories(${gated_dir}_${gated_name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(${gated_dir}_${gated_name}_test PRIVATE cxx_std_17)
+    opennova_add_gated_test(${gated_dir}_${gated_name} COMMAND ${gated_dir}_${gated_name}_test)
+endforeach()
+
 
 
 add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)

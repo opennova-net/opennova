@@ -1752,7 +1752,8 @@ independent; key empty only when the §14.8.6 gate is off); the mask-bone splice
 in `engine/runtime/anim` (`kWeaponChannelMaskBones`) + `SkeletalAnim::splice_weapon_channel`
 composed in WORLD-rotation space inside `eval_pose_overlay` in the witnessed order;
 `ObjectModel.set_weapon_channel` and `LocalPlayerPresenter._update_avatar` consumption.
-Live-verified (`godot/tests/body_reload_probe.gd(.tscn)`, historical ONED PIE,
+Live-verified (the `infantry` ctest's retail weapon-channel leg, formerly
+`body_reload_probe`; historical ONED PIE,
 JOX 05TR, F4 + R through the real input path, completion waited by state): mid-reload
 `body_anim_key=anim_reload` playhead advancing, the R-forearm mask bone 73.3° off the
 locomotion pose, clean mirror return post-reload.
@@ -1772,11 +1773,12 @@ until a binoculars item exists), reload 65 / reload2 66 by kind==2 — plus the 
 `InfantryState.head_look_decay` into the §14 overlay's `head_look_decay` term, seeded
 20 on a weapon-switch mount edge. ctest `infantry` (`test_player_weapon_hold_kinds`,
 `test_player_weapon_attack_stamp`, `test_player_arms_dip` + the original
-`test_player_weapon_channel`). Live-verified (`godot/tests/body_holds_probe.gd(.tscn)`,
+`test_player_weapon_channel`). Live-verified (the `infantry` ctest's retail
+weapon-channel leg, formerly `body_holds_probe`;
 historical ONED PIE, JOX 05TR, NOVA_VM_WEAPON, completion by state): WPN_colt45 —
 steady `anim_pistol`, reload plays `anim_reload2`, clean hold return; WPN_KNIFE —
 steady `anim_knife`, fire stamps `anim_knife_attack` with an advancing playhead,
-locked exit back to the hold; the rifle `body_reload_probe` re-run green (mirror at
+locked exit back to the hold; the rifle leg re-run green (mirror at
 idle, `anim_reload`, 73.4° mask-bone delta).
 
 **Session 3 (2026-08-17) closed the secondary channel's three tails and threaded the
@@ -4216,7 +4218,8 @@ on demand. The port does the same (2026-08-26; the present-pass push and its sta
 
 Evidence: `ai` ctest (`test_fire_pass_uses_embedder_fed_muzzle`, `test_weapon_fire_origin_fallback_chain`,
 the LOS band case, the aim-pitch case, the mounted UseGun case — all through a fake
-`IMuzzlePoseProvider`); in-game `godot/tests/ai_muzzle_probe.gd` reads the same provider
+`IMuzzlePoseProvider`); the `ai_muzzle_pose` ctest (`tests/world/ai_muzzle_pose_test.cpp`,
+gated on `OPENNOVA_JO_DIR`) reads the same provider
 through `get_entity_debug` (`muzzle_valid` / `muzzle`) and A/Bs it against the presented
 skeleton's `ObjectModel.get_muzzle_world_position()`: CP01 2026-08-26 PASS, 92/102 infantry in
 the rifle envelope, the sim point within 1e-5 u of the node's for the in-range bodies. That A/B

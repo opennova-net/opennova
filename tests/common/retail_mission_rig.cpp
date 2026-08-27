@@ -82,15 +82,16 @@ RetailMissionRig::~RetailMissionRig() {
 
 // --- open / boot ------------------------------------------------------------------
 
-bool RetailMissionRig::open(const std::string &root, const std::string &name, std::string &error) {
+bool RetailMissionRig::open(const std::string &root, const std::string &name, std::string &error,
+		const std::string &expansion) {
 	root_dir = root;
 	mission_name = name;
 	mission_basename = basename_of(name);
 	// A packed install mounts its .pff set with loose overrides; a loose asset
 	// tree (no archives) mounts as loose files only.
-	bool mounted = index.scan(root_dir);
+	bool mounted = index.scan(root_dir, expansion);
 	if (!mounted || !index.has_file(mission_name))
-		mounted = index.scan(root_dir, std::string(), VfsMountMode::LooseOnly);
+		mounted = index.scan(root_dir, expansion, VfsMountMode::LooseOnly);
 	if (!mounted) {
 		error = "could not mount " + root_dir + ": " + index.last_error();
 		return false;

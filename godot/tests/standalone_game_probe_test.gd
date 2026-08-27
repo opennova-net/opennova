@@ -2,8 +2,6 @@ extends GutTest
 
 const PROBE_PATHS: Array[String] = [
 	"res://tests/bend_capture_probe.gd",
-	"res://tests/body_holds_probe.gd",
-	"res://tests/body_reload_probe.gd",
 	"res://tests/fp_clean_probe.gd",
 	"res://tests/lean_tp_probe.gd",
 	"res://tests/oned_keys_probe.gd",
@@ -29,14 +27,8 @@ const HEADLESS_PROBES: Array[String] = [
 	"res://tests/adm_dump_probe.gd",
 	"res://tests/glare_ray_geometry_probe.gd",
 	"res://tests/held_weapon_frame_probe.gd",
-	"res://tests/held_weapon_placement_probe.gd",
-	"res://tests/itemfx_probe.gd",
 	"res://tests/mount_timing_probe.gd",
-	"res://tests/muzzle_origin_probe.gd",
 	"res://tests/ptl_effect_dump_probe.gd",
-	"res://tests/reload_asset_probe.gd",
-	"res://tests/remote_prone_roll_probe.gd",
-	"res://tests/weapon_bake_probe.gd",
 ]
 
 const REMOVED_PIE_PROBES: Array[String] = [
