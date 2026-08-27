@@ -10,7 +10,7 @@
 
 namespace godot {
 
-String LaunchFlags::bundled_probe_override_;
+std::string LaunchFlags::bundled_probe_override_;
 
 void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("loose_override_enabled"),
@@ -75,7 +75,7 @@ opennova::BootDirProbe LaunchFlags::probe() {
 }
 
 std::string LaunchFlags::probe_dir() {
-	if (!bundled_probe_override_.is_empty()) return to_std(bundled_probe_override_);
+	if (!bundled_probe_override_.empty()) return bundled_probe_override_;
 	OS *os = OS::get_singleton();
 	return os != nullptr ? to_std(os->get_executable_path().get_base_dir()) : std::string();
 }
@@ -121,11 +121,11 @@ String LaunchFlags::bundled_assets_dir(const String &exe_dir) {
 }
 
 void LaunchFlags::set_bundled_probe_override(const String &dir) {
-	bundled_probe_override_ = dir;
+	bundled_probe_override_ = to_std(dir);
 }
 
 String LaunchFlags::get_bundled_probe_override() {
-	return bundled_probe_override_;
+	return from_std(bundled_probe_override_);
 }
 
 } // namespace godot

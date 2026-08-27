@@ -55,7 +55,9 @@ private:
 	static std::string to_std(const String &s);
 	static String from_std(const std::string &s);
 
-	static String bundled_probe_override_;
+	// A std::string, not a godot::String: a file-scope godot::String would be
+	// constructed at DLL load, before godot-cpp's runtime is bound.
+	static std::string bundled_probe_override_;
 };
 
 } // namespace godot
