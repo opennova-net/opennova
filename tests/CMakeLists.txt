@@ -757,6 +757,12 @@ add_executable(hud_config_tokens_test hud/hud_config_tokens_test.cpp)
 target_link_libraries(hud_config_tokens_test PRIVATE opennova_runtime)
 add_test(NAME hud_config_tokens COMMAND hud_config_tokens_test)
 
+# The loading screen spec (hud/loading_screen.h): the sidecar name rule, the
+# present-due rule and the composited resource names.
+add_executable(hud_loading_screen_test hud/loading_screen_test.cpp)
+target_link_libraries(hud_loading_screen_test PRIVATE opennova_runtime)
+add_test(NAME hud_loading_screen COMMAND hud_loading_screen_test)
+
 add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
 target_link_libraries(jo_env_sweep_test PRIVATE opennova_formats opennova_base)
 target_include_directories(jo_env_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
