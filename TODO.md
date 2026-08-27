@@ -5,6 +5,43 @@ hardening, and project health. Divergences from the original engine belong in
 [docs/divergence-ledger.md](docs/divergence-ledger.md) instead, and
 [docs/current-state.md](docs/current-state.md) explains which is which.
 
+## Push-down campaign (ADR 0040; the Godot layer is device legs + thin seams)
+
+Gauges: `adapter_cpp_orig_cites_pushdown` (godot/src simulation|object|mission) and
+`gd_orig_cites` (godot/game + modtools) in `scripts/lint/maturity_baseline.json`; a
+slice moves code, banks the counter, and keeps fidelity (cites travel with the code).
+
+- [ ] Train A (pattern-setting): `simulation/simulation_player_view.cpp` ->
+      `engine/runtime/world/player_view.*`; the minimap feed layout duplicated at
+      `simulation/simulation.h` and `hud/hud_overlay.cpp` -> `engine/runtime/hud/`;
+      `simulation.cpp` `advance_world_tick`/`boot_mission`/`restore_world_baseline`
+      -> `engine/net/inmatch` + `engine/runtime/mission/runtime_boot`;
+      `network/lan_session.cpp`'s browse/announce cadence + constants ->
+      `engine/net/npruntime`; GDScript one-file moves (`world/item_seat_specs.gd`
+      delete, `resource_index/launch_flags.gd` boot policy, the options tables,
+      `world/sound_bank.gd` volume law, `modtools/game_packer.gd` pack policy,
+      `world/hud_text_tables.gd`, `strings/strings.gd` boot set, `mission_end_screen.gd`
+      fade, `world/player_input_router.gd` catalog tokens, `world/mission_presentation.gd`
+      raw masks)
+- [ ] Train B (`godot/src/simulation/`, 18k lines): `simulation_present.cpp` data model,
+      `simulation_net.cpp` GameConfig policy + pumps, `simulation_occlusion.cpp`
+      frustum/iris/lighting diff, `simulation_player_{loadout,weapon}.cpp` +
+      `simulation_player.cpp`, `simulation_assets.cpp`, the feed marshallers, then the
+      `simulation.h` state-model split — `Simulation` ends as a `TickTarget` adapter
+- [ ] Train C (game-level GDScript, ~5.5k lines / 190+ cites): `world/game_world.gd`'s
+      `Game_StartMission` sequence + progress schedule, `world/game_hud_presenter.gd`
+      config tokens + Q16, `world/local_player_presenter.gd` swizzles + rangefinder,
+      `world/player_viewmodel_rig.gd`, `world/effect_light_director.gd` constants,
+      `ui/loading_screen.gd`, `world/net_session_drive.gd`, `world/mission_audio.gd`
+      (the invented reverb approximation ports `Audio_LoadReverbDefs @0x766d80` or is
+      ledgered), the destruction/item-effect/occlusion/fire passes, the player-info +
+      armory companions
+- [ ] Train D (`object/` + holdouts): `object/object_model_anim.cpp` + `skeletal_anim`
+      slot machine -> `engine/runtime/anim`; `item_database`/`weapon_database` doc
+      blocks -> their engine homes; CTRL store + PANM cache; `env/weather.cpp`
+      mission-start boundary; `particle/particle_renderer.cpp` `lit_primary_color`;
+      `env/water_core.cpp` view builder; `terrain/terrain.cpp` normal + quadrant policy
+
 ## Cleanup & verification backlog
 
 - [ ] Retail-LAN parity four-topology verdict: the tracked 24-cell matrix harness

@@ -13,6 +13,9 @@
   side by side in each `engine/<group>/<lib>/` dir and the GROUP directory is
   the one public include dir, so `#include <prefix/file.h>` statements are
   unchanged. One-directory-per-format, fixtures, namespaces, and tests stand.
+  [ADR 0040](0040-the-engine-is-one-namespace.md) (2026-08-26) then made
+  `engine/` the one include root: the same headers are
+  `#include <formats/prefix/file.h>` now.
   Two prefix consequences: `terrain_query` owns `<terrain_query/...>` (the
   ADR 0020 seam headers, previously shared under `terrain/`), and the .ptl
   lib directory is `engine/formats/particle` (matching its historical

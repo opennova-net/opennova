@@ -7,6 +7,11 @@
   `opennova_oned_edit` INTERFACE leaf and the editor-only `refs` subsystem;
   the five group archives and `opennova_io` remain. References to `refs` in
   the decision body record the topology at decision time.
+  [ADR 0040](0040-the-engine-is-one-namespace.md) replaces the include-root
+  clause: `engine/` is the ONE public include root and includes are
+  group-qualified (`<runtime/terrain_query/coords.h>`, not
+  `<terrain_query/coords.h>`); decision 5's seam headers and the
+  `<domain/...>` paths named below read with their group prefix now.
 - **Supersedes/updates**: ADR 0024 decision 1's per-format-CMake-target clause
   and decisions 2–4 (the family link groups) — its one-directory-per-format
   layout, the decision-5 renderer reversal, and the decision-6 Model A/B

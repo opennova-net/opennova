@@ -2,8 +2,8 @@
 
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `engine/`.
   Godot binding code lives only in `godot/src/`.
-- Four groups (ADR 0028) — the directories and, since ADR 0029, the CMake build targets
-  too; still never namespaces or include-path segments:
+- Four groups (ADR 0028) — the directories, since ADR 0029 the CMake build targets,
+  and since ADR 0040 the first include-path segment too (never C++ namespaces):
   - `base/` — shared substrate and repo plumbing: io, crt, vfs, resource_index,
     gameprofile, pcapio.
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
@@ -30,14 +30,18 @@
     serializes that result.
 - Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
   headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
-  `npwire/wire/`), and each GROUP directory is the one public include dir, so
-  `#include <domain/file.h>` resolves to `engine/<group>/<domain>/file.h`. The
-  one-directory-per-format principle, fixtures, and tests (ADR 0024) survive both
-  ADR 0029's target collapse and the flatten; a library builds inside its group
-  target, not as its own (see the group-targets bullet below). Two prefix notes from
-  the flatten: `terrain_query` owns its own `<terrain_query/...>` prefix (the ADR
-  0020 seam headers — pre-flatten they shared `terrain/`), and the .ptl lib lives at
-  `engine/formats/particle` (its historical `<particle/...>` prefix names the dir).
+  `npwire/wire/`), and `engine/` is the ONE public include root (ADR 0040): every
+  engine header is included as `#include <group/domain/file.h>` —
+  `<runtime/world/player_view.h>`, `<formats/mission/mission.h>`, `<base/vfs/vfs.h>`,
+  `<net/npwire/peer_addr.h>` — from engine, apps, tests and godot/src alike; only a
+  same-directory sibling may use a bare `"file.h"`. The group in the path is what
+  keeps `formats/mission` and `runtime/mission` (likewise `particle`, `wac`) apart
+  and makes the layering a lint (`scripts/lint/include_graph_check.py`: a tree
+  includes only the groups below it, no unqualified engine include, the ADR 0020
+  terrain seam, no `godot` include under engine/apps/tests). The
+  one-directory-per-format principle, fixtures, and tests (ADR 0024) survive the
+  target collapse, the flatten and the root change; a library builds inside its
+  group target, not as its own (see the group-targets bullet below).
   Namespace `opennova`. Native consumers link the static group targets directly;
   no shared-library/FFI export surface is maintained.
 - Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones (single ratified
@@ -58,8 +62,8 @@
   runtime links base, net links runtime, the service links net. The ADR 0024 family
   groups are deleted as subsumed; ADR 0020's terrain seam is include-level now
   (`scripts/lint/include_graph_check.py` — for net/wac/mission/world the
-  `terrain/` prefix is fully forbidden; the seam is terrain_query's four
-  `<terrain_query/...>` headers), and `link_graph_check.py` keeps the sqlite
+  `runtime/terrain/` prefix is fully forbidden; the seam is terrain_query's
+  `<runtime/terrain_query/...>` headers), and `link_graph_check.py` keeps the sqlite
   containment.
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/

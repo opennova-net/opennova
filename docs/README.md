@@ -94,6 +94,7 @@ behavior is summarized and cited.
 | [0037](adr/0037-oned-runs-game-data.md) | Hard cut: ONED stores run settings, runs OpenNova loose, stages and runs retail, and stops its child; no authoring, project/import system, workspaces, or MCP; hidden `--pack-game` remains release infrastructure |
 | [0038](adr/0038-native-runtime-assets-glb-editor.md) | Hard cut to native runtime assets: Python/DCC and ASE/OED/TDP authoring retire; ObjectData is immutable 3DI; a future editor uses an independent GLB/GLTF ↔ 3DI seam |
 | [0039](adr/0039-in-engine-dev-tools.md) | Hard cut: the tool UI moves into the engine as Dear ImGui windows on one `ImGuiPass` (`engine/runtime/devtools`, docking + multi-viewport) with one Godot seam node per product and the imgui-godot addon — the game's F3 dev tools (debug builds only) and ONED's run surface; the GDScript overlay and ONED's Control scene are deleted; updates ADR 0034 d6, ADR 0031's seam note and ADR 0037's UI |
+| [0040](adr/0040-the-engine-is-one-namespace.md) | The engine is one namespace: no `Nova`/`nova_` prefix anywhere (files follow the type they declare; `NovaWorld*`, `NovaLogic`, `opennova*` survive as proper nouns), `engine/` is the one public include root with group-qualified `<group/lib/file.h>` includes, and the group order + Godot-free boundary are a lint (`include_graph_check.py`); updates ADR 0024/0029's include-root clause and ADR 0034 d5/§2 |
 
 ## RE records by domain
 
