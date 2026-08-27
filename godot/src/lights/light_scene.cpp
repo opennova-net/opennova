@@ -935,7 +935,38 @@ Ref<Image> LightScene::get_static_light_rows_image() const {
 			static_light_rows_bytes_);
 }
 
+namespace {
+
+Color color_from_rgb(uint32_t rgb) {
+	return Color(static_cast<float>((rgb >> 16) & 0xFF) / 255.0f,
+			static_cast<float>((rgb >> 8) & 0xFF) / 255.0f,
+			static_cast<float>(rgb & 0xFF) / 255.0f);
+}
+
+} // namespace
+
+float LightScene::muzzle_glow_radius() {
+	return static_cast<float>(::renderer::LightScene::kMuzzleGlowRadiusFixed) / 65536.0f;
+}
+Color LightScene::muzzle_glow_color() {
+	return color_from_rgb(::renderer::LightScene::kMuzzleGlowColorRgb);
+}
+int LightScene::muzzle_glow_fade_mode() { return ::renderer::LightScene::kMuzzleGlowFadeMode; }
+int LightScene::muzzle_glow_fade_ticks() { return ::renderer::LightScene::kMuzzleGlowFadeTicks; }
+Color LightScene::death_flash_color() {
+	return color_from_rgb(::renderer::LightScene::kDeathFlashColorRgb);
+}
+int LightScene::death_flash_fade_mode() { return ::renderer::LightScene::kDeathFlashFadeMode; }
+int LightScene::death_flash_fade_ticks() { return ::renderer::LightScene::kDeathFlashFadeTicks; }
+
 void LightScene::_bind_methods() {
+	ClassDB::bind_static_method("LightScene", D_METHOD("muzzle_glow_radius"), &LightScene::muzzle_glow_radius);
+	ClassDB::bind_static_method("LightScene", D_METHOD("muzzle_glow_color"), &LightScene::muzzle_glow_color);
+	ClassDB::bind_static_method("LightScene", D_METHOD("muzzle_glow_fade_mode"), &LightScene::muzzle_glow_fade_mode);
+	ClassDB::bind_static_method("LightScene", D_METHOD("muzzle_glow_fade_ticks"), &LightScene::muzzle_glow_fade_ticks);
+	ClassDB::bind_static_method("LightScene", D_METHOD("death_flash_color"), &LightScene::death_flash_color);
+	ClassDB::bind_static_method("LightScene", D_METHOD("death_flash_fade_mode"), &LightScene::death_flash_fade_mode);
+	ClassDB::bind_static_method("LightScene", D_METHOD("death_flash_fade_ticks"), &LightScene::death_flash_fade_ticks);
 	ClassDB::bind_method(D_METHOD("spawn_model_light", "config"),
 			&LightScene::spawn_model_light);
 	ClassDB::bind_method(D_METHOD("spawn_glow", "config"),

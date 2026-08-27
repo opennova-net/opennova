@@ -395,6 +395,19 @@ public:
 	static constexpr size_t kQueryLimit = 64;   // [orig: @ 0x5aa384]
 	static constexpr size_t kSelectLimit = kLightSelectLimit; // the 3-cap [orig: @ 0x5d9229]
 
+	// The witnessed transient spawners' constants (the pool comment above).
+	// Muzzle glow: radius 98304 (1.5 wu), color 0xFFE0A0, re-armed per shot to
+	// mode 4 / 5 ticks [orig: Entity_UpdateMuzzleGlowEffect @ 0x56c960].
+	static constexpr int32_t kMuzzleGlowRadiusFixed = 0x18000;
+	static constexpr uint32_t kMuzzleGlowColorRgb = 0xFFE0A0;
+	static constexpr int kMuzzleGlowFadeMode = 4;
+	static constexpr int kMuzzleGlowFadeTicks = 5;
+	// Death flash: color 0xFFC080, mode 2 / 31 ticks, corona disabled
+	// [orig: Entity_SpawnDeathPieces @ 0x49351a].
+	static constexpr uint32_t kDeathFlashColorRgb = 0xFFC080;
+	static constexpr int kDeathFlashFadeMode = 2;
+	static constexpr int kDeathFlashFadeTicks = 31;
+
 	LightHandle spawn(const LightSpawnParams &params);
 	void despawn(LightHandle handle);
 	void set_position(LightHandle handle, const std::array<int32_t, 3> &position_fixed);

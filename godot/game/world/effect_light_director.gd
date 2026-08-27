@@ -25,15 +25,6 @@ extends RefCounted
 ## touch sits well inside this radius.
 const QUERY_RADIUS := 512.0
 
-## The muzzle glow constants [orig: Entity_UpdateMuzzleGlowEffect @ 0x56c960 —
-## radius 98304 (1.5), color 0xFFE0A0, re-armed per shot to mode 4 / 5 ticks].
-const MUZZLE_RADIUS := 1.5
-const MUZZLE_COLOR := Color(255.0 / 255.0, 224.0 / 255.0, 160.0 / 255.0)
-## The death flash [orig: Entity_SpawnDeathPieces @ 0x49351a — color 0xFFC080,
-## mode 2 / 31 ticks, corona disabled].
-const DEATH_COLOR := Color(255.0 / 255.0, 192.0 / 255.0, 128.0 / 255.0)
-const DEATH_TICKS := 31
-
 # Light owner zero is retail's unowned/world sentinel. A decoded wire handle
 # is an independent 16-bit domain in which zero is valid, so tag every wire
 # identity into a nonzero, non-ObjectID range before it reaches LightScene.
@@ -681,8 +672,8 @@ func on_muzzle_fire(shooter_handle: int, world_pos: Vector3) -> void:
 	if handle == 0:
 		handle = int(_scene.spawn_glow({
 			"position": world_pos,
-			"radius": MUZZLE_RADIUS,
-			"color": MUZZLE_COLOR,
+			"radius": LightScene.muzzle_glow_radius(),
+			"color": LightScene.muzzle_glow_color(),
 			"fade_mode": 3,
 			"fade_duration": -1,
 			"owner_entity": owner_id,
@@ -690,7 +681,8 @@ func on_muzzle_fire(shooter_handle: int, world_pos: Vector3) -> void:
 		if handle == 0:
 			return
 		_entity_effect_handles[owner_id] = handle
-	_scene.set_light_fade(handle, 4, 5)
+	_scene.set_light_fade(handle, LightScene.muzzle_glow_fade_mode(),
+			LightScene.muzzle_glow_fade_ticks())
 	_scene.set_light_owner(handle, owner_id, 0)
 	_scene.set_light_position(handle, world_pos)
 	_scene.set_light_blend(handle, 1.0)
@@ -724,9 +716,9 @@ func on_death_light(world_pos: Vector3, radius: float) -> void:
 	_scene.spawn_glow({
 		"position": world_pos,
 		"radius": radius,
-		"color": DEATH_COLOR,
-		"fade_mode": 2,
-		"fade_duration": DEATH_TICKS,
+		"color": LightScene.death_flash_color(),
+		"fade_mode": LightScene.death_flash_fade_mode(),
+		"fade_duration": LightScene.death_flash_fade_ticks(),
 		"disable_corona": true,
 	})
 
