@@ -1,5 +1,5 @@
 // The per-frame sky-dome state assembly — the engine half of the shell's
-// dome applier, ported from nova_sky.gd (2026-08-10 de-scripting). The dome
+// dome applier, ported from sky.gd (2026-08-10 de-scripting). The dome
 // geometry itself is env::build_sky_dome_mesh (engine/formats/env, built once
 // at the reference height per env #20's ratified fold); this header owns the
 // per-frame value block the applier pushes into the dome shader.

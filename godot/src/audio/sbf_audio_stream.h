@@ -1,12 +1,11 @@
-#ifndef NOVA_SBF_AUDIO_STREAM_H
-#define NOVA_SBF_AUDIO_STREAM_H
+#pragma once
 
 #include <godot_cpp/classes/audio_stream.hpp>
 #include <godot_cpp/classes/audio_stream_playback.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include "nova_sbf_bank.h"
+#include "audio/sbf_bank.h"
 
 namespace godot {
 
@@ -42,4 +41,3 @@ private:
 
 } // namespace godot
 
-#endif // NOVA_SBF_AUDIO_STREAM_H

@@ -8,10 +8,10 @@ shader_type spatial;
 render_mode unshaded, depth_draw_never, cull_disabled, blend_mix;
 
 // Gamma-domain scene-target contract.
-#include "res://shaders/nova_color.gdshaderinc"
-#include "res://shaders/nova_frame_pass.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
+#include "res://shaders/frame_pass.gdshaderinc"
 
-// Raw sampling per the gamma-space convention (nova_color.gdshaderinc).
+// Raw sampling per the gamma-space convention (color.gdshaderinc).
 uniform sampler2D u_diffuse : filter_linear_mipmap;
 uniform vec3 u_tint = vec3(1.0, 1.0, 1.0);
 uniform float u_opacity = 1.0;
@@ -37,7 +37,7 @@ void vertex() {
 	// discs there against the beauty depth, so terrain past 64 u does not
 	// occlude the bloom source [orig: render_celestial_bodies(1) from
 	// FrameFX_RenderBloomPass @ 0x582a77].
-	if (!nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (!is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
 		POSITION.z = 0.0;
 	}
 }
@@ -50,6 +50,6 @@ void fragment() {
 	vec4 tex = texture(u_diffuse, UV);
 	// Gamma-space modulate; the terminal compositor runs only after this
 	// alpha blend has completed in the retail gamma domain.
-	ALBEDO = nova_scene_output(tex.rgb * u_tint);
+	ALBEDO = scene_output(tex.rgb * u_tint);
 	ALPHA = tex.a * u_opacity;
 }

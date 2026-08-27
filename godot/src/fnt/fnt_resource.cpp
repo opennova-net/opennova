@@ -1,6 +1,6 @@
-#include "fnt/nova_fnt_resource.h"
+#include "fnt/fnt_resource.h"
 
-#include "util/nova_cp1252.h"
+#include "util/cp1252.h"
 
 #include <godot_cpp/classes/text_server.hpp>
 #include <godot_cpp/core/class_db.hpp>

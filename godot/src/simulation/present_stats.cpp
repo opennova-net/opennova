@@ -1,8 +1,8 @@
-#include "nova_present_stats.h"
+#include "simulation/present_stats.h"
 
 namespace godot {
 
-#define NOVA_STAT_BIND(klass, field)                                          \
+#define STAT_BIND(klass, field)                                          \
 	ClassDB::bind_method(D_METHOD("get_" #field), &klass::get_##field);       \
 	ClassDB::bind_method(D_METHOD("set_" #field, "value"),                    \
 			&klass::set_##field);                                             \
@@ -10,16 +10,16 @@ namespace godot {
 			"get_" #field);
 
 void MissionPresentStats::_bind_methods() {
-	NOVA_STAT_BIND(MissionPresentStats, moved)
-	NOVA_STAT_BIND(MissionPresentStats, posed)
-	NOVA_STAT_BIND(MissionPresentStats, hidden)
-	NOVA_STAT_BIND(MissionPresentStats, plan_rebuilds)
-	NOVA_STAT_BIND(MissionPresentStats, transform_builds)
-	NOVA_STAT_BIND(MissionPresentStats, aim_dispatches)
-	NOVA_STAT_BIND(MissionPresentStats, rhc_dispatches)
-	NOVA_STAT_BIND(MissionPresentStats, part_dispatches)
-	NOVA_STAT_BIND(MissionPresentStats, control_dispatches)
-	NOVA_STAT_BIND(MissionPresentStats, body_dispatches)
+	STAT_BIND(MissionPresentStats, moved)
+	STAT_BIND(MissionPresentStats, posed)
+	STAT_BIND(MissionPresentStats, hidden)
+	STAT_BIND(MissionPresentStats, plan_rebuilds)
+	STAT_BIND(MissionPresentStats, transform_builds)
+	STAT_BIND(MissionPresentStats, aim_dispatches)
+	STAT_BIND(MissionPresentStats, rhc_dispatches)
+	STAT_BIND(MissionPresentStats, part_dispatches)
+	STAT_BIND(MissionPresentStats, control_dispatches)
+	STAT_BIND(MissionPresentStats, body_dispatches)
 }
 
 Ref<WirePresentStats> WirePresentStats::create(int64_t p_live,
@@ -37,21 +37,21 @@ void WirePresentStats::_bind_methods() {
 	ClassDB::bind_static_method("WirePresentStats",
 			D_METHOD("create", "live", "spawned", "unresolved", "pending"),
 			&WirePresentStats::create, DEFVAL(0));
-	NOVA_STAT_BIND(WirePresentStats, live)
-	NOVA_STAT_BIND(WirePresentStats, spawned)
-	NOVA_STAT_BIND(WirePresentStats, unresolved)
-	NOVA_STAT_BIND(WirePresentStats, pending)
+	STAT_BIND(WirePresentStats, live)
+	STAT_BIND(WirePresentStats, spawned)
+	STAT_BIND(WirePresentStats, unresolved)
+	STAT_BIND(WirePresentStats, pending)
 }
 
 void ScarPresenterStats::_bind_methods() {
-	NOVA_STAT_BIND(ScarPresenterStats, world_surfaces)
-	NOVA_STAT_BIND(ScarPresenterStats, entity_meshes)
-	NOVA_STAT_BIND(ScarPresenterStats, batches)
-	NOVA_STAT_BIND(ScarPresenterStats, vertices)
-	NOVA_STAT_BIND(ScarPresenterStats, textures_missing)
-	NOVA_STAT_BIND(ScarPresenterStats, strips_unsupported)
+	STAT_BIND(ScarPresenterStats, world_surfaces)
+	STAT_BIND(ScarPresenterStats, entity_meshes)
+	STAT_BIND(ScarPresenterStats, batches)
+	STAT_BIND(ScarPresenterStats, vertices)
+	STAT_BIND(ScarPresenterStats, textures_missing)
+	STAT_BIND(ScarPresenterStats, strips_unsupported)
 }
 
-#undef NOVA_STAT_BIND
+#undef STAT_BIND
 
 } // namespace godot

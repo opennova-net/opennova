@@ -15,7 +15,7 @@ namespace opennova::particle {
 // @0x5ECFC0 — the calls @0x5ED034 (pass 0) and @0x5ED07C (pass 1), each list
 // walk followed by CParticleManager_TransformToViewSpace]; the owner-to-be is
 // the group frame snapshot's child walk in effect_scene.cpp, with the device
-// draw in godot/src/particle/nova_particle_renderer.cpp taking the pass flag.
+// draw in godot/src/particle/particle_renderer.cpp taking the pass flag.
 // Consumed by tests/particle/group_render_gate_test.cpp only until then
 // (scripts/lint/orphan_header_check.py).
 //

@@ -3,9 +3,9 @@
 // AudioVM_OpenContextFile @ 0x00672160 (jointops); the engine reads SBF
 // archives via the same header + entry-table layout.
 
-#include "nova_sbf_bank.h"
-#include "nova_sbf_audio_stream.h"
-#include "util/nova_data_format.h"
+#include "audio/sbf_bank.h"
+#include "audio/sbf_audio_stream.h"
+#include "util/data_format.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>

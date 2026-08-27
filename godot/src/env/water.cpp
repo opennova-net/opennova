@@ -1,4 +1,4 @@
-#include "env/nova_water.h"
+#include "env/water.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/canvas_item_material.hpp>
@@ -13,10 +13,10 @@
 #include <godot_cpp/classes/viewport.hpp>
 
 #include "env/env_render_camera.h"
-#include "env/nova_mission_environment.h"
-#include "env/nova_weather.h"
-#include "render/nova_framefx.h"
-#include "object/nova_object_shader_cache.h"
+#include "env/mission_environment.h"
+#include "env/weather.h"
+#include "render/frame_fx.h"
+#include "object/object_shader_cache.h"
 
 #include <runtime/renderer/render_order.h>
 #include <runtime/terrain/quadtree.h> // water_pass_active (retail's g_WaterActive)

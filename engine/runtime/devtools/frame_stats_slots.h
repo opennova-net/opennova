@@ -4,7 +4,7 @@
 // Times are microseconds unless the description says VALUE (a plain count).
 //
 // One list, three consumers: the engine enum below, the FrameStats GDExtension
-// enum constants (godot/src/devtools/nova_frame_stats.cpp) and the Stats window
+// enum constants (godot/src/devtools/frame_stats.cpp) and the Stats window
 // rows (stats_window_rows.h). Add a slot here and every consumer sees it.
 #pragma once
 

@@ -7,7 +7,7 @@ extends GutTest
 ## @ 0x51f300, LoadingScreen_UpdateAndPresent @ 0x586be0, draw_progress_bar_0
 ## @ 0x5d4c40].
 
-const LoadingScreen := preload("res://game/ui/nova_loading_screen.gd")
+const LoadingScreen := preload("res://game/ui/loading_screen.gd")
 
 var _temp_dirs: Array[String] = []
 

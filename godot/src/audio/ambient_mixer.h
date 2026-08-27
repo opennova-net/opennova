@@ -17,7 +17,7 @@ class Simulation;
 // Thin Godot binding over opennova::audio::AmbientMixer: the placed-marker ambient
 // emitter system at the witnessed split cadence — staggered tick&7 eval/registration
 // on the logic-tick clock, per-frame live-slot mix (docs/audio/lwf-dbf-sound-re.md
-// §driver cadence, D-SND-16). The GDScript mission audio (nova_mission_audio.gd)
+// §driver cadence, D-SND-16). The GDScript mission audio (mission_audio.gd)
 // feeds resolved marker/layer data at setup, pumps the clocks, and binds the ranked
 // result to its persistent AudioStreamPlayer3D channels; occlusion routes to the
 // Simulation natively (tests inject a Callable override — the typed seam).
@@ -77,7 +77,7 @@ public:
 	int marker_count() const;
 
 	// The witnessed curve family (see engine/runtime/audio/ambient_mixer.h for the [orig]
-	// map); statics so nova_sound_bank.gd's pinned seams delegate here.
+	// map); statics so sound_bank.gd's pinned seams delegate here.
 	static int calc_distance_volume(int64_t dist_q16, int64_t radius_q16, int vol255,
 			int clamp_vol);
 	static int oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,

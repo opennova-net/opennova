@@ -1,6 +1,6 @@
 extends Node
 
-## The one interactive-music context (autoload "NovaMusicService"). The original
+## The one interactive-music context (autoload "MusicService"). The original
 ## engine streams exactly ONE music context at a time — a (bank .sbf, script
 ## .bin) pair loaded into the AudioVM; switching music is a full context reload
 ## [orig: AudioVM_OpenMusicContext @ 0x6722a0 tears down the prior VM;

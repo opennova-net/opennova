@@ -4,7 +4,7 @@ extends Control
 # Runtime menu shell: drives the compiled menu surface — a MenuFrame (the
 # engine draw-list/pump Control) orchestrated by MenuDriver (menu_driver.gd),
 # loading the game's .mnu menu set + audio from the user's resource directory.
-# Music streams through the shared NovaMusicService autoload (one context at a
+# Music streams through the shared MusicService autoload (one context at a
 # time, like the original AudioVM): the shell opens the MENU context; GameWorld
 # opens the GAME context at mission start. It is the runtime counterpart to
 # GameWorld: GameWorld turns a resource dir into a playable world, this turns it
@@ -312,10 +312,10 @@ func _assemble_assets() -> void:
 
 	_driver = MenuDriver.new()
 	_driver.attach(_frame, _audio)
-	# The one music context lives on the NovaMusicService autoload (the original
+	# The one music context lives on the MusicService autoload (the original
 	# streams one AudioVM context at a time); the driver pushes each screen's
 	# MUSICVAR into its director at the menumus discriminator index.
-	_driver.set_music_director(NovaMusicService.director())
+	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MusicDirector.MENU_MUSIC_VAR_SLOT)
 
 	# Connect once on the persistent driver (screens reconfigure under it;
@@ -759,7 +759,7 @@ func _apply_expansion(name: String) -> void:
 	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable(slot, MUSICVAR);
 	# the slot witness lives at the engine home, audio/music_policy.h
 	# kMenuMusicVarSlot].
-	var active_music_var := NovaMusicService.get_var(MusicDirector.MENU_MUSIC_VAR_SLOT)
+	var active_music_var := MusicService.get_var(MusicDirector.MENU_MUSIC_VAR_SLOT)
 	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled()) != OK:
 		push_warning("MenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
 		_root.mount_runtime(dir, prev, LaunchFlags.loose_override_enabled())  # rollback
@@ -767,7 +767,7 @@ func _apply_expansion(name: String) -> void:
 	ResourceDirSettings.set_expansion(name)
 	_selected_expansion = name
 	_enter_menu_music()
-	NovaMusicService.set_var(MusicDirector.MENU_MUSIC_VAR_SLOT, active_music_var)
+	MusicService.set_var(MusicDirector.MENU_MUSIC_VAR_SLOT, active_music_var)
 	_refresh_dependent_content()
 	_update_mod_desc(name)
 	# The expansion's movie overrides take effect with the remount [orig:
@@ -883,12 +883,12 @@ func _on_novaworld_control() -> void:
 
 # --- Audio --------------------------------------------------------------------
 
-# Open the MENU music context on the shared NovaMusicService (the original opens
+# Open the MENU music context on the shared MusicService (the original opens
 # it once at boot [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60] and re-opens
 # it when the front end returns; the GAME context is the world's to open at
 # mission start [orig: Game_StartMission @ 0x525598]).
 func _enter_menu_music() -> void:
-	NovaMusicService.open_menu_context(_root, menu_music_file, menu_sound_bank_file)
+	MusicService.open_menu_context(_root, menu_music_file, menu_sound_bank_file)
 
 
 # --- Asset resolution helpers (all best-effort, degrade to null) --------------
@@ -914,15 +914,15 @@ func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
 
 # The witnessed music-pair resolution (engine-derived names via
 # MusicDirector.resolve_*_music_pair + the VFS/loose fallback orchestration)
-# lives on NovaMusicService; these seams keep it queryable against the
+# lives on MusicService; these seams keep it queryable against the
 # shell's root (ADR 0018 — tests and diagnostics read it here, not the
 # privates).
 func resolve_menu_music_pair() -> MusicPair:
-	return NovaMusicService.resolve_menu_music_pair(_root)
+	return MusicService.resolve_menu_music_pair(_root)
 
 
 func resolve_game_music_pair() -> MusicPair:
-	return NovaMusicService.resolve_game_music_pair(_root)
+	return MusicService.resolve_game_music_pair(_root)
 
 
 # The visual menu assets (.mnu document, .mns stylesheet, RTXT text) load through
@@ -1033,7 +1033,7 @@ func get_resource_root() -> ResourceRoot:
 
 
 func get_music_director() -> MusicDirector:
-	return NovaMusicService.director()
+	return MusicService.director()
 
 
 func get_current_menu_file() -> String:

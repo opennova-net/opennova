@@ -11,9 +11,9 @@
 // Chunk data is read from SbfBank's decoded in-memory byte stream, so
 // SCR-wrapped loose banks and plaintext banks use the same playback path.
 
-#include "nova_sbf_audio_stream_playback.h"
+#include "audio/sbf_audio_stream_playback.h"
 
-#include "nova_sbf_bank.h"
+#include "audio/sbf_bank.h"
 
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>

@@ -7,8 +7,8 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include "imgui_pass_node.h"
-#include "nova_frame_stats.h"
+#include "devtools/imgui_pass_node.h"
+#include "devtools/frame_stats.h"
 
 #if OPENNOVA_DEVTOOLS
 #include <runtime/devtools/game_dev_tools.h>

@@ -19,24 +19,24 @@ Bases: `B50Cal`, `Armry01`, `dm1a1`, `Pmpjk01` are the committed
 
 | File | Base | Recipe | Consumer |
 |---|---|---|---|
-| `b50cal_ctrl1_heat_glow` | B50Cal | `set_control_register_name(1, "HEAT_GLOW")` | `nova_object_data_ctrl_bus_test.gd` duplicate CTRL alias |
+| `b50cal_ctrl1_heat_glow` | B50Cal | `set_control_register_name(1, "HEAT_GLOW")` | `object_data_ctrl_bus_test.gd` duplicate CTRL alias |
 | `b50cal_ctrl1_not_retail` | B50Cal | `set_control_register_name(1, "NOT_RETAIL")` | ctrl_bus unknown CTRL alias |
 | `b50cal_yaw_style114` | B50Cal | the LOD0 track with `control == 113 && control_param == 1`: `set_part_anim_track_field(0, anim, track, "control", 114)` | ctrl_bus wave style, normal |
 | `b50cal_ctrl1_lod_frac_yaw_style114` | B50Cal | `set_control_register_name(1, "LOD_FRAC")` + the same track edit | ctrl_bus wave style, patched |
 | `b50cal_mtrl0_rgbgen113_reg1` | B50Cal | `set_material_field(0, "rgb_gen_style", 113)`, `("rgb_gen_reg", 1)`, `("rgb_gen_start_color", Color.BLACK)`, `("rgb_gen_end_color", Color.WHITE)` | ctrl_bus material alias |
 | `armry01_lght0_colorgen113_flicker` | Armry01 | `set_light_field(0, "disable_lightobjects", false)`, `("colorgen_style", 113)`, `("colorgen_phase", 0)`, `("color_start", Color.BLACK)`, `("color_end", Color.WHITE)` | ctrl_bus light bus |
-| `pmpjk01_anim0_noise_translation` | Pmpjk01 | `set_part_anim_channel_enabled(0, 0, "translation", true)`; track fields `control = 0x36`, `control_param = 0`, `rate = 0`, `start = 0`, `end = 32767` | `nova_object_data_panm_apply_test.gd` same-time noise |
+| `pmpjk01_anim0_noise_translation` | Pmpjk01 | `set_part_anim_channel_enabled(0, 0, "translation", true)`; track fields `control = 0x36`, `control_param = 0`, `rate = 0`, `start = 0`, `end = 32767` | `object_data_panm_apply_test.gd` same-time noise |
 | `shed_lght0_sub2_origin_atten100` | Shed | `set_light_field(0, "subobject", 2)`, `("position", Vector3.ZERO)`, `("atten_end", 100.0)` | `effect_light_world_test.gd` exact ROBJ row; `per_model_light_isolation_test.gd` owner scope |
 | `armry01_lght0_sub1_offset` | Armry01 | `set_light_field(0, "subobject", 1)`, `("position", Vector3(0.25, 0.5, -0.75))`, `("atten_end", 1000.0)`, `("disable_lightobjects", false)` | effect_light spawn-time matrix |
 | `house_lod0_sine_rotx` | House | `p = add_part_anim(0, 0)`; rotation enabled; `rotation.x` `sine_wave` -1, values `0.0 .. 90.0` speed `1.0` (appended, no delete) | `terrain_static_shadow_runtime_test.gd` resident pages + restore phase |
 | `house_lod0_sine_rotx_uv1` | House | the previous recipe + `set_material_field(0, "uv_u_style", 1)` | terrain dynamic-UV phase |
 | `house_mtrl0_uvscroll16_alphatest` | House | `set_material_field(0, "alpha_test_enabled", true)`, `("uv_u_style", 16)`, `("uv_u_rate", 1.0)` | terrain worker snapshot |
-| `b50cal_heat_glow_slide_part1` | B50Cal | `set_control_register_name(0, "HEAT_GLOW")`; delete rows; slide(0, 1) | `nova_simulation_test.gd` heat glow |
-| `armry01_special1_slide_part1` | Armry01 | `set_control_register_name(0, "VEHICLE_SPECIAL1")`; delete rows; slide(0, 1) | nova_simulation animated collision + FastRope SPECIAL1 |
-| `armry01_special2_slide_part1` | Armry01 | `set_control_register_name(0, "VEHICLE_SPECIAL2")`; delete rows; slide(0, 1) | nova_simulation FastRope SPECIAL2 |
-| `dm1a1_special1_slide_ewep01` | dm1a1 | `set_control_register_name(0, "VEHICLE_SPECIAL1")`; `anchor` = `subobject` of user point `ewep01`; delete rows; slide(0, anchor) | nova_simulation listen-snapshot attachment |
-| `pmpjk01_lod0_inert_lod1_sine_rotz` | Pmpjk01 | delete LOD0 rows; `add_part_anim(0, 0)` (inert); delete LOD1 rows; `add_part_anim(1, 0)`, rotation enabled, `rotation.z` `sine_wave` -1, values `0.0 .. 90.0` speed `1.0` | nova_simulation effective LOD0 collision |
-| `panm_live_01_spinner` .. `panm_inert_10_rotrev` | Shed | delete rows; `a = add_part_anim(0, 0)`; `set_part_animation_flags(0, a, FLAGS)`; every track `control = 0`; the live tracks `control = 0x10`. Cases (flags, live tracks): 01 `1<<8` []; 02 `3<<8` []; 03 `4<<8` []; 04 `2<<8` [rotation_z]; 05 `2<<8` [scale_x]; 06 `1` [scale_y]; 07 `1` [scale_x]; 08 `2` [scale_y]; 09 `1<<24` [translation]; 10 `1<<16` [] | nova_simulation PANM liveness family (`live` files evaluate live, `inert` files do not) |
+| `b50cal_heat_glow_slide_part1` | B50Cal | `set_control_register_name(0, "HEAT_GLOW")`; delete rows; slide(0, 1) | `simulation_test.gd` heat glow |
+| `armry01_special1_slide_part1` | Armry01 | `set_control_register_name(0, "VEHICLE_SPECIAL1")`; delete rows; slide(0, 1) | simulation animated collision + FastRope SPECIAL1 |
+| `armry01_special2_slide_part1` | Armry01 | `set_control_register_name(0, "VEHICLE_SPECIAL2")`; delete rows; slide(0, 1) | simulation FastRope SPECIAL2 |
+| `dm1a1_special1_slide_ewep01` | dm1a1 | `set_control_register_name(0, "VEHICLE_SPECIAL1")`; `anchor` = `subobject` of user point `ewep01`; delete rows; slide(0, anchor) | simulation listen-snapshot attachment |
+| `pmpjk01_lod0_inert_lod1_sine_rotz` | Pmpjk01 | delete LOD0 rows; `add_part_anim(0, 0)` (inert); delete LOD1 rows; `add_part_anim(1, 0)`, rotation enabled, `rotation.z` `sine_wave` -1, values `0.0 .. 90.0` speed `1.0` | simulation effective LOD0 collision |
+| `panm_live_01_spinner` .. `panm_inert_10_rotrev` | Shed | delete rows; `a = add_part_anim(0, 0)`; `set_part_animation_flags(0, a, FLAGS)`; every track `control = 0`; the live tracks `control = 0x10`. Cases (flags, live tracks): 01 `1<<8` []; 02 `3<<8` []; 03 `4<<8` []; 04 `2<<8` [rotation_z]; 05 `2<<8` [scale_x]; 06 `1` [scale_y]; 07 `1` [scale_x]; 08 `2` [scale_y]; 09 `1<<24` [translation]; 10 `1<<16` [] | simulation PANM liveness family (`live` files evaluate live, `inert` files do not) |
 
 ## The minting probe (master `5820432c1`, `godot/tests/mint_synthetic_fixtures_probe.gd`)
 
@@ -204,7 +204,7 @@ func _init() -> void:
 		return
 	DirAccess.make_dir_recursive_absolute(_out_dir)
 
-	# --- CTRL bus (nova_object_data_ctrl_bus_test.gd) ---
+	# --- CTRL bus (object_data_ctrl_bus_test.gd) ---
 	_mint("b50cal_ctrl1_heat_glow", B50CAL,
 		func(d: ObjectData) -> void:
 			_check(d.set_control_register_name(1, "HEAT_GLOW"), "ctrl1 HEAT_GLOW"),
@@ -265,7 +265,7 @@ func _init() -> void:
 			_check(int(l.get("colorgen_phase", -1)) == 0, "colorgen_phase re-read")
 			_check(not bool(l.get("disable_lightobjects", true)), "disable_lightobjects re-read"))
 
-	# --- PANM apply (nova_object_data_panm_apply_test.gd) ---
+	# --- PANM apply (object_data_panm_apply_test.gd) ---
 	_mint("pmpjk01_anim0_noise_translation", PMP,
 		func(d: ObjectData) -> void:
 			_check(d.get_part_anim_count(0) > 0, "pump jack has a LOD0 row")
@@ -338,7 +338,7 @@ func _init() -> void:
 			_check(int(m.get("uv_u_style", -1)) == 16, "uv_u_style 16 re-read")
 			_check(is_equal_approx(float(m.get("uv_u_rate", 0.0)), 1.0), "uv_u_rate re-read"))
 
-	# --- nova_simulation_test.gd ---
+	# --- simulation_test.gd ---
 	_mint("b50cal_heat_glow_slide_part1", B50CAL,
 		func(d: ObjectData) -> void:
 			_check(d.set_control_register_name(0, "HEAT_GLOW"), "ctrl0 HEAT_GLOW")
@@ -406,7 +406,7 @@ func _init() -> void:
 			_check(r.has_live_panm_for_lod(1), "LOD1 live re-read")
 			_check(r.get_live_panm_lod() == 1, "live lod 1 re-read"))
 
-	# --- PANM liveness family (nova_simulation_test.gd, ten files) ---
+	# --- PANM liveness family (simulation_test.gd, ten files) ---
 	_liveness_case(1, true, "spinner", 1 << 8, [], true)
 	_liveness_case(2, true, "view3", 3 << 8, [], true)
 	_liveness_case(3, true, "view4", 4 << 8, [], true)

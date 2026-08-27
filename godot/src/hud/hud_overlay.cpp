@@ -1,10 +1,10 @@
-#include "hud_overlay.h"
+#include "hud/hud_overlay.h"
 
-#include "friendly_tag_flags.h"
-#include "nova_hud_pos.h"
-#include "resource_index/nova_resource_root.h"
-#include "simulation/nova_simulation.h"
-#include "terrain/nova_terrain_data.h"
+#include "hud/friendly_tag_flags.h"
+#include "hud/hud_pos.h"
+#include "resource_index/resource_root.h"
+#include "simulation/simulation.h"
+#include "terrain/terrain_data.h"
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
 #include <net/npwire/game_type.h> // the conquest arm of the zone panel

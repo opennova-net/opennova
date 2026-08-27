@@ -4,7 +4,7 @@
 // loopback view folds the same messages), turned into the overlay text ladder
 // (hud/end_round_overlay.h) and the stat.mnu RESULTLIST feed
 // (npruntime/stat_screen_feed.h).
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include "rtxt/rtxt_string_file.h"
 

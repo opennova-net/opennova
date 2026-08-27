@@ -1,9 +1,9 @@
-#include "mission/nova_mission_catalog.h"
+#include "mission/mission_catalog.h"
 
 #include <runtime/mission/mission_catalog.h>
 #include <net/npwire/game_type.h>
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 namespace godot {
 

@@ -63,7 +63,7 @@ struct Field {
 
 // The host's model->runtime collision conversion, replicated (the canonical
 // copy is collision_model_from_3di in
-// godot/src/simulation/nova_simulation_internal.h — engine/runtime/world stays
+// godot/src/simulation/simulation_internal.h — engine/runtime/world stays
 // format-free by design, so the leaf test carries its own).
 bool collision_from_3di(const ThreediCollisionModel *col, CollisionModel &out) {
     if (col == nullptr || col->volume_count == 0 || !threedi_3di3_collision_is_runtime_safe(col))
@@ -106,7 +106,7 @@ bool collision_from_3di(const ThreediCollisionModel *col, CollisionModel &out) {
 }
 
 // The host's model->runtime occlusion conversion, replicated (canonical copy:
-// occlusion_model_from_3di in nova_simulation_internal.h).
+// occlusion_model_from_3di in simulation_internal.h).
 bool occlusion_from_3di(const Threedi3di3 &model, OcclusionModel &out) {
     if (model.occlusion_object_count == 0) return false;
     for (size_t i = 0; i < model.occlusion_vertex_count; ++i) {

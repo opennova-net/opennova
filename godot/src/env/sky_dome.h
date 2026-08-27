@@ -25,7 +25,7 @@ class Weather;
 // ArrayMesh/ShaderMaterial ownership, per-frame shader-parameter pushes from
 // the typed SkyFrameState, the camera-anchored dome position, change-detected
 // cloud Texture2D binds, and the owner-supplied BG_COLOR Environment mirror.
-// Ported from nova_sky.gd (2026-08-10 de-scripting); RE record:
+// Ported from sky.gd (2026-08-10 de-scripting); RE record:
 // docs/env/env-tod-re.md.
 class SkyDome : public Node3D {
 	GDCLASS(SkyDome, Node3D)

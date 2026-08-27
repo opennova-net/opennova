@@ -5,7 +5,6 @@ extends GutTest
 ## sets the loaded banks contain, and reports how many PlayDialog commands fire on
 ## sim-ungated ticks (pins the sim-trigger-gating follow-up). Skips without the data.
 
-const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 # The loose JOX dump root rides the documented env gate (docs/asset-gated-tests.md);
 # machine paths go in .claude/settings.local.json env, never tracked.
@@ -29,7 +28,7 @@ func test_00trg_mission_dialog_resolves() -> void:
 
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var audio = NovaMissionAudioScript.new(root, item_db)
+	var audio = MissionAudio.new(root, item_db)
 	var stats := audio.setup(mission, "00TRg.bms", container)
 	gut.p("00TRg audio stats: %s" % str(stats))
 

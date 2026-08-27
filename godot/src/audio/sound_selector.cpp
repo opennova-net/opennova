@@ -1,4 +1,4 @@
-#include "audio/nova_sound_selector.h"
+#include "audio/sound_selector.h"
 
 using namespace godot;
 

@@ -1434,7 +1434,7 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
 
 // The npruntime headless host boots World without the shell's model-box
 // resolution (VehicleTraits.box_z_* is stamped only by the adapter's
-// nova_simulation_assets resolve), so its watercraft have no platform
+// simulation_assets resolve), so its watercraft have no platform
 // geometry and the solver cannot produce an afloat latch. This water-plane
 // stand-in covers exactly that path; resolved hulls always consume the
 // prior platform solve.

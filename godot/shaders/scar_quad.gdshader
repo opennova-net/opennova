@@ -11,7 +11,7 @@ shader_type spatial;
 //   z-write OFF (0x100000), z-test on              -> depth_draw_never
 //   CULLMODE CCW (no 0x400000): back faces culled  -> cull_back (the packer
 //       winds every quad so its front is the struck face's normal side,
-//       nova_simulation_scars.cpp)
+//       simulation_scars.cpp)
 //   NO ALPHATESTENABLE (no 0x40000): the drawer's SetAlphaTestRef(128)
 //       @0x5CCDAE latches ALPHAFUNC/ALPHAREF only, so it is INERT here
 //   stage 0: COLOROP MODULATE2X(TEXTURE, DIFFUSE), ALPHAOP MODULATE(TEXTURE,
@@ -24,8 +24,8 @@ render_mode unshaded, blend_mix, depth_draw_never, cull_back;
 
 // Gamma-space pipeline (D-RMAT-7): raw texel sampling, gamma-space combine,
 // the exact inverse of the blit's transfer curve on the way out.
-#include "res://shaders/nova_color.gdshaderinc"
-#include "res://shaders/nova_frame_pass.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
+#include "res://shaders/frame_pass.gdshaderinc"
 
 uniform sampler2D albedo_tex : repeat_disable, filter_linear_mipmap;
 
@@ -43,13 +43,13 @@ void vertex() {
 }
 
 void fragment() {
-	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
 		discard;
 	}
 	vec4 tex = texture(albedo_tex, UV);
 	// MODULATE2X(TEXTURE, DIFFUSE), saturating [orig: decode_mode_color_stage
 	// @0x681080 family 0x600 under GfxDevice_Modulate2XEnabled].
-	ALBEDO = nova_scene_output(min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0)));
+	ALBEDO = scene_output(min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0)));
 	// MODULATE(TEXTURE, DIFFUSE) alpha [orig: decode_mode_alpha_stage @0x680B00
 	// nibble 0x50]; DIFFUSE alpha is the vertex's FF.
 	ALPHA = tex.a * COLOR.a;

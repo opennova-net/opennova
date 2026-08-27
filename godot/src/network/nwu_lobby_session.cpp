@@ -1,4 +1,4 @@
-#include "nwu_lobby_session.h"
+#include "network/nwu_lobby_session.h"
 
 #include <net/napi/envelope.h>
 #include <net/novaworld/gate_probe.h>

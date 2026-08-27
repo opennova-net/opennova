@@ -1,4 +1,4 @@
-#include "world/nova_scar_presenter.h"
+#include "world/scar_presenter.h"
 
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/object.hpp>
@@ -18,8 +18,8 @@
 
 #include <vector>
 
-#include "object/nova_object_model.h"
-#include "simulation/nova_present_stats.h"
+#include "object/object_model.h"
+#include "simulation/present_stats.h"
 
 namespace godot {
 

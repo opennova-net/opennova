@@ -10,7 +10,7 @@
 #include <runtime/environment/environment_state.h>
 
 #include "env/env_file.h"
-#include "object/nova_object_model.h"
+#include "object/object_model.h"
 
 namespace godot {
 
@@ -23,7 +23,7 @@ namespace godot {
 // pushes (the scene-pass block terrain/foliage/water read, and the object
 // family's lighting block — retail's per-pass RenderBatchCtx constants), the
 // terrain ShaderMaterial uniform pushes, the sky-map texture handles, and the
-// EnvLightState publication + env_generation_changed signal. Ported from nova_environment.gd (2026-08-09 de-scripting); RE record:
+// EnvLightState publication + env_generation_changed signal. Ported from environment.gd (2026-08-09 de-scripting); RE record:
 // docs/env/env-tod-re.md.
 class MissionEnvironment : public Node {
 	GDCLASS(MissionEnvironment, Node)

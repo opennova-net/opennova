@@ -1,4 +1,4 @@
-#include "nova_effect_scene.h"
+#include "particle/effect_scene.h"
 
 #include <algorithm>
 #include <cstring>

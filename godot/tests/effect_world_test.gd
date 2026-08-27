@@ -200,7 +200,7 @@ func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:
 	assert_almost_eq(_single_emitter(world).position, Vector3(1, 2, 3),
 			Vector3(0.01, 0.01, 0.01))
 	assert_eq(world.get_children().filter(
-			func(child: Node) -> bool: return child.get_class() == "NovaParticleEmitter").size(), 0,
+			func(child: Node) -> bool: return child.get_class() == "ParticleEmitter").size(), 0,
 			"runtime effects remain values; no per-emitter renderer Nodes are created")
 	world.advance_fixed_tick(Simulation.tick_dt())
 	assert_gt(int(_single_emitter(world).alive), 0,

@@ -38,7 +38,7 @@ namespace godot {
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
 }
 
-#include "wac/nova_wac_program.h"
+#include "wac/wac_program.h"
 #include <formats/def/def.h> // the retained weapon.def parse (S6b)
 #include <runtime/simassets/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
 #include <runtime/world/player_loadout.h> // the moved loadout cluster (S7b, ADR 0028)
@@ -64,7 +64,7 @@ class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve
 #include <runtime/world/world.h>
 #include <formats/score/score.h> // the retained score.ini parse (score_config_)
 
-#include "mission/nova_mission_data.h"
+#include "mission/mission_data.h"
 #include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
 #include <net/netsim/loopback_channel.h>          // host_loop_ (the host's own dcb-2 client)
@@ -73,7 +73,7 @@ class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve
 #include <net/netsim/udp_session_transport.h>     // PeerLink::transport (the LAN per-peer transport)
 
 #include <net/npwire/peer_addr.h>    // PeerAddr / PeerAddrHash
-#include "network/nova_udp_pump.h"
+#include "network/udp_pump.h"
 
 #include <formats/mission/bms.h>                      // bms::File (persisted so ctx_.mission outlives the match)
 #include <net/npruntime/napi_np_server_ctx.h>     // NapiNPServerCtx / GameConfig / ConnectionMode / SocketMode
@@ -82,8 +82,8 @@ class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve
 #include <net/npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
 #include <net/npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
-#include "simulation/nova_inmatch_session_values.h"
-#include "devtools/nova_frame_stats.h"
+#include "simulation/inmatch_session_values.h"
+#include "devtools/frame_stats.h"
 
 namespace opennova::hud {
 struct ScoreboardEntry; // hud/hud_scoreboard.h — the Tab-board drawer row
@@ -235,7 +235,7 @@ public:
 
 	// local_player_blink_flags() letter bits GDScript gates the render passes
 	// on — mirrors world/collision.h kBlinkIndoorsBit/kBlinkWaterOffBit
-	// (static_asserts in nova_simulation_occlusion.cpp pin them).
+	// (static_asserts in simulation_occlusion.cpp pin them).
 	enum BlinkFlag {
 		BLINK_INDOORS = 0x2,
 		BLINK_WATER_OFF = 0x8,
@@ -331,7 +331,7 @@ public:
 		EPILOG_EXIT_TIMEOUT_TICKS = opennova::world::kEpilogExitTimeoutTicks,
 		// The item-effect attach scan reads only a model's first 16 userpoints
 		// (threedi_3di3.h THREEDI_USER_POINT_SCAN_LIMIT; pinned by
-		// static_assert in nova_simulation_bind.cpp).
+		// static_assert in simulation_bind.cpp).
 		ITEM_USER_POINT_SCAN_LIMIT = 16,
 		// The retail signed-16 storage domain entity health lives in
 		// (world/entity.h kRetailI16Min/Max).
@@ -943,7 +943,7 @@ private:
 	int medic_request_serial_ = 0;
 	bool local_dead_edge_seen_ = false;
 	void tick_local_medic_cooldown();
-	// The camera arbiter's inputs + the mode-4 entry (nova_simulation_player_view.cpp).
+	// The camera arbiter's inputs + the mode-4 entry (simulation_player_view.cpp).
 	bool camera_local_dead_seen_ = false;
 	void feed_camera_arbiter_inputs(const opennova::world::Entity &e);
 	void enter_death_camera(const opennova::world::Entity &e);
@@ -1236,7 +1236,7 @@ public:
 	bool is_joiner() const { return joiner_; }
 	// The client-local death screen latch (retail g_death_screen_active): the
 	// pass-level gate of the friendly-tags walks and the camera arbiter's
-	// sub-mode source. Fed by the local-player view (nova_simulation_player_view.cpp).
+	// sub-mode source. Fed by the local-player view (simulation_player_view.cpp).
 	bool local_death_screen_active() const;
 	// True while a live net session owns this sim: the world tick is the ONLY
 	// pump for the session socket, so the Play/Step/Stop transport locks out
@@ -1402,7 +1402,7 @@ public:
 	void set_server_text(const String &p_medic_request_format);
 	// The one role-agnostic read of the local player's dead bit.
 	bool local_player_dead() const;
-	// The end-of-round presentation feed (net-re §5.68; nova_simulation_end_round.cpp):
+	// The end-of-round presentation feed (net-re §5.68; simulation_end_round.cpp):
 	// the 0x1D header edge + the 0x56 board through the ONE ClientEndRoundStats
 	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)
 	// and the stat.mnu RESULTLIST columns/rows (npruntime/stat_screen_feed.h).
@@ -2380,7 +2380,7 @@ public:
 	// the spawner's team pick @ 0x4ec79b; world-wac-ai-re §27].
 	Array get_throwable_visuals() const;
 
-	// The impact-scar draw list for ScarPresenter (nova_simulation_scars.cpp):
+	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's
 	// camera (Godot space), fog distance and the combined terrain light colour
 	// (Env_TerrainLightCombined — EnvFile.combine_terrain_light(sun, sky)).
@@ -2392,7 +2392,7 @@ public:
 	Dictionary get_scar_draw_list(const Vector3 &p_camera_godot, float p_fog_distance,
 			const Color &p_terrain_light) const;
 	// The Scar_RenderCache owner gate over OcclusionWorld's section masks and
-	// the entity's blink-box quad (see nova_simulation_scars.cpp).
+	// the entity's blink-box quad (see simulation_scars.cpp).
 	bool scar_owner_visible(uint16_t p_owner_packed) const;
 
 	// The round hit-detection reality for the F3 hitbox view:

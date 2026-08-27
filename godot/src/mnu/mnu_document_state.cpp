@@ -1,4 +1,4 @@
-#include "nova_mnu_document.h"
+#include "mnu/mnu_document.h"
 
 #include <godot_cpp/variant/utility_functions.hpp>
 

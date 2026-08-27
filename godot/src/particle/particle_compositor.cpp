@@ -1,4 +1,4 @@
-#include "nova_particle_compositor.h"
+#include "particle/particle_compositor.h"
 
 #include <algorithm>
 #include <array>
@@ -308,7 +308,7 @@ public:
 	};
 
 	mutable std::mutex submission_mutex;
-	std::shared_ptr<const NovaParticleWorldSubmission> latest_submission;
+	std::shared_ptr<const ParticleWorldSubmission> latest_submission;
 	std::atomic<bool> hidden{false};
 	// Low bit is the pending request; upper bits form an epoch. Both request
 	// and cancel advance the epoch, so a failed callback can rearm only the
@@ -350,7 +350,7 @@ public:
 		diagnostics.failure = reason;
 	}
 
-	void publish(const std::shared_ptr<const NovaParticleWorldSubmission> &submission) {
+	void publish(const std::shared_ptr<const ParticleWorldSubmission> &submission) {
 		{
 			std::lock_guard<std::mutex> lock(submission_mutex);
 			latest_submission = submission;
@@ -373,7 +373,7 @@ public:
 		}
 	}
 
-	std::shared_ptr<const NovaParticleWorldSubmission> snapshot() const {
+	std::shared_ptr<const ParticleWorldSubmission> snapshot() const {
 		std::lock_guard<std::mutex> lock(submission_mutex);
 		return latest_submission;
 	}
@@ -434,7 +434,7 @@ public:
 	}
 
 	bool initialize_rd();
-	bool ensure_atlas(const std::shared_ptr<const NovaParticleAtlasSnapshot> &atlas);
+	bool ensure_atlas(const std::shared_ptr<const ParticleAtlasSnapshot> &atlas);
 	bool ensure_vertex_buffer(const PackedByteArray &vertices);
 	bool ensure_targets(RenderSceneBuffersRD *buffers, std::uint32_t view_count,
 			const Vector2i &size);
@@ -445,8 +445,8 @@ public:
 	RID pipeline_for(const renderer::ParticleDrawCommand &command,
 			int64_t framebuffer_format);
 	bool warm_pipelines(RenderData *render_data);
-	bool validate_submission(const NovaParticleWorldSubmission &submission) const;
-	bool draw(const NovaParticleWorldSubmission &submission,
+	bool validate_submission(const ParticleWorldSubmission &submission) const;
+	bool draw(const ParticleWorldSubmission &submission,
 			RenderData *render_data);
 	Dictionary report() const;
 };
@@ -661,7 +661,7 @@ bool ParticleCompositorEffect::Impl::ensure_scene_snapshot_shader() {
 }
 
 bool ParticleCompositorEffect::Impl::ensure_atlas(
-		const std::shared_ptr<const NovaParticleAtlasSnapshot> &atlas) {
+		const std::shared_ptr<const ParticleAtlasSnapshot> &atlas) {
 	if (!atlas) {
 		set_failure("World particle submission has no atlas snapshot",
 				"atlas_missing");
@@ -675,7 +675,7 @@ bool ParticleCompositorEffect::Impl::ensure_atlas(
 	gpu_atlas_pages.reserve(atlas->pages.size());
 	for (std::size_t page_index = 0; page_index < atlas->pages.size();
 			++page_index) {
-		const NovaParticleAtlasPageSnapshot &source = atlas->pages[page_index];
+		const ParticleAtlasPageSnapshot &source = atlas->pages[page_index];
 		const std::uint64_t expected = static_cast<std::uint64_t>(source.side) *
 				static_cast<std::uint64_t>(source.side) * 4u;
 		if (source.side == 0 || expected >
@@ -1149,7 +1149,7 @@ bool ParticleCompositorEffect::Impl::warm_pipelines(
 }
 
 bool ParticleCompositorEffect::Impl::validate_submission(
-		const NovaParticleWorldSubmission &submission) const {
+		const ParticleWorldSubmission &submission) const {
 	if (!submission.valid) {
 		const_cast<Impl *>(this)->set_failure(submission.validation_error,
 				"draw_list_invalid");
@@ -1212,7 +1212,7 @@ bool ParticleCompositorEffect::Impl::validate_submission(
 }
 
 bool ParticleCompositorEffect::Impl::draw(
-		const NovaParticleWorldSubmission &submission, RenderData *render_data) {
+		const ParticleWorldSubmission &submission, RenderData *render_data) {
 	if (!initialize_rd() || !validate_submission(submission) ||
 			!ensure_atlas(submission.atlas) ||
 			!ensure_vertex_buffer(submission.triangle_vertices))
@@ -1444,7 +1444,7 @@ ParticleCompositorEffect::~ParticleCompositorEffect() = default;
 void ParticleCompositorEffect::_bind_methods() {}
 
 void ParticleCompositorEffect::publish(
-		const std::shared_ptr<const NovaParticleWorldSubmission> &p_submission) {
+		const std::shared_ptr<const ParticleWorldSubmission> &p_submission) {
 	if (impl_)
 		impl_->publish(p_submission);
 }
@@ -1459,7 +1459,7 @@ void ParticleCompositorEffect::set_particles_hidden(bool p_hidden) {
 		return;
 	impl_->hidden.store(p_hidden, std::memory_order_release);
 	set_enabled(!p_hidden);
-	const std::shared_ptr<const NovaParticleWorldSubmission> submission =
+	const std::shared_ptr<const ParticleWorldSubmission> submission =
 			impl_->snapshot();
 	std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
 	if (p_hidden) {
@@ -1566,7 +1566,7 @@ void ParticleCompositorEffect::_render_callback(
 		}
 		break;
 	}
-	const std::shared_ptr<const NovaParticleWorldSubmission> submission =
+	const std::shared_ptr<const ParticleWorldSubmission> submission =
 			impl_->snapshot();
 	if (!submission) {
 		impl_->set_failure(std::string(), "waiting_for_submission");

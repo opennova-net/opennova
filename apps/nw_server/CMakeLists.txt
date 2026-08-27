@@ -1,7 +1,7 @@
 # nw-server — the headless in-match game HOST (engine/net/npruntime P6).
 #
-# godot-cpp guard (structural): godot-cpp is built by a SEPARATE SCons tree
-# (third_party/godot-cpp/SConstruct) and is NEVER add_subdirectory'd into this CMake graph, so it is
+# godot-cpp guard (structural): godot-cpp is add_subdirectory'd only from the
+# GDExtension's own CMake root (godot/src/CMakeLists.txt), never from this graph, so it is
 # not a linkable target here. This executable links ONLY opennova_* static libs (all strictly
 # Godot-agnostic, engine/CLAUDE.md) + apps/common, which makes it structurally incapable of pulling in
 # godot-cpp. There is no toggle to set — keep the link list opennova_*-only and that invariant holds.

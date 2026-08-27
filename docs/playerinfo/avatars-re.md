@@ -293,7 +293,7 @@ only `Menu`/`MenuStats`, and NOT `g_TextGameText`, which loads `gametext.bin`
 corrected the earlier conflation of the two). Verified by extraction: the retail
 `Game.bin` has sections `MENU / RemapActions / RemapKeys / WeaponDescriptions /
 Macros / Avatars`, and the `Avatars` keys resolve (`AV_NAT_RUSSIA → "Russia"`,
-`AV_DIV_SEAL → "SEAL"`, `AV_BOONIEHAT → "Boonie Hat"`). Reimpl: `nova_menu_shell.gd`
+`AV_DIV_SEAL → "SEAL"`, `AV_BOONIEHAT → "Boonie Hat"`). Reimpl: `menu_shell.gd`
 registers `Game.bin` into the shared `Strings` registry as **`gameui`**
 (gametext = `gametext.bin`), and `player_info_menu_companion.gd::_display_name`
 resolves the nationality/division/combo keys against `gameui`'s `"Avatars"`

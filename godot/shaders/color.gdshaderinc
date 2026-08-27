@@ -13,21 +13,21 @@
 // Offscreen retail devices intentionally bypass that compositor and retain
 // gamma-domain values. Canvas post effects use the explicit display helpers.
 
-vec3 nova_scene_output(vec3 gamma_rgb) {
+vec3 scene_output(vec3 gamma_rgb) {
 	return clamp(gamma_rgb, vec3(0.0), vec3(1.0));
 }
 
-vec3 nova_scene_input(vec3 gamma_rgb) {
+vec3 scene_input(vec3 gamma_rgb) {
 	return clamp(gamma_rgb, vec3(0.0), vec3(1.0));
 }
 
-vec3 nova_display_decode_gamma(vec3 gamma_rgb) {
+vec3 display_decode_gamma(vec3 gamma_rgb) {
 	vec3 c = clamp(gamma_rgb, vec3(0.0), vec3(1.0));
 	return mix(pow((c + vec3(0.055)) * (1.0 / 1.055), vec3(2.4)),
 			c * (1.0 / 12.92), lessThan(c, vec3(0.04045)));
 }
 
-vec3 nova_display_encode_gamma(vec3 linear_rgb) {
+vec3 display_encode_gamma(vec3 linear_rgb) {
 	vec3 c = clamp(linear_rgb, vec3(0.0), vec3(1.0));
 	return mix(vec3(1.055) * pow(c, vec3(1.0 / 2.4)) - vec3(0.055),
 			c * 12.92, lessThanEqual(c, vec3(0.0031308)));

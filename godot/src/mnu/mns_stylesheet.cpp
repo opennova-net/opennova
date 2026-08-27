@@ -1,6 +1,6 @@
-#include "mns_stylesheet.h"
+#include "mnu/mns_stylesheet.h"
 
-#include "util/nova_string_convert.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -39,7 +39,7 @@ bool MnsStyleSheet::has_variable(const String &p_name) const {
 // original expands %VAR% over the whole raw .mnu byte buffer BEFORE the XML parse;
 // the reimpl substitutes per-field, post-parse, on every consumed field the
 // engine's whole-buffer pass would cover -- colors, fonts, textures, and literal
-// text (see nova_mnu_builder.cpp substitute_var). Matching for the shipped corpus;
+// text (see mnu_builder.cpp substitute_var). Matching for the shipped corpus;
 // the remaining gap is shell-supplied variables in non-themed fields (D-MNU-1,
 // ADR 0005).
 String MnsStyleSheet::substitute(const String &p_text) const {

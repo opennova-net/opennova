@@ -10,7 +10,6 @@ extends GutTest
 ## here as a red with a per-file visibility report, not just as an in-game
 ## mystery. Skips when the install is absent (CI never has it).
 
-const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 const MISSION_CANDIDATES: PackedStringArray = ["00TRa.bms", "00TRg.bms"]
 
@@ -84,7 +83,7 @@ func test_pff_install_mission_audio() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 
-	var audio = NovaMissionAudioScript.new(root, item_db)
+	var audio = MissionAudio.new(root, item_db)
 	var stats: Dictionary = audio.setup(mission, mission_name, container)
 	gut.p("PFF install mission audio: %s" % str(stats))
 	assert_gt(int(stats.get("banks_loaded", 0)), 0,

@@ -82,7 +82,7 @@ func after_each() -> void:
 		_shell.queue_free()
 		_shell = null
 		await get_tree().process_frame
-	NovaMusicService.stop_context()
+	MusicService.stop_context()
 	if not _temp_dir.is_empty():
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""

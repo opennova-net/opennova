@@ -200,7 +200,7 @@ func clear_viewmodel() -> void:
 # and the depth range clamped to the nearest tenth [orig: Render_SetViewportDepth01
 # @0x58a7b0]. Both frusta share the viewport aspect, so the shader needs only the
 # focal ratio between the renderfov projection and the live beauty projection
-# (shaders/nova_viewmodel_pass.gdshaderinc applies it per flagged instance).
+# (shaders/viewmodel_pass.gdshaderinc applies it per flagged instance).
 func _update_viewmodel_projection() -> void:
 	if _camera == null or not _camera.is_inside_tree():
 		return

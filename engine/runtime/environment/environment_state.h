@@ -1,5 +1,5 @@
 // The runtime TOD environment state owner — the state half of the
-// witnessed environment cluster, ported verbatim from nova_environment.gd
+// witnessed environment cluster, ported verbatim from environment.gd
 // (2026-08-09 de-scripting). Engine equivalents (docs/env/env-tod-re.md):
 // - [orig: Environment_UpdateWeatherTick @ 0x57e9b0] advances time per tick.
 // - [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] interpolates

@@ -1,7 +1,7 @@
 // Simulation — the LOCAL PLAYER loadout cluster: armory / usegun / mount
 // interactions, the loadout (slot pool / spawn kit / map rules), the weapon
 // profile, and the weapon/ammo table feeds.
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include <net/npruntime/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
@@ -31,7 +31,7 @@
 #include <windows.h>
 #endif
 
-using namespace novasim;
+using namespace sim_internal;
 
 namespace {
 
@@ -418,7 +418,7 @@ bool Simulation::set_local_player_class(int p_player_class) {
 	return true;
 }
 
-// Called by load_from_mission_data's finish (nova_simulation.cpp): stash the
+// Called by load_from_mission_data's finish (simulation.cpp): stash the
 // mission's loadout/availability chunks in plain world types — the promotion
 // runs at load_weapon_table time through the witnessed SP-vs-net gate, when
 // the catalog can resolve names (retail's own order: Game_StartMission parses

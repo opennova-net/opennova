@@ -1,6 +1,6 @@
-#include "object/nova_object_shader_cache.h"
+#include "object/object_shader_cache.h"
 
-#include "object/nova_object_model.h"
+#include "object/object_model.h"
 
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/material_descriptor.h>

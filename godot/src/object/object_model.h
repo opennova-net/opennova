@@ -35,8 +35,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "object/nova_object_data.h"
-#include "object/nova_skeletal_anim.h"
+#include "object/object_data.h"
+#include "object/skeletal_anim.h"
 
 namespace godot {
 
@@ -159,7 +159,7 @@ public:
 
 
 	// Visual-layer bits, mirrored from the authoritative GDScript table in
-	// adapter/environment/nova_water.gd (the water/mirror pass owns the layer
+	// adapter/environment/water.gd (the water/mirror pass owns the layer
 	// scheme; keep the two in lockstep).
 	enum {
 		LAYER_WORLD = 1 << 0,
@@ -404,7 +404,7 @@ private:
 	// lifetime_generation_ when they die.
 	bool present_planned_ = false;
 
-	// --- core (nova_object_model.cpp) ---
+	// --- core (object_model.cpp) ---
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
 	// The stored layer/cast decision for one surface instance (auxiliary
 	// postmultiply draws never cast under the world policy) and the walk that
@@ -439,7 +439,7 @@ private:
 	Vector<ObjectModel *> live_presentation_links_sharing(
 			const String &p_register) const;
 
-	// --- body/part animation (nova_object_model_anim.cpp) ---
+	// --- body/part animation (object_model_anim.cpp) ---
 	void resolve_muzzle_userpoint();
 	bool select_body_clip_seeded(const String &p_key, int p_phase_ticks);
 	void accept_remote_body_state(int p_state_id, const String &p_key,
@@ -463,7 +463,7 @@ private:
 	String resolve_anim_channel_owner(int p_slot) const;
 	bool advance_part_anims(double p_delta);
 
-	// --- materials/environment (nova_object_model_materials.cpp) ---
+	// --- materials/environment (object_model_materials.cpp) ---
 	void build_material_defs();
 	Ref<ShaderMaterial> material_for_index(int p_material_array_index);
 	Ref<ShaderMaterial> create_material(int p_index, const Dictionary &p_material_def);
@@ -478,7 +478,7 @@ private:
 	bool material_runtime_is_dynamic(int p_material_index) const;
 	void classify_materials();
 
-	// --- retained-scene construction (nova_object_model_scene.cpp) ---
+	// --- retained-scene construction (object_model_scene.cpp) ---
 	void rebuild_scene();
 	void build_skeleton();
 	// Bumped by every rebuild_scene(): a device that stamps this subtree's
@@ -607,7 +607,7 @@ public:
 	void set_match_terrain_enabled(bool p_enabled);
 	// The first-person viewmodel drawn inside the beauty pass: every mesh
 	// instance takes the shader-side renderfov projection + depth band
-	// (u_viewmodel_pass, shaders/nova_viewmodel_pass.gdshaderinc), a cull
+	// (u_viewmodel_pass, shaders/viewmodel_pass.gdshaderinc), a cull
 	// margin that keeps the eye inside its AABB (a narrowed ADS beauty frustum
 	// must not cull gun parts the wider renderfov shows), and its alpha strips
 	// the viewmodel rung. Re-stamps after a scene rebuild; idempotent per frame.

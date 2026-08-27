@@ -1,5 +1,5 @@
 // The per-frame celestial body state — the engine half of the shell's
-// sun/moon/glare/star applier, ported from nova_celestial.gd (2026-08-10
+// sun/moon/glare/star applier, ported from celestial.gd (2026-08-10
 // de-scripting). The witnessed fixed-point math (body alphas, glare window +
 // hysteresis, star generation/twinkle/cull, kCelestialBodyDistance) is
 // env_celestial.h's (engine/formats/env); this header owns the per-frame

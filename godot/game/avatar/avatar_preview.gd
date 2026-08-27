@@ -28,7 +28,7 @@ const THIRD_PERSON_SLOTS := ["head", "body"]
 const MENU_DISTANCE_SCALE := 2.7
 const MENU_PITCH := -0.06
 
-# The menu's anamorphic design space (nova_menu_shell.gd scales the whole menu tree from this
+# The menu's anamorphic design space (menu_shell.gd scales the whole menu tree from this
 # to the window). The SubViewport is rendered at the on-screen pixel size
 # (design size x this scale) so the menu's upscale no longer blurs a low-res texture.
 const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)

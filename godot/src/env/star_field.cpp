@@ -1,4 +1,4 @@
-#include "nova_star_field.h"
+#include "env/star_field.h"
 
 namespace godot {
 

@@ -22,7 +22,7 @@ inline constexpr int32_t kPlayerInfantryTypeId = 0x14B9;
 // slot 0 and the joiner at slot 1 (roster slot N -> entity slot N when the mission has no pool-0 AI).
 // The prior value 4 (a mistaken "low slots reserved" assumption) offset every player by +4 vs retail.
 // Canonical home for both the npruntime host (np::kRetailPlayerMinEntitySlot re-exports this) and the
-// Godot listen host (nova_simulation.cpp). [orig: §5.2b spawn placement; Server_PlayerAdd @0x51cbc0]
+// Godot listen host (simulation.cpp). [orig: §5.2b spawn placement; Server_PlayerAdd @0x51cbc0]
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = 0;
 
 // Spawn parameters for the host's own player. `yaw` is the mission yaw in degrees (the same

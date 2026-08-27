@@ -1,5 +1,5 @@
 // S10a (ADR 0028): the joiner's per-frame world<->net bridge, moved verbatim
-// from the Godot binding's nova_simulation_net.cpp. See joiner_world_bridge.h
+// from the Godot binding's simulation_net.cpp. See joiner_world_bridge.h
 // for the ownership split; every phase keeps its original witnesses.
 #include <net/npruntime/joiner_world_bridge.h>
 

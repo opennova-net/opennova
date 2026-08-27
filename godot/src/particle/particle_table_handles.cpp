@@ -1,4 +1,4 @@
-#include "nova_particle_table_handles.h"
+#include "particle/particle_table_handles.h"
 
 using namespace godot;
 

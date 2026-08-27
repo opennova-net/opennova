@@ -158,7 +158,7 @@ parent chain (`CWnd_AccumulateAncestorOffset @ 0x6465e0`).
 
 Reimpl: the menu-root CanvasItem is given an 800x600 box and a non-uniform
 `scale = (screenW/800, screenH/600)`, position 0 — authored coords stay in 800x600 design
-space (`nova_menu_shell.gd::_recompute_fit`). The old reimpl
+space (`menu_shell.gd::_recompute_fit`). The old reimpl
 used a hardcoded 640x480 board with uniform letterbox + centering, which overhung and
 mis-centered the 800x600 `jo_game.mnu` (the badly-placed ESC menu) and letterboxed every
 menu. `D-MNU-4`: the original truncates each scaled quad to int per element; the reimpl
@@ -438,7 +438,7 @@ D-MNU-4's divergence). The compiler also owns the mouse pump, the interaction
 geometry queries
 (row/popup/arrow/table hit tests over the same layout math), the hotkey scan,
 and the edit-input module. The Godot applier (`MenuFrame`,
-`godot/src/mnu/nova_menu_frame.cpp`) uploads textures/fonts and rasterizes
+`godot/src/mnu/menu_frame.cpp`) uploads textures/fonts and rasterizes
 the list; `MenuDriver` (`godot/game/menu_driver.gd`) orchestrates navigation,
 actions, popups, and sounds over it — since the 2026-08-10 shell cutover this
 is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
@@ -989,9 +989,9 @@ byte-exact names/tokens/Class id + the default VK binding from the catalog's bin
 validated Forward=W/Up, Reload=R, Jump=Space, …), the Class-name table (`action_class_name`), the
 VK decoder (`key_name`), and the binding format (`format_binding`); `build_rows(device)` mirrors
 `UI_PopulateControlMappingList`. The Godot wrapper **`ControlsModel`** hands rows to
-`godot/game/nova_menu_shell.gd` (`_seed_control_mapping` / `_fill_control_mapping`), which fills the
+`godot/game/menu_shell.gd` (`_seed_control_mapping` / `_fill_control_mapping`), which fills the
 `CONTROL_MAPPING` `MnuTable` via `add_rows` and wires the Keyboard/Mouse/Joystick radios to
-repopulate. The earlier reimpl left the table empty — `nova_menu_shell` had no populate path for a
+repopulate. The earlier reimpl left the table empty — `menu_shell` had no populate path for a
 `type="table"`, so the Controls tab rendered floating headers over a blank grid.
 
 The table render itself was also corrected this pass (see Table render below). This pass is
@@ -1374,7 +1374,7 @@ Accepted/divergent (each a documented decision, not a defect):
   `engine/runtime/mission/mission_catalog.{h,cpp}` (the `.bin` resolves
   through the mount stack rather than the paired volume — identical on
   retail data; `.npj`/`.npz` legs not ported) + the `MissionCatalog`
-  binding (the code-word stamp) + `nova_menu_shell.gd`'s SP seeding
+  binding (the code-word stamp) + `menu_shell.gd`'s SP seeding
   (`_seed_mission_list` clears the reimpl's row-0 preselect to match the
   witnessed no-selection populate). Pinned by `mission_catalog` ctest +
   the shell GUT SP case over the retail `00tra.bin` fixture. The HOST
@@ -1551,7 +1551,7 @@ button->mask translation, and `is_token_pressed` — the one gameplay sampling
 call: keyboard slots gated on their modifier plus the held-sampleable
 L/R/M mouse-mask buttons; wheel masks are impulse-only and display/persist
 without sampling), `controls_bindings.gd` (the shared live model +
-persistence), `nova_menu_shell.gd` (arm/capture/cancel + DEFAULTS/CLEAR_KEY;
+persistence), `menu_shell.gd` (arm/capture/cancel + DEFAULTS/CLEAR_KEY;
 a screen change cancels an armed capture like retail's screen-owned pump
 state), and `player_input_router.gd` samples gameplay input through the live
 records. Divergences: persistence rides `user://controls.cfg` until the
@@ -1590,7 +1590,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 
 | Original | OpenNova |
 |---|---|
-| `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `MnuDocument` + `godot/game/nova_menu_shell.gd` |
+| `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `MnuDocument` + `godot/game/menu_shell.gd` |
 | `Menu_RenderFrame @ 0x54b7c0` -> `CUIScene_DrawScreensAndCursor @ 0x63bf60` | the scene draw walk -> `MenuFrameCompiler::compile` + interleaved `MenuDrawList::draw_ops` — `engine/runtime/menu/menu_frame.cpp` |
 | `CUIElement_Draw @ 0x64a8a0` / `CStaticWnd_Render @ 0x657b10` (the Draw vtable family) | the per-widget and cross-kind painter order — `MenuFrameCompiler::walk_widget` -> `draw_ops` -> `MenuFrame::_draw` |
 | `CWnd_SetVisualState @ 0x646340` + `widget_process_mouse_event @ 0x647a00` (state write +236) | `MenuFrameCompiler::visual_state_for` + `MenuWidgetState` |
@@ -1619,7 +1619,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `mnu::parse_window`'s LIST_BOX + `MenuFrameCompiler::combo_popup_rect` (authored combo-relative POSITION; `SB_EDGE_PAD` narrows content only, not scrollbar geometry) (D-MNU-7) |
 | `CUIElement_DrawFrame @ 0x64a210` + `init_border_materials @ 0x646f70` | `MenuFrameCompiler::emit_frame` — 8 border quads + tiled fill; retail-neutral 0x7F modulate-2x becomes effective white for Godot ordinary multiply; draws nothing when textures are absent; no monogram |
 | `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); the frame pass is gated on the DRAW_FRAME flag (`elem+0x134`) -> the compiler's draw walk gates `emit_frame` on `w.draw_frame`; confirms the menu monogram is never drawn |
-| `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `nova_menu_shell.gd` |
+| `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `menu_shell.gd` |
 | `CWnd_SetScaleRecursive @ 0x646c60` | scale propagation (root CanvasItem `set_scale`) |
 | `CUIElement_ParseXMLDefinition @ 0x648120` + `CUIElement_DrawTextureNative @ 0x647e40` -> `CTextureManager_DrawScaledRect @ 0x654e60` | `MenuFrameCompiler::emit_state_texture` — IMAGE stretched into the solved rect, with authored `MAP_STATE`/`HEIGHT` retained as the cropped atlas source band |
 | `CUIElement_DrawStretchedTexture @ 0x647d40` | the compiler's stretched-quad emit (texture into the solved rect); per-element int truncation of scaled coordinates is compiled (closes D-MNU-4's divergence) |
@@ -1639,14 +1639,14 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — reimpl code / not grillable |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `CreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `MnuMarquee` (plain text) |
 | `CUIWidget_HandleScriptedAction @ 0x6497f0` | `MenuDriver._dispatch_widget_actions` + the shell action signals — `godot/game/menu_driver.gd` |
-| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/src/controls.cpp`) + `nova_menu_shell.gd::_fill_control_mapping` |
+| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/src/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
 | `UI_BuildKeyBindingLoadoutTable @ 0x559e50` (catalog `aAbsoluteTurnLe @ 0x8159cb`) | `engine/runtime/controls` `k_catalog` — `controls.cpp` |
 | `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
 | `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> display name) | `controls::key_name` |
 | `KeyBinding_FormatBindingString @ 0x559a10` (`Ctrl-`/`Shift-`/`OR`) | `controls::format_binding` |
-| `UI_SelectControlsInputDevice @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `nova_menu_shell.gd::_seed_control_mapping` |
+| `UI_SelectControlsInputDevice @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `menu_shell.gd::_seed_control_mapping` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) + `CUITable_Render @ 0x6411d0` | `mnu::parse_table_*` + `MenuFrameCompiler::emit_table` — FONT "W" header height, separate top-level-MIN_ITEM_HEIGHT body rows/page, full-height authored-or-22px scrollbar rect, default-state art/thumb geometry |
-| `ControlsModel` (Godot wrapper) | `godot/src/mnu/nova_controls_model.cpp` |
+| `ControlsModel` (Godot wrapper) | `godot/src/mnu/controls_model.cpp` |
 | `Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f` (useitem armory leg) + `Input_HandleActionBinding case 218 @ 0x49b83d` | the shell armory key (SHIFT) + `_try_open_armory` — `main_game.gd` |
 | `UI_InitWeaponClassSelection @ 0x567250` (CHARCLASS_* rows, values 5..9) | `ArmoryMenuCompanion._populate_classes` |
 | `Armory_ResolveSelectedClass @ 0x5642f0` + `SpinList_SelectItemByValue @ 0x64ba50` | `ArmoryMenuCompanion._resolve_selected_class` + select-by-value |

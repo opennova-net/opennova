@@ -24,7 +24,7 @@ func after_each() -> void:
 
 
 func _native_fixture_dir() -> String:
-	var dir := OS.get_cache_dir().path_join("nova_listen_native_%d_%d" % [
+	var dir := OS.get_cache_dir().path_join("listen_native_%d_%d" % [
 			Time.get_ticks_usec(), _native_fixture_dirs.size()])
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
 	_native_fixture_dirs.append(dir)

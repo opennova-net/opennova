@@ -1,5 +1,4 @@
-#ifndef NOVA_WAV_LOADER_H
-#define NOVA_WAV_LOADER_H
+#pragma once
 
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -29,4 +28,3 @@ public:
 
 } // namespace godot
 
-#endif // NOVA_WAV_LOADER_H

@@ -1,7 +1,7 @@
 // ObjectData materials and textures: immutable MTRL inspection, runtime shader
 // classification, and texture resolution through a resource root or loose
 // source directory.
-#include "object/nova_object_data_internal.h"
+#include "object/object_data_internal.h"
 
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/material_descriptor.h>

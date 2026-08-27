@@ -1,5 +1,5 @@
 // ObjectData: read-only inspection of authored .3di PANM records.
-#include "object/nova_object_data_internal.h"
+#include "object/object_data_internal.h"
 
 #include <formats/threedi/threedi_panm.h>
 

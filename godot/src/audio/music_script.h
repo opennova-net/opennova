@@ -1,5 +1,4 @@
-#ifndef NOVA_MUSIC_SCRIPT_H
-#define NOVA_MUSIC_SCRIPT_H
+#pragma once
 
 // MUS interactive-music script wrapper. The underlying parser is
 // engine/formats/mus (mus_open_memory), mirroring the engine's
@@ -60,4 +59,3 @@ private:
 
 } // namespace godot
 
-#endif // NOVA_MUSIC_SCRIPT_H

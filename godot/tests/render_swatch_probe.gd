@@ -333,10 +333,10 @@ func _calibrate_mode() -> void:
 	shader.set_code("""
 shader_type spatial;
 render_mode unshaded;
-#include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
 void fragment() {
 	float b = floor(clamp(UV.x, 0.0, 0.999999) * 256.0) / 255.0;
-	ALBEDO = nova_scene_output(vec3(b));
+	ALBEDO = scene_output(vec3(b));
 }
 """)
 	material.shader = shader
@@ -436,11 +436,11 @@ func _make_calibration_material(render_modes: String, byte_value: int,
 	shader.set_code("""
 shader_type spatial;
 render_mode unshaded, cull_disabled%s;
-#include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
 uniform float u_byte;
 uniform float u_alpha;
 void fragment() {
-	ALBEDO = nova_scene_output(vec3(u_byte));%s
+	ALBEDO = scene_output(vec3(u_byte));%s
 }
 """ % [mode_suffix, alpha_line])
 	material.shader = shader
@@ -575,7 +575,7 @@ func _per_cell_diff(a: Image, b: Image, manifest: Dictionary) -> Dictionary:
 
 
 func _make_swatch_material(cache, cell: Dictionary, diffuse: Texture2D, detail: Texture2D, normal: Texture2D) -> ShaderMaterial:
-	# Mirrors nova_object_model.gd _create_material's uniform setup so the
+	# Mirrors object_model.gd _create_material's uniform setup so the
 	# swatch pins the same owner state the runtime binds.
 	var material := ShaderMaterial.new()
 	var key: int = cache.classify(cell["tag"], cell["flags"], cell["em"], cell["gl"], cell["atb"])

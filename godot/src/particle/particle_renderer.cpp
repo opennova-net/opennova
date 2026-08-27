@@ -1,6 +1,6 @@
-#include "nova_particle_renderer.h"
+#include "particle/particle_renderer.h"
 
-#include "env/nova_mission_environment.h"
+#include "env/mission_environment.h"
 
 #include <algorithm>
 #include <array>
@@ -53,8 +53,8 @@
 #include <runtime/renderer/particle_color.h>
 #include <runtime/renderer/particle_frame.h>
 
-#include "nova_particle_compositor.h"
-#include "render/nova_framefx.h"
+#include "particle/particle_compositor.h"
+#include "render/frame_fx.h"
 #include "util/texture_path_resolver.h"
 
 using namespace godot;
@@ -584,7 +584,7 @@ public:
 	std::vector<DefinitionVisual> definition_visuals;
 	std::vector<renderer::ParticleAtlasEntry> entries;
 	std::vector<AtlasPage> pages;
-	std::shared_ptr<const NovaParticleAtlasSnapshot> atlas_snapshot;
+	std::shared_ptr<const ParticleAtlasSnapshot> atlas_snapshot;
 	std::uint64_t atlas_generation = 0;
 	std::array<Ref<Shader>, 8> shader_cache;
 	std::map<std::uint64_t, Ref<ShaderMaterial>> materials;
@@ -911,7 +911,7 @@ public:
 		entries = std::move(build.entries);
 		rejected_atlas_entries = build.rejected_entries;
 		pages.reserve(build.pages.size());
-		auto snapshot = std::make_shared<NovaParticleAtlasSnapshot>();
+		auto snapshot = std::make_shared<ParticleAtlasSnapshot>();
 		snapshot->generation = ++atlas_generation;
 		snapshot->pages.reserve(build.pages.size());
 		for (renderer::ParticleAtlasPage &source : build.pages) {
@@ -926,13 +926,13 @@ public:
 				page.texture = ImageTexture::create_from_image(page_image);
 			pages.push_back(page);
 
-			NovaParticleAtlasPageSnapshot upload;
+			ParticleAtlasPageSnapshot upload;
 			upload.type = source.type;
 			upload.side = static_cast<std::uint32_t>(source.image.width);
 			upload.rgba8 = pixels;
 			snapshot->pages.push_back(std::move(upload));
 		}
-		atlas_snapshot = std::shared_ptr<const NovaParticleAtlasSnapshot>(
+		atlas_snapshot = std::shared_ptr<const ParticleAtlasSnapshot>(
 				std::move(snapshot));
 	}
 
@@ -1215,7 +1215,7 @@ public:
 	void publish_world_draw_list(const Ref<ParticleCompositorEffect> &effect,
 			const renderer::ParticleDrawList &draw_list,
 			const Vector3 &camera_position, const Vector3 &camera_forward) {
-		auto submission = std::make_shared<NovaParticleWorldSubmission>();
+		auto submission = std::make_shared<ParticleWorldSubmission>();
 		submission->frame_id = draw_list.frame_id;
 		submission->commands = draw_list.commands;
 		submission->atlas = atlas_snapshot;
@@ -1270,7 +1270,7 @@ public:
 			}
 		}
 		effect->publish(
-				std::shared_ptr<const NovaParticleWorldSubmission>(
+				std::shared_ptr<const ParticleWorldSubmission>(
 						std::move(submission)));
 	}
 

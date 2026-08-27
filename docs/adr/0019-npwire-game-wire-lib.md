@@ -2,7 +2,7 @@
 
 - **Status**: accepted (2026-07-04, rides the NET-2 extraction PR); amended
   2026-08-05 — the replay/spectate half of the "capture/replay chain"
-  (`replay_timeline`, `apps/nw_replay`, the `NovaNetClient` spectator binding)
+  (`replay_timeline`, `apps/nw_replay`, the `NovaWorldClient` spectator binding)
   was deleted as unused dev scaffolding. npwire's charter is now the in-game
   codec, the NWU session framing, and the CAPTURE DECODE chain
   (`wire_capture`, `serverlog_decode`); mentions of the replay leg below are

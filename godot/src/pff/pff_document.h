@@ -47,7 +47,7 @@ private:
 	bool source_open_ = false;
 	std::string source_path_;
 	PffFormat source_format_ = PFF_FORMAT_PFF3;
-	int game_id_ = 0;                     // NOVA_GAME_JO
+	int game_id_ = 0;                     // GAME_JO
 	bool dirty_ = false;
 	mutable String last_error_;
 	std::vector<Entry> entries_;

@@ -13,8 +13,8 @@ namespace opennova {
 std::vector<godot::String> texture_candidate_filenames(const godot::String &filename);
 
 // Case-insensitively resolve a texture filename within `dir` to an existing path.
-// For res:// dirs the result is a Godot resource path (imported .tga -> .ctex remap,
-// or .pcx/.mdt via ResourceFormatLoaderNovaTexture); for absolute/external dirs it
+// For res:// dirs the result is a Godot resource path (the imported .tga -> .ctex
+// remap); for absolute/external dirs it
 // is the on-disk path with its real casing.
 godot::String resolve_texture_path(const godot::String &dir, const godot::String &filename);
 

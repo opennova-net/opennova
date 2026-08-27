@@ -24,8 +24,8 @@ const ResourceDirSettings := preload("res://game/resource_index/resource_dir_set
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const FirstPersonArmsWitness := preload(
 		"res://game/world/first_person_arms_witness.gd")
-const NovaDebugViewStatus := preload(
-		"res://game/debug/nova_debug_view_status.gd")
+const DebugViewStatus := preload(
+		"res://game/debug/debug_view_status.gd")
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -735,7 +735,7 @@ func unload() -> void:
 		_mission_audio.teardown()
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
 	# The game shell re-opens menu music on its return to the front end.
-	NovaMusicService.stop_context()
+	MusicService.stop_context()
 	# Blink frame gates and every occlusion override reset with the mission
 	# [orig: the letter-bit clear @ 0x525c45 at mission start] — an unload while
 	# indoors must not leave the next mission's terrain/sky/water hidden. The
@@ -2230,7 +2230,7 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 # THIS node, so world-relative lookups (SkeletonDebug/PickDebug/...) are
 # unchanged. These one-line delegates keep the presentation-facing names on GameWorld:
 # the F3 option registry dispatches its setters against the world script
-# (nova_debug_options), and probes duck-find the world by these methods.
+# (debug_options), and probes duck-find the world by these methods.
 
 func set_skeleton_debug(enabled: bool) -> void:
 	_debug_views.set_skeleton_debug(enabled)
@@ -2296,14 +2296,14 @@ func is_occlusion_debug() -> bool:
 	return _debug_views.is_occlusion_debug()
 
 
-func get_debug_view_statuses() -> Array[NovaDebugViewStatus]:
+func get_debug_view_statuses() -> Array[DebugViewStatus]:
 	return _debug_views.get_debug_view_statuses()
 
 
 ## The F3 overlay's Particles tab seams (the existing get_effect_world() is
 ## the data source; these are the two debug toggles).
 ## Delegates to the item-effect director; the name stays on GameWorld for the
-## F3 option registry dispatch (nova_debug_options) + probe duck-calls.
+## F3 option registry dispatch (debug_options) + probe duck-calls.
 func set_particles_hidden(hidden: bool) -> void:
 	_item_fx.set_particles_hidden(hidden)
 
@@ -2677,7 +2677,7 @@ func _start_mission_audio(mission: MissionData, bms_name: String) -> void:
 	# (docs/audio/mus-sbf-re.md §Game music driving; SP-as-listen-server, ADR
 	# 0009/0011/0012). gamemus's discriminator Var1 stays 0 (never written in
 	# retail), so the Multiplayerstart P0 loop plays.
-	NovaMusicService.open_game_context(_resource_root)
+	MusicService.open_game_context(_resource_root)
 
 
 # The load-time effect warm pass (see the load-path call site): spawn every
@@ -3002,9 +3002,9 @@ func _music_var_pump() -> void:
 	var pump_sim := _runtime.get_sim()
 	if pump_sim == null:
 		return
-	NovaMusicService.set_var(MusicDirector.GAME_VAR_HEALTH_PCT,
+	MusicService.set_var(MusicDirector.GAME_VAR_HEALTH_PCT,
 		pump_sim.get_local_player_health_percent())
-	NovaMusicService.set_var(MusicDirector.GAME_VAR_TEAM, _runtime.local_player_team())
+	MusicService.set_var(MusicDirector.GAME_VAR_TEAM, _runtime.local_player_team())
 
 
 # The marched iris-exposure feed (D-RLIT-2): three camera-ray samples from the

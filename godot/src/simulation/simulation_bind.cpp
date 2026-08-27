@@ -1,11 +1,11 @@
 // Simulation — ClassDB registration.
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include "rtxt/rtxt_string_file.h" // the gametext table type the end-round / deploy feeds bind
 
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
 
-using namespace novasim;
+using namespace sim_internal;
 
 // The GDScript-facing seat codes are the SAME values engine/runtime/world computes with —
 // a drifted copy here would silently corrupt every binding-side seat-spec walk.

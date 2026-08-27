@@ -1,7 +1,7 @@
 // Simulation — the LOCAL PLAYER core: input and spawn, pose/state getters.
 // The view-effects, equipped-weapon FSM, and loadout clusters live in the
-// sibling nova_simulation_player_{view,weapon,loadout}.cpp TUs.
-#include "simulation/nova_simulation_internal.h"
+// sibling simulation_player_{view,weapon,loadout}.cpp TUs.
+#include "simulation/simulation_internal.h"
 
 #include <formats/mission/bms.h>
 #include <net/npwire/game_type.h>
@@ -10,7 +10,7 @@
 
 #include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 
-using namespace novasim;
+using namespace sim_internal;
 
 bool Simulation::local_player_can_fire_weapon(const AiEntity *p_body) const {
 	if (!world_ || p_body == nullptr || !p_body->inf.active) return false;

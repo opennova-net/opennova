@@ -244,7 +244,7 @@ void ClientReplicaPipeline::pump(ISessionTransport &channel) {
 
 namespace {
 // The compact coarse heading the present rebuilds: yaw_byte = top 8 bits of the 32-bit
-// engine BAM (present does `bam = yaw_byte << 24`). [nova_simulation present.]
+// engine BAM (present does `bam = yaw_byte << 24`). [simulation present.]
 inline uint8_t yaw_byte_from_bam(int32_t bam) {
 	return static_cast<uint8_t>(static_cast<uint32_t>(bam) >> 24);
 }

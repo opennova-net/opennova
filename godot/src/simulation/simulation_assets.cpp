@@ -1,7 +1,7 @@
 // Simulation — shell-side asset resolution: infantry anim maps (.adm),
 // item traits/weapons from the item database, collision instances + section
 // matrices from the .3di collision IR, and the mission item seat specs.
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 #include "network/item_replication_catalog_adapter.h"
 
 #include <runtime/simassets/item_traits.h>
@@ -15,7 +15,7 @@
 #include <cmath>
 #include <cstdio>
 
-using namespace novasim;
+using namespace sim_internal;
 
 void Simulation::reset_infantry_adm_ids() {
 	infantry_adm_resolved_ai_count_ = 0;

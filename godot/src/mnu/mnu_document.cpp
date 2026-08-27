@@ -1,6 +1,6 @@
-#include "nova_mnu_document.h"
+#include "mnu/mnu_document.h"
 
-#include "util/nova_string_convert.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/error_macros.hpp>

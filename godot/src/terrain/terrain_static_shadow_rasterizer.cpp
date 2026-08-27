@@ -4,11 +4,11 @@
 // planner's placement math — lives cited in engine/runtime/terrain/
 // terrain_static_shadow_{raster,planner,alpha,geometry}.cpp (see the class
 // header's witness block and docs/terrain/terrain-re.md).
-#include "terrain/nova_terrain_static_shadow_rasterizer.h"
+#include "terrain/terrain_static_shadow_rasterizer.h"
 
-#include "mission/nova_mission_object_placer.h"
-#include "object/nova_object_data.h"
-#include "terrain/nova_terrain_data.h"
+#include "mission/mission_object_placer.h"
+#include "object/object_data.h"
+#include "terrain/terrain_data.h"
 
 #include <runtime/terrain/terrain_static_shadow.h>
 #include <runtime/terrain/terrain_static_shadow_geometry.h>

@@ -8,7 +8,7 @@ namespace opennova {
 
 // Plain UTF-8 godot::String <-> std::string bridges, shared by the binding
 // modules that shuttle text between engine/ structs and Godot. NOT for
-// retail-encoded text: use nova_cp1252.h at the format or glyph boundary.
+// retail-encoded text: use cp1252.h at the format or glyph boundary.
 
 inline godot::String to_gd(const std::string &s) {
 	return godot::String::utf8(s.c_str(), static_cast<int>(s.length()));

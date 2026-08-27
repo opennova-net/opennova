@@ -1,8 +1,8 @@
-#include "nova_menu_frame.h"
+#include "mnu/menu_frame.h"
 
-#include "mns_stylesheet.h"
-#include "nova_mnu_document.h"
-#include "resource_index/nova_resource_root.h"
+#include "mnu/mns_stylesheet.h"
+#include "mnu/mnu_document.h"
+#include "resource_index/resource_root.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>

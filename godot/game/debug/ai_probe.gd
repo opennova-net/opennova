@@ -1,4 +1,4 @@
-class_name NovaAiProbe
+class_name AiProbe
 extends RefCounted
 ## Env-gated sim-truth probe for the autonomous self-test loop (net-capture
 ## branch): with NW_AI_PROBE=<path> set, appends one JSON line every interval

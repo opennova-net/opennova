@@ -1,5 +1,4 @@
-#ifndef NOVA_SBF_BANK_H
-#define NOVA_SBF_BANK_H
+#pragma once
 
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
@@ -94,4 +93,3 @@ private:
 
 } // namespace godot
 
-#endif // NOVA_SBF_BANK_H

@@ -12,7 +12,7 @@
 // bit gate on the 0x0A sub-block 3 [orig: 0x430361..0x4303D0, §5.9]; the
 // two-part stock-Co-op test [orig: serialize_mission_info_to_datastream
 // @0x523620, §5.32/D-NET-205]. The Godot layer consumes this vocabulary
-// through the NetProtocol binding (godot/src/network/nova_net_protocol.h).
+// through the NetProtocol binding (godot/src/network/net_protocol.h).
 
 #include <cstdint>
 #include <runtime/world/game_type.h>

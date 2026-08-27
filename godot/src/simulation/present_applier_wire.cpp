@@ -1,4 +1,4 @@
-#include "simulation/nova_present_applier.h"
+#include "simulation/present_applier.h"
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
@@ -7,11 +7,11 @@
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 
-#include "simulation/nova_simulation.h"
+#include "simulation/simulation.h"
 
 // The WIRE (joiner/MP) per-row hot walk — the native twin of the plan walk
 // the former wire_present_pass.gd carried (the native WirePresentPass,
-// nova_wire_present_pass.cpp, keeps the COLD path: spawn/defer/unresolved
+// wire_present_pass.cpp, keeps the COLD path: spawn/defer/unresolved
 // bookkeeping, the liveness prune, spawn callbacks and stats; per-leg
 // behavioral semantics and their [orig] witnesses moved here with the
 // code). The walk deliberately TRANSLITERATES the GDScript's dispatch
@@ -178,7 +178,7 @@ void PresentApplier::append_wire_deferred(Object *node) {
 bool PresentApplier::wire_plan_is_current(int64_t snapshot_size, int stride,
 		int64_t layout_revision, int64_t index_generation, int local_handle) {
 	// The revision keys on exactly the per-row identity quintet
-	// (wire_handle/type_id/bms_id/kind/index — nova_simulation_present.cpp), so
+	// (wire_handle/type_id/bms_id/kind/index — simulation_present.cpp), so
 	// revision equality replaces the GDScript plan's per-row identity re-reads;
 	// node swaps mark the plan dirty through release_wire_handle.
 	if (wire_plan_dirty_ || wire_plan_revision_ != layout_revision ||

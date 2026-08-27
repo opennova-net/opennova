@@ -9,7 +9,7 @@ extends GutTest
 ## [orig: TextResource_LoadOverrideTable @ 0x75D5C0], and miss formatting from
 ## the error path [orig: GameErr_GetString @ 0x4C2C60].
 
-const TMP_TABLE := "user://nova_strings_table_test.bin"
+const TMP_TABLE := "user://strings_table_test.bin"
 
 
 func before_each() -> void:

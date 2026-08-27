@@ -1,4 +1,4 @@
-#include "nova_particle_curve_ref.h"
+#include "particle/particle_curve_ref.h"
 
 using namespace godot;
 

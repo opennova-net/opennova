@@ -159,7 +159,7 @@ func test_detail_fog_consumes_supplied_start_and_honors_disable() -> void:
 
 func test_runtime_detail_foliage_consumes_terrains_resident_tile_page() -> void:
 	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
-	var dispatcher := _source("res://src/terrain/nova_foliage_dispatcher.cpp")
+	var dispatcher := _source("res://src/terrain/foliage_dispatcher.cpp")
 
 	assert_true(
 		detail.contains("uniform sampler2DArray u_tile_cache") and

@@ -4,7 +4,6 @@ extends GutTest
 ## mount the dir, load 00TRa.bms + items.def, run MissionAudio, and report how
 ## many sound markers resolved to a sound set. Skips when the data is absent.
 
-const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 # The loose JOX dump root rides the documented env gate (docs/asset-gated-tests.md);
 # machine paths go in .claude/settings.local.json env, never tracked.
@@ -32,7 +31,7 @@ func test_jo_00tra_sound_marker_resolution() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 
-	var audio = NovaMissionAudioScript.new(root, item_db)
+	var audio = MissionAudio.new(root, item_db)
 	var stats := audio.setup(mission, "00TRa.bms", container)
 	gut.p("JO 00TRa mission audio: %s" % str(stats))
 

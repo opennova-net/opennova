@@ -1,4 +1,4 @@
-#include "simulation/nova_present_applier.h"
+#include "simulation/present_applier.h"
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
@@ -13,8 +13,8 @@
 #include <runtime/mission/placement_traits.h>
 #include <runtime/simassets/sim_collision_pose.h>
 
-#include "simulation/nova_present_stats.h"
-#include "simulation/nova_simulation.h"
+#include "simulation/present_stats.h"
+#include "simulation/simulation.h"
 
 using namespace godot;
 

@@ -1,4 +1,4 @@
-#include "nova_dev_tools.h"
+#include "devtools/dev_tools.h"
 
 #if OPENNOVA_DEVTOOLS
 #include <runtime/devtools/stats_window.h>

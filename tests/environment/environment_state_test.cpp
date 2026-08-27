@@ -1,6 +1,6 @@
 // EnvironmentState + WeatherRuntime (engine/runtime/environment): the state
-// owner and the weather embedding ported from the nova_environment.gd /
-// nova_weather.gd shell scripts (2026-08-09 de-scripting). Pins the mission
+// owner and the weather embedding ported from the environment.gd /
+// weather.gd shell scripts (2026-08-09 de-scripting). Pins the mission
 // clock views, the weather-driven targets/currents split, the NVG rewrite,
 // generation discipline, the reset/prewarm epoch, the network wire units, and
 // the shader-global publication policy. RE record: docs/env/env-tod-re.md.

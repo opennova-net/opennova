@@ -7,10 +7,10 @@
 #include <formats/particle/parser.h>
 #include <formats/particle/particle.h>
 
-#include "nova_particle_def.h"
-#include "nova_particle_effect.h"
-#include "nova_particle_table.h"
-#include "nova_particle_table_handles.h"
+#include "particle/particle_def.h"
+#include "particle/particle_effect.h"
+#include "particle/particle_table.h"
+#include "particle/particle_table_handles.h"
 
 namespace godot {
 

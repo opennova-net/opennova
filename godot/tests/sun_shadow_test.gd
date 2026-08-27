@@ -75,7 +75,7 @@ func test_game_world_composes_only_the_live_shadow_map_during_ready() -> void:
 	var live_shadow := world.get_node("SunShadow") as SunShadow
 	_assert_tracks_environment(live_shadow, world.get_environment_node(),
 			"GameWorld's live shadow is aligned when production composition returns")
-	assert_false(world.has_node("NovaStaticSunShadow"),
+	assert_false(world.has_node("StaticSunShadow"),
 		"Static terrain silhouettes are page alpha; no second shadow map remains live.")
 
 

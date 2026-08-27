@@ -19,12 +19,12 @@ void vertex() {
 	// it overdraws (vertex_standard.gdshaderinc): an un-folded layer on the
 	// viewmodel would take the beauty projection and near plane while the gun
 	// under it is folded, and land displaced or clipped (the ACOG lens).
-	POSITION = nova_viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
+	POSITION = viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
 			MODELVIEW_MATRIX * vec4(VERTEX, 1.0), PROJECTION_MATRIX);
 }
 
 void fragment() {
-	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
 		discard;
 	}
 	vec4 source = texture(u_diffuse, v_raw_uv);
@@ -42,9 +42,9 @@ void fragment() {
 		source_gamma = mix(opennova_fog_color, source_gamma,
 				obj_scene_fog_visibility(CAMERA_POSITION_WORLD));
 	}
-	vec3 destination_gamma = nova_scene_input(
+	vec3 destination_gamma = scene_input(
 			textureLod(u_post_screen, SCREEN_UV, 0.0).rgb);
-	ALBEDO = nova_scene_output(
+	ALBEDO = scene_output(
 			2.0 * source_gamma * destination_gamma);
 	ALPHA = 1.0;
 }

@@ -1,5 +1,5 @@
 // The per-frame water-plane state assembly — the engine half of the shell's
-// water applier, ported from nova_water.gd (2026-08-10 de-scripting). The
+// water applier, ported from water.gd (2026-08-10 de-scripting). The
 // noise tables, PRNG, and screen-marched strip tessellation are
 // env_water_render.h's (engine/formats/env); this header owns the height
 // precedence ladder and the per-frame value block the applier feeds the strip

@@ -1,4 +1,4 @@
-#include "env/nova_sky_dome.h"
+#include "env/sky_dome.h"
 
 #include "env/env_axes.h"
 
@@ -10,8 +10,8 @@
 
 #include "env/env_file.h"
 #include "env/env_render_camera.h"
-#include "env/nova_mission_environment.h"
-#include "env/nova_weather.h"
+#include "env/mission_environment.h"
+#include "env/weather.h"
 
 namespace godot {
 

@@ -1,7 +1,7 @@
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 #include "cbin/cbin_asset_lookup.h"
-#include "fnt/nova_fnt_resource.h"
+#include "fnt/fnt_resource.h"
 #include "util/engine_caches.h"
 #include "util/texture_path_resolver.h"
 
@@ -66,14 +66,14 @@ PackedStringArray ResourceRoot::list_missing_boot_resources() const {
 		return missing;
 	}
 	for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
-		const NovaRequiredResource *row = gameprofile_required_resource_at(i);
-		if (row->severity != NOVA_RES_FATAL) {
+		const RequiredResource *row = gameprofile_required_resource_at(i);
+		if (row->severity != RES_FATAL) {
 			continue;
 		}
 		// The archive-table trio's all-missing gate belongs to mount_runtime
 		// itself [orig: fatal check @ 0x4a6f44]; pattern rows carry no
 		// probeable literal name.
-		if ((row->flags & (NOVA_RES_F_PFF_TABLE_ANY | NOVA_RES_F_PATTERN)) != 0) {
+		if ((row->flags & (RES_F_PFF_TABLE_ANY | RES_F_PATTERN)) != 0) {
 			continue;
 		}
 		const String name = String::utf8(row->name);
@@ -85,7 +85,7 @@ PackedStringArray ResourceRoot::list_missing_boot_resources() const {
 }
 
 String ResourceRoot::boot_resource_failure_text(const String &name) const {
-	const NovaRequiredResource *row =
+	const RequiredResource *row =
 			gameprofile_required_resource_find(name.utf8().get_data());
 	return row ? String::utf8(row->failure) : String();
 }

@@ -3,10 +3,10 @@
 // per-entry streaming state (block_size / total_size / data_offset) which
 // SbfAudioStreamPlayback consumes via raw_entry_at() at playback time.
 
-#include "nova_sbf_audio_stream.h"
+#include "audio/sbf_audio_stream.h"
 
-#include "nova_sbf_audio_stream_playback.h"
-#include "nova_sbf_bank.h"
+#include "audio/sbf_audio_stream_playback.h"
+#include "audio/sbf_bank.h"
 
 #include <godot_cpp/core/class_db.hpp>
 

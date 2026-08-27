@@ -4,7 +4,7 @@ extends RefCounted
 const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 
 # Drives the JO in-game armory — weapon.mnu's WEAPON screen — by control NAME, as a
-# companion the game-agnostic MenuShell (nova_menu_shell.gd) delegates to (the
+# companion the game-agnostic MenuShell (menu_shell.gd) delegates to (the
 # mp_menu_companion / player_info_menu_companion pattern), riding a MenuDriver
 # over the compiled MenuFrame surface. The original registers exactly these
 # controls on the "WEAPON" screen [orig: WeaponDef_RegisterUICallbacks @0x567020,

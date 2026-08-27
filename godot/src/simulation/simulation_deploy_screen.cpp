@@ -4,7 +4,7 @@
 // ClientState (the 0x0A sub-block-0 timers, the 0x6E wave groups, the 0x46
 // roster names) and the authority's own facts into them, and routes the
 // C2S 0x2E medic request the way the reload request already travels.
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include <net/npruntime/napi_np_server_ctx.h>
 #include <net/npwire/ingame_encode.h>
@@ -60,7 +60,7 @@ bool Simulation::request_local_player_medic() {
 		sent = runtime_->queue_medic_request();
 	} else if (host_owner_.serve_and_play) {
 		// The listen host's own call rides its loopback client like the reload
-		// request (nova_simulation_player_weapon.cpp): the server handler
+		// request (simulation_player_weapon.cpp): the server handler
 		// broadcasts the 0x1E line to everyone including this client.
 		opennova::MedicRequest request;
 		request.entity_index = world_->cached.local_player.packed;

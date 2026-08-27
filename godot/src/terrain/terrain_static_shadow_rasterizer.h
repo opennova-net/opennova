@@ -8,7 +8,7 @@
 // PolyTrn_RenderTile @0x60E0C6..0x60E19D; see
 // docs/terrain/terrain-re.md)
 
-#include "terrain/nova_terrain_tile_cache_device.h"
+#include "terrain/terrain_tile_cache_device.h"
 
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/dictionary.hpp>

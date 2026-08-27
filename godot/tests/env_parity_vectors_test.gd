@@ -120,7 +120,7 @@ extends GutTest
 # the ONLY two tolerances):
 # - BYTE-EXACT for integer-math outputs: all smoothed/interpolated colors,
 #   lightning intensity, and PRNG/sway-derived values compare via the
-#   int(x * 255.0 + 0.5) idiom (nova_color_smoother_test.gd) or via exact
+#   int(x * 255.0 + 0.5) idiom (color_smoother_test.gd) or via exact
 #   recovery of the underlying integer (sway amount/phase invert to the
 #   16-bit sway state and the 8-bit ring index). Encoded as hex strings in
 #   EXPECTED_BYTES; compared with assert_eq.

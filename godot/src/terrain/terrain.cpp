@@ -1,11 +1,11 @@
 // Terrain — Godot Node3D that builds and renders terrain meshes from CPT data.
 
-#include "nova_terrain.h"
-#include "nova_terrain_surface_inputs.h"
-#include "nova_terrain_tile_info.h"
-#include "env/nova_slot_shadow.h"
-#include "env/nova_water.h"
-#include "mission/nova_mission_object_placer.h"
+#include "terrain/terrain.h"
+#include "terrain/terrain_surface_inputs.h"
+#include "terrain/terrain_tile_info.h"
+#include "env/slot_shadow.h"
+#include "env/water.h"
+#include "mission/mission_object_placer.h"
 
 // Retail: PolyTrn_RenderTile @0x60da70 (docs/terrain/terrain-re.md, docs/tiles/til-re.md);
 // the sector traversal names below are jodemo-era (Terrain_RenderSectorTile @0x5CDAA0,
@@ -17,7 +17,7 @@
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/viewport.hpp>
-#include "object/nova_object_model.h"
+#include "object/object_model.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/vector4.hpp>

@@ -1,4 +1,4 @@
-#include "nova_wire_present_pass.h"
+#include "simulation/wire_present_pass.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/os.hpp>
@@ -9,8 +9,8 @@
 #include <runtime/world/present_rows.h>
 #include <runtime/world/tick_accumulator.h>
 
-#include "nova_simulation.h"
-#include "object/nova_object_data.h"
+#include "simulation/simulation.h"
+#include "object/object_data.h"
 
 namespace godot {
 

@@ -211,8 +211,8 @@ func test_provenance_contracts_are_reviewable_and_citations_resolve_to_docs() ->
 
 func test_environment_cube_capture_is_live_and_highest_quality() -> void:
 	var shared := _read(OBJECT_ROOT.path_join("shared.gdshaderinc"))
-	var capture_header := _read_repo("godot/src/env/nova_environment_cube_capture.h")
-	var capture_source := _read_repo("godot/src/env/nova_environment_cube_capture.cpp")
+	var capture_header := _read_repo("godot/src/env/environment_cube_capture.h")
+	var capture_source := _read_repo("godot/src/env/environment_cube_capture.cpp")
 	var water := _read(SHADER_ROOT.path_join("water.gdshader"))
 	var project := _read("res://project.godot")
 
@@ -230,7 +230,7 @@ func test_environment_cube_capture_is_live_and_highest_quality() -> void:
 		"pow(aligned, 800.0)", "pow(aligned, 40.0)", "static_lobe * opennova_sun_light * 2.0",
 	], "object/shared.gdshaderinc")
 	# The six capture cameras cull to the aliased water layer ALONE, so water
-	# rejects them by exact camera mask (nova_is_q3_pass pattern), never by a
+	# rejects them by exact camera mask (is_q3_pass pattern), never by a
 	# stale capture-origin distance.
 	assert_true(water.contains("NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u"))
 	assert_true(water.contains("CAMERA_VISIBLE_LAYERS == NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK"))
@@ -588,9 +588,9 @@ func test_retail_tile_set_atlas_is_carried_not_misclassified_as_a_lightmap() -> 
 	_contains_all(_read_repo("engine/runtime/terrain/terrain_tile_composer.cpp"),
 			["til_build_entry_render_uv_quad", "sample_tilestrip", "compose_overlay_rgba",
 			"add_dot3_alpha(output, dot3_alpha)"], "terrain_tile_composer.cpp")
-	_contains_all(_read_repo("godot/src/terrain/nova_terrain_tile_cache_device.cpp"),
+	_contains_all(_read_repo("godot/src/terrain/terrain_tile_cache_device.cpp"),
 			["get_tilestrip_tex()", "snapshot->tilestrip", "result.tilestrip = &tilestrip"],
-			"nova_terrain_tile_cache_device.cpp")
+			"terrain_tile_cache_device.cpp")
 	var terrain := _read(SHADER_ROOT.path_join("terrain.gdshader"))
 	var foliage := _read(SHADER_ROOT.path_join("foliage_detail.gdshaderinc"))
 	for shader in [terrain, foliage]:
@@ -644,9 +644,9 @@ func test_max_quality_tile_page_projection_is_one_c7_c8_cutover() -> void:
 		assert_true(shader.contains("u_match_terrain_page_projection"))
 		assert_false(shader.contains("u_match_terrain_page_origin_span"))
 	var runtime_consumers := "\n".join(PackedStringArray([
-		_read_repo("godot/src/terrain/nova_terrain.cpp"),
-		_read_repo("godot/src/terrain/nova_foliage_dispatcher.cpp"),
-		_read_repo("godot/src/object/nova_object_model.cpp"),
+		_read_repo("godot/src/terrain/terrain.cpp"),
+		_read_repo("godot/src/terrain/foliage_dispatcher.cpp"),
+		_read_repo("godot/src/object/object_model.cpp"),
 	]))
 	assert_eq(runtime_consumers.count("TerrainTileCompositionCache::page_projection("), 3)
 	assert_false(runtime_consumers.contains("tile_cache_origin_span"))
@@ -717,8 +717,8 @@ func test_static_multimeshes_share_the_per_robj_point_light_contract() -> void:
 	var vertex_standard := _read(OBJECT_ROOT.path_join("vertex_standard.gdshaderinc"))
 	var vertex_flag := _read(OBJECT_ROOT.path_join("vertex_flag.gdshaderinc"))
 	var project := _read("res://project.godot")
-	var placer := _read_repo("godot/src/mission/nova_mission_object_placer.cpp")
-	var light_scene := _read_repo("godot/src/lights/nova_light_scene.cpp")
+	var placer := _read_repo("godot/src/mission/mission_object_placer.cpp")
+	var light_scene := _read_repo("godot/src/lights/light_scene.cpp")
 
 	_contains_all(shared, [
 		"global uniform sampler2D opennova_static_point_light_rows",
@@ -832,10 +832,10 @@ func test_water_reflection_clip_class_matches_every_reachable_retail_effect() ->
 	], "object/shared.gdshaderinc")
 	assert_true(_read(OBJECT_ROOT.path_join("surface.gdshaderinc")).contains(
 			"obj_apply_water_reflection_clip(camera_position_world)"))
-	_contains_all(_read_repo("godot/src/env/nova_water.cpp"), [
+	_contains_all(_read_repo("godot/src/env/water.cpp"), [
 		"\"opennova_water_reflection_eye\"", "\"opennova_water_reflection_clip_active\"",
 		"!view.below_water",
-	], "nova_water.cpp")
+	], "water.cpp")
 
 
 func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() -> void:
@@ -843,39 +843,39 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 	for name in sources:
 		var source: String = sources[name]
 		assert_false(source.contains(": source_color"), name)
-		assert_false(source.contains("nova_gamma_to_linear"), name)
-		assert_false(source.contains("nova_linear_to_gamma"), name)
+		assert_false(source.contains("gamma_to_linear"), name)
+		assert_false(source.contains("linear_to_gamma"), name)
 
 	for name in ["particle/particle_blend_additive.gdshader", "particle/particle_blend_blend.gdshader",
 			"particle/particle_blend_bump.gdshader", "particle/particle_blend_bumpadd.gdshader",
 			"particle/particle_blend_mod.gdshader", "particle/particle_blend_mod2x.gdshader",
 			"particle/particle_blend_premult.gdshader"]:
 		var source: String = sources.get(name, "")
-		assert_true(source.contains("#include \"res://shaders/nova_color.gdshaderinc\""), name)
-		assert_true(source.contains("nova_scene_output"), name)
+		assert_true(source.contains("#include \"res://shaders/color.gdshaderinc\""), name)
+		assert_true(source.contains("scene_output"), name)
 
 	var distort: String = sources.get("particle/particle_blend_distort.gdshader", "")
-	assert_false(distort.contains("nova_scene_output"))
-	assert_false(distort.contains("nova_display_decode_gamma"))
+	assert_false(distort.contains("scene_output"))
+	assert_false(distort.contains("display_decode_gamma"))
 
 	var nvg: String = sources.get("nvg_view.gdshader", "")
-	assert_true(nvg.contains("nova_display_encode_gamma"))
-	assert_true(nvg.contains("nova_display_decode_gamma"))
+	assert_true(nvg.contains("display_encode_gamma"))
+	assert_true(nvg.contains("display_decode_gamma"))
 
 	var drape: String = sources.get("slot_shadow_drape.gdshader", "")
-	assert_true(drape.contains("nova_scene_output(factor)"))
+	assert_true(drape.contains("scene_output(factor)"))
 	assert_false(drape.contains("pow(factor"))
 	assert_true(drape.contains("vec3 ambient = vec3(1.0) - (1.0 - fade) * u_slot_term[i].rgb;"))
 	assert_true(drape.contains("vec3 shadowed = s.rgb + ambient;"))
 	assert_false(drape.contains("u_slot_term[i].rgb * s.a"))
 
-	var color_contract: String = sources.get("nova_color.gdshaderinc", "")
-	_contains_all(color_contract, ["nova_scene_output", "nova_scene_input",
-			"nova_display_decode_gamma", "nova_display_encode_gamma"], "nova_color.gdshaderinc")
-	assert_false(color_contract.contains("nova_gamma_to_linear"))
-	assert_false(color_contract.contains("nova_linear_to_gamma"))
+	var color_contract: String = sources.get("color.gdshaderinc", "")
+	_contains_all(color_contract, ["scene_output", "scene_input",
+			"display_decode_gamma", "display_encode_gamma"], "color.gdshaderinc")
+	assert_false(color_contract.contains("gamma_to_linear"))
+	assert_false(color_contract.contains("linear_to_gamma"))
 
-	var frame_renderer := _read_repo("godot/src/render/nova_framefx.cpp")
+	var frame_renderer := _read_repo("godot/src/render/frame_fx.cpp")
 	_contains_all(frame_renderer, [
 		"FramePass::GammaDecode", "EFFECT_CALLBACK_TYPE_POST_TRANSPARENT",
 		"framebuffer_blend_domain\"] = \"gamma\"",
@@ -886,15 +886,15 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		"direction_for_degrees(45.0f, 0.0027621093f)",
 		"BlendMode::SourceAlphaAdd, FramePass::FinalAverage",
 		"result[\"capture_filter\"] = \"linear_rgba8_highest_quality\"",
-	], "nova_framefx.cpp")
+	], "frame_fx.cpp")
 
 	# The first-person viewmodel draws inside the beauty pass through the
 	# shader-side renderfov projection + depth band; no composite shader.
 	assert_false(sources.has("viewmodel_composite.gdshader"))
-	var viewmodel_pass: String = sources.get("nova_viewmodel_pass.gdshaderinc", "")
+	var viewmodel_pass: String = sources.get("viewmodel_pass.gdshaderinc", "")
 	_contains_all(viewmodel_pass, ["global uniform vec4 opennova_viewmodel_projection",
 			"instance uniform bool u_viewmodel_pass", "NOVA_VIEWMODEL_DEPTH_WINDOW = 0.1"],
-			"nova_viewmodel_pass.gdshaderinc")
+			"viewmodel_pass.gdshaderinc")
 
 	var probe := _read("res://tests/render_swatch_probe.gd")
 	assert_true(probe.contains("[\"SRCALPHA/INVSRCALPHA\", -0.3, 128]"))

@@ -4,7 +4,7 @@ extends MenuCompanion
 # Drives the JO PLAYER_INFO screen (player.mnu) by control NAME: fills the
 # NATIONALITY / DIVISION / COMBO_LIST / PLAYERVOICE comboboxes from Avatars.def and
 # runs the nationality -> division -> combo cascade plus the SIDE_BLUE/SIDE_RED team
-# filter. It is a companion the game-agnostic MenuShell (nova_menu_shell.gd) delegates
+# filter. It is a companion the game-agnostic MenuShell (menu_shell.gd) delegates
 # to -- the same pattern as mp_menu_companion.gd -- claimed by the NATIONALITY + COMBO_LIST
 # controls unique to this screen, riding the shell's MenuDriver over the compiled
 # MenuFrame surface (widgets addressed by document id via _id/widget_id).

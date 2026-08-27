@@ -5,7 +5,7 @@ extends GutTest
 # quit), drives the music director's screen var, launches a selected mission, and
 # degrades gracefully when menu assets are missing - all headless, no blocking.
 
-const MenuShellScript := preload("res://game/nova_menu_shell.gd")
+const MenuShellScript := preload("res://game/menu_shell.gd")
 
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target
@@ -51,7 +51,7 @@ func before_each() -> void:
 
 func after_each() -> void:
 	# The music service is an autoload; leave no context behind for the next test.
-	NovaMusicService.stop_context()
+	MusicService.stop_context()
 	_restore_config(STATE_CONFIG_PATH, _had_state_config, _saved_state_config)
 	# The live binding model is a static shared with the whole run: restore the
 	# catalog defaults and the on-disk cfg even when a remap test fails early.
@@ -442,11 +442,11 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 		ResourceDirSettings.set_expansion(saved)
 		_rm_runtime_dir(dir)
 		return
-	assert_eq(NovaMusicService.current_context(), "menu", "base MENU music starts with the shell")
-	assert_not_null(NovaMusicService.current_script(), "base MENUMUS.BIN resolves")
-	if NovaMusicService.current_script() != null:
-		assert_eq(NovaMusicService.current_script().get_source_path(), "menumus.bin")
-	assert_eq(NovaMusicService.get_var(2), 9, "OPTIONS MUSICVAR drives Var2 before the swap")
+	assert_eq(MusicService.current_context(), "menu", "base MENU music starts with the shell")
+	assert_not_null(MusicService.current_script(), "base MENUMUS.BIN resolves")
+	if MusicService.current_script() != null:
+		assert_eq(MusicService.current_script().get_source_path(), "menumus.bin")
+	assert_eq(MusicService.get_var(2), 9, "OPTIONS MUSICVAR drives Var2 before the swap")
 	var driver: MenuDriver = shell.get_driver()
 	var avail: int = driver.widget_id("AVAIL_LIST")
 	assert_gte(avail, 0, "AVAIL_LIST authored")
@@ -456,11 +456,11 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	driver.list_activated.emit(avail, 0)
 	assert_eq(shell.get_selected_expansion(), "jox01")
 	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
-	assert_not_null(NovaMusicService.current_script(), "expansion menu context reopens")
-	if NovaMusicService.current_script() != null:
-		assert_eq(NovaMusicService.current_script().get_source_path(), "Mjox01.bin",
+	assert_not_null(MusicService.current_script(), "expansion menu context reopens")
+	if MusicService.current_script() != null:
+		assert_eq(MusicService.current_script().get_source_path(), "Mjox01.bin",
 			"live expansion selection swaps to the M<exp> script")
-	assert_eq(NovaMusicService.get_var(2), 9,
+	assert_eq(MusicService.get_var(2), 9,
 		"full expansion reload re-drives the active screen MUSICVAR")
 	var desc: int = driver.widget_id("MOD_DESC")
 	assert_gte(desc, 0, "MOD_DESC authored")
@@ -670,7 +670,7 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 # Retail hardcodes MENUMUS.SBF/.BIN + GAMEMUS.SBF/.BIN, renamed to M<n>/G<n> under
 # expansion <n> [orig: Expansion_LoadAssets @ 0x4a4798]; the .bin scripts ship
 # PFF-archived and must load by name through the VFS, while the .sbf banks stream
-# loose from disk. The ONE music context lives on the NovaMusicService autoload
+# loose from disk. The ONE music context lives on the MusicService autoload
 # (the original streams one AudioVM context at a time): the shell opens the MENU
 # context on setup, the world opens the GAME context at mission start. These pin
 # the resolution order, the byte-path loading, and the context-swap semantics.
@@ -703,32 +703,32 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 	shell.size = Vector2(800, 600)
 	add_child_autofree(shell)
 	shell.setup(root)
-	assert_eq(NovaMusicService.current_context(), "menu", "setup opens the MENU music context")
-	if NovaMusicService.current_script() != null:
-		assert_eq(NovaMusicService.current_script().get_source_path(), "menumus.bin",
+	assert_eq(MusicService.current_context(), "menu", "setup opens the MENU music context")
+	if MusicService.current_script() != null:
+		assert_eq(MusicService.current_script().get_source_path(), "menumus.bin",
 			"menumus.bin loaded from the PFF by hardcoded name")
-	NovaMusicService.set_var(14, 77)
+	MusicService.set_var(14, 77)
 	# Mission start = a full context reload onto the GAME pair + the witnessed seed.
-	assert_true(NovaMusicService.open_game_context(root), "game context opens")
-	assert_eq(NovaMusicService.current_context(), "game", "the one context swapped to GAME")
-	if NovaMusicService.current_script() != null:
-		assert_eq(NovaMusicService.current_script().get_source_path(), "gamemus.bin",
+	assert_true(MusicService.open_game_context(root), "game context opens")
+	assert_eq(MusicService.current_context(), "game", "the one context swapped to GAME")
+	if MusicService.current_script() != null:
+		assert_eq(MusicService.current_script().get_source_path(), "gamemus.bin",
 			"gamemus.bin loaded from the PFF by hardcoded name")
-	assert_eq(NovaMusicService.get_var(1), 0, "Var1 seeded 0 (never written in retail)")
-	assert_eq(NovaMusicService.get_var(7), 100, "Var7 seeded 100 (full health %)")
-	assert_eq(NovaMusicService.get_var(2), 0, "Var2 seeded 0")
-	assert_eq(NovaMusicService.get_var(14), 0, "full context reload clears unseeded globals")
-	NovaMusicService.set_var(14, 88)
-	assert_true(NovaMusicService.open_menu_context(root), "menu context reopens")
-	assert_eq(NovaMusicService.get_var(14), 0,
+	assert_eq(MusicService.get_var(1), 0, "Var1 seeded 0 (never written in retail)")
+	assert_eq(MusicService.get_var(7), 100, "Var7 seeded 100 (full health %)")
+	assert_eq(MusicService.get_var(2), 0, "Var2 seeded 0")
+	assert_eq(MusicService.get_var(14), 0, "full context reload clears unseeded globals")
+	MusicService.set_var(14, 88)
+	assert_true(MusicService.open_menu_context(root), "menu context reopens")
+	assert_eq(MusicService.get_var(14), 0,
 		"menu reload also clears globals under the headless audio driver")
 	# A failed replacement open tears down the old pair and obeys the witnessed
 	# bank-first gate: retail never attempts to read the script after no .sbf.
 	var missing_root := _MissingBankMusicRoot.new()
-	assert_false(NovaMusicService.open_menu_context(missing_root), "missing bank leaves silence")
+	assert_false(MusicService.open_menu_context(missing_root), "missing bank leaves silence")
 	assert_eq(missing_root.script_reads, 0, "missing-bank gate precedes VFS script read")
-	assert_null(NovaMusicService.director().get_bank(), "failed open retains no old bank")
-	assert_null(NovaMusicService.director().get_mus_script(), "failed open retains no old script")
+	assert_null(MusicService.director().get_bank(), "failed open retains no old bank")
+	assert_null(MusicService.director().get_mus_script(), "failed open retains no old script")
 	root.clear()
 	_rm_music_ctx_dir(dir)
 
@@ -772,9 +772,9 @@ func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
 	shell.size = Vector2(800, 600)
 	add_child_autofree(shell)
 	shell.setup(root)
-	assert_eq(NovaMusicService.current_context(), "menu", "menu context opened")
-	if NovaMusicService.current_script() != null:
-		assert_eq(NovaMusicService.current_script().get_source_path(), "Mjox01.bin",
+	assert_eq(MusicService.current_context(), "menu", "menu context opened")
+	if MusicService.current_script() != null:
+		assert_eq(MusicService.current_script().get_source_path(), "Mjox01.bin",
 			"M<n>.bin preferred over menumus.bin (complete pair)")
 	var menu_pair: MusicPair = shell.resolve_menu_music_pair()
 	assert_true(String(menu_pair.bank).ends_with("Mjox01.sbf"),
@@ -858,9 +858,9 @@ func test_musicless_expansion_does_not_reselect_base_pair() -> void:
 	shell.size = Vector2(800, 600)
 	add_child_autofree(shell)
 	shell.setup(root)
-	assert_eq(NovaMusicService.current_context(), "",
+	assert_eq(MusicService.current_context(), "",
 		"musicless mounted expansion leaves the menu context silent")
-	assert_null(NovaMusicService.current_script(),
+	assert_null(MusicService.current_script(),
 		"musicless mounted expansion does not load MENUMUS.BIN")
 	var pair: MusicPair = shell.resolve_menu_music_pair()
 	assert_true(String(pair.bank).ends_with("Mjox01.sbf"),

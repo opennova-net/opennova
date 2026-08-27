@@ -8,8 +8,8 @@ func _source(path: String) -> String:
 
 
 func test_device_snapshots_shadow_state_before_queuing_portable_work() -> void:
-	var header := _source("res://src/terrain/nova_terrain_tile_cache_device.h")
-	var source := _source("res://src/terrain/nova_terrain_tile_cache_device.cpp")
+	var header := _source("res://src/terrain/terrain_tile_cache_device.h")
+	var source := _source("res://src/terrain/terrain_tile_cache_device.cpp")
 	assert_true(header.contains("class TerrainStaticShadowPageRasterizer"),
 		"The device needs a typed page compiler, not a framebuffer-opacity hook.")
 	assert_true(header.contains("TerrainStaticShadowCompilationSnapshot"))
@@ -54,9 +54,9 @@ func test_device_snapshots_shadow_state_before_queuing_portable_work() -> void:
 
 
 func test_worker_snapshot_owns_the_complete_receiver_height_field() -> void:
-	var header := _source("res://src/terrain/nova_terrain_tile_cache_device.h")
+	var header := _source("res://src/terrain/terrain_tile_cache_device.h")
 	var rasterizer := _source(
-			"res://src/terrain/nova_terrain_static_shadow_rasterizer.cpp")
+			"res://src/terrain/terrain_static_shadow_rasterizer.cpp")
 	assert_true(header.contains("TerrainStaticShadowReceiverStorage"),
 			"The immutable worker snapshot needs one owner for every receiver pointer.")
 	assert_true(header.contains("std::vector<uint16_t> heightmap"),
@@ -76,7 +76,7 @@ func test_worker_snapshot_owns_the_complete_receiver_height_field() -> void:
 
 
 func test_workers_finish_exact_pages_before_generation_checked_upload() -> void:
-	var source := _source("res://src/terrain/nova_terrain_tile_cache_device.cpp")
+	var source := _source("res://src/terrain/terrain_tile_cache_device.cpp")
 	var worker := source.find("void worker_loop()")
 	var compose := source.find("compose_terrain_tile_page(", worker)
 	var plan := source.find("shadow_planner.plan(", compose)
@@ -120,7 +120,7 @@ func test_workers_finish_exact_pages_before_generation_checked_upload() -> void:
 
 
 func test_device_coalesces_stale_work_and_prioritizes_current_frame_demand() -> void:
-	var source := _source("res://src/terrain/nova_terrain_tile_cache_device.cpp")
+	var source := _source("res://src/terrain/terrain_tile_cache_device.cpp")
 	var async_state := source.find("struct TerrainTileCacheDevice::AsyncState")
 	var device_constructor := source.find(
 			"TerrainTileCacheDevice::TerrainTileCacheDevice()", async_state)
@@ -146,8 +146,8 @@ func test_device_coalesces_stale_work_and_prioritizes_current_frame_demand() -> 
 
 
 func test_terrain_owns_and_frames_the_concrete_shadow_rasterizer() -> void:
-	var header := _source("res://src/terrain/nova_terrain.h")
-	var source := _source("res://src/terrain/nova_terrain.cpp")
+	var header := _source("res://src/terrain/terrain.h")
+	var source := _source("res://src/terrain/terrain.cpp")
 	assert_true(header.contains("TerrainStaticShadowRasterizer static_shadow_rasterizer"),
 		"Terrain must own the producer whose non-owning address the cache device retains.")
 	assert_true(source.contains(
@@ -186,7 +186,7 @@ func test_game_world_attaches_and_detaches_the_mission_shadow_source() -> void:
 func test_page_shadow_alpha_preserves_sky_and_fog_without_a_black_overlay() -> void:
 	var shared := _source("res://shaders/terrain_lighting.gdshaderinc")
 	var runtime := _source("res://shaders/terrain.gdshader")
-	var device := _source("res://src/terrain/nova_terrain.cpp")
+	var device := _source("res://src/terrain/terrain.cpp")
 	assert_true(shared.contains("cm.a * u_sun_light + u_sky_ambient"),
 		"A zeroed page light term must remove only direct sun while retaining sky ambient.")
 	var surface := runtime.find("terrain_surface_color_from_colormap(")
@@ -205,16 +205,16 @@ func test_page_shadow_alpha_preserves_sky_and_fog_without_a_black_overlay() -> v
 		"The terrain drape pass must carry the render-slot witness, not the"
 		+ " retired static overlay rationale.")
 	var rasterizer_source := _source(
-			"res://src/terrain/nova_terrain_static_shadow_rasterizer.cpp")
+			"res://src/terrain/terrain_static_shadow_rasterizer.cpp")
 	assert_false(rasterizer_source.contains("slot_shadow_drape"),
 		"The static rasterizer must never route through the dynamic drape pass.")
 
 
 func test_capture_variants_control_page_shadows_without_a_static_shadow_map() -> void:
-	var terrain_header := _source("res://src/terrain/nova_terrain.h")
-	var terrain_source := _source("res://src/terrain/nova_terrain.cpp")
+	var terrain_header := _source("res://src/terrain/terrain.h")
+	var terrain_source := _source("res://src/terrain/terrain.cpp")
 	var device_header := _source(
-		"res://src/terrain/nova_terrain_tile_cache_device.h")
+		"res://src/terrain/terrain_tile_cache_device.h")
 	var world := _source("res://game/world/game_world.gd")
 	var session := _source(
 		"res://tests/support/shadow_attribution_capture_session.gd")
@@ -226,7 +226,7 @@ func test_capture_variants_control_page_shadows_without_a_static_shadow_map() ->
 	assert_true(terrain_source.count(
 			"tile_cache_device.invalidate_static_shadow_pages();") >= 3,
 		"Attach, enable, and suppression changes must retire stale page bindings.")
-	assert_false(world.contains("NovaStaticSunShadow"),
+	assert_false(world.contains("StaticSunShadow"),
 		"The page provider makes the old static DirectionalLight shadow map obsolete.")
 	assert_true(session.contains(
 			"_terrain.set_static_terrain_shadow_enabled("),
@@ -234,13 +234,13 @@ func test_capture_variants_control_page_shadows_without_a_static_shadow_map() ->
 	assert_true(session.contains(
 			"_terrain.set_suppressed_static_shadow_bms_ids("),
 		"Attribution suppression must filter the provider's typed BMS sources.")
-	assert_false(session.contains('get_node_or_null(\n\t\t\t"NovaStaticSunShadow")'),
+	assert_false(session.contains('get_node_or_null(\n\t\t\t"StaticSunShadow")'),
 		"Capture state must not depend on the retired static shadow-map node.")
 
 
 func test_device_frame_diagnostics_are_bounded_and_capacity_is_explicit() -> void:
-	var header := _source("res://src/terrain/nova_terrain_tile_cache_device.h")
-	var source := _source("res://src/terrain/nova_terrain_tile_cache_device.cpp")
+	var header := _source("res://src/terrain/terrain_tile_cache_device.h")
+	var source := _source("res://src/terrain/terrain_tile_cache_device.cpp")
 	for counter in [
 			"frame_requests_",
 			"frame_ready_hits_",
@@ -330,7 +330,7 @@ func test_provider_uses_page_local_point_receiver_state_and_complete_raster_stam
 	# the adapter keeps only marshalling, so each pin points at the file that
 	# owns the behavior now.
 	var adapter := _source(
-		"res://src/terrain/nova_terrain_static_shadow_rasterizer.cpp")
+		"res://src/terrain/terrain_static_shadow_rasterizer.cpp")
 	var planner := _source(
 		"res://../engine/runtime/terrain/terrain_static_shadow_planner.cpp")
 	var geometry := _source(

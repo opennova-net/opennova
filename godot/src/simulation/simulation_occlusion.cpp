@@ -1,7 +1,7 @@
 // Simulation — the occlusion runtime (building portals, iris march, sound
 // occlusion) and the world debug views (collision/hitbox/round/occlusion
 // dictionaries + debug round spawn).
-#include "simulation/nova_simulation_internal.h"
+#include "simulation/simulation_internal.h"
 
 #include <net/netsim/connection_fan.h>
 #include <net/netsim/entity_wire_bridge.h> // entity_class_of (the host's own rows)
@@ -10,7 +10,7 @@
 
 #include <unordered_set>
 
-using namespace novasim;
+using namespace sim_internal;
 
 void Simulation::occlusion_init_mission() {
 	// [orig: Terrain_InitBuildingPortals @ 0x5c7480 from Game_StartMission

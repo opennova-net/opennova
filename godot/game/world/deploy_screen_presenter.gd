@@ -383,7 +383,7 @@ func _ensure_menu() -> bool:
 	_ui_parent.add_child(_audio)
 	_driver = MenuDriver.new()
 	_driver.attach(_frame, _audio)
-	_driver.set_music_director(NovaMusicService.director())
+	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MUSIC_VAR_INDEX)
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
 	var style := _load_style(root)

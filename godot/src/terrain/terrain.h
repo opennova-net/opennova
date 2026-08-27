@@ -11,12 +11,12 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
-#include "env/nova_mission_environment.h"
-#include "env/nova_weather.h"
-#include "lights/nova_light_scene.h"
-#include "nova_terrain_data.h"
-#include "nova_terrain_static_shadow_rasterizer.h"
-#include "nova_terrain_tile_cache_device.h"
+#include "env/mission_environment.h"
+#include "env/weather.h"
+#include "lights/light_scene.h"
+#include "terrain/terrain_data.h"
+#include "terrain/terrain_static_shadow_rasterizer.h"
+#include "terrain/terrain_tile_cache_device.h"
 #include <runtime/terrain/terrain_frame.h>
 
 #include <cstdint>

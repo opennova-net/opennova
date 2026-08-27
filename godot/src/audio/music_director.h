@@ -1,5 +1,4 @@
-#ifndef NOVA_MUSIC_DIRECTOR_H
-#define NOVA_MUSIC_DIRECTOR_H
+#pragma once
 
 // MusicDirector embeds a engine/formats/mus VM and routes its hooks to Godot
 // signals. Owns a small AudioStreamPlayer pool for marker playback driven
@@ -131,4 +130,3 @@ private:
 
 } // namespace godot
 
-#endif // NOVA_MUSIC_DIRECTOR_H

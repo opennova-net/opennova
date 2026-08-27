@@ -6,7 +6,7 @@ master — 0001..0003 are reserved for the MNU ADRs that land with the menu slic
 ## Context
 
 `GOALS.md`: "the portable engine core is C++; Godot is the host that renders it." The runtime audio
-code lived entirely in GDScript (`nova_sound_bank.gd`, `nova_mission_audio.gd`). The genuinely portable
+code lived entirely in GDScript (`sound_bank.gd`, `mission_audio.gd`). The genuinely portable
 engine logic in there was the **per-layer sound-set member-selection state machine** (FIRST / RANDOM /
 SEQUENTIAL / RANDOM_SEQUENTIAL with per-layer cursor/bag state — originally the archive's
 `sound_set.cpp`), which a headless host would also need.

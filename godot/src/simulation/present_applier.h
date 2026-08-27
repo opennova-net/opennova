@@ -16,9 +16,9 @@
 
 #include <runtime/simassets/sim_collision_pose.h>
 
-#include "object/nova_entity_index.h"
-#include "object/nova_object_model.h"
-#include "mission/nova_mission_object_placer.h"
+#include "object/entity_index.h"
+#include "object/object_model.h"
+#include "mission/mission_object_placer.h"
 
 namespace godot {
 
@@ -104,9 +104,9 @@ public:
 			int base, bool drive_root_basis);
 
 	// --- The WIRE (joiner/MP) walk: plan + per-row hot path (the native
-	// WirePresentPass (nova_wire_present_pass.cpp) keeps the cold
+	// WirePresentPass (wire_present_pass.cpp) keeps the cold
 	// spawn/defer/prune path and pushes the finished plan here;
-	// nova_present_applier_wire.cpp holds the bodies).
+	// present_applier_wire.cpp holds the bodies).
 
 	// `rebuild_held_weapon(handle, adm) -> Node3D|null` stays on the facade,
 	// which owns the sim graphic resolve and the weapon-node maps its consumers
@@ -237,7 +237,7 @@ private:
 		// holds the exact PF fields its leg consumes; an invalid cache forces
 		// the first application, and a cold plan rebuild re-applies once by
 		// construction (rows rebuild with invalid caches). The field lists live
-		// beside the legs in nova_present_applier_wire.cpp.
+		// beside the legs in present_applier_wire.cpp.
 		static constexpr int kCtrlCacheCount = 21;
 		static constexpr int kAimCacheCount = 30;
 		float ctrl_cache[kCtrlCacheCount];

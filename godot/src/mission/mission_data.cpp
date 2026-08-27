@@ -1,6 +1,6 @@
-#include "nova_mission_data.h"
+#include "mission/mission_data.h"
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 #include <formats/mission/bms.h>     // AttribFlags / AreaTrigger / Trigger bit names
 #include <formats/mission/mission.h> // kItemIdOffset (pins ITEM_ID_OFFSET below)

@@ -300,7 +300,7 @@ func test_light_direction_render_tuple_is_the_raw_getter_and_the_godot_vector_it
 func test_environment_publishes_the_world_lighting_block_as_shader_globals() -> void:
 	# The object family reads retail's per-pass lighting block as global shader
 	# parameters written on every publication; the per-entity factors ride the
-	# u_entity_light instance uniform (nova_object_model tests) and the lerp/
+	# u_entity_light instance uniform (object_model tests) and the lerp/
 	# scale math is pinned engine-side (renderer::compute_entity_lighting).
 	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)

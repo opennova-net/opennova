@@ -9,8 +9,8 @@ shader_type spatial;
 // cleared-page fragment against this loose (un-cleared) texture.
 render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never;
 
-#include "res://shaders/nova_viewmodel_pass.gdshaderinc"
-#include "res://shaders/nova_color.gdshaderinc"
+#include "res://shaders/viewmodel_pass.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
 
 uniform sampler2D albedo_tex : filter_linear, repeat_disable;
 uniform bool has_texture = false;
@@ -26,14 +26,14 @@ void fragment() {
 		// The diagnostic disc rides RGB; additive alpha is witnessed-dead.
 		rgb *= mask;
 	}
-	ALBEDO = nova_scene_output(rgb);
+	ALBEDO = scene_output(rgb);
 	ALPHA = 0.0;
 }
 
 // The first-person particle batch rides the viewmodel's renderfov projection
-// + depth band inside the beauty pass (nova_viewmodel_pass.gdshaderinc).
+// + depth band inside the beauty pass (viewmodel_pass.gdshaderinc).
 void vertex() {
-	// Every path writes POSITION (see nova_viewmodel_pass.gdshaderinc).
-	POSITION = nova_viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
+	// Every path writes POSITION (see viewmodel_pass.gdshaderinc).
+	POSITION = viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
 			MODELVIEW_MATRIX * vec4(VERTEX, 1.0), PROJECTION_MATRIX);
 }

@@ -1,12 +1,12 @@
 // Internal header for the Simulation translation-unit family
-// (nova_simulation*.cpp) ONLY — one class, several TUs, split along the
+// (simulation*.cpp) ONLY — one class, several TUs, split along the
 // audit's seams (core / assets / occlusion / player / net / present / bind).
 // Carries the family's common includes plus every helper more than one TU
-// uses, in namespace novasim (each TU opens it with `using`). Not part of
+// uses, in namespace sim_internal (each TU opens it with `using`). Not part of
 // the engine's public include surface.
 #pragma once
 
-#include "simulation/nova_simulation.h"
+#include "simulation/simulation.h"
 
 #include <base/io/perf_clock.h> // the opt-in profiling clock (opennova::io::perf_now_us)
 #include <runtime/simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)
@@ -57,13 +57,13 @@
 #include <runtime/world/vehicle_attach.h> // player_toggle_vehicle_mount (the USE-ITEM toggle)
 #include <runtime/world/vehicle_mount.h>  // resolve_mounted_ammo_slot (phase-8 route)
 
-#include "env/nova_weather_core.h" // kIrisSample* classification codes
-#include "object/nova_item_database.h"
-#include "object/nova_avatar_database.h"
-#include "object/nova_object_data.h" // resolve_collision_instances: the .3di collision IR source
-#include "object/nova_skeletal_anim.h"
-#include "resource_index/nova_resource_root.h"
-#include "terrain/nova_terrain_data.h"
+#include "env/weather_core.h" // kIrisSample* classification codes
+#include "object/item_database.h"
+#include "object/avatar_database.h"
+#include "object/object_data.h" // resolve_collision_instances: the .3di collision IR source
+#include "object/skeletal_anim.h"
+#include "resource_index/resource_root.h"
+#include "terrain/terrain_data.h"
 
 using namespace godot;
 
@@ -73,7 +73,7 @@ using opennova::world::AiSystem;
 using opennova::world::TickContext;
 using opennova::world::World;
 
-namespace novasim {
+namespace sim_internal {
 
 inline constexpr double kFixed16 = 65536.0;
 // Canonical definition lives in engine/runtime/mission placement_traits.h
@@ -414,4 +414,4 @@ inline Vector3 godot_from_render_float3(const float p[3]) {
 	return Vector3(p[2], p[1], p[0]);
 }
 
-} // namespace novasim
+} // namespace sim_internal

@@ -27,10 +27,10 @@ void vertex() {
 	v_pixel_point_factor = vec4(0.0);
 	v_pixel_point_attenuation = vec4(0.0);
 	// The first-person viewmodel takes retail's renderfov projection + depth
-	// band (nova_viewmodel_pass.gdshaderinc); everything else takes the plain
+	// band (viewmodel_pass.gdshaderinc); everything else takes the plain
 	// projection. Writing POSITION anywhere makes Godot override the clip
 	// position for the whole shader, so EVERY path writes it (an unwritten
 	// path would leave it zero and the object would vanish).
-	POSITION = nova_viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
+	POSITION = viewmodel_position(u_viewmodel_pass && !IN_SHADOW_PASS,
 			MODELVIEW_MATRIX * vec4(VERTEX, 1.0), PROJECTION_MATRIX);
 }

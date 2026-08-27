@@ -1,14 +1,14 @@
-#include "nova_avatar_database.h"
+#include "object/avatar_database.h"
 
-#include "resource_index/nova_resource_root.h"
-#include "util/nova_data_format.h"
+#include "resource_index/resource_root.h"
+#include "util/data_format.h"
 
 #include <formats/avatars/avatars.h>
 #include <formats/avatars/preview_animation.h>
 #include <net/npwire/character_id.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
-#include "object/nova_object_model.h"
+#include "object/object_model.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 

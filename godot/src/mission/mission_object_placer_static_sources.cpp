@@ -1,14 +1,14 @@
-#include "mission/nova_mission_object_placer.h"
+#include "mission/mission_object_placer.h"
 
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
-#include "mission/nova_mission_object_placer_keys.h"
+#include "mission/mission_object_placer_keys.h"
 
 // The placer's read-back seams and destruction-support registry: static
 // user-point / item-effect / light-draw sources, static terrain-shadow
 // sources, and the per-BMS static instance table. The placement walk itself
-// lives in nova_mission_object_placer.cpp.
+// lives in mission_object_placer.cpp.
 
 namespace godot {
 

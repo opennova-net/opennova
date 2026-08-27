@@ -91,8 +91,7 @@ var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELE
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
-const NovaAiProbeScript := preload("res://game/debug/nova_ai_probe.gd")
-var _ai_probe := NovaAiProbeScript.new()
+var _ai_probe := AiProbe.new()
 var _world_load_pending := false
 # End-of-mission flow (SP): set by the sim's "round_end" effect [orig:
 # Server_ProcessRoundEnd @0x5164f0 SP tail]. The world keeps ticking underneath
@@ -761,7 +760,7 @@ func _begin_world_load() -> void:
 
 func _on_world_loaded() -> void:
 	# The GAME music context is the world's to open at mission start (GameWorld
-	# calls NovaMusicService.open_game_context, so every live mission entry path
+	# calls MusicService.open_game_context, so every live mission entry path
 	# gets the same music); nothing to do here for audio. The witnessed release
 	# then reveals the world + HUD at the tail
 	# of Game_StartMission [orig: LoadingScreen_ReleaseEffect @ 0x586b80, final

@@ -79,7 +79,7 @@ the pass-through); it is a bar-satisfying exclusion, not a gap.
 
 Merged from `playerinfo-runtime` as the twelfth workspace (the umbrella's
 ONED-A train): editor (`modtools/avatar/` — workspace, document, preview,
-three inspectors), engine (`nova_avatar_database` native Avatars.def
+three inspectors), engine (`avatar_database` native Avatars.def
 support), fixtures, five test files, and the RE doc. The branch's ADR
 renumbered 0013 → 0021 (it collided with master's consolidated-net-core
 0013) with a repo-wide reference sweep, and the eleven→twelve sweep is done
@@ -656,7 +656,7 @@ override → menu/game music) rides MUS-I's tail.
 
 ### Menus
 
-- MNU-1: **flow run mode** — run the runtime `MenuShell` (nova_menu_shell.gd's
+- MNU-1: **flow run mode** — run the runtime `MenuShell` (menu_shell.gd's
   surface: the same compiled `MenuFrame` driven interactively by `MenuDriver`) over
   the authored document in a sandboxed "Run" tab: navigation, back stack,
   window show/hide, per-screen MUSICVAR all execute for real; the shell-policy

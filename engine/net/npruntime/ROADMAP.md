@@ -30,7 +30,7 @@ The old in-match glue grew empirically against captures and is overworked:
 `engine/net/novaworld/game_session.cpp` (1332-line phase machine with hardcoded retail fixtures +
 ack-loop hacks), the `replication_min` `build_tag_*` builders (quarantined/superseded), the
 `netsim` deferred stubs, and the SP/host/joiner entanglement in
-`godot/src/simulation/nova_simulation.cpp`. The codecs themselves (`novacrypto`, `napi`, the
+`godot/src/simulation/simulation.cpp`. The codecs themselves (`novacrypto`, `napi`, the
 `novaworld` encode/decode/framing/capture layer) are byte-witnessed and solid. This effort
 rebuilds the *runtime* on top of those codecs as one faithful, maintainable core.
 
@@ -215,7 +215,7 @@ unaffected; full ctest 223/223.
 embedded `netsim::Connection link`). `Server_TickUpdate` walks it directly and drains/emits over each
 `conn.link`; it constructs/registers NO `NetSystem` and registers NO net ISystem (so the C2S queue
 never double-drains — P7 guardrail noted in `server_tick.h`). `NetSystem` stays byte-for-byte unchanged
-as the *legacy* `nova_simulation` table until P7 folds it onto `connection_list`; `ctx.net` stays
+as the *legacy* `simulation` table until P7 folds it onto `connection_list`; `ctx.net` stays
 declared-but-unused (removed at P7). To keep ONE drain/emit implementation, the two `net_system.cpp`
 file-statics were promoted to public free functions `netsim::drain_connection_c2s` /
 `emit_connection_s2c`; `NetSystem::tick`/`emit_s2c` became thin loops over them (behavior-preserving —
@@ -319,7 +319,7 @@ the 1300-byte send ceiling, while `ClientRuntime` queues reliable replies/housek
 complete send pump for the requested frame count (`NapiNPConnection+0x648`; §5.34/§5.44).
 
 ### ✅ P7 — Godot adapter rewrite (DONE — in-match core + lobby sweep)
-`nova_simulation.cpp` is a thin adapter over `npruntime` — every in-match path funnels into one
+`simulation.cpp` is a thin adapter over `npruntime` — every in-match path funnels into one
 runtime, the binding owns sockets/signals only.
 
 - **In-match core — DONE** (`346da20c`): SP listen + LAN host construct `NapiNPServerCtx` + `World`
@@ -345,7 +345,7 @@ runtime, the binding owns sockets/signals only.
   `make_lobby_identity_vars` = the NW-S5 10-var identity set; `parse_host_port`) — the host var-builders
   + the client identity assembly + the `UDPNOVAWORLD` split moved out of BOTH bindings; ctest
   `lobby_vars` proves byte-equality vs the old hand-assembly. The host keeps
-  `verify_cookie_vars={{NWUID,""}}` (the 10-var set is client-only). **B3** = `nova_world_client` holds
+  `verify_cookie_vars={{NWUID,""}}` (the 10-var set is client-only). **B3** = `novaworld_client` holds
   one `opennova::LobbyHttpFlow flow_`; `sync_flow_context()` snapshots the gate/session outputs into
   `LobbyHttpContext` at each leg-init (NEVER inside a leg callback — keeps `http_base()` stable
   mid-login); `ship_spec()` maps `HttpRequestSpec`→`HTTPRequest`; the 3 `request_completed` callbacks
@@ -353,7 +353,7 @@ runtime, the binding owns sockets/signals only.
   `on_gsb_response`'s arg order: body 3rd, out 4th, no headers). Deleted ~355 lines (login/GSB/join
   machines + `cookie_jar_`/`epask_`/Login+JoinStep). D-1 (flagged): async join `Failed` → uniform
   `STATE_CONNECTED` fallback. **Verified:** `lobby_vars`+`http_flow` ctest green; 23/23 net ctest green;
-  GDExtension compiles; `nova_world_client`/`host` GUT 4/4 each; and a **live headless our-stack lobby
+  GDExtension compiles; `novaworld_client`/`host` GUT 4/4 each; and a **live headless our-stack lobby
   smoke** against the local Docker NovaWorld server (our `NovaWorldHost`+`NovaWorldClient`,
   `SEED_DEV_USERS` `test`/`test`) ran host-register → connect → login(TestPlayer) → GSB browse →
   NWJoin → `joined_game 127.0.0.1:32768`, the shared cookie jar carrying NWHANDLE/PCID into the join
@@ -393,7 +393,7 @@ Migrations the deletion forced: `napi_np_protocol.cpp` (drop `ctx.game_runtime` 
 replies via `dispatch_session_replies`); the per-frame `0x0A` adapter (`build_tag_0a_world_reference`)
 lifted into `engine/net/netsim/connection_fan.cpp` (`build_0a_frame`); `apps/novaworld_server`'s JO routing
 re-pointed off `HostSessionAccept` onto a World-less `np::NapiNPServerCtx` session responder;
-`nova_simulation` `host_session_config_` retyped `GameServerRuntimeConfig` → `np::SessionReplyConfig`.
+`simulation` `host_session_config_` retyped `GameServerRuntimeConfig` → `np::SessionReplyConfig`.
 Tests: the P2 `handshake_server_test` migrated to assert the reactive §5.1 replies (the World-driven
 spawn/F3 flow is covered by `npruntime_client_runtime` / `npruntime_two_endpoint_socket`); the World-less
 game_runtime-mirror tests (`game_session`/`game_server_runtime`/`replication_min`/`host_session_accept`/
@@ -413,7 +413,7 @@ change; 223/223 ctest + GDExtension green):
   explicit harness `tests/netsim/conn_fan_test_util.h` (a plain `std::vector<Connection>` + the free
   functions + `spawn_remote_player`), keeping every assertion.
 - **`NapiNPServerCtx.net` field removed** (always `nullptr`; the "removed at P7" promise honored here)
-  + its forward decl + the `nova_simulation` assignment + the `server_tick.h` guardrail note.
+  + its forward decl + the `simulation` assignment + the `server_tick.h` guardrail note.
 - **`engine/net/novaworld/joiner_session.{h,cpp}` deleted** (the carried-forward orphan, superseded by
   `np::JoinerConnection`) + its `CMakeLists.txt` entry.
 - **Doc-integrity fix:** the D-NET-116/117/119 ID collisions (each assigned once as a §5.43 behavior

@@ -8,10 +8,10 @@ shader_type spatial;
 render_mode unshaded, depth_draw_never, cull_disabled, blend_add;
 
 // Gamma-domain scene-target contract.
-#include "res://shaders/nova_color.gdshaderinc"
-#include "res://shaders/nova_frame_pass.gdshaderinc"
+#include "res://shaders/color.gdshaderinc"
+#include "res://shaders/frame_pass.gdshaderinc"
 
-// Raw sampling per the gamma-space convention (nova_color.gdshaderinc).
+// Raw sampling per the gamma-space convention (color.gdshaderinc).
 uniform sampler2D u_diffuse : filter_linear_mipmap;
 uniform vec3 u_tint = vec3(1.0, 1.0, 1.0);
 uniform float u_opacity = 1.0;
@@ -65,7 +65,7 @@ void vertex() {
 	float view_dot_sq = view_dot * view_dot;
 	v_glare_view_fade = view_dot_sq * view_dot_sq;
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
-	if (u_depth_far_pin && !nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (u_depth_far_pin && !is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
 		// Exact far plane (reverse-Z depth 0); an epsilon fails because
 		// distant terrain's depth near/dist drops below any epsilon. The
 		// BEAUTY view only: retail's bloom pass redraws the discs at the
@@ -81,7 +81,7 @@ void vertex() {
 void fragment() {
 	vec4 tex = texture(u_diffuse, UV);
 	float pass_opacity = u_opacity;
-	if (nova_is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
 		pass_opacity = u_q3_opacity;
 	}
 	float opacity = pass_opacity * (u_glare_view_fade ? v_glare_view_fade : 1.0);
@@ -89,6 +89,6 @@ void fragment() {
 	// display transfer and therefore remains in the retail gamma domain.
 	// COLOR = per-instance brightness for the star field's twinkle (env #33;
 	// plain meshes default to white).
-	ALBEDO = nova_scene_output(tex.rgb * u_tint * COLOR.rgb * tex.a * opacity);
+	ALBEDO = scene_output(tex.rgb * u_tint * COLOR.rgb * tex.a * opacity);
 	ALPHA = 1.0;
 }

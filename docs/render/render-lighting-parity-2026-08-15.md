@@ -44,7 +44,7 @@ is aligned when production `GameWorld` composition returns, without waiting for
 an extra frame.
 
 Focused coverage in
-[`nova_sun_shadow_test.gd`](../../godot/tests/nova_sun_shadow_test.gd) pins:
+[`sun_shadow_test.gd`](../../godot/tests/sun_shadow_test.gd) pins:
 
 - a preassigned environment direction at `_ready()`;
 - a warm light's environment rebind before another process frame; and

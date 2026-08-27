@@ -1,5 +1,5 @@
 // ObjectData: read-only document identity and summary inspection.
-#include "object/nova_object_data_internal.h"
+#include "object/object_data_internal.h"
 
 bool ObjectData::has_document() const {
 	return has_source_model;

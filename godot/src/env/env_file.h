@@ -10,8 +10,8 @@
 
 #include <formats/env/env.h>
 
-#include "env/nova_env_keyframe.h"
-#include "resource_index/nova_resource_root.h"
+#include "env/env_keyframe.h"
+#include "resource_index/resource_root.h"
 
 namespace godot {
 

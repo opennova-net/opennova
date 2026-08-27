@@ -1,4 +1,4 @@
-#include "env/nova_environment_cube_capture.h"
+#include "env/environment_cube_capture.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -9,7 +9,7 @@
 #include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
-#include "env/nova_water.h"
+#include "env/water.h"
 
 namespace godot {
 namespace {

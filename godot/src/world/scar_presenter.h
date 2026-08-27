@@ -37,7 +37,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 namespace godot {
 

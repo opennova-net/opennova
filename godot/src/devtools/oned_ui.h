@@ -7,7 +7,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 
-#include "imgui_pass_node.h"
+#include "devtools/imgui_pass_node.h"
 
 #include <runtime/devtools/oned_ui.h>
 

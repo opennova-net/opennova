@@ -1,6 +1,6 @@
 #include "network/item_replication_catalog_adapter.h"
 
-#include "object/nova_item_database.h"
+#include "object/item_database.h"
 
 #include <utility>
 #include <vector>

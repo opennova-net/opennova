@@ -1,6 +1,6 @@
-#include "nova_wac_program.h"
+#include "wac/wac_program.h"
 
-#include "resource_index/nova_resource_root.h"
+#include "resource_index/resource_root.h"
 
 #include <godot_cpp/variant/dictionary.hpp>
 
