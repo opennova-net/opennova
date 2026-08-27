@@ -11,6 +11,11 @@ extends GameProbe
 # stall the runner's watchdog and the client's polling, so its groups are not
 # part of the sweep.
 const TRANSPORT_SCRIPT_PREFIXES := ["res://game/mcp/", "res://game/game_mcp_service.gd"]
+# The imgui-godot bridge: its helper runs ImGui::NewFrame at the lowest process
+# priority and its controller renders at the highest. Switching one half off
+# leaves every frame un-ended (IM_ASSERT spam in the log) and says nothing
+# about the game's cost, so neither is swept.
+const IMGUI_BRIDGE_CLASSES := ["ImGuiController", "ImGuiControllerHelper", "ImGuiLayer"]
 
 var _pending_states: Array = []
 
@@ -52,8 +57,12 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 					break
 			if transport:
 				continue
-			key = script_path.get_file()
+			# An inner-class script has no path of its own: name it by class.
+			key = script_path.get_file() if not script_path.is_empty() \
+					else "<inner> " + n.get_class()
 		else:
+			if IMGUI_BRIDGE_CLASSES.has(n.get_class()):
+				continue
 			key = "<native> " + n.get_class()
 		if not groups.has(key):
 			groups[key] = {nodes = [], phys = 0, proc = 0}
