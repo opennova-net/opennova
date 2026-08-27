@@ -66,6 +66,8 @@ class ValidationSim:
 	func debug_crew_local_player(vehicle_ssn: int) -> Error:
 		calls.append(["crew_local_player", vehicle_ssn])
 		return action_error
+	func add_local_player_look(dx_px: float, dy_px: float) -> void:
+		calls.append(["look", dx_px, dy_px])
 	func is_joiner_network_diagnostics_enabled() -> bool:
 		return net_diagnostics
 	func set_joiner_network_diagnostics_enabled(value: bool) -> void:
@@ -401,14 +403,17 @@ func test_automation_actions_validate_their_typed_arguments() -> void:
 	assert_eq(int(session.invoke_control(&"crew_local_player", ["11"])["error"]),
 			ERR_INVALID_PARAMETER,
 			"an SSN string is never coerced to an entity")
+	assert_eq(int(session.invoke_control(&"local_player_look", ["3", 1.0])["error"]),
+			ERR_INVALID_PARAMETER)
 	assert_true(sim.calls.is_empty())
 
 	assert_eq(int(session.invoke_control(&"deploy_pick", [0])["error"]), OK)
 	assert_eq(int(session.invoke_control(&"kill_group", [14])["error"]), OK)
 	assert_eq(int(session.invoke_control(&"crew_vehicle", [1766, 11])["error"]), OK)
 	assert_eq(int(session.invoke_control(&"crew_local_player", [11])["error"]), OK)
+	assert_eq(int(session.invoke_control(&"local_player_look", [3.0, -2.0])["error"]), OK)
 	assert_eq(sim.calls, [["deploy_pick", 0], ["kill_group", 14],
-			["crew_vehicle", 1766, 11], ["crew_local_player", 11]])
+			["crew_vehicle", 1766, 11], ["crew_local_player", 11], ["look", 3.0, -2.0]])
 
 	sim.action_error = ERR_UNAVAILABLE
 	assert_eq(int(session.invoke_control(&"crew_local_player", [11])["error"]),

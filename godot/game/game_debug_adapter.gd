@@ -31,6 +31,7 @@ var _render_capture_end_action: Callable
 var _hud_hidden_capture_begin_action: Callable
 var _hud_hidden_capture_end_action: Callable
 var _hud_hidden_capture_witness_source: Callable
+var _probe_seams: ProbeShellSeams = null
 
 
 func configure(
@@ -82,6 +83,16 @@ func start_runtime_endpoint() -> void:
 
 func get_debug_session() -> DebugSession:
 	return _session
+
+
+## Additive seam: the shell's live suppliers and mission verbs the probe
+## runner drives (ADR 0041).
+func set_probe_seams(seams: ProbeShellSeams) -> void:
+	_probe_seams = seams
+
+
+func get_probe_seams() -> ProbeShellSeams:
+	return _probe_seams
 
 
 ## Curated transport snapshot. Dictionaries begin here because this is the

@@ -12,6 +12,9 @@ var server: McpServer = null
 var log_hub: McpLogHub = null
 var tools: GameMcpTools = null
 var game_adapter: GameMcpAdapter = null
+## The game_probe runner (ADR 0041), a child so its watchdog ticks with the
+## transport and a frozen shell never stalls it.
+var probe_runner: ProbeRunner = null
 
 
 func _init() -> void:
@@ -40,6 +43,10 @@ func setup(adapter: GameMcpAdapter, port: int) -> Error:
 	server.context_factory = _make_context
 	server.log_sink = _on_server_log
 	add_child(server)
+	probe_runner = ProbeRunner.new()
+	probe_runner.name = "ProbeRunner"
+	probe_runner.seams = adapter.get_probe_seams()
+	add_child(probe_runner)
 	tools = GameMcpTools.new(self, game_adapter)
 	tools.register_all(server.registry)
 	var err := server.start(port)

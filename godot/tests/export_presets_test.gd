@@ -10,3 +10,20 @@ func test_export_presets_do_not_bundle_resource_root_data() -> void:
 		"Mod tools and runtime exports should not bundle original resource-root data.")
 	assert_false(text.contains("*.kda") or text.contains("*.fnt"),
 		"KDA and FNT files are loaded from the configured resource root, not exported in the app PCK.")
+
+
+# Probes (godot/probes) and the GUT suite are source-only: a shipped build
+# lists the probe catalog but reports every probe unavailable (ADR 0041).
+func test_export_presets_exclude_probes_and_tests() -> void:
+	var cfg := ConfigFile.new()
+	assert_eq(cfg.load("res://export_presets.cfg"), OK)
+	var presets := 0
+	for section in cfg.get_sections():
+		if not section.begins_with("preset.") or section.ends_with(".options"):
+			continue
+		presets += 1
+		var excluded := String(cfg.get_value(section, "exclude_filter", "")).split(",")
+		for pattern in ["probes/*", "tests/*", "addons/gut/*"]:
+			assert_true(pattern in excluded,
+				"%s excludes %s (source-only; never in the PCK)" % [section, pattern])
+	assert_eq(presets, 2, "the Mod Tools and Runtime presets")

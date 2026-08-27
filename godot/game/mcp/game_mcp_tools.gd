@@ -5,6 +5,9 @@ extends RefCounted
 ## methods; this module never reaches into its scene or the simulation's
 ## private state.
 
+## How long game_control quit waits for a running probe to settle first.
+const QUIT_PROBE_CANCEL_MS := 2000
+
 var service: Node
 var adapter: GameMcpAdapter
 
@@ -132,6 +135,11 @@ func _tool_game_control(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	var action := String(args.get("action", ""))
 	if adapter == null:
 		return McpToolResult.error("The game shell cannot be controlled yet.")
+	if action == "quit":
+		# A probe mid-run must release its restores before the shell tears down.
+		var runner := _probe_runner()
+		if runner != null and runner.is_running():
+			await runner.cancel_and_wait(QUIT_PROBE_CANCEL_MS)
 	var result := adapter.mcp_game_control(action)
 	if result != OK:
 		return McpToolResult.error(
@@ -281,6 +289,58 @@ func _tool_game_logs(args: Dictionary, ctx: McpToolContext) -> Variant:
 	return page
 
 
+func _tool_game_probe(args: Dictionary, _ctx: McpToolContext) -> Variant:
+	var runner := _probe_runner()
+	if runner == null:
+		return McpToolResult.error("The probe runner is unavailable in this game.")
+	var op := String(args.get("op", ""))
+	match op:
+		"list":
+			return runner.list()
+		"run":
+			if service.server.is_tool_running():
+				return McpToolResult.error(
+						"A serial tool call is in flight; retry game_probe op=run when it finishes.")
+			var name := String(args.get("name", ""))
+			if name.is_empty():
+				return McpToolResult.error("game_probe op=run requires name.")
+			var probe_args: Variant = args.get("args", {})
+			if probe_args == null:
+				probe_args = {}
+			if not (probe_args is Dictionary):
+				return McpToolResult.error("game_probe args must be an object.")
+			var started: Dictionary = runner.start(name, probe_args)
+			if started.has("refused"):
+				return McpToolResult.error(String(started["refused"]), started.get("details"))
+			return started
+		"status":
+			var cursor: Variant = _integer_number(args.get("cursor", 0))
+			var wait_ms: Variant = _integer_number(args.get("wait_ms", 0))
+			if cursor == null or int(cursor) < 0 or wait_ms == null or int(wait_ms) < 0 \
+					or int(wait_ms) > GameMcpCatalog.PROBE_STATUS_WAIT_MAX_MS:
+				return McpToolResult.error(
+						"game_probe op=status requires cursor >= 0 and wait_ms from 0 to %d." % [
+							GameMcpCatalog.PROBE_STATUS_WAIT_MAX_MS])
+			var status: Dictionary = await runner.status(
+					String(args.get("run_id", "")), int(cursor), int(wait_ms))
+			if status.has("refused"):
+				return McpToolResult.error(String(status["refused"]))
+			return status
+		"cancel":
+			var outcome: Dictionary = runner.cancel(String(args.get("run_id", "")))
+			if outcome.has("refused"):
+				return McpToolResult.error(String(outcome["refused"]))
+			return outcome
+		_:
+			return McpToolResult.error("Unknown game_probe op '%s'." % op)
+
+
+func _probe_runner() -> ProbeRunner:
+	if service == null:
+		return null
+	return service.get("probe_runner") as ProbeRunner
+
+
 static func _debug_error(id: StringName, err: Error) -> String:
 	match err:
 		ERR_DOES_NOT_EXIST:
@@ -312,6 +372,7 @@ static func _debug_action_args(id: StringName, raw: Variant) -> Variant:
 			&"kill_group",
 			&"crew_vehicle",
 			&"crew_local_player",
+			&"local_player_look",
 		]:
 			return McpToolResult.error(
 					"Debug action '%s' requires its documented args object." % id)
@@ -406,6 +467,12 @@ static func _debug_action_args(id: StringName, raw: Variant) -> Variant:
 			if seat_vehicle == null:
 				return McpToolResult.error("crew_local_player requires an integer vehicle_ssn.")
 			return [seat_vehicle]
+		&"local_player_look":
+			var dx: Variant = _finite_number(args.get("dx_px"))
+			var dy: Variant = _finite_number(args.get("dy_px"))
+			if dx == null or dy == null:
+				return McpToolResult.error("local_player_look requires numeric dx_px and dy_px.")
+			return [dx, dy]
 		_:
 			return args.get("values", null)
 

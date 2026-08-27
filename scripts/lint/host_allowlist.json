@@ -43,6 +43,7 @@
     "engine/net/npruntime/*",
     "engine/net/npwire/*",
     "scripts/net/*",
+    "scripts/mcp/*",
     "tests/fixtures/*",
     "tests/napi/*",
     "tests/netsim/*",

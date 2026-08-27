@@ -419,6 +419,9 @@ func get_game_debug_adapter() -> GameDebugAdapter:
 				begin_hud_hidden_capture,
 				finish_hud_hidden_capture,
 				hud_hidden_capture_witness)
+		_debug_adapter.set_probe_seams(ProbeShellSeams.for_shell(self,
+				func(): return _world, func(): return _player_presenter,
+				func(): return _hud_presenter, func(): return _menu_shell))
 	return _debug_adapter
 func get_frame_stats() -> FrameStats:
 	return _frame_stats
@@ -700,6 +703,46 @@ func start_loose_mission(bms_name: String) -> void:
 	start_world_load(
 		{"mission_file": bms_name},
 		Callable(_world, "load_loose_mission").bind(bms_name))
+
+
+## The probe runner's mission verbs (ProbeShellSeams, ADR 0041): the menu's
+## Start path, the saved-BMS path parity captures stage, and the return leg.
+func start_mission(bms_name: String) -> Error:
+	var gate := _mission_start_gate()
+	if gate == OK:
+		_on_start_requested(bms_name)
+	return gate
+
+
+func start_saved_mission(saved_path: String, bms_name: String, profile: Dictionary = {}) -> Error:
+	var gate := _mission_start_gate()
+	if gate != OK:
+		return gate
+	var mission := MissionData.new()
+	if mission.open_file(saved_path) != OK:
+		return ERR_FILE_CANT_OPEN
+	if not profile.is_empty():
+		set_local_player_profile(profile)
+	start_world_load({"mission_file": bms_name},
+			Callable(_world, "load_mission_data").bind(mission, bms_name))
+	return OK
+
+
+func return_to_menu() -> Error:
+	if _world_load_pending:
+		return ERR_BUSY
+	if not _world.is_loaded():
+		return ERR_UNAVAILABLE
+	_on_return_to_menu()
+	return OK
+
+
+func _mission_start_gate() -> Error:
+	if _root == null:
+		return ERR_UNCONFIGURED
+	if _world_load_pending or not _world_load.can_start():
+		return ERR_BUSY
+	return ERR_ALREADY_IN_USE if _world.is_loaded() else OK
 
 
 ## Graceful runtime stop seam used by the shell and optional control service.

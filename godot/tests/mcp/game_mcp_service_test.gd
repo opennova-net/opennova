@@ -21,6 +21,10 @@ func test_setup_binds_loopback_and_publishes_the_tool_catalog() -> void:
 	assert_eq(service.process_mode, Node.PROCESS_MODE_ALWAYS,
 			"a frozen shell must not stall the transport")
 	assert_eq(McpLogHub.instance, service.log_hub)
+	assert_true(service.probe_runner != null and service.probe_runner.get_parent() == service,
+			"the probe runner rides the service (ADR 0041)")
+	assert_eq(service.probe_runner.process_mode, Node.PROCESS_MODE_ALWAYS,
+			"a frozen shell must not stall the probe watchdog")
 
 	var client := McpTestClient.new()
 	assert_true(await client.connect_to(get_tree(), service.server.get_port()))
@@ -34,6 +38,7 @@ func test_setup_binds_loopback_and_publishes_the_tool_catalog() -> void:
 	assert_has(names, "game_state")
 	assert_has(names, "game_control")
 	assert_has(names, "game_capture_bundle")
+	assert_has(names, "game_probe")
 
 
 func test_setup_rejects_a_missing_adapter_and_bad_ports() -> void:

@@ -378,6 +378,14 @@ static func _install_automation_actions(session: DebugSession) -> void:
 	crew_local.action_returns_error = true
 	session.register_control(crew_local)
 
+	var look := DebugControlDef.action_control(
+			&"local_player_look", &"Player", "Local player look",
+			"Feed one mouse-look delta (dx_px, dy_px screen pixels) through the local player's look path.",
+			TARGET_SIM, &"add_local_player_look")
+	look.requires_unlock = true
+	look.action_validator = _valid_look_args
+	session.register_control(look)
+
 
 static func _authoritative(definition: DebugControlDef) -> void:
 	definition.requires_unlock = true
@@ -455,6 +463,10 @@ static func _valid_deploy_pick_args(args: Array) -> bool:
 static func _valid_weapon_name_args(args: Array) -> bool:
 	return args.size() == 1 and typeof(args[0]) == TYPE_STRING \
 			and not String(args[0]).strip_edges().is_empty()
+
+
+static func _valid_look_args(args: Array) -> bool:
+	return args.size() == 2 and _is_finite_number(args[0]) and _is_finite_number(args[1])
 
 
 static func _valid_kill_group_args(args: Array) -> bool:
