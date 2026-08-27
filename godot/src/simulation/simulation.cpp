@@ -129,8 +129,8 @@ void Simulation::reset_world() {
 	// Player_InitPlayer lifecycle).
 	hud_map_control_.reset_spawn();
 	local_weapon_.nvg_scope_restore = false;
-	binocular_yaw_offset_deg_ = 0.0f;
-	binocular_pitch_offset_deg_ = 0.0f;
+	view_tracker_.binocular_yaw_offset_deg = 0.0f;
+	view_tracker_.binocular_pitch_offset_deg = 0.0f;
 	local_weapon_.eye_valid = false;
 	local_weapon_.usegun_switch = LocalUseGunSwitch::kNone;
 	local_weapon_.usegun_slot_active = false;

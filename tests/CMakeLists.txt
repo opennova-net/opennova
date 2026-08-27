@@ -1350,6 +1350,15 @@ target_include_directories(death_camera_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(death_camera_test PRIVATE cxx_std_17)
 add_test(NAME death_camera COMMAND death_camera_test)
 
+# The local player's view cluster, orchestrated (world/local_player_view.h):
+# the scope/binocular/NVG request gates, the tick's arbiter feed + death-camera
+# entry edge, the composed frame read.
+add_executable(local_player_view_test world/local_player_view_test.cpp)
+target_link_libraries(local_player_view_test PRIVATE opennova_runtime)
+target_include_directories(local_player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(local_player_view_test PRIVATE cxx_std_17)
+add_test(NAME local_player_view COMMAND local_player_view_test)
+
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
 target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

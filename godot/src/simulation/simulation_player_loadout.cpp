@@ -216,8 +216,8 @@ bool Simulation::local_player_toggle_mount() {
 		// A successful ToSpecial/use-item transition clears the raw binocular
 		// request, not merely the effective first-person view.
 		player_view_.binoculars_requested = false;
-		binocular_yaw_offset_deg_ = 0.0f;
-		binocular_pitch_offset_deg_ = 0.0f;
+		view_tracker_.binocular_yaw_offset_deg = 0.0f;
+		view_tracker_.binocular_pitch_offset_deg = 0.0f;
 		refresh_local_player_view_effects();
 		sync_local_mounted_input_heading();
 		sync_local_usegun_weapon_transition();

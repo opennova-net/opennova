@@ -56,6 +56,7 @@ class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve
 #include <runtime/world/player_input.h>
 #include <runtime/world/player_look.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/local_player_view.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/round_sim.h> // the hit-zone damage tables (re-exported statics)
 #include <runtime/world/spawn_select.h>
@@ -943,20 +944,12 @@ private:
 	int medic_request_serial_ = 0;
 	bool local_dead_edge_seen_ = false;
 	void tick_local_medic_cooldown();
-	// The camera arbiter's inputs + the mode-4 entry (simulation_player_view.cpp).
-	bool camera_local_dead_seen_ = false;
-	void feed_camera_arbiter_inputs(const opennova::world::Entity &e);
-	void enter_death_camera(const opennova::world::Entity &e);
-	// The FP viewmodel motion-lead tracker (per render frame) and the local
-	// entity's per-62.5Hz-tick movement delta it samples.
-	opennova::world::PlayerViewMotionLead fp_motion_lead_{};
-	float local_tick_delta_[3] = {0.0f, 0.0f, 0.0f};
-	float local_tick_prev_pos_[3] = {0.0f, 0.0f, 0.0f};
-	bool local_tick_prev_valid_ = false;
-	// The binocular toggle seeds one fixed-radius random aim displacement. It
-	// survives movement/death/third-person suppression until the raw toggle drops.
-	float binocular_yaw_offset_deg_ = 0.0f;
-	float binocular_pitch_offset_deg_ = 0.0f;
+	// The view cluster's trackers (the binocular aim displacement, the FP
+	// motion-lead sampler, the local-dead edge) and the session inputs the
+	// arbiter reads, both engine-owned (world/local_player_view.h); this class
+	// converts frames and routes wire requests (simulation_player_view.cpp).
+	opennova::world::LocalPlayerViewTracker view_tracker_{};
+	opennova::world::LocalViewSessionInputs local_view_session_inputs() const;
 	void reset_local_player_view_effects();
 	void refresh_local_player_view_effects();
 	void tick_local_player_view();
