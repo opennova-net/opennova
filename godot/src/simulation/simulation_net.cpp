@@ -562,8 +562,8 @@ void Simulation::joiner_pump() {
 	};
 	hooks.on_mount_changed = [this] {
 		player_view_.binoculars_requested = false;
-		binocular_yaw_offset_deg_ = 0.0f;
-		binocular_pitch_offset_deg_ = 0.0f;
+		view_tracker_.binocular_yaw_offset_deg = 0.0f;
+		view_tracker_.binocular_pitch_offset_deg = 0.0f;
 		refresh_local_player_view_effects();
 		sync_local_mounted_input_heading();
 	};
