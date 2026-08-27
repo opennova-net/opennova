@@ -17,15 +17,17 @@ const MAX_CALLSIGN_LENGTH := NetProtocol.MAX_CALLSIGN_LENGTH
 
 
 static func load_callsign() -> String:
-	# NW_LAN_NAME overrides HERE, at the single source, so every consumer —
-	# the session controller's resolve AND the character-profile "name" the
-	# spawn loadout carries onto the wire — sees the same callsign. The
-	# controller-only override left the two-instance demo colliding on the
-	# shared per-machine default (name-match self-ID, D-NET-169).
-	var env_override := OS.get_environment("NW_LAN_NAME") \
+	# The `--callsign` launch flag overrides HERE, at the single source, so every
+	# consumer — the session controller's resolve AND the character-profile
+	# "name" the spawn loadout carries onto the wire — sees the same callsign.
+	# A controller-only override left the two-instance demo colliding on the
+	# shared per-machine default (name-match self-ID, D-NET-169). The override
+	# rides the same Name[16] wire echo as the profile value, so it gets the
+	# same clamp — a longer callsign could never satisfy the name-match self-ID.
+	var flag_override := LaunchFlags.callsign() \
 			.strip_edges().left(MAX_CALLSIGN_LENGTH)
-	if not env_override.is_empty():
-		return env_override
+	if not flag_override.is_empty():
+		return flag_override
 	var stored := String(ConfigStore.read(CONFIG_PATH, SECTION, "callsign", "")) 			.strip_edges().left(MAX_CALLSIGN_LENGTH)
 	if not stored.is_empty():
 		return stored

@@ -66,9 +66,6 @@ weapon "WPN_M4"
 	gfx1 M4_TEST_FIRST
 end
 """
-const ISOLATED_ENV := [
-	"NW_SP_MISSION", "NW_LAN_HOST", "NW_LAN_JOIN",
-]
 
 
 class EntityShellHarness:
@@ -99,7 +96,6 @@ class EntityShellHarness:
 
 var _saved_config := PackedByteArray()
 var _had_config := false
-var _saved_env := {}
 var _temp_dir := ""
 var _shell: Node = null
 
@@ -201,10 +197,9 @@ func before_each() -> void:
 	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
 			if _had_config else PackedByteArray()
-	_saved_env.clear()
-	for variable in ISOLATED_ENV:
-		_saved_env[variable] = OS.get_environment(variable)
-		OS.set_environment(variable, "")
+	# A shell booted here sees only the launch flags a case sets through the
+	# override (the GUT process carries none; no sibling leftovers).
+	LaunchFlags.set_args_override(PackedStringArray([]))
 	# The persisted expansion is process-wide state an earlier suite file can leave set, and
 	# these cases join a fixture host that has no expansion archives at all. A stale name makes
 	# the host advertise an expansion this install cannot mount, which the joiner's preload
@@ -234,8 +229,7 @@ func after_each() -> void:
 	if not _temp_dir.is_empty():
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
-	for variable in ISOLATED_ENV:
-		OS.set_environment(variable, String(_saved_env.get(variable, "")))
+	LaunchFlags.clear_args_override()
 	if _had_config:
 		var file := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
 		if file != null:
@@ -245,10 +239,10 @@ func after_each() -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 
 
-func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
+func test_boot_gates_flag_mission_when_the_resource_dir_cannot_mount() -> void:
 	# A loose-only directory (no packed archives) fails the runtime mount when no
 	# --loose-root flag sanctions the loose fallback. The boot continuations
-	# (NW_SP_MISSION here, --loose-mission in a managed run) must gate on
+	# (--mission here, --loose-mission in a managed run) must gate on
 	# that failure instead of starting a world load with no mounted root.
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
@@ -261,7 +255,7 @@ func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
 	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir,
 			"the persisted dir round-trips, so the boot below reads THIS dir")
 	ResourceDirSettings.set_game("jo")
-	OS.set_environment("NW_SP_MISSION", "mnml.bms")
+	LaunchFlags.set_args_override(PackedStringArray(["--mission", "mnml.bms"]))
 	_shell = MAIN_GAME_SCENE.instantiate()
 	assert_not_null(_shell)
 	add_child(_shell)

@@ -59,15 +59,19 @@ public:
 	// Send `bytes` to the dialed default destination (joiner side).
 	int send_to_host(const PackedByteArray &bytes);
 
-	// Datagrams written to the capture file so far; 0 when not recording.
+	// The pcap every datagram this pump moves is appended to, opened by the
+	// next bind_listen/dial; "" (the default) records nothing. The runtime
+	// passes `--capture-pcap <path>` (LaunchFlags) through Simulation.
+	void set_capture_path(const String &path) { capture_path_ = path; }
+	String get_capture_path() const { return capture_path_; }
 	bool is_capturing() const { return capture_ != nullptr; }
 
 protected:
 	static void _bind_methods();
 
 private:
-	// SELF-CAPTURE. When the capture env var names a path, every datagram this
-	// pump moves is appended to a pcap in the shape the repo's own readers and
+	// SELF-CAPTURE. When a capture path is set, every datagram this pump moves
+	// is appended to a pcap in the shape the repo's own readers and
 	// `apps/nw_pp` consume — the same legacy/DLT_RAW shape the retail-side hook
 	// writes, so a session recorded here and one recorded from the original
 	// game can be decoded by the same tool and compared per (direction, tag).
@@ -81,6 +85,7 @@ private:
 			const PackedByteArray &bytes);
 
 	std::unique_ptr<opennova::net::PcapUdpWriter> capture_;
+	String capture_path_;
 
 	Ref<PacketPeerUDP> socket_;
 	int local_port_ = 0;

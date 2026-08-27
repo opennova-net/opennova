@@ -36,14 +36,12 @@ const PUNT_REASON := "the host closed the session (reason 33, class 2): LogPuntE
 const LANGUAGE_FILES := ["gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
 		"menutxt.bin"]
 const LOCALRES_FILES := ["main.mnu", "menu_style.mns", "items.def"]
-const ISOLATED_ENV := ["NW_REPLAY", "NW_SP_MISSION", "NW_LAN_HOST", "NW_LAN_JOIN"]
 
 const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)
 const SPAWN_ZONE_TYPE := 1359  # pool-1 fixture; ItemDef supplies SpawnPoint
 
 var _saved_config := PackedByteArray()
 var _had_config := false
-var _saved_env := {}
 var _temp_dir := ""
 var _shell: Node = null
 
@@ -65,10 +63,9 @@ func before_each() -> void:
 	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
 			if _had_config else PackedByteArray()
-	_saved_env.clear()
-	for variable in ISOLATED_ENV:
-		_saved_env[variable] = OS.get_environment(variable)
-		OS.set_environment(variable, "")
+	# A shell booted here must see no launch flags: the GUT process carries none,
+	# and the override guards against a sibling test leaving one behind.
+	LaunchFlags.set_args_override(PackedStringArray([]))
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
 	if not DirAccess.dir_exists_absolute(dir):
 		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
@@ -98,8 +95,7 @@ func after_each() -> void:
 	if not _temp_dir.is_empty():
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
-	for variable in ISOLATED_ENV:
-		OS.set_environment(variable, String(_saved_env.get(variable, "")))
+	LaunchFlags.clear_args_override()
 	if _had_config:
 		var file := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
 		if file != null:

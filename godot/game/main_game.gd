@@ -91,7 +91,6 @@ var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELE
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
-var _ai_probe := AiProbe.new()
 var _world_load_pending := false
 # End-of-mission flow (SP): set by the sim's "round_end" effect [orig:
 # Server_ProcessRoundEnd @0x5164f0 SP tail]. The world keeps ticking underneath
@@ -99,8 +98,6 @@ var _world_load_pending := false
 # player input idles once the round is over [orig: the post-round input gate —
 # the client input uplinks stop against g_spawn_success_gate @0x42c410].
 var _round_ended := false
-# Pending NW_SP_DEBUG_POSE teleport (see DebugPoseEnv).
-var _debug_pose_env := OS.get_environment("NW_SP_DEBUG_POSE")
 var _end_winner := 0
 var _end_screen_delay := 0.0
 var _end_screen: MissionEndScreen = null
@@ -282,17 +279,17 @@ func _ready() -> void:
 	if not loose_mission.is_empty():
 		start_loose_mission(loose_mission)
 		return
-	# Dev/headless convenience: NW_SP_MISSION=<name.bms> boots straight into a single-player
-	# mission via the same path as the menu's Start button, so the runtime (and its HUD) can be
-	# exercised without menu navigation. Off by default. NW_SP_DEBUG_POSE rides
-	# beside it (one-shot post-spawn teleport; see DebugPoseEnv).
-	var sp_mission := OS.get_environment("NW_SP_MISSION")
+	# Dev/probe launches: `--mission <name.bms>` (LaunchFlags) boots straight into a
+	# single-player mission via the same path as the menu's Start button, so the
+	# runtime (and its HUD) can be exercised without menu navigation. Off by
+	# default; a post-spawn pose rides the game_debug teleport action over MCP.
+	var sp_mission := LaunchFlags.mission()
 	if not sp_mission.is_empty():
 		_on_start_requested(sp_mission)
 		return
-	# Co-op LAN demo hooks (NW_LAN_HOST / NW_LAN_JOIN) ride the controller.
-	# Mirrors NW_SP_MISSION above; two instances on localhost = the co-op demo.
-	_net.maybe_launch_lan_from_env()
+	# Co-op LAN launches (`--lan-host` / `--lan-join`) ride the controller.
+	# Mirrors `--mission` above; two instances on localhost = the co-op demo.
+	_net.maybe_launch_lan_from_flags()
 
 
 # Consume Esc before weapon.mnu's shell-wired CANCEL hotkey and FlyCamera can both
@@ -1075,9 +1072,6 @@ func _process(delta: float) -> void:
 	if _shutdown_prepared:
 		return
 	var stats_on: bool = _frame_phase_sampler.begin_shell_control()
-	if not _debug_pose_env.is_empty() and _state == State.WORLD:
-		_debug_pose_env = DebugPoseEnv.apply(_debug_pose_env,
-				_world.get_sim() if _world != null else null)
 	var probe_enabled := _perf_probe_enabled
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
 	# the F3 Stats capture both consume the same measurements.
@@ -1129,7 +1123,6 @@ func _process(delta: float) -> void:
 		_world.tick(_camera.global_position, _camera.global_transform,
 				delta, frame_input)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
-	_ai_probe.tick(_world, delta) # env-gated self-test sim-truth dump; inert without NW_AI_PROBE
 	# Camera placement runs in the world frame now (local-view device leg,
 	# D-RORD-8); this covers frames that skip it (probe world-skip, no live world).
 	if _player_presenter != null and (skip_world or not _world.is_loaded()):

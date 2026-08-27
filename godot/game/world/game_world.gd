@@ -2182,19 +2182,18 @@ func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 ## degrees) LocalPlayerPresenter consumes — decoded from WeaponDatabase's transport dict
 ## at this edge (ADR 0017). Null when the mounted root has no weapon.def or the weapon
 ## name is absent — callers keep their witnessed JOX AK-47 defaults then. The weapon is
-## the bring-up fallback until equipped-weapon resolution lands; NOVA_VM_WEAPON
-## overrides the name (debug: rig A/B against another SKU's def).
+## the bring-up fallback until equipped-weapon resolution lands; the debug
+## `set_viewmodel_weapon` control (set_local_player_weapon_by_name over MCP/F3)
+## rigs A/B against another SKU's def.
 func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if _viewmodel_weapon_cleared:
 		return null
 	var weapon_db := get_weapon_database()
 	if weapon_db == null:
 		return null
-	# Precedence: the armory-equipped weapon, else the NOVA_VM_WEAPON debug override,
-	# else the fixed default until first equip.
+	# Precedence: the armory-equipped (or debug-selected) weapon, else the fixed
+	# default until first equip.
 	var weapon_name := _viewmodel_weapon_override
-	if weapon_name.is_empty():
-		weapon_name = OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
 		weapon_name = Simulation.viewmodel_bringup_fallback_weapon()
 	# Retail reads the equipped slot's def pointer, resolved when the slot was

@@ -322,26 +322,6 @@ func test_hosted_mission_game_type_reaches_native_session_config() -> void:
 				"%s reaches the native wire configuration" % String(row["mission"]))
 
 
-func test_env_lan_mode_override_is_explicit_and_validated() -> void:
-	assert_eq(NetSessionController.resolve_lan_mode_override("4", 1), 4,
-		"the parity harness can match a retail game.cfg lanmode")
-	assert_eq(NetSessionController.resolve_lan_mode_override(" 2 ", 1), 2,
-		"surrounding whitespace follows the other NW_LAN_* overrides")
-	for invalid in ["", "fast", "0", "5", "-1"]:
-		assert_eq(NetSessionController.resolve_lan_mode_override(invalid, 1), 1,
-			"invalid override '%s' preserves the configured default" % invalid)
-
-
-func test_env_lan_max_players_override_is_explicit_and_validated() -> void:
-	assert_eq(NetSessionController.resolve_lan_max_players_override("4", 32), 4,
-		"the parity harness can match the retail hook's configured capacity")
-	assert_eq(NetSessionController.resolve_lan_max_players_override(" 64 ", 32), 64,
-		"the hook's witnessed listen-host upper bound remains valid")
-	for invalid in ["", "many", "0", "65", "-1"]:
-		assert_eq(NetSessionController.resolve_lan_max_players_override(invalid, 32), 32,
-			"invalid override '%s' preserves the configured default" % invalid)
-
-
 func test_auto_game_type_matches_retail_mission_mode_table() -> void:
 	var modes := {
 		0: 0x10020,

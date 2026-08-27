@@ -128,10 +128,8 @@ void PcapUdpWriter::write(uint32_t src_ip, uint16_t src_port, uint32_t dst_ip,
 	++records_;
 }
 
-std::unique_ptr<PcapUdpWriter> PcapUdpWriter::from_env(const char *env_var) {
-	if (env_var == nullptr) return nullptr;
-	const char *path = std::getenv(env_var);
-	if (path == nullptr || path[0] == '\0') return nullptr;
+std::unique_ptr<PcapUdpWriter> PcapUdpWriter::from_path(const std::string &path) {
+	if (path.empty()) return nullptr;
 	auto writer = std::make_unique<PcapUdpWriter>();
 	if (!writer->open(path)) return nullptr;
 	return writer;

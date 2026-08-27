@@ -61,7 +61,6 @@ var _audio: MenuAudio = null
 var _driver: MenuDriver = null
 var _menu_root: ResourceRoot = null
 var _refresh_accum := 0.0
-var _autodeploy_accum := 0.0
 # The spawn list's presenter-side row model, aligned with the compiled list's
 # visible rows: {label, param} per row, rebuilt by _populate_spawn_list. The
 # compiled list carries labels only, so the node parameter the pick serializes
@@ -192,16 +191,6 @@ func _process(delta: float) -> void:
 	if _refresh_accum >= REFRESH_INTERVAL_S:
 		_refresh_accum = 0.0
 		_populate_spawn_list(sim)
-	# Test automation (net-capture branch): NW_LAN_AUTODEPLOY sends the Default
-	# Spawn pick (parameter 0) while the screen is owed, so a scripted joiner
-	# reaches the deployed 0x0A stream without UI input. Re-sent on a cooldown
-	# because the host silently drops invalid/contested picks; the screen still
-	# closes only on the server-driven pending bit like a manual pick.
-	if not OS.get_environment("NW_LAN_AUTODEPLOY").is_empty():
-		_autodeploy_accum -= delta
-		if _autodeploy_accum <= 0.0:
-			_autodeploy_accum = 2.0
-			sim.send_deployment_pick(0)
 
 
 # Selection commands arrive through the driver's aggregate relay. Every click on

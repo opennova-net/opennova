@@ -242,15 +242,6 @@ public:
 private:
 	UdpPump *pump_;
 };
-constexpr const char *kJoinerNetDiagnosticsEnv = "OPENNOVA_NET_DIAGNOSTICS";
-
-bool environment_flag_enabled(const char *name) {
-	const String value =
-			OS::get_singleton()->get_environment(name).strip_edges().to_lower();
-	return !value.is_empty() && value != "0" && value != "false" &&
-			value != "no" && value != "off";
-}
-
 
 } // namespace
 
@@ -787,6 +778,7 @@ bool Simulation::set_score_config_data(const PackedByteArray &p_score_ini_bytes)
 bool Simulation::enable_host_listen(int p_port) {
 	listen_server_ = true;
 	if (pump_.is_null()) pump_.instantiate();
+	pump_->set_capture_path(capture_pcap_path_);
 	// The LAN host scans the retail port range from the requested port
 	// (D-NET-210; the sequence policy is npwire net_ports.h
 	// lan_host_bind_ports). Port 0 keeps the OS-assigned bind — the dev/test
@@ -1086,6 +1078,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 		return false;
 	}
 	if (pump_.is_null()) pump_.instantiate();
+	pump_->set_capture_path(capture_pcap_path_);
 	if (pump_->dial(p_host_ip, p_port) != 0) {
 		joiner_ = false;
 		return false;
@@ -1279,7 +1272,19 @@ bool Simulation::is_join_initial_admission_complete() const {
 }
 
 bool Simulation::is_joiner_network_diagnostics_enabled() const {
-	return environment_flag_enabled(kJoinerNetDiagnosticsEnv);
+	return joiner_net_diagnostics_;
+}
+
+void Simulation::set_joiner_network_diagnostics_enabled(bool p_enabled) {
+	joiner_net_diagnostics_ = p_enabled;
+}
+
+void Simulation::set_capture_pcap_path(const String &p_path) {
+	capture_pcap_path_ = p_path;
+}
+
+String Simulation::get_capture_pcap_path() const {
+	return capture_pcap_path_;
 }
 
 Dictionary Simulation::get_joiner_network_diagnostics() const {

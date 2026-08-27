@@ -123,8 +123,6 @@ private:
 			const PackedFloat32Array &p_snap, int p_base, int p_type_id) const;
 	int consume_present_logic_tick_delta();
 	void frame_spectator_camera();
-	void trace_cold_build(const char *p_stage, int p_handle, int p_type_id,
-			int p_visual_item_id) const;
 
 	ObjectID sim_id_;
 	Ref<MissionObjectPlacer> placer_;
@@ -152,7 +150,6 @@ private:
 	Callable node_spawned_callback_;
 	int pending_spawn_count_ = 0;
 	int64_t last_present_logic_tick_ = -1;
-	String trace_path_;
 
 	int64_t stat_spawned_ = 0;
 	int64_t stat_unresolved_ = 0;

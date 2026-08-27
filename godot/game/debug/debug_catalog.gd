@@ -68,6 +68,7 @@ static func install(session: DebugSession) -> void:
 	_install_edit_actions(session)
 	_install_audio_actions(session)
 	_install_authoritative_runtime_controls(session)
+	_install_automation_actions(session)
 
 
 ## Bind the standard runtime targets once for an eagerly owned session. All
@@ -316,6 +317,68 @@ static func _install_authoritative_runtime_controls(
 	session.register_control(lightning_long)
 
 
+## The controls scripted runs drive over MCP in place of the retired NW_*
+## environment hooks (ADR 0041): the deploy pick, the viewmodel A/B rig, the
+## joiner diagnostics trace, and the one-shot entity mutations the AI probe
+## used to read from its env console.
+static func _install_automation_actions(session: DebugSession) -> void:
+	var deploy_pick := DebugControlDef.action_control(
+			&"deploy_pick", &"Sim", "Deploy pick",
+			"Send one deployment pick (0 = the Default Spawn) while the deploy screen is owed; the host silently drops invalid or contested picks.",
+			TARGET_SIM, &"send_deployment_pick")
+	deploy_pick.requires_unlock = true
+	deploy_pick.action_validator = _valid_deploy_pick_args
+	session.register_control(deploy_pick)
+
+	var viewmodel := DebugControlDef.action_control(
+			&"set_viewmodel_weapon", &"Player", "Set viewmodel weapon",
+			"Rig the first-person viewmodel and action FSM to a weapon.def name (A/B against another SKU's def).",
+			TARGET_WORLD, &"set_local_player_weapon_by_name")
+	viewmodel.requires_unlock = true
+	viewmodel.action_validator = _valid_weapon_name_args
+	session.register_control(viewmodel)
+
+	var clear_viewmodel := DebugControlDef.action_control(
+			&"clear_viewmodel_weapon", &"Player", "Clear viewmodel weapon",
+			"Drop the equipped viewmodel (the armory NONE row).",
+			TARGET_WORLD, &"clear_local_player_weapon")
+	clear_viewmodel.requires_unlock = true
+	session.register_control(clear_viewmodel)
+
+	var diagnostics := DebugControlDef.check(
+			&"net_joiner_diagnostics", &"Net", "Joiner diagnostics",
+			"Emit the per-second joiner freeze-tripwire trace (renders via print_verbose; run with --verbose).",
+			TARGET_SIM, &"is_joiner_network_diagnostics_enabled",
+			&"set_joiner_network_diagnostics_enabled", false)
+	session.register_control(diagnostics)
+
+	var kill_group := DebugControlDef.action_control(
+			&"kill_group", &"Entities", "Kill group",
+			"Kill every live entity of a mission group; returns the count killed.",
+			TARGET_SIM, &"debug_kill_group")
+	_authoritative(kill_group)
+	kill_group.action_validator = _valid_kill_group_args
+	session.register_control(kill_group)
+
+	var crew_vehicle := DebugControlDef.action_control(
+			&"crew_vehicle", &"Entities", "Crew vehicle",
+			"Seat an AI occupant (by SSN) into a vehicle (by SSN) as its pilot.",
+			TARGET_SIM, &"debug_crew_vehicle")
+	_authoritative(crew_vehicle)
+	crew_vehicle.action_validator = _valid_crew_vehicle_args
+	crew_vehicle.action_returns_error = true
+	session.register_control(crew_vehicle)
+
+	var crew_local := DebugControlDef.action_control(
+			&"crew_local_player", &"Entities", "Crew local player",
+			"Seat the local player into a vehicle (by SSN).",
+			TARGET_SIM, &"debug_crew_local_player")
+	_authoritative(crew_local)
+	crew_local.action_validator = _valid_crew_local_player_args
+	crew_local.action_returns_error = true
+	session.register_control(crew_local)
+
+
 static func _authoritative(definition: DebugControlDef) -> void:
 	definition.requires_unlock = true
 	definition.authority = DebugControlDef.Authority.HOST_ONLY
@@ -383,6 +446,29 @@ static func _valid_teleport_args(args: Array) -> bool:
 	var pitch := float(args[2])
 	return is_finite(yaw) and yaw >= -360.0 and yaw <= 360.0 \
 			and is_finite(pitch) and pitch >= -90.0 and pitch <= 90.0
+
+
+static func _valid_deploy_pick_args(args: Array) -> bool:
+	return args.size() == 1 and _is_integer_number(args[0]) and int(args[0]) >= 0
+
+
+static func _valid_weapon_name_args(args: Array) -> bool:
+	return args.size() == 1 and typeof(args[0]) == TYPE_STRING \
+			and not String(args[0]).strip_edges().is_empty()
+
+
+static func _valid_kill_group_args(args: Array) -> bool:
+	return args.size() == 1 and _is_integer_number(args[0]) and int(args[0]) > 0
+
+
+static func _valid_crew_vehicle_args(args: Array) -> bool:
+	return args.size() == 2 and _is_integer_number(args[0]) \
+			and _is_integer_number(args[1]) \
+			and int(args[0]) > 0 and int(args[1]) > 0
+
+
+static func _valid_crew_local_player_args(args: Array) -> bool:
+	return args.size() == 1 and _is_integer_number(args[0]) and int(args[0]) > 0
 
 
 static func _valid_audio_bus_volume_args(args: Array) -> bool:

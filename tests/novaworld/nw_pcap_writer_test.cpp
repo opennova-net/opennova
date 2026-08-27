@@ -10,6 +10,8 @@
 #include <base/pcapio/pcap_reader.h>
 #include <base/pcapio/pcap_writer.h>
 
+#include "common/test_paths.h"
+
 #include <cstdio>
 #include <cstdint>
 #include <string>
@@ -30,10 +32,7 @@ int failures = 0;
 	} while (0)
 
 std::string temp_path(const char *stem) {
-	const char *tmp = std::getenv("TEMP");
-	if (tmp == nullptr || tmp[0] == '\0') tmp = std::getenv("TMPDIR");
-	if (tmp == nullptr || tmp[0] == '\0') tmp = ".";
-	return std::string(tmp) + "/" + stem;
+	return std::string(test_paths_temp_dir()) + "/" + stem;
 }
 
 std::vector<uint8_t> slurp(const std::string &path) {
@@ -141,12 +140,22 @@ void test_oversize_is_dropped_not_truncated() {
 	std::remove(path.c_str());
 }
 
-// The env gate: no variable, no file, no writer — the default every build runs.
-void test_env_gate() {
-	CHECK(net::PcapUdpWriter::from_env(nullptr) == nullptr,
-			"a null env var name yields no writer");
-	CHECK(net::PcapUdpWriter::from_env("NW_CAPTURE_WRITE_DEFINITELY_UNSET") == nullptr,
-			"an unset env var yields no writer");
+// The path gate: no path, no file, no writer — the default every session runs.
+void test_path_gate() {
+	CHECK(net::PcapUdpWriter::from_path(std::string()) == nullptr,
+			"an empty path yields no writer");
+	CHECK(net::PcapUdpWriter::from_path(temp_path("no_such_dir_zz/x.pcap")) == nullptr,
+			"an unopenable path yields no writer rather than a half-open one");
+	const std::string path = temp_path("nw_pcap_writer_path_gate.pcap");
+	std::remove(path.c_str());
+	auto writer = net::PcapUdpWriter::from_path(path);
+	CHECK(writer != nullptr, "a writable path yields an open writer");
+	if (writer != nullptr) {
+		CHECK(writer->is_open(), "the gated writer is open");
+		CHECK(writer->records() == 0, "and has recorded nothing yet");
+		writer->close();
+	}
+	std::remove(path.c_str());
 }
 
 // A writer that never opened must swallow writes rather than crash: a bad path
@@ -167,7 +176,7 @@ int main() {
 	test_roundtrip_through_the_reader();
 	test_streaming_matches_in_memory_builder();
 	test_oversize_is_dropped_not_truncated();
-	test_env_gate();
+	test_path_gate();
 	test_unopened_writer_is_inert();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

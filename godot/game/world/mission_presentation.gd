@@ -87,6 +87,8 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	_sim = options.get("simulation", null)
 	if _sim == null:
 		_sim = Simulation.new()
+		# `--capture-pcap <path>` (LaunchFlags) records this process's datagrams.
+		_sim.set_capture_pcap_path(LaunchFlags.capture_pcap())
 	_sim.set_frame_stats(_frame_stats)
 	_has_trace_stats_sampling = _sim != null
 	_sync_runtime_profiling()

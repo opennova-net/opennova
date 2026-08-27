@@ -132,6 +132,12 @@ void Simulation::_bind_methods() {
 	                     &Simulation::is_join_initial_admission_complete);
 	ClassDB::bind_method(D_METHOD("is_joiner_network_diagnostics_enabled"),
 	                     &Simulation::is_joiner_network_diagnostics_enabled);
+	ClassDB::bind_method(D_METHOD("set_joiner_network_diagnostics_enabled", "enabled"),
+	                     &Simulation::set_joiner_network_diagnostics_enabled);
+	ClassDB::bind_method(D_METHOD("set_capture_pcap_path", "path"),
+	                     &Simulation::set_capture_pcap_path);
+	ClassDB::bind_method(D_METHOD("get_capture_pcap_path"),
+	                     &Simulation::get_capture_pcap_path);
 	ClassDB::bind_method(D_METHOD("get_joiner_network_diagnostics"),
 	                     &Simulation::get_joiner_network_diagnostics);
 	ClassDB::bind_method(D_METHOD("is_join_deploy_pick_pending"),

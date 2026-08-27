@@ -53,6 +53,23 @@ class ValidationSim:
 	var calls: Array = []
 	var action_error: Error = OK
 	var wac_paused := false
+	var net_diagnostics := false
+	func send_deployment_pick(param: int) -> bool:
+		calls.append(["deploy_pick", param])
+		return true
+	func debug_kill_group(group: int) -> int:
+		calls.append(["kill_group", group])
+		return 0
+	func debug_crew_vehicle(occupant_ssn: int, vehicle_ssn: int) -> Error:
+		calls.append(["crew_vehicle", occupant_ssn, vehicle_ssn])
+		return action_error
+	func debug_crew_local_player(vehicle_ssn: int) -> Error:
+		calls.append(["crew_local_player", vehicle_ssn])
+		return action_error
+	func is_joiner_network_diagnostics_enabled() -> bool:
+		return net_diagnostics
+	func set_joiner_network_diagnostics_enabled(value: bool) -> void:
+		net_diagnostics = value
 	func debug_teleport_local_player(
 			position: Vector3, yaw: float, pitch: float) -> Error:
 		calls.append(["teleport", position, yaw, pitch])
@@ -365,3 +382,38 @@ func test_builtin_mutations_reject_values_that_overflow_engine_storage() -> void
 			[Vector3.ZERO, 0.0, 0.0])["error"]), ERR_UNAVAILABLE)
 	assert_eq(sim.calls.size(), 6,
 			"all three built-in actions propagate their public Error result")
+
+
+func test_automation_actions_validate_their_typed_arguments() -> void:
+	var sim := ValidationSim.new()
+	var session := DebugSession.new()
+	DebugCatalog.install(session)
+	session.set_target_source(DebugCatalog.TARGET_SIM, func(): return sim)
+	session.set_authority_source(func(): return true)
+	session.set_edit_unlocked(true)
+
+	assert_eq(int(session.invoke_control(&"deploy_pick", [-1])["error"]),
+			ERR_INVALID_PARAMETER)
+	assert_eq(int(session.invoke_control(&"kill_group", [0])["error"]),
+			ERR_INVALID_PARAMETER)
+	assert_eq(int(session.invoke_control(&"crew_vehicle", [3])["error"]),
+			ERR_INVALID_PARAMETER)
+	assert_eq(int(session.invoke_control(&"crew_local_player", ["11"])["error"]),
+			ERR_INVALID_PARAMETER,
+			"an SSN string is never coerced to an entity")
+	assert_true(sim.calls.is_empty())
+
+	assert_eq(int(session.invoke_control(&"deploy_pick", [0])["error"]), OK)
+	assert_eq(int(session.invoke_control(&"kill_group", [14])["error"]), OK)
+	assert_eq(int(session.invoke_control(&"crew_vehicle", [1766, 11])["error"]), OK)
+	assert_eq(int(session.invoke_control(&"crew_local_player", [11])["error"]), OK)
+	assert_eq(sim.calls, [["deploy_pick", 0], ["kill_group", 14],
+			["crew_vehicle", 1766, 11], ["crew_local_player", 11]])
+
+	sim.action_error = ERR_UNAVAILABLE
+	assert_eq(int(session.invoke_control(&"crew_local_player", [11])["error"]),
+			ERR_UNAVAILABLE, "the seat refusal propagates as the action result")
+
+	assert_eq(session.get_control_state(&"net_joiner_diagnostics").value, false)
+	assert_eq(session.set_control_value(&"net_joiner_diagnostics", true), OK)
+	assert_true(sim.net_diagnostics)

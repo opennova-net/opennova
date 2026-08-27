@@ -168,6 +168,8 @@ func load_as_joiner(target: JoinTarget) -> int:
 		_clear_pending_session()
 		return ERR_CANT_OPEN
 	_join_preload_sim = Simulation.new()
+	# `--capture-pcap <path>` (LaunchFlags) records this process's datagrams.
+	_join_preload_sim.set_capture_pcap_path(LaunchFlags.capture_pcap())
 	# Retail builds g_CharAttr from the boot-soft charattr.def before any
 	# network receive can deliver the 0x41 property clears or 0x39 challenge.
 	# A missing file deliberately leaves the inactive all-zero table.
