@@ -46,7 +46,7 @@ git submodule update --init --recursive
 scripts/build.sh
 
 # Native-only iteration.
-BUILD_GODOT=0 scripts/build.sh
+scripts/build.sh --no-godot
 
 # Headless Godot tests.
 scripts/test_godot.sh

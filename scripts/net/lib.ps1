@@ -1175,9 +1175,6 @@ function Wait-OpenNovaRuntimeChild {
 # useful for non-default build directories; otherwise prefer the Release tool
 # produced by the ordinary CMake build, then Debug.
 function Find-NwLanProbe {
-    if ($env:NW_LAN_PROBE -and (Test-Path -LiteralPath $env:NW_LAN_PROBE -PathType Leaf)) {
-        return (Resolve-Path -LiteralPath $env:NW_LAN_PROBE).Path
-    }
     $root = Get-RepoRoot
     foreach ($candidate in @(
         (Join-Path $root "build\apps\nw_lan_probe\Release\nw-lan-probe.exe"),

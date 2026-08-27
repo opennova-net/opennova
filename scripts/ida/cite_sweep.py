@@ -68,7 +68,8 @@ import urllib.request
 from collections import Counter, defaultdict
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-URL = os.environ.get("IDA_MCP_URL", "http://127.0.0.1:13337/mcp")
+DEFAULT_URL = "http://127.0.0.1:13337/mcp"
+URL = DEFAULT_URL  # the IDA MCP endpoint; --url overrides
 
 CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/modtools", "godot/shaders", "godot/tests", "apps", "tests")
 DOC_ROOTS = ("docs",)
@@ -497,7 +498,10 @@ def main():
                     help="plan the reverse-link rewrites (stale/moved paths -> the file that carries the cite); dry run")
     ap.add_argument("--apply", action="store_true", help="with --fix-reimpl: write the planned rewrites into the IDB")
     ap.add_argument("--save", action="store_true", help="with --apply: idb_save afterwards")
+    ap.add_argument("--url", default=DEFAULT_URL, help="the IDA MCP endpoint (default %(default)s)")
     args = ap.parse_args()
+    global URL
+    URL = args.url
 
     code_paths = tracked_files(CODE_ROOTS, CODE_EXT)
     doc_paths = [] if args.no_docs else tracked_files(DOC_ROOTS, DOC_EXT)

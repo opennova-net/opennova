@@ -126,9 +126,7 @@ jobs:
 
       - name: Build and test
         shell: bash
-        env:
-          BUILD_GODOT: "0"
-        run: scripts/build.sh
+        run: scripts/build.sh --no-godot
 
       - name: sccache stats
         if: always()

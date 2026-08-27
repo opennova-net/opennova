@@ -91,7 +91,7 @@ following the dbf block — one executable per test, link `opennova_formats`,
 
 Run loop:
 
-    BUILD_GODOT=0 bash scripts/build.sh          # configure + build + full ctest
+    bash scripts/build.sh --no-godot             # configure + build + full ctest
     ctest --test-dir build -C Release -R <name>  # then iterate on just yours
 
 ## 5. Optional: engine binding

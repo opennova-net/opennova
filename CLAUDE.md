@@ -59,7 +59,7 @@ processes in the main checkout outside the worktree, so sandboxed runs can fail 
 processes.
 
 ```bash
-scripts/build.sh          # C++ build + full ctest (Release); BUILD_GODOT=0 skips the GDExtension
+scripts/build.sh          # C++ build + full ctest (Release); --no-godot skips the GDExtension, --jobs N
 scripts/build_godot.sh    # GDExtension only -> godot/bin/; fully restart the editor after
 scripts/test_godot.sh     # GUT GDScript suite, headless
 python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv; ledger_check takes --check)

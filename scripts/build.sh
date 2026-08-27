@@ -1,13 +1,34 @@
 #!/usr/bin/env bash
+# Builds the engine libraries and the ctest suite (Release), runs the tests,
+# then builds the Godot GDExtension so the editor never loads a stale DLL
+# missing classes that engine/ has since added.
+#
+# Usage: scripts/build.sh [--no-godot] [--jobs N]
+#   --no-godot  skip the Godot addon bootstrap and the GDExtension build
+#               (library-only iteration; what CI's engine test job runs)
+#   --jobs N    build/test parallelism (default: the machine's CPU count)
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-jobs="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+jobs="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+build_godot=1
+usage="usage: scripts/build.sh [--no-godot] [--jobs N]"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-godot) build_godot=0; shift ;;
+        --jobs)
+            [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
+            jobs="$2"; shift 2 ;;
+        --jobs=*) jobs="${1#--jobs=}"; shift ;;
+        *) echo "$usage" >&2; exit 2 ;;
+    esac
+done
 
 # The Godot addons (GUT, imgui-godot) are project assets for the GDExtension
-# flavour, not a dependency of the C++ targets: the Godot-free path
-# (BUILD_GODOT=0, what CI's engine test job runs) skips the bootstrap.
-if [[ "${BUILD_GODOT:-1}" != "0" ]]; then
+# flavour, not a dependency of the C++ targets: the Godot-free path skips the
+# bootstrap.
+if [[ "$build_godot" == "1" ]]; then
     "$root/scripts/bootstrap_godot.sh"
 fi
 
@@ -18,11 +39,8 @@ cmake --build "$root/build" --config Release -j "$jobs"
 echo "Running tests..."
 ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs"
 
-# Build the Godot GDExtension too, so the editor doesn't load a stale DLL
-# missing classes that engine/ has since added. Skippable via BUILD_GODOT=0
-# for lib-only iteration.
-if [[ "${BUILD_GODOT:-1}" != "0" ]]; then
-    "$root/scripts/build_godot.sh"
+if [[ "$build_godot" == "1" ]]; then
+    "$root/scripts/build_godot.sh" --jobs "$jobs"
 fi
 
 echo "Build and tests completed successfully."
