@@ -46,7 +46,7 @@ var PLAYER_VIEWMODEL_TPOS_UNITS := Simulation.viewmodel_fallback_tpos_units()
 # transform; the S*A^T*S copy loops @0x40c4d8..0x40c57c realize the model->render map
 # inside the composition]. Sign pinned against retail: the stock/grip anchor bottom-RIGHT
 # at the hip idle (the pre-train build renders identically and was retail-confirmed).
-var PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
+var PLAYER_VIEWMODEL_ROT := Vector3(0.0, Simulation.viewmodel_rig_yaw_deg(), 0.0)
 # Witnessed per-weapon view-rotation bias: weapon.def `pos` rotation columns, DEGREES
 # (yaw, pitch, roll) ADDED to the view angles — the weapon cant. AK47AUTO = 5.0 / 3.75 / 353.0.
 # [orig: Player_UpdateFirstPersonCamera @0x4dd444: rot = view_rot + Def.Bone.rot; parser stores
@@ -62,7 +62,7 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Simulation.viewmodel_fallback_rot_bias_deg(
 # default 80.0 = flt_7D1898 stored by AdmDef_InitEntryDefaults @0x53ff31; parser key 'renderfov'
 # @0x54482a]. Ported as a SubViewport sharing the world, camera cull-masked to the viewmodel
 # layer, composited over the finished frame (the depth-remap's visible equivalent).
-var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
+var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := Simulation.weapon_render_fov_h_deg_default()
 # (near-z lives engine-side: Simulation.viewmodel_pass_near_z())
 const CTRL_OWNER_FP_HEAT := "first_person:heat"
 const CTRL_OWNER_FP_EMPLACED := "first_person:emplaced"
@@ -291,11 +291,10 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 # folds the camera's view of the instance's WORLD transform), so the root sits
 # at the camera every frame.
 func _place_viewmodel_at_camera() -> void:
-	var b := PLAYER_VIEWMODEL_ROT_BIAS_DEF
-	var bias := Basis.from_euler(Vector3(
-		deg_to_rad(_wrap180(b.y)),    # their pitch -> Godot x
-		deg_to_rad(_wrap180(b.x)),    # their yaw   -> Godot y
-		deg_to_rad(-_wrap180(b.z))))  # their roll  -> Godot z (opposite sense)
+	# The def cant as camera euler radians: the engine's axis map
+	# (simassets/fp_viewmodel_spec.h viewmodel_bias_euler_rad).
+	var bias := Basis.from_euler(
+			Simulation.viewmodel_bias_euler_rad(PLAYER_VIEWMODEL_ROT_BIAS_DEF))
 	var vm_basis := bias * Basis.from_euler(Vector3(
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.x),
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.y),
@@ -355,10 +354,8 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 		# never execute that retail writer.
 		# [orig: Player_RenderFirstPersonViewModel @0x4DEE96..0x4DEE9F]
 		if submit_viewmodel and sim != null:
-			var team := int(sim.get_local_player_team()) & 0xFF
-			if team >= 0x80:
-				team -= 0x100
-			visual.set_ctrl_override(CTRL_OWNER_FP_TEAM, "TEX_TEAM", team)
+			visual.set_ctrl_override(CTRL_OWNER_FP_TEAM, "TEX_TEAM",
+					Simulation.viewmodel_team_byte(int(sim.get_local_player_team())))
 		else:
 			visual.clear_ctrl_override(CTRL_OWNER_FP_TEAM, "TEX_TEAM")
 		# Retail publishes accumulated heat independently for every FP model
@@ -426,7 +423,7 @@ func _apply_viewmodel_def() -> void:
 # velocity lead (>>7, clamps @0x4dd4f2..) and the prone Z drop (-1280 @0x4dd578)
 # are recorded unported tails.
 func _viewmodel_view_offset(view_units: Vector3) -> Vector3:
-	return Vector3(-view_units.y, view_units.z, -view_units.x)
+	return Simulation.viewmodel_camera_local_from_view(view_units)
 
 
 # The raw-def-units fallback for a null-sim harness: the same axis map over the
@@ -435,9 +432,3 @@ func _viewmodel_offset(units: Vector3) -> Vector3:
 	return _viewmodel_view_offset(units / Simulation.weapon_def_pos_scale())
 
 
-# Fold degrees into (-180, 180] (def rot columns store e.g. 353 for -7).
-func _wrap180(degrees: float) -> float:
-	var out := fmod(degrees + 180.0, 360.0)
-	if out < 0.0:
-		out += 360.0
-	return out - 180.0

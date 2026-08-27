@@ -451,20 +451,17 @@ func aim_screen_point() -> Vector2:
 	if _world == null or _camera == null or not has_player():
 		return Vector2.INF
 	var angles := _aim_angles_deg()
-	var yr := deg_to_rad(angles.x)
-	var pr := deg_to_rad(angles.y)
-	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var sim = _sim()
 	var eye := _eye_position(sim.get_local_player_position() if sim != null else Vector3.ZERO)
-	var target := eye + forward * Simulation.player_aim_project_range()
+	var target := Simulation.aim_ray_endpoint(eye, angles.x, angles.y)
 	if _camera.is_position_behind(target):
 		return Vector2.INF
 	return _camera.unproject_position(target)
 
 
-# The binocular rangefinder targets the same aim ray as the camera. Retail
-# measures from entity Position to the collision/far endpoint, truncates to an
-# integer, and clamps the display to 1..1000.
+# The binocular rangefinder targets the same aim ray as the camera; the
+# endpoint, the truncation and the 1..1000 display clamp are the engine's
+# (world/presentation_frame.h). This leg samples the terrain surface.
 func aim_range_units() -> int:
 	if _world == null or _camera == null or not has_player():
 		return 1
@@ -472,10 +469,7 @@ func aim_range_units() -> int:
 	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
 	var eye := _eye_position(pos)
 	var angles := _aim_angles_deg()
-	var yr := deg_to_rad(angles.x)
-	var pr := deg_to_rad(angles.y)
-	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var endpoint := eye + forward * Simulation.player_aim_project_range()
+	var endpoint := Simulation.aim_ray_endpoint(eye, angles.x, angles.y)
 	# The terrain surface, through the ported retail raycast
 	# (TerrainData.raycast_terrain -> engine/runtime/terrain_query/terrain_raycast.h
 	# [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710]) rather than a Godot
@@ -489,7 +483,7 @@ func aim_range_units() -> int:
 		# A miss reports all-NAN.
 		if not (is_nan(hit.x) or is_nan(hit.y) or is_nan(hit.z)):
 			endpoint = hit
-	return clampi(int(pos.distance_to(endpoint)), 1, 1000)
+	return Simulation.rangefinder_units(pos, endpoint)
 
 
 func _aim_angles_deg() -> Vector2:
@@ -621,9 +615,8 @@ func _update_player_camera() -> void:
 	var sim = _sim()
 	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
 	if _view != null and _view.camera_pose_valid:
-		var yr := deg_to_rad(_view.camera_yaw_deg)
-		var pr := deg_to_rad(_view.camera_pitch_deg)
-		var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
+		var forward := Simulation.presentation_forward(
+				_view.camera_yaw_deg, _view.camera_pitch_deg)
 		_camera.global_position = _view.camera_eye
 		_camera.look_at(_view.camera_eye + forward, Vector3.UP)
 		# The FP roll (torsoRoll + lean/4, composed in the sim; 0 in third

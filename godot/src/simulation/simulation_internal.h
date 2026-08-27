@@ -405,6 +405,7 @@ inline Vector3 godot_from_fixed3(const int32_t p[3]) {
 	               static_cast<float>(-p[1] / 65536.0));
 }
 // Mission float Vec3 -> Godot world space: (x, y, z) -> (x, z, -y).
+// The ONE mission <-> presentation map (world/presentation_frame.h).
 inline Vector3 godot_from_mission_vec3(const opennova::world::Vec3 &p) {
 	return Vector3(p.x, p.z, -p.y);
 }

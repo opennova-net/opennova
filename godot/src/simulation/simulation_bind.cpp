@@ -41,6 +41,22 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_loaded"), &Simulation::is_loaded);
 	ClassDB::bind_method(D_METHOD("is_playing"), &Simulation::is_playing);
 	ClassDB::bind_method(D_METHOD("step"), &Simulation::step);
+	ClassDB::bind_static_method("Simulation", D_METHOD("presentation_forward", "yaw_deg", "pitch_deg"),
+			&Simulation::presentation_forward);
+	ClassDB::bind_static_method("Simulation", D_METHOD("aim_ray_endpoint", "eye", "yaw_deg", "pitch_deg"),
+			&Simulation::aim_ray_endpoint);
+	ClassDB::bind_static_method("Simulation", D_METHOD("rangefinder_units", "position", "endpoint"),
+			&Simulation::rangefinder_units);
+	ClassDB::bind_static_method("Simulation", D_METHOD("viewmodel_camera_local_from_view", "view_units"),
+			&Simulation::viewmodel_camera_local_from_view);
+	ClassDB::bind_static_method("Simulation", D_METHOD("viewmodel_bias_euler_rad", "rot_bias_deg"),
+			&Simulation::viewmodel_bias_euler_rad);
+	ClassDB::bind_static_method("Simulation", D_METHOD("viewmodel_rig_yaw_deg"),
+			&Simulation::viewmodel_rig_yaw_deg);
+	ClassDB::bind_static_method("Simulation", D_METHOD("weapon_render_fov_h_deg_default"),
+			&Simulation::weapon_render_fov_h_deg_default);
+	ClassDB::bind_static_method("Simulation", D_METHOD("viewmodel_team_byte", "team"),
+			&Simulation::viewmodel_team_byte);
 	ClassDB::bind_static_method("Simulation", D_METHOD("predict_mount_seat", "seats", "command_id"),
 			&Simulation::predict_mount_seat);
 	ClassDB::bind_static_method("Simulation", D_METHOD("tick_dt"),

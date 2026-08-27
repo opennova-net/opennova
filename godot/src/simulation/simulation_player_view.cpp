@@ -6,6 +6,8 @@
 
 #include <net/npwire/ingame_message_id.h> // c2s:: mounted-weapon slot select on scope toggle
 #include <runtime/world/local_player_view.h>
+#include <runtime/simassets/fp_viewmodel_spec.h>
+#include <runtime/world/presentation_frame.h>
 
 #include <cstdlib>
 
@@ -183,4 +185,50 @@ Vector3 Simulation::local_player_viewmodel_bias_view_units(
 
 float Simulation::fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect) {
 	return opennova::world::fov_vertical_from_horizontal_deg(p_fov_h_deg, p_aspect);
+}
+
+Vector3 Simulation::presentation_forward(float p_yaw_deg, float p_pitch_deg) {
+	float f[3];
+	opennova::world::presentation_forward_from_angles(p_yaw_deg, p_pitch_deg, f);
+	return Vector3(f[0], f[1], f[2]);
+}
+
+Vector3 Simulation::aim_ray_endpoint(const Vector3 &p_eye, float p_yaw_deg, float p_pitch_deg) {
+	const float eye[3] = {p_eye.x, p_eye.y, p_eye.z};
+	float out[3];
+	opennova::world::aim_ray_endpoint(eye, p_yaw_deg, p_pitch_deg,
+			opennova::world::kAimProjectRange, out);
+	return Vector3(out[0], out[1], out[2]);
+}
+
+int Simulation::rangefinder_units(const Vector3 &p_position, const Vector3 &p_endpoint) {
+	const float pos[3] = {p_position.x, p_position.y, p_position.z};
+	const float end[3] = {p_endpoint.x, p_endpoint.y, p_endpoint.z};
+	return opennova::world::rangefinder_units(pos, end);
+}
+
+Vector3 Simulation::viewmodel_camera_local_from_view(const Vector3 &p_view_units) {
+	const float view[3] = {p_view_units.x, p_view_units.y, p_view_units.z};
+	float out[3];
+	opennova::simassets::viewmodel_camera_local_from_view(view, out);
+	return Vector3(out[0], out[1], out[2]);
+}
+
+Vector3 Simulation::viewmodel_bias_euler_rad(const Vector3 &p_rot_bias_deg) {
+	const float bias[3] = {p_rot_bias_deg.x, p_rot_bias_deg.y, p_rot_bias_deg.z};
+	float out[3];
+	opennova::simassets::viewmodel_bias_euler_rad(bias, out);
+	return Vector3(out[0], out[1], out[2]);
+}
+
+float Simulation::viewmodel_rig_yaw_deg() {
+	return opennova::simassets::kViewmodelRigYawDeg;
+}
+
+float Simulation::weapon_render_fov_h_deg_default() {
+	return opennova::simassets::kWeaponRenderFovHDegDefault;
+}
+
+int Simulation::viewmodel_team_byte(int p_team) {
+	return opennova::simassets::viewmodel_team_byte(p_team);
 }

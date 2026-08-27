@@ -1397,6 +1397,14 @@ target_include_directories(seat_prediction_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(seat_prediction_test PRIVATE cxx_std_17)
 add_test(NAME seat_prediction COMMAND seat_prediction_test)
 
+# The mission <-> presentation frame map, the aim ray and the rangefinder clamp
+# (world/presentation_frame.h).
+add_executable(presentation_frame_test world/presentation_frame_test.cpp)
+target_link_libraries(presentation_frame_test PRIVATE opennova_runtime)
+target_include_directories(presentation_frame_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(presentation_frame_test PRIVATE cxx_std_17)
+add_test(NAME presentation_frame COMMAND presentation_frame_test)
+
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
 target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

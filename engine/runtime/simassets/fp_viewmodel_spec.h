@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 // The first-person viewmodel submit spec — which gun/arms/clip-adm models the
 // shell places for the equipped def and the local player's selected character.
 // Sim-consumed asset resolution (ADR 0028): the RULE is engine policy, the
@@ -45,6 +47,59 @@ inline constexpr float kFallbackRotBiasDeg[3] = {5.0f, 3.75f, 353.0f};
 // viewmodel draws [orig: Render_SwapProjectionNearZ(0.05) @ 0x4dee29,
 // restore @ 0x4df0aa].
 inline constexpr float kViewmodelPassNearZ = 0.05f;
+
+// The weapon `renderfov` default, HORIZONTAL degrees: every JO weapon.def
+// omits the key, so every viewmodel draws through the record default.
+// [orig: flt_7D1898 stored by AdmDef_InitEntryDefaults @0x53ff31; parser
+//  key 'renderfov' @0x54482a; fov = WeaponDef+0x148 @0x4dee71]
+inline constexpr float kWeaponRenderFovHDegDefault = 80.0f;
+
+// The rig's authored forward onto the presentation camera's -z forward: a
+// yaw of 180 degrees about the up axis — the structural equivalent of the
+// original drawing its composed render-frame bone matrices with the raw
+// view matrix [orig: Player_RenderFirstPersonViewModel @0x4ded60 root = the
+//  view transform; the S*A^T*S copy loops @0x40c4d8..0x40c57c].
+inline constexpr float kViewmodelRigYawDeg = 180.0f;
+
+// Fold degrees into (-180, 180] (def rot columns store e.g. 353 for -7).
+inline float viewmodel_wrap180_deg(float degrees) {
+    float out = std::fmod(degrees + 180.0f, 360.0f);
+    if (out < 0.0f) out += 360.0f;
+    return out - 180.0f;
+}
+
+// The weapon.def `pos` rotation columns (degrees: yaw, pitch, roll — the
+// cant ADDED to the view angles) as presentation-camera euler radians
+// (x, y, z): their pitch -> x, their yaw -> y, their roll -> z with the
+// opposite sense. [orig: Player_UpdateFirstPersonCamera @0x4dd444: rot =
+//  view_rot + Def.Bone.rot; the parser stores degrees -> BAM @0x54471f]
+inline void viewmodel_bias_euler_rad(const float rot_bias_deg[3], float out_xyz_rad[3]) {
+    constexpr float kRad = 3.14159265358979323846f / 180.0f;
+    out_xyz_rad[0] = viewmodel_wrap180_deg(rot_bias_deg[1]) * kRad;
+    out_xyz_rad[1] = viewmodel_wrap180_deg(rot_bias_deg[0]) * kRad;
+    out_xyz_rad[2] = -viewmodel_wrap180_deg(rot_bias_deg[2]) * kRad;
+}
+
+// A VIEW-FRAME offset (X = forward, Y = left, Z = up — proven by the aim
+// ray's far point being {+65536000, 0, 0} through the same transform) onto
+// presentation camera-local axes (x right, y up, -z forward):
+//   view x (forward) -> -z, view y (left) -> -x, view z (up) -> y.
+// [orig: HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0, 0, 0) q16; the
+//  view-local rotate Math_FixedPointTransformPoint22 @0x4dd5d8]
+inline void viewmodel_camera_local_from_view(const float view[3], float out[3]) {
+    out[0] = -view[1];
+    out[1] = view[2];
+    out[2] = -view[0];
+}
+
+// TEX_TEAM is a signed-byte store immediately before the FP lighting, heat
+// and model-submit path [orig: Player_RenderFirstPersonViewModel
+//  @0x4DEE96..0x4DEE9F].
+inline int viewmodel_team_byte(int team) {
+    int t = team & 0xFF;
+    if (t >= 0x80) t -= 0x100;
+    return t;
+}
 
 // The no-definition BRING-UP fallback (ours, not retail): before any def
 // resolves, the AK set keeps the FP pipeline exercisable.

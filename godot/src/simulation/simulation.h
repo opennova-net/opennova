@@ -1635,6 +1635,20 @@ public:
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use [orig: @ 0x58d900].
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
+	// The presentation frame's view forward for mission-euler angles, the aim
+	// ray's far point and the binocular rangefinder readout — the engine's
+	// world/presentation_frame.h (no presenter spells the swizzle).
+	static Vector3 presentation_forward(float p_yaw_deg, float p_pitch_deg);
+	static Vector3 aim_ray_endpoint(const Vector3 &p_eye, float p_yaw_deg, float p_pitch_deg);
+	static int rangefinder_units(const Vector3 &p_position, const Vector3 &p_endpoint);
+	// The FP viewmodel rig's frame math (simassets/fp_viewmodel_spec.h): the
+	// view-frame -> camera-local axis map, the def rotation bias as camera
+	// euler radians, the rig yaw, the renderfov default, the TEX_TEAM byte.
+	static Vector3 viewmodel_camera_local_from_view(const Vector3 &p_view_units);
+	static Vector3 viewmodel_bias_euler_rad(const Vector3 &p_rot_bias_deg);
+	static float viewmodel_rig_yaw_deg();
+	static float weapon_render_fov_h_deg_default();
+	static int viewmodel_team_byte(int p_team);
 	// The MCP/probe mirror of the attach-command seat selection over a flat
 	// seat list [{type, occupied, ...}] (world/vehicle_attach.h
 	// predict_seat_selection): {command, seat_index, seat, candidates}.
