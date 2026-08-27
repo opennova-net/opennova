@@ -8,6 +8,18 @@ add_subdirectory(../../third_party/godot-cpp godot-cpp)
 # npruntime), NEVER opennova_novaworld_service, so no sqlite or service code
 # ends up in the binary.
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
+# Dear ImGui + the engine's ImGui pass (ADR 0039) build in every flavour (ONED's
+# run surface needs them in the release-mode dev zip too). The game's dev-tool
+# windows ride the GDExtension flavour: every template_debug build (the editor,
+# scripts/build_godot.sh, PR CI, debug packaging) carries them; the
+# template_release DLL compiles them out and the game's release export strips the
+# imgui-godot addon. GODOTCPP_TARGET is defined by now (godot-cpp's option
+# default or the -D on the command line).
+add_subdirectory(../../third_party/imgui opennova_imgui)
+option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGui)" ON)
+if(GODOTCPP_TARGET STREQUAL "template_release")
+    set(OPENNOVA_DEVTOOLS OFF)
+endif()
 # The engine (Shape A group targets — see engine/CMakeLists.txt).
 add_subdirectory(../../engine opennova_engine)
 
@@ -84,6 +96,10 @@ add_library(${TARGET_NAME} SHARED
     object/nova_avatar_database.cpp
     object/nova_skeletal_anim.cpp
     hud/hud_overlay.cpp
+    devtools/nova_frame_stats.cpp
+    devtools/imgui_pass_node.cpp
+    devtools/nova_dev_tools.cpp
+    devtools/nova_oned_ui.cpp
     hud/nova_hud_pos.cpp
     mission/nova_mission_data.cpp
     simulation/nova_present_applier.cpp
@@ -95,6 +111,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/nova_simulation_assets.cpp
     simulation/nova_simulation_bind.cpp
     simulation/nova_simulation_frame.cpp
+    simulation/nova_simulation_frame_stats.cpp
     simulation/nova_simulation_net.cpp
     simulation/nova_simulation_occlusion.cpp
     simulation/nova_simulation_player.cpp

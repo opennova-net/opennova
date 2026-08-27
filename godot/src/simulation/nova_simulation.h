@@ -83,6 +83,7 @@ class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve
 #include <npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
 #include "simulation/nova_inmatch_session_values.h"
+#include "devtools/nova_frame_stats.h"
 
 namespace opennova::hud {
 struct ScoreboardEntry; // hud/hud_scoreboard.h — the Tab-board drawer row
@@ -422,6 +423,10 @@ private:
 		int64_t adm_resolve_us = 0;
 	};
 	SessionPhasePerf frame_phase_perf_;
+	// The dev tools' frame-stats board (ADR 0039): fold_frame_stats() lands the
+	// phase attribution above on it natively at the end of a session frame.
+	Ref<FrameStats> frame_stats_;
+	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
 	opennova::inmatch::Role configured_session_role() const;
 	bool begin_session_load();
 	void complete_session_load();
@@ -1275,8 +1280,14 @@ public:
 	// tick_us, ticks. Only while runtime profiling is on: sim_us, sink_us,
 	// net_us and the phase keys flattened from frame_phase_perf_ (the
 	// HostSessionPerf/ServerTickPerf/ClientFramePerf fields plus the shell
-	// legs), which mission_presentation.gd maps onto FrameStatsBoard slots.
+	// legs). The frame-stats board receives the same spans natively
+	// (fold_frame_stats); this Dictionary stays the probes' transport edge.
 	Dictionary get_session_perf() const;
+	// The dev tools' board: SIM_STEP and the SIM_* phase slots are fed here
+	// while the profiling clocks run and the board captures.
+	void set_frame_stats(const Ref<FrameStats> &p_stats);
+	Ref<FrameStats> get_frame_stats() const;
+	int64_t get_last_session_sim_us() const { return frame_sim_us_; }
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
 	void set_join_character_profile(const Dictionary &p_profile);

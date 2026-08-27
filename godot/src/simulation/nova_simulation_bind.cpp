@@ -55,6 +55,12 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("close_session"), &Simulation::close_session);
 	ClassDB::bind_method(D_METHOD("get_session_perf"),
 			&Simulation::get_session_perf);
+	ClassDB::bind_method(D_METHOD("set_frame_stats", "stats"),
+			&Simulation::set_frame_stats);
+	ClassDB::bind_method(D_METHOD("get_frame_stats"),
+			&Simulation::get_frame_stats);
+	ClassDB::bind_method(D_METHOD("get_last_session_sim_us"),
+			&Simulation::get_last_session_sim_us);
 	ClassDB::bind_method(D_METHOD("is_transport_locked"), &Simulation::is_transport_locked);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &Simulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("set_terrain_til_data", "til_bytes"), &Simulation::set_terrain_til_data);
