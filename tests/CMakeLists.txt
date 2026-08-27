@@ -1430,6 +1430,12 @@ target_include_directories(presentation_frame_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_features(presentation_frame_test PRIVATE cxx_std_17)
 add_test(NAME presentation_frame COMMAND presentation_frame_test)
 
+# The occlusion frame camera build (world/occlusion_camera.h): the
+# presentation -> mission/render remaps, the five frustum planes, the Q22 rows.
+add_executable(occlusion_camera_test world/occlusion_camera_test.cpp)
+target_link_libraries(occlusion_camera_test PRIVATE opennova_runtime)
+add_test(NAME occlusion_camera COMMAND occlusion_camera_test)
+
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
 target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
