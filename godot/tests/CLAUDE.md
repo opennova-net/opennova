@@ -7,15 +7,13 @@
   Headless runs never attach an ImGui context: `DevTools.is_available()` is false
   there while its open state (F3, capture, input policy) still works and is tested.
 - Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
-  `*_probe.gd` files are manual probes and are not collected.
-- Probes: extends-`SceneTree` scripts run
-  `"$GODOT_BIN" --headless --path godot -s res://tests/<x>_probe.gd`, asset-gated on
-  `NW_SP_MISSION=<bms>` + `NW_RESOURCE_DIR=<retail install>` (never CI). They print a
-  graded PASS/FAIL verdict and are judged on the printed verdict, not the exit code —
-  Godot 4.6 teardown can exit 139 after a PASS. Windowed/visual probes are `.tscn`
-  scenes under `tests/game/` run with `--path godot res://tests/game/<x>.tscn`,
-  capturing via viewport self-readback into an env-named dir. For a new probe, copy an
-  existing probe's header (`ladder_climb_probe.gd`).
+- No probes live here. Runtime probes are `game_probe` tools under `godot/probes/`
+  (`docs/mcp.md`, ADR 0041): registered in `ProbeCatalog`, driven through the game's
+  MCP endpoint with typed arguments, judged by their verdict. Their GUT companions
+  (the catalog contract, the render-fixture and foliage-capture contracts, the
+  parity-joiner contract) live in `godot/tests/probes/`. An assertion over the
+  portable engine is a ctest under `tests/<domain>/`, gated on the retail roots
+  when it needs retail data (`docs/asset-gated-tests.md`).
 - GUT exits 0 when a script fails to parse — it is silently dropped from collection.
   `scripts/test_godot.sh` greps for parse errors and dropped scripts; prefer it over
   invoking `gut_cmdln.gd` directly, and replicate those greps after any direct run.

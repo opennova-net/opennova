@@ -42,20 +42,12 @@ and pins the correct shipped-output RGB hashes for entries 761/781. This
 guards against repeating the 2026-08-21 test-only re-pin that left the
 asset-gated test permanently red without changing the renderer.
 
-Manual probes/tools share the gating pattern but are not CI-collected (see
-`godot/tests/CLAUDE.md`: `*_probe.gd` are uncollected): `NW_SP_MISSION` +
-`NW_RESOURCE_DIR` (the standalone-game probe pattern — boot straight into a
-mission with a retail install mounted, e.g. `ladder_climb_probe.gd`),
-`OPENNOVA_JO_DIR` + `SPLASH_CAPTURE_DIR` (the splash render probe),
-`JO_ASSETS_DIR` + `JO_PROBE_MISSIONS` (mission load/re-ground perf probes),
-`JO_RESOURCE_DIR` / `JO_EXPANSION` / `JO_MISSION` (mount diagnostics),
-`NOVA_RESOURCE_DIR` / `NOVA_MISSION_BMS` (the modtools screenshot driver),
-and the render-fixture capture probe family (now the `render_fixture_capture` `game_probe` tool, typed args):
-`NOVA_RENDER_FIXTURE_ID` / `NOVA_RENDER_FIXTURE_MINUTE` /
-`NOVA_RENDER_FIXTURE_OUTPUT`, `NOVA_RENDER_CAPTURE_MODE` /
-`NOVA_RENDER_CAPTURE_PROFILE`, `NOVA_MISSION_RESOURCE_DIR` /
-`NOVA_RUNTIME_RESOURCE_DIR` / `NOVA_EXPANSION`, `NOVA_EVIDENCE_SOURCE_COMMIT`,
-and `NOVA_RENDER_STATIC_SHADOW_SUPPRESS_BMS_IDS`.
+Runtime probes (`game_probe` tools under `godot/probes/`, `docs/mcp.md`) take
+their retail roots as typed arguments (`mission_path`, `mission_resource_dir`,
+`output_dir`, ...) or from the launch's `--resource-dir`; they read no environment
+variable. The scripts that drive them default those arguments to the four roots
+(`scripts/net/lib.ps1` getters; `game_mcp.py launch --resource-dir` defaults to
+`OPENNOVA_JO_DIR`).
 
 ## Local setup
 

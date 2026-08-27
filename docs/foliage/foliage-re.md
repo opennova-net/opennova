@@ -596,7 +596,7 @@ claim or divergence.
   `00TRe.bms` player spawn, fixed-input HIGH/automatic coverage with deliberate
   dropout and fade-response controls. LOW-far is explicitly reported as
   skipped when it has no pixels in the exact spawn view.
-- `runtime_scene_probe.gd` and the visual probes: detail camera selection uses
+- the runtime scene (the retired `runtime_scene_probe`) and the visual probes: detail camera selection uses
   the flat gate oracle; the runtime scene consumes Terrain's typed native
   detail-cell vector, while its minimal fixture intentionally contains no
   `.3di` models.

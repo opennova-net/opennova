@@ -371,7 +371,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
   its explicitly listed SP scoring/presentation residuals. Evidence:
   `match`, `wac_behavior` (outcome builtins + the verbatim 04TR else-if
   block), `npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution),
-  and the in-game `round_outcome_probe.gd` 04TR PASS (real-round teammate kill →
+  and the `lose_flow_04tr` ctest (formerly `round_outcome_probe.gd`) 04TR PASS (real-round teammate kill →
   bluekills → Lose(1) → the retail KILLEDBLUE string → round end winner 2 → the
   FAILED screen → ESC to menu).
 
@@ -469,7 +469,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     2026-07-08; MOUNTED/PLACED/WIRE SELECTOR SEAM IMPLEMENTED 2026-07-19** (§14.6:
     `engine/runtime/anim/aim_overlay`, the leg-chase sim fields, the shared present snapshot result,
     and `SkeletalAnim.eval_pose_overlay`; the original local bend was verified in-play
-    via `godot/tests/bend_capture_probe.gd`). REMAINING (row stays open, partial):
+    via the retired `bend_capture_probe.gd`; today `local_player_look` + `game_capture_bundle`, docs/mcp.md). REMAINING (row stays open, partial):
     NPC/remote upper-body weapon-channel threading (rides D-INF-1), attachment matrices, and the
     pitchBlend/pitchKickAccum/lean/torsoRoll sources. `[orig: Entity_BuildBoneTransformMatrices
     @ 0x4b1290]`, witness §14.
@@ -1355,7 +1355,7 @@ Measured from the shipped assets, not inferred from bounding boxes. `M4_3RD`'s u
 the muzzle flash `MFLASH01` at `(+0.003, +0.089, +0.781)` and the `scope` at
 `(−0.002, +0.194, +0.141)`: **muzzle is +Z, up is +Y**, origin at the grip, and every node in the
 built scene carries an identity transform so the rendered frame IS model space. A census of all
-41 distinct `gfx3` models (`godot/tests/held_weapon_census_probe.gd`) finds 33 `+Z`-long and 8
+41 distinct `gfx3` models (the retired `held_weapon_census_probe.gd`, 2026-08 census) finds 33 `+Z`-long and 8
 `+Y`-long; the `+Y` set is exactly the melee/throwable/utility items — `M9K_3rd`, `mach_3rd`,
 `Flsh_3RD`, `Frag_3RD`, `smok_3RD`, `medp_3rd`, `stch_3rd`, `det_3rd`. **No firearm is `+Y`-long.**
 That `+Y` set is **exactly the set of AdmDef hold kinds whose state carries flag 0x80** — knife,
@@ -1364,7 +1364,7 @@ frame, and the two halves lock each other in: those models are authored blade-up
 because retail poses them at the HAND, and only at the hand.
 
 Measured directly at the live attach triple `(pitch 17.95, yaw 13.57, roll 0)`
-(`godot/tests/held_weapon_livetick_probe.gd`, which also confirms no `gfx3` carries live PANM —
+(the retired `held_weapon_livetick_probe.gd`, which also confirmed no `gfx3` carries live PANM —
 the build-time and after-30-frames bounds are identical, so a static measurement is valid):
 under the ENTITY frame **every firearm's long axis draws at elevation +17.95°, exactly the attach
 pitch, while `M9K_3rd` and `mach_3rd` draw at +72.05°.** The arithmetic is exact and unavoidable —
@@ -1505,7 +1505,7 @@ The local controller train remains, and mounted selection is now an animation-ow
   `bms_to_godot_basis` and sets the avatar node to the BODY frame →
   `ObjectModel.set_aim_overlay` → `SkeletalAnim.eval_pose_overlay`. The 3P camera now
   uses the witnessed 3.0 / 5.625° / ¼-step-anchor numbers (net-re §5.39 addendum; the orbit pitch was misconverted as 22.5° until 2026-07-13).
-- **Historical verification**: `godot/tests/bend_capture_probe.gd(.tscn)`
+- **Historical verification**: the retired `bend_capture_probe.gd(.tscn)`
   originally booted ONED play-in-editor, injected F4 + mouse-look, and
   captured poses; look-down bent the spine/head forward and look-up arched
   back (05TR.bms, JOX root). That probe now enters the standalone game through
@@ -2508,7 +2508,7 @@ always ∈ {1,2,4}, zero misaligned vert runs, 27 zero-normal faces that cannot
 straddle in retail either.)
 
 Session 3 (same day, from a user pose dump on 00TRg): the pose-replay probe
-(`godot/tests/pose_replay_probe.gd` + `Simulation.debug_spawn_round`, a
+(the retired `pose_replay_probe.gd` + `Simulation.debug_spawn_round`, a
 diagnostic injector through the real `RoundSim::spawn`) reproduced a
 deterministic through-shot — a 2° aim change at a rock formation (RckS07,
 bms 1484) flipped a stone face hit into a clean pass-through. Root cause:
@@ -3765,7 +3765,7 @@ check, the respawn hold), `godot/game/world/game_hud_presenter.gd` (the lose ban
 `godot/game/mission_end_screen.gd` + `main_game.gd` (the end screens + exit).
 Evidence ctests: `wac_behavior` (the outcome builtins + the 04TR else-if block),
 `npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution);
-in-game: `godot/tests/round_outcome_probe.gd` (04TR.bms PASS 2026-07-16: real-round
+in-game (today the `lose_flow_04tr` ctest): the former `round_outcome_probe.gd` (04TR.bms PASS 2026-07-16: real-round
 teammate kill → bluekills → `Lose(1)` → KILLEDBLUE banner → round end winner 2 →
 FAILED screen → ESC to menu).
 
@@ -3971,7 +3971,7 @@ line + stored banner); `main_game.gd` consumes the `round_end` effect →
 `mission_end_screen.gd` (win = letterbox + jo_Epil.tga + the four count lines;
 lose = jo_Epil2.tga + STROVER_MISSION_FAILED + the banner + KEYINFO), 300 s
 timeout, ESC → teardown to the menu (the Post Menu stand-in). In-game verified
-via `round_outcome_probe.gd` (the retail string "You have killed a teammate."
+via the `lose_flow_04tr` ctest, formerly `round_outcome_probe.gd` (the retail string "You have killed a teammate."
 resolved from gametext.bin).
 
 ### 20.7 Script SSN + zone-ref resolution (fixed during the probe)
@@ -4418,7 +4418,7 @@ deploy group stamp. Ported same session: `engine/runtime/world/vehicle_attach.cp
 (`ai.cpp::vehicle_ai_drive` + `vehicle_motor.cpp`), `player_spawn.cpp`
 (group 1). Evidence: ctest `vehicle_mount` (9 blocks: toggle/deck/swap/enemy-gate/predicates/
 AI-drive/redirect+speed/drive-mirror/group-stamp), in-game
-`godot/tests/vehicle_ride_probe.gd` on retail 00TRa — PASS: toggle-mount into the
+the `vehicle_ride_00tra` ctest (formerly `vehicle_ride_probe.gd`) on retail 00TRa — PASS: toggle-mount into the
 truck, event 2 fires, the command-mounted instructor DRIVES the redirected truck
 11 u+ along list 2 with the player carried at the seat.
 
@@ -4663,7 +4663,7 @@ player `commandGroup = 1` [orig: @ 0x519fd0, the same block that writes team
 stay parked exactly as retail parks them.
 
 2026-08-06 addendum — **00TRg's "move in to defend" waves** (the host-parity
-slice; diagnosis probe `godot/tests/00trg_defense_probe.gd`). The mission's
+slice; diagnosis: the `defense_00trg` ctest, formerly `00trg_defense_probe.gd`). The mission's
 entire defense is event-driven: crews command-mount at spawn (waypoint_id 125,
 authored on their vehicles), then delay-gated events RedirectGroupTo the boat
 groups 5/6/7 (patrol boat SSN 60, Zodiacs 56/57) and truck group 3, and

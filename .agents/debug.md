@@ -62,14 +62,13 @@ nw_pp .scratch/capture.pcapng --stream --items /path/to/items.def
 These tests often skip cleanly when local captures or retail assets are absent.
 A skip is not coverage.
 
-- `NW_INGAME_HEXCAP`
-- `NW_PROFILE_SPH_DIR`
-- `NW_DVXI5_PCAP`, `NW_DVXI3_PCAP`, `NW_DVXC1_PCAP`
-- `NW_PROBE3AGAIN_PCAP`, `NW_PROBE3AGAIN_HOST_SPH`
-- `NW_WHITENOISE_PCAP`
-- `OPENNOVA_JO_DIR`
-- `OPENNOVA_MISSION_CORPUS`
-- `OPENNOVA_JO_ASSETS`, `JO_ASSETS_DIR`, `NOVA_RESOURCE_DIR`
+- `OPENNOVA_JO_DIR` (a packed retail install)
+- `OPENNOVA_JO_ASSETS` (an extracted retail tree)
+- `OPENNOVA_MISSION_CORPUS` (retail `.bms` missions)
+- `OPENNOVA_CAPTURES` (captures and goldens; default `.scratch/`)
+
+The four roots are the whole registry ([docs/asset-gated-tests.md](../docs/asset-gated-tests.md));
+a gated ctest reports Skipped (exit 77) without its root, never a silent pass.
 
 ## Logs and Cleanup
 

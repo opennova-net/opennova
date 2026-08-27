@@ -4373,10 +4373,11 @@ reaches InMatch, the host admits it, and the two-handle present resolves both wa
 the focused menu/GameWorld tests prove discovery handoff, retained-session mission loading, and
 visible bind failure. A final two-GUI smoke with installed retail assets remains a manual acceptance
 check for this delta, not an automated claim. The host listens on the requested retail-range port;
-the direct launch contract is `NW_LAN_HOST=<m.bms>` for the host and
-`NW_LAN_JOIN=<ip>:<port>` for the joiner. The joiner learns the mission from the retained game
-session's post-auth S2C `0x7B`, as retail does; `NW_LAN_MISSION` remains only an explicit
-compatibility/debug override for the older preloaded path.
+the direct launch contract is `--lan-host <m.bms>` for the host and
+`--lan-join <ip>[:<port>]` for the joiner (launch flags after `--`, docs/dev-env-vars.md). The
+joiner learns the mission from the retained game session's post-auth S2C `0x7B`, as retail
+does; the former `NW_LAN_MISSION` joiner-side override is gone with the env launch (D-NET-194:
+the wire owns the mission).
 Tracked client-fidelity items:
 1. **[CLOSED 2026-06-25 — stream the DYNAMIC set during load]** *(was: the joiner saw only the host player,
    not the NPCs.)* The host streams the networked/dynamic set during the joiner's world-load via
@@ -5262,7 +5263,7 @@ Godot's CCW cull) so mesh, skeleton, and Skin (`T(−abs pivot)` from identity r
 `LocalPlayerPresenter` maps rig→camera with yaw +90 plus the witnessed per-weapon biases (`pos`/256 in
 view axes; `rot` degrees added about the eye `[orig: Player_UpdateFirstPersonCamera @0x4dd444]`).
 Verified: reset/idle identity oracle in ctest (`anim_sample`) + on-asset probes
-(`godot/tests/fp_clean_probe.gd`, `vm_mesh_probe.gd`). **Still open:** the dedicated FP render pass
+(the retired `fp_clean`/`vm_mesh` probes; today `game_capture_bundle` `world_only` plus the `weapon_fsm` and `anim_skeletal_pose` ctests). **Still open:** the dedicated FP render pass
 (weapon `renderfov` @Def+0x148, near-Z 0.05 swap + viewport depth [0, 0.1] — D-RORD-4) which gives
 retail its close-up framing; def `rot` bias sign confirmation against retail footage *(hip-idle
 confirmed 2026-08-19 — the seventh pass below)*; the delta
@@ -12096,11 +12097,11 @@ ClientAuth order. When the named S2C 0x0C row identifies the joiner's own player
 `JoinerConnection::SelfSpawn` carries that row's `animSlot` and packed minimap id into the
 local L entity as well; the local self-spawn path no longer drops the character-registry
 identity after receiving it. Direct/headless clients retain the stock-table fallback
-`0x0200/0x8207`, class `8/8`, avatar `1/10`. BOTH host entry points — the `NW_LAN_HOST` dev
+`0x0200/0x8207`, class `8/8`, avatar `1/10`. BOTH host entry points — the `--lan-host` dev
 boot and the `mp.mnu` host config — seed the Co-op gametype **0x30020**, the value retail
 derives from a Co-op mission's `ATTRIB_COOP` header attrib (`AI_GetTaskTypeFromFlags
 @ 0x40DAE0` → `Game_StartMission @ 0x524360`; the D-NET-75 witness chain, and the only value
-that passes both off-wire sub-body gates). `NW_LAN_GAMETYPE` remains a diagnostic override;
+that passes both off-wire sub-body gates). `--lan-gametype` remains a diagnostic override;
 0x10010 was the ASH_I5A capture's value, not what this build seeds. DEFERRED (tracked here): the
 host-side character-table validity check and invalid-id fallback (`Server_BuildPlayerInfoAndAdd
 @0x51D560` probes each uploaded CI field with `MinimapSlot_HasEntity @0x57B140` and re-packs the

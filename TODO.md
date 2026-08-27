@@ -15,10 +15,15 @@ hardening, and project health. Divergences from the original engine belong in
       RunId prefix (`.agents/retail-lan-parity.md`), gate each on the wire-ready witness
       + `diff_vs_golden.ps1`, and re-express the retired verifier's RO/OR/OO-vs-RR
       comparison (both directions, packet grouping, 0x0A/0x0C state) as a ctest or
-      PowerShell verifier. Upstream blocker still open in opennova-int: the single-role
-      `onhook_host_lan`/`onhook_join_lan` MCP tools pass role config via child env and
-      never render `onhook.cfg` (make `LaunchLanRole` render it like the
-      `onhook_run_lan_pair` half). Baseline: the 2026-08-05 suites captured 24/24 cells
+      PowerShell verifier. Upstream blockers still open in opennova-int (the runner stops the
+      `deploy_hold` RR/RO cells and the OR retail joiner with a named UPSTREAM BLOCKER
+      error until they land): the single-role `onhook_host_lan`/`onhook_join_lan` MCP
+      tools pass role config via child env and never render `onhook.cfg` (make
+      `LaunchLanRole` render it like the `onhook_run_lan_pair` half), and they must
+      return `pid`/`instance_id`/`run_id`/`capture_path` like `onhook_run_lan_pair`;
+      onhook-mcp advertises protocol version `2026-07-28`, which Claude Code rejects
+      (negotiate `2025-06-18`/`2025-03-26`); optionally an `onhook_exercise_input`
+      tool would retire `exercise_retail_input.ps1`. Baseline: the 2026-08-05 suites captured 24/24 cells
       cleanly, wire-ready + `diff_vs_golden` GREEN.
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
       every file under `engine/runtime/terrain` now carries an anchor, and the cpt/til/trn

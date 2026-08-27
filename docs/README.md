@@ -45,6 +45,7 @@ behavior is summarized and cited.
 | [`env/env-honored-matrix.md`](env/env-honored-matrix.md) | Which `.env` fields each renderer consumer actually honors: live control vs parsed-but-deferred, per field |
 | [`dev-env-vars.md`](dev-env-vars.md) | The dev environment-variable registry: launch, capture, and asset-path vars and where each is read |
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
+| [`mcp.md`](mcp.md) | The game MCP: launching the runtime with `--mcp-port`, the two client layers, the tool catalog, the `game_probe` runtime probes and how to write one (ADR 0041) |
 | [`threedi/scene-naming-contract.md`](threedi/scene-naming-contract.md) | Format-neutral scene names reserved for the future GLB/GLTF ↔ 3DI editor seam; no importer metadata or DCC custom properties |
 | [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard. **Closed 2026-07-12** (freeze lifted); the enforcement instruments and standing ADRs survive it |
 | [`divergence-ledger.md`](divergence-ledger.md) | The divergence burn-down: every tracked divergence in one place under one vocabulary, the per-domain OPEN tables, the count-to-zero scoreboard, the permanent register, and the UNAUDITED systems — the parity dashboard (ADR 0022) |
@@ -96,6 +97,7 @@ behavior is summarized and cited.
 | [0038](adr/0038-native-runtime-assets-glb-editor.md) | Hard cut to native runtime assets: Python/DCC and ASE/OED/TDP authoring retire; ObjectData is immutable 3DI; a future editor uses an independent GLB/GLTF ↔ 3DI seam |
 | [0039](adr/0039-in-engine-dev-tools.md) | Hard cut: the tool UI moves into the engine as Dear ImGui windows on one `ImGuiPass` (`engine/runtime/devtools`, docking + multi-viewport) with one Godot seam node per product and the imgui-godot addon — the game's F3 dev tools (debug builds only) and ONED's run surface; the GDScript overlay and ONED's Control scene are deleted; updates ADR 0034 d6, ADR 0031's seam note and ADR 0037's UI |
 | [0040](adr/0040-the-engine-is-one-namespace.md) | The engine is one namespace: no `Nova`/`nova_` prefix anywhere (files follow the type they declare; `NovaWorld*`, `NovaLogic`, `opennova*` survive as proper nouns), `engine/` is the one public include root with group-qualified `<group/lib/file.h>` includes, and the group order + Godot-free boundary are a lint (`include_graph_check.py`); updates ADR 0024/0029's include-root clause and ADR 0034 d5/§2 |
+| [0041](adr/0041-probes-are-mcp-tools-launch-flags.md) | Probes are registered `game_probe` tools reading typed arguments; launch behaviour is a launch flag with four documented machine roots; `godot/probes/` is source-only; an assertion over the portable engine is a ctest; retail is driven only through onhook-mcp; fixtures are minted, authored or keep |
 
 ## RE records by domain
 

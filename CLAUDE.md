@@ -183,5 +183,5 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   retail staging, and hidden release pack command.
 - Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/src/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
-- Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,
+- Project skills in `.claude/skills/`: `gut`, `oned-run`, `game-mcp`, `new-format-lib`, `re-doc`,
   `extract-pr`, `grill-ida`, `engine-research`, and `diagnosing-bugs`.

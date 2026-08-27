@@ -34,17 +34,22 @@ Launcher variables:
 - `ONLAUNCHER_NW_ANCHOR_HOST`
 - `ONLAUNCHER_UPDATE_MANIFEST_URL`
 
-Godot direct-launch variables (the full registry is
-[docs/dev-env-vars.md](../docs/dev-env-vars.md)):
+Godot direct-launch flags, passed after `--` (the full table is
+[docs/dev-env-vars.md](../docs/dev-env-vars.md); `scripts/net/host_opennova.ps1`,
+`join_opennova.ps1` and `run_lan_pair.ps1` emit them):
 
-- Host: `NW_LAN_HOST`, `NW_LAN_PORT`, `NW_LAN_NAME`, `NW_LAN_GAMETYPE`,
-  `NW_LAN_MODE`, `NW_LAN_MAX_PLAYERS`
-- Joiner: `NW_LAN_JOIN`, `NW_LAN_MISSION`, `NW_LAN_NAME`
+- Host: `--lan-host <mission.bms>`, `--lan-port`, `--callsign`, `--lan-gametype`,
+  `--lan-mode`, `--lan-max-players`
+- Joiner: `--lan-join <ip[:port]>`, `--callsign` (the mission comes from the wire,
+  D-NET-194)
+- Both: `--resource-dir`, `/exp`, `--integrity-profile`, `--capture-pcap`,
+  `--mcp-port` (the `opennova-game` endpoint, [docs/mcp.md](../docs/mcp.md))
 
 ## What Can Be Automated Today
 
 - OpenNova server startup and API smoke checks.
-- Godot/OpenNova listen host and joiner through `NW_LAN_*` env hooks.
+- Godot/OpenNova listen host and joiner through launch flags, driven through
+  their MCP endpoints (`game_state`, the `parity_joiner_*` probes).
 - NovaWorld host registration for a Godot listen host.
 - Retail launch with stock files through the launcher after hosts redirection.
 - Debug-only, version-gated retail LAN hosting and joining from colocated
@@ -77,13 +82,12 @@ Supported inputs:
 - `nw_pp <capture.hexcap>`
 - `nw_pp <host.sph>` or `nw_pp <client.sph>`
 
-Useful env-gated witnesses:
-
-- `NW_INGAME_HEXCAP`
-- `NW_PROFILE_SPH_DIR`
-- `NW_DVXI5_PCAP`, `NW_DVXI3_PCAP`, `NW_DVXC1_PCAP`
-- `NW_PROBE3AGAIN_PCAP`, `NW_PROBE3AGAIN_HOST_SPH`
-- `NW_WHITENOISE_PCAP`
+Capture-gated witnesses read their files under `OPENNOVA_CAPTURES` (default
+`.scratch/`; the fixed names are in [docs/asset-gated-tests.md](../docs/asset-gated-tests.md)):
+`nw_ingame_histogram`/`nw_ingame_pool_records` (`ingame.hexcap`), `nw_serverlog_decode`
+(`sph/`), `nw_pool_groundtruth`/`nw_dvxi3_groundtruth`/`nw_dvxc1_groundtruth`,
+`nw_probe3again_lifecycle`, `nw_whitenoise_coverage`, the `npruntime_golden_*` joins and
+`nw_golden_diff` (`golden/`).
 
 ## Packet-Diff Matrix
 

@@ -232,7 +232,9 @@ Order of operations when you need an engine truth:
    - PerfTimeline ring (`godot/game/util/perf_timeline.gd`; its Perf page went
      with the overlay — a dev-tools window is the re-home); recorded baselines
      in `docs/perf/`.
-   - Headless probes `godot/tests/*_probe.gd` (see `godot/tests/CLAUDE.md`).
+   - Runtime probes: `game_probe` tools under `godot/probes/`, driven through the
+     game MCP (`docs/mcp.md`, ADR 0041); an assertion over the portable engine is a
+     ctest.
 
 ## 6. Evidence and landing rules
 

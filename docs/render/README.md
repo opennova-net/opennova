@@ -53,7 +53,9 @@ through the game MCP's `game_probe` tool) renders one cell per unique object-sha
 key (sphere + quad, code-generated textures, orthogonal camera — asset-free,
 deterministic) and diffs captures exactly (`compare` mode,
 `Image.compute_image_metrics`, max-delta 0). World-level baselines ride the
-asset-gated `godot/tests/env_visual_baseline_probe.gd` (ENG-2's driver).
+asset-gated time-of-day recipe (`docs/mcp.md`: `environment_time_of_day` +
+`game_capture_bundle` per minute, compared with `render_swatch` `compare`;
+formerly `env_visual_baseline_probe.gd`, ENG-2's driver).
 The `composite` mode (REN-3) renders the draw-order scenes — overlapping
 translucent layers with depths arranged AGAINST the witnessed order, so only
 the ported priority ladder composes them correctly (the water bracket and the
@@ -64,7 +66,7 @@ sky ladder; [render-order-re.md](render-order-re.md)).
 python scripts/mcp/game_mcp.py launch --windowed --resource-dir "$OPENNOVA_JO_DIR"
 python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"capture","output_dir":".scratch/golden/render/<label>"}' --wait
 python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"composite","output_dir":".scratch/golden/render/<label>"}' --wait
-"$GODOT_BIN" --path godot -s res://tests/env_visual_baseline_probe.gd -- <JOX_dir> .scratch/golden/render/<label> world
+# world baselines: per minute, game_debug set environment_time_of_day then game_capture_bundle world_only
 # compare two captures (swatch or composite):
 python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"compare","a":"a_grid.png","b":"b_grid.png"}' --wait
 ```
