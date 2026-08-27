@@ -1,0 +1,36 @@
+{
+  "_comment": "The closed environment-variable set (docs/dev-env-vars.md) for scripts/lint/env_lint.py: the four machine roots read only by the three resolvers, GODOT_BIN in the scripts, the deployed service's own 12-factor config, and the OS variables at their known sites. A new read anywhere else is a launch flag, an argv option or an MCP tool argument, not an env var.",
+  "gates": {
+    "OPENNOVA_JO_DIR": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1", "scripts/mcp/game_mcp.py"],
+    "OPENNOVA_JO_ASSETS": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1"],
+    "OPENNOVA_MISSION_CORPUS": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1"],
+    "OPENNOVA_CAPTURES": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1"]
+  },
+  "files": {
+    "scripts/*.sh": ["GODOT_BIN", "TEMP", "TMP", "HOME", "APPDATA", "XDG_DATA_HOME"],
+    "scripts/godot_bin.sh": ["GODOT_BIN"],
+    "scripts/net/*.ps1": ["GODOT_BIN", "TEMP", "TMP", "ProgramFiles", "ProgramFiles(x86)", "SystemRoot", "PATH"],
+    "scripts/mcp/*.py": ["GODOT_BIN"],
+    "scripts/mcp/*.ps1": ["GODOT_BIN"],
+    "scripts/render/*.ps1": ["GODOT_BIN"],
+    "scripts/*.ps1": ["GODOT_BIN", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "ProgramFiles", "SystemRoot"],
+    "tests/common/test_paths.h": ["TEMP", "TMP", "TMPDIR"],
+    "apps/novaworld_server/*": ["*"],
+    "deploy/*": ["*"],
+    "launcher/*": ["*"],
+    "web/src/*": ["*"],
+    "backend/*": ["*"],
+    "infra/*": ["*"]
+  },
+  "indirect_ok": [
+    "tests/common/retail_paths.h",
+    "godot/tests/support/retail_data.gd",
+    "scripts/net/lib.ps1",
+    "apps/novaworld_server/*",
+    "deploy/*",
+    "launcher/*",
+    "web/src/*",
+    "backend/*",
+    "infra/*"
+  ]
+}

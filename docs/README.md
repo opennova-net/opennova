@@ -43,8 +43,8 @@ behavior is summarized and cited.
 | [`perf/mission-load-baseline.md`](perf/mission-load-baseline.md) | Recorded mission-load timings (PerfTimeline) and the verdict that gates the perf push-down slices |
 | [`perf/reground-baseline.md`](perf/reground-baseline.md) | Recorded bulk re-ground timings (the activate-time "terrain changed under N objects" flow) behind the re-ground perf slices |
 | [`env/env-honored-matrix.md`](env/env-honored-matrix.md) | Which `.env` fields each renderer consumer actually honors: live control vs parsed-but-deferred, per field |
-| [`dev-env-vars.md`](dev-env-vars.md) | The dev environment-variable registry: launch, capture, and asset-path vars and where each is read |
-| [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
+| [`dev-env-vars.md`](dev-env-vars.md) | The environment-variable registry (the four machine roots, `GODOT_BIN`, the service family, the OS variables) and the launch-flag / argv tables that replaced the env hooks; enforced by `scripts/lint/env_lint.py` |
+| [`asset-gated-tests.md`](asset-gated-tests.md) | Every root-gated test: the root→data matrix, Skipped (77) vs SKIP-LEG reporting, the capture names, local setup, the reference-assets repository CI uses, why captures are never committed |
 | [`mcp.md`](mcp.md) | The game MCP: launching the runtime with `--mcp-port`, the two client layers, the tool catalog, the `game_probe` runtime probes and how to write one (ADR 0041) |
 | [`threedi/scene-naming-contract.md`](threedi/scene-naming-contract.md) | Format-neutral scene names reserved for the future GLB/GLTF ↔ 3DI editor seam; no importer metadata or DCC custom properties |
 | [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard. **Closed 2026-07-12** (freeze lifted); the enforcement instruments and standing ADRs survive it |

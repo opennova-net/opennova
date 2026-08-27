@@ -1,40 +1,40 @@
-# Asset-gated tests — the matrix, local setup, and the CI stance
+# Asset-gated tests — the roots, the matrix, local setup, and the CI stance
 
 Some tests exercise data we cannot commit: retail game installs, extracted retail
-assets, and network captures of retail sessions. Each such test is gated on an
-environment variable and **skips as a PASS** when the variable is unset — the C++
-gates print a `SKIP`/`[skip]` line and `return 0` (they are plain `add_test`
-entries, not `GTEST_SKIP`/`DISABLED`), and the one GUT gate uses `pending()`.
-Consequence: **a green full run does not mean these
-tests exercised anything.** When touching a gated area, set the variable and check
-the test's output for real work, not just its exit code.
+assets, retail mission corpora, and network captures of retail sessions. Each such
+test is gated on one of four documented roots and **reports Skipped** without it:
+a fully gated ctest returns 77 (`opennova_add_gated_test` sets
+`SKIP_RETURN_CODE`, so `ctest` prints `***Skipped`) after a `SKIP: needs ...`
+line; a mixed test runs its synthetic legs and prints `SKIP-LEG: needs ...` for
+the retail leg, exiting 0; the GUT gates `pending()`. A green run therefore
+never hides an unexercised gate, but it also never proves the gate ran: when
+touching a gated area, set the root and read the test's output.
 
-Machine paths live in `.claude/settings.local.json` `env` (untracked) — never in
-tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
-(gitignored) before the env override applies, so populating the main checkout's
-`.scratch/` is enough for the capture-gated ctests.
+The four roots (`docs/dev-env-vars.md`) are read only by the resolvers —
+`tests/common/retail_paths.h` (`retail::install()`, `assets()`,
+`mission_corpus()`, `captures_root()`, `golden(name)`, `capture(name)`,
+`sph(name)`, `asset_file(name)`, `expansions()`, `weapon_sav()`, `skip`,
+`skip_leg`, `RETAIL_REQUIRE_OR_SKIP`), `godot/tests/support/retail_data.gd`
+(`RetailData.install()`, `assets()`, `mission_corpus()`, `captures_root()`,
+`asset_file()`, `expansions()`, `mount_install_with(witness)`), and the
+`Get-OpenNovaRetail*` getters in `scripts/net/lib.ps1`. Machine paths live in
+`.claude/settings.local.json` `env` (untracked), never in tracked files.
 
 ## The matrix
 
-| Env var | Gates | Data | CI-able? |
-|---|---|---|---|
-| `OPENNOVA_JO_DIR` | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `terrain_tile_composer` (CP12 `.til` entries #53/#1013; the D-TIL-4 00TRa fork order pin, entries #761/#781 — needs the packed `00TRA.TIL`/`TRNTILE10.TGA`, which JO:CA ships); GUT `terrain_static_shadow_runtime_test.gd` (the Scrate1 shadow witness legs) | retail JO install dir (packed `.pff`); the CP12 oracle additionally needs an install whose packed set carries `CP12.TIL`/`TRNTILEA1.TGA` (JO:CA ships without them — that leg skips) | never (copyright, ~1.5 GB) |
-| `OPENNOVA_MISSION_CORPUS` | ctest `mission_corpus`; GUT `mission_corpus_binding_test.gd` | dir of retail `.bms` missions | never (copyright) |
-| `OPENNOVA_JO_ASSETS` | ctest `occlusion_armry`, `root_motion`, `anim_positions_from_model_corpus`, the `wac_corpus` sweep; GUT `sound_dialog_test.gd`, `sound_integration_test.gd` | extracted retail assets with `weapon.def` + models | never (copyright) |
-| `OPENNOVA_WAC_CORPUS_DIRS` | ctest `wac_corpus` extra corpus dirs (semicolon list, beside the `OPENNOVA_JO_ASSETS` sweep) | dirs of retail `.wac` scripts | never (copyright) |
-| `OPENNOVA_MNU_EXTRA` | ctest `mnu_compat` developer-only loose menu leg | a single loose `.mnu` | never (developer-local) |
-| `NW_INGAME_HEXCAP` | ctest `nw_ingame_histogram`, `nw_ingame_pool_records` | focused in-match hexcap dump | possible: policy allows a small *sanitized* `.hexcap` via LFS (user-gated follow-up) |
-| `NW_PROFILE_SPH_DIR` | ctest `nw_serverlog_decode` | dir with `host.sph` + `client.sph` `/profile` recordings | never (retail run output; can embed account identity) |
-| `NW_DVXI5_PCAP` / `NW_DVXI3_PCAP` / `NW_DVXC1_PCAP` | ctest `nw_pool_groundtruth`, `nw_dvxi3_groundtruth`, `nw_dvxc1_groundtruth` | authored probe captures (`.pcapng`) | never (raw-capture policy) |
-| `NW_PROBE3AGAIN_PCAP` (+ `NW_PROBE3AGAIN_HOST_SPH`) | ctest `nw_probe3again_lifecycle`, `nw_capture_decoder` extra leg | 3-player co-op capture + host `.sph` oracle | never |
-| `NW_WHITENOISE_PCAP` | ctest `nw_whitenoise_coverage` | stock retail co-op capture | never |
-| `NW_GOLDEN_GAMEPLAY` | ctest `npruntime_golden_gameplay`, `npruntime_golden_client`, `nw_golden_diff` | golden retail↔retail gameplay capture (`.scratch/golden/retail-gameplay-session.pcapng`) | never |
-| `NW_KARO_GUIDED_PCAP` | ctest `nw_karo_guided` | a local retail Karo Highlands capture carrying Stinger guided traffic (S2C 0x44) - the D-NET-64 wire-validation leg | never |
-| `NW_GOLDEN_LAN_JOIN` / `NW_GOLDEN_LAN_JOIN_SESSION` | ctest `npruntime_golden_lan_join`, `npruntime_two_endpoint_socket` cross-check, `npruntime_golden_lan_join_session` | golden retail LAN host/join captures | never |
-| `NW_GOLDEN_OURS` | ctest `nw_golden_diff` ("ours" side) | our own freshly captured join | committable in principle, but the diff needs the retail golden too |
-| `NW_GOLDEN_VEHICLE_SESSION` + `NW_ITEMS_DEF` | ctest `netsim_client_replica_pipeline_capture_parent_follow` (skips clean when either is absent) | golden retail vehicle-session capture (`.scratch/golden/retail-vehicle-session.pcapng`) + an extracted retail `ITEMS.DEF` for compact-record class resolution | never |
-| `NW_LIVE_WEAPON_ROOT` / `NW_LIVE_WEAPON_EXPANSION` | ctest `npruntime_weapon_table` corpus leg (its synthesized cases run ungated; getenv-gated in the test, not CMake) | retail `weapon.def` roots (base + expansion) | never (copyright) |
-| `OPENNOVA_WEAPON_SAV` | ctest `playersav_weapon_sav` (corpus leg only; its synthesized cases run ungated) | a retail `weapon.sav` player profile — `<install>/expansion/<exp>/weapon.sav`, else `<install>/weapon.sav` (net-re §5.66) | never (player profile data, and the file carries the local player's callsign-adjacent selections) |
+| Root | Points at | Gates |
+|---|---|---|
+| `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set; expansions under `expansion/<name>/`) | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `bink_retail`, `sbf_jo_install_sweep`, `mission_ai_path_conformance`, `mission_coop_convoy`, `mission_script_report`, `bunker_walkin`, `truck_dismount`, `minimal_pff_package --install`; the retail-mission rig ports `ai_threat`, `ladder_00tra`, `ai_muzzle_pose` (CP01), `vehicle_ride_00tra`, `defense_00trg`, `lose_flow_04tr`, `particle_gore_set_catalog`; the SKIP-LEG legs of `terrain_tile_composer` (iterates `expansions()` for the CP12/00TRa tile witnesses), `ground_conform` (the CP01 standing leg), `minimap_overlay` (00TRg with revx02), `npruntime_authored_payload_00trg` (revx02); GUT `avatar_preview_test`, `e50trib_mount_alignment_test`, `skeletal_anim_test`, `sound_pff_install_test` (every expansion), `terrain_static_shadow_runtime_test`, `veg_assets_test`, `vehicle_emplacement_alignment_test` |
+| `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, `ammo.def`, models, `.adm`, `.bms`, `.til`, `.lwf`, ...) | ctest `root_motion`, `anim_positions_from_model_corpus`, `anim_reload_clips_us01`, `anim_weapon_action_clips`, `wac_corpus` (plus argv corpus dirs), `cpt_jo_assets_sweep`, `lwf_jo_assets_sweep`; the rig ports `ai_corpse`, `rock_collision_00trg`, `soak_00trg`, `native_assets_00trg`, `npruntime_remote_body_state`, `npruntime_held_weapon_attach`; the SKIP-LEG legs of `occlusion_armry`, `threedi_panm_ctrl` (the six retail controlled models), `particle_smoke_all_fixtures` (the `.ptl` corpus), `npruntime_weapon_table` (`weapon.def` + each expansion's), `sound_profile` (`sndprof.def`), `score_roundtrip` (`score.ini`), `playersav_weapon_sav` (`weapon.sav`), `def_parse_items` (the particlefx rows), `infantry` (the weapon-channel leg), `netsim_client_replica_pipeline_capture_parent_follow` (`items.def`, with the vehicle capture below); GUT `sound_dialog_test`, `sound_integration_test` |
+| `OPENNOVA_MISSION_CORPUS` | a directory of retail `.bms` missions (loose) | ctest `mission_corpus`; GUT `mission_corpus_binding_test`; the render-fixture capture's loose mission (`scripts/render/*.ps1`) |
+| `OPENNOVA_CAPTURES` | the captures/goldens root (default `<repo>/.scratch`) | fixed names: `golden/retail-gameplay-session.pcapng` (`npruntime_golden_gameplay`, `npruntime_golden_client`, `nw_golden_diff`'s golden side), `golden/retail-lan-host-join.pcapng` (`npruntime_golden_lan_join`, `npruntime_two_endpoint_socket`'s cross-check leg), `golden/retail-lan-host-join-session.pcapng` (`npruntime_golden_lan_join_session`), `golden/retail-vehicle-session.pcapng` (`netsim_client_replica_pipeline_capture_parent_follow`), `host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng` (`nw_pool_groundtruth`), `probe2.pcapng` (`nw_dvxi3_groundtruth`), `probe3.pcapng` (`nw_dvxc1_groundtruth`), `probe3_again.pcapng` + `sph/hostprof_probe3again.sph` (`nw_probe3again_lifecycle`, `nw_capture_decoder`'s extra leg), `operation_whitenoise.pcapng` (`nw_whitenoise_coverage`), `karo-guided.pcapng` (`nw_karo_guided`, the D-NET-64 wire leg), `ingame.hexcap` (`nw_ingame_histogram`, `nw_ingame_pool_records`), `sph/host.sph` + `sph/client.sph` (`nw_serverlog_decode`) |
+
+The live "ours" side of the golden diff is argv, not a root:
+`nw_golden_diff_test --ours <capture>` (a `ctest` run without it reports Skipped).
+Developer knobs are argv too: `mnu_compat_test <extra.mnu>...`,
+`wac_corpus_test <dir>...`, `ai_path_conformance_test --report/--ticks/--bms`,
+`bunker_walkin_test --from/--to/--column`; dumps are `--dump`, `--write`,
+`--write-fixture`, `--write-pff` (`docs/dev-env-vars.md`).
 
 The 00TRa tile-composer leg fingerprints the archived `TRNTILE10.TGA`
 payload (`SHA-256 eb3b25ca50f66f2006668198919c8e25374d093c0290e9aceb613ee37d8bc490`)
@@ -45,9 +45,7 @@ asset-gated test permanently red without changing the renderer.
 Runtime probes (`game_probe` tools under `godot/probes/`, `docs/mcp.md`) take
 their retail roots as typed arguments (`mission_path`, `mission_resource_dir`,
 `output_dir`, ...) or from the launch's `--resource-dir`; they read no environment
-variable. The scripts that drive them default those arguments to the four roots
-(`scripts/net/lib.ps1` getters; `game_mcp.py launch --resource-dir` defaults to
-`OPENNOVA_JO_DIR`).
+variable. The scripts that drive them default those arguments to the four roots.
 
 ## Local setup
 
@@ -63,11 +61,36 @@ Add to `.claude/settings.local.json` (adjust to this machine's paths):
 }
 ```
 
-Capture-gated ctests need no env vars if the files sit at their defaults under the
-main checkout's `.scratch/`: the goldens at `.scratch/golden/`, probe captures at
-`.scratch/<name>.pcapng`. Captures are produced by the recipes in
-`.agents/README.md` (retail-join stack) and consumed via `nw_pp --stream` first —
-see the capture policy in `.agents/interop.md`.
+Capture-gated ctests need no variable when the files sit at their fixed names
+under the main checkout's `.scratch/` (the default `OPENNOVA_CAPTURES`).
+Captures are produced by the recipes in `.agents/README.md` (retail-join
+stack) and consumed via `nw_pp --stream` first — see the capture policy in
+`.agents/interop.md`. A packed install without an expansion the test needs
+(revx02 for the 00TRg payload oracle) skips that leg; the extracted tree
+carries the same pair and serves it.
+
+Run the gated set with the roots exported, e.g. `ctest --test-dir build -C
+Release -R "00tra|00trg|ai_|muzzle|reload_clips|weapon_action|remote_body|held_weapon|authored_payload|gore_set"`,
+and read the output: a real run prints its measurements, a skipped one prints
+`SKIP:`.
+
+## CI
+
+Retail installs and captures never reach public runners (copyright, size,
+credentials). The extracted retail asset tree the `OPENNOVA_JO_ASSETS` and
+`OPENNOVA_MISSION_CORPUS` gates need lives in the private
+`opennova-net/opennova-reference-assets` repository (its README lists the
+files); with the `REFERENCE_ASSETS_TOKEN` secret (a fine-grained token with
+`contents: read` on that repository) the `test` and `godot-tests` jobs check
+it out beside the tree and point the two roots at it, so those gates run in
+CI instead of reporting Skipped; without the secret the gates stay closed and
+the job is still green. The `OPENNOVA_JO_DIR` and `OPENNOVA_CAPTURES` gates
+stay local. `.github/workflows/ci.yml` is the record.
+
+The logic the capture gates would exercise is covered in CI by the
+**inline-pcap unit tests** (`nw_pool_decode_unit_test`,
+`nw_capture_decoder_test` craft tiny in-memory pcaps and run unconditionally)
+— the sanctioned CI substitute, per the net-test convention.
 
 ## Why captures are never committed
 
@@ -79,23 +102,9 @@ promote only small *sanitized* artifacts (`.nwmsg`, focused `.hexcap`, `.gsb`,
 manifest rows) — `fixtures/novaworld/` shows the shape. Raw `.pcapng`/`.sph` stay
 in gitignored `.scratch/`, full stop.
 
-## CI stance (assessed 2026-07-04)
-
-- The full `ctest` CI job already runs every gated test as a skip-pass; the logic
-  they would exercise is covered in CI by the **inline-pcap unit tests**
-  (`nw_pool_decode_unit_test`, `nw_capture_decoder_test`
-  craft tiny in-memory pcaps and run unconditionally) — that is the sanctioned CI
-  substitute, per the net-test convention.
-- Retail-data gates can never run on public runners (copyright + size). A
-  self-hosted runner with local retail data is the only path and is not currently
-  worth the maintenance.
-- The one improvement worth considering later: commit a trimmed, sanitized
-  `.hexcap` so `nw_ingame_histogram`/`nw_ingame_pool_records` exercise data in CI.
-  User-gated; sanitization review required.
-
 ## The two-tier wire-compat gate (maturity program NET-0)
 
-The retail golden diff is env-gated and therefore skip-passes-as-green in CI — a
+The retail golden diff is root-gated and therefore Skipped in CI — a
 net-touching change can look green while silently altering wire bytes. The
 maturity program (docs/maturity-program.md) closes that with two tiers:
 
@@ -106,19 +115,20 @@ maturity program (docs/maturity-program.md) closes that with two tiers:
   SYMMETRIC codec change — both sides edited together stay field-identical while
   the wire moves. Updating a vector is a wire-format change: it requires the
   [orig] witness or a D-NET entry in the same commit, never a bare regeneration
-  (`NW_CODEC_DUMP=1` prints the replacement table). The second tier-1 leg
-  (NET-0b) is `nw_self_capture` — `nw_golden_diff`'s self mode: a deterministic
-  in-process opennova↔opennova join + play session is captured live and
-  coverage-diffed per (direction, tag) against the committed opennova-produced
-  fixture `fixtures/novaworld/self-capture-session.pcap` (LFS; zero retail
-  bytes, so committable). Because both sides are ours the comparison is EXACT
-  set equality in both directions — no noise floor, no allowlists — and a
-  missing fixture FAILS rather than skips. Regenerating the fixture
-  (`OPENNOVA_WRITE_SELF_FIXTURE=1`, which re-reads and re-verifies the file) is
-  a wire-coverage change: justify the tag delta in the same commit.
+  (`nw_codec_identity_test --dump` prints the replacement table). The second
+  tier-1 leg (NET-0b) is `nw_self_capture` — `nw_golden_diff`'s self mode: a
+  deterministic in-process opennova↔opennova join + play session is captured
+  live and coverage-diffed per (direction, tag) against the committed
+  opennova-produced fixture `fixtures/novaworld/self-capture-session.pcap` (LFS;
+  zero retail bytes, so committable). Because both sides are ours the comparison
+  is EXACT set equality in both directions — no noise floor, no allowlists — and
+  a missing fixture FAILS rather than skips. Regenerating the fixture
+  (`nw_self_capture_test --write-fixture`, which re-reads and re-verifies the
+  file) is a wire-coverage change: justify the tag delta in the same commit.
 - **Tier 2 — local, mandatory protocol for net-touching PRs.** Run the retail
-  golden diff (`NW_GOLDEN_OURS` + the `.scratch/golden/` gameplay capture) and
-  the npruntime golden joins against local retail data, and **attest the run in
-  the PR description** (the commands + PASS lines). A net-touching PR without
-  the attestation is not reviewable. This is the standing substitute for the
+  golden diff (`nw_golden_diff_test --ours <capture>` against the
+  `golden/retail-gameplay-session.pcapng` under `OPENNOVA_CAPTURES`) and the
+  npruntime golden joins against local retail data, and **attest the run in the
+  PR description** (the commands + PASS lines). A net-touching PR without the
+  attestation is not reviewable. This is the standing substitute for the
   un-CI-able retail gates above.

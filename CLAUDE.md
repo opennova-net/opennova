@@ -78,12 +78,15 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
 - Full ctest is ~90 s. Scope during focused work:
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
 - For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.
-- Asset-gated tests SKIP-AS-PASS unless env vars point at local retail installs or
-  captures — a green run does not mean they exercised data. The full var→test→data
-  matrix, local setup, and the never-commit-captures policy live in
-  [docs/asset-gated-tests.md](docs/asset-gated-tests.md). Machine paths go in
-  `.claude/settings.local.json` `env` (never tracked); capture files default to the
-  gitignored `.scratch/` under the repo root (goldens in `.scratch/golden/`).
+- Asset-gated tests report Skipped (ctest exit 77, or a `SKIP-LEG:` line inside a
+  mixed test) unless the four roots — `OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`,
+  `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_CAPTURES` — point at local data; a green run
+  never proves they exercised it. The root→test→data matrix, local setup, and the
+  never-commit-captures policy live in [docs/asset-gated-tests.md](docs/asset-gated-tests.md);
+  every other env hook is gone ([docs/dev-env-vars.md](docs/dev-env-vars.md),
+  `scripts/lint/env_lint.py`). Machine paths go in `.claude/settings.local.json` `env`
+  (never tracked); capture files default to the gitignored `.scratch/` under the repo
+  root (goldens in `.scratch/golden/`).
 - Windows PowerShell 5.1 `Get-Content`/`Set-Content` corrupts BOM-less UTF-8 `.gd` files.
   Do bulk text rewrites with bash sed/perl, not PowerShell.
 

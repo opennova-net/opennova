@@ -108,6 +108,10 @@ jobs:
           # in scripts/lint/fixture_allowlist.json; LFS-tracked, under 2 MiB,
           # referenced by a test or doc, and materialized in this checkout.
           python scripts/lint/fixture_lint.py --enforce --require-pulled
+          # Environment-variable gate (docs/dev-env-vars.md): the four machine
+          # roots through their resolvers, GODOT_BIN in the scripts, the
+          # deployed service's own config and the OS variables; nothing else.
+          python scripts/lint/env_lint.py --enforce
 
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search

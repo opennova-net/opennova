@@ -1,70 +1,106 @@
-# Dev environment variables — the registry
+# Dev environment variables and launch flags — the registry
 
-Every deliberate env hook the runtime, tools, and libraries honor. If a variable
-is not listed here (or in [asset-gated-tests.md](asset-gated-tests.md), which
-owns the test-data gates), it should not exist — the quality campaign removed
-the strays, and new hooks land here in the same PR that adds them.
+The runtime, the tools and the tests read a closed set of environment
+variables; everything else that used to be an env hook is a launch flag, an
+argv option, a debug-catalog action or an MCP tool argument. If a variable is
+not listed here it must not exist: `scripts/lint/env_lint.py --enforce` (CI)
+fails on any other read, and a new hook lands here in the same PR that adds it.
 
-## Launch hooks (the game shell / NetSessionController)
+## The four machine roots
 
-| Var | Effect |
-|---|---|
-| `NW_SP_MISSION=<name.bms>` | boot straight into a single-player mission (skips menu navigation) |
-| `NW_LAN_HOST=<mission.bms>` | boot as a co-op LAN listen host (the demo/smoke path) |
-| `NW_LAN_JOIN=<ip[:port]>` | boot as a LAN joiner dialing that host |
-| `NW_LAN_MISSION=<name.bms>` | joiner-side explicit mission override (debug; the normal path learns it from S2C 0x7B) |
-| `NW_LAN_PORT=<port>` | host bind-port override (default: the retail LAN range head, `npwire/net_ports.h`) |
-| `NW_LAN_GAMETYPE=<n>` | numeric g_GameType override (default Co-op `HostSessionConfig.GAME_TYPE_COOP`) |
-| `NW_LAN_NAME=<callsign>` | callsign override for two-instance same-machine demos (15-char wire clamp applies) |
-| `NW_LAN_MODE=<1..4>` | host LAN rate-mode override (the witnessed holdoffs 12/6/4/3; out-of-range values keep the default) |
-| `NW_LAN_MAX_PLAYERS=<1..64>` | listen-host capacity override for the env-boot path |
-| `NW_SP_DEBUG_POSE="x,y,z[,yaw_deg]"` | one-shot teleport of the local player beside `NW_SP_MISSION` — pose-matched retail captures |
+Read only by the three resolvers — `tests/common/retail_paths.h` (ctests),
+`godot/tests/support/retail_data.gd` (GUT), `scripts/net/lib.ps1` (the
+PowerShell getters) — plus the `--resource-dir` default of
+`scripts/mcp/game_mcp.py launch`. Machine paths go in
+`.claude/settings.local.json` `env`, never in tracked files.
 
-## Headless `nw_server` host rules
+| Var | Points at | Who consumes it |
+|---|---|---|
+| `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set, expansions under `expansion/`) | the `JO_DIR`-gated ctests and GUT tests ([asset-gated-tests.md](asset-gated-tests.md)), the `game_mcp.py launch` default, the render/net scripts' defaults |
+| `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, models, `.adm`, `.bms`) | the `JO_ASSETS`-gated ctests and GUT tests |
+| `OPENNOVA_MISSION_CORPUS` | a directory of retail `.bms` missions (loose) | `mission_corpus`, the GUT corpus binding, the render fixture capture's loose mission |
+| `OPENNOVA_CAPTURES` | the captures/goldens root (default `<repo>/.scratch`) | the capture-gated ctests read fixed names under it: `golden/retail-gameplay-session.pcapng`, `golden/retail-lan-host-join.pcapng`, `golden/retail-lan-host-join-session.pcapng`, `golden/retail-vehicle-session.pcapng`, `host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng`, `probe2.pcapng`, `probe3.pcapng`, `probe3_again.pcapng`, `operation_whitenoise.pcapng`, `karo-guided.pcapng`, `ingame.hexcap`, `sph/host.sph`, `sph/client.sph`, `sph/hostprof_probe3again.sph` |
 
-| Var | Effect |
-|---|---|
-| `NW_GAME_TYPE=<n>` | exact decimal or `0x`-prefixed retail `g_GameType` override; otherwise the mission-authored mode wins |
-| `NW_NUM_TEAMS=<1..255>` | active-team count for retail's multi-team modes (normally 2 or 4) |
-| `NW_CAPTURE_DURATION_SECONDS=<i32>` | un-numbered takeover duration; retail default 15, values ≤0 select the instant branch `[orig: Config_SetDefaults @0x54D030; Server_UpdateCaptureZones @0x53B8F0]` |
-| `NW_CAPTURE_SPEED_SETTING=<i32>` | numbered-zone secure-speed selector; retail default 1 (bases: fallback 12, 1→24, 2→48) `[orig: Config_SetDefaults @0x54D030; calculate_capture_zone_control_delta @0x501120]` |
-| `NW_DEFAULT_SPAWN_REQUIRES_NO_TEAM_ZONE=<u32>` | nonzero enables retail cfg `nodefaultspawnpoints`: target-less deployment is denied while the team owns an unnumbered or fully controlled numbered spawn zone `[orig: Server_ProcessClientRequestRespawn @0x519C8E; Entity_HasAliveEntityOfTeam @0x4FC7B0]` |
+A gated ctest reports **Skipped** (exit 77, `opennova_add_gated_test`) without
+its root and prints `SKIP: needs ...`; a mixed test runs its synthetic legs and
+prints `SKIP-LEG:` for the retail leg. A green run therefore never hides an
+unexercised gate.
 
-## Diagnostics (all off by default)
+## The scripts
 
 | Var | Effect |
 |---|---|
-| `OPENNOVA_NET_DIAGNOSTICS=1` | the joiner freeze-tripwire diagnostics (~1 Hz; renders via `print_verbose`, so run with `--verbose`) |
-| `NW_LOG_DEBUG=1` | `nw_server` / `novaworld_server`: forward `io/log.h` kDebug messages (e.g. the per-tick burst trace) to the console sink |
-| `OED_STRIPIFY_DEBUG` / `OED_STRIPIFY_SEED_DIAG=1` | 3DI stripify diagnostics through the `io/log.h` sink (`forceA`/`forceB` also select a pass) |
-| `TRNGEN_TRACE=<path>` | terrain builder: write the TrnGen trace file |
+| `GODOT_BIN=<path>` | which Godot 4.6.1 binary `scripts/*.sh`, `scripts/**/*.ps1` and `scripts/mcp/game_mcp.py` use (else the main checkout's `.godot-bin/`) |
 
-## Probe/test seams (used by `godot/tests` probes; not runtime features)
+## The deployed service
 
-| Var | Effect |
+`apps/novaworld_server/`, `deploy/`, `launcher/`, `web/`, `backend/` and
+`infra/` keep their own 12-factor configuration (`ONNET_*`, `DATABASE_PATH`,
+`ADMIN_*`, `ONLAUNCHER_*`, the service's `NW_LOG_DEBUG`); see `DEPLOY.md`.
+The lint treats those trees as a family, not a list.
+
+## OS variables
+
+`TEMP`/`TMP`/`TMPDIR` (`tests/common/test_paths.h`, the scripts),
+`APPDATA`/`HOME`/`XDG_DATA_HOME` (`scripts/test_godot.sh`'s isolated
+`user://`), `ProgramFiles`/`SystemRoot` (`scripts/net/lib.ps1` tool discovery).
+
+## Launch flags (the game shell)
+
+Game flags ride after `--` on the Godot command line; `LaunchFlags`
+(`engine/base/resource_index/boot_policy.*`) parses them once for the shell
+and the bindings. `scripts/mcp/game_mcp.py launch` forwards each as a named
+option.
+
+| Flag | Effect |
 |---|---|
-| `NOVA_VM_WEAPON=<WPN_*>` | viewmodel weapon override — the `game_world_test` A/B seam |
-| `GODOT_BIN=<path>` | which Godot binary the sh scripts use (else `scripts/godot_bin.sh` resolves `.godot-bin/`) |
-| `NW_RESOURCE_DIR=<dir>` | the retail install an `NW_SP_MISSION` probe mounts |
-| `NOVA_RESOURCE_DIR=<dir>` | the loose or PFF-mounted retail game directory a probe hands to `ResourceRoot.mount_runtime`; the widest of the resource-dir names, read by ~30 `godot/tests/*_probe.gd` scripts including the four `00trg_*` probes (`00trg_briefing`, `00trg_rock_collision`, `00trg_world_state`, `00trg_zone_chain`), each of which fails fast when it is unset |
-| `NW_PROBE_SHOTS=<dir>` | ladder probe: save action-shot PNGs there (non-headless run) |
-| `NW_PROBE_BOTTOM=1` | ladder probe: full-span diagnostic — enter at the base |
-| `SPLASH_CAPTURE_DIR=<dir>` + `OPENNOVA_JO_DIR` | the splash render probe: capture output dir + the retail install it mounts |
-| `OPENNOVA_WAC_CORPUS_DIRS=<dir;dir;...>` | `wac_corpus_test`: extra corpus dirs (semicolon list) |
-| `OPENNOVA_MNU_EXTRA=<path.mnu>` | `mnu_compat_test`: a developer-only loose menu to include |
+| `--resource-dir <dir>` | the game data root (a packed install or a loose tree) |
+| `/exp <name>` | mount that expansion on top of the base set |
+| `/game <code>` | the game profile (SCR policy) |
+| `/d` | loose files override archive entries |
+| `--loose-root <dir>`, `--loose-mission <name.bms>` | boot a loose mission from a loose tree |
+| `--mission <name.bms>` | boot straight into a single-player mission (the world parks un-ticked under the start splash until the player is spawned) |
+| `--lan-host <mission.bms>` | boot as a co-op LAN listen host |
+| `--lan-join <ip[:port]>` | boot as a LAN joiner dialing that host (the mission comes from the wire, D-NET-194) |
+| `--lan-port <1..65535>` | host bind port (default: the retail LAN range head, `npwire/net_ports.h`) |
+| `--lan-gametype <n>` | numeric `g_GameType` (`0x` accepted; default Co-op) |
+| `--lan-mode <1..4>` | host LAN rate mode (the witnessed holdoffs 12/6/4/3) |
+| `--lan-max-players <1..64>` | listen-host capacity |
+| `--callsign <name>` | the local player's callsign (15-char wire clamp) |
+| `--integrity-profile <id>` | the integrity profile the host advertises / the joiner presents |
+| `--capture-pcap <path>` | write the session's UDP traffic to a pcap |
+| `--mcp-port <1..65535>` | start the `opennova-game` MCP endpoint on that port ([mcp.md](mcp.md)) |
 
-## Test-data gates
+## Debug controls that replaced post-boot hooks
 
-Owned entirely by [asset-gated-tests.md](asset-gated-tests.md) (`OPENNOVA_JO_DIR`,
-`OPENNOVA_MODSUPEROED_DIR`, `NW_GOLDEN_*`, …) — machine paths go in
-`.claude/settings.local.json` `env`, never tracked. `OPENNOVA_JO_ASSETS` now also
-gates ctest `root_motion` and the two sound GUT tests
-(`sound_dialog_test.gd`, `sound_integration_test.gd`).
+The F3 debug catalog (`game_debug` over MCP) carries the actions the old env
+hooks performed after boot: `teleport_local_player {position, yaw_deg,
+pitch_deg}` (the debug pose), `deploy_pick {zone}` (the auto-deploy hook),
+`set_viewmodel_weapon {weapon}` / `clear_viewmodel_weapon` (the viewmodel
+override), `kill_group {group}`, `crew_vehicle {occupant_ssn, vehicle_ssn}`,
+`crew_local_player {vehicle_ssn}` (the AI console), `local_player_look
+{dx_px, dy_px}`, `set_input_source` (scripted input), the
+`net_joiner_diagnostics` check (the joiner tripwire diagnostics) and
+`third_person_on_foot` (the third-person override).
 
-## Known debt (recorded, not yet unified)
+## Argv options that replaced env knobs
 
-The probe scripts under `godot/tests/` grew four prefix families
-(`NOVA_*`/`NW_*`/`JO_*`/`OPENNOVA_*`), and the resource directory answers to
-several names across them. Unifying those renames variables in maintainers'
-local environments, so it is deliberately a dedicated slice with maintainer
-sign-off rather than a drive-by.
+| Tool | Option |
+|---|---|
+| `nw-server` | `--mission --env --resource-root --port --game-type --num-teams --capture-duration-seconds --capture-speed-setting --spawn-wave-time-base --spawn-wave-time-zone --default-spawn-requires-no-team-zone --log-debug` (`apps/nw_server/README.md`) |
+| `nw_pp` | `--hexcap-max <n>` |
+| `opennova-extract` | `--game <dir> [/exp <name>] [/game <code>] [/d] --out <dir> <name>...` |
+| `nw_golden_diff_test` | `--ours <capture>` (the live "ours" side) |
+| `renderer_state_vectors_test`, `nw_codec_identity_test` | `--dump` (print the replacement vector table) |
+| `nw_self_capture_test` | `--write-fixture` (regenerate `fixtures/novaworld/self-capture-session.pcap`) |
+| `minimal_*_gen_test` | `--write` (regenerate that generator's minted fixtures); `minimal_pff_package_test --write-pff` / `--install <dir>` |
+| `ai_path_conformance_test` | `--report`, `--ticks`, `--bms` |
+| `bunker_walkin_test` | `--from x,y[,z]`, `--to x,y`, `--column x,y` |
+| `mnu_compat_test` | extra loose menus as positional arguments |
+| `wac_corpus_test` | extra corpus directories as positional arguments |
+| `scripts/build.sh` | `--no-godot`, `--jobs N`; `scripts/build_godot.sh [--jobs N]`; `scripts/test_godot.sh --keep-user-dir` |
+| `scripts/ida/cite_sweep.py` | `--url` |
+
+GUT-side regeneration is an uncollected script run alone:
+`godot/tests/tools/env_vectors_regen.gd` and `shader_hashes_regen.gd`
+(`-gtest=res://tests/tools/<x>.gd -gunit_test_name=test_regen -gexit`).
