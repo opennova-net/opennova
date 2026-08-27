@@ -3816,7 +3816,7 @@ mixed reply packet therefore retains only `0x1C`/`0x08`.
 [orig: queue calls `@0x42E7C0` / `@0x42FAD8` / `@0x42DAE5`]
 
 The two silence-counter resets are deliberately broader than semantic
-validation. `NapiNPServerMsg_0x01C @0x501D40` ignores the checksum-reply body and
+validation. `NapiNPServerMsg_AnimChecksumRequest @0x501D40` ignores the checksum-reply body and
 clears `slot[22473]` after resolving the connection context. `validate_time_sync
 @0x502210` reads the two dwords, then unconditionally clears `slot[22493]` at
 `@0x502273` before checking tracking-active, sequence, or timing. Consequently

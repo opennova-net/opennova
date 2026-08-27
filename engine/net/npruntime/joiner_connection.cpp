@@ -1396,7 +1396,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//  len 4 @0x42e723); checksum @0x412aa0 (IDB
 			//  AnimMap_GetSlotChecksum is misnamed) — the `return 0` arm
 			//  @0x412abf; the host's discard + counter reset
-			//  NapiNPServerMsg_0x01C @0x501D40 @0x501d71/@0x501d79]
+			//  NapiNPServerMsg_AnimChecksumRequest @0x501D40 @0x501d71/@0x501d79]
 			uint32_t challenge_seed = 0;
 			std::size_t seed_consumed = 0;
 			decode_u32_scalar(m.payload.data(), m.payload.size(), challenge_seed,

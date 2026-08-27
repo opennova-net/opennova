@@ -231,7 +231,7 @@ vec4 compose_retail_tile_overlay(vec4 colormap, vec3 world_pos) {
 }
 
 // NovaLogic terrain surface shading — the witnessed ps.1.4 splat chain
-// [orig: PolyTrn_PS14SplatNormalMap @ 0x7dece0]. No fog/overlays — callers
+// [orig: PolyTrn_PS14SplatNormalMap source text @ 0x7dece0]. No fog/overlays — callers
 // layer those on top. Colormap/detail UVs come from the caller's geometry
 // (runtime: baked patch mesh; editor: sculpted heightmap mesh).
 vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
@@ -274,7 +274,7 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	// authored colormap alpha is cleared by the base pass and never reaches t0.
 	// [orig: PolyTrn_RenderTile @ 0x60da70; Terrain_GenerateNormalMap
 	// @ 0x603210; terrain_setup_lighting_and_shader @ 0x604420 pushes
-	//  c0 <- PolyTrn_PSConstC0_Sky @ 0x31a183c, c1 <- PolyTrn_PSConstC1_Light
+	//  c0 <- PolyTrn_PSConstC0_SkyColorR @ 0x31a183c, c1 <- PolyTrn_PSConstC1_Light
 	//  @ 0x31a182c; values from init_terrain_lighting_color_ramps @ 0x604ee0
 	//  <- Render_TerrainScene @ 0x610c80 (Env_LightBlock / Env_SkyBlock)]
 	vec3 ambient = (cm.a * u_sun_light + u_sky_ambient) * 0.5;

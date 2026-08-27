@@ -1219,8 +1219,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// once-only latch closes; and the MEDIC_REQUEST composite sound
 				// fans to alive players. The listen host's own player runs
 				// this handler too (no loopback early-out).
-				// [orig: Server_BroadcastMedicRequest @0x515390 — GameText
-				// @0x5153C9, gates @0x515406, SpawnWaveList_RemovePlayer
+				// [orig: Server_BroadcastMedicRequest @0x515390 — the GameText
+				// lookup @0x5153C9, gates @0x515406, SpawnWaveList_RemovePlayer
 				// @0x515412, sprintf @0x515421, 0x54 @0x515432..0x515484,
 				// 0x14 @0x5154AC..0x51550B, latch @0x515510, sound
 				// @0x515519..0x51552F]
@@ -1318,7 +1318,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			}
 			case c2s::CHARATTR_CRC_REPLY:
 				// The host discards the returned checksum and only clears this
-				// player's silence counter. [orig: NapiNPServerMsg_0x01C
+				// player's silence counter. [orig: NapiNPServerMsg_AnimChecksumRequest
 				// @0x501D40, discard @0x501D71, reset @0x501D79]
 				st.charattr_unanswered_count = 0;
 				break;

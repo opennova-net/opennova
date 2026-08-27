@@ -59,6 +59,8 @@ std::string to_upper(const std::string &s) {
   return result;
 }
 
+// The '&' hotkey marker strip a button label goes through when it is set
+// [orig: CButtonWnd_SetLabel @ 0x6572F0].
 std::string strip_hotkey(const std::string &text, int &hotkey_index) {
   size_t pos = text.find(HOTKEY_MARKER);
   if (pos == std::string::npos) {

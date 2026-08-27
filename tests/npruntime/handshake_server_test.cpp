@@ -732,7 +732,7 @@ bool run_reactive_replies() {
 		            reply_has_tag(msgs, 0x64) && !reply_has_tag(msgs, 0x75),
 		            "0x37 -> 0x64 only, without an invented 0x75")) return false;
 	}
-	// 0x2F -> 0x5A weapon loadout, DERIVED from the request [orig: NapiNPServerMsg_0x02F
+	// 0x2F -> 0x5A weapon loadout, DERIVED from the request [orig: NapiNPServerMsg_HandlePlayerLoadout
 	// @0x515790 -> Server_SendWeaponSlotListToPlayer @0x502550]: reply set = the request's adm
 	// entries sorted ascending (the weapon-slot table walk order), avatarClass = the accepted
 	// soldier type, ammo bytes echoed (the client clamps them on apply @0x4295d7), 4th byte 0.
