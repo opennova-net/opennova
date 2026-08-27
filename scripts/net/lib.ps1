@@ -13,6 +13,10 @@ Set-StrictMode -Version Latest
 # Repo root = two levels up from this file (scripts\net\lib.ps1 -> repo).
 $script:NetRepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
 
+# The opennova-game MCP client (Invoke-GameTool, Wait-GameMcpReady,
+# Invoke-GameProbe, Stop-GameViaMcp, Get-StructuredResult; docs/mcp.md).
+. (Join-Path $PSScriptRoot "..\mcp\game_mcp.ps1")
+
 function Get-RepoRoot {
     return $script:NetRepoRoot
 }
