@@ -171,6 +171,7 @@
     "lan_host"
   ],
   "comment_ok_paths": [
+    "godot/probes/net/*",
     "godot/src/simulation/*",
     "engine/runtime/devtools/*",
     "godot/src/devtools/*",

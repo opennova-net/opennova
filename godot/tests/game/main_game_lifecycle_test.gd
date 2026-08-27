@@ -1054,3 +1054,73 @@ func _til_bytes_for_cell(cell_x: int) -> PackedByteArray:
 # The shared PFF3 fixture writer (TestPff.write), asserted here.
 func _write_pff(path: String, entries: Array) -> void:
 	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
+
+
+# The SP lose flow's SHELL half (world-wac-ai-re §20): the WAC Lose banner
+# effect and the "round_end" host effect (the Server_ProcessRoundEnd tail)
+# reach the shell over the world's mission_effects signal, the MISSION FAILED
+# screen mounts after the lead-in beat with the banner line, and ESC through
+# the real input path leaves to the menu [orig: ESC -> g_mission_exit_reason=1
+# -> the "Post Menu" push @0x526867]. The sim half (kill tally -> WAC lose ->
+# round end, winner 2) is ctest lose_flow_04tr on the retail mission.
+func test_round_end_effect_mounts_the_failed_screen_and_esc_returns_to_the_menu() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var terrain = world.get_node("Terrain")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	var boot_clear: Color = world.get_current_frame_clear_color()
+	menu_shell.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	_assert_loaded(world, terrain, menu_shell)
+	assert_null(_shell.find_child("MissionEndScreen", true, false),
+			"no end screen before the round ends")
+	assert_true(_shell.is_gameplay_input_active(), "gameplay input is live in the world")
+
+	var banner_key := "STRMISC_KILLEDGREEN"
+	world.mission_effects.emit([
+		{"kind": "lose", "a": 0, "str": banner_key},
+		{"kind": "round_end", "a": 2},
+	])
+	assert_false(_shell.is_gameplay_input_active(),
+			"the round-end latch stops gameplay input while the world keeps ticking")
+	# The lead-in beat is 3 s of shell time (the cine stand-in); run it fast.
+	var saved_scale := Engine.time_scale
+	Engine.time_scale = 20.0
+	var screen: Node = null
+	for _i in range(300):
+		await get_tree().process_frame
+		screen = _shell.find_child("MissionEndScreen", true, false)
+		if screen != null:
+			break
+	Engine.time_scale = saved_scale
+	assert_not_null(screen, "the MISSION FAILED screen mounts after the lead-in beat")
+	if screen == null:
+		return
+	assert_true(world.is_loaded(), "the world stays loaded under the end screen")
+	var gametext: RtxtStringFile = Strings.get_table("gametext")
+	if gametext != null and gametext.has_string_in_section("Misc", banner_key):
+		var banner: String = Strings.lookup_display("gametext", "Misc", banner_key)
+		var banner_visible := false
+		for node in screen.find_children("*", "Label", true, false):
+			if (node as Label).text == banner:
+				banner_visible = true
+				break
+		assert_true(banner_visible, "the WAC Lose banner line is on the failed screen")
+
+	# ESC through the real input path.
+	for pressed in [true, false]:
+		var key := InputEventKey.new()
+		key.keycode = KEY_ESCAPE
+		key.physical_keycode = KEY_ESCAPE
+		key.pressed = pressed
+		Input.parse_input_event(key)
+	for _i in range(4):
+		await get_tree().process_frame
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
+	assert_null(_shell.find_child("MissionEndScreen", true, false),
+			"the end screen goes with the world")
+	assert_true(_shell.is_gameplay_input_active() == false,
+			"nothing is live in the menu")

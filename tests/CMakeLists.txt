@@ -8,6 +8,16 @@ function(opennova_add_gated_test name)
     set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
 endfunction()
 
+# The retail-mission rig the asset-gated world/mission ctests share
+# (common/retail_mission_rig.h): one real mission booted through the engine's
+# boot policy (mission::run_mission_boot) and ticked on the no-net
+# authoritative path, with the same engine seams the Godot Simulation binding
+# drives for input, weapons, mounts and the debug views.
+add_library(opennova_test_rig STATIC common/retail_mission_rig.cpp)
+target_include_directories(opennova_test_rig PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(opennova_test_rig
+    PUBLIC opennova_net opennova_runtime opennova_formats opennova_base)
+
 # Shared io infrastructure unit tests
 add_executable(io_test io/io_test.cpp)
 target_link_libraries(io_test PRIVATE opennova_io)
@@ -1283,7 +1293,7 @@ target_compile_features(renderer_scar_draw_list_test PRIVATE cxx_std_17)
 add_test(NAME renderer_scar_draw_list COMMAND renderer_scar_draw_list_test)
 
 add_executable(ground_conform_test world/ground_conform_test.cpp)
-target_link_libraries(ground_conform_test PRIVATE opennova_runtime)
+target_link_libraries(ground_conform_test PRIVATE opennova_runtime opennova_test_rig)
 target_include_directories(ground_conform_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME ground_conform COMMAND ground_conform_test)
 
@@ -2441,6 +2451,20 @@ add_executable(ai_path_conformance_test mission/ai_path_conformance_test.cpp)
 target_include_directories(ai_path_conformance_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ai_path_conformance_test PRIVATE opennova_runtime opennova_formats)
 opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_test)
+
+# The retail-mission ports of the former in-game probes (ADR 0041: an
+# assertion over the portable engine is a ctest, not a probe), all on the
+# shared rig (common/retail_mission_rig.h). Gated: OPENNOVA_JO_DIR (a packed
+# install) or OPENNOVA_JO_ASSETS (an extracted tree), per test header.
+foreach(port
+        world/truck_rest_00tra world/rock_collision_00trg world/ai_corpse world/ai_threat
+        world/ladder_00tra mission/defense_00trg mission/vehicle_ride_00tra mission/soak_00trg
+        mission/native_assets_00trg mission/lose_flow_04tr)
+    get_filename_component(port_name ${port} NAME)
+    add_executable(${port_name}_test ${port}_test.cpp)
+    target_link_libraries(${port_name}_test PRIVATE opennova_test_rig)
+    opennova_add_gated_test(${port_name} COMMAND ${port_name}_test)
+endforeach()
 
 
 add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)
