@@ -5,22 +5,13 @@ extends RefCounted
 ## methods; this module never reaches into its scene or the simulation's
 ## private state.
 
-const INTERNAL_SHUTDOWN_ACTION := "_oned_shutdown_runtime_debug"
-
 var service: Node
 var adapter: GameMcpAdapter
-var _endpoint_shutdown := Callable()
 
 
-func _init(
-		game_service: Node,
-		game_adapter: GameMcpAdapter,
-		endpoint_shutdown: Callable = Callable()) -> void:
+func _init(game_service: Node, game_adapter: GameMcpAdapter) -> void:
 	service = game_service
 	adapter = game_adapter
-	_endpoint_shutdown = endpoint_shutdown
-	if not _endpoint_shutdown.is_valid() and service != null:
-		_endpoint_shutdown = Callable(service, "request_endpoint_shutdown")
 
 
 func register_all(registry: McpToolRegistry) -> void:
@@ -139,12 +130,6 @@ func _tool_game_capture_bundle(
 
 func _tool_game_control(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	var action := String(args.get("action", ""))
-	if action == INTERNAL_SHUTDOWN_ACTION:
-		if not _endpoint_shutdown.is_valid():
-			return McpToolResult.error(
-					"The runtime debug endpoint cannot shut down cleanly.")
-		_endpoint_shutdown.call()
-		return {"ok": true, "debug_endpoint": "stopping"}
 	if adapter == null:
 		return McpToolResult.error("The game shell cannot be controlled yet.")
 	var result := adapter.mcp_game_control(action)
@@ -322,6 +307,11 @@ static func _debug_action_args(id: StringName, raw: Variant) -> Variant:
 			&"set_audio_bus_mute",
 			&"set_audio_bus_solo",
 			&"set_audio_bus_bypass",
+			&"deploy_pick",
+			&"set_viewmodel_weapon",
+			&"kill_group",
+			&"crew_vehicle",
+			&"crew_local_player",
 		]:
 			return McpToolResult.error(
 					"Debug action '%s' requires its documented args object." % id)
@@ -389,6 +379,33 @@ static func _debug_action_args(id: StringName, raw: Variant) -> Variant:
 		&"set_audio_bus_bypass":
 			return _audio_bus_switch_args(
 					args, "bypassed", "set_audio_bus_bypass")
+		&"deploy_pick":
+			var zone: Variant = _integer_number(args.get("zone", 0))
+			if zone == null:
+				return McpToolResult.error("deploy_pick requires an integer zone (0 = Default Spawn).")
+			return [zone]
+		&"set_viewmodel_weapon":
+			var weapon: Variant = args.get("weapon")
+			if typeof(weapon) != TYPE_STRING or String(weapon).strip_edges().is_empty():
+				return McpToolResult.error("set_viewmodel_weapon requires a non-empty string weapon.")
+			return [String(weapon)]
+		&"kill_group":
+			var group: Variant = _integer_number(args.get("group"))
+			if group == null:
+				return McpToolResult.error("kill_group requires an integer group.")
+			return [group]
+		&"crew_vehicle":
+			var occupant: Variant = _integer_number(args.get("occupant_ssn"))
+			var vehicle: Variant = _integer_number(args.get("vehicle_ssn"))
+			if occupant == null or vehicle == null:
+				return McpToolResult.error(
+						"crew_vehicle requires integer occupant_ssn and vehicle_ssn.")
+			return [occupant, vehicle]
+		&"crew_local_player":
+			var seat_vehicle: Variant = _integer_number(args.get("vehicle_ssn"))
+			if seat_vehicle == null:
+				return McpToolResult.error("crew_local_player requires an integer vehicle_ssn.")
+			return [seat_vehicle]
 		_:
 			return args.get("values", null)
 

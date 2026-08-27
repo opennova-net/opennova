@@ -65,15 +65,19 @@ func configure(
 	_session.set_status_source(runtime_status)
 
 
+## The runtime MCP endpoint rides `--mcp-port <n>` (LaunchFlags); an unflagged
+## launch hosts none.
 func start_runtime_endpoint() -> void:
-	if not GameMcpService.should_start():
+	var port := LaunchFlags.mcp_port()
+	if port <= 0:
 		return
 	_service = GameMcpService.new()
 	_service.name = "RuntimeMcpService"
 	add_child(_service)
-	var err := _service.setup(self)
+	var err := _service.setup(self, port)
 	if err != OK:
-		push_warning("Runtime debug connection unavailable: %s" % error_string(err))
+		push_warning("Runtime MCP failed to start on port %d: %s" % [
+				port, error_string(err)])
 
 
 func get_debug_session() -> DebugSession:

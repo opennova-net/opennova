@@ -76,7 +76,11 @@ static func definitions() -> Array[McpToolDef]:
 			+ "runtime_transport {action}; set_mission_variable {index,value}."
 			+ " Audio actions: set_audio_bus_volume {bus,volume_db}; "
 			+ "set_audio_bus_mute {bus,muted}; set_audio_bus_solo {bus,soloed}; "
-			+ "set_audio_bus_bypass {bus,bypassed}.",
+			+ "set_audio_bus_bypass {bus,bypassed}."
+			+ " Automation actions: deploy_pick {zone} (0 = Default Spawn); "
+			+ "set_viewmodel_weapon {weapon}; clear_viewmodel_weapon; "
+			+ "kill_group {group}; crew_vehicle {occupant_ssn,vehicle_ssn}; "
+			+ "crew_local_player {vehicle_ssn}; plus the net_joiner_diagnostics check.",
 			{
 				"op": {
 					"type": "string",
