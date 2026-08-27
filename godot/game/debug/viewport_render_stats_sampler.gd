@@ -9,7 +9,7 @@ extends RefCounted
 ## frame. Latched per slot index by weakref so a freed viewport never sees a
 ## stale-RID RenderingServer call. No per-frame allocations while capturing.
 
-var _board: FrameStatsBoard = null
+var _board: FrameStats = null
 var _cpu_slot: int
 var _gpu_slot: int
 var _objects_slot: int
@@ -18,7 +18,7 @@ var _latched: Array[WeakRef] = []
 var _frame_on := false
 
 
-func _init(board: FrameStatsBoard, cpu_slot: int, gpu_slot: int,
+func _init(board: FrameStats, cpu_slot: int, gpu_slot: int,
 		objects_slot: int, draws_slot: int) -> void:
 	_board = board
 	_cpu_slot = cpu_slot

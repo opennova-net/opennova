@@ -6,6 +6,10 @@
   workspaces, project/import state, previews, an asset database, or MCP.
 - Keep the ONED interface small. Process discovery, child ownership,
   retail staging, working-directory rules, and error recovery stay behind it.
+- The surface is the engine's ImGui window (`OnedUi`, ADR 0039): a new
+  control is a new `OnedAction` in `engine/runtime/devtools/oned_ui.*` that
+  `oned_app.gd` executes. No Godot `Control` UI here; the scene is the app
+  node, the `OnedUi` node and two native `FileDialog`s.
 - `opennova-modtools.exe`, the `OpenNova Mod Tools` preset, the `modtools`
   feature, and hidden `--pack-game` command are release contracts.
 - Run OpenNova never mutates the selected game-data directory. Retail staging

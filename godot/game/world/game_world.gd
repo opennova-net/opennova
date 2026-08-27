@@ -1129,7 +1129,7 @@ var _perf_probe_occlusion_skipped := false
 # The shared F3 frame-stats board (null outside the game shell). Feeds gate on
 # board capture so a closed Stats tab costs nothing; the occlusion split spans
 # land from OcclusionFramePass.apply_frame, the tick legs from tick() below.
-var _frame_stats: FrameStatsBoard = null
+var _frame_stats: FrameStats = null
 # Weakref edge latch for measured render time on the water reflection RTT.
 var _stats_water_vp_ref: WeakRef = null
 # The other auxiliary scene renders (FrameFx's Q3 view, the slot-shadow
@@ -1140,9 +1140,9 @@ var _slot_render_stats: ViewportRenderStatsSampler = null
 var _slot_render_armed_mask := 0
 
 
-## The game shell hands its FrameStatsBoard here; the world re-hands it to
+## The game shell hands its FrameStats here; the world re-hands it to
 ## every MissionPresentation it creates and feeds its own tick legs.
-func set_frame_stats_board(board: FrameStatsBoard) -> void:
+func set_frame_stats(board: FrameStats) -> void:
 	if board == _frame_stats:
 		return
 	if _frame_stats != null:
@@ -1162,20 +1162,20 @@ func set_frame_stats_board(board: FrameStatsBoard) -> void:
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
 		_q3_render_stats = ViewportRenderStatsSampler.new(board,
-				FrameStatsBoard.RENDER_Q3_CPU, FrameStatsBoard.RENDER_Q3_GPU,
-				FrameStatsBoard.RENDER_Q3_OBJECTS, FrameStatsBoard.RENDER_Q3_DRAWS)
+				FrameStats.RENDER_Q3_CPU, FrameStats.RENDER_Q3_GPU,
+				FrameStats.RENDER_Q3_OBJECTS, FrameStats.RENDER_Q3_DRAWS)
 		_slot_render_stats = ViewportRenderStatsSampler.new(board,
-				FrameStatsBoard.RENDER_SLOT_CPU, FrameStatsBoard.RENDER_SLOT_GPU,
-				FrameStatsBoard.RENDER_SLOT_OBJECTS, FrameStatsBoard.RENDER_SLOT_DRAWS)
-	_occlusion.set_frame_stats_board(board)
+				FrameStats.RENDER_SLOT_CPU, FrameStats.RENDER_SLOT_GPU,
+				FrameStats.RENDER_SLOT_OBJECTS, FrameStats.RENDER_SLOT_DRAWS)
+	_occlusion.set_frame_stats(board)
 	if _runtime != null:
-		_runtime.set_frame_stats_board(board)
+		_runtime.set_frame_stats(board)
 
 
 ## GameFramePipeline's capture-only timing seam. The active value is latched by
 ## begin_device_frame(), so every leg in one frame writes to the same board even
 ## if the overlay changes page during that frame.
-func get_active_frame_stats_board() -> FrameStatsBoard:
+func get_active_frame_stats() -> FrameStats:
 	return _frame_stats if _frame_stats_on else null
 
 
@@ -1186,7 +1186,7 @@ func is_device_frame_timing_enabled() -> bool:
 func record_runtime_frame(elapsed_us: int) -> void:
 	_perf_runtime_us = elapsed_us
 	if _frame_stats_on:
-		_frame_stats.add(FrameStatsBoard.WORLD_RUNTIME, elapsed_us)
+		_frame_stats.add(FrameStats.WORLD_RUNTIME, elapsed_us)
 
 
 func _on_frame_stats_capture_changed(active: bool) -> void:
@@ -1299,7 +1299,7 @@ func advance_weather_frame() -> void:
 		if _frame_probe_enabled:
 			_perf_probe_spans["weather"] = weather_us
 		if _frame_stats_on:
-			_frame_stats.add(FrameStatsBoard.WORLD_WEATHER, weather_us)
+			_frame_stats.add(FrameStats.WORLD_WEATHER, weather_us)
 
 
 func apply_blink_frame() -> void:
@@ -1313,7 +1313,7 @@ func apply_blink_frame() -> void:
 		if _frame_probe_enabled:
 			_perf_probe_spans["blink"] = blink_us
 		if _frame_stats_on:
-			_frame_stats.add(FrameStatsBoard.WORLD_BLINK, blink_us)
+			_frame_stats.add(FrameStats.WORLD_BLINK, blink_us)
 
 
 # The local-player VIEW placement, as a device leg: the camera/viewmodel move
@@ -1445,7 +1445,7 @@ func sample_iris_frame() -> void:
 			if _frame_probe_enabled:
 				_perf_probe_spans["iris"] = iris_us
 			if _frame_stats_on:
-				_frame_stats.add(FrameStatsBoard.WORLD_IRIS, iris_us)
+				_frame_stats.add(FrameStats.WORLD_IRIS, iris_us)
 	elif _frame_probe_enabled:
 		_perf_probe_spans["iris"] = 0
 
@@ -1541,8 +1541,8 @@ func begin_device_frame(camera_pos: Vector3, camera_xform: Transform3D,
 func finish_device_frame() -> void:
 	_perf_tick_us = Time.get_ticks_usec() - _device_frame_start_us
 	if _frame_stats_on:
-		_frame_stats.add(FrameStatsBoard.WORLD_FOLIAGE, _perf_foliage_us)
-		_frame_stats.add(FrameStatsBoard.WORLD_AUDIO, _perf_audio_us)
+		_frame_stats.add(FrameStats.WORLD_FOLIAGE, _perf_foliage_us)
+		_frame_stats.add(FrameStats.WORLD_AUDIO, _perf_audio_us)
 	_sample_water_render_stats(_frame_stats_on)
 	_sample_auxiliary_render_stats(_frame_stats_on)
 
@@ -1573,7 +1573,7 @@ func _sample_auxiliary_render_stats(stats_on: bool) -> void:
 				_slot_shadow.get_capture_viewport(order), counted)
 		if counted:
 			rendered += 1
-	_frame_stats.add(FrameStatsBoard.RENDER_SLOT_VIEWPORTS, rendered)
+	_frame_stats.add(FrameStats.RENDER_SLOT_VIEWPORTS, rendered)
 
 
 func render_material_frame() -> void:
@@ -1589,17 +1589,17 @@ func render_material_frame() -> void:
 	var profile := ObjectModel.profile_awake_frame(_frame_delta)
 	if profile.size() < ObjectModel.AWAKE_PROFILE_SLOT_COUNT:
 		return
-	_frame_stats.add(FrameStatsBoard.MODEL_CLOCK_ANIMATION,
+	_frame_stats.add(FrameStats.MODEL_CLOCK_ANIMATION,
 			profile[ObjectModel.AWAKE_PROFILE_CLOCK_ANIMATION_US])
-	_frame_stats.add(FrameStatsBoard.MODEL_PANM,
+	_frame_stats.add(FrameStats.MODEL_PANM,
 			profile[ObjectModel.AWAKE_PROFILE_PANM_US])
-	_frame_stats.add(FrameStatsBoard.MODEL_MATERIAL,
+	_frame_stats.add(FrameStats.MODEL_MATERIAL,
 			profile[ObjectModel.AWAKE_PROFILE_MATERIAL_US])
-	_frame_stats.add(FrameStatsBoard.MODEL_ORDER_BOUNDS,
+	_frame_stats.add(FrameStats.MODEL_ORDER_BOUNDS,
 			profile[ObjectModel.AWAKE_PROFILE_ORDER_BOUNDS_US])
-	_frame_stats.add(FrameStatsBoard.MODEL_AWAKE_MODELS,
+	_frame_stats.add(FrameStats.MODEL_AWAKE_MODELS,
 			profile[ObjectModel.AWAKE_PROFILE_AWAKE_MODELS])
-	_frame_stats.add(FrameStatsBoard.MODEL_RENDERABLE_MODELS,
+	_frame_stats.add(FrameStats.MODEL_RENDERABLE_MODELS,
 			profile[ObjectModel.AWAKE_PROFILE_RENDERABLE_MODELS])
 
 
@@ -1696,18 +1696,18 @@ func _sample_water_render_stats(stats_on: bool) -> void:
 	if viewport == null:
 		return
 	var rid := viewport.get_viewport_rid()
-	_frame_stats.add(FrameStatsBoard.RENDER_WATER_CPU,
+	_frame_stats.add(FrameStats.RENDER_WATER_CPU,
 			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
-	_frame_stats.add(FrameStatsBoard.RENDER_WATER_GPU,
+	_frame_stats.add(FrameStats.RENDER_WATER_GPU,
 			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
 	# What the mirror pass actually re-rendered (previous frame): the witnessed
 	# reflection re-renders the world scene [orig: Water_ReflectionPrerender
 	# @ 0x5c2780], so its submission count is a first-class stats row.
-	_frame_stats.add(FrameStatsBoard.RENDER_WATER_OBJECTS,
+	_frame_stats.add(FrameStats.RENDER_WATER_OBJECTS,
 			RenderingServer.viewport_get_render_info(rid,
 					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
 					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME))
-	_frame_stats.add(FrameStatsBoard.RENDER_WATER_DRAWS,
+	_frame_stats.add(FrameStats.RENDER_WATER_DRAWS,
 			RenderingServer.viewport_get_render_info(rid,
 					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
 					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME))
@@ -2430,7 +2430,7 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	_runtime.name = "MissionPresentation"
 	add_child(_runtime)
 	if _frame_stats != null:
-		_runtime.set_frame_stats_board(_frame_stats)
+		_runtime.set_frame_stats(_frame_stats)
 	var mission_file := bms_name.get_file()
 	if mission_file.is_empty():
 		mission_file = bms_name
@@ -2616,7 +2616,7 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 		if _frame_stats != null and _frame_stats.is_capture_active():
 			var fx_start := Time.get_ticks_usec()
 			_effect_world.advance_fixed_tick(Simulation.tick_dt())
-			_frame_stats.add(FrameStatsBoard.EFFECTS_TICK,
+			_frame_stats.add(FrameStats.EFFECTS_TICK,
 					Time.get_ticks_usec() - fx_start)
 		else:
 			_effect_world.advance_fixed_tick(Simulation.tick_dt())

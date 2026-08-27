@@ -156,7 +156,7 @@ var _root: ResourceRoot
 var _text: RtxtStringFile
 var _style: MnsStyleSheet
 var _sound_profile: LwfData
-var _frame_stats: FrameStatsBoard = null
+var _frame_stats: FrameStats = null
 
 var _menu_cache: Dictionary = {}            # filename -> MnuDocument
 var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back stack
@@ -201,11 +201,11 @@ func _process(delta: float) -> void:
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
 	ObjectModel.advance_awake_frame(delta)
 	if stats_on:
-		_frame_stats.add(FrameStatsBoard.FRAME_MENU_SHELL,
+		_frame_stats.add(FrameStats.FRAME_MENU_SHELL,
 				Time.get_ticks_usec() - started)
 
 
-func set_frame_stats_board(board: FrameStatsBoard) -> void:
+func set_frame_stats(board: FrameStats) -> void:
 	if board == _frame_stats:
 		return
 	if _frame_stats != null:

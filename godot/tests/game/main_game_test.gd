@@ -158,7 +158,7 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	var menu_layer := CanvasLayer.new()
 	var nested_owner := Node.new()
 	var nested_overlay := CanvasLayer.new()
-	nested_overlay.name = "DebugOverlay"
+	nested_overlay.name = "NestedLayer"
 	mount.add_child(hud)
 	mount.add_child(menu_layer)
 	# The FP gun draws inside the beauty pass: a world-only capture hides it
@@ -179,7 +179,7 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 
 	assert_eq(session.begin_world_only_capture(hud, menu_layer, presenter), OK)
 	assert_false(hud.visible,
-			"the HUD layer hides nested CanvasLayers such as DebugOverlay")
+			"the HUD layer hides nested CanvasLayers")
 	assert_false(menu_layer.visible)
 	assert_true(presenter.viewmodel_rig().is_capture_hidden(),
 			"the capture latches the FP gun hidden through the presenter")
@@ -372,7 +372,7 @@ func test_main_frame_probe_spans_are_default_off() -> void:
 
 func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 	# The F3 Stats capture rides the same frame-leg measurements as the probe
-	# but lands on the FrameStatsBoard, and only while capture is active.
+	# but lands on the FrameStats, and only while capture is active.
 	var game := _make()
 	var world := GameWorld.new()
 	var terrain := Terrain.new()
@@ -388,17 +388,17 @@ func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 	game.set("_camera", camera)
 	game.set("_state", MainGameScript.State.WORLD)
 
-	var board: FrameStatsBoard = game.get_frame_stats_board()
+	var board: FrameStats = game.get_frame_stats()
 	assert_not_null(board, "the shell owns a frame-stats board from construction")
 	game.call("_process", 0.0)
-	assert_eq(board.drain().sample_frames[FrameStatsBoard.FRAME_WORLD], 0,
+	assert_eq(board.drain().sample_frames[FrameStats.FRAME_WORLD], 0,
 			"ordinary main frames feed nothing")
 
 	board.set_capture_active(true)
 	game.call("_process", 0.0)
 	var counts := board.drain().sample_frames
-	for slot in [FrameStatsBoard.FRAME_PLAYER_BEFORE, FrameStatsBoard.FRAME_WORLD,
-			FrameStatsBoard.FRAME_PLAYER_AFTER, FrameStatsBoard.FRAME_HUD]:
+	for slot in [FrameStats.FRAME_PLAYER_BEFORE, FrameStats.FRAME_WORLD,
+			FrameStats.FRAME_PLAYER_AFTER, FrameStats.FRAME_HUD]:
 		assert_eq(counts[slot], 1, "an active board captures each main-frame leg")
 	assert_true((game.get("_perf_probe_spans") as Dictionary).is_empty(),
 			"stats capture never writes the probe span dictionary")
@@ -408,7 +408,7 @@ func test_root_render_measurement_releases_on_capture_close_and_tree_exit() -> v
 	_shell = await _make_packed_shell("jodemo")
 	if _shell == null:
 		return
-	var board: FrameStatsBoard = _shell.get_frame_stats_board()
+	var board: FrameStats = _shell.get_frame_stats()
 	board.set_capture_active(true)
 	await get_tree().process_frame
 	assert_true(_shell.is_root_render_stats_measured(),

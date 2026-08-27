@@ -823,7 +823,7 @@ func test_in_match_session_loss_returns_to_the_menu() -> void:
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 
 
-func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
+func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 	_shell = await _make_shell()
 	if _shell == null:
 		return
@@ -838,57 +838,28 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	if runtime == null:
 		return
 
+	# The open state is the shell-facing contract and works headless (no ImGui
+	# context attaches under the headless DisplayServer); only drawing needs one.
+	var dev_tools: DevTools = _shell.get_dev_tools()
+	assert_not_null(dev_tools, "the shell owns its dev tools from construction")
+	assert_false(dev_tools.is_available(), "headless runs never attach an ImGui context")
 	assert_true(_shell.is_gameplay_input_active())
 	var tick_before := int(runtime.get_sim().get_logic_tick())
-	_shell.toggle_debug_overlay()
+	dev_tools.toggle()
+	assert_true(_shell.is_dev_tools_open())
 	assert_false(_shell.is_gameplay_input_active(),
 			"the public input gate closes on the same F3 edge")
+	var board: FrameStats = _shell.get_frame_stats()
+	assert_true(board.is_capture_active(),
+			"the Stats window (open by default) arms the board's capture on the F3 edge")
 	for _frame in range(4):
 		await get_tree().process_frame
-	assert_true(_shell.is_debug_overlay_open())
 	assert_false(_shell.is_gameplay_input_active(),
-			"F3 submits neutral player input while its controls own the cursor")
+			"F3 submits neutral player input while the tools own the cursor")
 	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE,
-			"F3 leaves the dump button clickable")
+			"F3 frees the mouse for the tool windows")
 	assert_gt(int(runtime.get_sim().get_logic_tick()), tick_before,
-			"the live world keeps ticking under the inspector")
-
-	var overlay = _shell.find_child("DebugOverlay", true, false)
-	assert_not_null(overlay)
-	var pose_path := _temp_dir.path_join("f3-player-pose.json")
-	var dumped_path: String = overlay.dump_debug_snapshot(pose_path)
-	assert_eq(dumped_path, pose_path)
-	var pose_file := FileAccess.open(dumped_path, FileAccess.READ)
-	assert_not_null(pose_file)
-	var payload_variant: Variant = JSON.parse_string(pose_file.get_as_text()) \
-			if pose_file != null else null
-	if pose_file != null:
-		pose_file.close()
-	var payload: Dictionary = payload_variant if payload_variant is Dictionary else {}
-	var view: Dictionary = payload.get("view", {})
-	var camera_snapshot: Dictionary = view.get("camera", {})
-	assert_false(camera_snapshot.is_empty(),
-			"the game shell supplies its actual foliage-dispatch camera")
-	assert_eq(String(camera_snapshot.get("mode", "")), "first_person")
-	var actual_camera := _shell.get_node("Camera3D") as Camera3D
-	var dumped_camera: Dictionary = camera_snapshot.get("position_godot", {})
-	assert_almost_eq(float(dumped_camera.get("x", 0.0)),
-			actual_camera.global_position.x, 0.0001)
-	assert_almost_eq(float(dumped_camera.get("y", 0.0)),
-			actual_camera.global_position.y, 0.0001)
-	assert_almost_eq(float(dumped_camera.get("z", 0.0)),
-			actual_camera.global_position.z, 0.0001)
-
-	# The option registry drives the real world end to end: one programmatic
-	# flip applies through the shared session's option target and
-	# builds the world's skeleton view; the counter-flip frees it.
-	overlay.set_option(&"show_skeletons", true)
-	assert_not_null(world.get_node_or_null("SkeletonDebug"),
-			"the registry flip built the world's skeleton debug view")
-	overlay.set_option(&"show_skeletons", false)
-	await get_tree().process_frame
-	assert_null(world.get_node_or_null("SkeletonDebug"),
-			"...and the counter-flip freed it")
+			"the live world keeps ticking under the tools")
 
 	# The pick stack, end to end: the world load installed the highlight view
 	# for the shell's list, F3-open flipped the click catcher on, and the
@@ -896,7 +867,7 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	assert_not_null(world.get_node_or_null("PickDebug"),
 			"the world renders the shell's pick list")
 	assert_not_null(world.get_node_or_null("PickClickCatcher"),
-			"overlay open: world clicks ray-pick")
+			"dev tools open: world clicks ray-pick")
 	var pick_sim = runtime.get_sim()
 	var player_pos: Vector3 = pick_sim.get_local_player_position()
 	var down: Dictionary = pick_sim.debug_pick_entity(
@@ -908,36 +879,35 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	assert_not_null(_shell.find_child("PickToast", true, false),
 			"the crosshair pick confirms every attempt with a toast")
 
-	(overlay.find_child("CloseDebug", true, false) as Button).pressed.emit()
+	dev_tools.set_open(false)
 	await get_tree().process_frame
-	assert_false(_shell.is_debug_overlay_open())
+	assert_false(_shell.is_dev_tools_open())
 	assert_true(_shell.is_gameplay_input_active(),
-			"the cockpit Close button restores the gameplay-input policy")
+			"closing the tools restores the gameplay-input policy")
+	assert_false(board.is_capture_active(),
+			"closing the tools releases the board's capture")
 	assert_null(world.get_node_or_null("PickClickCatcher"),
-			"Close removes the click picker")
+			"closing removes the click picker")
 
-	_shell.toggle_debug_overlay()
+	dev_tools.toggle()
 	await get_tree().process_frame
 	assert_not_null(world.get_node_or_null("PickClickCatcher"))
-	var escape := InputEventKey.new()
-	escape.keycode = KEY_ESCAPE
-	escape.pressed = true
-	assert_true(overlay.handle_key_input(escape))
+	dev_tools.toggle()
 	await get_tree().process_frame
-	assert_false(_shell.is_debug_overlay_open())
+	assert_false(_shell.is_dev_tools_open())
 	assert_null(world.get_node_or_null("PickClickCatcher"),
-			"Escape removes the click picker through the same visibility edge")
+			"F3 again removes the click picker through the same open edge")
 
 	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	assert_false(_shell.is_debug_overlay_open(),
-			"returning to the menu cannot blanket-show a closed F3 layer")
+	assert_false(_shell.is_dev_tools_open(),
+			"returning to the menu cannot reopen closed tools")
 	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
-	assert_false(_shell.is_debug_overlay_open(),
-			"the next mission keeps the overlay's own closed lifecycle")
+	assert_false(_shell.is_dev_tools_open(),
+			"the next mission keeps the tools' own closed lifecycle")
 
 
 func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:

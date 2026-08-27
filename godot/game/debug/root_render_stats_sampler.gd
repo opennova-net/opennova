@@ -6,7 +6,7 @@ extends RefCounted
 # tab captures (it is not free), then the previous frame's CPU/GPU times land
 # on the board each frame. RootFramePhaseSampler owns wall/process timing.
 
-var _board: FrameStatsBoard
+var _board: FrameStats
 var _measured := false
 var _viewport_ref: WeakRef = null
 
@@ -14,7 +14,7 @@ var _viewport_ref: WeakRef = null
 ## Render-time measurement is RenderingServer state, not Node-owned state.
 ## Observing the board's capture close edge directly means it cannot survive
 ## until some later process frame (or outlive the host scene).
-func setup(board: FrameStatsBoard) -> void:
+func setup(board: FrameStats) -> void:
 	_board = board
 	board.capture_changed.connect(_on_capture_changed)
 
@@ -43,25 +43,25 @@ func sample(viewport: Viewport, stats_on: bool) -> void:
 		RenderingServer.viewport_set_measure_render_time(
 				viewport.get_viewport_rid(), true)
 	var rid := viewport.get_viewport_rid()
-	_board.add(FrameStatsBoard.RENDER_ROOT_CPU,
+	_board.add(FrameStats.RENDER_ROOT_CPU,
 			int(RenderingServer.viewport_get_measured_render_time_cpu(rid) * 1000.0))
-	_board.add(FrameStatsBoard.RENDER_ROOT_GPU,
+	_board.add(FrameStats.RENDER_ROOT_GPU,
 			int(RenderingServer.viewport_get_measured_render_time_gpu(rid) * 1000.0))
 	# Per-pass submission counts (previous frame): what the main view and the
 	# shadow maps each rendered. Free counters — always tracked by the server.
-	_board.add(FrameStatsBoard.RENDER_MAIN_OBJECTS,
+	_board.add(FrameStats.RENDER_MAIN_OBJECTS,
 			RenderingServer.viewport_get_render_info(rid,
 					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
 					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME))
-	_board.add(FrameStatsBoard.RENDER_MAIN_DRAWS,
+	_board.add(FrameStats.RENDER_MAIN_DRAWS,
 			RenderingServer.viewport_get_render_info(rid,
 					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
 					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME))
-	_board.add(FrameStatsBoard.RENDER_SHADOW_OBJECTS,
+	_board.add(FrameStats.RENDER_SHADOW_OBJECTS,
 			RenderingServer.viewport_get_render_info(rid,
 					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_SHADOW,
 					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME))
-	_board.add(FrameStatsBoard.RENDER_SHADOW_DRAWS,
+	_board.add(FrameStats.RENDER_SHADOW_DRAWS,
 			RenderingServer.viewport_get_render_info(rid,
 					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_SHADOW,
 					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME))

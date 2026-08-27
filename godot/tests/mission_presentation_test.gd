@@ -266,10 +266,10 @@ func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> 
 
 func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var board := FrameStatsBoard.new()
+	var board := FrameStats.new()
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.set_frame_stats_board(board)
+	rt.set_frame_stats(board)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	var sim := rt.get_sim()
 	assert_false(sim.is_runtime_profiling_enabled(),

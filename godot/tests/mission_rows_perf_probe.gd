@@ -1,9 +1,9 @@
 extends SceneTree
 
 # Exact Mission Rows benchmark. Boots the real SP game shell, enables its
-# FrameStatsBoard directly (no overlay/UI cost), and drains the board once per
-# process frame so every sample is the exact span that feeds F3's
-# PRESENT_MISSION row. The same drains retain whole-Present, World, wall-frame,
+# FrameStats directly (no dev-tools UI cost), and drains the board once per
+# process frame so every sample is the exact span that feeds the Stats
+# window's PRESENT_MISSION row. The same drains retain whole-Present, World, wall-frame,
 # and outside-shell numbers so an optimization cannot merely move work beyond
 # the present span.
 #
@@ -17,17 +17,18 @@ extends SceneTree
 #   NW_MISSION_ROWS_PERF_WINDOWS
 #   NW_MISSION_ROWS_PERF_LABEL
 #   NW_MISSION_ROWS_PERF_OUTPUT
-#   NW_MISSION_ROWS_PERF_SHOW_OVERLAY=1  opens the F3 overlay on its Stats page
-#       for the whole run (the in-game reading condition). The probe drains the
-#       board every frame, so the page's own timer refresh would find nothing
-#       to render; the probe renders the page itself from its drains at the
-#       page's cadence (every OVERLAY_RENDER_FRAMES drains), so the Tree
-#       re-shape/redraw lands in the deferred flush exactly like in-game.
+#   NW_MISSION_ROWS_PERF_SHOW_OVERLAY=1  opens the dev tools (F3) with their
+#       Stats window for the whole run (the in-game reading condition; needs a
+#       window, the tools never attach headless). The probe drains the board
+#       every frame, so the window's own refresh would find nothing; the probe
+#       feeds the window its re-accumulated drains at the window's cadence
+#       (every OVERLAY_RENDER_FRAMES drains), so the ImGui layout cost lands in
+#       the frame exactly like in-game.
 # With no output override, JSON lands under the worktree's ignored
 # .scratch/perf/ directory.
 
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
-# The Stats page renders a ~0.5 s window in-game (0.25 s timer x divider 2).
+# The Stats window reads a ~0.5 s window in-game (StatsWindow::kRefreshSeconds).
 const OVERLAY_RENDER_FRAMES := 30
 const DEFAULT_WARMUP_SECONDS := 6.0
 const DEFAULT_WINDOW_SECONDS := 10.0
@@ -38,43 +39,42 @@ const ResourceDirSettings := preload(
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 
 const PRESENT_SLOTS := [
-	FrameStatsBoard.PRESENT_SNAPSHOT,
-	FrameStatsBoard.PRESENT_MISSION,
-	FrameStatsBoard.PRESENT_WIRE,
-	FrameStatsBoard.PRESENT_FIRE,
-	FrameStatsBoard.PRESENT_DESTRUCTION,
-	FrameStatsBoard.PRESENT_THROWABLE,
-	FrameStatsBoard.PRESENT_SCARS,
+	FrameStats.PRESENT_SNAPSHOT,
+	FrameStats.PRESENT_MISSION,
+	FrameStats.PRESENT_WIRE,
+	FrameStats.PRESENT_FIRE,
+	FrameStats.PRESENT_DESTRUCTION,
+	FrameStats.PRESENT_THROWABLE,
+	FrameStats.PRESENT_SCARS,
 ]
 const SHELL_LEG_SLOTS := [
-	FrameStatsBoard.FRAME_PLAYER_BEFORE,
-	FrameStatsBoard.FRAME_WORLD,
-	FrameStatsBoard.FRAME_PLAYER_AFTER,
-	FrameStatsBoard.FRAME_HUD,
+	FrameStats.FRAME_PLAYER_BEFORE,
+	FrameStats.FRAME_WORLD,
+	FrameStats.FRAME_PLAYER_AFTER,
+	FrameStats.FRAME_HUD,
 ]
 # The engine-frame decomposition (RootFramePhaseSampler's draw-signal split
 # plus the per-viewport render samplers): one sample per drained frame each,
 # so a slice that moves work between the callbacks and the residual is seen.
 const ENGINE_SLOT_SAMPLES := {
-	"process_callbacks": FrameStatsBoard.FRAME_PROCESS_CALLBACKS,
-	"deferred_flush": FrameStatsBoard.FRAME_DEFERRED_FLUSH,
-	"flush_queued": FrameStatsBoard.FRAME_FLUSH_QUEUED,
-	"flush_tail": FrameStatsBoard.FRAME_FLUSH_TAIL,
-	"debug_draw": FrameStatsBoard.FRAME_DEBUG_DRAW,
-	"draw": FrameStatsBoard.FRAME_DRAW,
-	"pacing_input": FrameStatsBoard.FRAME_PACING_INPUT,
-	"hud_draw_compile": FrameStatsBoard.HUD_DRAW_COMPILE,
-	"hud_draw_emit": FrameStatsBoard.HUD_DRAW_EMIT,
-	"render_root_cpu": FrameStatsBoard.RENDER_ROOT_CPU,
-	"render_root_gpu": FrameStatsBoard.RENDER_ROOT_GPU,
-	"render_water_cpu": FrameStatsBoard.RENDER_WATER_CPU,
-	"render_water_gpu": FrameStatsBoard.RENDER_WATER_GPU,
-	"render_q3_cpu": FrameStatsBoard.RENDER_Q3_CPU,
-	"render_q3_gpu": FrameStatsBoard.RENDER_Q3_GPU,
-	"render_slot_cpu": FrameStatsBoard.RENDER_SLOT_CPU,
-	"render_slot_gpu": FrameStatsBoard.RENDER_SLOT_GPU,
+	"process_callbacks": FrameStats.FRAME_PROCESS_CALLBACKS,
+	"deferred_flush": FrameStats.FRAME_DEFERRED_FLUSH,
+	"flush_queued": FrameStats.FRAME_FLUSH_QUEUED,
+	"flush_tail": FrameStats.FRAME_FLUSH_TAIL,
+	"draw": FrameStats.FRAME_DRAW,
+	"pacing_input": FrameStats.FRAME_PACING_INPUT,
+	"hud_draw_compile": FrameStats.HUD_DRAW_COMPILE,
+	"hud_draw_emit": FrameStats.HUD_DRAW_EMIT,
+	"render_root_cpu": FrameStats.RENDER_ROOT_CPU,
+	"render_root_gpu": FrameStats.RENDER_ROOT_GPU,
+	"render_water_cpu": FrameStats.RENDER_WATER_CPU,
+	"render_water_gpu": FrameStats.RENDER_WATER_GPU,
+	"render_q3_cpu": FrameStats.RENDER_Q3_CPU,
+	"render_q3_gpu": FrameStats.RENDER_Q3_GPU,
+	"render_slot_cpu": FrameStats.RENDER_SLOT_CPU,
+	"render_slot_gpu": FrameStats.RENDER_SLOT_GPU,
 }
-# Every FrameStatsBoard slot under the World tick (GameWorld.tick legs, the
+# Every FrameStats slot under the World tick (GameWorld.tick legs, the
 # awake-model walk, the occlusion frame, the sim step tree, traces, effects,
 # and the present rows) is sampled by prefix so one JSON carries the whole
 # world breakdown; the VALUE slots among them are counts, not spans.
@@ -96,15 +96,15 @@ const WORLD_VALUE_SLOTS := [
 ]
 # Per-pass submission counts (objects), averaged per drained frame.
 const ENGINE_COUNT_SAMPLES := {
-	"nodes_freed": FrameStatsBoard.FRAME_NODES_FREED,
-	"nodes_added": FrameStatsBoard.FRAME_NODES_ADDED,
-	"render_main_objects": FrameStatsBoard.RENDER_MAIN_OBJECTS,
-	"render_main_draws": FrameStatsBoard.RENDER_MAIN_DRAWS,
-	"render_water_objects": FrameStatsBoard.RENDER_WATER_OBJECTS,
-	"render_q3_objects": FrameStatsBoard.RENDER_Q3_OBJECTS,
-	"render_q3_draws": FrameStatsBoard.RENDER_Q3_DRAWS,
-	"render_slot_objects": FrameStatsBoard.RENDER_SLOT_OBJECTS,
-	"render_slot_viewports": FrameStatsBoard.RENDER_SLOT_VIEWPORTS,
+	"nodes_freed": FrameStats.FRAME_NODES_FREED,
+	"nodes_added": FrameStats.FRAME_NODES_ADDED,
+	"render_main_objects": FrameStats.RENDER_MAIN_OBJECTS,
+	"render_main_draws": FrameStats.RENDER_MAIN_DRAWS,
+	"render_water_objects": FrameStats.RENDER_WATER_OBJECTS,
+	"render_q3_objects": FrameStats.RENDER_Q3_OBJECTS,
+	"render_q3_draws": FrameStats.RENDER_Q3_DRAWS,
+	"render_slot_objects": FrameStats.RENDER_SLOT_OBJECTS,
+	"render_slot_viewports": FrameStats.RENDER_SLOT_VIEWPORTS,
 }
 const COUNTER_KEYS := [
 	"plan_rebuilds",
@@ -119,33 +119,12 @@ const COUNTER_KEYS := [
 	"hidden",
 ]
 
-# The probe's process_frame continuation runs BEFORE the frame's _process
-# callbacks, and MessageQueue is flushed once right after that signal: a
-# window rendered there would repaint the Tree in the pacing span, not the
-# deferred flush a player's timer-driven refresh lands in. This node renders
-# the armed window from _process, where the in-game refresh runs.
-class OverlayRenderDriver:
-	extends Node
-
-	var probe: SceneTree = null
-	var armed := false
-
-	func _process(_delta: float) -> void:
-		if armed:
-			armed = false
-			probe.call("_render_overlay_window")
-
-
 var _mount_guard = MountGuard.new()
 var _requested_exit_code := 1
-var _overlay_driver: OverlayRenderDriver = null
-var _board: FrameStatsBoard = null
-# Overlay mode: the Stats page the probe renders from its own drains. Untyped
-# on purpose: a static DebugStatsPage reference would compile the game-world
-# script chain (its autoload references) before -s mode registers autoloads.
-var _overlay_pane = null
-var _overlay = null  # the DebugOverlay whose sentinel bracket renders the window
-var _overlay_world = null
+var _board: FrameStats = null
+# Overlay mode: the dev tools whose Stats window the probe feeds from its own
+# drains (null = the tools stay closed).
+var _dev_tools: DevTools = null
 var _overlay_sums := PackedInt64Array()
 var _overlay_peaks := PackedInt64Array()
 var _overlay_counts := PackedInt32Array()
@@ -160,10 +139,8 @@ var _count_samples: Dictionary = {}
 func _initialize() -> void:
 	_slot_samples = ENGINE_SLOT_SAMPLES.duplicate()
 	_count_samples = ENGINE_COUNT_SAMPLES.duplicate()
-	var constants: Dictionary = (load("res://game/debug/frame_stats_board.gd")
-			as GDScript).get_script_constant_map()
-	for slot_name in constants:
-		var name := String(slot_name)
+	for slot in range(FrameStats.SLOT_COUNT):
+		var name := FrameStats.slot_name(slot)
 		var prefixed := false
 		for prefix in WORLD_SLOT_PREFIXES:
 			if name.begins_with(prefix):
@@ -172,9 +149,9 @@ func _initialize() -> void:
 		if not prefixed:
 			continue
 		if WORLD_VALUE_SLOTS.has(name):
-			_count_samples[name.to_lower()] = int(constants[slot_name])
+			_count_samples[name.to_lower()] = slot
 		else:
-			_slot_samples[name.to_lower()] = int(constants[slot_name])
+			_slot_samples[name.to_lower()] = slot
 	call_deferred("_run")
 
 
@@ -238,31 +215,24 @@ func _run() -> void:
 		push_error("[mrp] loaded world has no mission-present stats seam")
 		_finish(1)
 		return
-	_board = game.get_frame_stats_board()
+	_board = game.get_frame_stats()
 	if _board == null:
-		push_error("[mrp] main game has no FrameStatsBoard")
+		push_error("[mrp] main game has no FrameStats")
 		_finish(1)
 		return
 	var show_overlay := _env_flag("NW_MISSION_ROWS_PERF_SHOW_OVERLAY")
 	if show_overlay:
-		# The reading condition: F3 open on the Stats page. Its refresh drains
-		# the board at its own cadence, which costs this probe at most one
-		# frame's sample every half second.
-		game.toggle_debug_overlay()
-		var overlay = game.get_debug_overlay()
-		if overlay == null or not overlay.select_page(&"Stats"):
-			push_error("[mrp] could not open the F3 overlay on the Stats page")
+		# The reading condition: the dev tools open with their Stats window. The
+		# probe's own drains starve the window's refresh, so it is fed below.
+		var dev_tools: DevTools = game.get_dev_tools()
+		if dev_tools == null or not dev_tools.is_available():
+			push_error("[mrp] the dev tools are unavailable (headless, or the imgui-godot addon is missing)")
 			_finish(1)
 			return
-		_overlay_pane = overlay.get_page(&"Stats")
-		_overlay = overlay
-		_overlay_world = world
-		_overlay_driver = OverlayRenderDriver.new()
-		_overlay_driver.name = "OverlayRenderDriver"
-		_overlay_driver.probe = self
-		root.add_child(_overlay_driver)
+		dev_tools.set_open(true)
+		_dev_tools = dev_tools
 		_reset_overlay_window()
-		print("[mrp] F3 overlay open on the Stats page for the whole run")
+		print("[mrp] dev tools open with the Stats window for the whole run")
 
 	var warmup_seconds := _env_float(
 			"NW_MISSION_ROWS_PERF_WARMUP_SECONDS",
@@ -352,7 +322,7 @@ func _run() -> void:
 			"window_seconds": window_seconds,
 			"window_count": window_count,
 			"overlay_visible": show_overlay,
-			"capture": "FrameStatsBoard drained once per process frame",
+			"capture": "FrameStats drained once per process frame",
 			"units": "raw samples are integer microseconds; summaries are milliseconds",
 		},
 		"environment": {
@@ -396,22 +366,22 @@ func _env_flag(name: String) -> bool:
 
 
 func _reset_overlay_window() -> void:
-	_overlay_sums.resize(FrameStatsBoard.SLOT_COUNT)
+	_overlay_sums.resize(FrameStats.SLOT_COUNT)
 	_overlay_sums.fill(0)
-	_overlay_peaks.resize(FrameStatsBoard.SLOT_COUNT)
+	_overlay_peaks.resize(FrameStats.SLOT_COUNT)
 	_overlay_peaks.fill(0)
-	_overlay_counts.resize(FrameStatsBoard.SLOT_COUNT)
+	_overlay_counts.resize(FrameStats.SLOT_COUNT)
 	_overlay_counts.fill(0)
 	_overlay_frames = 0
 	_overlay_drains = 0
 
 
-# Overlay mode: fold every drain into the page's window and render it at the
-# page's cadence, so the observer's Tree work lands in the flush as in-game.
-func _feed_overlay(captured: FrameStatsBoard.CaptureWindow) -> void:
-	if _overlay_pane == null:
+# Overlay mode: fold every drain into the window's reading and hand it over at
+# the window's cadence, so the ImGui layout cost lands in the frame as in-game.
+func _feed_overlay(captured: FrameStatsWindow) -> void:
+	if _dev_tools == null:
 		return
-	for slot in range(FrameStatsBoard.SLOT_COUNT):
+	for slot in range(FrameStats.SLOT_COUNT):
 		_overlay_sums[slot] += captured.sums[slot]
 		_overlay_peaks[slot] = maxi(_overlay_peaks[slot], captured.peaks[slot])
 		_overlay_counts[slot] += captured.sample_frames[slot]
@@ -419,16 +389,8 @@ func _feed_overlay(captured: FrameStatsBoard.CaptureWindow) -> void:
 	_overlay_drains += 1
 	if _overlay_drains < OVERLAY_RENDER_FRAMES or _overlay_frames <= 0:
 		return
-	_overlay_driver.armed = true
-
-
-func _render_overlay_window() -> void:
-	if _overlay_frames <= 0:
-		return
-	var runtime = _overlay_world.get_runtime() if _overlay_world != null else null
-	var sim = _overlay_world.get_sim() if _overlay_world != null else null
-	_overlay.render_stats_window(_overlay_frames, _overlay_sums, _overlay_peaks,
-			_overlay_counts, runtime, sim)
+	_dev_tools.feed_stats_window(_overlay_frames, _overlay_sums, _overlay_peaks,
+			_overlay_counts)
 	_reset_overlay_window()
 
 
@@ -462,19 +424,19 @@ func _measure_window(seconds: float) -> Dictionary:
 			# A summed multi-frame window cannot provide an exact percentile
 			# sample. Preserve the diagnostic count and leave it out.
 			continue
-		if captured.sample_frames[FrameStatsBoard.PRESENT_MISSION] <= 0:
+		if captured.sample_frames[FrameStats.PRESENT_MISSION] <= 0:
 			missing_mission_drains += 1
 			continue
 		(samples["mission_rows_us"] as Array).append(
-				int(captured.sums[FrameStatsBoard.PRESENT_MISSION]))
+				int(captured.sums[FrameStats.PRESENT_MISSION]))
 		(samples["present_us"] as Array).append(
 				_sum_slots(captured.sums, PRESENT_SLOTS))
-		if captured.sample_frames[FrameStatsBoard.FRAME_WORLD] > 0:
+		if captured.sample_frames[FrameStats.FRAME_WORLD] > 0:
 			(samples["world_us"] as Array).append(
-					int(captured.sums[FrameStatsBoard.FRAME_WORLD]))
-		if captured.sample_frames[FrameStatsBoard.FRAME_WALL] > 0:
+					int(captured.sums[FrameStats.FRAME_WORLD]))
+		if captured.sample_frames[FrameStats.FRAME_WALL] > 0:
 			var wall_us := int(
-					captured.sums[FrameStatsBoard.FRAME_WALL])
+					captured.sums[FrameStats.FRAME_WALL])
 			(samples["frame_us"] as Array).append(wall_us)
 			(samples["outside_shell_us"] as Array).append(maxi(
 					wall_us - _sum_slots(

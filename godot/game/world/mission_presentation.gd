@@ -55,7 +55,7 @@ var _perf_did_tick := false
 # The shared F3 frame-stats board (null outside the game shell). While its
 # Stats tab captures, the sim/net legs and each present pass land their spans
 # on it; otherwise all extra clock reads are skipped.
-var _frame_stats: FrameStatsBoard = null
+var _frame_stats: FrameStats = null
 var _runtime_probe_enabled := false
 var _has_trace_stats_sampling := false
 var _ticks_last_frame := 0           # logic ticks run by the last session frame
@@ -87,6 +87,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	_sim = options.get("simulation", null)
 	if _sim == null:
 		_sim = Simulation.new()
+	_sim.set_frame_stats(_frame_stats)
 	_has_trace_stats_sampling = _sim != null
 	_sync_runtime_profiling()
 	var mission_path := String(options.get(
@@ -477,11 +478,14 @@ func local_player_team() -> int:
 	return int(_sim.get_local_player_team()) if _sim != null else 0
 
 
-## GameWorld hands the shared FrameStatsBoard here (game shell -> GameWorld ->
-## each runtime it creates).
-func set_frame_stats_board(board: FrameStatsBoard) -> void:
+## GameWorld hands the shared FrameStats here (game shell -> GameWorld ->
+## each runtime it creates). The sim folds its native phase spans onto the
+## same board inside advance_session_frame.
+func set_frame_stats(board: FrameStats) -> void:
 	if board == _frame_stats:
 		return
+	if _sim != null:
+		_sim.set_frame_stats(board)
 	if _frame_stats != null:
 		var old_capture_changed := Callable(self, "_on_frame_stats_capture_changed")
 		if _frame_stats.capture_changed.is_connected(old_capture_changed):
@@ -610,7 +614,7 @@ func _present_entity_rows(stats_on := false) -> void:
 	var snapshot: PackedFloat32Array = _sim.get_present_snapshot()
 	if stats_on:
 		# The native buffer build the fetch above just paid for.
-		_frame_stats.add(FrameStatsBoard.PRESENT_SNAPSHOT,
+		_frame_stats.add(FrameStats.PRESENT_SNAPSHOT,
 				int(_sim.get_last_present_snapshot_us()))
 	var layout_revision := int(_sim.get_present_layout_revision())
 	if _present != null:
@@ -619,23 +623,23 @@ func _present_entity_rows(stats_on := false) -> void:
 			var profile: PackedInt64Array = _present.profile_present_snapshot(
 					snapshot, stride, layout_revision)
 			if profile.size() >= PresentApplier.MISSION_PROFILE_SLOT_COUNT:
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_CORE,
+				_frame_stats.add(FrameStats.PRESENT_MISSION_CORE,
 						profile[PresentApplier.MISSION_PROFILE_CORE_US])
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_AIM,
+				_frame_stats.add(FrameStats.PRESENT_MISSION_AIM,
 						profile[PresentApplier.MISSION_PROFILE_AIM_US])
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_CONTROLS,
+				_frame_stats.add(FrameStats.PRESENT_MISSION_CONTROLS,
 						profile[PresentApplier.MISSION_PROFILE_CONTROLS_US])
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_VISIBILITY,
+				_frame_stats.add(FrameStats.PRESENT_MISSION_VISIBILITY,
 						profile[PresentApplier.MISSION_PROFILE_VISIBILITY_US])
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_BODY,
+				_frame_stats.add(FrameStats.PRESENT_MISSION_BODY,
 						profile[PresentApplier.MISSION_PROFILE_BODY_US])
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_ROWS,
+				_frame_stats.add(FrameStats.PRESENT_MISSION_ROWS,
 						profile[PresentApplier.MISSION_PROFILE_ROWS])
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_SUBMITTED_ROWS,
+				_frame_stats.add(FrameStats.PRESENT_MISSION_SUBMITTED_ROWS,
 						profile[PresentApplier.MISSION_PROFILE_SUBMITTED_ROWS])
-				_frame_stats.add(FrameStatsBoard.PRESENT_MISSION_BODY_ROWS,
+				_frame_stats.add(FrameStats.PRESENT_MISSION_BODY_ROWS,
 						profile[PresentApplier.MISSION_PROFILE_BODY_ROWS])
-			_frame_stats.add(FrameStatsBoard.PRESENT_MISSION,
+			_frame_stats.add(FrameStats.PRESENT_MISSION,
 					Time.get_ticks_usec() - mission_start)
 		else:
 			_present.present_snapshot(snapshot, stride, layout_revision)
@@ -643,7 +647,7 @@ func _present_entity_rows(stats_on := false) -> void:
 		var wire_start := Time.get_ticks_usec() if stats_on else 0
 		_wire_present.present_snapshot(snapshot, stride, layout_revision)
 		if stats_on:
-			_frame_stats.add(FrameStatsBoard.PRESENT_WIRE,
+			_frame_stats.add(FrameStats.PRESENT_WIRE,
 					Time.get_ticks_usec() - wire_start)
 
 
@@ -657,19 +661,19 @@ func _present_frame(stats_on: bool) -> void:
 		var fire_start := Time.get_ticks_usec() if stats_on else 0
 		_fire_present.present()
 		if stats_on:
-			_frame_stats.add(FrameStatsBoard.PRESENT_FIRE,
+			_frame_stats.add(FrameStats.PRESENT_FIRE,
 					Time.get_ticks_usec() - fire_start)
 	if _destruction_present != null:
 		var destruction_start := Time.get_ticks_usec() if stats_on else 0
 		_destruction_present.present()
 		if stats_on:
-			_frame_stats.add(FrameStatsBoard.PRESENT_DESTRUCTION,
+			_frame_stats.add(FrameStats.PRESENT_DESTRUCTION,
 					Time.get_ticks_usec() - destruction_start)
 	if _throwable_present != null:
 		var throwable_start := Time.get_ticks_usec() if stats_on else 0
 		_throwable_present.present()
 		if stats_on:
-			_frame_stats.add(FrameStatsBoard.PRESENT_THROWABLE,
+			_frame_stats.add(FrameStats.PRESENT_THROWABLE,
 					Time.get_ticks_usec() - throwable_start)
 	# After the entity rows: the entity-ring meshes parent under section nodes
 	# the row passes may have just built.
@@ -677,7 +681,7 @@ func _present_frame(stats_on: bool) -> void:
 		var scar_start := Time.get_ticks_usec() if stats_on else 0
 		_scar_present.present()
 		if stats_on:
-			_frame_stats.add(FrameStatsBoard.PRESENT_SCARS,
+			_frame_stats.add(FrameStats.PRESENT_SCARS,
 					Time.get_ticks_usec() - scar_start)
 	_perf_present_us = Time.get_ticks_usec() - present_start
 
@@ -737,95 +741,11 @@ func present_frame() -> void:
 	_present_frame(_stats_capture_on())
 
 
-# Session-perf key -> FrameStatsBoard slot: the ONE mapping from the native
-# phase attribution (Simulation.get_session_perf, emitted only while the
-# native profiling clocks run) onto the board. SIM_STEP, EFFECTS_DRAIN and
-# SIM_TICKS ride the probe counters read beside it.
-const _SESSION_PERF_SLOTS := {
-	"client_decode_us": FrameStatsBoard.SIM_NET,
-	"host_prep_us": FrameStatsBoard.SIM_HOST_PREP,
-	"host_pump_us": FrameStatsBoard.SIM_HOST_PUMP,
-	"host_receive_us": FrameStatsBoard.SIM_HOST_RECEIVE,
-	"host_connections_us": FrameStatsBoard.SIM_HOST_CONNECTIONS,
-	"host_adapter_us": FrameStatsBoard.SIM_HOST_ADAPTER,
-	"server_tick_us": FrameStatsBoard.SIM_SERVER_TICK,
-	"server_input_us": FrameStatsBoard.SIM_SERVER_INPUT,
-	"server_world_us": FrameStatsBoard.SIM_SERVER_WORLD,
-	"world_setup_us": FrameStatsBoard.SIM_WORLD_SETUP,
-	"world_scripts_us": FrameStatsBoard.SIM_WORLD_SCRIPTS,
-	"world_ai_us": FrameStatsBoard.SIM_WORLD_AI,
-	"world_ai_reactions_us": FrameStatsBoard.SIM_AI_REACTIONS,
-	"world_ai_collision_tables_us": FrameStatsBoard.SIM_AI_COLLISION,
-	"world_ai_entities_us": FrameStatsBoard.SIM_AI_ENTITIES,
-	"world_ai_infantry_entities_us": FrameStatsBoard.SIM_AI_INFANTRY,
-	"world_ai_infantry_remote_us": FrameStatsBoard.SIM_AI_INFANTRY_REMOTE,
-	"world_ai_infantry_combat_us": FrameStatsBoard.SIM_AI_INFANTRY_COMBAT,
-	"world_ai_infantry_animation_us": FrameStatsBoard.SIM_AI_INFANTRY_ANIMATION,
-	"world_ai_infantry_collision_us": FrameStatsBoard.SIM_AI_INFANTRY_COLLISION,
-	"world_ai_infantry_collision_contacts_us":
-			FrameStatsBoard.SIM_AI_INFANTRY_COLLISION_CONTACTS,
-	"world_ai_infantry_collision_repulsion_us":
-			FrameStatsBoard.SIM_AI_INFANTRY_COLLISION_REPULSION,
-	"world_ai_infantry_collision_ground_us":
-			FrameStatsBoard.SIM_AI_INFANTRY_COLLISION_GROUND,
-	"world_ai_other_entities_us": FrameStatsBoard.SIM_AI_OTHER_ENTITIES,
-	"world_ai_authority_vehicles_us": FrameStatsBoard.SIM_AI_AUTH_VEHICLES,
-	"world_ai_vehicle_scan_us": FrameStatsBoard.SIM_AI_VEHICLE_SCAN,
-	"world_ai_vehicle_motors_us": FrameStatsBoard.SIM_AI_VEHICLE_MOTORS,
-	"world_ai_vehicle_riders_us": FrameStatsBoard.SIM_AI_VEHICLE_RIDERS,
-	"world_ai_client_vehicles_us": FrameStatsBoard.SIM_AI_CLIENT_VEHICLES,
-	"world_ai_events_us": FrameStatsBoard.SIM_AI_EVENTS,
-	"world_attachments_us": FrameStatsBoard.SIM_WORLD_ATTACHMENTS,
-	"world_attachment_orphans_us": FrameStatsBoard.SIM_ATTACHMENT_ORPHANS,
-	"world_attachment_child_pose_us": FrameStatsBoard.SIM_ATTACHMENT_CHILDREN,
-	"world_attachment_riders_us": FrameStatsBoard.SIM_ATTACHMENT_RIDERS,
-	"world_throwables_us": FrameStatsBoard.SIM_WORLD_THROWABLES,
-	"world_weapons_us": FrameStatsBoard.SIM_WORLD_WEAPONS,
-	"world_projectiles_us": FrameStatsBoard.SIM_WORLD_PROJECTILES,
-	"world_destruction_us": FrameStatsBoard.SIM_WORLD_DESTRUCTION,
-	"world_housekeeping_us": FrameStatsBoard.SIM_WORLD_HOUSEKEEPING,
-	"match_us": FrameStatsBoard.SIM_MATCH,
-	"server_rules_us": FrameStatsBoard.SIM_SERVER_RULES,
-	"server_replication_us": FrameStatsBoard.SIM_SERVER_REPLICATION,
-	"replication_query_prep_us": FrameStatsBoard.SIM_REPLICATION_QUERY_PREP,
-	"replication_query_collect_us": FrameStatsBoard.SIM_REPLICATION_QUERY_COLLECT,
-	"replication_query_grid_us": FrameStatsBoard.SIM_REPLICATION_QUERY_GRID,
-	"replication_query_grid_span_us": FrameStatsBoard.SIM_REPLICATION_QUERY_GRID_SPAN,
-	"replication_query_grid_bucket_us":
-			FrameStatsBoard.SIM_REPLICATION_QUERY_GRID_BUCKET,
-	"replication_query_grid_workspace_us":
-			FrameStatsBoard.SIM_REPLICATION_QUERY_GRID_WORKSPACE,
-	"replication_snapshot_us": FrameStatsBoard.SIM_REPLICATION_SNAPSHOT,
-	"replication_fan_us": FrameStatsBoard.SIM_REPLICATION_FAN,
-	"replication_fan_setup_us": FrameStatsBoard.SIM_REPLICATION_FAN_SETUP,
-	"replication_round_selection_us": FrameStatsBoard.SIM_REPLICATION_ROUNDS,
-	"replication_entity_selection_us": FrameStatsBoard.SIM_REPLICATION_ENTITIES,
-	"replication_entity_setup_us": FrameStatsBoard.SIM_REPLICATION_ENTITY_SETUP,
-	"replication_entity_scoring_us": FrameStatsBoard.SIM_REPLICATION_ENTITY_SCORE,
-	"replication_entity_los_us": FrameStatsBoard.SIM_REPLICATION_ENTITY_LOS,
-	"replication_entity_los_terrain_us":
-			FrameStatsBoard.SIM_REPLICATION_ENTITY_LOS_TERRAIN,
-	"replication_entity_los_sector_us":
-			FrameStatsBoard.SIM_REPLICATION_ENTITY_LOS_SECTOR,
-	"replication_entity_sort_us": FrameStatsBoard.SIM_REPLICATION_ENTITY_SORT,
-	"replication_entity_budget_us": FrameStatsBoard.SIM_REPLICATION_ENTITY_BUDGET,
-	"replication_encode_us": FrameStatsBoard.SIM_REPLICATION_ENCODE,
-	"replication_enqueue_us": FrameStatsBoard.SIM_REPLICATION_ENQUEUE,
-	"host_send_us": FrameStatsBoard.SIM_HOST_SEND,
-	"host_player_us": FrameStatsBoard.SIM_HOST_PLAYER,
-	"client_setup_us": FrameStatsBoard.SIM_CLIENT_SETUP,
-	"client_receive_us": FrameStatsBoard.SIM_CLIENT_RECEIVE,
-	"client_maintenance_us": FrameStatsBoard.SIM_CLIENT_MAINTENANCE,
-	"client_send_us": FrameStatsBoard.SIM_CLIENT_SEND,
-	"adm_resolve_us": FrameStatsBoard.SIM_ADM_RESOLVE,
-	"sink_us": FrameStatsBoard.SIM_SINK,
-}
-
-
 # Pull the frame's tick accounting into the probe counters from the typed
-# outcome, and — only while the native profiling clocks run — the session
-# phase spans onto the stats board (the per-pass present spans land inside
-# the present legs themselves).
+# outcome. The session phase spans (SIM_STEP and the SIM_* attribution) land
+# on the board natively inside Simulation.advance_session_frame while the
+# profiling clocks run; only the shell-measured legs are fed here (the
+# per-pass present spans land inside the present legs themselves).
 func _read_frame_perf(outcome: MissionFrameOutcome) -> void:
 	_ticks_last_frame = outcome.get_ticks_run() if outcome != null else 0
 	_perf_did_tick = _ticks_last_frame > 0
@@ -833,14 +753,10 @@ func _read_frame_perf(outcome: MissionFrameOutcome) -> void:
 	_perf_sim_us = 0
 	if not _sim.is_runtime_profiling_enabled():
 		return
-	var perf: Dictionary = _sim.get_session_perf()
-	_perf_sim_us = int(perf.get("sim_us", 0))
+	_perf_sim_us = int(_sim.get_last_session_sim_us())
 	if _ticks_last_frame > 0 and _stats_capture_on():
-		_frame_stats.add(FrameStatsBoard.SIM_STEP, _perf_sim_us)
-		for key: String in _SESSION_PERF_SLOTS:
-			_frame_stats.add(_SESSION_PERF_SLOTS[key], int(perf.get(key, 0)))
-		_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, _perf_effects_us)
-		_frame_stats.add(FrameStatsBoard.SIM_TICKS, _ticks_last_frame)
+		_frame_stats.add(FrameStats.EFFECTS_DRAIN, _perf_effects_us)
+		_frame_stats.add(FrameStats.SIM_TICKS, _ticks_last_frame)
 
 
 func _feed_projectile_trace_stats() -> void:
@@ -855,24 +771,24 @@ func _feed_projectile_trace_stats() -> void:
 		return
 	var times: Vector4i = _sim.get_last_projectile_trace_times_us()
 	var faces: Vector2i = _sim.get_last_projectile_trace_faces()
-	_frame_stats.add(FrameStatsBoard.TRACE_TERRAIN,
+	_frame_stats.add(FrameStats.TRACE_TERRAIN,
 			times.x)
-	_frame_stats.add(FrameStatsBoard.TRACE_STATIC,
+	_frame_stats.add(FrameStats.TRACE_STATIC,
 			times.y)
-	_frame_stats.add(FrameStatsBoard.TRACE_DYNAMIC,
+	_frame_stats.add(FrameStats.TRACE_DYNAMIC,
 			times.z)
-	_frame_stats.add(FrameStatsBoard.TRACE_PERSON,
+	_frame_stats.add(FrameStats.TRACE_PERSON,
 			times.w)
-	_frame_stats.add(FrameStatsBoard.TRACE_CALLS, counts.x)
-	_frame_stats.add(FrameStatsBoard.TRACE_STATIC_SURVIVORS,
+	_frame_stats.add(FrameStats.TRACE_CALLS, counts.x)
+	_frame_stats.add(FrameStats.TRACE_STATIC_SURVIVORS,
 			counts.y)
-	_frame_stats.add(FrameStatsBoard.TRACE_DYNAMIC_SURVIVORS,
+	_frame_stats.add(FrameStats.TRACE_DYNAMIC_SURVIVORS,
 			counts.z)
-	_frame_stats.add(FrameStatsBoard.TRACE_PERSON_SURVIVORS,
+	_frame_stats.add(FrameStats.TRACE_PERSON_SURVIVORS,
 			counts.w)
-	_frame_stats.add(FrameStatsBoard.TRACE_STATIC_FACES,
+	_frame_stats.add(FrameStats.TRACE_STATIC_FACES,
 			faces.x)
-	_frame_stats.add(FrameStatsBoard.TRACE_DYNAMIC_FACES,
+	_frame_stats.add(FrameStats.TRACE_DYNAMIC_FACES,
 			faces.y)
 
 
