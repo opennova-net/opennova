@@ -74,7 +74,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 
 - `terrain/tmap` — `tests/fixtures/minimal_terrain_gen.cpp` (the second map beside
   `assets/mnml`).
-- `fnt/synth_*.fnt`, `cbin/credits_image.png` — `tests/fixtures/minimal_fnt_gen.cpp`,
-  `minimal_cbin_gen.cpp`.
+- `fnt/synth_*.fnt`, `cbin/credits_image.png`, `cbin/particle_dot.tga` —
+  `tests/fixtures/minimal_fnt_gen.cpp`, `minimal_cbin_gen.cpp` (the .tga is the
+  sprite the effect-world test's synthetic particle file names).
+- `env/cloud01.pcx`, `env/cloud01b.pcx` — `tests/fixtures/minimal_env_gen.cpp`: the
+  two sky maps `env/full_00.env` names (the bright square-rooted cloud field and the
+  modulation layer centered at 128), 64x64 indexed PCX by our writer.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
 - `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.

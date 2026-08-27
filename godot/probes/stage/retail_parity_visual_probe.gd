@@ -1,25 +1,24 @@
-extends Node3D
+extends GameProbe
 
-## Reproducible visual evidence for the D-HUD-11 / D-ITEM-16 / D-ITEM-17
-## closure. Each mode consumes the same public runtime/presentation seam as the
-## game, then annotates the result so non-pixel gameplay rules remain legible.
-## The debris/glass stages are deterministic probe fixtures, not retail mission
-## captures; their particle families are loaded from the mounted retail catalog.
-##
-## NOVA_PARITY_PROBE_MODE=attach|debris|glass
-## NOVA_PARITY_PROBE_DIR=<output dir>
-## NOVA_RESOURCE_DIR=<retail root> (debris/glass)
-##   "$GODOT_BIN" --path godot res://tests/retail_parity_visual_probe.tscn
+## retail_parity_visual: reproducible visual evidence for the D-HUD-11 /
+## D-ITEM-16 / D-ITEM-17 closure. Each mode consumes the same public
+## runtime/presentation seam as the game on a probe stage, then annotates the
+## result so non-pixel gameplay rules remain legible. The debris/glass stages
+## are deterministic probe fixtures, not retail mission captures; their
+## particle families are loaded from the mounted catalog (the launch's root).
+## Modes: attach (the attach-label gate), debris (collision-triangle section
+## debris), glass (glass userpoint shatter). Needs a window.
 
 const DestructionPresentPass := preload(
 		"res://game/world/destruction_present_pass.gd")
-const MODE_ENV := "NOVA_PARITY_PROBE_MODE"
-const OUTPUT_ENV := "NOVA_PARITY_PROBE_DIR"
-const RESOURCE_ENV := "NOVA_RESOURCE_DIR"
-const EXPANSION_ENV := "NOVA_EXPANSION"
+const STAGE_SIZE := Vector2i(960, 540)
 const TICK_DT := 1.0 / 62.5
 
+var _ctx: ProbeContext
+var _stage: ProbeStage
+var _scene: Node3D
 var _fx: EffectWorld
+var _failure := ""
 
 
 class AttachDiagram:
@@ -56,54 +55,50 @@ class AttachDiagram:
 					Color("e9f8ff"))
 
 
-func _ready() -> void:
-	DisplayServer.window_set_size(Vector2i(960, 540))
-	var mode := OS.get_environment(MODE_ENV).strip_edges().to_lower()
-	var output_dir := OS.get_environment(OUTPUT_ENV).strip_edges()
-	if output_dir.is_empty():
-		_fail("%s is required" % OUTPUT_ENV)
-		return
-	DirAccess.make_dir_recursive_absolute(output_dir)
+func run(ctx: ProbeContext) -> ProbeVerdict:
+	_ctx = ctx
+	var mode := String(ctx.args.get("mode", "")).strip_edges().to_lower()
+	var output_dir := ProbeOutput.resolve(ctx, String(ctx.args.get("output_dir", "")))
+	_stage = ProbeStage.create(ctx, STAGE_SIZE, ctx.viewport())
+	_scene = Node3D.new()
+	_stage.add_scene(_scene)
+	var built := false
 	match mode:
 		"attach":
-			if not _build_attach_stage():
-				return
+			built = _build_attach_stage()
 		"debris":
-			if not _build_debris_stage():
-				return
+			built = _build_debris_stage()
 		"glass":
-			if not _build_glass_stage():
-				return
+			built = _build_glass_stage()
 		_:
-			_fail("unknown %s=%s" % [MODE_ENV, mode])
-			return
+			return ProbeVerdict.failed("unknown mode %s" % mode)
+	if not built:
+		return ProbeVerdict.failed(_failure)
 
 	await _settle_frames(8)
 	if _fx != null:
 		for _tick in range(10):
 			_fx.advance_fixed_tick(TICK_DT)
 			_fx.render_frame()
-			await get_tree().process_frame
+			await ctx.tree.process_frame
 	var image := await _capture_image()
 	var file_path := output_dir.path_join("capture.png")
 	if image == null or image.save_png(file_path) != OK:
-		_fail("could not save %s" % file_path)
-		return
-	print("[retail-parity-visual] PASS mode=%s file=%s" % [mode, file_path])
-	get_tree().quit(0)
+		return ProbeVerdict.failed("could not save %s" % file_path)
+	ctx.artifact("capture", file_path, "png")
+	ctx.log("[retail-parity-visual] PASS mode=%s file=%s" % [mode, file_path])
+	return ProbeVerdict.passed("mode %s captured" % mode, {"mode": mode, "file": file_path})
 
 
 func _build_attach_stage() -> bool:
 	var md := MissionData.new()
 	if md.create_default() != OK:
-		_fail("could not create attach mission")
-		return false
+		return _fail("could not create attach mission")
 	if md.add_entity(MissionData.KIND_ITEM, 101294,
 			Vector3(10, 0, 0), Vector3.ZERO).is_empty() \
 			or md.add_entity(MissionData.KIND_ITEM, 101294,
 			Vector3(14, 0, 0), Vector3.ZERO).is_empty():
-		_fail("could not add attach candidates")
-		return false
+		return _fail("could not add attach candidates")
 
 	var fixture_dir := OS.get_cache_dir().path_join(
 			"attach_visual_%d" % Time.get_ticks_usec())
@@ -122,21 +117,18 @@ end
 		return false
 	var item_db := ItemDatabase.new()
 	if item_db.load(fixture_dir.path_join("items.def")) != OK:
-		_fail("could not load attach items.def")
-		return false
+		return _fail("could not load attach items.def")
 	var root := ResourceRoot.new()
 	if root.set_root_dir(fixture_dir) != OK:
-		_fail("could not mount attach fixture")
-		return false
+		return _fail("could not mount attach fixture")
 	var sim := Simulation.new()
 	sim.set_asset_root(root)
 	if not sim.install_seat_specs_for_type_ids(item_db,
 			PackedInt32Array([1294])) \
 			or not sim.load_from_mission_data(md) \
 			or not sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1):
-		_fail("could not start attach simulation")
 		sim.free()
-		return false
+		return _fail("could not start attach simulation")
 	sim.set_local_player_weapon({
 		"name": "WPN_LABEL_SCOPE",
 		"actions": [
@@ -151,9 +143,8 @@ end
 	sim.step()
 	var blocked: Array = sim.get_attach_labels()
 	if not sim.request_local_player_scope_toggle():
-		_fail("could not raise attach probe scope")
 		sim.free()
-		return false
+		return _fail("could not raise attach probe scope")
 	for _tick in range(16):
 		sim.step()
 	var aimed: Array = sim.get_attach_labels()
@@ -161,9 +152,8 @@ end
 	var third_person: Array = sim.get_attach_labels()
 	sim.free()
 	if blocked.size() != 2 or aimed.size() != 1 or third_person.size() != 2:
-		_fail("unexpected attach counts %s/%s/%s" % [
+		return _fail("unexpected attach counts %s/%s/%s" % [
 				blocked.size(), aimed.size(), third_person.size()])
-		return false
 
 	_add_flat_background(Color("07111d"))
 	_add_screen_title("D-HUD-11  •  ATTACH LABELS SHARE Player_CanFireWeapon",
@@ -181,20 +171,20 @@ end
 		var origin := Vector2(24.0 + index * 304.0, 112.0)
 		var title := _label(String(state["title"]), origin, 18,
 				state["accent"] as Color)
-		add_child(title)
+		_scene.add_child(title)
 		var detail := _label(String(state["detail"]), origin + Vector2(0, 27),
 				13, Color("a9bad0"))
-		add_child(detail)
+		_scene.add_child(detail)
 		var diagram := AttachDiagram.new()
 		diagram.position = origin + Vector2(0, 58)
 		diagram.size = Vector2(280, 274)
 		diagram.labels = state["labels"]
 		diagram.accent = state["accent"]
-		add_child(diagram)
+		_scene.add_child(diagram)
 	var footer := _label(
 			"PASS  •  counts 2 → 1 → 2  •  promoted scope is frame-stable; camera mode is live",
 			Vector2(24, 490), 15, Color("dce8f3"))
-	add_child(footer)
+	_scene.add_child(footer)
 	return true
 
 
@@ -211,6 +201,7 @@ func _build_debris_stage() -> bool:
 	var effects: Array = []
 	for index in range(18):
 		var column := index % 6
+		@warning_ignore("integer_division")
 		var row := index / 6
 		var point := Vector3(-5.35 + column * 2.13,
 				0.85 + row * 1.33, -2.48)
@@ -274,20 +265,15 @@ func _build_glass_stage() -> bool:
 
 
 func _build_particle_stage(title: String, subtitle: String, accent: Color) -> bool:
-	var resource_dir := OS.get_environment(RESOURCE_ENV).strip_edges()
-	var expansion := OS.get_environment(EXPANSION_ENV).strip_edges()
-	var root := ResourceRoot.new()
-	if resource_dir.is_empty() \
-			or root.mount_runtime(resource_dir, expansion, false, "jo") != OK:
-		_fail("could not mount %s=%s" % [RESOURCE_ENV, resource_dir])
-		return false
+	var root := _ctx.resource_root()
+	if root == null:
+		return _fail("the shell has no mounted resource root")
 	_build_world_environment()
 	_fx = EffectWorld.new()
 	_fx.name = "RetailEffectWorld"
-	add_child(_fx)
+	_scene.add_child(_fx)
 	if _fx.load_from_resource_root(root) <= 0:
-		_fail("retail particle catalog mounted no effects")
-		return false
+		return _fail("the mounted particle catalog carries no effects")
 	_add_screen_title(title, subtitle, accent)
 	return true
 
@@ -302,19 +288,19 @@ func _build_world_environment() -> void:
 	environment.ambient_light_energy = 0.58
 	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	world_environment.environment = environment
-	add_child(world_environment)
+	_scene.add_child(world_environment)
 	var camera := Camera3D.new()
 	camera.position = Vector3(0.0, 5.2, 12.8)
 	camera.fov = 48.0
 	camera.current = true
-	add_child(camera)
+	_scene.add_child(camera)
 	camera.look_at(Vector3(0.0, 2.25, -2.0), Vector3.UP)
 	var key := DirectionalLight3D.new()
 	key.light_color = Color("ddecff")
 	key.light_energy = 1.4
 	key.shadow_enabled = true
 	key.rotation_degrees = Vector3(-48.0, -24.0, 0.0)
-	add_child(key)
+	_scene.add_child(key)
 	_add_box("Floor", Vector3(20.0, 0.18, 15.0),
 			Vector3(0.0, -0.12, -0.2), Color("1e2a36"), 0.95, 0.04)
 
@@ -342,7 +328,7 @@ func _add_triangle_grid() -> void:
 	var lines := MeshInstance3D.new()
 	lines.mesh = mesh
 	lines.material_override = _unshaded_material(Color("718398"))
-	add_child(lines)
+	_scene.add_child(lines)
 
 
 func _add_window_frame(center: Vector3, shattered: bool) -> void:
@@ -365,6 +351,7 @@ func _add_window_frame(center: Vector3, shattered: bool) -> void:
 		mesh.size = Vector3(0.18 + (index % 3) * 0.08,
 				0.08 + (index % 2) * 0.07, 0.035)
 		fragment.mesh = mesh
+		@warning_ignore("integer_division")
 		fragment.position = center + Vector3(
 				-1.0 + (index % 5) * 0.48,
 				-1.0 + (index / 5) * 0.52,
@@ -372,7 +359,7 @@ func _add_window_frame(center: Vector3, shattered: bool) -> void:
 		fragment.rotation_degrees = Vector3(index * 13.0, index * 17.0,
 				index * 29.0)
 		fragment.material_override = _unshaded_material(Color("83e7ff"))
-		add_child(fragment)
+		_scene.add_child(fragment)
 
 
 func _add_legend(rows: Array, footer_text: String) -> void:
@@ -380,7 +367,7 @@ func _add_legend(rows: Array, footer_text: String) -> void:
 	panel.position = Vector2(22, 356)
 	panel.size = Vector2(916, 158)
 	panel.color = Color(0.025, 0.045, 0.072, 0.91)
-	add_child(panel)
+	_scene.add_child(panel)
 	for index in range(rows.size()):
 		var row: Dictionary = rows[index]
 		var swatch := ColorRect.new()
@@ -401,7 +388,7 @@ func _add_screen_title(title: String, subtitle: String, accent: Color) -> void:
 	panel.position = Vector2(18, 16)
 	panel.size = Vector2(924, 78)
 	panel.color = Color(0.025, 0.045, 0.072, 0.92)
-	add_child(panel)
+	_scene.add_child(panel)
 	var title_label := _label(title, Vector2(20, 12), 22, accent)
 	panel.add_child(title_label)
 	var subtitle_label := _label(subtitle, Vector2(20, 45), 14,
@@ -412,9 +399,9 @@ func _add_screen_title(title: String, subtitle: String, accent: Color) -> void:
 func _add_flat_background(color: Color) -> void:
 	var background := ColorRect.new()
 	background.position = Vector2.ZERO
-	background.size = Vector2(960, 540)
+	background.size = Vector2(STAGE_SIZE)
 	background.color = color
-	add_child(background)
+	_scene.add_child(background)
 
 
 func _label(text: String, pos: Vector2, font_size: int, color: Color) -> Label:
@@ -442,7 +429,7 @@ func _add_box(node_name: String, box_size: Vector3, pos: Vector3,
 	if transparent:
 		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	instance.material_override = material
-	add_child(instance)
+	_scene.add_child(instance)
 
 
 func _add_centroid_marker(pos: Vector3, color: Color) -> void:
@@ -453,7 +440,7 @@ func _add_centroid_marker(pos: Vector3, color: Color) -> void:
 	marker.mesh = sphere
 	marker.position = pos + Vector3(0, 0, 0.09)
 	marker.material_override = _unshaded_material(color)
-	add_child(marker)
+	_scene.add_child(marker)
 
 
 func _add_direction_line(from: Vector3, to: Vector3, color: Color) -> void:
@@ -465,7 +452,7 @@ func _add_direction_line(from: Vector3, to: Vector3, color: Color) -> void:
 	var line := MeshInstance3D.new()
 	line.mesh = mesh
 	line.material_override = _unshaded_material(color)
-	add_child(line)
+	_scene.add_child(line)
 
 
 func _add_marker(pos: Vector3, color: Color, text: String, radius: float) -> void:
@@ -478,7 +465,7 @@ func _add_marker(pos: Vector3, color: Color, text: String, radius: float) -> voi
 	ring.mesh = torus
 	ring.position = pos
 	ring.material_override = _unshaded_material(color)
-	add_child(ring)
+	_scene.add_child(ring)
 	var marker_label := Label3D.new()
 	marker_label.text = text
 	marker_label.position = pos + Vector3(0, radius + 0.55, 0)
@@ -487,7 +474,7 @@ func _add_marker(pos: Vector3, color: Color, text: String, radius: float) -> voi
 	marker_label.modulate = color.lightened(0.25)
 	marker_label.outline_size = 7
 	marker_label.no_depth_test = true
-	add_child(marker_label)
+	_scene.add_child(marker_label)
 
 
 func _unshaded_material(color: Color) -> StandardMaterial3D:
@@ -503,8 +490,7 @@ func _unshaded_material(color: Color) -> StandardMaterial3D:
 func _write_bytes(path: String, bytes: PackedByteArray) -> bool:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
-		_fail("could not write %s" % path)
-		return false
+		return _fail("could not write %s" % path)
 	file.store_buffer(bytes)
 	file.close()
 	return true
@@ -513,8 +499,7 @@ func _write_bytes(path: String, bytes: PackedByteArray) -> bool:
 func _write_text(path: String, text: String) -> bool:
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
-		_fail("could not write %s" % path)
-		return false
+		return _fail("could not write %s" % path)
 	file.store_string(text)
 	file.close()
 	return true
@@ -524,19 +509,17 @@ func _settle_frames(count: int) -> void:
 	for _index in range(count):
 		if _fx != null:
 			_fx.render_frame()
-		else:
-			RenderingServer.force_sync()
-		await get_tree().process_frame
+		await _ctx.tree.process_frame
 
 
 func _capture_image() -> Image:
 	if _fx != null:
 		_fx.render_frame()
-	await get_tree().process_frame
-	await RenderingServer.frame_post_draw
-	return get_viewport().get_texture().get_image()
+	await _ctx.tree.process_frame
+	return await _stage.capture_image(_ctx.tree)
 
 
-func _fail(message: String) -> void:
-	push_error("[retail-parity-visual] %s" % message)
-	get_tree().quit(1)
+func _fail(message: String) -> bool:
+	_failure = message
+	_ctx.log("[retail-parity-visual] %s" % message)
+	return false

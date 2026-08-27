@@ -588,7 +588,7 @@ claim or divergence.
   shared `Texture2DArray` ownership, valid ready-layer/page bounds, and a
   cross-frame LOD regression proving retained fine pages cannot override the
   current terrain frame's coarser selection.
-- `foliage_black_flicker_regression_probe.gd`: real rasterized destination-color
+- the `foliage_flicker_regression` probe: real rasterized destination-color
   preservation, strict alpha acceptance/rejection, retained late-consumer
   depth, screenshot-shaped exact-black-component detection, and fixed-input
   frame stability for both tiers.

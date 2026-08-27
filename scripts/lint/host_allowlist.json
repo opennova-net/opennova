@@ -227,7 +227,7 @@
     "godot/game/debug/debug_session.gd|session host",
     "godot/game/world/game_world.gd|host sent an incomplete",
     "godot/game/world/game_world.gd|parse host S2C 0x45",
-    "loading_screen_probe.gd|OPENNOVA HOST",
+    "loading_screen_stage_probe.gd|OPENNOVA HOST",
     "main_game_test.gd|SP/host/join",
     "mcp_test_client.gd|Host: 127",
     "mission_presentation.gd|co-op host",

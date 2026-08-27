@@ -1,19 +1,15 @@
-extends SceneTree
+extends GameProbe
 
-# Renderer-facing regression loop for the reported foliage failure:
-# near/detail foliage must not render black, and a fixed camera/fixed wind must
-# produce identical pixels across consecutive dispatcher submissions.
-#
-# This is deliberately a probe rather than a GUT test: the assertions consume
-# real rasterized viewport bytes and therefore require a non-headless renderer.
-# The fixture is asset-free but exercises FoliageDispatcher, its retail
-# one-frame detail cache, generated ArrayMeshes, draw pools, ShaderMaterials,
-# and the production foliage detail and MODEL shaders.
-#
-# Run:
-#   Godot_v4.6.1-stable_win64_console.exe --path godot \
-#     --rendering-method gl_compatibility \
-#     -s res://tests/foliage_black_flicker_regression_probe.gd -- <out_dir>
+## foliage_flicker_regression: the renderer-facing regression loop for the
+## reported foliage failure: near/detail foliage must not render black, and a
+## fixed camera/fixed wind must produce identical pixels across consecutive
+## dispatcher submissions. The assertions consume real rasterized viewport
+## bytes (a probe, not a GUT test). The fixture is asset-free but exercises
+## FoliageDispatcher, its retail one-frame detail cache, generated
+## ArrayMeshes, draw pools, ShaderMaterials, and the production foliage
+## detail and MODEL shaders, each on its own probe stage. Needs a window;
+## run it on gl_compatibility as well as Forward+ (both renderers own the
+## symptom).
 
 const VIEWPORT_SIZE := Vector2i(320, 240)
 const BACKGROUND := Color(0.07, 0.09, 0.13, 1.0)
@@ -26,87 +22,74 @@ const MAX_EXACT_BLACK_COMPONENT := 64
 const MODEL_CONTRACT_DELTA := 2
 const MIN_MODEL_CONTRACT_PIXELS := 1000
 const MODEL_ALPHA_REF := 128.0 / 255.0
+# The animated/environment inputs pinned for the run (restored at finish):
+# any remaining pixel change is draw pool/material/cache instability, not
+# expected wind or time-of-day motion.
+const PINNED_GLOBALS := {
+	&"opennova_sky_ambient": Vector3(0.35, 0.35, 0.35),
+	&"opennova_sun_light": Vector3(0.65, 0.60, 0.55),
+	&"opennova_sun_direction": Vector3(0.0, 0.0, 1.0),
+	&"opennova_fog_color": Vector3(0.07, 0.09, 0.13),
+	&"opennova_fog_start": 1000.0,
+	&"opennova_fog_end": 2000.0,
+	&"opennova_fog_type": 1,
+}
 
+var _ctx: ProbeContext
+var _out_dir := ""
 var _foliage_index := 1
+var _report: Dictionary = {}
 
 
-func _initialize() -> void:
-	call_deferred("_run")
+func run(ctx: ProbeContext) -> ProbeVerdict:
+	_ctx = ctx
+	_out_dir = ProbeOutput.resolve(ctx, String(ctx.args.get("output_dir", "")))
+	for name in PINNED_GLOBALS:
+		var previous: Variant = RenderingServer.global_shader_parameter_get(name)
+		ctx.defer_restore(func() -> void:
+			RenderingServer.global_shader_parameter_set(name, previous))
+		RenderingServer.global_shader_parameter_set(name, PINNED_GLOBALS[name])
 
-
-func _run() -> void:
-	var args := OS.get_cmdline_user_args()
-	var out_dir := args[0] if not args.is_empty() else "C:/tmp/opennova-foliage-black-flicker"
-	DirAccess.make_dir_recursive_absolute(out_dir)
-
-	# Pin every animated/environment input. Any remaining pixel change is draw
-	# pool/material/cache instability, not expected wind or time-of-day motion.
-	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", Vector3(0.35, 0.35, 0.35))
-	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", Vector3(0.65, 0.60, 0.55))
-	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", Vector3(0.0, 0.0, 1.0))
-	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", Vector3(BACKGROUND.r, BACKGROUND.g, BACKGROUND.b))
-	RenderingServer.global_shader_parameter_set(&"opennova_fog_start", 1000.0)
-	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", 2000.0)
-	RenderingServer.global_shader_parameter_set(&"opennova_fog_type", 1)
-
-	var viewport := SubViewport.new()
-	viewport.name = "FoliageRegressionViewport"
-	viewport.size = VIEWPORT_SIZE
-	viewport.own_world_3d = true
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
-	viewport.msaa_3d = Viewport.MSAA_DISABLED
-	root.add_child(viewport)
-
-	var world_environment := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = BACKGROUND
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
-	world_environment.environment = environment
-	viewport.add_child(world_environment)
-
+	var stage := _make_stage()
 	var camera := Camera3D.new()
 	camera.fov = 58.0
 	camera.near = 0.1
 	camera.far = 160.0
-	viewport.add_child(camera)
+	stage.add_child(camera)
 	camera.global_position = Vector3(8.0, 9.0, 28.0)
 	camera.look_at(Vector3(8.0, 2.0, 7.0), Vector3.UP)
 	camera.make_current()
 
 	# Capture the exact empty-scene pixels; foliage is measured against this
 	# frame rather than assuming a renderer/color-space background byte.
-	await _wait_frames(4)
-	var background := viewport.get_texture().get_image()
+	await ctx.wait_frames(4)
+	var background := stage.get_texture().get_image()
 	if background == null or background.is_empty():
-		_fail("viewport did not produce a background image")
-		return
-	background.save_png(out_dir.path_join("background.png"))
+		return _fail("viewport did not produce a background image")
+	background.save_png(_out_dir.path_join("background.png"))
 
 	# MODEL is not an opaque black silhouette in retail. Its fixed-function
 	# stage emits black into ONE/ONE blending, preserving the destination color,
 	# while the alpha-tested fragments still write depth. Exercise all three
 	# parts on the production shader before the dispatcher fixture.
 	var contract_failures: Array[String] = []
-	var model_contract: Dictionary = await _probe_model_blend_depth_contract(out_dir)
+	var model_contract: Dictionary = await _probe_model_blend_depth_contract()
 	if not bool(model_contract.get("ok", false)):
 		contract_failures.append(String(
 			model_contract.get("failure", "MODEL blend/depth contract failed")))
 
 	# D3DCMP_GREATER rejects equality. Exercise the high-detail production
 	# shader with a solid RGBA8 alpha byte exactly equal to ALPHAREF 180.
-	var detail_alpha_contract: Dictionary = await _probe_detail_alpha_equality_contract(out_dir)
+	var detail_alpha_contract: Dictionary = await _probe_detail_alpha_equality_contract()
 	if not bool(detail_alpha_contract.get("ok", false)):
 		contract_failures.append(String(detail_alpha_contract.get(
 			"failure", "detail alpha equality contract failed")))
 	if not contract_failures.is_empty():
-		_fail("; ".join(contract_failures))
-		return
+		return _fail("; ".join(contract_failures))
 
 	var dispatcher := FoliageDispatcher.new()
 	dispatcher.name = "FoliageRegressionDispatcher"
-	viewport.add_child(dispatcher)
+	stage.add_child(dispatcher)
 
 	var definition := TerrainFoliageDef.new()
 	definition.graphic = "procedural_regression_cross"
@@ -128,20 +111,19 @@ func _run() -> void:
 	dispatcher.render_preview(camera.global_transform)
 	dispatcher.render_preview(camera.global_transform)
 	_pin_wind(dispatcher)
-	await _wait_frames(4)
+	await ctx.wait_frames(4)
 
 	var images: Array[Image] = []
 	var stats_series: Array[Dictionary] = []
 	for frame_index in range(CAPTURE_COUNT):
 		dispatcher.render_preview(camera.global_transform)
 		_pin_wind(dispatcher)
-		await _wait_frames(2)
-		var image := viewport.get_texture().get_image()
+		await ctx.wait_frames(2)
+		var image := stage.get_texture().get_image()
 		if image == null or image.is_empty():
-			_fail("capture %d did not produce an image" % frame_index)
-			return
+			return _fail("capture %d did not produce an image" % frame_index)
 		images.append(image)
-		image.save_png(out_dir.path_join("detail_%02d.png" % frame_index))
+		image.save_png(_out_dir.path_join("detail_%02d.png" % frame_index))
 		stats_series.append(dispatcher.get_frame_stats())
 
 	var foreground := _foreground_stats(background, images[0])
@@ -161,30 +143,32 @@ func _run() -> void:
 	var batches_ok := int(first_stats.get("detail_high_instances", 0)) > 0 \
 		and int(first_stats.get("silhouette_instances", 0)) == 0
 
-	print("FOLIAGE_REGRESSION detail foreground_pixels=%d mean_luma=%.3f max_luma=%.3f" % [
+	ctx.log("FOLIAGE_REGRESSION detail foreground_pixels=%d mean_luma=%.3f max_luma=%.3f" % [
 		int(foreground.pixels), float(foreground.mean_luma), float(foreground.max_luma)])
-	print("FOLIAGE_REGRESSION detail frame_diffs=", frame_diffs,
-		" worst_changed=", worst_changed, " worst_delta=", worst_delta)
-	print("FOLIAGE_REGRESSION detail first_stats=", first_stats)
-	print("FOLIAGE_REGRESSION detail verdict renderer=", renderer_ok,
-		" nonblack=", nonblack_ok, " stable=", stable_ok,
-		" detail_only=", batches_ok)
+	ctx.log("FOLIAGE_REGRESSION detail frame_diffs=%s worst_changed=%d worst_delta=%d" % [
+		str(frame_diffs), worst_changed, worst_delta])
+	ctx.log("FOLIAGE_REGRESSION detail first_stats=%s" % str(first_stats))
+	ctx.log("FOLIAGE_REGRESSION detail verdict renderer=%s nonblack=%s stable=%s detail_only=%s" % [
+		str(renderer_ok), str(nonblack_ok), str(stable_ok), str(batches_ok)])
+	_report["detail"] = {
+		"foreground": foreground,
+		"frame_diffs": frame_diffs,
+		"worst_changed": worst_changed,
+		"worst_delta": worst_delta,
+		"first_stats": first_stats,
+	}
 
 	if not renderer_ok:
-		_fail("fixture rendered too few foliage pixels (%d < %d)" % [
+		return _fail("fixture rendered too few foliage pixels (%d < %d)" % [
 			int(foreground.pixels), MIN_FOREGROUND_PIXELS])
-		return
 	if not batches_ok:
-		_fail("fixture did not isolate visible near/detail foliage")
-		return
+		return _fail("fixture did not isolate visible near/detail foliage")
 	if not nonblack_ok:
-		_fail("BLACK FOLIAGE: near/detail mean luma %.3f < %.3f" % [
+		return _fail("BLACK FOLIAGE: near/detail mean luma %.3f < %.3f" % [
 			float(foreground.mean_luma), MIN_MEAN_LUMA])
-		return
 	if not stable_ok:
-		_fail("FLICKER: fixed-input consecutive frames changed %d pixels (max delta %d)" % [
+		return _fail("FLICKER: fixed-input consecutive frames changed %d pixels (max delta %d)" % [
 			worst_changed, worst_delta])
-		return
 
 	# Screenshot forensics identifies the reported black object as the distant
 	# MODEL tier: a single exact-RGB(0,0,0) connected component. Switch the SAME
@@ -195,20 +179,19 @@ func _run() -> void:
 	dispatcher.silhouette_anchors = PackedVector3Array([silhouette_anchor])
 	dispatcher.render_frame(camera.global_transform)
 	_pin_wind(dispatcher)
-	await _wait_frames(4)
+	await ctx.wait_frames(4)
 
 	var silhouette_images: Array[Image] = []
 	var silhouette_stats_series: Array[Dictionary] = []
 	for frame_index in range(CAPTURE_COUNT):
 		dispatcher.render_frame(camera.global_transform)
 		_pin_wind(dispatcher)
-		await _wait_frames(2)
-		var image := viewport.get_texture().get_image()
+		await ctx.wait_frames(2)
+		var image := stage.get_texture().get_image()
 		if image == null or image.is_empty():
-			_fail("silhouette capture %d did not produce an image" % frame_index)
-			return
+			return _fail("silhouette capture %d did not produce an image" % frame_index)
 		silhouette_images.append(image)
-		image.save_png(out_dir.path_join("silhouette_%02d.png" % frame_index))
+		image.save_png(_out_dir.path_join("silhouette_%02d.png" % frame_index))
 		silhouette_stats_series.append(dispatcher.get_frame_stats())
 
 	var largest_black := _largest_exact_black_component(silhouette_images[0])
@@ -229,71 +212,73 @@ func _run() -> void:
 		and int(silhouette_stats.get("detail_low_instances", 0)) == 0
 	var no_black_blob_ok := largest_black <= MAX_EXACT_BLACK_COMPONENT
 	var silhouette_stable_ok := silhouette_worst_changed == 0
-	print("FOLIAGE_REGRESSION silhouette largest_exact_black_component=", largest_black,
-		" allowed=", MAX_EXACT_BLACK_COMPONENT)
-	print("FOLIAGE_REGRESSION silhouette frame_diffs=", silhouette_diffs,
-		" worst_changed=", silhouette_worst_changed,
-		" worst_delta=", silhouette_worst_delta)
-	print("FOLIAGE_REGRESSION silhouette first_stats=", silhouette_stats)
-	print("FOLIAGE_REGRESSION silhouette verdict no_black_blob=", no_black_blob_ok,
-		" stable=", silhouette_stable_ok, " silhouette_only=", silhouette_only_ok)
+	ctx.log("FOLIAGE_REGRESSION silhouette largest_exact_black_component=%d allowed=%d" % [
+		largest_black, MAX_EXACT_BLACK_COMPONENT])
+	ctx.log("FOLIAGE_REGRESSION silhouette frame_diffs=%s worst_changed=%d worst_delta=%d" % [
+		str(silhouette_diffs), silhouette_worst_changed, silhouette_worst_delta])
+	ctx.log("FOLIAGE_REGRESSION silhouette first_stats=%s" % str(silhouette_stats))
+	ctx.log("FOLIAGE_REGRESSION silhouette verdict no_black_blob=%s stable=%s silhouette_only=%s" % [
+		str(no_black_blob_ok), str(silhouette_stable_ok), str(silhouette_only_ok)])
+	_report["silhouette"] = {
+		"largest_exact_black_component": largest_black,
+		"frame_diffs": silhouette_diffs,
+		"worst_changed": silhouette_worst_changed,
+		"worst_delta": silhouette_worst_delta,
+		"first_stats": silhouette_stats,
+	}
 
 	if not silhouette_only_ok:
-		_fail("fixture did not isolate distant MODEL foliage")
-		return
+		return _fail("fixture did not isolate distant MODEL foliage")
 	if not no_black_blob_ok:
-		_fail("BLACK FOLIAGE: largest exact-black connected component %d > %d" % [
+		return _fail("BLACK FOLIAGE: largest exact-black connected component %d > %d" % [
 			largest_black, MAX_EXACT_BLACK_COMPONENT])
-		return
 	if not silhouette_stable_ok:
-		_fail("FLICKER: fixed-input silhouette frames changed %d pixels (max delta %d)" % [
+		return _fail("FLICKER: fixed-input silhouette frames changed %d pixels (max delta %d)" % [
 			silhouette_worst_changed, silhouette_worst_delta])
-		return
 
-	print("FOLIAGE_REGRESSION PASS")
-	quit(0)
+	ctx.log("FOLIAGE_REGRESSION PASS")
+	return ProbeVerdict.passed("detail and MODEL tiers render non-black and frame-stable", _report)
 
 
-func _probe_detail_alpha_equality_contract(out_dir: String) -> Dictionary:
-	var viewport := SubViewport.new()
-	viewport.name = "FoliageDetailAlphaContractViewport"
-	viewport.size = VIEWPORT_SIZE
-	viewport.own_world_3d = true
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
-	viewport.msaa_3d = Viewport.MSAA_DISABLED
-	root.add_child(viewport)
-
+## A plain 320x240 stage (its own world, no MSAA) with the pinned dark
+## environment; every leg of the probe renders on one of these.
+func _make_stage() -> ProbeStage:
+	var stage := ProbeStage.create(_ctx, VIEWPORT_SIZE)
+	stage.msaa_3d = Viewport.MSAA_DISABLED
 	var world_environment := WorldEnvironment.new()
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = BACKGROUND
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
 	world_environment.environment = environment
-	viewport.add_child(world_environment)
+	stage.add_child(world_environment)
+	return stage
 
+
+func _probe_detail_alpha_equality_contract() -> Dictionary:
+	var stage := _make_stage()
 	var camera := Camera3D.new()
 	camera.fov = 58.0
 	camera.near = 0.1
 	camera.far = 40.0
-	viewport.add_child(camera)
+	stage.add_child(camera)
 	camera.global_position = Vector3(0.0, 0.0, 10.0)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
 	camera.make_current()
 
-	await _wait_frames(4)
-	var baseline := viewport.get_texture().get_image()
+	await _ctx.wait_frames(4)
+	var baseline := stage.get_texture().get_image()
 	if baseline == null or baseline.is_empty():
-		viewport.queue_free()
+		stage.dispose()
 		return {"ok": false, "failure": "detail alpha contract viewport produced no baseline"}
-	baseline.save_png(out_dir.path_join("detail_alpha_baseline.png"))
+	baseline.save_png(_out_dir.path_join("detail_alpha_baseline.png"))
 
 	var foliage := MeshInstance3D.new()
 	foliage.name = "ProductionDetailHighPass"
 	foliage.mesh = _make_model_contract_card_mesh()
 	var production_shader: Shader = load("res://shaders/foliage_detail_high.gdshader")
 	if production_shader == null:
-		viewport.queue_free()
+		stage.dispose()
 		return {"ok": false, "failure": "could not load production high-detail shader"}
 	var production_material := ShaderMaterial.new()
 	production_material.shader = production_shader
@@ -305,31 +290,33 @@ func _probe_detail_alpha_equality_contract(out_dir: String) -> Dictionary:
 	production_material.set_shader_parameter(&"u_has_heightfield_normal", false)
 	production_material.set_shader_parameter(&"u_has_tile_overlay", false)
 	foliage.material_override = production_material
-	viewport.add_child(foliage)
+	stage.add_child(foliage)
 	foliage.set_instance_shader_parameter(&"u_fade", 1.0)
 	foliage.set_instance_shader_parameter(&"u_wind_phase", 0.0)
 
 	# One byte below the sampled alpha is a fixture-positive control.
 	foliage.set_instance_shader_parameter(&"u_alpha_ref", 179.0 / 255.0)
-	await _wait_frames(4)
-	var accepted_image := viewport.get_texture().get_image()
-	accepted_image.save_png(out_dir.path_join("detail_alpha_accepted_control.png"))
+	await _ctx.wait_frames(4)
+	var accepted_image := stage.get_texture().get_image()
+	accepted_image.save_png(_out_dir.path_join("detail_alpha_accepted_control.png"))
 	var accepted := _foreground_stats(baseline, accepted_image)
 
 	# Equality must be rejected: retail sets D3DCMP_GREATER for ref 180.
 	foliage.set_instance_shader_parameter(&"u_alpha_ref", 180.0 / 255.0)
-	await _wait_frames(4)
-	var equality_image := viewport.get_texture().get_image()
-	equality_image.save_png(out_dir.path_join("detail_alpha_equality.png"))
+	await _ctx.wait_frames(4)
+	var equality_image := stage.get_texture().get_image()
+	equality_image.save_png(_out_dir.path_join("detail_alpha_equality.png"))
 	var equality := _foreground_stats(baseline, equality_image)
 
 	var fixture_ok := int(accepted.pixels) >= MIN_MODEL_CONTRACT_PIXELS
 	var equality_rejected := int(equality.pixels) == 0
-	print("FOLIAGE_REGRESSION detail_alpha accepted_control_pixels=",
-		int(accepted.pixels), " equality_pixels=", int(equality.pixels))
-	print("FOLIAGE_REGRESSION detail_alpha verdict fixture=", fixture_ok,
-		" greater_rejects_equality=", equality_rejected)
-	viewport.queue_free()
+	_ctx.log("FOLIAGE_REGRESSION detail_alpha accepted_control_pixels=%d equality_pixels=%d" % [
+		int(accepted.pixels), int(equality.pixels)])
+	_ctx.log("FOLIAGE_REGRESSION detail_alpha verdict fixture=%s greater_rejects_equality=%s" % [
+		str(fixture_ok), str(equality_rejected)])
+	_report["detail_alpha"] = {"accepted_control_pixels": int(accepted.pixels),
+		"equality_pixels": int(equality.pixels)}
+	stage.dispose()
 
 	if not fixture_ok:
 		return {
@@ -344,29 +331,13 @@ func _probe_detail_alpha_equality_contract(out_dir: String) -> Dictionary:
 	return {"ok": true}
 
 
-func _probe_model_blend_depth_contract(out_dir: String) -> Dictionary:
-	var viewport := SubViewport.new()
-	viewport.name = "FoliageModelContractViewport"
-	viewport.size = VIEWPORT_SIZE
-	viewport.own_world_3d = true
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
-	viewport.msaa_3d = Viewport.MSAA_DISABLED
-	root.add_child(viewport)
-
-	var world_environment := WorldEnvironment.new()
-	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = BACKGROUND
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
-	world_environment.environment = environment
-	viewport.add_child(world_environment)
-
+func _probe_model_blend_depth_contract() -> Dictionary:
+	var stage := _make_stage()
 	var camera := Camera3D.new()
 	camera.fov = 58.0
 	camera.near = 0.1
 	camera.far = 40.0
-	viewport.add_child(camera)
+	stage.add_child(camera)
 	camera.global_position = Vector3(0.0, 0.0, 10.0)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
 	camera.make_current()
@@ -379,14 +350,14 @@ func _probe_model_blend_depth_contract(out_dir: String) -> Dictionary:
 	foliage.mesh = card_mesh
 	var production_shader: Shader = load("res://shaders/foliage_silhouette.gdshader")
 	if production_shader == null:
-		viewport.queue_free()
+		stage.dispose()
 		return {"ok": false, "failure": "could not load production MODEL shader"}
 	var production_material := ShaderMaterial.new()
 	production_material.shader = production_shader
 	production_material.set_shader_parameter(&"u_fd_texture", alpha_texture)
 	production_material.set_shader_parameter(&"u_has_fd_texture", true)
 	foliage.material_override = production_material
-	viewport.add_child(foliage)
+	stage.add_child(foliage)
 	foliage.set_instance_shader_parameter(&"u_alpha_ref", MODEL_ALPHA_REF)
 	foliage.set_instance_shader_parameter(&"u_wind_phase", 0.0)
 
@@ -410,7 +381,7 @@ void fragment() {
 	late_material.shader = late_shader
 	late_material.render_priority = 127
 	late_layer.material_override = late_material
-	viewport.add_child(late_layer)
+	stage.add_child(late_layer)
 
 	# Identical mesh, UVs, texture and alpha reference recover the exact
 	# accepted-fragment mask without assuming projected screen coordinates.
@@ -435,7 +406,7 @@ void fragment() {
 	oracle_material.set_shader_parameter(&"u_fd_texture", alpha_texture)
 	oracle_material.set_shader_parameter(&"u_alpha_ref", MODEL_ALPHA_REF)
 	oracle.material_override = oracle_material
-	viewport.add_child(oracle)
+	stage.add_child(oracle)
 
 	# A transparent black/no-depth control validates the fixture: the late card
 	# must show through every covered texel when MODEL contributes no Z write.
@@ -461,46 +432,46 @@ void fragment() {
 	no_depth_material.set_shader_parameter(&"u_fd_texture", alpha_texture)
 	no_depth_material.set_shader_parameter(&"u_alpha_ref", MODEL_ALPHA_REF)
 	no_depth.material_override = no_depth_material
-	viewport.add_child(no_depth)
+	stage.add_child(no_depth)
 
 	foliage.visible = false
 	late_layer.visible = false
 	oracle.visible = false
 	no_depth.visible = false
-	await _wait_frames(4)
-	var baseline := viewport.get_texture().get_image()
+	await _ctx.wait_frames(4)
+	var baseline := stage.get_texture().get_image()
 	if baseline == null or baseline.is_empty():
-		viewport.queue_free()
+		stage.dispose()
 		return {"ok": false, "failure": "MODEL contract viewport produced no baseline"}
-	baseline.save_png(out_dir.path_join("model_contract_baseline.png"))
+	baseline.save_png(_out_dir.path_join("model_contract_baseline.png"))
 
 	late_layer.visible = true
-	await _wait_frames(3)
-	var late_only := viewport.get_texture().get_image()
-	late_only.save_png(out_dir.path_join("model_contract_late_only.png"))
+	await _ctx.wait_frames(3)
+	var late_only := stage.get_texture().get_image()
+	late_only.save_png(_out_dir.path_join("model_contract_late_only.png"))
 
 	late_layer.visible = false
 	oracle.visible = true
-	await _wait_frames(3)
-	var oracle_image := viewport.get_texture().get_image()
-	oracle_image.save_png(out_dir.path_join("model_contract_oracle.png"))
+	await _ctx.wait_frames(3)
+	var oracle_image := stage.get_texture().get_image()
+	oracle_image.save_png(_out_dir.path_join("model_contract_oracle.png"))
 
 	oracle.visible = false
 	foliage.visible = true
-	await _wait_frames(3)
-	var foliage_only := viewport.get_texture().get_image()
-	foliage_only.save_png(out_dir.path_join("model_contract_foliage_only.png"))
+	await _ctx.wait_frames(3)
+	var foliage_only := stage.get_texture().get_image()
+	foliage_only.save_png(_out_dir.path_join("model_contract_foliage_only.png"))
 
 	late_layer.visible = true
-	await _wait_frames(3)
-	var combined := viewport.get_texture().get_image()
-	combined.save_png(out_dir.path_join("model_contract_combined.png"))
+	await _ctx.wait_frames(3)
+	var combined := stage.get_texture().get_image()
+	combined.save_png(_out_dir.path_join("model_contract_combined.png"))
 
 	foliage.visible = false
 	no_depth.visible = true
-	await _wait_frames(3)
-	var no_depth_combined := viewport.get_texture().get_image()
-	no_depth_combined.save_png(out_dir.path_join("model_contract_no_depth.png"))
+	await _ctx.wait_frames(3)
+	var no_depth_combined := stage.get_texture().get_image()
+	no_depth_combined.save_png(_out_dir.path_join("model_contract_no_depth.png"))
 
 	var accepted_mask := _difference_mask(baseline, oracle_image, MODEL_CONTRACT_DELTA)
 	var card_mask := _difference_mask(baseline, late_only, MODEL_CONTRACT_DELTA)
@@ -530,18 +501,19 @@ void fragment() {
 	var depth_written_ok := late_leaked_through_depth == 0
 	var alpha_reject_ok := rejected_mismatch == 0
 	var fixture_order_ok := no_depth_mismatch == 0
-	print("FOLIAGE_REGRESSION model_contract accepted_pixels=", accepted_pixels,
-		" rejected_pixels=", rejected_pixels)
-	print("FOLIAGE_REGRESSION model_contract color_changed=", color_changed,
-		" late_leaked_through_depth=", late_leaked_through_depth,
-		" rejected_mismatch=", rejected_mismatch,
-		" no_depth_mismatch=", no_depth_mismatch)
-	print("FOLIAGE_REGRESSION model_contract verdict mask=", mask_ok,
-		" one_one_color=", color_preserved_ok,
-		" alpha_test_depth=", depth_written_ok,
-		" alpha_reject=", alpha_reject_ok,
-		" fixture_order=", fixture_order_ok)
-	viewport.queue_free()
+	_ctx.log("FOLIAGE_REGRESSION model_contract accepted_pixels=%d rejected_pixels=%d" % [
+		accepted_pixels, rejected_pixels])
+	_ctx.log("FOLIAGE_REGRESSION model_contract color_changed=%d late_leaked_through_depth=%d rejected_mismatch=%d no_depth_mismatch=%d" % [
+		color_changed, late_leaked_through_depth, rejected_mismatch, no_depth_mismatch])
+	_ctx.log("FOLIAGE_REGRESSION model_contract verdict mask=%s one_one_color=%s alpha_test_depth=%s alpha_reject=%s fixture_order=%s" % [
+		str(mask_ok), str(color_preserved_ok), str(depth_written_ok),
+		str(alpha_reject_ok), str(fixture_order_ok)])
+	_report["model_contract"] = {
+		"accepted_pixels": accepted_pixels, "rejected_pixels": rejected_pixels,
+		"color_changed": color_changed, "late_leaked_through_depth": late_leaked_through_depth,
+		"rejected_mismatch": rejected_mismatch, "no_depth_mismatch": no_depth_mismatch,
+	}
+	stage.dispose()
 
 	if not mask_ok:
 		return {"ok": false, "failure": "MODEL contract fixture did not produce robust accepted/rejected masks"}
@@ -649,6 +621,7 @@ func _make_model_contract_alpha_texture() -> ImageTexture:
 	for y in range(image.get_height()):
 		for x in range(image.get_width()):
 			var alpha := 0.0
+			@warning_ignore("integer_division")
 			if x < image.get_width() / 3:
 				alpha = 1.0
 			elif x < 2 * image.get_width() / 3:
@@ -758,6 +731,7 @@ func _largest_exact_black_component(image: Image) -> int:
 			var current := queue[cursor]
 			cursor += 1
 			var cx := current % width
+			@warning_ignore("integer_division")
 			var cy := current / width
 			for dy in range(-1, 2):
 				for dx in range(-1, 2):
@@ -776,11 +750,6 @@ func _largest_exact_black_component(image: Image) -> int:
 	return largest
 
 
-func _wait_frames(count: int) -> void:
-	for _index in range(count):
-		await process_frame
-
-
-func _fail(message: String) -> void:
-	push_error("FOLIAGE_REGRESSION FAIL: " + message)
-	quit(1)
+func _fail(message: String) -> ProbeVerdict:
+	_ctx.log("FOLIAGE_REGRESSION FAIL: " + message)
+	return ProbeVerdict.failed(message, _report)

@@ -20,7 +20,7 @@ leg.
 ## Reproduce
 
 ```powershell
-$env:NOVA_PARITY_PROBE_MODE = 'attach'
-$env:NOVA_PARITY_PROBE_DIR = (Resolve-Path '.\screenshots\parity\attach-label-can-fire')
-& $env:GODOT_BIN --path godot res://tests/retail_parity_visual_probe.tscn
+python scripts/mcp/game_mcp.py launch --windowed --resource-dir $env:OPENNOVA_JO_DIR
+python scripts/mcp/game_mcp.py probe run retail_parity_visual '{"mode":"attach","output_dir":"screenshots/parity/attach-label-can-fire"}' --wait
+python scripts/mcp/game_mcp.py stop
 ```

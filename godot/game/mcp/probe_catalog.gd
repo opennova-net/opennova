@@ -9,6 +9,7 @@ extends RefCounted
 
 const PERF := "res://probes/perf/"
 const RENDER := "res://probes/render/"
+const STAGE := "res://probes/stage/"
 
 # Built once: the runner and the tool look definitions up by identity.
 static var _definitions: Array[ProbeDef] = []
@@ -124,6 +125,61 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "red progress bar (the mounted root must hold the mission; mnml.bms by default).",
 				RENDER + "loading_screen_render_probe.gd", {
 					"mission": { "type": "string", "default": "mnml.bms" },
+				}, [], true, false, 120_000),
+		ProbeDef.make("effects_visual",
+				"The environment-particle visual probe: the mounted .ptl set in a bare "
+				+ "EffectWorld on a probe stage, six representative effects spawned into a "
+				+ "dark scene, frames captured over their lifetimes with live counters.",
+				STAGE + "effects_visual_probe.gd", {
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, false, 120_000),
+		ProbeDef.make("firebarrel_visual",
+				"Effect_FireBarrelS through the game's effect layer on a probe stage at 62 Hz "
+				+ "ticks, captured at 1..4 s: the barrel flame renders orange again "
+				+ "(the case-insensitive curve-table resolve).",
+				STAGE + "firebarrel_visual_probe.gd", {
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, false, 120_000),
+		ProbeDef.make("gore_set_visual",
+				"D-PTL-24 pixels: Effect_AmHitBody at three flesh-hit anchors over a clean "
+				+ "baseline on a probe stage; passes on five authored emitters and a real "
+				+ "changed-pixel count (before/after PNGs).",
+				STAGE + "gore_set_visual_probe.gd", {
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, false, 120_000),
+		ProbeDef.make("bridge_water_shock",
+				"D-ITEM-19 evidence: the bridge/water stage before destruction, then the "
+				+ "unowned Effect_ShockWaterBrdg family at three DEAD anchors; the best of "
+				+ "four tick captures (before/after PNGs).",
+				STAGE + "bridge_water_shock_probe.gd", {
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, false, 120_000),
+		ProbeDef.make("retail_parity_visual",
+				"The D-HUD-11 / D-ITEM-16 / D-ITEM-17 annotated stages through the public "
+				+ "runtime/presentation seams: attach (the attach-label gate), debris "
+				+ "(collision-triangle section debris), glass (glass userpoint shatter).",
+				STAGE + "retail_parity_visual_probe.gd", {
+					"mode": { "type": "string", "enum": ["attach", "debris", "glass"] },
+					"output_dir": { "type": "string", "default": "" },
+				}, ["mode"], true, false, 120_000),
+		ProbeDef.make("foliage_flicker_regression",
+				"The asset-free foliage regression loop on probe stages: the MODEL "
+				+ "ONE/ONE blend + depth contract, the detail D3DCMP_GREATER alpha "
+				+ "equality, then near/detail and distant MODEL tiers through the real "
+				+ "dispatcher: non-black, frame-stable, no exact-black blob.",
+				STAGE + "foliage_flicker_regression_probe.gd", {
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, false, 300_000),
+		ProbeDef.make("loading_screen_stage",
+				"The mission loading screen on a probe stage: session_hold (the MP session "
+				+ "composite held at a fixed progress, then the SP start-mission splash) or "
+				+ "splash_capture (the splash at both blink phases and dismissed).",
+				STAGE + "loading_screen_stage_probe.gd", {
+					"mode": { "type": "string", "enum": ["session_hold", "splash_capture"],
+							"default": "session_hold" },
+					"hold_seconds": { "type": "number", "minimum": 0.0, "default": 6.0 },
+					"mission": { "type": "string", "default": "" },
+					"output_dir": { "type": "string", "default": "" },
 				}, [], true, false, 120_000),
 	]
 

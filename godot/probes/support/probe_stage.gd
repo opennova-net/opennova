@@ -10,7 +10,10 @@ extends SubViewport
 
 ## A stage of `size` under the tree root; `mirror` (the shell viewport, when
 ## given) supplies the rendering settings a window capture would have had.
-static func create(ctx: ProbeContext, size: Vector2i, mirror: Viewport = null) -> ProbeStage:
+## `interactive` lets the stage's own nodes receive events pushed with
+## push_input (a probe driving a Control's input path).
+static func create(ctx: ProbeContext, size: Vector2i, mirror: Viewport = null,
+		interactive := false) -> ProbeStage:
 	var stage := ProbeStage.new()
 	stage.name = "ProbeStage"
 	stage.size = size
@@ -22,17 +25,23 @@ static func create(ctx: ProbeContext, size: Vector2i, mirror: Viewport = null) -
 	stage.transparent_bg = false
 	stage.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	stage.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
-	stage.handle_input_locally = false
-	stage.gui_disable_input = true
+	stage.handle_input_locally = interactive
+	stage.gui_disable_input = not interactive
 	if mirror != null:
 		stage.mirror_rendering_settings(mirror)
 	ctx.tree.root.add_child(stage)
 	ctx.defer_restore(func() -> void:
 		if is_instance_valid(stage):
-			if stage.get_parent() != null:
-				stage.get_parent().remove_child(stage)
-			stage.free())
+			stage.dispose())
 	return stage
+
+
+## Free the stage now (a probe done with one of several); idempotent with
+## the restore registered at create.
+func dispose() -> void:
+	if get_parent() != null:
+		get_parent().remove_child(self)
+	free()
 
 
 ## The per-viewport rendering knobs a window carries from the project

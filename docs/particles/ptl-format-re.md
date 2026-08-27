@@ -1127,7 +1127,7 @@ witnessed by direct disassembly of the on-disk image, the IDA MCP bridge being w
   `id = table11Alt`, so green never baked (constant 255) while red/alpha faded with
   `table11Alt` — aging flame sprites tint green, unmasked when the witnessed
   MODULATE fragment replaced the invented premult RGB-by-alpha rescale. Verified by
-  before/after `firebarrel_visual_probe.gd` captures (Effect_FireBarrelS: green wisps →
+  before/after `firebarrel_visual` probe captures (Effect_FireBarrelS: green wisps →
   retail orange) and the new case-fold ctest/GUT cases.
 
 2026-07-16 session (the effect/particledef name-lookup case grill — closes the

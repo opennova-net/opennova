@@ -17,9 +17,7 @@ const PROBE_PATHS: Array[String] = [
 # Self-contained scene probes: operator-run visual scenes with their own
 # roots (no standalone-game harness). Inventoried for discoverability; the
 # lighter contract below pins readable + compiles + no dead PIE API.
-const SELF_CONTAINED_PROBES: Array[String] = [
-	"res://tests/effects_visual_probe.gd",
-]
+const SELF_CONTAINED_PROBES: Array[String] = []
 
 # Headless manual probes: extends-SceneTree scripts that boot their own
 # runtime (main_game.tscn, a mounted ResourceRoot, or a bare Simulation) and

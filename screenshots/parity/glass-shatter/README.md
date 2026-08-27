@@ -21,8 +21,7 @@ presenter test pins verbatim delivery.
 ## Reproduce
 
 ```powershell
-$env:NOVA_PARITY_PROBE_MODE = 'glass'
-$env:NOVA_PARITY_PROBE_DIR = (Resolve-Path '.\screenshots\parity\glass-shatter')
-$env:NOVA_RESOURCE_DIR = $env:OPENNOVA_JO_DIR
-& $env:GODOT_BIN --path godot res://tests/retail_parity_visual_probe.tscn
+python scripts/mcp/game_mcp.py launch --windowed --resource-dir $env:OPENNOVA_JO_DIR
+python scripts/mcp/game_mcp.py probe run retail_parity_visual '{"mode":"glass","output_dir":"screenshots/parity/glass-shatter"}' --wait
+python scripts/mcp/game_mcp.py stop
 ```

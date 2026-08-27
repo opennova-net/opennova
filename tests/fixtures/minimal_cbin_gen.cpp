@@ -1,11 +1,14 @@
-// Generator + guard for fixtures/cbin/credits_image.png: the 8x8 RGB image
+// Generator + guard for fixtures/cbin/credits_image.png (the 8x8 RGB image
 // the credits (.kda) tests stage beside a .kda under the name its ~F image
-// row references. A self-contained PNG writer (one stored zlib block, so
-// no compressor is involved and every platform mints the same bytes); the
-// pixels are an integer gradient. No retail image is carried.
+// row references; a self-contained PNG writer with one stored zlib block, so
+// no compressor is involved and every platform mints the same bytes; the
+// pixels are an integer gradient) and fixtures/cbin/particle_dot.tga (the
+// 8x8 BGRA sprite the effect-world test's synthetic particle file names as
+// its layer texture: a soft white dot on transparent). No retail image is
+// carried.
 //
-// Default: rebuild in memory and byte-compare the committed file. `--write`
-// (re)writes it.
+// Default: rebuild in memory and byte-compare the committed files. `--write`
+// (re)writes them.
 #include "common/test_paths.h"
 
 #include <cstdint>
@@ -95,6 +98,36 @@ std::vector<uint8_t> make_png() {
 	return out;
 }
 
+// An uncompressed 32-bit true-color TGA (image type 2, bottom-left origin,
+// 8 alpha bits): the 18-byte header, then BGRA per pixel. The dot is a
+// radial alpha falloff on white, so a blended particle draw has coverage.
+std::vector<uint8_t> make_tga() {
+	std::vector<uint8_t> out(18, 0);
+	out[2] = 2;  // uncompressed true-color
+	out[12] = static_cast<uint8_t>(kWidth & 0xFF);
+	out[13] = static_cast<uint8_t>(kWidth >> 8);
+	out[14] = static_cast<uint8_t>(kHeight & 0xFF);
+	out[15] = static_cast<uint8_t>(kHeight >> 8);
+	out[16] = 32;  // bits per pixel
+	out[17] = 8;   // 8 alpha bits, bottom-left origin
+	for (uint32_t y = 0; y < kHeight; ++y) {
+		for (uint32_t x = 0; x < kWidth; ++x) {
+			// Integer radial falloff from the center (3.5, 3.5): 255 at the
+			// middle four texels, 0 at the corners.
+			const int dx = static_cast<int>(x) * 2 - 7;
+			const int dy = static_cast<int>(y) * 2 - 7;
+			const int distance_sq = dx * dx + dy * dy;  // 2 .. 98
+			int alpha = 255 - (distance_sq - 2) * 255 / 96;
+			if (alpha < 0) alpha = 0;
+			out.push_back(255);  // B
+			out.push_back(255);  // G
+			out.push_back(255);  // R
+			out.push_back(static_cast<uint8_t>(alpha));
+		}
+	}
+	return out;
+}
+
 bool read_file(const std::string &path, std::vector<uint8_t> &out) {
 	std::ifstream f(path, std::ios::binary | std::ios::ate);
 	if (!f) return false;
@@ -106,14 +139,8 @@ bool read_file(const std::string &path, std::vector<uint8_t> &out) {
 	return true;
 }
 
-} // namespace
-
-int main(int argc, char **argv) {
-	bool write_mode = false;
-	for (int i = 1; i < argc; ++i)
-		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
-	const std::string path = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/cbin/credits_image.png";
-	const std::vector<uint8_t> bytes = make_png();
+// 0 = byte-identical (or written), 1 = mismatch/missing.
+int guard(const std::string &path, const std::vector<uint8_t> &bytes, bool write_mode) {
 	if (write_mode) {
 		std::ofstream o(path, std::ios::binary);
 		o.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
@@ -121,14 +148,27 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 	std::vector<uint8_t> committed;
-	if (!expect(read_file(path, committed), "committed fixtures/cbin/credits_image.png missing; run with --write")) return 1;
+	if (!expect(read_file(path, committed), ("committed file missing; run with --write: " + path).c_str())) return 1;
 	static const char kLfsSentinel[] = "version https://git-lfs";
 	if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
 	    std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
-		std::printf("[skip] credits_image.png is an unpulled LFS pointer\n");
+		std::printf("[skip] %s is an unpulled LFS pointer\n", path.c_str());
 		return 0;
 	}
-	if (!expect(committed == bytes, "credits_image.png differs from the generator output; regenerate with --write")) return 1;
-	std::printf("OK: credits_image.png byte-reproducible (%zu bytes)\n", bytes.size());
+	if (!expect(committed == bytes, ("differs from the generator output; regenerate with --write: " + path).c_str())) return 1;
+	std::printf("OK: %s byte-reproducible (%zu bytes)\n", path.c_str(), bytes.size());
 	return 0;
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+	bool write_mode = false;
+	for (int i = 1; i < argc; ++i)
+		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
+	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/cbin";
+	int failures = 0;
+	failures += guard(dir + "/credits_image.png", make_png(), write_mode);
+	failures += guard(dir + "/particle_dot.tga", make_tga(), write_mode);
+	return failures == 0 ? 0 : 1;
 }

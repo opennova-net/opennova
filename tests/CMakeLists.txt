@@ -580,11 +580,19 @@ target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_fnt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
-# fixtures/cbin/credits_image.png: the 8x8 PNG the credits tests stage under
-# the retail .kda's image name; minted by a self-contained PNG writer.
+# fixtures/cbin/credits_image.png (the 8x8 PNG the credits tests stage under
+# the retail .kda's image name; a self-contained PNG writer) and
+# fixtures/cbin/particle_dot.tga (the effect-world test's particle sprite).
 add_executable(minimal_cbin_gen_test fixtures/minimal_cbin_gen.cpp)
 target_include_directories(minimal_cbin_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_cbin_gen COMMAND minimal_cbin_gen_test)
+
+# fixtures/env/cloud01.pcx + cloud01b.pcx: the sky maps full_00.env names,
+# minted by encode_pcx_indexed from integer data.
+add_executable(minimal_env_gen_test fixtures/minimal_env_gen.cpp)
+target_link_libraries(minimal_env_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_env_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_env_gen COMMAND minimal_env_gen_test)
 
 # Minimal mission's dialog companions (mnml.dbf + mnml.lwf): empty-but-valid
 # via the engine/formats/dbf + engine/formats/lwf writers, byte-stable vs the committed files.

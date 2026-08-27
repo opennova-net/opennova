@@ -75,6 +75,12 @@ func file_count() -> int:
 	return _files.size()
 
 
+## The loaded particle files (a copy of the list; the probes describe an
+## effect's authored definition through it).
+func get_files() -> Array[ParticleFile]:
+	return _files.duplicate()
+
+
 func effect_count() -> int:
 	return int(_load_report.get("effect_count", 0))
 

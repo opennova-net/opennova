@@ -21,8 +21,7 @@ rows are not randomized or repositioned by Godot.
 ## Reproduce
 
 ```powershell
-$env:NOVA_PARITY_PROBE_MODE = 'debris'
-$env:NOVA_PARITY_PROBE_DIR = (Resolve-Path '.\screenshots\parity\section-debris')
-$env:NOVA_RESOURCE_DIR = $env:OPENNOVA_JO_DIR
-& $env:GODOT_BIN --path godot res://tests/retail_parity_visual_probe.tscn
+python scripts/mcp/game_mcp.py launch --windowed --resource-dir $env:OPENNOVA_JO_DIR
+python scripts/mcp/game_mcp.py probe run retail_parity_visual '{"mode":"debris","output_dir":"screenshots/parity/section-debris"}' --wait
+python scripts/mcp/game_mcp.py stop
 ```
