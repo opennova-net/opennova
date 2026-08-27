@@ -2,8 +2,8 @@ shader_type spatial;
 // The impact-scar quad in the BULLET-HOLE drawer state — GfxShader mode word
 // 0x460651, the state the bhole1 strip (index 27, modeId 1) selects
 // [orig: Scar_LoadTextures @0x5CC321 -> GfxShader_Create1TexModeId @0x679030;
-// the drawer Terrain_RenderFoliageBatches @0x5CCD10 (Scar_DrawBatches
-// proposed); renderer::decode_scar_strip_mode, docs/world/world-wac-ai-re.md
+// the drawer Scar_DrawBatches @0x5CCD10 (ex Terrain_RenderFoliageBatches,
+// renamed 2026-08-25); renderer::decode_scar_strip_mode, docs/world/world-wac-ai-re.md
 // §24.9]. The scorch word's state (scar_quad.gdshader) plus:
 //   ALPHATESTENABLE (0x40000): the drawer's SetAlphaTestRef(128) @0x5CCDAE
 //       latch is LIVE here — ALPHAFUNC GREATER, ALPHAREF 128  -> the discard

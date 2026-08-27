@@ -2,8 +2,8 @@ shader_type spatial;
 // The impact-scar quad in the SCORCH drawer state — GfxShader mode word
 // 0x120651, the state every strip but bhole1 selects [orig: Scar_LoadTextures
 // @0x5CC315 -> GfxShader_Create1TexModeId @0x679030; the drawer
-// Terrain_RenderFoliageBatches @0x5CCD10 (the IDB's kong misnomer,
-// Scar_DrawBatches proposed) under Scar_RenderAllCaches @0x5CDF70; the decode
+// Scar_DrawBatches @0x5CCD10 (ex Terrain_RenderFoliageBatches, the kong
+// misnomer, renamed 2026-08-25) under Scar_RenderAllCaches @0x5CDF70; the decode
 // renderer::decode_scar_strip_mode, docs/world/world-wac-ai-re.md §24.9]:
 //   SRCALPHA / INVSRCALPHA framebuffer blend      -> blend_mix
 //   LIGHTING off (pass flag 0x10000000)            -> unshaded

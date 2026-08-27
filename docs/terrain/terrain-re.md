@@ -170,7 +170,7 @@ samples the detail layers anisotropically
 gradients back onto the 4×4 terminal so the synthetic Godot tail is never
 selected.
 
-Implemented in `engine/runtime/terrain/include/terrain/texture_preprocess.h` and
+Implemented in `engine/runtime/terrain/texture_preprocess.h` and
 `Terrain::_load_textures`;
 `terrain_texture_preprocess_test` pins recovered byte vectors, while
 `terrain_lod_family_test` pins all 16 sublevels against the eight-family

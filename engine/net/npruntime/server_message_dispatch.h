@@ -20,7 +20,7 @@ struct EntityHandle;
 
 // P8 — the reactive in-match gameplay-message reply path, ported off the retired
 // engine/net/novaworld/game_session.cpp (`GameSession`) + game_server_runtime.cpp (`GameServerRuntime`).
-// This is the faithful translation of the gameplay-layer C2S dispatch table [orig: g_msginfo_table
+// This is the faithful translation of the gameplay-layer C2S dispatch table [orig: g_np_msginfo_server
 // @0x82B5D8 → NapiNPServerMsg_0x0NN]: a 0x43 SESSION packet carries gameplay messages, each routed to
 // its server handler, which queues reactive replies via NapiNPServer_SendFiltered. It produces the
 // §5.1 handshake / server-info / mission-metadata / loadout / spawn-confirm replies a retail joiner

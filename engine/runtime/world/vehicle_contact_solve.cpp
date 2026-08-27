@@ -911,7 +911,8 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         probes[i][2] = pz + rotated[2];
     }
 
-    // ---- the two force passes + severity [orig: Entity_CheckCollisionState
+    // ---- the two force passes + severity [orig: Entity_CheckCollisionState calls
+    // @0x479CB1/@0x47A2F6 from Entity_ProcessLightVehiclePhysics, the pass setups
     // @0x479C2B/@0x479E7C]. Same torque sheds [orig: @0x479C89/@0x479CD1/
     // @0x479D0F]; the sev-3 authority damage (unitType-3 kill at 29300, the
     // mass<=3 light multiplier), scrape sound and momentum exchange are

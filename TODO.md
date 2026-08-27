@@ -21,12 +21,13 @@ hardening, and project health. Divergences from the original engine belong in
       `onhook_run_lan_pair` half). Baseline: the 2026-08-05 suites captured 24/24 cells
       cleanly, wire-ready + `diff_vs_golden` GREEN.
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
-      `engine/runtime/terrain` carries 23 anchors across 15 files and `godot/src/terrain/` 18
-      across 8 of its ~16 source files (the cpt/til/trn resource-format files and the
-      remaining builder files carry none); `docs/terrain/terrain-re.md` is still partial
-      (PAR-R1); narrow or close this entry after the sweep
+      every file under `engine/runtime/terrain` now carries an anchor, and the cpt/til/trn
+      resource formats moved to `engine/formats/` carrying theirs, so the gap is
+      `godot/src/terrain/`, where the foliage def/map pair, the static-shadow rasterizer
+      and the tile cache device/entry/info files carry none; `docs/terrain/terrain-re.md`
+      is still partial (PAR-R1); narrow or close this entry after the sweep
 - [ ] Present-pass / entity-reconcile citation pass: the present anchors live at
-      the native walks (`present_applier.{h,cpp}` 12, the wire walk +
+      the native walks (`present_applier.{h,cpp}` 10, the wire walk +
       cold path `godot/src/simulation/present_applier_wire.cpp`, the
       held-weapon reference math `engine/net/npruntime/client_replica_present.h`) —
       but the native `EntityIndex` (`godot/src/object/entity_index.cpp` —
@@ -36,26 +37,26 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Env/water/sky/weather singleton `_process` set: re-measure at the ASH_I5A
       vantage before slicing — the #403 present-side rework (parked idle models,
       `env_generation_changed`, the staggered per-model light restamp) invalidated
-      the earlier ~1 ms reading. The next perf attribution round starts from the F3
-      "Outside shell spans" row (the #403 live sessions observed the remaining frame
+      the earlier ~1 ms reading. The F3 "Outside shell spans" row went with ADR 0039's
+      hard cut; the metric survives as the `outside_shell` summary
+      `godot/tests/mission_rows_perf_probe.gd` reports, and that is where the next
+      attribution round reads it (the #403 live sessions observed the remaining frame
       cost concentrated outside the model system after the park/submission gates)
 - [ ] Main-loop order grill: `docs/runtime-architecture.md` cites the exact main-loop /
       entity-render order from existing RE notes; a focused grill-ida pass to pin
       `WacScript_AdvanceTick`'s surroundings + the original entity-render function would
       witness it directly
-- [ ] Incremental terrain-build tile load: `engine/runtime/terrain/build_quadtree.cpp` skips the
-      witnessed cached-tile load leg (`process_quadtree_leaf` / `sub_402730`) and always
-      regenerates from base meshes — correct on a clean build, but retail treats existing
-      tile files as a cache. Decide: ledger it as a D-TERRAIN row (cache-trust is the
-      witnessed semantic) or record it in `terrain-re.md` as a deliberate tool-side
-      divergence
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface) and cpt (a real migration, tracked as its own row below)
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
-- [ ] Converge `engine/formats/cpt`'s bit codec on `io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `engine/CLAUDE.md`. Acceptance: `parametric_parity_test` still reports byte-identical CPT output for all four fixtures after cpt drops its private copy.
+- [ ] Converge `engine/formats/cpt`'s bit codec on `engine/base/io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `engine/CLAUDE.md`. Acceptance: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) stays green AND a by-hand retail-corpus byte diff still reports byte-identical CPT output after cpt drops its private copy; the corpus diff is not in ctest, so it has to be run by hand (`engine/CLAUDE.md` § migration exceptions).
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
-- [ ] W5 consolidations + push-downs (the 2026-07 quality campaign's last wave;
-      waves 1-4 landed as #310-#375): perf-span unify, sim debug-snapshot
-      narrowing (debug half only), and remaining runtime push-downs — opportunistic
+- [ ] W5 remainder (the 2026-07 quality campaign's last wave; waves 1-4 landed as
+      #310-#375): perf-span unify landed as ADR 0039's `FrameStatsBoard` +
+      `engine/runtime/devtools/frame_stats_slots.h`, and the sim debug-snapshot
+      narrowing is moot, since `DebugSnapshotWriter` went with ADR 0039's hard cut. What
+      is left is the runtime push-downs, and they are now ADR 0040's campaign: the
+      slice ladder in [ADR 0040](docs/adr/0040-the-engine-is-one-namespace.md) is the
+      queue for them, not this file
 - [ ] Cross-mission debug-intent replay: `DebugSession._explicit_values` is never
       cleared, so `sync()` replays explicit debug writes into a NEW mission's fresh
       sim/terrain targets. Decide the cross-mission scope of debug intent: clear on
@@ -93,3 +94,19 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Serve mode (PROD-1, ADR 0015): `opennova.exe --server` / `--headless
       --server` and a packaging boot-smoke leg — tracked future work, never
       implemented; specs live in `docs/maturity-program.md` §PROD.
+- [ ] GSB server-name decode: browse rows carry Latin-1 bytes and are read as
+      UTF-8, so a `©` (0xA9) in a server name trips a Godot UTF-8 warning. Decode
+      GSB name strings Latin-1 -> UTF-8 on the read side. Carried over from the
+      completed NovaWorld integration record (`plan/status.md`), which had no owner
+      for it.
+- [ ] NovaWorld session-builder grill wave (PAR-NET): `build_server_hello` /
+      `build_server_auth` (`engine/net/npwire/session_hello.h` +
+      `engine/net/npwire/session/session_hello.cpp`, the builders the ROADMAP still
+      calls the `engine/net/novaworld` ones) hold the whole remaining 0x81/0x82
+      byte-parity gap (CI/MI/CS values, the game-server field block, LAN-CU
+      suppression), and the ~8 §5.2a initial-state serializers with no witnessed
+      byte format are still emitted-as-nothing-and-logged rather than faked, as is
+      the `Server_OnPlayerJoin` join-burst tail (`0x42/0x0F/0x4D/seed/0x3E`). Witness
+      each at the addresses cited in `engine/net/npruntime/server_initial_state.cpp`
+      -> `ingame_encode`, land the record via `re-doc`. Detail:
+      `engine/net/npruntime/ROADMAP.md`.

@@ -12,7 +12,7 @@ render_mode unshaded, cull_disabled, blend_add, depth_draw_always, fog_disabled;
 // uniforms because resident geometry is reused across anchors and frames.
 // [orig: Foliage_LoadDefAssets @ 0x6015b7;
 //  GfxBlend_ApplyToDevice @ 0x681823;
-//  Foliage_GridPlacementVS @ 0x5ff6a5;
+//  Terrain_CreateFoliageVertexShaders @ 0x5ff6a5 (the Foliage_GridPlacementVS @ 0x2c25e60 source copy);
 //  Foliage_DrawModelTileSlot @ 0x601d90].
 uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_fd_texture = false;

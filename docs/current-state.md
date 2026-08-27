@@ -51,10 +51,20 @@ push-down campaign** opened by [ADR 0040](adr/0040-the-engine-is-one-namespace.m
 (2026-08-26, PR #580): with the names and include roots settled, the witnessed
 behavior still living Godot-side moves home — `godot/src/simulation/` (the
 `adapter_cpp_orig_cites_pushdown` ratchet) and the game-level GDScript (the new
-`gd_orig_cites` ratchet) are the gauges. It runs as one commit per slice in
-PR #580 — the pattern-setting moves first, then `godot/src/simulation/`, the
-game-level GDScript presentation math, `object/` and the holdouts — and is
-finished when both counters hold only documented seam contracts. It subsumes the structural slot earlier programs
+`gd_orig_cites` ratchet) are the gauges, and it runs as one commit per slice.
+PR #580 landed thirteen of them: the pattern-setting moves (the local-player
+view cluster, the minimap feed, LAN browse, the boot/pack/options policies, the
+seat mirror + volume law + weapon-category rows), two `godot/src/simulation/`
+slices (the occlusion frame camera, the iris march), and the game-level
+GDScript presentation math (the mission load plan, the HUD config tokens, the
+presenter and viewmodel frame math, the light-director constants, the loading
+screen, the character registry). The remainder is queued in
+[ADR 0040](adr/0040-the-engine-is-one-namespace.md)'s ladder, which is that
+queue's only home: A3, Train B's `simulation.h` state-model split and its feed
+marshallers, the Train C tail including the `mission_audio.gd` reverb, and
+Train D in full. The counters sit at 341 and 733, not yet at a seam-contract
+floor; the campaign is finished when both hold only documented seam contracts.
+It subsumes the structural slot earlier programs
 held: the **2026-07 quality campaign** closed at W4 (#310–#375; its W5
 residue stays tracked in [`TODO.md`](../TODO.md) § "Cleanup & verification
 backlog"), and the 2026-08-08 adapter-shape round (#451–#456) was this
@@ -82,7 +92,7 @@ Every recent slice ran this same shape, and a new one should too:
 
 Counts come from the ledger's generated scoreboard — read them there, not here,
 because `scripts/lint/ledger_check.py --check` keeps that table honest and
-nothing keeps this sentence honest. As of the 2026-08-25 regeneration the shape
+nothing keeps this sentence honest. As of the 2026-08-26 regeneration the shape
 was:
 **World/AI** carries the largest share (59 of 140 domain-open), **UI** (40 — swollen
 by the 2026-08-04 D-SND/D-MNU/D-LOADSCR catalog tabling; most of those rows are
@@ -136,9 +146,10 @@ The remaining one is scoped small enough to be somebody's first grill.
 | Instrument | What it prevents | How it runs |
 |---|---|---|
 | [divergence-ledger.md](divergence-ledger.md) + `scripts/lint/ledger_check.py` | a divergence being known but untracked, or the scoreboard drifting from its own tables | CI, hard-fail; `--write` regenerates |
-| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates; `godot/src` cite markers growing (`adapter_cpp_orig_cites_pushdown`, banked at 364 on 2026-08-26) | CI, fail-on-increase against a committed baseline (`scripts/lint/maturity_baseline.json`) |
+| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates; `godot/src` cite markers growing (`adapter_cpp_orig_cites_pushdown`, banked at 341 on 2026-08-27) and the GDScript half growing (`gd_orig_cites`, `[orig:` citations in `godot/game` + `godot/modtools`, banked at 733 on 2026-08-27) | CI, fail-on-increase against a committed baseline (`scripts/lint/maturity_baseline.json`) |
 | `scripts/lint/link_graph_check.py` | forbidden lib edges (ADR 0019/0020 seams) | CI, hard-fail |
-| `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission may include only terrain_query's four `terrain_query/` headers, never the terrain-format stack | CI, hard-fail |
+| `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission/world may include only terrain_query's five seam headers (`coords.h`, `height_field.h`, `surface_type_map.h`, `terrain_raycast.h`, `terrain_scorch_record.h`, under the group-qualified `runtime/terrain_query/` prefix), never the terrain-format stack | CI, hard-fail |
+| `scripts/lint/orphan_header_check.py` | an `engine/` header wired to nothing: policy code that no engine, binding or app source includes (a header included only by its own test is exactly that shape), left behind by a move or landed ahead of its caller | CI, hard-fail; two deliberate escapes, `scripts/lint/orphan_header_allowlist.json` (a reasoned-exception list, burned down to empty on 2026-08-27) and a `STAGED, NOT WIRED` marker in the header naming the owner that will consume it |
 | `scripts/lint/host_lint.py` | "host" regressing to any non-game-host sense (the terminology campaign's teeth) | CI, hard-fail on code suffixes; Markdown gets a non-failing advisory |
 | `scripts/lint/maturity_lint.py` | dict-contract drift and new magic numbers in changed `.gd` ranges | CI, hard-fail (advisory legs stay advisory) |
 | [asset-gated-tests.md](asset-gated-tests.md) | believing a green run exercised retail data when the env vars were unset | read it before trusting a parity green |

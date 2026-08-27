@@ -10,7 +10,7 @@ catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| MUS VM (`engine/formats/mus/src/mus_vm.cpp`) | **MATCHING** (behavioral proof) | 52 inline citations (dispatch `@0x672720`, 65 opcodes, intrinsics); golden event-stream ctest `mus_vm` reproduces the original handlers' output byte-identically for gamemus/menumus across 5 var scenarios; local Unicorn differential (see "RE tooling" below) |
+| MUS VM (`engine/formats/mus/mus_vm.cpp`) | **MATCHING** (behavioral proof) | 52 inline citations (dispatch `@0x672720`, 65 opcodes, intrinsics); golden event-stream ctest `mus_vm` reproduces the original handlers' output byte-identically for gamemus/menumus across 5 var scenarios; local Unicorn differential (see "RE tooling" below) |
 | MUS compiler write path | **MATCHING** (read-only grill) | entry-index round-trip + operand-width checks (`mus_entry_roundtrip`, `mus_encode_idempotence`, 25-case `mus_authored_behavioral`) |
 | SBF bank codec (`engine/formats/sbf`) | **MATCHING** | 12 citations: `Sbf_OpenFile_Gamemus @0x4ED6C0`, `Sbf_StartEntry @0x4ED910`, `Audio_StreamNextChunk @0x4ED7D0`, mix coefficients `@0x7BD4B0`; `sbf_roundtrip` et al. |
 | SCR container codec (`engine/formats/scr`) | **MATCHING** (grilled 2026-06-09) | keystream + reverse pass byte-exact vs `Scr_DecryptBuffer @0x53D090`; two documented policy divergences (D-SCR-1/2 below) |

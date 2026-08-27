@@ -68,7 +68,8 @@ integration is not a one-off.
    `FrameStats` is the board's binding: the slot enum constants, the hot-path
    `add`, the capture edge and `drain()` into a typed `FrameStatsWindow` record.
    The game shell's only involvement is F3 (`DevTools.toggle`) and the
-   mouse/pick-click policy on `open_changed`; ONED's app (`oned_app.gd`) seeds
+   mouse/pick-click policy on `open_changed`; ONED's app
+   (`godot/modtools/oned_app.gd`) seeds
    the surface and executes its requests — process spawning, the native
    directory dialogs and settings persistence stay in GDScript. `Simulation`
    folds its session phase spans onto the board natively; `get_session_perf()`
@@ -92,7 +93,8 @@ integration is not a one-off.
    typed resolvers, the snapshot writer and the GDScript board are deleted;
    F3 opens the ImGui tools. What survives under `godot/game/debug/` has other
    owners: the MCP `game_debug` control plane (`DebugSession` and its catalog),
-   the world-owned debug views and pick nodes (`DebugViewSet`), the three
+   the world-owned debug views and pick nodes (`DebugViewSet` itself is at
+   `godot/game/world/debug_view_set.gd`), the three
    samplers (retyped to `FrameStats`) and the env-var probes. Retired page
    features return as engine windows when wanted; `TODO.md` carries the list.
 7. **Not an editor.** The tools inspect and, later, control a running game.

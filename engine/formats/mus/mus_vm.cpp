@@ -690,6 +690,8 @@ static Intrinsic kIntrinsics[MUS_INTRINSIC_NAMES] = {0};
 static int       kIntrinsicsInit = 0;
 static void init_intrinsics(void);
 
+/* Op 0x40 method: dispatch instance[+0x14][byte] through the built-in intrinsic
+   table, push the result, continue [orig: AudioVM_Op_Method @ 0x672CF0]. */
 static void op_method(MusVM *vm) {
     init_intrinsics();
     int idx = read_u8(vm);
@@ -1005,6 +1007,8 @@ extern "C" int32_t mus_vm_get_var(const MusVM *vm, uint8_t var_index) {
     return globals_read32(vm, byte_off);
 }
 
+/* The embedder's write into the VM globals (the screen MUSICVAR, the mission
+   var pumps) [orig: AudioVM_SetVariable @ 0x671FA0]. */
 extern "C" void mus_vm_set_var(MusVM *vm, uint8_t var_index, int32_t value) {
     if (!vm) return;
     int byte_off = (int)var_index * 4;
