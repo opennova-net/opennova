@@ -55,32 +55,24 @@ var _endround_banner := ""
 # in co-op; the binding row itself is the unported input-binding layer]
 var _objectives_visible := false
 # The friendly-tags mode, held here so it survives the per-mission HUD rebuild
-# like retail's process-lifetime global. Boot default 2 = FULL.
-# [orig: g_friendlyTagsMode @0x24C18C4; default @0x4a7fed]
-var _friendly_tag_mode := 2
+# like retail's process-lifetime global (the default and the other token
+# policies are the engine's, hud/hud_config_tokens.h via HudOverlay).
+var _friendly_tag_mode := HudOverlay.friendly_tag_mode_default()
 # The HUD color-scheme index, persisted like retail's config token (read at
-# boot, written back on cycle). Default 2 = the hudpos hud_textcolor scheme.
-# [orig: config token "hud_color_index" @0x5502eb, default 2 @0x54d2a6; applied
-# to the live index @0x55152f; cycled 0..5 by the `hudcolor` action
-# (catalog row 76 -> dispatch code 10) @0x49afc7]
+# boot, written back on cycle); the cfg store is this presenter's device work.
 const HUD_COLOR_CONFIG_PATH := "user://settings.cfg"
 const HUD_COLOR_SECTION := "hud"
 const HUD_COLOR_CONFIG_KEY := "hud_color_index"
-var _hud_color_index: int = clampi(
+var _hud_color_index: int = HudOverlay.clamp_hud_color_index(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-				HUD_COLOR_CONFIG_KEY, 2)), 0, 5)
+				HUD_COLOR_CONFIG_KEY, HudOverlay.hud_color_index_default())))
 var _hud_color_was_down := false
 var _score_fanfare := ScoreFanfarePresenter.new()  # the S2C 0x81 hit-confirm lane
 # The HUD declutter level, persisted like retail's config token round trip.
-# Default 0 = everything the masks author at level 0. [orig: cfg int
-# "hud_detail" — parse @0x550339, default 0 @0x54d3d8, applied to the live
-# level @0x55154d, saved @0x54c80d; the level drives
-# CRenderState_SetLayerVisibility @0x59B0F0]
 const HUD_DETAIL_CONFIG_KEY := "hud_detail"
-const HUD_HIDDEN_CAPTURE_DETAIL_LEVEL := 3
-var _hud_detail_level: int = clampi(
+var _hud_detail_level: int = HudOverlay.clamp_hud_detail_level(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-				HUD_DETAIL_CONFIG_KEY, 0)), 0, 3)
+				HUD_DETAIL_CONFIG_KEY, HudOverlay.hud_detail_level_default())))
 var _hud_detail_was_down := false
 # Render-comparison declutter is a reversible runtime transaction. It must not
 # share set_hud_detail_level(), because that public gameplay action faithfully
@@ -88,12 +80,8 @@ var _hud_detail_was_down := false
 var _hud_hidden_capture_active := false
 var _hud_hidden_saved_detail_level := 0
 # The showhud 2-bit FP-view flags, session state like retail's process-lifetime
-# global. Bit 0 = the FP gun/viewmodel draw, bit 1 = the corner spinmap block;
-# default 3 = both (the cfg gun-visible option writes 3/2). [orig:
-# g_FpWeaponViewFlags — cycle (flags + 1) & 3 @0x4E0561; bit0 read
-# Player_RenderFirstPersonViewModel @0x4DEDEA; bit1 read @0x5A8635; the option
-# writes @0x5521CB/@0x5521D7]
-var _showhud_flags := 3
+# global (bit 0 = the FP gun, bit 1 = the corner spinmap block).
+var _showhud_flags := HudOverlay.showhud_flags_default()
 var _showhud_was_down := false
 # The view-action rows' down latches (view1st / viewwithgun / viewchase).
 var _view1st_was_down := false
@@ -401,7 +389,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 		nvg_gain = lv.nvg_gain
 		vehicle_attack_context = lv.vehicle_attack_context
 	if binoculars_view_active and _player_presenter != null:
-		binocular_range = clampi(int(_player_presenter.aim_range_units()), 1, 1000)
+		binocular_range = int(_player_presenter.aim_range_units())
 
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	_apply_attach_labels()
@@ -634,11 +622,6 @@ func _apply_attach_labels() -> void:
 	_game_hud.set_attach_labels(screens, texts, nearest)
 
 
-# The overhead-anchor addend above the entity's eye offset: 0x4000 = 0.25 u
-# [orig: anchor z = z + entity[+116] + 0x4000 @0x5a3a84..0x5a3a98 — +116 is the
-# stance-driven eye offset the sim restamps per body tick and feeds per tag;
-# docs/interface/hud-re.md D-HUD-20].
-const FRIENDLY_TAG_LIFT := 0.25
 
 
 # The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
@@ -658,7 +641,7 @@ func _apply_friendly_tags() -> void:
 	if _game_hud == null:
 		return
 	var screens := PackedVector2Array()
-	var dists := PackedInt32Array()
+	var dists := PackedFloat32Array()
 	var names := PackedStringArray()
 	var ids := PackedInt32Array()
 	var ratios := PackedInt32Array()
@@ -674,22 +657,22 @@ func _apply_friendly_tags() -> void:
 				var tag: Dictionary = raw
 				var world_pos := MissionObjectPlacer.bms_to_godot_position(
 						Vector3(tag.get("position", Vector3.ZERO)))
-				world_pos.y += float(tag.get("eye_height", 0.0)) + FRIENDLY_TAG_LIFT
+				world_pos.y += float(tag.get("eye_height", 0.0)) + HudOverlay.friendly_tag_lift()
 				if camera.is_position_behind(world_pos):
 					continue # [orig: the nonzero-clip bail @0x5a3b80]
 				screens.append(camera.unproject_position(world_pos))
-				dists.append(int(cam_pos.distance_to(world_pos) * 65536.0))
+				dists.append(cam_pos.distance_to(world_pos))
 				names.append(String(tag.get("name", "")))
 				ids.append(int(tag.get("entity_id", 0)))
 				ratios.append(int(tag.get("health_ratio_fp16", 0x10000)))
 				# The flag word is packed by the sim feed (hud/friendly_tag_flags.h).
 				flags.append(int(tag.get("flags", 0)))
-	var fog_q16 := 0
+	var fog_distance := 0.0
 	var env: MissionEnvironment = _world.get_environment_node() \
 			if _world != null else null
 	if env != null:
-		fog_q16 = int(env.get_fog_distance() * 65536.0)
-	_game_hud.set_friendly_tag_env(fog_q16, 0)
+		fog_distance = env.get_fog_distance()
+	_game_hud.set_friendly_tag_env(fog_distance, 0)
 	_game_hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
 
 
@@ -851,7 +834,7 @@ func poll_hud_color_edge(color_down: bool, chorded: bool, active: bool) -> void:
 
 
 func cycle_hud_color() -> void:
-	_hud_color_index = (_hud_color_index + 1) % 6
+	_hud_color_index = HudOverlay.next_hud_color_index(_hud_color_index)
 	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
 			HUD_COLOR_CONFIG_KEY, _hud_color_index)
 	if _game_hud != null:
@@ -897,14 +880,14 @@ func poll_hud_detail_edge(detail_down: bool, chorded: bool, active: bool) -> voi
 ## persisted global, visibility rebuilt. [orig: Input_HandleActionBinding_0
 ## @0x4E0601..0x4E0624 -> CRenderState_SetLayerVisibility @0x59B0F0]
 func cycle_hud_detail() -> void:
-	set_hud_detail_level(0 if _hud_detail_level >= 3 else _hud_detail_level + 1)
+	set_hud_detail_level(HudOverlay.next_hud_detail_level(_hud_detail_level))
 
 
 ## The one declutter-level write seam: persists the level like retail's config
 ## token round trip and restamps a built HUD. The cycle, the round-init
 ## re-apply, and the death-screen force all land here.
 func set_hud_detail_level(level: int) -> void:
-	_hud_detail_level = clampi(level, 0, 3)
+	_hud_detail_level = HudOverlay.clamp_hud_detail_level(level)
 	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
 			HUD_DETAIL_CONFIG_KEY, _hud_detail_level)
 	if _game_hud != null:
@@ -928,7 +911,7 @@ func begin_hud_hidden_capture() -> Error:
 		return ERR_UNCONFIGURED
 	_hud_hidden_saved_detail_level = _hud_detail_level
 	_hud_hidden_capture_active = true
-	_hud_detail_level = HUD_HIDDEN_CAPTURE_DETAIL_LEVEL
+	_hud_detail_level = HudOverlay.hud_detail_level_blank()
 	_game_hud.set_hud_detail_level(_hud_detail_level)
 	return OK
 
@@ -939,7 +922,7 @@ func finish_hud_hidden_capture() -> void:
 	if not _hud_hidden_capture_active:
 		return
 	_hud_hidden_capture_active = false
-	_hud_detail_level = clampi(_hud_hidden_saved_detail_level, 0, 3)
+	_hud_detail_level = HudOverlay.clamp_hud_detail_level(_hud_hidden_saved_detail_level)
 	if _game_hud != null and is_instance_valid(_game_hud):
 		_game_hud.set_hud_detail_level(_hud_detail_level)
 
@@ -1000,7 +983,7 @@ func poll_showhud_edge(showhud_down: bool, chorded: bool, active: bool) -> void:
 ## 3 = both; the rest of the HUD is untouched. [orig: g_FpWeaponViewFlags
 ## cycle @0x4E0561; bit0 @0x4DEDEA; bit1 @0x5A8635]
 func cycle_showhud() -> void:
-	_showhud_flags = (_showhud_flags + 1) & 3
+	_showhud_flags = HudOverlay.next_showhud_flags(_showhud_flags)
 	if _game_hud != null:
 		_game_hud.set_showhud_flags(_showhud_flags)
 	_apply_fp_gun_visible()
@@ -1040,7 +1023,8 @@ func poll_view_action_edges(view1st_down: bool, viewwithgun_down: bool,
 # g_FpWeaponViewFlags bit 0, the view actions' write [orig: @0x49c073 clears,
 # @0x49c0d9 sets].
 func _set_showhud_gun_bit(gun_visible: bool) -> void:
-	_showhud_flags = (_showhud_flags | 1) if gun_visible else (_showhud_flags & ~1)
+	_showhud_flags = (_showhud_flags | HudOverlay.SHOWHUD_FLAG_GUN) if gun_visible \
+			else (_showhud_flags & ~HudOverlay.SHOWHUD_FLAG_GUN)
 	if _game_hud != null:
 		_game_hud.set_showhud_flags(_showhud_flags)
 	_apply_fp_gun_visible()
