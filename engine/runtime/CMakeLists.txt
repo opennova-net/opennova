@@ -214,6 +214,7 @@ target_link_libraries(opennova_runtime PRIVATE opennova_imgui)
 if(OPENNOVA_DEVTOOLS)
     target_sources(opennova_runtime PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/demo_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/stats_window.cpp
     )

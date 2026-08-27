@@ -107,6 +107,8 @@ func test_runtime_flags_are_only_the_loose_resource_contract() -> void:
 
 
 func test_dev_launch_plan_runs_the_game_scene_without_a_pack() -> void:
+	assert_eq(Session.RUNTIME_SCENE, "res://game/game_runtime_root.tscn",
+			"ONED launches through the debug embedding decision")
 	var request := Session.Request.opennova("C:/assets", "jo", "")
 	var plan := Session.launch_plan(
 		"C:/godot/godot.exe", "C:/project", true, request,

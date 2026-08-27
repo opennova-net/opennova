@@ -5,9 +5,9 @@
 // context (created by its ImGui bridge) and the frame bracket (call
 // draw_frame between the bridge's NewFrame and Render).
 //
-// Two products compose it today: the game's dev tools (game_dev_tools.h, the
-// Stats window behind F3; compiled with OPENNOVA_DEVTOOLS) and ONED's run
-// surface (oned_ui.h; every flavour). Not an editor (ADR 0037).
+// Two products compose it today: the game's F3 workspace
+// (game_dev_tools.h; compiled with OPENNOVA_DEVTOOLS) and ONED's run surface
+// (oned_ui.h; every flavour). Not an editor (ADR 0037).
 //
 // Ownership: a pass is a plain object its composer owns; there is no
 // process-wide instance. Windows are registered once and live as long as the
@@ -23,6 +23,12 @@ namespace opennova::devtools {
 
 class ImGuiPass;
 
+enum class InitialDockPlacement {
+	None,
+	Center,
+	Right,
+};
+
 // One tool window. draw() runs inside ImGui::Begin/End for the window each
 // frame the window is visible; on_visibility() fires on the edges of
 // (pass open && window open) so a window can arm and disarm its data
@@ -33,6 +39,14 @@ public:
 	virtual const char *title() const = 0;
 	virtual void draw(ImGuiPass &pass, uint64_t frame_index) = 0;
 	virtual void on_visibility(bool visible) { (void)visible; }
+	// Window policy is explicit so the pass never special-cases a title.
+	virtual bool is_closeable() const { return true; }
+	virtual bool is_undockable() const { return true; }
+	virtual bool is_collapsible() const { return true; }
+	virtual bool is_scrollable() const { return true; }
+	virtual InitialDockPlacement initial_dock_placement() const {
+		return InitialDockPlacement::None;
+	}
 	// A window that issues its own ImGui::Begin/End (ImGui's demo, a
 	// full-viewport surface) is drawn without the pass's wrapping Begin/End.
 	virtual bool owns_frame() const { return false; }
@@ -50,9 +64,8 @@ using ImGuiAllocFn = void *(*)(size_t size, void *user_data);
 using ImGuiFreeFn = void (*)(void *ptr, void *user_data);
 
 struct ImGuiPassOptions {
-	// A passthru dockspace over the main viewport: windows dock to the
-	// viewport's edges and to each other without stealing the mouse in the
-	// empty area. Off for a single full-viewport surface.
+	// An opaque application dockspace over the main viewport. Off for a single
+	// full-viewport surface.
 	bool dockspace = true;
 	// The main menu bar with the "Windows" menu of open toggles.
 	bool menu_bar = true;

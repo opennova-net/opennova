@@ -29,6 +29,9 @@ public:
 	StatsWindow();
 
 	const char *title() const override { return "Stats"; }
+	InitialDockPlacement initial_dock_placement() const override {
+		return InitialDockPlacement::Right;
+	}
 	void draw(ImGuiPass &pass, uint64_t frame_index) override;
 	void on_visibility(bool visible) override;
 
