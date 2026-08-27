@@ -816,6 +816,20 @@ target_compile_features(end_round_overlay_test PRIVATE cxx_std_17)
 add_test(NAME end_round_overlay COMMAND end_round_overlay_test)
 
 # The stat.mnu RESULTLIST feed (hud/stat_screen_feed.h).
+# The retained minimap marker feed layout (hud/hud_minimap_feed.h) and the
+# marker rows a client draws (npruntime/minimap_markers.h).
+add_executable(hud_minimap_feed_test hud/hud_minimap_feed_test.cpp)
+target_link_libraries(hud_minimap_feed_test PRIVATE opennova_runtime)
+target_include_directories(hud_minimap_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_minimap_feed_test PRIVATE cxx_std_17)
+add_test(NAME hud_minimap_feed COMMAND hud_minimap_feed_test)
+
+add_executable(minimap_markers_test npruntime/minimap_markers_test.cpp)
+target_link_libraries(minimap_markers_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(minimap_markers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(minimap_markers_test PRIVATE cxx_std_17)
+add_test(NAME minimap_markers COMMAND minimap_markers_test)
+
 add_executable(stat_screen_feed_test hud/stat_screen_feed_test.cpp)
 target_link_libraries(stat_screen_feed_test PRIVATE opennova_runtime opennova_net)
 target_include_directories(stat_screen_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -27,6 +27,8 @@
 
 using namespace godot;
 
+#include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
+
 namespace {
 
 using opennova::hud::HudDrawList;
@@ -34,10 +36,6 @@ using opennova::hud::HudLayout;
 using opennova::hud::HudPosRecord;
 using opennova::hud::HudRectRecord;
 
-// v4 appends the local-team medic bit per row (Simulation::HUD_MINIMAP_*).
-constexpr int kMinimapSnapshotVersion = 4;
-constexpr int kMinimapSnapshotHeaderSize = 3;
-constexpr int kMinimapSnapshotMinStride = 17;
 constexpr int kMinimapFootprintFeedVersion = 1;
 
 constexpr const char *kMinimapWaterShader = R"(
@@ -1160,47 +1158,10 @@ void HudOverlay::set_minimap_state(const Vector2 &p_mission_position,
 	state_.minimap.flip_180 = p_flip_180;
 	state_.minimap.markers.clear();
 
-	if (p_snapshot.size() < kMinimapSnapshotHeaderSize ||
-			p_snapshot[0] != kMinimapSnapshotVersion) {
-		queue_redraw();
-		return;
-	}
-	const int stride = p_snapshot[1];
-	const int declared_count = p_snapshot[2];
-	if (stride < kMinimapSnapshotMinStride || declared_count < 0) {
-		queue_redraw();
-		return;
-	}
-	const int64_t available =
-			(p_snapshot.size() - kMinimapSnapshotHeaderSize) / stride;
-	const int64_t count = std::min<int64_t>(declared_count, available);
-	state_.minimap.markers.reserve(static_cast<size_t>(count));
-	for (int64_t i = 0; i < count; ++i) {
-		const int64_t base = kMinimapSnapshotHeaderSize + i * stride;
-		opennova::hud::HudMinimapMarker marker;
-		marker.bank = static_cast<uint8_t>(p_snapshot[base]);
-		marker.handle = static_cast<uint16_t>(p_snapshot[base + 1]);
-		marker.x = p_snapshot[base + 2];
-		marker.y = p_snapshot[base + 3];
-		marker.z = p_snapshot[base + 4];
-		marker.heading_bam = p_snapshot[base + 5];
-		marker.icon = static_cast<uint8_t>(p_snapshot[base + 6]);
-		marker.color = static_cast<uint32_t>(p_snapshot[base + 7]);
-		marker.flags = static_cast<uint8_t>(p_snapshot[base + 8]);
-		marker.source = static_cast<uint8_t>(p_snapshot[base + 9]);
-		marker.remaining_ticks = static_cast<uint16_t>(p_snapshot[base + 10]);
-		marker.entity_known = p_snapshot[base + 11] != 0;
-		// v3 policy tail: bit0 rotate, bit1 footprint; halves + floor.
-		marker.rotate = (p_snapshot[base + 12] & 1) != 0 ? 1 : 0;
-		marker.footprint = (p_snapshot[base + 12] & 2) != 0 ? 1 : 0;
-		marker.half_x_q16 = p_snapshot[base + 13];
-		marker.half_y_q16 = p_snapshot[base + 14];
-		marker.floor_px = static_cast<uint8_t>(p_snapshot[base + 15]);
-		// v4: the local-team medic bit the marker walk turns into the
-		// red-cross plate in place of the blip.
-		marker.medic = p_snapshot[base + 16] != 0 ? 1 : 0;
-		state_.minimap.markers.push_back(marker);
-	}
+	// The feed layout and its parse are the engine's (hud/hud_minimap_feed.h):
+	// a foreign header leaves the marker list empty.
+	opennova::hud::minimap_feed_decode(p_snapshot.ptr(),
+			static_cast<size_t>(p_snapshot.size()), state_.minimap.markers);
 	queue_redraw();
 }
 
