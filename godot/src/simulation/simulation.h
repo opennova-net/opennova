@@ -59,6 +59,7 @@ class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_view.h>
+#include <runtime/world/vehicle_attach.h> // the attach-command ids + the seat mirror
 #include <runtime/world/round_sim.h> // the hit-zone damage tables (re-exported statics)
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/weapon_fsm.h>
@@ -247,9 +248,9 @@ public:
 	// them to seat filters). [orig: command 123 = sitex only, 124 = reject
 	// ctrlx, 125 = any seat — the Entity_RequestVehicleAttach command gates]
 	enum MountCommand {
-		MOUNT_COMMAND_PASSENGER_ONLY = 123,
-		MOUNT_COMMAND_SKIP_CONTROLLER = 124,
-		MOUNT_COMMAND_ANY_SEAT = 125,
+		MOUNT_COMMAND_PASSENGER_ONLY = opennova::world::kCommandAttachPassengerOnly,
+		MOUNT_COMMAND_SKIP_CONTROLLER = opennova::world::kCommandAttachSkipController,
+		MOUNT_COMMAND_ANY_SEAT = opennova::world::kCommandAttachAnySeat,
 	};
 
 	// The equipped-weapon FSM action ids, re-exported with the engine's values
@@ -1634,6 +1635,10 @@ public:
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
 	// ONE conversion both cameras use [orig: @ 0x58d900].
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
+	// The MCP/probe mirror of the attach-command seat selection over a flat
+	// seat list [{type, occupied, ...}] (world/vehicle_attach.h
+	// predict_seat_selection): {command, seat_index, seat, candidates}.
+	static Dictionary predict_mount_seat(const Array &p_seats, int p_command_id);
 	// The waypoint-track snapshot for the HUD label: {show, count, current,
 	// number, name_id, position (Godot space), done}. current is -1 with no
 	// selection; number is the 1-based display index [orig: hudInfo+373 =

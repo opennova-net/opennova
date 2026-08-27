@@ -41,6 +41,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_loaded"), &Simulation::is_loaded);
 	ClassDB::bind_method(D_METHOD("is_playing"), &Simulation::is_playing);
 	ClassDB::bind_method(D_METHOD("step"), &Simulation::step);
+	ClassDB::bind_static_method("Simulation", D_METHOD("predict_mount_seat", "seats", "command_id"),
+			&Simulation::predict_mount_seat);
 	ClassDB::bind_static_method("Simulation", D_METHOD("tick_dt"),
 			&Simulation::tick_dt);
 	ClassDB::bind_static_method("Simulation", D_METHOD("ticks_from_ms", "ms"),

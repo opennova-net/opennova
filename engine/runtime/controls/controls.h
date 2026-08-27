@@ -74,6 +74,17 @@ struct ActionDef {
 // The full static catalog (pointer + element count).
 const ActionDef *catalog(std::size_t *out_count);
 
+// The manual weapon-switch rows 28..36 in category order — Knife / Secondary /
+// Primary / Flashbang / FragGrenade / SmokeGrenade / Accessory / Detonator /
+// medpack fire the category actions 201..209 (categories 1..9); rows 39/40
+// cycle prev/next. [orig: input cases 200-210 @0x4e1144 ->
+//  Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
+//  Player_CycleWeaponSlot @0x4dfe70]
+inline constexpr int kWeaponCategoryFirstRow = 28;
+inline constexpr int kWeaponCategoryCount = 9;
+// The config token of weapon category `index` (0..8), nullptr out of range.
+const char *weapon_category_token(int index);
+
 // Whether an action is shown in the player-facing remap table — the witnessed
 // per-entry gate (*entry & 0x20) == 0 && (*entry & 0x800) != 0, applied to the
 // catalog flag word (D-CTRL-2 closed: the class-category approximation is

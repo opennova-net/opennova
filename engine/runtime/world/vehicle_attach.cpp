@@ -140,6 +140,55 @@ bool seat_allowed_for_selection(SeatType type, SeatSelectionMode mode) {
 
 } // namespace
 
+bool seat_selection_mode_for_command(int command_id, SeatSelectionMode &out) {
+    switch (command_id) {
+        case kCommandAttachPassengerOnly: out = SeatSelectionMode::PassengerOnly; return true;
+        case kCommandAttachSkipController: out = SeatSelectionMode::RejectController; return true;
+        case kCommandAttachAnySeat: out = SeatSelectionMode::Any; return true;
+        default: return false;
+    }
+}
+
+int32_t seat_priority_weight(SeatType type, bool root_seat) {
+    // [orig: Entity_FindBestSeatSlot @0x4351F0 — the per-type weights]
+    switch (type) {
+        case SeatType::Controller:
+        case SeatType::Driver:
+            return 0x2000;
+        case SeatType::Passenger:
+            return root_seat ? 0x200000 : 0x2000000;
+        case SeatType::Gunner:
+        default:
+            return 0x20000;
+    }
+}
+
+int predict_seat_selection(const std::vector<SeatCandidate> &seats,
+                           const SeatSelectionMode *mode,
+                           std::vector<SeatVerdict> &verdicts) {
+    verdicts.assign(seats.size(), SeatVerdict::kSkippedCommand);
+    int best = -1;
+    int32_t best_weight = 0x7fffffff;
+    for (size_t i = 0; i < seats.size(); ++i) {
+        const SeatCandidate &s = seats[i];
+        if (s.occupied) {
+            verdicts[i] = SeatVerdict::kSkippedOccupied;
+            continue;
+        }
+        const bool allowed = mode != nullptr && s.type != SeatType::None &&
+                             seat_allowed_for_selection(s.type, *mode);
+        if (!allowed) continue; // kSkippedCommand
+        verdicts[i] = SeatVerdict::kEligible;
+        const int32_t weight = seat_priority_weight(s.type, true);
+        if (weight < best_weight) {
+            best_weight = weight;
+            best = static_cast<int>(i);
+        }
+    }
+    if (best >= 0) verdicts[static_cast<size_t>(best)] = SeatVerdict::kSelected;
+    return best;
+}
+
 bool find_best_vehicle_seat(
         const World &world, EntityHandle root_vehicle, EntityHandle occupant,
         VehicleSeatSelection &out, SeatSelectionMode mode) {
@@ -162,19 +211,7 @@ bool find_best_vehicle_seat(
             if (!is_root && is_vehicle_control_seat(seat.type)) continue;
             if (seat.occupant.valid() && seat.occupant != occupant) continue;
 
-            int32_t weight = 0x20000;
-            switch (seat.type) {
-                case SeatType::Controller:
-                case SeatType::Driver:
-                    weight = 0x2000;
-                    break;
-                case SeatType::Passenger:
-                    weight = is_root ? 0x200000 : 0x2000000;
-                    break;
-                case SeatType::Gunner:
-                default:
-                    break;
-            }
+            const int32_t weight = seat_priority_weight(seat.type, is_root);
             if (weight >= best_weight) continue;
             best_weight = weight;
             out.vehicle = candidate.handle;

@@ -15,6 +15,8 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/vehicle_mount.h>
 
+#include <vector>
+
 namespace opennova::world {
 
 class World;
@@ -61,6 +63,37 @@ struct VehicleSeatSelection {
     int seat_index = -1; // seat index, or the armory_points index in armory mode
     SeatType type = SeatType::None;
 };
+
+// The WAC/AI attach-to-seat command ids: 123 accepts sitex (passenger)
+// seats only, 124 rejects ctrlx (controller) seats, 125 takes any seat by
+// the normal best-seat priority [orig: the Entity_RequestVehicleAttach
+// command gates; entity_commands.h].
+inline constexpr int kCommandAttachPassengerOnly = 123;
+inline constexpr int kCommandAttachSkipController = 124;
+inline constexpr int kCommandAttachAnySeat = 125;
+// The seat filter an attach command selects; false = not an attach command.
+bool seat_selection_mode_for_command(int command_id, SeatSelectionMode &out);
+
+// The witnessed seat priority weights (lower wins): root control/driver
+// 0x2000, Gunner 0x20000, root Passenger 0x200000, child Passenger
+// 0x2000000 — the table find_best_vehicle_seat walks.
+// [orig: Entity_FindBestSeatSlot @0x4351F0]
+int32_t seat_priority_weight(SeatType type, bool root_seat);
+
+// The tooling mirror of that selection over a flat seat list (root seats,
+// no child walk) for the MCP mission tools and probes: each candidate's
+// verdict (an occupied seat is skipped before the command filter; a None
+// type or a non-attach command never qualifies) and the pick — the lowest
+// weight, the first on a tie; -1 when none. `mode` null = not an attach
+// command.
+struct SeatCandidate {
+    SeatType type = SeatType::None;
+    bool occupied = false;
+};
+enum class SeatVerdict : uint8_t { kEligible = 0, kSkippedOccupied, kSkippedCommand, kSelected };
+int predict_seat_selection(const std::vector<SeatCandidate> &seats,
+                           const SeatSelectionMode *mode,
+                           std::vector<SeatVerdict> &verdicts);
 
 // FindBestSeatSlot's weighted root+child walk. The requested root is considered
 // first, followed by live entities whose ground_target is that root. Controller

@@ -18,9 +18,8 @@ extends RefCounted
 ## set+72] (every JOX set carries one; the field rename is a tracked
 ## follow-up). See docs/audio/lwf-dbf-sound-re.md.
 
-# The engine volume byte ceiling (member/clamp volumes, emitter fire volume)
-# [orig: e.g. the full-volume emitter fire path passes 255 @ 0x528e20].
-const VOLUME_BYTE_MAX := 255
+# The engine volume byte ceiling and its dB law (engine/runtime/audio/volume_law.h).
+const VOLUME_BYTE_MAX := SoundSelector.VOLUME_BYTE_MAX
 
 # Mirrors LwfData / opennova::audio::SelectionMode selection-mode constants.
 const SELECTION_FIRST := 0
@@ -293,7 +292,7 @@ func spawn_oneshot_2d(parent: Node, name: String, bus: StringName) -> AudioStrea
 		var base_pitch := float(member.get("base_pitch", 1.0))
 		player.pitch_scale = base_pitch if base_pitch > 0.01 else 1.0
 		var volume := int(member.get("volume", 255))
-		player.volume_db = linear_to_db(clampf(float(volume) / 255.0, 0.0001, 1.0))
+		player.volume_db = volume_db_from_255(volume)
 		player.stream = stream
 		parent.add_child(player)
 		player.play()
@@ -341,9 +340,9 @@ func _make_player(stream: AudioStreamWAV, member: Dictionary, bus: StringName, l
 	return player
 
 
-## dB for a 0..255 engine channel volume; 0 -> hard silent.
+## dB for a 0..255 engine channel volume; 0 -> hard silent (the engine's law).
 static func volume_db_from_255(vol255: int) -> float:
-	return linear_to_db(clampf(float(vol255) / 255.0, 0.0001, 1.0)) if vol255 > 0 else -80.0
+	return SoundSelector.volume_db_from_255(vol255)
 
 
 ## The witnessed distance volume curve [orig: SoundBank_CalcDistanceVolPan

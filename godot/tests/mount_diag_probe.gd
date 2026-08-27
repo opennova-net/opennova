@@ -1,6 +1,5 @@
 extends SceneTree
 
-const ItemSeatSpecs := preload("res://game/world/item_seat_specs.gd")
 
 
 func _init() -> void:
@@ -70,10 +69,10 @@ func _init() -> void:
 			target_summary["model"] = String(spec.get("model", ""))
 			target_summary["model_seat_points"] = _model_seat_points(
 					root, String(spec.get("model", "")), seats)
-		var prediction := ItemSeatSpecs.predict_best_seat(seats, command_id)
+		var prediction: Dictionary = Simulation.predict_mount_seat(seats, command_id)
 		rows.append({
 			"organic": _entity_summary(organic, item_db),
-			"command": ItemSeatSpecs.command_rule(command_id),
+			"command": prediction.get("command", {}),
 			"target": target_summary,
 			"prediction": {
 				"seat_index": prediction.get("seat_index", -1),
