@@ -36,8 +36,9 @@ Our own runtime client against both targets (OpenNova server / original NovaWorl
   contract: SessionInit web-domain extraction + `startupurl` template substitution, NWStart step,
   all-fields-EPASK-encrypted login POST + NWLogin poll, identity-cookie seeding, `jop_2.gsb?a=1`,
   full NWJoin query. 20/20 scoped net ctest green; GDExtension builds clean. The JointOperations
-  session stops at the hello (ADR 0009 in-match seam — no gameplay yet). Minor follow-up: decode
-  GSB server-name strings Latin-1→UTF-8 (a `©`/0xA9 name trips a Godot UTF-8 warning).
+  session stops at the hello (ADR 0009 in-match seam — no gameplay yet). The one follow-up this
+  record left without an owner, the Latin-1→UTF-8 GSB server-name decode, is tracked live in
+  [TODO.md](../TODO.md) § Project health follow-ups.
 - Phase 3 (EPASK account login) **LANDED 2026-06-12** against our own server: the binding
   HTTP login chain (prepare GET → login POST → relay GET, cookie jar) + panel username/password
   fields. Session-only (no persistence).
@@ -97,13 +98,14 @@ Our own runtime client against both targets (OpenNova server / original NovaWorl
 
 ## Verification milestones
 
-- [x] Scoped net ctest green on win + mac + ubuntu (PR 3)
-- [x] Local server boot smoke (PR 3)
-- [x] jodemo re-validates browser visibility through the hosts path, no hook (PR 16)
-- [x] Retail JO local end-to-end: gate, login, browse, host, second-client join, teardown (PR 11/16)
-- [x] Unknowns API shows JOINTOPERATIONS PN sightings when a match starts (PR 9)
-- [x] Two-client menu milestone through our game shell (PR 19)
-- [x] novacrypto byte-exact vs retail: NWU + EPASK + PUBcrypto + url_cipher (grill wave 3)
+Seven milestones were run and passed on the trunk: the scoped net ctest green on
+win + mac + ubuntu (PR 3); the local server boot smoke (PR 3); jodemo re-validating
+browser visibility through the hosts path, no hook (PR 16); the retail JO local
+end-to-end run of gate, login, browse, host, second-client join and teardown
+(PR 11/16); the Unknowns API showing JOINTOPERATIONS PN sightings when a match
+starts (PR 9); the two-client menu milestone through our game shell (PR 19); and
+novacrypto byte-exact vs retail for NWU + EPASK + PUBcrypto + url_cipher (grill
+wave 3).
 
 PR 21's two milestones (the production deploy from a docker-only machine and
 the retail JO smoke over the internet) were never run — tracked live in
