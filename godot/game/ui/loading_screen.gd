@@ -26,20 +26,13 @@ extends Control
 ## Shell-neutral presentation mounted by the game shell around GameWorld loads.
 ## No world/menu knowledge lives here.
 
-## Fallback background when the mission has no sidecar image
-## [orig: "loadscrn.pcx" @ 0x521e20].
-const FALLBACK_IMAGE := "loadscrn.pcx"
-## The two composited fonts [orig: "Arials18.fnt" @ 0x521eec, "Arial22.fnt" @ 0x521f5a].
-const FONT_SMALL := "Arials18.fnt"
-const FONT_LARGE := "Arial22.fnt"
-
 ## The layout values (image-space text band, server-message fractions/color,
 ## progress-bar rect/colors, the redraw throttle) are the engine's
 ## HudPos.LOADING_* constants and loading_* statics — the witnesses live at
 ## the engine home, engine/runtime/hud hud/loading_screen.h.
-## Fallback label when the gametext table misses
-## [orig: GameText_GetStringWithFallback("LoadingText", "LT_SERVERMSG", ...) @ 0x522074].
-const MSG_LABEL_FALLBACK := "Message from Game Server"
+## The resource names (the stock background, the two fonts, the server-message
+## label key and its literal fallback) are the engine's HudPos.loading_*
+## statics too.
 
 var _texture: Texture2D = null
 var _has_custom_bg := false
@@ -73,14 +66,10 @@ var _splash_frames_until_emit := 0
 
 
 ## <mission>.bms -> <mission>.pcx: the sidecar image name for a mission file
-## [orig: PathRemoveExtension + Path_ReplaceOrAppendExtension(path, "pcx")
-## @ 0x521d66/0x521dab; resolution is case-insensitive through the VFS].
+## (the engine's rule, hud/loading_screen.h; resolution is case-insensitive
+## through the VFS).
 static func sidecar_image_name(mission_file: String) -> String:
-	var base := mission_file.get_file()
-	var ext := base.get_extension()
-	if not ext.is_empty():
-		base = base.substr(0, base.length() - ext.length() - 1)
-	return base + ".pcx"
+	return HudPos.loading_sidecar_image_name(mission_file)
 
 
 ## The LoadingText key for a numeric session game type, or "" for an unknown
@@ -124,7 +113,7 @@ static func resolve_background(root: ResourceRoot, mission_file: String) -> Dict
 	if root != null and not sidecar.is_empty() and root.has_file(
 			sidecar, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST):
 		return {"name": sidecar, "custom": true}
-	return {"name": FALLBACK_IMAGE, "custom": false}
+	return {"name": HudPos.loading_fallback_image(), "custom": false}
 
 
 ## Public texture-load seam for owners/tests; avoids private-state inspection (ADR 0018).
@@ -157,8 +146,8 @@ func setup(root: ResourceRoot, info: Dictionary) -> void:
 	_mission_name = String(info.get("mission_name", ""))
 	_custom_text = String(info.get("custom_text", ""))
 	_game_type_text = _lookup_loading_text(gametype_text_key(int(info.get("game_type", 0))), "")
-	_font_small = _load_font(root, FONT_SMALL)
-	_font_large = _load_font(root, FONT_LARGE)
+	_font_small = _load_font(root, HudPos.loading_font_small())
+	_font_large = _load_font(root, HudPos.loading_font_large())
 	queue_redraw()
 
 
@@ -203,12 +192,10 @@ func present(force := false) -> void:
 	if _texture == null:
 		return  # no background loaded -> no screen at all [orig: @ 0x586bfd]
 	var now := Time.get_ticks_msec()
-	# Draw when 100 ms elapsed, the reported value changed, or the displayed
-	# value still trails it — the trailing case redraws unthrottled, so the bar
-	# catches a jump quickly, then creeps ahead at the 100 ms cadence
-	# [orig: elapsed >= 100 || this[8] != progress || this[9] < progress @ 0x586c24].
-	var due := now - _last_present_ms >= HudPos.LOADING_PRESENT_INTERVAL_MS \
-		or _last_drawn_reported != _reported or _displayed < _reported
+	# The due rule (interval elapsed, reported changed, or displayed still
+	# trailing) is the engine's, hud/loading_screen.h.
+	var due := HudPos.loading_present_due(now - _last_present_ms,
+			_last_drawn_reported != _reported, _displayed, _reported)
 	if not (force or due):
 		return
 	_last_present_ms = now
@@ -493,7 +480,8 @@ func _draw_session_text() -> void:
 	# The server message block [orig: gate on a non-empty CUSTOMTEXT @ 0x52205f;
 	# the fraction/color witnesses live at the engine home, hud/loading_screen.h].
 	if _font_small != null and not _custom_text.is_empty():
-		var label := _lookup_loading_text("LT_SERVERMSG", MSG_LABEL_FALLBACK) + ":"
+		var label := _lookup_loading_text(HudPos.loading_msg_label_key(),
+				HudPos.loading_msg_label_fallback()) + ":"
 		var mx := int(HudPos.loading_msg_x_frac() * tex_size.x)
 		var mw := int(HudPos.loading_msg_right_frac() * tex_size.x) - mx
 		_draw_wrapped(_font_small, label, mx,

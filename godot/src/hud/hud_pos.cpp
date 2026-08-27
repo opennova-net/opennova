@@ -133,6 +133,13 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_error_row", "stance", "scoped"), &HudPos::crosshair_error_row);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_should_draw", "aimed", "keep_while_aimed"), &HudPos::crosshair_should_draw);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_gametype_text_key", "game_type"), &HudPos::loading_gametype_text_key);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_fallback_image"), &HudPos::loading_fallback_image);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_small"), &HudPos::loading_font_small);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_large"), &HudPos::loading_font_large);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_key"), &HudPos::loading_msg_label_key);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_fallback"), &HudPos::loading_msg_label_fallback);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_sidecar_image_name", "mission_file"), &HudPos::loading_sidecar_image_name);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed", "displayed", "reported"), &HudPos::loading_present_due);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_x_frac"), &HudPos::loading_msg_x_frac);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_right_frac"), &HudPos::loading_msg_right_frac);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_y_frac"), &HudPos::loading_msg_label_y_frac);
@@ -658,6 +665,23 @@ int HudPos::power_fill_span(int p_progress_fp16, int p_extent_px) {
 
 int HudPos::loading_bar_step(int p_displayed, int p_reported) {
 	return opennova::hud::loading_bar_step(p_displayed, p_reported);
+}
+
+String HudPos::loading_fallback_image() { return opennova::hud::kLoadingFallbackImage; }
+String HudPos::loading_font_small() { return opennova::hud::kLoadingFontSmall; }
+String HudPos::loading_font_large() { return opennova::hud::kLoadingFontLarge; }
+String HudPos::loading_msg_label_key() { return opennova::hud::kLoadingServerMessageLabelKey; }
+String HudPos::loading_msg_label_fallback() { return opennova::hud::kLoadingServerMessageLabelFallback; }
+
+String HudPos::loading_sidecar_image_name(const String &p_mission_file) {
+	return String::utf8(opennova::hud::loading_sidecar_image_name(
+			p_mission_file.utf8().get_data()).c_str());
+}
+
+bool HudPos::loading_present_due(int p_elapsed_ms, bool p_reported_changed,
+		int p_displayed, int p_reported) {
+	return opennova::hud::loading_present_due(p_elapsed_ms, p_reported_changed,
+			p_displayed, p_reported);
 }
 
 Vector2i HudPos::loading_bar_fill_span(int p_x, int p_w, int p_displayed) {

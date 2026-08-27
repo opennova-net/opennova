@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 // The mission loading screen's witnessed spec: the GAMETYPE -> LoadingText
 // key policy and the layout/appearance block the shell's LoadingScreen draws
@@ -87,6 +88,43 @@ inline constexpr uint32_t kLoadingBarFillArgb = 0xFFEB0000u;
 
 // Redraw throttle [orig: GetTickCount() - last >= 100 @ 0x586c24].
 inline constexpr int kLoadingPresentIntervalMs = 100;
+
+// Redraw + present when due: the interval elapsed, the reported value
+// changed, or the displayed value still trails it (the trailing case
+// redraws unthrottled so the bar catches a jump quickly, then creeps ahead
+// at the interval cadence) [orig: elapsed >= 100 || this[8] != progress ||
+// this[9] < progress @ 0x586c24, LoadingScreen_UpdateAndPresent @ 0x586be0].
+inline bool loading_present_due(int elapsed_ms, bool reported_changed,
+		int displayed, int reported) {
+	return elapsed_ms >= kLoadingPresentIntervalMs || reported_changed ||
+			displayed < reported;
+}
+
+// The composited resources: the stock background when the mission has no
+// sidecar image [orig: "loadscrn.pcx" @ 0x521e20], the two text fonts
+// [orig: "Arials18.fnt" @ 0x521eec, "Arial22.fnt" @ 0x521f5a], and the
+// server-message label's literal fallback when the gametext table misses
+// [orig: GameText_GetStringWithFallback("LoadingText", "LT_SERVERMSG", ...)
+// @ 0x522074].
+inline constexpr const char *kLoadingFallbackImage = "loadscrn.pcx";
+inline constexpr const char *kLoadingFontSmall = "Arials18.fnt";
+inline constexpr const char *kLoadingFontLarge = "Arial22.fnt";
+inline constexpr const char *kLoadingServerMessageLabelKey = "LT_SERVERMSG";
+inline constexpr const char *kLoadingServerMessageLabelFallback =
+		"Message from Game Server";
+
+// <mission>.bms -> <mission>.pcx: the sidecar image name for a mission file
+// — the file part with its extension replaced (or appended) [orig:
+// PathRemoveExtension + Path_ReplaceOrAppendExtension(path, "pcx")
+// @ 0x521d66/0x521dab; resolution is case-insensitive through the VFS].
+inline std::string loading_sidecar_image_name(const std::string &mission_file) {
+	const size_t slash = mission_file.find_last_of("/\\");
+	std::string base = slash == std::string::npos ? mission_file
+													: mission_file.substr(slash + 1);
+	const size_t dot = base.rfind('.');
+	if (dot != std::string::npos) base.erase(dot);
+	return base + ".pcx";
+}
 
 // The SP start-mission splash at the end of a single-player load with a
 // custom (sidecar) background: the held loading-screen background stays up,

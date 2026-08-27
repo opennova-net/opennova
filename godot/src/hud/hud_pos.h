@@ -130,6 +130,14 @@ public:
 	// unknown) plus the non-integer layout values the LoadingScreen shell
 	// draws with.
 	static String loading_gametype_text_key(int p_game_type);
+	static String loading_fallback_image();
+	static String loading_font_small();
+	static String loading_font_large();
+	static String loading_msg_label_key();
+	static String loading_msg_label_fallback();
+	static String loading_sidecar_image_name(const String &p_mission_file);
+	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed,
+			int p_displayed, int p_reported);
 	static double loading_msg_x_frac();
 	static double loading_msg_right_frac();
 	static double loading_msg_label_y_frac();
