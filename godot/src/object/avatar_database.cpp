@@ -4,6 +4,7 @@
 #include "util/data_format.h"
 
 #include <formats/avatars/avatars.h>
+#include <net/npruntime/join_character_profile.h>
 #include <formats/avatars/preview_animation.h>
 #include <net/npwire/character_id.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
@@ -131,6 +132,8 @@ void AvatarDatabase::_bind_methods() {
 			DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("first_character_id", "alignment"),
 			&AvatarDatabase::first_character_id);
+	ClassDB::bind_method(D_METHOD("character_join_profile", "selection"),
+			&AvatarDatabase::character_join_profile, DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("get_model"), &AvatarDatabase::get_model);
 	ClassDB::bind_method(D_METHOD("set_model", "model"), &AvatarDatabase::set_model);
 
@@ -152,6 +155,7 @@ void AvatarDatabase::clear() {
 	parts.clear();
 	nationalities.clear();
 	diagnostics.clear();
+	registry_dirty_ = true;
 	loaded = false;
 }
 
@@ -223,6 +227,7 @@ void AvatarDatabase::adopt_parsed(const void *avatars_file) {
 		d.message = String(sd.message);
 		diagnostics.push_back(d);
 	}
+	registry_dirty_ = true;
 	loaded = true;
 }
 
@@ -287,6 +292,7 @@ Error AvatarDatabase::load(const String &path) {
 	}
 	adopt_parsed(&file);
 	avatars_free(&file);
+	registry_dirty_ = true;
 	emit_signal("changed");
 	return OK;
 }
@@ -316,6 +322,7 @@ Error AvatarDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resourc
 	adopt_parsed(&file);
 	avatars_free(&file);
 	source_path = file_name;
+	registry_dirty_ = true;
 	emit_signal("changed");
 	return OK;
 }
@@ -417,6 +424,7 @@ void AvatarDatabase::create_empty() {
 	source_path = String();
 	last_error = String();
 	loaded = true;
+	registry_dirty_ = true;
 	emit_signal("changed");
 }
 
@@ -591,97 +599,102 @@ Dictionary AvatarDatabase::resolve_combo(int nat_index, int div_index, int combo
 	return out;
 }
 
+const opennova::npruntime::CharacterRegistry &
+AvatarDatabase::character_registry() const {
+	if (registry_dirty_) {
+		registry_ = opennova::npruntime::CharacterRegistry();
+		for (int ni = 0; ni < static_cast<int>(nationalities.size()); ++ni) {
+			const Nationality &nat = nationalities[ni];
+			for (int di = 0; di < static_cast<int>(nat.divisions.size()); ++di) {
+				const Division &div = nat.divisions[di];
+				for (int ci = 0; ci < static_cast<int>(div.combos.size()); ++ci) {
+					const Combo &combo = div.combos[ci];
+					registry_.add_entry(ni, di, ci, nat.id, div.id, combo.id,
+							nat.alignment, combo.head.voice,
+							combo.head.sex == SEX_FEMALE);
+				}
+			}
+		}
+		registry_dirty_ = false;
+	}
+	return registry_;
+}
+
 Dictionary AvatarDatabase::resolve_character_id(
 		int character_id, int expected_alignment) const {
-	// The packed word carries the AUTHORED nationality/division/combo numbers
-	// plus the alignment bit; the registry decoder matches all four against the
-	// combo entry (+0/+4/+8/+276) — a side-B id never matches a good entry and
-	// vice versa (retail: MinimapSlot_FindByPackedId @0x57a270; packer
-	// lookup_entity_slot_and_pack_entry @0x57ad40 (@0x57ae47), see docs/playerinfo/avatars-re.md).
+	// The registry decode (npruntime/character_registry.h carries the
+	// witness); the resolved combo dictionary is this seam's shape.
 	const uint16_t packed = static_cast<uint16_t>(character_id & 0xffff);
-	const int nationality_id = opennova::character_id::nationality(packed);
-	const int division_id = opennova::character_id::division(packed);
-	const int combo_id = opennova::character_id::combo(packed);
-	const int alignment = opennova::character_id::alignment(packed);
-	if ((expected_alignment == ALIGN_GOOD ||
-			expected_alignment == ALIGN_EVIL) &&
-		alignment != expected_alignment) {
+	const opennova::npruntime::CharacterEntry *entry =
+			character_registry().find_by_packed_id(packed, expected_alignment);
+	if (entry == nullptr) {
 		return Dictionary();
 	}
-
-	for (int ni = 0; ni < static_cast<int>(nationalities.size()); ++ni) {
-		const Nationality &nat = nationalities[ni];
-		if (nat.id != nationality_id || nat.alignment != alignment) {
-			continue;
-		}
-		for (int di = 0; di < static_cast<int>(nat.divisions.size()); ++di) {
-			const Division &div = nat.divisions[di];
-			if (div.id != division_id) {
-				continue;
-			}
-			for (int ci = 0; ci < static_cast<int>(div.combos.size()); ++ci) {
-				if (div.combos[ci].id != combo_id) {
-					continue;
-				}
-				Dictionary out = resolve_combo(ni, di, ci);
-				out["character_id"] = static_cast<int>(packed);
-				out["nationality_index"] = ni;
-				out["division_index"] = di;
-				out["combo_index"] = ci;
-				return out;
-			}
-		}
-	}
-	return Dictionary();
+	Dictionary out = resolve_combo(entry->nationality_index,
+			entry->division_index, entry->combo_index);
+	out["character_id"] = static_cast<int>(packed);
+	out["nationality_index"] = entry->nationality_index;
+	out["division_index"] = entry->division_index;
+	out["combo_index"] = entry->combo_index;
+	return out;
 }
 
 int AvatarDatabase::first_character_id(int alignment) const {
-	// Retail's per-side default: walk the combo registry in file order and pack
-	// the first entry whose alignment matches the side; no side match packs
-	// entry 0; an empty registry packs 0. This is the fresh-profile seed
-	// (PlayerProfile_InitDefaults) AND the reallocation an unknown id gets at
-	// session start / on the client 0x0C fold (retail:
-	// lookup_entity_slot_and_pack_entry @0x57ad40 (loop @0x57ad6b..0x57ad80,
-	// entry-0 fallback @0x57ad84..0x57adda); callers PlayerSession_InitFromProfile
-	// @0x50cada/@0x50cb08, NapiNPClientMsg 0x0C @0x42eafb, see docs/playerinfo/avatars-re.md).
-	int first_any = 0;
-	bool have_any = false;
-	for (const Nationality &nat : nationalities) {
-		for (const Division &div : nat.divisions) {
-			for (const Combo &combo : div.combos) {
-				const int packed = opennova::character_id::pack(
-						nat.id, div.id, combo.id, nat.alignment);
-				if (nat.alignment == alignment) {
-					return packed;
-				}
-				if (!have_any) {
-					first_any = packed;
-					have_any = true;
-				}
-			}
+	return character_registry().first_character_id(alignment);
+}
+
+Dictionary AvatarDatabase::character_join_profile(
+		const Dictionary &p_selection) const {
+	opennova::npruntime::JoinSideSelection saved[2];
+	const Array sides = p_selection.has("side_profiles")
+			? (Array)p_selection["side_profiles"]
+			: Array();
+	for (int side = 0; side < 2 && side < sides.size(); ++side) {
+		if (sides[side].get_type() != Variant::DICTIONARY) {
+			continue;
 		}
+		const Dictionary sd = sides[side];
+		if (sd.is_empty()) {
+			continue;
+		}
+		saved[side].present = true;
+		saved[side].nationality_index = dict_int(sd, "nationality", -1);
+		saved[side].division_index = dict_int(sd, "division", -1);
+		saved[side].combo_index = dict_int(sd, "combo", -1);
+		saved[side].player_class = dict_int(sd, "player_class",
+				opennova::npruntime::kJoinDefaultPlayerClass);
 	}
-	return first_any;
+	const opennova::npruntime::JoinCharacterProfile profile =
+			opennova::npruntime::join_character_profile(character_registry(), saved);
+	Array ids;
+	ids.push_back(static_cast<int>(profile.character_ids[0]));
+	ids.push_back(static_cast<int>(profile.character_ids[1]));
+	Array classes;
+	classes.push_back(profile.player_classes[0]);
+	classes.push_back(profile.player_classes[1]);
+	Array avatars;
+	avatars.push_back(profile.avatars[0]);
+	avatars.push_back(profile.avatars[1]);
+	Dictionary out;
+	out["character_ids"] = ids;
+	out["player_classes"] = classes;
+	out["avatars"] = avatars;
+	out["team_request"] = profile.team_request;
+	return out;
 }
 
 std::vector<AvatarDatabase::CharacterSexRow>
 AvatarDatabase::character_sex_rows() const {
+	// File order, duplicate packed ids first-wins (the registry's walk order).
 	std::vector<CharacterSexRow> rows;
-	for (const Nationality &nat : nationalities) {
-		for (const Division &div : nat.divisions) {
-			for (const Combo &combo : div.combos) {
-				const uint16_t character_id = static_cast<uint16_t>(
-						opennova::character_id::pack(
-								nat.id, div.id, combo.id, nat.alignment));
-				const bool duplicate = std::any_of(rows.begin(), rows.end(),
-						[character_id](const CharacterSexRow &row) {
-							return row.character_id == character_id;
-						});
-				if (!duplicate)
-					rows.push_back(CharacterSexRow{
-							character_id, combo.head.sex == SEX_FEMALE});
-			}
-		}
+	for (const opennova::npruntime::CharacterEntry &entry :
+			character_registry().entries()) {
+		const bool duplicate = std::any_of(rows.begin(), rows.end(),
+				[&entry](const CharacterSexRow &row) {
+					return row.character_id == entry.packed_id;
+				});
+		if (!duplicate)
+			rows.push_back(CharacterSexRow{ entry.packed_id, entry.head_female });
 	}
 	return rows;
 }
@@ -790,5 +803,6 @@ void AvatarDatabase::set_model(const Dictionary &model) {
 		nationalities.push_back(std::move(n));
 	}
 	loaded = true;
+	registry_dirty_ = true;
 	emit_signal("changed");
 }
