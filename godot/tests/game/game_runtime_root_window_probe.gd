@@ -62,7 +62,7 @@ func _run() -> void:
 			"the central Game window receives a rendered texture")
 	if texture_image != null and not texture_image.is_empty():
 		_check(_has_visible_color(texture_image),
-				"resizing the hidden direct composite does not clear the hosted game frame")
+				"resizing the hidden direct composite does not clear the embedded game frame")
 		var viewport_path := OS.get_cache_dir().path_join("game_runtime_viewport_probe.png")
 		if texture_image.save_png(viewport_path) == OK:
 			print("[game-runtime-root-probe] viewport=", viewport_path)
@@ -116,7 +116,7 @@ func _finish(runtime_root) -> void:
 	if is_instance_valid(runtime_root):
 		runtime_root.queue_free()
 		# queue_free is flushed at the end of the next frame; wait one more so
-		# the probe does not report the hosted runtime as an exit-time leak.
+		# the probe does not report the embedded runtime as an exit-time leak.
 		await _wait_frames(2)
 	if _failures.is_empty():
 		print("[game-runtime-root-probe] PASS")

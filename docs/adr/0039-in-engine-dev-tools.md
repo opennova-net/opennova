@@ -35,7 +35,7 @@ integration is not a one-off.
    state, the ImGui context binding — and the window sets each product composes
    onto it. The game's dev tools (`GameDevTools`): `FrameStatsBoard` (the
    fixed-slot per-frame accumulator, transcribed from the retired GDScript board
-   with the same semantics and slot names), `GameWindow` (the mandatory hosted
+   with the same semantics and slot names), `GameWindow` (the mandatory embedded
    runtime surface plus typed Play/Interact requests), `StatsWindow` (the
    retired Stats page's row tree over the board) and `DemoWindow` (ImGui's
    demo, the docking/multi-viewport smoke test). ONED's run surface (`OnedUi`):

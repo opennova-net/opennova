@@ -23,7 +23,7 @@ Two products compose it:
 | `frame_stats_slots.h` | The slot table (X-macro): one entry per measured span or VALUE counter; the engine enum, the `FrameStats` constants and the Stats rows all derive from it |
 | `frame_stats_board.h/.cpp` | The fixed-slot per-frame accumulator (sums, worst-frame peaks, sampled-frame counts) with the capture edge and the atomic drain |
 | `game_dev_tools.h/.cpp` | The game's window set on a pass, with the board hand-off |
-| `game_window.h/.cpp` | The mandatory hosted Game window, its narrow viewport adapter, and typed Play/Interact/Close request policy |
+| `game_window.h/.cpp` | The mandatory embedded Game window, its narrow viewport adapter, and typed Play/Interact/Close request policy |
 | `stats_window.h/.cpp`, `stats_window_rows.h` | The Stats window: the row tree over a drained window, refreshed every 0.5 s |
 | `demo_window.h/.cpp` | ImGui's demo window, the docking/multi-viewport smoke test |
 | `oned_ui.h/.cpp` | ONED's surface: the fields it owns, the state the app pushes, the typed request queue the app drains |

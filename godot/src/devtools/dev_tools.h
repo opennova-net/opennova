@@ -23,7 +23,7 @@ namespace godot {
 class SubViewport;
 
 // The game's dev tools (ADR 0039): the ImGui workspace behind F3 with the
-// hosted Game surface and Stats window. The engine owns the windows
+// embedded Game surface and Stats window. The engine owns the windows
 // (engine/runtime/devtools/game_dev_tools.h); this node is their Godot seam —
 // context/frame hand-off, SubViewport rendering, and typed input-mode requests.
 //

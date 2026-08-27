@@ -1,7 +1,7 @@
 class_name GameRuntimeRoot
 extends Node
 
-## Startup boundary for the optional ImGui-hosted game view. Debug windowed
+## Startup boundary for the optional ImGui-embedded game view. Debug windowed
 ## runs with imgui-godot keep MainGame in one always-updating SubViewport;
 ## release, headless, and missing-addon runs immediately restore MainGame as
 ## the SceneTree's direct current scene.
