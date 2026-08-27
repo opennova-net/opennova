@@ -116,6 +116,15 @@ public:
 	// The games the tool can target: [{id:int, name:String}, ...] from the gameprofile table.
 	static Array list_games();
 
+	// The packed-game policy (engine base/vfs/pack_policy.h + vfs.h's boot
+	// table), re-exported for the packer and the boot-dir probe.
+	static PackedStringArray boot_archive_names();
+	static String pack_archive_name();
+	static PackedStringArray pack_loose_extensions();
+	static PackedStringArray pack_excluded_extensions();
+	static PackedStringArray pack_excluded_dirs();
+	static int pff_name_bytes();
+
 	Error open(const String &path);
 	String get_source_path() const;
 	String get_last_error() const;

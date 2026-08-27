@@ -39,6 +39,17 @@ enum class VfsLookupPolicy { SessionDefault, ForceLooseFirst, ForceArchiveOnly }
 //                 D-VFS-2 records the decision).
 enum class VfsArchiveDiscovery { RetailTable, ScanAll };
 
+// The witnessed fixed boot table [orig: PFF_OpenAllArchives @ 0x4a4310, name
+// table @ 0x829f90 stride 260]: after the expansion pair (slots 0/1), slot 2 =
+// language.pff, 3 = localres.pff, 4 = resource.pff (slot 5 has no writer).
+// Slot order IS lookup precedence; extra .pff files in the root never mount in
+// retail. Any one of them present makes a directory a mountable game dir.
+inline constexpr const char *kBootArchiveTable[] = {
+    "language.pff",
+    "localres.pff",
+    "resource.pff",
+};
+
 struct VfsFileLocation {
     std::string logical_name;                 // entry name, original case
     VfsSource source = VfsSource::LooseDir;

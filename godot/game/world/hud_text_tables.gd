@@ -24,21 +24,12 @@ static func register(root: ResourceRoot, world) -> void:
 	if sim != null and gametext != null \
 			and gametext.has_string_in_section("Server", "STRSRV_MEDREQ"):
 		sim.set_server_text(gametext.get_string_in_section("Server", "STRSRV_MEDREQ"))
-	# The medmssn fallback fires only when the mission .bin does not EXIST — a
-	# present-but-unparseable file loads to nothing with no fallback.
-	# [orig: TextResource_LoadMissionTextBin @0x51ede3 — FileSystem_FileExists picks
-	# the filename; the load result is stored either way]
-	var mission_table: RtxtStringFile = null
-	var mission_bin := ""
+	# The per-mission table: <mission>.bin, else medmssn.bin — the engine's
+	# resolver (runtime_boot resolve_mission_text) owns the fallback rule.
+	var base := ""
 	if world != null:
-		var base: String = String(world.get_loaded_mission_file()).get_basename()
-		if not base.is_empty():
-			mission_bin = base + ".bin"
-	if not mission_bin.is_empty() and root.has_file(mission_bin):
-		mission_table = load_rtxt(root, mission_bin)
-	else:
-		mission_table = load_rtxt(root, "medmssn.bin")
-	Strings.register_table("mission", mission_table)
+		base = String(world.get_loaded_mission_file()).get_basename()
+	Strings.register_table("mission", RtxtStringFile.load_mission_table(root, base))
 
 
 static func load_rtxt(root: ResourceRoot, name: String) -> RtxtStringFile:

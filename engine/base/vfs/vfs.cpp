@@ -495,19 +495,11 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
         return true;
     }
 
-    // The witnessed fixed boot table [orig: PFF_OpenAllArchives @ 0x4a4310,
-    // name table @ 0x829f90 stride 260]: after the expansion pair (slots 0/1,
-    // mounted above), slot 2 = language.pff, 3 = localres.pff,
-    // 4 = resource.pff (slot 5 has no writer). Slot order IS lookup
-    // precedence; extra .pff files in the root never mount in retail. Names
-    // probe case-insensitively (retail opens via _lopen on a case-insensitive
-    // filesystem); a missing archive just leaves its slot empty — only the
-    // all-missing case is fatal at the caller (required-resources.md).
-    static constexpr const char *kBootArchiveTable[] = {
-        "language.pff",
-        "localres.pff",
-        "resource.pff",
-    };
+    // The witnessed fixed boot table (vfs.h kBootArchiveTable) after the
+    // expansion pair mounted above. Names probe case-insensitively (retail
+    // opens via _lopen on a case-insensitive filesystem); a missing archive
+    // just leaves its slot empty — only the all-missing case is fatal at the
+    // caller (required-resources.md).
     for (const char *slot_name : kBootArchiveTable) {
         fs::path direct = root / slot_name;
         if (fs::exists(direct, ec)) {

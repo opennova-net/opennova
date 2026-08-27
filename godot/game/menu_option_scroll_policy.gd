@@ -1,19 +1,14 @@
 extends RefCounted
 
-# The named Options CScrollWnd setup. Each row is [min, max, page], where page
-# is the original inclusive-page field. The reimplementation does not yet own
-# persisted render/audio/input settings, so current=min is the deterministic
-# fallback; a settings owner can replace it through MenuDriver's range setter.
-# [orig: options_screen_init @ 0x554800; UI_PopulateRenderAndAudioSettings
-# @ 0x55c830; untouched page=10 default in CScrollWnd_Construct @ 0x64c450]
-# Seed every witnessed Options slider present in this document; unrelated
-# menus simply make this a no-op.
+# Seeds every witnessed Options slider present in this document from the
+# engine's ranges (engine/runtime/menu/options_policy.h, re-exported by
+# MenuFrame); unrelated menus make this a no-op. current = min is the
+# deterministic seed until a settings owner replaces it through MenuDriver's
+# range setter.
 static func apply(driver: MenuDriver) -> void:
-	apply_one(driver, "GAMMA", 5, 20, 2)
-	apply_one(driver, "SOUNDFXVOLUME", 0, 255, 10)
-	apply_one(driver, "DIALOGVOLUME", 0, 255, 10)
-	apply_one(driver, "MUSICVOLUME", 0, 255, 10)
-	apply_one(driver, "MOUSE_SENSITIVITY", 4, 511, 10)
+	for range in MenuFrame.options_scroll_ranges():
+		apply_one(driver, String(range["control"]), int(range["minimum"]),
+				int(range["maximum"]), int(range["page"]))
 
 
 static func apply_one(driver: MenuDriver, control_name: String,

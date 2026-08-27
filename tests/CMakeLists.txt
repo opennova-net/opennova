@@ -568,6 +568,13 @@ target_link_libraries(resource_index_test PRIVATE opennova_base)
 target_include_directories(resource_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index COMMAND resource_index_test)
 
+# Launch flags + the boot resource-dir ladder (base/resource_index/boot_policy.h).
+add_executable(boot_policy_test resource_index/boot_policy_test.cpp)
+target_link_libraries(boot_policy_test PRIVATE opennova_base)
+target_include_directories(boot_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(boot_policy_test PRIVATE cxx_std_17)
+add_test(NAME boot_policy COMMAND boot_policy_test)
+
 add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cpp)
 target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
