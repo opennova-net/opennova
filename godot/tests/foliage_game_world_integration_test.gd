@@ -1,11 +1,10 @@
 extends GutTest
 
-# Collected production-seam gate for retail foliage. It stages the committed
-# Dvxi5 terrain plus real 3DI geometry under both authored vegetation names,
+# Collected production-seam gate for retail foliage. It stages the synthetic
+# Tmap terrain plus real 3DI geometry under both authored vegetation names,
 # then drives GameWorld exactly through its public load/tick surface.
 
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
-const DVXI5_FIXTURE := "res://../fixtures/godot/dvxi5"
 const ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 const MODEL_FIXTURE := "res://../fixtures/threedi/objects/CmpFireN/CmpFireN.3di"
 const ROUTED_WITNESS_WORLD := Vector2(-120.0, -24.0)
@@ -29,7 +28,7 @@ func after_each() -> void:
 	_cleanup_dir(_fixture_root())
 
 
-func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
+func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	_stage_runtime_fixture()
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(_fixture_root()), OK)
@@ -48,6 +47,7 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 	camera.current = true
 	add_child_autofree(camera)
 	world.set_resource_root(resource_root)
+	world.terrain_file = TestFs.TMAP_TRN
 	world.visible = true
 	assert_eq(world.load_world(), OK)
 
@@ -99,7 +99,7 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 		"MODEL sampling must not inherit detail's flat wrapped match.")
 
 	var defs: Array = data.get_foliage_defs()
-	assert_eq(defs.size(), 2, "Dvxi5 should retain both authored foliage definitions.")
+	assert_eq(defs.size(), 2, "Tmap should retain both authored foliage definitions.")
 	var meshes := VegAssets.resolve_slot_meshes(resource_root, defs)
 	assert_eq(meshes.size(), defs.size())
 	for slot in range(defs.size()):
@@ -154,13 +154,14 @@ func _has_complete_detail_output(dispatcher: FoliageDispatcher, stats: Dictionar
 func _stage_runtime_fixture() -> void:
 	var root := _fixture_root()
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
-	var terrain_source := ProjectSettings.globalize_path(DVXI5_FIXTURE)
-	for filename in DirAccess.get_files_at(terrain_source):
-		_copy_file(terrain_source.path_join(filename), root.path_join(filename))
+	for source in [TestFs.TMAP_FIXTURE_DIR, TestFs.MINIMAL_ASSETS_DIR]:
+		var source_dir := ProjectSettings.globalize_path(source)
+		for filename in DirAccess.get_files_at(source_dir):
+			_copy_file(source_dir.path_join(filename), root.path_join(filename))
 	_copy_file(ProjectSettings.globalize_path(ENV_FIXTURE), root.path_join("full_00.env"))
 	var model_source := ProjectSettings.globalize_path(MODEL_FIXTURE)
-	_copy_file(model_source, root.path_join("mveg5.3di"))
-	_copy_file(model_source, root.path_join("mveg5b.3di"))
+	_copy_file(model_source, root.path_join("bush1.3di"))
+	_copy_file(model_source, root.path_join("bush2.3di"))
 
 
 func _copy_file(source: String, destination: String) -> void:

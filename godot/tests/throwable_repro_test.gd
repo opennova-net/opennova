@@ -12,13 +12,29 @@ extends GutTest
 #  - the thrown grenade flies as its TrcrID item and dies by fuse, never by
 #    ground contact.
 const DEF_FIXTURES := "res://../fixtures/def"
-const TERRAIN_FIXTURE := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
 
 var _sim: Simulation = null
 var _db: WeaponDatabase = null
 var _root: ResourceRoot = null
 var _reinstall_pending := ""
 var _reinstall_ticks := 0
+
+
+var _terrain_root := ""
+
+
+# The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
+# assets it names; one root per test file, removed at the end.
+func _tmap_trn() -> String:
+	if _terrain_root.is_empty():
+		_terrain_root = TestFs.stage_terrain_root("throwable")
+	return _terrain_root.path_join(TestFs.TMAP_TRN)
+
+
+func after_all() -> void:
+	if not _terrain_root.is_empty():
+		TestFs.remove_dir_recursive(_terrain_root)
+		_terrain_root = ""
 
 
 func before_each() -> void:
@@ -241,8 +257,8 @@ func test_grenade_ground_bounces_are_sound_only_until_the_fuse() -> void:
 	_sim.resolve_item_traits(item_db)
 
 	var terrain := TerrainData.new()
-	terrain.set_trn_path(ProjectSettings.globalize_path(TERRAIN_FIXTURE))
-	assert_eq(terrain.load(), OK, "the committed Dvxi5 terrain loads")
+	terrain.set_trn_path(_tmap_trn())
+	assert_eq(terrain.load(), OK, "the committed Tmap terrain loads")
 	assert_true(terrain.is_loaded())
 	_sim.set_terrain_height_field(terrain)
 	var ground := terrain.get_height_world_bilinear(Vector3.ZERO)
@@ -303,7 +319,7 @@ func test_satchel_loadout_can_switch_to_detonator() -> void:
 	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
 	_sim.resolve_item_traits(item_db)
 	var terrain := TerrainData.new()
-	terrain.set_trn_path(ProjectSettings.globalize_path(TERRAIN_FIXTURE))
+	terrain.set_trn_path(_tmap_trn())
 	assert_eq(terrain.load(), OK)
 	_sim.set_terrain_height_field(terrain)
 	var ground := terrain.get_height_world_bilinear(Vector3.ZERO)

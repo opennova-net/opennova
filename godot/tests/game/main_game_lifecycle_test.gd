@@ -5,7 +5,7 @@ extends GutTest
 
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const FIXTURE_DIR := "res://../assets"
-const BAKED_TERRAIN_DIR := "res://../fixtures/godot/dvxi5"
+const BAKED_TERRAIN_DIR := "res://../fixtures/terrain/tmap"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
@@ -23,13 +23,11 @@ const LOCALRES_FILES := [
 ]
 const RESOURCE_FILES := [
 	"mnml.env", "mnml.trn", "mnml_c.tga", "mnml_dm.tga",
-	"mnml_dc1.tga", "mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx",
+	"mnml_dc1.tga", "mnml_dc2.tga", "mnml_dc3.tga", "mnml_dmd.tga", "mnml_d1.tga",
+	"mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx",
 ]
-const BAKED_TERRAIN_FILES := [
-	"Dvxi5.cpt", "Dvxi5_c.tga", "Dvxi5_d1.tga", "Dvxi5_dc1.tga",
-	"Dvxi5_dc2.tga", "Dvxi5_dc3.tga", "Dvxi5_dm.tga", "Dvxi5_dm2.tga",
-	"Dvxi5_dmd.tga", "Dvxi5_f.pcx", "Dvxi5_m.pcx", "TRNTILE10.TGA",
-]
+# The synthetic Tmap terrain (its .trn names the mnml art packed above).
+const BAKED_TERRAIN_FILES := ["Tmap.cpt", "Tmap_f.pcx", "Tmap_m.pcx"]
 # This lifecycle-only armory deliberately resolves the engine fallback as well
 # as the selected profile weapon. The regression must fail if GameWorld mistakes
 # a nonempty WPN_M4AUTO fallback inventory for a mission-authored kit.
@@ -940,7 +938,7 @@ func _make_shell():
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 27,
+	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 31,
 			"the retail-shaped archives contain every minimal fixture resource")
 	var language_entries := _fixture_entries(LANGUAGE_FILES)
 	var localres_entries := _fixture_entries(LOCALRES_FILES)
@@ -978,7 +976,7 @@ func _fixture_entries(filenames: Array) -> Array:
 		# mnml.bms names mnml.trn. Substitute a committed render-capable TRN
 		# while retaining that logical archive name.
 		if filename == "mnml.trn":
-			source = BAKED_TERRAIN_DIR.path_join("Dvxi5.trn")
+			source = BAKED_TERRAIN_DIR.path_join("Tmap.trn")
 		# The in-world screens (ESC pause overlay + armory) pack the real JO
 		# menu fixtures under their retail archive names.
 		elif filename == "game.mnu":

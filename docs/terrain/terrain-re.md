@@ -911,7 +911,9 @@ remains for a *full* (vs partial) R1 record:
   and retail traversal/threshold re-confirmation. The final eight-family
   `lod_sub / 2` selector is closed; this item no longer includes shader
   binding or final mesh-family selection. `cdep_read` / `cdep_roundtrip`
-  already pin the header and encode/decode round-trip against `Dvxi5.cpt`.
+  already pin the header and encode/decode round-trip against the synthetic
+  `fixtures/terrain/tmap/Tmap.cpt`, and `cpt_jo_assets_sweep` (behind
+  `OPENNOVA_JO_ASSETS`) parses every retail `.cpt` including `Dvxi5.cpt`'s header.
 - **Tile-composition mechanics** — close D-TERRAIN-7 by matching the remaining
   scorch updates, retail refresh cadence, remaining ordered draws, and final
   RT edge/address/mip policy. The hosted

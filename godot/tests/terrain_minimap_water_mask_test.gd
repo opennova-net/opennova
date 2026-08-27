@@ -12,11 +12,11 @@ func _depthspin_height(data: TerrainData, at: Vector2i) -> int:
 
 
 func test_minimap_water_mask_reproduces_retail_depthspin_reduction() -> void:
+	var root_dir := TestFs.stage_terrain_root("minimap")
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/godot/dvxi5")), OK)
+	assert_eq(root.set_root_dir(root_dir), OK)
 	var data := TerrainData.new()
-	assert_eq(data.load_from_resource_root(root, "Dvxi5.trn"), OK)
+	assert_eq(data.load_from_resource_root(root, TestFs.TMAP_TRN), OK)
 
 	# Find two real fixture texels on opposite sides of one integer water
 	# plane. The expected height is retail's four raw16 taps followed by >>10,
@@ -60,3 +60,4 @@ func test_minimap_water_mask_reproduces_retail_depthspin_reduction() -> void:
 			"Terrain above the water plane remains available for post-sample rejection.")
 	assert_null(data.build_minimap_water_mask(0.0),
 			"Env_WaterHeightFixed zero suppresses the shore pass.")
+	TestFs.remove_dir_recursive(root_dir)

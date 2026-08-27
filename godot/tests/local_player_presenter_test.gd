@@ -36,7 +36,7 @@ const TEST_ROOT := "local_player_presenter_test"
 var TICK := Simulation.tick_dt()
 
 const MINIMAL_FIXTURE_DIR := "res://../assets"
-const DVXI5_FIXTURE_DIR := "res://../fixtures/godot/dvxi5"
+const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
 const WEAPON_DEF_FIXTURE := "res://../fixtures/def/weapon.def"
 const CHARMODEL_FIXTURE := "res://../fixtures/threedi/3di3/CharModel.3di"
 const SOLDIER_ADM_FIXTURE := "res://../fixtures/anim/soldier.adm"
@@ -70,10 +70,10 @@ func _stage_root() -> String:
 	var root_dir := OS.get_cache_dir().path_join(TEST_ROOT).path_join(
 			"root_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
-	# dvxi5 first (its own items.def loses to minimal's below), then the minimal
-	# mission set: one root serves both the mnml TRN and the baked Dvxi5 CPT
+	# tmap first (its own items.def loses to minimal's below), then the minimal
+	# mission set: one root serves both the mnml TRN and the synthetic Tmap CPT
 	# heightfield (the mission header picks the terrain per load).
-	for dir in [DVXI5_FIXTURE_DIR, MINIMAL_FIXTURE_DIR]:
+	for dir in [TMAP_FIXTURE_DIR, MINIMAL_FIXTURE_DIR]:
 		var source_dir := ProjectSettings.globalize_path(dir)
 		for file_name in DirAccess.get_files_at(source_dir):
 			var target := root_dir.path_join(file_name)
@@ -168,7 +168,7 @@ anim_wpn_switchrank\t"idle.bad"
 
 ## The production load: packaged world scene + injected root + playable auto-spawn
 ## with the M4/satchel kit (the armory-proven canonical profile). `baked_terrain`
-## swaps the mission onto the Dvxi5 CPT heightfield so the ported terrain raycast
+## swaps the mission onto the Tmap CPT heightfield so the ported terrain raycast
 ## has a real surface to measure.
 func _load_player_world(baked_terrain: bool = false) -> GameWorld:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
@@ -186,7 +186,7 @@ func _load_player_world(baked_terrain: bool = false) -> GameWorld:
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	if baked_terrain:
-		assert_true(mission.set_header_string("terrain", "Dvxi5"))
+		assert_true(mission.set_header_string("terrain", "Tmap"))
 		assert_true(mission.set_header_string("environment", "mnml"))
 	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
 	assert_true(world.get_sim().has_local_player(),

@@ -27,7 +27,7 @@ func test_non_default_character_identity_does_not_collapse_to_us01() -> void:
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/godot/dvxi5")), OK)
+			"res://../fixtures/terrain/tmap")), OK)
 	var placer := MissionObjectPlacer.create(root, null)
 	placer.set_avatar_db(avatar_db)
 	var spec := placer.resolve_player_visual_spec(0x14B9, character_id)
@@ -105,7 +105,7 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 
 func test_runtime_player_type_resolves_to_us01_visual_item() -> void:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5")), OK)
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/terrain/tmap")), OK)
 	var placer := MissionObjectPlacer.create(root, null)
 	var db := placer.get_item_db()
 	assert_eq(db.get_graphic(0x14B9), "", "runtime type id is not an items.def authoring id")

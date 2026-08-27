@@ -1012,6 +1012,19 @@ foreach(name crypto_roundtrip cdep_read cdep_roundtrip)
     add_test(NAME ${name} COMMAND ${name}_test)
 endforeach()
 
+# The synthetic terrain map fixtures/terrain/tmap (Tmap.trn/.cpt/_f.pcx):
+# minted by our own writers, byte-compared every run (--write regenerates).
+# The retail .cpt polydata is swept behind OPENNOVA_JO_ASSETS.
+add_executable(minimal_terrain_gen_test fixtures/minimal_terrain_gen.cpp)
+target_link_libraries(minimal_terrain_gen_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(minimal_terrain_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_terrain_gen COMMAND minimal_terrain_gen_test)
+
+add_executable(cpt_jo_assets_sweep_test terrain/cpt_jo_assets_sweep_test.cpp)
+target_link_libraries(cpt_jo_assets_sweep_test PRIVATE opennova_formats)
+target_include_directories(cpt_jo_assets_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(cpt_jo_assets_sweep COMMAND cpt_jo_assets_sweep_test)
+
 add_executable(trn_config_roundtrip_test terrain/trn_config_roundtrip_test.cpp)
 target_link_libraries(trn_config_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(trn_config_roundtrip_test PRIVATE

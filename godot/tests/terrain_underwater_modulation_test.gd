@@ -8,7 +8,23 @@ extends GutTest
 # dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2]. The shader-side
 # math contract lives in terrain_shader_contract_test.gd.
 
-const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
+var _terrain_root := ""
+
+
+# The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
+# assets it names; one root per test file, removed at the end.
+func _tmap_trn() -> String:
+	if _terrain_root.is_empty():
+		_terrain_root = TestFs.stage_terrain_root("underwater")
+	return _terrain_root.path_join(TestFs.TMAP_TRN)
+
+
+func after_all() -> void:
+	if not _terrain_root.is_empty():
+		TestFs.remove_dir_recursive(_terrain_root)
+		_terrain_root = ""
+
+
 const TICK := 1.0 / 62.0
 
 
@@ -18,8 +34,8 @@ func _make_fixture(water_height: float) -> Dictionary:
 	add_child_autofree(vp)
 
 	var data := TerrainData.new()
-	data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
-	assert_eq(data.load(), OK, "the Dvxi5 fixture terrain must load")
+	data.set_trn_path(_tmap_trn())
+	assert_eq(data.load(), OK, "the Tmap fixture terrain must load")
 
 	var terrain: Terrain = Terrain.new()
 	vp.add_child(terrain)
@@ -59,7 +75,7 @@ func test_render_eye_height_flips_the_below_water_uniform() -> void:
 	var water: Node = fixture["water"]
 	var cam: Camera3D = fixture["camera"]
 	assert_true(terrain.get_terrain_material() != null,
-			"the Dvxi5 build must produce the shared surface material")
+			"the Tmap build must produce the shared surface material")
 
 	cam.global_position = Vector3(64.0, 27.0, 64.0)
 	terrain.render_frame()

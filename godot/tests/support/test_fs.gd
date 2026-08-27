@@ -3,6 +3,31 @@ extends RefCounted
 
 ## Scratch-filesystem helpers the GUT suite shares.
 
+## The synthetic terrain map (fixtures/terrain/tmap, minted by
+## tests/fixtures/minimal_terrain_gen.cpp): Tmap.trn names the minimal set's
+## terrain art, so a runtime root is the minimal assets plus the tmap files.
+const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
+const MINIMAL_ASSETS_DIR := "res://../assets"
+const TMAP_TRN := "Tmap.trn"
+const TMAP_TERRAIN := "Tmap"
+
+
+## Stage a runtime root under the cache dir: every tmap fixture file, then
+## every minimal asset over it (the minimal items.def wins). Returns the
+## absolute directory; callers remove it with remove_dir_recursive.
+static func stage_terrain_root(name: String) -> String:
+	var root := OS.get_cache_dir().path_join(
+			"opennova_terrain_%s_%d" % [name, Time.get_ticks_usec()])
+	DirAccess.make_dir_recursive_absolute(root)
+	for source in [TMAP_FIXTURE_DIR, MINIMAL_ASSETS_DIR]:
+		var source_dir := ProjectSettings.globalize_path(source)
+		for file_name in DirAccess.get_files_at(source_dir):
+			var target := root.path_join(file_name)
+			if FileAccess.file_exists(target):
+				DirAccess.remove_absolute(target)
+			DirAccess.copy_absolute(source_dir.path_join(file_name), target)
+	return root
+
 
 ## Delete a directory tree (a missing path is a no-op).
 static func remove_dir_recursive(path: String) -> void:

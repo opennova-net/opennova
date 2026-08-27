@@ -1,6 +1,5 @@
 extends GutTest
 
-const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
 const HOUSE_3DI := "res://../fixtures/threedi/3di3/House.3di"
 # House with a live LOD0 sine rotation row; the same plus material 0's UV
 # generator set to style 1; House with material 0 alpha-tested and
@@ -9,6 +8,23 @@ const HOUSE_3DI := "res://../fixtures/threedi/3di3/House.3di"
 const SYN_HOUSE_SINE := "res://../fixtures/threedi/synthetic/house_lod0_sine_rotx.3di"
 const SYN_HOUSE_SINE_UV1 := "res://../fixtures/threedi/synthetic/house_lod0_sine_rotx_uv1.3di"
 const SYN_HOUSE_UVSCROLL := "res://../fixtures/threedi/synthetic/house_mtrl0_uvscroll16_alphatest.3di"
+
+
+var _terrain_root := ""
+
+
+# The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
+# assets it names; one root per test file, removed at the end.
+func _tmap_trn() -> String:
+	if _terrain_root.is_empty():
+		_terrain_root = TestFs.stage_terrain_root("static_shadow")
+	return _terrain_root.path_join(TestFs.TMAP_TRN)
+
+
+func after_all() -> void:
+	if not _terrain_root.is_empty():
+		TestFs.remove_dir_recursive(_terrain_root)
+		_terrain_root = ""
 
 
 static func _terrain_light_epoch(raw_tuple: Vector3) -> Vector3i:
@@ -45,7 +61,7 @@ func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var old_data: TerrainData = TerrainData.new()
-	old_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	old_data.set_trn_path(_tmap_trn())
 	assert_eq(old_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -75,7 +91,7 @@ func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver
 			"the replacement regression must cancel an executing receiver job, not only queued work")
 	var old_weak: WeakRef = weakref(old_data)
 	var replacement := TerrainData.new()
-	replacement.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	replacement.set_trn_path(_tmap_trn())
 	assert_eq(replacement.load(), OK)
 	terrain.set_terrain_data(replacement)
 	terrain.build()
@@ -121,8 +137,8 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	environment.configure_mission_clock(0x0900, 60)
 
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
-	assert_eq(terrain_data.load(), OK, "the Dvxi5 terrain fixture must load")
+	terrain_data.set_trn_path(_tmap_trn())
+	assert_eq(terrain_data.load(), OK, "the Tmap terrain fixture must load")
 
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -163,8 +179,11 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	var ground_sample := Vector3(64.125, 0.0, 64.125)
 	var point_ground := terrain_data.get_height_world(ground_sample)
 	var bilinear_ground := terrain_data.get_height_world_bilinear(ground_sample)
-	assert_almost_eq(point_ground, 40.5, 0.00001,
-		"the real terrain fixture pins retail's caster-origin point sample")
+	# The synthetic hill's checker cell at atlas (576, 576): the sloped plane
+	# (36 + 8 + 4) minus the checker's 0.5 (minted by
+	# tests/fixtures/minimal_terrain_gen.cpp, which prints this pin every run).
+	assert_almost_eq(point_ground, 47.5, 0.00001,
+		"the synthetic terrain fixture pins retail's caster-origin point sample")
 	assert_gt(absf(point_ground - bilinear_ground), 0.05,
 		"this fixture would catch an accidental return to bilinear caster grounding")
 	var origin := Vector3(ground_sample.x, point_ground, ground_sample.z)
@@ -331,7 +350,7 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	terrain_data.set_trn_path(_tmap_trn())
 	assert_eq(terrain_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -425,7 +444,7 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	terrain_data.set_trn_path(_tmap_trn())
 	assert_eq(terrain_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -504,7 +523,7 @@ func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> voi
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	terrain_data.set_trn_path(_tmap_trn())
 	assert_eq(terrain_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
