@@ -26,9 +26,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			run_id, topology, readiness_mode, str(auto_deploy), str(exercise_motion)])
 	var deadline := Time.get_ticks_msec() + READY_TIMEOUT_MS
 	var last_heartbeat := 0
-	var sequence := 0
 	var witness := ParityJoinerWitness.compose(ParityJoinerWitness.empty_state(),
-			readiness_mode, auto_deploy, exercise_motion, sequence)
+			readiness_mode, auto_deploy, exercise_motion, ParityJoinerWitness.next_heartbeat())
 	while not ctx.cancelled:
 		var now := Time.get_ticks_msec()
 		var state := ParityJoinerWitness.read_state(ctx)
@@ -42,18 +41,16 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 				var ready := ParityJoinerWitness.in_match_ready(state, readiness_mode, auto_deploy) \
 						or ParityJoinerWitness.deploy_hold_ready(state, readiness_mode)
 				if ready:
-					sequence += 1
 					witness = ParityJoinerWitness.compose(state, readiness_mode, auto_deploy,
-							exercise_motion, sequence)
+							exercise_motion, ParityJoinerWitness.next_heartbeat())
 					ctx.progress(witness)
 					ctx.log("joiner ready mode=%s self_handle=%d phase=%d" % [
 							readiness_mode, int(state.self_handle), int(state.joiner_phase)])
 					return ProbeVerdict.passed("joiner ready (%s)" % readiness_mode, witness)
 		if now - last_heartbeat >= HEARTBEAT_INTERVAL_MS:
-			sequence += 1
 			witness = ParityJoinerWitness.compose(
 					state if not state.is_empty() else ParityJoinerWitness.empty_state(),
-					readiness_mode, auto_deploy, exercise_motion, sequence)
+					readiness_mode, auto_deploy, exercise_motion, ParityJoinerWitness.next_heartbeat())
 			ctx.progress(witness)
 			last_heartbeat = now
 		if now >= deadline:

@@ -38,8 +38,17 @@ const FIELDS: PackedStringArray = [
 	"look_samples_per_phase", "heartbeat_sequence", "ticks_msec", "process_id",
 ]
 
+## The process-wide heartbeat count: every witness any of the three probes
+## publishes takes the next value, so the runner's initial/final snapshots
+## (different probe runs) still see a monotonic sequence from one process.
+static var heartbeat := 0
 ## Set by parity_joiner_ready when it sent the default deployment pick.
 static var pick_sent := false
+
+
+static func next_heartbeat() -> int:
+	heartbeat += 1
+	return heartbeat
 ## Set by parity_joiner_motion when the exercise completed: run_id, topology,
 ## steady_started_utc, created_utc, started_ticks_msec, completed_ticks_msec.
 static var exercise: Dictionary = {}

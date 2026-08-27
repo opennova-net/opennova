@@ -171,9 +171,26 @@ function Wait-GameMcpReady {
     throw "no MCP endpoint answered on port $Port within $TimeoutSeconds s"
 }
 
+function Test-GameMcpTransportTimeout {
+    param([Parameter(Mandatory = $true)] $ErrorRecord)
+    $exception = $ErrorRecord.Exception
+    while ($exception) {
+        if ($exception -is [System.Net.WebException] -or
+                $exception.Message -match "timed out|timeout") {
+            return $true
+        }
+        $exception = $exception.InnerException
+    }
+    return $false
+}
+
 # game_probe run + status polling. Returns the final status object; -OnLine
 # receives each new line ({seq, t_ms, text}) as it arrives. Throws only on
 # transport failures or the timeout; the caller judges verdict.ok / state.
+# The game answers its endpoint from the main thread, so a mission load (a
+# joiner's join preload, a big map) can leave a request unanswered for
+# minutes: a transport timeout is retried until the deadline while the
+# process lives, adopting the run the game did start if the request landed.
 function Invoke-GameProbe {
     param(
         [Parameter(Mandatory = $true)] [int] $Port,
@@ -181,25 +198,74 @@ function Invoke-GameProbe {
         [hashtable] $Arguments = @{},
         [int] $TimeoutSeconds = 900,
         [int] $PollMs = 2000,
-        [scriptblock] $OnLine = $null
+        [scriptblock] $OnLine = $null,
+        [System.Diagnostics.Process] $Process = $null
     )
-    $started = Get-StructuredResult (Invoke-GameTool -Port $Port -Name "game_probe" -Arguments @{
-        op = "run"
-        name = $Name
-        args = $Arguments
-    })
-    $runId = [string] $started.run_id
-    $cursor = 0
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $assertAlive = {
+        if ($Process) {
+            $Process.Refresh()
+            if ($Process.HasExited) {
+                throw "the game (PID $($Process.Id)) exited with code $($Process.ExitCode) while probe $Name was requested"
+            }
+        }
+    }
+    $runId = ""
+    while (-not $runId) {
+        try {
+            $started = Get-StructuredResult (Invoke-GameTool -Port $Port -Name "game_probe" -TimeoutSeconds 60 -Arguments @{
+                op = "run"
+                name = $Name
+                args = $Arguments
+            })
+            $runId = [string] $started.run_id
+        }
+        catch {
+            if (-not (Test-GameMcpTransportTimeout $_)) {
+                # The request may have landed before the response was lost:
+                # the game's active run is then this probe.
+                if ($_.Exception.Message -match "another probe|already running|in flight") {
+                    $active = Get-StructuredResult (Invoke-GameTool -Port $Port -Name "game_probe" -TimeoutSeconds 60 -Arguments @{ op = "status"; wait_ms = 0 })
+                    if ([string] $active.name -eq $Name) { $runId = [string] $active.run_id; continue }
+                }
+                throw
+            }
+            & $assertAlive
+            if ([DateTime]::UtcNow -ge $deadline) {
+                throw "the game on port $Port did not accept probe $Name within $TimeoutSeconds s (endpoint unresponsive)"
+            }
+            try {
+                $active = Get-StructuredResult (Invoke-GameTool -Port $Port -Name "game_probe" -TimeoutSeconds 60 -Arguments @{ op = "status"; wait_ms = 0 })
+                if ([string] $active.name -eq $Name -and [string] $active.state -eq "running") {
+                    $runId = [string] $active.run_id
+                    continue
+                }
+            }
+            catch { }
+            Start-Sleep -Seconds 2
+        }
+    }
+    $cursor = 0
     $waitMs = [Math]::Min($PollMs, 30000)
     while ($true) {
-        $status = Get-StructuredResult (Invoke-GameTool -Port $Port -Name "game_probe" `
-            -TimeoutSeconds ([int][Math]::Max(60, ($waitMs / 1000) + 30)) -Arguments @{
-                op = "status"
-                run_id = $runId
-                cursor = $cursor
-                wait_ms = $waitMs
-            })
+        try {
+            $status = Get-StructuredResult (Invoke-GameTool -Port $Port -Name "game_probe" `
+                -TimeoutSeconds ([int][Math]::Max(60, ($waitMs / 1000) + 30)) -Arguments @{
+                    op = "status"
+                    run_id = $runId
+                    cursor = $cursor
+                    wait_ms = $waitMs
+                })
+        }
+        catch {
+            if (-not (Test-GameMcpTransportTimeout $_)) { throw }
+            & $assertAlive
+            if ([DateTime]::UtcNow -ge $deadline) {
+                throw "probe $Name ($runId): the game on port $Port stopped answering status before $TimeoutSeconds s"
+            }
+            Start-Sleep -Seconds 2
+            continue
+        }
         foreach ($line in @($status.lines)) {
             if ($OnLine) { & $OnLine $line }
         }

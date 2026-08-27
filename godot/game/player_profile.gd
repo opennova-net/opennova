@@ -112,7 +112,7 @@ static func save_character_profile(root: ResourceRoot, profile: Dictionary) -> i
 
 # Per-machine stable suffix: with name-match self-ID, a shared default (the old literal
 # "Player") cross-wired any two default-named clients in one session. The two-instance
-# same-machine demo still overrides via NW_LAN_NAME.
+# same-machine demo still overrides via --callsign.
 static func _default_callsign() -> String:
 	var machine := OS.get_unique_id()
 	if machine.is_empty():

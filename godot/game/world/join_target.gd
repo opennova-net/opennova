@@ -2,7 +2,7 @@ class_name JoinTarget
 extends RefCounted
 
 ## Typed record for dialing a co-op host as a JOINER (ADR 0017): the LAN browser row the
-## player activated, the NovaWorld panel's resolved join, or the NW_LAN_JOIN env hook,
+## player activated, the NovaWorld panel's resolved join, or the --lan-join launch flag,
 ## carried shell -> GameWorld.load_mission_as_joiner. Retail LAN enumeration supplies an
 ## ENDPOINT, not a map: the normal path authenticates first and learns the mission from
 ## the S2C 0x7B session record. `mission` is only a browse/debug display hint; the

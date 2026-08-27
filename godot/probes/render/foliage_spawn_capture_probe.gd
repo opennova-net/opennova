@@ -90,6 +90,11 @@ func _run_capture(ctx: ProbeContext) -> void:
 		return
 	_logv(["[spawn-capture] runtime expansion: requested=%s actual=%s mount=packed" % [
 		requested_expansion, runtime_root.get_expansion()]])
+	_report["runtime_expansion"] = {
+		"requested": requested_expansion,
+		"actual": runtime_root.get_expansion(),
+		"mount": "packed",
+	}
 	var world: GameWorld = _world
 	var camera: Camera3D = ctx.camera()
 	if world == null or not world.is_loaded() \
@@ -146,12 +151,19 @@ func _run_capture(ctx: ProbeContext) -> void:
 	if not source_validation_error.is_empty():
 		_fail(source_validation_error)
 		return
+	var runtime_sources: Array = []
 	for entry in winning_entries:
 		_logv(["[spawn-capture] runtime source: logical_name=%s source_type=%s source=%s" % [
 			entry.get("logical_name", ""),
 			entry.get("source_type", ""),
 			entry.get("source_path", entry.get("archive_path", "")),
 		]])
+		runtime_sources.append({
+			"logical_name": String(entry.get("logical_name", "")),
+			"source_type": String(entry.get("source_type", "")),
+			"source": String(entry.get("source_path", entry.get("archive_path", ""))),
+		})
+	_report["runtime_sources"] = runtime_sources
 	_print_snapshot(spawn_state)
 	_print_runtime_metadata(world, environment)
 	_print_model_lighting_trace(world, camera, environment)
@@ -677,7 +689,7 @@ func _print_model_lighting_trace(world, camera: Camera3D, environment) -> void:
 	if sim != null:
 		iris_samples = sim.compute_iris_samples(
 			camera.global_position, -camera.global_basis.z, light_dir)
-	_logv(["[spawn-capture] model lighting trace: ", {
+	var trace := {
 		"local_player_indoors":
 			sim.local_player_indoors() if sim != null else null,
 		"local_player_blink_flags":
@@ -685,7 +697,9 @@ func _print_model_lighting_trace(world, camera: Camera3D, environment) -> void:
 		"local_player_interior_item_id":
 			sim.local_player_interior_item_id() if sim != null else null,
 		"iris_samples": iris_samples,
-	}])
+	}
+	_logv(["[spawn-capture] model lighting trace: ", trace])
+	_report["model_lighting_trace"] = trace
 
 
 func _texture_meta(value: Variant) -> Dictionary:

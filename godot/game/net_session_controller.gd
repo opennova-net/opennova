@@ -101,7 +101,7 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 
 
 ## Public entry for "join this server" — the seam behind the LAN browser's
-## `lan_join_requested` signal, the NovaWorld panel row, the `NW_LAN_JOIN` env
+## `lan_join_requested` signal, the NovaWorld panel row, the `--lan-join` launch flag
 ## hook, and the shell's ADR-0018 delegate. Dial it as a co-op JOINER: the world
 ## loads as a non-authority client that runs the witnessed in-match JOIN and
 ## renders the host + NPCs wire-direct (net-re §5.38b). The LAN row carries only
@@ -156,7 +156,7 @@ func open_novaworld_panel() -> void:
 	_panel_layer.add_child(_novaworld_panel)
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
 	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
-	# NW_LAN_JOIN env use); the panel emits the same typed JoinTarget load_mission_as_joiner
+	# --lan-join launch use); the panel emits the same typed JoinTarget load_mission_as_joiner
 	# consumes. Hosting from the panel routes through the shared host bring-up.
 	_novaworld_panel.join_in_match_requested.connect(_on_novaworld_join_requested)
 	_novaworld_panel.host_requested.connect(_on_novaworld_host_requested)
@@ -204,7 +204,7 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 
 
 # The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match
-# through the SAME joiner entry the LAN browser + NW_LAN_JOIN env use (the target already
+# through the SAME joiner entry the LAN browser + --lan-join launch use (the target already
 # carries host_ip/port/mission/player_name).
 func _on_novaworld_join_requested(target: JoinTarget) -> void:
 	_dismiss_novaworld_panel()

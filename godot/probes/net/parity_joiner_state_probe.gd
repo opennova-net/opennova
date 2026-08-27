@@ -13,7 +13,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var state := ParityJoinerWitness.read_state(ctx)
 	var witness := ParityJoinerWitness.compose(
 			state if not state.is_empty() else ParityJoinerWitness.empty_state(),
-			readiness_mode, auto_deploy, exercise_motion, 1)
+			readiness_mode, auto_deploy, exercise_motion, ParityJoinerWitness.next_heartbeat())
 	ctx.progress(witness)
 	if state.is_empty():
 		return ProbeVerdict.failed("no simulation to witness", witness)

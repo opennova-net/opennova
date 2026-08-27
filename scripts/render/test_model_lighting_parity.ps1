@@ -1,21 +1,24 @@
 [CmdletBinding()]
 param(
-    [string]$GodotPath = $env:GODOT_BIN,
-    [string]$MissionResourceDir = $env:NOVA_MISSION_RESOURCE_DIR,
-    [string]$RuntimeResourceDir = $env:NOVA_RUNTIME_RESOURCE_DIR,
+    [string]$GodotPath = "",
+    [string]$MissionResourceDir = "",
+    [string]$RuntimeResourceDir = "",
     [string]$Expansion = "revx02",
     [string]$Mission = "00TRa.bms",
     [string]$RetailImage,
     [string]$OutputDir,
     [string]$CurrentImage,
     [int]$ExpectedInteriorItemId = 101216,
+    [ValidatePattern("^\d+x\d+$")][string]$Resolution = "1280x720",
+    [ValidateRange(1, 65535)][int]$McpPort = 8975,
     [switch]$SkipCapture
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "..\net\lib.ps1")
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$repoRoot = Get-RepoRoot
 function ConvertTo-RepoAbsolutePath([string]$Path) {
     if ([System.IO.Path]::IsPathRooted($Path)) {
         return [System.IO.Path]::GetFullPath($Path)
@@ -93,126 +96,89 @@ function Get-Median([double[]]$Values) {
 
 if (-not $SkipCapture) {
     if ([string]::IsNullOrWhiteSpace($MissionResourceDir)) {
-        $MissionResourceDir = $env:NOVA_RESOURCE_DIR
+        $MissionResourceDir = Get-OpenNovaMissionCorpus
     }
     if ([string]::IsNullOrWhiteSpace($RuntimeResourceDir)) {
-        $RuntimeResourceDir = $env:OPENNOVA_JO_DIR
+        $RuntimeResourceDir = Get-OpenNovaRetailInstall
     }
-    if ([string]::IsNullOrWhiteSpace($GodotPath)) {
+    if (-not [string]::IsNullOrWhiteSpace($GodotPath)) { $env:GODOT_BIN = $GodotPath }
+    if (-not (Find-GodotBinary)) {
         throw "Set GODOT_BIN or pass -GodotPath to run the capture."
     }
     if ([string]::IsNullOrWhiteSpace($MissionResourceDir)) {
-        throw "Set NOVA_MISSION_RESOURCE_DIR or pass -MissionResourceDir " +
+        throw "Set OPENNOVA_MISSION_CORPUS or pass -MissionResourceDir " +
             "to locate the loose authoring mission."
     }
     if ([string]::IsNullOrWhiteSpace($RuntimeResourceDir)) {
-        throw "Set NOVA_RUNTIME_RESOURCE_DIR or pass -RuntimeResourceDir " +
+        throw "Set OPENNOVA_JO_DIR or pass -RuntimeResourceDir " +
             "to locate the packed retail install."
     }
     if ([string]::IsNullOrWhiteSpace($Expansion)) {
         throw "Pass an explicit -Expansion for the comparison capture."
     }
-    Assert-FileExists $GodotPath "Godot executable"
     if (-not (Test-Path -LiteralPath $MissionResourceDir -PathType Container)) {
         throw "Loose mission authoring directory not found: $MissionResourceDir"
     }
     if (-not (Test-Path -LiteralPath $RuntimeResourceDir -PathType Container)) {
         throw "Packed runtime directory not found: $RuntimeResourceDir"
     }
+    $expectedMissionPath = (Resolve-Path -LiteralPath (
+        Join-Path $MissionResourceDir $Mission)).Path
 
     [void](New-Item -ItemType Directory -Path $OutputDir -Force)
     $captureStarted = [DateTime]::UtcNow
-    $savedEnvironment = @{
-        NOVA_MISSION_RESOURCE_DIR = $env:NOVA_MISSION_RESOURCE_DIR
-        NOVA_RUNTIME_RESOURCE_DIR = $env:NOVA_RUNTIME_RESOURCE_DIR
-        NOVA_EXPANSION = $env:NOVA_EXPANSION
-        NOVA_MISSION_BMS = $env:NOVA_MISSION_BMS
-        NOVA_SPAWN_CAPTURE_DIR = $env:NOVA_SPAWN_CAPTURE_DIR
-        NOVA_MODEL_LIGHTING_TRACE = $env:NOVA_MODEL_LIGHTING_TRACE
-    }
-    try {
-        $env:NOVA_MISSION_RESOURCE_DIR = $MissionResourceDir
-        $env:NOVA_RUNTIME_RESOURCE_DIR = $RuntimeResourceDir
-        $env:NOVA_EXPANSION = $Expansion
-        $env:NOVA_MISSION_BMS = $Mission
-        $env:NOVA_SPAWN_CAPTURE_DIR = $OutputDir
-        $env:NOVA_MODEL_LIGHTING_TRACE = "1"
 
-        # Godot reports known RID leaks on stderr while this probe shuts down.
-        # Capture the complete native stream and let the probe PASS/fresh-image
-        # contract below decide success.
-        $savedErrorPreference = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        try {
-            $probeOutput = @(
-                & $GodotPath --path (Join-Path $repoRoot "godot") `
-                    "res://tests/foliage_spawn_capture_probe.tscn" 2>&1 |
-                    ForEach-Object {
-                        $line = "$_"
-                        if ($line -match "^\[spawn-capture\]" -or
-                            $line -match "^(SCRIPT )?ERROR:" -or
-                            $line -match "^RENDERER PARITY") {
-                            Write-Host $line
-                        }
-                        $line
-                    }
-            )
-            $probeExitCode = $LASTEXITCODE
-        }
-        finally {
-            $ErrorActionPreference = $savedErrorPreference
-        }
+    # One windowed game with its MCP endpoint; the capture is the
+    # foliage_spawn_capture probe (docs/mcp.md), judged by its verdict and the
+    # report it returns -- never by stdout.
+    $game = Start-OpenNovaProcess `
+        -GodotArguments @("--windowed", "--resolution", $Resolution) `
+        -GameArguments @("--resource-dir", $RuntimeResourceDir, "/exp", $Expansion) `
+        -McpPort $McpPort
+    try {
+        $status = Invoke-GameProbe -Port $McpPort -Name "foliage_spawn_capture" `
+            -TimeoutSeconds 900 -Arguments @{
+                mission = $Mission
+                mission_path = $expectedMissionPath
+                expansion = $Expansion
+                output_dir = $OutputDir
+                model_lighting_trace = $true
+            } -OnLine { param($line) Write-Host $line.text }
     }
     finally {
-        foreach ($name in $savedEnvironment.Keys) {
-            $value = $savedEnvironment[$name]
-            if ($null -eq $value) {
-                Remove-Item "Env:$name" -ErrorAction SilentlyContinue
-            }
-            else {
-                Set-Item "Env:$name" $value
-            }
-        }
+        $null = Stop-GameViaMcp -Port $McpPort -Process $game
+        Stop-OpenNovaProcess -Process $game
     }
 
-    # The current capture scene reports known Godot RID leaks at shutdown, so its
-    # native exit code is not the oracle. A fresh image plus the probe's own PASS
-    # line is required; any launch/load/capture failure still remains fatal.
-    if (-not ($probeOutput -match
-        "\[spawn-capture\] PASS: exact frozen player-spawn state in both images")) {
-        throw "Capture probe did not report PASS (native exit $probeExitCode)."
+    if ([string] $status.state -ne "passed" -or -not $status.verdict -or
+            -not [bool] $status.verdict.ok) {
+        $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+        throw "Capture probe did not PASS (state=$($status.state)): $why"
     }
-    $expansionPattern = (
-        "\[spawn-capture\] runtime expansion: requested={0} " +
-        "actual={0} mount=packed"
-    ) -f [regex]::Escape($Expansion)
-    if (-not ($probeOutput -match $expansionPattern)) {
+    $report = $status.verdict.data
+    if (-not $report -or -not ($report.PSObject.Properties.Name -contains "runtime_expansion")) {
+        throw "Capture probe returned no runtime expansion report."
+    }
+    $expansionReport = $report.runtime_expansion
+    if ([string] $expansionReport.requested -cne $Expansion -or
+            [string] $expansionReport.actual -cne $Expansion -or
+            [string] $expansionReport.mount -ne "packed") {
         throw "Capture did not prove the requested packed expansion '$Expansion'."
     }
-    $sourceLines = @($probeOutput | Where-Object {
-        "$_" -match "^\[spawn-capture\] runtime source:"
-    })
-    if ($sourceLines.Count -lt 3) {
+    $sources = @($report.runtime_sources)
+    if ($sources.Count -lt 3) {
         throw "Capture did not report the exact mission and packed dependency sources."
     }
-    $expectedMissionPath = (Resolve-Path -LiteralPath (
-        Join-Path $MissionResourceDir $Mission)).Path
     $sawExactLooseMission = $false
-    foreach ($line in $sourceLines) {
-        $sourceMatch = [regex]::Match("$line", (
-            '^\[spawn-capture\] runtime source: logical_name=(?<logical>\S+) ' +
-            'source_type=(?<type>\S+) source=(?<source>.+)$'))
-        if (-not $sourceMatch.Success) {
-            throw "Capture reported a malformed winning source: $line"
-        }
-        $logicalName = $sourceMatch.Groups['logical'].Value
-        $sourceType = $sourceMatch.Groups['type'].Value
-        $sourcePath = $sourceMatch.Groups['source'].Value
+    foreach ($source in $sources) {
+        $logicalName = [string] $source.logical_name
+        $sourceType = [string] $source.source_type
+        $sourcePath = [string] $source.source
         if ($sourceType -ieq 'pff') {
             if (-not $sourcePath.EndsWith('.pff',
                     [System.StringComparison]::OrdinalIgnoreCase) -or
                     -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-                throw "Capture reported a missing packed dependency source: $line"
+                throw "Capture reported a missing packed dependency source: $logicalName <- $sourcePath"
             }
             continue
         }
@@ -222,15 +188,14 @@ if (-not $SkipCapture) {
             $sawExactLooseMission = $true
             continue
         }
-        throw "Capture reported an unexpected loose dependency source: $line"
+        throw "Capture reported an unexpected loose dependency source: $logicalName <- $sourcePath"
     }
     if (-not $sawExactLooseMission) {
         throw "Capture did not report the exact saved loose mission $expectedMissionPath."
     }
     if ($ExpectedInteriorItemId -gt 0) {
-        $interiorPattern = '"local_player_interior_item_id":\s*{0}\b' -f
-            $ExpectedInteriorItemId
-        if (-not ($probeOutput -match $interiorPattern)) {
+        $trace = $report.model_lighting_trace
+        if (-not $trace -or [int] $trace.local_player_interior_item_id -ne $ExpectedInteriorItemId) {
             throw "Capture did not resolve expected interior items.def id " +
                 "$ExpectedInteriorItemId."
         }

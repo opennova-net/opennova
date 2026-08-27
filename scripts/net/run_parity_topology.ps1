@@ -56,7 +56,18 @@ param(
     [string] $OnHookMcpPath,
 
     [Parameter(Mandatory = $true)]
-    [string] $GodotLauncher
+    [string] $GodotLauncher,
+
+    [ValidateRange(1, 65535)]
+    [int] $HostMcpPort = 8975,
+
+    [ValidateRange(1, 65535)]
+    [int] $JoinerMcpPort = 8976,
+
+    # Diagnostic only: accept OpenNova launches through the plain runtime
+    # executable (no console-wrapper job). A verdict-bearing run needs the
+    # wrapper's ownership proof; the summary records the relaxation.
+    [switch] $AllowDirectRuntime
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,6 +88,9 @@ if ($ReadinessMode -eq "deploy_hold" -and ($AutoDeploy -or $ExerciseInput)) {
 }
 if ($WireOnly -and $Topology -ne "OR") {
     throw "WireOnly is an OR-only diagnostic mode."
+}
+if ($HostMcpPort -eq $JoinerMcpPort) {
+    throw "HostMcpPort and JoinerMcpPort must differ."
 }
 if (-not $WireOnly) {
     [uint32] $wireGameType = 0
@@ -139,14 +153,13 @@ $CaptureScript = Join-Path $Repo "scripts\net\capture.ps1"
 $HostScript = Join-Path $Repo "scripts\net\host_opennova.ps1"
 $JoinScript = Join-Path $Repo "scripts\net\join_opennova.ps1"
 $NetLib = Join-Path $Repo "scripts\net\lib.ps1"
-$RetailScript = Join-Path $Repo "scripts\net\launch_retail_cfg.ps1"
 $ProbeExe = Join-Path $Repo "build\apps\nw_lan_probe\Release\nw-lan-probe.exe"
 $InputExerciseScript = Join-Path $Repo "scripts\net\exercise_retail_input.ps1"
 $WireReadyScript = Join-Path $Repo "scripts\net\wait_parity_wire_ready.ps1"
 
 foreach ($required in @(
     $ServerDir, $ClientDir, $McpExe, $GodotLauncher, $CaptureScript, $HostScript,
-    $JoinScript, $NetLib, $RetailScript, $ProbeExe, $InputExerciseScript,
+    $JoinScript, $NetLib, $ProbeExe, $InputExerciseScript,
     $WireReadyScript
 )) {
     if (-not (Test-Path -LiteralPath $required)) {
@@ -188,11 +201,10 @@ $script:SteadyCompletedUtc = ""
 $script:OpenNovaHostStartOwnership = $null
 $script:CaptureTailMarker = $null
 $script:ExternalCaptureProof = $null
-$script:MotionGatePath = ""
 $script:MotionGateWitness = $null
 $script:WireReadyWitness = $null
-$script:OpenNovaJoinerStopRequestPath = ""
-$script:OpenNovaJoinerShutdownWitnessPath = ""
+$script:JoinerReadyRunId = ""
+$script:JoinerMotionRunId = ""
 $script:OpenNovaJoinerShutdownWitness = $null
 $script:OpenNovaJoinerCooperativeStopAttempted = $false
 $script:OpenNovaJoinerExactFallbackRequired = $false
@@ -263,21 +275,13 @@ function Invoke-OnHookTool {
     return $result
 }
 
-function Get-StructuredResult {
-    param([Parameter(Mandatory = $true)] $ToolResult)
-    if (-not ($ToolResult.PSObject.Properties.Name -contains "structuredContent")) {
-        throw "Tool response has no structuredContent"
-    }
-    return $ToolResult.structuredContent
-}
-
 function Stop-ExactProcess {
     param([System.Diagnostics.Process] $Process)
     if (-not $Process) { return }
     if ($Process.PSObject.Properties['OpenNovaLaunchProof']) {
         # The official console wrapper owns a KILL_ON_JOB_CLOSE job. Preserve
         # that lifecycle contract even when its proven runtime has exited.
-        Stop-OpenNovaLanProcess -Process $Process
+        Stop-OpenNovaProcess -Process $Process
         return
     }
     try {
@@ -324,10 +328,11 @@ function Register-OpenNovaLaunchProof {
     }
     $proof = $proofProperty.Value
     if ([string] $proof.schema -cne 'opennova.godot-process-ownership.v1' -or
-            -not [bool] $proof.wrapper_used -or
+            (-not [bool] $proof.wrapper_used -and -not $AllowDirectRuntime) -or
             [int] $proof.runtime_pid -ne $Process.Id -or
             [int] $proof.launcher_pid -ne $launcherProperty.Value.Id -or
-            [int] $proof.runtime_parent_pid -ne [int] $proof.launcher_pid -or
+            ([bool] $proof.wrapper_used -and
+                [int] $proof.runtime_parent_pid -ne [int] $proof.launcher_pid) -or
             -not [bool] $proof.parent_verified -or
             -not [bool] $proof.argv_verified -or
             -not [bool] $proof.active_execution_verified) {
@@ -512,61 +517,70 @@ function Publish-MotionGate {
     if (-not $script:SteadyStartedUtc -or $script:SteadyCompletedUtc) {
         throw "Motion gate publication must immediately follow steady-window start"
     }
-    if (-not $script:MotionGatePath) {
-        throw "Exercised OpenNova joiner has no bound motion-gate path"
+    if ($script:JoinerMotionRunId) {
+        throw "Motion gate must be create-new for run $RunId"
     }
     $script:OpenNovaJoiner.Refresh()
     if ($script:OpenNovaJoiner.HasExited) {
         throw "OpenNova joiner exited before motion-gate publication"
-    }
-    $gatePath = $script:MotionGatePath
-    $gateTemp = "$gatePath.tmp"
-    if ((Test-Path -LiteralPath $gatePath) -or
-            (Test-Path -LiteralPath $gateTemp)) {
-        throw "Motion gate must be create-new: $gatePath"
     }
     $started = [DateTimeOffset]::Parse(
         $script:SteadyStartedUtc,
         [Globalization.CultureInfo]::InvariantCulture,
         [Globalization.DateTimeStyles]::RoundtripKind
     ).ToUniversalTime()
-    $created = [DateTimeOffset]::UtcNow
+    $requestedUtc = [DateTimeOffset]::UtcNow
+    if ($requestedUtc -lt $started -or ($requestedUtc - $started).TotalMilliseconds -gt 2000.0) {
+        throw "Motion gate was not requested immediately after steady-window start"
+    }
+    # The exercise runs inside the joiner (walk/strafe/turn through its real
+    # input path) and blocks until complete; its witness is the verdict data.
+    $status = Invoke-GameProbe -Port $JoinerMcpPort -Name "parity_joiner_motion" -Process $script:OpenNovaJoiner `
+        -TimeoutSeconds 60 -PollMs 500 -Arguments @{
+            run_id = $RunId
+            topology = $Topology
+            steady_started_utc = $script:SteadyStartedUtc
+            readiness_mode = $ReadinessMode
+            auto_deploy = [bool] $AutoDeploy
+        }
+    $script:JoinerMotionRunId = [string] $status.run_id
+    if ([string] $status.state -ne "passed" -or -not $status.verdict -or
+            -not [bool] $status.verdict.ok) {
+        $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+        throw "OpenNova joiner motion exercise did not complete: state=$($status.state) $why"
+    }
+    $witness = $status.verdict.data
+    if (-not [bool] $witness.motion_complete -or -not [bool] $witness.motion_gate_observed -or
+            [string] $witness.motion_gate_run_id -cne $RunId -or
+            [string] $witness.motion_gate_steady_started_utc -cne $script:SteadyStartedUtc -or
+            [int] $witness.process_id -ne $script:OpenNovaJoiner.Id) {
+        throw "OpenNova joiner motion witness does not bind this run"
+    }
+    $created = ConvertFrom-RunnerStrictUtcTimestamp ([string] $witness.motion_gate_created_utc)
     if ($created -lt $started -or ($created - $started).TotalMilliseconds -gt 2000.0) {
         throw "Motion gate was not created immediately after steady-window start"
     }
-    $detail = [pscustomobject]@{
-        schema = 1
+    $script:MotionGateWitness = [pscustomobject]@{
+        schema = "opennova.parity-motion-gate.v2"
         run_id = $RunId
         topology = $Topology
         joiner_pid = $script:OpenNovaJoiner.Id
+        joiner_mcp_port = $JoinerMcpPort
+        probe_run_id = $script:JoinerMotionRunId
         steady_started_utc = $script:SteadyStartedUtc
-        created_utc = $created.UtcDateTime.ToString("o")
-        pre_roll_ms = 250
-        inter_phase_gap_ms = 250
-        look_samples_per_phase = 20
+        created_utc = [string] $witness.motion_gate_created_utc
+        pre_roll_ms = [int] $witness.motion_pre_roll_ms
+        inter_phase_gap_ms = [int] $witness.motion_inter_phase_gap_ms
+        look_samples_per_phase = [int] $witness.look_samples_per_phase
+        started_ticks_msec = [int64] $witness.motion_started_ticks_msec
+        completed_ticks_msec = [int64] $witness.motion_completed_ticks_msec
         forward_ms = 1800
         forward_look = 320
         strafe_ms = 1200
         strafe_look = -320
         return_ms = 900
         return_look = 160
-    }
-    $gateJson = $detail | ConvertTo-Json -Depth 5 -Compress
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($gateTemp, $gateJson, $utf8NoBom)
-    Move-Item -LiteralPath $gateTemp -Destination $gatePath
-    $gateItem = Get-Item -LiteralPath $gatePath
-    $script:MotionGateWitness = [pscustomobject]@{
-        path = $gatePath
-        sha256 = (Get-FileHash -LiteralPath $gatePath `
-            -Algorithm SHA256).Hash.ToLowerInvariant()
-        run_id = $RunId
-        topology = $Topology
-        joiner_pid = $script:OpenNovaJoiner.Id
-        created_utc = $detail.created_utc
-        steady_started_utc = $script:SteadyStartedUtc
-        file_last_write_utc = $gateItem.LastWriteTimeUtc.ToString("o")
-        detail = $detail
+        detail = ConvertTo-OpenNovaJoinerReadinessSnapshot $witness
     }
 }
 
@@ -765,35 +779,48 @@ function Stop-RetailProcessCapture {
     $null = $script:RetailInstanceIds.Remove($InstanceId)
 }
 
-function Set-RetailHostConfig {
-    $serverCfg = Join-Path $ServerDir "onhook.cfg"
-    Set-OnHookOwnedConfigValues -Path $serverCfg -Values @{
-        LanHostMission = $Mission
-        LanHostPort = [string] $Port
-        LanHostCallsign = $HostCallsign
-        LanHostGameType = [string] $GameType
-        LanHostMaxPlayers = "4"
+# Retail is launched only through onhook-mcp. Its role tools must return the
+# exact process (pid + instance_id) like onhook_run_lan_pair does and render
+# the role's onhook.cfg from their arguments; until the upstream tools do,
+# these cells stop with a named error instead of guessing at a process.
+function Assert-OnHookRoleLaunch {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Tool,
+        [Parameter(Mandatory = $true)] $Result
+    )
+    foreach ($name in @("pid", "instance_id", "run_id", "capture_path")) {
+        if (-not ($Result.PSObject.Properties.Name -contains $name) -or
+                [string]::IsNullOrWhiteSpace([string] $Result.$name)) {
+            throw "UPSTREAM BLOCKER (onhook-mcp): $Tool returned no '$name'; the role tools must return pid/instance_id/run_id/capture_path like onhook_run_lan_pair and render onhook.cfg from their arguments (TODO.md)."
+        }
     }
-    Bind-EffectiveRetailConfig -Role server -Source $serverCfg
-}
-
-function Set-RetailJoinerConfig {
-    $clientCfg = Join-Path $ClientDir "onhook.cfg"
-    Set-OnHookOwnedConfigValues -Path $clientCfg -Values @{
-        LanJoinAddress = "127.0.0.1"
-        LanJoinPort = [string] $Port
-        LanJoinCallsign = $JoinerCallsign
+    if ([int] $Result.pid -le 0) {
+        throw "UPSTREAM BLOCKER (onhook-mcp): $Tool returned pid $($Result.pid)."
     }
-    Bind-EffectiveRetailConfig -Role client -Source $clientCfg
 }
 
 function Start-RetailHostExact {
-    Set-RetailHostConfig
     $hostDir = Join-Path $RunRoot "host"
     New-Item -ItemType Directory -Path $hostDir -Force | Out-Null
-    $script:RetailHostProcess = & $RetailScript -GameDir $ServerDir `
-        -RunId "$RunId-host" -OutputDir $hostDir -PassThru
-    if (-not $script:RetailHostProcess) { throw "Retail host launcher returned no process" }
+    $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_host_lan" -Arguments @{
+        mission = $Mission
+        game_dir = $ServerDir
+        expansion = $Expansion
+        port = $Port
+        callsign = $HostCallsign
+        game_type = [string] $GameType
+        max_players = 4
+        run_id = "$RunId-host"
+        output_dir = $hostDir
+        capture = $true
+        windowed = $true
+        allow_many = $true
+        wait_timeout_ms = 240000
+    })
+    Assert-OnHookRoleLaunch -Tool "onhook_host_lan" -Result $result
+    $script:OwnedRetailRuns.Add([string] $result.run_id)
+    $script:RetailHostProcess = Get-Process -Id ([int] $result.pid) -ErrorAction Stop
+    Bind-EffectiveRetailConfig -Role server -Source (Join-Path $ServerDir "onhook.cfg")
     $probeOutput = @(& $ProbeExe --host 127.0.0.1 --port $Port --timeout-ms 240000 `
         --interval-ms 1000 --expect-name $ServerName)
     if ($LASTEXITCODE -ne 0) {
@@ -803,18 +830,31 @@ function Start-RetailHostExact {
     $ownership = Assert-RetailHostOwnsPort -ProcessId $script:RetailHostProcess.Id
     return [pscustomobject]@{
         process = $script:RetailHostProcess
-        capture_path = Join-Path $hostDir "traffic.pcap"
+        capture_path = [string] $result.capture_path
         port_ownership = $ownership
     }
 }
 
 function Start-RetailJoinerExact {
-    Set-RetailJoinerConfig
     $joinerDir = Join-Path $RunRoot "joiner"
     New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
-    $script:RetailJoinerProcess = & $RetailScript -GameDir $ClientDir `
-        -RunId "$RunId-joiner" -OutputDir $joinerDir -PassThru
-    if (-not $script:RetailJoinerProcess) { throw "Retail joiner launcher returned no process" }
+    $result = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_join_lan" -Arguments @{
+        game_dir = $ClientDir
+        expansion = $Expansion
+        join_address = "127.0.0.1"
+        port = $Port
+        callsign = $JoinerCallsign
+        run_id = "$RunId-joiner"
+        output_dir = $joinerDir
+        capture = $true
+        windowed = $true
+        allow_many = $true
+        wait_timeout_ms = 240000
+    })
+    Assert-OnHookRoleLaunch -Tool "onhook_join_lan" -Result $result
+    $script:OwnedRetailRuns.Add([string] $result.run_id)
+    $script:RetailJoinerProcess = Get-Process -Id ([int] $result.pid) -ErrorAction Stop
+    Bind-EffectiveRetailConfig -Role client -Source (Join-Path $ClientDir "onhook.cfg")
     $instance = Wait-RetailProcessForPeer -ProcessId $script:RetailJoinerProcess.Id `
         -Role joiner -RequireInMatch:($ReadinessMode -eq "in_match")
     $instanceId = [string] $instance.instance_id
@@ -825,7 +865,7 @@ function Start-RetailJoinerExact {
         process = $script:RetailJoinerProcess
         instance = $instance
         instance_id = $instanceId
-        capture_path = Join-Path $joinerDir "traffic.pcap"
+        capture_path = [string] $result.capture_path
     }
 }
 
@@ -945,87 +985,37 @@ function Stop-OpenNovaJoinerCooperatively {
     if ($process.HasExited) {
         throw "OpenNova joiner exited before a cooperative stop could be requested"
     }
-    if ([string]::IsNullOrWhiteSpace($script:OpenNovaJoinerStopRequestPath) -or
-            [string]::IsNullOrWhiteSpace($script:OpenNovaJoinerShutdownWitnessPath)) {
-        throw "OpenNova joiner has no bound cooperative shutdown paths"
-    }
-    $requestPath = $script:OpenNovaJoinerStopRequestPath
-    $ackPath = $script:OpenNovaJoinerShutdownWitnessPath
-    $requestTemp = "$requestPath.tmp"
-    if ((Test-Path -LiteralPath $requestPath) -or
-            (Test-Path -LiteralPath $requestTemp) -or
-            (Test-Path -LiteralPath $ackPath)) {
-        throw "Cooperative shutdown request/ack artifacts must be create-new"
-    }
+    # Cancel any probe, ask the game to quit through its endpoint, and give it
+    # 20 seconds; the process-shutdown evidence then proves the clean exit.
     $requestedUtc = [DateTime]::UtcNow.ToString("o")
-    $request = [ordered]@{
-        schema = "opennova.parity-joiner-stop-request.v1"
+    $quitAcknowledged = Stop-GameViaMcp -Port $JoinerMcpPort -Process $process -TimeoutSeconds 20
+    if (-not $quitAcknowledged) {
+        throw "OpenNova joiner did not exit within 20 seconds of game_control quit"
+    }
+    $shutdown = Stop-OpenNovaProcess -Process $process `
+        -GracefulTimeoutMs 0 -PassThruShutdownEvidence -QuitRequested
+    if ([bool] $shutdown.exact_fallback_required -or $null -eq $shutdown.exit_code -or
+            [int] $shutdown.exit_code -ne 0) {
+        throw "OpenNova joiner cooperative shutdown was not clean: exact_fallback_required=$($shutdown.exact_fallback_required) exit_code=$($shutdown.exit_code)"
+    }
+    $requested = ConvertFrom-RunnerStrictUtcTimestamp $requestedUtc
+    $completed = ConvertFrom-RunnerStrictUtcTimestamp ([string] $shutdown.completed_utc)
+    $processStarted = [DateTimeOffset]::new($process.StartTime.ToUniversalTime())
+    if ($requested -lt $processStarted -or $completed -lt $requested -or
+            $completed -gt $requested.AddSeconds(25)) {
+        throw "OpenNova joiner shutdown timestamps drifted"
+    }
+    $script:OpenNovaJoinerShutdownWitness = [pscustomobject][ordered]@{
+        schema = "opennova.parity-joiner-shutdown.v2"
         run_id = $RunId
         topology = $Topology
-        pid = $process.Id
+        process_id = [int] $process.Id
+        mcp_port = $JoinerMcpPort
         requested_utc = $requestedUtc
-    }
-    $stream = [IO.File]::Open($requestTemp, [IO.FileMode]::CreateNew,
-        [IO.FileAccess]::Write, [IO.FileShare]::None)
-    try {
-        $writer = [IO.StreamWriter]::new($stream, [Text.UTF8Encoding]::new($false))
-        try { $writer.WriteLine(($request | ConvertTo-Json -Compress)) }
-        finally { $writer.Dispose() }
-    }
-    finally { $stream.Dispose() }
-    [IO.File]::Move($requestTemp, $requestPath)
-
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
-    do {
-        $process.Refresh()
-        if ($process.HasExited -and (Test-Path -LiteralPath $ackPath -PathType Leaf)) {
-            break
-        }
-        Start-Sleep -Milliseconds 100
-    } while ([DateTime]::UtcNow -lt $deadline)
-    $process.Refresh()
-    if (-not $process.HasExited -or -not (Test-Path -LiteralPath $ackPath -PathType Leaf)) {
-        throw "OpenNova joiner did not exit with a shutdown acknowledgement within 20 seconds"
-    }
-    if ($process.ExitCode -ne 0) {
-        throw "OpenNova joiner cooperative shutdown exited with code $($process.ExitCode)"
-    }
-
-    [byte[]] $raw = [IO.File]::ReadAllBytes($ackPath)
-    if ($raw.Length -eq 0 -or ($raw.Length -ge 3 -and
-            $raw[0] -eq 0xef -and $raw[1] -eq 0xbb -and $raw[2] -eq 0xbf)) {
-        throw "OpenNova joiner shutdown acknowledgement is empty or has a UTF-8 BOM"
-    }
-    $ack = [Text.Encoding]::UTF8.GetString($raw) | ConvertFrom-Json
-    Assert-RunnerExactJsonProperties $ack @(
-        "schema", "run_id", "topology", "process_id", "requested_utc",
-        "completed_utc", "clean"
-    ) "OpenNova joiner shutdown acknowledgement"
-    $requested = ConvertFrom-RunnerStrictUtcTimestamp ([string] $ack.requested_utc)
-    $completed = ConvertFrom-RunnerStrictUtcTimestamp ([string] $ack.completed_utc)
-    $processStarted = [DateTimeOffset]::new($process.StartTime.ToUniversalTime())
-    if ([string] $ack.schema -cne "opennova.parity-joiner-shutdown.v1" -or
-            [string] $ack.run_id -cne $RunId -or
-            [string] $ack.topology -cne $Topology -or
-            [int] $ack.process_id -ne $process.Id -or
-            [string] $ack.requested_utc -cne $requestedUtc -or
-            $ack.clean -isnot [bool] -or -not [bool] $ack.clean -or
-            $requested -lt $processStarted -or $completed -lt $requested -or
-            $completed -gt $requested.AddSeconds(20)) {
-        throw "OpenNova joiner shutdown acknowledgement identity/timestamp contract drifted"
-    }
-    $script:OpenNovaJoinerShutdownWitness = [pscustomobject]@{
-        request_path = $requestPath
-        request_sha256 = (Get-FileHash -LiteralPath $requestPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        path = $ackPath
-        sha256 = (Get-FileHash -LiteralPath $ackPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        schema = [string] $ack.schema
-        run_id = [string] $ack.run_id
-        topology = [string] $ack.topology
-        process_id = [int] $ack.process_id
-        requested_utc = [string] $ack.requested_utc
-        completed_utc = [string] $ack.completed_utc
-        clean = [bool] $ack.clean
+        completed_utc = [string] $shutdown.completed_utc
+        quit_acknowledged = $true
+        exit_code = [int] $shutdown.exit_code
+        clean = $true
     }
     return $script:OpenNovaJoinerShutdownWitness
 }
@@ -1043,8 +1033,11 @@ function Stop-OpenNovaHostCleanly {
 
     $process = $script:OpenNovaHost
     $logPath = Join-Path $RunRoot "host\godot.log"
-    $shutdown = Stop-OpenNovaLanProcess -Process $process `
-        -PassThruShutdownEvidence -RequireCleanExit
+    # A cooperative quit through the host's endpoint first; the window close
+    # inside Stop-OpenNovaProcess is the witnessed fallback.
+    $hostQuit = Stop-GameViaMcp -Port $HostMcpPort -Process $process -TimeoutSeconds 20
+    $shutdown = Stop-OpenNovaProcess -Process $process `
+        -PassThruShutdownEvidence -RequireCleanExit -QuitRequested:$hostQuit
     Assert-RunnerExactJsonProperties $shutdown @(
         "schema", "process_id", "requested_utc", "completed_utc",
         "close_requested", "exact_fallback_required", "launcher_killed",
@@ -1143,7 +1136,8 @@ function Start-OpenNovaHostExact {
         -Expansion $Expansion `
         -IntegrityProfile "retail-revx02-024f56f2-2d087374" `
         -LogFile (Join-Path $hostDir "godot.log") `
-        -Resolution $Resolution -Windowed -SkipReadyCheck -PassThru
+        -Resolution $Resolution -Windowed -McpPort $HostMcpPort `
+        -SkipReadyCheck -PassThru
     if (-not $script:OpenNovaHost) { throw "OpenNova host launcher returned no process" }
     Register-OpenNovaLaunchProof -Role host -Process $script:OpenNovaHost
     & $ProbeExe --host 127.0.0.1 --port $Port --timeout-ms 240000 `
@@ -1152,122 +1146,134 @@ function Start-OpenNovaHostExact {
         throw "OpenNova host PID $($script:OpenNovaHost.Id) did not answer LAN discovery"
     }
     $script:OpenNovaHostStartOwnership = Assert-OpenNovaHostOwnsPort
+    # Discovery answers while the host is still loading its world; a joiner
+    # dialing before the load completes times out on preload admission. The
+    # endpoint's own account gates the joiner launch.
+    $null = Wait-OpenNovaHostLoaded -TimeoutSeconds 240
+}
+
+function Get-OpenNovaHostState {
+    if (-not $script:OpenNovaHost) { throw "No OpenNova host to query" }
+    return Get-StructuredResult (Invoke-GameTool -Port $HostMcpPort -Name "game_state")
+}
+
+function Wait-OpenNovaHostLoaded {
+    param([int] $TimeoutSeconds = 240)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ($true) {
+        $script:OpenNovaHost.Refresh()
+        if ($script:OpenNovaHost.HasExited) {
+            throw "OpenNova host exited before its world loaded"
+        }
+        $state = Get-OpenNovaHostState
+        $network = $null
+        if ($state.runtime.PSObject.Properties['network']) { $network = $state.runtime.network }
+        # The boot is complete once the host's own player has spawned (the
+        # listen server auto-spawns it at the end of the mission boot); the
+        # world node exists earlier, while the load still runs.
+        if ([bool] $state.shell.world_loaded -and [bool] $state.player.present -and $network -and
+                [string] $network.role -eq "host" -and [int] $network.port -eq $Port) {
+            return $state
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "OpenNova host did not report a loaded world hosting on port $Port within $TimeoutSeconds s"
+        }
+        Start-Sleep -Milliseconds 500
+    }
 }
 
 function Start-OpenNovaJoinerExact {
     $joinerDir = Join-Path $RunRoot "joiner"
     New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
-    $joinerScript = Join-Path $Repo "godot\tests\net\parity_joiner_driver.gd"
-    if (-not (Test-Path -LiteralPath $joinerScript)) {
-        throw "Parity joiner script is missing: $joinerScript"
-    }
-    $readyFile = Join-Path $joinerDir "join-ready.json"
-    $script:OpenNovaJoinerStopRequestPath = Join-Path $joinerDir "joiner-stop-request.json"
-    $script:OpenNovaJoinerShutdownWitnessPath = Join-Path $joinerDir "joiner-shutdown.json"
-    foreach ($createNewPath in @(
-        $script:OpenNovaJoinerStopRequestPath,
-        "$($script:OpenNovaJoinerStopRequestPath).tmp",
-        $script:OpenNovaJoinerShutdownWitnessPath
-    )) {
-        if (Test-Path -LiteralPath $createNewPath) {
-            throw "Joiner cooperative shutdown path must not exist before launch: $createNewPath"
-        }
-    }
-    $lanEnvironment = @{
-        NW_LAN_JOIN = "127.0.0.1:$Port"
-        NW_LAN_NAME = $JoinerCallsign
-        NW_LAN_INTEGRITY_PROFILE = "retail-revx02-024f56f2-2d087374"
-        NW_LAN_PARITY_AUTO_DEPLOY = $(if ($AutoDeploy) { "1" } else { "0" })
-        NW_LAN_PARITY_EXERCISE_MOTION = $(if ($ExerciseInput) { "1" } else { "0" })
-        NW_LAN_PARITY_READINESS_MODE = $ReadinessMode
-        NW_LAN_PARITY_READY_FILE = $readyFile
-        NW_LAN_PARITY_RUN_ID = $RunId
-        NW_LAN_PARITY_TOPOLOGY = $Topology
-        NW_LAN_PARITY_STOP_REQUEST_FILE = $script:OpenNovaJoinerStopRequestPath
-        NW_LAN_PARITY_SHUTDOWN_WITNESS_FILE = $script:OpenNovaJoinerShutdownWitnessPath
-    }
-    if ($ExerciseInput) {
-        $script:MotionGatePath = Join-Path $joinerDir "motion-gate.json"
-        if (Test-Path -LiteralPath $script:MotionGatePath) {
-            throw "Motion gate path must not exist before joiner launch: $($script:MotionGatePath)"
-        }
-        $lanEnvironment.NW_LAN_PARITY_MOTION_GATE_FILE = $script:MotionGatePath
-    }
-    $script:OpenNovaJoiner = Start-OpenNovaLanProcess `
-        -LanEnvironment $lanEnvironment `
+    $script:OpenNovaJoiner = Start-OpenNovaProcess `
         -GodotArguments @(
             "--windowed", "--resolution", $Resolution,
-            "--log-file", (Join-Path $joinerDir "godot.log"),
-            "--script", $joinerScript
+            "--log-file", (Join-Path $joinerDir "godot.log")
         ) `
-        -GameArguments @("--resource-dir", $ClientDir, "/exp", $Expansion)
+        -GameArguments @(
+            "--lan-join", "127.0.0.1:$Port",
+            "--callsign", $JoinerCallsign,
+            "--integrity-profile", "retail-revx02-024f56f2-2d087374",
+            "--resource-dir", $ClientDir, "/exp", $Expansion
+        ) `
+        -McpPort $JoinerMcpPort
     if (-not $script:OpenNovaJoiner) { throw "OpenNova joiner launcher returned no process" }
     Register-OpenNovaLaunchProof -Role joiner -Process $script:OpenNovaJoiner
 }
 
+# The joiner's readiness witness. The first call runs parity_joiner_ready in
+# the joiner (blocking until the requested readiness, sending the default
+# deployment pick when -AutoDeploy); every later call takes one live snapshot
+# through parity_joiner_state. Both carry the same witness the readiness
+# classifiers in lib.ps1 consume unchanged.
 function Wait-OpenNovaJoinerReady {
     param(
         [int] $TimeoutSeconds = 240,
         [long] $MinimumTicksMsec = -1,
-        [ValidateRange(500, 10000)] [int] $MaximumAgeMilliseconds = 3000,
         [switch] $RequireMotionComplete,
         [switch] $AllowPostDeathRedeploy
     )
-    $readyFile = Join-Path $RunRoot "joiner\join-ready.json"
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        $script:OpenNovaJoiner.Refresh()
-        if ($script:OpenNovaJoiner.HasExited) {
-            throw "OpenNova joiner exited before reporting $ReadinessMode readiness"
+    $script:OpenNovaJoiner.Refresh()
+    if ($script:OpenNovaJoiner.HasExited) {
+        throw "OpenNova joiner exited before reporting $ReadinessMode readiness"
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ($true) {
+        if (-not $script:JoinerReadyRunId) {
+            $status = Invoke-GameProbe -Port $JoinerMcpPort -Name "parity_joiner_ready" -Process $script:OpenNovaJoiner `
+                -TimeoutSeconds $TimeoutSeconds -PollMs 1000 -Arguments @{
+                    readiness_mode = $ReadinessMode
+                    auto_deploy = [bool] $AutoDeploy
+                    exercise_motion = [bool] $ExerciseInput
+                    run_id = $RunId
+                    topology = $Topology
+                }
+            $script:JoinerReadyRunId = [string] $status.run_id
+            if ([string] $status.state -ne "passed" -or -not $status.verdict -or
+                    -not [bool] $status.verdict.ok) {
+                $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+                throw "OpenNova joiner did not reach $ReadinessMode readiness: state=$($status.state) $why"
+            }
+            $ready = $status.verdict.data
         }
-        if (Test-Path -LiteralPath $readyFile) {
-            try {
-                $ready = Get-Content -LiteralPath $readyFile -Raw | ConvertFrom-Json
-                $readyItem = Get-Item -LiteralPath $readyFile
-            }
-            catch {
-                # The publisher uses a replace-by-rename sequence. A read that
-                # races that replacement is retried rather than treated as state.
-                Start-Sleep -Milliseconds 100
-                continue
-            }
-            if (-not ($ready.PSObject.Properties.Name -contains "ticks_msec") -or
-                    -not ($ready.PSObject.Properties.Name -contains "heartbeat_sequence") -or
-                    -not ($ready.PSObject.Properties.Name -contains "process_id") -or
-                    -not ($ready.PSObject.Properties.Name -contains "motion_complete") -or
-                    -not ($ready.PSObject.Properties.Name -contains "readiness_mode")) {
-                throw "OpenNova joiner wrote a witness without heartbeat fields: $readyFile"
-            }
-            if ([int] $ready.process_id -ne $script:OpenNovaJoiner.Id) {
-                throw "OpenNova readiness witness PID does not match the owned joiner process"
-            }
-            $ticksMsec = [long] $ready.ticks_msec
-            $ageMs = ([DateTime]::UtcNow - $readyItem.LastWriteTimeUtc).TotalMilliseconds
-            if ($ticksMsec -gt $MinimumTicksMsec -and
-                    $ageMs -ge -1000 -and $ageMs -le $MaximumAgeMilliseconds) {
-                if ([string] $ready.readiness_mode -ne $ReadinessMode) {
-                    throw "OpenNova joiner heartbeat readiness mode does not match the run"
+        else {
+            $status = Invoke-GameProbe -Port $JoinerMcpPort -Name "parity_joiner_state" -Process $script:OpenNovaJoiner `
+                -TimeoutSeconds 30 -PollMs 250 -Arguments @{
+                    readiness_mode = $ReadinessMode
+                    auto_deploy = [bool] $AutoDeploy
+                    exercise_motion = [bool] $ExerciseInput
                 }
-                $readinessClass = Get-OpenNovaJoinerReadinessClass `
-                    -State $ready -ReadinessMode $ReadinessMode `
-                    -AllowPostDeathRedeploy:$AllowPostDeathRedeploy
-                if ($readinessClass -eq 'invalid') {
-                    throw "OpenNova joiner fresh heartbeat reports an invalid admission/liveness state"
-                }
-                if ($RequireMotionComplete -and -not [bool] $ready.motion_complete) {
-                    Start-Sleep -Milliseconds 100
-                    continue
-                }
-                $ready | Add-Member -NotePropertyName observed_file_utc `
-                    -NotePropertyValue $readyItem.LastWriteTimeUtc.ToString("o") -Force
-                $ready | Add-Member -NotePropertyName observed_age_ms `
-                    -NotePropertyValue ([int] $ageMs) -Force
-                return $ready
+            if ([string] $status.state -ne "passed" -or -not $status.verdict) {
+                throw "OpenNova joiner state snapshot failed: state=$($status.state) $($status.error)"
             }
+            $ready = $status.verdict.data
+        }
+        if ([int] $ready.process_id -ne $script:OpenNovaJoiner.Id) {
+            throw "OpenNova readiness witness PID does not match the owned joiner process"
+        }
+        if ([string] $ready.readiness_mode -ne $ReadinessMode) {
+            throw "OpenNova joiner witness readiness mode does not match the run"
+        }
+        $readinessClass = Get-OpenNovaJoinerReadinessClass `
+            -State $ready -ReadinessMode $ReadinessMode `
+            -AllowPostDeathRedeploy:$AllowPostDeathRedeploy
+        if ($readinessClass -eq 'invalid') {
+            throw "OpenNova joiner witness reports an invalid admission/liveness state"
+        }
+        $ticksMsec = [long] $ready.ticks_msec
+        if ($ticksMsec -gt $MinimumTicksMsec -and
+                (-not $RequireMotionComplete -or [bool] $ready.motion_complete)) {
+            $ready | Add-Member -NotePropertyName observed_utc `
+                -NotePropertyValue ([DateTime]::UtcNow.ToString("o")) -Force
+            $ready | Add-Member -NotePropertyName probe_run_id `
+                -NotePropertyValue ([string] $status.run_id) -Force
+            return $ready
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Timed out waiting for OpenNova joiner $ReadinessMode readiness witness"
         }
         Start-Sleep -Milliseconds 250
-    } while ((Get-Date) -lt $deadline)
-    throw "Timed out waiting for OpenNova joiner $ReadinessMode readiness witness"
+    }
 }
 
 try {
@@ -1526,12 +1532,27 @@ try {
             Stop-OwnedRetailRun -OwnedRunId ([string] $retailHost.run_id)
         }
         "OR" {
+            Start-OpenNovaHostExact
+            $joinerDir = Join-Path $RunRoot "joiner"
+            New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
+            $retailJoinLaunch = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_join_lan" -Arguments @{
+                game_dir = $ClientDir
+                expansion = $Expansion
+                join_address = "127.0.0.1"
+                port = $Port
+                callsign = $JoinerCallsign
+                run_id = "$RunId-joiner"
+                output_dir = $joinerDir
+                capture = $true
+                windowed = $true
+                allow_many = $true
+                wait_timeout_ms = 240000
+            })
+            Assert-OnHookRoleLaunch -Tool "onhook_join_lan" -Result $retailJoinLaunch
+            $script:OwnedRetailRuns.Add([string] $retailJoinLaunch.run_id)
+            $script:RetailProcess = Get-Process -Id ([int] $retailJoinLaunch.pid) -ErrorAction Stop
+            $script:RetailJoinerProcess = $script:RetailProcess
             $clientCfg = Join-Path $ClientDir "onhook.cfg"
-            Set-OnHookOwnedConfigValues -Path $clientCfg -Values @{
-                LanJoinAddress = "127.0.0.1"
-                LanJoinPort = [string] $Port
-                LanJoinCallsign = $JoinerCallsign
-            }
             $cfgText = Get-Content -LiteralPath $clientCfg -Raw
             foreach ($expected in @(
                 "LanJoinAddress 127.0.0.1",
@@ -1544,14 +1565,7 @@ try {
                 }
             }
             Bind-EffectiveRetailConfig -Role client -Source $clientCfg
-            Start-OpenNovaHostExact
-            $joinerDir = Join-Path $RunRoot "joiner"
-            New-Item -ItemType Directory -Path $joinerDir -Force | Out-Null
-            $script:RetailProcess = & $RetailScript -GameDir $ClientDir `
-                -RunId "$RunId-joiner" -OutputDir $joinerDir -PassThru
-            if (-not $script:RetailProcess) { throw "Retail joiner launcher returned no process" }
-            $script:RetailJoinerProcess = $script:RetailProcess
-            $script:EvidenceCapture = Join-Path $joinerDir "traffic.pcap"
+            $script:EvidenceCapture = [string] $retailJoinLaunch.capture_path
             $script:EvidencePerspective = "retail-client"
             $script:EvidenceRole = "joiner"
             if ($WireOnly) {
@@ -1623,8 +1637,10 @@ try {
                     wire_ready = $script:WireReadyWitness
                     opennova_host = [pscustomobject]@{
                         pid = $script:OpenNovaHost.Id
+                        mcp_port = $HostMcpPort
                         discovery_ready = $true
                         port_ownership = $endOwnership
+                        state = Get-OpenNovaHostState
                     }
                 }
                 Complete-SteadyWindow
@@ -1685,8 +1701,10 @@ try {
                 wire_ready = $script:WireReadyWitness
                 opennova_host = [pscustomobject]@{
                     pid = $script:OpenNovaHost.Id
+                    mcp_port = $HostMcpPort
                     discovery_ready = $true
                     port_ownership = $endOwnership
+                    state = Get-OpenNovaHostState
                 }
                 opennova_joiner_initial = $initialJoinerAcceptance
                 opennova_joiner = $joinerAcceptance
@@ -1913,6 +1931,11 @@ $summary = [pscustomobject]@{
     screenshot = $script:Screenshot
     acceptance = $script:Acceptance
     opennova_launch_proofs = [pscustomobject] $script:OpenNovaLaunchProofs
+    direct_runtime_launch = [bool] $AllowDirectRuntime
+    opennova_host_mcp_port = $(if ($Topology -in @("OR", "OO")) { $HostMcpPort } else { $null })
+    opennova_joiner_mcp_port = $(if ($Topology -in @("RO", "OO")) { $JoinerMcpPort } else { $null })
+    joiner_ready_run_id = $script:JoinerReadyRunId
+    joiner_motion_run_id = $script:JoinerMotionRunId
     opennova_joiner_shutdown_witness = $script:OpenNovaJoinerShutdownWitness
     opennova_joiner_exact_fallback_required = [bool] $script:OpenNovaJoinerExactFallbackRequired
     stop_evidence = $script:StopEvidence

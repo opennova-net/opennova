@@ -14,7 +14,6 @@ const HEARTBEAT_INTERVAL_MS := 500
 var _ctx: ProbeContext
 var _readiness_mode := ""
 var _auto_deploy := false
-var _sequence := 0
 var _last_heartbeat := 0
 var _held: Key = KEY_NONE
 
@@ -123,11 +122,10 @@ func _heartbeat() -> void:
 
 
 func _witness(exercise_motion: bool) -> Dictionary:
-	_sequence += 1
 	var state := ParityJoinerWitness.read_state(_ctx)
 	return ParityJoinerWitness.compose(
 			state if not state.is_empty() else ParityJoinerWitness.empty_state(),
-			_readiness_mode, _auto_deploy, exercise_motion, _sequence)
+			_readiness_mode, _auto_deploy, exercise_motion, ParityJoinerWitness.next_heartbeat())
 
 
 func _cancelled() -> ProbeVerdict:
