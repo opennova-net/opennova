@@ -90,8 +90,9 @@ only untyped thing left.
    weather cluster (witnessed math → `engine/runtime` + thin bindings),
    `mission_object_placer`, the `game_world`/`mission_runtime` composition,
    the present-pass facades + the wire cold path, avatar composition.
-   Genuinely game-level scripts (F3 debug pages, MCP tooling, the fly
-   camera, ONED previews, shell UI) stay GDScript.
+   Genuinely game-level scripts (MCP tooling, the fly camera, shell UI)
+   stay GDScript. *(Amended by ADR 0039: the F3 debug pages moved into the
+   engine as Dear ImGui dev-tool windows; ONED previews went with ADR 0037.)*
 
 ## Consequences
 

@@ -305,7 +305,15 @@ _Avoid_: promote (for anything but the mission→world spawn)
 **HUD**:
 The in-game heads-up display, laid out by `hudpos.def`. RE record:
 `docs/interface/hud-re.md`.
-_Avoid_: overlay (that is the debug overlay), UI (too broad)
+_Avoid_: overlay, UI (too broad)
+
+**Dev tools**:
+The engine-owned Dear ImGui tool windows behind F3 (`engine/runtime/devtools`,
+ADR 0039): the Stats window over the frame-stats board, and every inspection
+or control window added later. Debug builds only; the Godot side is one
+`DevTools` node plus the imgui-godot addon. ONED's run surface rides the same
+engine ImGui pass (`OnedUi`) but is a product surface, not a dev tool.
+_Avoid_: debug overlay, F3 overlay (the retired GDScript surface), editor
 
 **Spinmap**:
 The heading-up gameplay map element in the authored `HUDSPINMAP*` rect (retail

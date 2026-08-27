@@ -23,8 +23,10 @@ git submodule update --init --recursive
 ```
 
 The GUT test plugin is copied out of the `third_party/gut` submodule into
-`godot/addons/gut/` (gitignored) by `scripts/bootstrap_godot.sh`; the build and
-test scripts run it for you. `godot-cpp` lives at `third_party/godot-cpp` and is
+`godot/addons/gut/` (gitignored) by `scripts/bootstrap_godot.sh`, which also
+downloads the pinned imgui-godot release into `godot/addons/imgui-godot/`
+(gitignored; the Dear ImGui bridge for the in-engine dev tools, ADR 0039); the
+build and test scripts run it for you. `godot-cpp` lives at `third_party/godot-cpp` and is
 pulled in by the submodule update above.
 
 ## Build the C++ core and run the tests

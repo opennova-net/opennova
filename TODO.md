@@ -60,11 +60,21 @@ hardening, and project health. Divergences from the original engine belong in
       cleared, so `sync()` replays explicit debug writes into a NEW mission's fresh
       sim/terrain targets. Decide the cross-mission scope of debug intent: clear on
       mission unload, or document the replay as intended.
-- [ ] F3 UX deltas vs the #342/#307 design: transport (pause/step) requires Edit
-      unlock even in local SP where the player has host authority; Stop maps to
-      return-to-menu rather than a pause-style stop; expensive views are physically
-      reset when F3 closes. Review and either ratify the new behavior in
-      `godot/src/debug/pages/README.md` or change it.
+- [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
+      recipe): the retired F3 pages return as engine ImGui windows as they are
+      wanted — entities + pick list, sim transport (play/pause/step; the MCP
+      `game_debug` control plane still drives these), script vars, net, particles,
+      occlusion, rounds, terrain, rendering/world-view toggles (`GameWorld`'s
+      typed API), environment, audio, animation, player (with the pose dump the
+      retired `DebugSnapshotWriter` produced for `pose_replay_probe` /
+      `terrain_seam_probe`), and the `PerfTimeline` ring. Data the shell alone
+      has crosses as VALUE slots or typed records, never Godot objects.
+- [ ] Stats window info cells not carried over from the retired page (they read
+      Godot objects at refresh): Performance draws/objs/prims/nodes on the Render
+      row, the a11y flag on Flush tail, peer count (Net), effects live count,
+      fire/destruction/throwable/wire present stats, occlusion counts (`occl`),
+      the sim row's entity count + role. Each returns as a VALUE slot fed by the
+      shell sampler that owns the source.
 - [ ] Managed-game shutdown: ONED close/Stop may still require forced termination.
       Add a bounded graceful-quit window before the current forced termination,
       and keep the process-handle lifecycle reliable so a stopped retail child

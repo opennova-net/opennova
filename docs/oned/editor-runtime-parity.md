@@ -53,7 +53,7 @@ system shared and abstract only the data source behind a sampler seam.
 
 `godot/game/world/mission_presentation.gd` has one live owner: `GameWorld`, entered
 through `MainGame`. ONED does not self-tick a mission, create a local-player
-presenter, or embed the F3 debug overlay. This removes the editor-specific transport
+presenter, or open the dev tools (F3). This removes the editor-specific transport
 and lifecycle state that could make an apparently shared simulation behave
 differently from the shipped game.
 

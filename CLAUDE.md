@@ -17,7 +17,9 @@ easier to relay than to rediscover.
   `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, ...;
   ADR 0024 layout; the target also builds mission's format half), `runtime/`(
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
-  terrain_query, environment, hud, menu, simassets),
+  terrain_query, environment, hud, menu, simassets, devtools — the Dear ImGui
+  pass with the game's F3 dev-tool windows (debug builds only) and ONED's run
+  surface, ADR 0039),
   `net/` (novacrypto, napi, npwire, novaworld, inmatch, plus the internal
   netsim/npruntime implementation directories). Native consumers link the engine
   groups directly.
@@ -27,7 +29,8 @@ easier to relay than to rediscover.
   `game/` (the game shell plus its game-level GDScript runtime — world,
   debug, mission, object, terrain, ui, ...),
   `modtools/` (ONED: settings, loose OpenNova run,
-  staged retail run, Stop, and the hidden release pack command),
+  staged retail run, Stop, and the hidden release pack command; its surface
+  is the engine's ImGui `OnedUi` window, the app only executes its requests),
   `tests/` (GUT suite).
 - `apps/` — `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
@@ -41,9 +44,11 @@ easier to relay than to rediscover.
   best current understanding of the original engine. RE findings land there directly
   (via the `re-doc` skill) — there is no scratch directory.
 - `third_party/` — vendored submodules (godot-cpp and gut; never edit in
-  place — bump submodules upstream) plus vendored in-tree bcrypt sources and a
-  hash-pinned sqlite FetchContent (bump sqlite by editing the URL/URL_HASH in
-  `third_party/sqlite/CMakeLists.txt`).
+  place — bump submodules upstream) plus vendored in-tree bcrypt sources and two
+  hash-pinned FetchContents: sqlite (bump by editing the URL/URL_HASH in
+  `third_party/sqlite/CMakeLists.txt`) and Dear ImGui (`third_party/imgui/`,
+  pinned to the commit the imgui-godot addon bundles — bump it and
+  `scripts/bootstrap_imgui_godot.sh` together, never one alone).
 
 ## Build & test
 

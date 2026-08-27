@@ -43,7 +43,10 @@ return/error contract reports context via `push_warning` (negative-path tests
 drive those legs; GUT counts engine errors as failures); `push_error` is for
 invariant violations nothing recovers from. Load/lifecycle narration uses
 `print_verbose` (visible under `--verbose`), live inspection goes through the
-F3 overlay/stats system, and `engine/` diagnostics ride the `io/log.h` sink.
+dev tools (F3: engine-owned ImGui windows; `devtools/` here is the
+`ImGuiPassNode` seam with its two product nodes `DevTools`/`OnedUi` and the
+`FrameStats` board binding, ADR 0039), and `engine/` diagnostics ride the
+`io/log.h` sink.
 Never raw `print`/`printerr`/`print_line`/`WARN_PRINT`/`ERR_PRINT` in shipping
 code.
 
