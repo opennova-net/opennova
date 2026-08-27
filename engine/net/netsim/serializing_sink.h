@@ -16,8 +16,13 @@ namespace opennova::netsim {
 // Decision 2: gameplay systems keep calling the same INetCommandSink and stay
 // network-unaware.
 //
-// Phase 1 keeps send_command a no-op shim so the seam is wired (World::net points
-// here); Phase 2+ serializes the command onto the channel.
+// STAGED, NOT WIRED (2026-08-27 tidy): no production World points its `net` here
+// yet — `World::local_sink` stays the SP default and send_command is a structural
+// no-op, because the `0x23` entity-command body is unwitnessed and the sink has zero
+// callers (engine/net/npruntime/ROADMAP.md, P8: never invent bytes). The live owner is
+// the in-match session's host role (engine/net/inmatch/session.*), which installs this
+// sink in place of LocalSink once `NapiNPServer_SendFiltered` 0x23 is grilled and the
+// serialize leg ported. tests/netsim/loopback_identity_test.cpp pins the seam shape.
 struct SerializingSink : world::INetCommandSink {
 	explicit SerializingSink(ISessionTransport &channel) : channel_(channel) {}
 

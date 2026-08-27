@@ -11,7 +11,7 @@ target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(threedi_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_roundtrip COMMAND threedi_roundtrip_test)
 
-add_executable(threedi_compare_test threedi/compare_test.cpp)
+add_executable(threedi_compare_test threedi/compare_test.cpp threedi/threedi_compare.cpp)
 target_link_libraries(threedi_compare_test PRIVATE opennova_formats)
 target_include_directories(threedi_compare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_compare COMMAND threedi_compare_test)
