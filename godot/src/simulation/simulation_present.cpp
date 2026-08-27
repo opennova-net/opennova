@@ -2,6 +2,9 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
+
+#include <net/npruntime/minimap_markers.h> // the retained marker rows (bank walk + local restore)
+#include <runtime/hud/hud_minimap_feed.h>  // the feed layout the snapshot carries
 #include <net/npruntime/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 
 #include <cmath>
@@ -190,138 +193,20 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 			local_marker_handle == minimap_snapshot_local_handle_) {
 		return minimap_snapshot_cache_;
 	}
+	// The rows (the bank walk, the policy resolve, the restored local row) and
+	// the feed layout are the engine's; this leg only packs the array.
+	opennova::np::MinimapMarkerInputs in;
+	in.map = runtime_ ? &runtime_->state().minimap : nullptr;
+	in.world = world_.get();
+	in.local_marker_handle = local_marker_handle;
+	in.local_heading_bam = static_cast<int32_t>(get_local_player_heading_bam());
+	std::vector<opennova::hud::HudMinimapMarker> markers;
+	opennova::np::build_minimap_markers(in, markers);
+	std::vector<int32_t> feed;
+	opennova::hud::minimap_feed_encode(markers, feed);
 	PackedInt32Array out;
-	bool retained_local_player = false;
-	int count = 0;
-	if (runtime_) {
-		const opennova::netsim::ClientMinimapState &map =
-				runtime_->state().minimap;
-		auto count_bank = [&](const auto &bank, bool regular) {
-			for (const auto &slot : bank) {
-				if (!slot.active) continue;
-				++count;
-				if (regular && slot.entity_known &&
-						slot.handle == local_marker_handle)
-					retained_local_player = true;
-			}
-		};
-		count_bank(map.transient, true);
-		count_bank(map.persistent, true);
-		count_bank(map.special, false);
-	}
-	// Retail registers the locally deployed player in a regular retained bank.
-	// The loopback client does not receive that client-local registration, so
-	// restore it here unless a decoded regular row already covers the same wire
-	// handle. The draw-call probe confirms cell 3, team-table blue, and the
-	// ordinary 6px-floor path at map center.
-	// Retail witness: render_minimap_slot_blip @0x5BE240 ->
-	// draw_minimap_blip, regular TSDicon submit @0x597F73. See hud-re.md.
-	const bool append_local_player = local_player != nullptr &&
-			local_marker_handle != opennova::world::EntityHandle::kInvalid &&
-			!retained_local_player;
-	if (append_local_player) ++count;
-
-	out.resize(HUD_MINIMAP_HEADER_SIZE + count * HUD_MINIMAP_STRIDE);
-	int32_t *write = out.ptrw();
-	write[0] = HUD_MINIMAP_SNAPSHOT_VERSION;
-	write[1] = HUD_MINIMAP_STRIDE;
-	write[2] = count;
-
-	int row = 0;
-	auto append_overlay_bank = [&](const auto &bank, int bank_id) {
-		for (const opennova::netsim::ClientMinimapOverlaySlot &slot : bank) {
-			if (!slot.active) continue;
-			int32_t *dst = write + HUD_MINIMAP_HEADER_SIZE +
-					row++ * HUD_MINIMAP_STRIDE;
-			dst[0] = bank_id;
-			dst[1] = slot.handle;
-			dst[2] = slot.x;
-			dst[3] = slot.y;
-			dst[4] = slot.z;
-			dst[5] = slot.heading_bam;
-			dst[6] = slot.param;
-			dst[7] = static_cast<int32_t>(slot.argb);
-			dst[8] = slot.flags;
-			dst[9] = slot.source;
-			dst[10] = slot.remaining_ticks;
-			dst[11] = slot.entity_known ? 1 : 0;
-			// The draw policy resolves against the LOCAL entity (host: the
-			// live registry; joiner: the materialized twin) — retail reads
-			// the pool slot's def at draw time the same way (witness at
-			// world::minimap_blip_draw_policy). Absent entity -> the
-			// rotated fallback on the class table.
-			opennova::world::MinimapBlipDrawPolicy policy;
-			int32_t medic = 0;
-			if (world_) {
-				const opennova::world::Entity *entity = world_->registry.get(
-						opennova::world::EntityHandle{slot.handle});
-				if (entity != nullptr) {
-					policy = opennova::world::minimap_blip_draw_policy(
-							*entity, slot.param);
-					// v4: the map medic marker — a LOCAL-TEAM entity whose
-					// class carries the charattr Medic attribute; the other
-					// team's bit is forced off at the producer (retail:
-					// draw_entity_labels_and_markers @0x5a49e0 — the team
-					// gate @0x5a4ac6/@0x5a4acf, AnimMap_IsSlotActive(
-					// playerClass, 8) @0x5a4ab3; see docs/interface/hud-re.md).
-					medic = local_player != nullptr &&
-									entity->team == local_player->team &&
-									world_->class_has_attribute(entity->player_class,
-											opennova::world::World::kCharAttrMedic)
-							? 1 : 0;
-				} else {
-					policy.half_x_q16 = 0;
-					policy.half_y_q16 = 0;
-				}
-			} else {
-				policy.half_x_q16 = 0;
-				policy.half_y_q16 = 0;
-			}
-			dst[12] = (policy.rotate ? 1 : 0) | (policy.footprint ? 2 : 0);
-			dst[13] = policy.half_x_q16;
-			dst[14] = policy.half_y_q16;
-			dst[15] = policy.floor_px;
-			dst[16] = medic;
-		}
-	};
-	if (runtime_) {
-		const opennova::netsim::ClientMinimapState &map = runtime_->state().minimap;
-		append_overlay_bank(map.transient,
-				static_cast<int>(opennova::hud::HudMinimapBank::kTransient));
-		append_overlay_bank(map.persistent,
-				static_cast<int>(opennova::hud::HudMinimapBank::kPersistent));
-		append_overlay_bank(map.special,
-				static_cast<int>(opennova::hud::HudMinimapBank::kSpecial));
-	}
-	if (append_local_player) {
-		int32_t *dst = write + HUD_MINIMAP_HEADER_SIZE +
-				row++ * HUD_MINIMAP_STRIDE;
-		const opennova::world::MinimapBlipDrawPolicy policy =
-				opennova::world::minimap_blip_draw_policy(*local_player, 3);
-		dst[0] = static_cast<int>(
-				opennova::hud::HudMinimapBank::kPersistent);
-		dst[1] = local_marker_handle;
-		dst[2] = opennova::world::to_fixed(local_player->position.x);
-		dst[3] = opennova::world::to_fixed(local_player->position.y);
-		dst[4] = opennova::world::to_fixed(local_player->position.z);
-		dst[5] = static_cast<int32_t>(get_local_player_heading_bam());
-		dst[6] = 3; // live Person classification -> TSDicon cell 3
-		dst[7] = static_cast<int32_t>(
-				opennova::netsim::minimap_team_argb(local_player->team));
-		dst[8] = 0x10; // regular persistent bank
-		dst[9] = local_player->zone_number;
-		dst[10] = 0; // regular slots draw at zero lifetime
-		dst[11] = 1; // the local entity is necessarily resolved
-		dst[12] = (policy.rotate ? 1 : 0) | (policy.footprint ? 2 : 0);
-		dst[13] = policy.half_x_q16;
-		dst[14] = policy.half_y_q16;
-		dst[15] = policy.floor_px;
-		// The restored local row is a local-team player by definition; its
-		// medic bit is its own class attribute.
-		dst[16] = world_->class_has_attribute(local_player->player_class,
-						  opennova::world::World::kCharAttrMedic)
-				? 1 : 0;
-	}
+	out.resize(static_cast<int64_t>(feed.size()));
+	std::copy(feed.begin(), feed.end(), out.ptrw());
 	minimap_snapshot_cache_ = out;
 	minimap_snapshot_revision_ = revision;
 	minimap_snapshot_tick_ = tick;

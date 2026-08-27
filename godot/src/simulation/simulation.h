@@ -29,6 +29,7 @@
 #include <runtime/hud/end_round_overlay.h> // EndRoundOverlayInput (the end-round ladder feed)
 #include <runtime/hud/hud_frame.h> // HudVehiclePanelState / HudLfpZone (the panel feed seams)
 #include <runtime/hud/hud_minimap.h>
+#include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/surface_type_map.h>
@@ -342,16 +343,12 @@ public:
 		// kPlayerCameraFovHDeg; the static_assert in the bind TU pins the
 		// integral mirror against the engine float).
 		DEFAULT_PLAYER_FOV_H_DEG = 80,
-		// Header {version, stride, row_count} for the retained minimap rows.
-		// v3 appends the client-resolved draw policy: {policy_flags (bit0
-		// rotate, bit1 footprint), half_x_q16, half_y_q16, floor_px}; v4
-		// appends {medic} — the local-team charattr Medic bit the map marker
-		// pass draws the red-cross plate for (retail: draw_entity_labels_and_markers
-		// @0x5a49e0 — AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3 under the
-		// local-team gate @0x5a4ac6/@0x5a4acf, see docs/interface/hud-re.md).
-		HUD_MINIMAP_SNAPSHOT_VERSION = 4,
-		HUD_MINIMAP_HEADER_SIZE = 3,
-		HUD_MINIMAP_STRIDE = 17,
+		// The retained minimap marker feed's header {version, stride, row_count}
+		// and row stride: the engine's one layout (hud/hud_minimap_feed.h),
+		// re-exported for the scripting seam the snapshot crosses.
+		HUD_MINIMAP_SNAPSHOT_VERSION = opennova::hud::kMinimapFeedVersion,
+		HUD_MINIMAP_HEADER_SIZE = opennova::hud::kMinimapFeedHeaderSize,
+		HUD_MINIMAP_STRIDE = opennova::hud::kMinimapFeedStride,
 	};
 
 	// Spawn-origin provenance (world/entity.h): (kind << 24) | (index &

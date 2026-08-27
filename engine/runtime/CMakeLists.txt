@@ -70,6 +70,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_end_round_statistics.cpp # the SP Show Score panel element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_lfp_panel.cpp     # the AAS zone status panel element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_feed.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
