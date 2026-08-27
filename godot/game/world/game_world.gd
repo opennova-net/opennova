@@ -90,6 +90,9 @@ signal minimap_water_changed(mask: ImageTexture)
 
 var _dispatcher: FoliageDispatcher
 var _sun_shadow: SunShadow
+# True once the env presenters' own _process is off and this world advances
+# them from render_environment_nodes_frame (the render diagnostics report it).
+var _env_presenters_world_driven := false
 var _slot_shadow: SlotShadow
 var _terrain_data: TerrainData
 var _resource_root: ResourceRoot
@@ -306,6 +309,7 @@ func _ready() -> void:
 	for presenter in [_weather, _sun_shadow, _sky_dome, _celestial, _water]:
 		if presenter != null:
 			(presenter as Node).set_process(false)
+	_env_presenters_world_driven = true
 
 
 func _notification(what: int) -> void:
@@ -2953,6 +2957,12 @@ func get_sky_dome_node() -> SkyDome:
 
 func get_sun_shadow_node() -> SunShadow:
 	return _sun_shadow
+
+
+## Whether this world advances the env presenters (weather, sun shadow, sky,
+## celestial, water) itself instead of their own _process.
+func drives_environment_presenters() -> bool:
+	return _env_presenters_world_driven
 
 
 func get_clear_color_node() -> WorldEnvironment:

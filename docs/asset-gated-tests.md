@@ -50,7 +50,7 @@ mission with a retail install mounted, e.g. `ladder_climb_probe.gd`),
 `JO_ASSETS_DIR` + `JO_PROBE_MISSIONS` (mission load/re-ground perf probes),
 `JO_RESOURCE_DIR` / `JO_EXPANSION` / `JO_MISSION` (mount diagnostics),
 `NOVA_RESOURCE_DIR` / `NOVA_MISSION_BMS` (the modtools screenshot driver),
-and the render-fixture capture probe family (`render_fixture_capture_probe.gd`):
+and the render-fixture capture probe family (now the `render_fixture_capture` `game_probe` tool, typed args):
 `NOVA_RENDER_FIXTURE_ID` / `NOVA_RENDER_FIXTURE_MINUTE` /
 `NOVA_RENDER_FIXTURE_OUTPUT`, `NOVA_RENDER_CAPTURE_MODE` /
 `NOVA_RENDER_CAPTURE_PROFILE`, `NOVA_MISSION_RESOURCE_DIR` /

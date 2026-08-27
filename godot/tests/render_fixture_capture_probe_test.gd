@@ -1,6 +1,6 @@
 extends GutTest
 
-const Probe := preload("res://tests/render_fixture_capture_probe.gd")
+const Probe := preload("res://probes/render/render_fixture_capture_probe.gd")
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
 const FirstPersonArmsWitness := preload(
@@ -87,7 +87,7 @@ class ComparisonSim:
 			"yaw_deg": yaw_deg,
 			"pitch_deg": pitch_deg,
 		})
-		player_position = Probe.mission_to_godot(position_bms)
+		player_position = RenderFixtureContract.mission_to_godot(position_bms)
 		return OK
 
 	func get_local_player_position() -> Vector3:
@@ -180,21 +180,21 @@ class CaptureTransactionGame:
 
 
 func test_mission_camera_pose_converts_to_godot_basis() -> void:
-	var position: Vector3 = Probe.mission_to_godot(
+	var position: Vector3 = RenderFixtureContract.mission_to_godot(
 			Vector3(277.129364, -363.799469, 28.8))
 	assert_true(position.is_equal_approx(Vector3(277.129364, 28.8, 363.799469)))
 
-	var forward: Vector3 = -Probe.camera_basis(0.0, 0.0).z
+	var forward: Vector3 = -RenderFixtureContract.camera_basis(0.0, 0.0).z
 	assert_true(forward.is_equal_approx(Vector3(0.0, 0.0, -1.0)))
-	var turned: Vector3 = -Probe.camera_basis(-45.0, 0.0).z
+	var turned: Vector3 = -RenderFixtureContract.camera_basis(-45.0, 0.0).z
 	var half_sqrt := sqrt(0.5)
 	assert_true(turned.is_equal_approx(Vector3(-half_sqrt, 0.0, -half_sqrt)))
-	var down: Vector3 = -Probe.camera_basis(0.0, -30.0).z
+	var down: Vector3 = -RenderFixtureContract.camera_basis(0.0, -30.0).z
 	assert_lt(down.y, 0.0)
 
 
 func test_capture_resolution_comes_from_the_catalog() -> void:
-	var parsed := Probe.parse_capture_resolution({"resolution": [2000, 1200]})
+	var parsed := RenderFixtureContract.parse_capture_resolution({"resolution": [2000, 1200]})
 	assert_eq(parsed.get("size"), Vector2i(2000, 1200))
 	assert_false(parsed.has("error"))
 
@@ -206,32 +206,32 @@ func test_capture_resolution_comes_from_the_catalog() -> void:
 		{"resolution": [2000, 128]},
 		{"resolution": [2000, 8192]},
 	]:
-		var rejected := Probe.parse_capture_resolution(bad)
+		var rejected := RenderFixtureContract.parse_capture_resolution(bad)
 		assert_true(rejected.has("error"), "expected rejection for %s" % [bad])
 
 
 func test_capture_mode_is_declared_by_the_fixture_and_env_only_verifies_it() -> void:
-	assert_eq(Probe.select_capture_mode(
+	assert_eq(RenderFixtureContract.select_capture_mode(
 			{"capture_mode": "world_only"}, ""), {
 		"mode": "world_only",
 		"world_only": true,
 	})
-	assert_eq(Probe.select_capture_mode(
+	assert_eq(RenderFixtureContract.select_capture_mode(
 			{"capture_mode": "full_frame"}, "full_frame"), {
 		"mode": "full_frame",
 		"world_only": false,
 	})
-	assert_eq(Probe.select_capture_mode(
+	assert_eq(RenderFixtureContract.select_capture_mode(
 			{"capture_mode": "hud_hidden"}, "hud_hidden"), {
 		"mode": "hud_hidden",
 		"world_only": false,
 	})
-	assert_true(Probe.select_capture_mode(
+	assert_true(RenderFixtureContract.select_capture_mode(
 			{"capture_mode": "world_only"}, "full_frame").has("error"),
 			"the environment may not relabel a catalog fixture")
-	assert_eq(Probe.select_capture_mode({}, "").get("mode"), "world_only",
+	assert_eq(RenderFixtureContract.select_capture_mode({}, "").get("mode"), "world_only",
 			"the pre-mode diagnostic catalog retains its world-only contract")
-	assert_true(Probe.select_capture_mode(
+	assert_true(RenderFixtureContract.select_capture_mode(
 			{"capture_mode": "hud_only"}, "").has("error"))
 
 
@@ -264,7 +264,7 @@ func test_hud_hidden_contract_requires_the_exact_matched_presentation() -> void:
 		"big_map_active": false,
 		"player_pose_source": "retail_player_bms.applied",
 	}
-	var parsed: Dictionary = Probe.parse_comparison_contract(fixture, contract)
+	var parsed: Dictionary = RenderFixtureContract.parse_comparison_contract(fixture, contract)
 	assert_false(parsed.has("error"))
 	assert_eq(parsed.equipped_weapon, "WPN_M16BURST")
 	assert_eq(parsed.character_id, 0x0402)
@@ -272,7 +272,7 @@ func test_hud_hidden_contract_requires_the_exact_matched_presentation() -> void:
 	assert_eq(parsed.arms_camo, [1, 0, 0])
 	assert_eq(parsed.player_position_bms,
 			Vector3(283.129364, -357.799469, 27.0))
-	assert_eq(String(Probe.comparison_spawn_profile(parsed).get("primary", "")),
+	assert_eq(String(RenderFixtureContract.comparison_spawn_profile(parsed).get("primary", "")),
 			"WPN_M16BURST",
 			"the canonical contract equips through the production profile seam")
 
@@ -297,12 +297,12 @@ func test_hud_hidden_contract_requires_the_exact_matched_presentation() -> void:
 		var invalid_contract := contract.duplicate(true)
 		for key: Variant in mutation:
 			invalid_contract[key] = mutation[key]
-		assert_true(Probe.parse_comparison_contract(
+		assert_true(RenderFixtureContract.parse_comparison_contract(
 				fixture, invalid_contract).has("error"),
 				"the HUD-hidden contract must reject %s" % [mutation])
 	var extra := contract.duplicate(true)
 	extra["profile_slot"] = 0
-	assert_true(Probe.parse_comparison_contract(fixture, extra).has("error"),
+	assert_true(RenderFixtureContract.parse_comparison_contract(fixture, extra).has("error"),
 			"profile setup fields do not belong in the comparison contract")
 
 
@@ -326,7 +326,7 @@ func test_comparison_contract_requires_full_frame_m16_and_exact_player_pose() ->
 		"terrain_enabled": true,
 		"player_pose_source": "retail_player_bms.applied",
 	}
-	var parsed: Dictionary = Probe.parse_comparison_contract(fixture, contract)
+	var parsed: Dictionary = RenderFixtureContract.parse_comparison_contract(fixture, contract)
 	assert_false(parsed.has("error"))
 	assert_eq(parsed.weapon, "WPN_M16BURST")
 	assert_eq(parsed.retail_hud_weapon_label, "M16 - Burst")
@@ -337,11 +337,11 @@ func test_comparison_contract_requires_full_frame_m16_and_exact_player_pose() ->
 
 	var wrong_mode := fixture.duplicate(true)
 	wrong_mode.capture_mode = "world_only"
-	assert_true(Probe.parse_comparison_contract(
+	assert_true(RenderFixtureContract.parse_comparison_contract(
 			wrong_mode, contract).has("error"))
 	var wrong_pose := fixture.duplicate(true)
 	wrong_pose.retail_player_bms.applied = [1.0, 2.0]
-	assert_true(Probe.parse_comparison_contract(
+	assert_true(RenderFixtureContract.parse_comparison_contract(
 			wrong_pose, contract).has("error"))
 	for mutation: Dictionary in [
 		{"capture_mode": "world_only"},
@@ -354,7 +354,7 @@ func test_comparison_contract_requires_full_frame_m16_and_exact_player_pose() ->
 		var invalid_contract := contract.duplicate(true)
 		for key: Variant in mutation:
 			invalid_contract[key] = mutation[key]
-		assert_true(Probe.parse_comparison_contract(
+		assert_true(RenderFixtureContract.parse_comparison_contract(
 				fixture, invalid_contract).has("error"),
 				"the comparison contract must reject %s" % [mutation])
 
@@ -383,7 +383,7 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 		"pitch_deg": -6.5,
 	}
 
-	assert_eq(Probe.comparison_spawn_profile(contract), {
+	assert_eq(RenderFixtureContract.comparison_spawn_profile(contract), {
 		"player_class": 9,
 		"primary": "WPN_M16BURST",
 		"primary_clips": 9,
@@ -396,7 +396,7 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 		"capture_mode": "hud_hidden",
 		"equipped_weapon": "WPN_M16BURST",
 	}
-	assert_eq(Probe.comparison_spawn_profile(hidden_profile_contract), {
+	assert_eq(RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract), {
 		"team": 0,
 		"player_class": 9,
 		"primary": "WPN_M16BURST",
@@ -426,7 +426,7 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	assert_eq(avatar_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/avatars/Avatars.def")), OK)
 	var join_profile := NetSessionDrive.character_join_profile_from_database(
-			avatar_db, Probe.comparison_spawn_profile(hidden_profile_contract))
+			avatar_db, RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract))
 	assert_eq(join_profile.get("character_ids", []), [0x0402, 0x8207],
 			"the staged tree selections resolve to retail slot 0's character IDs")
 	assert_eq(join_profile.get("player_classes", []), [9, 9])
@@ -438,10 +438,10 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	var arms: Dictionary = combo.get("arms", {})
 	assert_eq(String(arms.get("graphic", "")), "IndoArms.3di")
 	assert_eq(Array(arms.get("camo", [])), [1, 0, 0])
-	assert_true(Probe.verify_comparison_spawn(
+	assert_true(RenderFixtureContract.verify_comparison_spawn(
 			world, contract).has("error"),
 			"the mission-overridden M4 spawn must not pass as matched evidence")
-	var fallback: Dictionary = Probe.apply_comparison_weapon_fallback(
+	var fallback: Dictionary = RenderFixtureContract.apply_comparison_weapon_fallback(
 			game, world, contract)
 	assert_false(fallback.has("error"))
 	assert_eq(fallback.weapon_install_source,
@@ -456,8 +456,8 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 		"player_class": 9,
 	}])
 	assert_eq(presenter.refresh_calls, 1)
-	assert_false(Probe.verify_comparison_spawn(world, contract).has("error"))
-	var pose: Dictionary = Probe.teleport_comparison_player(world, contract)
+	assert_false(RenderFixtureContract.verify_comparison_spawn(world, contract).has("error"))
+	var pose: Dictionary = RenderFixtureContract.teleport_comparison_player(world, contract)
 	assert_false(pose.has("error"))
 	assert_eq(world.sim.teleports, [{
 		"position_bms": Vector3(283.129364, -357.799469, 27.0),
@@ -465,7 +465,7 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 		"pitch_deg": -6.5,
 	}])
 
-	var witness: Dictionary = Probe.observe_comparison_contract(
+	var witness: Dictionary = RenderFixtureContract.observe_comparison_contract(
 			game, world, viewport, contract)
 	assert_false(witness.has("error"))
 	assert_eq(witness.equipped_weapon, "WPN_M16BURST")
@@ -507,7 +507,7 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 		"yaw_deg": contract.yaw_deg,
 		"pitch_deg": contract.pitch_deg,
 	}
-	var hidden_witness: Dictionary = Probe.observe_comparison_contract(
+	var hidden_witness: Dictionary = RenderFixtureContract.observe_comparison_contract(
 			hidden_game, world, viewport, hidden_contract)
 	assert_false(hidden_witness.has("error"))
 	for expected: Dictionary in [
@@ -563,45 +563,45 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	assert_eq(observed_witness_keys, expected_witness_keys,
 			"the runtime witness retains exact timing, pose, and node provenance")
 	world.arms_graphic = "ArmsG.3di"
-	assert_true(Probe.observe_comparison_contract(
+	assert_true(RenderFixtureContract.observe_comparison_contract(
 			hidden_game, world, viewport, hidden_contract).has("error"),
 			"a different submitted arms asset must fail the capture")
 	world.arms_graphic = "IndoArms.3di"
 	hidden_game.big_map_active = true
 	hidden_game.gameplay_hud_visible = true
-	assert_true(Probe.observe_comparison_contract(
+	assert_true(RenderFixtureContract.observe_comparison_contract(
 			hidden_game, world, viewport, hidden_contract).has("error"),
 			"an active large map must fail the HUD-hidden capture")
 	hidden_game.big_map_active = false
 	hidden_game.gameplay_hud_visible = false
 	hidden_game.fps_counter_visible = true
-	assert_true(Probe.observe_comparison_contract(
+	assert_true(RenderFixtureContract.observe_comparison_contract(
 			hidden_game, world, viewport, hidden_contract).has("error"),
 			"a visible FPS counter must fail the HUD-hidden capture")
 	hidden_game.fps_counter_visible = false
 	world.visible = false
-	assert_true(Probe.observe_comparison_contract(
+	assert_true(RenderFixtureContract.observe_comparison_contract(
 			game, world, viewport, contract).has("error"),
 			"terrain hidden by a parent must fail the capture witness")
 	world.visible = true
 
 	world.sim.equipped_name = "WPN_M4AUTO"
-	assert_true(Probe.observe_comparison_contract(
+	assert_true(RenderFixtureContract.observe_comparison_contract(
 			game, world, viewport, contract).has("error"),
 			"a different equipped weapon must fail the capture")
 	world.sim.equipped_name = "WPN_M16BURST"
 	world.presented_weapon = "WPN_M4AUTO"
-	assert_true(Probe.observe_comparison_contract(
+	assert_true(RenderFixtureContract.observe_comparison_contract(
 			game, world, viewport, contract).has("error"),
 			"a stale world viewmodel weapon must fail the capture")
 	world.presented_weapon = "WPN_M16BURST"
 	hud.visible = false
-	assert_true(Probe.observe_comparison_contract(
+	assert_true(RenderFixtureContract.observe_comparison_contract(
 			game, world, viewport, contract).has("error"),
 			"a hidden HUD must fail the capture")
 	hud.visible = true
 	world.sim.weapon_reserve = 300
-	assert_true(Probe.observe_comparison_contract(
+	assert_true(RenderFixtureContract.observe_comparison_contract(
 			game, world, viewport, contract).has("error"),
 			"different visible reserve ammo must fail the capture")
 
@@ -618,7 +618,7 @@ func test_capture_provenance_requires_a_frozen_source_and_exact_binaries() -> vo
 	extension_file.store_string("extension-test")
 	extension_file.close()
 
-	var provenance := Probe.build_capture_provenance(
+	var provenance := RenderFixtureContract.build_capture_provenance(
 			"a".repeat(40), godot_path, extension_path)
 	assert_false(provenance.has("error"))
 	assert_eq(provenance.source_commit, "a".repeat(40))
@@ -626,11 +626,11 @@ func test_capture_provenance_requires_a_frozen_source_and_exact_binaries() -> vo
 			"59cb4fdf868a41f5dd4d2fbeedc45517b0636dec738b69de646fd08df0c97d4f")
 	assert_eq(provenance.gdextension_sha256,
 			"294c60be27332e39c6f029b7d98414e3a82221eb17a7ac86bb9b1b8767e436de")
-	assert_true(Probe.build_capture_provenance(
+	assert_true(RenderFixtureContract.build_capture_provenance(
 			"short", godot_path, extension_path).has("error"))
-	assert_true(Probe.build_capture_provenance(
+	assert_true(RenderFixtureContract.build_capture_provenance(
 			"A".repeat(40), godot_path, extension_path).has("error"))
-	assert_true(Probe.build_capture_provenance(
+	assert_true(RenderFixtureContract.build_capture_provenance(
 			"a".repeat(40), godot_path, "user://missing-extension.bin").has("error"))
 
 
@@ -700,7 +700,6 @@ func test_published_capture_artifacts_are_relocatable_with_the_manifest() -> voi
 			"terrain_node_visible": true,
 		},
 	}, ProjectSettings.globalize_path(output_dir), "portable")
-	probe.free()
 
 	assert_false(row.has("error"), String(row.get("error", "")))
 	assert_eq(row.png_path, "portable.png")
@@ -781,7 +780,6 @@ func test_publish_bundle_rejects_claims_that_do_not_match_source_bytes() -> void
 		},
 		"diagnostics": diagnostics,
 	}, ProjectSettings.globalize_path(output_dir), "hash-mismatch")
-	probe.free()
 
 	assert_true(row.has("error"),
 			"artifact and sidecar claims cannot substitute for hashing the PNG bytes")
@@ -842,7 +840,6 @@ func test_publish_bundle_rejects_a_stale_source_state_hash_before_writing() -> v
 		},
 		"diagnostics": diagnostics,
 	}, ProjectSettings.globalize_path(output_dir), "state-hash-mismatch")
-	probe.free()
 
 	assert_true(row.has("error"),
 			"the source state claim must be verified against its bytes")
@@ -890,7 +887,6 @@ func test_publish_bundle_rejects_a_hashed_but_incomplete_raw_sidecar() -> void:
 			"frame": {"process": 80},
 		},
 	}, ProjectSettings.globalize_path(output_dir), "incomplete-state")
-	probe.free()
 
 	assert_true(row.has("error"),
 			"hashes alone do not make an incomplete raw sidecar valid evidence")
@@ -910,7 +906,7 @@ func test_fixture_publication_replaces_the_destination_only_after_commit() -> vo
 	old_file.store_string("old")
 	old_file.close()
 
-	var transaction: Dictionary = Probe.begin_fixture_publication(
+	var transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root)
 	assert_false(transaction.has("error"))
 	var staging_dir := String(transaction.get("staging_path", ""))
@@ -931,7 +927,7 @@ func test_fixture_publication_replaces_the_destination_only_after_commit() -> vo
 			"the prior evidence remains visible while the fixture is incomplete")
 	assert_false(FileAccess.file_exists(
 			final_dir.path_join("fixture-manifest.json")))
-	assert_eq(Probe.commit_fixture_publication(staging_dir, final_dir), OK)
+	assert_eq(FixturePublication.commit_fixture_publication(staging_dir, final_dir), OK)
 	assert_false(DirAccess.dir_exists_absolute(staging_dir))
 	assert_false(FileAccess.file_exists(old_path))
 	assert_true(FileAccess.file_exists(
@@ -939,7 +935,7 @@ func test_fixture_publication_replaces_the_destination_only_after_commit() -> vo
 	assert_true(FileAccess.file_exists(
 			final_dir.path_join("fixture-manifest.json")))
 
-	var failed_transaction: Dictionary = Probe.begin_fixture_publication(
+	var failed_transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root)
 	assert_false(failed_transaction.has("error"))
 	var failed_stage := String(failed_transaction.staging_path)
@@ -948,7 +944,7 @@ func test_fixture_publication_replaces_the_destination_only_after_commit() -> vo
 	assert_not_null(incomplete)
 	incomplete.store_buffer(PackedByteArray([9]))
 	incomplete.close()
-	assert_eq(Probe.abort_fixture_publication(failed_stage), OK)
+	assert_eq(FixturePublication.abort_fixture_publication(failed_stage), OK)
 	assert_false(DirAccess.dir_exists_absolute(failed_stage))
 	assert_true(FileAccess.file_exists(
 			final_dir.path_join("fixture-manifest.json")),
@@ -956,12 +952,12 @@ func test_fixture_publication_replaces_the_destination_only_after_commit() -> vo
 	assert_false(FileAccess.file_exists(final_dir.path_join("incomplete.png")))
 
 	var source := FileAccess.get_file_as_string(
-			"res://tests/render_fixture_capture_probe.gd")
+			"res://probes/render/render_fixture_capture_probe.gd")
 	var begin := source.find(
 			"begin_fixture_publication(output_abs, scratch_abs)")
 	var publish := source.find(
 			"publish_bundle(result_dict, publication_abs, label)", begin)
-	var manifest_write := source.find("_write_bytes(manifest_path", publish)
+	var manifest_write := source.find("write_bytes(manifest_path", publish)
 	var commit := source.find(
 			"commit_fixture_publication(publication_abs, output_abs)",
 			manifest_write)
@@ -984,7 +980,7 @@ func test_fixture_publication_recovers_the_prior_fixture_after_an_interrupted_in
 	old_file.store_string("old")
 	old_file.close()
 
-	var transaction: Dictionary = Probe.begin_fixture_publication(
+	var transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root)
 	assert_false(transaction.has("error"))
 	var staging_dir := String(transaction.get("staging_path", ""))
@@ -998,21 +994,21 @@ func test_fixture_publication_recovers_the_prior_fixture_after_an_interrupted_in
 		return ERR_CANT_CREATE
 	var restore_failure := func(_source: String, _target: String) -> Error:
 		return ERR_BUSY
-	assert_eq(Probe.commit_fixture_publication(
+	assert_eq(FixturePublication.commit_fixture_publication(
 			staging_dir, final_dir, install_failure, restore_failure), ERR_BUSY)
 	assert_false(DirAccess.dir_exists_absolute(final_dir),
 			"the injected interruption leaves recovery to the durable transaction")
 
 	var owner_is_dead := func(_pid: int) -> bool:
 		return false
-	var recovered: Dictionary = Probe.begin_fixture_publication(
+	var recovered: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root, owner_is_dead)
 	assert_false(recovered.has("error"),
 			"the next publication must recover an interrupted prior transaction")
 	assert_true(FileAccess.file_exists(old_path),
 			"recovery restores the last complete fixture before accepting new work")
 	assert_false(FileAccess.file_exists(final_dir.path_join("new-evidence.txt")))
-	assert_eq(Probe.abort_fixture_publication(
+	assert_eq(FixturePublication.abort_fixture_publication(
 			String(recovered.get("staging_path", ""))), OK)
 
 
@@ -1047,12 +1043,12 @@ func test_fixture_publication_rejects_a_linked_output_root_without_touching_its_
 				"the regression fixture requires a real link/junction root")
 	assert_true(parent_dir.is_link(linked_output.get_file()))
 
-	var transaction: Dictionary = Probe.begin_fixture_publication(
+	var transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			linked_output, parent)
 	assert_true(transaction.has("error"),
 			"publication must reject a linked root before any rename or traversal")
 	if not transaction.has("error"):
-		Probe.abort_fixture_publication(String(transaction.get("staging_path", "")))
+		FixturePublication.abort_fixture_publication(String(transaction.get("staging_path", "")))
 	assert_true(FileAccess.file_exists(sentinel),
 			"rejecting the root must never traverse or delete the external target")
 	assert_eq(DirAccess.remove_absolute(linked_output), OK)
@@ -1071,12 +1067,12 @@ func test_fixture_publication_rejects_the_trusted_root_and_any_linked_ancestor()
 	assert_eq(DirAccess.make_dir_recursive_absolute(trusted_root), OK)
 	assert_eq(DirAccess.make_dir_recursive_absolute(external), OK)
 
-	var root_transaction: Dictionary = Probe.begin_fixture_publication(
+	var root_transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			trusted_root, trusted_root)
 	assert_true(root_transaction.has("error"),
 			"a fixture must be a dedicated strict descendant, never the scratch root")
 	if not root_transaction.has("error"):
-		Probe.abort_fixture_publication(String(
+		FixturePublication.abort_fixture_publication(String(
 				root_transaction.get("staging_path", "")))
 
 	var sentinel := external.path_join("must-survive.txt")
@@ -1105,12 +1101,12 @@ func test_fixture_publication_rejects_the_trusted_root_and_any_linked_ancestor()
 	assert_true(trusted_dir.is_link(pivot.get_file()))
 
 	var output_inside_link := pivot.path_join("fixture")
-	var transaction: Dictionary = Probe.begin_fixture_publication(
+	var transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			output_inside_link, trusted_root)
 	assert_true(transaction.has("error"),
 			"every existing component below the trusted root must be link-free")
 	if not transaction.has("error"):
-		Probe.abort_fixture_publication(String(
+		FixturePublication.abort_fixture_publication(String(
 				transaction.get("staging_path", "")))
 	assert_true(FileAccess.file_exists(sentinel),
 			"ancestor rejection must not enter or mutate the external target")
@@ -1120,12 +1116,12 @@ func test_fixture_publication_rejects_the_trusted_root_and_any_linked_ancestor()
 	assert_eq(DirAccess.remove_absolute(external), OK)
 	assert_true(trusted_dir.is_link(pivot.get_file()),
 			"removing the target must leave a dangling reparse entry")
-	var dangling_transaction: Dictionary = Probe.begin_fixture_publication(
+	var dangling_transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			output_inside_link, trusted_root)
 	assert_true(dangling_transaction.has("error"),
 			"dangling links must be rejected even when exists() reports false")
 	if not dangling_transaction.has("error"):
-		Probe.abort_fixture_publication(String(
+		FixturePublication.abort_fixture_publication(String(
 				dangling_transaction.get("staging_path", "")))
 	assert_eq(DirAccess.remove_absolute(pivot), OK)
 	assert_eq(DirAccess.remove_absolute(trusted_root), OK)
@@ -1143,7 +1139,7 @@ func test_orphan_recovery_is_atomically_claimed_before_any_mutation() -> void:
 	assert_not_null(old_file)
 	old_file.store_string("old")
 	old_file.close()
-	var orphan: Dictionary = Probe.begin_fixture_publication(
+	var orphan: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root)
 	assert_false(orphan.has("error"))
 	var orphan_staging := String(orphan.get("staging_path", ""))
@@ -1168,10 +1164,10 @@ func test_orphan_recovery_is_atomically_claimed_before_any_mutation() -> void:
 		race.claimed_path = claim
 		assert_true(DirAccess.dir_exists_absolute(claim),
 				"the old journal must be moved under the winner's unique claim")
-		race.competitor = Probe.begin_fixture_publication(
+		race.competitor = FixturePublication.begin_fixture_publication(
 				final_dir, trusted_root, owner_is_live)
 
-	var winner: Dictionary = Probe.begin_fixture_publication(
+	var winner: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root, owner_is_dead, compete_after_claim)
 	assert_eq(int(race.claim_count), 1)
 	assert_true((race.competitor as Dictionary).has("error"),
@@ -1184,7 +1180,7 @@ func test_orphan_recovery_is_atomically_claimed_before_any_mutation() -> void:
 	assert_false(DirAccess.dir_exists_absolute(String(race.claimed_path)))
 	var winner_staging := String(winner.get("staging_path", ""))
 	assert_true(DirAccess.dir_exists_absolute(winner_staging))
-	assert_eq(Probe.abort_fixture_publication(winner_staging), OK)
+	assert_eq(FixturePublication.abort_fixture_publication(winner_staging), OK)
 
 
 func test_orphan_recovery_revalidates_owner_liveness_after_the_atomic_claim() -> void:
@@ -1193,7 +1189,7 @@ func test_orphan_recovery_revalidates_owner_liveness_after_the_atomic_claim() ->
 			"user://render-fixture-recovery-liveness-" + nonce)
 	var final_dir := trusted_root.path_join("fixture")
 	assert_eq(DirAccess.make_dir_recursive_absolute(final_dir), OK)
-	var transaction: Dictionary = Probe.begin_fixture_publication(
+	var transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root)
 	assert_false(transaction.has("error"))
 	var staging := String(transaction.get("staging_path", ""))
@@ -1209,14 +1205,14 @@ func test_orphan_recovery_revalidates_owner_liveness_after_the_atomic_claim() ->
 		# One preflight happens in the caller and one in the atomic-claim seam.
 		# The third observation is deliberately the post-rename revalidation.
 		return int(liveness.checks) >= 3
-	var contender: Dictionary = Probe.begin_fixture_publication(
+	var contender: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root, becomes_live_after_claim)
 	assert_true(contender.has("error"))
 	assert_eq(int(liveness.checks), 3)
 	assert_true(FileAccess.file_exists(marker),
 			"a revived owner must regain its original journal without mutation")
 	assert_true(DirAccess.dir_exists_absolute(staging))
-	assert_eq(Probe.abort_fixture_publication(staging), OK)
+	assert_eq(FixturePublication.abort_fixture_publication(staging), OK)
 
 
 func test_empty_terminal_journals_are_recoverable_after_owner_release() -> void:
@@ -1225,7 +1221,7 @@ func test_empty_terminal_journals_are_recoverable_after_owner_release() -> void:
 			"user://render-fixture-empty-journal-" + nonce)
 	var final_dir := trusted_root.path_join("fixture")
 	assert_eq(DirAccess.make_dir_recursive_absolute(final_dir), OK)
-	var transaction: Dictionary = Probe.begin_fixture_publication(
+	var transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root)
 	assert_false(transaction.has("error"))
 	var staging := String(transaction.get("staging_path", ""))
@@ -1234,16 +1230,16 @@ func test_empty_terminal_journals_are_recoverable_after_owner_release() -> void:
 	assert_eq(DirAccess.remove_absolute(journal.path_join("owner.json")), OK)
 	assert_true(DirAccess.dir_exists_absolute(journal))
 
-	var recovered: Dictionary = Probe.begin_fixture_publication(
+	var recovered: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root)
 	assert_false(recovered.has("error"),
 			"an empty journal is the normal terminal cleanup crash state")
-	assert_eq(Probe.abort_fixture_publication(
+	assert_eq(FixturePublication.abort_fixture_publication(
 			String(recovered.get("staging_path", ""))), OK)
 
 	# The same owner-last cleanup rule applies after an orphan was renamed under
 	# a recovery claim and completed there.
-	transaction = Probe.begin_fixture_publication(final_dir, trusted_root)
+	transaction = FixturePublication.begin_fixture_publication(final_dir, trusted_root)
 	assert_false(transaction.has("error"))
 	staging = String(transaction.get("staging_path", ""))
 	journal = staging.get_base_dir()
@@ -1255,12 +1251,12 @@ func test_empty_terminal_journals_are_recoverable_after_owner_release() -> void:
 	assert_eq(DirAccess.rename_absolute(journal, abandoned_claim), OK)
 	var owner_is_live := func(_pid: int) -> bool:
 		return true
-	recovered = Probe.begin_fixture_publication(
+	recovered = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root, owner_is_live)
 	assert_false(recovered.has("error"),
 			"owner release makes an empty claim terminal even before process exit")
 	assert_false(DirAccess.dir_exists_absolute(abandoned_claim))
-	assert_eq(Probe.abort_fixture_publication(
+	assert_eq(FixturePublication.abort_fixture_publication(
 			String(recovered.get("staging_path", ""))), OK)
 
 
@@ -1275,7 +1271,7 @@ func test_marker_write_and_cleanup_failure_leave_a_recoverable_rollback() -> voi
 	assert_not_null(old_file)
 	old_file.store_string("old")
 	old_file.close()
-	var transaction: Dictionary = Probe.begin_fixture_publication(
+	var transaction: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root)
 	assert_false(transaction.has("error"))
 	var staging := String(transaction.get("staging_path", ""))
@@ -1289,7 +1285,7 @@ func test_marker_write_and_cleanup_failure_leave_a_recoverable_rollback() -> voi
 	var cleanup_interruption := func(
 			_root: String, _output: String, _trusted: String) -> Error:
 		return ERR_BUSY
-	assert_eq(Probe.commit_fixture_publication(
+	assert_eq(FixturePublication.commit_fixture_publication(
 			staging, final_dir, Callable(), Callable(),
 			marker_failure, cleanup_interruption), ERR_BUSY)
 	assert_true(FileAccess.file_exists(old_path),
@@ -1298,19 +1294,19 @@ func test_marker_write_and_cleanup_failure_leave_a_recoverable_rollback() -> voi
 
 	var owner_is_dead := func(_pid: int) -> bool:
 		return false
-	var recovered: Dictionary = Probe.begin_fixture_publication(
+	var recovered: Dictionary = FixturePublication.begin_fixture_publication(
 			final_dir, trusted_root, owner_is_dead)
 	assert_false(recovered.has("error"),
 			"the durable rollback marker must make this crash state recoverable")
 	assert_true(FileAccess.file_exists(old_path))
-	assert_eq(Probe.abort_fixture_publication(
+	assert_eq(FixturePublication.abort_fixture_publication(
 			String(recovered.get("staging_path", ""))), OK)
 
 
 func test_fixture_ids_and_publication_labels_cannot_escape_the_transaction_root() -> void:
 	var nonce := "%d-%d" % [OS.get_process_id(), Time.get_ticks_usec()]
 	var malicious_id := "../escaped-" + nonce
-	assert_true(Probe.fixture_by_id({
+	assert_true(RenderFixtureContract.fixture_by_id({
 		"fixtures": [{"id": malicious_id, "mission": "CP12.bms"}],
 	}, malicious_id).is_empty(),
 			"catalog lookup must reject non-canonical fixture IDs")
@@ -1324,7 +1320,7 @@ func test_fixture_ids_and_publication_labels_cannot_escape_the_transaction_root(
 	var escaped_state := parent.path_join(escaped_label + ".state.json")
 	DirAccess.remove_absolute(escaped_png)
 	DirAccess.remove_absolute(escaped_state)
-	assert_true(Probe.publication_child_path(
+	assert_true(FixturePublication.publication_child_path(
 			staging, "../%s-manifest.json" % escaped_label).is_empty(),
 			"post-join confinement must reject a manifest path outside staging")
 
@@ -1372,7 +1368,6 @@ func test_fixture_ids_and_publication_labels_cannot_escape_the_transaction_root(
 		},
 		"diagnostics": diagnostics,
 	}, staging, "../" + escaped_label)
-	probe.free()
 	assert_true(row.has("error"),
 			"bundle publication must reject a non-canonical label before writing")
 	assert_false(FileAccess.file_exists(escaped_png))
@@ -1386,9 +1381,9 @@ func test_fixture_lookup_and_capture_variants_are_bounded() -> void:
 			{"id": "second", "mission": "B.bms"},
 		],
 	}
-	assert_eq(Probe.fixture_by_id(catalog, "second").get("mission"), "B.bms")
-	assert_true(Probe.fixture_by_id(catalog, "missing").is_empty())
-	assert_eq(Probe.capture_variants().map(func(row): return row.id), [
+	assert_eq(RenderFixtureContract.fixture_by_id(catalog, "second").get("mission"), "B.bms")
+	assert_true(RenderFixtureContract.fixture_by_id(catalog, "missing").is_empty())
+	assert_eq(RenderFixtureContract.capture_variants().map(func(row): return row.id), [
 		"beauty", "shadows_off", "lighting_only", "unshaded",
 		"directional_shadow_atlas",
 	])
@@ -1419,8 +1414,8 @@ func test_live_warmup_suspends_only_static_projection_until_exact_refresh() -> v
 			"an originally disabled provider must be restored without spurious invalidation")
 
 	var source := FileAccess.get_file_as_string(
-			"res://tests/render_fixture_capture_probe.gd")
-	var boot := source.find("StandaloneProbe.boot(")
+			"res://probes/render/render_fixture_capture_probe.gd")
+	var boot := source.find("ctx.load_saved_mission(")
 	var begin := source.find("_static_shadow_warmup_suspension.begin(", boot)
 	var load_settle := source.find("\"load_settle_frames\"", boot)
 	assert_gt(boot, -1)
@@ -1439,7 +1434,7 @@ func test_live_warmup_suspends_only_static_projection_until_exact_refresh() -> v
 	assert_gt(restore, exact_camera)
 	assert_gt(refresh, restore,
 			"restore must precede the exact non-time-owning terrain refresh")
-	var shutdown := source.find("func _finish_shutdown(")
+	var shutdown := source.find("func _teardown(")
 	assert_gt(shutdown, restore)
 	assert_true(source.substr(shutdown).contains(
 			"_finish_static_shadow_warmup_suspension()"),
@@ -1448,7 +1443,7 @@ func test_live_warmup_suspends_only_static_projection_until_exact_refresh() -> v
 
 func test_frozen_capture_realizes_each_shadow_variant_before_state_capture() -> void:
 	var source := FileAccess.get_file_as_string(
-			"res://tests/render_fixture_capture_probe.gd")
+			"res://probes/render/render_fixture_capture_probe.gd")
 	var apply := source.find("_shadow_capture_session.apply_variant(variant)")
 	var capture := source.find("adapter.capture_mcp_render_bundle({", apply)
 	assert_gt(apply, -1)
@@ -1458,7 +1453,7 @@ func test_frozen_capture_realizes_each_shadow_variant_before_state_capture() -> 
 			"The frozen GameWorld must await exact async terrain pages after every " \
 			+ "shadow control change and before the adapter snapshots state.")
 
-	var shadows_off: Variant = Probe.capture_variants()[1]
+	var shadows_off: Variant = RenderFixtureContract.capture_variants()[1]
 	var stale_beauty := {
 		"shadow_provider_enabled": false,
 		"shadow_provider_frame_plan_count": 49,
@@ -1473,7 +1468,7 @@ func test_frozen_capture_realizes_each_shadow_variant_before_state_capture() -> 
 		"frame_shadow_rgb_changed_bytes": 0,
 		"ready_pages": 0,
 	}
-	assert_false(Probe.capture_variant_tile_cache_is_realized(
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
 			shadows_off, stale_beauty),
 			"Disabled controls plus beauty-frame counters are not a realized shadows_off frame.")
 	var realized_off := {
@@ -1499,16 +1494,16 @@ func test_frozen_capture_realizes_each_shadow_variant_before_state_capture() -> 
 		"ready_pages": 48,
 		"shadow_epoch_raster_jobs": 0,
 	}
-	assert_true(Probe.capture_variant_tile_cache_is_realized(
+	assert_true(RenderFixtureContract.capture_variant_tile_cache_is_realized(
 			shadows_off, realized_off))
 	var no_overlay_required := realized_off.duplicate()
 	no_overlay_required.tile_overlay_required = false
 	no_overlay_required.tile_overlay_available = false
-	assert_true(Probe.capture_variant_tile_cache_is_realized(
+	assert_true(RenderFixtureContract.capture_variant_tile_cache_is_realized(
 			shadows_off, no_overlay_required),
 			"A terrain that does not require .til data remains valid without an overlay.")
 
-	var beauty: Variant = Probe.capture_variants()[0]
+	var beauty: Variant = RenderFixtureContract.capture_variants()[0]
 	var realized_on := {
 		"available": true,
 		"tile_overlay_required": true,
@@ -1544,77 +1539,77 @@ func test_frozen_capture_realizes_each_shadow_variant_before_state_capture() -> 
 		"shadow_epoch_unsupported_draw_count": 0,
 		"shadow_epoch_unsupported_attribution_truncated": 0,
 	}
-	assert_true(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on))
+	assert_true(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on))
 	var cache_hit_beauty := realized_on.duplicate()
-	assert_true(Probe.capture_variant_tile_cache_is_realized(
+	assert_true(RenderFixtureContract.capture_variant_tile_cache_is_realized(
 			beauty, cache_hit_beauty),
 			"A fully cached frame is exact after its shadow epoch was compiled.")
 	cache_hit_beauty.frame_ready_hits = 48
-	assert_false(Probe.capture_variant_tile_cache_is_realized(
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
 			beauty, cache_hit_beauty),
 			"Every current request must resolve through composition or a ready hit.")
 	cache_hit_beauty.frame_ready_hits = 49
 	cache_hit_beauty.frame_selected_ready_pages = 0
-	assert_false(Probe.capture_variant_tile_cache_is_realized(
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
 			beauty, cache_hit_beauty),
 			"Retained global pages are not proof of a current-frame selection.")
 	cache_hit_beauty.frame_selected_ready_pages = 48
 	cache_hit_beauty.frame_capacity_fallbacks = 1
-	assert_false(Probe.capture_variant_tile_cache_is_realized(
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
 			beauty, cache_hit_beauty),
 			"A capacity fallback makes the evidence frame incomplete.")
 	cache_hit_beauty.frame_capacity_fallbacks = 0
 	realized_on.pending_jobs = 1
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"Capture must wait until every requested compile/upload is drained.")
 	realized_on.pending_jobs = 0
 	realized_on.tile_overlay_available = false
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"A mission that requires .til data must prove that its overlay is available.")
 	realized_on.tile_overlay_available = true
 	realized_on.upload_failures = 1
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"Cumulative upload failures make the evidence run inexact.")
 	realized_on.upload_failures = 0
 	realized_on.shadow_raster_failures = 1
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"Cumulative static-raster failures make the evidence run inexact.")
 	realized_on.shadow_raster_failures = 0
 	realized_on.shadow_epoch_pages_with_draws = 0
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"Enabled static shadows require at least one projected page witness.")
 	realized_on.shadow_epoch_pages_with_draws = 15
 	realized_on.shadow_epoch_projection_draws = 0
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"Enabled static shadows require realized projection draws.")
 	realized_on.shadow_epoch_projection_draws = 145
 	realized_on.shadow_provider_snapshot_exact = false
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"An incomplete static-caster snapshot must fail closed.")
 	realized_on.shadow_provider_snapshot_exact = true
 	realized_on.shadow_provider_admitted_count = 0
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"Enabled static evidence requires an admitted-caster inventory witness.")
 	realized_on.shadow_provider_admitted_count = 17
 	realized_on.shadow_provider_resolved_casters = 0
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"Enabled static evidence requires resolved caster geometry.")
 	realized_on.shadow_provider_resolved_casters = 17
 	realized_on.ready_pages = 0
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"An enabled provider without a resident current cache cannot back the capture.")
 	realized_on.ready_pages = 48
 	realized_on.shadow_epoch_plan_failures = 1
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"A rejected current page must stop evidence publication instead of hiding in a screenshot.")
 	realized_on.shadow_epoch_plan_failures = 0
 	realized_on.shadow_epoch_unsupported_draw_count = 1
-	assert_false(Probe.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
 			"A skipped unsupported draw preserves gameplay but is not exact capture evidence.")
 
 
 func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> void:
-	for variant in Probe.capture_variants():
+	for variant in RenderFixtureContract.capture_variants():
 		var diagnostics := {
 			"world": {
 				"loaded": true,
@@ -1650,24 +1645,24 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 			"suppressed_dynamic_caster_bms_ids": [],
 			"suppressed_static_caster_bms_ids": [],
 		}
-		assert_true(Probe.capture_variant_matches_diagnostics(
+		assert_true(RenderFixtureContract.capture_variant_matches_diagnostics(
 				variant, diagnostics, realized_variant),
 				"variant %s must accept its exact realized state" % variant.id)
 		var stale_dynamic: Dictionary = diagnostics.duplicate(true)
 		stale_dynamic.shadows.dynamic.shadow_enabled = \
 				not bool(variant.dynamic_shadow_enabled)
-		assert_false(Probe.capture_variant_matches_diagnostics(
+		assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
 				variant, stale_dynamic, realized_variant),
 				"variant %s must reject stale dynamic-shadow state" % variant.id)
 		var stale_static: Dictionary = diagnostics.duplicate(true)
 		stale_static.shadows.static_terrain.enabled = \
 				not bool(variant.static_terrain_shadow_enabled)
-		assert_false(Probe.capture_variant_matches_diagnostics(
+		assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
 				variant, stale_static, realized_variant),
 				"variant %s must reject stale static-shadow state" % variant.id)
 		var stale_debug: Dictionary = diagnostics.duplicate(true)
 		stale_debug.renderer.debug_draw = int(variant.debug_draw) + 1
-		assert_false(Probe.capture_variant_matches_diagnostics(
+		assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
 				variant, stale_debug, realized_variant),
 				"variant %s must reject stale debug-draw state" % variant.id)
 		for hidden_path in [
@@ -1683,14 +1678,14 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 				hidden[hidden_path[0]][hidden_path[1]] = false
 			else:
 				hidden[hidden_path[0]][hidden_path[1]][hidden_path[2]] = false
-			assert_false(Probe.capture_variant_matches_diagnostics(
+			assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
 					variant, hidden, realized_variant),
 					"variant %s must reject hidden/non-processing %s" % [
 							variant.id, ".".join(hidden_path)])
 
 
 func test_selected_caster_variants_require_exact_independently_realized_suppression() -> void:
-	var variant = Probe.shadow_attribution_variants(PackedInt32Array([58]))[3]
+	var variant = RenderFixtureContract.shadow_attribution_variants(PackedInt32Array([58]))[3]
 	var diagnostics := {
 		"world": {"loaded": true, "visible": true},
 		"terrain": {"available": true, "visible": true, "visible_in_tree": true},
@@ -1719,20 +1714,20 @@ func test_selected_caster_variants_require_exact_independently_realized_suppress
 		"suppressed_dynamic_caster_bms_ids": [],
 		"suppressed_static_caster_bms_ids": [58],
 	}
-	assert_true(Probe.capture_variant_matches_diagnostics(
+	assert_true(RenderFixtureContract.capture_variant_matches_diagnostics(
 			variant, diagnostics, realized_variant))
 	var request_echo_only := realized_variant.duplicate(true)
 	request_echo_only.suppressed_static_caster_bms_ids = []
-	assert_false(Probe.capture_variant_matches_diagnostics(
+	assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
 			variant, diagnostics, request_echo_only),
 			"the request cannot substitute for the realized static provider set")
 	var stale_provider := diagnostics.duplicate(true)
 	stale_provider.shadows.static_terrain.suppressed_bms_ids = []
-	assert_false(Probe.capture_variant_matches_diagnostics(
+	assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
 			variant, stale_provider, realized_variant),
 			"captured renderer diagnostics must independently carry the exact static set")
 
-	var dynamic_variant = Probe.shadow_attribution_variants()[3]
+	var dynamic_variant = RenderFixtureContract.shadow_attribution_variants()[3]
 	var dynamic_diagnostics: Dictionary = diagnostics.duplicate(true)
 	dynamic_diagnostics.shadows.dynamic.shadow_enabled = \
 			bool(dynamic_variant.dynamic_shadow_enabled)
@@ -1748,15 +1743,15 @@ func test_selected_caster_variants_require_exact_independently_realized_suppress
 		"suppressed_dynamic_caster_bms_ids": [58],
 		"suppressed_static_caster_bms_ids": [],
 	}
-	assert_true(Probe.capture_variant_matches_diagnostics(
+	assert_true(RenderFixtureContract.capture_variant_matches_diagnostics(
 			dynamic_variant, dynamic_diagnostics, dynamic_realized))
 	dynamic_realized.suppressed_dynamic_caster_bms_ids = []
-	assert_false(Probe.capture_variant_matches_diagnostics(
+	assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
 			dynamic_variant, dynamic_diagnostics, dynamic_realized),
 			"dynamic suppression must be read from the actual ObjectModel caster bit")
 
 	var source := FileAccess.get_file_as_string(
-			"res://tests/render_fixture_capture_probe.gd")
+			"res://probes/render/render_fixture_capture_probe.gd")
 	var camera_validation := source.find("func _valid_realized_camera(")
 	var publication := source.find("func publish_bundle", camera_validation)
 	assert_gt(camera_validation, -1)
@@ -1768,7 +1763,7 @@ func test_selected_caster_variants_require_exact_independently_realized_suppress
 
 
 func test_shadow_attribution_profile_is_opt_in_and_scratch_only() -> void:
-	var canonical: Dictionary = Probe.select_capture_profile("")
+	var canonical: Dictionary = RenderFixtureContract.select_capture_profile("")
 	assert_false(canonical.has("error"))
 	assert_eq(String(canonical.id), "canonical")
 	assert_false(bool(canonical.scratch_only))
@@ -1777,7 +1772,7 @@ func test_shadow_attribution_profile_is_opt_in_and_scratch_only() -> void:
 		"directional_shadow_atlas",
 	])
 
-	var attribution: Dictionary = Probe.select_capture_profile(
+	var attribution: Dictionary = RenderFixtureContract.select_capture_profile(
 			"shadow_attribution")
 	assert_false(attribution.has("error"))
 	assert_eq(String(attribution.id), "shadow_attribution")
@@ -1801,23 +1796,23 @@ func test_shadow_attribution_profile_is_opt_in_and_scratch_only() -> void:
 	assert_eq(Array(attribution_variants[3].suppressed_static_caster_bms_ids), [])
 	assert_false(attribution_variants[4].dynamic_shadow_enabled)
 	assert_false(attribution_variants[4].static_terrain_shadow_enabled)
-	assert_true(Probe.capture_output_is_allowed(
+	assert_true(RenderFixtureContract.capture_output_is_allowed(
 			attribution, "C:/repo/.scratch/shadow-attribution/cp12",
 			"C:/repo/.scratch"))
-	assert_false(Probe.capture_output_is_allowed(
+	assert_false(RenderFixtureContract.capture_output_is_allowed(
 			attribution, "C:/repo/screenshots/parity/cp12",
 			"C:/repo/.scratch"),
 			"the unconfirmed attribution profile may not publish evidence")
-	assert_true(Probe.capture_output_is_allowed(
+	assert_true(RenderFixtureContract.capture_output_is_allowed(
 			canonical, "C:/repo/.scratch/golden/render/cp12",
 			"C:/repo/.scratch"))
-	assert_false(Probe.capture_output_is_allowed(
+	assert_false(RenderFixtureContract.capture_output_is_allowed(
 			canonical, "C:/repo/.scratch", "C:/repo/.scratch"),
 			"a fixture may never replace the trusted scratch root itself")
-	assert_true(Probe.select_capture_profile("projected_slots").has("error"),
+	assert_true(RenderFixtureContract.select_capture_profile("projected_slots").has("error"),
 			"unwitnessed shadow profiles fail closed")
 
-	var selected: Dictionary = Probe.select_capture_profile(
+	var selected: Dictionary = RenderFixtureContract.select_capture_profile(
 			"shadow_attribution", "77, 58,77")
 	assert_false(selected.has("error"))
 	var selected_variants := selected.variants as Array
@@ -1831,7 +1826,7 @@ func test_shadow_attribution_profile_is_opt_in_and_scratch_only() -> void:
 	])
 	assert_eq(Array(selected_variants[3].suppressed_static_caster_bms_ids),
 			[58, 77], "comma-separated scratch selection is sorted and deduplicated")
-	assert_true(Probe.select_capture_profile(
+	assert_true(RenderFixtureContract.select_capture_profile(
 			"shadow_attribution", "58,nope").has("error"),
 			"malformed BMS ids fail before a capture mutates render state")
 
@@ -1843,32 +1838,32 @@ func test_realized_tod_must_preserve_the_exact_requested_clock() -> void:
 			"mission_time_fixed24": 12 * 0x1000000,
 		},
 	}
-	assert_true(Probe.realized_tod_matches(exact, 720.0, 12 * 0x1000000))
+	assert_true(RenderFixtureContract.realized_tod_matches(exact, 720.0, 12 * 0x1000000))
 
 	var drifted := exact.duplicate(true)
 	drifted.environment.mission_minute_of_day = 720.000536441803
 	drifted.environment.mission_time_fixed24 += 1
-	assert_false(Probe.realized_tod_matches(
+	assert_false(RenderFixtureContract.realized_tod_matches(
 			drifted, 720.0, 12 * 0x1000000),
 			"one weather tick makes pairwise fixture evidence non-identical")
 
 
 func test_minute_filter_only_selects_a_declared_integer_witness() -> void:
-	assert_eq(Probe.select_fixture_minutes([350, 720, 1320], ""), {
+	assert_eq(RenderFixtureContract.select_fixture_minutes([350, 720, 1320], ""), {
 		"values": [350, 720, 1320],
 	})
-	assert_eq(Probe.select_fixture_minutes([350, 720, 1320], "720"), {
+	assert_eq(RenderFixtureContract.select_fixture_minutes([350, 720, 1320], "720"), {
 		"values": [720],
 	})
-	assert_true(Probe.select_fixture_minutes(
+	assert_true(RenderFixtureContract.select_fixture_minutes(
 			[350, 720, 1320], "721").has("error"))
-	assert_true(Probe.select_fixture_minutes(
+	assert_true(RenderFixtureContract.select_fixture_minutes(
 			[350, 720, 1320], "720.0").has("error"),
 			"the environment override is an integer selector, not a TOD value")
-	assert_eq(Probe.select_fixture_minutes(
+	assert_eq(RenderFixtureContract.select_fixture_minutes(
 			[350.0, 720.0, 1320.0], "720"), {"values": [720]},
 			"Godot JSON numerics are floats even when the catalog literal is integral")
-	assert_true(Probe.select_fixture_minutes(
+	assert_true(RenderFixtureContract.select_fixture_minutes(
 			[350.0, 720.5, 1320.0], "").has("error"),
 			"fractional catalog minutes are not canonical witnesses")
 
@@ -1878,13 +1873,13 @@ func test_catalog_variants_must_exactly_match_the_capture_driver() -> void:
 		"beauty", "shadows_off", "lighting_only", "unshaded",
 		"directional_shadow_atlas",
 	]
-	assert_true(Probe.diagnostic_variant_contract_matches(declared))
+	assert_true(RenderFixtureContract.diagnostic_variant_contract_matches(declared))
 
 	var reordered := declared.duplicate()
 	reordered.reverse()
-	assert_false(Probe.diagnostic_variant_contract_matches(reordered),
+	assert_false(RenderFixtureContract.diagnostic_variant_contract_matches(reordered),
 			"variant order is part of reproducible evidence identity")
-	assert_false(Probe.diagnostic_variant_contract_matches(
+	assert_false(RenderFixtureContract.diagnostic_variant_contract_matches(
 			declared.slice(0, declared.size() - 1)),
 			"the driver may not silently omit a catalog variant")
 
@@ -1893,10 +1888,10 @@ func test_exact_fixture_pose_reseeds_the_public_weather_phase_owner() -> void:
 	var world := RecordingWorld.new()
 	world.add_child(world.weather)
 	add_child_autofree(world)
-	assert_eq(Probe.pin_weather_phase(world), OK)
+	assert_eq(RenderFixtureContract.pin_weather_phase(world), OK)
 	assert_eq(world.weather.prepare_calls, 1,
 			"capture setup must reset cloud, sway, and lightning phase once")
-	var contract: Dictionary = Probe.capture_phase_contract()
+	var contract: Dictionary = RenderFixtureContract.capture_phase_contract()
 	assert_eq(contract.weather, "canonical_reset_at_requested_tod")
 	assert_eq(contract.water_noise,
 			"one_pose_refresh_then_frozen_noncanonical")
@@ -1923,34 +1918,34 @@ func test_active_water_capture_requires_the_exact_mirrored_camera_pose() -> void
 			},
 		},
 	}
-	assert_true(Probe.realized_reflection_pose_matches(diagnostics))
+	assert_true(RenderFixtureContract.realized_reflection_pose_matches(diagnostics))
 
 	var stale := diagnostics.duplicate(true)
 	stale.water.reflection.camera.global_transform = Transform3D(
 			Basis.IDENTITY, Vector3(1000.001, 16.0, 30.0))
-	assert_false(Probe.realized_reflection_pose_matches(stale),
+	assert_false(RenderFixtureContract.realized_reflection_pose_matches(stale),
 			"a stale mirror from the presenter pose must reject the capture")
 
 	var missing := diagnostics.duplicate(true)
 	missing.water.reflection.available = false
-	assert_false(Probe.realized_reflection_pose_matches(missing),
+	assert_false(RenderFixtureContract.realized_reflection_pose_matches(missing),
 			"active water may not claim a capture without a reflection camera")
 
 	var inactive := diagnostics.duplicate(true)
 	inactive.water.render_active = false
-	assert_true(Probe.realized_reflection_pose_matches(inactive),
+	assert_true(RenderFixtureContract.realized_reflection_pose_matches(inactive),
 			"missions without rendered water have no mirror-pose precondition")
 
 	var hidden := diagnostics.duplicate(true)
 	hidden.water.mesh_visible = false
 	hidden.water.reflection.camera.global_transform = Transform3D(
 			Basis.IDENTITY, Vector3(999.0, 15.0, 31.0))
-	assert_true(Probe.realized_reflection_pose_matches(hidden),
+	assert_true(RenderFixtureContract.realized_reflection_pose_matches(hidden),
 			"an occluded strip is never sampled, so a stale mirror is no defect")
 
 	var unwitnessed := diagnostics.duplicate(true)
 	(unwitnessed.water as Dictionary).erase("mesh_visible")
-	assert_false(Probe.realized_reflection_pose_matches(unwitnessed),
+	assert_false(RenderFixtureContract.realized_reflection_pose_matches(unwitnessed),
 			"diagnostics without the strip-visibility witness cannot claim a capture")
 
 
@@ -1966,10 +1961,10 @@ func test_capture_requires_the_single_player_post_spawn_equivalent() -> void:
 		"gameplay_camera_current": true,
 		"spawn_or_menu_active": false,
 	}
-	assert_true(Probe.post_spawn_capture_state_matches(state))
+	assert_true(RenderFixtureContract.post_spawn_capture_state_matches(state))
 	var mislabeled := state.duplicate(true)
 	mislabeled.observed_at = "capture"
-	assert_false(Probe.post_spawn_capture_state_matches(mislabeled),
+	assert_false(RenderFixtureContract.post_spawn_capture_state_matches(mislabeled),
 			"the runtime is paused at capture; the playing witness must be timestamped")
 
 	for key in [
@@ -1978,11 +1973,11 @@ func test_capture_requires_the_single_player_post_spawn_equivalent() -> void:
 	]:
 		var invalid := state.duplicate(true)
 		invalid[key] = false
-		assert_false(Probe.post_spawn_capture_state_matches(invalid),
+		assert_false(RenderFixtureContract.post_spawn_capture_state_matches(invalid),
 				"%s is a required post-spawn witness" % key)
 	var still_loading := state.duplicate(true)
 	still_loading.world_loading = true
-	assert_false(Probe.post_spawn_capture_state_matches(still_loading))
+	assert_false(RenderFixtureContract.post_spawn_capture_state_matches(still_loading))
 	var spawn_screen := state.duplicate(true)
 	spawn_screen.spawn_or_menu_active = true
-	assert_false(Probe.post_spawn_capture_state_matches(spawn_screen))
+	assert_false(RenderFixtureContract.post_spawn_capture_state_matches(spawn_screen))

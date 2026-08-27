@@ -8,9 +8,9 @@ extends RefCounted
 ## never edited. The original state is restored between variants and at
 ## finish().
 
-const CaptureVariant := preload("res://tests/support/render_capture_variant.gd")
+const CaptureVariant := preload("res://probes/render/render_capture_variant.gd")
 const CasterDiagnostic := preload(
-		"res://tests/support/shadow_caster_diagnostic.gd")
+		"res://probes/render/shadow_caster_diagnostic.gd")
 
 var _world: GameWorld
 var _viewport: Viewport

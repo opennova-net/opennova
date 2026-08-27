@@ -307,7 +307,10 @@ func test_object_shader_topology_is_compile_time_not_uniform_driven() -> void:
 	var bindings := "\n".join(PackedStringArray([
 		_read(_repo_path("godot/src/object/object_shader_cache.cpp")),
 		_read(_repo_path("godot/src/object/object_model_materials.cpp")),
-		_read("res://tests/render_swatch_probe.gd"),
+		_read("res://probes/render/render_swatch_probe.gd"),
+		_read("res://probes/render/render_swatch_support.gd"),
+		_read("res://probes/render/render_swatch_lighting_modes.gd"),
+		_read("res://probes/render/render_swatch_pass_modes.gd"),
 	]))
 	for removed in ["u_cap_", "u_object_family", "u_environment_source",
 			"u_specular_source", "u_emissive"]:

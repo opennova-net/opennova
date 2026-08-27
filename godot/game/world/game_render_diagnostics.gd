@@ -60,7 +60,7 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 		"water": _water_state(water, camera),
 		"terrain": _terrain_state(world),
 		"shadows": {
-			"dynamic": _shadow_state(dynamic_shadow),
+			"dynamic": _shadow_state(dynamic_shadow, world.drives_environment_presenters()),
 			"static_terrain": _terrain_page_shadow_state(terrain),
 		},
 		"lights": _lights_state(world),
@@ -337,7 +337,7 @@ static func _resource_value(value: Variant) -> Variant:
 	return value
 
 
-static func _shadow_state(shadow: SunShadow) -> Dictionary:
+static func _shadow_state(shadow: SunShadow, world_driven: bool) -> Dictionary:
 	if shadow == null:
 		return {"available": false}
 	return {
@@ -345,7 +345,10 @@ static func _shadow_state(shadow: SunShadow) -> Dictionary:
 		"projection_mode": shadow.get_projection_mode(),
 		"visible": shadow.visible,
 		"visible_in_tree": shadow.is_visible_in_tree(),
-		"processing": shadow.is_processing(),
+		# Live = following the sun each frame: through its own _process when it
+		# stands alone, or through the world's render_environment_nodes_frame
+		# (which turns that callback off and calls advance_frame itself).
+		"processing": shadow.is_processing() or world_driven,
 		"shadow_enabled": shadow.has_shadow(),
 		"global_transform": shadow.global_transform,
 		"emission_direction": -shadow.global_transform.basis.z,

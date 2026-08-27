@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3]
-
-[ext_resource type="Script" path="res://tests/foliage_spawn_capture_probe.gd" id="1_spawn_probe"]
-
-[node name="FoliageSpawnCaptureProbe" type="Node"]
-script = ExtResource("1_spawn_probe")

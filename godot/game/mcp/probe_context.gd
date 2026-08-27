@@ -174,6 +174,49 @@ func return_to_menu() -> Error:
 	return seams.return_to_menu.call()
 
 
+## The saved-BMS boot the capture probes share: leave a loaded world, start
+## `saved_path` as `bms_name` with the local-player profile the deploy screen
+## would have staged, then wait for the local player and the reveal. Returns
+## "" or the failure text.
+func load_saved_mission(saved_path: String, bms_name: String, profile: Dictionary = {}) -> String:
+	var live_world := world()
+	if live_world != null and live_world.is_loaded():
+		var leave := return_to_menu()
+		if leave != OK:
+			return "could not leave the loaded world: %s" % error_string(leave)
+		var leave_deadline := Time.get_ticks_msec() + LOCAL_PLAYER_TIMEOUT_MS
+		while not cancelled and tree != null:
+			var current := world()
+			if current == null or not current.is_loaded():
+				break
+			if Time.get_ticks_msec() >= leave_deadline:
+				return "timed out leaving the loaded world"
+			await tree.process_frame
+	var load_error: Array[String] = [""]
+	var loading_world := world()
+	if loading_world != null:
+		loading_world.load_failed.connect(
+				func(message: String) -> void: load_error[0] = message, CONNECT_ONE_SHOT)
+	var start := start_saved_mission(saved_path, bms_name, profile)
+	if start != OK:
+		return "could not start %s from %s: %s" % [bms_name, saved_path, error_string(start)]
+	var deadline := Time.get_ticks_msec() + LOCAL_PLAYER_TIMEOUT_MS
+	while not cancelled and tree != null:
+		if not load_error[0].is_empty():
+			return load_error[0]
+		var live_sim := sim()
+		if live_sim != null and live_sim.has_local_player():
+			break
+		if Time.get_ticks_msec() >= deadline:
+			return "timed out loading %s" % bms_name
+		await tree.process_frame
+	if cancelled:
+		return "cancelled while loading %s" % bms_name
+	if not await wait_world_ready(maxi(deadline - Time.get_ticks_msec(), 0)):
+		return "timed out dismissing the start splash for %s" % bms_name
+	return ""
+
+
 # --- guarded mutations (undone by finish, in reverse) ------------------------------------
 
 ## Register the undo of a mutation the probe made itself.
@@ -214,6 +257,24 @@ func set_menu_visible(visible: bool) -> void:
 		if is_instance_valid(shell):
 			shell.visible = previous)
 	shell.visible = visible
+
+
+## The shell window at an exact size (a capture's resolution); windowed for
+## the run, the previous mode and size back at finish. False without a window.
+func set_window_size(size: Vector2i) -> bool:
+	var live_viewport := viewport()
+	var window: Window = live_viewport.get_window() if live_viewport != null else null
+	if window == null:
+		return false
+	var previous_mode := window.mode
+	var previous_size := window.size
+	defer_restore(func() -> void:
+		if is_instance_valid(window):
+			window.mode = previous_mode
+			window.size = previous_size)
+	window.mode = Window.MODE_WINDOWED
+	window.size = size
+	return true
 
 
 ## Runs every deferred restore in reverse order; idempotent. The runner calls

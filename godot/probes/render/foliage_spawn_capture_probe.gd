@@ -1,21 +1,18 @@
-extends Node
+extends GameProbe
 
-## Deterministic retail-comparison capture at the real local-player spawn.
-## This uses the real standalone game shell and never searches
-## foliage-painted cells, teleports the camera, or synthesizes input.
-##
-## NOVA_MISSION_RESOURCE_DIR=<loose-authoring-dir> \
-## NOVA_RUNTIME_RESOURCE_DIR=<packed-game-dir> NOVA_EXPANSION=revx02 \
-## NOVA_MISSION_BMS=00TRe.bms \
-##   "$GODOT_BIN" --path godot res://tests/foliage_spawn_capture_probe.tscn
-## Optional output override: NOVA_SPAWN_CAPTURE_DIR=<absolute-or-res://-path>
+## foliage_spawn_capture: the deterministic retail-comparison capture at the
+## real local-player spawn. Boots the saved loose mission through the shell
+## (the packed runtime root and its expansion are the launch's, validated
+## against `expansion`), freezes the shell at the exact spawn, and captures
+## the play viewport with foliage visible and hidden; `flicker` runs the
+## fixed-input frame-stability leg over the exact 00TRe spawn tiers instead.
+## It never searches foliage-painted cells, teleports the camera, or
+## synthesizes input. Needs a window: the capture is the play viewport.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 
 const DEFAULT_MISSION := "00TRe.bms"
 const DEFAULT_EXPANSION := "revx02"
-const DEFAULT_OUT_DIR := "res://../.scratch/00tre-spawn"
 const PLAY_SETTLE_FRAMES := 132
 const VISIBILITY_SETTLE_FRAMES := 3
 const CAPTURE_VIEWPORT_SIZE := Vector2i(1600, 900)
@@ -24,58 +21,64 @@ const FLICKER_CAPTURE_COUNT := 6
 const FLICKER_MASK_DELTA := 6
 const FLICKER_FADE_STEP := 0.25 / 22.0
 
+var _ctx: ProbeContext
 var _game: Node
 var _world: GameWorld
 var _out_abs := ""
 var _capture_stem := "00TRe"
+var _failed := false
+var _failure := ""
+var _passed_summary := ""
+var _report: Dictionary = {}
 
 
-func _ready() -> void:
-	var mission_resource_dir := OS.get_environment("NOVA_MISSION_RESOURCE_DIR").strip_edges()
-	if mission_resource_dir.is_empty():
-		mission_resource_dir = ResourceDirSettings.get_resource_dir()
-	if not ResourceDirSettings.is_valid_root(mission_resource_dir):
-		_fail("no valid loose authoring root; set NOVA_MISSION_RESOURCE_DIR")
-		return
-	var runtime_resource_dir := OS.get_environment("NOVA_RUNTIME_RESOURCE_DIR").strip_edges()
-	if not ResourceRoot.is_valid_root(runtime_resource_dir):
-		_fail("no valid packed runtime root; set NOVA_RUNTIME_RESOURCE_DIR")
-		return
-	var requested_expansion := OS.get_environment("NOVA_EXPANSION").strip_edges()
+func run(ctx: ProbeContext) -> ProbeVerdict:
+	_ctx = ctx
+	await _run_capture(ctx)
+	_restore_shell()
+	if _failed:
+		return ProbeVerdict.failed(_failure, _report)
+	return ProbeVerdict.passed(_passed_summary, _report)
+
+
+func _run_capture(ctx: ProbeContext) -> void:
+	# The loose authoring file is the saved BMS itself (mission_path); the
+	# packed runtime root is the launch's and must carry the requested expansion.
+	var mission_path := String(ctx.args.get("mission_path", "")).strip_edges().replace("\\", "/")
+	var requested_expansion := String(ctx.args.get("expansion", "")).strip_edges()
 	if requested_expansion.is_empty():
 		requested_expansion = DEFAULT_EXPANSION
-	var configured_out := OS.get_environment("NOVA_SPAWN_CAPTURE_DIR").strip_edges()
+	var configured_out := String(ctx.args.get("output_dir", "")).strip_edges()
 	_out_abs = ProjectSettings.globalize_path(
-		DEFAULT_OUT_DIR if configured_out.is_empty() else configured_out)
+		ctx.artifact_dir if configured_out.is_empty() else configured_out).simplify_path()
 	var mkdir_err := DirAccess.make_dir_recursive_absolute(_out_abs)
 	if mkdir_err != OK:
 		_fail("cannot create output directory (%d): %s" % [mkdir_err, _out_abs])
 		return
 
-	var mission_name := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
+	var mission_name := String(ctx.args.get("mission", "")).strip_edges()
 	if mission_name.is_empty():
 		mission_name = DEFAULT_MISSION
 	_capture_stem = mission_name.get_file().get_basename()
-	var mission_path := Paths.resolve_file(mission_resource_dir, mission_name)
-	if mission_path.is_empty():
-		_fail("%s not found in loose authoring root %s" % [
-			mission_name, mission_resource_dir])
+	if mission_path.is_empty() or not FileAccess.file_exists(mission_path):
+		_fail("mission_path must name the saved loose %s (got %s)" % [
+			mission_name, mission_path])
 		return
-	print("[spawn-capture] mission authoring root: ", mission_resource_dir)
-	print("[spawn-capture] packed runtime root: ", runtime_resource_dir)
-	print("[spawn-capture] mission: ", mission_name, " -> ", mission_path)
-	print("[spawn-capture] input: disabled after shell load; none synthesized")
+	_logv(["[spawn-capture] saved loose mission: ", mission_path])
+	_logv(["[spawn-capture] packed runtime root: ", ResourceDirSettings.get_resource_dir()])
+	_logv(["[spawn-capture] mission: ", mission_name])
+	_logv(["[spawn-capture] input: disabled after shell load; none synthesized"])
 
-	get_window().mode = Window.MODE_WINDOWED
-	get_window().size = CAPTURE_VIEWPORT_SIZE
-	var session: Dictionary = await StandaloneProbe.boot(
-		self, runtime_resource_dir, mission_name, requested_expansion, mission_path)
-	if not String(session.get("error", "")).is_empty():
-		_fail(String(session.error))
+	if not ctx.set_window_size(CAPTURE_VIEWPORT_SIZE):
+		_fail("the shell has no window to size for the capture")
 		return
-	_game = session.game
-	_world = session.world
-	var runtime_root: ResourceRoot = _game.current_resource_root()
+	var boot_error := await ctx.load_saved_mission(mission_path, mission_name)
+	if not boot_error.is_empty():
+		_fail(boot_error)
+		return
+	_game = ctx.game()
+	_world = ctx.world()
+	var runtime_root: ResourceRoot = ctx.resource_root()
 	if runtime_root == null:
 		_fail("standalone game did not retain its packed runtime root")
 		return
@@ -85,10 +88,10 @@ func _ready() -> void:
 	if not mount_validation_error.is_empty():
 		_fail(mount_validation_error)
 		return
-	print("[spawn-capture] runtime expansion: requested=%s actual=%s mount=packed" % [
-		requested_expansion, runtime_root.get_expansion()])
+	_logv(["[spawn-capture] runtime expansion: requested=%s actual=%s mount=packed" % [
+		requested_expansion, runtime_root.get_expansion()]])
 	var world: GameWorld = _world
-	var camera: Camera3D = session.camera
+	var camera: Camera3D = ctx.camera()
 	if world == null or not world.is_loaded() \
 			or world.get_sim() == null or not world.get_sim().has_local_player():
 		_fail("GameWorld has no loaded local-player spawn anchor")
@@ -99,7 +102,7 @@ func _ready() -> void:
 	var play_viewport: Viewport = camera.get_viewport()
 	world.get_sim().set_player_input(false, false, false, false, false, false, false)
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-	await ProbeClock.settle(get_tree(), PLAY_SETTLE_FRAMES)
+	await ctx.wait_frames(PLAY_SETTLE_FRAMES)
 
 	var environment = world.get_node_or_null("MissionEnvironment")
 	if environment == null or environment.get("time_of_day") == null:
@@ -144,21 +147,21 @@ func _ready() -> void:
 		_fail(source_validation_error)
 		return
 	for entry in winning_entries:
-		print("[spawn-capture] runtime source: logical_name=%s source_type=%s source=%s" % [
+		_logv(["[spawn-capture] runtime source: logical_name=%s source_type=%s source=%s" % [
 			entry.get("logical_name", ""),
 			entry.get("source_type", ""),
 			entry.get("source_path", entry.get("archive_path", "")),
-		])
+		]])
 	_print_snapshot(spawn_state)
 	_print_runtime_metadata(world, environment)
 	_print_model_lighting_trace(world, camera, environment)
 	_print_foliage_material_state(world)
-	if OS.get_environment("NOVA_FOLIAGE_FLICKER_PROBE") == "1":
+	if bool(ctx.args.get("flicker", false)):
 		await _run_foliage_flicker_probe(world, dispatcher, camera, play_viewport, spawn_state)
 		return
 
 	world.set_foliage_hidden(false)
-	await ProbeClock.settle(get_tree(), VISIBILITY_SETTLE_FRAMES)
+	await ctx.wait_frames(VISIBILITY_SETTLE_FRAMES)
 	if world.is_foliage_hidden():
 		_fail("GameWorld refused foliage-visible state")
 		return
@@ -172,7 +175,7 @@ func _ready() -> void:
 
 	# This is the public API used by the game and ONED debug overlay.
 	world.set_foliage_hidden(true)
-	await ProbeClock.settle(get_tree(), VISIBILITY_SETTLE_FRAMES)
+	await ctx.wait_frames(VISIBILITY_SETTLE_FRAMES)
 	if not world.is_foliage_hidden():
 		_fail("GameWorld refused foliage-hidden state")
 		return
@@ -185,10 +188,12 @@ func _ready() -> void:
 		return
 	world.set_foliage_hidden(false)
 
-	print("[spawn-capture] wrote: ", default_path)
-	print("[spawn-capture] wrote: ", hidden_path)
-	print("[spawn-capture] PASS: exact frozen player-spawn state in both images")
-	_shutdown(0)
+	ctx.artifact(_capture_stem + "_spawn_default", default_path, "png")
+	ctx.artifact(_capture_stem + "_spawn_foliage_hidden", hidden_path, "png")
+	_logv(["[spawn-capture] wrote: ", default_path])
+	_logv(["[spawn-capture] wrote: ", hidden_path])
+	_logv(["[spawn-capture] PASS: exact frozen player-spawn state in both images"])
+	_passed_summary = "exact frozen player-spawn state in both images"
 
 
 static func runtime_foliage_validation_error(
@@ -285,12 +290,14 @@ func _run_foliage_flicker_probe(
 	var base_transform := camera.global_transform
 
 	world.set_foliage_hidden(true)
-	await ProbeClock.settle(get_tree(), 2)
+	await _ctx.wait_frames(2)
 	var hidden: Image = await _grab_flicker_image(viewport)
 	if hidden == null or hidden.is_empty():
 		_fail("flicker probe could not capture the foliage-hidden baseline")
 		return
-	hidden.save_png(_out_abs.path_join(_capture_stem + "_flicker_hidden.png"))
+	var hidden_png := _out_abs.path_join(_capture_stem + "_flicker_hidden.png")
+	hidden.save_png(hidden_png)
+	_ctx.artifact(_capture_stem + "_flicker_hidden", hidden_png, "png")
 	world.set_foliage_hidden(false)
 
 	var failures: Array[String] = []
@@ -309,9 +316,9 @@ func _run_foliage_flicker_probe(
 	if not failures.is_empty():
 		_fail("; ".join(failures))
 		return
-	print("[spawn-flicker] PASS: exercised exact 00TRe spawn tiers were frame-stable; ",
-		"skipped=", skipped)
-	_shutdown(0)
+	_logv(["[spawn-flicker] PASS: exercised exact 00TRe spawn tiers were frame-stable; ",
+		"skipped=", skipped])
+	_passed_summary = "exact 00TRe spawn tiers were frame-stable (skipped: %s)" % str(skipped)
 
 
 func _probe_flicker_tier(
@@ -321,7 +328,7 @@ func _probe_flicker_tier(
 	for _warmup in 2:
 		dispatcher.render_frame(base_transform)
 		_configure_flicker_draws(dispatcher, tier, false, 0.0)
-		await ProbeClock.settle(get_tree(), 1)
+		await _ctx.wait_frames(1)
 
 	var images: Array[Image] = []
 	var setup := {}
@@ -350,8 +357,8 @@ func _probe_flicker_tier(
 		worst_delta = maxi(worst_delta, int(diff.max_channel_delta))
 
 	if frame_diffs.is_empty() or int(frame_diffs[0].coverage_union_pixels) <= 0:
-		print("[spawn-flicker] tier=", tier, " setup=", setup,
-			" skipped: active draws have no coverage in the exact spawn view")
+		_logv(["[spawn-flicker] tier=", tier, " setup=", setup,
+			" skipped: active draws have no coverage in the exact spawn view"])
 		return {"ok": true, "skipped": "outside exact spawn view"}
 
 	# Positive control: dropping the isolated tier must make the same metric red.
@@ -376,16 +383,16 @@ func _probe_flicker_tier(
 		or int(fade_diff.changed_rgb_pixels) > 0
 	)
 
-	print("[spawn-flicker] tier=", tier, " setup=", setup,
+	_logv(["[spawn-flicker] tier=", tier, " setup=", setup,
 		" frame_diffs=", frame_diffs,
 		" worst_xor=", worst_xor,
 		" worst_changed=", worst_changed,
-		" worst_delta=", worst_delta)
-	print("[spawn-flicker] tier=", tier,
+		" worst_delta=", worst_delta])
+	_logv(["[spawn-flicker] tier=", tier,
 		" positive_control=", control,
 		" fade_step=", FLICKER_FADE_STEP,
 		" fade_setup=", fade_setup,
-		" fade_diff=", fade_diff)
+		" fade_diff=", fade_diff])
 
 	if not control_detects:
 		return {"ok": false, "failure": "positive control could not detect a dropped tier"}
@@ -451,7 +458,7 @@ func _configure_flicker_draws(
 
 
 func _grab_flicker_image(viewport: Viewport) -> Image:
-	await get_tree().process_frame
+	await _ctx.tree.process_frame
 	await RenderingServer.frame_post_draw
 	return viewport.get_texture().get_image()
 
@@ -546,13 +553,13 @@ func _print_snapshot(state: Dictionary) -> void:
 	var p: Vector3 = state["position"]
 	var t: Transform3D = state["camera"]
 	var size: Vector2 = state["viewport"]
-	print("[spawn-capture] player position: (%.9f, %.9f, %.9f)" % [p.x, p.y, p.z])
-	print("[spawn-capture] player yaw/pitch deg: %.9f / %.9f" % [state["yaw"], state["pitch"]])
-	print("[spawn-capture] camera transform: origin=%s basis_x=%s basis_y=%s basis_z=%s" % [
-		str(t.origin), str(t.basis.x), str(t.basis.y), str(t.basis.z)])
-	print("[spawn-capture] camera FOV deg: %.9f" % state["fov"])
-	print("[spawn-capture] environment TOD: %.9f" % state["tod"])
-	print("[spawn-capture] play viewport: %dx%d" % [int(size.x), int(size.y)])
+	_logv(["[spawn-capture] player position: (%.9f, %.9f, %.9f)" % [p.x, p.y, p.z]])
+	_logv(["[spawn-capture] player yaw/pitch deg: %.9f / %.9f" % [state["yaw"], state["pitch"]]])
+	_logv(["[spawn-capture] camera transform: origin=%s basis_x=%s basis_y=%s basis_z=%s" % [
+		str(t.origin), str(t.basis.x), str(t.basis.y), str(t.basis.z)]])
+	_logv(["[spawn-capture] camera FOV deg: %.9f" % state["fov"]])
+	_logv(["[spawn-capture] environment TOD: %.9f" % state["tod"]])
+	_logv(["[spawn-capture] play viewport: %dx%d" % [int(size.x), int(size.y)]])
 
 
 func _capture(viewport: Viewport, path: String) -> Error:
@@ -562,34 +569,36 @@ func _capture(viewport: Viewport, path: String) -> Error:
 		return ERR_UNAVAILABLE
 	var expected := Vector2i(viewport.get_visible_rect().size)
 	if image.get_size() != expected:
-		push_error("[spawn-capture] viewport/image mismatch: %s vs %s" % [
+		_ctx.log("[spawn-capture] viewport/image mismatch: %s vs %s" % [
 			str(expected), str(image.get_size())])
 		return ERR_INVALID_DATA
 	return image.save_png(path)
 
 
 func _fail(reason: String) -> void:
-	push_error("[spawn-capture] FAIL: " + reason)
-	_shutdown(1)
+	if _failed:
+		return
+	_failed = true
+	_failure = reason
+	_ctx.log("[spawn-capture] FAIL: " + reason)
 
 
-func _shutdown(exit_code: int) -> void:
+func _restore_shell() -> void:
 	if _game != null and is_instance_valid(_game):
 		_game.process_mode = Node.PROCESS_MODE_INHERIT
 	if _world != null and is_instance_valid(_world):
 		_world.process_mode = Node.PROCESS_MODE_INHERIT
-	get_tree().quit(exit_code)
 
 func _print_runtime_metadata(world, environment) -> void:
 	var mission = world.get_loaded_mission()
 	var mission_info: Dictionary = mission.get_info() if mission != null else {}
-	print("[spawn-capture] mission metadata: ", {
+	_logv(["[spawn-capture] mission metadata: ", {
 		"environment_ref": mission.get_environment_ref() if mission != null else "",
 		"terrain_ref": mission.get_terrain_ref() if mission != null else "",
 		"start_time_raw_q8_8": int(mission_info.get("start_time", -1)),
 		"minutes_per_day": int(mission_info.get("minutes_per_day", -1)),
-	})
-	print("[spawn-capture] environment lighting: ", {
+	}])
+	_logv(["[spawn-capture] environment lighting: ", {
 		"sun_direction": environment.get_sun_direction(),
 		"light_direction": environment.get_light_direction(),
 		"sun_keyframe": environment.get_sun_color(),
@@ -612,13 +621,13 @@ func _print_runtime_metadata(world, environment) -> void:
 		"fog_type": environment.get_fog_type(),
 		"sky_height": environment.get_sky_height(),
 		"sky_height_target": environment.get_sky_height_target(),
-	})
+	}])
 
 	var sky = world.get_node_or_null("SkyDome")
 	var sky_material: ShaderMaterial = sky.get_sky_material() if sky != null else null
 	var cloud1: Texture2D = environment.get_sky_map1_tex()
 	var cloud2: Texture2D = environment.get_sky_map2_tex()
-	print("[spawn-capture] sky material: ", {
+	_logv(["[spawn-capture] sky material: ", {
 		"node": sky != null,
 		"material": sky_material != null,
 		"u_flat_pass": sky_material.get_shader_parameter("u_flat_pass") if sky_material != null else null,
@@ -630,14 +639,14 @@ func _print_runtime_metadata(world, environment) -> void:
 		"u_sky_highlight": sky_material.get_shader_parameter("u_sky_highlight") if sky_material != null else null,
 		"cloud_tex1_size": Vector2i(cloud1.get_width(), cloud1.get_height()) if cloud1 != null else Vector2i.ZERO,
 		"cloud_tex2_size": Vector2i(cloud2.get_width(), cloud2.get_height()) if cloud2 != null else Vector2i.ZERO,
-	})
+	}])
 
 	var dispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
-	print("[spawn-capture] dispatcher: ", {
+	_logv(["[spawn-capture] dispatcher: ", {
 		"present": dispatcher != null,
 		"total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
 		"frame_stats": dispatcher.get_frame_stats() if dispatcher != null else {},
-	})
+	}])
 	var data = world.get_terrain_data()
 	var terrain = world.get_node_or_null("Terrain")
 	var assigned_tile_info = terrain.get_tile_info_override() if terrain != null else null
@@ -649,18 +658,18 @@ func _print_runtime_metadata(world, environment) -> void:
 	var mission_til_name: String = String(world.get_loaded_mission_file()).get_basename() + ".til"
 	var mission_til_bytes: PackedByteArray = resource_root.read_file(mission_til_name) \
 		if resource_root != null and resource_root.has_file(mission_til_name) else PackedByteArray()
-	print("[spawn-capture] TIL metadata: ", {
+	_logv(["[spawn-capture] TIL metadata: ", {
 		"mission_til_name": mission_til_name,
 		"mission_til_bytes": mission_til_bytes.size(),
 		"terrain_tileinfo_filename": data.get_tileinfo_filename() if data != null else "",
 		"assigned_tile_info_source": tile_info_source,
 		"assigned_tile_info_entries": assigned_tile_info.get_entry_count() if assigned_tile_info != null else -1,
 		"terrain_tiles": data.get_tile_count() if data != null else -1,
-	})
+	}])
 
 
 func _print_model_lighting_trace(world, camera: Camera3D, environment) -> void:
-	if OS.get_environment("NOVA_MODEL_LIGHTING_TRACE") != "1":
+	if not bool(_ctx.args.get("model_lighting_trace", false)):
 		return
 	var sim = world.get_sim()
 	var light_dir: Vector3 = environment.get_light_direction()
@@ -668,7 +677,7 @@ func _print_model_lighting_trace(world, camera: Camera3D, environment) -> void:
 	if sim != null:
 		iris_samples = sim.compute_iris_samples(
 			camera.global_position, -camera.global_basis.z, light_dir)
-	print("[spawn-capture] model lighting trace: ", {
+	_logv(["[spawn-capture] model lighting trace: ", {
 		"local_player_indoors":
 			sim.local_player_indoors() if sim != null else null,
 		"local_player_blink_flags":
@@ -676,7 +685,7 @@ func _print_model_lighting_trace(world, camera: Camera3D, environment) -> void:
 		"local_player_interior_item_id":
 			sim.local_player_interior_item_id() if sim != null else null,
 		"iris_samples": iris_samples,
-	})
+	}])
 
 
 func _texture_meta(value: Variant) -> Dictionary:
@@ -691,7 +700,7 @@ func _texture_meta(value: Variant) -> Dictionary:
 func _print_foliage_material_state(world) -> void:
 	var dispatcher: Node = world.get_node_or_null("Terrain/FoliageDispatcher")
 	if dispatcher == null:
-		print("[spawn-capture] detail materials: dispatcher missing")
+		_logv(["[spawn-capture] detail materials: dispatcher missing"])
 		return
 	var seen := {}
 	var tier_counts := {}
@@ -708,7 +717,7 @@ func _print_foliage_material_state(world) -> void:
 		tier_counts[tier] = int(tier_counts.get(tier, 0)) + 1
 		if material != null and not seen.has(material.get_instance_id()):
 			seen[material.get_instance_id()] = true
-			print("[spawn-capture] detail material: ", {
+			_logv(["[spawn-capture] detail material: ", {
 				"tier": tier,
 				"u_has_fd_texture": material.get_shader_parameter("u_has_fd_texture"),
 				"u_fd_texture": _texture_meta(material.get_shader_parameter("u_fd_texture")),
@@ -720,7 +729,7 @@ func _print_foliage_material_state(world) -> void:
 				"u_tile_overlay": _texture_meta(material.get_shader_parameter("u_tile_overlay")),
 				"u_tile_overlay_tint": material.get_shader_parameter("u_tile_overlay_tint"),
 				"u_emitter_color": material.get_shader_parameter("u_emitter_color"),
-			})
+			}])
 		var mesh := draw.mesh
 		if mesh == null:
 			continue
@@ -733,10 +742,17 @@ func _print_foliage_material_state(world) -> void:
 				uv2_min = uv2_min.min(uv)
 				uv2_max = uv2_max.max(uv)
 				uv2_count += 1
-	print("[spawn-capture] detail mesh state: ", {
+	_logv(["[spawn-capture] detail mesh state: ", {
 		"visible_draws_by_tier": tier_counts,
 		"unique_materials": seen.size(),
 		"uv2_count": uv2_count,
 		"uv2_min": uv2_min if uv2_count > 0 else Vector2.ZERO,
 		"uv2_max": uv2_max if uv2_count > 0 else Vector2.ZERO,
-	})
+	}])
+
+
+func _logv(parts: Array) -> void:
+	var text := ""
+	for part in parts:
+		text += str(part)
+	_ctx.log(text)

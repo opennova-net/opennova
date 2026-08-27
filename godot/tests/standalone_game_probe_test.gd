@@ -4,7 +4,6 @@ const PROBE_PATHS: Array[String] = [
 	"res://tests/bend_capture_probe.gd",
 	"res://tests/body_holds_probe.gd",
 	"res://tests/body_reload_probe.gd",
-	"res://tests/foliage_spawn_capture_probe.gd",
 	"res://tests/fp_clean_probe.gd",
 	"res://tests/fp_impact_probe.gd",
 	"res://tests/lean_tp_probe.gd",

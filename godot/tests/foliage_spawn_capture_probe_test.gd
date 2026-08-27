@@ -1,6 +1,6 @@
 extends GutTest
 
-const PROBE_PATH := "res://tests/foliage_spawn_capture_probe.gd"
+const PROBE_PATH := "res://probes/render/foliage_spawn_capture_probe.gd"
 const ProbeScript := preload(PROBE_PATH)
 
 
@@ -8,8 +8,8 @@ func test_spawn_capture_uses_real_player_and_public_foliage_api() -> void:
 	var source := FileAccess.get_file_as_string(PROBE_PATH)
 	assert_false(source.is_empty(), "Spawn capture probe source should be readable.")
 	assert_true(source.contains('const DEFAULT_MISSION := "00TRe.bms"'))
-	assert_true(source.contains("StandaloneProbe.boot("),
-		"Probe should boot the real standalone game shell.")
+	assert_true(source.contains("ctx.load_saved_mission("),
+		"Probe should boot the saved mission through the real game shell.")
 	assert_true(source.contains("var world: GameWorld = _world"),
 		"Probe should bind the standalone shell's GameWorld.")
 	assert_true(source.contains("world.get_sim().has_local_player()"),
@@ -84,15 +84,12 @@ func test_spawn_capture_requires_requested_runtime_expansion_and_archive_winners
 		"A saved loose mission may drive a standalone packed-runtime capture.")
 
 	var source := FileAccess.get_file_as_string(PROBE_PATH)
-	assert_true(source.contains('OS.get_environment("NOVA_MISSION_RESOURCE_DIR")'),
-		"The loose authoring root must be configured separately.")
-	assert_true(source.contains('OS.get_environment("NOVA_RUNTIME_RESOURCE_DIR")'),
-		"The packed runtime root must be configured separately.")
-	assert_true(source.contains('OS.get_environment("NOVA_EXPANSION")'),
+	assert_true(source.contains('ctx.args.get("mission_path", "")'),
+		"The saved loose mission is a typed argument, separate from the runtime mount.")
+	assert_true(source.contains('ctx.args.get("expansion", "")'),
 		"The probe must receive an explicit expansion request.")
-	assert_true(source.contains(
-		"self, runtime_resource_dir, mission_name, requested_expansion, mission_path"),
-		"The standalone shell must mount packed dependencies and parse the exact saved BMS.")
+	assert_true(source.contains("ctx.load_saved_mission(mission_path, mission_name)"),
+		"The shell must parse the exact saved BMS and resolve its dependencies through the packed mount.")
 	assert_true(source.contains("list_file_entries()"),
 		"The probe must report the VFS's winning source entries.")
 
@@ -126,9 +123,9 @@ func test_spawn_capture_settles_visibility_changes_before_each_image() -> void:
 		"The shell tick must freeze with the world so presenter camera state stays exact.")
 	assert_true(source.contains("const VISIBILITY_SETTLE_FRAMES := 3"),
 		"The A/B probe should give renderer visibility changes time to reach the viewport.")
-	assert_true(source.contains("world.set_foliage_hidden(false)\n\tawait ProbeClock.settle(get_tree(), VISIBILITY_SETTLE_FRAMES)"),
+	assert_true(source.contains("world.set_foliage_hidden(false)\n\tawait ctx.wait_frames(VISIBILITY_SETTLE_FRAMES)"),
 		"The visible capture must settle after enabling foliage.")
-	assert_true(source.contains("world.set_foliage_hidden(true)\n\tawait ProbeClock.settle(get_tree(), VISIBILITY_SETTLE_FRAMES)"),
+	assert_true(source.contains("world.set_foliage_hidden(true)\n\tawait ctx.wait_frames(VISIBILITY_SETTLE_FRAMES)"),
 		"The hidden capture must settle after disabling foliage.")
 
 
@@ -137,7 +134,7 @@ func test_spawn_capture_uses_standalone_game_aspect_not_editor_dock_aspect() -> 
 	assert_false(source.is_empty(), "Spawn capture probe source should be readable.")
 	assert_true(source.contains("const CAPTURE_VIEWPORT_SIZE := Vector2i(1600, 900)"),
 		"Retail comparisons should use the standalone game's 16:9 viewport.")
-	assert_true(source.contains("get_window().size = CAPTURE_VIEWPORT_SIZE"),
+	assert_true(source.contains("ctx.set_window_size(CAPTURE_VIEWPORT_SIZE)"),
 		"The native game window should render at the fixed comparison size.")
 	assert_false(source.contains("PlayViewportContainer"),
 		"The capture must not depend on an editor dock viewport.")

@@ -592,7 +592,7 @@ claim or divergence.
   preservation, strict alpha acceptance/rejection, retained late-consumer
   depth, screenshot-shaped exact-black-component detection, and fixed-input
   frame stability for both tiers.
-- `foliage_spawn_capture_probe.gd` with `NOVA_FOLIAGE_FLICKER_PROBE=1`: the real
+- the `foliage_spawn_capture` probe with `flicker: true`: the real
   `00TRe.bms` player spawn, fixed-input HIGH/automatic coverage with deliberate
   dropout and fade-response controls. LOW-far is explicitly reported as
   skipped when it has no pixels in the exact spawn view.
