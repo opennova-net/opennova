@@ -39,9 +39,15 @@ hardening, and project health. Divergences from the original engine belong in
       `env_generation_changed`, the staggered per-model light restamp) invalidated
       the earlier ~1 ms reading. The F3 "Outside shell spans" row went with ADR 0039's
       hard cut; the metric survives as the `outside_shell` summary
-      `godot/tests/mission_rows_perf_probe.gd` reports, and that is where the next
+      the `perf_mission_rows` runtime probe reports, and that is where the next
       attribution round reads it (the #403 live sessions observed the remaining frame
       cost concentrated outside the model system after the park/submission gates)
+- [ ] Dev tools: each opening of the ImGui pass logs ~25 `IM_ASSERT` pairs in the game
+      log (`NewFrame` finds the previous frame un-ended / `UpdatePlatformWindows` not
+      called; the pass sets `ImGuiConfigFlags_ViewportsEnable` on attach and the
+      imgui-godot controller's frame bracket does not drive the platform windows). The
+      windows still draw and the Stats rows read live (the `frame_stats` probe), so it
+      is log noise today; witness the addon's viewport bridge before silencing it
 - [ ] Main-loop order grill: `docs/runtime-architecture.md` cites the exact main-loop /
       entity-render order from existing RE notes; a focused grill-ida pass to pin
       `WacScript_AdvanceTick`'s surroundings + the original entity-render function would

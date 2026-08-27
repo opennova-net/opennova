@@ -2,6 +2,8 @@
 
 #if OPENNOVA_DEVTOOLS
 #include <runtime/devtools/stats_window.h>
+
+#include <cstring>
 #endif
 
 namespace godot {
@@ -19,6 +21,7 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stats_row_average", "row_id"), &DevTools::stats_row_average);
 	ClassDB::bind_method(D_METHOD("stats_row_peak", "row_id"), &DevTools::stats_row_peak);
 	ClassDB::bind_method(D_METHOD("stats_row_info", "row_id"), &DevTools::stats_row_info);
+	ClassDB::bind_method(D_METHOD("reset_layout"), &DevTools::reset_layout);
 	ADD_SIGNAL(MethodInfo("open_changed", PropertyInfo(Variant::BOOL, "open")));
 }
 
@@ -81,6 +84,10 @@ void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
 	}
 }
 
+void DevTools::reset_layout() {
+	tools_->pass().request_layout_reset();
+}
+
 void DevTools::feed_stats_window(int64_t p_frames, const PackedInt64Array &p_sums,
 		const PackedInt64Array &p_peaks, const PackedInt32Array &p_sample_frames) {
 	opennova::devtools::CaptureWindow window;
@@ -119,9 +126,11 @@ PackedStringArray DevTools::stats_row_ids() const {
 namespace {
 
 int stats_row_index(const opennova::devtools::StatsWindow &p_stats, const String &p_row_id) {
+	// CharString carries no operator==; against a const char * it decays to a
+	// pointer compare, so the lookup goes through strcmp.
 	const CharString id = p_row_id.utf8();
 	for (int i = 0; i < p_stats.row_count(); ++i) {
-		if (id == p_stats.row_id(i)) {
+		if (std::strcmp(id.get_data(), p_stats.row_id(i)) == 0) {
 			return i;
 		}
 	}
@@ -179,6 +188,8 @@ void DevTools::set_open(bool p_open) {
 void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
 	frame_stats_ = p_stats;
 }
+
+void DevTools::reset_layout() {}
 
 void DevTools::feed_stats_window(int64_t p_frames, const PackedInt64Array &p_sums,
 		const PackedInt64Array &p_peaks, const PackedInt32Array &p_sample_frames) {

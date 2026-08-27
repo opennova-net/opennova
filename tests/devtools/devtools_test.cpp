@@ -8,6 +8,7 @@
 #include <runtime/devtools/stats_window.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <cstdio>
 #include <cstring>
@@ -169,7 +170,64 @@ void test_external_feed_drives_the_window_without_draining() {
 	const StatsWindow &stats = tools.stats_window();
 	CHECK(std::strcmp(stats.row_average(find_row(stats, "frame")), "10.00") == 0, "the external reading is what renders");
 	CHECK(board.drain(2).sums[static_cast<size_t>(Slot::FRAME_WALL)] == 999999, "the window did not drain the board");
+	// The feed lasts one visibility session: closing and reopening the tools
+	// re-arms the board and the window drains it again.
+	tools.pass().set_open(false);
+	tools.pass().set_open(true);
+	CHECK(board.is_capture_active(), "reopening after an external feed re-arms capture");
+	// The reopened window starts at the last drawn frame (2); two frames of
+	// 30 ms wall time drain at frame 4.
+	board.add(Slot::FRAME_WALL, 30000, 3);
+	board.add(Slot::FRAME_WALL, 30000, 4);
+	ImGui::NewFrame();
+	tools.pass().draw_frame(4);
+	ImGui::Render();
+	CHECK(stats.reading_frames() == 2, "the reading spans the frames since the reopen");
+	CHECK(std::strcmp(stats.row_average(find_row(stats, "frame")), "30.00") == 0, "the window drains the board again");
 	tools.set_frame_stats(nullptr);
+}
+
+// A parked Stats window (collapsed, pushed off to where a second monitor
+// would be) comes home on the layout pass after a reset request: expanded,
+// undocked, cascaded from the main viewport's work corner.
+void test_layout_reset_brings_windows_home() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	CHECK(!tools.pass().is_layout_reset_pending(), "nothing pending on fresh tools");
+	ImGui::NewFrame();
+	tools.pass().draw_frame(1);
+	ImGui::Render();
+	ImGuiWindow *stats = ImGui::FindWindowByName("Stats");
+	CHECK(stats != nullptr, "the Stats window exists after a pass");
+	if (stats == nullptr) {
+		return;
+	}
+	ImGui::SetWindowPos("Stats", ImVec2(900.0f, 500.0f), ImGuiCond_Always);
+	ImGui::SetWindowCollapsed("Stats", true, ImGuiCond_Always);
+	ImGui::NewFrame();
+	tools.pass().draw_frame(2);
+	ImGui::Render();
+	CHECK(stats->Collapsed, "parked collapsed");
+	CHECK(stats->Pos.x == 900.0f && stats->Pos.y == 500.0f, "parked away from home");
+
+	tools.pass().request_layout_reset();
+	CHECK(tools.pass().is_layout_reset_pending(), "a reset is pending");
+	ImGui::NewFrame();
+	tools.pass().draw_frame(3);
+	ImGui::Render();
+	CHECK(!tools.pass().is_layout_reset_pending(), "the pass consumed the reset");
+	const ImGuiViewport *main = ImGui::GetMainViewport();
+	CHECK(!stats->Collapsed, "expanded again");
+	CHECK(stats->DockId == 0, "undocked");
+	CHECK(stats->Pos.x == main->WorkPos.x + 24.0f && stats->Pos.y == main->WorkPos.y + 24.0f,
+			"home = the work corner cascade");
+	CHECK(stats->Viewport == ImGui::GetMainViewport(), "inside the main viewport");
+	ImGui::NewFrame();
+	tools.pass().draw_frame(4);
+	ImGui::Render();
+	CHECK(stats->Pos.x == main->WorkPos.x + 24.0f, "a one-shot: the next pass leaves placement alone");
 }
 
 }  // namespace
@@ -179,6 +237,7 @@ int main() {
 	test_attach_sets_docking_and_viewport_policy();
 	test_layout_pass_draws_the_stats_window_and_gates_capture();
 	test_external_feed_drives_the_window_without_draining();
+	test_layout_reset_brings_windows_home();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

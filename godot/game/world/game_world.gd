@@ -1202,6 +1202,24 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 	_sync_runtime_profiling()
 
 
+## The perf probe's A/B switches (only honored while the probe is enabled).
+func set_perf_probe_skip_occlusion(skip: bool) -> void:
+	_perf_probe_skip_occl = skip
+
+
+func set_perf_probe_skip_effect_tick(skip: bool) -> void:
+	_perf_probe_skip_effect_tick = skip
+
+
+func set_perf_probe_skip_fixed_handlers(skip: bool) -> void:
+	_perf_probe_skip_fixed_handlers = skip
+
+
+## The last frame's world-tick leg spans in microseconds (probe-enabled only).
+func get_perf_probe_spans() -> Dictionary:
+	return _perf_probe_spans.duplicate()
+
+
 # --- Godot frame device legs (ADR 0035) --------------------------------------
 # GameFramePipeline invokes these concrete renderer/audio/environment operations in
 # one visible order around inmatch::Session::advance().

@@ -1,6 +1,7 @@
 extends GutTest
 
-const ProcessGuard := preload("res://tests/perf_probe_process_guard.gd")
+# The perf_sweep probe's per-phase processing guard (godot/probes/support).
+const ProcessGuard := preload("res://probes/support/process_guard.gd")
 
 
 class ProcessingNode:

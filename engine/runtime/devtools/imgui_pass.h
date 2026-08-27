@@ -94,13 +94,23 @@ public:
 	// after the call (Escape and the menu close from inside).
 	bool draw_frame(uint64_t frame_index);
 
+	// Bring every window home on the next layout pass: undocked, uncollapsed,
+	// cascaded inside the main viewport. ImGui persists window placement in
+	// its ini (a window dragged out to a second monitor stays in its own OS
+	// viewport across runs), so a probe or a reader on a different desktop
+	// asks for this before reading. Also the "Reset layout" menu item.
+	void request_layout_reset() { layout_reset_pending_ = true; }
+	bool is_layout_reset_pending() const { return layout_reset_pending_; }
+
 private:
 	void sync_visibility();
+	void place_window_home(int index);
 
 	ImGuiPassOptions options_;
 	std::vector<std::unique_ptr<Window>> windows_;
 	bool attached_ = false;
 	bool open_ = false;
+	bool layout_reset_pending_ = false;
 };
 
 }  // namespace opennova::devtools

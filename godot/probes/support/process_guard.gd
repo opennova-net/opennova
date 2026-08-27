@@ -1,4 +1,10 @@
+class_name ProbeProcessGuard
 extends RefCounted
+
+## Disable a set of nodes' _process/_physics_process for one measured phase
+## and restore exactly the state each node had when the phase began (modes
+## legitimately change while earlier phases run, so the census is never the
+## restore source).
 
 
 static func disable_processing(nodes: Array) -> Array:

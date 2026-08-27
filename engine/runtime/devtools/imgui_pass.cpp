@@ -4,6 +4,8 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+
 // The engine's ImGui copy must be the commit the imgui-godot addon bundles
 // (third_party/imgui/CMakeLists.txt): a bump of one side without the other
 // fails here before it can fail at the runtime hand-off.
@@ -92,8 +94,11 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			for (auto &window : windows_) {
 				ImGui::MenuItem(window->title(), nullptr, &window->open);
 			}
+			ImGui::Separator();
+			if (ImGui::MenuItem("Reset layout")) {
+				layout_reset_pending_ = true;
+			}
 			if (options_.escape_closes) {
-				ImGui::Separator();
 				if (ImGui::MenuItem("Close dev tools", "Esc")) {
 					close_requested = true;
 				}
@@ -104,16 +109,22 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	}
 	sync_visibility();
 
-	for (auto &window : windows_) {
-		if (!window->open) {
+	const bool reset_layout = layout_reset_pending_;
+	layout_reset_pending_ = false;
+	for (int i = 0; i < static_cast<int>(windows_.size()); ++i) {
+		Window &window = *windows_[static_cast<size_t>(i)];
+		if (!window.open) {
 			continue;
 		}
-		if (window->owns_frame()) {
-			window->draw(*this, frame_index);
+		if (window.owns_frame()) {
+			window.draw(*this, frame_index);
 			continue;
 		}
-		if (ImGui::Begin(window->title(), &window->open)) {
-			window->draw(*this, frame_index);
+		if (reset_layout) {
+			place_window_home(i);
+		}
+		if (ImGui::Begin(window.title(), &window.open)) {
+			window.draw(*this, frame_index);
 		}
 		ImGui::End();
 	}
@@ -126,6 +137,21 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		set_open(false);
 	}
 	return true;
+}
+
+// The next Begin of window `index` lands it in the main viewport: no dock
+// node, expanded, cascaded from the work area's corner at a readable size.
+void ImGuiPass::place_window_home(int index) {
+	const ImGuiViewport *main = ImGui::GetMainViewport();
+	const float step = 32.0f * static_cast<float>(index);
+	ImGui::SetNextWindowViewport(main->ID);
+	ImGui::SetNextWindowDockID(0, ImGuiCond_Always);
+	ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always);
+	ImGui::SetNextWindowPos(ImVec2(main->WorkPos.x + 24.0f + step, main->WorkPos.y + 24.0f + step),
+			ImGuiCond_Always);
+	ImGui::SetNextWindowSize(ImVec2(std::min(main->WorkSize.x - 48.0f - step, 640.0f),
+									std::min(main->WorkSize.y - 48.0f - step, 720.0f)),
+			ImGuiCond_Always);
 }
 
 }  // namespace opennova::devtools

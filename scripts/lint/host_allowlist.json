@@ -1,5 +1,5 @@
 {
-  "_comment": "KEEP taxonomy for scripts/lint/host_lint.py: where the word 'host' legitimately lives (game/server host, wire-frozen names, external vocabulary). Everything outside this file renames — see CONTEXT.md Host / Joiner.",
+  "_comment": "KEEP taxonomy for scripts/lint/host_lint.py: where the word 'host' legitimately lives (game/server host, wire-frozen names, external vocabulary). Everything outside this file renames \u2014 see CONTEXT.md Host / Joiner.",
   "path_globs": [
     "apps/novaworld_server/*",
     "apps/nw_lan_probe/*",
@@ -32,7 +32,6 @@
     "godot/tests/novaworld_host_test.gd",
     "godot/tests/novaworld_menu_seam_test.gd",
     "godot/tests/novaworld_panel_test.gd",
-    "godot/tests/perf_wire_probe_game.gd",
     "godot/tests/skeletal_anim_test.gd",
     "godot/tests/wire_present_pass_test.gd",
     "infra/*",

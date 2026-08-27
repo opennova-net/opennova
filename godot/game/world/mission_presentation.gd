@@ -597,6 +597,12 @@ func get_wire_presenter() -> WirePresentPass:
 	return _wire_present
 
 
+## The placed-node present applier (the perf probes toggle its output channels
+## for their A/B legs); null before setup.
+func get_present_applier() -> PresentApplier:
+	return _present
+
+
 func entity_count() -> int:
 	return _sim.get_entity_count() if _sim != null else 0
 

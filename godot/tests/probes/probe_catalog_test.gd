@@ -6,10 +6,12 @@ extends GutTest
 # reach into the test suite.
 
 const PROBES_ROOT := "res://probes"
+# Regex -> reason. The print pattern is word-bounded so identifiers such as
+# `_build_fingerprint(` never match.
 const FORBIDDEN_SOURCE := {
-	"print(": "probes log through ctx.log, never print()",
-	"OS.get_environment(": "probes take typed args, never environment variables",
-	"OS.has_environment(": "probes take typed args, never environment variables",
+	"(?<![A-Za-z0-9_.])print(_rich|_debug|err|raw|s|t)?\\(": "probes log through ctx.log, never print()",
+	"OS\\.get_environment\\(": "probes take typed args, never environment variables",
+	"OS\\.has_environment\\(": "probes take typed args, never environment variables",
 	"res://tests/": "probes must not depend on the GUT suite",
 }
 
@@ -43,14 +45,19 @@ func test_every_available_probe_loads_and_its_defaults_validate() -> void:
 
 
 func test_probe_sources_keep_the_contract() -> void:
+	var patterns := {}
+	for pattern in FORBIDDEN_SOURCE:
+		var regex := RegEx.new()
+		assert_eq(regex.compile(pattern), OK, "pattern compiles: %s" % pattern)
+		patterns[regex] = FORBIDDEN_SOURCE[pattern]
 	var offenders := PackedStringArray()
 	for path in _gd_files(PROBES_ROOT):
 		var text := FileAccess.get_file_as_string(path)
 		for line in text.split("\n"):
 			var code := line.split("#", 1)[0]
-			for needle in FORBIDDEN_SOURCE:
-				if code.contains(needle):
-					offenders.append("%s: %s (%s)" % [path, line.strip_edges(), FORBIDDEN_SOURCE[needle]])
+			for regex in patterns:
+				if (regex as RegEx).search(code) != null:
+					offenders.append("%s: %s (%s)" % [path, line.strip_edges(), patterns[regex]])
 	assert_eq(offenders.size(), 0, "\n".join(offenders))
 
 
