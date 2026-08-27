@@ -104,6 +104,11 @@ jobs:
           # the game/server host and nothing else. Any uncovered use fails;
           # the KEEP taxonomy lives in scripts/lint/host_allowlist.json.
           python scripts/lint/host_lint.py --enforce
+          # Fixture provenance gate (fixtures/README.md): every fixture is
+          # minted by a generator, authored, or a keep-set retail-interop row
+          # in scripts/lint/fixture_allowlist.json; LFS-tracked, under 2 MiB,
+          # referenced by a test or doc, and materialized in this checkout.
+          python scripts/lint/fixture_lint.py --enforce --require-pulled
 
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search

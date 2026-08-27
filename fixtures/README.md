@@ -14,7 +14,56 @@ Every file under `fixtures/` belongs to one of three classes:
 
 Retail corpora (whole installs, extracted asset trees, captures) never live here;
 tests that need them run behind the `OPENNOVA_*` gates
-(`docs/asset-gated-tests.md`).
+(`docs/asset-gated-tests.md`); the retail files those gated tests need in CI live
+in the private `opennova-net/opennova-reference-assets` repository.
+
+## Rules (enforced by `scripts/lint/fixture_lint.py`)
+
+- Every file is one of the three classes: minted files are named (by path or
+  directory) in the `tests/fixtures/minimal_*_gen.cpp` that writes them; authored
+  and keep files carry a row in `scripts/lint/fixture_allowlist.json`. A retail
+  blob outside the keep rows fails the lint, and a keep row is a deliberate
+  decision recorded there and in the table below.
+- Every file is referenced by a test, the ctest registration, a workflow, a script,
+  or a doc (this README counts): a fixture nothing reads is deleted, not kept.
+- Every file is LFS-tracked (`.gitattributes` `fixtures/**`), except the text
+  carve-out (`*.md`, `.gitignore`), and no tracked file under `fixtures/` or
+  `assets/` exceeds 2 MiB; the three oversize `assets/mnml*` files carry a reason
+  in the allowlist's `size_exceptions`.
+- CI runs the lint with `--require-pulled`: every LFS fixture must be materialized
+  in the checkout the tests read (the scoped `git lfs pull` in `ci.yml`).
+
+Run `python scripts/lint/fixture_lint.py --report` locally; `--enforce` is the CI
+gate.
+
+## The keep set
+
+Original files kept byte-for-byte because a test proves the parser reads what the
+shipped game wrote (or because a wire test replays what a retail peer sent).
+Everything else that ever came from a retail install was replaced by a minted or
+authored file.
+
+| Files | Why they stay |
+|---|---|
+| `mnu/jo_*.mnu` (15), `mns/menu_style.mns` | the shipped JO menu screens and style: the menu compiler, the widget tests and the GUT shells pin retail widget ids and layouts |
+| `rtxt/gametext.bin`, `rtxt/menutxt.bin`, `rtxt/00tra.bin`, `rtxt/ash_g3d.bin` | the string tables the menus reference by retail string id; `00tra`/`ash_g3d` are the mission-text parity pair |
+| `def/weapon.def`, `def/ammo.def`, `def/hudpos.def` | the wire-visible weapon/ammo order (the weapon table bakes indices from it) and the HUD layout table |
+| `bms/ash_i5b.reference.bms` | the mission reference the BMS writer round-trips against |
+| `mus/jo_gamemus.bin`, `mus/jo_menumus.bin`, `mus/golden_jo_gamemus.mus.txt` | the music director scripts and their decoded golden |
+| `adm/mp5_1st.adm`, `bad/BINOC.bad`, `bad/BINOC_twist.bad` | the retail animation-definition and clip formats (skinned-rig twist parity) |
+| `env/full_00.env` | a complete retail environment file (every section populated) |
+| `particle/*.ptl`, `particle/gorehit.ptu` | the particle catalogue parser's retail corpus, including one gore-set file |
+| `cbin/nlist*.reference.kda` | the credits-list container in its JO, JOX01 and BHD encodings |
+| `dbf/00TRg.DBF` | the dialog bank format |
+| `avatars/Avatars.def` | the avatar definition table |
+| `novaworld/**` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
+
+## Authored files
+
+`def/items.def` (test rows 106100..), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
+`mnu/all_widgets.mnu`, `mns/test_style.mns`, `score/score_sample.ini`,
+`anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`), the
+`novaworld/*_manifest.txt` records, and this README.
 
 ## threedi/synth — the synthetic 3DI model set (minted)
 
