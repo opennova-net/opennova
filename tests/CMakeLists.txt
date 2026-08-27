@@ -824,6 +824,15 @@ target_include_directories(hud_minimap_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_
 target_compile_features(hud_minimap_feed_test PRIVATE cxx_std_17)
 add_test(NAME hud_minimap_feed COMMAND hud_minimap_feed_test)
 
+# The LAN browse window (npruntime/lan_discovery.h LanDiscoveryBrowser): the
+# probe identity, the 30 s window, the 3 s re-announce cadence, the reply
+# filter and the endpoint-keyed rows.
+add_executable(lan_discovery_test npruntime/lan_discovery_test.cpp)
+target_link_libraries(lan_discovery_test PRIVATE opennova_net)
+target_include_directories(lan_discovery_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(lan_discovery_test PRIVATE cxx_std_17)
+add_test(NAME lan_discovery COMMAND lan_discovery_test)
+
 add_executable(minimap_markers_test npruntime/minimap_markers_test.cpp)
 target_link_libraries(minimap_markers_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(minimap_markers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
