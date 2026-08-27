@@ -10,10 +10,10 @@ extends GutTest
 
 
 # Fixture items.def wire-test ids (graphic -> committed model fixture).
-const TYPE_PUMP := 6100      # -> item 106100, Pmpjk01 (static, PANM channels)
-const TYPE_ARMORY := 6101    # -> item 106101, Armry01
-const TYPE_RIFLEMAN := 6102  # -> item 106102, Shed + soldier.adm (skeletal)
-const TYPE_SCALED := 6103    # -> item 106103, Pmpjk01 at authored scale 1.5
+const TYPE_PUMP := 6100      # -> item 106100, pump (static, PANM channels)
+const TYPE_ARMORY := 6101    # -> item 106101, armory
+const TYPE_RIFLEMAN := 6102  # -> item 106102, shed + soldier.adm (skeletal)
+const TYPE_SCALED := 6103    # -> item 106103, pump at authored scale 1.5
 const TYPE_UNRESOLVED := 555
 const TYPE_UNRESOLVED_B := 666
 
@@ -31,10 +31,10 @@ func before_all() -> void:
 		"res://../fixtures/def/items.def": "items.def",
 		"res://../fixtures/def/weapon.def": "weapon.def",
 		"res://../fixtures/def/ammo.def": "ammo.def",
-		"res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di": "Pmpjk01.3di",
-		"res://../fixtures/threedi/objects/armry01/Armry01.3di": "Armry01.3di",
-		"res://../fixtures/threedi/3di3/Shed.3di": "Shed.3di",
-		"res://../fixtures/threedi/3di3/MP5.3di": "M9K_3rd.3di",
+		"res://../fixtures/threedi/synth/pump.3di": "pump.3di",
+		"res://../fixtures/threedi/synth/armory.3di": "armory.3di",
+		"res://../fixtures/threedi/synth/shed.3di": "shed.3di",
+		"res://../fixtures/threedi/synth/gun.3di": "M9K_3rd.3di",
 		"res://../fixtures/anim/soldier.adm": "soldier.adm",
 		"res://../fixtures/anim/idle.bad": "idle.bad",
 		"res://../fixtures/anim/walk.bad": "walk.bad",

@@ -1,8 +1,8 @@
 extends GutTest
 
 const VegAssetsScript = preload("res://game/terrain/veg_assets.gd")
-const SOURCE_OBJECT := "res://../fixtures/threedi/objects/Bird1/Bird1.3di"
-const OVERRIDE_OBJECT := "res://../fixtures/threedi/3di3/House.3di"
+const SOURCE_OBJECT := "res://../fixtures/threedi/synth/bird.3di"
+const OVERRIDE_OBJECT := "res://../fixtures/threedi/synth/house.3di"
 
 
 func before_each() -> void:

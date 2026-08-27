@@ -1,3 +1,8 @@
+// PANM/CTRL byte stability through the parity writer: the chunk bytes of the
+// synthetic register-controlled models (fixtures/threedi/synth) must survive
+// a read -> write round trip unchanged, and, when OPENNOVA_JO_ASSETS names an
+// extracted retail tree, the six retail controlled models it carries
+// (docs/asset-gated-tests.md).
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -5,6 +10,7 @@
 
 #include <formats/threedi/threedi.h>
 #include <formats/threedi/threedi_3di3.h>
+#include "common/retail_paths.h"
 #include "common/test_paths.h"
 
 static const ThreediChunk *find_first_chunk(const ThreediChunk *chunk,
@@ -98,40 +104,49 @@ static int roundtrip_and_compare(const char *path, const char id[4]) {
     return ok;
 }
 
-int main(void) {
-    const char *repo_root = test_paths_repo_root(__FILE__);
-    static const char *kControlledFixtures[] = {
-        "fixtures/threedi/objects/B50Cal/B50Cal.3di",
-        "fixtures/threedi/objects/CarierU/CarierU.3di",
-        "fixtures/threedi/objects/DLCAC2/DLCAC2.3di",
-        "fixtures/threedi/objects/dm1a1/dm1a1.3di",
-        "fixtures/threedi/objects/dsuv1/dsuv1.3di",
-        "fixtures/threedi/objects/m1trret/M1trret.3di",
-    };
+// The synthetic set: every model that authors CTRL registers and
+// register-driven PANM rows (tests/fixtures/minimal_3di_gen.cpp).
+static int check_synthetic_leg(const char *repo_root) {
+    static const char *kSynthetic[] = {"mount", "tank", "carrier", "pump", "armory"};
     char path[4096];
-    struct stat st;
-    size_t tested = 0;
     int ok = 1;
-
-    for (size_t i = 0;
-         i < sizeof(kControlledFixtures) / sizeof(kControlledFixtures[0]);
-         ++i) {
-        snprintf(path, sizeof(path), "%s/%s", repo_root, kControlledFixtures[i]);
-        if (stat(path, &st) != 0) {
-            fprintf(stderr, "required controlled PANM fixture missing: %s\n", path);
-            ok = 0;
-            continue;
-        }
-        ++tested;
+    for (size_t i = 0; i < sizeof(kSynthetic) / sizeof(kSynthetic[0]); ++i) {
+        snprintf(path, sizeof(path), "%s/fixtures/threedi/synth/%s.3di", repo_root, kSynthetic[i]);
         ok &= roundtrip_and_compare(path, "PANM");
         ok &= roundtrip_and_compare(path, "CTRL");
     }
-    if (tested != sizeof(kControlledFixtures) / sizeof(kControlledFixtures[0])) {
-        fprintf(stderr, "controlled PANM fixture coverage was incomplete (%zu/%zu)\n",
-                tested,
-                sizeof(kControlledFixtures) / sizeof(kControlledFixtures[0]));
-        ok = 0;
-    }
+    return ok;
+}
 
+// The retail leg: the six controlled models of the JO corpus, byte-stable
+// through the same writer.
+static int check_retail_leg(void) {
+    static const char *kRetail[] = {"B50Cal.3di", "CarierU.3di", "DLCAC2.3di",
+                                    "dm1a1.3di", "dsuv1.3di", "M1trret.3di"};
+    int ok = 1;
+    for (size_t i = 0; i < sizeof(kRetail) / sizeof(kRetail[0]); ++i) {
+        const std::string path = retail::asset_file(kRetail[i]);
+        if (path.empty()) {
+            // Not every extract carries every controlled model (CarierU and
+            // DLCAC2 ship in expansion packs): an absent file skips its leg.
+            char needs[96];
+            snprintf(needs, sizeof(needs), "%s under OPENNOVA_JO_ASSETS", kRetail[i]);
+            retail::skip_leg(needs);
+            continue;
+        }
+        ok &= roundtrip_and_compare(path.c_str(), "PANM");
+        ok &= roundtrip_and_compare(path.c_str(), "CTRL");
+    }
+    return ok;
+}
+
+int main(void) {
+    const char *repo_root = test_paths_repo_root(__FILE__);
+    int ok = check_synthetic_leg(repo_root);
+    if (retail::assets().empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS for the six retail controlled models");
+    } else {
+        ok &= check_retail_leg();
+    }
     return ok ? 0 : 1;
 }

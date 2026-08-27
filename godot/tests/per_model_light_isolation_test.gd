@@ -7,17 +7,17 @@ extends GutTest
 ## [orig: the per-draw collect @ 0x5aa250 feeding update_light_slots
 ## @ 0x5abc50 with that draw's owner group].
 
-const PMP_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
-const SHED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
-# Shed with its one LGHT authored onto subobject 2 (origin, 100-wu radius),
-# minted once from the retired edit surface (fixtures/threedi/synthetic/README.md).
-const SYN_SHED_LGHT0_SUB2 := "res://../fixtures/threedi/synthetic/shed_lght0_sub2_origin_atten100.3di"
+const PMP_3DI := "res://../fixtures/threedi/synth/pump.3di"
+const SHED_3DI := "res://../fixtures/threedi/synth/shed.3di"
+# shed with its one LGHT authored onto subobject 2 (origin, 100-wu radius),
+# minted once from the retired edit surface (fixtures/README.md).
+const SYN_SHED_LGHT0_SUB2 := "res://../fixtures/threedi/synth/shed_lght0_sub2_origin_atten100.3di"
 
 
 func _fixture_object_data(model: String) -> ObjectData:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3")), OK)
+			"res://../fixtures/threedi/synth")), OK)
 	var data := ObjectData.new()
 	assert_eq(data.open_from_resource_root(root, model), OK,
 			"%s loads as a per-model light fixture" % model)
@@ -28,7 +28,7 @@ func _placed_model(parent: Node, position: Vector3) -> ObjectModel:
 	var model := ObjectModel.new()
 	parent.add_child(model)
 	model.position = position
-	model.set_object_data(_fixture_object_data("House.3di"))
+	model.set_object_data(_fixture_object_data("house.3di"))
 	return model
 
 
@@ -210,11 +210,11 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 		container = Node3D.new()
 		container.name = "MissionObjects"
 		world.add_child(container)
-	# House.3di carries no light records: these draws only ever see what the
+	# house.3di carries no light records: these draws only ever see what the
 	# static source spawns.
 	var model_a := _placed_model(container, Vector3(0.0, 0.0, 0.0))
 	var model_b := _placed_model(container, Vector3(3.0, 0.0, 0.0))
-	# Shed.3di carries one authored record; the fixture attaches it to
+	# shed.3di carries one authored record; the fixture attaches it to
 	# subobject 2 to model the armory lamp shape.
 	var lit := ObjectData.new()
 	assert_eq(lit.open_file(ProjectSettings.globalize_path(SYN_SHED_LGHT0_SUB2)), OK)
@@ -247,7 +247,7 @@ func test_static_source_subobject_light_is_owner_scoped() -> void:
 			"u_point_light_count")), 0.0,
 			"no bystander draw receives the owned static light")
 	# The same record detached (subobject 0) is a mission-start world light:
-	# reload the pristine Shed (subobject 0, atten 0..3) into the ObjectData the
+	# reload the pristine shed (subobject 0, atten 0..3) into the ObjectData the
 	# source closure holds.
 	assert_eq(lit.open_file(ProjectSettings.globalize_path(SHED_3DI)), OK)
 	assert_eq(int(lit.get_light_info(0).get("subobject", -1)), 0)

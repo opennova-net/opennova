@@ -11,7 +11,7 @@ extends GutTest
 # tests/novaworld/joiner_session_test; this is the Godot-layer glue + the two-handle present.)
 #
 # Most tests assert the DATA layer (the present snapshots both sides decode). The focused
-# B50 aim regression additionally loads the authored B50Cal.3di into a real ObjectModel
+# B50 aim regression additionally loads the authored mount.3di into a real ObjectModel
 # and applies the decoded controls through the production presenter, so headless verifies
 # the actual yaw-controlled ROBJ transform too. The §5.38b two-handle (L vs H)
 # reconciliation shows up as: the host's present carries the joiner (SSN 0xFFEF), and the
@@ -42,7 +42,7 @@ const OBJECTIVE_COOP_START_TYPE := 6094
 # user:// roots), wire it with sim.set_asset_root FIRST, then
 # install_seat_specs_for_type_ids(item_db, ...) runs the ONE engine extractor
 # (simassets::extract_item_seat_specs) over items.def rows + .3di userpoints.
-# dsuvzero.3di is the committed dsuv1 with its ctrlx13 seat local zeroed and
+# carrierzero.3di is the committed carrier with its ctrlx13 seat local zeroed and
 # the sitex rows retired: the corpus authors no zero-offset control seat, and
 # the same-frame carrier-follow pin below compares L against the carrier root.
 const NATIVE_MODEL_DIR := "res://.godot/native_3dp_coop_two_sim"
@@ -114,15 +114,15 @@ func before_all() -> void:
 	assert_true(DirAccess.dir_exists_absolute(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)),
 			"created the flat native asset dir")
-	assert_true(_write_native_model("B50Cal.3di",
-			_repo_file_bytes("res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")),
-			"composed the B50Cal native model fixture")
+	assert_true(_write_native_model("mount.3di",
+			_repo_file_bytes("res://../fixtures/threedi/synth/mount.3di")),
+			"composed the mount native model fixture")
 	var carrier := _with_user_point_position(
-			_repo_file_bytes("res://../fixtures/threedi/objects/dsuv1/dsuv1.3di"),
+			_repo_file_bytes("res://../fixtures/threedi/synth/carrier.3di"),
 			"ctrlx13", 0, 0, 0)
 	for site in ["sitex00d", "sitex08c", "sitex06b", "sitex12a"]:
 		carrier = _with_renamed_user_point(carrier, site, "x" + site.substr(1))
-	assert_true(_write_native_model("dsuvzero.3di", carrier),
+	assert_true(_write_native_model("carrierzero.3di", carrier),
 			"composed the zero-offset control-seat carrier fixture")
 
 
@@ -130,7 +130,7 @@ func _native_asset_root() -> ResourceRoot:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)), OK)
-	assert_true(root.has_file("B50Cal.3di"),
+	assert_true(root.has_file("mount.3di"),
 			"the composed flat asset dir indexes the fixture models")
 	return root
 
@@ -161,7 +161,7 @@ func _attachment_items_db(anchor_name: String, ambiguous: bool) -> ItemDatabase:
 		return null
 	file.store_string("""begin "Attachment Fixture Carrier"
   id 105004
-  graphic B50cal
+  graphic mount
   primary_weapon WPN_EMPLCD50NA
   addeweap %s 101419
 """ % anchor_name)
@@ -256,10 +256,10 @@ func _net_watercraft_item_db() -> ItemDatabase:
 	assert_true(base_items.contains(DBUGGY_CALLBACK_BLOCK))
 	base_items = base_items.replace(DBUGGY_CALLBACK_BLOCK, DBUGGY_PHYSICS_BLOCK)
 	# Native seat extraction reads the graphic's .3di userpoints: both drivable
-	# rows ride the composed dsuvzero model (one zero-offset ctrlx seat).
+	# rows ride the composed carrierzero model (one zero-offset ctrlx seat).
 	assert_true(base_items.contains("  graphic Dbuggy1\n"))
 	base_items = base_items.replace(
-			"  graphic Dbuggy1\n", "  graphic dsuvzero\n")
+			"  graphic Dbuggy1\n", "  graphic carrierzero\n")
 	var path := ProjectSettings.globalize_path(
 			"res://.godot/net_watercraft_items.def")
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -272,7 +272,7 @@ func _net_watercraft_item_db() -> ItemDatabase:
 	file.store_string("""begin "Net Watercraft Fixture"
   id 105008
   type vehicle
-  graphic dsuvzero
+  graphic carrierzero
   sid netwatercraft
   ai_function cbot
   render_function cbot
@@ -996,10 +996,10 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	# PLAYPARTANIM is intentionally not part of this contract.
 	var model := ObjectData.new()
 	assert_eq(model.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")), OK)
+			"res://../fixtures/threedi/synth/mount.3di")), OK)
 	var moving_anchor := _moving_eweap_userpoint(model)
 	assert_false(moving_anchor.is_empty(),
-			"B50Cal exposes a userpoint carried by EWEAP_GUNYAW")
+			"mount exposes a userpoint carried by EWEAP_GUNYAW")
 	if moving_anchor.is_empty():
 		return
 	var anchor: Dictionary = moving_anchor["info"]
@@ -1008,7 +1008,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	# synthetic child on distinct wire types (the following UDP/presentation
 	# test uses the real B50 item/type end to end). The authored addeweap row
 	# anchors the child at the DISCOVERED articulated userpoint; the native
-	# extractor derives the carrier's Usegun seat from the same B50cal graphic.
+	# extractor derives the carrier's Usegun seat from the same mount graphic.
 	var root := _native_asset_root()
 	var attach_db := _attachment_items_db(anchor_name, false)
 	assert_not_null(attach_db)
@@ -1017,7 +1017,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	var carrier_card: Dictionary = attach_db.extract_seat_specs_for_item(
 			root, 105004)
 	assert_eq((carrier_card.get("seats", []) as Array).size(), 1,
-			"B50Cal exposes its authored Usegun seat")
+			"mount exposes its authored Usegun seat")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
@@ -1129,22 +1129,22 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	# applies its uplink look to H and drives the parent's EWEAP controls.
 	var model := ObjectData.new()
 	assert_eq(model.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")), OK)
+			"res://../fixtures/threedi/synth/mount.3di")), OK)
 	var moving_anchor := _moving_eweap_userpoint(model)
 	assert_false(moving_anchor.is_empty(),
-			"B50Cal exposes a real ROBJ carried by EWEAP_GUNYAW")
+			"mount exposes a real ROBJ carried by EWEAP_GUNYAW")
 	if moving_anchor.is_empty():
 		return
 	var yaw_part := int((moving_anchor["info"] as Dictionary).get(
 			"subobject", -1))
-	# The real B50 item end to end: items.def row 101419 (graphic B50cal,
+	# The real B50 item end to end: items.def row 101419 (graphic mount,
 	# primary WPN_EMPLCD50NA) plus the model's authored Usegun userpoint,
 	# through the ONE native extractor on both peers.
 	var root := _native_asset_root()
 	var seat_db := _fixture_items_db()
 	var b50_card: Dictionary = seat_db.extract_seat_specs_for_item(root, 101419)
 	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
-			"B50Cal exposes its authored Usegun seat")
+			"mount exposes its authored Usegun seat")
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var mounted_item := mission.add_entity(
@@ -1608,7 +1608,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	if watercraft_db == null:
 		return
 	# Both drivable rows (the placed Dune Buggy and the synthetic watercraft)
-	# resolve their control seat natively from the dsuvzero graphic: one
+	# resolve their control seat natively from the carrierzero graphic: one
 	# zero-offset ctrlx userpoint, the exact shape the old hand table carried.
 	var root := _native_asset_root()
 	var host := Simulation.new()
@@ -2807,7 +2807,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	var b50_card: Dictionary = fixture_item_db.extract_seat_specs_for_item(
 			root, 101419)
 	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
-			"B50Cal exposes its authored Usegun seat")
+			"mount exposes its authored Usegun seat")
 
 	var host := Simulation.new()
 	assert_true(host.enable_host_listen(0))

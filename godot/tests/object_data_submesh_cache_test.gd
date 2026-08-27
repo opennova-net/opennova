@@ -7,8 +7,8 @@ extends GutTest
 # animated entities stop paying N mesh builds - the recorded baseline's
 # dominant cost (docs/perf/mission-load-baseline.md).
 
-const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
-const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
+const SHED := "res://../fixtures/threedi/synth/shed.3di"
+const PERSON := "res://../fixtures/threedi/synth/person.3di"
 
 
 func _open(path: String) -> ObjectData:
@@ -105,7 +105,7 @@ func test_callers_cannot_taint_the_cache() -> void:
 func test_lod_round_trip_returns_the_cached_meshes() -> void:
 	# The object editor switches LODs freely; coming back must not pay a
 	# rebuild (and must return the SAME meshes - the cache held them).
-	var data := _open(CHARMODEL)
+	var data := _open(PERSON)
 	var lod0 := _mesh_rids(data.build_lod_submeshes(0))
 	data.build_lod_submeshes(1)  # may be empty on single-LOD fixtures; harmless
 	assert_eq(_mesh_rids(data.build_lod_submeshes(0)), lod0,

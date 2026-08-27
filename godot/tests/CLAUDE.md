@@ -32,9 +32,11 @@
   process exit when the class carries a `Transform3D`-typed member (Godot 4.6
   teardown quirk, bisected 2026-08-09) and GUT still reports green totals, so
   the crash only shows as a nonzero exit code.
-- `fixtures/threedi/synthetic/*.3di` are committed models with one authored edit each
-  (CTRL names, PANM rows, LGHT/material fields), minted ONCE on master `5820432c1`
-  through the `ObjectData` edit + export bindings ADR 0038 retired; the runtime cannot
-  re-author them. Tests that need an authored variant load one of these and assert its
-  content with the read-back getters. Recipes and the minting probe:
-  `fixtures/threedi/synthetic/README.md`.
+- Every 3DI model the suite loads is synthetic: `fixtures/threedi/synth/*.3di` are
+  minted by `tests/fixtures/minimal_3di_gen.cpp` through the engine's parity writer
+  (eleven base models plus the one-edit variants: CTRL names, PANM rows, LGHT/material
+  fields) and byte-compared by the `minimal_3di_gen` ctest every run. Change the
+  generator, run it with `--write`, commit the files. A test that needs an authored
+  variant loads one of these and asserts its content with the read-back getters; the
+  model and variant tables are in `fixtures/README.md`. No retail model lives in the
+  tree; retail-only assertions run as `OPENNOVA_JO_ASSETS` legs.

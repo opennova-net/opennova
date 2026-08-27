@@ -6,7 +6,7 @@ extends GutTest
 
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
 const ENV_FIXTURE := "res://../fixtures/env/full_00.env"
-const MODEL_FIXTURE := "res://../fixtures/threedi/objects/CmpFireN/CmpFireN.3di"
+const MODEL_FIXTURE := "res://../fixtures/threedi/synth/crate.3di"
 const ROUTED_WITNESS_WORLD := Vector2(-120.0, -24.0)
 const ROUTED_WITNESS_MAP := Vector2i(98, 122)
 const ROUTED_WITNESS_FLAT_MAP := Vector2i(226, 250)

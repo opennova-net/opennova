@@ -95,19 +95,19 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 
 		var sim := Simulation.new()
 		sim.enable_listen_server(true)
-		# B50cal's authored Usegun row (bone 6) + the fixture def's WPN_AVENGER
+		# mount's authored Usegun row (bone 6) + the fixture def's WPN_AVENGER
 		# primary; phrase_set is authored per config — an explicit 0 must
 		# survive the def parser as a real value, not become unknown.
 		var dir := _native_fixture_dir()
 		var model_file := FileAccess.open(
-				dir.path_join("B50cal.3di"), FileAccess.WRITE)
+				dir.path_join("mount.3di"), FileAccess.WRITE)
 		assert_not_null(model_file)
 		model_file.store_buffer(FileAccess.get_file_as_bytes(
-				"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di"))
+				"res://../fixtures/threedi/synth/mount.3di"))
 		model_file.close()
 		_install_native_seats(sim, dir, _fixture_items_text().replace(
 				"id 101294",
-				"id 101294\n  graphic B50cal\n  phrase_set %d" % config_value),
+				"id 101294\n  graphic mount\n  phrase_set %d" % config_value),
 				PackedInt32Array([1294]))
 		assert_true(sim.load_from_mission_data(md))
 		assert_true(sim.has_local_player())

@@ -3,12 +3,12 @@ extends GutTest
 const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
 const DestructionPresentPass := preload(
 		"res://game/world/destruction_present_pass.gd")
-const ARMRY_3DI := "res://../fixtures/threedi/objects/armry01/Armry01.3di"
+const ARMRY_3DI := "res://../fixtures/threedi/synth/armory.3di"
 # Authored light variants minted once from the retired edit surface
-# (fixtures/threedi/synthetic/README.md); each test reads the authored record
+# (fixtures/README.md); each test reads the authored record
 # back before probing the director.
-const SYN_SHED_LGHT0_SUB2 := "res://../fixtures/threedi/synthetic/shed_lght0_sub2_origin_atten100.3di"
-const SYN_ARMRY_LGHT0_SUB1 := "res://../fixtures/threedi/synthetic/armry01_lght0_sub1_offset.3di"
+const SYN_SHED_LGHT0_SUB2 := "res://../fixtures/threedi/synth/shed_lght0_sub2_origin_atten100.3di"
+const SYN_ARMRY_LGHT0_SUB1 := "res://../fixtures/threedi/synth/armory_lght0_sub1_offset.3di"
 
 # The EffectWorld dynamic point-light wiring (D-RLIT-4): the LightScene
 # binding round trip, the witnessed <= 4 select + global-parameter push, and
@@ -16,13 +16,13 @@ const SYN_ARMRY_LGHT0_SUB1 := "res://../fixtures/threedi/synthetic/armry01_lght0
 # pinned by ctest renderer_light_scene; this file covers the Godot seam.
 
 
-# The static walk runs against real committed models: Shed.3di carries one
-# authored light record (style 24, atten 0..3 at (-0.0017, 1.2097, 0.0112)),
-# House.3di carries none.
+# The static walk runs against the synthetic models: shed.3di carries one
+# authored light record (style 24, atten 0..3 at (0, 1.25, 0)), house.3di
+# carries none (tests/fixtures/minimal_3di_gen.cpp).
 func _fixture_object_data(model: String) -> ObjectData:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3")), OK)
+			"res://../fixtures/threedi/synth")), OK)
 	var data := ObjectData.new()
 	assert_eq(data.open_from_resource_root(root, model), OK,
 			"%s loads as a static light source fixture" % model)
@@ -254,7 +254,7 @@ func test_model_lght_and_muzzle_share_the_entity_cached_handle() -> void:
 	world.add_child(container)
 	var node := ObjectModel.new()
 	container.add_child(node)
-	node.set_object_data(_fixture_object_data("Shed.3di"))
+	node.set_object_data(_fixture_object_data("shed.3di"))
 	node.set_meta("entity_ref", {"wire_handle": 7, "kind": MissionData.KIND_ITEM})
 	var director := EffectLightDirector.new()
 	director.setup(world, Callable(), Callable())
@@ -275,7 +275,7 @@ func test_model_lght_and_muzzle_share_the_entity_cached_handle() -> void:
 		assert_true(rows[0].position.is_equal_approx(muzzle_position),
 				"the shared LGHT lease receives the muzzle position setter")
 		assert_almost_eq(float(rows[0].range), 3.75, 0.001,
-				"reuse retains Shed's authored radius instead of spawning 1.5 units")
+				"reuse retains shed's authored radius instead of spawning 1.5 units")
 	for i in range(5):
 		director.advance_fixed_tick()
 	assert_eq(director.get_report().live, 0,
@@ -342,8 +342,8 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var transform := Transform3D(Basis.IDENTITY, Vector3(10.0, 27.0, 350.0))
-	var lit := _fixture_object_data("Shed.3di")
-	var plain := _fixture_object_data("House.3di")
+	var lit := _fixture_object_data("shed.3di")
+	var plain := _fixture_object_data("house.3di")
 	var director := EffectLightDirector.new()
 	director.setup(world, func() -> Array:
 		return [
@@ -362,7 +362,7 @@ func test_director_spawns_model_lights_from_static_sources() -> void:
 	if rows.size() == 1:
 		var world_pos := rows[0].position
 		assert_true(world_pos.is_equal_approx(
-				transform * Vector3(-0.0017, 1.2097, 0.0112)),
+				transform * Vector3(0.0, 1.25, 0.0)),
 				"the record position rides the placement transform")
 	assert_eq(director.spawn_light_record({}, transform), 0,
 			"an empty record dictionary is skipped")
@@ -386,7 +386,7 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
-	# Shed's one LGHT authored onto subobject 2 at the origin with a 100-wu
+	# shed's one LGHT authored onto subobject 2 at the origin with a 100-wu
 	# radius; the atlas pixel below compares against the entity origin, so the
 	# authored position is asserted, not assumed.
 	var data := _synthetic_object_data(SYN_SHED_LGHT0_SUB2)
@@ -537,7 +537,7 @@ func test_wire_node_exit_retires_its_cached_light_without_duplicate_registration
 	var director := EffectLightDirector.new()
 	var node := ObjectModel.new()
 	add_child(node)
-	node.set_object_data(_fixture_object_data("Shed.3di"))
+	node.set_object_data(_fixture_object_data("shed.3di"))
 	director.on_wire_node_spawned(node, 0, 0)
 	director.on_wire_node_spawned(node, 0, 0)
 	assert_eq(director.get_report().live, 1,
@@ -552,7 +552,7 @@ func test_powerup_respawn_routes_authored_lght_once_per_live_entity() -> void:
 	var director := EffectLightDirector.new()
 	var first := ObjectModel.new()
 	add_child_autofree(first)
-	first.set_object_data(_fixture_object_data("Shed.3di"))
+	first.set_object_data(_fixture_object_data("shed.3di"))
 	first.set_meta("entity_ref", {
 		"wire_handle": 41,
 		"kind": MissionData.KIND_ITEM,
@@ -569,7 +569,7 @@ func test_powerup_respawn_routes_authored_lght_once_per_live_entity() -> void:
 
 	var respawn := ObjectModel.new()
 	add_child_autofree(respawn)
-	respawn.set_object_data(_fixture_object_data("Shed.3di"))
+	respawn.set_object_data(_fixture_object_data("shed.3di"))
 	respawn.set_meta("entity_ref", {
 		"wire_handle": 41,
 		"kind": MissionData.KIND_ITEM,
@@ -587,7 +587,7 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 	var container := Node3D.new()
 	container.name = "MissionObjects"
 	world.add_child(container)
-	# Armry01 with its LGHT 0 authored onto ROBJ 1 at (0.25, 0.5, -0.75), a
+	# armory with its LGHT 0 authored onto ROBJ 1 at (0.25, 0.5, -0.75), a
 	# 1000-wu radius and light objects enabled.
 	var data := _synthetic_object_data(SYN_ARMRY_LGHT0_SUB1)
 	assert_gt(data.get_light_count(), 0,
@@ -670,7 +670,7 @@ func test_reattach_rebinds_one_wire_exit_hook_without_accumulating_lights() -> v
 	world.add_child(container)
 	var node := ObjectModel.new()
 	container.add_child(node)
-	node.set_object_data(_fixture_object_data("Shed.3di"))
+	node.set_object_data(_fixture_object_data("shed.3di"))
 	node.set_meta("entity_ref", {"wire_handle": 91})
 	var director := EffectLightDirector.new()
 	director.setup(world, Callable(), Callable())

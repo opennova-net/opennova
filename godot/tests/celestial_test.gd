@@ -1,11 +1,11 @@
 extends GutTest
 
-# Reflection-pass fidelity pins for Celestial. The committed CmpFireN 3DI
+# Reflection-pass fidelity pins for Celestial. The committed crate 3DI
 # stands in for the retail body models, letting the test exercise the public
 # environment/resource-root lifecycle without requiring an external JO install.
 
-const MODEL_FIXTURE_ROOT := "res://../fixtures/threedi/objects/CmpFireN"
-const MODEL_NAME := "CmpFireN.3di"
+const MODEL_FIXTURE_ROOT := "res://../fixtures/threedi/synth"
+const MODEL_NAME := "crate.3di"
 const CELESTIAL_SHADER := "res://shaders/celestial.gdshader"
 const ADDITIVE_SHADER := "res://shaders/celestial_additive.gdshader"
 const TICK := 1.0 / 62.0

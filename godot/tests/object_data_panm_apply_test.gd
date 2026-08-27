@@ -7,11 +7,11 @@ extends GutTest
 # revisions (a hidden model re-shown) still lands on the current pose. The
 # Dictionary form (evaluate_panm) stays cache-neutral and is the reference.
 
-const PMP := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
+const PMP := "res://../fixtures/threedi/synth/pump.3di"
 # The pump jack with its LOD0 row 0 translation track re-styled to retail's
 # rand()-backed wave, minted once from the retired edit surface
-# (fixtures/threedi/synthetic/README.md).
-const PMP_NOISE := "res://../fixtures/threedi/synthetic/pmpjk01_anim0_noise_translation.3di"
+# (fixtures/README.md).
+const PMP_NOISE := "res://../fixtures/threedi/synth/pump_anim0_noise_translation.3di"
 
 
 func _data() -> ObjectData:

@@ -1,4 +1,5 @@
-// Roundtrip all reference 3DIs through the threedi parser/writer.
+// Roundtrip every synthetic 3DI (fixtures/threedi/synth, minted by
+// tests/fixtures/minimal_3di_gen.cpp) through the threedi parser/writer.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -146,7 +147,7 @@ int main(void) {
     size_t file_count = 0, file_cap = 0;
     size_t i;
 
-    snprintf(fixtures_dir, sizeof(fixtures_dir), "%s/fixtures/threedi/3di3", repo_root);
+    snprintf(fixtures_dir, sizeof(fixtures_dir), "%s/fixtures/threedi/synth", repo_root);
 
     d = opendir(fixtures_dir);
     if (!d) {

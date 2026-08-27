@@ -6,8 +6,8 @@ extends GutTest
 #  - SkeletalAnim resource basics (graceful failure, empty state).
 #  - ObjectModel's new skeletal methods parse and no-op safely without a skeletal set.
 
-const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
-const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
+const PERSON := "res://../fixtures/threedi/synth/person.3di"
+const SHED := "res://../fixtures/threedi/synth/shed.3di"
 const VIEWMODEL_RIG_TMP := "res://.godot/viewmodel_rig_test"
 
 
@@ -38,9 +38,9 @@ func _clear_viewmodel_rig_fixture() -> void:
 
 
 func test_skinned_model_emits_bone_arrays() -> void:
-	var data := _open(CHARMODEL)
+	var data := _open(PERSON)
 	if not data.is_skinned(0):
-		pass_test("CharModel.3di is not flagged skinned; skin-array assertions skipped.")
+		pass_test("person.3di is not flagged skinned; skin-array assertions skipped.")
 		return
 	var submeshes: Array = data.build_lod_submeshes(0)
 	assert_false(submeshes.is_empty(), "Skinned model should build submeshes.")
@@ -72,7 +72,7 @@ func test_skinned_model_emits_bone_arrays() -> void:
 
 func test_static_model_has_no_bone_arrays() -> void:
 	var data := _open(SHED)
-	assert_false(data.is_skinned(0), "Shed.3di should be a static model.")
+	assert_false(data.is_skinned(0), "shed.3di should be a static model.")
 	var submeshes: Array = data.build_lod_submeshes(0)
 	assert_false(submeshes.is_empty(), "Static model should still build submeshes.")
 	for entry in submeshes:
@@ -117,7 +117,7 @@ func test_viewmodel_graphic_bones_are_covered_when_adm_model_is_shorter() -> voi
 	_clear_viewmodel_rig_fixture()
 	var tmp := ProjectSettings.globalize_path(VIEWMODEL_RIG_TMP)
 	assert_eq(DirAccess.make_dir_recursive_absolute(tmp), OK)
-	_stage_viewmodel_rig_file("CharModel.3di", CHARMODEL)
+	_stage_viewmodel_rig_file("person.3di", PERSON)
 	_stage_viewmodel_rig_file("soldier.3di", SHED)
 	_stage_viewmodel_rig_file("soldier.adm", "res://../fixtures/anim/soldier.adm")
 	_stage_viewmodel_rig_file("idle.bad", "res://../fixtures/anim/idle.bad")
@@ -128,7 +128,7 @@ func test_viewmodel_graphic_bones_are_covered_when_adm_model_is_shorter() -> voi
 	var placer := MissionObjectPlacer.create(root, null)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
-	var model = placer.build_model_from_graphic("CharModel", "soldier", parent, "anim_idle")
+	var model = placer.build_model_from_graphic("person", "soldier", parent, "anim_idle")
 	assert_not_null(model, "the synthetic viewmodel resolves")
 	if model != null:
 		var bone_count: int = model.get_skeletal_anim().get_bone_count()
@@ -243,7 +243,7 @@ func test_emplaced_pose_collapses_right_hand_bone_and_restores_off_mount() -> vo
 	# controller/gunner/driver parent slot. The personal weapon is baked into the
 	# character mesh, so this is a skeletal collapse, not a child-node visibility gate.
 	# [orig: Entity_BuildBoneTransformMatrices special rows; world-wac-ai-re.md §14.1]
-	var data := _open(CHARMODEL)
+	var data := _open(PERSON)
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	var sk := SkeletalAnim.new()
@@ -354,7 +354,7 @@ func _skinned_geometry_metrics(data: ObjectData, skeleton: Skeleton3D) -> Dictio
 
 
 func test_mounted_hand_collapse_does_not_stretch_skinned_triangles() -> void:
-	var data := _open(CHARMODEL)
+	var data := _open(PERSON)
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	var skeletal := SkeletalAnim.new()
@@ -390,7 +390,7 @@ func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
 	# placement: the owner must collapse the bone at its current joint. Sending
 	# partially weighted vertices to world origin stretches triangles across the
 	# frame instead of clipping the baked weapon.
-	var data := _open(CHARMODEL)
+	var data := _open(PERSON)
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	var sk := SkeletalAnim.new()
@@ -591,7 +591,7 @@ func test_body_blend_missing_channels_fall_back_without_stale_pose() -> void:
 
 
 func test_primary_blend_composes_weapon_channel_then_aim_overlay_once() -> void:
-	var data := _open(CHARMODEL)
+	var data := _open(PERSON)
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	var skeletal := SkeletalAnim.new()

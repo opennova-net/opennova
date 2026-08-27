@@ -56,6 +56,16 @@ target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
 target_include_directories(threedi_collision_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 
+# The synthetic 3DI model set fixtures/threedi/synth (eleven base models plus
+# the one-edit variants the GUT suite loads), minted through the parity
+# writer from tests/fixtures/minimal_3di_builder.h and byte-compared every run
+# (--write regenerates). Every 3DI consumer below reads from that directory.
+add_executable(minimal_3di_gen_test fixtures/minimal_3di_gen.cpp)
+target_link_libraries(minimal_3di_gen_test PRIVATE opennova_formats)
+target_compile_features(minimal_3di_gen_test PRIVATE cxx_std_17)
+target_include_directories(minimal_3di_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_3di_gen COMMAND minimal_3di_gen_test)
+
 # ADM tests
 foreach(test comment trim_value parse variants)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
@@ -1422,7 +1432,7 @@ target_link_libraries(occlusion_armry_test PRIVATE opennova_runtime opennova_for
 target_include_directories(occlusion_armry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(occlusion_armry_test PRIVATE cxx_std_17)
 target_compile_definitions(occlusion_armry_test PRIVATE
-    OPENNOVA_ARMRY_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/threedi/objects/armry01/Armry01.3di")
+    OPENNOVA_ARMRY_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/threedi/synth/armory.3di")
 add_test(NAME occlusion_armry COMMAND occlusion_armry_test)
 
 # The FP weapon action FSM (WeaponAction_ProcessFrame @0x540e60 + Anim_InitActions

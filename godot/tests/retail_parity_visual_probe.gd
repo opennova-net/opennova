@@ -110,7 +110,7 @@ func _build_attach_stage() -> bool:
 	DirAccess.make_dir_recursive_absolute(fixture_dir)
 	if not _write_bytes(fixture_dir.path_join("labelgun.3di"),
 			FileAccess.get_file_as_bytes(
-			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")):
+			"res://../fixtures/threedi/synth/mount.3di")):
 		return false
 	if not _write_text(fixture_dir.path_join("items.def"), """begin "Labels Gun"
   id 101294

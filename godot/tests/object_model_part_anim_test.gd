@@ -7,7 +7,7 @@ extends GutTest
 # [orig: Jointops Entity_ApplyCommand @0x43ab60 case 0x22; integrator @0x456710,
 #  velocity-from-current, wrapping dword arithmetic, and strict overshoot clamps.]
 
-const RUNTIME_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
+const RUNTIME_3DI := "res://../fixtures/threedi/synth/shed.3di"
 
 
 func _model() -> ObjectModel:

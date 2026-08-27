@@ -1,13 +1,13 @@
 extends GutTest
 
-const HOUSE_3DI := "res://../fixtures/threedi/3di3/House.3di"
-# House with a live LOD0 sine rotation row; the same plus material 0's UV
-# generator set to style 1; House with material 0 alpha-tested and
+const HOUSE_3DI := "res://../fixtures/threedi/synth/house.3di"
+# house with a live LOD0 sine rotation row; the same plus material 0's UV
+# generator set to style 1; house with material 0 alpha-tested and
 # time-scrolled at one texture per second (style 16, rate 1). Minted once
-# from the retired edit surface (fixtures/threedi/synthetic/README.md).
-const SYN_HOUSE_SINE := "res://../fixtures/threedi/synthetic/house_lod0_sine_rotx.3di"
-const SYN_HOUSE_SINE_UV1 := "res://../fixtures/threedi/synthetic/house_lod0_sine_rotx_uv1.3di"
-const SYN_HOUSE_UVSCROLL := "res://../fixtures/threedi/synthetic/house_mtrl0_uvscroll16_alphatest.3di"
+# from the retired edit surface (fixtures/README.md).
+const SYN_HOUSE_SINE := "res://../fixtures/threedi/synth/house_lod0_sine_rotx.3di"
+const SYN_HOUSE_SINE_UV1 := "res://../fixtures/threedi/synth/house_lod0_sine_rotx_uv1.3di"
+const SYN_HOUSE_UVSCROLL := "res://../fixtures/threedi/synth/house_mtrl0_uvscroll16_alphatest.3di"
 
 
 var _terrain_root := ""
@@ -76,10 +76,10 @@ func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(HOUSE_3DI)), OK)
 	var placer := MissionObjectPlacer.create(null, null)
-	assert_true(placer.register_object_data("House", object_data))
+	assert_true(placer.register_object_data("house", object_data))
 	var caster_point := Vector3(64.0, 0.0, 64.0)
 	caster_point.y = old_data.get_height_world(caster_point)
-	placer.register_static_instance(901, "House", 0,
+	placer.register_static_instance(901, "house", 0,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), caster_point), true)
 	terrain.set_static_shadow_placer(placer)
 
@@ -171,11 +171,11 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE)), OK,
-		"the House fixture must provide real selected-LOD ROBJ triangles")
+		"the house fixture must provide real selected-LOD ROBJ triangles")
 	assert_true(object_data.has_live_panm_for_lod(0),
 		"fixture pins that the retail tile projector ignores live PANM")
 	var placer := MissionObjectPlacer.create(null, null)
-	assert_true(placer.register_object_data("House", object_data))
+	assert_true(placer.register_object_data("house", object_data))
 	var ground_sample := Vector3(64.125, 0.0, 64.125)
 	var point_ground := terrain_data.get_height_world(ground_sample)
 	var bilinear_ground := terrain_data.get_height_world_bilinear(ground_sample)
@@ -187,7 +187,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	assert_gt(absf(point_ground - bilinear_ground), 0.05,
 		"this fixture would catch an accidental return to bilinear caster grounding")
 	var origin := Vector3(ground_sample.x, point_ground, ground_sample.z)
-	placer.register_static_instance(100, "House", 0,
+	placer.register_static_instance(100, "house", 0,
 		Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), origin), true)
 	terrain.set_static_shadow_placer(placer)
 
@@ -299,7 +299,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	assert_eq(int(unsuppressed["shadow_epoch_rgb_changed_bytes"]), 0)
 
 	# Material 0's UV generator switched to style 1 (time/control-driven): the
-	# same House rows with that one authored change, reloaded into the
+	# same house rows with that one authored change, reloaded into the
 	# registered ObjectData so the projector sees a document change.
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE_UV1)), OK)
 	assert_eq(int(object_data.get_material_info(0).get("uv_u_style", -1)), 1,
@@ -366,14 +366,14 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(HOUSE_3DI)), OK)
 	var placer := MissionObjectPlacer.create(null, null)
-	assert_true(placer.register_object_data("House", object_data))
+	assert_true(placer.register_object_data("house", object_data))
 	var still_origin := Vector3(64.0, 0.0, 64.0)
 	still_origin.y = terrain_data.get_height_world(still_origin)
-	placer.register_static_instance(100, "House", 0,
+	placer.register_static_instance(100, "house", 0,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), still_origin), true)
 	var mover_origin := Vector3(96.0, 0.0, 96.0)
 	mover_origin.y = terrain_data.get_height_world(mover_origin)
-	placer.register_static_instance(101, "House", 1,
+	placer.register_static_instance(101, "house", 1,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), mover_origin), true)
 	terrain.set_static_shadow_placer(placer)
 	var settled := await _settle_tile_cache(terrain)
@@ -388,7 +388,7 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	# resident set never collapses to the fallback shader path.
 	mover_origin.x += 8.0
 	mover_origin.y = terrain_data.get_height_world(mover_origin)
-	placer.register_static_instance(101, "House", 1,
+	placer.register_static_instance(101, "house", 1,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), mover_origin), true)
 	terrain.render_frame()
 	var moved := terrain.get_tile_cache_diagnostics()
@@ -465,10 +465,10 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 	assert_eq(int(material.get("uv_u_style", -1)), 16)
 	assert_almost_eq(float(material.get("uv_u_rate", 0.0)), 1.0, 0.0001)
 	var placer := MissionObjectPlacer.create(null, null)
-	assert_true(placer.register_object_data("House", object_data))
+	assert_true(placer.register_object_data("house", object_data))
 	var origin := Vector3(64.0, 0.0, 64.0)
 	origin.y = terrain_data.get_height_world(origin)
-	placer.register_static_instance(100, "House", 0,
+	placer.register_static_instance(100, "house", 0,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), origin), true)
 	terrain.set_static_shadow_placer(placer)
 	var clock_ms := 1000

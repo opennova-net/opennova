@@ -9,7 +9,7 @@ extends GutTest
 
 const CollisionHull := preload("res://game/object/collision_hull.gd")
 
-const FIXTURE_DIR := "res://../fixtures/threedi/3di3"
+const FIXTURE_DIR := "res://../fixtures/threedi/synth"
 
 
 func _model(name: String) -> ObjectData:
@@ -40,8 +40,10 @@ func _visual_aabb(data: ObjectData) -> AABB:
 		var mesh: ArrayMesh = entry.get("mesh")
 		if mesh == null:
 			continue
+		# Render vertices are absolute model coordinates (the PANM node matrices
+		# pivot about ROBJ abs themselves), so the mesh AABB is already the
+		# part's model-space extent.
 		var m: AABB = mesh.get_aabb()
-		m.position += entry.get("abs", Vector3.ZERO) as Vector3
 		if first:
 			aabb = m
 			first = false
@@ -51,7 +53,7 @@ func _visual_aabb(data: ObjectData) -> AABB:
 
 
 func test_models_expose_collision_volumes() -> void:
-	for name in ["House", "Shed", "JetSki"]:
+	for name in ["house", "shed", "carrier"]:
 		var data := _model(name)
 		assert_true(data.has_collision(), "%s reports collision" % name)
 		var vols: Array = data.get_collision_volumes()
@@ -64,23 +66,23 @@ func test_models_expose_collision_volumes() -> void:
 
 func test_hulls_are_real_convex_not_box_fallback() -> void:
 	# A correct plane sign yields plane-derived hulls; a wrong one collapses every
-	# volume to the 8-corner AABB fallback. House carries multi-plane volumes, so at
+	# volume to the 8-corner AABB fallback. house carries multi-plane volumes, so at
 	# least one hull must be carved (> 8 points) -- the canary for the sign fix.
-	var data := _model("House")
+	var data := _model("house")
 	var carved := 0
 	for v in data.get_collision_volumes():
 		var pts := CollisionHull.hull_points(v)
 		assert_true(pts.size() >= 4, "hull is non-degenerate")
 		if pts.size() > 8:
 			carved += 1
-	assert_gt(carved, 0, "House has carved (multi-plane) hulls, not just boxes")
+	assert_gt(carved, 0, "house has carved (multi-plane) hulls, not just boxes")
 
 
 func test_hull_frame_overlaps_visual_mesh() -> void:
 	# The hull union sits on the drawn model: X/Z extents match the visual within
 	# tolerance (proves the (y,z,x) frame). Y may legitimately differ (collision
 	# extent vs visual silhouette), so it is not asserted tightly.
-	for name in ["Shed", "JetSki"]:
+	for name in ["shed", "carrier"]:
 		var data := _model(name)
 		var hull := _hull_union_aabb(data.get_collision_volumes())
 		var vis := _visual_aabb(data)
@@ -90,7 +92,7 @@ func test_hull_frame_overlaps_visual_mesh() -> void:
 
 
 func test_shapes_for_returns_convex_shapes() -> void:
-	var data := _model("Shed")
+	var data := _model("shed")
 	var vols: Array = data.get_collision_volumes()
 	var shapes := CollisionHull.shapes_for(vols)
 	assert_eq(shapes.size(), vols.size(), "one shape per volume")
@@ -107,13 +109,13 @@ func test_color_is_stable_and_distinct_per_type() -> void:
 
 
 func test_model_without_collision_has_no_volumes() -> void:
-	var data := _model("MP5")
-	assert_false(data.has_collision(), "MP5 carries no collision volumes")
+	var data := _model("gun")
+	assert_false(data.has_collision(), "gun carries no collision volumes")
 	assert_eq(data.get_collision_volumes().size(), 0, "and none are exposed")
 
 
 func test_skinned_person_reports_face_and_sphere_collision_without_volumes() -> void:
-	var data := _model("CharModel")
-	assert_true(data.is_skinned(0), "CharModel is the skeletal collision fixture")
-	assert_eq(data.get_collision_volumes().size(), 0, "CharModel has no BVOL collision")
-	assert_true(data.has_collision(), "CharModel still reports its CFAC/COBJ collision")
+	var data := _model("person")
+	assert_true(data.is_skinned(0), "person is the skeletal collision fixture")
+	assert_eq(data.get_collision_volumes().size(), 0, "person has no BVOL collision")
+	assert_true(data.has_collision(), "person still reports its CFAC/COBJ collision")

@@ -16,7 +16,7 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `godot/` | Godot game, ONED, project resources, and GDScript tests. |
 | `apps/` | Native command-line and NovaWorld service applications. |
 | `assets/` | Source-controlled game data consumed by OpenNova. |
-| `fixtures/` | Test fixtures, including runtime 3DI objects under `fixtures/threedi/objects/`. |
+| `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
 | `tests/` | Native CTest suite. |
 | `launcher/` | Windows launcher and its .NET tests. |
 | `web/` | NovaWorld web portal. |

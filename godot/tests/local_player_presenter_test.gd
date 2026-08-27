@@ -38,7 +38,7 @@ var TICK := Simulation.tick_dt()
 const MINIMAL_FIXTURE_DIR := "res://../assets"
 const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
 const WEAPON_DEF_FIXTURE := "res://../fixtures/def/weapon.def"
-const CHARMODEL_FIXTURE := "res://../fixtures/threedi/3di3/CharModel.3di"
+const PERSON_FIXTURE := "res://../fixtures/threedi/synth/person.3di"
 const SOLDIER_ADM_FIXTURE := "res://../fixtures/anim/soldier.adm"
 const IDLE_BAD_FIXTURE := "res://../fixtures/anim/idle.bad"
 const WALK_BAD_FIXTURE := "res://../fixtures/anim/walk.bad"
@@ -62,8 +62,8 @@ func after_each() -> void:
 # The minimal fixture plus the committed model/anim fixtures arranged under the
 # names the production resolvers ask for: the full weapon.def (WPN_M4AUTO with
 # its gfx/animadm/pos rows), a person items.def row for the player visual item
-# (105310 -> CharModel + soldier.adm), the infantry clip set (E_STAND.adm) so
-# the motor's body selection runs, and the 19-bone CharModel staged as the M4's
+# (105310 -> person + soldier.adm), the infantry clip set (E_STAND.adm) so
+# the motor's body selection runs, and the 19-bone person staged as the M4's
 # FP gun/arms rig with a wpn-key clip set over the committed .bads.
 
 func _stage_root() -> String:
@@ -87,7 +87,7 @@ func _stage_root() -> String:
 			ProjectSettings.globalize_path(WEAPON_DEF_FIXTURE),
 			root_dir.path_join("weapon.def")), OK)
 	# The player's third-person avatar: items.def person row 105310 (the placer's
-	# PLAYER_VISUAL_ITEM_ID) over the committed 19-bone CharModel + soldier.adm.
+	# PLAYER_VISUAL_ITEM_ID) over the committed 19-bone person + soldier.adm.
 	var items := FileAccess.open(root_dir.path_join("items.def"), FileAccess.READ_WRITE)
 	assert_not_null(items, "staged items.def is writable")
 	items.seek_end()
@@ -96,7 +96,7 @@ func _stage_root() -> String:
 begin "Player Character"
   id 105310
   type person
-  graphic CharModel
+  graphic person
   sid player
   anim_def soldier
   hp 100
@@ -105,19 +105,19 @@ end
 	items.close()
 	# The player's character registry: retail's ONLY first-person arms source is
 	# the selected combo's arms part (weapon.def gfx1a is a discarded token), so
-	# one good-side combo binds the staged CharModel head/body + the armsG arms.
+	# one good-side combo binds the staged person head/body + the armsG arms.
 	var avatars := FileAccess.open(root_dir.path_join("Avatars.def"), FileAccess.WRITE)
 	assert_not_null(avatars, "staged Avatars.def is writable")
 	avatars.store_string("""define head STAGED_HEAD
 {
-	graphic CharModel.3di
+	graphic person.3di
 	camo 0 0 0
 	voice 1
 	sex m
 }
 define body STAGED_BODY
 {
-	graphic CharModel.3di
+	graphic person.3di
 	camo 0 0 0
 }
 define arms STAGED_ARMS
@@ -136,10 +136,10 @@ nationality 0 STAGED_NAT
 """)
 	avatars.close()
 	for pair in [
-		["CharModel.3di", CHARMODEL_FIXTURE],
-		["M4_1st.3di", CHARMODEL_FIXTURE],
-		["M4_3RD.3di", CHARMODEL_FIXTURE],
-		["armsG.3di", CHARMODEL_FIXTURE],
+		["person.3di", PERSON_FIXTURE],
+		["M4_1st.3di", PERSON_FIXTURE],
+		["M4_3RD.3di", PERSON_FIXTURE],
+		["armsG.3di", PERSON_FIXTURE],
 		["soldier.adm", SOLDIER_ADM_FIXTURE],
 		["E_STAND.adm", SOLDIER_ADM_FIXTURE],
 		["idle.bad", IDLE_BAD_FIXTURE],
@@ -266,7 +266,7 @@ func _visual_instances(root: Node) -> Array:
 
 
 func _local_avatar(world: GameWorld) -> ObjectModel:
-	return world.get_node_or_null("PlayerAvatar_CharModel") as ObjectModel
+	return world.get_node_or_null("PlayerAvatar_person") as ObjectModel
 
 
 # --- input routing into the sim ----------------------------------------------

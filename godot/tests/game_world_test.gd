@@ -216,7 +216,7 @@ class ItemFxPlacerStub:
 
 # --- Real item-fx fixtures (ADR 0034): the item database is an authored
 # items.def parsed by the REAL ItemDatabase; the model data is the committed
-# B50Cal.3di (its MFlash01 user point anchors the effect) or Shed.3di (no
+# mount.3di (its MFlash01 user point anchors the effect) or shed.3di (no
 # matching point -> the origin-fallback leg). The first-16 mask RULE itself is
 # native and pinned by the threedi user-point-mask ctest.
 static var _fx_data_cache: Dictionary = {}
@@ -237,17 +237,17 @@ func _fx_object_data(fixture_dir: String, model_file: String) -> ObjectData:
 
 
 func _fx_anchor_data() -> ObjectData:
-	return _fx_object_data("res://../fixtures/threedi/objects/B50Cal", "B50Cal.3di")
+	return _fx_object_data("res://../fixtures/threedi/synth", "mount.3di")
 
 
 func _fx_plain_data() -> ObjectData:
-	return _fx_object_data("res://../fixtures/threedi/3di3", "Shed.3di")
+	return _fx_object_data("res://../fixtures/threedi/synth", "shed.3di")
 
 
-# The anchor point's index/info on the real model (MFlash01 on B50Cal).
+# The anchor point's index/info on the real model (MFlash01 on mount).
 func _fx_anchor_index() -> int:
 	var mask := int(_fx_anchor_data().get_user_point_bone_mask("MFlash01"))
-	assert_gt(mask, 0, "B50Cal authors the MFlash01 user point in the first 16")
+	assert_gt(mask, 0, "mount authors the MFlash01 user point in the first 16")
 	for i in range(16):
 		if (mask & (1 << i)) != 0:
 			return i
@@ -574,13 +574,13 @@ func _append_building_item(root_dir: String) -> void:
 	f.close()
 
 
-# Stage the minimal fixture plus the House.3di collision fixture as item
+# Stage the minimal fixture plus the house.3di collision fixture as item
 # 102001's GuardTwr1 graphic, so authored KIND_BUILDING entities place a REAL
 # ObjectModel and enter the sim's real collision/occlusion world.
 func _stage_building_fixture(name: String) -> String:
 	var root_dir := _stage_minimal_fixture(name)
 	assert_eq(DirAccess.copy_absolute(
-			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di"),
+			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/house.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
 	_append_building_item(root_dir)
 	return root_dir
@@ -589,20 +589,20 @@ func _stage_building_fixture(name: String) -> String:
 func _stage_lit_building_fixture(name: String) -> String:
 	var root_dir := _stage_minimal_fixture(name)
 	assert_eq(DirAccess.copy_absolute(
-			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/Shed.3di"),
+			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/shed.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
 	_append_building_item(root_dir)
 	return root_dir
 
 
-# Tmap supplies the terrain-normal table inputs (its ramp cell) and House.3di keeps
+# Tmap supplies the terrain-normal table inputs (its ramp cell) and house.3di keeps
 # the SSN owner on the real placed-object path used by the routing assertion.
 # [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0 resolves the SSN entity,
 # then reads the terrain normal for its grid cell before creating the emitter.]
 func _stage_building_terrain_fixture(name: String) -> String:
 	var root_dir := _stage_impact_fixture(name)
 	assert_eq(DirAccess.copy_absolute(
-			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di"),
+			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/house.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
 	_append_building_item(root_dir)
 	return root_dir
@@ -2905,7 +2905,7 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 
-	# Real model data: B50Cal authors MFlash01 (the matched anchor); Shed
+	# Real model data: mount authors MFlash01 (the matched anchor); shed
 	# authors no such point (the origin-fallback leg). The first-16 mask RULE
 	# (duplicates, beyond-16 exclusion) is native and pinned by the threedi
 	# user-point-mask ctest.

@@ -4,11 +4,11 @@ extends GutTest
 # visibility on the Robj_<N> render nodes — the draw-side consumer of the
 # render-occlusion section masks. Bit N visible = part N draws; -1 restores
 # everything; rebuild-created parts honor the applied mask. Pinned on a real
-# multi-part fixture (Pmpjk01: five ROBJ parts, shared material indexes).
+# multi-part fixture (pump: five ROBJ parts, shared material indexes).
 # [orig: g_HiddenSectionMask consumption in Terrain_RenderSectorModels
 #  @ 0x5c5d30; docs/render/render-occlusion-re.md §5]
 
-const PMP_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
+const PMP_3DI := "res://../fixtures/threedi/synth/pump.3di"
 
 
 func _object_data() -> ObjectData:

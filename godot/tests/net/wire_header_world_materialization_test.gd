@@ -21,11 +21,11 @@ const DESIGNATED_G_CHILD_TYPE := 1419
 # (simassets::extract_item_seat_specs) over items.def rows + .3di userpoints.
 # Three composed models re-author committed fixtures at the byte level
 # (48-byte USRP records; the name field at +32):
-# - dm1a1.3di      (verbatim)  one ctrlx control seat, retail slot 8, bone 1.
-# - dsuvswap.3di   (dsuv1)     ctrlx13 -> sitex13 and sitex00d -> ctrlx01, so
+# - tank.3di      (verbatim)  one ctrlx control seat, retail slot 8, bone 1.
+# - carrierswap.3di   (carrier)     ctrlx13 -> sitex13 and sitex00d -> ctrlx01, so
 #                              a passenger row precedes the controller in
 #                              dense extraction order (the refresh pin).
-# - dm1a1gp.3di    (dm1a1)     ctrlx25 retired and ewep01 moved to authored
+# - tankgp.3di    (tank)     ctrlx25 retired and ewep01 moved to authored
 #                              (0, 3, 0) mission-local — the designated-G
 #                              parent anchor the old hand table carried.
 const NATIVE_MODEL_DIR := "res://.godot/native_3dp_wire_header"
@@ -93,26 +93,26 @@ func before_all() -> void:
 	assert_true(DirAccess.dir_exists_absolute(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)),
 			"created the flat native asset dir")
-	assert_true(_write_native_model("dm1a1.3di",
-			_repo_file_bytes("res://../fixtures/threedi/objects/dm1a1/dm1a1.3di")),
+	assert_true(_write_native_model("tank.3di",
+			_repo_file_bytes("res://../fixtures/threedi/synth/tank.3di")),
 			"composed the single-control-seat vehicle fixture")
-	assert_true(_write_native_model("B50Cal.3di",
-			_repo_file_bytes("res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")),
+	assert_true(_write_native_model("mount.3di",
+			_repo_file_bytes("res://../fixtures/threedi/synth/mount.3di")),
 			"composed the B50 child fixture")
 	var swap := _with_renamed_user_point(
-			_repo_file_bytes("res://../fixtures/threedi/objects/dsuv1/dsuv1.3di"),
+			_repo_file_bytes("res://../fixtures/threedi/synth/carrier.3di"),
 			"ctrlx13", "sitex13")
 	swap = _with_renamed_user_point(swap, "sitex00d", "ctrlx01")
-	assert_true(_write_native_model("dsuvswap.3di", swap),
+	assert_true(_write_native_model("carrierswap.3di", swap),
 			"composed the passenger-before-controller refresh fixture")
 	# seat_local reads (-y, x, z)/65536 over the raw authored ints, so raw
 	# (196608, 0, 0) lands the anchor at mission-local (0, 3, 0) — the exact
 	# offset the retired hand table authored for this fixture.
 	var parent := _with_renamed_user_point(
-			_repo_file_bytes("res://../fixtures/threedi/objects/dm1a1/dm1a1.3di"),
+			_repo_file_bytes("res://../fixtures/threedi/synth/tank.3di"),
 			"ctrlx25", "cxrlx25")
 	parent = _with_user_point_position(parent, "ewep01", 196608, 0, 0)
-	assert_true(_write_native_model("dm1a1gp.3di", parent),
+	assert_true(_write_native_model("tankgp.3di", parent),
 			"composed the seatless designated-G parent fixture")
 
 
@@ -120,7 +120,7 @@ func _native_asset_root() -> ResourceRoot:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)), OK)
-	assert_true(root.has_file("dm1a1.3di"),
+	assert_true(root.has_file("tank.3di"),
 			"the composed flat asset dir indexes the fixture models")
 	return root
 
@@ -182,7 +182,7 @@ func _designated_g_mission_fixture() -> Dictionary:
 
 
 # variant "" = the authoritative table; "refresh" swaps the vehicle graphic to
-# dsuvswap (the dense-reorder refresh); "ambiguous" authors a second addeweap
+# carrierswap (the dense-reorder refresh); "ambiguous" authors a second addeweap
 # row of the same child type on the parent (stored slot 2, missing anchor).
 func _item_db(variant := "") -> ItemDatabase:
 	var base_path := ProjectSettings.globalize_path(
@@ -194,11 +194,11 @@ func _item_db(variant := "") -> ItemDatabase:
 	var text := base_file.get_as_text().replace("\r\n", "\n")
 	base_file.close()
 	# Native seat extraction walks the graphic's .3di userpoints; the Dune
-	# Buggy row rides the committed dm1a1 model (one ctrlx control seat).
+	# Buggy row rides the committed tank model (one ctrlx control seat).
 	assert_true(text.contains("  graphic Dbuggy1\n"))
 	text = text.replace("  graphic Dbuggy1\n",
-			"  graphic dsuvswap\n" if variant == "refresh"
-			else "  graphic dm1a1\n")
+			"  graphic carrierswap\n" if variant == "refresh"
+			else "  graphic tank\n")
 	var path := ProjectSettings.globalize_path(
 			"res://.godot/wire_header_world_items%s.def" % (
 			"" if variant.is_empty() else "_" + variant))
@@ -221,7 +221,7 @@ end
 begin "Wire Header Designated-G Parent"
   id 105005
   type vehicle
-  graphic dm1a1gp
+  graphic tankgp
   sid wire_header_designated_g_parent
   hp 1000
   attrib: EWeap
@@ -454,7 +454,7 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 		# Dense list order is presentation metadata. Retail occupancy is keyed by
 		# the fixed mountHandles slot, so a late model refresh that inserts
 		# passenger rows before the controller must move both the occupant and
-		# its mount_seat index to the controller's new dense row (dsuvswap
+		# its mount_seat index to the controller's new dense row (carrierswap
 		# authors sitex13 ahead of ctrlx01, then three more sitex rows).
 		assert_true(joiner.install_seat_specs_for_type_ids(
 				_item_db("refresh"), PackedInt32Array([VEHICLE_TYPE])))

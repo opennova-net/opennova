@@ -56,12 +56,12 @@ func test_load_combo_composes_parts_when_root_mounted() -> void:
 
 func _model_fixture_root():
 	var root := ResourceRoot.new()
-	var dir := ProjectSettings.globalize_path("res://../fixtures/threedi/3di3")
+	var dir := ProjectSettings.globalize_path("res://../fixtures/threedi/synth")
 	return root if root.set_root_dir(dir) == OK else null
 
 
 func _three_slot_fixture_combo() -> Dictionary:
-	var part := {"graphic": "CharModel.3di"}
+	var part := {"graphic": "person.3di"}
 	return {"head": part, "body": part, "arms": part}
 
 
