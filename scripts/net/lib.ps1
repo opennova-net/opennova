@@ -716,6 +716,53 @@ function Find-GodotBinary {
     return $null
 }
 
+# The documented machine roots (docs/dev-env-vars.md): a packed retail install
+# (OPENNOVA_JO_DIR), an extracted asset tree (OPENNOVA_JO_ASSETS), the retail
+# mission corpus (OPENNOVA_MISSION_CORPUS) and the captures root
+# (OPENNOVA_CAPTURES, default <repo>\.scratch). Scripts resolve them here and
+# nowhere else. The three retail getters return $null when the variable is unset
+# or the directory is missing; the caller decides whether that is fatal.
+# Cross-language twins: tests/common/retail_paths.h (C++) and
+# godot/tests/support/retail_data.gd (GUT) - change all three together.
+function Get-OpenNovaRetailInstall {
+    if ($env:OPENNOVA_JO_DIR -and (Test-Path -LiteralPath $env:OPENNOVA_JO_DIR -PathType Container)) {
+        return (Resolve-Path -LiteralPath $env:OPENNOVA_JO_DIR).Path
+    }
+    return $null
+}
+
+function Get-OpenNovaRetailAssets {
+    if ($env:OPENNOVA_JO_ASSETS -and (Test-Path -LiteralPath $env:OPENNOVA_JO_ASSETS -PathType Container)) {
+        return (Resolve-Path -LiteralPath $env:OPENNOVA_JO_ASSETS).Path
+    }
+    return $null
+}
+
+function Get-OpenNovaMissionCorpus {
+    if ($env:OPENNOVA_MISSION_CORPUS -and (Test-Path -LiteralPath $env:OPENNOVA_MISSION_CORPUS -PathType Container)) {
+        return (Resolve-Path -LiteralPath $env:OPENNOVA_MISSION_CORPUS).Path
+    }
+    return $null
+}
+
+# Captures are written as well as read, so the root need not exist yet.
+function Get-OpenNovaCapturesRoot {
+    if ($env:OPENNOVA_CAPTURES) { return $env:OPENNOVA_CAPTURES }
+    return (Join-Path (Get-RepoRoot) ".scratch")
+}
+
+# A file under the extracted asset tree by case-insensitive name (retail
+# archives mix ITEMS.DEF and items.def). $null when the tree or the file is absent.
+function Get-OpenNovaRetailAssetFile {
+    param([Parameter(Mandatory = $true)] [string] $Name)
+    $root = Get-OpenNovaRetailAssets
+    if (-not $root) { return $null }
+    $hit = Get-ChildItem -LiteralPath $root -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+    if ($hit) { return $hit.FullName }
+    return $null
+}
+
 # The official Windows `_console.exe` is a small wrapper that starts the real
 # Godot executable as a child. Keep resolving the exact sibling separately: the
 # wrapper remains the launch/lifecycle owner, while callers receive the runtime

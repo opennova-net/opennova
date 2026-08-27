@@ -309,12 +309,11 @@ void print_parity_event(const InGameMessage &message, uint64_t ts_nanos) {
 // The outer-decode pipeline (envelope -> NWU -> SCRK -> 0x43/0x83 -> reassembly)
 // is shared too: engine/net/npwire/wire_capture.h decode_capture_to_messages.
 
+// --hexcap-max overrides the per-dump byte cap (witness sessions need whole payloads).
+size_t g_hexcap_max = 0;
+
 std::string to_hex_sample(const uint8_t *p, size_t n, size_t cap = 48) {
-	// NW_PP_HEXCAP_MAX overrides the per-dump byte cap (witness sessions need whole payloads).
-	if (const char *env = std::getenv("NW_PP_HEXCAP_MAX"); env != nullptr && env[0] != '\0') {
-		const long v = std::strtol(env, nullptr, 10);
-		if (v > 0) cap = static_cast<size_t>(v);
-	}
+	if (g_hexcap_max > 0) cap = g_hexcap_max;
 	std::string s;
 	char buf[4];
 	for (size_t i = 0; i < n && i < cap; ++i) {
@@ -2224,6 +2223,9 @@ int main(int argc, char *argv[]) {
 		const char *a = argv[i];
 		if (std::strcmp(a, "--items") == 0 && i + 1 < argc) {
 			items_path = argv[++i];
+		} else if (std::strcmp(a, "--hexcap-max") == 0 && i + 1 < argc) {
+			const long v = std::strtol(argv[++i], nullptr, 10);
+			if (v > 0) g_hexcap_max = static_cast<size_t>(v);
 		} else if (std::strcmp(a, "--histogram") == 0) {
 			histogram_mode = true;
 		} else if (std::strcmp(a, "--coverage") == 0) {
@@ -2253,8 +2255,6 @@ int main(int argc, char *argv[]) {
 			path = a;
 		}
 	}
-	if (!path) path = std::getenv("NW_INGAME_HEXCAP");
-	if (!items_path) items_path = std::getenv("NW_PP_ITEMS");
 	if (!path || !*path) {
 		std::fprintf(stderr,
 		             "usage: nw_pp <capture-path> [--items <items.def>] [--stream] "
@@ -2279,8 +2279,8 @@ int main(int argc, char *argv[]) {
 		             "stops after N (implies --stream)\n"
 		             "       or a hexcap text file (one '<srcport> <frame> "
 		             "<hex>' per line)\n"
-		             "       NW_INGAME_HEXCAP env supplies a hexcap path\n"
-		             "       --items / NW_PP_ITEMS gives a JO items.def "
+		             "       --hexcap-max N widens the per-dump byte cap (default 48)\n"
+		             "       --items gives a JO items.def "
 		             "(plaintext or SCR-encrypted with the JO/DFX2 key)\n"
 		             "       so type_ids in 0x0D/0x20 records show as names\n");
 		return 1;

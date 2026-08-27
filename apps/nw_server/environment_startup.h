@@ -10,7 +10,7 @@
 namespace opennova::nw_server {
 
 // Resolve the BMS environment reference beside the loose mission by default.
-// NW_ENV is passed as explicit_path by the app when resources live elsewhere.
+// --env is passed as explicit_path by the app when resources live elsewhere.
 std::filesystem::path resolve_environment_path(
 		const std::filesystem::path &mission_path,
 		const std::string &environment_name,

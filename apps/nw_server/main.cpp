@@ -39,6 +39,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -48,14 +49,6 @@ namespace {
 
 std::atomic<bool> g_shutdown{false};
 void on_signal(int) { g_shutdown.store(true); }
-
-uint16_t env_port(const char *name, uint16_t fallback) {
-	if (const char *v = std::getenv(name)) {
-		const int p = std::atoi(v);
-		if (p > 0 && p < 65536) return static_cast<uint16_t>(p);
-	}
-	return fallback;
-}
 
 // Every g_GameType code word Game_StartMission can produce; anything else is
 // a typo, not a mode. [orig: Game_StartMission @0x524360 type switch]
@@ -80,37 +73,145 @@ bool is_retail_game_type_word(uint32_t value) {
 	}
 }
 
-bool apply_env_u32(const char *name, uint32_t &value) {
-	const char *text = std::getenv(name);
-	if (text == nullptr || *text == '\0') return true;
+// --- Command line. Everything the harness varies is a flag; nothing is read
+//     from the environment (docs/dev-env-vars.md). ---
+const char kUsage[] =
+		"usage: nw_server --mission <path.bms> [--env <path.env>] [--resource-root <dir>]\n"
+		"                 [--port <1..65535>] [--game-type <code>] [--num-teams <1..255>]\n"
+		"                 [--capture-duration-seconds <i32>] [--capture-speed-setting <i32>]\n"
+		"                 [--spawn-wave-time-base <i32>] [--spawn-wave-time-zone <i32>]\n"
+		"                 [--default-spawn-requires-no-team-zone] [--log-debug]\n"
+		"  --mission          the loose .bms to host; its directory is the default resource root\n"
+		"  --env              the .env to publish when it is not beside the mission\n"
+		"  --resource-root    where game.wac / server.wac / <mission>.wac, score.ini and\n"
+		"                     gametext.bin live when they were exported elsewhere\n"
+		"  --port             UDP bind port (default: the retail LAN range head)\n"
+		"  --game-type        an exact g_GameType code, decimal or 0x hex (default: the\n"
+		"                     mission's authored mode)\n"
+		"  --num-teams        active-team count for the multi-team modes (default 2)\n"
+		"  --capture-duration-seconds, --capture-speed-setting\n"
+		"                     A&S / C&C takeover overrides (retail: 15 s, speed setting 1)\n"
+		"  --spawn-wave-time-base, --spawn-wave-time-zone\n"
+		"                     spawn-wave timing overrides\n"
+		"  --default-spawn-requires-no-team-zone\n"
+		"                     retail cfg nodefaultspawnpoints\n"
+		"  --log-debug        forward io/log.h kDebug tracing to the console sink\n";
+
+struct Options {
+	const char *mission = nullptr;
+	const char *env = nullptr;
+	const char *resource_root = nullptr;
+	uint16_t port = opennova::kRetailLanPortMin; // the retail mpnovaworldport default
+	std::optional<uint32_t> game_type;
+	std::optional<uint32_t> num_teams;
+	std::optional<int32_t> capture_duration_seconds;
+	std::optional<int32_t> capture_speed_setting;
+	std::optional<int32_t> spawn_wave_time_base;
+	std::optional<int32_t> spawn_wave_time_zone;
+	bool default_spawn_requires_no_team_zone = false;
+	bool log_debug = false;
+};
+
+bool parse_u32(const char *flag, const char *text, uint32_t &value) {
 	char *end = nullptr;
 	errno = 0;
 	const unsigned long parsed = std::strtoul(text, &end, 0);
-	if (*text == '-' || errno == ERANGE || end == text || *end != '\0' ||
+	if (*text == '\0' || *text == '-' || errno == ERANGE || end == text || *end != '\0' ||
 			parsed > std::numeric_limits<uint32_t>::max()) {
-		std::fprintf(stderr,
-				"nw-server: %s must be a uint32 (decimal or 0x hex)\n", name);
+		std::fprintf(stderr, "nw-server: %s must be a uint32 (decimal or 0x hex)\n", flag);
 		return false;
 	}
 	value = static_cast<uint32_t>(parsed);
 	return true;
 }
 
-bool apply_env_i32(const char *name, int32_t &value) {
-	const char *text = std::getenv(name);
-	if (text == nullptr || *text == '\0') return true;
+bool parse_i32(const char *flag, const char *text, int32_t &value) {
 	char *end = nullptr;
 	errno = 0;
 	const long parsed = std::strtol(text, &end, 0);
-	if (errno == ERANGE || end == text || *end != '\0' ||
+	if (*text == '\0' || errno == ERANGE || end == text || *end != '\0' ||
 			parsed < std::numeric_limits<int32_t>::min() ||
 			parsed > std::numeric_limits<int32_t>::max()) {
-		std::fprintf(stderr,
-				"nw-server: %s must be an int32 (decimal or 0x hex)\n", name);
+		std::fprintf(stderr, "nw-server: %s must be an int32 (decimal or 0x hex)\n", flag);
 		return false;
 	}
 	value = static_cast<int32_t>(parsed);
 	return true;
+}
+
+bool parse_port(const char *flag, const char *text, uint16_t &value) {
+	uint32_t parsed = 0;
+	if (!parse_u32(flag, text, parsed)) return false;
+	if (parsed == 0 || parsed > 65535) {
+		std::fprintf(stderr, "nw-server: %s must be 1..65535\n", flag);
+		return false;
+	}
+	value = static_cast<uint16_t>(parsed);
+	return true;
+}
+
+// Returns 0 when the options parsed, 2 on a usage error (already reported),
+// and -1 when the caller asked for --help (usage printed, exit 0).
+int parse_options(int argc, char **argv, Options &o) {
+	for (int i = 1; i < argc; ++i) {
+		const std::string a = argv[i];
+		if (a == "--help" || a == "-h") {
+			std::fputs(kUsage, stdout);
+			return -1;
+		}
+		if (a == "--log-debug") {
+			o.log_debug = true;
+			continue;
+		}
+		if (a == "--default-spawn-requires-no-team-zone") {
+			o.default_spawn_requires_no_team_zone = true;
+			continue;
+		}
+		const bool takes_value = a == "--mission" || a == "--env" || a == "--resource-root" ||
+				a == "--port" || a == "--game-type" || a == "--num-teams" ||
+				a == "--capture-duration-seconds" || a == "--capture-speed-setting" ||
+				a == "--spawn-wave-time-base" || a == "--spawn-wave-time-zone";
+		if (!takes_value) {
+			std::fprintf(stderr, "nw-server: unknown option '%s'\n%s", a.c_str(), kUsage);
+			return 2;
+		}
+		if (i + 1 >= argc) {
+			std::fprintf(stderr, "nw-server: %s needs a value\n%s", a.c_str(), kUsage);
+			return 2;
+		}
+		const char *v = argv[++i];
+		bool ok = true;
+		if (a == "--mission") {
+			o.mission = v;
+		} else if (a == "--env") {
+			o.env = v;
+		} else if (a == "--resource-root") {
+			o.resource_root = v;
+		} else if (a == "--port") {
+			ok = parse_port(a.c_str(), v, o.port);
+		} else if (a == "--game-type") {
+			uint32_t x = 0;
+			ok = parse_u32(a.c_str(), v, x);
+			o.game_type = x;
+		} else if (a == "--num-teams") {
+			uint32_t x = 0;
+			ok = parse_u32(a.c_str(), v, x);
+			o.num_teams = x;
+		} else {
+			int32_t x = 0;
+			ok = parse_i32(a.c_str(), v, x);
+			if (a == "--capture-duration-seconds") o.capture_duration_seconds = x;
+			else if (a == "--capture-speed-setting") o.capture_speed_setting = x;
+			else if (a == "--spawn-wave-time-base") o.spawn_wave_time_base = x;
+			else o.spawn_wave_time_zone = x;
+		}
+		if (!ok) return 2;
+	}
+	if (o.mission == nullptr || *o.mission == '\0') {
+		std::fprintf(stderr, "nw-server: --mission <path.bms> is required\n%s", kUsage);
+		return 2;
+	}
+	return 0;
 }
 
 // The dedicated host's one adapter to inmatch::Session. The portable session
@@ -151,7 +252,7 @@ private:
 namespace {
 // The engine/ diagnostic channel (io/log.h): libraries are silent until the host
 // installs a sink. Reproduce the historical stream split — lifecycle to stdout,
-// warnings and errors to stderr; per-tick kDebug tracing opts in via NW_LOG_DEBUG.
+// warnings and errors to stderr; per-tick kDebug tracing opts in via --log-debug.
 bool g_log_debug_enabled = false;
 void app_log_sink(opennova::io::LogLevel level, const char *msg) {
 	if (level == opennova::io::LogLevel::kDebug && !g_log_debug_enabled) return;
@@ -159,18 +260,17 @@ void app_log_sink(opennova::io::LogLevel level, const char *msg) {
 }
 } // namespace
 
-int main() {
-	g_log_debug_enabled = std::getenv("NW_LOG_DEBUG") != nullptr;
+int main(int argc, char **argv) {
+	Options opt;
+	const int parse_rc = parse_options(argc, argv, opt);
+	if (parse_rc != 0) return parse_rc < 0 ? 0 : parse_rc;
+	g_log_debug_enabled = opt.log_debug;
 	opennova::io::set_log_sink(&app_log_sink);
 	using namespace opennova;
 
-	// Mission source: NW_MISSION env var (no committed fixture — ADR 0003 forbids inventing one).
-	const char *mission_path = std::getenv("NW_MISSION");
-	if (mission_path == nullptr || *mission_path == '\0') {
-		std::fprintf(stderr, "nw-server: set NW_MISSION=<path-to .bms> (the mission to host)\n");
-		return 2;
-	}
-	const uint16_t port = env_port("NW_LAN_PORT", opennova::kRetailLanPortMin); // the retail mpnovaworldport default
+	// Mission source: --mission (no committed fixture — ADR 0003 forbids inventing one).
+	const char *mission_path = opt.mission;
+	const uint16_t port = opt.port;
 
 	// --- Load the mission + build the authoritative World (pools + nav + AI brains). ---
 	mission::MissionDocument doc;
@@ -181,14 +281,11 @@ int main() {
 	world::World world;
 	const mission::MissionInfo mission_info = doc.info();
 	std::filesystem::path explicit_env_path;
-	if (const char *env_path = std::getenv("NW_ENV");
-	    env_path != nullptr && *env_path != '\0') {
-		explicit_env_path = env_path;
-	}
+	if (opt.env != nullptr && *opt.env != '\0') explicit_env_path = opt.env;
 	if (mission_info.environment.empty() && explicit_env_path.empty()) {
 		std::fprintf(stderr,
 		             "nw-server: mission '%s' has no environment reference; "
-		             "set NW_ENV=<path-to .env>\n",
+		             "pass --env <path-to .env>\n",
 		             mission_path);
 		return 1;
 	}
@@ -199,7 +296,7 @@ int main() {
 	if (!nw_server::publish_initial_environment_file(
 			resolved_env, doc.bms_file().header, world.network_env, env_error)) {
 		std::fprintf(stderr,
-		             "nw-server: %s; set NW_ENV=<path-to %s.env> when the "
+		             "nw-server: %s; pass --env <path-to %s.env> when the "
 		             "resource is not beside the mission\n",
 		             env_error.c_str(), mission_info.environment.c_str());
 		return 1;
@@ -211,10 +308,8 @@ int main() {
 	             mission_path, pr.spawned, pr.brains, pr.nav_nodes);
 
 	std::filesystem::path explicit_resource_root;
-	if (const char *root = std::getenv("NW_RESOURCE_ROOT");
-	    root != nullptr && *root != '\0') {
-		explicit_resource_root = root;
-	}
+	if (opt.resource_root != nullptr && *opt.resource_root != '\0')
+		explicit_resource_root = opt.resource_root;
 	const std::filesystem::path resource_root =
 			nw_server::resolve_resource_root(mission_path, explicit_resource_root);
 	wac::WacSystem wac;
@@ -289,38 +384,30 @@ int main() {
 	// remains capturable; ordinary hosts continue to derive the mission type.
 	// [orig: AI_GetTaskTypeFromFlags @0x40DAE0;
 	// Game_StartMission @0x524360]
-	if (!apply_env_u32("NW_GAME_TYPE", host_cfg.config.game_type))
-		return 2;
+	if (opt.game_type) host_cfg.config.game_type = *opt.game_type;
 	if (!is_retail_game_type_word(host_cfg.config.game_type)) {
 		std::fprintf(stderr,
-				"nw-server: NW_GAME_TYPE 0x%X is not a retail g_GameType code\n",
+				"nw-server: --game-type 0x%X is not a retail g_GameType code\n",
 				host_cfg.config.game_type);
 		return 2;
 	}
-	uint32_t configured_teams = host_cfg.config.num_teams;
-	if (!apply_env_u32("NW_NUM_TEAMS", configured_teams))
-		return 2;
-	if (!apply_env_i32(
-			"NW_CAPTURE_DURATION_SECONDS",
-			host_cfg.config.capture_duration_seconds) ||
-			!apply_env_i32(
-					"NW_CAPTURE_SPEED_SETTING",
-					host_cfg.config.capture_speed_setting) ||
-			!apply_env_i32(
-					"NW_SPAWN_WAVE_TIME_BASE",
-					host_cfg.config.spawn_wave_time_base) ||
-			!apply_env_i32(
-					"NW_SPAWN_WAVE_TIME_ZONE",
-					host_cfg.config.spawn_wave_time_zone) ||
-			!apply_env_u32(
-					"NW_DEFAULT_SPAWN_REQUIRES_NO_TEAM_ZONE",
-					host_cfg.config.default_spawn_requires_no_team_zone))
-		return 2;
-	if (configured_teams > 0xFFu) {
-		std::fprintf(stderr, "nw-server: NW_NUM_TEAMS must fit a uint8\n");
-		return 2;
+	if (opt.num_teams) {
+		if (*opt.num_teams > 0xFFu) {
+			std::fprintf(stderr, "nw-server: --num-teams must fit a uint8\n");
+			return 2;
+		}
+		host_cfg.config.num_teams = static_cast<uint8_t>(*opt.num_teams);
 	}
-	host_cfg.config.num_teams = static_cast<uint8_t>(configured_teams);
+	if (opt.capture_duration_seconds)
+		host_cfg.config.capture_duration_seconds = *opt.capture_duration_seconds;
+	if (opt.capture_speed_setting)
+		host_cfg.config.capture_speed_setting = *opt.capture_speed_setting;
+	if (opt.spawn_wave_time_base)
+		host_cfg.config.spawn_wave_time_base = *opt.spawn_wave_time_base;
+	if (opt.spawn_wave_time_zone)
+		host_cfg.config.spawn_wave_time_zone = *opt.spawn_wave_time_zone;
+	if (opt.default_spawn_requires_no_team_zone)
+		host_cfg.config.default_spawn_requires_no_team_zone = 1u;
 	// Retail starts from GameType_CreateDefaultSettings and overlays a loose
 	// VERSION 40 score.ini when present. An absent file intentionally leaves the
 	// optional row unset so Match and S2C 0x58 select that same default table.
