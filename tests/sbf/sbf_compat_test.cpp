@@ -1,5 +1,6 @@
-/* SBF compat: parse + decode the first chunk of each committed SBF fixture.
-   Fixtures only (no external assets); a missing/bad fixture is a failure. */
+/* SBF compat: parse + decode the first chunk of every committed SBF fixture.
+   Fixtures only (the retail banks are swept by sbf_jo_install_sweep_test
+   behind OPENNOVA_JO_DIR); a missing/bad fixture is a failure. */
 
 #include <stdio.h>
 #include <string.h>
@@ -31,8 +32,7 @@ static int try_open(const char *path) {
 
 int main(void) {
     int fail = 0;
-    /* Committed fixtures only (a JO gamemus bank + a BHD menumus bank). */
-    if (!try_open("fixtures/sbf/bhd_menumus.sbf")) ++fail;
-    if (!try_open("fixtures/sbf/jo_gamemus.sbf"))  ++fail;
+    /* Committed fixtures only: the synthetic bank. */
+    if (!try_open("fixtures/sbf/synth_gamemus.sbf")) ++fail;
     return fail == 0 ? 0 : 1;
 }

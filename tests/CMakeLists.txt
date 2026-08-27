@@ -346,6 +346,19 @@ endif()
 add_test(NAME sbf_roundtrip COMMAND sbf_roundtrip_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# The synthetic bank the SBF tests read (fixtures/sbf/synth_gamemus.sbf) is
+# minted by our own encoder and byte-compared every run (--write regenerates).
+add_executable(minimal_sbf_gen_test fixtures/minimal_sbf_gen.cpp)
+target_link_libraries(minimal_sbf_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_sbf_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_sbf_gen COMMAND minimal_sbf_gen_test)
+
+# The retail banks (gamemus.sbf + menumus.sbf) are swept behind OPENNOVA_JO_DIR.
+add_executable(sbf_jo_install_sweep_test sbf/sbf_jo_install_sweep_test.cpp)
+target_link_libraries(sbf_jo_install_sweep_test PRIVATE opennova_formats)
+target_include_directories(sbf_jo_install_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(sbf_jo_install_sweep COMMAND sbf_jo_install_sweep_test)
+
 # MUS tests
 add_executable(mus_header_test mus/mus_header_test.cpp)
 target_link_libraries(mus_header_test PRIVATE opennova_formats)

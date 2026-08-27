@@ -13,7 +13,7 @@ const OPTIONS_FIXTURE := "res://../fixtures/mnu/jo_options.mnu"  # has the Mods 
 const SP_PLAY_FIXTURE := "res://../fixtures/mnu/jo_sp.mnu"  # play screen: mission list IA_LIST + ACCEPT
 const MISSION_BIN_FIXTURE := "res://../fixtures/rtxt/00tra.bin"  # real per-mission bin: info/Title + briefing
 const MUS_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"  # decrypted SCR0 MUS program
-const SBF_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"  # real SBF bank (banks stream loose)
+const SBF_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"  # synthetic SBF bank (banks stream loose)
 
 
 class _MissingBankMusicRoot extends RefCounted:

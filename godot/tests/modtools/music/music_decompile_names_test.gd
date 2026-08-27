@@ -5,7 +5,7 @@ extends GutTest
 # play / bind statements show real names instead of "sound_N" placeholders.
 
 const SCRIPT_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
-const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
+const BANK_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"
 
 
 # The names-less path is unchanged. It must still emit the placeholder so the
@@ -25,9 +25,9 @@ func test_names_less_decompile_uses_sound_n_placeholder():
 
 
 # The names-aware path replaces the placeholder with the SBF entry name.
-# We don't pin the test to a specific entry name (jo_gamemus's slot 1 happens
-# to be GAMINT but committing to that string would couple the test to fixture
-# data); instead we assert (a) at least one bind line carries a non-placeholder
+# We don't pin the test to a specific entry name (the synthetic bank's slot 1
+# happens to be TONE01 but committing to that string would couple the test to
+# fixture data); instead we assert (a) at least one bind line carries a non-placeholder
 # quoted string and (b) the placeholder for slot 1 is gone.
 func test_names_aware_decompile_substitutes_real_names():
 	var script := MusicScript.new()
@@ -59,10 +59,10 @@ func test_names_aware_decompile_substitutes_real_names():
 	assert_true(matched_any, "at least one bind sound_N \"<entry>\" pair lands in the text")
 
 
-# Specific: jo_gamemus slot 1 is GAMINT. This locks the user-visible win that
-# motivated the entire change. If a future fixture rotates the order, swap the
-# slot index here.
-func test_jo_gamemus_slot_1_resolves_to_gamint():
+# Specific: the synthetic bank's slot 1 is TONE01 (retail jo_gamemus's is
+# GAMINT, the user-visible win that motivated the entire change). If a future
+# fixture rotates the order, swap the slot index here.
+func test_synth_gamemus_slot_1_resolves_to_tone01():
 	var script := MusicScript.new()
 	script.load_from_path(SCRIPT_FIXTURE)
 	var bank := SbfBank.new()

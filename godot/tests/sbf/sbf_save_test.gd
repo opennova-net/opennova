@@ -1,6 +1,6 @@
 extends GutTest
 
-const SRC := "res://../fixtures/sbf/bhd_menumus.sbf"
+const SRC := "res://../fixtures/sbf/synth_gamemus.sbf"
 const DST := "user://test_sbf_save_out.sbf"
 
 
