@@ -1,5 +1,7 @@
-// Byte-exact parse->encode round-trip for opennova::lwf over real JO sound
-// profiles, plus a mutate-and-reread check. Mirrors mission/mission_bms_test.cpp.
+// Byte-exact parse->encode round-trip for opennova::lwf over the synthetic
+// menu.lwf (tests/fixtures/minimal_lwf_gen.cpp), plus a mutate-and-reread
+// check. The retail profiles are swept by lwf_jo_assets_sweep_test behind
+// OPENNOVA_JO_ASSETS. Mirrors mission/mission_bms_test.cpp.
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -28,17 +30,13 @@ std::vector<uint8_t> read_file(const std::string &path) {
 	return data;
 }
 
-// Parse->encode must reproduce the input byte-for-byte (raw garbage + original
+// Parse->encode must reproduce the input byte-for-byte (raw slots + original
 // string pool preserved). Returns 0 on success.
-int check_byte_exact(const std::string &path, bool required) {
+int check_byte_exact(const std::string &path) {
 	const std::vector<uint8_t> original = read_file(path);
 	if (original.empty()) {
-		if (required) {
-			std::fprintf(stderr, "missing required fixture: %s\n", path.c_str());
-			return 1;
-		}
-		std::fprintf(stderr, "skipping optional fixture: %s\n", path.c_str());
-		return 0;
+		std::fprintf(stderr, "missing required fixture: %s\n", path.c_str());
+		return 1;
 	}
 
 	opennova::lwf::File file;
@@ -69,29 +67,33 @@ int check_byte_exact(const std::string &path, bool required) {
 
 int main() {
 	const std::string root = test_paths_repo_root(__FILE__);
-	const std::string compact = root + "/fixtures/lwf/00TRa.LWF";
-	const std::string global = root + "/fixtures/lwf/gamelocl.LWF";
+	const std::string menu = root + "/fixtures/lwf/menu.lwf";
 
 	// Byte-exact round-trip on the unmodified path.
-	TEST_EXPECT(check_byte_exact(compact, /*required=*/true) == 0);
-	TEST_EXPECT(check_byte_exact(global, /*required=*/false) == 0);
+	TEST_EXPECT(check_byte_exact(menu) == 0);
 
-	// Structural sanity on the compact fixture.
-	const std::vector<uint8_t> bytes = read_file(compact);
+	// Structural sanity on the fixture.
+	const std::vector<uint8_t> bytes = read_file(menu);
 	TEST_EXPECT(!bytes.empty());
 	opennova::lwf::File file;
 	std::string error;
 	TEST_EXPECT(opennova::lwf::parse_lwf_buffer(bytes.data(), bytes.size(), file, error));
 	TEST_EXPECT(file.header.magic == opennova::lwf::kMagic);
 	TEST_EXPECT(file.header.single_count == file.singles.size());
-	TEST_EXPECT(!file.multis.empty());
-	TEST_EXPECT(!file.playlists.empty());
-	TEST_EXPECT(!file.sndparms.empty());
+	TEST_EXPECT(file.singles.size() == 3);
+	TEST_EXPECT(file.multis.size() == 3);
+	TEST_EXPECT(file.playlists.size() == 3);
+	TEST_EXPECT(file.sndparms.size() == 3);
+	TEST_EXPECT(file.multis[0].name == "MOUSE_OVER");
+	TEST_EXPECT(file.multis[0].pitch_base == opennova::lwf::kAuthoredSetPitchBase);
+	TEST_EXPECT(file.singles[2].path == "tone.wav");
+	TEST_EXPECT(file.playlists[2].falloff_radius == 2000);
 
 	// Every sndparm references a valid single, and every playlist sndparm index
 	// is in range (the parser guarantees this, but pin it as a contract).
 	for (const auto &sp : file.sndparms) {
 		TEST_EXPECT(sp.single_index < file.singles.size());
+		TEST_EXPECT(sp.pitch_scaled == opennova::lwf::kPitchUnityQ16);
 	}
 
 	// Mutate-and-reread: change a member volume, re-encode, re-parse, assert.

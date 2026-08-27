@@ -201,11 +201,24 @@ target_compile_features(mission_corpus_test PRIVATE cxx_std_17)
 opennova_add_gated_test(mission_corpus COMMAND mission_corpus_test)
 
 # LWF sound-profile tests: byte-exact parse->encode round-trip + mutate-reread
-# over real JO fixtures (fixtures/lwf/00TRa.LWF + gamelocl.LWF).
+# over the synthetic fixtures/lwf/menu.lwf; the retail profiles are swept
+# behind OPENNOVA_JO_ASSETS.
 add_executable(lwf_roundtrip_test lwf/lwf_roundtrip_test.cpp)
 target_link_libraries(lwf_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(lwf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME lwf_roundtrip COMMAND lwf_roundtrip_test)
+
+# fixtures/lwf/menu.lwf + tone.wav are minted by our own writers and
+# byte-compared every run (--write regenerates).
+add_executable(minimal_lwf_gen_test fixtures/minimal_lwf_gen.cpp)
+target_link_libraries(minimal_lwf_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_lwf_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_lwf_gen COMMAND minimal_lwf_gen_test)
+
+add_executable(lwf_jo_assets_sweep_test lwf/lwf_jo_assets_sweep_test.cpp)
+target_link_libraries(lwf_jo_assets_sweep_test PRIVATE opennova_formats)
+target_include_directories(lwf_jo_assets_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(lwf_jo_assets_sweep COMMAND lwf_jo_assets_sweep_test)
 
 add_executable(wav_pcm_test lwf/wav_pcm_test.cpp)
 target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
@@ -215,8 +228,8 @@ add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
 target_link_libraries(inmatch_session_test PRIVATE opennova_net)
 add_test(NAME inmatch_session COMMAND inmatch_session_test)
 
-# The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
-# loose .wav members (drives MNU hover/click via MnuMenu).
+# The menu sound profile (the synthetic fixtures/lwf/menu.lwf): trigger sets
+# resolve to loose .wav members (drives MNU hover/click via MnuMenu).
 add_executable(menu_lwf_test lwf/menu_lwf_test.cpp)
 target_link_libraries(menu_lwf_test PRIVATE opennova_formats)
 target_include_directories(menu_lwf_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
