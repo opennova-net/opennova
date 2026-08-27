@@ -1,3 +1,7 @@
+// FNT reader/writer over the synthetic fixtures fixtures/fnt/synth_1page.fnt
+// and synth_3page.fnt (tests/fixtures/minimal_fnt_gen.cpp): header/page
+// parsing, the multi-page glyph lookup, the D-FNT-1/2 design-width
+// contract, and a deterministic blank-font write/reload.
 #include <formats/fnt/fnt.h>
 
 #include <cstdint>
@@ -49,6 +53,21 @@ bool parse_fixture(const char *name, uint32_t expected_pages) {
 	if (!expect(space != nullptr && last != nullptr, "glyph lookup should cover codes 32 through 255")) return false;
 	if (!expect(fnt_get_glyph(&font, 31) == nullptr, "glyph lookup should reject codes before 32")) return false;
 
+	// The builder spreads slot i over page (i % pages): 'A' (slot 33), 'B'
+	// (34), 'C' (35) land on pages 0, 1 and 2 of the three-page fixture and all
+	// on page 0 of the one-page fixture.
+	if (!expect(fnt_get_glyph(&font, 'A')->page == 33 % expected_pages &&
+	                    fnt_get_glyph(&font, 'B')->page == 34 % expected_pages &&
+	                    fnt_get_glyph(&font, 'C')->page == 35 % expected_pages,
+	            "glyph pages follow the builder's slot % pages layout"))
+		return false;
+
+	// Every glyph cell is 12 px wide by 16 px tall in the builder's layout.
+	int width = 0;
+	int height = 0;
+	fnt_get_glyph_size(fnt_get_glyph(&font, 'A'), &width, &height);
+	if (!expect(width == 12 && height == 16, "glyph rect matches the builder's 12x16 cell")) return false;
+
 	fnt_free(&font);
 	return true;
 }
@@ -56,20 +75,19 @@ bool parse_fixture(const char *name, uint32_t expected_pages) {
 } // namespace
 
 int main() {
-	if (!parse_fixture("Serpen24.fnt", 1)) return 1;
-	if (!parse_fixture("Serpen36.fnt", 2)) return 1;
-	if (!parse_fixture("Impact50.fnt", 3)) return 1;
+	if (!parse_fixture("synth_1page.fnt", 1)) return 1;
+	if (!parse_fixture("synth_3page.fnt", 3)) return 1;
 
 	// D-FNT-1/2: the +4 word is the DESIGN WIDTH, not a validated version. The
 	// engine reads it as the 800/dw glyph scale and never rejects a non-800 font
 	// [orig: GameFont_LoadFromBlob @ 0x674740]. Our reader must match: accept + carry it.
 	{
 		std::vector<uint8_t> bytes =
-		    read_file(std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/fnt/Serpen24.fnt");
+		    read_file(std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/fnt/synth_1page.fnt");
 		if (!expect(!bytes.empty() && bytes.size() >= 8, "fixture readable for D-FNT-1")) return 1;
 		fnt_font_t f0;
 		if (!expect(fnt_parse(bytes.data(), bytes.size(), &f0) == FNT_OK, "800-design font parses")) return 1;
-		if (!expect(fnt_design_scale(f0.design_width) == 1.0f, "shipped 800 font -> scale 1.0")) return 1;
+		if (!expect(fnt_design_scale(f0.design_width) == 1.0f, "the writer's 800 design width -> scale 1.0")) return 1;
 		fnt_free(&f0);
 
 		// Rewrite +4 as a non-800 design width; retail would scale it, so must we.
@@ -122,6 +140,6 @@ int main() {
 
 	fnt_free(&reparsed);
 	fnt_free(&font);
-	std::printf("OK: Nova FNT fixtures parse and deterministic write/reload works\n");
+	std::printf("OK: FNT fixtures parse and deterministic write/reload works\n");
 	return 0;
 }

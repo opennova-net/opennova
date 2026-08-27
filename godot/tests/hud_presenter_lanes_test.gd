@@ -10,7 +10,7 @@ extends GutTest
 const VehiclePanelPresenter := preload("res://game/world/vehicle_panel_presenter.gd")
 const MessageLogPresenter := preload("res://game/world/message_log_presenter.gd")
 const LfpPanelPresenter := preload("res://game/world/lfp_panel_presenter.gd")
-const FONT_FIXTURE := "res://../fixtures/fnt/Gunpl22b.fnt"
+const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"  # staged as Gunpl22b.fnt
 
 var _temp_dirs: Array[String] = []
 

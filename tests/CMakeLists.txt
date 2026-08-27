@@ -562,11 +562,19 @@ target_compile_definitions(minimal_art_validate_test PRIVATE
 add_test(NAME minimal_art_validate COMMAND minimal_art_validate_test)
 
 # Minimal set's generated boot font (minimal_fnt_builder.h): validity +
-# byte-stable roundtrip + label glyphs drawable. Always-on; the font itself is
-# emitted at package time, never committed.
+# byte-stable roundtrip + label glyphs drawable. Always-on; the boot font
+# itself is emitted at package time, never committed. The same builder mints
+# fixtures/fnt/synth_{1,3}page.fnt, byte-compared every run (--write regenerates).
 add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
 target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_fnt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
+
+# fixtures/cbin/credits_image.png: the 8x8 PNG the credits tests stage under
+# the retail .kda's image name; minted by a self-contained PNG writer.
+add_executable(minimal_cbin_gen_test fixtures/minimal_cbin_gen.cpp)
+target_include_directories(minimal_cbin_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_cbin_gen COMMAND minimal_cbin_gen_test)
 
 # Minimal mission's dialog companions (mnml.dbf + mnml.lwf): empty-but-valid
 # via the engine/formats/dbf + engine/formats/lwf writers, byte-stable vs the committed files.

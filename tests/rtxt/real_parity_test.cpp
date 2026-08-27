@@ -1,7 +1,9 @@
-// Grills engine/formats/rtxt against committed retail Joint Operations string tables:
-// the five global tables Game_InitSubsystems @ 0x4A6CD0 loads (gameerr, gametext,
-// vmacros, keyhelp) plus menutxt (menu path) and two mission bins (ash_g3d covers
-// the tiny case, 00tra covers cp1252 text and odd-length padding).
+// Grills engine/formats/rtxt against the committed retail Joint Operations
+// string tables the GUT menu tests pin string ids through: gametext (the
+// Game_InitSubsystems @ 0x4A6CD0 boot table), menutxt (menu path) and two
+// mission bins (ash_g3d covers the tiny case, 00tra covers cp1252 text and
+// odd-length padding). The other boot tables (gameerr, vmacros, keyhelp) are
+// covered by the gated install sweep (rtxt_jo_install_sweep).
 //
 // Each fixture must (a) obey the raw format invariants and (b) survive
 // parse -> write byte-for-byte.
@@ -9,8 +11,7 @@
 
 int main() {
   const char *names[] = {
-      "gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
-      "menutxt.bin", "ash_g3d.bin",  "00tra.bin",
+      "gametext.bin", "menutxt.bin", "ash_g3d.bin", "00tra.bin",
   };
 
   int failures = 0;
@@ -30,6 +31,6 @@ int main() {
     std::fprintf(stderr, "FAIL: %d real-fixture check(s) failed\n", failures);
     return 1;
   }
-  std::printf("OK: 7 retail string tables byte-stable through parse/write\n");
+  std::printf("OK: 4 retail string tables byte-stable through parse/write\n");
   return 0;
 }
