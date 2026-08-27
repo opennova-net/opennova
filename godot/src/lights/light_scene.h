@@ -17,6 +17,8 @@
 
 #include <vector>
 
+#include <godot_cpp/variant/color.hpp>
+
 #include <runtime/renderer/light_scene.h>
 #include <runtime/renderer/light_terrain_pass.h>
 #include <runtime/renderer/render_slot_shadow.h>
@@ -184,6 +186,18 @@ public:
 	// Read-only diagnostics snapshot of the last uploaded RGBAF atlas. The
 	// returned Image owns copied bytes; tests/tools cannot mutate render state.
 	Ref<Image> get_static_light_rows_image() const;
+
+protected:
+public:
+	// The witnessed muzzle-glow / death-flash spawn constants, re-exported
+	// from renderer::LightScene for the presenting director.
+	static float muzzle_glow_radius();
+	static Color muzzle_glow_color();
+	static int muzzle_glow_fade_mode();
+	static int muzzle_glow_fade_ticks();
+	static Color death_flash_color();
+	static int death_flash_fade_mode();
+	static int death_flash_fade_ticks();
 
 protected:
 	static void _bind_methods();

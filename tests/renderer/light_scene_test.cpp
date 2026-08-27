@@ -966,6 +966,16 @@ int main() {
                "an interior lamp never leaks onto an outdoor draw");
     }
 
+    // The witnessed transient-spawner constants the presenting director
+    // builds its muzzle-glow / death-flash spawns from.
+    expect(LightScene::kMuzzleGlowRadiusFixed == 98304, "muzzle glow radius 1.5 wu");
+    expect(LightScene::kMuzzleGlowColorRgb == 0xFFE0A0u, "muzzle glow color");
+    expect(LightScene::kMuzzleGlowFadeMode == 4 && LightScene::kMuzzleGlowFadeTicks == 5,
+           "muzzle glow mode 4 / 5 ticks");
+    expect(LightScene::kDeathFlashColorRgb == 0xFFC080u, "death flash color");
+    expect(LightScene::kDeathFlashFadeMode == 2 && LightScene::kDeathFlashFadeTicks == 31,
+           "death flash mode 2 / 31 ticks");
+
     std::cout << "light_scene_test passed\n";
     return 0;
 }
