@@ -4,8 +4,8 @@ A thin headless C++ binary that stands up the `engine/net/npruntime` in-match ho
 (the witnessed listen-server shape, a real UDP socket, the original 62 Hz
 cadence) so the net iteration harness can produce golden-comparable sessions:
 host a mission, let opennova or retail clients join, capture with dumpcap, and
-diff against the retail golden. All protocol, crypto, and framing live in the
-libs; this binary owns only the socket and the cadence.
+diff against the retail golden. All protocol, crypto, and framing live in
+`engine/net`; this binary owns only the socket and the cadence.
 
 It is a development and golden-harness tool. It is **never packaged or
 shipped**: dedicated hosting for players is a serve mode of `opennova.exe`,

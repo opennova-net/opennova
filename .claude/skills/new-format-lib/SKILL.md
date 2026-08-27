@@ -40,9 +40,10 @@ Then decide, before writing code:
 Files: `engine/formats/<name>/<name>.{h,cpp}` — FLAT since 2026-08-10:
 headers and sources sit side by side in the lib dir (nested subdirs allowed).
 There is NO per-lib CMakeLists.txt — the lib builds inside the
-`opennova_formats` group, and the group dir is the ONE public include dir
-(`#include <name>/<name>.h` resolves repo-wide). Registration is exactly ONE
-edit in `engine/formats/CMakeLists.txt`:
+`opennova_formats` group, and `engine/` is the ONE public include root: every
+cross-lib include is group-qualified, `#include <formats/<name>/<name>.h>`
+(ADR 0040 decision 3; same-directory siblings may keep a bare `"file.h"`).
+Registration is exactly ONE edit in `engine/formats/CMakeLists.txt`:
 
 1. the source block, alphabetical by domain, with a one-line format comment:
    `# <name> — <what the format holds>` + one
@@ -53,11 +54,10 @@ link to `opennova_io` — add nothing else; no include-list edit exists any
 more (the pre-flatten `include/<prefix>/` + `src/` split and the per-lib
 PUBLIC include entries are gone).
 
-Include prefix: keep the format's historical prefix (usually `<name>/...`).
-When a domain is split across formats/ and runtime/, the two libs may expose
-ONE prefix with disjoint header sets (ADR 0030 decision 2; precedents:
-terrain/terrain_query, particle/, mission/). Namespace `opennova::<name>` for
-C++ surfaces.
+Include prefix: always `formats/<name>/`. The group segment is what keeps
+`formats/mission` and `runtime/mission` apart (likewise `particle`, `wac`) —
+the flat per-group include roots that once made the prefix ambiguous are gone
+(ADR 0040 Context). Namespace `opennova::<name>` for C++ surfaces.
 
 ## 2. Nothing to register twice
 
@@ -96,7 +96,10 @@ Run loop:
 
 ## 5. Optional: engine binding
 
-- Binding: `godot/src/<name>/nova_<name>*.{h,cpp}`, `GDREGISTER_CLASS` in
+- Binding: `godot/src/<name>/<type>.{h,cpp}` — a binding file is named after the
+  type it declares, e.g. `godot/src/audio/ambient_mixer.h` wrapping
+  `opennova::audio::AmbientMixer` (ADR 0040 decisions 2 and 5; bindings include
+  root-relative, `"audio/ambient_mixer.h"`). `GDREGISTER_CLASS` in
   `godot/src/register_types.cpp` (`godot/src` already links the group —
   no CMake link edit), then `bash scripts/build_godot.sh` and fully restart
   any open editor (no hot-reload). Add a GDScript smoke test
@@ -136,5 +139,5 @@ When a format already exists inside a runtime lib and passes the step-0 gate:
 - `ctest --test-dir build -C Release` fully green including the new tests;
   roundtrip byte-exact on the fixture.
 - Both CMake roots build (`bash scripts/build.sh` exercises both).
-- README updated: the "C/C++ Libraries" table row.
+- `engine/CLAUDE.md`'s `formats/` list updated with the new lib.
 - New domain vocabulary added to `CONTEXT.md` only if a term needed pinning.

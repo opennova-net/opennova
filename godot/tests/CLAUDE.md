@@ -24,7 +24,7 @@
   `"$GODOT_BIN" --headless --path godot -s addons/gut/gut_cmdln.gd -gtest=res://tests/<file> -gexit`.
   (Flag reference: `godot/addons/gut/cli/gut_cli.gd` after bootstrap — `-gselect`
   filename substring, `-gunit_test_name` test-name substring.)
-- If a test needs a new `Nova*` class, rebuild the GDExtension first
+- If a test needs a newly registered engine class, rebuild the GDExtension first
   (`scripts/build_godot.sh`) — see `godot/src/CLAUDE.md`.
 - C++ tests live in `/tests` (ctest). Keep the two suites separate.
 - Always `autofree`/`add_child_autofree` harness objects — never leak a

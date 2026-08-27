@@ -21,10 +21,15 @@ All commands are Git Bash, from the repo root.
 2. Submodules: `git submodule update --init --recursive` — `third_party/` ships
    empty in a fresh worktree. (`scripts/test_godot.sh` self-inits the GUT
    submodule, but building the GDExtension needs godot-cpp too.)
-3. GDExtension built: fresh worktrees have no DLL in `godot/bin/` →
-   `bash scripts/build_godot.sh`. Unregistered `Nova*` classes make tests drop
+3. Addons installed: `bash scripts/bootstrap_godot.sh` — it copies GUT into
+   `godot/addons/gut/` AND runs `scripts/bootstrap_imgui_godot.sh` for the
+   imgui-godot addon the `DevTools`/`OnedUi` nodes draw through (ADR 0039).
+   `scripts/build.sh` and `scripts/test_godot.sh` call it; `scripts/build_godot.sh`
+   does NOT, so a build-only path leaves both addons missing.
+4. GDExtension built: fresh worktrees have no DLL in `godot/bin/` →
+   `bash scripts/build_godot.sh`. Unregistered engine classes make tests drop
    from collection (see failure signatures below).
-4. Imported once: `"$GODOT_BIN" --headless --path godot --import`
+5. Imported once: `"$GODOT_BIN" --headless --path godot --import`
    (the wrapper does NOT do this).
 
 ## Full suite
@@ -74,8 +79,8 @@ skip-and-pass (`pending`/`pass_test`) when the fixture or asset env var is
 absent — so a green count does not prove coverage; check for "skipping"/pending
 lines when you expected assets present. Non-collected helper scripts (probes)
 get a `_probe.gd` suffix, not `_test.gd`. Never bulk-edit `.gd` files with
-PowerShell 5.1 Get/Set-Content (BOM mangling) — use `apply_patch` or another
-UTF-8-safe editor.
+PowerShell 5.1 Get/Set-Content (BOM mangling) — do bulk text rewrites with bash
+sed/perl, not PowerShell (root CLAUDE.md).
 
 ## Done
 
