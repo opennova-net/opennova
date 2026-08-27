@@ -3262,7 +3262,7 @@ func test_tick_never_emits_session_lost_for_a_non_joiner() -> void:
 
 
 func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
-	# The F3 Stats feeds (FrameStatsBoard): a disabled board costs the tick
+	# The F3 Stats feeds (FrameStats): a disabled board costs the tick
 	# nothing and receives nothing; an enabled one gets every world leg — the
 	# occlusion split included — from the REAL playing stack, without touching
 	# the probe dicts. The REAL sim carries the native occlusion split getters,
@@ -3272,27 +3272,27 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	_load_minimal_mission(world)
-	var board := FrameStatsBoard.new()
-	world.set_frame_stats_board(board)
+	var board := FrameStats.new()
+	world.set_frame_stats(board)
 
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
-	assert_eq(board.drain().sample_frames[FrameStatsBoard.OCCL_APPLY], 0,
+	assert_eq(board.drain().sample_frames[FrameStats.OCCL_APPLY], 0,
 			"a disabled board sees no feeds")
 
 	board.set_capture_active(true)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	var counts := board.drain().sample_frames
-	assert_gt(counts[FrameStatsBoard.OCCL_APPLY], 0, "the GDScript apply leg lands")
-	assert_gt(counts[FrameStatsBoard.OCCL_GLUE], 0,
+	assert_gt(counts[FrameStats.OCCL_APPLY], 0, "the GDScript apply leg lands")
+	assert_gt(counts[FrameStats.OCCL_GLUE], 0,
 			"the bound-call remainder lands in the glue slot")
-	assert_gt(counts[FrameStatsBoard.OCCL_BUILD], 0,
+	assert_gt(counts[FrameStats.OCCL_BUILD], 0,
 			"the real sim's native split feeds the build slot")
-	assert_gt(counts[FrameStatsBoard.WORLD_WEATHER], 0)
-	assert_gt(counts[FrameStatsBoard.WORLD_BLINK], 0)
-	assert_gt(counts[FrameStatsBoard.WORLD_IRIS], 0)
-	assert_gt(counts[FrameStatsBoard.WORLD_FOLIAGE], 0)
-	assert_gt(counts[FrameStatsBoard.WORLD_RUNTIME], 0)
-	assert_gt(counts[FrameStatsBoard.WORLD_AUDIO], 0)
+	assert_gt(counts[FrameStats.WORLD_WEATHER], 0)
+	assert_gt(counts[FrameStats.WORLD_BLINK], 0)
+	assert_gt(counts[FrameStats.WORLD_IRIS], 0)
+	assert_gt(counts[FrameStats.WORLD_FOLIAGE], 0)
+	assert_gt(counts[FrameStats.WORLD_RUNTIME], 0)
+	assert_gt(counts[FrameStats.WORLD_AUDIO], 0)
 	assert_true(world.is_water_render_stats_measured(),
 			"capture enables the reflection viewport's render-time measurement")
 
@@ -3302,7 +3302,7 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 	board.set_capture_active(true)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_true(world.is_water_render_stats_measured())
-	world.set_frame_stats_board(null)
+	world.set_frame_stats(null)
 	assert_false(world.is_water_render_stats_measured(),
 			"detaching the board also releases measurement immediately")
 

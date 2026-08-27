@@ -49,16 +49,16 @@ func _ready() -> void:
 	presenter.set_debug_third_person(false)
 	await ProbeClock.settle(get_tree(), 4)
 
-	# F3: the game debug overlay opens.
-	var overlay_before: bool = game.is_debug_overlay_open()
+	# F3: the in-engine dev tools open.
+	var overlay_before: bool = game.is_dev_tools_open()
 	_tap(KEY_F3)
 	await ProbeClock.settle(get_tree(), 4)
-	var overlay_after: bool = game.is_debug_overlay_open()
-	_check(overlay_after and not overlay_before, "F3 opens the game debug overlay")
+	var overlay_after: bool = game.is_dev_tools_open()
+	_check(overlay_after and not overlay_before, "F3 opens the dev tools")
 	if overlay_after:
 		_tap(KEY_F3)
 		await ProbeClock.settle(get_tree(), 4)
-		_check(not game.is_debug_overlay_open(), "F3 again closes it")
+		_check(not game.is_dev_tools_open(), "F3 again closes it")
 
 	# C: stance crouch toggles on the presenter.
 	var crouch_before := bool(presenter.get("_crouch"))

@@ -9,8 +9,6 @@ extends Node3D
 # (runtime-only); headless probes set the dir explicitly and never block on it.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const DebugOverlayScript := preload("res://game/debug/nova_debug_overlay.gd")
-const DebugViewContext := preload("res://game/debug/nova_debug_view_context.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
 const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
@@ -32,10 +30,10 @@ const CHANGE_DIR_KEY := KEY_F9
 # ships with no binding row]. Out of zone the key falls through to its use-item
 # leg (unported; our motor separately polls Shift as the run modifier).
 const ARMORY_KEY := KEY_SHIFT
-# The mission debug overlay (entities / sim transport / script variables).
-const DEBUG_OVERLAY_KEY := KEY_F3
+# F3: the in-engine dev tools (the DevTools node's ImGui windows, ADR 0039).
+const DEV_TOOLS_KEY := KEY_F3
 # Shift+F6: pick the entity under the crosshair into the debug pick list
-# (DebugPickFlow). Works while playing, no overlay needed. Unmodified F6 stays
+# (DebugPickFlow). Works while playing, no dev tools needed. Unmodified F6 stays
 # with the retail-configurable binding rows (huddetail's default, shadowing
 # hudcolor's — the retail first-match order, D-CTRL-4).
 const PICK_KEY := KEY_F6
@@ -61,10 +59,11 @@ var _picker: FileDialog
 var _root: ResourceRoot
 var _state: int = State.MENU
 var _shell_wired := false
-var _debug_overlay  # DebugOverlay, lazily built on the first F3
+# The in-engine dev tools' seam: F3 opens them, the mouse policy follows them.
+var _dev_tools: DevTools
 var _debug_adapter: GameDebugAdapter
 # The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
-# the set survives overlay toggles; cleared on every world load.
+# the set survives dev-tools toggles; cleared on every world load.
 var _pick_list := DebugPickList.new()
 var _pick_flow := DebugPickFlow.new()
 var _net: NetSessionController  # every net-session entry (LAN/NovaWorld + env hooks)
@@ -74,11 +73,11 @@ var _net: NetSessionController  # every net-session entry (LAN/NovaWorld + env h
 # player is in-world.
 var _hud_presenter: GameHudPresenter
 var _player_presenter: LocalPlayerPresenter = null
-# The per-system frame-stats board behind F3 -> Stats. Created with the shell
-# and handed to every feeding owner; it costs nothing until the tab opens
-# (capture stays inactive, every feed site gates on it).
-var _frame_stats := FrameStatsBoard.new()
-# Root-viewport render-time sampling for the Stats tab; the sampler owns the
+# The per-system frame-stats board behind the dev tools' Stats window. Created
+# with the shell and handed to every feeding owner; it costs nothing until that
+# window opens (capture stays inactive, every feed site gates on it).
+var _frame_stats := FrameStats.new()
+# Root-viewport render-time sampling for the Stats window; the sampler owns the
 # RenderingServer measurement edge latch and the wall-frame clock.
 var _render_stats := RootRenderStatsSampler.new()
 var _frame_phase_sampler := RootFramePhaseSampler.new()
@@ -120,6 +119,11 @@ func _init() -> void:
 	_render_stats.setup(_frame_stats)
 	_frame_phase_sampler.setup(_frame_stats)
 	add_child(_frame_phase_sampler)
+	_dev_tools = DevTools.new()
+	_dev_tools.name = "DevTools"
+	_dev_tools.set_frame_stats(_frame_stats)
+	_dev_tools.open_changed.connect(_on_dev_tools_open_changed)
+	add_child(_dev_tools)
 	_world_load.load_failed.connect(_on_world_load_failed)
 
 
@@ -257,9 +261,9 @@ func _ready() -> void:
 	_net.setup(self, _world, _menu_shell, $MenuLayer)
 	# One shared frame-stats board across the shell, the world, and the HUD
 	# presenter; the world re-hands it to each mission runtime it creates.
-	_world.set_frame_stats_board(_frame_stats)
-	_hud_presenter.set_frame_stats_board(_frame_stats)
-	_menu_shell.set_frame_stats_board(_frame_stats)
+	_world.set_frame_stats(_frame_stats)
+	_hud_presenter.set_frame_stats(_frame_stats)
+	_menu_shell.set_frame_stats(_frame_stats)
 	# The shell's own round-outcome tap (the HUD presenter keeps its separate connection
 	# for text/banner presentation): "round_end" starts the end-of-mission flow.
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
@@ -332,8 +336,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_request_resource_dir()
 		get_viewport().set_input_as_handled()
 		return
-	if key.keycode == DEBUG_OVERLAY_KEY:
-		toggle_debug_overlay()
+	if key.keycode == DEV_TOOLS_KEY:
+		_dev_tools.toggle()
 		get_viewport().set_input_as_handled()
 		return
 	if key.keycode == PICK_KEY and key.shift_pressed and is_gameplay_input_active() \
@@ -369,45 +373,20 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-# F3: the mission debug overlay over the live runtime. Built lazily; without a
-# running mission it just reports so (the runtime source re-resolves per
-# refresh, so reloads and menu round-trips never leave it stale).
-func toggle_debug_overlay() -> void:
-	if _debug_overlay == null:
-		_debug_overlay = DebugOverlayScript.new(
-				DebugOverlay.DEFAULT_CONFIG_PATH,
-				get_debug_session())
-		_debug_overlay.name = "DebugOverlay"
-		var mount: Node = _hud if _hud != null else self
-		mount.add_child(_debug_overlay)
-		_debug_overlay.visibility_changed.connect(
-				_on_debug_overlay_visibility_changed)
-		_debug_overlay.set_runtime_source(_current_runtime)
-		_debug_overlay.set_view_context_source(_current_player_view_context)
-		_debug_overlay.set_frame_stats_board(_frame_stats)
-		_debug_overlay.set_world_source(func(): return _world)
-		_debug_overlay.set_player_source(func(): return _player_presenter)
-		_debug_overlay.set_effect_world_source(_current_effect_world)
-		_debug_overlay.set_pick_list(_pick_list)
-	_debug_overlay.toggle()
-
-
-func _on_debug_overlay_visibility_changed() -> void:
-	var open := is_debug_overlay_open()
-	# While the overlay is up the mouse is free: clicks on the world ray-pick
-	# into the same list F6 feeds. Every close path (F3, Escape, Close button)
-	# reaches this inherited visibility edge.
+# The dev tools' open edge. While they are up the mouse is free: clicks on the
+# world ray-pick into the same list F6 feeds. Every close path (F3, Escape, the
+# menu) reaches this signal.
+func _on_dev_tools_open_changed(open: bool) -> void:
 	if _world != null:
 		_world.set_pick_click_enabled(open)
 	if open:
 		# A press begun before F3 must not turn into a mount action when Shift is
-		# released behind the overlay.
+		# released behind the tools.
 		_use_latched = false
 
 
-func is_debug_overlay_open() -> bool:
-	return _debug_overlay != null and is_instance_valid(_debug_overlay) \
-			and _debug_overlay.visible
+func is_dev_tools_open() -> bool:
+	return _dev_tools != null and _dev_tools.is_open()
 
 
 ## Shift+F6 (and the probe/test seam): pick whatever the crosshair is on into the
@@ -418,9 +397,8 @@ func pick_at_crosshair() -> void:
 			_hud if _hud != null else self)
 
 
-func get_debug_overlay() -> DebugOverlay:
-	return _debug_overlay if _debug_overlay != null \
-			and is_instance_valid(_debug_overlay) else null
+func get_dev_tools() -> DevTools:
+	return _dev_tools
 func get_debug_session() -> DebugSession:
 	return get_game_debug_adapter().get_debug_session()
 func get_game_debug_adapter() -> GameDebugAdapter:
@@ -432,7 +410,7 @@ func get_game_debug_adapter() -> GameDebugAdapter:
 			func(): return _player_presenter,
 			_shell_state_name,
 			func(): return _world_load_pending,
-			is_debug_overlay_open,
+			is_dev_tools_open,
 			_on_resume,
 			_on_return_to_menu,
 			request_quit)
@@ -446,7 +424,7 @@ func get_game_debug_adapter() -> GameDebugAdapter:
 				finish_hud_hidden_capture,
 				hud_hidden_capture_witness)
 	return _debug_adapter
-func get_frame_stats_board() -> FrameStatsBoard:
+func get_frame_stats() -> FrameStats:
 	return _frame_stats
 
 func is_root_render_stats_measured() -> bool:
@@ -454,7 +432,7 @@ func is_root_render_stats_measured() -> bool:
 
 
 func is_gameplay_input_active() -> bool:
-	return _state == State.WORLD and not is_debug_overlay_open() and not _round_ended
+	return _state == State.WORLD and not is_dev_tools_open() and not _round_ended
 
 
 # --- End of mission (SP) -------------------------------------------------------
@@ -522,20 +500,6 @@ func _shell_state_name() -> String:
 			return "deploy"
 		_:
 			return "menu"
-
-
-func _current_player_view_context() -> DebugViewContext:
-	var context := DebugViewContext.new()
-	if _camera != null and is_instance_valid(_camera):
-		context.camera = _camera
-	if _player_presenter != null and is_instance_valid(_player_presenter):
-		context.camera_mode_known = true
-		context.third_person = bool(_player_presenter.is_third_person())
-	return context
-
-
-func _current_effect_world():
-	return _world.get_effect_world() if _world != null else null
 
 
 # Mission-effect passthrough + the last-text read seam: the surface lives on the
@@ -808,7 +772,7 @@ func _on_world_loaded() -> void:
 	# sessions); the world renders/curates the shell-owned list from here on.
 	_pick_list.clear()
 	_world.set_pick_debug(_pick_list)
-	_on_debug_overlay_visibility_changed()
+	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
 	if sim != null and bool(sim.is_joiner()) \
 			and not bool(sim.is_joined_in_match()):
@@ -1122,10 +1086,10 @@ func _process(delta: float) -> void:
 	if probe_enabled:
 		_perf_probe_spans.clear()
 	_frame_phase_sampler.sample_render(_render_stats, get_viewport(), _menu_shell)
-	var debug_overlay_open := is_debug_overlay_open()
+	var dev_tools_open := is_dev_tools_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND] \
-			or debug_overlay_open or _end_screen != null or not _world.is_loaded():
+			or dev_tools_open or _end_screen != null or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	# The end-of-mission lead-in: the world keeps ticking; the score/failed screen

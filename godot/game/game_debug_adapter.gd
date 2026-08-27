@@ -19,7 +19,7 @@ var _world_source: Callable
 var _player_source: Callable
 var _shell_state_source: Callable
 var _world_loading_source: Callable
-var _overlay_open_source: Callable
+var _dev_tools_open_source: Callable
 var _resume_action: Callable
 var _return_to_menu_action: Callable
 var _quit_action: Callable
@@ -39,7 +39,7 @@ func configure(
 		player_source: Callable,
 		shell_state_source: Callable,
 		world_loading_source: Callable,
-		overlay_open_source: Callable,
+		dev_tools_open_source: Callable,
 		resume_action: Callable,
 		return_to_menu_action: Callable,
 		quit_action: Callable) -> void:
@@ -48,7 +48,7 @@ func configure(
 	_player_source = player_source
 	_shell_state_source = shell_state_source
 	_world_loading_source = world_loading_source
-	_overlay_open_source = overlay_open_source
+	_dev_tools_open_source = dev_tools_open_source
 	_resume_action = resume_action
 	_return_to_menu_action = return_to_menu_action
 	_quit_action = quit_action
@@ -110,7 +110,7 @@ func get_mcp_game_state() -> Variant:
 			"world_loaded": world != null and world.is_loaded(),
 			"mission_file": world.get_loaded_mission_file() \
 					if world != null else "",
-			"debug_overlay_open": bool(_overlay_open_source.call()),
+			"dev_tools_open": bool(_dev_tools_open_source.call()),
 		},
 		"runtime": runtime_state,
 		"player": player,

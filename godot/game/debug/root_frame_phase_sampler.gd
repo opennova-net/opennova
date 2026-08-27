@@ -32,7 +32,7 @@ class LateBoundary:
 const _EARLY_PRIORITY := -2_147_483_647
 const _LATE_PRIORITY := 2_147_483_647
 
-var _board: FrameStatsBoard
+var _board: FrameStats
 var _late := LateBoundary.new()
 var _last_frame_usec := 0
 var _process_start_usec := 0
@@ -64,7 +64,7 @@ func _init() -> void:
 	_set_capture_active(false)
 
 
-func setup(board: FrameStatsBoard) -> void:
+func setup(board: FrameStats) -> void:
 	_board = board
 	board.capture_changed.connect(_set_capture_active)
 	_set_capture_active(board.is_capture_active())
@@ -90,16 +90,16 @@ func sample_render(render_stats: RootRenderStatsSampler, viewport: Viewport,
 	if menu_shell != null:
 		var menu_video_us: int = int(menu_shell.consume_video_process_us())
 		if menu_video_us > 0:
-			_board.add(FrameStatsBoard.FRAME_MENU_VIDEO, menu_video_us)
+			_board.add(FrameStats.FRAME_MENU_VIDEO, menu_video_us)
 	_stats_sample_end_usec = Time.get_ticks_usec()
-	_board.add(FrameStatsBoard.FRAME_STATS_SAMPLE,
+	_board.add(FrameStats.FRAME_STATS_SAMPLE,
 			_stats_sample_end_usec - _stats_sample_start_usec)
 
 
 func finish_shell_control(timed_work_start_usec: int) -> void:
 	if _shell_control_start_usec <= 0:
 		return
-	_board.add(FrameStatsBoard.FRAME_SHELL_CONTROL,
+	_board.add(FrameStats.FRAME_SHELL_CONTROL,
 			(_stats_sample_start_usec - _shell_control_start_usec) +
 			(timed_work_start_usec - _stats_sample_end_usec))
 	_shell_control_start_usec = 0
@@ -116,11 +116,11 @@ func record_shell_spans(probe_t0: int, probe_t1: int, probe_t2: int,
 		probe_spans["round_flow"] = probe_t5 - probe_t4
 	if _board == null or not _board.is_capture_active():
 		return
-	_board.add(FrameStatsBoard.FRAME_PLAYER_BEFORE, probe_t1 - probe_t0)
-	_board.add(FrameStatsBoard.FRAME_WORLD, probe_t2 - probe_t1)
-	_board.add(FrameStatsBoard.FRAME_PLAYER_AFTER, probe_t3 - probe_t2)
-	_board.add(FrameStatsBoard.FRAME_HUD, probe_t4 - probe_t3)
-	_board.add(FrameStatsBoard.FRAME_ROUND_FLOW, probe_t5 - probe_t4)
+	_board.add(FrameStats.FRAME_PLAYER_BEFORE, probe_t1 - probe_t0)
+	_board.add(FrameStats.FRAME_WORLD, probe_t2 - probe_t1)
+	_board.add(FrameStats.FRAME_PLAYER_AFTER, probe_t3 - probe_t2)
+	_board.add(FrameStats.FRAME_HUD, probe_t4 - probe_t3)
+	_board.add(FrameStats.FRAME_ROUND_FLOW, probe_t5 - probe_t4)
 
 
 func _process(_delta: float) -> void:
@@ -128,7 +128,7 @@ func _process(_delta: float) -> void:
 		return
 	var now := Time.get_ticks_usec()
 	if _last_frame_usec > 0:
-		_board.add(FrameStatsBoard.FRAME_WALL, now - _last_frame_usec)
+		_board.add(FrameStats.FRAME_WALL, now - _last_frame_usec)
 	_last_frame_usec = now
 	# The tail of the previous iteration: everything after its draw returned
 	# (audio/script frame hooks, pacing, input pump, this iteration's physics
@@ -137,24 +137,24 @@ func _process(_delta: float) -> void:
 	# loop before MainLoop.process, so those windows sit in this span and
 	# publish as their own row below.
 	if _post_draw_usec > 0:
-		_board.add(FrameStatsBoard.FRAME_PACING_INPUT,
+		_board.add(FrameStats.FRAME_PACING_INPUT,
 				maxi(now - _post_draw_usec - _pending_physics_usec, 0))
 	_post_draw_usec = 0
 	# Physics callbacks precede this idle frame. Publish their accumulated
-	# window here so FrameStatsBoard assigns them to the same render frame.
-	_board.add(FrameStatsBoard.FRAME_PHYSICS_CALLBACKS, _pending_physics_usec)
+	# window here so FrameStats assigns them to the same render frame.
+	_board.add(FrameStats.FRAME_PHYSICS_CALLBACKS, _pending_physics_usec)
 	_pending_physics_usec = 0
 	# Node churn since the previous frame: a delete-queue flush shows as freed
 	# nodes, a spawn burst as added ones (both land in the flush tail).
 	var node_count := int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
 	if _last_node_count >= 0:
 		var delta := node_count - _last_node_count
-		_board.add(FrameStatsBoard.FRAME_NODES_FREED, maxi(-delta, 0))
-		_board.add(FrameStatsBoard.FRAME_NODES_ADDED, maxi(delta, 0))
+		_board.add(FrameStats.FRAME_NODES_FREED, maxi(-delta, 0))
+		_board.add(FrameStats.FRAME_NODES_ADDED, maxi(delta, 0))
 	_last_node_count = node_count
 	var physics_frames := Engine.get_physics_frames()
 	if _last_physics_frames > 0:
-		_board.add(FrameStatsBoard.FRAME_PHYSICS_ITERATIONS,
+		_board.add(FrameStats.FRAME_PHYSICS_ITERATIONS,
 				physics_frames - _last_physics_frames)
 	_last_physics_frames = physics_frames
 	# Godot's own monitors: TIME_PROCESS spans MainLoop.process + the
@@ -162,9 +162,9 @@ func _process(_delta: float) -> void:
 	# physics servers' window. Main::iteration publishes both ONCE PER SECOND
 	# as that second's worst iteration (process_max in its FPS block), so the
 	# page reads them as peaks; the per-frame add only keeps the window fed.
-	_board.add(FrameStatsBoard.FRAME_TIME_PROCESS,
+	_board.add(FrameStats.FRAME_TIME_PROCESS,
 			int(Performance.get_monitor(Performance.TIME_PROCESS) * 1_000_000.0))
-	_board.add(FrameStatsBoard.FRAME_PHYSICS_SERVER,
+	_board.add(FrameStats.FRAME_PHYSICS_SERVER,
 			int(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 					* 1_000_000.0))
 	_process_start_usec = now
@@ -179,7 +179,7 @@ func finish_process_window() -> void:
 	if _process_start_usec <= 0 or _board == null or not _board.is_capture_active():
 		return
 	_process_end_usec = Time.get_ticks_usec()
-	_board.add(FrameStatsBoard.FRAME_PROCESS_CALLBACKS,
+	_board.add(FrameStats.FRAME_PROCESS_CALLBACKS,
 			_process_end_usec - _process_start_usec)
 	_process_start_usec = 0
 
@@ -206,7 +206,7 @@ func _mark_flush_queue() -> void:
 		return
 	var now := Time.get_ticks_usec()
 	if _process_end_usec > 0:
-		_board.add(FrameStatsBoard.FRAME_FLUSH_QUEUED, now - _process_end_usec)
+		_board.add(FrameStats.FRAME_FLUSH_QUEUED, now - _process_end_usec)
 	_flush_marker_usec = now
 
 
@@ -218,9 +218,9 @@ func _on_frame_pre_draw() -> void:
 		return
 	var now := Time.get_ticks_usec()
 	if _process_end_usec > 0:
-		_board.add(FrameStatsBoard.FRAME_DEFERRED_FLUSH, now - _process_end_usec)
+		_board.add(FrameStats.FRAME_DEFERRED_FLUSH, now - _process_end_usec)
 	if _flush_marker_usec > 0:
-		_board.add(FrameStatsBoard.FRAME_FLUSH_TAIL, now - _flush_marker_usec)
+		_board.add(FrameStats.FRAME_FLUSH_TAIL, now - _flush_marker_usec)
 	_flush_marker_usec = 0
 	_process_end_usec = 0
 	_pre_draw_usec = now
@@ -233,7 +233,7 @@ func _on_frame_post_draw() -> void:
 		return
 	var now := Time.get_ticks_usec()
 	if _pre_draw_usec > 0:
-		_board.add(FrameStatsBoard.FRAME_DRAW, now - _pre_draw_usec)
+		_board.add(FrameStats.FRAME_DRAW, now - _pre_draw_usec)
 	_pre_draw_usec = 0
 	_post_draw_usec = now
 

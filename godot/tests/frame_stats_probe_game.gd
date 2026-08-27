@@ -1,7 +1,7 @@
 extends SceneTree
 
 # F3 Stats acceptance probe: boots main_game.tscn into an SP mission, opens
-# the debug overlay onto the Stats tab (the real F3 path), lets the capture
+# the dev tools with their Stats window (the real F3 path), lets the capture
 # window fill, and dumps every Stats row twice — the second reading also
 # demonstrates that two consecutive window means agree. Exit 0 when the
 # load-bearing rows (world tick, sim step, present, occlusion apply, HUD)
@@ -71,28 +71,25 @@ func _run() -> void:
 	await ProbeClock.settle_ms(self, 3000)
 	_census_models()
 
-	# The real F3 path: summon the overlay, switch to the Stats tab.
-	game.toggle_debug_overlay()
-	var overlay = game.get_debug_overlay()
-	if overlay == null:
-		push_error("[fsp] no debug overlay after toggle")
+	# The real F3 path: open the dev tools; their Stats window (open by default)
+	# arms the board's capture and drains it every half second.
+	var dev_tools: DevTools = game.get_dev_tools()
+	if dev_tools == null or not dev_tools.is_available():
+		push_error("[fsp] the dev tools are unavailable (headless, or the imgui-godot addon is missing)")
 		_finish(1)
 		return
-	if not overlay.select_page(&"Stats"):
-		push_error("[fsp] overlay carries no Stats tab")
-		_finish(1)
-		return
+	dev_tools.set_open(true)
 	await ProbeClock.settle_ms(self, 500)
-	if not overlay.is_stats_capturing():
-		push_error("[fsp] the Stats tab did not open its capture window")
+	if not game.get_frame_stats().is_capture_active():
+		push_error("[fsp] the Stats window did not open its capture window")
 		_finish(1)
 		return
 
 	await ProbeClock.settle_ms(self, 2000)
-	var first := _snapshot_rows(overlay)
+	var first := _snapshot_rows(dev_tools)
 	_dump("READING 1", first)
 	await ProbeClock.settle_ms(self, 2000)
-	var second := _snapshot_rows(overlay)
+	var second := _snapshot_rows(dev_tools)
 	_dump("READING 2", second)
 
 	var missing := PackedStringArray()
@@ -112,10 +109,12 @@ func _run() -> void:
 		_finish(2)
 
 
-func _snapshot_rows(overlay) -> Dictionary:
+func _snapshot_rows(dev_tools: DevTools) -> Dictionary:
 	var out := {}
-	for row in overlay.get_stats_display_snapshot():
-		out[String(row.id)] = [row.average, row.peak, row.info]
+	for id in dev_tools.stats_row_ids():
+		var average := dev_tools.stats_row_average(id)
+		out[id] = [average if not average.is_empty() else "-",
+				dev_tools.stats_row_peak(id), dev_tools.stats_row_info(id)]
 	return out
 
 
@@ -134,7 +133,7 @@ func _dump(label: String, rows: Dictionary) -> void:
 			"occl_probe", "occl_apply", "occl_glue", "env", "audio", "after", "hud",
 			"hud_scalars", "hud_attach", "hud_waypoint", "hud_info", "hud_flush",
 			"other_process", "physics_callbacks", "deferred_flush",
-			"flush_queued", "hud_draw_compile", "hud_draw_emit", "debug_draw",
+			"flush_queued", "hud_draw_compile", "hud_draw_emit",
 			"flush_tail", "render_draw", "pacing_input",
 			"engine_frame",
 			"render", "render_main", "render_shadow", "render_root_cpu",

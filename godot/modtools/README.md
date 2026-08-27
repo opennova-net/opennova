@@ -14,6 +14,13 @@ from the former workspace UI. There is no project file, import database,
 asset browser, document model, preview runtime, workspace framework, or
 embedded MCP server.
 
+The surface is drawn by the engine: `OnedUi`
+(`engine/runtime/devtools/oned_ui.*`, [ADR 0039](../../docs/adr/0039-in-engine-dev-tools.md))
+is one Dear ImGui window rendered through the imgui-godot addon; `oned_app.gd`
+seeds its fields, pushes recents/readiness/status, and executes the typed
+requests it reports (run, stage & run, stop, browse, apply). Process
+spawning, the native directory dialogs and `user://oned.cfg` stay in GDScript.
+
 ## Loose OpenNova runs
 
 Run starts the sibling `opennova` executable through the standalone game's

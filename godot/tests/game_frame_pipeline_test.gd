@@ -41,7 +41,7 @@ class FakeWorld:
 	func render_foliage_frame() -> void:
 		foliage_camera_generation = camera_generation
 		trace.append("foliage")
-	func get_active_frame_stats_board() -> FrameStatsBoard: return null
+	func get_active_frame_stats() -> FrameStats: return null
 	func is_device_frame_timing_enabled() -> bool: return false
 	func record_runtime_frame(_elapsed_us: int) -> void: pass
 	func get_runtime() -> FakePresentation: return presentation

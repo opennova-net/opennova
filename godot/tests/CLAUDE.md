@@ -1,8 +1,11 @@
 # godot/tests/ — GUT suite
 
 - Run via `scripts/test_godot.sh` (headless; needs `GODOT_BIN` or a binary in the main
-  checkout's `.godot-bin/`). On a fresh worktree run
-  `"$GODOT_BIN" --headless --path godot --import` first, or engine classes appear missing.
+  checkout's `.godot-bin/`). On a fresh worktree run `scripts/bootstrap_godot.sh`
+  (installs GUT and the imgui-godot addon the `DevTools` node expects) and then
+  `"$GODOT_BIN" --headless --path godot --import`, or engine classes appear missing.
+  Headless runs never attach an ImGui context: `DevTools.is_available()` is false
+  there while its open state (F3, capture, input policy) still works and is tested.
 - Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
   `*_probe.gd` files are manual probes and are not collected.
 - Probes: extends-`SceneTree` scripts run

@@ -53,7 +53,7 @@ var _occlusion_node_cache: Dictionary = {}
 # The shared F3 frame-stats board (null outside the game shell), re-handed by
 # GameWorld wherever its own board changes: this pass lands the OCCL_* split
 # spans itself from apply_frame.
-var _frame_stats: FrameStatsBoard = null
+var _frame_stats: FrameStats = null
 # Mirrors GameWorld._perf_probe_enabled, written only at the probe toggle edge
 # (set_perf_probe_enabled): the manual A/B probe shares apply_frame's clock
 # reads with the F3 Stats capture, exactly as before the extraction.
@@ -70,7 +70,7 @@ func setup(world: GameWorld) -> void:
 	_world = world
 
 
-func set_frame_stats_board(board: FrameStatsBoard) -> void:
+func set_frame_stats(board: FrameStats) -> void:
 	_frame_stats = board
 
 
@@ -281,23 +281,23 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		_perf_occl_native_us = native_end - native_start
 		_perf_occl_apply_us = Time.get_ticks_usec() - native_end
 	if stats_on:
-		_frame_stats.add(FrameStatsBoard.OCCL_APPLY, _perf_occl_apply_us)
+		_frame_stats.add(FrameStats.OCCL_APPLY, _perf_occl_apply_us)
 		# The native call's internal split; the remainder of the bound call
 		# (marshalling + the handle collection) lands in the glue slot so the
 		# pane's Occlusion group still sums to the whole frame cost.
 		var build_us := int(sim.get_last_occlusion_build_us())
 		var probe_us := int(sim.get_last_occlusion_probe_us())
-		_frame_stats.add(FrameStatsBoard.OCCL_BUILD, build_us)
-		_frame_stats.add(FrameStatsBoard.OCCL_PROBE, probe_us)
-		_frame_stats.add(FrameStatsBoard.OCCL_GLUE,
+		_frame_stats.add(FrameStats.OCCL_BUILD, build_us)
+		_frame_stats.add(FrameStats.OCCL_PROBE, probe_us)
+		_frame_stats.add(FrameStats.OCCL_GLUE,
 				maxi(_perf_occl_native_us - build_us - probe_us, 0))
-		_frame_stats.add(FrameStatsBoard.OCCL_BUILDING_QUERY, building_query_us)
-		_frame_stats.add(FrameStatsBoard.OCCL_BUILDING_APPLY, building_apply_us)
-		_frame_stats.add(FrameStatsBoard.OCCL_CULL_QUERY, cull_query_us)
-		_frame_stats.add(FrameStatsBoard.OCCL_CULL_APPLY, cull_apply_us)
-		_frame_stats.add(FrameStatsBoard.OCCL_LIGHT_QUERY, light_query_us)
-		_frame_stats.add(FrameStatsBoard.OCCL_LIGHT_APPLY, light_apply_us)
-		_frame_stats.add(FrameStatsBoard.OCCL_WATER_APPLY, water_apply_us)
+		_frame_stats.add(FrameStats.OCCL_BUILDING_QUERY, building_query_us)
+		_frame_stats.add(FrameStats.OCCL_BUILDING_APPLY, building_apply_us)
+		_frame_stats.add(FrameStats.OCCL_CULL_QUERY, cull_query_us)
+		_frame_stats.add(FrameStats.OCCL_CULL_APPLY, cull_apply_us)
+		_frame_stats.add(FrameStats.OCCL_LIGHT_QUERY, light_query_us)
+		_frame_stats.add(FrameStats.OCCL_LIGHT_APPLY, light_apply_us)
+		_frame_stats.add(FrameStats.OCCL_WATER_APPLY, water_apply_us)
 
 
 ## The probe A/B seam, entering the occlusion skip: restore the water to the

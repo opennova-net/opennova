@@ -1,24 +1,20 @@
 class_name OnedApp
-extends Control
+extends Node
 
 ## ONED intentionally has one small surface. It remembers where game data and
 ## a retail install live, then owns one OpenNova-or-retail child process.
+##
+## The surface itself is the engine's ImGui window (OnedUi, ADR 0039): this
+## app seeds its fields, pushes the state only it has (recents, readiness, the
+## status line), and executes the typed requests the surface reports —
+## settings persistence, the native directory dialogs and the child process
+## stay here.
 
 const MIN_WINDOW_SIZE := Vector2i(760, 430)
-const RECENT_PLACEHOLDER := "__placeholder__"
-const CLEAR_RECENTS := "__clear__"
 
-@onready var resource_dir_edit: LineEdit = %ResourceDirEdit
-@onready var recent_dirs_option: OptionButton = %RecentDirsOption
-@onready var game_code_edit: LineEdit = %GameCodeEdit
-@onready var expansion_edit: LineEdit = %ExpansionEdit
-@onready var retail_dir_edit: LineEdit = %RetailDirEdit
-@onready var run_opennova_button: Button = %RunOpenNovaButton
-@onready var run_retail_button: Button = %RunRetailButton
-@onready var stop_button: Button = %StopButton
-@onready var status_label: Label = %StatusLabel
-@onready var resource_dir_dialog: FileDialog = %ResourceDirDialog
-@onready var retail_dir_dialog: FileDialog = %RetailDirDialog
+@onready var _ui: OnedUi = $Ui
+@onready var resource_dir_dialog: FileDialog = $ResourceDirDialog
+@onready var retail_dir_dialog: FileDialog = $RetailDirDialog
 
 var _session: GameRunSession
 var _previous_window_min_size := Vector2i.ZERO
@@ -37,7 +33,8 @@ func _ready() -> void:
 	_session = GameRunSession.new()
 	_session.status_changed.connect(_on_status_changed)
 	_session.state_changed.connect(_on_session_state_changed)
-	_connect_controls()
+	resource_dir_dialog.dir_selected.connect(_select_resource_dir)
+	retail_dir_dialog.dir_selected.connect(_select_retail_dir)
 	_load_settings()
 	_rebuild_recents()
 	_refresh_actions()
@@ -55,6 +52,7 @@ func _exit_tree() -> void:
 func _process(_delta: float) -> void:
 	if _session != null:
 		_session.poll()
+	_drain_requests()
 
 
 func _notification(what: int) -> void:
@@ -85,6 +83,17 @@ func _shortcut_input(event: InputEvent) -> void:
 
 func get_run_session() -> GameRunSession:
 	return _session
+
+
+## The surface seam: tests and automation drive the same edges the mouse does
+## (OnedUi.push_request) and read the same fields the window shows.
+func get_ui() -> OnedUi:
+	return _ui
+
+
+## Execute every queued surface request now (the frame loop does this each frame).
+func drain_ui_requests() -> void:
+	_drain_requests()
 
 
 ## Replace the managed run session (tests inject a stub); its status and
@@ -123,7 +132,7 @@ func should_persist_resource_dir() -> bool:
 ## Show `path` as the implicit packaged-assets fallback: displayed, never
 ## persisted until the user types over it.
 func set_implicit_resource_dir(path: String) -> void:
-	resource_dir_edit.text = path
+	_ui.set_resource_dir(path)
 	_resource_dir_is_implicit = true
 	_implicit_resource_dir = path
 	_refresh_actions()
@@ -134,28 +143,43 @@ static func bundled_assets_dir(executable_dir: String) -> String:
 	return candidate if ResourceDirSettings.is_valid_root(candidate) else ""
 
 
-func _connect_controls() -> void:
-	%BrowseResourceButton.pressed.connect(_browse_resource_dir)
-	%BrowseRetailButton.pressed.connect(_browse_retail_dir)
-	resource_dir_dialog.dir_selected.connect(_select_resource_dir)
-	retail_dir_dialog.dir_selected.connect(_select_retail_dir)
-	recent_dirs_option.item_selected.connect(_select_recent)
-	run_opennova_button.pressed.connect(_run_opennova)
-	run_retail_button.pressed.connect(_run_retail)
-	stop_button.pressed.connect(_stop_game)
+func _drain_requests() -> void:
+	if _ui == null:
+		return
+	while true:
+		var request: OnedUiRequest = _ui.take_request()
+		if request == null:
+			return
+		_handle_request(request)
 
-	resource_dir_edit.text_changed.connect(_on_resource_dir_text_changed)
-	game_code_edit.text_changed.connect(func(_text: String) -> void: _refresh_actions())
-	expansion_edit.text_changed.connect(func(_text: String) -> void: _refresh_actions())
-	retail_dir_edit.text_changed.connect(func(_text: String) -> void: _refresh_actions())
-	resource_dir_edit.text_submitted.connect(func(_text: String) -> void: _apply_resource_dir())
-	game_code_edit.text_submitted.connect(func(_text: String) -> void: _commit_profile())
-	expansion_edit.text_submitted.connect(func(_text: String) -> void: _commit_profile())
-	retail_dir_edit.text_submitted.connect(func(_text: String) -> void: _apply_retail_dir())
-	resource_dir_edit.focus_exited.connect(_apply_resource_dir)
-	game_code_edit.focus_exited.connect(_commit_profile)
-	expansion_edit.focus_exited.connect(_commit_profile)
-	retail_dir_edit.focus_exited.connect(_apply_retail_dir)
+
+func _handle_request(request: OnedUiRequest) -> void:
+	match request.action:
+		OnedUi.EDIT_RESOURCE_DIR:
+			# A keystroke over the displayed fallback makes it the user's value.
+			_resource_dir_is_implicit = false
+			_refresh_actions()
+		OnedUi.APPLY_RESOURCE_DIR:
+			_apply_resource_dir()
+		OnedUi.APPLY_RETAIL_DIR:
+			_apply_retail_dir()
+		OnedUi.COMMIT_PROFILE:
+			_commit_profile()
+		OnedUi.BROWSE_RESOURCE_DIR:
+			_open_dir_dialog(resource_dir_dialog, _ui.get_resource_dir())
+		OnedUi.BROWSE_RETAIL_DIR:
+			_open_dir_dialog(retail_dir_dialog, _ui.get_retail_dir())
+		OnedUi.SELECT_RECENT:
+			_select_recent(request.index)
+		OnedUi.CLEAR_RECENTS:
+			OnedSettings.clear_recent_dirs()
+			_rebuild_recents()
+		OnedUi.RUN_OPENNOVA:
+			_run_opennova()
+		OnedUi.RUN_RETAIL:
+			_run_retail()
+		OnedUi.STOP:
+			_stop_game()
 
 
 func _load_settings() -> void:
@@ -163,51 +187,43 @@ func _load_settings() -> void:
 	var use_bundled_default := configured.is_empty()
 	if use_bundled_default:
 		configured = bundled_assets_dir(OS.get_executable_path().get_base_dir())
-	resource_dir_edit.text = configured
-	# Record this after assigning the field so merely displaying the packaged
+	_ui.set_resource_dir(configured)
+	# Record this after seeding the field so merely displaying the packaged
 	# assets/ fallback never turns it into persisted user state.
 	_resource_dir_is_implicit = use_bundled_default
 	_implicit_resource_dir = configured if use_bundled_default else ""
-	game_code_edit.text = OnedSettings.get_game()
-	expansion_edit.text = OnedSettings.get_expansion()
-	retail_dir_edit.text = OnedSettings.get_retail_dir()
+	_ui.set_game_code(OnedSettings.get_game())
+	_ui.set_expansion(OnedSettings.get_expansion())
+	_ui.set_retail_dir(OnedSettings.get_retail_dir())
 
 
 func _commit_settings() -> void:
 	if _should_persist_resource_dir():
-		OnedSettings.set_resource_dir(resource_dir_edit.text)
-	OnedSettings.set_game(game_code_edit.text)
-	OnedSettings.set_expansion(expansion_edit.text)
-	OnedSettings.set_retail_dir(retail_dir_edit.text)
+		OnedSettings.set_resource_dir(_ui.get_resource_dir())
+	OnedSettings.set_game(_ui.get_game_code())
+	OnedSettings.set_expansion(_ui.get_expansion())
+	OnedSettings.set_retail_dir(_ui.get_retail_dir())
 
 
 func _apply_resource_dir() -> void:
 	if _should_persist_resource_dir():
 		_resource_dir_is_implicit = false
-		OnedSettings.set_resource_dir(resource_dir_edit.text)
+		OnedSettings.set_resource_dir(_ui.get_resource_dir())
 	_rebuild_recents()
 	_refresh_actions()
 
 
 func _apply_retail_dir() -> void:
-	OnedSettings.set_retail_dir(retail_dir_edit.text)
+	OnedSettings.set_retail_dir(_ui.get_retail_dir())
 	_refresh_actions()
 
 
 func _commit_profile() -> void:
-	OnedSettings.set_game(game_code_edit.text)
-	OnedSettings.set_expansion(expansion_edit.text)
-	game_code_edit.text = OnedSettings.get_game()
-	expansion_edit.text = OnedSettings.get_expansion()
+	OnedSettings.set_game(_ui.get_game_code())
+	OnedSettings.set_expansion(_ui.get_expansion())
+	_ui.set_game_code(OnedSettings.get_game())
+	_ui.set_expansion(OnedSettings.get_expansion())
 	_refresh_actions()
-
-
-func _browse_resource_dir() -> void:
-	_open_dir_dialog(resource_dir_dialog, resource_dir_edit.text)
-
-
-func _browse_retail_dir() -> void:
-	_open_dir_dialog(retail_dir_dialog, retail_dir_edit.text)
 
 
 func _open_dir_dialog(dialog: FileDialog, current: String) -> void:
@@ -219,63 +235,43 @@ func _open_dir_dialog(dialog: FileDialog, current: String) -> void:
 
 func _select_resource_dir(path: String) -> void:
 	_resource_dir_is_implicit = false
-	resource_dir_edit.text = path
+	_ui.set_resource_dir(path)
 	_apply_resource_dir()
 
 
 func _select_retail_dir(path: String) -> void:
-	retail_dir_edit.text = path
+	_ui.set_retail_dir(path)
 	_apply_retail_dir()
 
 
 func _rebuild_recents() -> void:
-	recent_dirs_option.clear()
-	recent_dirs_option.add_item("Recent resource directories…")
-	recent_dirs_option.set_item_metadata(0, RECENT_PLACEHOLDER)
-	recent_dirs_option.set_item_disabled(0, true)
-	for dir in OnedSettings.get_recent_dirs():
-		recent_dirs_option.add_item(String(dir))
-		recent_dirs_option.set_item_metadata(recent_dirs_option.item_count - 1, String(dir))
-	if recent_dirs_option.item_count > 1:
-		recent_dirs_option.add_separator()
-		recent_dirs_option.add_item("Clear recent directories")
-		recent_dirs_option.set_item_metadata(recent_dirs_option.item_count - 1, CLEAR_RECENTS)
-	recent_dirs_option.select(0)
+	_ui.set_recent_dirs(OnedSettings.get_recent_dirs())
 
 
 func _select_recent(index: int) -> void:
-	var value := String(recent_dirs_option.get_item_metadata(index))
-	if value == CLEAR_RECENTS:
-		OnedSettings.clear_recent_dirs()
-		_rebuild_recents()
-		return
-	if value == RECENT_PLACEHOLDER or value.is_empty():
+	var dirs := OnedSettings.get_recent_dirs()
+	if index < 0 or index >= dirs.size():
 		return
 	_resource_dir_is_implicit = false
-	resource_dir_edit.text = value
+	_ui.set_resource_dir(dirs[index])
 	_apply_resource_dir()
 
 
-func _on_resource_dir_text_changed(_text: String) -> void:
-	_resource_dir_is_implicit = false
-	_refresh_actions()
-
-
 func _should_persist_resource_dir() -> bool:
-	return not _resource_dir_is_implicit or resource_dir_edit.text != _implicit_resource_dir
+	return not _resource_dir_is_implicit or _ui.get_resource_dir() != _implicit_resource_dir
 
 
 func _run_opennova() -> void:
 	_commit_settings()
 	_rebuild_recents()
-	_session.run_opennova(resource_dir_edit.text, game_code_edit.text, expansion_edit.text)
+	_session.run_opennova(_ui.get_resource_dir(), _ui.get_game_code(), _ui.get_expansion())
 	_refresh_actions()
 
 
 func _run_retail() -> void:
 	_commit_settings()
 	_rebuild_recents()
-	_session.run_retail(resource_dir_edit.text, retail_dir_edit.text)
+	_session.run_retail(_ui.get_resource_dir(), _ui.get_retail_dir())
 	_refresh_actions()
 
 
@@ -288,20 +284,13 @@ func _stop_game() -> void:
 
 
 func _refresh_actions() -> void:
-	if _session == null:
+	if _session == null or _ui == null:
 		return
-	var open_reason := _session.opennova_readiness(
-			resource_dir_edit.text, game_code_edit.text, expansion_edit.text)
-	run_opennova_button.disabled = not open_reason.is_empty()
-	run_opennova_button.tooltip_text = open_reason if not open_reason.is_empty() \
-			else "Run OpenNova directly from this loose or packed game-data directory (F5)."
-
-	var retail_reason := _session.retail_readiness(resource_dir_edit.text, retail_dir_edit.text)
-	run_retail_button.disabled = not retail_reason.is_empty()
-	run_retail_button.tooltip_text = retail_reason if not retail_reason.is_empty() \
-			else "Stage the selected game data and run the retail install (F7)."
-	stop_button.disabled = not _session.is_running()
-	stop_button.tooltip_text = "Stop the managed process (F8)."
+	_ui.set_readiness(
+			_session.opennova_readiness(
+					_ui.get_resource_dir(), _ui.get_game_code(), _ui.get_expansion()),
+			_session.retail_readiness(_ui.get_resource_dir(), _ui.get_retail_dir()),
+			_session.is_running())
 
 
 func _on_status_changed(text: String, kind: StringName) -> void:
@@ -313,13 +302,8 @@ func _on_session_state_changed(_state: Dictionary) -> void:
 
 
 func _show_status(text: String, kind: StringName = &"info") -> void:
-	status_label.text = text
-	var color := Color("b8c0cc")
-	if kind == &"error":
-		color = Color("ff8f8f")
-	elif kind == &"warn":
-		color = Color("ffd37a")
-	status_label.add_theme_color_override("font_color", color)
+	if _ui != null:
+		_ui.set_status(text, kind)
 
 
 func _configure_window() -> void:

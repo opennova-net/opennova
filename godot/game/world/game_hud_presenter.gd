@@ -299,11 +299,11 @@ var _perf_probe_spans: Dictionary = {}
 
 # The shared F3 frame-stats board (null outside the game shell): while its
 # Stats tab captures, the tick's phase spans land there as HUD_* slots.
-var _frame_stats: FrameStatsBoard = null
+var _frame_stats: FrameStats = null
 var _hud_draw_timing_armed := false
 
 
-func set_frame_stats_board(board: FrameStatsBoard) -> void:
+func set_frame_stats(board: FrameStats) -> void:
 	_frame_stats = board
 
 
@@ -337,8 +337,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 		# while the board captures (the setter is edge-gated natively).
 		_game_hud.set_draw_timing_enabled(true)
 		var draw_us: PackedInt64Array = _game_hud.consume_draw_timing_us()
-		_frame_stats.add(FrameStatsBoard.HUD_DRAW_COMPILE, int(draw_us[0]))
-		_frame_stats.add(FrameStatsBoard.HUD_DRAW_EMIT, int(draw_us[1]))
+		_frame_stats.add(FrameStats.HUD_DRAW_COMPILE, int(draw_us[0]))
+		_frame_stats.add(FrameStats.HUD_DRAW_EMIT, int(draw_us[1]))
 	elif _hud_draw_timing_armed:
 		_game_hud.set_draw_timing_enabled(false)
 	_hud_draw_timing_armed = stats_on
@@ -538,11 +538,11 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_perf_probe_spans["update_info"] = probe_t4 - probe_t3
 			_perf_probe_spans["flush"] = probe_t5 - probe_t4
 		if stats_on:
-			_frame_stats.add(FrameStatsBoard.HUD_SCALARS, probe_t1 - probe_t0)
-			_frame_stats.add(FrameStatsBoard.HUD_ATTACH, probe_t2 - probe_t1)
-			_frame_stats.add(FrameStatsBoard.HUD_WAYPOINT, probe_t3 - probe_t2)
-			_frame_stats.add(FrameStatsBoard.HUD_INFO, probe_t4 - probe_t3)
-			_frame_stats.add(FrameStatsBoard.HUD_FLUSH, probe_t5 - probe_t4)
+			_frame_stats.add(FrameStats.HUD_SCALARS, probe_t1 - probe_t0)
+			_frame_stats.add(FrameStats.HUD_ATTACH, probe_t2 - probe_t1)
+			_frame_stats.add(FrameStats.HUD_WAYPOINT, probe_t3 - probe_t2)
+			_frame_stats.add(FrameStats.HUD_INFO, probe_t4 - probe_t3)
+			_frame_stats.add(FrameStats.HUD_FLUSH, probe_t5 - probe_t4)
 
 
 # The HUD's presentation clock driving the fade/message timers — the engine's
