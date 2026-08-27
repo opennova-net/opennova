@@ -5,7 +5,7 @@
 // engine/formats/trn save_trn (no retail asset), it models a small flat map
 // after fixtures/godot/dvxi5/Dvxi5.trn and is guarded by a round-trip check.
 //
-// Emit with OPENNOVA_WRITE_MINIMAL_FIXTURES=1; else guard the config loads and
+// Emit with `--write`; else guard the config loads and
 // carries the expected references.
 #include <formats/trn/trn_io.h>
 
@@ -14,6 +14,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <cstring>
 
 using namespace opennova;
 
@@ -69,8 +70,11 @@ TrnConfig build_config() {
 
 } // namespace
 
-int main() {
-	const bool write_mode = std::getenv("OPENNOVA_WRITE_MINIMAL_FIXTURES") != nullptr;
+int main(int argc, char **argv) {
+	// `--write` regenerates the committed file; the ctest registration passes nothing.
+	bool write_mode = false;
+	for (int i = 1; i < argc; ++i)
+		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
 	const TrnConfig cfg = build_config();
 
 	std::ostringstream os;
@@ -102,7 +106,7 @@ int main() {
 		std::printf("wrote %s (%zu bytes)\n", trn_path.c_str(), text.size());
 	} else {
 		std::ifstream f(trn_path, std::ios::binary);
-		CHECK(f.good(), "committed mnml.trn missing — run with OPENNOVA_WRITE_MINIMAL_FIXTURES=1");
+		CHECK(f.good(), "committed mnml.trn missing — run with --write");
 		if (f.good()) {
 			std::stringstream buf;
 			buf << f.rdbuf();

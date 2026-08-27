@@ -14,7 +14,7 @@
       rows instead of echoing the shipped values.
 
    Asset-gated on OPENNOVA_JO_ASSETS (an extracted JO assets dir, e.g. JOX);
-   skip-as-pass without it (docs/asset-gated-tests.md). Rig lookup is the
+   reports Skipped without it (docs/asset-gated-tests.md). Rig lookup is the
    runtime pairing the pytest used: parts from the .3di LOD0 render-object
    table, bones from the .adm's anim_reset .bad, all names matched
    case-insensitively over the flat directory. */
@@ -35,6 +35,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 namespace fs = std::filesystem;
 using opennova::anim::Vec3;
@@ -238,12 +239,9 @@ bool check_broken(const char *name, const Rig &rig) {
 } // namespace
 
 int main() {
-    const char *jox = std::getenv("OPENNOVA_JO_ASSETS");
-    if (jox == nullptr || jox[0] == '\0') {
-        std::fprintf(stderr,
-                     "anim_positions_from_model_corpus: skipped (set OPENNOVA_JO_ASSETS to an extracted JO assets dir; skip == pass)\n");
-        return 0;
-    }
+    RETAIL_REQUIRE_OR_SKIP(assets, retail::assets(),
+            "OPENNOVA_JO_ASSETS (an extracted JO asset tree with the .3di/.adm corpus)");
+    const char *jox = assets.c_str();
 
     FileMap files;
     std::error_code ec;

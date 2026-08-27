@@ -9,8 +9,8 @@
 // receives its route order, a trigger family we evaluate as permanently
 // false, an action type we drop on the floor.
 //
-// Gated on OPENNOVA_JO_DIR; mission selectable with OPENNOVA_BMS (default
-// 05TRcoop.bms), tick budget with OPENNOVA_TICKS (default 40000 ≈ 10 min).
+// Gated on OPENNOVA_JO_DIR (reports Skipped without the install); the pinned
+// case is 05TRcoop.bms over 40000 ticks (≈ 10 min of mission time).
 #include <formats/mission/bms.h>
 #include <runtime/mission/event_runtime.h>
 #include <runtime/mission/promote.h>
@@ -26,6 +26,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -57,15 +58,13 @@ const char *action_name(bms::ActionType t) {
 } // namespace
 
 int main() {
-	const char *dir = std::getenv("OPENNOVA_JO_DIR");
-	if (dir == nullptr || *dir == '\0') {
-		std::printf("mission script report: SKIP (OPENNOVA_JO_DIR not set)\n");
-		return 0;
-	}
-	const char *bms_name = std::getenv("OPENNOVA_BMS");
-	const std::string mission_file = bms_name && *bms_name ? bms_name : "05TRcoop.bms";
-	const char *tick_env = std::getenv("OPENNOVA_TICKS");
-	const int ticks = (tick_env && *tick_env) ? std::atoi(tick_env) : 40000;
+	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
+			"OPENNOVA_JO_DIR (a retail JO install carrying 05TRcoop.bms)");
+	const char *dir = install.c_str();
+	// The pinned case: the co-op training mission over the same tick budget the
+	// live 430 s capture baseline covers.
+	const std::string mission_file = "05TRcoop.bms";
+	const int ticks = 40000;
 
 	const std::string path = std::string(dir) + "/" + mission_file;
 	std::ifstream f(path, std::ios::binary);
@@ -372,8 +371,7 @@ int main() {
 	// the body from zone to zone, and a greedy search picks each next hop by how
 	// much it unlocks - walking the mission forward the way a player would.
 	{
-		const char *sweep_env = std::getenv("OPENNOVA_ZONE_SWEEP");
-		const int hop_ticks = (sweep_env && *sweep_env) ? std::atoi(sweep_env) : 4000;
+		const int hop_ticks = 4000;
 		int registered = 0;
 		while (world.registry.area(registered) != nullptr) ++registered;
 		std::vector<std::pair<float, float>> centre(registered);

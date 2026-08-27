@@ -6,8 +6,8 @@
 // Covers the room-transition chain the hand-built unit fixtures cannot: real
 // authored OFAC topology, real blink-box/section/render-part correspondence.
 //
-// Asset-gated on OPENNOVA_JO_ASSETS (the extracted JO corpus); SKIP-AS-PASS
-// when unset or when Armry01.3di is absent (docs/asset-gated-tests.md).
+// Runs on the committed fixture; OPENNOVA_JO_ASSETS (the extracted JO corpus)
+// substitutes the retail Armry01.3di when set (docs/asset-gated-tests.md).
 //
 // Armry01 ground truth (mission axes, entity-local; model = (-y, z, x)):
 //   blink sec 1 = east room   x  1.1.. 5.7, y -3.2..2.8   (carries the window)
@@ -32,6 +32,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
+#include "common/retail_paths.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -224,9 +225,11 @@ struct Rig {
 } // namespace
 
 int main() {
+    // The committed fixture by default; an extracted retail tree
+    // (OPENNOVA_JO_ASSETS) substitutes its own Armry01.3di when present.
     std::string path = OPENNOVA_ARMRY_FIXTURE;
-    const char *assets = std::getenv("OPENNOVA_JO_ASSETS");
-    if (assets != nullptr && assets[0] != '\0') path = std::string(assets) + "/Armry01.3di";
+    const std::string assets = retail::assets();
+    if (!assets.empty()) path = assets + "/Armry01.3di";
     if (path.empty()) {
         std::fprintf(stderr, "FAIL: no Armry01.3di fixture path configured\n");
         return 1;

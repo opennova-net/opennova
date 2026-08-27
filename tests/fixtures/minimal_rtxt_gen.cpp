@@ -9,7 +9,7 @@
 //
 // Default: regenerate each table in memory, assert it byte-matches the
 // committed file and round-trips (parse->write is byte-stable). Run with
-// OPENNOVA_WRITE_MINIMAL_FIXTURES=1 to (re)write the committed files.
+// `--write` (re)writes the committed files.
 #include <formats/rtxt/rtxt.h>
 
 #include <cstdint>
@@ -147,7 +147,7 @@ int run(const std::string &dir, bool write_mode) {
 			std::vector<uint8_t> committed;
 			if (!expect(read_file(path, committed),
 			            (std::string("committed ") + t.name + " missing — run with "
-			                                                  "OPENNOVA_WRITE_MINIMAL_FIXTURES=1")
+			                                                  "--write")
 			                .c_str())) {
 				++failures;
 				continue;
@@ -162,7 +162,7 @@ int run(const std::string &dir, bool write_mode) {
 			}
 			if (!expect(committed == bytes,
 			            (std::string(t.name) + " committed bytes differ from the writer output — "
-			                                    "regenerate with OPENNOVA_WRITE_MINIMAL_FIXTURES=1")
+			                                    "regenerate with --write")
 			                .c_str()))
 				++failures;
 		}
@@ -172,11 +172,14 @@ int run(const std::string &dir, bool write_mode) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
 #ifndef GAME_ASSETS_DIR
 #define GAME_ASSETS_DIR "."
 #endif
-	const bool write_mode = std::getenv("OPENNOVA_WRITE_MINIMAL_FIXTURES") != nullptr;
+	// `--write` regenerates the committed tables; the ctest registration passes nothing.
+	bool write_mode = false;
+	for (int i = 1; i < argc; ++i)
+		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
 	const int failures = run(GAME_ASSETS_DIR, write_mode);
 	if (failures == 0) std::printf("OK: minimal RTXT fatal-set tables valid + byte-reproducible\n");
 	return failures == 0 ? 0 : 1;

@@ -2,9 +2,9 @@
 // .bms missions. The first write is the OpenNova canonical form; the second write must be byte-identical
 // to that canonical form and bms::equal must report the same modeled mission.
 //
-// The corpus is copyrighted game data and is NOT committed. The test is gated on the env var
-// OPENNOVA_MISSION_CORPUS (point it at e.g. an extracted JO_ASSETS dir). When the var is unset the
-// test prints a skip line and passes, so it never runs bare in CI.
+// The corpus is copyrighted game data and is NOT committed. The test is gated on
+// OPENNOVA_MISSION_CORPUS (a directory of retail .bms, e.g. an extracted JOX tree);
+// without it the test reports Skipped, so it never runs bare in CI.
 
 #include <algorithm>
 #include <cstdint>
@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <formats/mission/bms.h>
+#include "common/retail_paths.h"
 
 namespace fs = std::filesystem;
 
@@ -115,12 +116,9 @@ bool check_mission(const fs::path &path) {
 } // namespace
 
 int main() {
-	const char *corpus_env = std::getenv("OPENNOVA_MISSION_CORPUS");
-	if (corpus_env == nullptr || corpus_env[0] == '\0') {
-		std::fprintf(stderr,
-		             "mission_corpus: skipped (set OPENNOVA_MISSION_CORPUS to a dir of real .bms files)\n");
-		return 0;
-	}
+	RETAIL_REQUIRE_OR_SKIP(corpus, retail::mission_corpus(),
+			"OPENNOVA_MISSION_CORPUS (a directory of retail .bms missions)");
+	const char *corpus_env = corpus.c_str();
 
 	const fs::path corpus_dir(corpus_env);
 	std::error_code ec;

@@ -1,6 +1,6 @@
 // P3 golden — validate the §5.2a initial-state burst ORDER against the retail LAN host/join capture
-// (.scratch/golden/retail-lan-host-join.pcapng). Env-gated on NW_GOLDEN_LAN_JOIN with a DEFAULT_*
-// fallback; skips cleanly when the gitignored golden is absent (no committed derived oracle).
+// (.scratch/golden/retail-lan-host-join.pcapng). Gated on
+// <OPENNOVA_CAPTURES>/golden; reports Skipped when the gitignored golden is absent (no committed derived oracle).
 //
 // WHAT THIS PROVES (the structural P3 bar, honestly scoped):
 //   Decoded host->joiner S2C stream — the burst a RETAIL host emits — appears in the §5.2a order our
@@ -26,10 +26,7 @@
 #include <map>
 #include <string>
 #include <vector>
-
-#ifndef DEFAULT_LAN_JOIN_PCAP
-#define DEFAULT_LAN_JOIN_PCAP ""
-#endif
+#include "common/retail_paths.h"
 
 namespace {
 using namespace opennova;
@@ -63,18 +60,11 @@ int main() {
 	            "golden order helper fails closed when a required tag is absent"))
 		return 1;
 
-	std::string path;
-	if (const char *env = std::getenv("NW_GOLDEN_LAN_JOIN"); env && *env)
-		path = env;
-	else
-		path = DEFAULT_LAN_JOIN_PCAP;
+	const std::string path = retail::golden("retail-lan-host-join.pcapng");
 
 	std::vector<net::PcapDatagram> pkts;
-	if (path.empty() || !net::read_pcap_udp_file(path, pkts)) {
-		std::printf("[skip] golden LAN host/join capture not found (set NW_GOLDEN_LAN_JOIN) — '%s'\n",
-		            path.c_str());
-		return 0; // skip clean — CI stays green without the gitignored golden
-	}
+	if (!net::read_pcap_udp_file(path, pkts))
+		return retail::skip("<OPENNOVA_CAPTURES>/golden/retail-lan-host-join.pcapng (the golden LAN host/join capture)");
 
 	// Outer-decode the whole capture (recovers each side's SCRK from the handshake as it streams by).
 	std::vector<CaptureDatagram> caps;

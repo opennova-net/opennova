@@ -10,7 +10,7 @@
 // Nothing is generated here any more: every byte, the baked mnml.cpt included, is authored
 // in ONED and committed. The tool READS assets/ and never writes into it — it once wrote its
 // generated music banks over the committed ones. It SKIPS clean unless asked, because it
-// writes files: OPENNOVA_BUILD_MINIMAL_PFF=1 or OPENNOVA_MINIMAL_INSTALL=<dir>. See
+// writes files: `--write-pff` or `--install <dir>` on the test binary. See
 // assets/README.md.
 #include <formats/pff/pff.h>
 
@@ -24,6 +24,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "common/retail_paths.h"
+
+#include <cstring>
 
 namespace fs = std::filesystem;
 
@@ -218,7 +221,7 @@ bool emit_loose_install(const fs::path &out, const fs::path &root,
 	//   * game.cfg matters: on a FIRST launch with no config, retail's video
 	//     enumeration hangs before the menu (reproduced 2026-08-23). Seeding the
 	//     install's config skips that. It is machine state, not game content.
-	if (const char *jo = std::getenv("OPENNOVA_JO_DIR")) {
+	if (const std::string jo = retail::install(); !jo.empty()) {
 		const fs::path src(jo);
 		auto copy_one = [&](const fs::path &from, const char *to) {
 			std::error_code e;
@@ -247,17 +250,20 @@ constexpr size_t count_of(const char *const (&)[N]) { return N; }
 
 } // namespace
 
-int main() {
-	// Two layouts over one committed tree: OPENNOVA_BUILD_MINIMAL_PFF=1 writes the three
-	// boot-table archives into assets/ (the retail-validated packed shape; the .pffs are
-	// gitignored there); OPENNOVA_MINIMAL_INSTALL=<dir> assembles a runnable loose install.
-	const char *install_env = std::getenv("OPENNOVA_MINIMAL_INSTALL");
-	const bool want_pff = std::getenv("OPENNOVA_BUILD_MINIMAL_PFF") != nullptr;
-	if (!want_pff && install_env == nullptr) {
-		std::printf("[skip] set OPENNOVA_BUILD_MINIMAL_PFF=1 to write the boot-table archives into "
-		            "assets/, or OPENNOVA_MINIMAL_INSTALL=<dir> for a runnable loose install\n");
-		return 0; // writes files: opt-in, not run per build
+int main(int argc, char **argv) {
+	// Two layouts over one committed tree: `--write-pff` writes the three
+	// boot-table archives into assets/ (the retail-validated packed shape; the
+	// .pffs are gitignored there); `--install <dir>` assembles a runnable loose
+	// install. Both write files, so they are opt-in: the ctest registration
+	// passes neither and the run reports Skipped.
+	const char *install_env = nullptr;
+	bool want_pff = false;
+	for (int i = 1; i < argc; ++i) {
+		if (std::strcmp(argv[i], "--write-pff") == 0) want_pff = true;
+		else if (std::strcmp(argv[i], "--install") == 0 && i + 1 < argc) install_env = argv[++i];
 	}
+	if (!want_pff && install_env == nullptr)
+		return retail::skip("--write-pff (boot-table archives into assets/) or --install <dir> (a runnable loose install)");
 
 	const fs::path root(dir());
 	if (!sources_present(root, {kLanguage, kLocalres, kResource, kLoose},
@@ -277,8 +283,8 @@ int main() {
 		return 1;
 
 	if (!want_pff) {
-		std::printf("OK: loose install assembled (set OPENNOVA_BUILD_MINIMAL_PFF=1 "
-		            "to also write the boot-table archives)\n");
+		std::printf("OK: loose install assembled (add --write-pff to also write the "
+		            "boot-table archives)\n");
 		return 0;
 	}
 

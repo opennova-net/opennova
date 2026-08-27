@@ -30,6 +30,7 @@
 #include <vector>
 
 #include <formats/bad/bad.h>
+#include "common/retail_paths.h"
 
 static int failures = 0;
 #define CHECK(c)                                                                       \
@@ -59,8 +60,9 @@ int main(int argc, char **argv) {
     std::vector<ClipCase> cases;
     if (argc > 1) {
         for (int i = 1; i < argc; ++i) cases.push_back({argv[i], 0.1, 10.0});
-    } else if (const char *jox = std::getenv("OPENNOVA_JO_ASSETS")) {
-        const std::string base(jox);
+    } else {
+        RETAIL_REQUIRE_OR_SKIP(base, retail::assets(),
+                "OPENNOVA_JO_ASSETS (an extracted JO asset tree with the gait .bad clips)");
         cases = {
             {base + "/I_walkf.bad", 0.5, 3.0},
             {base + "/E_RUNF.bad", 2.0, 8.0},
@@ -140,10 +142,7 @@ int main(int argc, char **argv) {
         bad_free(&bf);
     }
 
-    if (tested == 0) {
-        std::printf("root_motion_test: skipped (no assets)\n");
-        return 0;
-    }
+    if (tested == 0) return retail::skip("the gait clips (I_walkf.bad, E_RUNF.bad) under the asset tree");
     if (failures == 0) std::printf("root_motion_test: OK (%d clips)\n", tested);
     else std::printf("root_motion_test: %d FAILED\n", failures);
     return failures == 0 ? 0 : 1;

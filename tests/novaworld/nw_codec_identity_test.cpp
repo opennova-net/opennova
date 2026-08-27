@@ -13,7 +13,7 @@
 // Updating a vector is a WIRE-FORMAT CHANGE and needs a wire witness (the
 // [orig] citation on the encoder, or a D-NET divergence entry) in the same
 // commit — never update a hash to make a refactor pass. To regenerate after
-// a witnessed change: NW_CODEC_DUMP=1 ./nw_codec_identity_test prints the
+// a witnessed change: `nw_codec_identity_test --dump` prints the
 // replacement table.
 //
 // Inputs mirror nw_ingame_encode_test's proven constructions (all-flags +
@@ -496,12 +496,17 @@ void print_hex(const std::vector<uint8_t> &bytes) {
 
 } // namespace
 
-int main() {
+// `nw_codec_identity_test --dump` prints the replacement vector table; the
+// ctest registration passes nothing. Updating a vector is a wire-format change
+// (docs/asset-gated-tests.md, tier 1).
+int main(int argc, char **argv) {
 	const std::vector<Case> corpus = build_corpus();
 
-	if (const char *d = std::getenv("NW_CODEC_DUMP"); d && *d) {
-		dump(corpus);
-		return 0;
+	for (int i = 1; i < argc; ++i) {
+		if (std::strcmp(argv[i], "--dump") == 0) {
+			dump(corpus);
+			return 0;
+		}
 	}
 
 	const size_t expected_count = sizeof(kExpected) / sizeof(kExpected[0]);
@@ -509,7 +514,7 @@ int main() {
 
 	if (expected_count != corpus.size()) {
 		std::printf("FAIL: corpus has %zu cases but %zu vectors are committed "
-		            "(regenerate with NW_CODEC_DUMP=1 — wire-witness rule applies)\n",
+		            "(regenerate with --dump — wire-witness rule applies)\n",
 		            corpus.size(), expected_count);
 		++failures;
 	}
@@ -533,7 +538,7 @@ int main() {
 		std::printf("\n%d codec identity vector(s) diverged. The wire bytes "
 		            "changed: if unintentional, fix the codec; if witnessed, "
 		            "update the vectors in the SAME commit as the [orig]/D-NET "
-		            "justification (NW_CODEC_DUMP=1 prints the table).\n",
+		            "justification (--dump prints the table).\n",
 		            failures);
 		return 1;
 	}

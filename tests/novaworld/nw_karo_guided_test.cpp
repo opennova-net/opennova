@@ -18,18 +18,15 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/wire_capture.h>
 #include <base/pcapio/pcap_reader.h>
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
 int main() {
-	std::string path;
-	if (const char *env = std::getenv("NW_KARO_GUIDED_PCAP"); env && *env) path = env;
+	const std::string path = retail::capture("karo-guided.pcapng");
 	std::vector<net::PcapDatagram> pkts;
-	if (path.empty() || !net::read_pcap_udp_file(path, pkts)) {
-		std::printf("[skip] Karo guided capture not found (set NW_KARO_GUIDED_PCAP) — '%s'\n",
-		            path.c_str());
-		return 0;   // skip clean — CI stays green without the local capture
-	}
+	if (!net::read_pcap_udp_file(path, pkts))
+		return retail::skip("<OPENNOVA_CAPTURES>/karo-guided.pcapng (the Karo Highlands Stinger capture, D-NET-64)");
 
 	std::vector<CaptureDatagram> caps;
 	for (const net::PcapDatagram &p : pkts) {

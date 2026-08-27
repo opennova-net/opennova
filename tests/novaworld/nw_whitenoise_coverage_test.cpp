@@ -28,9 +28,9 @@
 //       sub_op 0x0A (no guided field-groups → D-NET-64 stays open), and there is
 //       no S2C 0x44 entity-routed nor S2C 0x59 deployed-item traffic.
 //
-// Reads the pcap directly via the shared apps/common reader; path from
-// NW_WHITENOISE_PCAP else DEFAULT_WHITENOISE_PCAP. Skips cleanly when the capture
-// is absent (.scratch is untracked) so CI stays green.
+// Reads the pcap directly via the shared apps/common reader from
+// <OPENNOVA_CAPTURES>/operation_whitenoise.pcapng; reports Skipped when the
+// capture is absent (.scratch is untracked).
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_catalog.h>
@@ -47,14 +47,11 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
 namespace {
-
-#ifndef DEFAULT_WHITENOISE_PCAP
-#define DEFAULT_WHITENOISE_PCAP ""
-#endif
 
 int g_failures = 0;
 void check(bool cond, const std::string &what) {
@@ -140,18 +137,11 @@ bool consume_c2s(int tag, const std::vector<uint8_t> &b) {
 } // namespace
 
 int main() {
-	std::string pcap_path;
-	if (const char *env = std::getenv("NW_WHITENOISE_PCAP"); env && *env)
-		pcap_path = env;
-	else
-		pcap_path = DEFAULT_WHITENOISE_PCAP;
+	const std::string pcap_path = retail::capture("operation_whitenoise.pcapng");
 
 	std::vector<net::PcapDatagram> pkts;
-	if (pcap_path.empty() || !net::read_pcap_udp_file(pcap_path, pkts)) {
-		std::printf("[skip] operation_whitenoise capture not found (set "
-		            "NW_WHITENOISE_PCAP) — '%s'\n", pcap_path.c_str());
-		return 0;
-	}
+	if (!net::read_pcap_udp_file(pcap_path, pkts))
+		return retail::skip("<OPENNOVA_CAPTURES>/operation_whitenoise.pcapng (the stock retail co-op capture)");
 	std::printf("loaded %zu datagrams from %s\n", pkts.size(), pcap_path.c_str());
 
 	std::vector<CaptureDatagram> caps;

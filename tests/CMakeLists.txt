@@ -1,3 +1,13 @@
+# Machine-local retail data gates (tests/common/retail_paths.h, the four
+# OPENNOVA_* roots in docs/asset-gated-tests.md): a gated test prints
+# "SKIP: needs <what>" and exits 77 when its data is absent, so ctest reports it
+# Skipped, never Passed. A test whose synthetic legs ran prints "SKIP-LEG:
+# needs <what>" for its missing retail leg and exits 0 (a plain add_test).
+function(opennova_add_gated_test name)
+    add_test(NAME ${name} ${ARGN})
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
+endfunction()
+
 # Shared io infrastructure unit tests
 add_executable(io_test io/io_test.cpp)
 target_link_libraries(io_test PRIVATE opennova_io)
@@ -67,8 +77,9 @@ target_link_libraries(bink_test PRIVATE opennova_formats)
 add_test(NAME bink COMMAND bink_test)
 
 add_executable(bink_retail_test bink/bink_retail_test.cpp)
+target_include_directories(bink_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bink_retail_test PRIVATE opennova_formats)
-add_test(NAME bink_retail COMMAND bink_retail_test)
+opennova_add_gated_test(bink_retail COMMAND bink_retail_test)
 
 # ANIM skeletal sampler (engine/runtime/anim): coordinate conventions, quaternion helpers, and
 # world<->local self-consistency on the real BINOC.bad fixture.
@@ -82,13 +93,13 @@ add_test(NAME anim_sample COMMAND anim_sample_test)
 # the former tests/test_bad_pos_derivation.py; synthetic exactness stays in
 # anim_sample): healthy M16/M24/M21/Frag rigs reconstruct BadBone.position within
 # 5e-4 on >=30 norm-consistent bones each; ak47_1st's X-triplicated rows (>=20)
-# come back model-consistent. Asset-gated on OPENNOVA_JO_ASSETS; skip-as-pass
+# come back model-consistent. Asset-gated on OPENNOVA_JO_ASSETS; reports Skipped
 # when unset.
 add_executable(anim_positions_from_model_corpus_test anim/anim_positions_from_model_corpus_test.cpp)
 target_link_libraries(anim_positions_from_model_corpus_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(anim_positions_from_model_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(anim_positions_from_model_corpus_test PRIVATE cxx_std_17)
-add_test(NAME anim_positions_from_model_corpus COMMAND anim_positions_from_model_corpus_test)
+opennova_add_gated_test(anim_positions_from_model_corpus COMMAND anim_positions_from_model_corpus_test)
 
 # ANIM aim overlay (the torso bend): bone-class map, BAM blend branches, compose
 # invariants. [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md s14]
@@ -187,7 +198,7 @@ add_executable(mission_corpus_test mission/mission_corpus_test.cpp)
 target_link_libraries(mission_corpus_test PRIVATE opennova_formats)
 target_include_directories(mission_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_corpus_test PRIVATE cxx_std_17)
-add_test(NAME mission_corpus COMMAND mission_corpus_test)
+opennova_add_gated_test(mission_corpus COMMAND mission_corpus_test)
 
 # LWF sound-profile tests: byte-exact parse->encode round-trip + mutate-reread
 # over real JO fixtures (fixtures/lwf/00TRa.LWF + gamelocl.LWF).
@@ -215,7 +226,7 @@ add_test(NAME menu_lwf COMMAND menu_lwf_test)
 # real JO fixture (fixtures/dbf/00TRg.DBF).
 # score — score.ini scoring config: parse, canonical write, and the witnessed
 # row-index ladder. Committed fixture is AUTHORED (fixtures/score/score_sample.ini),
-# not retail data; OPENNOVA_SCORE_INI adds a skip-and-pass retail sweep.
+# not retail data; <OPENNOVA_JO_ASSETS>/score.ini adds the retail sweep leg.
 add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
 target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -510,6 +521,7 @@ add_test(NAME minimal_map_validate COMMAND minimal_map_validate_test)
 # Minimal map's terrain config (.trn) — round-trip guarded; the heavy .cpt/tiles
 # are generate-at-package (not committed).
 add_executable(minimal_trn_gen_test fixtures/minimal_trn_gen.cpp)
+target_include_directories(minimal_trn_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(minimal_trn_gen_test PRIVATE opennova_formats)
 target_compile_definitions(minimal_trn_gen_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
@@ -547,12 +559,13 @@ add_test(NAME minimal_mus_gen COMMAND minimal_mus_gen_test)
 
 # Minimal set's packaging tool: build_terrain + generate the boot fonts +
 # boot music + PFF-bundle the whole set. Skips clean unless
-# OPENNOVA_BUILD_MINIMAL_PFF=1 (generate-at-package: ~35 s, ~10 MB).
+# `minimal_pff_package_test --write-pff` (generate-at-package: ~35 s, ~10 MB).
 add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
+target_include_directories(minimal_pff_package_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(minimal_pff_package_test PRIVATE opennova_runtime opennova_formats)
 target_compile_definitions(minimal_pff_package_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-add_test(NAME minimal_pff_package COMMAND minimal_pff_package_test)
+opennova_add_gated_test(minimal_pff_package COMMAND minimal_pff_package_test)
 
 # RTXT parity against committed retail string tables (format invariants + byte roundtrip)
 add_executable(rtxt_real_parity_test rtxt/real_parity_test.cpp)
@@ -564,9 +577,10 @@ add_test(NAME rtxt_real_parity COMMAND rtxt_real_parity_test)
 
 # Full-install RTXT sweep through the engine-faithful VFS (skips unless OPENNOVA_JO_DIR set)
 add_executable(rtxt_jo_install_sweep_test rtxt/jo_install_sweep_test.cpp)
+target_include_directories(rtxt_jo_install_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rtxt_jo_install_sweep_test PRIVATE opennova_formats opennova_base)
 target_include_directories(rtxt_jo_install_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
-add_test(NAME rtxt_jo_install_sweep COMMAND rtxt_jo_install_sweep_test)
+opennova_add_gated_test(rtxt_jo_install_sweep COMMAND rtxt_jo_install_sweep_test)
 
 # Resource directory index tests
 add_executable(resource_index_test resource_index/resource_index_test.cpp)
@@ -766,7 +780,7 @@ add_test(NAME hud_loading_screen COMMAND hud_loading_screen_test)
 add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
 target_link_libraries(jo_env_sweep_test PRIVATE opennova_formats opennova_base)
 target_include_directories(jo_env_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME env_jo_install COMMAND jo_env_sweep_test)
+opennova_add_gated_test(env_jo_install COMMAND jo_env_sweep_test)
 
 add_executable(terrain_lighting_test terrain/terrain_lighting_test.cpp)
 target_link_libraries(terrain_lighting_test PRIVATE opennova_runtime)
@@ -1297,7 +1311,7 @@ add_test(NAME collision COMMAND collision_test)
 # Asset-gated (OPENNOVA_JO_DIR): the 05TRcoop bunker walk-in repro — the real
 # Cbunker2 collision at the mission pose, a capsule walking the authored
 # route into it. Diagnostic/report-only while the frozen-clump divergence is
-# open; skip-as-pass without a JO install.
+# open; reports Skipped without a JO install.
 # Asset-gated (OPENNOVA_JO_DIR): mission-script report — which authored BMS
 # events fire in a headless run and what the unfired ones would have done.
 # Diagnostic; never fails on unfired events.
@@ -1305,19 +1319,19 @@ add_executable(mission_script_report_test mission/mission_script_report_test.cpp
 target_link_libraries(mission_script_report_test PRIVATE opennova_runtime)
 target_include_directories(mission_script_report_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_script_report_test PRIVATE cxx_std_17)
-add_test(NAME mission_script_report COMMAND mission_script_report_test)
+opennova_add_gated_test(mission_script_report COMMAND mission_script_report_test)
 
 add_executable(bunker_walkin_test world/bunker_walkin_test.cpp)
 target_link_libraries(bunker_walkin_test PRIVATE opennova_runtime)
 target_include_directories(bunker_walkin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(bunker_walkin_test PRIVATE cxx_std_17)
-add_test(NAME bunker_walkin COMMAND bunker_walkin_test)
+opennova_add_gated_test(bunker_walkin COMMAND bunker_walkin_test)
 
 add_executable(truck_dismount_test world/truck_dismount_test.cpp)
 target_link_libraries(truck_dismount_test PRIVATE opennova_runtime)
 target_include_directories(truck_dismount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(truck_dismount_test PRIVATE cxx_std_17)
-add_test(NAME truck_dismount COMMAND truck_dismount_test)
+opennova_add_gated_test(truck_dismount COMMAND truck_dismount_test)
 
 # Authoritative projectile consequences through RoundSim's CollisionWorld seam:
 # pre-arm dud substitution, kinetic damage, NoDie, and physical zero-damage blockers.
@@ -1565,7 +1579,7 @@ add_executable(root_motion_test anim/root_motion_test.cpp)
 target_link_libraries(root_motion_test PRIVATE opennova_formats)
 target_include_directories(root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(root_motion_test PRIVATE cxx_std_17)
-add_test(NAME root_motion COMMAND root_motion_test)
+opennova_add_gated_test(root_motion COMMAND root_motion_test)
 
 # WAC scripting. The registry oracle (165-command ISA + 28 param types from the
 # binary) exercises only the language front end (engine/formats/wac); VM behavior
@@ -1583,8 +1597,11 @@ foreach(test behavior corpus)
     target_link_libraries(wac_${test}_test PRIVATE opennova_runtime)
     target_include_directories(wac_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(wac_${test}_test PRIVATE cxx_std_17)
-    add_test(NAME wac_${test} COMMAND wac_${test}_test)
 endforeach()
+add_test(NAME wac_behavior COMMAND wac_behavior_test)
+# The corpus sweep walks OPENNOVA_JO_ASSETS + OPENNOVA_MISSION_CORPUS (argv dirs
+# override); it reports Skipped without either.
+opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)
 
 # WAC weather actions are authoritative network sources: exercise the compiled
 # script through the real per-connection 0x0A phase-2 projection.
@@ -1884,98 +1901,93 @@ add_test(NAME nw204_lobby_decode COMMAND nw204_lobby_decode_test)
 
 # In-game JOINTOPERATIONS surveyor — decodes a loopback host+join+play capture
 # and histograms the in-match NAPI messages per (direction, msg_id) so the
-# high-volume tags can be RE'd against §4. Asset-gated on env NW_INGAME_HEXCAP
-# (skips cleanly when unset); same decode pipeline as nw204_lobby_decode.
+# high-volume tags can be RE'd against §4. Asset-gated on
+# <OPENNOVA_CAPTURES>/ingame.hexcap (reports Skipped when absent); same decode pipeline as nw204_lobby_decode.
 add_executable(nw_ingame_histogram_test novaworld/nw_ingame_histogram_test.cpp)
 target_link_libraries(nw_ingame_histogram_test PRIVATE opennova_net)
 target_include_directories(nw_ingame_histogram_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME nw_ingame_histogram COMMAND nw_ingame_histogram_test)
+opennova_add_gated_test(nw_ingame_histogram COMMAND nw_ingame_histogram_test)
 
 # Pool-records byte-witness — walks every S2C 0x0D and 0x20 payload in the
 # same hexcap and asserts the §5.11/§5.12 field maps consume the wire exactly.
-# Asset-gated on NW_INGAME_HEXCAP, identical pipeline to the histogram test.
+# Asset-gated on <OPENNOVA_CAPTURES>/ingame.hexcap, identical pipeline to the histogram test.
 add_executable(nw_ingame_pool_records_test novaworld/nw_ingame_pool_records_test.cpp)
 target_link_libraries(nw_ingame_pool_records_test PRIVATE opennova_net)
 target_include_directories(nw_ingame_pool_records_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME nw_ingame_pool_records COMMAND nw_ingame_pool_records_test)
+opennova_add_gated_test(nw_ingame_pool_records COMMAND nw_ingame_pool_records_test)
 
 # /PROFILE .sph server-log decoder — §5.22. Witnessed against the controlled
 # dvxi5 probe recordings (host.sph / client.sph), the engine's own decoded view
 # of the same session as the pool-records capture. Skips unless
-# NW_PROFILE_SPH_DIR points at the folder holding the two .sph files.
+# <OPENNOVA_CAPTURES>/sph/ holds the two .sph files (reports Skipped without them).
 add_executable(nw_serverlog_decode_test novaworld/nw_serverlog_decode_test.cpp)
 target_link_libraries(nw_serverlog_decode_test PRIVATE opennova_net)
 target_include_directories(nw_serverlog_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME nw_serverlog_decode COMMAND nw_serverlog_decode_test)
+opennova_add_gated_test(nw_serverlog_decode COMMAND nw_serverlog_decode_test)
 
 # Authored-mission cross-validation (D-NET-62) — decode the dvxi5 probe capture
 # and assert every authored vehicle/marker reproduces on the wire (type_id +
 # position + team + heading), not just that the body was consumed. Reads the
 # real pcap directly via the shared apps/common reader; skips unless the capture
-# is present (NW_DVXI5_PCAP, else the in-tree .scratch path).
+# is present (<OPENNOVA_CAPTURES>/host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng).
 add_executable(nw_pool_groundtruth_test novaworld/nw_pool_groundtruth_test.cpp)
 target_link_libraries(nw_pool_groundtruth_test
     PRIVATE opennova_net opennova_app_common opennova_base)
 target_include_directories(nw_pool_groundtruth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_pool_groundtruth_test PRIVATE
     FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld"
-    DEFAULT_DVXI5_PCAP="${CMAKE_SOURCE_DIR}/.scratch/host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng")
-add_test(NAME nw_pool_groundtruth COMMAND nw_pool_groundtruth_test)
+)
+opennova_add_gated_test(nw_pool_groundtruth COMMAND nw_pool_groundtruth_test)
 
 # dvxi3 probe (probe 2, Team Deathmatch) groundtruth — successor to the dvxi5
 # test, additionally cross-validating the S2C 0x10 pool-2 static-entity decoder
 # (armory, oil pump, oil-field) against the authored statics. Skips unless the
-# capture is present (NW_DVXI3_PCAP, else the in-tree .scratch path).
+# capture is present (<OPENNOVA_CAPTURES>/probe2.pcapng).
 add_executable(nw_dvxi3_groundtruth_test novaworld/nw_dvxi3_groundtruth_test.cpp)
 target_link_libraries(nw_dvxi3_groundtruth_test
     PRIVATE opennova_net opennova_app_common opennova_base)
 target_include_directories(nw_dvxi3_groundtruth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_dvxi3_groundtruth_test PRIVATE
     FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld"
-    DEFAULT_DVXI3_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe2.pcapng")
-add_test(NAME nw_dvxi3_groundtruth COMMAND nw_dvxi3_groundtruth_test)
+)
+opennova_add_gated_test(nw_dvxi3_groundtruth COMMAND nw_dvxi3_groundtruth_test)
 
 # Co-op probe 3 (dvxc1): re-validates the spawn batches AND witnesses the deferred
 # Co-op bodies (0x0F waypoint records, 0x0A objective sub-block 3, 0x60 multi-chunk
-# + C2S 0x33, 0x7B gameName + g_GameType). Gated on NW_DVXC1_PCAP / the .scratch
-# capture; skips clean when absent.
+# + C2S 0x33, 0x7B gameName + g_GameType). Gated on
+# <OPENNOVA_CAPTURES>/probe3.pcapng; reports Skipped when absent.
 add_executable(nw_dvxc1_groundtruth_test novaworld/nw_dvxc1_groundtruth_test.cpp)
 target_link_libraries(nw_dvxc1_groundtruth_test
     PRIVATE opennova_net opennova_app_common opennova_base)
 target_include_directories(nw_dvxc1_groundtruth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nw_dvxc1_groundtruth_test PRIVATE
     FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld"
-    DEFAULT_DVXC1_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3.pcapng")
-add_test(NAME nw_dvxc1_groundtruth COMMAND nw_dvxc1_groundtruth_test)
+)
+opennova_add_gated_test(nw_dvxc1_groundtruth COMMAND nw_dvxc1_groundtruth_test)
 
 # probe3_again: the richer dvxc1 re-run (3 players, 15 weapons, more movement).
 # Asserts the NEW dimensions — RTT/trio transport volume, multi-client identity +
 # death/leave lifecycle (0x26+0x13 deaths, 0x5D despawn cross-checked vs the host
 # .sph oracle), weapon variety, 0x59 deployed-item, and the confirmed negatives
 # (no guided 0x0C sub_ops, AI-static 0x20, Co-op roster teams==0). Gated on
-# NW_PROBE3AGAIN_PCAP / the .scratch capture; skips clean when absent.
+# <OPENNOVA_CAPTURES>/probe3_again.pcapng; reports Skipped when absent.
 add_executable(nw_probe3again_lifecycle_test novaworld/nw_probe3again_lifecycle_test.cpp)
 target_link_libraries(nw_probe3again_lifecycle_test
     PRIVATE opennova_net opennova_app_common opennova_base)
 target_include_directories(nw_probe3again_lifecycle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(nw_probe3again_lifecycle_test PRIVATE
-    DEFAULT_PROBE3AGAIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3_again.pcapng"
-    DEFAULT_PROBE3AGAIN_HOST_SPH="${CMAKE_SOURCE_DIR}/.scratch/hostprof_probe3again.sph")
-add_test(NAME nw_probe3again_lifecycle COMMAND nw_probe3again_lifecycle_test)
+opennova_add_gated_test(nw_probe3again_lifecycle COMMAND nw_probe3again_lifecycle_test)
 
 # operation_whitenoise: the FIRST stock retail Co-op capture (not an authored
 # probe). Wire-only coverage witness — asserts every catalogued Decoded tag the
 # capture carries is consumed to the byte across all occurrences, plus the S2C
 # 0x20 stock load-batch spot-asserts (paged, every optional flag exercised, load-
 # only) and the confirmed negatives (C2S 0x0C all sub_op 0x0A, no 0x44 / 0x59).
-# Gated on NW_WHITENOISE_PCAP / the .scratch capture; skips clean when absent.
+# Gated on <OPENNOVA_CAPTURES>/operation_whitenoise.pcapng; reports Skipped when absent.
 add_executable(nw_whitenoise_coverage_test novaworld/nw_whitenoise_coverage_test.cpp)
 target_link_libraries(nw_whitenoise_coverage_test
     PRIVATE opennova_net opennova_app_common opennova_base)
 target_include_directories(nw_whitenoise_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(nw_whitenoise_coverage_test PRIVATE
-    DEFAULT_WHITENOISE_PCAP="${CMAKE_SOURCE_DIR}/.scratch/operation_whitenoise.pcapng")
-add_test(NAME nw_whitenoise_coverage COMMAND nw_whitenoise_coverage_test)
+opennova_add_gated_test(nw_whitenoise_coverage COMMAND nw_whitenoise_coverage_test)
 
 # Inline-pcap decoder regression — crafts tiny in-memory pcaps and round-trips
 # the 0x0D / 0x20 pool decoders through the full S2C stack (encode -> frame ->
@@ -1991,27 +2003,23 @@ add_test(NAME nw_pool_decode_unit COMMAND nw_pool_decode_unit_test)
 # yields byte-identical InGameMessages to one batch decode_capture_to_messages()
 # (the contract the in-engine live net client relies on). Runs on an inline
 # two-session capture unconditionally; also checks the real 3-player probe3_again
-# capture when present (NW_PROBE3AGAIN_PCAP / .scratch), skipping clean otherwise.
+# capture when present (<OPENNOVA_CAPTURES>/probe3_again.pcapng), noting SKIP-LEG otherwise.
 add_executable(nw_capture_decoder_test novaworld/nw_capture_decoder_test.cpp)
 target_link_libraries(nw_capture_decoder_test
     PRIVATE opennova_net opennova_app_common opennova_base)
 target_include_directories(nw_capture_decoder_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(nw_capture_decoder_test PRIVATE
-    DEFAULT_PROBE3AGAIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3_again.pcapng")
 add_test(NAME nw_capture_decoder COMMAND nw_capture_decoder_test)
 
 # Golden coverage diff — compare OUR freshly captured retail-join session
-# (NW_GOLDEN_OURS, produced live by scripts/net/diff_vs_golden.ps1's capture leg)
+# (`--ours <capture>`, produced live by scripts/net/diff_vs_golden.ps1's capture leg)
 # against a golden retail<->retail capture, by message coverage per (dir,tag). A
 # missing or spurious S2C tag fails the build; the CI-gated counterpart to the
-# diff_vs_golden.ps1 harness. Skips clean when NW_GOLDEN_OURS is unset (no
+# diff_vs_golden.ps1 harness. Reports Skipped without --ours (no
 # committed "ours" oracle). Golden defaults to the gitignored .scratch/golden.
 add_executable(nw_golden_diff_test novaworld/nw_golden_diff_test.cpp)
 target_link_libraries(nw_golden_diff_test PRIVATE opennova_net opennova_app_common opennova_base)
 target_include_directories(nw_golden_diff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(nw_golden_diff_test PRIVATE
-    DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
-add_test(NAME nw_golden_diff COMMAND nw_golden_diff_test)
+opennova_add_gated_test(nw_golden_diff COMMAND nw_golden_diff_test)
 
 # Streaming pcap reader — stream_pcap_udp_file must match the whole-file
 # read_pcap_udp byte-for-byte and honor early-exit (so capture consumers can
@@ -2063,7 +2071,7 @@ add_test(NAME nw_codec_identity COMMAND nw_codec_identity_test)
 # + ClientRuntime over an in-memory IDatagramSocket) coverage-diffed per (dir,tag)
 # against the COMMITTED opennova-produced fixture (LFS, zero retail bytes) with
 # EXACT set equality — no noise floor, both sides are ours. Cannot skip; a missing
-# fixture fails. Regen: OPENNOVA_WRITE_SELF_FIXTURE=1 (justify the delta in-commit).
+# fixture fails. Regen: `nw_self_capture_test --write-fixture` (justify the delta in-commit).
 add_executable(nw_self_capture_test novaworld/nw_self_capture_test.cpp)
 target_link_libraries(nw_self_capture_test
     PRIVATE opennova_net opennova_runtime opennova_app_common opennova_base)
@@ -2088,11 +2096,11 @@ target_include_directories(nw_ingame_guided_test PRIVATE ${CMAKE_CURRENT_SOURCE_
 add_test(NAME nw_ingame_guided COMMAND nw_ingame_guided_test)
 
 # Wire validation of the guided codec against a real local Karo capture —
-# asset-gated (NW_KARO_GUIDED_PCAP; skips as pass), the D-NET-64 capture leg.
+# asset-gated (<OPENNOVA_CAPTURES>/karo-guided.pcapng; reports Skipped), the D-NET-64 capture leg.
 add_executable(nw_karo_guided_test novaworld/nw_karo_guided_test.cpp)
 target_link_libraries(nw_karo_guided_test PRIVATE opennova_net opennova_base)
 target_include_directories(nw_karo_guided_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME nw_karo_guided COMMAND nw_karo_guided_test)
+opennova_add_gated_test(nw_karo_guided COMMAND nw_karo_guided_test)
 
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
@@ -2263,15 +2271,14 @@ add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extract
 # The non-COOP follower repro: replays the retail vehicle-session golden through
 # ClientReplicaPipeline and pins every organic-parented pool-1 spawn (§5.11 spawnFlags
 # 0x0100) to its own §5.10b compact wire positions. Env-gated: needs the
-# gitignored golden (NW_GOLDEN_VEHICLE_SESSION, DEFAULT below) and an items.def
-# class table (NW_ITEMS_DEF); skips clean when either is absent.
+# gitignored golden (<OPENNOVA_CAPTURES>/golden/retail-vehicle-session.pcapng) and
+# <OPENNOVA_JO_ASSETS>/ITEMS.DEF; reports Skipped when either is absent.
 add_executable(netsim_client_replica_pipeline_capture_parent_follow_test
     netsim/client_replica_pipeline_capture_parent_follow_test.cpp)
+target_include_directories(netsim_client_replica_pipeline_capture_parent_follow_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(netsim_client_replica_pipeline_capture_parent_follow_test
     PRIVATE opennova_net opennova_formats opennova_app_common opennova_base)
-target_compile_definitions(netsim_client_replica_pipeline_capture_parent_follow_test PRIVATE
-    DEFAULT_VEHICLE_SESSION_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-vehicle-session.pcapng")
-add_test(NAME netsim_client_replica_pipeline_capture_parent_follow
+opennova_add_gated_test(netsim_client_replica_pipeline_capture_parent_follow
     COMMAND netsim_client_replica_pipeline_capture_parent_follow_test)
 
 # npruntime tests — the IDA-faithful in-match NAPI NP runtime (the named server/client
@@ -2362,12 +2369,14 @@ add_test(NAME npruntime_round_sim COMMAND npruntime_round_sim_test)
 # [orig: Server_CheckWinConditions @0x51ad40], the round-end latch + host effect
 # [orig: Server_ProcessRoundEnd @0x5164f0], and the post-round respawn hold.
 add_executable(coop_convoy_test mission/coop_convoy_test.cpp)
+target_include_directories(coop_convoy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(coop_convoy_test PRIVATE opennova_runtime opennova_formats)
-add_test(NAME mission_coop_convoy COMMAND coop_convoy_test)
+opennova_add_gated_test(mission_coop_convoy COMMAND coop_convoy_test)
 
 add_executable(ai_path_conformance_test mission/ai_path_conformance_test.cpp)
+target_include_directories(ai_path_conformance_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ai_path_conformance_test PRIVATE opennova_runtime opennova_formats)
-add_test(NAME mission_ai_path_conformance COMMAND ai_path_conformance_test)
+opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_test)
 
 
 add_executable(npruntime_round_end_test npruntime/round_end_test.cpp)
@@ -2396,31 +2405,28 @@ add_test(NAME npruntime_lan_probe_client COMMAND npruntime_lan_probe_client_test
 # Golden 0x81/0x82 byte-parity vs the local LAN host/join session capture. Env-gated + skip-if-absent
 # (no committed derived oracle); DEFAULT path points at the gitignored .scratch golden.
 add_executable(npruntime_golden_lan_join_session_test npruntime/golden_lan_join_session_test.cpp)
+target_include_directories(npruntime_golden_lan_join_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_golden_lan_join_session_test
     PRIVATE opennova_net opennova_app_common opennova_base)
-target_compile_definitions(npruntime_golden_lan_join_session_test PRIVATE
-    DEFAULT_LAN_JOIN_SESSION_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join-session.pcapng")
-add_test(NAME npruntime_golden_lan_join_session COMMAND npruntime_golden_lan_join_session_test)
+opennova_add_gated_test(npruntime_golden_lan_join_session COMMAND npruntime_golden_lan_join_session_test)
 
 # P3 golden — validate the §5.2a initial-state burst ORDER against the retail LAN host/join capture
 # (handshake + world-load). Env-gated + skip-if-absent (no committed derived oracle).
 add_executable(npruntime_golden_lan_join_test npruntime/golden_lan_join_test.cpp)
+target_include_directories(npruntime_golden_lan_join_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_golden_lan_join_test
     PRIVATE opennova_net opennova_app_common opennova_base)
-target_compile_definitions(npruntime_golden_lan_join_test PRIVATE
-    DEFAULT_LAN_JOIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join.pcapng")
-add_test(NAME npruntime_golden_lan_join COMMAND npruntime_golden_lan_join_test)
+opennova_add_gated_test(npruntime_golden_lan_join COMMAND npruntime_golden_lan_join_test)
 
 # P4 golden — np::Server_TickUpdate round-trips a REAL retail C2S 0x0C uplink into an S2C 0x0A frame
 # (0x0C-in -> SNAP -> 0x0A-out), sourced from the in-match gameplay capture. Env-gated + skip-if-absent
 # (no committed derived oracle); unlike the order-only lan_join golden this drives the npruntime runtime,
 # so it links opennova_npruntime + opennova_netsim + opennova_world.
 add_executable(npruntime_golden_gameplay_test npruntime/golden_gameplay_test.cpp)
+target_include_directories(npruntime_golden_gameplay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_golden_gameplay_test
     PRIVATE opennova_net opennova_runtime opennova_app_common opennova_base)
-target_compile_definitions(npruntime_golden_gameplay_test PRIVATE
-    DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
-add_test(NAME npruntime_golden_gameplay COMMAND npruntime_golden_gameplay_test)
+opennova_add_gated_test(npruntime_golden_gameplay COMMAND npruntime_golden_gameplay_test)
 
 # P5 — the headless CLIENT runtime (np::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)
@@ -2475,25 +2481,23 @@ add_test(NAME npruntime_joiner_handshake_retry COMMAND npruntime_joiner_handshak
 # byte-identical to the captured client datagram (emitted C2S == client-origin); plus fold the
 # capture's S2C 0x0A through ClientReplicaPipeline and cross-check decompressed positions against the
 # world-stream absolute spawn positions (an independent in-pcap oracle, not the same decoder). Default
-# resolves the gitignored golden under .scratch/golden; env-gated NW_GOLDEN_GAMEPLAY; skip-if-absent.
+# resolves the gitignored golden under <OPENNOVA_CAPTURES>/golden; reports Skipped if absent.
 add_executable(npruntime_golden_client_test npruntime/golden_client_test.cpp)
+target_include_directories(npruntime_golden_client_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_golden_client_test
     PRIVATE opennova_net opennova_runtime opennova_app_common opennova_base)
-target_compile_definitions(npruntime_golden_client_test PRIVATE
-    DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
-add_test(NAME npruntime_golden_client COMMAND npruntime_golden_client_test)
+opennova_add_gated_test(npruntime_golden_client COMMAND npruntime_golden_client_test)
 
 # P6 — two endpoints over REAL UDP sockets: a ClientRuntime joiner and the apps/nw_server host
 # owner-loop (npruntime/host_session.h, the SAME loop apps/nw_server runs), each on its own bound UDP
 # over the wire (single-thread poll-pump). Asserts mirror npruntime_client_runtime but over real
 # sockets, and adds the §5.2a S2C tag-order check (always-on, our host) + the env-gated cross-check vs
-# the retail LAN host/join capture (NW_GOLDEN_LAN_JOIN, skip-clean). opennova_mission for the minimal
+# the retail LAN host/join capture (<OPENNOVA_CAPTURES>/golden, SKIP-LEG when absent). opennova_mission for the minimal
 # World/bms; opennova_app_common for net_sockets + net_datagram_socket + pcap_reader (ws2_32 on WIN32).
 add_executable(npruntime_two_endpoint_socket_test npruntime/two_endpoint_socket_test.cpp)
+target_include_directories(npruntime_two_endpoint_socket_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_two_endpoint_socket_test
     PRIVATE opennova_net opennova_runtime opennova_app_common opennova_base)
-target_compile_definitions(npruntime_two_endpoint_socket_test PRIVATE
-    DEFAULT_LAN_JOIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join.pcapng")
 if(WIN32)
     target_link_libraries(npruntime_two_endpoint_socket_test PRIVATE ws2_32)
 endif()

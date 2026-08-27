@@ -1,6 +1,6 @@
 // P5 Level-3 golden — drive the REAL client emission path against the in-match gameplay capture
-// (.scratch/golden/retail-gameplay-session.pcapng). Env-gated NW_GOLDEN_GAMEPLAY with a DEFAULT_*
-// fallback; skips cleanly when the gitignored golden is absent.
+// (.scratch/golden/retail-gameplay-session.pcapng). Gated on
+// <OPENNOVA_CAPTURES>/golden; reports Skipped when the gitignored golden is absent.
 //
 // WHAT THIS PROVES (the Level-3 bar, honestly):
 //   (C2S) "emitted C2S == client-origin" — BYTE-EXACT. We recover the captured client's SCRK (its
@@ -50,10 +50,7 @@
 #include <limits>
 #include <string>
 #include <vector>
-
-#ifndef DEFAULT_GAMEPLAY_PCAP
-#define DEFAULT_GAMEPLAY_PCAP ""
-#endif
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -77,17 +74,11 @@ double world_dist(int32_t ax, int32_t ay, int32_t az, int32_t bx, int32_t by, in
 } // namespace
 
 int main() {
-	std::string path;
-	if (const char *env = std::getenv("NW_GOLDEN_GAMEPLAY"); env && *env)
-		path = env;
-	else
-		path = DEFAULT_GAMEPLAY_PCAP;
+	const std::string path = retail::golden("retail-gameplay-session.pcapng");
 
 	std::vector<net::PcapDatagram> pkts;
-	if (path.empty() || !net::read_pcap_udp_file(path, pkts)) {
-		std::printf("[skip] golden gameplay capture not found (set NW_GOLDEN_GAMEPLAY) — '%s'\n",
-		            path.c_str());
-		return 0; // skip clean
+	if (!net::read_pcap_udp_file(path, pkts)) {
+		return retail::skip("<OPENNOVA_CAPTURES>/golden/retail-gameplay-session.pcapng (the golden gameplay capture)");
 	}
 
 	// --- Recover the per-session keys from the handshake: client port (0x41 src), client SCRK (0x42),

@@ -25,6 +25,7 @@
 #include <cstring>
 
 #include "common/test_paths.h"
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
@@ -37,49 +38,56 @@ static int failures = 0;
 		} \
 	} while (0)
 
+// The retail-install oracle: the base mount and every expansion the install
+// ships (OPENNOVA_JO_DIR), so protocol work can inspect the exact
+// expansion-scoped ADM indices and ammo classes a capture used. A retail leg of
+// an otherwise hermetic test; reported, never a pin.
+static int live_weapon_oracle(const std::string &install, const std::string &expansion) {
+	opennova::Vfs vfs;
+	if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) {
+		std::fprintf(stderr, "FAIL: live weapon mount (%s): %s\n", expansion.c_str(),
+		             vfs.last_error().c_str());
+		return 1;
+	}
+	std::vector<uint8_t> bytes;
+	if (!vfs.read_file("weapon.def", bytes) || bytes.empty()) {
+		std::fprintf(stderr, "FAIL: mounted weapon.def is unavailable\n");
+		return 1;
+	}
+	DefWeaponsFile live_file{};
+	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &live_file) != 0) {
+		std::fprintf(stderr, "FAIL: mounted weapon.def does not parse\n");
+		return 1;
+	}
+	const world::WeaponTable live = np::build_weapon_table(live_file);
+	std::printf("LIVE weapon.def bytes=%zu entries=%zu expansion=%s\n", bytes.size(),
+	            live.entries.size(), vfs.mounted_expansion().c_str());
+	for (size_t i = 0; i < live.ammo_class_names.size(); ++i)
+		std::printf("LIVE ammo-class local=%zu cap=%d name=%s\n", i,
+		            live.ammo_class_caps[i], live.ammo_class_names[i].c_str());
+	for (const int index : {1, 3, 16, 83, 84, 85, 88, 93, 97}) {
+		const world::WeaponTableEntry *entry =
+				live.by_index(static_cast<uint8_t>(index));
+		if (entry == nullptr) continue;
+		std::printf(
+				"LIVE adm=%d name=%s combo=%u:%u class=%s local=%d units=%d "
+				"clip=%d start=%d maxclips=%d bucket=%d weapon-class=%d\n",
+				index, entry->name.c_str(), entry->category, entry->rank,
+				entry->ammo_class.c_str(), entry->ammo_class_id,
+				entry->ammo_class_count, entry->clipsize, entry->startrounds,
+				entry->maxclips, entry->ammo_bucket, entry->weapon_class_slot);
+	}
+	def_free_weapons(&live_file);
+	return 0;
+}
+
 int main(void) {
-	// Optional retail-install oracle. This is deliberately environment-gated so
-	// the ordinary hermetic test stays fast while protocol work can inspect the
-	// exact expansion-scoped ADM indices and ammo classes used by a capture.
-	if (const char *live_root = std::getenv("NW_LIVE_WEAPON_ROOT");
-	    live_root != nullptr && *live_root != '\0') {
-		const char *live_expansion = std::getenv("NW_LIVE_WEAPON_EXPANSION");
-		opennova::Vfs vfs;
-		if (!vfs.mount_game(live_root,
-		                    live_expansion != nullptr ? live_expansion : std::string(),
-		                    opennova::VfsMountMode::Packed)) {
-			std::fprintf(stderr, "FAIL: live weapon mount: %s\n", vfs.last_error().c_str());
-			return 1;
-		}
-		std::vector<uint8_t> bytes;
-		if (!vfs.read_file("weapon.def", bytes) || bytes.empty()) {
-			std::fprintf(stderr, "FAIL: mounted weapon.def is unavailable\n");
-			return 1;
-		}
-		DefWeaponsFile live_file{};
-		if (def_parse_weapons_memory(bytes.data(), bytes.size(), &live_file) != 0) {
-			std::fprintf(stderr, "FAIL: mounted weapon.def does not parse\n");
-			return 1;
-		}
-		const world::WeaponTable live = np::build_weapon_table(live_file);
-		std::printf("LIVE weapon.def bytes=%zu entries=%zu expansion=%s\n", bytes.size(),
-		            live.entries.size(), vfs.mounted_expansion().c_str());
-		for (size_t i = 0; i < live.ammo_class_names.size(); ++i)
-			std::printf("LIVE ammo-class local=%zu cap=%d name=%s\n", i,
-			            live.ammo_class_caps[i], live.ammo_class_names[i].c_str());
-		for (const int index : {1, 3, 16, 83, 84, 85, 88, 93, 97}) {
-			const world::WeaponTableEntry *entry =
-					live.by_index(static_cast<uint8_t>(index));
-			if (entry == nullptr) continue;
-			std::printf(
-					"LIVE adm=%d name=%s combo=%u:%u class=%s local=%d units=%d "
-					"clip=%d start=%d maxclips=%d bucket=%d weapon-class=%d\n",
-					index, entry->name.c_str(), entry->category, entry->rank,
-					entry->ammo_class.c_str(), entry->ammo_class_id,
-					entry->ammo_class_count, entry->clipsize, entry->startrounds,
-					entry->maxclips, entry->ammo_bucket, entry->weapon_class_slot);
-		}
-		def_free_weapons(&live_file);
+	if (const std::string install = retail::install(); !install.empty()) {
+		if (live_weapon_oracle(install, std::string()) != 0) return 1;
+		for (const std::string &expansion : retail::expansions())
+			if (live_weapon_oracle(install, expansion) != 0) return 1;
+	} else {
+		retail::skip_leg("OPENNOVA_JO_DIR (the live weapon.def oracle over the install's expansions)");
 	}
 
 	const char *repo_root = test_paths_repo_root(__FILE__);

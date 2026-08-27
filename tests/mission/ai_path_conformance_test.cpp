@@ -17,12 +17,15 @@
 // spawn at the SAME position as retail and retail still walks them 625k/543k/583k
 // wire units, so they carry no placement ambiguity and no scenario confound.
 //
-// Gated on OPENNOVA_JO_DIR (skip-as-pass without a JO install), like
+// Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install), like
 // tests/mission/mission_corpus_test.cpp and coop_convoy_test.cpp.
 //
-// REPORT MODE: set OPENNOVA_AI_PATH_REPORT=1 to dump the full per-slot table
-// (authored group/waypoint/wp_number + brain waypoint state + travel). That dump
-// is the diagnosis surface; the assertions below are the regression pins.
+// REPORT MODE: `ai_path_conformance_test --report` dumps the full per-slot table
+// (authored group/waypoint/wp_number + brain waypoint state + travel) plus the
+// event/trigger/area census. That dump is the diagnosis surface; the assertions
+// below are the regression pins. `--ticks <n>` (default 2500) and `--bms <name>`
+// (default 00TRg.bms) point the same harness at the 430 s capture budget or the
+// 05TRcoop bunker-garrison pin; the ctest registration passes neither.
 #include <runtime/mission/event_runtime.h>
 #include <runtime/mission/promote.h>
 
@@ -56,6 +59,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -103,17 +107,28 @@ const double kMovedUnits = 1.0;
 
 } // namespace
 
-int main() {
-	const char *dir = std::getenv("OPENNOVA_JO_DIR");
-	if (dir == nullptr || *dir == '\0') {
-		std::printf("ai path conformance: SKIP (OPENNOVA_JO_DIR not set)\n");
-		return 0;
-	}
+static const char *arg_value(int argc, char **argv, const char *flag) {
+	for (int i = 1; i + 1 < argc; ++i)
+		if (std::strcmp(argv[i], flag) == 0) return argv[i + 1];
+	return nullptr;
+}
+
+static bool has_flag(int argc, char **argv, const char *flag) {
+	for (int i = 1; i < argc; ++i)
+		if (std::strcmp(argv[i], flag) == 0) return true;
+	return false;
+}
+
+int main(int argc, char **argv) {
+	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
+			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRg.bms)");
+	const char *dir = install.c_str();
+	const bool report = has_flag(argc, argv, "--report");
 	// Diagnostic parameterisation only (no behaviour change): the 05TRcoop
 	// bunker-garrison pin (SSNs 233/1254/2393, divergence-ledger.md:364) needs
 	// the SAME full-tick harness pointed at a different authored mission.
-	const char *bms_env = std::getenv("OPENNOVA_AI_PATH_BMS");
-	const std::string bms_name = (bms_env != nullptr && *bms_env) ? bms_env : "00TRg.bms";
+	const char *bms_arg = arg_value(argc, argv, "--bms");
+	const std::string bms_name = (bms_arg != nullptr && *bms_arg) ? bms_arg : "00TRg.bms";
 	const std::string path = std::string(dir) + "/" + bms_name;
 	std::ifstream f(path, std::ios::binary);
 	if (!f) {
@@ -304,7 +319,7 @@ int main() {
 	simassets::SimCollisionPoseProvider collision_pose;
 	simassets::SimModelCache collision_models;
 	simassets::CollisionResolveState collision_state;
-	if (std::getenv("NW_NO_COLLISION") == nullptr) {
+	{
 		collision_models.set_index(&index);
 		collision_pose.set_resource_index(&index);
 		const simassets::CollisionResolveDeps deps{collision, occlusion,
@@ -316,8 +331,6 @@ int main() {
 		world.collision = &collision;
 		ai.collision = &collision;
 		std::printf("collision: %d entities attached to a model\n", attached);
-	} else {
-		std::printf("collision: DISABLED (NW_NO_COLLISION)\n");
 	}
 
 	world.add_system(&events);
@@ -347,10 +360,9 @@ int main() {
 
 	// 2500 ticks = ~40 s of mission time at the 62.5 Hz logic rate — the same
 	// budget coop_convoy_test uses, and long enough for an authored patrol leg.
-	// Default 2500 ticks = ~40 s of mission time, the coop_convoy budget. The
-	// capture baseline is 430 s, so comparing counts against it needs
-	// OPENNOVA_AI_PATH_TICKS=27000 -- a 40 s run scoring fewer movers than a
-	// 430 s capture is a BUDGET difference, not a defect.
+	// The capture baseline is 430 s, so comparing counts against it needs
+	// `--ticks 27000` -- a 40 s run scoring fewer movers than a 430 s capture is
+	// a BUDGET difference, not a defect.
 	// PATH LENGTH, accumulated per tick -- NOT net displacement. The capture side
 	// sums per-sample deltas, so a start->end measure is not comparable to it: a
 	// patrolling AI that loops back has a huge path and a tiny net displacement.
@@ -365,7 +377,7 @@ int main() {
 	}
 
 	int ticks = 2500;
-	if (const char *tv = std::getenv("OPENNOVA_AI_PATH_TICKS")) {
+	if (const char *tv = arg_value(argc, argv, "--ticks")) {
 		const int parsed = std::atoi(tv);
 		if (parsed > 0) ticks = parsed;
 	}
@@ -375,32 +387,6 @@ int main() {
 	int peak_targets = 0;
 	for (int t = 0; t < ticks; ++t) {
 		world.run_logic_tick(/*is_authority=*/true);
-		// TRANSPORT TRACE: the two 1294s (bms 58/63) across event 10 at ~139 s
-		// (tick 8688), which redirects them to channels 13/14 to clear the drop
-		// point. Question: does the order land, and do they then drive?
-		if (std::getenv("NW_TRUCK_TRACE") != nullptr && (t % (std::getenv("NW_TRK_EVERY") ? std::atoi(std::getenv("NW_TRK_EVERY")) : 625)) == 0) {
-			world.registry.for_each([&](const w::Entity &en) {
-				const bool is_pax = (en.bms_id == 21 || en.bms_id == 24 ||
-				                     en.bms_id == 27 || en.bms_id == 32 ||
-				                     en.bms_id == 36 || en.bms_id == 45 ||
-				                     en.bms_id == 17);
-				if (en.bms_id != 58 && en.bms_id != 63 && !is_pax) return;
-				const w::AiEntity *ae = ai.for_handle(en.handle);
-				std::printf("  TRK t=%6d (%5.1fs) bms=%d pos=(%7.1f,%7.1f) wp=%d "
-				            "brain[type=%d ch=%d node=%d spd=%d spdA=%d spdB=%d st=%d dist=%d nv=%d]\n",
-						t, t / 62.5, en.bms_id, en.position.x, en.position.z,
-						int(en.waypoint_id),
-						ae ? ae->brain.f[w::AiBrain::kWpType] : -1,
-						ae ? ae->brain.f[w::AiBrain::kWpChannel] : -1,
-						ae ? ae->brain.f[w::AiBrain::kWpNode] : -1,
-						ae ? ae->brain.f[w::AiBrain::kOutSpeed] : -1,
-						ae ? ae->brain.f[w::AiBrain::kSpeedA] : -1,
-						ae ? ae->brain.f[w::AiBrain::kSpeedB] : -1,
-						ae ? ae->brain.f[w::AiBrain::kCurState] : -1,
-						ae ? ae->brain.f[w::AiBrain::kWpDistance] : -1,
-						ae ? ae->brain.f[w::AiBrain::kWpNodeVal] : -1);
-			});
-		}
 		{
 			int now = 0;
 			for (int k = 0; k < ai.count(); ++k) {
@@ -424,7 +410,7 @@ int main() {
 		}
 	}
 
-	if (std::getenv("NW_EVENT_DUMP") != nullptr) {
+	if (report) {
 		std::printf("--- events referencing RedirectGroupTo (action type 1) ---\n");
 		for (size_t ei = 0; ei < m.events.size(); ++ei) {
 			const bms::Event &ev = m.events[ei];
@@ -438,7 +424,7 @@ int main() {
 						events.event_fired(ei) ? 1 : 0);
 			}
 		}
-		if (std::getenv("NW_EVENT_TRIGGERS") != nullptr) {
+		{
 			std::printf("--- trigger chains for the rider re-task events ---\n");
 			for (size_t ei = 0; ei < m.events.size(); ++ei) {
 				bool touches_rider = false;
@@ -464,7 +450,7 @@ int main() {
 				}
 			}
 		}
-		if (std::getenv("NW_AREA_DUMP") != nullptr) {
+		{
 			std::printf("--- mission areas: bms area_triggers=%zu, world registry areas=%d ---\n",
 					m.area_triggers.size(), [&]{ int c = 0; while (world.registry.area(c) != nullptr) ++c; return c; }());
 			for (size_t bi = 0; bi < m.area_triggers.size(); ++bi) {
@@ -479,7 +465,6 @@ int main() {
 		for (size_t ei = 0; ei < m.events.size(); ++ei) if (events.event_fired(ei)) ++nf;
 		std::printf("  events fired: %zu of %zu\n", nf, m.events.size());
 	}
-	const bool report = std::getenv("OPENNOVA_AI_PATH_REPORT") != nullptr;
 	if (report) {
 		std::printf("%-5s %-6s %-6s %-5s %-4s %-4s %-6s %-8s %-6s %-6s %-6s %-6s %-7s %-4s %10s\n", "ai#",
 				"handle", "bms", "grp", "has", "cmd", "tgtSSN", "wpType", "wpChan", "wpNode",

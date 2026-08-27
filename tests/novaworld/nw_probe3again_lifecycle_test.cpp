@@ -13,10 +13,10 @@
 // .sph value-oracle (decode_server_log): the .sph DEATH/DISCONNECT events and the
 // 3-player roster must line up with the wire lifecycle tags.
 //
-// Reads the pcap directly via the shared apps/common pcap reader; path from
-// NW_PROBE3AGAIN_PCAP else DEFAULT_PROBE3AGAIN_PCAP. The host .sph from
-// NW_PROBE3AGAIN_HOST_SPH else DEFAULT_PROBE3AGAIN_HOST_SPH. Skips cleanly when
-// the capture is absent (.scratch is untracked) so CI stays green; the .sph
+// Reads the pcap directly via the shared apps/common pcap reader from
+// <OPENNOVA_CAPTURES>/probe3_again.pcapng; the host .sph from
+// <OPENNOVA_CAPTURES>/sph/hostprof_probe3again.sph. Reports Skipped when
+// the capture is absent (.scratch is untracked); the .sph
 // cross-check is skipped independently if its file is absent.
 
 #include <net/npwire/ingame_decode.h>
@@ -33,6 +33,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
@@ -134,18 +135,11 @@ void check(bool cond, const std::string &what) {
 } // namespace
 
 int main() {
-	std::string pcap_path;
-	if (const char *env = std::getenv("NW_PROBE3AGAIN_PCAP"); env && *env)
-		pcap_path = env;
-	else
-		pcap_path = DEFAULT_PROBE3AGAIN_PCAP;
+	const std::string pcap_path = retail::capture("probe3_again.pcapng");
 
 	std::vector<net::PcapDatagram> pkts;
-	if (pcap_path.empty() || !net::read_pcap_udp_file(pcap_path, pkts)) {
-		std::printf("[skip] probe3_again capture not found (set NW_PROBE3AGAIN_PCAP "
-		            "to ...probe3_again.pcapng) — '%s'\n", pcap_path.c_str());
-		return 0;
-	}
+	if (!net::read_pcap_udp_file(pcap_path, pkts))
+		return retail::skip("<OPENNOVA_CAPTURES>/probe3_again.pcapng (the 3-player co-op probe capture)");
 	std::printf("loaded %zu datagrams from %s\n", pkts.size(), pcap_path.c_str());
 
 	std::vector<CaptureDatagram> caps;
@@ -198,11 +192,7 @@ int main() {
 	check(max_wave_groups == 0, "Co-op 0x6E has no queued spawn-wave groups");
 
 	// === .sph value-oracle cross-check =======================================
-	std::string sph_path;
-	if (const char *env = std::getenv("NW_PROBE3AGAIN_HOST_SPH"); env && *env)
-		sph_path = env;
-	else
-		sph_path = DEFAULT_PROBE3AGAIN_HOST_SPH;
+	const std::string sph_path = retail::sph("hostprof_probe3again.sph");
 	std::ifstream sf(sph_path, std::ios::binary);
 	if (!sf) {
 		std::printf("[note] host .sph not found (%s) — skipping the value-oracle "

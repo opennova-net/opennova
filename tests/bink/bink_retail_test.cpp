@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -23,11 +24,8 @@ uint64_t fnv1a(const std::vector<uint8_t> &bytes) {
 }  // namespace
 
 int main() {
-	const char *root = std::getenv("OPENNOVA_JO_DIR");
-	if (root == nullptr || *root == '\0') {
-		std::cout << "SKIP: set OPENNOVA_JO_DIR to decode the retail main.bik\n";
-		return 0;
-	}
+	RETAIL_REQUIRE_OR_SKIP(root, retail::install(),
+			"OPENNOVA_JO_DIR (a retail JO install) to decode the retail main.bik");
 	const std::filesystem::path path = std::filesystem::path(root) / "main.bik";
 	auto file = std::make_shared<std::ifstream>(path, std::ios::binary);
 	if (!*file) {

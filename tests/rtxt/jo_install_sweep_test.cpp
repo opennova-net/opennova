@@ -9,13 +9,12 @@
 #include <cstdlib>
 
 #include "rtxt_real_util.h"
+#include "common/retail_paths.h"
 
 int main() {
-  const char *dir = std::getenv("OPENNOVA_JO_DIR");
-  if (!dir || !*dir) {
-    std::printf("SKIP: set OPENNOVA_JO_DIR to a JO install to run the full RTXT sweep\n");
-    return 0;
-  }
+  RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
+      "OPENNOVA_JO_DIR (a retail JO install) for the full RTXT sweep");
+  const char *dir = install.c_str();
 
   opennova::Vfs vfs;
   if (!vfs.mount_game(dir, std::string(), opennova::VfsMountMode::Packed)) {

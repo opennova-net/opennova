@@ -11,7 +11,7 @@
 // authored node, resolving each step. It reports the volume inventory and
 // whether the capsule reaches the interior. Diagnostic/report-only while the
 // divergence is open; flip the verdict to an assert once the walk-in works.
-// Gated on OPENNOVA_JO_DIR (skip-as-pass without a JO install).
+// Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install).
 #include <formats/mission/bms.h>
 #include <runtime/mission/promote.h>
 
@@ -30,9 +30,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -43,12 +45,27 @@ int32_t fx(double v) { return static_cast<int32_t>(v * 65536.0); }
 
 } // namespace
 
-int main() {
-	const char *dir = std::getenv("OPENNOVA_JO_DIR");
-	if (dir == nullptr || *dir == '\0') {
-		std::printf("bunker walk-in: SKIP (OPENNOVA_JO_DIR not set)\n");
-		return 0;
-	}
+// `--from x,y[,z]`, `--to x,y`, `--column x,y`: replay any live pin's mission
+// coordinates without a rebuild (docs/divergence-ledger.md D-COL rows). The
+// ctest registration passes none and runs the historical spawn probe.
+static const char *arg_value(int argc, char **argv, const char *flag) {
+	for (int i = 1; i + 1 < argc; ++i)
+		if (std::strcmp(argv[i], flag) == 0) return argv[i + 1];
+	return nullptr;
+}
+
+static void parse_point(const char *text, double *x, double *y, double *z) {
+	if (text == nullptr) return;
+	double px = *x, py = *y, pz = z != nullptr ? *z : 0.0;
+	const int n = std::sscanf(text, "%lf,%lf,%lf", &px, &py, &pz);
+	if (n >= 2) { *x = px; *y = py; }
+	if (n >= 3 && z != nullptr) *z = pz;
+}
+
+int main(int argc, char **argv) {
+	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
+			"OPENNOVA_JO_DIR (a retail JO install carrying Cbunker2)");
+	const char *dir = install.c_str();
 
 	// The real model, through the real pipeline.
 	opennova::ResourceIndex index;
@@ -167,15 +184,10 @@ int main() {
 	s.kind = w::EntityKind::Organic;
 	s.net_id = 70001;
 	s.alive = true;
-	// Endpoints are env-overridable so any live pin can be replayed without a
-	// rebuild: NW_WALK_FROM_X/Y[/Z] and NW_WALK_TO_X/Y (mission coordinates).
-	const auto envf = [](const char *k, double dflt) {
-		const char *v = std::getenv(k);
-		return (v != nullptr && v[0] != 0) ? std::atof(v) : dflt;
-	};
-	const double from_x = envf("NW_WALK_FROM_X", 159.7);
-	const double from_y = envf("NW_WALK_FROM_Y", 323.8);
-	const double from_z = envf("NW_WALK_FROM_Z", 35.1);
+	// Endpoints are argv-overridable so any live pin can be replayed without a
+	// rebuild: --from x,y[,z] and --to x,y (mission coordinates).
+	double from_x = 159.7, from_y = 323.8, from_z = 35.1;
+	parse_point(arg_value(argc, argv, "--from"), &from_x, &from_y, &from_z);
 	s.position = {static_cast<float>(from_x), static_cast<float>(from_y),
 	              static_cast<float>(from_z)};
 	const w::EntityHandle soldier = world.registry.spawn(0, s);
@@ -183,7 +195,8 @@ int main() {
 
 	// Walk toward the authored node (the bunker interior) at the live root
 	// step (~0.09u/tick), resolving every step like the infantry tick.
-	const double nx = envf("NW_WALK_TO_X", 159.8), ny = envf("NW_WALK_TO_Y", 319.7);
+	double nx = 159.8, ny = 319.7;
+	parse_point(arg_value(argc, argv, "--to"), &nx, &ny, nullptr);
 	int32_t pos[3] = {fx(from_x), fx(from_y), fx(from_z)};
 	int32_t vel[3] = {0, 0, 0};
 	int16_t health = 100;
@@ -228,10 +241,9 @@ int main() {
 				w::collision_matrix_from_heading(heading, bp);
 		w::CollisionMatrix inv;
 		mat.invert_into(inv);
-		// Column to inspect: NW_COL_X/Y (defaults to the historical spawn probe).
-		const char *cx = std::getenv("NW_COL_X"), *cy = std::getenv("NW_COL_Y");
-		const double colx = (cx && cx[0]) ? std::atof(cx) : 155.3;
-		const double coly = (cy && cy[0]) ? std::atof(cy) : 318.2;
+		// Column to inspect: --column x,y (defaults to the historical spawn probe).
+		double colx = 155.3, coly = 318.2;
+		parse_point(arg_value(argc, argv, "--column"), &colx, &coly, nullptr);
 		const int32_t col[3] = {fx(colx), fx(coly), fx(35.1)};
 		std::printf("column (%.1f, %.1f):\n", colx, coly);
 		int32_t local[3];

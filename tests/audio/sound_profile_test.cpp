@@ -3,8 +3,8 @@
 // SoundProfile_FindSlotByName @ 0x526e30]. The inline fixture mirrors the retail
 // file's shapes (quoted begin names + trailing comment text, tab/space runs,
 // float param columns, the med/crs percent rows). The retail-corpus spot check
-// (JO_ASSETS' sndprof.def, 49 profiles) runs only when the env var points at a
-// local install — SKIP-AS-PASS otherwise (docs/asset-gated-tests.md).
+// (<OPENNOVA_JO_ASSETS>/sndprof.def, 49 profiles) runs only when the extracted
+// asset tree carries it — SKIP-LEG otherwise (docs/asset-gated-tests.md).
 #include <runtime/audio/sound_profile.h>
 #include "common/test_expect.h"
 
@@ -13,6 +13,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 using opennova::audio::SoundProfile;
 using opennova::audio::SoundProfileTable;
@@ -103,8 +104,8 @@ int main() {
 
     // Retail corpus (asset-gated): JO's sndprof.def parses to 49 profiles and the
     // SP player profile carries the witnessed footstep sets.
-    if (const char *assets = std::getenv("JO_ASSETS")) {
-        std::string path = std::string(assets) + "/sndprof.def";
+    const std::string path = retail::asset_file("sndprof.def");
+    if (!path.empty()) {
         if (FILE *f = std::fopen(path.c_str(), "rb")) {
             std::fseek(f, 0, SEEK_END);
             long n = std::ftell(f);
@@ -122,10 +123,11 @@ int main() {
             TEST_EXPECT(player->set_names[slot::kSlotNightDeath] == "BM1_DEATH_K");
             TEST_EXPECT(player->set_names[slot::kSlotFreeFall] == "FREEFALL");
         } else {
-            std::printf("SKIP: %s not present\n", path.c_str());
+            std::fprintf(stderr, "FAIL: cannot open %s\n", path.c_str());
+            return 1;
         }
     } else {
-        std::printf("SKIP: JO_ASSETS not set (retail sndprof.def spot check)\n");
+        retail::skip_leg("OPENNOVA_JO_ASSETS/sndprof.def (retail sound profile spot check)");
     }
 
     return 0;

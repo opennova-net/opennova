@@ -90,7 +90,7 @@ static int try_menu(const char *path, bool required) {
   return 1;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
   int fail = 0;
 
   /* All 15 committed revx02 menus are required-pass; the fixed-point idempotence
@@ -108,11 +108,11 @@ int main(void) {
   for (const char *p : fixtures)
     if (!try_menu(p, true)) ++fail;
 
-  /* Developer-only: a menu not yet committed (e.g. PRE.MNU) still sweeps when
-     the env gate points at one, without failing CI (machine paths live in
-     .claude/settings.local.json env, never tracked). */
-  if (const char *extra = getenv("OPENNOVA_MNU_EXTRA"))
-    try_menu(extra, false);
+  /* Developer-only: menus not yet committed (e.g. PRE.MNU) still sweep when
+     passed on the command line (`mnu_compat_test <path.mnu> ...`), without
+     failing the ctest registration, which passes none. */
+  for (int i = 1; i < argc; ++i)
+    try_menu(argv[i], false);
 
   if (fail > 0) {
     fprintf(stderr, "\n%d required MNU fixture(s) FAILED\n", fail);
