@@ -5530,8 +5530,8 @@ movements:
    dispatch (ctest `weapon_fsm`: every tick of an idle reseed cycle steps except the one
    that drains the window, none for non-local owners or clipless actions). Both engines still park
    non-looping idles on the last key, so the catalog hold pose is unchanged.
-5. **The reload/left-hand tail, closed by the full-clip bone sweep.** `vm_bone_probe.gd` now
-   poses EVERY frame of every `anim_wpn_idle`/`anim_wpn_reload` variant on BOTH viewmodel
+5. **The reload/left-hand tail, closed by the full-clip bone sweep.** The `vm_bone_dump` probe
+   (`godot/probes/runtime/vm_bone_dump_probe.gd`) poses EVERY frame of every `anim_wpn_idle`/`anim_wpn_reload` variant on BOTH viewmodel
    parts (synchronously, so the presenter's per-tick pin never interleaves) and
    `fp_bone_oracle.py --sweep-log` diffs each frame against the retail builders: the M16 rig
    agrees to **0.0000 u on every bone of every frame** — 16-frame idles ×2 and the 99-frame
@@ -5596,7 +5596,7 @@ retail (up to ~110 px). Five findings, in the order they were settled:
    the model table with ABSOLUTE pivots (row `+36` is the file's `abs` vec3, file `+24` →
    memory `+36`; `T(−pivot)·W` then `pivot·W_parent + t_parent + T`) `[orig: @ 0x40c5ef..
    0x40c721]`, padding rows = bone 0 `[orig: @ 0x40c5a1]`. Against a live dump of the runtime
-   rig (`godot/tests/game/vm_bone_probe.gd`; M16 `gfx1` with the revx02 `M4_1ST` clip set) every
+   rig (the `vm_bone_dump` probe; M16 `gfx1` with the revx02 `M4_1ST` clip set) every
    pivot agrees to ≤ 0.6 mm at the idle hold under the model→render x-flip. The
    `anim_wpn_idle` clips `m4_1i` / `m4_1i2` are non-looping 16-frame holds (flags 0x0 / 0x2):
    both engines park on the last frame; mid-clip frames differ by up to 1.2 cm of gun travel,
@@ -8702,7 +8702,7 @@ re-queue loop.
 chain fixed the REVVY M4 still presented wrong live: ammo drained at the correct
 5-tick cadence but the gun kicked once and froze until release. The sim, the event
 batch, and the host drain all verified correct (headless FSM probe on the real dict;
-per-tick drain dump; the weapon_round_probe NOVA_WR_ANIMTRACE playhead trace) — the
+per-tick drain dump; the `weapon_round` probe's `animtrace` playhead trace) — the
 root cause was OUTSIDE the FSM: the `.bad` pose bake dropped every clip's final
 channel key (the header `frame_count` counts INTERVALS; channels carry
 `frame_count + 1` keys), and `m4_1f` — the M4 fire clip — is a ONE-frame clip whose
@@ -9022,7 +9022,7 @@ divergence, FIXED 2026-07-15]: the LOCAL fire leg fed `RoundSim` a `(90 − head
 mission-yaw bearing where the round bearing frame IS the engine heading frame
 (`RoundSim`'s `(cos, sin)` mission-axis mapping is wire-validated on the 0x06 yaw BAM —
 the same D-NET-153 flip, reintroduced on the local leg): every local shot flew mirrored
-across the NE diagonal, landing impact effects 90° off the aim ray (the `fp_impact_probe`
+across the NE diagonal, landing impact effects 90° off the aim ray (the `fp_impact` probe's
 pin: aiming due north put impacts 14.75 m due east; post-fix they sit on the ray).
 `dir_yaw = p->heading` directly now; the `simulation_test` fire case moved its
 target onto the true bearing and pins the drained impact position (the old east-side

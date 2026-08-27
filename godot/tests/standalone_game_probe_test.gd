@@ -5,13 +5,11 @@ const PROBE_PATHS: Array[String] = [
 	"res://tests/body_holds_probe.gd",
 	"res://tests/body_reload_probe.gd",
 	"res://tests/fp_clean_probe.gd",
-	"res://tests/fp_impact_probe.gd",
 	"res://tests/lean_tp_probe.gd",
 	"res://tests/oned_keys_probe.gd",
 	"res://tests/pose_replay_probe.gd",
 	"res://tests/render_align_probe.gd",
 	"res://tests/terrain_seam_probe.gd",
-	"res://tests/weapon_round_probe.gd",
 ]
 
 # Self-contained scene probes: operator-run visual scenes with their own
@@ -33,7 +31,6 @@ const HEADLESS_PROBES: Array[String] = [
 	"res://tests/held_weapon_frame_probe.gd",
 	"res://tests/held_weapon_placement_probe.gd",
 	"res://tests/itemfx_probe.gd",
-	"res://tests/mission_audio_probe.gd",
 	"res://tests/mount_timing_probe.gd",
 	"res://tests/muzzle_origin_probe.gd",
 	"res://tests/ptl_effect_dump_probe.gd",

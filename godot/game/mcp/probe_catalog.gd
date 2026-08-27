@@ -10,6 +10,7 @@ extends RefCounted
 const PERF := "res://probes/perf/"
 const RENDER := "res://probes/render/"
 const STAGE := "res://probes/stage/"
+const RUNTIME := "res://probes/runtime/"
 
 # Built once: the runner and the tool look definitions up by identity.
 static var _definitions: Array[ProbeDef] = []
@@ -181,6 +182,68 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"mission": { "type": "string", "default": "" },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, false, 120_000),
+		ProbeDef.make("dialog_vs_ambient",
+				"The dialog-vs-ambience gate at the MissionAudio seam on the mounted root: "
+				+ "set up a mission's audio (ambient marker voices on unless `ambient` is "
+				+ "false), play the first `lines` resolvable .DBF dialog ids and assert each "
+				+ "spawns, is audible on the Voice bus and advances the queue; reports the "
+				+ "ambient/master peaks while dialog plays. Menu launch (no loaded world).",
+				RUNTIME + "dialog_vs_ambient_probe.gd", {
+					"lines": { "type": "integer", "minimum": 1, "default": 3 },
+					"ambient": { "type": "boolean", "default": true },
+					"mission": { "type": "string", "default": "00TRa.bms" },
+					"sim_ticks": { "type": "integer", "minimum": 0, "default": 0 },
+				}, [], false, false, 300_000),
+		ProbeDef.make("mission_audio",
+				"The mission-audio setup report for one or more missions on the mounted "
+				+ "root (every listed .bms when `missions` is empty, cap 12): markers "
+				+ "resolved, banks loaded, ambient candidates, dialogs, and the physical "
+				+ "pool's loop regions (an empty region is a silent voice).",
+				RUNTIME + "mission_audio_probe.gd", {
+					"missions": { "type": "array", "items": { "type": "string" }, "default": [] },
+				}, [], false, false, 300_000),
+		ProbeDef.make("fp_impact",
+				"The impact-position probe on the loaded mission: equip `weapon` when given, "
+				+ "walk forward, aim down, fire a burst through the real input path, then "
+				+ "dump the camera aim ray against every live effect-world group (name, sim "
+				+ "position, rendered bounds) and capture the frame; fails on no live group.",
+				RUNTIME + "fp_impact_probe.gd", {
+					"weapon": { "type": "string", "default": "" },
+					"walk_frames": { "type": "integer", "minimum": 0, "default": 120 },
+					"look_px": { "type": "number", "default": 300.0 },
+					"burst_frames": { "type": "integer", "minimum": 1, "default": 20 },
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, true, 300_000),
+		ProbeDef.make("hud_killfeed",
+				"The message-feed screenshot (D-HUD-23): three real gametext Canned Msg "
+				+ "lines through the engine formatters and HudOverlay.push_feed_line with "
+				+ "the witnessed colors, captured over the loaded mission.",
+				RUNTIME + "hud_killfeed_probe.gd", {
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, true, 300_000),
+		ProbeDef.make("vm_bone_dump",
+				"The first-person viewmodel bone dump: equip `weapon`, write the rig's "
+				+ "placement inputs and every bone's camera-relative transform, then the "
+				+ "full-clip sweep (every frame of every anim_wpn_idle/anim_wpn_reload "
+				+ "variant on both parts) for the retail FP bone-builder comparison.",
+				RUNTIME + "vm_bone_dump_probe.gd", {
+					"weapon": { "type": "string", "default": "WPN_M16BURST" },
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, true, 600_000),
+		ProbeDef.make("weapon_round",
+				"The weapon-round visual probe: the adjudicated crosshair protocol "
+				+ "(D-HUD-9/10), the SIGHTS scope card and unscope-on-move through the real "
+				+ "input path (the armory at the spawn tents when in zone); with `fire` the "
+				+ "fire-chain diagnostic (FSM view + audio bank per ten frames, the reload "
+				+ "variant ring), with `animtrace` the per-frame viewmodel playhead trace.",
+				RUNTIME + "weapon_round_probe.gd", {
+					"rig_weapon": { "type": "string", "default": "WPN_Barret" },
+					"card_weapon": { "type": "string", "default": "WPN_RPG" },
+					"fire": { "type": "boolean", "default": false },
+					"weapon": { "type": "string", "default": "" },
+					"animtrace": { "type": "boolean", "default": false },
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, true, 900_000),
 	]
 
 

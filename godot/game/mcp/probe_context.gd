@@ -61,6 +61,10 @@ func menu_shell() -> MenuShell:
 	return _supply(seams.menu_shell_source if seams != null else Callable()) as MenuShell
 
 
+func armory_presenter() -> ArmoryPresenter:
+	return _supply(seams.armory_presenter_source if seams != null else Callable()) as ArmoryPresenter
+
+
 func dev_tools() -> DevTools:
 	return _supply(seams.dev_tools_source if seams != null else Callable()) as DevTools
 

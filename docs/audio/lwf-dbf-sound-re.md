@@ -643,7 +643,8 @@ range + the no-falloff emitter-volume source, and dropped an unwitnessed `sound_
 slot fallback (zero envs-class JOX items carry the key — it could never fire on retail
 data). Divergences D-SND-6..8 below; regression seams `sound_runtime_test.gd` (curve
 integers + the Q16/rounding/no-falloff pins), `mission_audio_test.gd` (mix budget /
-slots / crossfade), and the `dialog_vs_ambient_probe.gd` bed-vs-dialog gate.
+slots / crossfade), and the `dialog_vs_ambient` probe's bed-vs-dialog gate
+(`game_probe`, `godot/probes/runtime/dialog_vs_ambient_probe.gd`).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|

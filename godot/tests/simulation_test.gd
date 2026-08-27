@@ -1546,7 +1546,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# mission +y (bearing 90). The target sits 8 m along +y so the shot connects
 	# only when the round bearing rides the heading frame directly — the old
 	# (90 - heading) flip flew the shot along +x and only an east-side target
-	# could pass (the compensating-error pair the fp_impact_probe pinned;
+	# could pass (the compensating-error pair the fp_impact probe pinned;
 	# ledger D-WPN-18).
 	# Use the fixture's Generic Soldier (wire id 5311 -> items.def id 105311),
 	# then resolve traits through the same production seam as MissionPresentation. Retail
