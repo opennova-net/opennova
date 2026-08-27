@@ -21,7 +21,7 @@
     "oversize_cpp_files": 1,
     "oversize_cpp_headers": 1,
     "oversize_gd_files": 1,
-    "test_private_pokes": 95
+    "test_private_pokes": 94
   },
   "dict_contract_allowlist": [
     "player_profile.gd|static func load_character_profile(",

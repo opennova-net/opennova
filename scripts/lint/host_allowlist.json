@@ -16,7 +16,6 @@
     "godot/export_presets.cfg",
     "godot/game/novaworld_panel.gd",
     "godot/game/novaworld_settings.gd",
-    "godot/tests/00trg_defense_probe.gd",
     "godot/tests/armory_presenter_test.gd",
     "godot/tests/debug_entities_page_test.gd",
     "godot/tests/debug_snapshot_writer_test.gd",
