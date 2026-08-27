@@ -21,8 +21,9 @@ easier to relay than to rediscover.
   pass with the game's F3 dev-tool windows (debug builds only) and ONED's run
   surface, ADR 0039),
   `net/` (novacrypto, napi, npwire, novaworld, inmatch, plus the internal
-  netsim/npruntime implementation directories). Native consumers link the engine
-  groups directly.
+  netsim/npruntime implementation directories). `engine/` is the one public
+  include root: `#include <runtime/world/x.h>`, `<formats/pff/pff.h>` (ADR 0040).
+  Native consumers link the engine groups directly.
   See `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
@@ -90,6 +91,9 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
 
 - `engine/` libraries: built as the five group targets (ADR 0029 — no per-lib CMake
   targets), C++ namespace `opennova`; `godot/src/` is the typed Godot binding layer.
+  There is no "Nova layer" (ADR 0040): nothing carries a `Nova`/`nova_` prefix —
+  files are named after the type they declare; `NovaWorld*` (the service),
+  `NovaLogic` (the vendor) and `opennova*` (the project) are the proper nouns.
 - This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
   Implementing "our own version" of engine behavior is never allowed: port the witnessed
   original as a structural translation and cite it inline (`[orig: Name @ 0xADDR]`) unless a

@@ -23,6 +23,14 @@ in maturity_baseline.json:
                         is NON-ZERO BY DESIGN: a device-leg citation is the
                         seam contract working, and deleting one is a
                         documentation regression, not a win.
+  gd_orig_cites         "[orig:" citations in godot/game and godot/modtools
+                        GDScript -- witnessed engine behavior still living in
+                        the game-level scripts (ADR 0034 d6's C++ rewrite
+                        queue, measured). The burn-down class for the push-down
+                        campaign; its floor is the device-leg justifications.
+  oversize_cpp_headers  .h/.hpp under engine/, apps/, godot/src past the same
+                        2500-line limit as oversize_cpp_files (the .cpp glob
+                        never saw headers).
 
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
@@ -269,6 +277,46 @@ def count_oversize_cpp_files() -> int:
     return count
 
 
+def count_oversize_cpp_headers() -> int:
+    """Oversized headers: the same 2500-line limit as count_oversize_cpp_files,
+    applied to .h/.hpp under engine/, apps/, godot/src (a state model the size
+    of a translation unit is a split waiting to happen)."""
+    count = 0
+    for root in ("engine", "apps", "godot/src"):
+        for pattern in ("*.h", "*.hpp"):
+            for path in (REPO / root).rglob(pattern):
+                parts = path.relative_to(REPO).parts
+                if _in_build_dir(parts):
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if len(text.splitlines()) > OVERSIZE_CPP_LINE_LIMIT:
+                    count += 1
+    return count
+
+
+def count_gd_orig_cites() -> int:
+    """`[orig:` citations in the game-level GDScript (godot/game, godot/modtools):
+    witnessed engine behavior that ADR 0033/0034 say belongs in engine/. The
+    push-down campaign banks this down; the floor is the device-leg
+    justifications (a cite explaining WHY a node write happens, not HOW a
+    witnessed value is derived)."""
+    count = 0
+    for sub in ("game", "modtools"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            parts = path.relative_to(REPO).parts
+            if "addons" in parts or _in_build_dir(parts):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            count += text.count("[orig:")
+    return count
+
+
 OVERSIZE_GD_LINE_LIMIT = 1200
 
 
@@ -338,8 +386,10 @@ def main() -> int:
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),
         "oversize_cpp_files": count_oversize_cpp_files(),
+        "oversize_cpp_headers": count_oversize_cpp_headers(),
         "oversize_gd_files": count_oversize_gd_files(),
         "has_method_guards": count_has_method_guards(),
+        "gd_orig_cites": count_gd_orig_cites(),
     }
 
     if args.write_baseline:

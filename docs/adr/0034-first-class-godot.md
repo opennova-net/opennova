@@ -5,6 +5,9 @@
   described below with a typed native session and direct Godot frame pipeline.
 - **Updated**: [ADR 0037](0037-oned-runs-game-data.md) narrows ONED from an
   authoring front-end to run controls; Godot remains first-class.
+  [ADR 0040](0040-the-engine-is-one-namespace.md) finishes decision 5 (the
+  files, identifiers and macros drop the prefix too; bindings include
+  root-relative) and restates §2's consumer list honestly.
 - **Owners**: runtime architecture
 - **Supersedes/updates**: amends ADR 0028 and ADR 0033's POSTURE — the
   "adapter" framing and the shell-neutral pretense — without touching their
