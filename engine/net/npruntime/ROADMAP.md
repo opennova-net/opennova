@@ -124,7 +124,7 @@ suite unaffected.
 > game-server field block (`is_game_server`: SF/P1/P2/NP/MP) is present, identity strings are the
 > retail build's; 0x82 — `MI` is host-specific (retail 3 vs our 0x113f default), the CS control-field
 > *values* are the retail set (ours are onnet's `[UNVERIFIED]` values), and a LAN host emits **no CU**
-> block (we append novaworld name/url/nwuid). **Follow-up:** a `engine/net/novaworld` session-builder grill
+> block (we append novaworld name/url/nwuid). **Follow-up (tracked in TODO.md § Project health follow-ups):** the session-builder grill
 > (witness CI/MI/CS/game-server-block/LAN-CU-suppression in IDA) to reach full 0x81/0x82 byte-parity.
 >
 > **GRILLED 2026-06-27 (D-NET Wave 3):** 0x81 `NapiNPProtocol_SendServerInfoPacket @0x6204b0` —
@@ -188,7 +188,7 @@ unaffected; full ctest 223/223.
 > Refinement vs plan (scope): **structural P3** — the ~8 §5.2a serializers with no witnessed byte
 > format (`0x2C/0x08/0x2A/0x66/0x76/0x45/0x7E/0x1A`) are **emitted as nothing + logged once**, never
 > faked (faithful-port rule; mirrors P2's deferred-builder-gap). Full burst byte-parity is the
-> follow-up grill wave (witness each serializer @ the addresses cited in `server_initial_state.cpp` →
+> follow-up grill wave tracked in TODO.md § Project health follow-ups (witness each serializer @ the addresses cited in `server_initial_state.cpp` →
 > `ingame_encode`, land via `re-doc`). The fixture burst in `game_session.cpp`
 > (`queue_mission_bootstrap` / `queue_state4_loading_gate`) is no longer on the npruntime spawn/burst
 > path; its full deletion is P8, once `game_runtime`'s §5.1 reply role is also grilled.
@@ -387,7 +387,7 @@ the new `engine/net/npruntime/server_message_dispatch.{h,cpp}` (`dispatch_sessio
 `ctx.session_config` + the per-connection `NapiNPConnection.reply` state). Reply BODIES are carried
 verbatim (captured-from-observation fixtures, D-NET-127); the faithful per-body serializer port + the
 `Server_OnPlayerJoin` join-burst tail (the deferred §5.2a serializer half closed at P8.2 below) (`0x42/0x0F/0x4D/seed/0x3E`,
-to fold into `Server_SendInitialGameStateToPlayer`) stay the tracked grill-wave follow-up.
+to fold into `Server_SendInitialGameStateToPlayer`) stay part of that grill wave, tracked in TODO.md § Project health follow-ups.
 
 Migrations the deletion forced: `napi_np_protocol.cpp` (drop `ctx.game_runtime` + the mirror; reactive
 replies via `dispatch_session_replies`); the per-frame `0x0A` adapter (`build_tag_0a_world_reference`)

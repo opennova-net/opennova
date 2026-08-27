@@ -98,3 +98,42 @@ carrying the uniqueness load; nothing enforced it.
   state; paths that name a current file are updated.
 - No compatibility aliases: every consumer is rewritten in the same change
   (pre-1.0 policy).
+
+## Ladder: the push-down campaign
+
+With the names and the include roots settled, the witnessed behavior still
+living Godot-side moves to an engine home. The gauges are
+`adapter_cpp_orig_cites_pushdown` (the `[orig:` markers under
+`godot/src/{simulation,object,mission}`) and `gd_orig_cites` (the same markers
+under `godot/game` + `godot/modtools`), both in
+`scripts/lint/maturity_baseline.json`: a slice moves code, banks the counter,
+and keeps fidelity, because the cites travel with the code they cite.
+
+The campaign runs one commit per slice, and **this table is its queue.** The
+ranked list originally written into `TODO.md` was lifted back out at
+`77c025a2d` (the maintainer's call for this campaign: run it in the PR, not as
+a TODO queue), so the remainder is tracked here and nowhere else. The ladder is
+finished when both counters hold only documented seam contracts, not when they
+reach any particular number.
+
+| Slice | What moves | Engine home | Status |
+|---|---|---|---|
+| A1 | the local player's view cluster | `engine/runtime/world/local_player_view.{h,cpp}` | LANDED `4a7195299` |
+| A2 | the minimap marker rows and their feed layout (duplicated at `simulation.h` and `hud/hud_overlay.cpp`) | `engine/net/npruntime/minimap_markers.{h,cpp}` + `engine/runtime/hud/hud_minimap_feed.{h,cpp}` | LANDED `61bfa5efa` |
+| A3 | `simulation.cpp`'s `advance_world_tick` / `boot_mission` / `restore_world_baseline` | `engine/net/inmatch` + `engine/runtime/mission/runtime_boot` | QUEUED |
+| A4 | the LAN browse/announce cadence and its constants | `engine/net/npruntime/lan_discovery.{h,cpp}` | LANDED `a5ca3f3c9` |
+| A5a | the boot, pack and options policies leave the GDScript | `engine/base/resource_index/boot_policy.{h,cpp}`, `engine/base/vfs/pack_policy.h`, `engine/runtime/menu/options_policy.h` | LANDED `c33b15f46` |
+| A5b | the seat mirror, the volume law and the weapon-category rows | `engine/runtime/world/vehicle_attach.{h,cpp}`, `engine/runtime/audio/volume_law.h`, `engine/runtime/controls/controls.{h,cpp}` | LANDED `6e34d2e2a` |
+| B3a | the occlusion frame camera build | `engine/runtime/world/occlusion_camera.h` | LANDED `c2e41b97c` |
+| B3b | the iris exposure march | `engine/runtime/world/iris_march.{h,cpp}` | LANDED `97fb7a83b` |
+| B (remainder) | `simulation_present.cpp`'s data model, `simulation_net.cpp`'s GameConfig policy + pumps, `simulation_player_loadout.cpp` / `simulation_player_weapon.cpp` / `simulation_player.cpp`, `simulation_assets.cpp`, the feed marshallers, then the `simulation.h` state-model split, after which `Simulation` is a `TickTarget` adapter | to be chosen per slice | QUEUED |
+| C1 | the mission load plan (`Game_StartMission`'s sequence + progress schedule) | `engine/runtime/mission/mission_load_plan.h` | LANDED `d081d2908` |
+| C2 | the HUD presenter's config tokens and feed units | `engine/runtime/hud/hud_config_tokens.h` | LANDED `d8fa149b2` |
+| C3+C4 | the presenter's swizzles/rangefinder and the viewmodel rig's frame math | `engine/runtime/world/presentation_frame.h` + `engine/runtime/simassets/fp_viewmodel_spec.h` | LANDED `0b07c5f9f` |
+| C5 | the light director's spawner constants | `engine/runtime/renderer/light_scene.h` | LANDED `89440caf7` |
+| C6 | the loading screen's names, sidecar and due rules | `engine/runtime/hud/loading_screen.h` | LANDED `4c8a38c6a` |
+| C7 | the character registry and the joiner profile | `engine/net/npruntime/character_registry.{h,cpp}` + `engine/net/npruntime/join_character_profile.h` | LANDED `eb9fa8c69` |
+| C8 | `godot/game/world/mission_audio.gd`'s reverb, which is an invented approximation and so cannot stand as written: port `Audio_LoadReverbDefs @0x766d80` or ledger the divergence | `engine/runtime/audio` | QUEUED |
+| C9 | `godot/game/world/net_session_drive.gd`, plus the `destruction_present_pass.gd` / `item_effect_director.gd` / `fire_present_pass.gd` passes | to be chosen per slice | QUEUED |
+| C10 | the player-info and armory companions (`godot/game/player_info_menu_companion.gd`, `godot/game/world/armory_menu_companion.gd`), mostly wired-doc cites rather than behavior | to be chosen per slice | QUEUED |
+| D | `godot/src/object/object_model_anim.cpp` + the `skeletal_anim` slot machine to `engine/runtime/anim`; the `item_database` / `weapon_database` doc blocks to their engine homes; the CTRL store + PANM cache; `godot/src/env/weather.cpp`'s mission-start boundary; `godot/src/particle/particle_renderer.cpp`'s `lit_primary_color`; `godot/src/env/water_core.cpp`'s view builder; `godot/src/terrain/terrain.cpp`'s normal + quadrant policy | to be chosen per slice | QUEUED |
