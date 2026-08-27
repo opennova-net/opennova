@@ -54,4 +54,88 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, LanDiscoverySer
 	return true;
 }
 
+namespace {
+
+// A reply's source must be routable back: an empty or unspecified address
+// cannot be joined.
+bool usable_address(const std::string &address) {
+	return !address.empty() && address != "0.0.0.0" && address != "::";
+}
+
+std::string endpoint_key(const std::string &address, int port) {
+	return address + ":" + std::to_string(port);
+}
+
+} // namespace
+
+bool LanDiscoveryBrowser::begin(uint32_t client_index, int port_min, int port_max) {
+	if (port_min < 1 || port_max > 65535 || port_min > port_max) return false;
+	stop();
+	servers_.clear();
+	index_by_endpoint_.clear();
+	// One identity per browse window: retail keeps its connection identity
+	// across the enumerator's re-announce pumps, so every burst repeats the
+	// same probe bytes.
+	probe_ = build_lan_discovery_probe(client_index);
+	port_min_ = port_min;
+	port_max_ = port_max;
+	browse_elapsed_s_ = 0.0;
+	announce_elapsed_s_ = 0.0;
+	browsing_ = true;
+	return true;
+}
+
+void LanDiscoveryBrowser::stop() {
+	browsing_ = false;
+	browse_elapsed_s_ = 0.0;
+	announce_elapsed_s_ = 0.0;
+}
+
+bool LanDiscoveryBrowser::advance(double delta_seconds, bool &announce_due) {
+	announce_due = false;
+	if (!browsing_) return false;
+	browse_elapsed_s_ += delta_seconds;
+	announce_elapsed_s_ += delta_seconds;
+	if (browse_elapsed_s_ >= kLanBrowseWindowSeconds) {
+		stop();
+		return false;
+	}
+	// A cold host that binds its port mid-window is only discoverable because
+	// the enumerator keeps announcing.
+	if (announce_elapsed_s_ >= kLanAnnounceIntervalSeconds) {
+		announce_elapsed_s_ = 0.0;
+		announce_due = true;
+	}
+	return true;
+}
+
+LanRowChange LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size,
+                                               const std::string &source_ip,
+                                               int source_port) {
+	if (!browsing_ || data == nullptr || size == 0 || source_port < port_min_ ||
+	    source_port > port_max_ || !usable_address(source_ip))
+		return LanRowChange::kNone;
+	LanDiscoveryServer server;
+	if (!parse_lan_discovery_reply(data, size, server)) return LanRowChange::kNone;
+	const std::string key = endpoint_key(source_ip, source_port);
+	const auto it = index_by_endpoint_.find(key);
+	if (it != index_by_endpoint_.end()) {
+		// The host re-announces every browse interval and its row data is live
+		// state (player count, mission rotation) — refresh the stored row in
+		// place and report a change only when something actually changed, so a
+		// stale first-seen row does not survive the whole browse window.
+		LanDiscoveryRow &row = servers_[it->second];
+		if (row.server == server) return LanRowChange::kNone;
+		row.server = std::move(server);
+		return LanRowChange::kUpdated;
+	}
+	index_by_endpoint_.emplace(key, servers_.size());
+	LanDiscoveryRow row;
+	row.host_ip = source_ip;
+	row.port = source_port;
+	row.server = std::move(server);
+	servers_.push_back(std::move(row));
+	return LanRowChange::kAdded;
+}
+
 } // namespace opennova::np
