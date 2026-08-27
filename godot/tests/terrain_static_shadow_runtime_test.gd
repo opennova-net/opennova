@@ -484,14 +484,10 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 
 
 func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> void:
-	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
-	if install_dir.is_empty():
-		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the Scrate1 shadow witness")
+	var resource_root := RetailData.mount_install_with("Scrate1.3di")
+	if resource_root == null:
+		pending("OPENNOVA_JO_DIR / retail JO PFFs serving Scrate1.3di are required for the shadow witness")
 		return
-	var resource_root := ResourceRoot.new()
-	assert_eq(resource_root.mount_runtime(
-			install_dir, "revx02", false, "jo"), OK,
-		"the installed JO runtime must mount for the asset-backed witness")
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_from_resource_root(
 			resource_root, "Scrate1.3di", false), OK,

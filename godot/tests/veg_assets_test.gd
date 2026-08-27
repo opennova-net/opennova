@@ -165,14 +165,10 @@ func test_mesh_cache_does_not_alias_base_and_expansion_mounts_of_same_directory(
 
 
 func test_installed_dvxi5_foliage_assets_enable_every_authored_slot() -> void:
-	var install_dir := OS.get_environment('OPENNOVA_JO_DIR')
-	if install_dir.is_empty():
-		pass_test('OPENNOVA_JO_DIR is unset; installed-game foliage asset check skipped.')
+	var resource_root := RetailData.mount_install_with('Dvxi5.trn')
+	if resource_root == null:
+		pending('OPENNOVA_JO_DIR / retail JO PFFs serving Dvxi5.trn are required for the installed foliage check')
 		return
-	var resource_root := ResourceRoot.new()
-	var expansion := OS.get_environment('JO_EXPANSION')
-	assert_eq(resource_root.mount_runtime(install_dir, expansion, false, 'jo'), OK,
-		'Installed JO root must mount through the production packed VFS.')
 	var terrain := TerrainData.new()
 	assert_eq(terrain.load_from_resource_root(resource_root, 'Dvxi5.trn'), OK)
 	var defs: Array = terrain.get_foliage_defs()

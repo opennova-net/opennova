@@ -43,8 +43,9 @@ manifest and rejects runtime topology switches or source-generation paths.
 SHA-256 of each of the 132 checked-in object wrappers (128 generated + 4
 auxiliary) plus its transitive include closure, preserving the former
 composed-source regression sensitivity. A deliberate, witnessed shader change
-re-dumps with `OPENNOVA_OBJECT_SHADER_HASHES_DUMP=1` set for the GUT run; like
-the state-vector dump, that run rewrites the golden and intentionally fails.
+re-dumps by running `godot/tests/tools/shader_hashes_regen.gd` alone (its
+header carries the command line); like the state-vector dump, that run
+rewrites the golden and intentionally fails.
 
 **T2 — swatch A/B (local, mandatory per REN slice).**
 `godot/tests/render_swatch_probe.gd` renders one cell per unique object-shader

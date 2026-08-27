@@ -134,8 +134,8 @@ func _synthetic_attachment_rows(
 
 
 func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
-	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
-	if install_dir.is_empty() or not DirAccess.dir_exists_absolute(install_dir):
+	var install_dir := RetailData.install()
+	if install_dir.is_empty():
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the 03TR Blackhawk witness")
 		return
 
@@ -225,8 +225,8 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 
 
 func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
-	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
-	if install_dir.is_empty() or not DirAccess.dir_exists_absolute(install_dir):
+	var install_dir := RetailData.install()
+	if install_dir.is_empty():
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the MRK5 witness")
 		return
 
@@ -341,8 +341,8 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	# HELO_ROTOR / HELO_TAILROTOR and the present applier stores it on the
 	# carrier model [orig: Entity_UpdatePartSpinAccumulator @0x4928B0;
 	#  Entity_CacheVehicleHUDStats @0x492ACA..0x492ADE].
-	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
-	if install_dir.is_empty() or not DirAccess.dir_exists_absolute(install_dir):
+	var install_dir := RetailData.install()
+	if install_dir.is_empty():
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the Blackhawk witness")
 		return
 	var root := ResourceRoot.new()
@@ -428,8 +428,8 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 
 
 func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
-	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
-	if install_dir.is_empty() or not DirAccess.dir_exists_absolute(install_dir):
+	var install_dir := RetailData.install()
+	if install_dir.is_empty():
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the DBuggy witness")
 		return
 

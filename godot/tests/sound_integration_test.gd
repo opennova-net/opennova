@@ -5,20 +5,21 @@ extends GutTest
 ## many sound markers resolved to a sound set. Skips when the data is absent.
 
 
-# The loose JOX dump root rides the documented env gate (docs/asset-gated-tests.md);
-# machine paths go in .claude/settings.local.json env, never tracked.
-var JO_DIR := OS.get_environment("OPENNOVA_JO_ASSETS")
+# The loose JOX dump root is the documented OPENNOVA_JO_ASSETS gate
+# (docs/asset-gated-tests.md, RetailData.assets()); machine paths go in
+# .claude/settings.local.json env, never tracked.
+var JO_DIR := RetailData.assets()
 
 
 func test_jo_00tra_sound_marker_resolution() -> void:
-	if JO_DIR.is_empty() or not DirAccess.dir_exists_absolute(JO_DIR):
-		pass_test("JOX not present; skipping real-data probe")
+	if JO_DIR.is_empty():
+		pending("OPENNOVA_JO_ASSETS (the JOX extract) is required for the real-data probe")
 		return
 
 	var root := ResourceRoot.new()
 	root.set_root_dir(JO_DIR)
 	if not root.has_file("00TRa.bms"):
-		pass_test("00TRa.bms not resolvable from JOX; skipping")
+		pending("00TRa.bms is not resolvable from OPENNOVA_JO_ASSETS")
 		return
 	assert_true(root.has_file("00TRa.LWF"), "mission has a co-named sound profile")
 

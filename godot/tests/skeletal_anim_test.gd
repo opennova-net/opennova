@@ -1032,8 +1032,8 @@ anim_reset				\"idle.bad\"
 # the equivalence seam for the present-pass hot path. Asset-gated: needs the
 # retail PFF mount for a real .adm/.bad rig (M82_1st, the adm_dump_probe rig).
 func test_pose_skeleton_matches_script_bone_loop() -> void:
-	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
-	if install_dir.is_empty() or not DirAccess.dir_exists_absolute(install_dir):
+	var install_dir := RetailData.install()
+	if install_dir.is_empty():
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the pose equivalence witness")
 		return
 	var root := ResourceRoot.new()

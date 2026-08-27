@@ -643,30 +643,29 @@ func test_projshadow_capture_is_retail_black_over_the_white_clear() -> void:
 # --- transitive-source golden -------------------------------------------
 
 
-func test_transitive_shader_sources_match_golden() -> void:
-	# Keep the old composed-source regression sensitivity after static
-	# splitting. Deliberate witnessed shader changes regenerate the golden with
-	# OPENNOVA_OBJECT_SHADER_HASHES_DUMP=1 and must review the resulting diff.
-	# Dump mode always fails, so it cannot be mistaken for a green validation.
+# The golden's payload: one transitive-source hash per manifest wrapper.
+# tests/tools/shader_hashes_regen.gd writes it back after a witnessed change.
+func _hash_payload() -> Dictionary:
 	var manifest := _manifest()
 	var hashes := {}
 	for path in _expected_shader_paths(manifest):
 		hashes["godot/" + String(path).trim_prefix("res://")] = _transitive_source_hash(path)
-	var payload := {
+	return {
 		"schema": 1,
 		"algorithm": "sha256-normalized-transitive-include-closure-v1",
 		"resource_count": hashes.size(),
 		"resources": hashes,
 	}
 
-	if not OS.get_environment("OPENNOVA_OBJECT_SHADER_HASHES_DUMP").is_empty():
-		var file := FileAccess.open(HASH_GOLDEN_PATH, FileAccess.WRITE)
-		assert_not_null(file)
-		if file != null:
-			file.store_string(JSON.stringify(payload, "  ", true) + "\n")
-			file.close()
-		fail_test("shader hash golden rewritten at %s; dump mode is deliberately red" % HASH_GOLDEN_PATH)
-		return
+
+func test_transitive_shader_sources_match_golden() -> void:
+	# Keep the old composed-source regression sensitivity after static
+	# splitting. Deliberate witnessed shader changes regenerate the golden with
+	# tests/tools/shader_hashes_regen.gd (run alone; it is deliberately red so
+	# a regen run is never mistaken for a green validation) and must review the
+	# resulting diff.
+	var payload := _hash_payload()
+	var hashes: Dictionary = payload["resources"]
 
 	var golden: Dictionary = _load_json(HASH_GOLDEN_PATH)
 	assert_eq(int(golden["schema"]), 1)
@@ -676,4 +675,4 @@ func test_transitive_shader_sources_match_golden() -> void:
 	assert_eq(_sorted_keys(golden_resources), _sorted_keys(hashes), "the golden covers exactly the manifest wrappers")
 	for key in hashes:
 		assert_eq(String(golden_resources.get(key, "")), String(hashes[key]),
-				"%s transitive source hash (regenerate with OPENNOVA_OBJECT_SHADER_HASHES_DUMP=1 after a witnessed change)" % key)
+				"%s transitive source hash (regenerate with tests/tools/shader_hashes_regen.gd after a witnessed change)" % key)

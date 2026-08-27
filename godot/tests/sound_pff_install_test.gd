@@ -1,8 +1,8 @@
 extends GutTest
 
 ## Guarded diagnosis + regression probe against a real PFF install. The install
-## comes from OPENNOVA_JO_DIR; JO_EXPANSION optionally selects an expansion. The
-## ambient-marker path is
+## comes from OPENNOVA_JO_DIR (RetailData.install()); the base mount and every
+## expansion the install carries are each probed. The ambient-marker path is
 ## GUT-green against the flat JOX extract (sound_integration_test.gd); this
 ## probe exercises the GAME SHELL's actual mount instead — mount_runtime: PFF
 ## archives + expansion, loose files gated on /d [orig boot table:
@@ -15,16 +15,17 @@ const MISSION_CANDIDATES: PackedStringArray = ["00TRa.bms", "00TRg.bms"]
 
 
 func test_pff_install_mission_audio() -> void:
-	var install_dir := OS.get_environment("OPENNOVA_JO_DIR")
-	var expansion := OS.get_environment("JO_EXPANSION")
+	var install_dir := RetailData.install()
 	if install_dir.is_empty():
-		pass_test("OPENNOVA_JO_DIR is not configured; skipping PFF-install probe")
+		pending("OPENNOVA_JO_DIR / a retail PFF install is required for the PFF-install probe")
 		return
-	assert_true(DirAccess.dir_exists_absolute(install_dir),
-		"OPENNOVA_JO_DIR points to an existing directory")
-	if not DirAccess.dir_exists_absolute(install_dir):
-		return
+	var mounts := PackedStringArray([""])
+	mounts.append_array(RetailData.expansions())
+	for expansion in mounts:
+		_probe_mission_audio(install_dir, expansion)
 
+
+func _probe_mission_audio(install_dir: String, expansion: String) -> void:
 	var root := ResourceRoot.new()
 	var err: int = root.mount_runtime(install_dir, expansion, false, "jo")
 	assert_eq(err, OK, "mount_runtime(%s, exp=%s) mounts" % [install_dir, expansion])
