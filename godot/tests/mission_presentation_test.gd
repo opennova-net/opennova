@@ -6,7 +6,6 @@ extends GutTest
 # engine path without introducing a second editor gameplay runtime.
 
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
-const ItemSeatSpecs := preload("res://game/world/item_seat_specs.gd")
 
 
 func _advance_ticks(runtime: MissionPresentation, delta: float) -> int:
@@ -45,8 +44,9 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 # rejection, sitexNN pose digits + the 0..30 clamp, the yaw-zero local/yaw
 # conversions, addeweap anchor resolution + the parent-root fallback) are
 # native (simassets::extract_item_seat_specs) and pinned by
-# tests/simassets/seat_spec_extract_test.cpp; ItemSeatSpecs keeps only the
-# MCP command-walk mirror exercised below.
+# tests/simassets/seat_spec_extract_test.cpp; the MCP command-walk mirror is
+# Simulation.predict_mount_seat over the engine's own selection rules
+# (world/vehicle_attach.h), exercised below.
 
 
 func test_shared_seat_rules_predict_original_command_rules() -> void:
@@ -55,15 +55,15 @@ func test_shared_seat_rules_predict_original_command_rules() -> void:
 		{ "type": 2, "position": Vector3(1, 0, 0), "source_name": "ctrlx00" },
 		{ "type": 5, "position": Vector3(2, 0, 0), "source_name": "drvrx00" },
 	]
-	var passenger := ItemSeatSpecs.predict_best_seat(seats, 123)
+	var passenger := Simulation.predict_mount_seat(seats, 123)
 	assert_eq(int(passenger["seat_index"]), 0, "command 123 is passenger-only")
 	assert_eq(String(passenger["seat"]["source_name"]), "sitex00")
 
-	var non_controller := ItemSeatSpecs.predict_best_seat(seats, 124)
+	var non_controller := Simulation.predict_mount_seat(seats, 124)
 	assert_eq(int(non_controller["seat_index"]), 2, "command 124 skips ctrlx and takes driver before passenger")
 	assert_eq(String(non_controller["seat"]["source_name"]), "drvrx00")
 
-	var any := ItemSeatSpecs.predict_best_seat(seats, 125)
+	var any := Simulation.predict_mount_seat(seats, 125)
 	assert_eq(int(any["seat_index"]), 1, "command 125 can select ctrlx by original priority")
 	assert_eq(String(any["seat"]["source_name"]), "ctrlx00")
 	assert_eq(String(any["candidates"][1]["status"]), "selected")

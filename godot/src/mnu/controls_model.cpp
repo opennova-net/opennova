@@ -193,6 +193,15 @@ int ControlsModel::mouse_mask_from_godot_button(int p_button) {
 	}
 }
 
+PackedStringArray ControlsModel::weapon_category_tokens() {
+	PackedStringArray out;
+	for (int i = 0; i < opennova::controls::kWeaponCategoryCount; ++i) {
+		const char *token = opennova::controls::weapon_category_token(i);
+		out.push_back(String(token != nullptr ? token : ""));
+	}
+	return out;
+}
+
 int ControlsModel::vk_from_godot_key(int p_godot_key) {
 	// Letters, digits, and space share their values across the two code spaces.
 	if ((p_godot_key >= KEY_A && p_godot_key <= KEY_Z) ||
@@ -287,6 +296,8 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::is_token_pressed);
 	ClassDB::bind_method(D_METHOD("display_text_for_token", "token"),
 			&ControlsModel::display_text_for_token);
+	ClassDB::bind_static_method("ControlsModel", D_METHOD("weapon_category_tokens"),
+			&ControlsModel::weapon_category_tokens);
 	ClassDB::bind_static_method("ControlsModel",
 			D_METHOD("mouse_mask_from_godot_button", "button"),
 			&ControlsModel::mouse_mask_from_godot_button);

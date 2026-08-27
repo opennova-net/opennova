@@ -1389,6 +1389,14 @@ target_include_directories(local_player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(local_player_view_test PRIVATE cxx_std_17)
 add_test(NAME local_player_view COMMAND local_player_view_test)
 
+# The attach-command seat-selection mirror (world/vehicle_attach.h
+# predict_seat_selection) and the shared weight table.
+add_executable(seat_prediction_test world/seat_prediction_test.cpp)
+target_link_libraries(seat_prediction_test PRIVATE opennova_runtime)
+target_include_directories(seat_prediction_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(seat_prediction_test PRIVATE cxx_std_17)
+add_test(NAME seat_prediction COMMAND seat_prediction_test)
+
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
 target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

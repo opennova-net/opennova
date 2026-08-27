@@ -33,9 +33,7 @@ var _frame_sequence := 0
 # / cycleweaponN ']' cycle prev/next [orig: input cases 200-210 @ 0x4e1144 ->
 # Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
 # Player_CycleWeaponSlot @ 0x4dfe70; engine/runtime/controls k_catalog rows].
-const _WEAPON_CATEGORY_TOKENS: Array[String] = ["Knife", "Secondary",
-		"Primary", "Flashbang", "FragGrenade", "SmokeGrenade", "Accessory",
-		"Detonator", "medpack"]
+static var _WEAPON_CATEGORY_TOKENS: Array = Array(ControlsModel.weapon_category_tokens())
 var _category_was_down := 0
 var _cycle_prev_was_down := false
 var _cycle_next_was_down := false

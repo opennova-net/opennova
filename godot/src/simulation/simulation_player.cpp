@@ -567,3 +567,79 @@ String Simulation::get_local_player_weapon_name() const {
 			world_->weapons.by_index(e->equipped_adm_index);
 	return weapon ? String(weapon->name.c_str()) : String();
 }
+
+// The MCP/probe mirror of the attach-command seat selection: the engine's own
+// rules (world/vehicle_attach.h predict_seat_selection) over a flat seat list,
+// presented as the tooling card {command, seat_index, seat, candidates}.
+Dictionary Simulation::predict_mount_seat(const Array &p_seats, int p_command_id) {
+	using opennova::world::SeatCandidate;
+	using opennova::world::SeatSelectionMode;
+	using opennova::world::SeatType;
+	using opennova::world::SeatVerdict;
+	SeatSelectionMode mode = SeatSelectionMode::Any;
+	const bool mount_command =
+			opennova::world::seat_selection_mode_for_command(p_command_id, mode);
+	std::vector<SeatCandidate> candidates;
+	candidates.reserve(static_cast<size_t>(p_seats.size()));
+	for (int64_t i = 0; i < p_seats.size(); ++i) {
+		const Dictionary seat = p_seats[i];
+		SeatCandidate c;
+		c.type = static_cast<SeatType>(
+				static_cast<int>(seat.get("type", static_cast<int>(SeatType::None))));
+		c.occupied = bool(seat.get("occupied", false));
+		candidates.push_back(c);
+	}
+	std::vector<SeatVerdict> verdicts;
+	const int best = opennova::world::predict_seat_selection(
+			candidates, mount_command ? &mode : nullptr, verdicts);
+	const auto type_label = [](SeatType t) -> String {
+		switch (t) {
+			case SeatType::Passenger: return "passenger";
+			case SeatType::Controller: return "controller";
+			case SeatType::Gunner: return "gunner";
+			case SeatType::Driver: return "driver";
+			default: return "none";
+		}
+	};
+	Array rows;
+	for (int64_t i = 0; i < p_seats.size(); ++i) {
+		const Dictionary seat = p_seats[i];
+		Dictionary row = seat.duplicate(true);
+		const SeatCandidate &c = candidates[static_cast<size_t>(i)];
+		const SeatVerdict v = verdicts[static_cast<size_t>(i)];
+		row["index"] = static_cast<int>(i);
+		row["type_label"] = type_label(c.type);
+		row["eligible"] = v == SeatVerdict::kEligible || v == SeatVerdict::kSelected;
+		// A None type never weighs in; the card shows it as the never-picked sentinel.
+		row["weight"] = c.type == SeatType::None
+				? 0x7fffffff
+				: opennova::world::seat_priority_weight(c.type, true);
+		row["status"] = v == SeatVerdict::kSelected ? "selected"
+				: (v == SeatVerdict::kEligible ? "eligible" : "skipped");
+		row["skip_reason"] = v == SeatVerdict::kSkippedOccupied ? "occupied"
+				: (v == SeatVerdict::kSkippedCommand ? "command_filter" : "");
+		rows.push_back(row);
+	}
+	Dictionary command;
+	command["id"] = p_command_id;
+	if (!mount_command) {
+		command["mode"] = "not_mount_command";
+		command["description"] = "not an attach-to-seat command";
+	} else if (mode == SeatSelectionMode::PassengerOnly) {
+		command["mode"] = "passenger_only";
+		command["description"] = "command 123 accepts sitex/passenger seats only";
+	} else if (mode == SeatSelectionMode::RejectController) {
+		command["mode"] = "no_controller";
+		command["description"] = "command 124 rejects ctrlx/controller seats";
+	} else {
+		command["mode"] = "any_seat";
+		command["description"] =
+				"command 125 accepts passenger, controller, driver, and gunner seats";
+	}
+	Dictionary out;
+	out["command"] = command;
+	out["seat_index"] = best;
+	out["seat"] = best >= 0 ? Dictionary(rows[best]) : Dictionary();
+	out["candidates"] = rows;
+	return out;
+}

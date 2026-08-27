@@ -286,4 +286,12 @@ std::vector<ControlRow> build_rows(Device device) {
   return rows;
 }
 
+const char *weapon_category_token(int index) {
+  if (index < 0 || index >= kWeaponCategoryCount) return nullptr;
+  std::size_t count = 0;
+  const ActionDef *defs = catalog(&count);
+  const std::size_t row = static_cast<std::size_t>(kWeaponCategoryFirstRow + index);
+  return row < count ? defs[row].token : nullptr;
+}
+
 }  // namespace opennova::controls
