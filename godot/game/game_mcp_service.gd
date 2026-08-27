@@ -2,10 +2,10 @@ class_name GameMcpService
 extends Node
 
 ## The runtime MCP endpoint (`opennova-game`): a loopback Streamable-HTTP
-## server the game process hosts when launched with `--mcp-port <n>`
+## server the game process runs when launched with `--mcp-port <n>`
 ## (LaunchFlags; ADR 0041). A normal standalone launch carries no such flag
 ## and starts nothing. The endpoint lives as long as the game: `game_control
-## quit` is the stop. ONED hosts no MCP of its own (ADR 0037); this is the
+## quit` is the stop. ONED runs no MCP of its own (ADR 0037); this is the
 ## runtime's, driven from outside by agents and the scripts/mcp clients.
 
 var server: McpServer = null

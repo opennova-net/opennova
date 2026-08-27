@@ -167,7 +167,8 @@
     "send_to_host",
     "server_host",
     "ship_to_host",
-    "start_host_session"
+    "start_host_session",
+    "lan_host"
   ],
   "comment_ok_paths": [
     "godot/src/simulation/*",
@@ -196,7 +197,8 @@
     "godot/src/env/*",
     "engine/formats/env/*",
     "tests/env/*",
-    "tests/mission/*"
+    "tests/mission/*",
+    "engine/base/resource_index/boot_policy.h"
   ],
   "line_allow": [
     "stats_window_rows.h|\"Host owner pump\"",
@@ -212,6 +214,9 @@
     "engine/base/pcapio|host byte order",
     "engine/base/pcapio|host order",
     "engine/base/resource_index|D-NET-178",
+    "engine/base/resource_index/boot_policy.cpp|--lan-host",
+    "godot/tests/launch_flags_test.gd|--lan-host",
+    "godot/game/debug/debug_catalog.gd|the host silently drops",
     "engine/base/vfs/vfs.h|D-NET-178",
     "engine/formats/cpt/cpt_io.cpp|little-endian host",
     "engine/net/novacrypto|pcid_key",

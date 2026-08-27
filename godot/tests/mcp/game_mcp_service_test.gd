@@ -1,6 +1,6 @@
 extends GutTest
 
-# GameMcpService: the runtime MCP endpoint the game hosts under --mcp-port.
+# GameMcpService: the runtime MCP endpoint the game serves under --mcp-port.
 # It binds loopback, keeps polling while a probe freezes the shell, and tears
 # its server and log hub down with the node.
 

@@ -66,7 +66,7 @@ func configure(
 
 
 ## The runtime MCP endpoint rides `--mcp-port <n>` (LaunchFlags); an unflagged
-## launch hosts none.
+## launch runs none.
 func start_runtime_endpoint() -> void:
 	var port := LaunchFlags.mcp_port()
 	if port <= 0:
