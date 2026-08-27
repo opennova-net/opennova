@@ -51,6 +51,10 @@
 #include "object/nova_avatar_database.h"
 #include "object/nova_skeletal_anim.h"
 #include "hud/hud_overlay.h"
+#include "devtools/imgui_pass_node.h"
+#include "devtools/nova_dev_tools.h"
+#include "devtools/nova_frame_stats.h"
+#include "devtools/nova_oned_ui.h"
 #include "hud/nova_hud_pos.h"
 #include "mission/nova_mission_catalog.h"
 #include "mission/nova_mission_data.h"
@@ -197,6 +201,14 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LanSession);
 	GDREGISTER_CLASS(NetProtocol);
 	GDREGISTER_CLASS(NetSessionPolicy);
+	// The ImGui pass seams (ADR 0039): registered in every flavour so scripts
+	// parse; the release DLL's DevTools is inert, OnedUi runs everywhere.
+	GDREGISTER_CLASS(FrameStatsWindow);
+	GDREGISTER_CLASS(FrameStats);
+	GDREGISTER_ABSTRACT_CLASS(ImGuiPassNode);
+	GDREGISTER_CLASS(DevTools);
+	GDREGISTER_CLASS(OnedUiRequest);
+	GDREGISTER_CLASS(OnedUi);
 }
 
 void uninitialize_opennova_module(ModuleInitializationLevel p_level) {

@@ -188,6 +188,7 @@ Ref<MissionFrameOutcome> Simulation::advance_session_frame(
 	session_tick_sink_ = p_tick_sink;
 	const opennova::inmatch::FrameOutcome outcome = session_.advance(input);
 	session_tick_sink_ = Callable();
+	fold_frame_stats(outcome);
 	return godot_outcome(outcome);
 }
 
@@ -207,6 +208,7 @@ Ref<MissionFrameOutcome> Simulation::step_session_frame(
 	session_tick_sink_ = p_tick_sink;
 	const opennova::inmatch::FrameOutcome outcome = session_.step_once(input);
 	session_tick_sink_ = Callable();
+	fold_frame_stats(outcome);
 	return godot_outcome(outcome);
 }
 
@@ -236,8 +238,8 @@ Dictionary Simulation::get_session_perf() const {
 	if (!runtime_profiling_enabled_)
 		return out;
 	// The phase attribution (frame_phase_perf_) exists only while the native
-	// clocks run; the keys are the F3 Stats board's vocabulary
-	// (mission_presentation.gd maps each onto its FrameStatsBoard slot).
+	// clocks run; the keys are the Stats board's vocabulary (the board itself
+	// receives them through fold_frame_stats; this Dictionary is the probes').
 	const SessionPhasePerf &phase = frame_phase_perf_;
 	const opennova::np::HostSessionPerf &host_session = phase.host_session;
 	const opennova::np::ServerTickPerf &server = host_session.server;
