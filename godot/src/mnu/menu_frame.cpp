@@ -1,5 +1,7 @@
 #include "mnu/menu_frame.h"
 
+#include <runtime/menu/options_policy.h>
+
 #include "mnu/mns_stylesheet.h"
 #include "mnu/mnu_document.h"
 #include "resource_index/resource_root.h"
@@ -893,7 +895,49 @@ void MenuFrame::_draw() {
 	}
 }
 
+Array MenuFrame::options_scroll_ranges() {
+	Array out;
+	for (const opennova::menu::OptionsScrollRange &r : opennova::menu::kOptionsScrollRanges) {
+		Dictionary row;
+		row["control"] = String(r.control);
+		row["minimum"] = r.minimum;
+		row["maximum"] = r.maximum;
+		row["page"] = r.page;
+		out.push_back(row);
+	}
+	return out;
+}
+
+Array MenuFrame::video_quality_controls() {
+	Array out;
+	for (const opennova::menu::VideoQualityControl &c : opennova::menu::kVideoQualityControls) {
+		Dictionary row;
+		row["control"] = String(c.control);
+		row["value"] = String(c.semantic_value);
+		out.push_back(row);
+	}
+	return out;
+}
+
+int MenuFrame::video_gamma_reference() {
+	return opennova::menu::kVideoGammaReference;
+}
+
+PackedStringArray MenuFrame::video_preset_buttons() {
+	PackedStringArray out;
+	for (const char *name : opennova::menu::kVideoPresetButtons) out.push_back(String(name));
+	return out;
+}
+
 void MenuFrame::_bind_methods() {
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_scroll_ranges"),
+			&MenuFrame::options_scroll_ranges);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_quality_controls"),
+			&MenuFrame::video_quality_controls);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_gamma_reference"),
+			&MenuFrame::video_gamma_reference);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_preset_buttons"),
+			&MenuFrame::video_preset_buttons);
 	ClassDB::bind_method(
 			D_METHOD("configure", "document", "screen_name", "root", "style",
 					"text_lookup"),

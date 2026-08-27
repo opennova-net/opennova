@@ -138,6 +138,7 @@ add_library(${TARGET_NAME} SHARED
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
     resource_index/resource_root.cpp
+    resource_index/launch_flags.cpp
     pff/pff_document.cpp
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp

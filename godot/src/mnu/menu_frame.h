@@ -198,6 +198,16 @@ public:
 	void _draw() override;
 
 protected:
+public:
+	// The retail Options policy tables (engine/runtime/menu/options_policy.h),
+	// re-exported for the shell's appliers: [{control, minimum, maximum, page}],
+	// [{control, value}], the gamma reference and the preset-button names.
+	static Array options_scroll_ranges();
+	static Array video_quality_controls();
+	static int video_gamma_reference();
+	static PackedStringArray video_preset_buttons();
+
+protected:
 	static void _bind_methods();
 	void _notification(int p_what);
 

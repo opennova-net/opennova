@@ -1,5 +1,8 @@
 #include "rtxt/rtxt_string_file.h"
 
+#include "resource_index/resource_root.h"
+#include <runtime/mission/runtime_boot.h>
+
 #include "util/cp1252.h"
 #include "util/data_format.h"
 
@@ -337,7 +340,30 @@ void RtxtStringFile::set_native(const opennova::rtxt::File &p_file) {
 	file_.build_lookup();
 }
 
+Ref<RtxtStringFile> RtxtStringFile::load_mission_table(const Ref<ResourceRoot> &root,
+		const String &mission_file_basename) {
+	if (root.is_null()) return Ref<RtxtStringFile>();
+	const opennova::ResourceIndex *index = &root->native_index();
+	opennova::mission::BootFileSource files;
+	files.has_file = [index](const std::string &name) { return index->has_file(name); };
+	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
+		return index->read_file(name, out);
+	};
+	std::vector<uint8_t> bytes;
+	opennova::mission::resolve_mission_text(files,
+			std::string(mission_file_basename.utf8().get_data()), bytes);
+	if (bytes.empty()) return Ref<RtxtStringFile>();
+	PackedByteArray packed;
+	packed.resize(static_cast<int64_t>(bytes.size()));
+	std::memcpy(packed.ptrw(), bytes.data(), bytes.size());
+	Ref<RtxtStringFile> table;
+	table.instantiate();
+	if (table->load_from_byte_array(packed) != OK) return Ref<RtxtStringFile>();
+	return table;
+}
+
 void RtxtStringFile::_bind_methods() {
+	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("load_mission_table", "root", "mission_file_basename"), &RtxtStringFile::load_mission_table);
 	ClassDB::bind_method(D_METHOD("get_string", "key"), &RtxtStringFile::get_string);
 	ClassDB::bind_method(D_METHOD("has_string", "key"), &RtxtStringFile::has_string);
 	ClassDB::bind_method(D_METHOD("get_string_in_section", "section", "key"), &RtxtStringFile::get_string_in_section);

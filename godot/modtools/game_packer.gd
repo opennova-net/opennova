@@ -39,31 +39,20 @@ extends RefCounted
 ## (The C++ minimal-install fixture writes a zero-entry `resource.pff` boot token beside a fully
 ## LOOSE layout run under `/d`; there the loose walk lists the missions, so that name is fine.)
 
-## Files that must stay LOOSE in the game dir rather than going into the archive.
-##  - `.sbf` music banks stream by path and never resolve through the archives
-##    [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60].
-##  - `earlyerr.txt` is the pre-archive error text, read before any mount
-##    [orig: Game_ShowEarlyError @ 0x4a68a0] — inside an archive it could never be read.
-const LOOSE_EXTENSIONS := [".sbf", ".txt"]
+## The packed-game policy is the engine's (engine/base/vfs/pack_policy.h, the
+## boot table vfs.h kBootArchiveTable), re-exported by PffDocument: what stays
+## loose, what is never packed, the source dirs the walk skips (any OTHER
+## subdirectory is reported in `skipped_dirs`), the 16-byte entry-name width.
+static var LOOSE_EXTENSIONS: Array = Array(PffDocument.pack_loose_extensions())
 
-const ARCHIVE_NAME := "localres.pff"
-const BOOT_ARCHIVE_NAMES := ["language.pff", "localres.pff", "resource.pff"]
+static var ARCHIVE_NAME: String = PffDocument.pack_archive_name()
+static var BOOT_ARCHIVE_NAMES: Array = Array(PffDocument.boot_archive_names())
 
-## Never packed: the retail runtime, its own writes, and any archive already
-## present (packing an archive into an archive). Retail staging accepts PFFs;
-## runtime binaries still come only from the configured retail install.
-const EXCLUDED_EXTENSIONS := [".pff", ".exe", ".dll", ".sav", ".log", ".ini", ".cfg",
-	# Repo metadata that lives beside the assets but is not game data.
-	".md", ".gitignore", ".gitattributes"]
+static var EXCLUDED_EXTENSIONS: Array = Array(PffDocument.pack_excluded_extensions())
 
-## Subdirectories of the asset root that hold source material, not game files. Retail resolves
-## bare filenames at the root, so nothing under `src/` is loadable.
-## Any OTHER subdirectory is reported in `skipped_dirs`: the packer walks the root only, and a
-## data directory that silently vanished from the pack is the bug that gets debugged in retail.
-const EXCLUDED_DIRS := ["src/"]
+static var EXCLUDED_DIRS: Array = Array(PffDocument.pack_excluded_dirs())
 
-## PFF entry names are 16 BYTES; a name that fits in 16 characters can still overflow in UTF-8.
-const PFF_NAME_BYTES := 16
+static var PFF_NAME_BYTES: int = PffDocument.pff_name_bytes()
 
 ## Written into every packed dir. Stage & Run Retail stages into ONED's own
 ## user://packed directory, while release packaging takes an arbitrary output dir. The marker

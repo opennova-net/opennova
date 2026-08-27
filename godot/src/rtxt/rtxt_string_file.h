@@ -14,6 +14,8 @@
 
 namespace godot {
 
+class ResourceRoot;
+
 // Godot-facing wrapper around an RTXT localized string table (NovaLogic
 // strings/*.bin). All format behavior lives in engine/formats/rtxt; this Resource adds the
 // editor-facing CRUD surface, change signals, and Godot file I/O.
@@ -82,6 +84,12 @@ public:
 	// --- Snapshot (for editor undo/redo): faithful byte image of the table. ---
 	PackedByteArray to_byte_array() const;
 	Error load_from_byte_array(const PackedByteArray &p_bytes);
+	// The per-mission MissionText table off a mounted root: <mission>.bin when
+	// it exists, else medmssn.bin (the engine's runtime_boot resolver — the
+	// fallback fires only when the mission .bin does not EXIST; a present but
+	// unparseable file loads to nothing). Null when neither yields a table.
+	static Ref<RtxtStringFile> load_mission_table(const Ref<ResourceRoot> &root,
+			const String &mission_file_basename);
 
 	// --- Hotkey helpers ---
 	static String strip_hotkey(const String &p_text);

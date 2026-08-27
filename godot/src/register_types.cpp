@@ -81,6 +81,7 @@
 #include "network/net_session_policy.h"
 #include "util/paths.h"
 #include "util/process.h"
+#include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "audio/sbf_bank.h"
 #include "audio/sbf_audio_stream.h"
@@ -183,6 +184,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(DisplayDecode);
 	GDREGISTER_CLASS(ScarPresenter);
 	GDREGISTER_CLASS(ResourceRoot);
+	GDREGISTER_CLASS(LaunchFlags);
 	GDREGISTER_CLASS(SbfAudioStream);
 	GDREGISTER_CLASS(SbfAudioStreamPlayback);
 	GDREGISTER_CLASS(SbfBank);

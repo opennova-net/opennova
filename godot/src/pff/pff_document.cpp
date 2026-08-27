@@ -1,5 +1,7 @@
 #include "pff/pff_document.h"
 
+#include <base/vfs/pack_policy.h>
+
 #include <base/gameprofile/gameprofile.h>
 #include <base/vfs/vfs_decode.h>
 
@@ -189,7 +191,29 @@ PffDocument::~PffDocument() {
 // Bindings
 // ---------------------------------------------------------------------------
 
+namespace {
+template <typename T>
+PackedStringArray strings_of(const T &names) {
+	PackedStringArray out;
+	for (const char *name : names) out.push_back(String(name));
+	return out;
+}
+} // namespace
+
+PackedStringArray PffDocument::boot_archive_names() { return strings_of(opennova::kBootArchiveTable); }
+String PffDocument::pack_archive_name() { return String(opennova::kPackArchiveName); }
+PackedStringArray PffDocument::pack_loose_extensions() { return strings_of(opennova::kPackLooseExtensions); }
+PackedStringArray PffDocument::pack_excluded_extensions() { return strings_of(opennova::kPackExcludedExtensions); }
+PackedStringArray PffDocument::pack_excluded_dirs() { return strings_of(opennova::kPackExcludedDirs); }
+int PffDocument::pff_name_bytes() { return opennova::kPffNameBytes; }
+
 void PffDocument::_bind_methods() {
+	ClassDB::bind_static_method("PffDocument", D_METHOD("boot_archive_names"), &PffDocument::boot_archive_names);
+	ClassDB::bind_static_method("PffDocument", D_METHOD("pack_archive_name"), &PffDocument::pack_archive_name);
+	ClassDB::bind_static_method("PffDocument", D_METHOD("pack_loose_extensions"), &PffDocument::pack_loose_extensions);
+	ClassDB::bind_static_method("PffDocument", D_METHOD("pack_excluded_extensions"), &PffDocument::pack_excluded_extensions);
+	ClassDB::bind_static_method("PffDocument", D_METHOD("pack_excluded_dirs"), &PffDocument::pack_excluded_dirs);
+	ClassDB::bind_static_method("PffDocument", D_METHOD("pff_name_bytes"), &PffDocument::pff_name_bytes);
 	ClassDB::bind_static_method("PffDocument", D_METHOD("list_games"), &PffDocument::list_games);
 	ClassDB::bind_method(D_METHOD("open", "path"), &PffDocument::open);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &PffDocument::get_source_path);
