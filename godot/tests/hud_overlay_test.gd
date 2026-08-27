@@ -548,7 +548,7 @@ func test_friendly_tags_draw_modes() -> void:
 	hud.configure(fixture["layout"], root)
 	assert_eq(hud.get_friendly_tag_mode(), 2, "the boot default mode is FULL")
 	var screens := PackedVector2Array([Vector2(300, 200)])
-	var dists := PackedInt32Array([100 << 16])
+	var dists := PackedFloat32Array([100.0])
 	var names := PackedStringArray([""])
 	var ids := PackedInt32Array([24]) # the fallback table's "SGT  Brown"
 	var ratios := PackedInt32Array([0x10000])

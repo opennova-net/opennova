@@ -163,7 +163,34 @@ HudRectRecord rect_record(const Rect2i &rect) {
 
 } // namespace
 
+int HudOverlay::hud_color_index_default() { return opennova::hud::kHudColorIndexDefault; }
+int HudOverlay::clamp_hud_color_index(int p_index) { return opennova::hud::clamp_hud_color_index(p_index); }
+int HudOverlay::next_hud_color_index(int p_index) { return opennova::hud::next_hud_color_index(p_index); }
+int HudOverlay::hud_detail_level_default() { return opennova::hud::kHudDetailLevelDefault; }
+int HudOverlay::hud_detail_level_blank() { return opennova::hud::kHudDetailLevelBlank; }
+int HudOverlay::clamp_hud_detail_level(int p_level) { return opennova::hud::clamp_hud_detail_level(p_level); }
+int HudOverlay::next_hud_detail_level(int p_level) { return opennova::hud::next_hud_detail_level(p_level); }
+int HudOverlay::showhud_flags_default() { return static_cast<int>(opennova::hud::kShowHudFlagsDefault); }
+int HudOverlay::next_showhud_flags(int p_flags) {
+	return static_cast<int>(opennova::hud::next_showhud_flags(static_cast<uint32_t>(p_flags)));
+}
+int HudOverlay::friendly_tag_mode_default() { return opennova::hud::kFriendlyTagModeDefault; }
+float HudOverlay::friendly_tag_lift() { return opennova::hud::kFriendlyTagLiftUnits; }
+
 void HudOverlay::_bind_methods() {
+	BIND_ENUM_CONSTANT(SHOWHUD_FLAG_GUN);
+	BIND_ENUM_CONSTANT(SHOWHUD_FLAG_SPINMAP);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_color_index_default"), &HudOverlay::hud_color_index_default);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("clamp_hud_color_index", "index"), &HudOverlay::clamp_hud_color_index);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_color_index", "index"), &HudOverlay::next_hud_color_index);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_detail_level_default"), &HudOverlay::hud_detail_level_default);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_detail_level_blank"), &HudOverlay::hud_detail_level_blank);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("clamp_hud_detail_level", "level"), &HudOverlay::clamp_hud_detail_level);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_detail_level", "level"), &HudOverlay::next_hud_detail_level);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("showhud_flags_default"), &HudOverlay::showhud_flags_default);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_showhud_flags", "flags"), &HudOverlay::next_showhud_flags);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("friendly_tag_mode_default"), &HudOverlay::friendly_tag_mode_default);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("friendly_tag_lift"), &HudOverlay::friendly_tag_lift);
 	ClassDB::bind_method(D_METHOD("configure", "hudpos", "root"), &HudOverlay::configure);
 	ClassDB::bind_method(D_METHOD("is_configured"), &HudOverlay::is_configured);
 	ClassDB::bind_method(D_METHOD("set_crosshair_style", "style"), &HudOverlay::set_crosshair_style);
@@ -208,7 +235,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_objectives", "texts", "done"), &HudOverlay::set_objectives);
 	ClassDB::bind_method(D_METHOD("set_attach_labels", "screens", "texts", "nearest"),
 			&HudOverlay::set_attach_labels);
-	ClassDB::bind_method(D_METHOD("set_friendly_tags", "screens", "dists_q16",
+	ClassDB::bind_method(D_METHOD("set_friendly_tags", "screens", "dists_units",
 								  "names", "entity_ids", "health_ratios_fp16", "flags"),
 			&HudOverlay::set_friendly_tags);
 	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
@@ -218,7 +245,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_friendly_tag_mode);
 	ClassDB::bind_method(D_METHOD("get_friendly_tag_mode"),
 			&HudOverlay::get_friendly_tag_mode);
-	ClassDB::bind_method(D_METHOD("set_friendly_tag_env", "fog_dist_q16", "speaking_level"),
+	ClassDB::bind_method(D_METHOD("set_friendly_tag_env", "fog_distance_units", "speaking_level"),
 			&HudOverlay::set_friendly_tag_env);
 	ClassDB::bind_method(D_METHOD("set_hud_color_index", "index"),
 			&HudOverlay::set_hud_color_index);
@@ -1014,18 +1041,18 @@ void HudOverlay::set_attach_labels(const PackedVector2Array &p_screens,
 }
 
 void HudOverlay::set_friendly_tags(const PackedVector2Array &p_screens,
-		const PackedInt32Array &p_dists_q16, const PackedStringArray &p_names,
+		const PackedFloat32Array &p_dists_units, const PackedStringArray &p_names,
 		const PackedInt32Array &p_entity_ids,
 		const PackedInt32Array &p_health_ratios_fp16,
 		const PackedInt32Array &p_flags) {
 	state_.friendly_tags.clear();
-	const int64_t count = std::min(p_screens.size(), p_dists_q16.size());
+	const int64_t count = std::min(p_screens.size(), p_dists_units.size());
 	state_.friendly_tags.reserve(static_cast<size_t>(count));
 	for (int64_t i = 0; i < count; ++i) {
 		opennova::hud::HudFriendlyTag tag;
 		tag.screen_x = p_screens[i].x;
 		tag.screen_y = p_screens[i].y;
-		tag.dist_q16 = p_dists_q16[i];
+		tag.dist_q16 = q16_from_world(p_dists_units[i]);
 		if (i < p_names.size()) tag.name = p_names[i].utf8().get_data();
 		if (i < p_entity_ids.size())
 			tag.entity_id = static_cast<uint16_t>(p_entity_ids[i]);
@@ -1091,9 +1118,10 @@ void HudOverlay::set_showhud_flags(int p_flags) {
 	queue_redraw();
 }
 
-void HudOverlay::set_friendly_tag_env(int p_fog_dist_q16,
+void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,
 		int p_speaking_level255) {
-	state_.fog_dist_q16 = p_fog_dist_q16 > 0 ? p_fog_dist_q16 : INT32_MAX;
+	const int32_t fog_q16 = q16_from_world(p_fog_distance_units);
+	state_.fog_dist_q16 = fog_q16 > 0 ? fog_q16 : INT32_MAX;
 	state_.speaking_level255 = p_speaking_level255;
 }
 

@@ -17,6 +17,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <formats/fnt/fnt.h>
+#include <runtime/hud/hud_config_tokens.h>
 #include <runtime/hud/hud_frame.h>
 
 #include <array>
@@ -147,7 +148,7 @@ public:
 	// +0x10 / +0x2C, the downed legs of the drawer), packed by the Simulation's
 	// get_friendly_tags feed.
 	void set_friendly_tags(const PackedVector2Array &p_screens,
-			const PackedInt32Array &p_dists_q16, const PackedStringArray &p_names,
+			const PackedFloat32Array &p_dists_units, const PackedStringArray &p_names,
 			const PackedInt32Array &p_entity_ids,
 			const PackedInt32Array &p_health_ratios_fp16,
 			const PackedInt32Array &p_flags);
@@ -168,9 +169,10 @@ public:
 	// @0x4E0561): bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
 	void set_showhud_flags(int p_flags);
-	// Per-frame environment feed: the fog cull distance (16.16; <= 0 disables)
-	// and the speaking entity's voice level 0..255.
-	void set_friendly_tag_env(int p_fog_dist_q16, int p_speaking_level255);
+	// Per-frame environment feed: the fog cull distance in world units (<= 0
+	// disables; the 16.16 form is this seam's) and the speaking entity's voice
+	// level 0..255.
+	void set_friendly_tag_env(float p_fog_distance_units, int p_speaking_level255);
 	// Device-facing minimap feeds. TerrainData is sampled once into the
 	// portable sector layout; snapshot is Simulation's versioned fixed-stride
 	// retained overlay buffer.
@@ -200,6 +202,28 @@ public:
 	PackedInt64Array consume_draw_timing_us();
 
 	void _draw() override;
+
+protected:
+public:
+	// The HUD's persisted config tokens and session flags — defaults, clamps
+	// and cycle rules — and the friendly-tag anchor lift, re-exported from
+	// engine/runtime/hud/hud_config_tokens.h for the presenter's settings
+	// round trip (the cfg store is the presenter's device work).
+	enum ShowHudFlag {
+		SHOWHUD_FLAG_GUN = opennova::hud::kShowHudFlagGun,
+		SHOWHUD_FLAG_SPINMAP = opennova::hud::kShowHudFlagSpinmap,
+	};
+	static int hud_color_index_default();
+	static int clamp_hud_color_index(int p_index);
+	static int next_hud_color_index(int p_index);
+	static int hud_detail_level_default();
+	static int hud_detail_level_blank();
+	static int clamp_hud_detail_level(int p_level);
+	static int next_hud_detail_level(int p_level);
+	static int showhud_flags_default();
+	static int next_showhud_flags(int p_flags);
+	static int friendly_tag_mode_default();
+	static float friendly_tag_lift();
 
 protected:
 	static void _bind_methods();
@@ -304,3 +328,5 @@ private:
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::HudOverlay::ShowHudFlag);
