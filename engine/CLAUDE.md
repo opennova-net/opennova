@@ -14,7 +14,12 @@
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
-    environment, hud, menu, simassets.
+    environment, hud, menu, simassets, and devtools (the Dear ImGui pass, ADR
+    0039: infrastructure like io/vfs, not a port, so it sits in the citation
+    allowlist; the pass, the frame-stats board and ONED's run surface build in
+    every flavour, the game's F3 windows only with `OPENNOVA_DEVTOOLS` — off for
+    the release GDExtension flavour; ImGui headers never leave the group, the
+    shell hands the context over as plain pointers via `devtools/imgui_abi.h`).
   - `net/` — the retail wire/protocol stack and portable in-match control
     (ADRs 0009–0012, 0019, 0036; Model-B-only): novacrypto, napi, npwire,
     novaworld, inmatch, plus internal netsim/npruntime implementation

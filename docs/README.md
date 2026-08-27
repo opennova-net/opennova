@@ -93,6 +93,7 @@ behavior is summarized and cited.
 | [0036](adr/0036-one-inmatch-session-wire-first.md) | One `opennova::inmatch::Session`, `world::Match` owns gameplay, and `npwire` is the retail compatibility boundary; full cutover with no legacy API (accepted 2026-08-22) |
 | [0037](adr/0037-oned-runs-game-data.md) | Hard cut: ONED stores run settings, runs OpenNova loose, stages and runs retail, and stops its child; no authoring, project/import system, workspaces, or MCP; hidden `--pack-game` remains release infrastructure |
 | [0038](adr/0038-native-runtime-assets-glb-editor.md) | Hard cut to native runtime assets: Python/DCC and ASE/OED/TDP authoring retire; ObjectData is immutable 3DI; a future editor uses an independent GLB/GLTF ↔ 3DI seam |
+| [0039](adr/0039-in-engine-dev-tools.md) | Hard cut: the tool UI moves into the engine as Dear ImGui windows on one `ImGuiPass` (`engine/runtime/devtools`, docking + multi-viewport) with one Godot seam node per product and the imgui-godot addon — the game's F3 dev tools (debug builds only) and ONED's run surface; the GDScript overlay and ONED's Control scene are deleted; updates ADR 0034 d6, ADR 0031's seam note and ADR 0037's UI |
 
 ## RE records by domain
 

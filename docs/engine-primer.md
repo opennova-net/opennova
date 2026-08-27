@@ -219,19 +219,19 @@ Order of operations when you need an engine truth:
    - Retail-install sweeps and corpus tests, gated on env vars (`OPENNOVA_JO_DIR`,
      `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_JO_ASSETS` — see docs/asset-gated-tests.md).
 5. **Runtime introspection:**
-   - The debug overlay (F3 in the standalone game): 15 pages under
-     `godot/game/debug/pages/` (animation, audio, entities, environment, net,
-     occlusion, particles, perf, player, rendering, rounds, sim, stats, terrain,
-     vars) selected via `select_page(page_id)`, sim transport (play/pause/step),
-     and mission-variable writes —
-     `godot/game/debug/nova_debug_overlay.gd`. ONED's Run OpenNova loose action
-     launches that same standalone game against the selected data directory;
-     ONED has no embedded preview or debug overlay.
+   - The dev tools (F3 in the standalone game, ADR 0039): engine-owned Dear ImGui
+     windows under `engine/runtime/devtools/` — the Stats window over the
+     frame-stats board today, further inspection/control windows as they are
+     wanted (`engine/runtime/devtools/README.md` is the recipe). Debug builds
+     only. ONED's Run OpenNova loose action launches that same standalone game
+     against the selected data directory; ONED has no embedded preview or dev
+     tools (its own run surface is an engine ImGui window on the same pass).
    - `Simulation` introspection: `get_present_snapshot()`,
      `get_entity_debug(index)`, `get_fired_events_snapshot()`, `get_wac_state()`,
      and the mission/global/music variable snapshots.
-   - PerfTimeline ring (`godot/game/util/perf_timeline.gd`), rendered in the
-     overlay's Perf pane; recorded baselines in `docs/perf/`.
+   - PerfTimeline ring (`godot/game/util/perf_timeline.gd`; its Perf page went
+     with the overlay — a dev-tools window is the re-home); recorded baselines
+     in `docs/perf/`.
    - Headless probes `godot/tests/*_probe.gd` (see `godot/tests/CLAUDE.md`).
 
 ## 6. Evidence and landing rules

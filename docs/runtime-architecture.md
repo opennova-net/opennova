@@ -94,6 +94,15 @@ that operate on it; `tests/world/world_test.cpp` enforces the invariant.
 `Simulation` converts the typed input once, advances its mission kernel, and
 returns typed outcomes. A single temporary per-tick sink keeps catch-up
 presentation synchronous without installing persistent string-named hooks.
+While the profiling clocks run it also folds the session phase spans onto the
+`FrameStats` board the shell hands it (ADR 0039).
+
+The dev tools (`engine/runtime/devtools`, F3) sit outside this order: the
+imgui-godot addon calls `ImGui::NewFrame` at the lowest process priority and
+renders at the highest; the `DevTools` node runs the engine's layout pass in
+a `_process` just under that render, after every game callback of the frame,
+so the tool windows read the frame the game just produced. Closed tools cost
+nothing: the Stats window arms the board's capture only while it is visible.
 
 `MissionPresentation` owns the placed and wire present passes, entity index,
 effect drains, and fixed-tick presentation signals. It owns no cadence or
