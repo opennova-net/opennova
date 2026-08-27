@@ -37,6 +37,30 @@ opennova::mission::EntityKind to_native_kind(int kind) {
 
 } // namespace
 
+int MissionData::load_progress_percent(int p_stage) {
+	return opennova::mission::mission_load_progress_percent(
+			static_cast<opennova::mission::MissionLoadStage>(p_stage));
+}
+
+static_assert(MissionData::LOAD_STAGE_ENVIRONMENT ==
+		static_cast<int>(opennova::mission::MissionLoadStage::kEnvironment));
+static_assert(MissionData::LOAD_STAGE_TERRAIN ==
+		static_cast<int>(opennova::mission::MissionLoadStage::kTerrain));
+static_assert(MissionData::LOAD_STAGE_OBJECTS ==
+		static_cast<int>(opennova::mission::MissionLoadStage::kObjects));
+static_assert(MissionData::LOAD_STAGE_RUNTIME ==
+		static_cast<int>(opennova::mission::MissionLoadStage::kRuntime));
+static_assert(MissionData::LOAD_STAGE_AUDIO ==
+		static_cast<int>(opennova::mission::MissionLoadStage::kAudio));
+static_assert(MissionData::LOAD_STAGE_EFFECTS ==
+		static_cast<int>(opennova::mission::MissionLoadStage::kEffects));
+static_assert(MissionData::LOAD_STAGE_FINISH ==
+		static_cast<int>(opennova::mission::MissionLoadStage::kFinish));
+static_assert(MissionData::LOAD_STAGE_FINISH + 1 ==
+		static_cast<int>(opennova::mission::MissionLoadStage::kCount));
+static_assert(MissionData::LOAD_PROGRESS_COMPLETE ==
+		opennova::mission::kMissionLoadProgressComplete);
+
 void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_file", "path"), &MissionData::open_file);
 	ClassDB::bind_method(D_METHOD("create_default"), &MissionData::create_default);
@@ -121,6 +145,16 @@ void MissionData::_bind_methods() {
 	BIND_CONSTANT(WP_FLAG_BLUE_TEAM);
 	BIND_CONSTANT(WP_FLAG_RED_TEAM);
 	BIND_CONSTANT(ATTRIB_FORCE_INDOORS);
+	BIND_CONSTANT(LOAD_STAGE_ENVIRONMENT);
+	BIND_CONSTANT(LOAD_STAGE_TERRAIN);
+	BIND_CONSTANT(LOAD_STAGE_OBJECTS);
+	BIND_CONSTANT(LOAD_STAGE_RUNTIME);
+	BIND_CONSTANT(LOAD_STAGE_AUDIO);
+	BIND_CONSTANT(LOAD_STAGE_EFFECTS);
+	BIND_CONSTANT(LOAD_STAGE_FINISH);
+	BIND_CONSTANT(LOAD_PROGRESS_COMPLETE);
+	ClassDB::bind_static_method("MissionData", D_METHOD("load_progress_percent", "stage"),
+			&MissionData::load_progress_percent);
 	BIND_CONSTANT(ATTRIB_ROTATE_MAP_180);
 	BIND_CONSTANT(ATTRIB_ENABLE_NVG);
 	BIND_CONSTANT(ATTRIB_START_WITH_NVG_ON);

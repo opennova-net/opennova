@@ -157,6 +157,12 @@ target_include_directories(mission_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(mission_catalog_test PRIVATE cxx_std_17)
 add_test(NAME mission_catalog COMMAND mission_catalog_test)
 
+# The mission load plan (mission/mission_load_plan.h): the stage order and the
+# witnessed loading-screen anchors the shell presents.
+add_executable(mission_load_plan_test mission/mission_load_plan_test.cpp)
+target_link_libraries(mission_load_plan_test PRIVATE opennova_runtime)
+add_test(NAME mission_load_plan COMMAND mission_load_plan_test)
+
 add_executable(mission_bms_test mission/mission_bms_test.cpp)
 target_link_libraries(mission_bms_test PRIVATE opennova_formats)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
