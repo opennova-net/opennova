@@ -24,9 +24,9 @@ remain parsed-but-deferred — is tracked per field in
 
 | Original (Jointops retail) | Reimplementation |
 |---|---|
-| `Environment_InitDefaults @ 0x57c010` | `env::Config` member defaults (`engine/formats/env/include/env/env.h`) |
-| `TimeOfDay_ParseProperty @ 0x57c590` | `env::load_env` keyword handling (`engine/formats/env/src/env.cpp`) |
-| `Environment_ParseTimeString @ 0x57c500` | `env::hhmm_to_hours_fp` (`engine/formats/env/src/env.cpp`) |
+| `Environment_InitDefaults @ 0x57c010` | `env::Config` member defaults (`engine/formats/env/env.h`) |
+| `TimeOfDay_ParseProperty @ 0x57c590` | `env::load_env` keyword handling (`engine/formats/env/env.cpp`) |
+| `Environment_ParseTimeString @ 0x57c500` | `env::hhmm_to_hours_fp` (`engine/formats/env/env.cpp`) |
 | `Color_ScaleRGBAndPack @ 0x57f890` | parse-side quantization inside `env::interpolate_tod` |
 | `Environment_SortAndSnapshotKeyframes @ 0x57c240` | stable sort in `env::load_env` / `save_env` |
 | `Environment_FindKeyframeSegment @ 0x57dd80` | bracketing in `env::interpolate_tod` |
@@ -412,7 +412,7 @@ only when the SMOOTHED height changes (`Env_SkyHeightCurrent != Env_SkyHeightApp
 `SkyDome_SetHeightAndRebuild @ 0x579070`, which stores `this+0x48` and re-bakes;
 buffer creation is `SkyDome_CreateBuffersAndBuild @ 0x579d10`, 441×40-byte VB +
 2400-index IB). Ported: `env::build_sky_dome_mesh` + `kSkyDomeReferenceHeight`
-(`engine/formats/env/src/env_render.cpp`, dome section in `env_render_unit_test`).
+(`engine/formats/env/env_render.cpp`, dome section in `env_render_unit_test`).
 
 **Scroll-rate state (back-filled citations):** the live rate `Env_CloudScrollRate
 @ 0x26c686c` smooth-eighths toward `Env_CloudScrollRateTarget @ 0x26c6870` each tick
@@ -1213,7 +1213,7 @@ unverified. Tracked.
 
 ### Visual-parity check dispositions (sky / fog / weather / celestial)
 
-The planned A/B capture run (4 cameras × 4 curtimes via `scripts/ab_diff.py atmosphere`) was
+The planned A/B capture run (4 cameras × 4 curtimes via `scripts/ab_diff.py atmosphere`, a script that no longer exists) was
 never executed — zero visual deltas were recorded. The five pre-flagged checks were
 dispositioned analytically by the grill instead:
 

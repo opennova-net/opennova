@@ -496,8 +496,8 @@ Comment fixes:
 - 0x454c30: struct comment — +12/+14 = repeat cooldown live/reload, +16/+18 = activation
   delay live/reload, +21 = trigger_count; flags bit1/bit2 = pre/post PASS selectors.
 - Reverse links: on 0x454c30/0x454050/0x453620/0x4542e0/0x454d50 → opennova
-  `engine/runtime/mission/src/event_runtime.cpp`; on 0x4f81a0 → `engine/runtime/wac/include/wac/wac_system.h`;
-  on 0x40f4e0/0x40e9f0 → `engine/runtime/mission/src/promote.cpp`.
+  `engine/runtime/mission/event_runtime.cpp`; on 0x4f81a0 → `engine/runtime/wac/wac_system.h`;
+  on 0x40f4e0/0x40e9f0 → `engine/runtime/mission/promote.cpp`.
 
 ---
 
@@ -990,12 +990,12 @@ correspondence made explicit.
 
 | orig | reimpl |
 |---|---|
-| `EventTrigger_UpdateEntry @0x454c30` | `engine/runtime/mission/src/event_runtime.cpp` |
-| `@0x454050` (chain eval) | `engine/runtime/mission/src/event_runtime.cpp` |
-| `EventTrigger_EvaluateCondition @0x453620` | `engine/runtime/mission/src/event_runtime.cpp` |
-| `EventAction_Dispatch @0x4542e0` | `engine/runtime/mission/src/event_runtime.cpp` |
-| `@0x454d50` (quarter pass) | `engine/runtime/mission/src/event_runtime.cpp` |
-| `WacScript_AdvanceTick @0x4f81a0` | `engine/runtime/wac/include/wac/wac_system.h` |
-| `Mission_LoadBMSFile @0x40f4e0` | `engine/runtime/mission/src/promote.cpp` |
-| `Entity_SpawnFromBMSRecord @0x40e9f0` | `engine/runtime/mission/src/promote.cpp` |
+| `EventTrigger_UpdateEntry @0x454c30` | `engine/runtime/mission/event_runtime.cpp` |
+| `@0x454050` (chain eval) | `engine/runtime/mission/event_runtime.cpp` |
+| `EventTrigger_EvaluateCondition @0x453620` | `engine/runtime/mission/event_runtime.cpp` |
+| `EventAction_Dispatch @0x4542e0` | `engine/runtime/mission/event_runtime.cpp` |
+| `@0x454d50` (quarter pass) | `engine/runtime/mission/event_runtime.cpp` |
+| `WacScript_AdvanceTick @0x4f81a0` | `engine/runtime/wac/wac_system.h` |
+| `Mission_LoadBMSFile @0x40f4e0` | `engine/runtime/mission/promote.cpp` |
+| `Entity_SpawnFromBMSRecord @0x40e9f0` | `engine/runtime/mission/promote.cpp` |
 | `EntityPool_FindByNetId @0x4f0a20` | engine/runtime/world entity registry (`EntityRegistry::find_by_net_id`) |

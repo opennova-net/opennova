@@ -385,7 +385,7 @@ when its bit is set.
 | 0x100 | `Distort` | blend mode == Distort=7 | screen-texture distortion path (§5.4) |
 
 Mirrored as `opennova::particle::particle_runtime_flag::*` in
-`engine/runtime/particle/include/particle/emitter.h`; the bake step (`bake_particle_def_curves`) sets
+`engine/runtime/particle/emitter.h`; the bake step (`bake_particle_def_curves`) sets
 `CurveRef::baked` so spawn-flag computation reads baked state instead of engine pointers.
 
 ### 2.5 Flag tables
@@ -409,7 +409,7 @@ one trailing space — replicated exactly so writer output matches engine layout
   23 `SIGNEDROTATIONS` (pins the random `±1` sign on rotation rates AND the box-shape
   dominant axis `[orig: @ 0x5e790f/0x5e7832]`), 24 `ONEFRAME`, 25 `BURSTDISTRIBUTE`,
   26 `AMBIENTCOLOR`, 27 `BELOWH20`, 28 `ABOVEH20`. Mirrored 1:1 in
-  `engine/formats/particle/include/particle/particle.h::particle_flag` (which was already correct —
+  `engine/formats/particle/particle.h::particle_flag` (which was already correct —
   cross-witnessed from ParticleEdit_v1_1.exe `@ 0x5ba500`; this dump confirms the JO table).
 - **`move` table @ `0x848800`** — 5 bits, with a memory-order/bitmask reorder verified live from
   raw bytes at `0x848A10`/`0x848B18`/`0x848C20`: ORBIT sits at memory pos 4 with mask `0x04`,
@@ -424,7 +424,7 @@ ported without byte-layout claims; **pending** = not yet decompiled.
 
 | Original | Addr (size) | Behavior witnessed | Reimpl | Verdict |
 | --- | --- | --- | --- | --- |
-| `CEffectWorld_ParseSectionCallback` | `0x5ecb40` (0x101) | references all 4 section strings; `_stricmp` branches tag → per-section parser | `engine/formats/particle/src/parser.cpp` folds all four section tokens before one switch | match (witness; mixed-case contract) |
+| `CEffectWorld_ParseSectionCallback` | `0x5ecb40` (0x101) | references all 4 section strings; `_stricmp` branches tag → per-section parser | `engine/formats/particle/parser.cpp` folds all four section tokens before one switch | match (witness; mixed-case contract) |
 | `CEffectTableDef_ParseCallback` | `0x5e4010` (0x1b1) | alternate `[tabledef_edithandles]` path; likely editor-only, not on the runtime load path | — | pending |
 | `CParticleDef_ParseProperties` | `0x5ea320` (0x2525) | `_stricmp` dispatch on ~80 keys; one trailing `reverse`/`inverse` token; edithandles sentinel @ `0x5ea346`; `gN_colorM` remap bug (§1.11) | `parser.cpp::apply_particle_key`; known keys folded, unknown spelling retained | match except the documented dual-modifier superset (D-PTL-20) |
 | `CParticleDef_ParseFromConfigMap` | `0x5ed210` (0x1da5) | hydrates ~80 named keys → `CParticleEffectDef` (§2.1) | drives the `ParticleDef` field set | match (witness) |
@@ -447,7 +447,7 @@ Writers (round-trip verification gold):
 
 ## 4. Runtime witness matrix (simulator)
 
-The portable simulator in `engine/runtime/particle/src/emitter.cpp` is a **faithful core with recorded
+The portable simulator in `engine/runtime/particle/emitter.cpp` is a **faithful core with recorded
 gaps**: it captures the witnessed per-particle behavior (emission, lifetime, integration, curve
 clocks) without claiming complete or byte-exact parity with the DirectX-bound runtime. ORBIT,
 platform RNG/basis construction, capacity bounds, and the other §8/D-PTL rows remain explicit.

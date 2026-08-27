@@ -12,7 +12,7 @@ Witness images used by this record (never mix their addresses):
 - **`dfx2med.exe`** — the shipped retail Mission Editor (IDB
   `dfx2med.exe.i64` exists on disk; entity-record field NAMES were witnessed
   from its `Med_WriteMisFile @ 0x454630` at the 2026-06-06 pass — see
-  `engine/formats/mission/include/mission/bms.h`). Its full `.mis` grammar grill is
+  `engine/formats/mission/bms.h`). Its full `.mis` grammar grill is
   still pending (D-MIS-3).
 
 ## Current verdict
@@ -120,7 +120,6 @@ BMS record has no such fields; they are text-authoring concepts).
   which is how D-MIS-5 hid). The same reparse pins the D-MIS-1 pool
   classification: a fixture-derived items.def-TYPE resolver must land every
   pool back at its source size, spot entities in their original pools.
-- `tests/mission/mission_c_abi_test.cpp`: extension dispatch.
 - Godot binding: `MissionData` save/open dispatch and the caller-supplied
   base-height seam. The former workspace Save As flow was removed by ADR 0037.
 - Acceptance: export retail `00TRg.bms` → `.mis`, open in the Nile editor —
