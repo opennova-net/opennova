@@ -6,6 +6,7 @@
 #include <net/netsim/connection_fan.h>
 #include <net/netsim/entity_wire_bridge.h> // entity_class_of (the host's own rows)
 #include <runtime/renderer/light_runtime.h> // sun_visibility_factor — the quality->scale owner
+#include <runtime/world/occlusion_camera.h> // the camera hand-over
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed + VehicleTraits probe boxes
 
 #include <unordered_set>
@@ -26,75 +27,38 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
                                          double p_fog_dist_units, double p_water_z_units,
                                          bool p_force_indoors) {
 	if (!world_) return;
-	using opennova::world::to_fixed;
-	opennova::world::OcclusionFrameCamera cam;
-
-	// Godot world (x, up, z) -> mission fixed (x, -z, up) 16.16.
-	const Vector3 gp = p_camera.origin;
-	cam.pos_fixed[0] = to_fixed(gp.x);
-	cam.pos_fixed[1] = to_fixed(-gp.z);
-	cam.pos_fixed[2] = to_fixed(gp.y);
-	opennova::world::render_float_from_fixed(cam.pos_fixed, cam.pos_float);
-
-	// Camera axes. Godot camera looks -Z; render float = Godot with X/Z swapped
-	// ((-my, mz, mx)/65536 == (gz, gy, gx)); mission dirs = (x, -z, y) of Godot.
+	// The camera hand-over: the scene's view as presentation-frame vectors;
+	// the mission/render remaps, the frustum planes and the Q22 rows are the
+	// engine's (runtime/world/occlusion_camera.h).
+	opennova::world::OcclusionViewSpec view;
+	const Vector3 eye = p_camera.origin;
 	const Vector3 fwd_g = -p_camera.basis.get_column(2).normalized();
 	const Vector3 right_g = p_camera.basis.get_column(0).normalized();
 	const Vector3 up_g = p_camera.basis.get_column(1).normalized();
-	auto render_dir = [](const Vector3 &v) {
-		return Vector3(v.z, v.y, v.x);
+	auto store = [](const Vector3 &v, float out[3]) {
+		out[0] = static_cast<float>(v.x);
+		out[1] = static_cast<float>(v.y);
+		out[2] = static_cast<float>(v.z);
 	};
-	const Vector3 f = render_dir(fwd_g);
-	const Vector3 r = render_dir(right_g);
-	const Vector3 u = render_dir(up_g);
-	const Vector3 c(cam.pos_float[0], cam.pos_float[1], cam.pos_float[2]);
-
-	// The 5-plane view frustum (near + 4 sides), inward normals, in render
-	// float space — the reimpl stand-in for the retail viewport projector
-	// [orig: g_CameraFrustumPlanes5 @ 0xA7849C; D-OCC-12].
-	const double half_v = Math::deg_to_rad(p_fov_y_deg) * 0.5;
-	const double tan_v = std::tan(half_v);
-	const double tan_h = tan_v * (p_aspect > 0.0 ? p_aspect : 1.0);
-	Vector3 normals[5];
-	normals[0] = f;
-	normals[1] = (f * static_cast<real_t>(tan_h) + r).normalized();  // left
-	normals[2] = (f * static_cast<real_t>(tan_h) - r).normalized();  // right
-	normals[3] = (f * static_cast<real_t>(tan_v) + u).normalized();  // bottom
-	normals[4] = (f * static_cast<real_t>(tan_v) - u).normalized();  // top
-	cam.frustum_count = 5;
-	for (int i = 0; i < 5; ++i) {
-		const Vector3 anchor = (i == 0) ? c + f * static_cast<real_t>(p_near) : c;
-		cam.frustum[i][0] = normals[i].x;
-		cam.frustum[i][1] = normals[i].y;
-		cam.frustum[i][2] = normals[i].z;
-		cam.frustum[i][3] = -normals[i].dot(anchor);
-	}
-
-	// World->view rotation rows (mission axes, Q22): row 0 = forward (the depth
-	// cull axis), rows 1/2 = the lateral axes the three-ray probe offsets along.
-	// [orig: the fixed view matrix @ 0xA7841C]
-	auto mission_dir_q22 = [](const Vector3 &v, int32_t out[3]) {
-		out[0] = static_cast<int32_t>(std::lround(v.x * 4194304.0));
-		out[1] = static_cast<int32_t>(std::lround(-v.z * 4194304.0));
-		out[2] = static_cast<int32_t>(std::lround(v.y * 4194304.0));
-	};
-	mission_dir_q22(fwd_g, cam.view_rows_q22[0]);
-	mission_dir_q22(right_g, cam.view_rows_q22[1]);
-	mission_dir_q22(up_g, cam.view_rows_q22[2]);
-
-	cam.fog_dist = to_fixed(p_fog_dist_units);
-	cam.water_z = to_fixed(p_water_z_units);
+	store(eye, view.eye);
+	store(fwd_g, view.forward);
+	store(right_g, view.right);
+	store(up_g, view.up);
+	view.fov_y_deg = static_cast<float>(p_fov_y_deg);
+	view.aspect = static_cast<float>(p_aspect);
+	view.near_units = static_cast<float>(p_near);
+	view.fog_dist_units = static_cast<float>(p_fog_dist_units);
+	view.water_z_units = static_cast<float>(p_water_z_units);
+	view.local_blink_flags = collision_world_.local_player_blink_flags;
+	view.force_indoors = p_force_indoors;
+	opennova::world::OcclusionFrameCamera cam;
+	opennova::world::occlusion_camera_from_view(view, cam);
 	// Mirror the env view distance into the 0x0A priority score's global — the
 	// same value retail's env writes into word_26C681E for the render AND the
 	// priority builder to read (D-NET-139: the LOS gate + the +200 inside-view
 	// bonus). Headless embedders that never run an occlusion frame leave it 0,
 	// which disables both terms exactly like an unwritten retail global.
 	opennova::netsim::set_view_distance_units(static_cast<int>(p_fog_dist_units));
-	// The mission-attribute force-indoors override ORs the indoors bit into the
-	// frame's accum view. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> |= 2]
-	cam.local_blink_flags =
-			collision_world_.local_player_blink_flags |
-			(p_force_indoors ? opennova::world::kBlinkIndoorsBit : 0u);
 
 	const uint64_t occl_build_start =
 			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
