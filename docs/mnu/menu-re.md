@@ -1163,7 +1163,7 @@ Control-tree reimpl let overlapped siblings steal popup clicks and stack dropdow
 open). The compiled popup draws inside its owning combo's walk position, matching the
 original's tree-positional order — the Control-tree era's menu-top overlay divergence
 (D-MNU-12) dissolved with the cutover. Pinned by the popup cases in
-`tests/game/menu_driver_test.gd` + the geometry checks in
+`godot/tests/game/menu_driver_test.gd` + the geometry checks in
 `tests/menu/menu_frame_compiler_test`.
 
 **matching** (2026-06-23b controls grill): the CONTROL_MAPPING population (the action catalog +
@@ -1598,18 +1598,18 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CStaticWnd_DrawLabel @ 0x656fb0` + `draw_text_with_cursor @ 0x6533b0` + `font_cache_draw_text_scaled @ 0x653170` | `MenuFrameCompiler::emit_widget_text` / `emit_caret` over `opennova::hud::GameFont` |
 | `CEditWnd_Render @ 0x6619e0` (focus state-2, blink, password, scroll window `update_edit_scroll_range @ 0x661790`) | the compiler's edit leg + `MenuWidgetState.focused/caret` |
 | `CRadioWnd_Render @ 0x656e20` / `CCheckWnd_Render @ 0x64ae20` + `CCheckWnd_DrawLabel @ 0x64aa20` | checked-state forcing + label placement in the compiler |
-| `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `parse_key_value_buffer @ 0x639870` | `mns::Document::evaluate` — `engine/formats/mns/src/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless document model (ADR 0014) |
-| `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `engine/formats/mnu/src/mnu_xml.cpp` |
-| `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `engine/formats/mnu/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
+| `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `parse_key_value_buffer @ 0x639870` | `mns::Document::evaluate` — `engine/formats/mns/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless document model (ADR 0014) |
+| `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `engine/formats/mnu/mnu_xml.cpp` |
+| `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `engine/formats/mnu/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
 | `NapiXML_ExpandVariablesInText @ 0x63a000` | `MnsStyleSheet::substitute` — `godot/src/mnu/mns_stylesheet.cpp` (per-field post-parse, not whole-buffer; D-MNU-1 / ADR 0005) |
-| `parse_scene_node_attributes @ 0x639630` | `mnu::parse_screen` — `engine/formats/mnu/src/mnu.cpp` |
-| `CUIElement_ParseXMLDefinition @ 0x648120` | `mnu::parse_window` — `engine/formats/mnu/src/mnu.cpp`; layout in `MenuFrameCompiler::solve_rect` — `engine/runtime/menu/menu_frame.cpp` |
+| `parse_scene_node_attributes @ 0x639630` | `mnu::parse_screen` — `engine/formats/mnu/mnu.cpp` |
+| `CUIElement_ParseXMLDefinition @ 0x648120` | `mnu::parse_window` — `engine/formats/mnu/mnu.cpp`; layout in `MenuFrameCompiler::solve_rect` — `engine/runtime/menu/menu_frame.cpp` |
 | `parse_edit_widget_xml_properties @ 0x661d10` | EDIT attrs (`NUMBER/MINVAL/MAXVAL/MAXCHAR/READONLY/PASSWORD`) in `mnu::parse_window` |
 | `sub_64AD90 @ 0x64ad90` (CHECKBOX attr parse) | CHECKBOX attrs (`AS_BUTTON/CHECKED`) in `mnu::parse_window` |
 | `CScrollWnd_Construct @ 0x64c450` + `CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0` | SCROLL orientation and one along-axis part extent: constructor default 20, with authored `WIDTH`/`HEIGHT` override; texture size is not the extent source |
-| `CUIScene_CreateWidgetByType @ 0x64f630` | `mnu::parse_type_string` / `window_type_name` — `engine/formats/mnu/src/mnu.cpp` |
-| `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` | `mnu::parse_table_*` — `engine/formats/mnu/src/mnu.cpp` |
-| `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` / direct list fields — `engine/formats/mnu/src/mnu.cpp`; LIST/MULTI/LAN_LIST take sibling top-level `MIN_ITEM_HEIGHT`, COMBO takes it from nested `LIST_BOX` |
+| `CUIScene_CreateWidgetByType @ 0x64f630` | `mnu::parse_type_string` / `window_type_name` — `engine/formats/mnu/mnu.cpp` |
+| `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` | `mnu::parse_table_*` — `engine/formats/mnu/mnu.cpp` |
+| `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` / direct list fields — `engine/formats/mnu/mnu.cpp`; LIST/MULTI/LAN_LIST take sibling top-level `MIN_ITEM_HEIGHT`, COMBO takes it from nested `LIST_BOX` |
 | `CListWnd_Construct @ 0x643bb0` (embedded `CScrollWnd@+976`; row-height sentinel `this+201 = -1`) | popup row defaults — `MenuFrameCompiler::row_height_` (`engine/runtime/menu/menu_frame.cpp`, authored `MIN_ITEM_HEIGHT` sentinel) (D-MNU-8) |
 | `CListWnd_DrawItems @ 0x643f30` (rows inside `this+13`; row height = font "W" or `this+201`; per-row text truncation) | `MenuFrameCompiler::emit_combo_popup` (`engine/runtime/menu/menu_frame_scrollbar.cpp`) + `row_height_` (`menu_frame.cpp`) (D-MNU-7/8) |
 | `CScrollWnd_Render @ 0x64c5c0` (COLOR sink `@ 0x64ce70`, IMAGE sink `@ 0x64cf70`, outline via `CUIElement_DrawOutlineRect @ 0x647fc0`) + `CUIScrollbar_CreateChildWindows @ 0x64d330` | `MenuFrameCompiler::emit_scrollbar` (`engine/runtime/menu/menu_frame_scrollbar.cpp`) — COLOR/OUTLINE full rect, IMAGE middle inset, then SHUTTLE/SCROLLUP/SCROLLDOWN painter order |
@@ -1639,7 +1639,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — reimpl code / not grillable |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `CreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `MnuMarquee` (plain text) |
 | `CUIWidget_HandleScriptedAction @ 0x6497f0` | `MenuDriver._dispatch_widget_actions` + the shell action signals — `godot/game/menu_driver.gd` |
-| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/src/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
+| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
 | `UI_BuildKeyBindingLoadoutTable @ 0x559e50` (catalog `aAbsoluteTurnLe @ 0x8159cb`) | `engine/runtime/controls` `k_catalog` — `controls.cpp` |
 | `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
 | `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> display name) | `controls::key_name` |

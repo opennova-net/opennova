@@ -672,7 +672,7 @@ nearby entities. Called **unconditionally** by `HUD_RenderOverlays`
 | `g_hudLabelFmtArmoryDelay @0x2723870` | `STROVER_USEARMORYD` | "Armory in %d Seconds" | `!ArmoryDelay %d` |
 
 **Selection** (the ported half — `world::collect_attach_labels`,
-`engine/runtime/world/src/vehicle_attach.cpp`):
+`engine/runtime/world/vehicle_attach.cpp`):
 
 - Bracket gate: no `Entity_FindNearestSeatOrArmory` hit → no labels at all
   `[orig: @0x5a32e2]`. The searchMode is the player's **armory-zone flag**
@@ -1127,7 +1127,7 @@ FARP rearm) — recorded as D-HUD-14 and deferred with them.
 
 A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
 (1024×768 ints) or copies a texture-name string. Cross-checked against
-`DefHudPosDef` in `engine/formats/def/include/def/def.h`.
+`DefHudPosDef` in `engine/formats/def/def.h`.
 
 | Token | Writes |
 |---|---|

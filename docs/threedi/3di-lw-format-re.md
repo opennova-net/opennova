@@ -140,7 +140,7 @@ per-surface int16; exact unit labels for `>>8` / `×0.62` are still open (§3.3)
 
 The 80-byte face record is a **triangle**; its first 40 bytes follow the v8 `ModelFace`. Fields
 empirically validated across **578,424 triangles in 1,942 LODs**
-(`engine/formats/threedi/src/threedi_lw.cpp`, `tests/threedi/lw_parse_test.cpp`):
+(`threedi_lw.cpp` and `lw_parse_test.cpp` on the unlanded `lw-3di-import` branch):
 
 | Off | Type | Field | Validation |
 |---|---|---|---|
@@ -322,7 +322,7 @@ Float math is fine; only axis order, angle unit, and absolute-vs-local rotation 
 |---|---|
 | v10 container + per-LOD blob layout byte-exact | **971/971** v10 samples reproduce exactly (corpus `~/Desktop/dflw_3di`, 974 files: 971 v10, 3 v8 - `JPAN8.3DI`, `PFB1.3DI`, `TESTPART.3DI`); scratch validator `validate_lw_3di.py` (notes/, untracked) |
 | `blob_size == Σ(count × stride)`, zero leftover | every LOD of all 971 samples |
-| Face vertex/normal/surface indices in range | **578,424 triangles / 1,942 LODs**, 0 out-of-range (`tests/threedi/lw_parse_test.cpp`) |
+| Face vertex/normal/surface indices in range | **578,424 triangles / 1,942 LODs**, 0 out-of-range (`lw_parse_test.cpp`, unlanded branch) |
 | SAF1 plain (unencrypted), per-frame size exact to EOF | **53/53** sample `.SAF`; scratch validator `validate_saf.py` (notes/, untracked) |
 | Pose-builder recipe (§2.5-2.7) | read directly from matrix-construction code, not inferred from data |
 
