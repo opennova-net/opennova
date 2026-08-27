@@ -31,34 +31,52 @@ For each marker the tool asks the IDB what lives at the address and classifies t
   unqualified-image    a DLL-range address (>= 0x10000000) with no image qualifier
   reimpl-stale         an IDB `reimpl:` entry comment names a repo path that no longer
                        exists (the reverse link half of the check)
+  reimpl-moved         the named path exists but neither it nor its .h/.cpp sibling still
+                       carries a marker inside the function -- another file does (a rename
+                       kept the basename, or a push-down moved the port to its engine home)
+  reimpl-orphan        the named path exists but no code file cites the function any more
+                       (the port was deleted, or its marker dropped) -- adjudicate by hand
 
 Exit status 1 when any of the defect classes is non-empty. Prints disagreements only;
 `--all` prints every accepted row too, `--tsv PATH` writes the full join.
+
+The reverse leg can also repair itself: `--fix-reimpl` prints one planned rewrite per
+stale/moved link whose new home is unambiguous (the single citing file, else the citing
+file whose basename matches the old one, else the single engine/ or godot/src home);
+`--apply` writes those comment edits into the live IDB and `--save` runs idb_save after.
+Orphans and ambiguous links are never rewritten, only listed.
 
 Usage:
   python scripts/ida/cite_sweep.py                 # code + docs + reverse links
   python scripts/ida/cite_sweep.py --no-docs       # code markers only
   python scripts/ida/cite_sweep.py --tsv out.tsv   # keep the full join for adjudication
+  python scripts/ida/cite_sweep.py --fix-reimpl    # plan the reverse-link rewrites (dry run)
+  python scripts/ida/cite_sweep.py --fix-reimpl --apply --save   # write them, then idb_save
 """
 
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from collections import Counter, defaultdict
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 URL = os.environ.get("IDA_MCP_URL", "http://127.0.0.1:13337/mcp")
 
-CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/modtools", "godot/tests", "apps", "tests")
+CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/modtools", "godot/shaders", "godot/tests", "apps", "tests")
 DOC_ROOTS = ("docs",)
-CODE_EXT = (".cpp", ".h", ".hpp", ".gd", ".py", ".gdshader", ".json")
+# every tracked text form a marker has been written in: sources, shaders, the engine-side
+# .md records (ROADMAP.md), CMake lists
+CODE_EXT = (".cpp", ".h", ".hpp", ".gd", ".py", ".gdshader", ".gdshaderinc", ".json", ".md", ".txt", ".cmake")
 DOC_EXT = (".md",)
+COMMENT_LEAD = re.compile(r"^\s*(?://|##?|\*|--|;)+\s?")   # a wrapped marker's continuation line lead-in
 
 MARKER_LINE = re.compile(r"\[orig:|\(retail:")
 PAIR = re.compile(r"(?<![\w.}])(?:([A-Za-z_][A-Za-z0-9_]*(?:::~?[A-Za-z_][A-Za-z0-9_]*)*)\s*)?@\s*(0x[0-9A-Fa-f]{4,8})\b")
@@ -77,8 +95,10 @@ AUTO_PREFIXES = (
 LABELISH = re.compile(r"^(?:LABEL_\d+|var_[0-9A-Fa-f]+|arg_[0-9A-Fa-f]+|v\d+|a\d+|kong)$")
 DEFECTS = (
     "name-mismatch", "name-elsewhere", "unknown-name", "code-autoname", "idb-autoname",
-    "undefined", "malformed", "unqualified-image", "reimpl-stale",
+    "undefined", "malformed", "unqualified-image", "reimpl-stale", "reimpl-moved",
+    "reimpl-orphan",
 )
+TEST_ROOTS = ("godot/tests/", "tests/")
 
 # ---------------------------------------------------------------- MCP over HTTP
 
@@ -129,6 +149,20 @@ def py_eval(code, rid):
         raise
 
 
+def py_eval_big(code, rid):
+    """py_eval for a reply the server's ~1 KB result cap would truncate: the IDA side leaves
+    its `payload` as JSON in a temp file (IDA runs on this machine) and the client reads it."""
+    fd, path = tempfile.mkstemp(prefix="cite_sweep_", suffix=".json")
+    os.close(fd)
+    py_eval("OUT = %r\n%s\nopen(OUT, 'w', encoding='utf-8').write(json.dumps(payload))\nresult = json.dumps('ok')"
+            % (path, code), rid)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    finally:
+        os.remove(path)
+
+
 # ---------------------------------------------------------------- extraction
 
 def tracked_files(roots, exts):
@@ -167,10 +201,11 @@ def extract(paths):
         for i, line in enumerate(lines):
             if not MARKER_LINE.search(line):
                 continue
-            # a marker may wrap onto the next line(s); take up to 2 continuation lines
+            # a marker may wrap onto the next line(s); take up to 2 continuation lines, minus
+            # their comment lead-in (`Name @ // 0x4c8750` is one marker, not a dropped cite)
             text = line
             if "]" not in line.split("[orig:")[-1] and "(retail:" not in line:
-                text = " ".join(lines[i:i + 3])
+                text = " ".join([line] + [COMMENT_LEAD.sub("", l) for l in lines[i + 1:i + 3]])
             for m in PAIR.finditer(text):
                 tok, addr = m.group(1), m.group(2).lower()
                 tail = text[m.end():m.end() + 40]
@@ -281,35 +316,172 @@ def classify(tok, addr, ctx, info):
 
 # ---------------------------------------------------------------- reverse links
 
-REIMPL_CODE = r'''
-import idc, idautils, re, json
-pat = re.compile(r"reimpl:\s*([^\n]+)")
-tok = re.compile(r"([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:cpp|h|hpp|gdshaderinc|gdshader|gd|py))(?![A-Za-z0-9])")
-TRACKED = set(TRACKED)
-BASES = set(BASES)
-n = 0
-stale = []
+# A reverse link lives in one of four comment slots at the function entry: the function
+# comment (slot 0), the repeatable function comment (1), the regular (2) or repeatable (3)
+# instruction comment. The leg reads every slot and rewrites only the slot it found.
+
+REIMPL_EAS_CODE = r'''
+import idc, idautils, json
+eas = []
 for ea in idautils.Functions():
-    c = "\n".join(x or "" for x in (idc.get_func_cmt(ea, 0), idc.get_func_cmt(ea, 1), idc.get_cmt(ea, 0), idc.get_cmt(ea, 1)))
-    for m in pat.finditer(c):
-        n += 1
-        line = m.group(1).strip()[:160].encode("ascii", "replace").decode()
-        for t in tok.findall(line):
-            if t in TRACKED or t in BASES:
-                continue
-            stale.append(["0x%x" % ea, idc.get_func_name(ea), t, line])
-result = json.dumps([n, stale])
+    for i in range(4):
+        c = idc.get_func_cmt(ea, i) if i < 2 else idc.get_cmt(ea, i - 2)
+        if c and "reimpl:" in c:
+            eas.append("0x%x" % ea)
+            break
+payload = eas
 '''
 
+REIMPL_ROWS_CODE = r'''
+import idc, ida_funcs, json
+rows = []
+for a in EAS:
+    ea = int(a, 16)
+    f = ida_funcs.get_func(ea)
+    for i in range(4):
+        c = idc.get_func_cmt(ea, i) if i < 2 else idc.get_cmt(ea, i - 2)
+        if c and "reimpl:" in c:
+            rows.append([a, "0x%x" % (f.start_ea if f else ea), "0x%x" % (f.end_ea if f else ea + 1),
+                         idc.get_func_name(ea) or "", i, c])
+payload = rows
+'''
 
-def reimpl_stale(all_tracked):
-    # the path check runs inside IDA (the tracked list rides in with the code) so the reply
-    # carries only the stale rows -- the server caps a py_eval reply at about 1 KB of text
-    tracked = sorted(set(all_tracked))
-    bases = sorted({os.path.basename(p) for p in tracked})
-    code = "TRACKED = %s\nBASES = %s\n" % (json.dumps(tracked), json.dumps(bases)) + REIMPL_CODE
-    n, stale = py_eval(code, rid=700)
-    return n, [tuple(r) for r in stale]
+REIMPL_WRITE_CODE = r'''
+import idc, json
+n = 0
+for a, slot, text in EDITS:
+    ea = int(a, 16)
+    ok = idc.set_func_cmt(ea, text, slot) if slot < 2 else idc.set_cmt(ea, text, slot - 2)
+    n += 1 if ok else 0
+result = json.dumps(n)
+'''
+
+REIMPL_LINE = re.compile(r"reimpl:\s*([^\n]+)")
+REIMPL_TOKEN = re.compile(r"([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:cpp|h|hpp|gdshaderinc|gdshader|gd|py))(?![A-Za-z0-9])")
+
+
+def reimpl_rows():
+    """Every `reimpl:` comment in the IDB as [ea, func_start, func_end, func_name, slot, text]."""
+    eas = py_eval_big(REIMPL_EAS_CODE, rid=700)
+    return py_eval_big("EAS = %s\n" % json.dumps(eas) + REIMPL_ROWS_CODE, rid=701)
+
+
+def stem_siblings(path):
+    """`x.h` / `x.hpp` / `x.cpp` in one directory are one reimpl home: the marker sits on
+    whichever side declares or defines the port."""
+    base, ext = os.path.splitext(path)
+    return {base + e for e in (".h", ".hpp", ".cpp")} - {path}
+
+
+ORPHAN_OK = re.compile(r"unported|not ported|retired|deferr|no cite|no marker", re.I)   # a documented absence
+
+
+def collapse_homes(homes):
+    """Citing files grouped by directory + stem (`x.h` and `x.cpp` are one home); each group
+    is represented by its .cpp when it has one."""
+    groups = defaultdict(set)
+    for h in homes:
+        base, ext = os.path.splitext(h)
+        groups[base if ext in (".h", ".hpp", ".cpp") else h].add(h)
+    out = []
+    for key, members in groups.items():
+        cpp = [m for m in members if m.endswith(".cpp")]
+        out.append(cpp[0] if cpp else sorted(members)[0])
+    return out
+
+
+def renamed_twin(old_tok, by_base):
+    """The file a retired path became when only its name changed: the `nova_` prefix
+    dropped (ADR 0040) or the pre-engine `libs/<lib>/src/` layout -- a unique tracked file
+    with the surviving basename."""
+    base = os.path.basename(old_tok)
+    for cand in (base[5:] if base.startswith("nova_") else base,):
+        same = by_base.get(cand, [])
+        if len(same) == 1:
+            return same[0]
+    return None
+
+
+def pick_home(homes, old_tok, path_exists, by_base):
+    """The unambiguous new home for a link. A retired path follows its rename when the twin
+    still exists, else the single citing file (siblings collapsed), else the single citing
+    engine/ or godot/src file. A path that still EXISTS but lost its cite is rewritten only
+    when exactly one file cites the function and it lives under engine/ (the push-down
+    direction); everything else is listed for a hand adjudication."""
+    if not path_exists:
+        twin = renamed_twin(old_tok, by_base)
+        if twin:
+            return twin
+    homes = collapse_homes(homes)
+    if len(homes) == 1:
+        return homes[0] if (not path_exists or homes[0].startswith("engine/")) else None
+    if path_exists:
+        return None
+    for root in ("engine/", "godot/src/"):
+        under = [h for h in homes if h.startswith(root)]
+        if len(under) == 1:
+            return under[0]
+    return None
+
+
+def classify_reimpl(rows, pairs, all_tracked):
+    """Join each IDB reverse link against the tree. A link is ok when its path exists and
+    that file (or a .h/.cpp sibling) cites an address inside the function; otherwise it is
+    stale (path gone), moved (path exists, the cite lives elsewhere) or orphan (nothing
+    cites the function). Returns (n_links, sweep_rows, planned_edits)."""
+    tracked = set(all_tracked)
+    by_base = defaultdict(list)
+    for p in tracked:
+        by_base[os.path.basename(p)].append(p)
+    cites = sorted({(int(addr, 16), path) for path, _, _, addr, ctx in pairs
+                    if ctx != "(other-image)" and not path.startswith(DOC_ROOTS + TEST_ROOTS)})
+    addrs = [a for a, _ in cites]
+    text_cache = {}
+
+    def names_function(path, fname):
+        """The file still names the function in prose (a marker without this address, a
+        `[merged-into:]`, a short form): keep the link, a human decides."""
+        if path not in text_cache:
+            text_cache[path] = ""
+            for p in (path,) + tuple(stem_siblings(path)):
+                try:
+                    text_cache[path] += open(os.path.join(REPO, p), encoding="utf-8", errors="replace").read()
+                except OSError:
+                    pass
+        return bool(fname) and fname in text_cache[path]
+
+    n, out, edits = 0, [], []
+    for ea, start, end, name, slot, text in rows:
+        lo, hi = int(start, 16), int(end, 16)
+        homes = {p for _, p in cites[bisect.bisect_left(addrs, lo):bisect.bisect_left(addrs, hi)]}
+        new_text = text
+        for line in REIMPL_LINE.findall(text):
+            n += 1
+            for tok in REIMPL_TOKEN.findall(line):
+                cands = [tok] if tok in tracked else ([] if "/" in tok else by_base.get(tok, []))
+                if any(c in homes or stem_siblings(c) & homes for c in cands):
+                    continue
+                if cands and ORPHAN_OK.search(line):
+                    continue          # the line documents the absence itself (an unported leg, a
+                                      # retired port, a device-side leg the ratchets keep unmarked)
+                if cands and any(names_function(c, name) for c in cands):
+                    continue          # the file names the function without this address
+                target = pick_home(homes, tok, bool(cands), by_base)
+                cls = "reimpl-stale" if not cands else ("reimpl-moved" if homes else "reimpl-orphan")
+                out.append((cls, ea, name, tok, target or "", "slot%d" % slot, line.strip()[:160],
+                            " ".join(sorted(homes))[:200]))
+                if target:
+                    new_text = new_text.replace(tok, target)
+        if new_text != text:
+            edits.append((ea, slot, new_text))
+    return n, out, edits
+
+
+def apply_reimpl(edits, batch):
+    n = 0
+    for i in range(0, len(edits), batch):
+        n += py_eval("EDITS = %s\n" % json.dumps(edits[i:i + batch]) + REIMPL_WRITE_CODE, rid=800 + i)
+    return n
 
 
 # ---------------------------------------------------------------- main
@@ -321,6 +493,10 @@ def main():
     ap.add_argument("--all", action="store_true", help="print accepted rows too")
     ap.add_argument("--tsv", help="write the full join to this path")
     ap.add_argument("--batch", type=int, default=300)
+    ap.add_argument("--fix-reimpl", action="store_true",
+                    help="plan the reverse-link rewrites (stale/moved paths -> the file that carries the cite); dry run")
+    ap.add_argument("--apply", action="store_true", help="with --fix-reimpl: write the planned rewrites into the IDB")
+    ap.add_argument("--save", action="store_true", help="with --apply: idb_save afterwards")
     args = ap.parse_args()
 
     code_paths = tracked_files(CODE_ROOTS, CODE_EXT)
@@ -352,13 +528,11 @@ def main():
             cls, nm, fs, fn = ("ok" if tok else "site-only"), (tok or ""), None, ""
         rows.append((cls, addr, tok or "", nm, fs or "", fn, "%s:%d" % (path, ln), hint))
 
-    stale = []
-    n_reimpl = 0
+    n_reimpl, edits = 0, []
     if not args.no_reimpl:
         every_tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True).stdout.split("\n")
-        n_reimpl, stale = reimpl_stale([p for p in every_tracked if p])
-        for addr, name, tok, cmt in stale:
-            rows.append(("reimpl-stale", addr, name, tok, "", "", cmt, ""))
+        n_reimpl, reimpl_findings, edits = classify_reimpl(reimpl_rows(), pairs, [p for p in every_tracked if p])
+        rows.extend(reimpl_findings)
 
     if args.tsv:
         with open(args.tsv, "w", encoding="utf-8") as f:
@@ -374,6 +548,15 @@ def main():
     for r in sorted(rows, key=lambda r: (r[0], r[1], r[6])):
         if r[0] in DEFECTS or args.all:
             print("\t".join(r))
+    if args.fix_reimpl:
+        print("[fix-reimpl] %d comment rewrite(s) planned (%s)" % (len(edits), "applying" if args.apply else "dry run"))
+        for ea, slot, text in edits:
+            print("\t%s\tslot%d\t%s" % (ea, slot, " | ".join(REIMPL_LINE.findall(text))[:200]))
+        if args.apply and edits:
+            print("[fix-reimpl] %d written" % apply_reimpl(edits, 100))
+            if args.save:
+                rpc("tools/call", {"name": "idb_save", "arguments": {}}, rid=900)
+                print("[fix-reimpl] idb_save done")
     return 1 if n_defect else 0
 
 

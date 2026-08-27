@@ -259,7 +259,7 @@ pos.w = 65536/range_fixed, color = record RGB × `EffectWorld_AmbientScale` ×
 intensity (+ optional RgbGen animation via `RgbGen_EvaluateColor @ 0x5b23d0`,
 gen block ticked by `Light_TickGenBlock @ 0x5a8ae0`), attenuation
 `{1, 0, 15/range², 1}` with range = fixed × 1.25/65536 — the same set the
-OED preview emits (PrepareLightParams @ 0x46A500). `Light_FillD3DPointLight
+OED preview emits (`PrepareLightParams @ 0x46A500` in ModSuperOed.exe). `Light_FillD3DPointLight
 @ 0x5aa450` fills a D3DLIGHT9 (type POINT) with the same values and a
 **1.5× diffuse boost**. Group culling: each light carries an owner pair
 (entity ptr + section at record +76/+80); `Light_PassesActiveGroups

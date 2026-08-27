@@ -5,7 +5,7 @@
 
 namespace renderer {
 
-// Runtime point-light parameter helper [orig: PrepareLightParams @ 0x46A500].
+// Runtime point-light attenuation set [orig: Light_GetPointLightParams @ 0x5A9180].
 std::array<float, 4> build_point_light_attenuation(float light_range);
 
 // Build a depth-mask plane (a, b, c, d so that ax + by + cz + d = 0 marks

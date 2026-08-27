@@ -252,6 +252,8 @@ inline bool operator!=(LightHandle lhs, LightHandle rhs) {
 }
 
 struct LightActiveGroups {
+	// The interior group the sample position's section selects
+	// [orig: Lighting_SetInteriorLightGroup @ 0x5A90E0].
 	uint64_t interior_group_entity = 0;
 	int32_t interior_group_section = 0;
 	uint64_t owner_group_entity = 0;

@@ -115,7 +115,7 @@ void EntityRegistry::restore_from(const EntityRegistry &snapshot) {
 }
 
 EntityHandle EntityRegistry::find_by_net_id(uint16_t net_id) const {
-    // Faithful to EntityPool_FindByNetId @0x4f0a20: pool 0 first, then pools where
+    // [orig: EntityPool_FindByNetId @0x4f0a20] pool 0 first, then pools where
     // (1<<i)&0xF (i.e. 1..3); pool 4 is skipped. First match wins.
     auto scan = [&](int pool) -> EntityHandle {
         const Pool &p = pools_[pool];

@@ -639,8 +639,8 @@ void test_coop_script_producers_share_round_wire() {
 
 	// Stock Co-op is WAC-owned; Objective Co-op exercises the sibling BMS
 	// result action. Both front ends call the same retail round transaction.
-	// [orig: WacAction_Win @0x4ED4A0; EventAction_Dispatch RedWin
-	// @0x454495; Server_ProcessRoundEnd @0x5164F0]
+	// [orig: WacAction_Win @0x4ED4A0; EventAction_Dispatch "RedWin" ->
+	// Server_ProcessRoundEnd call @0x454495; Server_ProcessRoundEnd @0x5164F0]
 	run_case(game_type::kCoop, true);
 	run_case(game_type::kObjectiveCoop, false);
 }
