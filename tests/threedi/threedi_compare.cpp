@@ -1,4 +1,4 @@
-#include <formats/threedi/threedi_compare.h>
+#include "threedi_compare.h"
 
 #include <base/io/le.h>
 
