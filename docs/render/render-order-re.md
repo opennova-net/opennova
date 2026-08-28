@@ -305,8 +305,8 @@ pure functions in `engine/runtime/renderer/render_order.{h,cpp}`:
 - the transparent priority ladder (sky dome < celestial bodies < glare <
   far-water-side world alpha < water surface < camera-side world alpha <
   weather/particle overlays < glow), applied as Godot `render_priority`
-  rungs — `celestial.gd`'s local ladder re-derives from it,
-  `water.gd` takes the water rung, and `object_model.gd` assigns
+  rungs — `godot/src/env/celestial.cpp`'s local ladder re-derives from it,
+  `godot/src/env/water.cpp` takes the water rung, and `godot/src/object/object_model.cpp` assigns
   blended object materials their water-side rung;
 - the BmTxMirrT P3 post-multiply rung (`kRungObjectPostMultiply = -3`,
   between the celestial bodies and far-side alpha): retail has no separate
@@ -330,7 +330,7 @@ pure functions in `engine/runtime/renderer/render_order.{h,cpp}`:
 
 | ID | Ours | Original | Disposition |
 |---|---|---|---|
-| D-RORD-1 | No global transparent ordering: water, world alpha, and weather all at priority 0 (one depth-sorted queue); the celestial ladder local to `celestial.gd` | fixed pass bracket: sky → far-water-side alpha → water → camera-side alpha → overlays → glow (`[orig: @ 0x5c93a0]`) | FIXED (this slice: the ladder in `engine/runtime/renderer/render_order`, applied at celestial/water/object-model sites) |
+| D-RORD-1 | No global transparent ordering: water, world alpha, and weather all at priority 0 (one depth-sorted queue); the celestial ladder local to the celestial presenter (now `godot/src/env/celestial.cpp`) | fixed pass bracket: sky → far-water-side alpha → water → camera-side alpha → overlays → glow (`[orig: @ 0x5c93a0]`) | FIXED (this slice: the ladder in `engine/runtime/renderer/render_order`, applied at celestial/water/object-model sites) |
 | D-RORD-2 | Reimpl-internal opaque ordering (Godot front-to-back + its own state batching) | per-frame CPU quicksort by the composite key (alpha-test bit → 256-unit depth slabs → effect index → fine depth) (`[orig: @ 0x5d8b40; @ 0x5d928e]`) | PERMANENT-candidate (class C): same intent, device-era mechanism; key semantics preserved as T1-pinned functions |
 | D-RORD-3 | One retained material instance per alpha strip; rigid strips classify their transformed authored min/max center whenever their model transform or the water plane changes (a transform notification re-runs the classifier in place; still models park), bone-path strips use the submitting entity side, and the ladder mirrors with the adjusted render-eye side | rigid path: per strip and per frame (`[orig: @ 0x5d932e..0x5d9354]`); bone path: caller-selected Q1/Q2 via submit flag `0x20` (`[orig: @ 0x5d95c0..0x5d961f]`) | **FIXED (2026-08-22; change-driven 2026-08-23)** — straddling, transform changes, and both camera sides are runtime-pinned |
 | D-RORD-4 | Viewmodel is a camera-tracked node with no depth treatment (clips into near walls) | drawn FIRST with near-Z 0.05 + viewport depth range [0, 0.1], own mode-0 flush (`[orig: @ 0x4ded60; @ 0x58a7b0]`) | RESOLVED — ported 2026-07-09 as a dedicated shared-world SubViewport composite; re-ported 2026-08-26 INSIDE the beauty pass: a shader-side projection override per viewmodel instance (renderfov focal ratio, near 0.05, clip depth remapped into the nearest tenth of the reversed-Z range = the retail depth band) so the gun is under the murk/bloom composite like retail and no second full-window scene render exists. Bounded residual: Godot alpha strips write no depth, so a world transparent nearer than the band could blend over gun glass (retail's Z-write state for the viewmodel flush is unwitnessed) |

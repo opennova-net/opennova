@@ -163,8 +163,8 @@ and a synthetic compressed-clip regression: a sparsely-keyed bone holds its keyf
 `tests/world/ai_test` (state → `anim_slot`, plus a real lethal RoundSim edge that retains
 the outgoing root sample and enters death at weight zero), `tests/world/infantry_test`
 (exact float32 10/15-tick weights, independent playheads, A→B→C retargeting, target-only
-events, and death during an active blend), GUT `skeletal_anim_test`/`object_editor_test`/
-`mission_present_pass_test`. Native `mount_test` pins the exact non-cardinal seat-heading conversion,
+events, and death during an active blend), GUT `skeletal_anim_test`/
+`mission_present_pass_test` (`object_editor_test` retired with ONED authoring, ADR 0037). Native `mount_test` pins the exact non-cardinal seat-heading conversion,
 remote seat-frame state, and the local look/body split. Focused GUT `simulation_test` test
 `test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun` fires a local-owned round through a
 rotated mounted enemy's posed section and confirms authoritative damage. Native `collision_test`
