@@ -47,10 +47,6 @@ int32_t cos22_of_bam(int32_t bam) {
     const double a = static_cast<double>(bam) * io::kRadiansPerBam;
     return static_cast<int32_t>(std::cos(a) * io::kQ22One);
 }
-int32_t sin22_of_bam(int32_t bam) {
-    const double a = static_cast<double>(bam) * io::kRadiansPerBam;
-    return static_cast<int32_t>(std::sin(a) * io::kQ22One);
-}
 
 // The x87 trig pair (cos22/sin22_of_bam_x87) lives in vehicle_motor_detail.h —
 // shared with the contact solves in vehicle_contact_solve.cpp.

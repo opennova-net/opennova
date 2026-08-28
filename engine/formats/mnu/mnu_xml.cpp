@@ -163,25 +163,6 @@ const char *skip_space(const char *p, const char *end) {
   return p;
 }
 
-// Skip to next occurrence of char, return position (or end if not found).
-const char *skip_to(const char *p, const char *end, char c) {
-  while (p < end && *p != c) ++p;
-  return p;
-}
-
-// Check if starts with string (case-insensitive).
-bool starts_with_i(const char *p, const char *end, const char *prefix) {
-  while (*prefix && p < end) {
-    if (std::tolower(static_cast<unsigned char>(*p)) !=
-        std::tolower(static_cast<unsigned char>(*prefix))) {
-      return false;
-    }
-    ++p;
-    ++prefix;
-  }
-  return *prefix == '\0';
-}
-
 // The engine's named-entity table, name -> byte value.
 // [orig: off_85A628] The first 7 are case-INSENSITIVE (table flag 0); the
 // Latin-1 accented set + laquo/raquo are case-SENSITIVE (flag 1) so Agrave and

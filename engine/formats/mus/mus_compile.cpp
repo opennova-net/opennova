@@ -687,7 +687,6 @@ struct Compiler {
     int parse_top_decl(const char **err);
     int parse_section_body(const char **err, bool inside_section);
     int parse_stmt(const char **err);
-    int parse_top_level(const char **err);
 
     int finalize(const char **err);
     int parse_script(const char **err);

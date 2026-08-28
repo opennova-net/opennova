@@ -744,14 +744,6 @@ struct BoundingBox {
     int32_t type;                      // shipped values: 1 or 5
     int32_t ref_id;                    // shipped values: -2/-1 or a positive marker/entity id
     int32_t reserved0;                 // always zero in the shipped corpus
-
-    // Accessors for float bounds
-    float get_min_x() const { return min_x / 65536.0f; }
-    float get_min_y() const { return min_y / 65536.0f; }
-    float get_min_z() const { return min_z / 65536.0f; }
-    float get_max_x() const { return max_x / 65536.0f; }
-    float get_max_y() const { return max_y / 65536.0f; }
-    float get_max_z() const { return max_z / 65536.0f; }
 };
 
 // One weapon-loadout chunk tuple, kept as the four raw chunk strings so unusual authored

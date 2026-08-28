@@ -40,16 +40,6 @@ static const char *skip_ws(const char *s) {
     return s;
 }
 
-static const char *skip_ws_all(const char *s) {
-    while (*s && isspace((unsigned char)*s)) ++s;
-    return s;
-}
-
-static size_t rtrim_len(const char *s, size_t len) {
-    while (len > 0 && isspace((unsigned char)s[len - 1])) --len;
-    return len;
-}
-
 void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len) {
     if (src_len >= dst_size) src_len = dst_size - 1;
     memcpy(dst, src, src_len);

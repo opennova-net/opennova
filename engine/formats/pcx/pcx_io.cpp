@@ -75,29 +75,6 @@ bool decode_scanline_rle(const uint8_t *data,
 	return true;
 }
 
-bool load_file_bytes(const std::string &path, std::vector<uint8_t> &bytes, std::string &error) {
-	std::ifstream file(path, std::ios::binary | std::ios::ate);
-	if (!file.is_open()) {
-		error = "Failed to open file: " + path;
-		return false;
-	}
-
-	const std::streamsize size = file.tellg();
-	file.seekg(0, std::ios::beg);
-	if (size < 0) {
-		error = "Failed to stat file: " + path;
-		return false;
-	}
-
-	bytes.resize(static_cast<size_t>(size));
-	if (!bytes.empty() && !file.read(reinterpret_cast<char *>(bytes.data()), size)) {
-		error = "Failed to read file: " + path;
-		return false;
-	}
-
-	return true;
-}
-
 } // namespace
 
 bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error) {

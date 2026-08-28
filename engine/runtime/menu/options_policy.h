@@ -32,8 +32,6 @@ inline constexpr OptionsScrollRange kOptionsScrollRanges[] = {
     {"MUSICVOLUME", 0, 255, 10},
     {"MOUSE_SENSITIVITY", 4, 511, 10},
 };
-inline constexpr std::size_t kOptionsScrollRangeCount =
-    sizeof(kOptionsScrollRanges) / sizeof(kOptionsScrollRanges[0]);
 
 // OpenNova ports exactly one retail renderer configuration: the
 // highest-quality, pixel-shader path. The authored JO VIDEO controls stay
@@ -67,8 +65,6 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
     // "Minimal" means minimal compression and therefore maximum fidelity.
     {"TEXCOMPRESSION", "2"},
 };
-inline constexpr std::size_t kVideoQualityControlCount =
-    sizeof(kVideoQualityControls) / sizeof(kVideoQualityControls[0]);
 
 // The registered retail comparison profile's gamma reference. Gamma is
 // calibration, not a quality rung, so pushing it to the numeric maximum would
@@ -79,7 +75,5 @@ inline constexpr int32_t kVideoGammaReference = 8;
 inline constexpr const char *kVideoPresetButtons[] = {
     "VIDEODEFAULT", "VIDEOPERFORMANCE", "VIDEOQUALITY",
 };
-inline constexpr std::size_t kVideoPresetButtonCount =
-    sizeof(kVideoPresetButtons) / sizeof(kVideoPresetButtons[0]);
 
 } // namespace opennova::menu

@@ -32,16 +32,6 @@ inline int32_t qmul(int64_t a, int64_t b) {
 
 inline int32_t q16(double v) { return to_fixed(v); }
 
-// Mission-frame direction of a BAM yaw/pitch pair (the §5.16 bearing frame the
-// round spawner uses).
-inline void bam_dir(int32_t yaw_bam, int32_t pitch_bam, double out[3]) {
-    const double yaw = double(yaw_bam) / kBamPerRad;
-    const double pitch = double(pitch_bam) / kBamPerRad;
-    out[0] = std::cos(yaw) * std::cos(pitch);
-    out[1] = std::sin(yaw) * std::cos(pitch);
-    out[2] = std::sin(pitch);
-}
-
 } // namespace
 
 int32_t throwable_item_for_viewer(int32_t friendly_item, int32_t enemy_item,
