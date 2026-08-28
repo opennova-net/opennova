@@ -839,28 +839,37 @@ func is_transport_locked() -> bool:
 	return bool(_sim.is_transport_locked())
 
 
-func play() -> void:
-	if _sim != null:
-		_sim.resume_session()
+## Resume the engine session. False when nothing is loaded or the transition
+## is refused — Simulation.resume_session reports the inmatch::Session verdict.
+func play() -> bool:
+	if _sim == null:
+		return false
+	return bool(_sim.resume_session())
 
 
-func pause() -> void:
+## Pause the engine session. False when the session refuses — a net role
+## (inmatch::Session::pause is SinglePlayer-only) or a non-Running state — so
+## callers report the engine verdict instead of re-deriving the rule.
+func pause() -> bool:
 	if is_transport_locked():
-		return
-	if _sim != null:
-		_sim.pause_session()
+		return false
+	if _sim == null:
+		return false
+	return bool(_sim.pause_session())
 
 
 ## One manual debug/tooling tick: one logic tick + present, outside the real-time loop.
-## The standalone game's F3/MCP Step and isolated tests/tooling previews share this primitive.
-func step_once() -> void:
+## The standalone game's F3/MCP Step and isolated tests/tooling previews share this
+## primitive. False when the session refused the step (a net role, nothing loaded).
+func step_once() -> bool:
 	# Stepping pauses real-time cadence (and any opt-in tooling self-tick), which starves
 	# the socket between steps just as pause() does. See is_transport_locked().
 	if is_transport_locked():
-		return
-	if _sim != null:
-		_sim.pause_session()
-	tick()
+		return false
+	if _sim == null:
+		return false
+	_sim.pause_session()
+	return tick()
 
 
 ## Stop: rewind the world to the play-start baseline AND restore the authored node transforms, so the

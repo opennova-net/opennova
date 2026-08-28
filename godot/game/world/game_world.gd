@@ -453,6 +453,23 @@ func is_net_session() -> bool:
 	return bool(sim.is_joiner()) or bool(sim.is_host_listening())
 
 
+## The shell's ESC-pause session leg: the engine session pauses and resumes
+## WITH the shell's pause overlay, so the paused state is a session fact every
+## reader agrees on, not a shell-only tick skip. No role gate here — the
+## runtime reports the engine's own verdict (inmatch::Session::pause is
+## SinglePlayer-only: retail multiplayer cannot pause, its ESC menu overlays a
+## running match, and the world tick is the net session's only socket pump).
+## Resuming an unpaused session is a NoOp, so every shell resume leg (ESC,
+## armory close, menu RESUME, the MCP resume verb) can call this safely.
+func set_shell_paused(paused: bool) -> void:
+	if _runtime == null:
+		return
+	if paused:
+		_runtime.pause()
+	else:
+		_runtime.play()
+
+
 ## Load an in-memory mission through the shared world pipeline. This is retained
 ## as a focused engine-test/tool seam; normal game launches always use
 ## a saved .bms through load_mission() or load_loose_mission().
@@ -1514,8 +1531,8 @@ func mix_audio_frame(ticks_run: int) -> void:
 	if _world_ready and _mission_audio != null:
 		# Ambient soundloop regions read that same clock [orig:
 		# Entity_CalcTimeOfDayRegion @ 0x408110].
-		if _env != null and _env.get("time_of_day") != null:
-			_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
+		if _env != null:
+			_mission_audio.set_time_of_day_hhmm(_env.time_of_day)
 		# Marker eval/registration rides the sim's logic-tick clock — the witnessed
 		# pool-2 stagger [orig: Entity_UpdateAllEntities @ 0x4c225a]; the per-frame
 		# call below is only the live-slot mix + voice binds [orig:
@@ -2680,8 +2697,8 @@ func _start_mission_audio(mission: MissionData, bms_name: String) -> void:
 	# unoccluded.
 	_mission_audio.set_simulation(get_sim())
 	var stats := _mission_audio.setup(mission, bms_name, self)
-	if _env != null and _env.get("time_of_day") != null:
-		_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
+	if _env != null:
+		_mission_audio.set_time_of_day_hhmm(_env.time_of_day)
 	print_verbose("GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d ambient candidate(s), %d/%d physical channel(s) allocated" % [
 		int(stats.markers_resolved),
 		int(stats.markers_total),

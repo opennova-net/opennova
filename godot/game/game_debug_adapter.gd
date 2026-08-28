@@ -269,8 +269,9 @@ func get_mcp_game_entity(index: int) -> Variant:
 	return result
 
 
-## Narrow transport used by GameMcpTools. Pause and step reject multiplayer
-## because the world's network pump must keep running.
+## Narrow transport used by GameMcpTools. Pause and step report the engine
+## session's own refusal for multiplayer roles (the network pump must keep
+## running); the adapter adds no shell-side role gate.
 # Additive seam (keeps configure()'s arity stable): the menu shell the
 # game_menu tool drives.
 func set_menu_shell_source(source: Callable) -> void:
@@ -391,9 +392,11 @@ func mcp_game_control(action: String) -> Error:
 	var runtime: Variant = _current_runtime()
 	match action:
 		"pause":
-			if runtime == null or (world != null and world.is_net_session()):
+			# The engine refuses net-role pauses (inmatch::Session::pause is
+			# SinglePlayer-only: the network pump must keep running); the
+			# runtime reports that verdict instead of a shell-side gate.
+			if runtime == null or not runtime.pause():
 				return ERR_UNAVAILABLE
-			runtime.pause()
 		"resume":
 			if runtime == null:
 				return ERR_UNAVAILABLE
@@ -403,9 +406,10 @@ func mcp_game_control(action: String) -> Error:
 			if String(_shell_state_source.call()) in ["paused", "armory"]:
 				_resume_action.call()
 		"step":
-			if runtime == null or (world != null and world.is_net_session()):
+			# Same engine verdict as "pause": a net-role session declines the
+			# manual step natively.
+			if runtime == null or not runtime.step_once():
 				return ERR_UNAVAILABLE
-			runtime.step_once()
 		"open_ingame_menu":
 			if not _open_ingame_menu_action.is_valid():
 				return ERR_UNAVAILABLE
@@ -474,9 +478,11 @@ func debug_set_audio_bus_bypass(bus_name: String, bypassed: bool) -> Error:
 
 
 func has_debug_authority() -> bool:
+	# Authority is the session-role fact: ROLE_JOINER is the one
+	# non-authoritative role; every other session role owns the world.
 	var world := _current_world()
 	var sim: Variant = world.get_sim() if world != null else null
-	return sim != null and not bool(sim.is_joiner())
+	return sim != null and int(sim.session_role()) != Simulation.ROLE_JOINER
 
 
 func runtime_status() -> Dictionary:
@@ -495,9 +501,11 @@ func runtime_status() -> Dictionary:
 	if mission_name.is_empty():
 		mission_name = "Mission"
 	var role := "local"
-	if bool(sim.is_joiner()):
+	if int(sim.session_role()) == Simulation.ROLE_JOINER:
 		role = "joiner"
 	elif bool(sim.is_host_listening()):
+		# The session role is configured at mission load; the transport flag
+		# also labels a listen socket that has not loaded yet.
 		role = "host"
 	var playing := bool(runtime.is_playing())
 	return {
@@ -515,7 +523,7 @@ func runtime_status() -> Dictionary:
 func _network_state(sim: Variant) -> Dictionary:
 	if sim == null:
 		return {"role": "none"}
-	if bool(sim.is_joiner()):
+	if int(sim.session_role()) == Simulation.ROLE_JOINER:
 		return {
 			"role": "joiner",
 			"phase": sim.get_joiner_phase(),
