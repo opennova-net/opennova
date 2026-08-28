@@ -11,7 +11,7 @@
 // fast-path compares the pose planar-only, vehicle-client-movers-re.md §7) and
 // requires the ground solve to settle it BACK to the wheel-contact rest.
 // Gated on OPENNOVA_JO_DIR (a retail install carrying 00TRa.bms).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <cmath>

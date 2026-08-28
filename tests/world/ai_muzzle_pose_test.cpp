@@ -8,7 +8,7 @@
 // held-weapon model (M4_3RD) carries the user points the fire pass reads
 // (MFLASH01 ahead of the origin, muzzle authored +Z).
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <formats/threedi/threedi_3di3.h>

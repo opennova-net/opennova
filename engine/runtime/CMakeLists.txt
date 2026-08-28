@@ -47,9 +47,11 @@ add_library(opennova_runtime STATIC
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
-    # evaluated against the shared runtime world
+    # the boot policy, and the ONE mission kernel (boot + state + no-net tick,
+    # ADR 0042 d3) evaluated against the shared runtime world
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/placement_traits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/promote.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/runtime_boot.cpp
@@ -125,6 +127,7 @@ add_library(opennova_runtime STATIC
     # is engine/formats/wac
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/compiler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/vm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/wac_layered_load.cpp
     # world — the ONE runtime World: entities, AI, collision, players, vehicles,
     # weapons, zones (62 Hz tick)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp

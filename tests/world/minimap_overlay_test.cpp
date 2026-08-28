@@ -4,7 +4,7 @@
 #include <runtime/world/minimap_overlay.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/entity_registry.h>
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <algorithm>

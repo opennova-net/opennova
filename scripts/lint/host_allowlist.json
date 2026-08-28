@@ -52,7 +52,9 @@
     "tests/resource_index/*",
     "tests/vfs/*",
     "tests/world/*",
-    "web/src/*"
+    "web/src/*",
+    "engine/net/inmatch/listen_host.h",
+    "engine/net/inmatch/listen_host.cpp"
   ],
   "identifiers": [
     "DedicatedHost",

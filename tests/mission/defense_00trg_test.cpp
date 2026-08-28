@@ -24,7 +24,7 @@
 // ledger carries the tail) — a FAIL line there is the known state, not a
 // regression of this test. `--ticks N` sets the run budget (default 15000).
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRg.bms).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <cmath>

@@ -8,7 +8,7 @@
 // strike the entity's CFAC mesh (a miss there is a concrete render-vs-bullet
 // hole, not an AABB approximation artifact).
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <formats/threedi/threedi_strip_decode.h>

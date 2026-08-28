@@ -100,8 +100,11 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/joiner_world_bridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/host_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/lan_discovery.cpp
-    # inmatch — the one public mission lifecycle/cadence surface. The np and
-    # netsim directories beneath it are wire/runtime implementation modules.
+    # inmatch — the one public mission lifecycle/cadence surface (session) plus
+    # the SP listen bring-up/drain/frame over the mission kernel (ADR 0042 d3).
+    # The np and netsim directories beneath it are wire/runtime implementation
+    # modules.
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/listen_host.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
 )
 

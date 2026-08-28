@@ -12,7 +12,7 @@
 // declines a single production query across the whole run.
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms).
 // `--rounds N` (default 300; one round = 62 ticks + one sweep).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <cstdio>

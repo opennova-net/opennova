@@ -18,7 +18,7 @@
 //     span without a drop (the "pushed off halfway up" report).
 //   The dismount family is pinned by the `collision`/`infantry` ctests.
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <algorithm>
