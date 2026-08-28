@@ -730,23 +730,6 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	return ERR_CANT_OPEN;
 }
 
-Dictionary Simulation::get_mission_boot_debug() const {
-	Dictionary out;
-	out["text_source"] = boot_debug_.text_source;
-	out["text_size"] = boot_debug_.text_size;
-	out["infantry_adm"] = String(boot_debug_.infantry_adm.c_str());
-	Dictionary aip;
-	for (const opennova::mission::PromoteOptions::AiProfileRow &row :
-			boot_debug_.aip_rows) {
-		Dictionary speeds;
-		if (row.data.patrol_speed != -1) speeds["patrol"] = row.data.patrol_speed;
-		if (row.data.combat_speed != -1) speeds["combat"] = row.data.combat_speed;
-		aip[String(row.profile.c_str())] = speeds;
-	}
-	out["aip"] = aip;
-	return out;
-}
-
 bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	if (p_mission.is_null()) return false;
 	if (!begin_session_load()) return false;

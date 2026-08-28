@@ -35,8 +35,6 @@ void Simulation::_bind_methods() {
 			"item_db", "terrain", "terrain_til",
 			"wac_basename", "infantry_adm", "mission_file_basename", "playable"),
 			&Simulation::boot_mission);
-	ClassDB::bind_method(D_METHOD("get_mission_boot_debug"),
-			&Simulation::get_mission_boot_debug);
 	ClassDB::bind_method(D_METHOD("build_demo_mission"), &Simulation::build_demo_mission);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &Simulation::is_loaded);
 	ClassDB::bind_method(D_METHOD("is_playing"), &Simulation::is_playing);
@@ -82,7 +80,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_transport_locked"), &Simulation::is_transport_locked);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &Simulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("set_terrain_til_data", "til_bytes"), &Simulation::set_terrain_til_data);
-	ClassDB::bind_method(D_METHOD("set_mission_text_data", "rtxt_bytes"), &Simulation::set_mission_text_data);
 	ClassDB::bind_method(D_METHOD("set_score_config_data", "score_ini_bytes"), &Simulation::set_score_config_data);
 	ClassDB::bind_method(D_METHOD("is_listen_server"), &Simulation::is_listen_server);
 	ClassDB::bind_method(D_METHOD("enable_host_listen", "port"), &Simulation::enable_host_listen);
@@ -136,8 +133,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_joiner_network_diagnostics_enabled);
 	ClassDB::bind_method(D_METHOD("set_capture_pcap_path", "path"),
 	                     &Simulation::set_capture_pcap_path);
-	ClassDB::bind_method(D_METHOD("get_capture_pcap_path"),
-	                     &Simulation::get_capture_pcap_path);
 	ClassDB::bind_method(D_METHOD("get_joiner_network_diagnostics"),
 	                     &Simulation::get_joiner_network_diagnostics);
 	ClassDB::bind_method(D_METHOD("is_join_deploy_pick_pending"),
@@ -217,7 +212,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_stance_latch"),
 			&Simulation::get_local_player_stance_latch);
 	ClassDB::bind_method(D_METHOD("get_local_player_stance"), &Simulation::get_local_player_stance);
-	ClassDB::bind_method(D_METHOD("get_local_player_body_debug"), &Simulation::get_local_player_body_debug);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &Simulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_key"), &Simulation::get_local_player_anim_source_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_phase_ticks"), &Simulation::get_local_player_anim_source_phase_ticks);
@@ -278,8 +272,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_effects"), &Simulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("drain_fire_presentation_events"),
 			&Simulation::drain_fire_presentation_events);
-	ClassDB::bind_method(D_METHOD("set_sound_listener", "listener_godot"),
-			&Simulation::set_sound_listener);
 	ClassDB::bind_method(D_METHOD("drain_fire_sounds"),
 			&Simulation::drain_fire_sounds);
 	ClassDB::bind_method(D_METHOD("local_player_viewmodel_bias_view_units",
@@ -446,9 +438,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("occlusion_water_visible"),
 	                     &Simulation::occlusion_water_visible);
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &Simulation::get_collision_debug);
-	ClassDB::bind_method(D_METHOD("get_occlusion_debug"), &Simulation::get_occlusion_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &Simulation::get_round_debug);
-	ClassDB::bind_method(D_METHOD("get_throwable_debug"), &Simulation::get_throwable_debug);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);
@@ -665,35 +655,14 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_COUNT);
 
-	BIND_ENUM_CONSTANT(SEAT_NONE);
-	BIND_ENUM_CONSTANT(SEAT_PASSENGER);
-	BIND_ENUM_CONSTANT(SEAT_CONTROLLER);
 	BIND_ENUM_CONSTANT(SEAT_GUNNER);
-	BIND_ENUM_CONSTANT(SEAT_ARMORY_POINT);
-	BIND_ENUM_CONSTANT(SEAT_DRIVER);
-
-	BIND_ENUM_CONSTANT(MOUNT_COMMAND_PASSENGER_ONLY);
-	BIND_ENUM_CONSTANT(MOUNT_COMMAND_SKIP_CONTROLLER);
-	BIND_ENUM_CONSTANT(MOUNT_COMMAND_ANY_SEAT);
 
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_ABSENT);
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_RECEIVING);
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_COMPLETE);
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_INVALID);
 
-	BIND_CONSTANT(WEAPON_ACTION_IDLE);
-	BIND_CONSTANT(WEAPON_ACTION_EMPTY_IDLE);
 	BIND_CONSTANT(WEAPON_ACTION_FIRE);
-	BIND_CONSTANT(WEAPON_ACTION_RECOIL);
-	BIND_CONSTANT(WEAPON_ACTION_RELOAD);
-	BIND_CONSTANT(WEAPON_ACTION_EMPTY);
-	BIND_CONSTANT(WEAPON_ACTION_SWITCH_TO);
-	BIND_CONSTANT(WEAPON_ACTION_SWITCH_FROM);
-	BIND_CONSTANT(WEAPON_ACTION_SWITCH_RANK);
-	BIND_CONSTANT(WEAPON_ACTION_SCOPE_UP);
-	BIND_CONSTANT(WEAPON_ACTION_SCOPE_DOWN);
-	BIND_CONSTANT(WEAPON_ACTION_OVERHEATED);
-	BIND_CONSTANT(WEAPON_ACTION_COUNT);
 
 	BIND_CONSTANT(STANCE_STAND);
 	BIND_CONSTANT(STANCE_CROUCH);
@@ -703,15 +672,11 @@ void Simulation::_bind_methods() {
 	BIND_CONSTANT(FACE_FLAG_NEVER_HIT);
 	BIND_CONSTANT(FACE_FLAG_DOUBLE_SIDED);
 
-	BIND_CONSTANT(BVOL_CONTACT_MARKER);
 	BIND_CONSTANT(BVOL_LADDER_CL);
 	BIND_CONSTANT(BVOL_ARMORY_CA);
-	BIND_CONSTANT(BVOL_VEHICLE_VC);
 	BIND_CONSTANT(BVOL_BLINK_BB);
 	BIND_CONSTANT(BVOL_DOOR_CD);
 	BIND_CONSTANT(BVOL_CHANGE_TEAM_CT);
-	BIND_CONSTANT(BVOL_VEHICLE_LOADOUT);
-	BIND_CONSTANT(BVOL_VEHICLE_EXT);
 	BIND_CONSTANT(BVOL_FLAG_CF);
 	BIND_CONSTANT(BVOL_DAMAGE_HIGH_DH);
 	BIND_CONSTANT(BVOL_DAMAGE_MEDIUM_DM);
@@ -723,9 +688,7 @@ void Simulation::_bind_methods() {
 	BIND_CONSTANT(OCC_REC_PORTAL);
 	BIND_CONSTANT(OCC_REC_WELDED_LINK);
 
-	BIND_CONSTANT(PART_ANIM_PHASE_ONE);
 	BIND_CONSTANT(INVALID_WIRE_HANDLE);
-	BIND_CONSTANT(EPILOG_EXIT_TIMEOUT_TICKS);
 	BIND_CONSTANT(ITEM_USER_POINT_SCAN_LIMIT);
 	BIND_CONSTANT(ENTITY_HEALTH_MIN);
 	BIND_CONSTANT(ENTITY_HEALTH_MAX);
@@ -735,8 +698,6 @@ void Simulation::_bind_methods() {
 	BIND_CONSTANT(HUD_MINIMAP_STRIDE);
 
 	BIND_CONSTANT(SPAWN_ORIGIN_NONE);
-	BIND_CONSTANT(SPAWN_ORIGIN_KIND_NONE);
-	BIND_CONSTANT(SPAWN_ORIGIN_INDEX_NONE);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "loco_scale"), "set_loco_scale", "get_loco_scale");
 }

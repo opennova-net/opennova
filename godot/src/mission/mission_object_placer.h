@@ -162,7 +162,6 @@ public:
 	Ref<ObjectData> object_data_for(const String &p_graphic);
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------
-	Variant get_static_instance_transform(int p_bms_id) const;
 	// Diagnostic/read-back identity for the exact MultiMesh population whose
 	// slot is carved. Distinct policies may share the same authored graphic.
 	String get_static_instance_batch_key(int p_bms_id) const;
@@ -249,8 +248,6 @@ private:
 	Node3D *_ensure_container(Node3D *p_parent);
 	void _record_static_user_point_group(const String &p_graphic,
 			const Array &p_transforms);
-	void _append_static_user_point_source(const String &p_graphic,
-			const Transform3D &p_xform);
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,
 			int p_bms_id, int p_item_id, const String &p_graphic,
 			const Transform3D &p_xform);

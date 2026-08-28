@@ -96,7 +96,6 @@ private:
 	int32_t status_ = STATUS_NOT_RUNNING;
 	int32_t state_ = STATE_UNLOADED;
 	Array ticks_;
-	int64_t frame_us_ = 0;
 	int64_t tick_us_ = 0;
 	String error_;
 
@@ -108,7 +107,6 @@ public:
 	int get_state() const { return state_; }
 	Array get_ticks() const { return ticks_; }
 	int get_ticks_run() const { return ticks_.size(); }
-	int64_t get_frame_us() const { return frame_us_; }
 	int64_t get_tick_us() const { return tick_us_; }
 	String get_error() const { return error_; }
 	bool is_terminal() const;

@@ -57,7 +57,6 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &ItemDatabase::get_item_type);
 	ClassDB::bind_method(D_METHOD("get_light_transfer", "id"), &ItemDatabase::get_light_transfer);
 	ClassDB::bind_method(D_METHOD("is_ai_capable", "id"), &ItemDatabase::is_ai_capable);
-	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &ItemDatabase::get_display_name);
 	ClassDB::bind_method(
 			D_METHOD("extract_seat_specs_for_item", "resource_root", "item_id"),
 			&ItemDatabase::extract_seat_specs_for_item);
@@ -73,22 +72,13 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_item_ids"), &ItemDatabase::get_item_ids);
 	ClassDB::bind_method(D_METHOD("get_items"), &ItemDatabase::get_items);
 
-	BIND_CONSTANT(TYPE_UNKNOWN);
 	BIND_CONSTANT(TYPE_VEHICLE);
-	BIND_CONSTANT(TYPE_DECORATION);
-	BIND_CONSTANT(TYPE_FOLIAGE);
 	BIND_CONSTANT(TYPE_PERSON);
-	BIND_CONSTANT(TYPE_MARKER);
 	BIND_CONSTANT(TYPE_BUILDING);
 	BIND_CONSTANT(TYPE_POWERUP);
 	BIND_CONSTANT(TYPE_OBJECT);
-	BIND_CONSTANT(TYPE_EFFECT);
-	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP);
-	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_G);
-	BIND_CONSTANT(EMPLACEMENT_ADDEWEAP_C);
 	BIND_CONSTANT(ATTRIB_POWERUP);
 	BIND_CONSTANT(ATTRIB_PLAYER_CONTROL);
-	BIND_CONSTANT(ATTRIB_ARMORY);
 }
 
 ItemDatabase::~ItemDatabase() {
@@ -363,26 +353,6 @@ float ItemDatabase::get_light_transfer(int id) const {
 	return it == items.end() ? 0.0f : it->second.light_transfer;
 }
 
-float ItemDatabase::get_damage_reduc_pp(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0.0f : it->second.damage_reduc_pp;
-}
-
-float ItemDatabase::get_damage_reduc_max(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0.0f : it->second.damage_reduc_max;
-}
-
-int ItemDatabase::get_armor_impact(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0 : it->second.armor_impact;
-}
-
-int ItemDatabase::get_armor_kz(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0 : it->second.armor_kz;
-}
-
 // items.def ItemDefAttrib & 0x100000 (AIData). Mirrors the stock 0x0D decoder's own gate
 // (itemDef.attrib & 0x100000 @0x433327) so the host emits the AI-trailer iff the item is
 // AI-capable. [docs/world/itemdef-re.md; docs/net/novaworld-net-re.md D-NET-97]
@@ -450,40 +420,12 @@ String ItemDatabase::get_display_name(int id) const {
 	return it == items.end() ? String() : it->second.display_name;
 }
 
-// Person-item anim-fire round name (world-wac-ai-re §17.4). The sim's AI weapon
-// seed resolves it against the mission ammo table (D-AI-5). [orig:
-// ItemDef_ParseProperty @ 0x4a1823 -> def+0x56B]
-String ItemDatabase::get_ammo_closeattack(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.ammo_closeattack;
-}
-
 // The def-authored closeattack launch userpoint name — the AI muzzle point the
 // placer pushes onto the placed model (world-wac-ai-re §21.2). [orig:
 // ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB]
 String ItemDatabase::get_launchups_closeattack(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.launchups_closeattack;
-}
-
-// items.def clipsize — the respawn magazine reseed (word entity+0x35C = def+0x894).
-// [orig: ItemDef_ParseProperty @ 0x49fa1c; Entity_ResetToSpawnState @ 0x4b97a9]
-int ItemDatabase::get_clipsize(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0 : it->second.clipsize;
-}
-
-// items.def deathtime in ticks (parse-scaled (62*s or 496) + 62) — the corpse
-// timer's seed. [orig: ItemDef_ParseProperty @ 0x49fa6c -> def+0x890; consumer
-// Entity_UpdateInfantryAI @ 0x4b9c97 -> entity+0x148]
-int ItemDatabase::get_deathtime_ticks(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0 : it->second.deathtime_ticks;
-}
-
-String ItemDatabase::get_primary_weapon(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.primary_weapon;
 }
 
 Array ItemDatabase::get_emplacement_attachments(int id) const {
@@ -543,13 +485,6 @@ Dictionary ItemDatabase::get_mount_config(int id) const {
 	out["valid"] = valid;
 	out["value"] = valid ? it->second.mount_config : 0;
 	return out;
-}
-
-// Entity-attached profile name; the engine composes "<EntityDefName>_<SoundType>"
-// lookups from it [orig: SoundProfile_FindByEntityAndType @ 0x528180].
-String ItemDatabase::get_sound_profile(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.sound_profile;
 }
 
 String ItemDatabase::get_husk(int id) const {

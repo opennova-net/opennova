@@ -54,16 +54,6 @@ bool ObjectModel::has_muzzle() const {
 	return muzzle_bone_ >= 0 && skeleton_ != nullptr;
 }
 
-// The POSED muzzle world position: the authored model-space userpoint carried
-// through its bone's live pose. [orig: Entity_GetAttachmentWorldPosition
-// @0x4b2670 — userpoint local position x the animated bone matrix]
-Vector3 ObjectModel::get_muzzle_world_position() const {
-	const Transform3D model_to_world = skeleton_->get_global_transform() *
-			skeleton_->get_bone_global_pose(muzzle_bone_) *
-			skeleton_->get_bone_global_rest(muzzle_bone_).affine_inverse();
-	return model_to_world.xform(muzzle_model_pos_);
-}
-
 // The def names the muzzle: items.def launchups_closeattack authors the launch
 // userpoint (JO NPC riflemen: mflash01), pushed here by the placer. Resolve it
 // case-insensitively against the model's userpoint table — retail's by-name

@@ -656,7 +656,6 @@ public:
 	// The def-authored launch userpoint name; rebuild resolves it against the
 	// model's userpoint table (case-insensitive, retail's by-name lookup).
 	void set_muzzle_point_name(const String &p_name);
-	Vector3 get_muzzle_world_position() const;
 	void play_body_clip(const String &p_key);
 	void play_body_clip_variant(const String &p_key, int p_variant);
 	void play_body_clip_variant_at_time(const String &p_key, int p_variant,

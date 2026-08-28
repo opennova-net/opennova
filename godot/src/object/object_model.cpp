@@ -1405,9 +1405,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::wake_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_object_data", "data"), &ObjectModel::set_object_data);
 	ClassDB::bind_method(D_METHOD("get_object_data"), &ObjectModel::get_object_data);
-	ClassDB::bind_method(D_METHOD("add_presentation_link", "model",
-			"part_local_registers"), &ObjectModel::add_presentation_link,
-			DEFVAL(PackedStringArray()));
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "object_data",
 						 PROPERTY_HINT_RESOURCE_TYPE, "ObjectData"),
 			"set_object_data", "get_object_data");
@@ -1489,8 +1486,6 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_muzzle"), &ObjectModel::has_muzzle);
 	ClassDB::bind_method(D_METHOD("set_muzzle_point_name", "name"),
 			&ObjectModel::set_muzzle_point_name);
-	ClassDB::bind_method(D_METHOD("get_muzzle_world_position"),
-			&ObjectModel::get_muzzle_world_position);
 	ClassDB::bind_method(D_METHOD("play_body_clip", "key"), &ObjectModel::play_body_clip);
 	ClassDB::bind_method(D_METHOD("play_body_clip_variant", "key", "variant"),
 			&ObjectModel::play_body_clip_variant);
@@ -1567,7 +1562,6 @@ void ObjectModel::_bind_methods() {
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_AWAKE_MODELS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_RENDERABLE_MODELS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_SLOT_COUNT);
-	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_WORLD);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_VIEWMODEL);

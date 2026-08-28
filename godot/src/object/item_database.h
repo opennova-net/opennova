@@ -281,10 +281,6 @@ public:
 	// Building-interior daylight fraction from items.def light_transfer
 	// (authored percent clamped to 0..100 at parse; 0.0 for unknown/absent).
 	float get_light_transfer(int id) const;
-	float get_damage_reduc_pp(int id) const;
-	float get_damage_reduc_max(int id) const;
-	int get_armor_impact(int id) const;
-	int get_armor_kz(int id) const;
 	// items.def ItemDefAttrib & 0x100000 (AIData): true when the item def is AI-capable. The
 	// host's pool-1 0x0D stream gates the AI-trailer on this so the wire matches the stock
 	// decoder's own gate (itemDef.attrib & 0x100000 @0x433327). [docs/world/itemdef-re.md;
@@ -314,24 +310,7 @@ public:
 	// anchors, exactly like the production boot install.
 	Dictionary extract_seat_specs_for_item(
 			const Ref<class ResourceRoot> &p_root, int p_item_id);
-	// items.def ammo_closeattack — the person-item anim-fire round NAME, resolved
-	// against the ammo table at mission load by the sim's AI weapon seed (D-AI-5);
-	// empty if none authored. [orig: ItemDef_ParseProperty @ 0x4a1823 -> def+0x56B;
-	// world-wac-ai-re §17.4]
-	String get_ammo_closeattack(int id) const;
 	String get_launchups_closeattack(int id) const;
-	// items.def clipsize — the respawn magazine reseed (word entity+0x35C); 0 if
-	// none authored. [orig: @ 0x49fa1c -> def+0x894; Entity_ResetToSpawnState
-	// @ 0x4b97a9]
-	int get_clipsize(int id) const;
-	// items.def deathtime in ticks (parse-scaled); 0 if none authored. Seeds the
-	// corpse timer at the death edge. [orig: @ 0x49fa6c -> def+0x890;
-	// Entity_UpdateInfantryAI @ 0x4b9c97]
-	int get_deathtime_ticks(int id) const;
-	// items.def primary_weapon — the ewep emplacement's mounted weapon.def entry
-	// (the USEGUN attach label resolves its attachtextid); empty if none authored.
-	// [orig: -> ItemDef+0x54B; consumer draw_vehicle_seat_and_armory_labels @ 0x5a351d]
-	String get_primary_weapon(int id) const;
 	// Ordered child-emplacement records from addeweap/addeweapG/addeweapC.
 	// Every Dictionary retains the exact key variant plus source userpoint,
 	// child item id, and optional down/up/right/left limits.
@@ -353,9 +332,6 @@ public:
 	// husk_sub_part_types (PackedInt32Array), has_husk}. Empty Dictionary =
 	// unknown id. Feeds the sim's item-traits sweep (world::ItemDeathTraits).
 	// [docs/world/world-wac-ai-re.md §24]
-	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
-	// banks at runtime); empty if the item declares none.
-	String get_sound_profile(int id) const;
 	// items.def soundloop_1..7 as a 7-entry array (empty strings for unused slots).
 	// These are the looping ambient sound-set names for "snd:" marker items.
 	PackedStringArray get_sound_loops(int id) const;

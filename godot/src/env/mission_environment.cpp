@@ -453,8 +453,6 @@ void MissionEnvironment::write_shader_globals() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const opennova::env::EnvShaderGlobals globals =
 			state_.build_shader_globals(underwater_view_);
-	rs->global_shader_parameter_set("opennova_fill_light",
-			to_vector3(globals.fill_light));
 	rs->global_shader_parameter_set("opennova_sun_light",
 			to_vector3(globals.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
@@ -466,10 +464,6 @@ void MissionEnvironment::write_shader_globals() {
 	rs->global_shader_parameter_set("opennova_fog_end", globals.fog_end);
 	rs->global_shader_parameter_set("opennova_fog_start", globals.fog_start);
 	rs->global_shader_parameter_set("opennova_fog_type", globals.fog_type);
-	rs->global_shader_parameter_set("opennova_wind_sway_amount",
-			globals.wind_sway_amount);
-	rs->global_shader_parameter_set("opennova_wind_sway_phase",
-			globals.wind_sway_phase);
 }
 
 void MissionEnvironment::_write_scene_fog_globals() {
@@ -578,12 +572,10 @@ void MissionEnvironment::set_nvg_view(bool p_active, int p_gain) {
 	}
 	flush_publication();
 	// The weather owns the full per-frame global write while present. Refresh
-	// only the two affected channels immediately, and let its next tick
+	// only the affected channel immediately, and let its next tick
 	// publish the same getter-derived values again without disturbing
 	// wind/fog state.
 	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_fill_light",
-			to_vector3(state_.fill_light()));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
 			to_vector3(state_.sky_ambient()));
 }

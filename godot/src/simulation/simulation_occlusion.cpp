@@ -1004,45 +1004,6 @@ Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
 	return out;
 }
 
-Array Simulation::get_throwable_debug() const {
-	// Read-only F3 rows for the placed devices (satchels/claymores/AV mines):
-	// the exact stick pose, the parent ride, and the arm-delay countdown the
-	// think chain runs — ThrowableSim's own records, no present-pass detour.
-	Array out;
-	if (!world_) return out;
-	for (const opennova::world::PlacedDevice &dev : world_->throwables.devices) {
-		if (!dev.active) continue;
-		Dictionary d;
-		d["entity_handle"] = static_cast<int>(dev.entity.packed);
-		d["item_id"] = dev.item_friendly;
-		d["team"] = static_cast<int>(dev.team);
-		d["pos"] = Vector3(dev.pos.x, dev.pos.y, dev.pos.z);
-		d["yaw_deg"] = static_cast<double>(dev.yaw_bam) * (360.0 / 4294967296.0);
-		d["pitch_deg"] =
-		    static_cast<double>(dev.pitch_bam) * (360.0 / 4294967296.0);
-		d["roll_deg"] =
-		    static_cast<double>(dev.roll_bam) * (360.0 / 4294967296.0);
-		d["parent_handle"] = static_cast<int>(dev.parent.packed);
-		d["parent_live"] =
-		    dev.parent.valid() &&
-		    world_->registry.get(dev.parent) != nullptr;
-		d["arm_delay_ticks"] = dev.think_delay_ticks;
-		const char *think = "none";
-		switch (dev.think) {
-			case opennova::world::ThrowClass::kSatchel: think = "satchel"; break;
-			case opennova::world::ThrowClass::kClaymore: think = "claymore"; break;
-			case opennova::world::ThrowClass::kAVMine: think = "AT mine"; break;
-			case opennova::world::ThrowClass::kLandmine: think = "landmine"; break;
-			default: break;
-		}
-		d["think"] = think;
-		const opennova::world::Entity *e = world_->registry.get(dev.entity);
-		d["health"] = e != nullptr ? e->health : 0;
-		out.push_back(d);
-	}
-	return out;
-}
-
 Dictionary Simulation::get_round_debug() const {
 	Dictionary out;
 	Array events;
@@ -1091,93 +1052,6 @@ Dictionary Simulation::get_round_debug() const {
 		events.push_back(d);
 	}
 	out["tick"] = static_cast<int64_t>(world_->logic_tick);
-	return out;
-}
-
-Dictionary Simulation::get_occlusion_debug() const {
-	Dictionary out;
-	Array buildings;
-	Array welds;
-	Dictionary counts;
-	out["active"] = false;
-	out["camera_indoors"] = occlusion_world_.camera_indoors();
-	out["exterior_visible"] = occlusion_world_.exterior_visible();
-	out["water_visible"] = occlusion_world_.water_visible();
-	out["local_blink_flags"] = static_cast<int>(collision_world_.local_player_blink_flags);
-	out["counts"] = counts;
-	out["buildings"] = buildings;
-	out["welds"] = welds;
-	if (!world_) return out;
-
-	int instances = 0, batched = 0, visible = 0;
-	world_->registry.for_each([&](const opennova::world::Entity &e) {
-		if (e.kind != opennova::world::EntityKind::Building) return;
-		if (!occlusion_world_.has_instance(e.handle)) return;
-		++instances;
-		const bool is_batched = occlusion_world_.building_batched(e.handle);
-		const bool is_visible = occlusion_world_.building_visible(e.handle);
-		if (is_batched) ++batched;
-		if (is_visible) ++visible;
-		if (buildings.size() >= 256) return;
-		Dictionary b;
-		b["bms_id"] = e.bms_id;
-		const int32_t pos_fixed[3] = {opennova::world::to_fixed(e.position.x),
-		                              opennova::world::to_fixed(e.position.y),
-		                              opennova::world::to_fixed(e.position.z)};
-		b["pos"] = godot_from_fixed3(pos_fixed);
-		b["batched"] = is_batched;
-		b["visible"] = is_visible;
-		b["open_flagged"] = occlusion_world_.building_open_flagged(e.handle);
-		b["mask"] = static_cast<int64_t>(occlusion_world_.section_mask(e.handle));
-		const opennova::world::OcclusionWorld::BuildingFlags flags =
-		    occlusion_world_.building_flags(e.handle);
-		b["has_open"] = flags.has_open;
-		b["has_windows"] = flags.has_windows;
-		b["has_links"] = flags.has_links;
-		// Record-type census off the (possibly weld-retyped) shared model.
-		int windows = 0, portals = 0, links = 0, records = 0;
-		const opennova::world::OcclusionModel *m =
-		    occlusion_world_.model(occlusion_world_.instance_model_id(e.handle));
-		if (m != nullptr) {
-			records = static_cast<int>(m->records.size());
-			for (const opennova::world::OcclusionPortalFace &rec : m->records) {
-				if (rec.type == opennova::world::kOccRecWindow)
-					++windows;
-				else if (rec.type == opennova::world::kOccRecPortal)
-					++portals;
-				else if (rec.type == opennova::world::kOccRecWeldedLink)
-					++links;
-			}
-		}
-		b["records"] = records;
-		b["windows"] = windows;
-		b["portals"] = portals;
-		b["links"] = links;
-		buildings.push_back(b);
-	});
-
-	for (const opennova::world::OcclusionWorld::WeldRecord &wr : occlusion_world_.weld_records()) {
-		if (welds.size() >= 64) break;
-		Dictionary w;
-		const opennova::world::Entity *own = world_->registry.get(wr.own_entity);
-		const opennova::world::Entity *other = world_->registry.get(wr.other_entity);
-		w["own_bms"] = own != nullptr ? own->bms_id : 0;
-		w["own_section"] = wr.own_section;
-		w["other_bms"] = other != nullptr ? other->bms_id : 0;
-		w["other_section"] = wr.other_section;
-		welds.push_back(w);
-	}
-
-	counts["instances"] = instances;
-	counts["batched"] = batched;
-	counts["visible"] = visible;
-	counts["toc_culled"] = batched - visible;
-	counts["slots"] = occlusion_world_.slot_count();
-	counts["window_groups"] = occlusion_world_.window_frustum_group_count();
-	counts["viewthru_groups"] = occlusion_world_.viewthru_group_count();
-	counts["welds"] = static_cast<int>(occlusion_world_.weld_records().size());
-	counts["culled_entities"] = static_cast<int>(occlusion_culled_bms_.size());
-	out["active"] = instances > 0;
 	return out;
 }
 

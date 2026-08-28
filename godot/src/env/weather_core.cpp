@@ -277,17 +277,6 @@ Vector4 WeatherCore::get_water_uv_state(float p_cam_x, float p_cam_z, float p_fo
 	return Vector4(state.scale, state.bias, state.offset_u, state.offset_v);
 }
 
-void WeatherCore::set_scalar_targets(float p_fog_distance, float p_sky_height) {
-	// Target refresh (retail: Environment_SnapStateToTargets @0x57d1e0:
-	// Env_FogDistTarget <- Env_FogLevelFixed, sky target <- Env_SkyHeightFixed, see docs/env/env-tod-re.md).
-	core_.scalar_channels.fog_dist_target_fp = static_cast<int32_t>(p_fog_distance * 65536.0f);
-	core_.scalar_channels.sky_height_target_fp = static_cast<int32_t>(p_sky_height * 65536.0f);
-}
-
-void WeatherCore::snap_scalar_currents_to_targets() {
-	core_.scalar_channels.snap_currents_to_targets();
-}
-
 void WeatherCore::apply_network_environment_sample(int p_fog_dist,
 		int p_fog_accel, int p_rain_pct, int p_overcast) {
 	core_.scalar_channels.apply_network_sample(

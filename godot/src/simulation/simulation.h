@@ -354,15 +354,10 @@ public:
 	};
 
 	// Spawn-origin provenance (world/entity.h): (kind << 24) | (index &
-	// 0xFFFFFF), kSpawnOriginNone = none. The decoded halves of NONE are the
-	// present rows' "no local record" kind/index sentinels. Fixed uint32_t so
+	// 0xFFFFFF), kSpawnOriginNone = none. Fixed uint32_t so
 	// SPAWN_ORIGIN_NONE binds positive.
 	enum : uint32_t {
 		SPAWN_ORIGIN_NONE = opennova::world::kSpawnOriginNone,
-		SPAWN_ORIGIN_KIND_NONE =
-				static_cast<uint32_t>(opennova::world::kSpawnOriginKindNone),
-		SPAWN_ORIGIN_INDEX_NONE =
-				static_cast<uint32_t>(opennova::world::kSpawnOriginIndexNone),
 	};
 
 	// The spawn-origin pack/decode helpers, re-exported for GDScript
@@ -1159,9 +1154,6 @@ public:
 			const PackedByteArray &p_terrain_til, const String &p_wac_basename,
 			const String &p_infantry_adm, const String &p_mission_file_basename,
 			bool p_playable);
-	// The boot's native resolution decisions, for the shell's S9 assert-equal
-	// soak (text source/size, .aip rows, the effective adm name).
-	Dictionary get_mission_boot_debug() const;
 	// Build + promote a small synthetic patrol mission (no file) for the headless unit test.
 	void build_demo_mission();
 	bool is_loaded() const;
@@ -1380,7 +1372,6 @@ public:
 	// LaunchFlags); applied to the pump when the host binds or the joiner
 	// dials, so set it before the session opens. "" records nothing.
 	void set_capture_pcap_path(const String &p_path);
-	String get_capture_pcap_path() const;
 	// Player-paced deployment (the deploy-map screen; net-re §5.61/§5.0d). True while
 	// the join owes the player a deployment pick or awaits the host's release of one —
 	// the shell shows the DEATH deploy screen and the join watchdog stops (the
@@ -1562,13 +1553,6 @@ public:
 	// entity+300 flags 0x200=crouch -> 1, 0x100=prone -> 2]. The witnessed
 	// source is the body state, never the anim clip name.
 	int get_local_player_stance() const;
-	// Read-only F3 card: the local player's water/eye classification — the
-	// exact terms the recoil/spread/aimed-shot gates consume. Dictionary:
-	//   body_z, eye_height, eye_z, water_z: float mission units
-	//   water_authored, drowning, eye_below_water, submerged, in_air: bool
-	//   stance: int (0 stand / 1 crouch / 2 prone)
-	// Empty while no local player resolves.
-	Dictionary get_local_player_body_debug() const;
 	int get_local_player_anim_phase_ticks() const;
 	String get_local_player_anim_source_key() const;
 	int get_local_player_anim_source_phase_ticks() const;
@@ -2096,12 +2080,6 @@ public:
 	void set_panm_time_ms(int64_t p_time_ms);
 	int64_t get_panm_time_ms() const;
 	void debug_set_panm_time_ms(int64_t p_time_ms);
-	// The S11 dual-publish seam (D-NET-209): true (default) presents armed
-	// replica rows from the simulation-arbitrated channel directly; false
-	// routes them through the legacy remote-request publish (model-side FSM).
-	// This toggles ONLY the PUBLISH path — the per-record receive arbitration
-	// and the deferred/insert channel work in the fold run either way, so the
-	// flag is a presentation A/B, not a full pre-S11 rollback.
 	// Native pose-path health: cumulative queries/declines for the collision
 	// provider and the mounted resolver, plus the installed mounted model
 	// sources. The soak gates on declines == 0 — the A/B divergence stats this
@@ -2400,10 +2378,6 @@ public:
 	// first, capped at RoundSim::kDebugTrailCap. Covers every resolved outcome
 	// including face-miss fly-ons (the "why didn't that register" case).
 	Dictionary get_round_debug() const;
-	// Read-only F3 rows for the placed throwable devices: entity_handle,
-	// item_id, team, pos (mission units), yaw/pitch/roll_deg (the exact stick
-	// pose), parent_handle + parent_live, arm_delay_ticks, think, health.
-	Array get_throwable_debug() const;
 	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
 	// rounds with a TrcrID model plus placed devices. Entries: {key, item_id, pos (godot),
 	// rotation_deg (pitch, yaw, roll — placer convention)}; the enemy-team item
@@ -2457,18 +2431,6 @@ public:
 	// probe's seam. Returns the round slot, -1 on bad ammo/full pool.
 	int debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
 	                      const String &p_ammo_name);
-
-	// Read-only render-occlusion state for the F3 "Occlusion" debug tab:
-	// { active, camera_indoors, exterior_visible, water_visible, local_blink_flags,
-	//   counts: { instances, batched, visible, toc_culled, slots, window_groups,
-	//   viewthru_groups, welds, culled_entities },
-	//   buildings: [ { bms_id, pos (Godot), batched, visible, open_flagged,
-	//   mask, has_open, has_windows, has_links, records, windows, portals,
-	//   links } ] (capped 256),
-	//   welds: [ { own_bms, own_section, other_bms, other_section } ] (capped 64) }.
-	// Frame fields reflect the LAST run_occlusion_frame; before one runs the
-	// batch is empty and masks default open.
-	Dictionary get_occlusion_debug() const;
 
 	// World-space portal-face geometry for the F3 "Show portal faces" 3D view:
 	// { buildings: [ { bms_id, pos, visible, records: [ { type, section_a,

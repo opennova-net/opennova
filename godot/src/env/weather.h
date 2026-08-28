@@ -136,7 +136,6 @@ protected:
 
 private:
 	MissionEnvironment *_env_node() const;
-	opennova::env::EnvironmentState *_env_state() const;
 	// Re-resolve the cached env node from environment_path_ (in-tree only).
 	// Deliberately separate from the setter: _ready re-resolves without
 	// re-assigning the stored path (NodePath self-assignment through the

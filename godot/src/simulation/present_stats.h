@@ -6,11 +6,11 @@
 
 namespace godot {
 
-// One int64 stat field with its property accessors.
+// One int64 stat field with its read-only property accessor (C++ writers
+// assign the public field directly).
 #define STAT_FIELD(name)                                                 \
 	int64_t name = 0;                                                         \
-	int64_t get_##name() const { return name; }                               \
-	void set_##name(int64_t p_value) { name = p_value; }
+	int64_t get_##name() const { return name; }
 
 // Typed diagnostic snapshot for the native mission-present row applier
 // (ADR 0017: consumers receive this record, not the transport Dictionary).

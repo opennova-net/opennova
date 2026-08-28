@@ -162,13 +162,7 @@ Ref<CbinCreditsResource> CbinCreditsResource::from_cbin_bytes(const PackedByteAr
 
 void CbinEntry::_bind_methods() {
 
-	BIND_ENUM_CONSTANT(CBIN_ENTRY_TEXT);
-	BIND_ENUM_CONSTANT(CBIN_ENTRY_NEWLINE);
-	BIND_ENUM_CONSTANT(CBIN_ENTRY_IMAGE);
 
-	BIND_ENUM_CONSTANT(CBIN_JUSTIFY_LEFT);
-	BIND_ENUM_CONSTANT(CBIN_JUSTIFY_CENTER);
-	BIND_ENUM_CONSTANT(CBIN_JUSTIFY_RIGHT);
 }
 
 CbinEntry::CbinEntry() {}
@@ -187,9 +181,8 @@ void CbinTextEntry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_font"), &CbinTextEntry::get_font);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "font", PROPERTY_HINT_RESOURCE_TYPE, "Resource"),
 	             "set_font", "get_font");
-	ClassDB::bind_method(D_METHOD("set_font_name", "name"), &CbinTextEntry::set_font_name);
 	ClassDB::bind_method(D_METHOD("get_font_name"), &CbinTextEntry::get_font_name);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "font_name"), "set_font_name", "get_font_name");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "font_name"), "", "get_font_name");
 
 	ClassDB::bind_method(D_METHOD("set_color", "color"), &CbinTextEntry::set_color);
 	ClassDB::bind_method(D_METHOD("get_color"), &CbinTextEntry::get_color);
@@ -280,18 +273,6 @@ void CbinImageEntry::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"),
 	             "set_texture", "get_texture");
 
-	ClassDB::bind_method(D_METHOD("set_display_x", "x"), &CbinImageEntry::set_display_x);
-	ClassDB::bind_method(D_METHOD("get_display_x"), &CbinImageEntry::get_display_x);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "display_x"), "set_display_x", "get_display_x");
-
-	ClassDB::bind_method(D_METHOD("set_display_y", "y"), &CbinImageEntry::set_display_y);
-	ClassDB::bind_method(D_METHOD("get_display_y"), &CbinImageEntry::get_display_y);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "display_y"), "set_display_y", "get_display_y");
-
-	ClassDB::bind_method(D_METHOD("set_advances_y", "advances"), &CbinImageEntry::set_advances_y);
-	ClassDB::bind_method(D_METHOD("get_advances_y"), &CbinImageEntry::get_advances_y);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "advances_y"), "set_advances_y", "get_advances_y");
-
 	ClassDB::bind_method(D_METHOD("set_texture_name", "name"), &CbinImageEntry::set_texture_name);
 	ClassDB::bind_method(D_METHOD("get_texture_name"), &CbinImageEntry::get_texture_name);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "texture_name"), "set_texture_name", "get_texture_name");
@@ -374,14 +355,6 @@ void CbinCreditsResource::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_scroll_rate", "rate"), &CbinCreditsResource::set_scroll_rate);
 	ClassDB::bind_method(D_METHOD("get_scroll_rate"), &CbinCreditsResource::get_scroll_rate);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scroll_rate"), "set_scroll_rate", "get_scroll_rate");
-
-	ClassDB::bind_method(D_METHOD("set_vertical_space", "space"), &CbinCreditsResource::set_vertical_space);
-	ClassDB::bind_method(D_METHOD("get_vertical_space"), &CbinCreditsResource::get_vertical_space);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "vertical_space"), "set_vertical_space", "get_vertical_space");
-
-	ClassDB::bind_method(D_METHOD("set_center_x", "center"), &CbinCreditsResource::set_center_x);
-	ClassDB::bind_method(D_METHOD("get_center_x"), &CbinCreditsResource::get_center_x);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "center_x"), "set_center_x", "get_center_x");
 
 	ClassDB::bind_method(D_METHOD("set_has_top_y", "has_top_y"), &CbinCreditsResource::set_has_top_y);
 	ClassDB::bind_method(D_METHOD("has_top_y"), &CbinCreditsResource::has_top_y);

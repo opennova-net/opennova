@@ -1,5 +1,5 @@
-#ifndef OPENNOVA_NOVA_CREDITS_PLAYER_H
-#define OPENNOVA_NOVA_CREDITS_PLAYER_H
+#ifndef OPENNOVA_CREDITS_PLAYER_H
+#define OPENNOVA_CREDITS_PLAYER_H
 
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/font.hpp>
@@ -27,18 +27,9 @@ public:
 
 	// Autoplay - start scrolling when node enters tree.
 	void set_autoplay(bool p_autoplay);
-	bool get_autoplay() const;
 
 	// Resource to display.
 	void set_credits_resource(const Ref<CbinCreditsResource> &p_resource);
-	Ref<CbinCreditsResource> get_credits_resource() const;
-
-	// Base paths for loading fonts and textures.
-	void set_font_base_path(const String &p_path);
-	String get_font_base_path() const;
-
-	void set_texture_base_path(const String &p_path);
-	String get_texture_base_path() const;
 
 	// Playback control.
 	void play();
@@ -46,10 +37,6 @@ public:
 	void pause();
 	void resume();
 	bool is_playing() const;
-
-	// Scroll speed override (multiplier on resource's scroll_rate).
-	void set_speed_scale(float p_scale);
-	float get_speed_scale() const;
 
 	// Rebuild the visual tree from the resource.
 	void rebuild();
@@ -66,8 +53,6 @@ private:
 	void _on_resource_changed();  // Connected to credits_resource_->changed signal.
 
 	Ref<CbinCreditsResource> credits_resource_;
-	String font_base_path_;
-	String texture_base_path_;
 
 	Control *content_ = nullptr;
 	float content_height_ = 0.0f;  // Total height of content for scroll bounds.
@@ -101,4 +86,4 @@ private:
 
 }  // namespace godot
 
-#endif  // OPENNOVA_NOVA_CREDITS_PLAYER_H
+#endif  // OPENNOVA_CREDITS_PLAYER_H

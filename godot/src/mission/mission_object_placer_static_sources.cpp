@@ -205,32 +205,6 @@ void MissionObjectPlacer::_record_static_user_point_group(
 	static_user_point_sources_.push_back(row);
 }
 
-void MissionObjectPlacer::_append_static_user_point_source(
-		const String &p_graphic, const Transform3D &p_xform) {
-	const Ref<ObjectData> data = _load_object_data(p_graphic);
-	if (data.is_null() || data->get_user_point_count() <= 0) {
-		return;
-	}
-	for (int i = 0; i < static_user_point_sources_.size(); ++i) {
-		Dictionary row = static_user_point_sources_[i];
-		if (String(row.get("graphic", String())) != p_graphic) {
-			continue;
-		}
-		Array transforms = Array(row.get("transforms", Array())).duplicate();
-		transforms.push_back(p_xform);
-		row["transforms"] = transforms;
-		static_user_point_sources_[i] = row;
-		return;
-	}
-	Dictionary row;
-	row["graphic"] = p_graphic;
-	row["object_data"] = data;
-	Array transforms;
-	transforms.push_back(p_xform);
-	row["transforms"] = transforms;
-	static_user_point_sources_.push_back(row);
-}
-
 int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 		int p_entity_index, int p_bms_id, int p_item_id,
 		const String &p_graphic, const Transform3D &p_xform) {
@@ -284,15 +258,6 @@ void MissionObjectPlacer::register_static_instance(int p_bms_id,
 	inst.mirror_reflected = p_mirror_reflected;
 	destruction_instances_[p_bms_id] = inst;
 	_bump_static_terrain_shadow_source_revision();
-}
-
-Variant MissionObjectPlacer::get_static_instance_transform(
-		int p_bms_id) const {
-	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
-	if (rec == nullptr) {
-		return Variant();
-	}
-	return rec->xform;
 }
 
 String MissionObjectPlacer::get_static_instance_batch_key(int p_bms_id) const {

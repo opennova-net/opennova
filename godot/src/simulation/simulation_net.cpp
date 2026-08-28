@@ -1283,10 +1283,6 @@ void Simulation::set_capture_pcap_path(const String &p_path) {
 	capture_pcap_path_ = p_path;
 }
 
-String Simulation::get_capture_pcap_path() const {
-	return capture_pcap_path_;
-}
-
 Dictionary Simulation::get_joiner_network_diagnostics() const {
 	Dictionary out;
 	out["enabled"] = is_joiner_network_diagnostics_enabled();

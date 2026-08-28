@@ -16,38 +16,19 @@ static T clamp_int(int value, int min_value, int max_value) {
 void TerrainFoliageDef::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_graphic", "value"), &TerrainFoliageDef::set_graphic);
 	ClassDB::bind_method(D_METHOD("get_graphic"), &TerrainFoliageDef::get_graphic);
-	ClassDB::bind_method(D_METHOD("set_color_lower", "value"), &TerrainFoliageDef::set_color_lower);
-	ClassDB::bind_method(D_METHOD("get_color_lower"), &TerrainFoliageDef::get_color_lower);
-	ClassDB::bind_method(D_METHOD("set_color_upper", "value"), &TerrainFoliageDef::set_color_upper);
-	ClassDB::bind_method(D_METHOD("get_color_upper"), &TerrainFoliageDef::get_color_upper);
 	ClassDB::bind_method(D_METHOD("set_match", "value"), &TerrainFoliageDef::set_match);
 	ClassDB::bind_method(D_METHOD("get_match"), &TerrainFoliageDef::get_match);
 	ClassDB::bind_method(D_METHOD("set_attrib_flags", "value"), &TerrainFoliageDef::set_attrib_flags);
 	ClassDB::bind_method(D_METHOD("get_attrib_flags"), &TerrainFoliageDef::get_attrib_flags);
 	ClassDB::bind_method(D_METHOD("set_shadow", "enabled"), &TerrainFoliageDef::set_shadow);
 	ClassDB::bind_method(D_METHOD("get_shadow"), &TerrainFoliageDef::get_shadow);
-	ClassDB::bind_method(D_METHOD("set_force_on", "enabled"), &TerrainFoliageDef::set_force_on);
-	ClassDB::bind_method(D_METHOD("get_force_on"), &TerrainFoliageDef::get_force_on);
 	ClassDB::bind_method(D_METHOD("to_dictionary"), &TerrainFoliageDef::to_dictionary);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "graphic"), "set_graphic", "get_graphic");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "color_lower", PROPERTY_HINT_ENUM, "Match Ground,Blend 50,Retain Full Color"),
-	             "set_color_lower",
-	             "get_color_lower");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "color_upper", PROPERTY_HINT_ENUM, "Match Ground,Blend 50,Retain Full Color"),
-	             "set_color_upper",
-	             "get_color_upper");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "match", PROPERTY_HINT_RANGE, "-1,255,1"), "set_match", "get_match");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "attrib_flags"), "set_attrib_flags", "get_attrib_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "shadow"), "set_shadow", "get_shadow");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "force_on"), "set_force_on", "get_force_on");
 
-	BIND_CONSTANT(COLOR_MATCH_GROUND);
-	BIND_CONSTANT(COLOR_BLEND_50);
-	BIND_CONSTANT(COLOR_RETAIN_FULL);
-	BIND_CONSTANT(ATTRIB_FORCE_ON);
-	BIND_CONSTANT(ATTRIB_SHADOW);
-	BIND_CONSTANT(MAX_DEFS);
 }
 
 void TerrainFoliageDef::set_graphic(const String &value) {
@@ -56,22 +37,6 @@ void TerrainFoliageDef::set_graphic(const String &value) {
 
 String TerrainFoliageDef::get_graphic() const {
 	return graphic;
-}
-
-void TerrainFoliageDef::set_color_lower(int value) {
-	color_lower = opennova::foliage_normalize_color_mode(value);
-}
-
-int TerrainFoliageDef::get_color_lower() const {
-	return color_lower;
-}
-
-void TerrainFoliageDef::set_color_upper(int value) {
-	color_upper = opennova::foliage_normalize_color_mode(value);
-}
-
-int TerrainFoliageDef::get_color_upper() const {
-	return color_upper;
 }
 
 void TerrainFoliageDef::set_match(int value) {
@@ -101,15 +66,6 @@ void TerrainFoliageDef::set_shadow(bool enabled) {
 
 bool TerrainFoliageDef::get_shadow() const {
 	return (attrib_flags & ATTRIB_SHADOW) != 0;
-}
-
-void TerrainFoliageDef::set_force_on(bool enabled) {
-	if (enabled) {
-		attrib_flags |= ATTRIB_FORCE_ON;
-	} else {
-		attrib_flags &= ~ATTRIB_FORCE_ON;
-	}
-	attrib_flags = clamp_int<int>(opennova::foliage_normalize_attrib_flags(static_cast<uint8_t>(attrib_flags)), 0, 255);
 }
 
 bool TerrainFoliageDef::get_force_on() const {

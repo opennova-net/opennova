@@ -120,8 +120,6 @@ void MissionObjectPlacer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("object_data_for", "graphic"),
 			&MissionObjectPlacer::object_data_for);
 
-	ClassDB::bind_method(D_METHOD("get_static_instance_transform", "bms_id"),
-			&MissionObjectPlacer::get_static_instance_transform);
 	ClassDB::bind_method(D_METHOD("get_static_instance_batch_key", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_batch_key);
 	ClassDB::bind_method(

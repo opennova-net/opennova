@@ -51,12 +51,6 @@ public:
 	ParticleRenderer();
 	~ParticleRenderer() override;
 
-	// The witnessed flipbook frame-name derivation (renderer
-	// retail_particle_frame_name [orig: CParticleDef_ReloadGraphicFrameTextures
-	// @ 0x5e4bb0, D-PTL-14]) — static so every caller uses the runtime rule.
-	static String retail_frame_name(const String &p_authored, int p_frame_count,
-			int p_frame);
-
 	void set_scene(const Ref<EffectScene> &p_scene);
 	Ref<EffectScene> get_scene() const;
 

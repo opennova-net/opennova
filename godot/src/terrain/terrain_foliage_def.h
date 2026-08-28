@@ -35,12 +35,6 @@ public:
 	void set_graphic(const String &value);
 	String get_graphic() const;
 
-	void set_color_lower(int value);
-	int get_color_lower() const;
-
-	void set_color_upper(int value);
-	int get_color_upper() const;
-
 	void set_match(int value);
 	int get_match() const;
 
@@ -50,7 +44,6 @@ public:
 	void set_shadow(bool enabled);
 	bool get_shadow() const;
 
-	void set_force_on(bool enabled);
 	bool get_force_on() const;
 
 	Dictionary to_dictionary() const;

@@ -90,14 +90,8 @@ void ParticleDef::_bind_methods() {
 	BIND_GETSET(age, "set_age", "get_age");
 	BIND_GETSET(age_adj, "set_age_adj", "get_age_adj");
 	BIND_GETSET(scale_value, "set_scale_value", "get_scale_value");
-	BIND_GETSET(scale_adj, "set_scale_adj", "get_scale_adj");
-	BIND_GETSET(scale_func, "set_scale_func", "get_scale_func");
 
 	BIND_GETSET(alpha, "set_alpha", "get_alpha");
-	BIND_GETSET(alpha_func, "set_alpha_func", "get_alpha_func");
-	BIND_GETSET(red_func, "set_red_func", "get_red_func");
-	BIND_GETSET(green_func, "set_green_func", "get_green_func");
-	BIND_GETSET(blue_func, "set_blue_func", "get_blue_func");
 	BIND_GETSET(color1, "set_color1", "get_color1");
 	BIND_GETSET(color2, "set_color2", "get_color2");
 	BIND_GETSET(color3_prop, "set_color3_prop", "get_color3_prop");
@@ -131,9 +125,7 @@ void ParticleDef::_bind_methods() {
 	#undef BIND_GETSET
 
 	// Canonical-table introspection + deep clone (editor helpers).
-	BIND_CONSTANT(FLAG_YAW_AND_PITCH);
 	BIND_CONSTANT(FLAG_FOREVER_EMIT);
-	BIND_CONSTANT(FLAG_POSITION_RELATIVE);
 	ClassDB::bind_static_method("ParticleDef", D_METHOD("format_particle_flags", "bits"), &ParticleDef::format_particle_flags);
 	ClassDB::bind_method(D_METHOD("clone"), &ParticleDef::clone);
 
@@ -175,19 +167,6 @@ void ParticleDef::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "color4"), "set_color4", "get_color4");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bump_scale"), "set_bump_scale", "get_bump_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale_value"), "set_scale_value", "get_scale_value");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale_adj"), "set_scale_adj", "get_scale_adj");
-
-	ADD_GROUP("Curves", "");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "scale_func", PROPERTY_HINT_RESOURCE_TYPE, "ParticleCurveRef"),
-			"set_scale_func", "get_scale_func");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "alpha_func", PROPERTY_HINT_RESOURCE_TYPE, "ParticleCurveRef"),
-			"set_alpha_func", "get_alpha_func");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "red_func", PROPERTY_HINT_RESOURCE_TYPE, "ParticleCurveRef"),
-			"set_red_func", "get_red_func");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "green_func", PROPERTY_HINT_RESOURCE_TYPE, "ParticleCurveRef"),
-			"set_green_func", "get_green_func");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "blue_func", PROPERTY_HINT_RESOURCE_TYPE, "ParticleCurveRef"),
-			"set_blue_func", "get_blue_func");
 
 	ADD_GROUP("Motion", "");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "orientation"), "set_orientation", "get_orientation");
@@ -252,14 +231,8 @@ TRIVIAL_SET(z_offset, float)
 TRIVIAL_SET(age, float)
 TRIVIAL_SET(age_adj, float)
 TRIVIAL_SET(scale_value, float)
-TRIVIAL_SET(scale_adj, float)
-TRIVIAL_SET_REF(scale_func, Ref<ParticleCurveRef>)
 
 TRIVIAL_SET(alpha, float)
-TRIVIAL_SET_REF(alpha_func, Ref<ParticleCurveRef>)
-TRIVIAL_SET_REF(red_func, Ref<ParticleCurveRef>)
-TRIVIAL_SET_REF(green_func, Ref<ParticleCurveRef>)
-TRIVIAL_SET_REF(blue_func, Ref<ParticleCurveRef>)
 TRIVIAL_SET_REF(color1, Color)
 TRIVIAL_SET_REF(color2, Color)
 

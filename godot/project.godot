@@ -56,10 +56,6 @@ environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
 
 [shader_globals]
 
-opennova_fill_light={
-"type": "vec3",
-"value": Vector3(0.192157, 0.215686, 0.180392)
-}
 opennova_sun_light={
 "type": "vec3",
 "value": Vector3(0.666667, 0.666667, 0.654902)
@@ -87,18 +83,6 @@ opennova_fog_end={
 opennova_fog_type={
 "type": "int",
 "value": 1
-}
-opennova_wind_sway_amount={
-"type": "float",
-"value": 1.0
-}
-opennova_wind_sway_phase={
-"type": "float",
-"value": 0.0
-}
-opennova_color_src_gain={
-"type": "vec3",
-"value": Vector3(1, 1, 1)
 }
 opennova_light_block_dir={
 "type": "vec3",

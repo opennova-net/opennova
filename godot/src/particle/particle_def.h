@@ -116,14 +116,8 @@ public:
 	void set_age(float v); float get_age() const;
 	void set_age_adj(float v); float get_age_adj() const;
 	void set_scale_value(float v); float get_scale_value() const;
-	void set_scale_adj(float v); float get_scale_adj() const;
-	void set_scale_func(const Ref<ParticleCurveRef> &r); Ref<ParticleCurveRef> get_scale_func() const;
 
 	void set_alpha(float v); float get_alpha() const;
-	void set_alpha_func(const Ref<ParticleCurveRef> &r); Ref<ParticleCurveRef> get_alpha_func() const;
-	void set_red_func(const Ref<ParticleCurveRef> &r); Ref<ParticleCurveRef> get_red_func() const;
-	void set_green_func(const Ref<ParticleCurveRef> &r); Ref<ParticleCurveRef> get_green_func() const;
-	void set_blue_func(const Ref<ParticleCurveRef> &r); Ref<ParticleCurveRef> get_blue_func() const;
 	void set_color1(const Color &c); Color get_color1() const;
 	void set_color2(const Color &c); Color get_color2() const;
 	void set_color3_prop(const Color &c); Color get_color3_prop() const;

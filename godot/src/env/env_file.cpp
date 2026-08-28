@@ -141,31 +141,20 @@ void EnvFile::_bind_methods() {
 
 #undef BIND_PROP
 
-	ClassDB::bind_method(D_METHOD("set_sky_map1_tex", "texture"), &EnvFile::set_sky_map1_tex);
 	ClassDB::bind_method(D_METHOD("get_sky_map1_tex"), &EnvFile::get_sky_map1_tex);
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "sky_map1_tex", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_sky_map1_tex", "get_sky_map1_tex");
-	ClassDB::bind_method(D_METHOD("set_sky_map2_tex", "texture"), &EnvFile::set_sky_map2_tex);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "sky_map1_tex", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "", "get_sky_map1_tex");
 	ClassDB::bind_method(D_METHOD("get_sky_map2_tex"), &EnvFile::get_sky_map2_tex);
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "sky_map2_tex", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_sky_map2_tex", "get_sky_map2_tex");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "sky_map2_tex", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "", "get_sky_map2_tex");
 
 	ADD_GROUP("Models", "");
 	ClassDB::bind_method(D_METHOD("set_sun_3di", "value"), &EnvFile::set_sun_3di);
-	ClassDB::bind_method(D_METHOD("get_sun_3di"), &EnvFile::get_sun_3di);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "sun_3di"), "set_sun_3di", "get_sun_3di");
 	ClassDB::bind_method(D_METHOD("set_moon_3di", "value"), &EnvFile::set_moon_3di);
-	ClassDB::bind_method(D_METHOD("get_moon_3di"), &EnvFile::get_moon_3di);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "moon_3di"), "set_moon_3di", "get_moon_3di");
 	ClassDB::bind_method(D_METHOD("set_glare_3di", "value"), &EnvFile::set_glare_3di);
-	ClassDB::bind_method(D_METHOD("get_glare_3di"), &EnvFile::get_glare_3di);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "glare_3di"), "set_glare_3di", "get_glare_3di");
 	ClassDB::bind_method(D_METHOD("set_star_3di", "value"), &EnvFile::set_star_3di);
-	ClassDB::bind_method(D_METHOD("get_star_3di"), &EnvFile::get_star_3di);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "star_3di"), "set_star_3di", "get_star_3di");
 
 	ADD_GROUP("Time of Day", "tod_");
-	ClassDB::bind_method(D_METHOD("set_tod_keyframes", "keyframes"), &EnvFile::set_tod_keyframes);
 	ClassDB::bind_method(D_METHOD("get_tod_keyframes"), &EnvFile::get_tod_keyframes);
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "tod_keyframes", PROPERTY_HINT_ARRAY_TYPE, "EnvKeyframe"), "set_tod_keyframes", "get_tod_keyframes");
+	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "tod_keyframes", PROPERTY_HINT_ARRAY_TYPE, "EnvKeyframe"), "", "get_tod_keyframes");
 
 	ADD_SIGNAL(MethodInfo("environment_changed"));
 }
@@ -628,12 +617,6 @@ Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
 
 float EnvFile::dome_reference_height() {
 	return static_cast<float>(opennova::env::kSkyDomeReferenceHeight);
-}
-
-float EnvFile::fog_start_for(int p_fog_type, float p_fog_end, float p_overcast) {
-	const opennova::env::FogParams params =
-			opennova::env::compute_fog_params(p_fog_type, p_fog_end, p_overcast);
-	return params.start;
 }
 
 float EnvFile::celestial_body_distance() {

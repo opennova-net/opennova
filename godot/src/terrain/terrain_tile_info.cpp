@@ -69,12 +69,6 @@ void TerrainTileInfo::_bind_methods() {
 	             "set_entries",
 	             "get_entries");
 
-	BIND_CONSTANT(FLAG_FLIP_X);
-	BIND_CONSTANT(FLAG_FLIP_Y);
-	BIND_CONSTANT(FLAG_ROTATE_90);
-	BIND_CONSTANT(FLAG_OUTLINE);
-	BIND_CONSTANT(ATLAS_TILE_PIXELS);
-	BIND_CONSTANT(CELL_WORLD_SIZE);
 }
 
 Error TerrainTileInfo::load_from_bytes(const PackedByteArray &p_bytes) {

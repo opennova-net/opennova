@@ -113,9 +113,6 @@ private:
 	void _notify_terrain_changed();
 	void _sync_foliage_map_resource_from_slot();
 
-	// Extract bare filename from a Texture2D's resource path
-	static String _texture_to_filename(const Ref<Texture2D> &p_tex);
-
 	struct PcxSlotRefs;
 	bool _resolve_pcx_slot(const String &slot_id, PcxSlotRefs &out);
 	Error _import_pcx_slot_bytes(const String &slot_id, const String &filename, const PackedByteArray &bytes);
