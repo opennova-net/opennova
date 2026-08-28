@@ -65,9 +65,23 @@ bool ImGuiPass::attach_imgui(void *context, ImGuiAllocFn alloc, ImGuiFreeFn free
 	}
 	ImGui::SetCurrentContext(static_cast<ImGuiContext *>(context));
 	ImGuiIO &io = ImGui::GetIO();
-	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_ViewportsEnable;
+	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	attached_ = true;
+	set_platform_windows_enabled(platform_windows_enabled_);
 	return true;
+}
+
+void ImGuiPass::set_platform_windows_enabled(bool enabled) {
+	platform_windows_enabled_ = enabled;
+	if (!attached_) {
+		return;
+	}
+	ImGuiIO &io = ImGui::GetIO();
+	if (enabled) {
+		io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+	} else {
+		io.ConfigFlags &= ~ImGuiConfigFlags_ViewportsEnable;
+	}
 }
 
 void ImGuiPass::detach_imgui() {

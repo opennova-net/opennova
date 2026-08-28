@@ -46,17 +46,6 @@ void set_ms(std::array<char, N> &dst, double ms) {
 	std::snprintf(dst.data(), N, "%.2f", ms);
 }
 
-// "1.2k" / "3.4M" for large counts (the retired page's _compact_count).
-void compact_count(char *dst, size_t n, double value) {
-	if (value >= 1e6) {
-		std::snprintf(dst, n, "%.1fM", value / 1e6);
-	} else if (value >= 1e3) {
-		std::snprintf(dst, n, "%.1fk", value / 1e3);
-	} else {
-		std::snprintf(dst, n, "%d", static_cast<int>(value));
-	}
-}
-
 }  // namespace
 
 StatsWindow::StatsWindow() : texts_(static_cast<size_t>(kRowCount)) {
@@ -257,7 +246,6 @@ void StatsWindow::format_info() {
 		std::snprintf(buf, sizeof(buf), "drain %.2f ms/f", mean_ms(w, slot_sum(w, Slot::EFFECTS_DRAIN)));
 		set_info("effects", buf);
 	}
-	(void)compact_count;
 }
 
 int StatsWindow::row_count() const {

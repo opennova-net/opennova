@@ -6,6 +6,8 @@
   game-level GDScript) and ADR 0031's seam-bridge note (the "F3 clocks" are
   device legs feeding an engine-owned board); ADR 0025's "the standalone game is
   the only live runtime" and ADR 0037's "ONED is run-only" stand unchanged.
+  Updated by ADR 0041 (the env-var probes of decision 6 and the verification
+  bullet's probe are `game_probe` tools).
 
 ## Context
 
@@ -95,14 +97,27 @@ integration is not a one-off.
    opaque application workspace. On first use, Game owns the center and Stats
    starts in a roughly 30% right dock; an existing ImGui layout is preserved.
    Game cannot close, collapse, or undock, while other tools remain detachable.
+   *Amended 2026-08-28:* multi-viewport is suspended while the root window is
+   in either fullscreen mode. With `ViewportsEnable` set, a borderless
+   fullscreen main window presents black through imgui-godot 6.3.2 on Godot
+   4.6.1 / D3D12 (the game SubViewport keeps rendering; the root frame does
+   not), and the flag must already be clear at the NewFrame that first sees
+   the fullscreen size. So `ImGuiPass::set_platform_windows_enabled` carries
+   the flag, `ImGuiPassNode` applies it at attach and every frame from the
+   window mode, and the shell's F11 handler withdraws it before the switch
+   (`MainGame._toggle_fullscreen`); undocked tool windows merge back into the
+   main viewport while fullscreen. Pinned by `tests/devtools/devtools_test`,
+   the lifecycle GUT test and the `window_fullscreen` game probe.
 6. **Hard cut.** The GDScript overlay, its page framework, the pages, the
    typed resolvers, the snapshot writer and the GDScript board are deleted;
    F3 opens the ImGui tools. What survives under `godot/game/debug/` has other
    owners: the MCP `game_debug` control plane (`DebugSession` and its catalog),
    the world-owned debug views and pick nodes (`DebugViewSet` itself is at
-   `godot/game/world/debug_view_set.gd`), the three
-   samplers (retyped to `FrameStats`) and the env-var probes. Retired page
-   features return as engine windows when wanted; `TODO.md` carries the list.
+   `godot/game/world/debug_view_set.gd`) and the three
+   samplers (retyped to `FrameStats`); the env-var probes that survived this
+   cut went with ADR 0041 (2026-08-27) as `game_probe` tools under
+   `godot/probes/` or gated ctests. Retired page features return as engine
+   windows when wanted; `TODO.md` carries the list.
 7. **Not an editor.** The tools inspect and, later, control a running game.
    ADR 0037 stands: no authoring, no project state, no asset database.
 
@@ -145,8 +160,11 @@ integration is not a one-off.
   clicks on, Play recapturing normal gameplay, Escape returning to Interact
   before closing, and teardown clearing the mode.
 - `godot/tests/game/game_runtime_root_test.gd` pins the debug/direct startup
-  decision; `game_runtime_root_window_probe.gd` exercises the real addon,
-  shared texture, first layout, responsive resize, and F3 routing in a window.
+  decision; the `runtime_root_window` game probe
+  (`godot/probes/runtime/runtime_root_window_probe.gd`) exercises the real
+  addon, shared texture, first layout, responsive resize, and F3 routing in a
+  window, and the `window_fullscreen` probe pins the F11 toggle presenting a
+  lit frame in both window modes.
 - `tests/devtools/oned_ui_test` pins ONED's surface: open from construction,
   a layout pass from the seeded state, the FIFO request queue, the field
   round trip; `godot/tests/oned_app_test.gd` drives the app over the seam.

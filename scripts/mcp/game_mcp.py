@@ -37,7 +37,7 @@ DEFAULT_PORT = 8975
 PROTOCOL_VERSION = "2025-06-18"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_DIR = REPO_ROOT / "godot"
-RUNTIME_SCENE = "res://game/main_game.tscn"
+RUNTIME_SCENE = "res://game/game_runtime_root.tscn"
 GODOT_BINARIES = (
     "Godot_v4.6.1-stable_win64.exe",
     "Godot_v4.6.1-stable_win64_console.exe",

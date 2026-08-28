@@ -33,6 +33,12 @@ public:
 
 	// True while an ImGui context is attached and the pass draws.
 	bool is_available() const { return attached_; }
+	// The shell's say on ImGui multi-viewport (undocked tool windows as OS
+	// windows): off ahead of a fullscreen switch, on again once windowed. The
+	// pass only carries the flag while this is true AND the root window is
+	// windowed.
+	void set_platform_windows_allowed(bool p_allowed);
+	bool are_platform_windows_allowed() const { return platform_windows_allowed_; }
 
 protected:
 	static void _bind_methods();
@@ -52,10 +58,16 @@ protected:
 
 private:
 	bool attach(opennova::devtools::ImGuiPass &p_pass);
+	// Undocked tool windows are OS windows (ImGui multi-viewport), which a
+	// fullscreen main window cannot carry (borderless fullscreen presents
+	// black with the flag set, imgui-godot 6.3.2 / Godot 4.6.1 D3D12), so the
+	// pass's flag follows the root window's mode every frame.
+	bool window_allows_platform_windows() const;
 	void set_layer_visible(bool p_visible);
 
 	bool attached_ = false;
 	bool layer_visible_ = false;
+	bool platform_windows_allowed_ = true;
 };
 
 } // namespace godot

@@ -815,6 +815,30 @@ func test_in_match_session_loss_returns_to_the_menu() -> void:
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 
 
+func test_f11_withdraws_the_tools_platform_windows_before_the_switch() -> void:
+	# ImGui multi-viewport must be off at the NewFrame that first sees the
+	# fullscreen size (the window_fullscreen probe pins the black frame on the
+	# live process); the shell's F11 handler withdraws it before the mode change.
+	_shell = MAIN_GAME_SCENE.instantiate()
+	assert_not_null(_shell)
+	add_child(_shell)
+	await get_tree().process_frame
+	var dev_tools: DevTools = _shell.get_dev_tools()
+	assert_true(dev_tools.are_platform_windows_allowed(),
+			"windowed: undocked tool windows may become OS windows")
+	var f11 := InputEventKey.new()
+	f11.keycode = WindowState.TOGGLE_KEY
+	f11.physical_keycode = WindowState.TOGGLE_KEY
+	f11.pressed = true
+	Input.parse_input_event(f11)
+	await get_tree().process_frame
+	assert_false(dev_tools.are_platform_windows_allowed(),
+			"entering fullscreen withdraws them ahead of the mode switch")
+	dev_tools.set_platform_windows_allowed(true)
+	assert_true(dev_tools.are_platform_windows_allowed(),
+			"the return to windowed re-allows them")
+
+
 func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 	_shell = await _make_shell()
 	if _shell == null:

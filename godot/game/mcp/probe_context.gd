@@ -32,8 +32,8 @@ var _finished := false
 
 # --- live seams -----------------------------------------------------------------
 
-func game() -> Node:
-	return _supply(seams.game_source if seams != null else Callable()) as Node
+func game() -> MainGame:
+	return _supply(seams.game_source if seams != null else Callable()) as MainGame
 
 
 func world() -> GameWorld:

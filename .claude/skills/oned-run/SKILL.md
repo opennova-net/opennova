@@ -6,7 +6,10 @@ description: Runs this repo's ONED utility or OpenNova game runtime with the nat
 # Run ONED / the OpenNova runtime
 
 The Godot project is `godot/` (Godot 4.6.1). Its default main scene is the
-game runtime, `res://game/main_game.tscn`. The ONED scene
+game runtime root, `res://game/game_runtime_root.tscn` (on a debug windowed
+run with the imgui-godot addon it embeds MainGame in a SubViewport for the F3
+Game window; otherwise it hands off to `res://game/main_game.tscn` directly,
+`GameRuntimeRoot.should_embed_game_view`). The ONED scene
 `res://modtools/oned_main.tscn` is the `modtools` feature override for
 the packaged `opennova-modtools.exe`; pass that scene explicitly when running
 ONED from source. ONED is run-only (ADR 0037): Settings, Run OpenNova,

@@ -356,17 +356,17 @@ func test_main_frame_probe_spans_are_default_off() -> void:
 	game.set("_state", MainGameScript.State.WORLD)
 
 	game.call("_process", 0.0)
-	assert_true((game.get("_perf_probe_spans") as Dictionary).is_empty(),
+	assert_true(game.get_perf_probe_switches().spans.is_empty(),
 			"ordinary main frames make no clock reads or span writes")
 
-	game.call("set_perf_probe_enabled", true)
+	game.set_perf_probe_enabled(true)
 	game.call("_process", 0.0)
-	var spans: Dictionary = game.get("_perf_probe_spans")
+	var spans: Dictionary = game.get_perf_probe_switches().spans
 	assert_true(spans.has_all(["before", "world", "after", "hud"]),
 			"an explicitly enabled probe captures each main-frame phase")
 
-	game.call("set_perf_probe_enabled", false)
-	assert_true((game.get("_perf_probe_spans") as Dictionary).is_empty(),
+	game.set_perf_probe_enabled(false)
+	assert_true(game.get_perf_probe_switches().spans.is_empty(),
 			"probe teardown cannot leave stale measurements behind")
 
 
@@ -400,7 +400,7 @@ func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 	for slot in [FrameStats.FRAME_PLAYER_BEFORE, FrameStats.FRAME_WORLD,
 			FrameStats.FRAME_PLAYER_AFTER, FrameStats.FRAME_HUD]:
 		assert_eq(counts[slot], 1, "an active board captures each main-frame leg")
-	assert_true((game.get("_perf_probe_spans") as Dictionary).is_empty(),
+	assert_true(game.get_perf_probe_switches().spans.is_empty(),
 			"stats capture never writes the probe span dictionary")
 
 

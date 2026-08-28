@@ -52,10 +52,10 @@ func _input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	if not _embedded_game_view or not is_instance_valid(_game_container) or _tools_open:
 		return
-	var content_size := Vector2i(_game_container.size.round())
-	if content_size.x < 1 or content_size.y < 1:
-		content_size = get_window().size
-	_resize_game_viewport(content_size)
+	# The window, never the container: an unstretched SubViewportContainer's
+	# minimum size is its viewport, so reading the container back would pin
+	# the viewport at its largest size after a shrink (F11 back to windowed).
+	_resize_game_viewport(get_window().size)
 
 
 func get_main_game() -> MainGame:

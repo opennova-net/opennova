@@ -253,6 +253,15 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "size, a window resize reaches the viewport, and F3 through the Game texture "
 				+ "closes the workspace; refuses a direct-runtime fallback.",
 				RUNTIME + "runtime_root_window_probe.gd", {}, [], true, false, 120_000),
+		ProbeDef.make("window_fullscreen",
+				"The F11 policy (WindowState) on the live process: windowed -> fullscreen -> "
+				+ "windowed through the key handler's static, proving each state presents a "
+				+ "lit root frame and, in the embedded game view, that the game viewport "
+				+ "follows the window size with its own frame lit; a black frame fails.",
+				RUNTIME + "window_fullscreen_probe.gd", {
+					"mode": { "type": "string", "enum": ["fullscreen", "exclusive", "resize"],
+							"default": "fullscreen" },
+				}, [], true, false, 120_000),
 		ProbeDef.make("parity_joiner_ready",
 				"Wait until this --lan-join joiner reaches `readiness_mode` (in_match: a "
 				+ "live local player in the InMatch phase, the default deployment pick sent "

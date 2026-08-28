@@ -90,6 +90,17 @@ public:
 	void detach_imgui();
 	bool is_attached() const { return attached_; }
 
+	// Multi-viewport (an undocked tool window becomes an OS window) is part
+	// of the attach policy, and the shell can suspend it: with
+	// ImGuiConfigFlags_ViewportsEnable set, a main window in either
+	// fullscreen mode presents black through imgui-godot 6.3.2 on Godot
+	// 4.6.1 / D3D12 (witnessed 2026-08-28, the window_fullscreen probe), so
+	// the shell drops the flag while the window is fullscreen and restores
+	// it when windowed. Takes effect at ImGui's next NewFrame, so it is safe
+	// to call between the bridge's NewFrame and Render.
+	void set_platform_windows_enabled(bool enabled);
+	bool platform_windows_enabled() const { return platform_windows_enabled_; }
+
 	// The whole surface: closed = nothing drawn, no capture, no input.
 	void set_open(bool open);
 	bool is_open() const { return open_; }
@@ -122,6 +133,7 @@ private:
 	ImGuiPassOptions options_;
 	std::vector<std::unique_ptr<Window>> windows_;
 	bool attached_ = false;
+	bool platform_windows_enabled_ = true;
 	bool open_ = false;
 	bool layout_reset_pending_ = false;
 };
