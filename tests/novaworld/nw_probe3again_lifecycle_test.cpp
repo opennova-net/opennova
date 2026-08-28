@@ -13,7 +13,7 @@
 // .sph value-oracle (decode_server_log): the .sph DEATH/DISCONNECT events and the
 // 3-player roster must line up with the wire lifecycle tags.
 //
-// Reads the pcap directly via the shared apps/common pcap reader from
+// Reads the pcap directly via the shared engine/base/pcapio pcap reader from
 // <OPENNOVA_CAPTURES>/probe3_again.pcapng; the host .sph from
 // <OPENNOVA_CAPTURES>/sph/hostprof_probe3again.sph. Reports Skipped when
 // the capture is absent (.scratch is untracked); the .sph

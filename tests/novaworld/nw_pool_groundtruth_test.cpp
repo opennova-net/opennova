@@ -11,7 +11,7 @@
 // reproduces the authored fact — not merely that the body was consumed (the
 // weaker invariant nw_ingame_pool_records_test already covers).
 //
-// Reads the real pcap DIRECTLY via the shared apps/common pcap reader (no
+// Reads the real pcap DIRECTLY via the shared engine/base/pcapio pcap reader (no
 // hexcap intermediate) from <OPENNOVA_CAPTURES>/host_and_join_game_on_
 // opennovaworld_loopback_mission_probe.pcapng. Reports Skipped when the capture is
 // absent (it is a local-only artifact — .scratch is untracked), so CI stays

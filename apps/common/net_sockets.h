@@ -10,7 +10,7 @@
 namespace opennova::net {
 
 // Thin cross-platform socket layer for the apps/ binaries (novaworld_server,
-// nw_server, nw_lan_probe, nw_pp); engine/ carries no socket code of its own.
+// nw_server, nw_lan_probe); engine/ carries no socket code of its own.
 // Winsock2 on Windows, POSIX BSD sockets elsewhere.
 
 // Initialize the underlying networking subsystem. On Windows this is
@@ -50,23 +50,6 @@ int udp_recv_from(Socket &s, uint8_t *buf, size_t buf_cap, Endpoint &from,
 
 // Close an open socket. Sets fd=-1.
 void close_socket(Socket &s);
-
-// -- TCP (minimal, enough for an HTTP listener) --------------------------
-
-// Open a TCP listening socket on `port` (SO_REUSEADDR, backlog 8).
-Socket tcp_listen(uint16_t port);
-
-// Non-blocking accept with a timeout. Returns an accepted socket on
-// success (is_valid()), an invalid Socket on timeout / error. Populates
-// `from` with the remote endpoint on success.
-Socket tcp_accept(Socket &listener, Endpoint &from, int timeout_ms = 100);
-
-// Blocking recv with a timeout. Returns bytes read, 0 on timeout, -1 on
-// error or disconnect.
-int tcp_recv(Socket &s, uint8_t *buf, size_t buf_cap, int timeout_ms = 500);
-
-// Blocking send. Returns bytes sent, -1 on error.
-int tcp_send(Socket &s, const uint8_t *data, size_t len);
 
 // RAII wrapper. Moves are fine; copies are deleted.
 class ScopedSocket {

@@ -12,7 +12,7 @@
 //        -> the owner reframes that 0x0A as a 0x83 -> ClientRuntime folds it into ClientState.
 //      Asserts the peer SNAPs to the uplink AND the client's ClientState reflects the server's 0x0A
 //      (exactly one SNAP per 0x0C). This is the P5 e2e bar and the FIRST coverage of ClientReplicaPipeline
-//      fold + the production PeerC2SInMatch consumer (joiner_connection_test does neither).
+//      fold + the production PeerC2SInMatch consumer.
 //
 //  (B) Host-as-client (D-NET-121/122) — the SP listen-server host's OWN loopback view: Server_TickUpdate
 //      fans the host loopback a per-frame 0x0A (is_in_match) anchored to the host player's owned_entity
@@ -1582,7 +1582,7 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id) {
 }
 
 // A 1-record S2C 0x0C organic-spawn body the joiner name-matches (the owner's PeerSpawned reaction,
-// mirroring Simulation / joiner_connection_test).
+// mirroring Simulation).
 std::vector<uint8_t> make_organic_spawn(uint16_t slot_id, const std::string &name, int32_t x,
                                         int32_t y, int32_t z, int32_t orient, uint8_t team,
                                         uint16_t net_id, uint8_t anim_slot) {

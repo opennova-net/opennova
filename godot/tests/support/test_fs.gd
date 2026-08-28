@@ -9,7 +9,6 @@ extends RefCounted
 const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
 const MINIMAL_ASSETS_DIR := "res://../assets"
 const TMAP_TRN := "Tmap.trn"
-const TMAP_TERRAIN := "Tmap"
 
 
 ## Stage a runtime root under the cache dir: every tmap fixture file, then

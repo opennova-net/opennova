@@ -28,7 +28,7 @@
 //       sub_op 0x0A (no guided field-groups → D-NET-64 stays open), and there is
 //       no S2C 0x44 entity-routed nor S2C 0x59 deployed-item traffic.
 //
-// Reads the pcap directly via the shared apps/common reader from
+// Reads the pcap directly via the shared engine/base/pcapio reader from
 // <OPENNOVA_CAPTURES>/operation_whitenoise.pcapng; reports Skipped when the
 // capture is absent (.scratch is untracked).
 

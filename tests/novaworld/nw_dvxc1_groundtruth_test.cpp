@@ -14,7 +14,7 @@
 // fixtures/novaworld/dvxc1_manifest.txt is the ground-truth oracle. The host
 // (retail Jointops.exe + JOX expansion) serialized the mission onto the wire;
 // this test decodes the matching loopback capture and asserts each decoded record
-// reproduces the authored fact. Reads the pcap directly via the shared apps/common
+// reproduces the authored fact. Reads the pcap directly via the shared engine/base/pcapio
 // pcap reader; path <OPENNOVA_CAPTURES>/probe3.pcapng. Reports Skipped when
 // the capture is absent (.scratch is untracked) so CI stays green.
 

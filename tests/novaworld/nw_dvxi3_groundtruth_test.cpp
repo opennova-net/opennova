@@ -10,7 +10,7 @@
 // host (retail Jointops.exe) serialized that mission onto the wire; this test
 // decodes the matching loopback capture and asserts each decoded record
 // reproduces the authored fact. Reads the pcap directly via the shared
-// apps/common pcap reader from <OPENNOVA_CAPTURES>/probe2.pcapng. Reports
+// engine/base/pcapio pcap reader from <OPENNOVA_CAPTURES>/probe2.pcapng. Reports
 // Skipped when the capture is absent (it is a local-only artifact — .scratch is
 // untracked).
 
