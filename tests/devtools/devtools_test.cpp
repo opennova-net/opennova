@@ -118,7 +118,7 @@ void test_attach_sets_docking_and_viewport_policy() {
 	ImGui::SetCurrentContext(backend.context);
 }
 
-void test_game_window_is_the_mandatory_center_surface() {
+void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
 	CHECK(tools.pass().window_count() == 3, "Game + Stats + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
@@ -126,7 +126,7 @@ void test_game_window_is_the_mandatory_center_surface() {
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
 	CHECK(game.open, "Game opens from construction");
 	CHECK(!game.is_closeable(), "Game is mandatory");
-	CHECK(!game.is_undockable(), "Game stays in the application workspace");
+	CHECK(game.is_undockable(), "Game can detach from the application workspace");
 	CHECK(game.initial_dock_placement() == InitialDockPlacement::Center,
 			"Game owns the center dock");
 	CHECK(stats.initial_dock_placement() == InitialDockPlacement::Right,
@@ -226,8 +226,8 @@ void test_default_workspace_layout_is_created_once_and_preserves_user_layout() {
 								ImGuiWindowFlags_NoScrollWithMouse),
 				"Game has no collapse control or scrollbars");
 		CHECK(game != nullptr &&
-				(game->WindowClass.DockNodeFlagsOverrideSet & ImGuiDockNodeFlags_NoUndocking) != 0,
-				"Game's dock node cannot be undocked");
+				(game->WindowClass.DockNodeFlagsOverrideSet & ImGuiDockNodeFlags_NoUndocking) == 0,
+				"Game's dock node can be undocked");
 		ImGuiDockNode *root = game != nullptr && game->DockNode != nullptr
 				? ImGui::DockNodeGetRootNode(game->DockNode)
 				: nullptr;
@@ -402,7 +402,7 @@ void test_layout_reset_brings_windows_home() {
 int main() {
 	test_abi_fingerprint_is_the_pinned_one();
 	test_attach_sets_docking_and_viewport_policy();
-	test_game_window_is_the_mandatory_center_surface();
+	test_game_window_is_mandatory_and_detachable();
 	test_game_window_sends_responsive_integer_content_size_to_its_adapter();
 	test_game_window_orders_play_interact_and_close_requests();
 	test_default_workspace_layout_is_created_once_and_preserves_user_layout();

@@ -96,7 +96,8 @@ integration is not a one-off.
    `ImGuiConfigFlags_DockingEnable | ViewportsEnable`; the game layout is an
    opaque application workspace. On first use, Game owns the center and Stats
    starts in a roughly 30% right dock; an existing ImGui layout is preserved.
-   Game cannot close, collapse, or undock, while other tools remain detachable.
+   Game cannot close or collapse, but it can undock like the other tools and
+   become its own OS window while the root window is windowed.
    *Amended 2026-08-28:* multi-viewport is suspended while the root window is
    in either fullscreen mode. With `ViewportsEnable` set, a borderless
    fullscreen main window presents black through imgui-godot 6.3.2 on Godot
