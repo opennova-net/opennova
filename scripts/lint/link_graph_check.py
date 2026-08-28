@@ -35,9 +35,9 @@ Graph source, best available first (override with --source):
   files     a transitive walk of target_link_libraries() calls parsed
             from the repo's own CMake files — no build tree needed
             (what the pre-build CI lint step falls back to). Simple
-            single-assignment set() variables (TARGET_NAME,
-            OPENNOVA_CORE_TARGETS) are substituted so the adapter target
-            and the shared lib's whole-archive links are visible.
+            single-assignment set() variables (e.g. TARGET_NAME)
+            are substituted so variable-named targets stay visible to
+            the walk.
 
 Soft mode (default) always exits 0. --enforce makes violations exit 1.
 """
@@ -145,7 +145,7 @@ def strip_cmake_comments(text: str) -> str:
 
 def substitute_simple_vars(text: str) -> str:
     """Inline single-assignment set(VAR token...) values, one directory scope
-    (= one file) at a time, so ${TARGET_NAME} / ${OPENNOVA_CORE_TARGETS} links
+    (= one file) at a time, so ${TARGET_NAME}-style links
     become visible to the walk. Variables with generator expressions, quotes
     around multiple values, or re-assignment stay unresolved (their calls are
     then skipped, as before)."""

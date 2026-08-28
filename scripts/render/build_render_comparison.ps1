@@ -167,31 +167,6 @@ public static class OpenNovaRenderDelta
 '@
 }
 
-function New-NormalizedBitmap(
-    [System.Drawing.Bitmap]$Source,
-    [int]$Width,
-    [int]$Height
-) {
-    $normalized = [System.Drawing.Bitmap]::new(
-        $Width, $Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    $graphics = [System.Drawing.Graphics]::FromImage($normalized)
-    try {
-        $graphics.CompositingMode =
-            [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
-        $graphics.CompositingQuality =
-            [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
-        $graphics.InterpolationMode =
-            [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $graphics.PixelOffsetMode =
-            [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-        $graphics.DrawImage($Source, 0, 0, $Width, $Height)
-    }
-    finally {
-        $graphics.Dispose()
-    }
-    return $normalized
-}
-
 function Draw-Panel(
     [System.Drawing.Graphics]$Graphics,
     [System.Drawing.Bitmap]$Bitmap,
