@@ -215,7 +215,7 @@ int Simulation::set_character_avatar_database(
 }
 
 void Simulation::apply_collision_to_ai() {
-	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
+	collision_world_.terrain = terrain_store_.valid() ? &terrain_store_.height_field() : nullptr;
 	collision_world_.set_section_matrix_provider(this);
 	if (world_) {
 		world_->collision = &collision_world_;

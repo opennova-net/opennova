@@ -3,7 +3,10 @@
 #include <base/vfs/vfs.h>
 #include <formats/cpt/cpt_io.h>
 #include <formats/mission/mission.h>
+#include <formats/pcx/pcx_io.h>
 #include <formats/trn/trn_io.h>
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 #include <runtime/world/ammo_table_build.h>
 #include <net/npruntime/server_message_dispatch.h>
 #include <runtime/world/weapon_table_build.h>
@@ -139,34 +142,46 @@ bool RetailMissionRig::load_terrain(std::string &error) {
 		error = tname + ".trn: " + terr_err;
 		return false;
 	}
+	// The charmap surface raster for the footstep surface pick, decoded from
+	// the .trn-named PCX like the shell does (TerrainData's charmap slot);
+	// absent or undecodable = no surface map, the sampler's "no charmap ->
+	// surface 1" leg.
+	IndexedImage8 charmap;
+	std::vector<uint8_t> charmap_bytes;
+	if (!trn.charmap.empty()) {
+		if (!index.read_file(trn.charmap, charmap_bytes)) {
+			std::printf("rig: charmap %s is not under the mount - no surface map\n",
+					trn.charmap.c_str());
+		} else {
+			std::string charmap_err;
+			if (!decode_pcx_indexed(charmap_bytes.data(), charmap_bytes.size(), charmap,
+						charmap_err)) {
+				charmap = IndexedImage8{};
+				std::printf("rig: charmap %s did not decode (%s) - no surface map\n",
+						trn.charmap.c_str(), charmap_err.c_str());
+			}
+		}
+	}
 	// The same field the game builds (Simulation::set_terrain_height_field):
-	// own the buffer copy, flatten the 16x16 sector grid, apply the origins
-	// and the per-quadrant neighbour-tap locks.
-	heightmap = cpt.depth_buffer;
-	sector_grid.resize(256);
-	const int *grid = &trn.sector_grid[0][0];
-	for (int i = 0; i < 256; ++i) sector_grid[i] = grid[i];
-	terrain = terrain::TerrainHeightField{};
-	terrain.heightmap = heightmap.data();
-	terrain.dim = static_cast<int>(std::sqrt(static_cast<double>(heightmap.size())));
-	terrain.layout.sector_grid = sector_grid.data();
-	terrain.layout.origin_x = trn.origin_x;
-	terrain.layout.origin_y = trn.origin_y;
-	const TerrainQuadrantLocks locks = trn.get_quadrant_locks();
-	for (int q = 0; q < static_cast<int>(locks.size()); ++q)
-		terrain.locks.set(q, locks[q].x != 0, locks[q].y != 0);
-	terrain.has_water = false; // the water clamp is deferred, as in the game
-	return terrain.valid();
+	// the engine's one owning cpt/trn(+charmap) builder (ADR 0042 d4).
+	terrain::terrain_field_store_build(terrain_store, cpt, trn,
+			charmap.empty() ? nullptr : charmap.indices.data(),
+			charmap.width, charmap.height);
+	return terrain_store.valid();
 }
 
 void RetailMissionRig::wire_terrain() {
-	world.terrain = terrain.valid() ? &terrain : nullptr;
-	ai.terrain = terrain.valid() ? &terrain : nullptr;
-	collision.terrain = terrain.valid() ? &terrain : nullptr;
+	world.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
+	ai.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
+	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
+	// The footstep surface pick reads the charmap through this view, exactly
+	// as Simulation::apply_terrain_to_ai wires it (the rig has no mission .til
+	// path, matching the sim's empty-tiles leg).
+	world.surface_map = terrain_store.surface_map();
 }
 
 void RetailMissionRig::wire_collision() {
-	collision.terrain = terrain.valid() ? &terrain : nullptr;
+	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	collision.set_section_matrix_provider(this);
 	world.collision = &collision;
 	world.mounted_pose_provider = this;
@@ -871,7 +886,8 @@ void RetailMissionRig::set_entity_health(w::EntityHandle h, int32_t hp) {
 
 float RetailMissionRig::ground_height(float mission_x, float mission_y) const {
 	// The field's world frame is the renderer's: x, and z = -mission y.
-	return terrain::height_field_height_world_bilinear(terrain, mission_x, -mission_y);
+	return terrain::height_field_height_world_bilinear(terrain_store.height_field(),
+			mission_x, -mission_y);
 }
 
 // --- observation -----------------------------------------------------------------------

@@ -48,6 +48,7 @@
 #include <formats/cpt/cpt_io.h>
 #include <formats/trn/trn_io.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 #include <sstream>
 
 #include <algorithm>
@@ -258,13 +259,12 @@ int main(int argc, char **argv) {
 	// convoy pace loss and the 05TRcoop bunker-garrison pin were declared
 	// "does not reproduce headless, therefore the sim is exonerated" against
 	// this rig, which had no ground under either of them.
-	// Same pipeline the game uses, mirroring Simulation::set_terrain_height_field
-	// and godot::height_field_apply_trn (terrain_data.cpp:388-402).
+	// Same pipeline the game uses: the engine's one owning cpt/trn field
+	// builder (terrain_field_store_build, ADR 0042 d4 — the store
+	// Simulation::set_terrain_height_field fills).
 	opennova::CptFile cpt;
 	opennova::TrnConfig trn;
-	std::vector<uint16_t> heightmap;
-	std::vector<int> sector_grid;
-	opennova::terrain::TerrainHeightField terrain_field;
+	opennova::terrain::TerrainFieldStore terrain_store;
 	{
 		const std::string tname = m.get_terrain();
 		std::vector<uint8_t> cpt_bytes, trn_bytes;
@@ -274,26 +274,14 @@ int main(int argc, char **argv) {
 				opennova::load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, terr_err)) {
 			std::string raw(reinterpret_cast<const char *>(trn_bytes.data()), trn_bytes.size());
 			std::istringstream ts(raw);
-			if (opennova::load_trn(ts, trn, terr_err) && !cpt.depth_buffer.empty()) {
-				heightmap = cpt.depth_buffer;
-				sector_grid.resize(256);
-				const int *grid = &trn.sector_grid[0][0];
-				for (int i = 0; i < 256; ++i) sector_grid[i] = grid[i];
-				terrain_field.heightmap = heightmap.data();
-				terrain_field.dim = static_cast<int>(
-						std::sqrt(static_cast<double>(heightmap.size())));
-				terrain_field.layout.sector_grid = sector_grid.data();
-				terrain_field.layout.origin_x = trn.origin_x;
-				terrain_field.layout.origin_y = trn.origin_y;
-				const opennova::TerrainQuadrantLocks src = trn.get_quadrant_locks();
-				for (int q = 0; q < static_cast<int>(src.size()); ++q)
-					terrain_field.locks.set(q, src[q].x != 0, src[q].y != 0);
-			}
+			if (opennova::load_trn(ts, trn, terr_err) && !cpt.depth_buffer.empty())
+				opennova::terrain::terrain_field_store_build(terrain_store, cpt, trn);
 		}
-		if (terrain_field.valid()) {
-			world.terrain = &terrain_field;
-			ai.terrain = &terrain_field;
-			std::printf("terrain: %s loaded, dim %d\n", tname.c_str(), terrain_field.dim);
+		if (terrain_store.valid()) {
+			world.terrain = &terrain_store.height_field();
+			ai.terrain = &terrain_store.height_field();
+			std::printf("terrain: %s loaded, dim %d\n", tname.c_str(),
+					terrain_store.height_field().dim);
 		} else {
 			std::printf("terrain: NOT LOADED (ref=%s) - THE GROUND SOLVE WILL NOT RUN\n",
 					tname.c_str());
@@ -319,7 +307,7 @@ int main(int argc, char **argv) {
 		const int attached =
 				simassets::resolve_collision_instances(world, items, collision_state, deps);
 		collision.set_section_matrix_provider(&collision_pose);
-		collision.terrain = terrain_field.valid() ? &terrain_field : nullptr;
+		collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 		world.collision = &collision;
 		ai.collision = &collision;
 		std::printf("collision: %d entities attached to a model\n", attached);

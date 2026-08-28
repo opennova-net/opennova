@@ -14,6 +14,7 @@
 #include <runtime/terrain/terrain_static_shadow_planner.h>
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain_query/terrain_field_store.h>
 
 #include <array>
 #include <cstdint>
@@ -31,15 +32,11 @@ class TerrainTileInfo;
 // (caster set, light quantum, receiver terrain, config — never material time,
 // which rides each work item). Worker threads clone only the portable planner,
 // whose immutable caster set is shared by pointer, and keep the receiver
-// storage alive; no Godot Object or rendering API crosses the worker boundary.
-struct TerrainStaticShadowReceiverStorage {
-	std::vector<uint16_t> heightmap;
-	std::array<int, 16 * 16> sector_grid{};
-};
-
+// terrain store (the engine's one cpt/trn field builder, ADR 0042 d4) alive;
+// no Godot Object or rendering API crosses the worker boundary.
 struct TerrainStaticShadowCompilationSnapshot {
 	uint64_t revision = 0;
-	std::shared_ptr<const TerrainStaticShadowReceiverStorage> receiver_storage;
+	std::shared_ptr<const opennova::terrain::TerrainFieldStore> receiver_storage;
 	opennova::terrain::TerrainStaticShadowPlanner planner;
 };
 

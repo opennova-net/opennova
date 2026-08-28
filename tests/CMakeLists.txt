@@ -1091,6 +1091,16 @@ target_link_libraries(terrain_raycast_test PRIVATE opennova_runtime)
 target_include_directories(terrain_raycast_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_raycast COMMAND terrain_raycast_test)
 
+# The ONE owning cpt/trn(+charmap) -> TerrainHeightField + SurfaceTypeMap
+# builder (engine/runtime/terrain_query/terrain_field_store, ADR 0042 d4):
+# dims/origins/locks land in the views, a height sample and a surface index
+# round-trip through the store's own copies, and the copies outlive the
+# source documents.
+add_executable(terrain_field_store_test terrain_query/terrain_field_store_test.cpp)
+target_link_libraries(terrain_field_store_test PRIVATE opennova_runtime)
+target_include_directories(terrain_field_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_field_store COMMAND terrain_field_store_test)
+
 # Particle (.ptl) tests. Format half (engine/formats/ptl: model/parser/writer/
 # tables) links opennova_formats; sim half (engine/runtime/particle: emitter +
 # effect scene) links opennova_runtime. Witness matrix:
