@@ -159,11 +159,6 @@ MissionEnvironment *Weather::_env_node() const {
 	return nullptr;
 }
 
-opennova::env::EnvironmentState *Weather::_env_state() const {
-	MissionEnvironment *env = _env_node();
-	return env != nullptr ? &env->state() : nullptr;
-}
-
 void Weather::_post_runtime(MissionEnvironment *p_env) {
 	if (p_env == nullptr || !p_env->state().is_loaded()) {
 		return;
@@ -173,8 +168,6 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 			opennova::env::build_weather_shader_globals(p_env->state(),
 					runtime_, p_env->is_underwater_view());
 	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_fill_light",
-			to_vector3(globals.base.fill_light));
 	rs->global_shader_parameter_set("opennova_sun_light",
 			to_vector3(globals.base.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
@@ -188,12 +181,6 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 	rs->global_shader_parameter_set("opennova_fog_start",
 			globals.base.fog_start);
 	rs->global_shader_parameter_set("opennova_fog_type", globals.base.fog_type);
-	rs->global_shader_parameter_set("opennova_wind_sway_amount",
-			globals.base.wind_sway_amount);
-	rs->global_shader_parameter_set("opennova_wind_sway_phase",
-			globals.base.wind_sway_phase);
-	rs->global_shader_parameter_set("opennova_color_src_gain",
-			to_vector3(globals.color_src_gain));
 }
 
 void Weather::_ready() {

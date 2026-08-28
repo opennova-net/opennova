@@ -70,10 +70,6 @@ public:
 	StringName get_script_name() const;
 	void set_auto_start(bool p_auto);
 	bool get_auto_start() const;
-	void set_player_pool_size(int p_size);
-	int get_player_pool_size() const;
-	void set_audio_bus(const StringName &p_bus);
-	StringName get_audio_bus() const;
 
 	// Methods
 	void start();

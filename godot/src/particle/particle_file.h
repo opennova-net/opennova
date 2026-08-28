@@ -42,8 +42,6 @@ public:
 	TypedArray<ParticleDef> get_particles() const;
 	void set_tables(const TypedArray<ParticleTable> &v);
 	TypedArray<ParticleTable> get_tables() const;
-	void set_table_handles(const TypedArray<ParticleTableHandles> &v);
-	TypedArray<ParticleTableHandles> get_table_handles() const;
 
 	// File I/O — return Error code (OK on success).
 	Error load_from_file(const String &path);

@@ -243,12 +243,6 @@ PackedColorArray WaterCore::strip_colors() const {
 	return packed_argb_to_colors(strip_rows.diffuse);
 }
 
-PackedColorArray WaterCore::strip_speculars() const {
-	// The row-constant specular (WaterColorLit RGB under the distance alpha)
-	// (retail: @ 0x5c2eb5..0x5c2ef4, see docs/env/env-tod-re.md).
-	return packed_argb_to_colors(strip_rows.specular);
-}
-
 PackedFloat32Array WaterCore::strip_custom1() const {
 	// The specular as the mesh's ARRAY_CUSTOM1 payload (RGBA_FLOAT custom
 	// arrays only accept PackedFloat32Array): 4 floats per vertex, raw bytes

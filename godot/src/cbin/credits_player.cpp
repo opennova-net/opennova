@@ -50,26 +50,6 @@ void position_control_horizontal(Control *node, float node_width, HorizontalAlig
 void CreditsPlayer::_bind_methods() {
 	// Resource property.
 	ClassDB::bind_method(D_METHOD("set_credits_resource", "resource"), &CreditsPlayer::set_credits_resource);
-	ClassDB::bind_method(D_METHOD("get_credits_resource"), &CreditsPlayer::get_credits_resource);
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "credits_resource", PROPERTY_HINT_RESOURCE_TYPE,
-	                          "CbinCreditsResource"),
-	             "set_credits_resource", "get_credits_resource");
-
-	// Path properties.
-	ClassDB::bind_method(D_METHOD("set_font_base_path", "path"), &CreditsPlayer::set_font_base_path);
-	ClassDB::bind_method(D_METHOD("get_font_base_path"), &CreditsPlayer::get_font_base_path);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "font_base_path", PROPERTY_HINT_DIR), "set_font_base_path",
-	             "get_font_base_path");
-
-	ClassDB::bind_method(D_METHOD("set_texture_base_path", "path"), &CreditsPlayer::set_texture_base_path);
-	ClassDB::bind_method(D_METHOD("get_texture_base_path"), &CreditsPlayer::get_texture_base_path);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "texture_base_path", PROPERTY_HINT_DIR), "set_texture_base_path",
-	             "get_texture_base_path");
-
-	// Speed scale.
-	ClassDB::bind_method(D_METHOD("set_speed_scale", "scale"), &CreditsPlayer::set_speed_scale);
-	ClassDB::bind_method(D_METHOD("get_speed_scale"), &CreditsPlayer::get_speed_scale);
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "speed_scale"), "set_speed_scale", "get_speed_scale");
 
 	// Playback control.
 	ClassDB::bind_method(D_METHOD("play"), &CreditsPlayer::play);
@@ -88,8 +68,6 @@ void CreditsPlayer::_bind_methods() {
 
 	// Autoplay.
 	ClassDB::bind_method(D_METHOD("set_autoplay", "autoplay"), &CreditsPlayer::set_autoplay);
-	ClassDB::bind_method(D_METHOD("get_autoplay"), &CreditsPlayer::get_autoplay);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "autoplay"), "set_autoplay", "get_autoplay");
 
 	// Entry-lookup helpers (for editor scroll sync).
 
@@ -107,10 +85,6 @@ CreditsPlayer::~CreditsPlayer() {}
 
 void CreditsPlayer::set_autoplay(bool p_autoplay) {
 	autoplay_ = p_autoplay;
-}
-
-bool CreditsPlayer::get_autoplay() const {
-	return autoplay_;
 }
 
 void CreditsPlayer::_notification(int p_what) {
@@ -179,32 +153,6 @@ void CreditsPlayer::_rebuild_content_if_needed() {
 	}
 }
 
-Ref<CbinCreditsResource> CreditsPlayer::get_credits_resource() const {
-	return credits_resource_;
-}
-
-void CreditsPlayer::set_font_base_path(const String &p_path) {
-	font_base_path_ = p_path;
-	if (!font_base_path_.is_empty() && !font_base_path_.ends_with("/")) {
-		font_base_path_ += "/";
-	}
-}
-
-String CreditsPlayer::get_font_base_path() const {
-	return font_base_path_;
-}
-
-void CreditsPlayer::set_texture_base_path(const String &p_path) {
-	texture_base_path_ = p_path;
-	if (!texture_base_path_.is_empty() && !texture_base_path_.ends_with("/")) {
-		texture_base_path_ += "/";
-	}
-}
-
-String CreditsPlayer::get_texture_base_path() const {
-	return texture_base_path_;
-}
-
 void CreditsPlayer::play() {
 	if (!credits_resource_.is_valid()) return;
 
@@ -247,14 +195,6 @@ void CreditsPlayer::resume() {
 
 bool CreditsPlayer::is_playing() const {
 	return playing_ && !paused_;
-}
-
-void CreditsPlayer::set_speed_scale(float p_scale) {
-	speed_scale_ = p_scale;
-}
-
-float CreditsPlayer::get_speed_scale() const {
-	return speed_scale_;
 }
 
 void CreditsPlayer::rebuild() {

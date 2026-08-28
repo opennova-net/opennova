@@ -19,8 +19,6 @@ void ParticleFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_particles"), &ParticleFile::get_particles);
 	ClassDB::bind_method(D_METHOD("set_tables", "v"), &ParticleFile::set_tables);
 	ClassDB::bind_method(D_METHOD("get_tables"), &ParticleFile::get_tables);
-	ClassDB::bind_method(D_METHOD("set_table_handles", "v"), &ParticleFile::set_table_handles);
-	ClassDB::bind_method(D_METHOD("get_table_handles"), &ParticleFile::get_table_handles);
 
 	ClassDB::bind_method(D_METHOD("load_from_file", "path"), &ParticleFile::load_from_file);
 	ClassDB::bind_method(D_METHOD("load_from_buffer", "bytes", "display_path"), &ParticleFile::load_from_buffer);
@@ -37,9 +35,6 @@ void ParticleFile::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "tables", PROPERTY_HINT_TYPE_STRING,
 			String::num(Variant::OBJECT) + "/" + String::num(PROPERTY_HINT_RESOURCE_TYPE) + ":ParticleTable"),
 			"set_tables", "get_tables");
-	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "table_handles", PROPERTY_HINT_TYPE_STRING,
-			String::num(Variant::OBJECT) + "/" + String::num(PROPERTY_HINT_RESOURCE_TYPE) + ":ParticleTableHandles"),
-			"set_table_handles", "get_table_handles");
 }
 
 void ParticleFile::set_source_path(const String &p) { source_path = p; }
@@ -50,8 +45,6 @@ void ParticleFile::set_particles(const TypedArray<ParticleDef> &v) { particles =
 TypedArray<ParticleDef> ParticleFile::get_particles() const { return particles; }
 void ParticleFile::set_tables(const TypedArray<ParticleTable> &v) { tables = v; emit_changed(); }
 TypedArray<ParticleTable> ParticleFile::get_tables() const { return tables; }
-void ParticleFile::set_table_handles(const TypedArray<ParticleTableHandles> &v) { table_handles = v; emit_changed(); }
-TypedArray<ParticleTableHandles> ParticleFile::get_table_handles() const { return table_handles; }
 
 Error ParticleFile::load_from_file(const String &path) {
 	Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);

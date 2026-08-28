@@ -4,10 +4,7 @@ namespace godot {
 
 #define STAT_BIND(klass, field)                                          \
 	ClassDB::bind_method(D_METHOD("get_" #field), &klass::get_##field);       \
-	ClassDB::bind_method(D_METHOD("set_" #field, "value"),                    \
-			&klass::set_##field);                                             \
-	ADD_PROPERTY(PropertyInfo(Variant::INT, #field), "set_" #field,           \
-			"get_" #field);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, #field), "", "get_" #field);
 
 void MissionPresentStats::_bind_methods() {
 	STAT_BIND(MissionPresentStats, moved)

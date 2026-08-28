@@ -42,10 +42,6 @@ void MusicDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_script_name"), &MusicDirector::get_script_name);
 	ClassDB::bind_method(D_METHOD("set_auto_start", "auto"), &MusicDirector::set_auto_start);
 	ClassDB::bind_method(D_METHOD("get_auto_start"), &MusicDirector::get_auto_start);
-	ClassDB::bind_method(D_METHOD("set_player_pool_size", "size"), &MusicDirector::set_player_pool_size);
-	ClassDB::bind_method(D_METHOD("get_player_pool_size"), &MusicDirector::get_player_pool_size);
-	ClassDB::bind_method(D_METHOD("set_audio_bus", "bus"), &MusicDirector::set_audio_bus);
-	ClassDB::bind_method(D_METHOD("get_audio_bus"), &MusicDirector::get_audio_bus);
 
 	// Methods
 	ClassDB::bind_method(D_METHOD("start"), &MusicDirector::start);
@@ -84,11 +80,6 @@ void MusicDirector::_bind_methods() {
 			"set_script_name", "get_script_name");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_start"),
 			"set_auto_start", "get_auto_start");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "player_pool_size",
-						 PROPERTY_HINT_RANGE, "1,16,1"),
-			"set_player_pool_size", "get_player_pool_size");
-	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "audio_bus"),
-			"set_audio_bus", "get_audio_bus");
 
 	// Signals
 	ADD_SIGNAL(MethodInfo("section_entered",
@@ -163,28 +154,6 @@ void MusicDirector::set_auto_start(bool p_auto) {
 
 bool MusicDirector::get_auto_start() const {
 	return _auto_start;
-}
-
-void MusicDirector::set_player_pool_size(int p_size) {
-	_player_pool_size = (p_size < 1) ? 1 : p_size;
-}
-
-int MusicDirector::get_player_pool_size() const {
-	return _player_pool_size;
-}
-
-void MusicDirector::set_audio_bus(const StringName &p_bus) {
-	_audio_bus = p_bus;
-	for (int i = 0; i < _players.size(); ++i) {
-		AudioStreamPlayer *p = _players[i];
-		if (p) {
-			p->set_bus(_audio_bus);
-		}
-	}
-}
-
-StringName MusicDirector::get_audio_bus() const {
-	return _audio_bus;
 }
 
 // --- Lifecycle ---------------------------------------------------------

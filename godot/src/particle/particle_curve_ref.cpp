@@ -3,19 +3,8 @@
 using namespace godot;
 
 void ParticleCurveRef::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_name", "value"), &ParticleCurveRef::set_name);
-	ClassDB::bind_method(D_METHOD("get_name"), &ParticleCurveRef::get_name);
-	ClassDB::bind_method(D_METHOD("set_reverse", "value"), &ParticleCurveRef::set_reverse);
-	ClassDB::bind_method(D_METHOD("get_reverse"), &ParticleCurveRef::get_reverse);
-	ClassDB::bind_method(D_METHOD("set_inverse", "value"), &ParticleCurveRef::set_inverse);
-	ClassDB::bind_method(D_METHOD("get_inverse"), &ParticleCurveRef::get_inverse);
-	ClassDB::bind_method(D_METHOD("set_present", "value"), &ParticleCurveRef::set_present);
-	ClassDB::bind_method(D_METHOD("get_present"), &ParticleCurveRef::get_present);
-
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "name"), "set_name", "get_name");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "reverse"), "set_reverse", "get_reverse");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "inverse"), "set_inverse", "get_inverse");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "present"), "set_present", "get_present");
+	// No GDScript surface: the class stays registered only as the typed
+	// Ref<ParticleCurveRef> the C++ particle runtime carries.
 }
 
 void ParticleCurveRef::set_name(const String &p_value) {

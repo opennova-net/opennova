@@ -3,16 +3,8 @@
 using namespace godot;
 
 void ParticleTableHandles::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_table_id", "value"), &ParticleTableHandles::set_table_id);
-	ClassDB::bind_method(D_METHOD("get_table_id"), &ParticleTableHandles::get_table_id);
-	ClassDB::bind_method(D_METHOD("set_handlecount", "value"), &ParticleTableHandles::set_handlecount);
-	ClassDB::bind_method(D_METHOD("get_handlecount"), &ParticleTableHandles::get_handlecount);
-	ClassDB::bind_method(D_METHOD("set_tightness", "value"), &ParticleTableHandles::set_tightness);
-	ClassDB::bind_method(D_METHOD("get_tightness"), &ParticleTableHandles::get_tightness);
-
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "table_id"), "set_table_id", "get_table_id");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "handlecount"), "set_handlecount", "get_handlecount");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "tightness"), "set_tightness", "get_tightness");
+	// No GDScript surface: the class stays registered only as the typed
+	// .ptl edithandles record ParticleFile carries through load/save.
 }
 
 void ParticleTableHandles::set_table_id(const String &p_value) {

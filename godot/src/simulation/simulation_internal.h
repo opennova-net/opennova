@@ -92,22 +92,11 @@ inline int32_t trace_profile_lane(int64_t value) {
 			value, 0, std::numeric_limits<int32_t>::max()));
 }
 
-inline opennova::world::SeatType seat_type_from_variant(int value) {
-	switch (value) {
-		case static_cast<int>(opennova::world::SeatType::Passenger): return opennova::world::SeatType::Passenger;
-		case static_cast<int>(opennova::world::SeatType::Controller): return opennova::world::SeatType::Controller;
-		case static_cast<int>(opennova::world::SeatType::Gunner): return opennova::world::SeatType::Gunner;
-		case static_cast<int>(opennova::world::SeatType::Driver): return opennova::world::SeatType::Driver;
-		default: return opennova::world::SeatType::None;
-	}
-}
-
 // The seat/mount pose predicates moved to the engine (ADR 0028):
 // engine/runtime/simassets pose_inputs.h. The using declarations keep this
 // header's call sites unchanged.
 using opennova::simassets::mount_blocks_weapon_channel;
 using opennova::simassets::mount_collapses_right_hand_row;
-using opennova::simassets::seat_type_blocks_weapon_channel;
 
 // The policy lives in engine/runtime/mission placement_traits.h; this wrapper
 // only answers the "does the catalog carry the player visual?" probe from the
@@ -122,8 +111,6 @@ static_assert(opennova::mission::kPlayerRuntimeTypeId ==
 		opennova::world::kPlayerInfantryTypeId);
 
 using opennova::simassets::aim_overlay_inputs_for;
-using opennova::simassets::mount_mode_for;
-using opennova::simassets::mount_mode_for_seat_type;
 
 // The decoded-row lookup + the mounted-shooter carrier-exclusion rule moved to
 // the engine with the joiner bridge (S10a, ADR 0028):
@@ -145,14 +132,6 @@ inline constexpr char kHeatGlowRegister[] = "HEAT_GLOW";
 // declarations keep this header's call sites unchanged.
 using opennova::world::world_model_heat_glow_for;
 
-inline void assign_world_model_heat_glow(Dictionary &r_controls,
-		const opennova::world::World &world,
-		const opennova::world::Entity &entity) {
-	int32_t heat_glow = 0;
-	if (world_model_heat_glow_for(world, entity, heat_glow))
-		r_controls[String(kHeatGlowRegister)] = heat_glow;
-}
-
 inline void write_present_world_model_heat_glow(float *record,
 		const opennova::world::World &world,
 		const opennova::world::Entity &entity) {
@@ -160,24 +139,6 @@ inline void write_present_world_model_heat_glow(float *record,
 	if (!world_model_heat_glow_for(world, entity, heat_glow)) return;
 	record[Simulation::PF_WORLD_HEAT_GLOW_VALID] = 1.0f;
 	record[Simulation::PF_WORLD_HEAT_GLOW] = static_cast<float>(heat_glow);
-}
-
-// Publish the two PLAYPARTANIM accumulators onto retail's semantic CTRL bus.
-// The action writes direction/rate at comp[109..112] and the integrator advances
-// comp[113]/comp[114]. HUD_CacheEntityDisplayInfo then publishes those exact
-// phase fields as VEHICLE_SPECIAL1/2; it never walks the model's CTRL list.
-// SPECIAL1 alone is suppressed by ItemDefAttrib 0x1000 (FastRope), while
-// SPECIAL2 is unconditional.
-// [orig: Entity_ApplyCommand case 0x22 @ 0x43B192; integrator @ 0x456710;
-//  HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38; global CTRL ordinals
-//  VEHICLE_SPECIAL1=71 / VEHICLE_SPECIAL2=72]
-template <typename PhaseFn>
-inline void assign_part_anim_phases(Dictionary &r_controls,
-		bool p_publish_special1, PhaseFn p_phase_for) {
-	if (p_publish_special1) {
-		r_controls[String(kVehicleSpecial1Register)] = p_phase_for(0);
-	}
-	r_controls[String(kVehicleSpecial2Register)] = p_phase_for(1);
 }
 
 inline void write_present_vehicle_motion_controls(float *record,
@@ -211,15 +172,11 @@ inline void write_present_vehicle_motion_controls(float *record,
 }
 
 using opennova::world::EmplacedWeaponControls;
-using opennova::world::emplaced_clamp_turret_bam;
-using opennova::world::emplaced_control_phase;
 using opennova::world::emplaced_weapon_controls_for;
-using opennova::world::turret_limit_bam;
 
 // The client-replica present composition helpers moved to the engine
 // (ADR 0031): engine/net/npruntime client_replica_present.h. The using
 // declarations keep this family's call sites unchanged.
-using opennova::np::aim_overlay_inputs_for_client;
 using opennova::np::emplaced_weapon_controls_for_client;
 using opennova::np::write_present_emplaced_controls;
 
@@ -250,19 +207,6 @@ inline Vector3 mission_euler_from_overlay(
 
 using opennova::np::write_present_held_weapon;
 using opennova::np::write_present_overlay;
-
-inline Array aim_overlay_deltas_for(
-		const opennova::anim::AimOverlayAngles
-				angles[opennova::anim::kOverlayClassCount]) {
-	Array deltas;
-	deltas.resize(opennova::anim::kOverlayClassCount);
-	const Basis inverse_body =
-			godot_model_basis_from_overlay(
-					angles[opennova::anim::kOverlayBody]).inverse();
-	for (int i = 0; i < opennova::anim::kOverlayClassCount; ++i)
-		deltas[i] = inverse_body * godot_model_basis_from_overlay(angles[i]);
-	return deltas;
-}
 
 inline std::string dictionary_string(const Dictionary &d, const char *key, const std::string &fallback) {
 	if (!d.has(key)) return fallback;
@@ -302,14 +246,8 @@ inline int32_t dictionary_i32(const Dictionary &d, const char *key, int32_t fall
 // The collision/occlusion/bound-radius builders and the model predicates
 // moved to the engine (ADR 0028): engine/runtime/simassets. The using
 // declarations keep this header's call sites unchanged.
-using opennova::simassets::collision_model_from_3di;
 using opennova::simassets::model_bound_radius_from_3di;
-using opennova::simassets::occlusion_model_from_3di;
 
-
-inline constexpr double kHalfPi = 1.57079632679489661923;
-inline constexpr double kRadiansPerDegree =
-		3.14159265358979323846 / 180.0;
 
 // S4b (ADR 0028): the joiner's addeweap reconstruction rides the SAME engine
 // resolver the host authority runs (simassets::resolve_model_mounted_pose) —

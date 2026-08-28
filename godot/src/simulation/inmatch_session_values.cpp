@@ -33,10 +33,6 @@ void MissionFrameInput::_bind_methods() {
 			"set_look_delta", "get_look_delta");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sequence"),
 			"set_sequence", "get_sequence");
-	BIND_ENUM_CONSTANT(HELD_FIRE);
-	BIND_ENUM_CONSTANT(PRESSED_FIRE);
-	BIND_ENUM_CONSTANT(PRESSED_RELOAD);
-	BIND_ENUM_CONSTANT(PRESSED_MEDIC_REQUEST);
 }
 
 void MissionFrameInput::set_delta_seconds(double p_delta) {
@@ -124,7 +120,6 @@ void MissionFrameOutcome::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_state"), &MissionFrameOutcome::get_state);
 	ClassDB::bind_method(D_METHOD("get_ticks"), &MissionFrameOutcome::get_ticks);
 	ClassDB::bind_method(D_METHOD("get_ticks_run"), &MissionFrameOutcome::get_ticks_run);
-	ClassDB::bind_method(D_METHOD("get_frame_us"), &MissionFrameOutcome::get_frame_us);
 	ClassDB::bind_method(D_METHOD("get_tick_us"), &MissionFrameOutcome::get_tick_us);
 	ClassDB::bind_method(D_METHOD("get_error"), &MissionFrameOutcome::get_error);
 	ClassDB::bind_method(D_METHOD("is_terminal"), &MissionFrameOutcome::is_terminal);
@@ -133,19 +128,9 @@ void MissionFrameOutcome::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "state"), "", "get_state");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "ticks"), "", "get_ticks");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "ticks_run"), "", "get_ticks_run");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_us"), "", "get_frame_us");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tick_us"), "", "get_tick_us");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "error"), "", "get_error");
-	BIND_ENUM_CONSTANT(STATUS_OK);
-	BIND_ENUM_CONSTANT(STATUS_NOT_RUNNING);
-	BIND_ENUM_CONSTANT(STATUS_SESSION_LOST);
-	BIND_ENUM_CONSTANT(STATUS_FATAL);
-	BIND_ENUM_CONSTANT(STATE_UNLOADED);
-	BIND_ENUM_CONSTANT(STATE_CONNECTING);
-	BIND_ENUM_CONSTANT(STATE_LOADING);
 	BIND_ENUM_CONSTANT(STATE_RUNNING);
-	BIND_ENUM_CONSTANT(STATE_PAUSED);
-	BIND_ENUM_CONSTANT(STATE_STOPPING);
 	BIND_ENUM_CONSTANT(STATE_FAILED);
 }
 
@@ -163,7 +148,6 @@ void MissionFrameOutcome::assign(const opennova::inmatch::FrameOutcome &p_value)
 		value->assign(tick);
 		ticks_.push_back(value);
 	}
-	frame_us_ = p_value.perf.frame_us;
 	tick_us_ = p_value.perf.tick_us;
 	error_ = String::utf8(p_value.error.message.c_str());
 }

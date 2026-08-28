@@ -586,13 +586,6 @@ void TerrainData::set_sector_grid(const PackedInt32Array &p_grid) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-String TerrainData::_texture_to_filename(const Ref<Texture2D> &p_tex) {
-	if (p_tex.is_null()) return "";
-	String path = p_tex->get_path();
-	if (path.is_empty()) return "";
-	return path.get_file();
-}
-
 static void _sync_texture_filename(const Ref<Texture2D> &texture, std::string &target_field) {
 	if (texture.is_null()) {
 		return;

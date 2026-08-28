@@ -115,11 +115,6 @@ public:
 	// Layer-1 UV drift per second at the current smoothed rate — the water
 	// surface's scroll-speed source.
 	float get_cloud_uv_rate_per_second() const;
-
-	// env #27: refresh the scalar spring targets (world units); currents ramp.
-	void set_scalar_targets(float p_fog_distance, float p_sky_height);
-	// Local mission-start scalar current <- target copy (retail: sub_57F1E0, see docs/env/env-tod-re.md).
-	void snap_scalar_currents_to_targets();
 	// Apply the scalar subset decoded from one S2C 0x0A phase-2 sample. Inputs
 	// are the narrowed wire units; engine/formats/env owns the exact reconstruction.
 	void apply_network_environment_sample(int p_fog_dist, int p_fog_accel,

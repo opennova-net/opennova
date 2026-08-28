@@ -179,7 +179,6 @@ float HudOverlay::friendly_tag_lift() { return opennova::hud::kFriendlyTagLiftUn
 
 void HudOverlay::_bind_methods() {
 	BIND_ENUM_CONSTANT(SHOWHUD_FLAG_GUN);
-	BIND_ENUM_CONSTANT(SHOWHUD_FLAG_SPINMAP);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("hud_color_index_default"), &HudOverlay::hud_color_index_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("clamp_hud_color_index", "index"), &HudOverlay::clamp_hud_color_index);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_color_index", "index"), &HudOverlay::next_hud_color_index);

@@ -87,7 +87,6 @@ public:
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	void set_water_height(float p_value);
 	float get_water_height() const { return water_height_; }
-	void set_water_alpha(float p_value) { water_alpha_ = p_value; }
 	float get_water_alpha() const { return water_alpha_; }
 
 	// The mission/BMS rung in world units; NAN means absent. Zero is

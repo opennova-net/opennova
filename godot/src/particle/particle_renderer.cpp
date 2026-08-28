@@ -1369,13 +1369,6 @@ ParticleRenderer::ParticleRenderer() : impl_(std::make_unique<Impl>()) {}
 
 ParticleRenderer::~ParticleRenderer() = default;
 
-String ParticleRenderer::retail_frame_name(const String &p_authored,
-		int p_frame_count, int p_frame) {
-	return String(opennova::renderer::retail_particle_frame_name(
-			std::string(p_authored.utf8().get_data()), p_frame_count, p_frame)
-					.c_str());
-}
-
 void ParticleRenderer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("warm_pipelines", "position"),
 			&ParticleRenderer::warm_pipelines);

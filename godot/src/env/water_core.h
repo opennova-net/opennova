@@ -85,7 +85,6 @@ public:
 	// Row diffuse / specular ARGB per vertex as raw bytes / 255 (no
 	// color-space conversion) (retail: written @ 0x5c2f0a..0x5c2f2b, see docs/env/env-tod-re.md).
 	PackedColorArray strip_colors() const;
-	PackedColorArray strip_speculars() const;
 	// The specular again as 4 floats per vertex (RGBA, raw bytes / 255) —
 	// ARRAY_CUSTOM1 under the RGBA_FLOAT format only accepts a
 	// PackedFloat32Array, and the shader consumes it as CUSTOM1: the ps.1.1

@@ -21,7 +21,6 @@ void ObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_source_path"), &ObjectData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &ObjectData::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_summary"), &ObjectData::get_summary);
-	ClassDB::bind_method(D_METHOD("get_lod_surfaces", "lod_index"), &ObjectData::get_lod_surfaces);
 	ClassDB::bind_method(D_METHOD("get_materials"), &ObjectData::get_materials);
 	ClassDB::bind_method(D_METHOD("get_material_info", "index"), &ObjectData::get_material_info);
 	ClassDB::bind_method(D_METHOD("get_control_registers"), &ObjectData::get_control_registers);
@@ -61,24 +60,5 @@ void ObjectData::_bind_methods() {
 	BIND_CONSTANT(MATERIAL_FLAG_ALPHA_TEST);
 	BIND_CONSTANT(MATERIAL_FLAG_ALPHA_INVERT);
 	BIND_CONSTANT(MATERIAL_FLAG_TWO_SIDED);
-	BIND_CONSTANT(TEX_FLAG_ANIMATED);
-	BIND_CONSTANT(TEX_FLAG_CLAMPED);
-	BIND_CONSTANT(TEX_SLOT_DIFFUSE);
-	BIND_CONSTANT(TEX_SLOT_DETAIL);
-	BIND_CONSTANT(TEX_SLOT_NORMAL);
-	BIND_CONSTANT(TEX_SLOT_NORMAL_B);
-	BIND_CONSTANT(LIGHT_FLAG_DISABLE_CORONA);
-	BIND_CONSTANT(LIGHT_FLAG_DISABLE_TERRAIN);
-	BIND_CONSTANT(LIGHT_FLAG_DISABLE_OBJECTS);
-	BIND_CONSTANT(LIGHT_FLAG_TYPE_TARGET);
-
-	// Generator-style consumers + catalog/unit statics (engine
-	// threedi/threedi_panm.h values and tables).
-	BIND_CONSTANT(GENERATOR_CONSUMER_UV);
-	BIND_CONSTANT(GENERATOR_CONSUMER_RGB);
-	BIND_CONSTANT(GENERATOR_CONSUMER_ALPHA);
-	BIND_CONSTANT(GENERATOR_CONSUMER_LIGHT);
-	BIND_CONSTANT(GENERATOR_CONSUMER_PANM);
-
 	ADD_SIGNAL(MethodInfo("object_changed"));
 }

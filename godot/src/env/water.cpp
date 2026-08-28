@@ -49,12 +49,10 @@ void Water::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "water_height",
 						 PROPERTY_HINT_RANGE, "-100,200,0.1"),
 			"set_water_height", "get_water_height");
-	ClassDB::bind_method(D_METHOD("set_water_alpha", "value"),
-			&Water::set_water_alpha);
 	ClassDB::bind_method(D_METHOD("get_water_alpha"), &Water::get_water_alpha);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "water_alpha",
 						 PROPERTY_HINT_RANGE, "0,1,0.01"),
-			"set_water_alpha", "get_water_alpha");
+			"", "get_water_alpha");
 
 	ClassDB::bind_method(D_METHOD("set_mission_water_height_override", "value"),
 			&Water::set_mission_water_height_override);
