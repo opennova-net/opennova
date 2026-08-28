@@ -60,21 +60,21 @@ func current_script() -> MusicScript:
 ## script always come from the SAME stem (the script's play ops index that
 ## bank's entries), so halves are never mixed — the MusicPair typed record
 ## carries the two halves (ADR 0017).
-static func resolve_menu_music_pair(root: ResourceRoot) -> MusicPair:
+static func resolve_menu_music_pair(root) -> MusicPair:
 	if root == null:
 		return MusicPair.new()
 	return _pair_from_names(root,
 			MusicDirector.resolve_menu_music_pair(String(root.get_expansion())))
 
 
-static func resolve_game_music_pair(root: ResourceRoot) -> MusicPair:
+static func resolve_game_music_pair(root) -> MusicPair:
 	if root == null:
 		return MusicPair.new()
 	return _pair_from_names(root,
 			MusicDirector.resolve_game_music_pair(String(root.get_expansion())))
 
 
-static func _pair_from_names(root: ResourceRoot, names: Dictionary) -> MusicPair:
+static func _pair_from_names(root, names: Dictionary) -> MusicPair:
 	var pair := MusicPair.new()
 	var bank_file := String(names.get("bank_file", ""))
 	var script_file := String(names.get("script_file", ""))
@@ -118,7 +118,10 @@ static func _resolve_loose_file(dir_path: String, filename: String) -> String:
 ## selects the section afterwards]. Explicit overrides keep the shell's dev
 ## seams (an explicit script loads by loose path via ResourceLoader).
 ## Returns true when the context is loaded and the VM has been freshly started.
-func open_menu_context(root: ResourceRoot, script_override := "", bank_override := "") -> bool:
+# `root` stays untyped on this chain (resolve_*_pair / _open_context /
+# _load_music_script): menu_shell_test drives it with a RefCounted double whose
+# has_file/read_file cannot override the native ResourceRoot's.
+func open_menu_context(root, script_override := "", bank_override := "") -> bool:
 	var pair := resolve_menu_music_pair(root)
 	var bank_path := pair.bank
 	if not bank_override.is_empty() and root != null:
@@ -137,7 +140,7 @@ func open_menu_context(root: ResourceRoot, script_override := "", bank_override 
 ## GAME_HEALTH_SEED (GAME_VAR_MISSION_STATE stays 0 — never written by retail,
 ## so gamemus loops its Multiplayerstart P0 track); the slot/seed witnesses
 ## live at the engine home, engine/runtime/audio audio/music_policy.h.
-func open_game_context(root: ResourceRoot) -> bool:
+func open_game_context(root) -> bool:
 	var pair := resolve_game_music_pair(root)
 	var opened := _open_context("game", root, pair.bank, pair.script_name, "")
 	if opened:
@@ -175,7 +178,7 @@ func get_var(idx: int) -> int:
 # bails before loading the script when the bank is missing [orig:
 # AudioVM_OpenContextFile @ 0x672160 — the .sbf CreateFileA gate precedes the
 # script load], so a missing half means silence (non-fatal), never a mixed pair.
-func _open_context(name: String, root: ResourceRoot, bank_path: String, script_name: String, script_override: String) -> bool:
+func _open_context(name: String, root, bank_path: String, script_name: String, script_override: String) -> bool:
 	stop_context()
 	if _director == null:
 		return false
@@ -210,7 +213,7 @@ func _load_bank(path: String) -> SbfBank:
 # applies the shared SCR/BFC1 payload decode, so the bytes arrive in the
 # decrypted SCR0 form load_from_decrypted_bytes expects. An explicit override
 # takes the loose-path route (load_from_path runs the payload decode itself).
-func _load_music_script(root: ResourceRoot, explicit: String, name: String) -> MusicScript:
+func _load_music_script(root, explicit: String, name: String) -> MusicScript:
 	if not explicit.is_empty() and root != null:
 		var path := String(root.resolve_file(explicit))
 		if path.is_empty():
