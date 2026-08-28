@@ -971,6 +971,8 @@ func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
 
 func _pause() -> void:
 	_state = State.PAUSED
+	# The engine session pauses with the shell; net roles refuse natively.
+	_world.set_shell_paused(true)
 	_menu_shell.open_ingame_menu()  # game.mnu overlay over the kept-loaded world
 	_menu_shell.show_menu()
 
@@ -987,6 +989,8 @@ func _on_resume() -> void:
 	_state = State.DEPLOY if (_deploy_presenter != null and _deploy_presenter.is_open()) \
 			else State.END_ROUND if (_end_round_presenter != null and _end_round_presenter.is_open()) \
 			else State.WORLD
+	# Every resume leg lands here, so the session cannot stay stuck Paused.
+	_world.set_shell_paused(false)
 
 
 func _on_return_to_menu() -> void:

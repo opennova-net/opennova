@@ -9,7 +9,6 @@ extends RefCounted
 ## and the log/progress channel game_probe op=status reads back.
 
 const LOCAL_PLAYER_TIMEOUT_MS := 240_000
-const FRAMES_PER_MISSION_SECOND := 62.5
 const MS_PER_SECOND := 1000.0
 
 var run_id := ""
@@ -115,13 +114,14 @@ func wait_ms(duration_ms: int) -> void:
 
 
 ## Wait for the loaded simulation to advance `seconds` of mission time (the
-## engine's 62.5 Hz logic ticks); falls back to wall time without a sim.
+## engine's fixed logic-tick cadence, Simulation.tick_dt()); falls back to
+## wall time without a sim.
 func wait_mission_seconds(seconds: float) -> void:
 	var live_sim := sim()
 	if live_sim == null:
 		await wait_ms(int(seconds * MS_PER_SECOND))
 		return
-	var target := int(live_sim.get_logic_tick()) + int(ceil(seconds * FRAMES_PER_MISSION_SECOND))
+	var target := int(live_sim.get_logic_tick()) + int(ceil(seconds / Simulation.tick_dt()))
 	while not cancelled and tree != null:
 		var current := sim()
 		if current == null or int(current.get_logic_tick()) >= target:

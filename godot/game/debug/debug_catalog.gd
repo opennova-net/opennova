@@ -24,6 +24,7 @@ static var MISSION_COORD_MIN: float = Simulation.mission_coord_min()
 static var MISSION_COORD_MAX: float = Simulation.mission_coord_max()
 const ENTITY_HEALTH_MIN := Simulation.ENTITY_HEALTH_MIN
 const ENTITY_HEALTH_MAX := Simulation.ENTITY_HEALTH_MAX
+const MISSION_VAR_COUNT := Simulation.MISSION_VAR_COUNT
 const AUDIO_BUS_VOLUME_MIN_DB := -60.0
 const AUDIO_BUS_VOLUME_MAX_DB := 6.0
 
@@ -424,7 +425,7 @@ static func _valid_mission_variable_args(args: Array) -> bool:
 		return false
 	var index := int(args[0])
 	var value := int(args[1])
-	return index >= 0 and index < 512 \
+	return index >= 0 and index < MISSION_VAR_COUNT \
 			and value >= -2147483648 and value <= 2147483647
 
 

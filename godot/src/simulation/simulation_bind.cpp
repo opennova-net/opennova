@@ -78,6 +78,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_session_sim_us"),
 			&Simulation::get_last_session_sim_us);
 	ClassDB::bind_method(D_METHOD("is_transport_locked"), &Simulation::is_transport_locked);
+	ClassDB::bind_method(D_METHOD("session_role"), &Simulation::session_role);
+	ClassDB::bind_method(D_METHOD("session_state"), &Simulation::session_state);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &Simulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("set_terrain_til_data", "til_bytes"), &Simulation::set_terrain_til_data);
 	ClassDB::bind_method(D_METHOD("set_score_config_data", "score_ini_bytes"), &Simulation::set_score_config_data);
@@ -692,12 +694,18 @@ void Simulation::_bind_methods() {
 	BIND_CONSTANT(ITEM_USER_POINT_SCAN_LIMIT);
 	BIND_CONSTANT(ENTITY_HEALTH_MIN);
 	BIND_CONSTANT(ENTITY_HEALTH_MAX);
+	BIND_CONSTANT(MISSION_VAR_COUNT);
 	BIND_CONSTANT(DEFAULT_PLAYER_FOV_H_DEG);
 	BIND_CONSTANT(HUD_MINIMAP_SNAPSHOT_VERSION);
 	BIND_CONSTANT(HUD_MINIMAP_HEADER_SIZE);
 	BIND_CONSTANT(HUD_MINIMAP_STRIDE);
 
 	BIND_CONSTANT(SPAWN_ORIGIN_NONE);
+
+	BIND_ENUM_CONSTANT(ROLE_SINGLE_PLAYER);
+	BIND_ENUM_CONSTANT(ROLE_LISTEN_HOST);
+	BIND_ENUM_CONSTANT(ROLE_JOINER);
+	BIND_ENUM_CONSTANT(ROLE_DEDICATED_HOST);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "loco_scale"), "set_loco_scale", "get_loco_scale");
 }

@@ -341,6 +341,10 @@ public:
 		// (world/entity.h kRetailI16Min/Max).
 		ENTITY_HEALTH_MIN = opennova::world::kRetailI16Min,
 		ENTITY_HEALTH_MAX = opennova::world::kRetailI16Max,
+		// The mission-script variable table size — V0..V(N-1), shared by the
+		// WAC and BMS evaluators (world/var_store.h ScriptVarStore::kMissionVars
+		// carries the witness).
+		MISSION_VAR_COUNT = opennova::world::ScriptVarStore::kMissionVars,
 		// The horizontal default camera fov, degrees (world/player_view.h
 		// kPlayerCameraFovHDeg; the static_assert in the bind TU pins the
 		// integral mirror against the engine float).
@@ -1231,6 +1235,20 @@ public:
 	// The single home for the rule — F3 transport, MCP, and the ESC pause all
 	// read this predicate.
 	bool is_transport_locked() const { return joiner_ || host_listen_; }
+	// The portable session's live role/state records (net/inmatch/session.h),
+	// re-exported so the debug/MCP shell derives authority and role labels from
+	// the session instead of re-deriving them from the transport flags. The
+	// role values mirror inmatch::Role (the assignments make drift impossible);
+	// session_state() reports inmatch::State in the same values
+	// MissionFrameOutcome.STATE_* carries.
+	enum SessionRole {
+		ROLE_SINGLE_PLAYER = static_cast<int>(opennova::inmatch::Role::SinglePlayer),
+		ROLE_LISTEN_HOST = static_cast<int>(opennova::inmatch::Role::ListenHost),
+		ROLE_JOINER = static_cast<int>(opennova::inmatch::Role::Joiner),
+		ROLE_DEDICATED_HOST = static_cast<int>(opennova::inmatch::Role::DedicatedHost),
+	};
+	int session_role() const { return static_cast<int>(session_.role()); }
+	int session_state() const { return static_cast<int>(session_.state()); }
 	// The fixed logic-tick quantum (1/62.5 s) — the ONE cadence constant,
 	// re-exported from the engine accumulator for GDScript composition.
 	static double tick_dt() { return opennova::world::TickAccumulator::kTickDt; }
@@ -2573,3 +2591,4 @@ VARIANT_ENUM_CAST(godot::Simulation::EffectStateField);
 VARIANT_ENUM_CAST(godot::Simulation::SeatCode);
 VARIANT_ENUM_CAST(godot::Simulation::MountCommand);
 VARIANT_ENUM_CAST(godot::Simulation::JoinTerrainTilState);
+VARIANT_ENUM_CAST(godot::Simulation::SessionRole);
