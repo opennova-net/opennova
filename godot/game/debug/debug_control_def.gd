@@ -44,8 +44,10 @@ var step := 0.1
 var choices: Array[String] = []
 var requires_unlock := false
 var authority := Authority.ANY
-## Transitional seam for controls whose current host still owns the target.
-## The session records/emits the intent even when no target has been bound.
+## Controls whose target binds late (the OPTIONS rows: the game applies the
+## recorded intent when its world binds). The session records/emits the
+## intent even while no target is bound; every other control reports
+## unavailable until its owner registers the target.
 var allow_unresolved_intent := false
 
 

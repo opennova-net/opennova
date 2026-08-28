@@ -24,7 +24,7 @@ const HudTextTables := preload("res://game/world/hud_text_tables.gd")
 const LfpPanelPresenterScript := preload("res://game/world/lfp_panel_presenter.gd")
 
 var _world: GameWorld = null
-var _player_presenter = null     # LocalPlayerPresenter (reserved for the weapon-round anchors)
+var _player_presenter: LocalPlayerPresenter = null  # reserved for the weapon-round anchors
 var _ui_parent: Node = null
 
 # The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
@@ -129,7 +129,7 @@ func handle_gameplay_key(keycode: int) -> bool:
 	return true
 
 
-func setup(world, player_presenter_in, ui_parent: Node) -> void:
+func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_parent: Node) -> void:
 	_world = world
 	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent

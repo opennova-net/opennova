@@ -668,7 +668,7 @@ Error MnuDocument::load_from_bytes(const PackedByteArray &p_bytes) {
 	// Derive the document's content extent (max authored right/bottom) for the editor
 	// and MCP info. NOTE: this is informational only now — both the runtime and the
 	// editor canvas scale a fixed 800x600 design space anamorphically to the screen
-	// [orig: CUIScene_SetScreenScale @ 0x639480], so neither uses menu_size_ for the
+	// (retail: CUIScene_SetScreenScale @ 0x639480, see docs/mnu/menu-re.md), so neither uses menu_size_ for the
 	// fit. Leaves the default untouched if no window carries a position.
 	{
 		int max_r = 0;

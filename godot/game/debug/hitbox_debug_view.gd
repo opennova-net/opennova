@@ -135,7 +135,7 @@ func _process(delta: float) -> void:
 
 
 ## Advance the fixed debug-snapshot cadence by one rendered-frame delta.
-## Public so hosts and tests drive the same bounded scheduling behavior.
+## Public so owners and tests drive the same bounded scheduling behavior.
 func advance_refresh(delta: float) -> void:
 	if delta <= 0.0:
 		return

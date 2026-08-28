@@ -152,10 +152,10 @@ func wait_world_ready(timeout_ms := LOCAL_PLAYER_TIMEOUT_MS) -> bool:
 		var shell := game()
 		if shell == null:
 			return false
-		if not bool(shell.call("is_world_loading")):
+		if not shell.is_world_loading():
 			await tree.process_frame
 			return true
-		shell.call("dismiss_start_mission_splash")
+		shell.dismiss_start_mission_splash()
 		if Time.get_ticks_msec() >= deadline:
 			return false
 		await tree.process_frame

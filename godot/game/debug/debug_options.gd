@@ -1,5 +1,5 @@
 class_name DebugOptions
-## The declarative registry of the original host-owned debug checks. The
+## The declarative registry of the original owner-bound debug checks. The
 ## shared DebugCatalog turns these rows into typed controls whose targets
 ## are resolved live and whose public setters/getters are called directly.
 ##
@@ -14,9 +14,9 @@ const KIND_SLIDER := 1  # row carries "min"/"max"/"step"
 const KIND_ENUM := 2    # row carries "choices": Array[String]; value = index
 const KIND_ACTION := 3
 
-## The live GameWorld host.
+## The live GameWorld owner.
 const TARGET_WORLD := &"world"
-## The local player host (LocalPlayerPresenter).
+## The local player owner (LocalPlayerPresenter).
 const TARGET_PLAYER := &"player"
 
 const OPTIONS: Array[Dictionary] = [

@@ -235,6 +235,21 @@ func _display_name(key: String) -> String:
 ## this as a public seam lets callers exercise the same menu population path without
 ## reaching into companion internals. The recorded ammo picks are keyed by table index,
 ## so a table swap invalidates them — clear rather than misapply.
+## Inject the avatar table directly (a unit without a resource root).
+func set_database(db: AvatarDatabase) -> void:
+	_db = db
+
+
+## The NATIONALITY list's visible rows as nationality DB indices, in row order.
+func nationality_rows() -> Array[int]:
+	return _nat_db_index.duplicate()
+
+
+## The selected team: 0 = blue/good, 1 = red/evil.
+func team() -> int:
+	return _team
+
+
 func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_weapons = weapons
 	_ammo_pri.clear()

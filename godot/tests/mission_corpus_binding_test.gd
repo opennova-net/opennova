@@ -93,7 +93,7 @@ func test_cp19_over_count_waypoint_loads_and_is_clamped() -> void:
 		return
 	var path := dir.path_join("CP19.bms")
 	if not FileAccess.file_exists(path):
-		pending("CP19.bms not present in the corpus dir")
+		pending("OPENNOVA_MISSION_CORPUS: CP19.bms not present in the corpus dir")
 		return
 	var m := MissionData.new()
 	assert_eq(m.open_file(path), OK, "CP19.bms opens through the binding (no rejection)")
@@ -110,7 +110,7 @@ func test_real_mission_round_trips_through_the_binding_save_path() -> void:
 		return
 	var files := _list_bms(dir)
 	if files.is_empty():
-		pending("no .bms files in the corpus dir")
+		pending("OPENNOVA_MISSION_CORPUS: no .bms files in the corpus dir")
 		return
 
 	var src := files[0]

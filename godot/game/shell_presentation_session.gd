@@ -21,8 +21,6 @@ var _saved_visibility: Array[SavedVisibility] = []
 # The presenter whose FP gun a world-only capture hid (restored on finish).
 var _capture_presenter: LocalPlayerPresenter = null
 var _hud_hidden_capture_active := false
-var _saved_fps_label: CanvasItem = null
-var _saved_fps_visible := false
 
 
 ## Hide the world and mounted HUD items before the menu is raised. This keeps
@@ -90,7 +88,7 @@ func begin_world_only_capture(
 	_capture_active = true
 	for saved in _saved_visibility:
 		# Hide at the layer boundary. This also suppresses nested CanvasLayers
-		# (notably DebugOverlay) while leaving descendant state free to follow a
+		# (notably the dev tools) while leaving descendant state free to follow a
 		# real menu/HUD transition during the asynchronous capture.
 		saved.layer.visible = false
 	# The FP gun draws inside the beauty pass; the presenter's capture latch
@@ -123,16 +121,10 @@ func begin_hud_hidden_capture(
 	if hud_presenter == null or not is_instance_valid(hud_presenter) \
 			or hud == null or not is_instance_valid(hud):
 		return ERR_UNCONFIGURED
-	var fps_label := hud.get_node_or_null("FpsLabel") as CanvasItem
-	if fps_label == null or not is_instance_valid(fps_label):
-		return ERR_UNCONFIGURED
 	var error := hud_presenter.begin_hud_hidden_capture()
 	if error != OK:
 		return error
-	_saved_fps_label = fps_label
-	_saved_fps_visible = fps_label.visible
 	_hud_hidden_capture_active = true
-	fps_label.visible = false
 	return OK
 
 
@@ -141,10 +133,6 @@ func finish_hud_hidden_capture(hud_presenter: GameHudPresenter) -> void:
 		return
 	if hud_presenter != null and is_instance_valid(hud_presenter):
 		hud_presenter.finish_hud_hidden_capture()
-	if _saved_fps_label != null and is_instance_valid(_saved_fps_label):
-		_saved_fps_label.visible = _saved_fps_visible
-	_saved_fps_label = null
-	_saved_fps_visible = false
 	_hud_hidden_capture_active = false
 
 
@@ -163,12 +151,6 @@ func hud_hidden_capture_witness(
 	var witness := hud_presenter.hud_hidden_capture_witness()
 	if witness.is_valid():
 		witness.hud_canvas_layer_active = hud.visible
-		if _saved_fps_label == null or not is_instance_valid(_saved_fps_label):
-			witness.error = "FPS counter disappeared during HUD-hidden capture"
-		else:
-			witness.fps_counter_visible = _saved_fps_label.visible
-			if witness.fps_counter_visible:
-				witness.error = "FPS counter is visible during HUD-hidden capture"
 	return witness
 
 

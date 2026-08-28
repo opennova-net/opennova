@@ -902,18 +902,14 @@ static func observe_comparison_contract(
 			"ads_active": hud_witness.ads_active,
 			"big_map_active": hud_witness.big_map_active,
 			"hud_canvas_layer_active": hud_witness.hud_canvas_layer_active,
-			"fps_counter_visible": hud_witness.fps_counter_visible,
 		}
 	for key in [
 		"hud_detail_level", "gameplay_hud_visible",
 		"player_view_effects_active", "ads_active", "big_map_active",
 		"hud_canvas_layer_active",
-		"fps_counter_visible",
 	]:
 		if not hud_witness_value.has(key):
 			return {"error": "captured HUD-hidden witness is missing %s" % key}
-	if bool(hud_witness_value.fps_counter_visible):
-		return {"error": "captured FPS counter is visible"}
 	if not world.has_method("local_player_first_person_arms_witness"):
 		return {"error": "comparison world has no first-person arms witness"}
 	var arms_value: Variant = world.call(

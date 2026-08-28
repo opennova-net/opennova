@@ -3,18 +3,13 @@ extends RefCounted
 
 ## Named nested wall-clock spans for one operation (a mission load). An owner
 ## creates a timeline with begin(), brackets stages with span()/end_span(), and
-## finish()es it — which prints one structured line and retains the timeline in
-## a small static ring so later tooling (the debug overlay's perf pane) can
-## render recent history without re-running the operation. Nothing global runs
-## between operations: a timeline only costs while its operation does.
+## finish()es it, which prints one structured line. The owner keeps the
+## timeline it cares about (GameWorld.last_load_timeline()); nothing global
+## runs between operations: a timeline only costs while its operation does.
 ##
 ## The static *_on helpers no-op on a null timeline, so instrumented engine
 ## paths (terrain open, the object placer) accept an optional timeline without
 ## burdening callers that do not measure.
-
-const RING_SIZE := 8
-
-static var _ring: Array = []
 
 var label := ""
 var _spans: Array = []  # { name: String, depth: int, start_us: int, end_us: int }
@@ -40,17 +35,6 @@ static func end_on(timeline: PerfTimeline) -> void:
 		timeline.end_span()
 
 
-## Most-recent-first copy of the retained timelines.
-static func history() -> Array:
-	var out := _ring.duplicate()
-	out.reverse()
-	return out
-
-
-static func latest() -> PerfTimeline:
-	return _ring.back() if not _ring.is_empty() else null
-
-
 ## Record an already-measured child span (a collaborator returned its own
 ## timing) at the current nesting depth, ending now.
 func add_completed_span(name: String, duration_us: int) -> void:
@@ -72,16 +56,13 @@ func end_span() -> void:
 	_spans[idx]["end_us"] = Time.get_ticks_usec()
 
 
-## Close any spans an early return left open plus the timeline itself, retain it
-## in the ring, print the structured line, and return the one-line summary so
-## callers can surface it (status bar, log).
+## Close any spans an early return left open plus the timeline itself, print
+## the structured line, and return the one-line summary so callers can surface
+## it (status bar, log).
 func finish() -> String:
 	while not _open.is_empty():
 		end_span()
 	_end_us = Time.get_ticks_usec()
-	_ring.append(self)
-	while _ring.size() > RING_SIZE:
-		_ring.pop_front()
 	var line := summary()
 	print_verbose("PerfTimeline: ", line)
 	return line
@@ -136,6 +117,6 @@ func brief(top_n := 4) -> String:
 
 
 ## The one duration rendering every perf surface shares (the summary line and
-## the F3 Perf tree agree by construction).
+## the load status agree by construction).
 static func format_ms(ms: float) -> String:
 	return ("%.1fs" % (ms / 1000.0)) if ms >= 1000.0 else ("%dms" % int(roundf(ms)))

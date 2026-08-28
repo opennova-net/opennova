@@ -323,7 +323,6 @@ func _hud_hidden_capture_witness_json() -> Dictionary:
 		"ads_active": witness.ads_active,
 		"big_map_active": witness.big_map_active,
 		"hud_canvas_layer_active": witness.hud_canvas_layer_active,
-		"fps_counter_visible": witness.fps_counter_visible,
 	}
 
 

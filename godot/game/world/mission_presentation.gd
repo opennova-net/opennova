@@ -33,15 +33,14 @@ const ScarPresentPass := preload("res://game/world/scar_present_pass.gd")
 # loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
 # independently of the variable render rate — multiple ticks on a long frame, zero on a short one.
 # [orig: Game_MainLoop @ 0x52b630 -> Game_ProcessMainFrame @ 0x5263f0 (one current_tick++ @ 0x24c1968)]
-# 0.016 s — the engine tick quantum, single-sourced natively as
-# world::TickAccumulator::kTickDt (S14); kept here for cadence CONSUMERS
-# (avatar preview's menu clock). The accumulator arithmetic itself is native.
+# The 0.016 s tick quantum is single-sourced natively as
+# world::TickAccumulator::kTickDt (Simulation.tick_dt()); the accumulator
+# arithmetic itself is native.
 
 var _sim: Simulation
 var _present: PresentApplier          # placed nodes on every role or tooling/test preview
 var _wire_present: WirePresentPass    # un-placed network entities or SP attachment children
 var _fire_present: FirePresentPass    # non-local fire sound + muzzle + tracers; else null
-var _fire_listener := Callable()      # -> Vector3 camera listener, stamped into the sim per frame (world/fire_sound.h)
 var _destruction_present: DestructionPresentPass  # husk swap + debris + wreck effects (every viewing peer); null without fire_audio
 var _throwable_present: ThrowablePresentPass      # flying/placed throwable models
 var _scar_present: ScarPresentPass                # impact-scar rings as textured quads (every viewing peer)
@@ -60,7 +59,7 @@ var _runtime_probe_enabled := false
 var _has_trace_stats_sampling := false
 var _ticks_last_frame := 0           # logic ticks run by the last session frame
 var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = direct-sim fallback
-# Stable mission identity for shell-neutral diagnostics such as the F3 overlay.
+# Stable mission identity for diagnostics (the dev tools, the MCP catalog).
 var _mission_file := ""
 var _mission_name := ""
 var _setup_error := OK
@@ -233,8 +232,8 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	if _presentation_time_ms >= 0:
 		_sim.set_panm_time_ms(_presentation_time_ms)
 	# The SIM is held off-tree (never add_child'd): only this driver advances it, and an off-tree
-	# node never self-ticks via _process; it is freed explicitly in _exit_tree (mirrors the old
-	# MissionSimDriver). This MissionPresentation node itself IS in the tree — GameWorld adds it and
+	# node never self-ticks via _process; it is freed explicitly in _exit_tree.
+	# This MissionPresentation node itself IS in the tree — GameWorld adds it and
 	# drives advance_session_frame() explicitly (ADR 0025: the game shell is the only live runtime owner).
 	_index = EntityIndex.new()
 	var registry_placer: MissionObjectPlacer = options.get("placer")
@@ -286,14 +285,14 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 			options.get("fire_audio", Callable()),
 			options.get("fire_fx", Callable()),
 			options.get("fire_listener", Callable()),
-			Callable(_wire_present, "muzzle_world_for") if _wire_present != null
+			_wire_present.muzzle_world_for if _wire_present != null
 					else Callable(),
 			options.get("muzzle_light", Callable()))
 		# The sim's fire-sound distance gate reads the camera listener at fire
-		# time on the logic clock (world/fire_sound.h) — stamped in each typed
-		# session frame. A host with no fire presentation (dedicated) never
-		# stamps, which is the witnessed peer gate [orig: @ 0x528e57].
-		_fire_listener = options.get("fire_listener", Callable())
+		# time on the logic clock (world/fire_sound.h); GameFramePipeline stamps
+		# it into each typed session frame (MissionFrameInput.set_camera_sample).
+		# A host with no fire presentation (dedicated) never stamps, which is the
+		# witnessed peer gate [orig: @ 0x528e57].
 	# The destruction-presentation pass: husk model swaps, death-piece debris,
 	# wreck fire/smoke, destruction sounds — off the sim's destruction drain
 	# (world/destruction.h; world-wac-ai-re §24). Shares the fire pass's
@@ -489,12 +488,12 @@ func set_frame_stats(board: FrameStats) -> void:
 	if _sim != null:
 		_sim.set_frame_stats(board)
 	if _frame_stats != null:
-		var old_capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		var old_capture_changed := _on_frame_stats_capture_changed
 		if _frame_stats.capture_changed.is_connected(old_capture_changed):
 			_frame_stats.capture_changed.disconnect(old_capture_changed)
 	_frame_stats = board
 	if _frame_stats != null:
-		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		var capture_changed := _on_frame_stats_capture_changed
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
 	_sync_runtime_profiling()
@@ -925,10 +924,10 @@ func _for_each_present_node(fn: Callable) -> void:
 
 
 # The sim is held off-tree, so free it explicitly when this driver leaves the tree (a reload / Stop
-# queue_free()s the driver). [mirrors the old MissionSimDriver._exit_tree.]
+# queue_free()s the driver).
 func _exit_tree() -> void:
 	if _frame_stats != null:
-		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		var capture_changed := _on_frame_stats_capture_changed
 		if _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.disconnect(capture_changed)
 	_runtime_probe_enabled = false

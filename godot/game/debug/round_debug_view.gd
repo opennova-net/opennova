@@ -2,7 +2,7 @@ extends SimDebugView
 
 # Draws the RoundSim debug ring over the scene: every recently resolved round
 # outcome as its flight segment + hit marker, color-coded by outcome kind, with
-# a detail label on the newest events. The 3D face of the F3 overlay's Rounds
+# a detail label on the newest events. The 3D face of the dev tools' Rounds
 # tab -- a developer window into OUR hit-detection port (the item CFAC face
 # narrow phase, posed person bone spheres, sphere fallbacks, terrain stops,
 # and the face-miss fly-ons), not retail-mimicked UI.

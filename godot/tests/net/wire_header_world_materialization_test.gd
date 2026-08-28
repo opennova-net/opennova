@@ -31,88 +31,32 @@ const DESIGNATED_G_CHILD_TYPE := 1419
 const NATIVE_MODEL_DIR := "res://.godot/native_3dp_wire_header"
 
 
-static func _repo_file_bytes(res_path: String) -> PackedByteArray:
-	var file := FileAccess.open(
-			ProjectSettings.globalize_path(res_path), FileAccess.READ)
-	if file == null:
-		return PackedByteArray()
-	var bytes := file.get_buffer(file.get_length())
-	file.close()
-	return bytes
-
-
-static func _pattern_offset(data: PackedByteArray, pattern: String) -> int:
-	var wanted := pattern.to_ascii_buffer()
-	if wanted.is_empty() or data.size() < wanted.size():
-		return -1
-	var at := data.find(wanted[0], 0)
-	while at >= 0 and at + wanted.size() <= data.size():
-		if data.slice(at, at + wanted.size()) == wanted:
-			return at
-		at = data.find(wanted[0], at + 1)
-	return -1
-
-
-static func _with_renamed_user_point(data: PackedByteArray, old_name: String,
-		new_name: String) -> PackedByteArray:
-	var offset := _pattern_offset(data, old_name)
-	var replacement := new_name.to_ascii_buffer()
-	if offset < 0 or replacement.size() > 16:
-		return PackedByteArray()
-	for i in range(16):
-		data[offset + i] = replacement[i] if i < replacement.size() else 0
-	return data
-
-
-static func _with_user_point_position(data: PackedByteArray, name: String,
-		raw_x: int, raw_y: int, raw_z: int) -> PackedByteArray:
-	var offset := _pattern_offset(data, name)
-	if offset < 32:
-		return PackedByteArray()
-	data.encode_s32(offset - 32, raw_x)
-	data.encode_s32(offset - 28, raw_y)
-	data.encode_s32(offset - 24, raw_z)
-	return data
-
-
-static func _write_native_model(name: String, bytes: PackedByteArray) -> bool:
-	if bytes.is_empty():
-		return false
-	var file := FileAccess.open(
-			NATIVE_MODEL_DIR.path_join(name), FileAccess.WRITE)
-	if file == null:
-		return false
-	file.store_buffer(bytes)
-	file.close()
-	return true
-
-
 func before_all() -> void:
 	DirAccess.make_dir_recursive_absolute(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR))
 	assert_true(DirAccess.dir_exists_absolute(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)),
 			"created the flat native asset dir")
-	assert_true(_write_native_model("tank.3di",
-			_repo_file_bytes("res://../fixtures/threedi/synth/tank.3di")),
+	assert_true(NativeModelFixture.write_native_model(NATIVE_MODEL_DIR, "tank.3di",
+			NativeModelFixture.repo_file_bytes("res://../fixtures/threedi/synth/tank.3di")),
 			"composed the single-control-seat vehicle fixture")
-	assert_true(_write_native_model("mount.3di",
-			_repo_file_bytes("res://../fixtures/threedi/synth/mount.3di")),
+	assert_true(NativeModelFixture.write_native_model(NATIVE_MODEL_DIR, "mount.3di",
+			NativeModelFixture.repo_file_bytes("res://../fixtures/threedi/synth/mount.3di")),
 			"composed the B50 child fixture")
-	var swap := _with_renamed_user_point(
-			_repo_file_bytes("res://../fixtures/threedi/synth/carrier.3di"),
+	var swap := NativeModelFixture.with_renamed_user_point(
+			NativeModelFixture.repo_file_bytes("res://../fixtures/threedi/synth/carrier.3di"),
 			"ctrlx13", "sitex13")
-	swap = _with_renamed_user_point(swap, "sitex00d", "ctrlx01")
-	assert_true(_write_native_model("carrierswap.3di", swap),
+	swap = NativeModelFixture.with_renamed_user_point(swap, "sitex00d", "ctrlx01")
+	assert_true(NativeModelFixture.write_native_model(NATIVE_MODEL_DIR, "carrierswap.3di", swap),
 			"composed the passenger-before-controller refresh fixture")
 	# seat_local reads (-y, x, z)/65536 over the raw authored ints, so raw
 	# (196608, 0, 0) lands the anchor at mission-local (0, 3, 0) — the exact
 	# offset the retired hand table authored for this fixture.
-	var parent := _with_renamed_user_point(
-			_repo_file_bytes("res://../fixtures/threedi/synth/tank.3di"),
+	var parent := NativeModelFixture.with_renamed_user_point(
+			NativeModelFixture.repo_file_bytes("res://../fixtures/threedi/synth/tank.3di"),
 			"ctrlx25", "cxrlx25")
-	parent = _with_user_point_position(parent, "ewep01", 196608, 0, 0)
-	assert_true(_write_native_model("tankgp.3di", parent),
+	parent = NativeModelFixture.with_user_point_position(parent, "ewep01", 196608, 0, 0)
+	assert_true(NativeModelFixture.write_native_model(NATIVE_MODEL_DIR, "tankgp.3di", parent),
 			"composed the seatless designated-G parent fixture")
 
 
@@ -256,16 +200,6 @@ func _weapon(name: String) -> Dictionary:
 	var index := weapons.find_weapon(name)
 	assert_gte(index, 0)
 	return weapons.get_weapon(index) if index >= 0 else {}
-
-
-func _apply_weapon_switch_events(sim: Simulation,
-		defs_by_name: Dictionary) -> void:
-	for value in sim.drain_local_player_weapon_events():
-		var name := String((value as Dictionary).get("switch_to_weapon", ""))
-		if name.is_empty() or not defs_by_name.has(name):
-			continue
-		sim.set_local_player_weapon(
-				defs_by_name[name], {}, name == "WPN_EMPLCD50NA")
 
 
 func _present_wire_handle_for_type(sim: Simulation, type_id: int) -> int:
@@ -656,7 +590,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	for _settle in range(80):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
 			break
 		OS.delay_msec(1)
@@ -682,7 +616,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	for _tick in range(240):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if bool(joiner.get_local_player_view().get("mounted", false)) \
 				and host_player_index >= 0 \
 				and bool(host.get_entity_debug(host_player_index).get(
@@ -700,7 +634,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	for _settle in range(100):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
 			break
 		OS.delay_msec(1)
@@ -740,7 +674,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# weapon.def defaults and would intentionally replace an earlier debug value.
 	joiner.step()
 	host.step()
-	_apply_weapon_switch_events(joiner, weapon_defs)
+	NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 	assert_eq(host.debug_set_world_entity_weapon_ammo(
 			parent_bms_id, 7, 19), OK)
 	var parent_ammo_applied := false
@@ -749,7 +683,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	for _tick in range(640):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		var active: Dictionary = joiner.get_local_player_weapon_state()
 		if int(active.get("clip", -999)) == 7 \
 				and int(active.get("reserve", -999)) == 19:
@@ -765,7 +699,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	for _tick in range(120):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		var active: Dictionary = joiner.get_local_player_weapon_state()
 		if int(active.get("clip", -999)) == child_clip \
 				and int(active.get("reserve", -999)) == child_reserve:

@@ -66,13 +66,13 @@ void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 	// only the matrix conventions differ (D3D row-vector v' = v * M vs
 	// Godot's column-vector transforms).
 	//
-	// D3D view matrix [orig: viewMatrix @ 0xA7845C, consumed row-vector by
-	// Math_TransformPoint4ByMatrix4x4_Float @ 0x612e80]: the camera's
+	// D3D view matrix (retail: viewMatrix @ 0xA7845C, consumed row-vector by
+	// Math_TransformPoint4ByMatrix4x4_Float @ 0x612e80, see docs/env/env-tod-re.md): the camera's
 	// world-basis vectors sit in the COLUMNS (0 right / 1 up / 2 forward) and
 	// row 3 carries -dot(axis, eye). A Godot camera looks along -basis.z, so
 	// the D3D forward column is -basis.z; right/up carry over unchanged
 	// (matching the witnessed screen mapping s = center +/- clip/(2w) *
-	// extent [orig: @ 0x5c0cf1..0x5c0d25]: +view-x lands right of center,
+	// extent (retail: @ 0x5c0cf1..0x5c0d25, see docs/env/env-tod-re.md): +view-x lands right of center,
 	// +view-y above it).
 	const Basis &basis = p_cam_transform.basis;
 	const Vector3 right = basis.get_column(0);
@@ -121,7 +121,7 @@ void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 	inv[14] = static_cast<float>(eye.z);
 	inv[15] = 1.0f;
 
-	// Projection [orig: mat @ 0x2721980; m11 read @ 0x2721994].
+	// Projection (retail: mat @ 0x2721980; m11 read @ 0x2721994, see docs/env/env-tod-re.md).
 	// Preserve the complete shell matrix so the screen march also serves
 	// orthographic and off-center frustum cameras. Godot is column-vector
 	// while the strip core is row-vector, but both layouts index a coefficient
@@ -154,7 +154,7 @@ void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 	strip_view.cam_y_fp = static_cast<int32_t>(std::lround(static_cast<double>(eye.y) * 65536.0));
 	strip_view.cam_z_fp = static_cast<int32_t>(std::lround(static_cast<double>(eye.z) * 65536.0));
 
-	// Viewport rect + center, pixels [orig: 0xA78384..0xA783A8]: min 0,
+	// Viewport rect + center, pixels (retail: 0xA78384..0xA783A8, see docs/env/env-tod-re.md): min 0,
 	// max = px - 1 (the clip rect's right/bottom edges are max + 1 = px),
 	// center = px / 2.
 	strip_view.vp_min_x = 0;
@@ -164,8 +164,8 @@ void WaterCore::strip_set_view(const Transform3D &p_cam_transform,
 	strip_view.vp_center_x = p_viewport_px.x / 2;
 	strip_view.vp_center_y = p_viewport_px.y / 2;
 
-	// The pass fog end, 16.16 [orig: Environment_GetFogEndDistance @ 0x57e3e0,
-	// fetched with the underwater flag @ 0x5c28a2]; clamped to one fp unit —
+	// The pass fog end, 16.16 (retail: Environment_GetFogEndDistance @ 0x57e3e0,
+	// fetched with the underwater flag @ 0x5c28a2, see docs/env/env-tod-re.md); clamped to one fp unit —
 	// the row colors integer-divide by it.
 	int32_t fog_end_fp = static_cast<int32_t>(std::lround(static_cast<double>(p_fog_end_world) * 65536.0));
 	if (fog_end_fp < 1) {
@@ -224,7 +224,7 @@ PackedColorArray packed_argb_to_colors(const std::vector<uint32_t> &packed) {
 
 PackedVector3Array WaterCore::strip_positions() const {
 	// World positions recovered as (uv0 * 32, plane height): uv0 is the
-	// unprojected world x/z * 0.03125 [orig: flt_7DBFAC @ 0x5c2899] in the
+	// unprojected world x/z * 0.03125 (retail: flt_7DBFAC @ 0x5c2899, see docs/env/env-tod-re.md) in the
 	// render basis, which maps to godot axes unchanged (see strip_set_view).
 	PackedVector3Array out;
 	const int count = strip_row_count * 3;
@@ -239,13 +239,13 @@ PackedVector3Array WaterCore::strip_positions() const {
 
 PackedColorArray WaterCore::strip_colors() const {
 	// The row-constant diffuse, written to all 3 row vertices
-	// [orig: @ 0x5c2f0a..0x5c2f2b].
+	// (retail: @ 0x5c2f0a..0x5c2f2b, see docs/env/env-tod-re.md).
 	return packed_argb_to_colors(strip_rows.diffuse);
 }
 
 PackedColorArray WaterCore::strip_speculars() const {
 	// The row-constant specular (WaterColorLit RGB under the distance alpha)
-	// [orig: @ 0x5c2eb5..0x5c2ef4].
+	// (retail: @ 0x5c2eb5..0x5c2ef4, see docs/env/env-tod-re.md).
 	return packed_argb_to_colors(strip_rows.specular);
 }
 
@@ -303,8 +303,8 @@ PackedFloat32Array WaterCore::strip_custom2() const {
 	// 4 floats per vertex: [t1.x, t1.y, t2.x, t2.y] — the texm3x2
 	// perturbation basis, t1 = (right.x, right.z) * (-min(rhw, 0.05)/2),
 	// t2 = (fwd.x, fwd.z) * (-5*min(rhw, 0.05))
-	// [orig: rows @ 0x5c2f83..0x5c3067; consumed by texm3x2pad t1, t0_bx2 /
-	// texm3x2tex t2, t0_bx2 — Water_InitSurfaceShaders @ 0x5c19b0]. The 3rd
+	// (retail: rows @ 0x5c2f83..0x5c3067; consumed by texm3x2pad t1, t0_bx2 /
+	// texm3x2tex t2, t0_bx2 — Water_InitSurfaceShaders @ 0x5c19b0, see docs/env/env-tod-re.md). The 3rd
 	// components (screen U/V) ride strip_custom0's zw; the env #30 shader
 	// reassembles the full rows from both attributes.
 	PackedFloat32Array out;
@@ -324,8 +324,8 @@ PackedInt32Array WaterCore::strip_indices() const {
 	// The witnessed batch submits unrolled to PRIMITIVE_TRIANGLES: each
 	// <=5-row window locks 8n-10 vertices and draws a TRIANGLESTRIP through
 	// the first 8n-10 entries of the static index table; global vertex =
-	// 3*first_row + entry [orig: word_841328; batch walk @ 0x5c3164..
-	// 0x5c329e]. The strip->list unroll alternates winding per triangle and
+	// 3*first_row + entry (retail: word_841328; batch walk @ 0x5c3164..
+	// 0x5c329e, see docs/env/env-tod-re.md). The strip->list unroll alternates winding per triangle and
 	// SKIPS the {2,6}-style degenerate stitches (any two indices equal) —
 	// they only existed to join row pairs inside one strip call.
 	PackedInt32Array out;
@@ -342,7 +342,7 @@ PackedInt32Array WaterCore::strip_indices() const {
 			}
 			// D3D strip parity: odd triangles swap the first two vertices to
 			// keep a consistent facing (the water passes are two-sided
-			// anyway — cull NONE [orig: pass flags 0x400000 @ 0x5c340d]).
+			// anyway — cull NONE (retail: pass flags 0x400000 @ 0x5c340d, see docs/env/env-tod-re.md)).
 			if ((tri & 1) != 0) {
 				out.push_back(base + i1);
 				out.push_back(base + i0);

@@ -76,8 +76,6 @@ void WeatherCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_wind_duration_ticks", "ticks"), &WeatherCore::set_wind_duration_ticks);
 	ClassDB::bind_method(D_METHOD("trigger_lightning_short"), &WeatherCore::trigger_lightning_short);
 	ClassDB::bind_method(D_METHOD("trigger_lightning_long"), &WeatherCore::trigger_lightning_long);
-	ClassDB::bind_method(D_METHOD("set_exposure_from_iris", "light_dir", "iris_percent", "iris_center"),
-			&WeatherCore::set_exposure_from_iris);
 	ClassDB::bind_method(
 			D_METHOD("set_exposure_from_iris_samples", "samples", "light_dir", "ceiling", "floor", "iris_percent", "iris_center"),
 			&WeatherCore::set_exposure_from_iris_samples);
@@ -147,7 +145,7 @@ void WeatherCore::tick(const Color &p_fill_target, const Color &p_sun_target,
 		const Color &p_fog_target, const Color &p_sky_target,
 		const Color &p_lightning_color, float p_sky_speed) {
 	// The witnessed tick order is env::WeatherCore::tick's
-	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0].
+	// (retail: Environment_UpdateWeatherTick @ 0x57e9b0, see docs/env/env-tod-re.md).
 	core_.tick(color_to_packed(p_fill_target), color_to_packed(p_sun_target),
 			color_to_packed(p_fog_target), color_to_packed(p_sky_target),
 			color_to_packed(p_lightning_color), p_sky_speed);
@@ -171,11 +169,6 @@ void WeatherCore::trigger_lightning_short() {
 
 void WeatherCore::trigger_lightning_long() {
 	core_.lightning.trigger_long();
-}
-
-void WeatherCore::set_exposure_from_iris(const Vector3 &p_light_dir, float p_iris_percent, float p_iris_center) {
-	core_.set_exposure_from_outdoor_iris(p_light_dir.x, p_light_dir.y, p_light_dir.z,
-			p_iris_percent, p_iris_center);
 }
 
 void WeatherCore::set_exposure_from_iris_samples(const PackedInt32Array &p_samples,
@@ -285,8 +278,8 @@ Vector4 WeatherCore::get_water_uv_state(float p_cam_x, float p_cam_z, float p_fo
 }
 
 void WeatherCore::set_scalar_targets(float p_fog_distance, float p_sky_height) {
-	// Target refresh [orig: Environment_SnapStateToTargets @0x57d1e0:
-	// Env_FogDistTarget <- Env_FogLevelFixed, sky target <- Env_SkyHeightFixed].
+	// Target refresh (retail: Environment_SnapStateToTargets @0x57d1e0:
+	// Env_FogDistTarget <- Env_FogLevelFixed, sky target <- Env_SkyHeightFixed, see docs/env/env-tod-re.md).
 	core_.scalar_channels.fog_dist_target_fp = static_cast<int32_t>(p_fog_distance * 65536.0f);
 	core_.scalar_channels.sky_height_target_fp = static_cast<int32_t>(p_sky_height * 65536.0f);
 }

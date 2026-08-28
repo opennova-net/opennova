@@ -65,7 +65,6 @@ public:
 
 	// The outdoor iris exposure sample (no-world fallback for
 	// the marched form below) — env::WeatherCore::set_exposure_from_outdoor_iris.
-	void set_exposure_from_iris(const Vector3 &p_light_dir, float p_iris_percent, float p_iris_center);
 
 	// Per-sample classification codes for set_exposure_from_iris_samples.
 	// Outdoor samples carry their sun-occlusion level 0..8 directly.
@@ -119,7 +118,7 @@ public:
 
 	// env #27: refresh the scalar spring targets (world units); currents ramp.
 	void set_scalar_targets(float p_fog_distance, float p_sky_height);
-	// Local mission-start scalar current <- target copy [orig: sub_57F1E0].
+	// Local mission-start scalar current <- target copy (retail: sub_57F1E0, see docs/env/env-tod-re.md).
 	void snap_scalar_currents_to_targets();
 	// Apply the scalar subset decoded from one S2C 0x0A phase-2 sample. Inputs
 	// are the narrowed wire units; engine/formats/env owns the exact reconstruction.

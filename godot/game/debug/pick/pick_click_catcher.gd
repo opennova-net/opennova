@@ -1,6 +1,6 @@
 class_name PickClickCatcher
 extends Node
-## The overlay-open mouse picker: while the F3 overlay is up (mouse released),
+## The tools-open mouse picker: while the dev tools are up (mouse released),
 ## a left-click on the world ray-picks through the live camera and adds to
 ## the injected pick list. It lives inside the world subtree so the root
 ## viewport routes game clicks here while overlay-panel clicks (consumed by

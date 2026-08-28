@@ -1,5 +1,5 @@
 class_name DebugCatalog
-## Built-in, shell-neutral debug-control catalog.
+## The built-in debug-control catalog (the dev tools and the MCP read it).
 ##
 ## Definitions name only public owner methods/properties. Target adapters bind
 ## the corresponding target sources on DebugSession.

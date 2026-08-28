@@ -5,7 +5,7 @@ extends RefCounted
 ## Callers bind re-resolving targets and register typed control definitions.
 ## This module validates writes, enforces edit/authority policy, and reads back
 ## the public owner every time. A toggled debug visualizer stays live whether
-## or not any debug presentation (the F3 overlay, an automation capture) is
+## or not any debug presentation (the dev tools, an automation capture) is
 ## open — views persist until turned off or the mission unloads.
 
 signal catalog_changed

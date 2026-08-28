@@ -72,8 +72,8 @@ const CTRL_OWNER_FP_ARMS_CAMO := "first_person:arms_camo"
 # The world serves the viewmodel builder + def; the presenter serves the weapon
 # effects (play-serial resync on rebuild). Untyped for the same reason as the
 # presenter's _world: GUT harness worlds serve value-only doubles.
-var _world
-var _presenter
+var _world: GameWorld
+var _presenter: LocalPlayerPresenter
 var _camera: Camera3D = null
 var _viewmodel: Node3D = null
 var _vm_parts: Array[ObjectModel] = []  # the builder's typed viewmodel models
@@ -96,7 +96,7 @@ func set_fp_gun_visible(visible: bool) -> void:
 	_fp_gun_visible = visible
 
 
-func setup(world, presenter, camera: Camera3D) -> void:
+func setup(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D) -> void:
 	_world = world
 	_presenter = presenter
 	_camera = camera

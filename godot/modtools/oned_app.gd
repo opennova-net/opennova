@@ -20,6 +20,8 @@ var _session: GameRunSession
 var _previous_window_min_size := Vector2i.ZERO
 var _resource_dir_is_implicit := false
 var _implicit_resource_dir := ""
+# Set by the window close: quit once the managed process has stopped.
+var _quit_when_stopped := false
 
 
 func _ready() -> void:
@@ -53,14 +55,22 @@ func _process(_delta: float) -> void:
 	if _session != null:
 		_session.poll()
 	_drain_requests()
+	if _quit_when_stopped and (_session == null or not _session.is_stopping()):
+		_quit_when_stopped = false
+		if _session == null or _session.shutdown():
+			get_tree().quit()
 
 
+# The window close: stop the managed process without blocking the surface,
+# then quit from _process once it has exited (shutdown() is the synchronous
+# last resort for a stop that never completes).
 func _notification(what: int) -> void:
 	if what != NOTIFICATION_WM_CLOSE_REQUEST:
 		return
 	_commit_settings()
-	if _session == null or _session.shutdown():
-		get_tree().quit()
+	if _session != null and _session.is_running():
+		_session.stop()
+	_quit_when_stopped = true
 
 
 func _shortcut_input(event: InputEvent) -> void:

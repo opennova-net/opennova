@@ -26,24 +26,21 @@ const VIEWMODEL_HOLD_MAX_FRAMES := 240
 class StaticTerrainShadowWarmupSuspension:
 	extends RefCounted
 
-	var _terrain: Object = null
+	var _terrain: Terrain = null
 	var _original_enabled := false
 	var _active := false
 
 
-	func begin(terrain: Object) -> Error:
+	func begin(terrain: Terrain) -> Error:
 		if _active:
 			return ERR_ALREADY_IN_USE
-		if terrain == null or not is_instance_valid(terrain) \
-				or not terrain.has_method("is_static_terrain_shadow_enabled") \
-				or not terrain.has_method("set_static_terrain_shadow_enabled"):
+		if terrain == null or not is_instance_valid(terrain):
 			return ERR_UNCONFIGURED
 		_terrain = terrain
-		_original_enabled = bool(terrain.call(
-				"is_static_terrain_shadow_enabled"))
+		_original_enabled = terrain.is_static_terrain_shadow_enabled()
 		_active = true
 		if _original_enabled:
-			terrain.call("set_static_terrain_shadow_enabled", false)
+			terrain.set_static_terrain_shadow_enabled(false)
 		return OK
 
 
@@ -56,11 +53,8 @@ class StaticTerrainShadowWarmupSuspension:
 		_original_enabled = false
 		_active = false
 		if terrain != null and is_instance_valid(terrain) \
-				and terrain.has_method("is_static_terrain_shadow_enabled") \
-				and terrain.has_method("set_static_terrain_shadow_enabled") \
-				and bool(terrain.call("is_static_terrain_shadow_enabled")) \
-				!= original_enabled:
-			terrain.call("set_static_terrain_shadow_enabled", original_enabled)
+				and terrain.is_static_terrain_shadow_enabled() != original_enabled:
+			terrain.set_static_terrain_shadow_enabled(original_enabled)
 
 
 var _game: MainGame

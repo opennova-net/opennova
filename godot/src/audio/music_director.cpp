@@ -55,10 +55,8 @@ void MusicDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("jump_to_section", "section_name"), &MusicDirector::jump_to_section);
 	ClassDB::bind_method(D_METHOD("get_var", "var_index"), &MusicDirector::get_var);
 	ClassDB::bind_method(D_METHOD("set_var", "var_index", "value"), &MusicDirector::set_var);
-	ClassDB::bind_method(D_METHOD("current_section"), &MusicDirector::current_section);
 	ClassDB::bind_method(D_METHOD("vm_state"), &MusicDirector::vm_state);
 	ClassDB::bind_method(D_METHOD("last_error"), &MusicDirector::last_error);
-	ClassDB::bind_method(D_METHOD("current_pc"), &MusicDirector::current_pc);
 
 	// Witnessed music-driving policy (engine audio/music_policy.h re-exports).
 	BIND_CONSTANT(MENU_MUSIC_VAR_SLOT);
@@ -324,14 +322,6 @@ void MusicDirector::set_var(int p_var_index, int p_value) {
 	mus_vm_set_var(_vm, (uint8_t)p_var_index, (int32_t)p_value);
 }
 
-StringName MusicDirector::current_section() const {
-	if (_vm == nullptr) {
-		return StringName();
-	}
-	const char *s = mus_vm_current_section(_vm);
-	return StringName(s ? s : "");
-}
-
 int MusicDirector::vm_state() const {
 	if (_vm == nullptr) {
 		return (int)MUS_VM_STOPPED;
@@ -345,13 +335,6 @@ String MusicDirector::last_error() const {
 	}
 	const char *s = mus_vm_last_error(_vm);
 	return String(s ? s : "");
-}
-
-int MusicDirector::current_pc() const {
-	if (_vm == nullptr) {
-		return -1;
-	}
-	return (int)mus_vm_pc(_vm);
 }
 
 // --- Hook trampolines --------------------------------------------------

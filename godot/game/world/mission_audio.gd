@@ -129,7 +129,7 @@ func _init(resource_root: ResourceRoot, item_db: ItemDatabase) -> void:
 ## Load banks, describe ambient marker candidates under `container`, and apply the reverb bed.
 ## `mission_name` is the .bms filename (its basename selects the co-named .LWF).
 ## Returns a stats dictionary.
-func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
+func setup(mission: MissionData, mission_name: String, container: Node3D) -> Dictionary:
 	_stats = {
 		"markers_total": 0,
 		"markers_resolved": 0,
@@ -1063,9 +1063,15 @@ static func crossfade_volume_byte(blend: float) -> int:
 	return AmbientMixer.crossfade_volume_byte(blend)
 
 
-# Reverb id -> an AudioEffectReverb preset on the Ambient bus. The exact JO preset
-# table (Audio_LoadReverbDefs @0x766d80) is not yet ported; this is a coarse,
-# audible approximation gated on a non-zero mission reverb id.
+# Reverb id -> an AudioEffectReverb preset on the Ambient bus. NOT a port: retail's
+# reverb is a software DSP in the mixer driven by a 20-row coefficient table baked
+# into the image (0x7BF400; every row identical in stock JO, which ships no
+# reverb.def for Audio_LoadReverbDefs @0x766d80 / the parser @0x7bf5e4 to
+# override) and indexed by the per-tick reverb id the player body sets
+# (@0x4b633f: userpoint, else the occupied building's def `reverb`, else the
+# mission default). Witness record: docs/audio/lwf-dbf-sound-re.md "The reverb
+# bed". This room-size stand-in scales with an id retail's rows do not vary with;
+# its disposition (port the DSP or ledger a D-SND row) is pending the maintainer.
 func _apply_reverb(reverb_id: int) -> void:
 	var bus_idx := AudioServer.get_bus_index(AMBIENT_BUS)
 	if bus_idx < 0:

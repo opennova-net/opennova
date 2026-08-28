@@ -20,7 +20,6 @@ void FntResource::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_glyph_count"), &FntResource::get_glyph_count);
 	ClassDB::bind_method(D_METHOD("get_first_char"), &FntResource::get_first_char);
 	ClassDB::bind_method(D_METHOD("get_glyph_spacing"), &FntResource::get_glyph_spacing);
-	ClassDB::bind_method(D_METHOD("set_glyph_spacing", "glyph_spacing"), &FntResource::set_glyph_spacing);
 
 	ClassDB::bind_method(D_METHOD("get_page_image", "page"), &FntResource::get_page_image);
 
@@ -167,14 +166,6 @@ int FntResource::get_first_char() const {
 
 int FntResource::get_glyph_spacing() const {
 	return _has_valid_font() ? font_.glyph_spacing : 0;
-}
-
-void FntResource::set_glyph_spacing(int p_glyph_spacing) {
-	if (!_has_valid_font() || font_.glyph_spacing == p_glyph_spacing) {
-		return;
-	}
-	font_.glyph_spacing = p_glyph_spacing;
-	emit_changed();
 }
 
 Ref<Image> FntResource::get_page_image(int p_page) const {

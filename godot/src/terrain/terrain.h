@@ -240,8 +240,6 @@ public:
 	float get_visible_terrain_max_height() const;
 
 	// Debug API
-	Dictionary get_traversal_stats() const;
-	PackedInt32Array get_lod_distribution() const;
 	int get_patches_active() const;
 	int get_visible_patch_count() const;
 	const std::vector<FoliageDetailPatch> &get_foliage_detail_patches_native() const;

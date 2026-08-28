@@ -16,7 +16,7 @@ namespace godot {
 // remap operations (assign / clear / defaults), and exposes the live keys to
 // the gameplay input sampler. The engine logic (catalog, key-name decode,
 // binding format, record semantics) lives in engine/runtime/controls
-// (binding_set.h carries the [orig:] chain); this class adds only the
+// (binding_set.h carries the (retail:, see docs/mnu/menu-re.md) chain); this class adds only the
 // Godot-device seam: the VK <-> Godot Key translation and the Variant blob
 // the shell persists.
 class ControlsModel : public RefCounted {

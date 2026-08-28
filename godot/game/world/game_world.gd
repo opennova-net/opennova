@@ -111,7 +111,8 @@ var _runtime: MissionPresentation = null  # the one mission runtime driver (sim 
 var _panm_clock := PanmClock.new()
 var _frame_pipeline: GameFramePipeline
 var _mission_stats: Dictionary = {}
-var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
+var _placer: MissionObjectPlacer = null  # kept so mission audio reuses its item database
+var _last_load_timeline: PerfTimeline = null  # the most recent load_mission timing
 var _weapon_db: WeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
 var _local_weapon_dict := {}  # the resolved weapon's raw dict (FSM setup transport, ADR 0017 edge)
 var _mission_audio: MissionAudio
@@ -140,7 +141,7 @@ var _idle_frame_clear_color := Color.BLACK
 # entries skip the settings lookup + their own mount and resolve through it; the
 # game path (no injection) still mounts from the persisted resource directory.
 var _injected_root: ResourceRoot = null
-# Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
+# Debug: hide the scattered foliage (the dev tools' "Hide foliage"). Off by default.
 var _foliage_hidden := false
 var _playable := true
 # The net-session drive: typed request staging, the joiner preload/admission
@@ -219,8 +220,8 @@ func _init() -> void:
 	_net_drive = NetSessionDrive.new()
 	_net_drive.name = "NetSessionDrive"
 	_net_drive.setup(self,
-			Callable(self, "_load_mission_internal"),
-			Callable(self, "_resolve_root"),
+			_load_mission_internal,
+			_resolve_root,
 			func() -> Dictionary: return _local_player_spawn_loadout)
 	add_child(_net_drive)
 	# The debug-view set follows the same internal-child pattern. Its two
@@ -488,6 +489,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	_set_water_world_rendering_enabled(false)
 	# Keep stage attribution stable so load timelines remain comparable.
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_name)
+	_last_load_timeline = timeline
 	_resource_root = resource_root
 	# The shared .3DI definition cache resets before the environment and
 	# terrain stages (the load plan's first order witness): Celestial resolves
@@ -668,6 +670,11 @@ func get_weapon_database() -> WeaponDatabase:
 					% _weapon_db.get_last_error())
 			return null
 	return _weapon_db if _weapon_db.is_loaded() else null
+
+
+## The timing of the most recent mission load (null before the first load).
+func last_load_timeline() -> PerfTimeline:
+	return _last_load_timeline
 
 
 func get_runtime() -> MissionPresentation:
@@ -1138,7 +1145,7 @@ func set_frame_stats(board: FrameStats) -> void:
 	if board == _frame_stats:
 		return
 	if _frame_stats != null:
-		var old_capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		var old_capture_changed := _on_frame_stats_capture_changed
 		if _frame_stats.capture_changed.is_connected(old_capture_changed):
 			_frame_stats.capture_changed.disconnect(old_capture_changed)
 	_stop_water_render_stats()
@@ -1150,7 +1157,7 @@ func set_frame_stats(board: FrameStats) -> void:
 	_slot_render_stats = null
 	_frame_stats = board
 	if _frame_stats != null:
-		var capture_changed := Callable(self, "_on_frame_stats_capture_changed")
+		var capture_changed := _on_frame_stats_capture_changed
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
 		_q3_render_stats = ViewportRenderStatsSampler.new(board,
@@ -1232,6 +1239,8 @@ var _frame_camera_pos := Vector3()
 # Untyped on purpose: a Transform3D-typed member on this class crashes the
 # engine's exit teardown when a test leaks a GameWorld instance (Godot 4.6
 # quirk, bisected 2026-08-09); the Variant carries the camera transform.
+# Several GUT files still construct GameWorld.new() without autofree, so the
+# leak is not pinned to one test.
 var _frame_camera_xform = Transform3D()
 var _frame_delta := 0.0
 var _frame_probe_enabled := false
@@ -1243,7 +1252,7 @@ var _device_frame_start_us := 0
 # local-view device leg runs inside the frame (null in worlds without one —
 # tests, dedicated). D-RORD-8: placing it before the occlusion/iris/particle
 # legs lets them read the camera THIS frame's tick produced, not last frame's.
-var _local_view_presenter
+var _local_view_presenter: LocalPlayerPresenter = null
 
 
 func render_terrain_frame() -> void:
@@ -1412,7 +1421,7 @@ func apply_scene_environment_frame() -> void:
 
 
 ## One-time handoff from the shell that owns the local-player presenter.
-func set_local_view_presenter(presenter) -> void:
+func set_local_view_presenter(presenter: LocalPlayerPresenter) -> void:
 	_local_view_presenter = presenter
 
 
@@ -2309,7 +2318,7 @@ func get_debug_view_statuses() -> Array[DebugViewStatus]:
 	return _debug_views.get_debug_view_statuses()
 
 
-## The F3 overlay's Particles tab seams (the existing get_effect_world() is
+## The dev tools' Particles seams (the existing get_effect_world() is
 ## the data source; these are the two debug toggles).
 ## Delegates to the item-effect director; the name stays on GameWorld for the
 ## F3 option registry dispatch (debug_options) + probe duck-calls.
@@ -2321,7 +2330,7 @@ func is_particles_hidden() -> bool:
 	return _item_fx.particles_hidden()
 
 
-# --- Hide foliage (F3 overlay's "Hide foliage") ------------------------------
+# --- Hide foliage (the dev tools' "Hide foliage") ----------------------------
 # The dispatcher renders the scattered vegetation through child MultiMeshInstance3D slots,
 # so hiding the dispatcher node hides all foliage at once -- without touching the placement
 # caches, so re-showing is instant and the next dispatch is already current.
@@ -2493,9 +2502,9 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
 	# and effect world resolve lazily (mission audio is set up after the runtime), the
 	# listener is the same camera position the audio render pass ticks with.
-	opts["fire_audio"] = Callable(self, "get_mission_audio")
-	opts["fire_fx"] = Callable(self, "get_effect_world")
-	opts["fire_listener"] = Callable(self, "_fire_listener_position")
+	opts["fire_audio"] = get_mission_audio
+	opts["fire_fx"] = get_effect_world
+	opts["fire_listener"] = _fire_listener_position
 	# The destruction/throwable present passes anchor their wreck/piece/move
 	# effect groups through the ItemEffectDirector's owner-anchor registry
 	# (the typed seam; GameWorld's register_effect_anchor delegates to the
@@ -2503,12 +2512,12 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	opts["effect_anchors"] = _item_fx
 	# The scar present pass reads the fog distance + the combined terrain light
 	# off the live environment node each present frame (world-wac-ai-re §24.9).
-	opts["environment_node"] = Callable(self, "get_environment_node")
+	opts["environment_node"] = get_environment_node
 	# The dynamic light-pool routes (renderer/light_scene.h witness map): the
 	# MF_Light muzzle glow per presented fire, the death flash per husk death.
 	if _light_director != null:
-		opts["muzzle_light"] = Callable(_light_director, "on_muzzle_fire")
-		opts["death_light"] = Callable(_light_director, "on_death_light")
+		opts["muzzle_light"] = _light_director.on_muzzle_fire
+		opts["death_light"] = _light_director.on_death_light
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		var setup_error := int(_runtime.get_setup_error())

@@ -9,9 +9,11 @@
 
 #include <godot_cpp/core/math.hpp>
 
+#include <runtime/anim/aim_overlay.h> // kOverlayClassCount (the nine overlay classes)
 #include <runtime/world/ai.h> // kPartAnimPhaseOne (the PLAYPARTANIM phase domain)
 #include <runtime/world/infantry.h>
 
+#include <algorithm>
 #include <limits>
 
 namespace godot {
@@ -854,14 +856,21 @@ Dictionary ObjectModel::get_weapon_channel() const {
 	return out;
 }
 
-void ObjectModel::set_aim_overlay(const Array &p_deltas) {
+static_assert(ObjectModel::kAimOverlayClasses ==
+				static_cast<int>(opennova::anim::kOverlayClassCount),
+		"the model's overlay slots mirror the engine's overlay classes");
+
+void ObjectModel::set_aim_overlay_deltas(const Basis *p_deltas) {
 	for (ObjectModel *linked : live_presentation_links()) {
-		linked->set_aim_overlay(p_deltas);
+		linked->set_aim_overlay_deltas(p_deltas);
 	}
 	wake_runtime_frame();
-	const bool overlay_changed = p_deltas != aim_overlay_deltas_;
+	bool overlay_changed = !aim_overlay_valid_;
+	for (int c = 0; c < kAimOverlayClasses && !overlay_changed; ++c) {
+		overlay_changed = aim_overlay_deltas_[static_cast<size_t>(c)] != p_deltas[c];
+	}
 	bool classes_changed = false;
-	if (!p_deltas.is_empty() && aim_overlay_classes_.is_empty() && skeletal_.is_valid()) {
+	if (aim_overlay_classes_.is_empty() && skeletal_.is_valid()) {
 		const PackedInt32Array next_classes = skeletal_->get_overlay_classes();
 		classes_changed = next_classes != aim_overlay_classes_;
 		aim_overlay_classes_ = next_classes;
@@ -869,8 +878,45 @@ void ObjectModel::set_aim_overlay(const Array &p_deltas) {
 	if (!overlay_changed && !classes_changed) {
 		return;
 	}
-	aim_overlay_deltas_ = p_deltas;
+	std::copy_n(p_deltas, kAimOverlayClasses, aim_overlay_deltas_.begin());
+	aim_overlay_valid_ = true;
 	body_pose_dirty_ = true;
+}
+
+void ObjectModel::clear_aim_overlay() {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->clear_aim_overlay();
+	}
+	wake_runtime_frame();
+	if (!aim_overlay_valid_) {
+		return;
+	}
+	aim_overlay_valid_ = false;
+	body_pose_dirty_ = true;
+}
+
+void ObjectModel::set_aim_overlay(const Array &p_deltas) {
+	if (p_deltas.size() < static_cast<int64_t>(kAimOverlayClasses)) {
+		clear_aim_overlay();
+		return;
+	}
+	Basis deltas[kAimOverlayClasses];
+	for (int c = 0; c < kAimOverlayClasses; ++c) {
+		deltas[c] = p_deltas[c];
+	}
+	set_aim_overlay_deltas(deltas);
+}
+
+Array ObjectModel::get_aim_overlay() const {
+	Array out;
+	if (!aim_overlay_valid_) {
+		return out;
+	}
+	out.resize(kAimOverlayClasses);
+	for (int c = 0; c < kAimOverlayClasses; ++c) {
+		out[c] = aim_overlay_deltas_[static_cast<size_t>(c)];
+	}
+	return out;
 }
 
 Dictionary ObjectModel::get_body_blend() const {
@@ -925,7 +971,7 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 		return;
 	}
 	const bool use_overlay =
-			!aim_overlay_deltas_.is_empty() && !aim_overlay_classes_.is_empty();
+			aim_overlay_valid_ && !aim_overlay_classes_.is_empty();
 	const bool use_primary_blend =
 			!body_blend_source_key_.is_empty() && body_blend_weight_ < 1.0f;
 	double wpn_time = 0.0;
@@ -946,19 +992,19 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 		}
 	}
 	static const PackedInt32Array empty_classes;
-	static const Array empty_deltas;
+	const Basis *overlay_deltas = use_overlay ? aim_overlay_deltas_.data() : nullptr;
 	if (use_primary_blend) {
 		skeletal_->pose_skeleton_blended(skeleton_, body_blend_source_key_,
 				body_blend_source_time_, anim_key_, anim_time_, body_blend_weight_,
 				use_overlay ? aim_overlay_classes_ : empty_classes,
-				use_overlay ? aim_overlay_deltas_ : empty_deltas,
+				overlay_deltas,
 				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_,
 				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
 				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_);
 	} else {
-		skeletal_->pose_skeleton(skeleton_, anim_key_, anim_time_, anim_variant_,
+		skeletal_->pose_skeleton_deltas(skeleton_, anim_key_, anim_time_, anim_variant_,
 				use_overlay ? aim_overlay_classes_ : empty_classes,
-				use_overlay ? aim_overlay_deltas_ : empty_deltas,
+				overlay_deltas,
 				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_,
 				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
 				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_);

@@ -11,7 +11,6 @@ var player_view_effects_active := false
 var ads_active := false
 var big_map_active := false
 var hud_canvas_layer_active := false
-var fps_counter_visible := true
 var error := ""
 
 

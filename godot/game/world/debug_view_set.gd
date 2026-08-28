@@ -53,14 +53,14 @@ var _occlusion_view: OcclusionDebugView = null
 var _round_view: RoundDebugView = null
 var _hitbox_view: HitboxDebugView = null
 
-# Debug: draw character bones over the world (F3 overlay's "Show skeletons"). Off by default.
+# Debug: draw character bones over the world (the dev tools' "Show skeletons"). Off by default.
 var _skeleton_debug := false
 # Debug: draw named model user points, including static-batched objects. Off by default.
 var _user_point_debug := false
-# Debug: draw the collision volumes + player capsule (F3 overlay's "Show collision"). Off by default.
+# Debug: draw the collision volumes + player capsule (the dev tools' "Show collision"). Off by default.
 var _collision_debug := false
 var _occlusion_debug := false
-# Debug: draw live emitter bounds + effect names (F3 overlay's "Show effect boxes").
+# Debug: draw live emitter bounds + effect names (the dev tools' "Show effect boxes").
 var _particle_debug := false
 var _round_debug := false
 var _hitbox_debug := false
@@ -82,7 +82,7 @@ func _view_live(view: Node) -> bool:
 	return view != null and is_instance_valid(view) 			and not view.is_queued_for_deletion()
 
 
-## Readback for the F3 pages: toggle intent, installed view, and whether that
+## Readback for the dev tools and the MCP: toggle intent, installed view, and whether that
 ## installed view currently has anything it can draw are deliberately separate
 ## facts. A retained toggle can be enabled while its mission-owned view is
 ## detached during unload/reload.
@@ -187,7 +187,7 @@ func _remove_debug_view(debug_name: String) -> void:
 	existing.queue_free()
 
 
-# --- Skeleton debug view (F3 overlay's "Show skeletons") ---------------------
+# --- Skeleton debug view (the dev tools' "Show skeletons") -------------------
 # Build / free a child SkeletonDebugView that draws every character's bones over the world.
 # Mirrors the editor's set_pick_debug -> _refresh_pick_debug build/free toggle flow.
 
@@ -209,7 +209,7 @@ func _refresh_skeleton_debug() -> void:
 	view.setup(_world)  # walks the world's subtree for Skeleton3D nodes each frame
 
 
-# --- User-point debug view (F3 overlay's "Show user points") ------------------
+# --- User-point debug view (the dev tools' "Show user points") ----------------
 # Live models are discovered under the world. Static mission objects have no
 # per-entity nodes after batching, so the placer supplies the exact grouped
 # placement-time sources that successfully rendered (lent as the
@@ -240,7 +240,7 @@ func _remove_user_point_debug_view() -> void:
 	_remove_debug_view(USER_POINT_DEBUG_NAME)
 
 
-# --- Collision debug view (F3 overlay's "Show collision") --------------------
+# --- Collision debug view (the dev tools' "Show collision") ------------------
 # Build / free a child CollisionDebugView drawing the sim's collision volumes +
 # the local player's capsule test points over the world. Same build/free toggle
 # flow as the skeleton view; the view re-resolves the sim through the world
@@ -286,7 +286,7 @@ func _refresh_collision_debug() -> void:
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
 
 
-# --- Round debug view (F3 overlay's "Show round trails") ---------------------
+# --- Round debug view (the dev tools' "Show round trails") -------------------
 # Build / free a child RoundDebugView drawing the RoundSim debug ring (flight
 # segments + hit markers + labels) over the world — the collision-view
 # contract: the view re-resolves the sim through the world every frame,
@@ -351,7 +351,7 @@ func set_pick_debug(pick_list: DebugPickList) -> void:
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
 
 
-## While the F3 overlay is open (mouse released), a world click ray-picks the
+## While the dev tools are open (mouse released), a world click ray-picks the
 ## entity under the cursor into the installed pick list.
 func set_pick_click_enabled(enabled: bool) -> void:
 	_remove_debug_view(PICK_CATCHER_NAME)
@@ -363,7 +363,7 @@ func set_pick_click_enabled(enabled: bool) -> void:
 	catcher.setup(_world, _pick_list)
 
 
-# --- Occlusion debug view (F3 overlay's "Show portal faces") -----------------
+# --- Occlusion debug view (the dev tools' "Show portal faces") ---------------
 # Build / free a child OcclusionDebugView drawing the render-occlusion portal
 # faces (type-colored outlines + section labels) over the world — the
 # collision-view contract: the view re-resolves the sim through the world

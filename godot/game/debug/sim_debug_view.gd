@@ -2,14 +2,14 @@ class_name SimDebugView
 extends Node3D
 
 # Shared scaffolding for the world-space debug views that read one
-# Simulation debug accessor through GameWorld: host/sim resolution, the
+# Simulation debug accessor through GameWorld: owner/sim resolution, the
 # per-frame refresh template, and the common wireframe/label drawing recipes.
 # Each view builds its meshes (_build_view), refreshes from a live sim
 # (_refresh_from_sim), and drops its artifacts (_clear_all).
 #
-# The sim is re-resolved through the host every refresh so mission reloads
+# The sim is re-resolved through the owner every refresh so mission reloads
 # never leave a view pointing at a freed Simulation. Views are built /
-# freed by the host (GameWorld) in response to the F3 overlay's toggle
+# freed by the owner (GameWorld) in response to the dev tools' toggle
 # signals — the overlay itself never reaches into the 3D scene.
 
 const MissionOverlayUtil := preload("res://game/mission/mission_overlay_util.gd")
@@ -17,7 +17,7 @@ const MissionOverlayUtil := preload("res://game/mission/mission_overlay_util.gd"
 var _world: GameWorld = null  # re-resolved for its sim every refresh
 
 
-## `world` is the host owning the running sim.
+## `world` is the owner of the running sim.
 func setup(world: GameWorld) -> void:
 	_world = world
 	_build_view()
@@ -59,7 +59,7 @@ func _refresh_from_sim(_sim: Simulation) -> void:
 	pass
 
 
-## Drop every drawn artifact (no host, or the host has no sim).
+## Drop every drawn artifact (no owner, or the owner has no sim).
 func _clear_all() -> void:
 	pass
 

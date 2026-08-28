@@ -13,7 +13,7 @@ extends Node
 ## picked up when a client re-lists). McpHttpConnection.respond is the seam to
 ## grow an SSE stream on later.
 ##
-## The host wires `registry`, `context_factory`, `instructions`, and
+## The embedder wires `registry`, `context_factory`, `instructions`, and
 ## server identity, then start()s it. Tests start(0) for an ephemeral port.
 
 const MCP_PATH := "/mcp"

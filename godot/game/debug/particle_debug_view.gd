@@ -2,7 +2,7 @@ extends Node3D
 
 # Draws the live particle-effect world over the scene: one wireframe AABB per
 # active emitter plus a billboarded effect-name label per spawn group. The 3D
-# face of the F3 overlay's "Show effect boxes" toggle, mimicking the retail
+# face of the dev tools' "Show effect boxes" toggle, mimicking the retail
 # particle debug boxes: retail draws every emitter's accumulated AABB in
 # opaque red inside the particle render pass [orig: CParticleManager_RenderBatch
 # @ 0x5e9890 gate mgr[182] -> Render_DrawDebugBoundingBox @ 0x5e06e0, color

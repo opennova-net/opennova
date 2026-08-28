@@ -179,7 +179,7 @@ int RtxtStringFile::add_entry(const String &p_key, const String &p_text, int p_s
 	entry.position.y = static_cast<int16_t>(p_position.y);
 	// Insert at the end of the section's contiguous run: the engine derives entry
 	// indices by accumulating section string_counts and requires grouped entries
-	// [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250].
+	// (retail: TextResource_FindEntryBySectionAndKey @ 0x75D250, see docs/interface/rtxt-strings-re.md).
 	const int index = _section_insert_index(entry.section_index);
 	file_.entries.insert(file_.entries.begin() + index, std::move(entry));
 	_refresh();
@@ -198,24 +198,6 @@ void RtxtStringFile::set_entry_text(int p_index, const String &p_text) {
 	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
 	file_.entries[p_index].text = gd_to_std(p_text);
 	emit_signal("entry_text_changed", p_index);
-}
-
-int RtxtStringFile::set_entry_section_index(int p_index, int p_section_index) {
-	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_.entries.size()), -1);
-	const uint32_t target = static_cast<uint32_t>(p_section_index < 0 ? 0 : p_section_index);
-	if (file_.entries[p_index].section_index == target) {
-		return p_index;
-	}
-	// Move the entry to the end of its new section's run so the file stays
-	// grouped (see add_entry). Returns the entry's new index.
-	opennova::rtxt::Entry moved = file_.entries[p_index];
-	moved.section_index = target;
-	file_.entries.erase(file_.entries.begin() + p_index);
-	int index = _section_insert_index(target);
-	file_.entries.insert(file_.entries.begin() + index, std::move(moved));
-	_refresh();  // section totals change
-	emit_signal("entries_structure_changed");
-	return index;
 }
 
 int RtxtStringFile::_section_insert_index(uint32_t p_section_index) const {
@@ -382,7 +364,6 @@ void RtxtStringFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_entry", "key", "text", "section_index", "position"), &RtxtStringFile::add_entry);
 	ClassDB::bind_method(D_METHOD("remove_entry", "index"), &RtxtStringFile::remove_entry);
 	ClassDB::bind_method(D_METHOD("set_entry_text", "index", "text"), &RtxtStringFile::set_entry_text);
-	ClassDB::bind_method(D_METHOD("set_entry_section_index", "index", "section_index"), &RtxtStringFile::set_entry_section_index);
 
 	ClassDB::bind_method(D_METHOD("add_section", "name"), &RtxtStringFile::add_section);
 

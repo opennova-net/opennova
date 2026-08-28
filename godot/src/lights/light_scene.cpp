@@ -892,10 +892,6 @@ PackedByteArray LightScene::terrain_light_strip_rgba8() {
 			&opennova::renderer::falloff_texture_spot1d_argb);
 }
 
-int LightScene::live_count() const {
-	return static_cast<int>(scene_.inspect().live);
-}
-
 Dictionary LightScene::get_report() const {
 	const opennova::renderer::LightSceneReport report = scene_.inspect();
 	Dictionary out;
@@ -1022,7 +1018,6 @@ void LightScene::_bind_methods() {
 	ClassDB::bind_static_method("LightScene",
 			D_METHOD("terrain_light_strip_rgba8"),
 			&LightScene::terrain_light_strip_rgba8);
-	ClassDB::bind_method(D_METHOD("live_count"), &LightScene::live_count);
 	ClassDB::bind_method(D_METHOD("get_report"), &LightScene::get_report);
 	ClassDB::bind_method(D_METHOD("get_static_light_rows_image"),
 			&LightScene::get_static_light_rows_image);

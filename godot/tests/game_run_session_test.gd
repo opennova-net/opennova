@@ -28,6 +28,7 @@ class FakeSession:
 	var oned_exe := "C:/tools/opennova-modtools.exe"
 	var project_dir := "C:/project"
 	var dev_mode := true
+	var now_msec := 0
 
 	func _valid_resource_dir(path: String) -> bool:
 		return path.replace("\\", "/") == valid_root
@@ -85,6 +86,9 @@ class FakeSession:
 
 	func _is_dev_mode() -> bool:
 		return dev_mode
+
+	func _now_msec() -> int:
+		return now_msec
 
 
 func test_runtime_flags_are_only_the_loose_resource_contract() -> void:
@@ -166,16 +170,34 @@ func test_opennova_launches_directly_and_never_stages() -> void:
 	assert_true(session.is_running())
 
 
-func test_starting_another_target_stops_and_waits_for_the_first() -> void:
+func test_starting_another_target_stops_the_first_then_spawns_from_poll() -> void:
 	var session := FakeSession.new()
 	assert_true(session.run_opennova("C:/assets"))
 	var first_pid := int(session.get_state()["pid"])
 	assert_true(session.run_retail("C:/assets", "C:/retail"))
 	assert_eq(session.killed, [first_pid])
-	assert_eq(int(session.waited[0]["pid"]), first_pid)
+	assert_true(session.waited.is_empty(), "the stop never blocks on the exit")
+	assert_true(session.is_stopping())
+	assert_eq(session.get_state()["state"], "stopping")
+	assert_eq(session.spawned.size(), 1, "the second run waits for the first to exit")
+	session.poll()  # the fake kill already marked the process dead
 	assert_eq(session.released, [first_pid])
-	assert_eq(session.events, ["spawn", "kill", "wait", "release", "stage", "spawn"])
+	assert_eq(session.events, ["spawn", "kill", "release", "stage", "spawn"])
 	assert_eq(session.get_state()["mode"], "retail")
+	assert_true(session.is_running())
+
+
+func test_stop_reports_the_deadline_when_the_process_lingers() -> void:
+	var session := FakeSession.new()
+	assert_true(session.run_opennova("C:/assets"))
+	var pid := int(session.get_state()["pid"])
+	assert_true(session.stop())
+	session.alive[pid] = true  # the kill was sent but the process has not exited
+	session.now_msec = Session.STOP_WAIT_MSEC
+	session.poll()
+	assert_true(session.is_running(), "a lingering process stays owned")
+	assert_eq(session.get_last_error(), "The running process did not exit after it was stopped.")
+	assert_true(session.released.is_empty())
 
 
 func test_retail_stages_then_launches_with_only_retail_flags_and_cwd() -> void:
@@ -236,12 +258,23 @@ func test_stop_failure_preserves_the_owned_process() -> void:
 	assert_true(session.released.is_empty())
 
 
-func test_shutdown_stops_waits_and_releases_the_child() -> void:
+func test_shutdown_stops_and_releases_the_child_synchronously() -> void:
 	var session := FakeSession.new()
 	assert_true(session.run_opennova("C:/assets"))
 	var pid := int(session.get_state()["pid"])
 	assert_true(session.shutdown())
 	assert_eq(session.killed, [pid])
+	assert_eq(session.released, [pid])
+	assert_false(session.is_running())
+
+
+func test_shutdown_waits_for_a_stop_already_under_way() -> void:
+	var session := FakeSession.new()
+	assert_true(session.run_opennova("C:/assets"))
+	var pid := int(session.get_state()["pid"])
+	assert_true(session.stop())
+	session.alive[pid] = true  # still exiting when the app closes
+	assert_true(session.shutdown())
 	assert_eq(int(session.waited[0]["timeout"]), Session.STOP_WAIT_MSEC)
 	assert_eq(session.released, [pid])
 	assert_false(session.is_running())

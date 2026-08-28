@@ -35,7 +35,6 @@ public:
 	PackedByteArray get_data() const;
 
 	int row_count() const;
-	void set_row(int row, const PackedByteArray &values);
 
 	// Sample the 256-byte curve at t in [0, 1]. Linear interpolation between
 	// adjacent bytes; clamped at the ends.

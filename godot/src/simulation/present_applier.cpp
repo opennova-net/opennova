@@ -318,7 +318,7 @@ void PresentApplier::aim_apply(Object *node, const PackedFloat32Array &snap,
 	model->set_right_hand_collapsed(
 			field_i(p, base, Simulation::PF_RIGHT_HAND_COLLAPSED) != 0);
 	if (field_i(p, base, Simulation::PF_AIM_OVERLAY_VALID) == 0) {
-		model->set_aim_overlay(Array());
+		model->clear_aim_overlay();
 		return;
 	}
 	aim_apply_valid(model, snap, base, drive_root_basis);
@@ -337,16 +337,16 @@ void PresentApplier::aim_apply_valid(Object *node,
 	}
 	const Basis inverse_body = body_basis.inverse();
 	const float *p = snap.ptr();
-	Array deltas;
-	deltas.resize(9);
-	for (int overlay_class = 0; overlay_class < 9; ++overlay_class) {
+	Basis deltas[ObjectModel::kAimOverlayClasses];
+	for (int overlay_class = 0; overlay_class < ObjectModel::kAimOverlayClasses;
+			++overlay_class) {
 		const int offset = base + Simulation::PF_AIM_ANGLES +
 				overlay_class * Simulation::PF_AIM_CLASS_STRIDE;
 		deltas[overlay_class] = inverse_body *
 				bms_to_godot_basis(
 						Vector3(p[offset], p[offset + 1], p[offset + 2]));
 	}
-	model->set_aim_overlay(deltas);
+	model->set_aim_overlay_deltas(deltas);
 }
 
 namespace {
@@ -765,7 +765,7 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 				}
 				row.aim_valid = 1;
 			} else if (row.aim_valid != 0) {
-				model->set_aim_overlay(Array());
+				model->clear_aim_overlay();
 				++stat_aim_dispatches_;
 				row.aim_valid = 0;
 				row.aim_payload_valid = false;

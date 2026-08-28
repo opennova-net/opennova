@@ -53,8 +53,7 @@ func teardown() -> void:
 
 # The sim, re-resolved per use: mission reloads free the runtime and its sim,
 # so a cached reference would go stale (the presenter follows the same rule).
-# Untyped: GUT harness worlds serve value-only sim doubles.
-func _sim():
+func _sim() -> Simulation:
 	return _world.get_sim() if _world != null else null
 
 

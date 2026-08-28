@@ -300,7 +300,7 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 				aim_apply_valid(model, snap, base, false);
 			}
 		} else if (row.aim_valid != 0) {
-			model->set_aim_overlay(Array());
+			model->clear_aim_overlay();
 			row.aim_cache_valid = false;
 		}
 		row.aim_valid = aim_valid;

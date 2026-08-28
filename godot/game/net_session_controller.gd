@@ -10,14 +10,14 @@ extends Node
 # seam. Game-layer only: the engine world below knows nothing of menus or
 # launch flags.
 
-var _shell  # MainGame: start_world_load / current_resource_root
+var _shell: MainGame  # start_world_load / current_resource_root
 var _world: GameWorld
 var _menu_shell: MenuShell
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
 var _novaworld_panel: NovaWorldPanel
 
 
-func setup(shell, world: GameWorld, menu_shell, panel_layer: Node) -> void:
+func setup(shell: MainGame, world: GameWorld, menu_shell: MenuShell, panel_layer: Node) -> void:
 	_shell = shell
 	_world = world
 	_menu_shell = menu_shell
@@ -97,7 +97,7 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 	}
 	_shell.start_world_load(
 		load_info,
-		Callable(_world, "load_mission_as_host").bind(config))
+		_world.load_mission_as_host.bind(config))
 
 
 ## Public entry for "join this server" — the seam behind the LAN browser's
@@ -129,7 +129,7 @@ func join_lan_server(target: JoinTarget) -> void:
 	}
 	_shell.start_world_load(
 		load_info,
-		Callable(_world, "load_mission_as_joiner").bind(target))
+		_world.load_mission_as_joiner.bind(target))
 
 
 ## The local player's callsign — rides the game ClientAuth.NA (the host echoes it back so we
@@ -200,7 +200,7 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 		"mission_name": _resolve_mission_title(mission),
 		"game_type": config.game_type,
 		"custom_text": config.custom_text,
-	}, Callable(_world, "load_mission_as_host").bind(config))
+	}, _world.load_mission_as_host.bind(config))
 
 
 # The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match

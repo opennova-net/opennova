@@ -72,7 +72,6 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_source_path"), &MissionData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &MissionData::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_mission_name"), &MissionData::get_mission_name);
-	ClassDB::bind_method(D_METHOD("get_designer"), &MissionData::get_designer);
 	ClassDB::bind_method(D_METHOD("get_terrain_ref"), &MissionData::get_terrain_ref);
 	ClassDB::bind_method(D_METHOD("get_environment_ref"), &MissionData::get_environment_ref);
 	ClassDB::bind_method(D_METHOD("get_info"), &MissionData::get_info);
@@ -96,7 +95,6 @@ void MissionData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_waypoint_summaries"), &MissionData::get_waypoint_summaries);
 	ClassDB::bind_method(D_METHOD("get_waypoint_path", "index"), &MissionData::get_waypoint_path);
-	ClassDB::bind_method(D_METHOD("get_waypoint_paths"), &MissionData::get_waypoint_paths);
 	ClassDB::bind_method(D_METHOD("set_waypoint_path", "index", "marker_indices", "flags"), &MissionData::set_waypoint_path);
 	ClassDB::bind_method(D_METHOD("clear_waypoint_path", "index"), &MissionData::clear_waypoint_path);
 	ClassDB::bind_method(D_METHOD("add_waypoint_marker", "path_index", "marker_item_id", "position", "rotation_deg", "insert_index"), &MissionData::add_waypoint_marker);
@@ -304,10 +302,6 @@ String MissionData::get_last_error() const {
 
 String MissionData::get_mission_name() const {
 	return String(document.info().mission_name.c_str());
-}
-
-String MissionData::get_designer() const {
-	return String(document.info().designer.c_str());
 }
 
 String MissionData::get_terrain_ref() const {
@@ -596,14 +590,6 @@ Dictionary MissionData::get_waypoint_path(int index) const {
 		return Dictionary();
 	}
 	return waypoint_path_to_dictionary(path);
-}
-
-Array MissionData::get_waypoint_paths() const {
-	Array out;
-	for (const opennova::mission::WaypointPath &path : document.waypoint_paths()) {
-		out.push_back(waypoint_path_to_dictionary(path));
-	}
-	return out;
 }
 
 bool MissionData::set_waypoint_path(int index, const PackedInt32Array &marker_indices, int flags) {

@@ -185,7 +185,7 @@ func _run_capture(ctx: ProbeContext) -> void:
 		_fail("spawn state changed during default capture")
 		return
 
-	# This is the public API used by the game and ONED debug overlay.
+	# This is the public API the game uses.
 	world.set_foliage_hidden(true)
 	await ctx.wait_frames(VISIBILITY_SETTLE_FRAMES)
 	if not world.is_foliage_hidden():

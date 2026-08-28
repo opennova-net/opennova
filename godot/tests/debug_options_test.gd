@@ -1,9 +1,7 @@
 extends GutTest
 
-# DebugOptions + DebugOptionState: the declarative option registry
-# that keeps the game shell and the editor wired identically. Rows are
-# integrity-checked against the REAL target scripts (setter must exist), and
-# the state object's single-write-path contract is pinned.
+# DebugOptions: the declarative option registry. Rows are integrity-checked
+# against the REAL target scripts (setter must exist).
 
 const GameWorldScript := preload("res://game/world/game_world.gd")
 const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
@@ -52,30 +50,3 @@ func test_every_setter_exists_on_its_target_script() -> void:
 					"LocalPlayerPresenter implements '%s' for '%s'" % [setter, option["id"]])
 
 
-func test_state_defaults_and_single_write_path() -> void:
-	var state := DebugOptionState.new()
-	assert_eq(state.value(&"show_skeletons"), false, "unset reads the registry default")
-	assert_null(state.value(&"nonexistent_option"), "unknown ids read null")
-
-	var emissions: Array = []
-	state.changed.connect(func(id: StringName, v: Variant): emissions.append([id, v]))
-	state.set_value(&"show_skeletons", true)
-	state.set_value(&"show_skeletons", true)
-	assert_eq(emissions.size(), 1, "a repeated value never re-fires")
-	assert_eq(emissions[0], [&"show_skeletons", true])
-	assert_eq(state.value(&"show_skeletons"), true)
-
-	state.set_value(&"nonexistent_option", true)
-	assert_eq(emissions.size(), 1, "unknown ids are ignored")
-
-
-func test_registered_control_resyncs_without_refiring() -> void:
-	var state := DebugOptionState.new()
-	var check := CheckBox.new()
-	autofree(check)
-	var toggles := [0]
-	check.toggled.connect(func(_v: bool): toggles[0] += 1)
-	state.register_control(&"hide_foliage", check)
-	state.set_value(&"hide_foliage", true)
-	assert_true(check.button_pressed, "a programmatic write lands on the control")
-	assert_eq(toggles[0], 0, "...without re-firing its toggled signal")

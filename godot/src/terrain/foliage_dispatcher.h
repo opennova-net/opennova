@@ -38,8 +38,8 @@ class TerrainTileInfo;
 // per-submission uniform state, and both wind clocks. This node applies the
 // typed FoliageDrawList: source Mesh extraction at configure time, sampler
 // bindings, ArrayMesh uploads for the draw list's mesh builds, draw-node pooling,
-// and material binding. [orig: generate_foliage_instances_0 @ 0x5ffdd0;
-// Foliage_GenerateModelTileInstances @ 0x600980]
+// and material binding. (retail: generate_foliage_instances_0 @ 0x5ffdd0;
+// Foliage_GenerateModelTileInstances @ 0x600980, see docs/foliage/foliage-re.md)
 class FoliageDispatcher : public Node3D {
   GDCLASS(FoliageDispatcher, Node3D)
 
@@ -85,7 +85,7 @@ public:
   // Anchors for the distant silhouette/depth-mask tier: crouched/prone
   // infantry standing on terrain, supplied per frame by the binding from the
   // simulation's stance query. Callers without entity data leave this empty.
-  // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded].
+  // (retail: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded, see docs/foliage/foliage-re.md).
   void set_silhouette_anchors(const PackedVector3Array &p_anchors);
   PackedVector3Array get_silhouette_anchors() const;
 

@@ -1417,22 +1417,12 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_mirror_reflected);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mirror_reflected"),
 			"set_mirror_reflected", "get_mirror_reflected");
-	ClassDB::bind_method(D_METHOD("set_native_frame", "native"),
-			&ObjectModel::set_native_frame);
-	ClassDB::bind_method(D_METHOD("get_native_frame"),
-			&ObjectModel::get_native_frame);
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "native_frame"),
-			"set_native_frame", "get_native_frame");
 	ClassDB::bind_method(D_METHOD("set_match_terrain_enabled", "enabled"),
 			&ObjectModel::set_match_terrain_enabled);
 	ClassDB::bind_method(D_METHOD("set_viewmodel_pass", "enabled"),
 			&ObjectModel::set_viewmodel_pass);
-	ClassDB::bind_method(D_METHOD("is_viewmodel_pass"),
-			&ObjectModel::is_viewmodel_pass);
 	ClassDB::bind_method(D_METHOD("set_presentation_layer", "layer"),
 			&ObjectModel::set_presentation_layer);
-	ClassDB::bind_method(D_METHOD("get_presentation_layer"),
-			&ObjectModel::get_presentation_layer);
 	ClassDB::bind_method(D_METHOD("set_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),

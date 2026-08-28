@@ -11,7 +11,7 @@ namespace godot {
 
 // The 256-instance star field (env #33): the witnessed instance table +
 // per-frame twinkle, generated and ticked in engine/formats/env
-// [orig: Star_GenerateInstanceTable @ 0x5ac850; render_star_field @ 0x5ad9c0].
+// (retail: Star_GenerateInstanceTable @ 0x5ac850; render_star_field @ 0x5ad9c0, see docs/env/env-tod-re.md).
 // The binding serves GODOT-space data (the engine->render basis
 // godot = (-engY, engZ, engX) / 65536, the Math_FixedPointToFloat3_YNegated
 // convention); Celestial owns the billboards. Like the water noise

@@ -415,6 +415,45 @@ func _populate_missions() -> void:
 		_mission_option.select(0)
 
 
+# --- Typed seams (tests drive the panel off-tree through these) -------------
+
+## Build the panel's UI for `target` without entering the tree (no client).
+func build_ui_for_target(target: int) -> void:
+	_target = target
+	_build_ui()
+
+
+func mission_count() -> int:
+	return _mission_option.item_count if _mission_option != null else 0
+
+
+func mission_name_at(index: int) -> String:
+	return _mission_option.get_item_text(index) if _mission_option != null else ""
+
+
+func select_mission(index: int) -> void:
+	if _mission_option != null:
+		_mission_option.select(index)
+
+
+## The Map dropdown's current selection (the .bms basename), or "" when none.
+func selected_mission() -> String:
+	return _selected_mission()
+
+
+## The Host button's press path.
+func press_host() -> void:
+	_on_host_pressed()
+
+
+func status_text() -> String:
+	return _status_label.text if _status_label != null else ""
+
+
+func host_enabled() -> bool:
+	return _host_button != null and not _host_button.disabled
+
+
 # The Map dropdown's current selection (the .bms basename), or "" when none.
 func _selected_mission() -> String:
 	if _mission_option == null or _mission_option.item_count == 0:

@@ -27,7 +27,7 @@ func reset() -> void:
 	_pushed = false
 
 
-func update(hud, world, chorded: bool, active: bool) -> void:
+func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool) -> void:
 	if hud == null or world == null:
 		return
 	var down := ControlsBindings.pressed("playerlist_alt")

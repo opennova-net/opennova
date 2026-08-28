@@ -2,12 +2,12 @@ extends Node3D
 
 # Draws the bones of every Skeleton3D under a world subtree as a debug overlay: one line
 # per bone (joint -> parent) plus a small axis cross at each joint. The 3D analog of the
-# F3 overlay's read-only panes -- a developer tool for eyeballing the skeletal runtime
+# dev tools' read-only panes -- a developer tool for eyeballing the skeletal runtime
 # (bone placement, locomotion phase sync, FP-arms posing), not engine-witnessed behavior.
 #
 # Everything is rebuilt into ONE ImmediateMesh every frame (redraw-from-live-state:
 # no retained per-model nodes), so spawning / despawning models needs no invalidation: the next
-# frame's walk simply finds the current set. Built / freed by GameWorld on the F3 overlay's
+# frame's walk simply finds the current set. Built / freed by GameWorld on the dev tools'
 # "Show skeletons" toggle.
 
 const MissionOverlayUtil := preload("res://game/mission/mission_overlay_util.gd")

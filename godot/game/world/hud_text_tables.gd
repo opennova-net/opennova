@@ -9,7 +9,7 @@ extends RefCounted
 ##  TextResource_LoadMissionTextBin @0x51ed90]
 
 
-static func register(root: ResourceRoot, world) -> void:
+static func register(root: ResourceRoot, world: GameWorld) -> void:
 	if root == null:
 		return
 	# Refresh this global registry from the current world's root every build.
@@ -19,7 +19,7 @@ static func register(root: ResourceRoot, world) -> void:
 	# Game.bin is the SEPARATE menu resource (@0x552510) and carries no WepDes].
 	Strings.register_table("gametext", load_rtxt(root, "gametext.bin"))
 	# The host's medic broadcast format [orig: Server_BroadcastMedicRequest @0x515390].
-	var sim = world.get_sim() if world != null else null
+	var sim: Simulation = world.get_sim() if world != null else null
 	var gametext: RtxtStringFile = Strings.get_table("gametext")
 	if sim != null and gametext != null \
 			and gametext.has_string_in_section("Server", "STRSRV_MEDREQ"):

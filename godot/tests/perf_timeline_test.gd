@@ -37,17 +37,6 @@ func test_end_span_without_open_is_inert() -> void:
 	assert_eq(timeline.spans().size(), 0)
 
 
-func test_ring_retains_most_recent_and_caps() -> void:
-	for i in PerfTimeline.RING_SIZE + 3:
-		PerfTimeline.begin("op %d" % i).finish()
-	assert_eq(PerfTimeline.history().size(), PerfTimeline.RING_SIZE,
-		"the ring caps at RING_SIZE")
-	var newest := "op %d" % (PerfTimeline.RING_SIZE + 2)
-	assert_eq(PerfTimeline.latest().label, newest)
-	assert_eq(String((PerfTimeline.history()[0] as PerfTimeline).label), newest,
-		"history is most-recent-first")
-
-
 func test_brief_lists_top_level_spans_without_label() -> void:
 	var timeline := PerfTimeline.begin("op")
 	timeline.span("alpha")

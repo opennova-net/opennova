@@ -61,7 +61,7 @@ var _input_router := PlayerInputRouter.new()
 var _viewmodel_rig := PlayerViewmodelRig.new()
 var _view: PlayerLocalView = null   # the sim's per-tick view snapshot (null = no sim)
 var _camera_saved_fov := -1.0
-# Debug experiments (the F3 overlay's Player page): keep the FP arms drawn in every
+# Debug experiments (the dev tools' Player controls): keep the FP arms drawn in every
 # camera mode, and/or draw the player's own body in first person — the "see our
 # feet" probe (the §14 aim overlay bends the spine away from the eye, so looking
 # down shows your legs; the head/shoulders will clip the near plane until a
@@ -78,8 +78,7 @@ var _camera_saved_cull_mask := -1
 
 # The sim, re-resolved per use: mission reloads free the runtime and its sim,
 # so a cached reference would go stale (the debug views follow the same rule).
-# Untyped: GUT harness worlds serve value-only sim doubles.
-func _sim():
+func _sim() -> Simulation:
 	return _world.get_sim() if _world != null else null
 
 
@@ -151,7 +150,7 @@ func setup(world: GameWorld, camera: Camera3D,
 	if _world != null:
 		_world.drain_local_player_weapon_events()
 		_world.set_local_player_weapon_tick_consumer(
-				Callable(self, "_present_fixed_weapon_tick"))
+				_present_fixed_weapon_tick)
 
 
 func teardown() -> void:

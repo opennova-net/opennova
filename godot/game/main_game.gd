@@ -82,9 +82,9 @@ var _frame_stats := FrameStats.new()
 # RenderingServer measurement edge latch and the wall-frame clock.
 var _render_stats := RootRenderStatsSampler.new()
 var _frame_phase_sampler := RootFramePhaseSampler.new()
-var _mp_companion  # MpMenuCompanion: drives the multiplayer (mp.mnu) menu by control name
+var _mp_companion: MpMenuCompanion  # drives the multiplayer (mp.mnu) menu by control name
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
-var _player_info_companion  # PlayerInfoMenuCompanion: drives the PLAYER_INFO (player.mnu) character screen
+var _player_info_companion: PlayerInfoMenuCompanion  # drives the PLAYER_INFO (player.mnu) character screen
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
@@ -330,7 +330,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_toggle_fullscreen()
 		get_viewport().set_input_as_handled()
 		return
-	if key.keycode == CHANGE_DIR_KEY and _can_summon_dir_picker():
+	if key.keycode == CHANGE_DIR_KEY and can_summon_dir_picker():
 		_request_resource_dir()
 		get_viewport().set_input_as_handled()
 		return
@@ -504,7 +504,7 @@ func _on_end_screen_exit() -> void:
 	_teardown_world_to_menu()
 
 
-func _current_runtime():
+func _current_runtime() -> MissionPresentation:
 	return _world.get_runtime() if _world != null else null
 
 
@@ -535,10 +535,13 @@ func hud_objective_line() -> String:
 
 
 # Whether the folder picker may be summoned right now: only from the menu front-end
-# and only when one is not already open. Pure predicate so it is unit-testable
-# headless (the native dialog itself cannot be shown without a display).
-func _can_summon_dir_picker() -> bool:
-	return _state == State.MENU and _picker == null
+# and only when one is not already open (the static rule is unit-testable headless).
+func can_summon_dir_picker() -> bool:
+	return can_summon_dir_picker_in(_state, _picker != null)
+
+
+static func can_summon_dir_picker_in(state: int, picker_open: bool) -> bool:
+	return state == State.MENU and not picker_open
 
 
 # --- Menu state ---------------------------------------------------------------
@@ -639,7 +642,7 @@ func _try_open_armory() -> bool:
 # vehicles (deck best-seat, nearest-seat scan, seat-swap-or-detach — all sim-side).
 # [orig: Entity_ToggleVehicleMount @0x436950 via the useitem release edge @0x49d6dc]
 func _try_toggle_mount() -> bool:
-	var runtime = _current_runtime()
+	var runtime := _current_runtime()
 	if runtime == null:
 		return false
 	var sim: Simulation = runtime.get_sim()
@@ -705,7 +708,7 @@ func _on_start_requested(bms_name: String) -> void:
 	# text [orig: the not-in-session path draws only the background @ 0x521ebe].
 	start_world_load(
 		{"mission_file": bms_name},
-		Callable(_world, "load_mission").bind(bms_name))
+		_world.load_mission.bind(bms_name))
 
 
 ## Boot an exact loose mission through the same loading
@@ -713,7 +716,7 @@ func _on_start_requested(bms_name: String) -> void:
 func start_loose_mission(bms_name: String) -> void:
 	start_world_load(
 		{"mission_file": bms_name},
-		Callable(_world, "load_loose_mission").bind(bms_name))
+		_world.load_loose_mission.bind(bms_name))
 
 
 ## The probe runner's mission verbs (ProbeShellSeams, ADR 0041): the menu's
@@ -735,7 +738,7 @@ func start_saved_mission(saved_path: String, bms_name: String, profile: Dictiona
 	if not profile.is_empty():
 		set_local_player_profile(profile)
 	start_world_load({"mission_file": bms_name},
-			Callable(_world, "load_mission_data").bind(mission, bms_name))
+			_world.load_mission_data.bind(mission, bms_name))
 	return OK
 
 
@@ -1131,6 +1134,9 @@ func _process(delta: float) -> void:
 	# mounts after the short beat [orig: the SP world runs through the epilog cine].
 	if _world.is_loaded() and _end_flow.tick(delta):
 		_show_end_screen()
+	# The shell-control span closes before the early returns so every frame banks it.
+	var probe_t0 := Time.get_ticks_usec() if timing else 0
+	_frame_phase_sampler.finish_shell_control(probe_t0)
 	# Only the pause menu freezes the world, and only in a SINGLE-PLAYER session. The
 	# armory runs over LIVE play: the match keeps simulating around the player while the
 	# WEAPON screen is up [orig: the useitem armory leg @0x4e0b3f has no world-stop leg;
@@ -1149,14 +1155,14 @@ func _process(delta: float) -> void:
 		return
 	if _state == State.PAUSED and not _world.is_net_session():
 		return
-	var probe_t0 := Time.get_ticks_usec() if timing else 0
-	_frame_phase_sampler.finish_shell_control(probe_t0)
-	var frame_input := MissionFrameInput.new()
-	frame_input.delta_seconds = delta
+	var frame_input: MissionFrameInput
 	if _player_presenter != null:
 		var player_live := is_gameplay_input_active()
 		frame_input = _player_presenter.before_world_tick(
 				delta, player_live, player_live)
+	else:
+		frame_input = MissionFrameInput.new()
+		frame_input.delta_seconds = delta
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	var skip_world := probe_enabled and _perf_probe.skip_world
 	if not skip_world:

@@ -77,15 +77,6 @@ func _doc_from_xml(xml: String) -> MnuDocument:
 	return doc
 
 
-func _driver_over(doc: MnuDocument, menu_file: String, screen := "") -> MenuDriver:
-	# Frameless on purpose: the driver's state store carries the companion seam
-	# without a render surface (the documented headless-test contract).
-	var driver := MenuDriver.new()
-	assert_true(driver.open_document(doc, null, null, null, menu_file, screen),
-			"the document opens on the driver")
-	return driver
-
-
 func _wnd(type: String, name: String, top: int, inner := "", attrs := "") -> String:
 	return ('<WINDOW type="%s" name="%s"%s><POSITION><LEFT>10</LEFT><TOP>%d</TOP>'
 			+ '<RIGHT>250</RIGHT><BOTTOM>%d</BOTTOM></POSITION>%s</WINDOW>') % [
@@ -112,7 +103,7 @@ func _make_weapon_driver() -> MenuDriver:
 	body += _wnd("button", "ACCEPT", y)
 	body += _wnd("button", "CANCEL", y + 24)
 	body += _wnd("static", "STATIC_TOTAL_WEIGHT", y + 48)
-	return _driver_over(_doc_from_xml(_screen_xml("WEAPON", body)), "weapon.mnu")
+	return MenuDriverFixture.driver_over(self, _doc_from_xml(_screen_xml("WEAPON", body)), "weapon.mnu")
 
 
 func _items(driver: MenuDriver, name: String) -> Array:
@@ -145,7 +136,7 @@ func test_owns_menu_detects_weapon_screen() -> void:
 	assert_true(companion.owns_menu(_make_weapon_driver()),
 			"PLAYER_CLASS + PRIMARY_AMMO1 mark the WEAPON screen")
 	# player.mnu's screen (PLAYERCLASS combo, no ammo combos) is NOT claimed.
-	var player_info := _driver_over(_doc_from_xml(_screen_xml("PLAYER_INFO",
+	var player_info := MenuDriverFixture.driver_over(self, _doc_from_xml(_screen_xml("PLAYER_INFO",
 			_wnd("combo", "PLAYERCLASS", 10))), "player.mnu")
 	assert_false(companion.owns_menu(player_info),
 			"the PLAYER_INFO screen stays with its own companion")
@@ -451,7 +442,7 @@ func test_real_weapon_mnu_populates() -> void:
 	assert_eq(doc.load_from_bytes(
 			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_weapon.mnu")), OK,
 			"the shipped jo_weapon.mnu fixture loads")
-	var driver := _driver_over(doc, "weapon.mnu", "WEAPON")
+	var driver := MenuDriverFixture.driver_over(self, doc, "weapon.mnu", "WEAPON")
 
 	var companion := ArmoryMenuCompanion.new()
 	assert_true(companion.owns_menu(driver), "the real weapon.mnu is claimed by the armory companion")
@@ -473,7 +464,7 @@ func test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open() -> 
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(
 			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_weapon.mnu")), OK)
-	var driver := _driver_over(doc, "weapon.mnu", "WEAPON")
+	var driver := MenuDriverFixture.driver_over(self, doc, "weapon.mnu", "WEAPON")
 
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(_load_weapons())

@@ -181,7 +181,6 @@ public:
 	static PackedByteArray terrain_light_disc_rgba8();
 	static PackedByteArray terrain_light_strip_rgba8();
 
-	int live_count() const;
 	Dictionary get_report() const;
 	// Read-only diagnostics snapshot of the last uploaded RGBAF atlas. The
 	// returned Image owns copied bytes; tests/tools cannot mutate render state.
