@@ -111,7 +111,8 @@ var _runtime: MissionPresentation = null  # the one mission runtime driver (sim 
 var _panm_clock := PanmClock.new()
 var _frame_pipeline: GameFramePipeline
 var _mission_stats: Dictionary = {}
-var _placer: MissionObjectPlacer = null  # kept so mission audio reuses its item database
+var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database); untyped
+             # because game_world_test's ViewmodelWorldHarness installs a RefCounted double
 var _last_load_timeline: PerfTimeline = null  # the most recent load_mission timing
 var _weapon_db: WeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
 var _local_weapon_dict := {}  # the resolved weapon's raw dict (FSM setup transport, ADR 0017 edge)

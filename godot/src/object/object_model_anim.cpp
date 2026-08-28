@@ -896,13 +896,18 @@ void ObjectModel::clear_aim_overlay() {
 }
 
 void ObjectModel::set_aim_overlay(const Array &p_deltas) {
-	if (p_deltas.size() < static_cast<int64_t>(kAimOverlayClasses)) {
+	// The script form: an empty Array clears the overlay; otherwise index =
+	// overlay class, and a missing or non-Basis slot reads identity (the shape
+	// the Array store had before the typed table).
+	if (p_deltas.is_empty()) {
 		clear_aim_overlay();
 		return;
 	}
 	Basis deltas[kAimOverlayClasses];
 	for (int c = 0; c < kAimOverlayClasses; ++c) {
-		deltas[c] = p_deltas[c];
+		deltas[c] = Basis();
+		if (c < p_deltas.size() && p_deltas[c].get_type() == Variant::BASIS)
+			deltas[c] = static_cast<Basis>(p_deltas[c]);
 	}
 	set_aim_overlay_deltas(deltas);
 }

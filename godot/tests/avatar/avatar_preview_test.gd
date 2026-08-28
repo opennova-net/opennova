@@ -8,7 +8,7 @@ extends GutTest
 const AvatarPreviewScript = preload("res://game/avatar/avatar_preview.gd")
 const AVATARS_FIXTURE := "res://../fixtures/avatars/Avatars.def"
 
-var _preview
+var _preview: AvatarPreview
 
 
 func before_each() -> void:
