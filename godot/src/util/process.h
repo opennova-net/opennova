@@ -5,7 +5,7 @@
 // Godot's OS.create_process() gives the child the editor's working directory and offers no way
 // to change it. That is fine for our own runtime, which takes absolute paths on the command
 // line, but not for retail Jointops.exe: it opens its boot archives CWD-relative through a raw
-// _lopen (retail: PFF_OpenAllArchives @0x4a4310, see docs/vfs/vfs-pff-mount-re.md), so launched
+// _lopen [orig: PFF_OpenAllArchives @0x4a4310, see docs/vfs/vfs-pff-mount-re.md], so launched
 // from anywhere but the packed dir it finds no archives at all and dies on the zero-archives
 // gate with ShowEarlyError(3) -- before writing so much as a /FRISK line to say why.
 //

@@ -999,8 +999,8 @@ Vector3 TerrainData::get_surface_normal_world(const Vector3 &p_world_pos) const 
 					height_field_from(cpt, trn), p_world_pos.x, p_world_pos.z);
 	// The portable contract owns the recovered query. This device leg maps its
 	// {source X, source Z, height} basis to Godot {X, Y-up, Z}.
-	// (retail: Terrain_GenerateNormalMap @0x603210; WAC fx2ssn consumes the
-	// terrain table at WacScript_SpawnEffectAtSsnEntity @0x4F23A0, see docs/terrain/terrain-re.md)
+	// [orig: Terrain_GenerateNormalMap @0x603210; WAC fx2ssn consumes the
+	// terrain table at WacScript_SpawnEffectAtSsnEntity @0x4F23A0, see docs/terrain/terrain-re.md]
 	return Vector3(static_cast<float>(normal.x),
 	               static_cast<float>(normal.up),
 	               static_cast<float>(normal.z));
@@ -1101,7 +1101,7 @@ Vector3 TerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p_to)
 	// Substrate pick: the live editable image when mounted, else the baked CPT.
 	// NO substrate at all -> the all-NAN miss. Retail's null-atlas raycast
 	// returns HIT there instead ("blocked" is the runtime's no-data default
-	// (retail: @ 0x60ccf7, see docs/terrain/terrain-re.md)) — that is runtime-substrate behavior; this binding is
+	// [orig: @ 0x60ccf7, see docs/terrain/terrain-re.md]) — that is runtime-substrate behavior; this binding is
 	// the editor-mode surface, so no-data misses: the same deliberate
 	// editor-guard divergence class as the sampler's kOutOfExtent
 	// (terrain_query/terrain_raycast.h header note).
@@ -1185,7 +1185,7 @@ int TerrainData::get_tile_count() const {
 
 int TerrainData::get_detail_foliage_index_fixed(int32_t world_x_fixed,
                                                     int32_t world_z_fixed) const {
-	// (retail: Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0, see docs/terrain/terrain-re.md)
+	// [orig: Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0, see docs/terrain/terrain-re.md]
 	if (!loaded || foliage_map_resource.is_null()) {
 		return 0;
 	}

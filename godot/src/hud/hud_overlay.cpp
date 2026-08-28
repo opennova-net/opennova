@@ -509,8 +509,8 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// The chat box's coordinate rows (the chat wrap width `x2 - (x1 - 4)`)
 	// are NOT the HUDCHATTEXT anchor: retail's g_hudChatBoxCoords are written
 	// by a separate hud.def `chat_message x1 y1 x2 y2` / `sys_message` parser
-	// (retail: File_ParseASCIIFile("hud.def", cb, 0x2A5A8EAD) @0x5be210..0x5be228,
-	// the callback @0x5bb7a0, stores @0x5bb7d1/@0x5bb7ed/@0x5bb825/@0x5bb841),
+	// [orig: File_ParseASCIIFile("hud.def", cb, 0x2A5A8EAD) @0x5be210..0x5be228,
+	// the callback @0x5bb7a0, stores @0x5bb7d1/@0x5bb7ed/@0x5bb825/@0x5bb841],
 	// and JO:CA ships no hud.def — the rows stay 0, the width is 4, and the
 	// wrapper returns 1 at the first character, so a retail chat line never
 	// wraps. chat_box_present stays false for the same result; a hud.def-equipped
@@ -539,9 +539,9 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.map_coords_y = static_cast<float>(map_coords.y);
 	layout_.map_coords_off = map_coords.z;
 
-	// The HUDDECLUT mask table from the parsed rows (retail:
+	// The HUDDECLUT mask table from the parsed rows [orig:
 	// HUD_ParseHudposToken @0x59F370 -> byte_2723CE0, see
-	// docs/interface/hud-re.md). A file that authors ANY known row is applied
+	// docs/interface/hud-re.md]. A file that authors ANY known row is applied
 	// faithfully — an unauthored slot then stays hidden at every level, like
 	// retail's zeroed table. A file with NO declutter rows at all (the test
 	// harness's minimal layouts; retail never ships one) keeps the module's
@@ -590,8 +590,8 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.stance_tint = color_of("stanceicon_color", layout_.stance_tint);
 	layout_.heat_border = color_of("heat_border", layout_.heat_border);
 	// The whole stance colour triple: the vehicle panel bands its seats with the
-	// same three the stance bar reads (retail: the good/middle/bad arms of the
-	// seat loop in HUD_DrawVehicleHealthBars @0x5a4fd0, see docs/interface/hud-re.md).
+	// same three the stance bar reads [orig: the good/middle/bad arms of the
+	// seat loop in HUD_DrawVehicleHealthBars @0x5a4fd0, see docs/interface/hud-re.md].
 	layout_.stance_good = color_of("stancecolor_good", layout_.stance_good);
 	layout_.stance_middle = color_of("stancecolor_middle", layout_.stance_middle);
 	layout_.stance_bad = color_of("stancecolor_bad", layout_.stance_bad);
@@ -605,8 +605,8 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 
 	// Static HUD frame background. Retail keeps ONE static frame and the LAST
 	// authored line wins, so the index comes from the engine-side policy rather
-	// than being assumed here (retail: HUD_ParseHudposToken @0x59F370, see
-	// engine/runtime/hud/hud_frame.h).
+	// than being assumed here [orig: HUD_ParseHudposToken @0x59F370, see
+	// engine/runtime/hud/hud_frame.h].
 	const Array frames = p_hudpos->get_static_frames();
 	const int frame_index =
 			opennova::hud::hud_static_frame_index(static_cast<int>(frames.size()));
@@ -628,8 +628,8 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// recorded border-x-camo combine residual, and the valid gate still
 		// requires it because retail's style ctor draws NOTHING without the
 		// secondary texture (the combined material rec+0x30 gates the whole
-		// drawer) (retail: the combine @0x56af3c, the null gate @0x56b71f,
-		// see docs/interface/hud-re.md).
+		// drawer) [orig: the combine @0x56af3c, the null gate @0x56b71f,
+		// see docs/interface/hud-re.md].
 		const Ref<Texture2D> border = load_hud_texture_("border.tga");
 		const Ref<Texture2D> brush = load_hud_texture_("boxtile.tga");
 		const Ref<Texture2D> icon = load_hud_texture_("neticon2.tga");
@@ -638,17 +638,17 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		textures_[opennova::hud::kHudTexNetIcon] = icon;
 		layout_.box_texture_valid = border.is_valid() && brush.is_valid();
 		// The piece size comes off the border atlas's own width, not a
-		// constant (retail: the 4x4 cell grid, see docs/interface/hud-re.md).
+		// constant [orig: the 4x4 cell grid, see docs/interface/hud-re.md].
 		layout_.box_tex_w = border.is_valid() ? border->get_width() : 0;
 		layout_.net_icon_texture_valid = icon.is_valid();
 	}
 	{
 		// The AAS zone status panel's three team-icon atlases and the two
-		// tiles (retail: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga team 1,
+		// tiles [orig: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga team 1,
 		// R_LFP.tga team 2, N_LFP.tga neutral; lfp_alf.tga the tile for
 		// everyone else's zones -> 0x27239C0 @0x59e104/@0x59e10e, lfp_dlf.tga
 		// the tile for the viewer's OWN zones -> 0x27239D0 (textureId +4 =
-		// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md).
+		// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md].
 		const Ref<Texture2D> team1 = load_hud_texture_("JO_LFP.tga");
 		const Ref<Texture2D> team2 = load_hud_texture_("R_LFP.tga");
 		const Ref<Texture2D> neutral = load_hud_texture_("N_LFP.tga");
@@ -802,7 +802,7 @@ void HudOverlay::push_message(const String &p_text) {
 
 void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	// The SYSTEM feed sink (kills, joins, system lines) — the packed ARGB is
-	// stored raw and drawn as stored (retail: the stored-color read @0x59ae97).
+	// stored raw and drawn as stored [orig: the stored-color read @0x59ae97].
 	compiler_.push_feed_line(p_text.utf8().get_data(),
 			static_cast<uint32_t>(p_argb), state_.ticks);
 	queue_redraw();
@@ -937,8 +937,8 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Dictionary &p_block, int 
 	// (the set_scoreboard shape: the state from the args, the rows from the
 	// sim; a null sim leaves the rows empty). The panel's one witnessed gate
 	// is the interface texture: without it the whole panel is skipped, seats
-	// included (retail: HUD_DrawVehicleHealthBars @0x5a5038 tests the loaded
-	// texture's w/h, see docs/interface/hud-re.md).
+	// included [orig: HUD_DrawVehicleHealthBars @0x5a5038 tests the loaded
+	// texture's w/h, see docs/interface/hud-re.md].
 	bool riding = true;
 	if (p_sim != nullptr) {
 		riding = p_sim->fill_vehicle_panel(block, vp);
@@ -974,12 +974,12 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 	lp.local_team = p_local_team;
 	// The blink clock the marker masks (`& 0x18`). The shell feeds the 62 Hz
 	// HUD tick here; retail's g_hudFrameCounter increments once per MAIN FRAME
-	// (retail: Game_ProcessMainFrame @0x5265d5 -> Game_TickHudFrameCounters
-	// @0x434c23, see docs/interface/hud-re.md), so retail's blink is
+	// [orig: Game_ProcessMainFrame @0x5265d5 -> Game_TickHudFrameCounters
+	// @0x434c23, see docs/interface/hud-re.md], so retail's blink is
 	// frame-rate dependent and matches this fold only at 62 fps.
 	lp.frame_counter = p_frame_counter;
 	// The conquest arm is the other branch of the same drawer and is
-	// unmodelled (retail: g_GameType == 0x50010 @0x5a24a1).
+	// unmodelled [orig: g_GameType == 0x50010 @0x5a24a1].
 	lp.conquest_mode = static_cast<uint32_t>(p_game_type) ==
 			opennova::game_type::kConquerAndControl;
 	lp.under_attack_text =
@@ -1096,9 +1096,9 @@ void HudOverlay::apply_declutter_() {
 }
 
 void HudOverlay::set_hud_detail_level(int p_level) {
-	// The level write + visibility rebuild (retail: the hud_detail global
+	// The level write + visibility rebuild [orig: the hud_detail global
 	// @0x24D20BC -> CRenderState_SetLayerVisibility @0x59B0F0, see
-	// docs/interface/hud-re.md). The presenter owns the persistence and the
+	// docs/interface/hud-re.md]. The presenter owns the persistence and the
 	// cycle/death-force policy.
 	declutter_.set_level(CLAMP(p_level, 0, opennova::hud::kDeclutterLevelMax));
 	apply_declutter_();
@@ -1110,9 +1110,9 @@ int HudOverlay::get_hud_detail_level() const {
 }
 
 void HudOverlay::set_showhud_flags(int p_flags) {
-	// (retail: g_FpWeaponViewFlags — the compiler consumes bit 1 for the
+	// [orig: g_FpWeaponViewFlags — the compiler consumes bit 1 for the
 	// corner spinmap block @0x5A8635; bit 0 is the viewmodel rig's, see
-	// docs/interface/hud-re.md)
+	// docs/interface/hud-re.md]
 	state_.showhud_flags = static_cast<uint32_t>(p_flags) & 3u;
 	queue_redraw();
 }

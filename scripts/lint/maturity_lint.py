@@ -44,8 +44,9 @@ BASELINE_PATH = Path(__file__).resolve().parent / "maturity_baseline.json"
 # godot/game/ carries the GDScript that lived in godot/adapter/ before the
 # ADR 0034 split — the #460 rename pointed this at godot/src/ (now C++-only)
 # and silently dropped the game layer; restored 2026-08-11. godot/src/ stays
-# as a zero-cost tripwire against policy-violating GDScript.
-LINT_SCOPES = ("godot/modtools/", "godot/game/", "godot/src/")
+# as a zero-cost tripwire against policy-violating GDScript. godot/probes/
+# (the game_probe runtime probes) joined the scope under ADR 0042 d7.
+LINT_SCOPES = ("godot/modtools/", "godot/game/", "godot/src/", "godot/probes/")
 
 # Column 0 only: class-level declarations. GDScript function bodies are
 # indented, so an indented match is a local, not a contract.

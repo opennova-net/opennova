@@ -489,9 +489,9 @@ Node3D *WirePresentPass::rebuild_held_weapon(int p_handle, int p_adm) {
 			built->set_name(vformat("WireWeapon_%04x", p_handle));
 			built->set_shadow_caster_enabled(true);
 			// The 3P gun silhouettes inside the body's render slot, like
-			// retail's child walk (retail:
+			// retail's child walk [orig:
 			// RenderSlot_RenderEntityAndChildren @0x5d78ef, see
-			// docs/render/render-lighting-re.md) — never a slot of its own.
+			// docs/render/render-lighting-re.md] — never a slot of its own.
 			built->set_slot_shadow_capture_with(resolve_wire_handle(p_handle));
 			weapon_nodes_[p_handle] = built->get_instance_id();
 			apply_lighting_context(p_handle);

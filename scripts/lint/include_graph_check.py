@@ -25,6 +25,11 @@ in the path is what makes the layering visible, so this check reads it:
      engine's portability is a ratcheted property, not a re-verified one.
   5. BINDING ROOT — godot/src has no subdirectory named like an engine group,
      so a binding's quoted root-relative include can never alias an engine path.
+  6. IMGUI CONTAINMENT (ADR 0042 d6) — an include of a Dear ImGui header
+     (target starting `imgui`/`imconfig`: imgui.h, imgui_internal.h, ...) is
+     allowed only under engine/runtime/devtools/ and tests/devtools/; the
+     engine's ImGui pass is the one dev-tools surface (previously the
+     containment was a single CMake PRIVATE keyword).
 
 Modes:
   (default)   report violations; exit 0
@@ -79,6 +84,11 @@ TERRAIN_QUERY_HEADERS = {
 }
 
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
+
+# Rule 6: Dear ImGui stays behind the engine's dev-tools pass (ADR 0042 d6).
+# `opennova_imconfig.h` deliberately does not match — it names the project.
+IMGUI_INCLUDE = re.compile(r"^(?:imgui|imconfig)")
+IMGUI_ALLOWED_TREES = ("engine/runtime/devtools", "tests/devtools")
 
 
 def engine_libs() -> dict[str, set[str]]:
@@ -154,6 +164,14 @@ def scan() -> tuple[list[str], int]:
             if rel.parts[0] in GODOT_FREE_ROOTS and "godot" in inc.lower():
                 violations.append(f"[godot-free] {where}")
                 continue
+            if IMGUI_INCLUDE.match(inc) and not any(
+                    posix == t or posix.startswith(t + "/")
+                    for t in IMGUI_ALLOWED_TREES):
+                violations.append(
+                    f"[imgui-containment] {where} (imgui headers are allowed "
+                    f"only under engine/runtime/devtools/ and tests/devtools/; "
+                    f"ADR 0042 d6)")
+                continue
             if quote == '"' and "../" in inc and rel.parts[0] in PARENT_RELATIVE_FORBIDDEN_ROOTS:
                 violations.append(f"[parent-relative] {where} (only a same-directory sibling may be a quoted include; ADR 0040)")
                 continue
@@ -195,7 +213,9 @@ def main() -> int:
         print("[include-graph] FAIL: engine headers are included as <group/lib/file.h>; "
               "a tree includes only the groups below it (ADR 0029 d3); net/wac/mission/"
               "world reach terrain only through runtime/terrain_query's seam headers "
-              "(ADR 0020); nothing under engine/, apps/ or tests/ includes godot.")
+              "(ADR 0020); nothing under engine/, apps/ or tests/ includes godot; "
+              "imgui headers stay under engine/runtime/devtools/ and tests/devtools/ "
+              "(ADR 0042 d6).")
         return 1
     return 0
 

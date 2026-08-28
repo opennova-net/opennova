@@ -78,8 +78,8 @@ public:
 	int render_frame(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
 
-	// The per-draw gameplay pass (retail: update_light_slots @0x5abc50 per
-	// draw context, see docs/render/render-lighting-re.md): one draw context
+	// The per-draw gameplay pass [orig: update_light_slots @0x5abc50 per
+	// draw context, see docs/render/render-lighting-re.md]: one draw context
 	// per visible ObjectModel, owner group = that model's entity id, interior
 	// group = the building it currently stands inside + that blink volume's
 	// section. A nonzero p_robj_scoped row expands a building into one context
@@ -119,16 +119,16 @@ public:
 
 	// The render-slot dominant-light query (SlotShadow's per-slot pick):
 	// entity-centered collect + group-gated params, no D3D-fill boost
-	// (retail: RenderSlot_UpdateEntityLight @0x5d6a30, see
-	// docs/render/render-lighting-re.md). A C++ seam (not script-bound):
+	// [orig: RenderSlot_UpdateEntityLight @0x5d6a30, see
+	// docs/render/render-lighting-re.md]. A C++ seam (not script-bound):
 	// fills r_out with the planner's typed inputs (positions in Godot world).
 	void slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			std::vector<opennova::renderer::SlotPointLight> &r_out);
 
-	// The corona billboard rows for this frame (retail:
+	// The corona billboard rows for this frame [orig:
 	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on
-	// opennova::renderer::LightScene::collect_corona_quads): one Dictionary per
+	// opennova::renderer::LightScene::collect_corona_quads]: one Dictionary per
 	// additive camera-facing quad, keys position (Vector3 Godot world),
 	// half_size (float world units), color (Color, premultiplied additive
 	// including the segment fade and the fog-to-black fold). models/
@@ -136,7 +136,7 @@ public:
 	// walks — models carrying an occlusion section-mask verdict gate their
 	// owned coronas on the visible-section bit; fog is
 	// {enabled, type, start, end} (primary device fog, color forced black
-	// (retail: CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6)). The
+	// [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). The
 	// presenter (effect_light_director.gd) feeds the rows into a MultiMesh;
 	// marshalling only.
 	TypedArray<Dictionary> collect_corona_rows(const Vector3 &p_camera_pos,
@@ -148,11 +148,11 @@ public:
 
 	// The terrain leg of the pool: per terrain patch, the <= 16 world lights
 	// whose AABB overlaps the patch and which the authored terrain flag admits,
-	// as the rows the terrain shader re-draws the patch with (retail: the
+	// as the rows the terrain shader re-draws the patch with [orig: the
 	// per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
 	// Light_SetupTerrainProjectedPass @0x5AA830 — the collect, the gates and
 	// the pixel constants live portable in opennova::renderer::LightScene::
-	// collect_terrain_pass_rows, see docs/render/render-lighting-re.md). A C++
+	// collect_terrain_pass_rows, see docs/render/render-lighting-re.md]. A C++
 	// seam for the Terrain device: patch bounds in mission 16.16 (the helper
 	// opennova::renderer::terrain_patch_light_bounds folds the render frame), the env
 	// light-state gain, the time + weather the flicker reads, and the packed

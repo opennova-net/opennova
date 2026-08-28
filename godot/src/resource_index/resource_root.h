@@ -109,7 +109,7 @@ public:
 	// The expansion this root ACTUALLY mounted ("" for base game, loose mounts, and
 	// after mount_runtime's silent base fallback for an expansion that is not installed).
 	// Feeds the expansion bank slots and the M<exp>/G<exp> music forms
-	// (retail: Expansion_LoadAssets @ 0x4a4730, see docs/vfs/vfs-pff-mount-re.md). Never reports the requested name back: a
+	// [orig: Expansion_LoadAssets @ 0x4a4730, see docs/vfs/vfs-pff-mount-re.md]. Never reports the requested name back: a
 	// caller that must not run on the wrong data set (the LAN joiner reconciling against the
 	// host's authoritative expansion, D-NET-178) needs this to be evidence, not an echo.
 	String get_expansion() const;
@@ -147,8 +147,8 @@ public:
 	// list_missing_boot_resources probes the FATAL-class file rows against
 	// this mounted root and returns the missing names (empty = boot-viable).
 	// The boot-archive-table trio is excluded: its all-missing gate is
-	// enforced by mount_runtime itself (retail: PFF_OpenAllArchives @ 0x4a4310;
-	// fatal check @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md). boot_resource_failure_text quotes the
+	// enforced by mount_runtime itself [orig: PFF_OpenAllArchives @ 0x4a4310;
+	// fatal check @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md]. boot_resource_failure_text quotes the
 	// witnessed failure behavior for a manifest name ("" for unknown names)
 	// so owners can raise honest missing-resource errors.
 	PackedStringArray list_missing_boot_resources() const;

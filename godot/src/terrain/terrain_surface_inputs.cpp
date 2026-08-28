@@ -321,8 +321,8 @@ bool TerrainSurfaceInputs::rebuild_blend() {
 	if (have_source) {
 		// Retail creates the DBlendmap quadrants with flags 0x100001: no
 		// mip-suppression bit, so they carry the full box-filtered auto chain.
-		// (retail: PolyTrn_InitTextures @ 0x60b2c9..0x60b2dd;
-		// GTexture_CreateFromPixelData @ 0x6877c7..0x6878be, see docs/terrain/terrain-re.md)
+		// [orig: PolyTrn_InitTextures @ 0x60b2c9..0x60b2dd;
+		// GTexture_CreateFromPixelData @ 0x6877c7..0x6878be, see docs/terrain/terrain-re.md]
 		normalized_blend_texture = texture_from_rgba8(
 			opennova::terrain::normalize_detail_blend_map(source), true);
 	}
@@ -385,8 +385,8 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 
 	// The second detail is the ps.1.4 splat's stage-3 dp3 input, paired with
 	// its own far texture when authored, otherwise carrying plain box mips.
-	// (retail: PolyTrn_InitTextures @ 0x60af97/0x60aff9 (load + optional
-	// create-with-blend); stage bind @ 0x6043ff, see docs/terrain/terrain-re.md)
+	// [orig: PolyTrn_InitTextures @ 0x60af97/0x60aff9 (load + optional
+	// create-with-blend); stage bind @ 0x6043ff, see docs/terrain/terrain-re.md]
 	opennova::terrain::Rgba8Image detail2_source;
 	if (texture_to_rgba8(terrain_data->get_detailmap2(), detail2_source)) {
 		opennova::terrain::Rgba8Image far2_source;

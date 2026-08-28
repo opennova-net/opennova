@@ -160,9 +160,9 @@ inline void write_present_vehicle_motion_controls(float *record,
 	// The part-animation words ride the same valid bit: the rotor angle
 	// accumulator's high word (HELO_ROTOR / HELO_TAILROTOR) and the wheel
 	// phase's (VEHICLE_WHEELS), published by the same cveh callback
-	// (retail: Entity_CacheVehicleHUDStats @0x4929B0 — the +0x466 read
+	// [orig: Entity_CacheVehicleHUDStats @0x4929B0 — the +0x466 read
 	// @0x492ACA..0x492ADE, the +0x2BA read @0x4929B4; the accumulators are
-	// world/vehicle_part_anim.h's).
+	// world/vehicle_part_anim.h's].
 	record[Simulation::PF_VEHICLE_ROTOR] =
 			static_cast<float>(controls.rotor);
 	record[Simulation::PF_VEHICLE_TAIL_ROTOR] =

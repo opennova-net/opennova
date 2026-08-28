@@ -36,8 +36,8 @@ PackedFloat32Array StarField::tick_frame(const Vector3 &p_light_dir_godot) {
 		const bool visible = opennova::env::star_visible_fixed(star, light_fp);
 		int32_t brightness = star.brightness;
 		if (visible) {
-			// (retail: render_star_field @ 0x5adb45 — twinkle inside the
-			// visibility branch only, see docs/env/env-tod-re.md)
+			// [orig: render_star_field @ 0x5adb45 — twinkle inside the
+			// visibility branch only, see docs/env/env-tod-re.md]
 			brightness = opennova::env::star_twinkle_tick(star, prng_state);
 		}
 		opennova::env::star_offset_render_float3(star, &w[i * 6]);

@@ -179,7 +179,7 @@ int RtxtStringFile::add_entry(const String &p_key, const String &p_text, int p_s
 	entry.position.y = static_cast<int16_t>(p_position.y);
 	// Insert at the end of the section's contiguous run: the engine derives entry
 	// indices by accumulating section string_counts and requires grouped entries
-	// (retail: TextResource_FindEntryBySectionAndKey @ 0x75D250, see docs/interface/rtxt-strings-re.md).
+	// [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250, see docs/interface/rtxt-strings-re.md].
 	const int index = _section_insert_index(entry.section_index);
 	file_.entries.insert(file_.entries.begin() + index, std::move(entry));
 	_refresh();

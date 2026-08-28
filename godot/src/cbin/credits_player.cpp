@@ -205,7 +205,7 @@ void CreditsPlayer::_process_scroll(double p_delta) {
 	if (!content_ || !credits_resource_.is_valid()) return;
 
 	// The SCROLL_RATE value itself is witnessed (parsed per-frame pixels,
-	// (retail: marquee_load_credits_from_ini @ 0x65c5a0, see docs/credits/cbin-re.md)), but the frame CADENCE
+	// [orig: marquee_load_credits_from_ini @ 0x65c5a0, see docs/credits/cbin-re.md]), but the frame CADENCE
 	// this 60.0f converts it with is NOT — CMarqueeWnd's update rate is
 	// unwitnessed (R5 in docs/oned/workspace-maturity-program.md; the engine
 	// tick elsewhere is 62 Hz). Do not cite or change without a grill.

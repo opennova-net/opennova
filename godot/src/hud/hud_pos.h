@@ -29,8 +29,8 @@ class ResourceRoot;
 // of scope.
 //
 // Layout shape and field meanings are the witnessed originals; see
-// docs/interface/hud-re.md. (retail: HUD_ParseHudposToken @0x59f370 hudpos.def parser, registered by
-// HUD_InitOverlaySystem @0x5a4620, see docs/interface/hud-re.md)
+// docs/interface/hud-re.md. [orig: HUD_ParseHudposToken @0x59f370 hudpos.def parser, registered by
+// HUD_InitOverlaySystem @0x5a4620, see docs/interface/hud-re.md]
 class HudPos : public RefCounted {
 	GDCLASS(HudPos, RefCounted)
 
@@ -51,7 +51,7 @@ public:
 	~HudPos();
 
 	// The virtual design space hudpos.def positions are authored in; the HUD
-	// scales these to the real surface. (retail: Viewport_ScaleToVirtualCoords @0x5d2b20, see docs/interface/hud-re.md)
+	// scales these to the real surface. [orig: Viewport_ScaleToVirtualCoords @0x5d2b20, see docs/interface/hud-re.md]
 	enum {
 		DESIGN_WIDTH = 1024,
 		DESIGN_HEIGHT = 768,

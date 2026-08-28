@@ -158,15 +158,15 @@ public:
 	int get_friendly_tag_mode() const;
 	void set_hud_color_index(int p_index);
 	int get_hud_color_index() const;
-	// The HUD declutter level 0..3 (retail: the persisted cfg int
+	// The HUD declutter level 0..3 [orig: the persisted cfg int
 	// "hud_detail" @0x24D20BC driving CRenderState_SetLayerVisibility
-	// @0x59B0F0, see docs/interface/hud-re.md). The overlay owns the
+	// @0x59B0F0, see docs/interface/hud-re.md]. The overlay owns the
 	// HUDDECLUT mask table (fed from the parsed hudpos in configure) and
 	// rebuilds the compiler's per-slot visibility here.
 	void set_hud_detail_level(int p_level);
 	int get_hud_detail_level() const;
-	// The showhud 2-bit FP-view flags (retail: g_FpWeaponViewFlags cycle
-	// @0x4E0561): bit 0 = the FP gun (consumed by the viewmodel rig, not
+	// The showhud 2-bit FP-view flags [orig: g_FpWeaponViewFlags cycle
+	// @0x4E0561]: bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
 	void set_showhud_flags(int p_flags);
 	// Per-frame environment feed: the fog cull distance in world units (<= 0

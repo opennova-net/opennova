@@ -34,7 +34,7 @@ Error WacProgram::compile_sources(const PackedStringArray &p_sources) {
 
 Error WacProgram::compile_from_resource_root(const Ref<ResourceRoot> &p_root, const String &p_mission_basename) {
 	ERR_FAIL_COND_V_MSG(p_root.is_null(), ERR_UNCONFIGURED, "WacProgram needs a mounted resource root.");
-	// The original layering, absent files skipped in order. (retail: WacScript_InitAndLoad, see docs/world/world-wac-ai-re.md)
+	// The original layering, absent files skipped in order. [orig: WacScript_InitAndLoad, see docs/world/world-wac-ai-re.md]
 	PackedStringArray names;
 	names.push_back("game.wac");
 	names.push_back("server.wac");

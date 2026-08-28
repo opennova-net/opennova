@@ -77,7 +77,7 @@ Error ParticleFile::load_from_buffer(const PackedByteArray &bytes, const String 
 
 Ref<ParticleEffect> ParticleFile::find_effect(const String &id) const {
 	// Case-insensitive like every by-name walk in the effect system
-	// (retail: CEffectWorld_FindEffectDefByName @ 0x5e34f0 → _stricmp @ 0x5e352c, see docs/particles/ptl-format-re.md).
+	// [orig: CEffectWorld_FindEffectDefByName @ 0x5e34f0 → _stricmp @ 0x5e352c, see docs/particles/ptl-format-re.md].
 	for (int i = 0; i < effects.size(); ++i) {
 		Ref<ParticleEffect> e = effects[i];
 		if (e.is_valid() && e->get_id().nocasecmp_to(id) == 0) return e;
@@ -87,7 +87,7 @@ Ref<ParticleEffect> ParticleFile::find_effect(const String &id) const {
 
 Ref<ParticleDef> ParticleFile::find_particle(const String &id) const {
 	// Case-insensitive like every by-name walk in the effect system
-	// (retail: CEffectWorld_FindParticleDefByName @ 0x5e41d0 → _stricmp @ 0x5e420c, see docs/particles/ptl-format-re.md).
+	// [orig: CEffectWorld_FindParticleDefByName @ 0x5e41d0 → _stricmp @ 0x5e420c, see docs/particles/ptl-format-re.md].
 	for (int i = 0; i < particles.size(); ++i) {
 		Ref<ParticleDef> p = particles[i];
 		if (p.is_valid() && p->get_id().nocasecmp_to(id) == 0) return p;

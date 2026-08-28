@@ -136,8 +136,8 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 		// bit -> stock Co-op 0x10020). The auto-spawn below resolves the retail marker chain
 		// by this word — left at the default 0 it walks the DM 6095/6002 chain, finds none
 		// of a campaign mission's 6001 starts, and parks the player at the origin.
-		// (retail: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360,
-		// see docs/net/novaworld-net-re.md 5.2c)
+		// [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360,
+		// see docs/net/novaworld-net-re.md 5.2c]
 		host_config.game_type = mission_game_type();
 	}
 	if (world_) {
@@ -172,7 +172,7 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 		runtime_->view().set_game_type(host_config.game_type);
 		// The 0x1D header-form session half: the loopback replica stands in
 		// world.mp_session for the retail is_in_session (SP listen stays the
-		// 7-byte team form). (retail: NapiNPClientMsg_0x01D @0x43086c)
+		// 7-byte team form). [orig: NapiNPClientMsg_0x01D @0x43086c]
 		runtime_->view().set_mp_session(world_ != nullptr && world_->mp_session);
 
 		// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
@@ -571,9 +571,9 @@ void Simulation::joiner_pump() {
 	};
 	joiner_bridge_.pump(ctx, hooks);
 	// An S2C 0x41 applied inside the pump mutated the live charattr table; the
-	// World's per-class ATTRIBUTES words follow it the same frame (retail: the
+	// World's per-class ATTRIBUTES words follow it the same frame [orig: the
 	// HUD reads g_CharAttr directly, AnimMap_IsSlotActive @0x4125e0, so the
-	// clear is visible on the next draw; see docs/interface/hud-re.md).
+	// clear is visible on the next draw; see docs/interface/hud-re.md].
 	sync_class_attribute_flags();
 }
 
@@ -1370,7 +1370,7 @@ TypedArray<Dictionary> Simulation::get_deploy_spawn_zones() {
 		// The 0x6E wave group on this zone: its countdown (entity+548) and the
 		// queued members, named through the roster the way retail reads the
 		// member entity's Name (the player entity's name IS the roster name)
-		// (retail: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b, see world/deploy_screen_feed.h).
+		// [orig: dword_A85BC4[idx] / unk_A85CC4 @0x553cd0..0x553d8b, see world/deploy_screen_feed.h].
 		int wave_countdown = 0;
 		Array occupants;
 		if (cs.spawn_waves.known) {
@@ -1500,8 +1500,8 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 // the handle (0<<12)|index); the canned-message key, the camp key's team
 // suffix, and the line color all come from the witnessed policy in
 // engine/runtime/hud/feed_format.h. Suppressed types never surface
-// (retail: the LFP result set formats and returns @0x42702E-@0x42716D;
-// 58 posts to the tip system only @0x427202).
+// [orig: the LFP result set formats and returns @0x42702E-@0x42716D;
+// 58 posts to the tip system only @0x427202].
 Array Simulation::drain_feed_events() {
 	Array out;
 	if (!runtime_) return out;
@@ -1515,15 +1515,15 @@ Array Simulation::drain_feed_events() {
 		return e != nullptr ? String::utf8(e->name.c_str()) : String();
 	};
 	// A line the local player took no part in posts only while the MP verbose
-	// toggle is on (retail: g_MpVerbose2 @0x24D2154, seeded verbose-on from
-	// the session settings @0x551D0F). The keybind that flips it (@0x49B78F,
+	// toggle is on [orig: g_MpVerbose2 @0x24D2154, seeded verbose-on from
+	// the session settings @0x551D0F]. The keybind that flips it (@0x49B78F,
 	// STRMISC_VERBOSE_ON/OFF) is unported, so the seed default stands.
 	constexpr bool mp_verbose = true;
 	for (const opennova::netsim::ClientGameEvent &ev : runtime_->drain_game_events()) {
 		if (opennova::hud::feed_event_suppressed(ev.event_type)) continue;
 		// Camp events reuse the slots: attacker is the LEVEL index and victim
 		// is the TEAM byte, and their key gets a client-side team suffix
-		// (retail: case 59 @0x4272D7 / case 60 @0x4273DC).
+		// [orig: case 59 @0x4272D7 / case 60 @0x4273DC].
 		const bool camp = ev.event_type == 59 || ev.event_type == 60;
 		const bool own =
 				!camp && self_handle != 0xFFFF &&
@@ -1542,8 +1542,8 @@ Array Simulation::drain_feed_events() {
 		if (key == nullptr) continue;   // team/gametype-keyed at runtime — not ported
 		// The aux slot carries the bonus-credited player; only when that is
 		// the LOCAL player does retail re-compose the line through STRCND48
-		// "%s - Bonus for %s" with their name (retail: the 4th
-		// HUD_FormatKillEventMessage arg @0x422F5F -> the sprintf @0x422CA2).
+		// "%s - Bonus for %s" with their name [orig: the 4th
+		// HUD_FormatKillEventMessage arg @0x422F5F -> the sprintf @0x422CA2].
 		String extra;
 		if (!camp && self_handle != 0xFFFF && ev.aux_index != 0xFF &&
 				static_cast<uint16_t>(ev.aux_index) == self_handle) {
@@ -1561,7 +1561,7 @@ Array Simulation::drain_feed_events() {
 		d["extra"] = extra;
 		if (camp) {
 			// The camp template's %s takes the WPNames string of the level
-			// slot — index PLUS ONE (retail: sprintf @0x4272EC/@0x4273F1).
+			// slot — index PLUS ONE [orig: sprintf @0x4272EC/@0x4273F1].
 			d["wpname_key"] = String::utf8(
 					opennova::hud::feed_camp_wpname_key(ev.attacker_index).c_str());
 		}

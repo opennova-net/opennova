@@ -38,14 +38,14 @@ private:
 		int clipsize = 0;
 		int startrounds = 0;
 		int maxclips = 0;
-		// First-person viewmodel slice (retail: WeaponDef_ParseProperty @0x54d730
-		// rows; consumer Player_RenderFirstPersonViewModel @0x4ded60): the FP gun
+		// First-person viewmodel slice [orig: WeaponDef_ParseProperty @0x54d730
+		// rows; consumer Player_RenderFirstPersonViewModel @0x4ded60]: the FP gun
 		// model (gfx1), the 3P model (gfx3), the shared animation set (animadm),
 		// the hip/ADS view biases (pos/tpos: xyz raw file units + yaw/pitch/roll
 		// degrees), and renderfov (horizontal degrees, record default 80.0 — no
 		// shipped JO def sets it). gfx1a/gfx1b are recognized-and-DISCARDED
-		// tokens (retail: WeaponDefs_ParseLineCallback @0x5448d0 -> xor eax; the
-		// FP arms are the character combo's, see docs/playerinfo/avatars-re.md);
+		// tokens [orig: WeaponDefs_ParseLineCallback @0x5448d0 -> xor eax; the
+		// FP arms are the character combo's, see docs/playerinfo/avatars-re.md];
 		// the format lib still parses them, but nothing carries them past it.
 		String animadm;
 		String gfx1;

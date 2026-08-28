@@ -66,7 +66,7 @@ public:
 	// The frozen-fixture glare settle (GameWorld's capture-refresh seam):
 	// the occlusion brightness needs ~4 frames to fill the 8-sample window
 	// and up to 16 more to step +-16 onto the dead-band target
-	// (retail: render_skybox_sun_glow @ 0x5acdfb..0x5acf7f, see docs/env/env-tod-re.md), so a single
+	// [orig: render_skybox_sun_glow @ 0x5acdfb..0x5acf7f, see docs/env/env-tod-re.md], so a single
 	// zero-delta advance leaves a fresh accumulator dark at any pose. Runs
 	// ONLY the witnessed per-frame occlusion leg (two jittered rays + tick)
 	// until the dead-band holds across a full window turnover (frame cap
@@ -79,7 +79,7 @@ public:
 	// opacity/visibility (the last advanced frame's values).
 	Dictionary get_diagnostics() const;
 
-	// The last advanced frame's sun-veil outputs (retail: // Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0, see docs/env/env-tod-re.md): the fullscreen
+	// The last advanced frame's sun-veil outputs [orig: // Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0, see docs/env/env-tod-re.md]: the fullscreen
 	// white veil alpha (0..1 after the > 2 draw gate — consumed by the
 	// PlayerViewEffects veil rect via the opennova_sun_veil_alpha shader
 	// global this node pushes) and the modulator-2 exposure stop-down input
@@ -129,7 +129,7 @@ private:
 	// Terrain line-of-sight between two points (the water-glint visibility
 	// rays) — the same clear-when-miss form as _glare_ray_clear.
 	bool _segment_clear(const Vector3 &p_from, const Vector3 &p_to);
-	// One frame of the water-glint leg (retail: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md):
+	// One frame of the water-glint leg [orig: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md]:
 	// tick the accumulator at this camera, place the mirrored glint body,
 	// return its submit alpha (0 hides it).
 	float _advance_water_glint(const opennova::env::EnvironmentState &p_state,
@@ -154,7 +154,7 @@ private:
 	int sun_veil_glare_ = 0;
 	int sun_veil_stopdown_ = 0;
 	// The water-reflected sun glint accumulator
-	// (retail: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md).
+	// [orig: update_sun_glare @ 0x5ad130, see docs/env/env-tod-re.md].
 	opennova::env::WaterGlintState water_glint_;
 };
 

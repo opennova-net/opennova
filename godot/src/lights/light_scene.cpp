@@ -212,9 +212,9 @@ int64_t LightScene::spawn_glow(const Dictionary &p_config) {
 	params.disable_terrain = p_config.get("disable_terrain", false);
 	params.disable_objects = p_config.get("disable_objects", false);
 	// Retail render flag 0x100 (the impact flash): the corona re-centers
-	// radius/2 below the light (retail: AmmoDef_ProcessImpactEffect @0x40a2b3
+	// radius/2 below the light [orig: AmmoDef_ProcessImpactEffect @0x40a2b3
 	// sets it; EffectWorld_RenderLightCoronas @0x5ab037 reads it, see
-	// docs/render/render-lighting-re.md).
+	// docs/render/render-lighting-re.md].
 	params.corona_lower_half_radius =
 			p_config.get("corona_lower_half_radius", false);
 	return encode_handle(scene_.spawn(params));
@@ -353,11 +353,11 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 		Weather *p_weather, std::vector<opennova::renderer::SlotPointLight> &r_out) {
 	// The render-slot dominant-light query: the witnessed per-entity collect
 	// over entity position +- bound radius, group-gated params, no D3D-fill
-	// boost (retail: RenderSlot_UpdateEntityLight @0x5d6a30 collects via
+	// boost [orig: RenderSlot_UpdateEntityLight @0x5d6a30 collects via
 	// collect_nearby_zones_by_aabb @0x5aa250 and reads
 	// Light_GetPointLightParams @0x5a9180 directly — the pick itself lives
 	// portable in opennova::renderer::pick_dominant_light, see
-	// docs/render/render-lighting-re.md).
+	// docs/render/render-lighting-re.md].
 	r_out.clear();
 	const std::array<int32_t, 3> center = mission_fixed_from_godot(p_world_pos);
 	const int64_t half =
@@ -459,9 +459,9 @@ int LightScene::render_model_frame(const TypedArray<Node3D> &p_models,
 				// A building draw declares itself as interior section zero, then
 				// the model collector re-scopes the OWNER section per ROBJ. The
 				// group gate falls back from interior section zero to this value.
-				// (retail: Terrain_RenderSectorModels @0x5c5e07;
+				// [orig: Terrain_RenderSectorModels @0x5c5e07;
 				// collect_render_objects_for_batch @0x5d8ff7, see
-				// docs/render/render-lighting-re.md)
+				// docs/render/render-lighting-re.md]
 				draw.groups.owner_group_entity = 0;
 				draw.groups.owner_group_section = part.robj_index;
 				draw.groups.interior_group_entity = owner_entity;
@@ -701,9 +701,9 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	// Owner visible-section masks from the same model/owner walk the
 	// per-model light pass runs: a model with an occlusion verdict (mask
 	// != -1) contributes its owner row; everything else passes the gate
-	// like retail's non-pool-2 owners (retail: Terrain_IsBuildingSectionBitSet
+	// like retail's non-pool-2 owners [orig: Terrain_IsBuildingSectionBitSet
 	// @0x5c6960 returns TRUE outside the mask array, see
-	// docs/render/render-lighting-re.md).
+	// docs/render/render-lighting-re.md].
 	std::vector<opennova::renderer::LightCoronaOwnerMask> owner_masks;
 	const int64_t model_count = p_models.size();
 	owner_masks.reserve(static_cast<size_t>(model_count));
@@ -725,8 +725,8 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	}
 	inputs.owner_masks = owner_masks.data();
 	inputs.owner_mask_count = owner_masks.size();
-	// The fog-to-black fold (retail: CD3DDevice_SetFogAndBlendMode(dev, 2)
-	// @0x5aafb6, see docs/render/render-lighting-re.md): primary fog params,
+	// The fog-to-black fold [orig: CD3DDevice_SetFogAndBlendMode(dev, 2)
+	// @0x5aafb6, see docs/render/render-lighting-re.md]: primary fog params,
 	// color forced black engine-side.
 	inputs.fog_enabled = p_fog.get("enabled", false);
 	inputs.fog_type = static_cast<int32_t>(
@@ -736,7 +736,7 @@ TypedArray<Dictionary> LightScene::collect_corona_rows(
 	inputs.camera_fixed = mission_fixed_from_godot(p_camera_pos);
 	// The camera depth plane in mission space: depth grows in front of the
 	// camera, zero at the camera origin (the batch-sort plane retail feeds
-	// the fade (retail: @0x5ab2f8..0x5ab33c); the small near-plane offset is
+	// the fade [orig: @0x5ab2f8..0x5ab33c]; the small near-plane offset is
 	// folded into the clamp).
 	const Vector3 forward = p_camera_forward.normalized();
 	const std::array<float, 3> normal_mission = {
@@ -787,7 +787,7 @@ size_t LightScene::collect_terrain_light_rows(
 	opennova::renderer::TerrainLightPassInputs inputs;
 	// EffectWorld_AmbientScale = the env light-state gain the object pass
 	// already feeds; flt_2732DA{C,8,4} = the loaded recip unpacked once
-	// (retail: EffectWorld_TickInstancesAndLightScale @0x5aa1ef..0x5aa23f).
+	// [orig: EffectWorld_TickInstancesAndLightScale @0x5aa1ef..0x5aa23f].
 	inputs.ambient_scale = {
 		static_cast<float>(p_ambient_scale.x),
 		static_cast<float>(p_ambient_scale.y),
@@ -798,8 +798,8 @@ size_t LightScene::collect_terrain_light_rows(
 	fill_flicker(inputs.flicker, p_time_ms, p_weather);
 	// The normal pass: the pixel-shader terrain path is the one we render, the
 	// per-light loop is never skipped, and the 0.4/r alternate projection rides
-	// render-mode bit 0x100, which this shell never sets (retail: @0x6095e4,
-	// @0x60983f, @0x609890).
+	// render-mode bit 0x100, which this shell never sets [orig: @0x6095e4,
+	// @0x60983f, @0x609890].
 	inputs.alt_pass = false;
 	inputs.pixel_shader_path = true;
 	inputs.light_pass_disabled = false;

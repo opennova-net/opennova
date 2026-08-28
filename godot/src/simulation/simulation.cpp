@@ -144,9 +144,9 @@ void Simulation::reset_world() {
 	world_ = std::make_unique<World>();
 	apply_character_traits_to_world();
 	// The fresh World's per-class ATTRIBUTES words (the medic plate / map
-	// marker feed) come from the retained charattr table (retail: the
+	// marker feed) come from the retained charattr table [orig: the
 	// process-scoped g_CharAttr outlives every mission, CharAttr_LoadFromDef
-	// @0x412140 runs once at boot; see docs/interface/hud-re.md).
+	// @0x412140 runs once at boot; see docs/interface/hud-re.md].
 	sync_class_attribute_flags();
 	world_->external_local_mounted_weapon_pump = true;
 	world_->projectile_authority = !joiner_;
@@ -483,7 +483,7 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 			opennova::world::TickPhase::PreMission);
 	// The Show Score panel's mission-start unit census, after entity placement
 	// and the item-traits sweep stamped Entity::item_unit_type.
-	// (retail: Game_StartMission @0x525d5d -> Score_CountMissionSubgoalsAndUnits @0x509dc0)
+	// [orig: Game_StartMission @0x525d5d -> Score_CountMissionSubgoalsAndUnits @0x509dc0]
 	opennova::world::count_mission_units(*world_);
 	baseline_ = world_->snapshot();
 	ai_->capture_spawn_baseline();
@@ -595,10 +595,10 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		// clears the retained table, exactly like the shell resolver's empty
 		// dictionary did through set_ai_profile_speeds.
 		// The AI-class answer per items.def type id: which init family the
-		// class row runs and the def's default_aip (retail: the AI class table
+		// class row runs and the def's default_aip [orig: the AI class table
 		// @0x813280 — 'chel'/'cpln' -> Entity_InitHelicopterAIFromDef @0x4683C0,
 		// 'cveh'/'cbot'/'ctrn' -> Entity_InitVehicleAIFromDef @0x4686C0; the
-		// name arms are cited in mission/promote.h). Unknown classes get no
+		// name arms are cited in mission/promote.h]. Unknown classes get no
 		// fallback, as retail's other rows run no vehicle AI init.
 		ai_profile_defaults_ = {};
 		if (p_item_db.is_valid()) {
@@ -703,7 +703,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 					"MissionPresentation: weapon.def not loaded — 0x5A ammo resolve degraded to echo");
 		// score.ini rides the same session-data step. DIVERGENCE (placement): retail
 		// loads it far earlier, when it builds the default gametype settings
-		// (retail: GameType_CreateDefaultSettings @0x52DD00), not at mission boot. The
+		// [orig: GameType_CreateDefaultSettings @0x52DD00], not at mission boot. The
 		// observable behaviour is the same because the session's row is re-resolved
 		// from the mission's game-mode bit in refresh_score_rules(), which finish_load
 		// also calls — so either order yields the same score_rules.
@@ -1128,8 +1128,8 @@ Error Simulation::debug_set_entity_health(int p_index, int p_hp) {
 // world's cached local-player handle.
 // Is the local player in a seat that suppresses the first-person weapon? A
 // helicopter pilot has no weapon in hand in retail; a passenger keeps his.
-// (retail: Player_RenderFirstPersonViewModel — see
-//  world::mount_hides_fp_viewmodel for the witnessed condition)
+// [orig: Player_RenderFirstPersonViewModel — see
+//  world::mount_hides_fp_viewmodel for the witnessed condition]
 bool Simulation::local_player_fp_weapon_hidden() const {
 	if (!world_) return false;
 	const opennova::world::Entity *lp =
@@ -1260,7 +1260,7 @@ Dictionary Simulation::get_world_entity_debug(int p_net_id) const {
 // outright so an unattended round can reach a scripted win condition that an
 // autofiring bot cannot reliably produce (00TRg's event 31 needs GroupDestroyed(16),
 // i.e. six specific AI dead). It drives the SAME EntityCommands::kill_group the BMS
-// KILL_GROUP action uses (retail: EventAction_Dispatch case 2 @0x4542e0); it invents no
+// KILL_GROUP action uses [orig: EventAction_Dispatch case 2 @0x4542e0]; it invents no
 // state and fakes no event -- the win chain still has to evaluate on its own.
 // Sibling of debug_teleport_local_player, which exists for the same reason.
 int Simulation::debug_kill_group(int p_group) {

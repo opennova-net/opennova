@@ -224,8 +224,8 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 void ObjectModel::set_shadow_caster_enabled(bool p_enabled) {
 	set_shadow_caster_layer_enabled(LAYER_DYNAMIC_SHADOW_CASTER, p_enabled);
 	// Dynamic casters join the render-slot ground-shadow group the SlotShadow
-	// device plans over (retail: slot registration at entity init —
-	// Entity_InitFromModel, see docs/render/render-lighting-re.md).
+	// device plans over [orig: slot registration at entity init —
+	// Entity_InitFromModel, see docs/render/render-lighting-re.md].
 	update_slot_shadow_group();
 }
 
@@ -440,11 +440,11 @@ void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
 // building is not an ordinary entity submission: its exterior shell (ROBJ 0)
 // always keeps effectScale 1 with no interior lerp, and only ROBJ 1+ takes
 // its own ItemDef light transfer. Re-stamped by rebuild_scene (fresh
-// instances) and on every context edge; never per frame (retail:
+// instances) and on every context edge; never per frame [orig:
 // setup_entity_lighting_and_shader_constants @0x5d98a0 and the model+536
 // daylight push per visible building in Terrain_RenderSectorModels
 // @0x5c5d30, see docs/render/render-lighting-re.md; the math itself is
-// opennova::renderer::compute_entity_lighting).
+// opennova::renderer::compute_entity_lighting].
 void ObjectModel::stamp_entity_lighting_instances() {
 	const StringName name("u_entity_light");
 	const Vector4 entity = interior_section_lighting_
