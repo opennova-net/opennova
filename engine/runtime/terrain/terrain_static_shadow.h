@@ -4,7 +4,7 @@
 // cache. Mission placement supplies stable caster/geometry identities and
 // world bounds; this module owns witnessed admission, sun-swept page culling,
 // selected shadow LOD, all-ROBJ ordering, and a deterministic contribution
-// stamp. The device adapter remains responsible for resolving geometry refs
+// stamp. The device binding remains responsible for resolving geometry refs
 // and rasterizing/compositing them.
 // [orig: Terrain_CollectAndRenderTileModels @0x60D250; admission
 // @0x60D421..0x60D450; projected bound/page intersection
@@ -32,18 +32,18 @@ struct TerrainStaticShadowBounds {
 	bool valid() const noexcept;
 };
 
-// Adapter-owned stable model identity plus the two render-LOD populations the
+// Binding-owned stable model identity plus the two render-LOD populations the
 // retail collector can select. Each output draw adds an explicit ROBJ index.
 struct TerrainStaticShadowGeometrySource {
 	uint64_t geometry_key = 0;
 	std::array<uint16_t, 2> render_object_counts{};
 };
 
-// Per-selected-ROBJ resolution state shared by the Godot adapter and the
+// Per-selected-ROBJ resolution state shared by the Godot binding and the
 // portable tests. A hierarchy-only ROBJ with no authored surfaces is an exact
 // no-op. Once a surface is authored, losing any of it (including malformed
 // indices or UVs needed by an alpha-dependent material) makes the silhouette
-// inexact and must be attributed/omitted by the adapter.
+// inexact and must be attributed/omitted by the binding.
 struct TerrainStaticShadowRenderObjectCoverage {
 	uint32_t authored_surface_count = 0;
 	uint32_t valid_surface_count = 0;
@@ -72,7 +72,7 @@ bool terrain_static_shadow_strip_indices_are_valid(
 
 struct TerrainStaticShadowCandidate {
 	// BMS id is retained for diagnostics/suppression. caster_key is the stable
-	// adapter lookup identity and may differ for runtime husks/replacements.
+	// binding lookup identity and may differ for runtime husks/replacements.
 	int32_t bms_id = 0;
 	uint64_t caster_key = 0;
 	uint32_t collector_order = 0;
@@ -97,11 +97,11 @@ struct TerrainStaticShadowPageInput {
 	// Normalized surface-to-light direction. Like retail, the collector clamps
 	// the vertical projection divisor to 0.25 before expanding the footprint.
 	TerrainStaticShadowLightDirection surface_to_light{};
-	// Cache identity shared with the terrain DOT3 pass. The adapter derives
+	// Cache identity shared with the terrain DOT3 pass. The binding derives
 	// these bytes from the raw environment getter tuple through the one portable
 	// (g2,g0,g1) quantizer; raw direction remains the projection input above.
 	TerrainTileLightEpoch light_epoch = kDefaultTerrainTileLightEpoch;
-	// Conservative receiver plane for broad-phase projection. Raster adapters
+	// Conservative receiver plane for broad-phase projection. Raster bindings
 	// can use the actual page geometry; this value only decides candidate/page
 	// intersection and therefore should be the page's minimum terrain height.
 	float receiver_height = 0.0f;

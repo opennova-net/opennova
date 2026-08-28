@@ -1,4 +1,4 @@
-// Time-domain skeletal pose evaluation — moved from the shell adapter's
+// Time-domain skeletal pose evaluation — moved from the shell binding's
 // skeletal evaluator (ADR 0028); the Godot binding's residue was Transform3D
 // boxing around exactly this math.
 #include <runtime/anim/skeletal_pose.h>
@@ -29,8 +29,8 @@ Mat3 rows_to_mat3(const float rot[9]) {
     return o;
 }
 
-// Cofactor inverse with the adapter's exact 1e-9 determinant guard; a failed
-// invert leaves `out` untouched (the adapter ignored the result over a
+// Cofactor inverse with the binding's exact 1e-9 determinant guard; a failed
+// invert leaves `out` untouched (the binding ignored the result over a
 // zero-initialized matrix, and the caller's determinant guard catches the
 // degenerate product downstream).
 bool mat3_invert(const Mat3 &m, Mat3 &out) {
@@ -101,7 +101,7 @@ bool vec3_normalize(Vec3 &v) {
     return true;
 }
 
-// Column-wise Gram-Schmidt, the same normalization the adapter's
+// Column-wise Gram-Schmidt, the same normalization the binding's
 // Basis::orthonormalized() applied to the relativized bind product.
 void mat3_orthonormalize(Mat3 &m) {
     Vec3 x = mat3_column(m, 0);
@@ -230,9 +230,9 @@ void bind_rest_local(const ClipBone &bone, const ClipBone *parent,
     }
     // The .bad bind 3x3 is a row-vector engine matrix; the relativized product
     // TRANSPOSES into the column-vector basis the pose pipeline composes with
-    // (the adapter realized the same conversion by feeding the product's rows
+    // (the binding realized the same conversion by feeding the product's rows
     // into Godot's column-axes Basis constructor). Guard/orthonormalize the
-    // transposed basis exactly like the adapter did.
+    // transposed basis exactly like the binding did.
     Mat3 rest;
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 3; ++c)

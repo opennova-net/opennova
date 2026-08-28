@@ -20,7 +20,4 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 // table build @ 0x58bc35..0x58bca9, per-pixel A @ 0x58bcee].
 bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out, std::string &error);
 
-bool load_pcx_rgb_file(const std::string &path, RgbImage &out, std::string &error);
-bool load_pcx_indexed_file(const std::string &path, IndexedImage8 &out, std::string &error);
-
 } // namespace opennova

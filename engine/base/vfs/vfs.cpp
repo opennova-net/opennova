@@ -243,7 +243,7 @@ struct Vfs::Impl {
     void invalidate() { index_valid = false; }
 
     std::unique_ptr<ArchiveMount> open_archive(const std::string &path) {
-        std::unique_ptr<ArchiveMount> m(new ArchiveMount());
+        auto m = std::make_unique<ArchiveMount>();
         m->path = path;
         if (pff_open(&m->ar, path.c_str()) != 0) {
             last_error = "Failed to open PFF archive: " + path;
@@ -396,7 +396,7 @@ struct Vfs::Impl {
     }
 };
 
-Vfs::Vfs() : impl_(new Impl()) {}
+Vfs::Vfs() : impl_(std::make_unique<Impl>()) {}
 Vfs::~Vfs() = default;
 Vfs::Vfs(Vfs &&) noexcept = default;
 Vfs &Vfs::operator=(Vfs &&) noexcept = default;

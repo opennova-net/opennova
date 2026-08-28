@@ -15,8 +15,8 @@ namespace opennova::net {
 //
 // net::Endpoint.ip is MSO-first (ip[0] = a in a.b.c.d); PeerAddr.ip is LE octet packing (a in the
 // low byte). The conversion is a straight pack/unpack, NOT a byte swap — verified: 127.0.0.1 ->
-// PeerAddr.ip 0x0100007F (the value client_runtime_test hard-codes). Moved here from the inline
-// to_peer/to_endpoint in apps/nw_server/host_owner_loop.h.
+// PeerAddr.ip 0x0100007F (the value client_runtime_test hard-codes). The session loop that owns
+// the socket is engine/net/npruntime/host_session.h.
 class NetDatagramSocket : public netsim::IDatagramSocket {
 public:
 	// `sock` is NON-OWNING (the caller owns the socket lifetime). `recv_timeout_ms` is the per-recv
@@ -37,7 +37,7 @@ public:
 		udp_send_to(sock_, to_endpoint(to), data, len);
 	}
 
-	// PeerAddr <-> net::Endpoint (the pack/unpack formerly inline in host_owner_loop.h).
+	// PeerAddr <-> net::Endpoint pack/unpack.
 	static PeerAddr to_peer(const Endpoint &e) {
 		return PeerAddr{static_cast<uint32_t>(e.ip[0]) | (static_cast<uint32_t>(e.ip[1]) << 8) |
 		                        (static_cast<uint32_t>(e.ip[2]) << 16) |

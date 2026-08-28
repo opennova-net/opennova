@@ -2,8 +2,8 @@
 // decoded ClientEntityState (plus seat/weapon definitions) into packed
 // world::PF_* present-row fields — the mounted/emplaced turret phases, the
 // remote aim-overlay inputs, and the third-person held-weapon frame. Shared
-// by the client-replica projection (this lib) and the shell adapter's role
-// enrichers. Moved from the adapter's simulation family (ADR 0031); the
+// by the client-replica projection (this lib) and the shell binding's role
+// enrichers. Moved from the binding's simulation family (ADR 0031); the
 // witness citations travel with each body.
 #pragma once
 

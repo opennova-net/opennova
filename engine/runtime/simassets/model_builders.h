@@ -3,7 +3,7 @@
 // Sim-side model derivations from a parsed .3di (ADR 0028): the runtime
 // collision/occlusion model builders and the bound-sphere radius the entity
 // init consumes, plus the model predicates the build gates read. Moved from
-// the shell adapter's internal header — the bodies are the same structural
+// the shell binding's internal header — the bodies are the same structural
 // translations, with their [orig] witnesses, now linkable by any engine
 // consumer and testable headless.
 
@@ -33,7 +33,7 @@ bool occlusion_model_from_3di(const Threedi3di3 &model,
                               opennova::world::OcclusionModel &out);
 
 // LOD carries skinned geometry: the header mesh-type stamp, or any strip with
-// a bone table. (The render adapter's ObjectData::is_skinned delegates
+// a bone table. (The render binding's ObjectData::is_skinned delegates
 // here — one implementation per engine fact, ADR 0016.)
 bool model_is_skinned(const Threedi3di3 &model, int lod_index);
 

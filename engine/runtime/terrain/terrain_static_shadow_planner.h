@@ -3,12 +3,12 @@
 // Portable static-shadow page planner: owns the caster snapshot (admission +
 // collector candidates), the per-page receiver height minimum, page-job
 // compilation with the config-stamped content identity, draw classification,
-// and the raster-input build. The Godot adapter is reduced to marshalling
+// and the raster-input build. The Godot binding is reduced to marshalling
 // placer records, decoding alpha textures, and converting diagnostics.
 // Plans are memoized per page under a state epoch: an unchanged epoch makes
 // plan() a lookup (no caster walk) and rasterize() reuse the compiled job.
 // The caster snapshot is an immutable set shared by pointer, so copying a
-// planner (the adapter's worker snapshot) shares the casters and copies only
+// planner (the binding's worker snapshot) shares the casters and copies only
 // the per-instance memo caches; replace_casters publishes a fresh set.
 // Material animation is sampled from the planner's tick only when a page is
 // classified or rasterized — exactly retail, which evaluates the tile models'
@@ -58,7 +58,7 @@ struct TerrainStaticShadowPlannerCaster {
 	// Terrain height under the caster origin; retail subtracts it before
 	// rendering the selected shadow LOD.
 	float ground_y = 0.0f;
-	// Opaque stable identity of the source document (the adapter passes its
+	// Opaque stable identity of the source document (the binding passes its
 	// instance id); participates in the candidate transform revision.
 	uint64_t caster_identity = 0;
 };
@@ -124,7 +124,7 @@ public:
 	// never walks the casters, never changes the state revision, and never
 	// alters resident page content identity — retail cache hits key only on
 	// the spatial tile, and animations are sampled when a tile is actually
-	// recomposed. The adapter carries the requesting frame's tick with each
+	// recomposed. The binding carries the requesting frame's tick with each
 	// composition job and sets it on the worker's planner copy.
 	void set_material_time(uint32_t time_ms) { material_time_ms_ = time_ms; }
 	uint32_t material_time_ms() const { return material_time_ms_; }
@@ -136,12 +136,11 @@ public:
 	// Replaces the caster snapshot. Casters carry resolved geometry; a
 	// missing geometry on an admitted caster (resolution failed) is declared
 	// through admitted_geometry_missing so planning fails closed exactly as
-	// the adapter's snapshot build did. An identical snapshot (same records,
+	// the binding's snapshot build did. An identical snapshot (same records,
 	// same admission verdict) is a no-op that preserves cached plans.
 	void replace_casters(std::vector<TerrainStaticShadowPlannerCaster> casters,
 			bool admitted_geometry_missing);
 
-	bool has_receiver_terrain() const { return receiver_valid_; }
 	bool snapshot_exact() const { return casters_->exact; }
 	std::size_t candidate_count() const {
 		return casters_->collector.candidate_count();

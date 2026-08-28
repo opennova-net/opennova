@@ -11,12 +11,6 @@
 
 namespace opennova::np {
 
-// Retail's maintenance clocks, expressed in original 62 Hz server ticks and
-// exposed for protocol regression tests/capture tooling. Integrity shares one
-// explicit global scoreboard counter: `++timer > 0x136`, reset zero => 311
-// ticks. Its independently persistent family toggle starts with 0x31.
-// [orig: Server_TickUpdate @0x51D7E0 -> @0x508540]
-inline constexpr uint32_t INTEGRITY_REQUEST_PERIOD_TICKS = 0x136u + 1u;
 // One explicit global countdown: reset 0 emits at the next boundary, reload
 // 0x136 emits again after exactly 310 further Server_TickUpdate calls.
 inline constexpr uint32_t NETWORK_QUALITY_BROADCAST_PERIOD_TICKS = 0x136u;
@@ -27,7 +21,7 @@ inline constexpr uint32_t CONTROL_REQUEST_PERIOD_TICKS =
 
 // Optional attribution for one authoritative Server_TickUpdate. Callers pass
 // nullptr outside an active diagnostics capture; the zero-initialized value is
-// flattened so adapters can forward it without depending on World internals.
+// flattened so bindings can forward it without depending on World internals.
 struct ServerTickPerf {
 	uint64_t input_us = 0;
 	uint64_t world_us = 0;

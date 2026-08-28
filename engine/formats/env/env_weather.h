@@ -471,7 +471,7 @@ Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
                          uint32_t fog_dist_fixed, uint32_t fog_dist_reference_fixed);
 
 // The reference distance's retail default, 1024.0 in 16.16. Terrain init may
-// lower it to 768.0 by adapter caps, but the session authority is forced back
+// lower it to 768.0 by binding caps, but the session authority is forced back
 // to the default — the reimpl analog for a modern renderer is the default.
 // [orig: Environment_InitDefaults @ 0x57c0b0; Terrain_Init @ 0x60fc9a/0x60fca3]
 inline constexpr uint32_t kFogDistReferenceDefault = 1024u << 16;

@@ -58,6 +58,12 @@ constexpr int32_t bam_abs(int32_t v)
 constexpr double kRadiansPerBam = 6.283185307179586 / 4294967296.0;
 constexpr double kBamPerRadian = 4294967296.0 / 6.283185307179586;
 
+// The plain angle constants every port aliases (the same one-home rule as the
+// BAM scales above): pi and the degree <-> radian scales.
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kRadiansPerDegree = kPi / 180.0;
+constexpr double kDegreesPerRadian = 180.0 / kPi;
+
 } // namespace io
 } // namespace opennova
 

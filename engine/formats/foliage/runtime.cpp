@@ -193,7 +193,7 @@ std::vector<DetailInstance> generate_detail_cell(
     const WorldSamplers &world) {
 	// The detail tier expands the def model's full source geometry for every
 	// accepted transform. This module returns the transforms; the render
-	// adapter samples terrain height per transformed source vertex.
+	// binding samples terrain height per transformed source vertex.
 	// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
 	// Terrain_CollectNearFoliagePatches @ 0x603e60]
 	std::vector<DetailInstance> result;

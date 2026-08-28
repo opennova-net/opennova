@@ -37,7 +37,7 @@ struct RuntimeSlot {
 	// max(halfExtentX, halfExtentZ); the silhouette footprint is 0.75x this.
 	float model_radius = 1.0f;
 	// Retail sizes the persistent detail-cell pool from the complete source
-	// model vertex count. One is a compatibility default for adapters that do
+	// model vertex count. One is a compatibility default for bindings that do
 	// not yet provide mesh metadata and therefore selects the retail max (128).
 	uint32_t source_vertex_count = 1;
 };
@@ -85,7 +85,7 @@ struct DetailInstance {
 	uint8_t candidate = 0;
 	uint32_t cell_key = 0;
 	// Stable while the resident cell geometry is reused. Changes when the
-	// keyed slot is allocated/replaced so adapters can retain a built mesh.
+	// keyed slot is allocated/replaced so bindings can retain a built mesh.
 	uint64_t cache_revision = 0;
 	// Shared by every instance in one draw submission; always distinct for
 	// repeated submissions of the same resident key.
@@ -97,7 +97,7 @@ struct DetailInstance {
 	DetailPass pass = DetailPass::HighAlphaTest;
 	// True only for the near (<33) LOW resubmission that follows the HIGH
 	// pass. Retail draws it at the same c6 fade under strict D3DCMP_LESS, so
-	// it only lands where the HIGH pass rejected alpha; adapters emulate the
+	// it only lands where the HIGH pass rejected alpha; bindings emulate the
 	// equality rule by discarding texels above the HIGH reference.
 	// [orig: Foliage_RenderFarPatches @ 0x60a659..0x60a694;
 	// Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]

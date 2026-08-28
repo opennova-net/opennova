@@ -87,19 +87,13 @@ struct File {
 	std::vector<Group> groups;
 };
 
-// Parse a DBF file from disk / memory. Returns false on error (description in `error`).
-bool parse_dbf(const std::string &path, File &out, std::string &error);
 bool parse_dbf_memory(const uint8_t *data, size_t size, File &out, std::string &error);
 
 // Encode / write (used by the round-trip test).
 bool encode_dbf(const File &file, std::vector<uint8_t> &out, std::string &error);
-bool write_dbf(const File &file, const std::string &path, std::string &error);
 
 // Find group by name (case-insensitive); nullptr if not found.
 const Group *find_group(const File &file, const std::string &name);
-
-// Debug dump.
-std::string dump_dbf(const File &file);
 
 }  // namespace dbf
 }  // namespace opennova

@@ -697,7 +697,6 @@ public:
 	// `max_rows` lines, oldest first, NO expiry test [orig: HUD_DrawMessageLog
 	// @0x5b9d70 walks slots 16..1 of both rings @0x5b9e8a..0x5b9f1a].
 	const std::vector<HudMessageLine> &chat_lines() const { return chat_lines_; }
-	const std::vector<HudMessageLine> &feed_lines() const { return feed_lines_; }
 	void reset_runtime_state();
 
 	const HudDrawList &compile(const HudFrameState &state, float surface_w,

@@ -3,7 +3,7 @@
 // env_weather.h pieces: the wind-sway oscillator, rain fade, both lightning
 // flash sequencers, the smoothed scalar channels, the iris modulator chain,
 // the fourteen color-block pipelines in retail order, and the cloud-scroll
-// tail. The shell adapter (godot/src/env/weather_core.*) owns only
+// tail. The shell binding (godot/src/env/weather_core.*) owns only
 // the Godot boxing over this struct. RE record: docs/env/env-tod-re.md.
 #ifndef OPENNOVA_ENV_WEATHER_CORE_H
 #define OPENNOVA_ENV_WEATHER_CORE_H

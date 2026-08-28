@@ -69,7 +69,7 @@ void project_client_replica_present_row(
 	// Vehicle euler X/Y live in the same BAM32 entity fields as the
 	// authoritative pose. Spawn/dead-pose records seed them; the joiner
 	// prediction mirror advances air/water attitude between records. Role
-	// adapters override afterwards where a better source exists (the host's
+	// bindings override afterwards where a better source exists (the host's
 	// authoritative registry attitude, attachment poses).
 	if (entity.cls == EntityClass::Vehicle) {
 		row[world::PF_PITCH_DEG] = static_cast<float>(

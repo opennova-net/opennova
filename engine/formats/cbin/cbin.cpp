@@ -101,23 +101,6 @@ Entry Entry::make_justify(Justify j) {
     return e;
 }
 
-// Credits ENV helpers
-std::string Credits::get_env(const std::string& key) const {
-    if (key == "scroll_rate") {
-        return std::to_string(scroll_rate);
-    } else if (key == "vertical_space") {
-        return std::to_string(vertical_space);
-    } else if (key == "center_x") {
-        return std::to_string(center_x);
-    } else if (key == "top_y") {
-        return has_top_y ? std::to_string(top_y) : "";
-    } else if (key == "bottom_y") {
-        return has_bottom_y ? std::to_string(bottom_y) : "";
-    }
-    auto it = env_extra.find(key);
-    return (it != env_extra.end()) ? it->second : "";
-}
-
 void Credits::set_env(const std::string& key, const std::string& value) {
     if (key == "scroll_rate") {
         try { scroll_rate = std::stof(value); } catch (...) {}
@@ -153,18 +136,6 @@ bool is_cbin(const uint8_t* data, size_t size) {
     }
     uint32_t magic = read_le_u32(data);
     return magic == kMagic;
-}
-
-bool is_cbin_file(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        return false;
-    }
-    uint8_t header[sizeof(Header)];
-    if (!file.read(reinterpret_cast<char*>(header), sizeof(header))) {
-        return false;
-    }
-    return is_cbin(header, sizeof(header));
 }
 
 
@@ -495,25 +466,6 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
     return true;
 }
 
-bool decode_file_credits(const std::string& path, Credits& out, std::string& error) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) {
-        error = "Failed to open file: " + path;
-        return false;
-    }
-
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-
-    std::vector<uint8_t> buffer(size);
-    if (!file.read(reinterpret_cast<char*>(buffer.data()), size)) {
-        error = "Failed to read file: " + path;
-        return false;
-    }
-
-    return decode_credits(buffer.data(), buffer.size(), out, error);
-}
-
 // Helper to write a uint32_t to a buffer
 inline void write_u32(std::vector<uint8_t>& buf, uint32_t val) {
     buf.push_back(static_cast<uint8_t>(val & 0xFF));
@@ -759,26 +711,6 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
 
     // Encoded data
     out.insert(out.end(), encoded_data.begin(), encoded_data.end());
-
-    return true;
-}
-
-bool encode_file(const Credits& credits, const std::string& path, std::string& error) {
-    std::vector<uint8_t> data;
-    if (!encode(credits, data, error)) {
-        return false;
-    }
-
-    std::ofstream file(path, std::ios::binary);
-    if (!file) {
-        error = "Failed to create file: " + path;
-        return false;
-    }
-
-    if (!file.write(reinterpret_cast<const char*>(data.data()), data.size())) {
-        error = "Failed to write file: " + path;
-        return false;
-    }
 
     return true;
 }

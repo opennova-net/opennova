@@ -83,7 +83,6 @@ public:
     }
 
     bool at_end() const { return byte_pos_ >= size_; }
-    size_t byte_position() const { return byte_pos_; }
 
     // Bits still readable from the cursor. Lets a decoder reject a declared
     // count the section cannot possibly encode BEFORE it allocates for it.

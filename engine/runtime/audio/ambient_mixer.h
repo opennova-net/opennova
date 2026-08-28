@@ -73,9 +73,9 @@ int32_t crossfade_volume_byte(float blend);
 // distance reads full volume (@ 0x408251). `adjacent` is the neighbouring region at
 // the active edge.
 struct TimeOfDayRegion {
-    int32_t region;   // 0 morning / 1 day / 2 evening / 3 night
-    int32_t adjacent; // neighbour at the active crossfade edge
-    float blend;      // 0..1, 1 = full volume
+    int32_t region = 0;   // 0 morning / 1 day / 2 evening / 3 night
+    int32_t adjacent = 0; // neighbour at the active crossfade edge
+    float blend = 0.0f;   // 0..1, 1 = full volume
 };
 TimeOfDayRegion time_of_day_region(float hours);
 
@@ -93,10 +93,10 @@ using OcclusionFn = int64_t (*)(void *ctx, const float listener[3],
 // sort @ 0x5287ab). The embedder binds the first N non-failed entries to its persistent
 // channels and resolves streams by candidate_id.
 struct AmbientCandidate {
-    int32_t candidate_id;
-    int32_t vol; // 0..255 through the witnessed curve (crossfade + member + clamp)
-    int32_t pitch_q16; // registration pitch; placed markers use unity (0x10000)
-    float pos[3];
+    int32_t candidate_id = 0;
+    int32_t vol = 0; // 0..255 through the witnessed curve (crossfade + member + clamp)
+    int32_t pitch_q16 = 0x10000; // registration pitch; placed markers use unity (0x10000)
+    float pos[3] = {0.0f, 0.0f, 0.0f};
 };
 
 class AmbientMixer {

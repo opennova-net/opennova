@@ -153,25 +153,6 @@ inline bms::ItemType to_bms_type(EntityKind kind) {
 	return bms::ItemType::Item;
 }
 
-inline bool from_int_kind(int kind, EntityKind &out) {
-	switch (kind) {
-		case 0:
-			out = EntityKind::Marker;
-			return true;
-		case 1:
-			out = EntityKind::Item;
-			return true;
-		case 2:
-			out = EntityKind::Building;
-			return true;
-		case 3:
-			out = EntityKind::Organic;
-			return true;
-		default:
-			return false;
-	}
-}
-
 // preserve_over_count keeps a shipped on-disk marker_count that exceeds the 32-slot capacity verbatim
 // (CP19.bms ships one == 39) so an UNTOUCHED path round-trips byte-exact. parse_waypoint_record records
 // the over-count; sync_counts runs this on every load/save and passes true to preserve it. An AUTHORED
@@ -262,19 +243,6 @@ inline void repair_waypoint_marker_references(bms::File &file, size_t removed_in
 
 inline std::string unknown_label(const char *prefix, int value) {
 	return std::string(prefix) + "(" + std::to_string(value) + ")";
-}
-
-inline std::string extension_lower(const std::string &path) {
-	const size_t slash = path.find_last_of("/\\");
-	const size_t dot = path.find_last_of('.');
-	if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
-		return {};
-	}
-	std::string ext = path.substr(dot + 1);
-	std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char ch) {
-		return static_cast<char>(std::tolower(ch));
-	});
-	return ext;
 }
 
 // Copy into a fixed-width on-disk field that may use ALL dest_size bytes (no reserved NUL

@@ -246,18 +246,6 @@ int glare_q3_alpha_fixed(int view_dot_fixed, float fog_distance_world,
                          int overcast_blend_fixed, int sun_dim_fixed,
                          bool frame_effects_quarter);
 
-// ---------------------------------------------------------------------------
-// Celestial + sky constants
-// [orig: render_skybox @ 0x57960e] sun/moon dome position = camera + dir * 2000
-// [orig: render_skybox_layers @ 0x5ac230] layer offsets +64/+16, alpha 0x2000,
-// additive submit flag 0x110; glare/star models load under mode 0x300000.
-// NOTE (celestial-leg re-grill 2026-07-06): 2000 is the DOME VS clip-space
-// proximity reference distance ONLY [orig: c14 upload @ 0x57960e] — the
-// bodies place at kCelestialBodyDistance (64). The +16/+64 offsets and the
-// 0x2000 alpha belong to the caller-less dead variant @ 0x5ac230.
-inline constexpr float kCelestialDomeDistance = 2000.0f;
-inline constexpr float kCelestialLayerAlpha = float(0x2000) / 65536.0f; // dead variant
-
 // The 21x21 sky dome: 441 vertices / 800 triangles per pass
 // [orig: render_skybox draw @ 0x5798dc].
 inline constexpr int kSkyDomeVertices = 441;

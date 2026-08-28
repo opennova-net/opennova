@@ -169,7 +169,7 @@ struct NapiNPServerCtx {
 
 	// Host CNetQuality scalar sent as S2C 0x79. Retail derives this byte as
 	// max(frame-rate pressure, mean ping, packet loss) over a five-sample window.
-	// A local healthy LAN resolves to 1; the host adapter may replace it when
+	// A local healthy LAN resolves to 1; the shell binding may replace it when
 	// equivalent live telemetry is available.
 	uint8_t host_network_quality = 1;
 	// [orig: g_network_quality_broadcast_timer] One global explicit countdown,
@@ -223,7 +223,7 @@ struct NapiNPServerCtx {
 	std::vector<uint8_t> terrain_til_data;
 
 	// The current mission text table's raw cp1252 briefing strings. The Godot/resource
-	// adapter resolves [info]/briefing3 and [info]/briefing2 (falling back to
+	// binding resolves [info]/briefing3 and [info]/briefing2 (falling back to
 	// [info]/briefing) before host bring-up. When loaded, phase 6 serializes these as
 	// two consecutive C strings for S2C 0x7E. The explicit loaded bit distinguishes a
 	// valid pair of empty strings from a missing/unparseable mission text resource.

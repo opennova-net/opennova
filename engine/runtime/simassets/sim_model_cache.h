@@ -25,7 +25,7 @@ public:
 	SimModelCache &operator=(const SimModelCache &) = delete;
 
 	// Non-owning; the embedder keeps the index alive for the cache's lifetime
-	// (the adapter pins its ResourceRoot). Switching the index resets.
+	// (the binding pins its ResourceRoot). Switching the index resets.
 	void set_index(const opennova::ResourceIndex *index);
 	bool has_index() const { return index_ != nullptr; }
 

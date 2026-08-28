@@ -1,4 +1,4 @@
-// The engine-side skeletal clip set — the adapter evaluator's load/eval
+// The engine-side skeletal clip set — the binding evaluator's load/eval
 // pipeline moved verbatim onto ResourceIndex + the anim lib (ADR 0028).
 #include <runtime/simassets/adm_skeletal_clips.h>
 
@@ -24,7 +24,7 @@ std::string resolve_bad(const std::string &value) {
 
 } // namespace
 
-// Affine compose in the adapter's Transform3D semantics: rows are the
+// Affine compose in the binding's Transform3D semantics: rows are the
 // column-vector rotation matrix; out = a ∘ b (b applied first).
 AdmSkeletalClips::RestTransform rest_mul(
 		const AdmSkeletalClips::RestTransform &a,
@@ -47,7 +47,7 @@ AdmSkeletalClips::RestTransform rest_mul(
 }
 
 // Full affine inverse (cofactor basis inverse + rotated-negated origin) — the
-// adapter used Transform3D::affine_inverse on the accumulated rest. The rest
+// binding used Transform3D::affine_inverse on the accumulated rest. The rest
 // chain is orthonormal by construction, so the determinant never vanishes;
 // a degenerate input falls back to identity defensively.
 AdmSkeletalClips::RestTransform rest_affine_inverse(
@@ -220,7 +220,7 @@ bool AdmSkeletalClips::load_from_adm(
 				bones_[i].rest_position[2] = model_bone_origins[i].z;
 			}
 			// Model-table rows past the .bad's records carry no name;
-			// synthesize stable ones (the adapter's MDL<i> rule).
+			// synthesize stable ones (the binding's MDL<i> rule).
 			if (bones_[i].name.empty()) {
 				bones_[i].name = "MDL" + std::to_string(i);
 			}
@@ -245,7 +245,7 @@ bool AdmSkeletalClips::load_from_adm(
 				any_weapon_mask_ = true;
 			}
 			// The FK/rest accumulation assumes topological parent order — the
-			// same validation the adapter's collision consumer applied.
+			// same validation the binding's collision consumer applied.
 			if (parent < -1 || parent >= static_cast<int>(i)) {
 				fk_valid_ = false;
 			}

@@ -1427,16 +1427,6 @@ bool equal(const File& a, const File& b) {
     return true;
 }
 
-std::vector<const Entity*> File::all_entities() const {
-    std::vector<const Entity*> result;
-    result.reserve(items.size() + buildings.size() + markers.size() + organics.size());
-    for (const auto& e : items) result.push_back(&e);
-    for (const auto& e : buildings) result.push_back(&e);
-    for (const auto& e : markers) result.push_back(&e);
-    for (const auto& e : organics) result.push_back(&e);
-    return result;
-}
-
 std::string File::get_mission_name() const {
     return fixed_string(header.mission_name, sizeof(header.mission_name));
 }

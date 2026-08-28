@@ -46,8 +46,8 @@ add_library(opennova_formats STATIC
     # lwf — sound profiles (+ the .wav payload decode the profiles reference)
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/lwf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/wav_pcm.cpp
-    # mission — .bms/.mis missions: document model, parsers/writers, edit
-    # helpers, and the flat C ABI. Standalone (no world/runtime dependency);
+    # mission — .bms/.mis missions: document model, parsers/writers and edit
+    # helpers. Standalone (no world/runtime dependency);
     # the runtime half — event runtime, promotion, boot — lives in
     # engine/runtime/mission, both exposing <mission/...> with disjoint header
     # sets (the ADR 0029 acyclicity fold; directory home since ADR 0030).

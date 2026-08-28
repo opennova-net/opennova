@@ -32,7 +32,7 @@ struct ParticleRgbaImage {
 
 // Value result for the witnessed skyline allocator. The counters make its
 // otherwise invisible control-flow quirks contractible without exposing a
-// renderer adapter's private state.
+// renderer binding's private state.
 struct ParticleAtlasAllocation {
 	bool valid = false;
 	int x = 0;

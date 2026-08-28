@@ -167,19 +167,5 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
 // Encode a File structure to binary LWF format.
 bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error);
 
-// Write encoded LWF to disk.
-bool write_lwf(const File &file, const std::string &path, std::string &error);
-
-// Convert a parsed LWF to a tab-delimited SDF string. Returns false on error.
-// wav_base_path: optional prefix to prepend to each single path (use "" to omit).
-// source_lwf_path: path to the input LWF (for header row).
-// sdf_name: desired SDF filename (for header row).
-bool lwf_to_sdf(const File &file,
-                const std::string &wav_base_path,
-                const std::string &source_lwf_path,
-                const std::string &sdf_name,
-                std::string &out_sdf,
-                std::string &error);
-
 }  // namespace lwf
 }  // namespace opennova

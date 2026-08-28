@@ -110,24 +110,6 @@ bool parse_dbf_memory(const uint8_t *data, size_t size, File &out, std::string &
 	return true;
 }
 
-bool parse_dbf(const std::string &path, File &out, std::string &error) {
-	std::ifstream f(path, std::ios::binary);
-	if (!f) {
-		error = "Failed to open file: " + path;
-		return false;
-	}
-	f.seekg(0, std::ios::end);
-	auto size = f.tellg();
-	f.seekg(0, std::ios::beg);
-	std::vector<uint8_t> buf(static_cast<size_t>(size));
-	f.read(reinterpret_cast<char *>(buf.data()), size);
-	if (!f) {
-		error = "Failed to read file: " + path;
-		return false;
-	}
-	return parse_dbf_memory(buf.data(), buf.size(), out, error);
-}
-
 bool encode_dbf(const File &file, std::vector<uint8_t> &out, std::string &error) {
 	out.clear();
 	(void)error;
@@ -193,24 +175,6 @@ bool encode_dbf(const File &file, std::vector<uint8_t> &out, std::string &error)
 	return true;
 }
 
-bool write_dbf(const File &file, const std::string &path, std::string &error) {
-	std::vector<uint8_t> buf;
-	if (!encode_dbf(file, buf, error)) {
-		return false;
-	}
-	std::ofstream f(path, std::ios::binary);
-	if (!f) {
-		error = "Failed to open file for writing: " + path;
-		return false;
-	}
-	f.write(reinterpret_cast<const char *>(buf.data()), buf.size());
-	if (!f) {
-		error = "Failed to write file: " + path;
-		return false;
-	}
-	return true;
-}
-
 const Group *find_group(const File &file, const std::string &name) {
 	for (const auto &group : file.groups) {
 		if (iequals(group.group_name, name)) {
@@ -218,19 +182,6 @@ const Group *find_group(const File &file, const std::string &name) {
 		}
 	}
 	return nullptr;
-}
-
-std::string dump_dbf(const File &file) {
-	std::ostringstream ss;
-	ss << "DBF groups (" << file.groups.size() << "):\n";
-	for (size_t i = 0; i < file.groups.size(); ++i) {
-		const auto &group = file.groups[i];
-		ss << "  [" << i << "] " << group.group_name << " (lines: " << group.lines.size() << ")\n";
-		for (const auto &line : group.lines) {
-			ss << "      " << line.def_id_name << " delay=" << static_cast<int>(line.delay) << "\n";
-		}
-	}
-	return ss.str();
 }
 
 }  // namespace dbf

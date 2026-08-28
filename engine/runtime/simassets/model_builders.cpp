@@ -1,5 +1,5 @@
 // Sim-side model derivations from a parsed .3di (ADR 0028). Bodies moved
-// verbatim from the shell adapter's simulation_internal.h; the [orig]
+// verbatim from the shell binding's simulation_internal.h; the [orig]
 // witnesses ride with them.
 #include <runtime/simassets/model_builders.h>
 
@@ -328,7 +328,7 @@ bool occlusion_model_from_3di(const Threedi3di3 &model,
 
 // LOD skinning stamp: the header mesh type, or any strip carrying a bone
 // table. Mirrors retail's per-LOD skinned check the render path applies; the
-// adapter's ObjectData::is_skinned delegates here (ADR 0016).
+// binding's ObjectData::is_skinned delegates here (ADR 0016).
 bool model_is_skinned(const Threedi3di3 &model, int lod_index) {
 	if (lod_index < 0 || static_cast<size_t>(lod_index) >= model.lod_count ||
 			model.lods == nullptr)

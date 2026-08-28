@@ -90,16 +90,6 @@ static int parse_chunk(const uint8_t *buf, size_t buf_len, size_t cursor, Threed
     return 0;
 }
 
-const char *threedi_version(void)
-{
-    return "threedi-0.1.0-dev";
-}
-
-int threedi_smoke_self_check(void)
-{
-    return 1;
-}
-
 static int parse_owned_buffer(uint8_t *buf, size_t len, ThreediFile *out_file)
 {
     if (!buf || !out_file) {
@@ -204,21 +194,4 @@ void threedi_free_file(ThreediFile *file)
     free(file->buffer);
     file->buffer = NULL;
     file->buffer_len = 0;
-}
-
-int threedi_write_file(const char *path, const ThreediFile *file)
-{
-    if (!path || !file || !file->buffer || file->buffer_len == 0) {
-        return EINVAL;
-    }
-    FILE *f = fopen(path, "wb");
-    if (!f) {
-        return errno ? errno : -1;
-    }
-    size_t written = fwrite(file->buffer, 1, file->buffer_len, f);
-    fclose(f);
-    if (written != file->buffer_len) {
-        return -1;
-    }
-    return 0;
 }

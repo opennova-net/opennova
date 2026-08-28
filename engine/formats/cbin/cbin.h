@@ -93,8 +93,6 @@ struct Credits {
     // If 0, a random key will be generated on encode
     uint32_t xor_key = 0;
 
-    // Get/set ENV value (handles type conversion)
-    std::string get_env(const std::string& key) const;
     void set_env(const std::string& key, const std::string& value);
     bool has_bhd_bounds() const;
 };
@@ -112,20 +110,11 @@ namespace tokens {
 // Check if data starts with CBIN magic.
 bool is_cbin(const uint8_t* data, size_t size);
 
-// Check if file is CBIN format.
-bool is_cbin_file(const std::string& path);
-
 // Decode CBIN data and parse into structured Credits object.
 bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string& error);
 
-// Decode CBIN file to Credits structure.
-bool decode_file_credits(const std::string& path, Credits& out, std::string& error);
-
 // Encode Credits structure to CBIN binary format.
 bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& error);
-
-// Encode Credits to file.
-bool encode_file(const Credits& credits, const std::string& path, std::string& error);
 
 // ---------------------------------------------------------------------------
 // The display view: the Color/Justify CONTROL entries collapsed into effective

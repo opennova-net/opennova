@@ -30,7 +30,7 @@ uint64_t hash_value(uint64_t hash, const T &value) {
 	return hash_bytes(hash, &value, sizeof(value));
 }
 
-// The adapter hashed Godot Strings as to_lower().utf8() bytes; authored 3DI
+// The binding hashed Godot Strings as to_lower().utf8() bytes; authored 3DI
 // names are ASCII, so ascii-lowering preserves the byte stream (and the page
 // content stamps built on it).
 uint64_t hash_lowered_string(uint64_t hash, std::string_view value) {
@@ -78,7 +78,7 @@ TerrainStaticShadowBlend map_blend(opennova::renderer::ObjectBlendMode blend) {
 	return TerrainStaticShadowBlend::Opaque;
 }
 
-// First frame-zero texture name in the diffuse slot — the adapter's
+// First frame-zero texture name in the diffuse slot — the binding's
 // `diffuse_a` selection.
 std::string static_diffuse_name(const ThreediMaterial &mat) {
 	for (uint32_t i = 0; i < mat.texture_count && i < 24u; ++i) {
@@ -569,7 +569,7 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 			}
 		}
 
-		// The adapter hashed Godot Array::size() — a 64-bit count.
+		// The binding hashed Godot Array::size() — a 64-bit count.
 		hash = hash_value(hash, static_cast<int64_t>(surfaces.size()));
 		auto &out_surfaces = geometry->surfaces[
 				static_cast<std::size_t>(lod)];

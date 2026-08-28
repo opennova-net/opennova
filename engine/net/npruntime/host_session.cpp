@@ -363,7 +363,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 			(static_cast<uint64_t>(now) * 1000u) / uint64_t(JO_ENGINE_TICK_RATE));
 	auto &pending_session_messages = owner.pending_session_messages;
 
-	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the adapter.
+	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the socket owner.
 	uint8_t buf[4096];
 	for (;;) {
 		PeerAddr peer{};
@@ -450,7 +450,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 	}
 
 	// Owner-side entity registration belongs between creation and the first body update.
-	// Retail's AnimMap_RegisterEntity runs at entity creation; adapters with external
+	// Retail's AnimMap_RegisterEntity runs at entity creation; embedders with external
 	// animation registries use this boundary to preserve the same lifetime.
 	if (perf != nullptr) {
 		const uint64_t at = io::perf_now_us();
@@ -549,7 +549,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 		}
 	}
 
-	// (5) A dedicated host registers no type-2 local client. If its adapter nevertheless supplied a
+	// (5) A dedicated host registers no type-2 local client. If its embedder nevertheless supplied a
 	// loopback channel, defensively drain it so that unused input cannot accumulate. A serve-and-play
 	// owner instead folds the registered loopback into ClientState after this pump, so preserve it.
 	if (owner.host_loopback != nullptr && !owner.serve_and_play) {

@@ -9,7 +9,8 @@
 
 namespace opennova::net {
 
-// Thin cross-platform socket layer for apps/novaworld and apps/gameserver.
+// Thin cross-platform socket layer for the apps/ binaries (novaworld_server,
+// nw_server, nw_lan_probe, nw_pp); engine/ carries no socket code of its own.
 // Winsock2 on Windows, POSIX BSD sockets elsewhere.
 
 // Initialize the underlying networking subsystem. On Windows this is

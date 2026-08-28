@@ -98,7 +98,6 @@ public:
 	void set_source_text(const std::string &text);
 
 	bool has_bom() const { return has_bom_; }
-	void set_has_bom(bool v) { has_bom_ = v; }
 	// EOL used for newly added lines: the first EOL seen at parse, "\r\n"
 	// (ship-faithful) for documents that never carried one.
 	const std::string &default_eol() const { return default_eol_; }

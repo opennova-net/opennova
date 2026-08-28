@@ -86,7 +86,6 @@ public:
 	// assigns slot * FNT_MAX_PAGES; the device leg indexes its page-texture
 	// table the same way).
 	void set_page_base(uint32_t base) { page_base_ = base; }
-	uint32_t page_base() const { return page_base_; }
 
 	// Pixel measurement [orig: CGameFont_MeasureText @ 0x674e70]: byte-indexed
 	// glyphs (controls < 0x20 and 0x7F/0x80/0x81 skipped), '\\' escapes,
@@ -131,7 +130,6 @@ public:
 private:
 	struct Cursor;
 	const fnt_glyph_t *glyph_for_byte(uint8_t byte) const;
-	float glyph_advance(const fnt_glyph_t *glyph, float scaled_x) const;
 
 	const fnt_font_t *font_ = nullptr;
 	uint32_t page_base_ = 0;

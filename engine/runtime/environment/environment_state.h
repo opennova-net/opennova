@@ -172,7 +172,6 @@ public:
 	// set_smoothed_scalars().
 	void apply_network_sample(const NetEnvSample &sample);
 	void clear_network_state();
-	bool network_active() const { return network_environment_active_; }
 	int network_quake_ticks() const;
 	float network_rain_current() const;
 	float overcast_blend() const;
@@ -207,7 +206,6 @@ public:
 	// true when the state actually changed (the shell then refreshes only the
 	// two affected shader channels).
 	bool set_nvg_view(bool active, int gain);
-	bool nvg_view_active() const { return nvg_view_active_; }
 	int nvg_gain() const { return nvg_gain_; }
 
 	// --- current render colors (the smoothed/current slots) ---------------

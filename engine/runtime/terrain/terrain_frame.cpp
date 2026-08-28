@@ -1,5 +1,5 @@
 // Terrain frame compile (ADR 0033 R2): the per-frame walk and the load-time
-// scene snapshot, moved down from the shell adapter's self-driven loop as a
+// scene snapshot, moved down from the shell binding's self-driven loop as a
 // structural translation of the same decisions.
 
 #include <runtime/terrain/terrain_frame.h>

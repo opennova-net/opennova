@@ -23,14 +23,6 @@ constexpr std::array<uint8_t, FOLIAGE_MAX_DEFS> FOLIAGE_CANONICAL_MATCHES = {
 	254, 253, 252, 251
 };
 
-// Canonical match code for a def slot; -1 when the slot is outside
-// [0, FOLIAGE_MAX_DEFS).
-inline int foliage_canonical_match_for_slot(int def_index) {
-	if (def_index < 0 || def_index >= FOLIAGE_MAX_DEFS) {
-		return -1;
-	}
-	return static_cast<int>(FOLIAGE_CANONICAL_MATCHES[static_cast<size_t>(def_index)]);
-}
 constexpr uint8_t FOLIAGE_ATTRIB_FORCE_ON = 1 << 0;
 constexpr uint8_t FOLIAGE_ATTRIB_SHADOW = 1 << 1;
 constexpr uint8_t FOLIAGE_ATTRIB_KNOWN_MASK = FOLIAGE_ATTRIB_FORCE_ON | FOLIAGE_ATTRIB_SHADOW;

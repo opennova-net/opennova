@@ -64,11 +64,11 @@ struct QuadNode {
 };
 
 struct VisiblePatch {
-	int tile_index;
-	int lod_sub;
-	int lod_level;
-	float distance;
-	float sector_ox, sector_oz;
+	int tile_index = -1;
+	int lod_sub = 0;
+	int lod_level = 0;
+	float distance = 0.0f;
+	float sector_ox = 0.0f, sector_oz = 0.0f;
 };
 
 struct TraversalConfig {

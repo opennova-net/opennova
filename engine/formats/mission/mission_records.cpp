@@ -120,7 +120,7 @@ void apply_event_record(bms::Event &event, const MissionEventRecord &record) {
 	// reads >> 22), so the value range is 0..1023. Clamp here at the library boundary the way the other
 	// apply_* setters bound their fields: an out-of-range value would otherwise wrap on serialize
 	// (e.g. 2000 -> (uint32)2000 << 22 truncates, reparses as 976) with no error. The editor SpinBox
-	// already caps at 1023, but a direct C/C-ABI caller of set_event/add_event does not.
+	// already caps at 1023, but a direct caller of set_event/add_event does not.
 	event.reset_after = std::clamp(record.reset_after, 0, kMaxEventDelayTicks);
 	event.delay = std::clamp(record.delay, 0, kMaxEventDelayTicks);
 	event.unknown5 = 0;

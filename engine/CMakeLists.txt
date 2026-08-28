@@ -1,7 +1,7 @@
 # engine/ — the portable, Godot-free C++ core (ADR 0028), built as the Shape A
 # group targets: one STATIC library per group directory plus the header-only
-# INTERFACE leaf. Directories, namespaces, and the flat C ABI are unchanged —
-# only the CMake target granularity collapsed (2026-08 Shape A decision).
+# INTERFACE leaf. Directories and namespaces are unchanged — only the CMake
+# target granularity collapsed (2026-08 Shape A decision).
 #
 #   opennova_io                 INTERFACE  base/io (byte/bit IO, fixed-point, strutil)
 #   opennova_crt                STATIC     base/crt (retail-parity MSVC CRT rand stream)

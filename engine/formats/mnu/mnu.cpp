@@ -1948,22 +1948,4 @@ bool serialize_bytes(const Document &doc, std::vector<uint8_t> &out,
   return true;
 }
 
-bool serialize_file(const Document &doc, const std::string &path,
-                    std::string &error, bool pretty, int indent_size) {
-  std::ofstream file(path, std::ios::binary);
-  if (!file) {
-    error = "Failed to open file for writing: " + path;
-    return false;
-  }
-  std::vector<uint8_t> data;
-  if (!serialize_bytes(doc, data, error, pretty, indent_size)) return false;
-  file.write(reinterpret_cast<const char *>(data.data()),
-             static_cast<std::streamsize>(data.size()));
-  if (!file) {
-    error = "Failed to write file: " + path;
-    return false;
-  }
-  return true;
-}
-
 }  // namespace opennova::mnu

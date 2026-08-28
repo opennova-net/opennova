@@ -147,7 +147,6 @@ public:
 	// fallback sample when no world supplies classification codes
 	// [orig: compute_ambient_light_along_direction @ 0x5c7a00].
 	void set_iris_samples(const int32_t *samples, int count);
-	void clear_iris_samples() { iris_samples_.clear(); }
 
 	float sway_amount() const;
 	float sway_phase() const;

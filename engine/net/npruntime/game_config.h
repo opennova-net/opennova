@@ -141,7 +141,7 @@ struct GameConfig {
 
 	// S2C 0x58's 39 signed STROVER_STATVAR point values. Retail initializes the
 	// per-game-type table, then overlays score.ini VERSION 40 before answering
-	// the client's C2S 0x2D world-load request. The Godot resource adapter feeds
+	// the client's C2S 0x2D world-load request. The Godot resource binding feeds
 	// the mounted score.ini through load_session_score_config; a headless caller
 	// may seed the structural values directly. [orig: GameType_CreateDefaultSettings
 	// @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0; Server_BuildStatusReport
@@ -185,7 +185,7 @@ struct GameConfig {
 	// non-empty [orig: @0x51231e..0x512349, reject DPC=48] (D-NET-166).
 	int32_t expansion_version_checksum = 0;
 	// Optional exact retail resource corpus used to validate the host's inbound
-	// C2S 0x20/0x21 integrity replies. Empty (or an unknown id at the adapter
+	// C2S 0x20/0x21 integrity replies. Empty (or an unknown id at the binding
 	// boundary) disables validation: a host must never compare against guessed
 	// table bytes. This is deliberately independent of `expansion`, because two
 	// installs with the same expansion name can carry different patched data.

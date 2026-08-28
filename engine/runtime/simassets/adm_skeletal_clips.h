@@ -2,7 +2,7 @@
 // against the ONE shared skeleton (the reset/bind .bad + the model's bone
 // table), with the bind-local rests, accumulated rest globals, overlay
 // classes, and the weapon-channel mask precomputed. The native counterpart of
-// the shell adapter's skeletal evaluator, feeding the sim collision pose
+// the shell binding's skeletal evaluator, feeding the sim collision pose
 // provider (ADR 0028).
 //
 // [orig: the rig-wide skeleton is the .adm slot-0 .bad, pinned once at entity
@@ -42,7 +42,7 @@ public:
 	// non-empty value), sample every clip variant in file order
 	// (continue-on-failure on missing .bads), and build the skeleton from the
 	// model bone table (origins = parent-relative pivots, parents paired)
-	// exactly like the adapter's loader. Returns loaded().
+	// exactly like the binding's loader. Returns loaded().
 	bool load_from_adm(const ResourceIndex *index, const std::string &adm_name,
 	                   const std::vector<anim::Vec3> &model_bone_origins,
 	                   const std::vector<int> &model_bone_parents);
@@ -52,7 +52,6 @@ public:
 	const std::string &adm_name() const { return adm_name_; }
 	size_t bone_count() const { return bones_.size(); }
 	const std::vector<anim::ClipBone> &bones() const { return bones_; }
-	const std::vector<anim::PoseBone> &bind_pose() const { return bind_pose_; }
 	const std::vector<int> &parents() const { return parents_; }
 	const std::vector<uint8_t> &overlay_classes() const { return classes_; }
 	// FK-safe: every parent index is -1 or a lower bone index, so the
@@ -83,7 +82,7 @@ public:
 	// source key over the retail window) -> weapon-channel mask override ->
 	// aim overlay on top. deltas are the nine node-frame class rotations.
 	// Unknown keys fall back to anim_reset (blend legs) or the bind pose
-	// (primary sample), mirroring the adapter evaluator exactly. The BN17
+	// (primary sample), mirroring the binding evaluator exactly. The BN17
 	// collision collapse stays with the consumer (it zeroes the matrix row).
 	// [orig: @0x4b14a7..@0x4b16a7 run before the per-bone overlay loop;
 	//  world-wac-ai-re.md §14.8.6]
