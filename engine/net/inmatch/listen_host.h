@@ -3,10 +3,9 @@
 // The ONE SP listen bring-up / local request drain / per-tick session frame
 // over a mission::MissionKernel (ADR 0042 d3) — the net half the group order
 // keeps out of runtime/mission. Promoted from the retail-mission rig; the
-// ctest rig (tests/common/retail_mission_files) drives it today.
-// (STAGED, NOT WIRED into a shipping embedder yet: godot/src Simulation — the
-// shell TickTarget that owns a kernel — and apps/nw_server fold onto it in
-// the next ADR 0042 campaign slices.)
+// ctest rig (tests/common/retail_mission_files) and the shipping Godot
+// Simulation (the shell TickTarget that owns a kernel) both drive it.
+// (apps/nw_server still folds onto it in a later ADR 0042 campaign slice.)
 
 #include <net/netsim/idatagram_socket.h>
 #include <net/netsim/loopback_channel.h>

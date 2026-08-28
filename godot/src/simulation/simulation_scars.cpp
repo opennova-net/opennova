@@ -43,22 +43,22 @@ inline Color color_from_argb(uint32_t p_argb) {
 } // namespace
 
 bool Simulation::scar_owner_visible(uint16_t p_owner_packed) const {
-	if (!world_) {
+	if (!kernel_) {
 		return false;
 	}
 	opennova::world::EntityHandle handle;
 	handle.packed = p_owner_packed;
-	const opennova::world::Entity *owner = world_->registry.get(handle);
+	const opennova::world::Entity *owner = kernel_->world.registry.get(handle);
 	if (owner == nullptr) {
 		return false;
 	}
 	if (owner->kind == opennova::world::EntityKind::Building) {
 		// No occlusion instance = no verdict: the building draws (the same
 		// all-visible fold get_building_visibility applies).
-		if (!occlusion_world_.has_instance(handle)) {
+		if (!kernel_->occlusion.has_instance(handle)) {
 			return true;
 		}
-		return (occlusion_world_.section_mask(handle) & 0x0FFFFFFFu) != 0u;
+		return (kernel_->occlusion.section_mask(handle) & 0x0FFFFFFFu) != 0u;
 	}
 	bool any_hit = false;
 	for (const uint32_t hit : owner->blink_hits) {
@@ -70,10 +70,10 @@ bool Simulation::scar_owner_visible(uint16_t p_owner_packed) const {
 		const int building_slot = static_cast<int>(hit >> 20);
 		const opennova::world::EntityHandle building =
 				opennova::world::EntityHandle::make(2, building_slot);
-		if (!occlusion_world_.has_instance(building)) {
+		if (!kernel_->occlusion.has_instance(building)) {
 			return true;
 		}
-		if ((occlusion_world_.section_mask(building) & (1u << section)) != 0u) {
+		if ((kernel_->occlusion.section_mask(building) & (1u << section)) != 0u) {
 			return true;
 		}
 	}
@@ -83,7 +83,7 @@ bool Simulation::scar_owner_visible(uint16_t p_owner_packed) const {
 Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		float p_fog_distance, const Color &p_terrain_light) const {
 	Dictionary out;
-	if (!world_) {
+	if (!kernel_) {
 		return out;
 	}
 	opennova::renderer::ScarViewContext ctx;
@@ -95,7 +95,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	ctx.owner_visible = &scar_owner_visible_cb;
 	ctx.user = const_cast<Simulation *>(this);
 	opennova::renderer::ScarDrawList list;
-	opennova::renderer::compile_scar_draws(world_->scars, ctx, list);
+	opennova::renderer::compile_scar_draws(kernel_->world.scars, ctx, list);
 
 	PackedVector3Array vertices;
 	PackedVector2Array uvs;
@@ -192,7 +192,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		if (b.entity_local) {
 			opennova::world::EntityHandle handle;
 			handle.packed = b.owner_packed;
-			if (const opennova::world::Entity *owner = world_->registry.get(handle)) {
+			if (const opennova::world::Entity *owner = kernel_->world.registry.get(handle)) {
 				bms_id = owner->bms_id;
 				spawn_origin = static_cast<int64_t>(owner->spawn_origin);
 			}
@@ -229,6 +229,6 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	out["strip_mode_words"] = strip_mode_words;
 	out["slots_live"] = static_cast<int>(list.slots_live);
 	out["slots_culled"] = static_cast<int>(list.slots_culled);
-	out["rings_leased"] = world_->scars.leased_count();
+	out["rings_leased"] = kernel_->world.scars.leased_count();
 	return out;
 }

@@ -139,8 +139,8 @@ bool avatar_selection_from_dictionary(const Dictionary &profile, int side,
 } // namespace
 
 bool Simulation::local_player_in_armory_zone() const {
-	if (!world_) return false;
-	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (!kernel_) return false;
+	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
 	// The use-item armory leg rejects a seated player before consulting the type-6
 	// volume bit [orig: Input_HandleActionBinding_0 @0x4e0b3f, parentSlot == 0].
 	return e != nullptr && !e->mounted &&
@@ -151,7 +151,7 @@ bool Simulation::local_player_toggle_mount() {
 	// The USE-ITEM mount toggle for the local player — the shell calls this when the
 	// armory/vehicle-zone legs of the key don't apply. [orig: Input_ProcessFrame release
 	// edge @0x49d6dc -> Entity_ToggleVehicleMount @0x436950]
-	if (!world_) return false;
+	if (!kernel_) return false;
 	// The witnessed non-authority path queues C2S 0x26 (attach) /
 	// sends 0x27 (detach) and waits for the 0x0A stream to confirm [orig:
 	// Entity_RequestVehicleAttach @0x4364a0 / Entity_SendDetachPacket @0x435510].
@@ -160,7 +160,7 @@ bool Simulation::local_player_toggle_mount() {
 	// A missing EquippedSlot passes the retail action gate; active_local_weapon_slot
 	// supplies the inert slot state used by the modeled gate below.
 	const opennova::world::Entity *toggle_player =
-			world_->registry.get(world_->cached.local_player);
+			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (toggle_player == nullptr || !toggle_player->alive ||
 			toggle_player->health <= 0)
 		return false;
@@ -187,9 +187,9 @@ bool Simulation::local_player_toggle_mount() {
 					toggle_player->mount_target.packed);
 		opennova::world::VehicleSeatSelection hit;
 		if (!opennova::world::find_mount_toggle_candidate(
-					*world_, *toggle_player, hit))
+					kernel_->world, *toggle_player, hit))
 			return false;
-		opennova::world::Entity *vehicle = world_->registry.get(hit.vehicle);
+		opennova::world::Entity *vehicle = kernel_->world.registry.get(hit.vehicle);
 		if (vehicle == nullptr || hit.seat_index < 0 ||
 				hit.seat_index >= static_cast<int>(vehicle->seats.size()))
 			return false;
@@ -203,23 +203,23 @@ bool Simulation::local_player_toggle_mount() {
 	// player gate; force/script and NAPI authority paths bypass it.
 	// [orig: Entity_AttachToUseGunSlot @0x546b80, reject
 	//  !is_in_session && Flags&0x100 && !EquippedSlot @0x546c07]
-	if (!listen_server_ && !local_weapon_.active) {
+	if (!listen_server_ && !kernel_->weapon.active) {
 		opennova::world::VehicleSeatSelection hit;
 		if (opennova::world::find_mount_toggle_candidate(
-					*world_, *toggle_player, hit) &&
+					kernel_->world, *toggle_player, hit) &&
 				hit.type == opennova::world::SeatType::Gunner)
 			return false;
 	}
 	const bool changed = opennova::world::player_toggle_vehicle_mount(
-			*world_, world_->cached.local_player);
+			kernel_->world, kernel_->world.cached.local_player);
 	if (changed) {
 		// A successful ToSpecial/use-item transition clears the raw binocular
 		// request, not merely the effective first-person view.
-		player_view_.binoculars_requested = false;
-		view_tracker_.binocular_yaw_offset_deg = 0.0f;
-		view_tracker_.binocular_pitch_offset_deg = 0.0f;
+		kernel_->view.binoculars_requested = false;
+		kernel_->view_tracker.binocular_yaw_offset_deg = 0.0f;
+		kernel_->view_tracker.binocular_pitch_offset_deg = 0.0f;
 		refresh_local_player_view_effects();
-		sync_local_mounted_input_heading();
+		kernel_->sync_local_mounted_input_heading();
 		sync_local_usegun_weapon_transition();
 	}
 	return changed;
@@ -227,8 +227,8 @@ bool Simulation::local_player_toggle_mount() {
 
 TypedArray<Dictionary> Simulation::get_attach_labels() const {
 	TypedArray<Dictionary> out;
-	if (!world_) return out;
-	const opennova::world::Entity *player = world_->registry.get(world_->cached.local_player);
+	if (!kernel_) return out;
+	const opennova::world::Entity *player = kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (player == nullptr || !player->alive || player->health <= 0) return out;
 	// Armory mode = standing in the type-6 armory volume; the label pass reads the raw
 	// flag [orig: is_armory_mode = entity Flags & 0x400000 @0x5a32c4].
@@ -237,12 +237,12 @@ TypedArray<Dictionary> Simulation::get_attach_labels() const {
 	// The nearest-only gate [orig: Player_CanFireWeapon @0x5cf780 — EquippedSlot present
 	// plus the live mount, camera, scope, movement, air, and water gates. The
 	// query computes it directly so camera changes cannot lag one logic tick.
-	const AiEntity *body = world_->ai != nullptr
-			? world_->ai->for_handle(world_->cached.local_player)
+	const AiEntity *body = kernel_->world.ai != nullptr
+			? kernel_->world.ai->for_handle(kernel_->world.cached.local_player)
 			: nullptr;
-	const bool can_fire = local_player_can_fire_weapon(body);
+	const bool can_fire = kernel_->local_player_can_fire(body);
 	std::vector<opennova::world::AttachLabel> labels;
-	opennova::world::collect_attach_labels(*world_, *player, armory_mode, can_fire, labels);
+	opennova::world::collect_attach_labels(kernel_->world, *player, armory_mode, can_fire, labels);
 	for (const opennova::world::AttachLabel &l : labels) {
 		Dictionary d;
 		d["position"] = Vector3(l.world_pos.x, l.world_pos.y, l.world_pos.z);
@@ -253,11 +253,11 @@ TypedArray<Dictionary> Simulation::get_attach_labels() const {
 		if (l.type == opennova::world::SeatType::Gunner) {
 			// The USEGUN label text: the gun entity's primary weapon -> its weapon.def
 			// attachtextid key [orig: Entity_GetWeaponSlots slot0 -> def+0x3A0 @0x5a351d].
-			const opennova::world::Entity *cand = world_->registry.get(l.entity);
+			const opennova::world::Entity *cand = kernel_->world.registry.get(l.entity);
 			if (cand != nullptr && !cand->primary_weapon.empty()) {
-				const int wi = world_->weapons.index_of(cand->primary_weapon.c_str());
+				const int wi = kernel_->world.weapons.index_of(cand->primary_weapon.c_str());
 				if (wi >= 0)
-					key = String(world_->weapons.entries[static_cast<size_t>(wi)]
+					key = String(kernel_->world.weapons.entries[static_cast<size_t>(wi)]
 					                     .attach_text_id.c_str());
 			}
 		}
@@ -272,9 +272,9 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 	// presenter lifts, projects, and feeds the HUD compiler's element. The
 	// witnessed pass is cited at the engine gather (world/friendly_tags.cpp).
 	TypedArray<Dictionary> out;
-	if (!world_) return out;
+	if (!kernel_) return out;
 	const opennova::world::Entity *player =
-			world_->registry.get(world_->cached.local_player);
+			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (player == nullptr) return out;
 	std::vector<opennova::world::FriendlyTagSource> tags;
 	// The pass-level facts (retail g_death_screen_active / g_GameType): the
@@ -300,11 +300,11 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 				return false;
 			};
 	if (!is_joiner()) ctx.slot_lookup = &authority_slot_lookup;
-	opennova::world::collect_friendly_tags(*world_, *player, tags, ctx);
+	opennova::world::collect_friendly_tags(kernel_->world, *player, tags, ctx);
 	if (is_joiner() && runtime_) {
 		// A joiner's players are decoded rows, not World twins: the roster walk
 		// over ClientState supplies them (netsim/client_roster_tags.h).
-		const int32_t player_hp = world_->player_item_hp;
+		const int32_t player_hp = kernel_->world.player_item_hp;
 		opennova::netsim::collect_roster_tags(runtime_->state(),
 				runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu,
 				runtime_->assigned_team(), ctx.death_screen, ctx.game_type, tags,
@@ -363,13 +363,13 @@ Dictionary kit_entry_to_dict(const opennova::world::WeaponKitEntry &e) {
 
 void Simulation::set_spawn_loadout(const TypedArray<Dictionary> &p_kit,
                                        bool p_filter_by_availability) {
-	if (!world_) return;
+	if (!kernel_) return;
 	std::vector<opennova::world::WeaponKitEntry> kit;
 	for (int i = 0; i < p_kit.size(); ++i) {
 		opennova::world::WeaponKitEntry e = kit_entry_from_dict(p_kit[i]);
 		if (!e.name.empty()) kit.push_back(std::move(e));
 	}
-	opennova::world::local_loadout_set_spawn_kit(*world_, local_loadout_,
+	opennova::world::local_loadout_set_spawn_kit(kernel_->world, kernel_->loadout,
 			std::move(kit), p_filter_by_availability);
 	// A promoted kit changes what the joiner's 0x2F pair should carry; re-arm the
 	// seam (no-op for hosts and before the weapon catalog exists).
@@ -377,8 +377,8 @@ void Simulation::set_spawn_loadout(const TypedArray<Dictionary> &p_kit,
 }
 
 void Simulation::set_weapon_availability(const TypedArray<Dictionary> &p_pairs) {
-	if (!world_) {
-		local_loadout_.availability.reset();
+	if (!kernel_) {
+		kernel_->loadout.availability.reset();
 		return;
 	}
 	std::vector<std::pair<std::string, int32_t>> pairs;
@@ -388,15 +388,15 @@ void Simulation::set_weapon_availability(const TypedArray<Dictionary> &p_pairs) 
 		if (name.empty()) continue;
 		pairs.emplace_back(std::move(name), int32_t(int64_t(d.get("value", 1))));
 	}
-	opennova::world::local_loadout_apply_availability_pairs(*world_,
-			local_loadout_, pairs);
+	opennova::world::local_loadout_apply_availability_pairs(kernel_->world,
+			kernel_->loadout, pairs);
 }
 
 int Simulation::get_weapon_availability(const String &p_weapon_name) const {
-	if (!world_) return opennova::world::weapon_availability_value::kAllowed;
-	const int idx = world_->weapons.index_of(p_weapon_name.utf8().get_data());
+	if (!kernel_) return opennova::world::weapon_availability_value::kAllowed;
+	const int idx = kernel_->world.weapons.index_of(p_weapon_name.utf8().get_data());
 	if (idx < 0) return opennova::world::weapon_availability_value::kAllowed;
-	return local_loadout_.availability.value_for(idx);
+	return kernel_->loadout.availability.value_for(idx);
 }
 
 bool Simulation::set_local_player_class(int p_player_class) {
@@ -404,30 +404,18 @@ bool Simulation::set_local_player_class(int p_player_class) {
 	// straight out of the assigned side's profile block, the same integer that picks the
 	// kit page [orig: Game_StartMission @0x5257a0], so push_joiner_loadout_kit sources
 	// both from weapon_profile_. The pushes below just keep the seam re-armed.
-	if (!world_ || p_player_class < 5 || p_player_class > 9) return false;
-	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (!kernel_ || p_player_class < 5 || p_player_class > 9) return false;
+	opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (e == nullptr) {
 		// A joiner's shell applies the profile class before L has spawned
 		// (name-match). Latch it; the joiner spawn block stamps the entity.
-		local_loadout_.pending_player_class = p_player_class;
+		kernel_->loadout.pending_player_class = p_player_class;
 		push_joiner_loadout_kit();
 		return true;
 	}
 	e->player_class = static_cast<uint8_t>(p_player_class);
 	push_joiner_loadout_kit();
 	return true;
-}
-
-// Called by load_from_mission_data's finish (simulation.cpp): stash the
-// mission's loadout/availability chunks in plain world types — the promotion
-// runs at load_weapon_table time through the witnessed SP-vs-net gate, when
-// the catalog can resolve names (retail's own order: Game_StartMission parses
-// weapon.def @ 0x5254b3 before Mission_LoadBMSFile reads the chunks). The
-// tuple conversion (retail's atol truncation) is mission::stash_mission_loadout_rules's.
-void Simulation::stash_mission_loadout_rules(
-		const opennova::bms::File &p_file) {
-	opennova::mission::stash_mission_loadout_rules(p_file,
-			mission_availability_rows_, mission_kit_rows_);
 }
 
 bool Simulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_kit,
@@ -446,7 +434,7 @@ bool Simulation::apply_local_player_loadout_impl(
 	// inventory is sim-side state, the entity stamps defer to the joiner spawn
 	// block. Dropping the kit here left the joiner unable to fire, reload, or
 	// switch (the two-GUI regression).
-	if (!world_) return false;
+	if (!kernel_) return false;
 	std::vector<opennova::world::WeaponKitEntry> kit;
 	for (int i = 0; i < p_kit.size(); ++i) {
 		opennova::world::WeaponKitEntry entry = kit_entry_from_dict(p_kit[i]);
@@ -459,9 +447,9 @@ bool Simulation::apply_local_player_loadout_impl(
 bool Simulation::apply_local_player_loadout_rows(
 		std::vector<opennova::world::WeaponKitEntry> p_kit, int p_player_class,
 		bool p_submit_joiner_request) {
-	if (!world_) return false;
-	if (!opennova::world::local_loadout_apply_accept(*world_, local_loadout_,
-				local_weapon_, local_inventory_, local_inventory_valid_, p_kit,
+	if (!kernel_) return false;
+	if (!opennova::world::local_loadout_apply_accept(kernel_->world, kernel_->loadout,
+				kernel_->weapon, kernel_->inventory, kernel_->inventory_valid, p_kit,
 				p_player_class, /*validate_banned=*/p_submit_joiner_request))
 		return false;
 	// Always re-arm the 0x2F seam after a rebuild settles the equipped combo —
@@ -490,8 +478,8 @@ void Simulation::respawn_local_player_loadout() {
 }
 
 void Simulation::sync_local_player_damage_classes() {
-	if (!world_) return;
-	opennova::world::local_loadout_sync_damage_classes(*world_, local_loadout_);
+	if (!kernel_) return;
+	opennova::world::local_loadout_sync_damage_classes(kernel_->world, kernel_->loadout);
 }
 
 void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
@@ -502,9 +490,9 @@ void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	// spawn fill just settled], so the seam re-arms here AFTER the inventory
 	// settles. push_joiner_loadout_kit never rebuilds (it holds a one-way
 	// re-entry latch), so this cannot recurse.
-	if (!world_) return;
-	opennova::world::local_loadout_rebuild(*world_, local_loadout_,
-			local_weapon_, local_inventory_, local_inventory_valid_,
+	if (!kernel_) return;
+	opennova::world::local_loadout_rebuild(kernel_->world, kernel_->loadout,
+			kernel_->weapon, kernel_->inventory, kernel_->inventory_valid,
 			p_select_spawn_default);
 	push_joiner_loadout_kit();
 }
@@ -515,22 +503,22 @@ bool Simulation::seed_session_kit_from_profile() {
 	// binding keeps the ROLE gate: a live session covers a LISTEN HOST as
 	// well as a joiner, so single player and the editor keep the mission's
 	// .bms kit.
-	if (!world_) return false;
+	if (!kernel_) return false;
 	if (!host_listen_ && !joiner_) return false;
 	const uint8_t assigned =
 			(joiner_ && runtime_) ? runtime_->assigned_team() : 0;
-	return opennova::np::seed_session_kit_from_profile(*world_,
-			weapon_profile_, assigned, local_loadout_,
+	return opennova::np::seed_session_kit_from_profile(kernel_->world,
+			weapon_profile_, assigned, kernel_->loadout,
 			weapon_profile_seeded_side_);
 }
 
 bool Simulation::reseed_session_kit_on_side_change() {
 	if (!joiner_ && !host_listen_) return false;
-	if (!world_) return false;
+	if (!kernel_) return false;
 	const uint8_t assigned =
 			(joiner_ && runtime_) ? runtime_->assigned_team() : 0;
-	if (!opennova::np::reseed_session_kit_on_side_change(*world_,
-			weapon_profile_, assigned, local_loadout_,
+	if (!opennova::np::reseed_session_kit_on_side_change(kernel_->world,
+			weapon_profile_, assigned, kernel_->loadout,
 			weapon_profile_seeded_side_))
 		return false;
 	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
@@ -543,22 +531,22 @@ void Simulation::push_joiner_loadout_kit() {
 	// rule, the resident-buffer rows, and both side blocks live there, with
 	// their witnesses). This binding keeps the seam wiring: the role gate,
 	// the empty-catalog arm delay, the re-entry latch, and the pump handoff.
-	if (!joiner_ || !runtime_ || !world_) return;
-	// finish_load runs before the shell loads weapon.def (MissionPresentation orders
+	if (!joiner_ || !runtime_ || !kernel_) return;
+	// The role hook runs before the shell loads weapon.def (MissionPresentation orders
 	// load_from_mission_data ahead of load_weapon_table), and a kit resolved against an
 	// EMPTY catalog would skip every row — latching that would submit a zero-entry 0x2F
 	// pair AND disarm the runtime's capture-default fallback. Leave the seam unarmed
 	// until the catalog exists; load_weapon_table re-pushes from the carried state.
-	if (world_->weapons.empty()) return;
+	if (kernel_->world.weapons.empty()) return;
 	// rebuild_local_player_loadout re-pushes once the equipped combo has settled; this
 	// latch keeps that one-way (a push must never drive a rebuild back into itself).
 	if (pushing_joiner_loadout_kit_) return;
 	pushing_joiner_loadout_kit_ = true;
 	opennova::np::JoinerConnection::LoadoutKit wire_kit;
-	opennova::np::build_joiner_loadout_kit(*world_, weapon_profile_,
-			runtime_->assigned_team(), local_loadout_,
-			local_inventory_valid_ ? local_inventory_.equipped_combo : -1,
-			local_inventory_valid_ ? &local_inventory_ : nullptr,
+	opennova::np::build_joiner_loadout_kit(kernel_->world, weapon_profile_,
+			runtime_->assigned_team(), kernel_->loadout,
+			kernel_->inventory_valid ? kernel_->inventory.equipped_combo : -1,
+			kernel_->inventory_valid ? &kernel_->inventory : nullptr,
 			wire_kit);
 	runtime_->set_loadout_kit(std::move(wire_kit));
 	pushing_joiner_loadout_kit_ = false;
@@ -748,7 +736,7 @@ Dictionary Simulation::get_weapon_profile_summary() const {
 }
 
 void Simulation::apply_joiner_authoritative_loadout() {
-	if (!joiner_ || !runtime_ || !world_ || world_->weapons.empty()) return;
+	if (!joiner_ || !runtime_ || !kernel_ || kernel_->world.weapons.empty()) return;
 	const uint64_t revision = runtime_->authoritative_loadout_revision();
 	if (revision == 0 || revision <= joiner_applied_loadout_revision_) return;
 
@@ -756,7 +744,7 @@ void Simulation::apply_joiner_authoritative_loadout() {
 	// is np::kit_from_authoritative_grant's.
 	const opennova::WeaponLoadout &grant = runtime_->authoritative_loadout();
 	std::vector<opennova::world::WeaponKitEntry> kit;
-	opennova::np::kit_from_authoritative_grant(world_->weapons, grant, kit);
+	opennova::np::kit_from_authoritative_grant(kernel_->world.weapons, grant, kit);
 	// Do not echo an authoritative grant back as a new C2S 0x2F request. The
 	// S2C handler rebuilds the slots directly at recv-before-actions. The rebuild
 	// inside still re-arms the seam, but its ROWS come from the profile page, never
@@ -769,17 +757,17 @@ void Simulation::apply_joiner_authoritative_loadout() {
 
 Dictionary Simulation::get_local_player_inventory() const {
 	Dictionary out;
-	out["valid"] = local_inventory_valid_;
-	out["equipped_combo"] = local_inventory_.equipped_combo;
-	out["carry_flags"] = int64_t(local_inventory_.carry_flags);
+	out["valid"] = kernel_->inventory_valid;
+	out["equipped_combo"] = kernel_->inventory.equipped_combo;
+	out["carry_flags"] = int64_t(kernel_->inventory.carry_flags);
 	String equipped_name;
 	Array slots;
 	Dictionary pools;
-	if (world_ != nullptr) {
-		const opennova::world::WeaponTable &table = world_->weapons;
+	if (kernel_ != nullptr) {
+		const opennova::world::WeaponTable &table = kernel_->world.weapons;
 		for (int32_t combo = 0; combo < opennova::world::weapon_combo::kSlotCount;
 		     ++combo) {
-			const opennova::world::WeaponInventorySlot *s = local_inventory_.slot(combo);
+			const opennova::world::WeaponInventorySlot *s = kernel_->inventory.slot(combo);
 			if (s == nullptr || s->adm_index < 0) continue;
 			const opennova::world::WeaponTableEntry *def =
 					table.by_index(static_cast<uint8_t>(s->adm_index));
@@ -789,15 +777,15 @@ Dictionary Simulation::get_local_player_inventory() const {
 			row["name"] = String::utf8(def->name.c_str());
 			row["clip"] = s->clip;
 			slots.push_back(row);
-			if (combo == local_inventory_.equipped_combo)
+			if (combo == kernel_->inventory.equipped_combo)
 				equipped_name = String::utf8(def->name.c_str());
 		}
 		for (size_t i = 0; i < table.ammo_class_names.size() &&
-		                   i < local_inventory_.pools.size();
+		                   i < kernel_->inventory.pools.size();
 		     ++i) {
 			if (table.ammo_class_names[i].empty()) continue;
 			pools[String::utf8(table.ammo_class_names[i].c_str())] =
-					local_inventory_.pools[i];
+					kernel_->inventory.pools[i];
 		}
 	}
 	out["equipped_name"] = equipped_name;
@@ -809,7 +797,7 @@ Dictionary Simulation::get_local_player_inventory() const {
 TypedArray<Dictionary> Simulation::get_local_player_loadout() const {
 	TypedArray<Dictionary> out;
 	const std::vector<opennova::world::WeaponKitEntry> kit =
-			local_loadout_.spawn_kit_set ? local_loadout_.spawn_kit : opennova::world::weapon_kit_default();
+			kernel_->loadout.spawn_kit_set ? kernel_->loadout.spawn_kit : opennova::world::weapon_kit_default();
 	for (const opennova::world::WeaponKitEntry &entry : kit)
 		out.push_back(kit_entry_to_dict(entry));
 	return out;
@@ -822,7 +810,7 @@ TypedArray<Dictionary> Simulation::get_local_player_loadout() const {
 // a no-op) rather than guessing values.
 Error Simulation::load_score_config(const Ref<ResourceRoot> &p_resource_root,
                                     const String &p_name) {
-	if (!world_) return ERR_UNCONFIGURED;
+	if (!kernel_) return ERR_UNCONFIGURED;
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty())
 		return ERR_INVALID_PARAMETER;
 	const String file_name = p_name.get_file();
@@ -850,14 +838,14 @@ Error Simulation::load_score_config(const Ref<ResourceRoot> &p_resource_root,
 // The mode bit -> g_GameType code word is the already-ported ladder
 // [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360].
 void Simulation::refresh_score_rules() {
-	if (!world_) return;
+	if (!kernel_) return;
 	if (!score_config_loaded_) {
-		world_->score_rules = opennova::world::ScoreRules{};
+		kernel_->world.score_rules = opennova::world::ScoreRules{};
 		return;
 	}
 	const uint32_t mode = opennova::bms::selected_game_mode(
-			static_cast<opennova::bms::AttribFlags>(world_->mission_attrib_flags));
-	world_->score_rules = opennova::world::build_score_rules(
+			static_cast<opennova::bms::AttribFlags>(kernel_->world.mission_attrib_flags));
+	kernel_->world.score_rules = opennova::world::build_score_rules(
 			score_config_, opennova::game_type::for_mission_mode(mode));
 }
 
@@ -867,76 +855,36 @@ void Simulation::refresh_score_rules() {
 // allocation rule (null@0 + by-name-reuse-else-lowest-free = file order; §5.57, D-NET-141).
 Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
                                         const String &p_name) {
-	if (!world_) return ERR_UNCONFIGURED;
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty())
 		return ERR_INVALID_PARAMETER;
 	const String file_name = p_name.get_file();
 	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
-	const PackedByteArray bytes = p_resource_root->read_file(file_name);
-	if (bytes.is_empty()) return ERR_FILE_NOT_FOUND;
-
-	DefWeaponsFile file = {};
-	if (def_parse_weapons_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
-		return ERR_CANT_OPEN;
-	world_->weapons = opennova::world::build_weapon_table(
-			file, &p_resource_root->native_index());
-	// Retain the parse (S6b): the by-name FSM install reads its full rows —
-	// the ACCEPT chain rebuilds the slot table with no shell dictionary and no
-	// render dependency [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5414e0].
-	if (weapon_defs_loaded_) def_free_weapons(&weapon_defs_);
-	weapon_defs_ = file;
-	weapon_defs_loaded_ = true;
-	// The seat table may have been installed before this feed (either install
-	// order is production-legal); refresh its turret clamp windows now.
-	stamp_seat_spec_turret_limits();
-
-	// The host's own player spawns in finish_load, BEFORE this feed — re-stamp its equipped
-	// default now that WPN_M4AUTO resolves by name [orig: PlayerClass_InitEntity @0x4B1116].
-	// Joiners spawn after the feed and get the default in Server_BuildPlayerInfoAndAdd.
-	// (D-NET-143)
-	const int m4 = world_->weapons.index_of("WPN_M4AUTO");
-	if (m4 >= 0) {
-		std::vector<opennova::world::EntityHandle> handles;
-		world_->registry.for_each([&](const opennova::world::Entity &e) {
-			if (e.item_id == opennova::world::kPlayerInfantryTypeId &&
-			    e.equipped_adm_index == opennova::world::kAdmSlotNone)
-				handles.push_back(e.handle);
-		});
-		for (const opennova::world::EntityHandle h : handles) {
-			if (opennova::world::Entity *e = world_->registry.get(h))
-				e->equipped_adm_index = static_cast<uint8_t>(m4);
-		}
-	}
-	// The mission's stashed loadout/availability chunks promote NOW, through
-	// the witnessed SP-vs-net gate inside the engine (world/player_loadout.h
-	// local_loadout_promote_mission_rules): the catalog can resolve names —
-	// retail's own effective order, Game_StartMission parses weapon.def
-	// @ 0x5254b3 before Mission_LoadBMSFile reads the chunks. In a live
-	// session the gate skips both chunks (listen host and joiner alike) and
-	// the profile page below is the kit source instead. A promoted kit resets
-	// the view effects like the respawn it implies.
-	// [orig: Mission_LoadBMSFile @ 0x40F4E0 — gate @ 0x40f694]
-	if (opennova::world::local_loadout_promote_mission_rules(*world_,
-				local_loadout_, mission_availability_rows_,
-				mission_kit_rows_)) {
-		reset_local_player_view_effects();
-	}
-	// In a live session the resident kit buffer is the assigned side's profile page,
-	// copied in the moment the catalog can resolve its names — retail's
-	// Game_StartMission copy into restrictionData [orig: @0x525813], which runs before
-	// Player_InitPlayer builds the display list from that same buffer. Offline this
-	// no-ops and the mission's .bms kit stands.
-	seed_session_kit_from_profile();
-	// The LOCAL player's slot pool builds from the spawn kit (the profile page in a
-	// session, the mission/armory loadout offline, else the WPN_M4AUTO default kit) and
-	// selects the spawn default — the Player_InitPlayer weapon leg [orig: @ 0x4e15f0;
-	// the default kit literal @ 0x5246be]. This subsumes the bare adm-index stamp above
-	// for the local player.
-	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
-	// The catalog exists now: arm the joiner's 0x2F seam from the carried spawn kit
-	// (finish_load's earlier push deliberately no-ops against the empty catalog, and
-	// a menu join that never opens PLAYER_INFO has no later class/loadout apply to
-	// re-push through — without this the pair would ride zero kit entries).
+	// The armory build, the retained rows, the seat-spec turret re-stamp, the
+	// witnessed WPN_M4AUTO re-stamp (D-NET-143), the mission loadout-chunk
+	// promotion through the SP-vs-net gate and the spawn-kit rebuild are the
+	// kernel's ONE table-load body; this binding hands it the mounted source.
+	const opennova::ResourceIndex *index = &p_resource_root->native_index();
+	opennova::mission::BootFileSource files;
+	files.has_file = [index](const std::string &name) {
+		return index->has_file(name);
+	};
+	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
+		return index->read_file(name, out);
+	};
+	if (!kernel_->load_weapon_table(files, index,
+				std::string(file_name.utf8().get_data())))
+		return ERR_FILE_NOT_FOUND;
+	// In a live session the resident kit buffer is the assigned side's profile
+	// page, copied in the moment the catalog can resolve its names — retail's
+	// Game_StartMission copy into restrictionData [orig: @0x525813], which runs
+	// before Player_InitPlayer builds the display list from that same buffer.
+	// Offline this no-ops and the mission's .bms kit stands.
+	if (seed_session_kit_from_profile())
+		rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
+	// The catalog exists now: arm the joiner's 0x2F seam from the carried spawn
+	// kit (the earlier pushes deliberately no-op against the empty catalog, and
+	// a menu join that never opens PLAYER_INFO has no later class/loadout apply
+	// to re-push through — without this the pair would ride zero kit entries).
 	push_joiner_loadout_kit();
 	return OK;
 }
@@ -949,20 +897,21 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 // pipeline echoes without spawning sim rounds.
 Error Simulation::load_ammo_table(const Ref<ResourceRoot> &p_resource_root,
                                       const String &p_name) {
-	if (!world_) return ERR_UNCONFIGURED;
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty())
 		return ERR_INVALID_PARAMETER;
 	const String file_name = p_name.get_file();
 	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
-	const PackedByteArray bytes = p_resource_root->read_file(file_name);
-	if (bytes.is_empty()) return ERR_FILE_NOT_FOUND;
-
-	DefAmmoFile file = {};
-	if (def_parse_ammo_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
-		return ERR_CANT_OPEN;
-	world_->ammo = opennova::world::build_ammo_table(file);
-	def_free_ammo(&file);
-	opennova::world::resolve_weapon_round_types(world_->weapons, world_->ammo);
-	sync_local_player_damage_classes();
+	// The ballistics build + the weapon round_type resolve + the damage-class
+	// sync are the kernel's one body [orig: AmmoDef_LoadAll @0x40b0b0].
+	const opennova::ResourceIndex *index = &p_resource_root->native_index();
+	opennova::mission::BootFileSource files;
+	files.has_file = [index](const std::string &name) {
+		return index->has_file(name);
+	};
+	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
+		return index->read_file(name, out);
+	};
+	if (!kernel_->load_ammo_table(files, std::string(file_name.utf8().get_data())))
+		return ERR_FILE_NOT_FOUND;
 	return OK;
 }

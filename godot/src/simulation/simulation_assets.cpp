@@ -17,33 +17,14 @@
 
 using namespace sim_internal;
 
-void Simulation::reset_infantry_adm_ids() {
-	infantry_adm_resolved_ai_count_ = 0;
-	if (!world_ || !world_->ai) return;
-	AiSystem &ai = *world_->ai;
-	for (int i = 0; i < ai.count(); ++i) {
-		if (AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
-	}
-}
-
 int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, const String &p_adm_name) {
-	// The default clip set (adm_id 0): every infantry entity grounds off this until its own
-	// model's .adm is registered (register_infantry_adm + set_infantry_adm_id). Clearing here
-	// resets the whole registry on each (re)load.
-	infantry_anim_.clear();
-	reset_infantry_adm_ids();
-	const int default_adm_id = infantry_anim_.register_adm(
-			p_resource_root.is_valid() ? &p_resource_root->native_index() : nullptr,
-			std::string(p_adm_name.utf8().get_data()));
-	const int default_clip_count = default_adm_id == 0 ? infantry_anim_.clip_count(0) : 0;
-	// Every stored per-entity id indexes this registry; rebuilding it invalidates
-	// all prior assignments. Only repopulate once slot 0 is the successfully loaded
-	// default map; otherwise a model-specific ADM could usurp the default slot and
-	// turn a failed load into false success.
-	if (default_adm_id == 0) resolve_new_infantry_adm_ids();
-	// The registry ids just changed meaning: stale row stamps and the
-	// per-type cache would index the rebuilt registry with old ids. Re-arm
-	// every decoded organic row for a fresh resolve + channel.
+	// The default clip set (adm_id 0) and the per-entity re-resolve are the
+	// kernel's ONE install (mission_kernel.cpp install_infantry_anim); this
+	// binding hands the mounted index over and re-arms the joiner's decoded
+	// rows, whose stamps index the rebuilt registry with old ids otherwise.
+	const int default_clip_count = kernel_->install_infantry_anim(
+			std::string(p_adm_name.utf8().get_data()),
+			p_resource_root.is_valid() ? &p_resource_root->native_index() : nullptr);
 	client_row_adm_by_type_.clear();
 	if (runtime_ != nullptr && joiner_) {
 		for (opennova::netsim::ClientEntityState &es :
@@ -55,55 +36,21 @@ int Simulation::set_infantry_anim_map(const Ref<ResourceRoot> &p_resource_root, 
 			}
 		}
 	}
-	apply_root_motion_to_ai();
 	return default_clip_count;
 }
 
-// Assign only newly attached AI entries. AiSystem::attach is append-only, including when
-// an entity handle is reused, so the count is a generation-safe high-water mark. This is
-// the spawn-time half of AnimMap_RegisterEntity: late joiner-local/remote players must not
-// retain the default E_STAND map or configured emplacements fall back to anim_emplaced.
-// [orig: AnimMap_RegisterEntity @0x40bb60; AnimMap_UpdateEntity @0x40b5f0.]
-void Simulation::resolve_new_infantry_adm_ids() {
-	if (!world_ || !world_->ai || infantry_adm_resource_root_.is_null() ||
-			infantry_adm_item_db_.is_null() || infantry_anim_.empty())
-		return;
-	AiSystem &ai = *world_->ai;
-	const int count = ai.count();
-	if (infantry_adm_resolved_ai_count_ < 0 ||
-			infantry_adm_resolved_ai_count_ > count)
-		infantry_adm_resolved_ai_count_ = 0;
-	for (int i = infantry_adm_resolved_ai_count_; i < count; ++i) {
-		AiEntity *e = ai.at(i);
-		if (!e) continue;
-		e->inf.adm_id = 0;
-		if (!e->inf.active) continue;
-		const opennova::world::Entity *ent = world_->registry.get(e->handle);
-		if (!ent) continue;
-		const int visual_item_id =
-				visual_item_id_for_runtime_type(ent->item_id, infantry_adm_item_db_);
-		String adm = infantry_adm_item_db_->get_anim_def(visual_item_id);
-		if (adm.is_empty()) continue;
-		if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
-		const int adm_id = infantry_anim_.register_adm(
-				&infantry_adm_resource_root_->native_index(),
-				std::string(adm.utf8().get_data()));
-		if (adm_id >= 0) e->inf.adm_id = adm_id;
-	}
-	infantry_adm_resolved_ai_count_ = count;
-}
-
-// Per-entity .adm resolution: ground each soldier off its OWN model's clip, not the shared
-// default set (adm_id 0). Retain the shell inputs because multiplayer players are spawned
-// after this mission-load sweep; the step/spawn hooks above the world layer resolve each
-// later AiSystem entry exactly once.
+// Per-entity .adm resolution: ground each soldier off its OWN model's clip,
+// not the shared default set — the kernel's sweep (D-INF-6), (re)armed here
+// with the shell's sources. The Refs are retained because multiplayer players
+// are spawned after this mission-load sweep and the joiner's decoded-row
+// resolve reads the same inputs.
 void Simulation::resolve_infantry_adm_ids(const Ref<ResourceRoot> &p_resource_root,
 		const Ref<ItemDatabase> &p_item_db) {
 	if (p_resource_root.is_null() || p_item_db.is_null()) return;
 	infantry_adm_resource_root_ = p_resource_root;
 	infantry_adm_item_db_ = p_item_db;
-	reset_infantry_adm_ids();
-	resolve_new_infantry_adm_ids();
+	kernel_->set_items_table(&p_item_db->native_items());
+	kernel_->rearm_infantry_adm(&p_resource_root->native_index());
 }
 
 // The items.def trait sweep: the engine-side fold (simassets::resolve_item_traits,
@@ -113,8 +60,11 @@ void Simulation::resolve_infantry_adm_ids(const Ref<ResourceRoot> &p_resource_ro
 // (ADR 0026) — as an injected supplier so simassets stays net-free. Idempotent;
 // called after load and again after spawning the local player.
 void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
-	if (!world_ || p_item_db.is_null()) return;
+	if (p_item_db.is_null()) return;
 	item_traits_db_ = p_item_db;
+	// The kernel's item legs (the collision demand sweep, the adm resolve)
+	// read the same rows; the Ref above pins their lifetime.
+	kernel_->set_items_table(&p_item_db->native_items());
 	if (!item_replication_catalog_ ||
 			item_replication_catalog_db_.ptr() != p_item_db.ptr() ||
 			item_replication_catalog_revision_ != p_item_db->get_revision()) {
@@ -123,7 +73,7 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 		item_replication_catalog_revision_ = p_item_db->get_revision();
 	}
 	opennova::simassets::resolve_item_traits(
-			*world_, p_item_db->native_items(),
+			kernel_->world, p_item_db->native_items(),
 			[catalog = item_replication_catalog_](int def_id) {
 				// The same immutable profile supplies the host stamp and the
 				// client decode width. Missing/ambiguous definitions fail
@@ -158,7 +108,7 @@ void Simulation::install_charattr_challenge_table() {
 }
 
 void Simulation::sync_class_attribute_flags() {
-	if (!world_) return;
+	if (!kernel_) return;
 	// The joiner's live copy carries every S2C 0x41 clear applied so far; a
 	// HostClient keeps the boot copy, and a failed/missing charattr.def leaves
 	// the all-zero table -- no class carries an attribute, retail's failed-load
@@ -168,7 +118,7 @@ void Simulation::sync_class_attribute_flags() {
 			runtime_ ? runtime_->charattr_challenge_table() : nullptr;
 	const opennova::np::CharAttrChallengeTable &table =
 			live != nullptr ? *live : charattr_challenge_table_;
-	world_->class_attribute_flags =
+	kernel_->world.class_attribute_flags =
 			opennova::np::charattr_class_attribute_rows(table);
 }
 
@@ -196,9 +146,9 @@ void Simulation::install_expansion_version_root() {
 // rows — the seed semantics and [orig] witnesses live there now. Ammo names
 // resolve against the mission ammo table, so call AFTER load_ammo_table.
 int Simulation::resolve_ai_weapons(const Ref<ItemDatabase> &p_item_db) {
-	if (!world_ || !world_->ai || p_item_db.is_null()) return 0;
+	if (!kernel_->world.ai || p_item_db.is_null()) return 0;
 	return opennova::simassets::resolve_ai_weapons(
-			*world_, p_item_db->native_items());
+			kernel_->world, p_item_db->native_items());
 }
 
 int Simulation::set_character_avatar_database(
@@ -215,246 +165,70 @@ int Simulation::set_character_avatar_database(
 }
 
 void Simulation::apply_collision_to_ai() {
-	collision_world_.terrain = terrain_store_.valid() ? &terrain_store_.height_field() : nullptr;
-	collision_world_.set_section_matrix_provider(this);
-	if (world_) {
-		world_->collision = &collision_world_;
-		world_->mounted_pose_provider = this;
-		world_->muzzle_pose_provider = &collision_pose_native_;
-	}
-	if (ai_) ai_->collision = &collision_world_;
-}
-
-// The mounted-pose resolver (S4, ADR 0028) is native-only: the engine-side
-// resolver over the sim's own parse (simassets::resolve_model_mounted_pose) is
-// the sole host-authority path. Its model source resolves AT QUERY TIME —
-// the spec's graphic through the sim cache (production; survives asset-root
-// switches because the cache re-parses under the live index), else the
-// installed spec's Ref-kept model_data parse (boot order / test worlds).
-bool Simulation::resolve_mounted_pose(
-		opennova::world::World &p_world,
-		const opennova::world::Entity &p_carrier,
-		const opennova::world::Seat &p_seat,
-		opennova::world::MountedPose &r_out) {
-	return resolve_mounted_pose_native(p_world, p_carrier, p_seat, r_out);
-}
-
-bool Simulation::resolve_mounted_pose_native(
-		opennova::world::World &p_world,
-		const opennova::world::Entity &p_carrier,
-		const opennova::world::Seat &p_seat,
-		opennova::world::MountedPose &r_out) {
-	if (!world_ || &p_world != world_.get() ||
-			p_seat.type != opennova::world::SeatType::Gunner ||
-			p_seat.bone_index == 0)
-		return false;
-	++mounted_native_queries_;
-	const Threedi3di3 *model_ptr = nullptr;
-	const auto found_graphic =
-			mounted_pose_native_graphics_.find(p_carrier.item_id);
-	if (found_graphic != mounted_pose_native_graphics_.end() &&
-			sim_models_.has_index())
-		model_ptr = sim_models_.model_for(found_graphic->second);
-	if (model_ptr == nullptr) {
-		++mounted_native_declines_;
-		return false;
-	}
-	const Threedi3di3 &model = *model_ptr;
-	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr) {
-		++mounted_native_declines_;
-		return false;
-	}
-	// Gather the three CTRL sources; the ordinal writes onto the retail bus
-	// and the PANM clock are simassets' (compose_mounted_pose_controls /
-	// mounted_pose_time_ms).
-	opennova::simassets::MountedPoseControlSources sources;
-	AiEntity *carrier_ai = ai_ ? ai_->for_handle(p_carrier.handle) : nullptr;
-	if (carrier_ai != nullptr) {
-		sources.part_anim_phase0 =
-				carrier_ai->brain.f[AiBrain::kPartAnimPhase0];
-		sources.part_anim_phase1 =
-				carrier_ai->brain.f[AiBrain::kPartAnimPhase0 + 1];
-	}
-	sources.has_heat_glow = opennova::world::world_model_heat_glow_for(
-			p_world, p_carrier, sources.heat_glow);
-	EmplacedWeaponControls emplaced;
-	if (emplaced_weapon_controls_for(p_world, ai_.get(), p_carrier, emplaced)) {
-		sources.has_emplaced = true;
-		sources.emplaced_gun_yaw = emplaced.gun_yaw;
-		sources.emplaced_gun_pitch = emplaced.gun_pitch;
-	}
-	int32_t ctrl_bus[THREEDI_CTRL_REGISTER_COUNT] = {};
-	opennova::simassets::compose_mounted_pose_controls(
-			p_carrier.item_attrib, sources, ctrl_bus);
-	std::array<int32_t, THREEDI_CTRL_REGISTER_COUNT> ctrl_values{};
-	std::copy(std::begin(ctrl_bus), std::end(ctrl_bus), ctrl_values.begin());
-	const uint32_t time_ms = opennova::simassets::mounted_pose_time_ms(
-			p_world.logic_tick, panm_time_override_ms_);
-	if (mounted_pose_cache_logic_tick_ != p_world.logic_tick) {
-		mounted_pose_live_cache_.clear();
-		mounted_pose_cache_logic_tick_ = p_world.logic_tick;
-	}
-	auto rest_found = mounted_pose_rest_cache_.find(model_ptr);
-	if (rest_found == mounted_pose_rest_cache_.end()) {
-		MountedPoseRestCache rest;
-		if (!opennova::simassets::evaluate_model_mounted_pose_parts(
-				model, 0u, nullptr, rest.parts)) {
-			++mounted_native_declines_;
-			return false;
-		}
-		rest_found = mounted_pose_rest_cache_.emplace(
-				model_ptr, std::move(rest)).first;
-	}
-	std::vector<MountedPoseLiveCache> &model_live =
-			mounted_pose_live_cache_[model_ptr];
-	auto live_found = std::find_if(model_live.begin(), model_live.end(),
-			[&](const MountedPoseLiveCache &candidate) {
-				return candidate.time_ms == time_ms &&
-						candidate.controls == ctrl_values;
-			});
-	if (live_found == model_live.end()) {
-		MountedPoseLiveCache live;
-		live.time_ms = time_ms;
-		live.controls = ctrl_values;
-		live.valid = opennova::simassets::evaluate_model_mounted_pose_parts(
-				model, time_ms, ctrl_values.data(), live.parts);
-		model_live.push_back(std::move(live));
-		live_found = model_live.end() - 1;
-		++mounted_native_evaluations_;
-	} else {
-		++mounted_native_cache_hits_;
-	}
-	const bool resolved = live_found->valid &&
-			opennova::simassets::resolve_model_mounted_pose_from_parts(
-					model, p_carrier, p_seat, rest_found->second.parts,
-					live_found->parts, r_out);
-	if (!resolved) ++mounted_native_declines_;
-	return resolved;
-}
-
-bool Simulation::ensure_collision_instance(
-		opennova::world::World &p_world,
-		opennova::world::EntityHandle p_entity) {
-	if (!world_ || &p_world != world_.get() || collision_item_db_.is_null())
-		return false;
-	const opennova::world::Entity *entity = p_world.registry.get(p_entity);
-	if (entity == nullptr) {
-		collision_world_.remove_entity_instance(p_entity);
-		collision_pose_native_.remove_entity(p_entity);
-		collision_resolve_.resolution_attempted.erase(p_entity.packed);
-		return false;
-	}
-	const auto attempted =
-			collision_resolve_.resolution_attempted.find(p_entity.packed);
-	if (attempted != collision_resolve_.resolution_attempted.end()) {
-		if (attempted->second == entity->registry_spawn_id)
-			return collision_world_.has_instance(p_world, p_entity);
-		collision_world_.remove_entity_instance(p_entity);
-		collision_pose_native_.remove_entity(p_entity);
-		collision_resolve_.resolution_attempted.erase(attempted);
-	}
-
-	// Re-run the idempotent attach sweep against the retained mission caches.
-	// It resolves every entity that appeared since the previous sweep, including
-	// a player deployed after load, without registering another graphic model.
-	resolve_collision_instances(collision_item_db_);
-	return collision_world_.has_instance(p_world, p_entity);
-}
-
-// The collision section-matrix provider (S3, ADR 0028) is native-AUTHORITATIVE.
-// The engine-side provider poses from the sim's own parsed models and clip sets;
-// production always installs the sim's asset root, so every collision entity is
-// registered and served here. The legacy render-bound builder is reached ONLY
-// when the native provider has no source for this entity — the GUT stub worlds
-// that resolve collision through a duck-typed placer with no asset root (the
-// native provider loads its skeletal rigs and retains PANM parses through a
-// resource index those worlds never install). The two paths were proven
-// byte-identical by the live A/B soak this cutover retires.
-bool Simulation::build_section_matrices(opennova::world::World &p_world,
-		opennova::world::EntityHandle p_entity, int32_t p_model_id,
-		const opennova::world::CollisionMatrix &p_entity_world,
-		const opennova::world::CollisionModel &p_model,
-		std::vector<opennova::world::CollisionMatrix> &r_out) {
-	// The provider consumes the same per-query sim state this binding reads.
-	collision_pose_native_.weapon_active = local_weapon_.active;
-	collision_pose_native_.panm_time_override_ms = panm_time_override_ms_;
-	++collision_native_queries_;
-	if (collision_pose_native_.build_section_matrices(p_world, p_entity,
-			p_model_id, p_entity_world, p_model, r_out))
-		return true;
-	// Native-only (S3b full). False WITHOUT a registered source is the
-	// normal rigid path — most placed items carry no live PANM and no rig,
-	// and CollisionWorld poses them as identity sections. False WITH a
-	// source is a real decline (the masked-failure signal the soak/probes
-	// gate on); the legacy render-bound builder that once silently absorbed
-	// these is gone.
-	if (collision_pose_native_.has_skeletal_entity(p_entity) ||
-			collision_pose_native_.has_generic_model(p_model_id))
-		++collision_native_declines_;
-	return false;
+	// The kernel is the ONE registered section-matrix/mounted-pose provider;
+	// wire_collision points the world/AI systems at its collision world.
+	kernel_->wire_collision();
 }
 
 Dictionary Simulation::debug_native_pose_stats() const {
 	Dictionary out;
-	out["collision_queries"] = static_cast<int64_t>(collision_native_queries_);
-	out["collision_declines"] = static_cast<int64_t>(collision_native_declines_);
+	out["collision_queries"] = static_cast<int64_t>(kernel_->collision_queries);
+	out["collision_declines"] = static_cast<int64_t>(kernel_->collision_declines);
 	out["muzzle_queries"] = static_cast<int64_t>(
-			collision_pose_native_.muzzle_query_count());
+			kernel_->collision_pose.muzzle_query_count());
 	out["muzzle_resolves"] = static_cast<int64_t>(
-			collision_pose_native_.muzzle_resolve_count());
-	out["mounted_queries"] = static_cast<int64_t>(mounted_native_queries_);
-	out["mounted_declines"] = static_cast<int64_t>(mounted_native_declines_);
-	out["mounted_evaluations"] = static_cast<int64_t>(mounted_native_evaluations_);
-	out["mounted_cache_hits"] = static_cast<int64_t>(mounted_native_cache_hits_);
+			kernel_->collision_pose.muzzle_resolve_count());
+	out["mounted_queries"] = static_cast<int64_t>(kernel_->mounted_queries);
+	out["mounted_declines"] = static_cast<int64_t>(kernel_->mounted_declines);
+	out["mounted_evaluations"] = static_cast<int64_t>(kernel_->mounted_evaluations);
+	out["mounted_cache_hits"] = static_cast<int64_t>(kernel_->mounted_cache_hits);
 	out["mounted_rest_cache_entries"] =
-			static_cast<int64_t>(mounted_pose_rest_cache_.size());
+			static_cast<int64_t>(kernel_->mounted_rest_cache_size());
 	out["mounted_graphic_sources"] =
-			static_cast<int64_t>(mounted_pose_native_graphics_.size());
+			static_cast<int64_t>(kernel_->mounted_graphics.size());
 	return out;
 }
 
 
 void Simulation::set_asset_root(const Ref<ResourceRoot> &p_root) {
 	asset_root_ = p_root;
-	mounted_pose_rest_cache_.clear();
-	mounted_pose_live_cache_.clear();
-	mounted_pose_cache_logic_tick_ = 0xFFFFFFFFu;
-	sim_models_.set_index(
-			p_root.is_valid() ? &p_root->native_index() : nullptr);
-	collision_pose_native_.set_resource_index(
+	kernel_->set_asset_index(
 			p_root.is_valid() ? &p_root->native_index() : nullptr);
 }
 
 int Simulation::resolve_collision_instances(
 		const Ref<ItemDatabase> &p_item_db) {
-	if (!world_ || p_item_db.is_null()) return 0;
+	if (p_item_db.is_null()) return 0;
+	collision_item_db_ = p_item_db;
+	// The kernel's demand sweep (ensure_collision_instance) reads the same
+	// rows; the Ref above pins their lifetime.
+	kernel_->set_items_table(&p_item_db->native_items());
 	// Production installs the sim's own asset source first (ADR 0028).
-	if (!sim_models_.has_index()) {
+	if (!kernel_->models.has_index()) {
 		godot::UtilityFunctions::print_verbose(
 				"Simulation: no asset root installed — collision/occlusion "
 				"extraction has no model source (install set_asset_root first)");
 	}
-	collision_item_db_ = p_item_db;
 	apply_collision_to_ai();
 	// The sweep itself is engine code (simassets::resolve_collision_instances,
 	// ADR 0031 re-opening the S7b asset-resolution leg): this binding supplies
 	// the retained items.def rows and the engine systems, nothing else.
 	const opennova::simassets::CollisionResolveDeps deps{
-			collision_world_, occlusion_world_, collision_pose_native_,
-			sim_models_};
+			kernel_->collision, kernel_->occlusion, kernel_->collision_pose,
+			kernel_->models};
 	return opennova::simassets::resolve_collision_instances(
-			*world_, p_item_db->native_items(), collision_resolve_, deps);
+			kernel_->world, p_item_db->native_items(), kernel_->collision_state, deps);
 }
 
 void Simulation::stamp_seat_spec_turret_limits() {
-	if (!world_) return;
-	opennova::simassets::stamp_seat_spec_turret_limits(*world_, item_seat_specs_);
+	if (!kernel_) return;
+	opennova::simassets::stamp_seat_spec_turret_limits(kernel_->world, kernel_->seat_specs);
 }
 
 void Simulation::refresh_item_seat_spec(
 		opennova::world::Entity &p_entity) {
-	if (!world_) return;
-	opennova::simassets::refresh_item_seat_spec(*world_, item_seat_specs_,
+	if (!kernel_) return;
+	opennova::simassets::refresh_item_seat_spec(kernel_->world, kernel_->seat_specs,
 			p_entity, joiner_bridge_.wire_header_world());
 }
 
@@ -465,7 +239,7 @@ void Simulation::finalize_installed_seat_specs() {
 	// Lookup table, ordered for the binary search in item_seat_spec_for_type —
 	// a joiner probes it once per present row per frame. (The native
 	// extraction emits sorted specs already; kept for the wire-type installs.)
-	std::sort(item_seat_specs_.begin(), item_seat_specs_.end(),
+	std::sort(kernel_->seat_specs.begin(), kernel_->seat_specs.end(),
 			[](const opennova::mission::ItemSeatSpec &a,
 					const opennova::mission::ItemSeatSpec &b) {
 				return a.type_id < b.type_id;
@@ -475,15 +249,15 @@ void Simulation::finalize_installed_seat_specs() {
 	// The production header-only join resolves model metadata after network rows
 	// can already exist. Refresh live pool-1 rows immediately and preserve any
 	// occupant by retail's fixed mountHandles slot, never by dense vector index.
-	if (world_) {
+	if (kernel_) {
 		std::vector<opennova::world::EntityHandle> items;
-		world_->registry.for_each([&](const opennova::world::Entity &entity) {
+		kernel_->world.registry.for_each([&](const opennova::world::Entity &entity) {
 			if (entity.handle.pool() == 1) items.push_back(entity.handle);
 		});
 		for (const opennova::world::EntityHandle handle : items) {
 			opennova::world::Entity *entity = joiner_bridge_.wire_header_world()
-					? joiner_bridge_.materializer().owned(*world_, handle)
-					: world_->registry.get(handle);
+					? joiner_bridge_.materializer().owned(kernel_->world, handle)
+					: kernel_->world.registry.get(handle);
 			if (entity != nullptr)
 				refresh_item_seat_spec(*entity);
 		}
@@ -491,7 +265,7 @@ void Simulation::finalize_installed_seat_specs() {
 		// row. Definitions were installed above; now apply the retained fixed
 		// mountHandles image without creating synthetic seats.
 		if (joiner_bridge_.wire_header_world() && runtime_ != nullptr)
-			(void)joiner_bridge_.materializer().sync(runtime_->state(), *world_);
+			(void)joiner_bridge_.materializer().sync(runtime_->state(), kernel_->world);
 	}
 }
 
@@ -505,18 +279,18 @@ void Simulation::finalize_installed_seat_specs() {
 void Simulation::install_native_seat_specs(
 		const Ref<ItemDatabase> &p_item_db,
 		const std::vector<int> &p_seed_item_ids) {
-	item_seat_specs_.clear();
-	mounted_pose_native_graphics_.clear();
+	kernel_->seat_specs.clear();
+	kernel_->mounted_graphics.clear();
 	if (p_item_db.is_valid() && !p_seed_item_ids.empty()) {
 		opennova::simassets::SeatSpecExtraction native;
 		opennova::simassets::extract_item_seat_specs(
 				p_item_db->native_items(),
 				[this](const std::string &graphic) {
-					return sim_models_.model_for(graphic);
+					return kernel_->models.model_for(graphic);
 				},
 				p_seed_item_ids, native);
-		item_seat_specs_ = std::move(native.specs);
-		mounted_pose_native_graphics_ = std::move(native.graphic_by_type);
+		kernel_->seat_specs = std::move(native.specs);
+		kernel_->mounted_graphics = std::move(native.graphic_by_type);
 	}
 	finalize_installed_seat_specs();
 }
@@ -524,7 +298,7 @@ void Simulation::install_native_seat_specs(
 bool Simulation::install_seat_specs_for_type_ids(
 		const Ref<ItemDatabase> &p_item_db,
 		const PackedInt32Array &p_type_ids) {
-	if (p_item_db.is_null() || !sim_models_.has_index()) return false;
+	if (p_item_db.is_null() || !kernel_->models.has_index()) return false;
 	std::vector<int> seeds;
 	seeds.reserve(static_cast<size_t>(p_type_ids.size()));
 	for (int64_t i = 0; i < p_type_ids.size(); ++i) {

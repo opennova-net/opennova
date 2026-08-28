@@ -29,14 +29,14 @@ Dictionary Simulation::get_vehicle_panel_view() const {
 	Dictionary out;
 	out["shown"] = false;
 	out["item_id"] = 0;
-	if (!world_ || !world_->cached.local_player.valid()) return out;
+	if (!kernel_->world.cached.local_player.valid()) return out;
 	const opennova::world::Entity *local =
-			world_->registry.get(world_->cached.local_player);
+			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (local == nullptr) return out;
 	const opennova::world::EntityHandle root_h =
-			opennova::world::vehicle_panel_root(*world_, *local);
+			opennova::world::vehicle_panel_root(kernel_->world, *local);
 	const opennova::world::Entity *root =
-			root_h.valid() ? world_->registry.get(root_h) : nullptr;
+			root_h.valid() ? kernel_->world.registry.get(root_h) : nullptr;
 	if (root == nullptr) return out;
 	out["shown"] = true;
 	out["item_id"] = root->item_id;
@@ -48,30 +48,30 @@ bool Simulation::fill_vehicle_panel(const DefVehicleHudBlock &p_block,
 	r_state.seats.clear();
 	r_state.hull_health = 0;
 	r_state.hull_max_health = 0;
-	if (!world_ || !world_->cached.local_player.valid()) return false;
+	if (!kernel_->world.cached.local_player.valid()) return false;
 	const opennova::world::Entity *local =
-			world_->registry.get(world_->cached.local_player);
+			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (local == nullptr) return false;
 	const opennova::world::EntityHandle root_h =
-			opennova::world::vehicle_panel_root(*world_, *local);
+			opennova::world::vehicle_panel_root(kernel_->world, *local);
 	const opennova::world::Entity *root =
-			root_h.valid() ? world_->registry.get(root_h) : nullptr;
+			root_h.valid() ? kernel_->world.registry.get(root_h) : nullptr;
 	if (root == nullptr) return false;
 	// The silhouette bands on the HULL's own health, not any rider's
 	// [orig: the root's health band @0x5a50d1].
 	r_state.hull_health = root->health;
 	r_state.hull_max_health = root->health_max;
-	opennova::world::fill_vehicle_panel_seats(*world_, root_h,
-			world_->cached.local_player, p_block, r_state.seats);
+	opennova::world::fill_vehicle_panel_seats(kernel_->world, root_h,
+			kernel_->world.cached.local_player, p_block, r_state.seats);
 	return true;
 }
 
 bool Simulation::fill_lfp_zones(int p_local_team,
 		std::vector<opennova::hud::HudLfpZone> &r_zones) {
 	r_zones.clear();
-	if (!world_ || !runtime_ || !world_->cached.local_player.valid()) return false;
+	if (!kernel_ || !runtime_ || !kernel_->world.cached.local_player.valid()) return false;
 	const opennova::world::Entity *local =
-			world_->registry.get(world_->cached.local_player);
+			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (local == nullptr) return false;
 	// The zone-timer entry as the marker reads it: the client runtime's
 	// 13-DWORD image of the retail shared timer list (present only once a
@@ -108,7 +108,7 @@ bool Simulation::fill_lfp_zones(int p_local_team,
 				}
 				return 0;
 			};
-	opennova::world::build_lfp_zones(*world_, deploy_zone_registry(), *local,
+	opennova::world::build_lfp_zones(kernel_->world, deploy_zone_registry(), *local,
 			p_local_team, timer, capture_flags, r_zones);
 	return true;
 }

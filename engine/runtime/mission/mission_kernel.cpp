@@ -48,7 +48,13 @@ int32_t bam_from_radians(double radians) {
 
 } // namespace
 
-MissionKernel::MissionKernel() = default;
+MissionKernel::MissionKernel() {
+	// The kernel pumps the local player's slot itself (run_local_player_post_tick
+	// with the live trigger/reload/scope inputs), so the world's global weapon
+	// pump must skip L's borrowed UseGun parent slot or one slot advances twice
+	// per frame [orig: one WeaponAction_ProcessAllEntities walk @0x542690].
+	world.external_local_mounted_weapon_pump = true;
+}
 
 MissionKernel::~MissionKernel() {
 	// The systems and providers the world points at outlive nothing: drop the
@@ -80,6 +86,7 @@ bool MissionKernel::open(const std::string &root, const std::string &name,
 		error = "could not mount " + root_dir + ": " + index.last_error();
 		return false;
 	}
+	own_mounted_ = true;
 	std::vector<uint8_t> bytes;
 	if (!index.read_file(name, bytes)) {
 		error = name + " is not under " + root_dir;
@@ -106,21 +113,41 @@ void MissionKernel::open_document(bms::File mission_doc,
 	mission = std::move(mission_doc);
 	mission_name = mission_file_basename;
 	mission_basename = std::move(mission_file_basename);
+	opened_ = true;
 	files_ = std::move(files);
 	if (items_ok) {
 		def_free_items(&items);
 		items = DefItemsFile{};
 		items_ok = false;
 	}
+	// An embedder-supplied table (set_items_table) IS the item db — parsing a
+	// second copy from the mount would only shadow it.
 	std::vector<uint8_t> items_bytes;
-	if (files_.valid() && files_.read_file("items.def", items_bytes) &&
+	if (items_override_ == nullptr && files_.valid() &&
+			files_.read_file("items.def", items_bytes) &&
 			def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0)
 		items_ok = true;
+}
+
+void MissionKernel::set_asset_index(const ResourceIndex *asset_index_ptr) {
+	external_index_ = asset_index_ptr;
+	// A source switch invalidates every retained parse-derived pose, exactly
+	// like the shell's asset-root switch did.
+	mounted_rest_cache_.clear();
+	mounted_live_cache_.clear();
+	mounted_cache_tick_ = 0xFFFFFFFFu;
+	models.set_index(asset_index());
+	collision_pose.set_resource_index(asset_index());
+}
+
+void MissionKernel::set_items_table(const DefItemsFile *items_table_ptr) {
+	items_override_ = items_table_ptr;
 }
 
 void MissionKernel::wire_terrain() {
 	world.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	ai.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
+	ai.ground_clearance = w::GroundClearance{};
 	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	// The footstep surface pick reads the charmap through this view, exactly
 	// as Simulation::apply_terrain_to_ai wires it (the kernel has no mission
@@ -139,11 +166,11 @@ void MissionKernel::wire_collision() {
 
 std::function<PromoteOptions::AiProfileDefaults(int32_t)>
 MissionKernel::ai_profile_defaults_fn() const {
-	if (!items_ok) return {};
+	if (items_table() == nullptr) return {};
 	return [this](int32_t type_id) {
 		PromoteOptions::AiProfileDefaults d;
 		const int item_id = static_cast<int>(type_id) + static_cast<int>(kItemIdOffset);
-		const DefItemDef *def = simassets::find_item_def(items, item_id);
+		const DefItemDef *def = simassets::find_item_def(*items_table(), item_id);
 		if (def == nullptr) return d;
 		const std::string cls = strutil::to_lower(def->ai_function);
 		d.helicopter_init = cls == "chel" || cls == "cpln";
@@ -158,6 +185,9 @@ bool MissionKernel::load_mission_into_world() {
 	opts.item_seat_specs = seat_specs;
 	opts.ai_profiles = ai_profiles;
 	opts.ai_profile_defaults = ai_profile_defaults_fn();
+	// Authored display names from the embedder's [PeopleNames] table (D-HUD-20);
+	// promote applies the retail 15-char copy at its cited port site.
+	opts.people_name_resolver = people_name_resolver_;
 	promo = promote_mission(mission, world, ai, opts);
 	finish_load();
 	return true;
@@ -176,9 +206,15 @@ void MissionKernel::finish_load() {
 	// PreMission events settle initial scripted state before the clock starts.
 	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
 	w::count_mission_units(world);
+	capture_baseline();
+}
+
+void MissionKernel::capture_baseline() {
 	baseline = world.snapshot();
-	have_baseline = true;
 	ai.capture_spawn_baseline();
+	wac_baseline = wac.capture_runtime_state();
+	have_baseline = true;
+	have_wac_baseline = true;
 }
 
 int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
@@ -205,7 +241,9 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 }
 
 void MissionKernel::resolve_new_infantry_adm_ids() {
-	if (!infantry_adm_retained_ || !items_ok || root_motion.empty()) return;
+	const DefItemsFile *item_rows = items_table();
+	if (!infantry_adm_retained_ || item_rows == nullptr || root_motion.empty()) return;
+	const ResourceIndex *adm_source = adm_index_ != nullptr ? adm_index_ : asset_index();
 	const int count = ai.count();
 	if (infantry_adm_resolved_ai_count_ < 0 || infantry_adm_resolved_ai_count_ > count)
 		infantry_adm_resolved_ai_count_ = 0;
@@ -216,23 +254,52 @@ void MissionKernel::resolve_new_infantry_adm_ids() {
 		if (!e->inf.active) continue;
 		const w::Entity *ent = world.registry.get(e->handle);
 		if (ent == nullptr) continue;
-		const int visual = simassets::visual_item_id_for_runtime_type(ent->item_id, items);
-		const DefItemDef *def = simassets::find_item_def(items, visual);
+		const int visual = simassets::visual_item_id_for_runtime_type(ent->item_id, *item_rows);
+		const DefItemDef *def = simassets::find_item_def(*item_rows, visual);
 		if (def == nullptr || def->anim_def[0] == '\0') continue;
 		std::string adm = def->anim_def;
 		if (!strutil::ends_with_icase(adm, ".adm")) adm += ".adm";
-		const int adm_id = root_motion.register_adm(&index, adm);
+		const int adm_id = root_motion.register_adm(adm_source, adm);
 		if (adm_id >= 0) e->inf.adm_id = adm_id;
 	}
 	infantry_adm_resolved_ai_count_ = count;
 }
 
-bool MissionKernel::load_weapon_table() {
+void MissionKernel::rearm_infantry_adm(const ResourceIndex *adm_index) {
+	if (adm_index != nullptr) adm_index_ = adm_index;
+	infantry_adm_retained_ = true;
+	infantry_adm_resolved_ai_count_ = 0;
+	for (int i = 0; i < ai.count(); ++i)
+		if (w::AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
+	resolve_new_infantry_adm_ids();
+}
+
+int MissionKernel::install_infantry_anim(const std::string &adm_name,
+		const ResourceIndex *adm_index) {
+	adm_index_ = adm_index != nullptr ? adm_index : asset_index();
+	root_motion.clear();
+	infantry_adm_resolved_ai_count_ = 0;
+	const int default_adm = root_motion.register_adm(adm_index_, adm_name);
+	if (default_adm != 0)
+		io::logf(io::LogLevel::kWarn,
+				"mission kernel: no infantry clips from '%s' - AI soldiers will stand still",
+				adm_name.c_str());
+	// A source with no clips counts as none: the selector then resolves every
+	// state to "no clip" and soldiers stand, exactly the original's
+	// relationship between motion and clips.
+	ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
+	if (default_adm == 0) resolve_new_infantry_adm_ids();
+	return default_adm == 0 ? root_motion.clip_count(0) : 0;
+}
+
+bool MissionKernel::load_weapon_table(const BootFileSource &files,
+		const ResourceIndex *table_index, const std::string &name) {
 	std::vector<uint8_t> bytes;
-	if (!files_.read_file("weapon.def", bytes)) return false;
+	if (!files.valid() || !files.read_file(name, bytes)) return false;
 	DefWeaponsFile file = {};
 	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file) != 0) return false;
-	world.weapons = w::build_weapon_table(file, &index);
+	world.weapons = w::build_weapon_table(file,
+			table_index != nullptr ? table_index : asset_index());
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
 	weapon_defs = file;
 	weapon_defs_ok = true;
@@ -265,9 +332,10 @@ bool MissionKernel::load_weapon_table() {
 	return true;
 }
 
-bool MissionKernel::load_ammo_table() {
+bool MissionKernel::load_ammo_table(const BootFileSource &files,
+		const std::string &name) {
 	std::vector<uint8_t> bytes;
-	if (!files_.read_file("ammo.def", bytes)) return false;
+	if (!files.valid() || !files.read_file(name, bytes)) return false;
 	DefAmmoFile file = {};
 	if (def_parse_ammo_memory(bytes.data(), bytes.size(), &file) != 0) return false;
 	world.ammo = w::build_ammo_table(file);
@@ -279,20 +347,21 @@ bool MissionKernel::load_ammo_table() {
 }
 
 bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
-	if (!files_.valid()) {
-		error = "open() first";
+	if (!opened_) {
+		error = "open() / open_document() first";
 		return false;
 	}
 	// The sim's own model source, wired before the seat step runs (S16).
-	models.set_index(&index);
-	collision_pose.set_resource_index(&index);
+	models.set_index(asset_index());
+	collision_pose.set_resource_index(asset_index());
 	bringup_net_session_ = options.bringup_net_session;
+	people_name_resolver_ = options.people_name_resolver;
 
 	BootParams params;
-	params.is_joiner = false;
+	params.is_joiner = options.joiner;
 	params.playable = options.playable;
-	params.has_resource_root = true;
-	params.has_item_db = items_ok;
+	params.has_resource_root = files_.valid();
+	params.has_item_db = items_table() != nullptr;
 	params.has_terrain = terrain_store.valid();
 	params.has_terrain_til = false;
 	params.has_wac = options.wac;
@@ -312,9 +381,9 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		seed_group(mission.buildings);
 		seed_group(mission.markers);
 		seed_group(mission.organics);
-		if (!seeds.empty()) {
+		if (!seeds.empty() && items_table() != nullptr) {
 			simassets::SeatSpecExtraction native;
-			simassets::extract_item_seat_specs(items,
+			simassets::extract_item_seat_specs(*items_table(),
 					[this](const std::string &graphic) { return models.model_for(graphic); },
 					seeds, native);
 			seat_specs = std::move(native.specs);
@@ -337,21 +406,14 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	steps.install_terrain_field = [&] { wire_terrain(); };
 	steps.install_sound_profiles = [] {}; // the footstep/foley slot table is presentation-side
 	steps.install_infantry_anim = [&] {
-		root_motion.clear();
-		infantry_adm_resolved_ai_count_ = 0;
-		const int default_adm = root_motion.register_adm(&index, options.infantry_adm);
-		if (default_adm != 0)
-			io::logf(io::LogLevel::kWarn,
-					"mission kernel: no infantry clips from '%s' - AI soldiers will stand still",
-					options.infantry_adm.c_str());
-		ai.root_motion = &root_motion;
-		if (default_adm == 0) resolve_new_infantry_adm_ids();
+		(void)install_infantry_anim(options.infantry_adm);
 	};
 	steps.install_wac = [&] {
 		wac_loaded = false;
 		std::string wac_error;
 		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac, files_,
-				mission_basename, &world.registry, /*strict_diagnostics=*/false, wac_error);
+				options.wac_basename.empty() ? mission_basename : options.wac_basename,
+				&world.registry, /*strict_diagnostics=*/false, wac_error);
 		if (status == wac::WacLayeredLoadStatus::kBlocked) {
 			io::logf(io::LogLevel::kWarn, "mission kernel: %s - scripts disabled",
 					wac_error.c_str());
@@ -367,22 +429,18 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 			io::logf(io::LogLevel::kWarn,
 					"mission kernel: no player-start marker - spawned at the origin");
 	};
-	steps.resolve_infantry_adm = [&] {
-		infantry_adm_retained_ = true;
-		infantry_adm_resolved_ai_count_ = 0;
-		for (int i = 0; i < ai.count(); ++i)
-			if (w::AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
-		resolve_new_infantry_adm_ids();
-	};
+	steps.resolve_infantry_adm = [&] { rearm_infantry_adm(); };
 	steps.resolve_item_traits = [&] {
-		simassets::resolve_item_traits(world, items, [](int32_t) -> uint8_t { return 0; });
+		simassets::resolve_item_traits(world, *items_table(),
+				[](int32_t) -> uint8_t { return 0; });
 	};
 	steps.install_asset_root = [] {};
 	steps.resolve_collision = [&] {
 		if (!options.collision) return;
 		wire_collision();
 		const simassets::CollisionResolveDeps deps{collision, occlusion, collision_pose, models};
-		collision_attached = simassets::resolve_collision_instances(world, items, collision_state, deps);
+		collision_attached = simassets::resolve_collision_instances(world,
+				*items_table(), collision_state, deps);
 	};
 	steps.occlusion_init = [&] {
 		if (!options.collision) return;
@@ -390,11 +448,13 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		occlusion.init_mission(world, collision);
 	};
 	steps.load_weapon_table = [&] {
-		if (!load_weapon_table())
+		if (!load_weapon_table(files_, nullptr))
 			io::logf(io::LogLevel::kWarn, "mission kernel: weapon.def not loaded");
 	};
-	steps.load_ammo_table = [&] { return load_ammo_table(); };
-	steps.resolve_ai_weapons = [&] { simassets::resolve_ai_weapons(world, items); };
+	steps.load_ammo_table = [&] { return load_ammo_table(files_); };
+	steps.resolve_ai_weapons = [&] {
+		simassets::resolve_ai_weapons(world, *items_table());
+	};
 
 	const BootAbort abort = run_mission_boot(params, steps);
 	if (abort != BootAbort::kNone) {
@@ -480,33 +540,147 @@ void MissionKernel::run_local_player_post_tick() {
 	// Retail promotes the per-frame view before weapon actions; the sim-wrote-
 	// the-view fold runs first so the pumps read the settled look.
 	sync_local_mounted_input_heading();
-	w::local_player_view_tick(&world, weapon, view, view_tracker, w::LocalViewSessionInputs{});
+	w::local_player_view_tick(&world, weapon, view, view_tracker, view_session_inputs);
 	w::LocalWeaponPumpIO io;
 	io.view = &view;
 	io.inventory = inventory_valid ? &inventory : nullptr;
 	io.is_authority = true;
 	w::local_weapon_pump_tick(world, weapon, io);
+	// The wire-facing outcomes for the embedder's relay legs (the local reload
+	// producer the listen drain consumes; a joiner's fired-round uplink).
+	last_fired = io.fired;
+	last_reload = io.reload;
 }
 
-void MissionKernel::tick_no_net() {
+void MissionKernel::set_movement_keys(bool forward, bool back, bool left,
+		bool right, bool lean_left, bool lean_right, bool jump) {
+	input.forward = forward;
+	input.back = back;
+	input.left = left;
+	input.right = right;
+	// Lean keys -> MoveOrder bits 6/7 [orig: g_inputFlags 0x2000/0x4000 packed
+	// @0x4df708-0x4df741]; jump is a per-frame edge the motor consumes once
+	// grounded.
+	input.lean_left = lean_left;
+	input.lean_right = lean_right;
+	input.jump = jump;
+	// Stance comes from the sim-owned SELECT latches (request_stance — the
+	// C2S 0x1D apply semantics [orig: @0x501c60]).
+	input.crouch = stance_latch_ == 1;
+	input.prone = stance_latch_ == 2;
+	// The movement-held latch and the unscope-on-move [orig:
+	// Player_PackInputStateToEntity @0x4df450 — any of the four direction keys
+	// sets g_movementKeyHeld (blocks scope-UP on Scoped weapons @0x4df29c)
+	// and, while SETTLED at scope on a Scoped (flags 1) weapon, routes through
+	// Player_ToggleWeaponScope @0x4df4c9..0x4df4ec = the full unscope. The
+	// toggle's ForceScoped pin (@0x4df12d) keeps pinned sights raised].
+	const bool move_held = forward || back || left || right;
+	if (w::player_view_move_input(view, move_held,
+				weapon.active ? weapon.def.flags : 0) &&
+			(weapon.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
+		if (w::player_view_set_engaged(view, false,
+					(weapon.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
+			w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
+	}
+	w::local_player_view_refresh(&world, view);
+}
+
+bool MissionKernel::request_stance(int stance) {
+	if (stance < 0 || stance > 2) return false;
+	// ForceCrouch weapons refuse stance changes [orig: the case-169/170/172
+	// gate Entity_CheckWeaponSeatFlags(equipped, 0x40000) @0x4e0d8a; the
+	// seat-kind-3 mount refusal rides the unported mounting slice].
+	if (weapon.active && weapon.force_crouch) return false;
+	if (stance_latch_ == stance) return false;
+	// SELECT with mutual exclusion — the 0x1D apply writes one stance bit and
+	// clears the other [orig: NapiNPServerMsg_HandleStanceChange @0x501c60:
+	// 169 -> crouch, 170 -> prone, 172 -> clear both].
+	stance_latch_ = stance;
+	input.crouch = stance_latch_ == 1;
+	input.prone = stance_latch_ == 2;
+	return true;
+}
+
+void MissionKernel::tick_no_net(w::LogicTickPerf *perf) {
 	apply_player_input_pre_tick();
-	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay);
+	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay, perf);
 	run_local_player_post_tick();
 	resolve_new_infantry_adm_ids();
 }
 
-void MissionKernel::reset_local_player_input_to_player_facing() {
+void MissionKernel::reset_local_player_input(int32_t look_heading_bam) {
 	input = w::PlayerInput{};
 	stance_latch_ = 0;
 	look_accum_x_ = look_accum_y_ = 0.0f;
+	input.look_heading = look_heading_bam;
+}
+
+void MissionKernel::reset_local_player_input_to_player_facing() {
+	int32_t heading = 0;
 	if (world.cached.local_player.valid())
 		if (const w::AiEntity *pe = ai.for_handle(world.cached.local_player))
-			input.look_heading = pe->heading;
+			heading = pe->heading;
+	reset_local_player_input(heading);
 }
 
 bool MissionKernel::restore_baseline() {
 	if (!have_baseline) return false;
-	world.restore(baseline);
+	const bool usegun_was_active = weapon.usegun_slot_active;
+	const bool usegun_was_pending = weapon.usegun_switch != w::LocalUseGunSwitch::kNone;
+	const uint8_t saved_personal_adm = weapon.usegun_saved_adm;
+	weapon.events.clear();
+	weapon.power_throw_start_tick = 0;
+	weapon.pending_throw_charge = 0;
+	weapon.fire_held = false;
+	weapon.fire_pressed = false;
+	weapon.reload_pressed = false;
+	weapon.usegun_switch = w::LocalUseGunSwitch::kNone;
+	weapon.usegun_slot_active = false;
+	weapon.usegun_mount = w::EntityHandle{};
+	weapon.usegun_weapon_adm = 0xFF;
+	weapon.usegun_pending_mount = w::EntityHandle{};
+	weapon.usegun_pending_weapon_adm = 0xFF;
+	weapon.usegun_saved_adm = 0xFF;
+	weapon.usegun_switch_action = -1;
+	weapon.switch_deferred_action = -1;
+	world.restore(baseline); // rewinds registry/vars/env/clock + re-inits systems (incl.
+	                         // AI; WacSystem::on_load also resets its 62-tick accumulator)
+	if (have_wac_baseline) wac.restore_runtime_state(wac_baseline);
+	// Re-ground every soldier from scratch: the restored registry may reuse
+	// handles across epochs, so the high-water mark cannot be trusted.
+	infantry_adm_resolved_ai_count_ = 0;
+	for (int i = 0; i < ai.count(); ++i)
+		if (w::AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
+	resolve_new_infantry_adm_ids();
+	if (usegun_was_active) {
+		// The world snapshot restores the play-start entity set, while the
+		// embedder still presents the borrowed emplacement definition.
+		// Reinstall the saved personal selection as a fresh restart epoch.
+		if (w::Entity *player_row = world.registry.get(world.cached.local_player))
+			player_row->equipped_adm_index = saved_personal_adm;
+		weapon.active = false;
+		const w::WeaponTableEntry *saved_def = world.weapons.by_index(saved_personal_adm);
+		weapon.start_in_switchto = saved_def != nullptr;
+		w::WeaponPresentationEvent event;
+		event.tick = world.logic_tick;
+		if (const w::Entity *local = world.registry.get(world.cached.local_player))
+			event.world_position = local->position;
+		event.switch_to_weapon = saved_def != nullptr ? saved_def->name : std::string();
+		event.clear_weapon = saved_def == nullptr;
+		weapon.events.push_back(std::move(event));
+	} else if (usegun_was_pending) {
+		// The presenter never left the personal weapon, but its outgoing slot
+		// may already be inside SWITCHFROM/RANK. Cancel only that action state
+		// while retaining the personal magazine and reserve.
+		const int32_t clip = weapon.slot.clip;
+		const int32_t reserve = weapon.slot.reserve;
+		weapon.slot = w::WeaponSlotState{};
+		weapon.slot.clip = clip;
+		weapon.slot.reserve = reserve;
+	}
+	// The FP channel position is a gated advance count, not a clock delta, so
+	// the restored world keeps the held clip pose with no epoch re-stamp.
+	w::local_player_view_reset(&world, weapon, view, view_tracker);
 	return true;
 }
 
@@ -611,7 +785,7 @@ bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve
 		}
 	}
 	if (row == nullptr) return false;
-	clip_index.load(&index, row->animadm);
+	clip_index.load(asset_index(), row->animadm);
 	w::WeaponInstallData data;
 	data.name = row->weapon_name;
 	data.animadm = row->animadm;
@@ -791,7 +965,8 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 	simassets::compose_mounted_pose_controls(carrier.item_attrib, sources, ctrl_bus);
 	std::array<int32_t, THREEDI_CTRL_REGISTER_COUNT> controls{};
 	std::copy(std::begin(ctrl_bus), std::end(ctrl_bus), controls.begin());
-	const uint32_t time_ms = simassets::mounted_pose_time_ms(world.logic_tick, -1);
+	const uint32_t time_ms = simassets::mounted_pose_time_ms(world.logic_tick,
+			panm_time_override_ms);
 	if (mounted_cache_tick_ != world.logic_tick) {
 		mounted_live_cache_.clear();
 		mounted_cache_tick_ = world.logic_tick;
@@ -829,7 +1004,7 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 // --- world::ICollisionSectionMatrixProvider ---------------------------------
 
 bool MissionKernel::ensure_collision_instance(w::World &p_world, w::EntityHandle entity) {
-	if (&p_world != &world || !items_ok) return false;
+	if (&p_world != &world || items_table() == nullptr) return false;
 	const w::Entity *e = world.registry.get(entity);
 	if (e == nullptr) {
 		collision.remove_entity_instance(entity);
@@ -848,7 +1023,8 @@ bool MissionKernel::ensure_collision_instance(w::World &p_world, w::EntityHandle
 	// appeared since the previous sweep (a player deployed after load).
 	wire_collision();
 	const simassets::CollisionResolveDeps deps{collision, occlusion, collision_pose, models};
-	collision_attached = simassets::resolve_collision_instances(world, items, collision_state, deps);
+	collision_attached = simassets::resolve_collision_instances(world, *items_table(),
+			collision_state, deps);
 	return collision.has_instance(world, entity);
 }
 
@@ -856,7 +1032,7 @@ bool MissionKernel::build_section_matrices(w::World &p_world, w::EntityHandle en
 		int32_t model_id, const w::CollisionMatrix &entity_world, const w::CollisionModel &model,
 		std::vector<w::CollisionMatrix> &out) {
 	collision_pose.weapon_active = weapon.active;
-	collision_pose.panm_time_override_ms = -1;
+	collision_pose.panm_time_override_ms = panm_time_override_ms;
 	++collision_queries;
 	if (collision_pose.build_section_matrices(p_world, entity, model_id, entity_world, model, out))
 		return true;

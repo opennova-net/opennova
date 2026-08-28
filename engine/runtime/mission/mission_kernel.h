@@ -62,12 +62,22 @@ struct KernelBootOptions {
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
 	bool collision = true;
 	bool seat_specs = true; // the native seat/mount table (S16); off = the bare promote
+	// A joiner world: never spawns its own player here (L spawns on the
+	// name-match inside the joiner pump — the joiner ROLE stays with the
+	// embedder, ADR 0042 d3; this only gates the boot's spawn step).
+	bool joiner = false;
 	// The session g_GameType word the spawn-marker select filters on. The
 	// embedder derives it (game_type::for_mission_mode over the mission
 	// header's mode bit — npwire's mapping) so this kernel stays below net/;
 	// 0 is the SP fallback arm.
 	uint32_t game_type = 0;
 	std::string infantry_adm = kDefaultInfantryAdm;
+	// The <name>.wac mission layer when it differs from the mission file's own
+	// basename (the shell's loose-mission seam); empty = mission_basename.
+	std::string wac_basename;
+	// Authored display names for promote's name_index resolve (the embedder's
+	// parsed [PeopleNames] STRNAME%03i table; D-HUD-20). Empty = no names.
+	std::function<std::string(int32_t)> people_name_resolver;
 	// The net half's session bring-up (inmatch::listen_host::bringup),
 	// invoked between the world wiring and register_mission_systems — exactly
 	// where the SP listen host stands up inside the load
@@ -96,6 +106,23 @@ public:
 	// open() is this plus the mount + read + parse legs.
 	void open_document(bms::File mission_doc, std::string mission_file_basename,
 			BootFileSource files);
+	// --- embedder source seams (ADR 0042 d3) --------------------------------
+	// The embedder's already-mounted index (the shell's ResourceRoot). When
+	// installed it replaces the kernel's own mount for every asset resolve
+	// (models, collision pose rigs, .adm registration, the weapon-table
+	// texture index) and clears the pose caches like a root switch; null
+	// reverts to the kernel's own open() mount.
+	void set_asset_index(const ResourceIndex *asset_index);
+	// The embedder's already-parsed items.def (the shell's retained rows).
+	// Overrides the open_document parse — the caller keeps it alive for the
+	// kernel's lifetime; null reverts to the kernel's own parse.
+	void set_items_table(const DefItemsFile *items_table);
+	// The live items.def rows every kernel leg reads: the override, else the
+	// kernel's own parse, else null (no item db — the gated steps skip).
+	const DefItemsFile *items_table() const {
+		return items_override_ != nullptr ? items_override_
+										  : (items_ok ? &items : nullptr);
+	}
 	// The S9 boot (runtime_boot.h) over the opened mission — the ONE filler
 	// of run_mission_boot's step table. The embedder builds terrain_store
 	// FIRST when it has terrain (terrain_field_store_build over its parsed
@@ -105,8 +132,9 @@ public:
 
 	// One bare no-net authoritative logic tick between the local-player pumps
 	// (the AI-path and convoy drives; a live session orders the same legs
-	// around its session pump — inmatch::listen_host::frame).
-	void tick_no_net();
+	// around its session pump — inmatch::listen_host::frame). `perf` is
+	// optional world-phase attribution for the embedder's stats board.
+	void tick_no_net(world::LogicTickPerf *perf = nullptr);
 
 	// --- the per-tick legs a session frame orders around its pump -----------
 	// Pack the frame input onto the local player's body before the logic tick
@@ -121,8 +149,17 @@ public:
 	// Reset the frame-input state and seed the look heading from the (auto-)
 	// spawned local player's facing — the session bring-up's tail.
 	void reset_local_player_input_to_player_facing();
-	// Restore the post-PreMission world snapshot; false when none was taken.
+	// The same reset with an explicit heading (the joiner's spawn/redeploy
+	// edges hand the authoritative facing in).
+	void reset_local_player_input(int32_t look_heading_bam);
+	// Restore the post-PreMission snapshot — the play-start world, the WAC
+	// runtime state, the local weapon's epoch resets (the borrowed-UseGun
+	// reinstall event), the view reset, and the fresh-soldier .adm re-ground;
+	// false when no baseline was taken.
 	bool restore_baseline();
+	// Re-capture the baseline from the CURRENT state (the shell's sealed
+	// mission-start point: post-eager-WAC, fully settled play start).
+	void capture_baseline();
 
 	// --- the local player ----------------------------------------------------
 	bool has_local_player() const;
@@ -134,6 +171,24 @@ public:
 	int32_t player_health() const;
 	// The movement keys the pre-tick packs onto the body (look rides look()).
 	world::PlayerInput input;
+	// One frame of movement keys: packs the keys plus the sim-owned stance
+	// latch onto `input`, runs the witnessed movement-held unscope (while
+	// SETTLED at scope on a Scoped weapon, any direction key routes through
+	// the full unscope; the ForceScoped pin keeps pinned sights raised), and
+	// refreshes the view aggregates. [orig: Player_PackInputStateToEntity
+	// @0x4df450 — g_movementKeyHeld @0x4df29c; the unscope route
+	// @0x4df4c9..0x4df4ec; the ForceScoped pin @0x4df12d]
+	void set_movement_keys(bool forward, bool back, bool left, bool right,
+			bool lean_left, bool lean_right, bool jump);
+	// Stance SELECT request (0 stand / 1 crouch / 2 prone): mutual exclusion
+	// at apply, REFUSED while the equipped weapon has ForceCrouch. Returns
+	// whether the latch changed. [orig: input cases 169/170/172 @0x4e0d77..
+	// -> NapiNPServerMsg_HandleStanceChange @0x501c60; the ForceCrouch gate
+	// Entity_CheckWeaponSeatFlags(equipped, 0x40000) @0x4e0d8a]
+	bool request_stance(int stance);
+	// The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
+	// dword_B76484 prone-latch equivalent the render-slot drape gate reads.
+	int stance_latch() const { return stance_latch_; }
 	// Mouse pixels onto the look angles (the center-lock accumulator).
 	void look(float dx_px, float dy_px);
 	// Point the look straight at a mission-space target from a mission-space
@@ -145,6 +200,32 @@ public:
 	// The by-name weapon install from the retained weapon.def rows.
 	bool install_weapon(const std::string &weapon_name,
 			bool preserve_slot_state = false);
+	// The armory table (weapon.def -> world.weapons + the retained rows), the
+	// mission loadout-chunk promotion and the spawn-kit rebuild — the boot's
+	// load_weapon_table step over an explicit source so the embedder's
+	// table-feed seam shares the one body. `index` resolves texture/model
+	// references (null = the kernel's own asset index).
+	bool load_weapon_table(const BootFileSource &files, const ResourceIndex *index,
+			const std::string &name = "weapon.def");
+	// ammo.def -> world.ammo + the weapon round_type resolve.
+	bool load_ammo_table(const BootFileSource &files,
+			const std::string &name = "ammo.def");
+	// The infantry clip set (.adm -> .bad root-motion tracks): clear + register
+	// the default map through `adm_index` (null = the kernel's asset index) and
+	// re-point the AI. Returns the default map's clip count (0 = nothing
+	// loaded; soldiers then stand, as in the original).
+	int install_infantry_anim(const std::string &adm_name,
+			const ResourceIndex *adm_index = nullptr);
+	// (Re)arm the per-entity .adm resolution: every soldier grounds on its OWN
+	// model .adm from here on (D-INF-6); the boot's resolve_infantry_adm step
+	// and the shell's explicit re-arm share this body.
+	void rearm_infantry_adm(const ResourceIndex *adm_index = nullptr);
+	// Spawn the authoritative side's own player at the mission's player-START
+	// marker, selected the way the original engine does (by game type,
+	// FARTHEST from the enemy set). 1 = spawned at a real marker, 0 = origin
+	// fallback, -1 = failed. [orig: Server_PositionPlayerForSpawn @0x50cf60 ->
+	// Entity_FindBestSpawnPoint @0x50ccc0]
+	int spawn_local_player_at_start(uint32_t game_type);
 	// The USE-ITEM mount toggle.
 	bool toggle_mount();
 	world::LocalPlayerViewFrame view_frame();
@@ -204,6 +285,8 @@ public:
 	size_t text_size = 0;
 	world::World::Snapshot baseline;
 	bool have_baseline = false;
+	wac::WacSystem::RuntimeState wac_baseline;
+	bool have_wac_baseline = false;
 
 	// --- terrain (the engine's one owning field store, ADR 0042 d4) ----------
 	// The same store Simulation::set_terrain_height_field fills, so the
@@ -226,6 +309,20 @@ public:
 	world::LocalPlayerViewTracker view_tracker;
 	world::PlayerLookSettings look_settings;
 	simassets::AdmClipIndex clip_index;
+	// What the view arbiter reads from the embedder's session (death screen,
+	// end-round, the death-camera target): a live embedder refreshes this
+	// before each session frame; the bare kernel keeps the no-session default.
+	world::LocalViewSessionInputs view_session_inputs;
+	// The post-tick pump's wire-facing outcomes, overwritten every pump: a
+	// serving embedder relays the reload onto its loopback (the witnessed
+	// local reload producer -> the S2C 0x49 broadcast) and a joiner ships the
+	// fired round; the bare kernel drops both, having already applied them.
+	world::LocalWeaponFiredWire last_fired;
+	world::LocalWeaponReloadWire last_reload;
+	// A non-negative value is the shell's once-per-frame retail presentation
+	// DWORD for the PANM pose clock; -1 = deterministic logic time
+	// (simassets::mounted_pose_time_ms consumes it).
+	int64_t panm_time_override_ms = -1;
 
 	// The native pose counters the soak gates on (the binding's masked-failure
 	// signal): queries answered by the engine providers and their declines.
@@ -235,6 +332,16 @@ public:
 	int mounted_declines = 0;
 	int mounted_evaluations = 0;
 	int mounted_cache_hits = 0;
+	size_t mounted_rest_cache_size() const { return mounted_rest_cache_.size(); }
+
+	// Re-point the world/AI/collision systems at the terrain field store and
+	// the collision world (the embedder re-layers its own device-fed surface
+	// extras — placed tiles, sound profiles — after wire_terrain).
+	void wire_terrain();
+	void wire_collision();
+	// The post-tick "sim wrote the view" fold, exposed for the embedder's
+	// mount-change edges (the joiner's authoritative attach echo).
+	void sync_local_mounted_input_heading();
 
 	// world::IMountedPoseProvider
 	bool resolve_mounted_pose(world::World &w, const world::Entity &carrier,
@@ -247,19 +354,28 @@ public:
 			std::vector<world::CollisionMatrix> &out) override;
 
 private:
-	void wire_terrain();
-	void wire_collision();
 	std::function<PromoteOptions::AiProfileDefaults(int32_t)> ai_profile_defaults_fn() const;
-	void sync_local_mounted_input_heading();
-	int spawn_local_player_at_start(uint32_t game_type);
 	bool load_mission_into_world();
 	void finish_load();
-	bool load_weapon_table();
-	bool load_ammo_table();
+	// The live asset source: the embedder's installed index, else the kernel's
+	// own open() mount, else null (nothing to resolve against).
+	const ResourceIndex *asset_index() const {
+		if (external_index_ != nullptr) return external_index_;
+		return own_mounted_ ? &index : nullptr;
+	}
 
 	BootFileSource files_;
 	// The per-boot net bring-up hook (KernelBootOptions::bringup_net_session).
 	std::function<void()> bringup_net_session_;
+	// The embedder source overrides (set_asset_index / set_items_table).
+	const ResourceIndex *external_index_ = nullptr;
+	const DefItemsFile *items_override_ = nullptr;
+	bool own_mounted_ = false;
+	// The index the infantry .adm registrations resolve through (the install/
+	// re-arm seam's; defaults to the asset index).
+	const ResourceIndex *adm_index_ = nullptr;
+	bool opened_ = false;
+	std::function<std::string(int32_t)> people_name_resolver_;
 	bool infantry_adm_retained_ = false;
 	int infantry_adm_resolved_ai_count_ = 0;
 	float look_accum_x_ = 0.0f;

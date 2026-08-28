@@ -4,6 +4,9 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
+
+#include <base/io/log.h>
 
 #include "terrain/terrain_data.h"
 #include "terrain/terrain.h"
@@ -101,6 +104,16 @@ using namespace godot;
 void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
+	}
+
+	// Engine diagnostics (io/log.h — the mission kernel's boot/tick warnings)
+	// surface on Godot's warning channel; the sink stays unset elsewhere so
+	// ctest binaries keep their own stdout sink.
+	if (opennova::io::log_sink_slot() == nullptr) {
+		opennova::io::set_log_sink([](opennova::io::LogLevel level, const char *message) {
+			if (level >= opennova::io::LogLevel::kWarn)
+				UtilityFunctions::push_warning(String::utf8(message));
+		});
 	}
 
 	GDREGISTER_CLASS(TerrainData);
