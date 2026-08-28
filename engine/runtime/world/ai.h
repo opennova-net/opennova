@@ -200,7 +200,6 @@ struct AiBrain {
     const uint8_t *bytes() const { return reinterpret_cast<const uint8_t *>(f); }
 
     int32_t cur_state() const { return f[kCurState]; }
-    int32_t pend_state() const { return f[kPendState]; }
     void set_pend(int32_t s) { f[kPendState] = s; }
 };
 static_assert(sizeof(AiBrain) == 812, "AiBrain must match unk_AED380 812-byte stride");

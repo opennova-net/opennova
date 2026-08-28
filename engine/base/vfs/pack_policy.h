@@ -22,7 +22,6 @@ inline constexpr const char *kPackArchiveName = "localres.pff";
 //    [orig: Game_ShowEarlyError @0x4a68a0] — inside an archive it could never
 //    be read.
 inline constexpr const char *kPackLooseExtensions[] = {".sbf", ".txt"};
-inline constexpr int kPackLooseExtensionCount = 2;
 
 // Never packed: the retail runtime, its own writes, and any archive already
 // present (packing an archive into an archive). Retail staging accepts PFFs;
@@ -32,7 +31,6 @@ inline constexpr const char *kPackExcludedExtensions[] = {
     ".pff", ".exe", ".dll", ".sav", ".log", ".ini", ".cfg",
     ".md", ".gitignore", ".gitattributes",
 };
-inline constexpr int kPackExcludedExtensionCount = 10;
 
 // Subdirectories of the asset root that hold source material, not game
 // files: retail resolves bare filenames at the root, so nothing under `src/`
@@ -40,7 +38,6 @@ inline constexpr int kPackExcludedExtensionCount = 10;
 // root only, and a data directory that silently vanished from the pack is
 // the bug that gets debugged in retail.
 inline constexpr const char *kPackExcludedDirs[] = {"src/"};
-inline constexpr int kPackExcludedDirCount = 1;
 
 // PFF entry names are 16 BYTES (formats/pff PFF_NAME_SIZE); a name that fits
 // in 16 characters can still overflow in UTF-8.

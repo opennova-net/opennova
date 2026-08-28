@@ -147,7 +147,7 @@ bool frame_in_match_s2c_batch(NapiNPServerCtx &ctx, const PeerAddr &peer,
 // P5 — the production PeerC2SInMatch consumer. Route each decoded in-match C2S 0x0C carried by a
 // PeerC2SInMatch `event` onto its owning connection's transport (ISessionTransport::deliver_c2s), so
 // the NEXT Server_TickUpdate's drain_connection_c2s read-applies it. This is the owner-boundary form
-// of the manual push tests/npruntime/joiner_connection_test does inline. Deliberately SEPARATE from
+// of the manual push the since-removed joiner_connection_test did inline. Deliberately SEPARATE from
 // handle_client_session (which only SURFACES the event): the single C2S drain/apply is
 // Server_TickUpdate (D-NET-125), so the consumer stages into that drain rather than applying inline
 // (which would be a double-apply trap). A null/unbound owning transport or a non-0x0C inner message

@@ -23,12 +23,6 @@ std::string format_float(float value) {
 	return buffer;
 }
 
-std::string format_int(int value) {
-	char buffer[32];
-	std::snprintf(buffer, sizeof(buffer), "%d", value);
-	return buffer;
-}
-
 void write_color(std::ostream &out, const Color3 &c) {
 	// Engine writer at 0x5e5039 emits "%d, %d, %d" with a single space after
 	// each comma. Mirror exactly.

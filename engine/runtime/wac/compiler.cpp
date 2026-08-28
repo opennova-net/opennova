@@ -60,13 +60,6 @@ int builtin_id(const std::string &name) {
     return -1;
 }
 
-Op fold_for(std::string_view op) {
-    if (op == "and") return Op::FoldAnd;
-    if (op == "or") return Op::FoldOr;
-    if (op == "xor") return Op::FoldNe; // boolean xor == (a != b)
-    return Op::Call;
-}
-
 class Compiler {
 public:
     explicit Compiler(const CompileEnv &env) : env_(env) {}
