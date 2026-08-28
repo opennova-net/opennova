@@ -469,12 +469,6 @@ func has_player() -> bool:
 func local_player_aim_overlay() -> PlayerAimOverlay:
 	return PlayerAimOverlay.from_sim_dict(_sim.get_local_player_aim_overlay()) if _sim != null else null
 
-func local_player_health() -> int:
-	return int(_sim.get_local_player_health()) if _sim != null else 0
-
-func local_player_max_health() -> int:
-	return int(_sim.get_local_player_max_health()) if _sim != null else 100
-
 func local_player_team() -> int:
 	return int(_sim.get_local_player_team()) if _sim != null else 0
 
@@ -738,14 +732,6 @@ func _consume_session_tick(outcome: MissionTickOutcome) -> bool:
 
 func _stats_capture_on() -> bool:
 	return _frame_stats != null and _frame_stats.is_capture_active()
-
-
-func present_entity_rows() -> void:
-	_present_entity_rows(_stats_capture_on())
-
-
-func present_frame() -> void:
-	_present_frame(_stats_capture_on())
 
 
 # Pull the frame's tick accounting into the probe counters from the typed

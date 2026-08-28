@@ -478,13 +478,6 @@ func _cancel_join_preload() -> void:
 	_join_preload_root = null
 
 
-# True between load_as_joiner and stage_runtime_options' config consume: this load is a
-# co-op joiner, so remote pool-0 rows render wire-direct while pools 1-3 use exact
-# streamed native handles rather than local mission placement.
-func is_join_pending() -> bool:
-	return _pending_join != null
-
-
 ## True while the staged host request is a DEDICATED serve (no local-player
 ## spawn, ADR 0015 serve mode); read by the world's playable gate before
 ## stage_runtime_options consumes the request.

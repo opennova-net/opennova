@@ -2829,11 +2829,6 @@ func get_terrain_node() -> Terrain:
 	return _terrain
 
 
-## The live foliage dispatcher (null until a mission builds one), same consumer.
-func get_foliage_dispatcher() -> FoliageDispatcher:
-	return _dispatcher
-
-
 ## The mounted item database (null before a mission), for the F3 snapshot
 ## writer's display-name/graphic enrichment.
 func get_item_db() -> ItemDatabase:

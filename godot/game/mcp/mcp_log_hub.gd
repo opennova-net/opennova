@@ -122,11 +122,6 @@ func get_entries(cursor := 0, limit := 200, sources := PackedStringArray()) -> D
 	}
 
 
-## The newest assigned seq — hand this to clients as a "you are here" cursor.
-func latest_cursor() -> int:
-	return _next_seq - 1
-
-
 ## Test seam (and escape hatch): point the engine tail at a specific file.
 func set_engine_log_path(path: String) -> void:
 	_engine_log_path = path

@@ -8,13 +8,6 @@ extends RefCounted
 ## or not any debug presentation (the dev tools, an automation capture) is
 ## open — views persist until turned off or the mission unloads.
 
-signal catalog_changed
-signal control_changed(id: StringName, state: DebugControlState)
-## Emitted after a public setter/action was accepted. Kept intentionally
-## presentation-neutral.
-signal control_invoked(id: StringName, value: Variant)
-signal edit_unlock_changed(unlocked: bool)
-
 var _definitions: Dictionary = {}
 var _definition_order: Array[StringName] = []
 var _targets: Dictionary = {}
@@ -47,12 +40,7 @@ func register_control(definition: DebugControlDef) -> bool:
 	_definition_order.append(definition.id)
 	if definition.kind != DebugControlDef.Kind.ACTION:
 		_desired_values[definition.id] = definition.default_value
-	catalog_changed.emit()
 	return true
-
-
-func has_control(id: StringName) -> bool:
-	return _definitions.has(id)
 
 
 func definition(id: StringName) -> DebugControlDef:
@@ -166,8 +154,6 @@ func set_control_value(
 	_desired_values[id] = normalized["value"]
 	_explicit_values[id] = true
 	_pending_replays.erase(id)
-	control_invoked.emit(id, normalized["value"])
-	control_changed.emit(id, read_control_state(id))
 	return OK
 
 
@@ -204,8 +190,6 @@ func invoke_control(
 			and int(result) != OK:
 		var action_error: Error = int(result)
 		return _invoke_result(action_error, null, id, allow_authority)
-	control_invoked.emit(id, args)
-	control_changed.emit(id, read_control_state(id))
 	return _invoke_result(OK, result, id, allow_authority)
 
 
@@ -215,15 +199,6 @@ func set_edit_unlocked(unlocked: bool) -> void:
 	_edit_unlocked = unlocked
 	if unlocked:
 		sync()
-	edit_unlock_changed.emit(unlocked)
-	for id in _definition_order:
-		var control := definition(id)
-		if control.requires_unlock:
-			control_changed.emit(id, read_control_state(id))
-
-
-func is_edit_unlocked() -> bool:
-	return _edit_unlocked
 
 
 func set_authority_source(source: Callable) -> void:
@@ -445,23 +420,3 @@ func _invoke_result(
 		"result": DebugControlState._json_value(result),
 		"state": read_control_state(id, allow_authority).to_json_value(),
 	}
-
-
-## Turn an invoke_control result into non-empty presentation text. A public
-## action can fail after its catalog state was read (for example, an entity is
-## despawned between refresh and click), so state.reason alone is not enough.
-static func invoke_error_message(
-		outcome: Dictionary,
-		fallback: String = "Debug action failed.") -> String:
-	var code := int(outcome.get("error", ERR_UNAVAILABLE))
-	if code == OK:
-		return ""
-	var state_value: Variant = outcome.get("state", {})
-	var state: Dictionary = state_value if state_value is Dictionary else {}
-	var reason := String(state.get("reason", "")).strip_edges()
-	if not reason.is_empty():
-		return reason
-	var detail := error_string(code).strip_edges()
-	if detail.is_empty():
-		return fallback
-	return "%s (%s)" % [fallback.trim_suffix("."), detail]

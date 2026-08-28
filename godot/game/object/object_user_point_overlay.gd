@@ -62,10 +62,6 @@ func get_user_point_count() -> int:
 	return _object_data.get_user_point_count()
 
 
-func refresh_points() -> void:
-	_rebuild()
-
-
 ## Resolve the current source pose immediately. Debug owners and tests use this
 ## instead of reaching through the process callback.
 func refresh_now() -> void:
