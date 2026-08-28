@@ -4,9 +4,9 @@
 #include <formats/cpt/cpt_io.h>
 #include <formats/mission/mission.h>
 #include <formats/trn/trn_io.h>
-#include <net/npruntime/ammo_table_build.h>
+#include <runtime/world/ammo_table_build.h>
 #include <net/npruntime/server_message_dispatch.h>
-#include <net/npruntime/weapon_table_build.h>
+#include <runtime/world/weapon_table_build.h>
 #include <net/npwire/game_type.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
@@ -362,7 +362,7 @@ bool RetailMissionRig::load_weapon_table() {
 	if (!index.read_file("weapon.def", bytes)) return false;
 	DefWeaponsFile file = {};
 	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file) != 0) return false;
-	world.weapons = np::build_weapon_table(file, &index);
+	world.weapons = world::build_weapon_table(file, &index);
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
 	weapon_defs = file;
 	weapon_defs_ok = true;
@@ -400,9 +400,9 @@ bool RetailMissionRig::load_ammo_table() {
 	if (!index.read_file("ammo.def", bytes)) return false;
 	DefAmmoFile file = {};
 	if (def_parse_ammo_memory(bytes.data(), bytes.size(), &file) != 0) return false;
-	world.ammo = np::build_ammo_table(file);
+	world.ammo = world::build_ammo_table(file);
 	def_free_ammo(&file);
-	np::resolve_weapon_round_types(world.weapons, world.ammo);
+	world::resolve_weapon_round_types(world.weapons, world.ammo);
 	w::local_loadout_sync_damage_classes(world, loadout);
 	ammo_ok = true;
 	return true;

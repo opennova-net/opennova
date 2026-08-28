@@ -12,8 +12,8 @@
 //   filters  — team red=1/blue=2, char medic..engineer bits; class/type masks
 //              [orig: @0x502666/@0x502693/@0x502716].
 
-#include <net/npruntime/weapon_table_build.h>
-#include <net/npruntime/ammo_table_build.h>
+#include <runtime/world/weapon_table_build.h>
+#include <runtime/world/ammo_table_build.h>
 #include <net/npruntime/loadout_submit.h>
 
 #include <formats/def/def.h>
@@ -59,7 +59,7 @@ static int live_weapon_oracle(const std::string &install, const std::string &exp
 		std::fprintf(stderr, "FAIL: mounted weapon.def does not parse\n");
 		return 1;
 	}
-	const world::WeaponTable live = np::build_weapon_table(live_file);
+	const world::WeaponTable live = world::build_weapon_table(live_file);
 	std::printf("LIVE weapon.def bytes=%zu entries=%zu expansion=%s\n", bytes.size(),
 	            live.entries.size(), vfs.mounted_expansion().c_str());
 	for (size_t i = 0; i < live.ammo_class_names.size(); ++i)
@@ -101,7 +101,7 @@ int main(void) {
 		return 1;
 	}
 
-	const world::WeaponTable table = np::build_weapon_table(wf);
+	const world::WeaponTable table = world::build_weapon_table(wf);
 
 	// --- index allocation: null@0 + file order, 1-based.
 	CHECK(table.entries.size() == wf.count + 1);
@@ -166,42 +166,42 @@ int main(void) {
 
 	// --- ammo resolution branches.
 	{
-		np::LoadoutAmmoBytes a = np::resolve_loadout_ammo(table, 2, 0xFF); // KNIFE2: no-clip
+		world::LoadoutAmmoBytes a = world::resolve_loadout_ammo(table, 2, 0xFF); // KNIFE2: no-clip
 		CHECK(a.primary == 0xFF && a.secondary == 0xFF);
-		a = np::resolve_loadout_ammo(table, 3, 0xFF); // colt45: 35/7
+		a = world::resolve_loadout_ammo(table, 3, 0xFF); // colt45: 35/7
 		CHECK(a.primary == 5 && a.secondary == 0xFF);
-		a = np::resolve_loadout_ammo(table, 9, 0xFF); // M4AUTO: 300/30; variant M4 shares class
+		a = world::resolve_loadout_ammo(table, 9, 0xFF); // M4AUTO: 300/30; variant M4 shares class
 		CHECK(a.primary == 10 && a.secondary == 0xFF);
-		a = np::resolve_loadout_ammo(table, 9, 4); // requested 4 -> min(4, maxclips 10)
+		a = world::resolve_loadout_ammo(table, 9, 4); // requested 4 -> min(4, maxclips 10)
 		CHECK(a.primary == 4 && a.secondary == 0xFF);
-		a = np::resolve_loadout_ammo(table, 9, 200); // requested over maxclips -> clamp to 10
+		a = world::resolve_loadout_ammo(table, 9, 200); // requested over maxclips -> clamp to 10
 		CHECK(a.primary == 10);
 		// M4M203AUTO @11 (LSC 2): M4M203 shares CLASS_556MM, M4M203HE is CLASS_40MMNADE -> 6/1.
 		CHECK(table.index_of("WPN_M4M203AUTO") == 11);
-		a = np::resolve_loadout_ammo(table, 11, 0xFF);
+		a = world::resolve_loadout_ammo(table, 11, 0xFF);
 		CHECK(a.primary == 10 && a.secondary == 6);
 		const int he = table.index_of("WPN_GRENADEHE");
 		CHECK(he > 0);
-		a = np::resolve_loadout_ammo(table, static_cast<uint8_t>(he), 0xFF); // 3/1
+		a = world::resolve_loadout_ammo(table, static_cast<uint8_t>(he), 0xFF); // 3/1
 		CHECK(a.primary == 3 && a.secondary == 0xFF);
-		a = np::resolve_loadout_ammo(table, 250, 0xFF); // no entry
+		a = world::resolve_loadout_ammo(table, 250, 0xFF); // no entry
 		CHECK(a.primary == 0xFF && a.secondary == 0xFF);
 	}
 
 	// --- permission masks.
 	{
 		const world::WeaponTableEntry &m4e = *table.by_index(9);
-		CHECK(np::loadout_entry_permitted(m4e, 1, 8));  // blue rifleman
-		CHECK(!np::loadout_entry_permitted(m4e, 2, 8)); // red side: M4 is blue-only
-		CHECK(!np::loadout_entry_permitted(m4e, 1, 6)); // sniper bit not in rifleman|medic|engineer
-		CHECK(np::loadout_entry_permitted(m4e, 1, 5));  // medic bit present
-		CHECK(np::loadout_entry_permitted(m4e, 0, 2));  // class 1..3 -> all char bits; class 0 -> both teams
+		CHECK(world::loadout_entry_permitted(m4e, 1, 8));  // blue rifleman
+		CHECK(!world::loadout_entry_permitted(m4e, 2, 8)); // red side: M4 is blue-only
+		CHECK(!world::loadout_entry_permitted(m4e, 1, 6)); // sniper bit not in rifleman|medic|engineer
+		CHECK(world::loadout_entry_permitted(m4e, 1, 5));  // medic bit present
+		CHECK(world::loadout_entry_permitted(m4e, 0, 2));  // class 1..3 -> all char bits; class 0 -> both teams
 		const world::WeaponTableEntry &k2 = *table.by_index(2); // KNIFE2: red, all classes
-		CHECK(np::loadout_entry_permitted(k2, 2, 8));
-		CHECK(!np::loadout_entry_permitted(k2, 1, 8));
+		CHECK(world::loadout_entry_permitted(k2, 2, 8));
+		CHECK(!world::loadout_entry_permitted(k2, 1, 8));
 		// An unfiltered (emplaced) entry is never loadout-visible: masks are 0.
 		const int mini = table.index_of("WPN_WEAKAIMINI");
-		CHECK(mini > 0 && !np::loadout_entry_permitted(*table.by_index(static_cast<uint8_t>(mini)), 1, 8));
+		CHECK(mini > 0 && !world::loadout_entry_permitted(*table.by_index(static_cast<uint8_t>(mini)), 1, 8));
 		const world::WeaponTableEntry &minie =
 				*table.by_index(static_cast<uint8_t>(mini));
 		CHECK(minie.action_fsm.auto_fire);
@@ -211,11 +211,11 @@ int main(void) {
 	}
 
 	// --- token -> bit maps [orig: @0x830EB0 / @0x830ED8].
-	CHECK(np::charfilter_bit("medic") == 0x01 && np::charfilter_bit("sniper") == 0x02 &&
-	      np::charfilter_bit("gunner") == 0x04 && np::charfilter_bit("rifleman") == 0x08 &&
-	      np::charfilter_bit("engineer") == 0x10 && np::charfilter_bit("bogus") == 0);
-	CHECK(np::teamfilter_bit("red") == 0x01 && np::teamfilter_bit("BLUE") == 0x02 &&
-	      np::teamfilter_bit("green") == 0);
+	CHECK(world::charfilter_bit("medic") == 0x01 && world::charfilter_bit("sniper") == 0x02 &&
+	      world::charfilter_bit("gunner") == 0x04 && world::charfilter_bit("rifleman") == 0x08 &&
+	      world::charfilter_bit("engineer") == 0x10 && world::charfilter_bit("bogus") == 0);
+	CHECK(world::teamfilter_bit("red") == 0x01 && world::teamfilter_bit("BLUE") == 0x02 &&
+	      world::teamfilter_bit("green") == 0);
 
 	// --- C2S 0x2F send-time slot re-resolution. The requested red-only
 	// category-3 slot is corrected to the first populated blue slot for teams
@@ -277,7 +277,7 @@ int main(void) {
 		source.kz_physics = -1;
 		source.scorch_id = 7;
 		DefAmmoFile af{&source, 1};
-		const world::AmmoTable ammo_table = np::build_ammo_table(af);
+		const world::AmmoTable ammo_table = world::build_ammo_table(af);
 		const world::AmmoTableEntry *baked = ammo_table.by_index(0);
 		CHECK(baked != nullptr && baked->spread_error_fp16 == 12345);
 		CHECK(baked != nullptr && baked->recoil[0] == 255 && baked->recoil[1] == 0 &&
@@ -300,7 +300,7 @@ int main(void) {
 		std::memset(&mini, 0, sizeof(mini));
 		CHECK(def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(kMini),
 		                               sizeof(kMini) - 1, &mini) == 0);
-		const world::WeaponTable t2 = np::build_weapon_table(mini);
+		const world::WeaponTable t2 = world::build_weapon_table(mini);
 		CHECK(t2.entries.size() == 3); // null + A + B (the re-parsed A reused its slot)
 		CHECK(t2.index_of("WPN_A") == 1 && t2.index_of("WPN_B") == 2);
 		CHECK(t2.by_index(1)->category == 3); // overwritten by the second WPN_A block
@@ -329,8 +329,8 @@ int main(void) {
 
 		opennova::ResourceIndex index;
 		CHECK(index.scan(std::string(repo_root) + "/fixtures/anim"));
-		const world::WeaponTable unresolved = np::build_weapon_table(automatic);
-		const world::WeaponTable resolved = np::build_weapon_table(automatic, &index);
+		const world::WeaponTable unresolved = world::build_weapon_table(automatic);
+		const world::WeaponTable resolved = world::build_weapon_table(automatic, &index);
 		const world::WeaponFsmAction &unresolved_fire =
 				unresolved.by_index(1)->action_fsm.actions[world::weapon_action::kFire];
 		const world::WeaponFsmAction &resolved_fire =
@@ -355,7 +355,7 @@ int main(void) {
 		CHECK(def_parse_weapons_memory(
 				reinterpret_cast<const uint8_t *>(kNoAdm),
 				sizeof(kNoAdm) - 1, &no_adm) == 0);
-		const world::WeaponTable no_adm_table = np::build_weapon_table(no_adm, &index);
+		const world::WeaponTable no_adm_table = world::build_weapon_table(no_adm, &index);
 		const world::WeaponFsmAction &no_adm_fire =
 				no_adm_table.by_index(1)->action_fsm.actions[world::weapon_action::kFire];
 		CHECK(no_adm_fire.delay_start == 0 && no_adm_fire.delay_end == 0);

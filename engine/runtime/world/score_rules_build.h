@@ -19,7 +19,7 @@
 
 #include <cstdint>
 
-namespace opennova::np {
+namespace opennova::world {
 
 // Resolve the row for `game_type` [orig: @0x52D300 via score::row_for_game_type] and
 // pull the awards this port reads. Returns a `!valid` ScoreRules (all zero) when the
@@ -27,4 +27,4 @@ namespace opennova::np {
 // falling back to a guessed value.
 world::ScoreRules build_score_rules(const score::File &config, uint32_t game_type);
 
-} // namespace opennova::np
+} // namespace opennova::world

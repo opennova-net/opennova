@@ -857,7 +857,7 @@ void Simulation::refresh_score_rules() {
 	}
 	const uint32_t mode = opennova::bms::selected_game_mode(
 			static_cast<opennova::bms::AttribFlags>(world_->mission_attrib_flags));
-	world_->score_rules = opennova::np::build_score_rules(
+	world_->score_rules = opennova::world::build_score_rules(
 			score_config_, opennova::game_type::for_mission_mode(mode));
 }
 
@@ -878,7 +878,7 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 	DefWeaponsFile file = {};
 	if (def_parse_weapons_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
 		return ERR_CANT_OPEN;
-	world_->weapons = opennova::np::build_weapon_table(
+	world_->weapons = opennova::world::build_weapon_table(
 			file, &p_resource_root->native_index());
 	// Retain the parse (S6b): the by-name FSM install reads its full rows —
 	// the ACCEPT chain rebuilds the slot table with no shell dictionary and no
@@ -960,9 +960,9 @@ Error Simulation::load_ammo_table(const Ref<ResourceRoot> &p_resource_root,
 	DefAmmoFile file = {};
 	if (def_parse_ammo_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
 		return ERR_CANT_OPEN;
-	world_->ammo = opennova::np::build_ammo_table(file);
+	world_->ammo = opennova::world::build_ammo_table(file);
 	def_free_ammo(&file);
-	opennova::np::resolve_weapon_round_types(world_->weapons, world_->ammo);
+	opennova::world::resolve_weapon_round_types(world_->weapons, world_->ammo);
 	sync_local_player_damage_classes();
 	return OK;
 }

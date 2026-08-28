@@ -1,4 +1,4 @@
-#include <net/npruntime/weapon_table_build.h>
+#include <runtime/world/weapon_table_build.h>
 
 #include <base/io/strutil.h>
 #include <runtime/simassets/adm_clip_index.h>
@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
-namespace opennova::np {
+namespace opennova::world {
 
 // engine/runtime/world mirrors these DEF_* bits beside their consumers (world stays
 // def-parser-free). npruntime legally sees both headers, so this TU pins every
@@ -357,4 +357,4 @@ world::WeaponTable build_weapon_table(
 	return table;
 }
 
-} // namespace opennova::np
+} // namespace opennova::world

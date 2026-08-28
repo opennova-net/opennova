@@ -13,7 +13,7 @@ namespace opennova {
 class ResourceIndex;
 }
 
-namespace opennova::np {
+namespace opennova::world {
 
 // charfilter token -> bit: medic=1 sniper=2 gunner=4 rifleman=8 engineer=0x10
 // [orig: token table @0x830EB0, OR-ed @0x543F6E]. 0 = unrecognized (the original warns + skips).
@@ -57,4 +57,4 @@ LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t a
 world::WeaponTable build_weapon_table(
 		const DefWeaponsFile &weapons, const ResourceIndex *resources = nullptr);
 
-} // namespace opennova::np
+} // namespace opennova::world

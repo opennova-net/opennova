@@ -15,13 +15,13 @@
 // so the encrypted 0x83 replies decode without any test accessor.
 
 #include <net/npruntime/napi_np_protocol.h>
-#include <net/npruntime/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
+#include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <net/npruntime/integrity_challenge_profile.h>
 #include <net/npruntime/lan_discovery.h>
 #include <net/npruntime/server_message_dispatch.h>
 #include <net/npruntime/server_spawn.h>
 #include <net/npruntime/server_tick.h>
-#include <net/npruntime/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
+#include <runtime/world/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
 #include <formats/def/def.h>
 #include <runtime/world/ai.h>
@@ -1996,15 +1996,15 @@ bool run_loadout_resolve_with_armory() {
 	DefWeaponsFile wf{};
 	if (!expect(def_parse_weapons(def_path, &wf) == 0, "fixture weapon.def parses")) return false;
 	world::World world;
-	world.weapons = np::build_weapon_table(wf);
+	world.weapons = world::build_weapon_table(wf);
 	def_free_weapons(&wf);
 	char ammo_path[4096];
 	std::snprintf(ammo_path, sizeof(ammo_path), "%s/fixtures/def/ammo.def", repo_root);
 	DefAmmoFile af{};
 	if (!expect(def_parse_ammo(ammo_path, &af) == 0, "fixture ammo.def parses")) return false;
-	world.ammo = np::build_ammo_table(af);
+	world.ammo = world::build_ammo_table(af);
 	def_free_ammo(&af);
-	np::resolve_weapon_round_types(world.weapons, world.ammo);
+	world::resolve_weapon_round_types(world.weapons, world.ammo);
 	ctx.world = &world;
 
 	const PeerAddr peer{0x0100007Fu, 30100};

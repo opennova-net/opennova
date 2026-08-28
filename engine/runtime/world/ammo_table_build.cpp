@@ -1,9 +1,9 @@
 // See ammo_table_build.h. docs/net/novaworld-net-re.md §5.60.
-#include <net/npruntime/ammo_table_build.h>
+#include <runtime/world/ammo_table_build.h>
 
 #include <base/io/strutil.h>
 
-namespace opennova::np {
+namespace opennova::world {
 
 world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 	world::AmmoTable table;
@@ -96,4 +96,4 @@ void resolve_weapon_round_types(world::WeaponTable &weapons, const world::AmmoTa
 	}
 }
 
-} // namespace opennova::np
+} // namespace opennova::world
