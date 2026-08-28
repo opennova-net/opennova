@@ -69,7 +69,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		ctx.log("[gore-visual] unresolved textures: %s" % str(unresolved))
 
 	await ctx.wait_frames(8)
-	_before = await _capture()
+	_before = await _stage.capture_after_render(_ctx.tree, _fx)
 	if _before == null:
 		return ProbeVerdict.failed("the baseline capture produced no image")
 
@@ -92,14 +92,14 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 						int(emitter.get("alive", 0))])
 			census.append("[%s]" % ",".join(names))
 		ctx.log("[gore-visual] tick %d emitters %s" % [tick + 1, " ".join(census)])
-	var after := await _capture()
+	var after := await _stage.capture_after_render(_ctx.tree, _fx)
 	if after == null:
 		return ProbeVerdict.failed("the after capture produced no image")
 
 	var emitters := 0
 	for group_v in _fx.get_debug_group_report():
 		emitters += ((group_v as Dictionary).get("emitters", []) as Array).size()
-	var changed := _changed_pixels(_before, after)
+	var changed := ProbeCapture.changed_pixels(_before, after, 90)
 	ctx.log("[gore-visual] handle %d, spawned %d/%d, %d live emitter(s), %d changed pixel(s)"
 			% [handle, spawned, HIT_POINTS.size(), emitters, changed])
 
@@ -168,24 +168,3 @@ func _build_stage() -> void:
 	layer.add_child(_caption)
 
 
-func _capture() -> Image:
-	_fx.render_frame()
-	await _ctx.tree.process_frame
-	return await _stage.capture_image(_ctx.tree)
-
-
-func _changed_pixels(reference: Image, candidate: Image) -> int:
-	if reference == null or candidate == null \
-			or reference.get_size() != candidate.get_size():
-		return -1
-	var changed := 0
-	# Skip the caption band: the BEFORE/AFTER label change is intentional and must
-	# not be scored as particle visibility.
-	for y_value in range(90, reference.get_height()):
-		for x_value in range(reference.get_width()):
-			var before := reference.get_pixel(x_value, y_value)
-			var after := candidate.get_pixel(x_value, y_value)
-			if absf(before.r - after.r) + absf(before.g - after.g) \
-					+ absf(before.b - after.b) > 0.12:
-				changed += 1
-	return changed

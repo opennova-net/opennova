@@ -63,7 +63,7 @@ class StaticTerrainShadowWarmupSuspension:
 			terrain.call("set_static_terrain_shadow_enabled", original_enabled)
 
 
-var _game: Node
+var _game: MainGame
 var _world: GameWorld
 var _capture_size := RenderFixtureContract.DEFAULT_CAPTURE_SIZE
 var _expected_mission_time_fixed24 := -1

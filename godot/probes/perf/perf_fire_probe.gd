@@ -166,13 +166,12 @@ func _attribution_legs(shell: Node, world: GameWorld, runtime: MissionPresentati
 		hud_layer.set("visible", was_visible)
 	# Split A/B: which half of the shell's frame callback drags the
 	# out-of-process cost with it (deferred/RS-side work its calls generate)?
-	# MainGame keeps these as properties (it sits at the file-size ratchet).
 	legs["worldoff"] = await _leg_world_off()
-	shell.set("_perf_probe_skip_hud", true)
+	shell.get_perf_probe_switches().skip_hud = true
 	_hud_skipped = true
 	await ctx.wait_ms(500)
 	legs["hudtickoff"] = await _measure("hudtickoff", 3000)
-	shell.set("_perf_probe_skip_hud", false)
+	shell.get_perf_probe_switches().skip_hud = false
 	_hud_skipped = false
 	# Existing presenter options provide state-safe A/Bs without a production
 	# probe branch: freeze transform/visibility/body submission independently
@@ -248,11 +247,11 @@ func _leg_world_off() -> Dictionary:
 	var shell := _ctx.game()
 	if shell == null:
 		return {avg = -1.0}
-	shell.set("_perf_probe_skip_world", true)
+	shell.get_perf_probe_switches().skip_world = true
 	_world_skipped = true
 	await _ctx.wait_ms(300)
 	var st := await _measure("worldoff", 3000)
-	shell.set("_perf_probe_skip_world", false)
+	shell.get_perf_probe_switches().skip_world = false
 	_world_skipped = false
 	return st
 
@@ -328,8 +327,8 @@ func _counter_row(sec_frames: int, sec_accum: float) -> String:
 	var spans := ""
 	var shell := _ctx.game()
 	if shell != null:
-		var mg = shell.get("_perf_probe_spans")
-		if mg is Dictionary and not (mg as Dictionary).is_empty():
+		var mg: Dictionary = shell.get_perf_probe_switches().spans
+		if not mg.is_empty():
 			spans += " main{before=%.1f world=%.1f after=%.1f hud=%.1f}" % [
 					float(mg.get("before", 0)) / 1000.0, float(mg.get("world", 0)) / 1000.0,
 					float(mg.get("after", 0)) / 1000.0, float(mg.get("hud", 0)) / 1000.0]

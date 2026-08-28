@@ -75,13 +75,13 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	if not built:
 		return ProbeVerdict.failed(_failure)
 
-	await _settle_frames(8)
+	await _stage.settle(_ctx.tree, _fx, 8)
 	if _fx != null:
 		for _tick in range(10):
 			_fx.advance_fixed_tick(TICK_DT)
 			_fx.render_frame()
 			await ctx.tree.process_frame
-	var image := await _capture_image()
+	var image := await _stage.capture_after_render(_ctx.tree, _fx)
 	var file_path := output_dir.path_join("capture.png")
 	if image == null or image.save_png(file_path) != OK:
 		return ProbeVerdict.failed("could not save %s" % file_path)
@@ -505,18 +505,6 @@ func _write_text(path: String, text: String) -> bool:
 	return true
 
 
-func _settle_frames(count: int) -> void:
-	for _index in range(count):
-		if _fx != null:
-			_fx.render_frame()
-		await _ctx.tree.process_frame
-
-
-func _capture_image() -> Image:
-	if _fx != null:
-		_fx.render_frame()
-	await _ctx.tree.process_frame
-	return await _stage.capture_image(_ctx.tree)
 
 
 func _fail(message: String) -> bool:

@@ -87,6 +87,23 @@ func clear_scene() -> void:
 		child.free()
 
 
+## Frames rendered on the stage: the effect world's frame first, then the tree's.
+func settle(tree: SceneTree, fx: EffectWorld, count: int) -> void:
+	for _index in range(count):
+		if fx != null:
+			fx.render_frame()
+		await tree.process_frame
+
+
+## One rendered effect-world frame, then the stage read back (null when
+## nothing rendered).
+func capture_after_render(tree: SceneTree, fx: EffectWorld) -> Image:
+	if fx != null:
+		fx.render_frame()
+	await tree.process_frame
+	return await capture_image(tree)
+
+
 ## The stage's next drawn frame as an Image (null when nothing rendered).
 func capture_image(tree: SceneTree, settle_frames := 0) -> Image:
 	for _i in range(settle_frames):
