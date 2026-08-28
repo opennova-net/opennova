@@ -18,6 +18,11 @@
 
 namespace opennova::world {
 
+// The DEATH deploy screen re-reads its content every 16 ticks (0.256 s at the
+// 62.5 Hz tick); the cadence rides the tick, not a wall-clock timer.
+// [orig: every 16 ticks @0x55477d]
+inline constexpr int32_t kDeployRefreshTicks = 16;
+
 // One player queued on a zone's wave [orig: the member handles at
 // unk_A85CC4[zoneIdx*8+i], named through entity->Name @0x553d5a..0x553d7f].
 struct DeployOccupant {

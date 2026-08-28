@@ -273,7 +273,7 @@ float player_view_tp_effective_distance(float distance) {
 
 namespace {
 
-constexpr double kRadPerDeg = 3.14159265358979323846 / 180.0;
+constexpr double kRadPerDeg = io::kRadiansPerDegree;
 
 // The mission-frame view axes for a yaw/pitch pair (roll spins about forward
 // and moves none of these) — the (x, z, -y) godot conversion of the presented

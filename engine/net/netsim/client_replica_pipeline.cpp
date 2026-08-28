@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <base/io/fixed.h>
 
 namespace opennova::netsim {
 
@@ -462,15 +463,15 @@ void row_deck_ride(ClientEntityState &es,
 	if (dyaw != 0 || dpitch != 0 || droll != 0) {
 		auto q22c = [](int32_t bam) {
 			return static_cast<int32_t>(
-					std::cos(static_cast<double>(bam) * kRadPerBam) * 4194304.0);
+					std::cos(static_cast<double>(bam) * kRadPerBam) * io::kQ22One);
 		};
 		auto q22s = [](int32_t bam) {
 			return static_cast<int32_t>(
-					std::sin(static_cast<double>(bam) * kRadPerBam) * 4194304.0);
+					std::sin(static_cast<double>(bam) * kRadPerBam) * io::kQ22One);
 		};
 		auto q22s_neg = [](int32_t bam) {
 			return static_cast<int32_t>(
-					std::sin(static_cast<double>(bam) * kRadPerBam) * -4194304.0);
+					std::sin(static_cast<double>(bam) * kRadPerBam) * -io::kQ22One);
 		};
 		auto m22 = [](int32_t a, int32_t b) {
 			return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
@@ -525,8 +526,8 @@ void row_deck_ride(ClientEntityState &es,
 	if (dyaw != 0 || dpitch != 0 || droll != 0) {
 		const int32_t rel_yaw = io::bam_sub(cp.yaw, rider_yaw_before);
 		const double rr = static_cast<double>(rel_yaw) * kRadPerBam;
-		const int32_t rc = static_cast<int32_t>(std::cos(rr) * 4194304.0);
-		const int32_t rs = static_cast<int32_t>(std::sin(rr) * 4194304.0);
+		const int32_t rc = static_cast<int32_t>(std::cos(rr) * io::kQ22One);
+		const int32_t rs = static_cast<int32_t>(std::sin(rr) * io::kQ22One);
 		auto m22 = [](int32_t a2, int32_t b2) {
 			return static_cast<int32_t>((static_cast<int64_t>(a2) * b2) >> 22);
 		};
@@ -702,10 +703,12 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 	if (eye_h < 0x2000) eye_h = 0x2000;
 	if (es.cls == EntityClass::Player) {
 		// The org2 buoyant-rise form, REMOTE arm: flat base -0x4C9 (the
-		// surface bob is local-player-only in org2 [orig: @0x4b8063..0x4b80a5,
-		// else-arm 0xFFFFFB37]) and no look-pitch dive term (gated
-		// local-or-authority [orig: @0x4b80aa..0x4b8102]).
-		const int32_t base = cb_neg - 0x4C9;
+		// surface bob AND the capsule-bottom term are local-player-only in
+		// org2 [orig: @0x4b8063..0x4b8095 `-1225 - bob + v345` vs the else-arm
+		// @0x4b80a5 `v347 = -1225`]) and no look-pitch dive term (gated
+		// local-or-authority [orig: @0x4b80aa..0x4b8102]). cb_neg stays the
+		// org1 target line's term below.
+		const int32_t base = -0x4C9;
 		const int32_t base_q = base >> 4;
 		es.z = io::bam_add(es.z, (base_q < 0 ? -base_q : base_q) + 0x70);
 		// The velocity-triplet drag [orig: @0x4b8124..0x4b8163].
@@ -894,9 +897,9 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// @0x4B7CBF..0x4B7CEF, before resolver call @0x4B7CF4].
 	if (is_self) return;
 	const double rad = static_cast<double>(move_heading) *
-	                   (3.14159265358979323846 / 2147483648.0);
-	const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
-	const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+	                   io::kRadiansPerBam;
+	const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
+	const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
 	int32_t wx =
 			static_cast<int32_t>((static_cast<int64_t>(fwd) * c) >> 22) -
 			static_cast<int32_t>((static_cast<int64_t>(lat) * s) >> 22);

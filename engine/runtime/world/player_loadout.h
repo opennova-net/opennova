@@ -2,7 +2,7 @@
 // table, the resident spawn kit (retail's restrictionData), the pre-spawn
 // class latch, and the witnessed orchestration over them — the mission-rules
 // promotion with its SP-vs-net gate, the armory ACCEPT apply, and the
-// Player_InitPlayer spawn rebuild. Moved verbatim from the shell adapter
+// Player_InitPlayer spawn rebuild. Moved verbatim from the shell binding
 // (net-re §5.57/§5.63); the embedder feeds plain kit tuples and routes the
 // joiner wire submissions — the rules never touch the wire.
 // [orig: the SP chunk promotion + gate Mission_LoadBMSFile @ 0x40F4E0; the

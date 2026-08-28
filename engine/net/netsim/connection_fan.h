@@ -52,7 +52,6 @@ int entity_send_budget();
 // terms exactly as an unwritten retail global does; the sim wires it from the
 // same env value the occlusion camera uses. (D-NET-139)
 void set_view_distance_units(int units);
-int view_distance_units();
 
 // Serialize the live world into ONE S2C 0x0A frame for `conn`, anchored to its
 // live owned entity, and host_send it onto that connection's transport. A

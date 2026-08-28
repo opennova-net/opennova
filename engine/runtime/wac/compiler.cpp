@@ -56,6 +56,7 @@ int builtin_id(const std::string &name) {
     if (ieq(name, "WinVar")) return static_cast<int>(Builtin::WinVar);
     if (ieq(name, "LoseVar")) return static_cast<int>(Builtin::LoseVar);
     if (ieq(name, "accuracyspread")) return static_cast<int>(Builtin::AccuracySpread);
+    if (ieq(name, "fallmps")) return static_cast<int>(Builtin::Fallmps);
     return -1;
 }
 
@@ -146,9 +147,11 @@ private:
         const int named_value = builtin_id(t);
         if (type == ParamType::Variable) {
             // Retail's named-value table stores direct pointers. Port the writable
-            // accuracyspread row without pretending the cache-only rows are lvalues.
-            // [orig: WacScript_ResolveParameter @0x4f2940; named table @0x82EEF0]
-            if (named_value == static_cast<int>(Builtin::AccuracySpread)) {
+            // accuracyspread / fallmps rows without pretending the cache-only rows
+            // are lvalues. [orig: WacScript_ResolveParameter @0x4f2940; named table
+            // @0x82EEF0]
+            if (named_value == static_cast<int>(Builtin::AccuracySpread) ||
+                named_value == static_cast<int>(Builtin::Fallmps)) {
                 return encode_operand(OperandKind::Builtin,
                                       static_cast<uint32_t>(named_value));
             }

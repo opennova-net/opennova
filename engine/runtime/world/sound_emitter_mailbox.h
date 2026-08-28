@@ -21,7 +21,7 @@ namespace opennova::world {
 struct SoundEmitterEvent {
     uint64_t source_spawn_id = 0; // registry lifetime serial; survives handle reuse safely
     uint16_t source_handle = 0xFFFF;
-    Vec3 pos{};                   // mission frame; the Godot adapter axis-maps on drain
+    Vec3 pos{};                   // mission frame; the Godot binding axis-maps on drain
     int32_t source_bms_id = 0;    // occlusion source identity
     uint32_t emitted_tick = 0;    // post-producer world clock; preserves catch-up chronology
     uint8_t lane = 0;             // original slot-type byte (vehicle: 0/10/20)

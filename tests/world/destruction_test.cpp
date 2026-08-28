@@ -255,15 +255,39 @@ void test_explosion_damage_gates() {
     CHECK(b->health == 20); // 120 - 100 (no falloff inside kz_minradius)
     CHECK(w.destruction.explosions_processed == 1);
 
+    // The falloff is 16.16 with a truncating quotient and a rounded multiply
+    // [orig: @0x4e6943-0x4e699c]: surface 3.5 u of the 1..8 band is t16 = 23405
+    // (0.357132), so 77 -> (77 * 42131 + 0x8000) >> 16 = 50 where the float form
+    // 77 * (1 - 0.35714287) + 0.5 truncates to 49.
+    b->health = 300;
+    w.ammo.entries[1].kz_damage = 77;
+    ExplosionEntry far = e;
+    far.pos = Vec3{5.5f, 0.0f, 0.0f}; // center distance 4.5, bound 1.0 -> surface 3.5
+    w.explosions.queue_explosion(w, far);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.destruction);
+    CHECK(w.registry.get(barrel)->health == 300 - 50);
+    w.ammo.entries[1].kz_damage = 100;
+
     // Blast armor gate: an ammo whose penetration_kz is below the armor word
-    // zeroes its damage [orig: @0x4e69b0].
+    // zeroes its damage [orig: @0x4e69b0] -- but the last-attacker store precedes
+    // the damage math, so a 0-damage blast still rebinds it [orig: @0x4e68b0].
     b->health = 120;
+    b->last_attacker = EntityHandle{};
     ItemDeathTraits armored = barrel_traits();
     armored.armor_blast = 60; // > penetration_kz 50
     w.item_death_traits.set(500, armored);
+    Entity attacker_seed;
+    attacker_seed.kind = EntityKind::Organic;
+    attacker_seed.health = 100;
+    attacker_seed.position = Vec3{50.0f, 0.0f, 0.0f};
+    w.registry.configure_pool(0, 4);
+    const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
+    e.owner = attacker;
     w.explosions.queue_explosion(w, e);
     w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.destruction);
     CHECK(w.registry.get(barrel)->health == 120);
+    CHECK(w.registry.get(barrel)->last_attacker == attacker);
+    e.owner = EntityHandle{};
 
     // Invulnerable word (-1 = 0xFFFF) [orig: @0x4e68aa].
     armored.armor_blast = -1;

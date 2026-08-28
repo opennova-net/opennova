@@ -25,7 +25,7 @@ class World;
 struct RoundSpawnParams; // world/round_sim.h
 
 // The wire round-event arm bits, mirrored from the npwire decoder constants
-// (the adapter static_asserts the pairing; world never links the net stack).
+// (the binding static_asserts the pairing; world never links the net stack).
 // Bit 0 is tested FIRST: set -> the ammo-def arm. Only with bit 0 clear does
 // bit 1 select the adm-indexed arm. [orig: NetPacket_DeserializeRoundEvent
 // @ 0x42f270 — bit 0 @ 0x42f521, bit 1 @ 0x42f6ce]

@@ -91,6 +91,12 @@ bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
 
 } // namespace
 
+// The mounted body's heading refresh after the seat frame is applied: the local
+// player, a gunner seat and a remote peer driving the vehicle keep their own
+// full-precision LOOK heading/pitch (retail restores the occupant's independent
+// look yaw/pitch after the seat transform), every other rider adopts the seat
+// heading. [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0, the look
+// restore @0x546661 / @0x546664; world-wac-ai-re.md §22.4 / §5.38]
 bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
     Entity *occupant = world.registry.get(e.handle);
     if (occupant == nullptr || !occupant->mounted || occupant->health <= 0) return false;

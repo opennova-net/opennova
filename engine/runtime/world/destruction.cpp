@@ -363,18 +363,28 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
     // Indestructible / invulnerable armor word [orig: @ 0x4e68aa].
     if ((target.engine_flags & kEntityFlagIndestructible) != 0) return;
     if (traits != nullptr && traits->armor_blast == -1) return;
+    // The last-attacker store happens right after the gates and BEFORE any damage
+    // math, so a blast that resolves to 0 damage still rebinds the victim's
+    // attacker [orig: `pad_1ba = sourceHandle->groundEntity` @ 0x4e68b0].
+    target.last_attacker = attacker;
 
     const AmmoTableEntry *ammo = world.ammo.by_index(e.ammo_index);
     if (ammo == nullptr) return;
     // Authority-only base damage [orig: @ 0x4e68cf — non-authority reads 0].
     int32_t damage = ammo->kz_damage; // [orig: ammoDef word +46 @ 0x4e68d5]
-    // Linear falloff from kz_minradius to the blast radius; type 4 (radius
-    // blast / direct hit) skips it [orig: @ 0x4e695a-0x4e699c].
-    if (e.type != ammo_kz::kRadiusBlast && distance > ammo->kz_minradius &&
-        blast_radius - ammo->kz_minradius > 0.0f) {
-        const float t = (distance - ammo->kz_minradius) /
-                        (blast_radius - ammo->kz_minradius);
-        damage = static_cast<int32_t>(damage * (1.0f - t) + 0.5f);
+    // Linear falloff from kz_minradius to the blast radius in 16.16: the fraction
+    // is a truncating Q16 quotient and the multiply rounds at 0x8000; type 4
+    // (radius blast / direct hit) skips it [orig: @ 0x4e6943-0x4e699c].
+    const int32_t d16 = to_fixed(distance);
+    if (e.type != ammo_kz::kRadiusBlast) {
+        const int32_t min16 = to_fixed(ammo->kz_minradius);
+        const int32_t blast16 = to_fixed(blast_radius);
+        if (d16 > min16 && blast16 - min16 > 0) {
+            const int32_t t16 = static_cast<int32_t>(
+                    (static_cast<int64_t>(d16 - min16) << 16) / (blast16 - min16));
+            damage = static_cast<int32_t>(
+                    (static_cast<int64_t>(damage) * (0x10000 - t16) + 0x8000) >> 16);
+        }
     }
     // Blast armor class gate [orig: @ 0x4e69b0 — ammo penetration_kz (+200)
     // must reach def+0x192].
@@ -392,17 +402,20 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
     if (target.kind == EntityKind::Organic) {
         // The person path [orig: @ 0x4e6a01-0x4e6c5d]: the death-anim selection
         // at damage time — bone hardcoded 1 (torso @ 0x4e6ac7), quadrant from
-        // the blast direction vs the victim's heading, cause 2 or 3 (a ~25%
-        // roll @ 0x4e6a84), 4 when the source kz is Slash (type 7 @ 0x4e6abb).
+        // the blast direction vs the victim's heading, cause 2, or a ~25% roll
+        // for 3 taken ONLY when the surface distance lies in [4.0, 8.0) u (the
+        // PRNG draw happens only in that band) [orig: @ 0x4e6a61-0x4e6aa0], 4
+        // when the source kz is Slash (type 7 @ 0x4e6abb).
         const int32_t heading_bam = bam_heading_from_mission_yaw_deg(target.yaw);
         const Vec3 from_blast = vec_sub(target.position, e.pos);
         const int quadrant =
                 death_quadrant_from_round(heading_bam, -from_blast.x, -from_blast.y);
-        int cause = (death_rand16(world) < 0x4000) ? 3 : 2;
-        if (e.type == ammo_kz::kSlash) cause = 4;
+        int cause = death_cause::kExplosive;
+        if (d16 >= 0x40000 && d16 < 0x80000)
+            cause = (death_rand16(world) < 0x4000) ? death_cause::kFire : death_cause::kExplosive;
+        if (e.type == ammo_kz::kSlash) cause = death_cause::kGeneric;
         const int32_t before = target.health;
         if ((target.engine_flags & kEntityFlagDead) == 0 && before > 0) {
-            target.last_attacker = attacker;
             if (damage < before)
                 target.health = before - damage;
             else
@@ -571,7 +584,6 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                                      t->handle, e.owner, 0.0f))
                     continue;
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
-                if (!t->last_attacker.valid()) t->last_attacker = resolved;
             }
         }
 
@@ -606,7 +618,6 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 float surface = dist - bound;
                 if (surface < 0.0f) surface = 0.0f;
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
-                if (!t->last_attacker.valid()) t->last_attacker = resolved;
             }
         }
 
@@ -638,7 +649,6 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                         world, *t, e.pos, ammo->kz_maxradius, events);
                 if (t->health > 0 && !t->is_ai_capable) t->death_blast_center = e.pos;
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
-                if (!t->last_attacker.valid()) t->last_attacker = resolved;
             }
         }
     }

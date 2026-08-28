@@ -17,6 +17,7 @@
 
 #include <runtime/world/collision.h>
 #include <runtime/world/vehicle_motor.h>
+#include <base/io/fixed.h>
 
 namespace opennova::world {
 
@@ -31,11 +32,11 @@ namespace detail {
 constexpr double kBamToRadX87 = 1.4629627251502471e-9; // dbl_7C3608, exact bits
 inline int32_t cos22_of_bam_x87(int32_t bam) {
     return static_cast<int32_t>(
-            std::cos(static_cast<double>(bam) * kBamToRadX87) * 4194304.0);
+            std::cos(static_cast<double>(bam) * kBamToRadX87) * io::kQ22One);
 }
 inline int32_t sin22_of_bam_x87(int32_t bam) {
     return static_cast<int32_t>(
-            std::sin(static_cast<double>(bam) * kBamToRadX87) * 4194304.0);
+            std::sin(static_cast<double>(bam) * kBamToRadX87) * io::kQ22One);
 }
 
 struct VehicleEulerBasis {

@@ -3,12 +3,14 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <base/io/fixed.h>
+#include <base/io/bam.h>
 
 namespace opennova::world {
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
+constexpr double kPi = io::kPi;
 // dbl_7C19D8 = 2^32 / (2 pi): radians -> BAM32 [orig: @0x7c19d8].
 constexpr double kBamPerRadian = 683565275.5764316;
 // flt_7C32BC = 65536.0: the float normalise scale [orig: @0x7c32bc].
@@ -17,10 +19,10 @@ constexpr double kQ16 = 65536.0;
 // g_bam_sin_table_q22 / the cos table (off_849934): 1024 Q22 entries indexed
 // by (angle + 0x200000) >> 22 [orig: @0x438c4e / @0x438c5b].
 inline int32_t sin_q22(uint32_t index) {
-    return static_cast<int32_t>(std::sin(static_cast<double>(index & 0x3FFu) * (2.0 * kPi / 1024.0)) * 4194304.0);
+    return static_cast<int32_t>(std::sin(static_cast<double>(index & 0x3FFu) * (2.0 * kPi / 1024.0)) * io::kQ22One);
 }
 inline int32_t cos_q22(uint32_t index) {
-    return static_cast<int32_t>(std::cos(static_cast<double>(index & 0x3FFu) * (2.0 * kPi / 1024.0)) * 4194304.0);
+    return static_cast<int32_t>(std::cos(static_cast<double>(index & 0x3FFu) * (2.0 * kPi / 1024.0)) * io::kQ22One);
 }
 inline uint32_t table_index(uint32_t angle_bam) { return (angle_bam + 0x200000u) >> 22; }
 

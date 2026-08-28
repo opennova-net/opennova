@@ -1,5 +1,5 @@
 // The local player's equipped-weapon cluster — moved verbatim from the shell
-// adapter (S7a, ADR 0028). The pump order, the UseGun borrow, PowerThrow, the
+// binding (S7a, ADR 0028). The pump order, the UseGun borrow, PowerThrow, the
 // install bake, and the presentation-event assembly are unchanged; the two
 // wire legs (the joiner's fired descriptor, the reload relay) became output
 // records the embedder's net layer routes.

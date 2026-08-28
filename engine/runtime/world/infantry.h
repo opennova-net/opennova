@@ -646,6 +646,9 @@ struct InfantryState {
     bool was_hit = false;             // entity wasHit (consumed by the hit reactions)
     int32_t same_target_ticks = 0;    // entity+0x33C — scans-on-the-same-target counter
     int32_t combat_move_timer = 0;    // entity moveTimer (reaction hold / walking-fire cadence)
+    int prev_move_mode = 0;           // entity+0x368[2]: the move mode stamped at the end of
+                                      // the previous think [orig: @0x4bd356]; the pre_attack
+                                      // (152) reaction reads it [orig: @0x4bc23c]
     bool fire_secondary_latch = false;// shouldFireSecondary [orig: the 0x8 event latch +
                                       // the walking-fire aim gate]
     int32_t aim_heading = 0;          // the aim solution (BAM; bearing + sawtooth error)

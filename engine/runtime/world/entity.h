@@ -404,7 +404,7 @@ struct Entity {
     float damage_reduc_pp = 0.0f;
     float damage_reduc_max = 0.0f;
     // Effective uniform model scale in signed Q16.16. Zero is retail's sentinel
-    // for the ordinary unscaled/rigid inverse. The host adapter resolves the
+    // for the ordinary unscaled/rigid inverse. The shell binding resolves the
     // entity+0x158 override before the itemDef+0x1B8 fallback.
     int32_t uniform_scale_q16 = 0;
     bool alive = true;

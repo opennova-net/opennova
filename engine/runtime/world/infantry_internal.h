@@ -8,6 +8,12 @@
 
 namespace opennova::world {
 
+// BAM bearing of (dx, dy) [orig: atan2 * 2^31/pi (dbl_7C19D8)]; the body-state
+// commit with the gait->stance insert. Both defined in infantry.cpp, shared with
+// infantry_combat.cpp.
+int32_t bearing_to(int32_t dx, int32_t dy);
+void commit_body_state(InfantryState &inf, int resolved, const IRootMotionSource *root_motion);
+
 bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent);
 bool reset_capsule_bottom_state(int state);
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,

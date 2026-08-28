@@ -2,7 +2,7 @@
 // per-tick present snapshot's flat float buffer. ONE batched float-array read
 // replaces per-entity scalar getters in the present loop (the scalar getters
 // box a value each; see feedback_dispatcher_callable_perf). The engine owns
-// this layout; the shell adapter re-exports it as bound constants (the
+// this layout; the shell binding re-exports it as bound constants (the
 // GDExtension enum on the simulation binding) so scripts and C++ share a
 // single source of truth. Rotation is emitted as mission-space degrees
 // (pitch, yaw, roll) so the shell builds the basis through the one placer

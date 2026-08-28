@@ -13,6 +13,8 @@
 #include "ai_detail.h"
 
 #include <runtime/world/world.h>
+#include <base/io/fixed.h>
+#include <base/io/bam.h>
 
 namespace opennova::world {
 
@@ -193,15 +195,15 @@ void AiSystem::apply_route_order(AiEntity &e, int32_t list, int32_t node) {
 // The 1024-entry engine cos table at 2^22, computed form (the D-INF-4
 // equivalence) [orig: off_849934, idx = (bam + 0x200000) >> 22].
 static int32_t avoid_cos22(int32_t bam) {
-    const double a = static_cast<double>(bam) * (3.14159265358979323846 / 2147483648.0);
-    return static_cast<int32_t>(std::cos(a) * 4194304.0);
+    const double a = static_cast<double>(bam) * io::kRadiansPerBam;
+    return static_cast<int32_t>(std::cos(a) * io::kQ22One);
 }
 
 // x87 sin at the same 2^22 scale — the cbot slip block multiplies fsin by the
 // 4194304.0 constant [orig: dbl_7C3600, consumed @0x48E43D].
 static int32_t avoid_sin22(int32_t bam) {
-    const double a = static_cast<double>(bam) * (3.14159265358979323846 / 2147483648.0);
-    return static_cast<int32_t>(std::sin(a) * 4194304.0);
+    const double a = static_cast<double>(bam) * io::kRadiansPerBam;
+    return static_cast<int32_t>(std::sin(a) * io::kQ22One);
 }
 
 // The pool-1 avoid BRAKE, shared by the ground and cbot AI-driver legs — the
@@ -617,9 +619,9 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     // Cyclic pair from the heading error [orig: (132 * sin/cos) >> 22 over the
     // Q22 trig of the target bearing; forward dominates as the nose lines up].
     const double rad = static_cast<double>(io::bam_sub(bearing, m.yaw_bam)) *
-                       (3.14159265358979323846 / 2147483648.0);
-    const int32_t cos_q22 = static_cast<int32_t>(std::cos(rad) * 4194304.0);
-    const int32_t sin_q22 = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+                       io::kRadiansPerBam;
+    const int32_t cos_q22 = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
+    const int32_t sin_q22 = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
     int32_t fwd = static_cast<int32_t>((132LL * cos_q22) >> 22);
     int32_t lat = static_cast<int32_t>((132LL * sin_q22) >> 22);
     if (fwd < 0) fwd = 0; // behind the nose: turn in place, no reverse thrust

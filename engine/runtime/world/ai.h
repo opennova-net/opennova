@@ -585,10 +585,10 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field,
 // mover emits per node advance). The live TriggerRelations matrices are updated alongside
 // this diagnostic trace by the route-arrival seam.
 struct RelMatCall {
-    int which;     // 0 = SetBitA (net_id key), 1 = SetBitB (relmat_id key)
-    int32_t key;   // entity+124 (A) or entity+284 (B)
-    int32_t channel;
-    int32_t node;
+    int which = 0;       // 0 = SetBitA (net_id key), 1 = SetBitB (relmat_id key)
+    int32_t key = 0;     // entity+124 (A) or entity+284 (B)
+    int32_t channel = 0;
+    int32_t node = 0;
 };
 
 // The 8 relation-matrix bit-set ops emitted on target engagement, in call order.
@@ -716,10 +716,8 @@ public:
     // unavailable, the selector idles, and infantry entities stand still (no model fallback —
     // motion comes from clips, as in the original).
     IRootMotionSource *root_motion = nullptr;
-    // Fall-damage scale [orig: dword_C6EAE4, a runtime config (0 in the image; writer
-    // @0x4301bc unread). Damage when landing with vel_z <= -1057*scale: health -= excess>>4
-    // @0x4b9910 dump 5152]. 0 disables (the image default until the config source is RE'd).
-    int32_t fall_damage_scale = 0;
+    // (The fall-damage tolerance is the WAC named value World::wac_values.fallmps
+    //  [orig: dword_C6EAE4]; the landing leg in infantry.cpp reads it there.)
     int unported_calls = 0;   // coverage counter for not_yet_ported handlers
     int find_target_calls = 0;// coverage: target-acquisition invocations
     std::vector<RelMatCall> relmat_calls; // diagnostic trace of the applied mover side effects

@@ -15,6 +15,7 @@
 #include "collision_detail.h"
 
 #include <runtime/world/world.h>
+#include <base/io/fixed.h>
 
 namespace opennova::world {
 
@@ -189,7 +190,7 @@ void collision_matrix_to_euler(const CollisionMatrix &mat, int32_t out[3]) {
     // 30.5 ppm ABOVE the true quotient (1.4629180792671596e-9) and is NOT the
     // reciprocal of kBamPerRadian; keep the binary's value, not the math.
     constexpr double kRadPerBam = 1.4629627251502471e-9; // dbl_7C3608 verbatim
-    constexpr double kQ22 = 4194304.0;
+    constexpr double kQ22 = io::kQ22One;
     const int32_t *m = mat.m;
     const auto trunc32 = [](double v) { return static_cast<int32_t>(v); }; // ftol: toward zero
     const auto shr22 = [](int64_t v) { return static_cast<int32_t>(v >> 22); };
@@ -334,7 +335,7 @@ bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
     for (float v : final)
         if (!std::isfinite(v)) return false;
 
-    constexpr double kQ22 = 4194304.0;
+    constexpr double kQ22 = io::kQ22One;
     constexpr double kFixed16 = 65536.0;
     const auto ftol_checked = [](double v, int32_t &dst) {
         if (!std::isfinite(v) ||
@@ -430,7 +431,7 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
 CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
                                             int32_t roll_bam, const int32_t pos[3]) {
     static constexpr double kRadPerBam = io::kRadiansPerBam;
-    static constexpr double kQ22 = 4194304.0;
+    static constexpr double kQ22 = io::kQ22One;
     const auto trig = [](int32_t bam, int32_t &s, int32_t &c) {
         const double a = static_cast<double>(bam) * kRadPerBam;
         s = static_cast<int32_t>(std::sin(a) * kQ22); // trunc [orig: _ftol2_sse]

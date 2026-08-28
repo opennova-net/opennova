@@ -290,10 +290,25 @@ struct CachedFrameState {
 // engine state, so consumers such as infantry AI observe WAC writes immediately.
 // [orig: the 24-row table @0x82EEF0; WacScript_ResolveParameter @0x4f2940]
 struct WacNamedValues {
-    static constexpr int32_t kDefaultAccuracySpread = 1;
+    // Seeded 10 at every mission load and teardown [orig: WacScript_FreeAll @0x4f6395
+    // `mov wac_var_accuracyspread, 0Ah`, called from GameMode_CreateDefaultDefs @0x4f9061
+    // / Game_TeardownMission @0x5226f0].
+    static constexpr int32_t kDefaultAccuracySpread = 10;
     // Global multiplier in the infantry sawtooth aim-error formula.
     // [orig: wac_var_accuracyspread @0xC6EAE8; read @0x4bc5ea]
     int32_t accuracy_spread = kDefaultAccuracySpread;
+    // The fall-damage tolerance `fallmps` [orig: dword_C6EAE4, the named-value row
+    // beside accuracyspread]. Seeded 13 at every mission load and teardown [orig:
+    // WacScript_FreeAll @0x4f638b `mov dword_C6EAE4, 0Dh`, called from
+    // GameMode_CreateDefaultDefs @0x4f9061 / Game_TeardownMission @0x5226f0]; the
+    // authority writes it into the 0x0A sub-block-1 timer state
+    // (NetPacket_WritePlayerState @0x4ffa14, connection_fan.cpp state1) and a joiner
+    // mirrors it from that packet (NapiNPClientMsg_0x00A @0x4301bc) for its local
+    // red-flash only, since the landing damage itself is authority-gated. Damage when
+    // landing with vel_z <= -1057*fallmps: health -= excess>>4 [orig: @0x4bf839 /
+    // @0x4b7d13]. 0 disables.
+    static constexpr int32_t kDefaultFallmps = 13;
+    int32_t fallmps = kDefaultFallmps;
 };
 
 // End-of-round outcome state. `ended` is the double-run latch every round-end
@@ -346,6 +361,12 @@ struct RoundEndState {
 // [orig: epilog_cinematic_state_machine_update @0x576240 — the tick compares
 //  @0x57621d/@0x5744ea]
 inline constexpr int32_t kEpilogExitTimeoutTicks = 18600;
+
+// The epilog/debrief screens fade in over the cine fade pair: two 48-tick fade
+// events back to back (96 ticks, ~1.536 s at the 62.5 Hz tick). The shell
+// drives its screen alpha from this, not from a wall-clock stand-in.
+// [orig: the 48+48-tick cine fade pair @0x574512]
+inline constexpr int32_t kEpilogFadeInTicks = 48 + 48;
 
 // SP mission kill tallies — the 0xC846xx stat-bucket family the epilog score
 // screen counts from and the WAC bluekills/greenkills builtins read. By-player
@@ -453,7 +474,7 @@ public:
     // [orig: g_destroy_buildings gate in Entity_ApplyWeaponDamage
     // @0x4E682E..0x4E6860]
     bool destroy_buildings = false;
-    // An embedding adapter may own the local player's borrowed UseGun slot so
+    // An embedder may own the local player's borrowed UseGun slot so
     // it can supply trigger/reload/scope input and drain presentation events.
     // Standalone World users keep the default global mounted-slot pump.
     bool external_local_mounted_weapon_pump = false;

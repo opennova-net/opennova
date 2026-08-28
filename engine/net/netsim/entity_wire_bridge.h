@@ -76,11 +76,6 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w);
 StaticEntityBatch build_pool2_static_batch(const world::World &w);
 // pool-3 markers / waypoints / nav-nodes -> S2C 0x20 [orig: serialize_entity_pool_to_packet @0x503460].
 Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
-// pool-3 SPAWN-POINT markers only (the retail 60xx player-start family) -> S2C 0x20.
-// The small networked subset the client's spawn-select reads via Entity_BuildMapPoiLists @0x42de40 —
-// streaming the full pool-3 (incl. every nav waypoint) floods the client (D-NET-98), but the spawn-select
-// screen STILL needs the spawn points or the joiner spams C2S 0x0f and never deploys (§5.38c).
-Pool3SyncBatch build_pool3_spawn_marker_batch(const world::World &w);
 
 // One S2C 0x18 FULL-ENTITY-SPAWN record (§5.46) for a live World entity — the host's
 // reply body to a C2S 0x0F entity-info query, the client's self-heal request for a

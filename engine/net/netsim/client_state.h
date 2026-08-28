@@ -513,7 +513,7 @@ struct ClientEnvironmentState {
 };
 
 // Latest complete recipient-scoped phase-8 mounted-ammo snapshot. The World
-// adapter consumes revisions once so local weapon actions between phase-8
+// binding consumes revisions once so local weapon actions between phase-8
 // samples are not repeatedly reset by the same network value.
 struct ClientMountedAmmoState {
 	bool present = false;

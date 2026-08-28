@@ -12,14 +12,15 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/world.h>
+#include <base/io/fixed.h>
 
 namespace opennova::world {
 
 void ladder_push_back(int32_t pos[3], int32_t yaw_bam) {
     const double rad =
-        static_cast<double>(yaw_bam) * (3.14159265358979323846 / 2147483648.0);
-    const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
-    const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+        static_cast<double>(yaw_bam) * io::kRadiansPerBam;
+    const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
+    const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
     pos[0] -= static_cast<int32_t>((static_cast<int64_t>(c) << 15) >> 22);
     pos[1] -= static_cast<int32_t>((static_cast<int64_t>(s) << 15) >> 22);
 }
@@ -123,9 +124,9 @@ void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
                 lf.yaw,
                 inf.player_move_dir_index == 2 ? -1073741760 : 1073741760);
             const double rad = static_cast<double>(side_yaw) *
-                               (3.14159265358979323846 / 2147483648.0);
-            const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
-            const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+                               io::kRadiansPerBam;
+            const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
+            const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
             e.pos[0] -= static_cast<int32_t>((57344LL * c) >> 22);
             e.pos[1] -= static_cast<int32_t>((57344LL * s) >> 22);
             e.pos[2] += 0x4000;
@@ -172,9 +173,9 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
     };
     const LadderContact &lf = collision->last_ladder_frame;
     const double rad = static_cast<double>(inf.body_heading) *
-                       (3.14159265358979323846 / 2147483648.0);
-    const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
-    const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+                       io::kRadiansPerBam;
+    const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
+    const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
     const int32_t probe_x = e.pos[0] + static_cast<int32_t>((81920LL * c) >> 22);
     const int32_t probe_y = e.pos[1] + static_cast<int32_t>((81920LL * s) >> 22);
     bool held = false;
@@ -198,9 +199,9 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
         // this resolve". [orig: @ 0x4bfa47-0x4bfaa3, gate @ 0x4bfa3e-0x4bfa45
         // on dword_B57C8C == 0 (the applied-push latch, not pass-2 contact)]
         const double lrad = static_cast<double>(lf.yaw) *
-                            (3.14159265358979323846 / 2147483648.0);
-        const int32_t lc = static_cast<int32_t>(std::cos(lrad) * 4194304.0);
-        const int32_t ls = static_cast<int32_t>(std::sin(lrad) * 4194304.0);
+                            io::kRadiansPerBam;
+        const int32_t lc = static_cast<int32_t>(std::cos(lrad) * io::kQ22One);
+        const int32_t ls = static_cast<int32_t>(std::sin(lrad) * io::kQ22One);
         e.pos[0] += static_cast<int32_t>((static_cast<int64_t>(lc) << 11) >> 22);
         e.pos[1] += static_cast<int32_t>((static_cast<int64_t>(ls) << 11) >> 22);
     }

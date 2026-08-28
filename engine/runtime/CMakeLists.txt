@@ -53,10 +53,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/placement_traits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/promote.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/runtime_boot.cpp
-    # particle — the emitter/effect-scene sim (.ptl model+parse+write: engine/formats/ptl)
+    # particle — the emitter/effect-scene sim (.ptl model+parse+write: engine/formats/particle)
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/emitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_scene.cpp
-    # renderer — fixed-function material/light/order math
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
@@ -71,6 +70,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_lfp_panel.cpp     # the AAS zone status panel element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_feed.cpp
+    # renderer — fixed-function material/light/order math
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
@@ -85,8 +85,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_slot_shadow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/uv_anim.cpp
-    # simassets — sim-consumed asset resolution (ADR 0028; Model B only, never
-    # part of the C ABI)
+    # simassets — sim-consumed asset resolution (ADR 0028; Model B only)
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/adm_clip_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/adm_root_motion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/simassets/adm_skeletal_clips.cpp
@@ -147,6 +146,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_ladder.cpp         # the D-COL-5 climb legs
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_board.cpp           # the 123..127 command legs (ex-D-INF-2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_combat.cpp          # the D-AI-4 combat pass
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_remote_anim.cpp   # remote-player body anim (size gate)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_sound.cpp          # the foley/footstep slot-sound leg
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_water.cpp          # the §29.1 water/float channel
