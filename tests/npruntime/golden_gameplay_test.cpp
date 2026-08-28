@@ -107,11 +107,9 @@ int main() {
 	std::printf("[golden] gameplay capture: C2S 0x0C=%d, S2C 0x0A=%d, S2C 0x0C(spawn)=%d\n",
 	            c2s_counts[0x0C], s2c_counts[0x0A], s2c_counts[0x0C]);
 
-	if (uplink == nullptr) {
-		std::printf("[skip] no decodable extended (sub_op 0x0A) C2S 0x0C in capture — apply path not "
-		            "exercised (handshake absent or all-compact uplinks)\n");
-		return 0; // skip clean — the round-trip needs a real extended uplink to drive
-	}
+	if (uplink == nullptr)
+		return retail::skip("a capture with a decodable extended (sub_op 0x0A) C2S 0x0C to drive the "
+		                    "apply path (handshake absent or all-compact uplinks)");
 
 	// Decode the real retail extended uplink (the captured player's per-frame movement).
 	EntityPacketSubHeader hdr;

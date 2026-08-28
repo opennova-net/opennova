@@ -67,12 +67,50 @@ jobs:
           token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
           path: .reference-assets
 
-      - name: Point the asset gates at the reference assets
+      # The packed retail install (opennova-net/opennova-reference-retail-packed:
+      # the .pff set + expansion/revx02, 3.7 GB committed as 95 MiB parts) feeds
+      # OPENNOVA_JO_DIR. It is restored from the Actions cache keyed by that
+      # repository's commit; only a new commit there pays the clone + reassembly.
+      - name: Resolve the packed retail install's revision
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        id: packed-rev
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+        run: |
+          sha="$(gh api repos/opennova-net/opennova-reference-retail-packed/commits/main --jq .sha)"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the packed retail install
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        id: packed-cache
+        uses: actions/cache@v4
+        with:
+          path: .reference-retail-packed
+          key: retail-packed-${{ steps.packed-rev.outputs.sha }}
+
+      - name: Check out the packed retail install
+        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: opennova-net/opennova-reference-retail-packed
+          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+          path: .reference-retail-packed
+
+      - name: Reassemble the packed retail install
+        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          bash .reference-retail-packed/reassemble.sh
+          rm -rf .reference-retail-packed/.git
+
+      - name: Point the asset gates at the reference data
         if: env.HAVE_REFERENCE_ASSETS == 'true'
         shell: bash
         run: |
           echo "OPENNOVA_JO_ASSETS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
           echo "OPENNOVA_MISSION_CORPUS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
+          echo "OPENNOVA_JO_DIR=${GITHUB_WORKSPACE}/.reference-retail-packed" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v5
         with:
@@ -135,6 +173,16 @@ jobs:
       - name: Build and test
         shell: bash
         run: scripts/build.sh --no-godot
+
+      # A green ctest run never proves the asset-gated tests saw their data
+      # (a gate reports Skipped or SKIP-LEG). With the reference data mounted,
+      # every test the three roots gate must have run.
+      - name: Asset-gated tests ran
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        shell: bash
+        run: |
+          python scripts/ci/retail_gates_ran.py --junit build/Testing/ctest.xml \
+            --roots jo_dir,jo_assets,mission_corpus
 
       - name: sccache stats
         if: always()
@@ -345,12 +393,50 @@ jobs:
           token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
           path: .reference-assets
 
-      - name: Point the asset gates at the reference assets
+      # The packed retail install (opennova-net/opennova-reference-retail-packed:
+      # the .pff set + expansion/revx02, 3.7 GB committed as 95 MiB parts) feeds
+      # OPENNOVA_JO_DIR. It is restored from the Actions cache keyed by that
+      # repository's commit; only a new commit there pays the clone + reassembly.
+      - name: Resolve the packed retail install's revision
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        id: packed-rev
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+        run: |
+          sha="$(gh api repos/opennova-net/opennova-reference-retail-packed/commits/main --jq .sha)"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the packed retail install
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        id: packed-cache
+        uses: actions/cache@v4
+        with:
+          path: .reference-retail-packed
+          key: retail-packed-${{ steps.packed-rev.outputs.sha }}
+
+      - name: Check out the packed retail install
+        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: opennova-net/opennova-reference-retail-packed
+          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
+          path: .reference-retail-packed
+
+      - name: Reassemble the packed retail install
+        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          bash .reference-retail-packed/reassemble.sh
+          rm -rf .reference-retail-packed/.git
+
+      - name: Point the asset gates at the reference data
         if: env.HAVE_REFERENCE_ASSETS == 'true'
         shell: bash
         run: |
           echo "OPENNOVA_JO_ASSETS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
           echo "OPENNOVA_MISSION_CORPUS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
+          echo "OPENNOVA_JO_DIR=${GITHUB_WORKSPACE}/.reference-retail-packed" >> "$GITHUB_ENV"
 
       - name: Cache Godot binary
         uses: actions/cache@v4
@@ -424,7 +510,17 @@ jobs:
           else
             export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
           fi
-          bash scripts/test_godot.sh
+          bash scripts/test_godot.sh 2>&1 | tee gut.log
+          exit "${PIPESTATUS[0]}"
+
+      # The GUT gates report pending without their data; with the reference
+      # data mounted none of them may still name a mounted root.
+      - name: Asset-gated GUT tests ran
+        if: env.HAVE_REFERENCE_ASSETS == 'true'
+        shell: bash
+        run: |
+          python scripts/ci/retail_gates_ran.py --gut-log gut.log \
+            --roots jo_dir,jo_assets,mission_corpus
 
   # One job, the workflow's two zips. The DEV zip (game + ONED + loose assets/,
   # one copy of the data) is what PRs and master builds hand out; the GAME zip

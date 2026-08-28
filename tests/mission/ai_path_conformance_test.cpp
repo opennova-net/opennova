@@ -59,6 +59,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "common/retail_mission.h"
 #include "common/retail_paths.h"
 
 namespace {
@@ -121,22 +122,21 @@ static bool has_flag(int argc, char **argv, const char *flag) {
 
 int main(int argc, char **argv) {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 00TRg.bms)");
-	const char *dir = install.c_str();
+			"OPENNOVA_JO_DIR (a retail JO install serving 00TRg.bms)");
 	const bool report = has_flag(argc, argv, "--report");
 	// Diagnostic parameterisation only (no behaviour change): the 05TRcoop
 	// bunker-garrison pin (SSNs 233/1254/2393, divergence-ledger.md:364) needs
 	// the SAME full-tick harness pointed at a different authored mission.
 	const char *bms_arg = arg_value(argc, argv, "--bms");
 	const std::string bms_name = (bms_arg != nullptr && *bms_arg) ? bms_arg : "00TRg.bms";
-	const std::string path = std::string(dir) + "/" + bms_name;
-	std::ifstream f(path, std::ios::binary);
-	if (!f) {
-		std::printf("ai path conformance: SKIP (no 00TRg.bms under OPENNOVA_JO_DIR)\n");
-		return 0;
-	}
-	std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
-	                           std::istreambuf_iterator<char>());
+	// The mounted archives: the mission, the seat extraction and the root-motion
+	// clips all read through this one index.
+	ResourceIndex index;
+	std::vector<uint8_t> bytes;
+	std::string served_by;
+	if (!retail::read_mission(install, bms_name, index, bytes, served_by))
+		return retail::skip((bms_name + " on the OPENNOVA_JO_DIR mount (base or an expansion) "
+		                     "or under OPENNOVA_MISSION_CORPUS").c_str());
 	bms::File m;
 	std::string error;
 	if (!expect(bms::parse(bytes.data(), bytes.size(), m, error), (bms_name + " parses").c_str())) {
@@ -163,11 +163,6 @@ int main(int argc, char **argv) {
 	// returns -1, the arrival ring widens, and the soldiers 'arrive' beside a
 	// seatless hull and never attach -- measuring the harness, not the engine.
 	mission::PromoteOptions opts;
-	// The mounted archives: the seat extraction and the root-motion clips both
-	// read through this one index.
-	ResourceIndex index;
-	const bool indexed = index.scan(std::string(dir));
-
 	DefItemsFile items{};
 	std::vector<uint8_t> items_bytes;
 	// value.second = 'resolved'; a failed parse caches a negative so each
@@ -229,12 +224,9 @@ int main(int argc, char **argv) {
 	// resolved [orig: AnimMap_RegisterEntity @0x40bb60; the same default the
 	// game shell installs in Simulation::set_infantry_anim_map].
 	simassets::AdmRootMotion root_motion;
-	const int default_adm = indexed ? root_motion.register_adm(&index, "E_STAND.adm") : -1;
-	if (default_adm != 0) {
-		std::printf("ai path conformance: SKIP (E_STAND.adm not resolvable under "
-				"OPENNOVA_JO_DIR -- infantry cannot locomote without clips)\n");
-		return 0;
-	}
+	const int default_adm = root_motion.register_adm(&index, "E_STAND.adm");
+	if (default_adm != 0)
+		return retail::skip("E_STAND.adm on the OPENNOVA_JO_DIR mount (infantry cannot locomote without clips)");
 	ai.root_motion = &root_motion;
 	for (int i = 0; i < ai.count(); ++i) {
 		if (w::AiEntity *e = ai.at(i)) e->inf.adm_id = 0;

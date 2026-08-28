@@ -106,3 +106,6 @@ stripify_call_*.log
 
 # The CI checkout of opennova-net/opennova-reference-assets (the OPENNOVA_JO_ASSETS tree).
 .reference-assets/
+
+# The CI checkout of opennova-net/opennova-reference-retail-packed (the OPENNOVA_JO_DIR install).
+.reference-retail-packed/

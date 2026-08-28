@@ -29,6 +29,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "common/retail_mission.h"
 #include "common/retail_paths.h"
 
 namespace {
@@ -48,13 +49,13 @@ bool expect(bool cond, const char *msg) {
 
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 05TRcoop.bms)");
-	const char *dir = install.c_str();
-	const std::string path = install + "/05TRcoop.bms";
-	std::ifstream f(path, std::ios::binary);
-	if (!f) return retail::skip("05TRcoop.bms under OPENNOVA_JO_DIR");
-	std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
-	                           std::istreambuf_iterator<char>());
+			"OPENNOVA_JO_DIR (a retail JO install serving 05TRcoop.bms)");
+	opennova::ResourceIndex index;
+	std::vector<uint8_t> bytes;
+	std::string served_by;
+	if (!retail::read_mission(install, "05TRcoop.bms", index, bytes, served_by))
+		return retail::skip("05TRcoop.bms on the OPENNOVA_JO_DIR mount (base or an expansion) "
+		                    "or under OPENNOVA_MISSION_CORPUS");
 	bms::File m;
 	std::string error;
 	if (!expect(bms::parse(bytes.data(), bytes.size(), m, error),

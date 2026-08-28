@@ -118,11 +118,10 @@ int main() {
 	std::printf("[golden-client] client_port=%d host_port=%d client_scrk=%zuB SK=0x%08x server_scrk=%zuB\n",
 	            client_port, host_port, client_scrk.size(), server_sk, server_scrk.size());
 
-	if (!have_client_scrk || !have_server_auth || client_port == 0) {
-		std::printf("[skip] handshake (0x41/0x42/0x82) not fully captured — cannot recover keys for the "
-		            "client-emission parity (the mid-session-capture limitation nw_pp shares)\n");
-		return 0; // skip clean — needs the handshake to seed the client
-	}
+	if (!have_client_scrk || !have_server_auth || client_port == 0)
+		return retail::skip("a capture with the full handshake (0x41/0x42/0x82) to recover the keys "
+		                    "for the client-emission parity (the mid-session-capture limitation "
+		                    "nw_pp shares)");
 
 	// ===========================================================================================
 	// (C2S) byte-exact client emission parity against the captured retail client.

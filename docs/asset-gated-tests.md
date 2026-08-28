@@ -24,8 +24,8 @@ The four roots (`docs/dev-env-vars.md`) are read only by the resolvers —
 
 | Root | Points at | Gates |
 |---|---|---|
-| `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set; expansions under `expansion/<name>/`) | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `bink_retail`, `sbf_jo_install_sweep`, `mission_ai_path_conformance`, `mission_coop_convoy`, `mission_script_report`, `bunker_walkin`, `truck_dismount`, `minimal_pff_package --install`; the retail-mission rig ports `ai_threat`, `ladder_00tra`, `ai_muzzle_pose` (CP01), `vehicle_ride_00tra`, `defense_00trg`, `lose_flow_04tr`, `particle_gore_set_catalog`; the SKIP-LEG legs of `terrain_tile_composer` (iterates `expansions()` for the CP12/00TRa tile witnesses), `ground_conform` (the CP01 standing leg), `minimap_overlay` (00TRg with revx02), `npruntime_authored_payload_00trg` (revx02); GUT `avatar_preview_test`, `e50trib_mount_alignment_test`, `skeletal_anim_test`, `sound_pff_install_test` (every expansion), `terrain_static_shadow_runtime_test`, `veg_assets_test`, `vehicle_emplacement_alignment_test` |
-| `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, `ammo.def`, models, `.adm`, `.bms`, `.til`, `.lwf`, ...) | ctest `root_motion`, `anim_positions_from_model_corpus`, `anim_reload_clips_us01`, `anim_weapon_action_clips`, `wac_corpus` (plus argv corpus dirs), `cpt_jo_assets_sweep`, `lwf_jo_assets_sweep`; the rig ports `ai_corpse`, `rock_collision_00trg`, `soak_00trg`, `native_assets_00trg`, `npruntime_remote_body_state`, `npruntime_held_weapon_attach`; the SKIP-LEG legs of `occlusion_armry`, `threedi_panm_ctrl` (the six retail controlled models), `particle_smoke_all_fixtures` (the `.ptl` corpus), `npruntime_weapon_table` (`weapon.def` + each expansion's), `sound_profile` (`sndprof.def`), `score_roundtrip` (`score.ini`), `playersav_weapon_sav` (`weapon.sav`), `def_parse_items` (the particlefx rows), `infantry` (the weapon-channel leg), `netsim_client_replica_pipeline_capture_parent_follow` (`items.def`, with the vehicle capture below); GUT `sound_dialog_test`, `sound_integration_test` |
+| `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set; expansions under `expansion/<name>/`) | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `bink_retail`, `sbf_jo_install_sweep`, `mission_ai_path_conformance`, `mission_coop_convoy`, `mission_script_report`, `bunker_walkin`, `truck_dismount`, `minimal_pff_package --install`; the retail-mission rig ports `ai_threat`, `ladder_00tra`, `ai_muzzle_pose` (CP01), `vehicle_ride_00tra`, `defense_00trg`, `lose_flow_04tr`, `particle_gore_set_catalog`; the SKIP-LEG legs of `terrain_tile_composer` (iterates `expansions()` for the CP12/00TRa tile witnesses), `ground_conform` (the CP01 standing leg), `score_roundtrip` (the `score.ini` the install ships loose beside its archives), `playersav_weapon_sav` (`weapon.sav` at the root or under an expansion), `minimap_overlay` (00TRg with revx02), `npruntime_authored_payload_00trg` (revx02); GUT `avatar_preview_test`, `e50trib_mount_alignment_test`, `skeletal_anim_test`, `sound_pff_install_test` (every expansion), `terrain_static_shadow_runtime_test`, `veg_assets_test`, `vehicle_emplacement_alignment_test` |
+| `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, `ammo.def`, models, `.adm`, `.bms`, `.til`, `.lwf`, ...) | ctest `root_motion`, `anim_positions_from_model_corpus`, `anim_reload_clips_us01`, `anim_weapon_action_clips`, `wac_corpus` (plus argv corpus dirs), `cpt_jo_assets_sweep`, `lwf_jo_assets_sweep`; the rig ports `ai_corpse`, `rock_collision_00trg`, `soak_00trg`, `native_assets_00trg`, `npruntime_remote_body_state`, `npruntime_held_weapon_attach`; the SKIP-LEG legs of `occlusion_armry`, `threedi_panm_ctrl` (the six retail controlled models), `particle_smoke_all_fixtures` (the `.ptl` corpus), `npruntime_weapon_table` (`weapon.def` + each expansion's), `sound_profile` (`sndprof.def`), `def_parse_items` (the particlefx rows), `infantry` (the weapon-channel leg), `netsim_client_replica_pipeline_capture_parent_follow` (`items.def`, with the vehicle capture below); GUT `sound_dialog_test`, `sound_integration_test` |
 | `OPENNOVA_MISSION_CORPUS` | a directory of retail `.bms` missions (loose) | ctest `mission_corpus`; GUT `mission_corpus_binding_test`; the render-fixture capture's loose mission (`scripts/render/*.ps1`) |
 | `OPENNOVA_CAPTURES` | the captures/goldens root (default `<repo>/.scratch`) | fixed names: `golden/retail-gameplay-session.pcapng` (`npruntime_golden_gameplay`, `npruntime_golden_client`, `nw_golden_diff`'s golden side), `golden/retail-lan-host-join.pcapng` (`npruntime_golden_lan_join`, `npruntime_two_endpoint_socket`'s cross-check leg), `golden/retail-lan-host-join-session.pcapng` (`npruntime_golden_lan_join_session`), `golden/retail-vehicle-session.pcapng` (`netsim_client_replica_pipeline_capture_parent_follow`), `host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng` (`nw_pool_groundtruth`), `probe2.pcapng` (`nw_dvxi3_groundtruth`), `probe3.pcapng` (`nw_dvxc1_groundtruth`), `probe3_again.pcapng` + `sph/hostprof_probe3again.sph` (`nw_probe3again_lifecycle`, `nw_capture_decoder`'s extra leg), `operation_whitenoise.pcapng` (`nw_whitenoise_coverage`), `karo-guided.pcapng` (`nw_karo_guided`, the D-NET-64 wire leg), `ingame.hexcap` (`nw_ingame_histogram`, `nw_ingame_pool_records`), `sph/host.sph` + `sph/client.sph` (`nw_serverlog_decode`) |
 
@@ -76,16 +76,34 @@ and read the output: a real run prints its measurements, a skipped one prints
 
 ## CI
 
-Retail installs and captures never reach public runners (copyright, size,
-credentials). The extracted retail asset tree the `OPENNOVA_JO_ASSETS` and
-`OPENNOVA_MISSION_CORPUS` gates need lives in the private
-`opennova-net/opennova-reference-assets` repository (its README lists the
-files); with the `REFERENCE_ASSETS_TOKEN` secret (a fine-grained token with
-`contents: read` on that repository) the `test` and `godot-tests` jobs check
-it out beside the tree and point the two roots at it, so those gates run in
-CI instead of reporting Skipped; without the secret the gates stay closed and
-the job is still green. The `OPENNOVA_JO_DIR` and `OPENNOVA_CAPTURES` gates
-stay local. `.github/workflows/ci.yml` is the record.
+Retail data never reaches public runners as tracked files (copyright, size,
+credentials). Two private repositories carry what CI needs:
+`opennova-net/opennova-reference-assets` (the extracted tree behind
+`OPENNOVA_JO_ASSETS` and `OPENNOVA_MISSION_CORPUS`; its README lists the
+files) and `opennova-net/opennova-reference-retail-packed` (the packed install
+behind `OPENNOVA_JO_DIR`: `language.pff`, `localres.pff`, `resource.pff`,
+`main.bik`, the two SBF banks, `Jointops.exe` + the real Bink, and
+`expansion/revx02`; the archives are committed as 95 MiB plain-git parts that
+its `reassemble.sh` rebuilds and verifies against `MANIFEST.sha256`). With the
+`REFERENCE_ASSETS_TOKEN` secret (a token with `contents: read` on BOTH
+repositories) the `test` and `godot-tests` jobs check the assets out beside
+the tree, restore the reassembled packed install from the Actions cache keyed
+by that repository's commit (a miss clones and reassembles it once), and point
+the three roots at them, so every root-gated test except the capture gates
+runs in CI instead of reporting Skipped; without the secret the gates stay
+closed and the job is still green. The `OPENNOVA_CAPTURES` gate stays local.
+`.github/workflows/ci.yml` is the record.
+
+A green run still never proves a gate opened, so with the data mounted both
+jobs end by attesting it: `scripts/ci/retail_gates_ran.py` reads ctest's JUnit
+report (`scripts/build.sh` writes `build/Testing/ctest.xml`) and the GUT log,
+and fails on any fully gated test that reported Skipped or any `SKIP-LEG:` /
+`[Pending]` line that names a mounted root. Its expectation tables are this
+page's matrix; a new gated test is added to both. The one known gap it reports
+without failing: `mission_coop_convoy`, `mission_script_report` and
+`bunker_walkin` promote `05TRcoop.bms`, which no known retail mount or corpus
+carries (they read it through the mount, then `OPENNOVA_MISSION_CORPUS`, and
+skip honestly), and `minimal_pff_package` is argv-only.
 
 The logic the capture gates would exercise is covered in CI by the
 **inline-pcap unit tests** (`nw_pool_decode_unit_test`,

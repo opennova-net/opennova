@@ -26,6 +26,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "common/retail_mission.h"
 #include "common/retail_paths.h"
 
 namespace {
@@ -59,21 +60,18 @@ const char *action_name(bms::ActionType t) {
 
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
-			"OPENNOVA_JO_DIR (a retail JO install carrying 05TRcoop.bms)");
-	const char *dir = install.c_str();
+			"OPENNOVA_JO_DIR (a retail JO install serving 05TRcoop.bms)");
 	// The pinned case: the co-op training mission over the same tick budget the
 	// live 430 s capture baseline covers.
 	const std::string mission_file = "05TRcoop.bms";
 	const int ticks = 40000;
 
-	const std::string path = std::string(dir) + "/" + mission_file;
-	std::ifstream f(path, std::ios::binary);
-	if (!f) {
-		std::printf("mission script report: SKIP (no %s)\n", mission_file.c_str());
-		return 0;
-	}
-	std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
-	                           std::istreambuf_iterator<char>());
+	opennova::ResourceIndex index;
+	std::vector<uint8_t> bytes;
+	std::string served_by;
+	if (!retail::read_mission(install, mission_file, index, bytes, served_by))
+		return retail::skip((mission_file + " on the OPENNOVA_JO_DIR mount (base or an expansion) "
+		                     "or under OPENNOVA_MISSION_CORPUS").c_str());
 	bms::File m;
 	std::string error;
 	if (!bms::parse(bytes.data(), bytes.size(), m, error)) {

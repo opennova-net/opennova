@@ -56,10 +56,8 @@ int main() {
 	simassets::SimModelCache cache;
 	cache.set_index(&index);
 	const Threedi3di3 *m3 = cache.model_for("DTruck1");
-	if (m3 == nullptr || m3->collision == nullptr) {
-		std::printf("truck dismount: SKIP (DTruck1.3di not found/parsed)\n");
-		return 0;
-	}
+	if (m3 == nullptr || m3->collision == nullptr)
+		return retail::skip("DTruck1.3di (with collision) on the OPENNOVA_JO_DIR mount");
 	w::CollisionModel model;
 	if (!simassets::collision_model_from_3di(m3->collision, model,
 	                                         simassets::model_has_collision(*m3))) {

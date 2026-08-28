@@ -236,19 +236,13 @@ int main() {
 	            view.frames_applied(), view.state().entities.size(),
 	            view.game_type(), s2c_frames);
 
-	if ((view.game_type() & 0x20000u) != 0u) {
-		std::printf("[skip] capture is an objective/COOP session; the "
-		            "organic-parented vehicle oracle applies only to "
-		            "non-objective sessions\n");
-		return 0;
-	}
+	if ((view.game_type() & 0x20000u) != 0u)
+		return retail::skip("a non-objective session capture (the organic-parented vehicle "
+		                    "oracle does not apply to objective/COOP sessions)");
 
 	bool ok = true;
-	if (tracked.empty()) {
-		std::printf("[skip] capture carries no organic-parented pool-1 spawns "
-		            "— nothing to pin\n");
-		return 0;
-	}
+	if (tracked.empty())
+		return retail::skip("a capture carrying organic-parented pool-1 spawns (nothing to pin)");
 	for (const auto &kv : tracked) {
 		const Tracked &t = kv.second;
 		std::printf("[follow] vehicle %04x (type %04x, parent %04x): "

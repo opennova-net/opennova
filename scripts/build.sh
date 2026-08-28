@@ -37,7 +37,10 @@ cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$root/build" --config Release -j "$jobs"
 
 echo "Running tests..."
-ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs"
+# The JUnit report is what scripts/ci/retail_gates_ran.py reads to prove the
+# asset-gated tests ran (rather than skipped) once the reference data is mounted.
+ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" \
+  --output-junit "$root/build/Testing/ctest.xml"
 
 if [[ "$build_godot" == "1" ]]; then
     "$root/scripts/build_godot.sh" --jobs "$jobs"

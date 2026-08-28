@@ -34,6 +34,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "common/retail_mission.h"
 #include "common/retail_paths.h"
 
 namespace {
@@ -69,16 +70,12 @@ int main(int argc, char **argv) {
 
 	// The real model, through the real pipeline.
 	opennova::ResourceIndex index;
-	if (!index.scan(dir)) {
-		std::printf("bunker walk-in: SKIP (resource index scan failed)\n");
-		return 0;
-	}
+	if (!index.scan(dir)) return retail::skip("a mountable OPENNOVA_JO_DIR install");
 	simassets::SimModelCache cache;
 	cache.set_index(&index);
 	const Threedi3di3 *m3 = cache.model_for("Cbunker2");
 	if (m3 == nullptr || m3->collision == nullptr) {
-		std::printf("bunker walk-in: SKIP (Cbunker2.3di not found/parsed)\n");
-		return 0;
+		return retail::skip("Cbunker2.3di on the OPENNOVA_JO_DIR mount");
 	}
 	w::CollisionModel model;
 	if (!simassets::collision_model_from_3di(m3->collision, model,
@@ -107,14 +104,11 @@ int main(int argc, char **argv) {
 
 	// The mission pose for the east-base instance (SSN-less static): promote
 	// 05TRcoop and find item 1359 with x > 0.
-	const std::string path = std::string(dir) + "/05TRcoop.bms";
-	std::ifstream f(path, std::ios::binary);
-	if (!f) {
-		std::printf("bunker walk-in: SKIP (no 05TRcoop.bms)\n");
-		return 0;
-	}
-	std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
-	                           std::istreambuf_iterator<char>());
+	std::vector<uint8_t> bytes;
+	std::string served_by;
+	if (!retail::read_mission(install, "05TRcoop.bms", index, bytes, served_by))
+		return retail::skip("05TRcoop.bms on the OPENNOVA_JO_DIR mount (base or an expansion) "
+		                    "or under OPENNOVA_MISSION_CORPUS");
 	bms::File m;
 	std::string error;
 	if (!bms::parse(bytes.data(), bytes.size(), m, error)) {

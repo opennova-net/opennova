@@ -106,10 +106,14 @@ int main() {
 							  src2.size(), bad, error));
 	}
 
-	// --- retail sweep: <OPENNOVA_JO_ASSETS>/score.ini when the tree carries it ---
-	const std::string retail_ini = retail::asset_file("score.ini");
-	if (retail_ini.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/score.ini (the retail score table)");
+	// --- retail sweep: <OPENNOVA_JO_DIR>/score.ini, the score table the install
+	// ships loose beside its archives (never inside a .pff, so never in an
+	// extracted tree) ---
+	const std::string install = retail::install();
+	const std::string retail_ini =
+			install.empty() ? std::string() : retail::join(install, "score.ini");
+	if (retail_ini.empty() || !retail::file_exists(retail_ini)) {
+		retail::skip_leg("OPENNOVA_JO_DIR/score.ini (the retail score table beside the archives)");
 	} else {
 		const std::vector<uint8_t> rbytes = read_file(retail_ini.c_str());
 		TEST_EXPECT(!rbytes.empty());
