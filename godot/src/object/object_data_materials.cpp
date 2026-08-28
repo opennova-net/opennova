@@ -16,21 +16,21 @@ namespace {
 // The MTRL texture-slot array capacity (ThreediMaterial::textures).
 constexpr uint32_t kMaxMaterialTextures = 24;
 
-const char *shader_blend_name(renderer::ObjectBlendMode blend) {
+const char *shader_blend_name(opennova::renderer::ObjectBlendMode blend) {
 	switch (blend) {
-		case renderer::ObjectBlendMode::Opaque: return "opaque";
-		case renderer::ObjectBlendMode::AlphaBlend: return "alpha_blend";
-		case renderer::ObjectBlendMode::Additive: return "additive";
-		case renderer::ObjectBlendMode::Multiplicative: return "multiplicative";
+		case opennova::renderer::ObjectBlendMode::Opaque: return "opaque";
+		case opennova::renderer::ObjectBlendMode::AlphaBlend: return "alpha_blend";
+		case opennova::renderer::ObjectBlendMode::Additive: return "additive";
+		case opennova::renderer::ObjectBlendMode::Multiplicative: return "multiplicative";
 	}
 	return "opaque";
 }
 
-const char *shader_normal_space_name(renderer::ObjectNormalSpace normal_space) {
+const char *shader_normal_space_name(opennova::renderer::ObjectNormalSpace normal_space) {
 	switch (normal_space) {
-		case renderer::ObjectNormalSpace::None: return "none";
-		case renderer::ObjectNormalSpace::Tangent: return "tangent";
-		case renderer::ObjectNormalSpace::Object: return "object";
+		case opennova::renderer::ObjectNormalSpace::None: return "none";
+		case opennova::renderer::ObjectNormalSpace::Tangent: return "tangent";
+		case opennova::renderer::ObjectNormalSpace::Object: return "object";
 	}
 	return "none";
 }
@@ -39,11 +39,11 @@ const char *shader_normal_space_name(renderer::ObjectNormalSpace normal_space) {
 // the first row (FF_ST_OP, DIFFUSE only) for an unknown tag, the same fallback
 // the retail material-info registry gives an unregistered tag.
 uint32_t shader_flags_for_tag(const char *shader_name) {
-	if (const renderer::MaterialDescriptorRecord *descriptor =
-			renderer::find_material_descriptor(shader_name != nullptr ? shader_name : "")) {
+	if (const opennova::renderer::MaterialDescriptorRecord *descriptor =
+			opennova::renderer::find_material_descriptor(shader_name != nullptr ? shader_name : "")) {
 		return static_cast<uint32_t>(descriptor->shader_flags);
 	}
-	return static_cast<uint32_t>(renderer::kMaterialDescriptorTable[0].shader_flags);
+	return static_cast<uint32_t>(opennova::renderer::kMaterialDescriptorTable[0].shader_flags);
 }
 
 // The boolean keys are the descriptor's capability word (shader_flags) and
@@ -54,36 +54,36 @@ uint32_t shader_flags_for_tag(const char *shader_name) {
 // meaning.
 void add_shader_classification_fields(Dictionary &item,
 		const ThreediMaterial &material) {
-	const renderer::MaterialDescriptorRecord *descriptor =
-			renderer::find_material_descriptor(material.shader_name);
+	const opennova::renderer::MaterialDescriptorRecord *descriptor =
+			opennova::renderer::find_material_descriptor(material.shader_name);
 	const uint32_t flags = shader_flags_for_tag(material.shader_name);
 	const uint32_t descriptor_flags = descriptor != nullptr ? descriptor->descriptor_flags : 0;
-	const renderer::ObjectMaterialClassification classification =
-			renderer::classify_object_material(material.shader_name,
+	const opennova::renderer::ObjectMaterialClassification classification =
+			opennova::renderer::classify_object_material(material.shader_name,
 					material.material_flags, material.emissive_type,
 					material.is_glass, material.alpha_test_value_byte);
 	item["shader_flags"] = static_cast<int64_t>(flags);
-	item["has_diffuse"] = (flags & renderer::MATERIAL_FLAG_DIFFUSE) != 0;
-	item["has_secondary"] = (flags & renderer::MATERIAL_FLAG_SECONDARY) != 0;
-	item["has_normal_a"] = (flags & renderer::MATERIAL_FLAG_NORMAL_A) != 0;
-	item["has_normal_b"] = (flags & renderer::MATERIAL_FLAG_NORMAL_B) != 0;
-	item["is_alpha"] = (flags & renderer::MATERIAL_FLAG_ALPHA) != 0;
+	item["has_diffuse"] = (flags & opennova::renderer::MATERIAL_FLAG_DIFFUSE) != 0;
+	item["has_secondary"] = (flags & opennova::renderer::MATERIAL_FLAG_SECONDARY) != 0;
+	item["has_normal_a"] = (flags & opennova::renderer::MATERIAL_FLAG_NORMAL_A) != 0;
+	item["has_normal_b"] = (flags & opennova::renderer::MATERIAL_FLAG_NORMAL_B) != 0;
+	item["is_alpha"] = (flags & opennova::renderer::MATERIAL_FLAG_ALPHA) != 0;
 	// Self-lum keys on EMISSIVE; 0x10000000 is the separate glow/bloom-copy
 	// capability (REN-4, D-RMAT-4 — the two ride together on FF _LUM rows but
 	// FFP_GLASS carries only the capability).
-	item["is_luminance"] = (flags & renderer::MATERIAL_FLAG_EMISSIVE) != 0;
-	item["is_glow_capable"] = (flags & renderer::MATERIAL_FLAG_GLOW) != 0;
-	item["is_glass_shader"] = (flags & renderer::MATERIAL_FLAG_GLASS) != 0;
-	item["is_skinned_shader"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_SKINNED) != 0;
-	item["is_blending_shader"] = (flags & renderer::MATERIAL_FLAG_BLENDING) != 0;
-	item["uses_uv_generators"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_UV_TRANSFORM) != 0;
-	item["uses_environment"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
-	item["uses_specular"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_SPECULAR) != 0;
+	item["is_luminance"] = (flags & opennova::renderer::MATERIAL_FLAG_EMISSIVE) != 0;
+	item["is_glow_capable"] = (flags & opennova::renderer::MATERIAL_FLAG_GLOW) != 0;
+	item["is_glass_shader"] = (flags & opennova::renderer::MATERIAL_FLAG_GLASS) != 0;
+	item["is_skinned_shader"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_SKINNED) != 0;
+	item["is_blending_shader"] = (flags & opennova::renderer::MATERIAL_FLAG_BLENDING) != 0;
+	item["uses_uv_generators"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_UV_TRANSFORM) != 0;
+	item["uses_environment"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
+	item["uses_specular"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_SPECULAR) != 0;
 	item["environment_textured"] =
-			(descriptor_flags & renderer::MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED) != 0;
-	item["uses_flag_animation"] = (descriptor_flags & renderer::MATERIAL_DESCRIPTOR_FLAG_ANIMATION) != 0;
+			(descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED) != 0;
+	item["uses_flag_animation"] = (descriptor_flags & opennova::renderer::MATERIAL_DESCRIPTOR_FLAG_ANIMATION) != 0;
 	item["shader_family"] = from_native(
-			renderer::object_shader_family_name(classification.family));
+			opennova::renderer::object_shader_family_name(classification.family));
 	item["shader_blend"] = from_native(shader_blend_name(classification.blend));
 	item["normal_space"] = from_native(
 			shader_normal_space_name(classification.normal_space));

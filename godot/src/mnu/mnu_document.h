@@ -32,7 +32,7 @@ class MnuDocument : public Resource {
 	GDCLASS(MnuDocument, Resource)
 
 public:
-	// Mirrors mnu::WindowType (same order). -1 is used for screen containers,
+	// Mirrors opennova::mnu::WindowType (same order). -1 is used for screen containers,
 	// which are not widgets.
 	enum WidgetType {
 		TYPE_WINDOW = 0,
@@ -60,7 +60,7 @@ public:
 		TYPE_UNKNOWN,
 	};
 
-	// Color slots map to fields of mnu::Font. Values are raw strings (hex like
+	// Color slots map to fields of opennova::mnu::Font. Values are raw strings (hex like
 	// "FF8000" or a "%VAR%" stylesheet reference); conversion to a displayable
 	// Color is the caller's job so variable references survive a round-trip.
 	enum ColorSlot {
@@ -74,7 +74,7 @@ public:
 		COLOR_DISABLED_BG,
 	};
 
-	// Texture slots map to mnu::Appearance entries by state.
+	// Texture slots map to opennova::mnu::Appearance entries by state.
 	enum TextureSlot {
 		TEX_DEFAULT = 0,
 		TEX_MOUSEOVER,
@@ -94,7 +94,7 @@ public:
 
 private:
 	// Parallel id tree, kept structurally identical to doc_ so a lockstep walk
-	// maps an id to its mnu::Window/Screen. One IdWindow mirrors one mnu::Window.
+	// maps an id to its opennova::mnu::Window/Screen. One IdWindow mirrors one opennova::mnu::Window.
 	struct IdWindow {
 		int id = 0;
 		std::vector<IdWindow> children;
@@ -104,14 +104,14 @@ private:
 		IdWindow root;
 	};
 
-	mnu::Document doc_;
+	opennova::mnu::Document doc_;
 	std::vector<IdScreen> ids_;
 	int next_id_ = 1;
 	Vector2i menu_size_ = Vector2i(640, 480);
 
 	// Build a fresh id tree mirroring doc_ (used after load / structural rebuild).
 	void rebuild_ids();
-	IdWindow make_id_window(const mnu::Window &w);
+	IdWindow make_id_window(const opennova::mnu::Window &w);
 
 	// Snapshot helpers. collect_ids walks the id tree in the SAME pre-order
 	// rebuild_ids assigns (screen id, then its root window subtree depth-first);
@@ -120,7 +120,7 @@ private:
 	// byte-identical ids. Returns false on list under-run (desync).
 	void collect_id_window(const IdWindow &node, PackedInt32Array &out) const;
 	PackedInt32Array collect_ids() const;
-	bool build_id_window_from_list(const mnu::Window &w, const PackedInt32Array &ids, int &k, IdWindow &out) const;
+	bool build_id_window_from_list(const opennova::mnu::Window &w, const PackedInt32Array &ids, int &k, IdWindow &out) const;
 
 	// Locate an id. screen_index == -1 means "not found". is_screen marks a
 	// screen container; otherwise path is the child-index chain from the
@@ -134,13 +134,13 @@ private:
 	Locator locate(int id) const;
 	static bool find_in_id_window(const IdWindow &node, int id, std::vector<int> &path);
 
-	mnu::Window *window_at(const Locator &loc);
-	const mnu::Window *window_at(const Locator &loc) const;
+	opennova::mnu::Window *window_at(const Locator &loc);
+	const opennova::mnu::Window *window_at(const Locator &loc) const;
 	IdWindow *id_window_at(const Locator &loc);
 
-	// Find/format the mnu::Appearance for a texture slot's state string.
+	// Find/format the opennova::mnu::Appearance for a texture slot's state string.
 	static const char *state_for_slot(int slot);
-	mnu::Appearance *find_appearance(mnu::Window &w, const char *state, bool create);
+	opennova::mnu::Appearance *find_appearance(opennova::mnu::Window &w, const char *state, bool create);
 
 	void touch(); // emit_changed()
 
@@ -306,8 +306,8 @@ public:
 	bool reparent_widget(int p_id, int p_new_parent_id, int p_index);
 
 	// Native access for the loader/saver.
-	void set_native(const mnu::Document &p_doc);
-	const mnu::Document &get_native() const { return doc_; }
+	void set_native(const opennova::mnu::Document &p_doc);
+	const opennova::mnu::Document &get_native() const { return doc_; }
 };
 
 } // namespace godot

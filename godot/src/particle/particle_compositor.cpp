@@ -48,7 +48,7 @@ using namespace godot;
 namespace {
 
 constexpr std::uint32_t kRetailVertexStride =
-		static_cast<std::uint32_t>(sizeof(renderer::ParticleVertex));
+		static_cast<std::uint32_t>(sizeof(opennova::renderer::ParticleVertex));
 constexpr std::uint32_t kTriangleVerticesPerQuad = 6;
 constexpr std::uint32_t kPushConstantBytes = 128;
 constexpr std::uint32_t kMinimumVertexCapacity = 4096;
@@ -59,7 +59,7 @@ constexpr std::uint64_t kNoAtlasGeneration =
 constexpr std::uint64_t kPipelineWarmRequestedBit = 1;
 constexpr std::uint64_t kPipelineWarmEpochStep = 2;
 
-static_assert(sizeof(renderer::ParticleVertex) == 28,
+static_assert(sizeof(opennova::renderer::ParticleVertex) == 28,
 		"RD upload must retain the retail particle vertex stride");
 
 const char *kVertexShader = R"GLSL(#version 450
@@ -442,7 +442,7 @@ public:
 	bool ensure_scene_color_target(ViewTarget &target, std::uint32_t view);
 	RID scene_snapshot_pipeline_for(int64_t framebuffer_format);
 	bool snapshot_scene_color(ViewTarget &target, std::uint32_t view);
-	RID pipeline_for(const renderer::ParticleDrawCommand &command,
+	RID pipeline_for(const opennova::renderer::ParticleDrawCommand &command,
 			int64_t framebuffer_format);
 	bool warm_pipelines(RenderData *render_data);
 	bool validate_submission(const ParticleWorldSubmission &submission) const;
@@ -997,7 +997,7 @@ bool ParticleCompositorEffect::Impl::snapshot_scene_color(
 }
 
 RID ParticleCompositorEffect::Impl::pipeline_for(
-		const renderer::ParticleDrawCommand &command,
+		const opennova::renderer::ParticleDrawCommand &command,
 		int64_t framebuffer_format) {
 	const PipelineKey key{framebuffer_format,
 			static_cast<std::uint8_t>(command.pipeline), command.variant};
@@ -1025,12 +1025,12 @@ RID ParticleCompositorEffect::Impl::pipeline_for(
 	RenderingDevice::BlendFactor source_alpha = source_color;
 	RenderingDevice::BlendFactor destination_alpha = destination_color;
 	switch (command.pipeline) {
-		case renderer::ParticlePipeline::Blend:
-		case renderer::ParticlePipeline::Bump:
-		case renderer::ParticlePipeline::Distort:
+		case opennova::renderer::ParticlePipeline::Blend:
+		case opennova::renderer::ParticlePipeline::Bump:
+		case opennova::renderer::ParticlePipeline::Distort:
 			break;
-		case renderer::ParticlePipeline::Additive:
-		case renderer::ParticlePipeline::Premult:
+		case opennova::renderer::ParticlePipeline::Additive:
+		case opennova::renderer::ParticlePipeline::Premult:
 			// Additive and premult share one witnessed pair — ONE/INVSRCALPHA
 			// [orig: CParticleTexture_InitTextureAndChannels @ 0x5e8380 (case 1/2
 			// SRCBLEND=ONE) + @ 0x5e85a9 (LABEL_16 DESTBLEND=INVSRCALPHA)]. The
@@ -1039,18 +1039,18 @@ RID ParticleCompositorEffect::Impl::pipeline_for(
 			source_color = RenderingDevice::BLEND_FACTOR_ONE;
 			source_alpha = RenderingDevice::BLEND_FACTOR_ONE;
 			break;
-		case renderer::ParticlePipeline::Bumpadd:
+		case opennova::renderer::ParticlePipeline::Bumpadd:
 			// [orig: @ 0x5e84dc/@ 0x5e84d8 — SRCALPHA/ONE]
 			destination_color = RenderingDevice::BLEND_FACTOR_ONE;
 			destination_alpha = RenderingDevice::BLEND_FACTOR_ONE;
 			break;
-		case renderer::ParticlePipeline::Mod:
+		case opennova::renderer::ParticlePipeline::Mod:
 			source_color = RenderingDevice::BLEND_FACTOR_DST_COLOR;
 			destination_color = RenderingDevice::BLEND_FACTOR_ZERO;
 			source_alpha = RenderingDevice::BLEND_FACTOR_DST_ALPHA;
 			destination_alpha = RenderingDevice::BLEND_FACTOR_ZERO;
 			break;
-		case renderer::ParticlePipeline::Mod2x:
+		case opennova::renderer::ParticlePipeline::Mod2x:
 			source_color = RenderingDevice::BLEND_FACTOR_DST_COLOR;
 			destination_color = RenderingDevice::BLEND_FACTOR_SRC_COLOR;
 			source_alpha = RenderingDevice::BLEND_FACTOR_DST_ALPHA;
@@ -1124,9 +1124,9 @@ bool ParticleCompositorEffect::Impl::warm_pipelines(
 					framebuffer_format) == framebuffer_formats.end()) {
 			framebuffer_formats.push_back(framebuffer_format);
 			for (std::uint8_t mode = 0; mode < 8; ++mode) {
-				renderer::ParticleDrawCommand command;
+				opennova::renderer::ParticleDrawCommand command;
 				command.pipeline =
-						static_cast<renderer::ParticlePipeline>(mode);
+						static_cast<opennova::renderer::ParticlePipeline>(mode);
 				if (!pipeline_for(command, framebuffer_format).is_valid())
 					return false;
 			}
@@ -1176,9 +1176,9 @@ bool ParticleCompositorEffect::Impl::validate_submission(
 	}
 	const std::uint64_t quad_count = vertex_count / kTriangleVerticesPerQuad;
 	for (std::size_t i = 0; i < submission.commands.size(); ++i) {
-		const renderer::ParticleDrawCommand &command = submission.commands[i];
+		const opennova::renderer::ParticleDrawCommand &command = submission.commands[i];
 		const std::uint8_t mode = static_cast<std::uint8_t>(command.pipeline);
-		if (command.domain != renderer::ParticleRenderDomain::World || mode > 7 ||
+		if (command.domain != opennova::renderer::ParticleRenderDomain::World || mode > 7 ||
 				command.variant != 0 || command.atlas_page >=
 					submission.atlas->pages.size() || command.quad_count == 0) {
 			const_cast<Impl *>(this)->set_failure(
@@ -1187,11 +1187,11 @@ bool ParticleCompositorEffect::Impl::validate_submission(
 			return false;
 		}
 		const bool distortion = command.pipeline ==
-				renderer::ParticlePipeline::Distort;
+				opennova::renderer::ParticlePipeline::Distort;
 		if ((distortion && command.pass !=
-					renderer::ParticleRenderPass::Distortion) ||
+					opennova::renderer::ParticleRenderPass::Distortion) ||
 				(!distortion && command.pass !=
-					renderer::ParticleRenderPass::Color)) {
+					opennova::renderer::ParticleRenderPass::Color)) {
 			const_cast<Impl *>(this)->set_failure(
 					"Render pass/pipeline mismatch in World draw command " +
 							std::to_string(i), "draw_list_invalid");
@@ -1236,8 +1236,8 @@ bool ParticleCompositorEffect::Impl::draw(
 	const Vector2i size = buffers->get_internal_size();
 	const bool needs_scene_color = std::any_of(submission.commands.begin(),
 			submission.commands.end(),
-			[](const renderer::ParticleDrawCommand &command) {
-				return command.pipeline == renderer::ParticlePipeline::Distort;
+			[](const opennova::renderer::ParticleDrawCommand &command) {
+				return command.pipeline == opennova::renderer::ParticlePipeline::Distort;
 			});
 	if (!ensure_targets(buffers, view_count, size))
 		return false;
@@ -1246,7 +1246,7 @@ bool ParticleCompositorEffect::Impl::draw(
 	// reject the whole draw list instead of drawing a reordered or partial prefix.
 	for (const ViewTarget &target : targets) {
 		const int64_t format = rd->framebuffer_get_format(target.framebuffer);
-		for (const renderer::ParticleDrawCommand &command : submission.commands) {
+		for (const opennova::renderer::ParticleDrawCommand &command : submission.commands) {
 			if (!pipeline_for(command, format).is_valid())
 				return false;
 		}
@@ -1306,8 +1306,8 @@ bool ParticleCompositorEffect::Impl::draw(
 		const int64_t format = rd->framebuffer_get_format(target.framebuffer);
 		const RID scene_uniform_set = scene_color_available ?
 				target.scratch_uniform_set : fallback_scene_uniform_set;
-		for (const renderer::ParticleDrawCommand &command : submission.commands) {
-			if (command.pipeline == renderer::ParticlePipeline::Distort &&
+		for (const opennova::renderer::ParticleDrawCommand &command : submission.commands) {
+			if (command.pipeline == opennova::renderer::ParticlePipeline::Distort &&
 					!scene_color_available) {
 				++distortion_commands_skipped;
 				continue;

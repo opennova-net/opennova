@@ -38,6 +38,12 @@ inline float read_fp_14(const uint8_t *p)
     return fp14_to_float(read_s16_le(p));
 }
 
+// Q22 (10.22): the world-space fixed-point scale of the collision/entity
+// matrices and the sin/cos tables — 2^22 as one double, so the ~40 sites that
+// multiply or divide by it alias a single spelling.
+constexpr double kQ22One = 4194304.0;
+constexpr double kInvQ22One = 1.0 / 4194304.0;
+
 } // namespace io
 } // namespace opennova
 

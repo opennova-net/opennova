@@ -22,19 +22,19 @@ using opennova::to_std;
 // inside LIST_BOX; treating win.items as a mirror is destructive because it can
 // overwrite independently-authored popup alignment, appearances, and rows.
 // List/Table and the other list-like controls use the window-level ITEMS block.
-mnu::Items *items_container(mnu::Window *w) {
+opennova::mnu::Items *items_container(opennova::mnu::Window *w) {
 	if (w == nullptr) {
 		return nullptr;
 	}
 	switch (w->type) {
-		case mnu::WindowType::List:
-		case mnu::WindowType::Table:
-		case mnu::WindowType::GlbTable:
-		case mnu::WindowType::Multi:
-		case mnu::WindowType::LanList:
-		case mnu::WindowType::SpinList:
+		case opennova::mnu::WindowType::List:
+		case opennova::mnu::WindowType::Table:
+		case opennova::mnu::WindowType::GlbTable:
+		case opennova::mnu::WindowType::Multi:
+		case opennova::mnu::WindowType::LanList:
+		case opennova::mnu::WindowType::SpinList:
 			return &w->items;
-		case mnu::WindowType::Combo:
+		case opennova::mnu::WindowType::Combo:
 			// LIST_BOX owns combo items when it actually authors an ITEMS
 			// block under an authored LIST_BOX. A latent/disabled LIST_BOX or a
 			// styling-only one falls back to top-level ITEMS, matching runtime.
@@ -45,11 +45,11 @@ mnu::Items *items_container(mnu::Window *w) {
 	}
 }
 
-const mnu::Items *items_container(const mnu::Window *w) {
-	return items_container(const_cast<mnu::Window *>(w));
+const opennova::mnu::Items *items_container(const opennova::mnu::Window *w) {
+	return items_container(const_cast<opennova::mnu::Window *>(w));
 }
 
-Dictionary item_to_dict(const mnu::Item &it) {
+Dictionary item_to_dict(const opennova::mnu::Item &it) {
 	Dictionary d;
 	d["type"] = to_gd(it.type);
 	d["value"] = to_gd(it.value);
@@ -57,31 +57,31 @@ Dictionary item_to_dict(const mnu::Item &it) {
 	return d;
 }
 
-mnu::Item item_from_dict(const Dictionary &d) {
-	mnu::Item it;
+opennova::mnu::Item item_from_dict(const Dictionary &d) {
+	opennova::mnu::Item it;
 	it.type = to_std(String(d.get("type", "")));
 	it.value = to_std(String(d.get("value", "")));
 	it.text = to_std(String(d.get("text", "")));
 	return it;
 }
 
-mnu::TableData *table_of(mnu::Window *w) {
-	return (w != nullptr && (w->type == mnu::WindowType::Table ||
-			w->type == mnu::WindowType::GlbTable)) ? &w->table_data : nullptr;
+opennova::mnu::TableData *table_of(opennova::mnu::Window *w) {
+	return (w != nullptr && (w->type == opennova::mnu::WindowType::Table ||
+			w->type == opennova::mnu::WindowType::GlbTable)) ? &w->table_data : nullptr;
 }
 
-const mnu::TableData *table_of(const mnu::Window *w) {
-	return table_of(const_cast<mnu::Window *>(w));
+const opennova::mnu::TableData *table_of(const opennova::mnu::Window *w) {
+	return table_of(const_cast<opennova::mnu::Window *>(w));
 }
 
-bool is_table_window(const mnu::Window &w) {
-	return w.type == mnu::WindowType::Table ||
-			w.type == mnu::WindowType::GlbTable;
+bool is_table_window(const opennova::mnu::Window &w) {
+	return w.type == opennova::mnu::WindowType::Table ||
+			w.type == opennova::mnu::WindowType::GlbTable;
 }
 
-void sync_items_selection_alias(mnu::Items &items) {
+void sync_items_selection_alias(opennova::mnu::Items &items) {
 	items.selection_color.clear();
-	for (const mnu::Appearance &appearance : items.appearances) {
+	for (const opennova::mnu::Appearance &appearance : items.appearances) {
 		if (to_gd(appearance.state).nocasecmp_to("selected") == 0 &&
 				to_gd(appearance.type).nocasecmp_to("color") == 0) {
 			items.selection_color = appearance.value;
@@ -89,7 +89,7 @@ void sync_items_selection_alias(mnu::Items &items) {
 	}
 }
 
-void set_items_selection_alias(mnu::Items &items, const std::string &value) {
+void set_items_selection_alias(opennova::mnu::Items &items, const std::string &value) {
 	items.selection_color = value;
 	// Clearing updates an existing winning row but never invents an empty row.
 	if (!value.empty() ||
@@ -98,13 +98,13 @@ void set_items_selection_alias(mnu::Items &items, const std::string &value) {
 	}
 }
 
-void sync_table_aliases_from_items(mnu::Window &w) {
+void sync_table_aliases_from_items(opennova::mnu::Window &w) {
 	if (!is_table_window(w)) {
 		return;
 	}
 	w.table_data.outline_color.clear();
 	sync_items_selection_alias(w.items);
-	for (const mnu::Appearance &appearance : w.items.appearances) {
+	for (const opennova::mnu::Appearance &appearance : w.items.appearances) {
 		String state = to_gd(appearance.state).to_lower();
 		String type = to_gd(appearance.type).to_lower();
 		if (state == "default" && type == "outline") {
@@ -114,7 +114,7 @@ void sync_table_aliases_from_items(mnu::Window &w) {
 	w.table_data.selection_color = w.items.selection_color;
 }
 
-void set_table_item_alias(mnu::Window &w, const char *state,
+void set_table_item_alias(opennova::mnu::Window &w, const char *state,
 		const char *type, const std::string &value) {
 	if (!is_table_window(w)) {
 		return;
@@ -129,7 +129,7 @@ void set_table_item_alias(mnu::Window &w, const char *state,
 	}
 }
 
-Dictionary header_to_dict(const mnu::TableHeader &h) {
+Dictionary header_to_dict(const opennova::mnu::TableHeader &h) {
 	Dictionary d;
 	d["has_column"] = h.has_column;
 	d["column"] = h.column;
@@ -143,8 +143,8 @@ Dictionary header_to_dict(const mnu::TableHeader &h) {
 	return d;
 }
 
-mnu::TableHeader header_from_dict(const Dictionary &d) {
-	mnu::TableHeader h;
+opennova::mnu::TableHeader header_from_dict(const Dictionary &d) {
+	opennova::mnu::TableHeader h;
 	h.has_column = bool(d.get("has_column", d.has("column")));
 	h.column = static_cast<int>(d.get("column", 0));
 	h.has_width = bool(d.get("has_width", d.has("width")));
@@ -157,7 +157,7 @@ mnu::TableHeader header_from_dict(const Dictionary &d) {
 	return h;
 }
 
-Dictionary body_to_dict(const mnu::TableBody &b) {
+Dictionary body_to_dict(const opennova::mnu::TableBody &b) {
 	Dictionary d;
 	d["has_column"] = b.has_column;
 	d["column"] = b.column;
@@ -170,8 +170,8 @@ Dictionary body_to_dict(const mnu::TableBody &b) {
 	return d;
 }
 
-mnu::TableBody body_from_dict(const Dictionary &d) {
-	mnu::TableBody b;
+opennova::mnu::TableBody body_from_dict(const Dictionary &d) {
+	opennova::mnu::TableBody b;
 	b.has_column = bool(d.get("has_column", d.has("column")));
 	b.column = static_cast<int>(d.get("column", 0));
 	b.justify = to_std(String(d.get("justify", "")));
@@ -183,7 +183,7 @@ mnu::TableBody body_from_dict(const Dictionary &d) {
 	return b;
 }
 
-Dictionary subst_to_dict(const mnu::TableSubst &s) {
+Dictionary subst_to_dict(const opennova::mnu::TableSubst &s) {
 	Dictionary d;
 	d["has_column"] = s.has_column;
 	d["column"] = s.column;
@@ -193,8 +193,8 @@ Dictionary subst_to_dict(const mnu::TableSubst &s) {
 	return d;
 }
 
-mnu::TableSubst subst_from_dict(const Dictionary &d) {
-	mnu::TableSubst s;
+opennova::mnu::TableSubst subst_from_dict(const Dictionary &d) {
+	opennova::mnu::TableSubst s;
 	s.has_column = bool(d.get("has_column", d.has("column")));
 	s.column = static_cast<int>(d.get("column", 0));
 	s.value = to_std(String(d.get("value", "")));
@@ -203,27 +203,27 @@ mnu::TableSubst subst_from_dict(const Dictionary &d) {
 	return s;
 }
 
-mnu::Screen make_default_screen(const std::string &name) {
-	mnu::Screen screen;
+opennova::mnu::Screen make_default_screen(const std::string &name) {
+	opennova::mnu::Screen screen;
 	screen.name = name;
 	// New documents and added screens must share the retail-safe root shape.
 	// The original layout/render paths assume all four bounds and an appearance.
 	screen.root_window.name = "MAIN";
-	screen.root_window.type = mnu::WindowType::Window;
-	mnu::Position &root_pos = screen.root_window.position;
+	screen.root_window.type = opennova::mnu::WindowType::Window;
+	opennova::mnu::Position &root_pos = screen.root_window.position;
 	root_pos.left = 0;
 	root_pos.top = 0;
 	root_pos.right = 800;
 	root_pos.bottom = 600;
 	root_pos.has_left = root_pos.has_top = root_pos.has_right = root_pos.has_bottom = true;
-	mnu::Appearance root_app;
+	opennova::mnu::Appearance root_app;
 	root_app.type = "custom";
 	root_app.state = "default";
 	screen.root_window.appearances.push_back(std::move(root_app));
 	return screen;
 }
 
-Dictionary position_to_dict(const mnu::Position &p) {
+Dictionary position_to_dict(const opennova::mnu::Position &p) {
 	Dictionary d;
 	d["left"] = p.left;
 	d["top"] = p.top;
@@ -236,7 +236,7 @@ Dictionary position_to_dict(const mnu::Position &p) {
 	return d;
 }
 
-void apply_position_patch(mnu::Position &p, const Dictionary &d) {
+void apply_position_patch(opennova::mnu::Position &p, const Dictionary &d) {
 	if (d.has("left")) p.left = int(d["left"]);
 	if (d.has("top")) p.top = int(d["top"]);
 	if (d.has("right")) p.right = int(d["right"]);
@@ -247,7 +247,7 @@ void apply_position_patch(mnu::Position &p, const Dictionary &d) {
 	if (d.has("has_bottom")) p.has_bottom = bool(d["has_bottom"]);
 }
 
-Dictionary appearance_to_dict(const mnu::Appearance &a) {
+Dictionary appearance_to_dict(const opennova::mnu::Appearance &a) {
 	Dictionary d;
 	d["state"] = to_gd(a.state);
 	d["type"] = to_gd(a.type);
@@ -259,20 +259,20 @@ Dictionary appearance_to_dict(const mnu::Appearance &a) {
 	return d;
 }
 
-TypedArray<Dictionary> appearances_to_array(const std::vector<mnu::Appearance> &appearances) {
+TypedArray<Dictionary> appearances_to_array(const std::vector<opennova::mnu::Appearance> &appearances) {
 	TypedArray<Dictionary> out;
-	for (const mnu::Appearance &a : appearances) {
+	for (const opennova::mnu::Appearance &a : appearances) {
 		out.push_back(appearance_to_dict(a));
 	}
 	return out;
 }
 
-std::vector<mnu::Appearance> appearances_from_array(const TypedArray<Dictionary> &rows) {
-	std::vector<mnu::Appearance> out;
+std::vector<opennova::mnu::Appearance> appearances_from_array(const TypedArray<Dictionary> &rows) {
+	std::vector<opennova::mnu::Appearance> out;
 	out.reserve(static_cast<size_t>(rows.size()));
 	for (int i = 0; i < rows.size(); ++i) {
 		const Dictionary d = rows[i];
-		mnu::Appearance a;
+		opennova::mnu::Appearance a;
 		a.state = to_std(String(d.get("state", "")));
 		a.type = to_std(String(d.get("type", "")));
 		a.value = to_std(String(d.get("value", "")));
@@ -287,7 +287,7 @@ std::vector<mnu::Appearance> appearances_from_array(const TypedArray<Dictionary>
 	return out;
 }
 
-Dictionary sound_to_dict(const mnu::Sound &s) {
+Dictionary sound_to_dict(const opennova::mnu::Sound &s) {
 	Dictionary d;
 	d["state"] = to_gd(s.state);
 	d["trigger"] = to_gd(s.trigger);
@@ -295,9 +295,9 @@ Dictionary sound_to_dict(const mnu::Sound &s) {
 	return d;
 }
 
-TypedArray<Dictionary> sounds_to_array(const std::vector<mnu::Sound> &sounds) {
+TypedArray<Dictionary> sounds_to_array(const std::vector<opennova::mnu::Sound> &sounds) {
 	TypedArray<Dictionary> out;
-	for (const mnu::Sound &s : sounds) {
+	for (const opennova::mnu::Sound &s : sounds) {
 		out.push_back(sound_to_dict(s));
 	}
 	return out;
@@ -329,11 +329,11 @@ void apply_scrollbar_patch(T &s, const Dictionary &d) {
 	if (d.has("scrolldown")) s.scrolldown = appearances_from_array(TypedArray<Dictionary>(d["scrolldown"]));
 	if (d.has("sounds")) {
 		const TypedArray<Dictionary> rows = d["sounds"];
-		std::vector<mnu::Sound> next;
+		std::vector<opennova::mnu::Sound> next;
 		next.reserve(static_cast<size_t>(rows.size()));
 		for (int i = 0; i < rows.size(); ++i) {
 			const Dictionary row = rows[i];
-			mnu::Sound sound;
+			opennova::mnu::Sound sound;
 			sound.state = to_std(String(row.get("state", "")));
 			sound.trigger = to_std(String(row.get("trigger", "")));
 			sound.file = to_std(String(row.get("file", "")));
@@ -343,7 +343,7 @@ void apply_scrollbar_patch(T &s, const Dictionary &d) {
 	}
 }
 
-Dictionary spin_button_to_dict(const mnu::SpinButton &button) {
+Dictionary spin_button_to_dict(const opennova::mnu::SpinButton &button) {
 	Dictionary d;
 	d["present"] = button.present;
 	d["position"] = position_to_dict(button.position);
@@ -351,7 +351,7 @@ Dictionary spin_button_to_dict(const mnu::SpinButton &button) {
 	return d;
 }
 
-void apply_spin_button_patch(mnu::SpinButton &button, const Dictionary &d) {
+void apply_spin_button_patch(opennova::mnu::SpinButton &button, const Dictionary &d) {
 	if (!d.has("present") && !d.is_empty()) button.present = true;
 	if (d.has("present")) button.present = bool(d["present"]);
 	if (d.has("position")) apply_position_patch(button.position, Dictionary(d["position"]));
@@ -503,7 +503,7 @@ MnuDocument::MnuDocument() {
 
 // --- Id tree ---
 
-MnuDocument::IdWindow MnuDocument::make_id_window(const mnu::Window &w) {
+MnuDocument::IdWindow MnuDocument::make_id_window(const opennova::mnu::Window &w) {
 	IdWindow node;
 	node.id = next_id_++;
 	node.children.reserve(w.children.size());
@@ -558,22 +558,22 @@ MnuDocument::Locator MnuDocument::locate(int id) const {
 	return loc;
 }
 
-mnu::Window *MnuDocument::window_at(const Locator &loc) {
+opennova::mnu::Window *MnuDocument::window_at(const Locator &loc) {
 	if (!loc.valid() || loc.is_screen) {
 		return nullptr;
 	}
-	mnu::Window *w = &doc_.screens[loc.screen_index].root_window;
+	opennova::mnu::Window *w = &doc_.screens[loc.screen_index].root_window;
 	for (int idx : loc.path) {
 		w = &w->children[idx];
 	}
 	return w;
 }
 
-const mnu::Window *MnuDocument::window_at(const Locator &loc) const {
+const opennova::mnu::Window *MnuDocument::window_at(const Locator &loc) const {
 	if (!loc.valid() || loc.is_screen) {
 		return nullptr;
 	}
-	const mnu::Window *w = &doc_.screens[loc.screen_index].root_window;
+	const opennova::mnu::Window *w = &doc_.screens[loc.screen_index].root_window;
 	for (int idx : loc.path) {
 		w = &w->children[idx];
 	}
@@ -606,7 +606,7 @@ const char *MnuDocument::state_for_slot(int slot) {
 	}
 }
 
-mnu::Appearance *MnuDocument::find_appearance(mnu::Window &w, const char *state, bool create) {
+opennova::mnu::Appearance *MnuDocument::find_appearance(opennova::mnu::Window &w, const char *state, bool create) {
 	for (auto &app : w.appearances) {
 		if (app.state == state) {
 			return &app;
@@ -615,7 +615,7 @@ mnu::Appearance *MnuDocument::find_appearance(mnu::Window &w, const char *state,
 	if (!create) {
 		return nullptr;
 	}
-	mnu::Appearance app;
+	opennova::mnu::Appearance app;
 	app.state = state;
 	app.type = "image";
 	w.appearances.push_back(app);
@@ -633,9 +633,9 @@ namespace {
 // POSITIONs are parent-relative (the builder nests child controls under the
 // parent node), so absolute coords accumulate ancestor left/top; right/bottom
 // live in the same frame as left/top.
-void accumulate_extent(const mnu::Window &w, int sum_x, int sum_y, int &max_r,
+void accumulate_extent(const opennova::mnu::Window &w, int sum_x, int sum_y, int &max_r,
 		int &max_b) {
-	const mnu::Position &p = w.position;
+	const opennova::mnu::Position &p = w.position;
 	const int r = sum_x + (p.has_right ? p.right : (p.has_left ? p.left : 0));
 	const int b = sum_y + (p.has_bottom ? p.bottom : (p.has_top ? p.top : 0));
 	if (r > max_r) {
@@ -646,7 +646,7 @@ void accumulate_extent(const mnu::Window &w, int sum_x, int sum_y, int &max_r,
 	}
 	const int origin_x = sum_x + (p.has_left ? p.left : 0);
 	const int origin_y = sum_y + (p.has_top ? p.top : 0);
-	for (const mnu::Window &c : w.children) {
+	for (const opennova::mnu::Window &c : w.children) {
 		accumulate_extent(c, origin_x, origin_y, max_r, max_b);
 	}
 }
@@ -657,9 +657,9 @@ Error MnuDocument::load_from_bytes(const PackedByteArray &p_bytes) {
 	if (!bytes.empty()) {
 		std::memcpy(bytes.data(), p_bytes.ptr(), bytes.size());
 	}
-	mnu::Document parsed;
+	opennova::mnu::Document parsed;
 	std::string error;
-	if (!mnu::parse(bytes.data(), bytes.size(), parsed, error)) {
+	if (!opennova::mnu::parse(bytes.data(), bytes.size(), parsed, error)) {
 		UtilityFunctions::push_warning("MnuDocument: parse failed: ", error.c_str());
 		return ERR_FILE_CORRUPT;
 	}
@@ -673,7 +673,7 @@ Error MnuDocument::load_from_bytes(const PackedByteArray &p_bytes) {
 	{
 		int max_r = 0;
 		int max_b = 0;
-		for (const mnu::Screen &s : doc_.screens) {
+		for (const opennova::mnu::Screen &s : doc_.screens) {
 			accumulate_extent(s.root_window, 0, 0, max_r, max_b);
 		}
 		if (max_r > 0 && max_b > 0) {
@@ -687,7 +687,7 @@ Error MnuDocument::load_from_bytes(const PackedByteArray &p_bytes) {
 PackedByteArray MnuDocument::to_byte_array() const {
 	std::vector<uint8_t> bytes;
 	std::string error;
-	if (!mnu::serialize_bytes(doc_, bytes, error, true, 2)) {
+	if (!opennova::mnu::serialize_bytes(doc_, bytes, error, true, 2)) {
 		UtilityFunctions::push_warning(String("MnuDocument::to_byte_array: ") + to_gd(error));
 		return PackedByteArray();
 	}
@@ -721,7 +721,7 @@ Error MnuDocument::save_to_path(const String &p_path) const {
 }
 
 void MnuDocument::create_empty() {
-	doc_ = mnu::Document{};
+	doc_ = opennova::mnu::Document{};
 	doc_.screens.push_back(make_default_screen("SCREEN"));
 	menu_size_ = Vector2i(800, 600);
 	rebuild_ids();
@@ -810,17 +810,17 @@ String MnuDocument::get_widget_name(int p_id) const {
 	if (loc.is_screen) {
 		return to_gd(doc_.screens[loc.screen_index].name);
 	}
-	const mnu::Window *w = window_at(loc);
+	const opennova::mnu::Window *w = window_at(loc);
 	return w ? to_gd(w->name) : String();
 }
 
 Rect2 MnuDocument::get_window_rect(int p_id) const {
 	const Locator loc = locate(p_id);
-	const mnu::Window *w = window_at(loc);
+	const opennova::mnu::Window *w = window_at(loc);
 	if (!w) {
 		return Rect2();
 	}
-	const mnu::Position &p = w->position;
+	const opennova::mnu::Position &p = w->position;
 	const float x = p.has_left ? static_cast<float>(p.left) : 0.0f;
 	const float y = p.has_top ? static_cast<float>(p.top) : 0.0f;
 	const float wd = (p.has_left && p.has_right) ? static_cast<float>(p.right - p.left) : 0.0f;
@@ -865,7 +865,7 @@ void MnuDocument::set_screen_property(int p_screen_id, const String &p_key, cons
 	if (!loc.valid() || !loc.is_screen) {
 		return;
 	}
-	mnu::Screen &s = doc_.screens[loc.screen_index];
+	opennova::mnu::Screen &s = doc_.screens[loc.screen_index];
 	const String key = p_key.to_lower();
 	if (key == "name") {
 		s.name = to_std(p_value);
@@ -895,7 +895,7 @@ void MnuDocument::set_widget_name(int p_id, const String &p_name) {
 		touch();
 		return;
 	}
-	mnu::Window *w = window_at(loc);
+	opennova::mnu::Window *w = window_at(loc);
 	if (!w) {
 		return;
 	}
@@ -904,7 +904,7 @@ void MnuDocument::set_widget_name(int p_id, const String &p_name) {
 }
 
 void MnuDocument::set_window_rect(int p_id, const Rect2 &p_rect) {
-	mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return;
 	}
@@ -913,7 +913,7 @@ void MnuDocument::set_window_rect(int p_id, const Rect2 &p_rect) {
 	// (the original engine stretches appearance art across an explicit width).
 	const bool auto_width = p_rect.size.x < 0.0f;
 	const bool auto_height = p_rect.size.y < 0.0f;
-	mnu::Position &p = w->position;
+	opennova::mnu::Position &p = w->position;
 	p.left = static_cast<int>(p_rect.position.x);
 	p.top = static_cast<int>(p_rect.position.y);
 	p.right = auto_width ? 0 : static_cast<int>(p_rect.position.x + p_rect.size.x);
@@ -925,12 +925,12 @@ void MnuDocument::set_window_rect(int p_id, const Rect2 &p_rect) {
 }
 
 String MnuDocument::get_widget_text(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	return w ? to_gd(w->string_data.value) : String();
 }
 
 void MnuDocument::set_widget_text(int p_id, const String &p_text) {
-	mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return;
 	}
@@ -940,22 +940,22 @@ void MnuDocument::set_widget_text(int p_id, const String &p_text) {
 }
 
 String MnuDocument::get_widget_string_type(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	return w ? to_gd(w->string_data.type) : String();
 }
 
 String MnuDocument::get_widget_font(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	return w ? to_gd(w->font.name) : String();
 }
 
 String MnuDocument::get_widget_datasource(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	return w ? to_gd(w->datasource) : String();
 }
 
 void MnuDocument::set_widget_datasource(int p_id, const String &p_value) {
-	mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return;
 	}
@@ -964,12 +964,12 @@ void MnuDocument::set_widget_datasource(int p_id, const String &p_value) {
 }
 
 String MnuDocument::get_widget_orientation(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	return w ? to_gd(w->orientation) : String();
 }
 
 void MnuDocument::set_widget_orientation(int p_id, const String &p_value) {
-	mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return;
 	}
@@ -979,7 +979,7 @@ void MnuDocument::set_widget_orientation(int p_id, const String &p_value) {
 
 Dictionary MnuDocument::get_widget_authoring_state(int p_id) const {
 	Dictionary out;
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return out;
 	}
@@ -1048,7 +1048,7 @@ Dictionary MnuDocument::get_widget_authoring_state(int p_id) const {
 	out["cursor"] = cursor;
 
 	TypedArray<Dictionary> hotkeys;
-	for (const mnu::Hotkey &hotkey : w->hotkeys) {
+	for (const opennova::mnu::Hotkey &hotkey : w->hotkeys) {
 		Dictionary row;
 		row["value"] = to_gd(hotkey.value);
 		row["virtual"] = hotkey.virtual_key;
@@ -1064,7 +1064,7 @@ Dictionary MnuDocument::get_widget_authoring_state(int p_id) const {
 	items["appearances"] = appearances_to_array(w->items.appearances);
 	items["selection_color"] = to_gd(w->items.selection_color);
 	TypedArray<Dictionary> item_rows;
-	for (const mnu::Item &item : w->items.items) {
+	for (const opennova::mnu::Item &item : w->items.items) {
 		item_rows.push_back(item_to_dict(item));
 	}
 	items["rows"] = item_rows;
@@ -1091,7 +1091,7 @@ Dictionary MnuDocument::get_widget_authoring_state(int p_id) const {
 	list_items["appearances"] = appearances_to_array(w->list_box.items.appearances);
 	list_items["selection_color"] = to_gd(w->list_box.items.selection_color);
 	TypedArray<Dictionary> list_item_rows;
-	for (const mnu::Item &item : w->list_box.items.items) {
+	for (const opennova::mnu::Item &item : w->list_box.items.items) {
 		list_item_rows.push_back(item_to_dict(item));
 	}
 	list_items["rows"] = list_item_rows;
@@ -1139,7 +1139,7 @@ Dictionary MnuDocument::get_widget_authoring_state(int p_id) const {
 }
 
 bool MnuDocument::apply_widget_patch(int p_id, const Dictionary &p_patch) {
-	mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w || p_patch.is_empty()) {
 		return false;
 	}
@@ -1157,7 +1157,7 @@ bool MnuDocument::apply_widget_patch(int p_id, const Dictionary &p_patch) {
 		// document structure, inspector sections, and serialization consistent
 		// immediately instead of waiting for a save/reload to reparse it.
 		if (!w->type_token.empty()) {
-			w->type = mnu::parse_window_type(w->type_token);
+			w->type = opennova::mnu::parse_window_type(w->type_token);
 		}
 	}
 	if (p_patch.has("name")) w->name = to_std(String(p_patch["name"]));
@@ -1231,11 +1231,11 @@ bool MnuDocument::apply_widget_patch(int p_id, const Dictionary &p_patch) {
 	}
 	if (p_patch.has("hotkeys")) {
 		const TypedArray<Dictionary> rows = p_patch["hotkeys"];
-		std::vector<mnu::Hotkey> hotkeys;
+		std::vector<opennova::mnu::Hotkey> hotkeys;
 		hotkeys.reserve(static_cast<size_t>(rows.size()));
 		for (int i = 0; i < rows.size(); ++i) {
 			const Dictionary d = rows[i];
-			mnu::Hotkey hotkey;
+			opennova::mnu::Hotkey hotkey;
 			hotkey.value = to_std(String(d.get("value", "")));
 			hotkey.virtual_key = bool(d.get("virtual", false));
 			hotkeys.push_back(std::move(hotkey));
@@ -1261,7 +1261,7 @@ bool MnuDocument::apply_widget_patch(int p_id, const Dictionary &p_patch) {
 		}
 		if (d.has("rows")) {
 			const TypedArray<Dictionary> rows = d["rows"];
-			std::vector<mnu::Item> items;
+			std::vector<opennova::mnu::Item> items;
 			items.reserve(static_cast<size_t>(rows.size()));
 			for (int i = 0; i < rows.size(); ++i) items.push_back(item_from_dict(rows[i]));
 			w->items.items = std::move(items);
@@ -1310,7 +1310,7 @@ bool MnuDocument::apply_widget_patch(int p_id, const Dictionary &p_patch) {
 			}
 			if (items.has("rows")) {
 				const TypedArray<Dictionary> rows = items["rows"];
-				std::vector<mnu::Item> next;
+				std::vector<opennova::mnu::Item> next;
 				next.reserve(static_cast<size_t>(rows.size()));
 				for (int i = 0; i < rows.size(); ++i) next.push_back(item_from_dict(rows[i]));
 				w->list_box.items.items = std::move(next);
@@ -1390,10 +1390,10 @@ bool MnuDocument::apply_widget_patch(int p_id, const Dictionary &p_patch) {
 	}
 	if (p_patch.has("sounds")) {
 		const TypedArray<Dictionary> rows = p_patch["sounds"];
-		std::vector<mnu::Sound> next;
+		std::vector<opennova::mnu::Sound> next;
 		for (int i = 0; i < rows.size(); ++i) {
 			const Dictionary d = rows[i];
-			mnu::Sound sound;
+			opennova::mnu::Sound sound;
 			sound.state = to_std(String(d.get("state", "")));
 			sound.trigger = to_std(String(d.get("trigger", "")));
 			sound.file = to_std(String(d.get("file", "")));
@@ -1403,10 +1403,10 @@ bool MnuDocument::apply_widget_patch(int p_id, const Dictionary &p_patch) {
 	}
 	if (p_patch.has("actions")) {
 		const TypedArray<Dictionary> rows = p_patch["actions"];
-		std::vector<mnu::Action> next;
+		std::vector<opennova::mnu::Action> next;
 		for (int i = 0; i < rows.size(); ++i) {
 			const Dictionary d = rows[i];
-			mnu::Action action;
+			opennova::mnu::Action action;
 			action.type = to_std(String(d.get("type", "")));
 			action.state = to_std(String(d.get("state", "")));
 			action.file = to_std(String(d.get("file", "")));
@@ -1432,11 +1432,11 @@ bool MnuDocument::apply_widget_patch(int p_id, const Dictionary &p_patch) {
 
 TypedArray<Dictionary> MnuDocument::get_widget_sounds(int p_id) const {
 	TypedArray<Dictionary> out;
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return out;
 	}
-	for (const mnu::Sound &s : w->sounds) {
+	for (const opennova::mnu::Sound &s : w->sounds) {
 		Dictionary d;
 		d["state"] = to_gd(s.state);
 		d["trigger"] = to_gd(s.trigger);
@@ -1447,15 +1447,15 @@ TypedArray<Dictionary> MnuDocument::get_widget_sounds(int p_id) const {
 }
 
 void MnuDocument::set_widget_sounds(int p_id, const TypedArray<Dictionary> &p_sounds) {
-	mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return;
 	}
-	std::vector<mnu::Sound> next;
+	std::vector<opennova::mnu::Sound> next;
 	next.reserve(static_cast<size_t>(p_sounds.size()));
 	for (int i = 0; i < p_sounds.size(); ++i) {
 		const Dictionary d = p_sounds[i];
-		mnu::Sound s;
+		opennova::mnu::Sound s;
 		s.state = to_std(String(d.get("state", "")));
 		s.trigger = to_std(String(d.get("trigger", "")));
 		s.file = to_std(String(d.get("file", "")));
@@ -1467,11 +1467,11 @@ void MnuDocument::set_widget_sounds(int p_id, const TypedArray<Dictionary> &p_so
 
 TypedArray<Dictionary> MnuDocument::get_widget_appearances(int p_id) const {
 	TypedArray<Dictionary> out;
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return out;
 	}
-	for (const mnu::Appearance &a : w->appearances) {
+	for (const opennova::mnu::Appearance &a : w->appearances) {
 		out.push_back(appearance_to_dict(a));
 	}
 	return out;
@@ -1479,7 +1479,7 @@ TypedArray<Dictionary> MnuDocument::get_widget_appearances(int p_id) const {
 
 Dictionary MnuDocument::get_window_frame(int p_id) const {
 	Dictionary out;
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return out;
 	}
@@ -1497,11 +1497,11 @@ Dictionary MnuDocument::get_window_frame(int p_id) const {
 
 TypedArray<Dictionary> MnuDocument::get_widget_actions(int p_id) const {
 	TypedArray<Dictionary> out;
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return out;
 	}
-	for (const mnu::Action &a : w->actions) {
+	for (const opennova::mnu::Action &a : w->actions) {
 		Dictionary d;
 		d["type"] = to_gd(a.type);
 		d["target"] = to_gd(a.target);
@@ -1520,15 +1520,15 @@ TypedArray<Dictionary> MnuDocument::get_widget_actions(int p_id) const {
 }
 
 void MnuDocument::set_widget_actions(int p_id, const TypedArray<Dictionary> &p_actions) {
-	mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return;
 	}
-	std::vector<mnu::Action> next;
+	std::vector<opennova::mnu::Action> next;
 	next.reserve(static_cast<size_t>(p_actions.size()));
 	for (int i = 0; i < p_actions.size(); ++i) {
 		const Dictionary d = p_actions[i];
-		mnu::Action a;
+		opennova::mnu::Action a;
 		a.type = to_std(String(d.get("type", "")));
 		a.target = to_std(String(d.get("target", "")));
 		a.state = to_std(String(d.get("state", "")));
@@ -1549,12 +1549,12 @@ void MnuDocument::set_widget_actions(int p_id, const TypedArray<Dictionary> &p_a
 // --- M10: item rows (list / multi / spinlist / combo) ---
 
 int MnuDocument::get_item_count(int p_id) const {
-	const mnu::Items *items = items_container(window_at(locate(p_id)));
+	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
 	return items ? static_cast<int>(items->items.size()) : 0;
 }
 
 Dictionary MnuDocument::get_item(int p_id, int p_index) const {
-	const mnu::Items *items = items_container(window_at(locate(p_id)));
+	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return Dictionary();
 	}
@@ -1563,7 +1563,7 @@ Dictionary MnuDocument::get_item(int p_id, int p_index) const {
 
 TypedArray<Dictionary> MnuDocument::get_items(int p_id) const {
 	TypedArray<Dictionary> out;
-	const mnu::Items *items = items_container(window_at(locate(p_id)));
+	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
 	if (items == nullptr) {
 		return out;
 	}
@@ -1574,8 +1574,8 @@ TypedArray<Dictionary> MnuDocument::get_items(int p_id) const {
 }
 
 void MnuDocument::set_item(int p_id, int p_index, const Dictionary &p_row) {
-	mnu::Window *w = window_at(locate(p_id));
-	mnu::Items *items = items_container(w);
+	opennova::mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Items *items = items_container(w);
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return;
 	}
@@ -1585,8 +1585,8 @@ void MnuDocument::set_item(int p_id, int p_index, const Dictionary &p_row) {
 }
 
 int MnuDocument::add_item(int p_id, const Dictionary &p_row) {
-	mnu::Window *w = window_at(locate(p_id));
-	mnu::Items *items = items_container(w);
+	opennova::mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Items *items = items_container(w);
 	if (items == nullptr) {
 		return -1;
 	}
@@ -1598,8 +1598,8 @@ int MnuDocument::add_item(int p_id, const Dictionary &p_row) {
 }
 
 void MnuDocument::remove_item(int p_id, int p_index) {
-	mnu::Window *w = window_at(locate(p_id));
-	mnu::Items *items = items_container(w);
+	opennova::mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Items *items = items_container(w);
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return;
 	}
@@ -1609,8 +1609,8 @@ void MnuDocument::remove_item(int p_id, int p_index) {
 }
 
 void MnuDocument::move_item(int p_id, int p_from, int p_to) {
-	mnu::Window *w = window_at(locate(p_id));
-	mnu::Items *items = items_container(w);
+	opennova::mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Items *items = items_container(w);
 	if (items == nullptr) {
 		return;
 	}
@@ -1621,7 +1621,7 @@ void MnuDocument::move_item(int p_id, int p_from, int p_to) {
 	items->present = true;
 	// Remove then re-insert so p_to names the destination slot in final indexing
 	// (erase shifts the tail down by one when p_to > p_from). Clamp defensively.
-	mnu::Item moved = items->items[p_from];
+	opennova::mnu::Item moved = items->items[p_from];
 	items->items.erase(items->items.begin() + p_from);
 	int dest = p_to;
 	if (dest > static_cast<int>(items->items.size())) {
@@ -1634,12 +1634,12 @@ void MnuDocument::move_item(int p_id, int p_from, int p_to) {
 // --- M10: table column template (headers / bodies) ---
 
 int MnuDocument::get_table_column_count(int p_id) const {
-	const mnu::TableData *td = table_of(window_at(locate(p_id)));
+	const opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	return td ? td->column.count : 0;
 }
 
 void MnuDocument::set_table_column_count(int p_id, int p_count) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr || p_count < 0) {
 		return;
 	}
@@ -1649,12 +1649,12 @@ void MnuDocument::set_table_column_count(int p_id, int p_count) {
 }
 
 int MnuDocument::get_table_column_spacing(int p_id) const {
-	const mnu::TableData *td = table_of(window_at(locate(p_id)));
+	const opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	return td ? td->column.spacing : 0;
 }
 
 void MnuDocument::set_table_column_spacing(int p_id, int p_spacing) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr || p_spacing < 0) {
 		return;
 	}
@@ -1665,7 +1665,7 @@ void MnuDocument::set_table_column_spacing(int p_id, int p_spacing) {
 
 TypedArray<Dictionary> MnuDocument::get_table_headers(int p_id) const {
 	TypedArray<Dictionary> out;
-	const mnu::TableData *td = table_of(window_at(locate(p_id)));
+	const opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr) {
 		return out;
 	}
@@ -1676,7 +1676,7 @@ TypedArray<Dictionary> MnuDocument::get_table_headers(int p_id) const {
 }
 
 void MnuDocument::set_table_header(int p_id, int p_index, const Dictionary &p_row) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr || p_index < 0 || p_index >= static_cast<int>(td->column.headers.size())) {
 		return;
 	}
@@ -1685,7 +1685,7 @@ void MnuDocument::set_table_header(int p_id, int p_index, const Dictionary &p_ro
 }
 
 int MnuDocument::add_table_header(int p_id, const Dictionary &p_row) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr) {
 		return -1;
 	}
@@ -1696,7 +1696,7 @@ int MnuDocument::add_table_header(int p_id, const Dictionary &p_row) {
 
 TypedArray<Dictionary> MnuDocument::get_table_bodies(int p_id) const {
 	TypedArray<Dictionary> out;
-	const mnu::TableData *td = table_of(window_at(locate(p_id)));
+	const opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr) {
 		return out;
 	}
@@ -1707,7 +1707,7 @@ TypedArray<Dictionary> MnuDocument::get_table_bodies(int p_id) const {
 }
 
 void MnuDocument::set_table_body(int p_id, int p_index, const Dictionary &p_row) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr || p_index < 0 || p_index >= static_cast<int>(td->column.bodies.size())) {
 		return;
 	}
@@ -1716,7 +1716,7 @@ void MnuDocument::set_table_body(int p_id, int p_index, const Dictionary &p_row)
 }
 
 int MnuDocument::add_table_body(int p_id, const Dictionary &p_row) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr) {
 		return -1;
 	}
@@ -1726,7 +1726,7 @@ int MnuDocument::add_table_body(int p_id, const Dictionary &p_row) {
 }
 
 void MnuDocument::remove_table_body(int p_id, int p_index) {
-	mnu::TableData *td = table_of(window_at(locate(p_id)));
+	opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr || p_index < 0 || p_index >= static_cast<int>(td->column.bodies.size())) {
 		return;
 	}
@@ -1736,7 +1736,7 @@ void MnuDocument::remove_table_body(int p_id, int p_index) {
 
 TypedArray<Dictionary> MnuDocument::get_table_substs(int p_id) const {
 	TypedArray<Dictionary> out;
-	const mnu::TableData *td = table_of(window_at(locate(p_id)));
+	const opennova::mnu::TableData *td = table_of(window_at(locate(p_id)));
 	if (td == nullptr) {
 		return out;
 	}
@@ -1747,11 +1747,11 @@ TypedArray<Dictionary> MnuDocument::get_table_substs(int p_id) const {
 }
 
 String MnuDocument::get_widget_color(int p_id, int p_slot) const {
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return String();
 	}
-	const mnu::Font &f = w->font;
+	const opennova::mnu::Font &f = w->font;
 	switch (p_slot) {
 		case COLOR_DEFAULT_FG:
 			return to_gd(f.default_fg);
@@ -1775,7 +1775,7 @@ String MnuDocument::get_widget_color(int p_id, int p_slot) const {
 }
 
 String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return String();
 	}
@@ -1789,7 +1789,7 @@ String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
 }
 
 int MnuDocument::get_widget_flags(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return 0;
 	}
@@ -1816,12 +1816,12 @@ int MnuDocument::get_widget_flags(int p_id) const {
 }
 
 int MnuDocument::get_widget_group(int p_id) const {
-	const mnu::Window *w = window_at(locate(p_id));
+	const opennova::mnu::Window *w = window_at(locate(p_id));
 	return w ? w->group : 0;
 }
 
 void MnuDocument::set_widget_group(int p_id, int p_group) {
-	mnu::Window *w = window_at(locate(p_id));
+	opennova::mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
 		return;
 	}
@@ -1838,7 +1838,7 @@ int MnuDocument::add_widget(int p_parent_id, int p_type, const Rect2 &p_rect) {
 		return -1;
 	}
 	// A screen "contains" its root window; adding under a screen targets the root.
-	mnu::Window *parent;
+	opennova::mnu::Window *parent;
 	IdWindow *id_parent;
 	if (loc.is_screen) {
 		parent = &doc_.screens[loc.screen_index].root_window;
@@ -1851,9 +1851,9 @@ int MnuDocument::add_widget(int p_parent_id, int p_type, const Rect2 &p_rect) {
 		return -1;
 	}
 
-	mnu::Window w;
-	w.type = static_cast<mnu::WindowType>(p_type);
-	w.name = mnu::window_type_name(w.type);
+	opennova::mnu::Window w;
+	w.type = static_cast<opennova::mnu::WindowType>(p_type);
+	w.name = opennova::mnu::window_type_name(w.type);
 	// Same auto-size convention as set_window_rect: a negative extent leaves
 	// has_right/has_bottom unset so the writer omits RIGHT/BOTTOM.
 	const bool auto_width = p_rect.size.x < 0.0f;
@@ -1884,7 +1884,7 @@ void MnuDocument::delete_widget(int p_id) {
 	}
 	const int child_index = loc.path.back();
 
-	mnu::Window *parent = &doc_.screens[loc.screen_index].root_window;
+	opennova::mnu::Window *parent = &doc_.screens[loc.screen_index].root_window;
 	IdWindow *id_parent = &ids_[loc.screen_index].root;
 	for (size_t i = 0; i + 1 < loc.path.size(); ++i) {
 		parent = &parent->children[loc.path[i]];
@@ -1895,7 +1895,7 @@ void MnuDocument::delete_widget(int p_id) {
 	touch();
 }
 
-void MnuDocument::set_native(const mnu::Document &p_doc) {
+void MnuDocument::set_native(const opennova::mnu::Document &p_doc) {
 	doc_ = p_doc;
 	rebuild_ids();
 }

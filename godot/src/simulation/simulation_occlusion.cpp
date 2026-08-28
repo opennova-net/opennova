@@ -171,7 +171,7 @@ PackedInt32Array Simulation::get_render_culled_changes() {
 
 float Simulation::sun_quality_factor(int p_quality) const {
 	// quality = 4 - blocked, so the owner's factor(blocked) inverts cleanly.
-	return ::renderer::sun_visibility_factor(4 - p_quality);
+	return opennova::renderer::sun_visibility_factor(4 - p_quality);
 }
 
 // The per-drawn-entity sun-visibility factor feed (D-RLIT-3). Retail computes

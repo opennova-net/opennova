@@ -5,7 +5,7 @@
 // until the asset-pipeline cut (ADR 0038). With the OED library and the
 // third_party/modsuperoed submodule gone, this is the only in-repo copy of
 // that dump; renderer_material_classify_test pins
-// renderer::kMaterialDescriptorTable (engine/runtime/renderer/
+// opennova::renderer::kMaterialDescriptorTable (engine/runtime/renderer/
 // material_descriptor.h) against it row by row, with the five D-RMAT-4
 // runtime corrections enumerated in the test. It deliberately includes
 // nothing from engine/runtime/renderer: an oracle that moved with the code

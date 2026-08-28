@@ -56,7 +56,7 @@ uint64_t hash_transform(uint64_t hash,
 }
 
 uint64_t hash_control_values(uint64_t hash,
-		const ::renderer::ControlRegisterValues &values) {
+		const opennova::renderer::ControlRegisterValues &values) {
 	for (const int32_t value : values) {
 		hash = hash_value(hash, value);
 	}

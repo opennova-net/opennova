@@ -1,3 +1,4 @@
+#include <base/io/bam.h>
 #include <runtime/world/collision.h>
 
 // Split out of collision.cpp (quality campaign W3-2). Motion only — every body is
@@ -184,7 +185,10 @@ void CollisionMatrix::transform_point(const int32_t in[3], int32_t out[3]) const
 // [orig: Math_FixedPointMatrixToEulerAngles @ 0x613310]
 void collision_matrix_to_euler(const CollisionMatrix &mat, int32_t out[3]) {
     constexpr double kBamPerRadian = 683565275.5764316; // 2^31 / pi (dbl_7C19D8)
-    constexpr double kRadPerBam = 1.4629627251502471e-9; // pi / 2^31 (dbl_7C3608)
+    // dbl_7C3608's exact bytes (a8 e4 90 98 2d 22 19 3e): retail's "pi / 2^31" sits
+    // 30.5 ppm ABOVE the true quotient (1.4629180792671596e-9) and is NOT the
+    // reciprocal of kBamPerRadian; keep the binary's value, not the math.
+    constexpr double kRadPerBam = 1.4629627251502471e-9; // dbl_7C3608 verbatim
     constexpr double kQ22 = 4194304.0;
     const int32_t *m = mat.m;
     const auto trunc32 = [](double v) { return static_cast<int32_t>(v); }; // ftol: toward zero
@@ -425,7 +429,7 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
 // its visual — the 00TRg through-shot root cause once statics kept yaw only.]
 CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
                                             int32_t roll_bam, const int32_t pos[3]) {
-    static constexpr double kRadPerBam = 6.283185307179586 / 4294967296.0;
+    static constexpr double kRadPerBam = io::kRadiansPerBam;
     static constexpr double kQ22 = 4194304.0;
     const auto trig = [](int32_t bam, int32_t &s, int32_t &c) {
         const double a = static_cast<double>(bam) * kRadPerBam;

@@ -2,7 +2,7 @@
 
 #include <net/npwire/wire_handle.h>
 
-#include "../wire_cursor.h"
+#include <net/npwire/wire_cursor.h>
 
 #include <cmath>
 #include <cstring>

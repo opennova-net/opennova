@@ -189,7 +189,7 @@ void WeatherCore::set_exposure_from_iris_samples(const PackedInt32Array &p_sampl
 
 Vector3 WeatherCore::get_color_src_gain() const {
 	const std::array<float, 3> scale =
-			renderer::unpack_modulator_scale(core_.modulator_chain.render_color() & 0xFFFFFFu);
+			opennova::renderer::unpack_modulator_scale(core_.modulator_chain.render_color() & 0xFFFFFFu);
 	return Vector3(scale[0], scale[1], scale[2]);
 }
 

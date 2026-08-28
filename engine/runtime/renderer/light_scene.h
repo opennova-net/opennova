@@ -190,7 +190,7 @@ struct TerrainLightPassInputs;
 struct TerrainLightPatchRows;
 } // namespace opennova::renderer
 
-namespace renderer {
+namespace opennova::renderer {
 
 struct LightGenBlock {
 	uint8_t style = 0;  // 0 = static color (no gen multiply)
@@ -592,4 +592,4 @@ ModelLightOwner resolve_model_light_owner(const ModelLightOwnerInputs &inputs);
 int32_t light_flicker_value(const std::array<int32_t, 3> &position_fixed,
 		const LightFlickerInputs &flicker);
 
-} // namespace renderer
+}  // namespace opennova::renderer

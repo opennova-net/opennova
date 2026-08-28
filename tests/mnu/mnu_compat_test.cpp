@@ -34,7 +34,7 @@ static bool read_file(const char *path, std::string &out) {
   return true;
 }
 
-static int count_windows(const mnu::Window &w) {
+static int count_windows(const opennova::mnu::Window &w) {
   int n = 1;
   for (const auto &c : w.children) n += count_windows(c);
   return n;
@@ -52,9 +52,9 @@ static int try_menu(const char *path, bool required) {
     return 1;
   }
 
-  mnu::Document doc;
+  opennova::mnu::Document doc;
   std::string err;
-  if (!mnu::parse(src, doc, err)) {
+  if (!opennova::mnu::parse(src, doc, err)) {
     printf("  FAIL %s (parse: %s)\n", path, err.c_str());
     return 0;
   }
@@ -71,14 +71,14 @@ static int try_menu(const char *path, bool required) {
 
   /* Fixed-point idempotence: the first serialize may normalize the source, but
      re-parsing and re-serializing it must reproduce the same bytes. */
-  std::string s1 = mnu::serialize(doc, true, 2);
-  mnu::Document doc2;
+  std::string s1 = opennova::mnu::serialize(doc, true, 2);
+  opennova::mnu::Document doc2;
   std::string err2;
-  if (!mnu::parse(s1, doc2, err2)) {
+  if (!opennova::mnu::parse(s1, doc2, err2)) {
     printf("  FAIL %s (re-parse of serialized form: %s)\n", path, err2.c_str());
     return 0;
   }
-  std::string s2 = mnu::serialize(doc2, true, 2);
+  std::string s2 = opennova::mnu::serialize(doc2, true, 2);
   if (s1 != s2) {
     printf("  FAIL %s (round-trip not idempotent: %zu vs %zu bytes)\n", path,
            s1.size(), s2.size());

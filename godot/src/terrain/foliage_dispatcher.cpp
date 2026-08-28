@@ -184,7 +184,7 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
 
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
     runtime_slots_[slot] = opennova::foliage::RuntimeSlot{};
-    source_geometry_[slot] = renderer::FoliageSlotGeometry{};
+    source_geometry_[slot] = opennova::renderer::FoliageSlotGeometry{};
     fd_textures_[slot].unref();
 
     Ref<TerrainFoliageDef> def;
@@ -405,9 +405,9 @@ bool FoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
   return true;
 }
 
-renderer::FoliageSlotGeometry
+opennova::renderer::FoliageSlotGeometry
 FoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
-  renderer::FoliageSlotGeometry result;
+  opennova::renderer::FoliageSlotGeometry result;
   if (p_mesh.is_null()) {
     return result;
   }
@@ -457,9 +457,9 @@ FoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
     for (int vertex = 0; vertex < positions.size(); ++vertex) {
       const Vector3 position = positions[vertex];
       if (!finite_vector(position)) {
-        return renderer::FoliageSlotGeometry{};
+        return opennova::renderer::FoliageSlotGeometry{};
       }
-      renderer::FoliageSourceVertex source_vertex;
+      opennova::renderer::FoliageSourceVertex source_vertex;
       source_vertex.x = static_cast<float>(position.x);
       source_vertex.y = static_cast<float>(position.y);
       source_vertex.z = static_cast<float>(position.z);
@@ -500,7 +500,7 @@ FoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
   }
 
   if (result.vertices.empty() || result.indices.empty()) {
-    return renderer::FoliageSlotGeometry{};
+    return opennova::renderer::FoliageSlotGeometry{};
   }
 
   result.center_x = static_cast<float>((minimum.x + maximum.x) * 0.5);
@@ -773,7 +773,7 @@ void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform) {
   frame_stats_.frame_calls = ++total_frame_calls_;
   frame_stats_.native_detail_source = terrain_ != nullptr;
 
-  renderer::FoliageViewInput view = _view_input(p_camera_xform);
+  opennova::renderer::FoliageViewInput view = _view_input(p_camera_xform);
   if (terrain_ != nullptr) {
     const auto &patches = terrain_->get_foliage_detail_patches_native();
     view.detail_cells.reserve(patches.size());
@@ -792,14 +792,14 @@ void FoliageDispatcher::render_preview(const Transform3D &p_camera_xform) {
   frame_stats_.frame_calls = ++total_frame_calls_;
   frame_stats_.preview_detail_source = true;
 
-  renderer::FoliageViewInput view = _view_input(p_camera_xform);
+  opennova::renderer::FoliageViewInput view = _view_input(p_camera_xform);
   view.detail_cells = _preview_cells(p_camera_xform.origin);
   _compile_and_apply(view);
 }
 
-renderer::FoliageViewInput
+opennova::renderer::FoliageViewInput
 FoliageDispatcher::_view_input(const Transform3D &p_camera_xform) const {
-  renderer::FoliageViewInput input;
+  opennova::renderer::FoliageViewInput input;
   input.cam_x = static_cast<float>(p_camera_xform.origin.x);
   input.cam_y = static_cast<float>(p_camera_xform.origin.y);
   input.cam_z = static_cast<float>(p_camera_xform.origin.z);
@@ -1029,11 +1029,11 @@ Vector2 FoliageDispatcher::_terrain_uv(float p_world_x,
 }
 
 void FoliageDispatcher::_compile_and_apply(
-    const renderer::FoliageViewInput &p_view) {
+    const opennova::renderer::FoliageViewInput &p_view) {
   _ensure_visuals();
   _update_materials();
 
-  renderer::FoliageExpansionSamplers expansion;
+  opennova::renderer::FoliageExpansionSamplers expansion;
   expansion.terrain_uv_at = [this](float p_world_x, float p_world_z,
                                    float &r_u, float &r_v) {
     const Vector2 uv = _terrain_uv(p_world_x, p_world_z);
@@ -1042,14 +1042,14 @@ void FoliageDispatcher::_compile_and_apply(
     return uv != Vector2();
   };
 
-  const renderer::FoliageDrawList &draw_list =
+  const opennova::renderer::FoliageDrawList &draw_list =
       compiler_.compile(p_view, _world_samplers(), expansion);
   _apply_draw_list(draw_list);
 }
 
 Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
-    const renderer::FoliageDrawList &p_draw_list,
-    const renderer::FoliageMeshBuild &p_build) const {
+    const opennova::renderer::FoliageDrawList &p_draw_list,
+    const opennova::renderer::FoliageMeshBuild &p_build) const {
   Ref<ArrayMesh> mesh;
   if (p_build.vertex_count == 0 || p_build.index_count == 0) {
     return mesh;
@@ -1057,7 +1057,7 @@ Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
 
   const int64_t vertex_count = static_cast<int64_t>(p_build.vertex_count);
   const int64_t index_count = static_cast<int64_t>(p_build.index_count);
-  const bool detail = p_build.tier == renderer::FoliageTier::Detail;
+  const bool detail = p_build.tier == opennova::renderer::FoliageTier::Detail;
 
   PackedVector3Array positions;
   PackedVector3Array normals;
@@ -1075,7 +1075,7 @@ Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
   }
 
   for (int64_t i = 0; i < vertex_count; ++i) {
-    const renderer::FoliageVertex &v =
+    const opennova::renderer::FoliageVertex &v =
         p_draw_list.vertices[p_build.first_vertex + static_cast<size_t>(i)];
     positions.set(i, Vector3(v.x, v.y, v.z));
     uvs.set(i, Vector2(v.u, v.v));
@@ -1110,16 +1110,16 @@ Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
 }
 
 void FoliageDispatcher::_apply_draw_list(
-    const renderer::FoliageDrawList &p_draw_list) {
+    const opennova::renderer::FoliageDrawList &p_draw_list) {
   // 1) Upload every mesh the compiler built this frame (empty builds cache an
   // empty entry so repeated submissions of a barren identity stay cheap).
-  for (const renderer::FoliageMeshBuild &build : p_draw_list.mesh_builds) {
+  for (const opennova::renderer::FoliageMeshBuild &build : p_draw_list.mesh_builds) {
     CachedMesh entry;
     entry.mesh = _upload_mesh_build(p_draw_list, build);
     entry.instances = build.instance_count;
     entry.vertices = static_cast<int64_t>(build.vertex_count);
     const MeshCacheKey key{build.slot, build.cell_key, build.revision};
-    if (build.tier == renderer::FoliageTier::Detail) {
+    if (build.tier == opennova::renderer::FoliageTier::Detail) {
       detail_mesh_cache_[key] = std::move(entry);
     } else {
       model_mesh_cache_[key] = std::move(entry);
@@ -1129,13 +1129,13 @@ void FoliageDispatcher::_apply_draw_list(
   // 2) Bind the draw list's draw commands onto the pools, in draw-list order.
   size_t detail_draw_index = 0;
   size_t model_draw_index = 0;
-  for (const renderer::FoliageDrawCommand &command : p_draw_list.commands) {
+  for (const opennova::renderer::FoliageDrawCommand &command : p_draw_list.commands) {
     const int slot = command.slot;
     if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS) {
       continue;
     }
     const MeshCacheKey key{command.slot, command.cell_key, command.revision};
-    const bool detail = command.tier == renderer::FoliageTier::Detail;
+    const bool detail = command.tier == opennova::renderer::FoliageTier::Detail;
     auto &cache = detail ? detail_mesh_cache_ : model_mesh_cache_;
     const auto found = cache.find(key);
     if (found == cache.end() || found->second.mesh.is_null()) {
@@ -1253,7 +1253,7 @@ void FoliageDispatcher::_apply_draw_list(
   _erase_cache_identities(p_draw_list.model_evicted, model_mesh_cache_);
 
   // 4) Mirror the draw list's debug counters into the stable stats surface.
-  const renderer::FoliageFrameDebugCounters &debug = p_draw_list.debug;
+  const opennova::renderer::FoliageFrameDebugCounters &debug = p_draw_list.debug;
   frame_stats_.detail_cells = debug.detail_cells;
   frame_stats_.silhouette_anchors_input = debug.silhouette_anchors_input;
   frame_stats_.silhouette_anchors_visible = debug.silhouette_anchors_visible;

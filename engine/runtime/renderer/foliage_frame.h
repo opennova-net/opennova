@@ -20,7 +20,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace renderer {
+namespace opennova::renderer {
 
 // One definition slot's source geometry, extracted once at configure time
 // (the embedder flattens its mesh resource; no live mesh dependency here).
@@ -235,4 +235,4 @@ private:
 	int64_t model_wind_counter_ = 0;
 };
 
-} // namespace renderer
+}  // namespace opennova::renderer

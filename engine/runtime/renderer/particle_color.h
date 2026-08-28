@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace renderer {
+namespace opennova::renderer {
 
 // Deterministic UNORM conversion for caller-authored color/tint values. Keeping
 // every float-to-integer cast inside the proven finite range avoids C++ UB for
@@ -36,4 +36,4 @@ inline std::uint8_t particle_retail_low_byte(float value) noexcept {
 			static_cast<std::uint32_t>(converted) & 0xffu);
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

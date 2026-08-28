@@ -21,7 +21,7 @@
 
 #include <formats/mnu/mnu.h>
 
-namespace mnu {
+namespace opennova::mnu {
 
 // --- Frame border + fill [orig: CUIElement_DrawFrame @ 0x64a210] -------------
 
@@ -112,6 +112,5 @@ RectEdges spin_button_rect(bool has_left, int left, bool has_top, int top,
 // CSpinListWnd_Render @ 0x64b220 (color | 0xFF000000)].
 std::uint32_t item_color_argb(const std::string &hex_text);
 
-}  // namespace mnu
-
+}  // namespace opennova::mnu
 #endif  // MNU_LAYOUT_H

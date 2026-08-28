@@ -93,7 +93,7 @@ private:
 	// indexed by the pool slot each patch instance carries (retail: the
 	// per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
 	// Light_SetupTerrainProjectedPass @0x5AA830; the collect/gates/constants
-	// are portable in renderer::LightScene::collect_terrain_pass_rows, see
+	// are portable in opennova::renderer::LightScene::collect_terrain_pass_rows, see
 	// docs/render/render-lighting-re.md). Godot instance uniforms carry
 	// neither arrays nor samplers and this shader already spends seven of the
 	// sixteen instance slots, so the rows ride a texture rather than the object

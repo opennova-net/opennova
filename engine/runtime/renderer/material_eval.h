@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace renderer {
+namespace opennova::renderer {
 
 struct MaterialRuntime {
     UvAnimTransform uv;
@@ -52,4 +52,4 @@ int compute_anim_frame(const ThreediMaterial& mat,
                        const std::vector<std::string>& ctrl_names,
                        const ControlRegisterValues& ctrl_values);
 
-} // namespace renderer
+}  // namespace opennova::renderer

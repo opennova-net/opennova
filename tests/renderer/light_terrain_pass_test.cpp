@@ -205,8 +205,8 @@ void test_patch_bounds_fold() {
 			"render height is mission z");
 }
 
-renderer::LightSpawnParams pool_light(int32_t x_fixed, int32_t y_fixed, int32_t z_fixed) {
-	renderer::LightSpawnParams params;
+opennova::renderer::LightSpawnParams pool_light(int32_t x_fixed, int32_t y_fixed, int32_t z_fixed) {
+	opennova::renderer::LightSpawnParams params;
 	params.position_fixed = {x_fixed, y_fixed, z_fixed};
 	params.radius_fixed = 8 << 16;
 	params.rgb = {255, 255, 255};
@@ -223,8 +223,8 @@ TerrainLightPatchBounds patch_around(int32_t x_fixed, int32_t y_fixed, int32_t h
 // THE PER-PATCH ROWS: one row per passing light, no four-light cap, the
 // sixteen-light collect, both groups cleared, the pixel constants.
 void test_patch_rows() {
-	renderer::LightScene scene;
-	const renderer::LightHandle a = scene.spawn(pool_light(0, 0, 0));
+	opennova::renderer::LightScene scene;
+	const opennova::renderer::LightHandle a = scene.spawn(pool_light(0, 0, 0));
 	(void)a;
 	const TerrainLightPatchBounds patch = patch_around(0, 0, 64 << 16);
 	TerrainLightPassInputs inputs;
@@ -262,22 +262,22 @@ void test_patch_rows() {
 
 	// Both light groups are CLEARED for the terrain batch, so an owned light
 	// never passes — unlike the object pass, where its owner's draw admits it.
-	renderer::LightSpawnParams owned = pool_light(1 << 16, 0, 0);
+	opennova::renderer::LightSpawnParams owned = pool_light(1 << 16, 0, 0);
 	owned.owner_entity = 77;
 	owned.owner_section = 3;
 	scene.spawn(owned);
 	scene.collect_terrain_pass_rows(&patch, 1, inputs, &rows);
 	CHECK(rows.count == 1, "an owned light is refused by the cleared groups");
 	for (size_t i = 0; i < rows.count; ++i) {
-		CHECK(rows.rows[i].handle != renderer::LightHandle{}, "rows carry live handles");
+		CHECK(rows.rows[i].handle != opennova::renderer::LightHandle{}, "rows carry live handles");
 	}
 
 	// The authored terrain disable (flag 1024) is honoured; the object
 	// disable is irrelevant here.
-	renderer::LightSpawnParams no_terrain = pool_light(2 << 16, 0, 0);
+	opennova::renderer::LightSpawnParams no_terrain = pool_light(2 << 16, 0, 0);
 	no_terrain.disable_terrain = true;
 	scene.spawn(no_terrain);
-	renderer::LightSpawnParams no_objects = pool_light(3 << 16, 0, 0);
+	opennova::renderer::LightSpawnParams no_objects = pool_light(3 << 16, 0, 0);
 	no_objects.disable_objects = true;
 	scene.spawn(no_objects);
 	scene.collect_terrain_pass_rows(&patch, 1, inputs, &rows);
@@ -295,7 +295,7 @@ void test_patch_rows() {
 
 	// No four-light cap: every survivor gets a re-draw. The collect itself
 	// stops at SIXTEEN slot-order candidates, then sorts nearest-first.
-	renderer::LightScene crowd;
+	opennova::renderer::LightScene crowd;
 	for (int i = 0; i < 20; ++i) {
 		crowd.spawn(pool_light((20 - i) << 16, 0, 0)); // farthest first in slot order
 	}

@@ -44,7 +44,7 @@ struct TerrainStaticShadowPlannerCaster {
 	// submission. Static sector casters publish TEX_TEAM; every other slot is
 	// retained explicitly so controlled material inputs can be wired without
 	// changing the planner contract.
-	::renderer::ControlRegisterValues control_values{};
+	opennova::renderer::ControlRegisterValues control_values{};
 	uint32_t entity_attrib = 0;
 	uint32_t item_attrib = 0;
 	uint32_t item_attrib2 = 0;

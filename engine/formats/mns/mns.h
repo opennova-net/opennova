@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace mns {
+namespace opennova::mns {
 
 struct StyleSheet {
 	std::unordered_map<std::string, std::string> variables;  // uppercase keys
@@ -35,4 +35,4 @@ bool parse(const char *data, size_t size, StyleSheet &out, std::string &error);
 // Write stylesheet to binary buffer.
 bool write(const StyleSheet &sheet, std::vector<uint8_t> &out, std::string &error);
 
-}  // namespace mns
+}  // namespace opennova::mns

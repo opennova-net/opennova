@@ -1,6 +1,6 @@
 #include <runtime/renderer/object_shader_template.h>
 
-namespace renderer {
+namespace opennova::renderer {
 
 namespace {
 
@@ -266,4 +266,4 @@ ObjectShaderPipelineDescriptor describe_object_shader_pipeline(ObjectShaderKey k
 	return descriptor;
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

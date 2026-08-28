@@ -36,7 +36,7 @@ struct ParticleAtlasSnapshot {
 struct ParticleWorldSubmission {
 	std::uint64_t frame_id = 0;
 	PackedByteArray triangle_vertices;
-	std::vector<renderer::ParticleDrawCommand> commands;
+	std::vector<opennova::renderer::ParticleDrawCommand> commands;
 	std::shared_ptr<const ParticleAtlasSnapshot> atlas;
 	std::array<float, 3> camera_position{};
 	std::array<float, 3> camera_forward{0.0f, 0.0f, 1.0f};

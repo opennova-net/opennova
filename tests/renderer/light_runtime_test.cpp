@@ -35,7 +35,7 @@ void expect_vector(const std::array<float, N>& actual,
 }  // namespace
 
 int main() {
-    using namespace renderer;
+    using namespace opennova::renderer;
 
     {
         const auto atten = build_point_light_attenuation(10.0f);

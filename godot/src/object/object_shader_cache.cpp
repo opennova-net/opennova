@@ -18,102 +18,102 @@ namespace godot {
 
 namespace {
 
-const char *shader_technique_directory(renderer::ObjectShaderTechnique technique) {
+const char *shader_technique_directory(opennova::renderer::ObjectShaderTechnique technique) {
 	switch (technique) {
-		case renderer::ObjectShaderTechnique::Unsupported: return nullptr;
-		case renderer::ObjectShaderTechnique::Fixed: return "fixed";
-		case renderer::ObjectShaderTechnique::FixedSkinned: return "fixed_skinned";
-		case renderer::ObjectShaderTechnique::FixedDetail: return "fixed_detail";
-		case renderer::ObjectShaderTechnique::SelfLit: return "self_lit";
-		case renderer::ObjectShaderTechnique::SelfLitDetail: return "self_lit_detail";
-		case renderer::ObjectShaderTechnique::Tracer: return "tracer";
-		case renderer::ObjectShaderTechnique::Flag: return "flag";
-		case renderer::ObjectShaderTechnique::PhongTangentDiffuse:
+		case opennova::renderer::ObjectShaderTechnique::Unsupported: return nullptr;
+		case opennova::renderer::ObjectShaderTechnique::Fixed: return "fixed";
+		case opennova::renderer::ObjectShaderTechnique::FixedSkinned: return "fixed_skinned";
+		case opennova::renderer::ObjectShaderTechnique::FixedDetail: return "fixed_detail";
+		case opennova::renderer::ObjectShaderTechnique::SelfLit: return "self_lit";
+		case opennova::renderer::ObjectShaderTechnique::SelfLitDetail: return "self_lit_detail";
+		case opennova::renderer::ObjectShaderTechnique::Tracer: return "tracer";
+		case opennova::renderer::ObjectShaderTechnique::Flag: return "flag";
+		case opennova::renderer::ObjectShaderTechnique::PhongTangentDiffuse:
 			return "phong_tangent_diffuse";
-		case renderer::ObjectShaderTechnique::PhongTangentSpecular:
+		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecular:
 			return "phong_tangent_specular";
-		case renderer::ObjectShaderTechnique::PhongTangentSpecularSkinned:
+		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecularSkinned:
 			return "phong_tangent_specular_skinned";
-		case renderer::ObjectShaderTechnique::PhongObjectDiffuse:
+		case opennova::renderer::ObjectShaderTechnique::PhongObjectDiffuse:
 			return "phong_object_diffuse";
-		case renderer::ObjectShaderTechnique::PhongObjectSpecular:
+		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecular:
 			return "phong_object_specular";
-		case renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap:
+		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap:
 			return "phong_object_specular_phong_map";
-		case renderer::ObjectShaderTechnique::Dot3Tangent: return "dot3_tangent";
-		case renderer::ObjectShaderTechnique::Dot3TangentDetail:
+		case opennova::renderer::ObjectShaderTechnique::Dot3Tangent: return "dot3_tangent";
+		case opennova::renderer::ObjectShaderTechnique::Dot3TangentDetail:
 			return "dot3_tangent_detail";
-		case renderer::ObjectShaderTechnique::Dot3TangentSkinned:
+		case opennova::renderer::ObjectShaderTechnique::Dot3TangentSkinned:
 			return "dot3_tangent_skinned";
-		case renderer::ObjectShaderTechnique::Dot3TangentDetailSkinned:
+		case opennova::renderer::ObjectShaderTechnique::Dot3TangentDetailSkinned:
 			return "dot3_tangent_detail_skinned";
-		case renderer::ObjectShaderTechnique::Dot3Object: return "dot3_object";
-		case renderer::ObjectShaderTechnique::Dot3ObjectDetail:
+		case opennova::renderer::ObjectShaderTechnique::Dot3Object: return "dot3_object";
+		case opennova::renderer::ObjectShaderTechnique::Dot3ObjectDetail:
 			return "dot3_object_detail";
-		case renderer::ObjectShaderTechnique::EnvironmentMirror:
+		case opennova::renderer::ObjectShaderTechnique::EnvironmentMirror:
 			return "environment_tangent";
-		case renderer::ObjectShaderTechnique::EnvironmentMirrorTextured:
+		case opennova::renderer::ObjectShaderTechnique::EnvironmentMirrorTextured:
 			return "environment_tangent_textured";
-		case renderer::ObjectShaderTechnique::EnvironmentPhong:
+		case opennova::renderer::ObjectShaderTechnique::EnvironmentPhong:
 			return "environment_tangent_specular";
-		case renderer::ObjectShaderTechnique::GlassFixed: return "glass";
-		case renderer::ObjectShaderTechnique::GlassSkinned: return "glass_skinned";
+		case opennova::renderer::ObjectShaderTechnique::GlassFixed: return "glass";
+		case opennova::renderer::ObjectShaderTechnique::GlassSkinned: return "glass_skinned";
 	}
 	return nullptr;
 }
 
 const char *shader_policy_name(
-		const renderer::ObjectShaderPipelineDescriptor &pipeline) {
+		const opennova::renderer::ObjectShaderPipelineDescriptor &pipeline) {
 	if (pipeline.alpha_test) {
 		switch (pipeline.blend) {
-			case renderer::ObjectBlendMode::Opaque: return "cutout_mix";
-			case renderer::ObjectBlendMode::AlphaBlend: return "cutout_alpha";
-			case renderer::ObjectBlendMode::Additive: return "cutout_additive";
-			case renderer::ObjectBlendMode::Multiplicative:
+			case opennova::renderer::ObjectBlendMode::Opaque: return "cutout_mix";
+			case opennova::renderer::ObjectBlendMode::AlphaBlend: return "cutout_alpha";
+			case opennova::renderer::ObjectBlendMode::Additive: return "cutout_additive";
+			case opennova::renderer::ObjectBlendMode::Multiplicative:
 				return "cutout_multiplicative";
 		}
 	}
 	switch (pipeline.blend) {
-		case renderer::ObjectBlendMode::Opaque: return "opaque";
-		case renderer::ObjectBlendMode::AlphaBlend: return "alpha";
-		case renderer::ObjectBlendMode::Additive: return "additive";
-		case renderer::ObjectBlendMode::Multiplicative: return "multiplicative";
+		case opennova::renderer::ObjectBlendMode::Opaque: return "opaque";
+		case opennova::renderer::ObjectBlendMode::AlphaBlend: return "alpha";
+		case opennova::renderer::ObjectBlendMode::Additive: return "additive";
+		case opennova::renderer::ObjectBlendMode::Multiplicative: return "multiplicative";
 	}
 	return nullptr;
 }
 
-bool technique_supports_blend(renderer::ObjectShaderTechnique technique,
-		renderer::ObjectBlendMode blend) {
+bool technique_supports_blend(opennova::renderer::ObjectShaderTechnique technique,
+		opennova::renderer::ObjectBlendMode blend) {
 	switch (technique) {
-		case renderer::ObjectShaderTechnique::Fixed:
-		case renderer::ObjectShaderTechnique::FixedDetail:
-		case renderer::ObjectShaderTechnique::SelfLit:
-		case renderer::ObjectShaderTechnique::SelfLitDetail:
-			return blend == renderer::ObjectBlendMode::Opaque ||
-					blend == renderer::ObjectBlendMode::AlphaBlend ||
-					blend == renderer::ObjectBlendMode::Additive;
-		case renderer::ObjectShaderTechnique::Tracer:
-		case renderer::ObjectShaderTechnique::GlassFixed:
-		case renderer::ObjectShaderTechnique::GlassSkinned:
-			return blend == renderer::ObjectBlendMode::Additive;
-		case renderer::ObjectShaderTechnique::FixedSkinned:
-			return blend == renderer::ObjectBlendMode::Opaque;
-		case renderer::ObjectShaderTechnique::Unsupported:
+		case opennova::renderer::ObjectShaderTechnique::Fixed:
+		case opennova::renderer::ObjectShaderTechnique::FixedDetail:
+		case opennova::renderer::ObjectShaderTechnique::SelfLit:
+		case opennova::renderer::ObjectShaderTechnique::SelfLitDetail:
+			return blend == opennova::renderer::ObjectBlendMode::Opaque ||
+					blend == opennova::renderer::ObjectBlendMode::AlphaBlend ||
+					blend == opennova::renderer::ObjectBlendMode::Additive;
+		case opennova::renderer::ObjectShaderTechnique::Tracer:
+		case opennova::renderer::ObjectShaderTechnique::GlassFixed:
+		case opennova::renderer::ObjectShaderTechnique::GlassSkinned:
+			return blend == opennova::renderer::ObjectBlendMode::Additive;
+		case opennova::renderer::ObjectShaderTechnique::FixedSkinned:
+			return blend == opennova::renderer::ObjectBlendMode::Opaque;
+		case opennova::renderer::ObjectShaderTechnique::Unsupported:
 			return false;
 		default:
-			return blend == renderer::ObjectBlendMode::Opaque;
+			return blend == opennova::renderer::ObjectBlendMode::Opaque;
 	}
 }
 
 String shader_resource_path(
-		const renderer::ObjectShaderPipelineDescriptor &pipeline) {
+		const opennova::renderer::ObjectShaderPipelineDescriptor &pipeline) {
 	const char *technique = shader_technique_directory(pipeline.technique);
 	const char *policy = shader_policy_name(pipeline);
 	if (technique == nullptr || policy == nullptr ||
 			!technique_supports_blend(pipeline.technique, pipeline.blend)) {
 		return String();
 	}
-	const char *cull_suffix = pipeline.cull == renderer::ObjectCullPolicy::Disabled
+	const char *cull_suffix = pipeline.cull == opennova::renderer::ObjectCullPolicy::Disabled
 			? "_double_sided"
 			: "";
 	return String("res://shaders/object/") + technique + "/" + policy +
@@ -132,8 +132,8 @@ Ref<ImageTexture> create_retail_phong_map_texture() {
 	pixels.resize(kSize * kSize * 4);
 	for (int y = 0; y < kSize; ++y) {
 		for (int x_coord = 0; x_coord < kSize; ++x_coord) {
-			const renderer::ObjectPhongMapTexel texel =
-					renderer::object_phong_map_texel(
+			const opennova::renderer::ObjectPhongMapTexel texel =
+					opennova::renderer::object_phong_map_texel(
 							static_cast<uint8_t>(x_coord), static_cast<uint8_t>(y));
 			const int offset = (y * kSize + x_coord) * 4;
 			pixels.set(offset + 0, texel.red_pow4);
@@ -205,26 +205,26 @@ void ObjectShaderCache::_bind_methods() {
 	// dropped exactly like retail drops a NULL-texture stage instead of
 	// running x2 over a placeholder (render-material-re.md §FF technique
 	// tables).
-	ClassDB::bind_integer_constant(get_class_static(), "", "CAP_DETAIL", renderer::OSCAP_DETAIL);
+	ClassDB::bind_integer_constant(get_class_static(), "", "CAP_DETAIL", opennova::renderer::OSCAP_DETAIL);
 
-	// ObjectBlendMode (renderer::ObjectBlendMode) constants.
-	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_OPAQUE", static_cast<int64_t>(renderer::ObjectBlendMode::Opaque));
-	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_ALPHA", static_cast<int64_t>(renderer::ObjectBlendMode::AlphaBlend));
-	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_ADDITIVE", static_cast<int64_t>(renderer::ObjectBlendMode::Additive));
-	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_MULTIPLICATIVE", static_cast<int64_t>(renderer::ObjectBlendMode::Multiplicative));
+	// ObjectBlendMode (opennova::renderer::ObjectBlendMode) constants.
+	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_OPAQUE", static_cast<int64_t>(opennova::renderer::ObjectBlendMode::Opaque));
+	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_ALPHA", static_cast<int64_t>(opennova::renderer::ObjectBlendMode::AlphaBlend));
+	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_ADDITIVE", static_cast<int64_t>(opennova::renderer::ObjectBlendMode::Additive));
+	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_MULTIPLICATIVE", static_cast<int64_t>(opennova::renderer::ObjectBlendMode::Multiplicative));
 
 	// The witnessed transparent ordering ladder, single-sourced from
 	// engine/runtime/renderer/render_order (maturity REN-3): sky -> far-water-side
 	// alpha -> water -> camera-side alpha -> overlays -> sun glow
 	// [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0;
 	// docs/render/render-order-re.md].
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_STARS", renderer::kRungSkyStars);
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_BODY", renderer::kRungSkyBody);
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_FAR_SIDE", renderer::kRungAlphaFarSide);
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_WATER", renderer::kRungWater);
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_CAMERA_SIDE", renderer::kRungAlphaCameraSide);
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_OVERLAY_FX", renderer::kRungOverlayFx);
-	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SUN_GLOW", renderer::kRungSunGlow);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_STARS", opennova::renderer::kRungSkyStars);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_BODY", opennova::renderer::kRungSkyBody);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_FAR_SIDE", opennova::renderer::kRungAlphaFarSide);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_WATER", opennova::renderer::kRungWater);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_ALPHA_CAMERA_SIDE", opennova::renderer::kRungAlphaCameraSide);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_OVERLAY_FX", opennova::renderer::kRungOverlayFx);
+	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SUN_GLOW", opennova::renderer::kRungSunGlow);
 }
 
 Ref<Shader> ObjectShaderCache::get_shader_for_key(int32_t key) {
@@ -233,8 +233,8 @@ Ref<Shader> ObjectShaderCache::get_shader_for_key(int32_t key) {
 	if (it != cache.end()) {
 		return it->second;
 	}
-	const renderer::ObjectShaderPipelineDescriptor pipeline =
-			renderer::describe_object_shader_pipeline(ukey);
+	const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
+			opennova::renderer::describe_object_shader_pipeline(ukey);
 	const String path = shader_resource_path(pipeline);
 	ERR_FAIL_COND_V_MSG(path.is_empty(), Ref<Shader>(),
 			"Object shader key selects an unsupported family/blend pipeline");
@@ -251,10 +251,10 @@ void ObjectShaderCache::configure_material_for_key(
 	const Ref<Shader> shader = get_shader_for_key(key);
 	ERR_FAIL_COND_MSG(shader.is_null(), "Object shader resource is unavailable");
 	material->set_shader(shader);
-	const renderer::ObjectShaderPipelineDescriptor pipeline =
-			renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
+	const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
+			opennova::renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
 	if (pipeline.technique ==
-			renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap) {
+			opennova::renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap) {
 		if (phong_map_texture.is_null()) {
 			phong_map_texture = create_retail_phong_map_texture();
 		}
@@ -270,13 +270,13 @@ int32_t ObjectShaderCache::classify(const String &shader_tag,
 		int32_t is_glass_flag,
 		int32_t alpha_test_byte) {
 	const std::string tag = shader_tag.utf8().get_data();
-	const auto cls = renderer::classify_object_material(
+	const auto cls = opennova::renderer::classify_object_material(
 			tag,
 			static_cast<uint8_t>(material_flags),
 			static_cast<uint8_t>(emissive_type),
 			static_cast<uint8_t>(is_glass_flag),
 			static_cast<uint8_t>(alpha_test_byte));
-	return static_cast<int32_t>(renderer::build_object_shader_key(cls));
+	return static_cast<int32_t>(opennova::renderer::build_object_shader_key(cls));
 }
 
 void ObjectShaderCache::set_water_plane(float height, bool camera_above) {
@@ -314,19 +314,19 @@ int32_t ObjectShaderCache::alpha_rung_for_height(float world_height) const {
 	// default camera-side rung. The frame owner publishes the effective render
 	// eye side after camera placement, so the ladder mirrors underwater.
 	if (!water_split_set) {
-		return renderer::kRungAlphaCameraSide;
+		return opennova::renderer::kRungAlphaCameraSide;
 	}
-	const renderer::TransparentQueue side =
-			renderer::transparent_queue_for(world_height, water_split_height);
-	return renderer::transparent_rung_for(side, water_camera_above);
+	const opennova::renderer::TransparentQueue side =
+			opennova::renderer::transparent_queue_for(world_height, water_split_height);
+	return opennova::renderer::transparent_rung_for(side, water_camera_above);
 }
 
 PackedStringArray ObjectShaderCache::get_known_shader_tags() const {
 	PackedStringArray tags;
-	tags.resize(static_cast<int64_t>(renderer::kMaterialDescriptorTableCount));
-	for (size_t i = 0; i < renderer::kMaterialDescriptorTableCount; ++i) {
+	tags.resize(static_cast<int64_t>(opennova::renderer::kMaterialDescriptorTableCount));
+	for (size_t i = 0; i < opennova::renderer::kMaterialDescriptorTableCount; ++i) {
 		tags[static_cast<int64_t>(i)] =
-				String(renderer::kMaterialDescriptorTable[i].name);
+				String(opennova::renderer::kMaterialDescriptorTable[i].name);
 	}
 	return tags;
 }

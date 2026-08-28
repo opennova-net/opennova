@@ -19,10 +19,10 @@ namespace {
 // Test basic element parsing.
 bool test_basic_element() {
   const std::string xml = "<ROOT><CHILD>text</CHILD></ROOT>";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.roots.size() == 1, "expected 1 root");
   CHECK(doc.roots[0]->tag == "ROOT", "expected ROOT tag");
   CHECK(doc.roots[0]->children.size() == 1, "expected 1 child");
@@ -36,10 +36,10 @@ bool test_basic_element() {
 // Test quoted attributes.
 bool test_quoted_attributes() {
   const std::string xml = R"(<TAG attr1="value1" attr2='value2'/>)";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.roots.size() == 1, "expected 1 root");
   CHECK(doc.roots[0]->attr("attr1") == "value1", "attr1 mismatch");
   CHECK(doc.roots[0]->attr("attr2") == "value2", "attr2 mismatch");
@@ -50,10 +50,10 @@ bool test_quoted_attributes() {
 // Test unquoted attributes (game's parser allows this).
 bool test_unquoted_attributes() {
   const std::string xml = R"(<WINDOW type=button name=SINGLE_PLAYER/>)";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.roots.size() == 1, "expected 1 root");
   CHECK(doc.roots[0]->attr("type") == "button", "type mismatch");
   CHECK(doc.roots[0]->attr("name") == "SINGLE_PLAYER", "name mismatch");
@@ -64,10 +64,10 @@ bool test_unquoted_attributes() {
 // Test bare boolean attributes (game's parser allows this).
 bool test_bare_boolean_attributes() {
   const std::string xml = R"(<WINDOW HIDDEN DISABLE/>)";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.roots.size() == 1, "expected 1 root");
   CHECK(doc.roots[0]->attr_bool("HIDDEN") == true, "HIDDEN should be true");
   CHECK(doc.roots[0]->attr_bool("DISABLE") == true, "DISABLE should be true");
@@ -80,10 +80,10 @@ bool test_bare_boolean_attributes() {
 // Test case-insensitive matching.
 bool test_case_insensitive() {
   const std::string xml = R"(<Root><Child Attr="value">TEXT</Child></Root>)";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.find_root("ROOT") != nullptr, "case-insensitive root lookup");
   CHECK(doc.find_root("root") != nullptr, "case-insensitive root lookup");
 
@@ -107,10 +107,10 @@ bool test_comments() {
       <CHILD/>
     </ROOT>
   )";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.roots.size() == 1, "expected 1 root");
   CHECK(doc.roots[0]->find_child("CHILD") != nullptr, "expected CHILD");
 
@@ -120,10 +120,10 @@ bool test_comments() {
 // Test XML entities.
 bool test_entities() {
   const std::string xml = R"(<TAG attr="&lt;&gt;&amp;&quot;">text &amp; more</TAG>)";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.roots[0]->attr("attr") == "<>&\"", "attr entities not decoded");
   CHECK(doc.roots[0]->get_direct_text() == "text & more",
         "text entities not decoded");
@@ -136,33 +136,33 @@ bool test_entities() {
 // entities preserved verbatim (so a literal "&" or unrecognized "&foo;"
 // survives a round-trip instead of being lost).
 bool test_entity_policy() {
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
   // Decimal numeric -> low byte; &#x.. is NOT hex (engine _wtol stops at 'x').
-  CHECK(mnu_xml::parse("<T>&#65;&#169;</T>", doc, err), "decimal parse: " + err);
+  CHECK(opennova::mnu_xml::parse("<T>&#65;&#169;</T>", doc, err), "decimal parse: " + err);
   const std::string dec = doc.roots[0]->get_direct_text();
   CHECK(dec.size() == 2 && dec[0] == 'A' &&
             static_cast<unsigned char>(dec[1]) == 0xA9,
         "&#65; -> 'A', &#169; -> 0xA9 (copyright low byte)");
 
   // &apos; is NOT a recognized entity: it stays verbatim.
-  mnu_xml::Document doc2;
-  CHECK(mnu_xml::parse("<T>it&apos;s</T>", doc2, err), "apos parse: " + err);
+  opennova::mnu_xml::Document doc2;
+  CHECK(opennova::mnu_xml::parse("<T>it&apos;s</T>", doc2, err), "apos parse: " + err);
   CHECK(doc2.roots[0]->get_direct_text() == "it&apos;s",
         "&apos; is preserved verbatim (engine has no apos entry)");
 
   // An unknown named entity and a bare '&' both survive (no '?' substitution,
   // no infinite loop).
-  mnu_xml::Document doc3;
-  CHECK(mnu_xml::parse("<T>a &foo; b &c d</T>", doc3, err), "unknown parse: " + err);
+  opennova::mnu_xml::Document doc3;
+  CHECK(opennova::mnu_xml::parse("<T>a &foo; b &c d</T>", doc3, err), "unknown parse: " + err);
   CHECK(doc3.roots[0]->get_direct_text() == "a &foo; b &c d",
         "unknown entity and bare '&' preserved verbatim");
 
   // Named Latin-1 entity decodes to its byte; nbsp -> 0x20; case matters for
   // the accented set.
-  mnu_xml::Document doc4;
-  CHECK(mnu_xml::parse("<T>&copy;&nbsp;&Agrave;</T>", doc4, err), "named parse: " + err);
+  opennova::mnu_xml::Document doc4;
+  CHECK(opennova::mnu_xml::parse("<T>&copy;&nbsp;&Agrave;</T>", doc4, err), "named parse: " + err);
   const std::string named = doc4.roots[0]->get_direct_text();
   CHECK(named.size() == 3 && static_cast<unsigned char>(named[0]) == 0xA9 &&
             named[1] == ' ' && static_cast<unsigned char>(named[2]) == 0xC0,
@@ -183,10 +183,10 @@ bool test_nested_elements() {
       </WINDOW>
     </SCREEN>
   )";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
 
   auto screen = doc.find_root("SCREEN");
   CHECK(screen != nullptr, "expected SCREEN");
@@ -208,10 +208,10 @@ bool test_nested_elements() {
 // Test self-closing tags.
 bool test_self_closing() {
   const std::string xml = R"(<ROOT><EMPTY/><ALSO_EMPTY /></ROOT>)";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.roots[0]->children.size() == 2, "expected 2 children");
   CHECK(doc.roots[0]->find_child("EMPTY") != nullptr, "expected EMPTY");
   CHECK(doc.roots[0]->find_child("ALSO_EMPTY") != nullptr,
@@ -223,10 +223,10 @@ bool test_self_closing() {
 // Test text content with whitespace normalization.
 bool test_whitespace_normalization() {
   const std::string xml = R"(<TAG>  hello   world  </TAG>)";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   // With default options (normalize + trim), whitespace is collapsed and
   // trimmed.
   CHECK(doc.roots[0]->get_direct_text() == "hello world",
@@ -239,10 +239,10 @@ bool test_whitespace_normalization() {
 bool test_utf8_bom() {
   // UTF-8 BOM is EF BB BF
   std::string xml = "\xEF\xBB\xBF<ROOT/>";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.roots.size() == 1, "expected 1 root");
   CHECK(doc.roots[0]->tag == "ROOT", "expected ROOT tag");
 
@@ -252,10 +252,10 @@ bool test_utf8_bom() {
 // Test attr_int helper.
 bool test_attr_int() {
   const std::string xml = R"(<TAG num="42" invalid="abc" empty=""/>)";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
   CHECK(doc.roots[0]->attr_int("num") == 42, "attr_int failed");
   CHECK(doc.roots[0]->attr_int("invalid", -1) == -1,
         "attr_int should return default for invalid");
@@ -299,10 +299,10 @@ bool test_mnu_patterns() {
   </WINDOW>
 </SCREEN>
   )";
-  mnu_xml::Document doc;
+  opennova::mnu_xml::Document doc;
   std::string err;
 
-  CHECK(mnu_xml::parse(xml, doc, err), "parse failed: " + err);
+  CHECK(opennova::mnu_xml::parse(xml, doc, err), "parse failed: " + err);
 
   auto screen = doc.find_root("SCREEN");
   CHECK(screen != nullptr, "expected SCREEN");

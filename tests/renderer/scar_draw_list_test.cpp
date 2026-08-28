@@ -9,8 +9,8 @@
 #include <cstdio>
 
 using namespace opennova::world;
-using renderer::ScarDrawList;
-using renderer::ScarViewContext;
+using opennova::renderer::ScarDrawList;
+using opennova::renderer::ScarViewContext;
 
 namespace {
 
@@ -47,12 +47,12 @@ void test_quad_order_and_uvs() {
 	ScarViewContext ctx;
 	ctx.terrain_light_argb = 0x00808080u;
 	ScarDrawList out;
-	renderer::compile_scar_draws(cache, ctx, out);
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.batches.size() == 1, "one batch for one slot");
 	CHECK(out.vertices.size() == 6, "six vertices per quad");
 	CHECK(out.slots_live == 1 && out.slots_culled == 0, "the slot drew");
 	if (out.vertices.size() != 6) return;
-	const renderer::ScarVertex *v = out.vertices.data();
+	const opennova::renderer::ScarVertex *v = out.vertices.data();
 	// C-A-B (0,0), C+A-B (1,0), C-A+B (0,1), C+A-B (1,0), C+A+B (1,1), C-A+B (0,1)
 	CHECK(near(v[0].x, 9.5f) && near(v[0].y, 19.5f) && near(v[0].u, 0) && near(v[0].v, 0),
 			"vertex 0 = C-A-B (0,0)");
@@ -92,7 +92,7 @@ void test_batches_per_texture_and_ring_order() {
 	ring->slots[2] = make_slot(7, 5, 0, 3, owner, 4);
 	ScarViewContext ctx;
 	ScarDrawList out;
-	renderer::compile_scar_draws(cache, ctx, out);
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.batches.size() == 4,
 			"strip 0 + strip 27 for the shared ring, then section 1 and section 4 for the entity");
 	if (out.batches.size() != 4) return;
@@ -119,26 +119,26 @@ void test_fog_box_cull_is_world_only() {
 	ctx.cam_y = 0.0f;
 	ctx.fog_distance = 50.0f;
 	ScarDrawList out;
-	renderer::compile_scar_draws(cache, ctx, out);
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.slots_live == 1 && out.slots_culled == 2, "the two far shared slots are culled");
 	CHECK(out.vertices.size() == 6, "only the near quad is emitted");
 	// The margin is fog + radius: a slot at fog + 0.4 with a 0.5 radius stays.
 	cache.world_ring().slots[1] = make_slot(0, 0, 0, 0);
 	cache.world_ring().slots[1].pos[0] = static_cast<int32_t>(50.4f * 65536.0f);
 	cache.world_ring().slots[2].live = false;
-	renderer::compile_scar_draws(cache, ctx, out);
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.slots_live == 2, "|dx| <= fog + r keeps the slot");
 	// Entity-local slots are never box-culled here (their frame is the
 	// owner's section; the presenter culls them with the node).
 	const EntityHandle owner = EntityHandle::make(1, 2);
 	ScarRing *ring = cache.ring_for(owner, 1);
 	ring->slots[0] = make_slot(500, 500, 0, 0, owner, 0);
-	renderer::compile_scar_draws(cache, ctx, out);
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.slots_live == 3, "an entity-local slot far from the camera still emits");
 	// No fog distance means no cull.
 	ctx.fog_distance = 0.0f;
 	cache.world_ring().slots[2] = make_slot(0, -100, 0, 0);
-	renderer::compile_scar_draws(cache, ctx, out);
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.slots_culled == 0, "a zero fog distance disables the box cull");
 }
 
@@ -163,11 +163,11 @@ void test_owner_visibility() {
 	ScarViewContext ctx;
 	ScarDrawList out;
 	ctx.owner_visible = hide_everything;
-	renderer::compile_scar_draws(cache, ctx, out);
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.slots_live == 1, "only the ownerless shared slot survives a hide-all gate");
 	CHECK(out.slots_culled == 4, "both entity rings and the two owned shared slots were gated off");
 	ctx.owner_visible = show_owner_7;
-	renderer::compile_scar_draws(cache, ctx, out);
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
 	CHECK(out.slots_live == 3 && out.slots_culled == 2,
 			"the visible owner's shared slot and ring draw, the others do not");
 	CHECK(out.batches.size() == 2, "one shared batch + the visible entity ring's batch");
@@ -186,8 +186,8 @@ void test_strip_mode_words() {
 		CHECK(scar_texture_strip_mode_word(strip) == expected,
 				"every strip but bhole1 selects the scorch word");
 	}
-	const renderer::ScarStripState scorch =
-			renderer::decode_scar_strip_mode(kScarModeWordScorch);
+	const opennova::renderer::ScarStripState scorch =
+			opennova::renderer::decode_scar_strip_mode(kScarModeWordScorch);
 	CHECK(scorch.src_alpha_blend, "scorch: SRCALPHA/INVSRCALPHA");
 	CHECK(scorch.alpha_modulate_texture_diffuse, "scorch: MODULATE(TEXTURE, DIFFUSE) alpha");
 	CHECK(scorch.color_modulate2x_texture_diffuse, "scorch: MODULATE2X(TEXTURE, DIFFUSE)");
@@ -195,16 +195,16 @@ void test_strip_mode_words() {
 	CHECK(scorch.fog, "scorch: fog on");
 	CHECK(!scorch.depth_write, "scorch: z-write off");
 	CHECK(!scorch.cull_none, "scorch: the CCW back-face cull");
-	const renderer::ScarStripState hole = renderer::decode_scar_strip_mode(kScarModeWordHole);
+	const opennova::renderer::ScarStripState hole = opennova::renderer::decode_scar_strip_mode(kScarModeWordHole);
 	CHECK(hole.src_alpha_blend && hole.alpha_modulate_texture_diffuse &&
 					hole.color_modulate2x_texture_diffuse && hole.fog,
 			"bhole: the shared blend / stage / fog state");
 	CHECK(hole.alpha_test, "bhole: ALPHATESTENABLE — GREATER 128");
 	CHECK(hole.depth_write, "bhole: z-write on");
 	CHECK(hole.cull_none, "bhole: cull none");
-	CHECK(renderer::kScarAlphaTestRef == 128, "the drawer's latched ref");
+	CHECK(opennova::renderer::kScarAlphaTestRef == 128, "the drawer's latched ref");
 	// A blend-off word (the terrain's 0x20200 family) decodes to no blend.
-	const renderer::ScarStripState flat = renderer::decode_scar_strip_mode(0x20200u);
+	const opennova::renderer::ScarStripState flat = opennova::renderer::decode_scar_strip_mode(0x20200u);
 	CHECK(!flat.src_alpha_blend && !flat.alpha_modulate_texture_diffuse &&
 					!flat.color_modulate2x_texture_diffuse && flat.fog && flat.depth_write,
 			"a foreign word decodes field by field");

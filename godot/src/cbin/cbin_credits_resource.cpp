@@ -50,20 +50,20 @@ Color cbin_to_color(uint32_t rgb) {
 			(rgb & 0xFF) / 255.0f);
 }
 
-CbinJustify to_godot_justify(cbin::Justify j) {
+CbinJustify to_godot_justify(opennova::cbin::Justify j) {
 	switch (j) {
-		case cbin::Justify::Left: return CBIN_JUSTIFY_LEFT;
-		case cbin::Justify::Right: return CBIN_JUSTIFY_RIGHT;
-		case cbin::Justify::Center: break;
+		case opennova::cbin::Justify::Left: return CBIN_JUSTIFY_LEFT;
+		case opennova::cbin::Justify::Right: return CBIN_JUSTIFY_RIGHT;
+		case opennova::cbin::Justify::Center: break;
 	}
 	return CBIN_JUSTIFY_CENTER;
 }
 
-cbin::Justify to_cbin_justify(CbinJustify j) {
+opennova::cbin::Justify to_cbin_justify(CbinJustify j) {
 	switch (j) {
-		case CBIN_JUSTIFY_LEFT: return cbin::Justify::Left;
-		case CBIN_JUSTIFY_RIGHT: return cbin::Justify::Right;
-		default: return cbin::Justify::Center;
+		case CBIN_JUSTIFY_LEFT: return opennova::cbin::Justify::Left;
+		case CBIN_JUSTIFY_RIGHT: return opennova::cbin::Justify::Right;
+		default: return opennova::cbin::Justify::Center;
 	}
 }
 
@@ -75,12 +75,12 @@ cbin::Justify to_cbin_justify(CbinJustify j) {
 // datasource [orig: marquee_load_credits_from_ini @ 0x65c5a0: [ENV] SCROLL_RATE/CENTER_X/
 // VERTICAL_SPACE + [TEXT] ~C/~F/~I/~J/<CR>].
 Ref<CbinCreditsResource> CbinCreditsResource::from_cbin_bytes(const PackedByteArray &p_data) {
-	if (p_data.is_empty() || !cbin::is_cbin(p_data.ptr(), static_cast<size_t>(p_data.size()))) {
+	if (p_data.is_empty() || !opennova::cbin::is_cbin(p_data.ptr(), static_cast<size_t>(p_data.size()))) {
 		return Ref<CbinCreditsResource>();
 	}
-	cbin::Credits credits;
+	opennova::cbin::Credits credits;
 	std::string error;
-	if (!cbin::decode_credits(p_data.ptr(), static_cast<size_t>(p_data.size()), credits, error)) {
+	if (!opennova::cbin::decode_credits(p_data.ptr(), static_cast<size_t>(p_data.size()), credits, error)) {
 		return Ref<CbinCreditsResource>();
 	}
 
@@ -100,7 +100,7 @@ Ref<CbinCreditsResource> CbinCreditsResource::from_cbin_bytes(const PackedByteAr
 	CbinJustify current_justify = CBIN_JUSTIFY_CENTER;
 	for (const auto &src : credits.entries) {
 		switch (src.type) {
-			case cbin::EntryType::Text: {
+			case opennova::cbin::EntryType::Text: {
 				Ref<CbinTextEntry> entry;
 				entry.instantiate();
 				entry->set_text(String(src.text.c_str()).replace("_", " "));
@@ -112,20 +112,20 @@ Ref<CbinCreditsResource> CbinCreditsResource::from_cbin_bytes(const PackedByteAr
 				resource->add_entry(entry);
 				break;
 			}
-			case cbin::EntryType::Color: {
+			case opennova::cbin::EntryType::Color: {
 				const float r = ((src.color >> 16) & 0xFF) / 255.0f;
 				const float g = ((src.color >> 8) & 0xFF) / 255.0f;
 				const float b = (src.color & 0xFF) / 255.0f;
 				current_color = Color(r, g, b);
 				break;
 			}
-			case cbin::EntryType::Newline: {
+			case opennova::cbin::EntryType::Newline: {
 				Ref<CbinNewlineEntry> entry;
 				entry.instantiate();
 				resource->add_entry(entry);
 				break;
 			}
-			case cbin::EntryType::Image: {
+			case opennova::cbin::EntryType::Image: {
 				Ref<CbinImageEntry> entry;
 				entry.instantiate();
 				if (!src.image_path.empty()) {
@@ -137,15 +137,15 @@ Ref<CbinCreditsResource> CbinCreditsResource::from_cbin_bytes(const PackedByteAr
 				resource->add_entry(entry);
 				break;
 			}
-			case cbin::EntryType::Justify: {
+			case opennova::cbin::EntryType::Justify: {
 				switch (src.justify) {
-					case cbin::Justify::Left:
+					case opennova::cbin::Justify::Left:
 						current_justify = CBIN_JUSTIFY_LEFT;
 						break;
-					case cbin::Justify::Center:
+					case opennova::cbin::Justify::Center:
 						current_justify = CBIN_JUSTIFY_CENTER;
 						break;
-					case cbin::Justify::Right:
+					case opennova::cbin::Justify::Right:
 						current_justify = CBIN_JUSTIFY_RIGHT;
 						break;
 				}
@@ -870,13 +870,13 @@ Error CbinCreditsResource::load_from_path(const String &p_path) {
 		UtilityFunctions::push_warning("CbinCreditsResource: cannot open file: ", p_path);
 		return ERR_FILE_CANT_OPEN;
 	}
-	if (!cbin::is_cbin(data.ptr(), static_cast<size_t>(data.size()))) {
+	if (!opennova::cbin::is_cbin(data.ptr(), static_cast<size_t>(data.size()))) {
 		UtilityFunctions::push_warning("CbinCreditsResource: not a valid CBIN file: ", p_path);
 		return ERR_FILE_UNRECOGNIZED;
 	}
-	cbin::Credits credits;
+	opennova::cbin::Credits credits;
 	std::string error;
-	if (!cbin::decode_credits(data.ptr(), static_cast<size_t>(data.size()), credits, error)) {
+	if (!opennova::cbin::decode_credits(data.ptr(), static_cast<size_t>(data.size()), credits, error)) {
 		UtilityFunctions::push_warning("CbinCreditsResource: failed to parse ", p_path,
 				" - ", String(error.c_str()));
 		return ERR_PARSE_ERROR;
@@ -922,9 +922,9 @@ Error CbinCreditsResource::load_from_path(const String &p_path) {
 	// The Color/Justify control-code collapse lives in cbin
 	// (credits_display_items — seeded white/center); this loop only mints the
 	// Godot Resource per stamped item and resolves fonts/textures.
-	for (const auto &item : cbin::credits_display_items(credits)) {
+	for (const auto &item : opennova::cbin::credits_display_items(credits)) {
 		switch (item.type) {
-			case cbin::EntryType::Text: {
+			case opennova::cbin::EntryType::Text: {
 				Ref<CbinTextEntry> text_entry;
 				text_entry.instantiate();
 				text_entry->set_text(underscore_to_space(item.text));
@@ -941,13 +941,13 @@ Error CbinCreditsResource::load_from_path(const String &p_path) {
 				add_entry(text_entry);
 				break;
 			}
-			case cbin::EntryType::Newline: {
+			case opennova::cbin::EntryType::Newline: {
 				Ref<CbinNewlineEntry> newline_entry;
 				newline_entry.instantiate();
 				add_entry(newline_entry);
 				break;
 			}
-			case cbin::EntryType::Image: {
+			case opennova::cbin::EntryType::Image: {
 				Ref<CbinImageEntry> image_entry;
 				image_entry.instantiate();
 				if (!item.image_path.empty()) {
@@ -975,7 +975,7 @@ Error CbinCreditsResource::load_from_path(const String &p_path) {
 }
 
 Error CbinCreditsResource::save_to_path(const String &p_path) const {
-	cbin::Credits credits;
+	opennova::cbin::Credits credits;
 	credits.scroll_rate = get_scroll_rate();
 	credits.vertical_space = get_vertical_space();
 	credits.center_x = get_center_x();
@@ -992,15 +992,15 @@ Error CbinCreditsResource::save_to_path(const String &p_path) const {
 	// spaces back to underscores); the control-code re-emission by diff lives
 	// in cbin (credits_entries_from_display — controls only before Text,
 	// color before justify, seeded white/center).
-	std::vector<cbin::CreditsDisplayItem> items;
+	std::vector<opennova::cbin::CreditsDisplayItem> items;
 	const int entry_count = get_entry_count();
 	items.reserve(entry_count);
 	for (int i = 0; i < entry_count; ++i) {
 		Ref<CbinEntry> src = get_entry(i);
 		if (!src.is_valid()) continue;
 		if (Ref<CbinTextEntry> text_entry = Object::cast_to<CbinTextEntry>(src.ptr()); text_entry.is_valid()) {
-			cbin::CreditsDisplayItem item;
-			item.type = cbin::EntryType::Text;
+			opennova::cbin::CreditsDisplayItem item;
+			item.type = opennova::cbin::EntryType::Text;
 			item.text = space_to_underscore(text_entry->get_text());
 			String font_name = text_entry->get_font_name();
 			if (!font_name.is_empty()) {
@@ -1010,12 +1010,12 @@ Error CbinCreditsResource::save_to_path(const String &p_path) const {
 			item.justify = to_cbin_justify(text_entry->get_justify());
 			items.push_back(std::move(item));
 		} else if (Ref<CbinNewlineEntry> newline_entry = Object::cast_to<CbinNewlineEntry>(src.ptr()); newline_entry.is_valid()) {
-			cbin::CreditsDisplayItem item;
-			item.type = cbin::EntryType::Newline;
+			opennova::cbin::CreditsDisplayItem item;
+			item.type = opennova::cbin::EntryType::Newline;
 			items.push_back(std::move(item));
 		} else if (Ref<CbinImageEntry> image_entry = Object::cast_to<CbinImageEntry>(src.ptr()); image_entry.is_valid()) {
-			cbin::CreditsDisplayItem item;
-			item.type = cbin::EntryType::Image;
+			opennova::cbin::CreditsDisplayItem item;
+			item.type = opennova::cbin::EntryType::Image;
 			String texture_path = image_entry->get_texture_path();
 			if (!texture_path.is_empty()) {
 				item.image_path = texture_path.utf8().get_data();
@@ -1029,11 +1029,11 @@ Error CbinCreditsResource::save_to_path(const String &p_path) const {
 			continue;  // unknown entry type
 		}
 	}
-	credits.entries = cbin::credits_entries_from_display(items);
+	credits.entries = opennova::cbin::credits_entries_from_display(items);
 
 	std::vector<uint8_t> data;
 	std::string error;
-	if (!cbin::encode(credits, data, error)) {
+	if (!opennova::cbin::encode(credits, data, error)) {
 		UtilityFunctions::push_warning("CbinCreditsResource: failed to encode: ", String(error.c_str()));
 		return ERR_CANT_CREATE;
 	}

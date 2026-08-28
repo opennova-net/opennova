@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace mnu {
+namespace opennova::mnu {
 
 // Presence contract: every `has_*` bit and container `present` bit is the
 // authoritative authored state. Writers ignore retained latent values when the
@@ -461,4 +461,4 @@ bool serialize_file(const Document &doc, const std::string &path,
                     std::string &error, bool pretty = true,
                     int indent_size = 2);
 
-}  // namespace mnu
+}  // namespace opennova::mnu

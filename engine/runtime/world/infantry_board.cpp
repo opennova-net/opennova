@@ -20,6 +20,7 @@
 // gate that guards the Entity_CanEnterVehicle consult is ported at the ARRIVED
 // branch below.
 
+#include <base/io/bam.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/vehicle_mount.h>
@@ -33,7 +34,7 @@ namespace opennova::world {
 
 namespace {
 
-constexpr double kBamPerRadianBoard = 2147483648.0 / 3.14159265358979323846;
+constexpr double kBamPerRadianBoard = opennova::io::kBamPerRadian;
 
 // atan2 -> engine BAM (same formula as infantry.cpp's file-local bearing_to).
 int32_t board_bearing_to(int32_t dx, int32_t dy) {

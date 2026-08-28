@@ -4,7 +4,7 @@
 #include <cctype>
 #include <unordered_map>
 
-namespace mns {
+namespace opennova::mns {
 
 namespace {
 
@@ -842,4 +842,4 @@ bool Document::set_inline_comment(const std::string &name, const std::string &co
 	return true;
 }
 
-} // namespace mns
+}  // namespace opennova::mns

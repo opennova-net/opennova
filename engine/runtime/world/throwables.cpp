@@ -1,6 +1,7 @@
 // Throwables: the thrown-round class motors, placed-device conversion, and the
 // device think/detonate chain. Witness record: docs/world/world-wac-ai-re.md §27
 // (engine-research 2026-07-20, retail Jointops.exe kong IDB).
+#include <base/io/bam.h>
 #include <runtime/world/throwables.h>
 
 #include <cmath>
@@ -20,7 +21,7 @@ namespace opennova::world {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr double kBamPerRad = 4294967296.0 / (2.0 * kPi);
+constexpr double kBamPerRad = io::kBamPerRadian;
 
 // Q16 multiply with the witnessed +0x8000 rounding [orig: the pervasive
 // (a * b + 0x8000) >> 16 idiom in every motor].

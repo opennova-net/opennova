@@ -1,4 +1,4 @@
-/* MNS lossless document model tests (mns::Document, ADR 0014).
+/* MNS lossless document model tests (opennova::mns::Document, ADR 0014).
 
    The committed fixture fixtures/mns/menu_style.mns is the real shipped JO
    stylesheet, sourced byte-exact from the revx02 menu set (the same provenance
@@ -9,7 +9,7 @@
    Properties pinned here:
    - parse -> serialize is byte-identical for untouched documents (real file
      and synthetic edge cases);
-   - flatten() reproduces the legacy mns::parse view exactly;
+   - flatten() reproduces the legacy opennova::mns::parse view exactly;
    - edits are minimal-delta (an edited value changes only its own line) and
      the collapse/append/escaping policies match ADR 0014;
    - diagnostics report the spec's error conditions without failing the parse.
@@ -66,15 +66,15 @@ std::vector<std::string> split_lines(const std::string &s) {
 	return lines;
 }
 
-int count_errors(const mns::Document &doc) {
+int count_errors(const opennova::mns::Document &doc) {
 	int n = 0;
 	for (const auto &d : doc.diagnostics()) {
-		if (d.severity == mns::Severity::Error) ++n;
+		if (d.severity == opennova::mns::Severity::Error) ++n;
 	}
 	return n;
 }
 
-bool has_diagnostic(const mns::Document &doc, const std::string &code) {
+bool has_diagnostic(const opennova::mns::Document &doc, const std::string &code) {
 	for (const auto &d : doc.diagnostics()) {
 		if (d.code == code) return true;
 	}
@@ -88,7 +88,7 @@ static int test_real_file_byte_roundtrip() {
 	TEST_EXPECT(read_file(kRealFixture, src));
 	TEST_EXPECT(src.size() == 3761);
 
-	mns::Document doc = mns::Document::parse(src);
+	opennova::mns::Document doc = opennova::mns::Document::parse(src);
 	TEST_EXPECT(to_string(doc.serialize()) == src);
 	TEST_EXPECT(!doc.has_bom());
 	TEST_EXPECT(doc.default_eol() == "\r\n");
@@ -103,7 +103,7 @@ static int test_real_file_byte_roundtrip() {
 static int test_real_file_flatten() {
 	std::string src;
 	TEST_EXPECT(read_file(kRealFixture, src));
-	mns::StyleSheet sheet = mns::Document::parse(src).flatten();
+	opennova::mns::StyleSheet sheet = opennova::mns::Document::parse(src).flatten();
 
 	TEST_EXPECT(sheet.variables.size() == 12);
 	TEST_EXPECT(sheet.get("DEF_FONTNAME") == "Gunpl22b.fnt");
@@ -112,9 +112,9 @@ static int test_real_file_flatten() {
 	TEST_EXPECT(sheet.get("SEMIOPAQUE_BLACK") == "2f000000");
 
 	// Delegation guard: the legacy flat parse is the same view.
-	mns::StyleSheet legacy;
+	opennova::mns::StyleSheet legacy;
 	std::string error;
-	TEST_EXPECT(mns::parse(src.data(), src.size(), legacy, error));
+	TEST_EXPECT(opennova::mns::parse(src.data(), src.size(), legacy, error));
 	TEST_EXPECT(legacy.variables == sheet.variables);
 
 	std::printf("test_real_file_flatten passed\n");
@@ -124,7 +124,7 @@ static int test_real_file_flatten() {
 static int test_real_file_entries() {
 	std::string src;
 	TEST_EXPECT(read_file(kRealFixture, src));
-	mns::Document doc = mns::Document::parse(src);
+	opennova::mns::Document doc = opennova::mns::Document::parse(src);
 	const auto entries = doc.entries();
 
 	TEST_EXPECT(entries.size() == 12);
@@ -177,7 +177,7 @@ static int test_synthetic_byte_roundtrips() {
 	};
 	for (const char *src : cases) {
 		const std::string text(src);
-		mns::Document doc = mns::Document::parse(text);
+		opennova::mns::Document doc = opennova::mns::Document::parse(text);
 		if (to_string(doc.serialize()) != text) {
 			std::fprintf(stderr, "round-trip failed for: %s\n", src);
 			return 1;
@@ -189,7 +189,7 @@ static int test_synthetic_byte_roundtrips() {
 }
 
 static int test_inline_comment_ends_value() {
-	mns::Document doc = mns::Document::parse(std::string("FOO bar // c\n"));
+	opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO bar // c\n"));
 	const auto entries = doc.entries();
 	TEST_EXPECT(entries.size() == 1);
 	TEST_EXPECT(entries[0].value == "bar");
@@ -204,14 +204,14 @@ static int test_inline_comment_ends_value() {
 static int test_escapes_flatten() {
 	// The editor-facing Entry unescapes "\\", but the retail evaluator copies
 	// the authored pair intact after scanning over it.
-	mns::Document doc = mns::Document::parse(std::string("FOO a\\\\b\n"));
+	opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO a\\\\b\n"));
 	TEST_EXPECT(doc.flatten().get("FOO") == "a\\\\b");
 	TEST_EXPECT(doc.entries()[0].value == "a\\b");
 	TEST_EXPECT(doc.entries()[0].raw_value == "a\\\\b");
 	TEST_EXPECT(doc.diagnostics().empty());
 
 	// A bare backslash stays literal (legacy behavior) but is diagnosed.
-	mns::Document lone = mns::Document::parse(std::string("FOO a\\ b\n"));
+	opennova::mns::Document lone = opennova::mns::Document::parse(std::string("FOO a\\ b\n"));
 	TEST_EXPECT(lone.flatten().get("FOO") == "a\\ b");
 	TEST_EXPECT(has_diagnostic(lone, "lone-backslash"));
 
@@ -221,12 +221,12 @@ static int test_escapes_flatten() {
 
 static int test_continuation_forms() {
 	// Whitespace before the continuation backslash is part of the value.
-	TEST_EXPECT(mns::Document::parse(std::string("FOO bar \\\nbaz\n")).flatten().get("FOO") == "bar baz");
+	TEST_EXPECT(opennova::mns::Document::parse(std::string("FOO bar \\\nbaz\n")).flatten().get("FOO") == "bar baz");
 	// Name followed by a backslash: value begins on the next line.
-	TEST_EXPECT(mns::Document::parse(std::string("FOO \\\n  value\n")).flatten().get("FOO") == "value");
+	TEST_EXPECT(opennova::mns::Document::parse(std::string("FOO \\\n  value\n")).flatten().get("FOO") == "value");
 	// A continuation line that is only a comment ends the value.
 	{
-		mns::Document doc = mns::Document::parse(std::string("FOO bar \\\n// note\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO bar \\\n// note\n"));
 		TEST_EXPECT(doc.flatten().get("FOO") == "bar");
 		const auto entries = doc.entries();
 		TEST_EXPECT(entries.size() == 1);
@@ -234,7 +234,7 @@ static int test_continuation_forms() {
 	}
 	// Continuation at EOF: value ends, warning emitted.
 	{
-		mns::Document doc = mns::Document::parse(std::string("FOO bar \\"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO bar \\"));
 		TEST_EXPECT(doc.flatten().get("FOO") == "bar");
 		TEST_EXPECT(has_diagnostic(doc, "continuation-at-eof"));
 		TEST_EXPECT(to_string(doc.serialize()) == "FOO bar \\");
@@ -248,27 +248,27 @@ static int test_conditionals_document() {
 	// Inactive lines become InactiveText nodes; flatten excludes them.
 	{
 		const std::string src = "#if 0\nX 1\n#endif\nY 2\n";
-		mns::Document doc = mns::Document::parse(src);
+		opennova::mns::Document doc = opennova::mns::Document::parse(src);
 		TEST_EXPECT(doc.nodes().size() == 4);
-		TEST_EXPECT(doc.nodes()[0].kind == mns::NodeKind::Directive);
-		TEST_EXPECT(doc.nodes()[1].kind == mns::NodeKind::InactiveText);
-		TEST_EXPECT(doc.nodes()[2].kind == mns::NodeKind::Directive);
-		TEST_EXPECT(doc.nodes()[3].kind == mns::NodeKind::Define);
+		TEST_EXPECT(doc.nodes()[0].kind == opennova::mns::NodeKind::Directive);
+		TEST_EXPECT(doc.nodes()[1].kind == opennova::mns::NodeKind::InactiveText);
+		TEST_EXPECT(doc.nodes()[2].kind == opennova::mns::NodeKind::Directive);
+		TEST_EXPECT(doc.nodes()[3].kind == opennova::mns::NodeKind::Define);
 		TEST_EXPECT(!doc.flatten().has("X"));
 		TEST_EXPECT(doc.flatten().get("Y") == "2");
 		TEST_EXPECT(to_string(doc.serialize()) == src);
 	}
 	// Non-0/1 argument: truthy (legacy) + diagnostic.
 	{
-		mns::Document doc = mns::Document::parse(std::string("#if 2\nZ 3\n#endif\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("#if 2\nZ 3\n#endif\n"));
 		TEST_EXPECT(doc.flatten().get("Z") == "3");
 		TEST_EXPECT(has_diagnostic(doc, "noncanonical-if-arg"));
 	}
 	// Stray #endif / #else and an unterminated #if are diagnosed.
-	TEST_EXPECT(has_diagnostic(mns::Document::parse(std::string("#endif\n")), "unbalanced-endif"));
-	TEST_EXPECT(has_diagnostic(mns::Document::parse(std::string("#else\nW 4\n#endif\n")), "unbalanced-else"));
+	TEST_EXPECT(has_diagnostic(opennova::mns::Document::parse(std::string("#endif\n")), "unbalanced-endif"));
+	TEST_EXPECT(has_diagnostic(opennova::mns::Document::parse(std::string("#else\nW 4\n#endif\n")), "unbalanced-else"));
 	{
-		mns::Document doc = mns::Document::parse(std::string("#if 0\nX 1\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("#if 0\nX 1\n"));
 		TEST_EXPECT(has_diagnostic(doc, "unterminated-if"));
 		TEST_EXPECT(!doc.flatten().has("X"));
 	}
@@ -276,7 +276,7 @@ static int test_conditionals_document() {
 	// directive; the value resumes on the next ordinary active line.
 	{
 		const std::string src = "#if 1\nFOO bar \\\n#endif\nbaz\nQUX 7\n";
-		mns::Document doc = mns::Document::parse(src);
+		opennova::mns::Document doc = opennova::mns::Document::parse(src);
 		TEST_EXPECT(doc.flatten().get("FOO") == "bar baz");
 		TEST_EXPECT(doc.flatten().get("QUX") == "7");
 		TEST_EXPECT(!has_diagnostic(doc, "unterminated-if"));
@@ -296,7 +296,7 @@ static int test_conditionals_document() {
 	// requiring it to be line-leading.
 	{
 		const std::string src = "#if 0\nignored #else\nLIVE yes\n#endif\n";
-		mns::Document doc = mns::Document::parse(src);
+		opennova::mns::Document doc = opennova::mns::Document::parse(src);
 		TEST_EXPECT(doc.flatten().get("LIVE") == "yes");
 		TEST_EXPECT(!has_diagnostic(doc, "unbalanced-else"));
 		TEST_EXPECT(to_string(doc.serialize()) == src);
@@ -305,7 +305,7 @@ static int test_conditionals_document() {
 	// does not join the value, and evaluation resumes after #endif.
 	{
 		const std::string src = "FOO a \\\n#if 0\nignored\n#endif\nb\n";
-		mns::Document doc = mns::Document::parse(src);
+		opennova::mns::Document doc = opennova::mns::Document::parse(src);
 		TEST_EXPECT(doc.flatten().get("FOO") == "a b");
 		TEST_EXPECT(to_string(doc.serialize()) == src);
 	}
@@ -316,13 +316,13 @@ static int test_conditionals_document() {
 
 static int test_duplicate_name_diagnostics() {
 	{
-		mns::Document doc = mns::Document::parse(std::string("FOO a\nfoo b\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO a\nfoo b\n"));
 		TEST_EXPECT(has_diagnostic(doc, "duplicate-name"));
 		TEST_EXPECT(doc.flatten().get("FOO") == "b"); // last wins
 	}
 	// The same name in mutually exclusive #if branches is not a duplicate.
 	{
-		mns::Document doc = mns::Document::parse(std::string("#if 0\nFOO a\n#else\nFOO b\n#endif\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("#if 0\nFOO a\n#else\nFOO b\n#endif\n"));
 		TEST_EXPECT(!has_diagnostic(doc, "duplicate-name"));
 		TEST_EXPECT(doc.flatten().get("FOO") == "b");
 	}
@@ -332,20 +332,20 @@ static int test_duplicate_name_diagnostics() {
 }
 
 static int test_invalid_name_diagnostic() {
-	mns::Document doc = mns::Document::parse(std::string("A%B v\n"));
+	opennova::mns::Document doc = opennova::mns::Document::parse(std::string("A%B v\n"));
 	TEST_EXPECT(has_diagnostic(doc, "invalid-name-char"));
 	TEST_EXPECT(doc.flatten().get("A%B") == "v"); // still parsed, lenient
 
-	TEST_EXPECT(mns::Document::is_valid_name("DEF_TEXT_FG"));
-	TEST_EXPECT(!mns::Document::is_valid_name(""));
-	TEST_EXPECT(!mns::Document::is_valid_name("A B"));
-	TEST_EXPECT(!mns::Document::is_valid_name("A%B"));
-	TEST_EXPECT(!mns::Document::is_valid_name("A/B"));
-	TEST_EXPECT(!mns::Document::is_valid_name("A\\B"));
-	TEST_EXPECT(!mns::Document::is_valid_name("A<B"));
-	TEST_EXPECT(!mns::Document::is_valid_name("A>B"));
-	TEST_EXPECT(!mns::Document::is_valid_name("A#B"));
-	TEST_EXPECT(mns::Document::is_valid_name("A\"B")); // the spec's six exclude the quote
+	TEST_EXPECT(opennova::mns::Document::is_valid_name("DEF_TEXT_FG"));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_name(""));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_name("A B"));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_name("A%B"));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_name("A/B"));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_name("A\\B"));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_name("A<B"));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_name("A>B"));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_name("A#B"));
+	TEST_EXPECT(opennova::mns::Document::is_valid_name("A\"B")); // the spec's six exclude the quote
 
 	std::printf("test_invalid_name_diagnostic passed\n");
 	return 0;
@@ -354,7 +354,7 @@ static int test_invalid_name_diagnostic() {
 static int test_edit_stability_set_value() {
 	std::string src;
 	TEST_EXPECT(read_file(kRealFixture, src));
-	mns::Document doc = mns::Document::parse(src);
+	opennova::mns::Document doc = opennova::mns::Document::parse(src);
 
 	std::string error;
 	TEST_EXPECT(doc.set_value("DEF_TEXT_FG", "11223344", &error));
@@ -385,7 +385,7 @@ static int test_edit_stability_set_value() {
 }
 
 static int test_edit_preserves_inline_comment() {
-	mns::Document doc = mns::Document::parse(std::string("FOO bar\t// keep me\n"));
+	opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO bar\t// keep me\n"));
 	std::string error;
 	TEST_EXPECT(doc.set_value("FOO", "qux", &error));
 	TEST_EXPECT(to_string(doc.serialize()) == "FOO qux\t// keep me\n");
@@ -397,7 +397,7 @@ static int test_edit_preserves_inline_comment() {
 static int test_edit_multiline_collapse() {
 	// Collapsing keeps the first line's layout and coalesces every spanned
 	// inline comment (content preserved, position approximated; ADR 0014).
-	mns::Document doc = mns::Document::parse(std::string("FOO bar \\ // c1\n  baz // c2\n"));
+	opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO bar \\ // c1\n  baz // c2\n"));
 	std::string error;
 	TEST_EXPECT(doc.set_value("FOO", "new", &error));
 	TEST_EXPECT(to_string(doc.serialize()) == "FOO new\t// c1 c2\n");
@@ -414,7 +414,7 @@ static int test_add_rename_remove_move() {
 	// Append to a document without a final newline: the last line gains the
 	// document EOL, then the new define lands on its own line.
 	{
-		mns::Document doc = mns::Document::parse(std::string("FOO bar"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO bar"));
 		TEST_EXPECT(doc.add_define("NEW", "value", -1, "", &error));
 		TEST_EXPECT(to_string(doc.serialize()) == "FOO bar\r\nNEW\tvalue\r\n");
 	}
@@ -422,7 +422,7 @@ static int test_add_rename_remove_move() {
 	{
 		std::string src;
 		TEST_EXPECT(read_file(kRealFixture, src));
-		mns::Document doc = mns::Document::parse(src);
+		opennova::mns::Document doc = opennova::mns::Document::parse(src);
 		TEST_EXPECT(doc.add_define("MY_COLOR", "FF102030", -1, "added by test", &error));
 		TEST_EXPECT(to_string(doc.serialize()) ==
 				src + "\r\n" + "MY_COLOR\tFF102030\t// added by test\r\n");
@@ -430,14 +430,14 @@ static int test_add_rename_remove_move() {
 	}
 	// Insert before a node (after an existing entry).
 	{
-		mns::Document doc = mns::Document::parse(std::string("A 1\nB 2\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("A 1\nB 2\n"));
 		const int a_node = doc.entries()[0].node_index;
 		TEST_EXPECT(doc.add_define("MID", "x", a_node + 1, "", &error));
 		TEST_EXPECT(to_string(doc.serialize()) == "A 1\nMID\tx\nB 2\n");
 	}
 	// Duplicate / invalid rejections leave the document untouched.
 	{
-		mns::Document doc = mns::Document::parse(std::string("FOO bar\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO bar\n"));
 		TEST_EXPECT(!doc.add_define("foo", "x", -1, "", &error));
 		TEST_EXPECT(!doc.add_define("BAD NAME", "x", -1, "", &error));
 		TEST_EXPECT(!doc.add_define("OK", "a // b", -1, "", &error));
@@ -446,7 +446,7 @@ static int test_add_rename_remove_move() {
 	// Rename keeps the value bytes and alignment; collisions reject;
 	// case-only renames are allowed.
 	{
-		mns::Document doc = mns::Document::parse(std::string("FOO\t\tbar\nBAZ qux\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO\t\tbar\nBAZ qux\n"));
 		TEST_EXPECT(doc.rename_define("FOO", "QUX", &error));
 		TEST_EXPECT(to_string(doc.serialize()) == "QUX\t\tbar\nBAZ qux\n");
 		TEST_EXPECT(!doc.rename_define("QUX", "baz", &error));
@@ -456,24 +456,24 @@ static int test_add_rename_remove_move() {
 	}
 	// Remove drops the whole node (continuations included); comments above stay.
 	{
-		mns::Document doc = mns::Document::parse(std::string("// c\nFOO a \\\nb\nBAZ q\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("// c\nFOO a \\\nb\nBAZ q\n"));
 		TEST_EXPECT(doc.remove_define("FOO", &error));
 		TEST_EXPECT(to_string(doc.serialize()) == "// c\nBAZ q\n");
 		TEST_EXPECT(!doc.remove_define("FOO", &error));
 	}
 	// Remove under duplicates removes every active define with the name.
 	{
-		mns::Document doc = mns::Document::parse(std::string("FOO a\nFOO b\nBAR c\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO a\nFOO b\nBAR c\n"));
 		TEST_EXPECT(doc.remove_define("FOO", &error));
 		TEST_EXPECT(to_string(doc.serialize()) == "BAR c\n");
 	}
 	// Move reorders whole nodes.
 	{
-		mns::Document doc = mns::Document::parse(std::string("A 1\nB 2\nC 3\n"));
+		opennova::mns::Document doc = opennova::mns::Document::parse(std::string("A 1\nB 2\nC 3\n"));
 		TEST_EXPECT(doc.move_define("C", 0, &error));
 		TEST_EXPECT(to_string(doc.serialize()) == "C 3\nA 1\nB 2\n");
 		// Moving the no-final-newline last node terminates its line.
-		mns::Document doc2 = mns::Document::parse(std::string("A 1\nB 2"));
+		opennova::mns::Document doc2 = opennova::mns::Document::parse(std::string("A 1\nB 2"));
 		TEST_EXPECT(doc2.move_define("B", 0, &error));
 		TEST_EXPECT(to_string(doc2.serialize()) == "B 2\nA 1\n");
 	}
@@ -483,7 +483,7 @@ static int test_add_rename_remove_move() {
 }
 
 static int test_set_inline_comment() {
-	mns::Document doc = mns::Document::parse(std::string("FOO bar\n"));
+	opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO bar\n"));
 	std::string error;
 	TEST_EXPECT(doc.set_inline_comment("FOO", "the trim color", &error));
 	TEST_EXPECT(to_string(doc.serialize()) == "FOO bar\t// the trim color\n");
@@ -500,7 +500,7 @@ static int test_set_inline_comment() {
 }
 
 static int test_value_validation() {
-	mns::Document doc = mns::Document::parse(std::string("FOO bar\n"));
+	opennova::mns::Document doc = opennova::mns::Document::parse(std::string("FOO bar\n"));
 	std::string error;
 	TEST_EXPECT(!doc.set_value("FOO", "a//b", &error));
 	TEST_EXPECT(!doc.set_value("FOO", "a\nb", &error));
@@ -516,10 +516,10 @@ static int test_value_validation() {
 	TEST_EXPECT(doc.set_value("FOO", "  x  ", &error));
 	TEST_EXPECT(doc.flatten().get("FOO") == "x");
 
-	TEST_EXPECT(mns::Document::is_valid_value("FF8000"));
-	TEST_EXPECT(mns::Document::is_valid_value("a\\b"));
-	TEST_EXPECT(!mns::Document::is_valid_value("a//b"));
-	TEST_EXPECT(!mns::Document::is_valid_value("a\nb"));
+	TEST_EXPECT(opennova::mns::Document::is_valid_value("FF8000"));
+	TEST_EXPECT(opennova::mns::Document::is_valid_value("a\\b"));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_value("a//b"));
+	TEST_EXPECT(!opennova::mns::Document::is_valid_value("a\nb"));
 
 	std::printf("test_value_validation passed\n");
 	return 0;
@@ -529,7 +529,7 @@ static int test_source_text_get_set() {
 	// BOM stickiness across source-text round-trips.
 	{
 		const std::string with_bom = std::string("\xEF\xBB\xBF") + "FOO bar\n";
-		mns::Document doc = mns::Document::parse(with_bom);
+		opennova::mns::Document doc = opennova::mns::Document::parse(with_bom);
 		TEST_EXPECT(doc.has_bom());
 		TEST_EXPECT(doc.source_text() == "FOO bar\n"); // BOM excluded from text
 		doc.set_source_text("FOO baz\n");
@@ -540,7 +540,7 @@ static int test_source_text_get_set() {
 	{
 		std::string src;
 		TEST_EXPECT(read_file(kRealFixture, src));
-		mns::Document doc = mns::Document::parse(src);
+		opennova::mns::Document doc = opennova::mns::Document::parse(src);
 		doc.set_source_text(doc.source_text());
 		TEST_EXPECT(to_string(doc.serialize()) == src);
 	}
@@ -550,7 +550,7 @@ static int test_source_text_get_set() {
 }
 
 static int test_entries_groups_and_comments() {
-	mns::Document doc = mns::Document::parse(
+	opennova::mns::Document doc = opennova::mns::Document::parse(
 			std::string("// Fonts\nA 1\nB 2\n\n// Colors\nC 3\n"));
 	const auto entries = doc.entries();
 	TEST_EXPECT(entries.size() == 3);
@@ -567,7 +567,7 @@ static int test_entries_groups_and_comments() {
 	return 0;
 }
 
-static bool result_has_diagnostic(const mns::EvaluationResult &result,
+static bool result_has_diagnostic(const opennova::mns::EvaluationResult &result,
 		const std::string &code) {
 	for (const auto &d : result.diagnostics) {
 		if (d.code == code) return true;
@@ -584,8 +584,8 @@ static int test_retail_evaluation_result() {
 			"#if 2\nTWO kept\n#endif\n"
 			"Case first\nCASE last\n"
 			"PATH c:\\\\games\\\\jo\n";
-	const mns::Document doc = mns::Document::parse(src);
-	const mns::EvaluationResult result = doc.evaluate();
+	const opennova::mns::Document doc = opennova::mns::Document::parse(src);
+	const opennova::mns::EvaluationResult result = doc.evaluate();
 	TEST_EXPECT(result.success);
 	TEST_EXPECT(!result.sheet.has("ZERO"));
 	TEST_EXPECT(result.sheet.get("ZERO_ELSE") == "kept");
@@ -598,16 +598,16 @@ static int test_retail_evaluation_result() {
 
 	// A syntax error keeps a useful partial sheet, but success is false and the
 	// legacy flat API now reports the failure instead of silently accepting it.
-	const mns::Document invalid =
-			mns::Document::parse(std::string("#else\nOK value\n"));
-	const mns::EvaluationResult failed = invalid.evaluate();
+	const opennova::mns::Document invalid =
+			opennova::mns::Document::parse(std::string("#else\nOK value\n"));
+	const opennova::mns::EvaluationResult failed = invalid.evaluate();
 	TEST_EXPECT(!failed.success);
 	TEST_EXPECT(failed.sheet.get("OK") == "value");
 	TEST_EXPECT(result_has_diagnostic(failed, "unbalanced-else"));
-	mns::StyleSheet flat;
+	opennova::mns::StyleSheet flat;
 	std::string error;
 	const char *invalid_text = "#else\nOK value\n";
-	TEST_EXPECT(!mns::parse(invalid_text, std::strlen(invalid_text), flat, error));
+	TEST_EXPECT(!opennova::mns::parse(invalid_text, std::strlen(invalid_text), flat, error));
 	TEST_EXPECT(!error.empty());
 
 	std::printf("test_retail_evaluation_result passed\n");

@@ -43,6 +43,10 @@ ENGINE = REPO / "engine"
 GROUPS = ("base", "formats", "runtime", "net")
 SCAN_ROOTS = ("engine", "apps", "tests", "godot/src")
 GODOT_FREE_ROOTS = ("engine", "apps", "tests")
+# ADR 0040: a quoted include names a same-directory sibling and nothing else; a
+# `../` reach is the unqualified include in disguise (tests keep their
+# "../common/..." support includes: the test tree is not an include root).
+PARENT_RELATIVE_FORBIDDEN_ROOTS = ("engine", "apps", "godot")
 SOURCE_SUFFIXES = (".h", ".hpp", ".hh", ".c", ".cc", ".cpp", ".cxx", ".inl")
 SKIP_PARTS = {"third_party"}
 
@@ -149,6 +153,9 @@ def scan() -> tuple[list[str], int]:
             where = f"{posix}:{lineno}: {line.strip()}"
             if rel.parts[0] in GODOT_FREE_ROOTS and "godot" in inc.lower():
                 violations.append(f"[godot-free] {where}")
+                continue
+            if quote == '"' and "../" in inc and rel.parts[0] in PARENT_RELATIVE_FORBIDDEN_ROOTS:
+                violations.append(f"[parent-relative] {where} (only a same-directory sibling may be a quoted include; ADR 0040)")
                 continue
             parts = [p for p in inc.split("/") if p]
             if len(parts) < 2:

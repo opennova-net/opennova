@@ -701,12 +701,12 @@ Array Simulation::get_round_glow_rows() const {
 // geometry/color math lives in renderer/tracer_frame.cpp with its citations.
 Dictionary Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
 		const Vector3 &camera) {
-	std::vector<renderer::TracerChannelInput> channels;
+	std::vector<opennova::renderer::TracerChannelInput> channels;
 	const float *r = rows.ptr();
 	const int64_t size = rows.size();
 	int64_t i = 0;
 	while (r != nullptr && i + 2 < size) {
-		renderer::TracerChannelInput c;
+		opennova::renderer::TracerChannelInput c;
 		c.style_id = static_cast<int>(r[i]);
 		c.age = static_cast<int>(r[i + 1]);
 		c.count = static_cast<int>(r[i + 2]);
@@ -718,8 +718,8 @@ Dictionary Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
 		i += static_cast<int64_t>(c.count) * 4;
 		channels.push_back(c);
 	}
-	renderer::TracerRibbonFrame frame;
-	renderer::compile_tracer_ribbons(channels.data(), channels.size(),
+	opennova::renderer::TracerRibbonFrame frame;
+	opennova::renderer::compile_tracer_ribbons(channels.data(), channels.size(),
 			{static_cast<float>(camera.x), static_cast<float>(camera.y),
 					static_cast<float>(camera.z)},
 			frame);

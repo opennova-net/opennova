@@ -4,7 +4,7 @@
 
 #include <cmath>
 
-namespace renderer {
+namespace opennova::renderer {
 
 namespace {
 
@@ -218,4 +218,4 @@ UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
 	return t;
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

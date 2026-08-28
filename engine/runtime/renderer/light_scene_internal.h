@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace renderer::detail {
+namespace opennova::renderer::detail {
 
 inline constexpr uint16_t kHandleFlag = 0x8000; // [orig: @ 0x5a8e94]
 inline constexpr uint16_t kHandleIndexMask = 0x7FFF;
@@ -56,4 +56,4 @@ inline void apply_rgb_gen(const LightSpawnParams &params,
 	rgb[2] *= gen.b * gen.intensity;
 }
 
-} // namespace renderer::detail
+}  // namespace opennova::renderer::detail

@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-namespace defscan {
+namespace opennova::defscan {
 
 /* ========================================================================= */
 /* Helpers                                                                   */
@@ -449,4 +449,4 @@ int parse_fixed16_digits_n(const char *s, size_t len) {
     return (integer_part << 16) + (frac_accum >> 8);
 }
 
-} // namespace defscan
+}  // namespace opennova::defscan

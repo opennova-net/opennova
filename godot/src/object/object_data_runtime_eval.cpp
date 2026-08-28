@@ -36,7 +36,7 @@ int32_t control_value_from_variant(const Variant &value) {
 	return signed_value;
 }
 
-using GlobalCtrlValues = renderer::ControlRegisterValues;
+using GlobalCtrlValues = opennova::renderer::ControlRegisterValues;
 
 GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
 	GlobalCtrlValues values = {};
@@ -156,7 +156,7 @@ PackedInt32Array ObjectData::get_effective_panm_targets(int p_lod_index) const {
 
 Dictionary ObjectData::eval_material_runtime(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
 	Dictionary out;
-	renderer::MaterialRuntime runtime;
+	opennova::renderer::MaterialRuntime runtime;
 	if (!eval_material_runtime_native(p_index, p_time_ms,
 				runtime_control_values(p_ctrl_values), runtime)) {
 		return out;
@@ -176,30 +176,30 @@ const std::vector<std::string> &ObjectData::_runtime_control_names() const {
 	return runtime_control_names_cache_;
 }
 
-renderer::ControlRegisterValues ObjectData::runtime_control_values(
+opennova::renderer::ControlRegisterValues ObjectData::runtime_control_values(
 		const Dictionary &p_ctrl_values) {
 	return global_control_values_from_dict(p_ctrl_values);
 }
 
 bool ObjectData::eval_material_runtime_native(int p_index, int64_t p_time_ms,
-		const renderer::ControlRegisterValues &p_ctrl_values,
-		renderer::MaterialRuntime &r_runtime) const {
+		const opennova::renderer::ControlRegisterValues &p_ctrl_values,
+		opennova::renderer::MaterialRuntime &r_runtime) const {
 	if (!has_source_model || p_index < 0 || static_cast<size_t>(p_index) >= source_model.material_count) {
 		return false;
 	}
-	r_runtime = renderer::eval_material_runtime(source_model.materials[p_index],
+	r_runtime = opennova::renderer::eval_material_runtime(source_model.materials[p_index],
 			threedi_panm_runtime_time_ms(p_time_ms), _runtime_control_names(),
 			p_ctrl_values);
 	return true;
 }
 
 int ObjectData::compute_anim_frame_native(int p_index, int64_t p_time_ms,
-		const renderer::ControlRegisterValues &p_ctrl_values) const {
+		const opennova::renderer::ControlRegisterValues &p_ctrl_values) const {
 	if (!has_source_model || p_index < 0 ||
 			static_cast<size_t>(p_index) >= source_model.material_count) {
 		return 0;
 	}
-	return renderer::compute_anim_frame(source_model.materials[p_index], 0,
+	return opennova::renderer::compute_anim_frame(source_model.materials[p_index], 0,
 			threedi_panm_runtime_time_ms(p_time_ms), _runtime_control_names(),
 			p_ctrl_values);
 }
@@ -454,7 +454,7 @@ Array ObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_va
 		if (runtime_light.style == 113 || runtime_light.style == 114) {
 			ctrl_value = ctrl_values[runtime_light.phase];
 		}
-		const renderer::LightRuntime runtime = renderer::eval_light_runtime(
+		const opennova::renderer::LightRuntime runtime = opennova::renderer::eval_light_runtime(
 				runtime_light.style,
 				runtime_light.phase,
 				runtime_light.rate,

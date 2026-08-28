@@ -3,7 +3,7 @@
 #include <array>
 #include <cstdint>
 
-namespace renderer {
+namespace opennova::renderer {
 
 // Runtime point-light attenuation set [orig: Light_GetPointLightParams @ 0x5A9180].
 std::array<float, 4> build_point_light_attenuation(float light_range);
@@ -174,4 +174,4 @@ std::array<float, 3> terrain_surface_light(float sun_mask,
                                            const std::array<float, 3> &light,
                                            const std::array<float, 3> &sky);
 
-}  // namespace renderer
+}  // namespace opennova::renderer

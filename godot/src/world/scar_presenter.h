@@ -14,7 +14,7 @@
 //
 // The drawer state is per strip: the GfxShader mode word the loader built the
 // strip's effect from (the draw list's `strip_mode_words`, decoded through
-// renderer::decode_scar_strip_mode) selects the material — the scorch state
+// opennova::renderer::decode_scar_strip_mode) selects the material — the scorch state
 // (shaders/scar_quad.gdshader: SRCALPHA/INVSRCALPHA blend, MODULATE2X colour,
 // fog, no z-write, CCW cull, NO alpha test) or the bullet-hole state
 // (shaders/scar_quad_hole.gdshader: the same plus the GREATER/128 alpha test,

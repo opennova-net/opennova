@@ -33,7 +33,7 @@ Ref<ImageTexture> SlotShadow::shadowztex_;
 
 // Free visual layers reserved as per-slot capture channels (device plumbing;
 // the 12-slot budget itself is the retail RT chain — render_slot_shadow.h).
-static constexpr uint32_t kCaptureLayerBits[renderer::kSlotCaptureCount] = {
+static constexpr uint32_t kCaptureLayerBits[opennova::renderer::kSlotCaptureCount] = {
 	1u << 1, 1u << 2, 1u << 3, 1u << 4, 1u << 5, 1u << 6, 1u << 7, 1u << 8,
 	1u << 9, 1u << 17, 1u << 18, 1u << 19
 };
@@ -50,7 +50,7 @@ const StringName &SlotShadow::caster_group() {
 }
 
 uint32_t SlotShadow::capture_layer_bit(int p_order) {
-	if (p_order < 0 || p_order >= renderer::kSlotCaptureCount) {
+	if (p_order < 0 || p_order >= opennova::renderer::kSlotCaptureCount) {
 		return 0;
 	}
 	return kCaptureLayerBits[p_order];
@@ -58,7 +58,7 @@ uint32_t SlotShadow::capture_layer_bit(int p_order) {
 
 uint32_t SlotShadow::capture_layer_mask() {
 	uint32_t mask = 0;
-	for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
+	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
 		mask |= kCaptureLayerBits[i];
 	}
 	return mask;
@@ -67,10 +67,10 @@ uint32_t SlotShadow::capture_layer_mask() {
 // The per-slot uniform names, built once: the device names up to two per
 // admitted slot every frame.
 struct SlotUniformNames {
-	StringName mat[renderer::kSlotCaptureCount];
-	StringName tex[renderer::kSlotCaptureCount];
+	StringName mat[opennova::renderer::kSlotCaptureCount];
+	StringName tex[opennova::renderer::kSlotCaptureCount];
 	SlotUniformNames() {
-		for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
+		for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
 			mat[i] = StringName(vformat("u_slot_mat_%d", i));
 			tex[i] = StringName(vformat("u_slot_tex_%d", i));
 		}
@@ -84,11 +84,11 @@ static SlotUniformNames &slot_uniforms() {
 
 
 static void reset_material_slots(const Ref<ShaderMaterial> &p_material) {
-	for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
+	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
 		p_material->set_shader_parameter(slot_uniforms().mat[i], Projection());
 	}
 	PackedVector4Array terms;
-	terms.resize(renderer::kSlotCaptureCount);
+	terms.resize(opennova::renderer::kSlotCaptureCount);
 	p_material->set_shader_parameter("u_slot_term", terms);
 }
 
@@ -109,16 +109,16 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	// (retail: RenderSlot_DrawAllDrapes @0x5d6e54..0x5d6ec4, see
 	// docs/render/render-lighting-re.md).
 	drape_material_->set_next_pass(blob_material_);
-	// The drape distance fade thresholds — renderer::drape_fade owns them.
-	const Vector2 fade_range(renderer::kDrapeFadeStartUnits,
-			renderer::kDrapeFadeEndUnits - renderer::kDrapeFadeStartUnits);
+	// The drape distance fade thresholds — opennova::renderer::drape_fade owns them.
+	const Vector2 fade_range(opennova::renderer::kDrapeFadeStartUnits,
+			opennova::renderer::kDrapeFadeEndUnits - opennova::renderer::kDrapeFadeStartUnits);
 	drape_material_->set_shader_parameter("u_drape_fade_range", fade_range);
 	blob_material_->set_shader_parameter("u_drape_fade_range", fade_range);
 	// The depth-clip stage's texture: the witnessed 32x4 ARGB step, sampled
 	// CLAMP + bilinear by the shader's sampler hints (retail:
 	// shadow_system_init_resources @0x5d6260..0x5d62d7 — the planner carries
-	// the fill law, renderer::shadowztex_pixels).
-	const auto px = renderer::shadowztex_pixels();
+	// the fill law, opennova::renderer::shadowztex_pixels).
+	const auto px = opennova::renderer::shadowztex_pixels();
 	PackedByteArray bytes;
 	bytes.resize(static_cast<int64_t>(px.size()) * 4);
 	for (size_t i = 0; i < px.size(); ++i) {
@@ -128,8 +128,8 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 		bytes[static_cast<int64_t>(i) * 4 + 2] = static_cast<uint8_t>(argb & 0xFF);
 		bytes[static_cast<int64_t>(i) * 4 + 3] = static_cast<uint8_t>((argb >> 24) & 0xFF);
 	}
-	const Ref<Image> image = Image::create_from_data(renderer::kShadowZTexWidth,
-			renderer::kShadowZTexHeight, false, Image::FORMAT_RGBA8, bytes);
+	const Ref<Image> image = Image::create_from_data(opennova::renderer::kShadowZTexWidth,
+			opennova::renderer::kShadowZTexHeight, false, Image::FORMAT_RGBA8, bytes);
 	shadowztex_ = ImageTexture::create_from_image(image);
 	drape_material_->set_shader_parameter("u_shadowztex", shadowztex_);
 	return drape_material_;
@@ -142,7 +142,7 @@ void SlotShadow::cleanup_statics() {
 	// Release the uniform-name table before the engine tears the StringName
 	// table down (the function-local static would otherwise outlive it).
 	SlotUniformNames &names = slot_uniforms();
-	for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
+	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
 		names.mat[i] = StringName();
 		names.tex[i] = StringName();
 	}
@@ -240,12 +240,12 @@ void SlotShadow::_ensure_captures() {
 	if (viewports_[0] != nullptr) {
 		return;
 	}
-	for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
+	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
 		SubViewport *viewport = memnew(SubViewport);
 		viewport->set_name(vformat("SlotCapture%d", i));
 		// The retail RT chain size for this slot order
 		// (render_slot_shadow.h carries the witness).
-		const int size = renderer::slot_texture_size(i, shadow_detail_);
+		const int size = opennova::renderer::slot_texture_size(i, shadow_detail_);
 		viewport->set_size(Vector2i(size, size));
 		// Retail clears 0x00FFFFFF: white RGB and alpha 0 (the slot pass
 		// render_shadow_pass @0x5d7b70 - engine/runtime/renderer/render_slot_shadow.h
@@ -291,7 +291,7 @@ void SlotShadow::_ensure_captures() {
 	}
 	// Bind the capture textures to the drape pass once.
 	const Ref<ShaderMaterial> drape = get_drape_material();
-	for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
+	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
 		drape->set_shader_parameter(slot_uniforms().tex[i],
 				viewports_[i]->get_texture());
 	}
@@ -300,7 +300,7 @@ void SlotShadow::_ensure_captures() {
 void SlotShadow::_clear_all_terms() {
 	const PackedVector4Array zero = [] {
 		PackedVector4Array terms;
-		terms.resize(renderer::kSlotCaptureCount);
+		terms.resize(opennova::renderer::kSlotCaptureCount);
 		return terms;
 	}();
 	get_drape_material()->set_shader_parameter("u_slot_term", zero);
@@ -367,11 +367,11 @@ Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
 }
 
 int SlotShadow::get_capture_count() {
-	return static_cast<int>(renderer::kSlotCaptureCount);
+	return static_cast<int>(opennova::renderer::kSlotCaptureCount);
 }
 
 SubViewport *SlotShadow::get_capture_viewport(int p_order) const {
-	if (p_order < 0 || p_order >= static_cast<int>(renderer::kSlotCaptureCount)) {
+	if (p_order < 0 || p_order >= static_cast<int>(opennova::renderer::kSlotCaptureCount)) {
 		return nullptr;
 	}
 	return viewports_[p_order];
@@ -432,7 +432,7 @@ void SlotShadow::advance_frame() {
 	}
 	if (!live) {
 		_clear_all_terms();
-		for (int i = 0; i < renderer::kSlotCaptureCount; ++i) {
+		for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
 			viewports_[i]->set_update_mode(SubViewport::UPDATE_DISABLED);
 		}
 		report_bound_ = report_captures_ = report_blobs_ = 0;
@@ -447,7 +447,7 @@ void SlotShadow::advance_frame() {
 	// DirectionFloat @0x57d870 into render_shadow_pass @0x5d7b70, see
 	// docs/render/render-lighting-re.md).
 	const Vector3 tuple = env->get_light_direction();
-	const std::array<float, 3> sun_dir = renderer::slot_projection_direction(
+	const std::array<float, 3> sun_dir = opennova::renderer::slot_projection_direction(
 			{float(tuple.x), float(tuple.y), float(tuple.z)});
 	const Vector3 default_dir =
 			Vector3(sun_dir[0], sun_dir[1], sun_dir[2]).normalized();
@@ -481,7 +481,7 @@ void SlotShadow::advance_frame() {
 			slot_radius = capture_radius;
 		}
 		info.capture_radius = capture_radius;
-		renderer::SlotCandidateState &state = info.state;
+		opennova::renderer::SlotCandidateState &state = info.state;
 		state.pos2d = {float(pos.x), float(pos.z)};
 		state.bound_radius = slot_radius;
 		state.dead = !model->is_visible_in_tree();
@@ -519,41 +519,41 @@ void SlotShadow::advance_frame() {
 	const std::array<float, 2> cam2d{float(cam_pos.x), float(cam_pos.z)};
 	const std::array<float, 2> view2d{float(cam_forward.x),
 			float(cam_forward.z)};
-	const auto state_for = [&](uint64_t id) -> renderer::SlotCandidateState {
+	const auto state_for = [&](uint64_t id) -> opennova::renderer::SlotCandidateState {
 		const size_t *index = caster_index.getptr(id);
 		if (index == nullptr) {
-			renderer::SlotCandidateState gone;
+			opennova::renderer::SlotCandidateState gone;
 			gone.dead = true;
 			return gone;
 		}
 		return casters[*index].state;
 	};
-	const std::vector<renderer::SlotAssignment> assignments =
+	const std::vector<opennova::renderer::SlotAssignment> assignments =
 			plan_.assign(cam2d, view2d, state_for);
 
 	PackedVector4Array silhouette_terms;
-	silhouette_terms.resize(renderer::kSlotCaptureCount);
+	silhouette_terms.resize(opennova::renderer::kSlotCaptureCount);
 	PackedVector4Array blob_terms;
-	blob_terms.resize(renderer::kSlotCaptureCount);
+	blob_terms.resize(opennova::renderer::kSlotCaptureCount);
 	// Per-slot drape patch (world min_x, min_z, max_x, max_z) and the
 	// depth-clip texgen rows for the silhouette pass; the blob pass takes the
 	// same patch (retail drapes both legs over the slot's patch).
 	PackedVector4Array silhouette_patches;
-	silhouette_patches.resize(renderer::kSlotCaptureCount);
+	silhouette_patches.resize(opennova::renderer::kSlotCaptureCount);
 	PackedVector4Array blob_patches;
-	blob_patches.resize(renderer::kSlotCaptureCount);
+	blob_patches.resize(opennova::renderer::kSlotCaptureCount);
 	PackedVector4Array clip_u;
-	clip_u.resize(renderer::kSlotCaptureCount);
+	clip_u.resize(opennova::renderer::kSlotCaptureCount);
 	PackedVector4Array clip_v;
-	clip_v.resize(renderer::kSlotCaptureCount);
+	clip_v.resize(opennova::renderer::kSlotCaptureCount);
 	// The slot's lod x lod patch around the marched anchor
-	// (renderer::slot_patch_bounds; the march probes TerrainData when set).
+	// (opennova::renderer::slot_patch_bounds; the march probes TerrainData when set).
 	// Planar mission north is Godot -z, so the patch's north range maps to
 	// z in [-max_north, -min_north].
 	const auto slot_patch = [&](const Vector3 &p_pos, const Vector3 &p_dir,
 									float p_radius, float p_dir_y_raw) {
-		const int base_lod = renderer::slot_lod_for_radius(p_radius);
-		const int lod = renderer::grazing_slot_lod(base_lod, p_dir_y_raw);
+		const int base_lod = opennova::renderer::slot_lod_for_radius(p_radius);
+		const int lod = opennova::renderer::grazing_slot_lod(base_lod, p_dir_y_raw);
 		std::array<float, 2> anchor = {float(p_pos.x), float(p_pos.z)};
 		if (terrain_data_.is_valid()) {
 			const TerrainData *terrain = terrain_data_.ptr();
@@ -566,16 +566,16 @@ void SlotShadow::advance_frame() {
 			// (03TR M939: 2.500107 over 2.5). Reconcile only that sub-quantum
 			// contact before the exact march; otherwise the tiny gap becomes a
 			// whole planar step and crosses the lod-20 four-unit patch snap.
-			const float start_y = renderer::slot_march_start_height(
+			const float start_y = opennova::renderer::slot_march_start_height(
 					float(p_pos.y), height_at(float(p_pos.x), float(p_pos.z)),
-					renderer::kSlotTerrainHeightQuantumUnits);
-			anchor = renderer::march_shadow_anchor(
+					opennova::renderer::kSlotTerrainHeightQuantumUnits);
+			anchor = opennova::renderer::march_shadow_anchor(
 					{float(p_pos.x), start_y, float(p_pos.z)},
 					{float(p_dir.x), float(p_dir.y), float(p_dir.z)},
 					height_at);
 		}
-		const renderer::SlotPatch patch =
-				renderer::slot_patch_bounds(anchor[0], -anchor[1], lod);
+		const opennova::renderer::SlotPatch patch =
+				opennova::renderer::slot_patch_bounds(anchor[0], -anchor[1], lod);
 		return Vector4(patch.min_x, -patch.max_north, patch.max_x,
 				-patch.min_north);
 	};
@@ -590,7 +590,7 @@ void SlotShadow::advance_frame() {
 	// claim first: child id -> the parent's capture bit this frame.
 	HashMap<uint64_t, uint32_t> claimed;
 	HashSet<uint64_t> rowed;
-	for (const renderer::SlotAssignment &assignment : assignments) {
+	for (const opennova::renderer::SlotAssignment &assignment : assignments) {
 		rowed.insert(assignment.id);
 		if (!assignment.draws_silhouette || assignment.excluded) {
 			continue;
@@ -603,7 +603,7 @@ void SlotShadow::advance_frame() {
 		}
 	}
 
-	for (const renderer::SlotAssignment &assignment : assignments) {
+	for (const opennova::renderer::SlotAssignment &assignment : assignments) {
 		const size_t *index = caster_index.getptr(assignment.id);
 		if (index == nullptr) {
 			continue;
@@ -638,7 +638,7 @@ void SlotShadow::advance_frame() {
 		// the blob leg's patch follows the same stored direction (retail:
 		// RenderSlot_UpdateEntityLight @0x5d6a30 <- Entity_UpdateAllEntities).
 		const Vector3 center = model->get_world_bounds().get_center();
-		renderer::SlotLightPick pick;
+		opennova::renderer::SlotLightPick pick;
 		pick.direction = {default_dir.x, default_dir.y, default_dir.z};
 		pick.attached_handle = 0;
 		Vector3 attached_color;
@@ -648,13 +648,13 @@ void SlotShadow::advance_frame() {
 					ObjectDB::get_instance(weather_id_));
 			light_scene_->slot_shadow_lights(center, info.state.bound_radius,
 					light_gain_, light_time_ms_, weather, slot_lights_);
-			pick = renderer::pick_dominant_light(
+			pick = opennova::renderer::pick_dominant_light(
 					{float(center.x), float(center.y), float(center.z)},
 					{default_dir.x, default_dir.y, default_dir.z},
 					slot_lights_.data(), slot_lights_.size(),
 					info.state.interior);
 			if (pick.attached_handle != 0) {
-				for (const renderer::SlotPointLight &point : slot_lights_) {
+				for (const opennova::renderer::SlotPointLight &point : slot_lights_) {
 					if (point.handle == pick.attached_handle) {
 						attached_color = Vector3(point.color[0],
 								point.color[1], point.color[2]);
@@ -684,7 +684,7 @@ void SlotShadow::advance_frame() {
 				: sun_dir;
 		if (!captures) {
 			if (assignment.draws_blob && !assignment.excluded &&
-					blob_cursor < renderer::kSlotCaptureCount) {
+					blob_cursor < opennova::renderer::kSlotCaptureCount) {
 				// The authored items.def blob decal for a bound slot past
 				// the capture budget: top-down, heading-rotated, sized
 				// w x l with the authored UV offset (retail: the blob drape
@@ -728,7 +728,7 @@ void SlotShadow::advance_frame() {
 		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)).
 		const int order = assignment.capture_order;
 		const float radius = info.capture_radius;
-		const float half_extent = renderer::silhouette_half_extent(radius);
+		const float half_extent = opennova::renderer::silhouette_half_extent(radius);
 		const float cam_dist = radius * 2.0f + 2.0f;
 		Camera3D *slot_camera = cameras_[order];
 		Vector3 up = Vector3(0, 1, 0);
@@ -743,26 +743,26 @@ void SlotShadow::advance_frame() {
 		slot_camera->set_near(0.05f);
 		slot_camera->set_far(cam_dist * 2.0f + radius);
 
-		// The refresh cadence (renderer::slot_refresh_mask_for carries the
+		// The refresh cadence (opennova::renderer::slot_refresh_mask_for carries the
 		// local-player exception).
-		const uint32_t effective_mask = renderer::slot_refresh_mask_for(
+		const uint32_t effective_mask = opennova::renderer::slot_refresh_mask_for(
 				shadow_detail_, assignment.id == local_id);
 		SubViewport *slot_viewport = viewports_[order];
 		const int want_size =
-				renderer::slot_texture_size(order, shadow_detail_);
+				opennova::renderer::slot_texture_size(order, shadow_detail_);
 		if (slot_viewport->get_size().x != want_size) {
 			slot_viewport->set_size(Vector2i(want_size, want_size));
 		}
-		if (renderer::slot_refresh_due(assignment.record_index, frame_,
+		if (opennova::renderer::slot_refresh_due(assignment.record_index, frame_,
 					effective_mask, assignment.capture_dirty)) {
 			slot_viewport->set_update_mode(SubViewport::UPDATE_ONCE);
 			armed_capture_mask_ |= 1u << order;
 		}
 
 		// The local player's first-person drape gate
-		// (renderer::local_first_person_drape_skipped carries the law).
+		// (opennova::renderer::local_first_person_drape_skipped carries the law).
 		if (assignment.id == local_id &&
-				renderer::local_first_person_drape_skipped(local_first_person_,
+				opennova::renderer::local_first_person_drape_skipped(local_first_person_,
 						local_prone_, shadow_detail_)) {
 			silhouette_terms[order] = Vector4();
 			continue;
@@ -776,7 +776,7 @@ void SlotShadow::advance_frame() {
 			// with the negated color — drape_attached_light_scale; the
 			// per-pixel attenuation across a patch is folded to its center).
 			const std::array<float, 3> scale =
-					renderer::drape_attached_light_scale(
+					opennova::renderer::drape_attached_light_scale(
 							{float(attached_color.x), float(attached_color.y),
 									float(attached_color.z)},
 							0.0f);
@@ -784,7 +784,7 @@ void SlotShadow::advance_frame() {
 					CLAMP(-scale[1] * attached_atten, 0.0f, 1.0f),
 					CLAMP(-scale[2] * attached_atten, 0.0f, 1.0f));
 		} else {
-			const std::array<float, 3> term = renderer::drape_shadow_term(
+			const std::array<float, 3> term = opennova::renderer::drape_shadow_term(
 					{float(sun_rgb.x), float(sun_rgb.y), float(sun_rgb.z)},
 					{float(sky_rgb.x), float(sky_rgb.y), float(sky_rgb.z)},
 					dir.y);
@@ -799,8 +799,8 @@ void SlotShadow::advance_frame() {
 		silhouette_patches[order] =
 				slot_patch(entity_pos, dir, info.state.bound_radius, dir_y_raw);
 		// The depth-clip texgen from the stored direction, the capture half
-		// size and the person steepening (renderer::slot_depth_clip).
-		const renderer::SlotDepthClip clip = renderer::slot_depth_clip(
+		// size and the person steepening (opennova::renderer::slot_depth_clip).
+		const opennova::renderer::SlotDepthClip clip = opennova::renderer::slot_depth_clip(
 				stored_dir, half_extent, info.state.is_person,
 				{float(entity_pos.x), float(entity_pos.y), float(entity_pos.z)});
 		clip_u[order] = Vector4(clip.u_axis[0], clip.u_axis[1], clip.u_axis[2],

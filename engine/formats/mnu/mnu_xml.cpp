@@ -9,7 +9,7 @@
 
 #include <base/io/strutil.h>
 
-namespace mnu_xml {
+namespace opennova::mnu_xml {
 
 using opennova::strutil::iequals;
 
@@ -599,4 +599,4 @@ bool parse_file(const std::string &path, Document &out, std::string &error,
   return parse(content, out, error, options);
 }
 
-}  // namespace mnu_xml
+}  // namespace opennova::mnu_xml

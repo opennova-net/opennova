@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace renderer {
+namespace opennova::renderer {
 
 namespace {
 
@@ -259,4 +259,4 @@ std::array<float, 3> terrain_surface_light(float sun_mask,
 	};
 }
 
-}  // namespace renderer
+}  // namespace opennova::renderer

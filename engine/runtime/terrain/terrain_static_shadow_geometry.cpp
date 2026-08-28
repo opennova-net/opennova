@@ -64,15 +64,15 @@ uint64_t hash_alpha_pyramid(uint64_t hash,
 }
 
 // The four framebuffer blend classes [orig: decode_blend_mode_to_d3d_states @0x680f00].
-TerrainStaticShadowBlend map_blend(::renderer::ObjectBlendMode blend) {
+TerrainStaticShadowBlend map_blend(opennova::renderer::ObjectBlendMode blend) {
 	switch (blend) {
-		case ::renderer::ObjectBlendMode::Opaque:
+		case opennova::renderer::ObjectBlendMode::Opaque:
 			return TerrainStaticShadowBlend::Opaque;
-		case ::renderer::ObjectBlendMode::AlphaBlend:
+		case opennova::renderer::ObjectBlendMode::AlphaBlend:
 			return TerrainStaticShadowBlend::Alpha;
-		case ::renderer::ObjectBlendMode::Additive:
+		case opennova::renderer::ObjectBlendMode::Additive:
 			return TerrainStaticShadowBlend::Additive;
-		case ::renderer::ObjectBlendMode::Multiplicative:
+		case opennova::renderer::ObjectBlendMode::Multiplicative:
 			return TerrainStaticShadowBlend::Multiply;
 	}
 	return TerrainStaticShadowBlend::Opaque;
@@ -207,7 +207,7 @@ TerrainStaticShadowMaterialState terrain_static_shadow_evaluate_material(
 		const TerrainStaticShadowResolvedGeometry &geometry,
 		const TerrainStaticShadowResolvedMaterial &material,
 		uint32_t time_ms,
-		const ::renderer::ControlRegisterValues &control_values) {
+		const opennova::renderer::ControlRegisterValues &control_values) {
 	TerrainStaticShadowMaterialState state;
 	state.issues = material.unsupported_issues;
 	if (!material.casts_projected_shadow ||
@@ -215,7 +215,7 @@ TerrainStaticShadowMaterialState terrain_static_shadow_evaluate_material(
 		return state;
 	}
 
-	const ::renderer::MaterialRuntime runtime = ::renderer::eval_material_runtime(
+	const opennova::renderer::MaterialRuntime runtime = opennova::renderer::eval_material_runtime(
 			material.runtime_material, time_ms,
 			geometry.control_register_names, control_values);
 	state.uv = runtime.uv;
@@ -228,7 +228,7 @@ TerrainStaticShadowMaterialState terrain_static_shadow_evaluate_material(
 		return state;
 	}
 	if (material.diffuse_alpha_frames.size() > 1) {
-		state.diffuse_frame = ::renderer::compute_anim_frame(
+		state.diffuse_frame = opennova::renderer::compute_anim_frame(
 				material.runtime_material,
 				static_cast<uint32_t>(material.diffuse_alpha_frames.size()),
 				time_ms, geometry.control_register_names, control_values);
@@ -298,24 +298,24 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 		const std::string shader_tag =
 				mat.shader_name[0] != '\0' ? std::string(mat.shader_name)
 										   : std::string("FF_ST_OP");
-		const ::renderer::ObjectMaterialClassification classification =
-				::renderer::classify_object_material(shader_tag,
+		const opennova::renderer::ObjectMaterialClassification classification =
+				opennova::renderer::classify_object_material(shader_tag,
 						static_cast<uint8_t>(material_flags),
 						mat.emissive_type == THREEDI_EMISSIVE_FULL
 								? THREEDI_EMISSIVE_FULL
 								: 0,
 						mat.is_glass != 0 ? 1 : 0,
 						static_cast<uint8_t>(alpha_ref));
-		const ::renderer::ObjectShaderPipelineDescriptor pipeline =
-				::renderer::describe_object_shader_pipeline(
-						::renderer::build_object_shader_key(classification));
-		const ::renderer::ObjectProjectedShadowPolicy projected_policy =
-				::renderer::object_projected_shadow_policy(pipeline.technique);
+		const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
+				opennova::renderer::describe_object_shader_pipeline(
+						opennova::renderer::build_object_shader_key(classification));
+		const opennova::renderer::ObjectProjectedShadowPolicy projected_policy =
+				opennova::renderer::object_projected_shadow_policy(pipeline.technique);
 		TerrainStaticShadowResolvedMaterial material;
 		material.casts_projected_shadow = projected_policy !=
-				::renderer::ObjectProjectedShadowPolicy::NoPass;
+				opennova::renderer::ObjectProjectedShadowPolicy::NoPass;
 		material.blend = projected_policy ==
-				::renderer::ObjectProjectedShadowPolicy::MaterialBlend
+				opennova::renderer::ObjectProjectedShadowPolicy::MaterialBlend
 				? map_blend(classification.blend)
 				: TerrainStaticShadowBlend::Opaque;
 		material.alpha_test_enabled =
@@ -332,7 +332,7 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 				material.blend == TerrainStaticShadowBlend::Alpha;
 		material.samples_diffuse_alpha = needs_alpha;
 		material.uses_material_alpha = needs_alpha && projected_policy ==
-				::renderer::ObjectProjectedShadowPolicy::MaterialBlend;
+				opennova::renderer::ObjectProjectedShadowPolicy::MaterialBlend;
 		material.runtime_material = mat;
 		const int anim_frames = static_cast<int>(mat.animation.num_frames);
 		const int anim_type = static_cast<int>(mat.animation.animation_type);

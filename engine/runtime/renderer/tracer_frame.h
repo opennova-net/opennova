@@ -23,7 +23,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace renderer {
+namespace opennova::renderer {
 
 // One style row: the ARGB color ramp (+0x18; head index 0 = the ramp start),
 // the float half-width curve (+0x41C, count +0x418), the base color (+0x14,
@@ -89,4 +89,4 @@ struct TracerRibbonFrame {
 void compile_tracer_ribbons(const TracerChannelInput *channels, std::size_t count,
 		const TracerVec3 &camera, TracerRibbonFrame &out);
 
-} // namespace renderer
+}  // namespace opennova::renderer

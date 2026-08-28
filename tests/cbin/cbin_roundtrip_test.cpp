@@ -50,9 +50,9 @@ int main() {
     // ========================================
     std::cout << "\n=== Test 1: Byte-for-byte roundtrip ===" << std::endl;
 
-    cbin::Credits credits;
+    opennova::cbin::Credits credits;
     std::string error;
-    if (!cbin::decode_credits(original.data(), original.size(), credits, error)) {
+    if (!opennova::cbin::decode_credits(original.data(), original.size(), credits, error)) {
         std::cerr << "FAIL: Decode failed: " << error << std::endl;
         return 1;
     }
@@ -84,13 +84,13 @@ int main() {
     size_t with_font_count = 0;  // Text entries with font
     for (const auto& e : credits.entries) {
         if (e.binary_type == 2) type2_count++;
-        if (e.type == cbin::EntryType::Text && !e.font.empty()) with_font_count++;
+        if (e.type == opennova::cbin::EntryType::Text && !e.font.empty()) with_font_count++;
         switch (e.type) {
-            case cbin::EntryType::Text: text_count++; break;
-            case cbin::EntryType::Color: color_count++; break;
-            case cbin::EntryType::Newline: newline_count++; break;
-            case cbin::EntryType::Image: image_count++; break;
-            case cbin::EntryType::Justify: justify_count++; break;
+            case opennova::cbin::EntryType::Text: text_count++; break;
+            case opennova::cbin::EntryType::Color: color_count++; break;
+            case opennova::cbin::EntryType::Newline: newline_count++; break;
+            case opennova::cbin::EntryType::Image: image_count++; break;
+            case opennova::cbin::EntryType::Justify: justify_count++; break;
         }
     }
     std::cout << "Entry counts: text=" << text_count << ", color=" << color_count
@@ -101,7 +101,7 @@ int main() {
 
     // Re-encode
     std::vector<uint8_t> re_encoded;
-    if (!cbin::encode(credits, re_encoded, error)) {
+    if (!opennova::cbin::encode(credits, re_encoded, error)) {
         std::cerr << "FAIL: Encode failed: " << error << std::endl;
         return 1;
     }
@@ -139,8 +139,8 @@ int main() {
     // ========================================
     std::cout << "\n=== Test 2: Internal roundtrip consistency ===" << std::endl;
 
-    cbin::Credits credits2;
-    if (!cbin::decode_credits(re_encoded.data(), re_encoded.size(), credits2, error)) {
+    opennova::cbin::Credits credits2;
+    if (!opennova::cbin::decode_credits(re_encoded.data(), re_encoded.size(), credits2, error)) {
         std::cerr << "FAIL: Re-decode failed: " << error << std::endl;
         return 1;
     }
@@ -154,7 +154,7 @@ int main() {
 
     // Re-encode again
     std::vector<uint8_t> re_encoded2;
-    if (!cbin::encode(credits2, re_encoded2, error)) {
+    if (!opennova::cbin::encode(credits2, re_encoded2, error)) {
         std::cerr << "FAIL: Internal re-encode failed: " << error << std::endl;
         return 1;
     }
@@ -180,15 +180,15 @@ int main() {
             return;
         }
 
-        cbin::Credits parsed;
-        if (!cbin::decode_credits(fixture.data(), fixture.size(), parsed, error)) {
+        opennova::cbin::Credits parsed;
+        if (!opennova::cbin::decode_credits(fixture.data(), fixture.size(), parsed, error)) {
             std::cerr << "FAIL: Decode failed for " << label << ": " << error << std::endl;
             failures++;
             return;
         }
         size_t text_with_font_count = 0;
         for (const auto& entry : parsed.entries) {
-            if (entry.type == cbin::EntryType::Text && !entry.font.empty()) {
+            if (entry.type == opennova::cbin::EntryType::Text && !entry.font.empty()) {
                 text_with_font_count++;
             }
         }
@@ -207,7 +207,7 @@ int main() {
         }
 
         std::vector<uint8_t> encoded;
-        if (!cbin::encode(parsed, encoded, error)) {
+        if (!opennova::cbin::encode(parsed, encoded, error)) {
             std::cerr << "FAIL: Encode failed for " << label << ": " << error << std::endl;
             failures++;
             return;
@@ -222,15 +222,15 @@ int main() {
             }
             std::cout << "PASS: " << label << " byte-for-byte roundtrip" << std::endl;
         } else {
-            cbin::Credits reparsed;
-            if (!cbin::decode_credits(encoded.data(), encoded.size(), reparsed, error)) {
+            opennova::cbin::Credits reparsed;
+            if (!opennova::cbin::decode_credits(encoded.data(), encoded.size(), reparsed, error)) {
                 std::cerr << "FAIL: Re-decode failed for " << label << ": " << error << std::endl;
                 failures++;
                 return;
             }
             size_t reparsed_text_with_font_count = 0;
             for (const auto& entry : reparsed.entries) {
-                if (entry.type == cbin::EntryType::Text && !entry.font.empty()) {
+                if (entry.type == opennova::cbin::EntryType::Text && !entry.font.empty()) {
                     reparsed_text_with_font_count++;
                 }
             }

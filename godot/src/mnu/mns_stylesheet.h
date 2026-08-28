@@ -18,7 +18,7 @@ namespace godot {
 // All format behavior lives in engine/formats/mns. Keys are case-insensitive (stored
 // uppercase in the flattened view).
 //
-// Document-backed (ADR 0014): the source of truth is a lossless mns::Document
+// Document-backed (ADR 0014): the source of truth is a lossless opennova::mns::Document
 // (comments, grouping, alignment, conditionals, authored case all survive a
 // load -> save), and the StyleSheet the runtime substitutes through is its
 // separately evaluated cache. Lookup/substitution serve that evaluated view;
@@ -30,9 +30,9 @@ class MnsStyleSheet : public Resource {
 	GDCLASS(MnsStyleSheet, Resource)
 
 private:
-	mns::Document doc_;
-	mns::StyleSheet sheet_; // successful/partial runtime evaluation cache
-	std::vector<mns::Diagnostic> evaluation_diagnostics_;
+	opennova::mns::Document doc_;
+	opennova::mns::StyleSheet sheet_; // successful/partial runtime evaluation cache
+	std::vector<opennova::mns::Diagnostic> evaluation_diagnostics_;
 	bool runtime_valid_ = true;
 
 	void _refresh();
@@ -86,10 +86,10 @@ public:
 
 	// Native access. The flat-sheet setter rebuilds a canonical document from
 	// the map (documented lossy); the document accessors are the lossless path.
-	void set_native(const mns::StyleSheet &p_sheet);
-	const mns::StyleSheet &get_native() const { return sheet_; }
-	void set_native_document(const mns::Document &p_doc);
-	const mns::Document &get_native_document() const { return doc_; }
+	void set_native(const opennova::mns::StyleSheet &p_sheet);
+	const opennova::mns::StyleSheet &get_native() const { return sheet_; }
+	void set_native_document(const opennova::mns::Document &p_doc);
+	const opennova::mns::Document &get_native_document() const { return doc_; }
 };
 
 } // namespace godot

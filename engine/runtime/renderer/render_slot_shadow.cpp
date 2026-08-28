@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace renderer {
+namespace opennova::renderer {
 
 std::array<float, 3> slot_projection_direction(
 		const std::array<float, 3> &sun_surface_to_light) {
@@ -542,4 +542,4 @@ std::vector<SlotAssignment> RenderSlotPlan::assign(
 	return out;
 }
 
-}  // namespace renderer
+}  // namespace opennova::renderer

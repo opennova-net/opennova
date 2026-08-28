@@ -17,7 +17,7 @@
 
 #include <runtime/world/impact_scar.h>
 
-namespace renderer {
+namespace opennova::renderer {
 
 // The witnessed vertex stride {x, y, z, argb, u, v} [orig: the six 24-byte
 // vertices Scar_RenderCache writes; FVF 0x142].
@@ -109,4 +109,4 @@ struct ScarStripState {
 inline constexpr int kScarAlphaTestRef = 128;
 ScarStripState decode_scar_strip_mode(std::uint32_t mode_word);
 
-} // namespace renderer
+}  // namespace opennova::renderer

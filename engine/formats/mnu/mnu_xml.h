@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace mnu_xml {
+namespace opennova::mnu_xml {
 
 // XML attribute (name/value pair).
 struct Attribute {
@@ -95,4 +95,4 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
 bool parse_file(const std::string &path, Document &out, std::string &error,
                 const ParseOptions &options = {});
 
-}  // namespace mnu_xml
+}  // namespace opennova::mnu_xml

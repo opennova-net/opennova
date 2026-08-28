@@ -54,7 +54,7 @@ int main() {
 	material.runtime_material.u_params.style = 114;
 	material.runtime_material.u_params.reg = 0;
 	material.runtime_material.u_params.end = 2.0f;
-	renderer::ControlRegisterValues controls{};
+	opennova::renderer::ControlRegisterValues controls{};
 	controls[THREEDI_CTRL_FLICKER] = 32768;
 	const TerrainStaticShadowMaterialState controlled =
 			terrain_static_shadow_evaluate_material(

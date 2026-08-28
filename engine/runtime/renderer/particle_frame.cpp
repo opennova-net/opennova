@@ -9,7 +9,7 @@
 #include <limits>
 #include <utility>
 
-namespace renderer {
+namespace opennova::renderer {
 namespace {
 
 bool water_subset_selects(const ParticleEmitterSnapshot &emitter,
@@ -632,4 +632,4 @@ const ParticleDrawList &ParticleFrameCompiler::compile(
 	return draw_list;
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

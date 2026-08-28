@@ -16,7 +16,7 @@ class MissionEnvironment;
 // casts the Godot shadow map the static-terrain bake reads (static casters
 // onto terrain receivers); PROJECTION_DYNAMIC keeps the shadow map OFF — the
 // SlotShadow capture pipeline renders the live entity ground shadows — and
-// stays the direction-law reference (renderer::slot_projection_direction:
+// stays the direction-law reference (opennova::renderer::slot_projection_direction:
 // the 0.25 vertical clamp, then negate). Both pair light_cull_mask
 // (receivers) with shadow_caster_mask (casters) over the Water visual-layer
 // bits. Each frame it reads the environment's surface-to-light direction,

@@ -71,7 +71,7 @@ void MenuFrame::free_fonts_() {
 
 void MenuFrame::collect_font_names_(const void *p_window,
 		std::vector<String> &r_names) const {
-	const mnu::Window &w = *static_cast<const mnu::Window *>(p_window);
+	const opennova::mnu::Window &w = *static_cast<const opennova::mnu::Window *>(p_window);
 	if (!w.font.name.empty()) {
 		const String name = String::utf8(w.font.name.c_str());
 		bool seen = false;
@@ -85,7 +85,7 @@ void MenuFrame::collect_font_names_(const void *p_window,
 			r_names.push_back(name);
 		}
 	}
-	for (const mnu::Window &child : w.children) {
+	for (const opennova::mnu::Window &child : w.children) {
 		collect_font_names_(&child, r_names);
 	}
 }
@@ -108,8 +108,8 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 		queue_redraw();
 		return false;
 	}
-	const mnu::Document &doc = document_->get_native();
-	const mnu::Screen *screen = p_screen_name.is_empty()
+	const opennova::mnu::Document &doc = document_->get_native();
+	const opennova::mnu::Screen *screen = p_screen_name.is_empty()
 			? doc.first_screen()
 			: doc.find_screen(to_std(p_screen_name));
 	if (screen == nullptr) {
@@ -436,7 +436,7 @@ bool MenuFrame::is_widget_shown(int p_index) const {
 }
 
 Rect2 MenuFrame::widget_rect(int p_index) const {
-	mnu::RectEdges rect;
+	opennova::mnu::RectEdges rect;
 	if (!compiler_.widget_rect(p_index, state_, &rect)) {
 		return Rect2();
 	}
@@ -490,7 +490,7 @@ int MenuFrame::list_visible_rows(int p_index) const {
 }
 
 Rect2 MenuFrame::combo_popup_rect(int p_index) const {
-	mnu::RectEdges rect;
+	opennova::mnu::RectEdges rect;
 	if (!compiler_.combo_popup_rect(p_index, state_, &rect)) {
 		return Rect2();
 	}

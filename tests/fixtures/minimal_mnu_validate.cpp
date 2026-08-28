@@ -12,7 +12,7 @@
 #include <fstream>
 #include <string>
 
-using namespace mnu;
+using namespace opennova::mnu;
 
 namespace {
 

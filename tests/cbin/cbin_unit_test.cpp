@@ -40,7 +40,7 @@ static void write_le_u32(std::vector<uint8_t>& data, size_t offset, uint32_t val
 
 static std::vector<uint8_t> make_header(uint32_t string_offset, uint32_t blob_length, uint32_t string_count = 0) {
     std::vector<uint8_t> data(20, 0);
-    write_le_u32(data, 0, cbin::kMagic);
+    write_le_u32(data, 0, opennova::cbin::kMagic);
     write_le_u32(data, 4, string_offset);
     write_le_u32(data, 8, blob_length);
     write_le_u32(data, 12, string_count);
@@ -50,24 +50,24 @@ static std::vector<uint8_t> make_header(uint32_t string_offset, uint32_t blob_le
 
 // Test empty credits encode/decode
 TEST(empty_credits) {
-    cbin::Credits credits;
+    opennova::cbin::Credits credits;
     credits.scroll_rate = 1.0f;
     credits.vertical_space = 20;
     credits.center_x = 320;
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
     EXPECT_TRUE(encoded.size() > 20);  // At least header
 
     // Verify magic
     uint32_t magic;
     std::memcpy(&magic, encoded.data(), 4);
-    EXPECT_EQ(magic, cbin::kMagic);
+    EXPECT_EQ(magic, opennova::cbin::kMagic);
 
     // Decode
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_FLOAT_EQ(decoded.scroll_rate, 1.0f);
     EXPECT_EQ(decoded.vertical_space, 20);
@@ -79,18 +79,18 @@ TEST(empty_credits) {
 
 // Test text entry roundtrip
 TEST(text_entry_roundtrip) {
-    cbin::Credits credits;
-    credits.entries.push_back(cbin::Entry::make_text("Hello World", ""));
+    opennova::cbin::Credits credits;
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Hello World", ""));
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_EQ(decoded.entries.size(), 1u);
-    EXPECT_EQ(decoded.entries[0].type, cbin::EntryType::Text);
+    EXPECT_EQ(decoded.entries[0].type, opennova::cbin::EntryType::Text);
     EXPECT_EQ(decoded.entries[0].text, "Hello World");
     EXPECT_EQ(decoded.entries[0].font, "");
 
@@ -99,18 +99,18 @@ TEST(text_entry_roundtrip) {
 
 // Test text with font roundtrip
 TEST(text_with_font_roundtrip) {
-    cbin::Credits credits;
-    credits.entries.push_back(cbin::Entry::make_text("Title", "Arial24"));
+    opennova::cbin::Credits credits;
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Title", "Arial24"));
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_EQ(decoded.entries.size(), 1u);
-    EXPECT_EQ(decoded.entries[0].type, cbin::EntryType::Text);
+    EXPECT_EQ(decoded.entries[0].type, opennova::cbin::EntryType::Text);
     EXPECT_EQ(decoded.entries[0].text, "Title");
     EXPECT_EQ(decoded.entries[0].font, "Arial24");
 
@@ -119,20 +119,20 @@ TEST(text_with_font_roundtrip) {
 
 // Test color entry roundtrip
 TEST(color_entry_roundtrip) {
-    cbin::Credits credits;
-    credits.entries.push_back(cbin::Entry::make_color(0xFF0000));  // Red
-    credits.entries.push_back(cbin::Entry::make_color(0x00FF00));  // Green
-    credits.entries.push_back(cbin::Entry::make_color(0x0000FF));  // Blue
+    opennova::cbin::Credits credits;
+    credits.entries.push_back(opennova::cbin::Entry::make_color(0xFF0000));  // Red
+    credits.entries.push_back(opennova::cbin::Entry::make_color(0x00FF00));  // Green
+    credits.entries.push_back(opennova::cbin::Entry::make_color(0x0000FF));  // Blue
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_EQ(decoded.entries.size(), 3u);
-    EXPECT_EQ(decoded.entries[0].type, cbin::EntryType::Color);
+    EXPECT_EQ(decoded.entries[0].type, opennova::cbin::EntryType::Color);
     EXPECT_EQ(decoded.entries[0].color, 0xFF0000u);
     EXPECT_EQ(decoded.entries[1].color, 0x00FF00u);
     EXPECT_EQ(decoded.entries[2].color, 0x0000FFu);
@@ -142,39 +142,39 @@ TEST(color_entry_roundtrip) {
 
 // Test newline entry roundtrip
 TEST(newline_entry_roundtrip) {
-    cbin::Credits credits;
-    credits.entries.push_back(cbin::Entry::make_newline());
-    credits.entries.push_back(cbin::Entry::make_newline());
+    opennova::cbin::Credits credits;
+    credits.entries.push_back(opennova::cbin::Entry::make_newline());
+    credits.entries.push_back(opennova::cbin::Entry::make_newline());
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_EQ(decoded.entries.size(), 2u);
-    EXPECT_EQ(decoded.entries[0].type, cbin::EntryType::Newline);
-    EXPECT_EQ(decoded.entries[1].type, cbin::EntryType::Newline);
+    EXPECT_EQ(decoded.entries[0].type, opennova::cbin::EntryType::Newline);
+    EXPECT_EQ(decoded.entries[1].type, opennova::cbin::EntryType::Newline);
 
     PASS();
 }
 
 // Test image entry roundtrip
 TEST(image_entry_roundtrip) {
-    cbin::Credits credits;
-    credits.entries.push_back(cbin::Entry::make_image("logo.pcx", 0));
-    credits.entries.push_back(cbin::Entry::make_image("banner.pcx", 1));
+    opennova::cbin::Credits credits;
+    credits.entries.push_back(opennova::cbin::Entry::make_image("logo.pcx", 0));
+    credits.entries.push_back(opennova::cbin::Entry::make_image("banner.pcx", 1));
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_EQ(decoded.entries.size(), 2u);
-    EXPECT_EQ(decoded.entries[0].type, cbin::EntryType::Image);
+    EXPECT_EQ(decoded.entries[0].type, opennova::cbin::EntryType::Image);
     EXPECT_EQ(decoded.entries[0].image_path, "logo.pcx");
     EXPECT_EQ(decoded.entries[0].image_display_x, 0);
     EXPECT_EQ(decoded.entries[1].image_path, "banner.pcx");
@@ -185,52 +185,52 @@ TEST(image_entry_roundtrip) {
 
 // Test justify entry roundtrip
 TEST(justify_entry_roundtrip) {
-    cbin::Credits credits;
-    credits.entries.push_back(cbin::Entry::make_justify(cbin::Justify::Left));
-    credits.entries.push_back(cbin::Entry::make_justify(cbin::Justify::Center));
-    credits.entries.push_back(cbin::Entry::make_justify(cbin::Justify::Right));
+    opennova::cbin::Credits credits;
+    credits.entries.push_back(opennova::cbin::Entry::make_justify(opennova::cbin::Justify::Left));
+    credits.entries.push_back(opennova::cbin::Entry::make_justify(opennova::cbin::Justify::Center));
+    credits.entries.push_back(opennova::cbin::Entry::make_justify(opennova::cbin::Justify::Right));
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_EQ(decoded.entries.size(), 3u);
-    EXPECT_EQ(decoded.entries[0].type, cbin::EntryType::Justify);
-    EXPECT_EQ(decoded.entries[0].justify, cbin::Justify::Left);
-    EXPECT_EQ(decoded.entries[1].justify, cbin::Justify::Center);
-    EXPECT_EQ(decoded.entries[2].justify, cbin::Justify::Right);
+    EXPECT_EQ(decoded.entries[0].type, opennova::cbin::EntryType::Justify);
+    EXPECT_EQ(decoded.entries[0].justify, opennova::cbin::Justify::Left);
+    EXPECT_EQ(decoded.entries[1].justify, opennova::cbin::Justify::Center);
+    EXPECT_EQ(decoded.entries[2].justify, opennova::cbin::Justify::Right);
 
     PASS();
 }
 
 // Test mixed entries roundtrip
 TEST(mixed_entries_roundtrip) {
-    cbin::Credits credits;
+    opennova::cbin::Credits credits;
     credits.scroll_rate = 0.75f;
     credits.vertical_space = 16;
     credits.center_x = 400;
 
-    credits.entries.push_back(cbin::Entry::make_justify(cbin::Justify::Center));
-    credits.entries.push_back(cbin::Entry::make_color(0xFFFFFF));
-    credits.entries.push_back(cbin::Entry::make_text("Game Credits", "Title32"));
-    credits.entries.push_back(cbin::Entry::make_newline());
-    credits.entries.push_back(cbin::Entry::make_newline());
-    credits.entries.push_back(cbin::Entry::make_color(0xAAAAAA));
-    credits.entries.push_back(cbin::Entry::make_text("Director", ""));
-    credits.entries.push_back(cbin::Entry::make_newline());
-    credits.entries.push_back(cbin::Entry::make_text("John Doe", "Name24"));
-    credits.entries.push_back(cbin::Entry::make_newline());
-    credits.entries.push_back(cbin::Entry::make_image("logo.pcx", 0));
+    credits.entries.push_back(opennova::cbin::Entry::make_justify(opennova::cbin::Justify::Center));
+    credits.entries.push_back(opennova::cbin::Entry::make_color(0xFFFFFF));
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Game Credits", "Title32"));
+    credits.entries.push_back(opennova::cbin::Entry::make_newline());
+    credits.entries.push_back(opennova::cbin::Entry::make_newline());
+    credits.entries.push_back(opennova::cbin::Entry::make_color(0xAAAAAA));
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Director", ""));
+    credits.entries.push_back(opennova::cbin::Entry::make_newline());
+    credits.entries.push_back(opennova::cbin::Entry::make_text("John Doe", "Name24"));
+    credits.entries.push_back(opennova::cbin::Entry::make_newline());
+    credits.entries.push_back(opennova::cbin::Entry::make_image("logo.pcx", 0));
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_FLOAT_EQ(decoded.scroll_rate, 0.75f);
     EXPECT_EQ(decoded.vertical_space, 16);
@@ -241,18 +241,18 @@ TEST(mixed_entries_roundtrip) {
     for (size_t i = 0; i < credits.entries.size(); i++) {
         EXPECT_EQ(decoded.entries[i].type, credits.entries[i].type);
         switch (credits.entries[i].type) {
-            case cbin::EntryType::Text:
+            case opennova::cbin::EntryType::Text:
                 EXPECT_EQ(decoded.entries[i].text, credits.entries[i].text);
                 EXPECT_EQ(decoded.entries[i].font, credits.entries[i].font);
                 break;
-            case cbin::EntryType::Color:
+            case opennova::cbin::EntryType::Color:
                 EXPECT_EQ(decoded.entries[i].color, credits.entries[i].color);
                 break;
-            case cbin::EntryType::Image:
+            case opennova::cbin::EntryType::Image:
                 EXPECT_EQ(decoded.entries[i].image_path, credits.entries[i].image_path);
                 EXPECT_EQ(decoded.entries[i].image_display_x, credits.entries[i].image_display_x);
                 break;
-            case cbin::EntryType::Justify:
+            case opennova::cbin::EntryType::Justify:
                 EXPECT_EQ(decoded.entries[i].justify, credits.entries[i].justify);
                 break;
             default:
@@ -266,29 +266,29 @@ TEST(mixed_entries_roundtrip) {
 // Test is_cbin function
 TEST(is_cbin_detection) {
     // Valid CBIN data
-    cbin::Credits credits;
-    credits.entries.push_back(cbin::Entry::make_text("Test", ""));
+    opennova::cbin::Credits credits;
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Test", ""));
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
-    EXPECT_TRUE(cbin::is_cbin(encoded.data(), encoded.size()));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::is_cbin(encoded.data(), encoded.size()));
 
     // Invalid magic
     std::vector<uint8_t> invalid = {0x00, 0x00, 0x00, 0x00};
-    EXPECT_TRUE(!cbin::is_cbin(invalid.data(), invalid.size()));
+    EXPECT_TRUE(!opennova::cbin::is_cbin(invalid.data(), invalid.size()));
 
     // Too small
     std::vector<uint8_t> small = {0x43, 0x42, 0x49, 0x4E};  // Just "CBIN"
-    EXPECT_TRUE(!cbin::is_cbin(small.data(), small.size()));
+    EXPECT_TRUE(!opennova::cbin::is_cbin(small.data(), small.size()));
 
     PASS();
 }
 
 TEST(rejects_string_offset_before_header) {
     std::vector<uint8_t> data = make_header(16, 0);
-    cbin::Credits decoded;
+    opennova::cbin::Credits decoded;
     std::string error;
-    EXPECT_TRUE(!cbin::decode_credits(data.data(), data.size(), decoded, error));
+    EXPECT_TRUE(!opennova::cbin::decode_credits(data.data(), data.size(), decoded, error));
     EXPECT_TRUE(!error.empty());
 
     PASS();
@@ -296,9 +296,9 @@ TEST(rejects_string_offset_before_header) {
 
 TEST(rejects_overflowing_header_range) {
     std::vector<uint8_t> data = make_header(0xFFFFFFF0u, 0x30u);
-    cbin::Credits decoded;
+    opennova::cbin::Credits decoded;
     std::string error;
-    EXPECT_TRUE(!cbin::decode_credits(data.data(), data.size(), decoded, error));
+    EXPECT_TRUE(!opennova::cbin::decode_credits(data.data(), data.size(), decoded, error));
     EXPECT_TRUE(!error.empty());
 
     PASS();
@@ -306,39 +306,39 @@ TEST(rejects_overflowing_header_range) {
 
 TEST(rejects_empty_decoded_payload) {
     std::vector<uint8_t> data = make_header(20, 0);
-    cbin::Credits decoded;
+    opennova::cbin::Credits decoded;
     std::string error;
-    EXPECT_TRUE(!cbin::decode_credits(data.data(), data.size(), decoded, error));
+    EXPECT_TRUE(!opennova::cbin::decode_credits(data.data(), data.size(), decoded, error));
     EXPECT_TRUE(!error.empty());
 
     PASS();
 }
 
 TEST(rejects_truncated_string_table) {
-    cbin::Credits credits;
-    credits.entries.push_back(cbin::Entry::make_text("Test", ""));
+    opennova::cbin::Credits credits;
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Test", ""));
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
     uint32_t too_many_strings = 999;
     write_le_u32(encoded, 12, too_many_strings);
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(!cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(!opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
     EXPECT_TRUE(!error.empty());
 
     PASS();
 }
 
 TEST(rejects_invalid_label_string_index) {
-    cbin::Credits credits;
-    credits.entries.push_back(cbin::Entry::make_text("Test", ""));
+    opennova::cbin::Credits credits;
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Test", ""));
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
     // Decode the payload using the public API once to get a valid shape, then
     // corrupt the first label's string index in the encoded bytes by exploiting
@@ -364,8 +364,8 @@ TEST(rejects_invalid_label_string_index) {
     }
     std::copy(payload.begin(), payload.end(), encoded.begin() + 20);
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(!cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(!opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
     EXPECT_TRUE(!error.empty());
 
     PASS();
@@ -373,26 +373,26 @@ TEST(rejects_invalid_label_string_index) {
 
 // Test string deduplication in encoder
 TEST(string_deduplication) {
-    cbin::Credits credits;
+    opennova::cbin::Credits credits;
     // Add multiple entries with same text/font to test deduplication
     for (int i = 0; i < 10; i++) {
-        credits.entries.push_back(cbin::Entry::make_text("Repeated Text", "Font24"));
-        credits.entries.push_back(cbin::Entry::make_newline());
+        credits.entries.push_back(opennova::cbin::Entry::make_text("Repeated Text", "Font24"));
+        credits.entries.push_back(opennova::cbin::Entry::make_newline());
     }
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_EQ(decoded.entries.size(), 20u);
 
     // Verify all text entries have same content
     int text_count = 0;
     for (const auto& e : decoded.entries) {
-        if (e.type == cbin::EntryType::Text) {
+        if (e.type == opennova::cbin::EntryType::Text) {
             EXPECT_EQ(e.text, "Repeated Text");
             EXPECT_EQ(e.font, "Font24");
             text_count++;
@@ -405,19 +405,19 @@ TEST(string_deduplication) {
 
 // Test BHD-specific credit bounds roundtrip as explicit ENV fields.
 TEST(bhd_bounds_roundtrip) {
-    cbin::Credits credits;
+    opennova::cbin::Credits credits;
     credits.has_top_y = true;
     credits.top_y = 66;
     credits.has_bottom_y = true;
     credits.bottom_y = 588;
-    credits.entries.push_back(cbin::Entry::make_text("Delta_Force_Black_Hawk_Down", "Serpen36"));
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Delta_Force_Black_Hawk_Down", "Serpen36"));
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_TRUE(decoded.has_bhd_bounds());
     EXPECT_TRUE(decoded.has_top_y);
@@ -430,16 +430,16 @@ TEST(bhd_bounds_roundtrip) {
 
 // Test env_extra map
 TEST(env_extra_roundtrip) {
-    cbin::Credits credits;
+    opennova::cbin::Credits credits;
     credits.env_extra["custom_key"] = "custom_value";
     credits.env_extra["another_key"] = "another_value";
 
     std::vector<uint8_t> encoded;
     std::string error;
-    EXPECT_TRUE(cbin::encode(credits, encoded, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded, error));
 
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded.data(), encoded.size(), decoded, error));
 
     EXPECT_EQ(decoded.env_extra.count("custom_key"), 1u);
     EXPECT_EQ(decoded.env_extra["custom_key"], "custom_value");
@@ -451,35 +451,35 @@ TEST(env_extra_roundtrip) {
 
 // Test internal roundtrip produces consistent sizes
 TEST(internal_roundtrip_consistency) {
-    cbin::Credits credits;
+    opennova::cbin::Credits credits;
     credits.scroll_rate = 0.5f;
     credits.vertical_space = 14;
     credits.center_x = 400;
-    credits.entries.push_back(cbin::Entry::make_text("Line 1", "Font24"));
-    credits.entries.push_back(cbin::Entry::make_newline());
-    credits.entries.push_back(cbin::Entry::make_color(0xFFFF00));
-    credits.entries.push_back(cbin::Entry::make_text("Line 2", ""));
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Line 1", "Font24"));
+    credits.entries.push_back(opennova::cbin::Entry::make_newline());
+    credits.entries.push_back(opennova::cbin::Entry::make_color(0xFFFF00));
+    credits.entries.push_back(opennova::cbin::Entry::make_text("Line 2", ""));
 
     std::string error;
 
     // Encode once
     std::vector<uint8_t> encoded1;
-    EXPECT_TRUE(cbin::encode(credits, encoded1, error));
+    EXPECT_TRUE(opennova::cbin::encode(credits, encoded1, error));
 
     // Decode
-    cbin::Credits decoded;
-    EXPECT_TRUE(cbin::decode_credits(encoded1.data(), encoded1.size(), decoded, error));
+    opennova::cbin::Credits decoded;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded1.data(), encoded1.size(), decoded, error));
 
     // Encode again
     std::vector<uint8_t> encoded2;
-    EXPECT_TRUE(cbin::encode(decoded, encoded2, error));
+    EXPECT_TRUE(opennova::cbin::encode(decoded, encoded2, error));
 
     // Sizes should match (XOR key differs, but structure is deterministic)
     EXPECT_EQ(encoded1.size(), encoded2.size());
 
     // Decode again and verify content matches
-    cbin::Credits decoded2;
-    EXPECT_TRUE(cbin::decode_credits(encoded2.data(), encoded2.size(), decoded2, error));
+    opennova::cbin::Credits decoded2;
+    EXPECT_TRUE(opennova::cbin::decode_credits(encoded2.data(), encoded2.size(), decoded2, error));
 
     EXPECT_EQ(decoded.entries.size(), decoded2.entries.size());
     EXPECT_FLOAT_EQ(decoded.scroll_rate, decoded2.scroll_rate);

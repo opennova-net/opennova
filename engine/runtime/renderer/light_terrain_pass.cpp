@@ -151,7 +151,7 @@ TerrainLightPatchBounds terrain_patch_light_bounds(const float aabb_min[3],
 
 } // namespace opennova::renderer
 
-namespace renderer {
+namespace opennova::renderer {
 
 // [orig: collect_nearby_zones_by_aabb @0x5aa37a — ((d * d + 0x8000) >> 16)
 //  per axis, 16.16 squared distance in world^2] — the same metric the object
@@ -160,12 +160,10 @@ using detail::axis_distance_term;
 using detail::saturating_add;
 
 size_t LightScene::collect_terrain_pass_rows(
-		const opennova::renderer::TerrainLightPatchBounds *patches,
+		const TerrainLightPatchBounds *patches,
 		size_t patch_count,
-		const opennova::renderer::TerrainLightPassInputs &inputs,
-		opennova::renderer::TerrainLightPatchRows *out) const {
-	using opennova::renderer::kTerrainLightQueryLimit;
-	using opennova::renderer::TerrainLightRow;
+		const TerrainLightPassInputs &inputs,
+		TerrainLightPatchRows *out) const {
 	if (patches == nullptr || out == nullptr || patch_count == 0) {
 		return 0;
 	}
@@ -204,7 +202,7 @@ size_t LightScene::collect_terrain_pass_rows(
 	std::array<Candidate, kTerrainLightQueryLimit> candidates{};
 	size_t total = 0;
 	for (size_t p = 0; p < patch_count; ++p) {
-		const opennova::renderer::TerrainLightPatchBounds &patch = patches[p];
+		const TerrainLightPatchBounds &patch = patches[p];
 		std::array<int32_t, 3> center{};
 		for (int axis = 0; axis < 3; ++axis) {
 			center[axis] = static_cast<int32_t>(
@@ -242,7 +240,7 @@ size_t LightScene::collect_terrain_pass_rows(
 				[](const Candidate &a, const Candidate &b) {
 					return a.distance < b.distance;
 				});
-		opennova::renderer::TerrainLightPatchRows &rows = out[p];
+		TerrainLightPatchRows &rows = out[p];
 		for (size_t i = 0; i < count; ++i) {
 			const Slot &slot = *candidates[i].entry->slot;
 			const LightSpawnParams &params = slot.params;
@@ -264,7 +262,7 @@ size_t LightScene::collect_terrain_pass_rows(
 			}
 			const float radius_world =
 					static_cast<float>(params.radius_fixed) / 65536.0f;
-			row.inv_scale = opennova::renderer::terrain_project_scale(
+			row.inv_scale = terrain_project_scale(
 					radius_world, inputs.alt_pass);
 			// Record bytes /256 at spawn [orig: @0x5a8e51] x the live blend
 			// (f14) x the modulator ambient scale x the recip factor x 0.66,
@@ -276,7 +274,7 @@ size_t LightScene::collect_terrain_pass_rows(
 				static_cast<float>(params.rgb[2]) / 256.0f,
 			};
 			for (int channel = 0; channel < 3; ++channel) {
-				rgb[channel] = opennova::renderer::terrain_light_ambient(
+				rgb[channel] = terrain_light_ambient(
 						rgb[channel], slot.blend, inputs.ambient_scale[channel],
 						inputs.terrain_factor[channel]);
 			}
@@ -292,4 +290,4 @@ size_t LightScene::collect_terrain_pass_rows(
 	return total;
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

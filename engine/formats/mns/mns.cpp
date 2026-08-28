@@ -11,7 +11,7 @@
 #include <sstream>
 #include <vector>
 
-namespace mns {
+namespace opennova::mns {
 
 namespace {
 
@@ -116,4 +116,4 @@ bool write(const StyleSheet &sheet, std::vector<uint8_t> &out, std::string &erro
 	return true;
 }
 
-}  // namespace mns
+}  // namespace opennova::mns

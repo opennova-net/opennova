@@ -55,7 +55,7 @@
         {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["NOVA_SLOT_CAPTURE_LAYER_MASK", "obj_is_slot_shadow_capture(uint camera_visible_layers,"]},
         {"path": "godot/shaders/object/output_opaque.gdshaderinc", "tokens": ["obj_is_slot_shadow_capture(CAMERA_VISIBLE_LAYERS,", "ALBEDO = vec3(0.0);"]},
         {"path": "godot/shaders/object/sampling/single.gdshaderinc", "tokens": ["obj_proj_shadow_coverage"]},
-        {"path": "godot/src/env/slot_shadow.cpp", "tokens": ["kCaptureLayerBits[renderer::kSlotCaptureCount]", "camera->set_cull_mask(kCaptureLayerBits[i])"]},
+        {"path": "godot/src/env/slot_shadow.cpp", "tokens": ["kCaptureLayerBits[opennova::renderer::kSlotCaptureCount]", "camera->set_cull_mask(kCaptureLayerBits[i])"]},
         {"path": "godot/src/env/water.h", "tokens": ["VISUAL_LAYER_SLOT_CAPTURE_MASK", "only the slot capture cameras cull to them"]},
         {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["black-on-white coverage", "capture_darkness", "PROJSHAD Diffuse1.a", "invented a PROJSHAD pass"]}
       ],

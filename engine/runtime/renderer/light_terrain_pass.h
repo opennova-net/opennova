@@ -221,7 +221,7 @@ struct TerrainLightRow {
 	std::array<float, 3> position{};   // mission-space float world units
 	float inv_scale = 0.0f;
 	std::array<float, 3> pixel_rgb{};  // constants 4..6 @0x5AAA9B..0x5AAAB3
-	::renderer::LightHandle handle{};
+	LightHandle handle{};
 };
 
 struct TerrainLightPatchRows {
@@ -235,7 +235,7 @@ struct TerrainLightPassInputs {
 	std::array<float, 3> ambient_scale{1.0f, 1.0f, 1.0f};
 	// flt_2732DA{C,8,4} — terrain_per_channel_factor(the loaded recip).
 	std::array<float, 3> terrain_factor{1.0f, 1.0f, 1.0f};
-	::renderer::LightFlickerInputs flicker{};
+	LightFlickerInputs flicker{};
 	// Render-mode dword_319FBD4 & 0x100: the 0.4/r alt pass [orig: @0x609890].
 	bool alt_pass = false;
 	// PolyTrn_UsePixelShaderPath == 0 drops the light leg [orig: @0x6095e4].

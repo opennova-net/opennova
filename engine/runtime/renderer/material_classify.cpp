@@ -3,7 +3,7 @@
 #include <runtime/renderer/material_descriptor.h>
 #include <formats/threedi/threedi_3di3.h>
 
-namespace renderer {
+namespace opennova::renderer {
 
 namespace {
 
@@ -116,4 +116,4 @@ ObjectMaterialClassification classify_object_material(const std::string &shader_
 	return c;
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

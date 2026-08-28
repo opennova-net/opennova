@@ -17,7 +17,7 @@ static int failures = 0;
 		}                                                                  \
 	} while (0)
 
-using namespace renderer;
+using namespace opennova::renderer;
 
 static bool near_f(float a, float b, float eps = 1.0e-5f) {
 	return std::fabs(a - b) <= eps;

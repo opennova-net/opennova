@@ -15,6 +15,7 @@
 #ifndef OPENNOVA_TEST_RETAIL_MISSION_RIG_H
 #define OPENNOVA_TEST_RETAIL_MISSION_RIG_H
 
+#include <base/io/bam.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/cpt/cpt.h>
 #include <formats/def/def.h>
@@ -77,10 +78,10 @@ struct BootOptions {
 // The 62.5 Hz logic-tick clock in mission seconds.
 constexpr double kTickSeconds = 1.0 / 62.5;
 inline int ticks_for_seconds(double seconds) {
-	return static_cast<int>(seconds * 62.5 + 0.5);
+	return static_cast<int>(seconds / kTickSeconds + 0.5);
 }
 
-constexpr double kBamPerRad = 4294967296.0 / (2.0 * 3.14159265358979323846);
+constexpr double kBamPerRad = opennova::io::kBamPerRadian;
 constexpr double kBamPerDeg = 4294967296.0 / 360.0;
 
 inline int32_t bam_from_radians(double radians) {
@@ -143,7 +144,7 @@ public:
 	void set_entity_position(world::EntityHandle h, const world::Vec3 &mission_pos);
 	void set_entity_health(world::EntityHandle h, int32_t hp);
 
-	// --- terrain -------------------------------------------------------------
+	// --- terrain queries -----------------------------------------------------
 	bool has_terrain() const { return terrain.valid(); }
 	// The renderer-accurate column height under a mission x/y, world units.
 	float ground_height(float mission_x, float mission_y) const;
@@ -192,7 +193,7 @@ public:
 	np::HostOwner host_owner;
 	std::unique_ptr<np::ClientRuntime> client_runtime;
 
-	// --- terrain ---------------------------------------------------------------
+	// --- terrain data (the mounted cpt/trn) -----------------------------------
 	CptFile cpt;
 	TrnConfig trn;
 	std::vector<uint16_t> heightmap;

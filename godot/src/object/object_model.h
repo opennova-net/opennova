@@ -395,7 +395,7 @@ private:
 	PackedInt32Array dynamic_material_slots_;
 	struct MaterialRuntimeStamp {
 		bool runtime_valid = false;
-		renderer::MaterialRuntime runtime;
+		opennova::renderer::MaterialRuntime runtime;
 		int anim_frame = -1;
 	};
 	std::vector<MaterialRuntimeStamp> material_runtime_stamps_;
