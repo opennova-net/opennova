@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <base/io/fixed.h>
 
 namespace opennova::world {
 
@@ -18,7 +19,7 @@ struct DirTable {
         double angle = 0.0;
         constexpr double kStep = 0.006135923151542565; // [orig: dbl_7DF578]
         for (int i = 0; i < 1281; ++i) {
-            sin22[i] = static_cast<int32_t>(std::sin(angle) * 4194304.0); // [orig: dbl_7C3600]
+            sin22[i] = static_cast<int32_t>(std::sin(angle) * io::kQ22One); // [orig: dbl_7C3600]
             angle += kStep;
         }
     }

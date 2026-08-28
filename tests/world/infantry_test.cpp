@@ -2817,6 +2817,179 @@ void test_eye_offset_restamp() {
 
 // COMBAT FIXTURE — the instrument the maneuver slice needs.
 //
+// The 2026-08-28 parity pins: the mission-load defaults, the landing gates, the
+// same-think waypoint advance, the alerted-idle predicate and the hit flinch.
+// [orig: WacScript_FreeAll @0x4f638b/@0x4f6395; Entity_UpdateInfantryAI @0x4bf81e,
+//  @0x4badbf, @0x4bd2f0, @0x4bd6a7]
+void test_infantry_parity_pins_2026_08_28() {
+    // Mission-load defaults: fall-damage tolerance 13, accuracy spread 10.
+    {
+        World w;
+        CHECK(w.wac_values.fallmps == 13);
+        CHECK(w.wac_values.accuracy_spread == 10);
+    }
+    // Landing damage is authority-only: a joiner's own body lands unharmed.
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        const int32_t floor_z = fx(50) + kFloorStand;
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        w.wac_values.fallmps = 1;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true; // the motor runs locally for the joiner's own body
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(200);
+        e->health = 30000;
+        TickContext ctx;
+        ctx.world = &w;
+        ctx.is_authority = false;
+        for (uint32_t t = 0; t < 600; ++t) {
+            ctx.logic_tick = t;
+            ai.tick(w, ctx);
+        }
+        CHECK(e->pos[2] == floor_z);
+        CHECK(e->health == 30000);
+    }
+    // An Indestructible (0x4000000) body lands unharmed on the authority.
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        const int32_t floor_z = fx(50) + kFloorStand;
+        World w;
+        w.registry.configure_pool(0, 4);
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        w.wac_values.fallmps = 1;
+        Entity body{};
+        body.alive = true;
+        body.health = 30000;
+        body.engine_flags = kEntityFlagIndestructible;
+        body.position = {100.0f, 100.0f, 200.0f};
+        AiEntity *e = ai.at(ai.attach(w.registry.spawn(0, body)));
+        e->inf.active = true;
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(200);
+        e->health = 30000;
+        run_ticks(ai, w, 0, 600);
+        CHECK(e->pos[2] == floor_z);
+        CHECK(e->health == 30000);
+    }
+    // A waypoint wait of 1..7 ticks computes to a 0 cooldown and the body walks
+    // toward the next node in the SAME think; 20 ticks holds for one think.
+    {
+        World w;
+        AiSystem ai;
+        AiEntity *e = soldier(ai);
+        route(ai, e, {node(0, 0, fx(1), 0, 3), node(fx(500), 0, fx(1))}, 0);
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->inf.wait_cooldown == 0);
+        CHECK(e->inf.move_mode == 4);
+        CHECK(e->inf.target_dist > 0);
+    }
+    {
+        World w;
+        AiSystem ai;
+        AiEntity *e = soldier(ai);
+        route(ai, e, {node(0, 0, fx(1), 0, 20), node(fx(500), 0, fx(1))}, 0);
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->inf.wait_cooldown == 1);
+        CHECK(e->inf.move_mode == 0);
+    }
+    // Alerted idle: damageTimer / the alert byte promote 43 to 49 with a slot[3]
+    // target, else 44; wasHit alone is NOT a term (it feeds the flinch instead).
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kIdle, anim_state::kIdle2, anim_state::kIdle3,
+                     anim_state::kWalkForward, anim_state::kRunForward};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.damage_timer = 40;
+        e->slot.f[3] = 1;
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->inf.anim_state == anim_state::kIdle3);
+        e->slot.f[3] = 0;
+        e->inf.damage_timer = 40;
+        run_ticks(ai, w, 16, 17);
+        CHECK(e->inf.anim_state == anim_state::kIdle2);
+        e->inf.damage_timer = 0;
+        e->inf.was_hit = true; // no cover_idle clip: the idle stays 43 and wasHit is consumed
+        run_ticks(ai, w, 32, 33);
+        CHECK(e->inf.anim_state == anim_state::kIdle);
+        CHECK(!e->inf.was_hit);
+    }
+    // The hit flinch on the think cadence: idle -> cover_idle, run -> cover_run.
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kIdle, anim_state::kIdle2, anim_state::kCoverIdle,
+                     anim_state::kWalkForward, anim_state::kRunForward, anim_state::kCoverRun};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.was_hit = true;
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->inf.anim_state == anim_state::kCoverIdle);
+        CHECK(!e->inf.was_hit);
+
+        AiEntity *r = soldier(ai);
+        route(ai, r, {node(fx(500), 0, fx(1))}, 0);
+        r->inf.damage_timer = 40; // alerted: the gait is run
+        r->inf.was_hit = true;
+        run_ticks(ai, w, 16, 17);
+        CHECK(r->inf.anim_state == anim_state::kCoverRun);
+        CHECK(!r->inf.was_hit);
+    }
+}
+
+// pre_attack (152) wins over every attack clip when the previous think's move mode
+// was idle (0) or route walking (3/4); the move timer stamps on every in-range
+// think. [orig: Entity_UpdateInfantryAI @0x4bc23c..0x4bc25e, @0x4bc2a6]
+void test_pre_attack_wins_when_previously_idle() {
+    World w;
+    w.registry.configure_pool(0, 16);
+    AiSystem ai;
+    w.ai = &ai;
+    TestSource src;
+    src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kIdle,
+                 anim_state::kIdle2, anim_state::kIdle3, anim_state::kAttack,
+                 anim_state::kPreAttack};
+    ai.root_motion = &src;
+
+    auto make = [&](int slot_idx, uint8_t team, int32_t x) {
+        Entity body{};
+        body.alive = true;
+        body.health = 150;
+        body.team = team;
+        body.net_id = uint16_t(300 + slot_idx);
+        body.position = {float(x) / 65536.0f, 0.0f, 0.0f};
+        AiEntity *e = ai.at(ai.attach(w.registry.spawn(0, body)));
+        e->inf.active = true;
+        e->team = team;
+        e->health = 150;
+        e->inf.max_health = 150;
+        e->pos[0] = x;
+        e->slot.f[15] = 8 * 65536;
+        e->slot.f[16] = 4 * 65536;
+        e->slot.f[17] = 40 * 65536;
+        e->slot.f[22] = 5 << 4; // moveTimer stamp = 5 ticks
+        return e;
+    };
+    AiEntity *red = make(0, 2, 0);
+    AiEntity *blue = make(1, 1, 2 * 65536);
+    (void)red;
+    run_ticks(ai, w, 0, 96);
+    CHECK(blue->inf.combat_target.valid());
+    CHECK(blue->inf.move_mode == 7);
+    CHECK(blue->inf.prev_move_mode == 0);
+    CHECK(blue->inf.anim_state == anim_state::kPreAttack);
+    CHECK(blue->inf.combat_reaction);
+    CHECK(blue->inf.combat_move_timer > 0);
+}
+
 // The 00TRg rig can never produce combat: infantry_scan_nearest_threat caps its
 // radius at 0x280000 (40 world units) and the mission's two sides start hundreds
 // of units apart, so no AI ever acquires a target headless. That is scenario, not
@@ -3421,7 +3594,7 @@ int main() {
 
     // ---- gravity: -416 every 2 ticks to terminal -32768; landing + fall damage ----
     // [orig: dump 5088-5173 — pos.z += 2*vel_z; damage when vel_z <= -1057*scale,
-    //  health -= excess >> 4 (dword_C6EAE4 scale, injectable)]
+    //  health -= excess >> 4 (dword_C6EAE4 = the fallmps named value)]
     {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); }); // 50u everywhere
         const int32_t floor_z = fx(50) + kFloorStand;
@@ -3429,7 +3602,7 @@ int main() {
         World w;
         AiSystem ai;
         ai.terrain = &flat.field;
-        ai.fall_damage_scale = 1;
+        w.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);
@@ -3457,7 +3630,7 @@ int main() {
         World w; // a hop (2 gravity steps, vel -832 > -1057) lands without damage
         AiSystem ai;
         ai.terrain = &flat.field;
-        ai.fall_damage_scale = 1;
+        w.wac_values.fallmps = 1;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);
@@ -3473,7 +3646,7 @@ int main() {
         World w; // scale 0 (the image default) disables fall damage entirely
         AiSystem ai;
         ai.terrain = &flat.field;
-        ai.fall_damage_scale = 0;
+        w.wac_values.fallmps = 0;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);
@@ -4162,6 +4335,8 @@ int main() {
 
     test_combat_fixture_acquires_a_target();
     test_out_of_range_enemy_is_approached();
+    test_infantry_parity_pins_2026_08_28();
+    test_pre_attack_wins_when_previously_idle();
     test_retail_weapon_channel_holds();
 
     if (failures == 0) std::printf("infantry_test: OK\n");

@@ -12,6 +12,7 @@
 #include <runtime/world/vehicle_sound.h>
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
+#include <base/io/bam.h>
 
 namespace opennova::world {
 
@@ -197,7 +198,7 @@ Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
     // the trig paths differ in rounding; the fast path also skips the matrix).
     const Vec3 &L = local;
     if (vehicle.pitch == 0 && vehicle.roll == 0) {
-        constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
+        constexpr double kDeg2Rad = io::kRadiansPerDegree;
         const double a = static_cast<double>(-vehicle.yaw) * kDeg2Rad;
         const double ca = std::cos(a), sa = std::sin(a);
         Vec3 p;

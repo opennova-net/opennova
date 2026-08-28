@@ -133,6 +133,8 @@ enum class Builtin : uint32_t {
     WinVar = 12,    // winner == 1 [orig: wac_var_WinVar @0xC6EB08, derived @0x4f57c9]
     LoseVar = 13,   // winner == 2 [orig: wac_var_LoseVar @0xC6EB04, derived @0x4f57cf]
     AccuracySpread = 14, // writable AI error multiplier [orig: @0xC6EAE8, read @0x4bc5ea]
+    Fallmps = 15,        // writable fall-damage tolerance [orig: @0xC6EAE4, read @0x4bf839 /
+                         //  @0x4b7d13; seeded 13 by WacScript_FreeAll @0x4f638b]
 };
 
 } // namespace opennova::wac

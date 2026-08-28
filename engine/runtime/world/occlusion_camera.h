@@ -19,6 +19,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <base/io/fixed.h>
+#include <base/io/bam.h>
 
 namespace opennova::world {
 
@@ -49,9 +51,9 @@ inline void render_dir_from_presentation(const float p[3], float out[3]) {
 
 // A presentation direction as Q22 mission-axis rows: mission (x, -z, y).
 inline void mission_dir_q22_from_presentation(const float p[3], int32_t out[3]) {
-	out[0] = static_cast<int32_t>(std::lround(p[0] * 4194304.0));
-	out[1] = static_cast<int32_t>(std::lround(-p[2] * 4194304.0));
-	out[2] = static_cast<int32_t>(std::lround(p[1] * 4194304.0));
+	out[0] = static_cast<int32_t>(std::lround(p[0] * io::kQ22One));
+	out[1] = static_cast<int32_t>(std::lround(-p[2] * io::kQ22One));
+	out[2] = static_cast<int32_t>(std::lround(p[1] * io::kQ22One));
 }
 
 namespace detail {
@@ -83,7 +85,7 @@ inline void occlusion_camera_from_view(const OcclusionViewSpec &view,
 	render_dir_from_presentation(view.up, u);
 
 	// The 5-plane view frustum (near + 4 sides), inward normals, render float.
-	const double half_v = static_cast<double>(view.fov_y_deg) * (3.14159265358979323846 / 180.0) * 0.5;
+	const double half_v = static_cast<double>(view.fov_y_deg) * io::kRadiansPerDegree * 0.5;
 	const double tan_v = std::tan(half_v);
 	const double tan_h = tan_v * (view.aspect > 0.0f ? static_cast<double>(view.aspect) : 1.0);
 	const float th = static_cast<float>(tan_h);

@@ -165,8 +165,10 @@ static void test_wac_accuracyspread_drives_npc_aim() {
     npc.inf.aim_point[0] = 20 << 16; // no lead: target is stationary
     npc.slot.f[11] = 1;              // fresh-target accuracy parameter
 
-    // Default spread 1: target is due east, so the heading is only the witnessed
-    // sawtooth error term.
+    // Spread 1 (the mission-load default is 10 [orig: WacScript_FreeAll @0x4f6395];
+    // pinned to 1 here so the WAC write below is an exact x3): target is due east,
+    // so the heading is only the witnessed sawtooth error term.
+    w.wac_values.accuracy_spread = 1;
     ai.infantry_combat_think(npc, w, /*key=*/1);
     CHECK(npc.inf.aim_valid);
     const int32_t default_heading = npc.inf.aim_heading;

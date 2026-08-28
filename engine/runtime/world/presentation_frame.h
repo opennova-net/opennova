@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <base/io/bam.h>
 
 namespace opennova::world {
 
@@ -37,8 +38,8 @@ inline void mission_from_presentation(const float p[3], float out[3]) {
 // frame: yaw around the up axis (0 = mission north = -z), pitch tilting it —
 // (sin yaw cos pitch, sin pitch, -cos yaw cos pitch).
 inline void presentation_forward_from_angles(float yaw_deg, float pitch_deg, float out[3]) {
-    const double yr = static_cast<double>(yaw_deg) * (3.14159265358979323846 / 180.0);
-    const double pr = static_cast<double>(pitch_deg) * (3.14159265358979323846 / 180.0);
+    const double yr = static_cast<double>(yaw_deg) * io::kRadiansPerDegree;
+    const double pr = static_cast<double>(pitch_deg) * io::kRadiansPerDegree;
     out[0] = static_cast<float>(std::sin(yr) * std::cos(pr));
     out[1] = static_cast<float>(std::sin(pr));
     out[2] = static_cast<float>(-std::cos(yr) * std::cos(pr));
@@ -49,7 +50,7 @@ inline void presentation_forward_from_angles(float yaw_deg, float pitch_deg, flo
 // the camera's -forward (+z) axis by +roll — the presenter rotates about
 // (0, 0, -1) by the negated angle. [orig: the on-foot person leg @0x437fe6]
 inline float presentation_roll_rad(float roll_deg) {
-    return static_cast<float>(static_cast<double>(roll_deg) * (3.14159265358979323846 / 180.0));
+    return static_cast<float>(static_cast<double>(roll_deg) * io::kRadiansPerDegree);
 }
 
 // The aim ray's far point: the eye plus kAimProjectRange along the view

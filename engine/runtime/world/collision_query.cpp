@@ -15,6 +15,7 @@
 #include "collision_detail.h"
 
 #include <runtime/world/world.h>
+#include <base/io/fixed.h>
 
 namespace opennova::world {
 
@@ -911,8 +912,8 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                         // quantized table. [orig: @ 0x4ae9df-0x4aea30 — fsin/fcos of
                         // yaw * dbl_7C3608, * dbl_7C3600]
                         const double yaw_rad = static_cast<double>(ladder.yaw) * kRadianPerBam;
-                        const int32_t s22 = static_cast<int32_t>(std::sin(yaw_rad) * 4194304.0);
-                        const int32_t c22 = static_cast<int32_t>(std::cos(yaw_rad) * 4194304.0);
+                        const int32_t s22 = static_cast<int32_t>(std::sin(yaw_rad) * io::kQ22One);
+                        const int32_t c22 = static_cast<int32_t>(std::cos(yaw_rad) * io::kQ22One);
                         ladder.anchor[0] -= static_cast<int32_t>((24576LL * c22) >> 22);
                         ladder.anchor[1] -= static_cast<int32_t>((24576LL * s22) >> 22);
                         ladder.valid = true;

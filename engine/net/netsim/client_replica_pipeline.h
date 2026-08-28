@@ -76,7 +76,6 @@ public:
 	// The host/SP roles keep the snap fold — their loopback view refreshes at
 	// full rate and the authority never interpolates (D-NET-89).
 	void set_remote_motion_mode(bool enabled) { remote_motion_mode_ = enabled; }
-	bool remote_motion_mode() const { return remote_motion_mode_; }
 
 	// The replica contact-resolver seam (net-re §5.38e, D-NET-196): when the
 	// embedding sim provides a resolver, each armed Player/Infantry row's

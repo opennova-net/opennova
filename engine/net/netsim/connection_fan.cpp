@@ -17,6 +17,7 @@
 #include <runtime/world/vehicle_mount.h>
 
 #include <net/netsim/entity_wire_bridge.h> // health_classification_byte (the field-17 pack)
+#include <base/io/fixed.h>
 
 namespace opennova::netsim {
 
@@ -31,6 +32,9 @@ struct FrameHeaderState {
 	// so one bit1=0 frame closes it [orig: NapiNPClientMsg_0x00A @0x42ff82]. bit2 = the
 	// one-shot load hint (entity+44 & 0x1000 — unmodeled). (D-NET-156)
 	uint8_t flags1 = 0;
+	// The live fall-damage tolerance the sub-block-1 timer state carries
+	// (World::wac_values.fallmps, dword_C6EAE4) [orig: NetPacket_WritePlayerState @0x4ffa14].
+	uint8_t fallmps = 13;
 	// Tail state byte bits 0-1 = the recipient's OWN [prone, crouch] echo — the client
 	// re-latches its stance from this EVERY frame [orig: tail read @0x4303e5 (byte << 8 ->
 	// MoveOrder bits 8-9) -> latches @0x430562/@0x430570]; a hardcoded 0 force-stands a
@@ -113,7 +117,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// defaults @0x4f638b C6EAE0=20/C6EAE4=13; grill 2026-06-28.]
 		fu.timer.present = true;
 		fu.timer.state0 = 20;        // dword_C6EAE0 (retail default)
-		fu.timer.state1 = 13;        // dword_C6EAE4 = fall-damage tolerance (0 => constant fall dmg)
+		fu.timer.state1 = hdr.fallmps; // dword_C6EAE4 = fallmps, the fall-damage tolerance (0 => constant fall dmg)
 		fu.timer.state2 = 62;        // g_serverFps (cosmetic netgraph)
 		fu.timer.state3 = 0;         // g_serverCpuPct (cosmetic netgraph)
 		// The round clock's wire projection: whole seconds (ticks / 62) only
@@ -428,8 +432,6 @@ int entity_send_budget() { return g_entity_send_budget; }
 void set_view_distance_units(int units) {
 	g_view_distance_units = units < 0 ? 0 : units;
 }
-
-int view_distance_units() { return g_view_distance_units; }
 
 namespace {
 
@@ -781,7 +783,7 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		// Y=cosYaw*cosPitch, Z=sinPitch per the round spawners
 		// [orig: Weapon_SpawnSingleProjectile @0x4ebf51 / RoundData_SpawnRound @0x4ec5e9].
 		constexpr double kBamToRad = 1.4629627251502471e-09; // [orig: dbl_7C3608 = 2pi/2^32]
-		constexpr double kTrigScale = 4194304.0;             // [orig: dbl_7C3600 = 2^22]
+		constexpr double kTrigScale = io::kQ22One;             // [orig: dbl_7C3600 = 2^22]
 		const double yaw = double(ev.dir_yaw) * kBamToRad;
 		const double pitch = double(ev.dir_pitch) * kBamToRad;
 		const int64_t sy = int64_t(std::sin(yaw) * kTrigScale);
@@ -1015,6 +1017,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	hs.flags1 = conn.respawn_pending ? 0x02 : 0x00;
 	hs.preround_delay_seconds =
 			static_cast<uint8_t>(w.preround_delay_seconds);
+	hs.fallmps = static_cast<uint8_t>(std::clamp(w.wac_values.fallmps, 0, 255));
 	hs.round_time_remaining_ticks = w.match.remaining_ticks();
 	const world::EnvNetworkState &env = w.network_env;
 	hs.env.present = true;

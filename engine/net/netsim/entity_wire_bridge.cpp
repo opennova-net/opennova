@@ -612,19 +612,6 @@ Pool3SyncBatch build_pool3_marker_batch(const world::World &w) {
 	return batch;
 }
 
-Pool3SyncBatch build_pool3_spawn_marker_batch(const world::World &w) {
-	Pool3SyncBatch batch;
-	w.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 3) return;
-		// Only the 60xx start-marker family — the spawn points the client's spawn-select reads.
-		const bool is_spawn = world::is_player_spawn_marker_type(e.item_id);
-		if (!is_spawn) return;
-		batch.records.push_back(pool3_record_of(e));
-	});
-	batch.entity_count = static_cast<int16_t>(batch.records.size());
-	return batch;
-}
-
 bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	// 1. Resolve the joiner's owned entity by its wire handle (pool<<12 | slot).
 	//    [orig: dispatch_entity_packet_callback @0x4D6A80 resolves g_pool_list[h>>12] and

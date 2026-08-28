@@ -1,7 +1,7 @@
 // The LOCAL PLAYER equipped-weapon cluster (S7a, ADR 0028): the weapon action
 // FSM pump, install/def bake orchestration, clip-variant rings, the UseGun
 // borrow, PowerThrow, switch outcomes, and the presentation-event queue —
-// moved verbatim from the shell adapter (net-re §5.62). The embedder feeds
+// moved verbatim from the shell binding (net-re §5.62). The embedder feeds
 // plain install data and inputs, drains presentation events, and routes the
 // two wire request records; everything else runs here.
 // [orig: the per-entity pump WeaponAction_ProcessAllEntities @ 0x542690; the
@@ -26,7 +26,7 @@ namespace opennova::world {
 class World;
 
 // The remaining WeaponDef flag bits the local pump consumes, mirrored from
-// the def parser's token table (the adapter static_asserts the pairing; world
+// the def parser's token table (the binding static_asserts the pairing; world
 // never consumes the format stack). [orig: the 16-byte flag rows @ 0x830BF0]
 namespace weapon_flag {
 enum : int32_t {
@@ -77,7 +77,7 @@ struct WeaponClipRing {
 // @ 0x546b80; the action-handler commit seams @ 0x543475 / @ 0x543539]
 enum class LocalUseGunSwitch : uint8_t { kNone, kAttach, kSwap, kDetach };
 
-// The local player's whole equipped-weapon state — the moved adapter members,
+// The local player's whole equipped-weapon state — the moved binding members,
 // one aggregate the embedder holds beside the world.
 struct LocalPlayerWeapon {
     WeaponFsmDef def{};

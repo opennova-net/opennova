@@ -26,7 +26,7 @@ namespace opennova::world {
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
+constexpr double kPi = io::kPi;
 // BAM32 -> radians (full turn = 2^32) [orig: engine-wide BAM convention, angle.h].
 constexpr double kRadPerBam = io::kRadiansPerBam;
 constexpr int32_t kProjectileGravityQ16 = 167;

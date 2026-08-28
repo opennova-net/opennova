@@ -21,12 +21,13 @@
 #include <runtime/world/vehicle_mount.h> // vehicle_prepare_weapon_slot, mount_blocks_weapon_channel
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
+#include <base/io/bam.h>
 
 namespace opennova::world {
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
+constexpr double kPi = io::kPi;
 
 const Entity *local_entity(World *world) {
     return world != nullptr ? world->registry.get(world->cached.local_player) : nullptr;

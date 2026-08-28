@@ -1,5 +1,5 @@
 // Mount-relation CTRL sources: the carrier-side HEAT_GLOW derivation and the
-// emplaced-weapon turret phase pair. Moved verbatim from the shell adapter's
+// emplaced-weapon turret phase pair. Moved verbatim from the shell binding's
 // simulation internals (ADR 0028) — every input is world state, and both the
 // legacy render/collision paths and the engine-side pose provider consume the
 // same derivations (ADR 0016 one-impl).

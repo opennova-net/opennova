@@ -15,6 +15,7 @@
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/vehicle_sound.h>
 #include <runtime/world/world.h>
+#include <base/io/fixed.h>
 
 namespace opennova::world {
 
@@ -43,12 +44,12 @@ constexpr int32_t kAnalogSteerScale = 192426;
 // fixed-point cos table [orig: off_849934, idx = (bam + 0x200000) >> 22]; the
 // infantry motor established the same computed equivalent (D-INF-4).
 int32_t cos22_of_bam(int32_t bam) {
-    const double a = static_cast<double>(bam) * (3.14159265358979323846 / 2147483648.0);
-    return static_cast<int32_t>(std::cos(a) * 4194304.0);
+    const double a = static_cast<double>(bam) * io::kRadiansPerBam;
+    return static_cast<int32_t>(std::cos(a) * io::kQ22One);
 }
 int32_t sin22_of_bam(int32_t bam) {
-    const double a = static_cast<double>(bam) * (3.14159265358979323846 / 2147483648.0);
-    return static_cast<int32_t>(std::sin(a) * 4194304.0);
+    const double a = static_cast<double>(bam) * io::kRadiansPerBam;
+    return static_cast<int32_t>(std::sin(a) * io::kQ22One);
 }
 
 // The x87 trig pair (cos22/sin22_of_bam_x87) lives in vehicle_motor_detail.h —
@@ -752,7 +753,7 @@ VehicleEulerBasis vehicle_euler_basis(int32_t yaw_bam, int32_t pitch_bam,
     const int32_t origin[3] = {};
     out.q22 = collision_matrix_from_euler(
             yaw_bam, pitch_bam, roll_bam, origin);
-    constexpr double kInvQ22 = 1.0 / 4194304.0;
+    constexpr double kInvQ22 = io::kInvQ22One;
     out.fwd[0] = double(out.q22.m[0]) * kInvQ22;
     out.fwd[1] = double(out.q22.m[4]) * kInvQ22;
     out.fwd[2] = double(out.q22.m[8]) * kInvQ22;
@@ -1433,7 +1434,7 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
 }
 
 // The npruntime headless host boots World without the shell's model-box
-// resolution (VehicleTraits.box_z_* is stamped only by the adapter's
+// resolution (VehicleTraits.box_z_* is stamped only by the binding's
 // simulation_assets resolve), so its watercraft have no platform
 // geometry and the solver cannot produce an afloat latch. This water-plane
 // stand-in covers exactly that path; resolved hulls always consume the

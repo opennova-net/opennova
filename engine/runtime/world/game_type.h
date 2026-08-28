@@ -4,7 +4,7 @@
 
 // Runtime-owned retail game-type code words. They are opaque beyond the two
 // witnessed bits below. Gameplay can therefore share the exact wire values
-// without depending on the network or mission adapters.
+// without depending on the network or mission layers.
 // [orig: g_GameType @0x24D2128; Server_CheckWinConditions @0x51AD40;
 // ScoreRules_GetPrimaryScoreField (ex sub_52C850) @0x52C850]
 namespace opennova::game_type {

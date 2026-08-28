@@ -58,7 +58,7 @@ struct MatchLiveTeamScore {
 };
 
 // One authoritative projection for S2C 0x16. The match owns every mode
-// decision; the network adapter only narrows these values to their wire words.
+// decision; the wire layer only narrows these values to their wire words.
 // Row zero is the retail neutral row and remains zero-filled.
 // [orig: Server_BuildAndBroadcastScoreboard @0x50D960]
 struct MatchLiveScoreboard {
@@ -210,8 +210,8 @@ enum class MatchGameplayEventKind : uint8_t {
 };
 
 // A semantic objective transition plus the exact entity-state snapshot the
-// network adapter needs after the transition. Captured CTF flags can be gone
-// from the registry by the time the adapter drains this record.
+// wire layer needs after the transition. Captured CTF flags can be gone
+// from the registry by the time the binding drains this record.
 struct MatchGameplayEvent {
     MatchGameplayEventKind kind = MatchGameplayEventKind::FlagPickup;
     EntityHandle actor;

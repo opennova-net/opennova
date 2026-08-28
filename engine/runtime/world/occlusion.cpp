@@ -10,6 +10,7 @@
 
 #include <runtime/world/angle.h>
 #include <runtime/world/world.h>
+#include <base/io/fixed.h>
 
 namespace opennova::world {
 
@@ -52,8 +53,8 @@ inline void entity_pos_fixed(const Entity &e, int32_t out[3]) {
 // dbl_7C57B0 = -2^22, flt_7C3610 = 1/2^22]
 inline void quantized_trig(int32_t bam, float &c, float &s) {
     const double th = static_cast<double>(bam) * bam_angle_scale();
-    c = static_cast<float>(ftol(std::cos(th) * 4194304.0)) * (1.0f / 4194304.0f);
-    s = static_cast<float>(ftol(std::sin(th) * -4194304.0)) * (1.0f / 4194304.0f);
+    c = static_cast<float>(ftol(std::cos(th) * io::kQ22One)) * (1.0f / 4194304.0f);
+    s = static_cast<float>(ftol(std::sin(th) * -io::kQ22One)) * (1.0f / 4194304.0f);
 }
 
 constexpr int32_t kSlotCap = 128;        // [orig: the 128-cap slot arrays @ 0x5c6d7f]

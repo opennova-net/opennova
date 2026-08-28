@@ -15,12 +15,13 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
+#include <base/io/fixed.h>
 
 namespace opennova::world {
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
+constexpr double kPi = io::kPi;
 constexpr double kBamPerRad = io::kBamPerRadian;
 
 // Q16 multiply with the witnessed +0x8000 rounding [orig: the pervasive
@@ -71,8 +72,8 @@ void throwable_stick_pose(const int32_t normal_q16[3], int32_t yaw_bam,
                           int32_t pitch_bias_bam, int32_t roll_bias_bam,
                           int32_t &pitch_bam, int32_t &roll_bam) {
     const double a = static_cast<double>(yaw_bam) / kBamPerRad;
-    const int32_t c = static_cast<int32_t>(std::cos(a) * 4194304.0);
-    const int32_t s = static_cast<int32_t>(std::sin(a) * 4194304.0);
+    const int32_t c = static_cast<int32_t>(std::cos(a) * io::kQ22One);
+    const int32_t s = static_cast<int32_t>(std::sin(a) * io::kQ22One);
     const int64_t nx = normal_q16[0], ny = normal_q16[1];
     const int32_t lx = static_cast<int32_t>((ny * s + nx * c + 0x200000) >> 22);
     const int32_t ly = static_cast<int32_t>((ny * c + nx * -s + 0x200000) >> 22);
@@ -358,15 +359,15 @@ void parent_delta_follow(const Entity &parent, FollowPose &p) {
     if (dyaw == 0 && dpitch == 0 && droll == 0) return;
     const auto q22c = [](int32_t bam) {
         return static_cast<int32_t>(
-                std::cos(static_cast<double>(bam) / kBamPerRad) * 4194304.0);
+                std::cos(static_cast<double>(bam) / kBamPerRad) * io::kQ22One);
     };
     const auto q22s = [](int32_t bam) {
         return static_cast<int32_t>(
-                std::sin(static_cast<double>(bam) / kBamPerRad) * 4194304.0);
+                std::sin(static_cast<double>(bam) / kBamPerRad) * io::kQ22One);
     };
     const auto q22s_neg = [](int32_t bam) {
         return static_cast<int32_t>(
-                std::sin(static_cast<double>(bam) / kBamPerRad) * -4194304.0);
+                std::sin(static_cast<double>(bam) / kBamPerRad) * -io::kQ22One);
     };
     const auto m22 = [](int32_t a, int32_t b) {
         return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
