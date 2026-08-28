@@ -1,33 +1,41 @@
-// nw-server — the headless in-match game HOST (engine/net/npruntime P6). A pure C++ dedicated server: it
-// loads a mission, stands up the npruntime runtime as a NovaWorld HostOnly session, opens a real UDP
-// socket, and asks inmatch::Session to drive the host loop at the original fixed cadence so
-// retail-wire-compatible clients (opennova or, as a follow-up, stock retail) can join -> spawn ->
-// play. All protocol/crypto/framing and cadence live in the libs; this binary owns the socket and
-// wall-clock pacing only.
+// nw-server — the headless in-match dedicated game HOST over the engine's ONE
+// mission kernel (ADR 0042 d3). It mounts the resource root, boots the loose
+// mission through mission::MissionKernel (terrain, item/weapon/ammo tables,
+// collision, infantry .adm — the same boot every embedder drives), stands the
+// npruntime runtime up as a HostOnly session through inmatch::listen_host,
+// opens a real UDP socket, and asks inmatch::Session to drive the listen frame
+// at the original fixed cadence so retail-wire-compatible clients (opennova
+// or, as a follow-up, stock retail) can join -> spawn -> play. All protocol,
+// crypto, framing, cadence, and mission state live in the libs; this binary
+// owns the flag surface, the socket, and the wall-clock pacing only.
 //
 // It NEVER links godot-cpp (godot-cpp is a separate SCons build, not in this CMake graph). Separate from
 // the matchmaking apps/novaworld_server (gate/lobby/HTTP) — this is the authoritative game server.
 
-#include <net/npwire/net_ports.h>
-#include <net/npwire/game_type.h>
-#include <net/npruntime/host_session.h> // the host owner loop, promoted to engine/net/npruntime (P7/A3)
-#include <net/npruntime/session_status.h>
+#include <base/io/log.h>
+#include <base/resource_index/resource_index.h>
+#include <base/vfs/vfs.h>
+#include <formats/cpt/cpt.h>
+#include <formats/cpt/cpt_io.h>
+#include <formats/mission/bms.h>
+#include <formats/pcx/pcx_io.h>
+#include <formats/rtxt/rtxt.h> // the gametext "Server" strings (STRSRV_MEDREQ)
+#include <formats/trn/trn.h>
+#include <formats/trn/trn_io.h>
+#include <net/inmatch/listen_host.h>
 #include <net/inmatch/session.h>
+#include <net/npruntime/host_session.h>
+#include <net/npruntime/napi_np_server_ctx.h>
+#include <net/npruntime/session_status.h>
+#include <net/npwire/game_type.h>
+#include <net/npwire/net_ports.h>
+#include <runtime/environment/env_network_sample.h>
+#include <runtime/mission/mission_kernel.h>
+#include <runtime/terrain_query/terrain_field_build.h>
+#include <runtime/world/tick_accumulator.h>
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
 #include "net_sockets.h"         // net::startup / udp_bind / ScopedSocket
-#include "environment_startup.h" // mission-selected ENV/BMS -> World::network_env
-#include "wac_startup.h"         // resource-root WAC layers + retail startup order
-
-#include <runtime/mission/event_runtime.h> // BmsEventSystem
-#include <formats/mission/mission.h> // MissionDocument
-#include <runtime/mission/promote.h> // promote_mission
-#include <formats/rtxt/rtxt.h>        // the gametext "Server" strings (STRSRV_MEDREQ)
-
-#include <runtime/wac/wac_system.h>
-
-#include <runtime/world/ai.h>
-#include <runtime/world/world.h>
 
 #include <atomic>
 #include <cerrno>
@@ -42,36 +50,15 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
-#include <base/io/log.h>
+#include <utility>
+#include <vector>
 
 namespace {
 
 std::atomic<bool> g_shutdown{false};
 void on_signal(int) { g_shutdown.store(true); }
-
-// Every g_GameType code word Game_StartMission can produce; anything else is
-// a typo, not a mode. [orig: Game_StartMission @0x524360 type switch]
-bool is_retail_game_type_word(uint32_t value) {
-	switch (value) {
-	case opennova::game_type::kDeathmatch:
-	case opennova::game_type::kKingOfTheHill:
-	case opennova::game_type::kFlagMe:
-	case opennova::game_type::kTeamDeathmatch:
-	case opennova::game_type::kTeamKingOfTheHill:
-	case opennova::game_type::kAttackDefend:
-	case opennova::game_type::kCaptureTheFlag:
-	case opennova::game_type::kFlagBall:
-	case opennova::game_type::kAdvanceAndSecure:
-	case opennova::game_type::kCoop:
-	case opennova::game_type::kObjectiveCoop:
-	case opennova::game_type::kConquerAndControl:
-	case opennova::game_type::kSearchAndDestroy:
-		return true;
-	default:
-		return false;
-	}
-}
 
 // --- Command line. Everything the harness varies is a flag; nothing is read
 //     from the environment (docs/dev-env-vars.md). ---
@@ -83,8 +70,9 @@ const char kUsage[] =
 		"                 [--default-spawn-requires-no-team-zone] [--log-debug]\n"
 		"  --mission          the loose .bms to host; its directory is the default resource root\n"
 		"  --env              the .env to publish when it is not beside the mission\n"
-		"  --resource-root    where game.wac / server.wac / <mission>.wac, score.ini and\n"
-		"                     gametext.bin live when they were exported elsewhere\n"
+		"  --resource-root    the directory the mission's resources mount from (terrain,\n"
+		"                     items/weapon/ammo tables, WAC layers, score.ini, gametext.bin)\n"
+		"                     when they were exported away from the mission\n"
 		"  --port             UDP bind port (default: the retail LAN range head)\n"
 		"  --game-type        an exact g_GameType code, decimal or 0x hex (default: the\n"
 		"                     mission's authored mode)\n"
@@ -214,22 +202,90 @@ int parse_options(int argc, char **argv, Options &o) {
 	return 0;
 }
 
-// The dedicated host's one adapter to inmatch::Session. The portable session
-// decides when a fixed tick is due; this adapter performs that real tick using
-// the shared network owner loop.
-class HeadlessTickTarget final : public opennova::inmatch::TickTarget {
+// The engine/ diagnostic channel (io/log.h): libraries are silent until the host
+// installs a sink. Reproduce the historical stream split — lifecycle to stdout,
+// warnings and errors to stderr; per-tick kDebug tracing opts in via --log-debug.
+bool g_log_debug_enabled = false;
+void app_log_sink(opennova::io::LogLevel level, const char *msg) {
+	if (level == opennova::io::LogLevel::kDebug && !g_log_debug_enabled) return;
+	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n", msg);
+}
+
+// A fixed-width BMS header slot (environment[16]) as a string.
+std::string fixed_string(const char *data, size_t size) {
+	size_t n = 0;
+	while (n < size && data[n] != '\0') ++n;
+	return std::string(data, n);
+}
+
+// The mission's .cpt/.trn(+charmap) height field, built into the kernel's own
+// terrain field store BEFORE boot — the embedder-side format-typed leg on the
+// far side of the ADR 0020 seam, exactly the retail-mission rig's load_terrain.
+// The raw .til bytes feed the S2C 0x45 terrain-tile load a wire joiner streams
+// (net-re §5.37); absent, the tile stream is skipped.
+bool load_terrain(opennova::mission::MissionKernel &kernel,
+		const opennova::ResourceIndex &index,
+		std::vector<uint8_t> &til_bytes, std::string &error) {
+	using namespace opennova;
+	const std::string tname = kernel.mission.get_terrain();
+	if (tname.empty()) {
+		error = "the mission names no terrain";
+		return false;
+	}
+	std::vector<uint8_t> cpt_bytes, trn_bytes;
+	if (!index.read_file(tname + ".cpt", cpt_bytes) ||
+			!index.read_file(tname + ".trn", trn_bytes)) {
+		error = tname + ".cpt/.trn are not under the resource root";
+		return false;
+	}
+	std::string terr_err;
+	CptFile cpt;
+	if (!load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, terr_err)) {
+		error = tname + ".cpt: " + terr_err;
+		return false;
+	}
+	TrnConfig trn;
+	std::string raw(reinterpret_cast<const char *>(trn_bytes.data()), trn_bytes.size());
+	std::istringstream ts(raw);
+	if (!load_trn(ts, trn, terr_err) || cpt.depth_buffer.empty()) {
+		error = tname + ".trn: " + terr_err;
+		return false;
+	}
+	// The charmap surface raster for the footstep surface pick; absent or
+	// undecodable = no surface map, the sampler's "no charmap -> surface 1" leg.
+	IndexedImage8 charmap;
+	std::vector<uint8_t> charmap_bytes;
+	if (!trn.charmap.empty() && index.read_file(trn.charmap, charmap_bytes)) {
+		std::string charmap_err;
+		if (!decode_pcx_indexed(charmap_bytes.data(), charmap_bytes.size(), charmap,
+					charmap_err))
+			charmap = IndexedImage8{};
+	}
+	terrain::terrain_field_store_build(kernel.terrain_store, cpt, trn,
+			charmap.empty() ? nullptr : charmap.indices.data(),
+			charmap.width, charmap.height);
+	(void)index.read_file(tname + ".til", til_bytes);
+	return kernel.terrain_store.valid();
+}
+
+// The dedicated host's one adapter to inmatch::Session: the portable session
+// decides when a fixed tick is due; the tick itself is the ONE listen-host
+// frame over the kernel. viewport_height 0 is the headless seam — npruntime
+// then suppresses S2C 0x68 instead of inventing a screen size (D-NET-206).
+class DedicatedTickTarget final : public opennova::inmatch::TickTarget {
 public:
-	HeadlessTickTarget(opennova::world::World &world,
-			opennova::np::HostOwner &owner,
+	DedicatedTickTarget(opennova::mission::MissionKernel &kernel,
+			opennova::inmatch::ListenHostState &host,
 			opennova::netsim::IDatagramSocket &socket)
-			: world_(world), owner_(owner), socket_(socket) {}
+			: kernel_(kernel), host_(host), socket_(socket) {}
 
 	opennova::inmatch::TickOutcome advance_mission_tick(
 			const opennova::inmatch::TickInput &) override {
-		world_.network_env.advance_tick();
-		opennova::np::host_session_pump(owner_, socket_);
+		kernel_.world.network_env.advance_tick();
+		opennova::inmatch::listen_host::frame(kernel_, host_, socket_,
+				/*viewport_height=*/0, /*perf=*/nullptr);
 		return {opennova::inmatch::TickStatus::Ran,
-				static_cast<int32_t>(world_.logic_tick), {}};
+				static_cast<int32_t>(kernel_.world.logic_tick), {}};
 	}
 
 	bool reset_mission_to_baseline(opennova::inmatch::SessionError &error) override {
@@ -241,23 +297,11 @@ public:
 	void close_mission() override {}
 
 private:
-	opennova::world::World &world_;
-	opennova::np::HostOwner &owner_;
+	opennova::mission::MissionKernel &kernel_;
+	opennova::inmatch::ListenHostState &host_;
 	opennova::netsim::IDatagramSocket &socket_;
 };
 
-} // namespace
-
-
-namespace {
-// The engine/ diagnostic channel (io/log.h): libraries are silent until the host
-// installs a sink. Reproduce the historical stream split — lifecycle to stdout,
-// warnings and errors to stderr; per-tick kDebug tracing opts in via --log-debug.
-bool g_log_debug_enabled = false;
-void app_log_sink(opennova::io::LogLevel level, const char *msg) {
-	if (level == opennova::io::LogLevel::kDebug && !g_log_debug_enabled) return;
-	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n", msg);
-}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -268,91 +312,114 @@ int main(int argc, char **argv) {
 	opennova::io::set_log_sink(&app_log_sink);
 	using namespace opennova;
 
-	// Mission source: --mission (no committed fixture — ADR 0003 forbids inventing one).
-	const char *mission_path = opt.mission;
-	const uint16_t port = opt.port;
+	// --- The loose mission (no committed fixture — ADR 0003 forbids inventing
+	//     one). It may live outside the resource root, so it is read from its
+	//     own path, not through the mount. ---
+	const std::filesystem::path mission_path = opt.mission;
+	bms::File mission_doc;
+	{
+		std::ifstream mission_file(mission_path, std::ios::binary);
+		std::ostringstream mission_bytes;
+		std::string parse_error;
+		if (!mission_file || !(mission_bytes << mission_file.rdbuf())) {
+			std::fprintf(stderr, "nw-server: failed to load mission '%s'\n", opt.mission);
+			return 1;
+		}
+		const std::string bytes = mission_bytes.str();
+		if (!bms::parse(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size(),
+					mission_doc, parse_error)) {
+			std::fprintf(stderr, "nw-server: mission '%s' did not parse: %s\n",
+					opt.mission, parse_error.c_str());
+			return 1;
+		}
+	}
 
-	// --- Load the mission + build the authoritative World (pools + nav + AI brains). ---
-	mission::MissionDocument doc;
-	if (!doc.load_bms_file(mission_path)) {
-		std::fprintf(stderr, "nw-server: failed to load mission '%s'\n", mission_path);
+	// --- Mount the resource root (the mission's own directory unless
+	//     --resource-root names the exported layers' home) the way the
+	//     kernel's own open() does: the .pff set with loose overrides when
+	//     archives exist, the loose tree otherwise (loose files win). ---
+	const std::filesystem::path resource_root =
+			opt.resource_root != nullptr && *opt.resource_root != '\0'
+					? std::filesystem::path(opt.resource_root)
+					: (mission_path.has_parent_path() ? mission_path.parent_path()
+													  : std::filesystem::path("."));
+	ResourceIndex index;
+	if (!index.scan(resource_root.string()) &&
+			!index.scan(resource_root.string(), std::string(), VfsMountMode::LooseOnly)) {
+		std::fprintf(stderr, "nw-server: could not mount '%s': %s\n",
+				resource_root.string().c_str(), index.last_error().c_str());
 		return 1;
 	}
-	world::World world;
-	const mission::MissionInfo mission_info = doc.info();
-	std::filesystem::path explicit_env_path;
-	if (opt.env != nullptr && *opt.env != '\0') explicit_env_path = opt.env;
-	if (mission_info.environment.empty() && explicit_env_path.empty()) {
+
+	// --- Adopt the parsed mission over the mounted file source: the kernel is
+	//     the one mission boot + state + tick (ADR 0042 d3). ---
+	mission::MissionKernel kernel;
+	kernel.set_asset_index(&index);
+	mission::BootFileSource files;
+	files.has_file = [&index](const std::string &name) { return index.has_file(name); };
+	files.read_file = [&index](const std::string &name, std::vector<uint8_t> &out) {
+		return index.read_file(name, out);
+	};
+	kernel.open_document(std::move(mission_doc), mission_path.stem().string(), files);
+
+	// --- The authoritative T0 environment sample, published before the boot
+	//     (retail order: ENV parse + BMS overrides before Game_StartMission
+	//     snapshots the network-visible targets). ---
+	const std::string environment_name = fixed_string(
+			kernel.mission.header.environment, sizeof(kernel.mission.header.environment));
+	if (environment_name.empty() && (opt.env == nullptr || *opt.env == '\0')) {
 		std::fprintf(stderr,
 		             "nw-server: mission '%s' has no environment reference; "
 		             "pass --env <path-to .env>\n",
-		             mission_path);
+		             opt.mission);
 		return 1;
 	}
 	const std::filesystem::path resolved_env =
-			nw_server::resolve_environment_path(
-					mission_path, mission_info.environment, explicit_env_path);
-	std::string env_error;
-	if (!nw_server::publish_initial_environment_file(
-			resolved_env, doc.bms_file().header, world.network_env, env_error)) {
-		std::fprintf(stderr,
-		             "nw-server: %s; pass --env <path-to %s.env> when the "
-		             "resource is not beside the mission\n",
-		             env_error.c_str(), mission_info.environment.c_str());
-		return 1;
-	}
-	world::AiSystem ai;
-	world.ai = &ai; // Server_BuildPlayerInfoAndAdd requires an AiSystem to spawn a player
-	const mission::PromoteResult pr = mission::promote_mission(doc.bms_file(), world, ai);
-	std::fprintf(stderr, "nw-server: promoted '%s' (%d entities, %d brains, %d nav nodes)\n",
-	             mission_path, pr.spawned, pr.brains, pr.nav_nodes);
-
-	std::filesystem::path explicit_resource_root;
-	if (opt.resource_root != nullptr && *opt.resource_root != '\0')
-		explicit_resource_root = opt.resource_root;
-	const std::filesystem::path resource_root =
-			nw_server::resolve_resource_root(mission_path, explicit_resource_root);
-	wac::WacSystem wac;
-	mission::BmsEventSystem bms;
-	bool wac_loaded = false;
-	std::string startup_error;
-	if (!nw_server::initialize_mission_startup(
-			resource_root, std::filesystem::path(mission_path).stem().string(),
-			doc.bms_file(), world, wac, bms, ai, wac_loaded, startup_error)) {
-		std::fprintf(stderr, "nw-server: %s\n", startup_error.c_str());
-		return 1;
-	}
-	std::fprintf(stderr, "nw-server: WAC %s from '%s'\n",
-			wac_loaded ? "loaded" : "absent (BMS-only)",
-			resource_root.string().c_str());
-
-	// --- Open the UDP socket. ---
-	if (net::startup() != 0) {
-		std::fprintf(stderr, "nw-server: winsock init failed\n");
-		return 1;
-	}
-	uint16_t bound = 0;
-	net::ScopedSocket sock(net::udp_bind(port, &bound));
-	if (!sock.is_valid()) {
-		std::fprintf(stderr, "nw-server: bind on UDP %u failed\n", port);
-		net::shutdown();
-		return 1;
+			opt.env != nullptr && *opt.env != '\0'
+					? std::filesystem::path(opt.env)
+					: mission_path.parent_path() / (environment_name + ".env");
+	{
+		std::ifstream env_input(resolved_env, std::ios::binary);
+		std::string env_error;
+		if (!env_input) {
+			env_error = "environment resource '" + resolved_env.string() +
+					"' could not be opened";
+		} else if (!env::publish_initial_network_environment(
+						   env_input, kernel.mission.header,
+						   kernel.world.network_env, env_error)) {
+			env_error = "failed to parse environment '" + resolved_env.string() +
+					"': " + env_error;
+		}
+		if (!kernel.world.network_env.valid) {
+			std::fprintf(stderr,
+			             "nw-server: %s; pass --env <path-to %s.env> when the "
+			             "resource is not beside the mission\n",
+			             env_error.c_str(), environment_name.c_str());
+			return 1;
+		}
 	}
 
-	// --- Stand up the npruntime runtime as a dedicated HostOnly server. There is no synthetic
-	//     loopback player; every roster row belongs to an admitted remote peer. ---
-	np::HostOwner owner;
-	owner.ctx.world = &world;
-	owner.ctx.mission = &doc.bms_file();
+	// --- The mission's terrain field, built into the kernel's store before
+	//     the boot (the ground solve, collision heightfield, surface picks). ---
+	std::vector<uint8_t> terrain_til_bytes;
+	{
+		std::string terrain_error;
+		if (!load_terrain(kernel, index, terrain_til_bytes, terrain_error))
+			std::fprintf(stderr,
+					"nw-server: terrain not loaded (%s) - the ground solve will not run\n",
+					terrain_error.c_str());
+	}
 
+	// --- The consolidated HostConfig: identity, the mission-derived (or
+	//     overridden) g_GameType, the fresh-host rule defaults, the flag
+	//     overrides, and the optional loose score.ini overlay. ---
 	np::HostConfig host_cfg;
 	host_cfg.config.server_name = "OpenNova nw-server";
 	host_cfg.config.max_players = 16;
-	host_cfg.config.mission_name = mission_info.mission_name;
-	host_cfg.config.mission_file =
-			std::filesystem::path(mission_path).filename().string();
+	host_cfg.config.mission_name = kernel.mission.get_mission_name();
+	host_cfg.config.mission_file = mission_path.filename().string();
 	host_cfg.config.game_type = game_type::for_mission_mode(
-			bms::selected_game_mode(doc.bms_file().header.attrib_flags));
+			bms::selected_game_mode(kernel.mission.header.attrib_flags));
 	// The harness has no host-options UI, so install the same fresh-host rule
 	// defaults the retail config path would have applied before mission start.
 	host_cfg.config.respawn_time = game_rules::kDefaultRespawnTime;
@@ -385,7 +452,7 @@ int main(int argc, char **argv) {
 	// [orig: AI_GetTaskTypeFromFlags @0x40DAE0;
 	// Game_StartMission @0x524360]
 	if (opt.game_type) host_cfg.config.game_type = *opt.game_type;
-	if (!is_retail_game_type_word(host_cfg.config.game_type)) {
+	if (!game_type::is_retail_code_word(host_cfg.config.game_type)) {
 		std::fprintf(stderr,
 				"nw-server: --game-type 0x%X is not a retail g_GameType code\n",
 				host_cfg.config.game_type);
@@ -413,62 +480,100 @@ int main(int argc, char **argv) {
 	// optional row unset so Match and S2C 0x58 select that same default table.
 	// [orig: GameType_CreateDefaultSettings @0x52DD00;
 	// ScoreConfig_LoadFile @0x52D8A0]
-	// The "Server" chat strings: retail reads GameText("Server", key) from the
-	// gametext table loaded at init; this host reads a loose gametext.bin beside
-	// the mission when one is present and otherwise leaves the strings empty,
-	// which is retail's null lookup (the medic-call handler then no-ops).
-	// [orig: Game_InitSubsystems @0x4A6CD0; Server_BroadcastMedicRequest
-	// @0x5153C9]
-	{
-		const std::filesystem::path gametext_path = resource_root / "gametext.bin";
-		std::error_code gametext_exists_error;
-		if (std::filesystem::exists(gametext_path, gametext_exists_error)) {
-			opennova::rtxt::File gametext;
-			std::string gametext_error;
-			if (opennova::rtxt::parse_file(gametext_path.string(), gametext,
-					gametext_error)) {
-				np::ServerTextTable server_text;
-				server_text.medic_request_format =
-						gametext.get_in_section("Server", "STRSRV_MEDREQ");
-				np::set_server_text(owner.ctx, std::move(server_text));
-			} else {
-				std::fprintf(stderr, "nw-server: gametext '%s' unreadable: %s\n",
-						gametext_path.string().c_str(), gametext_error.c_str());
-			}
-		}
-	}
-	const std::filesystem::path score_path = resource_root / "score.ini";
-	std::error_code score_exists_error;
-	if (std::filesystem::exists(score_path, score_exists_error)) {
-		std::ifstream score_file(score_path, std::ios::binary);
-		std::ostringstream score_bytes;
-		if (!score_file || !(score_bytes << score_file.rdbuf()) ||
-				!np::load_session_score_config(
-						host_cfg.config, score_bytes.str())) {
-			std::fprintf(stderr,
-					"nw-server: invalid score config '%s'\n",
-					score_path.string().c_str());
-			net::shutdown();
+	if (index.has_file("score.ini")) {
+		std::vector<uint8_t> score_bytes;
+		if (!index.read_file("score.ini", score_bytes) ||
+				!np::load_session_score_config(host_cfg.config,
+						std::string_view(reinterpret_cast<const char *>(score_bytes.data()),
+								score_bytes.size()))) {
+			std::fprintf(stderr, "nw-server: invalid score config 'score.ini' under '%s'\n",
+					resource_root.string().c_str());
 			return 1;
 		}
-	} else if (score_exists_error) {
-		std::fprintf(stderr,
-				"nw-server: score config '%s' could not be inspected: %s\n",
-				score_path.string().c_str(),
-				score_exists_error.message().c_str());
-		net::shutdown();
-		return 1;
 	}
 	host_cfg.socket_mode = np::SocketMode::Lan; // a real LAN socket (Socketless=1 would be in-process SP)
 	host_cfg.serve_and_play = false;            // headless dedicated host: no local-player registration
-	if (!world.network_env.valid) {
-		std::fprintf(stderr,
-		             "nw-server: refusing to launch without an authoritative "
-		             "environment sample\n");
+
+	// The "Server" chat strings: retail reads GameText("Server", key) from the
+	// gametext table loaded at init; this host reads a mounted gametext.bin
+	// when one is present and otherwise leaves the strings empty, which is
+	// retail's null lookup (the medic-call handler then no-ops).
+	// [orig: Game_InitSubsystems @0x4A6CD0; Server_BroadcastMedicRequest
+	// @0x5153C9]
+	std::optional<std::string> medic_request_format;
+	{
+		std::vector<uint8_t> gametext_bytes;
+		if (index.has_file("gametext.bin") &&
+				index.read_file("gametext.bin", gametext_bytes)) {
+			rtxt::File gametext;
+			std::string gametext_error;
+			if (rtxt::parse(gametext_bytes.data(), gametext_bytes.size(), gametext,
+						gametext_error)) {
+				medic_request_format =
+						gametext.get_in_section("Server", "STRSRV_MEDREQ");
+			} else {
+				std::fprintf(stderr, "nw-server: mounted gametext.bin unreadable: %s\n",
+						gametext_error.c_str());
+			}
+		}
+	}
+
+	// --- The kernel boot as DedicatedHost: terrain grounding, tables,
+	//     collision, infantry .adm, the strict WAC walk (EVERY diagnostic is
+	//     fatal here — running a partial script is a known wire-parity
+	//     failure), and the HostOnly session bring-up at the witnessed spot
+	//     inside the load. A refused boot aborts before the UDP socket opens. ---
+	inmatch::ListenHostState host;
+	mission::KernelBootOptions boot_options;
+	boot_options.playable = false; // no synthetic loopback player; every roster row is a remote peer
+	boot_options.wac_strict_diagnostics = true;
+	boot_options.game_type = host_cfg.config.game_type;
+	boot_options.bringup_net_session = [&] {
+		inmatch::listen_host::bringup_dedicated(kernel, host, host_cfg);
+	};
+	std::string boot_error;
+	if (!kernel.boot(boot_options, boot_error)) {
+		std::fprintf(stderr, "nw-server: %s\n", boot_error.c_str());
+		return 1;
+	}
+	std::fprintf(stderr, "nw-server: promoted '%s' (%d entities, %d brains, %d nav nodes)\n",
+			opt.mission, kernel.promo.spawned, kernel.promo.brains, kernel.promo.nav_nodes);
+	std::fprintf(stderr,
+			"nw-server: kernel boot: terrain %s, weapon table %s, ammo table %s, "
+			"%d collision instances, WAC %s from '%s'\n",
+			kernel.has_terrain() ? "loaded" : "MISSING",
+			kernel.weapon_defs_ok ? "loaded" : "MISSING",
+			kernel.ammo_ok ? "loaded" : "MISSING",
+			kernel.collision_attached,
+			kernel.wac_loaded ? "loaded" : "absent (BMS-only)",
+			resource_root.string().c_str());
+
+	// Retail order: the eager WAC execution (the boot's tail) precedes
+	// environment mission-start initialization and the 255 complete weather
+	// ticks that settle before any client can observe phase 2.
+	kernel.world.network_env.initialize_mission_start();
+	env::prewarm_network_environment(kernel.world.network_env);
+	// The per-join ctx feeds the bring-up left to the embedder: the S2C 0x45
+	// terrain-tile source and the "Server" gametext table.
+	host.host_owner.ctx.terrain_til_data = std::move(terrain_til_bytes);
+	if (medic_request_format) {
+		np::ServerTextTable server_text;
+		server_text.medic_request_format = std::move(*medic_request_format);
+		np::set_server_text(host.host_owner.ctx, std::move(server_text));
+	}
+
+	// --- Open the UDP socket. ---
+	if (net::startup() != 0) {
+		std::fprintf(stderr, "nw-server: winsock init failed\n");
+		return 1;
+	}
+	uint16_t bound = 0;
+	net::ScopedSocket sock(net::udp_bind(opt.port, &bound));
+	if (!sock.is_valid()) {
+		std::fprintf(stderr, "nw-server: bind on UDP %u failed\n", opt.port);
 		net::shutdown();
 		return 1;
 	}
-	np::start_host_session(owner, host_cfg);
 
 	std::signal(SIGINT, on_signal);
 	std::signal(SIGTERM, on_signal);
@@ -481,7 +586,7 @@ int main(int argc, char **argv) {
 	constexpr int64_t kPeriodNs =
 			static_cast<int64_t>(1000000000.0 * opennova::world::TickAccumulator::kTickDt);
 	net::NetDatagramSocket dgram(sock.get()); // recv_timeout_ms = 0 (non-blocking; the loop self-paces)
-	HeadlessTickTarget target(world, owner, dgram);
+	DedicatedTickTarget target(kernel, host, dgram);
 	inmatch::Session session(target, inmatch::Role::DedicatedHost);
 	if (!session.begin_load().applied() || !session.complete_load().applied()) {
 		std::fprintf(stderr, "nw-server: failed to start mission session\n");

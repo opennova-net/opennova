@@ -811,6 +811,15 @@ target_link_libraries(environment_state_test PRIVATE opennova_runtime)
 target_include_directories(environment_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME environment_state COMMAND environment_state_test)
 
+# The mission-start network environment sample (runtime/environment/
+# env_network_sample): the mission-selected ENV/BMS derivation and retail's
+# 255-tick weather prewarm must reach clients through the same real phase-2
+# projection every host embeds. opennova_net supplies that wire projection.
+add_executable(env_network_sample_test environment/env_network_sample_test.cpp)
+target_link_libraries(env_network_sample_test PRIVATE opennova_runtime opennova_net)
+target_include_directories(env_network_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME env_network_sample COMMAND env_network_sample_test)
+
 # The HUD view-helper math cluster (engine/runtime/hud, S15): design-space
 # scaling, ALPHAFADE decay + quirk, stance Q16 scale/centering, health bands,
 # message tick policy, half-bright, ammo fold + nudge, round icons, crosshair
@@ -1689,6 +1698,16 @@ add_test(NAME wac_behavior COMMAND wac_behavior_test)
 # override); it reports Skipped without either.
 opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)
 
+# The layered game.wac/server.wac/<mission>.wac load every mission boot walks
+# (runtime/wac/wac_layered_load): retail layer order as one program, the
+# absent BMS-only case, and the lenient-vs-strict diagnostic policies (strict
+# = the dedicated golden host's fatal mode).
+add_executable(wac_layered_load_test wac/wac_layered_load_test.cpp)
+target_link_libraries(wac_layered_load_test PRIVATE opennova_runtime)
+target_include_directories(wac_layered_load_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(wac_layered_load_test PRIVATE cxx_std_17)
+add_test(NAME wac_layered_load COMMAND wac_layered_load_test)
+
 # WAC weather actions are authoritative network sources: exercise the compiled
 # script through the real per-connection 0x0A phase-2 projection.
 add_executable(wac_environment_wire_test wac/wac_environment_wire_test.cpp)
@@ -2563,18 +2582,6 @@ add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)
 target_link_libraries(npruntime_client_runtime_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
-# The headless host must publish its mission-selected ENV/BMS values, eagerly
-# run the layered WAC program, and finish retail's environment prewarm before
-# opening a session, through the same real phase-2 projection as the Godot host.
-add_executable(npruntime_nw_server_environment_test
-    npruntime/nw_server_environment_test.cpp)
-target_link_libraries(npruntime_nw_server_environment_test
-    PRIVATE opennova_nw_server_startup opennova_net)
-target_include_directories(npruntime_nw_server_environment_test
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME npruntime_nw_server_environment
-    COMMAND npruntime_nw_server_environment_test)
-
 # D-NET-194: a joiner retains the host's exact S2C 0x0B BMS header and
 # reassembles the paged S2C 0x45 terrain-tile stream for wire-driven loading.
 add_executable(npruntime_join_wire_assets_test npruntime/join_wire_assets_test.cpp)
@@ -2620,7 +2627,7 @@ opennova_add_gated_test(npruntime_golden_client COMMAND npruntime_golden_client_
 # owner-loop (npruntime/host_session.h, the SAME loop apps/nw_server runs), each on its own bound UDP
 # over the wire (single-thread poll-pump). Asserts mirror npruntime_client_runtime but over real
 # sockets, and adds the §5.2a S2C tag-order check (always-on, our host) + the env-gated cross-check vs
-# the retail LAN host/join capture (<OPENNOVA_CAPTURES>/golden, SKIP-LEG when absent). opennova_mission for the minimal
+# the retail LAN host/join capture (<OPENNOVA_CAPTURES>/golden, SKIP-LEG when absent). opennova_runtime for the minimal
 # World/bms; opennova_app_common for net_sockets + net_datagram_socket (ws2_32 on WIN32).
 add_executable(npruntime_two_endpoint_socket_test npruntime/two_endpoint_socket_test.cpp)
 target_include_directories(npruntime_two_endpoint_socket_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

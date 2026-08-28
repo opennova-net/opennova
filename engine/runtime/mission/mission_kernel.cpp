@@ -408,13 +408,18 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	steps.install_infantry_anim = [&] {
 		(void)install_infantry_anim(options.infantry_adm);
 	};
+	std::string wac_blocked_error; // strict mode's fatal diagnostic, if any
 	steps.install_wac = [&] {
 		wac_loaded = false;
 		std::string wac_error;
 		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac, files_,
 				options.wac_basename.empty() ? mission_basename : options.wac_basename,
-				&world.registry, /*strict_diagnostics=*/false, wac_error);
+				&world.registry, options.wac_strict_diagnostics, wac_error);
 		if (status == wac::WacLayeredLoadStatus::kBlocked) {
+			if (options.wac_strict_diagnostics) {
+				wac_blocked_error = std::move(wac_error);
+				return;
+			}
 			io::logf(io::LogLevel::kWarn, "mission kernel: %s - scripts disabled",
 					wac_error.c_str());
 			return;
@@ -459,6 +464,10 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	const BootAbort abort = run_mission_boot(params, steps);
 	if (abort != BootAbort::kNone) {
 		error = "mission boot aborted (load failed)";
+		return false;
+	}
+	if (!wac_blocked_error.empty()) {
+		error = wac_blocked_error;
 		return false;
 	}
 	// WacScript_InitAndLoad executes the freshly loaded bytecode once before

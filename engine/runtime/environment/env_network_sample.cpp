@@ -1,14 +1,13 @@
-#include "environment_startup.h"
+#include <runtime/environment/env_network_sample.h>
 
 #include <formats/env/env.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <fstream>
 #include <limits>
 
-namespace opennova::nw_server {
+namespace opennova::env {
 namespace {
 
 constexpr uint32_t kTodDayFixed24 = 24u << 24;
@@ -36,29 +35,23 @@ uint32_t nonnegative_scaled(float value, double scale) noexcept {
 
 } // namespace
 
-std::filesystem::path resolve_environment_path(
-		const std::filesystem::path &mission_path,
-		const std::string &environment_name,
-		const std::filesystem::path &explicit_path) {
-	if (!explicit_path.empty()) return explicit_path;
-	return mission_path.parent_path() / (environment_name + ".env");
-}
-
-bool publish_initial_environment(
+bool publish_initial_network_environment(
 		std::istream &input,
 		const bms::Header &header,
 		world::EnvNetworkState &state,
 		std::string &error) {
-	env::Config config;
-	if (!env::load_env(input, config, error)) return false;
+	Config config;
+	if (!load_env(input, config, error)) return false;
 
 	// Game_LoadTerrainDuringConnect mutates the parsed ENV with BMS overrides
 	// before Game_StartMission snapshots its network-visible targets.
-	env::BmsEnvOverrides overrides;
+	// [orig: Game_LoadTerrainDuringConnect @0x520710; Game_StartMission
+	// snapshot sites @0x525383/0x525393]
+	BmsEnvOverrides overrides;
 	overrides.has_fog_level = bms::has_flag(
 			header.attrib_flags, bms::AttribFlags::FogDistanceOverrideEnable);
 	overrides.fog_level = static_cast<float>(header.fog_override);
-	env::apply_bms_overrides(config, overrides);
+	apply_bms_overrides(config, overrides);
 
 	world::EnvNetworkSample sample;
 	sample.fog_target_q16 = fixed_q16(config.fog_level);
@@ -80,28 +73,12 @@ bool publish_initial_environment(
 	return true;
 }
 
-bool publish_initial_environment_file(
-		const std::filesystem::path &path,
-		const bms::Header &header,
-		world::EnvNetworkState &state,
-		std::string &error) {
-	std::ifstream input(path, std::ios::binary);
-	if (!input) {
-		error = "environment resource '" + path.string() + "' could not be opened";
-		return false;
-	}
-	std::string parse_error;
-	if (!publish_initial_environment(input, header, state, parse_error)) {
-		error = "failed to parse environment '" + path.string() + "': " + parse_error;
-		return false;
-	}
-	error.clear();
-	return true;
-}
-
-void prewarm_initial_environment(world::EnvNetworkState &state) noexcept {
+// Retail settles mission-start environment state through 255 complete weather
+// ticks before the server can publish phase 2
+// [orig: sub_57F1E0 @0x57f878..0x57f880].
+void prewarm_network_environment(world::EnvNetworkState &state) noexcept {
 	for (uint32_t tick = 0; tick < kMissionStartPrewarmTicks; ++tick)
 		state.advance_tick();
 }
 
-} // namespace opennova::nw_server
+} // namespace opennova::env

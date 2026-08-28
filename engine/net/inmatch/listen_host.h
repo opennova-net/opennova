@@ -1,11 +1,11 @@
 #pragma once
 
-// The ONE SP listen bring-up / local request drain / per-tick session frame
-// over a mission::MissionKernel (ADR 0042 d3) — the net half the group order
-// keeps out of runtime/mission. Promoted from the retail-mission rig; the
-// ctest rig (tests/common/retail_mission_files) and the shipping Godot
-// Simulation (the shell TickTarget that owns a kernel) both drive it.
-// (apps/nw_server still folds onto it in a later ADR 0042 campaign slice.)
+// The ONE host bring-up / local request drain / per-tick session frame over a
+// mission::MissionKernel (ADR 0042 d3) — the net half the group order keeps
+// out of runtime/mission. Promoted from the retail-mission rig; every host
+// embedder drives it: the ctest rig (tests/common/retail_mission_files), the
+// shipping Godot Simulation (the shell TickTarget that owns a kernel), and
+// the dedicated host (apps/nw_server).
 
 #include <net/netsim/idatagram_socket.h>
 #include <net/netsim/loopback_channel.h>
@@ -39,6 +39,17 @@ namespace listen_host {
 // loopback into its ClientState. Invoked by the kernel boot's
 // bringup_net_session hook. [orig: SinglePlayer_StartMission @0x561af0]
 void bringup(mission::MissionKernel &kernel, ListenHostState &state);
+
+// The dedicated-host bring-up (HostOnly): the npruntime ctx over the kernel's
+// world/mission and start_host_session with the embedder's consolidated
+// HostConfig — no serve-and-play loopback, no local player, no local replica
+// fold (serve_and_play is forced off; the caller authors everything else,
+// socket mode included). The witnessed original makes serve-only a true
+// host-only session [orig: HG_SERVEONLY -> CGameSession_SetConnectionMode(1),
+// is_host=1/is_client=0; HostDialog read @0x555940, dispatch @0x556d00, mode
+// switch @0x4c49f0]. Invoked by the kernel boot's bringup_net_session hook.
+void bringup_dedicated(mission::MissionKernel &kernel, ListenHostState &state,
+		const np::HostConfig &host_cfg);
 
 // The local player's own C2S gameplay messages (the witnessed local reload
 // producer) reach the SAME per-message server dispatcher a remote connection

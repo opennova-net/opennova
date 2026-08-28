@@ -59,6 +59,24 @@ void bringup(mission::MissionKernel &kernel, ListenHostState &state) {
 	kernel.reset_local_player_input_to_player_facing();
 }
 
+void bringup_dedicated(mission::MissionKernel &kernel, ListenHostState &state,
+		const np::HostConfig &host_cfg) {
+	state.client_runtime.reset();
+	state.host_loop = netsim::LoopbackChannel{};
+	state.host_owner = np::HostOwner{};
+	state.host_owner.serve_and_play = false;
+	state.host_owner.ctx.world = &kernel.world;
+	state.host_owner.ctx.mission = &kernel.mission;
+	state.host_owner.ctx.mission_text_loaded = false;
+	kernel.world.fat_bullets = host_cfg.config.fat_bullets;
+	kernel.world.one_shot_kill = host_cfg.config.one_shot_kill;
+	// HostOnly registers no local-player connection: no type-2 loopback is
+	// handed to create_session and no local player spawns.
+	np::HostConfig cfg = host_cfg;
+	cfg.serve_and_play = false;
+	np::start_host_session(state.host_owner, cfg);
+}
+
 void drain_host_client_gameplay_requests(mission::MissionKernel &kernel,
 		ListenHostState &state) {
 	np::NapiNPConnection *local = nullptr;
