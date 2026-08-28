@@ -17,8 +17,9 @@ Manual wiring ported from `git show 1bb779e1:CMakeLists.txt`:
 
 - Root CMake: third_party sqlite/bcrypt, the `BUILD_NOVAWORLD_HTTP` option (FetchContent
   asio 1-30-2 + Crow 1.2.0), lib and app subdirectories. Net libs stay OUT of
-  `OPENNOVA_CORE_TARGETS`/`opennova_shared`: no Python FFI consumer, and it keeps
-  sqlite and socket-adjacent code out of the Blender FFI library.
+  `OPENNOVA_CORE_TARGETS`/`opennova_shared` (both since retired by ADR 0038): no
+  Python FFI consumer, and it keeps sqlite and socket-adjacent code out of the
+  Blender FFI library.
 - `tests/CMakeLists.txt`: the net registration block, names preserved so the scoped
   ctest regex (`gate|lobby|novaworld|napi|crypto|gsb|protocol_message|session|bms`)
   keeps working.
