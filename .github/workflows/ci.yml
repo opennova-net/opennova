@@ -628,13 +628,11 @@ jobs:
           merge-multiple: true
           path: godot/bin
 
-      # The imgui-godot addon must be present for BOTH export modes: ONED's ImGui
-      # surface ships it always, and the game's export plugin keeps it for a debug
-      # export / strips it from a release one (export_presets.cfg imgui/*). GUT stays
-      # out of the export tree: only the addon script runs here, never bootstrap_godot.sh.
-      - name: Install the imgui-godot addon
-        shell: bash
-        run: bash scripts/bootstrap_imgui_godot.sh
+      # The imgui-godot addon must be present for BOTH export modes (ONED ships it
+      # always; the game's export plugin keeps it for a debug export and strips it
+      # from a release one, export_presets.cfg imgui/*): package_godot_windows.ps1
+      # runs scripts/bootstrap_imgui_godot.sh itself, never bootstrap_godot.sh, so
+      # GUT stays out of the export tree. The release workflow relies on the same.
 
       # PRs export in debug mode (debug export template + the template_debug DLL,
       # the development flavour); master/manual runs export in

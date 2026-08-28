@@ -22,7 +22,7 @@ const FLICKER_MASK_DELTA := 6
 const FLICKER_FADE_STEP := 0.25 / 22.0
 
 var _ctx: ProbeContext
-var _game: Node
+var _game: MainGame
 var _world: GameWorld
 var _out_abs := ""
 var _capture_stem := "00TRe"

@@ -86,7 +86,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	if (!world_) {
 		return out;
 	}
-	renderer::ScarViewContext ctx;
+	opennova::renderer::ScarViewContext ctx;
 	// Godot (x, y, z) -> mission (x, -z, y): the ground axes the fog box tests.
 	ctx.cam_x = p_camera_godot.x;
 	ctx.cam_y = -p_camera_godot.z;
@@ -94,8 +94,8 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	ctx.terrain_light_argb = argb_from_color(p_terrain_light);
 	ctx.owner_visible = &scar_owner_visible_cb;
 	ctx.user = const_cast<Simulation *>(this);
-	renderer::ScarDrawList list;
-	renderer::compile_scar_draws(world_->scars, ctx, list);
+	opennova::renderer::ScarDrawList list;
+	opennova::renderer::compile_scar_draws(world_->scars, ctx, list);
 
 	PackedVector3Array vertices;
 	PackedVector2Array uvs;
@@ -114,7 +114,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	// slot would land the quad rotated off the struck face on every vehicle and
 	// item, so the entity-local batches take the model fold instead.
 	std::vector<bool> entity_local_vertex(list.vertices.size(), false);
-	for (const renderer::ScarDrawBatch &b : list.batches) {
+	for (const opennova::renderer::ScarDrawBatch &b : list.batches) {
 		if (!b.entity_local) {
 			continue;
 		}
@@ -141,8 +141,9 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	// struck side and the shared ring keeps it; the entity-local fold
 	// (-x, y, z) is a reflection that flips it, so those triangles are re-wound
 	// (vertices 1 and 2 swapped). The scorch shader's cull_back then culls
-	// exactly what retail's CCW cull culls (proved in-game by
-	// godot/tests/scar_wall_probe.gd's front/behind captures).
+	// exactly what retail's CCW cull culls (pinned by ctest impact_scar and
+	// godot/tests/scar_present_pass_test.gd; the in-game front/behind
+	// capture went with ADR 0041's probe retirement).
 	const auto source_index = [&](size_t i) -> size_t {
 		if (!entity_local_vertex[i]) {
 			return i;
@@ -151,7 +152,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		return k == 0 ? i : i - k + (3 - k);
 	};
 	for (size_t i = 0; i < list.vertices.size(); ++i) {
-		const renderer::ScarVertex &v = list.vertices[source_index(i)];
+		const opennova::renderer::ScarVertex &v = list.vertices[source_index(i)];
 		vertices[static_cast<int64_t>(i)] = entity_local_vertex[i]
 				? Vector3(-v.x, v.y, v.z)
 				: Vector3(v.x, v.z, -v.y);
@@ -176,7 +177,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	batch_bms_id.resize(batches);
 	batch_spawn_origin.resize(batches);
 	for (int64_t i = 0; i < batches; ++i) {
-		const renderer::ScarDrawBatch &b = list.batches[static_cast<size_t>(i)];
+		const opennova::renderer::ScarDrawBatch &b = list.batches[static_cast<size_t>(i)];
 		batch_owner[i] = b.owner_packed;
 		batch_texture[i] = b.texture;
 		batch_section[i] = b.section;
@@ -203,7 +204,7 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	// builds each strip's effect from (retail: Scar_LoadTextures @0x5CC2E0 —
 	// modeId 0 -> 0x120651, 1 -> 0x460651, see docs/world/world-wac-ai-re.md
 	// §24.9); the presenter decodes the word into the drawer state
-	// (renderer::decode_scar_strip_mode).
+	// (opennova::renderer::decode_scar_strip_mode).
 	PackedStringArray strip_names;
 	PackedInt32Array strip_mode_words;
 	strip_names.resize(opennova::world::kScarTextureStripCount);

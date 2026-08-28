@@ -45,8 +45,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		return ProbeVerdict.failed("the mounted root carries no particle effects")
 	_describe_effect_definition()
 
-	await _settle_frames(8)
-	_before = await _capture_image()
+	await _stage.settle(_ctx.tree, _fx, 8)
+	_before = await _stage.capture_after_render(_ctx.tree, _fx)
 	if _before == null:
 		return ProbeVerdict.failed("could not capture the baseline frame")
 
@@ -71,8 +71,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			_fx.render_frame()
 			elapsed_ticks += 1
 			await ctx.tree.process_frame
-		var candidate := await _capture_image()
-		var score := _changed_pixels(_before, candidate)
+		var candidate := await _stage.capture_after_render(_ctx.tree, _fx)
+		var score := ProbeCapture.changed_pixels(_before, candidate, 100)
 		var draw_report := _fx.get_debug_draw_list_report()
 		var far_draw: Dictionary = draw_report.get("world_far_side", {})
 		var camera_draw: Dictionary = draw_report.get("world_camera_side", {})
@@ -248,31 +248,3 @@ func _material(color: Color, roughness: float, metallic: float) -> StandardMater
 	return material
 
 
-func _settle_frames(count: int) -> void:
-	for _index in range(count):
-		if _fx != null:
-			_fx.render_frame()
-		await _ctx.tree.process_frame
-
-
-func _capture_image() -> Image:
-	_fx.render_frame()
-	await _ctx.tree.process_frame
-	return await _stage.capture_image(_ctx.tree)
-
-
-func _changed_pixels(reference: Image, candidate: Image) -> int:
-	if reference == null or candidate == null \
-			or reference.get_size() != candidate.get_size():
-		return -1
-	var changed := 0
-	# Exclude the caption band so this score selects particle visibility rather
-	# than the intentional BEFORE/AFTER label change.
-	for y_value in range(100, reference.get_height()):
-		for x_value in range(reference.get_width()):
-			var before := reference.get_pixel(x_value, y_value)
-			var after := candidate.get_pixel(x_value, y_value)
-			if absf(before.r - after.r) + absf(before.g - after.g) \
-					+ absf(before.b - after.b) > 0.12:
-				changed += 1
-	return changed

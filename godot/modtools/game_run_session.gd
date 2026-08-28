@@ -317,8 +317,15 @@ func _kill_process(pid: int) -> bool:
 
 
 func _wait_for_exit(pid: int, timeout_msec: int) -> bool:
-	return Process.wait_for_exit(pid, timeout_msec) if Process.supports_working_directory() \
-			else not OS.is_process_running(pid)
+	if Process.supports_working_directory():
+		return Process.wait_for_exit(pid, timeout_msec)
+	# The portable fallback polls to the same deadline.
+	var deadline := Time.get_ticks_msec() + timeout_msec
+	while OS.is_process_running(pid):
+		if Time.get_ticks_msec() >= deadline:
+			return false
+		OS.delay_msec(50)
+	return true
 
 
 func _release_process(pid: int) -> void:

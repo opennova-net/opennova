@@ -25,8 +25,8 @@ static func enable_spans(ctx: ProbeContext) -> void:
 	if shell != null:
 		ctx.defer_restore(func() -> void:
 			if is_instance_valid(shell):
-				shell.call("set_perf_probe_enabled", false))
-		shell.call("set_perf_probe_enabled", true)
+				shell.set_perf_probe_enabled(false))
+		shell.set_perf_probe_enabled(true)
 	var world := ctx.world()
 	if world != null:
 		ctx.defer_restore(func() -> void:
