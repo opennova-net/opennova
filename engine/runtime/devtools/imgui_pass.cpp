@@ -3,6 +3,7 @@
 #include <runtime/devtools/imgui_abi.h>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
 
@@ -15,6 +16,31 @@ static_assert(sizeof(ImDrawIdx) == 2, "imgui-godot expects 16-bit draw indices")
 static_assert(sizeof(ImWchar) == 2, "imgui-godot expects 16-bit ImWchar");
 
 namespace opennova::devtools {
+
+namespace {
+
+constexpr const char *kWorkspaceDockspace = "OpenNovaWorkspaceDockspace";
+
+void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport,
+		const std::vector<std::unique_ptr<Window>> &windows) {
+	ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+	ImGui::DockBuilderSetNodePos(dockspace_id, viewport.WorkPos);
+	ImGui::DockBuilderSetNodeSize(dockspace_id, viewport.WorkSize);
+	ImGuiID center_id = dockspace_id;
+	ImGuiID right_id = 0;
+	ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Right, 0.30f, &right_id, &center_id);
+	for (const auto &window : windows) {
+		const InitialDockPlacement placement = window->initial_dock_placement();
+		if (placement == InitialDockPlacement::Center) {
+			ImGui::DockBuilderDockWindow(window->title(), center_id);
+		} else if (placement == InitialDockPlacement::Right) {
+			ImGui::DockBuilderDockWindow(window->title(), right_id);
+		}
+	}
+	ImGui::DockBuilderFinish(dockspace_id);
+}
+
+}  // namespace
 
 ImGuiAbi imgui_abi() {
 	return ImGuiAbi{IMGUI_VERSION, static_cast<int>(sizeof(ImGuiIO)),
@@ -82,17 +108,28 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	}
 
 	if (options_.dockspace) {
-		// The dockspace covers the main viewport: tool windows dock to its
-		// edges and to each other, the passthru central node leaves the
-		// game's mouse alone.
-		ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+		// The workspace owns the main viewport. Install its default only when
+		// ImGui did not restore this dockspace from persisted settings.
+		const ImGuiID dockspace_id = ImHashStr(kWorkspaceDockspace);
+		const ImGuiViewport *viewport = ImGui::GetMainViewport();
+		if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
+			create_default_layout(dockspace_id, *viewport, windows_);
+		}
+		ImGui::DockSpaceOverViewport(dockspace_id, viewport, ImGuiDockNodeFlags_None);
 	}
 
 	bool close_requested = false;
 	if (options_.menu_bar && ImGui::BeginMainMenuBar()) {
 		if (ImGui::BeginMenu("Windows")) {
 			for (auto &window : windows_) {
-				ImGui::MenuItem(window->title(), nullptr, &window->open);
+				if (window->is_closeable()) {
+					ImGui::MenuItem(window->title(), nullptr, &window->open);
+				} else {
+					bool selected = true;
+					ImGui::BeginDisabled();
+					ImGui::MenuItem(window->title(), nullptr, &selected);
+					ImGui::EndDisabled();
+				}
 			}
 			ImGui::Separator();
 			if (ImGui::MenuItem("Reset layout")) {
@@ -113,6 +150,9 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	layout_reset_pending_ = false;
 	for (int i = 0; i < static_cast<int>(windows_.size()); ++i) {
 		Window &window = *windows_[static_cast<size_t>(i)];
+		if (!window.is_closeable()) {
+			window.open = true;
+		}
 		if (!window.open) {
 			continue;
 		}
@@ -123,7 +163,20 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		if (reset_layout) {
 			place_window_home(i);
 		}
-		if (ImGui::Begin(window.title(), &window.open)) {
+		ImGuiWindowFlags flags = ImGuiWindowFlags_None;
+		if (!window.is_collapsible()) {
+			flags |= ImGuiWindowFlags_NoCollapse;
+		}
+		if (!window.is_scrollable()) {
+			flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+		}
+		ImGuiWindowClass window_class;
+		if (!window.is_undockable()) {
+			window_class.DockNodeFlagsOverrideSet |= ImGuiDockNodeFlags_NoUndocking;
+			ImGui::SetNextWindowClass(&window_class);
+		}
+		bool *open = window.is_closeable() ? &window.open : nullptr;
+		if (ImGui::Begin(window.title(), open, flags)) {
 			window.draw(*this, frame_index);
 		}
 		ImGui::End();

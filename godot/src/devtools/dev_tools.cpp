@@ -1,8 +1,12 @@
 #include "devtools/dev_tools.h"
 
+#include <godot_cpp/classes/sub_viewport.hpp>
+
 #if OPENNOVA_DEVTOOLS
+#include <godot_cpp/classes/engine.hpp>
 #include <runtime/devtools/stats_window.h>
 
+#include <algorithm>
 #include <cstring>
 #endif
 
@@ -14,6 +18,14 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("toggle"), &DevTools::toggle);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "stats"), &DevTools::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("get_frame_stats"), &DevTools::get_frame_stats);
+	ClassDB::bind_method(D_METHOD("set_game_viewport", "viewport"), &DevTools::set_game_viewport);
+	ClassDB::bind_method(D_METHOD("set_game_play_available", "available"), &DevTools::set_game_play_available);
+	ClassDB::bind_method(D_METHOD("is_game_play_available"), &DevTools::is_game_play_available);
+	ClassDB::bind_method(D_METHOD("set_game_playing", "playing"), &DevTools::set_game_playing);
+	ClassDB::bind_method(D_METHOD("is_game_playing"), &DevTools::is_game_playing);
+	ClassDB::bind_method(D_METHOD("handle_tools_toggle"), &DevTools::handle_tools_toggle);
+	ClassDB::bind_method(D_METHOD("handle_game_escape"), &DevTools::handle_game_escape);
+	ClassDB::bind_method(D_METHOD("get_rendered_game_viewport_size"), &DevTools::get_rendered_game_viewport_size);
 	ClassDB::bind_method(D_METHOD("feed_stats_window", "frames", "sums", "peaks", "sample_frames"),
 			&DevTools::feed_stats_window);
 	ClassDB::bind_method(D_METHOD("stats_reading_frames"), &DevTools::stats_reading_frames);
@@ -23,11 +35,14 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stats_row_info", "row_id"), &DevTools::stats_row_info);
 	ClassDB::bind_method(D_METHOD("reset_layout"), &DevTools::reset_layout);
 	ADD_SIGNAL(MethodInfo("open_changed", PropertyInfo(Variant::BOOL, "open")));
+	ADD_SIGNAL(MethodInfo("game_input_mode_changed", PropertyInfo(Variant::BOOL, "playing")));
 }
 
 #if OPENNOVA_DEVTOOLS
 
-DevTools::DevTools() : tools_(std::make_unique<opennova::devtools::GameDevTools>()) {}
+DevTools::DevTools() : tools_(std::make_unique<opennova::devtools::GameDevTools>()) {
+	tools_->set_game_viewport(this);
+}
 
 DevTools::~DevTools() = default;
 
@@ -36,6 +51,12 @@ opennova::devtools::ImGuiPass *DevTools::engine_pass() {
 }
 
 void DevTools::_exit_tree() {
+	set_game_play_available(false);
+	set_game_playing_internal(false);
+	game_viewport_ = nullptr;
+	rendered_game_viewport_size_ = Vector2i();
+	tools_->set_game_viewport(nullptr);
+	tools_->reset_game_input_mode();
 	tools_->pass().set_open(false);
 	tools_->set_frame_stats(nullptr);
 	if (frame_stats_.is_valid()) {
@@ -49,8 +70,11 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 	if (p_drew && frame_stats_.is_valid() && frame_stats_->is_capture_active()) {
 		frame_stats_->add(FrameStats::FRAME_DEBUG_REFRESH, p_layout_us);
 	}
+	apply_game_requests();
 	if (open_ && !tools_->pass().is_open()) {
 		// Closed from inside (Escape, the menu).
+		set_game_playing_internal(false);
+		tools_->reset_game_input_mode();
 		open_ = false;
 		emit_signal("open_changed", false);
 	}
@@ -67,6 +91,10 @@ void DevTools::set_open(bool p_open) {
 	if (p_open == tools_->pass().is_open()) {
 		return;
 	}
+	// Every workspace lifetime begins and ends in Interact. This also clears
+	// queued requests so an Escape from the previous lifetime cannot leak.
+	set_game_playing_internal(false);
+	tools_->reset_game_input_mode();
 	tools_->pass().set_open(p_open);
 	open_ = p_open;
 	sync_layer_visible();
@@ -74,6 +102,109 @@ void DevTools::set_open(bool p_open) {
 		frame_stats_->sync_capture_signal();
 	}
 	emit_signal("open_changed", p_open);
+}
+
+void DevTools::set_game_viewport(SubViewport *p_viewport) {
+	game_viewport_ = p_viewport;
+	rendered_game_viewport_size_ = Vector2i();
+}
+
+void DevTools::set_game_play_available(bool p_available) {
+	if (game_play_available_ == p_available) {
+		return;
+	}
+	game_play_available_ = p_available;
+	tools_->set_game_play_available(p_available);
+	apply_game_requests();
+}
+
+bool DevTools::is_game_play_available() const {
+	return game_play_available_;
+}
+
+void DevTools::set_game_playing_internal(bool p_playing) {
+	if (game_playing_ == p_playing) {
+		tools_->set_game_input_mode(p_playing
+				? opennova::devtools::GameInputMode::Play
+				: opennova::devtools::GameInputMode::Interact);
+		return;
+	}
+	game_playing_ = p_playing;
+	tools_->set_game_input_mode(p_playing
+			? opennova::devtools::GameInputMode::Play
+			: opennova::devtools::GameInputMode::Interact);
+	emit_signal("game_input_mode_changed", p_playing);
+}
+
+void DevTools::set_game_playing(bool p_playing) {
+	if (p_playing && (!is_open() || !game_play_available_)) {
+		return;
+	}
+	set_game_playing_internal(p_playing);
+}
+
+bool DevTools::is_game_playing() const {
+	return game_playing_;
+}
+
+bool DevTools::handle_tools_toggle() {
+	const uint64_t frame = Engine::get_singleton()->get_process_frames();
+	if (last_tools_toggle_frame_ == frame) {
+		return true;
+	}
+	last_tools_toggle_frame_ = frame;
+	toggle();
+	return true;
+}
+
+bool DevTools::handle_game_escape() {
+	if (!is_open()) {
+		return false;
+	}
+	const uint64_t frame = Engine::get_singleton()->get_process_frames();
+	if (last_game_escape_frame_ == frame) {
+		return true;
+	}
+	last_game_escape_frame_ = frame;
+	tools_->request_game_escape();
+	apply_game_requests();
+	return true;
+}
+
+Vector2i DevTools::get_rendered_game_viewport_size() const {
+	return rendered_game_viewport_size_;
+}
+
+void DevTools::apply_game_requests() {
+	opennova::devtools::GameWindowRequest request;
+	while (tools_->take_game_request(request)) {
+		switch (request) {
+			case opennova::devtools::GameWindowRequest::EnterPlay:
+				set_game_playing(true);
+				break;
+			case opennova::devtools::GameWindowRequest::EnterInteract:
+				set_game_playing_internal(false);
+				break;
+			case opennova::devtools::GameWindowRequest::CloseTools:
+				set_open(false);
+				return;
+		}
+	}
+}
+
+void DevTools::draw(int p_requested_width, int p_requested_height) {
+	if (game_viewport_ == nullptr) {
+		return;
+	}
+	const Vector2i requested(std::max(1, p_requested_width), std::max(1, p_requested_height));
+	if (game_viewport_->get_size() != requested) {
+		game_viewport_->set_size(requested);
+	}
+	rendered_game_viewport_size_ = requested;
+	Engine *engine = Engine::get_singleton();
+	if (engine->has_singleton("ImGuiGD")) {
+		engine->get_singleton("ImGuiGD")->call("SubViewport", game_viewport_);
+	}
 }
 
 void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
@@ -183,6 +314,38 @@ bool DevTools::is_open() const {
 
 void DevTools::set_open(bool p_open) {
 	(void)p_open;
+}
+
+void DevTools::set_game_viewport(SubViewport *p_viewport) {
+	(void)p_viewport;
+}
+
+void DevTools::set_game_play_available(bool p_available) {
+	(void)p_available;
+}
+
+bool DevTools::is_game_play_available() const {
+	return false;
+}
+
+void DevTools::set_game_playing(bool p_playing) {
+	(void)p_playing;
+}
+
+bool DevTools::is_game_playing() const {
+	return false;
+}
+
+bool DevTools::handle_tools_toggle() {
+	return false;
+}
+
+bool DevTools::handle_game_escape() {
+	return false;
+}
+
+Vector2i DevTools::get_rendered_game_viewport_size() const {
+	return Vector2i();
 }
 
 void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {

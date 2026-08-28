@@ -12,14 +12,14 @@ config_version=5
 
 config/name="OpenNova"
 config/version="0.0.10"
-run/main_scene="uid://dqiq0mn3kghyi"
+run/main_scene="res://game/game_runtime_root.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 run/flush_stdout_on_print=true
 boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)
 boot_splash/show_image=false
 config/icon="res://icon.svg"
 run/main_scene.modtools="res://modtools/oned_main.tscn"
-run/main_scene.runtime_game="res://game/main_game.tscn"
+run/main_scene.runtime_game="res://game/game_runtime_root.tscn"
 
 [autoload]
 

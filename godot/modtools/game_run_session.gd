@@ -8,7 +8,7 @@ extends RefCounted
 signal status_changed(text: String, kind: StringName)
 signal state_changed(state: Dictionary)
 
-const RUNTIME_SCENE := "res://game/main_game.tscn"
+const RUNTIME_SCENE := "res://game/game_runtime_root.tscn"
 const PACKAGED_RUNTIME_CANDIDATES: Array[String] = [
 	"opennova.exe", "opennova.x86_64", "opennova",
 	"../../../opennova.app/Contents/MacOS/opennova",

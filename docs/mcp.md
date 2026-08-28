@@ -153,6 +153,7 @@ mission runtime, net codecs) is not a probe: it is a ctest under `tests/<domain>
 | render | `loading_screen_render` | the loading screen for one mission |
 | stage | `loading_screen_stage`, `effects_visual`, `firebarrel_visual`, `gore_set_visual`, `bridge_water_shock`, `retail_parity_visual`, `foliage_flicker_regression` | the visual stage scenes and their captures |
 | runtime | `dialog_vs_ambient`, `mission_audio`, `fp_impact`, `hud_killfeed`, `vm_bone_dump`, `weapon_round` | audio, HUD and viewmodel witnesses in the live runtime |
+| runtime | `runtime_root_window` | the embedded game view (ADR 0039's debug windowed startup): one always-updating SubViewport under `GameRuntimeRoot`, the ImGui context attached, the tools workspace hiding only the direct composite, a resize reaching the viewport, F3 through the Game texture closing the workspace |
 | net | `parity_joiner_ready` | wait for `in_match` or `deploy_hold` readiness on a `--lan-join` launch (`auto_deploy` sends the default pick); the witness the parity runner classifies |
 | net | `parity_joiner_motion` | the walk/strafe/turn exercise inside the runner's steady window |
 | net | `parity_joiner_state` | one live readiness snapshot |

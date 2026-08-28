@@ -245,6 +245,14 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"animtrace": { "type": "boolean", "default": false },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, true, 900_000),
+		ProbeDef.make("runtime_root_window",
+				"The embedded game view (GameRuntimeRoot, the debug windowed startup) on the "
+				+ "live process: the game runs inside one always-updating SubViewport, the "
+				+ "real ImGui context attached, the tools workspace hides only the direct "
+				+ "composite while the shared texture keeps rendering at the Game window's "
+				+ "size, a window resize reaches the viewport, and F3 through the Game texture "
+				+ "closes the workspace; refuses a direct-runtime fallback.",
+				RUNTIME + "runtime_root_window_probe.gd", {}, [], true, false, 120_000),
 		ProbeDef.make("parity_joiner_ready",
 				"Wait until this --lan-join joiner reaches `readiness_mode` (in_match: a "
 				+ "live local player in the InMatch phase, the default deployment pick sent "

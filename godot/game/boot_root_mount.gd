@@ -6,6 +6,16 @@ extends RefCounted
 ## are static and read only the launch/settings singletons.
 
 
+## Mount `dir` as the shell's resource root: packed PFFs, `/exp` expansion,
+## `/d` loose override, and `/game` SCR policy. With `allow_loose_root` (the
+## `--loose-root` flag, passed by ONED-managed runs) a directory holding
+## none of the packed archives falls back to a loose mount — the same data
+## contract used by the packed game, so ONED can run a loose extract
+## and the dev zip's bundled assets/ boots as the game it is
+## (LaunchFlags.boot_loose_allowed). The no-archives fatal stays the picked default
+## [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
+## Warns and returns null on failure. Public and parameterized so the fallback
+## contract is testable without process arguments (ADR 0018).
 static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 	var root := ResourceRoot.new()
 	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())

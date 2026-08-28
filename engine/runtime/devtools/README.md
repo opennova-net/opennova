@@ -7,8 +7,9 @@ addon's `NewFrame` and `Render` (the `ImGuiPassNode` seam in `godot/src/devtools
 
 Two products compose it:
 
-- the **game's dev tools** (`game_dev_tools.*`, F3): the Stats window over the
-  frame-stats board plus ImGui's demo window. Debug builds only
+- the **game's dev tools** (`game_dev_tools.*`, F3): an opaque workspace with
+  a mandatory Game viewport, the frame-stats window, and ImGui's demo window.
+  Debug builds only
   (`OPENNOVA_DEVTOOLS`; off for the release GDExtension flavour).
 - **ONED's run surface** (`oned_ui.*`): the one window with the game-data
   directory, its recents, the game/expansion profile, the retail install and
@@ -22,6 +23,7 @@ Two products compose it:
 | `frame_stats_slots.h` | The slot table (X-macro): one entry per measured span or VALUE counter; the engine enum, the `FrameStats` constants and the Stats rows all derive from it |
 | `frame_stats_board.h/.cpp` | The fixed-slot per-frame accumulator (sums, worst-frame peaks, sampled-frame counts) with the capture edge and the atomic drain |
 | `game_dev_tools.h/.cpp` | The game's window set on a pass, with the board hand-off |
+| `game_window.h/.cpp` | The mandatory embedded Game window, its narrow viewport adapter, and typed Play/Interact/Close request policy |
 | `stats_window.h/.cpp`, `stats_window_rows.h` | The Stats window: the row tree over a drained window, refreshed every 0.5 s |
 | `demo_window.h/.cpp` | ImGui's demo window, the docking/multi-viewport smoke test |
 | `oned_ui.h/.cpp` | ONED's surface: the fields it owns, the state the app pushes, the typed request queue the app drains |
@@ -30,8 +32,9 @@ Two products compose it:
 
 1. Subclass `Window` (`imgui_pass.h`): `title()` and `draw(ImGuiPass &, uint64_t frame_index)`;
    override `on_visibility(bool)` to arm/disarm any data capture on the
-   (pass open && window open) edge; override `owns_frame()` only for a window
-   that issues its own `ImGui::Begin/End`.
+   (pass open && window open) edge; declare close, dock, collapse, scroll, and
+   initial-placement policy through the explicit virtuals; override
+   `owns_frame()` only for a window that issues its own `ImGui::Begin/End`.
 2. Register it in `GameDevTools::GameDevTools()` (`pass_.register_window(std::make_unique<MyWindow>())`);
    it appears in the "Windows" menu. Keep `open` false unless the window is
    the default surface.
