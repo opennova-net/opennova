@@ -117,6 +117,7 @@ add_library(opennova_runtime STATIC
     # D-SND-15; the seam headers themselves stay format-free)
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/surface_tiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_field_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_raycast.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_scorch_record.cpp
     # wac — the WAC compiler (binds names/vars against the live world) + the VM;

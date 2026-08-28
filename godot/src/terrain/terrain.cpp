@@ -7,6 +7,8 @@
 #include "env/water.h"
 #include "mission/mission_object_placer.h"
 
+#include <runtime/terrain_query/terrain_field_build.h>
+
 // Retail: PolyTrn_RenderTile @0x60da70 (docs/terrain/terrain-re.md, docs/tiles/til-re.md);
 // the sector traversal names below are jodemo-era (Terrain_RenderSectorTile @0x5CDAA0,
 // Terrain_TraverseQuadTreeNode @0x5C89C0, Terrain_CollectVisibleSectors @0x5C9120).
@@ -1062,7 +1064,7 @@ bool Terrain::_build_terrain() {
 	}
 	const float height_scale = 1.0f / 256.0f;
 	const opennova::terrain::CoordsQuadrantLocks quadrant_locks =
-		coords_locks_from(terrain_data->get_trn());
+		opennova::terrain::coords_locks_from(terrain_data->get_trn());
 
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();

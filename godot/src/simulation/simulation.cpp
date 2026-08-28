@@ -6,6 +6,7 @@
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <net/npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
 #include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
+#include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 
 using namespace sim_internal;
 
@@ -232,15 +233,15 @@ void Simulation::initialize_network_environment_mission_start() {
 }
 
 // Re-point the (possibly just-rebuilt) AI system at our owned terrain field. The field's raw
-// pointers reference terrain_heightmap_/terrain_sector_grid_, which persist across reset_world.
+// pointers reference terrain_store_'s buffers, which persist across reset_world.
 void Simulation::apply_terrain_to_ai() {
 	// The round sim's ground stop shares the same field (world.terrain; §5.60).
-	if (world_) world_->terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
+	if (world_) world_->terrain = terrain_store_.valid() ? &terrain_store_.height_field() : nullptr;
 	if (world_) {
 		// The footstep surface pick reads the charmap through this view; the
-		// zero-initialized map is the sampler's "no charmap -> surface 1" leg.
-		world_->surface_map =
-			surface_indices_.empty() ? opennova::terrain::SurfaceTypeMap{} : surface_map_;
+		// store's zero-initialized map (no charmap supplied) is the sampler's
+		// "no charmap -> surface 1" leg.
+		world_->surface_map = terrain_store_.surface_map();
 		// The placed-tile override rides the same view (D-SND-15). With no
 		// charmap the sampler's early return-1 skips the walk exactly like
 		// retail, so attaching the tiles unconditionally is faithful.
@@ -251,10 +252,10 @@ void Simulation::apply_terrain_to_ai() {
 	}
 	apply_sound_state_to_world();
 	if (!ai_) return;
-	ai_->terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
+	ai_->terrain = terrain_store_.valid() ? &terrain_store_.height_field() : nullptr;
 	ai_->ground_clearance = opennova::world::GroundClearance{};
 	// The collision ground probe shares the same field.
-	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
+	collision_world_.terrain = terrain_store_.valid() ? &terrain_store_.height_field() : nullptr;
 }
 
 // (Re)apply the persisted sound-profile chain state to the current world: the parsed
@@ -294,51 +295,18 @@ opennova::mission::PromoteOptions Simulation::promote_options() const {
 }
 
 void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
-	// Clear first so a null/unloaded terrain disables grounding.
-	terrain_heightmap_.clear();
-	terrain_sector_grid_.clear();
-	terrain_field_ = opennova::terrain::TerrainHeightField{};
-
-	surface_indices_.clear();
-	surface_map_ = opennova::terrain::SurfaceTypeMap{};
-
+	// Clear first so a null/unloaded terrain disables grounding. The store is
+	// the engine's one owning cpt/trn(+charmap) field builder (ADR 0042 d4):
+	// depth-buffer/sector-grid copies, the origins + per-quadrant
+	// neighbour-tap locks stamp, and the charmap surface view for the
+	// footstep surface pick.
+	terrain_store_.clear();
 	if (p_terrain.is_valid() && p_terrain->is_loaded()) {
-		const opennova::CptFile &cpt = p_terrain->get_cpt();
-		const opennova::TrnConfig &trn = p_terrain->get_trn();
-		if (!cpt.depth_buffer.empty()) {
-			terrain_heightmap_ = cpt.depth_buffer; // own a copy (outlives the source resource)
-			terrain_sector_grid_.resize(256);
-			const int *grid = &trn.sector_grid[0][0];
-			for (int i = 0; i < 256; ++i) terrain_sector_grid_[i] = grid[i];
-
-			terrain_field_.heightmap = terrain_heightmap_.data();
-			terrain_field_.dim = static_cast<int>(std::sqrt(static_cast<double>(terrain_heightmap_.size())));
-			terrain_field_.layout.sector_grid = terrain_sector_grid_.data();
-			// Sector origins + the per-quadrant neighbour-tap locks, through the same
-			// helper the render/editor field uses. Without the locks every 512-unit
-			// sector boundary reads the neighbouring quadrant and grounding drops into
-			// a one-unit trench the terrain mesh does not draw — you fall through
-			// ground that looks solid.
-			height_field_apply_trn(terrain_field_, trn);
-			// Water clamp deferred: water_height units (vs the 16.16 worldY @0x26C6454 the original
-			// compares) are not yet verified, so leave has_water off rather than float entities onto
-			// a wrong plane. The ground-following path (the Phase 1 goal) does not need it.
-			terrain_field_.has_water = false;
-
-			// The charmap surface raster for the footstep surface pick (own a
-			// copy like the depth buffer; shares the sector grid + origins)
-			// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510].
-			const std::vector<uint8_t> &charmap = p_terrain->get_charmap_indices();
-			if (!charmap.empty() && p_terrain->get_charmap_width() > 0) {
-				surface_indices_ = charmap;
-				surface_map_.data = surface_indices_.data();
-				surface_map_.width = p_terrain->get_charmap_width();
-				surface_map_.height = p_terrain->get_charmap_height();
-				surface_map_.sector_grid = terrain_sector_grid_.data();
-				surface_map_.origin_x = trn.origin_x;
-				surface_map_.origin_y = trn.origin_y;
-			}
-		}
+		const std::vector<uint8_t> &charmap = p_terrain->get_charmap_indices();
+		opennova::terrain::terrain_field_store_build(terrain_store_,
+				p_terrain->get_cpt(), p_terrain->get_trn(),
+				charmap.empty() ? nullptr : charmap.data(),
+				p_terrain->get_charmap_width(), p_terrain->get_charmap_height());
 	}
 	apply_terrain_to_ai();
 }

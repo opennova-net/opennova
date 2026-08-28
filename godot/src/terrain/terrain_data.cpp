@@ -7,6 +7,7 @@
 #include <formats/til/til_io.h>
 #include <runtime/terrain_query/coords.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 #include <runtime/terrain/lighting.h>
 #include <runtime/terrain_query/terrain_raycast.h>
 
@@ -116,22 +117,11 @@ bool resolve_world_sample(const opennova::TrnConfig &trn,
 	return r.valid;
 }
 
-// Builds a portable TerrainHeightField over the loaded CPT depth buffer + TRN
-// sector layout, the shared engine/runtime/terrain sampler the runtime AI also uses. The
-// height samplers don't read water, so it's left default here; the AI-grounding
-// field (Simulation::set_terrain_height_field) supplies the water plane.
-opennova::terrain::TerrainHeightField height_field_from(const opennova::CptFile &cpt,
-                                                        const opennova::TrnConfig &trn) {
-	opennova::terrain::TerrainHeightField field;
-	if (cpt.depth_buffer.empty()) {
-		return field;
-	}
-	field.heightmap = cpt.depth_buffer.data();
-	field.dim = static_cast<int>(std::sqrt(static_cast<double>(cpt.depth_buffer.size())));
-	field.layout.sector_grid = &trn.sector_grid[0][0];
-	height_field_apply_trn(field, trn);
-	return field;
-}
+// The portable TerrainHeightField over the loaded CPT depth buffer + TRN
+// sector layout comes from the engine's one field builder
+// (<runtime/terrain_query/terrain_field_build.h>, ADR 0042 d4), the same
+// sampler surface the runtime AI grounds on.
+using opennova::terrain::height_field_from;
 
 // Builds a sector layout from the GDScript-exposed members. Caller must ensure
 // the grid has at least 256 entries.
@@ -295,22 +285,6 @@ opennova::terrain::TerrainRaycastSample raycast_sample_bilinear(void *ctx, int32
 }
 
 } // namespace
-
-opennova::terrain::CoordsQuadrantLocks godot::coords_locks_from(const opennova::TrnConfig &trn) {
-	const opennova::TerrainQuadrantLocks source = trn.get_quadrant_locks();
-	opennova::terrain::CoordsQuadrantLocks locks{};
-	for (int quadrant = 0; quadrant < static_cast<int>(source.size()); ++quadrant) {
-		locks.set(quadrant, source[quadrant].x != 0, source[quadrant].y != 0);
-	}
-	return locks;
-}
-
-void godot::height_field_apply_trn(opennova::terrain::TerrainHeightField &field,
-                                   const opennova::TrnConfig &trn) {
-	field.layout.origin_x = trn.origin_x;
-	field.layout.origin_y = trn.origin_y;
-	field.locks = coords_locks_from(trn);
-}
 
 // ---------------------------------------------------------------------------
 // Macros for texture property boilerplate

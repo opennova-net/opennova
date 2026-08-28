@@ -36,7 +36,7 @@
 #include <runtime/simassets/mounted_pose.h>
 #include <runtime/simassets/sim_collision_pose.h>
 #include <runtime/simassets/sim_model_cache.h>
-#include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
@@ -145,7 +145,7 @@ public:
 	void set_entity_health(world::EntityHandle h, int32_t hp);
 
 	// --- terrain queries -----------------------------------------------------
-	bool has_terrain() const { return terrain.valid(); }
+	bool has_terrain() const { return terrain_store.valid(); }
 	// The renderer-accurate column height under a mission x/y, world units.
 	float ground_height(float mission_x, float mission_y) const;
 
@@ -196,9 +196,10 @@ public:
 	// --- terrain data (the mounted cpt/trn) -----------------------------------
 	CptFile cpt;
 	TrnConfig trn;
-	std::vector<uint16_t> heightmap;
-	std::vector<int> sector_grid;
-	terrain::TerrainHeightField terrain;
+	// The engine's one owning cpt/trn(+charmap) field builder (ADR 0042 d4):
+	// the same store Simulation::set_terrain_height_field fills, so the rig
+	// grounds and surface-picks on exactly the game's field.
+	terrain::TerrainFieldStore terrain_store;
 
 	// --- the local player's weapon and view --------------------------------------------
 	DefWeaponsFile weapon_defs{};

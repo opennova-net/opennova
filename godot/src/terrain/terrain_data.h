@@ -29,20 +29,9 @@ class TerrainFoliageDef;
 class TerrainFoliageMap;
 class TerrainTileInfo;
 
-// The .trn's four lock_* pairs as the portable neighbour-tap policy. One converter
-// for every heightmap tap in the runtime: the height samplers (via the height field),
-// the render mesh, and the collision heightfield — so no site can silently keep the
-// old unconditional full-atlas wrap.
-opennova::terrain::CoordsQuadrantLocks coords_locks_from(const opennova::TrnConfig &trn);
-
-// Everything a TerrainHeightField takes from the TRN: the sector origins and the
-// neighbour-tap locks. The heightmap and sector-grid POINTERS stay the caller's
-// (Simulation owns copies that outlive the resource), but the derived members
-// live here so a second field builder cannot silently miss one — which is exactly
-// how the sim's grounding field kept the pre-lock full-atlas wrap, and the player
-// kept falling through ground the mesh drew as solid.
-void height_field_apply_trn(opennova::terrain::TerrainHeightField &field,
-                            const opennova::TrnConfig &trn);
+// The trn -> lock/origin stamps (coords_locks_from, height_field_apply_trn) and
+// the non-owning height_field_from builder live in the engine now:
+// <runtime/terrain_query/terrain_field_build.h> (ADR 0042 d4).
 
 class TerrainData : public Resource {
 	GDCLASS(TerrainData, Resource)

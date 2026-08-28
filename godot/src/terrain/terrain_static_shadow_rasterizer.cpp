@@ -15,6 +15,7 @@
 #include <runtime/terrain/terrain_static_shadow_planner.h>
 
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -213,7 +214,7 @@ public:
 	bool enabled = true;
 	PackedInt32Array suppressed_bms_ids;
 	mutable opennova::terrain::TerrainStaticShadowPlanner planner;
-	std::shared_ptr<const TerrainStaticShadowReceiverStorage> receiver_storage;
+	std::shared_ptr<const opennova::terrain::TerrainFieldStore> receiver_storage;
 	mutable std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
 			compilation_snapshot;
 	mutable opennova::terrain::TerrainStaticShadowPlannerDiagnostics
@@ -370,26 +371,21 @@ public:
 			have_receiver = false;
 			return;
 		}
+		// The engine's one owning cpt/trn field builder (ADR 0042 d4); the
+		// store keeps the receiver buffers alive for the worker snapshots.
 		auto mutable_receiver =
-				std::make_shared<TerrainStaticShadowReceiverStorage>();
-		mutable_receiver->heightmap = cpt.depth_buffer;
-		const opennova::TrnConfig &trn = terrain_data->get_trn();
-		std::copy_n(&trn.sector_grid[0][0],
-				mutable_receiver->sector_grid.size(),
-				mutable_receiver->sector_grid.begin());
+				std::make_shared<opennova::terrain::TerrainFieldStore>();
+		opennova::terrain::terrain_field_store_build(*mutable_receiver, cpt,
+				terrain_data->get_trn());
 		receiver_storage = std::move(mutable_receiver);
-		opennova::terrain::TerrainHeightField field;
-		field.heightmap = receiver_storage->heightmap.data();
-		field.dim = dimension;
-		field.layout.sector_grid = receiver_storage->sector_grid.data();
-		height_field_apply_trn(field, trn);
-		if (!field.valid()) {
+		if (!receiver_storage->valid()) {
 			planner.clear_receiver_terrain();
 			receiver_storage.reset();
 			have_receiver = false;
 			return;
 		}
-		planner.set_receiver_terrain(field, observed_terrain_revision);
+		planner.set_receiver_terrain(receiver_storage->height_field(),
+				observed_terrain_revision);
 		have_receiver = true;
 	}
 };

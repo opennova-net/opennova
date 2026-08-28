@@ -77,6 +77,10 @@ TERRAIN_QUERY_HEADERS = {
     "runtime/terrain_query/coords.h",
     "runtime/terrain_query/height_field.h",
     "runtime/terrain_query/surface_type_map.h",
+    # The ONE owning cpt/trn(+charmap) field builder (ADR 0042 d4; format-free
+    # store header only — terrain_field_build.h, the format-typed entry over
+    # the parsed documents, stays off the seam).
+    "runtime/terrain_query/terrain_field_store.h",
     "runtime/terrain_query/terrain_raycast.h",
     # The permanent scorch record + its two retail producers (ADR 0020 #5:
     # world-owned interfaces grow here; the registry/textures stay behind).

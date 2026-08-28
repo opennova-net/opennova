@@ -32,8 +32,7 @@
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
 #include <runtime/world/deploy_screen_feed.h> // kDeployRefreshTicks (the death deploy screen cadence)
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
-#include <runtime/terrain_query/height_field.h>
-#include <runtime/terrain_query/surface_type_map.h>
+#include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 
 namespace godot {
@@ -1031,17 +1030,13 @@ private:
 	opennova::world::ResolvedCollisionShape wire_collision_shape_for_type(
 			uint16_t type_id);
 
-	// Terrain the AI grounds on. We own copies of the shell's depth buffer + 16x16 sector grid so
-	// the portable TerrainHeightField's raw pointers outlive the source TerrainData and survive
-	// a reload (reset_world rebuilds ai_; apply_terrain_to_ai re-points it). Empty = no grounding.
-	std::vector<uint16_t> terrain_heightmap_;
-	std::vector<int> terrain_sector_grid_;
-	opennova::terrain::TerrainHeightField terrain_field_;
-	// Charmap (surface-type) raster copy + the sampler view the footstep pass
-	// reads through world.surface_map [orig: Terrain_GetSurfaceTypeAtPosition
-	// @ 0x606510]. Shares terrain_sector_grid_/origins with the height field.
-	std::vector<uint8_t> surface_indices_;
-	opennova::terrain::SurfaceTypeMap surface_map_;
+	// Terrain the AI grounds on plus the charmap (surface-type) raster the
+	// footstep pass reads through world.surface_map: the engine's one owning
+	// cpt/trn(+charmap) field builder (terrain_field_store.h, ADR 0042 d4).
+	// The store's copies outlive the source TerrainData and survive a reload
+	// (reset_world rebuilds ai_; apply_terrain_to_ai re-points it). Empty = no
+	// grounding.
+	opennova::terrain::TerrainFieldStore terrain_store_;
 	// The placed-tile surface override (D-SND-15): the mission .til entries
 	// plus the tileset's .TSD-fed tile-index -> surface table, both resolved
 	// engine-side (terrain_query surface_tiles.h — the witnesses live there).
