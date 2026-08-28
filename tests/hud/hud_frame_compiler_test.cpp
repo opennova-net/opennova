@@ -713,7 +713,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	// Above-player waypoint, clamped OUTSIDE: the orange tricolor rides the
 	// per-channel 2c saturate (the halve fires only in the inside-dot branch
 	// on frames with counter bit 5 set — the 32-frame blink).
-	// [orig: sub_590970 0xFF7F5000; bit test @0x599353 inside-only; halve
+	// [orig: HUD_UpdateWaypointAltitudeColor @0x590970 0xFF7F5000; bit test @0x599353 inside-only; halve
 	//  @0x599397; vertex 2c-saturate @0x5993c6]
 	CHECK(list.map.lines[0].color == 0xFFFEA000u,
 			"the state line carries the 2c-saturated above-tricolor");
@@ -969,7 +969,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 
 	// The grid label compiles at the authored MAPCOORDS position once its
 	// suppressor clears; the column letters ride the base-26 formatter.
-	// [orig: sub_59CB40; HUD_FormatGridCoordinate @0x598600]
+	// [orig: HUD_DrawPlayerGridLabel @0x59cb40; HUD_FormatGridCoordinate @0x598600]
 	layout.map_coords_x = 530.0f;
 	layout.map_coords_y = 720.0f;
 	layout.map_coords_off = 0;

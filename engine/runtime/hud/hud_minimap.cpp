@@ -65,7 +65,7 @@ constexpr float kCompassUvMax = 0.95f;
 // lattice (cells span [k*300-150, k*300+150) — the same fold the player
 // grid formula carries), rows on the plain 300 lattice.
 // [orig: 19660800 snaps + the unk_960000 fold in the @0x5a5f40 grid branch;
-//  HUD_DrawPlayerGridLabel sub_59CB40 x - 150 wu]
+//  HUD_DrawPlayerGridLabel @0x59cb40 x - 150 wu]
 constexpr int32_t kGridCellQ16 = 19660800;
 constexpr int32_t kGridHalfCellQ16 = 0x960000;
 // Row readouts multiply by the FLOAT reciprocal constant, not an exact
@@ -1281,7 +1281,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 
 	// Player grid coordinate label at the authored MAPCOORDS position.
 	// [orig: gate @0x5a7a1c — ctx bit9 && !bit12 && dword_27236FC == 0;
-	//  sub_59CB40 — origin snapped to 300 wu cells, column letters from
+	//  HUD_DrawPlayerGridLabel @0x59cb40 — origin snapped to 300 wu cells, column letters from
 	//  x - 150 wu - origin, row = y/300 - origin/300 - 1 (+1 above zero),
 	//  "(%s,%d)" right-aligned in the frame overlay color]
 	if ((flags & 0x200u) && !(flags & 0x1000u) &&

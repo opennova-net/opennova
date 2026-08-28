@@ -13,7 +13,8 @@
    committed golden in `fixtures/mus/golden_jo_gamemus.mus.txt`.
 
    The opcode table below was transcribed from the Python `OPCODES = {...}`
-   dict at line 23. The IDA witness confirmed all 65 entries (0x00..0x40);
+   dict at line 23. The IDA witness [orig: 65-entry dispatch table @ 0x84F220, see
+   engine/formats/mus/mus.h] confirmed all 65 entries (0x00..0x40);
    slots 0x0D, 0x0E, 0x1F, 0x26, 0x27, 0x2C..0x2F, 0x36, 0x37, 0x3C have
    no Python entry (those are unused / no-op slots in the dispatch table).
 

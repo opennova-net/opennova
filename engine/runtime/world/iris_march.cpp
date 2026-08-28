@@ -59,9 +59,9 @@ void compute_iris_march(World &world, CollisionWorld &collision,
 		// iterates only that player's own +0x1BC/+0x1C0 slice (the 17-tick
 		// arena), skips candidates owner-linked to the player, requires an
 		// ItemDef, and reports BLOCKED on the first obstructed candidate
-		// (retail: raycast_find_collision_entity @0x539a70 — slice walk
+		// [orig: raycast_find_collision_entity @0x539a70 — slice walk
 		// @0x539b5d..0x539bc4, pushed @0x5c7765..0x5c77c6 at radii
-		// -0x2000/-0x5000/-0x8000, see docs/render/render-lighting-re.md).
+		// -0x2000/-0x5000/-0x8000, see docs/render/render-lighting-re.md].
 		int32_t level = 8;
 		const int32_t ray_end[3] = { p[0] + sun[0], p[1] + sun[1], p[2] + sun[2] };
 		if (local_candidate_count > 0) {

@@ -1105,7 +1105,7 @@ bool Terrain::_build_terrain() {
 		// The tile's own quadrant decides the lock policy for every one of its
 		// vertices; a tile whose last row/column lands on the quadrant boundary is
 		// exactly the case the .trn locks exist for.
-		// [orig: sub_402D20 — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200).]
+		// [orig: sub_402D20 @0x402D20 (jodemo.exe) — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200).]
 		const opennova::terrain::CoordsTaps taps =
 			opennova::terrain::coords_taps_for_quadrant(
 				quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, hm_size);

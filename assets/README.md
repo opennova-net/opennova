@@ -69,7 +69,7 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 | `vmacros.bin` | `engine/formats/rtxt` | voice-macro strings `[orig: @ 0x4a702f]` — may be empty-but-valid. |
 | `keyhelp.bin` | `engine/formats/rtxt` | keyboard-map strings `[orig: @ 0x4a7072]` — may be empty-but-valid. |
 | `items.def` | authored text | `[orig: @ 0x4a71a3 → ItemDef_ParseProperty @ 0x49eb00]` — minimal: only what the mission places or the engine spawns by fixed id (witnessed mapping, D-ITEMDEF-1): the player item `105310` (spawned by its own id, never placed) and the mesh-less marker family (`106001` player start, `106003`/`106004` team starts, plus the retail-canonical `100000`/`106002`/`106005`). Model-bearing entries the map does not place are not carried ahead of their models. Ids the engine addresses **by number** are reserved; ids that merely also exist in retail's catalogue are free, and our own content goes at `108001+`. |
-| `main.mnu` (`"Startup"` node) | project-authored MNU | the entry screen `[orig: sub_552500 @ 0x552651]`. |
+| `main.mnu` (`"Startup"` node) | project-authored MNU | the entry screen `[orig: Menu_InitShellResources @ 0x552651 -> UIScene_LoadAndParseContent @ 0x63c830 -> CUIScene_SelectNodeByName @ 0x63b6b0]`. |
 
 ### Host + join + single player — mission start + menus
 
@@ -118,7 +118,7 @@ Boot-clean was not menu-visible: the Startup screen drew text-only buttons on
 a **null font slot** — a black screen (validated on retail 2026-07-05; the
 `/FRISK` log showed every set file loading and the profile saves proved the
 shell was running). The menu shell's own load list is witnessed at
-`sub_552500 @ 0x552500`: `menu_style.mns` → `brand.mns` (append; not even
+`Menu_InitShellResources @ 0x552500`: `menu_style.mns` → `brand.mns` (append; not even
 retail ships one) → the three menu Bink slots (`main.bik`/`header.bik`/
 `footer.bik`) → `nw_cdata.coo` → `main.mnu` → `Startup` →
 `HUD_InitAllFonts @ 0x51ee20` with **hardcoded font names** (width breakpoints

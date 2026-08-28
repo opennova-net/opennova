@@ -32,9 +32,9 @@ const Entity *local_entity(World *world) {
     return world != nullptr ? world->registry.get(world->cached.local_player) : nullptr;
 }
 
-// The mode-4 transition computes the lerp camera once (retail:
+// The mode-4 transition computes the lerp camera once [orig:
 // Camera_SetTrackedEntity @0x439257 -> Camera_ComputeThirdPersonPositions
-// @0x438b80). The anchor: the joiner's S2C 0x52 triple (the last received one,
+// @0x438b80]. The anchor: the joiner's S2C 0x52 triple (the last received one,
 // zeros like retail's globals before any), the authority's +0x178 killer
 // entity position, else the player itself.
 void enter_death_camera(World &world, const Entity &e, PlayerViewState &v,
@@ -253,11 +253,11 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
     // The mounted camera's carrier read, refreshed every tick: only a CONTROL
     // seat (the retail parentSlot 2/5 test) takes the mounted leg, and the
     // carrier's pose/radius/class feed the chase target, the back-off and the
-    // watercraft eye drop (retail: Camera_ComputeThirdPersonView @0x437D10 --
+    // watercraft eye drop [orig: Camera_ComputeThirdPersonView @0x437D10 --
     // the +0x168 seat test, parentEntity +0x16C, boundRadius +0, the unitType
-    // +0x196 in {3,4} test @0x43861D..0x43864C; see player_view.h). The same
-    // seat test is the arbiter's (retail: Render_ProcessMainSceneFrame
-    // @0x5ca1e2..0x5ca1f2), so the read precedes the mode resolve and the
+    // +0x196 in {3,4} test @0x43861D..0x43864C; see player_view.h]. The same
+    // seat test is the arbiter's [orig: Render_ProcessMainSceneFrame
+    // @0x5ca1e2..0x5ca1f2], so the read precedes the mode resolve and the
     // effective-mode refresh below.
     MountedCameraInput mount;
     const Entity *carrier = e->mounted ? world->registry.get(e->mount_target) : nullptr;
@@ -271,9 +271,9 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
         // reads the carrier through carrier_pose_fixed, whose yaw is the one
         // attitude term every mover family stamps, so the forward is the
         // yaw-only form (sin yaw, cos yaw, 0) in mission space -- the pitch/roll
-        // fold of the full chassis matrix is not composed here (retail:
+        // fold of the full chassis matrix is not composed here [orig:
         // Camera_ComputeThirdPersonView @0x438811..0x4388b5, see
-        // docs/world/world-wac-ai-re.md section 14.6).
+        // docs/world/world-wac-ai-re.md section 14.6].
         const double forward_yaw_rad =
             mission_yaw_deg_from_bam_heading(mount.carrier_yaw_bam) * (kPi / 180.0);
         mount.carrier_forward[0] = static_cast<float>(std::sin(forward_yaw_rad));
@@ -284,8 +284,8 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
         mount.water_z = static_cast<float>(world->env.water_z) / 65536.0f;
     }
     v.mount = mount;
-    // The remaining arbiter inputs (retail: Render_ProcessMainSceneFrame
-    // @0x5ca1f4..0x5ca24b; see player_view.h). The two g_rules_flags bits are
+    // The remaining arbiter inputs [orig: Render_ProcessMainSceneFrame
+    // @0x5ca1f4..0x5ca24b; see player_view.h]. The two g_rules_flags bits are
     // admin `set` commands with no wire fold yet: carried false.
     v.local_dead = s.local_dead;
     v.death_screen_active = s.death_screen_active;

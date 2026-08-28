@@ -791,7 +791,7 @@ func test_godot_to_bms_position_axis_remap() -> void:
 # or a control-register binding) must place as an individual ObjectModel even
 # though items.def gives it no anim_def: a MultiMesh batch captures the rest pose once
 # and never evaluates PANM again, while the engine re-poses PANM from the global clock
-# every rendered frame [orig: PANM_SampleTrack (sub_4354B0) idle gate, clock
+# every rendered frame [orig: PANM_SampleTrack @0x5b2270 idle gate, clock
 # Render_ShaderTickMs @0x2721A40]. DFX2's "Oil Pump" (graphic pump,
 # type decoration, control-0x32 sine tracks) is the witnessed case. Inert PANM
 # blocks (armory as shipped: entries
