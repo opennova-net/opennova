@@ -12,13 +12,12 @@ TARGET level are the two structural seams:
      ONLY library that links opennova_sqlite. Any target whose transitive link
      closure reaches opennova_sqlite must either be the service itself or link
      the service DIRECTLY (its declared consumers: apps/novaworld_server and
-     the service tests). Everything else — the engine groups, the FFI shared
-     lib, the godot adapter, the other apps/tests — is a violation.
+     the service tests). Everything else — the engine groups, the godot
+     adapter, the other apps/tests — is a violation.
 
   2. Forbidden edges: the game net stack never links the service leg (the
-     service sits ABOVE opennova_net), the FFI shared lib carries no net stack
-     (ADR 0019 §5; abi_export_identity pins the export surface), and the godot
-     adapter links session+gate via opennova_net, never the service.
+     service sits ABOVE opennova_net), and the godot adapter links
+     session+gate via opennova_net, never the service.
 
 PUBLIC vs PRIVATE keywords are deliberately not consulted: a STATIC library's
 PRIVATE deps still propagate onto every downstream link line (as $<LINK_ONLY>
@@ -86,13 +85,6 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         ["opennova_net"],
         [SERVICE_TARGET],
         set(),
-    ),
-    (
-        "the FFI shared lib carries no net stack (ADR 0019 §5; "
-        "abi_export_identity pins the export surface)",
-        ["opennova_shared"],
-        ["opennova_net", SERVICE_TARGET],
-        {"opennova_shared"},  # absent when BUILD_SHARED_LIB=OFF
     ),
     (
         "the godot adapter links session+gate via opennova_net, "

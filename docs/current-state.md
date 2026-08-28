@@ -60,15 +60,16 @@ GDScript presentation math (the mission load plan, the HUD config tokens, the
 presenter and viewmodel frame math, the light-director constants, the loading
 screen, the character registry). The remainder is queued in
 [ADR 0040](adr/0040-the-engine-is-one-namespace.md)'s ladder, which is that
-queue's only home: A3, Train B's `simulation.h` state-model split and its feed
-marshallers, the Train C tail including the `mission_audio.gd` reverb, and
-Train D in full. The counters sit at 341 and 733, not yet at a seam-contract
+queue's only home: A3, Train B's `simulation_*.cpp` remainder, its feed
+marshallers and the `simulation.h` state-model split, the Train C tail
+including the `mission_audio.gd` reverb, and Train D in full. The counters sit at 341 and 733, not yet at a seam-contract
 floor; the campaign is finished when both hold only documented seam contracts.
 It subsumes the structural slot earlier programs
 held: the **2026-07 quality campaign** closed at W4 (#310–#375; its W5
-residue stays tracked in [`TODO.md`](../TODO.md) § "Cleanup & verification
-backlog"), and the 2026-08-08 adapter-shape round (#451–#456) was this
-program's census and ground-clearing.
+residue is absorbed: the perf-span unify became ADR 0039's `FrameStatsBoard`,
+the debug-snapshot narrowing went with that hard cut, and the runtime
+push-downs are this ladder), and the 2026-08-08 adapter-shape round
+(#451–#456) was this program's census and ground-clearing.
 
 ## The standing loop for a fidelity slice
 
@@ -152,6 +153,8 @@ The remaining one is scoped small enough to be somebody's first grill.
 | `scripts/lint/orphan_header_check.py` | an `engine/` header wired to nothing: policy code that no engine, binding or app source includes (a header included only by its own test is exactly that shape), left behind by a move or landed ahead of its caller | CI, hard-fail; two deliberate escapes, `scripts/lint/orphan_header_allowlist.json` (a reasoned-exception list, burned down to empty on 2026-08-27) and a `STAGED, NOT WIRED` marker in the header naming the owner that will consume it |
 | `scripts/lint/host_lint.py` | "host" regressing to any non-game-host sense (the terminology campaign's teeth) | CI, hard-fail on code suffixes; Markdown gets a non-failing advisory |
 | `scripts/lint/maturity_lint.py` | dict-contract drift and new magic numbers in changed `.gd` ranges | CI, hard-fail (advisory legs stay advisory) |
+| `scripts/lint/env_lint.py` | a new environment read outside the four documented roots (`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`, `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_CAPTURES`), `GODOT_BIN` and the service family (ADR 0041; [dev-env-vars.md](dev-env-vars.md)) | CI, hard-fail; the allowlist is `scripts/lint/env_allowlist.json` |
+| `scripts/lint/fixture_lint.py` | a file under `fixtures/` that is not MINTED, AUTHORED or KEEP, an oversize fixture, or one that missed LFS (`fixtures/README.md`, ADR 0041) | CI, hard-fail with `--require-pulled`; the KEEP list is `scripts/lint/fixture_allowlist.json` |
 | [asset-gated-tests.md](asset-gated-tests.md) | believing a green run exercised retail data when the env vars were unset | read it before trusting a parity green |
 
 ## What this page is not

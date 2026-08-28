@@ -79,7 +79,7 @@ pitch_deg}` (the debug pose), `deploy_pick {zone}` (the auto-deploy hook),
 `set_viewmodel_weapon {weapon}` / `clear_viewmodel_weapon` (the viewmodel
 override), `kill_group {group}`, `crew_vehicle {occupant_ssn, vehicle_ssn}`,
 `crew_local_player {vehicle_ssn}` (the AI console), `local_player_look
-{dx_px, dy_px}`, `set_input_source` (scripted input), the
+{dx_px, dy_px}`, the
 `net_joiner_diagnostics` check (the joiner tripwire diagnostics) and
 `third_person_on_foot` (the third-person override).
 

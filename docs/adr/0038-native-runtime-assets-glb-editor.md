@@ -25,7 +25,8 @@ current game runtime.
    Qt importer, Blender add-on, DCC-specific package, `pyproject.toml`/lockfile,
    or Python test suite. Stdlib-only repository lint and maintainer scripts
    remain (`scripts/lint/`, the CI maturity gates; `scripts/ida/cite_sweep.py`;
-   `scripts/net/diff_0a.py`; `tools/net/pcap_to_hexcap.py`) and run on a stock
+   `scripts/net/diff_0a.py`; `tools/net/pcap_to_hexcap.py`; since ADR 0041 also
+   `scripts/mcp/game_mcp.py` and `scripts/ci/retail_gates_ran.py`) and run on a stock
    `actions/setup-python` interpreter. For product code the cut is literal: no
    compatibility modules or deprecated entry points remain.
 2. Native ASE, TDP/3DP, and OED authoring modules are removed. Godot

@@ -71,13 +71,27 @@ FFI wrapper. One thing still matters:
 
 ## 3. Fixtures (`fixtures/<name>/`)
 
-- Small representative samples ARE committed: `fixtures/**` is already LFS via
-  `.gitattributes` — after `git add`, verify with `git lfs status` that they
-  staged as LFS objects, not text.
-- Bulk retail corpora are NEVER committed (copyright). Gate a sweep test on a
-  runtime env var following `tests/mission/mission_corpus_test.cpp`:
-  `std::getenv("OPENNOVA_...")`, and when unset print
-  `skipped (set OPENNOVA_... to ...)` and exit 0 — skip-and-pass.
+- Small representative samples ARE committed, and every file under `fixtures/`
+  is one of the three classes `fixtures/README.md` defines: MINTED (written by
+  a `tests/fixtures/minimal_*_gen.cpp` generator through our own writer and
+  byte-compared by that generator's ctest), AUTHORED (text we wrote) or KEEP
+  (a small retail-interop file listed with its reason in
+  `scripts/lint/fixture_allowlist.json`). Prefer minting; a KEEP entry needs a
+  reason. `fixtures/**` is LFS via `.gitattributes` and capped at 2 MiB per
+  file — after `git add`, verify with `git lfs status` that the files staged
+  as LFS objects, then run `python scripts/lint/fixture_lint.py --report`
+  (CI runs it `--enforce --require-pulled`).
+- Bulk retail corpora are NEVER committed (copyright). Gate a sweep test on one
+  of the four machine roots through `tests/common/retail_paths.h`
+  (`retail::install()` / `retail::assets()` / `retail::mission_corpus()` /
+  `retail::capture(name)`, with `RETAIL_REQUIRE_OR_SKIP` or `retail::skip`):
+  absent data returns exit 77, and the test is registered with
+  `opennova_add_gated_test` so ctest reports Skipped, never Passed. A test whose
+  synthetic legs ran reports its missing retail leg with `retail::skip_leg` and
+  exits 0. Never read the environment directly (`scripts/lint/env_lint.py`
+  hard-fails it) and never exit 0 on missing data. Add the new gate to the
+  matrix in `docs/asset-gated-tests.md` and to the expectation tables in
+  `scripts/ci/retail_gates_ran.py` in the same commit.
 - Record where each committed sample came from in the test header comment.
 
 ## 4. Tests (`tests/<name>/`)

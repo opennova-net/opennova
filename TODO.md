@@ -29,7 +29,8 @@ hardening, and project health. Divergences from the original engine belong in
       every file under `engine/runtime/terrain` now carries an anchor, and the cpt/til/trn
       resource formats moved to `engine/formats/` carrying theirs, so the gap is
       `godot/src/terrain/`, where the foliage def/map pair, the static-shadow rasterizer
-      and the tile cache device/entry/info files carry none; `docs/terrain/terrain-re.md`
+      and the tile cache device/entry files carry none and `terrain_tile_info.cpp` carries
+      only its foliage-block anchor; `docs/terrain/terrain-re.md`
       is still partial (PAR-R1); narrow or close this entry after the sweep
 - [ ] Present-pass / entity-reconcile citation pass: the present anchors live at
       the native walks (`present_applier.{h,cpp}` 10, the wire walk +
@@ -55,13 +56,6 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
 - [ ] Converge `engine/formats/cpt`'s bit codec on `engine/base/io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `engine/CLAUDE.md`. Acceptance: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) stays green AND a by-hand retail-corpus byte diff still reports byte-identical CPT output after cpt drops its private copy; the corpus diff is not in ctest, so it has to be run by hand (`engine/CLAUDE.md` § migration exceptions).
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
-- [ ] W5 remainder (the 2026-07 quality campaign's last wave; waves 1-4 landed as
-      #310-#375): perf-span unify landed as ADR 0039's `FrameStatsBoard` +
-      `engine/runtime/devtools/frame_stats_slots.h`, and the sim debug-snapshot
-      narrowing is moot, since `DebugSnapshotWriter` went with ADR 0039's hard cut. What
-      is left is the runtime push-downs, and they are now ADR 0040's campaign: the
-      slice ladder in [ADR 0040](docs/adr/0040-the-engine-is-one-namespace.md) is the
-      queue for them, not this file
 - [ ] Cross-mission debug-intent replay: `DebugSession._explicit_values` is never
       cleared, so `sync()` replays explicit debug writes into a NEW mission's fresh
       sim/terrain targets. Decide the cross-mission scope of debug intent: clear on

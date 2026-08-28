@@ -104,6 +104,16 @@ a `_process` just under that render, after every game callback of the frame,
 so the tool windows read the frame the game just produced. Closed tools cost
 nothing: the Stats window arms the board's capture only while it is visible.
 
+In a debug windowed run with the addon present, `GameRuntimeRoot`
+(`godot/game/game_runtime_root.tscn`, the project's main scene) keeps
+`MainGame` inside one always-updating `SubViewport`: with the tools closed the
+`SubViewportContainer` composites it directly, and with them open the
+container's composite is hidden while the same texture is drawn as the
+workspace's Game window at the size that window requests (F3 through the Game
+texture closes the workspace). Release, headless and addon-less runs hand
+`MainGame` to the tree directly instead (ADR 0039; the `runtime_root_window`
+and `window_fullscreen` probes pin both arrangements).
+
 `MissionPresentation` owns the placed and wire present passes, entity index,
 effect drains, and fixed-tick presentation signals. It owns no cadence or
 playing flag. Its deterministic `tick()` test/debug entry still goes through

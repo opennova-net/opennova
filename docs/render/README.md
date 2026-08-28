@@ -33,7 +33,7 @@ pipeline descriptors). The engine returns renderer-neutral technique, blend,
 depth, cull, coverage, environment-source, and specular-source data; Godot
 maps that descriptor to one of the finite checked-in resources under
 `godot/shaders/object/`. No runtime shader source is assembled. Dump mode
-(`OPENNOVA_RENDER_VECTORS_DUMP=1`) rewrites the
+(`renderer_state_vectors_test --dump`) rewrites the
 golden and deliberately fails. Re-dumps carry witness citations in the same
 commit. A thin GUT leg (`godot/tests/render_shader_cache_handoff_test.gd`)
 pins the GDScript→native binding, while

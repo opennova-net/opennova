@@ -32,11 +32,16 @@ easier to relay than to rediscover.
   `modtools/` (ONED: settings, loose OpenNova run,
   staged retail run, Stop, and the hidden release pack command; its surface
   is the engine's ImGui `OnedUi` window, the app only executes its requests),
+  `probes/` (the registered `game_probe` runtime probes, source-only and
+  excluded from both export presets, ADR 0041; see `docs/mcp.md`),
   `tests/` (GUT suite).
 - `apps/` — `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
-  `nw_pp/` (NovaWorld in-game packet pretty-printer/decoder), `common/` (shared
-  socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
+  `nw_pp/` (NovaWorld in-game packet pretty-printer/decoder), `extract/`
+  (`opennova-extract`: writes named entries out of a mounted game root through
+  the engine's own resource index; replaced the dump probes, ADR 0041), `common/`
+  (shared socket helpers, deliberately app-layer; pcap I/O lives in
+  `engine/base/pcapio`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `launcher/` — Windows tray app pointing a
   stock install at our servers; `backend/` + `deploy/` + `infra/` — service data and
   deployment stack (DEPLOY.md).
@@ -114,7 +119,7 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   typed frame input, advances that session, and orders Godot-only presentation/device
   work once per display frame. A `godot/` line earns its place only as that device
   work (node writes, GPU dispatch, input sampling, audio players) or a thin typed seam.
-  Nova formats never touch Godot's resource system:
+  NovaLogic formats never touch Godot's resource system:
   documents read/write themselves (`load_from_path`/`save_to_path`).
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
@@ -184,6 +189,9 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   (`godot/src/simulation/present_applier*.cpp`), or `Simulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — ONED,
   retail staging, and hidden release pack command.
+- [docs/mcp.md](docs/mcp.md) — the game MCP: launching with `--mcp-port`,
+  `scripts/mcp/game_mcp.py` / `game_mcp.ps1`, the tool catalog and the
+  `game_probe` runtime probes (ADR 0041); drive it with the `game-mcp` skill.
 - Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/src/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
 - Project skills in `.claude/skills/`: `gut`, `oned-run`, `game-mcp`, `new-format-lib`, `re-doc`,

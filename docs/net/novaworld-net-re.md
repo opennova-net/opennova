@@ -1595,9 +1595,9 @@ tag's appearance in one direction says nothing about the other. The 0x25-vs-0x1D
 All observed blobs are 616 bytes (the size hardcoded into the handler's copy into
 `g_BmsHeaderBlock @ 0xA761D0` — renamed from `byte_A761D0` 2026-07-27; for a JOINER this wire
 copy is the ONLY mission-identity source, §5.28 correction / D-NET-194). Cross-capture diff
-over three maps (dvxi5 / dvxc1 / g11), sourced from the
-fragment-aware dissector (`tools/wireshark/jointops_udp.lua`); never diff from
-non-reassembled per-fragment extracts:
+over three maps (dvxi5 / dvxc1 / g11), sourced from a local fragment-aware
+Wireshark dissector (`jointops_udp.lua`, a maintainer-side tool that is not tracked
+in this repository); never diff from non-reassembled per-fragment extracts:
 
 | Offset (dec) | Width | Field | dvxi5 | dvxc1 | g11 | Category |
 |---|---|---|---|---|---|---|
@@ -2728,7 +2728,7 @@ the overshoot/steer-guard detonation and the proximity AI-notify are
 AUTHORITY-only `[orig: the role gate @0x4463cb]` — a non-authority client
 flies until the wire's group 1 sets the dead bit) — and
 the per-group field semantics are validated against a local retail Karo Stinger
-capture (`nw_karo_guided_test`, asset-gated NW_KARO_GUIDED_PCAP; the earlier
+capture (`nw_karo_guided_test`, gated on `<OPENNOVA_CAPTURES>/karo-guided.pcapng`; the earlier
 "no capture in hand" blocker is closed by that capture). Still deferred: the
 authority seeker branch (the 0x44 write side), missile presentation, and the
 per-missile ammo resolve for velocity/turn clamps. Verdict: **ported**
