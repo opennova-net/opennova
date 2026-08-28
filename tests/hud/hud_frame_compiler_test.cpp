@@ -775,7 +775,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	layout.spinmap_wp_dist_off = 0;
 	compiler.update_layout(layout);
 	// The M-cycle big map: mode 3 compiles the fullscreen north-up pass —
-	// grid rules appear, the compass ring does not (mask 0xAF937 has
+	// grid rules and water appear, the compass ring does not (mask 0xAF937 has
 	// neither bit9 nor bit6), and the view centers on the design screen.
 	// [orig: HUD_BuildMapOverlayView @0x5a7e10; HUD_CycleMapMode @0x520bc0]
 	{
@@ -784,6 +784,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		big_state.minimap.player_x = 1035 << 16;
 		big_state.minimap.player_heading_bam = 0x10000000;
 		big_state.minimap.terrain.present = true;
+		big_state.minimap.terrain.water_present = true;
 		big_state.minimap.terrain.sector_count = 16;
 		big_state.minimap.terrain.sector_rows = 16;
 		big_state.minimap.terrain.sector_grid.fill(1);
@@ -797,6 +798,10 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		const HudDrawList &big = compiler.compile(big_state, 1024.0f, 768.0f);
 		CHECK(big.map.visible, "the corner spinmap still compiles under a map mode");
 		CHECK(big.big_map.visible, "mode 3 compiles the big-map pass");
+		CHECK(!big.big_map.terrain.empty() &&
+				big.big_map.terrain_water.size() == big.big_map.terrain.size(),
+				"mode 3 redraws every clipped big-map terrain triangle with "
+				"depthspin water");
 		CHECK(std::fabs(big.big_map.center_x - 511.0f) < 2.0f &&
 				std::fabs(big.big_map.center_y - 383.0f) < 2.0f,
 				"the fullscreen pass centers on the design screen");
@@ -854,6 +859,19 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 				std::fabs(win.big_map.center_x - 219.0f) < 2.0f &&
 				std::fabs(win.big_map.center_y - 219.0f) < 2.0f,
 				"mode 2 compiles the 20,20..419,419 window");
+		CHECK(!win.big_map.terrain.empty() &&
+				win.big_map.terrain_water.size() == win.big_map.terrain.size(),
+				"mode 2 redraws every clipped big-map terrain triangle with "
+				"depthspin water");
+
+		HudFrameState dry_big_state = big_state;
+		dry_big_state.minimap.map_mode = 3;
+		dry_big_state.minimap.terrain.water_present = false;
+		const HudDrawList &dry_big = compiler.compile(
+				dry_big_state, 1024.0f, 768.0f);
+		CHECK(!dry_big.big_map.terrain.empty() &&
+				dry_big.big_map.terrain_water.empty(),
+				"a big map without a depthspin mask emits no water layer");
 	}
 
 	// Special-bank slots whose lifetime floored to zero stay claimed in the

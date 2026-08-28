@@ -1384,10 +1384,8 @@ is `screenshots/pr-492/` (the synchronized 00TRa spinmap pair).
   `g_trackedTargetPos @0x272350C`, drawer args no-line/tip-when-ahead), 8
   the waypoint state line in `g_waypointAltitudeColor @0x2723D7C` (ctx
   `g_waypointPosXY @0x2723518`; drawer args line+tip), 9 pairs into the
-  compass gate, selects `render_terrain_decal`'s enable_fog_pass
-  water-overlay variant (the TILES themselves draw UNMASKED — the decal
-  call is unconditional, bit9 only picks its argument form), and gates
-  the player grid-coordinate label with !bit12
+  compass gate, selects `render_terrain_decal`'s adjacent `use_alt_blend`
+  argument, and gates the player grid-coordinate label with !bit12
   (`HUD_DrawPlayerGridLabel @0x59cb40`:
   `"(%s,%d)"` right-aligned half-bright at the authored `mapcoords` position
   `g_mapCoordsLabelX/Y @0x27236F4/F8`, gated `g_mapCoordsLabelOff
@@ -1424,7 +1422,11 @@ is `screenshots/pr-492/` (the synchronized 00TRa spinmap pair).
   box at `0x2723628/262C`), 20 the waypoint altitude nub above the rect (see
   the pointer bullet; NO witnessed caller mask carries bit20 — `0xD07FF`
   and `0xAF937` both lack it, so the leg ships dormant in retail JO; the
-  earlier "big-map mask" attribution is corrected). The spinmap's
+  earlier "big-map mask" attribution is corrected). The bit9 terrain branch
+  does **not** gate water: `HUD_DrawMapOverlay` tests it `@0x5a6670`, pushes
+  `enable_fog_pass = 1` unconditionally `@0x5a6677`, selects
+  `use_alt_blend = 1/0` `@0x5a6684/@0x5a6696`, and converges on the decal
+  call `@0x5a66a5`. The spinmap's
   `0xD07FF` sets bits 0-10 and 16/18/19.
 - **Waypoint/tracked pointer** [orig: `HUD_DrawMapTargetPointer @0x599220`
   (ex "CTerrainTile_UpdateShadowState"), call sites `@0x5a7835` (bit 7,
@@ -1560,7 +1562,11 @@ is `screenshots/pr-492/` (the synchronized 00TRa spinmap pair).
   1×) and draws the terrain a second time on an additive child item —
   per-pixel identical to the ×4 stage under saturation. The
   `enable_fog_pass = 1` both call sites pass (`@0x5a59c8`/`@0x5a6677`) is
-  the separate WATER pass, not the brightness. `PolyTrn_InitTextures
+  the separate WATER pass, not the brightness. In `HUD_DrawMapOverlay`, the
+  bit9 branch selects only the neighboring `use_alt_blend` argument
+  (`@0x5a6670`, `@0x5a6684/@0x5a6696`) before the shared call
+  `@0x5a66a5`; downstream, the water redraw checks `enable_fog_pass` and
+  generated vertices `@0x6079DC`. `PolyTrn_InitTextures
   @0x60BA20` builds the 256×256 `depthspin` texture directly from the raw
   1024×1024 CPT height words: output `(x,z)` averages the four taps
   `(4x,4z)`, `(+2,0)`, `(0,+2)`, and `(+2,+2)`, then uses `sum >> 10` as
@@ -1775,7 +1781,9 @@ builds the mode's ctx and calls the same `HUD_DrawMapOverlay`:
   mode 2: the 400×400 design window at (20,20)..(419,419); mode 3: the
   fullscreen 0,0..1023,767 map. The mask has NO bit9 and NO bit6 (no
   compass — the compass gate is bit9 && bit6 `@0x5cab..512-region`), and
-  NO bit18 label. mode 1 exists for a caller-supplied entity (rotating,
+  NO bit18 label. The absent bit9 does not suppress water: the caller's
+  `enable_fog_pass = 1` push `@0x5a6677` is outside that bit's argument
+  branch. mode 1 exists for a caller-supplied entity (rotating,
   entity_ref = entity heading; ctx+48 carries the mode and exempts the
   grid leg) and mode 4 for a caller rect (the DEATH-window sibling).
 - bit12 (set in 0xAF937) selects the GRID leg, not marker suppression:
