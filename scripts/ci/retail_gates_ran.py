@@ -66,7 +66,6 @@ KNOWN_ABSENT = {
     "mission_coop_convoy": "05TRcoop.bms is on no known retail mount or corpus",
     "mission_script_report": "05TRcoop.bms is on no known retail mount or corpus",
     "bunker_walkin": "05TRcoop.bms is on no known retail mount or corpus",
-    "minimal_pff_package": "argv-only tool modes (--write-pff / --install)",
     "netsim_client_replica_pipeline_capture_parent_follow":
         "needs <OPENNOVA_CAPTURES>/golden/retail-vehicle-session.pcapng beside items.def; "
         "captures never ride CI",

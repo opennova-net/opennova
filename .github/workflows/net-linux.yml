@@ -1,0 +1,61 @@
+name: Net stack (Linux)
+
+# The one definition of the Linux net leg: the standalone novaworld server
+# with the Crow HTTP layer ON plus the net-scoped ctests, on the deploy
+# target's OS and flag set. ci.yml runs it on every push and PR; the
+# NovaWorld images workflow gates its image builds on the same job, so a
+# green here means the server image will build and the test list never
+# drifts between the two callers.
+#
+# The Windows `test` job compiles the same net libs and runs the same tests
+# with BUILD_NOVAWORLD_HTTP=OFF (no Crow/asio FetchContent on the hot legs);
+# the wider lib corpus rides the Windows job and the master-only Linux full
+# build in ci.yml (test-linux).
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  net-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false   # net stack consumes no LFS game assets (net fixtures pulled below)
+
+      # nwmsg_replay_test reads the captured .nwmsg parity fixtures and
+      # nw_self_capture_test the committed opennova-produced self-capture pcap,
+      # both LFS-tracked (fixtures/** in .gitattributes). The rest of the net
+      # stack consumes no LFS assets, so pull only this subtree to keep checkout
+      # fast.
+      - name: Materialize net parity fixtures (LFS)
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/novaworld/**"
+
+      - name: Install libcurl (server links it when HTTP is ON)
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+      - name: Configure (BUILD_NOVAWORLD_HTTP=ON)
+        run: cmake -S . -B build-server -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
+
+      - name: Build server + net tests
+        run: |
+          cmake --build build-server -j "$(nproc)" --target opennova_novaworld_server \
+            url_cipher_test crc32_test nwu_test pubcrypto_test epask_test \
+            envelope_test tlv_test session_test \
+            registration_url_test gate_response_test gate_probe_test lobby_update_test \
+            gate_server_loopback_test gsb_roundtrip_test protocol_message_test \
+            connection_registry_test connection_manager_test \
+            db_sqlite_test session_hello_roundtrip_test lobby_session_test \
+            backend_schema_test nw_codec_identity_test nw_self_capture_test \
+            unknown_tracker_test nwmsg_replay_test expansion_publish_test
+
+      - name: Run net ctests
+        run: |
+          ctest --test-dir build-server --output-on-failure --parallel "$(nproc)" -R \
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|expansion_publish)$"

@@ -20,6 +20,8 @@
 
 using namespace opennova;
 
+#include "common/file_io.h"
+
 namespace {
 
 int fail = 0;
@@ -33,16 +35,7 @@ int fail = 0;
 
 std::string path(const char *name) { return std::string(GAME_ASSETS_DIR) + "/" + name; }
 
-bool read_bytes(const std::string &p, std::vector<uint8_t> &b) {
-	std::ifstream f(p, std::ios::binary | std::ios::ate);
-	if (!f) return false;
-	const std::streamoff sz = f.tellg();
-	if (sz < 0) return false;
-	f.seekg(0);
-	b.resize(static_cast<size_t>(sz));
-	if (!b.empty()) f.read(reinterpret_cast<char *>(b.data()), static_cast<std::streamsize>(b.size()));
-	return true;
-}
+using test_io::read_file;
 
 bool is_lfs_pointer(const std::vector<uint8_t> &b) {
 	static const char k[] = "version https://git-lfs";
@@ -85,7 +78,7 @@ void run(const char *name, const std::vector<uint8_t> &bytes, bool write_mode,
 		return;
 	}
 	std::vector<uint8_t> committed;
-	CHECK(read_bytes(p, committed),
+	CHECK(read_file(p, committed),
 	      (std::string("committed ") + name + " missing — run with --write").c_str());
 	if (committed.empty()) return;
 	if (is_lfs_pointer(committed)) {

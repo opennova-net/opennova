@@ -23,6 +23,8 @@
 
 using namespace opennova;
 
+#include "common/file_io.h"
+
 namespace {
 
 bool expect(bool cond, const char *msg) {
@@ -128,16 +130,7 @@ std::vector<uint8_t> make_tone_wav() {
 
 // --- guard -----------------------------------------------------------------------------
 
-bool read_file(const std::string &path, std::vector<uint8_t> &out) {
-	std::ifstream f(path, std::ios::binary | std::ios::ate);
-	if (!f) return false;
-	const std::streamoff sz = f.tellg();
-	if (sz < 0) return false;
-	f.seekg(0);
-	out.resize(static_cast<size_t>(sz));
-	if (!out.empty()) f.read(reinterpret_cast<char *>(out.data()), static_cast<std::streamsize>(out.size()));
-	return true;
-}
+using test_io::read_file;
 
 int guard(const std::string &path, const std::vector<uint8_t> &bytes, bool write_mode) {
 	if (write_mode) {

@@ -31,6 +31,8 @@
 #include <cstdio>
 #include <vector>
 
+#include "conn_fixture.h"
+
 namespace {
 
 using namespace opennova;
@@ -51,19 +53,7 @@ w::PlayerSpawn player_spawn(uint16_t net_id) {
 	return s;
 }
 
-np::NapiNPConnection make_conn(uint32_t id, int type, ns::ISessionTransport *t,
-                               ns::TransportMode mode, w::EntityHandle owned, bool spawned) {
-	np::NapiNPConnection c;
-	c.connection_id = id;
-	c.type = type;
-	c.link.transport = t;
-	c.link.mode = mode;
-	c.link.owned_entity = owned;
-	c.burst.spawned = spawned;
-	c.spawned_announced = spawned;
-	c.phase = spawned ? np::ConnectionPhase::InMatch : np::ConnectionPhase::New;
-	return c;
-}
+using conn_fixture::make_conn;
 
 // Pop exactly one staged S2C datagram from a transport and assert it is the relayed 0x49.
 bool pops_one_relayed_49(ns::ISessionTransport &t, bool udp_raw,

@@ -188,7 +188,6 @@ rather than asserting byte-equality against a throwaway generator:
 | `minimal_trn_gen` | `mnml.trn` round-trips, keeps the 8-wide sector grid + quadrant block, names exactly the shipped `mnml_*` art (`minimal_trn_gen_test --write` re-emits the config) |
 | `minimal_art_validate` | every image `mnml.trn` names decodes; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |
 | `minimal_eol_guard` | every hand-authored text file is CRLF |
-| `minimal_pff_package` | the packaging tool (below); skips unless asked |
 
 ## Packaging
 

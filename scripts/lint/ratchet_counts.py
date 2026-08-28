@@ -4,9 +4,10 @@
 Counts debt classes that must never INCREASE, against the committed baseline
 in maturity_baseline.json:
 
-  test_private_pokes    lines in godot/tests/**/*.gd that access an
-                        _underscore member of ANOTHER object (self._ excluded)
-                        -- ADR 0018: each is a missing public seam.
+  test_private_pokes    lines in godot/tests/**/*.gd AND godot/probes/**/*.gd
+                        that access an _underscore member of ANOTHER object
+                        (self._ excluded) -- ADR 0018: each is a missing public
+                        seam, on the test side and the probe side alike.
   engine_uncited_src_files  engine/<group>/<lib> source files (post-flatten:
                         no src/ level) with zero "[orig" citations, excluding
                         the allowlisted infra libs (citation is inapplicable

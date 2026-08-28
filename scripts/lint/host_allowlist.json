@@ -1,5 +1,5 @@
 {
-  "_comment": "KEEP taxonomy for scripts/lint/host_lint.py: where the word 'host' legitimately lives (game/server host, wire-frozen names, external vocabulary). Everything outside this file renames \u2014 see CONTEXT.md Host / Joiner.",
+  "_comment": "KEEP taxonomy for scripts/lint/host_lint.py: where the word 'host' legitimately lives (game/server host, wire-frozen names, external vocabulary). Everything outside this file renames — see CONTEXT.md Host / Joiner.",
   "path_globs": [
     "apps/novaworld_server/*",
     "apps/nw_lan_probe/*",
@@ -17,8 +17,6 @@
     "godot/game/novaworld_panel.gd",
     "godot/game/novaworld_settings.gd",
     "godot/tests/armory_presenter_test.gd",
-    "godot/tests/debug_entities_page_test.gd",
-    "godot/tests/debug_snapshot_writer_test.gd",
     "godot/tests/deploy_screen_presenter_test.gd",
     "godot/tests/game/main_game_lifecycle_test.gd",
     "godot/tests/game_world_test.gd",
@@ -195,12 +193,12 @@
     "godot/tests/debug_session_test.gd",
     "godot/tests/env_render_cadence_test.gd",
     "godot/tests/vehicle_emplacement_alignment_test.gd",
-    "godot/game/world/*",
     "godot/src/env/*",
     "engine/formats/env/*",
     "tests/env/*",
     "tests/mission/*",
-    "engine/base/resource_index/boot_policy.h"
+    "engine/base/resource_index/boot_policy.h",
+    "godot/game/world/*"
   ],
   "line_allow": [
     "stats_window_rows.h|\"Host owner pump\"",
@@ -211,7 +209,6 @@
     "stats_window_rows.h|\"Host setup/input\"",
     "stats_window_rows.h|\"Host-pump unattributed\"",
     "apps/common/net_datagram_socket.h|headless host",
-    "apps/common/net_datagram_socket.h|host_owner_loop.h",
     "engine/base/io/bit_stream.h|little-endian host",
     "engine/base/pcapio|host byte order",
     "engine/base/pcapio|host order",
@@ -251,7 +248,6 @@
     "resource_root_contract_test.gd|host's authoritative",
     "scripts/lint/maturity_lint.py|LAN host port range",
     "tests/mission/event_runtime_test.cpp|test_empty_host_holds_the_script",
-    "tests/mission/mission_script_report_test.cpp|retail's host counts itself",
-    "vehicle_emplacement_alignment_test.gd|host-side aircraft mover unported"
+    "tests/mission/mission_script_report_test.cpp|retail's host counts itself"
   ]
 }

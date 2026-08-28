@@ -7,14 +7,13 @@
     "OPENNOVA_CAPTURES": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1"]
   },
   "files": {
-    "scripts/*.sh": ["GODOT_BIN", "TEMP", "TMP", "HOME", "APPDATA", "XDG_DATA_HOME"],
+    "scripts/*.sh": ["GODOT_BIN", "HOME", "APPDATA", "XDG_DATA_HOME"],
     "scripts/godot_bin.sh": ["GODOT_BIN"],
-    "scripts/net/*.ps1": ["GODOT_BIN", "TEMP", "TMP", "ProgramFiles", "ProgramFiles(x86)", "SystemRoot", "PATH"],
+    "scripts/net/*.ps1": ["GODOT_BIN", "ProgramFiles", "ProgramFiles(x86)", "SystemRoot"],
     "scripts/mcp/*.py": ["GODOT_BIN"],
-    "scripts/mcp/*.ps1": ["GODOT_BIN"],
     "scripts/render/*.ps1": ["GODOT_BIN"],
-    "scripts/*.ps1": ["GODOT_BIN", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "ProgramFiles", "SystemRoot"],
-    "tests/common/test_paths.h": ["TEMP", "TMP", "TMPDIR"],
+    "scripts/*.ps1": ["APPDATA"],
+    "tests/common/test_paths.h": ["TEMP", "TMP"],
     "apps/novaworld_server/*": ["*"],
     "deploy/*": ["*"],
     "launcher/*": ["*"],

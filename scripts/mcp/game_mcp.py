@@ -38,9 +38,11 @@ PROTOCOL_VERSION = "2025-06-18"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_DIR = REPO_ROOT / "godot"
 RUNTIME_SCENE = "res://game/game_runtime_root.tscn"
+# Console-first, the same order as scripts/godot_bin.sh and scripts/net/lib.ps1
+# (the three resolvers are kept in sync by hand; change all three).
 GODOT_BINARIES = (
-    "Godot_v4.6.1-stable_win64.exe",
     "Godot_v4.6.1-stable_win64_console.exe",
+    "Godot_v4.6.1-stable_win64.exe",
     "Godot_v4.6.1-stable_linux.x86_64",
     "Godot_v4.6.1-stable_macos.universal",
 )
