@@ -54,7 +54,6 @@ bool GameDevTools::take_game_request(GameWindowRequest &request) {
 }
 
 void GameDevTools::set_frame_stats(FrameStatsBoard *board) {
-	frame_stats_ = board;
 	stats_window_->set_board(board);
 }
 

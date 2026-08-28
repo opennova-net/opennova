@@ -24,9 +24,6 @@ public:
 	const ImGuiPass &pass() const { return pass_; }
 	StatsWindow &stats_window() { return *stats_window_; }
 	const StatsWindow &stats_window() const { return *stats_window_; }
-	GameWindow &game_window() { return *game_window_; }
-	const GameWindow &game_window() const { return *game_window_; }
-
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_input_mode(GameInputMode mode);
@@ -36,13 +33,11 @@ public:
 
 	// The board the Stats window reads (owned by the embedder; may be null).
 	void set_frame_stats(FrameStatsBoard *board);
-	FrameStatsBoard *frame_stats() const { return frame_stats_; }
 
 private:
 	ImGuiPass pass_;
 	GameWindow *game_window_ = nullptr;
 	StatsWindow *stats_window_ = nullptr;
-	FrameStatsBoard *frame_stats_ = nullptr;
 };
 
 }  // namespace opennova::devtools

@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -21,6 +22,8 @@ constexpr const char *kImGuiSingleton = "ImGuiGD";
 
 void ImGuiPassNode::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_available"), &ImGuiPassNode::is_available);
+	ClassDB::bind_method(D_METHOD("set_platform_windows_allowed", "allowed"), &ImGuiPassNode::set_platform_windows_allowed);
+	ClassDB::bind_method(D_METHOD("are_platform_windows_allowed"), &ImGuiPassNode::are_platform_windows_allowed);
 }
 
 bool ImGuiPassNode::attach(opennova::devtools::ImGuiPass &p_pass) {
@@ -34,7 +37,7 @@ bool ImGuiPassNode::attach(opennova::devtools::ImGuiPass &p_pass) {
 	}
 	if (!engine->has_singleton(kImGuiSingleton)) {
 		UtilityFunctions::push_warning(
-				"ImGuiPassNode: the imgui-godot addon is not loaded (run scripts/bootstrap_godot.sh); ImGui surfaces unavailable");
+				"ImGuiPassNode: the imgui-godot addon is not loaded (run scripts/bootstrap_imgui_godot.sh, or scripts/bootstrap_godot.sh for a dev checkout); ImGui surfaces unavailable");
 		return false;
 	}
 	Object *imgui = engine->get_singleton(kImGuiSingleton);
@@ -56,6 +59,23 @@ bool ImGuiPassNode::attach(opennova::devtools::ImGuiPass &p_pass) {
 	return p_pass.attach_imgui(reinterpret_cast<void *>(static_cast<intptr_t>(table[0])),
 			reinterpret_cast<opennova::devtools::ImGuiAllocFn>(static_cast<intptr_t>(table[1])),
 			reinterpret_cast<opennova::devtools::ImGuiFreeFn>(static_cast<intptr_t>(table[2])), nullptr);
+}
+
+void ImGuiPassNode::set_platform_windows_allowed(bool p_allowed) {
+	platform_windows_allowed_ = p_allowed;
+	opennova::devtools::ImGuiPass *pass = engine_pass();
+	if (attached_ && pass != nullptr) {
+		pass->set_platform_windows_enabled(platform_windows_allowed_ && window_allows_platform_windows());
+	}
+}
+
+bool ImGuiPassNode::window_allows_platform_windows() const {
+	const Window *window = get_window();
+	if (window == nullptr) {
+		return true;
+	}
+	const Window::Mode mode = window->get_mode();
+	return mode != Window::MODE_FULLSCREEN && mode != Window::MODE_EXCLUSIVE_FULLSCREEN;
 }
 
 void ImGuiPassNode::set_layer_visible(bool p_visible) {
@@ -83,6 +103,9 @@ void ImGuiPassNode::_ready() {
 		set_process(false);
 		return;
 	}
+	// Before the addon's first NewFrame: a run that starts fullscreen must
+	// never show ImGui the viewports flag beside a fullscreen size.
+	pass->set_platform_windows_enabled(platform_windows_allowed_ && window_allows_platform_windows());
 	// The addon's helper runs ImGui::NewFrame() at the lowest process priority
 	// and its controller renders at the highest; this layout pass sits just
 	// under the render, after every game callback of the frame.
@@ -114,6 +137,7 @@ void ImGuiPassNode::_process(double p_delta) {
 	if (!attached_ || pass == nullptr) {
 		return;
 	}
+	pass->set_platform_windows_enabled(platform_windows_allowed_ && window_allows_platform_windows());
 	const uint64_t frame = Engine::get_singleton()->get_process_frames();
 	const int64_t t0 = Time::get_singleton()->get_ticks_usec();
 	const bool drew = pass->draw_frame(frame);

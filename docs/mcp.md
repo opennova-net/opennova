@@ -48,7 +48,8 @@ Stop-GameViaMcp -Port 8975 -Process $game; Stop-OpenNovaProcess -Process $game
 `launch` flags: `--headless` (no window; tools that need one refuse) or
 `--windowed`, `--resolution WxH`, `--log-file`, `--rendering-method`, `--port`
 (default 8975), `--pid-file`, `--timeout`; game flags forwarded after `--`:
-`--resource-dir` (default `OPENNOVA_JO_DIR`), `--exp`, `--game`, `--loose-root`,
+`--resource-dir` (default `OPENNOVA_JO_DIR`), `--exp`, `--game`, `--loose` (retail's
+`/d`: loose files beside the archives override them), `--loose-root`,
 `--loose-mission`, `--mission`, `--lan-host`, `--lan-join`, `--lan-port`,
 `--callsign`, `--lan-gametype`, `--lan-mode`, `--lan-max-players`,
 `--integrity-profile`, `--capture-pcap`. Exit codes: 0 ok, 2 tool error, 3
@@ -154,6 +155,7 @@ mission runtime, net codecs) is not a probe: it is a ctest under `tests/<domain>
 | stage | `loading_screen_stage`, `effects_visual`, `firebarrel_visual`, `gore_set_visual`, `bridge_water_shock`, `retail_parity_visual`, `foliage_flicker_regression` | the visual stage scenes and their captures |
 | runtime | `dialog_vs_ambient`, `mission_audio`, `fp_impact`, `hud_killfeed`, `vm_bone_dump`, `weapon_round` | audio, HUD and viewmodel witnesses in the live runtime |
 | runtime | `runtime_root_window` | the embedded game view (ADR 0039's debug windowed startup): one always-updating SubViewport under `GameRuntimeRoot`, the ImGui context attached, the tools workspace hiding only the direct composite, a resize reaching the viewport, F3 through the Game texture closing the workspace |
+| runtime | `window_fullscreen` | the F11 policy: windowed -> fullscreen -> windowed through `WindowState`, each state presenting a lit root frame and, in the embedded game view, the game viewport following the window size with its own frame lit |
 | net | `parity_joiner_ready` | wait for `in_match` or `deploy_hold` readiness on a `--lan-join` launch (`auto_deploy` sends the default pick); the witness the parity runner classifies |
 | net | `parity_joiner_motion` | the walk/strafe/turn exercise inside the runner's steady window |
 | net | `parity_joiner_state` | one live readiness snapshot |

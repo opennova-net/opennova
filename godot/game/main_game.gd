@@ -169,6 +169,8 @@ func finish_runtime_shutdown() -> void:
 	if _root != null:
 		_root.clear()
 	VegAssetsScript.clear_cache()
+
+
 ## True from the menu-to-loading handoff until the world reports success or
 ## failure. This is the public shell-level observation seam for load lifecycle
 ## tests and rendered probes (ADR 0018).
@@ -325,7 +327,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	# F11 fullscreen uses the shared runtime window policy.
 	if WindowState.is_toggle_event(event):
-		WindowState.toggle_fullscreen(get_window())
+		_toggle_fullscreen()
 		get_viewport().set_input_as_handled()
 		return
 	if key.keycode == CHANGE_DIR_KEY and _can_summon_dir_picker():
@@ -414,6 +416,25 @@ func pick_at_crosshair() -> void:
 	var sim = _world.get_sim() if _world != null else null
 	_pick_flow.pick_at_crosshair(sim, _camera, _pick_list,
 			_hud if _hud != null else self)
+
+
+## F11. ImGui multi-viewport must already be off at the NewFrame that first
+## sees the fullscreen size (imgui-godot 6.3.2 on Godot 4.6.1 / D3D12 presents
+## black otherwise; the window_fullscreen probe pins it), so the tools'
+## platform windows are withdrawn before the switch and allowed again after
+## the return to windowed.
+func _toggle_fullscreen() -> void:
+	var window := get_window()
+	var entering := not WindowState.is_fullscreen(window)
+	if entering:
+		_dev_tools.set_platform_windows_allowed(false)
+	WindowState.toggle_fullscreen(window)
+	if not entering:
+		_dev_tools.set_platform_windows_allowed(true)
+
+
+func get_local_player_presenter() -> LocalPlayerPresenter:
+	return _player_presenter
 
 
 func get_dev_tools() -> DevTools:
@@ -764,8 +785,6 @@ func join_lan_server(target: JoinTarget) -> void:
 	_net.join_lan_server(target)
 
 
-
-
 ## The common mission-start seam; ShellPresentationSession owns its visibility
 ## transition while this shell owns load state and the operation handoff.
 func start_world_load(load_info: Dictionary, operation: Callable) -> void:
@@ -1074,20 +1093,18 @@ func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
 	return _shell_presentation.hud_hidden_capture_witness(_hud_presenter, _hud)
 
 
-var _perf_probe_enabled := false
-var _perf_probe_spans: Dictionary = {}
-var _perf_probe_skip_world := false
-var _perf_probe_skip_hud := false
+## The frame-span probe switches: opt-in, since their clock reads and span
+## writes would perturb every retail frame they measure; the typed seam the
+## perf probes read and set.
+var _perf_probe := PerfProbeSwitches.new()
 
 
-## The frame-span probe is deliberately opt-in: its clock reads and Dictionary
-## writes would otherwise perturb every retail frame it is meant to measure.
+func get_perf_probe_switches() -> PerfProbeSwitches:
+	return _perf_probe
+
+
 func set_perf_probe_enabled(enabled: bool) -> void:
-	_perf_probe_enabled = enabled
-	_perf_probe_spans.clear()
-	if not enabled:
-		_perf_probe_skip_world = false
-		_perf_probe_skip_hud = false
+	_perf_probe.set_enabled(enabled)
 
 
 func _process(delta: float) -> void:
@@ -1096,12 +1113,12 @@ func _process(delta: float) -> void:
 		return
 	_refresh_dev_tools_game_state()
 	var stats_on: bool = _frame_phase_sampler.begin_shell_control()
-	var probe_enabled := _perf_probe_enabled
+	var probe_enabled := _perf_probe.enabled
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
 	# the F3 Stats capture both consume the same measurements.
 	var timing: bool = probe_enabled or stats_on
 	if probe_enabled:
-		_perf_probe_spans.clear()
+		_perf_probe.spans.clear()
 	_frame_phase_sampler.sample_render(_render_stats, get_viewport(), _menu_shell)
 	var dev_tools_open := is_dev_tools_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
@@ -1141,7 +1158,7 @@ func _process(delta: float) -> void:
 		frame_input = _player_presenter.before_world_tick(
 				delta, player_live, player_live)
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
-	var skip_world := probe_enabled and _perf_probe_skip_world
+	var skip_world := probe_enabled and _perf_probe.skip_world
 	if not skip_world:
 		_world.tick(_camera.global_position, _camera.global_transform,
 				delta, frame_input)
@@ -1153,7 +1170,7 @@ func _process(delta: float) -> void:
 	var probe_t3 := Time.get_ticks_usec() if timing else 0
 	# The shared HUD presenter rebuilds the per-frame info while the player is in-world
 	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
-	var skip_hud := probe_enabled and _perf_probe_skip_hud
+	var skip_hud := probe_enabled and _perf_probe.skip_hud
 	if _hud_presenter != null and not skip_hud \
 			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND]:
 		_hud_presenter.tick(is_gameplay_input_active())
@@ -1163,7 +1180,7 @@ func _process(delta: float) -> void:
 	if timing:
 		_frame_phase_sampler.record_shell_spans(
 				probe_t0, probe_t1, probe_t2, probe_t3, probe_t4,
-				Time.get_ticks_usec(), _perf_probe_spans, probe_enabled)
+				Time.get_ticks_usec(), _perf_probe.spans, probe_enabled)
 
 
 # Mouse-look rides the shared LocalPlayerPresenter (the yaw/pitch witnesses live there);

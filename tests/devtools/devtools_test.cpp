@@ -104,6 +104,13 @@ void test_attach_sets_docking_and_viewport_policy() {
 	const ImGuiIO &io = ImGui::GetIO();
 	CHECK((io.ConfigFlags & ImGuiConfigFlags_DockingEnable) != 0, "docking enabled on attach");
 	CHECK((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0, "multi-viewport requested on attach");
+	CHECK(tools.pass().platform_windows_enabled(), "multi-viewport is the attach default");
+	tools.pass().set_platform_windows_enabled(false);
+	CHECK((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0,
+			"the shell suspends multi-viewport for a fullscreen main window");
+	CHECK((io.ConfigFlags & ImGuiConfigFlags_DockingEnable) != 0, "docking survives the suspension");
+	tools.pass().set_platform_windows_enabled(true);
+	CHECK((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0, "and restores it once windowed again");
 	CHECK(tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr), "re-attach is harmless (reloadable extension)");
 	tools.pass().detach_imgui();
 	CHECK(!tools.pass().is_attached(), "detached");
