@@ -124,12 +124,6 @@ function Get-StructuredResult {
     return $ToolResult.structuredContent
 }
 
-function Get-GameToolText {
-    param([Parameter(Mandatory = $true)] $ToolResult)
-    return (@($ToolResult.content | Where-Object { $_.type -eq "text" } |
-        ForEach-Object { $_.text }) -join "`n")
-}
-
 function Test-GameMcpPortOpen {
     param([Parameter(Mandatory = $true)] [int] $Port)
     $client = [System.Net.Sockets.TcpClient]::new()

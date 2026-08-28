@@ -69,7 +69,7 @@ HARD_EXCLUDES = ("third_party/", "/build/", "scripts/lint/host_lint.py",
 HOST_TOKEN = re.compile(
     r"(?<![A-Za-z])host(?:s|ed|ing)?(?![a-z])"      # host, _host, host_x, hosted
     r"|(?<![A-Z])Host(?:s|ed|ing)?(?![a-z])"        # Host, MenuHost, HostOwner
-    r"|(?<![A-Za-z])HOST(?:S|ED|ING)?(?![A-Z]?[a-z])")  # HOST, NW_LAN_HOST
+    r"|(?<![A-Za-z])HOST(?:S|ED|ING)?(?![A-Z]?[a-z])")  # HOST, MULTI_PLAYER_HOST
 
 # Standard vocabulary that is not project terminology at all; a line carrying
 # one of these is skipped wholesale (the plural-meaning risk on such lines is
