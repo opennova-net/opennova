@@ -50,7 +50,7 @@ func test_load_combo_composes_parts_when_root_mounted() -> void:
 	if root != null and _head_graphic_resolves(root, combo):
 		assert_gt(_preview.get_part_model_count(), 0, "composes at least one part model when its .3di resolves")
 	else:
-		pending("OPENNOVA_JO_DIR: part .3di files not present in the mounted root; load_combo path exercised without error")
+		pending("fixtures/avatars carries no part .3di by design (no retail root is mounted here); load_combo path exercised without error")
 		assert_eq(_preview.get_part_model_count(), 0, "no parts compose when the graphics are absent")
 
 
