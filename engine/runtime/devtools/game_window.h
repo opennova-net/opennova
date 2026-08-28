@@ -33,7 +33,6 @@ class GameWindow : public Window {
 public:
 	const char *title() const override { return "Game"; }
 	bool is_closeable() const override { return false; }
-	bool is_undockable() const override { return false; }
 	bool is_collapsible() const override { return false; }
 	bool is_scrollable() const override { return false; }
 	InitialDockPlacement initial_dock_placement() const override {
