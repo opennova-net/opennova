@@ -7131,7 +7131,7 @@ apply (`NapiNPClientMsg_HandleWeaponLoadoutSync @ 0x4290E0`) re-runs the same cl
 its own table — echoed bytes converge on apply EXCEPT when the fallback `entry[23]` is negative
 (the shipped default), where the count degenerates (the v15 "ammo issues"). Reimpl:
 `build_tag_5a_weapon_loadout` (engine/net/npruntime/server_message_dispatch.cpp) + the witnessed
-rules in engine/net/npruntime/weapon_table_build.cpp over `world::WeaponTable` (D-NET-141).
+rules in engine/runtime/world/weapon_table_build.cpp over `world::WeaponTable` (D-NET-141).
 
 **Index numbering (CLOSED 2026-07-02):** `AnimDef_InitAll @ 0x5435C0` wipes the table and
 creates exactly ONE built-in — `"null"` @ index 0 (strcpy @0x543615) — immediately before
@@ -9405,7 +9405,7 @@ when the +5/+96483 flags say no submitted loadout), then the same
 display→fill chain as the local leg.
 
 **Reimpl mapping.** `engine/runtime/world/weapon_inventory.{h,cpp}` carries the structural
-translations (each function cites its original); `engine/net/npruntime/weapon_table_build.cpp`
+translations (each function cites its original); `engine/runtime/world/weapon_table_build.cpp`
 fills the new `WeaponTableEntry` fields + the ammo-class registry/caps;
 `weapon_fsm_queue_switch_from/rank` land beside the other request writers;
 `Simulation.rebuild_local_player_loadout` is the Player_InitPlayer weapon leg,
@@ -11979,7 +11979,7 @@ host parses ITS OWN resolved weapon.def (`Simulation::load_weapon_table` →
 `np::build_weapon_table` → `world::WeaponTable`), and `build_tag_5a_weapon_loadout` resolves
 per accepted entry like `Server_SendWeaponSlotListToPlayer @ 0x502550`: mask filter
 (@0x502716), ammoPrimary/ammoSecondary via the `WeaponSlot_GetTotalClips @ 0x5425F0` port
-(`resolve_loadout_ammo`, engine/net/npruntime/weapon_table_build.cpp), slot-combo reply order.
+(`resolve_loadout_ammo`, engine/runtime/world/weapon_table_build.cpp), slot-combo reply order.
 Table-less hosts (no resource root) keep the echo — tracked for that configuration only.
 Pinned by npruntime_weapon_table + the handshake armory cases. LIVE-VERIFIED retail-join v18
 (2026-07-02): the 0x5A reply is byte-for-byte golden — slots {2,3,21,76,77,78,83}, primaries

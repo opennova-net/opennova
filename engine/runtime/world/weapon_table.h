@@ -1,7 +1,7 @@
 // The armory / AdmDef weapon table resolved from weapon.def — the server-side weapon knowledge
 // the loadout service (C2S 0x2F -> S2C 0x5A), the extended-uplink equipped-weapon gate, and the
-// player spawn default read. POD and def-parser-free: engine/net/npruntime builds it from a parsed
-// DefWeaponsFile (npruntime/weapon_table_build.h); the engine feeds it from the resource root
+// player spawn default read. POD and def-parser-free: weapon_table_build.h (this directory)
+// builds it from a parsed DefWeaponsFile; the engine feeds it from the resource root
 // (Simulation::load_weapon_table). [orig: the AdmDefs table @0x24E7FE0, 255 x 1120 B;
 // docs/net/novaworld-net-re.md §5.57]
 #ifndef OPENNOVA_WORLD_WEAPON_TABLE_H

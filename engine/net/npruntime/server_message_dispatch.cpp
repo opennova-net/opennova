@@ -7,7 +7,7 @@
 #include <net/npruntime/server_spawn.h> // Server_ReservePlayerTeam (0x04/spawn identity)
 #include <net/npruntime/server_tick.h> // Server_StageHostDisconnect
 #include <net/npruntime/session_status.h>
-#include <net/npruntime/weapon_table_build.h> // loadout_entry_permitted / resolve_loadout_ammo (D-NET-141)
+#include <runtime/world/weapon_table_build.h> // loadout_entry_permitted / resolve_loadout_ammo (D-NET-141)
 
 #include <net/netsim/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
@@ -586,7 +586,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 		for (const LoadoutSubmitEntry &e : req.entries) {
 			const world::WeaponTableEntry *we = table->by_index(e.adm_index);
 			if (we == nullptr) continue; // the AdmDef_GetEntryByIndex fail leg
-			if (!loadout_entry_permitted(*we, req.team, reply.avatar_class))
+			if (!world::loadout_entry_permitted(*we, req.team, reply.avatar_class))
 				continue; // team/char mask filter [orig: @0x502716]
 			if (we->ammo_class_id >= 0 && we->ammo_class_id < 128) {
 				int32_t pool = e.ammo_primary != 0xFF
@@ -604,7 +604,8 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 			}
 			const uint8_t damage_class = normalized_damage_class(e.variant);
 			set_ammo_damage_class(grant.ammo_damage_classes, we->ammo_index, damage_class);
-			const LoadoutAmmoBytes ammo = resolve_loadout_ammo(*table, e.adm_index, e.ammo_primary);
+			const world::LoadoutAmmoBytes ammo =
+					world::resolve_loadout_ammo(*table, e.adm_index, e.ammo_primary);
 			GrantedSlot s;
 			s.combo = static_cast<uint16_t>(we->category * 65u + we->rank);
 			s.wire.type_id = e.adm_index;

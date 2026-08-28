@@ -1,6 +1,6 @@
 // The ammo.def table — the fired-round ballistics + damage knowledge the authoritative
-// round sim consumes. POD and def-parser-free: engine/net/npruntime builds it from a parsed
-// DefAmmoFile (npruntime/ammo_table_build.h); the engine feeds it beside the weapon table
+// round sim consumes. POD and def-parser-free: ammo_table_build.h (this directory) builds it
+// from a parsed DefAmmoFile; the engine feeds it beside the weapon table
 // (Simulation::load_ammo_table). [orig: g_ammoDefTable @ 0xA2ECE8 — 276-B records,
 // loaded per mission from literally "ammo.def" by AmmoDef_LoadAll @ 0x40B0B0 (same
 // encrypted-ASCII parse as weapon.def), token map AmmoDef_ParseProperty @ 0x40A2D0;
@@ -102,7 +102,7 @@ inline constexpr uint32_t kAmmoFlagIgnorFoilage = 0x4000000u; // sic — the wit
 // at or below the water plane [orig: the +0x114 & 0x20000000 test @0x4EA02B in
 // Projectile_UpdatePhysics; world/round_move_effect.h].
 inline constexpr uint32_t kAmmoFlagClipWaterFx = 0x20000000u;
-// (parity static_asserts against DEF_AMMO_FLAG_* live in npruntime/src/weapon_table_build.cpp)
+// (parity static_asserts against DEF_AMMO_FLAG_* live in world/weapon_table_build.cpp)
 
 struct AmmoTableEntry {
     std::string name;               // record +144 [orig: AmmoDef_AllocateSlot copy]

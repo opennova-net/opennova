@@ -11,7 +11,7 @@
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
 #include <formats/def/def.h>
-#include <net/npruntime/weapon_table_build.h>
+#include <runtime/world/weapon_table_build.h>
 #include <runtime/simassets/adm_clip_index.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_table.h>
@@ -54,7 +54,7 @@ int main() {
 	DefWeaponsFile file{};
 	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file) != 0)
 		return retail::skip("a parseable weapon.def");
-	const world::WeaponTable table = np::build_weapon_table(file, &index);
+	const world::WeaponTable table = world::build_weapon_table(file, &index);
 	expect(!table.empty(), "the weapon table bakes");
 
 	int weapons = 0, keyed = 0, resolved = 0, missing = 0, auto_rows = 0, auto_checked = 0, collapsed = 0;

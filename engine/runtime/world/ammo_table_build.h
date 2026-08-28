@@ -9,7 +9,7 @@
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/weapon_table.h>
 
-namespace opennova::np {
+namespace opennova::world {
 
 // Dense file-order table (index 0 = the file's own null first block, e.g. AT_NULL).
 world::AmmoTable build_ammo_table(const DefAmmoFile &ammo);
@@ -18,4 +18,4 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo);
 // unresolvable — the original warns and leaves the pair null).
 void resolve_weapon_round_types(world::WeaponTable &weapons, const world::AmmoTable &ammo);
 
-} // namespace opennova::np
+} // namespace opennova::world

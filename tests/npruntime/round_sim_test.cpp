@@ -21,7 +21,7 @@
 // hold branches; exact silent-drop/accept boundary; a dead loopback victim releases at
 // spawn health without a second respawn implementation.
 
-#include <net/npruntime/ammo_table_build.h>
+#include <runtime/world/ammo_table_build.h>
 #include <net/npruntime/napi_np_connection.h>
 #include <net/npruntime/napi_np_server_ctx.h>
 #include <net/npruntime/server_message_dispatch.h>
@@ -904,10 +904,10 @@ int main() {
 		defs[1].effects_table_count = 4;
 		file.entries = defs;
 		file.count = 2;
-		world.ammo = np::build_ammo_table(file);
+		world.ammo = world::build_ammo_table(file);
 		defs[1].effects_table = nullptr; // static rows; keep def_free-style cleanup moot
 		defs[1].effects_table_count = 0;
-		np::resolve_weapon_round_types(world.weapons, world.ammo);
+		world::resolve_weapon_round_types(world.weapons, world.ammo);
 	}
 	if (!expect(world.weapons.entries[5].ammo_index == 1, "round_type resolved to ammo 1"))
 		return 1;

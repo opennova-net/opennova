@@ -93,7 +93,6 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/joiner_connection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/server_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/server_initial_state.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/score_rules_build.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/server_tick.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/client_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/client_replica_present_projection.cpp
@@ -101,8 +100,6 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/joiner_world_bridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/host_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/lan_discovery.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/weapon_table_build.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/ammo_table_build.cpp
     # inmatch — the one public mission lifecycle/cadence surface. The np and
     # netsim directories beneath it are wire/runtime implementation modules.
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp

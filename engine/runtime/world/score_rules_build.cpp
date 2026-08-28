@@ -1,6 +1,6 @@
-#include <net/npruntime/score_rules_build.h>
+#include <runtime/world/score_rules_build.h>
 
-namespace opennova::np {
+namespace opennova::world {
 
 world::ScoreRules build_score_rules(const score::File &config, uint32_t game_type) {
 	world::ScoreRules rules;
@@ -18,4 +18,4 @@ world::ScoreRules build_score_rules(const score::File &config, uint32_t game_typ
 	return rules;
 }
 
-} // namespace opennova::np
+} // namespace opennova::world
