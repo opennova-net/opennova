@@ -1,28 +1,18 @@
-# nw-server — the headless in-match game HOST (engine/net/npruntime P6).
+# nw-server — the headless in-match dedicated game HOST over the engine's one
+# mission kernel (ADR 0042 d3).
 #
 # godot-cpp guard (structural): godot-cpp is add_subdirectory'd only from the
 # GDExtension's own CMake root (godot/src/CMakeLists.txt), never from this graph, so it is
 # not a linkable target here. This executable links ONLY opennova_* static libs (all strictly
 # Godot-agnostic, engine/CLAUDE.md) + apps/common, which makes it structurally incapable of pulling in
 # godot-cpp. There is no toggle to set — keep the link list opennova_*-only and that invariant holds.
-add_library(opennova_nw_server_startup STATIC
-    environment_startup.cpp
-    wac_startup.cpp
-)
-target_include_directories(opennova_nw_server_startup
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(opennova_nw_server_startup
-    PUBLIC opennova_runtime)
-target_compile_features(opennova_nw_server_startup PUBLIC cxx_std_17)
-
 add_executable(opennova_nw_server main.cpp)
 
 target_link_libraries(opennova_nw_server
     PRIVATE
-        opennova_net         # npruntime's in-match runtime (Server_TickUpdate / handle_server_datagram /
-                             # frame_in_match_s2c); PUBLIC-pulls the runtime world transitively
-        opennova_runtime     # MissionDocument + promote_mission (load + build the authoritative World)
-        opennova_nw_server_startup # mission-selected ENV/BMS/WAC -> authoritative phase-2 owner
+        opennova_net         # inmatch::listen_host + npruntime's in-match runtime (Server_TickUpdate /
+                             # handle_server_datagram / frame_in_match_s2c); PUBLIC-pulls the runtime transitively
+        opennova_runtime     # mission::MissionKernel (the one boot + state + tick) + env_network_sample
         opennova_app_common  # net_sockets (real UDP); PUBLIC-links ws2_32 on WIN32
 )
 

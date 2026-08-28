@@ -4,8 +4,8 @@
 // the retail order through the embedder's mounted-file source, compile them as
 // ONE program (V#/G# scope spans the layers), and install it on the WacSystem
 // [orig: WacScript_InitAndLoad]. Promoted from the retail-mission rig's
-// install_wac step (ADR 0042 d3); apps/nw_server's file-system copy is the
-// strict-mode consumer the dedicated-host slice folds onto this.
+// install_wac step (ADR 0042 d3); the dedicated host (apps/nw_server) is the
+// strict-mode consumer, through KernelBootOptions::wac_strict_diagnostics.
 
 #include <runtime/mission/runtime_boot.h> // mission::BootFileSource
 #include <runtime/wac/wac_system.h>

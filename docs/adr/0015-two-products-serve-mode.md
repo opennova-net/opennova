@@ -64,6 +64,7 @@ Godot shell publishes the live `Weather` node's snapshot
 (`game_world.gd::_push_network_environment` ->
 `Simulation::set_network_environment`), and the sim-only host
 (`apps/nw_server`) publishes mission-sourced samples below the shell seam
-(`environment_startup.cpp`: `.env` parse + BMS fog overrides, prewarmed and
-advanced per tick). The #403-review concern that a sim-only host would emit
+(`engine/runtime/environment/env_network_sample.cpp`: `.env` parse + BMS fog
+overrides, prewarmed and advanced per tick). The #403-review concern that a
+sim-only host would emit
 default environment data does not hold — both paths feed the same publish seam.

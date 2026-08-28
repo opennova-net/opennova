@@ -52,6 +52,11 @@ private:
     bool is_kw(std::string_view low) const {
         return cur().kind == TokKind::Keyword && cur().lowered == low;
     }
+    bool next_is_kw(std::string_view low) const {
+        if (pos_ + 1 >= toks_.size()) return false;
+        const Token &t = toks_[pos_ + 1];
+        return t.kind == TokKind::Keyword && t.lowered == low;
+    }
     bool is_op(std::string_view low) const {
         return cur().kind == TokKind::Operator && cur().lowered == low;
     }
@@ -98,8 +103,18 @@ private:
         out.cond = parse_expr();
         if (is_kw("then")) advance(); else warn("expected 'then'");
         out.body = parse_block_until({"else", "elseif", "endif", "end", "enif"});
-        while (is_kw("elseif")) {
-            advance();
+        // Retail chains alternatives as `elseif` OR the two-word `else if`
+        // (the shipped corpus' dominant form — e.g. 00TRg.wac), both closed by
+        // the chain's ONE endif. `else` directly followed by `if` is that
+        // chain, never a nested if: nesting would hand the single endif to the
+        // inner if and fold every trailing statement into the else branch.
+        while (is_kw("elseif") || (is_kw("else") && next_is_kw("if"))) {
+            if (is_kw("elseif")) {
+                advance();
+            } else {
+                advance(); // 'else'
+                advance(); // 'if'
+            }
             ElseIf ei;
             ei.cond = parse_expr();
             if (is_kw("then")) advance(); else warn("expected 'then' after elseif");

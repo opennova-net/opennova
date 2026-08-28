@@ -29,8 +29,10 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
-    # target-feed/writeback order); the witnessed math cores stay in
-    # engine/formats/env
+    # target-feed/writeback order) + the mission-start network sample
+    # derivation (ENV resource + BMS header -> world::EnvNetworkState); the
+    # witnessed math cores stay in engine/formats/env
+    ${CMAKE_CURRENT_SOURCE_DIR}/environment/env_network_sample.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/environment_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/sky_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/water_frame.cpp

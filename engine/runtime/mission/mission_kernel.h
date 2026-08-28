@@ -60,6 +60,12 @@ namespace opennova::mission {
 struct KernelBootOptions {
 	bool playable = true;   // spawn the authoritative side's own player after load
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
+	// EVERY WAC diagnostic is fatal and fails the boot (the dedicated golden
+	// host's policy — running a partial script is a known wire-parity
+	// failure). false = the game's lenient policy: only a compile FAILURE
+	// blocks, and a blocked program merely disables scripts with a warning.
+	// Feeds wac_layered_load's strict_diagnostics flag.
+	bool wac_strict_diagnostics = false;
 	bool collision = true;
 	bool seat_specs = true; // the native seat/mount table (S16); off = the bare promote
 	// A joiner world: never spawns its own player here (L spawns on the
@@ -78,7 +84,8 @@ struct KernelBootOptions {
 	// Authored display names for promote's name_index resolve (the embedder's
 	// parsed [PeopleNames] STRNAME%03i table; D-HUD-20). Empty = no names.
 	std::function<std::string(int32_t)> people_name_resolver;
-	// The net half's session bring-up (inmatch::listen_host::bringup),
+	// The net half's session bring-up (inmatch::listen_host::bringup, or
+	// bringup_dedicated for a HostOnly embedder),
 	// invoked between the world wiring and register_mission_systems — exactly
 	// where the SP listen host stands up inside the load
 	// [orig: SinglePlayer_StartMission @0x561af0]. Null = the bare no-net

@@ -1,0 +1,158 @@
+// The engine's mission-start network environment sample (runtime/environment/
+// env_network_sample): every serving embedder must seed the same
+// authoritative environment owner from the mission-selected resources — the
+// ENV parse + BMS header overrides and retail's 255-tick weather prewarm —
+// before a client can receive phase 2, through the same real wire projection.
+
+#include "netsim/conn_fan_test_util.h"
+
+#include <net/netsim/loopback_channel.h>
+#include <net/npwire/ingame_decode.h>
+#include <runtime/environment/env_network_sample.h>
+#include <runtime/world/world.h>
+
+#include <cstdio>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+namespace ns = opennova::netsim;
+namespace nw = opennova;
+namespace env = opennova::env;
+namespace w = opennova::world;
+
+int failures = 0;
+
+#define CHECK(condition)                                                        \
+	do {                                                                          \
+		if (!(condition)) {                                                          \
+			std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #condition);           \
+			++failures;                                                                \
+		}                                                                           \
+	} while (0)
+
+nw::FrameUpdate emit_phase2(w::World &world) {
+	world.registry.configure_pool(0, 1);
+	w::Entity recipient;
+	recipient.kind = w::EntityKind::Organic;
+	recipient.health = 150;
+	const w::EntityHandle recipient_h = world.registry.spawn(0, recipient);
+	// The server environment projection rides a real deployed player's 0x0A.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate]
+	ns::LoopbackChannel channel;
+	std::vector<ns::Connection> connections;
+	connections.push_back(ns::Connection{
+			&channel, ns::TransportMode::Loopback, recipient_h, 0});
+	connections.back().s2c_phase = 1;
+	ns::test::emit_all(world, connections);
+
+	ns::Datagram datagram;
+	CHECK(channel.client_recv(datagram));
+	nw::FrameUpdate frame;
+	CHECK(nw::decode_frame_update(datagram.body.data(), datagram.body.size(),
+			ns::class_for_type_id, frame));
+	CHECK(frame.flags2 == 2);
+	CHECK(frame.env.present);
+	return frame;
+}
+
+void test_resource_values_reach_the_real_wire_projection() {
+	w::World world;
+    // A mission only advances while a human is in the world - retail holds the
+    // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
+    // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
+    // so they stand a player up; the empty-server hold has its own test.
+	world.cached.humans = 1;
+	opennova::bms::Header header{};
+	header.start_time = 0x0A80; // 10.5 hours in the BMS Q8.8 clock
+	header.minutes_per_day = 123;
+	std::istringstream input(
+			"enviro_name \"Parity\"\n"
+			"fog_level 733\n"
+			"sky_speed 37\n");
+	std::string error;
+	CHECK(env::publish_initial_network_environment(
+			input, header, world.network_env, error));
+	CHECK(error.empty());
+	CHECK(world.network_env.valid);
+
+	const nw::FrameUpdate frame = emit_phase2(world);
+	CHECK(frame.env.fog_dist == 733);
+	CHECK(frame.env.fog_accel == 0xFF00);
+	CHECK(frame.env.tod_fixed == 0x5400);
+	CHECK(frame.env.cloud_scroll == 37);
+	CHECK(frame.env.quake_ticks == 0);
+	CHECK(frame.env.rain_pct == 0);
+	CHECK(frame.env.overcast == 0);
+	CHECK(frame.env.env_param == 0);
+
+	const uint32_t before = world.network_env.tod_fixed24;
+	world.network_env.advance_tick();
+	const uint32_t expected_rate = (24u << 24) / (3720u * 123u);
+	CHECK(world.network_env.tod_fixed24 - before == expected_rate);
+}
+
+void test_bms_fog_override_precedes_the_environment_resource() {
+	w::World world;
+	world.cached.humans = 1;
+	opennova::bms::Header header{};
+	header.attrib_flags = opennova::bms::AttribFlags::FogDistanceOverrideEnable;
+	header.fog_override = 811;
+	header.minutes_per_day = 60;
+	std::istringstream input("fog_level 733\nsky_speed 19\n");
+	std::string error;
+	CHECK(env::publish_initial_network_environment(
+			input, header, world.network_env, error));
+	CHECK(emit_phase2(world).env.fog_dist == 811);
+}
+
+void test_mission_start_prewarms_255_environment_ticks() {
+	w::World world;
+	world.cached.humans = 1;
+	opennova::bms::Header header{};
+	header.start_time = 0x0540;
+	header.minutes_per_day = 60;
+	std::istringstream input("fog_level 733\nsky_speed 19\n");
+	std::string error;
+	CHECK(env::publish_initial_network_environment(
+			input, header, world.network_env, error));
+	const uint32_t start = world.network_env.tod_fixed24;
+	const uint32_t rate = (24u << 24) / (3720u * 60u);
+	env::prewarm_network_environment(world.network_env);
+	CHECK(world.network_env.tod_fixed24 ==
+			(start + 255u * rate) % (24u << 24));
+}
+
+void test_prewarm_runs_complete_weather_ticks_after_eager_scripts() {
+	// A mission-start script command that seeds weather state (quake writes
+	// 6 * 50 = 300 complete weather ticks) must be prewarmed through: the
+	// embedders run the eager WAC execution first (the kernel boot's tail),
+	// then the 255-tick prewarm, leaving exactly 45.
+	w::World world;
+	world.cached.humans = 1;
+	w::EnvNetworkSample base;
+	base.fog_target_q16 = 733 << 16;
+	base.fog_current_q16 = base.fog_target_q16;
+	base.tod_fixed24 = 100;
+	base.tod_advance_per_tick = 7;
+	world.network_env.publish_complete(base);
+	world.network_env.command_quake(50);
+	env::prewarm_network_environment(world.network_env);
+	CHECK(world.network_env.quake_ticks == 45);
+	CHECK(world.network_env.tod_fixed24 == 100 + 255 * 7);
+}
+
+} // namespace
+
+int main() {
+	test_resource_values_reach_the_real_wire_projection();
+	test_bms_fog_override_precedes_the_environment_resource();
+	test_mission_start_prewarms_255_environment_ticks();
+	test_prewarm_runs_complete_weather_ticks_after_eager_scripts();
+	std::printf(failures ? "ENV NETWORK SAMPLE TEST FAILED (%d)\n"
+	                     : "env network sample test passed\n",
+	            failures);
+	return failures ? 1 : 0;
+}
