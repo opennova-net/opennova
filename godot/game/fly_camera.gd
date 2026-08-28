@@ -43,14 +43,14 @@ func _ready() -> void:
 
 func set_gameplay_locked(locked: bool) -> void:
 	_gameplay_locked = locked
-
-
-func is_gameplay_locked() -> bool:
-	return _gameplay_locked
 	if locked:
 		_orbiting = false
 		_panning = false
 		_flying = false
+
+
+func is_gameplay_locked() -> bool:
+	return _gameplay_locked
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _gameplay_locked:
