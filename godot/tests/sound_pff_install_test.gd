@@ -85,14 +85,14 @@ func _probe_mission_audio(install_dir: String, expansion: String) -> void:
 	add_child_autofree(container)
 
 	var audio = MissionAudio.new(root, item_db)
-	var stats: Dictionary = audio.setup(mission, mission_name, container)
-	gut.p("PFF install mission audio: %s" % str(stats))
-	assert_gt(int(stats.get("banks_loaded", 0)), 0,
+	var stats := audio.setup(mission, mission_name, container)
+	gut.p("PFF install mission audio: %s" % str(stats.to_dict()))
+	assert_gt(int(stats.banks_loaded), 0,
 		"sound banks load through the PFF mount")
-	if int(stats.get("markers_total", 0)) > 0:
-		assert_gt(int(stats.get("markers_resolved", 0)), 0,
+	if int(stats.markers_total) > 0:
+		assert_gt(int(stats.markers_resolved), 0,
 			"sound markers resolve against the install's items.def")
-		assert_gte(int(stats.get("ambient_candidates", 0)),
-			int(stats.get("markers_resolved", 0)),
+		assert_gte(int(stats.ambient_candidates),
+			int(stats.markers_resolved),
 			"each resolved marker describes at least one ambient layer candidate")
 	audio.teardown()
