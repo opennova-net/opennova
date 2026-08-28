@@ -40,6 +40,8 @@
 #include <string>
 #include <vector>
 
+#include "conn_fixture.h"
+
 namespace {
 
 using namespace opennova;
@@ -60,19 +62,7 @@ w::PlayerSpawn player_spawn(uint16_t net_id) {
 	return s;
 }
 
-np::NapiNPConnection make_conn(uint32_t id, int type, ns::ISessionTransport *t,
-                               ns::TransportMode mode, w::EntityHandle owned, bool spawned) {
-	np::NapiNPConnection c;
-	c.connection_id = id;
-	c.type = type;
-	c.link.transport = t;
-	c.link.mode = mode;
-	c.link.owned_entity = owned;
-	c.burst.spawned = spawned;
-	c.spawned_announced = spawned;
-	c.phase = spawned ? np::ConnectionPhase::InMatch : np::ConnectionPhase::New;
-	return c;
-}
+using conn_fixture::make_conn;
 
 void put_u16(std::vector<uint8_t> &b, uint16_t v) {
 	b.push_back(uint8_t(v & 0xFF));

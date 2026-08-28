@@ -41,7 +41,7 @@ The lint treats those trees as a family, not a list.
 
 ## OS variables
 
-`TEMP`/`TMP`/`TMPDIR` (`tests/common/test_paths.h`, the scripts),
+`TEMP`/`TMP` (`tests/common/test_paths.h`),
 `APPDATA`/`HOME`/`XDG_DATA_HOME` (`scripts/test_godot.sh`'s isolated
 `user://`), `ProgramFiles`/`SystemRoot` (`scripts/net/lib.ps1` tool discovery).
 

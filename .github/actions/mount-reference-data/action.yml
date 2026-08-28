@@ -1,0 +1,105 @@
+name: Mount the reference data
+description: >-
+  Restore or check out the two private reference repositories the asset gates
+  read (docs/asset-gated-tests.md) and export the three roots. One definition
+  for the engine test job and the Godot test job.
+
+# The retail data the asset gates need lives in two private repositories:
+# opennova-net/opennova-reference-assets (the extracted tree behind
+# OPENNOVA_JO_ASSETS / OPENNOVA_MISSION_CORPUS) and
+# opennova-net/opennova-reference-retail-packed (the retail JO:CA .pff set +
+# expansion/jox01 behind OPENNOVA_JO_DIR, 1.1 GB committed as 95 MiB parts
+# that reassemble.sh rebuilds against MANIFEST.sha256). With the
+# REFERENCE_ASSETS_TOKEN secret (contents: read on both) they land beside the
+# tree and the gated tests run instead of reporting Skipped; without it the
+# gates stay closed (`enabled` is false). Both are restored from the Actions
+# cache keyed by their main commit and saved the moment the data is ready
+# (before the tests), so a red or cancelled run still leaves the next one
+# warm; only a new commit in a reference repository pays its clone again.
+
+inputs:
+  token:
+    description: The REFERENCE_ASSETS_TOKEN secret (empty when the caller has none).
+    required: true
+  enabled:
+    description: "'true' when the token is set; every step is skipped otherwise."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the reference data revisions
+      if: inputs.enabled == 'true'
+      id: ref-rev
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        assets="$(gh api repos/opennova-net/opennova-reference-assets/commits/main --jq .sha)"
+        packed="$(gh api repos/opennova-net/opennova-reference-retail-packed/commits/main --jq .sha)"
+        echo "assets=${assets}" >> "$GITHUB_OUTPUT"
+        echo "packed=${packed}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the reference assets
+      if: inputs.enabled == 'true'
+      id: assets-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: .reference-assets
+        key: reference-assets-${{ steps.ref-rev.outputs.assets }}
+
+    - name: Check out the reference assets
+      if: inputs.enabled == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: opennova-net/opennova-reference-assets
+        token: ${{ inputs.token }}
+        path: .reference-assets
+
+    - name: Trim the reference assets checkout
+      if: inputs.enabled == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: rm -rf .reference-assets/.git
+    - name: Save the reference assets
+      if: inputs.enabled == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: .reference-assets
+        key: reference-assets-${{ steps.ref-rev.outputs.assets }}
+
+    - name: Restore the packed retail install
+      if: inputs.enabled == 'true'
+      id: packed-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: .reference-retail-packed
+        key: retail-packed-${{ steps.ref-rev.outputs.packed }}
+
+    - name: Check out the packed retail install
+      if: inputs.enabled == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: opennova-net/opennova-reference-retail-packed
+        token: ${{ inputs.token }}
+        path: .reference-retail-packed
+
+    - name: Reassemble the packed retail install
+      if: inputs.enabled == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        bash .reference-retail-packed/reassemble.sh
+        rm -rf .reference-retail-packed/.git
+    - name: Save the packed retail install
+      if: inputs.enabled == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: .reference-retail-packed
+        key: retail-packed-${{ steps.ref-rev.outputs.packed }}
+
+    - name: Point the asset gates at the reference data
+      if: inputs.enabled == 'true'
+      shell: bash
+      run: |
+        echo "OPENNOVA_JO_ASSETS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
+        echo "OPENNOVA_MISSION_CORPUS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
+        echo "OPENNOVA_JO_DIR=${GITHUB_WORKSPACE}/.reference-retail-packed" >> "$GITHUB_ENV"

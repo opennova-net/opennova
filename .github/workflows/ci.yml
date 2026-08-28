@@ -53,93 +53,15 @@ jobs:
           git lfs install --local
           git lfs pull --include="fixtures/**,assets/**"
 
-      # The retail data the asset gates need lives in two private repositories
-      # (docs/asset-gated-tests.md): opennova-net/opennova-reference-assets (the
-      # extracted tree behind OPENNOVA_JO_ASSETS / OPENNOVA_MISSION_CORPUS) and
-      # opennova-net/opennova-reference-retail-packed (the retail JO:CA .pff set
-      # + expansion/jox01 behind OPENNOVA_JO_DIR, 1.1 GB committed as 95 MiB
-      # parts that reassemble.sh rebuilds against MANIFEST.sha256). With the
-      # REFERENCE_ASSETS_TOKEN secret (contents: read on both) they land beside
-      # the tree and the gated tests run instead of reporting Skipped; without
-      # it the gates stay closed. Both are restored from the Actions cache keyed
-      # by their main commit and saved the moment the data is ready (before the
-      # tests), so a red or cancelled run still leaves the next one warm; only a
-      # new commit in a reference repository pays its clone again.
-      - name: Resolve the reference data revisions
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        id: ref-rev
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-        run: |
-          assets="$(gh api repos/opennova-net/opennova-reference-assets/commits/main --jq .sha)"
-          packed="$(gh api repos/opennova-net/opennova-reference-retail-packed/commits/main --jq .sha)"
-          echo "assets=${assets}" >> "$GITHUB_OUTPUT"
-          echo "packed=${packed}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the reference assets
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        id: assets-cache
-        uses: actions/cache/restore@v4
+      # The retail data the asset gates need (docs/asset-gated-tests.md): the
+      # composite action restores or checks out the two private reference
+      # repositories and exports the three roots; without the
+      # REFERENCE_ASSETS_TOKEN secret it does nothing and the gates stay closed.
+      - name: Mount the reference data
+        uses: ./.github/actions/mount-reference-data
         with:
-          path: .reference-assets
-          key: reference-assets-${{ steps.ref-rev.outputs.assets }}
-
-      - name: Check out the reference assets
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: opennova-net/opennova-reference-assets
           token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          path: .reference-assets
-
-      - name: Trim the reference assets checkout
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: rm -rf .reference-assets/.git
-      - name: Save the reference assets
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .reference-assets
-          key: reference-assets-${{ steps.ref-rev.outputs.assets }}
-
-      - name: Restore the packed retail install
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        id: packed-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .reference-retail-packed
-          key: retail-packed-${{ steps.ref-rev.outputs.packed }}
-
-      - name: Check out the packed retail install
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: opennova-net/opennova-reference-retail-packed
-          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          path: .reference-retail-packed
-
-      - name: Reassemble the packed retail install
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          bash .reference-retail-packed/reassemble.sh
-          rm -rf .reference-retail-packed/.git
-      - name: Save the packed retail install
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .reference-retail-packed
-          key: retail-packed-${{ steps.ref-rev.outputs.packed }}
-
-      - name: Point the asset gates at the reference data
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        shell: bash
-        run: |
-          echo "OPENNOVA_JO_ASSETS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
-          echo "OPENNOVA_MISSION_CORPUS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
-          echo "OPENNOVA_JO_DIR=${GITHUB_WORKSPACE}/.reference-retail-packed" >> "$GITHUB_ENV"
+          enabled: ${{ env.HAVE_REFERENCE_ASSETS }}
 
       - uses: actions/setup-python@v5
         with:
@@ -179,6 +101,10 @@ jobs:
           # roots through their resolvers, GODOT_BIN in the scripts, the
           # deployed service's own config and the OS variables; nothing else.
           python scripts/lint/env_lint.py --enforce
+          # Vocabulary conventions (CLAUDE.md): no Nova/nova_ prefix (ADR 0040),
+          # no em dashes in public-facing copy, no checked-off checklist rows
+          # (completed entries are deleted, not ticked).
+          python scripts/lint/conventions_lint.py --enforce
 
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search
@@ -218,49 +144,38 @@ jobs:
         shell: bash
         run: sccache --show-stats
 
-  # Linux build of the standalone novaworld server with the Crow HTTP layer ON,
-  # plus the net-scoped ctests. This mirrors what the deploy image builds; the
-  # Windows `test` job compiles the same net libs and runs the same tests
-  # with BUILD_NOVAWORLD_HTTP=OFF (no Crow/asio FetchContent on the hot legs).
-  # Target-scoped build: the wider lib corpus is Windows-covered and this repo
-  # has no other Linux leg yet.
-  novaworld-server:
+  # The full engine build + ctest suite on Linux. PRs get the Windows `test`
+  # job and the target-scoped Linux net leg below; a master push or a manual
+  # run also builds and tests the whole lib corpus on ubuntu, so a Linux-only
+  # compile or test failure surfaces here instead of at the tagged release
+  # (release.yml runs the same leg at tag time).
+  test-linux:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          lfs: false   # scoped below: the tests read fixtures/ and assets/ only
           submodules: recursive
-          lfs: false   # net stack consumes no LFS game assets (net fixtures pulled below)
 
-      # nw_self_capture_test compares against the committed opennova-produced
-      # self-capture pcap, which is LFS-tracked (fixtures/** in .gitattributes).
-      # Pull only this subtree to keep checkout fast.
-      - name: Materialize net parity fixtures (LFS)
+      - name: Pull Git LFS assets (fixtures/ and assets/ only)
+        shell: bash
         run: |
           git lfs install --local
-          git lfs pull --include="fixtures/novaworld/**"
+          git lfs pull --include="fixtures/**,assets/**"
 
-      - name: Install libcurl (server links it when HTTP is ON)
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Build and test
+        shell: bash
+        run: scripts/build.sh --no-godot
 
-      - name: Configure (BUILD_NOVAWORLD_HTTP=ON)
-        run: cmake -S . -B build-server -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
-
-      - name: Build server + net tests
-        run: |
-          cmake --build build-server -j "$(nproc)" --target opennova_novaworld_server \
-            url_cipher_test crc32_test nwu_test pubcrypto_test epask_test \
-            envelope_test tlv_test session_test \
-            registration_url_test gate_response_test gate_probe_test lobby_update_test \
-            gate_server_loopback_test gsb_roundtrip_test protocol_message_test \
-            connection_registry_test connection_manager_test \
-            db_sqlite_test session_hello_roundtrip_test lobby_session_test \
-            backend_schema_test nw_codec_identity_test nw_self_capture_test
-
-      - name: Run net ctests
-        run: |
-          ctest --test-dir build-server --output-on-failure --parallel "$(nproc)" -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture)$"
+  # Linux build of the standalone novaworld server with the Crow HTTP layer ON,
+  # plus the net-scoped ctests, on the deploy target's OS and flag set. One
+  # definition (.github/workflows/net-linux.yml) shared with the NovaWorld
+  # images workflow, so the two never drift. The Windows `test` job compiles
+  # the same net libs and runs the same tests with BUILD_NOVAWORLD_HTTP=OFF
+  # (no Crow/asio FetchContent on the hot legs).
+  novaworld-server:
+    uses: ./.github/workflows/net-linux.yml
 
   # Type-check + build the NovaWorld web portal (web/). The built dist is an
   # artifact only; production images bake it via web/Dockerfile (Track B).
@@ -408,93 +323,13 @@ jobs:
           git lfs install --local
           git lfs pull --include="fixtures/**,assets/**"
 
-      # The retail data the asset gates need lives in two private repositories
-      # (docs/asset-gated-tests.md): opennova-net/opennova-reference-assets (the
-      # extracted tree behind OPENNOVA_JO_ASSETS / OPENNOVA_MISSION_CORPUS) and
-      # opennova-net/opennova-reference-retail-packed (the retail JO:CA .pff set
-      # + expansion/jox01 behind OPENNOVA_JO_DIR, 1.1 GB committed as 95 MiB
-      # parts that reassemble.sh rebuilds against MANIFEST.sha256). With the
-      # REFERENCE_ASSETS_TOKEN secret (contents: read on both) they land beside
-      # the tree and the gated tests run instead of reporting Skipped; without
-      # it the gates stay closed. Both are restored from the Actions cache keyed
-      # by their main commit and saved the moment the data is ready (before the
-      # tests), so a red or cancelled run still leaves the next one warm; only a
-      # new commit in a reference repository pays its clone again.
-      - name: Resolve the reference data revisions
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        id: ref-rev
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-        run: |
-          assets="$(gh api repos/opennova-net/opennova-reference-assets/commits/main --jq .sha)"
-          packed="$(gh api repos/opennova-net/opennova-reference-retail-packed/commits/main --jq .sha)"
-          echo "assets=${assets}" >> "$GITHUB_OUTPUT"
-          echo "packed=${packed}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the reference assets
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        id: assets-cache
-        uses: actions/cache/restore@v4
+      # The retail data the asset gates need (docs/asset-gated-tests.md); the
+      # same composite action as the engine test job.
+      - name: Mount the reference data
+        uses: ./.github/actions/mount-reference-data
         with:
-          path: .reference-assets
-          key: reference-assets-${{ steps.ref-rev.outputs.assets }}
-
-      - name: Check out the reference assets
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: opennova-net/opennova-reference-assets
           token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          path: .reference-assets
-
-      - name: Trim the reference assets checkout
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: rm -rf .reference-assets/.git
-      - name: Save the reference assets
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.assets-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .reference-assets
-          key: reference-assets-${{ steps.ref-rev.outputs.assets }}
-
-      - name: Restore the packed retail install
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        id: packed-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .reference-retail-packed
-          key: retail-packed-${{ steps.ref-rev.outputs.packed }}
-
-      - name: Check out the packed retail install
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: opennova-net/opennova-reference-retail-packed
-          token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
-          path: .reference-retail-packed
-
-      - name: Reassemble the packed retail install
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          bash .reference-retail-packed/reassemble.sh
-          rm -rf .reference-retail-packed/.git
-      - name: Save the packed retail install
-        if: env.HAVE_REFERENCE_ASSETS == 'true' && steps.packed-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .reference-retail-packed
-          key: retail-packed-${{ steps.ref-rev.outputs.packed }}
-
-      - name: Point the asset gates at the reference data
-        if: env.HAVE_REFERENCE_ASSETS == 'true'
-        shell: bash
-        run: |
-          echo "OPENNOVA_JO_ASSETS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
-          echo "OPENNOVA_MISSION_CORPUS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
-          echo "OPENNOVA_JO_DIR=${GITHUB_WORKSPACE}/.reference-retail-packed" >> "$GITHUB_ENV"
+          enabled: ${{ env.HAVE_REFERENCE_ASSETS }}
 
       - name: Cache Godot binary
         uses: actions/cache@v4
@@ -502,21 +337,9 @@ jobs:
           path: .godot-bin
           key: godot-${{ matrix.os }}-${{ env.GODOT_VERSION }}
 
-      - name: Install Godot (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -x ".godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64" ]; then
-            mkdir -p .godot-bin
-            curl -fL -o .godot-bin/godot.zip \
-              "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
-            unzip -o .godot-bin/godot.zip -d .godot-bin
-            chmod +x ".godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
-          fi
-
+      # The suite runs on the Windows console binary (the GDExtension is built
+      # for Windows only); GODOT_BIN below is that path.
       - name: Install Godot (Windows)
-        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -531,7 +354,6 @@ jobs:
 
       # The editor binary that runs GUT loads the template_debug flavour only.
       - name: Download GDExtension (Windows)
-        if: matrix.os == 'windows-latest'
         uses: actions/download-artifact@v4
         with:
           name: gdext_windows_template_debug
@@ -540,11 +362,7 @@ jobs:
       - name: Prime Godot import cache
         shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          else
-            GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
-          fi
+          GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
           bash scripts/bootstrap_godot.sh
           # The editor importer can still crash on a cold import; a half-baked
           # cache makes the test run fail with confusing "missing resource"
@@ -563,11 +381,7 @@ jobs:
       - name: Run Godot tests
         shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          else
-            export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
-          fi
+          export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
           bash scripts/test_godot.sh 2>&1 | tee gut.log
           exit "${PIPESTATUS[0]}"
 

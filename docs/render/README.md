@@ -194,7 +194,24 @@ The former registered-capture publication pipeline (the render-parity runbook,
 retained catalogs and screenshots are historical evidence carrying their own
 provenance, not a currently reproducible release gate. The remaining PowerShell
 helpers under `scripts/render/` support local OpenNova capture and comparison
-work.
+work, in pipeline order:
+
+- [`capture_opennova_fixtures.ps1`](../../scripts/render/capture_opennova_fixtures.ps1)
+  launches one windowed OpenNova with its MCP endpoint and runs the
+  `render_fixture_capture` probe once per catalog id (the raw 2000x1200
+  bundles).
+- [`normalize_opennova_for_retail.ps1`](../../scripts/render/normalize_opennova_for_retail.ps1)
+  draws one raw 2000x1200 OpenNova capture into the 1920x1200 retail frame
+  size (bicubic, never a crop or a vertical change) so the two sides compare
+  pixel for pixel.
+- [`build_render_comparison.ps1`](../../scripts/render/build_render_comparison.ps1)
+  assembles the side-by-side, overlay and difference images plus the
+  comparison manifest (`-ComparisonMode subsystem-ab` for the within-run
+  diagnostic catalog).
+- [`build_model_lighting_comparison.ps1`](../../scripts/render/build_model_lighting_comparison.ps1)
+  and [`test_model_lighting_parity.ps1`](../../scripts/render/test_model_lighting_parity.ps1)
+  are the model-lighting sheet's own pair
+  ([screenshots/parity/model-lighting](../../screenshots/parity/model-lighting/README.md)).
 
 The exact-pose harness both tiers drive is
 the `render_fixture_capture` probe

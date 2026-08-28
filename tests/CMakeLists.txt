@@ -530,6 +530,7 @@ endforeach()
 # the committed file + round-trips. See assets/README.md.
 add_executable(minimal_rtxt_gen_test fixtures/minimal_rtxt_gen.cpp)
 target_link_libraries(minimal_rtxt_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_rtxt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(minimal_rtxt_gen_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
@@ -608,6 +609,7 @@ add_test(NAME minimal_env_gen COMMAND minimal_env_gen_test)
 # via the engine/formats/dbf + engine/formats/lwf writers, byte-stable vs the committed files.
 add_executable(minimal_companion_gen_test fixtures/minimal_companion_gen.cpp)
 target_link_libraries(minimal_companion_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_companion_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(minimal_companion_gen_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_companion_gen COMMAND minimal_companion_gen_test)
@@ -619,15 +621,15 @@ add_executable(minimal_mus_gen_test fixtures/minimal_mus_gen.cpp)
 target_link_libraries(minimal_mus_gen_test PRIVATE opennova_formats)
 add_test(NAME minimal_mus_gen COMMAND minimal_mus_gen_test)
 
-# Minimal set's packaging tool: build_terrain + generate the boot fonts +
-# boot music + PFF-bundle the whole set. Skips clean unless
-# `minimal_pff_package_test --write-pff` (generate-at-package: ~35 s, ~10 MB).
+# Minimal set's packaging tool: PFF-bundle the committed assets/ tree or
+# assemble a loose install. A TOOL, not a test: it only acts on
+# `minimal_pff_package_test --write-pff` / `--install <dir>` (assets/README.md),
+# so it is built here beside the generators but never registered with ctest.
 add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
 target_include_directories(minimal_pff_package_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(minimal_pff_package_test PRIVATE opennova_runtime opennova_formats)
 target_compile_definitions(minimal_pff_package_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
-opennova_add_gated_test(minimal_pff_package COMMAND minimal_pff_package_test)
 
 # RTXT parity against committed retail string tables (format invariants + byte roundtrip)
 add_executable(rtxt_real_parity_test rtxt/real_parity_test.cpp)

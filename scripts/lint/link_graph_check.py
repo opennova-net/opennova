@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Link-graph seam check over the Shape A target graph.
 
-The engine builds as five STATIC group targets plus one INTERFACE leaf
+The engine builds as five STATIC group targets plus two leaves
 (engine/CMakeLists.txt): opennova_formats, opennova_base, opennova_runtime,
-opennova_net, opennova_novaworld_service (+ opennova_io).
+opennova_net, opennova_novaworld_service (+ the header-only opennova_io and
+the opennova_crt STATIC leaf, the retail-parity CRT rand stream both formats
+and runtime link).
 The old ~400-target graph's per-format and terrain-seam rules moved to the
 include-level lint (scripts/lint/include_graph_check.py); what survives at
 TARGET level are the two structural seams:

@@ -2,8 +2,9 @@
 # The one Godot-binary resolver for the sh-side scripts: honors $GODOT_BIN,
 # else picks the first runnable binary under .godot-bin/. Source this, then
 # rely on $GODOT_BIN (empty = not found; the caller owns the error message).
-# The PowerShell twin lives in scripts/net/lib.ps1 (cross-language boundary —
-# kept in sync by hand; change both).
+# The PowerShell twin lives in scripts/net/lib.ps1 and the Python twin in
+# scripts/mcp/game_mcp.py GODOT_BINARIES (cross-language boundary — kept in
+# sync by hand, console binary first; change all three).
 resolve_godot_bin() {
   local root="$1"
   if [[ -n "${GODOT_BIN:-}" ]]; then

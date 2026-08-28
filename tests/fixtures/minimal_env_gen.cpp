@@ -23,6 +23,8 @@
 
 using opennova::IndexedImage8;
 
+#include "common/file_io.h"
+
 namespace {
 
 constexpr int kSize = 64;
@@ -82,16 +84,7 @@ IndexedImage8 make_modulation_map() {
 	return image;
 }
 
-bool read_file(const std::string &path, std::vector<uint8_t> &out) {
-	std::ifstream f(path, std::ios::binary | std::ios::ate);
-	if (!f) return false;
-	const std::streamoff sz = f.tellg();
-	if (sz < 0) return false;
-	f.seekg(0);
-	out.resize(static_cast<size_t>(sz));
-	if (!out.empty()) f.read(reinterpret_cast<char *>(out.data()), static_cast<std::streamsize>(out.size()));
-	return true;
-}
+using test_io::read_file;
 
 // 0 = byte-identical (or written), 1 = mismatch/missing.
 int guard(const std::string &path, const std::vector<uint8_t> &bytes, bool write_mode) {

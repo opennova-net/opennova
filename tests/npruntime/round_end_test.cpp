@@ -37,6 +37,8 @@
 #include <utility>
 #include <vector>
 
+#include "conn_fixture.h"
+
 namespace {
 
 using namespace opennova;
@@ -52,19 +54,7 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-np::NapiNPConnection make_conn(uint32_t id, int type, ns::ISessionTransport *t,
-                               ns::TransportMode mode, w::EntityHandle owned, bool spawned) {
-	np::NapiNPConnection c;
-	c.connection_id = id;
-	c.type = type;
-	c.link.transport = t;
-	c.link.mode = mode;
-	c.link.owned_entity = owned;
-	c.burst.spawned = spawned;
-	c.spawned_announced = spawned;
-	c.phase = spawned ? np::ConnectionPhase::InMatch : np::ConnectionPhase::New;
-	return c;
-}
+using conn_fixture::make_conn;
 
 void push_death(w::World &world, w::EntityHandle victim, w::EntityHandle killer) {
 	w::RoundDeath d;

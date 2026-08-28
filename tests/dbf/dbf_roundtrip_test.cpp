@@ -11,22 +11,11 @@
 #include "common/test_paths.h"
 #include <formats/dbf/dbf.h>
 
+#include "common/file_io.h"
+
 namespace {
 
-std::vector<uint8_t> read_file(const std::string &path) {
-	std::ifstream file(path, std::ios::binary | std::ios::ate);
-	if (!file.good()) {
-		return {};
-	}
-	const std::streamsize size = file.tellg();
-	file.seekg(0, std::ios::beg);
-	std::vector<uint8_t> data(static_cast<size_t>(size));
-	file.read(reinterpret_cast<char *>(data.data()), size);
-	if (!file.good()) {
-		return {};
-	}
-	return data;
-}
+using test_io::read_file;
 
 } // namespace
 

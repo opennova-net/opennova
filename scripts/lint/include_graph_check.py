@@ -67,7 +67,7 @@ SEAM_TREES = ("engine/net", "engine/runtime/wac", "engine/runtime/mission",
               "engine/runtime/world")
 SEAM_FORBIDDEN_PREFIXES = ("runtime/terrain/", "runtime/terrain_query/",
                            "formats/cpt/", "formats/til/", "formats/trn/",
-                           "formats/tpj/", "formats/foliage/")
+                           "formats/foliage/")
 TERRAIN_QUERY_HEADERS = {
     "runtime/terrain_query/coords.h",
     "runtime/terrain_query/height_field.h",
