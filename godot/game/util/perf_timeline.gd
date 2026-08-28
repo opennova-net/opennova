@@ -6,10 +6,6 @@ extends RefCounted
 ## finish()es it, which prints one structured line. The owner keeps the
 ## timeline it cares about (GameWorld.last_load_timeline()); nothing global
 ## runs between operations: a timeline only costs while its operation does.
-##
-## The static *_on helpers no-op on a null timeline, so instrumented engine
-## paths (terrain open, the object placer) accept an optional timeline without
-## burdening callers that do not measure.
 
 var label := ""
 var _spans: Array = []  # { name: String, depth: int, start_us: int, end_us: int }
@@ -23,24 +19,6 @@ static func begin(operation_label: String) -> PerfTimeline:
 	timeline.label = operation_label
 	timeline._start_us = Time.get_ticks_usec()
 	return timeline
-
-
-static func span_on(timeline: PerfTimeline, name: String) -> void:
-	if timeline != null:
-		timeline.span(name)
-
-
-static func end_on(timeline: PerfTimeline) -> void:
-	if timeline != null:
-		timeline.end_span()
-
-
-## Record an already-measured child span (a collaborator returned its own
-## timing) at the current nesting depth, ending now.
-func add_completed_span(name: String, duration_us: int) -> void:
-	var now := Time.get_ticks_usec()
-	_spans.append({ "name": name, "depth": _open.size(),
-			"start_us": now - maxi(duration_us, 0), "end_us": now })
 
 
 func span(name: String) -> void:

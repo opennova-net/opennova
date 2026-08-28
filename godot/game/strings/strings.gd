@@ -37,11 +37,6 @@ func load_table(path: String) -> Error:
 	return OK
 
 
-## Uses an already-loaded table directly (e.g. from the editor or ResourceLoader).
-func set_table(table: RtxtStringFile) -> void:
-	_table = table
-
-
 func is_loaded() -> bool:
 	return _table != null
 
@@ -55,11 +50,6 @@ func get_string(key: StringName, default: String = "") -> String:
 	if _table == null or not _table.has_string(key):
 		return default
 	return _table.get_string(key)
-
-
-## Returns the display text with the {hot} accelerator marker stripped.
-func get_display_string(key: StringName, default: String = "") -> String:
-	return RtxtStringFile.strip_hotkey(get_string(key, default))
 
 
 func clear() -> void:

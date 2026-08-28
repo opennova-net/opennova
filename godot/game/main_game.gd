@@ -433,10 +433,6 @@ func _toggle_fullscreen() -> void:
 		_dev_tools.set_platform_windows_allowed(true)
 
 
-func get_local_player_presenter() -> LocalPlayerPresenter:
-	return _player_presenter
-
-
 func get_dev_tools() -> DevTools:
 	return _dev_tools
 func get_debug_session() -> DebugSession:

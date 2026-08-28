@@ -80,13 +80,6 @@ func add_scene(scene: Node) -> void:
 	add_child(scene)
 
 
-## Remove and free the current scene(s) so the next mode starts empty.
-func clear_scene() -> void:
-	for child in get_children():
-		remove_child(child)
-		child.free()
-
-
 ## Frames rendered on the stage: the effect world's frame first, then the tree's.
 func settle(tree: SceneTree, fx: EffectWorld, count: int) -> void:
 	for _index in range(count):

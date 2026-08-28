@@ -52,10 +52,6 @@ func is_running() -> bool:
 	return _active != null
 
 
-func active_run() -> ProbeRun:
-	return _active
-
-
 ## game_probe op=list.
 func list() -> Dictionary:
 	var probes: Array = []

@@ -120,18 +120,6 @@ func _update_orbit() -> void:
 	_pitch = rotation.x
 
 
-func frame_bounds(center: Vector3, extent: float) -> void:
-	_pivot = center
-	# Cap the orbit distance so the whole viewport stays inside a 1500-unit
-	# far plane even for terrains whose full sector grid extent is much
-	# larger than the authored region. A pitch of about 32° gives a
-	# map-overview feel without flattening the horizon.
-	_distance = clampf(extent * 1.35, 300.0, 1200.0)
-	_yaw = 0.0
-	_pitch = -0.55
-	_update_orbit()
-
-
 func frame_bounds_custom(center: Vector3, radius: float, distance_scale: float = 1.35, max_distance: float = 1200.0, yaw: float = 0.0, pitch: float = -0.55) -> void:
 	_pivot = center
 	_distance = clampf(radius * distance_scale, 1.0, max_distance)

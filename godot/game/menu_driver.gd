@@ -94,14 +94,6 @@ func get_frame() -> MenuFrame:
 	return _frame
 
 
-func get_document() -> MnuDocument:
-	return _doc
-
-
-func set_menu_file(file: String) -> void:
-	_menu_file = file
-
-
 func get_menu_file() -> String:
 	return _menu_file
 

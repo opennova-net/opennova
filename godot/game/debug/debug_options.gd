@@ -12,7 +12,6 @@ class_name DebugOptions
 const KIND_CHECK := 0
 const KIND_SLIDER := 1  # row carries "min"/"max"/"step"
 const KIND_ENUM := 2    # row carries "choices": Array[String]; value = index
-const KIND_ACTION := 3
 
 ## The live GameWorld owner.
 const TARGET_WORLD := &"world"
