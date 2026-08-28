@@ -31,9 +31,9 @@ func test_00trg_mission_dialog_resolves() -> void:
 	add_child_autofree(container)
 	var audio = MissionAudio.new(root, item_db)
 	var stats := audio.setup(mission, "00TRg.bms", container)
-	gut.p("00TRg audio stats: %s" % str(stats))
+	gut.p("00TRg audio stats: %s" % str(stats.to_dict()))
 
-	var dialog_count := int(stats.get("dialogs", 0))
+	var dialog_count := int(stats.dialogs)
 	assert_gt(dialog_count, 0, "the mission .DBF loaded with dialog groups")
 
 	# Every dialog id should resolve to a set the loaded banks (mission .LWF +

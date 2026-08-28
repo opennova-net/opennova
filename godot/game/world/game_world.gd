@@ -638,11 +638,11 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	# cache pages when the producer becomes live.
 	_terrain.set_static_shadow_placer(_placer)
 	print_verbose("GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
-		int(_mission_stats.get("placed", 0)),
-		int(_mission_stats.get("batched", 0)),
-		int(_mission_stats.get("animated", 0)),
-		int(_mission_stats.get("unresolved", 0)),
-		int(_mission_stats.get("markers", 0)),
+		int(_mission_stats.placed),
+		int(_mission_stats.batched),
+		int(_mission_stats.animated),
+		int(_mission_stats.unresolved),
+		int(_mission_stats.markers),
 	])
 
 
@@ -2683,12 +2683,12 @@ func _start_mission_audio(mission: MissionData, bms_name: String) -> void:
 	if _env != null and _env.get("time_of_day") != null:
 		_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
 	print_verbose("GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d ambient candidate(s), %d/%d physical channel(s) allocated" % [
-		int(stats.get("markers_resolved", 0)),
-		int(stats.get("markers_total", 0)),
-		int(stats.get("banks_loaded", 0)),
-		int(stats.get("ambient_candidates", 0)),
-		int(stats.get("physical_channels", 0)),
-		int(stats.get("channel_budget", MissionAudio.MIX_CHANNELS)),
+		int(stats.markers_resolved),
+		int(stats.markers_total),
+		int(stats.banks_loaded),
+		int(stats.ambient_candidates),
+		int(stats.physical_channels),
+		int(stats.channel_budget),
 	])
 	# Open the GAME music context + seed the witnessed vars [orig: Game_StartMission
 	# @ 0x525581-0x52561b]. Retail gates the open on is_mp_session_peer and STOPS

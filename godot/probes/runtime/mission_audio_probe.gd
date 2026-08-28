@@ -56,11 +56,11 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		var container := Node3D.new()
 		parent.add_child(container)
 		var audio := MissionAudio.new(root, item_db)
-		var stats: Dictionary = audio.setup(mission, m, container)
+		var stats := audio.setup(mission, m, container)
 		ctx.log("%-28s resolved %3d/%3d markers, %d banks, %d candidates, %d dialogs" % [
-				m, int(stats.get("markers_resolved", 0)), int(stats.get("markers_total", 0)),
-				int(stats.get("banks_loaded", 0)), int(stats.get("ambient_candidates", 0)),
-				int(stats.get("dialogs", 0))])
+				m, int(stats.markers_resolved), int(stats.markers_total),
+				int(stats.banks_loaded), int(stats.ambient_candidates),
+				int(stats.dialogs)])
 		# Materialize only the current top-eight candidates, then verify the
 		# physical pool's loop regions.
 		audio.tick(Vector3.ZERO, 0.2)
@@ -81,7 +81,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		container.queue_free()
 		reports.append({
 			"mission": m,
-			"stats": stats,
+			"stats": stats.to_dict(),
 			"loop_voices": loop_voices,
 			"loop_empty": loop_empty,
 		})

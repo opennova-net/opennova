@@ -64,9 +64,9 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		# STRATEGY_TARGET_ID resolves no marker names -> banks + .DBF still
 		# load, zero ambient candidates resolve: the "ambient disabled" arm.
 		audio.set_resolution_strategy(MissionAudio.STRATEGY_TARGET_ID)
-	var stats: Dictionary = audio.setup(mission, mission_name, container)
-	ctx.log("setup: %s" % str(stats))
-	data["setup"] = stats
+	var stats := audio.setup(mission, mission_name, container)
+	ctx.log("setup: %s" % str(stats.to_dict()))
+	data["setup"] = stats.to_dict()
 
 	# The listener parks at the player start when the sim arm resolved one
 	# (the play-test position), else at the origin. A current Camera3D is the
@@ -93,7 +93,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		if d <= NEAR_RANGE_U:
 			near_close += 1
 	ctx.log("ambient candidates=%d physical voices=%d (within %.0fu of listener: %d, within %.0fu: %d) listener=%s" % [
-			int(stats.get("ambient_candidates", 0)), marker_players.size(),
+			int(stats.ambient_candidates), marker_players.size(),
 			CULL_RANGE_U, near, NEAR_RANGE_U, near_close, str(listen_pos)])
 	data["physical_voices"] = marker_players.size()
 	data["voices_within_cull"] = near
@@ -119,7 +119,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	data["pre_dialog_peaks"] = {"ambient_db": ambient_floor, "master_db": master_floor}
 
 	# The first N dialog ids that resolve to a loaded set.
-	var dialog_count := int(stats.get("dialogs", 0))
+	var dialog_count := int(stats.dialogs)
 	var ids: Array[int] = []
 	for i in range(1, dialog_count + 1):
 		if ids.size() >= lines:
