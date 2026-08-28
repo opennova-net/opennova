@@ -15,8 +15,8 @@ The four roots (`docs/dev-env-vars.md`) are read only by the resolvers —
 `mission_corpus()`, `captures_root()`, `golden(name)`, `capture(name)`,
 `sph(name)`, `asset_file(name)`, `expansions()`, `weapon_sav()`, `skip`,
 `skip_leg`, `RETAIL_REQUIRE_OR_SKIP`), `godot/tests/support/retail_data.gd`
-(`RetailData.install()`, `assets()`, `mission_corpus()`, `captures_root()`,
-`asset_file()`, `expansions()`, `mount_install_with(witness)`), and the
+(`RetailData.install()`, `assets()`, `mission_corpus()`, `expansions()`,
+`mount_install_with(witness)`), and the
 `Get-OpenNovaRetail*` getters in `scripts/net/lib.ps1`. Machine paths live in
 `.claude/settings.local.json` `env` (untracked), never in tracked files.
 
