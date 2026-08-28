@@ -81,14 +81,18 @@ credentials). Two private repositories carry what CI needs:
 `opennova-net/opennova-reference-assets` (the extracted tree behind
 `OPENNOVA_JO_ASSETS` and `OPENNOVA_MISSION_CORPUS`; its README lists the
 files) and `opennova-net/opennova-reference-retail-packed` (the packed install
-behind `OPENNOVA_JO_DIR`: `language.pff`, `localres.pff`, `resource.pff`,
-`main.bik`, the two SBF banks, `Jointops.exe` + the real Bink, and
-`expansion/revx02`; the archives are committed as 95 MiB plain-git parts that
-its `reassemble.sh` rebuilds and verifies against `MANIFEST.sha256`). With the
+behind `OPENNOVA_JO_DIR`: the retail JO:CA `language.pff`, `localres.pff`,
+`resource.pff`, `main.bik`, the SBF banks, `score.ini`, the `weapon.sav` pair,
+`Jointops.exe` + Bink, and `expansion/jox01`; the archives are committed as
+95 MiB plain-git parts that its `reassemble.sh` rebuilds and verifies against
+`MANIFEST.sha256`; a JOTAC tree is a mod install whose `items.def`,
+`weapon.def`, rigs and models the retail pins reject, so it never feeds this
+root). With the
 `REFERENCE_ASSETS_TOKEN` secret (a token with `contents: read` on BOTH
 repositories) the `test` and `godot-tests` jobs check the assets out beside
-the tree, restore the reassembled packed install from the Actions cache keyed
-by that repository's commit (a miss clones and reassembles it once), and point
+the tree (both restored from the Actions cache keyed by each repository's
+`main` commit and saved as soon as the data is ready, so a miss clones — and
+reassembles the packed set — once, even when the tests then fail), and point
 the three roots at them, so every root-gated test except the capture gates
 runs in CI instead of reporting Skipped; without the secret the gates stay
 closed and the job is still green. The `OPENNOVA_CAPTURES` gate stays local.
