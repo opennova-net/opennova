@@ -35,6 +35,34 @@ class TimeOfDayRegion extends RefCounted:
 		blend = p_blend
 
 
+## The setup statistics: a typed record like the sibling present passes' Stats
+## (ADR 0017); to_dict() is the probe/MCP JSON edge.
+class Stats extends RefCounted:
+	var markers_total := 0
+	var markers_resolved := 0
+	var banks_loaded := 0
+	var ambient_candidates := 0
+	var ambient_candidates_validated := 0
+	var ambient_decode_failures := 0
+	var physical_channels := 0
+	var channel_budget := MissionAudio.MIX_CHANNELS
+	var dialogs := 0
+
+	func to_dict() -> Dictionary:
+		return {
+			"markers_total": markers_total,
+			"markers_resolved": markers_resolved,
+			"banks_loaded": banks_loaded,
+			"ambient_candidates": ambient_candidates,
+			"ambient_candidates_validated": ambient_candidates_validated,
+			"ambient_decode_failures": ambient_decode_failures,
+			"physical_channels": physical_channels,
+			"channel_budget": channel_budget,
+			"dialogs": dialogs,
+		}
+
+
+
 const AMBIENT_BUS := &"Ambient"
 const SFX_BUS := &"SFX"
 const VOICE_BUS := &"Voice"
@@ -101,7 +129,7 @@ var _failed_candidate_ids: Dictionary = {}
 var _validated_candidate_ids: Dictionary = {}
 var _warned_ambient_decode_failure := false
 var _strategy: int = STRATEGY_ITEM_SOUNDLOOP
-var _stats: Dictionary = {}
+var _stats: Stats = null
 var _time_of_day_hhmm: float = 1200.0  # HHMM like MissionEnvironment.time_of_day; noon default
 var _last_camera_pos := Vector3.INF  # listener at the last tick; INF until first tick
 # Serialized dialog playback. The engine plays one dialog audio channel at a time
@@ -128,18 +156,9 @@ func _init(resource_root: ResourceRoot, item_db: ItemDatabase) -> void:
 
 ## Load banks, describe ambient marker candidates under `container`, and apply the reverb bed.
 ## `mission_name` is the .bms filename (its basename selects the co-named .LWF).
-## Returns a stats dictionary.
-func setup(mission: MissionData, mission_name: String, container: Node3D) -> Dictionary:
-	_stats = {
-		"markers_total": 0,
-		"markers_resolved": 0,
-		"banks_loaded": 0,
-		"ambient_candidates": 0,
-		"ambient_candidates_validated": 0,
-		"ambient_decode_failures": 0,
-		"physical_channels": 0,
-		"channel_budget": MIX_CHANNELS,
-	}
+## Returns the setup Stats record.
+func setup(mission: MissionData, mission_name: String, container: Node3D) -> Stats:
+	_stats = Stats.new()
 	if mission == null or container == null or _resource_root == null:
 		return _stats
 	var mission_info: Dictionary = mission.get_info()
@@ -182,7 +201,7 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Dic
 		var dbf = DbfData.new()
 		if dbf.open_from_resource_root(_resource_root, dbf_name) == OK:
 			_dbf = dbf
-			_stats["dialogs"] = dbf.get_dialog_count()
+			_stats.dialogs = dbf.get_dialog_count()
 
 	_audio_root = Node3D.new()
 	_audio_root.name = "MissionAudio"
@@ -275,7 +294,7 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Dic
 	return _stats
 
 
-func get_stats() -> Dictionary:
+func get_stats() -> Stats:
 	return _stats
 
 
@@ -694,8 +713,8 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 	_perf_markers = _markers.size()
 	_perf_voice_writes = writes
 	_perf_tick_us = Time.get_ticks_usec() - start
-	if not _stats.is_empty():
-		_stats["physical_channels"] = _channels.size()
+	if _stats != null:
+		_stats.physical_channels = _channels.size()
 
 
 func _resolve_candidate_stream(descriptor: Dictionary) -> AudioStreamWAV:
@@ -713,12 +732,12 @@ func _validate_candidate_stream(
 	var stream := _resolve_candidate_stream(descriptor)
 	if first_validation:
 		_validated_candidate_ids[candidate_id] = true
-		if not _stats.is_empty():
-			_stats["ambient_candidates_validated"] = _validated_candidate_ids.size()
+		if _stats != null:
+			_stats.ambient_candidates_validated = _validated_candidate_ids.size()
 	if stream != null:
 		return stream
-	if not _stats.is_empty():
-		_stats["ambient_decode_failures"] = _failed_candidate_ids.size() + 1
+	if _stats != null:
+		_stats.ambient_decode_failures = _failed_candidate_ids.size() + 1
 	if not _warned_ambient_decode_failure:
 		_warned_ambient_decode_failure = true
 		push_warning(

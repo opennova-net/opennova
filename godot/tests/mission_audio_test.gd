@@ -503,19 +503,19 @@ end
 	var audio = MissionAudio.new(root, item_db)
 	var provider := OcclusionRecorder.new()
 	audio.set_occlusion_override(provider.occlude)
-	var stats: Dictionary = audio.setup(mission, "probe.bms", container)
+	var stats := audio.setup(mission, "probe.bms", container)
 
-	assert_eq(int(stats.get("markers_total", 0)), 1,
+	assert_eq(int(stats.markers_total), 1,
 		"only the items.def envs class participates, regardless of BMS entity kind")
-	assert_eq(int(stats.get("markers_resolved", 0)), 1,
+	assert_eq(int(stats.markers_resolved), 1,
 		"an envs decoration/building resolves its ambient soundloop")
-	assert_gt(int(stats.get("ambient_candidates", 0)), 0)
-	assert_eq(int(stats.get("physical_channels", -1)), 0)
+	assert_gt(int(stats.ambient_candidates), 0)
+	assert_eq(int(stats.physical_channels), 0)
 	assert_eq(_players(container).size(), 0,
 		"mission setup stores marker/layer data without creating candidate nodes")
 	audio.tick(Vector3.ZERO, 0.2)
 	assert_lte(_players(container).size(), MissionAudio.MIX_CHANNELS)
-	assert_eq(int(audio.get_stats().get("physical_channels", -1)), _players(container).size())
+	assert_eq(int(audio.get_stats().physical_channels), _players(container).size())
 	assert_eq(provider.source_bms_ids, [int(env_building.get("bms_id", 0))],
 		"setup retains the authored emitter identity through the ambient LOS call")
 	audio.teardown()
@@ -570,15 +570,15 @@ end
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio = MissionAudio.new(root, item_db)
-	var stats: Dictionary = audio.setup(mission, "probe.bms", container)
+	var stats := audio.setup(mission, "probe.bms", container)
 
-	assert_eq(int(stats.get("ambient_candidates", 0)), 2)
-	assert_eq(int(stats.get("ambient_candidates_validated", -1)), 0,
+	assert_eq(int(stats.ambient_candidates), 2)
+	assert_eq(int(stats.ambient_candidates_validated), 0,
 		"setup remains descriptor-only and has not decoded either WAV")
-	assert_eq(int(stats.get("ambient_decode_failures", -1)), 0)
+	assert_eq(int(stats.ambient_decode_failures), 0)
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(int(stats.get("ambient_candidates_validated", -1)), 2)
-	assert_eq(int(stats.get("ambient_decode_failures", -1)), 1,
+	assert_eq(int(stats.ambient_candidates_validated), 2)
+	assert_eq(int(stats.ambient_decode_failures), 1,
 		"the corrupt virtual candidate is visible in runtime stats")
 	assert_eq(_players(container).size(), 1,
 		"the next-ranked playable candidate receives the physical channel")
