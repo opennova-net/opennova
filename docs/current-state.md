@@ -49,9 +49,10 @@ ordering-attributable delta (ADR 0033 §R3 spike result); R4 (a second
 backend) waits on R3's reopen condition. **The next structural program is the
 push-down campaign** opened by [ADR 0040](adr/0040-the-engine-is-one-namespace.md)
 (2026-08-26, PR #580): with the names and include roots settled, the witnessed
-behavior still living Godot-side moves home — `godot/src/simulation/` (the
-`adapter_cpp_orig_cites_pushdown` ratchet) and the game-level GDScript (the new
-`gd_orig_cites` ratchet) are the gauges, and it runs as one commit per slice.
+behavior still living Godot-side moves home — `godot/src` (the
+`adapter_cpp_orig_cites` ratchet; one marker, one count since ADR 0042 d7) and
+the game-level GDScript (the `gd_orig_cites` ratchet) are the gauges, and it
+runs as one commit per slice.
 PR #580 landed thirteen of them: the pattern-setting moves (the local-player
 view cluster, the minimap feed, LAN browse, the boot/pack/options policies, the
 seat mirror + volume law + weapon-category rows), two `godot/src/simulation/`
@@ -153,9 +154,9 @@ The remaining one is scoped small enough to be somebody's first grill.
 | Instrument | What it prevents | How it runs |
 |---|---|---|
 | [divergence-ledger.md](divergence-ledger.md) + `scripts/lint/ledger_check.py` | a divergence being known but untracked, or the scoreboard drifting from its own tables | CI, hard-fail; `--write` regenerates |
-| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates; `godot/src` cite markers growing (`adapter_cpp_orig_cites_pushdown`, banked at 341 on 2026-08-27) and the GDScript half growing (`gd_orig_cites`, `[orig:` citations in `godot/game` + `godot/modtools`, banked at 730 on 2026-08-28) | CI, fail-on-increase against a committed baseline (`scripts/lint/maturity_baseline.json`) |
+| `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates; witness citations growing Godot-side (ADR 0042 d7: `adapter_cpp_orig_cites`, one `[orig:` count over all of `godot/src`, and `gd_orig_cites` over `godot/game` + `godot/modtools` + `godot/probes` — both non-increasing, banked in the baseline; a decrease means code moved to its engine home or died); any witness cite under `godot/game/mcp` (`mcp_boundary_cites`, an absolute zero floor) | CI, fail-on-increase against a committed baseline (`scripts/lint/maturity_baseline.json`); the mcp floor is absolute, no baseline key |
 | `scripts/lint/link_graph_check.py` | forbidden lib edges (ADR 0019/0020 seams) | CI, hard-fail |
-| `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission/world may include only terrain_query's five seam headers (`coords.h`, `height_field.h`, `surface_type_map.h`, `terrain_raycast.h`, `terrain_scorch_record.h`, under the group-qualified `runtime/terrain_query/` prefix), never the terrain-format stack | CI, hard-fail |
+| `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission/world may include only terrain_query's five seam headers (`coords.h`, `height_field.h`, `surface_type_map.h`, `terrain_raycast.h`, `terrain_scorch_record.h`, under the group-qualified `runtime/terrain_query/` prefix), never the terrain-format stack; Dear ImGui includes escaping `engine/runtime/devtools` + `tests/devtools` (ADR 0042 d6) | CI, hard-fail |
 | `scripts/lint/orphan_header_check.py` | an `engine/` header wired to nothing: policy code that no engine, binding or app source includes (a header included only by its own test is exactly that shape), left behind by a move or landed ahead of its caller | CI, hard-fail; two deliberate escapes, `scripts/lint/orphan_header_allowlist.json` (a reasoned-exception list, burned down to empty on 2026-08-27) and a `STAGED, NOT WIRED` marker in the header naming the owner that will consume it |
 | `scripts/lint/host_lint.py` | "host" regressing to any non-game-host sense (the terminology campaign's teeth) | CI, hard-fail on code suffixes; Markdown gets a non-failing advisory |
 | `scripts/lint/maturity_lint.py` | dict-contract drift and new magic numbers in changed `.gd` ranges | CI, hard-fail (advisory legs stay advisory) |

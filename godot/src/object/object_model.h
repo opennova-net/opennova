@@ -181,9 +181,9 @@ public:
 	// a suppressed submit, the FP gun a viewmodel-first draw); Godot keeps that
 	// decision as per-instance layer/cast state, so the decision is STORED here
 	// and written on its edges + inside rebuild_scene, never per frame
-	// (retail: BoneCallback_org0_World @0x4e3940 the body submit gate;
+	// [orig: BoneCallback_org0_World @0x4e3940 the body submit gate;
 	// Player_RenderFirstPersonViewModel @0x4ded60, see
-	// docs/world/world-wac-ai-re.md section 13.1).
+	// docs/world/world-wac-ai-re.md section 13.1].
 	enum PresentationLayer {
 		// The ordinary entity: the mirror-policy world layer plus this model's
 		// shadow-caster markers; casts when it carries a marker.
@@ -385,8 +385,8 @@ private:
 	int wpn_phase_ticks_ = 0;
 	// The secondary channel's outgoing clip + cross-fade weight (the sim's
 	// wpn_prev / wpn_prev_clip_phase / wpn_blend_weight). Empty prev key = the
-	// channel is not blending (retail: the AnimMap_UpdateEntity @0x40b5f0
-	// re-init, see docs/world/world-wac-ai-re.md §14.8.7).
+	// channel is not blending [orig: the AnimMap_UpdateEntity @0x40b5f0
+	// re-init, see docs/world/world-wac-ai-re.md §14.8.7].
 	String wpn_prev_key_;
 	int wpn_prev_phase_ticks_ = 0;
 	float wpn_blend_weight_ = 1.0f;
@@ -536,8 +536,8 @@ public:
 	// Render-slot ground-shadow profile (SlotShadow consumes): person-type
 	// casters are the depth-clip stage's steepened class (that stage owns the
 	// 4x, not the drape — render_slot_shadow.h); vehicles may author an
-	// items.def `shadow` blob decal fallback (retail: itemdef type 3 / the
-	// +0xA0 decal, see docs/render/render-lighting-re.md). dims = (w, l, ox, oy).
+	// items.def `shadow` blob decal fallback [orig: itemdef type 3 / the
+	// +0xA0 decal, see docs/render/render-lighting-re.md]. dims = (w, l, ox, oy).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
 	void set_entity_uniform_scale_q16(int64_t p_scale_q16);
@@ -552,9 +552,9 @@ public:
 	// capture extent and the depth clip; the ENTITY BOUND (entity+0: that
 	// sphere raised to the husk model's, + the 0x1000 pad, written only for a
 	// model with a collision block) sizes the slot lod/patch and the light
-	// query (retail: Entity_InitFromModel @0x40dc30; RenderSlot_AllocSlot
+	// query [orig: Entity_InitFromModel @0x40dc30; RenderSlot_AllocSlot
 	// @0x5d5773 reads entity+0; RenderSlot_RenderEntityAndChildren
-	// @0x5d7835 reads gpm[5]; see docs/render/render-lighting-re.md). A model
+	// @0x5d7835 reads gpm[5]; see docs/render/render-lighting-re.md]. A model
 	// sphere of 0 = unstamped (SlotShadow falls back to the render bounds).
 	void set_shadow_bound_radii(float p_model_sphere, float p_entity_bound);
 	float get_model_sphere_radius() const;
@@ -582,8 +582,8 @@ public:
 	};
 	// Visible rigid ROBJ draws and their exact world bounds. The EffectWorld
 	// device leg uses these only for a building's per-ROBJ owner-section scope
-	// (retail: collect_render_objects_for_batch @0x5d8ff7, see
-	// docs/render/render-lighting-re.md).
+	// [orig: collect_render_objects_for_batch @0x5d8ff7, see
+	// docs/render/render-lighting-re.md].
 	void collect_point_light_draw_parts(
 			std::vector<PointLightDrawPart> &r_parts) const;
 	// The per-ROBJ world bounds are rebuilt only when a part/robj transform,
@@ -602,8 +602,8 @@ public:
 			const Vector4 *p_posr, const Vector4 *p_color);
 	// One authored LGHT record's live world position. Record offsets are model
 	// space; a nonzero attach subobject follows the same rest-to-live transform
-	// as user points (retail: Entity_SpawnGlowEffects @0x56c836 plus the
-	// per-frame attachment mover, see docs/render/render-lighting-re.md).
+	// as user points [orig: Entity_SpawnGlowEffects @0x56c836 plus the
+	// per-frame attachment mover, see docs/render/render-lighting-re.md].
 	Vector3 get_model_light_world_position(int p_index) const;
 	// Retail submits MATCHTERRAIN only for a skinned entity whose MoveOrder
 	// stance bits are crouch/prone. The live presentation row owns that gate.

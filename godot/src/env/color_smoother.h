@@ -9,7 +9,7 @@ namespace godot {
 
 // Integer-faithful weather color smoother: the engine's 12.20 fixed-point
 // per-channel eighth-step with rate clamps and +0x80000 rounding on repack
-// (retail: interpolate_weather_color @ 0x57d9e0, see docs/env/env-tod-re.md). One instance per smoothed
+// [orig: interpolate_weather_color @ 0x57d9e0, see docs/env/env-tod-re.md]. One instance per smoothed
 // color channel (Weather holds four). See docs/env/env-tod-re.md.
 class ColorSmoother : public RefCounted {
 	GDCLASS(ColorSmoother, RefCounted)

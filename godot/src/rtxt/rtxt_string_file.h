@@ -48,7 +48,7 @@ public:
 	String get_string(const StringName &p_key) const;
 	bool has_string(const StringName &p_key) const;
 	// Engine-faithful section-scoped lookup (first matching section, first
-	// matching key within its contiguous run) (retail: 0x75D250 / 0x75D1E0, see docs/interface/rtxt-strings-re.md).
+	// matching key within its contiguous run) [orig: 0x75D250 / 0x75D1E0, see docs/interface/rtxt-strings-re.md].
 	String get_string_in_section(const String &p_section, const StringName &p_key) const;
 	bool has_string_in_section(const String &p_section, const StringName &p_key) const;
 	int get_entry_count() const;

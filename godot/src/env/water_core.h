@@ -17,11 +17,11 @@
 
 namespace godot {
 
-// The per-frame water surface core of (retail: render_water_surface @ 0x5c32c0, see docs/env/env-tod-re.md):
+// The per-frame water surface core of [orig: render_water_surface @ 0x5c32c0, see docs/env/env-tod-re.md]:
 // the animated 128x128 ridge color/alpha texture and its DuDv/normal
-// derivative (retail: Water_GenerateNoiseTextures @ 0x5c0360, see docs/env/env-tod-re.md), plus the
+// derivative [orig: Water_GenerateNoiseTextures @ 0x5c0360, see docs/env/env-tod-re.md], plus the
 // screen-marched strip tessellation of the detailed tier (env #29)
-// (retail: render_water_strip_detailed @ 0x5c27d0, see docs/env/env-tod-re.md). All math lives in engine/formats/env
+// [orig: render_water_strip_detailed @ 0x5c27d0, see docs/env/env-tod-re.md]. All math lives in engine/formats/env
 // (env/env_water_render.h); this binding owns the static tables (built once with
 // the witnessed init, from the boot PRNG state), the frame buffers, and the
 // Godot<->render basis conversion for the strip view state. Water updates
@@ -52,7 +52,7 @@ protected:
 
 public:
 	// Regenerates both textures for the given 62 Hz frame counter
-	// (retail: called per frame from render_water_surface @ 0x5c3326, see docs/env/env-tod-re.md).
+	// [orig: called per frame from render_water_surface @ 0x5c3326, see docs/env/env-tod-re.md].
 	void update(int p_frame_counter);
 
 	// RGBA8 bytes (128x128) for Image::create_from_data - the ridge
@@ -80,10 +80,10 @@ public:
 
 	// Godot-space world positions reconstructed per vertex from the
 	// witnessed uv0 = world x/32, z/32 pair + the plane height
-	// (retail: flt_7DBFAC @ 0x5c2899, see docs/env/env-tod-re.md).
+	// [orig: flt_7DBFAC @ 0x5c2899, see docs/env/env-tod-re.md].
 	PackedVector3Array strip_positions() const;
 	// Row diffuse / specular ARGB per vertex as raw bytes / 255 (no
-	// color-space conversion) (retail: written @ 0x5c2f0a..0x5c2f2b, see docs/env/env-tod-re.md).
+	// color-space conversion) [orig: written @ 0x5c2f0a..0x5c2f2b, see docs/env/env-tod-re.md].
 	PackedColorArray strip_colors() const;
 	// The specular again as 4 floats per vertex (RGBA, raw bytes / 255) —
 	// ARRAY_CUSTOM1 under the RGBA_FLOAT format only accepts a
@@ -100,13 +100,13 @@ public:
 	PackedFloat32Array strip_custom0() const;
 	// 4 floats per vertex: [t1.x, t1.y, t2.x, t2.y] — the texm3x2
 	// perturbation basis (camera right/forward xz under the witnessed rhw
-	// scales (retail: rows @ 0x5c2f83..0x5c3067, see docs/env/env-tod-re.md)) as the mesh's ARRAY_CUSTOM2;
+	// scales [orig: rows @ 0x5c2f83..0x5c3067, see docs/env/env-tod-re.md]) as the mesh's ARRAY_CUSTOM2;
 	// the rows' 3rd components (screen U/V) ride strip_custom0's zw. The
 	// env #30 reflection consumer dots both against the DuDv sample.
 	PackedFloat32Array strip_custom2() const;
 	// PRIMITIVE_TRIANGLES indices unrolled from the witnessed <=5-row
 	// triangle-strip batches through kWaterStripIndexTable
-	// (retail: word_841328; batch walk @ 0x5c3164..0x5c329e, see docs/env/env-tod-re.md).
+	// [orig: word_841328; batch walk @ 0x5c3164..0x5c329e, see docs/env/env-tod-re.md].
 	PackedInt32Array strip_indices() const;
 };
 

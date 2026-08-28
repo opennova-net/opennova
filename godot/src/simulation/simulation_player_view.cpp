@@ -71,8 +71,8 @@ int Simulation::request_local_player_nvg_gain(int p_delta) {
 }
 
 void Simulation::set_local_player_third_person_selected(bool p_selected) {
-	// The preference re-resolves the mode at once (retail: the next frame's
-	// arbiter; see world/player_view.h).
+	// The preference re-resolves the mode at once [orig: the next frame's
+	// arbiter; see world/player_view.h].
 	opennova::world::player_view_set_third_person_selected(player_view_, p_selected);
 	refresh_local_player_view_effects();
 }
@@ -86,7 +86,7 @@ void Simulation::set_local_player_debug_third_person(bool p_enabled) {
 bool Simulation::local_death_screen_active() const {
 	// The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
 	// role's view folds (the listen host's own loopback included)
-	// (retail: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b, see netsim/client_state.h).
+	// [orig: g_death_screen_active, NapiNPClientMsg_0x00A @0x42ff88..0x43002b, see netsim/client_state.h].
 	return runtime_ != nullptr && runtime_->state().death_screen_active;
 }
 

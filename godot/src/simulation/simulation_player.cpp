@@ -173,8 +173,8 @@ uint32_t Simulation::mission_game_type() const {
 	// Derive the same g_GameType code word as the mission catalog. A mission
 	// with no multiplayer bit is stock Co-op (0x10020), which reaches 00TRa's
 	// exact 6001 fallback rather than requiring a cross-mode family scan.
-	// (retail: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360,
-	// see docs/net/novaworld-net-re.md 5.2c)
+	// [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360,
+	// see docs/net/novaworld-net-re.md 5.2c]
 	return opennova::game_type::for_mission_mode(
 			opennova::bms::selected_game_mode(
 					static_cast<opennova::bms::AttribFlags>(

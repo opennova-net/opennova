@@ -177,8 +177,8 @@ float Simulation::sun_quality_factor(int p_quality) const {
 // The per-drawn-entity sun-visibility factor feed (D-RLIT-3). Retail computes
 // the factor inside the sector render walk for every entity it draws and
 // pushes it onto the render-state stack around that entity's submits
-// (retail: setup_terrain_effect_for_entity @0x5c74a0 -> Entity_ComputeSunVisibility
-// @0x5c6800, stack write @0x5c7bff, see docs/render/render-lighting-re.md);
+// [orig: setup_terrain_effect_for_entity @0x5c74a0 -> Entity_ComputeSunVisibility
+// @0x5c6800, stack write @0x5c7bff, see docs/render/render-lighting-re.md];
 // contained entities take the interior light group instead and the factor
 // stays 1.0. The blocked-ray count and eligibility gate are engine-side
 // (world::CollisionWorld); this walk mirrors both drawn identity domains and
@@ -189,7 +189,7 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 	if (!world_) return out;
 
 	// Sun step in mission fixed: light_dir * 200 u, the same tuple mapping the
-	// iris march uses (retail: end = start + 200 * lightdir @0x5c6858..0x5c6876).
+	// iris march uses [orig: end = start + 200 * lightdir @0x5c6858..0x5c6876].
 	const int32_t sun[3] = {
 		opennova::world::to_fixed(p_light_dir.x * 200.0f),
 		opennova::world::to_fixed(-p_light_dir.z * 200.0f),
@@ -204,8 +204,8 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 
 	const auto entity_quality = [&](const opennova::world::Entity &e) {
 		// Contained entities route through the interior light group; the
-		// outdoor factor stays 1.0 (retail: the blink-ref branch @0x5c74b7).
-		// The +0x1C0 slice gate (retail: @0x5c6808) lives inside the ray walk:
+		// outdoor factor stays 1.0 [orig: the blink-ref branch @0x5c74b7].
+		// The +0x1C0 slice gate [orig: @0x5c6808] lives inside the ray walk:
 		// an entity with no proximity-candidate slice blocks nothing and holds
 		// quality 4 — statics never ray, and only slice candidates (structures
 		// overlapping the entity's inflated bubble) can shade it.
@@ -257,12 +257,12 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 	// frame. Retail casts inside the sector render walk for every drawn entity
 	// every frame; only the candidate SLICE the walker iterates refreshes on
 	// the 17-tick arena edge, which CollisionWorld::build_tick_tables already
-	// mirrors for wire rows (retail: Terrain_RenderSectorEntities @0x5c7bf1 /
+	// mirrors for wire rows [orig: Terrain_RenderSectorEntities @0x5c7bf1 /
 	// Terrain_RenderSectorEntitiesBySide @0x5c7f9a -> setup_terrain_effect_for_entity
 	// @0x5c74a0 -> Entity_ComputeSunVisibility @0x5c6800 per frame; the slice
 	// gate g_ProxSliceRefreshCounter >= 0x10 @0x4c240f ->
 	// Entity_BuildProximityListsFromPools @0x4c2418, see
-	// docs/render/render-lighting-re.md). Throttling the casts themselves to
+	// docs/render/render-lighting-re.md]. Throttling the casts themselves to
 	// that cadence would hold a moving vehicle's sun factor stale for up to
 	// 16 ticks; the per-handle cache below only suppresses unchanged emits.
 	if (!joiner_) {
@@ -449,8 +449,8 @@ int Simulation::local_player_interior_item_id() const {
 
 // The pool-2 entity a packed blink hit names, as a bms_id. 0 = the hit's pool
 // slot holds no bms-identified entity (nothing to own a light).
-// (retail: Pool_GetEntryUnchecked(2, hit >> 20) @0x56c8c9, see
-// docs/render/render-lighting-re.md)
+// [orig: Pool_GetEntryUnchecked(2, hit >> 20) @0x56c8c9, see
+// docs/render/render-lighting-re.md]
 int Simulation::blink_hit_owner_bms_id(uint32_t p_hit) const {
 	if (!world_ || p_hit == 0) return 0;
 	const opennova::world::EntityHandle building =

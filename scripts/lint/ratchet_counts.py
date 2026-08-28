@@ -12,23 +12,26 @@ in maturity_baseline.json:
                         no src/ level) with zero "[orig" citations, excluding
                         the allowlisted infra libs (citation is inapplicable
                         there) -- the faithful-port rule's coverage floor.
-  adapter_cpp_orig_cites_pushdown  "[orig:" citations in godot/src
-                        simulation/, object/, and mission/ -- witnessed
-                        engine behavior still living in the binding layer.
-                        The burn-down class: push-downs bank the decrease,
-                        and this one CAN legitimately reach zero.
-  adapter_cpp_orig_cites_device  "[orig:" + "(retail:" citations in the rest of godot/src
-                        (env, terrain, hud, mnu, particle, network, ...) --
-                        the retail-D3D-to-Godot device-leg mappings ADR 0035
-                        sanctions. Ratcheted so it cannot grow, but its floor
-                        is NON-ZERO BY DESIGN: a device-leg citation is the
-                        seam contract working, and deleting one is a
-                        documentation regression, not a win.
-  gd_orig_cites         "[orig:" citations in godot/game and godot/modtools
-                        GDScript -- witnessed engine behavior still living in
-                        the game-level scripts (ADR 0034 d6's C++ rewrite
-                        queue, measured). The burn-down class for the push-down
-                        campaign; its floor is the device-leg justifications.
+  adapter_cpp_orig_cites  "[orig:" citations across ALL of godot/src -- the
+                        one cite marker (ADR 0042 d7 retired the dual-marker
+                        convention; there is no "(retail:" form and no
+                        pushdown/device partition any more). Non-increasing:
+                        a decrease means witnessed code moved to its engine
+                        home or died as verified dead code -- bank it with
+                        --write-baseline. The marker-rewrite exit is gone;
+                        only code that moves banks the counter.
+  mcp_boundary_cites    "[orig:" citations in godot/game/mcp GDScript. An
+                        ABSOLUTE zero floor, not baseline-relative (ADR 0042
+                        d7): the MCP boundary converts typed records to JSON,
+                        and a converter that needs a witness cite is
+                        re-deriving. No baseline key exists for it.
+  gd_orig_cites         "[orig:" citations in godot/game, godot/modtools and
+                        godot/probes GDScript -- witnessed engine behavior
+                        still living in the game-level scripts (ADR 0034 d6's
+                        C++ rewrite queue, measured; godot/probes joined the
+                        scope under ADR 0042 d7). The burn-down class for the
+                        push-down campaign; its floor is the device-leg
+                        justifications.
   oversize_cpp_headers  .h/.hpp under engine/, apps/, godot/src past the same
                         2500-line limit as oversize_cpp_files (the .cpp glob
                         never saw headers).
@@ -123,18 +126,14 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
     return count
 
 
-# The push-down population: witnessed gameplay/format behavior in the binding
-# layer with a named engine/ destination (godot/src/CLAUDE.md). Everything
-# else under godot/src is the device population — seam contracts that stay.
-# The push-down counter counts only the literal `[orig:` marker (converting a
-# note to the adjudicated `(retail: ...)` form IS the sanctioned exit); the
-# device counter counts BOTH forms, so its "must not shrink" floor survives
-# the convention and only a deleted device witness moves it.
-ADAPTER_PUSHDOWN_DIRS = ("simulation", "object", "mission")
-ADAPTER_DEVICE_MARKERS = ("[orig:", "(retail:")
-
-
-def _count_adapter_cites(pushdown: bool) -> int:
+# One cite marker, one count (ADR 0042 d7): a witness citation is
+# `[orig: Name @0xADDR]` everywhere — the adjudicated `(retail: ...)` note
+# form and the pushdown/device partition are retired. The count over all of
+# godot/src is non-increasing; a decrease means witnessed code moved to its
+# engine home (or died as verified dead code) and is banked with
+# --write-baseline. The marker rewrite that let citations leave the gauge is
+# no longer an exit: only code that moves banks the counter.
+def count_adapter_cpp_orig_cites() -> int:
     count = 0
     adapter = REPO / "godot" / "src"
     for path in adapter.rglob("*"):
@@ -143,26 +142,27 @@ def _count_adapter_cites(pushdown: bool) -> int:
         rel_parts = path.relative_to(REPO).parts
         if _in_build_dir(rel_parts):  # generated CMake tree (godot-cpp), not source
             continue
-        sub = path.relative_to(adapter).parts[0] if path.relative_to(adapter).parts else ""
-        if (sub in ADAPTER_PUSHDOWN_DIRS) != pushdown:
-            continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if pushdown:
-            count += text.count("[orig:")
-        else:
-            count += sum(text.count(marker) for marker in ADAPTER_DEVICE_MARKERS)
+        count += text.count("[orig:")
     return count
 
 
-def count_adapter_cpp_orig_cites_pushdown() -> int:
-    return _count_adapter_cites(pushdown=True)
-
-
-def count_adapter_cpp_orig_cites_device() -> int:
-    return _count_adapter_cites(pushdown=False)
+def count_mcp_boundary_cites() -> int:
+    """`[orig:` citations in godot/game/mcp GDScript: an ABSOLUTE zero floor
+    (ADR 0042 d7), not a baseline-relative ratchet. The MCP boundary converts
+    typed engine records to JSON; a converter that needs a witness cite is
+    re-deriving engine facts at the boundary."""
+    count = 0
+    for path in (REPO / "godot" / "game" / "mcp").rglob("*.gd"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        count += text.count("[orig:")
+    return count
 
 
 LIBS_PRINT = re.compile(
@@ -309,13 +309,14 @@ def count_oversize_cpp_headers() -> int:
 
 
 def count_gd_orig_cites() -> int:
-    """`[orig:` citations in the game-level GDScript (godot/game, godot/modtools):
-    witnessed engine behavior that ADR 0033/0034 say belongs in engine/. The
-    push-down campaign banks this down; the floor is the device-leg
-    justifications (a cite explaining WHY a node write happens, not HOW a
-    witnessed value is derived)."""
+    """`[orig:` citations in the game-level GDScript (godot/game,
+    godot/modtools, and — since ADR 0042 d7 — godot/probes): witnessed engine
+    behavior that ADR 0033/0034 say belongs in engine/. The push-down campaign
+    banks this down; the floor is the device-leg justifications (a cite
+    explaining WHY a node write happens, not HOW a witnessed value is
+    derived)."""
     count = 0
-    for sub in ("game", "modtools"):
+    for sub in ("game", "modtools", "probes"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or _in_build_dir(parts):
@@ -391,8 +392,7 @@ def main() -> int:
     current = {
         "test_private_pokes": count_test_private_pokes(),
         "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
-        "adapter_cpp_orig_cites_pushdown": count_adapter_cpp_orig_cites_pushdown(),
-        "adapter_cpp_orig_cites_device": count_adapter_cpp_orig_cites_device(),
+        "adapter_cpp_orig_cites": count_adapter_cpp_orig_cites(),
         "engine_stdout_prints": count_engine_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),
@@ -403,15 +403,29 @@ def main() -> int:
         "gd_orig_cites": count_gd_orig_cites(),
     }
 
+    # Absolute floor, no baseline key (ADR 0042 d7): the MCP boundary carries
+    # zero witness cites, forever — this never relaxes via --write-baseline.
+    mcp_cites = count_mcp_boundary_cites()
+
     if args.write_baseline:
         config["counters"] = current
         BASELINE_PATH.write_text(
             json.dumps(config, indent=2, sort_keys=True) + "\n",
             encoding="utf-8", newline="\n")
         print(f"[ratchet] baseline rewritten: {current}")
+        if mcp_cites > 0:
+            print(f"[ratchet] WARNING: mcp_boundary_cites is {mcp_cites} — the "
+                  f"floor is 0 and has no baseline; --enforce will fail.")
         return 0
 
     failed = False
+    floor_marker = "OK" if mcp_cites == 0 else "ABOVE FLOOR"
+    print(f"[ratchet] mcp_boundary_cites: {mcp_cites} (absolute floor 0) {floor_marker}")
+    if mcp_cites > 0:
+        print("[ratchet]   godot/game/mcp converts typed records to JSON; a "
+              "converter that needs a witness cite is re-deriving (ADR 0042 d7). "
+              "Move the witnessed logic to engine/ and delete the cite.")
+        failed = True
     for name, value in current.items():
         base = baseline.get(name)
         if base is None:
@@ -428,9 +442,10 @@ def main() -> int:
                   f"python scripts/lint/ratchet_counts.py --write-baseline")
 
     if failed and args.enforce:
-        print("[ratchet] FAIL: a counter increased (or lacks a baseline). "
-              "Fix the regression, or a maintainer bumps the baseline and "
-              "logs it in docs/maturity-program.md.")
+        print("[ratchet] FAIL: a counter increased, lacks a baseline, or sits "
+              "above an absolute floor. Fix the regression, or (baseline "
+              "counters only) a maintainer bumps the baseline and logs it in "
+              "docs/maturity-program.md.")
         return 1
     return 0
 

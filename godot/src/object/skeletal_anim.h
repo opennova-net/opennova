@@ -192,14 +192,14 @@ public:
 	// An EMPTY p_wpn_key means the §14.8.6 gate is off — no override at all. A key with
 	// no matching clip is DIFFERENT: registration backfills every absent anim_<name>
 	// with entry 0, so a missing key plays the RESET clip rather than no-opping
-	// (retail: the unrolled backfill loops @0x40bc24 / @0x40bd2e, see
-	// docs/world/world-wac-ai-re.md §14.8.1).
+	// [orig: the unrolled backfill loops @0x40bc24 / @0x40bd2e, see
+	// docs/world/world-wac-ai-re.md §14.8.1].
 	//
 	// p_wpn_prev_key/playhead/weight carry the secondary channel's own cross-fade — the
 	// weapon layer re-inits through the SAME AnimMap_UpdateEntity body as the primary,
-	// so it takes the same blend window (retail: AnimMap_UpdateDualChannels @0x40b8c0
+	// so it takes the same blend window [orig: AnimMap_UpdateDualChannels @0x40b8c0
 	// -> @0x40b5f0 and AnimChannel_BlendTwoChannels @0x410740, see
-	// docs/world/world-wac-ai-re.md §14.8.7). Empty prev = no blend.
+	// docs/world/world-wac-ai-re.md §14.8.7]. Empty prev = no blend.
 	void splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
 			double p_wpn_playhead_seconds, const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,

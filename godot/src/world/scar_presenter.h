@@ -8,9 +8,9 @@
 // ONE top-level mesh, one surface per (texture strip, building) batch. Entity
 // ring batches are SECTION-LOCAL to the owner model's struck section and are
 // parented under that section's render-part node, so they ride the carrier's
-// pose for free (retail: Scar_RenderCache @0x5CD830 transforms an entity ring's
+// pose for free [orig: Scar_RenderCache @0x5CD830 transforms an entity ring's
 // slots through `bones + bone << 6` at draw time; the shared ring draws its
-// positions as-is — see docs/world/world-wac-ai-re.md §24.9).
+// positions as-is — see docs/world/world-wac-ai-re.md §24.9].
 //
 // The drawer state is per strip: the GfxShader mode word the loader built the
 // strip's effect from (the draw list's `strip_mode_words`, decoded through
@@ -20,9 +20,9 @@
 // (shaders/scar_quad_hole.gdshader: the same plus the GREATER/128 alpha test,
 // z-write, cull none). The ONLY device folds are the view-space pull that
 // replaces the D3D depth bias and the winding the sim packer applies with the
-// coordinate fold (retail: the scar batch drawer Scar_DrawBatches (ex Terrain_RenderFoliageBatches)
+// coordinate fold [orig: the scar batch drawer Scar_DrawBatches (ex Terrain_RenderFoliageBatches)
 // @0x5ccd10 — the IDB's kong misnomer, Scar_DrawBatches proposed — under
-// Scar_RenderAllCaches @0x5CDF70; the strip table Scar_LoadTextures @0x5CC2E0).
+// Scar_RenderAllCaches @0x5CDF70; the strip table Scar_LoadTextures @0x5CC2E0].
 
 #include <cstdint>
 

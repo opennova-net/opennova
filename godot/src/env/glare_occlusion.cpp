@@ -15,7 +15,7 @@ void GlareOcclusion::_bind_methods() {
 Vector3 GlareOcclusion::jitter_to_godot(uint32_t p_index) const {
 	// Mission axes -> Godot world (the (x, z, -y) map every mission
 	// position takes): jitter offsets live on mission Y (north) and mission
-	// Z (height) (retail: @ 0x5ace3b..0x5ace61, see docs/env/env-tod-re.md), so godot y = +offset_z,
+	// Z (height) [orig: @ 0x5ace3b..0x5ace61, see docs/env/env-tod-re.md], so godot y = +offset_z,
 	// godot z = -offset_y. (2026-08-20 correction with the env_axes.h sweep:
 	// the earlier mapping sent mission Y to godot -x — a 90-degree-rotated
 	// jitter plane; symmetric offsets made it invisible to the window.)
@@ -32,7 +32,7 @@ Vector3 GlareOcclusion::get_ray_jitter_b() const {
 }
 
 float GlareOcclusion::get_ray_length() const {
-	return 1024.0f; // (retail: sun_dir << 10 @ 0x5acd71/0x5acde8, see docs/env/env-tod-re.md)
+	return 1024.0f; // [orig: sun_dir << 10 @ 0x5acd71/0x5acde8, see docs/env/env-tod-re.md]
 }
 
 void GlareOcclusion::tick(bool p_visible_a, bool p_visible_b, float p_fog_distance) {

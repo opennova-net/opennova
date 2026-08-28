@@ -17,24 +17,14 @@ engine concept it exposes (`AmbientMixer` in `audio/ambient_mixer.h` wraps
 includes are quoted and root-relative (`#include "audio/ambient_mixer.h"`, this
 directory is the include root); engine includes are `<group/lib/file.h>`; no
 subdirectory here may be named `base`, `formats`, `runtime` or `net`
-(`include_graph_check.py` enforces all three). The
-two `adapter_cpp_orig_cites_*` ratchets are the transition gauge, split by
-population (2026-08-11): `_pushdown` (simulation/, object/, mission/) is
-witnessed engine behavior still living here — the burn-down class, and it
-can legitimately reach zero; `_device` (env/, terrain/, hud/, mnu/,
-particle/, network/, ...) is the retail-D3D→Godot device-leg mappings ADR
-0035 sanctions — it must not grow, but its floor is NON-ZERO BY DESIGN:
-deleting a device citation is a documentation regression, not a win. The
-device counter counts both the `[orig:` marker and the adjudicated
-`(retail:` form below, so converting a note never shrinks it; only a
-deleted witness does.
+(`include_graph_check.py` enforces all three).
 
-Citation convention (adjudicated): a witness note in `godot/src` is written as
-`(retail: Name @0xADDR, see docs/<record>)` — NEVER the literal `[orig:`
-marker, which the `adapter_cpp_orig_cites_*` ratchets count. The
-`(retail: ...)` form is for device-leg cross-references pointing at a
-record-owned witness; genuinely witnessed engine behavior belongs in `engine/`
-with a real `[orig:]` cite.
+Citations (ADR 0042 d7): a witness citation is `[orig: Name @ 0xADDR]`
+everywhere — there is no second marker form. `adapter_cpp_orig_cites` is one
+non-increasing count over all of `godot/src`: it shrinks when witnessed code
+moves to its engine home (or dies as verified dead code) and may never grow.
+Genuinely witnessed engine behavior still belongs in `engine/` (ADR 0042's
+boundary rule).
 
 Size ratchets: no `.cpp` here past 2500 lines and no shipping `.gd` past 1200 —
 split first; `scripts/lint/ratchet_counts.py` fails on any increase.

@@ -38,7 +38,7 @@ public:
 	Error compile_sources(const PackedStringArray &p_sources);
 	// Resolve game.wac, server.wac and <mission_basename>.wac through the
 	// mounted resource root, skipping absent files in the original order, and
-	// compile what exists. (retail: WacScript_InitAndLoad, see docs/world/world-wac-ai-re.md) Returns
+	// compile what exists. [orig: WacScript_InitAndLoad, see docs/world/world-wac-ai-re.md] Returns
 	// ERR_DOES_NOT_EXIST when none of the three is present (a BMS-only
 	// mission — callers leave the VM unloaded).
 	Error compile_from_resource_root(const Ref<ResourceRoot> &p_root, const String &p_mission_basename);

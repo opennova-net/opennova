@@ -145,7 +145,7 @@ void WeatherCore::tick(const Color &p_fill_target, const Color &p_sun_target,
 		const Color &p_fog_target, const Color &p_sky_target,
 		const Color &p_lightning_color, float p_sky_speed) {
 	// The witnessed tick order is env::WeatherCore::tick's
-	// (retail: Environment_UpdateWeatherTick @ 0x57e9b0, see docs/env/env-tod-re.md).
+	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0, see docs/env/env-tod-re.md].
 	core_.tick(color_to_packed(p_fill_target), color_to_packed(p_sun_target),
 			color_to_packed(p_fog_target), color_to_packed(p_sky_target),
 			color_to_packed(p_lightning_color), p_sky_speed);

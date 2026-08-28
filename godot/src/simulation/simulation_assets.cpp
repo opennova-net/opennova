@@ -162,8 +162,8 @@ void Simulation::sync_class_attribute_flags() {
 	// The joiner's live copy carries every S2C 0x41 clear applied so far; a
 	// HostClient keeps the boot copy, and a failed/missing charattr.def leaves
 	// the all-zero table -- no class carries an attribute, retail's failed-load
-	// state (retail: CharAttr_LoadFromDef @0x412140 memsets 0x7C0 bytes first;
-	// AnimMap_IsSlotActive @0x4125e0; see docs/interface/hud-re.md).
+	// state [orig: CharAttr_LoadFromDef @0x412140 memsets 0x7C0 bytes first;
+	// AnimMap_IsSlotActive @0x4125e0; see docs/interface/hud-re.md].
 	const opennova::np::CharAttrChallengeTable *live =
 			runtime_ ? runtime_->charattr_challenge_table() : nullptr;
 	const opennova::np::CharAttrChallengeTable &table =

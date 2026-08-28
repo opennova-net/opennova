@@ -208,9 +208,9 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	material->set_shader_parameter("u_local_light_atten_end", 5.0f);
 	// No shadow-receiver next pass on world models: retail's render-slot
 	// entity ground shadows drape TERRAIN-FOLLOWING patches only — a live
-	// silhouette never lands on another model (retail:
+	// silhouette never lands on another model [orig:
 	// RenderSlot_DrawAllDrapes @0x5d6e20 draws the slot's terrain patch via
-	// render_sector_model @0x5d5ca0; see docs/render/render-lighting-re.md).
+	// render_sector_model @0x5d5ca0; see docs/render/render-lighting-re.md].
 	// The terrain material carries the drape pass (SlotShadow).
 	return material;
 }

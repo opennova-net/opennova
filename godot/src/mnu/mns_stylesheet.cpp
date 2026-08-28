@@ -35,7 +35,7 @@ bool MnsStyleSheet::has_variable(const String &p_name) const {
 	return sheet_.has(to_std(p_name));
 }
 
-// (retail: NapiXML_ExpandVariablesInText @ 0x63a000, see docs/mnu/menu-re.md)  ARCHITECTURE DIVERGENCE: the
+// [orig: NapiXML_ExpandVariablesInText @ 0x63a000, see docs/mnu/menu-re.md]  ARCHITECTURE DIVERGENCE: the
 // original expands %VAR% over the whole raw .mnu byte buffer BEFORE the XML parse;
 // the reimpl substitutes per-field, post-parse, on every consumed field the
 // engine's whole-buffer pass would cover -- colors, fonts, textures, and literal

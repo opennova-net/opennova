@@ -21,10 +21,10 @@ using namespace godot;
 namespace {
 
 // The retail client medic-call cooldown: 310 ticks stamped at the send
-// (retail: Input_HandleActionBinding case 217 @0x49b511 `dword_B76804 =
+// [orig: Input_HandleActionBinding case 217 @0x49b511 `dword_B76804 =
 // 0x136`; decremented once per frame in Player_UpdatePerFrame @0x4de73e;
 // cleared on the local death path @0x4b4d06, see docs/net/novaworld-net-re.md
-// 0x2E).
+// 0x2E].
 constexpr int kMedicRequestCooldownTicks = 0x136;
 
 } // namespace
@@ -50,8 +50,8 @@ bool Simulation::local_player_dead() const {
 }
 
 bool Simulation::request_local_player_medic() {
-	// The action gates (retail: case 217 @0x49b4b4..0x49b4da — in session, a
-	// local entity, `Flags & 2`, the cooldown at zero).
+	// The action gates [orig: case 217 @0x49b4b4..0x49b4da — in session, a
+	// local entity, `Flags & 2`, the cooldown at zero].
 	if (!runtime_ || !world_ || !world_->cached.local_player.valid()) return false;
 	if (!local_player_dead()) return false;
 	if (medic_request_cooldown_ticks_ != 0) return false;
@@ -76,8 +76,8 @@ bool Simulation::request_local_player_medic() {
 }
 
 void Simulation::tick_local_medic_cooldown() {
-	// (retail: Player_UpdatePerFrame @0x4de736..0x4de744 — one per frame while
-	// nonzero; the local death path @0x4b4d06 zeroes it.)
+	// [orig: Player_UpdatePerFrame @0x4de736..0x4de744 — one per frame while
+	// nonzero; the local death path @0x4b4d06 zeroes it.]
 	const bool dead = local_player_dead();
 	if (dead && !local_dead_edge_seen_) medic_request_cooldown_ticks_ = 0;
 	local_dead_edge_seen_ = dead;
@@ -102,10 +102,10 @@ void Simulation::set_server_text(const String &p_medic_request_format) {
 }
 
 Dictionary Simulation::get_deploy_status() {
-	// The DEATH screen's STATIC facts for THIS client (retail: the client
+	// The DEATH screen's STATIC facts for THIS client [orig: the client
 	// globals UI_UpdateDeathScreenContent @0x5536a0 reads — dword_A85B5C /
 	// A85B60 / A85B68 from the 0x0A sub-block 0, word_A85BC0 + entity+538/548
-	// from the 0x6E fold).
+	// from the 0x6E fold].
 	Dictionary out;
 	int penalty = 0;
 	int revive = 0;
@@ -196,7 +196,7 @@ TypedArray<Dictionary> Simulation::get_deploy_list_rows(const String &p_default_
 	TypedArray<Dictionary> out;
 	if (!world_ || !joiner_ || !runtime_) return out;
 	opennova::world::DeployListInput in;
-	// (retail: "<c4040FF>", or "<cFF2020>" when Team == 2 @0x553b1e..0x553b38)
+	// [orig: "<c4040FF>", or "<cFF2020>" when Team == 2 @0x553b1e..0x553b38]
 	in.team_color_tag = runtime_->assigned_team() == 2 ? "<cFF2020>" : "<c4040FF>";
 	in.default_key = p_default_key.utf8().get_data();
 	in.default_home = p_default_home.utf8().get_data();

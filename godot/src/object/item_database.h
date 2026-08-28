@@ -48,8 +48,8 @@ private:
 		int id = 0;
 		int type = 0;
 		// The items.def `sid` token — the key hudpos.def's VEHICLE_HUD blocks
-		// commit against (retail: HUD_ParseHudposToken @0x59F370 VEHICLE_END
-		// walks the item table by sid; see docs/interface/hud-re.md).
+		// commit against [orig: HUD_ParseHudposToken @0x59F370 VEHICLE_END
+		// walks the item table by sid; see docs/interface/hud-re.md].
 		String sid;
 		uint32_t attrib = 0; // items.def ItemDefAttrib (+0x54); 0x100000 = AIData (AI class)
 		uint32_t attrib2 = 0; // items.def ItemDefAttrib2 (+0x58); bit 6 = portal-weldable
@@ -65,9 +65,9 @@ private:
 		String render_function;
 		String disk_function;
 		// items.def default_aip (itemDef+0x8B8): the vehicle AI init's profile
-		// name when the placed record's ai_textfile is empty (retail:
+		// name when the placed record's ai_textfile is empty [orig:
 		// Entity_InitVehicleAIFromDef @0x4686C0, the def+0x8B8 arm @0x4687c1;
-		// see docs/world/world-wac-ai-re.md §23).
+		// see docs/world/world-wac-ai-re.md §23].
 		String default_aip;
 		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
 		// Authored ground-shadow blob decal 'shadow <name> <w> <l> <ox> <oy>'
@@ -275,8 +275,8 @@ public:
 	int get_item_type(int id) const;
 	// Effective authored model scale source, signed Q16.16. Zero is retail's
 	// unscaled sentinel (a visual/collision scale of 1.0).
-	// (retail: ItemDef+0x1B8; Entity_InitFromModel @0x40dc30, see
-	// engine/runtime/simassets/model_builders.cpp)
+	// [orig: ItemDef+0x1B8; Entity_InitFromModel @0x40dc30, see
+	// engine/runtime/simassets/model_builders.cpp]
 	int32_t get_model_scale_q16(int id) const;
 	// Building-interior daylight fraction from items.def light_transfer
 	// (authored percent clamped to 0..100 at parse; 0.0 for unknown/absent).

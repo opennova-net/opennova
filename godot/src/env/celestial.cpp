@@ -163,9 +163,9 @@ void Celestial::_rebuild_if_needed() {
 		{ "glare", env_data->get_glare_3di(), true,
 				opennova::renderer::kRungSunGlow, "sun" },
 		// The water-reflected sun glint reuses the glare 3DI, mirrored below
-		// the eye (retail: update_sun_glare @ 0x5ad130 submits
+		// the eye [orig: update_sun_glare @ 0x5ad130 submits
 		// Celestial_GlareModel at camera + sun * 128 with the height term
-		// negated, additive 0x110, see docs/env/env-tod-re.md).
+		// negated, additive 0x110, see docs/env/env-tod-re.md].
 		{ "glint", env_data->get_glare_3di(), true,
 				opennova::renderer::kRungSunGlow, "sun" },
 	};
@@ -394,8 +394,8 @@ Camera3D *Celestial::_resolve_camera() {
 
 void Celestial::_publish_idle_veil() {
 	// The retail veil writer is gated on the sun model
-	// (retail: Environment_ApplySunVeilAndExposureStopdown @0x5ad8ba, see
-	// docs/env/env-tod-re.md): no bodies, no veil. Clear the pair and push a
+	// [orig: Environment_ApplySunVeilAndExposureStopdown @0x5ad8ba, see
+	// docs/env/env-tod-re.md]: no bodies, no veil. Clear the pair and push a
 	// zero alpha so a reload never inherits the last mission's veil. The
 	// global is process-wide (another Celestial may have written it), so
 	// there is no per-instance latch — one RS call per idle frame.
@@ -465,8 +465,8 @@ void Celestial::advance_frame(double p_delta) {
 			frame = opennova::env::build_moon_frame(state, cam_rf);
 		} else if (kv.key == "glint") {
 			// The water-reflected sun glint runs its own leg (accumulator,
-			// mirrored placement, CPU alpha) (retail: update_sun_glare
-			// @ 0x5ad130, see docs/env/env-tod-re.md).
+			// mirrored placement, CPU alpha) [orig: update_sun_glare
+			// @ 0x5ad130, see docs/env/env-tod-re.md].
 			const float alpha = _advance_water_glint(state, cam_pos, sun_dir,
 					forward, body);
 			body.last_opacity = alpha;
@@ -475,9 +475,9 @@ void Celestial::advance_frame(double p_delta) {
 			// env #14 (closed): ONE coarse unjittered gate ray with the
 			// witnessed start-height lift, then two jittered fine rays from
 			// the exact camera height, feed the 8-sample window + dead-band
-			// hysteresis (retail: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f
+			// hysteresis [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f
 			// — the fine rays' entity leg keeps the documented sun-occlusion
-			// statics posture (render-lighting-re.md D-RLIT-2/D-RLIT-3), see docs/env/env-tod-re.md).
+			// statics posture (render-lighting-re.md D-RLIT-2/D-RLIT-3), see docs/env/env-tod-re.md].
 			const float ray_length = glare_occlusion_->get_ray_length();
 			const Vector3 lift(0.0f, opennova::env::glare_coarse_start_lift(
 					glare_occlusion_->get_frame_index()), 0.0f);
@@ -518,9 +518,9 @@ void Celestial::advance_frame(double p_delta) {
 	}
 
 	// The sun-glare screen veil + exposure stop-down, once per frame after
-	// the occlusion tick (retail: Environment_ApplySunVeilAndExposureStopdown
+	// the occlusion tick [orig: Environment_ApplySunVeilAndExposureStopdown
 	// @ 0x5ad8b0 from Render_ProcessMainSceneFrame @ 0x5cac4b, gated on the
-	// sun model, see docs/env/env-tod-re.md): dot(view_forward, sun) in 16.16 through the witnessed
+	// sun model, see docs/env/env-tod-re.md]: dot(view_forward, sun) in 16.16 through the witnessed
 	// dot^32/dot^128 chain (env::sun_veil_from_dot), plus the water-reflected
 	// SECONDARY term at the glint brightness >> 2 when water exists, both
 	// sums clamped 192 (env::sun_veil_combine). The veil alpha global
@@ -540,8 +540,8 @@ void Celestial::advance_frame(double p_delta) {
 				sun_dim_fixed, overcast_fixed);
 		if (state.has_water_height() && state.water_height() != 0.0f) {
 			// The secondary reflected-sun ray: direction to the UNJITTERED
-			// glint point (view_z 0 (retail: @ 0x5ad628, see docs/env/env-tod-re.md)), brightness >> 2
-			// (retail: @ 0x5ad6a7, see docs/env/env-tod-re.md).
+			// glint point (view_z 0 [orig: @ 0x5ad628, see docs/env/env-tod-re.md]), brightness >> 2
+			// [orig: @ 0x5ad6a7, see docs/env/env-tod-re.md].
 			const opennova::env::Vec3 cam_m = godot_to_mission(cam_pos);
 			const opennova::env::Vec3 sun_m = godot_to_mission(sun_dir);
 			opennova::env::Vec3 point_m;
@@ -771,8 +771,8 @@ float Celestial::_advance_water_glint(
 		const opennova::env::EnvironmentState &p_state,
 		const Vector3 &p_cam_pos, const Vector3 &p_sun_dir,
 		const Vector3 &p_forward, Body &p_body) {
-	// (retail: update_sun_glare @ 0x5ad130, once per main scene render from
-	// Terrain_RenderSceneWithReflection @ 0x5c96c0, see docs/env/env-tod-re.md): one sample per frame —
+	// [orig: update_sun_glare @ 0x5ad130, once per main scene render from
+	// Terrain_RenderSceneWithReflection @ 0x5c96c0, see docs/env/env-tod-re.md]: one sample per frame —
 	// the reflected-sun point on the water (with the 0.25 * (frame & 3)
 	// reflected-height jitter and the +-2 point x/z jitter), visible when
 	// the point sees BOTH the sun (point -> camera + sun * 2048) and the
@@ -795,7 +795,7 @@ float Celestial::_advance_water_glint(
 	bool visible = opennova::env::water_glint_point(cam_m, sun_m,
 			p_state.water_height(), view_z_jitter, point_m);
 	if (visible) {
-		// The +-2 unit point jitter (retail: @ 0x5ad26a..0x5ad27e, see docs/env/env-tod-re.md) — mission
+		// The +-2 unit point jitter [orig: @ 0x5ad26a..0x5ad27e, see docs/env/env-tod-re.md] — mission
 		// x (godot x) and mission z = height (godot y).
 		point_m.x += (water_glint_.frame_index & 1u) ? 2.0f : -2.0f;
 		point_m.z += (water_glint_.frame_index & 2u) ? 2.0f : -2.0f;
@@ -807,15 +807,15 @@ float Celestial::_advance_water_glint(
 	opennova::env::water_glint_tick(water_glint_, visible);
 
 	// Placement: camera + sun * 128 with the HEIGHT term negated (the
-	// mirrored glint below the eye (retail: @ 0x5ad1ba..0x5ad213 — the float
+	// mirrored glint below the eye [orig: @ 0x5ad1ba..0x5ad213 — the float
 	// matrix stores (-(camY + sunY*128), camZ - sunZ*128, camX + sunX*128),
-	// the mission -> render-float map of exactly that mirrored point, see docs/env/env-tod-re.md)).
+	// the mission -> render-float map of exactly that mirrored point, see docs/env/env-tod-re.md]).
 	const Vector3 mirrored(p_sun_dir.x, -p_sun_dir.y, p_sun_dir.z);
 	p_body.model->set_global_position(p_cam_pos + mirrored * 128.0f);
 	_set_body_parameter(p_body, "u_anchor_camera_world", p_cam_pos);
 	_set_body_parameter(p_body, "u_tint", to_vector3(p_state.sun_color()));
-	// Alpha: the view dot of the MIRRORED sun direction (retail: @ 0x5ad384
-	// negates the height term before the view transform, see docs/env/env-tod-re.md) through the
+	// Alpha: the view dot of the MIRRORED sun direction [orig: @ 0x5ad384
+	// negates the height term before the view transform, see docs/env/env-tod-re.md] through the
 	// witnessed (dot^4 - 28672/65536) x brightness chain.
 	const int dot_fixed = static_cast<int>(
 			p_forward.dot(mirrored) * 65536.0f);

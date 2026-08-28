@@ -395,9 +395,9 @@ int vehicle_motion_apply_typed(ObjectModel *model,
 		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_speed,
 				field_i(p, base, Simulation::PF_VEHICLE_SPEED));
 		// The part-animation words are stored by the same callback, again as
-		// literal zero at rest (retail: Entity_CacheVehicleHUDStats @0x4929B0 —
+		// literal zero at rest [orig: Entity_CacheVehicleHUDStats @0x4929B0 —
 		// the rotor word @0x492ACA..0x492ADE for both rotor ordinals, the wheel
-		// word @0x4929B4; see docs/world/vehicle-client-movers-re.md §14).
+		// word @0x4929B4; see docs/world/vehicle-client-movers-re.md §14].
 		set_owned_ctrl(model, n.owner_vehicle_motion, n.helo_rotor,
 				field_i(p, base, Simulation::PF_VEHICLE_ROTOR));
 		set_owned_ctrl(model, n.owner_vehicle_motion, n.helo_tailrotor,

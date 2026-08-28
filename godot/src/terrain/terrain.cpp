@@ -434,8 +434,8 @@ void Terrain::render_frame() {
 	// Env_WaterHeightFixed with no render gate, so the engine side gets the
 	// authored value whenever a Water node exists (a missing node passes 0,
 	// and non-negative terrain keeps a dry map's compare inert).
-	// (retail: cameraY < Env_WaterHeightFixed @0x60fea5, no zero guard —
-	//  see docs/terrain/terrain-re.md, the underwater selector section)
+	// [orig: cameraY < Env_WaterHeightFixed @0x60fea5, no zero guard —
+	//  see docs/terrain/terrain-re.md, the underwater selector section]
 	view_input.water_height = cached_water_node != nullptr
 			? cached_water_node->get_water_height()
 			: 0.0f;
@@ -469,9 +469,9 @@ void Terrain::render_frame() {
 	// invalidating the whole working set. The page path consumes the RAW
 	// getter tuple: the static projector's (g2,g1,g0) reduction and the DOT3
 	// (g2,g0,g1) byte pack are both ports of retail's packing of that tuple
-	// (retail: Environment_GetLightDirectionFloat @0x57D870 read by the
+	// [orig: Environment_GetLightDirectionFloat @0x57D870 read by the
 	// collector @0x60D2F5/0x60D2FF and the tile DOT3 pack @0x60E231..0x60E331;
-	// see docs/terrain/terrain-re.md) — never the Godot-axes vector
+	// see docs/terrain/terrain-re.md] — never the Godot-axes vector
 	// get_light_direction() serves, which would swap x/z a second time.
 	Vector3 page_tile_tint(1.0f, 1.0f, 1.0f);
 	Vector3 page_light_direction(0.0f, 0.70710678f, 0.70710678f);
@@ -620,7 +620,7 @@ void Terrain::render_frame() {
 			cached_env_node->apply_terrain_uniforms(terrain_material);
 			// Runtime-only: prefer Weather-smoothed colors when a weather node
 			// is present (overriding the ones it smooths). The terrain surface
-			// consumes only c1 = light + c0 = sky (retail: @ 0x604420, see docs/terrain/terrain-re.md).
+			// consumes only c1 = light + c0 = sky [orig: @ 0x604420, see docs/terrain/terrain-re.md].
 			if (cached_weather_node) {
 				terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->get_smooth_sun());
 				terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->get_smooth_sky());
@@ -633,7 +633,7 @@ void Terrain::render_frame() {
 			}
 			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
 			// one multiply; the shared runtime/ONED tile path consumes this uniform.
-			// (retail: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md).
+			// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md].
 			tile_overlay_tint = cached_env_node->get_tile_overlay_tint();
 			terrain_material->set_shader_parameter(
 				"u_tile_overlay_tint", tile_overlay_tint);
@@ -661,11 +661,11 @@ void Terrain::_bind_light_textures() {
 		return;
 	}
 	// The two procedural textures, built once per process like the corona
-	// texture (retail: Lighting_InitTextures @0x5a94f0 creates "texlight2d"
+	// texture [orig: Lighting_InitTextures @0x5a94f0 creates "texlight2d"
 	// 64x64 and "texlightspot1d" 64x8, both without mips, and the 0x600 shader
 	// they bind addresses CLAMP — CGfxTexture_SetSamplerAddressing (ex sub_680720)(this, clamp=1, 0, 0, 0)
 	// @0x5a98eb..0x5a98f4; the shader samplers carry the matching
-	// filter_linear, repeat_disable hints).
+	// filter_linear, repeat_disable hints].
 	const int size = LightScene::terrain_light_texture_size();
 	const int rows = LightScene::terrain_light_strip_rows();
 	if (light_disc_texture.is_null()) {
@@ -736,7 +736,7 @@ void Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list) {
 	}
 	// EffectWorld_AmbientScale = the env light-state gain (the modulator
 	// unpack the object pass feeds too); the recip factor unpacks the loaded
-	// Env_TerrainColorRecip (retail: @0x5aa1ef..0x5aa23f).
+	// Env_TerrainColorRecip [orig: @0x5aa1ef..0x5aa23f].
 	Vector3 gain(1.0f, 1.0f, 1.0f);
 	uint32_t recip_packed = opennova::renderer::kTerrainFactorDefaultPacked;
 	if (cached_env_node != nullptr) {
@@ -1072,10 +1072,10 @@ bool Terrain::_build_terrain() {
 	// blob decal) into the terrain along the slot projection direction with
 	// the per-channel ambient law and the 40..80 u fade. Retail drapes over
 	// 21x21 terrain-following patches; the terrain surface itself stands in
-	// for the patch mesh and the projection is evaluated per pixel (retail:
+	// for the patch mesh and the projection is evaluated per pixel [orig:
 	// RenderSlot_DrawAllDrapes @0x5d6e20, render_sector_model @0x5d5ca0 —
 	// engine/runtime/renderer/render_slot_shadow.h carries the witness map;
-	// SlotShadow is the capture device). Entity shadows land on TERRAIN ONLY,
+	// SlotShadow is the capture device]. Entity shadows land on TERRAIN ONLY,
 	// like retail's terrain-following patches; static building silhouettes
 	// stay page-alpha in the tile composer.
 	terrain_material->set_next_pass(SlotShadow::get_drape_material());
@@ -1103,7 +1103,7 @@ bool Terrain::_build_terrain() {
 		// The tile's own quadrant decides the lock policy for every one of its
 		// vertices; a tile whose last row/column lands on the quadrant boundary is
 		// exactly the case the .trn locks exist for.
-		// (retail: sub_402D20 @0x402D20 (jodemo.exe) — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200)., see docs/terrain/terrain-re.md)
+		// [orig: sub_402D20 @0x402D20 (jodemo.exe) — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200)., see docs/terrain/terrain-re.md]
 		const opennova::terrain::CoordsTaps taps =
 			opennova::terrain::coords_taps_for_quadrant(
 				quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, hm_size);

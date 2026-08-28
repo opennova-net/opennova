@@ -106,8 +106,8 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	reset_material_slots(blob_material_);
 	// The authored-blob pass chains behind the silhouette pass: retail draws
 	// both legs over the same patches in the same drape walk
-	// (retail: RenderSlot_DrawAllDrapes @0x5d6e54..0x5d6ec4, see
-	// docs/render/render-lighting-re.md).
+	// [orig: RenderSlot_DrawAllDrapes @0x5d6e54..0x5d6ec4, see
+	// docs/render/render-lighting-re.md].
 	drape_material_->set_next_pass(blob_material_);
 	// The drape distance fade thresholds — opennova::renderer::drape_fade owns them.
 	const Vector2 fade_range(opennova::renderer::kDrapeFadeStartUnits,
@@ -115,9 +115,9 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	drape_material_->set_shader_parameter("u_drape_fade_range", fade_range);
 	blob_material_->set_shader_parameter("u_drape_fade_range", fade_range);
 	// The depth-clip stage's texture: the witnessed 32x4 ARGB step, sampled
-	// CLAMP + bilinear by the shader's sampler hints (retail:
+	// CLAMP + bilinear by the shader's sampler hints [orig:
 	// shadow_system_init_resources @0x5d6260..0x5d62d7 — the planner carries
-	// the fill law, opennova::renderer::shadowztex_pixels).
+	// the fill law, opennova::renderer::shadowztex_pixels].
 	const auto px = opennova::renderer::shadowztex_pixels();
 	PackedByteArray bytes;
 	bytes.resize(static_cast<int64_t>(px.size()) * 4);
@@ -347,10 +347,10 @@ Ref<Texture2D> SlotShadow::_blob_texture(const String &p_name) {
 
 // World -> (u, v, depth01) projector for a camera-style pose (local -Z
 // forward): the drape samples the capture along the same slot direction it
-// was rendered from (retail: the shared unscaled direction of the capture
+// was rendered from [orig: the shared unscaled direction of the capture
 // and drape matrices, setup_shadow_cascade_matrices @0x58d300 /
 // build_shadow_cascade_uv_matrices @0x58cf10 lookat_dir1; the person 4x
-// belongs to the separate depth-clip stage — render_slot_shadow.h).
+// belongs to the separate depth-clip stage — render_slot_shadow.h].
 Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
 		float p_half_u, float p_half_v, float p_far) const {
 	const Transform3D view = p_pose.affine_inverse();
@@ -443,9 +443,9 @@ void SlotShadow::advance_frame() {
 	// The frame-open slot projection direction: get_light_direction now
 	// serves the Godot-axes vector (the env_axes x/z swap IS the witnessed
 	// (g2, g1, g0) surface->light mapping of the raw getter tuple), so the
-	// planner law only clamps and negates it (retail: Environment_GetLight-
+	// planner law only clamps and negates it [orig: Environment_GetLight-
 	// DirectionFloat @0x57d870 into render_shadow_pass @0x5d7b70, see
-	// docs/render/render-lighting-re.md).
+	// docs/render/render-lighting-re.md].
 	const Vector3 tuple = env->get_light_direction();
 	const std::array<float, 3> sun_dir = opennova::renderer::slot_projection_direction(
 			{float(tuple.x), float(tuple.y), float(tuple.z)});
@@ -468,10 +468,10 @@ void SlotShadow::advance_frame() {
 		// The two radii the slot reads: the model sphere (gpm[5]) sizes the
 		// capture extent and the depth clip; the entity bound (entity+0 —
 		// the sphere raised to the husk's, + 0x1000, and 0 without a
-		// collision block) sizes the lod/patch and the light query (retail:
+		// collision block) sizes the lod/patch and the light query [orig:
 		// RenderSlot_RenderEntityAndChildren @0x5d7835 reads the model's
 		// +0x14; RenderSlot_AllocSlot @0x5d5773 and the light query read
-		// entity+0, Entity_InitFromModel @0x40dc30). A model the placer did
+		// entity+0, Entity_InitFromModel @0x40dc30]. A model the placer did
 		// not stamp falls back to half its render-bounds diagonal for both.
 		float capture_radius = model->get_model_sphere_radius();
 		float slot_radius = model->get_entity_bound_radius();
@@ -584,7 +584,7 @@ void SlotShadow::advance_frame() {
 
 	// The retail child walk: models linked capture-with an admitted caster
 	// (held weapons, mounted children) render into the parent's slot RT
-	// (retail: RenderSlot_RenderEntityAndChildren @0x5d78ef..0x5d79d6). A
+	// [orig: RenderSlot_RenderEntityAndChildren @0x5d78ef..0x5d79d6]. A
 	// linked child is excluded from its own slot and its own row lands
 	// before or after the parent's in registration order, so resolve every
 	// claim first: child id -> the parent's capture bit this frame.
@@ -635,8 +635,8 @@ void SlotShadow::advance_frame() {
 		// The dominant-light pick for every bound slot (the clamped sun by
 		// default; the strongest nearby point light overrides) — retail runs
 		// it from the entity update for silhouette and blob slots alike, so
-		// the blob leg's patch follows the same stored direction (retail:
-		// RenderSlot_UpdateEntityLight @0x5d6a30 <- Entity_UpdateAllEntities).
+		// the blob leg's patch follows the same stored direction [orig:
+		// RenderSlot_UpdateEntityLight @0x5d6a30 <- Entity_UpdateAllEntities].
 		const Vector3 center = model->get_world_bounds().get_center();
 		opennova::renderer::SlotLightPick pick;
 		pick.direction = {default_dir.x, default_dir.y, default_dir.z};
@@ -676,8 +676,8 @@ void SlotShadow::advance_frame() {
 									.normalized();
 		// The slot direction as stored: the RAW clamped-negated sun, or the
 		// unit attached-light direction — what the grazing rescale's vertical
-		// and the depth clip read (retail: slot+0x68..0x70, RenderSlot_Update-
-		// EntityLight @0x5d6d5c; RenderSlot_DrawSilhouetteDrape @0x5d5d66).
+		// and the depth clip read [orig: slot+0x68..0x70, RenderSlot_Update-
+		// EntityLight @0x5d6d5c; RenderSlot_DrawSilhouetteDrape @0x5d5d66].
 		const float dir_y_raw = pick.attached_handle != 0 ? dir.y : sun_dir[1];
 		const std::array<float, 3> stored_dir = pick.attached_handle != 0
 				? std::array<float, 3>{float(dir.x), float(dir.y), float(dir.z)}
@@ -687,8 +687,8 @@ void SlotShadow::advance_frame() {
 					blob_cursor < opennova::renderer::kSlotCaptureCount) {
 				// The authored items.def blob decal for a bound slot past
 				// the capture budget: top-down, heading-rotated, sized
-				// w x l with the authored UV offset (retail: the blob drape
-				// @0x5d59d0 — 1/w 1/l UV scale, offset + 0.5 UV center).
+				// w x l with the authored UV offset [orig: the blob drape
+				// @0x5d59d0 — 1/w 1/l UV scale, offset + 0.5 UV center].
 				const Ref<Texture2D> texture = _blob_texture(
 						model->get_slot_shadow_decal_texture());
 				if (texture.is_valid()) {
@@ -724,8 +724,8 @@ void SlotShadow::advance_frame() {
 		}
 
 		// Capture camera along the slot direction, sized from the MODEL
-		// sphere (retail: RenderSlot_RenderEntityAndChildren @0x5d7835 —
-		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)).
+		// sphere [orig: RenderSlot_RenderEntityAndChildren @0x5d7835 —
+		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)].
 		const int order = assignment.capture_order;
 		const float radius = info.capture_radius;
 		const float half_extent = opennova::renderer::silhouette_half_extent(radius);

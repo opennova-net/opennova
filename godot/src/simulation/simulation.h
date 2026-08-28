@@ -664,16 +664,16 @@ private:
 	std::unordered_map<int32_t, std::string> mission_location_texts_;
 	// Numeric suffix -> [PeopleNames] STRNAME%03i value; promote resolves an
 	// entity's authored display name (D-HUD-20) from its BMS name_index here
-	// (retail: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; the witnessed
-	// resolve lives engine-side in promote.cpp).
+	// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; the witnessed
+	// resolve lives engine-side in promote.cpp].
 	std::unordered_map<int32_t, std::string> mission_people_names_;
 	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()):
 	// the joiner's view of the host's stream.
 	PackedFloat32Array present_snapshot_from_client_replicas() const;
 	// Build the PF_* present buffer from the host's own pools: retail's listen
 	// host/SP local client reads process memory and its loopback 0x0A carries no
-	// entity records (retail: serialize_entity_states_to_packet @0x50f07e;
-	// collect_visible_entities_for_terrain @0x5c8c60; D-NET-140 closed).
+	// entity records [orig: serialize_entity_states_to_packet @0x50f07e;
+	// collect_visible_entities_for_terrain @0x5c8c60; D-NET-140 closed].
 	PackedFloat32Array present_snapshot_from_world() const;
 	// The decoded fold's dead->alive respawn revision, mirrored per pool row so
 	// WirePresentPass sees the same PF_RESPAWN_REVISION edges on every role.
@@ -1000,9 +1000,9 @@ private:
 	// Copy the per-class ATTRIBUTES words into World::class_attribute_flags -- the
 	// joiner's live table when one exists (S2C 0x41 mutates it in receive order),
 	// else the boot copy. Runs at world creation, at every table install, and
-	// after each net pump (retail: AnimMap_IsSlotActive @0x4125e0 reads the one
+	// after each net pump [orig: AnimMap_IsSlotActive @0x4125e0 reads the one
 	// g_CharAttr table CharAttr_LoadFromDef @0x412140 fills and the 0x41 arm
-	// AnimMap_SetSlotProperty @0x412890 clears; see docs/interface/hud-re.md).
+	// AnimMap_SetSlotProperty @0x412890 clears; see docs/interface/hud-re.md].
 	void sync_class_attribute_flags();
 	// Install the retained retail player-profile join block on the current runtime.
 	void install_character_join_vars();
@@ -1088,8 +1088,8 @@ private:
 	// PromoteOptions before promotion (see promote.h AiProfileRow).
 	std::vector<opennova::mission::PromoteOptions::AiProfileRow> ai_profiles_;
 	// The per-type-id AI-class answer the profile resolve and the promote share
-	// (retail: the AI class table @0x813280 — chel/cpln rows run the helicopter
-	// init, cveh/cbot/ctrn the vehicle init; see mission/promote.h).
+	// [orig: the AI class table @0x813280 — chel/cpln rows run the helicopter
+	// init, cveh/cbot/ctrn the vehicle init; see mission/promote.h].
 	std::function<opennova::mission::PromoteOptions::AiProfileDefaults(int32_t)>
 			ai_profile_defaults_;
 	// The shared install tail (both install orders): sort for the per-frame
@@ -1350,7 +1350,7 @@ public:
 	// landed since the last take, else {score, delta, tone} with the tone name
 	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
 	// 2D interface sound behind the enable_slotmachine setting
-	// (retail: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0, see hud/score_fanfare.h).
+	// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0, see hud/score_fanfare.h].
 	Dictionary take_score_feedback();
 	// Exact pre-world payloads retained by the joiner from retail's initial
 	// state stream. The mission header is exactly 616 bytes when available. TIL
@@ -1404,7 +1404,7 @@ public:
 	// witnessed loops (world/deploy_screen_feed.h) over the zone rows above, the
 	// team colour tag, the Menu default-row tokens and the embedder-resolved
 	// WPNames strings (name_key -> text). value 0 = default, index+1 = zone,
-	// -1 = occupant/blank (never a pick). (retail: UI_UpdateDeathScreenContent @0x5536a0, see world/deploy_screen_feed.h)
+	// -1 = occupant/blank (never a pick). [orig: UI_UpdateDeathScreenContent @0x5536a0, see world/deploy_screen_feed.h]
 	TypedArray<Dictionary> get_deploy_list_rows(const String &p_default_key,
 			const String &p_default_home, const Dictionary &p_zone_names);
 	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
@@ -1416,7 +1416,7 @@ public:
 	String get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext);
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
-	// (retail: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b, see docs/net/novaworld-net-re.md 0x2E)
+	// [orig: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b, see docs/net/novaworld-net-re.md 0x2E]
 	bool request_local_player_medic();
 	int local_medic_request_cooldown_ticks() const;
 	int local_medic_request_serial() const;
@@ -1477,8 +1477,8 @@ public:
 	// through the catalog's for_mission_mode map (no multiplayer bit -> stock Co-op 0x10020).
 	// The listen host seeds its GameConfig from it before the auto-spawn, the same word the
 	// LAN-host dialog derives on the GDScript side (HostSessionConfig.game_type_auto).
-	// (retail: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360, see
-	// docs/net/novaworld-net-re.md 5.2c)
+	// [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360, see
+	// docs/net/novaworld-net-re.md 5.2c]
 	uint32_t mission_game_type() const;
 	// Spawn the host's own player at the mission's player-START marker, selected the way the
 	// original engine does — by game type, FARTHEST from the enemy set — NOT at any NPC's
@@ -1563,8 +1563,8 @@ public:
 	String get_local_player_anim_key() const;
 	// The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
 	// dword_B76484 prone-latch equivalent the render-slot drape gate reads
-	// (retail: RenderSlot_DrawAllDrapes @0x5d6e81 reads
-	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md).
+	// [orig: RenderSlot_DrawAllDrapes @0x5d6e81 reads
+	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md].
 	int get_local_player_stance_latch() const { return stance_latch_; }
 	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
 	// authoritative stance state [orig: HUD_BuildEntityInfo @0x4b860c —
@@ -1732,8 +1732,8 @@ public:
 	// already folded from mission (x,y) to terrain/Godot horizontal (x,z).
 	Array drain_terrain_scorches();
 	// Drain this frame's folded S2C 0x1E game events as feed rows — one per
-	// line the original would post to its message feed (retail: the 0x426270
-	// handler). Each row carries the actor NAMES (resolved here, where the
+	// line the original would post to its message feed [orig: the 0x426270
+	// handler]. Each row carries the actor NAMES (resolved here, where the
 	// decoded roster lives), the canned-message key (plus the camp rows'
 	// WPNames level key), and the witnessed line color; the embedder resolves
 	// the keys against gametext and calls the format helpers below.
@@ -1775,8 +1775,8 @@ public:
 	// witnessed channel table: [{text, argb, sink, channel}] where sink 0 =
 	// the SYSTEM ring, 1 = the CHAT ring, 2 = the message queue, 3 = channel 3.
 	Array drain_chat_lines();
-	// Substitute actor names into a canned template (retail: Chat_FormatMessage
-	// @0x422C60): the STRCND48 bonus re-compose when `extra` names the local
+	// Substitute actor names into a canned template [orig: Chat_FormatMessage
+	// @0x422C60]: the STRCND48 bonus re-compose when `extra` names the local
 	// player, then $A/$B sequential case-insensitive replace-all. Exposed so
 	// the string lookup can live with the string table while the substitution
 	// rule stays in engine C++.
@@ -1784,7 +1784,7 @@ public:
 			const String &p_victim, const String &p_extra,
 			const String &p_bonus_template) const;
 	// Compose a camp line — the template's %s takes the level's WPNames string
-	// (retail: the case-59/60 sprintf @0x427327/@0x42736B).
+	// [orig: the case-59/60 sprintf @0x427327/@0x42736B].
 	String format_feed_camp_line(const String &p_template,
 			const String &p_wpname) const;
 
@@ -2024,7 +2024,7 @@ public:
 	// it just crossed, and its world pose; the witnessed consume itself is
 	// the portable world::wire_body_slot_sounds (world/wire_body_sound.h),
 	// fed through the same SoundSlotEvent drain the authority bodies use
-	// (retail: the org1/org2 sound blocks, see docs/audio/lwf-dbf-sound-re.md).
+	// [orig: the org1/org2 sound blocks, see docs/audio/lwf-dbf-sound-re.md].
 	void present_wire_body_sounds(int p_type_id, int p_character_id,
 			int p_wire_handle, int p_carrier_handle, int p_anim_state,
 			int p_from_phase, int p_to_phase, const Vector3 &p_pos);
@@ -2052,10 +2052,10 @@ public:
 	// The in-flight round glows: one row per active round whose ammo authors
 	// `light_move` — {id (presentation generation), pos (godot space), radius,
 	// color}. The presenter's light pool spawns a permanent (mode 1) light per
-	// id, follows it per tick, and despawns dropped ids (retail:
+	// id, follows it per tick, and despawns dropped ids [orig:
 	// RoundData_SpawnRound @0x4ec8da spawn, the per-tick follow @0x4eaa9f,
 	// Projectile_ReleaseEffects clear — witness map on
-	// engine/runtime/renderer/light_scene.h).
+	// engine/runtime/renderer/light_scene.h].
 	Array get_round_glow_rows() const;
 
 	// The styled ribbon compile over trail rows (renderer/tracer_frame.h owns
@@ -2475,22 +2475,22 @@ public:
 	// The blink-box owner for a model-light spawn at a world point: retail runs
 	// ONE point query at the spawning entity's position before walking its LGHT
 	// records, and slot 0's packed hit names the containing building + section
-	// every unattached record binds to (retail: Entity_SpawnGlowEffects
+	// every unattached record binds to [orig: Entity_SpawnGlowEffects
 	// @0x56c7fc -> Entity_QueryBlinkBoxesAtPoint @0x4af350, decoded @0x56c8c9
-	// and @0x56c8db, see docs/render/render-lighting-re.md). Returns
+	// and @0x56c8db, see docs/render/render-lighting-re.md]. Returns
 	// [containing bms_id, section], or an empty array when the point sits in no
 	// blink volume (or the containing entity carries no bms identity). The
 	// caller applies retail's ItemDef-type gate: a BUILDING never runs the
-	// query at all (retail: @0x56c7ec).
+	// query at all [orig: @0x56c7ec].
 	PackedInt64Array query_blink_owner_at(const Vector3 &p_world);
 
 	// The per-drawn-entity interior light group: every placed entity currently
 	// standing inside a blink volume, as [bms_id, containing bms_id, section]
 	// triples. Retail pushes this pair per entity draw so an interior room
-	// light reaches exactly the entities in its own section (retail:
+	// light reaches exactly the entities in its own section [orig:
 	// setup_terrain_effect_for_entity @0x5c74a0 -> Lighting_SetInteriorLightGroup
 	// @0x5a90e0, the gate Light_PassesActiveGroups @0x5a9120, see
-	// docs/render/render-lighting-re.md). Entities outside every blink volume
+	// docs/render/render-lighting-re.md]. Entities outside every blink volume
 	// are absent (their group is (0, 0)).
 	PackedInt64Array get_entity_interior_groups() const;
 
@@ -2564,7 +2564,7 @@ public:
 	// Parse score.ini and install this session's scoring awards (world::World::score_rules).
 	// Retail builds 12 x 452-byte gametype rows with hardcoded defaults and then OVERLAYS
 	// the file onto them, writing the file out when it is absent
-	// (retail: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0).
+	// [orig: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0].
 	// DECLARED GAP: the built-in defaults are NOT ported, so a missing score.ini leaves
 	// score_rules !valid (every award a no-op) where retail would still score from its
 	// defaults. The shipped file is the retail-parity path.

@@ -49,8 +49,8 @@ public:
 	// preserves the BMS/item policy inputs instead of flattening eligibility
 	// into a render-layer guess; the engine collector remains the one owner of
 	// admission and ordering.
-	// (retail: Terrain_CollectAndRenderTileModels pool scans/admission
-	// @0x60D421..0x60D450; see docs/terrain/terrain-re.md)
+	// [orig: Terrain_CollectAndRenderTileModels pool scans/admission
+	// @0x60D421..0x60D450; see docs/terrain/terrain-re.md]
 	struct StaticTerrainShadowSource {
 		int bms_id = 0;
 		int item_id = 0;
@@ -146,8 +146,8 @@ public:
 	// atlas index stamped into each matching MultiMesh INSTANCE_CUSTOM.x;
 	// descriptors carry the source identity, exact world AABB, and live carve
 	// state. The EffectWorld device selects this row's <=4 lights into the
-	// shared RGBAF atlas (retail: collect_render_objects_for_batch @0x5d8ff7,
-	// see docs/render/render-lighting-re.md).
+	// shared RGBAF atlas [orig: collect_render_objects_for_batch @0x5d8ff7,
+	// see docs/render/render-lighting-re.md].
 	Array get_static_light_draw_sources();
 	// Advances whenever a row is appended, the table is reset, or a carve
 	// changes any row's `active` state: consumers rebuild their packed row

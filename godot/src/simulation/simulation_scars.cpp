@@ -12,11 +12,11 @@ using namespace sim_internal;
 
 namespace {
 
-// The owner visibility gate Scar_RenderCache applies (retail: @0x5CD830 — a
+// The owner visibility gate Scar_RenderCache applies [orig: @0x5CD830 — a
 // building owner draws while `g_BuildingSectionVisMask[idx] & 0xFFFFFFF` is
 // nonzero; any other owner while one of its four containing blink boxes
 // (+464..+476) has its section bit set in that building's mask, or outright
-// when it sits in none; see docs/world/world-wac-ai-re.md §24.9). Our twins:
+// when it sits in none; see docs/world/world-wac-ai-re.md §24.9]. Our twins:
 // OcclusionWorld::section_mask over the same COBJ-section domain and
 // Entity::blink_hits — the packed `((section & 0x1F) | (pool_index << 8)) << 12`
 // quads the collision pass stamps.
@@ -126,9 +126,9 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 	// The winding fold that rides the coordinate folds. The witnessed quad
 	// order's coordinate cross product points AGAINST the struck face's normal
 	// in the engine's frame: the slot writer's handedness fix makes the
-	// (tangent, bitangent, normal) triple LEFT-handed (retail: Scar_AddEntry
+	// (tangent, bitangent, normal) triple LEFT-handed [orig: Scar_AddEntry
 	// @0x5CCAE6..0x5CCB37 — the tangent flips while n . (b x t) < 0, see
-	// docs/world/world-wac-ai-re.md §24.9; pinned by ctest impact_scar).
+	// docs/world/world-wac-ai-re.md §24.9; pinned by ctest impact_scar].
 	// Retail uploads through a REFLECTION
 	// (Math_FixedPointToFloat3_YNegated @0x611210, y -> -y) into D3D's
 	// left-handed, clockwise-front frame, which makes the quad a front face on
@@ -201,9 +201,9 @@ Dictionary Simulation::get_scar_draw_list(const Vector3 &p_camera_godot,
 		batch_spawn_origin[i] = spawn_origin;
 	}
 	// The strip table: the TGA name and the GfxShader mode word the loader
-	// builds each strip's effect from (retail: Scar_LoadTextures @0x5CC2E0 —
+	// builds each strip's effect from [orig: Scar_LoadTextures @0x5CC2E0 —
 	// modeId 0 -> 0x120651, 1 -> 0x460651, see docs/world/world-wac-ai-re.md
-	// §24.9); the presenter decodes the word into the drawer state
+	// §24.9]; the presenter decodes the word into the drawer state
 	// (opennova::renderer::decode_scar_strip_mode).
 	PackedStringArray strip_names;
 	PackedInt32Array strip_mode_words;

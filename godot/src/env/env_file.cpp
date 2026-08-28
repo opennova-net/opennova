@@ -358,8 +358,8 @@ void EnvFile::_load_sky_textures() {
 // synthesizes the PCX alpha channel from the image's own palette luminance —
 // the cloud combine's alpha (a1 = t0.a*t1.a*2) rides it, so a plain opaque
 // decode makes the cloud pass cover the whole dome
-// (retail: terrain_init_rendering_resources @ 0x578a97/0x578aa5 ->
-// load_texture_from_archive @ 0x58b980, PCX alpha loop @ 0x58bc35..0x58bcee, see docs/env/env-tod-re.md).
+// [orig: terrain_init_rendering_resources @ 0x578a97/0x578aa5 ->
+// load_texture_from_archive @ 0x58b980, PCX alpha loop @ 0x58bc35..0x58bcee, see docs/env/env-tod-re.md].
 // Non-PCX names (DDS/TGA) keep the generic decode like retail's DDS-first path.
 Ref<Texture2D> EnvFile::_load_sky_map_texture(const String &name) {
 	if (name.get_extension().to_lower() == "pcx") {
@@ -532,7 +532,7 @@ float EnvFile::get_fog_end_distance(float p_overcast) const {
 float EnvFile::fog_end_above_water(float p_fog_distance, float p_overcast) {
 	// Static leg for callers holding a LIVE smoothed distance rather than this
 	// file's authored fog_level (the water pass) — same witnessed curve
-	// (retail: Environment_GetFogEndDistance @ 0x57e426, see docs/env/env-tod-re.md).
+	// [orig: Environment_GetFogEndDistance @ 0x57e426, see docs/env/env-tod-re.md].
 	return opennova::env::fog_end_above_water(p_fog_distance, p_overcast);
 }
 
@@ -572,7 +572,7 @@ Color EnvFile::horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 }
 
 Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
-	// (retail: PolyTrn_RenderTile @ 0x60df0d, see docs/env/env-tod-re.md) — DIFFUSE(HALF) x TEXTURE under
+	// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/env/env-tod-re.md] — DIFFUSE(HALF) x TEXTURE under
 	// MODULATE2X, folded to one multiply for the shader.
 	const opennova::env::TerrainTint tint =
 			opennova::env::terrain_tint_from_rgb(to_rgb(p_terrain_tint));
@@ -580,7 +580,7 @@ Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
 }
 
 Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
-	// (retail: build_sky_dome_mesh @ 0x578db0, see docs/env/env-tod-re.md) — engine/formats/env owns the math; this
+	// [orig: build_sky_dome_mesh @ 0x578db0, see docs/env/env-tod-re.md] — engine/formats/env owns the math; this
 	// repacks the plain vectors into Mesh.ARRAY_* surface arrays.
 	const opennova::env::SkyDomeMesh mesh = opennova::env::build_sky_dome_mesh(p_sky_height);
 	const int vertex_count = static_cast<int>(mesh.positions.size() / 3);
@@ -654,7 +654,7 @@ float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
 
 float EnvFile::cloud_uv_rate_per_second(float p_sky_speed) {
 	// Steady state: the ramp's target rate (sky_speed << 10) through the
-	// per-second layer-1 UV scale (retail: @ 0x57eecc; @ 0x57f1a5, see docs/env/env-tod-re.md).
+	// per-second layer-1 UV scale [orig: @ 0x57eecc; @ 0x57f1a5, see docs/env/env-tod-re.md].
 	opennova::env::CloudScrollState steady;
 	steady.rate = static_cast<int>(p_sky_speed) << 10;
 	return opennova::env::cloud_uv_rate_per_second(steady);

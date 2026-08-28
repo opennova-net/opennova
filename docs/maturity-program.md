@@ -673,7 +673,7 @@ hatch (a baseline bump, logged in this doc).
 | Codec identity + self-capture goldens | default ctest | Wave 0 | hard-fail forever |
 | Message-catalog coverage | existing CI gate | exists | unchanged |
 | Tests poking privates | ratchet (non-self `._name` count in godot/tests), fail-on-increase | Wave 1 | hard from day one; top offenders driven down by ONED-TST |
-| New Dictionary contracts | diff-scoped lint over `maturity_lint.py`'s `LINT_SCOPES` (`godot/modtools/`, `godot/game/`, `godot/src/`) signatures, allowlist for transport edges | Wave 0 soft | hard-fail at Wave-2 boundary |
+| New Dictionary contracts | diff-scoped lint over `maturity_lint.py`'s `LINT_SCOPES` (`godot/modtools/`, `godot/game/`, `godot/src/`, `godot/probes/`) signatures, allowlist for transport edges | Wave 0 soft | hard-fail at Wave-2 boundary |
 | [orig] citation coverage | ratchet `engine_uncited_src_files`: `engine/<group>/<lib>` source files with zero citations (infra libs allowlisted), fail-on-increase | Wave 1 | hard on increase; semantic coverage stays a review concern |
 | Magic numbers | diff-scoped advisory in the CI summary | Wave 2 | advisory permanently |
 | Link-graph edges | forbidden-edge script (npwire !→ sqlite; wac/mission/net !→ terrain-format libs post-seam) | Wave 1 | hard-fail forever |

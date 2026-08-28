@@ -77,9 +77,9 @@ Array Simulation::get_throwable_visuals() const {
 		// The round's emitter liveness (the +0x1CC handle mirror): the shell
 		// spawns while this is set and holds no handle, and retires + forgets
 		// the handle when it clears, so a round that dips under water releases
-		// its plume and re-acquires one on surfacing (retail:
+		// its plume and re-acquires one on surfacing [orig:
 		// Projectile_UpdatePhysics @0x4ea019..0x4ea03e, the lazy spawn
-		// @0x4e9f58..0x4e9f94; see docs/world/world-wac-ai-re.md).
+		// @0x4e9f58..0x4e9f94; see docs/world/world-wac-ai-re.md].
 		d["move_effect_live"] = move_effect_live;
 		out.push_back(d);
 	};
@@ -683,8 +683,8 @@ Array Simulation::get_round_glow_rows() const {
 		Dictionary d;
 		d["id"] = static_cast<int64_t>(r.presentation_generation);
 		// The spawn rides radius/2 above the round and the per-tick follow
-		// re-centers at the round position (retail: @0x4ec8d6 / @0x4eaa9f,
-		// see renderer/light_scene.h).
+		// re-centers at the round position [orig: @0x4ec8d6 / @0x4eaa9f,
+		// see renderer/light_scene.h].
 		d["pos"] = Vector3(r.pos.x, r.pos.z, -r.pos.y);
 		d["radius"] = ammo->light_move_radius;
 		d["color"] = Color(
@@ -934,9 +934,9 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	// AI DECISION STATE, named to match the retail probe (onhook ai_probe.c) so
 	// the two recordings join field-for-field. Retail reads these straight off
 	// the entity and its AiSlot; these are our equivalents:
-	//   parent  = the carrier we are mounted to   (retail: entity->parentEntity +364)
-	//   ground  = what we are standing on         (retail: entity->groundEntity +0x28)
-	//   s35/37/38 = has-route / command / node    (retail: AiSlot +140/+148/+152)
+	//   parent  = the carrier we are mounted to   [orig: entity->parentEntity +364]
+	//   ground  = what we are standing on         [orig: entity->groundEntity +0x28]
+	//   s35/37/38 = has-route / command / node    [orig: AiSlot +140/+148/+152]
 	// Without them a retail-vs-OpenNova diff can see THAT a body is stuck but not
 	// what order it believes it is under, which is the question that matters.
 	out["parent"] = -1;
@@ -1425,8 +1425,8 @@ PackedFloat32Array Simulation::get_present_snapshot() const {
 	// ADR 0011 Decision 1 (as amended, D-NET-140 closed): every authoritative live mission is an
 	// in-process listen server in standalone MainGame/GameWorld, and the listen host presents
 	// from its OWN pools — retail's local client reads process memory and its loopback 0x0A is
-	// header-only (retail: serialize_entity_states_to_packet @0x50f07e;
-	// collect_visible_entities_for_terrain @0x5c8c60). A joiner renders the host's stream
+	// header-only [orig: serialize_entity_states_to_packet @0x50f07e;
+	// collect_visible_entities_for_terrain @0x5c8c60]. A joiner renders the host's stream
 	// wire-direct from the state its ClientReplicaPipeline decoded (ClientState).
 	// Empty when no runtime is active (a bare sim) — scalar getters (get_entity_*) read the
 	// AI pool for tooling.
@@ -1770,8 +1770,8 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 	// Entity_RenderVehicleModel's local UseGun predicate is a render verdict,
 	// not Entity.hidden: parent equality + first-person camera + raw UseGun seat.
 	// The per-row tail below adds the live EquippedSlot/Def tests.
-	// (retail: Entity_RenderVehicleModel @0x4407f6..0x44084c, sole submit @0x440918;
-	//  see docs/world/world-wac-ai-re.md)
+	// [orig: Entity_RenderVehicleModel @0x4407f6..0x44084c, sole submit @0x440918;
+	//  see docs/world/world-wac-ai-re.md]
 	const bool local_first_person_usegun =
 			!player_view_.third_person && local_player != nullptr &&
 			local_player->mounted &&
@@ -1779,8 +1779,8 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 	// One row per live pool slot, in registry order — the set the host's own
 	// ClientState held before D-NET-140 closed (every slot the 0x0C/0x0D/0x10/
 	// 0x20 spawn batches stream plus every 0x0A record), now read straight
-	// from the pools (retail: collect_visible_entities_for_terrain @0x5c8c60
-	// walks the pools; see docs/net/novaworld-net-re.md D-NET-140). A row
+	// from the pools [orig: collect_visible_entities_for_terrain @0x5c8c60
+	// walks the pools; see docs/net/novaworld-net-re.md D-NET-140]. A row
 	// without a def keeps PF_TYPE_ID 0, which the wire pass skips.
 	int count = 0;
 	w.registry.for_each([&](const opennova::world::Entity &) { ++count; });
@@ -1852,18 +1852,18 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 		r[PF_RIGHT_HAND_COLLAPSED] =
 				mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
 		// The cveh render callback publishes directly from the live entity
-		// motor fields (retail: Entity_CacheVehicleHUDStats @0x4929B0, stores
-		// @0x4929D7 / @0x4929F1; see docs/world/vehicle-client-movers-re.md).
+		// motor fields [orig: Entity_CacheVehicleHUDStats @0x4929B0, stores
+		// @0x4929D7 / @0x4929F1; see docs/world/vehicle-client-movers-re.md].
 		write_present_vehicle_motion_controls(r, w, e);
 		// Only a carrier in the witnessed live UseGun attachment relation
 		// publishes its inline MountSlot's HEAT_GLOW, including owned cold zero.
-		// (retail: attachment call @0x546518; HUD_CacheWeaponSlotInfo stores
-		//  @0x440969 / @0x440991; see docs/world/world-wac-ai-re.md)
+		// [orig: attachment call @0x546518; HUD_CacheWeaponSlotInfo stores
+		//  @0x440969 / @0x440991; see docs/world/world-wac-ai-re.md]
 		write_present_world_model_heat_glow(r, w, e);
 		// The local first-person UseGun parent cull is a render verdict of THIS
-		// machine's own mount state (retail: Entity_RenderVehicleModel @0x4407d0
+		// machine's own mount state [orig: Entity_RenderVehicleModel @0x4407d0
 		// predicate @0x4407f6..0x44084c, sole submit @0x440918; see
-		// docs/world/world-wac-ai-re.md).
+		// docs/world/world-wac-ai-re.md].
 		if (local_first_person_usegun && local_player->mount_target == h) {
 			const opennova::world::WeaponTableEntry *mount_def =
 					w.weapons.by_index(e.primary_weapon_slot_adm);
@@ -1871,8 +1871,8 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 			// MountSlot is the live EquippedSlot. flags2 Invisible is the
 			// witnessed alternate forced-cull leg and does not require the
 			// EquippedSlot comparison.
-			// (retail: Def+0x16c @0x440824; EquippedSlot @0x440833;
-			//  Def+0x0c & 0x800 @0x44083f; see docs/world/world-wac-ai-re.md)
+			// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
+			//  Def+0x0c & 0x800 @0x44083f; see docs/world/world-wac-ai-re.md]
 			const bool equipped_parent_slot =
 					local_weapon_.usegun_slot_active && local_weapon_.usegun_mount == h &&
 					local_weapon_.usegun_weapon_adm == e.primary_weapon_slot_adm;
@@ -1889,8 +1889,8 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 		// reaches its model callback. The generic-world callback publishes the
 		// same TEX_TEAM plus TEAMSWING for a nonzero packed zone byte, and writes
 		// LFP only when the client-side shared timer-list entry exists.
-		// (retail: render_sector_entity @0x5C424F..0x5C425F;
-		//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB; see docs/world/world-wac-ai-re.md)
+		// [orig: render_sector_entity @0x5C424F..0x5C425F;
+		//  BoneCallback_gnrc_World @0x4E288B..0x4E28FB; see docs/world/world-wac-ai-re.md]
 		const bool sector_model_row = h.pool() >= 1 && h.pool() <= 3;
 		const bool zone_ctrl = e.zone_number != 0 &&
 				opennova::world::zone_chain_zone_info_byte(w.zone_chain, e) != 0;
@@ -1920,8 +1920,8 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 		for (int slot = 0; slot < 2; ++slot) {
 			// HUD_CacheEntityDisplayInfo copies comp[113/114] as raw
 			// signed dwords. Do not normalize wrapping zero-time states.
-			// (retail: HUD_CacheEntityDisplayInfo stores @0x4A3E2D/@0x4A3E38;
-			//  see docs/world/world-wac-ai-re.md)
+			// [orig: HUD_CacheEntityDisplayInfo stores @0x4A3E2D/@0x4A3E38;
+			//  see docs/world/world-wac-ai-re.md]
 			const int32_t phase = ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
 			const bool publish = slot != 0 || (e.item_attrib & 0x1000u) == 0;
 			uint32_t phase_bits;

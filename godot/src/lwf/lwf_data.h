@@ -26,7 +26,7 @@ class ResourceRoot;
 // and encodes via opennova::lwf::encode_lwf — a valid, canonical .lwf.
 //
 // Dictionary shapes (all keys present on read; field semantics grilled vs
-// Jointops.exe -- see engine/formats/lwf/lwf.h for the (retail:, see docs/audio/lwf-dbf-sound-re.md) anchors):
+// Jointops.exe -- see engine/formats/lwf/lwf.h for the [orig:, see docs/audio/lwf-dbf-sound-re.md] anchors):
 //   set:    { name:String, target_id:int, pitch_base:int, pitch_random_range:int,
 //             set_flags:int, layer_count:int, layers:Array[layer] }
 //   layer:  { selection_mode:int, falloff_radius:int, min_distance:int,

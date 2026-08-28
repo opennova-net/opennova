@@ -105,8 +105,8 @@ public:
 	static String game_type_host_abbreviation_key(int p_game_type);
 	static bool game_type_host_rotation_default(int p_game_type);
 	// The Tab board header's game-type rung — the Overlays gametext key
-	// (retail: HUD_GetGameTypeOverlayLabel @0x5b8680; the map lives in
-	// npwire game_type.h overlay_label_key). "" = blank rung.
+	// [orig: HUD_GetGameTypeOverlayLabel @0x5b8680; the map lives in
+	// npwire game_type.h overlay_label_key]. "" = blank rung.
 	static String game_type_overlay_label_key(int p_game_type);
 
 	// The retail host's custom-message default (npwire game_rules::kCustomTextDefault).

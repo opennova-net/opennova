@@ -850,8 +850,8 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 
 // The player's visual = the combo its packed character id resolves to: head +
 // body models in the world (retail draws BOTH with the entity's skeleton, each
-// after its own camo store (retail: Terrain_RenderSectorEntitiesBySide
-// @0x5c7fea..0x5c8020: CharacterEntity blip +4 head then +0 body, see docs/playerinfo/avatars-re.md)) and the arms
+// after its own camo store [orig: Terrain_RenderSectorEntitiesBySide
+// @0x5c7fea..0x5c8020: CharacterEntity blip +4 head then +0 body, see docs/playerinfo/avatars-re.md]) and the arms
 // model in first person. `fallback` = no combo resolved: with an EMPTY registry
 // retail draws the entity's own item model @0x5c8039 (blip handles 0), which is
 // what this returns. The remaining delta, recorded under avatars-re
@@ -914,8 +914,8 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	const String head_graphic = spec.get("head", String());
 	// Retail composes head + body only when BOTH blip model handles are
 	// nonzero; either missing falls to the entity's own item model.
-	// (retail: Terrain_RenderSectorEntitiesBySide @0x5c7fdf-0x5c7fea —
-	//  jz to the forced_model 0 item path on either zero handle)
+	// [orig: Terrain_RenderSectorEntitiesBySide @0x5c7fdf-0x5c7fea —
+	//  jz to the forced_model 0 item path on either zero handle]
 	if (body_graphic.is_empty() || head_graphic.is_empty()) {
 		return build_animated_model(item_id, p_parent);
 	}
@@ -933,8 +933,8 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	body->set_meta("avatar_part", "body");
 	body->set_meta("character_id", p_character_id & 0xffff);
 	body->set_meta("player_visual_spec", spec);
-	// (retail: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
-	// @0x5c800f, see docs/playerinfo/avatars-re.md)
+	// [orig: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
+	// @0x5c800f, see docs/playerinfo/avatars-re.md]
 	AvatarDatabase::apply_part_camo(body, spec.get("body_camo", Array()),
 			"player_avatar:body_camo");
 	body->set_mirror_reflected(_item_is_mirror_reflected(item_id));
@@ -949,7 +949,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	if (head == nullptr) {
 		// A head that fails to build mirrors the zero-handle case: tear the
 		// composed body down and render the plain item model instead of a
-		// headless avatar. (retail: the both-or-neither gate above)
+		// headless avatar. [orig: the both-or-neither gate above]
 		body->queue_free();
 		return build_animated_model(item_id, p_parent);
 	}
@@ -957,8 +957,8 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 			head_graphic.get_file().get_basename()));
 	head->set_meta("avatar_part", "head");
 	head->set_meta("character_id", p_character_id & 0xffff);
-	// (retail: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
-	// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md)
+	// [orig: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
+	// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md]
 	AvatarDatabase::apply_part_camo(head, spec.get("head_camo", Array()),
 			"player_avatar:head_camo");
 	head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
@@ -1127,8 +1127,8 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	// drape's depth-clip plane 4x (the shadowztex stage, not the silhouette
 	// projection), and vehicles may author an items.def `shadow` blob decal —
 	// the drape fallback for a bound slot past the silhouette-capture budget
-	// (retail: itemdef type 3 gate @0x5d5d7f, the +0xA0 decal via @0x5d59d0;
-	// see docs/render/render-lighting-re.md).
+	// [orig: itemdef type 3 gate @0x5d5d7f, the +0xA0 decal via @0x5d59d0;
+	// see docs/render/render-lighting-re.md].
 	p_model->set_slot_shadow_person(
 			item_db_->get_item_type(p_item_id) == ItemDatabase::TYPE_PERSON);
 	// The two radii the shadow slot reads. The MODEL SPHERE is the .3di
@@ -1136,9 +1136,9 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	// depth clip size from it. The ENTITY BOUND (entity+0) is that sphere
 	// raised to the first husk stage's sphere and padded + 0x1000, written
 	// only when the graphic carries a collision block — the slot lod/patch
-	// and the light query size from it (retail: Entity_InitFromModel
+	// and the light query size from it [orig: Entity_InitFromModel
 	// @0x40dc30 — the gpm[44] collision-block gate, the scaled base-model
-	// bound, the unscaled husk max, and the +0x1000 pad).
+	// bound, the unscaled husk max, and the +0x1000 pad].
 	const String graphic = _graphic_for(p_item_id);
 	if (!graphic.is_empty()) {
 		const Ref<ObjectData> data = _load_object_data(graphic);

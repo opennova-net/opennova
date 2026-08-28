@@ -154,7 +154,7 @@ void main() {
 		// channel descs in CParticleTexture_InitTextureAndChannels @ 0x5e8347/
 		// @ 0x5e8380]. Only the blend factors differ (SRCALPHA/INVSRCALPHA vs
 		// ONE/INVSRCALPHA). Type-1 pages ship alpha cleared to 0
-		// (retail: BuildTextureAtlases @ 0x5e9116, see docs/particles/ptl-format-re.md), so an additive layer adds at
+		// [orig: BuildTextureAtlases @ 0x5e9116, see docs/particles/ptl-format-re.md], so an additive layer adds at
 		// full strength and DIFFUSE alpha (the alpha curve) never affects it.
 		frag_color = texel * v_primary;
 	} else if (pc.mode == 3u || pc.mode == 6u) {
@@ -1032,15 +1032,15 @@ RID ParticleCompositorEffect::Impl::pipeline_for(
 		case opennova::renderer::ParticlePipeline::Additive:
 		case opennova::renderer::ParticlePipeline::Premult:
 			// Additive and premult share one witnessed pair — ONE/INVSRCALPHA
-			// (retail: CParticleTexture_InitTextureAndChannels @ 0x5e8380 (case 1/2
-			// SRCBLEND=ONE) + @ 0x5e85a9 (LABEL_16 DESTBLEND=INVSRCALPHA), see docs/particles/ptl-format-re.md). The
+			// [orig: CParticleTexture_InitTextureAndChannels @ 0x5e8380 (case 1/2
+			// SRCBLEND=ONE) + @ 0x5e85a9 (LABEL_16 DESTBLEND=INVSRCALPHA), see docs/particles/ptl-format-re.md]. The
 			// type-1 atlas alpha clear zeroes the fragment alpha, which is what
 			// turns this pair into a pure add for additive layers.
 			source_color = RenderingDevice::BLEND_FACTOR_ONE;
 			source_alpha = RenderingDevice::BLEND_FACTOR_ONE;
 			break;
 		case opennova::renderer::ParticlePipeline::Bumpadd:
-			// (retail: @ 0x5e84dc/@ 0x5e84d8 — SRCALPHA/ONE, see docs/particles/ptl-format-re.md)
+			// [orig: @ 0x5e84dc/@ 0x5e84d8 — SRCALPHA/ONE, see docs/particles/ptl-format-re.md]
 			destination_color = RenderingDevice::BLEND_FACTOR_ONE;
 			destination_alpha = RenderingDevice::BLEND_FACTOR_ONE;
 			break;

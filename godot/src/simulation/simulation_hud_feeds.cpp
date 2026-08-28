@@ -24,8 +24,8 @@ Dictionary Simulation::get_vehicle_panel_view() const {
 	// gun child re-roots to its parent vehicle, and every mount qualifies
 	// (world::vehicle_panel_root carries the witness). The shell joins the
 	// root's items.def sid to its VEHICLE_HUD block; the panel's only gate is
-	// the block's interface texture (retail: HUD_DrawVehicleHealthBars
-	// @0x5a4fd0 draws nothing without it, see docs/interface/hud-re.md).
+	// the block's interface texture [orig: HUD_DrawVehicleHealthBars
+	// @0x5a4fd0 draws nothing without it, see docs/interface/hud-re.md].
 	Dictionary out;
 	out["shown"] = false;
 	out["item_id"] = 0;
@@ -58,7 +58,7 @@ bool Simulation::fill_vehicle_panel(const DefVehicleHudBlock &p_block,
 			root_h.valid() ? world_->registry.get(root_h) : nullptr;
 	if (root == nullptr) return false;
 	// The silhouette bands on the HULL's own health, not any rider's
-	// (retail: the root's health band @0x5a50d1).
+	// [orig: the root's health band @0x5a50d1].
 	r_state.hull_health = root->health;
 	r_state.hull_max_health = root->health_max;
 	opennova::world::fill_vehicle_panel_seats(*world_, root_h,
@@ -123,8 +123,8 @@ int64_t Simulation::get_session_game_type() const {
 Dictionary Simulation::take_score_feedback() {
 	// Revision-edge over the replica fold's 0x81 landing: every role's view
 	// folds it (the host's own loopback included), so the edge is
-	// role-agnostic (retail: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0 runs on
-	// every client, the listen host's own included).
+	// role-agnostic [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0 runs on
+	// every client, the listen host's own included].
 	Dictionary out;
 	if (!runtime_) return out;
 	const opennova::netsim::ClientState &cs = runtime_->state();

@@ -132,10 +132,10 @@ public:
 	// (TEX_CAMO1..3 = .3di control-catalog ordinals 93..95). Retail zero-extends
 	// the bytes into the shared CTRL bus immediately before submitting THAT
 	// part, so head, body and arms each carry their own triplet — no scaling, no
-	// tint: the bytes are texture-variant selectors (retail: Avatar_SetHeadCamoCtrl
+	// tint: the bytes are texture-variant selectors [orig: Avatar_SetHeadCamoCtrl
 	// @0x57a370 / Avatar_SetBodyCamoCtrl @0x57a390 / Avatar_SetArmsCamoCtrl
 	// @0x57a3b0 -> CTRL slots 0x83FFD0/D8/E0; world submits @0x5c7fec/@0x5c800f,
-	// preview @0x56113c/@0x56110b, first-person arms @0x4df008/@0x4df070, see docs/playerinfo/avatars-re.md).
+	// preview @0x56113c/@0x56110b, first-person arms @0x4df008/@0x4df070, see docs/playerinfo/avatars-re.md].
 	static PackedStringArray part_camo_registers();
 	// Store one part's raw camo bytes ([r, g, b] as parsed) on `p_model` under
 	// `p_owner`. Fewer than three bytes stores nothing.
@@ -182,12 +182,12 @@ public:
 	// all carry. Returns the resolved combo plus its tree indices, or an empty
 	// Dictionary when no combo matches (or the alignment bit contradicts
 	// `expected_alignment` when that is ALIGN_GOOD/ALIGN_EVIL)
-	// (retail: MinimapSlot_FindByPackedId @0x57a270, see docs/playerinfo/avatars-re.md).
+	// [orig: MinimapSlot_FindByPackedId @0x57a270, see docs/playerinfo/avatars-re.md].
 	Dictionary resolve_character_id(int character_id,
 			int expected_alignment = -1) const;
 	// Retail's per-side default character: the packed id of the first combo (file
 	// order) whose nationality alignment matches; no match -> the first combo of
-	// all; empty -> 0 (retail: lookup_entity_slot_and_pack_entry @0x57ad40, see docs/playerinfo/avatars-re.md).
+	// all; empty -> 0 [orig: lookup_entity_slot_and_pack_entry @0x57ad40, see docs/playerinfo/avatars-re.md].
 	int first_character_id(int alignment) const;
 	// The joiner's profile-to-wire projection (net/npruntime/
 	// join_character_profile.h): `selection` is the PLAYER_INFO profile shape

@@ -225,8 +225,8 @@ bool Simulation::install_local_player_weapon_by_name(
 	// The rig's clip lengths through the sim's own mounted index. An
 	// unauthored animadm loads NOTHING: the rings stay empty and every
 	// 'auto' delay collapses to zero, matching the table-build rule
-	// (retail: no animadm = no anim object at Def+372 = 'auto' reads 0;
-	// see weapon_table_build.cpp — Anim_InitActions, D-WPN-26).
+	// [orig: no animadm = no anim object at Def+372 = 'auto' reads 0;
+	// see weapon_table_build.cpp — Anim_InitActions, D-WPN-26].
 	// The FP viewmodel MODEL keeps its separate documented bring-up
 	// fallback; the clip rings never substitute another weapon's ADM.
 	weapon_clip_index_.load(
@@ -435,8 +435,8 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 	out["anim_variant"] = w.anim_variant;
 	// The FP clip channel position: gated per-tick advances since the play, not
 	// wall-clock age — the presenter poses the parts at advance * tick_dt and
-	// nothing free-runs the playhead (retail: the counter-gated
-	// AnimChannel_AdvanceDispatch @ 0x40b960 callers, net-re §5.40).
+	// nothing free-runs the playhead [orig: the counter-gated
+	// AnimChannel_AdvanceDispatch @ 0x40b960 callers, net-re §5.40].
 	out["anim_advance_ticks"] = static_cast<int64_t>(
 			w.anim_key.empty() ? 0u : w.anim_advance_ticks);
 	out["play_serial"] = static_cast<int64_t>(w.play_serial);
@@ -628,8 +628,8 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 	out["body_anim_phase"] = 0;
 	// The secondary channel's cross-fade + served variant ride beside the key: the
 	// outgoing clip at its own playhead, the ramping weight, and the ring entry each
-	// play latched (retail: the AnimMap_UpdateEntity @0x40b5f0 re-init + the +68
-	// latch, see docs/world/world-wac-ai-re.md §14.8.7).
+	// play latched [orig: the AnimMap_UpdateEntity @0x40b5f0 re-init + the +68
+	// latch, see docs/world/world-wac-ai-re.md §14.8.7].
 	out["body_anim_prev_key"] = String();
 	out["body_anim_prev_phase"] = 0;
 	out["body_anim_blend_weight"] = 1.0f;
