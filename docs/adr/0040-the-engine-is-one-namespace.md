@@ -1,6 +1,10 @@
 # ADR 0040: the engine is one namespace — no Nova prefix, files follow classes, group-qualified includes
 
 - **Status**: accepted (2026-08-26; maintainer directive)
+- **Updated**: [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
+  (2026-08-28) fixed decision 6's consumer list (the "any future non-Godot
+  front-end" clause is gone) and reframed ladder rows A3 and B (remainder) as
+  the mission-kernel / listen-host slices.
 - **Owners**: engine layout, build topology, the Godot binding layer
 - **Supersedes/updates**: ADR 0034 decision 5's deferral ("file names keep
   their `nova_` prefix for now"); ADR 0029's and ADR 0024's include-root
@@ -83,8 +87,8 @@ carrying the uniqueness load; nothing enforced it.
    `engine/` without Godot today: the six `apps/` (the NovaWorld service,
    the in-match dev host, the LAN probe, the packet pretty-printer, the
    mounted-install entry extractor `opennova-extract` added by ADR 0041, the
-   shared socket helpers), the ctest suite, the C-linkage headers, and any
-   future non-Godot front-end. `engine/` stays Godot-free for them — now as
+   shared socket helpers), the ctest suite, and the C-linkage headers.
+   `engine/` stays Godot-free for them — now as
    a ratcheted property (decision 4), not a re-verified one.
 
 ## Consequences
@@ -121,13 +125,13 @@ reach any particular number.
 |---|---|---|---|
 | A1 | the local player's view cluster | `engine/runtime/world/local_player_view.{h,cpp}` | LANDED `4a7195299` |
 | A2 | the minimap marker rows and their feed layout (duplicated at `simulation.h` and `hud/hud_overlay.cpp`) | `engine/net/npruntime/minimap_markers.{h,cpp}` + `engine/runtime/hud/hud_minimap_feed.{h,cpp}` | LANDED `61bfa5efa` |
-| A3 | `simulation.cpp`'s `advance_world_tick` / `boot_mission` / `restore_world_baseline` | `engine/net/inmatch` + `engine/runtime/mission/runtime_boot` | QUEUED |
+| A3 | `simulation.cpp`'s `advance_world_tick` / `boot_mission` / `restore_world_baseline` | `engine/runtime/mission/mission_kernel` + `engine/net/inmatch/listen_host` (ADR 0042) | QUEUED |
 | A4 | the LAN browse/announce cadence and its constants | `engine/net/npruntime/lan_discovery.{h,cpp}` | LANDED `a5ca3f3c9` |
 | A5a | the boot, pack and options policies leave the GDScript | `engine/base/resource_index/boot_policy.{h,cpp}`, `engine/base/vfs/pack_policy.h`, `engine/runtime/menu/options_policy.h` | LANDED `c33b15f46` |
 | A5b | the seat mirror, the volume law and the weapon-category rows | `engine/runtime/world/vehicle_attach.{h,cpp}`, `engine/runtime/audio/volume_law.h`, `engine/runtime/controls/controls.{h,cpp}` | LANDED `6e34d2e2a` |
 | B3a | the occlusion frame camera build | `engine/runtime/world/occlusion_camera.h` | LANDED `c2e41b97c` |
 | B3b | the iris exposure march | `engine/runtime/world/iris_march.{h,cpp}` | LANDED `97fb7a83b` |
-| B (remainder) | `simulation_present.cpp`'s data model, `simulation_net.cpp`'s GameConfig policy + pumps, `simulation_player_loadout.cpp` / `simulation_player_weapon.cpp` / `simulation_player.cpp`, `simulation_assets.cpp`, the feed marshallers, then the `simulation.h` state-model split, after which `Simulation` is a `TickTarget` adapter | to be chosen per slice | QUEUED |
+| B (remainder) | `simulation_present.cpp`'s data model, `simulation_net.cpp`'s GameConfig policy + pumps, `simulation_player_loadout.cpp` / `simulation_player_weapon.cpp` / `simulation_player.cpp`, `simulation_assets.cpp`, the feed marshallers, then the `simulation.h` state-model split, after which `Simulation` is a `TickTarget` adapter — reframed by ADR 0042: the rig-twinned half moves into the kernel; the Godot-only witnessed blocks stay binding-side until grilled | to be chosen per slice | QUEUED |
 | C1 | the mission load plan (`Game_StartMission`'s sequence + progress schedule) | `engine/runtime/mission/mission_load_plan.h` | LANDED `d081d2908` |
 | C2 | the HUD presenter's config tokens and feed units | `engine/runtime/hud/hud_config_tokens.h` | LANDED `d8fa149b2` |
 | C3+C4 | the presenter's swizzles/rangefinder and the viewmodel rig's frame math | `engine/runtime/world/presentation_frame.h` + `engine/runtime/simassets/fp_viewmodel_spec.h` | LANDED `0b07c5f9f` |

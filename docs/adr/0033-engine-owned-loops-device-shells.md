@@ -4,7 +4,12 @@
 - **Amended**: ADR 0035 (2026-08-10) replaced the R1 callback-driven
   `FrameDriver`; ADR 0036 (2026-08-22) cuts its lifecycle owner over to
   `inmatch::Session` plus the first-class `GameFramePipeline`.
-  The R2 draw-list and R3/R4 dispositions below remain in force.
+  The R2 draw-list and R3 dispositions below remain in force; R4 is CLOSED
+  permanently by [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
+  (2026-08-28) — no second backend, ever — which also supersedes decision 1's
+  RenderBackend/InputSource/AudioSink triad with the real seams
+  (`inmatch::TickTarget`, `GameFramePipeline`, the draw-list compilers +
+  native appliers). R3's reopen clause stands, decoupled from any backend.
 - **Updated**: [ADR 0037](0037-oned-runs-game-data.md) retires ONED authoring
   surfaces; the engine-loop and runtime-device decisions remain in force.
 - **Owners**: runtime architecture
@@ -75,6 +80,10 @@ The engine owns the three loops. A shell implements devices:
 - **AudioSink** — bank/PCM playback out.
 - The VFS already lives engine-side and stays there.
 
+[The RenderBackend/InputSource/AudioSink triad is SUPERSEDED by ADR 0042
+(2026-08-28): the real seams are `inmatch::TickTarget`, `GameFramePipeline`,
+and the draw-list compilers + native appliers.]
+
 `godot/game` becomes a device host measured in hundreds of lines, not
 thousands. ONED remains a full Godot application — authoring is where Godot
 earns its keep — consuming engine documents exactly as today.
@@ -108,7 +117,8 @@ earns its keep — consuming engine documents exactly as today.
   sort keys get their caller. (The spike RAN 2026-08-10 and closed the rung
   NOT TAKEN — §R3 spike result below.)
 - **R4 — a second backend (indefinitely optional).** SDL + a GL/D3D9-class
-  backend proving the device seam. Godot remains ONED's home.
+  backend proving the device seam. Godot remains ONED's home. [CLOSED by
+  ADR 0042 (2026-08-28): no second backend, ever.]
 
 ### 3. The absorbed rules (formerly ADR 0032; restated so this ADR is the one contract)
 
@@ -172,14 +182,18 @@ parity payoff.
   needs a scene that shows that residual. (D-RORD-8 left the candidate list 2026-08-12: its
   one-frame lag was the CAMERA phase, not the leg order — local-view placement
   now precedes terrain/foliage, and the post-present occlusion slot stands;
-  render-order-re.md + the ledger closure.)
+  render-order-re.md + the ledger closure.) [ADR 0042: a reopened R3 is for
+  draw-order fidelity inside Godot, never a second renderer — the clause is
+  decoupled from any backend.]
 - R4 stays indefinitely optional and now waits on R3's reopen (a second
   backend requires the engine-owned command stream R3 would have built).
+  [CLOSED by ADR 0042 (2026-08-28): no second backend, ever.]
 
 ## Consequences
 
 - R1 and R2 landed. R3's spike ran 2026-08-10 and closed the rung NOT TAKEN
-  (§R3 spike result); R4 waits on R3's reopen.
+  (§R3 spike result); R4 waits on R3's reopen. [R4 CLOSED by ADR 0042
+  (2026-08-28): no second backend, ever.]
 - **Ladder state (2026-08-10):** R1 was superseded by ADR 0035's typed
   mission-session/frame-pipeline cutover. R2
   COMPLETE — all four packet domains (terrain, foliage, HUD, menus) compile
@@ -191,7 +205,8 @@ parity payoff.
   godot layer to an engine home with a bound re-export, and the engine tree
   flattened to `engine/<group>/<lib>/*.{h,cpp}` (ADR 0024's layout
   amendment). R3 CLOSED not taken at its spike (§R3 spike result); R4 waits
-  on R3's reopen condition.
+  on R3's reopen condition. [R4 CLOSED by ADR 0042 (2026-08-28): no second
+  backend, ever.]
 - During transition a domain not yet cut over keeps its node path; the draw list
   applier makes old-vs-new diffable, which is itself the parity harness.
 - Verification per stage: R1 — full ctest + frame-golden traces + the

@@ -64,6 +64,12 @@ queue's only home: A3, Train B's `simulation_*.cpp` remainder, its feed
 marshallers and the `simulation.h` state-model split, the Train C tail
 including the `mission_audio.gd` reverb, and Train D in full. The counters sit at 341 and 730, not yet at a seam-contract
 floor; the campaign is finished when both hold only documented seam contracts.
+[ADR 0042](adr/0042-godot-permanent-shell-one-mission-kernel.md) (2026-08-28)
+closed the boundary question: Godot is the permanent sole shell (ADR 0033 R4
+CLOSED), and the campaign's next structural slices are the mission kernel
+(`engine/runtime/mission`) + listen-host frame (`engine/net/inmatch`) promoted
+from the retail-mission rig, with typed inspect/control surfaces for MCP and
+F3.
 It subsumes the structural slot earlier programs
 held: the **2026-07 quality campaign** closed at W4 (#310–#375; its W5
 residue is absorbed: the perf-span unify became ADR 0039's `FrameStatsBoard`,

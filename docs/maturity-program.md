@@ -28,7 +28,8 @@ Two things hold at every commit of this program:
 
 The architecture constraint the whole program serves: **ONED is a detachable
 layer over public engine APIs, and the engine never depends on the editor**
-(ADR 0016). Godot products: exactly two exported exes; the server is a serve
+(ADR 0016) *(historical: retired by ADR 0037; the standing boundary rule is
+ADR 0042's)*. Godot products: exactly two exported exes; the server is a serve
 MODE of the game (ADR 0015). OpenNova Launcher is outside that taxonomy.
 
 ## Status

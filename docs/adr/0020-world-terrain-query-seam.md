@@ -1,6 +1,12 @@
 # ADR 0020: the world→terrain seam — libs/terrain_query
 
 - **Status**: accepted (2026-07-04, rides the LIBS-1 seam PR)
+- **Amended**: [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
+  (2026-08-28) amends decision 4: the terrain-field provider becomes the
+  engine builder in `runtime/terrain_query` (`terrain_field_store`, landing as
+  a campaign slice), called by `TerrainData` and the mission kernel. The
+  `engine/net` SEAM_TREE entry in `scripts/lint/include_graph_check.py` is
+  inherited from this era and harmless.
 - **Owners**: maturity program LIBS track
 - **Supersedes/updates**: executes the LIBS-1 slice of the maturity
   umbrella (docs/maturity-program.md); sequenced after ADR 0019's npwire
