@@ -599,9 +599,9 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// wrapping 0 -> 1]. On a LAN listen host the host ASSIGNS the dcb (it does not learn it from the
 	// client) and advertises it in ServerAuth.MI. It becomes spawn-eligible only after the final
 	// admission 0x02; the bundled client later echoes it in 0x48. On NovaWorld the gate-assigned id
-	// arrives via that 0x48 and overrides this host provisional value.
-	// TODO(P6): gate this on the LAN network type when NovaWorld transport lands — on NovaWorld the
-	// dcb is gate-assigned, not host-assigned.
+	// arrives via that 0x48 and overrides this host provisional value -- retail's Create assigns
+	// the provisional `++protocol[947]` on BOTH network types (no transport-mode gate @0x62acb0),
+	// so the provisional-then-override shape is the port, not a placeholder.
 	conn.connection_id = ctx.np_protocol.next_connection_id++;
 	if (ctx.np_protocol.next_connection_id == 0) ctx.np_protocol.next_connection_id = 1; // wrap 0 -> 1
 	conn.self_id_seen = false;

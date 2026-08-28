@@ -308,9 +308,6 @@ public:
 	void set_expansion_version_root(std::string game_root) {
 		expansion_version_root_ = std::move(game_root);
 	}
-	const CharacterJoinVars &character_join_vars() const {
-		return character_join_vars_;
-	}
 
 	// Anti-cheat character-attribute challenge source. This is the exact
 	// sixteen-row table loaded from charattr.def at boot, not AnimMap/.adm data.

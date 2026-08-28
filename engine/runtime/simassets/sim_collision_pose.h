@@ -2,7 +2,7 @@
 // collision sections from the sim's OWN parsed models and clip sets — the
 // PANM generic leg over threedi_panm_pose, and the person skeletal leg over
 // AdmSkeletalClips — producing the same final world-space CollisionMatrix
-// array the shell adapter's provider built through the render binding.
+// array the shell binding's provider built through the render binding.
 // [orig: the model+168 callback consumed in lockstep by
 //  Physics_RaycastAgainstBoneCollision @ 0x4e4cb0; the person pose chain is
 //  Entity_BuildBoneTransformMatrices @ 0x4b1290.]
@@ -101,7 +101,7 @@ public:
 
 	// Register the pose model for a collision model id whose canonical first
 	// RLOD carries live PANM (the generic leg's precondition; mirrors the
-	// adapter's has-live-PANM registration gate). The pointer must outlive the
+	// binding's has-live-PANM registration gate). The pointer must outlive the
 	// provider (SimModelCache retains its parses).
 	void register_generic_model(int32_t model_id, const Threedi3di3 *model);
 	// Register the parsed model behind a collision model id for the userpoint
@@ -115,7 +115,7 @@ public:
 	// cached by rig_key (the embedder composes adm+graphic identity). Returns
 	// false — and registers nothing — when the rig cannot load or its
 	// FK/section preconditions fail, in which case the query path declines
-	// exactly like the adapter's unregistered-source leg.
+	// exactly like the binding's unregistered-source leg.
 	bool register_skeletal_entity(world::EntityHandle entity,
 			uint64_t registry_spawn_id, int32_t model_id,
 			const std::string &rig_key, const std::string &adm_name,
@@ -123,7 +123,6 @@ public:
 			const std::string &muzzle_userpoint = std::string());
 	void remove_entity(world::EntityHandle entity);
 	bool has_skeletal_entity(world::EntityHandle entity) const;
-	bool has_skeletal_muzzle_entity(world::EntityHandle entity) const;
 	// Whether a query for this model id has a registered pose source at all.
 	// A build_section_matrices false WITHOUT a source is the normal rigid
 	// path (CollisionWorld's identity sections); false WITH one is a real

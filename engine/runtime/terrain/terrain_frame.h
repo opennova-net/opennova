@@ -4,7 +4,7 @@
 // built terrain scene plus a camera into the ordered patch-draw list an
 // embedding renderer uploads — the snapshot-and-view-in, typed-draw list-out seam
 // renderer::ParticleFrameCompiler proved. The compiler owns every per-frame
-// DECISION the shell adapter used to make in its self-driven walk: the
+// DECISION the shell binding used to make in its self-driven walk: the
 // 512-unit sector window over the .trn sector grid, the quadtree traversal,
 // the foliage detail-cell handoff, the front-to-back order, the patch budget,
 // and the LOD-family resolve. The embedder keeps only device work: building

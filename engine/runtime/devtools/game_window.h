@@ -1,6 +1,6 @@
 // The mandatory Game workspace window. Rendering the game texture and the
 // Play/Interact request policy are layered onto this window through its narrow
-// viewport adapter; the window policy itself is engine-owned.
+// viewport binding; the window policy itself is engine-owned.
 #pragma once
 
 #include <runtime/devtools/imgui_pass.h>
@@ -21,8 +21,8 @@ enum class GameWindowRequest {
 };
 
 // The only seam between the engine-owned window and a rendering device. The
-// Godot adapter resizes and draws its SubViewport; engine-only runs leave the
-// adapter null or install a fake.
+// Godot binding resizes and draws its SubViewport; engine-only runs leave the
+// binding null or install a fake.
 class GameViewport {
 public:
 	virtual ~GameViewport() = default;

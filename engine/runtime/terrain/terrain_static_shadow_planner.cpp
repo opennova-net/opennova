@@ -45,7 +45,7 @@ std::array<float, 3> transform_point(const std::array<float, 12> &transform,
 	return out;
 }
 
-// The adapter hashed the Godot basis rows then origin; the record carries the
+// The binding hashed the Godot basis rows then origin; the record carries the
 // same value order.
 uint64_t hash_transform(uint64_t hash,
 		const std::array<float, 12> &transform) {
@@ -387,7 +387,7 @@ bool TerrainStaticShadowPlanner::compile(const TerrainTilePageKey &page,
 // visible model is submitted and flushed on the spot, and that flush samples
 // the frame-shared tick. Resident tiles are never re-evaluated. The same
 // evaluator runs here once per caster per classification or raster, from the
-// tick the adapter stamped on this planner for the job.
+// tick the binding stamped on this planner for the job.
 // [orig: Terrain_CollectAndRenderTileModels — Render_SubmitEntity @0x60D971
 // then CRenderBatchQueue_SortAndFlush @0x60D97D per visible model;
 // apply_shader_parameters @0x58DB80 inside that flush]

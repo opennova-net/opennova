@@ -23,7 +23,7 @@ namespace opennova::game_type {
 
 // The witnessed code words (retail LTGT_* keys).
 // Code words and structural predicates live in world/game_type.h so runtime
-// gameplay and this mission/wire adapter consume one vocabulary.
+// gameplay and this mission/wire binding consume one vocabulary.
 
 // Retail's mission-attrib -> g_GameType selection: the single-select game-mode
 // bit from the mission header (bms::AttribFlags) picks the session code word.

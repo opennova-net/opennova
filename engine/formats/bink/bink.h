@@ -29,7 +29,6 @@ struct BinkInfo {
 	uint32_t audio_track_count = 0;
 
 	double frames_per_second() const;
-	double duration_seconds() const;
 };
 
 // One tightly-packed, top-down RGBA8 frame. BinkMovie owns and reuses this
@@ -56,7 +55,7 @@ void yuv_to_rgb(uint8_t y, uint8_t u, uint8_t v, uint8_t &r, uint8_t &g, uint8_t
 
 // Portable BIKi video-only decoder. This deliberately exposes no container,
 // bundle, YUV-plane, or transform machinery: those are one implementation
-// detail behind the sequential movie interface used by the engine adapter.
+// detail behind the sequential movie interface used by the movie binding.
 class BinkMovie final {
 public:
 	static std::unique_ptr<BinkMovie> open(

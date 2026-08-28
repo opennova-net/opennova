@@ -113,7 +113,7 @@ ObjectProjectedShadowPolicy object_projected_shadow_policy(
 
 // The finite technique choices preserve the witnessed retail material families
 // and pass policies; only their Godot resource realization lives in the
-// adapter. [orig: HLSLEffect_LoadFromFile @ 0x5af417..0x5af49e; _FFP.fx
+// binding. [orig: HLSLEffect_LoadFromFile @ 0x5af417..0x5af49e; _FFP.fx
 // TBoringFFP / TECHNIQUE_NORMAL / SELFLUM variants; alpha-test state at
 // CRenderBatchQueue_FlushBatches @ 0x5da3a9..0x5da401; environment-cube
 // refresh at update_environment_cubemap @ 0x6106a0].

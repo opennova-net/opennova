@@ -101,13 +101,6 @@ struct CFMap {
     int      count;
 };
 
-static CFBlock *cf_get(CFMap *m, uint32_t off) {
-    for (int i = 0; i < m->count; ++i) {
-        if (m->blocks[i].start_offset == off) return &m->blocks[i];
-    }
-    return NULL;
-}
-
 static void cf_add(CFMap *m, int *cap, const CFBlock &b) {
     if (m->count == *cap) {
         *cap = (*cap == 0) ? 8 : (*cap * 2);
@@ -120,13 +113,6 @@ static void cf_free(CFMap *m) {
     free(m->blocks);
     m->blocks = NULL;
     m->count = 0;
-}
-
-static int find_inst_idx(const Instruction *insts, int n, uint32_t off) {
-    for (int i = 0; i < n; ++i) {
-        if (insts[i].offset == off) return i;
-    }
-    return -1;
 }
 
 static void analyze_control_flow(const Instruction *insts, int n, CFMap *out) {

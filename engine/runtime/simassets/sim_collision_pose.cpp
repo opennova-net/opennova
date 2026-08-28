@@ -1,4 +1,4 @@
-// The engine-side collision section-matrix provider — the adapter's
+// The engine-side collision section-matrix provider — the binding's
 // build_section_matrices legs moved verbatim onto the sim's own parsed
 // models/clips (ADR 0028). The Godot binding's Transform3D round trip was the
 // identity on every matrix entry the collision applier reads, so the PANM leg
@@ -65,7 +65,7 @@ anim::Quat quat_axis_z(double angle) {
 }
 
 // The model-frame orientation of one overlay class — the native twin of the
-// adapter's godot_model_basis_from_overlay: Ry(yaw) * Rz(pitch) * Rx(roll)
+// binding's godot_model_basis_from_overlay: Ry(yaw) * Rz(pitch) * Rx(roll)
 // with the trailing +90° model-forward correction. The correction does NOT
 // cancel in the body-relative delta below — it conjugates the delta into the
 // node frame apply_aim_overlay expects.
@@ -81,7 +81,7 @@ anim::Quat overlay_model_quat(const anim::AimOverlayAngles &angles) {
 }
 
 // Row-major render float[16] from a composed deformation — the exact formula
-// the adapter's panm_render_matrix_from_godot applied to the same rows
+// the binding's panm_render_matrix_from_godot applied to the same rows
 // (the (-x, y, z) handedness flip + the row-vector transpose).
 void render_matrix_from_deformation(
 		const AdmSkeletalClips::RestTransform &deformation, float out[16]) {
@@ -106,7 +106,7 @@ void render_matrix_from_deformation(
 
 // The model's bone table for the rig: parent-relative pivots + parent indices
 // from the canonical first RLOD's render objects (raw, engine frame — the
-// same rows the adapter's get_bone_origins/get_bone_parents exposed).
+// same rows the binding's get_bone_origins/get_bone_parents exposed).
 bool model_bone_table(const Threedi3di3 &model,
 		std::vector<anim::Vec3> &r_origins, std::vector<int> &r_parents) {
 	r_origins.clear();
@@ -158,7 +158,7 @@ bool SimCollisionPoseProvider::register_skeletal_entity(
 		auto loaded = std::make_shared<AdmSkeletalClips>();
 		if (!loaded->load_from_adm(index_, adm_name, origins, parents)) {
 			// Negative results are not cached: a later mission mount can make
-			// the .adm resolvable (mirrors the adapter's per-sweep resolve).
+			// the .adm resolvable (mirrors the binding's per-sweep resolve).
 			return false;
 		}
 		rig = std::move(loaded);
@@ -269,12 +269,6 @@ bool SimCollisionPoseProvider::resolve_userpoint_rigid(world::World &world,
 bool SimCollisionPoseProvider::has_skeletal_entity(
 		world::EntityHandle entity) const {
 	return skeletal_sources_.find(entity.packed) != skeletal_sources_.end();
-}
-
-bool SimCollisionPoseProvider::has_skeletal_muzzle_entity(
-		world::EntityHandle entity) const {
-	const auto found = skeletal_sources_.find(entity.packed);
-	return found != skeletal_sources_.end() && found->second.muzzle_bone >= 0;
 }
 
 bool SimCollisionPoseProvider::build_section_matrices(world::World &world,
@@ -520,7 +514,7 @@ bool SimCollisionPoseProvider::build_skeletal(world::World &world,
 		// Preserve that literal collision result for COBJ 16: composing
 		// body_world here would incorrectly reintroduce the entity
 		// translation; the zero-scale local (origin kept) still FK-chains any
-		// children exactly like the adapter's collapsed pose.
+		// children exactly like the binding's collapsed pose.
 		// [orig: special row @0x4b1290]
 		if (collapse_right_hand && i == kRightHandBoneIndex) {
 			std::memset(local.rows, 0, sizeof(local.rows));
@@ -554,7 +548,7 @@ bool SimCollisionPoseProvider::panm_part_matrices(world::World &world,
 		return false;
 
 	// The retail global CTRL bus, written by ordinal — absent keys and zero
-	// values are indistinguishable on the bus, exactly like the adapter's
+	// values are indistinguishable on the bus, exactly like the binding's
 	// Dictionary translation.
 	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
 	const world::Entity *e = world.registry.get(entity);
@@ -618,7 +612,7 @@ bool SimCollisionPoseProvider::build_generic(world::World &world,
 	// whose target part ordinal exists as a collision section. This
 	// intentionally ignores COBJ parent metadata and CXLT/offset records:
 	// CVRT is model-space. The evaluator's row-major matrices are exactly the
-	// render matrices the collision applier consumes — the adapter's
+	// render matrices the collision applier consumes — the binding's
 	// Transform3D round trip was the identity on every entry it reads.
 	out.assign(model.sections.size(), entity_world);
 	bool matched_section = false;

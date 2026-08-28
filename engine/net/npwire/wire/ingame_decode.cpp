@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <base/io/fixed.h>
 
 // Decoders for S2C 0x0D / 0x20 — see docs/net/novaworld-net-re.md §5.11/§5.12.
 // Cross-witnessed byte-exact against the 2026-06-16b loopback by
@@ -27,8 +28,8 @@ EulerQ22 euler_q22(uint32_t yaw_bam, uint32_t pitch_bam, uint32_t roll_bam) {
 	const double k = 6.283185307179586476925286766559 / 4294967296.0; // 2pi / 2^32
 	auto q = [k](uint32_t bam, int32_t &s, int32_t &c) {
 		const double a = double(int32_t(bam)) * k; // fild loads the dword signed
-		s = int32_t(std::sin(a) * 4194304.0);      // *2^22, ftol truncates
-		c = int32_t(std::cos(a) * 4194304.0);
+		s = int32_t(std::sin(a) * io::kQ22One);      // *2^22, ftol truncates
+		c = int32_t(std::cos(a) * io::kQ22One);
 	};
 	EulerQ22 t;
 	q(roll_bam, t.sr, t.cr);

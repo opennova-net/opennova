@@ -232,12 +232,6 @@ public:
 	// 0x0A tail with health <= 0 closes only the authoritative spawn latch.
 	// Positive health does not reopen it: death re-enters JoinerConnection's
 	// deployment-pick FSM, and only the applicable post-pick release reopens spawn.
-	// set_deployed remains an explicit simulation/test override and moves both
-	// latches together; production transitions keep their independent semantics.
-	void set_deployed(bool v) {
-		deployed_ = v;
-		authoritative_spawn_released_ = v;
-	}
 	bool deployed() const { return is_deployed(); }
 
 	// The shell's kit for the 0x1A-released loadout-submission pair (Joiner only; see

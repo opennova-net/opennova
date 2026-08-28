@@ -1,4 +1,4 @@
-// The mounted-pose resolver — the adapter's model-bound body moved onto the
+// The mounted-pose resolver — the binding's model-bound body moved onto the
 // sim's own parse (ADR 0028): the same userpoint re-anchor, live-PANM carry,
 // attachment look-at frame, and mission-euler extraction, in native rows math
 // (the Godot Transform3D round trip contributed no semantics — its basis
@@ -11,13 +11,14 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <base/io/bam.h>
 
 namespace opennova::simassets {
 
 namespace {
 
 constexpr double kHalfPi = 1.57079632679489661923;
-constexpr double kRadiansPerDegree = 3.14159265358979323846 / 180.0;
+constexpr double kRadiansPerDegree = io::kRadiansPerDegree;
 
 struct V3 {
 	double x = 0.0, y = 0.0, z = 0.0;
@@ -164,7 +165,7 @@ M3 m3_axis_angle_x(double angle) {
 	return o;
 }
 
-// The adapter's godot_model_basis_from_mission_euler: the ordinary mission
+// The binding's godot_model_basis_from_mission_euler: the ordinary mission
 // euler into the model world frame (RotY(90 - yaw) * RotZ(pitch) * RotX(roll)
 // * RotY(+90), the trailing term the .3di model-forward correction).
 M3 model_basis_from_mission_euler(double pitch_deg, double yaw_deg,
@@ -251,7 +252,7 @@ bool resolve_model_mounted_pose_from_parts(
 			model.user_points[static_cast<size_t>(userpoint_index)];
 	const int part_index = up.subobject_index;
 	// The decode swizzle + render X-mirror: authored 16.16 -> the model world
-	// frame the PANM evaluator poses (the adapter's get_user_point_info space).
+	// frame the PANM evaluator poses (the binding's get_user_point_info space).
 	const V3 authored_model_position{
 			static_cast<double>(up.y) / 65536.0,
 			static_cast<double>(up.z) / 65536.0,
@@ -318,7 +319,7 @@ bool resolve_model_mounted_pose_from_parts(
 		V3 fup = v3_cross(forward, right);
 		if (v3_length_sq(fup) <= 1.0e-8) return false;
 		v3_normalize(fup);
-		// The adapter built this Basis from column AXES (right, up, forward).
+		// The binding built this Basis from column AXES (right, up, forward).
 		M3 retail_frame;
 		m3_set_column(retail_frame, 0, right);
 		m3_set_column(retail_frame, 1, fup);

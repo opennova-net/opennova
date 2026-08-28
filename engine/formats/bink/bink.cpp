@@ -405,11 +405,6 @@ double BinkInfo::frames_per_second() const {
 			static_cast<double>(fps_numerator) / fps_denominator;
 }
 
-double BinkInfo::duration_seconds() const {
-	return fps_numerator == 0 ? 0.0 :
-			static_cast<double>(frame_count) * fps_denominator / fps_numerator;
-}
-
 bool BinkMovie::Impl::initialize() {
 	std::array<uint8_t, kHeaderSize> header{};
 	if (!read_range(0, header.data(), header.size())) {

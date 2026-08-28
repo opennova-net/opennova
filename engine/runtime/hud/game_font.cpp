@@ -44,15 +44,6 @@ const fnt_glyph_t *GameFont::glyph_for_byte(uint8_t byte) const {
 	return &font_->glyphs[byte - FNT_FIRST_CHAR];
 }
 
-float GameFont::glyph_advance(const fnt_glyph_t *glyph, float scaled_x) const {
-	// (u1 - u0) * 256 = the glyph's pixel width on the 256-wide page; advance
-	// adds the font's (spacing - 1) pad [orig: @ 0x6752c0
-	// floor(cursor + w*scale*256 + (spacing-1)*scale + 0.5)].
-	const float width_px = (glyph->uv.u1 - glyph->uv.u0) * 256.0f;
-	const float pad = static_cast<float>(font_->glyph_spacing - 1);
-	return width_px * scaled_x + pad * scaled_x;
-}
-
 float GameFont::char_height(uint8_t byte, float scale_y) const {
 	// One glyph's v-extent in pixels [orig: GameFont_MeasureCharHeight
 	// @ 0x580a80 — CGameFont_GetCharMetrics scaled by the fontDesc scale;

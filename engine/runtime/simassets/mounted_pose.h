@@ -1,6 +1,6 @@
 // The engine-side mounted-pose resolver (S4, ADR 0028): the live UseGun /
 // emplacement seat frame from the carrier model's authored userpoint posed
-// through its own PANM — the sim-parse counterpart of the shell adapter's
+// through its own PANM — the sim-parse counterpart of the shell binding's
 // model-bound resolver. [orig: UseGun Entity_AttachToBoneAndUpdateTransform
 // @ 0x5463d0; the addeweap attachment frame build_bone_attachment_matrix
 // @ 0x56C630 over build_direction_look_at_matrix @ 0x612C90]
@@ -61,7 +61,7 @@ bool resolve_model_mounted_pose_from_parts(
 // (seat.attachment_frame + an authored direction) owns the complete look-at
 // orientation, an ordinary gunner seat re-bases the part delta onto the
 // carrier baseline. ctrl_values is the 96-slot global register bus (may be
-// null); time_ms the retail PANM clock. Mirrors the adapter resolver's
+// null); time_ms the retail PANM clock. Mirrors the binding resolver's
 // gates/fallthroughs exactly — false means "use the portable fallback".
 bool resolve_model_mounted_pose(const Threedi3di3 &model,
                                 const world::Entity &carrier,

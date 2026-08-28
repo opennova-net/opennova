@@ -3,7 +3,7 @@
 // Renderer-neutral object shader pipeline description.
 //
 // The engine classifies authored material facts and returns this typed
-// descriptor. Backend adapters select their own checked-in shader resources
+// descriptor. Backend bindings select their own checked-in shader resources
 // and bind the capabilities; the engine never emits backend shader source.
 
 #include <runtime/renderer/material_classify.h>
@@ -83,7 +83,7 @@ ObjectPhongMapTexel object_phong_map_texel(uint8_t ndotl, uint8_t ndoth);
 
 // Shader execution topology. These are the combinations reachable from the
 // canonical material descriptor table plus the runtime's missing-detail
-// downgrade. Backend adapters fail closed on Unsupported instead of growing
+// downgrade. Backend bindings fail closed on Unsupported instead of growing
 // a runtime uber-shader or guessing a fallback.
 enum class ObjectShaderTechnique : uint8_t {
 	Unsupported,
@@ -161,7 +161,7 @@ ObjectShaderFamily decode_object_shader_family(ObjectShaderKey key);
 ObjectBlendMode decode_object_shader_blend(ObjectShaderKey key);
 
 // Describe the complete normal-pass pipeline selected by a key. Pure data;
-// adapters decide how each policy maps to their renderer.
+// bindings decide how each policy maps to their renderer.
 ObjectShaderPipelineDescriptor describe_object_shader_pipeline(ObjectShaderKey key);
 
 }  // namespace opennova::renderer

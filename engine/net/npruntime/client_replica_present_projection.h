@@ -22,7 +22,7 @@ struct ClientReplicaPresentContext {
 void initialize_client_replica_present_row(float *row);
 
 // Project the role-independent client replica fields into one initialized
-// world::PF_* row. Authoritative/local role adapters may enrich or override
+// world::PF_* row. Authoritative/local role bindings may enrich or override
 // the result afterwards, but they do not define another wire model.
 void project_client_replica_present_row(
 		float *row,

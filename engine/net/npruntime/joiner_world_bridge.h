@@ -130,7 +130,7 @@ public:
 		world::IRootMotionSource *root_motion = nullptr;
 	};
 
-	// The shell/adapter-owned legs of the frame, in the order pump() invokes
+	// The shell/binding-owned legs of the frame, in the order pump() invokes
 	// them. Every hook is required unless noted; the binding builds this on the
 	// stack per frame (lambdas over the simulation).
 	struct PumpHooks {
@@ -145,7 +145,7 @@ public:
 		// The F3 Stats wire-leg clock stamp: called right after the uplink
 		// ships, before the decoded-state folds (may be null = no profiling).
 		std::function<void()> on_wire_leg_complete;
-		// The S2C 0x5A authoritative-loadout fold (S7b: the adapter keeps the
+		// The S2C 0x5A authoritative-loadout fold (S7b: the binding keeps the
 		// dict/profile conversion seam).
 		std::function<void()> apply_authoritative_loadout;
 		// Re-copy the resident kit page when the side selector moved; true =

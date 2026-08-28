@@ -18,12 +18,13 @@
 #include <deque>
 #include <limits>
 #include <unordered_set>
+#include <base/io/bam.h>
 
 namespace opennova::simassets {
 
 namespace {
 
-constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
+constexpr double kRadToDeg = io::kDegreesPerRadian;
 
 std::string trimmed(const char *name) {
 	// strutil::trim spells its whitespace set out so canonicalization never

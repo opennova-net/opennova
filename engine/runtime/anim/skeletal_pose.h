@@ -1,6 +1,6 @@
 // Time-domain skeletal pose evaluation over sample_clip's baked frame table —
 // the frame-window selection, interpolation, blend, BN## bone-tag parsing, and
-// .bad bind-rest math the shell adapter's skeletal evaluator carried
+// .bad bind-rest math the shell binding's skeletal evaluator carried
 // (ADR 0028). The clip sampling itself stays anim_sample.h's; this header owns
 // turning a playhead into one parent-local pose.
 //
@@ -56,10 +56,10 @@ uint8_t overlay_class_for_bone_name(const std::string &name);
 // The parent-local BIND rest from the .bad BadBone bind matrix: origin = the
 // bone's rest position raw; rotation = orthonormalized TRANSPOSE of
 // (bone_bind3x3 * parent_bind3x3^-1) — the .bad bind is a row-vector engine
-// matrix, and the transpose is the column-vector conversion the adapter
+// matrix, and the transpose is the column-vector conversion the binding
 // realized by feeding the product's rows into Godot's column-axes Basis
 // constructor. Identity when degenerate; a non-invertible parent matrix
-// contributes a zero product (matching the adapter's ignored-invert result),
+// contributes a zero product (matching the binding's ignored-invert result),
 // which the determinant guard then turns into identity. r_rotation_rows is
 // row-major, column-vector convention (the same rows a Godot Basis exposes).
 // [orig: build_world_bone_matrices @0x40c770 bind layer]

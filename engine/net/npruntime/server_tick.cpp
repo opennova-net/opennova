@@ -275,6 +275,9 @@ void send_minimap_overlay_batches(NapiNPConnection &conn,
 // advances a 0..127 phase. The dynamic pool-1 loop visits phase, phase+128, ...
 // rather than sweeping all actors every invocation. This produces 00TRg's five
 // one-entry EWEAP packets close together and repeats them every 1792 ticks.
+// [orig: Server_BuildOverlayStateForPlayer @0x517FC0 (the 14-tick cooldown, the
+//  0..127 phase and the +128 stride); Entity_ClassifyForMinimap @0x50FA70 (the
+//  item-type 1 / carrier-type 5 classification and the 0x10 persistent flag)]
 void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_in_session) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {

@@ -1,5 +1,5 @@
 // Seat/mount pose predicates + the aim-overlay input builder. Moved verbatim
-// from the shell adapter's simulation internals (ADR 0028): every input is
+// from the shell binding's simulation internals (ADR 0028): every input is
 // world/anim state, and the legacy render/collision paths and the engine-side
 // pose provider must select the same channels (ADR 0016 one-impl).
 #ifndef OPENNOVA_SIMASSETS_POSE_INPUTS_H

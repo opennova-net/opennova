@@ -1,7 +1,7 @@
 #pragma once
 
 // Portable static-shadow caster geometry/material resolution over the native
-// 3DI model. This is the policy half the Godot adapter formerly owned: strip
+// 3DI model. This is the policy half the Godot binding formerly owned: strip
 // curation in authored ROBJ order with the loader's relative/absolute index
 // conventions, presentation-world (-x,y,z) extraction, PROJSHAD material
 // admission (alpha sources plus exact runtime AlphaGen/UV/flipbook inputs),

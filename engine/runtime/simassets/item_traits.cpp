@@ -1,4 +1,4 @@
-// The sim-side items.def trait fold, moved verbatim from the shell adapter's
+// The sim-side items.def trait fold, moved verbatim from the shell binding's
 // Simulation::resolve_item_traits / resolve_ai_weapons (ADR 0028). Every
 // read that went through the item database's getter surface now reads the
 // DefItemDef row directly; the getters were field-for-field projections, so
@@ -21,7 +21,7 @@ namespace opennova::simassets {
 namespace {
 
 // Last-wins by-id view over the parsed file: duplicate definition ids
-// overwrite earlier rows — the same load-order semantics the adapter's
+// overwrite earlier rows — the same load-order semantics the binding's
 // id-keyed item map exposed (operator[] assignment per entry). The net
 // catalog separately RETAINS duplicates so it can classify them ambiguous and
 // fail closed; that policy lives with the injected wire-class supplier, not

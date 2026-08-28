@@ -107,35 +107,6 @@ int threedi_generator_style_count(void) {
     return (int)(sizeof(kControlEntries) / sizeof(kControlEntries[0]));
 }
 
-int threedi_generator_style_code_at(int index) {
-    if (index < 0 || index >= threedi_generator_style_count()) {
-        return -1;
-    }
-    return (int)kControlEntries[index].code;
-}
-
-int threedi_generator_reads_control_value(int consumer, uint8_t code) {
-    // Per-consumer dispatch of the 0x71..0x75 control-register range
-    // [orig: compute_uv_transform_matrix @ 0x5B1990 (whole range);
-    //  RgbGen_EvaluateColor @ 0x5B23D0 / light path (SET + ADD);
-    //  AlphaGen_EvaluateValue @ 0x5B2320 and PANM_SampleTrack @ 0x5B2270
-    //  (SET only — the rest fall back to the low-nibble waveform)].
-    switch (consumer) {
-        case THREEDI_GENERATOR_CONSUMER_UV:
-            return code >= THREEDI_STYLE_CONTROL_SET &&
-                   code <= THREEDI_STYLE_CONTROL_ROTATE;
-        case THREEDI_GENERATOR_CONSUMER_RGB:
-        case THREEDI_GENERATOR_CONSUMER_LIGHT:
-            return code == THREEDI_STYLE_CONTROL_SET ||
-                   code == THREEDI_STYLE_CONTROL_ADD;
-        case THREEDI_GENERATOR_CONSUMER_ALPHA:
-        case THREEDI_GENERATOR_CONSUMER_PANM:
-            return code == THREEDI_STYLE_CONTROL_SET;
-        default:
-            return 0;
-    }
-}
-
 const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx) {
     if (!ctrl || !ctrl->registers || idx >= ctrl->count) {
         return NULL;

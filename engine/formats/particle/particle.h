@@ -138,16 +138,6 @@ constexpr std::uint32_t AboveH2O              = 1u << 28;  // 0x10000000 "ABOVEH
 std::uint32_t parse_particle_flags(std::string_view raw) noexcept;
 std::string format_particle_flags(std::uint32_t bits);
 
-// Editor-facing introspection of the canonical name<->bit tables. Returned by
-// reference to function-local statics built once from the constexpr tables in
-// particle.cpp (the single source of truth). The Godot editor uses these to
-// build flag/move pickers and blend-mode dropdowns without duplicating the
-// witnessed tables in GDScript. Order matches the engine table (write) order.
-const std::vector<std::pair<std::string, std::uint32_t>> &particle_flag_entries();
-const std::vector<std::pair<std::string, std::uint32_t>> &move_flag_entries();
-// Indexed by BlendMode value (0..7): names()[i] == blend_mode_name((BlendMode)i).
-const std::vector<std::string> &blend_mode_names();
-
 // "table12", "table12 reverse", "table12 inverse"/"table12 invert", or both
 // modifiers in any order. Engine: per-func dispatch in
 // CParticleDef_ParseProperties (e.g. scale_func @ 0x5eafdd) sets bit 0x02 on

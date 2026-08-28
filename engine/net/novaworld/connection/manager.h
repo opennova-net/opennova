@@ -47,7 +47,6 @@ public:
 	void on_lost(LostHandler h) { lost_handler_ = std::move(h); }
 
 	uint64_t heartbeat_timeout_ms() const { return heartbeat_timeout_ms_; }
-	void set_heartbeat_timeout_ms(uint64_t ms) { heartbeat_timeout_ms_ = ms; }
 
 	// Verbs the listener threads call when a HELLO/JOIN/SESSION/GOODBYE
 	// packet has been recognised. These wrap the registry and fire the

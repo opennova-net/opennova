@@ -211,7 +211,7 @@ TerrainStaticShadowPageJob TerrainStaticShadowCollector::compile(
 				candidate.world_bounds, input);
 		if (!intersects_page(footprint, input.page, span)) continue;
 		// Bounds participate directly in projection, so they must invalidate a
-		// resident page even if an adapter has not yet advanced its optional
+		// resident page even if an binding has not yet advanced its optional
 		// transform revision.
 		hash = hash_value(hash, candidate.world_bounds.min_x);
 		hash = hash_value(hash, candidate.world_bounds.min_y);

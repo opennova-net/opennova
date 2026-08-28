@@ -19,6 +19,13 @@ golden pcaps. **Server-first.**
 > implementation directories; `engine/net/inmatch/session.*` is the sole public
 > lifecycle/cadence owner and `npwire` is the retail compatibility boundary.
 > This document retains the original phase names only as a build record.
+>
+> **Env-gate note (2026-08-28):** the `NW_GOLDEN_*` / `NW_PROFILE_SPH_DIR` environment
+> variables the phase text below names were replaced by fixed names under the
+> `OPENNOVA_CAPTURES` root (`golden/retail-gameplay-session.pcapng`,
+> `golden/retail-lan-host-join.pcapng`, `sph/`; `tests/CMakeLists.txt` gates them through
+> `opennova_add_gated_test`, see `docs/dev-env-vars.md` and `docs/asset-gated-tests.md`).
+> The phase paragraphs keep the names they shipped with.
 
 The witness record is `docs/net/novaworld-net-re.md`; governing decisions are ADRs 0009–0013 and
 0019. The original approved design lived in a session plan that was never tracked in this repo;

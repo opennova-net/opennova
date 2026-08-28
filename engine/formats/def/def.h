@@ -963,46 +963,6 @@ typedef struct DefHudPosFile {
 } DefHudPosFile;
 
 /* ========================================================================= */
-/* Legacy Single-Entry API                                                   */
-/* ========================================================================= */
-
-typedef struct DefAction {
-    char name[64];
-    char anim[128];
-} DefAction;
-
-typedef struct DefLegacyWeaponDef {
-    char weapon_name[64];
-    char animadm[128];
-    char launch_user_point[64];
-    char gfx1[128];
-    char gfx1a[128];
-    char gfx1b[128];
-    char gfx3[128];
-    DefAction *actions;
-    size_t actions_count;
-} DefLegacyWeaponDef;
-
-typedef struct DefGenericDef {
-    char display_name[128];
-    char type[64];
-    char graphic[128];
-    char husk[128];
-    char anim_def[128];
-} DefGenericDef;
-
-enum {
-    DEF_KIND_WEAPON = 0,
-    DEF_KIND_GENERIC = 1
-};
-
-typedef struct DefFile {
-    int kind;
-    DefLegacyWeaponDef weapon;
-    DefGenericDef generic;
-} DefFile;
-
-/* ========================================================================= */
 /* API                                                                       */
 /* ========================================================================= */
 
@@ -1029,9 +989,6 @@ int def_parse_hudpos(const char *path, DefHudPosFile *out);
    call; free with def_free_hudpos as usual. Returns 0 on success, -1 on bad input. */
 int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out);
 void def_free_hudpos(DefHudPosFile *f);
-
-int def_parse_def(const char *path, DefFile *out);
-void def_free_def(DefFile *f);
 
 /* PLAYER_INFO loadout weight + encumbrance [orig: calculate_loadout_weight
    @ 0x55f1f0; update_player_info_weight_and_weapon_icons @ 0x55f480]. */

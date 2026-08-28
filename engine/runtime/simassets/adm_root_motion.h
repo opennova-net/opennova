@@ -13,7 +13,7 @@ class ResourceIndex;
 
 namespace opennova::simassets {
 
-// The engine's IRootMotionSource (ADR 0028; moved from the shell adapter's
+// The engine's IRootMotionSource (ADR 0028; moved from the shell binding's
 // InfantryRootMotion): a registry of per-model .adm clip sets, each reduced to
 // per-state root-motion tracks. Each in-mission soldier grounds + locomotes off
 // its OWN model's clip (its adm_id), not one shared set, matching the original

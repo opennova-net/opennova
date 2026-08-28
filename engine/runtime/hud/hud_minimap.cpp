@@ -12,7 +12,7 @@ namespace opennova::hud {
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
+constexpr double kPi = io::kPi;
 // BAM16 to radians [orig: flt_7C7988 = 9.58738019e-05 = 2*pi/65536]
 constexpr double kBam16ToRadians = (2.0 * kPi) / 65536.0;
 constexpr int kCircleSegments = 32; // [orig: ring step 0x8000000 BAM @0x5a5f40 vertex loop]

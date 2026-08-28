@@ -146,7 +146,7 @@ bool terrain_raycast_refined(const TerrainRaycastSampler &sampler,
 // @ 0x60ca71-0x60ca77]); kOutOfExtent marches on untested (the editor guard,
 // as above). Retail's point sample reads its render tile cache's
 // 0.5-unit-quantized height byte (`sample << 15` [orig: @ 0x60c9c7]); world
-// adapters feeding a raw16 height field must quantize that point callback.
+// bindings feeding a raw16 height field must quantize that point callback.
 // Returns true = CLEAR (retail 1), false = HIT (retail 0).
 bool terrain_raycast_los_clear(const TerrainRaycastSampler &sampler,
                                const int32_t start[3], const int32_t end[3]);

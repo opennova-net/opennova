@@ -11,7 +11,7 @@
 // pumps it (apps/nw_server wraps net::Socket via apps/common/net_datagram_socket.h; godot/src
 // wraps UdpPump). ALL protocol/crypto/framing stay in the libs (.agents/network.md). The loop
 // speaks PeerAddr; the recv timeout (0 = non-blocking busy loop; ~30 ms for a single-threaded
-// poll-pump test) is a property of the adapter, not this loop.
+// poll-pump test) is a property of the embedder, not this loop.
 
 #include <cstdint>
 #include <map>
@@ -66,7 +66,7 @@ struct HostOwner {
 	std::map<PeerAddr, std::vector<std::vector<uint8_t>>, PeerAddrLess>
 			pending_session_datagrams;
 	uint32_t now_tick = 0;
-	// false (dedicated/headless): HostOnly registers no local-player connection; an adapter-supplied
+	// false (dedicated/headless): HostOnly registers no local-player connection; an embedder-supplied
 	// unused channel may be defensively drained. true (serve-and-play): HostClient registers the
 	// loopback and the owner folds it into ClientState, so the pump must preserve it.
 	bool serve_and_play = false;
@@ -90,10 +90,10 @@ void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerA
 //   (3) Server_TickUpdate: the single C2S drain + one logic tick + per-connection 0x0A fan
 //   (4) S2C flush: on each peer's send boundary, ship retained 0x83/0x84 packets,
 //       then pop its transport's identity [tag][body] -> frame/batch as 0x83 -> send
-//   (5) drain an unused adapter loopback for HostOnly; preserve the HostClient local view
+//   (5) drain an unused embedder loopback for HostOnly; preserve the HostClient local view
 // `before_server_tick`, when supplied, runs after tick_connections has completed any
 // player spawns and before their first authoritative logic update / 0x0A fan. The opaque
-// context keeps this shared owner loop independent of adapter-specific registration state.
+// context keeps this shared owner loop independent of embedder-specific registration state.
 // Advances owner.now_tick by 1.
 using HostBeforeServerTickFn = void (*)(void *context);
 using HostEventObserverFn = void (*)(void *context, const HostAcceptEvent &event);

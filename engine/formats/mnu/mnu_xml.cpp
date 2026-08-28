@@ -381,12 +381,9 @@ bool parse_content(const char *&p, const char *end, Node *current,
         p = skip_space(p, end);
         if (p < end && *p == '>') ++p;
 
-        // Verify tag matches (case-insensitive).
-        if (!iequals(close_tag, current->tag)) {
-          // Game is forgiving - just warn but continue.
-          // error = "Mismatched close tag: expected </" + current->tag + "> got </" + close_tag + ">";
-          // return false;
-        }
+        // A mismatched close tag is NOT an error: the game's parser is forgiving
+        // and closes the current element regardless of the tag name, so the
+        // close_tag/current->tag comparison is deliberately not made here.
         return true;  // Done with this element.
       }
 

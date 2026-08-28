@@ -1,7 +1,7 @@
 #pragma once
 
 // Portable leaf raster for one retail static-shadow tile page. The Godot
-// adapter resolves selected-LOD ROBJ geometry into normalized page vertices;
+// binding resolves selected-LOD ROBJ geometry into normalized page vertices;
 // this module owns the witnessed temporary-RT semantics: the near-plane clip
 // (depth < 0, i.e. geometry lower than 0.1 u above the caster's ground plane,
 // never casts — buried skirts and foundations are cut away), 2x coverage,
@@ -114,7 +114,7 @@ struct TerrainStaticShadowRasterTriangle {
 
 struct TerrainStaticShadowRasterInput {
 	// Input order remains retail collector/ROBJ/strip order. Every triangle is
-	// already admitted for culling/material visibility by the adapter.
+	// already admitted for culling/material visibility by the binding.
 	std::vector<TerrainStaticShadowRasterTriangle> triangles;
 	std::vector<TerrainStaticShadowAlphaTextureView> alpha_textures;
 	float receiver_depth = 0.5f;

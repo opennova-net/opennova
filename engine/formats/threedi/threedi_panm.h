@@ -64,10 +64,6 @@ static inline double threedi_panm_rotation_raw_from_deg(double degrees) {
     return degrees * ((double)THREEDI_PANM_ROTATION_COUNTS_PER_TURN / 360.0);
 }
 
-static inline double threedi_panm_value_raw_from_float(double value) {
-    return value * (double)THREEDI_PANM_VALUE_ONE;
-}
-
 typedef enum ThreediPanmTarget {
     THREEDI_PANM_ROT_X,
     THREEDI_PANM_ROT_Y,
@@ -171,7 +167,6 @@ int threedi_panm_parameter_is_ctrl_reference(uint8_t code);
 // Number of canonical styles, and the code at a catalog index (-1 when out of
 // range). Names for a code come from threedi_control_func_info.
 int threedi_generator_style_count(void);
-int threedi_generator_style_code_at(int index);
 
 // The retail consumers of the generator-style byte. Their 0x71..0x75 dispatch
 // differs: UV reads the CTRL value for the whole range, RGB/light for
@@ -186,13 +181,6 @@ typedef enum ThreediGeneratorConsumer {
     THREEDI_GENERATOR_CONSUMER_LIGHT = 3,
     THREEDI_GENERATOR_CONSUMER_PANM = 4
 } ThreediGeneratorConsumer;
-
-// 1 when the consumer's dispatch READS the referenced control-register VALUE
-// for this style byte; 0 otherwise (including unknown consumers). Deliberately
-// separate from threedi_panm_parameter_is_ctrl_reference: the loader rewrites
-// the parameter for EVERY style > 0x70 even when a consumer then uses the
-// resolved ordinal only as phase.
-int threedi_generator_reads_control_value(int consumer, uint8_t code);
 
 // Resolve a control register name by index. Returns NULL if out of range or missing.
 const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx);

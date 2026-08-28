@@ -269,7 +269,7 @@ struct LightSelectionOptions {
 	// Target-disable flags are eligibility gates and are applied before the
 	// three-light cap. The default is the object/material pass.
 	LightSelectionTarget target = LightSelectionTarget::Objects;
-	// Retail supplies per-draw owner/interior groups. A camera-global adapter
+	// Retail supplies per-draw owner/interior groups. A camera-global binding
 	// has no such draw context and must opt into this explicitly named
 	// approximation rather than silently treating empty groups as a wildcard.
 	bool admit_owned_unscoped = false;

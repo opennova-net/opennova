@@ -47,11 +47,6 @@ uint32_t water_noise_prng_step(uint32_t state);
 // boot state 0 for a deterministic, witnessed-faithful instance.
 WaterNoiseTables water_init_noise_tables();
 
-// The per-frame wave phase [orig: Water_WavePhase = counter * 0x3000000
-// @ 0x5c0374; render_water_strip consumes phase + 0x200000, += 0x55555555
-// per row, sin table index = value >> 22].
-inline constexpr uint32_t kWaterWavePhasePerFrame = 0x3000000u;
-
 // Passes 1+2 of Water_GenerateNoiseTextures: animate the field through the
 // LUT (per byte: lut[(uint8)(field + (counter << (field & 1)))] — two speed
 // classes), then the toroidal 9-tap kernel (3x corners + 4x cross, >> 5),

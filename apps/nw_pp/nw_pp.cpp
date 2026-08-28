@@ -73,22 +73,7 @@ struct Datagram {
 	std::vector<uint8_t> bytes;
 };
 
-bool hex_to_bytes(const std::string &hex, std::vector<uint8_t> &out) {
-	if (hex.size() % 2 != 0) return false;
-	out.clear();
-	auto nib = [](char c) -> int {
-		if (c >= '0' && c <= '9') return c - '0';
-		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-		return -1;
-	};
-	for (size_t i = 0; i < hex.size(); i += 2) {
-		const int hi = nib(hex[i]), lo = nib(hex[i + 1]);
-		if (hi < 0 || lo < 0) return false;
-		out.push_back(static_cast<uint8_t>((hi << 4) | lo));
-	}
-	return true;
-}
+using opennova::strutil::hex_to_bytes;
 
 using opennova::strutil::ends_with_icase;
 

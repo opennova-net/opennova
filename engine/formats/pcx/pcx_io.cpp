@@ -306,20 +306,4 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 	return true;
 }
 
-bool load_pcx_rgb_file(const std::string &path, RgbImage &out, std::string &error) {
-	std::vector<uint8_t> bytes;
-	if (!load_file_bytes(path, bytes, error)) {
-		return false;
-	}
-	return decode_pcx_rgb(bytes.data(), bytes.size(), out, error);
-}
-
-bool load_pcx_indexed_file(const std::string &path, IndexedImage8 &out, std::string &error) {
-	std::vector<uint8_t> bytes;
-	if (!load_file_bytes(path, bytes, error)) {
-		return false;
-	}
-	return decode_pcx_indexed(bytes.data(), bytes.size(), out, error);
-}
-
 } // namespace opennova

@@ -249,10 +249,10 @@ struct HudLabelFontChoice {
 	// dialog draw with, loaded at the SAME over-800 scale as the large slot
 	// [orig: HUD_InitAllFonts — g_hudLabelFontImpact38 @0xB4C3AC = Impac38b.fnt
 	//  @0x51ef7b..0x51ef94, the scale register shared with Impac22b].
-	const char *impact38_fnt;
-	float scale;
-	float large_scale;
-	int tier; // 0 <= 640 / 1 <= 800 / 2 > 800 — stable id for reload checks
+	const char *impact38_fnt = nullptr;
+	float scale = 1.0f;
+	float large_scale = 1.0f;
+	int tier = 0; // 0 <= 640 / 1 <= 800 / 2 > 800 — stable id for reload checks
 };
 HudLabelFontChoice hud_label_font_choice(int surface_w);
 

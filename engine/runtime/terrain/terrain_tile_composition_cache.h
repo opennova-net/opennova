@@ -85,7 +85,7 @@ struct TerrainTileCompositionDecision {
 
 // Portable scheduling policy for high-quality CPU page work. A demand frame is
 // the render compiler frame that made the page visible; sequence is the FIFO
-// order within that frame. Payload storage stays in the device adapter.
+// order within that frame. Payload storage stays in the device binding.
 struct TerrainTileCompositionDemand {
 	uint16_t layer = 0;
 	uint64_t generation = 0;
@@ -164,9 +164,9 @@ public:
 			const TerrainTileCompositionRequest &request);
 	// Publishes only the still-current target generation. Eviction,
 	// invalidation, or a newer request makes an older job fail closed.
-	// Device adapters call can_publish() immediately before mutating a leased
+	// Device bindings call can_publish() immediately before mutating a leased
 	// texture layer; cache ownership stays on the render thread, so a true
-	// result remains current until that adapter calls publish().
+	// result remains current until that binding calls publish().
 	bool can_publish(const TerrainTileCompositionJob &job) const noexcept;
 	bool publish(const TerrainTileCompositionJob &job) noexcept;
 	bool invalidate(const TerrainTilePageKey &page) noexcept;

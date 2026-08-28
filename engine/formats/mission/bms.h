@@ -19,12 +19,6 @@ namespace opennova::bms {
 constexpr uint32_t kMagic = 0x534D42;  // 'B','M','S' (first 3 header bytes; magic[3] is the format version)
 // [orig: version gate `byte_A761D3 < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader (Jointops.exe)]
 constexpr uint8_t kMinVersion = 19;    // 0x13; shipped JO missions are version 19 (magic reads "BMS\x13")
-// [orig: per-pool "Too many ..." clamps @0x40f5b5+ Mission_LoadBMSFile / @0x40e326+ BMS_LoadAndValidateHeader.
-//  Over-limit shows a warning dialog then continues loading; it does NOT reject the file.]
-constexpr uint32_t kMaxItems = 0x4B0;      // 1200
-constexpr uint32_t kMaxBuildings = 0x4B0;  // 1200 (engine calls these "decorations")
-constexpr uint32_t kMaxMarkers = 0x300;    // 768
-constexpr uint32_t kMaxOrganics = 0x100;   // 256
 constexpr size_t kHeaderSize = 616;
 constexpr size_t kEntitySize = 0xAC;  // 172 bytes
 constexpr size_t kWaypointRecordSize = 136;
@@ -602,9 +596,6 @@ struct Entity {
     void set_y(float v) { y = to_fixed_16_16(v); }
     void set_z(float v) { z = to_fixed_16_16(v); }
 
-    BmsiAttributeFlags get_ai_flags() const {
-        return static_cast<BmsiAttributeFlags>(bmsi_attributes);
-    }
 };
 
 static_assert(std::is_trivial<Entity>::value,
@@ -816,9 +807,6 @@ struct File {
     int32_t trigger_count;
     int32_t action_count;
     int32_t bounding_box_count;
-
-    // Helper to get all entities
-    std::vector<const Entity*> all_entities() const;
 
     // Get mission name as string
     std::string get_mission_name() const;

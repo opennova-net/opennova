@@ -199,41 +199,6 @@ std::string format_particle_flags(std::uint32_t bits) {
 	return format_flag_table(bits, kParticleFlagEntries);
 }
 
-const std::vector<std::pair<std::string, std::uint32_t>> &particle_flag_entries() {
-	static const std::vector<std::pair<std::string, std::uint32_t>> entries = [] {
-		std::vector<std::pair<std::string, std::uint32_t>> v;
-		v.reserve(kParticleFlagEntries.size());
-		for (const auto &e : kParticleFlagEntries) {
-			v.emplace_back(e.first, e.second);
-		}
-		return v;
-	}();
-	return entries;
-}
-
-const std::vector<std::pair<std::string, std::uint32_t>> &move_flag_entries() {
-	static const std::vector<std::pair<std::string, std::uint32_t>> entries = [] {
-		std::vector<std::pair<std::string, std::uint32_t>> v;
-		v.reserve(kMoveEntries.size());
-		for (const auto &e : kMoveEntries) {
-			v.emplace_back(e.first, e.second);
-		}
-		return v;
-	}();
-	return entries;
-}
-
-const std::vector<std::string> &blend_mode_names() {
-	static const std::vector<std::string> names = [] {
-		std::vector<std::string> v;
-		for (int i = 0; i <= 7; ++i) {
-			v.emplace_back(blend_mode_name(static_cast<BlendMode>(i)));
-		}
-		return v;
-	}();
-	return names;
-}
-
 void bake_curve_lut(const TableDef &table, bool reverse, bool inverse,
 		std::array<std::uint8_t, 256> &out) noexcept {
 	// Engine: CEffectDef_ResolveTblDefReference @ 0x5e9630. The 32 × 8 byte

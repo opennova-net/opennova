@@ -47,17 +47,6 @@
 #define THREEDI_TEX_FLAG_ANIMATED  0x01u  // Part of animation sequence
 #define THREEDI_TEX_FLAG_CLAMPED   0x02u  // Use clamp addressing (vs wrap)
 
-// The slot -> texture-type authoring policy: a fresh texture entry in a
-// normal-map slot (NORMAL / NORMAL_B) is stamped THREEDI_TEX_TYPE_NORMAL_MDT,
-// every other slot THREEDI_TEX_TYPE_DIFFUSE — matching what the original
-// authoring pipeline writes for MDT-sourced normal maps. One home so the
-// document bindings never restate the mapping.
-static inline uint8_t threedi_tex_default_type_for_slot(uint8_t slot) {
-    return (slot == THREEDI_TEX_SLOT_NORMAL || slot == THREEDI_TEX_SLOT_NORMAL_B)
-                   ? THREEDI_TEX_TYPE_NORMAL_MDT
-                   : THREEDI_TEX_TYPE_DIFFUSE;
-}
-
 /* 3DI3 chunk-header dword: high bit = parent (has children), low 24 bits =
  * payload length. One home; the reader and writer TUs both use these. */
 #define THREEDI_3DI3_PARENT_FLAG 0x80000000u

@@ -14,7 +14,7 @@ namespace opennova::particle {
 
 // The portable effect-world seam. EffectScene owns catalog resolution,
 // admission/ownership, emitter lifetime, deterministic catch-up, and the
-// value snapshots consumed by renderer adapters. It deliberately has no
+// value snapshots consumed by renderer bindings. It deliberately has no
 // knowledge of Godot nodes, materials, textures, or weapon action names.
 
 struct EffectHandle {

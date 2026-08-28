@@ -101,10 +101,6 @@ inline int til_cell_z_from_world(double world_z) {
 	return til_cell_from_world(world_z);
 }
 
-inline float til_world_from_cell(int cell) {
-	return static_cast<float>(cell * TIL_CELL_WORLD_UNITS);
-}
-
 inline TilAtlasLayout til_make_atlas_layout(int atlas_width, int atlas_height) {
 	TilAtlasLayout layout;
 	if (atlas_width < TIL_ATLAS_TILE_PIXELS || atlas_height < TIL_ATLAS_TILE_PIXELS) {
