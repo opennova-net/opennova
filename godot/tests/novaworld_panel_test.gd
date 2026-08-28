@@ -41,9 +41,8 @@ func _real_root(missions: PackedStringArray) -> ResourceRoot:
 func _make_panel(missions: PackedStringArray) -> NovaWorldPanel:
 	var panel = NovaWorldPanel.new()
 	autofree(panel)  # freed at teardown WITHOUT entering the tree, so _ready/_create_client never run
-	panel._target = NovaWorldSettings.Target.OPENNOVA
 	panel.resource_root = _real_root(missions)
-	panel._build_ui()  # builds the UI + populates the Map picker off-tree
+	panel.build_ui_for_target(NovaWorldSettings.Target.OPENNOVA)  # builds the UI + populates the Map picker off-tree
 	return panel
 
 
@@ -52,16 +51,16 @@ func test_map_picker_populates_from_root() -> void:
 	# list_files still returns path-bearing entries, so MissionCatalog's
 	# basename reduction is what the picker text asserts below.
 	var panel := _make_panel(PackedStringArray(["alpha.bms", "bravo.bms"]))
-	assert_eq(panel._mission_option.item_count, 2, "Map picker lists the root's .bms missions")
-	assert_eq(panel._mission_option.get_item_text(0), "alpha.bms", "items are basenames")
-	assert_eq(panel._selected_mission(), "alpha.bms", "first mission selected by default")
+	assert_eq(panel.mission_count(), 2, "Map picker lists the root's .bms missions")
+	assert_eq(panel.mission_name_at(0), "alpha.bms", "items are basenames")
+	assert_eq(panel.selected_mission(), "alpha.bms", "first mission selected by default")
 
 
 func test_host_pressed_emits_selected_mission() -> void:
 	var panel := _make_panel(PackedStringArray(["alpha.bms", "bravo.bms"]))
-	panel._mission_option.select(1)
+	panel.select_mission(1)
 	watch_signals(panel)
-	panel._on_host_pressed()
+	panel.press_host()
 	assert_signal_emitted(panel, "host_requested")
 	var config: HostSessionConfig = get_signal_parameters(panel, "host_requested")[0]
 	assert_eq(config.mission, "bravo.bms", "the picked map rides the host request")
@@ -75,9 +74,9 @@ func test_host_pressed_emits_selected_mission() -> void:
 func test_host_pressed_reports_when_no_missions() -> void:
 	var panel := _make_panel(PackedStringArray())
 	watch_signals(panel)
-	panel._on_host_pressed()
+	panel.press_host()
 	assert_signal_not_emitted(panel, "host_requested", "no missions -> no host request emitted")
-	assert_string_contains(panel._status_label.text, "No missions", "the empty case is reported, not hung")
+	assert_string_contains(panel.status_text(), "No missions", "the empty case is reported, not hung")
 
 
 func test_server_row_label_shows_address() -> void:
@@ -103,7 +102,7 @@ func test_server_row_tooltip_lists_details() -> void:
 
 func test_host_failed_reports_and_reenables() -> void:
 	var panel := _make_panel(PackedStringArray(["alpha.bms"]))
-	panel._host_button.disabled = true
+	assert_false(panel.host_enabled(), "Host starts disabled until the gate connects")
 	panel.host_failed("No mission available to host.")
-	assert_eq(panel._status_label.text, "No mission available to host.", "the failure reason is shown")
-	assert_false(panel._host_button.disabled, "Host is re-enabled on the OpenNova target")
+	assert_eq(panel.status_text(), "No mission available to host.", "the failure reason is shown")
+	assert_true(panel.host_enabled(), "Host is re-enabled on the OpenNova target")

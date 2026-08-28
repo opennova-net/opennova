@@ -54,7 +54,7 @@ func _init(resource_root: ResourceRoot) -> void:
 
 ## Index a loaded LwfData bank. Sets already indexed under a name win (banks
 ## added first take precedence), matching "load mission bank, then global".
-func add_bank(lwf) -> void:
+func add_bank(lwf: LwfData) -> void:
 	if lwf == null or not lwf.is_loaded():
 		return
 	var bank_i := _banks.size()
@@ -328,7 +328,7 @@ func _make_player(stream: AudioStreamWAV, member: Dictionary, bus: StringName, l
 	# channel volume from the two layer radii; Godot must not attenuate on top
 	# of it — its inverse-distance curve AMPLIFIES inside unit_size, which is
 	# how a marker bed drowned the mission dialog). Positional panning stays
-	# (host approximation of the bearing-byte pan [orig: @ 0x5289c2]).
+	# (the shell's approximation of the bearing-byte pan [orig: @ 0x5289c2]).
 	player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
 	# Only route to a bus that actually exists; otherwise keep the default (Master)
 	# so a missing/renamed bus can never silence the voice.

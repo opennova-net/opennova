@@ -82,7 +82,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		return ProbeVerdict.failed("the shell refused to start %s: %s" % [mission, error_string(start)])
 
 	while not _qualified and Time.get_ticks_msec() < deadline_ms and not ctx.cancelled:
-		if not is_instance_valid(shell) or not bool(shell.call("is_world_loading")):
+		if not is_instance_valid(shell) or not shell.is_world_loading():
 			break
 		await ctx.tree.process_frame
 
@@ -109,7 +109,7 @@ func _on_frame_post_draw() -> void:
 	if _qualified or _ctx == null:
 		return
 	var shell := _ctx.game()
-	if shell == null or not bool(shell.call("is_world_loading")):
+	if shell == null or not shell.is_world_loading():
 		return
 	var viewport := _ctx.viewport()
 	var image: Image = viewport.get_texture().get_image() if viewport != null else null

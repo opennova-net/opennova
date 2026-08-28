@@ -75,6 +75,9 @@ hardening, and project health. Divergences from the original engine belong in
       fire/destruction/throwable/wire present stats, occlusion counts (`occl`),
       the sim row's entity count + role. Each returns as a VALUE slot fed by the
       shell sampler that owns the source.
+- [ ] Expansion description in the menu shell: `menu_shell.gd` shows the raw expansion
+      folder name; read the description from the expansion `.pff` (the retail launcher
+      reads it from the archive) instead of the folder name.
 - [ ] Managed-game shutdown: ONED close/Stop may still require forced termination.
       Add a bounded graceful-quit window before the current forced termination,
       and keep the process-handle lifecycle reliable so a stopped retail child

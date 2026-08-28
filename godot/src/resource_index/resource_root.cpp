@@ -71,7 +71,7 @@ PackedStringArray ResourceRoot::list_missing_boot_resources() const {
 			continue;
 		}
 		// The archive-table trio's all-missing gate belongs to mount_runtime
-		// itself [orig: fatal check @ 0x4a6f44]; pattern rows carry no
+		// itself (retail: fatal check @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md); pattern rows carry no
 		// probeable literal name.
 		if ((row->flags & (RES_F_PFF_TABLE_ANY | RES_F_PATTERN)) != 0) {
 			continue;
@@ -188,7 +188,7 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 		return err;
 	}
 	// Retail aborts subsystem initialization when the fixed boot table opens no archives.
-	// [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44]
+	// (retail: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md)
 	if (!index_.has_mounted_archive()) {
 		clear();
 		last_error_ = "No game data archives could be opened";

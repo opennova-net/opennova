@@ -51,7 +51,6 @@ void ItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_graphic", "id"), &ItemDatabase::get_graphic);
 	ClassDB::bind_method(D_METHOD("get_husk", "id"), &ItemDatabase::get_husk);
 	ClassDB::bind_method(D_METHOD("get_huskfinal", "id"), &ItemDatabase::get_huskfinal);
-	ClassDB::bind_method(D_METHOD("get_death_traits", "id"), &ItemDatabase::get_death_traits);
 	ClassDB::bind_method(D_METHOD("get_anim_def", "id"), &ItemDatabase::get_anim_def);
 	ClassDB::bind_method(D_METHOD("get_ai_function", "id"), &ItemDatabase::get_ai_function);
 	ClassDB::bind_method(D_METHOD("get_move_function", "id"), &ItemDatabase::get_move_function);
@@ -563,31 +562,6 @@ String ItemDatabase::get_huskfinal(int id) const {
 	return it == items.end() ? String() : it->second.huskfinal;
 }
 
-// The destruction traits bundle (world-wac-ai-re §24), consumed by the sim's
-// item-traits sweep into world::ItemDeathTraits.
-Dictionary ItemDatabase::get_death_traits(int id) const {
-	Dictionary out;
-	const auto it = items.find(id);
-	if (it == items.end()) {
-		return out;
-	}
-	const Item &item = it->second;
-	out["unit_type"] = item.unit_type;
-	out["kz"] = item.kz;
-	out["armor_impact"] = item.armor_impact;
-	out["armor_blast"] = item.armor_blast;
-	out["sounddeath"] = item.sounddeath;
-	out["debris_scale"] = item.debris_scale;
-	out["husk_sub_parts"] = item.husk_sub_parts;
-	PackedInt32Array types;
-	types.resize(16);
-	for (int s = 0; s < 16; ++s) {
-		types.set(s, item.husk_sub_part_types[s]);
-	}
-	out["husk_sub_part_types"] = types;
-	out["has_husk"] = !item.husk.is_empty() || !item.huskfinal.is_empty();
-	return out;
-}
 
 // items.def soundloop_1..7 looping ambient set names for "snd:" marker items
 // [orig: ItemDef_ParseProperty @ 0x49eb00, "soundloop_" prefix @ 0x49fec4; the

@@ -46,7 +46,6 @@ public:
 	int get_glyph_count() const;
 	int get_first_char() const;
 	int get_glyph_spacing() const;
-	void set_glyph_spacing(int p_glyph_spacing);
 
 	Ref<Image> get_page_image(int p_page) const;
 

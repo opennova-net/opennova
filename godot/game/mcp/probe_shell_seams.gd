@@ -46,7 +46,7 @@ var return_to_menu := Callable()
 ## get_frame_stats, get_viewport, current_resource_root,
 ## get_game_debug_adapter, start_mission, start_saved_mission,
 ## return_to_menu); the runtime rides the world's get_runtime().
-static func for_shell(shell: Node, world: Callable, presenter: Callable,
+static func for_shell(shell: MainGame, world: Callable, presenter: Callable,
 		hud_presenter: Callable, menu_shell: Callable,
 		armory_presenter := Callable(), deploy_presenter := Callable()) -> ProbeShellSeams:
 	var seams := ProbeShellSeams.new()
@@ -60,12 +60,12 @@ static func for_shell(shell: Node, world: Callable, presenter: Callable,
 	seams.menu_shell_source = menu_shell
 	seams.armory_presenter_source = armory_presenter
 	seams.deploy_presenter_source = deploy_presenter
-	seams.dev_tools_source = Callable(shell, "get_dev_tools")
-	seams.frame_stats_source = Callable(shell, "get_frame_stats")
-	seams.viewport_source = Callable(shell, "get_viewport")
-	seams.resource_root_source = Callable(shell, "current_resource_root")
-	seams.adapter_source = Callable(shell, "get_game_debug_adapter")
-	seams.start_mission = Callable(shell, "start_mission")
-	seams.start_saved_mission = Callable(shell, "start_saved_mission")
-	seams.return_to_menu = Callable(shell, "return_to_menu")
+	seams.dev_tools_source = shell.get_dev_tools
+	seams.frame_stats_source = shell.get_frame_stats
+	seams.viewport_source = shell.get_viewport
+	seams.resource_root_source = shell.current_resource_root
+	seams.adapter_source = shell.get_game_debug_adapter
+	seams.start_mission = shell.start_mission
+	seams.start_saved_mission = shell.start_saved_mission
+	seams.return_to_menu = shell.return_to_menu
 	return seams

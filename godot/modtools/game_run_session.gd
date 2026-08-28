@@ -18,7 +18,9 @@ const STOP_WAIT_MSEC := 5000
 const EXIT_POLL_MSEC := 50
 
 enum Mode { OPENNOVA, RETAIL }
-enum State { STOPPED, RUNNING }
+# STOPPING: the kill was sent; poll() finishes the stop (or reports the
+# deadline) without blocking the surface.
+enum State { STOPPED, RUNNING, STOPPING }
 
 
 class Request:
@@ -66,11 +68,16 @@ var _state: int = State.STOPPED
 var _pid := -1
 var _active_request: Request
 var _last_error := ""
+# The asynchronous stop: the deadline the exiting process must meet, and the
+# request (with its retail dir) queued to spawn once the previous run is gone.
+var _stop_deadline_msec := 0
+var _pending_request: Request = null
+var _pending_retail_dir := ""
 
 
 func get_state() -> Dictionary:
 	return {
-		"state": "running" if _state == State.RUNNING else "stopped",
+		"state": _state_name(_state),
 		"running": _state == State.RUNNING,
 		"pid": _pid,
 		"mode": _mode_name(_active_request.mode) if _active_request != null else "",
@@ -80,6 +87,11 @@ func get_state() -> Dictionary:
 
 func is_running() -> bool:
 	return _state == State.RUNNING
+
+
+## A stop was requested and the process has not exited yet (poll() drives it).
+func is_stopping() -> bool:
+	return _state == State.STOPPING
 
 
 func get_last_error() -> String:
@@ -123,34 +135,60 @@ func run_retail(resource_dir: String, retail_dir: String) -> bool:
 	return _replace_with(Request.retail(_absolute_root(resource_dir)), retail_dir.strip_edges())
 
 
+## Ask the managed process to stop. Returns true when the stop is under way
+## (poll() reports the exit, or the STOP_WAIT_MSEC deadline) and false when
+## nothing was running or the kill failed. Never blocks the surface.
 func stop() -> bool:
 	if _state == State.STOPPED:
 		return false
+	if _state == State.STOPPING:
+		return true
 	if not _process_is_alive(_pid):
 		_finish_stopped(false)
 		return true
 	if not _kill_process(_pid):
 		return _fail("Could not stop the running process.")
-	if not _wait_for_exit(_pid, STOP_WAIT_MSEC):
-		return _fail("The running process did not exit after it was stopped.")
-	_finish_stopped(false)
-	_status("Stopped the managed process.")
+	_state = State.STOPPING
+	_stop_deadline_msec = _now_msec() + STOP_WAIT_MSEC
+	state_changed.emit(get_state())
+	_status("Stopping the managed process...")
 	return true
 
 
 func poll() -> void:
-	if _state == State.RUNNING and not _process_is_alive(_pid):
-		_finish_stopped(true)
+	match _state:
+		State.RUNNING:
+			if not _process_is_alive(_pid):
+				_finish_stopped(true)
+		State.STOPPING:
+			if not _process_is_alive(_pid):
+				_finish_stopped(false)
+				_status("Stopped the managed process.")
+				_spawn_pending()
+			elif _now_msec() >= _stop_deadline_msec:
+				_pending_request = null
+				_pending_retail_dir = ""
+				_state = State.RUNNING
+				_fail("The running process did not exit after it was stopped.")
 
 
+## The synchronous last resort for the app's exit: stop and wait for the
+## process here, because nothing polls once the tree is gone.
 func shutdown() -> bool:
 	if _state == State.STOPPED:
 		return true
-	if stop():
-		return true
-	_last_error = "Could not stop the running process during ONED shutdown."
-	_status(_last_error, &"error")
-	return false
+	if _state == State.RUNNING and _process_is_alive(_pid) and not _kill_process(_pid):
+		_last_error = "Could not stop the running process during ONED shutdown."
+		_status(_last_error, &"error")
+		return false
+	if _process_is_alive(_pid) and not _wait_for_exit(_pid, STOP_WAIT_MSEC):
+		_last_error = "Could not stop the running process during ONED shutdown."
+		_status(_last_error, &"error")
+		return false
+	_pending_request = null
+	_pending_retail_dir = ""
+	_finish_stopped(false)
+	return true
 
 
 static func runtime_flags(request: Request) -> PackedStringArray:
@@ -198,9 +236,25 @@ static func launch_plan(
 
 
 func _replace_with(request: Request, retail_dir: String = "") -> bool:
-	if _state == State.RUNNING and not stop():
-		return false
+	if _state != State.STOPPED:
+		if not stop():
+			return false
+		if _state == State.STOPPING:
+			# The previous run is still exiting: spawn from poll() once it is gone.
+			_pending_request = request
+			_pending_retail_dir = retail_dir
+			return true
 	return _spawn_request(request, retail_dir)
+
+
+func _spawn_pending() -> void:
+	if _pending_request == null:
+		return
+	var request := _pending_request
+	var retail_dir := _pending_retail_dir
+	_pending_request = null
+	_pending_retail_dir = ""
+	_spawn_request(request, retail_dir)
 
 
 func _spawn_request(request: Request, retail_dir: String) -> bool:
@@ -280,6 +334,16 @@ static func _mode_name(mode: int) -> String:
 	return "retail" if mode == Mode.RETAIL else "opennova"
 
 
+static func _state_name(state: int) -> String:
+	match state:
+		State.RUNNING:
+			return "running"
+		State.STOPPING:
+			return "stopping"
+		_:
+			return "stopped"
+
+
 # Internal seams used by the deterministic session tests. Production has one
 # implementation: Godot/Process plus GamePacker.
 func _valid_resource_dir(path: String) -> bool:
@@ -292,6 +356,10 @@ func _file_exists(path: String) -> bool:
 
 func _supports_working_directory() -> bool:
 	return Process.supports_working_directory()
+
+
+func _now_msec() -> int:
+	return Time.get_ticks_msec()
 
 
 func _retail_install_error(retail_dir: String) -> String:

@@ -55,7 +55,6 @@ class HudHiddenPresenterHarness:
 		witness.hud_detail_level = 3
 		witness.gameplay_hud_visible = false
 		witness.player_view_effects_active = true
-		witness.fps_counter_visible = false
 		return witness
 
 
@@ -106,44 +105,26 @@ func _make() -> MainGame:
 
 func test_can_summon_in_menu_state() -> void:
 	var game := _make()
-	game._state = MainGameScript.State.MENU
-	game._picker = null
-	assert_true(game._can_summon_dir_picker(), "picker summonable from the menu front-end")
+	assert_true(game.can_summon_dir_picker(), "picker summonable from the menu front-end")
+	assert_true(MainGameScript.can_summon_dir_picker_in(MainGameScript.State.MENU, false))
 
 
 func test_cannot_summon_during_mission() -> void:
-	var game := _make()
-	game._picker = null
-	game._state = MainGameScript.State.WORLD
-	assert_false(game._can_summon_dir_picker(), "not summonable while a world is live")
-	game._state = MainGameScript.State.PAUSED
-	assert_false(game._can_summon_dir_picker(), "not summonable from the pause overlay")
+	assert_false(MainGameScript.can_summon_dir_picker_in(MainGameScript.State.WORLD, false),
+			"not summonable while a world is live")
+	assert_false(MainGameScript.can_summon_dir_picker_in(MainGameScript.State.PAUSED, false),
+			"not summonable from the pause overlay")
 
 
 func test_cannot_summon_while_picker_open() -> void:
-	var game := _make()
-	game._state = MainGameScript.State.MENU
-	var picker := FileDialog.new()
-	game._picker = picker
-	assert_false(game._can_summon_dir_picker(), "no second picker while one is already open")
-	picker.queue_free()
+	assert_false(MainGameScript.can_summon_dir_picker_in(MainGameScript.State.MENU, true),
+			"no second picker while one is already open")
 
 
 func test_loading_background_query_is_false_without_a_live_handoff() -> void:
 	var game := _make()
 	assert_false(game.has_loading_background(),
 			"the public loading-art query is safe while the shell is idle")
-
-
-func test_main_game_scene_mounts_the_gameplay_fps_counter() -> void:
-	var game := MainGameScene.instantiate()
-	autofree(game)
-	var fps_label := game.get_node_or_null("HUD/FpsLabel") as Label
-	assert_not_null(fps_label,
-			"ordinary gameplay mounts the player-visible FPS counter")
-	if fps_label != null:
-		assert_true(fps_label.visible,
-				"the FPS counter starts visible outside screenshot capture")
 
 
 func test_world_only_capture_hides_layers_without_overwriting_descendant_state() -> void:
@@ -217,9 +198,6 @@ func test_world_only_capture_rejects_an_unconfigured_shell() -> void:
 func test_hud_hidden_capture_delegates_through_main_game_and_keeps_canvas_active() -> void:
 	var game := _make()
 	var hud := CanvasLayer.new()
-	var fps_label := Label.new()
-	fps_label.name = "FpsLabel"
-	hud.add_child(fps_label)
 	var presenter := HudHiddenPresenterHarness.new()
 	game.add_child(hud)
 	game.add_child(presenter)
@@ -235,10 +213,8 @@ func test_hud_hidden_capture_delegates_through_main_game_and_keeps_canvas_active
 	assert_false(witness.ads_active)
 	assert_false(witness.big_map_active)
 	assert_true(witness.hud_canvas_layer_active)
-	assert_false(witness.fps_counter_visible)
 	game.finish_hud_hidden_capture()
 	assert_eq(presenter.finish_calls, 1)
-	assert_true(fps_label.visible)
 
 	var unconfigured := _make()
 	assert_eq(unconfigured.begin_hud_hidden_capture(), ERR_UNCONFIGURED)
@@ -248,9 +224,6 @@ func test_hud_hidden_capture_delegates_through_main_game_and_keeps_canvas_active
 func test_runtime_shutdown_restores_an_active_hud_hidden_capture() -> void:
 	var game := _make()
 	var hud := CanvasLayer.new()
-	var fps_label := Label.new()
-	fps_label.name = "FpsLabel"
-	hud.add_child(fps_label)
 	var presenter := HudHiddenPresenterHarness.new()
 	game.add_child(hud)
 	game.add_child(presenter)
@@ -258,10 +231,8 @@ func test_runtime_shutdown_restores_an_active_hud_hidden_capture() -> void:
 	game.set("_hud_presenter", presenter)
 
 	assert_eq(game.begin_hud_hidden_capture(), OK)
-	assert_false(fps_label.visible)
+	assert_true(presenter.capture_active)
 	game.begin_runtime_shutdown()
-	assert_true(fps_label.visible,
-			"runtime cancellation restores screenshot-only FPS suppression")
 	assert_false(presenter.capture_active,
 			"runtime cancellation also restores the gameplay HUD detail")
 
@@ -277,15 +248,12 @@ func test_shell_presentation_session_owns_hud_hidden_capture_boundary() -> void:
 	var session := ShellPresentationSessionScript.new()
 	var presenter := HudHiddenPresenterHarness.new()
 	var hud := CanvasLayer.new()
-	var fps_label := Label.new()
-	fps_label.name = "FpsLabel"
-	hud.add_child(fps_label)
 	autofree(presenter)
 	autofree(hud)
 
 	assert_eq(session.begin_hud_hidden_capture(presenter, hud), OK)
-	assert_false(fps_label.visible,
-			"the FPS counter is hidden only while screenshot presentation is active")
+	assert_true(presenter.capture_active,
+			"the gameplay HUD detail is hidden only while screenshot presentation is active")
 	assert_eq(session.begin_hud_hidden_capture(presenter, hud), ERR_BUSY,
 			"a nested screenshot cannot replace the visibility snapshot")
 	var witness: HudHiddenCaptureWitness = \
@@ -297,20 +265,12 @@ func test_shell_presentation_session_owns_hud_hidden_capture_boundary() -> void:
 	assert_true(witness.hud_canvas_layer_active)
 
 	session.finish_hud_hidden_capture(presenter)
-	assert_true(fps_label.visible,
-			"screenshot cleanup restores the exact ordinary FPS visibility")
+	assert_false(presenter.capture_active,
+			"screenshot cleanup restores the ordinary HUD detail")
+	assert_eq(presenter.finish_calls, 1)
 	session.finish_hud_hidden_capture(presenter)
-	assert_true(fps_label.visible, "screenshot cleanup is idempotent")
+	assert_eq(presenter.finish_calls, 1, "screenshot cleanup is idempotent")
 	assert_false(session.hud_hidden_capture_witness(presenter, hud).is_valid())
-
-	# An already-hidden FPS label remains hidden after the capture transaction;
-	# cleanup restores state rather than unconditionally showing telemetry.
-	fps_label.visible = false
-	assert_eq(session.begin_hud_hidden_capture(presenter, hud), OK)
-	assert_false(fps_label.visible)
-	session.finish_hud_hidden_capture(presenter)
-	assert_false(fps_label.visible,
-			"capture restores an initially hidden FPS counter exactly")
 
 
 func test_shell_presentation_session_stages_and_reveals_world_atomically() -> void:

@@ -951,7 +951,7 @@ func _write_pff(path: String, entries: Array) -> void:
 
 
 # A throwaway companion: claims the menu (or not) and records whether it was driven.
-class _FakeCompanion extends RefCounted:
+class _FakeCompanion extends MenuCompanion:
 	var owns: bool
 	var built := false
 	func _init(p_owns: bool) -> void:

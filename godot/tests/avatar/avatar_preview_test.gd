@@ -50,7 +50,7 @@ func test_load_combo_composes_parts_when_root_mounted() -> void:
 	if root != null and _head_graphic_resolves(root, combo):
 		assert_gt(_preview.get_part_model_count(), 0, "composes at least one part model when its .3di resolves")
 	else:
-		pending("Part .3di files not present in the mounted root; load_combo path exercised without error")
+		pending("OPENNOVA_JO_DIR: part .3di files not present in the mounted root; load_combo path exercised without error")
 		assert_eq(_preview.get_part_model_count(), 0, "no parts compose when the graphics are absent")
 
 
@@ -153,17 +153,17 @@ func _soldier_bounds() -> AABB:
 
 
 func test_runtime_portrait_locks_camera_and_passes_clicks_through() -> void:
-	var cam = _preview._camera
-	assert_true(cam.get("_gameplay_locked"), "camera locked (no orbit/pan/fly) in menu mode")
-	assert_eq(_preview._viewport_container.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+	var cam := _preview.portrait_camera()
+	assert_true(cam.is_gameplay_locked(), "camera locked (no orbit/pan/fly) in menu mode")
+	assert_eq(_preview.viewport_container().mouse_filter, Control.MOUSE_FILTER_IGNORE,
 		"the SubViewport container does not eat clicks, so the button keeps them")
-	assert_true(_preview._viewport.gui_disable_input, "SubViewport GUI input disabled")
+	assert_true(_preview.preview_viewport().gui_disable_input, "SubViewport GUI input disabled")
 
 
 func test_runtime_portrait_frames_a_front_facing_pose() -> void:
-	var cam = _preview._camera
+	var cam := _preview.portrait_camera()
 	var bounds := _soldier_bounds()
-	_preview._frame_menu_pose(bounds)
+	_preview.frame_menu_pose(bounds)
 	var center := bounds.get_center()
 	# The .3di parts import +Z-forward; yaw 0 sits the camera on +Z in front of the
 	# figure, so the character faces the viewer and the camera looks back toward -Z.
@@ -173,12 +173,11 @@ func test_runtime_portrait_frames_a_front_facing_pose() -> void:
 
 
 func test_runtime_portrait_pose_holds_across_selection_refresh() -> void:
-	var cam = _preview._camera
-	_preview._frame_menu_pose(_soldier_bounds())
-	_preview._menu_pose_set = true
+	var cam := _preview.portrait_camera()
+	_preview.frame_menu_pose(_soldier_bounds())
 	var before: Transform3D = cam.global_transform
 	# A combo change re-runs the portrait refresh; the camera must not jump.
-	_preview._refresh_portrait()
+	_preview.refresh_portrait()
 	assert_eq(cam.global_transform, before, "camera pose unchanged when the selection changes")
 
 
@@ -191,7 +190,7 @@ func test_runtime_portrait_renders_at_onscreen_resolution() -> void:
 	var win: Vector2 = _preview.get_viewport().get_visible_rect().size
 	var sx := win.x / 800.0
 	var sy := win.y / 600.0
-	var c = _preview._viewport_container
+	var c := _preview.viewport_container()
 	assert_almost_eq(c.size.x, 212.0 * sx, 1.0, "container width sized to on-screen px")
 	assert_almost_eq(c.size.y, 241.0 * sy, 1.0, "container height sized to on-screen px")
 	assert_almost_eq(c.scale.x, 1.0 / sx, 0.01, "container counter-scaled in x")
@@ -201,33 +200,33 @@ func test_runtime_portrait_renders_at_onscreen_resolution() -> void:
 
 func test_runtime_portrait_idle_spins_and_holds_the_camera() -> void:
 	# At rest the model rotates continuously (idle spin) while the camera holds its front pose.
-	_preview._frame_menu_pose(_soldier_bounds())
-	var cam = _preview._camera
-	var before_angle: float = _preview._model_root.rotation.y
-	var rest_dist: float = (cam.global_position - _preview._menu_center).length()
+	_preview.frame_menu_pose(_soldier_bounds())
+	var cam := _preview.portrait_camera()
+	var before_angle: float = _preview.model_yaw()
+	var rest_dist: float = (cam.global_position - _preview.menu_center()).length()
 	for i in range(5):
-		_preview._process(0.1)
-	assert_gt(_preview._model_root.rotation.y, before_angle, "the model idle-spins")
-	var dist_after: float = (cam.global_position - _preview._menu_center).length()
+		_preview.advance(0.1)
+	assert_gt(_preview.model_yaw(), before_angle, "the model idle-spins")
+	var dist_after: float = (cam.global_position - _preview.menu_center()).length()
 	assert_almost_eq(dist_after, rest_dist, 0.05, "the camera holds its distance at rest (no zoom)")
-	assert_gt(cam.global_position.z, _preview._menu_center.z, "camera stays in front (+Z)")
+	assert_gt(cam.global_position.z, _preview.menu_center().z, "camera stays in front (+Z)")
 
 
 func test_runtime_portrait_hover_zooms_in_and_out() -> void:
 	# Mouseover ramps the zoom blend toward 1 and pulls the camera closer; un-hover relaxes it.
-	_preview._frame_menu_pose(_soldier_bounds())
-	var cam = _preview._camera
-	var rest_dist: float = (cam.global_position - _preview._menu_center).length()
+	_preview.frame_menu_pose(_soldier_bounds())
+	var cam := _preview.portrait_camera()
+	var rest_dist: float = (cam.global_position - _preview.menu_center()).length()
 	_preview.set_hovered(true)
 	for i in range(30):
-		_preview._process(0.1)
-	assert_gt(_preview._zoom_blend, 0.5, "hover ramps the zoom blend toward 1")
-	var hover_dist: float = (cam.global_position - _preview._menu_center).length()
+		_preview.advance(0.1)
+	assert_gt(_preview.zoom_blend(), 0.5, "hover ramps the zoom blend toward 1")
+	var hover_dist: float = (cam.global_position - _preview.menu_center()).length()
 	assert_lt(hover_dist, rest_dist, "the camera zooms in (closer) on hover")
 	_preview.set_hovered(false)
 	for i in range(30):
-		_preview._process(0.1)
-	assert_lt(_preview._zoom_blend, 0.5, "un-hover relaxes the zoom blend toward 0")
+		_preview.advance(0.1)
+	assert_lt(_preview.zoom_blend(), 0.5, "un-hover relaxes the zoom blend toward 0")
 
 
 # --- Skeletal idle (D-PLAYERINFO-1) -------------------------------------------
@@ -243,7 +242,7 @@ func test_preview_skeletal_is_null_without_bad_assets() -> void:
 		pending("fixtures/avatars not mountable")
 		return
 	_preview.set_resource_root(root)
-	assert_null(_preview._ensure_preview_skeletal(),
+	assert_null(_preview.preview_skeletal(),
 		"no skeletal idle built when the .bad assets are absent")
 
 
@@ -255,12 +254,12 @@ func test_preview_skeletal_builds_when_bad_assets_resolve() -> void:
 		pending("could not stage Dt1rst.bad / PI_Idle.BAD from fixtures/anim")
 		return
 	_preview.set_resource_root(root)
-	var sk = _preview._ensure_preview_skeletal()
+	var sk := _preview.preview_skeletal()
 	assert_not_null(sk, "skeletal idle built when both .bad files resolve")
 	if sk != null:
 		assert_true(sk.is_loaded(), "the skeletal set is loaded")
 		assert_true(sk.has_clip("anim_idle"), "the idle clip is registered under anim_idle")
-	assert_eq(_preview._ensure_preview_skeletal(), sk, "the skeletal idle is cached (built once)")
+	assert_eq(_preview.preview_skeletal(), sk, "the skeletal idle is cached (built once)")
 
 
 func test_runtime_portrait_binds_idle_on_skinned_parts_with_real_assets() -> void:
@@ -280,14 +279,14 @@ func test_runtime_portrait_binds_idle_on_skinned_parts_with_real_assets() -> voi
 	await get_tree().process_frame
 	var body = _preview.get_part_model("body")
 	if body == null:
-		pending("body part .3di not resolved from the mounted root")
+		pending("OPENNOVA_JO_DIR: body part .3di not resolved from the mounted root")
 		return
 	var data = body.get_object_data()
 	if data != null and data.is_skinned(0):
 		assert_true(body.has_skeleton(), "the skinned body part builds a Skeleton3D under the idle")
 		assert_eq(body.get_active_body_clip(), "anim_idle", "the idle clip is playing on the part")
 	else:
-		pending("body part is not vertex-skinned on this asset set (rigid-attach is D-PLAYERINFO-1)")
+		pending("OPENNOVA_JO_DIR: body part is not vertex-skinned on this asset set (rigid-attach is D-PLAYERINFO-1)")
 
 
 # Copy the committed fixtures/anim/idle.bad into a temp dir under the names the preview binds

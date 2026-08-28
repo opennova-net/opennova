@@ -27,15 +27,6 @@ func _doc_from_xml(xml: String) -> MnuDocument:
 	return doc
 
 
-func _driver_over(doc: MnuDocument, menu_file: String, screen := "") -> MenuDriver:
-	# Frameless on purpose: the driver's state store carries the companion seam
-	# without a render surface (the documented headless-test contract).
-	var driver := MenuDriver.new()
-	assert_true(driver.open_document(doc, null, null, null, menu_file, screen),
-			"the document opens on the driver")
-	return driver
-
-
 func _wnd(type: String, name: String, top: int, inner := "") -> String:
 	return ('<WINDOW type="%s" name="%s"><POSITION><LEFT>10</LEFT><TOP>%d</TOP>'
 			+ '<RIGHT>250</RIGHT><BOTTOM>%d</BOTTOM></POSITION>%s</WINDOW>') % [
@@ -85,11 +76,11 @@ func _lan_screen_xml() -> String:
 
 
 func _make_host_driver(with_spins := false) -> MenuDriver:
-	return _driver_over(_doc_from_xml(_host_screen_xml(with_spins)), "jo_mp.mnu")
+	return MenuDriverFixture.driver_over(self, _doc_from_xml(_host_screen_xml(with_spins)), "jo_mp.mnu")
 
 
 func _make_lan_driver() -> MenuDriver:
-	return _driver_over(_doc_from_xml(_lan_screen_xml()), "jo_mp.mnu")
+	return MenuDriverFixture.driver_over(self, _doc_from_xml(_lan_screen_xml()), "jo_mp.mnu")
 
 
 # Simulate a control press: the driver emits widget_activated(id, NAME) on the
@@ -127,7 +118,7 @@ func test_owns_menu_detects_mp_menu() -> void:
 	var mp := MpMenuCompanion.new()
 	assert_true(mp.owns_menu(_make_host_driver()),
 			"a menu carrying SELECTED_MISSIONS is the JO mp menu")
-	var plain := _driver_over(_doc_from_xml(_screen_xml("PLAIN",
+	var plain := MenuDriverFixture.driver_over(self, _doc_from_xml(_screen_xml("PLAIN",
 			_wnd("button", "OK", 10))), "plain.mnu")
 	assert_false(mp.owns_menu(plain), "a plain menu is left to the shell")
 

@@ -57,15 +57,15 @@ using namespace godot;
 namespace {
 
 // hudpos.def [4] rects are stored as corners (x1,y1,x2,y2); the witnessed draws
-// read them that way. [orig: HUD_DrawHealthBar @0x5a2e50 reads dword_27237C8/CC/D0/D4]
+// read them that way. (retail: HUD_DrawHealthBar @0x5a2e50 reads dword_27237C8/CC/D0/D4, see docs/interface/hud-re.md)
 Rect2i rect_from_corners(const int v[4]) {
 	return Rect2i(v[0], v[1], v[2] - v[0], v[3] - v[1]);
 }
 
 // HUDPOWERBAR alone is authored x,y,w,h — its witnessed consumer adds the third
 // and fourth dwords to the anchor (JOX authors "20,720,72,11": as corners the
-// height would be negative). [orig: HUD_DrawPowerThrowChargeBar @0x599830 draws
-// (x, y)-(x+w, y+h) from dword_27237EC..F8]
+// height would be negative). (retail: HUD_DrawPowerThrowChargeBar @0x599830 draws
+// (x, y)-(x+w, y+h) from dword_27237EC..F8, see docs/interface/hud-re.md)
 Rect2i rect_from_xywh(const int v[4]) {
 	return Rect2i(v[0], v[1], v[2], v[3]);
 }
@@ -549,8 +549,8 @@ Dictionary HudPos::to_dictionary() const {
 	// ALPHAFADE raw file fields: base%, max%, seconds — floats, because the
 	// original reads them via atof and the fraction survives into the stored
 	// base*2.55 / max*2.55 (0..255 alpha) and seconds*62 (ticks) converts;
-	// consumers do that conversion. [orig: alphafade parse @0x5a0882..0x5a08c2
-	// -> 0x2723614/18/1C]
+	// consumers do that conversion. (retail: alphafade parse @0x5a0882..0x5a08c2
+	// -> 0x2723614/18/1C, see docs/interface/hud-re.md)
 	misc["alpha_fade"] = Vector3(h.alpha_fade[0], h.alpha_fade[1], h.alpha_fade[2]);
 	misc["spinmap_wp_dist_off"] = h.spinmap_wp_dist_off;
 	out["misc"] = misc;

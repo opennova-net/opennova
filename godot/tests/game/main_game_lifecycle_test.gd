@@ -661,7 +661,7 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 		"expansion": "",
 	})
 	assert_true(host.enable_host_listen(0))
-	var streamed_til := _til_bytes_for_cell(4)
+	var streamed_til := TilFixture.bytes_for_cell(4)
 	host.set_terrain_til_data(streamed_til)
 	assert_true(host.load_from_mission_data(mission))
 
@@ -736,7 +736,7 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 	# Advertise two records but provide one. The host emits the canonical first
 	# page [0,1), then has no second page; admission must see Receiving, never
 	# reinterpret it as the valid no-0x45 Absent case.
-	var truncated_til := _til_bytes_for_cell(4)
+	var truncated_til := TilFixture.bytes_for_cell(4)
 	truncated_til.encode_u32(4, 2)
 	host.set_terrain_til_data(truncated_til)
 	assert_true(host.load_from_mission_data(mission))
@@ -1111,17 +1111,6 @@ func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 			"the mission sky clear is restored to the boot/menu frame clear")
 	assert_null(world.get_node_or_null("MissionObjects"),
 			"no mission presentation subtree remains")
-
-
-func _til_bytes_for_cell(cell_x: int) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(28)
-	bytes.encode_u32(0, 0x74696c30)
-	bytes.encode_u32(4, 1)
-	bytes.encode_u32(16, cell_x * (16 << 16))
-	bytes.encode_u32(20, 0)
-	bytes[24] = 1
-	return bytes
 
 
 # The shared PFF3 fixture writer (TestPff.write), asserted here.

@@ -39,7 +39,7 @@ const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
 # play_body_clip / slot_to_key resolve it.
 const PREVIEW_IDLE_KEY := "anim_idle"
 
-var _resource_root  # ResourceRoot, or null (headless / no shell)
+var _resource_root: ResourceRoot = null  # null when headless / no shell
 
 var _viewport_container: SubViewportContainer
 var _status_label: Label
@@ -64,7 +64,7 @@ var _part_models: Dictionary = {}
 # Shared skeletal idle (Dt1rst.bad + PI_Idle.BAD), built lazily once and bound onto every
 # skinned part so the composed character plays the idle. Null when the .bad assets aren't
 # resolvable; _skeletal_tried gates the one-time build so a missing-asset mount reads once.
-var _skeletal  # SkeletalAnim or null
+var _skeletal: SkeletalAnim = null
 var _skeletal_tried := false
 var _missing_parts := PackedStringArray()
 
@@ -77,15 +77,53 @@ func _ready() -> void:
 	_build_viewport()
 
 
-func set_resource_root(root) -> void:
+func set_resource_root(root: ResourceRoot) -> void:
 	_resource_root = root
 	# Re-evaluate the skeletal idle against the new mount (a remount may add/remove the .bad set).
 	_skeletal = null
 	_skeletal_tried = false
 
 
-func get_resource_root():
+func get_resource_root() -> ResourceRoot:
 	return _resource_root
+
+
+# --- Typed read seams (tests and the MCP read the portrait through these) ---
+
+func portrait_camera() -> FlyCamera:
+	return _camera
+
+
+func viewport_container() -> SubViewportContainer:
+	return _viewport_container
+
+
+func preview_viewport() -> SubViewport:
+	return _viewport
+
+
+## The spin node's current yaw (idle spin + hover sway), radians.
+func model_yaw() -> float:
+	return _model_root.rotation.y if _model_root != null else 0.0
+
+
+func menu_center() -> Vector3:
+	return _menu_center
+
+
+func zoom_blend() -> float:
+	return _zoom_blend
+
+
+## Frame the portrait on `bounds` and hold that pose across selection refreshes.
+func frame_menu_pose(bounds: AABB) -> void:
+	_frame_menu_pose(bounds)
+	_menu_pose_set = true
+
+
+## Re-run the selection refresh (frames once, then holds the pose).
+func refresh_portrait() -> void:
+	_refresh_portrait()
 
 
 # Size the SubViewport to the true on-screen pixel footprint of this pane. The menu scales
@@ -200,7 +238,7 @@ func load_combo(combo: Dictionary) -> void:
 # Returns null (parts stay static) when there's no resource root, the .bad assets aren't
 # present (a loose mount that lacks them), the native raw-.bad method is missing (stale DLL),
 # or the load fails — all non-fatal degraded states. Cached; _skeletal_tried reads once.
-func _ensure_preview_skeletal():
+func preview_skeletal() -> SkeletalAnim:
 	if _skeletal_tried:
 		return _skeletal
 	_skeletal_tried = true
@@ -245,14 +283,14 @@ func _load_part(slot: String, graphic: String, camo: Array = []) -> void:
 	# BoneFile_Load + AnimChannel_InitFromData("PI_Idle.BAD")]. Only skinned parts pose; an absent
 	# .bad set or a static part leaves the slot at rest. The transform animation (idle spin +
 	# hover zoom/sway) is driven separately in _process.
-	var sk = _ensure_preview_skeletal()
+	var sk := preview_skeletal()
 	if sk != null and data.is_skinned(0):
 		model.set_skeletal_anim(sk)
 		model.play_body_clip(PREVIEW_IDLE_KEY)
 	_part_models[slot] = model
 
 
-func get_part_model(slot: String):
+func get_part_model(slot: String) -> ObjectModel:
 	return _part_models.get(slot, null)
 
 
@@ -342,6 +380,12 @@ func set_hovered(value: bool) -> void:
 # a damped zoom toward the hover target, a continuous idle rotation, and a sinusoidal sway
 # that fades in on hover.
 func _process(delta: float) -> void:
+	advance(delta)
+
+
+## One portrait animation step of `delta` seconds (the _process body; tests
+## drive it directly).
+func advance(delta: float) -> void:
 	if not _menu_framed:
 		return
 	# Hover by mouse-position-over-this-pane, not the PLAYER_PREVIEW widget's mouse_entered

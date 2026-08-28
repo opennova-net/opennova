@@ -18,7 +18,7 @@ extends Node
 # what the returned edges say — signal emission, the settle call, the preload
 # sim pump, and the in-place mount switch.
 #
-# Engine-side and shell-neutral: no menu/env knowledge lives here (the shell's
+# No menu/env knowledge lives here (the shell's
 # NetSessionController owns the entries; MainGame owns presentation). The
 # session signals stay on GameWorld — the shell contract pins them there — so
 # this drive emits them THROUGH its world reference

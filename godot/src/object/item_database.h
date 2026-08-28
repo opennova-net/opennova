@@ -353,7 +353,6 @@ public:
 	// husk_sub_part_types (PackedInt32Array), has_husk}. Empty Dictionary =
 	// unknown id. Feeds the sim's item-traits sweep (world::ItemDeathTraits).
 	// [docs/world/world-wac-ai-re.md §24]
-	Dictionary get_death_traits(int id) const;
 	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
 	// banks at runtime); empty if the item declares none.
 	String get_sound_profile(int id) const;

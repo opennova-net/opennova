@@ -26,7 +26,6 @@ void ParticleFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_from_buffer", "bytes", "display_path"), &ParticleFile::load_from_buffer);
 	ClassDB::bind_method(D_METHOD("find_effect", "id"), &ParticleFile::find_effect);
 	ClassDB::bind_method(D_METHOD("find_particle", "id"), &ParticleFile::find_particle);
-	ClassDB::bind_method(D_METHOD("find_table", "id"), &ParticleFile::find_table);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "source_path"), "set_source_path", "get_source_path");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "effects", PROPERTY_HINT_TYPE_STRING,
@@ -85,7 +84,7 @@ Error ParticleFile::load_from_buffer(const PackedByteArray &bytes, const String 
 
 Ref<ParticleEffect> ParticleFile::find_effect(const String &id) const {
 	// Case-insensitive like every by-name walk in the effect system
-	// [orig: CEffectWorld_FindEffectDefByName @ 0x5e34f0 → _stricmp @ 0x5e352c].
+	// (retail: CEffectWorld_FindEffectDefByName @ 0x5e34f0 → _stricmp @ 0x5e352c, see docs/particles/ptl-format-re.md).
 	for (int i = 0; i < effects.size(); ++i) {
 		Ref<ParticleEffect> e = effects[i];
 		if (e.is_valid() && e->get_id().nocasecmp_to(id) == 0) return e;
@@ -95,23 +94,12 @@ Ref<ParticleEffect> ParticleFile::find_effect(const String &id) const {
 
 Ref<ParticleDef> ParticleFile::find_particle(const String &id) const {
 	// Case-insensitive like every by-name walk in the effect system
-	// [orig: CEffectWorld_FindParticleDefByName @ 0x5e41d0 → _stricmp @ 0x5e420c].
+	// (retail: CEffectWorld_FindParticleDefByName @ 0x5e41d0 → _stricmp @ 0x5e420c, see docs/particles/ptl-format-re.md).
 	for (int i = 0; i < particles.size(); ++i) {
 		Ref<ParticleDef> p = particles[i];
 		if (p.is_valid() && p->get_id().nocasecmp_to(id) == 0) return p;
 	}
 	return Ref<ParticleDef>();
-}
-
-Ref<ParticleTable> ParticleFile::find_table(const String &id) const {
-	// Case-insensitive to match the engine's _stricmp table resolve
-	// [orig: table find @ 0x5e9540 → _stricmp @ 0x76fdf6]; shipped data mixes
-	// cases (ambfx.ptl `green_func = Table11Alt` vs `id = table11Alt`).
-	for (int i = 0; i < tables.size(); ++i) {
-		Ref<ParticleTable> t = tables[i];
-		if (t.is_valid() && t->get_id().nocasecmp_to(id) == 0) return t;
-	}
-	return Ref<ParticleTable>();
 }
 
 void ParticleFile::copy_from_native(const opennova::particle::ParticleFile &file) {

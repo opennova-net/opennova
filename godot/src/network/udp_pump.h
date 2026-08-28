@@ -26,7 +26,7 @@ namespace godot {
 // poll() before its receive step and the sends after its emit, routing each datagram to the
 // right engine/net/netsim UdpSessionTransport by source address (a later increment). This is a
 // RefCounted, not a Node — it never self-processes; its owner drives the cadence (the witnessed
-// poll-before-logic / send-after order, [orig: Game_ProcessMainFrame @0x5263f0]).
+// poll-before-logic / send-after order, (retail: Game_ProcessMainFrame @0x5263f0, see docs/net/novaworld-net-re.md)).
 class UdpPump : public RefCounted {
 	GDCLASS(UdpPump, RefCounted)
 

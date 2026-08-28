@@ -142,7 +142,6 @@ public:
 	String get_last_error() const;
 
 	String get_mission_name() const;
-	String get_designer() const;
 	// Header references (basenames, no extension): e.g. "dvxi5", "full_00".
 	String get_terrain_ref() const;
 	String get_environment_ref() const;
@@ -218,7 +217,6 @@ public:
 	// indices are KIND_MARKER entity indices), or {} if `index` is out of range.
 	Dictionary get_waypoint_path(int index) const;
 	// All 128 paths in the same shape as get_waypoint_path (for the in-world overlay).
-	Array get_waypoint_paths() const;
 	// Replace a path's ordered marker list and flags. `marker_indices` are KIND_MARKER
 	// entity indices; an empty list clears the path. Does NOT create or delete marker
 	// entities -- it only rewrites which markers (and in what order) the path references,

@@ -105,9 +105,7 @@ void Terrain::_bind_methods() {
 			&Terrain::get_visible_terrain_min_height);
 	ClassDB::bind_method(D_METHOD("get_visible_terrain_max_height"),
 			&Terrain::get_visible_terrain_max_height);
-	ClassDB::bind_method(D_METHOD("get_traversal_stats"), &Terrain::get_traversal_stats);
 	ClassDB::bind_method(D_METHOD("get_visible_patch_count"), &Terrain::get_visible_patch_count);
-	ClassDB::bind_method(D_METHOD("get_lod_distribution"), &Terrain::get_lod_distribution);
 	ClassDB::bind_method(D_METHOD("get_patches_active"), &Terrain::get_patches_active);
 
 	ClassDB::bind_method(D_METHOD("set_debug_no_frustum", "enabled"), &Terrain::set_debug_no_frustum);
@@ -622,7 +620,7 @@ void Terrain::render_frame() {
 			cached_env_node->apply_terrain_uniforms(terrain_material);
 			// Runtime-only: prefer Weather-smoothed colors when a weather node
 			// is present (overriding the ones it smooths). The terrain surface
-			// consumes only c1 = light + c0 = sky [orig: @ 0x604420].
+			// consumes only c1 = light + c0 = sky (retail: @ 0x604420, see docs/terrain/terrain-re.md).
 			if (cached_weather_node) {
 				terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->get_smooth_sun());
 				terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->get_smooth_sky());
@@ -635,7 +633,7 @@ void Terrain::render_frame() {
 			}
 			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
 			// one multiply; the shared runtime/ONED tile path consumes this uniform.
-			// [orig: PolyTrn_RenderTile @ 0x60df0d].
+			// (retail: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md).
 			tile_overlay_tint = cached_env_node->get_tile_overlay_tint();
 			terrain_material->set_shader_parameter(
 				"u_tile_overlay_tint", tile_overlay_tint);
@@ -1105,7 +1103,7 @@ bool Terrain::_build_terrain() {
 		// The tile's own quadrant decides the lock policy for every one of its
 		// vertices; a tile whose last row/column lands on the quadrant boundary is
 		// exactly the case the .trn locks exist for.
-		// [orig: sub_402D20 @0x402D20 (jodemo.exe) — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200).]
+		// (retail: sub_402D20 @0x402D20 (jodemo.exe) — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200)., see docs/terrain/terrain-re.md)
 		const opennova::terrain::CoordsTaps taps =
 			opennova::terrain::coords_taps_for_quadrant(
 				quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, hm_size);
@@ -1193,36 +1191,6 @@ float Terrain::get_visible_terrain_max_height() const {
 	return has_visible_terrain_bounds()
 			? frame_compiler.last_draw_list().visible_bounds.max[1]
 			: 0.0f;
-}
-
-Dictionary Terrain::get_traversal_stats() const {
-	const opennova::TraversalStats &stats =
-			frame_compiler.last_draw_list().debug.traversal;
-	Dictionary d;
-	d["nodes_visited"] = stats.nodes_visited;
-	d["rej_nearfar"] = stats.rej_nearfar;
-	d["rej_left"] = stats.rej_left;
-	d["rej_right"] = stats.rej_right;
-	d["rej_bottom"] = stats.rej_bottom;
-	d["rej_top"] = stats.rej_top;
-	d["partial_subdiv"] = stats.partial_subdiv_count;
-	d["budget_drops"] = stats.budget_drops;
-	d["leaf_emits"] = stats.leaf_emits;
-	d["nonleaf_emits"] = stats.nonleaf_emits;
-	d["dist_min"] = stats.dist_min;
-	d["dist_max"] = stats.dist_max;
-	d["lod_fallbacks"] = stats.lod_fallbacks;
-	return d;
-}
-
-PackedInt32Array Terrain::get_lod_distribution() const {
-	const opennova::TerrainFrameDebugCounters &debug =
-			frame_compiler.last_draw_list().debug;
-	PackedInt32Array arr;
-	arr.resize(8);
-	for (int i = 0; i < 8; i++)
-		arr.set(i, debug.lod_distribution[i]);
-	return arr;
 }
 
 int Terrain::get_patches_active() const {

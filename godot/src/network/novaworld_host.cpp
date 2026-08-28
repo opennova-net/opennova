@@ -238,7 +238,7 @@ opennova::HostRegistration NovaWorldHost::host_cfg() const {
 
 void NovaWorldHost::send_host_request() {
 	if (!lobby_.session_verified()) return;
-	// [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
+	// (retail: CNapiGameSession_SendHostRequest @ 0x4d3700, see docs/net/novaworld-net-re.md)
 	// NWUID: echoed from the ServerSessionInit into the request's Cookie.
 	auto req = opennova::make_host_request(host_cfg(), lobby_.session()->server_nwuid());
 	lobby_.send(lobby_.session()->build_lobby_message(req));
@@ -257,7 +257,7 @@ void NovaWorldHost::send_host_request() {
 
 void NovaWorldHost::send_host_update() {
 	if (!lobby_.session_verified()) return;
-	// [orig: CNapiGameSession_SendHostUpdate @ 0x4d3860]
+	// (retail: CNapiGameSession_SendHostUpdate @ 0x4d3860, see docs/net/novaworld-net-re.md)
 	auto upd = opennova::make_host_update(host_cfg());
 	lobby_.send(lobby_.session()->build_lobby_message(upd));
 	emit_signal("host_update_sent");

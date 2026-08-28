@@ -68,7 +68,7 @@ void ObjectModel::rebuild_scene() {
 	const int bone_count =
 			skeletal_mode && skeleton_ != nullptr ? skeleton_->get_bone_count() : 0;
 	const Array submeshes = object_data_->build_lod_submeshes(active_lod_,
-			skeletal_mode, bone_count, native_frame_);
+			skeletal_mode, bone_count, false);
 	for (int64_t entry = 0; entry < submeshes.size(); ++entry) {
 		const Dictionary submesh = submeshes[entry];
 		const Ref<ArrayMesh> mesh = submesh.get("mesh", Variant());

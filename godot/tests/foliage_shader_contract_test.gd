@@ -75,32 +75,14 @@ func test_fd_sampling_is_anisotropic_with_conservative_terminal_guard() -> void:
 		"MODEL depth masks must use the same retail-capped :fd sampler.")
 
 
-func _quantize_retail_signed_vector(value: Vector3) -> Vector3:
-	return Vector3(
-		floorf(clampf((value.x + 1.0) * 127.5, 0.0, 255.0)),
-		floorf(clampf((value.y + 1.0) * 127.5, 0.0, 255.0)),
-		floorf(clampf((value.z + 1.0) * 127.5, 0.0, 255.0))
-	) / 255.0
-
-
-func _gpu_light_byte(retail_getter_direction: Vector3) -> Vector3:
-	# PolyTrn packs the getter tuple into D3DCOLOR diffuse RGB as (z, x, y).
-	var gpu_diffuse_rgb := Vector3(
-		retail_getter_direction.z,
-		retail_getter_direction.x,
-		retail_getter_direction.y
-	)
-	return _quantize_retail_signed_vector(gpu_diffuse_rgb)
-
-
 func _light_alpha(normal_byte: Vector3, retail_getter_direction: Vector3) -> float:
-	var light_byte := _gpu_light_byte(retail_getter_direction)
+	var light_byte := ShaderLightFixture.gpu_light_byte(retail_getter_direction)
 	return clampf(4.0 * (normal_byte - Vector3(0.5, 0.5, 0.5)).dot(
 		light_byte - Vector3(0.5, 0.5, 0.5)), 0.0, 1.0)
 
 
 func _flat_ground_light_alpha(retail_getter_direction: Vector3) -> float:
-	var normal_byte := _quantize_retail_signed_vector(Vector3(0.0, 0.0, 1.0))
+	var normal_byte := ShaderLightFixture.quantize_retail_signed_vector(Vector3(0.0, 0.0, 1.0))
 	return _light_alpha(normal_byte, retail_getter_direction)
 
 
@@ -133,7 +115,7 @@ func test_detail_light_packs_world_sun_in_heightfield_texture_basis() -> void:
 
 
 	var morning := env.compute_sun_direction(800.0)
-	assert_eq(_gpu_light_byte(morning), Vector3(231, 83, 187) / 255.0,
+	assert_eq(ShaderLightFixture.gpu_light_byte(morning), Vector3(231, 83, 187) / 255.0,
 		"08:00 D3DCOLOR diffuse RGB must be the witnessed getter permutation (z, x, y).")
 	assert_almost_eq(_light_alpha(Vector3(217, 127, 217) / 255.0, morning),
 		0.8987774, 0.000001, "08:00 X-ramp normal must receive the witnessed bright DOT3 response.")

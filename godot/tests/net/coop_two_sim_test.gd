@@ -48,81 +48,21 @@ const OBJECTIVE_COOP_START_TYPE := 6094
 const NATIVE_MODEL_DIR := "res://.godot/native_3dp_coop_two_sim"
 
 
-static func _repo_file_bytes(res_path: String) -> PackedByteArray:
-	var file := FileAccess.open(
-			ProjectSettings.globalize_path(res_path), FileAccess.READ)
-	if file == null:
-		return PackedByteArray()
-	var bytes := file.get_buffer(file.get_length())
-	file.close()
-	return bytes
-
-
-static func _pattern_offset(data: PackedByteArray, pattern: String) -> int:
-	var wanted := pattern.to_ascii_buffer()
-	if wanted.is_empty() or data.size() < wanted.size():
-		return -1
-	var at := data.find(wanted[0], 0)
-	while at >= 0 and at + wanted.size() <= data.size():
-		if data.slice(at, at + wanted.size()) == wanted:
-			return at
-		at = data.find(wanted[0], at + 1)
-	return -1
-
-
-# Rewrite one USRP record's 16-byte name field in place (threedi parse_usrp:
-# 48-byte records, the name at record offset +32). Empty result = no match.
-static func _with_renamed_user_point(data: PackedByteArray, old_name: String,
-		new_name: String) -> PackedByteArray:
-	var offset := _pattern_offset(data, old_name)
-	var replacement := new_name.to_ascii_buffer()
-	if offset < 0 or replacement.size() > 16:
-		return PackedByteArray()
-	for i in range(16):
-		data[offset + i] = replacement[i] if i < replacement.size() else 0
-	return data
-
-
-# Overwrite one USRP record's authored 16.16 position ints (record base sits
-# 32 bytes before the name field).
-static func _with_user_point_position(data: PackedByteArray, name: String,
-		raw_x: int, raw_y: int, raw_z: int) -> PackedByteArray:
-	var offset := _pattern_offset(data, name)
-	if offset < 32:
-		return PackedByteArray()
-	data.encode_s32(offset - 32, raw_x)
-	data.encode_s32(offset - 28, raw_y)
-	data.encode_s32(offset - 24, raw_z)
-	return data
-
-
-static func _write_native_model(name: String, bytes: PackedByteArray) -> bool:
-	if bytes.is_empty():
-		return false
-	var file := FileAccess.open(
-			NATIVE_MODEL_DIR.path_join(name), FileAccess.WRITE)
-	if file == null:
-		return false
-	file.store_buffer(bytes)
-	file.close()
-	return true
-
-
 func before_all() -> void:
 	DirAccess.make_dir_recursive_absolute(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR))
 	assert_true(DirAccess.dir_exists_absolute(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)),
 			"created the flat native asset dir")
-	assert_true(_write_native_model("mount.3di",
-			_repo_file_bytes("res://../fixtures/threedi/synth/mount.3di")),
+	assert_true(NativeModelFixture.write_native_model(NATIVE_MODEL_DIR, "mount.3di",
+			NativeModelFixture.repo_file_bytes("res://../fixtures/threedi/synth/mount.3di")),
 			"composed the mount native model fixture")
-	var carrier := _with_user_point_position(
-			_repo_file_bytes("res://../fixtures/threedi/synth/carrier.3di"),
+	var carrier := NativeModelFixture.with_user_point_position(
+			NativeModelFixture.repo_file_bytes("res://../fixtures/threedi/synth/carrier.3di"),
 			"ctrlx13", 0, 0, 0)
 	for site in ["sitex00d", "sitex08c", "sitex06b", "sitex12a"]:
-		carrier = _with_renamed_user_point(carrier, site, "x" + site.substr(1))
-	assert_true(_write_native_model("carrierzero.3di", carrier),
+		carrier = NativeModelFixture.with_renamed_user_point(carrier, site, "x" + site.substr(1))
+	assert_true(NativeModelFixture.write_native_model(NATIVE_MODEL_DIR, "carrierzero.3di", carrier),
 			"composed the zero-offset control-seat carrier fixture")
 
 
@@ -521,16 +461,6 @@ func _moving_eweap_userpoint(data: ObjectData) -> Dictionary:
 		if (live * point_in_part).distance_to(authored) > 0.25:
 			return {"index": index, "info": info}
 	return {}
-
-
-func _apply_weapon_switch_events(sim: Simulation,
-		defs_by_name: Dictionary) -> void:
-	for value in sim.drain_local_player_weapon_events():
-		var name := String((value as Dictionary).get("switch_to_weapon", ""))
-		if name.is_empty() or not defs_by_name.has(name):
-			continue
-		sim.set_local_player_weapon(
-				defs_by_name[name], {}, name == "WPN_EMPLCD50NA")
 
 
 func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void:
@@ -1204,7 +1134,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	for _settle in range(80):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
 			break
 		OS.delay_msec(1)
@@ -1218,7 +1148,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	for _tick in range(180):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if bool(joiner.get_local_player_view().get("mounted", false)) \
 				and bool(host.get_entity_debug(
 						host_joiner_index).get("mounted", false)) \
@@ -1243,7 +1173,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	for _tick in range(96):
 		host.step()
 		joiner.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		var joined_ammo: Dictionary = joiner.get_local_player_weapon_state()
 		if int(joined_ammo.get("clip", -999)) == 7 \
 				and int(joined_ammo.get("reserve", -999)) == 19:
@@ -1259,7 +1189,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	for _settle in range(100):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
 			break
 		OS.delay_msec(1)
@@ -1292,7 +1222,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	for _tick in range(120):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		var authority_yaw := float(host.get_entity_debug(
 				host_joiner_index).get("yaw_deg", authority_yaw_before))
 		var presented_yaw := _present_field_for_type(
@@ -1334,7 +1264,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	for _settle in range(100):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
 			break
 		OS.delay_msec(1)
@@ -1346,7 +1276,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	for _tick in range(180):
 		joiner.step()
 		host.step()
-		_apply_weapon_switch_events(joiner, weapon_defs)
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if not bool(joiner.get_local_player_view().get("mounted", true)) \
 				and not bool(host.get_entity_debug(
 						host_joiner_index).get("mounted", true)) \

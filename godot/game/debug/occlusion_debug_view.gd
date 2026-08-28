@@ -2,7 +2,7 @@ extends SimDebugView
 
 # Draws the render-occlusion portal data over the world: every nearby
 # portal-carrying building's occlusion faces as type-colored outlines, with a
-# section label on each portal-type record. The 3D face of the F3 overlay's
+# section label on each portal-type record. The 3D face of the dev tools'
 # "Show portal faces" toggle -- a developer tool for eyeballing our port of the
 # section-mask/portal engine (docs/render/render-occlusion-re.md), not
 # engine-witnessed behavior.

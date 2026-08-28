@@ -32,7 +32,7 @@ var _world: GameWorld
 var _static_sources := Callable()  # () -> Array (the placer's static item-effect sources)
 var _item_db_source := Callable()  # () -> ItemDatabase or null (the placer's db, lent by the world)
 
-# Debug: hide every particle effect (F3 overlay's "Hide particles" — the retail
+# Debug: hide every particle effect (the dev tools' "Hide particles" — the retail
 # master particle switch, mimicked). Off by default; survives mission reloads.
 var _particles_hidden := false
 
@@ -75,7 +75,7 @@ func _resolve_item_db() -> ItemDatabase:
 	return _item_db_source.call() if _item_db_source.is_valid() else null
 
 
-## The retail master particle switch (F3 overlay's "Hide particles"), delegated
+## The retail master particle switch (the dev tools' "Hide particles"), delegated
 ## from the world: flips the effect world's spawn facade and, on re-enable,
 ## retries the deferred persistent item effects exactly once.
 func set_particles_hidden(hidden: bool) -> void:
@@ -116,7 +116,7 @@ func on_effect_world_started() -> void:
 	# One provider for every owned/attached group: int keys are WAC fx2ssn SSNs
 	# (resolved through the runtime), String keys are the per-item effect attaches
 	# (resolved to the placed node's live transform).
-	effect_world.set_owner_position_provider(Callable(self, "_effect_owner_transform"))
+	effect_world.set_owner_position_provider(_effect_owner_transform)
 	reattach()
 	# The wire-spawn callback is single-subscriber; GameWorld registers one
 	# router that fans out to this director AND the effect-light director.

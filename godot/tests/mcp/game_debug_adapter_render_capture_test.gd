@@ -90,7 +90,6 @@ func test_hud_hidden_bundle_scopes_presentation_to_its_target_capture() -> void:
 				witness.gameplay_hud_visible = false
 				witness.player_view_effects_active = true
 				witness.hud_canvas_layer_active = true
-				witness.fps_counter_visible = false
 				return witness)
 
 	var result: Dictionary = await adapter.capture_mcp_render_bundle({

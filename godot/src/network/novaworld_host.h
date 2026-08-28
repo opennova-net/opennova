@@ -27,7 +27,7 @@ namespace godot {
 // heartbeats. It is the host-direction sibling of NovaWorldClient (ADR 0010):
 // sockets + signals here, protocol/crypto in engine/net/novaworld.
 //
-// [orig: CNapiGameSession_SendHostRequest @ 0x4d3700 / SendHostUpdate @ 0x4d3860]
+// (retail: CNapiGameSession_SendHostRequest @ 0x4d3700 / SendHostUpdate @ 0x4d3860, see docs/net/novaworld-net-re.md)
 //
 // Usage from GDScript:
 //   var h := NovaWorldHost.new()

@@ -40,7 +40,6 @@ public:
 	int get_cell_z() const;
 
 	void set_cell(int cell_x, int cell_z);
-	bool has_flag(int flag) const;
 
 	Dictionary to_dictionary() const;
 

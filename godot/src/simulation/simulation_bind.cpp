@@ -554,6 +554,12 @@ void Simulation::_bind_methods() {
 			D_METHOD("epilog_exit_timeout_seconds"),
 			&Simulation::epilog_exit_timeout_seconds);
 	ClassDB::bind_static_method("Simulation",
+			D_METHOD("epilog_fade_in_seconds"),
+			&Simulation::epilog_fade_in_seconds);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("deploy_refresh_interval_seconds"),
+			&Simulation::deploy_refresh_interval_seconds);
+	ClassDB::bind_static_method("Simulation",
 			D_METHOD("spawn_origin_pack", "kind", "index"),
 			&Simulation::spawn_origin_pack);
 	ClassDB::bind_static_method("Simulation",

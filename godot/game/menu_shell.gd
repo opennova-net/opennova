@@ -209,12 +209,12 @@ func set_frame_stats(board: FrameStats) -> void:
 	if board == _frame_stats:
 		return
 	if _frame_stats != null:
-		var old_edge := Callable(self, "_on_frame_stats_capture_changed")
+		var old_edge := _on_frame_stats_capture_changed
 		if _frame_stats.capture_changed.is_connected(old_edge):
 			_frame_stats.capture_changed.disconnect(old_edge)
 	_frame_stats = board
 	if _frame_stats != null:
-		var edge := Callable(self, "_on_frame_stats_capture_changed")
+		var edge := _on_frame_stats_capture_changed
 		if not _frame_stats.capture_changed.is_connected(edge):
 			_frame_stats.capture_changed.connect(edge)
 	_on_frame_stats_capture_changed(
@@ -234,7 +234,7 @@ func consume_video_process_us() -> int:
 # (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO screen). The shell can
 # drive several: companions are tried in install order, and the first whose
 # owns_menu() claims the loaded menu drives it (see _wire_named_controls).
-func add_companion(companion) -> void:
+func add_companion(companion: MenuCompanion) -> void:
 	if companion != null and not _companions.has(companion):
 		_companions.append(companion)
 
@@ -792,7 +792,7 @@ func _update_mod_desc(name: String) -> void:
 
 
 # Names-only is all the VFS exposes today; show a friendly label when we know one,
-# else the raw folder name. TODO(expansion-desc): read a description from the .pff.
+# else the raw folder name (the .pff description read is a TODO.md item).
 func _describe(name: String) -> String:
 	if name.is_empty():
 		return ""

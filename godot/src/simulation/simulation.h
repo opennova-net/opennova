@@ -30,6 +30,7 @@
 #include <runtime/hud/hud_frame.h> // HudVehiclePanelState / HudLfpZone (the panel feed seams)
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
+#include <runtime/world/deploy_screen_feed.h> // kDeployRefreshTicks (the death deploy screen cadence)
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/surface_type_map.h>
@@ -1253,6 +1254,18 @@ public:
 		return opennova::world::kEpilogExitTimeoutTicks *
 				opennova::world::TickAccumulator::kTickDt;
 	}
+	// The epilog/debrief screen fade-in in seconds (world/world.h
+	// kEpilogFadeInTicks, the 48+48-tick cine fade pair).
+	static double epilog_fade_in_seconds() {
+		return opennova::world::kEpilogFadeInTicks *
+				opennova::world::TickAccumulator::kTickDt;
+	}
+	// The DEATH deploy screen's content refresh cadence in seconds
+	// (world/deploy_screen_feed.h kDeployRefreshTicks).
+	static double deploy_refresh_interval_seconds() {
+		return opennova::world::kDeployRefreshTicks *
+				opennova::world::TickAccumulator::kTickDt;
+	}
 
 	// --- Portable session frame (ADR 0035) --------------------------------
 	// The input and outcomes are typed values. The one temporary tick sink keeps
@@ -2075,7 +2088,7 @@ public:
 	bool has_event_fired(int index) const;
 	int get_event_count() const;
 
-	// --- Read-only introspection (debug overlay / tooling) -----------------
+	// --- Read-only introspection (dev tools / MCP tooling) -----------------
 	// The world's logic tick counter [orig: current_tick @0x24c1968]. The
 	// pre-mission pass in finish_load already advanced it once, so a freshly
 	// loaded mission reads 1 — consumers should track deltas, not absolutes.

@@ -14,8 +14,8 @@ extends Control
 ## @0x57621d — the main loop then pushes the "Post Menu" scene @0x526867].
 ## Stand-ins (ledgered D-AI-10, docs/divergence-ledger.md): no flyaway cine /
 ## .cne playback, no score count-up
-## animation, no end-music track switch; a timed fade-in stands in for the cine
-## fade events. Witness record: docs/world/world-wac-ai-re.md §20.6.
+## animation, no end-music track switch; the screen alpha ramps over the cine
+## fade pair's tick span. Witness record: docs/world/world-wac-ai-re.md §20.6.
 
 signal exit_requested
 
@@ -24,13 +24,15 @@ signal exit_requested
 # [orig: @0x57621d/@0x5744ea] witness). Deliberate correction: the old
 # godot-side 300.0 assumed a 62 Hz tick; the engine value is adopted.
 static var EXIT_TIMEOUT_S: float = Simulation.epilog_exit_timeout_seconds()
-const FADE_IN_S := 1.5        # stands in for the 48+48-tick cine fade pair [orig: @0x574512]
+# The fade-in: engine truth 1.536 s, the 48+48-tick cine fade pair on the
+# 62.5 Hz loop (world/world.h kEpilogFadeInTicks carries the witness).
+static var FADE_IN_S: float = Simulation.epilog_fade_in_seconds()
 
 var _age := 0.0
 var _built := false
 
 
-func setup(outcome: Dictionary, banner: String, root) -> void:
+func setup(outcome: Dictionary, banner: String, root: ResourceRoot) -> void:
 	# Full-rect dark backdrop + letterbox bars [orig: CCineEventLetterbox].
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE

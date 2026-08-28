@@ -158,7 +158,6 @@ class CaptureTransactionGame:
 	var hud_canvas_layer_active := true
 	var ads_active := false
 	var big_map_active := false
-	var fps_counter_visible := false
 
 	func begin_hud_hidden_capture() -> Error:
 		begin_calls += 1
@@ -175,7 +174,6 @@ class CaptureTransactionGame:
 		witness.hud_canvas_layer_active = hud_canvas_layer_active
 		witness.ads_active = ads_active
 		witness.big_map_active = big_map_active
-		witness.fps_counter_visible = fps_counter_visible
 		return witness
 
 
@@ -574,11 +572,6 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 			"an active large map must fail the HUD-hidden capture")
 	hidden_game.big_map_active = false
 	hidden_game.gameplay_hud_visible = false
-	hidden_game.fps_counter_visible = true
-	assert_true(RenderFixtureContract.observe_comparison_contract(
-			hidden_game, world, viewport, hidden_contract).has("error"),
-			"a visible FPS counter must fail the HUD-hidden capture")
-	hidden_game.fps_counter_visible = false
 	world.visible = false
 	assert_true(RenderFixtureContract.observe_comparison_contract(
 			game, world, viewport, contract).has("error"),

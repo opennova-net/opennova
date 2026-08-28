@@ -83,14 +83,8 @@ public:
 	void jump_to_section(const StringName &p_section_name);
 	int get_var(int p_var_index) const;
 	void set_var(int p_var_index, int p_value);
-	StringName current_section() const;
 	int vm_state() const;
 	String last_error() const;
-	// Current VM program counter (bytecode offset of the next opcode), or -1 when
-	// no VM/script is live. Drives the editor's live statement highlight: a
-	// statement whose [code_offset, code_offset+byte_size) contains this pc is the
-	// one about to execute. Witnessed: Jointops.exe!AudioVM_DispatchLoop esi=IP.
-	int current_pc() const;
 
 	// Engine callbacks (Node virtuals via godot-cpp)
 	void _ready() override;

@@ -32,6 +32,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -148,6 +149,9 @@ class ObjectModel : public Node3D {
 	GDCLASS(ObjectModel, Node3D)
 
 public:
+	// The nine aim-overlay classes (mirrors anim::kOverlayClassCount; pinned
+	// by static_assert in object_model_anim.cpp).
+	static constexpr int kAimOverlayClasses = 9;
 	// The witnessed lighting uniform surface defaults — the RETAIL NOON
 	// register (shipped full_00.env tod 1200 bytes /255), so an un-enved
 	// preview lights like a JO noon world. Must stay equal to the checked-in
@@ -303,7 +307,6 @@ private:
 	PresentationLayer presentation_layer_ = PRESENTATION_LAYER_WORLD;
 	bool on_screen_ = true;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
-	bool native_frame_ = false;
 	bool match_terrain_enabled_ = false;
 	bool awake_ = false; // in the shared awake set below
 
@@ -371,8 +374,11 @@ private:
 	int last_slot_resolved_ = -1;
 	String last_slot_key_;
 
-	// Third-person aim overlay + the upper-body weapon channel.
-	Array aim_overlay_deltas_;
+	// Third-person aim overlay + the upper-body weapon channel. The nine
+	// per-class deltas live in a fixed array (no Variant container on the
+	// present hot path); valid_ = an overlay is applied.
+	std::array<Basis, kAimOverlayClasses> aim_overlay_deltas_{};
+	bool aim_overlay_valid_ = false;
 	PackedInt32Array aim_overlay_classes_;
 	bool collapse_right_hand_ = false;
 	String wpn_key_;
@@ -523,9 +529,6 @@ public:
 	void set_mirror_reflected(bool p_reflected) { mirror_reflected_ = p_reflected; }
 	bool get_mirror_reflected() const { return mirror_reflected_; }
 	void set_presentation_layer(PresentationLayer p_layer);
-	PresentationLayer get_presentation_layer() const { return presentation_layer_; }
-	void set_native_frame(bool p_native) { native_frame_ = p_native; }
-	bool get_native_frame() const { return native_frame_; }
 	void set_shadow_caster_enabled(bool p_enabled);
 	bool is_shadow_caster_enabled() const;
 	void set_static_shadow_caster_enabled(bool p_enabled);
@@ -612,7 +615,6 @@ public:
 	// must not cull gun parts the wider renderfov shows), and its alpha strips
 	// the viewmodel rung. Re-stamps after a scene rebuild; idempotent per frame.
 	void set_viewmodel_pass(bool p_enabled);
-	bool is_viewmodel_pass() const { return viewmodel_pass_; }
 	static void refresh_match_terrain_frame(Terrain *p_terrain);
 	Dictionary get_render_part_nodes() const;
 	void set_section_visibility_mask(int64_t p_mask);
@@ -687,8 +689,14 @@ public:
 	// The applied weapon-channel pose ({key, phase_ticks}; empty when no
 	// channel is held) — presentation-state read-back.
 	Dictionary get_weapon_channel() const;
+	// The typed present path: p_deltas is kAimOverlayClasses body-relative
+	// per-class rotations; clear drops the overlay.
+	void set_aim_overlay_deltas(const Basis *p_deltas);
+	void clear_aim_overlay();
+	// The script-facing form (an Array of kAimOverlayClasses Basis, or empty
+	// to clear) converts into the typed path.
 	void set_aim_overlay(const Array &p_deltas);
-	Array get_aim_overlay() const { return aim_overlay_deltas_; }
+	Array get_aim_overlay() const;
 
 	void set_right_hand_collapsed(bool p_collapsed);
 	bool is_right_hand_collapsed() const { return collapse_right_hand_; }

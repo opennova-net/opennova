@@ -1953,7 +1953,7 @@ func test_environment_load_failure_finishes_its_perf_timeline() -> void:
 	world.set_resource_root(root)
 	assert_eq(world.load_mission(bms_name), ERR_CANT_OPEN)
 
-	var timeline: PerfTimeline = PerfTimeline.latest()
+	var timeline: PerfTimeline = world.last_load_timeline()
 	assert_not_null(timeline, "a failed environment stage still retains its timeline")
 	if timeline == null:
 		return
@@ -1990,7 +1990,7 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 	world.set_resource_root(root)
 	assert_eq(world.load_mission(bms_name), ERR_CANT_OPEN)
 
-	var timeline: PerfTimeline = PerfTimeline.latest()
+	var timeline: PerfTimeline = world.last_load_timeline()
 	assert_not_null(timeline, "a failed terrain stage still retains its timeline")
 	if timeline == null:
 		return
@@ -2091,10 +2091,10 @@ func test_runtime_mission_til_forces_loose_first_in_packed_mode() -> void:
 		})
 	archive_entries.append({
 		"name": "mnml.til",
-		"bytes": _til_bytes_for_cell(0),
+		"bytes": TilFixture.bytes_for_cell(0),
 	})
 	_write_pff(root_dir.path_join("resource.pff"), archive_entries)
-	_write_bytes(root_dir.path_join("mnml.til"), _til_bytes_for_cell(4))
+	_write_bytes(root_dir.path_join("mnml.til"), TilFixture.bytes_for_cell(4))
 
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.mount_runtime(root_dir), OK,
@@ -3346,17 +3346,6 @@ func _write_bytes(path: String, bytes: PackedByteArray) -> void:
 	if file != null:
 		file.store_buffer(bytes)
 		file.close()
-
-
-func _til_bytes_for_cell(cell_x: int) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(28)
-	bytes.encode_u32(0, 0x74696c30)
-	bytes.encode_u32(4, 1)
-	bytes.encode_u32(16, cell_x * (16 << 16))
-	bytes.encode_u32(20, 0)
-	bytes[24] = 1
-	return bytes
 
 
 # The shared PFF3 fixture writer (TestPff.write), asserted here.

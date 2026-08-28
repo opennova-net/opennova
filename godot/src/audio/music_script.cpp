@@ -39,7 +39,6 @@ void MusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_decompiled_text", "script_name"), &MusicScript::get_decompiled_text);
 	ClassDB::bind_method(D_METHOD("get_decompiled_text_with_bank", "script_name", "bank"), &MusicScript::get_decompiled_text_with_bank);
 	ClassDB::bind_method(D_METHOD("compile_text", "text"), &MusicScript::compile_text);
-	ClassDB::bind_method(D_METHOD("set_compiled_file_bytes", "file_bytes"), &MusicScript::set_compiled_file_bytes);
 	ClassDB::bind_method(D_METHOD("load_from_decrypted_bytes", "bytes", "source"),
 			&MusicScript::load_from_decrypted_bytes);
 	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &MusicScript::load_from_path);
@@ -175,14 +174,6 @@ Dictionary MusicScript::compile_text(const String &p_text) {
 	out["bytecode"] = bytecode;
 	out["file_bytes"] = file_bytes;
 	return out;
-}
-
-void MusicScript::set_compiled_file_bytes(const PackedByteArray &p_file_bytes) {
-	if (p_file_bytes.size() <= 0) {
-		return;
-	}
-	String keep_source = source_path;
-	load_from_decrypted_bytes(p_file_bytes, keep_source);
 }
 
 String MusicScript::get_decompiled_text(const StringName &p_script_name) {

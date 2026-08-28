@@ -2,7 +2,7 @@ extends SimDebugView
 
 # Draws the live collision world over the scene: every nearby object's collision
 # volumes as type-colored wireframe boxes, plus the local player's capsule test
-# points and the last measured ground gap. The 3D face of the F3 overlay's
+# points and the last measured ground gap. The 3D face of the dev tools'
 # "Show collision" toggle -- a developer tool for eyeballing the movement
 # resolver (wall push-out, zone volumes, foot clearance), not engine-witnessed
 # behavior.

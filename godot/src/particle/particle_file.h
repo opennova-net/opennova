@@ -54,7 +54,6 @@ public:
 	// Convenience lookups by id (returns null Ref on miss).
 	Ref<ParticleEffect> find_effect(const String &id) const;
 	Ref<ParticleDef> find_particle(const String &id) const;
-	Ref<ParticleTable> find_table(const String &id) const;
 
 	void copy_from_native(const opennova::particle::ParticleFile &file);
 	opennova::particle::ParticleFile to_native() const;

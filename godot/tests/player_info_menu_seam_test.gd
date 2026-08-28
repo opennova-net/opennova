@@ -39,15 +39,6 @@ func _doc_from_xml(xml: String) -> MnuDocument:
 	return doc
 
 
-func _driver_over(doc: MnuDocument, menu_file: String, screen := "") -> MenuDriver:
-	# Frameless on purpose: the driver's state store carries the companion seam
-	# without a render surface (the documented headless-test contract).
-	var driver := MenuDriver.new()
-	assert_true(driver.open_document(doc, null, null, null, menu_file, screen),
-			"the document opens on the driver")
-	return driver
-
-
 func _wnd(type: String, name: String, top: int, inner := "", attrs := "") -> String:
 	return ('<WINDOW type="%s" name="%s"%s><POSITION><LEFT>10</LEFT><TOP>%d</TOP>'
 			+ '<RIGHT>250</RIGHT><BOTTOM>%d</BOTTOM></POSITION>%s</WINDOW>') % [
@@ -82,7 +73,7 @@ func _avatar_screen_xml(include_preview := false) -> String:
 
 
 func _make_avatar_driver(include_preview := false) -> MenuDriver:
-	return _driver_over(_doc_from_xml(_avatar_screen_xml(include_preview)), "player.mnu")
+	return MenuDriverFixture.driver_over(self, _doc_from_xml(_avatar_screen_xml(include_preview)), "player.mnu")
 
 
 func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
@@ -168,7 +159,7 @@ func test_owns_menu_detects_player_info() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	assert_true(companion.owns_menu(_make_avatar_driver()),
 			"a menu carrying NATIONALITY + COMBO_LIST is the PLAYER_INFO screen")
-	var plain := _driver_over(_doc_from_xml(_screen_xml("PLAIN",
+	var plain := MenuDriverFixture.driver_over(self, _doc_from_xml(_screen_xml("PLAIN",
 			_wnd("button", "OK", 10))), "plain.mnu")
 	assert_false(companion.owns_menu(plain),
 			"a plain menu is left to the shell / other companions")
@@ -177,7 +168,7 @@ func test_owns_menu_detects_player_info() -> void:
 func test_populates_avatar_lists_and_combo_label() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	var db := _load_db()
-	companion._db = db  # inject directly (no resource root in the unit)
+	companion.set_database(db)  # inject directly (no resource root in the unit)
 	var driver := _make_avatar_driver()
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
 
@@ -203,7 +194,7 @@ func test_populates_avatar_lists_and_combo_label() -> void:
 func test_resolves_friendly_names_from_gametext_avatars_section() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	var db := _load_db()
-	companion._db = db
+	companion.set_database(db)
 
 	# Map the exact keys this test asserts on to friendly text in a synthetic Avatars table.
 	var t := RtxtStringFile.new()
@@ -231,7 +222,7 @@ func test_resolves_friendly_names_from_gametext_avatars_section() -> void:
 func test_division_change_refills_combos() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	var db := _load_db()
-	companion._db = db
+	companion.set_database(db)
 	var driver := _make_avatar_driver()
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
 
@@ -246,12 +237,12 @@ func test_division_change_refills_combos() -> void:
 func test_team_filter_partitions_nationalities_by_alignment() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	var db := _load_db()
-	companion._db = db
+	companion.set_database(db)
 	var driver := _make_avatar_driver()
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
 
 	# Team 0 (blue/SIDE_BLUE default): every shown nationality is good-aligned.
-	var good_rows: Array = companion._nat_db_index.duplicate()
+	var good_rows: Array[int] = companion.nationality_rows()
 	assert_gt(good_rows.size(), 0, "at least one good nationality")
 	for i in good_rows:
 		assert_eq(int(db.get_nationality(i).get("alignment", -1)), AvatarDatabase.ALIGN_GOOD,
@@ -264,23 +255,23 @@ func test_team_filter_partitions_nationalities_by_alignment() -> void:
 	driver.set_widget_checked(side_red, true)
 	driver.set_widget_checked(driver.widget_id("SIDE_BLUE"), false)
 	driver.widget_activated.emit(side_red, "SIDE_RED")
-	for i in companion._nat_db_index:
+	for i in companion.nationality_rows():
 		assert_eq(int(db.get_nationality(i).get("alignment", -1)), AvatarDatabase.ALIGN_EVIL,
 			"team 1 shows only evil-aligned nationalities")
 
 	# The two teams partition every nationality (good->blue, evil->red; D-PLAYERINFO-5).
-	assert_eq(good_rows.size() + companion._nat_db_index.size(), db.get_nationality_count(),
+	assert_eq(good_rows.size() + companion.nationality_rows().size(), db.get_nationality_count(),
 		"good + evil = all nationalities")
 
 
 func test_initial_team_follows_checked_side_radio() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
-	companion._db = _load_db()
+	companion.set_database(_load_db())
 	var driver := _make_avatar_driver()
 	driver.set_widget_checked(driver.widget_id("SIDE_RED"), true)
 	driver.set_widget_checked(driver.widget_id("SIDE_BLUE"), false)
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
-	assert_eq(companion._team, 1, "the initial team follows the checked SIDE_RED radio")
+	assert_eq(companion.team(), 1, "the initial team follows the checked SIDE_RED radio")
 
 
 func test_degrades_without_avatar_db() -> void:
@@ -303,7 +294,7 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 	assert_true(driver.open_document(_doc_from_xml(_avatar_screen_xml(true)),
 			null, null, null, "player.mnu"), "the preview document opens on the driver")
 	var companion := PlayerInfoMenuCompanion.new()
-	companion._db = _load_db()
+	companion.set_database(_load_db())
 	# No resource root, so the preview mounts but loads no .3di (graceful); we only
 	# assert the surface is wired over the PLAYER_PREVIEW widget rect.
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
@@ -325,7 +316,7 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 
 func test_snapshot_reports_current_selection() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
-	companion._db = _load_db()
+	companion.set_database(_load_db())
 	var driver := _make_avatar_driver()
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
 	driver.set_widget_text(driver.widget_id("PLAYERNAME"), "Ghost")
@@ -395,7 +386,7 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 
 func test_accept_emits_avatar_chosen() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
-	companion._db = _load_db()
+	companion.set_database(_load_db())
 	watch_signals(companion)
 	var driver := _make_avatar_driver()
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
@@ -614,7 +605,7 @@ func test_real_player_mnu_loadout_populates() -> void:
 	assert_eq(doc.load_from_bytes(
 			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_player.mnu")), OK,
 			"the shipped jo_player.mnu fixture loads")
-	var driver := _driver_over(doc, "player.mnu", "PLAYER_INFO")
+	var driver := MenuDriverFixture.driver_over(self, doc, "player.mnu", "PLAYER_INFO")
 
 	assert_true(driver.has_widget("PRIMARY"), "the real player.mnu authors a PRIMARY combobox")
 	var pclass := driver.widget_id("PLAYERCLASS")
@@ -622,7 +613,7 @@ func test_real_player_mnu_loadout_populates() -> void:
 	assert_gt(driver.item_count(pclass), 0, "PLAYERCLASS carries its static class items")
 
 	var companion := PlayerInfoMenuCompanion.new()
-	companion._db = _load_db()
+	companion.set_database(_load_db())
 	companion.set_weapon_database(_load_weapons())  # injected (root-less unit), as if weapon.def had loaded
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
 
