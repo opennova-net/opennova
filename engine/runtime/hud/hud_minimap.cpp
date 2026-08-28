@@ -29,7 +29,7 @@ constexpr float kTerrainBoundFactor = 0.8f;
 // time on an additive child item: min(2 x 0.7529t, 1) == min(1.5058t, 1).
 // The enable_fog_pass resubmission at these call sites is the separate
 // depthspin shore pass, not the brightness source (see below).
-// [orig: 0xD0606060 @0x5a59c8/@0x5a6677; color | 0xFF000000 @0x6071C0;
+// [orig: 0xD0606060 @0x5a6679; color | 0xFF000000 @0x6071C0;
 //  capture-measured 2.00/2.02/2.04 vs a single 0.7529 pass]
 constexpr uint32_t kTerrainTint = 0xFFC0C0C0u;
 // The shore pass remaps each sector's local 0..1 UV into one of depthspin's
@@ -671,11 +671,13 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 
 	// Terrain: 512-unit sector tiles over the covered disc, sampled through
 	// the TRN routing table. Terrain rows run on NEGATED mission Y. The tile
-	// pass is UNMASKED — every mode draws it; bit9 only selects the
-	// enable_fog_pass depthspin water variant.
-	// [orig: render_terrain_decal @0x6071C0 called unconditionally from the
-	//  @0x5a5f40 walk (the bit9 test at the call site picks the fog-pass
-	//  argument); bound = diag*0.8*scale, tile snap 0x2000000 Q16, row index
+	// pass is UNMASKED — every mode draws it. The caller always pushes
+	// enable_fog_pass=1; bit9 only selects the adjacent use_alt_blend argument.
+	// [orig: HUD_DrawMapOverlay tests bit9 @0x5a6670, pushes enable_fog_pass=1
+	//  @0x5a6677, pushes use_alt_blend=1/0 @0x5a6684/@0x5a6696, then calls
+	//  render_terrain_decal @0x5a66a5; its water leg gates only on that
+	//  enable_fog_pass value and generated vertices @0x6079DC. Bound =
+	//  diag*0.8*scale, tile snap 0x2000000 Q16, row index
 	//  (-0x1000000 - y)>>25, sector =
 	//  Terrain_SectorGrid[16*(row&0xF)+(col&0xF)] - 1]
 	if (input.terrain.present &&
@@ -747,11 +749,11 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				}
 				emit_fan(clip_a_, kTerrainTint, out.terrain);
 
-				// The bit9 fog-pass leg redraws the identical clipped tile with
-				// depthspin UVs. Sector ids 2/4 select the lower half; 3/4 the
+				// Retail's unconditional fog-pass leg redraws the identical clipped
+				// tile with depthspin UVs. Sector ids 2/4 select the lower half; 3/4 the
 				// right half. The transparent mask texture replaces retail's
 				// ADDSIGNED/alpha-test cutout while preserving the same shoreline.
-				if (input.terrain.water_present && (flags & 0x200u) != 0) {
+				if (input.terrain.water_present) {
 					const float water_u0 = sector.quadrant_x != 0
 							? kDepthspinUvOffset : 0.0f;
 					const float water_v0 = sector.quadrant_z != 0
