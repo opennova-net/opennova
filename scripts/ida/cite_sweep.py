@@ -71,11 +71,13 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DEFAULT_URL = "http://127.0.0.1:13337/mcp"
 URL = DEFAULT_URL  # the IDA MCP endpoint; --url overrides
 
-CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/modtools", "godot/shaders", "godot/tests", "apps", "tests")
+CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/modtools", "godot/probes", "godot/shaders", "godot/tests",
+              "apps", "tests", "assets", "fixtures")
 DOC_ROOTS = ("docs",)
 # every tracked text form a marker has been written in: sources, shaders, the engine-side
 # .md records (ROADMAP.md), CMake lists
-CODE_EXT = (".cpp", ".h", ".hpp", ".gd", ".py", ".gdshader", ".gdshaderinc", ".json", ".md", ".txt", ".cmake")
+CODE_EXT = (".cpp", ".h", ".hpp", ".gd", ".py", ".gdshader", ".gdshaderinc", ".json", ".md", ".txt", ".cmake",
+            ".mnu", ".mns", ".ptu")
 DOC_EXT = (".md",)
 COMMENT_LEAD = re.compile(r"^\s*(?://|##?|\*|--|;)+\s?")   # a wrapped marker's continuation line lead-in
 

@@ -49,9 +49,9 @@ void append_bank(const Bank &bank, hud::HudMinimapBank bank_id, world::World *wo
             policy = world::minimap_blip_draw_policy(*entity, slot.param);
             // v4: the map medic marker -- a LOCAL-TEAM entity whose class
             // carries the charattr Medic attribute; the other team's bit is
-            // forced off at the producer (retail: draw_entity_labels_and_markers
+            // forced off at the producer [orig: draw_entity_labels_and_markers
             // @0x5a49e0 -- the team gate @0x5a4ac6/@0x5a4acf,
-            // AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3).
+            // AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3].
             medic = local_player != nullptr && entity->team == local_player->team &&
                             world->class_has_attribute(entity->player_class,
                                                        world::World::kCharAttrMedic)

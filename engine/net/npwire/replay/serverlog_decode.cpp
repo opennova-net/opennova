@@ -1,6 +1,6 @@
 #include <net/npwire/serverlog_decode.h>
 
-#include "../wire_cursor.h"
+#include <net/npwire/wire_cursor.h>
 
 #include <formats/sph/sph.h>
 
@@ -8,8 +8,8 @@
 
 // `/PROFILE` .sph server-log decoder — see docs/net/novaworld-net-re.md §5.22.
 // The chunk layout + per-record field maps are witnessed in the CServerLog_*
-// writer cluster (Jointops.exe @ 0x4e1a10-0x4e1e00) and the per-frame loop in
-// Game_ProcessMainFrame @ 0x5263f0.
+// writer cluster [orig: CServerLog_CloseAndFree @0x4e1a10, the cluster
+// @0x4e1a10..0x4e1e00] and the per-frame loop [orig: Game_ProcessMainFrame @0x5263f0].
 
 namespace opennova {
 

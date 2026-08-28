@@ -1,5 +1,8 @@
 // Authoritative checked-in WAC command registry.
-// Recovered from the Jointops.exe command table @0x82D290 and maintained here.
+// Recovered from the Jointops.exe command table and maintained here
+// [orig: the 165 x 44-byte WAC command table @0x82D290, read by WacScript_InitAndLoad
+// @0x4f91f0; each row's last field is that command's retail handler, e.g.
+// WacCmd_Elapse @0x4ecef0].
 #include <formats/wac/command.h>
 
 namespace opennova::wac {

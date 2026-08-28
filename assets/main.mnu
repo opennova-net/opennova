@@ -1,5 +1,5 @@
 <!-- Minimal main.mnu for fixtures/minimal/ — the boot entry screen. The engine
-     loads main.mnu and selects the "Startup" node [orig: sub_552500 @ 0x552651
+     loads main.mnu and selects the "Startup" node [orig: Menu_InitShellResources @ 0x552651
      -> CUIScene_SelectNodeByName @ 0x63b6b0]. Authored from scratch (no retail
      asset); parses through libs/mnu. Just the two paths a minimal host+join
      needs: LAN multiplayer and exit. -->

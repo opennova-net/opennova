@@ -2,8 +2,9 @@
 //
 // One C++ table is the source of truth for the 165 WAC keywords: name, kind
 // (condition/action), replication flags, param types, and derived argc/call_conv.
-// Extracted from the binary command table (Jointops.exe @0x82D290, 165 x 44-byte
-// records); argc/call_conv derived per the WacScript_InitAndLoad classification.
+// Extracted from the binary command table [orig: the 165 x 44-byte WAC command table
+// @0x82D290]; argc/call_conv derived per the WacScript_InitAndLoad @0x4f91f0
+// classification.
 // The authoritative rows live in command_table_data.cpp.
 #ifndef OPENNOVA_WAC_COMMAND_H
 #define OPENNOVA_WAC_COMMAND_H

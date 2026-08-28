@@ -2945,7 +2945,7 @@ void test_out_of_range_enemy_is_approached() {
 }
 
 // ---- the weapon channel on the retail data (SKIP-LEG without OPENNOVA_JO_ASSETS) ----
-// The body's weapon channel [orig: AnimMap_SelectWeaponChannel @0x4b5dc0..0x4b5e95]
+// The body's weapon channel [orig: Entity_UpdateInfantryPlayerBody @0x4b5dc0..0x4b5e95, the weapon-channel selection leg]
 // on the shipped weapon.def + US01 clip set: a pistol's special_hold selects the
 // pistol hold pose, its reload plays reload2 (never the rifle reload), a knife
 // holds the knife pose and stamps knife_attack on the click, and a rifle reload

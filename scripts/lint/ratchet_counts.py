@@ -80,15 +80,16 @@ def _in_build_dir(parts) -> bool:
 
 def count_test_private_pokes() -> int:
     count = 0
-    for path in (REPO / "godot" / "tests").rglob("*.gd"):
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        for line in text.splitlines():
-            stripped = SELF_POKE.sub("", line)
-            if PRIVATE_POKE.search(stripped):
-                count += 1
+    for sub in ("tests", "probes"):
+        for path in (REPO / "godot" / sub).rglob("*.gd"):
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                stripped = SELF_POKE.sub("", line)
+                if PRIVATE_POKE.search(stripped):
+                    count += 1
     return count
 
 
@@ -98,11 +99,19 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
     # engine/<group>/<lib>: the libs are one level below the four group dirs.
     # Post-flatten (2026-08-10) sources sit directly in the lib dir (nested
     # subdirs included); there is no src/ level any more.
+    # An allowlist entry is a bare lib-dir name (the whole lib is infrastructure)
+    # or an engine-relative path prefix (a subtree or one file with no retail
+    # counterpart to cite — the NovaWorld service, a transport shim, a standard
+    # codec); docs/maturity-program.md records why each is there.
+    prefixes = tuple(entry for entry in allowlist if "/" in entry)
     for lib_dir in sorted(p for p in engine.glob("*/*") if p.is_dir()):
         if lib_dir.name in allowlist:
             continue
         for path in lib_dir.rglob("*"):
             if path.suffix.lower() not in (".c", ".cc", ".cpp"):
+                continue
+            rel = path.relative_to(engine).as_posix()
+            if any(rel == prefix or rel.startswith(prefix.rstrip("/") + "/") for prefix in prefixes):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -235,7 +244,7 @@ def count_has_method_guards() -> int:
     has_method() probe is the same duck dispatch, just invisible to GDScript
     greps."""
     count = 0
-    for sub in ("src", "game", "modtools"):
+    for sub in ("src", "game", "modtools", "probes"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")

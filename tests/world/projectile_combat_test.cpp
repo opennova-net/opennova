@@ -1936,7 +1936,7 @@ void test_terrain_impact_samples_charmap_surface() {
 // A physical terrain stop resolves ammo word +0x74 into the permanent terrain
 // cache registry before presenting the ordinary impact. The record remains in
 // mission x/y here; the Simulation drain owns the one Godot x/-z fold.
-// [orig: Projectile_HandleTerrainImpact @0x4E9314 -> sub_6060D0]
+// [orig: Projectile_HandleTerrainImpact @0x4E9314 -> Terrain_AddScorchForEffectKind @0x6060d0]
 void test_terrain_impact_emits_permanent_scorch() {
     crt_srand(1);
     World world;

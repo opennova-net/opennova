@@ -16,7 +16,8 @@
 //   4. Runtime surface normals share the generated-map kernel and lock policy.
 //   5. The default (all-zero locks) field still taps across the full atlas.
 //
-// [orig: sub_402D20 @0x402D20.]
+// [orig: sub_402D20 @0x402D20 (jodemo.exe; in retail Jointops.exe 0x402D20 is a socket
+// send thunk) -- the quadrant picker, see engine/runtime/terrain_query/coords.h.]
 
 #include <runtime/terrain_query/coords.h>
 #include <runtime/terrain_query/height_field.h>
