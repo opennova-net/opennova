@@ -7,7 +7,7 @@
 // This is the P2 port of tests/novaworld/host_session_accept_test.cpp, retargeted onto the promoted np
 // free functions over a NapiNPServerCtx (connection state on NapiNPConnection; the reactive replies
 // produced by server_message_dispatch off ctx.config, P8). The WORLD-driven spawn / F3-ordering
-// flow is covered by joiner_connection_test / initial_state_burst_test / two_endpoint_socket_test (which
+// flow is covered by client_runtime_test / initial_state_burst_test / two_endpoint_socket_test (which
 // wire ctx.world); this World-less test asserts the reactive replies + the handshake legs.
 //
 // nw_encode_outbound is the client's exact inverse of the server's nw_decode_inbound, so it doubles as
@@ -450,7 +450,7 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 }
 
 // World-less: the reactive §5.1 reply path (dispatch_session_replies). No World wired => no spawn (the
-// World-path spawn/F3 flow is covered by joiner_connection_test / two_endpoint_socket_test). Asserts the
+// World-path spawn/F3 flow is covered by client_runtime_test / two_endpoint_socket_test). Asserts the
 // handshake / server-info / mission-metadata / loadout / roster / spawn-confirm reactive replies a retail
 // joiner expects.
 // The PR #403 retail->retail 00TRg witness pins both metadata files consumed

@@ -5,11 +5,6 @@ export interface ExpansionFileSummary {
   fileType: string;
 }
 
-export interface ExpansionGameSummary {
-  slug: string;
-  displayName: string;
-}
-
 export interface ExpansionSummary {
   slug: string;
   displayName: string;

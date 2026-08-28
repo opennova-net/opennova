@@ -1868,7 +1868,7 @@ add_test(NAME session_protocol COMMAND session_protocol_test)
 
 # NOTE (P8): the old joiner_session_test (the legacy novaworld::JoinerSession driven against the
 # retired HostSessionAccept) was deleted — np::JoinerConnection is the promoted in-match client and is
-# covered by tests/npruntime/joiner_connection_test.cpp against the real np server legs.
+# covered on the World path by npruntime_client_runtime + npruntime_two_endpoint_socket.
 
 # Connection registry / manager tests
 add_executable(connection_registry_test novaworld/connection_registry_test.cpp)
@@ -2601,7 +2601,7 @@ opennova_add_gated_test(npruntime_golden_client COMMAND npruntime_golden_client_
 # over the wire (single-thread poll-pump). Asserts mirror npruntime_client_runtime but over real
 # sockets, and adds the §5.2a S2C tag-order check (always-on, our host) + the env-gated cross-check vs
 # the retail LAN host/join capture (<OPENNOVA_CAPTURES>/golden, SKIP-LEG when absent). opennova_mission for the minimal
-# World/bms; opennova_app_common for net_sockets + net_datagram_socket + pcap_reader (ws2_32 on WIN32).
+# World/bms; opennova_app_common for net_sockets + net_datagram_socket (ws2_32 on WIN32).
 add_executable(npruntime_two_endpoint_socket_test npruntime/two_endpoint_socket_test.cpp)
 target_include_directories(npruntime_two_endpoint_socket_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_two_endpoint_socket_test

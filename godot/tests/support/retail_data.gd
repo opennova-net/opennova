@@ -24,31 +24,6 @@ static func mission_corpus() -> String:
 	return _dir("OPENNOVA_MISSION_CORPUS")
 
 
-## Captures and goldens: OPENNOVA_CAPTURES, else <repo>/.scratch. The root is
-## written as well as read, so it need not exist yet.
-static func captures_root() -> String:
-	var configured := OS.get_environment("OPENNOVA_CAPTURES").strip_edges()
-	if not configured.is_empty():
-		return configured
-	return ProjectSettings.globalize_path("res://").path_join("..").simplify_path().path_join(".scratch")
-
-
-## A file under the asset tree by case-insensitive name (retail archives mix
-## ITEMS.DEF and items.def); "" when the tree or the file is absent.
-static func asset_file(name: String) -> String:
-	var root := assets()
-	if root.is_empty():
-		return ""
-	var dir := DirAccess.open(root)
-	if dir == null:
-		return ""
-	var wanted := name.to_lower()
-	for entry in dir.get_files():
-		if String(entry).to_lower() == wanted:
-			return root.path_join(entry)
-	return ""
-
-
 ## The expansion names the install carries (the engine's own enumeration of
 ## <install>/expansion), sorted; empty without an install.
 static func expansions() -> PackedStringArray:
