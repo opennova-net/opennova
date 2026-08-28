@@ -689,6 +689,34 @@ maintainer OK (same day): the curated misnomer `render_loading_frame @ 0x521310 
 GameLoop_RenderFrame`, entry comment rewritten to the mode-table witness (the old
 "loading frame / previous name confirmed correct" note was wrong). IDB saved.
 
+## The reverb bed (witnessed 2026-08-28; NOT ported)
+
+Retail's reverb is a software DSP inside the audio mixer, driven by a 20-row x 24-byte
+coefficient table baked into the image at `0x7BF400` (`.text`, 4 words + 4 dwords per
+row) and optionally overridden by a text script `reverb.def`: `Audio_LoadReverbDefs
+@ 0x766d80` (called from `Audio_InitSubsystems @ 0x767124`) reads the file through the
+search paths when `File_CheckExists` finds it and `Audio_ParseReverbColorTable @ 0x7bf5e4`
+(the IDB name is a misnomer; it is the reverb table parser) fills up to 20 rows: two
+`AudioScript_ParseNumber` pairs are MMX-unpacked into the word quads and the two scale
+values are stored as `-22 * value`. **Stock JO/JO:CA ships no `reverb.def`** (none in the
+install's pffs or loose tree), so the baked table stands, and every one of its 20 rows is
+identical: words `(8192, 8192, 4096, 6144)`, dwords `(-2816 = -22*128, -3960 = -22*180,
+0, 0)`. The row index is the current reverb id `dword_3346FA0`, written once per player
+tick by `Entity_UpdateInfantryPlayerBody @ 0x4b633f` (`sub_766460`, the setter) from,
+in priority order: the userpoint case-4 value, the occupied building's def word +432
+(the `reverb` items.def property, `ItemDef_ParseProperty @ 0x4a015a`), else the mission
+default `dword_A762E4` (written `@ 0x4b5f9e`); the F3 environment page prints it as
+`Reverb: %i` (`Debug_DrawEnvironmentValues @ 0x4ef16a` via the getter `sub_766470`).
+The mixer reads the row at `0x7bdd12..0x7bdd4e` (`lea ebx,[ebx+ebx*2]; lea ebx,[ebx*8]`
+= index * 24, copied into the DSP state at `0x798898..0x7988A8`) inside a self-modifying
+MMX block (`0x7bdcf0` patches a jump opcode on a device-caps compare), so whether index 0
+bypasses the reverb or applies the same coefficients is unresolved until that DSP is
+decompiled. Reimpl: NONE of this is ported. `godot/game/world/mission_audio.gd`
+`_apply_reverb` installs a Godot `AudioEffectReverb` whose room size scales with the
+mission header `reverb` id -- an invented stand-in that retail does not compute (retail's
+rows do not vary with the id at all in stock data). Disposition pending the maintainer:
+either port the mixer DSP (a slice of its own) or ledger the stand-in as a D-SND row.
+
 ## Verdict
 
 **matching** — LWF container layout, DBF layout, member-selection modes, the selection RNG

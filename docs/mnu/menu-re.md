@@ -913,20 +913,19 @@ screen. `MenuDriver._activate_widget` now emits `widget_activated` before dispat
 ACTION list: observers read the same still-live control values retail's callback reads,
 and the jump follows.
 
-Reimpl: the exclusivity is hosted as a full-menu transparent catcher overlay
-(`ComboPopupOverlay`) added as the owning `MnuMenu`'s **last child** on open, with the
-styled popup box inside it — last-in-tree wins Godot mouse picking and draw order, which
-Godot's z_index does not affect (the pre-fix popup was a z-lifted child of the combo:
-drawn on top but siblings stole its clicks, and nothing closed on outside press, so
-`player.mnu`'s stacked-rect dropdowns could pile open on top of each other). The catcher
-implements the witnessed outside-press close/consume + dead-cell rule; `MnuMenu`
-tracks the single active combo (`register_open_combo`/`close_active_combo_popup`) and
-closes it on every screen change; a combo leaving the tree or losing tree visibility
-closes its own popup. Bare shell-built combos with no owning menu (a case the original
-does not have) keep the legacy child-of-combo popup. See **D-MNU-11** (fixed) and
-**D-MNU-12** (kept). Pinned by `mnu_combo_test.gd::test_combo_popup_overlay_hosts_exclusive_input`,
-`::test_combo_single_open_per_menu`, `::test_combo_outside_press_closes_and_nothing_else_opens`,
-`::test_combo_press_on_own_cell_keeps_popup_open`, and `::test_screen_change_closes_popup`.
+Reimpl (the compiled MenuFrame/MenuDriver path, the one menu runtime since the R2
+cutover): `MenuFrameCompiler::emit_combo_popup` (engine/runtime/menu/menu_frame.*) draws
+the open combo's LIST_BOX popup as the first op of the menu-top overlay, so it wins the
+draw order over every sibling, and while a popup is open `MenuDriver`
+(godot/game/menu_driver.gd) routes the pointer through `pump_popup_mouse` /
+`combo_popup_contains` / `combo_popup_row_at` only, implementing the witnessed
+outside-press close/consume + dead-cell rule; the driver tracks the single active
+combo (`close_active_combo_popup`) and closes it on every screen change. The earlier
+Control-tree hosting (a `ComboPopupOverlay` catcher added as the `MnuMenu`'s last child,
+and before that a z-lifted child of the combo whose clicks siblings stole, so
+`player.mnu`'s stacked-rect dropdowns could pile open) went with the `MnuMenu` tree.
+See **D-MNU-11** (fixed) and **D-MNU-12** (dissolved into the compiled path). Pinned by
+the `menu_frame_compiler` ctest and the menu-driver GUT legs.
 
 ## Marquee / credits `[orig: CMarqueeWnd @ 0x65c430; marquee_load_credits_from_ini @ 0x65c5a0]`
 
@@ -1067,7 +1066,9 @@ widget through a single shell `.lwf` profile - all corrected.
 Every screen event stores the active screen's `MUSICVAR` field (screen +0x14) into
 AudioVM Var2 at `0x54eff4`. The write is unconditional: an absent field contributes
 its parsed default zero, and showing the same screen again repeats the store. The
-runtime mirrors that rule through `MnuMenu::apply_music_for_screen`.
+runtime mirrors that rule in `MenuDriver` (godot/game/menu_driver.gd): every screen show
+reads `MnuDocument::get_screen_music_var` (the parsed default zero when the field is
+absent) and stores it through `MusicDirector.set_var`.
 
 ## XML entities `[orig: XML_ParseCharEntity @ 0x769cc0; table @ 0x85a628]`
 
@@ -1273,6 +1274,17 @@ Accepted/divergent (each a documented decision, not a defect):
   membership, `KeyBinding_BuildFilteredTable @ 0x54c2b0`) rides the flag word for future use.
 - **D-CTRL-3 (read-only):** live double-click rebinding, DEFAULTS/CLEAR_KEY mutation, and profile
   persistence are deferred (no game input-action layer consumes the bindings yet).
+- **D-CTRL-4 (`hudcolor` shadowed by `huddetail` on F6) - PERMANENT 2026-08-15:** retail's
+  `huddetail` action (catalog row 50, dispatch code 19) first-match-shadows `hudcolor`
+  (row 76, dispatch code 10, hidden from the rebind UI by the D-CTRL-2 flag gate) on the
+  shared default F6; code 19 is a live arm of the in-game per-item-class handler
+  `Input_HandleActionBinding_0 @0x4e0420` (installed at itemDef+0x170 for the troop/tank
+  inputFunctionClass, consulted before the menu-context default arm `@0x49c27d`), so the
+  earlier no-op reading was refuted. The declutter cycle is ported (interface/hud-re.md,
+  the HUDDECLUT system), so F6 drives `huddetail` here too; the reimpl keeps the
+  `hudcolor` row reachable by rebinding, which retail's shadowing leaves dormant on the
+  stock keymap (ledger register; the palette port itself is hud-re.md's
+  `hud_color_index` scheme).
 
 - **D-MNU-1 (`%VAR%` mechanism):** per-field build-time expansion vs whole-buffer
   pre-parse - the runtime result matches for stylesheet vars; shell-var-in-text is a
@@ -1303,14 +1315,17 @@ Accepted/divergent (each a documented decision, not a defect):
   NATIONALITY (LIST_BOX POSITION `0,65 -> 214,306`, `%SEMIOPAQUE_BLACK%` background) this
   placed the translucent list at `y=20` over the sibling DIVISION/COMBO_LIST combos, whose
   text bled through — the "overlapping dropdown" look. Fixed: `build_combo` passes
-  `list_box.position` via `MnuCombo::set_popup_rect`; `open_popup` uses the authored
+  `list_box.position` via `MnuCombo::set_popup_rect` (the historical fix site; the
+  compiled path carries the same authored rect in `MenuFrameCompiler::combo_popup_rect`);
+  `open_popup` used the authored
   rect when present (which also gives PLAYERVOICE its upward open), else the below-combo
   fallback for shell-built combos.
 - **D-MNU-8 (combo row-height default) — FIXED 2026-06-23c:** the list row height is the
   font "W" glyph height `[orig: CListWnd_DrawItems @ 0x643f30 -> font_cache_measure_text_default @ 0x653680]`,
   overridden by `this+201` (the `<MI>`/`<MIN_ITEM_HEIGHT>` value; ctor default `-1`
   `[orig: CListWnd ctor @ 0x643bb0]`) only when `>= 0`. The reimpl defaulted to a hardcoded
-  16px. Fixed: `MnuCombo::effective_item_height` returns the authored MIN_ITEM_HEIGHT,
+  16px. Fixed (historical fix site `MnuCombo::effective_item_height`; the compiled
+  path keeps the rule): the row height is the authored MIN_ITEM_HEIGHT,
   else the item font line height, else 16. The shipped `player.mnu` lists author
   MIN_ITEM_HEIGHT=20, so they were already correct; the default fallback is the latent
   divergence this closes.
@@ -1593,7 +1608,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `MnuDocument` + `godot/game/menu_shell.gd` |
 | `Menu_RenderFrame @ 0x54b7c0` -> `CUIScene_DrawScreensAndCursor @ 0x63bf60` | the scene draw walk -> `MenuFrameCompiler::compile` + interleaved `MenuDrawList::draw_ops` — `engine/runtime/menu/menu_frame.cpp` |
 | `CUIElement_Draw @ 0x64a8a0` / `CStaticWnd_Render @ 0x657b10` (the Draw vtable family) | the per-widget and cross-kind painter order — `MenuFrameCompiler::walk_widget` -> `draw_ops` -> `MenuFrame::_draw` |
-| `CWnd_SetVisualState @ 0x646340` + `widget_process_mouse_event @ 0x647a00` (state write +236) | `MenuFrameCompiler::visual_state_for` + `MenuWidgetState` |
+| `CWnd_SetVisualState @ 0x646340` + `widget_process_mouse_event @ 0x647a00` (state write +236) | `MenuFrameCompiler::pump_visual_state` + `MenuWidgetState` |
 | `CWnd_GetFontAndColors @ 0x646a70` (vtable+64 draw-time font/color inheritance) | `MenuFrameCompiler` `WidgetNode::font/colors` |
 | `CStaticWnd_DrawLabel @ 0x656fb0` + `draw_text_with_cursor @ 0x6533b0` + `font_cache_draw_text_scaled @ 0x653170` | `MenuFrameCompiler::emit_widget_text` / `emit_caret` over `opennova::hud::GameFont` |
 | `CEditWnd_Render @ 0x6619e0` (focus state-2, blink, password, scroll window `update_edit_scroll_range @ 0x661790`) | the compiler's edit leg + `MenuWidgetState.focused/caret` |

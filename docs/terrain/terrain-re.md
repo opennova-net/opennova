@@ -39,10 +39,10 @@ partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
 | `lighting` | terrain lighting colors + per-position modulation | **retail** `terrain_sector_compute_lighting @ 0x5c7550`; `Terrain_SetLightingColors @ 0x5C4B10` / `Terrain_GetModulatedColorAtPos @ 0x5C5FE0` are jodemo-era names with no kong function at those addresses (unverified — env-tod-re's VERIFY-pending); fog via `Render_SetFogState @ 0x58a950` → `CD3DDevice_SetFogParameters @ 0x677960` |
 | `texture_preprocess` | byte-faithful detail coefficient map, DBlend normalization, and paired near/far mip chains | **retail** `Texture_GenerateNormalMap @ 0x58c070`, `PolyTrn_InitTextures @ 0x60aaa0`, `GTexture_Downsample2x2_RGBA8 @ 0x687000`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270` |
 | `mesh_simp` | mesh simplification (edge-collapse) | **BYTE-IDENTICAL — verified** (2026-06) by the since-retired `dvd4_parity` (canonical `.cpt`) + `parametric_parity` sweeps over the Sample/Gradient/Checker64/Perlin TrnGen corpus (4.6–6.8 MB CPTs each, no longer carried in `fixtures/`); the tracked gate today is `tests/cpt/cpt_roundtrip_test` over the committed `assets/mnml.cpt` plus the gated retail `.cpt` sweep. The in-code "divergence point / vertex 1223" logging is leftover debug scaffolding from when parity was being achieved, now inert |
-| `tpm` (`engine/formats/tpm`, ex `mesh_data` here) | the TPM1 tile-mesh container (.tml/.tms) read/write | **TrnGen.exe** `MeshData_LoadFromFile @ 0x404100`, `MeshData_WriteToFile @ 0x403FE0` (the addresses are TrnGen's — kong retail holds `CAdminServer_*` there); §The TPM1 tile-mesh format below |
-| `packing` (`engine/formats/tpm/src`, ex here) | the TPM1 on-disk index codecs | **TrnGen.exe** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) + the unpack/10-bit pair `@ 0x403DD0/0x403E70/0x403EF0` |
+| `tpm` (formerly `engine/formats/tpm`, removed with ADR 0037 in d57608b3d; ex `mesh_data` here) | the TPM1 tile-mesh container (.tml/.tms) read/write | **TrnGen.exe** `MeshData_LoadFromFile @ 0x404100`, `MeshData_WriteToFile @ 0x403FE0` (the addresses are TrnGen's — kong retail holds `CAdminServer_*` there); §The TPM1 tile-mesh format below |
+| `packing` (formerly `engine/formats/tpm/src`, removed with ADR 0037; ex here) | the TPM1 on-disk index codecs | **TrnGen.exe** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) + the unpack/10-bit pair `@ 0x403DD0/0x403E70/0x403EF0` |
 | `tristrip` (incl. the ex-`mesh_data` remap pass) | strip conversion + the cache-order vertex remap the bake runs before writing .tms | **TrnGen.exe** `sub_4068E0` (strips), `sub_404480` via thunk `sub_404610` (remap) |
-| `depthmap` | depth/height map storage (the raw `.dep` intermediate's read/write lives in `engine/formats/dep`) | in-code |
+| `depthmap` | depth/height map storage (the raw `.dep` intermediate's read/write formerly lived in `engine/formats/dep`, removed with ADR 0037) | in-code |
 | `terrain_query` raycast (ENG-3 B1, ported with #209) | world-space height samplers + the segment raycast used by runtime consumers | **retail** §Runtime terrain queries below (`Terrain_SampleHeightBilinear @ 0x6067b0`, `Terrain_RaycastHeightmapLoRes @ 0x60cb80`, `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`) |
 
 The tile overlay and foliage that render over the terrain surface have their own
@@ -54,8 +54,8 @@ live top-tier terrain shader has no terrain-tint multiplier
 
 ## The TPM1 tile-mesh format (.tml/.tms — TrnGen.exe witness map)
 
-The tile-mesh container the bake writes and the CPT export re-reads. Reimpl:
-`engine/formats/tpm` (read/write + the index codecs; magic-shaped lib name,
+The tile-mesh container the bake writes and the CPT export re-reads. Reimpl (historical,
+removed with ADR 0037 in d57608b3d): `engine/formats/tpm` (read/write + the index codecs; magic-shaped lib name,
 precedent bfc1, since the two extensions share one format), with the
 strip/remap bake pass staying in `engine/runtime/terrain` (`tristrip`).
 The retail `S0_00_00.tml` sample and its `tpm1_roundtrip` byte gate were
@@ -947,7 +947,7 @@ D-TERRAIN-9 were retired with the ONED terrain preview.
 ## Cross-references
 
 - Reimpl: `engine/runtime/terrain`, `engine/runtime/terrain_query` (ADR 0020, the world→height seam),
-  `engine/formats/tpm` (the TPM1 tile mesh) + `engine/formats/dep` (the depth intermediate) — ADR 0030.
+  formerly `engine/formats/tpm` (the TPM1 tile mesh) + `engine/formats/dep` (the depth intermediate), placed under ADR 0030 and removed with ADR 0037 (d57608b3d).
 - The reference data path: the TrnGen byte-identical terrain generator (canonical).
 - Surface consumers with their own records: tiles (R3), foliage (R2), env
   far-colormap bake (#19).

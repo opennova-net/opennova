@@ -330,7 +330,7 @@ Float math is fine; only axis order, angle unit, and absolute-vs-local rotation 
 
 ### 3.2 Implementation state (at PR #45 close)
 
-- `engine/formats/threedi`: `threedi_lw.h/.cpp` parser (v10) + IR conversion with skeleton/one-weight
+- (on the closed PR #45 branch, not in the tree) `engine/formats/threedi`: `threedi_lw.h/.cpp` parser (v10) + IR conversion with skeleton/one-weight
   skinning for flag-1 LODs; parse tests as above. v8 branch and textures deferred.
 - `pyopennova.lw_animation` parses decoded `ANM`, `ACA`, `SAF1`, `KSA`;
   `build_animation_context()` returns `LwAnimationContext` when an ANM exists and ADM/BAD does
@@ -363,7 +363,9 @@ Float math is fine; only axis order, angle unit, and absolute-vs-local rotation 
 
 Stable IDs for the deferrals stated in §3.2/§3.3 (dispositions in the canonical vocabulary of
 [divergence-ledger.md](../divergence-ledger.md)). The whole record is unlanded (PR #45 closed);
-these rows ride whenever an LW import is revived.
+these rows ride whenever an LW import is revived. They left the ledger's per-domain tables
+on 2026-08-28 (the parser is not in the tree, so there is no OpenNova behavior to diverge);
+this catalog is their home until an import lands.
 
 | ID | Divergence | Disposition |
 |---|---|---|

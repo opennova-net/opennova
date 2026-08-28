@@ -237,7 +237,10 @@ Everything below was decompiled and read this session (pseudocode dumps:
    `pos.z += 2·vel_z`;
    `movement collision resolver @ 0x4b2bd0 (entity, root_drop, height)`:
    ≤0 ⇒ ground push-out (`pos.z -= ret`), vel_z = 0, water-exit sounds (15/16),
-   **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`;
+   **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`
+   (`dword_C6EAE4` is the writable named value `fallmps`, seeded 13 by
+   `WacScript_FreeAll @ 0x4f638b` at every mission load; ported 2026-08-28 as
+   `World::wac_values.fallmps`, authority-gated and skipping Indestructible bodies);
    >61440 ⇒ set swim (flag 0x2000, states 47/31 hmm 47=tread/31 per anim availability).
    The 81920·dir pool-0 probe → state 32 sits in the ON-LADDER block, not a
    water-edge climb-out: it is the ladder CONGESTION hold (someone climbing
@@ -311,7 +314,6 @@ and the vehicle rows 21/23) — ported 2026-07-16.
    the manual pins CL as ladder, and the entry/chase/exit semantics landed with the
    D-COL-5 port 2026-08-15 (§30).
 7. Perception scan fn (called at dump line 2377, kong-misnamed `Entity_SpawnProjectile`) + LOS `Entity_CheckLineOfSightTerrainAndEntities`.
-8. `dword_C6EAE4` (fall-damage gravity scale) value/source.
 9. Death move-step movers `0x461c30`/`0x461cb0` (ids 0/2) — define + decode.
 10. Vehicle-SM per-tick invocation site (event-callback path is confirmed; the tick-mode caller for
     vehicles not yet pinned — likely inside `Entity_UpdateVehiclePhysics`).
@@ -377,13 +379,14 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 
 - **Infantry ground locomotion** (`Entity_UpdateInfantryAI @ 0x4b9910` → `AiSystem::tick_infantry`,
   engine/runtime/world/infantry.cpp): **MATCHING**, with the named, cited deviations —
-  - **D-INF-1 — PRIMARY FIXED 2026-07-29; SECONDARY OPEN.** Primary locomotion/body
+  - **D-INF-1 — PRIMARY FIXED 2026-07-29; SECONDARY FIXED 2026-08-17.** Primary locomotion/body
     switches now retain independent source/target playheads, accumulate the exact
     float32 10/15-tick weight, blend raw root/capsule lanes before conversion, carry
     only target events, and pose render plus authoritative collision from the same
     blend `[orig: AnimMap_UpdateEntity @ 0x40b5f0;
-    AnimChannel_BlendTwoChannels @ 0x410740]`. The secondary weapon channel still
-    changes state without its retail transition blend.
+    AnimChannel_BlendTwoChannels @ 0x410740]`. The secondary weapon channel re-inits
+    through the same shared body since 2026-08-17 (`InfantryState::begin_weapon_transition`
+    mirrors `begin_body_transition`; §14.8 blend window).
   - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) are
     partially driven. Commands 123/124/125 authored spawn attachment now resolve `wp_number` as the
     target SSN, apply the IDA-confirmed seat filter (123 passenger-only, 124 rejects `ctrlx`, 125 any),
@@ -1976,7 +1979,7 @@ store (details inline below), added D-COL-9, and extended D-COL-5/-8.
   min-penetration plane wins, second-best assists (added at half when it grows the
   component); per-section force rotated to world; total clamped to
   `sourceBoundRadius << 7` then `(f+16)>>5` (the length ftol is min-clamped by
-  `flt_7C19E0 = 2147352576.0`, the shared sqrt-overflow guard on every distance
+  `flt_7C19E0 = 2147418112.0` (0x7FFF0000), the shared sqrt-overflow guard on every distance
   in the query set). Type dispatch on containment:
   4 CL ladder frame -> flag 0x1 — the anchor is TWO rotations through the section
   matrix (x/y from `(midX, midY, point-local z)`, z from `(midX, midY,
@@ -2228,7 +2231,7 @@ and a 0.5 m player detection sphere (§1.2.2.7).
 | D-COL-1 | ~~one yaw-only world matrix shared by every section~~ CLOSED for full-Euler statics and non-organic effective-LOD0 ordinary/spinner PANM. `CollisionWorld::target_view` requests the final array from `ICollisionSectionMatrixProvider`; `Simulation` uses canonical LOD0 only (a nonempty local PANM block wins, otherwise model-level PANM is inherited), scopes liveness to the active transform family, applies current AI controls, and defaults untouched slots to the Simple entity matrix. `PanmClock` samples one full 32-bit process-uptime value per rendered frame for models/materials/collision; direct/headless sims use deterministic `logic_tick * 16`. The fixed→render, pose × entity, render→Q22/16.16 sandwich preserves retail x87 PC53 add order and final truncation. Missing, inert, invalid, or count-mismatched data retains the exact Simple fallback | Generic loads the canonical first RLOD rather than the render-selected/first-live LOD; callback returns one final matrix per COBJ and `callback_matrix[i]` ↔ `COBJ[i]` by `+64`/`+108` pointer lockstep. COBJ parent/offset and CXLT are not selectors or additive transforms; render and collision consume the same GetTickCount-derived DWORD | tilted statics and ordinary/spinner parts collide at their rendered pose. Covered by `collision`, `threedi_panm_runtime`, `simulation_test.gd`, `panm_clock_test.gd`, `mission_presentation_test.gd`. Camera-derived types 3/4 are D-COL-10; pool-0 skeletal zones now use the separately ported per-entity current-pose path (§15.8b), not Generic PANM |
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
 | D-COL-3 | **FIXED 2026-08-23:** production models consume GHDR+24's exact Q16 gpm[5]; `items.def scale` parses by the retail `atof × 65536` truncation and feeds visual matrices, collision matrices/inverses, bbox midpoint, movement/proximity, projectile local/wire proxies, and shadow entity bounds. The collision-block gate suppresses the whole bound/center stamp, the base bound is scaled with the signed `+0x8000` multiply before the signed max against the unscaled first husk, then receives +0x1000. Typed wire rows use the same `ResolvedCollisionShape`; the 1u replica compatibility radius and out-param shape API are deleted. | entity+0 boundRadius = max(scale × exact model gpm[5], first-husk gpm[5]) + 0x1000, stamped only when the model carries collision data; bbox center and matrix use the same effective scale [orig: `Entity_InitFromModel @ 0x40dc30`] | native parser/FFI/model/collision/replica/projectile regressions plus GUT wire-pose coverage pin the cutover; only headerless in-memory model fixtures derive a fallback radius |
-| D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
+| D-COL-4 | NARROWED 2026-08-23: the eye test point is the org1 at-rest CameraOffset stand-in built in `collision_resolve.cpp` when the caller carries no offset (h = max(top - bottom, 0x9000), Z = h, lean at rest so X = Y = 0) | eye point = pos + the entity's +0x74 CameraOffset, written by the think before the resolver call (org1 `@0x4b9910` kong 155519-155521; lateral = (3*(h*sin(lean)))>>2 rotated by Yaw) | residual: the live-lean CameraOffset vs the at-rest stand-in; head and eye no longer share a column (the 00TRg wave-3 convoy pin, probe diff 2026-08-23) |
 | D-COL-5 | PORTED 2026-08-15 (§30): entry gate + anchor snap/bump, recontact mask 0x1 + the 2-point capsule, the per-tick alignment chase, states 32–35 selection (org2 every-tick override; org1 33/35 select + congestion hold), gravity suppression + horizontal-root zeroing, the ±120° view clamp, the arms lock, the side/back dismounts, the on-ladder jump push, the grounded bottom dismount, the exit push + pitch restore, and the org1 `Flags 0x80` Z-chase gravity variant. Evidence: `collision` ctest (entry/recontact/exit trio) + `infantry` ctest (climb cycle, bottom exit + jump-off, org1 hold/top/0x80) | the same legs `@ 0x4b3245-0x4b3495 / 0x4b3c5c-0x4b3d69 / 0x4b7484-0x4b76d8 / 0x4b7f0c / 0x4b7fba-0x4b8019 / 0x4bf6c1-0x4bf6e5 / 0x4bf917-0x4bfad8` | residuals: the AI move-order WRITER (aiRuntime 0x400 entry orders, `attachParent==self` + `+0x2FC/+0x300` X/Y direct-move chase, MoveOrder 0x100/0x200 AI bump variants) rides the AI-order slice — the org1 legs are dormant until it lands; the carried/parachute halves of the shared 0x100060/0x100020 gates ride their slices; the authority now resolves a snapshot-owned remote player's collision tail, but `remote_player_body_anim` does not yet apply org2's every-tick climb-state override (MP display residual). The earlier "platform/seat/deck carry" description was a terminology error corrected from the Super OED manual |
 | D-COL-6 | **FIXED 2026-08-23:** authority pass-0 type-10 contacts are published as exact source/trigger pairs by `CollisionWorld::resolve_entity`; snapshot-owned remote org2 bodies run the same collision tail; `zone_capture_contact_tick` drains the stream into request/presence state with no MoveOrder or radius fallback | `Entity_ComputeBoneCollisionForce @0x4AE150` sets 0x200 at `@0x4AEB7B`; resolver callback gate `@0x4B31DD..0x4B3238`; `Server_OnPlayerTouchCaptureZone @0x500BA0` | Pinned by `collision_test` (authority/dedupe), `infantry_test` (stationary remote body producer), and `zone_chain_test` (authored narrow CT box vs broad gameplay radius) |
 | D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined |
@@ -3273,7 +3276,7 @@ block but never acquire), and no shipped file resolves a nonzero facing.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-4 | The infantry combat pass is ported (2026-07-16, `AiSystem::infantry_combat_think`/`infantry_fire_pass`): 32-tick staged perception (calm half-range, 4-phase schedule, lastAttacker fallback, slot[3]+aimPoint+damageTimer commit, priority-mark decay), the attack-anim reactions (155–158/165/166 by distance/health/hit + post_attack 151), approach/hold move modes, reload (anim 65 + magazine), lead + sawtooth aim error, the walking-fire latch, and the `.bad` anim-event fire into the ring + RoundSim. The 2026-07-20 parity pass added direct `AiSlot[1]&0x200` Berserk friendly filtering [orig: `Entity_FindTargets @ 0x53a7ea-0x53a824`] and the actual-hit move/group + wasHit/timer/attacker chain [orig: `Entity_HandleDamageTrigger @ 0x407310`; `Entity_OnDamageReceived @ 0x4af800`] | retail near misses remain listener-only [orig: `Projectile_UpdatePhysics @ 0x4ea99a-0x4ea9f2`]; the nearest-first scan penalties (corpse/drowning/far x2), fresh-corpse (<=16-tick) targets, forced-target words, cover-seeking (`ai_find_cover_position`), retreat/board modes, and the §4-item-13 idle look-at are unported | OPEN (friendly/hit reactions fixed; the remaining behavior residuals tracked) — §17.1-§17.6 carry the witnesses |
+| D-AI-4 | The infantry combat pass is ported (2026-07-16, `AiSystem::infantry_combat_think`/`infantry_fire_pass`): 32-tick staged perception (calm half-range, 4-phase schedule, lastAttacker fallback, slot[3]+aimPoint+damageTimer commit, priority-mark decay), the attack-anim reactions (155–158/165/166 by distance/health/hit + post_attack 151), approach/hold move modes, reload (anim 65 + magazine), lead + sawtooth aim error, the walking-fire latch, and the `.bad` anim-event fire into the ring + RoundSim. The 2026-07-20 parity pass added direct `AiSlot[1]&0x200` Berserk friendly filtering [orig: `Entity_FindTargets @ 0x53a7ea-0x53a824`] and the actual-hit move/group + wasHit/timer/attacker chain [orig: `Entity_HandleDamageTrigger @ 0x407310`; `Entity_OnDamageReceived @ 0x4af800`] | retail near misses remain listener-only [orig: `Projectile_UpdatePhysics @ 0x4ea99a-0x4ea9f2`]; the nearest-first scan penalties (corpse/drowning/far x2), fresh-corpse (<=16-tick) targets, forced-target words, cover-seeking (`ai_find_cover_position`), retreat/board modes, and the §4-item-13 idle look-at are unported. The 2026-08-28 pass ported the pre_attack 152 reaction, the cover_idle/cover_run 163/164 hit flinch with the think-cadence wasHit consume, the unconditional moveTimer stamp and the no-reaction fall-through into the approach arm, the command-126 and target-ground approach gates (`Entity_CheckGroundHeightAtPosition @ 0x4aff70`), the alerted-idle predicate (49 with a slot[3] target, wasHit not a term), the availability-gated wounded gaits, the same-think waypoint step on a 0 cooldown, and the flt_7C19E0 sqrt clamp on the waypoint distance | OPEN (friendly/hit reactions fixed; the remaining behavior residuals tracked) — §17.1-§17.6 carry the witnesses |
 
 ## 18. Appendix: fire presentation + the LOS raycast internals (engine-research, 2026-07-16 session 4)
 
@@ -4704,7 +4707,7 @@ itemDef+0x8B8, then `"helo1"`) [orig: `Entity_InitVehicleAIFromDef
 @ 0x4686C0` — the seeds @ 0x4688C7/@ 0x4688D3]. The port:
 `PromoteOptions::ai_profile_speeds` (raw values, keyed by ai_textfile;
 scale applied at the brain seed in `init_brain`), resolved natively by
-`mission::resolve_ai_profile_speeds` inside `run_mission_boot` (S9, ADR
+`mission::resolve_ai_profiles` (engine/runtime/mission/runtime_boot.cpp, driven by `boot_mission`) inside `run_mission_boot` (S9, ADR
 0028; the former shell `AiProfileSpeeds.build` reader + the
 `set_ai_profile_speeds` seam are deleted). d_zode's patrol 75 → 21845 (≈0.333 u/tick), pinned by the
 `mission_promote` ctest. The REST of the profile parse stays D-AI-11 (h).
@@ -5032,8 +5035,9 @@ radius (`@ 0x4e695a-0x4e699c`); blast armor gate ammo `penetration_kz` (+200)
 below def+0x192; dying gate (+0x124); occupant scale for vehicles
 (`Entity_ApplyOccupantDamageScale @ 0x4e5a50`); NoDie (attrib 0x40000000)
 clamps to health-1. Persons then run the death-anim pick at damage time (bone
-hardcoded 1 `@ 0x4e6ac7`, quadrant from the blast direction, cause 2/3 by a
-~25% PRNG roll `@ 0x4e6a84`, 4 when the source kz is Slash) + the tag-23
+hardcoded 1 `@ 0x4e6ac7`, quadrant from the blast direction, cause 2, or 3 by a
+~25% PRNG roll `@ 0x4e6a84` drawn ONLY when the surface distance lies in
+[4.0, 8.0) u `@ 0x4e6a61` (no draw outside the band), 4 when the source kz is Slash) + the tag-23
 impact effect; non-persons run the breakable-section sweep (collision sections
 with byte flag & 2 inside the blast OR into the entity sectionMask
 `@ 0x4e6e48`) and the health drain + deathCallback(2) + kill scoring.
@@ -5125,7 +5129,7 @@ pools: `Entity_UpdateAllEntities @ 0x4c2100` drains `DeathPiece_TickAll`
 UNCONDITIONALLY on every peer, so the death chain's kz blasts detonate and
 the pieces fly on a pure client too. Ported: JoinerConnection surfaces both
 tags, `ClientReplicaPipeline::apply_entity_death` folds them (row Health=0 +
-a once-drained record), `Simulation::apply_joiner_gameplay_events` runs
+a once-drained record), the joiner world bridge (`engine/net/npruntime/joiner_world_bridge.cpp`) runs
 `destruction_notify_item_damage(world, twin, 4)` on the materialized world
 row, `World::run_logic_tick` runs the explosion/dead-settle/piece drains
 under the MP visual-client predicate, and `mission_presentation.gd` builds the

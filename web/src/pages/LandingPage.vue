@@ -7,7 +7,7 @@
       </h1>
       <p class="mt-5 max-w-2xl text-base text-ink-muted">
         OpenNova runs the NovaWorld servers these games connect to. The launcher points your game
-        at them and manages expansions. Your install stays stock — no patched executables.
+        at them and manages expansions. Your install stays stock: no patched executables.
       </p>
 
       <div class="mt-8 flex flex-wrap items-center gap-3">

@@ -30,7 +30,7 @@
              bare game headers over empty grids. -->
         <div v-if="totalHosts === 0" class="rounded-panel border border-border bg-panel p-10 text-center">
           <p class="text-lg font-semibold text-ink">No games are being hosted right now</p>
-          <p class="mt-2 text-sm text-ink-muted">Be the first — host a game and it will show up here.</p>
+          <p class="mt-2 text-sm text-ink-muted">Be the first: host a game and it will show up here.</p>
         </div>
 
         <template v-else>

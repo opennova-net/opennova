@@ -5,7 +5,8 @@ loose-vs-archive precedence and its `/d` gate, the search-path walk, the PFF
 container/entry formats, and the read disciplines. Reimplementation surface:
 `engine/base/vfs` (`vfs.cpp` — the engine-faithful mount stack), `engine/formats/pff`
 (container codec), `godot/src/resource_index/resource_root.cpp`
-(`mount_runtime`) and `launch_flags.gd` (`/d`). Binary: retail
+(`mount_runtime`) and the engine `LaunchFlags` (`engine/base/resource_index/boot_policy.h`,
+`loose_override` = `/d`, bound by `godot/src/resource_index/launch_flags.cpp`). Binary: retail
 **Jointops.exe** (IDB `Jointops.exe.kong.i64`); produced by the PAR-R7 audit
 (2026-07-05) that converted this system's `UNAUDITED` ledger row into the
 tracked **D-VFS** catalog below. IDB write-back applied in the same session

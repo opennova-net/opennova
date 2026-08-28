@@ -355,8 +355,9 @@ D-3DI-2/D-WPN-28 in the divergence ledger.
 
 OED export now preserves the loader's structural rule for every style
 `> 0x70`: even a raw PANM style 114 reference is collected into CTRL and its
-local index is serialized before retail remaps it. `oed_export_3di_test` pins
-that behavior. ONED no longer offers model authoring under ADR 0037, so this is
+local index is serialized before retail remaps it. The since-retired
+`oed_export_3di_test` (OED went with ADR 0038) pinned that behavior; the live pins are
+the `threedi_*` ctests (`threedi_ctrl_catalog` for the CTRL side). ONED no longer offers model authoring under ADR 0037, so this is
 load/runtime/export fidelity, not a claim of retail OED UI parity for those
 unused PANM styles.
 
@@ -423,7 +424,7 @@ file; mesh/texture blobs can follow it.
 
 | Claim | Corpus | Verdict |
 |---|---|---|
-| Inner-header tail `pad_light_2C/30/34/38` zero | all fixtures (parser asserts + `gp_corpus_invariants_test`) | padding; loader stores but never tests them |
+| Inner-header tail `pad_light_2C/30/34/38` zero | all fixtures (parser asserts; the `gp_corpus_invariants_test` sweep retired with the GP reader, ADR 0027) | padding; loader stores but never tests them |
 | Per-entry `pad_light_entry_24/28/2C` zero | 93/93 entries, 33 fixtures | padding; offsets unaccessed by loader |
 | `payload_size == 60 + 48 * light_count` (no trailing gap) | 33/33 fixtures, gap = 0 in all (counts 1..11) | exact; the `gp_skip(remainder)` branch is a safety net only |
 
@@ -653,9 +654,10 @@ fixture with extra_polys surfaces.
   (1005) and Basic (0x01, 40 B) with FF/VS_FLAG (4077/87). Every first-person
   arms model referenced by `Avatars.def` is 0x55; a 0x41 arms model renders as
   garbage in retail's first-person pass (observed live, 2026-08-17) while the
-  same model is fine in the world skinned pass. The OED conversion path implements
-  the witnessed rule over the D-RMAT-4-corrected descriptor rows
-  (`oed/rdta.cpp build_render_geometry_skinned`, ctest `oed_skinned_tangents`).
+  same model is fine in the world skinned pass. The since-retired OED conversion path
+  implemented the witnessed rule over the D-RMAT-4-corrected descriptor rows
+  (`oed/rdta.cpp build_render_geometry_skinned`, ctest `oed_skinned_tangents`; both went
+  with ADR 0038, the runtime consumes the authored 3DI3 descriptors directly).
   Residual: the static path keys on `NORMAL_A|NORMAL_B` of the authored rows —
   corpus-equivalent, but `VS_DOT3DIFFOBJ` (NORMAL_A set, no `0x8000` in either
   table) would compile Extended where the original selects Basic; the corpus

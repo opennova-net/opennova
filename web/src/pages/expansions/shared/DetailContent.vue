@@ -53,7 +53,7 @@
         <section class="rounded-panel border border-border bg-surface p-6 text-sm text-ink">
           <h3 class="text-xs uppercase tracking-widest text-ink-muted">How to install</h3>
           <p class="mt-3 text-ink-muted">
-            Expansions are delivered through the OpenNova launcher. Download the latest build, sign in, and enable this package from the Expansion Manager—we’ll handle the download and staging for you.
+            Expansions are delivered through the OpenNova launcher. Download the latest build, sign in, and enable this package from the Expansion Manager. We’ll handle the download and staging for you.
           </p>
           <RouterLink
             to="/"
