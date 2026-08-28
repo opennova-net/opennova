@@ -83,7 +83,7 @@ Dictionary Simulation::get_end_round_state() const {
 	// the joiner store @0x430219..0x430235]
 	const int32_t remaining = joiner_
 			? runtime_->state().round_time_remaining_ticks
-			: (world_ ? world_->match.remaining_ticks() : -1);
+			: (kernel_ ? kernel_->world.match.remaining_ticks() : -1);
 	out["round_ticks"] = std::max(0, remaining);
 	out["death_screen"] = local_death_screen_active();
 	out["local_team"] = static_cast<int>(runtime_->assigned_team());
@@ -124,7 +124,7 @@ opennova::hud::EndRoundOverlayInput Simulation::end_round_overlay_input() const 
 	// timed/untimed arm picks read it on every role].
 	in.round_time_remaining_ticks = std::max(0, joiner_
 			? runtime_->state().round_time_remaining_ticks
-			: (world_ ? world_->match.remaining_ticks() : -1));
+			: (kernel_ ? kernel_->world.match.remaining_ticks() : -1));
 	return in;
 }
 
@@ -269,8 +269,8 @@ Dictionary Simulation::get_end_round_statistics() const {
 	// no tally world. [orig: HUD_DrawEndRoundStatistics @0x5b7600 reads the
 	// block; the toggle gate @0x49bd29 — see net-re §5.68]
 	Dictionary out;
-	if (world_ == nullptr) return out;
-	const opennova::world::World &w = *world_;
+	if (kernel_ == nullptr) return out;
+	const opennova::world::World &w = kernel_->world;
 	opennova::hud::EndRoundStatisticsInput in;
 	int32_t won = 0;
 	for (uint32_t mask = w.subgoals.won; mask != 0; mask &= mask - 1) ++won;

@@ -57,18 +57,21 @@ func test_worker_snapshot_owns_the_complete_receiver_height_field() -> void:
 	var header := _source("res://src/terrain/terrain_tile_cache_device.h")
 	var rasterizer := _source(
 			"res://src/terrain/terrain_static_shadow_rasterizer.cpp")
-	assert_true(header.contains("TerrainStaticShadowReceiverStorage"),
+	# Since ADR 0042 d4 the one receiver owner is the engine's terrain field
+	# store: it keeps the copied CPT height samples and the TRN routing grid
+	# alive for the worker snapshots.
+	assert_true(header.contains(
+			"std::shared_ptr<const opennova::terrain::TerrainFieldStore>"),
 			"The immutable worker snapshot needs one owner for every receiver pointer.")
-	assert_true(header.contains("std::vector<uint16_t> heightmap"),
-			"The receiver owner must keep the copied CPT height samples alive.")
-	assert_true(header.contains("std::array<int, 16 * 16> sector_grid"),
-			"The receiver owner must also copy the TRN routing grid used by workers.")
 	var refresh := rasterizer.find("void refresh_receiver_terrain()")
 	var snapshot := rasterizer.find("TerrainStaticShadowRasterizer::compilation_snapshot()")
 	assert_gt(refresh, -1)
 	assert_gt(snapshot, refresh)
 	var refresh_body := rasterizer.substr(refresh, snapshot - refresh)
-	assert_true(refresh_body.contains("receiver_storage->sector_grid.data()"),
+	assert_true(refresh_body.contains("terrain_field_store_build("),
+			"The receiver copy must come from the engine's one cpt/trn field builder.")
+	assert_true(refresh_body.contains(
+			"planner.set_receiver_terrain(receiver_storage->height_field()"),
 			"The planner's receiver view must point into snapshot-owned routing storage.")
 	assert_false(refresh_body.contains(
 			"field.layout.sector_grid = &terrain_data->get_trn().sector_grid"),

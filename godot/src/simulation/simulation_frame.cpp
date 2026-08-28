@@ -98,7 +98,7 @@ void Simulation::close_mission() {
 
 bool Simulation::reset_mission_to_baseline(
 		opennova::inmatch::SessionError &r_error) {
-	if (!world_installed_ || !have_baseline_) {
+	if (!world_installed_ || !kernel_->have_baseline) {
 		r_error = {opennova::inmatch::SessionErrorCode::TickFailed,
 				"mission baseline is unavailable"};
 		return false;
@@ -217,15 +217,15 @@ bool Simulation::step() {
 	// deterministic tick. Preserve that public seam without adding a second tick
 	// path: snapshot the concrete target's held/edge latches into the same typed
 	// frame value inmatch::Session consumes. Direct look input has already updated
-	// player_input_'s composed heading/pitch, so it must not be replayed as a
+	// kernel_->input's composed heading/pitch, so it must not be replayed as a
 	// second pixel delta here.
 	opennova::inmatch::FrameInput input;
-	input.player.movement = player_input_;
-	input.player.held_action_bits = local_weapon_.fire_held
+	input.player.movement = kernel_->input;
+	input.player.held_action_bits = kernel_->weapon.fire_held
 			? MissionFrameInput::HELD_FIRE : 0u;
 	input.player.pressed_action_bits =
-			(local_weapon_.fire_pressed ? MissionFrameInput::PRESSED_FIRE : 0u) |
-			(local_weapon_.reload_pressed ? MissionFrameInput::PRESSED_RELOAD : 0u);
+			(kernel_->weapon.fire_pressed ? MissionFrameInput::PRESSED_FIRE : 0u) |
+			(kernel_->weapon.reload_pressed ? MissionFrameInput::PRESSED_RELOAD : 0u);
 	return session_.drive_one(input).ticks_run() == 1;
 }
 

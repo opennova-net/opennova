@@ -5,6 +5,8 @@
 #include <godot_cpp/variant/dictionary.hpp>
 
 #include <runtime/wac/compiler.h>
+#include <runtime/wac/wac_layered_load.h>
+#include <runtime/wac/wac_system.h>
 
 #include <string>
 #include <vector>
@@ -34,28 +36,35 @@ Error WacProgram::compile_sources(const PackedStringArray &p_sources) {
 
 Error WacProgram::compile_from_resource_root(const Ref<ResourceRoot> &p_root, const String &p_mission_basename) {
 	ERR_FAIL_COND_V_MSG(p_root.is_null(), ERR_UNCONFIGURED, "WacProgram needs a mounted resource root.");
-	// The original layering, absent files skipped in order. [orig: WacScript_InitAndLoad, see docs/world/world-wac-ai-re.md]
-	PackedStringArray names;
-	names.push_back("game.wac");
-	names.push_back("server.wac");
-	if (!p_mission_basename.is_empty()) {
-		names.push_back(p_mission_basename + String(".wac"));
+	// The layered read + compile is the engine's one body (wac_layered_load,
+	// lenient mode — the game's policy) [orig: WacScript_InitAndLoad]; this
+	// binding adopts the compiled program off a scratch system so the holder
+	// keeps its diagnostics surface.
+	const opennova::ResourceIndex *index = &p_root->native_index();
+	opennova::mission::BootFileSource files;
+	files.has_file = [index](const std::string &name) {
+		return index->has_file(name);
+	};
+	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
+		return index->read_file(name, out);
+	};
+	opennova::wac::WacSystem system;
+	std::string error;
+	const opennova::wac::WacLayeredLoadStatus status =
+			opennova::wac::wac_layered_load(system, files,
+					std::string(p_mission_basename.utf8().get_data()),
+					/*registry=*/nullptr, /*strict_diagnostics=*/false, error);
+	switch (status) {
+		case opennova::wac::WacLayeredLoadStatus::kAbsent:
+			return ERR_DOES_NOT_EXIST; // BMS-only mission: nothing to install
+		case opennova::wac::WacLayeredLoadStatus::kBlocked:
+			compiled_ = false;
+			return ERR_COMPILATION_FAILED;
+		case opennova::wac::WacLayeredLoadStatus::kLoaded:
+			break;
 	}
-	PackedStringArray sources;
-	for (int64_t i = 0; i < names.size(); ++i) {
-		if (!p_root->has_file(names[i])) {
-			continue;
-		}
-		const PackedByteArray bytes = p_root->read_file(names[i]);
-		String text;
-		// WAC sources are plain ASCII/latin text; parse permissively.
-		text.parse_utf8(reinterpret_cast<const char *>(bytes.ptr()), bytes.size());
-		sources.push_back(text);
-	}
-	if (sources.is_empty()) {
-		return ERR_DOES_NOT_EXIST; // BMS-only mission: nothing to install
-	}
-	return compile_sources(sources);
+	adopt(opennova::wac::Program(system.program()));
+	return OK;
 }
 
 bool WacProgram::is_ok() const {

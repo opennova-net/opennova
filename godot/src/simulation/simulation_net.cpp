@@ -69,11 +69,10 @@ bool character_vars_from_profile(const Dictionary &p_profile,
 // [orig: SinglePlayer_StartMission @0x561af0], mirroring apps/nw_server/main.cpp. The host's own
 // player AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
 // resolve_player_spawn_pose marker chain), and its own loopback client renders the per-frame 0x0A.
-void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
+void Simulation::bringup_host_runtime() {
 	namespace np = opennova::np;
-	// Persist the mission so ctx_.mission (read by the §5.1 0x0B BMS-header burst for LAN joiners)
-	// outlives the match — the load-local bms::File would dangle.
-	mission_file_ = file;
+	// ctx_.mission (read by the §5.1 0x0B BMS-header burst for LAN joiners)
+	// points straight at the kernel's adopted document, which outlives the match.
 	host_loop_.clear();
 	// Reload: a fresh host_owner_ drops any stale connections / peers from a prior mission. A reload is a
 	// new match (Stop -> load), so configure_session_runtime runs once per match (never mid-match,
@@ -90,15 +89,15 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 	host_owner_ = np::HostOwner{};
 	host_owner_.host_loopback = &host_loop_;
 	host_owner_.serve_and_play = serve_and_play;
-	ctx_.world = world_.get();
-	ctx_.mission = &mission_file_;
+	ctx_.world = &kernel_->world;
+	ctx_.mission = &kernel_->mission;
 	ctx_.terrain_til_data = terrain_til_data_; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
 	ctx_.mission_text_loaded = mission_text_loaded_;
 	ctx_.mission_briefing3 = mission_briefing3_;
 	ctx_.mission_briefing2 = mission_briefing2_;
 	ctx_.mission_location_names.clear();
 	int32_t location_index = 1;
-	for (const opennova::bms::Entity &marker : mission_file_.markers) {
+	for (const opennova::bms::Entity &marker : kernel_->mission.markers) {
 		if (marker.type_id != 2044) continue;
 		// Retail assigns LOCATION001.. in type-2044 marker spawn order. The
 		// BMS ttool_index is zero for both 00TRg markers and is not the text key.
@@ -140,9 +139,9 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 		// see docs/net/novaworld-net-re.md 5.2c]
 		host_config.game_type = mission_game_type();
 	}
-	if (world_) {
-		world_->fat_bullets = host_config.fat_bullets;
-		world_->one_shot_kill = host_config.one_shot_kill;
+	if (kernel_) {
+		kernel_->world.fat_bullets = host_config.fat_bullets;
+		kernel_->world.one_shot_kill = host_config.one_shot_kill;
 	}
 
 	// The witnessed §5.0 listen-host bring-up, dedup'd to the ONE shared helper start_host_session
@@ -173,18 +172,11 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 		// The 0x1D header-form session half: the loopback replica stands in
 		// world.mp_session for the retail is_in_session (SP listen stays the
 		// 7-byte team form). [orig: NapiNPClientMsg_0x01D @0x43086c]
-		runtime_->view().set_mp_session(world_ != nullptr && world_->mp_session);
+		runtime_->view().set_mp_session(kernel_ != nullptr && kernel_->world.mp_session);
 
 		// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
-		// motor drives entity Yaw from player_input_.look_heading each frame, else input snaps it to 0).
-		player_input_ = opennova::world::PlayerInput{};
-		stance_latch_ = 0;
-		look_px_accum_x_ = look_px_accum_y_ = 0.0f;
-		if (world_->ai && world_->cached.local_player.valid()) {
-			if (const AiEntity *pe = world_->ai->for_handle(world_->cached.local_player)) {
-				player_input_.look_heading = pe->heading;
-			}
-		}
+		// motor drives entity Yaw from kernel_->input.look_heading each frame, else input snaps it to 0).
+		kernel_->reset_local_player_input_to_player_facing();
 	} else {
 		// Dedicated (UI "serve only"). The witnessed original makes this a true host-only session
 		// [orig: HG_SERVEONLY -> CGameSession_SetConnectionMode(1), is_host=1/is_client=0; HostDialog
@@ -250,61 +242,6 @@ private:
 // longer drift. Simulation supplies the socket (a UdpPump adapter; SP passes a null pump and the
 // loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
 // pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
-void Simulation::resolve_infantry_adm_before_server_tick(void *p_context) {
-	if (p_context == nullptr) return;
-	static_cast<Simulation *>(p_context)->resolve_new_infantry_adm_ids();
-}
-
-void Simulation::drain_host_client_gameplay_requests() {
-	if (!world_ || !host_owner_.serve_and_play) return;
-
-	// The local player is a real type-2 connection over transport-mode-1. Its
-	// socketless C2S FIFO still enters the SAME per-message server dispatcher as
-	// a remote type-1 connection; only the outer 0x43/SCRK envelope is absent.
-	// Server_TickUpdate's generic transport fan owns 0x0C and ignores other tags,
-	// so consume the local gameplay messages at this recv-before-logic boundary.
-	// [orig: WeaponAction_Reload @0x5430B0 ->
-	// NapiNPServerMsg_HandleReloadRequest @0x514DF0]
-	opennova::np::NapiNPConnection *local = nullptr;
-	for (opennova::np::NapiNPConnection &conn :
-			ctx_.np_protocol.connection_list) {
-		if (conn.type == 2 && conn.link.transport == &host_loop_) {
-			local = &conn;
-			break;
-		}
-	}
-	if (local == nullptr) return;
-
-	opennova::netsim::Datagram dg;
-	std::vector<opennova::netsim::Datagram> deferred;
-	while (host_loop_.host_recv(dg)) {
-		// This seam owns only the witnessed local reload producer. Preserve
-		// every other C2S datagram, in FIFO order, for Server_TickUpdate's
-		// authoritative transport drain (notably a future/local 0x0C).
-		if (dg.tag != opennova::c2s::WEAPON_RELOAD_REQUEST) {
-			deferred.push_back(std::move(dg));
-			continue;
-		}
-		std::vector<opennova::ProtocolMessage> messages;
-		messages.push_back(opennova::make_protocol_message(
-				dg.tag, std::move(dg.body)));
-		std::vector<opennova::ProtocolMessage> replies =
-				opennova::np::dispatch_session_replies(
-						ctx_.config, *local, messages, host_owner_.now_tick,
-						ctx_.np_protocol.connection_list, world_.get());
-		// A loopback direct reply is already an inner {tag,body} datagram. The
-		// 0x25 handler itself returns no direct reply; its 0x49 is broadcast to
-		// every transport (including this one) inside the shared dispatcher.
-		for (opennova::ProtocolMessage &reply : replies) {
-			host_loop_.host_send(reply.tag, std::move(reply.payload));
-		}
-	}
-	for (opennova::netsim::Datagram &preserved : deferred) {
-		host_loop_.deliver_c2s(
-				preserved.tag, std::move(preserved.body));
-	}
-}
-
 void Simulation::host_pump() {
 	namespace np = opennova::np;
 	const bool profiling = runtime_profiling_enabled_;
@@ -312,16 +249,13 @@ void Simulation::host_pump() {
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
 	// and wraps against the current renderer viewport height [orig:
 	// Server_SendRandomSeedSync @ 0x511360 — CEffectWorld_GetViewportDimensions
-	// @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Refresh the portable
-	// runtime seam on every frame so resizing is observable; the retail parity
-	// runbook pins this root viewport to 1920x1080. The runtime owns this node
-	// without parenting it into the tree (manual pump ordering, ADR 0011), so
-	// get_viewport() alone is null on every production host: resolve the render
-	// window the way retail's CEffectWorld query does — the live window. A
-	// headless DisplayServer has no renderer (the dedicated-host analogue), and
-	// a missing/non-drawable viewport leaves the seam explicitly unset:
-	// npruntime suppresses 0x68 instead of inventing a screen size
-	// (docs/net/novaworld-net-re.md §5.34, D-NET-206).
+	// @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Resolve the render
+	// window the way retail's CEffectWorld query does — the live window (the
+	// runtime owns this node without parenting it into the tree, so
+	// get_viewport() alone is null on every production host). A headless
+	// DisplayServer has no renderer (the dedicated-host analogue); a missing/
+	// non-drawable viewport hands listen_host::frame 0 and npruntime
+	// suppresses 0x68 instead of inventing a screen size (D-NET-206).
 	Viewport *viewport = get_viewport();
 	if (viewport == nullptr) {
 		DisplayServer *display = DisplayServer::get_singleton();
@@ -334,29 +268,37 @@ void Simulation::host_pump() {
 	}
 	const double viewport_height = viewport != nullptr
 			? viewport->get_visible_rect().size.y : 0.0;
-	ctx_.loaded_model_viewport_height = viewport_height > 0.0
-			? static_cast<uint32_t>(viewport_height) : 0u;
 	const uint32_t now = host_owner_.now_tick;
-	drain_host_client_gameplay_requests();
-	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
+	// What the view arbiter reads from the session (death screen, end round,
+	// the death camera): sampled pre-fold, exactly the value the old inline
+	// view tick consumed at this point in the frame.
+	kernel_->view_session_inputs = local_view_session_inputs();
 	UdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	if (profiling)
 		frame_phase_perf_.host_prep_us +=
 				static_cast<int64_t>(opennova::io::perf_now_us() - prep_start);
+	// The ONE listen frame (ADR 0042 d3): the local C2S drain, the pre-tick
+	// input apply, host_session_pump (Server_TickUpdate's owner loop), the
+	// local view/weapon pumps, and the new-soldier .adm ground — over this
+	// sim's kernel and host state. [orig: Game_ProcessMainFrame @0x5263f0]
 	np::HostSessionPerf host_perf;
-	np::host_session_pump(host_owner_, sock,
-			&Simulation::resolve_infantry_adm_before_server_tick, this,
-			nullptr, nullptr, profiling ? &host_perf : nullptr);
+	opennova::inmatch::listen_host::frame(*kernel_, host_state_, sock,
+			static_cast<int32_t>(viewport_height),
+			profiling ? &host_perf : nullptr);
 	if (profiling)
 		frame_phase_perf_.host_session += host_perf;
-	const uint64_t player_start = profiling ? opennova::io::perf_now_us() : 0;
-	sync_local_mounted_input_heading();
-	tick_local_player_view();   // retail promotes the per-frame view before weapon actions
-	tick_local_player_weapon(); // the equipped-slot FSM pump, after the view promoter
 	tick_local_medic_cooldown(); // the medic-call cooldown (Player_UpdatePerFrame)
-	if (profiling)
-		frame_phase_perf_.host_player_us +=
-				static_cast<int64_t>(opennova::io::perf_now_us() - player_start);
+	// The kernel pump's wire-facing reload outcome relays onto the loopback so
+	// the shared dispatcher broadcasts the S2C 0x49 to every client next frame
+	// (the authority already performed WeaponSlot_ReloadAmmo inside the pump;
+	// the server handler's local-connection gate prevents a second refill).
+	if (kernel_->last_reload.valid && host_owner_.serve_and_play) {
+		opennova::WeaponReload reload;
+		reload.entity_handle = kernel_->last_reload.entity_handle;
+		reload.reload_param = kernel_->last_reload.reload_param;
+		host_loop_.client_send(0x25, opennova::encode_weapon_reload(reload));
+		kernel_->last_reload = opennova::world::LocalWeaponReloadWire{};
+	}
 	// The host's measurable net leg for the F3 Stats board: the ClientState
 	// fold. The S2C serialize/emit half rides inside np::host_session_pump
 	// (fused with the logic tick) and stays inside the Sim step number until
@@ -385,7 +327,7 @@ void Simulation::host_pump() {
 void Simulation::resolve_client_row_adm_ids() {
 	// The host never presents a decoded row (D-NET-140 closed).
 	if (!joiner_) return;
-	if (runtime_ == nullptr || infantry_anim_.empty() ||
+	if (runtime_ == nullptr || kernel_->root_motion.empty() ||
 			infantry_adm_resource_root_.is_null() ||
 			infantry_adm_item_db_.is_null())
 		return;
@@ -407,13 +349,13 @@ void Simulation::resolve_client_row_adm_ids() {
 		int adm_id = -1;
 		if (!adm.is_empty()) {
 			if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
-			adm_id = infantry_anim_.register_adm(
+			adm_id = kernel_->root_motion.register_adm(
 					infantry_adm_resource_root_.is_valid()
 							? &infantry_adm_resource_root_->native_index()
 							: nullptr,
 					std::string(adm.utf8().get_data()));
 		}
-		if (adm_id < 0 && !infantry_anim_.empty()) adm_id = 0; // the default set
+		if (adm_id < 0 && !kernel_->root_motion.empty()) adm_id = 0; // the default set
 		client_row_adm_by_type_[es.type_id] = adm_id;
 		es.rm_adm_id = static_cast<int16_t>(adm_id);
 	}
@@ -428,17 +370,17 @@ void Simulation::on_replica_world_changed(
 	for (const opennova::world::EntityLifetime lifetime : p_sync.retired) {
 		if (!lifetime.valid()) continue;
 		const auto cached =
-				collision_resolve_.resolution_attempted.find(lifetime.handle.packed);
+				kernel_->collision_state.resolution_attempted.find(lifetime.handle.packed);
 		// A later allocation at the same packed handle may already have had
 		// its caches rebuilt. The retired lifetime cannot erase those.
-		if (cached != collision_resolve_.resolution_attempted.end() &&
+		if (cached != kernel_->collision_state.resolution_attempted.end() &&
 				cached->second != lifetime.registry_spawn_id)
 			continue;
 		const opennova::world::EntityHandle handle = lifetime.handle;
-		collision_world_.remove_entity_instance(handle);
-		occlusion_world_.remove_entity_instance(handle);
-		collision_pose_native_.remove_entity(handle);
-		collision_resolve_.resolution_attempted.erase(handle.packed);
+		kernel_->collision.remove_entity_instance(handle);
+		kernel_->occlusion.remove_entity_instance(handle);
+		kernel_->collision_pose.remove_entity(handle);
+		kernel_->collision_state.resolution_attempted.erase(handle.packed);
 	}
 
 	// Zone/deploy lookup is a registry-derived cache. Any streamed topology
@@ -453,7 +395,7 @@ void Simulation::on_replica_world_changed(
 		for (const opennova::world::EntityLifetime lifetime : rows) {
 			if (lifetime.handle.pool() != 1) continue;
 			if (opennova::world::Entity *entity =
-					world_->registry.get(lifetime))
+					kernel_->world.registry.get(lifetime))
 				refresh_item_seat_spec(*entity);
 		}
 	};
@@ -463,7 +405,7 @@ void Simulation::on_replica_world_changed(
 	// definitions. Item/model resolution above installs them, then this
 	// idempotent fold projects the retained 0x0D mountHandles image by each
 	// seat's fixed retail_slot.
-	(void)joiner_bridge_.materializer().sync(runtime_->state(), *world_);
+	(void)joiner_bridge_.materializer().sync(runtime_->state(), kernel_->world);
 
 	if (collision_item_db_.is_valid())
 		resolve_collision_instances(collision_item_db_);
@@ -522,9 +464,9 @@ void Simulation::joiner_pump() {
 	// resolution, the loadout profile seams (S7b disposition), device input,
 	// the view/weapon pumps shared with the host path, and the clocks.
 	opennova::np::JoinerWorldBridge::PumpContext ctx{
-			*world_, *runtime_, local_weapon_, local_loadout_,
-			local_inventory_, local_inventory_valid_, item_seat_specs_,
-			infantry_anim_.empty() ? nullptr : &infantry_anim_};
+			kernel_->world, *runtime_, kernel_->weapon, kernel_->loadout,
+			kernel_->inventory, kernel_->inventory_valid, kernel_->seat_specs,
+			kernel_->root_motion.empty() ? nullptr : &kernel_->root_motion};
 	opennova::np::JoinerWorldBridge::PumpHooks hooks;
 	hooks.send = [this](const std::vector<uint8_t> &dg) { ship_to_host(dg); };
 	hooks.deposit_inbound = [this] { joiner_deposit_inbound(); };
@@ -552,18 +494,18 @@ void Simulation::joiner_pump() {
 		on_joiner_local_player_redeployed(look_heading_bam);
 	};
 	hooks.on_mount_changed = [this] {
-		player_view_.binoculars_requested = false;
-		view_tracker_.binocular_yaw_offset_deg = 0.0f;
-		view_tracker_.binocular_pitch_offset_deg = 0.0f;
+		kernel_->view.binoculars_requested = false;
+		kernel_->view_tracker.binocular_yaw_offset_deg = 0.0f;
+		kernel_->view_tracker.binocular_pitch_offset_deg = 0.0f;
 		refresh_local_player_view_effects();
-		sync_local_mounted_input_heading();
+		kernel_->sync_local_mounted_input_heading();
 	};
 	hooks.wire_collision_shape = [this](uint16_t type_id) {
 		return wire_collision_shape_for_type(type_id);
 	};
-	hooks.apply_input_pre_tick = [this] { apply_player_input_pre_tick(); };
+	hooks.apply_input_pre_tick = [this] { kernel_->apply_player_input_pre_tick(); };
 	hooks.sync_mounted_input_heading =
-			[this] { sync_local_mounted_input_heading(); };
+			[this] { kernel_->sync_local_mounted_input_heading(); };
 	hooks.tick_view = [this] { tick_local_player_view(); };
 	hooks.tick_weapon = [this] {
 		tick_local_player_weapon();
@@ -598,11 +540,11 @@ void Simulation::joiner_deposit_inbound() {
 void Simulation::print_joiner_net_diagnostic_sample() {
 	if (!is_joiner_network_diagnostics_enabled() || !runtime_) return;
 	String local_state = " L=none";
-	if (joiner_bridge_.local_spawned() && world_ && world_->ai) {
+	if (joiner_bridge_.local_spawned() && kernel_ && kernel_->world.ai) {
 		const opennova::world::AiEntity *lae =
-				world_->ai->for_handle(world_->cached.local_player);
+				kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
 		const opennova::world::Entity *le =
-				world_->registry.get(world_->cached.local_player);
+				kernel_->world.registry.get(kernel_->world.cached.local_player);
 		if (lae != nullptr)
 			local_state = vformat(
 					" L=(%.1f,%.1f,%.1f) hdg=%d input=0x%02x",
@@ -630,20 +572,14 @@ void Simulation::print_joiner_net_diagnostic_sample() {
 // input latches die and the look heading seeds from the spawn facing (retail
 // polls live keys; a press during the join wait must not cross the spawn edge).
 void Simulation::on_joiner_local_player_spawned(int32_t p_look_heading_bam) {
-	resolve_new_infantry_adm_ids();
-	player_input_ = opennova::world::PlayerInput{};
-	player_input_.look_heading = p_look_heading_bam;
-	stance_latch_ = 0;
-	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
+	kernel_->resolve_new_infantry_adm_ids();
+	kernel_->reset_local_player_input(p_look_heading_bam);
 }
 
 // L revived on an ACK-qualified redeploy release: the same input-latch reset
 // from the redeployed authoritative heading, plus the respawn loadout rebuild.
 void Simulation::on_joiner_local_player_redeployed(int32_t p_look_heading_bam) {
-	player_input_ = opennova::world::PlayerInput{};
-	player_input_.look_heading = p_look_heading_bam;
-	stance_latch_ = 0;
-	look_px_accum_x_ = look_px_accum_y_ = 0.0f;
+	kernel_->reset_local_player_input(p_look_heading_bam);
 	respawn_local_player_loadout();
 }
 
@@ -654,11 +590,11 @@ opennova::world::ResolvedCollisionShape Simulation::wire_collision_shape_for_typ
 	opennova::world::ResolvedCollisionShape shape;
 	if (collision_item_db_.is_valid()) {
 		const opennova::simassets::CollisionResolveDeps deps{
-				collision_world_, occlusion_world_, collision_pose_native_,
-				sim_models_};
+				kernel_->collision, kernel_->occlusion, kernel_->collision_pose,
+				kernel_->models};
 		shape = opennova::simassets::collision_shape_for_runtime_type(
 				static_cast<int>(p_type_id), collision_item_db_->native_items(),
-				collision_resolve_, deps);
+				kernel_->collision_state, deps);
 	}
 	wire_collision_shape_by_type_.emplace(p_type_id, shape);
 	return shape;
@@ -800,9 +736,9 @@ bool Simulation::enable_host_listen(int p_port) {
 		return false;
 	}
 	host_listen_ = true;
-	if (world_) {
-		world_->projectile_authority = true;
-		world_->mp_session = true;
+	if (kernel_) {
+		kernel_->world.projectile_authority = true;
+		kernel_->world.mp_session = true;
 	}
 	// P7: the LAN host rides the npruntime runtime (ctx_ over a real UDP socket), stood up per-load in
 	// bringup_host_runtime with SocketMode::Lan. UdpPump owns the socket; all protocol/crypto/
@@ -962,9 +898,9 @@ void Simulation::configure_host_session(Dictionary p_options) {
 		host_max_players_ = mp;
 	}
 	host_session_config_ = std::move(config);
-	if (world_ && host_listen_) {
-		world_->fat_bullets = host_session_config_.fat_bullets;
-		world_->one_shot_kill = host_session_config_.one_shot_kill;
+	if (kernel_ && host_listen_) {
+		kernel_->world.fat_bullets = host_session_config_.fat_bullets;
+		kernel_->world.one_shot_kill = host_session_config_.one_shot_kill;
 	}
 }
 
@@ -1065,7 +1001,7 @@ void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 // ---- co-op LAN joiner (D.2) -------------------------------------------------
 
 bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &p_player_name) {
-	// P7: the joiner is a non-authority np::ClientRuntime (Joiner role) built per-load in finish_load;
+	// P7: the joiner is a non-authority np::ClientRuntime (Joiner role) built per-load by the boot's role hook;
 	// it owns the connect-leg state machine + the S2C->ClientState fold internally. Here we only dial
 	// the socket + store the player name (the ClientAuth.NA the host echoes for the name-match). Leave
 	// listen_server_ false (the present gate adds || joiner_); a sim is host XOR joiner.
@@ -1085,7 +1021,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 	}
 	joiner_player_name_ = std::string(p_player_name.utf8().get_data());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
-	// the legacy joiner_session_ held); finish_load rebuilds it fresh on each (re)load.
+	// the legacy joiner_session_ held); each (re)load's role hook rebuilds it fresh.
 	runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
 	install_charattr_challenge_table();
 	install_character_join_vars();
@@ -1093,9 +1029,9 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 	install_expansion_version_root();
 	install_item_class_resolver();
 	joiner_ = true;
-	if (world_) {
-		world_->projectile_authority = false;
-		world_->mp_session = true;
+	if (kernel_) {
+		kernel_->world.projectile_authority = false;
+		kernel_->world.mp_session = true;
 	}
 	joiner_bridge_.reset_for_join();
 	joiner_environment_revision_seen_ = 0;
@@ -1319,10 +1255,10 @@ int Simulation::get_class_allow_mask() const {
 
 const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {
 	// Built once per load; the zone set is authored (the world stream upserts state,
-	// not membership). finish_load resets the flag. [orig: Entity_BuildSpawnZoneList
+	// not membership). The joiner role hook resets the flag. [orig: Entity_BuildSpawnZoneList
 	// @0x43EAE0 — rebuilt at mission start]
-	if (!deploy_zone_registry_built_ && world_) {
-		deploy_zone_registry_ = opennova::world::build_spawn_zone_list(*world_);
+	if (!deploy_zone_registry_built_ && kernel_) {
+		deploy_zone_registry_ = opennova::world::build_spawn_zone_list(kernel_->world);
 		deploy_zone_registry_built_ = true;
 	}
 	return deploy_zone_registry_;
@@ -1338,13 +1274,13 @@ TypedArray<Dictionary> Simulation::get_deploy_spawn_zones() {
 	// loop of the populate has no secured gate, so the engine builder decides
 	// which rows list and where the occupants land.
 	TypedArray<Dictionary> rows;
-	if (!world_ || !joiner_ || !runtime_) return rows;
+	if (!kernel_ || !joiner_ || !runtime_) return rows;
 	const opennova::world::SpawnZoneRegistry &reg = deploy_zone_registry();
 	const uint8_t team = runtime_->assigned_team();
 	const opennova::netsim::ClientState &cs = runtime_->state();
 	const uint16_t self_handle = runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFFu;
 	for (size_t i = 0; i < reg.entries.size(); ++i) {
-		const opennova::world::Entity *e = world_->registry.get(reg.entries[i]);
+		const opennova::world::Entity *e = kernel_->world.registry.get(reg.entries[i]);
 		if (e == nullptr || !e->has_item_def || !e->is_spawn_point) continue;
 		uint8_t effective_team = e->team;
 		int32_t effective_control = e->zone_control;
@@ -1471,7 +1407,7 @@ void Simulation::ship_to_host(const std::vector<uint8_t> &dg) {
 //  over an np::ClientRuntime; the legacy JoinerSession path is retired here.)
 
 bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team) {
-	if (!host_listen_ || !world_ || !world_->ai) return false;
+	if (!host_listen_ || !kernel_->world.ai) return false;
 	opennova::world::PlayerSpawn spawn;
 	// Godot (x,y,z) -> mission (x,-z,y), the inverse of the present remap (same as spawn_local_player).
 	spawn.position = {static_cast<float>(p_position.x), static_cast<float>(-p_position.z),
@@ -1489,8 +1425,8 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 	}
 	const opennova::world::EntityHandle h =
 			opennova::np::admit_synthetic_peer(
-					ctx_, *world_, peer, spawn, link.transport.get());
-	resolve_new_infantry_adm_ids();
+					ctx_, kernel_->world, peer, spawn, link.transport.get());
+	kernel_->resolve_new_infantry_adm_ids();
 	return h.valid();
 }
 
@@ -1608,26 +1544,26 @@ String Simulation::format_feed_camp_line(const String &p_template,
 void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 		int p_wire_handle, int p_carrier_handle, int p_anim_state,
 		int p_from_phase, int p_to_phase, const Vector3 &p_pos) {
-	if (!world_installed_ || !world_ || p_anim_state < 0) return;
+	if (!world_installed_ || !kernel_ || p_anim_state < 0) return;
 	if (p_to_phase <= p_from_phase) return;
 	const auto adm = client_row_adm_by_type_.find(static_cast<uint16_t>(p_type_id));
 	if (adm == client_row_adm_by_type_.end() || adm->second < 0) return;
 
 	uint32_t words[16] = {};
-	const int n = infantry_anim_.scan_triggers(adm->second, p_anim_state,
+	const int n = kernel_->root_motion.scan_triggers(adm->second, p_anim_state,
 			p_from_phase, p_to_phase, words, 16, /*variant=*/0);
 	if (n <= 0) return;
 	// The dip belongs to the frame the playhead ended on (a multi-frame
 	// catch-up dips all its words by the final frame's bottom — the scan
 	// carries no per-word phases).
 	const int32_t capsule_bottom =
-			infantry_anim_.capsule_bottom_at(adm->second, p_anim_state, p_to_phase,
+			kernel_->root_motion.capsule_bottom_at(adm->second, p_anim_state, p_to_phase,
 					/*variant=*/0);
 	// Godot (x, y, z) -> mission (x, -z, y) 16.16, the drain's own convention.
 	const int32_t body[3] = { static_cast<int32_t>(p_pos.x * 65536.0f),
 		                      static_cast<int32_t>(-p_pos.z * 65536.0f),
 		                      static_cast<int32_t>(p_pos.y * 65536.0f) };
-	opennova::world::wire_body_slot_sounds(*world_, words, n, capsule_bottom,
+	opennova::world::wire_body_slot_sounds(kernel_->world, words, n, capsule_bottom,
 			p_type_id, static_cast<uint16_t>(p_character_id),
 			static_cast<uint16_t>(p_wire_handle), p_carrier_handle >= 0, body);
 }

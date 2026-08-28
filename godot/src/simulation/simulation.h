@@ -68,8 +68,10 @@ class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve
 #include <formats/score/score.h> // the retained score.ini parse (score_config_)
 
 #include "mission/mission_data.h"
+#include <runtime/mission/mission_kernel.h> // the ONE mission boot + state + no-net tick (ADR 0042 d3)
 #include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
+#include <net/inmatch/listen_host.h>              // ListenHostState + the listen bring-up/frame (ADR 0042 d3)
 #include <net/netsim/loopback_channel.h>          // host_loop_ (the host's own dcb-2 client)
 #include <net/netsim/item_replication_catalog.h> // canonical items.def replication traits
 #include <net/netsim/client_world_materializer.h> // header-only joiner pools 1..3
@@ -119,9 +121,7 @@ class ResourceRoot;
 // EffectLog each tick. Runtime transport and fixture teardown use the same
 // play/pause/step/restart surface.
 class Simulation : public Node3D,
-                       private opennova::inmatch::TickTarget,
-                       private opennova::world::ICollisionSectionMatrixProvider,
-                       private opennova::world::IMountedPoseProvider {
+                       private opennova::inmatch::TickTarget {
 	GDCLASS(Simulation, Node3D)
 
 public:
@@ -379,24 +379,22 @@ public:
 	}
 
 private:
-	std::unique_ptr<opennova::world::World> world_;
-	std::unique_ptr<opennova::world::AiSystem> ai_;
-	// World-object collision: the runtime models + per-tick proximity tables the AI
-	// motor resolves against (world/collision.h). Reset per load; models re-registered
-	// by resolve_collision_instances. ai_->collision points here (apply_collision_to_ai).
-	opennova::world::CollisionWorld collision_world_;
+	// The engine's ONE mission boot + state + no-net tick (ADR 0042 d3):
+	// world, systems (AI/WAC/BMS events/collision/occlusion), the sim asset
+	// caches, terrain field store, seat specs, the weapon/ammo tables, and
+	// the local-player frame state all live inside. Recreated per load
+	// (reset_world) and NEVER null after construction; this binding converts
+	// Godot Refs into the kernel's sources and orders device work around it.
+	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
 	void apply_collision_to_ai();
 	// The shell input the sweep reads (its retained items.def rows feed the
 	// engine resolve). RefCounted, so retaining it also keeps its object/ADM
 	// caches alive for a later RoundSim or F3 query.
 	Ref<ItemDatabase> collision_item_db_;
-	// The sim's own asset source (ADR 0028): the mounted root pinned for its
-	// index lifetime + the parse-once model cache the collision/occlusion/
-	// radius extraction reads. Render caches stay render-only. Mutable: it is
-	// a parse-on-miss CACHE — the const present path resolves the joiner's
-	// attachment models through it (one mounted matrix path, S4b).
+	// The sim's asset source (ADR 0028): the mounted root pinned for its
+	// index lifetime; the kernel's parse-once model cache reads through it
+	// (set_asset_index). Render caches stay render-only.
 	Ref<ResourceRoot> asset_root_;
-	mutable opennova::simassets::SimModelCache sim_models_;
 	// Portable mission lifecycle and cadence. During one advance call the Godot
 	// adapter holds a single typed tick sink so presentation consumes every
 	// catch-up tick before the next simulation tick.
@@ -435,78 +433,10 @@ private:
 			const opennova::inmatch::TickInput &p_input) override;
 	bool reset_mission_to_baseline(opennova::inmatch::SessionError &r_error) override;
 	void close_mission() override;
-	// The mission-lifetime collision graphic caches + the negative demand
-	// cache, engine-owned (simassets::CollisionResolveState, ADR 0031); the
-	// registry sweep and the joiner's wire ghosts share one implementation.
-	opennova::simassets::CollisionResolveState collision_resolve_;
 	// Wire-side collision initialization for decoded rows, sharing the exact
 	// typed engine result and by-graphic caches used by local entities.
 	std::unordered_map<uint16_t, opennova::world::ResolvedCollisionShape>
 			wire_collision_shape_by_type_;
-	// A non-negative value is the shell's once-per-frame retail presentation
-	// DWORD. Direct/headless simulations use deterministic logic time.
-	int64_t panm_time_override_ms_ = -1;
-	// The engine-side collision pose provider (S3b full, ADR 0028) — the ONE
-	// section-matrix source. It poses from the sim's own parse-once models and
-	// .adm rigs over the installed asset root; a world without a root has no
-	// model source and every query is a counted decline (the legacy
-	// render-bound builder is gone).
-	opennova::simassets::SimCollisionPoseProvider collision_pose_native_;
-	// Post-A/B native-path health counters (the cutover retired the divergence
-	// stats; these keep declines observable): cumulative queries/declines on the
-	// two native-authoritative pose paths. A production decline is the
-	// masked-failure signal the soak/probes gate on (debug_native_pose_stats).
-	uint64_t collision_native_queries_ = 0;
-	uint64_t collision_native_declines_ = 0;
-	uint64_t mounted_native_queries_ = 0;
-	uint64_t mounted_native_declines_ = 0;
-	uint64_t mounted_native_evaluations_ = 0;
-	uint64_t mounted_native_cache_hits_ = 0;
-	struct MountedPoseRestCache {
-		opennova::simassets::MountedPosePartMatrices parts;
-	};
-	struct MountedPoseLiveCache {
-		uint32_t time_ms = 0;
-		std::array<int32_t, THREEDI_CTRL_REGISTER_COUNT> controls{};
-		opennova::simassets::MountedPosePartMatrices parts;
-		bool valid = false;
-	};
-	uint32_t mounted_pose_cache_logic_tick_ = 0xFFFFFFFFu;
-	std::unordered_map<const Threedi3di3 *, MountedPoseRestCache>
-			mounted_pose_rest_cache_;
-	std::unordered_map<const Threedi3di3 *, std::vector<MountedPoseLiveCache>>
-			mounted_pose_live_cache_;
-	bool ensure_collision_instance(opennova::world::World &p_world,
-			opennova::world::EntityHandle p_entity) override;
-	bool build_section_matrices(opennova::world::World &p_world,
-			opennova::world::EntityHandle p_entity, int32_t p_model_id,
-			const opennova::world::CollisionMatrix &p_entity_world,
-			const opennova::world::CollisionModel &p_model,
-			std::vector<opennova::world::CollisionMatrix> &r_out) override;
-	// The mounted-pose resolver (S4, ADR 0028) is native-only: the engine-side
-	// resolver over the sim's own parse is the sole host-authority path.
-	bool resolve_mounted_pose(opennova::world::World &p_world,
-			const opennova::world::Entity &p_carrier,
-			const opennova::world::Seat &p_seat,
-			opennova::world::MountedPose &r_out) override;
-	bool resolve_mounted_pose_native(opennova::world::World &p_world,
-			const opennova::world::Entity &p_carrier,
-			const opennova::world::Seat &p_seat,
-			opennova::world::MountedPose &r_out);
-	// The native mounted-pose model sources: type id -> the spec's graphic
-	// name (SeatSpecExtraction::graphic_by_type), resolved through the sim
-	// cache AT QUERY TIME. The cache frees its parses whenever set_asset_root
-	// switches the index, so this table stores the graphic name and never a
-	// raw pointer (a retained pointer here was a use-after-free across root
-	// switches). Kept across reset_world — the table installs before mission
-	// promotion; boot wires the asset root before the steps run, so the cache
-	// serves every query.
-	std::unordered_map<int32_t, std::string> mounted_pose_native_graphics_;
-	// Rendering occlusion: the portal/section-mask engine (world/occlusion.h) —
-	// models attached alongside collision by resolve_collision_instances, the
-	// portal weld run by occlusion_init_mission, per-frame masks/gates by
-	// run_occlusion_frame. [docs/render/render-occlusion-re.md]
-	opennova::world::OcclusionWorld occlusion_world_;
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
 	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
 	std::vector<int32_t> occlusion_culled_bms_;
@@ -533,29 +463,14 @@ private:
 	int32_t iris_interior_group_section_ = 0;
 	// The pool-2 building a packed blink hit names, as a bms_id (0 = none).
 	int blink_hit_owner_bms_id(uint32_t p_hit) const;
-	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
-	std::unique_ptr<opennova::wac::WacSystem> wac_;
 	// The installed script program. Held as a Ref so it survives reset_world();
-	// finish_load() re-applies it onto the fresh WacSystem each (re)load.
+	// each (re)load re-applies it onto the fresh kernel WacSystem when the
+	// kernel's own layered load installed none.
 	Ref<WacProgram> wac_program_;
-	opennova::world::World::Snapshot baseline_; // runtime-start state, for restart/teardown
-	opennova::wac::WacSystem::RuntimeState wac_baseline_;
-	opennova::mission::PromoteResult promo_;
-	// The last boot_mission resolution decisions (S9 soak surface).
-	struct MissionBootDebug {
-		int32_t text_source = 0; // mission::MissionTextSource
-		int64_t text_size = 0;
-		std::string infantry_adm;
-		std::vector<opennova::mission::PromoteOptions::AiProfileRow> aip_rows;
-	};
-	MissionBootDebug boot_debug_;
 	// Resource-install invariant only. Public lifecycle is
 	// session_.state(); this prevents partially constructed worlds from
 	// serving data while Loading/Failed transitions are in flight.
 	bool world_installed_ = false;
-	bool defer_session_load_completion_ = false;
-	bool have_baseline_ = false;
-	bool have_wac_baseline_ = false;
 
 	// --- in-match net runtime (P7, ADR 0009/0011): the SP / LAN host in-process listen server. OFF
 	// by default, so an explicit non-network fixture uses the direct AI-pool present. When
@@ -685,7 +600,7 @@ private:
 	mutable std::unordered_map<uint16_t, PoolPresentLifecycle> pool_present_lifecycle_;
 
 	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
-	// finish_load; the runtime_ member is declared in the P7 block below). joiner_pump drives the
+	// the boot's role hook; the runtime_ member is declared in the P7 block below). joiner_pump drives the
 	// connect legs + the per-frame S2C->ClientState fold + the C2S 0x0C uplink over a dialed UdpPump.
 	// It runs run_logic_tick(false) for its own player L (a motor-driven pool-0 entity spawned at the
 	// H-learned pose); remote entities render wire-direct (present + wire_present_pass). enable_join
@@ -708,7 +623,7 @@ private:
 	void on_joiner_local_player_redeployed(int32_t p_look_heading_bam);
 	// Retail authenticates with one packed Avatars.def selection for each side.
 	// GameWorld resolves the active profile before enable_join; retain it here
-	// because a direct-loaded join rebuilds ClientRuntime in finish_load.
+	// because a direct-loaded join rebuilds ClientRuntime at load.
 	opennova::np::CharacterJoinVars join_character_vars_{};
 	bool join_character_vars_set_ = false;
 	// The listen host's own type-2 connection consumes the same profile shape,
@@ -736,43 +651,19 @@ private:
 	// The shell applies the profile kit/class right after runtime setup — on a
 	// joiner that is BEFORE L exists (L spawns on the name-match). The class
 	// latch lives on the world-typed loadout aggregate
-	// (local_loadout_.pending_player_class); L's spawn block stamps it with
+	// (kernel_->loadout.pending_player_class); L's spawn block stamps it with
 	// the equipped weapon, the same Player_InitPlayer-time arm the host's own
 	// spawn performs. [orig: Player_InitPlayer weapon leg @ 0x4e15f0]
 	// Send one framed datagram to the dialed host (the joiner's send_datagram).
 	void ship_to_host(const std::vector<uint8_t> &dg);
 
-	// Phase 2 (the moving player): the latest input from the host controller, applied to the
-	// local player's AiEntity at the TOP of each frame (net-before-logic, ADR 0009). The
-	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
-	opennova::world::PlayerInput player_input_{};
-	void apply_player_input_pre_tick();
-	// One live verdict for body pose and attach-label selection. The caller
-	// supplies the current local body so the query cannot accidentally consume
-	// the previous tick's aimed_shot_available cache.
-	// Retail witness: Player_CanFireWeapon @0x5cf780.
-	bool local_player_can_fire_weapon(
-			const opennova::world::AiEntity *p_body) const;
+	// The local-player frame input, look accumulators, stance latch and mouse
+	// settings all live on the kernel (kernel_->input / look() /
+	// request_stance / look_settings); this binding only converts device
+	// input and routes the joiner's wire edges.
 	// Retail's held-weapon draw gate, local-player branch — the weapon model is shown
 	// iff the soldier may fire it. [orig: Entity_CanFireWeapon @ 0x4dcb10]
 	bool local_held_weapon_visible(const opennova::world::Entity &p_entity) const;
-	// Retail has one input-owned entity view (the mouse accumulators ARE the
-	// entity yaw/pitch). An authoritative attach snap or the ladder legs (the
-	// CL alignment chase, the ±120° clamp, the post-ladder pitch restore) can
-	// write the split world/AI copy during the logic tick, so mirror any
-	// sim-written view value back into the host latch before the next pre-tick
-	// input write can restore the old look.
-	void sync_local_mounted_input_heading();
-	// The mouse options + the sim-owned stance latches (the dword_B76484/dword_B76480
-	// equivalents the 0x1D apply writes) — the host sends key EDGES and pixel deltas;
-	// look angles and stance state live here. [orig: profile +0x590/+0x594; the
-	// stance latches @ 0x501d1b/0x501d2d]
-	opennova::world::PlayerLookSettings look_settings_{};
-	int stance_latch_ = 0; // 0 stand, 1 crouch, 2 prone
-	// Godot mouse motion is float; the original consumes whole center-lock pixels.
-	// Carry the sub-pixel remainder between frames so slow motion is not lost.
-	float look_px_accum_x_ = 0.0f;
-	float look_px_accum_y_ = 0.0f;
 	// The M-cycle map mode + the two radar zooms — the engine-side state
 	// machine carries the retail lifecycle (cycle, zoom routing, spawn
 	// reset, the dead-player clear); this class only routes requests and
@@ -788,45 +679,37 @@ private:
 	// set_local_player_weapon_input. Presentation outputs accumulate as ordered
 	// per-tick records because several logic ticks can run per render frame; the
 	// snapshot's monotonic serials remain diagnostics/rebuild state.
-	// The whole moved equipped-weapon state (S7a, ADR 0028): def/slot/
-	// rings/serials/UseGun/PowerThrow/presentation events live in
-	// engine/runtime/world (world/player_weapon.h); this binding marshals
-	// installs, inputs, drains, and the two wire request records.
-	opennova::world::LocalPlayerWeapon local_weapon_;
+	// The whole equipped-weapon state (def/slot/rings/serials/UseGun/
+	// PowerThrow/presentation events) lives on the kernel (kernel_->weapon,
+	// with the retained weapon.def rows and the clip index beside it); this
+	// binding marshals installs, inputs, drains, and the two wire request
+	// records.
 	using LocalUseGunSwitch = opennova::world::LocalUseGunSwitch;
-	// The retained weapon.def parse (S6b, ADR 0028): the by-name install reads
-	// rows from here so the ACCEPT chain needs no shell dictionary. Freed on
-	// reload and in the destructor.
-	DefWeaponsFile weapon_defs_ = {};
-	bool weapon_defs_loaded_ = false;
-	// The equipped rig's per-key clip variant lengths (the native replacement
-	// for the render skeletal's clip_seconds feed).
-	opennova::simassets::AdmClipIndex weapon_clip_index_;
-	// The UseGun borrow + slot selection moved to world/player_weapon.h
-	// (S7a); these inline wrappers keep the family's call sites unchanged.
+	// The UseGun borrow + slot selection live in world/player_weapon.h; these
+	// inline wrappers keep the family's call sites unchanged.
 	opennova::world::WeaponSlotState *active_local_weapon_slot() {
-		return world_ ? opennova::world::active_local_weapon_slot(
-				*world_, local_weapon_) : &local_weapon_.slot;
+		return opennova::world::active_local_weapon_slot(
+				kernel_->world, kernel_->weapon);
 	}
 	const opennova::world::WeaponSlotState *active_local_weapon_slot() const {
-		return world_ ? opennova::world::active_local_weapon_slot(
-				*world_, local_weapon_) : &local_weapon_.slot;
+		return opennova::world::active_local_weapon_slot(
+				kernel_->world, kernel_->weapon);
 	}
 	bool local_usegun_switch_is_instant() const {
-		return world_ != nullptr && opennova::world::
-				local_usegun_switch_is_instant(*world_, local_weapon_);
+		return opennova::world::local_usegun_switch_is_instant(
+				kernel_->world, kernel_->weapon);
 	}
 	void sync_local_usegun_weapon_transition() {
-		if (world_) opennova::world::sync_local_usegun_weapon_transition(
-				*world_, local_weapon_);
+		opennova::world::sync_local_usegun_weapon_transition(
+				kernel_->world, kernel_->weapon);
 	}
 	void commit_local_usegun_weapon_switch() {
-		if (world_) opennova::world::commit_local_usegun_weapon_switch(
-				*world_, local_weapon_);
+		opennova::world::commit_local_usegun_weapon_switch(
+				kernel_->world, kernel_->weapon);
 	}
 	void queue_local_usegun_weapon_switch(bool p_same_category) {
-		if (world_) opennova::world::queue_local_usegun_weapon_switch(
-				*world_, local_weapon_, p_same_category);
+		opennova::world::queue_local_usegun_weapon_switch(
+				kernel_->world, kernel_->weapon, p_same_category);
 	}
 	void install_local_player_weapon(const Dictionary &p_def,
 	                                 const Dictionary &p_clip_seconds,
@@ -838,27 +721,10 @@ private:
 	void tick_local_player_weapon();
 
 	// --- the local player's weapon slot pool + spawn kit + map rules -------------------
-	// [orig: weaponSlotArrayBase @ 0xB75FD4 (780 x 100 B) + g_localAmmoPools @ 0xB75FE8 +
-	//  restrictionData @ 0x24D4E00 + g_armoryWeaponAvailability @ 0x24D5600; the loadout
-	//  grill 2026-07-18]
-	opennova::world::WeaponInventory local_inventory_;
-	bool local_inventory_valid_ = false;
-	// The world-typed loadout aggregate (S7b): the availability table, the
-	// resident spawn kit (retail's restrictionData — spawn_kit_set
-	// distinguishes an EXPLICIT kit, even the armory's all-NONE empty one,
-	// from the never-set state that takes the WPN_M4AUTO default [orig: the
-	// default literal @ 0x5246be]), and the pre-spawn class latch. The rules
-	// over it live in world/player_loadout.h; this binding converts
+	// The slot pool, spawn kit, availability table and pre-spawn class latch
+	// all live on the kernel (kernel_->inventory / kernel_->loadout, with the
+	// world-typed rules in world/player_loadout.h); this binding converts
 	// dictionaries and routes the joiner wire submissions.
-	opennova::world::LocalPlayerLoadout local_loadout_;
-	// The mission's loadout/availability chunks, stashed at finish_load for the
-	// weapon-table load to promote through the witnessed SP-vs-net gate —
-	// retail reads the chunks with the catalog already loaded
-	// (Game_StartMission parses weapon.def @ 0x5254b3 before
-	// Mission_LoadBMSFile runs); our mission loads first, so the promotion
-	// waits for load_weapon_table. [orig: Mission_LoadBMSFile @ 0x40F4E0]
-	std::vector<std::pair<std::string, int32_t>> mission_availability_rows_;
-	std::vector<opennova::world::WeaponKitEntry> mission_kit_rows_;
 	// The ACTIVE player weapon profile record — retail's g_charSelClass slot: two
 	// side blocks (blue/red), each carrying the class byte that selects both the wire
 	// class and one of five 2048-byte kit pages, plus the single-player page.
@@ -873,27 +739,26 @@ private:
 	// The switch commit/outcome/gates moved to world/player_weapon.h (S7a);
 	// wrappers keep the family's call sites unchanged.
 	void commit_pending_weapon_switch() {
-		if (world_) opennova::world::commit_pending_weapon_switch(
-				*world_, local_weapon_,
-				local_inventory_valid_ ? &local_inventory_ : nullptr);
+		opennova::world::commit_pending_weapon_switch(
+				kernel_->world, kernel_->weapon,
+				kernel_->inventory_valid ? &kernel_->inventory : nullptr);
 	}
 	void handle_weapon_switch_outcome(
 			const opennova::world::WeaponSwitchOutcome &p_out) {
-		if (world_) opennova::world::handle_weapon_switch_outcome(
-				*world_, local_weapon_,
-				local_inventory_valid_ ? &local_inventory_ : nullptr, p_out);
+		opennova::world::handle_weapon_switch_outcome(
+				kernel_->world, kernel_->weapon,
+				kernel_->inventory_valid ? &kernel_->inventory : nullptr, p_out);
 	}
 	opennova::world::WeaponSwitchGates local_weapon_switch_gates() const {
-		return world_ ? opennova::world::local_weapon_switch_gates(
-						*world_, local_weapon_,
-						local_inventory_valid_ ? &local_inventory_ : nullptr)
-				: opennova::world::WeaponSwitchGates{};
+		return opennova::world::local_weapon_switch_gates(
+				kernel_->world, kernel_->weapon,
+				kernel_->inventory_valid ? &kernel_->inventory : nullptr);
 	}
 	// Player_InitPlayer's weapon leg [orig: @ 0x4e15f0]; shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
 	// Copies the assigned side's profile page into the resident kit buffer
-	// (local_loadout_.spawn_kit) in a live session — retail's single restrictionData [orig: Game_StartMission
+	// (kernel_->loadout.spawn_kit) in a live session — retail's single restrictionData [orig: Game_StartMission
 	// @0x525813; re-run per side by NapiNPClientMsg_TeamAssign @0x431a9a]. False when
 	// not in a session, before the catalog exists, or when the page resolves empty.
 	bool seed_session_kit_from_profile();
@@ -930,24 +795,16 @@ private:
 	void sync_local_player_damage_classes();
 
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
-	// Ticked at the world cadence immediately before the weapon pump, so camera lag and
-	// the ADS settle promoter are render-rate independent and action effects observe the
-	// same tick's promoted scope state [orig: Player_UpdatePerFrame call @ 0x42c18e
-	// precedes WeaponAction_ProcessAllEntities call @ 0x526786].
-	// The sim OWNS the engaged bit [orig: g_scopeEngaged @ 0x82CE94]: the host requests
-	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
-	opennova::world::PlayerViewState player_view_{};
+	// The view state and its trackers live on the kernel (kernel_->view /
+	// kernel_->view_tracker; the witnessed gates in world/local_player_view.h);
+	// this class converts frames and routes wire requests
+	// (simulation_player_view.cpp).
 	// The client medic-call cooldown (retail dword_B76804): 310 ticks from the
 	// send, one per tick, cleared on the local death edge.
 	int medic_request_cooldown_ticks_ = 0;
 	int medic_request_serial_ = 0;
 	bool local_dead_edge_seen_ = false;
 	void tick_local_medic_cooldown();
-	// The view cluster's trackers (the binocular aim displacement, the FP
-	// motion-lead sampler, the local-dead edge) and the session inputs the
-	// arbiter reads, both engine-owned (world/local_player_view.h); this class
-	// converts frames and routes wire requests (simulation_player_view.cpp).
-	opennova::world::LocalPlayerViewTracker view_tracker_{};
 	opennova::world::LocalViewSessionInputs local_view_session_inputs() const;
 	void reset_local_player_view_effects();
 	void refresh_local_player_view_effects();
@@ -965,20 +822,25 @@ private:
 	// host_loop_ MUST be declared before runtime_: the HostClient ClientRuntime holds a
 	// non-owning reference into host_loop_, so the loopback has to outlive (and not move under)
 	// the runtime.
-	// The host state — ctx + per-peer transports + now_tick + serve_and_play — shared with the promoted
-	// owner loop host_session_pump (engine/net/npruntime). MUST be declared before ctx_ (the alias) and before
-	// host_loop_ (host_owner_.host_loopback points at host_loop_, set at bring-up). Replaces the old
-	// ctx_/peers_/PeerLink members; admit_peer/dispatch_event moved into libs (np::, over host_owner_).
-	opennova::np::HostOwner host_owner_;
-	opennova::np::NapiNPServerCtx &ctx_ = host_owner_.ctx;    // alias: host only (is_authority)
-	opennova::netsim::LoopbackChannel host_loop_;             // the host's own dcb-2 client; Server_TickUpdate's 0x0A target
+	// The SP/LAN listen session's net state (inmatch::ListenHostState): the
+	// loopback + the np host owner the ONE listen frame
+	// (inmatch::listen_host::frame) drives — ctx + per-peer transports +
+	// now_tick + serve_and_play, shared with host_session_pump
+	// (engine/net/npruntime). MUST be declared before the aliases and before
+	// runtime_ (the HostClient runtime references host_state_.host_loop). The
+	// HostClient/Joiner ClientRuntime stays a binding member (runtime_ below,
+	// ADR 0042 d3: no headless joiner consumer; the binding also folds the
+	// host's own view with its perf clocks), so state.client_runtime is unused.
+	opennova::inmatch::ListenHostState host_state_;
+	opennova::np::HostOwner &host_owner_ = host_state_.host_owner;
+	opennova::np::NapiNPServerCtx &ctx_ = host_state_.host_owner.ctx; // alias: host only (is_authority)
+	opennova::netsim::LoopbackChannel &host_loop_ = host_state_.host_loop; // the host's own dcb-2 client; Server_TickUpdate's 0x0A target
 	std::unique_ptr<opennova::np::ClientRuntime> runtime_;    // HostClient (host/SP) OR Joiner; the present-snapshot source
 	// Retail loads this process-scoped table from charattr.def before joining.
 	// Keep the byte image outside ClientRuntime so a direct mission load can
-	// reinstall it when finish_load rebuilds an as-yet-unstarted joiner.
+	// reinstall it when a load rebuilds an as-yet-unstarted joiner.
 	opennova::np::CharAttrChallengeTable charattr_challenge_table_{};
 	bool charattr_challenge_loaded_ = false;
-	opennova::bms::File mission_file_;                        // persisted so ctx_.mission outlives the match (the 0x0B burst body)
 	std::string joiner_player_name_;                          // persisted for the Joiner runtime ctor on (re)load
 	// One immutable items.def catalog supplies both the authoritative entity stamp
 	// and the decoded-client record-width resolver. The callback codec, physical
@@ -1010,14 +872,14 @@ private:
 	// Install the retained JOIN-checksum install root (D-NET-166).
 	void install_expansion_version_root();
 	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
-	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn. Mirrors apps/nw_server.
-	void bringup_host_runtime(const opennova::bms::File &file);
-	// Route the listen host's socketless gameplay C2S through the same message
-	// dispatcher as remote connections before Server_TickUpdate drains 0x0C.
-	void drain_host_client_gameplay_requests();
-	// The per-frame host owner loop (local loopback gameplay + recv-drain -> tick_connections ->
-	// Server_TickUpdate -> S2C flush -> fold host_loop_ into ClientState). Socket legs gated on
-	// host_listen_ (pure SP has none).
+	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn, over the kernel's
+	// world/mission. Mirrors apps/nw_server; the Godot-fed context installs (mission text,
+	// .til bytes, GameConfig from the UI host config) sit beside the shared core.
+	void bringup_host_runtime();
+	// The per-frame host owner loop: the ONE inmatch::listen_host::frame over the kernel
+	// (drain -> pre-tick -> host_session_pump -> local pumps -> adm ground), with the
+	// binding supplying the viewport-height seam, the local ClientState fold + perf
+	// clocks, and the local reload relay.
 	void host_pump();
 	// The per-frame non-authority client loop, now the bridge's pump (S10a):
 	// this binding builds the PumpContext/PumpHooks and delegates. The
@@ -1030,13 +892,10 @@ private:
 	opennova::world::ResolvedCollisionShape wire_collision_shape_for_type(
 			uint16_t type_id);
 
-	// Terrain the AI grounds on plus the charmap (surface-type) raster the
-	// footstep pass reads through world.surface_map: the engine's one owning
-	// cpt/trn(+charmap) field builder (terrain_field_store.h, ADR 0042 d4).
-	// The store's copies outlive the source TerrainData and survive a reload
-	// (reset_world rebuilds ai_; apply_terrain_to_ai re-points it). Empty = no
-	// grounding.
-	opennova::terrain::TerrainFieldStore terrain_store_;
+	// Terrain: the kernel owns the one cpt/trn(+charmap) field store
+	// (kernel_->terrain_store, ADR 0042 d4); this binding retains the source
+	// TerrainData Ref so a reload (which recreates the kernel) can rebuild it.
+	Ref<TerrainData> terrain_data_;
 	// The placed-tile surface override (D-SND-15): the mission .til entries
 	// plus the tileset's .TSD-fed tile-index -> surface table, both resolved
 	// engine-side (terrain_query surface_tiles.h — the witnesses live there).
@@ -1056,14 +915,10 @@ private:
 	void apply_sound_state_to_world();
 	void apply_character_traits_to_world();
 
-	// Anim-driven soldier locomotion: the .adm/.bad-backed root-motion source the infantry
-	// motor integrates (world/infantry.h). Owned here so it survives reset_world; the fresh
-	// ai_ is re-pointed at it like the terrain field. Empty = soldiers hold and stand.
-	opennova::simassets::AdmRootMotion infantry_anim_;
-	// Per-entity ADM resolution is a spawn-time invariant, not a one-shot mission-load
-	// sweep: joiner-local and host-admitted players are attached to the AI pool after
-	// MissionPresentation's initial call. Retain the resolver inputs and advance this
-	// high-water mark whenever AiSystem gains entries (its attach storage is append-only).
+	// Anim-driven soldier locomotion: the kernel owns the .adm/.bad-backed
+	// root-motion source (kernel_->root_motion) and the per-entity resolution
+	// sweep. This binding retains the Refs that pin the shell's sources (the
+	// anim root and item db a joiner's decoded-row resolve reads through).
 	void resolve_client_row_adm_ids();
 	std::unordered_map<uint16_t, int> client_row_adm_by_type_;
 	Ref<ResourceRoot> infantry_adm_resource_root_;
@@ -1073,20 +928,6 @@ private:
 	bool score_config_loaded_ = false;
 	void refresh_score_rules();
 	Ref<ItemDatabase> infantry_adm_item_db_;
-	int infantry_adm_resolved_ai_count_ = 0;
-	void apply_root_motion_to_ai();
-	void reset_infantry_adm_ids();
-	void resolve_new_infantry_adm_ids();
-	static void resolve_infantry_adm_before_server_tick(void *p_context);
-	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
-	// The two witnessed .aip profile speeds per ai_textfile, fed to
-	// PromoteOptions before promotion (see promote.h AiProfileRow).
-	std::vector<opennova::mission::PromoteOptions::AiProfileRow> ai_profiles_;
-	// The per-type-id AI-class answer the profile resolve and the promote share
-	// [orig: the AI class table @0x813280 — chel/cpln rows run the helicopter
-	// init, cveh/cbot/ctrn the vehicle init; see mission/promote.h].
-	std::function<opennova::mission::PromoteOptions::AiProfileDefaults(int32_t)>
-			ai_profile_defaults_;
 	// The shared install tail (both install orders): sort for the per-frame
 	// binary search, stamp turret clamps, refresh live pool-1 rows, and re-sync
 	// the header-only materializer image.
@@ -1096,7 +937,6 @@ private:
 	// weapon.def rows. Called from BOTH install orders (specs-then-table and
 	// table-then-specs); all-zero = not authored, no clamp.
 	void stamp_seat_spec_turret_limits();
-	opennova::mission::PromoteOptions promote_options() const;
 
 	void reset_world();
 
@@ -1117,13 +957,11 @@ public:
 	void initialize_network_environment_mission_start();
 
 private:
-	// Shared post-promote wiring: load the BMS arrays, register the systems, run the
-	// pre-mission pass, capture the restore baseline. Marks the sim loaded.
-	void finish_load(const opennova::bms::File &file);
-	// Stash the mission's loadout/availability chunks (plain world types) for
-	// load_weapon_table to promote through the engine's SP-vs-net gate
-	// (world/player_loadout.h). [orig: Mission_LoadBMSFile @ 0x40F4E0]
-	void stash_mission_loadout_rules(const opennova::bms::File &p_file);
+	// The shared post-kernel-boot binding legs: session-header capture, HUD
+	// map zoom, score-row re-resolve, and the held-WacProgram re-apply.
+	void finish_kernel_boot();
+	// The kernel boot's bringup_net_session hook for this sim's role.
+	std::function<void()> role_bringup_hook();
 	void apply_host_session_mission_header(const opennova::bms::File &file);
 	void refresh_host_accept_config();
 
@@ -1560,7 +1398,7 @@ public:
 	// dword_B76484 prone-latch equivalent the render-slot drape gate reads
 	// [orig: RenderSlot_DrawAllDrapes @0x5d6e81 reads
 	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md].
-	int get_local_player_stance_latch() const { return stance_latch_; }
+	int get_local_player_stance_latch() const { return kernel_->stance_latch(); }
 	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
 	// authoritative stance state [orig: HUD_BuildEntityInfo @0x4b860c —
 	// entity+300 flags 0x200=crouch -> 1, 0x100=prone -> 2]. The witnessed
@@ -1794,7 +1632,7 @@ public:
 	void set_spawn_loadout(const TypedArray<Dictionary> &p_kit, bool p_filter_by_availability);
 	// True only after a mission/profile explicitly supplied a spawn kit; the
 	// WPN_M4AUTO engine fallback created by load_weapon_table leaves this false.
-	bool has_explicit_spawn_loadout() const { return local_loadout_.spawn_kit_set; }
+	bool has_explicit_spawn_loadout() const { return kernel_->loadout.spawn_kit_set; }
 	// The map weapon-availability rules [orig: g_armoryWeaponAvailability @ 0x24D5600]:
 	// reset to all-allowed, then apply {name, value} pairs (the .mis item_availability
 	// chunk shape; -1 maps to 3, sub-weapons inherit the parent's value)
@@ -2262,7 +2100,7 @@ public:
 	// of anim states with a usable clip (0 = nothing loaded; org1 soldiers then stand —
 	// motion comes from clips, as in the original). Survives reset_world like the terrain.
 	int set_infantry_anim_map(const Ref<class ResourceRoot> &p_resource_root, const String &p_adm_name);
-	int get_infantry_clip_count() const { return infantry_anim_.clip_count(0); }
+	int get_infantry_clip_count() const { return kernel_->root_motion.clip_count(0); }
 
 	// Per-entity grounding: resolve every active infantry soldier's OWN model .adm (from its
 	// items.def type id via the item database) and store its registry adm_id on the entity, so
@@ -2575,8 +2413,8 @@ public:
 	Error load_ammo_table(const Ref<class ResourceRoot> &p_resource_root,
 	                      const String &p_name = "ammo.def");
 
-	int get_spawned_count() const { return promo_.spawned; }
-	int get_brain_count() const { return promo_.brains; }
+	int get_spawned_count() const { return kernel_->promo.spawned; }
+	int get_brain_count() const { return kernel_->promo.brains; }
 };
 
 } // namespace godot

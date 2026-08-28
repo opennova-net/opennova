@@ -53,7 +53,7 @@ inline void write_present_section_mask(float *row, uint32_t hidden_mask) {
 
 Array Simulation::get_throwable_visuals() const {
 	Array out;
-	if (!world_) return out;
+	if (!kernel_) return out;
 	const double kDegPerBam = opennova::world::kDegreesPerBam;
 	auto push_entry = [&](int64_t key, int item_id, const opennova::world::Vec3 &pos,
 			int32_t yaw_bam, int32_t pitch_bam, int32_t roll_bam,
@@ -85,10 +85,10 @@ Array Simulation::get_throwable_visuals() const {
 	};
 	for (int i = 0; i < opennova::world::RoundSim::kCapacity; ++i) {
 		const opennova::world::LiveRound &r =
-				world_->round_sim.rounds[static_cast<size_t>(i)];
+				kernel_->world.round_sim.rounds[static_cast<size_t>(i)];
 		if (!r.active) continue;
 		const opennova::world::AmmoTableEntry *ammo =
-				world_->ammo.by_index(r.ammo_index);
+				kernel_->world.ammo.by_index(r.ammo_index);
 		const char *move_effect = ammo != nullptr
 				? ammo->impact_effects[1].effect.c_str()
 				: "";
@@ -114,9 +114,9 @@ Array Simulation::get_throwable_visuals() const {
 	}
 	uint8_t viewer_team = 0xFF;
 	if (const opennova::world::Entity *lp =
-			world_->registry.get(world_->cached.local_player))
+			kernel_->world.registry.get(kernel_->world.cached.local_player))
 		viewer_team = static_cast<uint8_t>(lp->team);
-	for (const opennova::world::PlacedDevice &d : world_->throwables.devices) {
+	for (const opennova::world::PlacedDevice &d : kernel_->world.throwables.devices) {
 		if (!d.active) continue;
 		// Viewer-side team variant with the retail base/friendly fallback when
 		// no foe TrcrID is authored [orig: @ 0x5469db..0x546a15].
@@ -137,7 +137,7 @@ Dictionary Simulation::get_waypoint_hud_view() const {
 	// mission-scripted show gate. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
 	// (hudInfo+373 number, +400/404/408 position) + g_showWaypoints @ 0x27238BC]
 	Dictionary out;
-	const opennova::world::WaypointTrack *track = world_ ? &world_->waypoints : nullptr;
+	const opennova::world::WaypointTrack *track = kernel_ ? &kernel_->world.waypoints : nullptr;
 	out["show"] = track != nullptr && track->show;
 	out["count"] = track ? static_cast<int>(track->entries.size()) : 0;
 	const opennova::world::WaypointEntry *cur = track ? track->current_entry() : nullptr;
@@ -159,9 +159,9 @@ Dictionary Simulation::get_hud_map_grid_origin() const {
 	// client-side pool scan retail's HUD init runs (witness at
 	// World::map_grid_origin_x / HudMinimapInput::grid_origin_x).
 	Dictionary out;
-	bool present = world_ != nullptr && world_->map_grid_origin_present;
-	int32_t x_q16 = present ? world_->map_grid_origin_x : 0;
-	int32_t y_q16 = present ? world_->map_grid_origin_y : 0;
+	bool present = kernel_ != nullptr && kernel_->world.map_grid_origin_present;
+	int32_t x_q16 = present ? kernel_->world.map_grid_origin_x : 0;
+	int32_t y_q16 = present ? kernel_->world.map_grid_origin_y : 0;
 	if (!present && runtime_ != nullptr) {
 		present = opennova::netsim::client_minimap_grid_origin(
 				runtime_->state(), x_q16, y_q16);
@@ -174,8 +174,8 @@ Dictionary Simulation::get_hud_map_grid_origin() const {
 }
 
 PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
-	const opennova::world::Entity *local_player = world_ != nullptr
-			? world_->registry.get(world_->cached.local_player)
+	const opennova::world::Entity *local_player = kernel_ != nullptr
+			? kernel_->world.registry.get(kernel_->world.cached.local_player)
 			: nullptr;
 	const uint16_t local_marker_handle = local_player != nullptr
 			? static_cast<uint16_t>(get_local_player_wire_handle())
@@ -186,8 +186,8 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 	// built array. The baseline restore invalidates across epochs.
 	const uint64_t revision =
 			runtime_ ? runtime_->state().minimap.revision : 0;
-	const uint64_t tick = world_ != nullptr
-			? static_cast<uint64_t>(world_->logic_tick) : 0;
+	const uint64_t tick = kernel_ != nullptr
+			? static_cast<uint64_t>(kernel_->world.logic_tick) : 0;
 	if (minimap_snapshot_valid_ && revision == minimap_snapshot_revision_ &&
 			tick == minimap_snapshot_tick_ &&
 			local_marker_handle == minimap_snapshot_local_handle_) {
@@ -197,7 +197,7 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 	// the feed layout are the engine's; this leg only packs the array.
 	opennova::np::MinimapMarkerInputs in;
 	in.map = runtime_ ? &runtime_->state().minimap : nullptr;
-	in.world = world_.get();
+	in.world = &kernel_->world;
 	in.local_marker_handle = local_marker_handle;
 	in.local_heading_bam = static_cast<int32_t>(get_local_player_heading_bam());
 	std::vector<opennova::hud::HudMinimapMarker> markers;
@@ -224,10 +224,10 @@ PackedInt32Array Simulation::get_hud_minimap_footprints() const {
 	PackedInt32Array out;
 	out.push_back(1); // feed version
 	out.push_back(0); // row count, patched below
-	if (!world_) return out;
+	if (!kernel_) return out;
 	int count = 0;
 	std::unordered_map<int32_t, opennova::world::MinimapFootprintMesh> meshes;
-	world_->registry.for_each([&](const opennova::world::Entity &entity) {
+	kernel_->world.registry.for_each([&](const opennova::world::Entity &entity) {
 		if (!opennova::world::minimap_overlay_entity_enabled(entity)) return;
 		const opennova::world::MinimapOverlayClassification row =
 				opennova::world::classify_minimap_overlay(entity);
@@ -235,13 +235,13 @@ PackedInt32Array Simulation::get_hud_minimap_footprints() const {
 		const opennova::world::MinimapBlipDrawPolicy policy =
 				opennova::world::minimap_blip_draw_policy(entity, row.icon);
 		if (!policy.footprint) return;
-		const int32_t model_id = occlusion_world_.instance_model_id(
+		const int32_t model_id = kernel_->occlusion.instance_model_id(
 				entity.handle);
 		if (model_id < 0) return;
 		auto mesh_it = meshes.find(model_id);
 		if (mesh_it == meshes.end()) {
 			const opennova::world::OcclusionModel *model =
-					occlusion_world_.model(model_id);
+					kernel_->occlusion.model(model_id);
 			if (model == nullptr) return;
 			mesh_it = meshes.emplace(model_id,
 					opennova::world::minimap_footprint_from_occlusion(
@@ -274,8 +274,8 @@ Array Simulation::get_objectives_view() const {
 	// [orig: HUD_DrawWinConditions @0x5ba9e0 — byte_A7628B[slot] 0/255 break;
 	//  row gate = show-win bit @0x5ba9ff; checkmark = won bit @0x5bab35]
 	Array out;
-	if (!world_) return out;
-	const auto &sg = world_->subgoals;
+	if (!kernel_) return out;
+	const auto &sg = kernel_->world.subgoals;
 	for (int slot = 1; slot <= 8; ++slot) {
 		const uint8_t id = sg.win_text_ids[slot];
 		if (id == 0 || id == 255) break;
@@ -296,10 +296,10 @@ Array Simulation::get_objectives_view() const {
 // on world/round_sim.h RoundImpact].
 Array Simulation::drain_round_impacts() {
 	Array out;
-	if (!world_) return out;
-	const uint32_t now = world_->logic_tick;
-	for (const opennova::world::RoundImpact &imp : world_->round_sim.impacts) {
-		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(imp.ammo_index);
+	if (!kernel_) return out;
+	const uint32_t now = kernel_->world.logic_tick;
+	for (const opennova::world::RoundImpact &imp : kernel_->world.round_sim.impacts) {
+		const opennova::world::AmmoTableEntry *ammo = kernel_->world.ammo.by_index(imp.ammo_index);
 		if (ammo == nullptr) continue;
 		if (imp.effect_tag < 0 || imp.effect_tag >= opennova::world::kImpactEffectTagCount)
 			continue;
@@ -332,15 +332,15 @@ Array Simulation::drain_round_impacts() {
 		}
 		out.push_back(d);
 	}
-	world_->round_sim.impacts.clear();
+	kernel_->world.round_sim.impacts.clear();
 	return out;
 }
 
 Array Simulation::drain_terrain_scorches() {
 	Array out;
-	if (!world_) return out;
+	if (!kernel_) return out;
 	for (const opennova::world::TerrainScorchEvent &event :
-			world_->terrain_scorches.pending()) {
+			kernel_->world.terrain_scorches.pending()) {
 		const opennova::terrain::TerrainScorchEntry &mission =
 				event.mission_bounds;
 		Dictionary row;
@@ -357,14 +357,14 @@ Array Simulation::drain_terrain_scorches() {
 		row["source_order"] = static_cast<int64_t>(event.source_order);
 		out.push_back(row);
 	}
-	world_->terrain_scorches.clear_pending();
+	kernel_->world.terrain_scorches.clear_pending();
 	return out;
 }
 
 Array Simulation::drain_effects() {
 	Array out;
 	if (!world_installed_) return out;
-	for (const opennova::world::Effect &e : world_->effects.entries()) {
+	for (const opennova::world::Effect &e : kernel_->world.effects.entries()) {
 		Dictionary d;
 		d["kind"] = String(e.kind.c_str());
 		d["a"] = e.a;
@@ -377,7 +377,7 @@ Array Simulation::drain_effects() {
 		d["str"] = String(e.str.c_str());
 		out.push_back(d);
 	}
-	world_->effects.clear();
+	kernel_->world.effects.clear();
 	return out;
 }
 
@@ -388,8 +388,8 @@ Array Simulation::drain_fire_presentation_events() {
 	Array out;
 	if (!world_installed_) return out;
 	constexpr double kRadPerBam = (2.0 * 3.14159265358979323846) / 4294967296.0;
-	const bool have_local = world_->cached.local_player.valid();
-	for (const opennova::world::FireEvent &fe : world_->round_sim.fired) {
+	const bool have_local = kernel_->world.cached.local_player.valid();
+	for (const opennova::world::FireEvent &fe : kernel_->world.round_sim.fired) {
 		Dictionary d;
 		d["origin"] = Vector3(fe.origin.x, fe.origin.z, -fe.origin.y);
 		// Retail's two receive arms are mutually exclusive and present differently.
@@ -408,11 +408,11 @@ Array Simulation::drain_fire_presentation_events() {
 				static_cast<real_t>(std::sin(pitch)),
 				static_cast<real_t>(-std::sin(bearing) * cp));
 		d["shooter_handle"] = static_cast<int>(fe.shooter_handle);
-		const opennova::world::Entity *shooter = world_->registry.get(fe.shooter);
+		const opennova::world::Entity *shooter = kernel_->world.registry.get(fe.shooter);
 		d["source_bms_id"] = shooter != nullptr ? shooter->bms_id : 0;
-		d["is_local_player"] = have_local && fe.shooter == world_->cached.local_player;
+		d["is_local_player"] = have_local && fe.shooter == kernel_->world.cached.local_player;
 		d["ammo_index"] = fe.ammo_index;
-		const opennova::world::AmmoTableEntry *ammo = world_->ammo.by_index(fe.ammo_index);
+		const opennova::world::AmmoTableEntry *ammo = kernel_->world.ammo.by_index(fe.ammo_index);
 		d["effect"] = ammo ? String(ammo->ai_launch_effect.c_str()) : String();
 		d["mf_light"] = ammo ? ammo->mf_light : 0;
 		// The SOUND legs of both arms moved onto the sim's logic clock with the
@@ -429,7 +429,7 @@ Array Simulation::drain_fire_presentation_events() {
 		//  g_weaponActionTable @0x830B90; the +684 call @0x42f777/@0x42f98f; the glow
 		//  gate @0x40205e/@0x402080 with the context stamped 2 @0x42f8a0]
 		const opennova::world::WeaponTableEntry *fired_def =
-				world_->weapons.by_index(fe.adm_index);
+				kernel_->world.weapons.by_index(fe.adm_index);
 		const opennova::world::WeaponFsmAction *fire_row =
 				fired_def != nullptr
 						? &fired_def->action_fsm.actions[opennova::world::weapon_action::kFire]
@@ -448,7 +448,7 @@ Array Simulation::drain_fire_presentation_events() {
 		// presentation layer resolves it against the node it renders.
 		out.push_back(d);
 	}
-	world_->round_sim.fired.clear();
+	kernel_->world.round_sim.fired.clear();
 	return out;
 }
 
@@ -468,7 +468,7 @@ static_assert(opennova::world::round_event_flag::kAdmIndexed ==
 // dedicated host, which is the witnessed peer gate.
 void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 	if (!world_installed_) return;
-	world_->fire_sounds.set_listener(opennova::world::Vec3{
+	kernel_->world.fire_sounds.set_listener(opennova::world::Vec3{
 			p_listener_godot.x, -p_listener_godot.z, p_listener_godot.y});
 }
 
@@ -482,7 +482,7 @@ Array Simulation::drain_fire_sounds() {
 	Array out;
 	if (!world_installed_) return out;
 	for (const opennova::world::ReadyFireSound &sound :
-			world_->fire_sounds.drain()) {
+			kernel_->world.fire_sounds.drain()) {
 		Dictionary d;
 		d["set"] = String(sound.set_name.c_str());
 		d["pos"] = Vector3(sound.pos.x, sound.pos.z, -sound.pos.y);
@@ -498,7 +498,7 @@ Array Simulation::drain_fire_sounds() {
 Dictionary Simulation::drain_destruction_events() {
 	Dictionary out;
 	if (!world_installed_) return out;
-	opennova::world::DestructionEvents &ev = world_->destruction;
+	opennova::world::DestructionEvents &ev = kernel_->world.destruction;
 	auto to_godot = [](const opennova::world::Vec3 &v) {
 		return Vector3(v.x, v.z, -v.y);
 	};
@@ -560,8 +560,8 @@ Dictionary Simulation::drain_destruction_events() {
 Array Simulation::get_death_pieces() const {
 	Array out;
 	if (!world_installed_) return out;
-	for (size_t slot = 0; slot < world_->death_pieces.pieces.size(); ++slot) {
-		const opennova::world::DeathPiece &p = world_->death_pieces.pieces[slot];
+	for (size_t slot = 0; slot < kernel_->world.death_pieces.pieces.size(); ++slot) {
+		const opennova::world::DeathPiece &p = kernel_->world.death_pieces.pieces[slot];
 		if (!p.active) continue;
 		Dictionary d;
 		d["slot"] = static_cast<int>(slot);
@@ -587,9 +587,9 @@ Array Simulation::get_death_pieces() const {
 // damage chain reads, resolved by bms_id. {} = no such entity.
 Dictionary Simulation::get_destruction_debug(int p_bms_id) const {
 	Dictionary out;
-	if (!world_) return out;
+	if (!kernel_) return out;
 	const opennova::world::Entity *found = nullptr;
-	world_->registry.for_each([&](const opennova::world::Entity &e) {
+	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (found == nullptr && e.bms_id == p_bms_id) found = &e;
 	});
 	if (found == nullptr) return out;
@@ -605,9 +605,9 @@ Dictionary Simulation::get_destruction_debug(int p_bms_id) const {
 	out["engine_flags"] = static_cast<int64_t>(found->engine_flags);
 	out["is_ai_capable"] = found->is_ai_capable;
 	out["has_collision_instance"] =
-			collision_world_.has_instance(*world_, found->handle);
+			kernel_->collision.has_instance(kernel_->world, found->handle);
 	const opennova::world::ItemDeathTraits *t =
-			world_->item_death_traits.get(found->item_id);
+			kernel_->world.item_death_traits.get(found->item_id);
 	out["has_death_traits"] = t != nullptr;
 	if (t != nullptr) {
 		out["armor_impact"] = t->armor_impact;
@@ -649,7 +649,7 @@ Dictionary Simulation::get_destruction_debug(int p_bms_id) const {
 PackedFloat32Array Simulation::get_tracer_trails() const {
 	PackedFloat32Array out;
 	if (!world_installed_) return out;
-	for (const opennova::world::TracerTrailChannel &c : world_->round_sim.trails.channels) {
+	for (const opennova::world::TracerTrailChannel &c : kernel_->world.round_sim.trails.channels) {
 		if (!c.active || c.count <= 0) continue;
 		const int64_t base = out.size();
 		out.resize(base + 3 + static_cast<int64_t>(c.count) * 4);
@@ -675,10 +675,10 @@ PackedFloat32Array Simulation::get_tracer_trails() const {
 Array Simulation::get_round_glow_rows() const {
 	Array out;
 	if (!world_installed_) return out;
-	for (const opennova::world::LiveRound &r : world_->round_sim.rounds) {
+	for (const opennova::world::LiveRound &r : kernel_->world.round_sim.rounds) {
 		if (!r.active || r.ammo_index < 0) continue;
 		const opennova::world::AmmoTableEntry *ammo =
-				world_->ammo.by_index(r.ammo_index);
+				kernel_->world.ammo.by_index(r.ammo_index);
 		if (ammo == nullptr || ammo->light_move_radius <= 0.0f) continue;
 		Dictionary d;
 		d["id"] = static_cast<int64_t>(r.presentation_generation);
@@ -750,14 +750,14 @@ Dictionary Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
 
 Dictionary Simulation::get_entity_debug(int p_index) const {
 	Dictionary out;
-	if (!ai_ || !world_) return out;
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_) return out;
+	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return out;
 	// A scripted remove (VaporizeSingle / removeSSN) despawns the registry slot
 	// while the AiEntity stays in the AI pool, so the registry block emits TYPED
 	// DEFAULTS rather than dropping keys - the card's shape is stable whether
 	// the entity is whole or registry-despawned.
-	const opennova::world::Entity *ent = world_->registry.get(e->handle);
+	const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
 	out["kind"] = ent ? opennova::world::spawn_origin_kind(ent->spawn_origin) : -1;
 	out["index"] = ent ? static_cast<int>(opennova::world::spawn_origin_index(ent->spawn_origin)) : -1;
 	out["bms_id"] = ent ? ent->bms_id : 0;
@@ -784,7 +784,7 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["vehicle_family"] = -1;
 	if (ent != nullptr) {
 		if (const opennova::world::VehicleTraits *traits =
-					world_->vehicle_traits.get(ent->item_id)) {
+					kernel_->world.vehicle_traits.get(ent->item_id)) {
 			out["vehicle_family"] = static_cast<int>(traits->family);
 		}
 	}
@@ -808,7 +808,7 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["mount_target_seat_count"] = 0;
 	out["mount_target_seats"] = Array();
 	if (ent && ent->mounted) {
-		const opennova::world::Entity *target = world_->registry.get(ent->mount_target);
+		const opennova::world::Entity *target = kernel_->world.registry.get(ent->mount_target);
 		if (target) {
 			out["mount_target_net_id"] = static_cast<int>(target->net_id);
 			out["mount_target_config_valid"] = target->emplaced_config_valid;
@@ -868,7 +868,7 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["out_speed"] = e->brain.f[AiBrain::kOutSpeed];
 	// Rotor spin, so a live round can show the blades actually turning rather
 	// than only the code that says they should.
-	if (const opennova::world::Entity *ve = world_->registry.get(e->handle)) {
+	if (const opennova::world::Entity *ve = kernel_->world.registry.get(e->handle)) {
 		out["rotor_speed"] = ve->veh.part_spin.speed;
 		out["rotor_phase"] = ve->veh.part_spin.angle;
 		// The rotor machine's three gates, so a still rotor names its cause: the
@@ -882,7 +882,7 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 		// The mover family, so a rotor check can tell "no helicopter here" from
 		// "the helicopter's blades are not turning".
 		const opennova::world::VehicleTraits *vt =
-				world_->vehicle_traits.get(ve->item_id);
+				kernel_->world.vehicle_traits.get(ve->item_id);
 		out["veh_family"] = vt != nullptr ? int(vt->family) : -1;
 		out["player_control"] = vt != nullptr && vt->player_control;
 		// Flight-command chain, so a "the helicopter will not move" report can
@@ -912,7 +912,7 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 		int pilot_move = -1;
 		for (const opennova::world::Seat &st : ve->seats) {
 			if (!st.occupant.valid()) continue;
-			const opennova::world::Entity *oc = world_->registry.get(st.occupant);
+			const opennova::world::Entity *oc = kernel_->world.registry.get(st.occupant);
 			if (oc != nullptr && oc->player_class != 0)
 				pilot_move = static_cast<int>(oc->net_move_input);
 		}
@@ -921,7 +921,7 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["infantry"] = e->inf.active;
 	out["adm_id"] = e->inf.active ? e->inf.adm_id : -1;
 	out["adm_name"] = e->inf.active
-			? String::utf8(infantry_anim_.adm_name(e->inf.adm_id).c_str())
+			? String::utf8(kernel_->root_motion.adm_name(e->inf.adm_id).c_str())
 			: String();
 	out["infantry_move_mode"] = e->inf.move_mode;
 	// The frozen-clump instrument: this tick's integrated root step vs the
@@ -942,10 +942,10 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	out["parent"] = -1;
 	out["ground"] = -1;
 	if (const opennova::world::Entity *pe =
-				ent && ent->mounted ? world_->registry.get(ent->mount_target) : nullptr)
+				ent && ent->mounted ? kernel_->world.registry.get(ent->mount_target) : nullptr)
 		out["parent"] = static_cast<int>(pe->bms_id);
 	if (const opennova::world::Entity *ge =
-				ent ? world_->registry.get(ent->ground_target) : nullptr)
+				ent ? kernel_->world.registry.get(ent->ground_target) : nullptr)
 		out["ground"] = static_cast<int>(ge->bms_id);
 	out["s35"] = e->slot.f[35];
 	out["s37"] = e->slot.f[37];
@@ -977,9 +977,9 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	// point the fire pass, LOS rays, and aim eye read (world/muzzle_pose.h).
 	{
 		int32_t muzzle[3] = {};
-		const bool muzzle_valid = world_->muzzle_pose_provider != nullptr &&
-				world_->muzzle_pose_provider->resolve_muzzle_pose(
-						*world_, e->handle, muzzle);
+		const bool muzzle_valid = kernel_->world.muzzle_pose_provider != nullptr &&
+				kernel_->world.muzzle_pose_provider->resolve_muzzle_pose(
+						kernel_->world, e->handle, muzzle);
 		out["muzzle_valid"] = muzzle_valid;
 		out["muzzle"] = muzzle_valid ? godot_from_fixed3(muzzle) : Vector3();
 	}
@@ -1014,21 +1014,21 @@ bool Simulation::remote_body_state_defers(int64_t p_current_flags, int64_t p_nex
 }
 
 int Simulation::get_entity_count() const {
-	return ai_ ? ai_->count() : 0;
+	return kernel_ ? kernel_->ai.count() : 0;
 }
 
 int Simulation::get_entity_kind(int p_index) const {
-	if (!ai_ || !world_) return -1;
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_) return -1;
+	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return -1;
-	const opennova::world::Entity *ent = world_->registry.get(e->handle);
+	const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
 	if (!ent) return -1;
 	return opennova::world::spawn_origin_kind(ent->spawn_origin); // [orig promote: (kind<<24)|index]
 }
 
 Vector3 Simulation::get_entity_position(int p_index) const {
-	if (!ai_) return Vector3();
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_) return Vector3();
+	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return Vector3();
 	// mission (x, y, z) 16.16 -> Godot (x, z, -y) world units. [orig render remap: (x, z, -y).]
 	return Vector3(static_cast<float>(e->pos[0] / kFixed16),
@@ -1037,22 +1037,22 @@ Vector3 Simulation::get_entity_position(int p_index) const {
 }
 
 float Simulation::get_entity_yaw_deg(int p_index) const {
-	if (!ai_) return 0.0f;
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_) return 0.0f;
+	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return 0.0f;
 	return static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(e->heading));
 }
 
 int Simulation::get_entity_state(int p_index) const {
-	if (!ai_) return 0;
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_) return 0;
+	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return 0;
 	return e->brain.f[AiBrain::kCurState];
 }
 
 int Simulation::get_entity_net_id(int p_index) const {
-	if (!ai_) return 0;
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_) return 0;
+	AiEntity *e = kernel_->ai.at(p_index);
 	return e ? e->net_id : 0;
 }
 
@@ -1066,11 +1066,11 @@ int Simulation::get_entity_net_id(int p_index) const {
 // NapiNPServerMsg_HandleStanceChange @ 0x501c60]
 PackedVector3Array Simulation::get_foliage_mask_anchor_positions() const {
 	PackedVector3Array out;
-	if (!ai_ || !world_) return out;
-	for (int i = 0; i < ai_->count(); ++i) {
-		AiEntity *e = ai_->at(i);
+	if (!kernel_) return out;
+	for (int i = 0; i < kernel_->ai.count(); ++i) {
+		AiEntity *e = kernel_->ai.at(i);
 		if (!e) continue;
-		const opennova::world::Entity *ent = world_->registry.get(e->handle);
+		const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
 		if (!ent) continue;
 		if ((ent->net_stance_bits & 0x3u) == 0) continue;
 		if (ent->ground_target.valid()) continue;
@@ -1083,12 +1083,12 @@ PackedVector3Array Simulation::get_foliage_mask_anchor_positions() const {
 
 PackedVector3Array Simulation::get_entity_effect_state_for_ssn(int p_ssn) const {
 	PackedVector3Array out;
-	if (world_ == nullptr || p_ssn <= 0 ||
+	if (kernel_ == nullptr || p_ssn <= 0 ||
 			p_ssn > static_cast<int>(std::numeric_limits<std::uint16_t>::max())) {
 		return out;
 	}
-	const opennova::world::Entity *entity = world_->registry.get(
-			world_->registry.find_by_net_id(static_cast<std::uint16_t>(p_ssn)));
+	const opennova::world::Entity *entity = kernel_->world.registry.get(
+			kernel_->world.registry.find_by_net_id(static_cast<std::uint16_t>(p_ssn)));
 	if (entity == nullptr) return out;
 
 	out.resize(EFFECT_STATE_COUNT);
@@ -1115,13 +1115,13 @@ void Simulation::invalidate_present_effect_pose_cache() const {
 }
 
 void Simulation::ensure_present_effect_pose_cache() const {
-	if (!world_ || !runtime_) {
+	if (!kernel_ || !runtime_) {
 		if (present_effect_pose_cache_valid_) invalidate_present_effect_pose_cache();
 		return;
 	}
 
 	const opennova::netsim::ClientState &client = runtime_->state();
-	const uint32_t logic_tick = world_->logic_tick;
+	const uint32_t logic_tick = kernel_->world.logic_tick;
 	if (present_effect_pose_cache_valid_ &&
 			present_effect_pose_cache_runtime_ == runtime_.get() &&
 			present_effect_pose_cache_logic_tick_ == logic_tick &&
@@ -1162,7 +1162,7 @@ bool Simulation::cache_present_effect_pose(
 	// Host/listen presentation can recover the authored pitch and roll from the
 	// authoritative registry. The compact peer row only carries yaw; joiners
 	// therefore retain the wire-only zeroes here.
-	const opennova::world::Entity *entity = joiner_ ? nullptr : world_->registry.get(
+	const opennova::world::Entity *entity = joiner_ ? nullptr : kernel_->world.registry.get(
 			opennova::world::EntityHandle{p_entity_state.handle});
 	PresentEffectPose pose;
 	pose.position = Vector3(
@@ -1209,8 +1209,8 @@ bool Simulation::cache_present_effect_pose(
 			present_effect_poses_by_handle_.end()) {
 		return true;
 	}
-	const AiEntity *ae = world_->ai != nullptr
-			? world_->ai->for_handle(p_entity.handle) : nullptr;
+	const AiEntity *ae = kernel_->world.ai != nullptr
+			? kernel_->world.ai->for_handle(p_entity.handle) : nullptr;
 	PresentEffectPose pose;
 	pose.position = Vector3(p_entity.position.x, p_entity.position.z,
 			-p_entity.position.y);
@@ -1261,7 +1261,7 @@ PackedVector3Array Simulation::present_effect_state_for_handle(uint16_t p_handle
 	}
 	if (!joiner_) {
 		const opennova::world::Entity *entity =
-				world_->registry.get(opennova::world::EntityHandle{p_handle});
+				kernel_->world.registry.get(opennova::world::EntityHandle{p_handle});
 		if (entity != nullptr && cache_present_effect_pose(*entity)) {
 			return cached_present_effect_state_for_handle(p_handle);
 		}
@@ -1293,7 +1293,7 @@ PackedVector3Array Simulation::get_present_effect_state_for_ssn(int p_ssn) const
 		return PackedVector3Array();
 	}
 	const opennova::world::Entity *match = nullptr;
-	world_->registry.for_each([&](const opennova::world::Entity &e) {
+	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (match == nullptr && static_cast<int>(e.net_id) == p_ssn) match = &e;
 	});
 	if (match != nullptr && cache_present_effect_pose(*match)) {
@@ -1325,7 +1325,7 @@ PackedVector3Array Simulation::get_present_effect_state_for_bms_id(int p_bms_id)
 		return PackedVector3Array();
 	}
 	const opennova::world::Entity *entity =
-			world_->registry.get(handle_for_bms_id(p_bms_id));
+			kernel_->world.registry.get(handle_for_bms_id(p_bms_id));
 	if (entity != nullptr && cache_present_effect_pose(*entity)) {
 		return cached_present_effect_state_for_handle(entity->handle.packed);
 	}
@@ -1348,7 +1348,7 @@ PackedVector3Array Simulation::get_present_effect_state_for_origin(
 		return PackedVector3Array();
 	}
 	const opennova::world::Entity *match = nullptr;
-	world_->registry.for_each([&](const opennova::world::Entity &e) {
+	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (match != nullptr) return;
 		const int kind = opennova::world::spawn_origin_kind(e.spawn_origin);
 		const int index = static_cast<int>(opennova::world::spawn_origin_index(e.spawn_origin));
@@ -1365,18 +1365,18 @@ PackedVector3Array Simulation::get_present_effect_state_for_origin(
 // PLAYER is identified by this + its handle, NOT by an SSN (players carry net_id 0). 0 = unowned (AI /
 // mission entity / the host's dedicated reservation).
 int Simulation::get_entity_owner_connection_id(int p_index) const {
-	if (!ai_ || !world_) return 0;
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_) return 0;
+	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return 0;
-	const opennova::world::Entity *ent = world_->registry.get(e->handle);
+	const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
 	return ent ? static_cast<int>(ent->owner_connection_id) : 0;
 }
 
 // The entity's wire handle (pool<<12|slot) — the per-entity identity carried on the 0x0A/0x0C wire and
 // the decoded present's PF_WIRE_HANDLE. Unique per entity (unlike a player's net_id, which is now 0).
 int Simulation::get_entity_wire_handle(int p_index) const {
-	if (!ai_) return 0;
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_) return 0;
+	AiEntity *e = kernel_->ai.at(p_index);
 	return e ? static_cast<int>(e->handle.packed) : 0;
 }
 
@@ -1400,19 +1400,19 @@ int32_t Simulation::decode_present_part_anim_phase(
 }
 
 int Simulation::get_entity_part_anim_phase(int p_index, int channel) const {
-	if (!ai_ || channel < 1 || channel > 2) return 0;
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_ || channel < 1 || channel > 2) return 0;
+	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return 0;
 	return e->brain.f[AiBrain::kPartAnimPhase0 + (channel - 1)];
 }
 
 bool Simulation::get_entity_part_anim_active(int p_index, int channel) const {
-	if (!ai_ || channel < 1 || channel > 2) return false;
-	AiEntity *e = ai_->at(p_index);
+	if (!kernel_ || channel < 1 || channel > 2) return false;
+	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return false;
-	if (channel == 1 && world_ != nullptr) {
+	if (channel == 1 && kernel_ != nullptr) {
 		const opennova::world::Entity *entity =
-				world_->registry.get(e->handle);
+				kernel_->world.registry.get(e->handle);
 		if (entity != nullptr && (entity->item_attrib & 0x1000u) != 0)
 			return false;
 	}
@@ -1458,22 +1458,22 @@ PackedFloat32Array Simulation::get_present_snapshot() const {
 }
 PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 	PackedFloat32Array out;
-	if (!world_ || !runtime_) return out;
+	if (!kernel_ || !runtime_) return out;
 	// P7: every path (SP / LAN host / joiner) reads its own npruntime ClientRuntime view's ClientState.
 	const opennova::netsim::ClientState &cs = runtime_->state();
 	const opennova::world::Entity *local_player =
-			world_->registry.get(world_->cached.local_player);
+			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	// Entity_RenderVehicleModel's local UseGun predicate is a render verdict,
 	// not Entity.hidden: parent equality + first-person camera + raw UseGun seat.
 	// The per-row tail below adds the live EquippedSlot/Def tests.
 	// [orig: @0x4407f6..0x44084c; sole submit @0x440918]
 	const bool local_first_person_usegun =
-			!player_view_.third_person && local_player != nullptr &&
+			!kernel_->view.third_person && local_player != nullptr &&
 			local_player->mounted &&
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
 	const opennova::np::ClientReplicaPresentContext replica_present_context{
-			&item_seat_specs_, &world_->weapons, joiner_};
+			&kernel_->seat_specs, &kernel_->world.weapons, joiner_};
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
@@ -1505,7 +1505,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 		// Hidden/alive/animation state still comes from the wire. Remote pool-0 organics
 		// remain wire-rendered through their remote-request-shaped body path.
 		const opennova::world::EntityHandle h{es.handle};
-		const opennova::world::Entity *ent = (!joiner_) ? world_->registry.get(h) : nullptr;
+		const opennova::world::Entity *ent = (!joiner_) ? kernel_->world.registry.get(h) : nullptr;
 		// Retail's terrain collector sends pool-1 model rows through
 		// render_sector_entity; pool-2 statics and pool-3 marker models join the
 		// same sector list through their dedicated collectors. Pool-0 skeletal
@@ -1515,7 +1515,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 		// while a failed model build has no CTRL surface on which to apply it.
 		const bool sector_model_row = h.pool() >= 1 && h.pool() <= 3;
 		if (joiner_ && h.pool() >= 1 && h.pool() <= 3) {
-			const opennova::world::Entity *local = world_->registry.get(h);
+			const opennova::world::Entity *local = kernel_->world.registry.get(h);
 			if (local != nullptr && local->spawn_origin != opennova::world::kSpawnOriginNone &&
 					static_cast<uint16_t>(local->item_id) == es.type_id) {
 				r[PF_KIND] = static_cast<float>(local->spawn_origin >> 24);
@@ -1548,14 +1548,14 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			// the compact view has no steer/currentSpeed source to reconstruct.
 			// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
 			//  stores @0x4929D7 / @0x4929F1]
-			write_present_vehicle_motion_controls(r, *world_, *ent);
+			write_present_vehicle_motion_controls(r, kernel_->world, *ent);
 			// Only a carrier in the witnessed live UseGun attachment relation
 			// publishes its inline MountSlot's HEAT_GLOW, including owned cold
 			// zero. A joiner has no heat-window/ownership state in its compact
 			// row and must not synthesize one.
 			// [orig: attachment call @ 0x546518;
 			//  HUD_CacheWeaponSlotInfo stores @ 0x440969 / @ 0x440991]
-			write_present_world_model_heat_glow(r, *world_, *ent);
+			write_present_world_model_heat_glow(r, kernel_->world, *ent);
 		}
 		// The local first-person UseGun parent cull is a render verdict of THIS
 		// machine's own mount state, and retail's render walk applies it
@@ -1568,10 +1568,10 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 		// [orig: Entity_RenderVehicleModel @0x4407d0 predicate
 		//  @0x4407f6..0x44084c; sole submit @0x440918]
 		if (local_first_person_usegun && local_player->mount_target == h) {
-			const opennova::world::Entity *mount_row = world_->registry.get(h);
+			const opennova::world::Entity *mount_row = kernel_->world.registry.get(h);
 			const opennova::world::WeaponTableEntry *mount_def =
 					mount_row != nullptr
-					? world_->weapons.by_index(mount_row->primary_weapon_slot_adm)
+					? kernel_->world.weapons.by_index(mount_row->primary_weapon_slot_adm)
 					: nullptr;
 			// Primary retail leg: FP model exists and this exact embedded
 			// MountSlot is the live EquippedSlot. flags2 Invisible is the
@@ -1580,12 +1580,12 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
 			//  Def+0x0c & 0x800 @0x44083f]
 			const bool equipped_parent_slot = mount_row != nullptr &&
-					local_weapon_.usegun_slot_active && local_weapon_.usegun_mount == h &&
-					local_weapon_.usegun_weapon_adm ==
+					kernel_->weapon.usegun_slot_active && kernel_->weapon.usegun_mount == h &&
+					kernel_->weapon.usegun_weapon_adm ==
 							mount_row->primary_weapon_slot_adm;
 			if (mount_def != nullptr &&
 					((mount_def->has_first_person_model_reference &&
-					  local_weapon_.first_person_model_adm ==
+					  kernel_->weapon.first_person_model_adm ==
 							  mount_row->primary_weapon_slot_adm &&
 					  equipped_parent_slot) ||
 					 (mount_def->flags2 &
@@ -1632,7 +1632,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 		EmplacedWeaponControls emplaced;
 		if (ent != nullptr) {
 			if (emplaced_weapon_controls_for(
-						*world_, ai_.get(), *ent, emplaced))
+						kernel_->world, &kernel_->ai, *ent, emplaced))
 				write_present_emplaced_controls(r, emplaced);
 		}
 		const bool authoritative_attachment_pose =
@@ -1640,13 +1640,13 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 				ent->emplacement_pose_metadata_resolved &&
 				ent->emplacement_parent.packed == es.parent_handle;
 		opennova::world::MountedPose client_attachment_pose;
-		const uint32_t attachment_time_ms = panm_time_override_ms_ >= 0
-				? static_cast<uint32_t>(panm_time_override_ms_)
-				: world_->logic_tick * 16u;
+		const uint32_t attachment_time_ms = kernel_->panm_time_override_ms >= 0
+				? static_cast<uint32_t>(kernel_->panm_time_override_ms)
+				: kernel_->world.logic_tick * 16u;
 		const bool reconstructed_client_attachment_pose = joiner_ &&
 				resolve_client_eweap_attachment_pose(
-						es, cs, item_seat_specs_, mounted_pose_native_graphics_,
-						sim_models_, attachment_time_ms, client_attachment_pose);
+						es, cs, kernel_->seat_specs, kernel_->mounted_graphics,
+						kernel_->models, attachment_time_ms, client_attachment_pose);
 		if (authoritative_attachment_pose) {
 			// NoNetworkCallback addeweap children have only their 0x0D spawn pose in
 			// ClientState. The host has already advanced their authoritative userpoint
@@ -1674,8 +1674,8 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 		// exists; re-deriving the wire pose here would re-clobber the host's
 		// live vehicle attitude with the stale spawn/dead-pose eulers.
 		// Infantry anim from the local AI pool (host only — same registry caveat as above).
-		if (world_->ai && !joiner_) {
-			const AiEntity *ae = world_->ai->for_handle(h);
+		if (kernel_->world.ai && !joiner_) {
+			const AiEntity *ae = kernel_->world.ai->for_handle(h);
 			if (ae != nullptr) {
 				for (int slot = 0; slot < 2; ++slot) {
 					// HUD_CacheEntityDisplayInfo copies comp[113/114] as raw
@@ -1763,8 +1763,8 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 
 PackedFloat32Array Simulation::present_snapshot_from_world() const {
 	PackedFloat32Array out;
-	if (!world_) return out;
-	const opennova::world::World &w = *world_;
+	if (!kernel_) return out;
+	const opennova::world::World &w = kernel_->world;
 	const opennova::world::Entity *local_player =
 			w.registry.get(w.cached.local_player);
 	// Entity_RenderVehicleModel's local UseGun predicate is a render verdict,
@@ -1773,7 +1773,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 	// [orig: Entity_RenderVehicleModel @0x4407f6..0x44084c, sole submit @0x440918;
 	//  see docs/world/world-wac-ai-re.md]
 	const bool local_first_person_usegun =
-			!player_view_.third_person && local_player != nullptr &&
+			!kernel_->view.third_person && local_player != nullptr &&
 			local_player->mounted &&
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	// One row per live pool slot, in registry order — the set the host's own
@@ -1874,11 +1874,11 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 			// [orig: Def+0x16c @0x440824; EquippedSlot @0x440833;
 			//  Def+0x0c & 0x800 @0x44083f; see docs/world/world-wac-ai-re.md]
 			const bool equipped_parent_slot =
-					local_weapon_.usegun_slot_active && local_weapon_.usegun_mount == h &&
-					local_weapon_.usegun_weapon_adm == e.primary_weapon_slot_adm;
+					kernel_->weapon.usegun_slot_active && kernel_->weapon.usegun_mount == h &&
+					kernel_->weapon.usegun_weapon_adm == e.primary_weapon_slot_adm;
 			if (mount_def != nullptr &&
 					((mount_def->has_first_person_model_reference &&
-					  local_weapon_.first_person_model_adm == e.primary_weapon_slot_adm &&
+					  kernel_->weapon.first_person_model_adm == e.primary_weapon_slot_adm &&
 					  equipped_parent_slot) ||
 					 (mount_def->flags2 &
 					  opennova::world::weapon_flag2::kInvisible) != 0))
@@ -1914,7 +1914,7 @@ PackedFloat32Array Simulation::present_snapshot_from_world() const {
 			}
 		}
 		EmplacedWeaponControls emplaced;
-		if (emplaced_weapon_controls_for(w, ai_.get(), e, emplaced))
+		if (emplaced_weapon_controls_for(w, &kernel_->ai, e, emplaced))
 			write_present_emplaced_controls(r, emplaced);
 		if (ae == nullptr) return;
 		for (int slot = 0; slot < 2; ++slot) {

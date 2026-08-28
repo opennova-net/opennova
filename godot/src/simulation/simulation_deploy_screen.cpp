@@ -43,8 +43,8 @@ bool Simulation::local_player_dead() const {
 		const opennova::netsim::ClientEntityState *self = cs.find(runtime_->self_handle());
 		return self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
 	}
-	if (!world_ || !world_->cached.local_player.valid()) return false;
-	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (!kernel_->world.cached.local_player.valid()) return false;
+	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
 	return e != nullptr &&
 			((e->flags | e->engine_flags) & opennova::world::kEntityFlagDead) != 0;
 }
@@ -52,7 +52,7 @@ bool Simulation::local_player_dead() const {
 bool Simulation::request_local_player_medic() {
 	// The action gates [orig: case 217 @0x49b4b4..0x49b4da — in session, a
 	// local entity, `Flags & 2`, the cooldown at zero].
-	if (!runtime_ || !world_ || !world_->cached.local_player.valid()) return false;
+	if (!runtime_ || !kernel_->world.cached.local_player.valid()) return false;
 	if (!local_player_dead()) return false;
 	if (medic_request_cooldown_ticks_ != 0) return false;
 	bool sent = false;
@@ -63,7 +63,7 @@ bool Simulation::request_local_player_medic() {
 		// request (simulation_player_weapon.cpp): the server handler
 		// broadcasts the 0x1E line to everyone including this client.
 		opennova::MedicRequest request;
-		request.entity_index = world_->cached.local_player.packed;
+		request.entity_index = kernel_->world.cached.local_player.packed;
 		host_loop_.client_send(opennova::c2s::MEDIC_REQUEST,
 				opennova::encode_medic_request(request));
 		sent = true;
@@ -119,11 +119,11 @@ Dictionary Simulation::get_deploy_status() {
 		revive = cs.local_revive_seconds;
 		hold = cs.spawn_hold_seconds;
 		if (cs.spawn_waves.known && cs.spawn_waves.self_zone_handle != 0xFFFFu &&
-				world_) {
+				kernel_) {
 			const opennova::world::SpawnZoneRegistry &reg = deploy_zone_registry();
 			const opennova::world::EntityHandle zone{cs.spawn_waves.self_zone_handle};
 			self_zone_index = opennova::world::spawn_zone_index_of(reg, zone);
-			if (const opennova::world::Entity *e = world_->registry.get(zone)) {
+			if (const opennova::world::Entity *e = kernel_->world.registry.get(zone)) {
 				self_zone_numbered = e->zone_number != 0;
 			}
 			for (const opennova::SpawnWaveGroup &g : cs.spawn_waves.value.groups) {
@@ -142,7 +142,7 @@ Dictionary Simulation::get_deploy_status() {
 	opennova::world::DeployStaticsInput statics_in;
 	statics_in.hold_seconds = hold;
 	statics_in.revive_seconds = revive;
-	statics_in.local_mounted = player_view_.mount.control_seat;
+	statics_in.local_mounted = kernel_->view.mount.control_seat;
 	const opennova::world::DeployStaticsVisibility statics =
 			opennova::world::deploy_statics_visibility(statics_in);
 	out["penalty_seconds"] = penalty;
@@ -194,7 +194,7 @@ TypedArray<Dictionary> Simulation::get_deploy_list_rows(const String &p_default_
 	// loops over the zone rows this sim exposes (get_deploy_spawn_zones), the
 	// team colour tag, and the embedder-resolved WPNames strings.
 	TypedArray<Dictionary> out;
-	if (!world_ || !joiner_ || !runtime_) return out;
+	if (!kernel_ || !joiner_ || !runtime_) return out;
 	opennova::world::DeployListInput in;
 	// [orig: "<c4040FF>", or "<cFF2020>" when Team == 2 @0x553b1e..0x553b38]
 	in.team_color_tag = runtime_->assigned_team() == 2 ? "<cFF2020>" : "<c4040FF>";
