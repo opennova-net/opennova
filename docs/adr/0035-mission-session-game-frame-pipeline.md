@@ -8,6 +8,10 @@
   "MainGame retains the explicit local-player and HUD shell/UI tail" now
   covers only a fallback for frames that skip the world leg, plus the HUD/UI
   tail.
+- **Updated**: [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
+  (2026-08-28) makes decision 5 permanent — no alternate shell, ever — and
+  its kernel slices supply the concrete mission kernel
+  (`mission::MissionKernel`) the session drives.
 - **Owners**: runtime architecture
 - **Amends**: ADR 0033 decisions 1-2 and ADR 0034 decision 3
 

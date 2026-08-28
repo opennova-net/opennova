@@ -4,8 +4,10 @@ Glossary of the project's domain language. Definitions only: what a term *is*, n
 
 ## Layers
 
-The vocabulary for the codebase's own layering (ADR 0016/0028). Dependencies point one
-way: shells → the Godot layer (godot/src) → engine.
+The vocabulary for the codebase's own layering (ADR 0028/0034; the boundary rule is
+ADR 0042's). Dependencies point one way: the Godot layer (godot/src bindings +
+godot/game game runtime) → engine. Shells are the front-end composition inside the
+Godot layer's game runtime, not a third dependency tier.
 
 **Engine**:
 The portable, Godot-free C++ core under `engine/` (`base/`, `formats/`, `runtime/`,
@@ -17,13 +19,15 @@ _Avoid_: libs (the pre-2026-08 path), core, framework
 **The Godot layer (first-class, ADR 0034)**:
 `godot/src/` (pure C++ GDExtension bindings) plus `godot/game/` (the game-level
 GDScript runtime) — the layer that wires Godot nodes to engine facts. The game
-shell consumes it; ONED uses the process and packaging bindings it needs.
+shell is composed inside its game runtime; ONED uses the process and packaging
+bindings it needs.
 _Avoid_: godot/engine (the pre-2026-08 path), engine layer (that word is the
 engine's), glue, bindings (only half of it)
 
 **Shell**:
-An application front-end over the Godot layer: the game shell (`godot/game/`) and ONED
-(`godot/modtools/`). Shells own UI and application flow, never engine behavior.
+An application front-end composed inside the Godot layer's game runtime: the game
+shell (in `godot/game/`) and ONED (`godot/modtools/`). Shells own UI and application
+flow, never engine behavior.
 _Avoid_: frontend, app (in project prose), host (reserved for the game host)
 
 **Simulation**:
@@ -31,6 +35,12 @@ The deterministic in-match world state advanced at the 62 Hz tick by the engine'
 systems (WAC VM, BMS events, AI). `Simulation` is the Godot-layer binding that owns it
 shell-side; present passes project it onto scene nodes and never mutate it.
 _Avoid_: game logic, GameWorld (that is the scene, below)
+
+**Engine fact / Device fact**:
+ADR 0042's placement test — a fact a headless ctest can reproduce without Godot is an
+engine fact reached through one engine function; anything that exists only because a
+Godot node/server/viewport/window/socket/clock/input event/audio player exists is a
+device fact, written as typed Godot code beside its owner.
 
 ## Menu UI (MNU)
 

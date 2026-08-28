@@ -7,7 +7,13 @@
   device legs feeding an engine-owned board); ADR 0025's "the standalone game is
   the only live runtime" and ADR 0037's "ONED is run-only" stand unchanged.
   Updated by ADR 0041 (the env-var probes of decision 6 and the verification
-  bullet's probe are `game_probe` tools).
+  bullet's probe are `game_probe` tools). Updated by
+  [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md) (2026-08-28),
+  which scopes decision 3: Godot device facts arrive as VALUE slots or pushed
+  records; ENGINE facts arrive as typed records the embedder pushes, and
+  window mutations leave as typed requests the embedder drains; `DevTools`
+  holds the `Simulation` natively; the imgui include lint is added by the
+  campaign.
 
 ## Context
 

@@ -76,8 +76,12 @@ session. There is no callback lattice and no second legacy frame sequence.
 
 Its one internal seam is `inmatch::TickTarget`. The Godot `Simulation` adapter
 and `apps/nw_server` each provide a target, which proves the session interface
-does not depend on Godot. The target owns the concrete mission kernel it knows
-how to construct. In the game that remains `Simulation`: one `World`, WAC,
+does not depend on Godot. ADR 0042 names the end state: the concrete targets
+embed the engine's `mission::MissionKernel` and call
+`inmatch::listen_host::frame`, so the kernel and the frame are the one
+implementation. The target owns the concrete mission kernel it knows
+how to construct (becoming: the target embeds the engine's MissionKernel —
+ADR 0042). In the game that remains `Simulation`: one `World`, WAC,
 BMS, AI, collision, and the selected network runtime. This is intentional
 locality—resource resolution and Godot value conversion do not leak into the
 portable session state machine.

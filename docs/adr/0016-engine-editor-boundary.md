@@ -3,6 +3,12 @@
 > **Authoring role superseded by [ADR 0037](0037-oned-runs-game-data.md).**
 > ONED no longer has editor surfaces. The one-way dependency and engine-owned
 > behavior rules remain; the body below is the historical rationale.
+>
+> **Historical in full per [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
+> (2026-08-28).** The "export-a-game future" this ADR cites no longer exists in
+> GOALS.md, and the "bypass sweep" instrument has no script. The surviving
+> principle — one implementation per engine fact; engine behavior does not live
+> in GDScript — now lives as ADR 0042's boundary rule.
 
 ONED is a view and data editor over the engine. If the editor shows anything
 the game would not show — a height the engine didn't sample, a color the

@@ -1,6 +1,10 @@
 # ADR 0041: Probes are MCP tools; launch behaviour is a launch flag
 
 - **Status**: accepted (2026-08-27; hard cut)
+- **Updated**: [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
+  (2026-08-28) updates decision 5's rig reference: once the kernel slices
+  land, the mission kernel boots (`tests/common` retains only retail path
+  glue).
 - **Owners**: the game shell, `godot/probes/`, `scripts/mcp/`, `scripts/net/`,
   the test suites
 - **Supersedes/updates**: updates ADR 0037's "ONED has no MCP" (unchanged for
