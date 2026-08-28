@@ -9,7 +9,7 @@
 // independent read of the same files.
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying 00TRg.bms);
 // the attach count pins the recorded retail value on that tree (859).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <runtime/world/player_spawn.h>

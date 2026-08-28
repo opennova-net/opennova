@@ -32,7 +32,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/world.h>
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 #include <string>
 

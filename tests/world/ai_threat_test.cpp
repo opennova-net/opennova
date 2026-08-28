@@ -7,7 +7,7 @@
 // Movement rides the same PlayerInput packet the shell's input router fills;
 // the look is set straight at the target in the engine's BAM frame.
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <cmath>

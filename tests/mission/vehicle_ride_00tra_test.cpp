@@ -17,7 +17,7 @@
 // view frame: the chase in a control seat, first person otherwise [orig: the
 // arbiter Render_ProcessMainSceneFrame @0x5ca1d2..0x5ca1f2].
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 00TRa.bms).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <cmath>

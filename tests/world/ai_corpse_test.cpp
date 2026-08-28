@@ -16,7 +16,7 @@
 // travels the full damage/death chain, only the required hit count changes.
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying CP01.bms);
 // no synthetic leg exists: the death matrix needs a retail infantry .adm.
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <cmath>

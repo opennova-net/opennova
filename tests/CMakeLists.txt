@@ -9,11 +9,11 @@ function(opennova_add_gated_test name)
 endfunction()
 
 # The retail-mission rig the asset-gated world/mission ctests share
-# (common/retail_mission_rig.h): one real mission booted through the engine's
-# boot policy (mission::run_mission_boot) and ticked on the no-net
-# authoritative path, with the same engine seams the Godot Simulation binding
-# drives for input, weapons, mounts and the debug views.
-add_library(opennova_test_rig STATIC common/retail_mission_rig.cpp)
+# (common/retail_mission_files.h): one real mission booted through the
+# engine's own mission::MissionKernel (ADR 0042 d3) and ticked on the SP
+# listen frame (inmatch::listen_host) or the kernel's bare no-net path; this
+# pair supplies only the retail terrain documents and the TickTarget adapter.
+add_library(opennova_test_rig STATIC common/retail_mission_files.cpp)
 target_include_directories(opennova_test_rig PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(opennova_test_rig
     PUBLIC opennova_net opennova_runtime opennova_formats opennova_base)
@@ -1728,6 +1728,16 @@ add_executable(mission_runtime_boot_test mission/runtime_boot_test.cpp)
 target_link_libraries(mission_runtime_boot_test PRIVATE opennova_runtime)
 add_test(NAME mission_runtime_boot COMMAND mission_runtime_boot_test)
 
+# The mission kernel (ADR 0042 d3) over a synthetic mission + in-memory file
+# source: open_document, the boot side effects (promotion, WAC install, the
+# origin spawn, the baseline), the no-net tick, the teleport/health seams, and
+# the CanFire verdict. Ungated — no retail assets.
+add_executable(mission_kernel_test mission/mission_kernel_test.cpp)
+target_link_libraries(mission_kernel_test PRIVATE opennova_runtime)
+target_include_directories(mission_kernel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_kernel_test PRIVATE cxx_std_17)
+add_test(NAME mission_kernel COMMAND mission_kernel_test)
+
 # Emplacement mount: the seat model + canonical root/child seat selection and attach
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the
 # snapshot/restore rewind of a mount.
@@ -2466,7 +2476,7 @@ opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_
 
 # The retail-mission ports of the former in-game probes (ADR 0041: an
 # assertion over the portable engine is a ctest, not a probe), all on the
-# shared rig (common/retail_mission_rig.h). Gated: OPENNOVA_JO_DIR (a packed
+# shared rig (common/retail_mission_files.h). Gated: OPENNOVA_JO_DIR (a packed
 # install) or OPENNOVA_JO_ASSETS (an extracted tree), per test header.
 foreach(port
         world/truck_rest_00tra world/rock_collision_00trg world/ai_corpse world/ai_threat

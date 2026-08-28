@@ -6,7 +6,7 @@
 
 #include <runtime/world/ground_conform.h>
 
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <algorithm>

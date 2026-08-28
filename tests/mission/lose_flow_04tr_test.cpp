@@ -11,7 +11,7 @@
 //     witnessed Misc gametext key and the round ends winner 2
 //     [orig: Server_ProcessRoundEnd @0x5164f0].
 // Gated on OPENNOVA_JO_DIR (a retail JO install carrying 04TR.bms).
-#include "common/retail_mission_rig.h"
+#include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
 #include <cmath>

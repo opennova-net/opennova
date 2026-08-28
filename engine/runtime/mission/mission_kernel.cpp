@@ -1,22 +1,20 @@
-#include "common/retail_mission_rig.h"
+// mission::MissionKernel — the promoted retail-mission rig body (ADR 0042 d3).
+// Every leg here is the one engine implementation the embedders share; the
+// witness citations moved with the bodies.
 
+#include <runtime/mission/mission_kernel.h>
+
+#include <base/io/bam.h>
+#include <base/io/log.h>
+#include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
-#include <formats/cpt/cpt_io.h>
 #include <formats/mission/mission.h>
-#include <formats/pcx/pcx_io.h>
-#include <formats/trn/trn_io.h>
-#include <runtime/terrain_query/height_field.h>
-#include <runtime/terrain_query/terrain_field_build.h>
-#include <runtime/world/ammo_table_build.h>
-#include <net/npruntime/server_message_dispatch.h>
-#include <runtime/world/weapon_table_build.h>
-#include <net/npwire/game_type.h>
-#include <net/npwire/ingame_message_id.h>
-#include <net/npwire/protocol_message.h>
 #include <runtime/mission/mission_systems.h>
 #include <runtime/simassets/item_traits.h>
 #include <runtime/simassets/seat_spec_extract.h>
-#include <runtime/wac/compiler.h>
+#include <runtime/terrain_query/height_field.h>
+#include <runtime/wac/wac_layered_load.h>
+#include <runtime/world/ammo_table_build.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/mount_controls.h>
@@ -25,49 +23,34 @@
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/weapon_fsm.h>
+#include <runtime/world/weapon_table_build.h>
 
 #include <algorithm>
-#include <cctype>
+#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <sstream>
+#include <utility>
 
-namespace opennova::testrig {
+namespace opennova::mission {
 
 namespace w = opennova::world;
-namespace ms = opennova::mission;
 
 namespace {
-
-std::string lower_ascii(std::string s) {
-	for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-	return s;
-}
-
-bool iequals(const char *a, const std::string &b) {
-	return lower_ascii(a) == lower_ascii(b);
-}
 
 std::string basename_of(const std::string &name) {
 	const size_t dot = name.rfind('.');
 	return dot == std::string::npos ? name : name.substr(0, dot);
 }
 
-// The socketless SP host: no datagrams in or out (the loopback carries the
-// host's own client).
-class NullDatagramSocket final : public netsim::IDatagramSocket {
-public:
-	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
-	void send_to(const PeerAddr &, const uint8_t *, std::size_t) override {}
-};
+int32_t bam_from_radians(double radians) {
+	return static_cast<int32_t>(
+			static_cast<int64_t>(std::llround(radians * io::kBamPerRadian)));
+}
 
 } // namespace
 
-RetailMissionRig::RetailMissionRig() = default;
+MissionKernel::MissionKernel() = default;
 
-RetailMissionRig::~RetailMissionRig() {
-	// The host's own client holds a reference into the loopback: drop it first.
-	client_runtime.reset();
+MissionKernel::~MissionKernel() {
 	// The systems and providers the world points at outlive nothing: drop the
 	// non-owning links before the members tear down in reverse order.
 	world.collision = nullptr;
@@ -83,104 +66,69 @@ RetailMissionRig::~RetailMissionRig() {
 	if (items_ok) def_free_items(&items);
 }
 
-// --- open / boot ------------------------------------------------------------------
+// --- open / boot ------------------------------------------------------------
 
-bool RetailMissionRig::open(const std::string &root, const std::string &name, std::string &error,
-		const std::string &expansion) {
+bool MissionKernel::open(const std::string &root, const std::string &name,
+		std::string &error, const std::string &expansion) {
 	root_dir = root;
-	mission_name = name;
-	mission_basename = basename_of(name);
 	// A packed install mounts its .pff set with loose overrides; a loose asset
 	// tree (no archives) mounts as loose files only.
 	bool mounted = index.scan(root_dir, expansion);
-	if (!mounted || !index.has_file(mission_name))
+	if (!mounted || !index.has_file(name))
 		mounted = index.scan(root_dir, expansion, VfsMountMode::LooseOnly);
 	if (!mounted) {
 		error = "could not mount " + root_dir + ": " + index.last_error();
 		return false;
 	}
 	std::vector<uint8_t> bytes;
-	if (!index.read_file(mission_name, bytes)) {
-		error = mission_name + " is not under " + root_dir;
+	if (!index.read_file(name, bytes)) {
+		error = name + " is not under " + root_dir;
 		return false;
 	}
 	std::string parse_error;
-	if (!bms::parse(bytes.data(), bytes.size(), mission, parse_error)) {
-		error = mission_name + " did not parse: " + parse_error;
+	bms::File parsed;
+	if (!bms::parse(bytes.data(), bytes.size(), parsed, parse_error)) {
+		error = name + " did not parse: " + parse_error;
 		return false;
 	}
-	std::vector<uint8_t> items_bytes;
-	if (index.read_file("items.def", items_bytes) &&
-			def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0)
-		items_ok = true;
-	files_.has_file = [this](const std::string &file) { return index.has_file(file); };
-	files_.read_file = [this](const std::string &file, std::vector<uint8_t> &out) {
+	BootFileSource files;
+	files.has_file = [this](const std::string &file) { return index.has_file(file); };
+	files.read_file = [this](const std::string &file, std::vector<uint8_t> &out) {
 		return index.read_file(file, out);
 	};
+	open_document(std::move(parsed), basename_of(name), std::move(files));
+	mission_name = name;
 	return true;
 }
 
-bool RetailMissionRig::load_terrain(std::string &error) {
-	const std::string tname = mission.get_terrain();
-	if (tname.empty()) {
-		error = "the mission names no terrain";
-		return false;
+void MissionKernel::open_document(bms::File mission_doc,
+		std::string mission_file_basename, BootFileSource files) {
+	mission = std::move(mission_doc);
+	mission_name = mission_file_basename;
+	mission_basename = std::move(mission_file_basename);
+	files_ = std::move(files);
+	if (items_ok) {
+		def_free_items(&items);
+		items = DefItemsFile{};
+		items_ok = false;
 	}
-	std::vector<uint8_t> cpt_bytes, trn_bytes;
-	if (!index.read_file(tname + ".cpt", cpt_bytes) || !index.read_file(tname + ".trn", trn_bytes)) {
-		error = tname + ".cpt/.trn are not under the mount";
-		return false;
-	}
-	std::string terr_err;
-	if (!load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, terr_err)) {
-		error = tname + ".cpt: " + terr_err;
-		return false;
-	}
-	std::string raw(reinterpret_cast<const char *>(trn_bytes.data()), trn_bytes.size());
-	std::istringstream ts(raw);
-	if (!load_trn(ts, trn, terr_err) || cpt.depth_buffer.empty()) {
-		error = tname + ".trn: " + terr_err;
-		return false;
-	}
-	// The charmap surface raster for the footstep surface pick, decoded from
-	// the .trn-named PCX like the shell does (TerrainData's charmap slot);
-	// absent or undecodable = no surface map, the sampler's "no charmap ->
-	// surface 1" leg.
-	IndexedImage8 charmap;
-	std::vector<uint8_t> charmap_bytes;
-	if (!trn.charmap.empty()) {
-		if (!index.read_file(trn.charmap, charmap_bytes)) {
-			std::printf("rig: charmap %s is not under the mount - no surface map\n",
-					trn.charmap.c_str());
-		} else {
-			std::string charmap_err;
-			if (!decode_pcx_indexed(charmap_bytes.data(), charmap_bytes.size(), charmap,
-						charmap_err)) {
-				charmap = IndexedImage8{};
-				std::printf("rig: charmap %s did not decode (%s) - no surface map\n",
-						trn.charmap.c_str(), charmap_err.c_str());
-			}
-		}
-	}
-	// The same field the game builds (Simulation::set_terrain_height_field):
-	// the engine's one owning cpt/trn(+charmap) builder (ADR 0042 d4).
-	terrain::terrain_field_store_build(terrain_store, cpt, trn,
-			charmap.empty() ? nullptr : charmap.indices.data(),
-			charmap.width, charmap.height);
-	return terrain_store.valid();
+	std::vector<uint8_t> items_bytes;
+	if (files_.valid() && files_.read_file("items.def", items_bytes) &&
+			def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0)
+		items_ok = true;
 }
 
-void RetailMissionRig::wire_terrain() {
+void MissionKernel::wire_terrain() {
 	world.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	ai.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	// The footstep surface pick reads the charmap through this view, exactly
-	// as Simulation::apply_terrain_to_ai wires it (the rig has no mission .til
-	// path, matching the sim's empty-tiles leg).
+	// as Simulation::apply_terrain_to_ai wires it (the kernel has no mission
+	// .til path here, matching the sim's empty-tiles leg).
 	world.surface_map = terrain_store.surface_map();
 }
 
-void RetailMissionRig::wire_collision() {
+void MissionKernel::wire_collision() {
 	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	collision.set_section_matrix_provider(this);
 	world.collision = &collision;
@@ -189,132 +137,42 @@ void RetailMissionRig::wire_collision() {
 	ai.collision = &collision;
 }
 
-bool RetailMissionRig::load_mission_into_world() {
-	ms::PromoteOptions opts;
+std::function<PromoteOptions::AiProfileDefaults(int32_t)>
+MissionKernel::ai_profile_defaults_fn() const {
+	if (!items_ok) return {};
+	return [this](int32_t type_id) {
+		PromoteOptions::AiProfileDefaults d;
+		const int item_id = static_cast<int>(type_id) + static_cast<int>(kItemIdOffset);
+		const DefItemDef *def = simassets::find_item_def(items, item_id);
+		if (def == nullptr) return d;
+		const std::string cls = strutil::to_lower(def->ai_function);
+		d.helicopter_init = cls == "chel" || cls == "cpln";
+		d.known = d.helicopter_init || cls == "cveh" || cls == "cbot" || cls == "ctrn";
+		d.default_aip = def->default_aip;
+		return d;
+	};
+}
+
+bool MissionKernel::load_mission_into_world() {
+	PromoteOptions opts;
 	opts.item_seat_specs = seat_specs;
 	opts.ai_profiles = ai_profiles;
-	if (items_ok) {
-		opts.ai_profile_defaults = [this](int32_t type_id) {
-			ms::PromoteOptions::AiProfileDefaults d;
-			const int item_id = static_cast<int>(type_id) + static_cast<int>(ms::kItemIdOffset);
-			const DefItemDef *def = simassets::find_item_def(items, item_id);
-			if (def == nullptr) return d;
-			const std::string cls = lower_ascii(def->ai_function);
-			d.helicopter_init = cls == "chel" || cls == "cpln";
-			d.known = d.helicopter_init || cls == "cveh" || cls == "cbot" || cls == "ctrn";
-			d.default_aip = def->default_aip;
-			return d;
-		};
-	}
-	promo = ms::promote_mission(mission, world, ai, opts);
+	opts.ai_profile_defaults = ai_profile_defaults_fn();
+	promo = promote_mission(mission, world, ai, opts);
 	finish_load();
 	return true;
 }
 
-uint32_t RetailMissionRig::mission_game_type() const {
-	// The same g_GameType word the mission catalog derives: a mission with no
-	// multiplayer bit is stock Co-op (0x10020) (retail: AI_GetTaskTypeFromFlags
-	// @0x40DAE0 -> Game_StartMission @0x524360, net-re 5.2c).
-	return game_type::for_mission_mode(bms::selected_game_mode(
-			static_cast<bms::AttribFlags>(mission.header.attrib_flags)));
-}
-
-// The witnessed §5.0 listen-host bring-up (Simulation::bringup_host_runtime):
-// the npruntime ctx over this world, start_host_session (mode 3 ->
-// create_session over the loopback -> configure_session_runtime -> the
-// auto-spawn of the host's own player at the start marker), and the host's
-// own HostClient replica pipeline folding the loopback into its ClientState.
-// [orig: SinglePlayer_StartMission @0x561af0]
-void RetailMissionRig::bringup_host_runtime() {
-	client_runtime.reset();
-	host_loop = netsim::LoopbackChannel{};
-	host_owner = np::HostOwner{};
-	host_owner.host_loopback = &host_loop;
-	host_owner.serve_and_play = true;
-	host_owner.ctx.world = &world;
-	host_owner.ctx.mission = &mission;
-	host_owner.ctx.mission_text_loaded = false;
-	np::GameConfig config;
-	config.server_name = "SINGLEPLAYERGAME";
-	config.max_players = 1;
-	config.game_type = mission_game_type();
-	world.fat_bullets = config.fat_bullets;
-	world.one_shot_kill = config.one_shot_kill;
-	np::HostConfig host_cfg;
-	host_cfg.config = config;
-	host_cfg.socket_mode = np::SocketMode::Socketless;
-	host_cfg.serve_and_play = true;
-	np::start_host_session(host_owner, host_cfg);
-	client_runtime = std::make_unique<np::ClientRuntime>(host_loop);
-	client_runtime->view().set_game_type(config.game_type);
-	client_runtime->view().set_mp_session(world.mp_session);
-	// Seed the look heading from the auto-spawned player's facing.
-	input = w::PlayerInput{};
-	stance_latch_ = 0;
-	look_accum_x_ = look_accum_y_ = 0.0f;
-	if (world.cached.local_player.valid())
-		if (const w::AiEntity *pe = ai.for_handle(world.cached.local_player)) input.look_heading = pe->heading;
-}
-
-void RetailMissionRig::before_server_tick(void *context) {
-	if (context != nullptr) static_cast<RetailMissionRig *>(context)->resolve_new_infantry_adm_ids();
-}
-
-// The local player's own C2S gameplay messages (the witnessed local reload
-// producer) reach the SAME per-message server dispatcher a remote connection
-// does; every other datagram stays queued for Server_TickUpdate's drain
-// (Simulation::drain_host_client_gameplay_requests).
-void RetailMissionRig::drain_host_client_gameplay_requests() {
-	np::NapiNPConnection *local = nullptr;
-	for (np::NapiNPConnection &conn : host_owner.ctx.np_protocol.connection_list) {
-		if (conn.type == 2 && conn.link.transport == &host_loop) {
-			local = &conn;
-			break;
-		}
-	}
-	if (local == nullptr) return;
-	netsim::Datagram dg;
-	std::vector<netsim::Datagram> deferred;
-	while (host_loop.host_recv(dg)) {
-		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST) {
-			deferred.push_back(std::move(dg));
-			continue;
-		}
-		std::vector<ProtocolMessage> messages;
-		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
-		std::vector<ProtocolMessage> replies = np::dispatch_session_replies(host_owner.ctx.config, *local,
-				messages, host_owner.now_tick, host_owner.ctx.np_protocol.connection_list, &world);
-		for (ProtocolMessage &reply : replies) host_loop.host_send(reply.tag, std::move(reply.payload));
-	}
-	for (netsim::Datagram &preserved : deferred) host_loop.deliver_c2s(preserved.tag, std::move(preserved.body));
-}
-
-// The listen-server frame (Simulation::host_pump): input -> the host player's
-// body input, Server_TickUpdate (the C2S drain, ONE logic tick, the 0x0A fan)
-// through the shared owner loop, the local view/weapon pumps, then the host's
-// own ClientState fold. [orig: Game_ProcessMainFrame @0x5263f0]
-void RetailMissionRig::host_pump() {
-	const uint32_t now = host_owner.now_tick;
-	drain_host_client_gameplay_requests();
-	apply_player_input_pre_tick();
-	NullDatagramSocket sock;
-	np::host_session_pump(host_owner, sock, &RetailMissionRig::before_server_tick, this, nullptr, nullptr, nullptr);
-	sync_local_mounted_input_heading();
-	w::local_player_view_tick(&world, weapon, view, view_tracker, w::LocalViewSessionInputs{});
-	w::LocalWeaponPumpIO io;
-	io.view = &view;
-	io.inventory = inventory_valid ? &inventory : nullptr;
-	io.is_authority = true;
-	w::local_weapon_pump_tick(world, weapon, io);
-	if (client_runtime) client_runtime->Client_ProcessNetworkFrame(now, nullptr);
-}
-
-void RetailMissionRig::finish_load() {
+void MissionKernel::finish_load() {
 	events.load(mission.events, mission.triggers, mission.actions);
 	world.mission_attrib_flags = static_cast<uint32_t>(mission.header.attrib_flags);
 	world.ai = &ai;
-	if (listen_server) bringup_host_runtime();
-	ms::register_mission_systems(world, wac, events, ai);
+	// The net half stands its session up here — between the world wiring and
+	// register_mission_systems, exactly where the SP listen host's bring-up
+	// sits inside the load (inmatch::listen_host::bringup)
+	// [orig: SinglePlayer_StartMission @0x561af0].
+	if (bringup_net_session_) bringup_net_session_();
+	register_mission_systems(world, wac, events, ai);
 	// PreMission events settle initial scripted state before the clock starts.
 	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
 	w::count_mission_units(world);
@@ -323,10 +181,8 @@ void RetailMissionRig::finish_load() {
 	ai.capture_spawn_baseline();
 }
 
-int RetailMissionRig::spawn_local_player_at_start() {
+int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 	if (has_local_player()) return 1;
-	const uint32_t game_type = game_type::for_mission_mode(bms::selected_game_mode(
-			static_cast<bms::AttribFlags>(mission.header.attrib_flags)));
 	const w::SpawnPointResult sel = w::resolve_player_spawn_pose(
 			world, w::EntityHandle{}, w::EntityHandle{}, 0, 1, game_type);
 	w::PlayerSpawn spawn;
@@ -348,7 +204,7 @@ int RetailMissionRig::spawn_local_player_at_start() {
 	return sel.found ? 1 : 0;
 }
 
-void RetailMissionRig::resolve_new_infantry_adm_ids() {
+void MissionKernel::resolve_new_infantry_adm_ids() {
 	if (!infantry_adm_retained_ || !items_ok || root_motion.empty()) return;
 	const int count = ai.count();
 	if (infantry_adm_resolved_ai_count_ < 0 || infantry_adm_resolved_ai_count_ > count)
@@ -364,27 +220,26 @@ void RetailMissionRig::resolve_new_infantry_adm_ids() {
 		const DefItemDef *def = simassets::find_item_def(items, visual);
 		if (def == nullptr || def->anim_def[0] == '\0') continue;
 		std::string adm = def->anim_def;
-		const std::string lowered = lower_ascii(adm);
-		if (lowered.size() < 4 || lowered.compare(lowered.size() - 4, 4, ".adm") != 0) adm += ".adm";
+		if (!strutil::ends_with_icase(adm, ".adm")) adm += ".adm";
 		const int adm_id = root_motion.register_adm(&index, adm);
 		if (adm_id >= 0) e->inf.adm_id = adm_id;
 	}
 	infantry_adm_resolved_ai_count_ = count;
 }
 
-bool RetailMissionRig::load_weapon_table() {
+bool MissionKernel::load_weapon_table() {
 	std::vector<uint8_t> bytes;
-	if (!index.read_file("weapon.def", bytes)) return false;
+	if (!files_.read_file("weapon.def", bytes)) return false;
 	DefWeaponsFile file = {};
 	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file) != 0) return false;
-	world.weapons = world::build_weapon_table(file, &index);
+	world.weapons = w::build_weapon_table(file, &index);
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
 	weapon_defs = file;
 	weapon_defs_ok = true;
 	simassets::stamp_seat_spec_turret_limits(world, seat_specs);
-	// The host's own player spawned before this feed: re-stamp its equipped
-	// default now that WPN_M4AUTO resolves by name [orig: PlayerClass_InitEntity
-	// @0x4B1116] (D-NET-143).
+	// The authoritative side's own player spawned before this feed: re-stamp
+	// its equipped default now that WPN_M4AUTO resolves by name
+	// [orig: PlayerClass_InitEntity @0x4B1116] (D-NET-143).
 	const int m4 = world.weapons.index_of("WPN_M4AUTO");
 	if (m4 >= 0) {
 		std::vector<w::EntityHandle> handles;
@@ -402,7 +257,7 @@ bool RetailMissionRig::load_weapon_table() {
 	// [orig: @ 0x4e15f0; the default kit literal @ 0x5246be].
 	std::vector<std::pair<std::string, int32_t>> availability_rows;
 	std::vector<w::WeaponKitEntry> kit_rows;
-	ms::stash_mission_loadout_rules(mission, availability_rows, kit_rows);
+	stash_mission_loadout_rules(mission, availability_rows, kit_rows);
 	if (w::local_loadout_promote_mission_rules(world, loadout, availability_rows, std::move(kit_rows)))
 		w::local_player_view_reset(&world, weapon, view, view_tracker);
 	w::local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
@@ -410,20 +265,20 @@ bool RetailMissionRig::load_weapon_table() {
 	return true;
 }
 
-bool RetailMissionRig::load_ammo_table() {
+bool MissionKernel::load_ammo_table() {
 	std::vector<uint8_t> bytes;
-	if (!index.read_file("ammo.def", bytes)) return false;
+	if (!files_.read_file("ammo.def", bytes)) return false;
 	DefAmmoFile file = {};
 	if (def_parse_ammo_memory(bytes.data(), bytes.size(), &file) != 0) return false;
-	world.ammo = world::build_ammo_table(file);
+	world.ammo = w::build_ammo_table(file);
 	def_free_ammo(&file);
-	world::resolve_weapon_round_types(world.weapons, world.ammo);
+	w::resolve_weapon_round_types(world.weapons, world.ammo);
 	w::local_loadout_sync_damage_classes(world, loadout);
 	ammo_ok = true;
 	return true;
 }
 
-bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
+bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	if (!files_.valid()) {
 		error = "open() first";
 		return false;
@@ -431,23 +286,18 @@ bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 	// The sim's own model source, wired before the seat step runs (S16).
 	models.set_index(&index);
 	collision_pose.set_resource_index(&index);
-	listen_server = options.listen_server;
-	std::string terrain_error;
-	const bool terrain_loaded = options.terrain && load_terrain(terrain_error);
-	if (options.terrain && !terrain_loaded)
-		std::printf("rig: terrain not loaded (%s) - the ground solve will not run\n",
-				terrain_error.c_str());
+	bringup_net_session_ = options.bringup_net_session;
 
-	ms::BootParams params;
+	BootParams params;
 	params.is_joiner = false;
 	params.playable = options.playable;
 	params.has_resource_root = true;
 	params.has_item_db = items_ok;
-	params.has_terrain = terrain_loaded;
+	params.has_terrain = terrain_store.valid();
 	params.has_terrain_til = false;
 	params.has_wac = options.wac;
 
-	ms::BootSteps steps;
+	BootSteps steps;
 	steps.install_seat_specs = [&] {
 		seat_specs.clear();
 		mounted_graphics.clear();
@@ -456,7 +306,7 @@ bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 		const auto seed_group = [&seeds](const std::vector<bms::Entity> &v) {
 			for (const bms::Entity &e : v)
 				if (e.type_id > 0)
-					seeds.push_back(static_cast<int>(e.type_id) + static_cast<int>(ms::kItemIdOffset));
+					seeds.push_back(static_cast<int>(e.type_id) + static_cast<int>(kItemIdOffset));
 		};
 		seed_group(mission.items);
 		seed_group(mission.buildings);
@@ -471,30 +321,16 @@ bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 			mounted_graphics = std::move(native.graphic_by_type);
 		}
 		std::sort(seat_specs.begin(), seat_specs.end(),
-				[](const ms::ItemSeatSpec &a, const ms::ItemSeatSpec &b) { return a.type_id < b.type_id; });
+				[](const ItemSeatSpec &a, const ItemSeatSpec &b) { return a.type_id < b.type_id; });
 		simassets::stamp_seat_spec_turret_limits(world, seat_specs);
 	};
 	steps.install_ai_profiles = [&] {
-		std::function<ms::PromoteOptions::AiProfileDefaults(int32_t)> defaults;
-		if (items_ok) {
-			defaults = [this](int32_t type_id) {
-				ms::PromoteOptions::AiProfileDefaults d;
-				const int item_id = static_cast<int>(type_id) + static_cast<int>(ms::kItemIdOffset);
-				const DefItemDef *def = simassets::find_item_def(items, item_id);
-				if (def == nullptr) return d;
-				const std::string cls = lower_ascii(def->ai_function);
-				d.helicopter_init = cls == "chel" || cls == "cpln";
-				d.known = d.helicopter_init || cls == "cveh" || cls == "cbot" || cls == "ctrn";
-				d.default_aip = def->default_aip;
-				return d;
-			};
-		}
-		ai_profiles = ms::resolve_ai_profiles(files_, mission, defaults);
+		ai_profiles = resolve_ai_profiles(files_, mission, ai_profile_defaults_fn());
 	};
 	steps.install_terrain_til = [] {};
 	steps.install_mission_text = [&] {
 		std::vector<uint8_t> text;
-		text_source = static_cast<int>(ms::resolve_mission_text(files_, mission_basename, text));
+		text_source = static_cast<int>(resolve_mission_text(files_, mission_basename, text));
 		text_size = text.size();
 	};
 	steps.load_mission = [&] { return load_mission_into_world(); };
@@ -505,37 +341,31 @@ bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 		infantry_adm_resolved_ai_count_ = 0;
 		const int default_adm = root_motion.register_adm(&index, options.infantry_adm);
 		if (default_adm != 0)
-			std::printf("rig: no infantry clips from '%s' - AI soldiers will stand still\n",
+			io::logf(io::LogLevel::kWarn,
+					"mission kernel: no infantry clips from '%s' - AI soldiers will stand still",
 					options.infantry_adm.c_str());
 		ai.root_motion = &root_motion;
 		if (default_adm == 0) resolve_new_infantry_adm_ids();
 	};
 	steps.install_wac = [&] {
-		// The original layering, absent files skipped in order
-		// [orig: WacScript_InitAndLoad].
-		std::vector<std::string> sources;
-		for (const std::string &name : {std::string("game.wac"), std::string("server.wac"),
-					 mission_basename + ".wac"}) {
-			std::vector<uint8_t> bytes;
-			if (!index.has_file(name) || !index.read_file(name, bytes)) continue;
-			sources.emplace_back(reinterpret_cast<const char *>(bytes.data()), bytes.size());
-		}
-		if (sources.empty()) return;
-		wac::CompileEnv env;
-		env.registry = &world.registry;
-		wac::Program program = wac::compile_program(sources, env);
-		if (!program.ok()) {
-			std::printf("rig: WAC for %s failed to compile (%d error(s)) - scripts disabled\n",
-					mission_basename.c_str(), program.error_count());
+		wac_loaded = false;
+		std::string wac_error;
+		const wac::WacLayeredLoadStatus status = wac::wac_layered_load(wac, files_,
+				mission_basename, &world.registry, /*strict_diagnostics=*/false, wac_error);
+		if (status == wac::WacLayeredLoadStatus::kBlocked) {
+			io::logf(io::LogLevel::kWarn, "mission kernel: %s - scripts disabled",
+					wac_error.c_str());
 			return;
 		}
-		wac.set_program(std::move(program));
-		wac_loaded = true;
+		wac_loaded = status == wac::WacLayeredLoadStatus::kLoaded;
 	};
 	steps.spawn_local_player = [&] {
-		const int status = spawn_local_player_at_start();
-		if (status < 0) std::printf("rig: spawn_local_player failed\n");
-		else if (status == 0) std::printf("rig: no player-start marker - spawned at the origin\n");
+		const int status = spawn_local_player_at_start(options.game_type);
+		if (status < 0)
+			io::logf(io::LogLevel::kWarn, "mission kernel: spawn_local_player failed");
+		else if (status == 0)
+			io::logf(io::LogLevel::kWarn,
+					"mission kernel: no player-start marker - spawned at the origin");
 	};
 	steps.resolve_infantry_adm = [&] {
 		infantry_adm_retained_ = true;
@@ -560,28 +390,29 @@ bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 		occlusion.init_mission(world, collision);
 	};
 	steps.load_weapon_table = [&] {
-		if (!load_weapon_table()) std::printf("rig: weapon.def not loaded\n");
+		if (!load_weapon_table())
+			io::logf(io::LogLevel::kWarn, "mission kernel: weapon.def not loaded");
 	};
 	steps.load_ammo_table = [&] { return load_ammo_table(); };
 	steps.resolve_ai_weapons = [&] { simassets::resolve_ai_weapons(world, items); };
 
-	const ms::BootAbort abort = ms::run_mission_boot(params, steps);
-	if (abort != ms::BootAbort::kNone) {
+	const BootAbort abort = run_mission_boot(params, steps);
+	if (abort != BootAbort::kNone) {
 		error = "mission boot aborted (load failed)";
 		return false;
 	}
 	// WacScript_InitAndLoad executes the freshly loaded bytecode once before
-	// the world ticks (Simulation::run_mission_start_wac).
+	// the world ticks.
 	if (wac_loaded) wac.execute_initial(world);
 	return true;
 }
 
-// --- the tick ------------------------------------------------------------------------
+// --- the tick ---------------------------------------------------------------
 
-bool RetailMissionRig::local_player_can_fire(const w::AiEntity *body) const {
+bool MissionKernel::local_player_can_fire(const w::AiEntity *body) const {
 	// The Player_CanFireWeapon verdict the body updater and the HUD share
-	// (Simulation::local_player_can_fire_weapon) [orig: @0x5cf7c7..0x5cf886;
-	// Scoped helper @0x4dcc80; Sighted helper @0x4dcd30].
+	// [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper
+	// @0x4dcd30].
 	const w::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr || body == nullptr || !local->alive || local->health <= 0 || !weapon.active)
 		return false;
@@ -608,7 +439,7 @@ bool RetailMissionRig::local_player_can_fire(const w::AiEntity *body) const {
 	return (flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0 || ordinary;
 }
 
-void RetailMissionRig::apply_player_input_pre_tick() {
+void MissionKernel::apply_player_input_pre_tick() {
 	if (!world.cached.local_player.valid()) return;
 	w::AiEntity *p = ai.for_handle(world.cached.local_player);
 	if (p == nullptr) return;
@@ -634,7 +465,7 @@ void RetailMissionRig::apply_player_input_pre_tick() {
 	}
 }
 
-void RetailMissionRig::sync_local_mounted_input_heading() {
+void MissionKernel::sync_local_mounted_input_heading() {
 	if (!world.cached.local_player.valid()) return;
 	const w::Entity *player_entity = world.registry.get(world.cached.local_player);
 	const w::AiEntity *body = ai.for_handle(world.cached.local_player);
@@ -645,14 +476,9 @@ void RetailMissionRig::sync_local_mounted_input_heading() {
 	if (body->inf.look_pitch != input.look_pitch) input.look_pitch = body->inf.look_pitch;
 }
 
-void RetailMissionRig::tick() {
-	if (listen_server) {
-		host_pump();
-		resolve_new_infantry_adm_ids();
-		return;
-	}
-	apply_player_input_pre_tick();
-	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay);
+void MissionKernel::run_local_player_post_tick() {
+	// Retail promotes the per-frame view before weapon actions; the sim-wrote-
+	// the-view fold runs first so the pumps read the settled look.
 	sync_local_mounted_input_heading();
 	w::local_player_view_tick(&world, weapon, view, view_tracker, w::LocalViewSessionInputs{});
 	w::LocalWeaponPumpIO io;
@@ -660,42 +486,59 @@ void RetailMissionRig::tick() {
 	io.inventory = inventory_valid ? &inventory : nullptr;
 	io.is_authority = true;
 	w::local_weapon_pump_tick(world, weapon, io);
+}
+
+void MissionKernel::tick_no_net() {
+	apply_player_input_pre_tick();
+	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay);
+	run_local_player_post_tick();
 	resolve_new_infantry_adm_ids();
 }
 
-void RetailMissionRig::tick(int count) {
-	for (int i = 0; i < count; ++i) tick();
+void MissionKernel::reset_local_player_input_to_player_facing() {
+	input = w::PlayerInput{};
+	stance_latch_ = 0;
+	look_accum_x_ = look_accum_y_ = 0.0f;
+	if (world.cached.local_player.valid())
+		if (const w::AiEntity *pe = ai.for_handle(world.cached.local_player))
+			input.look_heading = pe->heading;
 }
 
-// --- the local player -------------------------------------------------------------------
+bool MissionKernel::restore_baseline() {
+	if (!have_baseline) return false;
+	world.restore(baseline);
+	return true;
+}
 
-bool RetailMissionRig::has_local_player() const {
+// --- the local player -------------------------------------------------------
+
+bool MissionKernel::has_local_player() const {
 	return world.cached.local_player.valid() && world.registry.get(world.cached.local_player) != nullptr;
 }
 
-w::Entity *RetailMissionRig::player() {
+w::Entity *MissionKernel::player() {
 	return world.cached.local_player.valid() ? world.registry.get(world.cached.local_player) : nullptr;
 }
 
-const w::Entity *RetailMissionRig::player() const {
+const w::Entity *MissionKernel::player() const {
 	return world.cached.local_player.valid() ? world.registry.get(world.cached.local_player) : nullptr;
 }
 
-w::AiEntity *RetailMissionRig::player_ai() {
+w::AiEntity *MissionKernel::player_ai() {
 	return world.cached.local_player.valid() ? ai.for_handle(world.cached.local_player) : nullptr;
 }
 
-w::Vec3 RetailMissionRig::player_position() const {
+w::Vec3 MissionKernel::player_position() const {
 	const w::Entity *e = player();
 	return e != nullptr ? e->position : w::Vec3{};
 }
 
-int32_t RetailMissionRig::player_health() const {
+int32_t MissionKernel::player_health() const {
 	const w::Entity *e = player();
 	return e != nullptr ? e->health : 0;
 }
 
-std::string RetailMissionRig::player_anim_key() const {
+std::string MissionKernel::player_anim_key() const {
 	const w::AiEntity *e = world.cached.local_player.valid()
 			? const_cast<w::AiSystem &>(ai).for_handle(world.cached.local_player)
 			: nullptr;
@@ -705,7 +548,7 @@ std::string RetailMissionRig::player_anim_key() const {
 	return std::string("anim_") + w::kInfantryAnimNames[state];
 }
 
-void RetailMissionRig::look(float dx_px, float dy_px) {
+void MissionKernel::look(float dx_px, float dy_px) {
 	int32_t scoped_zoom = 0;
 	if (!view.binoculars_view_active && weapon.active && view.scope_engaged && weapon.scope_max_mag > 1.0f)
 		scoped_zoom = static_cast<int32_t>(weapon.scope_max_mag);
@@ -720,7 +563,7 @@ void RetailMissionRig::look(float dx_px, float dy_px) {
 	w::player_look_apply(input.look_heading, input.look_pitch, look_settings, dx, dy, scoped_zoom, prone);
 }
 
-void RetailMissionRig::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
+void MissionKernel::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
 	const double dx = target.x - eye.x, dy = target.y - eye.y, dz = target.z - eye.z;
 	const double horizontal = std::sqrt(dx * dx + dy * dy);
 	input.look_heading = bam_from_radians(std::atan2(dy, dx));
@@ -731,7 +574,7 @@ void RetailMissionRig::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
 	}
 }
 
-void RetailMissionRig::teleport_local_player(const w::Vec3 &mission_pos, double yaw_deg, double pitch_deg) {
+void MissionKernel::teleport_local_player(const w::Vec3 &mission_pos, double yaw_deg, double pitch_deg) {
 	w::Entity *e = player();
 	w::AiEntity *p = player_ai();
 	if (e == nullptr || p == nullptr) return;
@@ -754,15 +597,15 @@ void RetailMissionRig::teleport_local_player(const w::Vec3 &mission_pos, double 
 	p->collide_state = {};
 }
 
-void RetailMissionRig::set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed) {
+void MissionKernel::set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed) {
 	w::local_weapon_set_input(weapon, view, fire_held, fire_pressed, reload_pressed);
 }
 
-bool RetailMissionRig::install_weapon(const std::string &weapon_name, bool preserve_slot_state) {
+bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve_slot_state) {
 	if (!weapon_defs_ok || weapon_name.empty()) return false;
 	const DefWeaponDef *row = nullptr;
 	for (size_t i = 0; i < weapon_defs.count; ++i) {
-		if (iequals(weapon_defs.entries[i].weapon_name, weapon_name)) {
+		if (strutil::iequals(weapon_defs.entries[i].weapon_name, weapon_name)) {
 			row = &weapon_defs.entries[i];
 			break;
 		}
@@ -799,7 +642,7 @@ bool RetailMissionRig::install_weapon(const std::string &weapon_name, bool prese
 	}
 	const auto add_key = [&](const char *key) {
 		if (key == nullptr || key[0] == '\0') return;
-		const std::string lowered = lower_ascii(key);
+		const std::string lowered = strutil::to_lower(key);
 		for (const auto &kv : data.clip_rings)
 			if (kv.first == lowered) return;
 		if (const std::vector<float> *lengths = clip_index.lengths_for(key))
@@ -813,7 +656,7 @@ bool RetailMissionRig::install_weapon(const std::string &weapon_name, bool prese
 	return true;
 }
 
-bool RetailMissionRig::toggle_mount() {
+bool MissionKernel::toggle_mount() {
 	const w::Entity *toggle_player = player();
 	if (toggle_player == nullptr || !toggle_player->alive || toggle_player->health <= 0) return false;
 	w::sync_local_usegun_weapon_transition(world, weapon);
@@ -840,20 +683,20 @@ bool RetailMissionRig::toggle_mount() {
 	return changed;
 }
 
-w::LocalPlayerViewFrame RetailMissionRig::view_frame() {
+w::LocalPlayerViewFrame MissionKernel::view_frame() {
 	w::LocalPlayerViewFrame f;
 	w::local_player_view_frame(&world, weapon, view, view_tracker, f);
 	return f;
 }
 
-// --- entities ------------------------------------------------------------------------
+// --- entities ---------------------------------------------------------------
 
-w::Entity *RetailMissionRig::by_net_id(uint16_t ssn) {
+w::Entity *MissionKernel::by_net_id(uint16_t ssn) {
 	const w::EntityHandle h = world.registry.find_by_net_id(ssn);
 	return h.valid() ? world.registry.get(h) : nullptr;
 }
 
-w::Entity *RetailMissionRig::by_bms_id(int32_t bms_id) {
+w::Entity *MissionKernel::by_bms_id(int32_t bms_id) {
 	w::EntityHandle found;
 	world.registry.for_each([&](const w::Entity &e) {
 		if (!found.valid() && e.bms_id == bms_id) found = e.handle;
@@ -861,11 +704,11 @@ w::Entity *RetailMissionRig::by_bms_id(int32_t bms_id) {
 	return found.valid() ? world.registry.get(found) : nullptr;
 }
 
-w::AiEntity *RetailMissionRig::ai_for(w::EntityHandle h) {
+w::AiEntity *MissionKernel::ai_for(w::EntityHandle h) {
 	return h.valid() ? ai.for_handle(h) : nullptr;
 }
 
-void RetailMissionRig::set_entity_position(w::EntityHandle h, const w::Vec3 &mission_pos) {
+void MissionKernel::set_entity_position(w::EntityHandle h, const w::Vec3 &mission_pos) {
 	if (w::Entity *e = world.registry.get(h)) e->position = mission_pos;
 	if (w::AiEntity *a = ai.for_handle(h)) {
 		a->pos[0] = static_cast<int32_t>(mission_pos.x * 65536.0f);
@@ -874,7 +717,7 @@ void RetailMissionRig::set_entity_position(w::EntityHandle h, const w::Vec3 &mis
 	}
 }
 
-void RetailMissionRig::set_entity_health(w::EntityHandle h, int32_t hp) {
+void MissionKernel::set_entity_health(w::EntityHandle h, int32_t hp) {
 	if (w::AiEntity *a = ai.for_handle(h)) a->health = static_cast<int16_t>(hp);
 	if (w::Entity *e = world.registry.get(h)) {
 		e->health = hp;
@@ -882,30 +725,30 @@ void RetailMissionRig::set_entity_health(w::EntityHandle h, int32_t hp) {
 	}
 }
 
-// --- terrain ---------------------------------------------------------------------------
+// --- terrain ----------------------------------------------------------------
 
-float RetailMissionRig::ground_height(float mission_x, float mission_y) const {
+float MissionKernel::ground_height(float mission_x, float mission_y) const {
 	// The field's world frame is the renderer's: x, and z = -mission y.
 	return terrain::height_field_height_world_bilinear(terrain_store.height_field(),
 			mission_x, -mission_y);
 }
 
-// --- observation -----------------------------------------------------------------------
+// --- observation ------------------------------------------------------------
 
-std::vector<w::Effect> RetailMissionRig::drain_effects() {
+std::vector<w::Effect> MissionKernel::drain_effects() {
 	std::vector<w::Effect> out = world.effects.entries();
 	world.effects.clear();
 	return out;
 }
 
-std::vector<w::CollisionWorld::DebugInstance> RetailMissionRig::collision_instances(
+std::vector<w::CollisionWorld::DebugInstance> MissionKernel::collision_instances(
 		const w::Vec3 &anchor, float range_units, int32_t max_instances) {
 	const int32_t a[3] = {static_cast<int32_t>(anchor.x * 65536.0f),
 			static_cast<int32_t>(anchor.y * 65536.0f), static_cast<int32_t>(anchor.z * 65536.0f)};
 	return collision.debug_instances(world, a, static_cast<int32_t>(range_units * 65536.0f), max_instances);
 }
 
-std::vector<w::CollisionWorld::DebugHitboxEntity> RetailMissionRig::hitboxes(
+std::vector<w::CollisionWorld::DebugHitboxEntity> MissionKernel::hitboxes(
 		const w::Vec3 &anchor, float range_units, int32_t max_entities, int32_t max_faces) {
 	const int32_t a[3] = {static_cast<int32_t>(anchor.x * 65536.0f),
 			static_cast<int32_t>(anchor.y * 65536.0f), static_cast<int32_t>(anchor.z * 65536.0f)};
@@ -913,33 +756,9 @@ std::vector<w::CollisionWorld::DebugHitboxEntity> RetailMissionRig::hitboxes(
 			max_entities, max_faces);
 }
 
-// --- inmatch::TickTarget ----------------------------------------------------------------
+// --- world::IMountedPoseProvider --------------------------------------------
 
-inmatch::TickOutcome RetailMissionRig::advance_mission_tick(const inmatch::TickInput &in) {
-	input = in.player.movement;
-	if (in.player.look_delta_x != 0.0f || in.player.look_delta_y != 0.0f)
-		look(in.player.look_delta_x, in.player.look_delta_y);
-	tick();
-	inmatch::TickOutcome out;
-	out.status = inmatch::TickStatus::Ran;
-	out.logic_tick = static_cast<int32_t>(world.logic_tick);
-	return out;
-}
-
-bool RetailMissionRig::reset_mission_to_baseline(inmatch::SessionError &error) {
-	if (!have_baseline) {
-		error = {inmatch::SessionErrorCode::LoadFailed, "no baseline"};
-		return false;
-	}
-	world.restore(baseline);
-	return true;
-}
-
-void RetailMissionRig::close_mission() {}
-
-// --- world::IMountedPoseProvider ----------------------------------------------------------
-
-bool RetailMissionRig::resolve_mounted_pose(w::World &p_world, const w::Entity &carrier,
+bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &carrier,
 		const w::Seat &seat, w::MountedPose &out) {
 	// The native-only mounted-pose resolver (Simulation::resolve_mounted_pose_native).
 	if (&p_world != &world || seat.type != w::SeatType::Gunner || seat.bone_index == 0) return false;
@@ -1007,9 +826,9 @@ bool RetailMissionRig::resolve_mounted_pose(w::World &p_world, const w::Entity &
 	return resolved;
 }
 
-// --- world::ICollisionSectionMatrixProvider --------------------------------------------------
+// --- world::ICollisionSectionMatrixProvider ---------------------------------
 
-bool RetailMissionRig::ensure_collision_instance(w::World &p_world, w::EntityHandle entity) {
+bool MissionKernel::ensure_collision_instance(w::World &p_world, w::EntityHandle entity) {
 	if (&p_world != &world || !items_ok) return false;
 	const w::Entity *e = world.registry.get(entity);
 	if (e == nullptr) {
@@ -1033,7 +852,7 @@ bool RetailMissionRig::ensure_collision_instance(w::World &p_world, w::EntityHan
 	return collision.has_instance(world, entity);
 }
 
-bool RetailMissionRig::build_section_matrices(w::World &p_world, w::EntityHandle entity,
+bool MissionKernel::build_section_matrices(w::World &p_world, w::EntityHandle entity,
 		int32_t model_id, const w::CollisionMatrix &entity_world, const w::CollisionModel &model,
 		std::vector<w::CollisionMatrix> &out) {
 	collision_pose.weapon_active = weapon.active;
@@ -1046,4 +865,4 @@ bool RetailMissionRig::build_section_matrices(w::World &p_world, w::EntityHandle
 	return false;
 }
 
-} // namespace opennova::testrig
+} // namespace opennova::mission
