@@ -2,9 +2,9 @@
 
 #include <base/resource_index/boot_policy.h>
 
+#include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 
-#include <cctype>
 #include <cerrno>
 #include <cstdlib>
 
@@ -12,17 +12,9 @@ namespace opennova {
 
 namespace {
 
-std::string lower_ascii(std::string s) {
-    for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return s;
-}
-
-std::string strip(const std::string &s) {
-    std::size_t b = 0, e = s.size();
-    while (b < e && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
-    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
-    return s.substr(b, e - b);
-}
+// ASCII-only by design (io/strutil.h): flag matching never follows the locale.
+std::string lower_ascii(const std::string &s) { return strutil::to_lower(s); }
+std::string strip(const std::string &s) { return strutil::trim(s); }
 
 bool has_flag(const std::vector<std::string> &args, const char *flag) {
     const std::string wanted = lower_ascii(flag);

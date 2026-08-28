@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <string_view>
 
-namespace renderer {
+#include <base/io/strutil.h>
+
+namespace opennova::renderer {
 
 // Runtime shader capabilities recovered from the retail effect registry.
 enum MaterialCapabilityFlags : uint32_t {
@@ -69,10 +71,6 @@ struct MaterialDescriptorRecord {
   uint32_t descriptor_flags;
 };
 
-constexpr uint32_t material_capability_flags(uint32_t flags) {
-  return flags;
-}
-
 // Static representation of the retail shader registry:
 // - FindMaterialIndexByName resolves shader tags by exact name.
 // - RegisterFixedFunctionMaterials derives FF_* rows from _FFP.fx.
@@ -92,65 +90,65 @@ constexpr uint32_t material_capability_flags(uint32_t flags) {
 // GLASS), and VS_SKGLASS (untextured => no DIFFUSE). The renderer-facing rows
 // below are the authoritative runtime catalog.
 inline constexpr MaterialDescriptorRecord kMaterialDescriptorTable[] = {
-    {"FF_ST_OP", material_capability_flags(MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_ST_OP#UV", material_capability_flags(MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_ST_AB", material_capability_flags(MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_ST_AB#UV", material_capability_flags(MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_ST_AD", material_capability_flags(MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_ST_AD#UV", material_capability_flags(MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_ST_OP_LUM", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_ST_OP_LUM#UV", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_ST_AB_LUM", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_ST_AB_LUM#UV", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_ST_AD_LUM", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_ST_AD_LUM#UV", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_MT_OP", material_capability_flags(MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_MT_OP#UV", material_capability_flags(MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_MT_AB", material_capability_flags(MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_MT_AB#UV", material_capability_flags(MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_MT_AD", material_capability_flags(MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_MT_AD#UV", material_capability_flags(MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_MT_OP_LUM", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_MT_OP_LUM#UV", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_MT_AB_LUM", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_MT_AB_LUM#UV", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"FF_MT_AD_LUM", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, 0},
-    {"FF_MT_AD_LUM#UV", material_capability_flags(MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_ST_OP", MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_ST_OP#UV", MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_ST_AB", MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_ST_AB#UV", MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_ST_AD", MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_ST_AD#UV", MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_ST_OP_LUM", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_ST_OP_LUM#UV", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_ST_AB_LUM", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_ST_AB_LUM#UV", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_ST_AD_LUM", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_ST_AD_LUM#UV", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_MT_OP", MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_MT_OP#UV", MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_MT_AB", MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_MT_AB#UV", MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_MT_AD", MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_MT_AD#UV", MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_MT_OP_LUM", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_MT_OP_LUM#UV", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_MT_AB_LUM", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_MT_AB_LUM#UV", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_ALPHA | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::AlphaBlend, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FF_MT_AD_LUM", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, 0},
+    {"FF_MT_AD_LUM#UV", MATERIAL_FLAG_GLOW | MATERIAL_FLAG_EMISSIVE | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
     // FFP_GLASS runtime word [orig: probe @ 0x5ae690 over Glass.fx]: no vertex
     // shader => no TANGENT; the GLOW technique samples TexCubeRotSpecular =>
     // GLOW (the Q3 bloom-copy set). Legacy dump said GLASS|TANGENT|BLENDING.
-    {"FFP_GLASS", material_capability_flags(MATERIAL_FLAG_GLASS | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_GLOW), MaterialDescriptorFamily::Glass, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_ENVIRONMENT},
-    {"VS_DOT3DIFFOBJ", material_capability_flags(MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, 0},
-    {"VS_PHONGO", material_capability_flags(MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, MATERIAL_DESCRIPTOR_SPECULAR},
-    {"VS_DOT3DIFF", material_capability_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, 0},
-    {"VS_DOT3DIFF#UV", material_capability_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"VS_PHONGT", material_capability_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SPECULAR},
-    {"VS_PHONGT#UV", material_capability_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SPECULAR | MATERIAL_DESCRIPTOR_UV_TRANSFORM},
-    {"VS_DOT3DIFF2", material_capability_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY), MaterialDescriptorFamily::Dot3, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, 0},
-    {"VS_BMTXMIRRT", material_capability_flags(MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT | MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED},
-    {"VS_BUMPMIRRT", material_capability_flags(MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT},
-    {"VS_ENVPHONGT", material_capability_flags(MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT | MATERIAL_DESCRIPTOR_SPECULAR},
-    {"VS_SKBASIC", material_capability_flags(MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_SKINNED},
-    {"VS_SKBASIC#UV", material_capability_flags(MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_SKINNED | MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"FFP_GLASS", MATERIAL_FLAG_GLASS | MATERIAL_FLAG_BLENDING | MATERIAL_FLAG_GLOW, MaterialDescriptorFamily::Glass, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_ENVIRONMENT},
+    {"VS_DOT3DIFFOBJ", MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, 0},
+    {"VS_PHONGO", MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, MATERIAL_DESCRIPTOR_SPECULAR},
+    {"VS_DOT3DIFF", MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, 0},
+    {"VS_DOT3DIFF#UV", MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"VS_PHONGT", MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SPECULAR},
+    {"VS_PHONGT#UV", MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SPECULAR | MATERIAL_DESCRIPTOR_UV_TRANSFORM},
+    {"VS_DOT3DIFF2", MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY, MaterialDescriptorFamily::Dot3, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, 0},
+    {"VS_BMTXMIRRT", MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT | MATERIAL_DESCRIPTOR_ENVIRONMENT_TEXTURED},
+    {"VS_BUMPMIRRT", MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT},
+    {"VS_ENVPHONGT", MATERIAL_FLAG_GLASS | MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Environment, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_ENVIRONMENT | MATERIAL_DESCRIPTOR_SPECULAR},
+    {"VS_SKBASIC", MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_SKINNED},
+    {"VS_SKBASIC#UV", MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_UVGEN, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_SKINNED | MATERIAL_DESCRIPTOR_UV_TRANSFORM},
     // VS_SKGLASS runtime word [orig: probe @ 0x5ae690 over SkGlass.fx]: untextured
     // (Out.Diff = ReflectColor; no TexDiffuse1 reference) => no DIFFUSE.
-    {"VS_SKGLASS", material_capability_flags(MATERIAL_FLAG_GLASS | MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_BLENDING), MaterialDescriptorFamily::Glass, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_SKINNED | MATERIAL_DESCRIPTOR_ENVIRONMENT},
-    {"VS_SKBUMPDIFFOBJ", material_capability_flags(MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, MATERIAL_DESCRIPTOR_SKINNED},
-    {"VS_SKBUMPPHONGOBJ", material_capability_flags(MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, MATERIAL_DESCRIPTOR_SKINNED | MATERIAL_DESCRIPTOR_SPECULAR},
-    {"VS_SKBUMPDIFFOBJ2", material_capability_flags(MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY), MaterialDescriptorFamily::Dot3, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, MATERIAL_DESCRIPTOR_SKINNED},
+    {"VS_SKGLASS", MATERIAL_FLAG_GLASS | MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_BLENDING, MaterialDescriptorFamily::Glass, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_SKINNED | MATERIAL_DESCRIPTOR_ENVIRONMENT},
+    {"VS_SKBUMPDIFFOBJ", MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, MATERIAL_DESCRIPTOR_SKINNED},
+    {"VS_SKBUMPPHONGOBJ", MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, MATERIAL_DESCRIPTOR_SKINNED | MATERIAL_DESCRIPTOR_SPECULAR},
+    {"VS_SKBUMPDIFFOBJ2", MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY, MaterialDescriptorFamily::Dot3, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Object, MATERIAL_DESCRIPTOR_SKINNED},
     // VS_SKBUMPDIFFT / VS_SKBUMPPHONGT / VS_SKBUMPDIFFT2 runtime words [orig:
     // probe @ 0x5ae690 over SkBDiffT/SkBPhongT/SkBDiffT2 + _vsSkDfT.fx]: the
     // tangent-space skinned VS reads In.Tangent (TANGENT) and nothing
     // references ReflectColor (no GLASS). Legacy dump had GLASS instead.
-    {"VS_SKBUMPDIFFT", material_capability_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SKINNED},
-    {"VS_SKBUMPPHONGT", material_capability_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SKINNED | MATERIAL_DESCRIPTOR_SPECULAR},
-    {"VS_SKBUMPDIFFT2", material_capability_flags(MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY), MaterialDescriptorFamily::Dot3, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SKINNED},
-    {"VS_FLAG", material_capability_flags(MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::Flag, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_FLAG_ANIMATION},
+    {"VS_SKBUMPDIFFT", MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SKINNED},
+    {"VS_SKBUMPPHONGT", MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Phong, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SKINNED | MATERIAL_DESCRIPTOR_SPECULAR},
+    {"VS_SKBUMPDIFFT2", MATERIAL_FLAG_TANGENT | MATERIAL_FLAG_SKINNED | MATERIAL_FLAG_NORMAL_A | MATERIAL_FLAG_DIFFUSE | MATERIAL_FLAG_SECONDARY, MaterialDescriptorFamily::Dot3, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::Tangent, MATERIAL_DESCRIPTOR_SKINNED},
+    {"VS_FLAG", MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::Flag, MaterialDescriptorBlend::Opaque, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_FLAG_ANIMATION},
     // Tracer.fx: unlit additive diffuse (RSAlphaMode(TRUE, ONE, ONE),
     // ZMODE_NOWRITE, no lighting includes) with the vsTracer view-angle fade
     // (VIEW_FADE: color x |dot(eye, normal)|^2 — not a displacement; the
     // "soft edge" is the squared facing falloff). D-RMAT-2 ported at REN-4.
-    {"VS_TRACER", material_capability_flags(MATERIAL_FLAG_DIFFUSE), MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_VIEW_FADE},
+    {"VS_TRACER", MATERIAL_FLAG_DIFFUSE, MaterialDescriptorFamily::FixedFunction, MaterialDescriptorBlend::Additive, MaterialDescriptorNormalSpace::None, MATERIAL_DESCRIPTOR_VIEW_FADE},
 };
 
 inline constexpr size_t kMaterialDescriptorTableCount =
@@ -160,26 +158,12 @@ inline constexpr size_t kMaterialDescriptorTableCount =
 // [orig: HLSLEffect_FindByName @ 0x5ade70 — stricmp over the entry names].
 // Still deliberately exact-tag (no substring guessing).
 inline const MaterialDescriptorRecord* find_material_descriptor(std::string_view shader_tag) {
-  auto ascii_lower = [](char c) {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-  };
   for (size_t i = 0; i < kMaterialDescriptorTableCount; ++i) {
-    std::string_view name = kMaterialDescriptorTable[i].name;
-    if (name.size() != shader_tag.size()) {
-      continue;
-    }
-    bool equal = true;
-    for (size_t j = 0; j < name.size(); ++j) {
-      if (ascii_lower(name[j]) != ascii_lower(shader_tag[j])) {
-        equal = false;
-        break;
-      }
-    }
-    if (equal) {
+    if (opennova::strutil::iequals(kMaterialDescriptorTable[i].name, shader_tag)) {
       return &kMaterialDescriptorTable[i];
     }
   }
   return nullptr;
 }
 
-}  // namespace renderer
+}  // namespace opennova::renderer

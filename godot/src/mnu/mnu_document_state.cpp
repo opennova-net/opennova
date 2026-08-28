@@ -30,7 +30,7 @@ PackedInt32Array MnuDocument::collect_ids() const {
 	return out;
 }
 
-bool MnuDocument::build_id_window_from_list(const mnu::Window &w, const PackedInt32Array &ids, int &k, IdWindow &out) const {
+bool MnuDocument::build_id_window_from_list(const opennova::mnu::Window &w, const PackedInt32Array &ids, int &k, IdWindow &out) const {
 	if (k >= ids.size()) {
 		return false;
 	}
@@ -65,9 +65,9 @@ void MnuDocument::apply_state(const Dictionary &p_state) {
 	if (!bytes.empty()) {
 		std::memcpy(bytes.data(), packed.ptr(), bytes.size());
 	}
-	mnu::Document parsed;
+	opennova::mnu::Document parsed;
 	std::string error;
-	if (!mnu::parse(bytes.data(), bytes.size(), parsed, error)) {
+	if (!opennova::mnu::parse(bytes.data(), bytes.size(), parsed, error)) {
 		UtilityFunctions::push_warning("MnuDocument::apply_state: parse failed: ", error.c_str());
 		return;
 	}
@@ -145,7 +145,7 @@ bool MnuDocument::reparent_widget(int p_id, int p_new_parent_id, int p_index) {
 
 	// Resolve the source parent vectors + the child's index within them.
 	const int src_index = src.path.back();
-	mnu::Window *src_parent = &doc_.screens[src.screen_index].root_window;
+	opennova::mnu::Window *src_parent = &doc_.screens[src.screen_index].root_window;
 	IdWindow *src_id_parent = &ids_[src.screen_index].root;
 	for (size_t i = 0; i + 1 < src.path.size(); ++i) {
 		src_parent = &src_parent->children[src.path[i]];
@@ -153,7 +153,7 @@ bool MnuDocument::reparent_widget(int p_id, int p_new_parent_id, int p_index) {
 	}
 
 	// Move the subtree (and its mirrored id subtree) out, then erase the slot.
-	mnu::Window moved = std::move(src_parent->children[src_index]);
+	opennova::mnu::Window moved = std::move(src_parent->children[src_index]);
 	IdWindow moved_id = std::move(src_id_parent->children[src_index]);
 	src_parent->children.erase(src_parent->children.begin() + src_index);
 	src_id_parent->children.erase(src_id_parent->children.begin() + src_index);
@@ -162,7 +162,7 @@ bool MnuDocument::reparent_widget(int p_id, int p_new_parent_id, int p_index) {
 	// was a later sibling in the same parent). It cannot have vanished: it is not
 	// inside the moved subtree (cycle check) and still exists in the tree.
 	const Locator dst = locate(p_new_parent_id);
-	mnu::Window *dst_parent = nullptr;
+	opennova::mnu::Window *dst_parent = nullptr;
 	IdWindow *dst_id_parent = nullptr;
 	if (dst.valid()) {
 		if (dst.is_screen) {

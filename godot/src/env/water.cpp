@@ -395,7 +395,7 @@ void Water::build() {
 	// The water surface draws between the two water-side transparent
 	// brackets (the ladder lives in engine/runtime/renderer/render_order,
 	// REN-3).
-	water_material_->set_render_priority(renderer::kRungWater);
+	water_material_->set_render_priority(opennova::renderer::kRungWater);
 
 	// The witnessed screen-marched strip mesh is LIVE (env #29): every frame
 	// rebuilds the surface from WaterCore.strip_build, so the mesh starts

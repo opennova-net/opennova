@@ -5,7 +5,7 @@
 
 #include <cmath>
 
-namespace renderer {
+namespace opennova::renderer {
 
 namespace {
 
@@ -180,4 +180,4 @@ void compile_scar_draws(const opennova::world::ScarCache &cache,
 	}
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

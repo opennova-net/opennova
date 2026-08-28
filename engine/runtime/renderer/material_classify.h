@@ -14,7 +14,7 @@
 #include <cstdint>
 #include <string>
 
-namespace renderer {
+namespace opennova::renderer {
 
 enum class ObjectBlendMode : uint8_t {
 	Opaque,
@@ -82,4 +82,4 @@ ObjectMaterialClassification classify_object_material(const std::string &shader_
                                                        uint8_t is_glass_flag,
                                                        uint8_t alpha_test_value_byte);
 
-} // namespace renderer
+}  // namespace opennova::renderer

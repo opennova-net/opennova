@@ -10,7 +10,7 @@
 #include <cmath>
 #include <limits>
 
-namespace renderer {
+namespace opennova::renderer {
 
 namespace {
 
@@ -466,4 +466,4 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 	return draw_list_;
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

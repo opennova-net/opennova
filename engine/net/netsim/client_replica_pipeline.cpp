@@ -407,7 +407,7 @@ inline int16_t org2_bucket(int32_t dist2d) {
 	return 18;
 }
 
-constexpr double kRadPerBam = 3.14159265358979323846 / 2147483648.0;
+constexpr double kRadPerBam = opennova::io::kRadiansPerBam;
 
 // The caller-owned org gravity channel (the infantry.cpp world-motor twins)
 // [orig: org2 vel_z -= 208 @0x4b7acf, clamp @0x4b7c77; org1 -= 416

@@ -13,7 +13,7 @@
 #include <limits>
 #include <random>
 
-namespace cbin {
+namespace opennova::cbin {
 
 namespace {
 
@@ -868,4 +868,4 @@ std::vector<Entry> credits_entries_from_display(
     return entries;
 }
 
-}  // namespace cbin
+}  // namespace opennova::cbin

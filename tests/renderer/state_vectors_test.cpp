@@ -67,94 +67,94 @@
 
 namespace {
 
-const char *blend_name(renderer::ObjectBlendMode blend) {
+const char *blend_name(opennova::renderer::ObjectBlendMode blend) {
 	switch (blend) {
-		case renderer::ObjectBlendMode::Opaque: return "opaque";
-		case renderer::ObjectBlendMode::AlphaBlend: return "alpha_blend";
-		case renderer::ObjectBlendMode::Additive: return "additive";
-		case renderer::ObjectBlendMode::Multiplicative: return "multiplicative";
+		case opennova::renderer::ObjectBlendMode::Opaque: return "opaque";
+		case opennova::renderer::ObjectBlendMode::AlphaBlend: return "alpha_blend";
+		case opennova::renderer::ObjectBlendMode::Additive: return "additive";
+		case opennova::renderer::ObjectBlendMode::Multiplicative: return "multiplicative";
 	}
 	return "?";
 }
 
-const char *normal_space_name(renderer::ObjectNormalSpace space) {
+const char *normal_space_name(opennova::renderer::ObjectNormalSpace space) {
 	switch (space) {
-		case renderer::ObjectNormalSpace::None: return "none";
-		case renderer::ObjectNormalSpace::Tangent: return "tangent";
-		case renderer::ObjectNormalSpace::Object: return "object";
+		case opennova::renderer::ObjectNormalSpace::None: return "none";
+		case opennova::renderer::ObjectNormalSpace::Tangent: return "tangent";
+		case opennova::renderer::ObjectNormalSpace::Object: return "object";
 	}
 	return "?";
 }
 
-const char *depth_policy_name(renderer::ObjectDepthPolicy depth) {
+const char *depth_policy_name(opennova::renderer::ObjectDepthPolicy depth) {
 	switch (depth) {
-		case renderer::ObjectDepthPolicy::Opaque: return "opaque";
-		case renderer::ObjectDepthPolicy::TransparentNoWrite: return "transparent-no-write";
+		case opennova::renderer::ObjectDepthPolicy::Opaque: return "opaque";
+		case opennova::renderer::ObjectDepthPolicy::TransparentNoWrite: return "transparent-no-write";
 	}
 	return "?";
 }
 
-const char *cull_policy_name(renderer::ObjectCullPolicy cull) {
+const char *cull_policy_name(opennova::renderer::ObjectCullPolicy cull) {
 	switch (cull) {
-		case renderer::ObjectCullPolicy::Back: return "back";
-		case renderer::ObjectCullPolicy::Disabled: return "disabled";
+		case opennova::renderer::ObjectCullPolicy::Back: return "back";
+		case opennova::renderer::ObjectCullPolicy::Disabled: return "disabled";
 	}
 	return "?";
 }
 
-const char *environment_source_name(renderer::ObjectEnvironmentSource source) {
+const char *environment_source_name(opennova::renderer::ObjectEnvironmentSource source) {
 	switch (source) {
-		case renderer::ObjectEnvironmentSource::None: return "none";
-		case renderer::ObjectEnvironmentSource::HemisphereApproximation: return "hemisphere-approx";
+		case opennova::renderer::ObjectEnvironmentSource::None: return "none";
+		case opennova::renderer::ObjectEnvironmentSource::HemisphereApproximation: return "hemisphere-approx";
 	}
 	return "?";
 }
 
-const char *specular_source_name(renderer::ObjectSpecularSource source) {
+const char *specular_source_name(opennova::renderer::ObjectSpecularSource source) {
 	switch (source) {
-		case renderer::ObjectSpecularSource::None: return "none";
-		case renderer::ObjectSpecularSource::AnalyticPow8DiffuseAlpha:
+		case opennova::renderer::ObjectSpecularSource::None: return "none";
+		case opennova::renderer::ObjectSpecularSource::AnalyticPow8DiffuseAlpha:
 			return "analytic-pow8-diffuse-alpha";
-		case renderer::ObjectSpecularSource::PhongMapLookupDiffuseAlpha:
+		case opennova::renderer::ObjectSpecularSource::PhongMapLookupDiffuseAlpha:
 			return "analytic-phong-map-diffuse-alpha";
-		case renderer::ObjectSpecularSource::AnalyticPow16: return "analytic-pow16";
+		case opennova::renderer::ObjectSpecularSource::AnalyticPow16: return "analytic-pow16";
 	}
 	return "?";
 }
 
-const char *technique_name(renderer::ObjectShaderTechnique technique) {
+const char *technique_name(opennova::renderer::ObjectShaderTechnique technique) {
 	switch (technique) {
-		case renderer::ObjectShaderTechnique::Unsupported: return "unsupported";
-		case renderer::ObjectShaderTechnique::Fixed: return "fixed";
-		case renderer::ObjectShaderTechnique::FixedSkinned: return "fixed-skinned";
-		case renderer::ObjectShaderTechnique::FixedDetail: return "fixed-detail";
-		case renderer::ObjectShaderTechnique::SelfLit: return "self-lit";
-		case renderer::ObjectShaderTechnique::SelfLitDetail: return "self-lit-detail";
-		case renderer::ObjectShaderTechnique::Tracer: return "tracer";
-		case renderer::ObjectShaderTechnique::Flag: return "flag";
-		case renderer::ObjectShaderTechnique::PhongTangentDiffuse: return "phong-tangent-diffuse";
-		case renderer::ObjectShaderTechnique::PhongTangentSpecular: return "phong-tangent-specular";
-		case renderer::ObjectShaderTechnique::PhongTangentSpecularSkinned: return "phong-tangent-specular-skinned";
-		case renderer::ObjectShaderTechnique::PhongObjectDiffuse: return "phong-object-diffuse";
-		case renderer::ObjectShaderTechnique::PhongObjectSpecular: return "phong-object-specular";
-		case renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap: return "phong-object-specular-phong-map";
-		case renderer::ObjectShaderTechnique::Dot3Tangent: return "dot3-tangent";
-		case renderer::ObjectShaderTechnique::Dot3TangentDetail: return "dot3-tangent-detail";
-		case renderer::ObjectShaderTechnique::Dot3TangentSkinned: return "dot3-tangent-skinned";
-		case renderer::ObjectShaderTechnique::Dot3TangentDetailSkinned: return "dot3-tangent-detail-skinned";
-		case renderer::ObjectShaderTechnique::Dot3Object: return "dot3-object";
-		case renderer::ObjectShaderTechnique::Dot3ObjectDetail: return "dot3-object-detail";
-		case renderer::ObjectShaderTechnique::EnvironmentMirror: return "environment-mirror";
-		case renderer::ObjectShaderTechnique::EnvironmentMirrorTextured: return "environment-mirror-textured";
-		case renderer::ObjectShaderTechnique::EnvironmentPhong: return "environment-phong";
-		case renderer::ObjectShaderTechnique::GlassFixed: return "glass-fixed";
-		case renderer::ObjectShaderTechnique::GlassSkinned: return "glass-skinned";
+		case opennova::renderer::ObjectShaderTechnique::Unsupported: return "unsupported";
+		case opennova::renderer::ObjectShaderTechnique::Fixed: return "fixed";
+		case opennova::renderer::ObjectShaderTechnique::FixedSkinned: return "fixed-skinned";
+		case opennova::renderer::ObjectShaderTechnique::FixedDetail: return "fixed-detail";
+		case opennova::renderer::ObjectShaderTechnique::SelfLit: return "self-lit";
+		case opennova::renderer::ObjectShaderTechnique::SelfLitDetail: return "self-lit-detail";
+		case opennova::renderer::ObjectShaderTechnique::Tracer: return "tracer";
+		case opennova::renderer::ObjectShaderTechnique::Flag: return "flag";
+		case opennova::renderer::ObjectShaderTechnique::PhongTangentDiffuse: return "phong-tangent-diffuse";
+		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecular: return "phong-tangent-specular";
+		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecularSkinned: return "phong-tangent-specular-skinned";
+		case opennova::renderer::ObjectShaderTechnique::PhongObjectDiffuse: return "phong-object-diffuse";
+		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecular: return "phong-object-specular";
+		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap: return "phong-object-specular-phong-map";
+		case opennova::renderer::ObjectShaderTechnique::Dot3Tangent: return "dot3-tangent";
+		case opennova::renderer::ObjectShaderTechnique::Dot3TangentDetail: return "dot3-tangent-detail";
+		case opennova::renderer::ObjectShaderTechnique::Dot3TangentSkinned: return "dot3-tangent-skinned";
+		case opennova::renderer::ObjectShaderTechnique::Dot3TangentDetailSkinned: return "dot3-tangent-detail-skinned";
+		case opennova::renderer::ObjectShaderTechnique::Dot3Object: return "dot3-object";
+		case opennova::renderer::ObjectShaderTechnique::Dot3ObjectDetail: return "dot3-object-detail";
+		case opennova::renderer::ObjectShaderTechnique::EnvironmentMirror: return "environment-mirror";
+		case opennova::renderer::ObjectShaderTechnique::EnvironmentMirrorTextured: return "environment-mirror-textured";
+		case opennova::renderer::ObjectShaderTechnique::EnvironmentPhong: return "environment-phong";
+		case opennova::renderer::ObjectShaderTechnique::GlassFixed: return "glass-fixed";
+		case opennova::renderer::ObjectShaderTechnique::GlassSkinned: return "glass-skinned";
 	}
 	return "?";
 }
 
 std::string generate() {
-	using namespace renderer;
+	using namespace opennova::renderer;
 
 	std::ostringstream out;
 	out << "# render-state-vectors v1 (renderer_state_vectors_test; REN-1, ADR 0023)\n";
@@ -163,8 +163,8 @@ std::string generate() {
 	// unknown-tag probes (a unknown tag, a case-mismatch probe, and empty —
 	// classification is deliberately exact-tag only).
 	std::vector<std::string> tags;
-	for (size_t i = 0; i < renderer::kMaterialDescriptorTableCount; ++i)
-		tags.push_back(renderer::kMaterialDescriptorTable[i].name);
+	for (size_t i = 0; i < opennova::renderer::kMaterialDescriptorTableCount; ++i)
+		tags.push_back(opennova::renderer::kMaterialDescriptorTable[i].name);
 	tags.push_back("VS_LEAVESWIND");
 	tags.push_back("ff_st_op");
 	tags.push_back("");
@@ -236,15 +236,15 @@ std::string generate() {
 	// backend's source language.
 	out << "# object-pipeline-descriptors v1\n";
 	for (uint32_t key : keys) {
-		const renderer::ObjectShaderPipelineDescriptor pipeline =
-			renderer::describe_object_shader_pipeline(key);
+		const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
+			opennova::renderer::describe_object_shader_pipeline(key);
 		std::snprintf(line, sizeof(line),
 		              "key=%08x fam=%s technique=%s blend=%s depth=%s cull=%s alpha=%d "
 		              "atest=%d atinv=%d two=%d emis=%d lum=%d nmap=%d "
 		              "nuv2=%d nspace=%s detail=%d spec=%d skin=%d envtex=%d glass=%d vfade=%d "
 		              "envsrc=%s specsrc=%s\n",
 		              key,
-		              renderer::object_shader_family_name(pipeline.family),
+		              opennova::renderer::object_shader_family_name(pipeline.family),
 		              technique_name(pipeline.technique),
 		              blend_name(pipeline.blend),
 		              depth_policy_name(pipeline.depth),
@@ -354,7 +354,7 @@ std::string generate() {
 	for (uint8_t wt : wave_types) {
 		for (uint16_t ph : wave_phases) {
 			std::snprintf(line, sizeof(line), "wave t=%02x ph=%04x v=%d\n",
-			              wt, ph, renderer::uv_anim_wave_lookup(wt, ph, 0x1234));
+			              wt, ph, opennova::renderer::uv_anim_wave_lookup(wt, ph, 0x1234));
 			out << line;
 		}
 	}
@@ -363,7 +363,7 @@ std::string generate() {
 	// covering every mode family at two times.
 	struct UvCase {
 		const char *label;
-		renderer::UvAnimChannel ch;
+		opennova::renderer::UvAnimChannel ch;
 	};
 	const UvCase uv_cases[] = {
 		{ "scroll+", { 16, 0x20, 3, 0, 0 } },
@@ -381,14 +381,14 @@ std::string generate() {
 		{ "ctrl-rot", { 'u', 0, 0, 0, 64 } },
 	};
 	const uint16_t uv_times[] = { 0x0000, 0x2B67 };
-	const renderer::UvAnimChannel identity{};
+	const opennova::renderer::UvAnimChannel identity{};
 	for (const UvCase &c : uv_cases) {
 		for (uint16_t tm : uv_times) {
-			const renderer::UvAnimTransform tu =
-				renderer::uv_anim_transform(
+			const opennova::renderer::UvAnimTransform tu =
+				opennova::renderer::uv_anim_transform(
 						c.ch, identity, tm, 0x8000, 0, 0x0741, 0x0741);
-			const renderer::UvAnimTransform tv =
-				renderer::uv_anim_transform(
+			const opennova::renderer::UvAnimTransform tv =
+				opennova::renderer::uv_anim_transform(
 						identity, c.ch, tm, 0, 0x8000, 0x0741, 0x0741);
 			std::snprintf(line, sizeof(line),
 			              "uvU %-11s t=%04x m=[%.6f %.6f %.6f %.6f %.6f %.6f]\n",
@@ -420,14 +420,14 @@ std::string generate() {
 
 	const uint32_t mod_packeds[] = { 0x404040u, 0x000000u, 0xFFFFFFu, 0x203040u };
 	for (uint32_t m : mod_packeds) {
-		const auto s = renderer::unpack_modulator_scale(m);
+		const auto s = opennova::renderer::unpack_modulator_scale(m);
 		std::snprintf(line, sizeof(line), "modscale m=%06x s=[%.6f %.6f %.6f]\n",
 		              m, static_cast<double>(s[0]), static_cast<double>(s[1]),
 		              static_cast<double>(s[2]));
 		out << line;
 	}
 
-	const auto print_block = [&](const char *label, const renderer::WorldLightingBlock &b) {
+	const auto print_block = [&](const char *label, const opennova::renderer::WorldLightingBlock &b) {
 		std::snprintf(line, sizeof(line),
 		              "wblock %-6s en=%d dir=[%.6f %.6f %.6f] dc=[%.6f %.6f %.6f] "
 		              "sky=[%.6f %.6f %.6f] gnd=[%.6f %.6f %.6f] flr=[%.6f %.6f %.6f] "
@@ -452,31 +452,31 @@ std::string generate() {
 		out << line;
 	};
 
-	renderer::WorldLightingInputs win;
+	opennova::renderer::WorldLightingInputs win;
 	win.light_packed = 0xFFF0E0u;
 	win.sky_packed = 0x8090A0u;
 	win.ground_packed = 0x605040u;
 	win.ceiling_packed = 0x404850u;
 	win.floor_packed = 0x302820u;
 	win.light_dir = { 0.3f, -0.8f, 0.5f };
-	const renderer::WorldLightingBlock day = renderer::build_world_lighting(win);
+	const opennova::renderer::WorldLightingBlock day = opennova::renderer::build_world_lighting(win);
 	print_block("day", day);
 
-	renderer::WorldLightingInputs win_nvg = win;
+	opennova::renderer::WorldLightingInputs win_nvg = win;
 	win_nvg.nvg_hemi_rewrite = true;
 	win_nvg.nvg_level = 3;
 	win_nvg.modulator_packed = 0x404040u;
-	print_block("nvg", renderer::build_world_lighting(win_nvg));
+	print_block("nvg", opennova::renderer::build_world_lighting(win_nvg));
 
-	renderer::WorldLightingInputs win_scope = win;
+	opennova::renderer::WorldLightingInputs win_scope = win;
 	win_scope.vehicle_scope_grey = true;
-	print_block("scope", renderer::build_world_lighting(win_scope));
+	print_block("scope", opennova::renderer::build_world_lighting(win_scope));
 
-	renderer::WorldLightingInputs win_dim = win;
+	opennova::renderer::WorldLightingInputs win_dim = win;
 	win_dim.nvg_world_dim = true;
-	print_block("nvgdim", renderer::build_world_lighting(win_dim));
+	print_block("nvgdim", opennova::renderer::build_world_lighting(win_dim));
 
-	const auto print_uniforms = [&](const char *label, const renderer::EntityLightingUniforms &u) {
+	const auto print_uniforms = [&](const char *label, const opennova::renderer::EntityLightingUniforms &u) {
 		std::snprintf(line, sizeof(line),
 		              "euni %-10s dc=[%.6f %.6f %.6f] gnd=[%.6f %.6f %.6f] "
 		              "sky=[%.6f %.6f %.6f] amb=[%.6f %.6f %.6f]\n",
@@ -491,13 +491,13 @@ std::string generate() {
 		              static_cast<double>(u.ambient[2]));
 		out << line;
 	};
-	const renderer::EntityLightingUniforms outdoor_full =
-		renderer::compute_entity_lighting(day, 1.0f, false, 0.0f);
+	const opennova::renderer::EntityLightingUniforms outdoor_full =
+		opennova::renderer::compute_entity_lighting(day, 1.0f, false, 0.0f);
 	print_uniforms("out-1.0", outdoor_full);
-	print_uniforms("out-0.5", renderer::compute_entity_lighting(day, 0.5f, false, 0.0f));
-	print_uniforms("int-0.0", renderer::compute_entity_lighting(day, 1.0f, true, 0.0f));
-	print_uniforms("int-0.25", renderer::compute_entity_lighting(day, 1.0f, true, 0.25f));
-	print_uniforms("int-1.0", renderer::compute_entity_lighting(day, 1.0f, true, 1.0f));
+	print_uniforms("out-0.5", opennova::renderer::compute_entity_lighting(day, 0.5f, false, 0.0f));
+	print_uniforms("int-0.0", opennova::renderer::compute_entity_lighting(day, 1.0f, true, 0.0f));
+	print_uniforms("int-0.25", opennova::renderer::compute_entity_lighting(day, 1.0f, true, 0.25f));
+	print_uniforms("int-1.0", opennova::renderer::compute_entity_lighting(day, 1.0f, true, 1.0f));
 
 	const std::array<float, 3> normals[] = {
 		{ 0.0f, 1.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }, { 0.70710678f, 0.0f, 0.70710678f },
@@ -505,29 +505,29 @@ std::string generate() {
 	};
 	const std::array<float, 3> to_light = { -day.dir[0], -day.dir[1], -day.dir[2] };
 	for (const auto &n : normals) {
-		const auto lit = renderer::ff_vertex_light(outdoor_full, n, to_light);
+		const auto lit = opennova::renderer::ff_vertex_light(outdoor_full, n, to_light);
 		std::snprintf(line, sizeof(line),
 		              "fflit n=[%.4f %.4f %.4f] lit=[%.6f %.6f %.6f] x2=[%.6f %.6f %.6f]\n",
 		              static_cast<double>(n[0]), static_cast<double>(n[1]),
 		              static_cast<double>(n[2]),
 		              static_cast<double>(lit[0]), static_cast<double>(lit[1]),
 		              static_cast<double>(lit[2]),
-		              static_cast<double>(lit[0] * renderer::kFFModulate2x),
-		              static_cast<double>(lit[1] * renderer::kFFModulate2x),
-		              static_cast<double>(lit[2] * renderer::kFFModulate2x));
+		              static_cast<double>(lit[0] * opennova::renderer::kFFModulate2x),
+		              static_cast<double>(lit[1] * opennova::renderer::kFFModulate2x),
+		              static_cast<double>(lit[2] * opennova::renderer::kFFModulate2x));
 		out << line;
 	}
 
 	for (int blocked = 0; blocked <= 4; ++blocked) {
 		std::snprintf(line, sizeof(line), "sunvis blocked=%d f=%.6f\n",
-		              blocked, static_cast<double>(renderer::sun_visibility_factor(blocked)));
+		              blocked, static_cast<double>(opennova::renderer::sun_visibility_factor(blocked)));
 		out << line;
 	}
 
 	const std::array<float, 3> pl_rgb = { 1.0f, 0.5f, 0.25f };
-	const std::array<float, 3> pl_mod = renderer::unpack_modulator_scale(0x203040u);
+	const std::array<float, 3> pl_mod = opennova::renderer::unpack_modulator_scale(0x203040u);
 	for (int d3d = 0; d3d <= 1; ++d3d) {
-		const auto c = renderer::point_light_color(pl_rgb, 2.0f, pl_mod, d3d != 0);
+		const auto c = opennova::renderer::point_light_color(pl_rgb, 2.0f, pl_mod, d3d != 0);
 		std::snprintf(line, sizeof(line), "plcolor d3d=%d c=[%.6f %.6f %.6f]\n",
 		              d3d, static_cast<double>(c[0]), static_cast<double>(c[1]),
 		              static_cast<double>(c[2]));
@@ -535,7 +535,7 @@ std::string generate() {
 	}
 	const int32_t pl_ranges[] = { 0x10000, 0xA0000, 0x400000 };
 	for (int32_t r : pl_ranges) {
-		const auto a4 = renderer::point_light_attenuation(r);
+		const auto a4 = opennova::renderer::point_light_attenuation(r);
 		std::snprintf(line, sizeof(line), "platten r=%08x a=[%.6f %.6f %.6f %.6f]\n",
 		              static_cast<unsigned>(r),
 		              static_cast<double>(a4[0]), static_cast<double>(a4[1]),
@@ -547,7 +547,7 @@ std::string generate() {
 	const std::array<float, 3> trn_sky = { 0.2f, 0.25f, 0.3f };
 	const float masks[] = { 0.0f, 0.5f, 1.0f };
 	for (float m : masks) {
-		const auto lit = renderer::terrain_surface_light(m, trn_light, trn_sky);
+		const auto lit = opennova::renderer::terrain_surface_light(m, trn_light, trn_sky);
 		std::snprintf(line, sizeof(line), "trnlit mask=%.2f lit=[%.6f %.6f %.6f]\n",
 		              static_cast<double>(m),
 		              static_cast<double>(lit[0]), static_cast<double>(lit[1]),

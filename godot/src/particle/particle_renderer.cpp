@@ -143,9 +143,9 @@ struct DefinitionVisual {
 	std::array<LayerVisual, kGraphicLayerCount> layers;
 };
 
-renderer::ParticleRgbaImage particle_rgba_image(const Ref<Image> &image,
+opennova::renderer::ParticleRgbaImage particle_rgba_image(const Ref<Image> &image,
 		bool type_one_procedural_mask) {
-	renderer::ParticleRgbaImage result;
+	opennova::renderer::ParticleRgbaImage result;
 	if (image.is_null() || image->get_width() <= 0 || image->get_height() <= 0)
 		return result;
 	result.width = image->get_width();
@@ -154,15 +154,15 @@ renderer::ParticleRgbaImage particle_rgba_image(const Ref<Image> &image,
 	const std::size_t width = static_cast<std::size_t>(result.width);
 	const std::size_t height = static_cast<std::size_t>(result.height);
 	if (width > std::numeric_limits<std::size_t>::max() / height)
-		return renderer::ParticleRgbaImage{};
+		return opennova::renderer::ParticleRgbaImage{};
 	const std::size_t pixel_count = width * height;
 	if (pixel_count > std::numeric_limits<std::size_t>::max() / 4u)
-		return renderer::ParticleRgbaImage{};
+		return opennova::renderer::ParticleRgbaImage{};
 	const std::size_t mip0_bytes = pixel_count * 4u;
 	if (mip0_bytes > static_cast<std::size_t>(
 			std::numeric_limits<int64_t>::max()) ||
 			pixels.size() < static_cast<int64_t>(mip0_bytes))
-		return renderer::ParticleRgbaImage{};
+		return opennova::renderer::ParticleRgbaImage{};
 	// Image::get_data() appends lower mip levels after mip 0. The portable
 	// atlas accepts one flat RGBA frame, so copy only the base-level prefix.
 	result.rgba.resize(mip0_bytes);
@@ -188,30 +188,30 @@ PackedByteArray packed_rgba(const std::vector<std::uint8_t> &pixels) {
 	return result;
 }
 
-String shader_path_for_pipeline(renderer::ParticlePipeline pipeline) {
+String shader_path_for_pipeline(opennova::renderer::ParticlePipeline pipeline) {
 	switch (pipeline) {
-		case renderer::ParticlePipeline::Blend:
+		case opennova::renderer::ParticlePipeline::Blend:
 			return "res://shaders/particle/particle_blend_blend.gdshader";
-		case renderer::ParticlePipeline::Additive:
+		case opennova::renderer::ParticlePipeline::Additive:
 			return "res://shaders/particle/particle_blend_additive.gdshader";
-		case renderer::ParticlePipeline::Premult:
+		case opennova::renderer::ParticlePipeline::Premult:
 			return "res://shaders/particle/particle_blend_premult.gdshader";
-		case renderer::ParticlePipeline::Bump:
+		case opennova::renderer::ParticlePipeline::Bump:
 			return "res://shaders/particle/particle_blend_bump.gdshader";
-		case renderer::ParticlePipeline::Mod:
+		case opennova::renderer::ParticlePipeline::Mod:
 			return "res://shaders/particle/particle_blend_mod.gdshader";
-		case renderer::ParticlePipeline::Mod2x:
+		case opennova::renderer::ParticlePipeline::Mod2x:
 			return "res://shaders/particle/particle_blend_mod2x.gdshader";
-		case renderer::ParticlePipeline::Bumpadd:
+		case opennova::renderer::ParticlePipeline::Bumpadd:
 			return "res://shaders/particle/particle_blend_bumpadd.gdshader";
-		case renderer::ParticlePipeline::Distort:
+		case opennova::renderer::ParticlePipeline::Distort:
 			return "res://shaders/particle/particle_blend_distort.gdshader";
 	}
 	return "res://shaders/particle/particle_blend_blend.gdshader";
 }
 
 std::uint8_t unit_byte(float value) {
-	return renderer::particle_unit_byte(value);
+	return opennova::renderer::particle_unit_byte(value);
 }
 
 std::uint32_t pack_argb(float red, float green, float blue, float alpha) {
@@ -230,7 +230,7 @@ std::uint32_t pack_argb_bytes(std::uint8_t red, std::uint8_t green,
 }
 
 std::uint8_t retail_low_byte(float value) {
-	return renderer::particle_retail_low_byte(value);
+	return opennova::renderer::particle_retail_low_byte(value);
 }
 
 Color unpack_argb(std::uint32_t value) {
@@ -242,19 +242,19 @@ Color unpack_argb(std::uint32_t value) {
 			static_cast<float>((value >> 24) & 0xffu) * inv);
 }
 
-renderer::ParticleVec3 particle_vec(const opennova::particle::Vec3 &value) {
+opennova::renderer::ParticleVec3 particle_vec(const opennova::particle::Vec3 &value) {
 	return {value.x, value.y, value.z};
 }
 
-renderer::ParticleVec3 particle_vec(const Vector3 &value) {
+opennova::renderer::ParticleVec3 particle_vec(const Vector3 &value) {
 	return {value.x, value.y, value.z};
 }
 
-void include_point(renderer::ParticleAabb &bounds,
-		const renderer::ParticleVec3 &point, float radius) {
-	const renderer::ParticleVec3 minimum{
+void include_point(opennova::renderer::ParticleAabb &bounds,
+		const opennova::renderer::ParticleVec3 &point, float radius) {
+	const opennova::renderer::ParticleVec3 minimum{
 		point.x - radius, point.y - radius, point.z - radius};
-	const renderer::ParticleVec3 maximum{
+	const opennova::renderer::ParticleVec3 maximum{
 		point.x + radius, point.y + radius, point.z + radius};
 	if (!bounds.valid) {
 		bounds.min = minimum;
@@ -276,7 +276,7 @@ int64_t godot_token(std::uint64_t value) {
 	return result;
 }
 
-AABB godot_aabb(const renderer::ParticleAabb &bounds) {
+AABB godot_aabb(const opennova::renderer::ParticleAabb &bounds) {
 	const Vector3 minimum(bounds.min.x, bounds.min.y, bounds.min.z);
 	const Vector3 maximum(bounds.max.x, bounds.max.y, bounds.max.z);
 	return AABB(minimum, maximum - minimum);
@@ -329,9 +329,9 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 // valid until that slot compiles again and nothing on the render thread
 // references it (World submissions are immutable copies), so no per-frame
 // capture copy and no opt-in flag are needed for the first report to be live.
-Dictionary draw_list_report(const renderer::ParticleDrawList &draw_list) {
+Dictionary draw_list_report(const opennova::renderer::ParticleDrawList &draw_list) {
 	Dictionary result;
-	const renderer::ParticleFrameDebugCounters &debug = draw_list.debug;
+	const opennova::renderer::ParticleFrameDebugCounters &debug = draw_list.debug;
 	result["frame_id"] = godot_token(draw_list.frame_id);
 	result["compile_index"] = godot_token(debug.compile_index);
 	result["input_emitters"] = static_cast<int64_t>(debug.input_emitters);
@@ -364,7 +364,7 @@ Dictionary draw_list_report(const renderer::ParticleDrawList &draw_list) {
 	Array commands;
 	commands.resize(static_cast<int64_t>(draw_list.commands.size()));
 	for (std::size_t i = 0; i < draw_list.commands.size(); ++i) {
-		const renderer::ParticleDrawCommand &command = draw_list.commands[i];
+		const opennova::renderer::ParticleDrawCommand &command = draw_list.commands[i];
 		Dictionary value;
 		value["render_domain"] = static_cast<int>(command.domain);
 		value["render_pass"] = static_cast<int>(command.pass);
@@ -574,15 +574,15 @@ public:
 	MeshInstance3D *first_person_instance = nullptr;
 	Ref<ArrayMesh> first_person_mesh;
 	FirstPersonUploadBuffers first_person_upload;
-	std::array<renderer::ParticleFrameCompiler, kParticleDrawSlotCount> compilers;
+	std::array<opennova::renderer::ParticleFrameCompiler, kParticleDrawSlotCount> compilers;
 	// A slot is present once it compiled for the current render and until
 	// clear_draws or a render without its camera retires it.
 	std::array<bool, kParticleDrawSlotCount> slot_present{};
-	renderer::ParticleFrameSnapshot render_snapshot;
+	opennova::renderer::ParticleFrameSnapshot render_snapshot;
 	std::vector<LitQuadInput> lit_quads;
 	std::shared_ptr<const std::vector<opennova::particle::ParticleDef>> catalog_definitions;
 	std::vector<DefinitionVisual> definition_visuals;
-	std::vector<renderer::ParticleAtlasEntry> entries;
+	std::vector<opennova::renderer::ParticleAtlasEntry> entries;
 	std::vector<AtlasPage> pages;
 	std::shared_ptr<const ParticleAtlasSnapshot> atlas_snapshot;
 	std::uint64_t atlas_generation = 0;
@@ -810,7 +810,7 @@ public:
 		unresolved_names.clear();
 		rejected_atlas_entries = 0;
 		catalog_dirty = false;
-		renderer::ParticleAtlasBuilder builder;
+		opennova::renderer::ParticleAtlasBuilder builder;
 		if (definitions)
 			definition_visuals.resize(definitions->size());
 		std::unordered_map<std::string, std::size_t> entry_lookup;
@@ -860,7 +860,7 @@ public:
 				return kMissingEntry;
 			}
 
-			renderer::ParticleRgbaImage rgba = particle_rgba_image(image,
+			opennova::renderer::ParticleRgbaImage rgba = particle_rgba_image(image,
 					used_fallback && type == 1);
 			if (!rgba.valid()) {
 				entry_lookup.emplace(key, kMissingEntry);
@@ -895,7 +895,7 @@ public:
 				layer.flip_rate = std::max(0, graphic.flip_rate);
 				layer.frame_entries.reserve(static_cast<std::size_t>(layer.flip_frames));
 				for (int frame = 1; frame <= layer.flip_frames; ++frame) {
-					const std::string name = renderer::retail_particle_frame_name(
+					const std::string name = opennova::renderer::retail_particle_frame_name(
 							graphic.texture, layer.flip_frames, frame);
 					layer.frame_entries.push_back(register_frame(name, layer.type));
 				}
@@ -907,14 +907,14 @@ public:
 			}
 		}
 
-		renderer::ParticleAtlasBuild build = builder.build();
+		opennova::renderer::ParticleAtlasBuild build = builder.build();
 		entries = std::move(build.entries);
 		rejected_atlas_entries = build.rejected_entries;
 		pages.reserve(build.pages.size());
 		auto snapshot = std::make_shared<ParticleAtlasSnapshot>();
 		snapshot->generation = ++atlas_generation;
 		snapshot->pages.reserve(build.pages.size());
-		for (renderer::ParticleAtlasPage &source : build.pages) {
+		for (opennova::renderer::ParticleAtlasPage &source : build.pages) {
 			AtlasPage page;
 			page.type = source.type;
 			page.side = source.image.width;
@@ -936,7 +936,7 @@ public:
 				std::move(snapshot));
 	}
 
-	Ref<Shader> shader_for(renderer::ParticlePipeline pipeline) {
+	Ref<Shader> shader_for(opennova::renderer::ParticlePipeline pipeline) {
 		const std::size_t index = static_cast<std::size_t>(pipeline);
 		if (index >= shader_cache.size())
 			return Ref<Shader>();
@@ -950,7 +950,7 @@ public:
 		return shader_cache[index];
 	}
 
-	Ref<ShaderMaterial> material_for(const renderer::ParticleDrawCommand &command) {
+	Ref<ShaderMaterial> material_for(const opennova::renderer::ParticleDrawCommand &command) {
 		const std::uint64_t key =
 				(static_cast<std::uint64_t>(command.atlas_page) << 24) |
 				(static_cast<std::uint64_t>(command.pipeline) << 16) |
@@ -1027,16 +1027,16 @@ public:
 			const DefinitionVisual &visual =
 					definition_visuals[source_emitter.definition_index];
 
-			renderer::ParticleEmitterSnapshot emitter;
+			opennova::renderer::ParticleEmitterSnapshot emitter;
 			emitter.emitter_id = source_emitter.id;
 			emitter.position = particle_vec(source_emitter.position);
 			emitter.first_particle = render_snapshot.particles.size();
 			if (source_emitter.group_index < frame.groups.size() &&
 					frame.groups[source_emitter.group_index].render_domain ==
 						opennova::particle::EffectRenderDomain::FirstPerson) {
-				emitter.domain = renderer::ParticleRenderDomain::FirstPerson;
+				emitter.domain = opennova::renderer::ParticleRenderDomain::FirstPerson;
 			} else {
-				emitter.domain = renderer::ParticleRenderDomain::World;
+				emitter.domain = opennova::renderer::ParticleRenderDomain::World;
 			}
 
 			int fallback_layer = 0;
@@ -1155,7 +1155,7 @@ public:
 							layer.flip_frames;
 				}
 
-				renderer::ParticleQuadSnapshot quad;
+				opennova::renderer::ParticleQuadSnapshot quad;
 				quad.center = particle_vec(particle.position);
 				quad.half_width = size * 0.5f;
 				quad.half_height = size * 0.5f;
@@ -1166,12 +1166,12 @@ public:
 				quad.primary_color = pack_argb(red, green, blue, alpha);
 				quad.alignment = (definition.flags &
 						opennova::particle::particle_flag::YawAndPitch) != 0 ?
-						renderer::ParticleAlignment::WorldOriented :
-						renderer::ParticleAlignment::CameraFacing;
-				quad.state.pipeline = static_cast<renderer::ParticlePipeline>(layer.type);
+						opennova::renderer::ParticleAlignment::WorldOriented :
+						opennova::renderer::ParticleAlignment::CameraFacing;
+				quad.state.pipeline = static_cast<opennova::renderer::ParticlePipeline>(layer.type);
 				quad.state.pass = layer.type == 7 ?
-						renderer::ParticleRenderPass::Distortion :
-						renderer::ParticleRenderPass::Color;
+						opennova::renderer::ParticleRenderPass::Distortion :
+						opennova::renderer::ParticleRenderPass::Color;
 
 				std::size_t entry_index = kMissingEntry;
 				if (!layer.frame_entries.empty()) {
@@ -1183,7 +1183,7 @@ public:
 						entry_index < entries.size() &&
 						entries[entry_index].placement.valid;
 				if (quad.visible) {
-					const renderer::ParticleAtlasEntry &entry = entries[entry_index];
+					const opennova::renderer::ParticleAtlasEntry &entry = entries[entry_index];
 					quad.state.atlas.page = entry.placement.page;
 					quad.state.atlas.type = entry.type;
 					quad.state.atlas.rect = entry.placement.rect;
@@ -1213,7 +1213,7 @@ public:
 	}
 
 	void publish_world_draw_list(const Ref<ParticleCompositorEffect> &effect,
-			const renderer::ParticleDrawList &draw_list,
+			const opennova::renderer::ParticleDrawList &draw_list,
 			const Vector3 &camera_position, const Vector3 &camera_forward) {
 		auto submission = std::make_shared<ParticleWorldSubmission>();
 		submission->frame_id = draw_list.frame_id;
@@ -1229,7 +1229,7 @@ public:
 		submission->fog_start = fog_start;
 		submission->fog_end = fog_end;
 		submission->fog_type = fog_type;
-		if (draw_list.domain != renderer::ParticleRenderDomain::World) {
+		if (draw_list.domain != opennova::renderer::ParticleRenderDomain::World) {
 			submission->valid = false;
 			submission->validation_error =
 					"World backend received a non-World compiler draw_list";
@@ -1240,7 +1240,7 @@ public:
 		} else {
 			const std::size_t quad_count = draw_list.vertices.size() / 4u;
 			constexpr std::size_t expanded_bytes_per_quad =
-					6u * sizeof(renderer::ParticleVertex);
+					6u * sizeof(opennova::renderer::ParticleVertex);
 			if (quad_count > static_cast<std::size_t>(
 					std::numeric_limits<int64_t>::max()) /
 					expanded_bytes_per_quad) {
@@ -1256,9 +1256,9 @@ public:
 				// @0x5e6d60 - docs/particles/ptl-format-re.md): the first triangle
 				// is the quad's contiguous first three vertices, so it copies
 				// as one block.
-				constexpr std::size_t stride = sizeof(renderer::ParticleVertex);
+				constexpr std::size_t stride = sizeof(opennova::renderer::ParticleVertex);
 				for (std::size_t quad = 0; quad < quad_count; ++quad) {
-					const renderer::ParticleVertex *source =
+					const opennova::renderer::ParticleVertex *source =
 							draw_list.vertices.data() + quad * 4u;
 					std::uint8_t *target = destination +
 							quad * expanded_bytes_per_quad;
@@ -1275,7 +1275,7 @@ public:
 	}
 
 	void upload_first_person_draw_list(
-			const renderer::ParticleDrawList &draw_list, bool hidden) {
+			const opennova::renderer::ParticleDrawList &draw_list, bool hidden) {
 		if (first_person_instance == nullptr)
 			return;
 		// One retained ArrayMesh: surfaces are rebuilt per frame while the mesh
@@ -1293,7 +1293,7 @@ public:
 		FirstPersonUploadBuffers &upload = first_person_upload;
 		if (upload.arrays.size() != Mesh::ARRAY_MAX)
 			upload.arrays.resize(Mesh::ARRAY_MAX);
-		for (const renderer::ParticleDrawCommand &command : draw_list.commands) {
+		for (const opennova::renderer::ParticleDrawCommand &command : draw_list.commands) {
 			const std::size_t first_vertex =
 					static_cast<std::size_t>(command.first_quad) * 4u;
 			const std::size_t vertex_count =
@@ -1315,7 +1315,7 @@ public:
 
 			for (std::size_t vertex_index = 0; vertex_index < vertex_count;
 					++vertex_index) {
-				const renderer::ParticleVertex &source =
+				const opennova::renderer::ParticleVertex &source =
 						draw_list.vertices[first_vertex + vertex_index];
 				vertices[vertex_index] = Vector3(source.x, source.y, source.z);
 				uvs[vertex_index] = Vector2(source.u, source.v);
@@ -1371,7 +1371,7 @@ ParticleRenderer::~ParticleRenderer() = default;
 
 String ParticleRenderer::retail_frame_name(const String &p_authored,
 		int p_frame_count, int p_frame) {
-	return String(renderer::retail_particle_frame_name(
+	return String(opennova::renderer::retail_particle_frame_name(
 			std::string(p_authored.utf8().get_data()), p_frame_count, p_frame)
 					.c_str());
 }
@@ -1522,7 +1522,7 @@ void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 	quad->set_size(Vector2(0.01f, 0.01f));
 	for (std::size_t i = 0; i < impl_->shader_cache.size(); ++i) {
 		Ref<Shader> shader =
-				impl_->shader_for(static_cast<renderer::ParticlePipeline>(i));
+				impl_->shader_for(static_cast<opennova::renderer::ParticlePipeline>(i));
 		if (shader.is_null())
 			continue;
 		Ref<ShaderMaterial> material;
@@ -1628,11 +1628,11 @@ void ParticleRenderer::render_now() {
 	impl_->refresh_environment(get_environment_source());
 	impl_->build_render_snapshot(frame, world_camera.view_basis);
 	auto compile_world = [&](ParticleDrawSlot slot,
-			renderer::ParticleWaterSubset subset,
+			opennova::renderer::ParticleWaterSubset subset,
 			const ParticleCameraFrame &view_camera,
 			const Ref<ParticleCompositorEffect> &effect) {
-		renderer::ParticleViewInput view;
-		view.domain = renderer::ParticleRenderDomain::World;
+		opennova::renderer::ParticleViewInput view;
+		view.domain = opennova::renderer::ParticleRenderDomain::World;
 		view.water_subset = subset;
 		view.water_height = water_height_;
 		view.position = particle_vec(view_camera.position);
@@ -1643,7 +1643,7 @@ void ParticleRenderer::render_now() {
 				view.projection);
 		view.projection_valid = view_camera.projection_valid;
 		view.projection_near_is_one = true;
-		const renderer::ParticleDrawList &draw_list =
+		const opennova::renderer::ParticleDrawList &draw_list =
 				impl_->compilers[slot].compile(impl_->render_snapshot, view);
 		impl_->slot_present[slot] = true;
 		impl_->publish_world_draw_list(effect, draw_list, view_camera.position,
@@ -1651,15 +1651,15 @@ void ParticleRenderer::render_now() {
 	};
 
 	compile_world(kWorldFarSide,
-			renderer::particle_water_subset_for_side(camera_above_water, false),
+			opennova::renderer::particle_water_subset_for_side(camera_above_water, false),
 			world_camera, impl_->world_effects[0]);
 	compile_world(kWorldCameraSide,
-			renderer::particle_water_subset_for_side(camera_above_water, true),
+			opennova::renderer::particle_water_subset_for_side(camera_above_water, true),
 			world_camera, impl_->world_effects[1]);
 
-	renderer::ParticleViewInput first_person_view;
-	first_person_view.domain = renderer::ParticleRenderDomain::FirstPerson;
-	first_person_view.water_subset = renderer::ParticleWaterSubset::All;
+	opennova::renderer::ParticleViewInput first_person_view;
+	first_person_view.domain = opennova::renderer::ParticleRenderDomain::FirstPerson;
+	first_person_view.water_subset = opennova::renderer::ParticleWaterSubset::All;
 	first_person_view.position = particle_vec(world_camera.position);
 	first_person_view.right = particle_vec(world_camera.right);
 	first_person_view.up = particle_vec(world_camera.up);
@@ -1668,7 +1668,7 @@ void ParticleRenderer::render_now() {
 			first_person_view.projection);
 	first_person_view.projection_valid = world_camera.projection_valid;
 	first_person_view.projection_near_is_one = true;
-	const renderer::ParticleDrawList &first_person_draw =
+	const opennova::renderer::ParticleDrawList &first_person_draw =
 			impl_->compilers[kFirstPerson].compile(impl_->render_snapshot,
 					first_person_view);
 	impl_->slot_present[kFirstPerson] = true;
@@ -1683,11 +1683,11 @@ void ParticleRenderer::render_now() {
 		// the World draw lists above already hold their own vertex copies.
 		impl_->relight_render_snapshot(mirror_camera.view_basis);
 		compile_world(kReflectionFarSide,
-				renderer::particle_water_subset_for_side(
+				opennova::renderer::particle_water_subset_for_side(
 						camera_above_water, false),
 				mirror_camera, impl_->reflection_effects[0]);
 		compile_world(kReflectionCameraSide,
-				renderer::particle_water_subset_for_side(
+				opennova::renderer::particle_water_subset_for_side(
 						camera_above_water, true),
 				mirror_camera, impl_->reflection_effects[1]);
 	} else {
@@ -1765,7 +1765,7 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	result["atlas_page_count"] = static_cast<int64_t>(impl_->pages.size());
 	result["atlas_entry_count"] = static_cast<int64_t>(impl_->entries.size());
 	std::size_t resolved_entries = 0;
-	for (const renderer::ParticleAtlasEntry &entry : impl_->entries) {
+	for (const opennova::renderer::ParticleAtlasEntry &entry : impl_->entries) {
 		if (entry.placement.valid)
 			++resolved_entries;
 	}
@@ -1786,7 +1786,7 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	Array atlas_entries;
 	atlas_entries.resize(static_cast<int64_t>(impl_->entries.size()));
 	for (std::size_t i = 0; i < impl_->entries.size(); ++i) {
-		const renderer::ParticleAtlasEntry &entry = impl_->entries[i];
+		const opennova::renderer::ParticleAtlasEntry &entry = impl_->entries[i];
 		Dictionary value;
 		value["name"] = String::utf8(entry.name.c_str());
 		value["type"] = static_cast<int>(entry.type);
@@ -1821,13 +1821,13 @@ Array ParticleRenderer::get_debug_emitter_bounds() const {
 			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
 		if (!impl_->slot_present[slot])
 			continue;
-		for (const renderer::ParticleEmitterDrawBounds &bounds :
+		for (const opennova::renderer::ParticleEmitterDrawBounds &bounds :
 				impl_->compilers[slot].draw_list().emitter_bounds) {
 			Dictionary value;
 			value["emitter_id"] = godot_token(bounds.emitter_id);
 			value["render_domain"] = slot == kFirstPerson ?
-					static_cast<int>(renderer::ParticleRenderDomain::FirstPerson) :
-					static_cast<int>(renderer::ParticleRenderDomain::World);
+					static_cast<int>(opennova::renderer::ParticleRenderDomain::FirstPerson) :
+					static_cast<int>(opennova::renderer::ParticleRenderDomain::World);
 			value["draw_scope"] = slot == kWorldFarSide ?
 					String("world_far_side") :
 					(slot == kWorldCameraSide ? String("world_camera_side") :

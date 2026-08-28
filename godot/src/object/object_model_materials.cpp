@@ -137,16 +137,16 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 		// Retail runs the _MT second stage only with its texture bound — an
 		// unresolved secondary composes the no-detail shader
 		// (render-material-re.md §FF technique tables).
-		key &= ~renderer::OSCAP_DETAIL;
+		key &= ~opennova::renderer::OSCAP_DETAIL;
 	}
 	shader_cache->configure_material_for_key(material, key);
-	const renderer::ObjectShaderPipelineDescriptor pipeline =
-			renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
+	const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
+			opennova::renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
 	// BmTxMirrT.fx P3 is an independent raw-UV, regular-fogged draw with
 	// DESTCOLOR/SRCCOLOR (2*source*framebuffer). Keep it paired with the P0/P1
 	// material so animated Diffuse1 and environment state update atomically.
 	if (pipeline.technique ==
-			renderer::ObjectShaderTechnique::EnvironmentMirrorTextured) {
+			opennova::renderer::ObjectShaderTechnique::EnvironmentMirrorTextured) {
 		String proxy_path = "res://shaders/object/postmultiply/environment_textured";
 		if (pipeline.alpha_test) {
 			proxy_path += "_cutout";
@@ -162,7 +162,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 		Ref<ShaderMaterial> proxy_material;
 		proxy_material.instantiate();
 		proxy_material->set_shader(proxy_shader);
-		proxy_material->set_render_priority(renderer::kRungObjectPostMultiply);
+		proxy_material->set_render_priority(opennova::renderer::kRungObjectPostMultiply);
 		material->set_meta(postmultiply_material_meta(), proxy_material);
 	}
 	if (diffuse.is_valid()) {

@@ -21,7 +21,7 @@ using opennova::to_std;
 } // namespace
 
 void MnsStyleSheet::_refresh() {
-	const mns::EvaluationResult result = doc_.evaluate();
+	const opennova::mns::EvaluationResult result = doc_.evaluate();
 	sheet_ = result.sheet;
 	evaluation_diagnostics_ = result.diagnostics;
 	runtime_valid_ = result.success;
@@ -91,7 +91,7 @@ bool MnsStyleSheet::remove_variable(const String &p_name) {
 }
 
 void MnsStyleSheet::set_variables(const Dictionary &p_variables) {
-	doc_ = mns::Document();
+	doc_ = opennova::mns::Document();
 	const Array keys = p_variables.keys();
 	for (int i = 0; i < keys.size(); ++i) {
 		const String key = keys[i];
@@ -108,14 +108,14 @@ void MnsStyleSheet::clear() {
 	if (doc_.nodes().empty() && sheet_.variables.empty()) {
 		return;
 	}
-	doc_ = mns::Document();
+	doc_ = opennova::mns::Document();
 	_refresh();
 	emit_changed();
 }
 
 Array MnsStyleSheet::get_entries() const {
 	Array out;
-	for (const mns::Document::Entry &entry : doc_.entries()) {
+	for (const opennova::mns::Document::Entry &entry : doc_.entries()) {
 		Dictionary row;
 		row["name"] = to_gd(entry.name);
 		row["value"] = to_gd(entry.value);
@@ -141,10 +141,10 @@ int MnsStyleSheet::get_entry_count() const {
 
 Array MnsStyleSheet::get_diagnostics() const {
 	Array out;
-	for (const mns::Diagnostic &d : doc_.diagnostics()) {
+	for (const opennova::mns::Diagnostic &d : doc_.diagnostics()) {
 		Dictionary row;
 		row["line"] = d.line;
-		row["severity"] = (d.severity == mns::Severity::Error) ? "error" : "warning";
+		row["severity"] = (d.severity == opennova::mns::Severity::Error) ? "error" : "warning";
 		row["code"] = to_gd(d.code);
 		row["message"] = to_gd(d.message);
 		out.append(row);
@@ -154,10 +154,10 @@ Array MnsStyleSheet::get_diagnostics() const {
 
 Array MnsStyleSheet::get_evaluation_diagnostics() const {
 	Array out;
-	for (const mns::Diagnostic &d : evaluation_diagnostics_) {
+	for (const opennova::mns::Diagnostic &d : evaluation_diagnostics_) {
 		Dictionary row;
 		row["line"] = d.line;
-		row["severity"] = (d.severity == mns::Severity::Error) ? "error" : "warning";
+		row["severity"] = (d.severity == opennova::mns::Severity::Error) ? "error" : "warning";
 		row["code"] = to_gd(d.code);
 		row["message"] = to_gd(d.message);
 		out.append(row);
@@ -211,7 +211,7 @@ bool MnsStyleSheet::rename_variable(const String &p_old_name, const String &p_ne
 }
 
 bool MnsStyleSheet::move_variable(const String &p_name, int p_to_entry_index) {
-	const std::vector<mns::Document::Entry> entries = doc_.entries();
+	const std::vector<opennova::mns::Document::Entry> entries = doc_.entries();
 	const int before_node = (p_to_entry_index < 0 || p_to_entry_index >= static_cast<int>(entries.size()))
 			? static_cast<int>(doc_.nodes().size())
 			: entries[static_cast<size_t>(p_to_entry_index)].node_index;
@@ -237,17 +237,17 @@ bool MnsStyleSheet::set_inline_comment(const String &p_name, const String &p_com
 }
 
 bool MnsStyleSheet::is_valid_variable_name(const String &p_name) const {
-	return mns::Document::is_valid_name(to_std(p_name));
+	return opennova::mns::Document::is_valid_name(to_std(p_name));
 }
 
 bool MnsStyleSheet::is_valid_variable_value(const String &p_value) const {
-	return mns::Document::is_valid_value(to_std(p_value));
+	return opennova::mns::Document::is_valid_value(to_std(p_value));
 }
 
 Error MnsStyleSheet::load_from_bytes(const PackedByteArray &p_bytes) {
 	// Keep the lossless document load permissive so malformed source remains
 	// repairable in the editor. Runtime callers must check is_runtime_valid().
-	doc_ = mns::Document::parse(reinterpret_cast<const char *>(p_bytes.ptr()),
+	doc_ = opennova::mns::Document::parse(reinterpret_cast<const char *>(p_bytes.ptr()),
 			static_cast<size_t>(p_bytes.size()));
 	_refresh();
 	return OK;
@@ -284,10 +284,10 @@ Error MnsStyleSheet::save_to_path(const String &p_path) const {
 	return OK;
 }
 
-void MnsStyleSheet::set_native(const mns::StyleSheet &p_sheet) {
-	doc_ = mns::Document();
+void MnsStyleSheet::set_native(const opennova::mns::StyleSheet &p_sheet) {
+	doc_ = opennova::mns::Document();
 	// Sorted for determinism (unordered_map iteration order is arbitrary),
-	// matching the legacy mns::write canonical dump.
+	// matching the legacy opennova::mns::write canonical dump.
 	std::vector<std::string> keys;
 	keys.reserve(p_sheet.variables.size());
 	for (const auto &kv : p_sheet.variables) {
@@ -301,7 +301,7 @@ void MnsStyleSheet::set_native(const mns::StyleSheet &p_sheet) {
 	_refresh();
 }
 
-void MnsStyleSheet::set_native_document(const mns::Document &p_doc) {
+void MnsStyleSheet::set_native_document(const opennova::mns::Document &p_doc) {
 	doc_ = p_doc;
 	_refresh();
 }

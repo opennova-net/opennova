@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace {
-namespace r = renderer;
+namespace r = opennova::renderer;
 
 static_assert(sizeof(r::ParticleVertex) == 28,
 		"particle upload vertices retain the retail stride");
@@ -26,8 +26,8 @@ bool near(float actual, float expected) {
 }
 
 bool color_byte_conversion_contract() {
-	using renderer::particle_retail_low_byte;
-	using renderer::particle_unit_byte;
+	using opennova::renderer::particle_retail_low_byte;
+	using opennova::renderer::particle_unit_byte;
 	const float nan = std::numeric_limits<float>::quiet_NaN();
 	const float inf = std::numeric_limits<float>::infinity();
 	const float huge = std::numeric_limits<float>::max();

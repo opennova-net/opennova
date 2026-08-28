@@ -8,7 +8,7 @@
 #include <cstdlib>
 #include <limits>
 
-namespace renderer {
+namespace opennova::renderer {
 
 namespace {
 
@@ -687,4 +687,4 @@ int32_t light_flicker_value(const std::array<int32_t, 3> &position_fixed,
 	return flicker.amp_ring[index % flicker.amp_ring_size];
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

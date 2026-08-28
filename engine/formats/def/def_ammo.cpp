@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-using namespace defscan; // the shared .def scanner, unqualified as before
+using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
 /* ========================================================================= */
 /* Ammo Parsing                                                              */

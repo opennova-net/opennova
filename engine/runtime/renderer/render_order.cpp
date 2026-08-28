@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace renderer {
+namespace opennova::renderer {
 
 TechniqueClass technique_class_for_submit(uint32_t stack_default_flags,
                                           uint32_t submit_flags) {
@@ -72,4 +72,4 @@ int transparent_rung_for(TransparentQueue side, bool camera_above_water) {
 	return far_side ? kRungAlphaFarSide : kRungAlphaCameraSide;
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

@@ -3,7 +3,8 @@
 // unfired ones would have commanded.
 //
 // This is the "does our BMS/WAC execution match the authored mission"
-// instrument. It is diagnostic (never fails on unfired events — plenty of a
+// instrument. It is diagnostic beyond two floors (promote must keep every authored zone,
+// and a live zone must never neuter its trigger); it never fails on unfired events — plenty of a
 // mission's script is legitimately conditional on players doing things), but
 // it makes a whole class of silent divergence visible: a convoy that never
 // receives its route order, a trigger family we evaluate as permanently
@@ -128,9 +129,14 @@ int main() {
 		}
 		std::printf("zones: %zu authored in the BMS, %d registered, %d of those degenerate\n",
 		            m.area_triggers.size(), registered, degenerate);
-		if (m.area_triggers.size() != static_cast<size_t>(registered))
-			std::printf("   <== promote DROPPED %zu authored zone(s)\n",
+		// The two floors this report stands on (everything else is diagnostic):
+		// promote dropping an authored zone, and a trigger neutered although its
+		// zone exists, are defects on our side by the record's own reading.
+		if (m.area_triggers.size() != static_cast<size_t>(registered)) {
+			std::printf("FAIL: promote DROPPED %zu authored zone(s)\n",
 			            m.area_triggers.size() - static_cast<size_t>(registered));
+			return 1;
+		}
 		// Separate authored main_type-0 padding from triggers WE neutered: the
 		// two are indistinguishable after load, and only the second is a bug.
 		int authored_zero = 0;
@@ -167,9 +173,11 @@ int main() {
 			std::printf("   %d neutered because the mission never authored zone(s)%s"
 			            " - retail neuters these too, not a defect\n",
 			            dangling_refs, dangling_ids.c_str());
-			if (resolvable_but_neutered > 0)
-				std::printf("   <== %d neutered despite a LIVE zone - that IS our bug\n",
+			if (resolvable_but_neutered > 0) {
+				std::printf("FAIL: %d neutered despite a LIVE zone - that IS our bug\n",
 				            resolvable_but_neutered);
+				return 1;
+			}
 		}
 	}
 

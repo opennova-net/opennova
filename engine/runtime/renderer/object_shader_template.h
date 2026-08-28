@@ -10,7 +10,7 @@
 
 #include <cstdint>
 
-namespace renderer {
+namespace opennova::renderer {
 
 enum ObjectShaderCapBits : uint32_t {
 	OSCAP_BLEND_MASK   = 0x00000003u, // ObjectBlendMode value
@@ -164,4 +164,4 @@ ObjectBlendMode decode_object_shader_blend(ObjectShaderKey key);
 // adapters decide how each policy maps to their renderer.
 ObjectShaderPipelineDescriptor describe_object_shader_pipeline(ObjectShaderKey key);
 
-} // namespace renderer
+}  // namespace opennova::renderer

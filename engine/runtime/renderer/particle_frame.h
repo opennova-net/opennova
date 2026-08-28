@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace renderer {
+namespace opennova::renderer {
 
 struct ParticleVec3 {
 	float x = 0.0f;
@@ -266,4 +266,4 @@ private:
 	std::unique_ptr<Impl> impl_;
 };
 
-} // namespace renderer
+}  // namespace opennova::renderer

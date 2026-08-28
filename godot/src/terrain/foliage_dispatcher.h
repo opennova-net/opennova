@@ -33,7 +33,7 @@ class TerrainTileInfo;
 
 // Godot render applier for the portable foliage frame (ADR 0033 R2).
 //
-// renderer::FoliageFrameCompiler owns the whole frame compilation: the anchor
+// opennova::renderer::FoliageFrameCompiler owns the whole frame compilation: the anchor
 // gate, both retail placement algorithms, per-identity vertex expansion, the
 // per-submission uniform state, and both wind clocks. This node applies the
 // typed FoliageDrawList: source Mesh extraction at configure time, sampler
@@ -177,10 +177,10 @@ private:
     int64_t vertices = 0;
   };
 
-  renderer::FoliageFrameCompiler compiler_;
+  opennova::renderer::FoliageFrameCompiler compiler_;
   std::array<opennova::foliage::RuntimeSlot, opennova::FOLIAGE_MAX_DEFS>
       runtime_slots_{};
-  std::array<renderer::FoliageSlotGeometry, opennova::FOLIAGE_MAX_DEFS>
+  std::array<opennova::renderer::FoliageSlotGeometry, opennova::FOLIAGE_MAX_DEFS>
       source_geometry_{};
   std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> fd_textures_{};
   std::unordered_map<int, uint32_t> palette_masks_;
@@ -248,7 +248,7 @@ private:
   FrameStats frame_stats_{};
   int64_t total_frame_calls_ = 0;
 
-  renderer::FoliageSlotGeometry
+  opennova::renderer::FoliageSlotGeometry
   _extract_source_geometry(const Ref<Mesh> &p_mesh) const;
   void _ensure_visuals();
   void _update_materials();
@@ -265,14 +265,14 @@ private:
   void _on_tile_info_changed();
   void _on_colormap_source_changed();
 
-  renderer::FoliageViewInput
+  opennova::renderer::FoliageViewInput
   _view_input(const Transform3D &p_camera_xform) const;
   std::vector<opennova::foliage::DetailCell>
   _preview_cells(const Vector3 &p_camera_position) const;
-  void _compile_and_apply(const renderer::FoliageViewInput &p_view);
-  void _apply_draw_list(const renderer::FoliageDrawList &p_draw_list);
-  Ref<ArrayMesh> _upload_mesh_build(const renderer::FoliageDrawList &p_draw_list,
-                                    const renderer::FoliageMeshBuild &p_build) const;
+  void _compile_and_apply(const opennova::renderer::FoliageViewInput &p_view);
+  void _apply_draw_list(const opennova::renderer::FoliageDrawList &p_draw_list);
+  Ref<ArrayMesh> _upload_mesh_build(const opennova::renderer::FoliageDrawList &p_draw_list,
+                                    const opennova::renderer::FoliageMeshBuild &p_build) const;
 
   opennova::foliage::WorldSamplers _world_samplers();
   float _sample_height(float p_world_x, float p_world_z) const;

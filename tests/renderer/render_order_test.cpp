@@ -17,7 +17,7 @@ static int failures = 0;
 		}                                                                  \
 	} while (0)
 
-using namespace renderer;
+using namespace opennova::renderer;
 
 static uint32_t float_bits(float f) {
 	uint32_t b = 0;

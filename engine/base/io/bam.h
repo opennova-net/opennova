@@ -51,6 +51,13 @@ constexpr int32_t bam_abs(int32_t v)
     return v < 0 ? (int32_t)(0u - (uint32_t)v) : v;
 }
 
+// The BAM32 <-> radian scales, exact (a full turn is 2^32): the one spelling
+// every port aliases. A port that reproduces a retail double VERBATIM (the
+// x87 dbl_7C3608 = 1.4629627251502471e-9, 30.5 ppm off) keeps its own
+// constant and says so; everything else uses these.
+constexpr double kRadiansPerBam = 6.283185307179586 / 4294967296.0;
+constexpr double kBamPerRadian = 4294967296.0 / 6.283185307179586;
+
 } // namespace io
 } // namespace opennova
 

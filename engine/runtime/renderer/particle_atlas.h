@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-namespace renderer {
+namespace opennova::renderer {
 
 using ParticleAtlasEntryId = std::size_t;
 
@@ -110,4 +110,4 @@ private:
 	std::vector<RegisteredFrame> frames_;
 };
 
-} // namespace renderer
+}  // namespace opennova::renderer

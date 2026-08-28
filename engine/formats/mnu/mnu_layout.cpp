@@ -4,7 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 
-namespace mnu {
+namespace opennova::mnu {
 
 namespace {
 
@@ -160,4 +160,4 @@ std::uint32_t item_color_argb(const std::string &hex_text) {
 	return static_cast<std::uint32_t>(v) | 0xFF000000u;
 }
 
-}  // namespace mnu
+}  // namespace opennova::mnu

@@ -38,9 +38,9 @@ class Weather;
 //
 // Device folds (documented on docs/render/render-lighting-re.md): the drape
 // projects per-pixel over the terrain surface, bounded by the retail lod x
-// lod patch placed by the anchor march (renderer::slot_patch_bounds over the
+// lod patch placed by the anchor march (opennova::renderer::slot_patch_bounds over the
 // TerrainData height query) and clipped by the shadowztex depth stage
-// (renderer::slot_depth_clip) — both published per slot to the shader;
+// (opennova::renderer::slot_depth_clip) — both published per slot to the shader;
 // capture-with linked children (held weapons, mounted riders) render into
 // their parent's slot RT through the per-frame claim pass — the
 // RenderSlot_RenderEntityAndChildren child walk — while tree-parented riders
@@ -109,7 +109,7 @@ protected:
 private:
 	struct CasterInfo {
 		ObjectModel *model = nullptr;
-		renderer::SlotCandidateState state;  // bound_radius = entity+0 (lod, light query)
+		opennova::renderer::SlotCandidateState state;  // bound_radius = entity+0 (lod, light query)
 		// The model sphere (gpm[5]) the silhouette capture extent and the
 		// depth clip size from (retail: RenderSlot_RenderEntityAndChildren
 		// @0x5d7835 reads the model's +0x14, not entity+0).
@@ -123,9 +123,9 @@ private:
 	Projection _drape_projection(const Transform3D &p_pose, float p_half_u,
 			float p_half_v, float p_far) const;
 
-	renderer::RenderSlotPlan plan_;
-	SubViewport *viewports_[renderer::kSlotCaptureCount] = {};
-	Camera3D *cameras_[renderer::kSlotCaptureCount] = {};
+	opennova::renderer::RenderSlotPlan plan_;
+	SubViewport *viewports_[opennova::renderer::kSlotCaptureCount] = {};
+	Camera3D *cameras_[opennova::renderer::kSlotCaptureCount] = {};
 	// Slots set to UPDATE_ONCE by the latest advance_frame (bit = slot order).
 	uint32_t armed_capture_mask_ = 0;
 	// instance id -> applied capture bit (for removal on churn), and the
@@ -135,7 +135,7 @@ private:
 	HashMap<uint64_t, uint32_t> applied_scene_serials_;
 	HashMap<String, Ref<Texture2D>> blob_textures_;
 	// The per-slot dominant-light query buffer (reused across frames).
-	std::vector<renderer::SlotPointLight> slot_lights_;
+	std::vector<opennova::renderer::SlotPointLight> slot_lights_;
 	ObjectID environment_node_id_;
 	Ref<TerrainData> terrain_data_;
 	Ref<LightScene> light_scene_;
@@ -157,7 +157,7 @@ private:
 
 	static Ref<ShaderMaterial> drape_material_;
 	static Ref<ShaderMaterial> blob_material_;
-	// The depth-clip stage's 32x4 "shadowztex" (renderer::shadowztex_pixels),
+	// The depth-clip stage's 32x4 "shadowztex" (opennova::renderer::shadowztex_pixels),
 	// bound once on the shared drape material.
 	static Ref<ImageTexture> shadowztex_;
 };

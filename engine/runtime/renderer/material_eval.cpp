@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace renderer {
+namespace opennova::renderer {
 namespace {
 
 static uint8_t localCtrlOrdinal(
@@ -331,4 +331,4 @@ int compute_anim_frame(const ThreediMaterial& mat,
     return frame;
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

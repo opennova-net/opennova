@@ -28,7 +28,7 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 // BAM32 -> radians (full turn = 2^32) [orig: engine-wide BAM convention, angle.h].
-constexpr double kRadPerBam = (2.0 * kPi) / 4294967296.0;
+constexpr double kRadPerBam = io::kRadiansPerBam;
 constexpr int32_t kProjectileGravityQ16 = 167;
 constexpr int32_t kDragTableSize = 1220;
 

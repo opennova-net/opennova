@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace {
-namespace r = renderer;
+namespace r = opennova::renderer;
 
 bool check(bool ok, const char *message) {
 	if (!ok) {

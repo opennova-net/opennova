@@ -21,7 +21,7 @@
 
 #include <cstdint>
 
-namespace renderer {
+namespace opennova::renderer {
 
 // One animation channel (8 bytes at matdef+524 / +532):
 // type = waveform/mode byte, phase = start phase (high byte), speed = phase
@@ -64,4 +64,4 @@ UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
                                   uint16_t rand16_u,
                                   uint16_t rand16_v);
 
-} // namespace renderer
+}  // namespace opennova::renderer

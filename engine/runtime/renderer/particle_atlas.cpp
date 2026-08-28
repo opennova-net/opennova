@@ -9,7 +9,7 @@
 
 #include <base/io/strutil.h>
 
-namespace renderer {
+namespace opennova::renderer {
 namespace {
 
 
@@ -362,4 +362,4 @@ ParticleAtlasBuild ParticleAtlasBuilder::build() const {
 	return result;
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

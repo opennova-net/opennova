@@ -6,7 +6,7 @@
 
 #include <formats/mns/mns.h>
 
-namespace mns {
+namespace opennova::mns {
 
 // Lossless document model for .mns menu stylesheets. The format specification
 // is NovaLogic's own comment header in the shipped menu_style.mns ("The style
@@ -168,4 +168,4 @@ private:
 	std::string default_eol_ = "\r\n";
 };
 
-} // namespace mns
+}  // namespace opennova::mns

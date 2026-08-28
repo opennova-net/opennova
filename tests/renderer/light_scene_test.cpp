@@ -24,11 +24,11 @@ bool nearly_equal(float a, float b, float epsilon = 0.0001f) {
     return std::fabs(a - b) <= epsilon;
 }
 
-renderer::LightSpawnParams barrel_params(int32_t x_fixed, int32_t y_fixed,
+opennova::renderer::LightSpawnParams barrel_params(int32_t x_fixed, int32_t y_fixed,
                                          int32_t z_fixed) {
     // The FireBrl3 shape: atten_end 8 -> radius_fixed 8<<16, white record
     // color, intensity 1, style-113 gen block.
-    renderer::LightSpawnParams params;
+    opennova::renderer::LightSpawnParams params;
     params.position_fixed = {x_fixed, y_fixed, z_fixed};
     params.radius_fixed = 8 << 16;
     params.rgb = {255, 255, 255};
@@ -42,7 +42,7 @@ renderer::LightSpawnParams barrel_params(int32_t x_fixed, int32_t y_fixed,
 }  // namespace
 
 int main() {
-    using namespace renderer;
+    using namespace opennova::renderer;
 
     // Spawn: retail handle form, first-free reuse, no stale resurrection.
     {
@@ -415,14 +415,14 @@ int main() {
         // @ 0x5aa170]. Mode 2 blends down d16/d17 per tick and dies at zero
         // (the impact/death flash shape).
         LightScene scene;
-        renderer::LightSpawnParams params = barrel_params(0, 0, 0);
+        opennova::renderer::LightSpawnParams params = barrel_params(0, 0, 0);
         params.has_gen = false;
         params.fade_mode = 2;
         params.fade_duration = 4;
-        const renderer::LightHandle handle = scene.spawn(params);
+        const opennova::renderer::LightHandle handle = scene.spawn(params);
         std::array<LightHandle, LightScene::kQueryLimit> handles{};
         std::array<SelectedLight, LightScene::kSelectLimit> out{};
-        renderer::LightFlickerInputs flicker;
+        opennova::renderer::LightFlickerInputs flicker;
         scene.tick();  // counter 4 -> 3, blend 3/4
         size_t found = scene.query({-1, -1, -1}, {1, 1, 1}, handles);
         expect(found == 1, "a fading light still queries");
@@ -445,11 +445,11 @@ int main() {
         // re-shows the kept slot [orig: @ 0x5aa1c3; CEffectInstance_
         // SetBlendAmount @ 0x5a8f11].
         LightScene scene;
-        renderer::LightSpawnParams params = barrel_params(0, 0, 0);
+        opennova::renderer::LightSpawnParams params = barrel_params(0, 0, 0);
         params.has_gen = false;
         params.fade_mode = 5;
         params.fade_duration = 2;
-        const renderer::LightHandle handle = scene.spawn(params);
+        const opennova::renderer::LightHandle handle = scene.spawn(params);
         std::array<LightHandle, LightScene::kQueryLimit> handles{};
         scene.tick();
         scene.tick();
@@ -467,13 +467,13 @@ int main() {
         // duration 5 + blend 1 — five ticks later the slot dies (mode 4 is
         // not the keep-slot mode).
         LightScene scene;
-        renderer::LightSpawnParams params;
+        opennova::renderer::LightSpawnParams params;
         params.position_fixed = {0, 0, 0};
         params.radius_fixed = 98304;  // 1.5 [orig: @ 0x56c98f]
         params.rgb = {0xFF, 0xE0, 0xA0};
         params.fade_mode = 3;
         params.fade_duration = -1;
-        const renderer::LightHandle handle = scene.spawn(params);
+        const opennova::renderer::LightHandle handle = scene.spawn(params);
         scene.set_fade(handle, 4, 5);
         scene.set_blend(handle, 1.0f);
         for (int i = 0; i < 4; ++i) {
@@ -499,16 +499,16 @@ int main() {
         // Mode 1 / duration -1 (the model-light and round-glow shape) never
         // decays [orig: d16 <= 0 skips the decrement @ 0x5aa1a2].
         LightScene scene;
-        renderer::LightSpawnParams params = barrel_params(0, 0, 0);
+        opennova::renderer::LightSpawnParams params = barrel_params(0, 0, 0);
         params.has_gen = false;
-        const renderer::LightHandle handle = scene.spawn(params);
+        const opennova::renderer::LightHandle handle = scene.spawn(params);
         for (int i = 0; i < 100; ++i) {
             scene.tick();
         }
         expect(scene.alive(handle), "a permanent light survives the tick");
         std::array<LightHandle, LightScene::kQueryLimit> handles{};
         std::array<SelectedLight, LightScene::kSelectLimit> out{};
-        renderer::LightFlickerInputs flicker;
+        opennova::renderer::LightFlickerInputs flicker;
         const size_t found = scene.query({-1, -1, -1}, {1, 1, 1}, handles);
         scene.select(handles.data(), found, LightActiveGroups{},
                 LightSelectionOptions{}, {1.0f, 1.0f, 1.0f}, flicker, false,

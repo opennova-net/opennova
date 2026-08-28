@@ -249,13 +249,13 @@ public:
 	Dictionary eval_material_runtime(int p_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 	// Typed render hot path. ObjectModel converts its CTRL dictionary once per frame, then
 	// evaluates every dynamic material without Dictionary/Variant round trips.
-	static renderer::ControlRegisterValues runtime_control_values(
+	static opennova::renderer::ControlRegisterValues runtime_control_values(
 			const Dictionary &p_ctrl_values);
 	bool eval_material_runtime_native(int p_index, int64_t p_time_ms,
-			const renderer::ControlRegisterValues &p_ctrl_values,
-			renderer::MaterialRuntime &r_runtime) const;
+			const opennova::renderer::ControlRegisterValues &p_ctrl_values,
+			opennova::renderer::MaterialRuntime &r_runtime) const;
 	int compute_anim_frame_native(int p_index, int64_t p_time_ms,
-			const renderer::ControlRegisterValues &p_ctrl_values) const;
+			const opennova::renderer::ControlRegisterValues &p_ctrl_values) const;
 	Dictionary evaluate_panm(int p_lod_index, int64_t p_time_ms, const Dictionary &p_ctrl_values) const;
 	// The hot-path form of evaluate_panm: evaluates through the shared
 	// per-graphic frame cache and writes ONLY changed part transforms onto the

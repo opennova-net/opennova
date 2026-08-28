@@ -157,17 +157,17 @@ void Celestial::_rebuild_if_needed() {
 	// engine/runtime/renderer/render_order (REN-3).
 	const Spec wanted[] = {
 		{ "sun", env_data->get_sun_3di(), false,
-				renderer::kRungSkyBody, "sun" },
+				opennova::renderer::kRungSkyBody, "sun" },
 		{ "moon", env_data->get_moon_3di(), false,
-				renderer::kRungSkyBody, "moon" },
+				opennova::renderer::kRungSkyBody, "moon" },
 		{ "glare", env_data->get_glare_3di(), true,
-				renderer::kRungSunGlow, "sun" },
+				opennova::renderer::kRungSunGlow, "sun" },
 		// The water-reflected sun glint reuses the glare 3DI, mirrored below
 		// the eye (retail: update_sun_glare @ 0x5ad130 submits
 		// Celestial_GlareModel at camera + sun * 128 with the height term
 		// negated, additive 0x110, see docs/env/env-tod-re.md).
 		{ "glint", env_data->get_glare_3di(), true,
-				renderer::kRungSunGlow, "sun" },
+				opennova::renderer::kRungSunGlow, "sun" },
 	};
 	// Rebuild only when the set of names actually changed (undo/scrub safe).
 	HashMap<String, String> signature;
@@ -609,7 +609,7 @@ void Celestial::_build_star_field(const String &p_star_name) {
 	}
 	Ref<Texture2D> diffuse = data->load_material_texture(0, 0);
 	Ref<ShaderMaterial> material =
-			_make_celestial_material(true, renderer::kRungSkyStars);
+			_make_celestial_material(true, opennova::renderer::kRungSkyStars);
 	if (diffuse.is_valid()) {
 		material->set_shader_parameter("u_diffuse", diffuse);
 	}

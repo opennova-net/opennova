@@ -88,7 +88,7 @@ struct TerrainStaticShadowResolvedMaterial {
 // then shared by draw classification and rasterization so stochastic/channel
 // evaluation cannot disagree within one page job.
 struct TerrainStaticShadowMaterialState {
-	::renderer::UvAnimTransform uv{};
+	opennova::renderer::UvAnimTransform uv{};
 	float alpha_scale = 1.0f;
 	int32_t diffuse_frame = 0;
 	const TerrainStaticShadowAlphaPyramid *alpha_texture = nullptr;
@@ -134,7 +134,7 @@ TerrainStaticShadowMaterialState terrain_static_shadow_evaluate_material(
 		const TerrainStaticShadowResolvedGeometry &geometry,
 		const TerrainStaticShadowResolvedMaterial &material,
 		uint32_t time_ms,
-		const ::renderer::ControlRegisterValues &control_values);
+		const opennova::renderer::ControlRegisterValues &control_values);
 
 // Resolves the full caster geometry/material description from the parsed
 // model. graphic feeds the geometry key (lowercased before hashing).

@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-namespace defscan {
+namespace opennova::defscan {
 
 // The scanner's own types and the caps/macros the family parsers use directly.
 #define MAX_TOKENS 16
@@ -104,4 +104,4 @@ void parse_pos_aligned(Token *vals, int n, int *out);
 
 int parse_fixed16_digits_n(const char *s, size_t len);
 
-} // namespace defscan
+}  // namespace opennova::defscan

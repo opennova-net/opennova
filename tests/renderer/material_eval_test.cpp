@@ -25,9 +25,9 @@ bool nearly_equal(float a, float b, float epsilon = 0.0001f) {
     return std::fabs(a - b) <= epsilon;
 }
 
-renderer::ControlRegisterValues ctrl_bus(
+opennova::renderer::ControlRegisterValues ctrl_bus(
         const std::unordered_map<std::string, int32_t>& values = {}) {
-    renderer::ControlRegisterValues bus{};
+    opennova::renderer::ControlRegisterValues bus{};
     for (const auto& [name, value] : values) {
         const int ordinal = threedi_ctrl_register_ordinal(name.c_str());
         if (ordinal != THREEDI_CTRL_REGISTER_NOT_FOUND) {
@@ -37,16 +37,16 @@ renderer::ControlRegisterValues ctrl_bus(
     return bus;
 }
 
-renderer::MaterialRuntime eval_runtime(
+opennova::renderer::MaterialRuntime eval_runtime(
         const ThreediMaterial& material,
         uint32_t time_ms,
         const std::vector<std::string>& ctrl_names = {},
         const std::unordered_map<std::string, int32_t>& ctrl_values = {}) {
-    return renderer::eval_material_runtime(
+    return opennova::renderer::eval_material_runtime(
             material, time_ms, ctrl_names, ctrl_bus(ctrl_values));
 }
 
-void expect_uv(const renderer::UvAnimTransform& actual,
+void expect_uv(const opennova::renderer::UvAnimTransform& actual,
                float m00,
                float m01,
                float m10,
@@ -69,7 +69,7 @@ int main() {
     ThreediMaterial material{};
 
     {
-        const renderer::MaterialRuntime runtime = eval_runtime(material, 750);
+        const opennova::renderer::MaterialRuntime runtime = eval_runtime(material, 750);
         expect_uv(runtime.uv, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
                   "Inactive UV channels should produce the identity matrix");
         expect(nearly_equal(runtime.rgb_r, 1.0f) &&
@@ -93,7 +93,7 @@ int main() {
         material.v_params.style = 0x36;
         material.v_params.end = 1.0f;
         crt_srand(1);
-        const renderer::MaterialRuntime dual_noise =
+        const opennova::renderer::MaterialRuntime dual_noise =
                 eval_runtime(material, 0);
         expect(nearly_equal(dual_noise.uv.m20,
                             16.0f * 41.0f / 65535.0f) &&
@@ -110,7 +110,7 @@ int main() {
         crt_srand(1);
         expect(threedi_panm_sample_track_raw(&panm_noise, 0, nullptr) == 656,
                "PANM should consume the first seeded waveform-noise sample");
-        const renderer::MaterialRuntime after_panm =
+        const opennova::renderer::MaterialRuntime after_panm =
                 eval_runtime(material, 0);
         expect(nearly_equal(after_panm.uv.m20,
                             16.0f * 2083.0f / 65535.0f) &&
@@ -129,8 +129,8 @@ int main() {
         material.rgb_gen.end_color[1] = 1.0f;
         material.rgb_gen.end_color[2] = 1.0f;
 
-        const renderer::MaterialRuntime a = eval_runtime(material, 0);
-        const renderer::MaterialRuntime b = eval_runtime(material, 4000);
+        const opennova::renderer::MaterialRuntime a = eval_runtime(material, 0);
+        const opennova::renderer::MaterialRuntime b = eval_runtime(material, 4000);
         expect(nearly_equal(a.rgb_r, 89.0f * kInv255) &&
                        nearly_equal(a.rgb_g, 26.0f * kInv255) &&
                        nearly_equal(a.rgb_b, 153.0f * kInv255),
@@ -148,15 +148,15 @@ int main() {
         material.rgb_gen.start_color[0] = 100.0f * kInv255;
         material.rgb_gen.end_color[0] = 0.0f;
 
-        const renderer::MaterialRuntime a = eval_runtime(material, 0);
-        const renderer::MaterialRuntime b = eval_runtime(material, 700);
+        const opennova::renderer::MaterialRuntime a = eval_runtime(material, 0);
+        const opennova::renderer::MaterialRuntime b = eval_runtime(material, 700);
         expect(!nearly_equal(a.rgb_r, b.rgb_r),
                "Waveform RGB style 50 should vary over time");
 
         ThreediMaterial phased = material;
         phased.rgb_gen.phase = 0.375f;
-        const renderer::MaterialRuntime c = eval_runtime(material, 900);
-        const renderer::MaterialRuntime d = eval_runtime(phased, 900);
+        const opennova::renderer::MaterialRuntime c = eval_runtime(material, 900);
+        const opennova::renderer::MaterialRuntime d = eval_runtime(phased, 900);
         expect(!nearly_equal(c.rgb_r, d.rgb_r),
                "Waveform RGB phase should be reconstructed as its packed byte");
     }
@@ -166,7 +166,7 @@ int main() {
         material.u_params.style = 16;
         material.u_params.phase = 0.25f;
         material.u_params.gen_rate = 1.0f;
-        const renderer::MaterialRuntime runtime = eval_runtime(material, 500);
+        const opennova::renderer::MaterialRuntime runtime = eval_runtime(material, 500);
         expect_uv(runtime.uv, 1.0f, 0.0f, 0.0f, 1.0f, 0.75f, 0.0f,
                   "UV style 16 should use the retail wrapping phase accumulator");
 
@@ -182,7 +182,7 @@ int main() {
         material.v_params.style = 17;
         material.v_params.phase = 0.25f;
         material.v_params.gen_rate = 1.0f;
-        const renderer::MaterialRuntime reverse = eval_runtime(material, 500);
+        const opennova::renderer::MaterialRuntime reverse = eval_runtime(material, 500);
         expect_uv(reverse.uv, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, -0.75f,
                   "UV style 17 should apply negative V scroll");
     }
@@ -191,12 +191,12 @@ int main() {
         material = {};
         material.u_params.style = 32;
         material.u_params.phase = 0.25f;
-        const renderer::MaterialRuntime clockwise = eval_runtime(material, 0);
+        const opennova::renderer::MaterialRuntime clockwise = eval_runtime(material, 0);
         expect_uv(clockwise.uv, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f,
                   "UV style 32 should rotate the U row about texture center");
 
         material.u_params.style = 33;
-        const renderer::MaterialRuntime counterclockwise = eval_runtime(material, 0);
+        const opennova::renderer::MaterialRuntime counterclockwise = eval_runtime(material, 0);
         expect_uv(counterclockwise.uv, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f, 0.0f,
                   "UV style 33 should rotate the U row in the opposite direction");
     }
@@ -280,13 +280,13 @@ int main() {
         material.rgb_gen.style = 113;
         material.rgb_gen.reg = 0;
         material.rgb_gen.end_color[0] = 1.0f;
-        const renderer::MaterialRuntime ignored =
+        const opennova::renderer::MaterialRuntime ignored =
                 eval_runtime(material, 0, {"FLICKER"},
                              {{"NOT_A_RETAIL_REGISTER", 65536}});
         expect(nearly_equal(ignored.rgb_r, 0.0f),
                "Unknown supplied CTRL keys should not alias the global bus");
 
-        const renderer::MaterialRuntime loader_alias =
+        const opennova::renderer::MaterialRuntime loader_alias =
                 eval_runtime(material, 0, {"MODEL_PRIVATE_CTRL"},
                              {{"lod_frac", 65536}});
         expect(nearly_equal(loader_alias.rgb_r, 1.0f),
@@ -306,7 +306,7 @@ int main() {
             material.rgb_gen.end_color[1] = 201.0f * kInv255;
             material.rgb_gen.end_color[2] = 130.0f * kInv255;
 
-            const renderer::MaterialRuntime runtime =
+            const opennova::renderer::MaterialRuntime runtime =
                     eval_runtime(material, 12345, names, {{"FLICKER", 32768}});
             expect(nearly_equal(runtime.rgb_r, 105.0f * kInv255) &&
                            nearly_equal(runtime.rgb_g, 105.0f * kInv255) &&
@@ -318,15 +318,15 @@ int main() {
         material.rgb_gen.style = 113;
         material.rgb_gen.reg = 0;
         material.rgb_gen.end_color[0] = 1.0f;
-        const renderer::MaterialRuntime almost_full =
+        const opennova::renderer::MaterialRuntime almost_full =
                 eval_runtime(material, 0, names, {{"FLICKER", 65535}});
         expect(nearly_equal(almost_full.rgb_r, 254.0f * kInv255),
                "RGB CTRL interpolation should retain the 65535 pre-endpoint");
-        const renderer::MaterialRuntime full =
+        const opennova::renderer::MaterialRuntime full =
                 eval_runtime(material, 0, names, {{"FLICKER", 65536}});
         expect(nearly_equal(full.rgb_r, 1.0f),
                "RGB CTRL 0x10000 should reach the exact endpoint");
-        const renderer::MaterialRuntime wrapped =
+        const opennova::renderer::MaterialRuntime wrapped =
                 eval_runtime(material, 0, names,
                              {{"FLICKER", std::numeric_limits<int32_t>::max()}});
         expect(nearly_equal(wrapped.rgb_r, 32767.0f * kInv255),
@@ -334,7 +334,7 @@ int main() {
 
         material.rgb_gen.start_color[0] = 100.0f * kInv255;
         material.rgb_gen.end_color[0] = 200.0f * kInv255;
-        const renderer::MaterialRuntime negative =
+        const opennova::renderer::MaterialRuntime negative =
                 eval_runtime(material, 0, names, {{"FLICKER", -32768}});
         expect(nearly_equal(negative.rgb_r, 50.0f * kInv255),
                "RGB CTRL interpolation should preserve signed negative extrapolation");
@@ -349,9 +349,9 @@ int main() {
         std::vector<std::string> names(38);
         names[37] = "FLICKER";
 
-        const renderer::MaterialRuntime low =
+        const opennova::renderer::MaterialRuntime low =
                 eval_runtime(material, 611, names, {{"FLICKER", 0}});
-        const renderer::MaterialRuntime high =
+        const opennova::renderer::MaterialRuntime high =
                 eval_runtime(material, 611, names, {{"FLICKER", 65535}});
         expect(nearly_equal(low.rgb_r, high.rgb_r),
                "RGB style 115 should be a waveform and must not read CTRL");
@@ -360,12 +360,12 @@ int main() {
         global_ordinal.rgb_gen.reg = 3;  // FLICKER's retail global ordinal.
         std::vector<std::string> ordinal_names(4);
         ordinal_names[3] = "FLICKER";
-        const renderer::MaterialRuntime ordinal_phase =
+        const opennova::renderer::MaterialRuntime ordinal_phase =
                 eval_runtime(global_ordinal, 611, ordinal_names, {});
         expect(nearly_equal(low.rgb_r, ordinal_phase.rgb_r),
                "RGB style 115 phase should use the loader-patched global ordinal, not local index 37");
 
-        const renderer::MaterialRuntime later =
+        const opennova::renderer::MaterialRuntime later =
                 eval_runtime(material, 1611, names, {{"FLICKER", 65535}});
         expect(!nearly_equal(high.rgb_r, later.rgb_r),
                "RGB style 115 should retain its waveform time dependence");
@@ -383,11 +383,11 @@ int main() {
         material.alpha_gen.reg = 0;
         material.alpha_gen.start = 10;
         material.alpha_gen.end = 210;
-        const renderer::MaterialRuntime controlled =
+        const opennova::renderer::MaterialRuntime controlled =
                 eval_runtime(material, 999, {"FLICKER"}, {{"FLICKER", 32768}});
         expect(nearly_equal(controlled.alpha, 110.0f * kInv255),
                "Alpha style 113 should use the retail CTRL-table interpolation");
-        const renderer::MaterialRuntime endpoint =
+        const opennova::renderer::MaterialRuntime endpoint =
                 eval_runtime(material, 999, {"FLICKER"}, {{"FLICKER", 65536}});
         expect(nearly_equal(endpoint.alpha, 210.0f * kInv255),
                "Alpha CTRL 0x10000 should reach the exact endpoint");
@@ -418,29 +418,29 @@ int main() {
         const std::array<uint8_t, 4> start = {10, 20, 30, 0};
         const std::array<uint8_t, 4> end = {110, 120, 130, 0};
         for (uint8_t style : {uint8_t{113}, uint8_t{114}}) {
-            const renderer::LightRuntime light = renderer::eval_light_runtime(
+            const opennova::renderer::LightRuntime light = opennova::renderer::eval_light_runtime(
                     style, 0, 0, start, end, 0, 32768);
             expect(nearly_equal(light.r, 80.0f * kInv255) &&
                            nearly_equal(light.g, 70.0f * kInv255) &&
                            nearly_equal(light.b, 60.0f * kInv255),
                    "Light RGB styles 113/114 should share material RGB semantics");
         }
-        const renderer::LightRuntime endpoint = renderer::eval_light_runtime(
+        const opennova::renderer::LightRuntime endpoint = opennova::renderer::eval_light_runtime(
                 113, 0, 0, start, end, 0, 65536);
         expect(nearly_equal(endpoint.r, 130.0f * kInv255) &&
                        nearly_equal(endpoint.g, 120.0f * kInv255) &&
                        nearly_equal(endpoint.b, 110.0f * kInv255),
                "Light CTRL 0x10000 should reach its packed endpoint");
-        const renderer::LightRuntime negative = renderer::eval_light_runtime(
+        const opennova::renderer::LightRuntime negative = opennova::renderer::eval_light_runtime(
                 113, 0, 0, start, end, 0, -32768);
         expect(nearly_equal(negative.r, -20.0f * kInv255) &&
                        nearly_equal(negative.g, -30.0f * kInv255) &&
                        nearly_equal(negative.b, -40.0f * kInv255),
                "Light CTRL should preserve signed negative extrapolation");
 
-        const renderer::LightRuntime low = renderer::eval_light_runtime(
+        const opennova::renderer::LightRuntime low = opennova::renderer::eval_light_runtime(
                 115, 37, 192, start, end, 733, 0);
-        const renderer::LightRuntime high = renderer::eval_light_runtime(
+        const opennova::renderer::LightRuntime high = opennova::renderer::eval_light_runtime(
                 115, 37, 192, start, end, 733, 65535);
         expect(nearly_equal(low.r, high.r) &&
                        nearly_equal(low.g, high.g) &&
@@ -454,25 +454,25 @@ int main() {
         material.animation.animation_type = 1;
         material.animation.cycle_frame_time = 1;
         const std::vector<std::string> names = {"LOD_FADE_IN", "FLICKER"};
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, names, ctrl_bus({{"FLICKER", 0}})) == 0,
                "CTRL texture animation should start at frame zero");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, names, ctrl_bus({{"FLICKER", 32768}})) == 2,
                "CTRL texture animation should use fractional frame selection");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, names, ctrl_bus({{"FLICKER", 65535}})) == 3,
                "CTRL texture animation should retain the pre-endpoint frame");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, names, ctrl_bus({{"FLICKER", 65536}})) == 3,
                "CTRL texture animation should clamp the exact endpoint to the last frame");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 2, 0, names, ctrl_bus({{"FLICKER", 32768}})) == 1,
                "The optional frame-table bound should cap controlled animation");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, names, ctrl_bus({{"FLICKER", -32768}})) == -2,
                "CTRL texture animation should preserve retail signed SAR math");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, {"LOD_FADE_IN", "MODEL_PRIVATE_FRAME"},
                        ctrl_bus({{"lod_frac", 32768}})) == 2,
                "Unknown authored texture CTRL names should alias lowercase LOD_FRAC");
@@ -486,15 +486,15 @@ int main() {
         material.animation.num_frames = 2;
         material.animation.cycle_frame_time = 0;
         const std::vector<std::string> indo_arms_names = {"TEX_CAMO1"};
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, indo_arms_names,
                        ctrl_bus({{"TEX_CAMO1", 0}})) == 0,
                "IndoArms TEX_CAMO selector zero should choose A_Arm1st");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, indo_arms_names,
                        ctrl_bus({{"TEX_CAMO1", 1}})) == 1,
                "IndoArms TEX_CAMO selector one should choose A_Arm2nd");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, indo_arms_names,
                        ctrl_bus({{"TEX_CAMO1", 3}})) == 1,
                "TEX_CAMO selectors should wrap through retail's modulo branch");
@@ -503,36 +503,36 @@ int main() {
         // do not normalize negative selectors into the positive frame range.
         material.animation.num_frames = 3;
         const std::vector<std::string> team_names = {"TEX_TEAM"};
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, team_names,
                        ctrl_bus({{"TEX_TEAM", 0}})) == 0,
                "TEX_TEAM selector zero should choose the first team frame");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, team_names,
                        ctrl_bus({{"TEX_TEAM", 1}})) == 1,
                "TEX_TEAM selector one should choose the second team frame");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, team_names,
                        ctrl_bus({{"TEX_TEAM", 2}})) == 2,
                "TEX_TEAM selector two should choose the third team frame");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, team_names,
                        ctrl_bus({{"TEX_TEAM", 3}})) == 0,
                "TEX_TEAM selectors should wrap through retail's modulo branch");
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, team_names,
                        ctrl_bus({{"TEX_TEAM", -1}})) == -1,
                "TEX_TEAM should preserve retail's signed IDIV remainder");
 
         material.animation.num_frames = 4;
         material.animation.cycle_frame_time = 255;
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 0, 0, {}, ctrl_bus({{"LOD_FRAC", 32768}})) == 2,
                "An out-of-range local texture CTRL index aliases LOD_FRAC");
 
         material.animation.animation_type = 0;
         material.animation.cycle_frame_time = 100;
-        expect(renderer::compute_anim_frame(
+        expect(opennova::renderer::compute_anim_frame(
                        material, 2, 250, {}, ctrl_bus({})) == 0,
                "The optional frame-table bound should cap timed animation too");
     }

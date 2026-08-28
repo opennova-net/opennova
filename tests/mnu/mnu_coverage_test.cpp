@@ -171,13 +171,13 @@ static int check_menu(const char *path) {
     printf("  MISSING %s (required fixture)\n", path);
     return 0;
   }
-  mnu::Document doc;
+  opennova::mnu::Document doc;
   std::string err;
-  if (!mnu::parse(src, doc, err)) {
+  if (!opennova::mnu::parse(src, doc, err)) {
     printf("  FAIL %s (parse: %s)\n", path, err.c_str());
     return 0;
   }
-  const std::string ser = mnu::serialize(doc, true, 2);
+  const std::string ser = opennova::mnu::serialize(doc, true, 2);
   const Occurrences authored = extract_occurrences(src);
   const Occurrences written = extract_occurrences(ser);
   std::vector<std::string> differences;

@@ -11,6 +11,7 @@
 // to <out>/<basename>. Exit 0 when every entry was written, 1 when any entry
 // was missing, 2 on a usage or mount error.
 #include <base/gameprofile/gameprofile.h>
+#include <base/resource_index/boot_policy.h>
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
 
@@ -38,12 +39,6 @@ int usage(const char *why) {
 std::string basename_of(const std::string &name) {
 	const size_t cut = name.find_last_of("/\\");
 	return cut == std::string::npos ? name : name.substr(cut + 1);
-}
-
-std::string join(const std::string &dir, const std::string &name) {
-	if (dir.empty()) return name;
-	const char last = dir.back();
-	return (last == '/' || last == '\\') ? dir + name : dir + "/" + name;
 }
 
 } // namespace
@@ -107,7 +102,7 @@ int main(int argc, char **argv) {
 			++missing;
 			continue;
 		}
-		const std::string path = join(out_dir, basename_of(name));
+		const std::string path = opennova::boot_path_join(out_dir, basename_of(name));
 		std::ofstream out(path, std::ios::binary);
 		if (!out) {
 			std::fprintf(stderr, "opennova-extract: cannot write %s\n", path.c_str());

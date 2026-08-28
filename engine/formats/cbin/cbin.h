@@ -10,7 +10,7 @@
 #include <variant>
 #include <vector>
 
-namespace cbin {
+namespace opennova::cbin {
 
 // Magic number "CBIN" in little-endian
 constexpr uint32_t kMagic = 0x4E494243;  // 'CBIN'
@@ -167,4 +167,4 @@ std::vector<CreditsDisplayItem> credits_display_items(const Credits& credits);
 std::vector<Entry> credits_entries_from_display(
     const std::vector<CreditsDisplayItem>& items);
 
-}  // namespace cbin
+}  // namespace opennova::cbin

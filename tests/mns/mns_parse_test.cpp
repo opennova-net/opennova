@@ -1,4 +1,4 @@
-// Tests for the MNS stylesheet flat parse view (mns::parse -> StyleSheet).
+// Tests for the MNS stylesheet flat parse view (opennova::mns::parse -> StyleSheet).
 // Expectations are TEST_EXPECT (real assertions under the Release ctest
 // config, where assert() would compile away).
 
@@ -10,10 +10,10 @@
 #include <cstring>
 
 static int test_empty() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
-	TEST_EXPECT(mns::parse("", 0, sheet, error));
+	TEST_EXPECT(opennova::mns::parse("", 0, sheet, error));
 	TEST_EXPECT(sheet.variables.empty());
 
 	std::printf("test_empty passed\n");
@@ -21,11 +21,11 @@ static int test_empty() {
 }
 
 static int test_simple_variables() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data = "FOO bar\nBAZ qux\n";
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.variables.size() == 2);
 	TEST_EXPECT(sheet.get("foo") == "bar");
 	TEST_EXPECT(sheet.get("FOO") == "bar");
@@ -37,11 +37,11 @@ static int test_simple_variables() {
 }
 
 static int test_tab_separator() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data = "DEF_FONTNAME\tGunpl22b.fnt\n";
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.get("DEF_FONTNAME") == "Gunpl22b.fnt");
 
 	std::printf("test_tab_separator passed\n");
@@ -49,13 +49,13 @@ static int test_tab_separator() {
 }
 
 static int test_utf8_bom() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	// UTF-8 BOM + "FOO bar\n". Split the literal so MSVC does not fold the
 	// trailing 'F' into the \xBF hex escape ("\xBFF" is out of range).
 	const char data[] = "\xEF\xBB\xBF" "FOO bar\n";
-	TEST_EXPECT(mns::parse(data, sizeof(data) - 1, sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, sizeof(data) - 1, sheet, error));
 	TEST_EXPECT(sheet.get("FOO") == "bar");
 
 	std::printf("test_utf8_bom passed\n");
@@ -63,11 +63,11 @@ static int test_utf8_bom() {
 }
 
 static int test_comment() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data = "// This is a comment\nFOO bar\n// Another comment\nBAZ qux\n";
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.variables.size() == 2);
 	TEST_EXPECT(sheet.get("FOO") == "bar");
 	TEST_EXPECT(sheet.get("BAZ") == "qux");
@@ -77,11 +77,11 @@ static int test_comment() {
 }
 
 static int test_if_0() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data = "BEFORE yes\n#if 0\nSKIPPED no\n#endif\nAFTER yes\n";
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.variables.size() == 2);
 	TEST_EXPECT(sheet.get("BEFORE") == "yes");
 	TEST_EXPECT(sheet.get("AFTER") == "yes");
@@ -92,11 +92,11 @@ static int test_if_0() {
 }
 
 static int test_if_1() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data = "BEFORE yes\n#if 1\nINCLUDED yes\n#endif\nAFTER yes\n";
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.variables.size() == 3);
 	TEST_EXPECT(sheet.get("BEFORE") == "yes");
 	TEST_EXPECT(sheet.get("INCLUDED") == "yes");
@@ -107,11 +107,11 @@ static int test_if_1() {
 }
 
 static int test_if_0_else() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data = "#if 0\nSKIPPED no\n#else\nINCLUDED yes\n#endif\n";
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.variables.size() == 1);
 	TEST_EXPECT(sheet.get("INCLUDED") == "yes");
 	TEST_EXPECT(!sheet.has("SKIPPED"));
@@ -121,11 +121,11 @@ static int test_if_0_else() {
 }
 
 static int test_if_1_else() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data = "#if 1\nINCLUDED yes\n#else\nSKIPPED no\n#endif\n";
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.variables.size() == 1);
 	TEST_EXPECT(sheet.get("INCLUDED") == "yes");
 	TEST_EXPECT(!sheet.has("SKIPPED"));
@@ -135,11 +135,11 @@ static int test_if_1_else() {
 }
 
 static int test_nested_if() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data = "#if 0\nSKIPPED1 no\n#if 1\nSKIPPED2 no\n#endif\n#endif\nAFTER yes\n";
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.variables.size() == 1);
 	TEST_EXPECT(sheet.get("AFTER") == "yes");
 	TEST_EXPECT(!sheet.has("SKIPPED1"));
@@ -150,11 +150,11 @@ static int test_nested_if() {
 }
 
 static int test_line_continuation() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data = "FOO bar \\\nbaz\n";
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.get("FOO") == "bar baz");
 
 	std::printf("test_line_continuation passed\n");
@@ -162,10 +162,10 @@ static int test_line_continuation() {
 }
 
 static int test_missing_value_delimiter_fails() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 	const char *data = "FOO\n";
-	TEST_EXPECT(!mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(!opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(error.find("delimiter") != std::string::npos);
 
 	std::printf("test_missing_value_delimiter_fails passed\n");
@@ -173,7 +173,7 @@ static int test_missing_value_delimiter_fails() {
 }
 
 static int test_substitute() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	sheet.variables["FOO"] = "hello";
 	sheet.variables["BAR"] = "world";
 
@@ -193,7 +193,7 @@ static int test_substitute() {
 }
 
 static int test_has() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	sheet.variables["FOO"] = "bar";
 
 	TEST_EXPECT(sheet.has("FOO"));
@@ -206,17 +206,17 @@ static int test_has() {
 }
 
 static int test_write() {
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	sheet.variables["FOO"] = "bar";
 	sheet.variables["BAZ"] = "qux";
 
 	std::vector<uint8_t> out;
 	std::string error;
-	TEST_EXPECT(mns::write(sheet, out, error));
+	TEST_EXPECT(opennova::mns::write(sheet, out, error));
 
 	// Parse it back.
-	mns::StyleSheet sheet2;
-	TEST_EXPECT(mns::parse(reinterpret_cast<const char *>(out.data()), out.size(), sheet2, error));
+	opennova::mns::StyleSheet sheet2;
+	TEST_EXPECT(opennova::mns::parse(reinterpret_cast<const char *>(out.data()), out.size(), sheet2, error));
 	TEST_EXPECT(sheet2.get("FOO") == "bar");
 	TEST_EXPECT(sheet2.get("BAZ") == "qux");
 
@@ -226,7 +226,7 @@ static int test_write() {
 
 static int test_menu_style() {
 	// Test parsing a snippet similar to the real menu_style.mns file.
-	mns::StyleSheet sheet;
+	opennova::mns::StyleSheet sheet;
 	std::string error;
 
 	const char *data =
@@ -238,7 +238,7 @@ static int test_menu_style() {
 		"DEF_TEXT_SELECTED_FG\t\tFFFF0000\n"
 		"DEF_TEXT_DISABLED_FG\t\tFF545252\n";
 
-	TEST_EXPECT(mns::parse(data, strlen(data), sheet, error));
+	TEST_EXPECT(opennova::mns::parse(data, strlen(data), sheet, error));
 	TEST_EXPECT(sheet.get("DEF_FONTNAME") == "Gunpl22b.fnt");
 	TEST_EXPECT(sheet.get("DEF_FONTNAME_LG") == "Gunpl27b.fnt");
 	TEST_EXPECT(sheet.get("DEF_TEXT_FG") == "FFFFFFFF");

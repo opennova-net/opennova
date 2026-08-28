@@ -444,7 +444,7 @@ void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
 // setup_entity_lighting_and_shader_constants @0x5d98a0 and the model+536
 // daylight push per visible building in Terrain_RenderSectorModels
 // @0x5c5d30, see docs/render/render-lighting-re.md; the math itself is
-// renderer::compute_entity_lighting).
+// opennova::renderer::compute_entity_lighting).
 void ObjectModel::stamp_entity_lighting_instances() {
 	const StringName name("u_entity_light");
 	const Vector4 entity = interior_section_lighting_
@@ -697,7 +697,7 @@ void ObjectModel::refresh_render_order() {
 			// The viewmodel flushes whole before the sky pass; its depth band
 			// keeps later world alpha off it (renderer/render_order).
 			const int32_t rung = viewmodel_pass_
-					? renderer::kRungViewmodel
+					? opennova::renderer::kRungViewmodel
 					: shader_cache->alpha_rung_for_height(world_height);
 			if (rung != draw.rung) {
 				draw.rung = rung;
@@ -1116,9 +1116,9 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	const uint64_t material_start = p_profile != nullptr
 			? Time::get_singleton()->get_ticks_usec()
 			: 0;
-	const renderer::ControlRegisterValues material_ctrl_values =
+	const opennova::renderer::ControlRegisterValues material_ctrl_values =
 			dynamic_material_slots_.is_empty()
-			? renderer::ControlRegisterValues{}
+			? opennova::renderer::ControlRegisterValues{}
 			: ObjectData::runtime_control_values(ctrl_values_);
 	for (int64_t s = 0; s < dynamic_material_slots_.size(); ++s) {
 		const int i = dynamic_material_slots_[s];
@@ -1130,10 +1130,10 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 		MaterialRuntimeStamp &stamp = material_runtime_stamps_[
 				static_cast<size_t>(i)];
 		if (material_needs_eval_[i]) {
-			renderer::MaterialRuntime runtime;
+			opennova::renderer::MaterialRuntime runtime;
 			if (object_data_->eval_material_runtime_native(material_index,
 						anim_time_ms_, material_ctrl_values, runtime)) {
-				const renderer::MaterialRuntime &previous = stamp.runtime;
+				const opennova::renderer::MaterialRuntime &previous = stamp.runtime;
 				if (!stamp.runtime_valid || runtime.uv.m00 != previous.uv.m00 ||
 						runtime.uv.m10 != previous.uv.m10 ||
 						runtime.uv.m20 != previous.uv.m20) {

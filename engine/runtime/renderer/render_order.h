@@ -16,7 +16,7 @@
 
 #include <cstdint>
 
-namespace renderer {
+namespace opennova::renderer {
 
 // The six technique classes, batch-selected per entry (flag bits 4-6) and
 // mapped to the material def's cached pass blocks at draw time
@@ -138,4 +138,4 @@ constexpr int kRungSunGlow = 2;          // the sun-glow lens glare, drawn last
 // ordering mirrors when that eye crosses below the water plane.
 int transparent_rung_for(TransparentQueue side, bool camera_above_water);
 
-} // namespace renderer
+}  // namespace opennova::renderer

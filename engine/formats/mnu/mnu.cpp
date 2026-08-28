@@ -12,7 +12,7 @@
 
 #include <base/io/strutil.h>
 
-namespace mnu {
+namespace opennova::mnu {
 
 namespace {
 
@@ -1966,4 +1966,4 @@ bool serialize_file(const Document &doc, const std::string &path,
   return true;
 }
 
-}  // namespace mnu
+}  // namespace opennova::mnu

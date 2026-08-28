@@ -29,8 +29,8 @@ static bool load_file(const char* path, std::vector<uint8_t>& out) {
         file.read(reinterpret_cast<char*>(out.data()), size));
 }
 
-static bool items_equal(const cbin::CreditsDisplayItem& a,
-                        const cbin::CreditsDisplayItem& b) {
+static bool items_equal(const opennova::cbin::CreditsDisplayItem& a,
+                        const opennova::cbin::CreditsDisplayItem& b) {
     return a.type == b.type && a.text == b.text && a.font == b.font &&
            a.color == b.color && a.justify == b.justify &&
            a.image_path == b.image_path &&
@@ -40,19 +40,19 @@ static bool items_equal(const cbin::CreditsDisplayItem& a,
 }
 
 int main() {
-    using cbin::Credits;
-    using cbin::Entry;
-    using cbin::EntryType;
-    using cbin::Justify;
+    using opennova::cbin::Credits;
+    using opennova::cbin::Entry;
+    using opennova::cbin::EntryType;
+    using opennova::cbin::Justify;
 
     // Seeds: a lone text item is stamped white/center.
     {
         Credits credits;
         credits.entries.push_back(Entry::make_text("HELLO", "MainFont"));
-        const auto items = cbin::credits_display_items(credits);
+        const auto items = opennova::cbin::credits_display_items(credits);
         TEST_EXPECT(items.size() == 1);
         TEST_EXPECT(items[0].type == EntryType::Text);
-        TEST_EXPECT(items[0].color == cbin::kDefaultDisplayColor);
+        TEST_EXPECT(items[0].color == opennova::cbin::kDefaultDisplayColor);
         TEST_EXPECT(items[0].justify == Justify::Center);
         TEST_EXPECT(items[0].font == "MainFont");
     }
@@ -67,7 +67,7 @@ int main() {
         credits.entries.push_back(Entry::make_newline());
         credits.entries.push_back(Entry::make_image("logo.tga", 10, 20));
         credits.entries.push_back(Entry::make_text("STILL_RED_LEFT"));
-        const auto items = cbin::credits_display_items(credits);
+        const auto items = opennova::cbin::credits_display_items(credits);
         TEST_EXPECT(items.size() == 4);
         TEST_EXPECT(items[0].type == EntryType::Text);
         TEST_EXPECT(items[0].color == 0xFF0000);
@@ -84,7 +84,7 @@ int main() {
     // Emit-by-diff: color before justify, only immediately before TEXT items;
     // an unchanged state emits nothing; newline/image never emit controls.
     {
-        std::vector<cbin::CreditsDisplayItem> items(4);
+        std::vector<opennova::cbin::CreditsDisplayItem> items(4);
         items[0].type = EntryType::Text;
         items[0].text = "A";
         items[0].color = 0x00FF00;
@@ -96,7 +96,7 @@ int main() {
         items[2].justify = Justify::Right;
         items[3].type = EntryType::Image;
         items[3].image_path = "pic.tga";
-        const auto entries = cbin::credits_entries_from_display(items);
+        const auto entries = opennova::cbin::credits_entries_from_display(items);
         TEST_EXPECT(entries.size() == 6);
         TEST_EXPECT(entries[0].type == EntryType::Color);
         TEST_EXPECT(entries[0].color == 0x00FF00);
@@ -110,10 +110,10 @@ int main() {
 
     // Seed state emits nothing: white/center text needs no leading controls.
     {
-        std::vector<cbin::CreditsDisplayItem> items(1);
+        std::vector<opennova::cbin::CreditsDisplayItem> items(1);
         items[0].type = EntryType::Text;
         items[0].text = "PLAIN";
-        const auto entries = cbin::credits_entries_from_display(items);
+        const auto entries = opennova::cbin::credits_entries_from_display(items);
         TEST_EXPECT(entries.size() == 1);
         TEST_EXPECT(entries[0].type == EntryType::Text);
     }
@@ -126,18 +126,18 @@ int main() {
         TEST_EXPECT(load_file(kFixturePath, data));
         Credits credits;
         std::string error;
-        TEST_EXPECT(cbin::decode_credits(data.data(), data.size(), credits, error));
-        const auto items = cbin::credits_display_items(credits);
+        TEST_EXPECT(opennova::cbin::decode_credits(data.data(), data.size(), credits, error));
+        const auto items = opennova::cbin::credits_display_items(credits);
         TEST_EXPECT(!items.empty());
 
         Credits rebuilt = credits;  // ENV + string-table policy carried over
-        rebuilt.entries = cbin::credits_entries_from_display(items);
+        rebuilt.entries = opennova::cbin::credits_entries_from_display(items);
         std::vector<uint8_t> encoded;
-        TEST_EXPECT(cbin::encode(rebuilt, encoded, error));
+        TEST_EXPECT(opennova::cbin::encode(rebuilt, encoded, error));
         Credits reparsed;
-        TEST_EXPECT(cbin::decode_credits(encoded.data(), encoded.size(),
+        TEST_EXPECT(opennova::cbin::decode_credits(encoded.data(), encoded.size(),
                                          reparsed, error));
-        const auto items2 = cbin::credits_display_items(reparsed);
+        const auto items2 = opennova::cbin::credits_display_items(reparsed);
         TEST_EXPECT(items2.size() == items.size());
         for (size_t i = 0; i < items.size(); ++i) {
             TEST_EXPECT(items_equal(items[i], items2[i]));

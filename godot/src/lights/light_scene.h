@@ -28,7 +28,7 @@ namespace godot {
 class Weather;
 
 // Godot adapter for the portable EffectWorld dynamic light pool
-// (renderer::LightScene — engine/runtime/renderer/light_scene.h carries the
+// (opennova::renderer::LightScene — engine/runtime/renderer/light_scene.h carries the
 // witness map). Marshalling only: Godot world <-> mission 16.16 conversion,
 // the per-frame select, and the RenderingServer global-parameter push the
 // technique shaders consume. Owns no Nodes and renders nothing itself.
@@ -41,7 +41,7 @@ public:
 	// config keys: position (Vector3 Godot world), atten_end (float world
 	// units), color_start / color_end (Color), style / phase / rate (int),
 	// intensity (float), disable_corona / disable_terrain / disable_objects
-	// (bool), plus the owner-attach facts renderer::resolve_model_light_owner
+	// (bool), plus the owner-attach facts opennova::renderer::resolve_model_light_owner
 	// decides from: attach_bone (int, the record's authored subobject),
 	// spawning_entity (int), spawner_is_building (bool), and
 	// blink_owner_entity / blink_section (int) for the blink box the spawning
@@ -112,7 +112,7 @@ public:
 			int64_t p_rows_revision = -1);
 
 	// The procedural corona texture "texlightcrn" as RGBA8 bytes,
-	// corona_texture_size() square — renderer::corona_texture_argb carries
+	// corona_texture_size() square — opennova::renderer::corona_texture_argb carries
 	// the law; this only unpacks the words for Image::create_from_data.
 	static int corona_texture_size();
 	static PackedByteArray corona_texture_rgba8();
@@ -124,11 +124,11 @@ public:
 	// fills r_out with the planner's typed inputs (positions in Godot world).
 	void slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
-			std::vector<renderer::SlotPointLight> &r_out);
+			std::vector<opennova::renderer::SlotPointLight> &r_out);
 
 	// The corona billboard rows for this frame (retail:
 	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on
-	// renderer::LightScene::collect_corona_quads): one Dictionary per
+	// opennova::renderer::LightScene::collect_corona_quads): one Dictionary per
 	// additive camera-facing quad, keys position (Vector3 Godot world),
 	// half_size (float world units), color (Color, premultiplied additive
 	// including the segment fade and the fog-to-black fold). models/
@@ -151,10 +151,10 @@ public:
 	// as the rows the terrain shader re-draws the patch with (retail: the
 	// per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
 	// Light_SetupTerrainProjectedPass @0x5AA830 — the collect, the gates and
-	// the pixel constants live portable in renderer::LightScene::
+	// the pixel constants live portable in opennova::renderer::LightScene::
 	// collect_terrain_pass_rows, see docs/render/render-lighting-re.md). A C++
 	// seam for the Terrain device: patch bounds in mission 16.16 (the helper
-	// renderer::terrain_patch_light_bounds folds the render frame), the env
+	// opennova::renderer::terrain_patch_light_bounds folds the render frame), the env
 	// light-state gain, the time + weather the flicker reads, and the packed
 	// Env_TerrainColorRecip the recip factor unpacks. Returns the row total.
 	size_t collect_terrain_light_rows(
@@ -174,7 +174,7 @@ public:
 	// "texlight2d" (terrain_light_texture_size() square, the disc on the ground
 	// plane) and "texlightspot1d" (terrain_light_texture_size() x
 	// terrain_light_strip_rows(), the height strip). The laws live portable in
-	// renderer::falloff_texture_light2d_argb / _spot1d_argb; this only unpacks
+	// opennova::renderer::falloff_texture_light2d_argb / _spot1d_argb; this only unpacks
 	// the words for Image::create_from_data.
 	static int terrain_light_texture_size();
 	static int terrain_light_strip_rows();
@@ -190,7 +190,7 @@ public:
 protected:
 public:
 	// The witnessed muzzle-glow / death-flash spawn constants, re-exported
-	// from renderer::LightScene for the presenting director.
+	// from opennova::renderer::LightScene for the presenting director.
 	static float muzzle_glow_radius();
 	static Color muzzle_glow_color();
 	static int muzzle_glow_fade_mode();
@@ -206,13 +206,13 @@ private:
 	static constexpr int STATIC_LIGHT_ROW_TEXELS = 9;
 	struct StaticCachedSelection {
 		int atlas_row = 0;
-		renderer::LightActiveGroups groups{};
-		std::array<renderer::LightHandle,
-				renderer::LightScene::kSelectLimit> handles{};
+		opennova::renderer::LightActiveGroups groups{};
+		std::array<opennova::renderer::LightHandle,
+				opennova::renderer::LightScene::kSelectLimit> handles{};
 		size_t count = 0;
 	};
-	renderer::LightScene scene_;
-	std::array<renderer::SelectedLight, renderer::LightScene::kSelectLimit>
+	opennova::renderer::LightScene scene_;
+	std::array<opennova::renderer::SelectedLight, opennova::renderer::LightScene::kSelectLimit>
 			selected_{};
 	size_t selected_count_ = 0;
 	String selection_mode_ = "none";

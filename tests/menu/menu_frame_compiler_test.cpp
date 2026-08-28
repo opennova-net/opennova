@@ -50,10 +50,10 @@ fnt_font_t make_font() {
 	return font;
 }
 
-mnu::Document parse_or_die(const char *xml) {
-	mnu::Document doc;
+opennova::mnu::Document parse_or_die(const char *xml) {
+	opennova::mnu::Document doc;
 	std::string err;
-	if (!mnu::parse(std::string(xml), doc, err)) {
+	if (!opennova::mnu::parse(std::string(xml), doc, err)) {
 		std::fprintf(stderr, "FAIL: fixture parse: %s\n", err.c_str());
 		++failures;
 	}
@@ -115,7 +115,7 @@ const char *kScreenXml = R"(
 )";
 
 void test_draw_order_and_state_selection(const fnt_font_t *font) {
-	mnu::Document doc = parse_or_die(kScreenXml);
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t border = slot_of(c, "border.tga");
@@ -250,7 +250,7 @@ void test_image_appearance_crops_authored_map_state(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t atlas = slot_of(c, "tab_atlas.tga");
@@ -301,7 +301,7 @@ void test_scroll_draws_authored_visual_parts(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t track = slot_of(c, "track.tga");
@@ -377,7 +377,7 @@ void test_spin_arrow_uses_cropped_atlas_extent(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t up = slot_of(c, "spin_up_atlas.tga");
@@ -446,7 +446,7 @@ void test_list_scrollbar_uses_authored_geometry_and_range(
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t track = slot_of(c, "list_track.tga");
@@ -555,7 +555,7 @@ void test_combo_scrollbar_offsets_rows_and_hit(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	for (const char *name : { "combo_track.tga", "combo_shuttle.tga",
@@ -635,7 +635,7 @@ void test_table_scrollbar_separates_header_and_body_row_heights(
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t shuttle = slot_of(c, "table_shuttle.tga");
@@ -703,7 +703,7 @@ void test_table_visible_count_floors_to_one(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t up = slot_of(c, "tiny_up.tga");
@@ -746,7 +746,7 @@ void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuWidgetState table_state;
@@ -808,7 +808,7 @@ void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
 }
 
 void test_text_placement_and_truncation(const fnt_font_t *font) {
-	mnu::Document doc = parse_or_die(kScreenXml);
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuFrameState state;
@@ -843,7 +843,7 @@ void test_text_placement_and_truncation(const fnt_font_t *font) {
 }
 
 void test_scale_truncation(const fnt_font_t *font) {
-	mnu::Document doc = parse_or_die(kScreenXml);
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t ok_idle = slot_of(c, "ok_idle.tga");
@@ -887,7 +887,7 @@ void test_radio_checkbox_forcing(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t r_off = slot_of(c, "r_off.tga");
@@ -958,7 +958,7 @@ void test_edit_caret(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 
@@ -1045,7 +1045,7 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 
@@ -1096,7 +1096,7 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 // widget_process_mouse_event @ 0x647a00]: front-most claim, disabled keeps
 // state 1, hit+down -> pressed, hit+up -> hovered, misses clear.
 void test_mouse_pump(const fnt_font_t *font) {
-	mnu::Document doc = parse_or_die(kScreenXml);
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 
@@ -1194,7 +1194,7 @@ void test_table_interior(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuFrameState state;
@@ -1243,7 +1243,7 @@ void test_marquee_roll(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuFrameState state;
@@ -1308,7 +1308,7 @@ void test_draw_frame_gate(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	const int32_t border = slot_of(c, "border.tga");
@@ -1431,7 +1431,7 @@ void test_runtime_items_and_multiselect(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 
@@ -1460,18 +1460,18 @@ void test_runtime_items_and_multiselect(const fnt_font_t *font) {
 // The widget queries: pre-order identity, names/kinds, authored text, the
 // absolute rect accumulation, and the edit-limits mapping.
 void test_widget_queries(const fnt_font_t *font) {
-	mnu::Document doc = parse_or_die(kScreenXml);
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 
 	CHECK(c.widget_count() == 3, "widget_count covers the pre-order tree");
 	CHECK(c.widget_name(1) == "OK", "widget_name reads the authored NAME");
-	CHECK(c.widget_kind(1) == static_cast<int>(mnu::WindowType::Button),
+	CHECK(c.widget_kind(1) == static_cast<int>(opennova::mnu::WindowType::Button),
 			"widget_kind reports the parsed type");
 	CHECK(c.widget_authored_text(1) == "OK",
 			"widget_authored_text resolves the STRING");
 	MenuFrameState st;
-	mnu::RectEdges rect{};
+	opennova::mnu::RectEdges rect{};
 	CHECK(c.widget_rect(1, st, &rect) && rect.left == 10 && rect.top == 20 &&
 					rect.right == 110 && rect.bottom == 40,
 			"widget_rect solves the nested absolute rect");
@@ -1486,7 +1486,7 @@ void test_widget_queries(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document edoc = parse_or_die(edit_xml);
+	opennova::mnu::Document edoc = parse_or_die(edit_xml);
 	MenuFrameCompiler ec;
 	ec.configure(edoc.first_screen(), font);
 	opennova::menu::EditLimits lim;
@@ -1541,7 +1541,7 @@ void test_interaction_geometry(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuFrameState st;
@@ -1561,7 +1561,7 @@ void test_interaction_geometry(const fnt_font_t *font) {
 	st.widgets.clear();
 
 	// The combo popup rect is combo-relative [orig: D-MNU-7], rows inside it.
-	mnu::RectEdges popup{};
+	opennova::mnu::RectEdges popup{};
 	CHECK(c.combo_popup_rect(2, st, &popup) && popup.left == 200 &&
 					popup.top == 20 && popup.right == 300 && popup.bottom == 80,
 			"combo_popup_rect offsets the authored LIST_BOX rect");
@@ -1619,7 +1619,7 @@ void test_combo_face_and_outside_arrow_claim(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 
@@ -1699,7 +1699,7 @@ void test_hotkey_widget(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuFrameState st;
@@ -1739,7 +1739,7 @@ void test_multiline_wrap(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 
@@ -1800,7 +1800,7 @@ void test_multiline_wrap(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document sdoc = parse_or_die(short_xml);
+	opennova::mnu::Document sdoc = parse_or_die(short_xml);
 	MenuFrameCompiler sc;
 	sc.configure(sdoc.first_screen(), font);
 	MenuFrameState sst;
@@ -1844,7 +1844,7 @@ void test_draw_list_preserves_interleaved_primitive_order(
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 
@@ -1893,7 +1893,7 @@ void test_scroll_interaction_hits_and_drag(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	c.set_texture_size(slot_of(c, "track.tga"), 76, 20);
@@ -1969,7 +1969,7 @@ void test_table_embedded_scrollbar_scrolls_rows(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuWidgetState table;
@@ -2036,7 +2036,7 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuWidgetState combo;
@@ -2089,7 +2089,7 @@ void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuWidgetState combo;
@@ -2151,7 +2151,7 @@ void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuWidgetState gamma;
@@ -2236,7 +2236,7 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuWidgetState combo;
@@ -2339,7 +2339,7 @@ void test_wheel_ticks_scroll_popup_and_row_owners(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuFrameState state;
@@ -2404,7 +2404,7 @@ void test_degenerate_list_draws_no_dead_scrollbar(const fnt_font_t *font) {
   </WINDOW>
 </SCREEN>
 )";
-	mnu::Document doc = parse_or_die(xml);
+	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 	MenuFrameState state;

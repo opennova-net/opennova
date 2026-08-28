@@ -127,7 +127,7 @@ Ref<Shader> ScarPresenter::shader_for_mode_(uint32_t p_mode_word, bool &r_unsupp
 	// The mode word -> the drawer state -> the shader that carries it. The two
 	// shipped words are matched on their FULL decoded state, so a word that
 	// decodes to anything else is reported rather than silently approximated.
-	const renderer::ScarStripState s = renderer::decode_scar_strip_mode(p_mode_word);
+	const opennova::renderer::ScarStripState s = opennova::renderer::decode_scar_strip_mode(p_mode_word);
 	const bool shared = s.src_alpha_blend && s.alpha_modulate_texture_diffuse &&
 			s.color_modulate2x_texture_diffuse && s.fog;
 	const bool scorch = shared && !s.alpha_test && !s.depth_write && !s.cull_none;

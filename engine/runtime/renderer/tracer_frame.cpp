@@ -4,7 +4,7 @@
 #include <array>
 #include <cmath>
 
-namespace renderer {
+namespace opennova::renderer {
 namespace {
 
 // The witnessed per-style ribbon tables, built once. Static ramps are ported
@@ -250,4 +250,4 @@ void compile_tracer_ribbons(const TracerChannelInput *channels, std::size_t coun
 	}
 }
 
-} // namespace renderer
+}  // namespace opennova::renderer

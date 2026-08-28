@@ -49,7 +49,7 @@
 #include <functional>
 #include <vector>
 
-namespace renderer {
+namespace opennova::renderer {
 
 // ---------------------------------------------------------------------------
 // Direction and geometry laws
@@ -397,4 +397,4 @@ int32_t slot_priority_score(const std::array<float, 2> &camera_pos2d,
 		const std::array<float, 2> &view_dir2d,
 		const SlotCandidateState &state);
 
-}  // namespace renderer
+}  // namespace opennova::renderer

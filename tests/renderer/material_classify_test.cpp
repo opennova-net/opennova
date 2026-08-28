@@ -1,4 +1,4 @@
-// Unit tests for renderer::classify_object_material + its typed pipeline
+// Unit tests for opennova::renderer::classify_object_material + its typed pipeline
 // descriptor in engine/runtime/renderer. Verifies the static shader_tag -> family/blend table without
 // `.fx` parsing matches the canonical runtime classifications for every
 // shader_tag in the original OED's gMaterialInfoTable (relocated as the test
@@ -31,7 +31,7 @@ bool contains(const std::string &haystack, const char *needle) {
 } // namespace
 
 int main() {
-	using namespace renderer;
+	using namespace opennova::renderer;
 
 	// Retail's generated gsys_phong bytes, including its truncation rule.
 	expect(object_phong_map_texel(0, 0) == ObjectPhongMapTexel{0, 0, 0, 0},
