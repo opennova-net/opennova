@@ -9,7 +9,9 @@ extends RefCounted
 
 ## Clock reads and span writes happen only while true.
 var enabled := false
-## The last frame's shell spans (before / world / after / hud, microseconds).
+## The last frame's shell spans (before / world / after / hud, microseconds):
+## the probe's report edge, filled by the frame-phase sampler by key and
+## formatted straight into the probe's text (dict_contract_allowlist).
 var spans: Dictionary = {}
 ## The A/B legs: skip the world tick, skip the HUD tick (only while enabled).
 var skip_world := false

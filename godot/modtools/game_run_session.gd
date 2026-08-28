@@ -14,6 +14,8 @@ const PACKAGED_RUNTIME_CANDIDATES: Array[String] = [
 	"../../../opennova.app/Contents/MacOS/opennova",
 ]
 const STOP_WAIT_MSEC := 5000
+# The portable exit-wait fallback's poll interval.
+const EXIT_POLL_MSEC := 50
 
 enum Mode { OPENNOVA, RETAIL }
 enum State { STOPPED, RUNNING }
@@ -324,7 +326,7 @@ func _wait_for_exit(pid: int, timeout_msec: int) -> bool:
 	while OS.is_process_running(pid):
 		if Time.get_ticks_msec() >= deadline:
 			return false
-		OS.delay_msec(50)
+		OS.delay_msec(EXIT_POLL_MSEC)
 	return true
 
 
