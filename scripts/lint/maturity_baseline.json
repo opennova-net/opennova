@@ -64,6 +64,7 @@
     "probe_runner.gd|func start(",
     "probe_runner.gd|func status(",
     "probe_runner.gd|func cancel(",
-    "game_world.gd|func get_perf_probe_spans("
+    "game_world.gd|func get_perf_probe_spans(",
+    "perf_probe_switches.gd|var spans: Dictionary"
   ]
 }
