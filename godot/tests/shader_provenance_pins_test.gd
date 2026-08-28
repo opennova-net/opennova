@@ -489,7 +489,10 @@ func test_every_retail_pass_class_has_a_runtime_or_exclusion_disposition() -> vo
 		"TECHNIQUE_MATCHTERRAIN": ["matchterrain"],
 		"UNSPECIFIED": [],
 	}
-	var probe_source := _read("res://tests/render_swatch_probe.gd")
+	var probe_source := _read("res://probes/render/render_swatch_probe.gd") \
+			+ _read("res://probes/render/render_swatch_support.gd") \
+			+ _read("res://probes/render/render_swatch_lighting_modes.gd") \
+			+ _read("res://probes/render/render_swatch_pass_modes.gd")
 
 	for pass_class in classes:
 		var entry: Dictionary = classes[pass_class]
@@ -902,7 +905,10 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 			"instance uniform bool u_viewmodel_pass", "NOVA_VIEWMODEL_DEPTH_WINDOW = 0.1"],
 			"viewmodel_pass.gdshaderinc")
 
-	var probe := _read("res://tests/render_swatch_probe.gd")
+	var probe := _read("res://probes/render/render_swatch_probe.gd") \
+			+ _read("res://probes/render/render_swatch_support.gd") \
+			+ _read("res://probes/render/render_swatch_lighting_modes.gd") \
+			+ _read("res://probes/render/render_swatch_pass_modes.gd")
 	assert_true(probe.contains("[\"SRCALPHA/INVSRCALPHA\", -0.3, 128]"))
 	assert_true(probe.contains("[\"ONE/ONE\", 0.3, 96]"))
 
@@ -921,7 +927,10 @@ func test_environment_techniques_do_not_invent_fresnel_or_diffuse_terms() -> voi
 
 
 func test_windowed_probe_exercises_direction_hemisphere_and_gameplay_points() -> void:
-	var probe := _read("res://tests/render_swatch_probe.gd")
+	var probe := _read("res://probes/render/render_swatch_probe.gd") \
+			+ _read("res://probes/render/render_swatch_support.gd") \
+			+ _read("res://probes/render/render_swatch_lighting_modes.gd") \
+			+ _read("res://probes/render/render_swatch_pass_modes.gd")
 	_contains_all(probe, [
 		"\"direction_a\"", "\"direction_b\"", "\"hemi_sky\"", "\"hemi_ground\"", "\"ambient_off\"",
 		"\"ambient_on\"", "\"point_off\"", "\"point_on\"", "\"point_static\"",

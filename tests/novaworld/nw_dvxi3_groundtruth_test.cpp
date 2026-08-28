@@ -10,9 +10,9 @@
 // host (retail Jointops.exe) serialized that mission onto the wire; this test
 // decodes the matching loopback capture and asserts each decoded record
 // reproduces the authored fact. Reads the pcap directly via the shared
-// apps/common pcap reader; path from NW_DVXI3_PCAP else the in-tree .scratch
-// capture (DEFAULT_DVXI3_PCAP). Skips cleanly when the capture is absent (it is a
-// local-only artifact — .scratch is untracked), so CI stays green.
+// apps/common pcap reader from <OPENNOVA_CAPTURES>/probe2.pcapng. Reports
+// Skipped when the capture is absent (it is a local-only artifact — .scratch is
+// untracked).
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/wire_capture.h>
@@ -27,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
@@ -134,19 +135,11 @@ void check(bool cond, const std::string &what) {
 } // namespace
 
 int main() {
-	std::string pcap_path;
-	if (const char *env = std::getenv("NW_DVXI3_PCAP"); env && *env)
-		pcap_path = env;
-	else
-		pcap_path = DEFAULT_DVXI3_PCAP;
+	const std::string pcap_path = retail::capture("probe2.pcapng");
 
 	std::vector<net::PcapDatagram> pkts;
-	if (pcap_path.empty() || !net::read_pcap_udp_file(pcap_path, pkts)) {
-		std::printf("[skip] dvxi3 capture not found (set NW_DVXI3_PCAP to "
-		            "...probe2.pcapng) — '%s'\n",
-		            pcap_path.c_str());
-		return 0;
-	}
+	if (!net::read_pcap_udp_file(pcap_path, pkts))
+		return retail::skip("<OPENNOVA_CAPTURES>/probe2.pcapng (the dvxi3 probe capture)");
 
 	std::vector<Expected> manifest;
 	const std::string manifest_path = std::string(FIXTURE_DIR) + "/dvxi3_manifest.txt";

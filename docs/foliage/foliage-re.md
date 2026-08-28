@@ -588,15 +588,15 @@ claim or divergence.
   shared `Texture2DArray` ownership, valid ready-layer/page bounds, and a
   cross-frame LOD regression proving retained fine pages cannot override the
   current terrain frame's coarser selection.
-- `foliage_black_flicker_regression_probe.gd`: real rasterized destination-color
+- the `foliage_flicker_regression` probe: real rasterized destination-color
   preservation, strict alpha acceptance/rejection, retained late-consumer
   depth, screenshot-shaped exact-black-component detection, and fixed-input
   frame stability for both tiers.
-- `foliage_spawn_capture_probe.gd` with `NOVA_FOLIAGE_FLICKER_PROBE=1`: the real
+- the `foliage_spawn_capture` probe with `flicker: true`: the real
   `00TRe.bms` player spawn, fixed-input HIGH/automatic coverage with deliberate
   dropout and fade-response controls. LOW-far is explicitly reported as
   skipped when it has no pixels in the exact spawn view.
-- `runtime_scene_probe.gd` and the visual probes: detail camera selection uses
+- the runtime scene (the retired `runtime_scene_probe`) and the visual probes: detail camera selection uses
   the flat gate oracle; the runtime scene consumes Terrain's typed native
   detail-cell vector, while its minimal fixture intentionally contains no
   `.3di` models.

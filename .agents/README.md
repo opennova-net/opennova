@@ -30,6 +30,9 @@ divergences in its §8 catalog):
   probing without the retired generated Python parity matrix. onHook is an
   external `opennova-int` executable passed as `-OnHookMcpPath`, never a
   registered MCP server: without it, report the parity leg as blocked.
+- `docs/mcp.md` — the game's own `opennova-game` MCP (launch with `--mcp-port`,
+  `scripts/mcp/game_mcp.py` / `game_mcp.ps1`, the tool catalog, the `game_probe`
+  runtime probes, the `parity_joiner_*` witnesses the runner classifies).
 
 ## Working Rules
 

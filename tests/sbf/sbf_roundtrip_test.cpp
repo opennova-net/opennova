@@ -7,6 +7,7 @@
 #ifndef SBF_FIXTURE_DIR
 #define SBF_FIXTURE_DIR "fixtures/sbf"
 #endif
+#define SYNTH_BANK SBF_FIXTURE_DIR "/synth_gamemus.sbf"
 
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \
@@ -15,15 +16,15 @@ static int passed = 0, failed = 0;
 #define CHECK(cond, msg) do { if (!(cond)) { \
     fprintf(stderr, "  FAIL: %s (line %d)\n", msg, __LINE__); return 0; } } while (0)
 
-/* End-to-end fixture roundtrip: decode the BHD MENU101 entry, re-encode it,
-   reparse the encoded image, decode it again, and compare. The bound is one
-   int8 quantum (256 raw int16), the worst-case error per sample at the
-   loosest scale sbf_pick_scale can choose. */
-static int test_roundtrip_bhd_menu101(void) {
+/* End-to-end fixture roundtrip: decode the three-chunk TONE01 entry of the
+   synthetic bank, re-encode it, reparse the encoded image, decode it again,
+   and compare. The bound is one int8 quantum (256 raw int16), the worst-case
+   error per sample at the loosest scale sbf_pick_scale can choose. */
+static int test_roundtrip_tone01(void) {
     SbfArchive arc;
-    CHECK(sbf_open(&arc, SBF_FIXTURE_DIR "/bhd_menumus.sbf") == 0, "open fixture");
-    const SbfRawEntry *e = sbf_find_by_name(&arc, "MENU101");
-    CHECK(e != NULL, "MENU101 found");
+    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open fixture");
+    const SbfRawEntry *e = sbf_find_by_name(&arc, "TONE01");
+    CHECK(e != NULL, "TONE01 found");
 
     uint8_t *raw = (uint8_t *)malloc(e->total_size);
     CHECK(raw != NULL, "raw alloc");
@@ -35,7 +36,7 @@ static int test_roundtrip_bhd_menu101(void) {
     int n_dec = sbf_decode_all(raw, e->total_size, dec, e->total_size);
     CHECK(n_dec > 0, "first decode produces samples");
 
-    const char *names[1] = { "MENU101" };
+    const char *names[1] = { "TONE01" };
     const int16_t *pcm[1] = { dec };
     const size_t counts[1] = { (size_t)n_dec };
     uint8_t *enc = NULL; size_t enc_size = 0;
@@ -69,7 +70,7 @@ static int test_roundtrip_bhd_menu101(void) {
 }
 
 int main(void) {
-    RUN_TEST(test_roundtrip_bhd_menu101);
+    RUN_TEST(test_roundtrip_tone01);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

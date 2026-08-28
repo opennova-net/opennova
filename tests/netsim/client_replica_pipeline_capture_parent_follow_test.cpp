@@ -19,9 +19,9 @@
 //
 // Oracle: an independent raw decode of every S2C 0x0A frame — each tracked
 // vehicle's anchor-relative compact position is the wire truth the view's row
-// must match after apply. No committed derived oracle: env-gated on
-// NW_GOLDEN_VEHICLE_SESSION (capture, DEFAULT_* fallback) + NW_ITEMS_DEF (the
-// §5.10b class table); skips clean when either is absent.
+// must match after apply. No committed derived oracle: gated on
+// <OPENNOVA_CAPTURES>/golden/retail-vehicle-session.pcapng + <OPENNOVA_JO_ASSETS>/ITEMS.DEF
+// (the §5.10b class table); reports Skipped when either is absent.
 
 #include <net/netsim/connection_fan.h>
 #include <net/netsim/client_replica_pipeline.h>
@@ -45,10 +45,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#ifndef DEFAULT_VEHICLE_SESSION_PCAP
-#define DEFAULT_VEHICLE_SESSION_PCAP ""
-#endif
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -113,29 +110,18 @@ struct Tracked {
 } // namespace
 
 int main() {
-	std::string cap_path;
-	if (const char *env = std::getenv("NW_GOLDEN_VEHICLE_SESSION"); env && *env)
-		cap_path = env;
-	else
-		cap_path = DEFAULT_VEHICLE_SESSION_PCAP;
-
-	const char *items_path = std::getenv("NW_ITEMS_DEF");
-	if (items_path == nullptr || *items_path == '\0') {
-		std::printf("[skip] NW_ITEMS_DEF not set (items.def class table needed "
-		            "to size §5.10b records)\n");
-		return 0;
-	}
+	const std::string cap_path = retail::golden("retail-vehicle-session.pcapng");
+	RETAIL_REQUIRE_OR_SKIP(items_def, retail::asset_file("items.def"),
+			"OPENNOVA_JO_ASSETS/ITEMS.DEF (the class table that sizes the 5.10b records)");
+	const char *items_path = items_def.c_str();
 
 	std::vector<net::PcapDatagram> pkts;
-	if (cap_path.empty() || !net::read_pcap_udp_file(cap_path, pkts)) {
-		std::printf("[skip] vehicle-session capture not found (set "
-		            "NW_GOLDEN_VEHICLE_SESSION) — '%s'\n", cap_path.c_str());
-		return 0;
-	}
+	if (!net::read_pcap_udp_file(cap_path, pkts))
+		return retail::skip("<OPENNOVA_CAPTURES>/golden/retail-vehicle-session.pcapng (the golden vehicle-session capture)");
 
 	std::unordered_map<uint16_t, EntityClass> item_classes;
 	if (!load_item_classes(items_path, item_classes)) {
-		std::fprintf(stderr, "FAIL: NW_ITEMS_DEF set but unusable: %s\n",
+		std::fprintf(stderr, "FAIL: ITEMS.DEF found but unusable: %s\n",
 		             items_path);
 		return 1;
 	}
@@ -250,19 +236,13 @@ int main() {
 	            view.frames_applied(), view.state().entities.size(),
 	            view.game_type(), s2c_frames);
 
-	if ((view.game_type() & 0x20000u) != 0u) {
-		std::printf("[skip] capture is an objective/COOP session; the "
-		            "organic-parented vehicle oracle applies only to "
-		            "non-objective sessions\n");
-		return 0;
-	}
+	if ((view.game_type() & 0x20000u) != 0u)
+		return retail::skip("a non-objective session capture (the organic-parented vehicle "
+		                    "oracle does not apply to objective/COOP sessions)");
 
 	bool ok = true;
-	if (tracked.empty()) {
-		std::printf("[skip] capture carries no organic-parented pool-1 spawns "
-		            "— nothing to pin\n");
-		return 0;
-	}
+	if (tracked.empty())
+		return retail::skip("a capture carrying organic-parented pool-1 spawns (nothing to pin)");
 	for (const auto &kv : tracked) {
 		const Tracked &t = kv.second;
 		std::printf("[follow] vehicle %04x (type %04x, parent %04x): "

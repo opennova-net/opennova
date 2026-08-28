@@ -639,6 +639,7 @@ private:
 	// fed to configure_session_runtime). Sockets live here, the protocol/crypto in libs (ADR 0010).
 	bool host_listen_ = false;
 	Ref<UdpPump> pump_;
+	String capture_pcap_path_;
 	opennova::np::GameConfig host_session_config_; // the ONE consolidated server-state config (ADR 0013)
 	uint16_t host_bind_port_ = 64220;                      // the lobby-advertised bind port (UI only)
 	// UI server-type: serve-and-play (default true) spawns + renders the host's own player and folds
@@ -691,6 +692,7 @@ private:
 	// H-learned pose); remote entities render wire-direct (present + wire_present_pass). enable_join
 	// turns it on; a sim is host XOR joiner. [orig: NapiNPClientMsg_0x00C @0x42E730 self name-match]
 	bool joiner_ = false;
+	bool joiner_net_diagnostics_ = false;
 	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): the frame
 	// sequence, its latches (started/spawned/redeploy/tripwire), the
 	// wire-header materializer, and the per-replica resolver state all live in
@@ -1354,11 +1356,18 @@ public:
 	// Monotonic initial-admission boundary: policy + both initial loadout grants
 	// have landed. Deploy-pick state is intentionally exposed separately.
 	bool is_join_initial_admission_complete() const;
-	// The per-second joiner trace is deliberately opt-in for release play. Set
-	// OPENNOVA_NET_DIAGNOSTICS=1 to emit it. The snapshot remains available so
-	// tests/debug UI can distinguish a real ordered gap from ordinary idle traffic.
+	// The per-second joiner trace is deliberately opt-in for release play: the
+	// `net_joiner_diagnostics` debug control (F3 / MCP game_debug) switches it
+	// on. The snapshot remains available so tests/debug UI can distinguish a
+	// real ordered gap from ordinary idle traffic.
 	bool is_joiner_network_diagnostics_enabled() const;
+	void set_joiner_network_diagnostics_enabled(bool p_enabled);
 	Dictionary get_joiner_network_diagnostics() const;
+	// The pcap this session's datagrams are recorded to (`--capture-pcap`,
+	// LaunchFlags); applied to the pump when the host binds or the joiner
+	// dials, so set it before the session opens. "" records nothing.
+	void set_capture_pcap_path(const String &p_path);
+	String get_capture_pcap_path() const;
 	// Player-paced deployment (the deploy-map screen; net-re §5.61/§5.0d). True while
 	// the join owes the player a deployment pick or awaits the host's release of one —
 	// the shell shows the DEATH deploy screen and the join watchdog stops (the

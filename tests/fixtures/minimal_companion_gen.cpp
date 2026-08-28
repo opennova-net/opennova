@@ -6,7 +6,7 @@
 // docs/audio/lwf-dbf-sound-re.md. The minimal mission speaks no dialog, so
 // both are authored empty-but-valid from scratch (engine/formats/dbf + engine/formats/lwf
 // writers). Same contract as minimal_rtxt_gen: default guards byte-stability
-// against the committed files; OPENNOVA_WRITE_MINIMAL_FIXTURES=1 rewrites.
+// against the committed files; `--write` rewrites.
 #include <formats/dbf/dbf.h>
 #include <formats/lwf/lwf.h>
 
@@ -86,7 +86,7 @@ void run(const char *name, const std::vector<uint8_t> &bytes, bool write_mode,
 	}
 	std::vector<uint8_t> committed;
 	CHECK(read_bytes(p, committed),
-	      (std::string("committed ") + name + " missing — run with OPENNOVA_WRITE_MINIMAL_FIXTURES=1").c_str());
+	      (std::string("committed ") + name + " missing — run with --write").c_str());
 	if (committed.empty()) return;
 	if (is_lfs_pointer(committed)) {
 		std::printf("[skip] %s is an unpulled LFS pointer\n", name);
@@ -98,8 +98,11 @@ void run(const char *name, const std::vector<uint8_t> &bytes, bool write_mode,
 
 } // namespace
 
-int main() {
-	const bool write_mode = std::getenv("OPENNOVA_WRITE_MINIMAL_FIXTURES") != nullptr;
+int main(int argc, char **argv) {
+	// `--write` regenerates the committed files; the ctest registration passes nothing.
+	bool write_mode = false;
+	for (int i = 1; i < argc; ++i)
+		if (std::strcmp(argv[i], "--write") == 0) write_mode = true;
 
 	run("mnml.dbf", make_dbf(), write_mode, [](const std::vector<uint8_t> &b, std::string &err) {
 		dbf::File f;

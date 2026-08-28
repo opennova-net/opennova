@@ -20,7 +20,7 @@
 // walks it forward at the live root step, resolving every tick exactly as the
 // infantry tick does. Diagnostic/report-only while the divergence is open, in
 // the bunker_walkin_test tradition: it prints whether the capsule escapes.
-// Gated on OPENNOVA_JO_DIR (skip-as-pass without a JO install).
+// Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install).
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -36,6 +36,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/world.h>
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -47,23 +48,16 @@ int32_t fx(double v) { return static_cast<int32_t>(v * 65536.0); }
 } // namespace
 
 int main() {
-	const char *dir = std::getenv("OPENNOVA_JO_DIR");
-	if (dir == nullptr || *dir == '\0') {
-		std::printf("truck dismount: SKIP (OPENNOVA_JO_DIR not set)\n");
-		return 0;
-	}
+	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
+			"OPENNOVA_JO_DIR (a retail JO install carrying the truck models)");
+	const char *dir = install.c_str();
 	opennova::ResourceIndex index;
-	if (!index.scan(dir)) {
-		std::printf("truck dismount: SKIP (resource index scan failed)\n");
-		return 0;
-	}
+	if (!index.scan(dir)) return retail::skip("a scannable resource index under OPENNOVA_JO_DIR");
 	simassets::SimModelCache cache;
 	cache.set_index(&index);
 	const Threedi3di3 *m3 = cache.model_for("DTruck1");
-	if (m3 == nullptr || m3->collision == nullptr) {
-		std::printf("truck dismount: SKIP (DTruck1.3di not found/parsed)\n");
-		return 0;
-	}
+	if (m3 == nullptr || m3->collision == nullptr)
+		return retail::skip("DTruck1.3di (with collision) on the OPENNOVA_JO_DIR mount");
 	w::CollisionModel model;
 	if (!simassets::collision_model_from_3di(m3->collision, model,
 	                                         simassets::model_has_collision(*m3))) {
@@ -188,32 +182,29 @@ int main() {
 	// A rear passenger seat, straight off the authored seat table (concept
 	// 6.4p): local (1.05, -5.14, 2.54). Truck faces +y at the origin, so the
 	// seat's world position is the same as its local one.
-	// Default is the SEAT height, which is what reproduces the live pin. A body
-	// left in the cargo bed walks into the back of the cab and never gets out;
-	// the same walk started at ground level (NW_SEAT_Z=0) clears the truck in two
-	// resolver ticks. That contrast IS the defect: our dismount leaves the
-	// occupant standing in the bed instead of on the ground beside the vehicle.
-	// The live probe's `gc` matching the AI's `y` does NOT prove they are on
-	// terrain -- the bed is solid to us, so it reads as their ground.
-	const char *seatz = std::getenv("NW_SEAT_Z");
+	// The SEAT height is what reproduces the live pin. A body left in the cargo
+	// bed walks into the back of the cab and never gets out; the same walk
+	// started at ground level clears the truck in two resolver ticks. That
+	// contrast IS the defect: our dismount leaves the occupant standing in the
+	// bed instead of on the ground beside the vehicle. The live probe's `gc`
+	// matching the AI's `y` does NOT prove they are on terrain -- the bed is
+	// solid to us, so it reads as their ground.
 	const double sx = 1.05, sy = -5.14;
-	const double sz = (seatz != nullptr && seatz[0] != 0) ? std::atof(seatz) : 2.54;
+	const double sz = 2.54;
 	// The authored destination lies FORWARD of the truck. The live case is
 	// 28-31 u ahead (ch 11 node 0 at (381.2, 406.2) from a dismount at
 	// (377, 375)); 31 u forward reproduces it without the mission loaded.
-	const char *tyv = std::getenv("NW_TARGET_Y");
 	const double tx = 0.0;
-	const double ty = (tyv != nullptr && tyv[0] != 0) ? std::atof(tyv) : 31.0;
+	const double ty = 31.0;
 
 	// SIX bodies, one per rear passenger seat -- the live failure is a PILE-UP,
 	// not a single body against a hull. The user session shows all six dismounted
 	// passengers collapsing onto ONE identical coordinate (371.41, -342.30) and
 	// locking, while the one AI that dismounted 8 u clear of the pile walked away.
-	// A single-capsule harness cannot show that. NW_BODIES overrides the count.
-	const char *slv = std::getenv("NW_SLOPE");
-	const double slope = (slv != nullptr && slv[0] != 0) ? std::atof(slv) : 0.0;
-	const char *nb = std::getenv("NW_BODIES");
-	const int body_count = (nb != nullptr && nb[0] != 0) ? std::atoi(nb) : 6;
+	// A single-capsule harness cannot show that. Flat ground: the pin is the
+	// pile-up, not a slope case.
+	const double slope = 0.0;
+	const int body_count = 6;
 	struct Body { w::EntityHandle h; int32_t pos[3]; int32_t vel[3]; bool done; };
 	std::vector<Body> bodies;
 	const double seat_x[6] = {-1.068, 1.054, -1.068, 1.054, -1.068, 1.054};
@@ -234,7 +225,7 @@ int main() {
 	// Mount ALL first, then dismount ALL: mounting and dismounting one at a time
 	// frees seat 0 each round, so every body would take the same seat and land on
 	// the same spot -- which is not the live case (six distinct seats).
-	if (std::getenv("NW_NO_MOUNT") == nullptr) {
+	{
 		int mounted_n = 0, dropped_n = 0;
 		for (size_t bi = 0; bi < bodies.size(); ++bi)
 			if (world.commands.mount(uint16_t(70002 + bi), truck.net_id)) ++mounted_n;
@@ -272,7 +263,7 @@ int main() {
 			                  0, 0, /*is_player=*/false, /*is_authority=*/true, t,
 			                  /*anim=*/149, 0u, health);
 			if (bx != b.pos[0] || by != b.pos[1]) ++pushed_ticks;
-			// SYNTHETIC ground ramp (NW_SLOPE = units of rise per unit of +y).
+			// SYNTHETIC ground ramp (`slope` = units of rise per unit of +y; flat here).
 			// NOT a parity model -- the repro has no real terrain, and the live
 			// drop site IS sloped: bms 17's ground reads 12.9 -> 14.4 -> 16.6 ->
 			// 18.7 -> 23.5 -> 26.6 as it walks away, while the pinned six sit at a

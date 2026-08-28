@@ -3,7 +3,7 @@
 decoder test consumes.
 
 Output format (one UDP datagram per line, exactly what
-`tests/novaworld/nw_ingame_histogram_test.cpp` reads via env NW_INGAME_HEXCAP):
+`tests/novaworld/nw_ingame_histogram_test.cpp` reads as <OPENNOVA_CAPTURES>/ingame.hexcap):
 
     <srcport> <frame> <udp_payload_hex>
 

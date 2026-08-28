@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -518,28 +519,40 @@ bool til_entry_oracle(const opennova::TilOverlayEntry &entry,
 	return true;
 }
 
-bool test_optional_cp12_assets() {
-	const char *root = std::getenv("OPENNOVA_JO_DIR");
-	if (root == nullptr || root[0] == '\0') {
-		std::printf("SKIP: OPENNOVA_JO_DIR not set (CP12 tile composer oracle)\n");
-		return true;
+// Mount the retail install (OPENNOVA_JO_DIR) — base, then every expansion it
+// ships — and read the two oracle files from the first mount carrying both.
+// Which expansion carries a retail SKU's tile set is machine-specific (the
+// JO:CA unified install ships jox01 without the CP12 files; JOTAC ships
+// revx02 with them), so an install without them is an environment condition,
+// not a regression: the leg reports SKIP-LEG and the synthetic legs stand.
+bool read_retail_tile_pair(const char *til_name, const char *tga_name,
+		std::vector<uint8_t> &til_bytes, std::vector<uint8_t> &tga_bytes,
+		const char *leg) {
+	const std::string install = retail::install();
+	if (install.empty()) {
+		retail::skip_leg((std::string("OPENNOVA_JO_DIR (") + leg + ")").c_str());
+		return false;
 	}
+	std::vector<std::string> mounts{std::string()};
+	for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
+	for (const std::string &expansion : mounts) {
+		opennova::Vfs vfs;
+		if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) continue;
+		til_bytes.clear();
+		tga_bytes.clear();
+		if (vfs.read_file(til_name, til_bytes) && vfs.read_file(tga_name, tga_bytes))
+			return true;
+	}
+	retail::skip_leg((std::string("an install carrying ") + til_name + "/" + tga_name +
+			" (" + leg + ")").c_str());
+	return false;
+}
 
-	opennova::Vfs vfs;
-	if (!expect(vfs.mount_game(root, "revx02", opennova::VfsMountMode::Packed),
-			"OPENNOVA_JO_DIR mounts for the CP12 oracle")) return false;
+bool test_optional_cp12_assets() {
 	std::vector<uint8_t> til_bytes;
 	std::vector<uint8_t> tga_bytes;
-	if (!vfs.read_file("CP12.TIL", til_bytes) ||
-			!vfs.read_file("TRNTILEA1.TGA", tga_bytes)) {
-		// Asset-gated SKIP-AS-PASS applies to the DATA too: the var can point
-		// at a retail SKU whose packed set lacks the CP12 oracle files (the
-		// JO:CA unified install ships without them). A set var with an
-		// incompatible install is an environment condition, not a regression.
-		std::printf("SKIP: mounted install lacks CP12.TIL/TRNTILEA1.TGA "
-				"(CP12 tile composer oracle needs an install carrying them)\n");
-		return true;
-	}
+	if (!read_retail_tile_pair("CP12.TIL", "TRNTILEA1.TGA", til_bytes, tga_bytes,
+			"CP12 tile composer oracle")) return true;
 	opennova::TilFile tiles;
 	std::string error;
 	if (!expect(opennova::load_til(
@@ -581,22 +594,10 @@ bool test_optional_cp12_assets() {
 // flags-7 and blind to that order, so this leg pins one entry of each combo.
 // Gated like the CP12 leg (docs/asset-gated-tests.md).
 bool test_optional_00tra_fork_oracle() {
-	const char *root = std::getenv("OPENNOVA_JO_DIR");
-	if (root == nullptr || root[0] == '\0') {
-		std::printf("SKIP: OPENNOVA_JO_DIR not set (00TRa fork oracle)\n");
-		return true;
-	}
-
-	opennova::Vfs vfs;
-	if (!expect(vfs.mount_game(root, "revx02", opennova::VfsMountMode::Packed),
-			"OPENNOVA_JO_DIR mounts for the 00TRa fork oracle")) return false;
 	std::vector<uint8_t> til_bytes;
 	std::vector<uint8_t> tga_bytes;
-	if (!vfs.read_file("00TRA.TIL", til_bytes) ||
-			!vfs.read_file("TRNTILE10.TGA", tga_bytes)) {
-		std::printf("SKIP: mounted install lacks 00TRA.TIL/TRNTILE10.TGA\n");
-		return true;
-	}
+	if (!read_retail_tile_pair("00TRA.TIL", "TRNTILE10.TGA", til_bytes, tga_bytes,
+			"00TRa fork oracle")) return true;
 	opennova::TilFile tiles;
 	std::string error;
 	if (!expect(opennova::load_til(

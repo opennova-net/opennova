@@ -1,12 +1,28 @@
 extends GutTest
 
-const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
+
+
+var _terrain_root := ""
+
+
+# The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
+# assets it names; one root per test file, removed at the end.
+func _tmap_trn() -> String:
+	if _terrain_root.is_empty():
+		_terrain_root = TestFs.stage_terrain_root("tile_cache_readiness")
+	return _terrain_root.path_join(TestFs.TMAP_TRN)
+
+
+func after_all() -> void:
+	if not _terrain_root.is_empty():
+		TestFs.remove_dir_recursive(_terrain_root)
+		_terrain_root = ""
 
 
 func _loaded_data() -> TerrainData:
 	var data := TerrainData.new()
-	data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
-	assert_eq(data.load(), OK, "the Dvxi5 terrain fixture must load")
+	data.set_trn_path(_tmap_trn())
+	assert_eq(data.load(), OK, "the Tmap terrain fixture must load")
 	return data
 
 

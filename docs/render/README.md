@@ -43,15 +43,19 @@ manifest and rejects runtime topology switches or source-generation paths.
 SHA-256 of each of the 132 checked-in object wrappers (128 generated + 4
 auxiliary) plus its transitive include closure, preserving the former
 composed-source regression sensitivity. A deliberate, witnessed shader change
-re-dumps with `OPENNOVA_OBJECT_SHADER_HASHES_DUMP=1` set for the GUT run; like
-the state-vector dump, that run rewrites the golden and intentionally fails.
+re-dumps by running `godot/tests/tools/shader_hashes_regen.gd` alone (its
+header carries the command line); like the state-vector dump, that run
+rewrites the golden and intentionally fails.
 
 **T2 — swatch A/B (local, mandatory per REN slice).**
-`godot/tests/render_swatch_probe.gd` renders one cell per unique object-shader
+The `render_swatch` probe (`godot/probes/render/render_swatch_probe.gd`, run
+through the game MCP's `game_probe` tool) renders one cell per unique object-shader
 key (sphere + quad, code-generated textures, orthogonal camera — asset-free,
 deterministic) and diffs captures exactly (`compare` mode,
 `Image.compute_image_metrics`, max-delta 0). World-level baselines ride the
-asset-gated `godot/tests/env_visual_baseline_probe.gd` (ENG-2's driver).
+asset-gated time-of-day recipe (`docs/mcp.md`: `environment_time_of_day` +
+`game_capture_bundle` per minute, compared with `render_swatch` `compare`;
+formerly `env_visual_baseline_probe.gd`, ENG-2's driver).
 The `composite` mode (REN-3) renders the draw-order scenes — overlapping
 translucent layers with depths arranged AGAINST the witnessed order, so only
 the ported priority ladder composes them correctly (the water bracket and the
@@ -59,11 +63,12 @@ sky ladder; [render-order-re.md](render-order-re.md)).
 
 ```
 # capture (windowed, never --headless):
-"$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- capture .scratch/golden/render/<label>
-"$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- composite .scratch/golden/render/<label>
-"$GODOT_BIN" --path godot -s res://tests/env_visual_baseline_probe.gd -- <JOX_dir> .scratch/golden/render/<label> world
+python scripts/mcp/game_mcp.py launch --windowed --resource-dir "$OPENNOVA_JO_DIR"
+python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"capture","output_dir":".scratch/golden/render/<label>"}' --wait
+python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"composite","output_dir":".scratch/golden/render/<label>"}' --wait
+# world baselines: per minute, game_debug set environment_time_of_day then game_capture_bundle world_only
 # compare two captures (swatch or composite):
-"$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- compare a_grid.png b_grid.png
+python scripts/mcp/game_mcp.py probe run render_swatch '{"mode":"compare","a":"a_grid.png","b":"b_grid.png"}' --wait
 ```
 
 Baselines live under `.scratch/golden/render/` (machine-local, never
@@ -192,7 +197,9 @@ helpers under `scripts/render/` support local OpenNova capture and comparison
 work.
 
 The exact-pose harness both tiers drive is
-[`render_fixture_capture_probe.tscn`](../../godot/tests/render_fixture_capture_probe.tscn).
+the `render_fixture_capture` probe
+([`render_fixture_capture_probe.gd`](../../godot/probes/render/render_fixture_capture_probe.gd),
+a `game_probe` tool).
 It boots the production `MainGame` world, dismisses the start-mission splash,
 and fail-closes until single-player auto-spawn has produced a local player,
 gameplay camera, and active world input with no spawn/menu shell remaining.

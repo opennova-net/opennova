@@ -31,7 +31,7 @@ All commands are Git Bash, inside the current worktree only.
 
 ## 3. Local green bar (before every push)
 
-    BUILD_GODOT=0 bash scripts/build.sh      # C++ + full ctest
+    bash scripts/build.sh --no-godot         # C++ + full ctest
     bash scripts/build_godot.sh              # GDExtension (if godot/ touched)
     bash scripts/test_godot.sh               # GUT (use the gut skill's GODOT_BIN setup)
 

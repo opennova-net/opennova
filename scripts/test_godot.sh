@@ -4,6 +4,10 @@
 # Expects $GODOT_BIN to point at Godot 4.6.1. Falls back to the binary
 # at .godot-bin/ if one isn't set.
 #
+# Usage: scripts/test_godot.sh [--keep-user-dir]
+#   --keep-user-dir  leave the run's isolated user:// (.godot-test-user) in
+#                    place to inspect what the suite wrote
+#
 # The suite runs against an ISOLATED user:// (see below). Tests that persist
 # settings or drop scratch files therefore cannot reach the developer's real
 # Godot user directory -- a run must never change which resource directory ONED
@@ -11,6 +15,13 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+keep_user_dir=0
+for arg in "$@"; do
+  case "$arg" in
+    --keep-user-dir) keep_user_dir=1 ;;
+    *) echo "usage: scripts/test_godot.sh [--keep-user-dir]" >&2; exit 2 ;;
+  esac
+done
 
 "$root/scripts/bootstrap_godot.sh"
 
@@ -37,14 +48,14 @@ trap 'rm -f "$log"' EXIT
 # test_sbf_*.sbf and more. Per-test snapshot/restore only ever covered the files
 # somebody remembered; this covers all of them, including files added later.
 #
-# Set OPENNOVA_TEST_KEEP_USER_DIR=1 to inspect what a run wrote.
+# Pass --keep-user-dir to inspect what a run wrote.
 user_dir="$root/.godot-test-user"
 rm -rf "$user_dir"
 mkdir -p "$user_dir"
 export APPDATA="$user_dir"
 export XDG_DATA_HOME="$user_dir"
 export HOME="$user_dir"
-if [[ -z "${OPENNOVA_TEST_KEEP_USER_DIR:-}" ]]; then
+if [[ "$keep_user_dir" == "0" ]]; then
   trap 'rm -f "$log"; rm -rf "$user_dir"' EXIT
 fi
 

@@ -92,19 +92,8 @@ var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELE
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
-var _ai_probe := AiProbe.new()
 var _world_load_pending := false
-# End-of-mission flow (SP): set by the sim's "round_end" effect [orig:
-# Server_ProcessRoundEnd @0x5164f0 SP tail]. The world keeps ticking underneath
-# (the SP world runs through the epilog — humans >= 1 keeps the run gate open);
-# player input idles once the round is over [orig: the post-round input gate —
-# the client input uplinks stop against g_spawn_success_gate @0x42c410].
-var _round_ended := false
-# Pending NW_SP_DEBUG_POSE teleport (see DebugPoseEnv).
-var _debug_pose_env := OS.get_environment("NW_SP_DEBUG_POSE")
-var _end_winner := 0
-var _end_screen_delay := 0.0
-var _end_screen: MissionEndScreen = null
+var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -> score screen)
 var _shutdown_prepared := false
 var _shutdown_resources_released := false
 var _quit_requested := false
@@ -284,17 +273,17 @@ func _ready() -> void:
 	if not loose_mission.is_empty():
 		start_loose_mission(loose_mission)
 		return
-	# Dev/headless convenience: NW_SP_MISSION=<name.bms> boots straight into a single-player
-	# mission via the same path as the menu's Start button, so the runtime (and its HUD) can be
-	# exercised without menu navigation. Off by default. NW_SP_DEBUG_POSE rides
-	# beside it (one-shot post-spawn teleport; see DebugPoseEnv).
-	var sp_mission := OS.get_environment("NW_SP_MISSION")
+	# Dev/probe launches: `--mission <name.bms>` (LaunchFlags) boots straight into a
+	# single-player mission via the same path as the menu's Start button, so the
+	# runtime (and its HUD) can be exercised without menu navigation. Off by
+	# default; a post-spawn pose rides the game_debug teleport action over MCP.
+	var sp_mission := LaunchFlags.mission()
 	if not sp_mission.is_empty():
 		_on_start_requested(sp_mission)
 		return
-	# Co-op LAN demo hooks (NW_LAN_HOST / NW_LAN_JOIN) ride the controller.
-	# Mirrors NW_SP_MISSION above; two instances on localhost = the co-op demo.
-	_net.maybe_launch_lan_from_env()
+	# Co-op LAN launches (`--lan-host` / `--lan-join`) ride the controller.
+	# Mirrors `--mission` above; two instances on localhost = the co-op demo.
+	_net.maybe_launch_lan_from_flags()
 
 
 # Consume Esc before weapon.mnu's shell-wired CANCEL hotkey and FlyCamera can both
@@ -395,8 +384,9 @@ func _on_dev_tools_game_input_mode_changed(_playing: bool) -> void:
 
 
 func _is_game_play_available() -> bool:
-	return _state == State.WORLD and not _round_ended and not _world_load_pending \
-			and _end_screen == null and _world != null and _world.is_loaded()
+	return _state == State.WORLD and not _end_flow.is_round_ended() \
+			and not _world_load_pending and not _end_flow.has_screen() \
+			and _world != null and _world.is_loaded()
 
 
 func _refresh_dev_tools_game_state() -> void:
@@ -452,6 +442,10 @@ func get_game_debug_adapter() -> GameDebugAdapter:
 				begin_hud_hidden_capture,
 				finish_hud_hidden_capture,
 				hud_hidden_capture_witness)
+		_debug_adapter.set_probe_seams(ProbeShellSeams.for_shell(self,
+				func(): return _world, func(): return _player_presenter,
+				func(): return _hud_presenter, func(): return _menu_shell,
+				func(): return _armory_presenter, func(): return _deploy_presenter))
 	return _debug_adapter
 func get_frame_stats() -> FrameStats:
 	return _frame_stats
@@ -461,49 +455,24 @@ func is_root_render_stats_measured() -> bool:
 
 
 func is_gameplay_input_active() -> bool:
-	return _state == State.WORLD and not _round_ended \
+	return _state == State.WORLD and not _end_flow.is_round_ended() \
 			and (not is_dev_tools_open() or _dev_tools.is_game_playing())
 
 
 # --- End of mission (SP) -------------------------------------------------------
 
+# The sim's round_end effect arms MissionEndFlow; the flow's beat and screen run
+# from _process.
 func _on_shell_mission_effects(effects: Array) -> void:
 	for e in effects:
 		if e is Dictionary and String(e.get("kind", "")) == "round_end":
-			_begin_end_of_mission(int(e.get("a", 0)))
-
-
-func _begin_end_of_mission(winner: int) -> void:
-	if _round_ended:
-		return
-	var sim = _world.get_sim() if _world != null else null  # MP: EndRoundPresenter (5.68)
-	if sim != null and bool(sim.get_round_outcome_debug().get("mp_session", false)):
-		return
-	_round_ended = true
-	_end_winner = winner
-	# The short beat between the round end and the score/failed screen stands in for
-	# the cine lead-in (the lose letterbox+fade, the win flyaway — D-AI-10).
-	# [orig: Cine_StartPlayback @0x577840 / Cine_InitPlayback @0x578390]
-	_end_screen_delay = 3.0
+			_end_flow.begin(int(e.get("a", 0)), _world.get_sim() if _world != null else null)
 
 
 func _show_end_screen() -> void:
-	if _end_screen != null:
-		return
-	var outcome: Dictionary = {}
-	var sim = _world.get_sim() if _world != null else null
-	if sim != null:
-		outcome = sim.get_round_outcome_debug()
-	if outcome.is_empty():
-		outcome = {"ended": true, "winner_team": _end_winner}
-	_end_screen = MissionEndScreen.new()
-	_end_screen.name = "MissionEndScreen"
 	var banner := _hud_presenter.endround_banner_line() if _hud_presenter != null else ""
-	_end_screen.setup(outcome, banner, _root)
-	var mount: Node = _hud if _hud != null else self
-	mount.add_child(_end_screen)
-	_end_screen.exit_requested.connect(_on_end_screen_exit)
-	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	_end_flow.show_screen(_world.get_sim() if _world != null else null, banner, _root,
+			_hud if _hud != null else self, _on_end_screen_exit)
 
 
 # [orig: g_mission_exit_reason = 1 (ESC / the epilog timeout) -> the main loop pushes
@@ -697,16 +666,6 @@ func apply_picked_resource_dir(dir: String, process_local: bool) -> bool:
 	return true
 
 
-## Mount `dir` as this shell's resource root: packed PFFs, `/exp` expansion,
-## `/d` loose override, and `/game` SCR policy. With `allow_loose_root` (the
-## `--loose-root` flag, passed by ONED-managed runs) a directory holding
-## none of the packed archives falls back to a loose mount — the same data
-## contract used by the packed game, so ONED can run a loose extract
-## and the dev zip's bundled assets/ boots as the game it is
-## (LaunchFlags.boot_loose_allowed). The no-archives fatal stays the picked default
-## [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
-## Warns and returns null on failure. Public and parameterized so the fallback
-## contract is testable without process arguments (ADR 0018).
 func _on_dir_canceled() -> void:
 	_cleanup_picker()
 	_request_resource_dir()
@@ -734,6 +693,46 @@ func start_loose_mission(bms_name: String) -> void:
 	start_world_load(
 		{"mission_file": bms_name},
 		Callable(_world, "load_loose_mission").bind(bms_name))
+
+
+## The probe runner's mission verbs (ProbeShellSeams, ADR 0041): the menu's
+## Start path, the saved-BMS path parity captures stage, and the return leg.
+func start_mission(bms_name: String) -> Error:
+	var gate := _mission_start_gate()
+	if gate == OK:
+		_on_start_requested(bms_name)
+	return gate
+
+
+func start_saved_mission(saved_path: String, bms_name: String, profile: Dictionary = {}) -> Error:
+	var gate := _mission_start_gate()
+	if gate != OK:
+		return gate
+	var mission := MissionData.new()
+	if mission.open_file(saved_path) != OK:
+		return ERR_FILE_CANT_OPEN
+	if not profile.is_empty():
+		set_local_player_profile(profile)
+	start_world_load({"mission_file": bms_name},
+			Callable(_world, "load_mission_data").bind(mission, bms_name))
+	return OK
+
+
+func return_to_menu() -> Error:
+	if _world_load_pending:
+		return ERR_BUSY
+	if not _world.is_loaded():
+		return ERR_UNAVAILABLE
+	_on_return_to_menu()
+	return OK
+
+
+func _mission_start_gate() -> Error:
+	if _root == null:
+		return ERR_UNCONFIGURED
+	if _world_load_pending or not _world_load.can_start():
+		return ERR_BUSY
+	return ERR_ALREADY_IN_USE if _world.is_loaded() else OK
 
 
 ## Graceful runtime stop seam used by the shell and optional control service.
@@ -853,17 +852,6 @@ func _on_join_deploy_pick_required() -> void:
 		_on_world_load_failed("join: the deploy screen failed to open (death.mnu)")
 
 
-## An established session ended without the player asking: the host closed it on its own
-## terms (its punt channel — a CRC mismatch, a violation sweep, the six-minute deploy-screen
-## idle kick), or it went silent past the connection reap window. Retail EXITS THE MISSION
-## with a reason here and raises no in-world dialog, so this takes the shell's existing
-## abort-to-menu leg with the decoded reason named.
-## [orig: the punt record CNapiNPConnection_HandleDescriptionPacket @ 0x621ae0 and the
-##  cs_dir0.timeout_ms = 120000 reap CNapiNetwork_Init @ 0x4ca4a0, both ->
-##  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0. The captured DPC 33 falls to
-##  Input_QueueEvent(3) @ 0x4c67a4, whose action sets g_mission_exit_reason = 1 and drops
-##  the connection (Input_HandleActionBinding case 3 @ 0x49af2c) — reason 1 is the same
-##  teardown + "MainMenu" push every abort leg takes @ 0x568654]
 ## The host's round cycle: the 2790-tick post-round linger expiry EXITS THE
 ## MISSION into the map cycle — retail's server sets exit reason 3 and reloads
 ## the next rotation entry; the rotation itself is not modeled, so the shell
@@ -890,6 +878,17 @@ func _maybe_exit_round_cycle() -> void:
 	_abort_to_menu("round cycle", "post-round linger expired (mission exit 3)")
 
 
+## An established session ended without the player asking: the host closed it on its own
+## terms (its punt channel — a CRC mismatch, a violation sweep, the six-minute deploy-screen
+## idle kick), or it went silent past the connection reap window. Retail EXITS THE MISSION
+## with a reason here and raises no in-world dialog, so this takes the shell's existing
+## abort-to-menu leg with the decoded reason named.
+## [orig: the punt record CNapiNPConnection_HandleDescriptionPacket @ 0x621ae0 and the
+##  cs_dir0.timeout_ms = 120000 reap CNapiNetwork_Init @ 0x4ca4a0, both ->
+##  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0. The captured DPC 33 falls to
+##  Input_QueueEvent(3) @ 0x4c67a4, whose action sets g_mission_exit_reason = 1 and drops
+##  the connection (Input_HandleActionBinding case 3 @ 0x49af2c) — reason 1 is the same
+##  teardown + "MainMenu" push every abort leg takes @ 0x568654]
 func _on_session_lost(reason: String) -> void:
 	# Already back in the menu with nothing loading: the teardown ran (this is the
 	# double-notification guard, not a state test the loss depends on). A loss during
@@ -933,12 +932,10 @@ func _on_camera_escape() -> void:
 		if _world != null:
 			_world.cancel_join_admission()
 		return
-	# Round over: ESC leaves the mission instead of pausing [orig: ESC (0x1B) sets
-	# g_mission_exit_reason = 1 during the epilog, Input_HandleSpecialKeys @0x49c8e2].
-	if _round_ended:
-		if _end_screen != null:
-			_end_screen.request_exit()
-		else:
+	# Round over: ESC leaves the mission instead of pausing (the witness rides
+	# MissionEndFlow.request_screen_exit).
+	if _end_flow.is_round_ended():
+		if not _end_flow.request_screen_exit():
 			_on_end_screen_exit()
 		return
 	if _state in [State.WORLD, State.DEPLOY, State.END_ROUND]:
@@ -986,7 +983,7 @@ func _on_return_to_menu() -> void:
 ## resume verb hands play back.
 func mcp_open_ingame_menu() -> Error:
 	if _world == null or not _world.is_loaded() or _world_load_pending \
-			or _round_ended:
+			or _end_flow.is_round_ended():
 		return ERR_UNAVAILABLE
 	if _state == State.PAUSED:
 		return OK
@@ -1000,7 +997,7 @@ func mcp_open_ingame_menu() -> Error:
 
 func mcp_open_armory() -> Error:
 	if _world == null or not _world.is_loaded() or _world_load_pending \
-			or _round_ended or _armory_presenter == null:
+			or _end_flow.is_round_ended() or _armory_presenter == null:
 		return ERR_UNAVAILABLE
 	if _state == State.ARMORY:
 		return OK
@@ -1019,12 +1016,7 @@ func mcp_open_armory() -> Error:
 func _teardown_world_to_menu() -> void:
 	_world_load.dismiss()
 	finish_hud_hidden_capture()
-	_round_ended = false
-	_end_winner = 0
-	_end_screen_delay = 0.0
-	if _end_screen != null:
-		_end_screen.queue_free()
-		_end_screen = null
+	_end_flow.reset()
 	if _player_presenter != null:
 		_player_presenter.teardown()
 	if _armory_presenter != null:
@@ -1082,11 +1074,6 @@ func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
 	return _shell_presentation.hud_hidden_capture_witness(_hud_presenter, _hud)
 
 
-# Drive the loaded world's per-frame foliage coverage. Tick whenever a world is
-# loaded and not paused (the pause menu freezes it); tick() itself no-ops until the
-# world finishes loading. Gating on "loaded, not paused" rather than State.WORLD
-# also lets a caller that drives load_world() directly (the headless runtime probe,
-# which stays in MENU) keep dispatching foliage.
 var _perf_probe_enabled := false
 var _perf_probe_spans: Dictionary = {}
 var _perf_probe_skip_world := false
@@ -1109,9 +1096,6 @@ func _process(delta: float) -> void:
 		return
 	_refresh_dev_tools_game_state()
 	var stats_on: bool = _frame_phase_sampler.begin_shell_control()
-	if not _debug_pose_env.is_empty() and _state == State.WORLD:
-		_debug_pose_env = DebugPoseEnv.apply(_debug_pose_env,
-				_world.get_sim() if _world != null else null)
 	var probe_enabled := _perf_probe_enabled
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
 	# the F3 Stats capture both consume the same measurements.
@@ -1123,15 +1107,13 @@ func _process(delta: float) -> void:
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	var dev_tools_interacting := dev_tools_open and not _dev_tools.is_game_playing()
 	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND] \
-			or dev_tools_interacting or _end_screen != null or not _world.is_loaded():
+			or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	# The end-of-mission lead-in: the world keeps ticking; the score/failed screen
 	# mounts after the short beat [orig: the SP world runs through the epilog cine].
-	if _round_ended and _end_screen == null and _world.is_loaded():
-		_end_screen_delay -= delta
-		if _end_screen_delay <= 0.0:
-			_show_end_screen()
+	if _world.is_loaded() and _end_flow.tick(delta):
+		_show_end_screen()
 	# Only the pause menu freezes the world, and only in a SINGLE-PLAYER session. The
 	# armory runs over LIVE play: the match keeps simulating around the player while the
 	# WEAPON screen is up [orig: the useitem armory leg @0x4e0b3f has no world-stop leg;
@@ -1164,7 +1146,6 @@ func _process(delta: float) -> void:
 		_world.tick(_camera.global_position, _camera.global_transform,
 				delta, frame_input)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
-	_ai_probe.tick(_world, delta) # env-gated self-test sim-truth dump; inert without NW_AI_PROBE
 	# Camera placement runs in the world frame now (local-view device leg,
 	# D-RORD-8); this covers frames that skip it (probe world-skip, no live world).
 	if _player_presenter != null and (skip_world or not _world.is_loaded()):

@@ -28,9 +28,7 @@ jobs:
 
       - name: Build and test
         shell: bash
-        env:
-          BUILD_GODOT: "0"
-        run: scripts/build.sh
+        run: scripts/build.sh --no-godot
 
   # Tagged releases ship the GAME zip only: opennova.exe + the packed pffs,
   # built by ONED's hidden --pack-game CLI, pre-configured to boot from its own

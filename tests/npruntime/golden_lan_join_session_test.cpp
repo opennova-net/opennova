@@ -1,6 +1,6 @@
 // Golden parity for the P2 per-connection handshake legs, driven by the local LAN host/join session
-// capture (.scratch/golden/retail-lan-host-join-session.pcapng). Env-gated on NW_GOLDEN_LAN_JOIN_SESSION
-// with a DEFAULT_* fallback; skips cleanly when the golden is absent (no committed derived oracle).
+// capture (.scratch/golden/retail-lan-host-join-session.pcapng). Gated on
+// <OPENNOVA_CAPTURES>/golden; reports Skipped when the golden is absent (no committed derived oracle).
 //
 // WHAT THIS PROVES (the P2 bar, honestly scoped):
 //   The promoted np handshake legs, fed the golden's real C2S 0x42 ClientAuth and seed-injected with
@@ -44,10 +44,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
-
-#ifndef DEFAULT_LAN_JOIN_SESSION_PCAP
-#define DEFAULT_LAN_JOIN_SESSION_PCAP ""
-#endif
+#include "common/retail_paths.h"
 
 namespace {
 using namespace opennova;
@@ -72,18 +69,11 @@ int first_diff(const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) {
 } // namespace
 
 int main() {
-	std::string path;
-	if (const char *env = std::getenv("NW_GOLDEN_LAN_JOIN_SESSION"); env && *env)
-		path = env;
-	else
-		path = DEFAULT_LAN_JOIN_SESSION_PCAP;
+	const std::string path = retail::golden("retail-lan-host-join-session.pcapng");
 
 	std::vector<net::PcapDatagram> pkts;
-	if (path.empty() || !net::read_pcap_udp_file(path, pkts)) {
-		std::printf("[skip] golden LAN-join-session capture not found "
-		            "(set NW_GOLDEN_LAN_JOIN_SESSION) — '%s'\n", path.c_str());
-		return 0; // skip clean — CI stays green without the gitignored golden
-	}
+	if (!net::read_pcap_udp_file(path, pkts))
+		return retail::skip("<OPENNOVA_CAPTURES>/golden/retail-lan-host-join-session.pcapng (the golden LAN-join-session capture)");
 
 	// Partition: the host is the source of the 0x81/0x82 server replies; the joiner is the source of
 	// the 0x42 ClientAuth. Grab the first of each + the joiner's port.
@@ -166,6 +156,8 @@ int main() {
 	if (!expect(oh.hk == gh.hk, "0x81 advertises the golden host_key (R1 host-key stamp)")) return 1;
 	if (!expect(oh.pn == gh.pn, "0x81 PN echoes the client PN")) return 1;
 	if (!expect(oh.pg == gh.pg, "0x81 PG echoes the client PG")) return 1;
+	if (oh.p2 != gh.p2)
+		std::fprintf(stderr, "  0x81 P2: golden 0x%08x ours 0x%08x\n", gh.p2, oh.p2);
 	if (!expect(oh.p2 == gh.p2, "0x81 P2 matches the retail BuildFlags value")) return 1;
 
 	// --- 0x82 leg: replay the REAL golden ClientAuth datagram through handle_client_join. ---

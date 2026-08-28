@@ -339,9 +339,9 @@ Impac22b.fnt under D-LOADSCR-2's standing CGameFont approximation.
   `Server_ToggleDedicatedFlag @ 0x4dc9c0`.
 - The centered splash text's vertical anchor (top vs baseline at y=730) rides the
   D-LOADSCR-2 CGameFont approximation; confirm against retail with the visual
-  probes — `godot/tests/game/loading_screen_probe.gd` (splash phase) and
-  `godot/tests/game/loading_screen_splash_render_probe.gd` (windowed
-  self-readback; `OPENNOVA_JO_DIR` + `SPLASH_CAPTURE_DIR`).
+  probe — `loading_screen_stage` (`godot/probes/stage/loading_screen_stage_probe.gd`,
+  a `game_probe` tool: mode `session_hold` for the splash phase, `splash_capture`
+  for the self-readback captures).
 - D-LOADSCR-8 (the epilog-stage splash re-show) above.
 
 ## IDB changes made during the session

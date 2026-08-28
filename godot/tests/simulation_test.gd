@@ -65,14 +65,14 @@ func after_each() -> void:
 
 
 # Authored 3DI variants minted once from the retired edit surface
-# (fixtures/threedi/synthetic/README.md): CTRL names, PANM rows and flags the
+# (fixtures/README.md): CTRL names, PANM rows and flags the
 # sim's own parse-once cache consumes from disk.
-const SYN_B50CAL_HEAT_GLOW_SLIDE := "res://../fixtures/threedi/synthetic/b50cal_heat_glow_slide_part1.3di"
-const SYN_ARMRY_SPECIAL1_SLIDE := "res://../fixtures/threedi/synthetic/armry01_special1_slide_part1.3di"
-const SYN_ARMRY_SPECIAL2_SLIDE := "res://../fixtures/threedi/synthetic/armry01_special2_slide_part1.3di"
-const SYN_DM1A1_SPECIAL1_SLIDE_EWEP01 := "res://../fixtures/threedi/synthetic/dm1a1_special1_slide_ewep01.3di"
-const SYN_PMP_LOD0_INERT_LOD1_LIVE := "res://../fixtures/threedi/synthetic/pmpjk01_lod0_inert_lod1_sine_rotz.3di"
-const SYN_PANM_LIVENESS_DIR := "res://../fixtures/threedi/synthetic/"
+const SYN_MOUNT_HEAT_GLOW_SLIDE := "res://../fixtures/threedi/synth/mount_heat_glow_slide_part1.3di"
+const SYN_ARMRY_SPECIAL1_SLIDE := "res://../fixtures/threedi/synth/armory_special1_slide_part1.3di"
+const SYN_ARMRY_SPECIAL2_SLIDE := "res://../fixtures/threedi/synth/armory_special2_slide_part1.3di"
+const SYN_TANK_SPECIAL1_SLIDE_EWEP01 := "res://../fixtures/threedi/synth/tank_special1_slide_ewep01.3di"
+const SYN_PMP_LOD0_INERT_LOD1_LIVE := "res://../fixtures/threedi/synth/pump_lod0_inert_lod1_sine_rotz.3di"
+const SYN_PANM_LIVENESS_DIR := "res://../fixtures/threedi/synth/"
 
 
 func _native_fixture_dir() -> String:
@@ -144,11 +144,11 @@ func _bytes_with_renamed_user_point(bytes: PackedByteArray, from_name: String,
 	return bytes
 
 
-# The 19-bone CharModel + BINOC rig as a named organic graphic: <graphic>.3di,
+# The 19-bone person + BINOC rig as a named organic graphic: <graphic>.3di,
 # <graphic>.adm (the anim map the native pose provider resolves through the
 # item's anim_def), and the shared BINOC.bad clip.
 func _write_char_rig(dir: String, graphic: String) -> void:
-	_copy_fixture(dir, "res://../fixtures/threedi/3di3/CharModel.3di",
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/person.3di",
 			graphic + ".3di")
 	_copy_fixture(dir, "res://../fixtures/bad/BINOC.bad", "BINOC.bad")
 	var quote := String.chr(34)
@@ -210,7 +210,7 @@ func _vehicle_ctrl_item_db() -> ItemDatabase:
 	file.store_string("""begin "CTRL Vehicle Fixture"
   id 105007
   type vehicle
-  graphic dm1a1
+  graphic tank
   sid ctrlvehicle
   ai_function cveh
   render_function cveh
@@ -798,10 +798,10 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
-	# The fixture def's dm1a1 graphic carries the one authored ctrlx25 point,
+	# The fixture def's tank graphic carries the one authored ctrlx25 point,
 	# so the native extraction installs the controller seat the drive needs.
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/dm1a1/dm1a1.3di", "dm1a1.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/tank.3di", "tank.3di")
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5007]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
@@ -931,12 +931,12 @@ func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
 	assert_true(md.set_entity_property_int(
 			MissionData.KIND_ORGANIC, int(npc["index"]),
 			"wp_number", int(mount["bms_id"])))
-	# One-seat carrier per retail prefix: B50cal's authored Usegun row (bone 6),
+	# One-seat carrier per retail prefix: mount's authored Usegun row (bone 6),
 	# byte-renamed for the sitex/ctrlx/drvrx variants.
 	var renames := {1: "sitex00", 2: "ctrlx00", 5: "drvrx00"}
 	var dir := _native_fixture_dir()
 	var model_bytes := FileAccess.get_file_as_bytes(
-			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")
+			"res://../fixtures/threedi/synth/mount.3di")
 	if renames.has(seat_type):
 		model_bytes = _bytes_with_renamed_user_point(
 				model_bytes, "Usegun", String(renames[seat_type]))
@@ -1546,7 +1546,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# mission +y (bearing 90). The target sits 8 m along +y so the shot connects
 	# only when the round bearing rides the heading frame directly — the old
 	# (90 - heading) flip flew the shot along +x and only an east-side target
-	# could pass (the compensating-error pair the fp_impact_probe pinned;
+	# could pass (the compensating-error pair the fp_impact probe pinned;
 	# ledger D-WPN-18).
 	# Use the fixture's Generic Soldier (wire id 5311 -> items.def id 105311),
 	# then resolve traits through the same production seam as MissionPresentation. Retail
@@ -1666,14 +1666,14 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
-	# Native root: the guns pose their UseGun seat from B50cal's authored
+	# Native root: the guns pose their UseGun seat from mount's authored
 	# Usegun point; both enemies pose their COBJ sections from the US02
-	# CharModel + BINOC rig resolved through their anim_def.
+	# person + BINOC rig resolved through their anim_def.
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	_write_char_rig(dir, "us02")
 	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
-			"id 101294", "id 101294\n  graphic B50cal"))
+			"id 101294", "id 101294\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
@@ -1799,7 +1799,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot() -> void:
 	# Config 6 is the decisive per-config witness: the mounted body/neck stay on
 	# the carrier frame while the head alone consumes aim. Build an actual
-	# ObjectModel from the same CharModel + BINOC rig as collision, feed it
+	# ObjectModel from the same person + BINOC rig as collision, feed it
 	# the packed presentation result, and compare its final head deformation to
 	# COBJ section 14 before shooting through that rendered point.
 	var md := MissionData.new()
@@ -1821,13 +1821,13 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
-	# Native sim sources: B50cal's authored Usegun seat (bone 6) with the def's
-	# phrase_set 6, plus the US02 CharModel + BINOC rig for the mounted pose.
+	# Native sim sources: mount's authored Usegun seat (bone 6) with the def's
+	# phrase_set 6, plus the US02 person + BINOC rig for the mounted pose.
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	_write_char_rig(dir, "us02")
 	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
-			"id 101294", "id 101294\n  graphic B50cal\n  phrase_set 6"))
+			"id 101294", "id 101294\n  graphic mount\n  phrase_set 6"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
@@ -1835,7 +1835,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	# longer reads them (native-only pose sources).
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
+			"res://../fixtures/threedi/synth/person.3di")), OK)
 	var bad_root := ResourceRoot.new()
 	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/bad")), OK)
@@ -1843,7 +1843,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	assert_true(skeletal.load_from_bad_files(
 			bad_root, "BINOC.bad", {"anim_emplaced": "BINOC.bad"},
 			data.get_bone_origins(), data.get_bone_parents()),
-			"mounted CharModel rig loads: %s" % skeletal.get_last_error())
+			"mounted person rig loads: %s" % skeletal.get_last_error())
 	assert_gte(sim.resolve_collision_instances(item_db), 1,
 			"the mounted enemy owns authored posed COBJ collision")
 	var ammo_root := ResourceRoot.new()
@@ -1928,12 +1928,11 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	await get_tree().process_frame
 	await get_tree().process_frame
 	skeleton.force_update_all_bone_transforms()
-	# Existing native fixture witness: CharModel COBJ 14/head authors
-	# center=(3578,65,54371) in signed 16.16 collision space. The retail
-	# fixed-to-render sandwich maps local collision (x,y,z) to the skeleton's
-	# node frame as (y,z,x) before the live bone deformation.
-	var head_center_model := Vector3(
-			65.0 / 65536.0, 54371.0 / 65536.0, 3578.0 / 65536.0)
+	# The synthetic person's COBJ 14/head authors center=(1/16, 0, 13/16)
+	# in signed 16.16 collision space (tests/fixtures/minimal_3di_gen.cpp). The
+	# retail fixed-to-render sandwich maps local collision (x,y,z) to the
+	# skeleton's node frame as (y,z,x) before the live bone deformation.
+	var head_center_model := Vector3(0.0, 0.8125, 0.0625)
 	var rendered_head_matrix := (skeleton.global_transform
 			* skeleton.get_bone_global_pose(14)
 			* skeleton.get_bone_global_rest(14).affine_inverse())
@@ -2368,13 +2367,13 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 			MissionData.KIND_ITEM, 101419,
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 	var sim := Simulation.new()
-	# The fixture def row (101419) authors graphic B50cal, phrase_set 4, and
+	# The fixture def row (101419) authors graphic mount, phrase_set 4, and
 	# primary_weapon WPN_EMPLCD50NA — the native install reads all three.
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1419]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
@@ -2417,14 +2416,14 @@ func test_load_from_editor_mission_data() -> void:
 	sim.free()
 
 func test_item_seat_specs_mount_command_125_spawn() -> void:
-	# dsuv1 authors one ctrlx13 point plus four sitexNN points: the native
+	# carrier authors one ctrlx13 point plus four sitexNN points: the native
 	# extraction supplies the seat table the Dictionary seam used to fake.
 	var fixture_dir := _native_fixture_dir()
-	_copy_fixture(fixture_dir, "res://../fixtures/threedi/objects/dsuv1/dsuv1.3di", "dsuv1.3di")
+	_copy_fixture(fixture_dir, "res://../fixtures/threedi/synth/carrier.3di", "carrier.3di")
 	var item_db := _item_db_from_text(fixture_dir, """begin "Drivable Transport Truck"
   id 101294
   type vehicle
-  graphic dsuv1
+  graphic carrier
   attrib: PlayerControl
   physics 1
   player_speed 60
@@ -2446,7 +2445,7 @@ end
 end
 """)
 	var suv := ObjectData.new()
-	assert_eq(suv.open_file(fixture_dir.path_join("dsuv1.3di")), OK)
+	assert_eq(suv.open_file(fixture_dir.path_join("carrier.3di")), OK)
 	var ctrl_point := Vector3.INF
 	var passenger_point := Vector3.INF
 	for point_index in range(suv.get_user_point_count()):
@@ -2456,8 +2455,8 @@ end
 				ctrl_point = info.get("position", Vector3.ZERO)
 			"sitex00d":
 				passenger_point = info.get("position", Vector3.ZERO)
-	assert_true(ctrl_point.is_finite(), "dsuv1 authors its ctrlx13 point")
-	assert_true(passenger_point.is_finite(), "dsuv1 authors its sitex00d point")
+	assert_true(ctrl_point.is_finite(), "carrier authors its ctrlx13 point")
+	assert_true(passenger_point.is_finite(), "carrier authors its sitex00d point")
 
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -2615,11 +2614,11 @@ func test_attach_labels_seats() -> void:
 	var vehicle := md.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
 	assert_false(vehicle.is_empty())
 	var sim := Simulation.new()
-	# B50cal byte-renamed: heat -> a sitex00 passenger beside the authored
+	# mount byte-renamed: heat -> a sitex00 passenger beside the authored
 	# Usegun, BCasing -> an armory1 anchor behind the def's Armory attrib.
 	var dir := _native_fixture_dir()
 	var model_bytes := FileAccess.get_file_as_bytes(
-			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")
+			"res://../fixtures/threedi/synth/mount.3di")
 	model_bytes = _bytes_with_renamed_user_point(model_bytes, "heat", "sitex00")
 	model_bytes = _bytes_with_renamed_user_point(model_bytes, "BCasing", "armory1")
 	_write_fixture_bytes(dir, "labelgun.3di", model_bytes)
@@ -2665,7 +2664,7 @@ func test_attach_labels_share_complete_can_fire_verdict() -> void:
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	var model_bytes := FileAccess.get_file_as_bytes(
-			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")
+			"res://../fixtures/threedi/synth/mount.3di")
 	_write_fixture_bytes(dir, "labelgun.3di", model_bytes)
 	var item_db := _item_db_from_text(dir, """begin "Labels Gun"
   id 101294
@@ -2725,11 +2724,11 @@ func test_attach_labels_hide_occupied_and_out_of_range() -> void:
 	# vehicle instead [orig: Vehicle_HasEnemyOccupant @0x4359f0].
 	assert_true(md.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "team", 1))
 	var sim := Simulation.new()
-	# Two-seat carrier: B50cal renamed to one ctrlx00 (the command-125 target)
+	# Two-seat carrier: mount renamed to one ctrlx00 (the command-125 target)
 	# plus one sitex00 passenger.
 	var dir := _native_fixture_dir()
 	var model_bytes := FileAccess.get_file_as_bytes(
-			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")
+			"res://../fixtures/threedi/synth/mount.3di")
 	model_bytes = _bytes_with_renamed_user_point(model_bytes, "Usegun", "ctrlx00")
 	model_bytes = _bytes_with_renamed_user_point(model_bytes, "heat", "sitex00")
 	_write_fixture_bytes(dir, "ctrlgun.3di", model_bytes)
@@ -2762,7 +2761,7 @@ func test_attach_labels_empty_out_of_range() -> void:
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
-			FileAccess.get_file_as_bytes("res://../fixtures/threedi/objects/B50Cal/B50Cal.3di"),
+			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/mount.3di"),
 			"Usegun", "sitex00"))
 	var item_db := _item_db_from_text(dir, """begin "One Seat Gun"
   id 101294
@@ -2810,11 +2809,11 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/dsuv1/dsuv1.3di", "dsuv1.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/carrier.3di", "carrier.3di")
 	var item_db := _item_db_from_text(dir, """begin "Rotated SUV"
   id 101294
   type vehicle
-  graphic dsuv1
+  graphic carrier
 end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
@@ -2828,10 +2827,10 @@ end
 	var soldier_idx := _first_organic_ai_index(sim)
 	assert_true(soldier_idx >= 0, "found the soldier's AI row")
 	var pos := sim.get_entity_position(soldier_idx)
-	# Command 125 selects dsuv1's authored ctrlx13; the mounted origin is that
+	# Command 125 selects carrier's authored ctrlx13; the mounted origin is that
 	# model point through the same rotated entity transform the placer renders.
 	var suv := ObjectData.new()
-	assert_eq(suv.open_file(dir.path_join("dsuv1.3di")), OK)
+	assert_eq(suv.open_file(dir.path_join("carrier.3di")), OK)
 	var ctrl_point := Vector3.INF
 	for point_index in range(suv.get_user_point_count()):
 		var info: Dictionary = suv.get_user_point_info(point_index)
@@ -2855,7 +2854,7 @@ func test_local_player_toggle_mount_weapon_busy_gate() -> void:
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
-			FileAccess.get_file_as_bytes("res://../fixtures/threedi/objects/B50Cal/B50Cal.3di"),
+			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/mount.3di"),
 			"Usegun", "sitex00"))
 	var item_db := _item_db_from_text(dir, """begin "One Seat Truck"
   id 101294
@@ -2916,9 +2915,9 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	# This cull witness pairs the emplacement with WPN_EMPLCD50 (a def with an
 	# authored gfx1), so the superset def overrides the fixture's AVENGER row.
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	var item_db := _item_db_from_text(dir, _fixture_items_text()
-			.replace("id 101294", "id 101294\n  graphic B50cal")
+			.replace("id 101294", "id 101294\n  graphic mount")
 			.replace("primary_weapon WPN_AVENGER", "primary_weapon WPN_EMPLCD50"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
@@ -2983,7 +2982,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 
 func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	# The emplacement carries a deterministic HEAT_GLOW collision track: the
-	# B50Cal fixture with its LOD0 rows replaced by one register-driven slide of
+	# mount fixture with its LOD0 rows replaced by one register-driven slide of
 	# part 1 (0..4 wu on CTRL 0 = HEAT_GLOW). The scoped parent visual/collision
 	# frame must sample its embedded MountSlot only while a live UseGun child is
 	# attached; the local FP state is the comparison witness for the
@@ -2992,7 +2991,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	#  HUD_CacheWeaponSlotInfo stores @ 0x440969 / @ 0x440991]
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
-			SYN_B50CAL_HEAT_GLOW_SLIDE)), OK)
+			SYN_MOUNT_HEAT_GLOW_SLIDE)), OK)
 	assert_eq(String((object_data.get_control_registers()[0] as Dictionary).get("name", "")),
 			"HEAT_GLOW")
 	assert_eq(object_data.get_part_anim_count(0), 1)
@@ -3011,9 +3010,9 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# The authored HEAT_GLOW track rides the fixture bytes; the sim's own parse
-	# of B50cal.3di is the only seat/collision source.
+	# of mount.3di is the only seat/collision source.
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, SYN_B50CAL_HEAT_GLOW_SLIDE, "B50cal.3di")
+	_copy_fixture(dir, SYN_MOUNT_HEAT_GLOW_SLIDE, "mount.3di")
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
@@ -3109,7 +3108,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 
 
 func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
-	# B50Cal's authored PANM binds its turret and barrel to the semantic
+	# mount's authored PANM binds its turret and barrel to the semantic
 	# EWEAP_GUNYAW/EWEAP_GUNPITCH registers. A mounted local player's live look
 	# must pose those parts in authoritative model space, not only turn the camera.
 	var md := MissionData.new()
@@ -3119,13 +3118,13 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/objects/B50Cal/B50Cal.3di")), OK)
+			"res://../fixtures/threedi/synth/mount.3di")), OK)
 	var usegun_info: Dictionary = {}
 	for point_index in range(object_data.get_user_point_count()):
 		var info: Dictionary = object_data.get_user_point_info(point_index)
 		if String(info.get("name", "")).nocasecmp_to("Usegun") == 0:
 			usegun_info = info
-	assert_false(usegun_info.is_empty(), "B50Cal exposes its authored Usegun seat")
+	assert_false(usegun_info.is_empty(), "mount exposes its authored Usegun seat")
 	var expected_usegun_world := MissionObjectPlacer.entity_transform(
 			Vector3(2, 0, 0), Vector3.ZERO) * Vector3(
 					usegun_info.get("position", Vector3.ZERO))
@@ -3134,7 +3133,7 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			"res://../fixtures/def/items.def")), OK)
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1419]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
@@ -3219,7 +3218,7 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 		if before[index].distance_to(after_yaw[index]) > 0.001:
 			yaw_moved += 1
 	assert_gt(yaw_moved, 0,
-			"EWEAP_GUNYAW moves the authored B50Cal turret with local look")
+			"EWEAP_GUNYAW moves the authored mount turret with local look")
 
 	var pitch_before := sim.get_local_player_pitch_deg()
 	sim.add_local_player_look(0.0, 100.0)
@@ -3240,7 +3239,7 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 		if after_yaw[index].distance_to(after_pitch[index]) > 0.001:
 			pitch_moved += 1
 	assert_gt(pitch_moved, 0,
-			"EWEAP_GUNPITCH moves the authored B50Cal barrel with local look")
+			"EWEAP_GUNPITCH moves the authored mount barrel with local look")
 	sim.free()
 
 
@@ -3253,11 +3252,11 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	var sim := Simulation.new()
 	# The fixture def row already authors primary_weapon WPN_AVENGER (a finite
 	# clip makes parent-slot persistence observable across remounts); the
-	# superset adds the B50cal graphic for the authored Usegun seat.
+	# superset adds the mount graphic for the authored Usegun seat.
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
-			"id 101294", "id 101294\n  graphic B50cal"))
+			"id 101294", "id 101294\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
@@ -3432,14 +3431,14 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# All three fixture emplacement rows keep their authored primaries
-	# (AVENGER / EMPLCD50 / EMPLCD50); the shared B50cal graphic supplies the
+	# (AVENGER / EMPLCD50 / EMPLCD50); the shared mount graphic supplies the
 	# one authored Usegun seat per gun.
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	var item_db := _item_db_from_text(dir, _fixture_items_text()
-			.replace("id 101294", "id 101294\n  graphic B50cal")
-			.replace("id 101295", "id 101295\n  graphic B50cal")
-			.replace("id 101296", "id 101296\n  graphic B50cal"))
+			.replace("id 101294", "id 101294\n  graphic mount")
+			.replace("id 101295", "id 101295\n  graphic mount")
+			.replace("id 101296", "id 101296\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db,
 			PackedInt32Array([1294, 1295, 1296]))
 	assert_true(sim.load_from_mission_data(md))
@@ -3558,9 +3557,9 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
-			"id 101294", "id 101294\n  graphic B50cal"))
+			"id 101294", "id 101294\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
@@ -3618,9 +3617,9 @@ func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
-			"id 101294", "id 101294\n  graphic B50cal"))
+			"id 101294", "id 101294\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
@@ -3636,11 +3635,11 @@ func test_unarmed_offline_local_ordinary_seat_toggle_is_allowed() -> void:
 	assert_false(md.add_entity(MissionData.KIND_ITEM, 101294,
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 	var sim := Simulation.new()
-	# A passenger-only carrier (no primary weapon): B50cal's Usegun row renamed
+	# A passenger-only carrier (no primary weapon): mount's Usegun row renamed
 	# to sitex00 in a minimal authored def.
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
-			FileAccess.get_file_as_bytes("res://../fixtures/threedi/objects/B50Cal/B50Cal.3di"),
+			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/mount.3di"),
 			"Usegun", "sitex00"))
 	var item_db := _item_db_from_text(dir, """begin "Unarmed Seat Carrier"
   id 101294
@@ -3669,11 +3668,11 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di", "B50cal.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	var item_db := _item_db_from_text(dir, """begin "Config3 UseGun"
   id 101294
   type object
-  graphic B50cal
+  graphic mount
   phrase_set 3
 end
 """)
@@ -3956,14 +3955,14 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
 	var data := ObjectData.new()
 	assert_eq(data.open_file(
-		ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di")), OK)
+		ProjectSettings.globalize_path("res://../fixtures/threedi/synth/house.3di")), OK)
 	assert_true(data.has_collision())
 	assert_false(data.has_occlusion(), "fixture must exercise collision without OOBJ")
 
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/3di3/House.3di", "GuardTwr1.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/house.3di", "GuardTwr1.3di")
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
@@ -3994,7 +3993,7 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/3di3/House.3di", "GuardTwr1.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/house.3di", "GuardTwr1.3di")
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
@@ -4035,11 +4034,11 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	# Armry01 is a committed, loadable 3DI3 model with two user points. Relabel
+	# armory is a committed, loadable 3DI3 model with two user points. Relabel
 	# those two 16-byte name fields in a temporary copy so the integration test
 	# owns an exact multi-KZ witness without checking in another binary fixture.
 	var source_path := ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/objects/armry01/Armry01.3di")
+			"res://../fixtures/threedi/synth/armory.3di")
 	var bytes := FileAccess.get_file_as_bytes(source_path)
 	for source_name in ["Armory", "Ground"]:
 		var needle := String(source_name).to_ascii_buffer()
@@ -4062,7 +4061,7 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 		bytes[name_offset] = replacement.unicode_at(0)
 		bytes[name_offset + 1] = replacement.unicode_at(1)
 	var husk_dir := _native_fixture_dir()
-	_copy_fixture(husk_dir, "res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
+	_copy_fixture(husk_dir, "res://../fixtures/threedi/synth/house.3di", "Barrel1.3di")
 	_write_fixture_bytes(husk_dir, "Barrel1X.3di", bytes)
 	var husk_data := ObjectData.new()
 	assert_eq(husk_data.open_file(husk_dir.path_join("Barrel1X.3di")), OK)
@@ -4103,7 +4102,7 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	dead_bytes = _bytes_with_renamed_user_point(dead_bytes, "Armory", "dEaD")
 	var dead_dir := _native_fixture_dir()
 	_copy_fixture(dead_dir,
-			"res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
+			"res://../fixtures/threedi/synth/house.3di", "Barrel1.3di")
 	_write_fixture_bytes(dead_dir, "Barrel1X.3di", dead_bytes)
 	var dead_data := ObjectData.new()
 	assert_eq(dead_data.open_file(dead_dir.path_join("Barrel1X.3di")), OK)
@@ -4165,7 +4164,7 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	final_only_sim.resolve_item_traits(final_only_db)
 	var final_only_dir := _native_fixture_dir()
 	_copy_fixture(final_only_dir,
-			"res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
+			"res://../fixtures/threedi/synth/house.3di", "Barrel1.3di")
 	_write_fixture_bytes(final_only_dir, "Barrel1XF.3di", bytes)
 	_native_asset_root(final_only_sim, final_only_dir)
 	assert_eq(final_only_sim.resolve_collision_instances(final_only_db), 1)
@@ -4184,7 +4183,7 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	missing_sim.resolve_item_traits(item_db)
 	var missing_dir := _native_fixture_dir()
 	_copy_fixture(missing_dir,
-			"res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
+			"res://../fixtures/threedi/synth/house.3di", "Barrel1.3di")
 	_native_asset_root(missing_sim, missing_dir)
 	assert_eq(missing_sim.resolve_collision_instances(item_db), 1)
 	var missing_debug := missing_sim.get_destruction_debug(bms_id)
@@ -4201,7 +4200,7 @@ func test_retail_glass_model_maps_exact_userpoint_into_death_traits() -> void:
 	# a renamed committed model so this exercises the production SimModelCache
 	# and collision-resolution seam rather than a test-only trait setter.
 	var bytes := FileAccess.get_file_as_bytes(
-			"res://../fixtures/threedi/objects/armry01/Armry01.3di")
+			"res://../fixtures/threedi/synth/armory.3di")
 	bytes = _bytes_with_renamed_user_point(bytes, "Armory", "gLaSs")
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "eurhr2.3di", bytes)
@@ -4277,7 +4276,8 @@ end
 
 func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	# Retail collision construction and the projectile face walker do not
-	# require BVOL. Bird1 is a committed face-only witness (242 CFAC, 0 BVOL);
+	# require BVOL. The synthetic bird is the face-only witness (18 CFAC over
+	# nine bone sections, 0 BVOL);
 	# rejecting it here silently degrades authored bullet geometry to a sphere.
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -4291,15 +4291,15 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, "res://../fixtures/threedi/3di3/Bird1.3di", "GuardTwr1.3di")
+	_copy_fixture(dir, "res://../fixtures/threedi/synth/bird.3di", "GuardTwr1.3di")
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1,
 		"face-only CFAC remains a real collision model")
 	var entities: Array = sim.get_hitbox_debug().get("entities", [])
 	assert_eq(entities.size(), 1)
 	if entities.size() == 1:
-		assert_eq(int((entities[0] as Dictionary).get("face_total", 0)), 242,
-			"all authored Bird1 faces reach the projectile walker")
+		assert_eq(int((entities[0] as Dictionary).get("face_total", 0)), 18,
+			"all authored bird faces reach the projectile walker")
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	assert_true((sim.get_hitbox_debug().get("entities", []) as Array).is_empty(),
 		"the heavier non-organic mesh view retains its local 80-unit range")
@@ -4307,8 +4307,8 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 
 
 func test_panm_liveness_is_scoped_to_the_active_transform_family() -> void:
-	# Ten Shed variants, each with its LOD0 rows replaced by one row whose flags
-	# and track controls are the case (fixtures/threedi/synthetic/README.md):
+	# Ten shed variants, each with its LOD0 rows replaced by one row whose flags
+	# and track controls are the case (fixtures/README.md):
 	# every track control 0, the case's live tracks 0x10.
 	var cases := [
 		["panm_live_01_spinner", true, "spinner uses raw coefficients"],
@@ -4336,7 +4336,7 @@ func test_panm_liveness_is_scoped_to_the_active_transform_family() -> void:
 
 func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 	# The pump jack with an inert local LOD0 row and one live sine rotation on
-	# LOD1 (fixtures/threedi/synthetic/README.md).
+	# LOD1 (fixtures/README.md).
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
 		SYN_PMP_LOD0_INERT_LOD1_LIVE)), OK)
@@ -4402,11 +4402,11 @@ func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
 	}).is_empty())
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
-	# The crate's controller seat comes from the committed Armry01 model with
+	# The crate's controller seat comes from the committed armory model with
 	# its Armory point byte-renamed to ctrlx00 (the fixture def's graphic).
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
-			FileAccess.get_file_as_bytes("res://../fixtures/threedi/objects/armry01/Armry01.3di"),
+			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/armory.3di"),
 			"Armory", "ctrlx00"))
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
@@ -4484,7 +4484,7 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 	sim.enable_listen_server(true)
 	var dir := _native_fixture_dir()
 	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
-			FileAccess.get_file_as_bytes("res://../fixtures/threedi/objects/armry01/Armry01.3di"),
+			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/armory.3di"),
 			"Armory", "ctrlx00"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5006]))
 	assert_true(sim.load_from_mission_data(md))
@@ -4507,14 +4507,14 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 
 
 func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
-	# The M1A1 with a deterministic VEHICLE_SPECIAL1 track on its real turret
+	# The tank with a deterministic VEHICLE_SPECIAL1 track on its real turret
 	# part (the part owning the ewep01 user point); hang the synthetic ewep from
 	# that user point. A rigid parent-local reconstruction stays at the authored
 	# point; the authoritative mounted pose carries it four metres with the live
 	# part.
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			SYN_DM1A1_SPECIAL1_SLIDE_EWEP01)), OK)
+			SYN_TANK_SPECIAL1_SLIDE_EWEP01)), OK)
 	assert_eq(String((data.get_control_registers()[0] as Dictionary).get("name", "")),
 			"VEHICLE_SPECIAL1", "the fixture authors the semantic local CTRL name")
 	var anchor_index := -1
@@ -4525,7 +4525,7 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 			anchor_index = index
 			anchor_info = candidate
 			break
-	assert_gte(anchor_index, 0, "M1A1 fixture has its authored ewep01 attachment point")
+	assert_gte(anchor_index, 0, "tank fixture has its authored ewep01 attachment point")
 	if anchor_index < 0:
 		return
 	var anchor_part := int(anchor_info.get("subobject", -1))
@@ -4566,14 +4566,14 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# The carrier def authors the addeweap row; the fixture model resolves the
-	# ewep01 anchor natively (dm1a1 also authors the ctrlx25 controller seat the
+	# ewep01 anchor natively (tank also authors the ctrlx25 controller seat the
 	# old dict spec faked). This attachment lifecycle needs the real
 	# carrier/child rows (health, class, and NoNetworkCallback), so the def is
 	# the fixture superset, not an isolated FastRope fixture.
 	var dir := _native_fixture_dir()
-	_copy_fixture(dir, SYN_DM1A1_SPECIAL1_SLIDE_EWEP01, "dm1a1.3di")
+	_copy_fixture(dir, SYN_TANK_SPECIAL1_SLIDE_EWEP01, "tank.3di")
 	var item_db := _item_db_from_text(dir, _fixture_items_text()
-			.replace("graphic Dbuggy1", "graphic dm1a1")
+			.replace("graphic Dbuggy1", "graphic tank")
 			.replace("id 101291", "id 101291\n  addeweap ewep01 101419"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1291]))
 	assert_true(sim.load_from_mission_data(md))
@@ -4725,12 +4725,13 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 func test_fast_rope_collision_publishes_special2_but_not_special1() -> void:
 	assert_eq(_fast_rope_collision_moved_vertices(SYN_ARMRY_SPECIAL1_SLIDE, 1), 0,
 			"FastRope suppresses SPECIAL1 in authoritative collision evaluation")
-	assert_eq(_fast_rope_collision_moved_vertices(SYN_ARMRY_SPECIAL2_SLIDE, 2), 639,
+	assert_eq(_fast_rope_collision_moved_vertices(SYN_ARMRY_SPECIAL2_SLIDE, 2), 24,
 			"SPECIAL2 remains published through the same collision CTRL dictionary")
 
 
 func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
-	# Armry COBJ parents are all 0; face counts are [24, 213, 1, 12].
+	# The armory's COBJ parents are all 0; face counts are [12, 8, 2, 2]
+	# (tests/fixtures/minimal_3di_gen.cpp).
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var placed := md.add_entity(
@@ -4747,8 +4748,8 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 		'res://../fixtures/def/items.def')), OK)
-	# Armry01 with CTRL 0 named VEHICLE_SPECIAL1 and one register-driven slide
-	# of ordinal 1 (fixtures/threedi/synthetic/README.md).
+	# armory with CTRL 0 named VEHICLE_SPECIAL1 and one register-driven slide
+	# of ordinal 1 (fixtures/README.md).
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(SYN_ARMRY_SPECIAL1_SLIDE)), OK)
 	assert_eq(String((data.get_control_registers()[0] as Dictionary).get("name", "")),
@@ -4770,10 +4771,10 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 		'entities', [])
 	assert_eq(before_debug.size(), 1)
 	assert_eq(int((before_debug[0] as Dictionary).get(
-		'face_total', 0)), 250)
+		'face_total', 0)), 24)
 	var before: PackedVector3Array = (before_debug[0] as Dictionary).get(
 		'tris', PackedVector3Array())
-	assert_eq(before.size(), 250 * 3)
+	assert_eq(before.size(), 24 * 3)
 
 	# No present pass/render node: collision reads authoritative AI state.
 	for _tick in range(80):
@@ -4797,14 +4798,14 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 			stayed += 1
 		else:
 			partial += 1
-	assert_eq(moved, 639, "only ordinal 1 moves")
-	assert_eq(stayed, 111)
+	assert_eq(moved, 24, "only ordinal 1 moves")
+	assert_eq(stayed, 48)
 	assert_eq(partial, 0)
 	sim.free()
 
 
 func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
-	# BINOC is a committed 19-bone, three-frame BAD. Pair it with CharModel's
+	# BINOC is a committed 19-bone, three-frame BAD. Pair it with person's
 	# canonical 19-row model table/COBJ block so the real SkeletalAnim ->
 	# Simulation -> CollisionWorld path can be tested without retail assets.
 	var dir := _native_fixture_dir()
@@ -4829,7 +4830,7 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 	assert_eq(root.set_root_dir(dir), OK)
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
+			"res://../fixtures/threedi/synth/person.3di")), OK)
 	assert_true(data.has_collision())
 	var skeletal := SkeletalAnim.new()
 	assert_true(skeletal.load_from_bad_files(
@@ -4861,7 +4862,7 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 
 	var before: Array = sim.get_hitbox_debug().get("organics", [])
-	assert_eq(before.size(), 19, "one posed sphere per CharModel COBJ/bone")
+	assert_eq(before.size(), 19, "one posed sphere per person COBJ/bone")
 	var before_by_section := {}
 	for value in before:
 		var row: Dictionary = value
@@ -5107,7 +5108,7 @@ func test_time_driven_collision_advances_without_an_ai_brain() -> void:
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 		'res://../fixtures/def/items.def')), OK)
 	var data := ObjectData.new()
-	const PUMP_MODEL := 'res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di'
+	const PUMP_MODEL := 'res://../fixtures/threedi/synth/pump.3di'
 	assert_eq(data.open_file(ProjectSettings.globalize_path(PUMP_MODEL)), OK)
 	assert_gt(data.get_part_anim_count(0), 0)
 	assert_true(data.has_live_panm_for_lod(0),

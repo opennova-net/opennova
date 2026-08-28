@@ -1,8 +1,10 @@
 extends GutTest
 
 const KDA_PATH := "res://../fixtures/cbin/nlist.reference.kda"
-const CREDITS_IMAGE_FIXTURE := "res://../fixtures/cbin/cr1.png"
-const FONT_FIXTURE := "res://../fixtures/fnt/Serpen24.fnt"
+# Synthetic stand-ins staged under the names the retail .kda references
+# (cr1.png, Serpen24.fnt); minted by tests/fixtures/minimal_{cbin,fnt}_gen.cpp.
+const CREDITS_IMAGE_FIXTURE := "res://../fixtures/cbin/credits_image.png"
+const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"
 const FONT_SAVE_PATH := "user://kda_font_preserve_test.kda"
 
 var _temp_roots: Array[String] = []

@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://cterrseamprobe0"]
-
-[ext_resource type="Script" path="res://tests/terrain_seam_probe.gd" id="1_seamprobe"]
-
-[node name="TerrainSeamProbe" type="Node"]
-script = ExtResource("1_seamprobe")

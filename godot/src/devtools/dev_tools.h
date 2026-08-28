@@ -54,6 +54,12 @@ public:
 	void set_frame_stats(const Ref<FrameStats> &p_stats);
 	Ref<FrameStats> get_frame_stats() const { return frame_stats_; }
 
+	// Every tool window back inside the main viewport on the next layout pass
+	// (ImGui's ini remembers a window dragged out to another monitor); the
+	// "Reset layout" menu item's seam, and what a probe asks for before it
+	// reads the Stats rows.
+	void reset_layout();
+
 	// The runtime workspace installs its single game viewport here. The engine
 	// window owns sizing policy; this adapter owns the Godot resize/draw call.
 	void set_game_viewport(SubViewport *p_viewport);

@@ -25,10 +25,26 @@ var _engine_fragment := ""
 
 func _init() -> void:
 	var setting := String(ProjectSettings.get_setting("debug/file_logging/log_path", "user://logs/godot.log"))
-	var global := ProjectSettings.globalize_path(setting)
+	var global := resolve_engine_log_path(OS.get_cmdline_args(),
+			ProjectSettings.globalize_path(setting))
 	if FileAccess.file_exists(global):
 		_engine_log_path = global
 		_engine_pos = _file_length(global)
+
+
+## The engine log to tail: Godot's own `--log-file <path>` when the launch
+## carried one (the scripted launchers always pass it), else `fallback` (the
+## project's rotated user://logs file).
+static func resolve_engine_log_path(args: PackedStringArray, fallback: String) -> String:
+	for i in range(args.size()):
+		var arg := String(args[i])
+		if arg == "--log-file" and i + 1 < args.size():
+			var path := String(args[i + 1]).strip_edges()
+			return ProjectSettings.globalize_path(path) if not path.is_empty() else fallback
+		if arg.begins_with("--log-file="):
+			var inline := arg.get_slice("=", 1).strip_edges()
+			return ProjectSettings.globalize_path(inline) if not inline.is_empty() else fallback
+	return fallback
 
 
 func note_server(text: String) -> void:

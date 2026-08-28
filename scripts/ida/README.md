@@ -1,7 +1,7 @@
 # scripts/ida — maintainer tools that need a live IDA
 
 These scripts talk to the `ida-pro-mcp` plugin over plain HTTP JSON-RPC
-(`http://127.0.0.1:13337/mcp`, override with `IDA_MCP_URL`) with the retail
+(`http://127.0.0.1:13337/mcp`, override with `--url`) with the retail
 `Jointops.exe.kong.i64` loaded. They are not CI lints: CI has no IDA. Run them from
 the repo root before a release, when resuming after a long gap, and at the end of a
 post-merge tidy round.

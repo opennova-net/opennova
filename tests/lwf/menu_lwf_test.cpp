@@ -1,8 +1,9 @@
 // The menu sound profile (menu.LWF) drives MNU hover/click sounds: each .mnu
 // <SOUND trigger="..."> names a Multi (sound set) in menu.LWF, which resolves
 // through a Playlist (layer) -> Sndparm (member) -> Single (the .wav). This pins
-// that the real fixture exposes the trigger sets the menus reference and that
-// they resolve to loose .wav members. See plan + notes/audio.
+// that the synthetic menu.lwf (tests/fixtures/minimal_lwf_gen.cpp) exposes the
+// trigger sets the menus reference and that they resolve to loose .wav members
+// the way the retail profile does. See docs/audio/lwf-dbf-sound-re.md.
 #include <cstdint>
 #include <fstream>
 #include <string>
@@ -74,7 +75,7 @@ std::string first_member_wav(const opennova::lwf::File &f, const std::string &se
 
 int main() {
 	const std::string root = test_paths_repo_root(__FILE__);
-	const std::string menu_lwf = root + "/fixtures/menu_sound/menu.LWF";
+	const std::string menu_lwf = root + "/fixtures/lwf/menu.lwf";
 
 	const std::vector<uint8_t> bytes = read_file(menu_lwf);
 	TEST_EXPECT(!bytes.empty());

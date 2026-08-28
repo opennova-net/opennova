@@ -87,7 +87,7 @@ func _wire_resolver(nodes: Dictionary = {}) -> WirePresentPass:
 
 
 const HUSK_GRAPHIC := 'Dbuggy1X'  # fixture items.def 101291's husk stage
-const HUSK_MODEL_3DI := 'res://../fixtures/threedi/objects/armry01/Armry01.3di'
+const HUSK_MODEL_3DI := 'res://../fixtures/threedi/synth/armory.3di'
 
 
 # A REAL placer whose husk graphic resolves through the injected fixture
@@ -328,7 +328,7 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 	container.add_child(intact)
 	var intact_data := ObjectData.new()
 	assert_eq(intact_data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3/Shed.3di")), OK)
+			"res://../fixtures/threedi/synth/shed.3di")), OK)
 	assert_eq(intact_data.get_light_count(), 1)
 	intact.set_object_data(intact_data)
 	intact.set_meta("entity_ref", {

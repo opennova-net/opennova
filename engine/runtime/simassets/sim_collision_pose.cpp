@@ -102,6 +102,8 @@ void render_matrix_from_deformation(
 	out[15] = 1.0f;
 }
 
+} // namespace
+
 // The model's bone table for the rig: parent-relative pivots + parent indices
 // from the canonical first RLOD's render objects (raw, engine frame — the
 // same rows the adapter's get_bone_origins/get_bone_parents exposed).
@@ -122,8 +124,6 @@ bool model_bone_table(const Threedi3di3 &model,
 	}
 	return true;
 }
-
-} // namespace
 
 void SimCollisionPoseProvider::clear() {
 	generic_models_.clear();

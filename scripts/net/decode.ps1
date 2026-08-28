@@ -8,6 +8,7 @@
 #   pwsh -File scripts\net\decode.ps1 -Capture .scratch\retail-ref-<stamp>.pcapng `
 #        [-Items <items.def>] [-Tags '0x0c','0x0d'] [-Stream]
 #
+# -Items defaults to ITEMS.DEF under OPENNOVA_JO_ASSETS when that tree is set.
 # Prints DECODE_FILE=<path> and the first lines of the decode.
 
 param(
@@ -38,6 +39,7 @@ if (-not (Test-Path $Capture)) {
     exit 1
 }
 $Capture = (Resolve-Path $Capture).Path
+if (-not $Items) { $Items = Get-OpenNovaRetailAssetFile -Name "ITEMS.DEF" }
 
 $nwpp = Find-Tool -Name "nw_pp"
 if (-not $nwpp) {

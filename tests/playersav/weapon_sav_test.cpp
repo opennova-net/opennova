@@ -1,8 +1,8 @@
 // engine/formats/playersav — weapon.sav player-profile parse/serialize tests.
 //
 // Every fixture is built in code: no retail file is committed. The optional
-// last leg reads the maintainer's real weapon.sav when OPENNOVA_WEAPON_SAV
-// points at one, and SKIPS AS A PASS otherwise (docs/asset-gated-tests.md).
+// last leg reads the install's real weapon.sav (OPENNOVA_JO_DIR, beside the
+// expansion) and notes SKIP-LEG otherwise (docs/asset-gated-tests.md).
 
 #include <cstdint>
 #include <cstdio>
@@ -15,6 +15,7 @@
 
 #include "common/test_expect.h"
 #include <formats/playersav/weapon_sav.h>
+#include "common/retail_paths.h"
 
 using namespace opennova::playersav;
 
@@ -447,21 +448,20 @@ int test_page_codec_roundtrip()
     return 0;
 }
 
-// --- 8. optional: the maintainer's real weapon.sav (skip-as-pass) -----------
+// --- 8. optional: the install's real weapon.sav (SKIP-LEG without it) --------
 
 int test_retail_file()
 {
-    const char *path = std::getenv("OPENNOVA_WEAPON_SAV");
-    if (path == nullptr || path[0] == '\0') {
-        std::printf(
-            "SKIP: set OPENNOVA_WEAPON_SAV to a retail weapon.sav to run the "
-            "corpus leg\n");
-        return 0;
-    }
+    // <install>/expansion/<exp>/weapon.sav, else <install>/weapon.sav
+    // (net-re section 5.66) — the retail leg of an otherwise synthetic test.
+    const std::string sav = retail::weapon_sav();
+    if (sav.empty())
+        return retail::skip_leg("OPENNOVA_JO_DIR carrying a retail weapon.sav (corpus leg)");
+    const char *path = sav.c_str();
 
     std::ifstream in(path, std::ios::binary);
     if (!in) {
-        std::fprintf(stderr, "OPENNOVA_WEAPON_SAV set but unreadable: %s\n", path);
+        std::fprintf(stderr, "retail weapon.sav found but unreadable: %s\n", path);
         return 1;
     }
     const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)),
@@ -485,7 +485,7 @@ int test_retail_file()
     const std::vector<uint8_t> rewritten = write(f);
     TEST_EXPECT(rewritten.size() == bytes.size());
     TEST_EXPECT(rewritten == bytes);
-    std::printf("OPENNOVA_WEAPON_SAV: %zu bytes re-serialized byte-identically\n",
+    std::printf("retail weapon.sav: %zu bytes re-serialized byte-identically\n",
                 bytes.size());
     return 0;
 }

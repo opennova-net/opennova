@@ -173,6 +173,12 @@ func get_hud():
 	return _game_hud
 
 
+## The layer every HUD element hangs under (hiding it hides the whole HUD,
+## siblings of the GameHud control included; the perf probe's canvas A/B).
+func get_ui_parent() -> Node:
+	return _ui_parent
+
+
 func _on_minimap_water_changed(mask: ImageTexture) -> void:
 	if _game_hud == null:
 		return

@@ -12,7 +12,7 @@
 // pipeline of nw204_lobby_decode_test.cpp; the only new code is the streaming
 // aggregation.
 //
-// Asset-gated: reads the hexcap path from env NW_INGAME_HEXCAP (one datagram
+// Asset-gated: reads <OPENNOVA_CAPTURES>/ingame.hexcap (one datagram
 // per line: "<srcport> <frame> <udp_payload_hex>"). Skips cleanly when unset so
 // CI stays green until a sanitized fixture slice is committed.
 
@@ -34,6 +34,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
@@ -168,15 +169,13 @@ size_t modal_len(const Stat &s) {
 } // namespace
 
 int main() {
-	const char *path = std::getenv("NW_INGAME_HEXCAP");
-	if (!path || !*path) {
-		std::printf("[skip] set NW_INGAME_HEXCAP to a '<srcport> <frame> <hex>' "
-		            "capture to run the in-game surveyor\n");
-		return 0;
-	}
+	const std::string hexcap = retail::capture("ingame.hexcap");
+	if (!retail::file_exists(hexcap))
+		return retail::skip("<OPENNOVA_CAPTURES>/ingame.hexcap (a '<srcport> <frame> <hex>' in-match dump for the surveyor)");
+	const char *path = hexcap.c_str();
 	std::ifstream file(path);
 	if (!file) {
-		std::printf("FAILED to open NW_INGAME_HEXCAP=%s\n", path);
+		std::printf("FAILED to open %s\n", path);
 		return 1;
 	}
 

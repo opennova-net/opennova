@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""Fixture provenance lint: every file under fixtures/ is MINTED, AUTHORED or KEEP.
+
+fixtures/README.md defines the three classes. A MINTED file is written by a
+tests/fixtures/minimal_*_gen.cpp generator through one of our own writers and
+byte-compared by that generator's ctest; an AUTHORED file is text we wrote; a
+KEEP file is one of the small retail-interop set kept as-is so the parsers
+prove they read what the shipped game wrote (ADR 0003: no retail bytes ever
+pass through a writer). Nothing else belongs in the tree.
+
+Rules (each hit names the file and the rule):
+
+  lfs           every fixtures/ file is LFS-tracked (.gitattributes) except
+                the text carve-out (*.md, .gitignore), and a carve-out file is
+                never an LFS pointer
+  size          no tracked file under fixtures/ or assets/ exceeds 2 MiB
+                (the size comes from the LFS pointer, so this needs no pull);
+                scripts/lint/fixture_allowlist.json "size_exceptions" carries
+                the few oversize assets with a reason
+  referenced    every fixtures/ file is referenced (by path, parent directory
+                or basename) from tests/, godot/tests/, tests/CMakeLists.txt,
+                .github/workflows/, scripts/, docs/ or fixtures/README.md
+  provenance    every fixtures/ file is MINTED (its path or parent directory
+                is named by a tests/fixtures/*_gen.cpp), or matches an
+                "authored" / "keep" glob in the allowlist
+  pulled        (--require-pulled, CI) every LFS-tracked fixture is
+                materialized in the working tree, not a pointer stub
+
+Modes:
+  (default)     summary counts; exit 0 (report mode)
+  --report      summary plus every hit, grouped by rule
+  --enforce     exit 1 on any hit
+  --require-pulled   also apply the pulled rule
+"""
+
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import json
+import re
+import subprocess
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+ALLOWLIST_PATH = Path(__file__).resolve().parent / "fixture_allowlist.json"
+SIZE_LIMIT = 2 * 1024 * 1024
+TEXT_CARVE_OUT = ("*.md", ".gitignore")
+REFERENCE_ROOTS = ("tests/", "godot/tests/", ".github/workflows/", "scripts/", "docs/",
+                   "fixtures/README.md")
+REFERENCE_SUFFIXES = (".cpp", ".h", ".c", ".gd", ".tscn", ".txt", ".cmake", ".py", ".ps1",
+                      ".sh", ".yml", ".yaml", ".md", ".json", ".cfg")
+GENERATOR_GLOB = "tests/fixtures/*_gen.cpp"
+POINTER_HEAD = b"version https://git-lfs.github.com/spec/v1"
+
+
+def run_git(*args: str) -> str:
+    return subprocess.run(["git", *args], cwd=REPO, check=True,
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace").stdout
+
+
+def tracked(prefix: str) -> list[str]:
+    return [line for line in run_git("ls-files", "--", prefix).splitlines() if line]
+
+
+def lfs_attributes(paths: list[str]) -> dict[str, str]:
+    """path -> the git 'filter' attribute value ('lfs', 'unspecified', ...)."""
+    out: dict[str, str] = {}
+    if not paths:
+        return out
+    text = subprocess.run(["git", "check-attr", "filter", "-z", "--stdin"], cwd=REPO,
+                          check=True, input="\0".join(paths) + "\0",
+                          capture_output=True, text=True, encoding="utf-8").stdout
+    fields = text.split("\0")
+    for i in range(0, len(fields) - 2, 3):
+        out[fields[i]] = fields[i + 2]
+    return out
+
+
+def blob_size(path: str, is_lfs: bool) -> int:
+    """The tracked object's size: the LFS pointer's `size` line, else the blob."""
+    if is_lfs:
+        pointer = run_git("cat-file", "-p", f"HEAD:{path}")
+        match = re.search(r"^size (\d+)$", pointer, re.M)
+        if match:
+            return int(match.group(1))
+        # An unstaged-only or non-pointer blob: fall through to the blob size.
+    return int(run_git("cat-file", "-s", f"HEAD:{path}").strip())
+
+
+def is_pointer_file(path: str) -> bool:
+    try:
+        with open(REPO / path, "rb") as handle:
+            return handle.read(len(POINTER_HEAD)) == POINTER_HEAD
+    except OSError:
+        return False
+
+
+def reference_corpus() -> str:
+    """Every tracked text file under the reference roots, concatenated."""
+    chunks: list[str] = []
+    for root in REFERENCE_ROOTS:
+        for rel in tracked(root):
+            if not rel.endswith(REFERENCE_SUFFIXES):
+                continue
+            try:
+                chunks.append((REPO / rel).read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+    return "\n".join(chunks)
+
+
+def generator_names() -> set[str]:
+    """Every fixtures/... token a generator source names (paths and directories)."""
+    names: set[str] = set()
+    for gen in sorted(REPO.glob(GENERATOR_GLOB)):
+        text = gen.read_text(encoding="utf-8", errors="replace")
+        for token in re.findall(r"fixtures/[A-Za-z0-9_./-]+", text):
+            names.add(token.rstrip("/."))
+    return names
+
+
+def matches_any(rel: str, globs: list[str]) -> bool:
+    return any(fnmatch.fnmatch(rel, glob) for glob in globs)
+
+
+def classify(rel: str, allow: dict, gen_names: set[str]) -> str | None:
+    if matches_any(rel, allow.get("authored", [])):
+        return "authored"
+    if matches_any(rel, allow.get("keep", [])):
+        return "keep"
+    parent = rel.rsplit("/", 1)[0]
+    if rel in gen_names or parent in gen_names:
+        return "minted"
+    return None
+
+
+def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--report", action="store_true", help="list every hit, grouped by rule")
+    parser.add_argument("--enforce", action="store_true", help="exit 1 on any hit")
+    parser.add_argument("--require-pulled", action="store_true",
+                        help="every LFS fixture must be materialized (CI)")
+    args = parser.parse_args()
+
+    allow = json.loads(ALLOWLIST_PATH.read_text(encoding="utf-8"))
+    size_exceptions = {row["path"]: row["why"] for row in allow.get("size_exceptions", [])}
+    fixtures = tracked("fixtures/")
+    assets = tracked("assets/")
+    attrs = lfs_attributes(fixtures + assets)
+    corpus = reference_corpus()
+    gen_names = generator_names()
+
+    hits: dict[str, list[str]] = defaultdict(list)
+    classes: Counter = Counter()
+
+    for rel in fixtures:
+        carve_out = any(fnmatch.fnmatch(rel.rsplit("/", 1)[-1], g) for g in TEXT_CARVE_OUT)
+        is_lfs = attrs.get(rel) == "lfs"
+        if carve_out:
+            if is_lfs:
+                hits["lfs"].append(f"{rel}: text carve-out file is LFS-tracked")
+            elif is_pointer_file(rel):
+                hits["lfs"].append(f"{rel}: text carve-out file is an LFS pointer")
+        elif not is_lfs:
+            hits["lfs"].append(f"{rel}: not LFS-tracked (.gitattributes fixtures/** rule)")
+
+        if args.require_pulled and is_lfs and is_pointer_file(rel):
+            hits["pulled"].append(f"{rel}: LFS pointer, not materialized")
+
+        basename = rel.rsplit("/", 1)[-1]
+        parent = rel.rsplit("/", 1)[0]
+        parent_name = parent.rsplit("/", 1)[-1]
+        stem = basename.rsplit(".", 1)[0]
+        # A consumer names the file, its directory (a run directory the test
+        # walks), or a distinctive stem (a fixture copied under another name).
+        if not (rel in corpus or parent in corpus or basename in corpus
+                or (len(parent_name) >= 8 and parent_name in corpus)
+                or (len(stem) >= 6 and stem in corpus)):
+            hits["referenced"].append(f"{rel}: no test, build, workflow, script or doc names it")
+
+        cls = classify(rel, allow, gen_names)
+        if cls is None:
+            hits["provenance"].append(
+                f"{rel}: neither minted by a tests/fixtures/*_gen.cpp nor an authored/keep row")
+        else:
+            classes[cls] += 1
+
+    for rel in fixtures + assets:
+        if attrs.get(rel) not in ("lfs",) and rel.endswith(TEXT_CARVE_OUT[0]):
+            continue
+        try:
+            size = blob_size(rel, attrs.get(rel) == "lfs")
+        except subprocess.CalledProcessError:
+            continue
+        if size > SIZE_LIMIT and rel not in size_exceptions:
+            hits["size"].append(f"{rel}: {size} bytes exceeds {SIZE_LIMIT} (add a size_exceptions row with a why)")
+    for rel in size_exceptions:
+        if rel not in fixtures and rel not in assets:
+            hits["size"].append(f"{rel}: size exception names an untracked file")
+
+    total = sum(len(v) for v in hits.values())
+    print(f"[fixture-lint] {len(fixtures)} fixture file(s): "
+          + ", ".join(f"{classes[c]} {c}" for c in ("minted", "authored", "keep"))
+          + f"; {len(assets)} asset file(s) size-checked; {total} hit(s)")
+    for rule in ("lfs", "size", "referenced", "provenance", "pulled"):
+        if hits[rule]:
+            print(f"[fixture-lint]   {len(hits[rule]):4d}  {rule}")
+    if args.report or (args.enforce and total):
+        for rule in ("lfs", "size", "referenced", "provenance", "pulled"):
+            for line in hits[rule]:
+                print(f"[fixture-lint][{rule}] {line}")
+    if total and args.enforce:
+        print("[fixture-lint] FAIL: every fixture is minted by a generator, authored, or a "
+              "keep-set retail-interop file named in scripts/lint/fixture_allowlist.json, "
+              "LFS-tracked, under 2 MiB, and referenced by a test or doc (fixtures/README.md).")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -20,17 +20,16 @@ hash-bound parity verdict.
 | `decode.ps1` | Decode a capture with the native `nw_pp` application. |
 | `diff_vs_golden.ps1` | Compare native decoder tag coverage against a local golden capture. |
 | `diff_0a.py` | Per-FIELD shape diff of the S2C 0x0A stream vs a retail-host golden (sub-block cycle, record-class mix, field population); caches `<golden>.0a.json` beside the input. |
-| `launch_retail.ps1` | Launch a stock retail client for a manual host or join run. |
-| `launch_retail_cfg.ps1` | Launch retail from a role-specific onHook configuration. |
 | `exercise_retail_input.ps1` | Drive the bounded Windows input trajectory used by live probes. |
-| `host_opennova.ps1` | Start an OpenNova LAN host and wait for protocol readiness. |
-| `join_opennova.ps1` | Start an OpenNova LAN joiner. |
-| `run_lan_pair.ps1` | Start a local OpenNova host/joiner pair. |
+| `host_opennova.ps1` | Start an OpenNova LAN host on launch flags, await LAN discovery and its MCP endpoint. |
+| `join_opennova.ps1` | Start an OpenNova LAN joiner on launch flags with its MCP endpoint. |
+| `run_lan_pair.ps1` | Start a local OpenNova host/joiner pair (MCP ports 8975/8976). |
 | `run_parity_topology.ps1` | Run one explicitly configured live topology. |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
 
-Shared process and path helpers live in `lib.ps1`; the two tracked cfg examples
-live in `configs/`.
+Shared process and path helpers live in `lib.ps1` (which dot-sources the
+opennova-game MCP client, `scripts/mcp/game_mcp.ps1`); retail instances are
+launched only through onhook-mcp.
 
 ## Build native helpers
 

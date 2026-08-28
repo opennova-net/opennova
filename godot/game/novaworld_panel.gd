@@ -20,7 +20,7 @@ extends Control
 signal closed()
 # The NWJoin handshake resolved the in-match host:port — enter the match as a JOINER. The arg is
 # the typed dial target MainGame hands to GameWorld.load_mission_as_joiner
-# (the SAME entry the LAN browser + NW_LAN_JOIN env use — one in-match joiner seam, ADR 0009).
+# (the SAME entry the LAN browser + --lan-join launch use — one in-match joiner seam, ADR 0009).
 signal join_in_match_requested(target: JoinTarget)
 # Host a NovaWorld game. The panel supplies the gate (the server it's connected to); MainGame fills in
 # the mission + callsign and stands up a browsable listen host (net_session_drive._maybe_start_nw_host).

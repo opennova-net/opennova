@@ -153,5 +153,6 @@ integration is not a one-off.
 - `scripts/package_godot_windows.ps1` requires the addon library beside the
   exports (ONED) and stages it into the game zip only for a debug export; the
   boot smoke covers both products in both modes.
-- `godot/tests/frame_stats_probe_game.gd` (windowed, asset-gated) opens the
-  tools and reads the Stats rows through the `DevTools` seam.
+- the `frame_stats` runtime probe (`godot/probes/perf/frame_stats_probe.gd`,
+  run windowed through the `game_probe` MCP tool) opens the tools and reads
+  the Stats rows through the `DevTools` seam.

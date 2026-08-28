@@ -521,11 +521,11 @@ func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> v
 func test_manual_static_instance_publishes_typed_terrain_shadow_source() -> void:
 	var placer := MissionObjectPlacer.create(null, null)
 	var data := ObjectData.new()
-	assert_true(placer.register_object_data("House", data))
+	assert_true(placer.register_object_data("house", data))
 	var source_revision := placer.get_static_terrain_shadow_source_revision()
 	var xform := Transform3D(Basis.from_euler(Vector3(0.1, 0.2, 0.3)),
 			Vector3(12, 34, -56))
-	placer.register_static_instance(100, "House", 0, xform, true)
+	placer.register_static_instance(100, "house", 0, xform, true)
 	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
 	source_revision = placer.get_static_terrain_shadow_source_revision()
 
@@ -536,7 +536,7 @@ func test_manual_static_instance_publishes_typed_terrain_shadow_source() -> void
 		return
 	var row: Dictionary = rows[0]
 	assert_eq(int(row.get("bms_id", 0)), 100)
-	assert_eq(String(row.get("graphic", "")), "House")
+	assert_eq(String(row.get("graphic", "")), "house")
 	assert_eq(int(row.get("entity_kind", -1)), MissionData.KIND_BUILDING,
 			"manual admitted casters use the collector's building policy")
 	assert_eq(row.get("world_transform", Transform3D()), xform)
@@ -631,7 +631,7 @@ func test_manual_static_instance_publishes_typed_terrain_shadow_source() -> void
 	assert_true(placer.clear_static_terrain_shadow_replacement(100))
 	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
 	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq(String((rows[0] as Dictionary).get("graphic", "")), "House")
+	assert_eq(String((rows[0] as Dictionary).get("graphic", "")), "house")
 
 
 func test_rejected_static_source_updates_do_not_advance_the_page_revision() -> void:
@@ -792,13 +792,13 @@ func test_godot_to_bms_position_axis_remap() -> void:
 # though items.def gives it no anim_def: a MultiMesh batch captures the rest pose once
 # and never evaluates PANM again, while the engine re-poses PANM from the global clock
 # every rendered frame [orig: PANM_SampleTrack (sub_4354B0) idle gate, clock
-# Render_ShaderTickMs @0x2721A40]. DFX2's "Oil Pump" (graphic Pmpjk01,
+# Render_ShaderTickMs @0x2721A40]. DFX2's "Oil Pump" (graphic pump,
 # type decoration, control-0x32 sine tracks) is the witnessed case. Inert PANM
-# blocks (Armry01 as shipped: entries
+# blocks (armory as shipped: entries
 # present, every control idle) must keep the perf-tier static batching.
 
-const ARMRY_3DI := "res://../fixtures/threedi/objects/armry01/Armry01.3di"
-const PMPJK_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
+const ARMRY_3DI := "res://../fixtures/threedi/synth/armory.3di"
+const PMPJK_3DI := "res://../fixtures/threedi/synth/pump.3di"
 
 
 func _panm_data(live: bool) -> ObjectData:
@@ -855,7 +855,7 @@ func test_place_routes_live_panm_graphic_to_a_live_model() -> void:
 
 
 func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
-	# Armry01 as shipped has idle PANM plus an independent OOBJ portal payload.
+	# armory as shipped has idle PANM plus an independent OOBJ portal payload.
 	# The harness suppresses that second classifier here so this test isolates
 	# the rule that inert PANM alone does not defeat static batching.
 	var placer := _panm_placer(false)

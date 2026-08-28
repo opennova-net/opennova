@@ -26,35 +26,36 @@ static bool near(float actual, float expected, float epsilon = 1e-6f) {
 static void test_cxlt_is_preserved_metadata_not_a_vertex_offset() {
     // Retail BuildCollision preserves CXLT in collision metadata, but the
     // projectile face walker gets section matrices from the model callback and
-    // never adds CXLT/COBJ offsets to CVRT. JetSki is a decisive witness: its
-    // sole CXLT equals COBJ 1's offset while that object's CVRT run is already
-    // in render-model coordinates, so adding either value would double-shift it.
+    // never adds CXLT/COBJ offsets to CVRT. The synthetic carrier is authored
+    // the way the retail JetSki witness is: its sole CXLT equals COBJ 1's
+    // offset while that object's CVRT run is already in model coordinates, so
+    // adding either value would double-shift it.
     char path[4096];
-    std::snprintf(path, sizeof(path), "%s/fixtures/threedi/3di3/JetSki.3di",
+    std::snprintf(path, sizeof(path), "%s/fixtures/threedi/synth/carrier.3di",
                   test_paths_repo_root(__FILE__));
 
     Threedi3di3 model = {};
     const int read_rc = threedi_3di3_read(path, &model);
-    check(read_rc == 0, "JetSki CXLT fixture parses");
+    check(read_rc == 0, "carrier CXLT fixture parses");
     if (read_rc != 0) return;
 
     const ThreediCollisionModel *collision = model.collision;
-    check(collision != nullptr, "JetSki carries a collision block");
+    check(collision != nullptr, "carrier carries a collision block");
     if (collision != nullptr) {
-        check(collision->object_count == 2, "JetSki keeps both COBJ records");
-        check(collision->translation_count == 1, "JetSki keeps its sole CXLT record");
+        check(collision->object_count == 2, "carrier keeps both COBJ records");
+        check(collision->translation_count == 1, "carrier keeps its sole CXLT record");
         if (collision->object_count == 2 && collision->translation_count == 1) {
             const int32_t *offset = collision->objects[1].offset;
             const int32_t *translation = collision->translations[0].translation;
-            check(offset[0] == 23193 && offset[1] == 39 && offset[2] == 34085,
-                  "COBJ offset remains raw fp16 metadata");
+            check(offset[0] == 131072 && offset[1] == 0 && offset[2] == 32768,
+                  "COBJ offset remains raw fp16 metadata (2, 0, 1/2)");
             check(translation[0] == offset[0] && translation[1] == offset[1] &&
                           translation[2] == offset[2],
-                  "CXLT is preserved independently and equals JetSki COBJ 1 metadata");
+                  "CXLT is preserved independently and equals carrier COBJ 1 metadata");
 
             ThreediCollisionObjectRun runs[2] = {};
             check(threedi_collision_object_runs(collision, runs) == 1,
-                  "JetSki COBJ runs resolve");
+                  "carrier COBJ runs resolve");
             const int32_t vertex_start = runs[1].vertex_start;
             const int32_t vertex_count = collision->objects[1].num_vertices;
             check(vertex_start == collision->objects[0].num_vertices,
@@ -62,7 +63,7 @@ static void test_cxlt_is_preserved_metadata_not_a_vertex_offset() {
             const bool bounded = vertex_start >= 0 && vertex_count > 0 &&
                                  static_cast<size_t>(vertex_start + vertex_count) <=
                                      collision->vertex_count;
-            check(bounded, "JetSki COBJ 1 owns a bounded CVRT run");
+            check(bounded, "carrier COBJ 1 owns a bounded CVRT run");
             if (bounded) {
                 float min_v[3] = {
                     std::numeric_limits<float>::infinity(),
@@ -79,11 +80,12 @@ static void test_cxlt_is_preserved_metadata_not_a_vertex_offset() {
                         if (v[axis] > max_v[axis]) max_v[axis] = v[axis];
                     }
                 }
-                check(near(min_v[0], 0.12109375f) && near(min_v[1], -0.34375f) &&
-                              near(min_v[2], 0.53515625f),
+                // The cabin box (1, -1, 1.4)..(2.5, 1, 2.2) in its authored Q8 words.
+                check(near(min_v[0], 1.0f) && near(min_v[1], -1.0f) &&
+                              near(min_v[2], 1.3984375f),
                       "COBJ 1 CVRT minimum remains unshifted model-space data");
-                check(near(max_v[0], 0.40234375f) && near(max_v[1], 0.359375f) &&
-                              near(max_v[2], 0.6953125f),
+                check(near(max_v[0], 2.5f) && near(max_v[1], 1.0f) &&
+                              near(max_v[2], 2.19921875f),
                       "COBJ 1 CVRT maximum remains unshifted model-space data");
             }
         }
@@ -92,34 +94,36 @@ static void test_cxlt_is_preserved_metadata_not_a_vertex_offset() {
     threedi_3di3_free(&model);
 }
 
-static void test_charmodel_cobj_preserves_exact_bone_sphere() {
+static void test_person_cobj_preserves_exact_bone_sphere() {
     // Retail's organic/skeletal broad phase reads these authored COBJ values
-    // directly as signed 16.16 integers. CharModel COBJ 14 is the head and is
-    // a useful fidelity witness because it owns no CFAC/CVRT run of its own.
+    // directly as signed 16.16 integers. The synthetic person's COBJ 14 is
+    // the head (the retail person rig order) and is a useful fidelity witness
+    // because it owns no CFAC/CVRT run of its own.
     char path[4096];
-    std::snprintf(path, sizeof(path), "%s/fixtures/threedi/3di3/CharModel.3di",
+    std::snprintf(path, sizeof(path), "%s/fixtures/threedi/synth/person.3di",
                   test_paths_repo_root(__FILE__));
 
     Threedi3di3 model = {};
     const int read_rc = threedi_3di3_read(path, &model);
-    check(read_rc == 0, "CharModel COBJ sphere fixture parses");
+    check(read_rc == 0, "person COBJ sphere fixture parses");
     if (read_rc != 0) return;
 
     const ThreediCollisionModel *collision = model.collision;
-    check(collision != nullptr, "CharModel carries a collision block");
+    check(collision != nullptr, "person carries a collision block");
     if (collision != nullptr) {
-        check(collision->object_count == 19, "CharModel keeps all 19 COBJ records");
+        check(collision->object_count == 19, "person keeps all 19 COBJ records");
         if (collision->object_count > 14) {
             const ThreediCollisionObject &head = collision->objects[14];
             check(head.parent_subobject_index == 13,
-                  "CharModel head COBJ keeps its parent bone");
+                  "person head COBJ keeps its parent bone");
             check(head.num_vertices == 0 && head.num_faces == 0,
-                  "CharModel head COBJ is a sphere-only skeletal section");
-            check(head.med[0] == 3578 && head.med[1] == 65 &&
-                          head.med[2] == 54371,
-                  "CharModel head COBJ center remains exact signed 16.16 data");
-            check(head.radius == 10345,
-                  "CharModel head COBJ radius remains exact signed 16.16 data");
+                  "person head COBJ is a sphere-only skeletal section");
+            // The authored center (1/16, 0, 13/16) and radius 5/32.
+            check(head.med[0] == 4096 && head.med[1] == 0 &&
+                          head.med[2] == 53248,
+                  "person head COBJ center remains exact signed 16.16 data");
+            check(head.radius == 10240,
+                  "person head COBJ radius remains exact signed 16.16 data");
         }
     }
 
@@ -303,7 +307,7 @@ int main() {
           "null collision block is rejected");
 
     test_cxlt_is_preserved_metadata_not_a_vertex_offset();
-    test_charmodel_cobj_preserves_exact_bone_sphere();
+    test_person_cobj_preserves_exact_bone_sphere();
     test_collision_probe_boxes_follow_the_witnessed_folds();
 
     // Retail models (Zodiacs, mounted weapons, large buildings) author

@@ -9,7 +9,8 @@
 # class registration does not reliably hot-reload (especially on Windows, where
 # the running editor holds the DLL lock and the swap is deferred to a ~temp).
 #
-# Usage: scripts/build_godot.sh [Dev|DebugFull|Release]   (default: Dev)
+# Usage: scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N]   (default: Dev)
+#   --jobs N  -> build parallelism (default: the machine's CPU count)
 #   Dev       -> libopennova.<platform>.template_debug.x86_64.<dll|so>  (editor)
 #                RelWithDebInfo: optimized native code (/O2 + symbols). This is
 #                the flavor every editor session and every game runtime it
@@ -30,17 +31,25 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-jobs="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
-flavor="${1:-Dev}"
+jobs="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+flavor="Dev"
+usage="usage: scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N]"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --jobs)
+            [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
+            jobs="$2"; shift 2 ;;
+        --jobs=*) jobs="${1#--jobs=}"; shift ;;
+        Dev|DebugFull|Release) flavor="$1"; shift ;;
+        *) echo "$usage" >&2; exit 2 ;;
+    esac
+done
 
 case "$flavor" in
     Dev) config="RelWithDebInfo" ;;
     DebugFull) config="Debug" ;;
     Release) config="Release" ;;
-    *)
-        echo "usage: scripts/build_godot.sh [Dev|DebugFull|Release]" >&2
-        exit 2
-        ;;
 esac
 
 echo "Building Godot GDExtension ($flavor -> CMake config $config)..."

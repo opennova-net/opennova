@@ -1,11 +1,11 @@
 extends GutTest
 
-# Round-trip the re-encode saver path: load a real SBF, override one entry's
-# audio with silence via set_entry_pcm, save, and reload. Asserts the dirty
-# flag flips on edit + clears on save and that the saved file parses back as
-# a valid bank with the same entry count.
+# Round-trip the re-encode saver path: load the synthetic SBF, override one
+# entry's audio with silence via set_entry_pcm, save, and reload. Asserts the
+# dirty flag flips on edit + clears on save and that the saved file parses
+# back as a valid bank with the same entry count.
 
-const SRC := "res://../fixtures/sbf/jo_gamemus.sbf"
+const SRC := "res://../fixtures/sbf/synth_gamemus.sbf"
 const DST := "user://test_sbf_reencode.sbf"
 
 

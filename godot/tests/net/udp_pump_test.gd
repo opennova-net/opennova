@@ -131,3 +131,26 @@ func test_dialed_pump_accepts_only_the_resolved_host_endpoint() -> void:
 	assert_eq(join.inbound_count(), 1, "the non-host source port is rejected")
 	assert_eq(join.take_inbound().get("bytes"), authentic,
 			"the surviving datagram came from the dialed host")
+
+
+func test_capture_path_records_the_session() -> void:
+	var path := OS.get_cache_dir().path_join(
+			"opennova_udp_pump_capture_%d.pcap" % Time.get_ticks_usec())
+	var host = _pump()
+	assert_false(host.is_capturing(), "a pump with no capture path records nothing")
+	host.set_capture_path(path)
+	assert_eq(host.get_capture_path(), path)
+	assert_eq(host.bind_listen(0), OK)
+	assert_true(host.is_capturing(), "binding with a capture path opens the pcap")
+	var join = _pump()
+	assert_eq(join.dial("127.0.0.1", host.local_port()), OK)
+	assert_false(join.is_capturing(), "the joiner pump has its own (unset) path")
+	assert_eq(join.send_to_host(PackedByteArray([0x0A, 0x01, 0x02])), OK)
+	assert_eq(_poll_until(host, 1), 1)
+	host.take_inbound()
+	host.close()
+	assert_false(host.is_capturing(), "close releases the capture")
+	assert_true(FileAccess.file_exists(path), "the pcap exists after the session")
+	assert_gt(FileAccess.get_file_as_bytes(path).size(), 24,
+			"the file holds the global header plus the recorded datagram")
+	DirAccess.remove_absolute(path)

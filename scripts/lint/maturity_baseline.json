@@ -21,7 +21,7 @@
     "oversize_cpp_files": 1,
     "oversize_cpp_headers": 1,
     "oversize_gd_files": 1,
-    "test_private_pokes": 95
+    "test_private_pokes": 94
   },
   "dict_contract_allowlist": [
     "player_profile.gd|static func load_character_profile(",
@@ -41,6 +41,21 @@
     "game_packer.gd|static func stage_loose(",
     "game_packer.gd|static func export_game(",
     "game_packer.gd|static func stage_retail(",
-    "game_run_session.gd|func get_state()"
+    "game_run_session.gd|func get_state()",
+    "probe_def.gd|var input_schema",
+    "probe_def.gd|func to_list_entry(",
+    "probe_verdict.gd|var data",
+    "probe_verdict.gd|func to_json_value()",
+    "probe_schema_result.gd|var values",
+    "probe_context.gd|var args",
+    "probe_context.gd|func capture_bundle(",
+    "probe_context.gd|func progress_value()",
+    "probe_run.gd|var progress",
+    "probe_run.gd|func to_status(",
+    "probe_runner.gd|func list()",
+    "probe_runner.gd|func start(",
+    "probe_runner.gd|func status(",
+    "probe_runner.gd|func cancel(",
+    "game_world.gd|func get_perf_probe_spans("
   ]
 }

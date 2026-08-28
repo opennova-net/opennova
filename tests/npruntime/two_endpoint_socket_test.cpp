@@ -14,7 +14,7 @@
 //       folds it into ClientState. The peer SNAPs to the uplink, no synthetic host player exists, and
 //       the client's ClientState anchor == the joiner's post-SNAP position.
 //   (3) The host's emitted S2C stream (recorded at the joiner socket) appears in the §5.2a order, and —
-//       when the gitignored golden is present (NW_GOLDEN_LAN_JOIN) — agrees pairwise with the retail LAN
+//       when the gitignored golden is present (<OPENNOVA_CAPTURES>/golden) — agrees pairwise with the retail LAN
 //       host/join capture's S2C order on the common tags. Order-only (body byte-parity is deferred: our
 //       world stream is built from our own minimal World, not the capture's mission).
 
@@ -52,10 +52,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
-
-#ifndef DEFAULT_LAN_JOIN_PCAP
-#define DEFAULT_LAN_JOIN_PCAP ""
-#endif
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -268,13 +265,10 @@ int main() {
 	if (!order) { net::shutdown(); return 1; }
 
 	// ---- env-gated cross-check vs the retail LAN host/join golden (order agreement on common tags). ----
-	std::string path;
-	if (const char *env = std::getenv("NW_GOLDEN_LAN_JOIN"); env && *env) path = env;
-	else path = DEFAULT_LAN_JOIN_PCAP;
+	const std::string path = retail::golden("retail-lan-host-join.pcapng");
 	std::vector<net::PcapDatagram> pkts;
-	if (path.empty() || !net::read_pcap_udp_file(path, pkts)) {
-		std::printf("[skip] retail golden absent (set NW_GOLDEN_LAN_JOIN) — '%s'; our §5.2a order asserted above\n",
-		            path.c_str());
+	if (!net::read_pcap_udp_file(path, pkts)) {
+		retail::skip_leg("<OPENNOVA_CAPTURES>/golden/retail-lan-host-join.pcapng (the retail golden cross-check; our 5.2a order asserted above)");
 		net::shutdown();
 		std::printf("OK\n");
 		return 0;

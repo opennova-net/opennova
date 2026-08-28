@@ -1,6 +1,7 @@
 extends GutTest
 
-const FNT_PATH := "res://../fixtures/fnt/Serpen24.fnt"
+# The one-page synthetic FNT (tests/fixtures/minimal_fnt_gen.cpp).
+const FNT_PATH := "res://../fixtures/fnt/synth_1page.fnt"
 const TEMP_FNT_PATH := "user://test_blank_font.fnt"
 
 
@@ -12,14 +13,14 @@ func after_each() -> void:
 
 func test_fnt_loads_as_native_resource_and_font_file_view() -> void:
 	var bytes := FileAccess.get_file_as_bytes(FNT_PATH)
-	assert_gt(bytes.size(), 0, "Serpen24.fnt fixture bytes should be readable.")
+	assert_gt(bytes.size(), 0, "synth_1page.fnt fixture bytes should be readable.")
 	var res := FntResource.new()
 	var err := res.load_from_bytes(bytes)
-	assert_eq(err, OK, "Serpen24.fnt should load as FntResource.")
+	assert_eq(err, OK, "synth_1page.fnt should load as FntResource.")
 	if err != OK:
 		return
 
-	assert_eq(res.get_page_count(), 1, "Serpen24 should be a one-page Nova FNT fixture.")
+	assert_eq(res.get_page_count(), 1, "synth_1page is a one-page FNT fixture.")
 	assert_eq(res.get_glyph_count(), 224, "Nova FNT exposes fixed glyph slots 32..255.")
 	assert_eq(res.get_first_char(), 32, "First glyph code should be ASCII 32.")
 

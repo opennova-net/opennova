@@ -1,8 +1,5 @@
 #include "simulation/wire_present_pass.h"
 
-#include <godot_cpp/classes/file_access.hpp>
-#include <godot_cpp/classes/os.hpp>
-#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <net/npruntime/wire_present.h>
@@ -53,8 +50,6 @@ void WirePresentPass::setup(Object *p_sim,
 			p_container != nullptr ? p_container->get_instance_id() : ObjectID();
 	defer_index_ = p_defer_index;
 	pending_spawn_count_ = 0;
-	trace_path_ = OS::get_singleton()->get_environment(
-			"OPENNOVA_TRACE_WIRE_BUILDS");
 	camera_framed_ = false;
 	last_present_logic_tick_ = -1;
 	applier_.instantiate();
@@ -308,13 +303,11 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 				continue;
 			}
 			++spawn_attempts;
-			trace_cold_build("begin", handle, type_id, visual_item_id);
 			// build_player_animated_model maps the player runtime type to its
 			// visual item and passes other organics through — the SAME chain
 			// the host uses for the local avatar and placed NPCs.
 			node = placer_->build_player_animated_model(
 					type_id, parent, character_id);
-			trace_cold_build("end", handle, type_id, visual_item_id);
 			if (node == nullptr) {
 				unresolved_[handle] = visual_identity;
 				++stat_unresolved_;
@@ -374,27 +367,6 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 		lighting_contexts_.erase(handle);
 	}
 	frame_spectator_camera();
-}
-
-void WirePresentPass::trace_cold_build(const char *p_stage, int p_handle,
-		int p_type_id, int p_visual_item_id) const {
-	if (trace_path_.is_empty()) {
-		return;
-	}
-	const FileAccess::ModeFlags mode = FileAccess::file_exists(trace_path_)
-			? FileAccess::READ_WRITE
-			: FileAccess::WRITE_READ;
-	Ref<FileAccess> file = FileAccess::open(trace_path_, mode);
-	if (file.is_null()) {
-		return;
-	}
-	file->seek_end();
-	file->store_line(vformat(
-			"%d %s handle=0x%04x type=0x%04x visual=%d nodes=%d pending_prev=%d",
-			int64_t(Time::get_singleton()->get_ticks_msec()),
-			String(p_stage), p_handle, p_type_id, p_visual_item_id,
-			int(nodes_.size()), pending_spawn_count_));
-	file->flush();
 }
 
 // Spectator-only one-shot overview.

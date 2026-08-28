@@ -282,7 +282,7 @@ popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43
 - **`engine/net/npruntime/{include/npruntime/host_session.h,src/host_session.cpp}`** (shared by `main.cpp`,
   the NovaWorld listener, and the socket tests — one wire owner loop) +
   **`apps/nw_server/main.cpp`** (a headless **dedicated host**: `HostOnly`, with no
-  synthetic loopback player; loads a mission via `NW_MISSION`, drift-free `sleep_until` 62 Hz loop, SIGINT
+  synthetic loopback player; loads a mission via `--mission`, drift-free `sleep_until` 62 Hz loop, SIGINT
   shutdown). The per-tick body is the §5.44 recv-before-send order: recv-drain → `tick_connections`
   (pre-spawn §5.2a bursts) → `Server_TickUpdate` (single C2S drain + logic tick + 0x0A fan) → S2C flush
   (`pop_outbound` → `frame_in_match_s2c` → `sendto`). The joiner spawn is AUTOMATIC (`tick_connections`

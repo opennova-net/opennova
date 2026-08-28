@@ -12,8 +12,8 @@
 // weaker invariant nw_ingame_pool_records_test already covers).
 //
 // Reads the real pcap DIRECTLY via the shared apps/common pcap reader (no
-// hexcap intermediate). Path comes from NW_DVXI5_PCAP, else the in-tree
-// .scratch capture (DEFAULT_DVXI5_PCAP). Skips cleanly when the capture is
+// hexcap intermediate) from <OPENNOVA_CAPTURES>/host_and_join_game_on_
+// opennovaworld_loopback_mission_probe.pcapng. Reports Skipped when the capture is
 // absent (it is a local-only artifact — .scratch is untracked), so CI stays
 // green; the decoder regression coverage that runs without the capture lives in
 // the inline-pcap unit tests (nw_pool_decode_unit_test).
@@ -31,6 +31,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
@@ -137,19 +138,12 @@ void check(bool cond, const std::string &what) {
 
 int main() {
 	// --- locate inputs --------------------------------------------------------
-	std::string pcap_path;
-	if (const char *env = std::getenv("NW_DVXI5_PCAP"); env && *env)
-		pcap_path = env;
-	else
-		pcap_path = DEFAULT_DVXI5_PCAP;
+	const std::string pcap_path =
+			retail::capture("host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng");
 
 	std::vector<net::PcapDatagram> pkts;
-	if (pcap_path.empty() || !net::read_pcap_udp_file(pcap_path, pkts)) {
-		std::printf("[skip] dvxi5 capture not found (set NW_DVXI5_PCAP to "
-		            "...mission_probe.pcapng) — '%s'\n",
-		            pcap_path.c_str());
-		return 0;
-	}
+	if (!net::read_pcap_udp_file(pcap_path, pkts))
+		return retail::skip("<OPENNOVA_CAPTURES>/host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng (the dvxi5 probe capture)");
 
 	std::vector<Expected> manifest;
 	const std::string manifest_path = std::string(FIXTURE_DIR) + "/dvxi5_manifest.txt";

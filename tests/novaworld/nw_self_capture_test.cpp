@@ -27,7 +27,7 @@
 // missing/unreadable fixture is a hard FAIL, not a skip.
 //
 // Regenerating the fixture is a WIRE-COVERAGE CHANGE: run with
-// OPENNOVA_WRITE_SELF_FIXTURE=1 to rewrite it (the write path re-reads and
+// `--write-fixture` to rewrite it (the write path re-reads and
 // re-verifies the file before reporting OK), and justify the coverage delta in
 // the same commit (the newly implemented tag, or its D-NET entry) — never
 // regenerate to make an unexplained diff pass.
@@ -61,6 +61,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <cstring>
 
 #ifndef SELF_CAPTURE_FIXTURE
 #define SELF_CAPTURE_FIXTURE ""
@@ -290,7 +291,14 @@ int compare_coverage(const std::map<Key, long> &live, const std::map<Key, long> 
 
 } // namespace
 
-int main() {
+// `nw_self_capture_test --write-fixture` regenerates the committed fixture
+// from this run (then re-reads and re-verifies it); the ctest registration
+// passes nothing.
+int main(int argc, char **argv) {
+	bool write_fixture = false;
+	for (int i = 1; i < argc; ++i)
+		if (std::strcmp(argv[i], "--write-fixture") == 0) write_fixture = true;
+
 	std::vector<CaptureDatagram> recorded;
 	if (!run_session(recorded)) return 1;
 
@@ -305,7 +313,7 @@ int main() {
 
 	// Regen mode: rewrite the committed fixture from this run, then re-read and
 	// re-verify it so a bad write can never be committed green.
-	if (const char *regen = std::getenv("OPENNOVA_WRITE_SELF_FIXTURE"); regen && *regen) {
+	if (write_fixture) {
 		std::vector<net::PcapDatagram> dgrams;
 		dgrams.reserve(recorded.size());
 		for (const CaptureDatagram &c : recorded) {
@@ -350,14 +358,14 @@ int main() {
 	if (fixture_path.empty() || !net::read_pcap_udp_file(fixture_path, fixture_pkts)) {
 		std::printf("FAIL: committed fixture missing/unreadable — '%s'. If it is an LFS "
 		            "pointer, run: git lfs pull --include=\"fixtures/novaworld/**\". To "
-		            "(re)generate: OPENNOVA_WRITE_SELF_FIXTURE=1 %s\n",
+		            "(re)generate: --write-fixture %s\n",
 		            fixture_path.c_str(), "nw_self_capture_test");
 		return 1;
 	}
 	const std::map<Key, long> fixture = histogram(fixture_pkts);
 	if (fixture.empty()) {
 		std::printf("FAIL: fixture decoded to zero messages — regenerate it "
-		            "(OPENNOVA_WRITE_SELF_FIXTURE=1)\n");
+		            "(--write-fixture)\n");
 		return 1;
 	}
 	// Tripwire: the tag-SET gate cannot see a shrinking fixture — a regen that drops
@@ -384,7 +392,7 @@ int main() {
 		std::printf("FAIL: live opennova<->opennova coverage diverges from the committed "
 		            "self-capture fixture — see GAP/SPURIOUS rows above. If the change is "
 		            "intentional (a tag implemented or retired), regenerate with "
-		            "OPENNOVA_WRITE_SELF_FIXTURE=1 and justify the delta in the same "
+		            "--write-fixture and justify the delta in the same "
 		            "commit; otherwise fix the regression.\n");
 		return 1;
 	}

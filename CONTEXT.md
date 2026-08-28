@@ -124,6 +124,20 @@ and the present pass renders the locally-decoded result, so SP, co-op, and multi
 share one replication path (only the transport differs). See ADR 0011.
 _Avoid_: standalone server, dedicated server (those have no local player)
 
+**Probe**:
+A registered runtime probe: a `GameProbe` script under `godot/probes/<family>/` run
+inside the live game through the `game_probe` MCP tool, reading typed arguments and
+returning a verdict with data and artifacts (ADR 0041, `docs/mcp.md`). An assertion
+over the portable engine is a ctest, not a probe.
+_Avoid_: manual probe script, env-configured probe, `*_probe.gd` under `godot/tests/`
+
+**Runtime MCP**:
+The `opennova-game` Model Context Protocol server the game runtime embeds
+(`--mcp-port`), through which scripts, runbooks and agents read state, drive the
+debug catalog and menu, capture frames and run probes. Retail is driven separately
+through `onhook-mcp` (`opennova-int`). ONED has no MCP (ADR 0037).
+_Avoid_: ONED MCP, the editor MCP
+
 **In-match / Matchmaking**:
 The two network protocol domains. **In-match** is the 62 Hz game session between a host
 and its clients (the wire codec + replication runtime). **Matchmaking** is everything that

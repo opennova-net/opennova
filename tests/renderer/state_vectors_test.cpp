@@ -21,7 +21,7 @@
 //    commit that re-dumps carries the witness citation
 //    ([orig: Name @ 0xADDR] or a D-RMAT/ledger row). Tolerances are never
 //    widened; there are none here — comparison is exact text.
-//  - Dump mode is LOUD: OPENNOVA_RENDER_VECTORS_DUMP=1 rewrites the golden
+//  - Dump mode is LOUD: `--dump` rewrites the golden
 //    in the source tree and then FAILS the test, so a dump run can never be
 //    mistaken for green.
 //
@@ -63,6 +63,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <cstring>
 
 namespace {
 
@@ -559,11 +560,16 @@ std::string generate() {
 
 } // namespace
 
-int main() {
+// `renderer_state_vectors_test --dump` rewrites the golden (and deliberately
+// fails); the ctest registration passes nothing.
+int main(int argc, char **argv) {
 	const std::string generated = generate();
 	const char *golden_path = RENDER_STATE_VECTORS_GOLDEN;
 
-	if (std::getenv("OPENNOVA_RENDER_VECTORS_DUMP") != nullptr) {
+	bool dump = false;
+	for (int i = 1; i < argc; ++i)
+		if (std::strcmp(argv[i], "--dump") == 0) dump = true;
+	if (dump) {
 		std::ofstream out(golden_path, std::ios::binary);
 		if (!out) {
 			std::cerr << "FAIL: dump mode could not open golden for write: "
@@ -587,7 +593,7 @@ int main() {
 	std::ifstream in(golden_path, std::ios::binary);
 	if (!in) {
 		std::cerr << "FAIL: golden missing: " << golden_path << "\n"
-		          << "Initial dump: set OPENNOVA_RENDER_VECTORS_DUMP=1 and rerun.\n";
+		          << "Initial dump: rerun with --dump.\n";
 		return 1;
 	}
 	std::stringstream buf;
@@ -623,7 +629,7 @@ int main() {
 		"FAIL: render-state vectors diverged from the committed golden.\n"
 		"If this was NOT a deliberate witnessed port step, it is a\n"
 		"regression: fix the code, never the golden. A deliberate change\n"
-		"re-dumps (OPENNOVA_RENDER_VECTORS_DUMP=1) and cites its witness in\n"
+		"re-dumps (--dump) and cites its witness in\n"
 		"the same commit (ADR 0023; docs/render/).\n";
 	return 1;
 }

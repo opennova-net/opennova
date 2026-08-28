@@ -54,7 +54,7 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
 
 - Every ctest named in Evidence exists:
   `ctest --test-dir build -C Release -N -R <name>` (build first if needed:
-  `BUILD_GODOT=0 bash scripts/build.sh`).
+  `bash scripts/build.sh --no-godot`).
 - Every cited repo path exists; every address is in `@ 0x...` form.
 - The doc reads standalone: a future session must be able to re-grill from it
   without the original transcript.

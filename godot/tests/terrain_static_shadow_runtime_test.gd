@@ -1,14 +1,30 @@
 extends GutTest
 
-const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
-const HOUSE_3DI := "res://../fixtures/threedi/3di3/House.3di"
-# House with a live LOD0 sine rotation row; the same plus material 0's UV
-# generator set to style 1; House with material 0 alpha-tested and
+const HOUSE_3DI := "res://../fixtures/threedi/synth/house.3di"
+# house with a live LOD0 sine rotation row; the same plus material 0's UV
+# generator set to style 1; house with material 0 alpha-tested and
 # time-scrolled at one texture per second (style 16, rate 1). Minted once
-# from the retired edit surface (fixtures/threedi/synthetic/README.md).
-const SYN_HOUSE_SINE := "res://../fixtures/threedi/synthetic/house_lod0_sine_rotx.3di"
-const SYN_HOUSE_SINE_UV1 := "res://../fixtures/threedi/synthetic/house_lod0_sine_rotx_uv1.3di"
-const SYN_HOUSE_UVSCROLL := "res://../fixtures/threedi/synthetic/house_mtrl0_uvscroll16_alphatest.3di"
+# from the retired edit surface (fixtures/README.md).
+const SYN_HOUSE_SINE := "res://../fixtures/threedi/synth/house_lod0_sine_rotx.3di"
+const SYN_HOUSE_SINE_UV1 := "res://../fixtures/threedi/synth/house_lod0_sine_rotx_uv1.3di"
+const SYN_HOUSE_UVSCROLL := "res://../fixtures/threedi/synth/house_mtrl0_uvscroll16_alphatest.3di"
+
+
+var _terrain_root := ""
+
+
+# The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
+# assets it names; one root per test file, removed at the end.
+func _tmap_trn() -> String:
+	if _terrain_root.is_empty():
+		_terrain_root = TestFs.stage_terrain_root("static_shadow")
+	return _terrain_root.path_join(TestFs.TMAP_TRN)
+
+
+func after_all() -> void:
+	if not _terrain_root.is_empty():
+		TestFs.remove_dir_recursive(_terrain_root)
+		_terrain_root = ""
 
 
 static func _terrain_light_epoch(raw_tuple: Vector3) -> Vector3i:
@@ -45,7 +61,7 @@ func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var old_data: TerrainData = TerrainData.new()
-	old_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	old_data.set_trn_path(_tmap_trn())
 	assert_eq(old_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -60,10 +76,10 @@ func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(HOUSE_3DI)), OK)
 	var placer := MissionObjectPlacer.create(null, null)
-	assert_true(placer.register_object_data("House", object_data))
+	assert_true(placer.register_object_data("house", object_data))
 	var caster_point := Vector3(64.0, 0.0, 64.0)
 	caster_point.y = old_data.get_height_world(caster_point)
-	placer.register_static_instance(901, "House", 0,
+	placer.register_static_instance(901, "house", 0,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), caster_point), true)
 	terrain.set_static_shadow_placer(placer)
 
@@ -75,7 +91,7 @@ func test_replacing_terrain_data_cancels_old_jobs_without_borrowing_old_receiver
 			"the replacement regression must cancel an executing receiver job, not only queued work")
 	var old_weak: WeakRef = weakref(old_data)
 	var replacement := TerrainData.new()
-	replacement.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	replacement.set_trn_path(_tmap_trn())
 	assert_eq(replacement.load(), OK)
 	terrain.set_terrain_data(replacement)
 	terrain.build()
@@ -121,8 +137,8 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	environment.configure_mission_clock(0x0900, 60)
 
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
-	assert_eq(terrain_data.load(), OK, "the Dvxi5 terrain fixture must load")
+	terrain_data.set_trn_path(_tmap_trn())
+	assert_eq(terrain_data.load(), OK, "the Tmap terrain fixture must load")
 
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -155,20 +171,23 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE)), OK,
-		"the House fixture must provide real selected-LOD ROBJ triangles")
+		"the house fixture must provide real selected-LOD ROBJ triangles")
 	assert_true(object_data.has_live_panm_for_lod(0),
 		"fixture pins that the retail tile projector ignores live PANM")
 	var placer := MissionObjectPlacer.create(null, null)
-	assert_true(placer.register_object_data("House", object_data))
+	assert_true(placer.register_object_data("house", object_data))
 	var ground_sample := Vector3(64.125, 0.0, 64.125)
 	var point_ground := terrain_data.get_height_world(ground_sample)
 	var bilinear_ground := terrain_data.get_height_world_bilinear(ground_sample)
-	assert_almost_eq(point_ground, 40.5, 0.00001,
-		"the real terrain fixture pins retail's caster-origin point sample")
+	# The synthetic hill's checker cell at atlas (576, 576): the sloped plane
+	# (36 + 8 + 4) minus the checker's 0.5 (minted by
+	# tests/fixtures/minimal_terrain_gen.cpp, which prints this pin every run).
+	assert_almost_eq(point_ground, 47.5, 0.00001,
+		"the synthetic terrain fixture pins retail's caster-origin point sample")
 	assert_gt(absf(point_ground - bilinear_ground), 0.05,
 		"this fixture would catch an accidental return to bilinear caster grounding")
 	var origin := Vector3(ground_sample.x, point_ground, ground_sample.z)
-	placer.register_static_instance(100, "House", 0,
+	placer.register_static_instance(100, "house", 0,
 		Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), origin), true)
 	terrain.set_static_shadow_placer(placer)
 
@@ -280,7 +299,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	assert_eq(int(unsuppressed["shadow_epoch_rgb_changed_bytes"]), 0)
 
 	# Material 0's UV generator switched to style 1 (time/control-driven): the
-	# same House rows with that one authored change, reloaded into the
+	# same house rows with that one authored change, reloaded into the
 	# registered ObjectData so the projector sees a document change.
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE_UV1)), OK)
 	assert_eq(int(object_data.get_material_info(0).get("uv_u_style", -1)), 1,
@@ -331,7 +350,7 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	terrain_data.set_trn_path(_tmap_trn())
 	assert_eq(terrain_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -347,14 +366,14 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(HOUSE_3DI)), OK)
 	var placer := MissionObjectPlacer.create(null, null)
-	assert_true(placer.register_object_data("House", object_data))
+	assert_true(placer.register_object_data("house", object_data))
 	var still_origin := Vector3(64.0, 0.0, 64.0)
 	still_origin.y = terrain_data.get_height_world(still_origin)
-	placer.register_static_instance(100, "House", 0,
+	placer.register_static_instance(100, "house", 0,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), still_origin), true)
 	var mover_origin := Vector3(96.0, 0.0, 96.0)
 	mover_origin.y = terrain_data.get_height_world(mover_origin)
-	placer.register_static_instance(101, "House", 1,
+	placer.register_static_instance(101, "house", 1,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), mover_origin), true)
 	terrain.set_static_shadow_placer(placer)
 	var settled := await _settle_tile_cache(terrain)
@@ -369,7 +388,7 @@ func test_caster_motion_recomposes_only_affected_pages_while_stale_pages_keep_se
 	# resident set never collapses to the fallback shader path.
 	mover_origin.x += 8.0
 	mover_origin.y = terrain_data.get_height_world(mover_origin)
-	placer.register_static_instance(101, "House", 1,
+	placer.register_static_instance(101, "house", 1,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), mover_origin), true)
 	terrain.render_frame()
 	var moved := terrain.get_tile_cache_diagnostics()
@@ -425,7 +444,7 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	terrain_data.set_trn_path(_tmap_trn())
 	assert_eq(terrain_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -446,10 +465,10 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 	assert_eq(int(material.get("uv_u_style", -1)), 16)
 	assert_almost_eq(float(material.get("uv_u_rate", 0.0)), 1.0, 0.0001)
 	var placer := MissionObjectPlacer.create(null, null)
-	assert_true(placer.register_object_data("House", object_data))
+	assert_true(placer.register_object_data("house", object_data))
 	var origin := Vector3(64.0, 0.0, 64.0)
 	origin.y = terrain_data.get_height_world(origin)
-	placer.register_static_instance(100, "House", 0,
+	placer.register_static_instance(100, "house", 0,
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), origin), true)
 	terrain.set_static_shadow_placer(placer)
 	var clock_ms := 1000
@@ -484,14 +503,10 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 
 
 func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> void:
-	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
-	if install_dir.is_empty():
-		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the Scrate1 shadow witness")
+	var resource_root := RetailData.mount_install_with("Scrate1.3di")
+	if resource_root == null:
+		pending("OPENNOVA_JO_DIR / retail JO PFFs serving Scrate1.3di are required for the shadow witness")
 		return
-	var resource_root := ResourceRoot.new()
-	assert_eq(resource_root.mount_runtime(
-			install_dir, "revx02", false, "jo"), OK,
-		"the installed JO runtime must mount for the asset-backed witness")
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_from_resource_root(
 			resource_root, "Scrate1.3di", false), OK,
@@ -508,7 +523,7 @@ func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> voi
 	viewport.size = Vector2i(320, 180)
 	add_child_autofree(viewport)
 	var terrain_data := TerrainData.new()
-	terrain_data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
+	terrain_data.set_trn_path(_tmap_trn())
 	assert_eq(terrain_data.load(), OK)
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)

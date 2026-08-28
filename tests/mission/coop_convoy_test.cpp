@@ -11,7 +11,7 @@
 //
 // This is the scripted behavior a live host shows when a player mounts the
 // Stryker gun; the test pins it deterministically against the shipped mission.
-// Gated on OPENNOVA_JO_DIR (skip-as-pass without a JO install).
+// Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install).
 #include <runtime/mission/event_runtime.h>
 #include <runtime/mission/promote.h>
 
@@ -29,6 +29,8 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "common/retail_mission.h"
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -46,19 +48,14 @@ bool expect(bool cond, const char *msg) {
 } // namespace
 
 int main() {
-	const char *dir = std::getenv("OPENNOVA_JO_DIR");
-	if (dir == nullptr || *dir == '\0') {
-		std::printf("coop convoy: SKIP (OPENNOVA_JO_DIR not set)\n");
-		return 0;
-	}
-	const std::string path = std::string(dir) + "/05TRcoop.bms";
-	std::ifstream f(path, std::ios::binary);
-	if (!f) {
-		std::printf("coop convoy: SKIP (no 05TRcoop.bms under OPENNOVA_JO_DIR)\n");
-		return 0;
-	}
-	std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
-	                           std::istreambuf_iterator<char>());
+	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
+			"OPENNOVA_JO_DIR (a retail JO install serving 05TRcoop.bms)");
+	opennova::ResourceIndex index;
+	std::vector<uint8_t> bytes;
+	std::string served_by;
+	if (!retail::read_mission(install, "05TRcoop.bms", index, bytes, served_by))
+		return retail::skip("05TRcoop.bms on the OPENNOVA_JO_DIR mount (base or an expansion) "
+		                    "or under OPENNOVA_MISSION_CORPUS");
 	bms::File m;
 	std::string error;
 	if (!expect(bms::parse(bytes.data(), bytes.size(), m, error),

@@ -2,13 +2,13 @@ extends GutTest
 
 const UserPointDebugView := preload("res://game/debug/user_point_debug_view.gd")
 const UserPointOverlay := preload("res://game/object/object_user_point_overlay.gd")
-const MP5_FIXTURE := "res://../fixtures/threedi/3di3/MP5.3di"
+const GUN_FIXTURE := "res://../fixtures/threedi/synth/gun.3di"
 
 
 func test_live_overlay_maps_user_point_through_the_live_part_frame() -> void:
-	var data := _load_mp5()
+	var data := _load_gun()
 	var user_point_index := _first_bone_user_point(data)
-	assert_gte(user_point_index, 0, "MP5 fixture should carry a part-owned user point")
+	assert_gte(user_point_index, 0, "gun fixture should carry a part-owned user point")
 	if user_point_index < 0:
 		return
 	var info: Dictionary = data.get_user_point_info(user_point_index)
@@ -22,7 +22,7 @@ func test_live_overlay_maps_user_point_through_the_live_part_frame() -> void:
 	_set_visual_layers(model, 1 << 11)
 	var part_nodes: Dictionary = model.get_render_part_nodes()
 	assert_true(part_nodes.has(part_index),
-			"the rigid MP5 builds a live part node for the point's subobject")
+			"the rigid gun builds a live part node for the point's subobject")
 	if not part_nodes.has(part_index):
 		return
 	# Pose the real part node off its rest — the same write the part-anim
@@ -63,7 +63,7 @@ func test_live_overlay_maps_user_point_through_the_live_part_frame() -> void:
 
 
 func test_world_view_tracks_grouped_static_instances_and_live_model_lifecycle() -> void:
-	var data := _load_mp5()
+	var data := _load_gun()
 	var root := Node3D.new()
 	add_child_autofree(root)
 	var view := UserPointDebugView.new()
@@ -72,7 +72,7 @@ func test_world_view_tracks_grouped_static_instances_and_live_model_lifecycle() 
 	var static_a := Transform3D(Basis.IDENTITY, Vector3(2.0, 0.0, 0.0))
 	var static_b := Transform3D(Basis(Vector3.UP, 0.5), Vector3(-3.0, 1.0, 4.0))
 	view.setup(root, [{
-		"graphic": "MP5",
+		"graphic": "gun",
 		"object_data": data,
 		"transforms": [static_a, static_b],
 	}])
@@ -99,10 +99,10 @@ func test_world_view_tracks_grouped_static_instances_and_live_model_lifecycle() 
 			"live churn leaves retained static sources intact")
 
 
-func _load_mp5() -> ObjectData:
+func _load_gun() -> ObjectData:
 	var data := ObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(MP5_FIXTURE)), OK,
-			"MP5 fixture should open through ObjectData")
+	assert_eq(data.open_file(ProjectSettings.globalize_path(GUN_FIXTURE)), OK,
+			"gun fixture should open through ObjectData")
 	return data
 
 

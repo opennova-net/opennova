@@ -14,9 +14,9 @@ extends GutTest
 # can never alias EWEAP registers; the register-independence case pins the
 # real layout.
 
-const RIGGED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
-const MUZZLE_3DI := "res://../fixtures/threedi/objects/dapche2/dapche2.3di"
-const SECTIONED_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
+const RIGGED_3DI := "res://../fixtures/threedi/synth/shed.3di"
+const MUZZLE_3DI := "res://../fixtures/threedi/synth/gun.3di"
+const SECTIONED_3DI := "res://../fixtures/threedi/synth/pump.3di"
 
 
 # Builds the flat PF-layout snapshot Simulation.get_present_snapshot()
@@ -167,7 +167,7 @@ func _rigged_model() -> ObjectModel:
 
 # A model with the def-named AI muzzle (the D-AI-6 seam): the def's
 # launchups_* name (pushed by the placer in production) resolves against the
-# model's userpoint table case-insensitively — dapche2 authors Bullet01 and the
+# model's userpoint table case-insensitively — gun authors Bullet01 and the
 # committed rig gives it a skeleton.
 func _muzzle_model() -> ObjectModel:
 	var m := ObjectModel.new()

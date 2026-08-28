@@ -185,7 +185,7 @@ rather than asserting byte-equality against a throwaway generator:
 | `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def` |
 | `minimal_mnu_validate` | `main.mnu` (Startup), `mp.mnu` (LAN host/join), `sp.mnu` (single player) parse and carry their screens |
 | `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight |
-| `minimal_trn_gen` | `mnml.trn` round-trips, keeps the 8-wide sector grid + quadrant block, names exactly the shipped `mnml_*` art (`OPENNOVA_WRITE_MINIMAL_FIXTURES=1` re-emits the config) |
+| `minimal_trn_gen` | `mnml.trn` round-trips, keeps the 8-wide sector grid + quadrant block, names exactly the shipped `mnml_*` art (`minimal_trn_gen_test --write` re-emits the config) |
 | `minimal_art_validate` | every image `mnml.trn` names decodes; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |
 | `minimal_eol_guard` | every hand-authored text file is CRLF |
 | `minimal_pff_package` | the packaging tool (below); skips unless asked |
@@ -195,14 +195,14 @@ rather than asserting byte-equality against a throwaway generator:
 `tests/fixtures/minimal_pff_package.cpp` bundles the committed tree — it reads
 `assets/` and never writes into it. Two layouts:
 
-- `OPENNOVA_BUILD_MINIMAL_PFF=1` writes the **three boot-table archives** into
-  this root (gitignored), each file in the archive retail uses for its kind
+- `minimal_pff_package_test --write-pff` writes the **three boot-table
+  archives** into this root (gitignored), each file in the archive retail uses for its kind
   (witnessed against the JOTAC JO install): `language.pff` = the boot text
   bins + the mission-family `.bin`/`.pcx`/`.lwf`, `localres.pff` = the menus,
   defs, mission, fonts and music scripts, `resource.pff` = the map and terrain
   (`.env`/`.trn`/`.cpt`/source art).
-- `OPENNOVA_MINIMAL_INSTALL=<dir>` assembles a runnable **loose** install:
-  everything flat plus a zero-entry `resource.pff` boot token, run with `/d`.
+- `minimal_pff_package_test --install <dir>` assembles a runnable **loose**
+  install: everything flat plus a zero-entry `resource.pff` boot token, run with `/d`.
   With `OPENNOVA_JO_DIR` set it also stages `Jointops.exe` + `binkw32.dll` +
   `game.cfg` from your own install (never committed).
 

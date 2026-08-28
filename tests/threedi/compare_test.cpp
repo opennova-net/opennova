@@ -24,7 +24,7 @@ static std::string fixture_path(const char *name)
     char path[4096];
     snprintf(path,
              sizeof(path),
-             "%s/fixtures/threedi/3di3/%s",
+             "%s/fixtures/threedi/synth/%s",
              test_paths_repo_root(__FILE__),
              name);
     return std::string(path);
@@ -269,7 +269,7 @@ static int compare_self_succeeds_for_explicit_ghdr(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR",
@@ -282,7 +282,7 @@ static int compare_self_succeeds_for_explicit_ghdr_and_usrp(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR,USRP",
@@ -295,7 +295,7 @@ static int compare_self_succeeds_for_explicit_ghdr_usrp_and_info(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR,USRP,INFO",
@@ -308,7 +308,7 @@ static int compare_self_succeeds_for_explicit_ghdr_usrp_info_and_ctrl(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR,USRP,INFO,CTRL",
@@ -321,7 +321,7 @@ static int compare_self_succeeds_for_explicit_ghdr_usrp_info_ctrl_and_mtrl(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR,USRP,INFO,CTRL,MTRL",
@@ -334,7 +334,7 @@ static int compare_self_succeeds_for_explicit_ghdr_usrp_info_ctrl_mtrl_and_occl(
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR,USRP,INFO,CTRL,MTRL,OCCL",
@@ -347,7 +347,7 @@ static int compare_self_succeeds_for_explicit_ghdr_usrp_info_ctrl_mtrl_occl_and_
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR,USRP,INFO,CTRL,MTRL,OCCL,LGHT",
@@ -360,7 +360,7 @@ static int compare_self_succeeds_for_explicit_ghdr_usrp_info_ctrl_mtrl_occl_lght
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR,USRP,INFO,CTRL,MTRL,OCCL,LGHT,MTRX",
@@ -373,7 +373,7 @@ static int compare_self_succeeds_for_explicit_top_level_chunks_through_rdta(void
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR,USRP,INFO,CTRL,MTRL,OCCL,LGHT,MTRX,RDTA",
@@ -386,7 +386,7 @@ static int compare_self_succeeds_for_explicit_top_level_chunks_through_cdta(void
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "GHDR,USRP,INFO,CTRL,MTRL,OCCL,LGHT,MTRX,RDTA,CDTA",
@@ -399,7 +399,7 @@ static int empty_chunk_list_is_invalid(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "",
@@ -414,7 +414,7 @@ static int null_chunk_list_is_invalid(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               NULL,
@@ -429,7 +429,7 @@ static int requested_chunk_must_exist_in_expected(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string path = fixture_path("Shed.3di");
+    const std::string path = fixture_path("shed.3di");
     int rc = threedi_3di3_compare_file_chunks(path.c_str(),
                                               path.c_str(),
                                               "ZZZZ",
@@ -446,7 +446,7 @@ static int changed_ghdr_payload_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_ghdr.3di");
     if (!write_modified_chunk_copy(expected, actual, "GHDR")) {
         return 0;
@@ -469,7 +469,7 @@ static int changed_usrp_payload_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_usrp.3di");
     if (!write_modified_chunk_copy(expected, actual, "USRP")) {
         return 0;
@@ -492,7 +492,7 @@ static int changed_info_kind_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_info.3di");
     if (!write_parent_flag_toggled_chunk_copy(expected, actual, "INFO")) {
         return 0;
@@ -515,7 +515,7 @@ static int changed_ctrl_payload_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_ctrl.3di");
     if (!write_modified_chunk_copy(expected, actual, "CTRL")) {
         return 0;
@@ -538,7 +538,7 @@ static int changed_mtrl_payload_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_mtrl.3di");
     if (!write_modified_chunk_copy(expected, actual, "MTRL")) {
         return 0;
@@ -561,7 +561,7 @@ static int changed_occl_child_payload_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_occl_child.3di");
     if (!write_modified_chunk_copy(expected, actual, "OVRT")) {
         return 0;
@@ -586,7 +586,7 @@ static int changed_lght_payload_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_lght.3di");
     if (!write_modified_chunk_copy(expected, actual, "LGHT")) {
         return 0;
@@ -609,7 +609,7 @@ static int changed_mtrx_payload_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_mtrx.3di");
     if (!write_modified_chunk_copy(expected, actual, "MTRX")) {
         return 0;
@@ -632,7 +632,7 @@ static int changed_rdta_child_payload_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_rdta_child.3di");
     if (!write_modified_chunk_copy(expected, actual, "RMDL")) {
         return 0;
@@ -657,7 +657,7 @@ static int changed_cdta_child_payload_reports_mismatch(const char child_id[4])
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     char name[128];
     snprintf(name, sizeof(name), "opennova_compare_changed_cdta_%.4s.3di", child_id);
     const std::string actual = temp_path(name);
@@ -687,7 +687,7 @@ static int changed_cdta_cfac_padding_matches(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_cdta_cfac_padding.3di");
     size_t cfac_payload_offset = 0;
     if (!first_chunk_payload_offset(expected, "CFAC", &cfac_payload_offset) ||
@@ -708,7 +708,7 @@ static int changed_cdta_cfac_second_record_padding_matches(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_cdta_cfac_second_record_padding.3di");
     size_t cfac_payload_offset = 0;
     if (!first_chunk_payload_offset(expected, "CFAC", &cfac_payload_offset) ||
@@ -729,7 +729,7 @@ static int changed_cdta_cfac_plane_dist_reports_field(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_cdta_cfac_plane_dist.3di");
     size_t cfac_payload_offset = 0;
     if (!first_chunk_payload_offset(expected, "CFAC", &cfac_payload_offset) ||
@@ -758,7 +758,7 @@ static int changed_cdta_cfac_poly_type_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_cdta_cfac_poly_type.3di");
     size_t cfac_payload_offset = 0;
     if (!first_chunk_payload_offset(expected, "CFAC", &cfac_payload_offset) ||
@@ -787,7 +787,7 @@ static int changed_rdta_vert_normal_within_tolerance_matches(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_rdta_vert_normal_within_tolerance.3di");
     size_t normal_offset = 0;
     if (!first_vert_normal_offset(expected, 0, 2, &normal_offset) ||
@@ -808,7 +808,7 @@ static int changed_rdta_vert_normal_beyond_tolerance_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_rdta_vert_normal_beyond_tolerance.3di");
     size_t normal_offset = 0;
     if (!first_vert_normal_offset(expected, 0, 2, &normal_offset) ||
@@ -835,7 +835,7 @@ static int changed_rdta_vert_non_normal_byte_reports_mismatch(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string actual = temp_path("opennova_compare_changed_rdta_vert_position.3di");
     size_t position_offset = 0;
     if (!first_vert_position_offset(expected, 0, &position_offset) ||
@@ -860,7 +860,7 @@ static int missing_file_returns_read_error(void)
 {
     char report[512];
     memset(report, 0, sizeof(report));
-    const std::string expected = fixture_path("Shed.3di");
+    const std::string expected = fixture_path("shed.3di");
     const std::string missing = temp_path("opennova_compare_missing.3di");
     remove(missing.c_str());
 

@@ -27,7 +27,7 @@ func test_non_default_character_identity_does_not_collapse_to_us01() -> void:
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/godot/dvxi5")), OK)
+			"res://../fixtures/terrain/tmap")), OK)
 	var placer := MissionObjectPlacer.create(root, null)
 	placer.set_avatar_db(avatar_db)
 	var spec := placer.resolve_player_visual_spec(0x14B9, character_id)
@@ -51,14 +51,14 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 	assert_not_null(items)
 	items.store_string(
 			"begin Player\n"
-			+ " id 105310\n type person\n graphic Fsldr03\nend\n")
+			+ " id 105310\n type person\n graphic person\nend\n")
 	items.close()
 	var avatars := FileAccess.open(avatar_path, FileAccess.WRITE)
 	assert_not_null(avatars)
 	avatars.store_string(
-			"define head HEAD\n{\n graphic Fsldr03.3di\n camo 32 64 96\n voice 3\n sex m\n}\n"
-			+ "define body BODY\n{\n graphic Fsldr03.3di\n camo 100 120 140\n}\n"
-			+ "define arms ARMS\n{\n graphic Fsldr03.3di\n camo 200 210 220\n}\n"
+			"define head HEAD\n{\n graphic person.3di\n camo 32 64 96\n voice 3\n sex m\n}\n"
+			+ "define body BODY\n{\n graphic person.3di\n camo 100 120 140\n}\n"
+			+ "define arms ARMS\n{\n graphic person.3di\n camo 200 210 220\n}\n"
 			+ "nationality 0 NAT\n{\n alignment good\n division 0 DIV\n {\n"
 			+ "  combo 2 HEAD BODY ARMS\n }\n}\n")
 	avatars.close()
@@ -69,7 +69,7 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 	assert_eq(avatar_db.load(avatar_path), OK)
 	var resources := ResourceRoot.new()
 	assert_eq(resources.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi")), OK)
+			"res://../fixtures/threedi/synth")), OK)
 	var placer := MissionObjectPlacer.create(resources, item_db)
 	placer.set_avatar_db(avatar_db)
 	var parent := Node3D.new()
@@ -84,7 +84,7 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 	assert_eq(int(body_ctrl.get("TEX_CAMO2", -1)), 120)
 	assert_eq(int(body_ctrl.get("TEX_CAMO3", -1)), 140,
 			"retail stores authored camo bytes directly, without scaling")
-	assert_eq(String(body.name), "PlayerAvatar_Fsldr03",
+	assert_eq(String(body.name), "PlayerAvatar_person",
 			"the composed body keeps the player avatar node name")
 	var head := body.find_child("PlayerAvatarHead_*", true, false) as ObjectModel
 	assert_not_null(head, "the selected head is composed with the selected body")
@@ -105,7 +105,7 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 
 func test_runtime_player_type_resolves_to_us01_visual_item() -> void:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5")), OK)
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/terrain/tmap")), OK)
 	var placer := MissionObjectPlacer.create(root, null)
 	var db := placer.get_item_db()
 	assert_eq(db.get_graphic(0x14B9), "", "runtime type id is not an items.def authoring id")

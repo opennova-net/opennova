@@ -90,6 +90,9 @@ signal minimap_water_changed(mask: ImageTexture)
 
 var _dispatcher: FoliageDispatcher
 var _sun_shadow: SunShadow
+# True once the env presenters' own _process is off and this world advances
+# them from render_environment_nodes_frame (the render diagnostics report it).
+var _env_presenters_world_driven := false
 var _slot_shadow: SlotShadow
 var _terrain_data: TerrainData
 var _resource_root: ResourceRoot
@@ -306,6 +309,7 @@ func _ready() -> void:
 	for presenter in [_weather, _sun_shadow, _sky_dome, _celestial, _water]:
 		if presenter != null:
 			(presenter as Node).set_process(false)
+	_env_presenters_world_driven = true
 
 
 func _notification(what: int) -> void:
@@ -1200,6 +1204,24 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 		_perf_probe_skip_fixed_handlers = false
 		_perf_probe_occlusion_skipped = false
 	_sync_runtime_profiling()
+
+
+## The perf probe's A/B switches (only honored while the probe is enabled).
+func set_perf_probe_skip_occlusion(skip: bool) -> void:
+	_perf_probe_skip_occl = skip
+
+
+func set_perf_probe_skip_effect_tick(skip: bool) -> void:
+	_perf_probe_skip_effect_tick = skip
+
+
+func set_perf_probe_skip_fixed_handlers(skip: bool) -> void:
+	_perf_probe_skip_fixed_handlers = skip
+
+
+## The last frame's world-tick leg spans in microseconds (probe-enabled only).
+func get_perf_probe_spans() -> Dictionary:
+	return _perf_probe_spans.duplicate()
 
 
 # --- Godot frame device legs (ADR 0035) --------------------------------------
@@ -2182,19 +2204,18 @@ func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 ## degrees) LocalPlayerPresenter consumes — decoded from WeaponDatabase's transport dict
 ## at this edge (ADR 0017). Null when the mounted root has no weapon.def or the weapon
 ## name is absent — callers keep their witnessed JOX AK-47 defaults then. The weapon is
-## the bring-up fallback until equipped-weapon resolution lands; NOVA_VM_WEAPON
-## overrides the name (debug: rig A/B against another SKU's def).
+## the bring-up fallback until equipped-weapon resolution lands; the debug
+## `set_viewmodel_weapon` control (set_local_player_weapon_by_name over MCP/F3)
+## rigs A/B against another SKU's def.
 func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if _viewmodel_weapon_cleared:
 		return null
 	var weapon_db := get_weapon_database()
 	if weapon_db == null:
 		return null
-	# Precedence: the armory-equipped weapon, else the NOVA_VM_WEAPON debug override,
-	# else the fixed default until first equip.
+	# Precedence: the armory-equipped (or debug-selected) weapon, else the fixed
+	# default until first equip.
 	var weapon_name := _viewmodel_weapon_override
-	if weapon_name.is_empty():
-		weapon_name = OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
 		weapon_name = Simulation.viewmodel_bringup_fallback_weapon()
 	# Retail reads the equipped slot's def pointer, resolved when the slot was
@@ -2936,6 +2957,12 @@ func get_sky_dome_node() -> SkyDome:
 
 func get_sun_shadow_node() -> SunShadow:
 	return _sun_shadow
+
+
+## Whether this world advances the env presenters (weather, sun shadow, sky,
+## celestial, water) itself instead of their own _process.
+func drives_environment_presenters() -> bool:
+	return _env_presenters_world_driven
 
 
 func get_clear_color_node() -> WorldEnvironment:

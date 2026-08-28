@@ -206,7 +206,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ours", required=True)
     ap.add_argument("--golden", required=True)
-    ap.add_argument("--items", default=os.environ.get("NW_PP_ITEMS", ""))
+    ap.add_argument("--items", default="")
     ap.add_argument("--refresh", action="store_true", help="ignore cached golden profile")
     args = ap.parse_args()
 

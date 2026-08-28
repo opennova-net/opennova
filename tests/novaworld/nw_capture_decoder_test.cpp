@@ -11,7 +11,7 @@
 // payload bytes) to ONE batch decode_capture_to_messages() over the same
 // datagrams. It exercises that on an inline two-session capture (runs in CI with
 // no fixtures) and, when present, on the real 3-player probe3_again capture (the
-// strong multi-client / fragmented / real-SCRK case; skips clean when absent).
+// strong multi-client / fragmented / real-SCRK case; SKIP-LEG when absent).
 
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>
@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
@@ -343,15 +344,11 @@ int main() {
 		EXPECT(dec.push({1, 0, 0, {}}).empty()); // compatibility projection unchanged
 	}
 
-	// --- real 3-player capture (opt-in) --------------------------------------
-	std::string pcap_path;
-	if (const char *env = std::getenv("NW_PROBE3AGAIN_PCAP"); env && *env)
-		pcap_path = env;
-	else
-		pcap_path = DEFAULT_PROBE3AGAIN_PCAP;
+	// --- real 3-player capture (the retail leg) ------------------------------
+	const std::string pcap_path = retail::capture("probe3_again.pcapng");
 
 	std::vector<net::PcapDatagram> pkts;
-	if (!pcap_path.empty() && net::read_pcap_udp_file(pcap_path, pkts)) {
+	if (net::read_pcap_udp_file(pcap_path, pkts)) {
 		std::vector<CaptureDatagram> caps;
 		caps.reserve(pkts.size());
 		for (auto &pk : pkts)
@@ -359,8 +356,7 @@ int main() {
 		std::printf("probe3_again: %zu datagrams\n", caps.size());
 		EXPECT(streaming_equals_batch(caps, "probe3_again"));
 	} else {
-		std::printf("[note] probe3_again capture not found (set NW_PROBE3AGAIN_PCAP) "
-		            "— skipping the real-capture equivalence check\n");
+		retail::skip_leg("<OPENNOVA_CAPTURES>/probe3_again.pcapng (the real-capture equivalence check)");
 	}
 
 	if (g_failures) {

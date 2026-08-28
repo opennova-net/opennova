@@ -1,21 +1,24 @@
-// Real-asset probe for the interior section-mask/portal engine: the retail
-// Armry01.3di (the 00TRa armory — three rooms joined by two interior portals,
-// one window, one whole-building open slot) loaded through threedi_3di3_read and
-// run through the SAME model->runtime conversions the host performs, then the
-// camera walked through the rooms and the per-room section masks asserted.
-// Covers the room-transition chain the hand-built unit fixtures cannot: real
-// authored OFAC topology, real blink-box/section/render-part correspondence.
+// Model-file probe for the interior section-mask/portal engine: an armory
+// (three rooms joined by two interior portals, one window, one whole-building
+// open slot) loaded through threedi_3di3_read and run through the SAME
+// model->runtime conversions the host performs, then the camera walked
+// through the rooms and the per-room section masks asserted. Covers the
+// room-transition chain the hand-built unit fixtures cannot: authored OFAC
+// topology in a file, blink-box/section/render-part correspondence.
 //
-// Asset-gated on OPENNOVA_JO_ASSETS (the extracted JO corpus); SKIP-AS-PASS
-// when unset or when Armry01.3di is absent (docs/asset-gated-tests.md).
+// Two legs share the camera walk: the synthetic fixtures/threedi/synth/armory.3di
+// (tests/fixtures/minimal_3di_gen.cpp authors the retail floor plan below)
+// always runs; the retail Armry01.3di (the 00TRa armory) runs when
+// OPENNOVA_JO_ASSETS names the extracted JO corpus (docs/asset-gated-tests.md).
 //
-// Armry01 ground truth (mission axes, entity-local; model = (-y, z, x)):
+// The floor plan both models share (mission axes, entity-local; model =
+// (-y, z, x)):
 //   blink sec 1 = east room   x  1.1.. 5.7, y -3.2..2.8   (carries the window)
 //   blink sec 2 = west room   x -6.8..-0.6, y -3.2..3.7
 //   blink sec 3 = middle      x -0.5.. 1.1, y -3.2..2.8
 //   occ records: type1 open (whole building), 4x type0 occluders,
-//   type2 window A=1 B=0 @ (2.35, -3.47), type3 portals 1<->3 @ (1.11, 1.24)
-//   and 3<->2 @ (-0.54, -2.25).
+//   type2 window A=1 B=0 on the east room's south wall, type3 portals
+//   1<->3 @ (1.11, 1.24) and 3<->2 @ (-0.54, -2.25).
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -32,6 +35,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
+#include "common/retail_paths.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -223,14 +227,18 @@ struct Rig {
 
 } // namespace
 
-int main() {
-    std::string path = OPENNOVA_ARMRY_FIXTURE;
-    const char *assets = std::getenv("OPENNOVA_JO_ASSETS");
-    if (assets != nullptr && assets[0] != '\0') path = std::string(assets) + "/Armry01.3di";
-    if (path.empty()) {
-        std::fprintf(stderr, "FAIL: no Armry01.3di fixture path configured\n");
-        return 1;
-    }
+// The volume families a leg's model authors (Super OED Manual v1.1 §1.1.3.4
+// names them): generic CBs, the CA armory trigger, the VC vehicle hull, the
+// CL ladder, and the three BB rooms with their blink letters.
+struct VolumeShape {
+    int cb, cl, ca, vc, bb;
+};
+
+// Load one armory, pin its authored shape, then walk the camera through the
+// rooms. Returns the number of failed checks for this leg.
+int run_leg(const char *label, const std::string &path, const VolumeShape &expected) {
+    const int failures_before = failures;
+    std::printf("occlusion_armry: %s leg (%s)\n", label, path.c_str());
     Threedi3di3 model = {};
     if (threedi_3di3_read(path.c_str(), &model) != 0) {
         std::fprintf(stderr, "FAIL: %s not readable\n", path.c_str());
@@ -257,17 +265,14 @@ int main() {
             if (volume.flags == 0x28u) ++bb_28_count;
         }
     }
-    // Super OED Manual v1.1 §1.1.3.4 names these families. The real armory
-    // independently pins the numeric mapping: generic CBs plus one CA armory
-    // trigger, one VC vehicle hull, and three BB rooms. It authors no CL ladder.
-    CHECK(cb_count == 14);
-    CHECK(cl_count == 0);
-    CHECK(ca_count == 1);
-    CHECK(vc_count == 1);
-    CHECK(bb_count == 3);
+    CHECK(cb_count == expected.cb);
+    CHECK(cl_count == expected.cl);
+    CHECK(ca_count == expected.ca);
+    CHECK(vc_count == expected.vc);
+    CHECK(bb_count == expected.bb);
     CHECK(bb_2e_count == 2 && bb_28_count == 1);
     threedi_3di3_free(&model);
-    if (failures != 0) return 1; // shape mismatch: don't chase derived checks
+    if (failures != failures_before) return failures - failures_before; // shape mismatch: don't chase derived checks
 
     Rig rig;
     const EntityHandle armory = rig.add_armory(100.0, 100.0, std::move(cm), std::move(om));
@@ -363,6 +368,28 @@ int main() {
         const uint32_t mask = rig.ow.section_mask(armory);
         CHECK((mask & 1u) != 0);
         CHECK((mask & (1u << 1)) != 0); // through the window from outside
+    }
+
+    return failures - failures_before;
+}
+
+int main() {
+    // The synthetic armory: five CB walls/roof, one CA trigger, one VC hull,
+    // one CL ladder, three BB rooms (tests/fixtures/minimal_3di_gen.cpp).
+    const std::string synthetic = OPENNOVA_ARMRY_FIXTURE;
+    if (synthetic.empty()) {
+        std::fprintf(stderr, "FAIL: no synthetic armory fixture path configured\n");
+        return 1;
+    }
+    run_leg("synthetic", synthetic, VolumeShape{5, 1, 1, 1, 3});
+
+    // The retail 00TRa armory: fourteen CBs, one CA, one VC, no ladder,
+    // three BB rooms.
+    const std::string assets = retail::assets();
+    if (assets.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS for the retail Armry01.3di");
+    } else {
+        run_leg("retail", retail::asset_file("Armry01.3di"), VolumeShape{14, 0, 1, 1, 3});
     }
 
     if (failures == 0) std::printf("occlusion_armry: all checks passed\n");

@@ -52,8 +52,9 @@ OED walker/IO surface:
 
 ### Wcrate5 chunk inventory
 
-Fixture: `fixtures/wcrate5/Wcrate5.3di` (3636 bytes, 3DI3 v0x0103). Sizes are
-payload bytes (exclusive of the 8-byte header).
+Taken from the retail `Wcrate5.3di` (3636 bytes, 3DI3 v0x0103); the model is
+not carried in `fixtures/` (the committed 3DI set is synthetic), so this table
+is the record. Sizes are payload bytes (exclusive of the 8-byte header).
 
 | Chunk path | Payload B | Parent? | OED reader | OED writer | Layout / notes |
 |---|---|---|---|---|---|
@@ -366,7 +367,9 @@ unused PANM styles.
 Corpus: 639 `.3di` files (GPM/GPS/GPP) from the `AS_ASSETS` BHD affiliate build
 (`~/Desktop/AS_ASSETS`, `__temp.3di` excluded); 639/639 parsed cleanly against
 the since-removed reader. The material-struct probe (§2.3 first table) used
-the smaller 22-file `fixtures/threedi/objects/` set instead. Struct/field names below
+the smaller 22-file retail objects set that was then carried under
+`fixtures/threedi/objects/` (both since removed, the tree now holds only the
+synthetic `fixtures/threedi/synth` set; the findings stand) instead. Struct/field names below
 follow the removed `threedi_gp.h`'s vocabulary; fields proven always-zero and
 loader-unread are named `pad_<struct>_<hexoffset>` and round-tripped verbatim.
 
@@ -426,7 +429,7 @@ file; mesh/texture blobs can follow it.
 
 ### 2.3 Materials
 
-`ThreediGpMaterial` (22/22 `fixtures/threedi/objects/` fixtures probed):
+`ThreediGpMaterial` (22/22 of the since-removed retail objects set probed):
 
 | Offset | Field | Corpus | Notes |
 |---|---|---|---|

@@ -65,10 +65,10 @@ public:
 	// Datagrams accepted so far (excludes any dropped as oversize).
 	uint64_t records() const { return records_; }
 
-	// Open a writer when `env_var` names a non-empty path, else return nullptr.
-	// The shared gate for every capture site, so a build nobody asked to record
-	// pays one getenv at construction and nothing after.
-	static std::unique_ptr<PcapUdpWriter> from_env(const char *env_var);
+	// Open a writer on `path`, or return nullptr for an empty path or one that
+	// cannot be opened. The shared gate for every capture site: a session
+	// nobody asked to record (the default) constructs no writer at all.
+	static std::unique_ptr<PcapUdpWriter> from_path(const std::string &path);
 
 private:
 	std::FILE *file_ = nullptr;

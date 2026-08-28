@@ -5,7 +5,7 @@ extends GutTest
 
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const FIXTURE_DIR := "res://../assets"
-const BAKED_TERRAIN_DIR := "res://../fixtures/godot/dvxi5"
+const BAKED_TERRAIN_DIR := "res://../fixtures/terrain/tmap"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
@@ -23,13 +23,11 @@ const LOCALRES_FILES := [
 ]
 const RESOURCE_FILES := [
 	"mnml.env", "mnml.trn", "mnml_c.tga", "mnml_dm.tga",
-	"mnml_dc1.tga", "mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx",
+	"mnml_dc1.tga", "mnml_dc2.tga", "mnml_dc3.tga", "mnml_dmd.tga", "mnml_d1.tga",
+	"mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx",
 ]
-const BAKED_TERRAIN_FILES := [
-	"Dvxi5.cpt", "Dvxi5_c.tga", "Dvxi5_d1.tga", "Dvxi5_dc1.tga",
-	"Dvxi5_dc2.tga", "Dvxi5_dc3.tga", "Dvxi5_dm.tga", "Dvxi5_dm2.tga",
-	"Dvxi5_dmd.tga", "Dvxi5_f.pcx", "Dvxi5_m.pcx", "TRNTILE10.TGA",
-]
+# The synthetic Tmap terrain (its .trn names the mnml art packed above).
+const BAKED_TERRAIN_FILES := ["Tmap.cpt", "Tmap_f.pcx", "Tmap_m.pcx"]
 # This lifecycle-only armory deliberately resolves the engine fallback as well
 # as the selected profile weapon. The regression must fail if GameWorld mistakes
 # a nonempty WPN_M4AUTO fallback inventory for a mission-authored kit.
@@ -66,9 +64,6 @@ weapon "WPN_M4"
 	gfx1 M4_TEST_FIRST
 end
 """
-const ISOLATED_ENV := [
-	"NW_SP_MISSION", "NW_LAN_HOST", "NW_LAN_JOIN",
-]
 
 
 class EntityShellHarness:
@@ -99,7 +94,6 @@ class EntityShellHarness:
 
 var _saved_config := PackedByteArray()
 var _had_config := false
-var _saved_env := {}
 var _temp_dir := ""
 var _shell: Node = null
 
@@ -201,10 +195,9 @@ func before_each() -> void:
 	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
 			if _had_config else PackedByteArray()
-	_saved_env.clear()
-	for variable in ISOLATED_ENV:
-		_saved_env[variable] = OS.get_environment(variable)
-		OS.set_environment(variable, "")
+	# A shell booted here sees only the launch flags a case sets through the
+	# override (the GUT process carries none; no sibling leftovers).
+	LaunchFlags.set_args_override(PackedStringArray([]))
 	# The persisted expansion is process-wide state an earlier suite file can leave set, and
 	# these cases join a fixture host that has no expansion archives at all. A stale name makes
 	# the host advertise an expansion this install cannot mount, which the joiner's preload
@@ -234,8 +227,7 @@ func after_each() -> void:
 	if not _temp_dir.is_empty():
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
-	for variable in ISOLATED_ENV:
-		OS.set_environment(variable, String(_saved_env.get(variable, "")))
+	LaunchFlags.clear_args_override()
 	if _had_config:
 		var file := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
 		if file != null:
@@ -245,10 +237,10 @@ func after_each() -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 
 
-func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
+func test_boot_gates_flag_mission_when_the_resource_dir_cannot_mount() -> void:
 	# A loose-only directory (no packed archives) fails the runtime mount when no
 	# --loose-root flag sanctions the loose fallback. The boot continuations
-	# (NW_SP_MISSION here, --loose-mission in a managed run) must gate on
+	# (--mission here, --loose-mission in a managed run) must gate on
 	# that failure instead of starting a world load with no mounted root.
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
@@ -261,7 +253,7 @@ func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
 	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir,
 			"the persisted dir round-trips, so the boot below reads THIS dir")
 	ResourceDirSettings.set_game("jo")
-	OS.set_environment("NW_SP_MISSION", "mnml.bms")
+	LaunchFlags.set_args_override(PackedStringArray(["--mission", "mnml.bms"]))
 	_shell = MAIN_GAME_SCENE.instantiate()
 	assert_not_null(_shell)
 	add_child(_shell)
@@ -995,7 +987,7 @@ func _make_shell():
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 27,
+	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 31,
 			"the retail-shaped archives contain every minimal fixture resource")
 	var language_entries := _fixture_entries(LANGUAGE_FILES)
 	var localres_entries := _fixture_entries(LOCALRES_FILES)
@@ -1033,7 +1025,7 @@ func _fixture_entries(filenames: Array) -> Array:
 		# mnml.bms names mnml.trn. Substitute a committed render-capable TRN
 		# while retaining that logical archive name.
 		if filename == "mnml.trn":
-			source = BAKED_TERRAIN_DIR.path_join("Dvxi5.trn")
+			source = BAKED_TERRAIN_DIR.path_join("Tmap.trn")
 		# The in-world screens (ESC pause overlay + armory) pack the real JO
 		# menu fixtures under their retail archive names.
 		elif filename == "game.mnu":
@@ -1111,3 +1103,73 @@ func _til_bytes_for_cell(cell_x: int) -> PackedByteArray:
 # The shared PFF3 fixture writer (TestPff.write), asserted here.
 func _write_pff(path: String, entries: Array) -> void:
 	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
+
+
+# The SP lose flow's SHELL half (world-wac-ai-re §20): the WAC Lose banner
+# effect and the "round_end" host effect (the Server_ProcessRoundEnd tail)
+# reach the shell over the world's mission_effects signal, the MISSION FAILED
+# screen mounts after the lead-in beat with the banner line, and ESC through
+# the real input path leaves to the menu [orig: ESC -> g_mission_exit_reason=1
+# -> the "Post Menu" push @0x526867]. The sim half (kill tally -> WAC lose ->
+# round end, winner 2) is ctest lose_flow_04tr on the retail mission.
+func test_round_end_effect_mounts_the_failed_screen_and_esc_returns_to_the_menu() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var terrain = world.get_node("Terrain")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	var boot_clear: Color = world.get_current_frame_clear_color()
+	menu_shell.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	_assert_loaded(world, terrain, menu_shell)
+	assert_null(_shell.find_child("MissionEndScreen", true, false),
+			"no end screen before the round ends")
+	assert_true(_shell.is_gameplay_input_active(), "gameplay input is live in the world")
+
+	var banner_key := "STRMISC_KILLEDGREEN"
+	world.mission_effects.emit([
+		{"kind": "lose", "a": 0, "str": banner_key},
+		{"kind": "round_end", "a": 2},
+	])
+	assert_false(_shell.is_gameplay_input_active(),
+			"the round-end latch stops gameplay input while the world keeps ticking")
+	# The lead-in beat is 3 s of shell time (the cine stand-in); run it fast.
+	var saved_scale := Engine.time_scale
+	Engine.time_scale = 20.0
+	var screen: Node = null
+	for _i in range(300):
+		await get_tree().process_frame
+		screen = _shell.find_child("MissionEndScreen", true, false)
+		if screen != null:
+			break
+	Engine.time_scale = saved_scale
+	assert_not_null(screen, "the MISSION FAILED screen mounts after the lead-in beat")
+	if screen == null:
+		return
+	assert_true(world.is_loaded(), "the world stays loaded under the end screen")
+	var gametext: RtxtStringFile = Strings.get_table("gametext")
+	if gametext != null and gametext.has_string_in_section("Misc", banner_key):
+		var banner: String = Strings.lookup_display("gametext", "Misc", banner_key)
+		var banner_visible := false
+		for node in screen.find_children("*", "Label", true, false):
+			if (node as Label).text == banner:
+				banner_visible = true
+				break
+		assert_true(banner_visible, "the WAC Lose banner line is on the failed screen")
+
+	# ESC through the real input path.
+	for pressed in [true, false]:
+		var key := InputEventKey.new()
+		key.keycode = KEY_ESCAPE
+		key.physical_keycode = KEY_ESCAPE
+		key.pressed = pressed
+		Input.parse_input_event(key)
+	for _i in range(4):
+		await get_tree().process_frame
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
+	assert_null(_shell.find_child("MissionEndScreen", true, false),
+			"the end screen goes with the world")
+	assert_true(_shell.is_gameplay_input_active() == false,
+			"nothing is live in the menu")

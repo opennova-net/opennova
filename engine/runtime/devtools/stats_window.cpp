@@ -78,11 +78,14 @@ void StatsWindow::set_board(FrameStatsBoard *board) {
 
 void StatsWindow::on_visibility(bool visible) {
 	shown_ = visible;
+	if (!visible) {
+		// An external feed lasts as long as the feeder's session: the next
+		// opening drains the board again.
+		external_ = false;
+		last_refresh_time_ = -1.0;
+	}
 	if (board_ != nullptr) {
 		board_->set_capture_active(visible && !external_, last_frame_index_);
-	}
-	if (!visible) {
-		last_refresh_time_ = -1.0;
 	}
 }
 

@@ -15,8 +15,8 @@ extends GutTest
 const ScarPresentPass := preload("res://game/world/scar_present_pass.gd")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
-const MODEL_GRAPHIC := "Armry01"
-const MODEL_3DI := "res://../fixtures/threedi/objects/armry01/Armry01.3di"
+const MODEL_GRAPHIC := "armory"
+const MODEL_3DI := "res://../fixtures/threedi/synth/armory.3di"
 const STRIP_NAMES := ["scorch1.tga", "scorch2.tga", "scorch3.tga", "scorch4.tga"]
 const BHOLE_STRIP := 27
 # The loader's two GfxShader mode words [orig: Scar_LoadTextures @0x5CC315 /

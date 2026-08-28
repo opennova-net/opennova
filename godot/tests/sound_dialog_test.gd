@@ -6,19 +6,20 @@ extends GutTest
 ## sim-ungated ticks (pins the sim-trigger-gating follow-up). Skips without the data.
 
 
-# The loose JOX dump root rides the documented env gate (docs/asset-gated-tests.md);
-# machine paths go in .claude/settings.local.json env, never tracked.
-var JO_DIR := OS.get_environment("OPENNOVA_JO_ASSETS")
+# The loose JOX dump root is the documented OPENNOVA_JO_ASSETS gate
+# (docs/asset-gated-tests.md, RetailData.assets()); machine paths go in
+# .claude/settings.local.json env, never tracked.
+var JO_DIR := RetailData.assets()
 
 
 func test_00trg_mission_dialog_resolves() -> void:
-	if JO_DIR.is_empty() or not DirAccess.dir_exists_absolute(JO_DIR):
-		pass_test("JOX not present; skipping dialog probe")
+	if JO_DIR.is_empty():
+		pending("OPENNOVA_JO_ASSETS (the JOX extract) is required for the dialog probe")
 		return
 	var root := ResourceRoot.new()
 	root.set_root_dir(JO_DIR)
 	if not root.has_file("00TRg.bms"):
-		pass_test("00TRg.bms not resolvable from JOX; skipping")
+		pending("00TRg.bms is not resolvable from OPENNOVA_JO_ASSETS")
 		return
 
 	var mission := MissionData.new()

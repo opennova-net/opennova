@@ -1,4 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://cposereplaypr0"]
-[ext_resource type="Script" path="res://tests/pose_replay_probe.gd" id="1_prprobe"]
-[node name="PoseReplayProbe" type="Node"]
-script = ExtResource("1_prprobe")

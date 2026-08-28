@@ -142,10 +142,10 @@ extends GutTest
 #   to MissionEnvironment (ADR 0018 — no private pokes; ratchet stays flat).
 #
 # REGEN (the dumped-ONCE event, or after a witnessed change):
-#   OPENNOVA_ENV_VECTORS_DUMP=1 "$GODOT_BIN" --headless --path godot \
-#     -s addons/gut/gut_cmdln.gd -gtest=res://tests/env_parity_vectors_test.gd -gexit
+#   "$GODOT_BIN" --headless --path godot -s addons/gut/gut_cmdln.gd \
+#     -gtest=res://tests/tools/env_vectors_regen.gd -gunit_test_name=test_regen -gexit
 # prints the replacement EXPECTED_BYTES/EXPECTED_FLOATS blocks, then FAILS
-# loudly so a dump run is never mistaken for a green run.
+# loudly so a regen run is never mistaken for a green run.
 # =============================================================================
 
 
@@ -896,14 +896,8 @@ func test_environment_parity_vectors() -> void:
 	var bytes: Dictionary = tables[0]
 	var floats: Dictionary = tables[1]
 
-	var dump := OS.get_environment("OPENNOVA_ENV_VECTORS_DUMP")
-	if dump != "" and dump != "0":
-		_print_dump(bytes, floats)
-		fail_test("OPENNOVA_ENV_VECTORS_DUMP run — table printed above; a dump run is never green. Re-run without the env var to verify.")
-		return
-
 	if EXPECTED_BYTES.is_empty() or EXPECTED_FLOATS.is_empty():
-		fail_test("No committed vectors. Generate the dumped-ONCE table via OPENNOVA_ENV_VECTORS_DUMP=1 (see header) and paste it in.")
+		fail_test("No committed vectors. Generate the dumped-ONCE table via tests/tools/env_vectors_regen.gd (see header) and paste it in.")
 		return
 
 	assert_eq(_sorted_keys(bytes), _sorted_keys(EXPECTED_BYTES),

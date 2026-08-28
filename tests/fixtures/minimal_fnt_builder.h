@@ -102,17 +102,24 @@ inline const GlyphArt *find_art(char ch) {
 	return nullptr;
 }
 
-// Build the minimal font: one page, every glyph slot gets a cell-aligned UV
-// rect; drawable characters get their 2x stroke art, space stays blank, and
-// anything else renders as a hollow box (visibly "missing", never invisible).
-inline fnt_error_t build_font(fnt_font_t *font) {
-	const fnt_error_t rc = fnt_init_blank(font, 1, 0);
+// Build the font over `num_pages` pages: every glyph slot gets a cell-aligned
+// UV rect on page (slot % num_pages), so a multi-page font exercises the
+// per-glyph page lookup; drawable characters get their 2x stroke art, space
+// stays blank, and anything else renders as a hollow box (visibly "missing",
+// never invisible). The minimal set's boot font is the one-page form; the
+// committed fixtures/fnt/synth_{1,3}page.fnt test fixtures are minted from
+// the same art (tests/fixtures/minimal_fnt_gen.cpp).
+inline fnt_error_t build_font_pages(fnt_font_t *font, uint32_t num_pages) {
+	if (num_pages == 0 || num_pages > FNT_MAX_PAGES) return FNT_ERR_INVALID_PAGE_COUNT;
+	const fnt_error_t rc = fnt_init_blank(font, num_pages, 0);
 	if (rc != FNT_OK) return rc;
 
-	uint8_t *page = fnt_get_page_data(font, 0);
-	std::memset(page, 0, FNT_TEXTURE_SIZE);
+	for (uint32_t p = 0; p < num_pages; ++p)
+		std::memset(fnt_get_page_data(font, p), 0, FNT_TEXTURE_SIZE);
 
 	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
+		const uint32_t page_index = i % num_pages;
+		uint8_t *page = fnt_get_page_data(font, page_index);
 		const uint32_t cell_x = (i % kCellsPerRow) * kCellSize;
 		const uint32_t cell_y = (i / kCellsPerRow) * kCellSize;
 		const char ch = static_cast<char>(FNT_FIRST_CHAR + i);
@@ -141,7 +148,7 @@ inline fnt_error_t build_font(fnt_font_t *font) {
 		}
 
 		fnt_glyph_t &g = font->glyphs[i];
-		g.page = 0;
+		g.page = page_index;
 		g.uv.u0 = static_cast<float>(cell_x) / FNT_TEXTURE_WIDTH;
 		g.uv.v0 = static_cast<float>(cell_y) / FNT_TEXTURE_HEIGHT;
 		g.uv.u1 = static_cast<float>(cell_x + kGlyphUvWidth) / FNT_TEXTURE_WIDTH;
@@ -149,6 +156,9 @@ inline fnt_error_t build_font(fnt_font_t *font) {
 	}
 	return FNT_OK;
 }
+
+// The minimal set's boot font: the one-page form.
+inline fnt_error_t build_font(fnt_font_t *font) { return build_font_pages(font, 1); }
 
 } // namespace minimal_fnt
 

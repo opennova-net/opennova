@@ -17,7 +17,7 @@ const MAX_WAYPOINT_SLOTS := 32
 
 
 func _corpus_dir() -> String:
-	return OS.get_environment("OPENNOVA_MISSION_CORPUS").strip_edges()
+	return RetailData.mission_corpus()
 
 
 func _list_bms(dir_path: String) -> PackedStringArray:

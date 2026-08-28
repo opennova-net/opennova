@@ -37,7 +37,7 @@ struct TrnConfig {
 	// save_trn emits this many columns per `polytrn_sectors` row and load_trn
 	// reads that many, edge-replicating (or wrapping, per wrap_x) out to 16, so
 	// any sector placed at a column >= sector_count is silently dropped on write.
-	// Retail maps carry 8 (fixtures/godot/dvxi5/Dvxi5.trn).
+	// Retail maps carry 8 (Dvxi5.trn), as do the committed mnml and Tmap configs.
 	int sector_count = 0;
 	int origin_x = 0;
 	int origin_y = 0;

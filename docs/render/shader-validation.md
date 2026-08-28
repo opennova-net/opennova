@@ -62,7 +62,7 @@ Lighting validation is layered:
 1. `renderer_light_runtime` pins the recovered CPU equations and edge cases.
 2. GUT device-seam tests pin environment uniform delivery, per-model point
    light isolation, and the terrain projected-light row path.
-3. `render_swatch_probe.gd -- lighting <out_dir>` rasterizes the actual object
+3. `render_swatch` mode `lighting` (`game_probe`) rasterizes the actual object
    shader matrix under opposing directional/hemisphere states and point-light
    states. It checks each direction/hemisphere/point response independently,
    so both a missing authored response and an invented one fail. In pixel-
@@ -77,7 +77,7 @@ Lighting validation is layered:
    `INSTANCE_CUSTOM.x`, and requires byte-identical RGBA8 output against the
    live per-instance-uniform route. Native and GUT layers separately pin atlas
    selection, immutable row identity, owner/interior isolation, and clearing.
-4. `render_swatch_probe.gd -- channels <out_dir>` rasterizes the same 24
+4. `render_swatch` mode `channels` rasterizes the same 24
    techniques through eight paired states. It proves that `RgbGen` affects
    only `_FFP` self-lit RGB, `AlphaGenValue` affects only `_FFP` fixed alpha,
    each technique cuts out from its declared diffuse/normal/vertex/reflect/
@@ -95,7 +95,7 @@ Lighting validation is layered:
    Q3 viewport, exact POT-floor capture, four weighted downsample taps, four
    cardinal blur draws, 45-degree final average, and `SRCALPHA/ONE` composite.
    All run against Forward+ over D3D12.
-6. `render_swatch_probe.gd -- calibrate` proves the production terminal
+6. `render_swatch` mode `calibrate` proves the production terminal
    transfer and live framebuffer blend domain: all 256 gamma bytes round-trip
    exactly, SRCALPHA/INVSRCALPHA resolves to byte 128 for the pinned operands,
    and the selected ONE/ONE additive convention resolves to byte 96.

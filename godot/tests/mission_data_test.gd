@@ -117,7 +117,7 @@ func test_item_database_mount_config_preserves_presence_and_explicit_zero() -> v
 			"authored zero remains a valid retail config")
 	DirAccess.remove_absolute(tmp)
 
-	# Existing retail-shaped fixture witness: the emplaced B50cal target authors 4.
+	# Existing retail-shaped fixture witness: the emplaced mount target authors 4.
 	assert_eq(db.load(_items_abs()), OK)
 	assert_eq(db.get_mount_config(101419), {"valid": true, "value": 4},
 			"target item definition phrase_set is the production mount config source")

@@ -56,12 +56,12 @@ func test_load_combo_composes_parts_when_root_mounted() -> void:
 
 func _model_fixture_root():
 	var root := ResourceRoot.new()
-	var dir := ProjectSettings.globalize_path("res://../fixtures/threedi/3di3")
+	var dir := ProjectSettings.globalize_path("res://../fixtures/threedi/synth")
 	return root if root.set_root_dir(dir) == OK else null
 
 
 func _three_slot_fixture_combo() -> Dictionary:
-	var part := {"graphic": "CharModel.3di"}
+	var part := {"graphic": "person.3di"}
 	return {"head": part, "body": part, "arms": part}
 
 
@@ -317,11 +317,11 @@ func _staged_idle_root():
 	return root
 
 
-# A ResourceRoot on the retail PFF install named by OPENNOVA_JO_DIR (machine-specific;
+# A ResourceRoot on the retail PFF install (RetailData.install(): OPENNOVA_JO_DIR, machine-specific;
 # set in settings.local.json env, never tracked). Null when unset or the .bad set is absent.
 func _retail_root():
-	var dir := OS.get_environment("OPENNOVA_JO_DIR")
-	if dir.is_empty() or not DirAccess.dir_exists_absolute(dir):
+	var dir := RetailData.install()
+	if dir.is_empty():
 		return null
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "", false, "jo") != OK:

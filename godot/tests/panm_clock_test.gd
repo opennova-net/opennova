@@ -1,6 +1,6 @@
 extends GutTest
 
-const PMP := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
+const PMP := "res://../fixtures/threedi/synth/pump.3di"
 
 
 func _open_pmp() -> ObjectData:

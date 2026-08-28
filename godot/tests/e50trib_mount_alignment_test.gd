@@ -23,8 +23,8 @@ func _mission_type_ids(mission: MissionData) -> PackedInt32Array:
 
 
 func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
-	var install_dir := OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
-	if install_dir.is_empty() or not DirAccess.dir_exists_absolute(install_dir):
+	var install_dir := RetailData.install()
+	if install_dir.is_empty():
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the 00TRc E50triB witness")
 		return
 

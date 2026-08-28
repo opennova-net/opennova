@@ -1,6 +1,22 @@
 extends GutTest
 
-const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
+
+
+var _terrain_root := ""
+
+
+# The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
+# assets it names; one root per test file, removed at the end.
+func _tmap_trn() -> String:
+	if _terrain_root.is_empty():
+		_terrain_root = TestFs.stage_terrain_root("foliage_tile_cache")
+	return _terrain_root.path_join(TestFs.TMAP_TRN)
+
+
+func after_all() -> void:
+	if not _terrain_root.is_empty():
+		TestFs.remove_dir_recursive(_terrain_root)
+		_terrain_root = ""
 
 
 func _sample_height(_world_x: float, _world_z: float) -> float:
@@ -34,8 +50,8 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	add_child_autofree(viewport)
 
 	var data := TerrainData.new()
-	data.set_trn_path(ProjectSettings.globalize_path(DVXI5_TRN))
-	assert_eq(data.load(), OK, "the Dvxi5 fixture terrain must load")
+	data.set_trn_path(_tmap_trn())
+	assert_eq(data.load(), OK, "the Tmap fixture terrain must load")
 
 	var terrain := Terrain.new()
 	viewport.add_child(terrain)
@@ -121,7 +137,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	assert_gt(fine_ready_draws, 0,
 		"The near-camera warmup must retain a fine page for the cross-frame LOD regression.")
 
-	# On this pinned Dvxi5 view, quality 0.3 keeps the same 25 near detail cells
+	# On this pinned Tmap view, quality 0.3 keeps the same 25 near detail cells
 	# while selecting 128-unit pages over them. A lower 0.15 threshold stops
 	# emitting LOD >= 3 terrain nodes and therefore has no valid detail handoff.
 	# The prior frame's overlapping 64-unit residents deliberately remain in the

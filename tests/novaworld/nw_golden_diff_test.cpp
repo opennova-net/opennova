@@ -15,10 +15,10 @@
 // 0x43/0x83 -> reassembly), so the comparison is ground truth.
 //
 // Gating:
-//   NW_GOLDEN_OURS      our capture (.pcap/.pcapng) — REQUIRED; skip clean if unset
-//                       (there is no committed "ours" oracle; it is produced live
-//                       by the capture harness, then this test re-validated against it)
-//   NW_GOLDEN_GAMEPLAY  the golden (defaults to .scratch/golden/retail-gameplay-session.pcapng)
+//   --ours <capture>  our capture (.pcap/.pcapng) — REQUIRED; reports Skipped without it
+//                     (there is no committed "ours" oracle; it is produced live
+//                     by the capture harness, then this test re-validated against it)
+//   the golden        <OPENNOVA_CAPTURES>/golden/retail-gameplay-session.pcapng
 //
 // A GAP (retail emits a tag above the noise floor, we never do) or a SPURIOUS S2C
 // tag (we emit a tag retail never does) outside the documented allowlists fails.
@@ -38,10 +38,8 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#ifndef DEFAULT_GAMEPLAY_PCAP
-#define DEFAULT_GAMEPLAY_PCAP ""
-#endif
+#include "common/retail_paths.h"
+#include <cstring>
 
 using namespace opennova;
 
@@ -116,29 +114,25 @@ const char *name_of(Key k) {
 
 } // namespace
 
-int main() {
-	const char *ours_path = std::getenv("NW_GOLDEN_OURS");
-	if (!ours_path || !*ours_path) {
-		std::printf("[skip] set NW_GOLDEN_OURS to a freshly captured retail-join "
-		            ".pcapng to run the golden coverage diff\n");
-		return 0; // skip clean — ours is produced live, never committed
-	}
-	std::string golden_path;
-	if (const char *env = std::getenv("NW_GOLDEN_GAMEPLAY"); env && *env)
-		golden_path = env;
-	else
-		golden_path = DEFAULT_GAMEPLAY_PCAP;
+// `nw_golden_diff_test --ours <capture.pcapng>`: OUR freshly captured session,
+// produced live by scripts/net/diff_vs_golden.ps1 and never committed. The
+// ctest registration passes none and the run reports Skipped; the tier-2
+// attestation (docs/asset-gated-tests.md) is the direct invocation.
+int main(int argc, char **argv) {
+	const char *ours_path = nullptr;
+	for (int i = 1; i + 1 < argc; ++i)
+		if (std::strcmp(argv[i], "--ours") == 0) ours_path = argv[i + 1];
+	if (ours_path == nullptr || *ours_path == '\0')
+		return retail::skip("--ours <our freshly captured retail-join .pcapng> (the golden coverage diff)");
+	const std::string golden_path = retail::golden("retail-gameplay-session.pcapng");
 
 	std::vector<net::PcapDatagram> ours_pkts, gold_pkts;
 	if (!net::read_pcap_udp_file(ours_path, ours_pkts)) {
-		std::printf("FAILED to read NW_GOLDEN_OURS=%s\n", ours_path);
+		std::printf("FAILED to read --ours %s\n", ours_path);
 		return 1;
 	}
-	if (golden_path.empty() || !net::read_pcap_udp_file(golden_path, gold_pkts)) {
-		std::printf("[skip] golden capture not found (set NW_GOLDEN_GAMEPLAY) — '%s'\n",
-		            golden_path.c_str());
-		return 0; // skip clean — gitignored golden absent
-	}
+	if (!net::read_pcap_udp_file(golden_path, gold_pkts))
+		return retail::skip("<OPENNOVA_CAPTURES>/golden/retail-gameplay-session.pcapng (the golden gameplay capture)");
 
 	const std::map<Key, long> ours = histogram(ours_pkts);
 	const std::map<Key, long> gold = histogram(gold_pkts);

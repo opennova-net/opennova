@@ -61,6 +61,12 @@ func is_running() -> bool:
 	return _tcp.is_listening()
 
 
+## Whether a serial tools/call job is in flight (game_probe refuses to start
+## a run alongside one).
+func is_tool_running() -> bool:
+	return _tool_running
+
+
 ## The bound port (start(0) binds an ephemeral one; this reports it).
 func get_port() -> int:
 	return _tcp.get_local_port() if _tcp.is_listening() else 0

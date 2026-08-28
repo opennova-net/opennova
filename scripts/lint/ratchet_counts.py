@@ -202,10 +202,11 @@ CPP_CONSOLE = re.compile(
 def count_gd_prints_outside_debug() -> int:
     """Raw print() family in the shipping godot layer (W1-2): the sanctioned
     channels are push_error/push_warning, print_verbose, and the dev tools (F3).
-    godot/tests and the GUT addon are out of scope (probes print by design).
+    godot/tests and the GUT addon are out of scope; the runtime probes under
+    godot/probes log through their ProbeContext, so they are in scope.
     godot/src is C++-only (ADR 0034 d6); its .gd leg here is a tripwire."""
     count = 0
-    for sub in ("src", "game", "modtools"):
+    for sub in ("src", "game", "modtools", "probes"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             rel = path.relative_to(REPO).as_posix()
             if rel in GD_PRINT_ALLOWLIST:
@@ -322,12 +323,12 @@ OVERSIZE_GD_LINE_LIMIT = 1200
 
 def count_oversize_gd_files() -> int:
     """Oversized GDScript files (W4-6, the W4 closer): the W4 god-file splits
-    leave a ratcheted residual set; no .gd under godot/src, godot/game, or
-    godot/modtools may grow past 1200 lines without splitting first.
-    godot/tests is deliberately out of scope; test-suite file size is a
+    leave a ratcheted residual set; no .gd under godot/src, godot/game,
+    godot/modtools or godot/probes may grow past 1200 lines without splitting
+    first. godot/tests is deliberately out of scope; test-suite file size is a
     separate maintainability concern."""
     count = 0
-    for root in ("godot/src", "godot/game", "godot/modtools"):
+    for root in ("godot/src", "godot/game", "godot/modtools", "godot/probes"):
         for path in (REPO / root).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or _in_build_dir(parts):  # vendored addons / build output, not source

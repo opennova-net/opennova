@@ -7,9 +7,9 @@
 // remap are both exercised, with the retail Co-op row's witnessed ENEMYKILL 5 /
 // MEDICSAVE 2.
 //
-// The retail sweep is env-gated the way tests/mission/mission_corpus_test.cpp
-// gates its corpus: set OPENNOVA_SCORE_INI to a local score.ini from a licensed
-// game installation and this test additionally asserts it
+// The retail sweep is gated the way tests/mission/mission_corpus_test.cpp
+// gates its corpus: with <OPENNOVA_JO_ASSETS>/score.ini extracted from a licensed
+// game installation this test additionally asserts it
 // parses, carries the 12 shipped blocks, and that its Co-op row 2 reads
 // ENEMYKILL 5 -- the value the S2C 0x81 score mirror reproduces in the retail
 // capture (5, 10, 20, ... 220). Unset, that half prints a skip line and passes.
@@ -23,6 +23,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 namespace {
 
@@ -105,14 +106,16 @@ int main() {
 							  src2.size(), bad, error));
 	}
 
-	// --- retail sweep, env-gated (skip-and-pass when unset) ---
-	const char *retail = std::getenv("OPENNOVA_SCORE_INI");
-	if (retail == nullptr || retail[0] == '\0') {
-		std::fprintf(stderr,
-				"score_roundtrip: retail sweep skipped (set OPENNOVA_SCORE_INI to a "
-				"score.ini extracted from the game archives)\n");
+	// --- retail sweep: <OPENNOVA_JO_DIR>/score.ini, the score table the install
+	// ships loose beside its archives (never inside a .pff, so never in an
+	// extracted tree) ---
+	const std::string install = retail::install();
+	const std::string retail_ini =
+			install.empty() ? std::string() : retail::join(install, "score.ini");
+	if (retail_ini.empty() || !retail::file_exists(retail_ini)) {
+		retail::skip_leg("OPENNOVA_JO_DIR/score.ini (the retail score table beside the archives)");
 	} else {
-		const std::vector<uint8_t> rbytes = read_file(retail);
+		const std::vector<uint8_t> rbytes = read_file(retail_ini.c_str());
 		TEST_EXPECT(!rbytes.empty());
 		{
 			score::File rfile;

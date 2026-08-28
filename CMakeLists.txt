@@ -43,6 +43,7 @@ add_subdirectory(apps/nw_lan_probe)
 add_subdirectory(apps/novaworld_server)
 add_subdirectory(apps/nw_server)
 add_subdirectory(apps/nw_pp)
+add_subdirectory(apps/extract)
 
 enable_testing()
 add_subdirectory(tests)

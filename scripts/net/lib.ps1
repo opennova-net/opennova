@@ -3,8 +3,10 @@
 # Dot-source this from the other scripts:  . "$PSScriptRoot\lib.ps1"
 #
 # Provides: repo-root + .scratch path resolution, run timestamps, a Godot binary
-# finder (same contract as the oned-run skill), and Npcap/dumpcap discovery used
-# by detect_capture.ps1 / capture.ps1.
+# finder (GODOT_BIN, then .godot-bin/), the retail-root getters, the proven
+# OpenNova process launch/stop pair (Start-OpenNovaProcess with its MCP
+# endpoint, Stop-OpenNovaProcess), the joiner readiness classifiers, and
+# Npcap/dumpcap discovery used by detect_capture.ps1 / capture.ps1.
 #
 # Nothing here mutates tracked files; all run output belongs under <repo>\.scratch\.
 
@@ -12,6 +14,10 @@ Set-StrictMode -Version Latest
 
 # Repo root = two levels up from this file (scripts\net\lib.ps1 -> repo).
 $script:NetRepoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
+
+# The opennova-game MCP client (Invoke-GameTool, Wait-GameMcpReady,
+# Invoke-GameProbe, Stop-GameViaMcp, Get-StructuredResult; docs/mcp.md).
+. (Join-Path $PSScriptRoot "..\mcp\game_mcp.ps1")
 
 function Get-RepoRoot {
     return $script:NetRepoRoot
@@ -647,30 +653,6 @@ function Set-OnHookOwnedConfigValues {
     }
 }
 
-function Resolve-OnHookConfigPath {
-    param(
-        [Parameter(Mandatory = $true)] [string] $ConfigDirectory,
-        [Parameter(Mandatory = $true)] [string] $Value
-    )
-    $candidate = $Value.Trim()
-    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
-        $candidate = Join-Path $ConfigDirectory $candidate
-    }
-    return (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path
-}
-
-function ConvertFrom-OnHookBoolean {
-    param(
-        [Parameter(Mandatory = $true)] [string] $Value,
-        [Parameter(Mandatory = $true)] [string] $Key
-    )
-    switch ($Value.Trim().ToLowerInvariant()) {
-        { $_ -in @('1', 'true', 'yes', 'on') } { return $true }
-        { $_ -in @('0', 'false', 'no', 'off') } { return $false }
-        default { throw "$Key must be 0/1, true/false, yes/no, or on/off." }
-    }
-}
-
 # Normalize Godot's `--resolution WIDTHxHEIGHT` value before any process is
 # launched. Keeping this shared prevents a pair run from starting its host and
 # only then discovering that the joiner's viewport value is malformed.
@@ -693,7 +675,7 @@ function ConvertTo-OpenNovaResolution {
 
 # Godot 4.6.1 binary: $env:GODOT_BIN, else .godot-bin\ walking up from the repo
 # (worktrees borrow the main checkout's copy). Prefer the official _console entry
-# when discovering a Windows installation; Start-OpenNovaLanProcess resolves that
+# when discovering a Windows installation; Start-OpenNovaProcess resolves that
 # wrapper to its sibling runtime so its returned PID owns the window and sockets.
 # Returns $null if none is found (the caller decides whether that is fatal).
 # Cross-language twin: scripts/godot_bin.sh is the sh-side resolver - change both.
@@ -713,6 +695,53 @@ function Find-GodotBinary {
         if ($parent -eq $dir) { break }
         $dir = $parent
     }
+    return $null
+}
+
+# The documented machine roots (docs/dev-env-vars.md): a packed retail install
+# (OPENNOVA_JO_DIR), an extracted asset tree (OPENNOVA_JO_ASSETS), the retail
+# mission corpus (OPENNOVA_MISSION_CORPUS) and the captures root
+# (OPENNOVA_CAPTURES, default <repo>\.scratch). Scripts resolve them here and
+# nowhere else. The three retail getters return $null when the variable is unset
+# or the directory is missing; the caller decides whether that is fatal.
+# Cross-language twins: tests/common/retail_paths.h (C++) and
+# godot/tests/support/retail_data.gd (GUT) - change all three together.
+function Get-OpenNovaRetailInstall {
+    if ($env:OPENNOVA_JO_DIR -and (Test-Path -LiteralPath $env:OPENNOVA_JO_DIR -PathType Container)) {
+        return (Resolve-Path -LiteralPath $env:OPENNOVA_JO_DIR).Path
+    }
+    return $null
+}
+
+function Get-OpenNovaRetailAssets {
+    if ($env:OPENNOVA_JO_ASSETS -and (Test-Path -LiteralPath $env:OPENNOVA_JO_ASSETS -PathType Container)) {
+        return (Resolve-Path -LiteralPath $env:OPENNOVA_JO_ASSETS).Path
+    }
+    return $null
+}
+
+function Get-OpenNovaMissionCorpus {
+    if ($env:OPENNOVA_MISSION_CORPUS -and (Test-Path -LiteralPath $env:OPENNOVA_MISSION_CORPUS -PathType Container)) {
+        return (Resolve-Path -LiteralPath $env:OPENNOVA_MISSION_CORPUS).Path
+    }
+    return $null
+}
+
+# Captures are written as well as read, so the root need not exist yet.
+function Get-OpenNovaCapturesRoot {
+    if ($env:OPENNOVA_CAPTURES) { return $env:OPENNOVA_CAPTURES }
+    return (Join-Path (Get-RepoRoot) ".scratch")
+}
+
+# A file under the extracted asset tree by case-insensitive name (retail
+# archives mix ITEMS.DEF and items.def). $null when the tree or the file is absent.
+function Get-OpenNovaRetailAssetFile {
+    param([Parameter(Mandatory = $true)] [string] $Name)
+    $root = Get-OpenNovaRetailAssets
+    if (-not $root) { return $null }
+    $hit = Get-ChildItem -LiteralPath $root -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+    if ($hit) { return $hit.FullName }
     return $null
 }
 
@@ -1124,9 +1153,6 @@ function Wait-OpenNovaRuntimeChild {
 # useful for non-default build directories; otherwise prefer the Release tool
 # produced by the ordinary CMake build, then Debug.
 function Find-NwLanProbe {
-    if ($env:NW_LAN_PROBE -and (Test-Path -LiteralPath $env:NW_LAN_PROBE -PathType Leaf)) {
-        return (Resolve-Path -LiteralPath $env:NW_LAN_PROBE).Path
-    }
     $root = Get-RepoRoot
     foreach ($candidate in @(
         (Join-Path $root "build\apps\nw_lan_probe\Release\nw-lan-probe.exe"),
@@ -1140,17 +1166,18 @@ function Find-NwLanProbe {
     return $null
 }
 
-# Launch the OpenNova game project with an isolated set of NW_LAN_* variables.
-# Start-Process inherits this process's environment, so temporarily install only
-# the requested role, then restore the caller's exact LAN environment even when
-# process creation fails. The official console wrapper remains the lifecycle
-# owner; the returned Process is its proven runtime child and owns the window,
-# readiness witness, and LAN socket.
-function Start-OpenNovaLanProcess {
+# Launch the OpenNova game project. Every role setting is a launch flag
+# (--lan-host/--lan-join/--callsign/..., docs/dev-env-vars.md) passed after
+# `--`; nothing rides on the environment. The official console wrapper
+# remains the lifecycle owner; the returned Process is its proven runtime
+# child and owns the window, the LAN socket and, with -McpPort, the
+# opennova-game endpoint (`--mcp-port`, awaited before returning).
+function Start-OpenNovaProcess {
     param(
-        [Parameter(Mandatory = $true)] [hashtable] $LanEnvironment,
         [string[]] $GodotArguments = @(),
-        [string[]] $GameArguments = @()
+        [string[]] $GameArguments = @(),
+        [ValidateRange(0, 65535)] [int] $McpPort = 0,
+        [ValidateRange(1, 600)] [int] $McpReadyTimeoutSeconds = 240
     )
 
     $godotCandidate = Find-GodotBinary
@@ -1165,50 +1192,19 @@ function Start-OpenNovaLanProcess {
     if (-not (Test-Path (Join-Path $projectDir "project.godot"))) {
         throw "OpenNova Godot project not found at: $projectDir"
     }
-
-    foreach ($name in $LanEnvironment.Keys) {
-        if (-not ([string] $name).StartsWith("NW_LAN_", [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "Start-OpenNovaLanProcess accepts only NW_LAN_* variables (got '$name')."
+    foreach ($token in @($GameArguments)) {
+        if ([string] $token -eq '--mcp-port') {
+            throw "Pass the endpoint port through -McpPort, not --mcp-port."
         }
     }
-
-    # Keep this child on the local-LAN entry path even when the calling shell was
-    # previously used for online-gate, replay, or single-player development. Those
-    # alternate-mode variables are suppressed for the child and restored below.
-    $isolatedEntries = {
-        Get-ChildItem Env: | Where-Object {
-            $_.Name -like "NW_LAN_*" -or
-            $_.Name -like "NW_GATE_*" -or
-            $_.Name -like "NW_REPLAY*" -or
-            $_.Name -eq "NW_SP_MISSION"
+    if ($McpPort -gt 0) {
+        if (Test-GameMcpPortOpen -Port $McpPort) {
+            throw "MCP port $McpPort is already answering; another game owns it."
         }
+        $GameArguments = @($GameArguments) + @('--mcp-port', [string] $McpPort)
     }
 
-    $environmentMutex = [System.Threading.Mutex]::new(
-        $false, "Local\OpenNovaLanEnvironment-$PID")
-    $environmentLockTaken = $false
-    $saved = @{}
     try {
-        try { $environmentLockTaken = $environmentMutex.WaitOne() }
-        catch [System.Threading.AbandonedMutexException] {
-            # The abandoned owner is gone and this thread now owns the mutex.
-            $environmentLockTaken = $true
-        }
-        if (-not $environmentLockTaken) {
-            throw "Could not acquire the OpenNova launch-environment mutex."
-        }
-        foreach ($entry in @(& $isolatedEntries)) {
-            $saved[$entry.Name] = $entry.Value
-        }
-        foreach ($entry in @(& $isolatedEntries)) {
-            [Environment]::SetEnvironmentVariable(
-                $entry.Name, $null, [EnvironmentVariableTarget]::Process)
-        }
-        foreach ($name in $LanEnvironment.Keys) {
-            [Environment]::SetEnvironmentVariable(
-                [string] $name, [string] $LanEnvironment[$name], [EnvironmentVariableTarget]::Process)
-        }
-
         # No --headless/hidden flags: each child is an ordinary, visible game instance.
         # Start-Process flattens ArgumentList on Windows, so quote every token that
         # contains whitespace. Reject embedded quotes instead of producing an
@@ -1322,6 +1318,12 @@ function Start-OpenNovaLanProcess {
                 -NotePropertyValue $launcher -Force
             $runtime | Add-Member -NotePropertyName OpenNovaLaunchProof `
                 -NotePropertyValue $proof -Force
+            if ($McpPort -gt 0) {
+                $null = Wait-GameMcpReady -Port $McpPort `
+                    -TimeoutSeconds $McpReadyTimeoutSeconds -Process $runtime
+                $runtime | Add-Member -NotePropertyName OpenNovaMcpPort `
+                    -NotePropertyValue $McpPort -Force
+            }
             return $runtime
         }
         catch {
@@ -1345,24 +1347,7 @@ function Start-OpenNovaLanProcess {
         }
     }
     finally {
-        try {
-            if ($environmentLockTaken) {
-                foreach ($entry in @(& $isolatedEntries)) {
-                    [Environment]::SetEnvironmentVariable(
-                        $entry.Name, $null, [EnvironmentVariableTarget]::Process)
-                }
-                foreach ($name in $saved.Keys) {
-                    [Environment]::SetEnvironmentVariable(
-                        [string] $name, [string] $saved[$name], [EnvironmentVariableTarget]::Process)
-                }
-            }
-        }
-        finally {
-            if ($environmentLockTaken) {
-                $environmentMutex.ReleaseMutex()
-            }
-            $environmentMutex.Dispose()
-        }
+        # Nothing to restore: the launch mutated no process state.
     }
 }
 
@@ -1370,18 +1355,21 @@ function Start-OpenNovaLanProcess {
 # forced cleanup targets the official console wrapper so its KILL_ON_JOB_CLOSE
 # job tears down the complete engine tree. Direct non-wrapper launches retain
 # the same exact-Process fallback.
-function Stop-OpenNovaLanProcess {
+function Stop-OpenNovaProcess {
     param(
         [Parameter(Mandatory = $true)]
         [System.Diagnostics.Process] $Process,
         [ValidateRange(0, 60000)] [int] $GracefulTimeoutMs = 8000,
         [ValidateRange(100, 30000)] [int] $ForceTimeoutMs = 5000,
         [switch] $PassThruShutdownEvidence,
-        [switch] $RequireCleanExit
+        [switch] $RequireCleanExit,
+        # The game was already asked to quit through its MCP endpoint
+        # (Stop-GameViaMcp acknowledged): that request is the graceful close.
+        [switch] $QuitRequested
     )
 
     $requestedUtc = [DateTime]::UtcNow.ToString('o')
-    $closeRequested = $false
+    $closeRequested = [bool] $QuitRequested
     $exactFallbackRequired = $false
     $launcherKilled = $false
     $runtimeKilled = $false
@@ -1452,7 +1440,7 @@ function Stop-OpenNovaLanProcess {
         }
     }
 
-    # Start-OpenNovaLanProcess materializes the runtime handle while it is alive,
+    # Start-OpenNovaProcess materializes the runtime handle while it is alive,
     # but keep the evidence nullable and fail closed if a non-centralized caller
     # supplies a Process whose exit code can no longer be queried.
     $exitCode = $null

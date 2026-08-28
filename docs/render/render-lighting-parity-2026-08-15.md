@@ -145,7 +145,7 @@ The new seam is intentionally narrow:
   data, not a renderer behavior change.
 
 The versioned [`fixture catalog`](render-fixtures-v1.json) and production
-[`capture scene`](../../godot/tests/render_fixture_capture_probe.tscn) add the
+[`capture probe`](../../godot/probes/render/render_fixture_capture_probe.gd) add the
 repeatable driver. The scene validates the catalog variant order and mission
 SHA-256 before loading, realizes an exact catalog camera/TOD, freezes the
 production shell after settling, and records five variants per selection:

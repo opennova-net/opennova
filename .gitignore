@@ -103,3 +103,9 @@ stripify_call_*.log
 # Isolated user:// for the GUT suite (scripts/test_godot.sh) so tests cannot
 # write the developer's real Godot user directory.
 /.godot-test-user/
+
+# The CI checkout of opennova-net/opennova-reference-assets (the OPENNOVA_JO_ASSETS tree).
+.reference-assets/
+
+# The CI checkout of opennova-net/opennova-reference-retail-packed (the OPENNOVA_JO_DIR install).
+.reference-retail-packed/

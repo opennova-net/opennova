@@ -14,7 +14,7 @@
 //     builder is wrong: D-NET-52..55).
 //   - Position fields land in plausible 16.16 world bounds.
 //
-// Skips cleanly when `NW_INGAME_HEXCAP` is unset (CI stays green; see
+// Reports Skipped when <OPENNOVA_CAPTURES>/ingame.hexcap is absent (see
 // `tools/net/pcap_to_hexcap.py` for the converter).
 
 #include <net/napi/envelope.h>
@@ -33,6 +33,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
@@ -145,15 +146,13 @@ void process_protocol(const std::vector<uint8_t> &body, const std::string &scrk,
 } // namespace
 
 int main() {
-	const char *path = std::getenv("NW_INGAME_HEXCAP");
-	if (!path || !*path) {
-		std::printf("[skip] set NW_INGAME_HEXCAP to a '<srcport> <frame> <hex>' "
-		            "capture to run the pool-records witness\n");
-		return 0;
-	}
+	const std::string hexcap = retail::capture("ingame.hexcap");
+	if (!retail::file_exists(hexcap))
+		return retail::skip("<OPENNOVA_CAPTURES>/ingame.hexcap (a '<srcport> <frame> <hex>' in-match dump for the pool-records witness)");
+	const char *path = hexcap.c_str();
 	std::ifstream file(path);
 	if (!file) {
-		std::printf("FAILED to open NW_INGAME_HEXCAP=%s\n", path);
+		std::printf("FAILED to open %s\n", path);
 		return 1;
 	}
 

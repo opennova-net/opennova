@@ -17,8 +17,7 @@
 //     + at least one death;
 //   - host and client agree on the shared frame-0 state for id2.
 //
-// Skips cleanly when NW_PROFILE_SPH_DIR is unset (CI stays green); point it at
-// the folder containing host.sph / client.sph.
+// Reports Skipped when <OPENNOVA_CAPTURES>/sph/ lacks host.sph / client.sph.
 
 #include <net/npwire/serverlog_decode.h>
 
@@ -28,6 +27,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "common/retail_paths.h"
 
 using namespace opennova;
 
@@ -72,17 +72,13 @@ constexpr int32_t FP_25 = 25 * 65536;      // 0x00190000
 } // namespace
 
 int main() {
-	const char *dir = std::getenv("NW_PROFILE_SPH_DIR");
-	if (!dir || !*dir) {
-		std::printf("[skip] set NW_PROFILE_SPH_DIR to a folder with host.sph / "
-		            "client.sph to run the .sph server-log witness\n");
-		return 0;
-	}
-	const std::string base = std::string(dir);
+	const std::string base = retail::join(retail::captures_root(), "sph");
+	if (!retail::file_exists(base + "/host.sph") || !retail::file_exists(base + "/client.sph"))
+		return retail::skip("<OPENNOVA_CAPTURES>/sph/host.sph + client.sph (the /profile recordings for the server-log witness)");
 	std::vector<uint8_t> host_bytes, client_bytes;
 	if (!read_file(base + "/host.sph", host_bytes) ||
 	    !read_file(base + "/client.sph", client_bytes)) {
-		std::printf("FAILED to open host.sph / client.sph under %s\n", dir);
+		std::printf("FAILED to open host.sph / client.sph under %s\n", base.c_str());
 		return 1;
 	}
 

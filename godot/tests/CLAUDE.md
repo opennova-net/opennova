@@ -7,15 +7,13 @@
   Headless runs never attach an ImGui context: `DevTools.is_available()` is false
   there while its open state (F3, capture, input policy) still works and is tested.
 - Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
-  `*_probe.gd` files are manual probes and are not collected.
-- Probes: extends-`SceneTree` scripts run
-  `"$GODOT_BIN" --headless --path godot -s res://tests/<x>_probe.gd`, asset-gated on
-  `NW_SP_MISSION=<bms>` + `NW_RESOURCE_DIR=<retail install>` (never CI). They print a
-  graded PASS/FAIL verdict and are judged on the printed verdict, not the exit code —
-  Godot 4.6 teardown can exit 139 after a PASS. Windowed/visual probes are `.tscn`
-  scenes under `tests/game/` run with `--path godot res://tests/game/<x>.tscn`,
-  capturing via viewport self-readback into an env-named dir. For a new probe, copy an
-  existing probe's header (`ladder_climb_probe.gd`).
+- No probes live here. Runtime probes are `game_probe` tools under `godot/probes/`
+  (`docs/mcp.md`, ADR 0041): registered in `ProbeCatalog`, driven through the game's
+  MCP endpoint with typed arguments, judged by their verdict. Their GUT companions
+  (the catalog contract, the render-fixture and foliage-capture contracts, the
+  parity-joiner contract) live in `godot/tests/probes/`. An assertion over the
+  portable engine is a ctest under `tests/<domain>/`, gated on the retail roots
+  when it needs retail data (`docs/asset-gated-tests.md`).
 - GUT exits 0 when a script fails to parse — it is silently dropped from collection.
   `scripts/test_godot.sh` greps for parse errors and dropped scripts; prefer it over
   invoking `gut_cmdln.gd` directly, and replicate those greps after any direct run.
@@ -32,9 +30,11 @@
   process exit when the class carries a `Transform3D`-typed member (Godot 4.6
   teardown quirk, bisected 2026-08-09) and GUT still reports green totals, so
   the crash only shows as a nonzero exit code.
-- `fixtures/threedi/synthetic/*.3di` are committed models with one authored edit each
-  (CTRL names, PANM rows, LGHT/material fields), minted ONCE on master `5820432c1`
-  through the `ObjectData` edit + export bindings ADR 0038 retired; the runtime cannot
-  re-author them. Tests that need an authored variant load one of these and assert its
-  content with the read-back getters. Recipes and the minting probe:
-  `fixtures/threedi/synthetic/README.md`.
+- Every 3DI model the suite loads is synthetic: `fixtures/threedi/synth/*.3di` are
+  minted by `tests/fixtures/minimal_3di_gen.cpp` through the engine's parity writer
+  (eleven base models plus the one-edit variants: CTRL names, PANM rows, LGHT/material
+  fields) and byte-compared by the `minimal_3di_gen` ctest every run. Change the
+  generator, run it with `--write`, commit the files. A test that needs an authored
+  variant loads one of these and asserts its content with the read-back getters; the
+  model and variant tables are in `fixtures/README.md`. No retail model lives in the
+  tree; retail-only assertions run as `OPENNOVA_JO_ASSETS` legs.

@@ -7,7 +7,7 @@ extends GutTest
 
 const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"
 const WEAPON_PATH := "res://../fixtures/def/weapon.def"
-const FONT_FIXTURE := "res://../fixtures/fnt/Gunpl22b.fnt"
+const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"  # staged as Gunpl22b.fnt
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 

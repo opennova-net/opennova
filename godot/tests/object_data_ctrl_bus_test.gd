@@ -4,16 +4,16 @@ extends GutTest
 # model-local CTRL record, while runtime evaluation consumes the shared retail
 # 96-register bus.
 
-const B50CAL := "res://../fixtures/threedi/objects/B50Cal/B50Cal.3di"
+const MOUNT := "res://../fixtures/threedi/synth/mount.3di"
 # Authored variants of the fixture above, minted once from the retired edit
-# surface (fixtures/threedi/synthetic/README.md); each test reads back the
+# surface (fixtures/README.md); each test reads back the
 # authored content it depends on before probing the runtime.
-const SYN_CTRL1_HEAT_GLOW := "res://../fixtures/threedi/synthetic/b50cal_ctrl1_heat_glow.3di"
-const SYN_CTRL1_NOT_RETAIL := "res://../fixtures/threedi/synthetic/b50cal_ctrl1_not_retail.3di"
-const SYN_YAW_STYLE114 := "res://../fixtures/threedi/synthetic/b50cal_yaw_style114.3di"
-const SYN_CTRL1_LOD_FRAC_YAW_STYLE114 := "res://../fixtures/threedi/synthetic/b50cal_ctrl1_lod_frac_yaw_style114.3di"
-const SYN_MTRL0_RGBGEN113_REG1 := "res://../fixtures/threedi/synthetic/b50cal_mtrl0_rgbgen113_reg1.3di"
-const SYN_ARMRY_LGHT0_COLORGEN113 := "res://../fixtures/threedi/synthetic/armry01_lght0_colorgen113_flicker.3di"
+const SYN_CTRL1_HEAT_GLOW := "res://../fixtures/threedi/synth/mount_ctrl1_heat_glow.3di"
+const SYN_CTRL1_NOT_RETAIL := "res://../fixtures/threedi/synth/mount_ctrl1_not_retail.3di"
+const SYN_YAW_STYLE114 := "res://../fixtures/threedi/synth/mount_yaw_style114.3di"
+const SYN_CTRL1_LOD_FRAC_YAW_STYLE114 := "res://../fixtures/threedi/synth/mount_ctrl1_lod_frac_yaw_style114.3di"
+const SYN_MTRL0_RGBGEN113_REG1 := "res://../fixtures/threedi/synth/mount_mtrl0_rgbgen113_reg1.3di"
+const SYN_ARMRY_LGHT0_COLORGEN113 := "res://../fixtures/threedi/synth/armory_lght0_colorgen113_flicker.3di"
 const TRACK_NAMES := [
 	"rotation_x", "rotation_y", "rotation_z",
 	"scale_x", "scale_y", "scale_z", "translation",
@@ -72,9 +72,9 @@ func _assert_cached_apply_matches(data: ObjectData,
 
 
 func test_panm_uses_case_insensitive_signed_global_dwords() -> void:
-	var data := _open(B50CAL)
+	var data := _open(MOUNT)
 	var track := _controlled_track(data, 1) # EWEAP_GUNYAW
-	assert_false(track.is_empty(), "B50Cal should carry its authored yaw track")
+	assert_false(track.is_empty(), "mount should carry its authored yaw track")
 	if track.is_empty():
 		return
 	var part := int(track.get("part_index", -1))
@@ -143,7 +143,7 @@ func test_duplicate_and_unknown_authored_names_follow_retail_loader_aliases() ->
 func test_wave_styles_receive_the_loader_resolved_phase_ordinal() -> void:
 	# The pristine model locates the yaw track (control 113, local ordinal 1);
 	# both fixtures carry that same track re-styled to 114.
-	var pristine_track := _controlled_track(_open(B50CAL), 1)
+	var pristine_track := _controlled_track(_open(MOUNT), 1)
 	assert_false(pristine_track.is_empty())
 	if pristine_track.is_empty():
 		return

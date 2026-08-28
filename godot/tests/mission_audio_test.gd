@@ -304,7 +304,7 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 	_write_bytes(fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path(
-				"res://../fixtures/menu_sound/selecta1.wav")))
+				"res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
 	lwf.create_empty()
 	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000)
@@ -399,7 +399,7 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 	_write_bytes(fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path(
-				"res://../fixtures/menu_sound/selecta1.wav")))
+				"res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
 	lwf.create_empty()
 	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000)
@@ -478,7 +478,7 @@ end
 """
 	_write_text(fixture_dir.path_join("items.def"), items)
 	_write_bytes(fixture_dir.path_join("tone.wav"),
-		FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/menu_sound/selecta1.wav")))
+		FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
 	lwf.create_empty()
 	var si := lwf.add_set()
@@ -550,7 +550,7 @@ end
 	_write_bytes(fixture_dir.path_join("bad.wav"), PackedByteArray([1, 2, 3, 4]))
 	_write_bytes(fixture_dir.path_join("good.wav"),
 		FileAccess.get_file_as_bytes(
-			ProjectSettings.globalize_path("res://../fixtures/menu_sound/selecta1.wav")))
+			ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
 	lwf.create_empty()
 	_add_lwf_set(lwf, "BAD_AMB", "bad.wav", 2000)
@@ -595,7 +595,7 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 			ProjectSettings.globalize_path("res://../fixtures/dbf/00TRg.DBF")))
 	_write_bytes(fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(
-			ProjectSettings.globalize_path("res://../fixtures/menu_sound/selecta1.wav")))
+			ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
 	lwf.create_empty()
 	_add_lwf_set(lwf, "Z00gR100", "tone.wav", 200)

@@ -74,10 +74,10 @@ NetId) then bound a vehicle-archetype entry → the DBuggy1 shadow decal under a
 Reimpl: `Entity::anim_slot` SPLIT from the new `Entity::body_anim_slot` (present-pass clip;
 never wire), `minimap_net_id` added, `handle_client_join` parses the CU vars, the spawn
 stamps per side, our joiner uploads the fresh-profile default set (CI0=512 CI1=33287 TR=-1
-CTA=CTB=8 VCA=1 VCB=4), and the NW_LAN_HOST boot seeds `gametype 0x10010` (the golden
+CTA=CTB=8 VCA=1 VCB=4), and the `--lan-host` boot seeds `gametype 0x10010` (the golden
 ASH_I5A session g_GameType [orig: seeded from the host settings @0x4a6657]; its team-based
-bit 0x10000 drives the side pick; NW_LAN_GAMETYPE overrides). `nw_pp --handshake` dumps the
-outer 0x41/0x42/0x81/0x82 incl. the CU chunks; `NW_PP_HEXCAP_MAX` widens raw dumps. Full
+bit 0x10000 drives the side pick; `--lan-gametype` overrides). `nw_pp --handshake` dumps the
+outer 0x41/0x42/0x81/0x82 incl. the CU chunks; `nw_pp --hexcap-max <n>` widens raw dumps. Full
 chain + deferrals (char-slot registry realloc, BMS AnimSlot promote, WAC set_ssn_anim
 target) in net-re D-NET-146.
 

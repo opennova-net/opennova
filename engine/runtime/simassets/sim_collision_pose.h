@@ -76,6 +76,13 @@ inline constexpr float kHeldWeaponAttachNudgeZ = 0.051f;
 inline constexpr double kHeldWeaponHandFrameZRad = 0.5759761961496483;
 inline constexpr double kHeldWeaponHandFrameYRad = -1.3613982818082597;
 
+// The model's bone table for a skeletal rig: parent-relative pivots and parent
+// indices from the canonical first RLOD's render objects (raw, engine frame).
+// The same rows AdmSkeletalClips::load_from_adm consumes; public so a test can
+// stand a rig up from a mounted model without the collision resolve.
+bool model_bone_table(const Threedi3di3 &model,
+		std::vector<anim::Vec3> &r_origins, std::vector<int> &r_parents);
+
 class SimCollisionPoseProvider : public world::ICollisionSectionMatrixProvider,
 		public world::IMuzzlePoseProvider {
 public:

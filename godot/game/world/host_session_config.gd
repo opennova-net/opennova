@@ -4,7 +4,7 @@ extends RefCounted
 ## Typed record for a hosted co-op game-session request (ADR 0017): what the player chose
 ## on a host screen, carried menu -> shell -> GameWorld.load_mission_as_host -> the mission
 ## runtime. Every host producer builds one — the mp.mnu host screen (MpMenuCompanion), the
-## NovaWorld panel, and the NW_LAN_HOST env hook. A HostSessionConfig always requests a
+## NovaWorld panel, and the --lan-host launch flag. A HostSessionConfig always requests a
 ## SOCKETED LAN listen server; single-player passes none and keeps the in-process
 ## (socketless) listen server. At the FFI boundary the runtime encodes it back to a
 ## Dictionary via to_session_options() for Simulation.configure_host_session.

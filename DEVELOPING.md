@@ -37,8 +37,9 @@ One shot (configure, build the libraries, run `ctest`, then build the GDExtensio
 scripts/build.sh
 ```
 
-- `BUILD_GODOT=0 scripts/build.sh` skips the GDExtension for fast library-only iteration.
-- `JOBS=N` sets the build parallelism.
+- `scripts/build.sh --no-godot` skips the GDExtension for fast library-only iteration.
+- `--jobs N` sets the build parallelism (`scripts/build.sh` and `scripts/build_godot.sh`).
+- `scripts/test_godot.sh --keep-user-dir` leaves the suite's isolated `user://` in place.
 
 The manual equivalent:
 

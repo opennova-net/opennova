@@ -216,7 +216,7 @@ class ItemFxPlacerStub:
 
 # --- Real item-fx fixtures (ADR 0034): the item database is an authored
 # items.def parsed by the REAL ItemDatabase; the model data is the committed
-# B50Cal.3di (its MFlash01 user point anchors the effect) or Shed.3di (no
+# mount.3di (its MFlash01 user point anchors the effect) or shed.3di (no
 # matching point -> the origin-fallback leg). The first-16 mask RULE itself is
 # native and pinned by the threedi user-point-mask ctest.
 static var _fx_data_cache: Dictionary = {}
@@ -237,17 +237,17 @@ func _fx_object_data(fixture_dir: String, model_file: String) -> ObjectData:
 
 
 func _fx_anchor_data() -> ObjectData:
-	return _fx_object_data("res://../fixtures/threedi/objects/B50Cal", "B50Cal.3di")
+	return _fx_object_data("res://../fixtures/threedi/synth", "mount.3di")
 
 
 func _fx_plain_data() -> ObjectData:
-	return _fx_object_data("res://../fixtures/threedi/3di3", "Shed.3di")
+	return _fx_object_data("res://../fixtures/threedi/synth", "shed.3di")
 
 
-# The anchor point's index/info on the real model (MFlash01 on B50Cal).
+# The anchor point's index/info on the real model (MFlash01 on mount).
 func _fx_anchor_index() -> int:
 	var mask := int(_fx_anchor_data().get_user_point_bone_mask("MFlash01"))
-	assert_gt(mask, 0, "B50Cal authors the MFlash01 user point in the first 16")
+	assert_gt(mask, 0, "mount authors the MFlash01 user point in the first 16")
 	for i in range(16):
 		if (mask & (1 << i)) != 0:
 			return i
@@ -543,14 +543,13 @@ func _add_engine_children(world: GameWorld) -> void:
 	world.add_child(env)
 
 
-# Stage the minimal fixture over the Dvxi5 terrain fixture plus the staged
-# impact ammo. The minimal mnml.trn carries no CPT depth buffer, so the sim's
-# terrain height field stays empty under it and rounds never ground; Dvxi5 is
-# the real-heights terrain the round flight can actually hit.
+# Stage the minimal fixture over the synthetic Tmap terrain plus the staged
+# impact ammo. The minimal mnml map is flat, so rounds would never ground on
+# it; Tmap carries the relief the round flight can actually hit.
 func _stage_impact_fixture(name: String) -> String:
 	var root_dir := _make_fixture_root(name)
 	for source_dir in [
-		ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"),
+		ProjectSettings.globalize_path("res://../fixtures/terrain/tmap"),
 		ProjectSettings.globalize_path("res://../assets"),
 	]:
 		for file_name in DirAccess.get_files_at(source_dir):
@@ -575,13 +574,13 @@ func _append_building_item(root_dir: String) -> void:
 	f.close()
 
 
-# Stage the minimal fixture plus the House.3di collision fixture as item
+# Stage the minimal fixture plus the house.3di collision fixture as item
 # 102001's GuardTwr1 graphic, so authored KIND_BUILDING entities place a REAL
 # ObjectModel and enter the sim's real collision/occlusion world.
 func _stage_building_fixture(name: String) -> String:
 	var root_dir := _stage_minimal_fixture(name)
 	assert_eq(DirAccess.copy_absolute(
-			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di"),
+			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/house.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
 	_append_building_item(root_dir)
 	return root_dir
@@ -590,20 +589,20 @@ func _stage_building_fixture(name: String) -> String:
 func _stage_lit_building_fixture(name: String) -> String:
 	var root_dir := _stage_minimal_fixture(name)
 	assert_eq(DirAccess.copy_absolute(
-			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/Shed.3di"),
+			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/shed.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
 	_append_building_item(root_dir)
 	return root_dir
 
 
-# Dvxi5 supplies the witnessed terrain-normal table inputs and House.3di keeps
+# Tmap supplies the terrain-normal table inputs (its ramp cell) and house.3di keeps
 # the SSN owner on the real placed-object path used by the routing assertion.
 # [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0 resolves the SSN entity,
 # then reads the terrain normal for its grid cell before creating the emitter.]
 func _stage_building_terrain_fixture(name: String) -> String:
 	var root_dir := _stage_impact_fixture(name)
 	assert_eq(DirAccess.copy_absolute(
-			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di"),
+			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/house.3di"),
 			root_dir.path_join("GuardTwr1.3di")), OK)
 	_append_building_item(root_dir)
 	return root_dir
@@ -666,7 +665,7 @@ func test_round_light_move_rows_reach_world_selected_output() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
-		assert_true(mission.set_header_string("terrain", "Dvxi5")))
+		assert_true(mission.set_header_string("terrain", "Tmap")))
 	var camera := Camera3D.new()
 	camera.position = Vector3(16, 300, -16)
 	world.add_child(camera)
@@ -692,7 +691,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	_add_engine_children(world)
 	add_child_autofree(world)
 	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
-		assert_true(mission.set_header_string("terrain", "Dvxi5")))
+		assert_true(mission.set_header_string("terrain", "Tmap")))
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
 	var audio := ImpactAudioStub.new(null, null)
@@ -755,7 +754,7 @@ func test_round_impacts_route_sound_only_without_a_particle() -> void:
 	_add_engine_children(world)
 	add_child_autofree(world)
 	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
-		assert_true(mission.set_header_string("terrain", "Dvxi5")))
+		assert_true(mission.set_header_string("terrain", "Tmap")))
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
 	var audio := ImpactAudioStub.new(null, null)
@@ -779,7 +778,7 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 	_add_engine_children(world)
 	add_child_autofree(world)
 	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
-		assert_true(mission.set_header_string("terrain", "Dvxi5")))
+		assert_true(mission.set_header_string("terrain", "Tmap")))
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
 	var audio := ImpactAudioStub.new(null, null)
@@ -811,7 +810,7 @@ func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
 	add_child_autofree(world)
 	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
 	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
-		assert_true(mission.set_header_string("terrain", "Dvxi5"))
+		assert_true(mission.set_header_string("terrain", "Tmap"))
 		placed.merge(mission.add_entity(
 				MissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)))
 	var ssn := int(placed.get("bms_id", 0))
@@ -834,7 +833,7 @@ func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
 	var terrain := world.get_terrain_data()
 	assert_not_null(terrain)
 	# This independently spells out the recovered centered raw-height
-	# difference at the real, non-flat Dvxi5 cell (source 518,508).
+	# difference at the synthetic map's ramp cell (source 518,508).
 	# [orig: Terrain_GenerateNormalMap @0x603210, diff scale @0x7C6950;
 	# WacScript_SpawnEffectAtSsnEntity consumes that cell normal @0x4F23A0.]
 	var expected := Vector3(
@@ -847,7 +846,7 @@ func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
 	assert_lt(orientation.distance_to(expected), 0.00001,
 			"fx2ssn receives the terrain cell's recovered surface normal")
 	assert_gt(orientation.distance_to(Vector3.UP), 0.01,
-			"the non-flat Dvxi5 witness cannot regress to the old UP placeholder")
+			"the ramp witness cannot regress to the old UP placeholder")
 
 
 func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:
@@ -872,13 +871,13 @@ func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
 	DirAccess.make_dir_recursive_absolute(root)
 	# Pass the runtime archive gate so this fixture reaches the missing-environment contract.
 	_write_pff(root.path_join("resource.pff"), [])
-	_write_fixture_file(root.path_join("Dvxi5.trn"), "terrain_name \"Dvxi5\"\n")
+	_write_fixture_file(root.path_join("Tmap.trn"), "terrain_name \"Tmap\"\n")
 
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
 
-	assert_eq(world.load_world(root), ERR_FILE_NOT_FOUND, "Runtime global root must contain full_00.env next to Dvxi5.trn.")
+	assert_eq(world.load_world(root), ERR_FILE_NOT_FOUND, "Runtime global root must contain full_00.env next to Tmap.trn.")
 
 
 func test_packaged_scene_instantiates_with_intact_wiring() -> void:
@@ -937,7 +936,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 		"zero_water_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root_dir)
 	for source_dir in [
-		ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"),
+		ProjectSettings.globalize_path("res://../fixtures/terrain/tmap"),
 		ProjectSettings.globalize_path("res://../assets"),
 	]:
 		for file_name in DirAccess.get_files_at(source_dir):
@@ -952,7 +951,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 	world.set_resource_root(root)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
-	assert_true(mission.set_header_string("terrain", "Dvxi5"))
+	assert_true(mission.set_header_string("terrain", "Tmap"))
 	assert_true(mission.set_header_string("environment", "mnml"))
 	assert_true(mission.set_header_int("water_override", 0))
 	assert_true(mission.set_header_flag(0x1, true))
@@ -1105,7 +1104,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 		"presentation_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root_dir)
 	for source_dir in [
-		ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"),
+		ProjectSettings.globalize_path("res://../fixtures/terrain/tmap"),
 		ProjectSettings.globalize_path("res://../assets"),
 	]:
 		for file_name in DirAccess.get_files_at(source_dir):
@@ -1117,7 +1116,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	world.set_resource_root(root)
 	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
-	assert_true(mission.set_header_string("terrain", "Dvxi5"))
+	assert_true(mission.set_header_string("terrain", "Tmap"))
 	assert_true(mission.set_header_string("environment", "mnml"))
 	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
 	await get_tree().process_frame
@@ -2186,18 +2185,19 @@ func test_unload_forgets_the_viewmodel_def_memo() -> void:
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../assets")), OK)
 	world.set_resource_root(root)
-	var old_debug_weapon := OS.get_environment("NOVA_VM_WEAPON")
-	OS.set_environment("NOVA_VM_WEAPON", "WPN_M4")
 	assert_eq(world.load_mission("mnml.bms"), OK)
+	# The debug viewmodel rig (the `set_viewmodel_weapon` control's seam).
+	assert_true(world.set_local_player_weapon_by_name("WPN_M4"))
 	assert_not_null(world.local_player_viewmodel_def())
 	assert_eq(world.local_player_weapon_name(), "WPN_M4",
 			"the first decode installs the weapon dict")
 	world.unload()
 	# The same resolved name in the next mission must re-decode from that
-	# mission's weapon.def instead of returning the memo over an empty dict.
+	# mission's weapon.def instead of returning the memo over an empty dict
+	# (unload drops the previous entity's selection, so it is re-rigged).
 	assert_eq(world.load_mission("mnml.bms"), OK)
+	assert_true(world.set_local_player_weapon_by_name("WPN_M4"))
 	var again: PlayerViewmodelDef = world.local_player_viewmodel_def()
-	OS.set_environment("NOVA_VM_WEAPON", old_debug_weapon)
 	assert_not_null(again)
 	assert_eq(world.local_player_weapon_name(), "WPN_M4",
 			"a reload with the same weapon name repopulates the weapon dict")
@@ -2217,10 +2217,10 @@ func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 	assert_null(world.local_player_viewmodel_def(), "the authored NONE row has no viewmodel")
 	world.unload()
 
-	var old_debug_weapon := OS.get_environment("NOVA_VM_WEAPON")
-	OS.set_environment("NOVA_VM_WEAPON", "WPN_M4")
+	# The root stays mounted across unload, so the next entity's rig resolves
+	# against its weapon.def even before the next mission loads.
+	assert_true(world.set_local_player_weapon_by_name("WPN_M4"))
 	var restored: PlayerViewmodelDef = world.local_player_viewmodel_def()
-	OS.set_environment("NOVA_VM_WEAPON", old_debug_weapon)
 	assert_not_null(restored, "a new mission is not stuck with the previous entity's NONE state")
 	if restored != null:
 		assert_eq(restored.weapon_name, "WPN_M4",
@@ -2905,7 +2905,7 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 
-	# Real model data: B50Cal authors MFlash01 (the matched anchor); Shed
+	# Real model data: mount authors MFlash01 (the matched anchor); shed
 	# authors no such point (the origin-fallback leg). The first-16 mask RULE
 	# (duplicates, beyond-16 exclusion) is native and pinned by the threedi
 	# user-point-mask ctest.

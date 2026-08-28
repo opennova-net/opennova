@@ -6,7 +6,14 @@
 
 #include <runtime/world/ground_conform.h>
 
+#include "common/retail_mission_rig.h"
+#include "common/retail_paths.h"
+
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 using namespace opennova::world;
 
@@ -189,6 +196,62 @@ void test_oscillator_two_decays() {
 	}
 }
 
+// The standing-still vertical-stability leg on the retail data: CP01 boots on
+// the engine's boot policy, the local player stands with an EMPTY input packet
+// (no movement, no jump), the spawn settles, then the player's height is
+// sampled every tick for a watch window. A standing player must not oscillate:
+// peak-to-peak z over the window stays under the limit, with the z trace's
+// extremes and any anim-state changes printed so the waveform names the
+// mechanism (sawtooth = gravity accumulation between resolver snaps; smooth
+// loop-period wave = capsule-bottom-tracked dz; a flap to the airborne state =
+// the edge/jump path firing at rest). SKIP-LEG without OPENNOVA_JO_DIR.
+void test_cp01_standing_player_is_vertically_stable() {
+	const std::string install = retail::install();
+	if (install.empty()) {
+		retail::skip_leg("OPENNOVA_JO_DIR (a retail JO install carrying CP01.bms)");
+		return;
+	}
+	opennova::testrig::RetailMissionRig rig;
+	std::string error;
+	if (!rig.open(install, "CP01.bms", error)) {
+		retail::skip_leg(error.c_str());
+		return;
+	}
+	opennova::testrig::BootOptions options;
+	CHECK(rig.boot(options, error), "CP01 boots for the standing leg");
+	if (!rig.has_local_player() || !rig.has_terrain()) {
+		CHECK(false, "CP01 spawned the player over its terrain");
+		return;
+	}
+	rig.install_weapon("WPN_M4AUTO");
+	rig.input = PlayerInput{};
+	rig.tick(opennova::testrig::ticks_for_seconds(5.0));
+	const float z0 = rig.player_position().z;
+	std::string last_anim = rig.player_anim_key();
+	std::printf("stand: settled z=%.4f anim=%s — watching 12 mission-s\n", z0, last_anim.c_str());
+	float min_z = z0, max_z = z0;
+	int anim_changes = 0;
+	const int samples = opennova::testrig::ticks_for_seconds(12.0);
+	for (int i = 0; i < samples; ++i) {
+		rig.tick();
+		const float z = rig.player_position().z;
+		min_z = std::min(min_z, z);
+		max_z = std::max(max_z, z);
+		const std::string anim = rig.player_anim_key();
+		if (anim != last_anim) {
+			++anim_changes;
+			std::printf("stand: anim change #%d: %s -> %s (sample %d)\n", anim_changes, last_anim.c_str(),
+					anim.c_str(), i);
+			last_anim = anim;
+		}
+	}
+	const float p2p = max_z - min_z;
+	std::printf("stand: watch done: samples=%d min_z=%.4f max_z=%.4f p2p=%.4fu anim_changes=%d\n", samples,
+			min_z, max_z, p2p, anim_changes);
+	CHECK(p2p <= 0.02f, "the standing player is vertically stable (peak-to-peak z under 0.02 u)");
+	CHECK(anim_changes == 0, "the standing player's anim state never flaps");
+}
+
 } // namespace
 
 int main() {
@@ -199,6 +262,7 @@ int main() {
 	test_impact_sink_is_one_directional();
 	test_oscillator_two_decays();
 	test_shock_clamps_in_place();
+	test_cp01_standing_player_is_vertically_stable();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

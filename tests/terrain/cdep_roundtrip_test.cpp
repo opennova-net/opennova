@@ -1,10 +1,11 @@
-// Stand-alone CDEP encode/decode round-trip. Independent of the bake —
-// just reads a raw 1024×1024 uint16 depth buffer (Output.dep), wraps it
-// in a CptFile with CDEP format, writes to a tmp file, reads back, and
-// asserts the decoded depth buffer matches byte-for-byte.
+// Stand-alone CDEP encode/decode round-trip. Independent of the bake: a
+// synthesized 1024x1024 uint16 depth buffer (a 14-bit pattern plus a ramp
+// aligned to the encoder's 4096-sample blocks, so blocks carry both narrow
+// and wide deltas) goes into a CptFile with CDEP format, is written to a
+// tmp file, read back, and must match sample for sample.
 //
-// Catches encoder regressions that the full-bake byte-parity tests
-// might mask.
+// Catches encoder regressions that the full-bake byte-parity tests might
+// mask.
 
 #include <formats/cpt/cpt.h>
 #include "common/test_paths.h"
@@ -13,35 +14,22 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
 
 namespace fs = std::filesystem;
 
 int main() {
-    const fs::path repo_root = test_paths_repo_root(__FILE__);
-    const fs::path dep_path =
-        repo_root / "fixtures" / "terrain" / "sample" / "Output.dep";
-    if (!fs::exists(dep_path)) {
-        std::fprintf(stderr, "FAIL: missing fixture %s\n",
-                     dep_path.string().c_str());
-        return 1;
-    }
-
-    std::ifstream f(dep_path, std::ios::binary);
-    if (!f) {
-        std::fprintf(stderr, "FAIL: can't open %s\n",
-                     dep_path.string().c_str());
-        return 1;
-    }
-    std::vector<uint16_t> original(1024u * 1024u);
-    f.read(reinterpret_cast<char *>(original.data()),
-           original.size() * sizeof(uint16_t));
-    if (!f) {
-        std::fprintf(stderr, "FAIL: short read from %s\n",
-                     dep_path.string().c_str());
-        return 1;
+    constexpr size_t kDim = 1024;
+    std::vector<uint16_t> original(kDim * kDim);
+    for (size_t z = 0; z < kDim; ++z) {
+        for (size_t x = 0; x < kDim; ++x) {
+            const size_t i = z * kDim + x;
+            // Per-block ramp: block b (4096 samples) sits b * 3 higher, so a
+            // block's [min, max] range and its 4-bit delta width both vary.
+            const uint16_t block_base = static_cast<uint16_t>((i / 4096u) * 3u);
+            original[i] = static_cast<uint16_t>(block_base + ((x * 7u + z * 13u) & 0x3FFFu));
+        }
     }
 
     fs::path tmp_path =

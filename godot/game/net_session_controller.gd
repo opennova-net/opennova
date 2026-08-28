@@ -2,13 +2,13 @@ class_name NetSessionController
 extends Node
 
 # The game shell's NET SESSION entries: every way a networked session starts —
-# the mp.mnu LAN browser/host screens, the NovaWorld panel, and the NW_* env
-# launch hooks — plus the callsign, panel lifecycle, and spectator kill feed
-# that ride them. The shell (MainGame) keeps the state machine and the load
-# pipeline; this component builds the typed requests (HostSessionConfig /
+# the mp.mnu LAN browser/host screens, the NovaWorld panel, and the --lan-host /
+# --lan-join launch flags — plus the callsign, panel lifecycle, and spectator
+# kill feed that ride them. The shell (MainGame) keeps the state machine and the
+# load pipeline; this component builds the typed requests (HostSessionConfig /
 # JoinTarget, ADR 0017) and hands each load to the shell's start_world_load
-# seam. Game-layer only: the engine world below knows nothing of menus or env
-# hooks.
+# seam. Game-layer only: the engine world below knows nothing of menus or
+# launch flags.
 
 var _shell  # MainGame: start_world_load / current_resource_root
 var _world: GameWorld
@@ -30,79 +30,48 @@ func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
 	mp_companion.lan_join_requested.connect(join_lan_server)
 
 
-# --- Env launch hooks (dev/demo scaffolding) -----------------------------------
+# --- Launch-flag entries (dev/probe/automation launches) -----------------------
 
-# Co-op LAN demo hooks. These remain useful for deterministic smoke runs even
-# though mp.mnu's LAN_SEARCH now browses live hosts through LanSession.
-# NW_LAN_HOST=<mission.bms> boots straight in as a co-op host;
-# NW_LAN_JOIN=<ip[:port]> boots as a joiner dialing that host. The normal path
-# learns the mission from S2C 0x7B after authentication; NW_LAN_MISSION is only
-# a debug/display expectation and never a local load override (D-NET-194).
-# Two instances on localhost = the bidirectional co-op demo.
-func maybe_launch_lan_from_env() -> bool:
-	var lan_mission := OS.get_environment("NW_LAN_HOST")
+# Co-op LAN launches (LaunchFlags, ADR 0041). These remain useful for
+# deterministic smoke runs even though mp.mnu's LAN_SEARCH now browses live
+# hosts through LanSession. `--lan-host <mission.bms>` boots straight in as a
+# co-op host; `--lan-join <ip[:port]>` boots as a joiner dialing that host. The
+# joiner learns the mission from S2C 0x7B after authentication; there is no
+# local mission override (D-NET-194). Two instances on localhost = the
+# bidirectional co-op demo. The 1..4 rate mode (the witnessed holdoffs
+# 12/6/4/3) and the 1..64 listen-host capacity are validated by the engine
+# parser; an absent or malformed value keeps the typed request's default.
+func maybe_launch_lan_from_flags() -> bool:
+	var lan_mission := LaunchFlags.lan_host()
 	if not lan_mission.is_empty():
 		# game_type = the numeric session g_GameType the host config chooses at host start
 		# [orig: g_GameType = session gametype setting @0x4a6657]. An absent override
-		# means the hook's `auto`: derive it from the loaded mission. That distinction
+		# means `auto`: derive it from the loaded mission. That distinction
 		# matters for 00TRg, whose zero mode resolves to retail's 0x10020 training Co-op.
-		var lan_gametype := OS.get_environment("NW_LAN_GAMETYPE")
-		var lan_port := OS.get_environment("NW_LAN_PORT")
-		var lan_mode := OS.get_environment("NW_LAN_MODE")
-		var lan_max_players := OS.get_environment("NW_LAN_MAX_PLAYERS")
+		var lan_gametype := LaunchFlags.lan_gametype()
 		var demo_config := HostSessionConfig.new()
 		demo_config.mission = lan_mission
-		# NW_LAN_NAME is the host player's callsign, matching LanHostCallsign in
+		# `--callsign` is the host player's callsign, matching LanHostCallsign in
 		# onhook.cfg. Retail's default GameName is the localized `Untitled ` value.
 		demo_config.server_name = "Untitled "
-		demo_config.max_players = resolve_lan_max_players_override(lan_max_players, 4)
-		if not lan_port.is_empty():
-			demo_config.bind_port = int(lan_port)
-		demo_config.game_type_auto = lan_gametype.strip_edges().is_empty()
+		demo_config.max_players = LaunchFlags.lan_max_players(4)
+		demo_config.bind_port = LaunchFlags.lan_port(demo_config.bind_port)
+		demo_config.game_type_auto = lan_gametype < 0
 		if not demo_config.game_type_auto:
-			demo_config.game_type = int(lan_gametype)
-		demo_config.integrity_profile = OS.get_environment(
-				"NW_LAN_INTEGRITY_PROFILE").strip_edges()
-		demo_config.lan_mode = resolve_lan_mode_override(
-			lan_mode, demo_config.lan_mode)
+			demo_config.game_type = lan_gametype
+		demo_config.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
+		demo_config.lan_mode = LaunchFlags.lan_mode(demo_config.lan_mode)
 		_on_lan_host_start_requested(demo_config)
 		return true
-	var lan_join := OS.get_environment("NW_LAN_JOIN")
-	if not lan_join.is_empty():
-		var jp := lan_join.split(":")
+	var lan_join_ip := LaunchFlags.lan_join_ip()
+	if not lan_join_ip.is_empty():
 		var demo_target := JoinTarget.new()
-		if jp.size() > 0 and not jp[0].is_empty():
-			demo_target.host_ip = jp[0]
-		if jp.size() > 1:
-			demo_target.port = int(jp[1])
-		demo_target.mission = OS.get_environment("NW_LAN_MISSION")
-		demo_target.integrity_profile = OS.get_environment(
-				"NW_LAN_INTEGRITY_PROFILE").strip_edges()
+		demo_target.host_ip = lan_join_ip
+		demo_target.port = LaunchFlags.lan_join_port(demo_target.port)
+		demo_target.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
 		join_lan_server(demo_target)
 		return true
 	return false
-
-
-## Parse the optional env-host LAN rate selector without letting a malformed
-## development override silently change the retail default. Values 1..4 map to
-## the witnessed holdoffs 12/6/4/3; blank, non-numeric, and out-of-range values
-## preserve the supplied fallback.
-static func resolve_lan_mode_override(value: String, fallback: int) -> int:
-	var normalized := value.strip_edges()
-	if not normalized.is_valid_int():
-		return fallback
-	var mode := int(normalized)
-	return mode if mode >= 1 and mode <= 4 else fallback
-
-
-## The retail hook accepts 1..64 for direct listen-host capacity. Keep a bad
-## automation value from silently changing the typed request's fallback.
-static func resolve_lan_max_players_override(value: String, fallback: int) -> int:
-	var normalized := value.strip_edges()
-	if not normalized.is_valid_int():
-		return fallback
-	var max_players := int(normalized)
-	return max_players if max_players >= 1 and max_players <= 64 else fallback
 
 
 # --- LAN co-op (mp.mnu) --------------------------------------------------------
@@ -132,7 +101,7 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 
 
 ## Public entry for "join this server" — the seam behind the LAN browser's
-## `lan_join_requested` signal, the NovaWorld panel row, the `NW_LAN_JOIN` env
+## `lan_join_requested` signal, the NovaWorld panel row, the `--lan-join` launch flag
 ## hook, and the shell's ADR-0018 delegate. Dial it as a co-op JOINER: the world
 ## loads as a non-authority client that runs the witnessed in-match JOIN and
 ## renders the host + NPCs wire-direct (net-re §5.38b). The LAN row carries only
@@ -165,15 +134,10 @@ func join_lan_server(target: JoinTarget) -> void:
 
 ## The local player's callsign — rides the game ClientAuth.NA (the host echoes it back so we
 ## self-identify by name-match, which makes a duplicate callsign unjoinable — D-NET-169).
-## The persisted profile default is uniquified per machine (PlayerProfile); NW_LAN_NAME
-## overrides for the two-instance demo.
+## PlayerProfile is the single source: the persisted per-machine default, or the
+## `--callsign` launch flag for the two-instance demo.
 func resolve_player_callsign() -> String:
-	# The override rides the same Name[16] wire echo as the profile value, so it gets
-	# the same 15-character clamp — a longer callsign can never satisfy the name-match
-	# self-ID and the join would die 60 s later with a misleading stall reason.
-	var n := OS.get_environment("NW_LAN_NAME").strip_edges() \
-			.left(PlayerProfile.MAX_CALLSIGN_LENGTH)
-	return n if not n.is_empty() else PlayerProfile.load_callsign()
+	return PlayerProfile.load_callsign()
 
 
 # --- NovaWorld (online multiplayer) ---------------------------------------------
@@ -192,7 +156,7 @@ func open_novaworld_panel() -> void:
 	_panel_layer.add_child(_novaworld_panel)
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
 	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
-	# NW_LAN_JOIN env use); the panel emits the same typed JoinTarget load_mission_as_joiner
+	# --lan-join launch use); the panel emits the same typed JoinTarget load_mission_as_joiner
 	# consumes. Hosting from the panel routes through the shared host bring-up.
 	_novaworld_panel.join_in_match_requested.connect(_on_novaworld_join_requested)
 	_novaworld_panel.host_requested.connect(_on_novaworld_host_requested)
@@ -240,7 +204,7 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 
 
 # The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match
-# through the SAME joiner entry the LAN browser + NW_LAN_JOIN env use (the target already
+# through the SAME joiner entry the LAN browser + --lan-join launch use (the target already
 # carries host_ip/port/mission/player_name).
 func _on_novaworld_join_requested(target: JoinTarget) -> void:
 	_dismiss_novaworld_panel()

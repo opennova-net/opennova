@@ -1,3 +1,6 @@
+/* SBF decode: the sample/chunk/entry decoders over the synthetic bank
+   fixtures/sbf/synth_gamemus.sbf (SILENCE = one partial chunk of 0x08A8
+   samples, TONE01 = 4096 + 4096 + 1000 samples over three chunks). */
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -14,6 +17,7 @@ static int passed = 0, failed = 0;
 #ifndef SBF_FIXTURE_DIR
 #define SBF_FIXTURE_DIR "fixtures/sbf"
 #endif
+#define SYNTH_BANK SBF_FIXTURE_DIR "/synth_gamemus.sbf"
 
 static int test_decode_sample_silence(void) {
     /* 0x80 (128) is centred, should decode to 0 at every scale */
@@ -52,14 +56,11 @@ static int test_decode_chunk_rejects_invalid_scales(void) {
     return 1;
 }
 
-/* TODO golden WAV compare once apps/sbf_cli (deferred) lands.
-   Phase B fallback: sanity-decode + first-byte hand check verifies the
-   decoder produces reasonable output without an external reference. */
-static int test_decode_chunk_bhd_menu101(void) {
+static int test_decode_chunk_tone01(void) {
     SbfArchive arc;
-    CHECK(sbf_open(&arc, SBF_FIXTURE_DIR "/bhd_menumus.sbf") == 0, "open");
-    const SbfRawEntry *e = sbf_find_by_name(&arc, "MENU101");
-    CHECK(e != NULL, "MENU101 found");
+    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    const SbfRawEntry *e = sbf_find_by_name(&arc, "TONE01");
+    CHECK(e != NULL, "TONE01 found");
     uint8_t chunk[0x1008];
     CHECK(sbf_read_chunk(&arc, e, 0, chunk, sizeof(chunk)) == (int)e->block_size,
           "read chunk");
@@ -74,20 +75,20 @@ static int test_decode_chunk_bhd_menu101(void) {
     int16_t expected_first = sbf_decode_sample(chunk[SBF_CHUNK_HEADER], h.scale_a);
     CHECK(decoded[0] == expected_first, "first sample matches hand decode");
 
-    /* At least some samples must be non-silent (music chunk, not all 0x80). */
+    /* A tone chunk is not silence. */
     int nonzero = 0;
     for (int i = 0; i < n; ++i) if (decoded[i] != 0) ++nonzero;
-    CHECK(nonzero > 0, "music chunk has non-silent samples");
+    CHECK(nonzero > 0, "tone chunk has non-silent samples");
 
     sbf_close(&arc);
     return 1;
 }
 
-static int test_decode_chunk_jo_nulls_partial(void) {
+static int test_decode_chunk_silence_partial(void) {
     SbfArchive arc;
-    CHECK(sbf_open(&arc, SBF_FIXTURE_DIR "/jo_gamemus.sbf") == 0, "open");
-    const SbfRawEntry *e = sbf_find_by_name(&arc, "NULLS");
-    CHECK(e != NULL, "NULLS found");
+    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    const SbfRawEntry *e = sbf_find_by_name(&arc, "SILENCE");
+    CHECK(e != NULL, "SILENCE found");
     uint8_t chunk[0x1008];
     CHECK(sbf_read_chunk(&arc, e, 0, chunk, sizeof(chunk)) == (int)e->block_size,
           "read chunk");
@@ -95,16 +96,17 @@ static int test_decode_chunk_jo_nulls_partial(void) {
     int16_t decoded[SBF_CHUNK_AUDIO];
     int n = sbf_decode_chunk(chunk, sizeof(chunk), decoded, SBF_CHUNK_AUDIO);
     CHECK(n == 0x08A8, "partial chunk: 2216 int16 samples");
+    for (int i = 0; i < n; ++i) CHECK(decoded[i] == 0, "silence decodes to zero");
 
     sbf_close(&arc);
     return 1;
 }
 
-static int test_decode_all_jo_nulls(void) {
+static int test_decode_all_silence(void) {
     SbfArchive arc;
-    CHECK(sbf_open(&arc, SBF_FIXTURE_DIR "/jo_gamemus.sbf") == 0, "open");
-    const SbfRawEntry *e = sbf_find_by_name(&arc, "NULLS");
-    CHECK(e != NULL, "NULLS found");
+    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    const SbfRawEntry *e = sbf_find_by_name(&arc, "SILENCE");
+    CHECK(e != NULL, "SILENCE found");
     uint8_t *raw = (uint8_t *)malloc(e->total_size);
     CHECK(raw != NULL, "raw alloc");
     CHECK(sbf_read_raw(&arc, e, raw, e->total_size) == (int)e->total_size, "read raw");
@@ -112,18 +114,18 @@ static int test_decode_all_jo_nulls(void) {
     int16_t *out = (int16_t *)malloc(e->total_size * sizeof(int16_t));
     CHECK(out != NULL, "out alloc");
     int n = sbf_decode_all(raw, e->total_size, out, e->total_size);
-    CHECK(n == 0x08A8, "JO NULLS decodes to 2216 samples (single partial chunk)");
+    CHECK(n == 0x08A8, "SILENCE decodes to 2216 samples (single partial chunk)");
 
     free(out); free(raw);
     sbf_close(&arc);
     return 1;
 }
 
-static int test_decode_all_bhd_menu101_multichunk(void) {
+static int test_decode_all_tone01_multichunk(void) {
     SbfArchive arc;
-    CHECK(sbf_open(&arc, SBF_FIXTURE_DIR "/bhd_menumus.sbf") == 0, "open");
-    const SbfRawEntry *e = sbf_find_by_name(&arc, "MENU101");
-    CHECK(e != NULL, "MENU101 found");
+    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    const SbfRawEntry *e = sbf_find_by_name(&arc, "TONE01");
+    CHECK(e != NULL, "TONE01 found");
     uint8_t *raw = (uint8_t *)malloc(e->total_size);
     CHECK(raw != NULL, "raw alloc");
     CHECK(sbf_read_raw(&arc, e, raw, e->total_size) == (int)e->total_size, "read raw");
@@ -131,12 +133,14 @@ static int test_decode_all_bhd_menu101_multichunk(void) {
     int16_t *out = (int16_t *)malloc(e->total_size * sizeof(int16_t));
     CHECK(out != NULL, "out alloc");
     int n = sbf_decode_all(raw, e->total_size, out, e->total_size);
-    /* Bounds: at least all-but-last chunks are full; last chunk may be partial. */
+    /* Bounds: all-but-last chunks are full; the last is partial. */
     uint32_t chunks = e->total_size / e->block_size;
+    CHECK(chunks == 3, "three chunks");
     int min_samples = (int)((chunks - 1) * SBF_CHUNK_AUDIO + 1);
     int max_samples = (int)(chunks * SBF_CHUNK_AUDIO);
     CHECK(n >= min_samples && n <= max_samples,
           "decoded count is bounded by chunk count");
+    CHECK(n == 4096 + 4096 + 1000, "TONE01 decodes to its 9192 authored samples");
 
     free(out); free(raw);
     sbf_close(&arc);
@@ -147,10 +151,10 @@ int main(void) {
     RUN_TEST(test_decode_sample_silence);
     RUN_TEST(test_decode_sample_extremes);
     RUN_TEST(test_decode_chunk_rejects_invalid_scales);
-    RUN_TEST(test_decode_chunk_bhd_menu101);
-    RUN_TEST(test_decode_chunk_jo_nulls_partial);
-    RUN_TEST(test_decode_all_jo_nulls);
-    RUN_TEST(test_decode_all_bhd_menu101_multichunk);
+    RUN_TEST(test_decode_chunk_tone01);
+    RUN_TEST(test_decode_chunk_silence_partial);
+    RUN_TEST(test_decode_all_silence);
+    RUN_TEST(test_decode_all_tone01_multichunk);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

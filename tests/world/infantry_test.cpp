@@ -32,6 +32,9 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/world.h>
+#include "common/retail_mission_rig.h"
+#include "common/retail_paths.h"
+#include <string>
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -2941,6 +2944,151 @@ void test_out_of_range_enemy_is_approached() {
     CHECK(blue->inf.arrival_radius == 655360);
 }
 
+// ---- the weapon channel on the retail data (SKIP-LEG without OPENNOVA_JO_ASSETS) ----
+// The body's weapon channel [orig: AnimMap_SelectWeaponChannel @0x4b5dc0..0x4b5e95]
+// on the shipped weapon.def + US01 clip set: a pistol's special_hold selects the
+// pistol hold pose, its reload plays reload2 (never the rifle reload), a knife
+// holds the knife pose and stamps knife_attack on the click, and a rifle reload
+// plays reload with an advancing playhead while the slot FSM sits in RELOAD,
+// returning to the primary-state mirror once the slot is idle again.
+namespace {
+
+int retail_hold_state(opennova::testrig::RetailMissionRig &rig, const char *weapon, int settle_ticks) {
+    if (!rig.install_weapon(weapon)) return -1;
+    // The hold kind is re-read every selection pass from the entity's OWN
+    // equipped index (the single wire byte at entity+0x2B0) [orig: @0x4b5dba].
+    const int idx = rig.world.weapons.index_of(weapon);
+    if (idx >= 0)
+        if (Entity *pe = rig.player()) pe->equipped_adm_index = static_cast<uint8_t>(idx);
+    for (int t = 0; t < settle_ticks; ++t) rig.tick();
+    return rig.player_ai() != nullptr ? rig.player_ai()->inf.wpn_state : -1;
+}
+
+// Burst-fire then press R; returns the first weapon-channel state that differs
+// from `hold` within `wait_ticks`, or -1. Flags `never_state` if it ever shows.
+int retail_fire_then_reload(opennova::testrig::RetailMissionRig &rig, int hold, int wait_ticks,
+        int *r_never_seen, int never_state) {
+    for (int t = 0; t < 20; ++t) {
+        rig.set_weapon_input(true, t == 0, false);
+        rig.tick();
+    }
+    rig.set_weapon_input(false, false, false);
+    for (int t = 0; t < 10; ++t) rig.tick();
+    rig.set_weapon_input(false, false, true);
+    rig.tick();
+    rig.set_weapon_input(false, false, false);
+    int seen = -1;
+    for (int t = 0; t < wait_ticks; ++t) {
+        rig.tick();
+        const int st = rig.player_ai()->inf.wpn_state;
+        if (st == never_state) *r_never_seen = 1;
+        if (seen < 0 && st != hold) seen = st;
+        if (seen >= 0 && st != never_state) break;
+    }
+    return seen;
+}
+
+void wait_slot_idle(opennova::testrig::RetailMissionRig &rig, int max_ticks) {
+    for (int t = 0; t < max_ticks; ++t) {
+        if (rig.weapon.slot.current == weapon_action::kIdle && t > 5) return;
+        rig.tick();
+    }
+}
+
+} // namespace
+
+static void test_retail_weapon_channel_holds() {
+    const std::string assets = retail::assets();
+    if (assets.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS (an extracted JO tree carrying 00TRg.bms, weapon.def and US01)");
+        return;
+    }
+    opennova::testrig::RetailMissionRig rig;
+    std::string error;
+    if (!rig.open(assets, "00TRg.bms", error)) {
+        retail::skip_leg(error.c_str());
+        return;
+    }
+    opennova::testrig::BootOptions options;
+    if (!rig.boot(options, error)) {
+        std::fprintf(stderr, "FAIL: 00TRg boots for the weapon-channel leg: %s\n", error.c_str());
+        ++failures;
+        return;
+    }
+    CHECK(rig.has_local_player());
+    CHECK(rig.inventory_valid);
+    if (!rig.has_local_player() || rig.player_ai() == nullptr) return;
+    const AiEntity *pa = rig.player_ai();
+
+    // Pistol: special_hold -> the pistol hold; its reload is reload2.
+    const int pistol = retail_hold_state(rig, "WPN_colt45", 40);
+    std::printf("weapon_channel: WPN_colt45 hold state %d (%s) hold_kind %d\n", pistol,
+            pistol >= 0 ? kInfantryAnimNames[pistol] : "?", pa->inf.wpn_hold_kind);
+    CHECK(pistol == anim_state::kHoldPistol);
+    int saw_rifle_reload = 0;
+    const int pistol_reload = retail_fire_then_reload(rig, pistol, 40, &saw_rifle_reload, anim_state::kReload);
+    std::printf("weapon_channel: pistol reload state %d (%s)\n", pistol_reload,
+            pistol_reload >= 0 ? kInfantryAnimNames[pistol_reload] : "?");
+    CHECK(pistol_reload == anim_state::kReload2); // pistol reload plays reload2
+    CHECK(saw_rifle_reload == 0);                  // NOT the rifle reload
+    wait_slot_idle(rig, 600);
+    for (int t = 0; t < 40; ++t) rig.tick();
+    CHECK(pa->inf.wpn_state == anim_state::kHoldPistol); // post-reload back to the hold
+
+    // Knife: the knife hold; the click stamps knife_attack, which then settles.
+    const int knife = retail_hold_state(rig, "WPN_KNIFE", 40);
+    std::printf("weapon_channel: WPN_KNIFE hold state %d (%s) hold_kind %d\n", knife,
+            knife >= 0 ? kInfantryAnimNames[knife] : "?", pa->inf.wpn_hold_kind);
+    CHECK(knife == anim_state::kHoldKnife);
+    rig.set_weapon_input(true, true, false);
+    rig.tick();
+    rig.set_weapon_input(false, false, false);
+    int attack_at = -1;
+    int32_t phase_a = 0, phase_b = 0;
+    for (int t = 0; t < 30; ++t) {
+        rig.tick();
+        if (pa->inf.wpn_state == anim_state::kKnifeAttack) {
+            attack_at = t;
+            phase_a = pa->inf.wpn_clip_phase;
+            rig.tick();
+            phase_b = pa->inf.wpn_clip_phase;
+            break;
+        }
+    }
+    std::printf("weapon_channel: knife attack stamped at tick %d, phase %d -> %d\n", attack_at, phase_a, phase_b);
+    CHECK(attack_at >= 0);         // fire stamps knife_attack
+    CHECK(phase_b > phase_a);      // the attack clip advances
+    int settled = 0;
+    for (int t = 0; t < 300; ++t) {
+        rig.tick();
+        if (pa->inf.wpn_state == anim_state::kHoldKnife) { settled = 1; break; }
+    }
+    CHECK(settled == 1);           // back to the knife hold
+
+    // Rifle: the channel mirrors the primary state; a reload plays reload with an
+    // advancing playhead while the slot FSM is in RELOAD, then mirrors again.
+    const int rifle = retail_hold_state(rig, "WPN_M4AUTO", 40);
+    std::printf("weapon_channel: WPN_M4AUTO hold state %d (%s) primary %d\n", rifle,
+            rifle >= 0 ? kInfantryAnimNames[rifle] : "?", pa->inf.anim_state);
+    CHECK(rifle == pa->inf.anim_state || rifle == anim_state::kIdle);
+    int unused = 0;
+    const int rifle_reload = retail_fire_then_reload(rig, rifle, 40, &unused, -1);
+    std::printf("weapon_channel: rifle reload state %d (%s) slot action %d\n", rifle_reload,
+            rifle_reload >= 0 ? kInfantryAnimNames[rifle_reload] : "?", rig.weapon.slot.current);
+    CHECK(rifle_reload == anim_state::kReload);
+    CHECK(rig.weapon.slot.current == weapon_action::kReload); // mid-reload: FSM in RELOAD
+    phase_a = pa->inf.wpn_clip_phase;
+    for (int t = 0; t < 4; ++t) rig.tick();
+    phase_b = pa->inf.wpn_clip_phase;
+    CHECK(phase_b > phase_a);      // the body playhead advances
+    wait_slot_idle(rig, 600);
+    for (int t = 0; t < 40; ++t) rig.tick();
+    CHECK(rig.weapon.slot.current == weapon_action::kIdle);
+    CHECK(pa->inf.wpn_state == pa->inf.anim_state || pa->inf.wpn_state == anim_state::kIdle);
+    std::printf("weapon_channel: post-reload slot %d body %d primary %d\n", rig.weapon.slot.current,
+            pa->inf.wpn_state, pa->inf.anim_state);
+}
+
 int main() {
     test_gait_stance_transition_insert();
     test_player_ladder_climb_cycle();
@@ -4014,6 +4162,7 @@ int main() {
 
     test_combat_fixture_acquires_a_target();
     test_out_of_range_enemy_is_approached();
+    test_retail_weapon_channel_holds();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

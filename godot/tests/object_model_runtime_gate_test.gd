@@ -8,10 +8,10 @@ extends GutTest
 # the next visible frame. Retail computes these constants per SUBMITTED model
 # only [orig: Terrain_RenderSectorModels @ 0x5c5d30].
 
-const HOUSE_3DI := "res://../fixtures/threedi/3di3/House.3di"
-const PMP_3DI := "res://../fixtures/threedi/objects/Pmpjk01/Pmpjk01.3di"
-const ARMRY_3DI := "res://../fixtures/threedi/objects/armry01/Armry01.3di"
-const SHED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
+const HOUSE_3DI := "res://../fixtures/threedi/synth/house.3di"
+const PMP_3DI := "res://../fixtures/threedi/synth/pump.3di"
+const ARMRY_3DI := "res://../fixtures/threedi/synth/armory.3di"
+const SHED_3DI := "res://../fixtures/threedi/synth/shed.3di"
 const ANIM_FIXTURES := "res://../fixtures/anim"
 
 
@@ -176,7 +176,7 @@ func test_gameplay_keeps_the_editor_local_lght_uniforms_disabled() -> void:
 
 
 func test_dynamic_material_typed_runtime_matches_public_evaluator() -> void:
-	# Armry material 3 is an authored FLICKER-controlled RGB generator. The
+	# armory material 3 is an authored FLICKER-controlled RGB generator. The
 	# runtime model now keeps the native result typed through the ShaderMaterial
 	# write; the public Dictionary evaluator remains the independent tooling
 	# boundary used as the exact-value oracle here.

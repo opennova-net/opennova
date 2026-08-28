@@ -1,7 +1,7 @@
 extends GutTest
 
 const SCRIPT_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
-const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
+const BANK_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"
 
 
 func test_director_starts_and_stops() -> void:

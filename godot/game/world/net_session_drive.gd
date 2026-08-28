@@ -78,7 +78,7 @@ func setup(world: GameWorld, internal_load: Callable, resolve_root: Callable,
 ## runtime starts the in-process listen server (ADR 0011) bound to a real socket transport and,
 ## on the NovaWorld channel, registered with the gate. `config` is the typed session
 ## request every host producer builds (ADR 0017): the mp.mnu host screen, the NovaWorld
-## panel, and the NW_LAN_HOST env hook. Returns the same codes as load_mission.
+## panel, and the --lan-host launch flag. Returns the same codes as load_mission.
 func load_as_host(config: HostSessionConfig) -> int:
 	if config == null:
 		_world.load_failed.emit("host start: no host configuration")
@@ -168,6 +168,8 @@ func load_as_joiner(target: JoinTarget) -> int:
 		_clear_pending_session()
 		return ERR_CANT_OPEN
 	_join_preload_sim = Simulation.new()
+	# `--capture-pcap <path>` (LaunchFlags) records this process's datagrams.
+	_join_preload_sim.set_capture_pcap_path(LaunchFlags.capture_pcap())
 	# Retail builds g_CharAttr from the boot-soft charattr.def before any
 	# network receive can deliver the 0x41 property clears or 0x39 challenge.
 	# A missing file deliberately leaves the inactive all-zero table.

@@ -15,10 +15,15 @@ hardening, and project health. Divergences from the original engine belong in
       RunId prefix (`.agents/retail-lan-parity.md`), gate each on the wire-ready witness
       + `diff_vs_golden.ps1`, and re-express the retired verifier's RO/OR/OO-vs-RR
       comparison (both directions, packet grouping, 0x0A/0x0C state) as a ctest or
-      PowerShell verifier. Upstream blocker still open in opennova-int: the single-role
-      `onhook_host_lan`/`onhook_join_lan` MCP tools pass role config via child env and
-      never render `onhook.cfg` (make `LaunchLanRole` render it like the
-      `onhook_run_lan_pair` half). Baseline: the 2026-08-05 suites captured 24/24 cells
+      PowerShell verifier. Upstream blockers still open in opennova-int (the runner stops the
+      `deploy_hold` RR/RO cells and the OR retail joiner with a named UPSTREAM BLOCKER
+      error until they land): the single-role `onhook_host_lan`/`onhook_join_lan` MCP
+      tools pass role config via child env and never render `onhook.cfg` (make
+      `LaunchLanRole` render it like the `onhook_run_lan_pair` half), and they must
+      return `pid`/`instance_id`/`run_id`/`capture_path` like `onhook_run_lan_pair`;
+      onhook-mcp advertises protocol version `2026-07-28`, which Claude Code rejects
+      (negotiate `2025-06-18`/`2025-03-26`); optionally an `onhook_exercise_input`
+      tool would retire `exercise_retail_input.ps1`. Baseline: the 2026-08-05 suites captured 24/24 cells
       cleanly, wire-ready + `diff_vs_golden` GREEN.
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
       every file under `engine/runtime/terrain` now carries an anchor, and the cpt/til/trn
@@ -39,7 +44,7 @@ hardening, and project health. Divergences from the original engine belong in
       `env_generation_changed`, the staggered per-model light restamp) invalidated
       the earlier ~1 ms reading. The F3 "Outside shell spans" row went with ADR 0039's
       hard cut; the metric survives as the `outside_shell` summary
-      `godot/tests/mission_rows_perf_probe.gd` reports, and that is where the next
+      the `perf_mission_rows` runtime probe reports, and that is where the next
       attribution round reads it (the #403 live sessions observed the remaining frame
       cost concentrated outside the model system after the park/submission gates)
 - [ ] Main-loop order grill: `docs/runtime-architecture.md` cites the exact main-loop /
@@ -91,7 +96,6 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, and Godot gates.
 - [ ] Full Linux core tests: add an Ubuntu leg for the complete native suite after triaging any platform-only failures. Acceptance: the full CTest suite runs on Linux for every PR without relying on the net-only or packaging jobs.
 - [ ] Incremental conventional linting: establish project-owned formatting settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
-- [ ] One ctest is `DISABLED TRUE` in `tests/CMakeLists.txt` with a reason recorded but no owner: `particle_smoke_all_fixtures` (waiting on the full 77-file corpus being mirrored into `fixtures/particle/`). Acceptance: it is either re-enabled or converted into an env-gated test alongside the rest of the asset-gated set (`docs/asset-gated-tests.md`).
 - [ ] Serve mode (PROD-1, ADR 0015): `opennova.exe --server` / `--headless
       --server` and a packaging boot-smoke leg — tracked future work, never
       implemented; specs live in `docs/maturity-program.md` §PROD.

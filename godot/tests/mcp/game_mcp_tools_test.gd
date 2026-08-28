@@ -135,15 +135,6 @@ class AdapterStub:
 		return OK
 
 
-class RuntimeServiceStub:
-	extends Node
-
-	var shutdown_requested := false
-
-	func request_endpoint_shutdown() -> void:
-		shutdown_requested = true
-
-
 var adapter: AdapterStub
 var tools: GameMcpTools
 var registry: McpToolRegistry
@@ -203,23 +194,6 @@ func test_game_control_routes_through_public_adapter_seam() -> void:
 	var result := await _call("game_control", {"action": "pause"})
 	assert_eq(adapter.last_action, "pause")
 	assert_eq(result.structured["shell"]["state"], "world")
-
-
-func test_internal_debug_shutdown_stops_endpoint_without_quitting_game() -> void:
-	var runtime_service: RuntimeServiceStub = add_child_autofree(
-			RuntimeServiceStub.new())
-	var runtime_tools := GameMcpTools.new(runtime_service, adapter)
-	var runtime_registry := McpToolRegistry.new()
-	runtime_tools.register_all(runtime_registry)
-
-	var result := await runtime_registry.call_tool("game_control", {
-		"action": GameMcpTools.INTERNAL_SHUTDOWN_ACTION,
-	}, ctx)
-
-	assert_true(runtime_service.shutdown_requested)
-	assert_eq(adapter.last_action, "",
-			"the reserved endpoint control never reaches MainGame quit")
-	assert_eq(result.structured["debug_endpoint"], "stopping")
 
 
 func test_debug_set_forwards_per_call_authority_confirmation() -> void:

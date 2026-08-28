@@ -9,10 +9,6 @@ namespace godot {
 
 namespace {
 
-// The env var that names the capture file. Unset (the default) means the pump
-// never opens a file and every record_ call returns on its first branch.
-constexpr const char *kCaptureEnvVar = "NW_CAPTURE_WRITE";
-
 // This end of every recorded datagram. The socket binds 0.0.0.0, so there is no
 // single local address to report; loopback keeps the synthesized IP header valid
 // and the PORTS — which is what partitions a session downstream — exact.
@@ -66,7 +62,8 @@ int UdpPump::bind_listen(int port) {
 		return static_cast<int>(err);
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
-	capture_ = opennova::net::PcapUdpWriter::from_env(kCaptureEnvVar);
+	capture_ = opennova::net::PcapUdpWriter::from_path(
+			std::string(capture_path_.utf8().get_data()));
 	if (capture_ != nullptr) {
 		print_verbose(String("UdpPump: recording host traffic (port ") +
 				itos(local_port_) + ")");
@@ -91,7 +88,8 @@ int UdpPump::dial(const String &host, int port) {
 	dest_ip_ = resolved_host;
 	dest_port_ = port;
 	socket_->set_dest_address(dest_ip_, port);
-	capture_ = opennova::net::PcapUdpWriter::from_env(kCaptureEnvVar);
+	capture_ = opennova::net::PcapUdpWriter::from_path(
+			std::string(capture_path_.utf8().get_data()));
 	if (capture_ != nullptr) {
 		print_verbose(String("UdpPump: recording joiner traffic to ") +
 				dest_ip_ + ":" + itos(dest_port_));
@@ -172,6 +170,8 @@ void UdpPump::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("close"), &UdpPump::close);
 	ClassDB::bind_method(D_METHOD("poll"), &UdpPump::poll);
 	ClassDB::bind_method(D_METHOD("is_capturing"), &UdpPump::is_capturing);
+	ClassDB::bind_method(D_METHOD("set_capture_path", "path"), &UdpPump::set_capture_path);
+	ClassDB::bind_method(D_METHOD("get_capture_path"), &UdpPump::get_capture_path);
 	ClassDB::bind_method(D_METHOD("inbound_count"), &UdpPump::inbound_count);
 	ClassDB::bind_method(D_METHOD("take_inbound"), &UdpPump::take_inbound);
 	ClassDB::bind_method(D_METHOD("send_to", "ip", "port", "bytes"), &UdpPump::send_to);

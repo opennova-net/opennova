@@ -1,19 +1,20 @@
 <#
 .SYNOPSIS
-Capture OpenNova render fixtures through the exact-pose probe, one id at a time.
+Capture OpenNova render fixtures through the render_fixture_capture probe.
 
 .DESCRIPTION
-Runs `godot/tests/render_fixture_capture_probe.tscn` once per fixture id and judges
-each run by the probe's 11-file output contract (5 variant PNGs + 5 state
-sidecars + 1 manifest) -- never by stdout, which PowerShell 5.1 garbles for
-the non-console Godot binary.
+Launches one windowed OpenNova instance with its opennova-game MCP endpoint
+(docs/mcp.md), then runs `game_probe render_fixture_capture` once per fixture
+id and judges each run by the probe's verdict (its 11-file output contract:
+5 variant PNGs + 5 state sidecars + 1 manifest is the probe's own check).
+-FreshProcess restarts the game per id instead of reusing one process.
 
-Must run in the FOREGROUND of an interactive desktop session: from a detached
-or background shell the probe takes its publication-transaction lock and
-aborts having written only owner.json, failing every fixture with no message.
+The probe refuses, before its publication transaction, when the window is
+missing or the wrong size: run from an interactive desktop session.
 
-Machine paths (mission corpus, retail install, Godot binary) are read from the
-environment or parameters -- never tracked defaults.
+Machine paths default to the documented roots (OPENNOVA_MISSION_CORPUS for the
+loose .bms corpus, OPENNOVA_JO_DIR for the retail install, GODOT_BIN for the
+binary) -- never tracked defaults.
 
 .EXAMPLE
 # Full sweep at the frozen commit
@@ -24,43 +25,47 @@ environment or parameters -- never tracked defaults.
 .\scripts\render\capture_opennova_fixtures.ps1 -SourceCommit $frozen `
   -Ids 00tra-tire-marks-retail,cp01-water-wide-retail
 #>
+[CmdletBinding()]
 param(
     # Fixture ids to capture; omitted = every fixture in the catalog.
     [string[]]$Ids = @(),
-    [string]$Catalog = "docs/render/render-fixtures-retail-v4.json",
+    [string]$Catalog = "docs/render/render-fixtures-retail-v5.json",
     # The frozen source commit the manifests bind. Defaults to HEAD, which is
     # only valid for evidence when the tree is clean and unrebuilt.
     [string]$SourceCommit = "",
     [string]$OutputRoot = "",
-    [string]$MissionResourceDir = $env:NOVA_MISSION_RESOURCE_DIR,
-    [string]$RuntimeResourceDir = $env:NOVA_RUNTIME_RESOURCE_DIR,
+    [string]$MissionResourceDir = "",
+    [string]$RuntimeResourceDir = "",
     [string]$Expansion = "revx02",
     [string]$CaptureMode = "hud_hidden",
-    [string]$GodotBin = $env:GODOT_BIN,
-    [ValidatePattern("^\d+x\d+$")][string]$Resolution = "2000x1200"
+    [string]$GodotBin = "",
+    [ValidatePattern("^\d+x\d+$")][string]$Resolution = "2000x1200",
+    [ValidateRange(1, 65535)][int]$McpPort = 8975,
+    [switch]$FreshProcess
 )
 
 $ErrorActionPreference = "Stop"
-$repo = (& git rev-parse --show-toplevel).Trim() -replace "/", "\"
+. (Join-Path $PSScriptRoot "..\net\lib.ps1")
+$repo = Get-RepoRoot
 Set-Location $repo
 
 if (-not $SourceCommit) { $SourceCommit = (& git rev-parse HEAD).Trim() }
 if ($SourceCommit -notmatch "^[0-9a-f]{40}$") {
     throw "SourceCommit must be a full lowercase 40-hex sha: $SourceCommit"
 }
+if (-not $MissionResourceDir) { $MissionResourceDir = Get-OpenNovaMissionCorpus }
 if (-not $MissionResourceDir -or -not (Test-Path $MissionResourceDir)) {
-    throw "MissionResourceDir (or NOVA_MISSION_RESOURCE_DIR) must name the loose .bms corpus"
+    throw "MissionResourceDir (or OPENNOVA_MISSION_CORPUS) must name the loose .bms corpus"
 }
+if (-not $RuntimeResourceDir) { $RuntimeResourceDir = Get-OpenNovaRetailInstall }
 if (-not $RuntimeResourceDir -or -not (Test-Path $RuntimeResourceDir)) {
-    throw "RuntimeResourceDir (or NOVA_RUNTIME_RESOURCE_DIR) must name the retail install"
+    throw "RuntimeResourceDir (or OPENNOVA_JO_DIR) must name the retail install"
 }
-if (-not $GodotBin) {
-    # Worktrees have no .godot-bin of their own; use the main checkout's.
-    $common = (& git rev-parse --path-format=absolute --git-common-dir).Trim()
-    $GodotBin = Join-Path (Split-Path $common -Parent) ".godot-bin\Godot_v4.6.1-stable_win64.exe"
-}
-if (-not (Test-Path $GodotBin)) { throw "Godot binary not found: $GodotBin" }
+if ($GodotBin) { $env:GODOT_BIN = $GodotBin }
+if (-not (Find-GodotBinary)) { throw "Godot 4.6.1 was not found; set GODOT_BIN or pass -GodotBin" }
 if (-not $OutputRoot) { $OutputRoot = Join-Path $repo ".scratch\golden\render\fixtures" }
+$MissionResourceDir = (Resolve-Path -LiteralPath $MissionResourceDir).Path
+$RuntimeResourceDir = (Resolve-Path -LiteralPath $RuntimeResourceDir).Path
 
 $catalogPath = Join-Path $repo $Catalog
 $catalogDoc = Get-Content $catalogPath -Raw | ConvertFrom-Json
@@ -72,36 +77,58 @@ foreach ($id in $Ids) {
 
 $dll = Join-Path $repo "godot\bin\libopennova.windows.template_debug.x86_64.dll"
 if (-not (Test-Path $dll)) { throw "GDExtension not built: $dll (run scripts/build_godot.sh)" }
+$catalogRes = "res://../" + ($Catalog -replace "\\", "/")
 
-$env:GODOT_BIN = $GodotBin
-$env:NOVA_EVIDENCE_SOURCE_COMMIT = $SourceCommit
-$env:NOVA_GDEXTENSION_BINARY = $dll
-$env:NOVA_RENDER_FIXTURE_CATALOG = "res://../" + ($Catalog -replace "\\", "/")
-$env:NOVA_RENDER_CAPTURE_MODE = $CaptureMode
-$env:NOVA_MISSION_RESOURCE_DIR = $MissionResourceDir
-$env:NOVA_RUNTIME_RESOURCE_DIR = $RuntimeResourceDir
-$env:NOVA_EXPANSION = $Expansion
+$script:Game = $null
+function Start-CaptureGame {
+    $script:Game = Start-OpenNovaProcess `
+        -GodotArguments @("--windowed", "--resolution", $Resolution) `
+        -GameArguments @("--resource-dir", $RuntimeResourceDir, "/exp", $Expansion) `
+        -McpPort $McpPort
+    Write-Output "GAME pid=$($script:Game.Id) mcp=$(Get-GameMcpUrl -Port $McpPort)"
+}
+function Stop-CaptureGame {
+    if (-not $script:Game) { return }
+    $null = Stop-GameViaMcp -Port $McpPort -Process $script:Game
+    Stop-OpenNovaProcess -Process $script:Game
+    $script:Game = $null
+}
 
 $failed = @()
-foreach ($id in $Ids) {
-    $outDir = Join-Path $OutputRoot $id
-    $env:NOVA_RENDER_FIXTURE_ID = $id
-    $env:NOVA_RENDER_FIXTURE_OUTPUT = $outDir
-    if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
-    $txn = "$outDir.publication-transaction"
-    if (Test-Path $txn) { Remove-Item -Recurse -Force $txn }
+try {
+    Start-CaptureGame
+    foreach ($id in $Ids) {
+        if ($FreshProcess -and -not $script:Game) { Start-CaptureGame }
+        $outDir = Join-Path $OutputRoot $id
+        if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
+        $txn = "$outDir.publication-transaction"
+        if (Test-Path $txn) { Remove-Item -Recurse -Force $txn }
 
-    & $GodotBin --path godot --resolution $Resolution `
-        res://tests/render_fixture_capture_probe.tscn 2>$null | Out-Null
+        $status = Invoke-GameProbe -Port $McpPort -Name "render_fixture_capture" -TimeoutSeconds 1800 -Arguments @{
+            id = $id
+            catalog = $catalogRes
+            mode = $CaptureMode
+            output_dir = $outDir
+            mission_resource_dir = $MissionResourceDir
+            source_commit = $SourceCommit
+            gdextension_binary = $dll
+        } -OnLine { param($line) Write-Verbose ("[{0}] {1}" -f $id, $line.text) }
 
-    $count = 0
-    if (Test-Path $outDir) { $count = (Get-ChildItem $outDir -File).Count }
-    if ($count -eq 11) {
-        Write-Output "PASS  $id"
-    } else {
-        $failed += $id
-        Write-Output "FAIL  $id (files=$count)"
+        $count = 0
+        if (Test-Path $outDir) { $count = (Get-ChildItem $outDir -File).Count }
+        $ok = ([string] $status.state -eq "passed") -and $status.verdict -and [bool] $status.verdict.ok
+        if ($ok -and $count -eq 11) {
+            Write-Output "PASS  $id"
+        } else {
+            $failed += $id
+            $why = if ($status.verdict) { [string] $status.verdict.summary } else { [string] $status.error }
+            Write-Output "FAIL  $id (state=$($status.state) files=$count) $why"
+        }
+        if ($FreshProcess) { Stop-CaptureGame }
     }
+}
+finally {
+    Stop-CaptureGame
 }
 
 Write-Output "=== SUMMARY ==="

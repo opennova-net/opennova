@@ -23,7 +23,7 @@ class World;
 namespace opennova::nw_server {
 
 // A loose headless mission treats its containing directory as the mounted
-// resource root. NW_RESOURCE_ROOT is passed as explicit_path when the mission
+// resource root. --resource-root is passed as explicit_path when the mission
 // was exported separately from the shared game/server script layers.
 std::filesystem::path resolve_resource_root(
 		const std::filesystem::path &mission_path,

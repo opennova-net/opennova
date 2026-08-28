@@ -122,6 +122,20 @@ func test_engine_delta_is_stateless() -> void:
 	assert_eq(hub.engine_delta(mark).size(), 1, "Delta does not consume; same answer twice.")
 
 
+func test_engine_log_path_follows_the_launch_log_file_flag() -> void:
+	var fallback := ProjectSettings.globalize_path("user://logs/godot.log")
+	assert_eq(McpLogHub.resolve_engine_log_path(PackedStringArray([]), fallback), fallback)
+	assert_eq(McpLogHub.resolve_engine_log_path(
+			PackedStringArray(["--path", "godot", "--log-file", "C:/runs/x/godot.log"]),
+			fallback), ProjectSettings.globalize_path("C:/runs/x/godot.log"))
+	assert_eq(McpLogHub.resolve_engine_log_path(
+			PackedStringArray(["--log-file=C:/runs/y/godot.log"]), fallback),
+			ProjectSettings.globalize_path("C:/runs/y/godot.log"))
+	assert_eq(McpLogHub.resolve_engine_log_path(
+			PackedStringArray(["--log-file"]), fallback), fallback,
+			"a trailing flag without a value keeps the project log")
+
+
 func test_unavailable_engine_log_degrades_explicitly() -> void:
 	hub.set_engine_log_path("")
 	assert_false(hub.engine_available())

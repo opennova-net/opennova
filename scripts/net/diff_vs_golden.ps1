@@ -23,15 +23,18 @@
 # Usage:
 #   pwsh -File scripts\net\diff_vs_golden.ps1 `
 #        -Ours    .scratch\retail-join-<stamp>.pcapng `
-#        -Golden  .scratch\golden\retail-gameplay-session.pcapng `
+#        [-Golden .scratch\golden\retail-gameplay-session.pcapng] `
 #        [-Items ~\Desktop\JOX\ITEMS.DEF] [-MinGolden 1]
 #
+# -Golden defaults to golden\retail-gameplay-session.pcapng under the captures
+# root (OPENNOVA_CAPTURES, else <repo>\.scratch); -Items to ITEMS.DEF under
+# OPENNOVA_JO_ASSETS when that tree is set.
 # Writes <Ours>.vs-golden.txt and prints the table + a PASS/FAIL summary line.
 # Exit 0 = no gaps/spurious/decode-failures; non-zero otherwise (CI-friendly).
 
 param(
     [Parameter(Mandatory = $true)] [string] $Ours,
-    [Parameter(Mandatory = $true)] [string] $Golden,
+    [string] $Golden = "",
     [string] $Items = "",
     # A golden tag with fewer than this many messages is treated as noise and
     # not reported as a GAP (rare one-off control tags shouldn't dominate the
@@ -81,6 +84,10 @@ function Find-Tool {
     return $null
 }
 
+if (-not $Golden) {
+    $Golden = Join-Path (Get-OpenNovaCapturesRoot) "golden\retail-gameplay-session.pcapng"
+}
+if (-not $Items) { $Items = Get-OpenNovaRetailAssetFile -Name "ITEMS.DEF" }
 foreach ($f in @($Ours, $Golden)) {
     if (-not (Test-Path $f)) { Write-Error "Capture not found: $f"; exit 1 }
 }

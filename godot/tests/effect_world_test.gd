@@ -97,7 +97,7 @@ func _make_renderable_effect_file() -> ParticleFile:
 	var graphics: Array = particle.graphics
 	var layer := graphics[0] as ParticleGraphicLayer
 	layer.present = true
-	layer.texture = "bink.tga"
+	layer.texture = "particle_dot.tga"
 	layer.alpha = 1.0
 	layer.scale_value = 1.0
 	particle.graphics = graphics

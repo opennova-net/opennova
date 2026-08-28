@@ -4373,10 +4373,11 @@ reaches InMatch, the host admits it, and the two-handle present resolves both wa
 the focused menu/GameWorld tests prove discovery handoff, retained-session mission loading, and
 visible bind failure. A final two-GUI smoke with installed retail assets remains a manual acceptance
 check for this delta, not an automated claim. The host listens on the requested retail-range port;
-the direct launch contract is `NW_LAN_HOST=<m.bms>` for the host and
-`NW_LAN_JOIN=<ip>:<port>` for the joiner. The joiner learns the mission from the retained game
-session's post-auth S2C `0x7B`, as retail does; `NW_LAN_MISSION` remains only an explicit
-compatibility/debug override for the older preloaded path.
+the direct launch contract is `--lan-host <m.bms>` for the host and
+`--lan-join <ip>[:<port>]` for the joiner (launch flags after `--`, docs/dev-env-vars.md). The
+joiner learns the mission from the retained game session's post-auth S2C `0x7B`, as retail
+does; the former `NW_LAN_MISSION` joiner-side override is gone with the env launch (D-NET-194:
+the wire owns the mission).
 Tracked client-fidelity items:
 1. **[CLOSED 2026-06-25 — stream the DYNAMIC set during load]** *(was: the joiner saw only the host player,
    not the NPCs.)* The host streams the networked/dynamic set during the joiner's world-load via
@@ -5262,7 +5263,7 @@ Godot's CCW cull) so mesh, skeleton, and Skin (`T(−abs pivot)` from identity r
 `LocalPlayerPresenter` maps rig→camera with yaw +90 plus the witnessed per-weapon biases (`pos`/256 in
 view axes; `rot` degrees added about the eye `[orig: Player_UpdateFirstPersonCamera @0x4dd444]`).
 Verified: reset/idle identity oracle in ctest (`anim_sample`) + on-asset probes
-(`godot/tests/fp_clean_probe.gd`, `vm_mesh_probe.gd`). **Still open:** the dedicated FP render pass
+(the retired `fp_clean`/`vm_mesh` probes; today `game_capture_bundle` `world_only` plus the `weapon_fsm` and `anim_skeletal_pose` ctests). **Still open:** the dedicated FP render pass
 (weapon `renderfov` @Def+0x148, near-Z 0.05 swap + viewport depth [0, 0.1] — D-RORD-4) which gives
 retail its close-up framing; def `rot` bias sign confirmation against retail footage *(hip-idle
 confirmed 2026-08-19 — the seventh pass below)*; the delta
@@ -5530,8 +5531,8 @@ movements:
    dispatch (ctest `weapon_fsm`: every tick of an idle reseed cycle steps except the one
    that drains the window, none for non-local owners or clipless actions). Both engines still park
    non-looping idles on the last key, so the catalog hold pose is unchanged.
-5. **The reload/left-hand tail, closed by the full-clip bone sweep.** `vm_bone_probe.gd` now
-   poses EVERY frame of every `anim_wpn_idle`/`anim_wpn_reload` variant on BOTH viewmodel
+5. **The reload/left-hand tail, closed by the full-clip bone sweep.** The `vm_bone_dump` probe
+   (`godot/probes/runtime/vm_bone_dump_probe.gd`) poses EVERY frame of every `anim_wpn_idle`/`anim_wpn_reload` variant on BOTH viewmodel
    parts (synchronously, so the presenter's per-tick pin never interleaves) and
    `fp_bone_oracle.py --sweep-log` diffs each frame against the retail builders: the M16 rig
    agrees to **0.0000 u on every bone of every frame** — 16-frame idles ×2 and the 99-frame
@@ -5596,7 +5597,7 @@ retail (up to ~110 px). Five findings, in the order they were settled:
    the model table with ABSOLUTE pivots (row `+36` is the file's `abs` vec3, file `+24` →
    memory `+36`; `T(−pivot)·W` then `pivot·W_parent + t_parent + T`) `[orig: @ 0x40c5ef..
    0x40c721]`, padding rows = bone 0 `[orig: @ 0x40c5a1]`. Against a live dump of the runtime
-   rig (`godot/tests/game/vm_bone_probe.gd`; M16 `gfx1` with the revx02 `M4_1ST` clip set) every
+   rig (the `vm_bone_dump` probe; M16 `gfx1` with the revx02 `M4_1ST` clip set) every
    pivot agrees to ≤ 0.6 mm at the idle hold under the model→render x-flip. The
    `anim_wpn_idle` clips `m4_1i` / `m4_1i2` are non-looping 16-frame holds (flags 0x0 / 0x2):
    both engines park on the last frame; mid-clip frames differ by up to 1.2 cm of gun travel,
@@ -8702,7 +8703,7 @@ re-queue loop.
 chain fixed the REVVY M4 still presented wrong live: ammo drained at the correct
 5-tick cadence but the gun kicked once and froze until release. The sim, the event
 batch, and the host drain all verified correct (headless FSM probe on the real dict;
-per-tick drain dump; the weapon_round_probe NOVA_WR_ANIMTRACE playhead trace) — the
+per-tick drain dump; the `weapon_round` probe's `animtrace` playhead trace) — the
 root cause was OUTSIDE the FSM: the `.bad` pose bake dropped every clip's final
 channel key (the header `frame_count` counts INTERVALS; channels carry
 `frame_count + 1` keys), and `m4_1f` — the M4 fire clip — is a ONE-frame clip whose
@@ -9022,7 +9023,7 @@ divergence, FIXED 2026-07-15]: the LOCAL fire leg fed `RoundSim` a `(90 − head
 mission-yaw bearing where the round bearing frame IS the engine heading frame
 (`RoundSim`'s `(cos, sin)` mission-axis mapping is wire-validated on the 0x06 yaw BAM —
 the same D-NET-153 flip, reintroduced on the local leg): every local shot flew mirrored
-across the NE diagonal, landing impact effects 90° off the aim ray (the `fp_impact_probe`
+across the NE diagonal, landing impact effects 90° off the aim ray (the `fp_impact` probe's
 pin: aiming due north put impacts 14.75 m due east; post-fix they sit on the ray).
 `dir_yaw = p->heading` directly now; the `simulation_test` fire case moved its
 target onto the true bearing and pins the drained impact position (the old east-side
@@ -12096,11 +12097,11 @@ ClientAuth order. When the named S2C 0x0C row identifies the joiner's own player
 `JoinerConnection::SelfSpawn` carries that row's `animSlot` and packed minimap id into the
 local L entity as well; the local self-spawn path no longer drops the character-registry
 identity after receiving it. Direct/headless clients retain the stock-table fallback
-`0x0200/0x8207`, class `8/8`, avatar `1/10`. BOTH host entry points — the `NW_LAN_HOST` dev
+`0x0200/0x8207`, class `8/8`, avatar `1/10`. BOTH host entry points — the `--lan-host` dev
 boot and the `mp.mnu` host config — seed the Co-op gametype **0x30020**, the value retail
 derives from a Co-op mission's `ATTRIB_COOP` header attrib (`AI_GetTaskTypeFromFlags
 @ 0x40DAE0` → `Game_StartMission @ 0x524360`; the D-NET-75 witness chain, and the only value
-that passes both off-wire sub-body gates). `NW_LAN_GAMETYPE` remains a diagnostic override;
+that passes both off-wire sub-body gates). `--lan-gametype` remains a diagnostic override;
 0x10010 was the ASH_I5A capture's value, not what this build seeds. DEFERRED (tracked here): the
 host-side character-table validity check and invalid-id fallback (`Server_BuildPlayerInfoAndAdd
 @0x51D560` probes each uploaded CI field with `MinimapSlot_HasEntity @0x57B140` and re-packs the

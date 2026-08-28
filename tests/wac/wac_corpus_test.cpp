@@ -1,7 +1,7 @@
 // WAC corpus test: lex + parse + compile EVERY shipped .wac file with zero
-// crashes. Directories come from argv (or a built-in default list of the dev
-// corpus). Missing directories are skipped, so CI without the copyrighted assets
-// still passes.
+// crashes. Directories come from argv, else the documented retail gates;
+// without either the test reports Skipped (docs/asset-gated-tests.md).
+#include <algorithm>
 #include <cstdlib>
 #include <cstdio>
 #include <filesystem>
@@ -12,6 +12,7 @@
 
 #include <formats/wac/bytecode.h>
 #include <runtime/wac/compiler.h>
+#include "common/retail_paths.h"
 
 namespace fs = std::filesystem;
 using namespace opennova::wac;
@@ -33,25 +34,17 @@ int main(int argc, char **argv) {
     std::vector<std::string> dirs;
     for (int i = 1; i < argc; ++i) dirs.push_back(argv[i]);
     if (dirs.empty()) {
-        // Machine corpus roots come from the documented env gates
-        // (docs/asset-gated-tests.md), never tracked paths; absent vars
-        // skip-as-pass like every asset-gated sweep.
-        if (const char *jox = std::getenv("OPENNOVA_JO_ASSETS"))
-            dirs.push_back(jox);
-        if (const char *extra = std::getenv("OPENNOVA_WAC_CORPUS_DIRS")) {
-            std::string list(extra);
-            size_t start = 0;
-            while (start <= list.size()) {
-                const size_t sep = list.find(';', start);
-                const std::string dir = list.substr(start,
-                        sep == std::string::npos ? std::string::npos
-                                                 : sep - start);
-                if (!dir.empty()) dirs.push_back(dir);
-                if (sep == std::string::npos) break;
-                start = sep + 1;
-            }
-        }
+        // Machine corpus roots come from the documented gates
+        // (docs/asset-gated-tests.md): the extracted asset tree and the
+        // mission corpus both carry shipped .wac scripts.
+        if (const std::string assets = retail::assets(); !assets.empty())
+            dirs.push_back(assets);
+        if (const std::string corpus = retail::mission_corpus();
+            !corpus.empty() && std::find(dirs.begin(), dirs.end(), corpus) == dirs.end())
+            dirs.push_back(corpus);
     }
+    if (dirs.empty())
+        return retail::skip("OPENNOVA_JO_ASSETS or OPENNOVA_MISSION_CORPUS (directories of retail .wac scripts)");
 
     int files = 0;
     int hard_errors = 0;

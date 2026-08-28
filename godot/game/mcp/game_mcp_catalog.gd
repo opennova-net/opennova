@@ -4,6 +4,10 @@ extends RefCounted
 ## Stable tool definitions for the game-side runtime handlers.
 
 const SCREENSHOT_TIMEOUT_MS := 60_000
+## game_probe op=status may long-poll up to PROBE_STATUS_WAIT_MAX_MS; its
+## budget stays clear of that.
+const PROBE_STATUS_WAIT_MAX_MS := 30_000
+const PROBE_TIMEOUT_MS := 45_000
 
 ## The one list of public game_control actions. The game_control schema enum,
 ## Handler registration and the GameDebugAdapter contract test both read this
@@ -76,7 +80,12 @@ static func definitions() -> Array[McpToolDef]:
 			+ "runtime_transport {action}; set_mission_variable {index,value}."
 			+ " Audio actions: set_audio_bus_volume {bus,volume_db}; "
 			+ "set_audio_bus_mute {bus,muted}; set_audio_bus_solo {bus,soloed}; "
-			+ "set_audio_bus_bypass {bus,bypassed}.",
+			+ "set_audio_bus_bypass {bus,bypassed}."
+			+ " Automation actions: deploy_pick {zone} (0 = Default Spawn); "
+			+ "set_viewmodel_weapon {weapon}; clear_viewmodel_weapon; "
+			+ "kill_group {group}; crew_vehicle {occupant_ssn,vehicle_ssn}; "
+			+ "crew_local_player {vehicle_ssn}; local_player_look {dx_px,dy_px}; "
+			+ "plus the net_joiner_diagnostics check.",
 			{
 				"op": {
 					"type": "string",
@@ -157,15 +166,45 @@ static func definitions() -> Array[McpToolDef]:
 				"quality": {"type": "number", "minimum": 0.1, "maximum": 1.0, "default": 0.8},
 			}, [], true, SCREENSHOT_TIMEOUT_MS),
 		McpToolDef.make("game_logs",
-			"Read runtime MCP and engine log entries from the launched game.",
+			"Read runtime MCP, probe and engine log entries from the launched game.",
 			{
 				"cursor": {"type": "integer", "minimum": 0},
 				"limit": {"type": "integer", "minimum": 1, "maximum": 2000, "default": 200},
 				"sources": {
 					"type": "array",
-					"items": {"type": "string", "enum": ["server", "script", "engine"]},
+					"items": {"type": "string", "enum": ["server", "script", "engine", "probe"]},
 				},
 			}, [], false),
+		McpToolDef.make("game_probe",
+			"Run the registered runtime probes (docs/mcp.md). op=list returns the catalog "
+			+ "with each probe's input_schema, preconditions and availability; op=run starts "
+			+ "one (args validated against its schema; one probe at a time; refused while a "
+			+ "serial tool call is in flight) and returns its run_id; op=status reads a run's "
+			+ "state, the log lines after cursor (long-polling up to wait_ms while it runs), "
+			+ "progress, verdict and artifacts; op=cancel asks the running probe to stop. "
+			+ "run_id defaults to the active or most recent run.",
+			{
+				"op": {"type": "string", "enum": ["list", "run", "status", "cancel"]},
+				"name": {"type": "string", "description": "The probe to run (op=run)."},
+				"args": {
+					"type": "object",
+					"description": "The probe's typed arguments (op=run), per its input_schema.",
+				},
+				"run_id": {"type": "string"},
+				"cursor": {
+					"type": "integer",
+					"minimum": 0,
+					"default": 0,
+					"description": "Return log lines with seq greater than this (op=status).",
+				},
+				"wait_ms": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": PROBE_STATUS_WAIT_MAX_MS,
+					"default": 0,
+					"description": "How long op=status may wait for new lines or the end of the run.",
+				},
+			}, ["op"], false, PROBE_TIMEOUT_MS),
 	]
 
 

@@ -9,8 +9,9 @@ ONED Strings workspace was removed by ADR 0037.
 
 Ground truth: all 98 RTXT-magic `.bin` files in the retail install
 (language.pff) sweep clean through the invariants and byte-roundtrip below
-(`tests/rtxt/jo_install_sweep_test.cpp`, gated on `OPENNOVA_JO_DIR`). Seven of
-them are committed under `fixtures/rtxt/` and pinned by
+(`tests/rtxt/jo_install_sweep_test.cpp`, gated on `OPENNOVA_JO_DIR`). Four of
+them (gametext, menutxt, and the mission bins ash_g3d and 00tra, whose string
+ids the GUT menu tests pin) are committed under `fixtures/rtxt/` and pinned by
 `tests/rtxt/real_parity_test.cpp`.
 
 ## On-disk format
