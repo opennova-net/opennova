@@ -127,8 +127,8 @@ live in this doc's git history; the outcome per phase:
 - **B7 — forms unification**: `object/ui/object_ui_helpers.gd` →
   `framework/inspector_forms.gd` (`InspectorForms`); `WorkflowInspector`
   de-coupled from object; terrain's inspector fork retired. Row builders
-  stay per-domain — the UiBox decision, recorded in
-  `godot/game/ui/ui_box.gd`.
+  stay per-domain — the UiBox decision (the helper itself went with the
+  2026-08-28 hygiene round once the ONED cut left it without a caller).
 - **B8 — SearchField**: `framework/search_field.gd`, adopted at the six
   bespoke search-bar sites (`search_field_test.gd`).
 - **B9 — shell services**: protected `EditorWorkspace` helpers

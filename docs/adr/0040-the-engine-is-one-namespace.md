@@ -80,8 +80,9 @@ carrying the uniqueness load; nothing enforced it.
 6. **The engine's portability has an honest consumer list.** ADR 0034 §2
    named an importer FFI and DCC plugins; those left with ADR 0037/0038 (no
    `oned_edit`, no shared-library export, no ctypes/pybind11). What consumes
-   `engine/` without Godot today: the five `apps/` (the NovaWorld service,
+   `engine/` without Godot today: the six `apps/` (the NovaWorld service,
    the in-match dev host, the LAN probe, the packet pretty-printer, the
+   mounted-install entry extractor `opennova-extract` added by ADR 0041, the
    shared socket helpers), the ctest suite, the C-linkage headers, and any
    future non-Godot front-end. `engine/` stays Godot-free for them — now as
    a ratcheted property (decision 4), not a re-verified one.

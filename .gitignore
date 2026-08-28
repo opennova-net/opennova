@@ -14,6 +14,13 @@
 .codex/
 .worktrees/
 
+# Debris of the ADR 0038 Python pipeline cut on machines that ran it (the
+# PyInstaller spec, the egg-info, the loose ModSuperOed .fx set); nothing
+# tracked produces or reads them.
+onimport.spec
+opennova_tools.egg-info/
+third_party/modsuperoed/
+
 # Build artifacts
 build/
 *.o

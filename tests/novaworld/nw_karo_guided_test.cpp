@@ -2,8 +2,8 @@
 // leg D-NET-64 deferred as "no capture in hand carries rocket/missile state".
 // The reference wire is a local retail Karo Highlands capture (Stinger duels;
 // the fork's measured wire: 709 S2C 0x44 records, 100% stng, 4 shooters).
-// Asset-gated (docs/asset-gated-tests.md): set NW_KARO_GUIDED_PCAP to the
-// local pcap; absent, this SKIPS AS PASS and CI stays green.
+// Asset-gated (docs/asset-gated-tests.md) on <OPENNOVA_CAPTURES>/karo-guided.pcapng;
+// absent, it reports Skipped (exit 77) and CI stays green.
 //
 // [orig: NapiNPClientMsg_0x044 @0x422710 -> Entity_SerializeGuidedMissileState
 //  @0x447C50; sub-header [u16 shooter][i16 netId][u8 group]]

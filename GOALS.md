@@ -78,6 +78,6 @@ and foliage systems, and simulates missions (WAC scripts, BMS events, AI);
 the gameplay systems (weapons, projectile physics and damage, throwables,
 mounted and emplaced weapons, vehicles, item destruction, optics and the HUD)
 are ported with test coverage, and multiplayer runs on the wire-compatible
-in-match protocol ("NovaWorld and multiplayer" above). Nothing here is
-production-ready. See the [README](README.md) for current capabilities, downloads,
+in-match protocol ("NovaWorld and multiplayer" above). Every system here is
+experimental. See the [README](README.md) for current capabilities, downloads,
 and build steps.

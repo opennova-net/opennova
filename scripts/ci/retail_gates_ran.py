@@ -35,8 +35,8 @@ MUST_RUN = {
     "jo_dir": [
         "rtxt_jo_install_sweep", "env_jo_install", "bink_retail", "sbf_jo_install_sweep",
         "mission_ai_path_conformance", "truck_dismount", "ai_threat", "ladder_00tra",
-        "ai_muzzle_pose", "vehicle_ride_00tra", "defense_00trg", "lose_flow_04tr",
-        "particle_gore_set_catalog",
+        "truck_rest_00tra", "ai_muzzle_pose", "vehicle_ride_00tra", "defense_00trg",
+        "lose_flow_04tr", "particle_gore_set_catalog",
     ],
     "jo_assets": [
         "root_motion", "anim_positions_from_model_corpus", "anim_reload_clips_us01",
@@ -52,7 +52,7 @@ MUST_RUN = {
 MIXED = {
     "jo_dir": [
         "terrain_tile_composer", "ground_conform", "minimap_overlay", "score_roundtrip",
-        "playersav_weapon_sav", "npruntime_weapon_table", "npruntime_authored_payload_00trg",
+        "playersav_weapon_sav", "npruntime_weapon_table",
     ],
     "jo_assets": [
         "occlusion_armry", "threedi_panm_ctrl", "particle_smoke_all_fixtures", "sound_profile",
@@ -67,6 +67,9 @@ KNOWN_ABSENT = {
     "mission_script_report": "05TRcoop.bms is on no known retail mount or corpus",
     "bunker_walkin": "05TRcoop.bms is on no known retail mount or corpus",
     "minimal_pff_package": "argv-only tool modes (--write-pff / --install)",
+    "netsim_client_replica_pipeline_capture_parent_follow":
+        "needs <OPENNOVA_CAPTURES>/golden/retail-vehicle-session.pcapng beside items.def; "
+        "captures never ride CI",
 }
 
 

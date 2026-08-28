@@ -40,6 +40,8 @@ appear in tracked docs:
 | `TrnGen.exe` | NovaLogic's terrain build tool (heightmap → `.trn`/`.tml`/`.tms`) | historical bake research retained in [terrain-re.md](terrain/terrain-re.md); the editor-love hard cut removed OpenNova's legacy terrain builder |
 | `ParticleEdit_v1_1.exe` | NovaLogic's `.ptl` particle editor | `.ptl` semantics: [ptl-format-re.md](particles/ptl-format-re.md) (`engine/formats/particle`) |
 | `Dflw.exe` | the Delta Force: Land Warrior executable | LW-era `.3di` loaders: [3di-lw-format-re.md](threedi/3di-lw-format-re.md) |
+| `misldr.dll` | the JO mission loader DLL | the `.mis` editor-side format: [mis-format-re.md](mission/mis-format-re.md) |
+| `binkw32.dll` | the Bink video decoder the game ships | the intro/menu video decode law: [menu-re.md](mnu/menu-re.md) |
 
 Addresses cited from `TrnGen.exe`, `ParticleEdit_v1_1.exe`, and `Dflw.exe` are
 labeled at their citation sites; an unlabeled address is retail `Jointops.exe`.
@@ -216,8 +218,8 @@ Order of operations when you need an engine truth:
      (98/98 retail bins), `tests/terrain/cdep_roundtrip_test.cpp` and
      `tests/terrain/trn_config_roundtrip_test.cpp`, the `.bad`/3DI
      roundtrips under `tests/<domain>/`.
-   - Retail-install sweeps and corpus tests, gated on env vars (`OPENNOVA_JO_DIR`,
-     `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_JO_ASSETS` — see docs/asset-gated-tests.md).
+   - Retail-install sweeps and corpus tests, gated on the four documented roots (`OPENNOVA_JO_DIR`,
+     `OPENNOVA_JO_ASSETS`, `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_CAPTURES` — see docs/asset-gated-tests.md).
 5. **Runtime introspection:**
    - The dev tools (F3 in the standalone game, ADR 0039): engine-owned Dear ImGui
      windows under `engine/runtime/devtools/` — the Stats window over the

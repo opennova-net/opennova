@@ -76,6 +76,6 @@ stable across the ONED hard cut.
 
 ONED treats the selected directory as an external, source-controlled game-data
 tree. Asset creation belongs to format-specific tools and external DCC
-applications such as Blender. Nova formats continue to use their direct
+applications such as Blender. NovaLogic formats continue to use their direct
 `load_from_path`/`save_to_path` interfaces; ONED does not integrate them with
 Godot's resource import system or create sidecar metadata.

@@ -306,9 +306,11 @@ matrix-construction code. Per bone `i` in 0..14 (sub-object array at `model+164`
 ### 2.8 Importer integration recipe
 
 Compute each bone's WORLD matrix per §2.5, convert world → pose-local
-(`parent.world⁻¹ · bone.world`), and feed the existing two-pass world→rest-local path
-(`scene_builder/animation.py` `_build_action_from_bad`, which already does this for BAD). Reuse
-`build_armature_from_parts` - the synthetic BN## bones already match the sub-object order.
+(`parent.world⁻¹ · bone.world`), and feed a two-pass world→rest-local path. The retired
+Blender importer (`scene_builder/animation.py` `_build_action_from_bad`, removed with ADR
+0038) did exactly this for BAD and built the armature from the parts
+(`build_armature_from_parts`), the synthetic BN## bones matching the sub-object order; a
+future importer on the native runtime's GLB seam must do the same.
 Float math is fine; only axis order, angle unit, and absolute-vs-local rotation must match
 (all pinned above). SAF `part_id` values map to the same sub-object indices used by vertex `w`.
 

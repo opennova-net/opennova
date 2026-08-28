@@ -49,7 +49,7 @@ Our own runtime client against both targets (OpenNova server / original NovaWorl
   to end with a headless driver against the local server: the server logged `NWLogin → auth ok`,
   `NWJoin (second call) rid=1`, and `[nwudp] refusing PN='JointOperations'`, and
   `GET /api/unknowns` shows the `pn:JointOperations` sighting with the full ClientHello. Plan +
-  detail in [`phase3-host-wiring.md`] and the `we-need-to-get-gentle-owl` plan. **Provisional:**
+  detail in [`phase3-host-wiring.md`](phase3-host-wiring.md) and the `we-need-to-get-gentle-owl` plan. **Provisional:**
   the JointOperations PG GUID/PV1 are placeholders ("JO-PROVIS-PG") pending the
   `StartPlaying @ 0x4d45e0` grill — sufficient to cross the boundary locally (our server rejects
   on PN alone), needed only for a real retail host.

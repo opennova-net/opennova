@@ -53,7 +53,8 @@ files-on-disk IPC.
    (`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`, `OPENNOVA_MISSION_CORPUS`,
    `OPENNOVA_CAPTURES`), read only by the three resolvers
    (`tests/common/retail_paths.h`, `godot/tests/support/retail_data.gd`,
-   `scripts/net/lib.ps1`), plus `GODOT_BIN` for the scripts and the deployed
+   `scripts/net/lib.ps1`) and the `--resource-dir` default of
+   `scripts/mcp/game_mcp.py launch`, plus `GODOT_BIN` for the scripts and the deployed
    service's `ONNET_*` family; `scripts/lint/env_lint.py` keeps it so.
 4. **`godot/probes/` is source-only.** Both export presets exclude `probes/*`
    and `tests/*`; a shipped build lists every probe as `available: false`.
