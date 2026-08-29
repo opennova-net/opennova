@@ -600,8 +600,9 @@ add_executable(minimal_cbin_gen_test fixtures/minimal_cbin_gen.cpp)
 target_include_directories(minimal_cbin_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_cbin_gen COMMAND minimal_cbin_gen_test)
 
-# fixtures/env/cloud01.pcx + cloud01b.pcx: the sky maps full_00.env names,
-# minted by encode_pcx_indexed from integer data.
+# fixtures/env/synth_full.env + the sky maps it names (cloud01.pcx, cloud01b.pcx):
+# the synthetic environment via save_env and the PCX pair
+# minted by encode_pcx_indexed, all from integer data.
 add_executable(minimal_env_gen_test fixtures/minimal_env_gen.cpp)
 target_link_libraries(minimal_env_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_env_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

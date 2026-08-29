@@ -26,7 +26,6 @@
     "fixtures/def/weapon.def",
     "fixtures/def/ammo.def",
     "fixtures/def/hudpos.def",
-    "fixtures/env/full_00.env",
     "fixtures/mns/menu_style.mns",
     "fixtures/mnu/jo_*.mnu",
     "fixtures/mus/*",

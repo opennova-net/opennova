@@ -2,7 +2,7 @@ extends GutTest
 
 # The env is not bundled with the project; it loads from an external directory
 # (the resource dir at runtime). The test fixture lives in repo-root fixtures/.
-const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
+const FULL_00_ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 
 
 func _load_full_00() -> EnvFile:
@@ -15,18 +15,18 @@ func _load_full_00() -> EnvFile:
 func test_full_00_env_loads_and_parses() -> void:
 	var env := _load_full_00()
 
-	assert_not_null(env, "FULL_00 should load as the shared EnvFile resource.")
+	assert_not_null(env, "the synthetic env should load as the shared EnvFile resource.")
 	if env == null:
 		return
 	assert_true(env.is_loaded(), "Loaded EnvFile should report a valid document.")
-	assert_eq(env.get_env_name(), "Full_00", "Stock enviro_name should round-trip into EnvFile.")
+	assert_eq(env.get_env_name(), "Synth_Full", "The authored enviro_name should round-trip into EnvFile.")
 	assert_eq(env.get_timeofday(), "Day", "Stock timeofday should be parsed.")
 	assert_eq(env.get_curtime(), 1200, "Stock curtime should be parsed.")
 	assert_eq(env.get_fog_level(), 1000.0, "Stock fog level should be parsed.")
 	assert_eq(env.get_fog_type(), 2, "Stock fog type should be parsed.")
 	assert_false(env.has_water_height(), "Stock fixture should not claim an authored water height.")
 	assert_eq(env.get_advanced_clouds(), 1, "Stock advanced cloud mode should be parsed.")
-	assert_eq(env.get_tod_keyframes().size(), 10, "FULL_00 should expose all TOD keyframes.")
+	assert_eq(env.get_tod_keyframes().size(), 10, "the synthetic env should expose all TOD keyframes.")
 	assert_not_null(env.get_sky_map1_tex(), "Sky map 1 should resolve through the shared texture resolver.")
 	assert_not_null(env.get_sky_map2_tex(), "Sky map 2 should resolve through the shared texture resolver.")
 

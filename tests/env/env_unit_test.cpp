@@ -23,9 +23,9 @@ bool near(float actual, float expected, float epsilon = 0.0001f) {
 
 std::string fixture_path() {
 #ifdef OPENNOVA_SOURCE_DIR
-	return std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/env/full_00.env";
+	return std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/env/synth_full.env";
 #else
-	return "fixtures/env/full_00.env";
+	return "fixtures/env/synth_full.env";
 #endif
 }
 
@@ -73,23 +73,23 @@ int main() {
 		return 1;
 	}
 
-	if (!expect(loaded.name == "Full_00", "env name should parse")) return 1;
+	if (!expect(loaded.name == "Synth_Full", "env name should parse")) return 1;
 	if (!expect(loaded.timeofday == "Day", "timeofday should parse")) return 1;
 	if (!expect(loaded.curtime == 1200, "curtime should parse")) return 1;
 	if (!expect(near(loaded.fog_level, 1000.0f), "fog_level should parse")) return 1;
 	if (!expect(loaded.fog_type == 2, "fog_type should parse")) return 1;
-	if (!expect(!loaded.water_height_set, "full_00 does not author water_height")) return 1;
+	if (!expect(!loaded.water_height_set, "synth_full does not author water_height")) return 1;
 	if (!expect(loaded.sky_map1 == "Cloud01.pcx", "sky_map1 should parse")) return 1;
 	if (!expect(loaded.sky_map2 == "Cloud01b.pcx", "sky_map2 should parse")) return 1;
 	if (!expect(loaded.star_3di.empty(), "blank star_3di should parse as empty")) return 1;
-	if (!expect(loaded.keyframes.size() == 10, "full_00 should have 10 TOD keyframes")) return 1;
+	if (!expect(loaded.keyframes.size() == 10, "synth_full should have 10 TOD keyframes")) return 1;
 	if (!expect(loaded.keyframes.front().time == 200, "first TOD keyframe should be 0200")) return 1;
 	if (!expect(loaded.keyframes.back().time == 2359, "last TOD keyframe should be 2359")) return 1;
 	if (!expect(near(loaded.vertex_rgb.r, 128.0f / 255.0f), "vertex_rgb should parse")) return 1;
 
 	const opennova::env::TodState noon = opennova::env::interpolate_tod(loaded.keyframes, 1200.0f, loaded.envscale);
 	if (!expect(near(noon.sun.r, 170.0f / 255.0f), "TOD exact noon sun should match keyframe")) return 1;
-	if (!expect(near(noon.fog.b, 138.0f / 255.0f), "TOD exact noon fog should match keyframe")) return 1;
+	if (!expect(near(noon.fog.b, 140.0f / 255.0f), "TOD exact noon fog should match keyframe")) return 1;
 
 	// Integer channel lerp rounds half up: 1300 sits exactly between 1200 and
 	// 1400 in HOURS space; sun.r 170 -> 165 lands on 168 (not 167.5).
