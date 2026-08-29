@@ -84,7 +84,7 @@ func brief(top_n := 4) -> String:
 	for s in _spans:
 		if int(s["depth"]) == 0 and int(s["end_us"]) > 0:
 			tops.append(s)
-	tops.sort_custom(func(a, b):
+	tops.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["end_us"]) - int(a["start_us"]) > int(b["end_us"]) - int(b["start_us"]))
 	var parts := PackedStringArray()
 	for i in range(mini(top_n, tops.size())):

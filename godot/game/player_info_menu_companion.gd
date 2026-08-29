@@ -77,7 +77,7 @@ var _combo_handlers: Dictionary = {}
 # The icon TextureRects mounted as frame children ("PRIMARY"/... -> TextureRect);
 # freed and rebuilt on each on_menu_built.
 var _icon_mounts: Dictionary = {}
-var _character_state = PlayerCharacterSelectionStateScript.new()
+var _character_state := PlayerCharacterSelectionStateScript.new()
 signal avatar_chosen(profile: Dictionary)
 
 
@@ -907,13 +907,13 @@ func _set_team(team: int) -> void:
 
 # --- ACCEPT seam (Phase 5) ----------------------------------------------------
 
-func _current_character_selection():
+func _current_character_selection() -> PlayerCharacterSelectionState.Selection:
 	return _character_state.make_selection(_team, _sel_nat, _sel_div,
 			_selected_combo_index(), _selected_player_class())
 
 
 func _remember_current_character_selection() -> void:
-	var current = _current_character_selection()
+	var current := _current_character_selection()
 	if current != null:
 		_character_state.remember(current)
 

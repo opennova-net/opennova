@@ -156,7 +156,7 @@ func _part_local_position(model_position: Vector3, subobject: int) -> Vector3:
 	return (rest as Transform3D).affine_inverse() * model_position
 
 
-func _rest_part_transform(subobject: int):
+func _rest_part_transform(subobject: int) -> Variant:
 	var lod := 0
 	if _source_model != null:
 		lod = _source_model.get_active_lod()

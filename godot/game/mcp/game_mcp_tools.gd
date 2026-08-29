@@ -8,20 +8,39 @@ extends RefCounted
 ## How long game_control quit waits for a running probe to settle first.
 const QUIT_PROBE_CANCEL_MS := 2000
 
-var service: Node
+var service: GameMcpService
 var adapter: GameMcpAdapter
 
 
-func _init(game_service: Node, game_adapter: GameMcpAdapter) -> void:
+func _init(game_service: GameMcpService, game_adapter: GameMcpAdapter) -> void:
 	service = game_service
 	adapter = game_adapter
 
 
+## The catalog name -> handler table. Method references, so a handler that
+## goes missing fails at parse time rather than silently dropping its tool.
+func _handlers() -> Dictionary:
+	return {
+		"game_state": _tool_game_state,
+		"game_entities": _tool_game_entities,
+		"game_render_diagnostics": _tool_game_render_diagnostics,
+		"game_capture_bundle": _tool_game_capture_bundle,
+		"game_control": _tool_game_control,
+		"game_debug": _tool_game_debug,
+		"game_menu": _tool_game_menu,
+		"game_screenshot": _tool_game_screenshot,
+		"game_logs": _tool_game_logs,
+		"game_probe": _tool_game_probe,
+	}
+
+
 func register_all(registry: McpToolRegistry) -> void:
+	var handlers := _handlers()
 	for def in GameMcpCatalog.definitions():
-		var handler := Callable(self, "_tool_%s" % def.name)
-		if handler.is_valid():
-			registry.register(def, handler)
+		if not handlers.has(def.name):
+			push_error("GameMcpTools has no handler for cataloged tool '%s'." % def.name)
+			continue
+		registry.register(def, handlers[def.name])
 
 
 func _tool_game_state(_args: Dictionary, _ctx: McpToolContext) -> Variant:
@@ -257,7 +276,7 @@ func _tool_game_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 
 
 func _tool_game_logs(args: Dictionary, ctx: McpToolContext) -> Variant:
-	if service == null or service.get("log_hub") == null:
+	if service == null or service.log_hub == null:
 		return McpToolResult.error("Runtime logs are unavailable.")
 	var hub: McpLogHub = service.log_hub
 	hub.ingest_engine()
@@ -326,9 +345,7 @@ func _tool_game_probe(args: Dictionary, _ctx: McpToolContext) -> Variant:
 
 
 func _probe_runner() -> ProbeRunner:
-	if service == null:
-		return null
-	return service.get("probe_runner") as ProbeRunner
+	return service.probe_runner if service != null else null
 
 
 static func _debug_error(id: StringName, err: Error) -> String:

@@ -268,8 +268,7 @@ func setup(mission: MissionData, container: Node,
 		_wire_present.setup(_sim, options.placer, container,
 				wire_defer_index)
 		_wire_present.set_synthetic_origin_only(sp_attachment_present)
-		simulation_restarted.connect(
-				Callable(_wire_present, 'reset_runtime_state'))
+		simulation_restarted.connect(_wire_present.reset_runtime_state)
 	# The viewing client's fire-presentation pass: AI/remote fire sound + muzzle
 	# effect + tracer streaks off the sim's fired/tracer drains. A joiner re-runs
 	# decoded S2C tag-2 rounds through the same visual RoundSim, so it must drain
@@ -311,8 +310,7 @@ func setup(mission: MissionData, container: Node,
 			options.fire_fx,
 			_wire_present,
 			options.death_light)
-		simulation_restarted.connect(
-				Callable(_destruction_present, 'reset_runtime_state'))
+		simulation_restarted.connect(_destruction_present.reset_runtime_state)
 	# The throwable-presentation pass: item models for flying grenades/satchels
 	# and placed devices, reconciled from the sim's visual snapshot. Joiners need
 	# the flying-round half because decoded S2C tag-2 descriptors run the visual
@@ -323,8 +321,7 @@ func setup(mission: MissionData, container: Node,
 	_throwable_present.setup(_sim, container, options.placer,
 		options.item_db,
 		options.fire_fx, options.effect_anchors)
-	simulation_restarted.connect(
-		Callable(_throwable_present, 'reset_runtime_state'))
+	simulation_restarted.connect(_throwable_present.reset_runtime_state)
 	# The impact-scar presentation pass (world-wac-ai-re §24.9): the sim's scar
 	# rings as textured quads — the shared ring as one world mesh, each entity
 	# ring under its carrier's struck section. Every viewing peer runs it: retail
@@ -337,8 +334,7 @@ func setup(mission: MissionData, container: Node,
 		options.resource_root,
 		options.fire_listener,
 		options.environment_node)
-	simulation_restarted.connect(
-		Callable(_scar_present, 'reset_runtime_state'))
+	simulation_restarted.connect(_scar_present.reset_runtime_state)
 	# ADR 0035: the native session owns lifecycle/cadence and invokes one
 	# synchronous per-tick presentation sink. The camera remains a Godot device;
 	# a dedicated host has none.
@@ -867,7 +863,8 @@ func stop() -> void:
 
 func _capture_transforms() -> void:
 	_orig_transforms.clear()
-	_for_each_present_node(func(node): _orig_transforms[node] = node.transform)
+	_for_each_present_node(func(node: ObjectModel) -> void:
+		_orig_transforms[node] = node.transform)
 
 
 func _restore_transforms() -> void:
@@ -889,7 +886,7 @@ func _for_each_present_node(fn: Callable) -> void:
 	var count: int = snap.size() / stride
 	for i in range(count):
 		var base := i * stride
-		var node = _index.resolve(
+		var node: ObjectModel = _index.resolve(
 			int(snap[base + Simulation.PF_BMS_ID]),
 			int(snap[base + Simulation.PF_KIND]),
 			int(snap[base + Simulation.PF_INDEX]))
@@ -914,25 +911,25 @@ func _exit_tree() -> void:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container
 		_fire_present = null
 	if _wire_present != null:
-		var reset_wire := Callable(_wire_present, 'reset_runtime_state')
+		var reset_wire := _wire_present.reset_runtime_state
 		if simulation_restarted.is_connected(reset_wire):
 			simulation_restarted.disconnect(reset_wire)
 		_wire_present.teardown()
 		_wire_present = null
 	if _destruction_present != null:
-		var reset_destruction := Callable(_destruction_present, 'reset_runtime_state')
+		var reset_destruction := _destruction_present.reset_runtime_state
 		if simulation_restarted.is_connected(reset_destruction):
 			simulation_restarted.disconnect(reset_destruction)
 		_destruction_present.teardown()  # frees husk models + effect anchors
 		_destruction_present = null
 	if _throwable_present != null:
-		var reset_throwable := Callable(_throwable_present, 'reset_runtime_state')
+		var reset_throwable := _throwable_present.reset_runtime_state
 		if simulation_restarted.is_connected(reset_throwable):
 			simulation_restarted.disconnect(reset_throwable)
 		_throwable_present.teardown()
 		_throwable_present = null
 	if _scar_present != null:
-		var reset_scars := Callable(_scar_present, 'reset_runtime_state')
+		var reset_scars := _scar_present.reset_runtime_state
 		if simulation_restarted.is_connected(reset_scars):
 			simulation_restarted.disconnect(reset_scars)
 		_scar_present.teardown()  # frees the scar meshes under the owner models

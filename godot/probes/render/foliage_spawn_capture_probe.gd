@@ -109,7 +109,7 @@ func _run_capture(ctx: ProbeContext) -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	await ctx.wait_frames(PLAY_SETTLE_FRAMES)
 
-	var environment = world.get_node_or_null("MissionEnvironment")
+	var environment: MissionEnvironment = world.get_node_or_null("MissionEnvironment")
 	if environment == null or environment.get("time_of_day") == null:
 		_fail("played mission environment/TOD unavailable")
 		return
@@ -123,7 +123,7 @@ func _run_capture(ctx: ProbeContext) -> void:
 	# simulation/presentation input state stays bit-identical.
 	_game.process_mode = Node.PROCESS_MODE_DISABLED
 	world.process_mode = Node.PROCESS_MODE_DISABLED
-	var dispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
+	var dispatcher: FoliageDispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
 	var foliage_error := runtime_foliage_validation_error(
 		mission_name,
 		dispatcher.get_frame_stats() if dispatcher != null else {},
@@ -135,7 +135,7 @@ func _run_capture(ctx: ProbeContext) -> void:
 	if not _valid_snapshot(spawn_state):
 		_fail("spawn state failed validation")
 		return
-	var loaded_mission = world.get_loaded_mission()
+	var loaded_mission := world.get_loaded_mission()
 	var winning_entries: Array = [{
 		"logical_name": mission_name,
 		"source_type": "loose",
@@ -523,7 +523,8 @@ func _masked_flicker_diff(hidden: Image, first: Image, current: Image) -> Dictio
 	}
 
 
-func _snapshot(world, camera: Camera3D, environment, viewport: Viewport) -> Dictionary:
+func _snapshot(world: GameWorld, camera: Camera3D, environment: MissionEnvironment,
+		viewport: Viewport) -> Dictionary:
 	return {
 		"position": world.get_sim().get_local_player_position(),
 		"yaw": float(world.get_sim().get_local_player_yaw_deg()),
@@ -601,8 +602,8 @@ func _restore_shell() -> void:
 	if _world != null and is_instance_valid(_world):
 		_world.process_mode = Node.PROCESS_MODE_INHERIT
 
-func _print_runtime_metadata(world, environment) -> void:
-	var mission = world.get_loaded_mission()
+func _print_runtime_metadata(world: GameWorld, environment: MissionEnvironment) -> void:
+	var mission := world.get_loaded_mission()
 	var mission_info: Dictionary = mission.get_info() if mission != null else {}
 	_logv(["[spawn-capture] mission metadata: ", {
 		"environment_ref": mission.get_environment_ref() if mission != null else "",
@@ -635,7 +636,7 @@ func _print_runtime_metadata(world, environment) -> void:
 		"sky_height_target": environment.get_sky_height_target(),
 	}])
 
-	var sky = world.get_node_or_null("SkyDome")
+	var sky: SkyDome = world.get_node_or_null("SkyDome")
 	var sky_material: ShaderMaterial = sky.get_sky_material() if sky != null else null
 	var cloud1: Texture2D = environment.get_sky_map1_tex()
 	var cloud2: Texture2D = environment.get_sky_map2_tex()
@@ -653,20 +654,21 @@ func _print_runtime_metadata(world, environment) -> void:
 		"cloud_tex2_size": Vector2i(cloud2.get_width(), cloud2.get_height()) if cloud2 != null else Vector2i.ZERO,
 	}])
 
-	var dispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
+	var dispatcher: FoliageDispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
 	_logv(["[spawn-capture] dispatcher: ", {
 		"present": dispatcher != null,
 		"total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
 		"frame_stats": dispatcher.get_frame_stats() if dispatcher != null else {},
 	}])
-	var data = world.get_terrain_data()
-	var terrain = world.get_node_or_null("Terrain")
-	var assigned_tile_info = terrain.get_tile_info_override() if terrain != null else null
+	var data := world.get_terrain_data()
+	var terrain: Terrain = world.get_node_or_null("Terrain")
+	var assigned_tile_info: TerrainTileInfo = \
+			terrain.get_tile_info_override() if terrain != null else null
 	var tile_info_source := "override"
 	if assigned_tile_info == null and data != null:
 		assigned_tile_info = data.get_tileinfo_resource()
 		tile_info_source = "terrain_data"
-	var resource_root = world.get_resource_root()
+	var resource_root := world.get_resource_root()
 	var mission_til_name: String = String(world.get_loaded_mission_file()).get_basename() + ".til"
 	var mission_til_bytes: PackedByteArray = resource_root.read_file(mission_til_name) \
 		if resource_root != null and resource_root.has_file(mission_til_name) else PackedByteArray()
@@ -680,10 +682,11 @@ func _print_runtime_metadata(world, environment) -> void:
 	}])
 
 
-func _print_model_lighting_trace(world, camera: Camera3D, environment) -> void:
+func _print_model_lighting_trace(world: GameWorld, camera: Camera3D,
+		environment: MissionEnvironment) -> void:
 	if not bool(_ctx.args.get("model_lighting_trace", false)):
 		return
-	var sim = world.get_sim()
+	var sim := world.get_sim()
 	var light_dir: Vector3 = environment.get_light_direction()
 	var iris_samples := PackedInt32Array()
 	if sim != null:
@@ -711,7 +714,7 @@ func _texture_meta(value: Variant) -> Dictionary:
 	}
 
 
-func _print_foliage_material_state(world) -> void:
+func _print_foliage_material_state(world: GameWorld) -> void:
 	var dispatcher: Node = world.get_node_or_null("Terrain/FoliageDispatcher")
 	if dispatcher == null:
 		_logv(["[spawn-capture] detail materials: dispatcher missing"])

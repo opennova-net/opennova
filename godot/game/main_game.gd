@@ -415,7 +415,7 @@ func is_dev_tools_open() -> bool:
 ## Shift+F6 (and the probe/test seam): pick whatever the crosshair is on into the
 ## debug pick list, with a brief on-screen confirmation (DebugPickFlow).
 func pick_at_crosshair() -> void:
-	var sim = _world.get_sim() if _world != null else null
+	var sim: Simulation = _world.get_sim() if _world != null else null
 	_pick_flow.pick_at_crosshair(sim, _camera, _pick_list,
 			_hud if _hud != null else self)
 
@@ -445,14 +445,15 @@ func get_game_debug_adapter() -> GameDebugAdapter:
 		# here. The adapter adopts it in configure() and the probe runner reads
 		# the same record through get_shell_seams() (ADR 0041).
 		var seams := GameShellSeams.for_shell(self,
-				func(): return _world, _current_runtime,
-				func(): return _player_presenter,
-				func(): return _hud_presenter, func(): return _menu_shell,
-				func(): return _armory_presenter, func(): return _deploy_presenter)
+				func() -> GameWorld: return _world, _current_runtime,
+				func() -> LocalPlayerPresenter: return _player_presenter,
+				func() -> GameHudPresenter: return _hud_presenter,
+				func() -> MenuShell: return _menu_shell,
+				func() -> ArmoryPresenter: return _armory_presenter,
+				func() -> DeployScreenPresenter: return _deploy_presenter)
 		seams.shell_state_source = _shell_state_name
-		seams.world_loading_source = func(): return _world_load_pending
+		seams.world_loading_source = func() -> bool: return _world_load_pending
 		seams.resume_action = _on_resume
-		seams.return_to_menu_action = _on_return_to_menu
 		_debug_adapter.configure(seams)
 	return _debug_adapter
 func get_frame_stats() -> FrameStats:
@@ -881,12 +882,12 @@ func _maybe_exit_round_cycle() -> void:
 	var sim: Simulation = _world.get_sim()
 	if sim == null:
 		return
-	if not bool(sim.get_round_outcome_debug().get("mp_session", false)):
+	if not sim.is_mp_session():
 		return
-	var er: Dictionary = sim.get_end_round_state()
-	if not bool(er.get("header_known", false)):
+	var er: EndRoundState = sim.get_end_round_state()
+	if not er.is_header_known():
 		return
-	if bool(er.get("session_open", true)):
+	if er.is_session_open():
 		return
 	_abort_to_menu("round cycle", "post-round linger expired (mission exit 3)")
 

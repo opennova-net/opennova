@@ -196,7 +196,7 @@ func set_input_source(source: Callable) -> void:
 ##  Render_ProcessMainSceneFrame @0x5ca1d2]. GameHudPresenter polls the rows
 ## (it owns the FP-gun bit two of them also write) and calls this.
 func set_third_person_selected(selected: bool) -> void:
-	var sim = _sim()
+	var sim := _sim()
 	if sim != null:
 		sim.set_local_player_third_person_selected(selected)
 	_refresh_camera_mode()
@@ -205,7 +205,7 @@ func set_third_person_selected(selected: bool) -> void:
 ## The debug menu's on-foot third person (the F3 Player page).
 func set_debug_third_person(enabled: bool) -> void:
 	debug_third_person = enabled
-	var sim = _sim()
+	var sim := _sim()
 	if sim != null:
 		sim.set_local_player_debug_third_person(enabled)
 	_refresh_camera_mode()
@@ -375,7 +375,7 @@ func _reset_state() -> void:
 	_input_router.reset()
 	_view = null
 	_set_world_nvg_view(false, 0)
-	var sim = _sim()
+	var sim := _sim()
 	if sim != null:
 		sim.set_local_player_debug_third_person(false)
 
@@ -390,7 +390,7 @@ func has_player() -> bool:
 		return false
 	if not _world.is_loaded():
 		return false
-	var sim = _sim()
+	var sim := _sim()
 	return sim != null and sim.has_local_player()
 
 
@@ -438,7 +438,7 @@ func aim_screen_point() -> Vector2:
 	if _world == null or _camera == null or not has_player():
 		return Vector2.INF
 	var angles := _aim_angles_deg()
-	var sim = _sim()
+	var sim := _sim()
 	var eye := _eye_position(sim.get_local_player_position() if sim != null else Vector3.ZERO)
 	var target := Simulation.aim_ray_endpoint(eye, angles.x, angles.y)
 	if _camera.is_position_behind(target):
@@ -452,7 +452,7 @@ func aim_screen_point() -> Vector2:
 func aim_range_units() -> int:
 	if _world == null or _camera == null or not has_player():
 		return 1
-	var sim = _sim()
+	var sim := _sim()
 	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
 	var eye := _eye_position(pos)
 	var angles := _aim_angles_deg()
@@ -474,7 +474,7 @@ func aim_range_units() -> int:
 
 
 func _aim_angles_deg() -> Vector2:
-	var sim = _sim()
+	var sim := _sim()
 	var yaw := float(sim.get_local_player_yaw_deg()) if sim != null else 0.0
 	var pitch := float(sim.get_local_player_pitch_deg()) if sim != null else 0.0
 	if _view != null and _view.binoculars_view_active:
@@ -490,8 +490,9 @@ func _aim_angles_deg() -> Vector2:
 # [orig: the local bone path @0x4b6bb3 (Entity_BuildBoneTransformMatrices -> head,
 # CameraOffset = head - Position); consumed by the on-foot person leg @0x437f9c.
 # Unported tail: the remote trig approximation @0x4b6984. The 0.125u floor here
-# is a DEFENSIVE stand-in — retail floors only the sample-less capsule leg
-# (retail: @0x4b6b98); the head-bone legs store unfloored (D-INF-18).]
+# is a DEFENSIVE stand-in — the original floors only the sample-less capsule
+# leg (the capsule-leg cite sits in engine/runtime/world/player_view.cpp); the
+# head-bone legs store unfloored (D-INF-18).]
 func _eye_position(pos: Vector3) -> Vector3:
 	var head := avatar_head_world()
 	if head == Vector3.INF:
@@ -599,7 +600,7 @@ func _find_skeleton(root: Node) -> Skeleton3D:
 func _update_player_camera() -> void:
 	if _world == null or _camera == null:
 		return
-	var sim = _sim()
+	var sim := _sim()
 	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
 	if _view != null and _view.camera_pose_valid:
 		var forward := Simulation.presentation_forward(
@@ -621,11 +622,11 @@ func _update_player_camera() -> void:
 
 
 func _update_model_lighting_context() -> void:
-	var sim = _sim()
+	var sim := _sim()
 	var interior_item_id := \
 			int(sim.local_player_interior_item_id()) if sim != null else 0
 	var transfer := 0.0
-	var item_db = _world.get_item_db() if _world != null else null
+	var item_db: ItemDatabase = _world.get_item_db() if _world != null else null
 	if interior_item_id != 0 and item_db != null:
 		transfer = float(item_db.get_light_transfer(interior_item_id))
 	var interior := interior_item_id != 0
@@ -679,7 +680,7 @@ func _update_avatar(pos: Vector3) -> void:
 	# MATCHTERRAIN follows the simulation's exact MoveOrder stance latch. The
 	# body stays submitted as a shadow source in first person, so keep this
 	# independent of the camera-visible layer verdict below.
-	var stance_sim = _sim()
+	var stance_sim := _sim()
 	_avatar.set_match_terrain_enabled(
 			stance_sim != null and stance_sim.get_local_player_stance_latch() != 0)
 	# The avatar node carries the BODY frame (the lagged body heading), not the aim yaw:
@@ -687,7 +688,7 @@ func _update_avatar(pos: Vector3) -> void:
 	# the body-class delta is identity by construction so the hips stay glued to the node.
 	# [orig: Entity_BuildBoneTransformMatrices @0x4b1290 — every overlay blends toward
 	# bodyHeading/bodyPitch; docs/world/world-wac-ai-re.md §14 (D-INF-11)]
-	var runtime = _world.get_runtime()
+	var runtime := _world.get_runtime()
 	var overlay: PlayerAimOverlay = runtime.local_player_aim_overlay() \
 			if runtime != null else null
 	if overlay != null:
@@ -699,7 +700,7 @@ func _update_avatar(pos: Vector3) -> void:
 			deltas.append(inv * MissionObjectPlacer.bms_to_godot_basis(a))
 		_avatar.set_aim_overlay(deltas)
 	else:
-		var sim_yaw = _sim()
+		var sim_yaw := _sim()
 		var body_basis := MissionObjectPlacer.bms_to_godot_basis(
 			Vector3(0.0, sim_yaw.get_local_player_yaw_deg() if sim_yaw != null else 0.0, 0.0))
 		_set_avatar_transform(_avatar.compose_entity_transform(body_basis, pos))
@@ -721,7 +722,7 @@ func _update_avatar(pos: Vector3) -> void:
 	_avatar.set_presentation_layer(ObjectModel.PRESENTATION_LAYER_LOCAL_BODY
 			if draw_avatar else ObjectModel.PRESENTATION_LAYER_LOCAL_BODY_HIDDEN)
 	_update_held_weapon(overlay)
-	var sim = _sim()
+	var sim := _sim()
 	var anim_key := String(sim.get_local_player_anim_key()) if sim != null else ""
 	var anim_phase := int(sim.get_local_player_anim_phase_ticks()) if sim != null else 0
 	var anim_source_key := (

@@ -268,7 +268,7 @@ func _load_part(slot: String, graphic: String, camo: Array = []) -> void:
 	if data.open_from_resource_root(_resource_root, graphic) != OK:
 		_missing_parts.append("%s: %s not found" % [slot, graphic])
 		return
-	var model = ObjectModel.new()
+	var model := ObjectModel.new()
 	model.name = "AvatarPart_%s" % slot
 	_model_root.add_child(model)
 	model.set_object_data(data)

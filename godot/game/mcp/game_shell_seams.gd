@@ -61,8 +61,6 @@ var return_to_menu := Callable()
 
 ## func() -> void: the shell's resume leg (closes pause/armory, hands play back)
 var resume_action := Callable()
-## func() -> void: the shell's raw teardown-to-menu leg (the adapter gates it)
-var return_to_menu_action := Callable()
 ## func() -> void: graceful runtime quit
 var quit_action := Callable()
 ## func() -> Error: open the ESC pause overlay
@@ -93,8 +91,9 @@ var hud_hidden_capture_witness_source := Callable()
 ## start_saved_mission, return_to_menu, is_dev_tools_open, request_quit,
 ## mcp_open_ingame_menu, mcp_open_armory, the capture begin/end/witness set).
 ## MainGame stamps the remaining private-leg fields (shell_state_source,
-## world_loading_source, resume_action, return_to_menu_action) before handing
-## the record to configure().
+## world_loading_source, resume_action) before handing the record to
+## configure(); the adapter's return_to_menu verb rides the gated public
+## `return_to_menu` leg above.
 static func for_shell(shell: MainGame, world: Callable, runtime: Callable,
 		presenter: Callable, hud_presenter: Callable, menu_shell: Callable,
 		armory_presenter := Callable(), deploy_presenter := Callable()) -> GameShellSeams:

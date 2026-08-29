@@ -36,7 +36,7 @@ var occlusion_provider: Simulation = null
 # Test-injection seam: Callable(listener, source, dist_q16, source_bms_id) -> int,
 # consulted only when no Simulation provider is set.
 var occlusion_override: Callable = Callable()
-var _banks: Array = []  # Array[LwfData]
+var _banks: Array[LwfData] = []
 # name(lower) -> Array[{bank:int, set:int}]
 var _index: Dictionary = {}
 # The portable member-selection state machine (engine/runtime/audio); holds the per-(bank,set,layer) state.
@@ -87,7 +87,7 @@ func describe_ambient(name: String) -> Array:
 	var loc := _find_set(name)
 	if loc.is_empty():
 		return []
-	var lwf = _banks[loc.bank]
+	var lwf: LwfData = _banks[loc.bank]
 	var set_d: Dictionary = lwf.get_set(loc.set)
 	var layers: Array = set_d.get("layers", [])
 	var out: Array = []
@@ -152,7 +152,7 @@ func spawn_ambient(parent: Node3D, world_pos: Vector3, name: String, bus: String
 	var loc := _find_set(name)
 	if loc.is_empty():
 		return null
-	var lwf = _banks[loc.bank]
+	var lwf: LwfData = _banks[loc.bank]
 	var set_d: Dictionary = lwf.get_set(loc.set)
 	var layers: Array = set_d.get("layers", [])
 	var holder: Node3D = null
@@ -207,10 +207,11 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 	# refires (chute flap / freefall retrigger each body tick) into its finite
 	# channel pool — audibly one continuous sound either way (audio doc D-SND-10).
 	if not exclusive_key.is_empty():
-		var prev = _exclusive.get(exclusive_key)
+		# A queue_freed voice may still sit in the table: validate before typing.
+		var prev: Variant = _exclusive.get(exclusive_key)
 		if prev != null and is_instance_valid(prev) and prev.playing:
 			return false
-	var lwf = _banks[loc.bank]
+	var lwf: LwfData = _banks[loc.bank]
 	var set_d: Dictionary = lwf.get_set(loc.set)
 	var layers: Array = set_d.get("layers", [])
 	var has_listener := listener_pos != Vector3.INF and listener_pos.is_finite()
@@ -275,7 +276,7 @@ func spawn_oneshot_2d(parent: Node, name: String, bus: StringName) -> AudioStrea
 	var loc := _find_set(name)
 	if loc.is_empty():
 		return null
-	var lwf = _banks[loc.bank]
+	var lwf: LwfData = _banks[loc.bank]
 	var set_d: Dictionary = lwf.get_set(loc.set)
 	var layers: Array = set_d.get("layers", [])
 	for li in layers.size():

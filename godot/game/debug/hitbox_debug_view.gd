@@ -329,7 +329,7 @@ func _update_labels(entities: Array, organics: Array) -> void:
 		if float(o.get("radius", 0.0)) <= 0.0:
 			continue
 		order.append([cam_pos.distance_to(o.get("pos", Vector3.ZERO)), true, o])
-	order.sort_custom(func(x, y): return x[0] < y[0])
+	order.sort_custom(func(x: Array, y: Array) -> bool: return x[0] < y[0])
 	var visible_count := mini(order.size(), _labels.size())
 	for i in range(visible_count):
 		var lb := _labels[i]

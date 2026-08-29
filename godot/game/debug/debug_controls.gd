@@ -984,7 +984,9 @@ func _world() -> GameWorld:
 	if _seams == null or not _seams.world_source.is_valid():
 		return null
 	var value: Variant = _seams.world_source.call()
-	if value is GameWorld and is_instance_valid(value):
+	# The world rows draw over a LOADED mission: the shell's GameWorld node
+	# outlives the mission, so an unloaded one reads as no world.
+	if value is GameWorld and is_instance_valid(value) and value.is_loaded():
 		return value
 	return null
 

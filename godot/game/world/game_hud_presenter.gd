@@ -316,7 +316,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 		_perf_probe_spans.clear()
 	if _world == null or not _world.is_loaded():
 		return
-	var sim = _world.get_sim()
+	var sim: Simulation = _world.get_sim()
 	if sim == null or not sim.has_local_player():
 		if not _warned_no_player:
 			_warned_no_player = true
@@ -519,7 +519,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# sim's own respawn init.
 	_end_round_stats.update(_game_hud, sim, ControlsBindings.pressed("ShowScore"),
 			hud_keys_chorded, gameplay_input_active,
-			not bool(sim.get_round_outcome_debug().get("mp_session", false)),
+			not sim.is_mp_session(),
 			func() -> void: _message_log.close(_game_hud))
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
 	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active)
@@ -609,7 +609,7 @@ func _apply_attach_labels() -> void:
 	var screens := PackedVector2Array()
 	var texts := PackedStringArray()
 	var nearest := PackedByteArray()
-	var sim = _world.get_sim() if _world != null else null
+	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim != null:
 		var labels: Array = sim.get_attach_labels()
 		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
@@ -652,7 +652,7 @@ func _apply_friendly_tags() -> void:
 	var ids := PackedInt32Array()
 	var ratios := PackedInt32Array()
 	var flags := PackedInt32Array()
-	var sim = _world.get_sim() if _world != null else null
+	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim != null and _game_hud.get_friendly_tag_mode() != 0:
 		var tags: Array = sim.get_friendly_tags()
 		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
@@ -1055,7 +1055,7 @@ func _apply_objectives() -> void:
 		return
 	var texts := PackedStringArray()
 	var done := PackedByteArray()
-	var sim = _world.get_sim() if _world != null else null
+	var sim: Simulation = _world.get_sim() if _world != null else null
 	if _objectives_visible and sim != null:
 		var table: RtxtStringFile = Strings.get_table("mission")
 		for raw in sim.get_objectives_view():

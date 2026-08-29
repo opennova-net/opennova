@@ -88,7 +88,7 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 	# MoveOrder bits 0x40/0x80, and the aircraft mover reads those same two
 	# bits as descend/ascend - the collective is the lean pair, overloaded.
 	var state := _read_input_state() if gameplay_input_active else {}
-	var sim = _sim()
+	var sim := _sim()
 	frame_input.set_movement(
 			_bool(state, "forward"),
 			_bool(state, "back"),
@@ -134,7 +134,7 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 # ported in engine/runtime/world weapon_fsm + Simulation]
 func _sample_weapon_input(frame_input: MissionFrameInput,
 		gameplay_input_active: bool) -> void:
-	var sim = _sim()
+	var sim := _sim()
 	var captured := gameplay_input_active \
 			and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 	var fire_held := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
@@ -166,7 +166,7 @@ func _sample_weapon_input(frame_input: MissionFrameInput,
 # into the sim's switch walks; the sim applies the witnessed stance/FSM gates and
 # answers through the event drain (switch_to_weapon / switch_denied).
 func _send_weapon_switch_input(captured: bool) -> void:
-	var sim = _sim()
+	var sim := _sim()
 	var down_mask := 0
 	for i in _WEAPON_CATEGORY_TOKENS.size():
 		if captured and ControlsBindings.pressed(_WEAPON_CATEGORY_TOKENS[i]):
@@ -199,7 +199,7 @@ func _sample_hud_input(active: bool) -> void:
 	# arm runs, so a key held across an armory/F3 window must NOT re-fire
 	# when the gate reopens (the same rule the hudcolor poll follows).
 	# [orig: the @0x49d1f0 scan's per-row down latch reads raw key state]
-	var sim = _sim()
+	var sim := _sim()
 	var radar_out_down := ControlsBindings.pressed("radarout")
 	if active and radar_out_down and not _radar_out_was_down and sim != null:
 		sim.request_hud_radar_zoom(1)
@@ -239,7 +239,7 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 	if not key.pressed or key.echo:
 		return false
 	var physical := key.physical_keycode if key.physical_keycode != 0 else key.keycode
-	var sim = _sim()
+	var sim := _sim()
 	if physical == KEY_B:
 		if sim != null:
 			sim.request_local_player_binoculars_toggle()
@@ -271,7 +271,7 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 
 
 func _request_stance(stance: int) -> void:
-	var sim = _sim()
+	var sim := _sim()
 	if sim != null:
 		sim.request_local_player_stance(stance)
 
@@ -311,7 +311,7 @@ func release_mouse_capture() -> void:
 # [orig: Player_PackInputStateToEntity @0x4df450; promotion @0x4b729d]
 func _read_input_state() -> Dictionary:
 	if _input_source.is_valid():
-		var out = _input_source.call()
+		var out: Variant = _input_source.call()
 		if out is Dictionary:
 			return out
 	return {
