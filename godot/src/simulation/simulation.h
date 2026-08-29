@@ -54,6 +54,7 @@ class EntityRow;      // one typed entity-directory row
 #include <runtime/simassets/mounted_pose.h> // reusable PANM part matrices for mounted attachments
 #include <net/inmatch/session.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/inspect.h> // the typed entity inspection API (ADR 0042 d5)
 #include <runtime/world/tick_accumulator.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
@@ -1960,6 +1961,14 @@ public:
 	// mixes into the decoded view), and its cards ride the decoded replica
 	// section (np::client_replica_card).
 	TypedArray<EntityRow> entity_directory() const;
+	// Native (unbound) form for the in-process C++ dev tools (ADR 0042 d6):
+	// the same engine join, returned as the engine vector — no
+	// TypedArray/Variant round-trip. Empty without a kernel.
+	std::vector<opennova::world::inspect::EntityRow> native_entity_directory() const;
+	// Native (unbound): the AI pool index behind a packed wire handle
+	// (-1 = no brain / no kernel) — the dev-tools drain resolves a queued
+	// request's handle onto the ai_index the debug delegates key on.
+	int native_ai_index_for_handle(int p_handle) const;
 	// The full card by packed wire handle; null when nothing resolves. The
 	// AI-index and SSN forms wrap the same builder (edit seams key on
 	// ai_index; pool-1 vehicles carry no brain and resolve by SSN).

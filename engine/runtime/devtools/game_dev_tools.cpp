@@ -1,8 +1,11 @@
 #include <runtime/devtools/game_dev_tools.h>
 
 #include <runtime/devtools/demo_window.h>
+#include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/stats_window.h>
+
+#include <utility>
 
 namespace opennova::devtools {
 
@@ -26,6 +29,10 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	stats_window_ = stats.get();
 	stats->open = true;
 	pass_.register_window(std::move(stats));
+	// Closed by default; opens from the "Windows" menu.
+	auto entities = std::make_unique<EntitiesWindow>();
+	entities_window_ = entities.get();
+	pass_.register_window(std::move(entities));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -55,6 +62,18 @@ bool GameDevTools::take_game_request(GameWindowRequest &request) {
 
 void GameDevTools::set_frame_stats(FrameStatsBoard *board) {
 	stats_window_->set_board(board);
+}
+
+void GameDevTools::set_entity_directory(EntityDirectorySnapshot snapshot) {
+	entities_window_->set_directory(std::move(snapshot));
+}
+
+bool GameDevTools::needs_entity_directory() const {
+	return pass_.is_open() && entities_window_->open;
+}
+
+bool GameDevTools::take_debug_request(DebugRequest &request) {
+	return entities_window_->take_request(request);
 }
 
 }  // namespace opennova::devtools

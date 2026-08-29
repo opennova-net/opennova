@@ -58,7 +58,8 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
 - [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
       recipe): the retired F3 pages return as engine ImGui windows as they are
-      wanted — entities + pick list, sim transport (play/pause/step; the MCP
+      wanted — the pick-list feed into the Entities window, sim transport
+      (play/pause/step; the MCP
       `game_debug` control plane still drives these), script vars, net, particles,
       occlusion, rounds, terrain, rendering/world-view toggles (`GameWorld`'s
       typed API), environment, audio, animation, player (with the pose dump the

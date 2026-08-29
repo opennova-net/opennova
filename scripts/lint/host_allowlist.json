@@ -244,7 +244,7 @@
     "debug_controls.gd|Only the session host",
     "debug_controls_test.gd|host authority",
     "debug_controls_test.gd|host_authority",
-    "debug_controls_test.gd|state.reason, \"host\"",
+    "debug_controls_test.gd|joiner.reason, \"host\"",
     "item_database.cpp|the host emits the AI-trailer",
     "item_database.h|host's pool-1 0x0D stream",
     "menu_shell.gd|HOST_GAME",

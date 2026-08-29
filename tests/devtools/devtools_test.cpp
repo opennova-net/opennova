@@ -3,9 +3,12 @@
 // produces draw data, the Stats window arms and disarms the board's capture
 // on its visibility edges and formats a drained window, and the ImGui ABI
 // fingerprint is the pinned one (the imgui-godot addon rejects any other).
+#include <runtime/devtools/debug_request.h>
+#include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/imgui_abi.h>
+#include <runtime/devtools/inspect_snapshot.h>
 #include <runtime/devtools/stats_window.h>
 
 #include <imgui.h>
@@ -15,6 +18,9 @@
 #include <cstring>
 
 using opennova::devtools::CaptureWindow;
+using opennova::devtools::DebugRequest;
+using opennova::devtools::EntitiesWindow;
+using opennova::devtools::EntityDirectorySnapshot;
 using opennova::devtools::GameViewport;
 using opennova::devtools::GameWindow;
 using opennova::devtools::GameInputMode;
@@ -120,7 +126,7 @@ void test_attach_sets_docking_and_viewport_policy() {
 
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 3, "Game + Stats + demo registered");
+	CHECK(tools.pass().window_count() == 4, "Game + Stats + Entities + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -131,7 +137,10 @@ void test_game_window_is_mandatory_and_detachable() {
 			"Game owns the center dock");
 	CHECK(stats.initial_dock_placement() == InitialDockPlacement::Right,
 			"Stats starts in the right dock");
-	CHECK(!tools.pass().window(2).open, "the demo window starts closed");
+	CHECK(std::strcmp(tools.pass().window(2).title(), "Entities") == 0,
+			"Entities registers after Stats");
+	CHECK(!tools.pass().window(2).open, "the Entities window starts closed");
+	CHECK(!tools.pass().window(3).open, "the demo window starts closed");
 }
 
 void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
@@ -263,9 +272,9 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 3, "Game + Stats + demo registered");
+	CHECK(tools.pass().window_count() == 4, "Game + Stats + Entities + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
-	CHECK(!tools.pass().window(2).open, "the demo window starts closed");
+	CHECK(!tools.pass().window(3).open, "the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
 
 	ImGui::NewFrame();
@@ -397,6 +406,124 @@ void test_layout_reset_brings_windows_home() {
 	CHECK(stats->Pos.x == home_x, "a one-shot: the next pass leaves placement alone");
 }
 
+// The Entities window (ADR 0042 d6): the pushed directory record formats into
+// the filtered table, the layout pass draws it, and an invalid snapshot (the
+// world unloaded) or a visibility close clears it.
+void test_entities_window_formats_the_pushed_directory() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	CHECK(!tools.needs_entity_directory(), "a closed Entities window needs no snapshot");
+	tools.entities_window().open = true;
+	CHECK(tools.needs_entity_directory(), "pass open && window open arms the feed");
+
+	EntityDirectorySnapshot snapshot;
+	opennova::world::inspect::EntityRow alpha;
+	alpha.index = 0;
+	alpha.ai_index = 2;
+	alpha.editable = true;
+	alpha.net_id = 1201;
+	alpha.wire_handle = 0x3001;
+	alpha.name = "ALPHA";
+	alpha.health = 100;
+	alpha.team = 1;
+	alpha.alive = true;
+	alpha.mission_position = {10.0f, 20.0f, 3.0f};
+	snapshot.rows.push_back(alpha);
+	opennova::world::inspect::EntityRow bravo;
+	bravo.index = 1;
+	bravo.ai_index = -1;
+	bravo.net_id = 1202;
+	bravo.wire_handle = 0x3002;
+	bravo.name = "BRAVO";
+	bravo.health = 0;
+	bravo.team = 2;
+	bravo.alive = false;
+	snapshot.rows.push_back(bravo);
+	snapshot.valid = true;
+	snapshot.logic_tick = 62;
+	tools.set_entity_directory(snapshot);
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with the Entities window open");
+	ImGui::Render();
+	CHECK(ImGui::FindWindowByName("Entities") != nullptr, "the Entities window exists after a pass");
+
+	const EntitiesWindow &entities = tools.entities_window();
+	CHECK(entities.snapshot_valid(), "the pushed snapshot is the reading");
+	CHECK(entities.snapshot_logic_tick() == 62, "the reading carries the join's logic tick");
+	CHECK(entities.row_count() == 2, "one formatted row per pushed row");
+	CHECK(std::strcmp(entities.row_name(0), "ALPHA") == 0, "name");
+	CHECK(std::strcmp(entities.row_ai(0), "2") == 0, "ai index");
+	CHECK(std::strcmp(entities.row_net_id(0), "1201") == 0, "ssn");
+	CHECK(std::strcmp(entities.row_team(0), "1") == 0, "team");
+	CHECK(std::strcmp(entities.row_health(0), "100") == 0, "health");
+	CHECK(std::strcmp(entities.row_alive(0), "yes") == 0, "alive");
+	CHECK(std::strcmp(entities.row_pos(0), "10.0 20.0 3.0") == 0, "mission position");
+	CHECK(std::strcmp(entities.row_ai(1), "-") == 0, "a brainless row shows no ai index");
+	CHECK(std::strcmp(entities.row_alive(1), "no") == 0, "a dead row reads no");
+
+	tools.entities_window().set_filter("brav");
+	CHECK(entities.row_count() == 1, "the filter narrows the table");
+	CHECK(std::strcmp(entities.row_name(0), "BRAVO") == 0, "case-insensitive name match");
+	tools.entities_window().set_filter("1201");
+	CHECK(entities.row_count() == 1 && std::strcmp(entities.row_name(0), "ALPHA") == 0,
+			"the filter also matches the SSN");
+	tools.entities_window().set_filter("");
+	CHECK(entities.row_count() == 2, "clearing the filter restores every row");
+
+	tools.set_entity_directory(EntityDirectorySnapshot{});
+	CHECK(!entities.snapshot_valid() && entities.row_count() == 0,
+			"an invalid snapshot clears the table (the world unloaded)");
+
+	tools.set_entity_directory(snapshot);
+	CHECK(entities.row_count() == 2, "a re-push restores the table");
+	tools.pass().set_open(false);
+	CHECK(!tools.needs_entity_directory(), "closing the pass drops the need");
+	CHECK(!entities.snapshot_valid() && entities.row_count() == 0,
+			"the visibility close drops the held snapshot (a closed window costs nothing)");
+}
+
+// The DebugRequest channel: enqueue/take round-trips the typed payloads in
+// order and drains exactly once; needs_entity_directory gates on (pass open
+// && window open) so the embedder can skip building snapshots nobody shows.
+void test_entities_debug_request_queue_and_gating() {
+	GameDevTools tools;
+	DebugRequest request;
+	CHECK(!tools.take_debug_request(request), "fresh tools hold no debug request");
+	CHECK(!tools.needs_entity_directory(), "closed pass: no directory needed");
+	tools.entities_window().open = true;
+	CHECK(!tools.needs_entity_directory(), "window open inside a closed pass still needs none");
+	tools.pass().set_open(true);
+	CHECK(tools.needs_entity_directory(), "pass open && window open");
+	tools.entities_window().open = false;
+	CHECK(!tools.needs_entity_directory(), "closing the window drops the need");
+	tools.entities_window().open = true;
+
+	DebugRequest health;
+	health.kind = DebugRequest::Kind::SetEntityHealth;
+	health.target.packed = 0x3001;
+	health.health = 25;
+	tools.entities_window().enqueue_request(health);
+	DebugRequest teleport;
+	teleport.kind = DebugRequest::Kind::TeleportLocalPlayer;
+	teleport.pos[0] = 100.0f;
+	teleport.pos[1] = 200.0f;
+	teleport.pos[2] = 5.0f;
+	teleport.yaw = 90.0f;
+	teleport.pitch = -10.0f;
+	tools.entities_window().enqueue_request(teleport);
+	CHECK(tools.take_debug_request(request) && request.kind == DebugRequest::Kind::SetEntityHealth &&
+					request.target.packed == 0x3001 && request.health == 25,
+			"the health request round-trips first");
+	CHECK(tools.take_debug_request(request) && request.kind == DebugRequest::Kind::TeleportLocalPlayer &&
+					request.pos[0] == 100.0f && request.pos[1] == 200.0f && request.pos[2] == 5.0f &&
+					request.yaw == 90.0f && request.pitch == -10.0f,
+			"the teleport request follows with its payload");
+	CHECK(!tools.take_debug_request(request), "the queue drains exactly once");
+}
+
 }  // namespace
 
 int main() {
@@ -409,6 +536,8 @@ int main() {
 	test_layout_pass_draws_the_stats_window_and_gates_capture();
 	test_external_feed_drives_the_window_without_draining();
 	test_layout_reset_brings_windows_home();
+	test_entities_window_formats_the_pushed_directory();
+	test_entities_debug_request_queue_and_gating();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

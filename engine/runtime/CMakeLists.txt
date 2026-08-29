@@ -226,6 +226,7 @@ if(OPENNOVA_DEVTOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/demo_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entities_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/stats_window.cpp
     )
     target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_DEVTOOLS=1)

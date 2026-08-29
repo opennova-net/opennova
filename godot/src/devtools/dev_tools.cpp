@@ -1,13 +1,20 @@
 #include "devtools/dev_tools.h"
 
+#include "simulation/simulation.h"
+
 #include <godot_cpp/classes/sub_viewport.hpp>
 
 #if OPENNOVA_DEVTOOLS
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/time.hpp>
+#include <runtime/devtools/debug_request.h>
+#include <runtime/devtools/entities_window.h>
+#include <runtime/devtools/inspect_snapshot.h>
 #include <runtime/devtools/stats_window.h>
 
 #include <algorithm>
 #include <cstring>
+#include <utility>
 #endif
 
 namespace godot {
@@ -18,6 +25,7 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("toggle"), &DevTools::toggle);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "stats"), &DevTools::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("get_frame_stats"), &DevTools::get_frame_stats);
+	ClassDB::bind_method(D_METHOD("set_simulation", "simulation"), &DevTools::set_simulation);
 	ClassDB::bind_method(D_METHOD("set_game_viewport", "viewport"), &DevTools::set_game_viewport);
 	ClassDB::bind_method(D_METHOD("set_game_play_available", "available"), &DevTools::set_game_play_available);
 	ClassDB::bind_method(D_METHOD("is_game_play_available"), &DevTools::is_game_play_available);
@@ -53,6 +61,7 @@ opennova::devtools::ImGuiPass *DevTools::engine_pass() {
 void DevTools::_exit_tree() {
 	set_game_play_available(false);
 	set_game_playing_internal(false);
+	set_simulation(nullptr);
 	game_viewport_ = nullptr;
 	rendered_game_viewport_size_ = Vector2i();
 	tools_->set_game_viewport(nullptr);
@@ -71,6 +80,8 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 		frame_stats_->add(FrameStats::FRAME_DEBUG_REFRESH, p_layout_us);
 	}
 	apply_game_requests();
+	apply_debug_requests();
+	push_entity_directory();
 	if (open_ && !tools_->pass().is_open()) {
 		// Closed from inside (Escape, the menu).
 		set_game_playing_internal(false);
@@ -215,6 +226,78 @@ void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
 	}
 }
 
+void DevTools::set_simulation(Simulation *p_simulation) {
+	if (simulation_ == p_simulation) {
+		return;
+	}
+	simulation_ = p_simulation;
+	last_entity_push_ms_ = -1;
+	if (simulation_ == nullptr) {
+		// The unload edge: an invalid snapshot clears the pushed record so a
+		// window left open never shows a dead world's rows.
+		tools_->set_entity_directory(opennova::devtools::EntityDirectorySnapshot{});
+	}
+}
+
+// Drain the F3 windows' typed mutation requests into the SAME engine-backed
+// debug delegates the MCP control plane uses (ADR 0042 d6). Requests queued
+// with no world behind them drain and drop.
+void DevTools::apply_debug_requests() {
+	opennova::devtools::DebugRequest request;
+	while (tools_->take_debug_request(request)) {
+		if (simulation_ == nullptr) {
+			continue;
+		}
+		switch (request.kind) {
+			case opennova::devtools::DebugRequest::Kind::SetEntityHealth: {
+				const int ai_index =
+						simulation_->native_ai_index_for_handle(request.target.packed);
+				if (ai_index >= 0) {
+					simulation_->debug_set_entity_health(ai_index, request.health);
+				}
+				break;
+			}
+			case opennova::devtools::DebugRequest::Kind::SetEntityPosition: {
+				const int ai_index =
+						simulation_->native_ai_index_for_handle(request.target.packed);
+				if (ai_index >= 0) {
+					simulation_->debug_set_entity_position(ai_index,
+							Vector3(request.pos[0], request.pos[1], request.pos[2]));
+				}
+				break;
+			}
+			case opennova::devtools::DebugRequest::Kind::TeleportLocalPlayer:
+				simulation_->debug_teleport_local_player(
+						Vector3(request.pos[0], request.pos[1], request.pos[2]),
+						request.yaw, request.pitch);
+				break;
+		}
+	}
+}
+
+// Push the entity-directory record while the Entities window shows, on its
+// 0.5 s cadence: the ENGINE join (world::inspect::entity_directory) through
+// the Simulation's native accessor — no TypedArray/Variant round-trip
+// (ADR 0042 d6).
+void DevTools::push_entity_directory() {
+	if (simulation_ == nullptr || !tools_->needs_entity_directory()) {
+		last_entity_push_ms_ = -1;
+		return;
+	}
+	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	const int64_t cadence_ms = static_cast<int64_t>(
+			opennova::devtools::EntitiesWindow::kRefreshSeconds * 1000.0);
+	if (last_entity_push_ms_ >= 0 && now_ms - last_entity_push_ms_ < cadence_ms) {
+		return;
+	}
+	last_entity_push_ms_ = now_ms;
+	opennova::devtools::EntityDirectorySnapshot snapshot;
+	snapshot.rows = simulation_->native_entity_directory();
+	snapshot.valid = true;
+	snapshot.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
+	tools_->set_entity_directory(std::move(snapshot));
+}
+
 void DevTools::reset_layout() {
 	tools_->pass().request_layout_reset();
 }
@@ -350,6 +433,10 @@ Vector2i DevTools::get_rendered_game_viewport_size() const {
 
 void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
 	frame_stats_ = p_stats;
+}
+
+void DevTools::set_simulation(Simulation *p_simulation) {
+	(void)p_simulation;
 }
 
 void DevTools::reset_layout() {}
