@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/io/log.h>
+#include <base/io/log_ring.h>
 
 #include "terrain/terrain_data.h"
 #include "terrain/terrain.h"
@@ -117,6 +118,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 				UtilityFunctions::push_warning(String::utf8(message));
 		});
 	}
+	// The bounded ring MCP's game_logs drains (DevTools.engine_log_after;
+	// ADR 0042 d5) records every level, then chains to the push_warning
+	// forwarder above.
+	opennova::io::LogRing::install();
 
 	GDREGISTER_CLASS(TerrainData);
 	GDREGISTER_CLASS(Terrain);

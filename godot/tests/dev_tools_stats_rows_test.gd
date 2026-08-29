@@ -4,6 +4,28 @@ extends GutTest
 # a fed reading formats into the rows the ids name. No ImGui context is
 # needed for the feed path, so this pins the binding headless. The release
 # flavour (OPENNOVA_DEVTOOLS off) lists no rows and is skipped.
+# The engine-log ring drain is flavour-independent and pinned below.
+
+
+func test_engine_log_ring_drain_contract() -> void:
+	# The io::log ring (base/io/log_ring.h) is installed at extension init in
+	# every flavour; the static drain returns one locked snapshot as parallel
+	# columns. Ring content here is whatever the process logged (usually
+	# nothing headless), so pin the shape and the exclusive-cursor contract;
+	# record/wrap/chaining behavior is the io ctest's job.
+	var page: Dictionary = DevTools.engine_log_after(0)
+	var seqs: PackedInt64Array = page["sequences"]
+	var levels: PackedStringArray = page["levels"]
+	var texts: PackedStringArray = page["texts"]
+	assert_eq(levels.size(), seqs.size(), "one level per sequence")
+	assert_eq(texts.size(), seqs.size(), "one text per sequence")
+	var last := 0
+	for i in range(seqs.size()):
+		assert_true(int(seqs[i]) > last, "sequences strictly increase")
+		last = int(seqs[i])
+	var after: Dictionary = DevTools.engine_log_after(last)
+	assert_eq(PackedInt64Array(after["sequences"]).size(), 0,
+			"a drain after the newest sequence returns nothing")
 
 
 func test_fed_reading_is_readable_by_row_id() -> void:

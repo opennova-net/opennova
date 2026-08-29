@@ -166,13 +166,14 @@ static func definitions() -> Array[McpToolDef]:
 				"quality": {"type": "number", "minimum": 0.1, "maximum": 1.0, "default": 0.8},
 			}, [], true, SCREENSHOT_TIMEOUT_MS),
 		McpToolDef.make("game_logs",
-			"Read runtime MCP, probe and engine log entries from the launched game.",
+			"Read runtime MCP, probe, engine (the native io::log ring) and godot "
+			+ "(the tailed Godot log file) log entries from the launched game.",
 			{
 				"cursor": {"type": "integer", "minimum": 0},
 				"limit": {"type": "integer", "minimum": 1, "maximum": 2000, "default": 200},
 				"sources": {
 					"type": "array",
-					"items": {"type": "string", "enum": ["server", "script", "engine", "probe"]},
+					"items": {"type": "string", "enum": ["server", "script", "engine", "godot", "probe"]},
 				},
 			}, [], false),
 		McpToolDef.make("game_probe",

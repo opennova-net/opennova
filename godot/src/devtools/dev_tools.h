@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -93,6 +94,16 @@ public:
 	String stats_row_average(const String &p_row_id) const;
 	String stats_row_peak(const String &p_row_id) const;
 	String stats_row_info(const String &p_row_id) const;
+
+	// The engine io::log ring drain (base/io/log_ring.h; ADR 0042 d5): one
+	// locked snapshot of every recorded entry with sequence > cursor, as the
+	// parallel columns MCP's game_logs "engine" source pages —
+	// { "sequences": PackedInt64Array, "levels": PackedStringArray
+	// ("debug"/"info"/"warn"/"error"), "texts": PackedStringArray }. Static
+	// because the ring is process-wide, installed at extension init
+	// (register_types.cpp) in every flavour; the forward converts and never
+	// composes.
+	static Dictionary engine_log_after(int64_t p_cursor);
 
 protected:
 	static void _bind_methods();
