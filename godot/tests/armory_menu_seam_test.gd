@@ -92,7 +92,7 @@ func _screen_xml(screen_name: String, body: String) -> String:
 
 # A synthetic WEAPON screen: the named controls the original registers, authored
 # as a small .mnu document (spinlist + combos + buttons + the weight static).
-func _make_weapon_driver() -> MenuDriver:
+func _make_weapon_driver(with_frame := false) -> MenuDriver:
 	var body := _wnd("spinlist", "PLAYER_CLASS", 10)
 	var y := 40
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY",
@@ -100,10 +100,40 @@ func _make_weapon_driver() -> MenuDriver:
 			"GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]:
 		body += _wnd("combo", n, y)
 		y += 24
+	for n in ["PRIMARY_ICON", "SECONDARY_ICON", "ACCESSORY_ICON"]:
+		body += _wnd("window", n, y)
+		y += 24
 	body += _wnd("button", "ACCEPT", y)
 	body += _wnd("button", "CANCEL", y + 24)
 	body += _wnd("static", "STATIC_TOTAL_WEIGHT", y + 48)
-	return MenuDriverFixture.driver_over(self, _doc_from_xml(_screen_xml("WEAPON", body)), "weapon.mnu")
+	var doc := _doc_from_xml(_screen_xml("WEAPON", body))
+	if not with_frame:
+		return MenuDriverFixture.driver_over(self, doc, "weapon.mnu")
+	var driver := MenuDriver.new()
+	var frame := MenuFrame.new()
+	frame.size = Vector2(800, 600)
+	add_child_autofree(frame)
+	driver.attach(frame, null)
+	assert_true(driver.open_document(doc, null, null, null, "weapon.mnu", "WEAPON"),
+			"the framed WEAPON document opens on the driver")
+	return driver
+
+
+func _write_solid_tga(path: String) -> void:
+	var bytes := PackedByteArray()
+	bytes.resize(18 + 2 * 2 * 4)
+	bytes[2] = 2
+	bytes[12] = 2
+	bytes[14] = 2
+	bytes[16] = 32
+	bytes[17] = 0x28
+	for i in range(18, bytes.size()):
+		bytes[i] = 0xff
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "the temporary weapon icon opens for writing")
+	if file != null:
+		file.store_buffer(bytes)
+		file.close()
 
 
 func _items(driver: MenuDriver, name: String) -> Array:
@@ -210,6 +240,39 @@ func test_populates_classes_slots_and_ammo() -> void:
 	driver.select_row(ammo, 0)  # the user pick relays as a "combo" value change
 	assert_eq(companion.selected_clips("PRIMARY"), 1,
 		"the first zero-based UI row serializes as one clip")
+
+
+# update_weapon_weight_display updates the three blank *_ICON windows from the
+# selected weapon.def row's loadout_menu_icon (+144); selecting NONE clears it
+# [orig: @0x5657a8..0x5658a3].
+func test_selected_primary_mounts_and_clears_its_weapon_icon() -> void:
+	var temp_dir := OS.get_temp_dir().path_join(
+			"opennova_armory_icon_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(temp_dir), OK)
+	_write_solid_tga(temp_dir.path_join("M_4.tga"))
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(temp_dir), OK)
+
+	var companion := ArmoryMenuCompanion.new()
+	companion.set_weapon_database(_load_weapons())
+	companion.set_player_class(8)
+	companion.set_current_loadout("WPN_M4AUTO")
+	var driver := _make_weapon_driver(true)
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", root)
+
+	var icon := driver.get_frame().find_child(
+			"PRIMARYArmoryIcon", true, false) as TextureRect
+	assert_not_null(icon, "the Armory mounts a texture over PRIMARY_ICON")
+	if icon != null:
+		assert_not_null(icon.texture,
+				"the selected M4 displays its loadout_menu_icon texture")
+		assert_eq(icon.position,
+				driver.widget_frame_rect(driver.widget_id("PRIMARY_ICON")).position)
+		driver.select_row(driver.widget_id("PRIMARY"), 0)
+		assert_null(icon.texture, "the NONE row clears the weapon preview texture")
+
+	DirAccess.remove_absolute(temp_dir.path_join("M_4.tga"))
+	DirAccess.remove_absolute(temp_dir)
 
 
 func test_ammo_rows_resolve_the_shipped_wepdes_labels() -> void:

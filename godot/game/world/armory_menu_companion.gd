@@ -31,8 +31,7 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # Deferred (tracked in the armory RE notes): the per-class 2048-byte loadout
 # buffer MEMORY (save-on-flip + remembered counts) [orig:
 # g_armoryLoadoutBufferByClass @0x25DD740 -> populate_ammo_type_combo_boxes
-# @0x564930], the icon swaps [orig: @0x565640 tail, icon table @0x2540D70], the
-# *_AMMO2 controls, and the *_AMMO1_TYPE round-type cascade.
+# @0x564930], the *_AMMO2 controls, and the *_AMMO1_TYPE round-type cascade.
 
 var _driver: MenuDriver
 var _root: ResourceRoot
@@ -77,6 +76,9 @@ var _grenade_rows: Array = []
 var _accept_hotkey_armed := false
 # NAME (upper) -> Callable activation routing off the driver.
 var _activation_handlers := {}
+# PRIMARY/SECONDARY/ACCESSORY -> TextureRect mounted over the blank authored
+# *_ICON window. The compiled frame owns no per-widget Control nodes.
+var _icon_mounts := {}
 
 signal loadout_accepted(loadout: Dictionary)
 signal armory_closed
@@ -150,10 +152,16 @@ func on_menu_built(driver: MenuDriver, _file: String, _screen: String, root: Res
 	_driver = driver
 	_root = root
 	_activation_handlers.clear()
+	_clear_icon_mounts()
 	if not driver.widget_activated.is_connected(_on_widget_activated):
 		driver.widget_activated.connect(_on_widget_activated)
 	if not driver.widget_value_changed.is_connected(_on_widget_value_changed):
 		driver.widget_value_changed.connect(_on_widget_value_changed)
+	if not driver.screen_changed.is_connected(_on_screen_changed):
+		driver.screen_changed.connect(_on_screen_changed)
+	var frame := driver.get_frame()
+	if frame != null and not frame.resized.is_connected(_reposition_icon_mounts):
+		frame.resized.connect(_reposition_icon_mounts)
 	_ensure_weapons()
 	_populate_classes()
 	_populate_slots()
@@ -473,6 +481,7 @@ func _selected_grenade_loadout() -> Array[Dictionary]:
 
 func _update_weight() -> void:
 	if _weapons == null:
+		_update_icons()
 		return  # weapon.def absent: the screen degrades with empty slot lists
 	var indices := PackedInt32Array()
 	var counts := PackedInt32Array()
@@ -504,6 +513,38 @@ func _update_weight() -> void:
 		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
 			_menu_text("TOTAL_WEIGHT", "Total Weight"), total,
 			_menu_text("LBS", "lbs"), encumbrance])
+	_update_icons()
+
+
+# The blank PRIMARY/SECONDARY/ACCESSORY_ICON windows receive the selected
+# weapon.def row's loadout_menu_icon (+144); NONE clears the image. Retail does
+# this in the same combined refresh as the weight line [orig:
+# update_weapon_weight_display @0x5657a8..0x5658a3]. TextureRects are mounted as
+# frame children because the compiled MenuFrame has no per-widget Control nodes.
+func _update_icons() -> void:
+	var frame := _driver.get_frame() if _driver != null else null
+	if frame == null:
+		return
+	for control in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
+		var holder := _driver.widget_id(control + "_ICON")
+		if holder < 0:
+			continue
+		var icon_rect: TextureRect = _icon_mounts.get(control)
+		if icon_rect == null or not is_instance_valid(icon_rect):
+			icon_rect = TextureRect.new()
+			icon_rect.name = control + "ArmoryIcon"
+			icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			icon_rect.stretch_mode = TextureRect.STRETCH_SCALE
+			icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			frame.add_child(icon_rect)
+			_icon_mounts[control] = icon_rect
+		_place_icon_mount(icon_rect, holder)
+		var icon_name := String(selected_weapon(control).get("icon", ""))
+		if icon_name.is_empty() or _root == null:
+			icon_rect.texture = null
+		else:
+			icon_rect.texture = _root.load_texture(
+					icon_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 
 
 ## The rendered weight line (public read seam for tests/diagnostics).
@@ -586,6 +627,39 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, _va
 		"PRIMARY_AMMO1", "SECONDARY_AMMO1", "ACCESSORY_AMMO1", \
 		"GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3":
 			_update_weight()
+
+
+# --- Frame icon mounts ------------------------------------------------------------
+
+func _clear_icon_mounts() -> void:
+	for control in _icon_mounts:
+		var mount: TextureRect = _icon_mounts[control]
+		if mount != null and is_instance_valid(mount):
+			mount.queue_free()
+	_icon_mounts.clear()
+
+
+func _place_icon_mount(mount: Control, id: int) -> void:
+	var rect := _driver.widget_frame_rect(id)
+	mount.position = rect.position
+	mount.size = rect.size
+	mount.visible = rect.size.x > 0.0 and rect.size.y > 0.0
+
+
+func _reposition_icon_mounts() -> void:
+	if _driver == null:
+		return
+	for control in _icon_mounts:
+		var mount: TextureRect = _icon_mounts[control]
+		if mount == null or not is_instance_valid(mount):
+			continue
+		var holder := _driver.widget_id(String(control) + "_ICON")
+		if holder >= 0:
+			_place_icon_mount(mount, holder)
+
+
+func _on_screen_changed(_screen_name: String) -> void:
+	_reposition_icon_mounts()
 
 
 # --- Helpers -----------------------------------------------------------------------
