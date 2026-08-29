@@ -1,15 +1,22 @@
-// Generator + guard for fixtures/cbin/credits_image.png (the 8x8 RGB image
-// the credits (.kda) tests stage beside a .kda under the name its ~F image
-// row references; a self-contained PNG writer with one stored zlib block, so
-// no compressor is involved and every platform mints the same bytes; the
-// pixels are an integer gradient) and fixtures/cbin/particle_dot.tga (the
-// 8x8 BGRA sprite the effect-world test's synthetic particle file names as
-// its layer texture: a soft white dot on transparent). No retail image is
-// carried.
+// Generator + guard for fixtures/cbin:
+//  * synth_nlist.kda, synth_nlist_jox01.kda, synth_nlist_bhd.kda — three
+//    synthetic credits lists written by cbin::encode from authored rows, in
+//    the shapes the shipped JO, JOX01 and BHD nlist.kda take (the BHD one
+//    carries the top_y/bottom_y bounds); a fixed XOR key per file keeps the
+//    bytes reproducible. The shipped trio is cbin_roundtrip's reference-tree leg.
+//  * credits_image.png — the 8x8 RGB image the credits tests stage beside a
+//    .kda under the name its ~F image row references (a self-contained PNG
+//    writer with one stored zlib block, so no compressor is involved and every
+//    platform mints the same bytes; the pixels are an integer gradient).
+//  * particle_dot.tga — the 8x8 BGRA sprite the effect-world test's synthetic
+//    particle file names as its layer texture (a soft white dot on transparent).
+// No retail file is carried.
 //
 // Default: rebuild in memory and byte-compare the committed files. `--write`
 // (re)writes them.
 #include "common/test_paths.h"
+
+#include <formats/cbin/cbin.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -153,6 +160,88 @@ int guard(const std::string &path, const std::vector<uint8_t> &bytes, bool write
 	return 0;
 }
 
+// --- the credits lists -----------------------------------------------------
+
+using opennova::cbin::Credits;
+using opennova::cbin::Entry;
+using opennova::cbin::EntryType;
+using opennova::cbin::Justify;
+
+Entry text_with_font(const std::string &text, const std::string &font) {
+	Entry e = Entry::make_text(text, font);
+	e.binary_type = 2; // the text + font pair element
+	return e;
+}
+
+// A credits list: a title block (centered, a colour, the logo image row the
+// tests resolve as cr_logo.png, the title in the Synth24 font the tests
+// resolve as Synth24.fnt), then `sections` credit sections of a heading and
+// two names each; every section re-colours and the last one right-justifies.
+// `sections` sets the text-with-font count: 1 + 3 * sections.
+Credits make_credits(const char *title, int sections, uint32_t xor_key) {
+	Credits c;
+	c.scroll_rate = 0.5f;
+	c.vertical_space = 14;
+	c.center_x = 400;
+	c.xor_key = xor_key;
+	c.entries.push_back(Entry::make_justify(Justify::Center));
+	c.entries.push_back(Entry::make_color(0xFFFFD0));
+	c.entries.push_back(Entry::make_image("cr_logo.png", 300, 20));
+	c.entries.push_back(Entry::make_newline());
+	c.entries.push_back(text_with_font(title, "Synth24"));
+	c.entries.push_back(Entry::make_newline());
+	static const char *const kHeadings[] = {"ENGINE", "FORMATS", "NETWORK", "AUDIO", "TERRAIN",
+	                                        "MENUS", "TOOLS", "TESTING", "DOCS", "THANKS"};
+	for (int s = 0; s < sections; ++s) {
+		c.entries.push_back(Entry::make_color(0x80C0FF - 0x100000 * (s % 4)));
+		if (s == sections - 1) c.entries.push_back(Entry::make_justify(Justify::Right));
+		c.entries.push_back(text_with_font(kHeadings[s % 10], "Synth24"));
+		c.entries.push_back(Entry::make_newline());
+		c.entries.push_back(text_with_font("Contributor " + std::to_string(2 * s + 1), "Synth16"));
+		c.entries.push_back(Entry::make_newline());
+		c.entries.push_back(text_with_font("Contributor " + std::to_string(2 * s + 2), "Synth16"));
+		c.entries.push_back(Entry::make_newline());
+	}
+	return c;
+}
+
+// Encode a list, prove the bytes decode back to the same entry sequence and
+// re-encode identically (with the string table the decoder recovered), and
+// return them.
+bool build_credits(const Credits &credits, std::vector<uint8_t> &bytes, std::string &err) {
+	if (!opennova::cbin::encode(credits, bytes, err)) return false;
+	Credits back;
+	if (!opennova::cbin::decode_credits(bytes.data(), bytes.size(), back, err)) return false;
+	if (back.entries.size() != credits.entries.size()) {
+		err = "the decoded list lost entries";
+		return false;
+	}
+	size_t with_font = 0;
+	for (const Entry &e : back.entries)
+		if (e.type == EntryType::Text && !e.font.empty()) ++with_font;
+	size_t expected_with_font = 0;
+	for (const Entry &e : credits.entries)
+		if (e.type == EntryType::Text && !e.font.empty()) ++expected_with_font;
+	if (with_font != expected_with_font || back.has_bhd_bounds() != credits.has_bhd_bounds()) {
+		err = "the decoded list lost a font name or the BHD bounds";
+		return false;
+	}
+	std::vector<uint8_t> again;
+	if (!opennova::cbin::encode(back, again, err)) return false;
+	if (again != bytes) {
+		err = "encode(decode(encode(credits))) is not byte-stable";
+		return false;
+	}
+	return true;
+}
+
+int guard_credits(const std::string &path, const Credits &credits, bool write_mode) {
+	std::vector<uint8_t> bytes;
+	std::string err;
+	if (!expect(build_credits(credits, bytes, err), (path + ": " + err).c_str())) return 1;
+	return guard(path, bytes, write_mode);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -163,5 +252,17 @@ int main(int argc, char **argv) {
 	int failures = 0;
 	failures += guard(dir + "/credits_image.png", make_png(), write_mode);
 	failures += guard(dir + "/particle_dot.tga", make_tga(), write_mode);
+	// JO: 8 sections (25 text entries with fonts, the count kda_load_test pins).
+	failures += guard_credits(dir + "/synth_nlist.kda", make_credits("OPENNOVA", 8, 0x5EED0001u), write_mode);
+	// JOX01: the expansion's longer list.
+	failures += guard_credits(dir + "/synth_nlist_jox01.kda", make_credits("OPENNOVA JOX", 10, 0x5EED0002u),
+	                          write_mode);
+	// BHD: the top_y/bottom_y viewport bounds the BHD-era encoding adds.
+	Credits bhd = make_credits("OPENNOVA BHD", 6, 0x5EED0003u);
+	bhd.has_top_y = true;
+	bhd.top_y = 60;
+	bhd.has_bottom_y = true;
+	bhd.bottom_y = 580;
+	failures += guard_credits(dir + "/synth_nlist_bhd.kda", bhd, write_mode);
 	return failures == 0 ? 0 : 1;
 }

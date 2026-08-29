@@ -1,8 +1,8 @@
 extends GutTest
 
-const KDA_PATH := "res://../fixtures/cbin/nlist.reference.kda"
-# Synthetic stand-ins staged under the names the retail .kda references
-# (cr1.png, Serpen24.fnt); minted by tests/fixtures/minimal_{cbin,fnt}_gen.cpp.
+const KDA_PATH := "res://../fixtures/cbin/synth_nlist.kda"
+# The image and font staged under the names the minted .kda references
+# (cr_logo.png, Synth24.fnt); all minted by tests/fixtures/minimal_{cbin,fnt}_gen.cpp.
 const CREDITS_IMAGE_FIXTURE := "res://../fixtures/cbin/credits_image.png"
 const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"
 const FONT_SAVE_PATH := "user://kda_font_preserve_test.kda"
@@ -19,10 +19,10 @@ func after_each() -> void:
 func test_kda_loads_as_cbin_credits_resource() -> void:
 	var res := CbinCreditsResource.new()
 	assert_eq(res.load_from_path(KDA_PATH), OK,
-		"nlist.kda should load through CbinCreditsResource.load_from_path.")
+		"synth_nlist.kda should load through CbinCreditsResource.load_from_path.")
 
 	assert_true(res.get_entry_count() > 0,
-		"nlist.kda should contain at least one credits entry.")
+		"synth_nlist.kda should contain at least one credits entry.")
 
 	assert_true(res.get_scroll_rate() > 0.0,
 		"scroll_rate should be positive, got: %.4f" % res.get_scroll_rate())
@@ -37,8 +37,8 @@ func test_kda_load_save_preserves_unresolved_font_names() -> void:
 	assert_eq(res.load_from_path(KDA_PATH), OK, "Fixture should load before font preservation test.")
 
 	var original_font_count := _text_entries_with_font_names(res)
-	assert_eq(original_font_count, 231,
-		"Stock nlist.kda should expose all text-entry font names even without .fnt assets.")
+	assert_eq(original_font_count, 25,
+		"the minted nlist.kda should expose all text-entry font names even without .fnt assets.")
 
 	var err := res.save_to_path(FONT_SAVE_PATH)
 	assert_eq(err, OK, "Saving loaded KDA should succeed.")
@@ -61,8 +61,8 @@ func test_kda_resolves_fonts_and_images_from_same_filesystem_root() -> void:
 	_temp_roots.append(root)
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
 	_copy_fixture(KDA_PATH, root.path_join("nlist.kda"))
-	_copy_fixture(CREDITS_IMAGE_FIXTURE, root.path_join("cr1.png"))
-	_copy_fixture(FONT_FIXTURE, root.path_join("Serpen24.fnt"))
+	_copy_fixture(CREDITS_IMAGE_FIXTURE, root.path_join("cr_logo.png"))
+	_copy_fixture(FONT_FIXTURE, root.path_join("Synth24.fnt"))
 
 	var res := CbinCreditsResource.new()
 	assert_eq(res.load_from_path(root.path_join("nlist.kda")), OK,
@@ -72,9 +72,9 @@ func test_kda_resolves_fonts_and_images_from_same_filesystem_root() -> void:
 	var resolved_font := false
 	for i in range(res.get_entry_count()):
 		var entry := res.get_entry(i)
-		if entry is CbinImageEntry and (entry as CbinImageEntry).get_texture_name().to_lower() == "cr1.png":
+		if entry is CbinImageEntry and (entry as CbinImageEntry).get_texture_name().to_lower() == "cr_logo.png":
 			resolved_image = (entry as CbinImageEntry).get_texture() != null
-		elif entry is CbinTextEntry and (entry as CbinTextEntry).get_font_name() == "Serpen24":
+		elif entry is CbinTextEntry and (entry as CbinTextEntry).get_font_name() == "Synth24":
 			resolved_font = (entry as CbinTextEntry).get_font() != null
 		if resolved_image and resolved_font:
 			break
