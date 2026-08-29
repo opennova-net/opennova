@@ -21,9 +21,9 @@ python scripts/mcp/game_mcp.py launch --windowed --resolution 1280x720 \
 - `--headless` when no window is needed (window probes then report
   `available: false`); `--windowed` otherwise (never rely on the project's
   fullscreen default under automation).
-- The four machine roots come from `.claude/settings.local.json` `env`
-  (`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`, `OPENNOVA_MISSION_CORPUS`,
-  `OPENNOVA_CAPTURES`); never guess or commit a local path. `GODOT_BIN` names
+- The three machine roots come from `.claude/settings.local.json` `env`
+  (`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`, `OPENNOVA_CAPTURES`); never guess
+  or commit a local path. `GODOT_BIN` names
   the binary (else the main checkout's `.godot-bin/`).
 - A `--mission` launch parks under the start splash with the world un-ticked:
   every mission probe begins with `wait_for_local_player`.

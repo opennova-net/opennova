@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
 	std::string error, served_by;
 	if (!retail::open_mission(rig, install, "05TRcoop.bms", error, served_by))
 		return retail::skip("05TRcoop.bms on the OPENNOVA_JO_DIR mount (base or an expansion) "
-		                    "or under OPENNOVA_MISSION_CORPUS");
+		                    "or loose under OPENNOVA_JO_ASSETS");
 	testrig::BootOptions options;
 	options.playable = false;
 	options.wac = false;

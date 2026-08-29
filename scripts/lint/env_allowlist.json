@@ -1,9 +1,8 @@
 {
-  "_comment": "The closed environment-variable set (docs/dev-env-vars.md) for scripts/lint/env_lint.py: the four machine roots read only by the three resolvers, GODOT_BIN in the scripts, the deployed service's own 12-factor config, and the OS variables at their known sites. A new read anywhere else is a launch flag, an argv option or an MCP tool argument, not an env var.",
+  "_comment": "The closed environment-variable set (docs/dev-env-vars.md) for scripts/lint/env_lint.py: the three machine roots read only by the three resolvers, GODOT_BIN in the scripts, the deployed service's own 12-factor config, and the OS variables at their known sites. A new read anywhere else is a launch flag, an argv option or an MCP tool argument, not an env var.",
   "gates": {
     "OPENNOVA_JO_DIR": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1", "scripts/mcp/game_mcp.py"],
     "OPENNOVA_JO_ASSETS": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1"],
-    "OPENNOVA_MISSION_CORPUS": ["tests/common/retail_paths.h", "godot/tests/support/retail_data.gd", "scripts/net/lib.ps1"],
     "OPENNOVA_CAPTURES": ["tests/common/retail_paths.h", "scripts/net/lib.ps1"]
   },
   "files": {

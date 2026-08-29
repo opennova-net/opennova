@@ -137,7 +137,7 @@ jobs:
         shell: bash
         run: |
           python scripts/ci/retail_gates_ran.py --junit build/Testing/ctest.xml \
-            --roots jo_dir,jo_assets,mission_corpus
+            --roots jo_dir,jo_assets
 
       - name: sccache stats
         if: always()
@@ -394,7 +394,7 @@ jobs:
         shell: bash
         run: |
           python scripts/ci/retail_gates_ran.py --gut-log gut.log \
-            --roots jo_dir,jo_assets,mission_corpus
+            --roots jo_dir,jo_assets
 
   # One job, the workflow's two zips. The DEV zip (game + ONED + loose assets/,
   # one copy of the data) is what PRs and master builds hand out; the GAME zip

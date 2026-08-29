@@ -84,8 +84,8 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
 - For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.
 - Asset-gated tests report Skipped (ctest exit 77, or a `SKIP-LEG:` line inside a
-  mixed test) unless the four roots — `OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`,
-  `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_CAPTURES` — point at local data; a green run
+  mixed test) unless the three roots — `OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`,
+  `OPENNOVA_CAPTURES` — point at local data; a green run
   never proves they exercised it. The root→test→data matrix, local setup, and the
   never-commit-captures policy live in [docs/asset-gated-tests.md](docs/asset-gated-tests.md);
   every other env hook is gone ([docs/dev-env-vars.md](docs/dev-env-vars.md),

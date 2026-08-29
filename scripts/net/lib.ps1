@@ -283,10 +283,10 @@ function Find-GodotBinary {
 }
 
 # The documented machine roots (docs/dev-env-vars.md): a packed retail install
-# (OPENNOVA_JO_DIR), an extracted asset tree (OPENNOVA_JO_ASSETS), the retail
-# mission corpus (OPENNOVA_MISSION_CORPUS) and the captures root
+# (OPENNOVA_JO_DIR), an extracted asset tree (OPENNOVA_JO_ASSETS, which also
+# carries the shipped .bms missions loose at its root) and the captures root
 # (OPENNOVA_CAPTURES, default <repo>\.scratch). Scripts resolve them here and
-# nowhere else. The three retail getters return $null when the variable is unset
+# nowhere else. The two retail getters return $null when the variable is unset
 # or the directory is missing; the caller decides whether that is fatal.
 # Cross-language twins: tests/common/retail_paths.h (C++) and
 # godot/tests/support/retail_data.gd (GUT) - change all three together.
@@ -300,13 +300,6 @@ function Get-OpenNovaRetailInstall {
 function Get-OpenNovaRetailAssets {
     if ($env:OPENNOVA_JO_ASSETS -and (Test-Path -LiteralPath $env:OPENNOVA_JO_ASSETS -PathType Container)) {
         return (Resolve-Path -LiteralPath $env:OPENNOVA_JO_ASSETS).Path
-    }
-    return $null
-}
-
-function Get-OpenNovaMissionCorpus {
-    if ($env:OPENNOVA_MISSION_CORPUS -and (Test-Path -LiteralPath $env:OPENNOVA_MISSION_CORPUS -PathType Container)) {
-        return (Resolve-Path -LiteralPath $env:OPENNOVA_MISSION_CORPUS).Path
     }
     return $null
 }

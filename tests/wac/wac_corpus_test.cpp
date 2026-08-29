@@ -34,17 +34,14 @@ int main(int argc, char **argv) {
     std::vector<std::string> dirs;
     for (int i = 1; i < argc; ++i) dirs.push_back(argv[i]);
     if (dirs.empty()) {
-        // Machine corpus roots come from the documented gates
-        // (docs/asset-gated-tests.md): the extracted asset tree and the
-        // mission corpus both carry shipped .wac scripts.
+        // The machine corpus root comes from the documented gate
+        // (docs/asset-gated-tests.md): the extracted asset tree carries the
+        // shipped .wac scripts beside their missions.
         if (const std::string assets = retail::assets(); !assets.empty())
             dirs.push_back(assets);
-        if (const std::string corpus = retail::mission_corpus();
-            !corpus.empty() && std::find(dirs.begin(), dirs.end(), corpus) == dirs.end())
-            dirs.push_back(corpus);
     }
     if (dirs.empty())
-        return retail::skip("OPENNOVA_JO_ASSETS or OPENNOVA_MISSION_CORPUS (directories of retail .wac scripts)");
+        return retail::skip("OPENNOVA_JO_ASSETS (the extracted tree's retail .wac scripts)");
 
     int files = 0;
     int hard_errors = 0;

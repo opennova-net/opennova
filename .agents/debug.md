@@ -63,11 +63,10 @@ These tests often skip cleanly when local captures or retail assets are absent.
 A skip is not coverage.
 
 - `OPENNOVA_JO_DIR` (a packed retail install)
-- `OPENNOVA_JO_ASSETS` (an extracted retail tree)
-- `OPENNOVA_MISSION_CORPUS` (retail `.bms` missions)
+- `OPENNOVA_JO_ASSETS` (an extracted retail tree, its `.bms` missions loose at the root)
 - `OPENNOVA_CAPTURES` (captures and goldens; default `.scratch/`)
 
-The four roots are the whole registry ([docs/asset-gated-tests.md](../docs/asset-gated-tests.md));
+The three roots are the whole registry ([docs/asset-gated-tests.md](../docs/asset-gated-tests.md));
 a gated ctest reports Skipped (exit 77) without its root, never a silent pass.
 
 ## Logs and Cleanup

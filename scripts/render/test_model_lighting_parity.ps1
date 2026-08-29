@@ -96,7 +96,7 @@ function Get-Median([double[]]$Values) {
 
 if (-not $SkipCapture) {
     if ([string]::IsNullOrWhiteSpace($MissionResourceDir)) {
-        $MissionResourceDir = Get-OpenNovaMissionCorpus
+        $MissionResourceDir = Get-OpenNovaRetailAssets
     }
     if ([string]::IsNullOrWhiteSpace($RuntimeResourceDir)) {
         $RuntimeResourceDir = Get-OpenNovaRetailInstall
@@ -106,7 +106,7 @@ if (-not $SkipCapture) {
         throw "Set GODOT_BIN or pass -GodotPath to run the capture."
     }
     if ([string]::IsNullOrWhiteSpace($MissionResourceDir)) {
-        throw "Set OPENNOVA_MISSION_CORPUS or pass -MissionResourceDir " +
+        throw "Set OPENNOVA_JO_ASSETS or pass -MissionResourceDir " +
             "to locate the loose authoring mission."
     }
     if ([string]::IsNullOrWhiteSpace($RuntimeResourceDir)) {

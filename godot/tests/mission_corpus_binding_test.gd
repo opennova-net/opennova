@@ -9,15 +9,15 @@ extends GutTest
 # data. This complements tests/mission/mission_corpus_test.cpp (the C++ parse/write proof) at the
 # Godot layer.
 #
-# Gated on OPENNOVA_MISSION_CORPUS (point it at a dir of real .bms files, e.g. an extracted JO_ASSETS
-# dir). The assets are copyrighted and not committed, so the test marks itself pending + passes when
+# Gated on OPENNOVA_JO_ASSETS (the extracted retail tree carries the shipped .bms loose at its
+# root). The assets are copyrighted and not committed, so the test marks itself pending + passes when
 # the env var is unset -- it never runs bare in CI.
 
 const MAX_WAYPOINT_SLOTS := 32
 
 
 func _corpus_dir() -> String:
-	return RetailData.mission_corpus()
+	return RetailData.assets()
 
 
 func _list_bms(dir_path: String) -> PackedStringArray:
@@ -35,7 +35,7 @@ func _list_bms(dir_path: String) -> PackedStringArray:
 func test_real_missions_open_and_are_sane_through_the_binding() -> void:
 	var dir := _corpus_dir()
 	if dir.is_empty():
-		pending("set OPENNOVA_MISSION_CORPUS to a dir of real .bms files to run")
+		pending("set OPENNOVA_JO_ASSETS to the extracted tree of real .bms files to run")
 		return
 	assert_true(DirAccess.dir_exists_absolute(dir), "corpus dir exists: %s" % dir)
 
@@ -89,11 +89,11 @@ func test_cp19_over_count_waypoint_loads_and_is_clamped() -> void:
 	# bug the corpus round-trip surfaced.
 	var dir := _corpus_dir()
 	if dir.is_empty():
-		pending("set OPENNOVA_MISSION_CORPUS to the dir containing CP19.bms to run")
+		pending("set OPENNOVA_JO_ASSETS to the extracted tree containing CP19.bms to run")
 		return
 	var path := dir.path_join("CP19.bms")
 	if not FileAccess.file_exists(path):
-		pending("OPENNOVA_MISSION_CORPUS: CP19.bms not present in the corpus dir")
+		pending("OPENNOVA_JO_ASSETS: CP19.bms not present in the tree")
 		return
 	var m := MissionData.new()
 	assert_eq(m.open_file(path), OK, "CP19.bms opens through the binding (no rejection)")
@@ -106,11 +106,11 @@ func test_cp19_over_count_waypoint_loads_and_is_clamped() -> void:
 func test_real_mission_round_trips_through_the_binding_save_path() -> void:
 	var dir := _corpus_dir()
 	if dir.is_empty():
-		pending("set OPENNOVA_MISSION_CORPUS to a dir of real .bms files to run")
+		pending("set OPENNOVA_JO_ASSETS to the extracted tree of real .bms files to run")
 		return
 	var files := _list_bms(dir)
 	if files.is_empty():
-		pending("OPENNOVA_MISSION_CORPUS: no .bms files in the corpus dir")
+		pending("OPENNOVA_JO_ASSETS: no .bms files in the tree")
 		return
 
 	var src := files[0]

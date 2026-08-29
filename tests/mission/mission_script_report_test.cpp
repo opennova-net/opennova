@@ -83,7 +83,7 @@ int main() {
 	std::string error, served_by;
 	if (!retail::open_mission(rig, install, mission_file, error, served_by))
 		return retail::skip((mission_file + " on the OPENNOVA_JO_DIR mount (base or an expansion) "
-		                     "or under OPENNOVA_MISSION_CORPUS").c_str());
+		                     "or loose under OPENNOVA_JO_ASSETS").c_str());
 	// The bare no-net tick with the host's own player at the start marker: the
 	// zone tour below walks THAT body, the same pool the group-in-area triggers
 	// scan [orig: Entity_IsTeamInTriggerBounds @0x43c730].

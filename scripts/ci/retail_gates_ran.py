@@ -10,8 +10,8 @@ gates must have run, and no mixed test may have skipped a leg naming a
 mounted root.
 
     python scripts/ci/retail_gates_ran.py --junit build/Testing/ctest.xml \
-        --roots jo_dir,jo_assets,mission_corpus
-    python scripts/ci/retail_gates_ran.py --gut-log gut.log --roots jo_dir,jo_assets,mission_corpus
+        --roots jo_dir,jo_assets
+    python scripts/ci/retail_gates_ran.py --gut-log gut.log --roots jo_dir,jo_assets
 
 Exit 1 on any gap, listing it. The expectations below are the root -> test
 matrix of docs/asset-gated-tests.md; keep the two in step.
@@ -27,7 +27,6 @@ from pathlib import Path
 ROOT_VARS = {
     "jo_dir": "OPENNOVA_JO_DIR",
     "jo_assets": "OPENNOVA_JO_ASSETS",
-    "mission_corpus": "OPENNOVA_MISSION_CORPUS",
 }
 
 # Fully gated ctests: `***Skipped` with the root mounted is a gap.
@@ -44,8 +43,9 @@ MUST_RUN = {
         "ai_corpse", "rock_collision_00trg", "soak_00trg", "native_assets_00trg",
         "npruntime_remote_body_state", "npruntime_held_weapon_attach",
         "npruntime_authored_payload_00trg",
+        # The shipped .bms missions loose at the tree's root.
+        "mission_corpus",
     ],
-    "mission_corpus": ["mission_corpus"],
 }
 
 # Mixed ctests: a `SKIP-LEG:` line naming the mounted root is a gap.
@@ -62,7 +62,6 @@ MIXED = {
         "avatars_roundtrip", "mus_parse", "mus_compat", "mus_decompile", "mus_roundtrip",
         "mus_names_roundtrip", "mus_entry_roundtrip", "mus_encode_idempotence", "mus_vm",
     ],
-    "mission_corpus": [],
 }
 
 # Gated tests the reference data cannot serve yet; reported, never a gap.
@@ -125,8 +124,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--junit", type=Path, help="ctest --output-junit report")
     ap.add_argument("--gut-log", type=Path, help="the GUT run's captured output")
-    ap.add_argument("--roots", default="jo_dir,jo_assets,mission_corpus",
-                    help="comma-separated mounted roots (jo_dir, jo_assets, mission_corpus)")
+    ap.add_argument("--roots", default="jo_dir,jo_assets",
+                    help="comma-separated mounted roots (jo_dir, jo_assets)")
     args = ap.parse_args()
     roots = [r.strip() for r in args.roots.split(",") if r.strip()]
     unknown = [r for r in roots if r not in ROOT_VARS]

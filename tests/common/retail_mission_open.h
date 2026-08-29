@@ -1,6 +1,6 @@
 // Open a retail mission into the shared rig the way the OPENNOVA_JO_DIR tests
 // read missions (retail_mission.h): the base mount first, then each expansion
-// the install carries, then the loose OPENNOVA_MISSION_CORPUS copy. The rig's
+// the install carries, then the loose copy under OPENNOVA_JO_ASSETS. The rig's
 // own index stays scanned on the layer that served the mission and becomes
 // the kernel's asset source, so the kernel boot (seat specs, .adm clips,
 // terrain, collision, weapon/ammo tables) reads the same layer.
@@ -27,7 +27,7 @@ inline bool open_mission(opennova::testrig::RetailMissionRig &rig, const std::st
 	std::vector<uint8_t> bytes;
 	if (!read_mission(install, name, rig.index, bytes, served_by)) {
 		error = name + " is on no mount under " + install +
-		        " and not under OPENNOVA_MISSION_CORPUS";
+		        " and not loose under OPENNOVA_JO_ASSETS";
 		return false;
 	}
 	opennova::bms::File parsed;

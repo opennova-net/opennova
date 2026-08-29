@@ -56,7 +56,7 @@ int main() {
 	std::string error, served_by;
 	if (!retail::open_mission(rig, install, "05TRcoop.bms", error, served_by))
 		return retail::skip("05TRcoop.bms on the OPENNOVA_JO_DIR mount (base or an expansion) "
-		                    "or under OPENNOVA_MISSION_CORPUS");
+		                    "or loose under OPENNOVA_JO_ASSETS");
 	// The bare no-net tick: the scripted chain under test needs no session,
 	// and the host's own player spawns at the mission start marker.
 	testrig::BootOptions options;
