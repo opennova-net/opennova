@@ -81,12 +81,46 @@ func get_mcp_game_state() -> Variant:
 					if world != null else "",
 			"dev_tools_open": bool(_seams.dev_tools_open_source.call()),
 		},
+		"session": _session_facts(sim),
 		"runtime": runtime_state,
 		"player": player,
 		"mission": world.get_mission_stats() if world != null else {},
 		"performance": world.get_runtime_perf_counters() if world != null else {},
 		"audio_buses": _audio_bus_state(),
 	}
+
+
+## The in-match session facts (ADR 0042: Simulation.session_state()/
+## session_role() re-export the portable inmatch::Session — the authority,
+## never the transport flags), as transport labels.
+func _session_facts(sim: Variant) -> Dictionary:
+	if sim == null:
+		return {}
+	return {
+		"state": _session_state_name(int(sim.session_state())),
+		"role": _session_role_name(int(sim.session_role())),
+	}
+
+
+func _session_state_name(state: int) -> String:
+	match state:
+		MissionFrameOutcome.STATE_UNLOADED: return "unloaded"
+		MissionFrameOutcome.STATE_CONNECTING: return "connecting"
+		MissionFrameOutcome.STATE_LOADING: return "loading"
+		MissionFrameOutcome.STATE_RUNNING: return "running"
+		MissionFrameOutcome.STATE_PAUSED: return "paused"
+		MissionFrameOutcome.STATE_STOPPING: return "stopping"
+		MissionFrameOutcome.STATE_FAILED: return "failed"
+	return "unknown(%d)" % state
+
+
+func _session_role_name(role: int) -> String:
+	match role:
+		Simulation.ROLE_SINGLE_PLAYER: return "single_player"
+		Simulation.ROLE_LISTEN_HOST: return "listen_host"
+		Simulation.ROLE_JOINER: return "joiner"
+		Simulation.ROLE_DEDICATED_HOST: return "dedicated_host"
+	return "unknown(%d)" % role
 
 
 ## One transport-ready view of the world's typed renderer snapshot. Shell

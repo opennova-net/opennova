@@ -125,6 +125,7 @@
     "host_loop",
     "host_loop_",
     "listen_host",
+    "dedicated_host",
     "host_loopback",
     "host_max_players_",
     "host_model",

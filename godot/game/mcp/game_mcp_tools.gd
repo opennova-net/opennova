@@ -261,6 +261,7 @@ func _tool_game_logs(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("Runtime logs are unavailable.")
 	var hub: McpLogHub = service.log_hub
 	hub.ingest_engine()
+	hub.ingest_godot_log()
 	var session: Dictionary = service.server.session(
 			String(ctx.args.get("_session_id", "")))
 	var cursor := int(args.get("cursor", -1))

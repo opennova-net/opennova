@@ -4,6 +4,8 @@
 
 #include <godot_cpp/classes/sub_viewport.hpp>
 
+#include <base/io/log_ring.h>
+
 #if OPENNOVA_DEVTOOLS
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/time.hpp>
@@ -42,8 +44,31 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stats_row_peak", "row_id"), &DevTools::stats_row_peak);
 	ClassDB::bind_method(D_METHOD("stats_row_info", "row_id"), &DevTools::stats_row_info);
 	ClassDB::bind_method(D_METHOD("reset_layout"), &DevTools::reset_layout);
+	ClassDB::bind_static_method("DevTools", D_METHOD("engine_log_after", "cursor"),
+			&DevTools::engine_log_after);
 	ADD_SIGNAL(MethodInfo("open_changed", PropertyInfo(Variant::BOOL, "open")));
 	ADD_SIGNAL(MethodInfo("game_input_mode_changed", PropertyInfo(Variant::BOOL, "playing")));
+}
+
+// Both flavours: the engine log ring records regardless of OPENNOVA_DEVTOOLS
+// (it is io infrastructure, not an ImGui window).
+Dictionary DevTools::engine_log_after(int64_t p_cursor) {
+	const std::vector<opennova::io::LogRingEntry> entries =
+			opennova::io::LogRing::instance().entries_after(
+					p_cursor > 0 ? static_cast<uint64_t>(p_cursor) : 0);
+	PackedInt64Array sequences;
+	PackedStringArray levels;
+	PackedStringArray texts;
+	for (const opennova::io::LogRingEntry &entry : entries) {
+		sequences.append(static_cast<int64_t>(entry.sequence));
+		levels.append(String(opennova::io::log_level_name(entry.level)));
+		texts.append(String::utf8(entry.text.c_str()));
+	}
+	Dictionary out;
+	out["sequences"] = sequences;
+	out["levels"] = levels;
+	out["texts"] = texts;
+	return out;
 }
 
 #if OPENNOVA_DEVTOOLS

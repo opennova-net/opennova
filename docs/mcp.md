@@ -67,14 +67,16 @@ shell has no console (a hidden automation shell): launch from a real terminal
 (or `cmd /c`), or point `GODOT_BIN` at the plain runtime executable. The
 parity runner's ownership proofs require the wrapper.
 
-`--log-file <path>` makes the engine log readable through `game_logs`; a
-headless launch reports `available: false` for probes that need a window.
+`--log-file <path>` makes Godot's own log (script errors, prints) readable
+through `game_logs` as source `godot`; engine io::log entries always arrive
+from the in-process ring as source `engine`. A headless launch reports
+`available: false` for probes that need a window.
 
 ## The tool catalog
 
 | Tool | What it does |
 |---|---|
-| `game_state` | the shell, mission, runtime (entity/brain counts, the network role: `host` with its port and peers, `joiner` with its phase and admission, or `local`) and player state |
+| `game_state` | the shell, the in-match session (`session.state`/`session.role` from the portable inmatch session), mission, runtime (entity/brain counts, the network role: `host` with its port and peers, `joiner` with its phase and admission, or `local`) and player state |
 | `game_entities` | `op=list` a bounded page of the rendered entity view; `op=inspect` one entity's public debug card (its `ai_index` is the edit target for `game_debug`) |
 | `game_control` | `quit`, pause/step/resume, `open_ingame_menu`, `open_armory`, ...; `quit` cancels a running probe first |
 | `game_debug` | the F3 debug catalog without the UI: `op=list/get/set/invoke/snapshot`; the automation actions `teleport_local_player`, `set_entity_health/position`, `deploy_pick`, `set_viewmodel_weapon`/`clear_viewmodel_weapon`, `kill_group`, `crew_vehicle`, `crew_local_player`, `local_player_look`, the audio bus actions, `runtime_transport`, `set_mission_variable`; the `net_joiner_diagnostics` check |
@@ -82,7 +84,7 @@ headless launch reports `available: false` for probes that need a window.
 | `game_capture_bundle` | the next completed frame as a lossless PNG + diagnostics JSON under `user://render-captures` (`world_only` hides the canvas UI) |
 | `game_menu` | drive the compiled menu: `state`, `press`, `press_at`, `click_at`, `key`, `screen`, `open` |
 | `game_screenshot` | the game window, F3 included when open |
-| `game_logs` | the MCP, probe and engine log entries (sources `mcp`, `probe`, `engine`) |
+| `game_logs` | the MCP, probe, engine and Godot log entries (sources `server`, `script`, `probe`, `engine` — the native io::log ring — and `godot` — the tailed Godot log file) |
 | `game_probe` | the registered runtime probes: `op=list/run/status/cancel` (below) |
 
 Tools marked serial (captures, screenshots, control) run one at a time;

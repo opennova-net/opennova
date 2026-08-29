@@ -1,7 +1,8 @@
 extends GutTest
 
 # McpLogHub: cursor paging, ring overflow accounting, the status mirror seam,
-# and the engine log tail (classification, continuation merge, partial lines).
+# the engine io::log ring drain (source "engine"), and the Godot log tail
+# (source "godot": classification, continuation merge, partial lines).
 
 const FAKE_LOG := "user://mcp_hub_test.log"
 
@@ -80,15 +81,15 @@ func test_sources_filter() -> void:
 	assert_eq(String(page["entries"][0]["text"]), "from status")
 
 
-func test_engine_ingest_classifies_and_merges() -> void:
+func test_godot_ingest_classifies_and_merges() -> void:
 	_write_fake_log("")
-	hub.set_engine_log_path(ProjectSettings.globalize_path(FAKE_LOG))
+	hub.set_godot_log_path(ProjectSettings.globalize_path(FAKE_LOG))
 	_append_fake_log("Mission loaded in 2.4s\n")
 	_append_fake_log("SCRIPT ERROR: Invalid call on a Nil value.\n")
 	_append_fake_log("   at: run (gdscript://123.gd:4)\n")
 	_append_fake_log("WARNING: something minor\n")
-	hub.ingest_engine()
-	var page := hub.get_entries(0, 10, PackedStringArray(["engine"]))
+	hub.ingest_godot_log()
+	var page := hub.get_entries(0, 10, PackedStringArray(["godot"]))
 	assert_eq(page["entries"].size(), 3, "Continuation folded into its error block.")
 	assert_eq(String(page["entries"][0]["level"]), "info")
 	assert_eq(String(page["entries"][1]["level"]), "error")
@@ -96,50 +97,99 @@ func test_engine_ingest_classifies_and_merges() -> void:
 	assert_eq(String(page["entries"][2]["level"]), "warn")
 
 
-func test_engine_ingest_holds_partial_line() -> void:
+func test_godot_ingest_holds_partial_line() -> void:
 	_write_fake_log("")
-	hub.set_engine_log_path(ProjectSettings.globalize_path(FAKE_LOG))
+	hub.set_godot_log_path(ProjectSettings.globalize_path(FAKE_LOG))
 	_append_fake_log("complete line\nincomplete frag")
-	hub.ingest_engine()
-	var page := hub.get_entries(0, 10, PackedStringArray(["engine"]))
+	hub.ingest_godot_log()
+	var page := hub.get_entries(0, 10, PackedStringArray(["godot"]))
 	assert_eq(page["entries"].size(), 1, "Half-written line is not ingested.")
 	_append_fake_log("ment finished\n")
-	hub.ingest_engine()
-	page = hub.get_entries(0, 10, PackedStringArray(["engine"]))
+	hub.ingest_godot_log()
+	page = hub.get_entries(0, 10, PackedStringArray(["godot"]))
 	assert_eq(page["entries"].size(), 2)
 	assert_eq(String(page["entries"][1]["text"]), "incomplete fragment finished")
 
 
-func test_engine_delta_is_stateless() -> void:
+func test_godot_log_delta_is_stateless() -> void:
 	_write_fake_log("")
-	hub.set_engine_log_path(ProjectSettings.globalize_path(FAKE_LOG))
-	var mark := hub.engine_mark()
+	hub.set_godot_log_path(ProjectSettings.globalize_path(FAKE_LOG))
+	var mark := hub.godot_log_mark()
 	_append_fake_log("ERROR: boom\n   at: somewhere\n")
-	var blocks := hub.engine_delta(mark)
+	var blocks := hub.godot_log_delta(mark)
 	assert_eq(blocks.size(), 1)
 	assert_eq(String(blocks[0]["level"]), "error")
 	assert_true(String(blocks[0]["text"]).contains("boom"))
-	assert_eq(hub.engine_delta(mark).size(), 1, "Delta does not consume; same answer twice.")
+	assert_eq(hub.godot_log_delta(mark).size(), 1, "Delta does not consume; same answer twice.")
 
 
-func test_engine_log_path_follows_the_launch_log_file_flag() -> void:
+func test_godot_log_path_follows_the_launch_log_file_flag() -> void:
 	var fallback := ProjectSettings.globalize_path("user://logs/godot.log")
-	assert_eq(McpLogHub.resolve_engine_log_path(PackedStringArray([]), fallback), fallback)
-	assert_eq(McpLogHub.resolve_engine_log_path(
+	assert_eq(McpLogHub.resolve_godot_log_path(PackedStringArray([]), fallback), fallback)
+	assert_eq(McpLogHub.resolve_godot_log_path(
 			PackedStringArray(["--path", "godot", "--log-file", "C:/runs/x/godot.log"]),
 			fallback), ProjectSettings.globalize_path("C:/runs/x/godot.log"))
-	assert_eq(McpLogHub.resolve_engine_log_path(
+	assert_eq(McpLogHub.resolve_godot_log_path(
 			PackedStringArray(["--log-file=C:/runs/y/godot.log"]), fallback),
 			ProjectSettings.globalize_path("C:/runs/y/godot.log"))
-	assert_eq(McpLogHub.resolve_engine_log_path(
+	assert_eq(McpLogHub.resolve_godot_log_path(
 			PackedStringArray(["--log-file"]), fallback), fallback,
 			"a trailing flag without a value keeps the project log")
 
 
-func test_unavailable_engine_log_degrades_explicitly() -> void:
-	hub.set_engine_log_path("")
-	assert_false(hub.engine_available())
-	assert_eq(hub.engine_mark(), -1)
-	assert_eq(hub.engine_delta(0).size(), 0)
+func test_unavailable_godot_log_degrades_explicitly() -> void:
+	hub.set_godot_log_path("")
+	assert_false(hub.godot_log_available())
+	assert_eq(hub.godot_log_mark(), -1)
+	assert_eq(hub.godot_log_delta(0).size(), 0)
 	var page := hub.get_entries()
-	assert_eq(String(page["engine_log"]), "unavailable")
+	assert_eq(String(page["godot_log"]), "unavailable")
+
+
+static func _drain_page(seqs: Array, levels: Array, texts: Array) -> Dictionary:
+	return {
+		"sequences": PackedInt64Array(seqs),
+		"levels": PackedStringArray(levels),
+		"texts": PackedStringArray(texts),
+	}
+
+
+func test_engine_ring_ingest_pages_by_cursor() -> void:
+	var cursors: Array = []
+	var drain := func(cursor: int) -> Dictionary:
+		cursors.append(cursor)
+		if cursor >= 3:
+			return _drain_page([], [], [])
+		return _drain_page([1, 2, 3],
+				["info", "warn", "error"],
+				["kernel boot", "clamped value", "boom"])
+	hub.set_engine_drain(drain)
+	hub.ingest_engine()
+	var page := hub.get_entries(0, 10, PackedStringArray(["engine"]))
+	assert_eq(page["entries"].size(), 3, "the native ring's columns land as engine entries")
+	assert_eq(String(page["entries"][0]["text"]), "kernel boot")
+	assert_eq(String(page["entries"][1]["level"]), "warn")
+	assert_eq(String(page["entries"][2]["level"]), "error")
+	hub.ingest_engine()
+	page = hub.get_entries(0, 10, PackedStringArray(["engine"]))
+	assert_eq(page["entries"].size(), 3, "the drain cursor advanced; no duplicates")
+	assert_eq(cursors, [0, 3], "the second drain asks after the last ingested sequence")
+
+
+func test_engine_ring_wrap_gap_is_noted() -> void:
+	var pages := [
+		_drain_page([1], ["info"], ["first"]),
+		_drain_page([5, 6], ["debug", "info"], ["late a", "late b"]),
+		_drain_page([], [], []),
+	]
+	var drain := func(_cursor: int) -> Dictionary:
+		return pages.pop_front()
+	hub.set_engine_drain(drain)
+	hub.ingest_engine()
+	hub.ingest_engine()
+	var page := hub.get_entries(0, 10, PackedStringArray(["engine"]))
+	assert_eq(page["entries"].size(), 4, "two drained batches plus the gap note")
+	assert_eq(String(page["entries"][1]["level"]), "warn", "the wrap gap surfaces as a warn")
+	assert_true(String(page["entries"][1]["text"]).contains("3 unread entries lost"),
+			"seq 2..4 were overwritten before the drain")
+	assert_eq(String(page["entries"][2]["text"]), "late a")

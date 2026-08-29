@@ -130,7 +130,12 @@ void MissionFrameOutcome::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "ticks_run"), "", "get_ticks_run");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tick_us"), "", "get_tick_us");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "error"), "", "get_error");
+	BIND_ENUM_CONSTANT(STATE_UNLOADED);
+	BIND_ENUM_CONSTANT(STATE_CONNECTING);
+	BIND_ENUM_CONSTANT(STATE_LOADING);
 	BIND_ENUM_CONSTANT(STATE_RUNNING);
+	BIND_ENUM_CONSTANT(STATE_PAUSED);
+	BIND_ENUM_CONSTANT(STATE_STOPPING);
 	BIND_ENUM_CONSTANT(STATE_FAILED);
 }
 

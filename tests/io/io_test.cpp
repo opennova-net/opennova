@@ -12,6 +12,7 @@
 #include <base/io/byte_writer.h>
 #include <base/io/bam.h>
 #include <base/io/log.h>
+#include <base/io/log_ring.h>
 #include <base/io/fixed.h>
 #include <base/io/le.h>
 #include <base/io/strutil.h>
@@ -242,6 +243,81 @@ static int test_log_sink()
     return 0;
 }
 
+static int test_log_ring_cursor_drain_and_wrap()
+{
+    using opennova::io::LogLevel;
+    using opennova::io::LogRing;
+    using opennova::io::LogRingEntry;
+
+    // Level labels are the one transport mapping.
+    TEST_EXPECT(std::string(opennova::io::log_level_name(LogLevel::kDebug)) == "debug");
+    TEST_EXPECT(std::string(opennova::io::log_level_name(LogLevel::kWarn)) == "warn");
+
+    LogRing ring;
+    TEST_EXPECT(ring.last_sequence() == 0);
+    TEST_EXPECT(ring.entries_after(0).empty());
+
+    ring.record(LogLevel::kInfo, "one");
+    ring.record(LogLevel::kWarn, "two");
+    ring.record(LogLevel::kError, "three");
+    TEST_EXPECT(ring.last_sequence() == 3);
+
+    // Cursor drain: strictly after, oldest first, sequences monotonic from 1.
+    std::vector<LogRingEntry> all = ring.entries_after(0);
+    TEST_EXPECT(all.size() == 3);
+    TEST_EXPECT(all[0].sequence == 1 && all[0].text == "one");
+    TEST_EXPECT(all[1].level == LogLevel::kWarn);
+    TEST_EXPECT(all[2].sequence == 3 && all[2].text == "three");
+    std::vector<LogRingEntry> tail = ring.entries_after(2);
+    TEST_EXPECT(tail.size() == 1 && tail[0].text == "three");
+    TEST_EXPECT(ring.entries_after(3).empty());
+
+    // max_entries pages from the oldest unread entry.
+    std::vector<LogRingEntry> page = ring.entries_after(0, 2);
+    TEST_EXPECT(page.size() == 2 && page[1].sequence == 2);
+
+    // Wrap: capacity + 3 records keep the newest kCapacity, sequences intact,
+    // and a stale cursor surfaces the gap as a first sequence > cursor + 1.
+    ring.reset();
+    for (size_t i = 0; i < LogRing::kCapacity + 3; ++i)
+        ring.record(LogLevel::kDebug, ("entry " + std::to_string(i + 1)).c_str());
+    std::vector<LogRingEntry> wrapped = ring.entries_after(0);
+    TEST_EXPECT(wrapped.size() == LogRing::kCapacity);
+    TEST_EXPECT(wrapped.front().sequence == 4);
+    TEST_EXPECT(wrapped.front().text == "entry 4");
+    TEST_EXPECT(wrapped.back().sequence == LogRing::kCapacity + 3);
+    TEST_EXPECT(ring.entries_after(LogRing::kCapacity + 2).size() == 1);
+    return 0;
+}
+
+static int test_log_ring_install_chains_downstream()
+{
+    using opennova::io::LogLevel;
+    using opennova::io::LogRing;
+    using opennova::io::LogRingEntry;
+
+    // A pre-installed sink (the GDExtension's push_warning forwarder in the
+    // real embedder) must keep receiving every message after install().
+    g_log_seen.clear();
+    opennova::io::set_log_sink(&log_test_sink);
+    LogRing::instance().reset();
+    LogRing::install();
+    LogRing::install(); // idempotent: no self-chaining loop
+
+    opennova::io::logf(LogLevel::kWarn, "chained %d", 42);
+    std::vector<LogRingEntry> drained = LogRing::instance().entries_after(0);
+    TEST_EXPECT(drained.size() == 1);
+    TEST_EXPECT(drained[0].sequence == 1);
+    TEST_EXPECT(drained[0].level == LogLevel::kWarn);
+    TEST_EXPECT(drained[0].text == "chained 42");
+    TEST_EXPECT(g_log_seen.size() == 1);
+    TEST_EXPECT(g_log_seen[0].second == "chained 42");
+
+    opennova::io::set_log_sink(nullptr);
+    LogRing::instance().reset();
+    return 0;
+}
+
 
 // --- W2-4: the vector-append writers + the ByteReader truncation latch ------
 static int test_append_writers()
@@ -335,6 +411,8 @@ int main()
     if (test_append_writers()) return 1;
     if (test_byte_reader_truncation_latch()) return 1;
     if (test_log_sink()) return 1;
+    if (test_log_ring_cursor_drain_and_wrap()) return 1;
+    if (test_log_ring_install_chains_downstream()) return 1;
     std::printf("io_test: all checks passed\n");
     return 0;
 }

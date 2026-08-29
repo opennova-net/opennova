@@ -586,6 +586,10 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 	var state: Dictionary = adapter.get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "paused",
 			"open_ingame_menu takes the ESC pause leg")
+	assert_eq(String(state["session"]["role"]), "single_player",
+			"game_state carries the inmatch session role")
+	assert_eq(String(state["session"]["state"]), "paused",
+			"the SP shell pause runs through inmatch::State::Paused")
 	assert_true(menu_shell.visible, "the pause overlay is presented")
 	var snapshot: Dictionary = menu_shell.menu_snapshot(false)
 	assert_eq(String(snapshot["file"]).to_lower(), "game.mnu",
@@ -599,6 +603,8 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 	assert_eq(adapter.mcp_game_control("resume"), OK)
 	state = adapter.get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "world", "resume hands play back")
+	assert_eq(String(state["session"]["state"]), "running",
+			"resume leaves the inmatch session running")
 	assert_false(menu_shell.visible, "the overlay is hidden after resume")
 
 	# The armory over live play (the presenter's direct-open seam; no armory
