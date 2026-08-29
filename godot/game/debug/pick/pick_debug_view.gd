@@ -8,9 +8,9 @@ extends SimDebugView
 #
 # One deliberate deviation from the base contract: the row DATA comes from
 # the injected host-owned DebugPickList, not a sim accessor — the sim's
-# get_world_entity_debug is only used to re-resolve mover positions each
-# refresh, so a picked vehicle keeps its highlight while driving. Statics
-# (net_id 0) keep their pick-time position; they cannot move.
+# entity card (entity_card_by_net_id) is only used to re-resolve mover
+# positions each refresh, so a picked vehicle keeps its highlight while
+# driving. Statics (net_id 0) keep their pick-time position; they cannot move.
 
 const LABEL_LIFT := 0.6
 
@@ -40,9 +40,9 @@ func _refresh_from_sim(sim: Simulation) -> void:
 			if net_id <= 0 or live_positions.has(net_id):
 				continue
 			# Movers re-resolve so the highlight follows the live entity.
-			var card: Dictionary = sim.get_world_entity_debug(net_id)
-			if card.has("position"):
-				live_positions[net_id] = card["position"]
+			var card: EntityCard = sim.entity_card_by_net_id(net_id)
+			if card != null:
+				live_positions[net_id] = card.get_position()
 	render_picks(live_positions)
 
 

@@ -95,6 +95,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/server_initial_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/server_tick.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/client_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/client_replica_card.cpp  # the decoded joiner debug card (ADR 0042 d5)
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/client_replica_present_projection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/loadout_submit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/joiner_world_bridge.cpp

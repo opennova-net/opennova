@@ -105,6 +105,8 @@ add_library(${TARGET_NAME} SHARED
     simulation/present_applier.cpp
     simulation/present_applier_wire.cpp
     simulation/present_stats.cpp
+    simulation/entity_card.cpp
+    simulation/entity_row.cpp
     simulation/inmatch_session_values.cpp
     simulation/wire_present_pass.cpp
     simulation/simulation.cpp

@@ -398,12 +398,12 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 		var input := MissionFrameInput.new()
 		input.delta_seconds = Simulation.tick_dt()
 		assert_true(rt.advance_session_frame(input).did_tick())
-	var card: Dictionary = rt.get_sim().get_entity_debug(0)
-	assert_eq(int(card.get("item_id", 0)), CARRIER_TYPE_ID,
+	var card: EntityCard = rt.get_sim().entity_card_by_ai_index(0)
+	assert_eq(card.get_item_id(), CARRIER_TYPE_ID,
 			"AI card 0 is the Blackhawk's brain")
-	assert_eq(int(card.get("profile_type", 0)), 1,
+	assert_eq(card.get_profile_type(), 1,
 			"a bare-placed Blackhawk still takes the type-HELO helo1 profile")
-	assert_true(bool(card.get("primary_occupant", false)),
+	assert_true(card.has_primary_occupant(),
 			"the pilot claimed the engine-start latch")
 	var ctrls: Dictionary = carrier_model.get_ctrl_values()
 	assert_true(ctrls.has("HELO_ROTOR"),

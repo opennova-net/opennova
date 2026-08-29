@@ -160,6 +160,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_wire.cpp            # replicated anim/input mirror
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_tables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_spawn.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect.cpp   # the entity directory + debug cards (ADR 0042 d5)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_footprint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_input.cpp

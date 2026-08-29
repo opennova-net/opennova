@@ -8,8 +8,6 @@ extends GameMcpAdapter
 ## public APIs. It owns no duplicate simulation state and receives no editor
 ## document state.
 
-const DebugEntities := preload("res://game/debug/debug_entities.gd")
-
 const MCP_ENTITY_LIMIT_MAX := 128
 
 var _session := DebugSession.new()
@@ -223,23 +221,24 @@ func capture_mcp_render_bundle(
 			viewport, diagnostics_source, capture_args, cancel_requested)
 
 
-## Bounded MCP counterpart to F3's entity discovery. `index` addresses the
-## current discovery view; authoritative edits still require a row's ai_index.
+## Bounded MCP counterpart to F3's entity discovery, over the engine's typed
+## entity directory (Simulation.entity_directory, ADR 0042 d5). `index`
+## addresses the current discovery view; authoritative edits still require a
+## row's ai_index. JSON conversion happens here, at the MCP boundary, via the
+## records' own to_json_value() — the wire shape is the legacy key set.
 func get_mcp_game_entities(offset: int, limit: int) -> Variant:
 	var runtime: Variant = _current_runtime()
 	var sim: Variant = runtime.get_sim() if runtime != null else null
 	if sim == null:
 		return {}
-	var discovered: Array[Dictionary] = DebugEntities.list(sim)
-	var total := discovered.size()
+	var rows: Array = sim.entity_directory()
+	var total := rows.size()
 	var first := clampi(offset, 0, total)
 	var count := clampi(limit, 1, MCP_ENTITY_LIMIT_MAX)
 	var last := mini(total, first + count)
 	var entities: Array = []
 	for index in range(first, last):
-		var summary: Dictionary = discovered[index].duplicate(false)
-		summary.erase("detail")
-		entities.append(summary)
+		entities.append((rows[index] as EntityRow).to_json_value())
 	return {
 		"total": total,
 		"offset": first,
@@ -256,16 +255,15 @@ func get_mcp_game_entity(index: int) -> Variant:
 	var sim: Variant = runtime.get_sim() if runtime != null else null
 	if index < 0 or sim == null:
 		return {}
-	var discovered: Array[Dictionary] = DebugEntities.list(sim)
-	if index >= discovered.size():
+	var rows: Array = sim.entity_directory()
+	if index >= rows.size():
 		return {}
-	var row: Dictionary = discovered[index]
-	var detail_value: Variant = row.get("detail", {})
-	var result: Dictionary = detail_value.duplicate(true) \
-			if detail_value is Dictionary else {}
-	for key in row:
-		if key != "detail":
-			result[key] = row[key]
+	var row: EntityRow = rows[index]
+	var result: Dictionary = {}
+	var card: EntityCard = sim.entity_card(row.get_wire_handle())
+	if card != null:
+		result = card.to_json_value()
+	result.merge(row.to_json_value(), true)
 	return result
 
 

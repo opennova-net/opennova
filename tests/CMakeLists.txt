@@ -1214,6 +1214,14 @@ target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(world_test PRIVATE cxx_std_17)
 add_test(NAME world COMMAND world_test)
 
+# world::inspect (ADR 0042 d5): the entity directory join, the debug-card
+# halves, and the EntityCommands set_entity_health/position both-store writes.
+add_executable(inspect_test world/inspect_test.cpp)
+target_link_libraries(inspect_test PRIVATE opennova_runtime)
+target_include_directories(inspect_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(inspect_test PRIVATE cxx_std_17)
+add_test(NAME inspect COMMAND inspect_test)
+
 add_executable(tick_accumulator_test world/tick_accumulator_test.cpp)
 target_link_libraries(tick_accumulator_test PRIVATE opennova_runtime)
 target_include_directories(tick_accumulator_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -237,7 +237,8 @@ func _present_position_for_type(sim: Simulation, type_id: int) -> Vector3:
 
 func _player_index(sim: Simulation) -> int:
 	for index in range(sim.get_entity_count()):
-		if int(sim.get_entity_debug(index).get("item_id", 0)) == 0x14B9:
+		var card: EntityCard = sim.entity_card_by_ai_index(index)
+		if card != null and card.get_item_id() == 0x14B9:
 			return index
 	return -1
 
@@ -270,12 +271,12 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 			"the native install resolved the vehicle model source")
 	assert_true(host.load_from_mission_data(mission))
 	host.resolve_item_traits(db)
-	var host_vehicle: Dictionary = host.get_world_entity_debug(
+	var host_vehicle: EntityCard = host.entity_card_by_net_id(
 			int(fixture["vehicle_bms_id"]))
-	var host_zone: Dictionary = host.get_world_entity_debug(
+	var host_zone: EntityCard = host.entity_card_by_net_id(
 			int(fixture["zone_bms_id"]))
-	assert_eq(int(host_vehicle.get("handle", -1)), 0x1000)
-	assert_eq(int(host_zone.get("handle", -1)), 0x2000)
+	assert_eq(host_vehicle.get_wire_handle(), 0x1000)
+	assert_eq(host_zone.get_wire_handle(), 0x2000)
 
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
@@ -332,9 +333,9 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_true(joiner.get_join_terrain_til().is_empty(),
 			"Absent terrain never exposes a synthetic byte image")
 	assert_eq(_present_wire_handle_for_type(joiner, VEHICLE_TYPE),
-			int(host_vehicle.get("handle", -1)))
+			host_vehicle.get_wire_handle())
 	assert_eq(_present_wire_handle_for_type(joiner, ZONE_TYPE),
-			int(host_zone.get("handle", -1)))
+			host_zone.get_wire_handle())
 
 	var deploy_rows := joiner.get_deploy_spawn_zones()
 	var zone_param := int((deploy_rows[0] as Dictionary).get("param", 0))
@@ -377,8 +378,7 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 		host.step()
 		if bool(joiner.get_local_player_view().get("mounted", false)) \
 				and host_player_index >= 0 \
-				and bool(host.get_entity_debug(host_player_index).get(
-						"mounted", false)):
+				and host.entity_card_by_ai_index(host_player_index).is_mounted():
 			mounted = true
 			break
 		OS.delay_msec(2)
@@ -393,25 +393,25 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 		assert_true(joiner.install_seat_specs_for_type_ids(
 				_item_db("refresh"), PackedInt32Array([VEHICLE_TYPE])))
 	if mounted and joiner_player_index >= 0:
-		var local_card: Dictionary = joiner.get_entity_debug(joiner_player_index)
-		assert_true(bool(local_card.get("mounted", false)))
-		assert_eq(int(local_card.get("mount_seat", -1)), 1,
+		var local_card: EntityCard = joiner.entity_card_by_ai_index(
+				joiner_player_index)
+		assert_true(local_card.is_mounted())
+		assert_eq(local_card.get_mount_seat(), 1,
 				"the occupant's dense index follows retail slot 8")
-		assert_eq(String(local_card.get("mount_seat_source_name", "")),
-				"ctrlx01")
-		assert_eq(int(local_card.get("mount_target_seat_count", 0)), 5)
-		var target_seats: Array = local_card.get("mount_target_seats", [])
+		assert_eq(local_card.get_mount_seat_source_name(), "ctrlx01")
+		assert_eq(local_card.get_mount_target_seat_count(), 5)
+		var target_seats: Array = local_card.get_mount_target_seats()
 		assert_eq(target_seats.size(), 5)
 		if target_seats.size() == 5:
-			var seat: Dictionary = target_seats[1]
-			assert_eq(int(seat.get("retail_slot", -1)), 8)
-			assert_eq(String(seat.get("source_name", "")), "ctrlx01")
-			assert_true(bool(seat.get("occupied", false)),
+			var seat: EntityCardSeat = target_seats[1]
+			assert_eq(seat.get_retail_slot(), 8)
+			assert_eq(seat.get_source_name(), "ctrlx01")
+			assert_true(seat.is_occupied(),
 					"late seat refresh preserves the occupant by retail slot")
 	if mounted and host_player_index >= 0:
-		assert_eq(int(host.get_entity_debug(host_player_index).get(
-				"mount_target_net_id", -1)),
-				int(host_vehicle.get("net_id", -2)))
+		assert_eq(host.entity_card_by_ai_index(
+				host_player_index).get_mount_target_net_id(),
+				host_vehicle.get_net_id())
 	joiner.free()
 	host.free()
 
@@ -443,8 +443,8 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 			"the native install resolved the parent and child model sources")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host, db)
-	var host_parent: Dictionary = host.get_world_entity_debug(parent_bms_id)
-	assert_eq(int(host_parent.get("handle", -1)), 0x1000)
+	var host_parent: EntityCard = host.entity_card_by_net_id(parent_bms_id)
+	assert_eq(host_parent.get_wire_handle(), 0x1000)
 
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
@@ -619,8 +619,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if bool(joiner.get_local_player_view().get("mounted", false)) \
 				and host_player_index >= 0 \
-				and bool(host.get_entity_debug(host_player_index).get(
-						"mounted", false)):
+				and host.entity_card_by_ai_index(host_player_index).is_mounted():
 			mounted_echoed = true
 			break
 		OS.delay_msec(2)
@@ -708,9 +707,9 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		OS.delay_msec(1)
 	assert_true(child_route_restored,
 			"returning to the child recovers its untouched ammo words")
-	var host_parent_after: Dictionary = host.get_world_entity_debug(parent_bms_id)
-	assert_eq(int(host_parent_after.get("primary_weapon_clip", -999)), 7)
-	assert_eq(int(host_parent_after.get("primary_weapon_reserve", -999)), 19)
+	var host_parent_after: EntityCard = host.entity_card_by_net_id(parent_bms_id)
+	assert_eq(host_parent_after.get_primary_weapon_clip(), 7)
+	assert_eq(host_parent_after.get_primary_weapon_reserve(), 19)
 	joiner.free()
 	host.free()
 
@@ -735,12 +734,12 @@ func test_complete_bms_joiner_keeps_authored_promotion_identity() -> void:
 	assert_true(joiner.load_from_mission_data(mission))
 	joiner.resolve_item_traits(db)
 
-	var before: Dictionary = joiner.get_world_entity_debug(
+	var before: EntityCard = joiner.entity_card_by_net_id(
 			int(fixture["vehicle_bms_id"]))
-	assert_eq(int(before.get("handle", -1)), 0x1000)
-	assert_eq(int(before.get("kind", -1)), MissionData.KIND_ITEM)
-	assert_eq(int(before.get("index", -1)), 0)
-	assert_eq(int(before.get("bms_id", 0)), int(fixture["vehicle_bms_id"]))
+	assert_eq(before.get_wire_handle(), 0x1000)
+	assert_eq(before.get_kind(), MissionData.KIND_ITEM)
+	assert_eq(before.get_source_index(), 0)
+	assert_eq(before.get_bms_id(), int(fixture["vehicle_bms_id"]))
 	for _tick in range(800):
 		host.step()
 		joiner.step()
@@ -748,12 +747,12 @@ func test_complete_bms_joiner_keeps_authored_promotion_identity() -> void:
 				and _present_wire_handle_for_type(joiner, VEHICLE_TYPE) == 0x1000:
 			break
 		OS.delay_msec(2)
-	var after: Dictionary = joiner.get_world_entity_debug(
+	var after: EntityCard = joiner.entity_card_by_net_id(
 			int(fixture["vehicle_bms_id"]))
-	assert_eq(int(after.get("handle", -1)), 0x1000)
-	assert_eq(int(after.get("kind", -1)), MissionData.KIND_ITEM,
+	assert_eq(after.get_wire_handle(), 0x1000)
+	assert_eq(after.get_kind(), MissionData.KIND_ITEM,
 			"full-BMS joiners retain authored spawn_origin semantics")
-	assert_eq(int(after.get("index", -1)), 0)
-	assert_eq(int(after.get("bms_id", 0)), int(fixture["vehicle_bms_id"]))
+	assert_eq(after.get_source_index(), 0)
+	assert_eq(after.get_bms_id(), int(fixture["vehicle_bms_id"]))
 	joiner.free()
 	host.free()

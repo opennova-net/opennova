@@ -209,6 +209,7 @@ static_assert(sizeof(AiBrain) == 812, "AiBrain must match unk_AED380 812-byte st
 struct AiSlot {
     int32_t f[43] = {};
     uint8_t *bytes() { return reinterpret_cast<uint8_t *>(f); }
+    const uint8_t *bytes() const { return reinterpret_cast<const uint8_t *>(f); }
     // Named dword indices (the perception/attack ranges the target scan reads,
     // 16.16 world units) plus the movement flag byte the reset helpers clear.
     enum Idx : int {
@@ -670,7 +671,12 @@ public:
     int attach_dismemberment_piece(EntityHandle h, const AiEntity &source,
                                    const int32_t impulse_q16[3]);
     AiEntity *at(int ai_index);
+    const AiEntity *at(int ai_index) const;
     AiEntity *for_handle(EntityHandle h);
+    const AiEntity *for_handle(EntityHandle h) const;
+    // The pool index behind for_handle's resolve (-1 = no brain for h) — the
+    // directory join key (world/inspect.h).
+    int index_for_handle(EntityHandle h) const;
     int count() const { return static_cast<int>(entities_.size()); }
 
     AiScheduler scheduler;

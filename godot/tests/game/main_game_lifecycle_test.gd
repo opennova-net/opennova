@@ -70,9 +70,9 @@ class EntityShellHarness:
 	extends "res://game/main_game.gd"
 
 	# A real MissionPresentation over an in-memory mission: two authored organics
-	# plus the auto-spawned host player supply the AI/present rows the
-	# discovery pages walk (the sim-double era ended with the typed
-	# DebugEntities.list(sim: Simulation) signature).
+	# plus the auto-spawned host player supply the AI/registry rows the
+	# discovery pages walk (the sim-double era ended when discovery became the
+	# engine's typed Simulation.entity_directory()).
 	var runtime: MissionPresentation = null
 
 	func ensure_runtime(parent: Node) -> void:

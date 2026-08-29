@@ -352,11 +352,13 @@ func _inventory_clip(sim: Simulation, weapon_name: String) -> int:
 
 func _organic_index_at_x(sim: Simulation, x: float) -> int:
 	for ai_index in range(sim.get_entity_count()):
-		var card: Dictionary = sim.get_entity_debug(ai_index)
-		var item_id := int(card.get("item_id", 0))
+		var card: EntityCard = sim.entity_card_by_ai_index(ai_index)
+		if card == null:
+			continue
+		var item_id := card.get_item_id()
 		if item_id != 5311 and item_id != 105311:
 			continue
-		var pos: Vector3 = card.get("position", Vector3.INF)
+		var pos: Vector3 = card.get_position()
 		if absf(pos.x - x) < 0.25:
 			return ai_index
 	return -1
@@ -644,9 +646,9 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var debug_host_own := host.get_local_player_wire_handle()
 	var debug_host_remote_index := -1
 	for debug_index in range(host.get_entity_count()):
-		var debug_card: Dictionary = host.get_entity_debug(debug_index)
-		if int(debug_card.get("item_id", 0)) == 0x14B9 \
-				and int(debug_card.get("wire_handle", 0)) != debug_host_own:
+		var debug_card: EntityCard = host.entity_card_by_ai_index(debug_index)
+		if debug_card.get_item_id() == 0x14B9 \
+				and debug_card.get_wire_handle() != debug_host_own:
 			debug_host_remote_index = debug_index
 			break
 	var host_applied_zone_pose := false
@@ -657,8 +659,8 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 		joiner.step()
 		host.step()
 		if debug_host_remote_index >= 0:
-			var host_pick_position: Vector3 = host.get_entity_debug(
-					debug_host_remote_index).get("position", Vector3.INF)
+			var host_pick_position: Vector3 = host.entity_card_by_ai_index(
+					debug_host_remote_index).get_position()
 			if absf(host_pick_position.x - 40.0) < 1.0:
 				host_applied_zone_pose = true
 				break
@@ -730,10 +732,10 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var host_remote_adm := ""
 	var host_remote_index := -1
 	for ai_index in range(host.get_entity_count()):
-		var card: Dictionary = host.get_entity_debug(ai_index)
-		if int(card.get("item_id", 0)) == 0x14B9 \
-				and int(card.get("wire_handle", 0)) != host_own:
-			host_remote_adm = String(card.get("adm_name", ""))
+		var card: EntityCard = host.entity_card_by_ai_index(ai_index)
+		if card.get_item_id() == 0x14B9 \
+				and card.get_wire_handle() != host_own:
+			host_remote_adm = card.get_adm_name()
 			host_remote_index = ai_index
 			break
 	assert_eq(host_remote_adm, "US01.adm",
@@ -766,11 +768,11 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			"the root-motion channel exposes its compact-seeded simulation playhead")
 	var joiner_local_adm := ""
 	for ai_index in range(joiner.get_entity_count()):
-		var card: Dictionary = joiner.get_entity_debug(ai_index)
+		var card: EntityCard = joiner.entity_card_by_ai_index(ai_index)
 		# Joiner get_local_player_wire_handle() deliberately returns host identity H,
 		# not local simulation handle L. Its local World contains only L as a player.
-		if int(card.get("item_id", 0)) == 0x14B9:
-			joiner_local_adm = String(card.get("adm_name", ""))
+		if card.get_item_id() == 0x14B9:
+			joiner_local_adm = card.get_adm_name()
 			break
 	assert_eq(joiner_local_adm, "US01.adm",
 			"the real joiner name-match path binds local L's body ADM")
@@ -821,16 +823,16 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 		OS.delay_msec(2)
 	assert_true(death_arrived,
 			"the authoritative 0x0A tail health reaches the joiner's local player L")
-	var local_death_card: Dictionary = {}
+	var local_death_card: EntityCard = null
 	for ai_index in range(joiner.get_entity_count()):
-		var card: Dictionary = joiner.get_entity_debug(ai_index)
-		if int(card.get("item_id", 0)) == 0x14B9:
+		var card: EntityCard = joiner.entity_card_by_ai_index(ai_index)
+		if card.get_item_id() == 0x14B9:
 			local_death_card = card
 			break
-	assert_false(local_death_card.is_empty(), "joiner retains its local player L after death")
-	assert_eq(int(local_death_card.get("health", -1)), 0)
-	assert_eq(int(local_death_card.get("ai_health", -1)), 0)
-	assert_false(bool(local_death_card.get("alive", true)))
+	assert_not_null(local_death_card, "joiner retains its local player L after death")
+	assert_eq(local_death_card.get_health(), 0)
+	assert_eq(local_death_card.get_ai_health(), 0)
+	assert_false(local_death_card.is_alive())
 
 	# A positive tail without a new deploy edge is not a respawn. This also
 	# protects the next infantry tick from hydrating its motor copy back to life.
@@ -839,15 +841,15 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var after_stale_positive: Dictionary = {}
+	var after_stale_positive: EntityCard = null
 	for ai_index in range(joiner.get_entity_count()):
-		var card: Dictionary = joiner.get_entity_debug(ai_index)
-		if int(card.get("item_id", 0)) == 0x14B9:
+		var card: EntityCard = joiner.entity_card_by_ai_index(ai_index)
+		if card.get_item_id() == 0x14B9:
 			after_stale_positive = card
 			break
-	assert_eq(int(after_stale_positive.get("health", -1)), 0)
-	assert_eq(int(after_stale_positive.get("ai_health", -1)), 0)
-	assert_false(bool(after_stale_positive.get("alive", true)),
+	assert_eq(after_stale_positive.get_health(), 0)
+	assert_eq(after_stale_positive.get_ai_health(), 0)
+	assert_false(after_stale_positive.is_alive(),
 			"positive health without a deploy edge cannot partially revive local L")
 	# Restore the authority-side death predicate before requesting deployment.
 	# debug_set_entity_health(100) deliberately made H alive to synthesize the
@@ -867,26 +869,25 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(joiner.send_deployment_pick(0),
 			"the default 0xFFFF redeployment pick was queued")
 	var revived := false
-	var revived_card: Dictionary = {}
+	var revived_card: EntityCard = null
 	for _i in range(240):
 		host.step()
 		joiner.step()
 		for ai_index in range(joiner.get_entity_count()):
-			var card: Dictionary = joiner.get_entity_debug(ai_index)
-			if int(card.get("item_id", 0)) == 0x14B9:
+			var card: EntityCard = joiner.entity_card_by_ai_index(ai_index)
+			if card.get_item_id() == 0x14B9:
 				revived_card = card
 				break
-		if not revived_card.is_empty() \
-				and bool(revived_card.get("alive", false)) \
-				and int(revived_card.get("health", 0)) > 0:
+		if revived_card != null \
+				and revived_card.is_alive() \
+				and revived_card.get_health() > 0:
 			revived = true
 			break
 		OS.delay_msec(2)
 	assert_true(revived,
 			"the post-pick release plus a later positive tail revives existing local L")
-	assert_gt(int(revived_card.get("health", 0)), 0)
-	assert_eq(int(revived_card.get("ai_health", -1)),
-			int(revived_card.get("health", -2)),
+	assert_gt(revived_card.get_health(), 0)
+	assert_eq(revived_card.get_ai_health(), revived_card.get_health(),
 			"the registry and infantry motor health revive atomically")
 	assert_false(joiner.is_join_deploy_pick_pending(),
 			"the valid release retires the deploy-screen wait")
@@ -898,7 +899,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	# on the local terrain/motor fixture and can remain stationary even while
 	# every uplink is admitted and applied.
 	var host_yaw_before_resume := float(
-			host.get_entity_debug(host_remote_index).get("yaw_deg", 0.0))
+			host.entity_card_by_ai_index(host_remote_index).get_yaw_deg())
 	joiner.set_local_player_mouse(511, false)
 	joiner.add_local_player_look(500.0, 0.0)
 	var uplink_resumed := false
@@ -906,8 +907,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 		host.step()
 		joiner.step()
 		var remote_yaw := float(
-				host.get_entity_debug(host_remote_index).get(
-						"yaw_deg", host_yaw_before_resume))
+				host.entity_card_by_ai_index(host_remote_index).get_yaw_deg())
 		if absf(wrapf(remote_yaw - host_yaw_before_resume, -180.0, 180.0)) > 0.1:
 			uplink_resumed = true
 			break
@@ -984,7 +984,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 		if String((raw as Dictionary).get(
 				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
 			host.set_local_player_weapon(mounted, {}, true)
-	assert_true(bool(host.get_entity_debug(0).get("mounted", false)),
+	assert_true(host.entity_card_by_ai_index(0).is_mounted(),
 			"host player remains mounted after the local switch commit")
 
 	var joiner := Simulation.new()
@@ -1007,7 +1007,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 		host.free()
 		joiner.free()
 		return
-	assert_true(bool(host.get_entity_debug(0).get("mounted", false)),
+	assert_true(host.entity_card_by_ai_index(0).is_mounted(),
 			"join handshake does not detach the host player")
 	for _tick in range(20):
 		host.step()
@@ -1115,8 +1115,8 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		return
 	var host_joiner_index := -1
 	for ai_index in range(host.get_entity_count()):
-		var card: Dictionary = host.get_entity_debug(ai_index)
-		if int(card.get("item_id", 0)) == 0x14B9:
+		var card: EntityCard = host.entity_card_by_ai_index(ai_index)
+		if card.get_item_id() == 0x14B9:
 			host_joiner_index = ai_index
 			break
 	assert_gte(host_joiner_index, 0,
@@ -1150,8 +1150,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if bool(joiner.get_local_player_view().get("mounted", false)) \
-				and bool(host.get_entity_debug(
-						host_joiner_index).get("mounted", false)) \
+				and host.entity_card_by_ai_index(host_joiner_index).is_mounted() \
 				and _present_field_for_type(joiner, 1419,
 						Simulation.PF_EMPLACED_CONTROLS_VALID) == 1:
 			mounted_echoed = true
@@ -1193,8 +1192,8 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
 			break
 		OS.delay_msec(1)
-	var authority_yaw_before := float(host.get_entity_debug(
-			host_joiner_index).get("yaw_deg", 0.0))
+	var authority_yaw_before := float(host.entity_card_by_ai_index(
+			host_joiner_index).get_yaw_deg())
 	var yaw_before := _present_field_for_type(
 			joiner, 1419, Simulation.PF_EWEAP_GUNYAW)
 	var visual: Node3D = add_child_autofree(ObjectModel.new())
@@ -1223,8 +1222,8 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		var authority_yaw := float(host.get_entity_debug(
-				host_joiner_index).get("yaw_deg", authority_yaw_before))
+		var authority_yaw := float(host.entity_card_by_ai_index(
+				host_joiner_index).get_yaw_deg())
 		var presented_yaw := _present_field_for_type(
 				joiner, 1419, Simulation.PF_EWEAP_GUNYAW)
 		if absf(wrapf(authority_yaw - authority_yaw_before,
@@ -1278,8 +1277,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		if not bool(joiner.get_local_player_view().get("mounted", true)) \
-				and not bool(host.get_entity_debug(
-						host_joiner_index).get("mounted", true)) \
+				and not host.entity_card_by_ai_index(host_joiner_index).is_mounted() \
 				and _present_field_for_type(joiner, 1419,
 						Simulation.PF_EMPLACED_CONTROLS_VALID) == 0:
 			detached_echoed = true
@@ -1326,8 +1324,8 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	var joiner_target := _organic_index_at_x(joiner, 0.0)
 	assert_gte(host_target, 0, "host resolved the joiner's north-lane target")
 	assert_gte(joiner_target, 0, "joiner retained its visual copy of the target")
-	var host_health_before := int(host.get_entity_debug(host_target).get("health", -1))
-	var joiner_health_before := int(joiner.get_entity_debug(joiner_target).get("health", -1))
+	var host_health_before := host.entity_card_by_ai_index(host_target).get_health()
+	var joiner_health_before := joiner.entity_card_by_ai_index(joiner_target).get_health()
 	var before_fire: Dictionary = joiner.get_local_player_weapon_state()
 	var fired_before := int(before_fire.get("fired_serial", 0))
 	joiner.drain_round_impacts()
@@ -1349,10 +1347,10 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	var after_fire: Dictionary = joiner.get_local_player_weapon_state()
 	assert_eq(int(after_fire.get("fired_serial", 0)), fired_before + 1,
 			"one local weapon action fired")
-	assert_lt(int(host.get_entity_debug(host_target).get("health", host_health_before)),
+	assert_lt(host.entity_card_by_ai_index(host_target).get_health(),
 			host_health_before,
 			"the framed C2S 0x06 spawned a damaging authoritative host round")
-	assert_eq(int(joiner.get_entity_debug(joiner_target).get("health", -1)),
+	assert_eq(joiner.entity_card_by_ai_index(joiner_target).get_health(),
 			joiner_health_before,
 			"the joiner's predicted projectile is visual-only")
 	assert_eq(host_impacts.size(), 1,
@@ -1570,22 +1568,22 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 		host.free()
 		return
 
-	var joiner_player: Dictionary = {}
+	var joiner_player: EntityCard = null
 	for ai_index in range(joiner.get_entity_count()):
-		var card: Dictionary = joiner.get_entity_debug(ai_index)
-		if int(card.get("item_id", 0)) == 0x14B9:
+		var card: EntityCard = joiner.entity_card_by_ai_index(ai_index)
+		if card.get_item_id() == 0x14B9:
 			joiner_player = card
 			break
-	assert_false(joiner_player.is_empty(),
+	assert_not_null(joiner_player,
 			"the joiner materializes its name-matched local player")
-	if not joiner_player.is_empty():
-		assert_eq(int(joiner_player.get("character_anim_slot", 0)), 1,
+	if joiner_player != null:
+		assert_eq(joiner_player.get_character_anim_slot(), 1,
 				"the local player retains the host-stamped retail avatar selector")
-		assert_eq(int(joiner_player.get("minimap_net_id", 0)), 0x0200,
+		assert_eq(joiner_player.get_minimap_net_id(), 0x0200,
 				"the local player retains the packed side-A character id")
 		# [D-NET-112] The packed id is the wire NetId ONLY — L's SSN stays 0 like the host's
 		# own player, so it never enters the WAC/BMS find_by_net_id space.
-		assert_eq(int(joiner_player.get("net_id", -1)), 0,
+		assert_eq(joiner_player.get_net_id(), 0,
 				"the local player carries no SSN (the packed id is not reused as one)")
 
 	# Runtime type 1291 is items.def id 101291 after the BMS namespace strip.
@@ -1625,9 +1623,9 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 				"the joiner publishes the decoded/predicted vehicle roll")
 	var family := -1
 	for ai_index in range(host.get_entity_count()):
-		var card: Dictionary = host.get_entity_debug(ai_index)
-		if int(card.get("item_id", 0)) == 1291:
-			family = int(card.get("vehicle_family", -1))
+		var card: EntityCard = host.entity_card_by_ai_index(ai_index)
+		if card.get_item_id() == 1291:
+			family = card.get_vehicle_family()
 			break
 	assert_eq(family, 0,
 			"the ai_function chel / move_function cveh Dune Buggy uses Ground physics")
@@ -2392,7 +2390,7 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	var ghost_index := _organic_index_at_x(joiner, 0.0)
 	assert_gte(ghost_index, 0, "the complete-BMS fixture's authored AI copy exists")
 	var ghost_health_before := int(
-			joiner.get_entity_debug(ghost_index).get("health", -1)) \
+			joiner.entity_card_by_ai_index(ghost_index).get_health()) \
 			if ghost_index >= 0 else -1
 	host.drain_round_impacts()
 	joiner.drain_round_impacts()
@@ -2418,7 +2416,7 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	assert_eq(host_impacts.size(), 1,
 			"host authority resolves the same round against its live AI")
 	if ghost_index >= 0:
-		assert_eq(int(joiner.get_entity_debug(ghost_index).get("health", -1)),
+		assert_eq(int(joiner.entity_card_by_ai_index(ghost_index).get_health()),
 				ghost_health_before,
 				"the complete-BMS fixture AI never takes client damage")
 
@@ -2452,8 +2450,8 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	var joiner_target := _organic_index_at_x(joiner, 20.0)
 	assert_gte(host_target, 0, "host resolved its own north-lane target")
 	assert_gte(joiner_target, 0, "observer retained the remote visual target")
-	var host_health_before := int(host.get_entity_debug(host_target).get("health", -1))
-	var joiner_health_before := int(joiner.get_entity_debug(joiner_target).get("health", -1))
+	var host_health_before := host.entity_card_by_ai_index(host_target).get_health()
+	var joiner_health_before := joiner.entity_card_by_ai_index(joiner_target).get_health()
 	joiner.drain_round_impacts()
 	host.drain_round_impacts()
 
@@ -2467,9 +2465,9 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 		joiner_impacts.append_array(joiner.drain_round_impacts())
 		OS.delay_msec(2)
 
-	assert_lt(int(host.get_entity_debug(host_target).get("health", host_health_before)),
+	assert_lt(host.entity_card_by_ai_index(host_target).get_health(),
 			host_health_before, "host fire remains authoritative")
-	assert_eq(int(joiner.get_entity_debug(joiner_target).get("health", -1)),
+	assert_eq(joiner.entity_card_by_ai_index(joiner_target).get_health(),
 			joiner_health_before,
 			"the observer's tag-2 re-simulation cannot change health")
 	assert_eq(host_impacts.size(), 1, "host projectile resolved one impact")
@@ -2796,8 +2794,8 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	# confirm the authority world really seated its gunner.
 	var host_ai_index := -1
 	for ai_index in range(host.get_entity_count()):
-		var card: Dictionary = host.get_entity_debug(ai_index)
-		var item_id := int(card.get("item_id", 0))
+		var card: EntityCard = host.entity_card_by_ai_index(ai_index)
+		var item_id := card.get_item_id()
 		if item_id == 5311 or item_id == 105311:
 			host_ai_index = ai_index
 			break
@@ -2806,8 +2804,8 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	for _tick in range(400):
 		host.step()
 		joiner.step()
-		if host_ai_index >= 0 and bool(host.get_entity_debug(
-				host_ai_index).get("mounted", false)):
+		if host_ai_index >= 0 and host.entity_card_by_ai_index(
+				host_ai_index).is_mounted():
 			host_mounted = true
 			break
 		OS.delay_msec(2)

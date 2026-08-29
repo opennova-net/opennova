@@ -228,8 +228,9 @@ Order of operations when you need an engine truth:
      only. ONED's Run OpenNova loose action launches that same standalone game
      against the selected data directory; ONED has no embedded preview or dev
      tools (its own run surface is an engine ImGui window on the same pass).
-   - `Simulation` introspection: `get_present_snapshot()`,
-     `get_entity_debug(index)`, `get_fired_events_snapshot()`, `get_wac_state()`,
+   - `Simulation` introspection: `get_present_snapshot()`, the typed
+     `entity_directory()` / `entity_card(handle)` records (`world::inspect`,
+     ADR 0042 d5), `get_fired_events_snapshot()`, `get_wac_state()`,
      and the mission/global/music variable snapshots.
    - PerfTimeline ring (`godot/game/util/perf_timeline.gd`; its Perf page went
      with the overlay — a dev-tools window is the re-home); recorded baselines

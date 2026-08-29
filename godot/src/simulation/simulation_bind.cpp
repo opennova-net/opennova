@@ -2,6 +2,8 @@
 #include "simulation/simulation_internal.h"
 
 #include "rtxt/rtxt_string_file.h" // the gametext table type the end-round / deploy feeds bind
+#include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
+#include "simulation/entity_row.h"
 
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
 
@@ -339,7 +341,10 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_global_variable", "index", "value"), &Simulation::set_global_variable);
 	ClassDB::bind_method(D_METHOD("get_global_variable", "index"), &Simulation::get_global_variable);
 	ClassDB::bind_method(D_METHOD("get_fired_events_snapshot"), &Simulation::get_fired_events_snapshot);
-	ClassDB::bind_method(D_METHOD("get_entity_debug", "index"), &Simulation::get_entity_debug);
+	ClassDB::bind_method(D_METHOD("entity_directory"), &Simulation::entity_directory);
+	ClassDB::bind_method(D_METHOD("entity_card", "handle"), &Simulation::entity_card);
+	ClassDB::bind_method(D_METHOD("entity_card_by_ai_index", "index"), &Simulation::entity_card_by_ai_index);
+	ClassDB::bind_method(D_METHOD("entity_card_by_net_id", "net_id"), &Simulation::entity_card_by_net_id);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_health", "index", "hp"), &Simulation::debug_set_entity_health);
 	ClassDB::bind_method(D_METHOD("debug_crew_vehicle", "occupant_ssn", "vehicle_ssn"),
 	                     &Simulation::debug_crew_vehicle);
@@ -351,8 +356,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::debug_crew_local_player);
 	ClassDB::bind_method(D_METHOD("debug_kill_player_entity", "handle"), &Simulation::debug_kill_player_entity);
 	ClassDB::bind_method(D_METHOD("debug_set_entity_position", "index", "mission_pos"), &Simulation::debug_set_entity_position);
-	ClassDB::bind_method(D_METHOD("get_world_entity_debug", "net_id"), &Simulation::get_world_entity_debug);
-	ClassDB::bind_method(D_METHOD("get_client_entity_debug", "handle"), &Simulation::get_client_entity_debug);
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_position", "net_id", "mission_pos"), &Simulation::debug_set_world_entity_position);
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_weapon_ammo", "net_id", "clip", "reserve"),
 	                     &Simulation::debug_set_world_entity_weapon_ammo);

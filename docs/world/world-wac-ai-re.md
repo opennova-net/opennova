@@ -4223,7 +4223,7 @@ Evidence: `ai` ctest (`test_fire_pass_uses_embedder_fed_muzzle`, `test_weapon_fi
 the LOS band case, the aim-pitch case, the mounted UseGun case — all through a fake
 `IMuzzlePoseProvider`); the `ai_muzzle_pose` ctest (`tests/world/ai_muzzle_pose_test.cpp`,
 gated on `OPENNOVA_JO_DIR`) reads the same provider
-through `get_entity_debug` (`muzzle_valid` / `muzzle`) and A/Bs it against the presented
+through the entity card (`world::inspect` `muzzle_valid` / `muzzle`) and A/Bs it against the presented
 skeleton's `ObjectModel.get_muzzle_world_position()`: CP01 2026-08-26 PASS, 92/102 infantry in
 the rifle envelope, the sim point within 1e-5 u of the node's for the in-range bodies. That A/B
 caught the skeletal leg feeding the userpoint in the render-swizzled frame (0.5 u low, ~90°
