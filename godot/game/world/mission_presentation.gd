@@ -725,6 +725,27 @@ func _read_frame_perf(outcome: MissionFrameOutcome) -> void:
 	if _ticks_last_frame > 0 and _stats_capture_on():
 		_frame_stats.add(FrameStats.EFFECTS_DRAIN, _perf_effects_us)
 		_frame_stats.add(FrameStats.SIM_TICKS, _ticks_last_frame)
+		# The sim row's counter cells and the Net row's peer count, folded from
+		# the sim this presentation already owns (frame_stats_slots.h).
+		_frame_stats.add(FrameStats.SIM_ENTITY_COUNT, _sim.get_entity_count())
+		_frame_stats.add(FrameStats.SIM_ROLE, _stats_role_value())
+		_frame_stats.add(FrameStats.NET_PEER_COUNT, _sim.get_host_peer_count())
+
+
+# The Stats window's SIM_ROLE contract: the three roles the window names.
+const STATS_ROLE_SINGLE_PLAYER := 0
+const STATS_ROLE_HOST := 1
+const STATS_ROLE_JOINER := 2
+
+
+func _stats_role_value() -> int:
+	match _sim.session_role():
+		Simulation.ROLE_JOINER:
+			return STATS_ROLE_JOINER
+		Simulation.ROLE_LISTEN_HOST, Simulation.ROLE_DEDICATED_HOST:
+			return STATS_ROLE_HOST
+		_:
+			return STATS_ROLE_SINGLE_PLAYER
 
 
 func _feed_projectile_trace_stats() -> void:

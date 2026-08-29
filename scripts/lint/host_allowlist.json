@@ -186,7 +186,8 @@
     "host_register_list_test",
     "host_punt_test",
     "npruntime_host_punt",
-    "npruntime_host_punt_test"
+    "npruntime_host_punt_test",
+    "STATS_ROLE_HOST"
   ],
   "comment_ok_paths": [
     "tests/CMakeLists.txt",
@@ -269,6 +270,11 @@
     "simulation_net.cpp|Role::Host",
     "resource_root_contract_test.gd|host's authoritative",
     "scripts/lint/maturity_lint.py|LAN host port range",
-    "tests/mission/event_runtime_test.cpp|test_empty_host_holds_the_script"
+    "tests/mission/event_runtime_test.cpp|test_empty_host_holds_the_script",
+    "frame_stats_slots.h|X(SIM_ROLE,",
+    "frame_stats_slots.h|X(NET_PEER_COUNT,",
+    "stats_window.cpp|kRoleNames[] = {\"single player\", \"host\", \"joiner\"}",
+    "dev_tools_stats_rows_test.gd|1 = host, every frame",
+    "dev_tools_stats_rows_test.gd|12 entities | host"
   ]
 }

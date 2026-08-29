@@ -150,6 +150,9 @@
     X(SIM_ADM_RESOLVE, "late animation-registry resolution after the tick") \
     X(SIM_SINK, "typed per-tick Godot presentation/effects callback") \
     X(SIM_TICKS, "VALUE: logic ticks run this frame") \
+    X(SIM_ENTITY_COUNT, "VALUE: live world entities after the frame's ticks") \
+    X(SIM_ROLE, "VALUE: the session role the shell folds from Simulation.session_role(): 0 single player, 1 host (listen or dedicated), 2 joiner") \
+    X(NET_PEER_COUNT, "VALUE: remote peers on the host's connection table (0 on a joiner or offline)") \
     X(TRACE_TERRAIN, "projectile trace terrain leg") \
     X(TRACE_STATIC, "projectile trace static-entity leg") \
     X(TRACE_DYNAMIC, "projectile trace dynamic-entity leg") \

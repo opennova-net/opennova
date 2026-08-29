@@ -69,14 +69,9 @@ hardening, and project health. Divergences from the original engine belong in
       has crosses as VALUE slots or typed records, never Godot objects.
 - [ ] Stats window info cells not carried over from the retired page (they read
       Godot objects at refresh): Performance draws/objs/prims/nodes on the Render
-      row, the a11y flag on Flush tail, peer count (Net), effects live count,
-      fire/destruction/throwable/wire present stats, occlusion counts (`occl`),
-      the sim row's entity count + role. Each returns as a VALUE slot fed by the
-      shell sampler that owns the source.
-- [ ] Expansion description in the menu shell: `menu_shell.gd` maps known expansions to
-      hardcoded friendly labels and shows unknown ones by folder name; read the
-      description from the expansion `.pff` (the retail launcher reads it from the
-      archive) and drop the label table.
+      row, the a11y flag on Flush tail, effects live count,
+      fire/destruction/throwable/wire present stats, occlusion counts (`occl`).
+      Each returns as a VALUE slot fed by the shell sampler that owns the source.
 - [ ] Managed-game shutdown: ONED close/Stop may still require forced termination.
       Add a bounded graceful-quit window before the current forced termination,
       and keep the process-handle lifecycle reliable so a stopped retail child
