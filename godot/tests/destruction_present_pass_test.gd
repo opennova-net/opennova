@@ -670,7 +670,7 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	add_child_autofree(boot_container)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(mission, boot_container, {})
+	rt.setup(mission, boot_container)
 	var sim := rt.get_sim()
 	assert_not_null(sim, 'the runtime boots a real simulation over the mission')
 	rt.play()

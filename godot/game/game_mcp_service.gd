@@ -45,7 +45,7 @@ func setup(adapter: GameMcpAdapter, port: int) -> Error:
 	add_child(server)
 	probe_runner = ProbeRunner.new()
 	probe_runner.name = "ProbeRunner"
-	probe_runner.seams = adapter.get_probe_seams()
+	probe_runner.seams = adapter.get_shell_seams()
 	add_child(probe_runner)
 	tools = GameMcpTools.new(self, game_adapter)
 	tools.register_all(server.registry)

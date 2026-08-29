@@ -440,29 +440,20 @@ func get_debug_session() -> DebugSession:
 func get_game_debug_adapter() -> GameDebugAdapter:
 	if _debug_adapter == null:
 		_debug_adapter = GameDebugAdapterScript.new()
-		_debug_adapter.configure(
-			_current_runtime,
-			func(): return _world,
-			func(): return _player_presenter,
-			_shell_state_name,
-			func(): return _world_load_pending,
-			is_dev_tools_open,
-			_on_resume,
-			_on_return_to_menu,
-			request_quit)
-		_debug_adapter.set_menu_shell_source(func(): return _menu_shell)
-		_debug_adapter.set_ingame_screen_actions(
-				mcp_open_ingame_menu, mcp_open_armory)
-		_debug_adapter.set_render_capture_actions(
-				mcp_begin_world_only_capture, mcp_end_world_only_capture)
-		_debug_adapter.set_hud_hidden_capture_actions(
-				begin_hud_hidden_capture,
-				finish_hud_hidden_capture,
-				hud_hidden_capture_witness)
-		_debug_adapter.set_probe_seams(ProbeShellSeams.for_shell(self,
-				func(): return _world, func(): return _player_presenter,
+		# ONE typed seams record (GameShellSeams): the factory binds the shell's
+		# public methods by name; the private presenters/state legs are supplied
+		# here. The adapter adopts it in configure() and the probe runner reads
+		# the same record through get_shell_seams() (ADR 0041).
+		var seams := GameShellSeams.for_shell(self,
+				func(): return _world, _current_runtime,
+				func(): return _player_presenter,
 				func(): return _hud_presenter, func(): return _menu_shell,
-				func(): return _armory_presenter, func(): return _deploy_presenter))
+				func(): return _armory_presenter, func(): return _deploy_presenter)
+		seams.shell_state_source = _shell_state_name
+		seams.world_loading_source = func(): return _world_load_pending
+		seams.resume_action = _on_resume
+		seams.return_to_menu_action = _on_return_to_menu
+		_debug_adapter.configure(seams)
 	return _debug_adapter
 func get_frame_stats() -> FrameStats:
 	return _frame_stats
@@ -715,7 +706,7 @@ func start_loose_mission(bms_name: String) -> void:
 		_world.load_loose_mission.bind(bms_name))
 
 
-## The probe runner's mission verbs (ProbeShellSeams, ADR 0041): the menu's
+## The probe runner's mission verbs (GameShellSeams, ADR 0041): the menu's
 ## Start path, the saved-BMS path parity captures stage, and the return leg.
 func start_mission(bms_name: String) -> Error:
 	var gate := _mission_start_gate()

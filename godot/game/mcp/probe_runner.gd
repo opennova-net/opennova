@@ -14,7 +14,7 @@ const DEFAULT_UNRESPONSIVE_GRACE_MS := 5000
 const RUNS_DIR := "user://probe-runs"
 
 ## The shell seams handed to every context (null in pure tests).
-var seams: ProbeShellSeams = null
+var seams: GameShellSeams = null
 ## How long after cancellation a run may keep running before it is reaped.
 var unresponsive_grace_ms := DEFAULT_UNRESPONSIVE_GRACE_MS
 

@@ -20,7 +20,7 @@ var artifact_dir := ""
 ## Set by the runner (cancel, watchdog); long waits must check it.
 var cancelled := false
 var tree: SceneTree = null
-var seams: ProbeShellSeams = null
+var seams: GameShellSeams = null
 
 var _line_sink := Callable()
 var _artifacts: Array[Dictionary] = []

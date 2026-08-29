@@ -137,16 +137,17 @@ func test_game_debug_adapter_handles_every_cataloged_public_control_action() -> 
 	# adapter's match arms are its implementation. An action added to the catalog
 	# without an adapter arm would fall through to ERR_INVALID_PARAMETER here.
 	var adapter: GameDebugAdapter = add_child_autofree(GameDebugAdapter.new())
-	adapter.configure(
-			func(): return null,
-			func(): return null,
-			func(): return null,
-			func(): return "menu",
-			func(): return false,
-			func(): return false,
-			func(): pass,
-			func(): pass,
-			func(): pass)
+	var seams := GameShellSeams.new()
+	seams.runtime_source = func(): return null
+	seams.world_source = func(): return null
+	seams.presenter_source = func(): return null
+	seams.shell_state_source = func(): return "menu"
+	seams.world_loading_source = func(): return false
+	seams.dev_tools_open_source = func(): return false
+	seams.resume_action = func(): pass
+	seams.return_to_menu_action = func(): pass
+	seams.quit_action = func(): pass
+	adapter.configure(seams)
 	for action in GameMcpCatalog.PUBLIC_GAME_CONTROL_ACTIONS:
 		assert_ne(adapter.mcp_game_control(action), ERR_INVALID_PARAMETER,
 				"the adapter recognizes cataloged action '%s'" % action)
