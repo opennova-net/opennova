@@ -1,3 +1,1573 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:bedff0dadb094ebb4c045d86b067cddd3bac9b14db75cd5d6c642b783073c572
-size 79944
+<SCREEN>
+	<NAME>PLAYER_INFO</NAME>
+	<MUSICVAR>10</MUSICVAR>
+	<WINDOW type="window" name="MAIN">
+		<FRAME>
+			<STENCIL size="32">BORDER2.tga</STENCIL>
+			<BRUSH>BOXTILE.tga</BRUSH>
+			<MONOGRAM>MONOGRAM.tga</MONOGRAM>
+		</FRAME>
+		<APPEARANCE type="image" state="default">ltrbx_pl.tga</APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>0</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
+		<FONT>
+			<NAME>%DEF_FONTNAME%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+
+		<WINDOW type="window" name="ALIGNMENT_WRAPPER">
+			<POSITION>
+				<TOP>75</TOP>
+				<LEFT>0</LEFT>
+			</POSITION>
+<!-- bink panels begin-->
+			<WINDOW type="window" name="LOGO_SPLASH_HDR">
+				<APPEARANCE type="custom" state="default"></APPEARANCE>
+				<POSITION>
+					<TOP>-75</TOP>
+					<BOTTOM>0</BOTTOM>
+					<LEFT>0</LEFT>
+					<RIGHT>801</RIGHT>
+				</POSITION>
+			</WINDOW>
+			<WINDOW type="window" name="LOGO_SPLASH_FTR">
+				<APPEARANCE type="custom" state="default"></APPEARANCE>
+				<POSITION>
+					<TOP>450</TOP>
+					<BOTTOM>525</BOTTOM>
+					<LEFT>0</LEFT>
+					<RIGHT>801</RIGHT>
+				</POSITION>
+			</WINDOW>
+<!-- bink panels end-->
+
+	<!-- PLAYER TABS -->
+			<WINDOW type="static" name="STATIC_PLAYERPROFILE" HIDDEN>
+				<POSITION>
+					<LEFT>10</LEFT>
+					<RIGHT>60</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>20</BOTTOM>
+				</POSITION>
+				<STRING type="id" justify="LEFT">PROFILE</STRING>
+			</WINDOW>
+			<!-- SPAGH <WINDOW type="combobox" name="PLAYER" MAXCHAR="15">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>65</LEFT>
+					<RIGHT>265</RIGHT>
+					<TOP>2</TOP>
+					<BOTTOM>22</BOTTOM>
+				</POSITION>
+				<STRING edge="5" justify="CENTER" vjustify="CENTER"></STRING>
+				<LIST_BOX>
+					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+					<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+					<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+					<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>200</RIGHT>
+						<TOP>20</TOP>
+						<BOTTOM>120</BOTTOM>
+					</POSITION>
+					<ITEMS justify="LEFT" vjustify="CENTER">
+						<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+					</ITEMS>
+					<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					<STRING edge="5"></STRING>
+				</LIST_BOX>
+				<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+			</WINDOW>
+			<WINDOW type="button" name="RESET_PLAYER">
+				<ACTION type="window" state="SHOW">QUERY_WINDOW</ACTION>
+				<APPEARANCE type="image" state="default" map_state="0" height="20">btn1d.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1d.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1d.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1d.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>65</LEFT>
+					<RIGHT>265</RIGHT>
+					<TOP>27</TOP>
+					<BOTTOM>47</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER">DELETE_PLAYER</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>-->
+			<WINDOW type="static" name="STATIC_PLAYERCLASS">
+				<POSITION>
+					<LEFT>300</LEFT>
+					<RIGHT>350</RIGHT>
+					<TOP>27</TOP>
+					<BOTTOM>47</BOTTOM>
+				</POSITION>
+				<STRING type="id" justify="LEFT">CLASS</STRING>
+			</WINDOW>
+			<WINDOW type="combobox" name="PLAYERCLASS">
+				<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>355</LEFT>
+					<RIGHT>555</RIGHT>
+					<TOP>27</TOP>
+					<BOTTOM>47</BOTTOM>
+				</POSITION>
+				<LIST_BOX>
+					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+					<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+					<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+					<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+					<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>200</RIGHT>
+						<TOP>20</TOP>
+						<BOTTOM>120</BOTTOM>
+					</POSITION>
+					<ITEMS justify="LEFT" vjustify="CENTER">
+						<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+						<ITEM type="ID" value="5">CHARTYPE_DELTA_MEDIC</ITEM>
+						<ITEM type="ID" value="6">CHARTYPE_DELTA_SNIPER</ITEM>
+						<ITEM type="ID" value="7">CHARTYPE_DELTA_GUNNER</ITEM>
+						<ITEM type="ID" value="8">CHARTYPE_DELTA_RIFLEMAN</ITEM>
+						<ITEM type="ID" value="9">CHARTYPE_DELTA_ENGINEER</ITEM>
+					</ITEMS>
+					<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					<STRING edge="5"></STRING>
+				</LIST_BOX>
+				<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+			</WINDOW>
+			<!-- SPAGH<WINDOW type="static" name="STATIC_PLAYERNAME">
+				<POSITION>
+					<LEFT>300</LEFT>
+					<RIGHT>350</RIGHT>
+					<TOP>2</TOP>
+					<BOTTOM>22</BOTTOM>
+				</POSITION>
+				<STRING type="id" justify="LEFT">NAME</STRING>
+			</WINDOW>
+			<WINDOW type="edit" name="PLAYERNAME" MAXCHAR="15">
+				<APPEARANCE type="image" state="default" map_state="0" height="20">btn1d.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1d.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1d.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1d.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>355</LEFT>
+					<RIGHT>555</RIGHT>
+					<TOP>2</TOP>
+					<BOTTOM>22</BOTTOM>
+				</POSITION>
+				<STRING edge="5" type="id" justify="LEFT"></STRING>
+				<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+			</WINDOW>-->
+			<WINDOW type="checkbox" name="OPTIONS_AUTORELOAD">
+				<APPEARANCE type="image" state="default" map_state="0" height="20">btn6.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn6.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="20">btn6.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn6.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>600</LEFT>
+					<TOP>2</TOP>
+					<BOTTOM>22</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER" type="id">PLAYER_AUTORELOAD</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>
+			<WINDOW type="checkbox" name="OPTIONS_AUTOMEDIC">
+				<APPEARANCE type="image" state="default" map_state="0" height="20">btn6.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn6.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="20">btn6.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn6.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>600</LEFT>
+					<TOP>27</TOP>
+					<BOTTOM>47</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER" type="id">PLAYER_AUTOMEDIC</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>
+
+	<!-- -->
+			<WINDOW type="window" name="QUERY_WINDOW" DRAW_FRAME HIDDEN MODAL>
+				<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+				<POSITION>
+					<LEFT>200</LEFT>
+					<RIGHT>600</RIGHT>
+					<TOP>150</TOP>
+					<BOTTOM>250</BOTTOM>
+				</POSITION>
+				<WINDOW type="static" name="STATIC_QUESTION">
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>400</RIGHT>
+						<TOP>20</TOP>
+						<BOTTOM>45</BOTTOM>
+					</POSITION>
+					<STRING type="id" justify="CENTER">QUERY_DELETE</STRING>
+				</WINDOW>
+				<WINDOW type="button" name="QUERY_YES">
+					<ACTION type="window" state="HIDE">QUERY_WINDOW</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn1.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>220</LEFT>
+						<RIGHT>380</RIGHT>
+						<TOP>70</TOP>
+						<BOTTOM>90</BOTTOM>
+					</POSITION>
+					<STRING type="ID" justify="CENTER">TT_YES</STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="button" name="QUERY_NO">
+					<ACTION type="window" state="HIDE">QUERY_WINDOW</ACTION>
+					<APPEARANCE type="image" state="default" map_state="0" height="24">btn1.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>20</LEFT>
+						<RIGHT>180</RIGHT>
+						<TOP>70</TOP>
+						<BOTTOM>90</BOTTOM>
+					</POSITION>
+					<STRING type="ID" justify="CENTER">TT_NO</STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+			</WINDOW>
+	<!-- -->
+
+			<WINDOW type="radio" name="SIDE_BLUE" CHECKED>
+				<APPEARANCE type="image" state="default"   map_state="0" height="25">tab_mid.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="25">tab_mid.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected"  map_state="2" height="25">tab_mid.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled"  map_state="3" height="25">tab_mid.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>24</LEFT>
+					<TOP>59</TOP>
+					<BOTTOM>84</BOTTOM>
+				</POSITION>
+				<GROUP>1</GROUP>
+				<STRING type="id" justify="CENTER" vjustify="CENTER">STR_LOAD_BLUESIDE</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>
+			<WINDOW type="radio" name="SIDE_RED">
+				<APPEARANCE type="image" state="default"   map_state="0" height="25">tab_mid.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="25">tab_mid.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected"  map_state="2" height="25">tab_mid.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled"  map_state="3" height="25">tab_mid.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>173</LEFT>
+					<TOP>59</TOP>
+					<BOTTOM>84</BOTTOM>
+				</POSITION>
+				<GROUP>1</GROUP>
+				<STRING type="id" justify="CENTER" vjustify="CENTER">STR_LOAD_REDSIDE</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>
+			<WINDOW type="window">
+				<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+				<POSITION>
+					<TOP>83</TOP>
+					<BOTTOM>83</BOTTOM>
+					<LEFT>0</LEFT>
+					<RIGHT>25</RIGHT>
+				</POSITION>
+			</WINDOW>
+			<WINDOW type="window">
+				<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+				<POSITION>
+					<TOP>83</TOP>
+					<BOTTOM>83</BOTTOM>
+					<LEFT>320</LEFT>
+					<RIGHT>801</RIGHT>
+				</POSITION>
+			</WINDOW>
+
+	<!-- -->
+			<WINDOW type="window" name="AVATARS">
+				<POSITION>
+					<LEFT>32</LEFT>
+					<TOP>90</TOP>
+				</POSITION>
+				<WINDOW type="button" name="PLAYER_PREVIEW">
+					<APPEARANCE type="custom" state="default"></APPEARANCE>
+					<APPEARANCE type="custom" state="mouseover"></APPEARANCE>
+					<APPEARANCE type="custom" state="selected"></APPEARANCE>
+					<APPEARANCE type="custom" state="disabled"></APPEARANCE>
+					<POSITION>
+						<LEFT>1</LEFT>
+						<TOP>64</TOP>
+						<RIGHT>213</RIGHT>
+						<BOTTOM>305</BOTTOM>
+					</POSITION>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="combobox" name="NATIONALITY">
+					<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>215</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>20</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX sb_edge_pad="21">
+						<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="color" state="default">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="selected">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>214</RIGHT>
+							<TOP>65</TOP>
+							<BOTTOM>306</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+						<SCROLLBAR>
+							<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+							<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+							<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+							<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+							<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+							<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+							<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+							<POSITION>
+								<LEFT>195</LEFT>
+								<TOP>0</TOP>
+								<RIGHT>215</RIGHT>
+								<BOTTOM>250</BOTTOM>
+							</POSITION>
+						</SCROLLBAR>
+						<STRING edge="5"></STRING>
+					</LIST_BOX>
+					<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="combobox" name="DIVISION">
+					<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>215</RIGHT>
+						<TOP>20</TOP>
+						<BOTTOM>40</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX sb_edge_pad="21">
+						<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="color" state="default">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="selected">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>214</RIGHT>
+							<TOP>45</TOP>
+							<BOTTOM>286</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+						<SCROLLBAR>
+							<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+							<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+							<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+							<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+							<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+							<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+							<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+							<POSITION>
+								<LEFT>195</LEFT>
+								<TOP>0</TOP>
+								<RIGHT>215</RIGHT>
+								<BOTTOM>250</BOTTOM>
+							</POSITION>
+						</SCROLLBAR>
+						<STRING edge="5"></STRING>
+					</LIST_BOX>
+					<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="combobox" name="COMBO_LIST">
+					<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>215</RIGHT>
+						<TOP>40</TOP>
+						<BOTTOM>60</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="LEFT"></STRING>
+					<LIST_BOX sb_edge_pad="21">
+						<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="color" state="default">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="selected">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">%SEMIOPAQUE_BLACK%</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>214</RIGHT>
+							<TOP>25</TOP>
+							<BOTTOM>266</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+						<SCROLLBAR>
+							<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+							<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+							<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+							<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+							<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+							<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+							<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+							<POSITION>
+								<LEFT>195</LEFT>
+								<TOP>0</TOP>
+								<RIGHT>215</RIGHT>
+								<BOTTOM>250</BOTTOM>
+							</POSITION>
+						</SCROLLBAR>
+						<STRING edge="5"></STRING>
+					</LIST_BOX>
+					<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="combobox" name="PLAYERVOICE">
+					<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>215</RIGHT>
+						<TOP>310</TOP>
+						<BOTTOM>330</BOTTOM>
+					</POSITION>
+					<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+					<LIST_BOX sb_edge_pad="21">
+						<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+						<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+						<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>214</RIGHT>
+							<TOP>-104</TOP>
+							<BOTTOM>-4</BOTTOM>
+						</POSITION>
+						<ITEMS justify="LEFT" vjustify="CENTER">
+							<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+						</ITEMS>
+						<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+						<SCROLLBAR>
+							<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+							<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+							<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+							<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+							<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+							<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+							<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+							<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+							<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+							<POSITION>
+								<LEFT>194</LEFT>
+								<TOP>0</TOP>
+								<RIGHT>212</RIGHT>
+								<BOTTOM>99</BOTTOM>
+							</POSITION>
+						</SCROLLBAR>
+						<STRING edge="5"></STRING>
+					</LIST_BOX>
+					<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+				</WINDOW>
+				<WINDOW type="button" name="TESTPLAYERVOICE">
+					<APPEARANCE type="image" state="default" map_state="0" height="20">btn1d.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1d.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1d.tga</APPEARANCE>
+					<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1d.tga</APPEARANCE>
+					<POSITION>
+						<LEFT>0</LEFT>
+						<RIGHT>215</RIGHT>
+						<TOP>335</TOP>
+						<BOTTOM>355</BOTTOM>
+					</POSITION>
+					<STRING justify="CENTER" vjustify="CENTER" type="id">TEST_VOICE</STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+			</WINDOW>
+
+	<!-- -->			
+			<WINDOW type="window" name="LOADOUT_WRAPPER">
+				<POSITION>
+					<LEFT>300</LEFT>
+					<TOP>120</TOP>
+				</POSITION>
+
+				<WINDOW type="static" name="STATIC_PRIMARY">
+					<POSITION>
+						<LEFT>25</LEFT>
+						<TOP>-30</TOP>
+					</POSITION>
+					<STRING type="id" justify="LEFT" vjustify="CENTER">PRIMARY</STRING>
+				</WINDOW>
+				<WINDOW type="window" name="PRIMARY_OUTLINE">
+					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+					<POSITION>
+						<LEFT>25</LEFT>
+						<RIGHT>225</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>124</BOTTOM>
+					</POSITION>
+					<WINDOW type="window" name="PRIMARY_ICON">
+						<POSITION>
+							<LEFT>03</LEFT>
+							<RIGHT>197</RIGHT>
+							<TOP>3</TOP>
+							<BOTTOM>57</BOTTOM>
+						</POSITION>
+					</WINDOW>
+					<WINDOW type="combobox" name="PRIMARY">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>60</TOP>
+							<BOTTOM>80</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="PRIMARY_AMMO1">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1bb.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1bb.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1bb.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1bb.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>125</RIGHT>
+							<TOP>82</TOP>
+							<BOTTOM>102</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>125</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>105</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>124</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="PRIMARY_AMMO1_TYPE">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1bc.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1bc.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1bc.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1bc.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>125</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>82</TOP>
+							<BOTTOM>102</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>75</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+								<ITEM type="ID" value="0">AMMO_TYPE_FMJ</ITEM>
+								<ITEM type="ID" value="1">AMMO_TYPE_AP</ITEM>
+								<ITEM type="ID" value="2">AMMO_TYPE_SP</ITEM>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>55</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>74</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="PRIMARY_AMMO2">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>104</TOP>
+							<BOTTOM>124</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+				</WINDOW>
+				
+				<WINDOW type="static" name="STATIC_SECONDARY">
+					<POSITION>
+						<LEFT>235</LEFT>
+						<TOP>-30</TOP>
+					</POSITION>
+					<STRING type="id" justify="LEFT" vjustify="CENTER">SECONDARY</STRING>
+				</WINDOW>
+				<WINDOW type="window" name="SECONDARY_OUTLINE">
+					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+					<POSITION>
+						<LEFT>235</LEFT>
+						<RIGHT>435</RIGHT>
+						<TOP>0</TOP>
+						<BOTTOM>124</BOTTOM>
+					</POSITION>
+					<WINDOW type="window" name="SECONDARY_ICON">
+						<POSITION>
+							<LEFT>3</LEFT>
+							<RIGHT>197</RIGHT>
+							<TOP>3</TOP>
+							<BOTTOM>57</BOTTOM>
+						</POSITION>
+					</WINDOW>
+					<WINDOW type="combobox" name="SECONDARY">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>60</TOP>
+							<BOTTOM>80</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="SECONDARY_AMMO1">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1bb.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1bb.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1bb.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1bb.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>125</RIGHT>
+							<TOP>82</TOP>
+							<BOTTOM>102</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>125</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>105</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>124</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="SECONDARY_AMMO1_TYPE">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1bc.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1bc.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1bc.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1bc.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>125</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>82</TOP>
+							<BOTTOM>102</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>75</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+								<ITEM type="ID" value="0">AMMO_TYPE_FMJ</ITEM>
+								<ITEM type="ID" value="1">AMMO_TYPE_AP</ITEM>
+								<ITEM type="ID" value="2">AMMO_TYPE_SP</ITEM>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>55</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>74</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="SECONDARY_AMMO2">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>104</TOP>
+							<BOTTOM>124</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+				</WINDOW>
+					
+				<WINDOW type="static" name="STATIC_ACCESSORY">
+					<POSITION>
+						<LEFT>25</LEFT>
+						<TOP>134</TOP>
+					</POSITION>
+					<STRING type="id" justify="LEFT" vjustify="CENTER">ACCESSORY</STRING>
+				</WINDOW>
+				<WINDOW type="window" name="ACCESSORY_OUTLINE">
+					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+					<POSITION>
+						<LEFT>25</LEFT>
+						<RIGHT>225</RIGHT>
+						<TOP>154</TOP>
+						<BOTTOM>278</BOTTOM>
+					</POSITION>
+					<WINDOW type="window" name="ACCESSORY_ICON">
+						<POSITION>
+							<LEFT>3</LEFT>
+							<RIGHT>197</RIGHT>
+							<TOP>3</TOP>
+							<BOTTOM>57</BOTTOM>
+						</POSITION>
+					</WINDOW>
+					<WINDOW type="combobox" name="ACCESSORY">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>60</TOP>
+							<BOTTOM>80</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="ACCESSORY_AMMO1">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>82</TOP>
+							<BOTTOM>102</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="ACCESSORY_AMMO2">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>104</TOP>
+							<BOTTOM>124</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+				</WINDOW>
+				
+				<WINDOW type="static" name="STATIC_GRENADES">
+					<POSITION>
+						<LEFT>235</LEFT>
+						<TOP>134</TOP>
+					</POSITION>
+					<STRING type="id" justify="LEFT" vjustify="CENTER">GRENADE</STRING>
+				</WINDOW>
+				<WINDOW type="window" name="GRENADE_OUTLINE">
+					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+					<POSITION>
+						<LEFT>235</LEFT>
+						<RIGHT>435</RIGHT>
+						<TOP>154</TOP>
+						<BOTTOM>278</BOTTOM>
+					</POSITION>
+					<WINDOW type="window" name="GRENADE_ICON">
+						<APPEARANCE type="image" state="default">m_nades.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>3</LEFT>
+							<RIGHT>197</RIGHT>
+							<TOP>3</TOP>
+							<BOTTOM>57</BOTTOM>
+						</POSITION>
+					</WINDOW>
+					<WINDOW type="combobox" name="GRENADE_AMMO1">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>60</TOP>
+							<BOTTOM>80</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="GRENADE_AMMO2">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>82</TOP>
+							<BOTTOM>102</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+					<WINDOW type="combobox" name="GRENADE_AMMO3">
+						<APPEARANCE type="image" state="default" map_state="0" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover" map_state="1" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected" map_state="2" height="20">btn1b.tga</APPEARANCE>
+						<APPEARANCE type="image" state="disabled" map_state="3" height="20">btn1b.tga</APPEARANCE>
+						<POSITION>
+							<LEFT>0</LEFT>
+							<RIGHT>200</RIGHT>
+							<TOP>104</TOP>
+							<BOTTOM>124</BOTTOM>
+						</POSITION>
+						<STRING edge="5" vjustify="CENTER" justify="CENTER"></STRING>
+						<LIST_BOX sb_edge_pad="21">
+							<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="mouseover">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="selected">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="outline" state="disabled">%TRIM_COLOR%</APPEARANCE>
+							<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="mouseover">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="selected">%COLOR_BLACK%</APPEARANCE>
+							<APPEARANCE type="color" state="disabled">%COLOR_BLACK%</APPEARANCE>
+							<POSITION>
+								<LEFT>0</LEFT>
+								<RIGHT>200</RIGHT>
+								<TOP>20</TOP>
+								<BOTTOM>120</BOTTOM>
+							</POSITION>
+							<ITEMS justify="LEFT" vjustify="CENTER">
+								<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+							</ITEMS>
+							<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+							<SCROLLBAR>
+								<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+								<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+								<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+								<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+								<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+								<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+								<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+								<POSITION>
+									<LEFT>180</LEFT>
+									<TOP>1</TOP>
+									<RIGHT>199</RIGHT>
+									<BOTTOM>99</BOTTOM>
+								</POSITION>
+							</SCROLLBAR>
+							<STRING edge="5"></STRING>
+						</LIST_BOX>
+						<SOUND state="mousein" trigger="MOVER_COMBO">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					</WINDOW>
+				</WINDOW>
+
+				<WINDOW type="static" name="STATIC_TOTAL_WEIGHT">
+					<POSITION>
+						<LEFT>27</LEFT>
+						<RIGHT>427</RIGHT>
+						<TOP>300</TOP>
+						<BOTTOM>325</BOTTOM>
+					</POSITION>
+					<STRING type="id" justify="CENTER" vjustify="CENTER">WEIGHT</STRING>
+				</WINDOW>
+			</WINDOW>			
+
+	<!-- ACCEPT -->
+
+			<WINDOW type="button" name="ACCEPT">
+				<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+				<ACTION type="screen" file="main.mnu">STARTUP</ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<APPEARANCE state="disabled"></APPEARANCE>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				<FONT>
+					<NAME>%DEF_FONTNAME_LG%</NAME>
+					<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+					<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+					<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+					<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+				</FONT>
+				<POSITION>
+					<LEFT>795</LEFT>
+					<TOP>425</TOP>
+				</POSITION>
+				<STRING type="id" justify="RIGHT">NAV_ACCEPT</STRING>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+

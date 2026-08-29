@@ -1,3 +1,4276 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:affa7115750b3ae1dc21e7febd3cb44977ba454f97a622784a7a15f128546c06
-size 120575
+
+
+
+
+
+
+
+
+
+ammo AT_NULL
+	velocity			0
+	min_stable_velocity 0
+	max_age				0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+	
+
+    ai_launch		NULL_SET 		
+
+	effects_table
+		move       none                		none          		0   
+		obj        none   					imp_bullet_dirt   	15
+		dirt       Effect_AmHitDirt    	imp_bullet_dirt   	15
+		grass      Effect_AmHitGrass   	imp_bullet_grass  	15
+		snow       Effect_AmHitSnow    	imp_bullet_dirt   	1
+		cement     Effect_AmHitDirt    	IMP_BULLET_CEMENT   	15
+		packeddirt Effect_AmHitDirt    	imp_bullet_dirt   	15
+		water      Effect_AmHitWater  	imp_bullet_water  	5
+		railroad   Effect_AmHitMetal   	imp_bullet_metal  	15
+		mud        Effect_AmHitDirt     imp_bullet_mud    	15
+		ice        Effect_AmHitSnow     imp_bullet_mud    	15
+		sand       Effect_AmHitSand    	imp_bullet_sand   	15
+		quicksand  Effect_AmHitSand    	imp_bullet_sand   	15
+		stone      Effect_AmHitStone   	IMP_BULLET_CEMENT  	15
+		wood       Effect_AmHitDirt    	imp_bullet_wood   	5
+		metal      Effect_AmHitMetal   	imp_bullet_metal  	15
+		bodyarmor  Effect_bdyarmhit   	IMP_BULLET_BARMOR  	15
+		glass      Effect_AmHitGlass    IMP_BULLET_GLASS          	5
+		cloth      Effect_AmHitCloth   	IMP_BULLET_CLOTH 	3
+		foliage    Effect_AmHitGrass 	IMP_BULLET_FOLIAGE   	3
+		hmetal     Effect_AmHitMetal   	imp_bullet_armor  	15
+		flesh      Effect_AmHitBody   	imp_bullet_flesh  	3
+		player		none				imp_bullet_flesh	10  
+		zip			none				WSH_BULLET_BY		10	    
+	end
+end
+
+ammo ROCKET
+	frndlyTrcrID		4502   
+	max_age				4     
+	arm_age				0      
+	velocity			390
+	dopplerdiv			3
+	min_stable_velocity 0
+	error				0
+	tumble_error		0.01
+	recoil				0 0 0
+	drag				0.5
+	weight_in_grains	23840
+	min_damage			0
+	max_damage			0
+	penetration_impact	100
+	penetration_kz		100
+	kztype				rounds_kz_C4  
+	kz_minradius		4.0
+	kz_maxradius		20.0
+	kz_damage			200
+	bullet_radius		0.05
+
+    ai_launch		GS_AT4 
+
+	tracer_type		rocket
+
+	scorch_id 2
+	scar_type 2
+
+
+	kz_physics	1
+
+	light_move     6.0   128 120 80
+	light_impact   10.0  255 192 96  0.2
+
+	flag LAWR
+	flag NoGravity
+	flag forcetracer
+
+	effects_table
+		move       none					LP_STINGER_MOVE		0
+		obj        Effect_PRGDirt		explo_ammo_med		200
+		dirt       Effect_PRGDirt		explo_dirt			200
+		grass      Effect_PRGDirt		explo_ammo_med		200
+		snow       Effect_PRGDirt		explo_dirt			200
+		cement     Effect_PRGDirt		explo_ammo_med		200
+		packeddirt Effect_PRGDirt		explo_dirt			200
+		water      Effect_WaterExp		explo_water_sm		200
+		railroad   Effect_PRGDirt		IMP_ROCKET_ARMOR	200
+		mud        Effect_PRGDirt		explo_ammo_med		200
+		ice        Effect_PRGDirt		explo_dirt			200
+		quicksand  Effect_PRGDirt		explo_dirt			200
+		sand	   Effect_PRGDirt		explo_dirt			200
+		stone      Effect_PRGDirt 		explo_ammo_med		200
+		wood       Effect_PRGDirt		explo_ammo_med		200
+		metal      Effect_PRGDirt		IMP_ROCKET_METAL	200
+		glass      Effect_PRGDirt		explo_ammo_med		200
+		cloth      Effect_PRGDirt		explo_ammo_med		200
+		foliage    Effect_PRGDirt		explo_foliage		200
+		hmetal     Effect_PRGDirt		IMP_ROCKET_ARMOR	200
+		flesh      Effect_PRGDirt		explo_ammo_med		200
+		player	   Effect_PRGDirt		explo_ammo_med		200
+		zip			none				none				10	
+	end
+end
+
+ammo ROCKETAT4
+	frndlyTrcrID			1873   
+	max_age					5     
+	arm_age					0.04      
+	velocity				290
+	dopplerdiv				2
+	min_stable_velocity		0
+	error					0
+	tumble_error			0.01
+	drag					.75
+	weight_in_grains		25250
+	min_damage				0
+	max_damage				0
+	penetration_impact		100
+	penetration_kz			100
+	kztype					rounds_kz_C4  
+	kz_minradius			2.0
+	kz_maxradius			10.0
+	kz_damage				150
+	recoil					28 42 56
+	bullet_radius		0.05
+
+    ai_launch		GS_AT4 
+
+	tracer_type		at4
+	
+	Mf_Light 100
+
+	scorch_id 2
+	scar_type 2
+
+
+	kz_physics	1
+
+	light_move     6.0   128 120 80
+	light_impact   10.0  255 192 96  0.2
+
+	flag	LAWR
+	flag	IgnorFoilage
+	flag	forcetracer
+	flag	priority	
+
+	effects_table
+		move       none					LP_STINGER_MOVE		0
+		obj        Effect_PRGDirt		explo_ammo_med		200
+		dirt       Effect_PRGDirt		explo_dirt			200
+		grass      Effect_PRGDirt		explo_ammo_med		200
+		snow       Effect_PRGDirt		explo_dirt			200
+		cement     Effect_PRGDirt		explo_ammo_med		200
+		packeddirt Effect_PRGDirt		explo_dirt			200
+		water      Effect_WaterExp		explo_water_sm		200
+		railroad   Effect_PRGDirt		IMP_ROCKET_ARMOR	200
+		mud        Effect_PRGDirt		explo_ammo_med		200
+		ice        Effect_PRGDirt		explo_dirt			200
+		quicksand  Effect_PRGDirt		explo_dirt			200
+		sand	   Effect_PRGDirt		explo_dirt			200
+		stone      Effect_PRGDirt 		explo_ammo_med		200
+		wood       Effect_PRGDirt		explo_ammo_med		200
+		metal      Effect_PRGDirt		IMP_ROCKET_METAL	200
+		glass      Effect_PRGDirt		explo_ammo_med		200
+		cloth      Effect_PRGDirt		explo_ammo_med		200
+		foliage    Effect_PRGDirt		explo_foliage		200
+		hmetal     Effect_PRGDirt		IMP_ROCKET_ARMOR	200
+		flesh      Effect_PRGDirt		explo_ammo_med		200
+		player	   Effect_PRGDirt		explo_ammo_med		200
+		zip			none				none				10	
+	end
+end
+
+
+
+ammo JAVELIN
+	frndlyTrcrID		0369   
+	max_age				30     
+	arm_age				.5      
+	velocity			100 
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				.75
+	weight_in_grains	65000
+	min_damage			23000
+	max_damage			23000
+	penetration_impact	100
+	penetration_kz		100
+	kztype				rounds_kz_C4
+	kz_minradius		2.0
+	kz_maxradius		10.0
+	kz_damage			1500
+	bullet_radius		0.05
+
+    ai_launch		GS_STINGER 
+	ai_launcheffect Effect_at4mf 
+
+	tracer_type		0
+	
+	scorch_id 2
+	scar_type 2
+
+	turnrate_maxpit  120
+	turnrate_maxyaw  120
+	heat_det_range 3000.0
+	boresight_maxang 20   
+
+	
+
+	kz_physics	1
+
+	light_move     6.0  128 120 80
+	light_impact   8.0  255 192 96  0.2
+
+	flag LAWR
+	flag NoGravity
+	flag forcetracer
+	flag priority
+
+
+
+	effects_table
+		move	   fx_jav_thrust		LP_STINGER_MOVE		0
+		obj        fx_jav_m_mtl_exp		explo_ammo_med		200
+		dirt       fx_jav_m_drt_exp		explo_dirt			200
+		grass      fx_jav_m_drt_exp		explo_ammo_med		200
+		snow       fx_jav_m_drt_exp		explo_dirt			200
+		cement     fx_jav_m_stn_exp		explo_ammo_med		200
+		packeddirt fx_jav_m_drt_exp		explo_dirt			200
+		water      Effect_shalH2O		explo_water_m		200
+		railroad   fx_jav_m_mtl_exp		IMP_ROCKET_ARMOR	200
+		mud        fx_jav_m_drt_exp		explo_ammo_med		200
+		ice        fx_jav_m_drt_exp		explo_dirt			200
+		quicksand  fx_jav_m_drt_exp		explo_dirt			200
+		sand	   fx_jav_m_drt_exp		explo_dirt			200
+		stone      fx_jav_m_stn_exp		explo_ammo_med		200
+		wood       fx_jav_m_wd_exp		explo_ammo_med		200
+		metal      fx_jav_m_drt_exp		IMP_ROCKET_METAL	200
+		glass      fx_jav_m_fol_exp		explo_ammo_med		200
+		cloth      fx_jav_m_drt_exp		explo_ammo_med		200
+		foliage    fx_jav_m_fol_exp		explo_foliage		200
+		hmetal     fx_jav_m_mtl_exp		IMP_ROCKET_ARMOR	200
+		flesh      fx_jav_m_drt_exp		explo_ammo_med		200
+		player	   fx_jav_m_drt_exp		explo_ammo_med		200
+		zip		   none					none				10 
+	end
+end
+
+
+ammo STINGER
+	frndlyTrcrID		4504   
+	max_age				10     
+	arm_age				.5      
+	velocity			85 
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	16000
+	min_damage			3000
+	max_damage			3000
+	penetration_impact	20
+	penetration_kz		20
+	kztype				rounds_kz_C4
+	kz_minradius		2.0
+	kz_maxradius		10.0
+	kz_damage			2250
+	bullet_radius		0.05
+
+    ai_launch		GS_STINGER 
+	ai_launcheffect Effect_at4mf 
+
+	tracer_type		rocket
+	
+	scorch_id 2
+	scar_type 2
+
+	turnrate_maxpit  120
+	turnrate_maxyaw  120
+	heat_det_range 3000.0
+	boresight_maxang 20   
+
+	
+
+	kz_physics	1
+
+	light_move     6.0  128 120 80
+	light_impact   8.0  255 192 96  0.2
+
+	flag LAWR
+	flag NoGravity
+	flag forcetracer
+
+
+
+	effects_table
+		move	   none					LP_STINGER_MOVE		0
+		obj        Effect_GrenObj		explo_ammo_med		200
+		dirt       Effect_stingerExp		explo_dirt		200
+		grass      Effect_GrenGrass		explo_ammo_med		200
+		snow       Effect_SnowExp		explo_dirt			200
+		cement     Effect_GrenStone		explo_ammo_med		200
+		packeddirt Effect_stingerExp		explo_dirt		200
+		water      Effect_shalH2O		explo_water_m		200
+		railroad   effect_GrenObj		IMP_ROCKET_ARMOR	200
+		mud        Effect_DirtExp_L		explo_ammo_med		200
+		ice        Effect_SnowExp		explo_dirt			200
+		quicksand	Effect_DirtExp_L		explo_dirt		200
+		sand		Effect_DirtExp_L		explo_dirt		200
+		stone      Effect_GrenStone		explo_ammo_med		200
+		wood       Effect_GrenWood		explo_ammo_med		200
+		metal      effect_GrenMetal		IMP_ROCKET_METAL	200
+		glass      effect_GrenStone		explo_ammo_med		200
+		cloth      effect_GrenStone		explo_ammo_med		200
+		foliage    Effect_GrenFolio		explo_foliage		200
+		hmetal     effect_GrenMetal		IMP_ROCKET_ARMOR	200
+		flesh      effect_DirtExp_L		explo_ammo_med		200
+		player		none				explo_ammo_med		200
+		zip			none				none				10 
+	end
+end
+
+
+ammo ARTILLERY
+	max_age					16     
+	arm_age					5
+	frndlyTrcrID 4407
+
+	flag useownmove
+
+end
+
+
+ammo ARTYRND
+	max_age					20     
+	velocity				150	
+	min_stable_velocity		0
+	error					0
+	tumble_error			0
+	drag					1
+	weight_in_grains		0
+	min_damage				1024
+	max_damage				1024
+	penetration_impact		60
+	penetration_kz			60
+
+	scorch_id 1
+	scar_type 1
+    ai_launch		ARTY_INCOMING 
+
+	tracer_type		rocket
+
+	kztype rounds_kz_Bullets
+	kz_damage 256
+	kz_minradius 5.0
+	kz_maxradius 30.0
+
+	effects_table
+		move       none                none              0
+		obj        Effect_AirExp		explo_artillery	15
+		dirt       Effect_DirtExp		explo_artillery	15
+		grass      Effect_GrassExp		explo_artillery	15
+		snow       Effect_SnowExp		explo_artillery	1
+		cement     Effect_StoneExp		explo_artillery	15
+		packeddirt Effect_DirtExp		explo_artillery	15
+		water      Effect_WaterExp		explo_water_lg	5
+		railroad   Effect_AirExp		explo_artillery	15
+		mud        Effect_DirtExp		explo_artillery	15
+		ice        Effect_SnowExp		explo_artillery	15
+		sand       Effect_DirtExp		explo_artillery	15
+		quicksand  Effect_DirtExp		explo_artillery	15
+		stone      Effect_StoneExp		explo_artillery	15
+		wood       effect_WoodExp		explo_artillery	5
+		metal      Effect_AirExp		explo_artillery	15
+		glass      none                 explo_artillery	5
+		cloth      Effect_AirExp	    explo_artillery	3
+		foliage    Effect_FoliageExp	explo_artillery	3
+		hmetal     Effect_AirExp	    explo_artillery	15
+		flesh      Effect_AirExp	    explo_artillery	3
+		player	   none					explo_artillery	10
+		zip		   none					wsh_shell_by	10
+	end
+end
+
+ammo 30MM
+	max_age					2     
+	velocity				900
+	min_stable_velocity		0
+	error					0
+	tumble_error			0.01
+	drag					0.5
+	weight_in_grains		1000
+	min_damage				0
+	max_damage				0
+	penetration_impact		60
+	penetration_kz			60
+	kztype					rounds_kz_Bullets
+	kz_damage				0
+	kz_minradius			1.0
+	kz_maxradius			4.0
+	recoil					10 10 10
+	bullet_radius			0.015
+
+	scorch_id 1
+	scar_type 1
+    ai_launch		GS_30MM 
+
+	tracerRate	 1				
+	tracer_type		stdred stdgreen
+	
+	Mf_Light 100
+
+	effects_table
+		move       none					none				0
+		obj        Effect_30mmMetalHit	none				15
+		dirt       Effect_30MMDirtHit	IMP_50CAL_DIRT		15
+		grass      Effect_AmHitGrass	IMP_50CAL_DIRT		15
+		snow       Effect_AmHitSnow		IMP_50CAL_DIRT		1
+		cement     Effect_AmHitStone	IMP_50CAL_CEMENT	15
+		packeddirt Effect_30MMDirtHit	IMP_50CAL_DIRT		15
+		water      Effect_AmHitWater2	imp_20mm_water		5
+		railroad   Effect_AmHitMetal	IMP_50CAL_ARMOR		15
+		mud        Effect_AmHitDirt		IMP_50CAL_DIRT		15
+		ice        Effect_AmHitSnow		IMP_BULLET_SAND		15
+		sand       Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand  Effect_30MMDirtHit   IMP_BULLET_SAND		15
+		stone      Effect_AmHitStone	IMP_50CAL_CEMENT	15
+		wood       Effect_30mmWoodHit   IMP_50CAL_WOOD		5
+		metal      Effect_30mmMetalHit  IMP_50CAL_METAL		15
+		bodyarmor  Effect_bdyarmhit   	IMP_BULLET_BARMOR  	15
+		glass      Effect_AmHitGlass	IMP_BULLET_GLASS	5
+		cloth      Effect_AmHitCloth	IMP_BULLET_SAND		3
+		foliage    Effect_30mmFolHit	imp_20mm_foliage	3
+		hmetal     Effect_30mmMetalHit	IMP_50CAL_ARMOR		15
+		flesh      Effect_AmHitBody		imp_20mm_flesh		3
+		player	   Effect_AmHitBody		imp_20mm_flesh		10
+		zip			none				wsh_shell_by		10
+	end
+end
+
+ammo ROTOR_BLADE
+	max_age				0.2     
+	velocity			100
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			8
+	max_damage			8
+	penetration_impact	0
+	penetration_kz		0
+
+	scorch_id 1
+	scar_type 1
+
+	effects_table
+		move       none						none            0
+		obj        none						none			15
+		dirt       Effect_AmHitDirt			none			15
+		grass      Effect_AmHitGrass		none			15
+		snow       Effect_AmHitSnow			none			1
+		cement     Effect_AmHitDirt			IMP_ROTOR_THING	15
+		packeddirt Effect_AmHitDirt			none			15
+		water      Effect_SmlSplash			imp_rotor_water	5
+		railroad   Effect_AmHitMetal		IMP_ROTOR_THING	15
+		mud        Effect_AmHitDirt			none			15
+		ice        Effect_AmHitSnow			none			15
+		sand       Effect_AmHitSand			none			15
+		quicksand  Effect_AmHitSand			none			15
+		stone      Effect_AmHitStone		none			15
+		wood       Effect_AmHitWood			none			5
+		metal      Effect_AmHitMetal		IMP_ROTOR_THING	15
+		glass      Effect_AmHitGlass		none			5
+		cloth      Effect_AmHitObj			none			3
+		foliage    Effect_AmHitFoliage		IMP_ROTOR_TREE	3
+		hmetal     Effect_AmHitMetal		IMP_ROTOR_THING	15
+		flesh      Effect_AmHitBody			none			3
+		player		none					none			10
+		zip			none					none			10
+	end
+end
+
+
+ammo AI_AK47a		
+	max_age				2     
+	velocity			862	
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			35
+	max_damage			35
+	penetration_impact	10
+	penetration_kz		10
+	armor_density		50 25 75
+
+	scorch_id 0
+	scar_type 0
+	tracerRate	 3				
+    ai_launch		GS_AK47_2 
+	ai_Launcheffect Effect_EnmyMuzz
+	recoil	17 17 17
+
+	tracer_type		stdred stdgreen
+
+	Mf_Light 100
+
+	kztype rounds_kz_C4  
+	kz_damage		0
+	kz_minradius 2.5
+	kz_maxradius 2.5
+ 
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		imp_bullet_dirt		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		imp_bullet_dirt		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT	15
+		packeddirt	Effect_AmHitDirt		imp_bullet_dirt		15
+		water		Effect_AmHitWater		imp_bullet_water	5
+		railroad	Effect_AmHitMetal		imp_bullet_metal	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		imp_bullet_sand		15
+		quicksand	Effect_AmHitSand		imp_bullet_sand		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		imp_bullet_wood		5
+		metal		Effect_AmHitMetal		imp_bullet_metal	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH	3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		imp_bullet_armor	15
+		flesh		Effect_AmHitBody		imp_bullet_flesh	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					wsh_bullet_by2		3
+	end
+end
+
+ammo AI_Rock
+	frndlyTrcrID		1905   
+	max_age				8     
+	arm_age				0      
+	velocity			30		
+	min_stable_velocity 0
+	error				1
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			5
+	max_damage			5
+	penetration_impact	0
+	penetration_kz		0
+	armor_density		1000 1000 1000
+
+	recoil		0 0 0
+
+
+	flag	useownmove
+	flag	IgnorFoilage
+	flag	forcetracer	
+
+
+
+	effects_table
+		move		none				none				0
+		obj			none				IMP_GREN_WOOD		80	
+		dirt		none				IMP_ROCK_DIRT		20	
+		grass		none				IMP_ROCK_DIRT		20	
+		snow		none				IMP_ROCK_DIRT		20	
+		cement		none				IMP_ROCK_STONE		20	
+		packeddirt	none				IMP_ROCK_DIRT		20	
+		water		Effect_SmlSplash	IMP_DEBSML_WATER	20	
+		railroad	none				IMP_ROCK_METAL		20	
+		mud			none				IMP_ROCK_DIRT		20	
+		ice			none				IMP_ROCK_DIRT		20	
+		quicksand	none				IMP_ROCK_DIRT		20	
+		sand		none				IMP_ROCK_DIRT		20	
+		stone		none				IMP_ROCK_STONE		20	
+		wood		none				IMP_GREN_WOOD		20	
+		metal		none				IMP_ROCK_METAL		20	
+		bodyarmor      none   	IMP_GREN_FLESH  	15
+		glass		none				IMP_BULLET_GLASS			20	
+		cloth		none				IMP_GREN_CANV		20	
+		foliage		none				IMP_GREN_FOLIAGE	20	
+		hmetal		none				IMP_ROCK_METAL		20	
+		flesh		none				IMP_GREN_FLESH		20	
+		player		none				IMP_ROCK_PLAYER		20	
+		zip			none				none				10	
+	end
+end
+
+ammo FLARE
+	max_age				10     
+	velocity	15		
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			2
+	max_damage			2
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+
+	scorch_id 1
+	scar_type 1
+	frndlyTrcrID 4408		
+    ai_launch		GS_FLARE 
+	flag useownmove
+	flag forcetracer
+
+	effects_table
+		move		Effect_Flare		none				0
+		obj			none				none				15
+		dirt		Effect_AmHitDirt	none				15
+		grass		Effect_AmHitGrass	none				15
+		snow		Effect_AmHitSnow	none				1
+		cement		Effect_AmHitDirt	none				15
+		packeddirt	Effect_AmHitDirt	none				15
+		water		Effect_SmlSplash	none				5
+		railroad	Effect_AmHitMetal	none				15
+		mud			Effect_AmHitDirt		none				15
+		ice			Effect_AmHitSnow		none				15
+		sand		Effect_AmHitSand	none				15
+		quicksand	Effect_AmHitSand	none				15
+		stone		Effect_AmHitStone	none				15
+		wood		Effect_AmHitWood	none				5
+		metal		Effect_AmHitMetal	none				15
+		glass		none				none				5
+		cloth		Effect_AmHitObj		none				3
+		foliage		Effect_AmHitFoliage	none				3
+		hmetal		Effect_AmHitMetal	none				15
+		flesh		Effect_AmHitBody	none				3
+		player		none				none				10
+		zip			none				none				10
+	end
+end
+
+ammo GROUND_FLARE
+	max_age				10     
+	velocity			0
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			2
+	max_damage			2
+	penetration_impact	0
+	penetration_kz		0
+
+	scorch_id 1
+	scar_type 1
+	frndlyTrcrID 4409					
+    ai_launch		GS_FLARE	
+	flag useownmove
+	flag forcetracer
+
+	effects_table
+		move		none				none				0
+		obj			none				none				15
+		dirt		Effect_AmHitDirt	none				15
+		grass		Effect_AmHitGrass	none				15
+		snow		Effect_AmHitSnow	none				1
+		cement		Effect_AmHitDirt	none				15
+		packeddirt	Effect_AmHitDirt	none				15
+		water		Effect_SmlSplash	none				5
+		railroad	Effect_AmHitMetal	none				15
+		mud			Effect_AmHitDirt		none				15
+		ice			Effect_AmHitSnow		none				15
+		sand		Effect_AmHitSand	none				15
+		quicksand	Effect_AmHitSand	none				15
+		stone		Effect_AmHitStone	none				15
+		wood		Effect_AmHitWood	none				5
+		metal		Effect_AmHitMetal	none				15
+		glass		none				none				5
+		cloth		Effect_AmHitObj	none				3
+		foliage		Effect_AmHitFoliage	none				3
+		hmetal		Effect_AmHitMetal	none				15
+		flesh		Effect_AmHitBody	none				3
+		player		none				none				10
+		zip			none				none				10
+	end
+end
+
+ammo RPG
+	frndlyTrcrID		1873   
+	max_age				5     
+	arm_age				0.04      
+	velocity			300 
+	min_stable_velocity 0
+	error				0
+	tumble_error		0.01
+	drag				0.75
+	weight_in_grains	25250
+	min_damage			0
+	max_damage			0
+	penetration_impact	100
+	penetration_kz		100
+	kztype				rounds_kz_C4  
+	kz_minradius		2.0
+	kz_maxradius		10.0
+	kz_damage			150 
+	recoil				35 52 70
+	bullet_radius		0.03
+
+	tracer_type		at4
+
+    ai_launch		GS_RPG 
+	ai_Launcheffect Effect_AT4MF
+
+	turnrate_maxpit  300
+	turnrate_maxyaw  300
+	boresight_maxang 45   
+
+	scorch_id 2
+	scar_type 2
+    kz_physics 1		
+
+	Mf_Light 100
+
+	light_move     6.0  128 120 80
+	light_impact   8.0  255 192 96  0.25
+
+	flag LAWR
+	flag forcetracer
+
+	effects_table
+		move		none		      none				0
+		obj        Effect_PRGDirt	explo_ammo_med		200
+		dirt       Effect_PRGDirt	explo_dirt			200
+		grass      Effect_PRGDirt	explo_ammo_med		200
+		snow       Effect_PRGDirt	explo_dirt			200
+		cement     Effect_PRGDirt	explo_ammo_med		200
+		packeddirt Effect_PRGDirt	explo_dirt			200
+		water      effect_waterexp	explo_water_sm		200
+		railroad   Effect_PRGDirt	IMP_ROCKET_ARMOR	200
+		mud        Effect_PRGDirt	explo_ammo_med		200
+		ice        Effect_PRGDirt	explo_dirt			200
+		quicksand	Effect_PRGDirt	explo_dirt			200
+		sand		Effect_PRGDirt	explo_dirt			200
+		stone      Effect_PRGDirt	explo_ammo_med		200
+		wood       Effect_PRGDirt	explo_ammo_med		200
+		metal      Effect_PRGDirt	IMP_ROCKET_METAL	200
+		glass      Effect_PRGDirt	explo_ammo_med		200
+		cloth      Effect_PRGDirt	explo_ammo_med		200
+		foliage    Effect_PRGDirt	explo_foliage		200
+		hmetal     Effect_PRGDirt	IMP_ROCKET_ARMOR	200
+		flesh      Effect_PRGDirt	explo_ammo_med		200
+		player		Effect_PRGDirt	explo_ammo_med		200
+		zip			none				by_missile1		50
+	end
+end
+
+ammo AMMO_KNIFE01
+	max_age				1     
+	velocity			1		
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			30		
+	max_damage			100
+	penetration_impact	0
+	penetration_kz		0
+
+    
+	flag instantkillzone
+	kztype rounds_kz_Knife
+	kz_damage 200			
+	kz_minradius 1.0
+	kz_maxradius 1.8		
+	kz_pieslice	 35		
+	kz_sound	IMP_KNIFE_FLESH
+
+	effects_table
+		move       none						none				0
+		obj        none						none				15
+		dirt       Effect_AmHitDirt			IMP_KNIFE_DIRT		15
+		grass      Effect_AmHitGrass		IMP_KNIFE_DIRT		15
+		snow       Effect_AmHitSnow			IMP_KNIFE_DIRT		1
+		cement     Effect_AmHitStone		IMP_KNIFE_CEMENT	15
+		packeddirt Effect_AmHitDirt			IMP_KNIFE_DIRT		15
+		water      Effect_AmHitWater3		imp_20mm_water		5
+		railroad   Effect_AmHitMetal		IMP_KNIFE_METAL		15
+		mud        Effect_AmHitDirt			IMP_KNIFE_DIRT		15
+		ice        Effect_AmHitSnow			IMP_KNIFE_DIRT		15
+		sand       Effect_AmHitSand			IMP_KNIFE_DIRT		15
+		quicksand  Effect_AmHitSand			IMP_KNIFE_DIRT		15
+		stone      Effect_AmHitStone		IMP_KNIFE_CEMENT	15
+		wood       Effect_AmHitWood			IMP_KNIFE_WOOD		5
+		metal      Effect_AmHitMetal		IMP_KNIFE_METAL		15
+		glass      Effect_AmHitGlass		IMP_KNIFE_GLASS		5
+		cloth      Effect_AmHitCloth		IMP_KNIFE_CLOTH		3
+		foliage    Effect_AmHitFoliage		imp_20mm_foliage	3
+		hmetal     Effect_AmHitMetal		IMP_KNIFE_METAL		15
+		flesh      Effect_AmHitBody			IMP_KNIFE_FLESH		3
+		player     Effect_AmHitBody			IMP_KNIFE_FLESH		10
+		zip			none					none				10
+	end
+end
+
+ammo AMMO_BERETTA_9MM
+	max_age				1		
+	velocity			341
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.158
+	weight_in_grains	124
+	min_damage			0
+	max_damage			0
+	recoil				11 17 23
+	penetration_impact	10
+	penetration_kz		10
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.0045
+	armor_density		8	5	14
+
+
+	scar_type 1
+    ai_launch		GS_BERETTA 
+	ai_Launcheffect Effect_M4MuzFlashFp
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_BERETTA_357
+	max_age				1		
+	velocity			457
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.158
+	weight_in_grains	110
+	min_damage			0
+	max_damage			0
+	recoil				17 24 31
+	penetration_impact	10
+	penetration_kz		10
+	armor_density		8	5	14
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.0045339
+	
+	scar_type 1
+    ai_launch		GS_357 
+	ai_Launcheffect Effect_Colt45MF
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_COLT_45
+	max_age				1     
+	velocity			244	
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.165
+	weight_in_grains	230
+	min_damage			0
+	max_damage			0
+	recoil				14 21 28
+	penetration_impact	10
+	penetration_kz		10
+	armor_density		8	5	14
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.005715
+
+	scar_type 1
+    ai_launch		GS_45 
+	ai_Launcheffect Effect_M4MuzFlashFp
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_SHOTGUN
+	max_age				1     
+	velocity			388
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.1
+	weight_in_grains	71
+	min_damage			0
+	max_damage			0
+	recoil				8 13 17
+	penetration_impact	10
+	penetration_kz		0
+	armor_density		50 50 50
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.004064
+
+	scorch_id 1
+	scar_type 1
+
+	flag shotgun
+    ai_launch		GS_12GAGE_REMM 	
+	Mf_Light 100
+	spread_count	10
+	kz_pieslice	 6		
+
+	effects_table
+		dirt       Effect_SGvDirt			IMP_12GAGE_DIRT		15
+		grass      Effect_SGvGrass			IMP_12GAGE_DIRT		15
+		snow       Effect_SGvSnow			IMP_12GAGE_DIRT		1
+		cement     Effect_SGvStone			IMP_12GAGE_ROCK		15
+		packeddirt Effect_SGvDirt			IMP_12GAGE_DIRT		15
+		water      Effect_SGvWater			IMP_12GAGE_WATER	5
+		railroad   Effect_SGvMetal			IMP_12GAGE_METAL	15
+		mud        Effect_SGvDirt			IMP_12GAGE_DIRT		15
+		ice        Effect_SGvSnow			IMP_12GAGE_DIRT		15
+		sand       Effect_SGvSand			IMP_12GAGE_SAND		15
+		quicksand  Effect_SGvSand			IMP_12GAGE_SAND		15
+		stone      Effect_SGvStone			IMP_12GAGE_ROCK		15
+		wood       Effect_SGvDirt			IMP_BULLET_WOOD		5
+		metal      Effect_SGvMetal			IMP_12GAGE_METAL	15
+		bodyarmor  Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass      Effect_SGvGlass			IMP_BULLET_GLASS			5
+		cloth      Effect_SGvDirt			IMP_12G_CLOTH		3
+		foliage    Effect_SGvGrass			IMP_12GAGE_FOLG		3	
+		hmetal     Effect_SGvMetal			IMP_12GAGE_METAL	15
+		flesh      Effect_SGvBody			IMP_12GAGE_FLESH	3
+		player	   Effect_SGvBody			IMP_BULLET_PLAYER	10
+		zip		   none						WSH_12GAGE_BY		10
+	end
+end
+ammo AMMO_CAR15_556MM
+	max_age				3
+	arm_age				0
+	velocity			854
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.255
+	weight_in_grains	62
+	min_damage			0
+	max_damage			0
+	recoil				8 9 11
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	14
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00278
+	
+	tracerRate	 3				
+
+	scar_type 1
+    ai_launch		GS_M4AI 	
+	ai_Launcheffect Effect_CAR15MF
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT	15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_M16_556MM
+	max_age				3
+	arm_age				0
+	velocity			945
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.255 
+	weight_in_grains	62
+	min_damage			0
+	max_damage			0
+	recoil				8 11 14
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	14
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00278
+		
+	tracerRate	 3				
+
+	scar_type 1
+    ai_launch		GS_M16AI 	
+	Mf_Light 100
+	ai_launcheffect Effect_M16MF
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_ak74_556MM
+	max_age				3
+	arm_age				0
+	velocity			900
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.255 
+	weight_in_grains	60
+	min_damage			0
+	max_damage			0
+	recoil				8 11 14
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	14
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00277
+	
+	tracerRate	 3				
+
+	scar_type 1
+    ai_launch		GS_AK74AI	
+	ai_launcheffect Effect_CAR15MF
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT	15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT	15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH	3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+
+ammo AMMO_AK47_556MM
+	max_age				3
+	arm_age				0
+	velocity			715
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.252 
+	weight_in_grains	110
+	min_damage			0
+	max_damage			0
+	recoil				9 13 17
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	13
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+	
+	tracerRate	 3				
+
+	scar_type 1
+    ai_launch		GS_AK47AI 	
+	ai_launcheffect Effect_CAR15MF
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_FNFNC_556MM
+	max_age				3
+	arm_age				0
+	velocity			965
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.255 
+	weight_in_grains	62
+	min_damage			0
+	max_damage			0
+	recoil				11 14 17
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	14
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00278
+		
+	tracerRate	 3				
+
+	scar_type 1
+    ai_launch		GS_M16AI 	
+	Mf_Light 100
+	ai_launcheffect Effect_M16MF
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_G36_556MM
+	max_age				3
+	arm_age				0
+	velocity			920
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.255 
+	weight_in_grains	62
+	min_damage			0
+	max_damage			0
+	recoil				10 13 16
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	14
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00278
+		
+	tracerRate	 3				
+
+	scar_type 1
+    ai_launch		GS_M16AI 	
+	Mf_Light 100
+	ai_launcheffect Effect_M16MF
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_MP5_10MM
+	max_age				6
+	arm_age				0
+	velocity			305
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.138
+	weight_in_grains	165
+	min_damage			0
+	max_damage			0
+	recoil				8 10 12
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		5.25	2	6
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.005
+	
+	tracerRate	 0				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_MP5_AI 	
+	ai_launcheffect Effect_MP5MF
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT	15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT	15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS	5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH	3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_MP5SP_9MM
+	max_age				6    
+	arm_age				0
+	velocity			285
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.158
+	weight_in_grains	124
+	min_damage			0
+	max_damage			0
+	recoil				8 9 10
+	penetration_impact	10
+	penetration_kz		10
+	armor_density		3	0.75	5
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.0045
+
+	tracerRate	 0				
+
+	scar_type 1
+	Mf_Light 100
+	flag silenced
+	
+	tracer_type		stdred stdgreen
+
+    ai_launch		GS_MP5SUP_AI 	
+	ai_launcheffect Effect_MP5MF
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT	15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS	5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH	3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_FNFAL_762MM
+	max_age				3
+	arm_age				0
+	velocity			840
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.435
+	weight_in_grains	145
+	min_damage			0
+	max_damage			0
+	recoil				10 20 50  
+	penetration_impact	30
+	penetration_kz		30
+	armor_density		20	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+
+	
+	tracerRate	 3				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_M60 	
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_G3_762MM
+	max_age				3
+	arm_age				0
+	velocity			800
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.435
+	weight_in_grains	145
+	min_damage			0
+	max_damage			0
+	recoil				10 20 50  
+	penetration_impact	30
+	penetration_kz		30
+	armor_density		20	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+
+	
+	tracerRate	 3				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_M60 	
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_MP7
+	max_age				3
+	arm_age				0
+	velocity			725
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.355
+	weight_in_grains	39
+	min_damage			0
+	max_damage			0
+	recoil				8 10 12
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		6	1	7
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.0141
+
+	
+	tracerRate	 3				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_M60 	
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_P90
+	max_age				3
+	arm_age				0
+	velocity			715
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.355
+	weight_in_grains	41
+	min_damage			0
+	max_damage			0
+	recoil				8 10 12
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		6	1	7
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.0855
+
+	
+	tracerRate	 3				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_M60 	
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+
+ammo AMMO_SAW_556MM
+	max_age				3
+	arm_age				0
+	velocity			924
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.255 
+	weight_in_grains	62
+	min_damage			0
+	max_damage			0
+	recoil				7 17 31
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	14
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00278
+	
+	tracerRate	 3				
+
+	scar_type 1
+	Mf_Light 100	
+    ai_launch		GS_MG_SAW 	
+	ai_Launcheffect Effect_M249SawMF
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_M60_762MM
+	max_age				3
+	arm_age				0
+	velocity			853
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.435
+	weight_in_grains	150
+	min_damage			0
+	max_damage			0
+	recoil				8 24 35
+	penetration_impact	30
+	penetration_kz		30
+	armor_density		15	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+
+	
+	tracerRate	 3				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_M60 	
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_FNMAG_762MM
+	max_age				2.5
+	arm_age				0
+	velocity			840
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.435
+	weight_in_grains	150
+	min_damage			0
+	max_damage			0
+	recoil				8 24 35
+	penetration_impact	30
+	penetration_kz		30
+	armor_density		15	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+	
+	tracerRate	 3				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_MG_M240 	
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+
+ammo AMMO_RPK_545MM
+	max_age				3
+	arm_age				0
+	velocity			900
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.255 
+	weight_in_grains	60
+	min_damage			0
+	max_damage			0
+	recoil				7 17 31
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		7	1	13
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00277
+	
+	tracerRate	 3				
+
+	scar_type 1
+    ai_launch		GS_RPK_AI	
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		IMP_BULLET_DIRT		15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_ROCK		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_ROCK		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY2		10
+	end
+end
+
+ammo AMMO_SR25_mm
+	max_age				3
+	velocity			853
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.435
+	weight_in_grains	165
+	min_damage			0
+	max_damage			0
+	recoil				25 42 56
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		15	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+	
+	tracerRate	 1				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_SR25 	
+
+	tracer_type		sniperred snipergreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		grass		Effect_AmHitGrass		IMP_SNIPER_DIRT	15
+		snow		Effect_AmHitSnow		IMP_SNIPER_DIRT		1
+		cement		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_SNIPER_DIRT		15
+		quicksand	Effect_AmHitSand		IMP_SNIPER_DIRT		15
+		stone		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		wood		Effect_AmHitWood		IMP_SNIPER_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_SNIPER_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY		10
+	end
+end
+
+ammo AMMO_L115A_mm
+	max_age				3
+	velocity			914
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.414
+	weight_in_grains	250
+	min_damage			0
+	max_damage			0
+	recoil				34 50 66
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		15	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.0042926
+	
+	tracerRate	 1				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_L115AAI 	
+
+	tracer_type		sniperred snipergreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_SNIPER_DIRT		1
+		cement		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		wood		Effect_AmHitWood		IMP_SNIPER_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_SNIPER_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY		10
+	end
+end
+
+
+
+ammo AMMO_DRAGUNOV_mm
+	max_age				3
+	velocity			810
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.45
+	weight_in_grains	204
+	min_damage			0
+	max_damage			0
+	recoil				34 49 64
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		15	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+	
+	tracerRate	 1				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_DRAGUNOVAI 	
+	ai_launcheffect Effect_M21MF
+
+	tracer_type		sniperred snipergreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_SNIPER_DIRT		1
+		cement		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		wood		Effect_AmHitWood		IMP_SNIPER_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_SNIPER_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY		10
+	end
+end
+
+
+ammo AMMO_PKM_MM
+	max_age				3
+	velocity			825
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.292
+	weight_in_grains	122
+	min_damage			0
+	max_damage			0
+	recoil				7 21 31
+	penetration_impact	30
+	penetration_kz		30
+	armor_density		7	1	14
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+	
+	tracerRate	 3				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_MG_PKMAI 	
+	ai_launcheffect Effect_M249SawMF
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_BULLET_DIRT		1
+		cement		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_BULLET_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_BULLET_CEMENT		15
+		wood		Effect_AmHitWood		IMP_BULLET_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_BULLET_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY		10
+	end
+end
+
+ammo AMMO_M21_762HPBT
+	max_age				3
+	velocity			853
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.435
+	weight_in_grains	165
+	min_damage			0
+	max_damage			0
+	recoil				21 31 43
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		15	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+	
+	tracerRate	 1				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_M21_AI 	
+
+	tracer_type		sniperred snipergreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_SNIPER_DIRT		1
+		cement		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		wood		Effect_AmHitWood		IMP_SNIPER_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_SNIPER_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY		10
+	end
+end
+
+ammo AMMO_M24_762HPBT
+	max_age				3
+	velocity			853
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.435
+	weight_in_grains	165
+	min_damage			0
+	max_damage			0
+	recoil				22 32 43
+	penetration_impact	20
+	penetration_kz		20
+	armor_density		15	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00381
+	
+	tracerRate	 1				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_M24_AI 	
+
+	tracer_type		sniperred snipergreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		none				15
+		dirt		Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		grass		Effect_AmHitGrass		imp_bullet_grass	15
+		snow		Effect_AmHitSnow		IMP_SNIPER_DIRT		1
+		cement		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		packeddirt	Effect_AmHitDirt		IMP_SNIPER_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_BULLET_METAL	15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_SNIPER_CEMENT		15
+		wood		Effect_AmHitWood		IMP_SNIPER_WOOD		5
+		metal		Effect_AmHitMetal		IMP_BULLET_METAL	15
+		bodyarmor   Effect_bdyarmhit		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH		3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_SNIPER_ARMOR	15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY		10
+	end
+end
+
+ammo AMMO_BARRET_50CAL
+	max_age				3.5
+	velocity			853
+	min_stable_velocity 	0 
+	error				0
+	tumble_error		0.01
+	drag				0.295 
+	weight_in_grains	500
+	min_damage			0
+	max_damage			0
+	recoil				45 67 90
+	penetration_impact	40
+	penetration_kz		40
+	armor_density		15	5	30
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	bullet_radius		0.00635
+	
+	tracerRate	 1				
+
+	scar_type 1
+	Mf_Light 100
+    ai_launch		GS_BARRET_AI 	
+	ai_launcheffect	Effect_M4MuzFlashFp
+	tracer_type		sniperred snipergreen
+
+	effects_table
+		move		none					none				0
+		obj			Effect_AmHitMetal		IMP_50CAL_DIRT		15
+		dirt		Effect_AmHitDirt		IMP_50CAL_DIRT		15
+		grass		Effect_AmHitGrass		IMP_50CAL_DIRT		15
+		snow		Effect_AmHitSnow		IMP_50CAL_DIRT		1
+		cement		Effect_AmHitStone		IMP_50CAL_CEMENT	15
+		packeddirt	Effect_AmHitDirt		IMP_50CAL_DIRT		15
+		water		Effect_AmHitWater		IMP_BULLET_WATER	5
+		railroad	Effect_AmHitMetal		IMP_50CAL_ARMOR		15
+		mud			Effect_AmHitDirt		imp_bullet_mud		15
+		ice			Effect_AmHitSnow		imp_bullet_mud		15
+		sand		Effect_AmHitSand		IMP_BULLET_SAND		15
+		quicksand	Effect_AmHitSand		IMP_BULLET_SAND		15
+		stone		Effect_AmHitStone		IMP_50CAL_CEMENT	15
+		wood		Effect_AmHitWood		IMP_50CAL_WOOD		5
+		metal		Effect_AmHitMetal		IMP_50CAL_METAL		15
+		bodyarmor   Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass		Effect_AmHitGlass		IMP_BULLET_GLASS	5
+		cloth		Effect_AmHitCloth		IMP_BULLET_CLOTH	3
+		foliage		Effect_AmHitFoliage		IMP_BULLET_FOLIAGE	3
+		hmetal		Effect_AmHitMetal		IMP_50CAL_ARMOR		15
+		flesh		Effect_AmHitBody		IMP_BULLET_FLESH	3
+		player		Effect_AmHitBody		IMP_BULLET_PLAYER	10
+		zip			none					WSH_BULLET_BY		10
+	end
+end
+
+ammo AMMO_M203_40MM_NADE
+	frndlyTrcrID		1874   
+	max_age				20
+	arm_age				.30      
+	velocity			74	
+	min_stable_velocity 0
+	error				0
+	tumble_error		0
+	recoil				28 28 28
+	kztype				rounds_kz_C4
+	kz_minradius		4.0
+	kz_maxradius		10.0
+	kz_damage			150
+	bullet_radius		0.02
+	
+	drag				0.5
+	weight_in_grains	2000
+	min_damage			410
+	max_damage			410
+	penetration_impact	60
+	penetration_kz		60
+
+	notarmmedammo	GRENADE_NOEXP	
+
+    ai_launch		GS_M203_GLAUNCH 
+	Mf_Light 100
+	scorch_id 2
+	scar_type 2
+
+	tracer_type		grenade
+
+    kz_physics 1		
+
+
+	light_impact   8.0  255 192 96  0.25
+
+	flag LAWR
+	flag	IgnorFoilage
+	flag forcetracer
+
+	effects_table
+		move	   none					none				0
+		obj        Effect_GrenMetal		EXPLO_FRAG_GREN		200
+		dirt       Effect_GrenGrnd		explo_dirt			200
+		grass      Effect_GrenGrass		EXPLO_FRAG_GREN		200
+		snow       Effect_GrenMetal		explo_dirt			200
+		cement     Effect_GrenRoad		EXPLO_FRAG_GREN		200
+		packeddirt Effect_GrenGrndSlp	explo_dirt			200
+		water      effect_waterexp		explo_water_sm		200
+		railroad   Effect_GrenMetal		EXPLO_FRAG_GREN		200
+		mud        Effect_GrenGrnd		EXPLO_FRAG_GREN		200
+		ice        Effect_GrenGrnd		explo_dirt			200
+		quicksand  Effect_GrenQSand		explo_dirt			200
+		sand	   Effect_GrenSand		explo_dirt			200
+		stone      Effect_GrenStone		EXPLO_FRAG_GREN		200
+		wood       Effect_GrenWood		EXPLO_FRAG_GREN		200
+		metal      Effect_GrenMetal		EXPLO_FRAG_GREN		200
+		glass      Effect_GrenMetal		EXPLO_FRAG_GLASS	200
+		cloth      Effect_GrenObj		EXPLO_FRAG_GREN		200
+		foliage    Effect_GrenFolio		EXPLO_FRAG_GREN		200
+		hmetal     Effect_GrenMetal		EXPLO_FRAG_GREN		200
+		flesh      Effect_GrenBody		EXPLO_FRAG_GREN		200
+		player		Effect_GrenBody		EXPLO_FRAG_GREN		200
+		zip			none				WSH_SHELL_BY		50
+	end
+end
+
+ammo AMMO_60MM_MORTAR
+	frndlyTrcrID		1878   
+	max_age				200
+	arm_age				.14      
+	velocity			163	
+	min_stable_velocity 0
+	error				0
+	tumble_error		0.01
+	drag				0.05
+	weight_in_grains	15000
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	recoil				8 8 8
+	kztype				rounds_kz_C4
+	kz_minradius		6.0	
+	kz_maxradius		12.0	
+	kz_damage			205			
+    kz_physics			1		
+	bullet_radius		0.03
+
+    ai_launch		GS_MORTAR 
+	Mf_Light 100
+	scorch_id 2
+	scar_type 2
+
+	tracer_type		grenade
+
+	light_impact   8.0  255 192 96  0.25
+
+	flag IgnorFoilage
+	flag forcetracer
+	flag useownmove
+	flag priority
+
+	effects_table
+		move	   none					LP_MORTAR_MOVE		0
+		obj        Effect_stingerExp	EXPLO_ARTILLERY		200
+		dirt       Effect_GrenGrnd		EXPLO_ARTILLERY		200
+		grass      Effect_GrenGrass		EXPLO_ARTILLERY		200
+		snow       Effect_GrenMetal		EXPLO_ARTILLERY		200
+		cement     Effect_GrenRoad		EXPLO_ARTILLERY		200
+		packeddirt Effect_GrenGrndSlp	EXPLO_ARTILLERY		200
+		water      effect_waterexp		EXPLO_WATER_M		200
+		railroad   Effect_GrenMetal		EXPLO_ARTILLERY		200
+		mud        Effect_GrenGrnd		EXPLO_ARTILLERY		200
+		ice        Effect_GrenGrnd		EXPLO_ARTILLERY		200
+		quicksand	Effect_GrenQSand	EXPLO_ARTILLERY		200
+		sand		Effect_GrenSand		EXPLO_ARTILLERY		200
+		stone      Effect_GrenStone		EXPLO_ARTILLERY		200
+		wood       Effect_GrenWood		EXPLO_ARTILLERY		200
+		metal      Effect_GrenMetal		EXPLO_ARTILLERY		200
+		glass      Effect_GrenMetal		EXPLO_ARTILLERY		200
+		cloth      Effect_GrenObj		EXPLO_ARTILLERY		200
+		foliage    Effect_GrenFolio		EXPLO_ARTILLERY		200
+		hmetal     Effect_GrenMetal		EXPLO_ARTILLERY		200
+		flesh      Effect_GrenBody		EXPLO_ARTILLERY		200
+		player		Effect_GrenBody		EXPLO_ARTILLERY		200
+		zip			none				none				50
+	end
+end
+
+ammo satchel	
+	frndlyTrcrID		1891   
+	max_age				1     
+	arm_age				0      
+	velocity			6		
+	min_stable_velocity 0
+	error				1
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	110
+	penetration_kz		110
+
+	recoil		0 0 0
+
+	scorch_id	2
+	scar_type	2
+
+	flag	useownmove
+	flag	noage
+	flag	forcetracer
+	flag	priority	
+
+
+	effects_table	
+		move		none				none				0
+		obj			none		EXPLO_SATCHEL		200	
+		dirt		none		IMP_SATCHEL_DRT		20	
+		grass		none		IMP_SATCHEL_DRT		20	
+		snow		none		IMP_SATCHEL_DRT		20	
+		cement		none		IMP_SATCHEL_STN		20	
+		packeddirt	none		IMP_SATCHEL_DRT		20	
+		water		Effect_SmlSplash	IMP_DEBSML_WATER	20	
+		railroad	none		IMP_SATCHEL_MTL		20	
+		mud			none		IMP_SATCHEL_MUD		20	
+		ice			none		IMP_SATCHEL_STN		20	
+		quicksand	none		IMP_SATCHEL_MUD		20	
+		sand		none		IMP_SATCHEL_DRT 	20	
+		stone		none		IMP_SATCHEL_STN		20	
+		wood		none		IMP_SATCHEL_WD		20	
+		metal		none		IMP_SATCHEL_MTL		20	
+		glass		none		IMP_SATCHEL_STN		20	
+		cloth		none		IMP_SATCHEL_CNV		20	
+		foliage		none		IMP_GREN_FOLIAGE	20	
+		hmetal		none		IMP_SATCHEL_MTL		20	
+		flesh		none		IMP_SATCHEL_CNV		20	
+		player		none		IMP_SATCHEL_CNV		20	
+		zip			none		none				10	
+		uwaterdeep    Effect_underH2O1		EXPLO_UWATER_L		20	
+		uwatershallow effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface Effect_surfaceRings	EXPLO_UWATERS_L		20	
+	end
+end
+
+ammo satchelboom
+	frndlyTrcrID		1891   
+	max_age				1     
+	arm_age				0      
+	velocity			6		
+	min_stable_velocity 0
+	error				1
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	110
+	penetration_kz		110
+	kztype				rounds_kz_Standard
+	kz_minradius		5.0
+	kz_maxradius		15.0
+	kz_damage			20000
+
+	recoil		0 0 0
+
+	scorch_id	2
+	scar_type	2
+
+	flag instantkillzone
+
+    kz_physics 1		
+
+	light_impact   8.0  255 192 96  0.25
+
+	effects_table
+		move			none				none				0
+		obj				Effect_SATCHEL		EXPLO_SATCHEL		200	
+		dirt			Effect_SATCHEL		none				20	
+		grass			Effect_SATCHEL		none				20	
+		snow			Effect_SATCHEL		none				20	
+		cement			Effect_SATCHEL		none				20	
+		packeddirt		Effect_SATCHEL		none		 		20	
+		water			Effect_SmlSplash	IMP_DEBSML_WATER	20	
+		railroad		Effect_SATCHEL		none				20	
+		mud				Effect_SATCHEL		none				20	
+		ice				Effect_SATCHEL		none				20	
+		quicksand		Effect_SATCHEL		none				20	
+		sand			Effect_SATCHEL		none		 		20	
+		stone			Effect_SATCHEL		none				20	
+		wood			Effect_SATCHEL		none				20	
+		metal			Effect_SATCHEL		none				20	
+		glass			Effect_SATCHEL		none				20	
+		cloth			Effect_SATCHEL		none				20	
+		foliage			Effect_SATCHEL		IMP_GREN_FOLIAGE	20	
+		hmetal			Effect_SATCHEL		none				20	
+		flesh			Effect_SATCHEL		none				20	
+		player			Effect_SATCHEL		none				20	
+		zip				none				none				10	
+		uwaterdeep		Effect_underH2O1	EXPLO_UWATER_L		20	
+		uwatershallow	effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface	Effect_surfaceRings	EXPLO_UWATERS_L		20	
+	end
+end
+
+
+ammo claymore	
+	frndlyTrcrID		1895   
+	foeTrcrID			1895   
+	max_age		1     
+	arm_age		0      
+	velocity	2		
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	40
+	penetration_kz		40
+	kztype				rounds_kz_C4  
+	kz_damage			105
+	kz_minradius		15
+	kz_maxradius		30
+	kz_pieslice			24		
+
+	recoil		0 0 0
+
+	scorch_id	2
+	scar_type	2
+
+	flag	useownmove
+	flag	noage
+	flag	forcetracer
+	flag	priority	
+
+
+
+	effects_table
+		move		none				none				0
+		obj			Effect_FragGrndDirt	EXPLO_CLAYMORE		200	
+		dirt		Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		grass		Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		snow		Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		cement		Effect_FragGrndDirt	IMP_CLAYMORE_ST		20	
+		packeddirt	Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		water		Effect_SmlSplash	IMP_DEBSML_WATER	20	
+		railroad	Effect_FragGrndDirt	IMP_CLAYMORE_MT		20	
+		mud			Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		ice			Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		quicksand	Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		sand		Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		stone		Effect_FragGrndDirt	IMP_CLAYMORE_ST		20	
+		wood		Effect_FragGrndDirt	IMP_CLAYMORE_WD		20	
+		metal		Effect_FragGrndDirt	IMP_CLAYMORE_MT		20	
+		glass		Effect_FragGrndDirt	IMP_BULLET_GLASS			20	
+		cloth		Effect_FragGrndDirt	IMP_CLAYMORE_CV		20	
+		foliage		Effect_FragGrndDirt	IMP_GREN_FOLIAGE	20	
+		hmetal		Effect_FragGrndDirt	IMP_CLAYMORE_MT		20	
+		flesh		Effect_FragGrndDirt	IMP_GREN_FLESH		20	
+		player		Effect_FragGrndDirt	IMP_GREN_FLESH		20	
+		zip			none				none				10	
+		uwaterdeep    Effect_underH2O1		EXPLO_UWATER_L		20	
+		uwatershallow effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface Effect_surfaceRings	EXPLO_UWATERS_L		20	
+	end
+end
+
+
+
+ammo claymorekillzone
+	max_age		1     
+	arm_age		0      
+	velocity	2		
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	40
+	penetration_kz		40
+	kztype				rounds_kz_C4  
+	kz_damage			205
+	kz_minradius		15
+	kz_maxradius		30
+	kz_pieslice			24		
+
+	recoil		0 0 0
+
+	scorch_id	2
+	scar_type	2
+
+	flag instantkillzone
+
+
+	light_impact   8.0  255 192 96  0.25
+
+	effects_table
+		obj			Effect_FragGrndDirt		EXPLO_CLAYMORE		200	
+		dirt       Effect_SGvDirt			IMP_BULLET_DIRT		15
+		grass      Effect_SGvGrass			imp_bullet_grass	15
+		snow       Effect_SGvSnow			IMP_BULLET_DIRT		1
+		cement     Effect_SGvStone			IMP_12GAGE_ROCK		15
+		packeddirt Effect_SGvDirt			IMP_BULLET_DIRT		15
+		water      Effect_SGvWater			IMP_12GAGE_WATER	5
+		railroad   Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		mud        Effect_SGvDirt			imp_bullet_mud		15
+		ice        Effect_SGvSnow			imp_bullet_mud		15
+		sand       Effect_SGvSand			IMP_BULLET_SAND		15
+		quicksand  Effect_SGvSand			IMP_BULLET_SAND		15
+		stone      Effect_SGvStone			IMP_12GAGE_ROCK		15
+		wood       Effect_SGvDirt			IMP_BULLET_WOOD		5
+		metal      Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		glass      Effect_SGvGlass			IMP_BULLET_GLASS			5
+		cloth      Effect_SGvDirt			IMP_BULLET_CLOTH	3
+		foliage    Effect_SGvGrass			IMP_BULLET_FOLIAGE	3
+		hmetal     Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		flesh      Effect_SGvBody			IMP_BULLET_FLESH	3
+		player	   Effect_SGvBody			IMP_BULLET_FLESH	10
+		zip		   none			WSH_BULLET_BY		10
+		uwaterdeep    Effect_underH2O1		EXPLO_UWATER_L		20	
+		uwatershallow effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface Effect_surfaceRings	EXPLO_UWATERS_L		20	
+	end
+end
+
+ammo claymoreshrapnel
+	max_age .5 
+	velocity 388
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag  1
+	weight_in_grains	0
+	min_damage			55
+	max_damage			55
+	penetration_impact	40
+	penetration_kz		40
+
+	scorch_id 1
+	scar_type 1
+	recoil		0 0 0
+
+	flag claymore
+
+	spread_count	16
+	kz_pieslice	 48		
+
+	effects_table
+		dirt       Effect_SGvDirt			SHRAPNEL_DIRT		15
+		grass      Effect_SGvGrass			SHRAPNEL_DIRT		15
+		snow       Effect_SGvSnow			SHRAPNEL_DIRT		1
+		cement     Effect_SGvStone			IMP_12GAGE_ROCK		15
+		packeddirt Effect_SGvDirt			SHRAPNEL_DIRT		15
+		water      Effect_SGvWater			IMP_12GAGE_WATER	5
+		railroad   Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		mud        Effect_SGvDirt			SHRAPNEL_DIRT		15
+		ice        Effect_SGvSnow			SHRAPNEL_DIRT		15
+		sand       Effect_SGvSand			IMP_BULLET_SAND		15
+		quicksand  Effect_SGvSand			IMP_BULLET_SAND		15
+		stone      Effect_SGvStone			IMP_12GAGE_ROCK		15
+		wood       Effect_SGvDirt			IMP_BULLET_WOOD		5
+		metal      Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		glass      Effect_SGvGlass			IMP_BULLET_GLASS			5
+		cloth      Effect_SGvDirt			IMP_12G_CLOTH		3
+		foliage    Effect_SGvGrass			IMP_BULLET_FOLIAGE	3
+		hmetal     Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		flesh      Effect_SGvBody			IMP_BULLET_FLESH	3
+		player	   Effect_SGvBody			IMP_BULLET_FLESH	10
+		zip		   none			WSH_BULLET_BY		10
+	end
+end
+
+
+
+
+ammo AV_Mine	
+	frndlyTrcrID		0368   
+	foeTrcrID			0368   
+	max_age				1     
+	arm_age				0      
+	velocity			6		
+	min_stable_velocity 0
+	error				1
+	tumble_error		0
+	drag				1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	100
+	penetration_kz		100
+
+	kztype				rounds_kz_C4  
+	kz_damage			2000
+	kz_minradius		5
+	kz_maxradius		5
+
+
+	recoil		0 0 0
+
+	scorch_id	2
+	scar_type	2
+
+	flag	useownmove
+	flag	noage
+	flag	forcetracer
+	flag	priority	
+
+
+
+	effects_table
+		move		none				none				0
+		obj			Effect_FragGrndDirt	EXPLO_CLAYMORE		200	
+		dirt		Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		grass		Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		snow		Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		cement		Effect_FragGrndDirt	IMP_CLAYMORE_ST		20	
+		packeddirt	Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		water		Effect_SmlSplash	IMP_DEBSML_WATER	20	
+		railroad	Effect_FragGrndDirt	IMP_CLAYMORE_MT		20	
+		mud			Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		ice			Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		quicksand	Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		sand		Effect_FragGrndDirt	IMP_CLAYMORE_DT		20	
+		stone		Effect_FragGrndDirt	IMP_CLAYMORE_ST		20	
+		wood		Effect_FragGrndDirt	IMP_CLAYMORE_WD		20	
+		metal		Effect_FragGrndDirt	IMP_CLAYMORE_MT		20	
+		glass		Effect_FragGrndDirt	IMP_BULLET_GLASS			20	
+		cloth		Effect_FragGrndDirt	IMP_CLAYMORE_CV		20	
+		foliage		Effect_FragGrndDirt	IMP_GREN_FOLIAGE	20	
+		hmetal		Effect_FragGrndDirt	IMP_CLAYMORE_MT		20	
+		flesh		Effect_FragGrndDirt	IMP_GREN_FLESH		20	
+		player		Effect_FragGrndDirt	IMP_GREN_FLESH		20	
+		zip			none				none				10	
+		uwaterdeep    Effect_underH2O1		EXPLO_UWATER_L		20	
+		uwatershallow effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface Effect_surfaceRings	EXPLO_UWATERS_L		20	
+	end
+end
+
+
+
+ammo AV_Minekillzone
+	max_age		1     
+	arm_age		0      
+	velocity	2		
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	100
+	penetration_kz		100
+	kztype				rounds_kz_C4  
+	kz_damage			30000
+	kz_minradius		5
+	kz_maxradius		15
+
+
+	recoil		0 0 0
+
+	scorch_id	2
+	scar_type	2
+
+	flag instantkillzone
+
+
+	light_impact   8.0  255 192 96  0.25
+
+	effects_table
+		obj			Effect_FragGrndDirt		EXPLO_CLAYMORE		200	
+		dirt       Effect_SGvDirt			IMP_BULLET_DIRT		15
+		grass      Effect_SGvGrass			imp_bullet_grass	15
+		snow       Effect_SGvSnow			IMP_BULLET_DIRT		1
+		cement     Effect_SGvStone			IMP_12GAGE_ROCK		15
+		packeddirt Effect_SGvDirt			IMP_BULLET_DIRT		15
+		water      Effect_SGvWater			IMP_12GAGE_WATER	5
+		railroad   Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		mud        Effect_SGvDirt			imp_bullet_mud		15
+		ice        Effect_SGvSnow			imp_bullet_mud		15
+		sand       Effect_SGvSand			IMP_BULLET_SAND		15
+		quicksand  Effect_SGvSand			IMP_BULLET_SAND		15
+		stone      Effect_SGvStone			IMP_12GAGE_ROCK		15
+		wood       Effect_SGvDirt			IMP_BULLET_WOOD		5
+		metal      Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		glass      Effect_SGvGlass			IMP_BULLET_GLASS			5
+		cloth      Effect_SGvDirt			IMP_BULLET_CLOTH	3
+		foliage    Effect_SGvGrass			IMP_BULLET_FOLIAGE	3
+		hmetal     Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		flesh      Effect_SGvBody			IMP_BULLET_FLESH	3
+		player	   Effect_SGvBody			IMP_BULLET_FLESH	10
+		zip		   none			WSH_BULLET_BY		10
+		uwaterdeep    Effect_underH2O1		EXPLO_UWATER_L		20	
+		uwatershallow effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface Effect_surfaceRings	EXPLO_UWATERS_L		20	
+	end
+end
+
+
+
+ammo AMMO_DETONATOR
+
+	max_age		0     
+	arm_age		0      
+	velocity	0		
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+
+	flag Detonatesatchels
+
+	effects_table
+		move		none	none	0
+		obj			none	none	200	
+		dirt		none	none	20	
+		grass		none	none	20	
+		snow		none	none	20	
+		cement		none	none	20	
+		packeddirt	none	none	20	
+		water		none	none	20	
+		railroad	none	none	20	
+		mud			none	none	20	
+		ice			none	none	20	
+		quicksand	none	none	20	
+		sand		none	none	20	
+		stone		none	none	20	
+		wood		none	none	20	
+		metal		none	none	20	
+		glass		none	none	20	
+		cloth		none	none	20	
+		foliage		none	none	20	
+		hmetal		none	none	20	
+		flesh		none	none	20	
+		player		none	none	20	
+		zip			none	none	10	
+	end
+end
+
+
+
+ammo SMALLLANDMINE 
+	max_age		1     
+	arm_age		0      
+	velocity	2		
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	40
+	penetration_kz		40
+
+	scorch_id	2
+	scar_type	2
+
+    ai_launch		EXPLO_MINE_SM 
+	ai_Launcheffect Effect_FragGrndDirt
+
+	flag instantkillzone
+
+	kztype rounds_kz_C4  
+	kz_damage 155    
+	kz_minradius 2
+	kz_maxradius 5
+
+	light_impact   8.0  255 192 96  0.25
+
+	effects_table
+		obj			Effect_FragGrndDirt		EXPLO_MINE_SM		200	
+		dirt       Effect_SGvDirt			IMP_BULLET_DIRT		15
+		grass      Effect_SGvGrass			imp_bullet_grass	15
+		snow       Effect_SGvSnow			IMP_BULLET_DIRT		1
+		cement     Effect_SGvStone			IMP_12GAGE_ROCK		15
+		packeddirt Effect_SGvDirt			IMP_BULLET_DIRT		15
+		water      Effect_SGvWater			IMP_12GAGE_WATER	5
+		railroad   Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		mud        Effect_SGvDirt			imp_bullet_mud		15
+		ice        Effect_SGvSnow			imp_bullet_mud		15
+		sand       Effect_SGvSand			IMP_BULLET_SAND		15
+		quicksand  Effect_SGvSand			IMP_BULLET_SAND		15
+		stone      Effect_SGvStone			IMP_12GAGE_ROCK		15
+		wood       Effect_SGvDirt			IMP_BULLET_WOOD		5
+		metal      Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		glass      Effect_SGvGlass			IMP_BULLET_GLASS			5
+		cloth      Effect_SGvDirt			IMP_BULLET_CLOTH	3
+		foliage    Effect_SGvGrass			IMP_BULLET_FOLIAGE	3
+		hmetal     Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		flesh      Effect_SGvBody			IMP_BULLET_FLESH	3
+		player	   Effect_SGvBody			IMP_BULLET_FLESH	10
+		zip		   none			wsh_shell_by		10
+	end
+end
+
+
+ammo LARGELANDMINE
+	max_age		1     
+	arm_age		0      
+	velocity	2		
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+
+	scorch_id	2
+	scar_type	2
+
+    ai_launch		EXPLO_MINE_LG 
+	ai_Launcheffect Effect_FragGrndDirt
+
+
+	flag instantkillzone
+
+	kztype rounds_kz_C4  
+	kz_damage 500
+	kz_minradius 4
+	kz_maxradius 8
+
+	light_impact   8.0  255 192 96  0.25
+
+	effects_table
+		obj			Effect_FragGrndDirt		EXPLO_MINE_LG		200	
+		dirt       Effect_SGvDirt			IMP_BULLET_DIRT		15
+		grass      Effect_SGvGrass			imp_bullet_grass	15
+		snow       Effect_SGvSnow			IMP_BULLET_DIRT		1
+		cement     Effect_SGvStone			IMP_12GAGE_ROCK		15
+		packeddirt Effect_SGvDirt			IMP_BULLET_DIRT		15
+		water      Effect_SGvWater			IMP_12GAGE_WATER	5
+		railroad   Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		mud        Effect_SGvDirt			imp_bullet_mud		15
+		ice        Effect_SGvSnow			imp_bullet_mud		15
+		sand       Effect_SGvSand			IMP_BULLET_SAND		15
+		quicksand  Effect_SGvSand			IMP_BULLET_SAND		15
+		stone      Effect_SGvStone			IMP_12GAGE_ROCK		15
+		wood       Effect_SGvDirt			IMP_BULLET_WOOD		5
+		metal      Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		glass      Effect_SGvGlass			IMP_BULLET_GLASS			5
+		cloth      Effect_SGvDirt			IMP_BULLET_CLOTH	3
+		foliage    Effect_SGvGrass			IMP_BULLET_FOLIAGE	3
+		hmetal     Effect_SGvMetal			IMP_BULLET_ARMOR	15
+		flesh      Effect_SGvBody			IMP_BULLET_FLESH	3
+		player	   Effect_SGvBody			IMP_BULLET_FLESH	10
+		zip		   none			wsh_shell_by		10
+	end
+end
+
+
+ammo grenadehe
+	frndlyTrcrID		1883   
+	max_age		4     
+	arm_age		0      
+	velocity	30		
+	min_stable_velocity 0
+	error 1
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	recoil		0 0 0
+	penetration_impact	40
+	penetration_kz		40
+	kztype				rounds_kz_C4
+	kz_minradius		6.0	
+	kz_maxradius		12.0	
+	kz_damage			205			
+    kz_physics			1		
+
+	scorch_id	2
+	scar_type	2
+
+	flag	useownmove
+	flag	IgnorFoilage
+	flag	forcetracer
+	flag	priority	
+
+
+
+	effects_table
+		move		none				none				0
+		obj			Effect_FragGrndDirt	EXPLO_FRAG_GREN		80	
+		dirt		Effect_FragGrndDirt	IMP_GREN_DIRT		20	
+		grass		Effect_FragGrndDirt	IMP_GREN_DIRT		20	
+		snow		Effect_FragGrndDirt	IMP_GREN_DIRT		20	
+		cement		Effect_FragGrndDirt	IMP_GREN_STON		20	
+		packeddirt	Effect_FragGrndDirt	IMP_GREN_DIRT		20	
+		water		Effect_SmlSplash	IMP_DEBSML_WATER	20	
+		railroad	Effect_FragGrndDirt	IMP_GREN_METAL		20	
+		mud			Effect_FragGrndDirt	IMP_GREN_DIRT		20	
+		ice			Effect_FragGrndDirt	IMP_GREN_DIRT		20	
+		quicksand	Effect_FragGrndDirt	IMP_GREN_DIRT		20	
+		sand		Effect_FragGrndDirt	IMP_GREN_DIRT		20	
+		stone		Effect_FragGrndDirt	IMP_GREN_STON		20	
+		wood		Effect_FragGrndDirt	IMP_GREN_WOOD		20	
+		metal		Effect_FragGrndDirt	IMP_GREN_METAL		20	
+		glass		Effect_FragGrndDirt	IMP_GREN_GLASS			20	
+		cloth		Effect_FragGrndDirt	IMP_GREN_CANV		20	
+		foliage		Effect_FragGrndDirt	IMP_GREN_FOLIAGE	20	
+		hmetal		Effect_FragGrndDirt	IMP_GREN_METAL		20	
+		flesh		Effect_FragGrndDirt	IMP_GREN_FLESH		20	
+		player		Effect_FragGrndDirt	IMP_GREN_FLESH		20	
+		zip			none				none				10	
+		uwaterdeep    Effect_underH2O1		EXPLO_UWATER_M		20	
+		uwatershallow effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface Effect_surfaceRings	EXPLO_UWATERS_M		20	
+	end
+end
+
+ammo grenadesm 
+	frndlyTrcrID		1875   
+	max_age		30     
+	arm_age		5      
+	velocity	30		
+	min_stable_velocity 0
+	error 1
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+
+	scorch_id 2
+	scar_type 2
+
+	flag	useownmove
+	flag	IgnorFoilage
+	flag	forcetracer
+	flag	priority
+	flag	ClipWaterFX
+
+
+
+	effects_table
+		move			Effect_SmokeToss	none				0
+		obj				none				EXPLO_SMOK_GREN		80	
+		dirt			none				IMP_GREN_DIRT		20	
+		grass			none				IMP_GREN_DIRT		20	
+		snow			none				IMP_GREN_DIRT		20	
+		cement			none				IMP_GREN_STON		20	
+		packeddirt		none				IMP_GREN_DIRT		20	
+		water			Effect_SmlSplash	IMP_DEBSML_WATER	20	
+		railroad		none				IMP_GREN_METAL		20	
+		mud				none				IMP_GREN_DIRT		20	
+		ice				none				IMP_GREN_DIRT		20	
+		quicksand		none				IMP_GREN_DIRT		20	
+		sand			none				IMP_GREN_DIRT		20	
+		stone			none				IMP_GREN_STON		20	
+		wood			none				IMP_GREN_WOOD		20	
+		metal			none				IMP_GREN_METAL		20	
+		glass			none				IMP_GREN_GLASS			20	
+		cloth			none				IMP_GREN_CANV		20	
+		foliage			none				IMP_GREN_FOLIAGE	20	
+		hmetal			none				IMP_GREN_METAL		20	
+		flesh			none				IMP_GREN_FLESH		20	
+		player			none				IMP_GREN_FLESH		20	
+		zip				none				none				10	
+		uwaterdeep		none				none				20	
+		uwatershallow	none				none				20	
+		uwatersurface	none				none				20	
+	end
+end
+
+ammo grenadefb 
+	frndlyTrcrID		1875   
+	max_age		4      
+	arm_age		0      
+	velocity	30	
+	min_stable_velocity 0
+	error 1
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+
+	scorch_id 2
+	scar_type 2
+
+	flag	useownmove
+	flag	IgnorFoilage
+	flag	forcetracer
+	flag	priority	
+
+	kztype rounds_kz_C4
+	kz_minradius 20.0
+	kz_maxradius 20.0
+	kz_damage 0
+    kz_physics 3		
+    secondary_anim  2	
+
+
+	effects_table
+		move		Effect_FlashBangToss	none				0
+		obj			Effect_FlashBang		EXPLO_FLASHBANG		80	
+		dirt		Effect_FlashBangDirt	IMP_GREN_DIRT		20	
+		grass		Effect_FlashBang		IMP_GREN_DIRT		20	
+		snow		Effect_FlashBang		IMP_GREN_DIRT		20	
+		cement		Effect_FlashBangDirt	IMP_GREN_STON		20	
+		packeddirt	Effect_FlashBangDirt	IMP_GREN_DIRT		20	
+		water		Effect_SmlSplash		IMP_DEBSML_WATER	20	
+		railroad	Effect_FlashBang		IMP_GREN_METAL		20	
+		mud			Effect_FlashBangDirt	IMP_GREN_DIRT		20	
+		ice			Effect_FlashBang		IMP_GREN_DIRT		20	
+		quicksand	Effect_FlashBangDirt	IMP_GREN_DIRT		20	
+		sand		Effect_FlashBangDirt	IMP_GREN_DIRT		20	
+		stone		Effect_FlashBangDirt	IMP_GREN_STON		20	
+		wood		Effect_FlashBang		IMP_GREN_WOOD		20	
+		metal		Effect_FlashBang		IMP_GREN_METAL		20	
+		glass		Effect_FlashBang		IMP_GREN_GLASS			20	
+		cloth		Effect_FlashBang		IMP_GREN_CANV		20	
+		foliage		Effect_FlashBangDirt	IMP_GREN_FOLIAGE	20	
+		hmetal		Effect_FlashBang		IMP_GREN_METAL		20	
+		flesh		Effect_FlashBang		IMP_GREN_FLESH		20	
+		player		Effect_FlashBang		IMP_GREN_FLESH		20	
+		zip			none					none				10	
+		uwaterdeep		Effect_underH2O1	EXPLO_UWATER_M		20	
+		uwatershallow	effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface	Effect_surfaceRings	EXPLO_UWATERS_M		20	
+	end
+end
+
+ammo grenadecs 
+	frndlyTrcrID		1875   
+	max_age		5     
+	arm_age		0      
+	velocity	30		
+	min_stable_velocity 0
+	error 1
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+
+	scorch_id 2
+	scar_type 2
+
+	flag	useownmove
+	flag	IgnorFoilage
+	flag	forcetracer
+	flag	priority	
+
+	kztype rounds_kz_C4
+	kz_minradius 1.0
+	kz_maxradius 6.0
+	kz_damage 32
+
+
+
+
+	effects_table
+		move	   Effect_ChemGasToss	none				0
+		obj        Effect_ChemGas		EXPLO_SMOK_GREN		80	
+		dirt       Effect_ChemGas		IMP_GREN_DIRT		20	
+		grass      Effect_ChemGas		IMP_GREN_DIRT		20	
+		snow       Effect_ChemGas		IMP_GREN_DIRT		20	
+		cement     Effect_ChemGas		IMP_GREN_STON		20	
+		packeddirt Effect_ChemGas		IMP_GREN_DIRT		20	
+		water      Effect_SmlSplash		IMP_DEBSML_WATER	20	
+		railroad   Effect_ChemGas		IMP_GREN_METAL		20	
+		mud        Effect_ChemGas		IMP_GREN_DIRT		20	
+		ice        Effect_ChemGas		IMP_GREN_DIRT		20	
+		quicksand	Effect_ChemGas		IMP_GREN_DIRT		20	
+		sand		Effect_ChemGas		IMP_GREN_DIRT		20	
+		stone      Effect_ChemGas		IMP_GREN_STON		20	
+		wood       Effect_ChemGas		IMP_GREN_WOOD		20	
+		metal      Effect_ChemGas		IMP_GREN_METAL		20	
+		glass      Effect_ChemGas		IMP_GREN_GLASS			20	
+		cloth      Effect_ChemGas		IMP_GREN_CANV		20	
+		foliage    Effect_ChemGas		IMP_GREN_FOLIAGE	20	
+		hmetal     Effect_ChemGas		IMP_GREN_METAL		20	
+		flesh      Effect_ChemGas		IMP_GREN_FLESH		20	
+		player		Effect_ChemGas		IMP_GREN_FLESH		20	
+		zip			none				none				10	
+		uwaterdeep		Effect_underH2O1	EXPLO_UWATER_M		20	
+		uwatershallow	effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface	Effect_surfaceRings	EXPLO_UWATERS_M		20	
+	end
+end
+
+ammo medpack
+	max_age 1     
+	velocity 1		
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag  1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+
+    
+	flag instantkillzone
+	kztype rounds_kz_Medic
+	kz_damage 0
+	kz_minradius 2
+	kz_maxradius 2
+
+	effects_table
+		move		none				none		0
+		obj			none				none		50
+		dirt		none				none		50
+		grass		none				none		50
+		snow		none				none		50
+		cement		none				none		50
+		packeddirt	none				none		50
+		water		none				none		50
+		railroad	none				none		50
+		mud			none				none		50
+		ice			none				none		50
+		quicksand	none				none		50
+		sand		none				none		50
+		stone		none				none		50
+		wood		none				none		50
+		metal		none				none		50
+		glass		none				none		50
+		cloth		none				none		50
+		foliage		none				none		50
+		hmetal		none			    none		50
+		flesh		none				none		50
+		player		none				none		50
+		zip			none				none		50
+	end
+end
+
+ammo MK19nade
+	frndlyTrcrID		1874   
+	max_age				3   
+	arm_age				.13
+	velocity			244
+	min_stable_velocity 	0 
+	recoil				8 8 8
+	error				1
+	tumble_error		0.01
+	drag				0.5
+	weight_in_grains	2000
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	kztype				rounds_kz_C4
+	kz_minradius		10.0		
+	kz_maxradius		15.0		
+	kz_damage			1000		
+	bullet_radius		0.02
+
+
+	notarmmedammo	GRENADE_NOEXP	
+
+    ai_launch		GS_EMP_GLAUNCH 
+	Mf_Light 100
+	scorch_id 2
+	scar_type 2
+
+	tracer_type		grenade
+
+    kz_physics 1		
+
+
+	
+	light_impact   8.0  255 192 96  0.25
+
+	flag LAWR
+	flag forcetracer
+	
+	flag ClipWater
+	
+	effects_table
+		move	   none				    none				0
+		obj        Effect_GrenObj		EXPLO_FRAG_GREN		200
+		dirt       Effect_GrenGrnd		explo_dirt			200
+		grass      Effect_GrenGrass		EXPLO_FRAG_GREN		200
+		snow       Effect_SmlSnowExp	explo_dirt			200
+		cement     Effect_GrenRoad		EXPLO_FRAG_GREN		200
+		packeddirt Effect_GrenGrnd		explo_dirt			200
+		water      effect_waterexp		explo_water_sm		200 
+		railroad   Effect_GrenMetal		EXPLO_FRAG_GREN		200
+		mud        Effect_GrenGrnd		EXPLO_FRAG_GREN		200
+		ice        Effect_SmlSnowExp	explo_dirt			200
+		quicksand	Effect_GrenQSand	explo_dirt			200
+		sand		Effect_GrenSand		explo_dirt			200
+		stone      Effect_GrenStone		EXPLO_FRAG_GREN		200
+		wood       Effect_GrenWood		EXPLO_FRAG_GREN		200
+		metal      Effect_GrenMetal		EXPLO_FRAG_GREN		200
+		glass      Effect_GrenObj		EXPLO_FRAG_GLASS		200
+		cloth      Effect_GrenObj		EXPLO_FRAG_GREN		200
+		foliage    Effect_GrenFolio		EXPLO_FRAG_GREN		200
+		hmetal     Effect_GrenMetal		EXPLO_FRAG_GREN		200
+		flesh      Effect_GrenBody		EXPLO_FRAG_GREN		200
+		player		Effect_GrenBody		EXPLO_FRAG_GREN		200
+		zip			none				WSH_SHELL_BY		50
+		uwaterdeep		Effect_underH2O1	EXPLO_UWATER_L		20	
+		uwatershallow	effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface	Effect_surfaceRings	EXPLO_UWATERS_L		20	
+	end
+end
+
+ammo Rclsrnd
+	frndlyTrcrID		1874   
+	max_age				4.5    
+	arm_age				.05    
+	velocity			305
+	min_stable_velocity 0
+	recoil				17 17 17
+	error				1
+	tumble_error		0.01
+	drag				0.75
+	weight_in_grains	15000
+	min_damage			0
+	max_damage			0
+	penetration_impact	90
+	penetration_kz		90
+	kztype				rounds_kz_C4
+	kz_minradius		3.0	
+	kz_maxradius		7.0	
+	kz_damage			500		
+	bullet_radius		0.0381
+
+    ai_launch		GS_EMCANNON 
+	Mf_Light 100
+	scorch_id 2
+	scar_type 2
+
+	tracer_type		grenade
+
+    kz_physics 1		
+
+
+	
+	light_impact   8.0  255 192 96  0.25
+
+	flag LAWR
+	
+
+	effects_table
+		move	   none				    none			0
+		obj        Effect_GrenObj		explo_ammo_med		200
+		dirt       Effect_GrenGrnd		explo_dirt			200
+		grass      Effect_GrenGrass		explo_ammo_med		200
+		snow       Effect_SmlSnowExp	explo_dirt			200
+		cement     Effect_GrenRoad		explo_ammo_med		200
+		packeddirt Effect_GrenGrnd		explo_dirt			200
+		water      effect_waterexp		explo_water_sm		200
+		railroad   Effect_GrenMetal		explo_ammo_med		200
+		mud        Effect_GrenGrnd		explo_ammo_med		200
+		ice        Effect_SmlSnowExp	explo_dirt			200
+		quicksand	Effect_GrenQSand	explo_dirt			200
+		sand		Effect_GrenSand		explo_dirt			200
+		stone      Effect_GrenStone		explo_ammo_med		200
+		wood       Effect_GrenWood		explo_ammo_med		200
+		metal      Effect_GrenMetal		explo_ammo_med		200
+		glass      Effect_GrenObj		explo_ammo_med		200
+		cloth      Effect_GrenObj		explo_ammo_med		200
+		foliage    Effect_GrenFolio		explo_foliage		200
+		hmetal     Effect_GrenMetal		explo_ammo_med		200
+		flesh      Effect_GrenBody		explo_ammo_med		200
+		player		Effect_GrenBody		explo_ammo_med		200
+		zip			none				WSH_SHELL_BY		50
+	end
+end
+
+
+ammo minirnds
+	max_age				3 
+	velocity			853
+	min_stable_velocity 	0 
+	error				3
+	tumble_error		0.01
+	drag				0.453
+	weight_in_grains	165
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	armor_density		15	5	30
+	kztype				rounds_kz_C4
+	kz_damage			50	
+	kz_minradius		1.0	
+	kz_maxradius		1.0	
+
+	recoil 7 7 7
+	scar_type 1
+	Mf_Light 100
+	bullet_radius .4	
+
+	tracer_type		rapidred rapidgreen
+	tracerRate	 3				
+
+
+	effects_table
+		move       none						none				0
+		obj        Effect_FX50CalObj		IMP_BULLET_DIRT		15
+		dirt       Effect_FX50CalDirt		IMP_BULLET_DIRT		15
+		grass      Effect_FX50CalGrass		imp_bullet_grass	15
+		snow       Effect_FX50CalDirt		IMP_BULLET_DIRT		1
+		cement     Effect_FX50CalStone		IMP_BULLET_CEMENT		15
+		packeddirt Effect_FX50CalDirt		IMP_BULLET_DIRT		15
+		water      Effect_WatersplshMed		IMP_BULLET_WATER	5
+		railroad   Effect_FX50CalMetal		IMP_BULLET_METAL	15
+		mud        Effect_FX50CalDirt		imp_bullet_mud		15
+		ice        Effect_AmHitSnow			imp_bullet_mud		15
+		sand       Effect_FX50CalSand		IMP_BULLET_SAND		15
+		quicksand  Effect_FX50CalSand		IMP_BULLET_SAND		15
+		stone      Effect_FX50CalStone		IMP_BULLET_CEMENT		15
+		wood       Effect_FX50CalWood		IMP_BULLET_WOOD		5
+		metal      Effect_FX50CalMetal		IMP_BULLET_METAL	15
+		bodyarmor  Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass      Effect_FX50CalGlass		IMP_BULLET_GLASS			5
+		cloth      Effect_FX50CalObj		IMP_BULLET_CLOTH	3
+		foliage    Effect_FX50CalWoodF		IMP_BULLET_FOLIAGE	3
+		hmetal     Effect_FX50CalMetal		IMP_BULLET_ARMOR	15
+		flesh      Effect_FX50CalBody		IMP_BULLET_FLESH	3
+		player		Effect_FX50CalBody		imp_bullet_flesh	10
+		zip			none					wsh_bullet_by		10
+	end
+end
+
+ammo minirnds_ah6
+	max_age				3 
+	velocity			853
+	min_stable_velocity 	0 
+	error				3
+	tumble_error		0.01
+	drag				0.453
+	weight_in_grains	165
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	armor_density		15	5	30
+	kztype				rounds_kz_C4
+	kz_damage			50 
+	kz_minradius		2.0	
+	kz_maxradius		2.0	
+
+	tracerRate	 3				
+
+	recoil 7 7 7
+	scar_type 1
+	Mf_Light 100
+	bullet_radius .4	
+
+	tracer_type		rapidred rapidgreen
+
+	effects_table
+		move       none						none				0
+		obj        Effect_FX50CalObj		IMP_BULLET_DIRT		15
+		dirt       Effect_FX50CalDirt		IMP_BULLET_DIRT		15
+		grass      Effect_FX50CalGrass		imp_bullet_grass	15
+		snow       Effect_FX50CalDirt		IMP_BULLET_DIRT		1
+		cement     Effect_FX50CalStone		IMP_BULLET_CEMENT		15
+		packeddirt Effect_FX50CalDirt		IMP_BULLET_DIRT		15
+		water      Effect_WatersplshMed		IMP_BULLET_WATER	5
+		railroad   Effect_FX50CalMetal		IMP_BULLET_METAL	15
+		mud        Effect_FX50CalDirt		imp_bullet_mud		15
+		ice        Effect_AmHitSnow			imp_bullet_mud		15
+		sand       Effect_FX50CalSand		IMP_BULLET_SAND		15
+		quicksand  Effect_FX50CalSand		IMP_BULLET_SAND		15
+		stone      Effect_FX50CalStone		IMP_BULLET_CEMENT		15
+		wood       Effect_FX50CalWood		IMP_BULLET_WOOD		5
+		metal      Effect_FX50CalMetal		IMP_BULLET_METAL	15
+		bodyarmor  Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass      Effect_FX50CalGlass		IMP_BULLET_GLASS			5
+		cloth      Effect_FX50CalObj		IMP_BULLET_CLOTH	3
+		foliage    Effect_FX50CalWoodF		IMP_BULLET_FOLIAGE	3
+		hmetal     Effect_FX50CalMetal		IMP_BULLET_ARMOR	15
+		flesh      Effect_FX50CalBody		IMP_BULLET_FLESH	3
+		player		Effect_FX50CalBody		imp_bullet_flesh	10
+		zip			none					wsh_bullet_by		10
+	end
+end
+
+
+ammo wkminirnds
+	max_age				3 
+	velocity			853
+	min_stable_velocity 	0 
+	error				3
+	tumble_error		0.01
+	drag				0.453
+	weight_in_grains	165
+	min_damage			30
+	max_damage			30
+	penetration_impact	50
+	penetration_kz		50
+	armor_density		15	5	30
+
+	tracerRate	 3				
+
+	recoil 7 7 7
+	scar_type 1
+	Mf_Light 100
+	bullet_radius .2	
+
+	tracer_type		stdred stdgreen
+
+	kztype rounds_kz_C4
+	kz_damage 0		
+	kz_minradius .75	
+	kz_maxradius .75	
+
+	effects_table
+		move       none						none				0
+		obj        Effect_FX50CalObj		IMP_BULLET_DIRT		15
+		dirt       Effect_FX50CalDirt		IMP_BULLET_DIRT		15
+		grass      Effect_FX50CalGrass		imp_bullet_grass	15
+		snow       Effect_FX50CalDirt		IMP_BULLET_DIRT		1
+		cement     Effect_FX50CalStone		IMP_BULLET_CEMENT		15
+		packeddirt Effect_FX50CalDirt		IMP_BULLET_DIRT		15
+		water      Effect_WatersplshMed		IMP_BULLET_WATER	5
+		railroad   Effect_FX50CalMetal		IMP_BULLET_METAL	15
+		mud        Effect_FX50CalDirt		imp_bullet_mud		15
+		ice        Effect_AmHitSnow			imp_bullet_mud		15
+		sand       Effect_FX50CalSand		IMP_BULLET_SAND		15
+		quicksand  Effect_FX50CalSand		IMP_BULLET_SAND		15
+		stone      Effect_FX50CalStone		IMP_BULLET_CEMENT		15
+		wood       Effect_FX50CalWood		IMP_BULLET_WOOD		5
+		metal      Effect_FX50CalMetal		IMP_BULLET_METAL	15
+		bodyarmor  Effect_bdyarmhit			IMP_BULLET_BARMOR  	15
+		glass      Effect_FX50CalGlass		IMP_BULLET_GLASS			5
+		cloth      Effect_FX50CalObj		IMP_BULLET_CLOTH	3
+		foliage    Effect_FX50CalWoodF		IMP_BULLET_FOLIAGE	3
+		hmetal     Effect_FX50CalMetal		IMP_BULLET_ARMOR	15
+		flesh      Effect_FX50CalBody		IMP_BULLET_FLESH	3
+		player		Effect_FX50CalBody		imp_bullet_flesh	10
+		zip			none					wsh_bullet_by		10
+	end
+end
+
+
+ammo minirnds_zerodamage
+	max_age				3
+	velocity			853
+	min_stable_velocity 	0 
+	error				3
+	tumble_error		0.01
+	drag				0.453
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	50
+	penetration_kz		50
+	armor_density		15	5	30
+	recoil 7 7 7
+	
+	tracerRate	 3				
+
+	scar_type 1
+	Mf_Light 100
+	bullet_radius .2	
+
+	tracer_type		stdred stdgreen
+
+	kztype rounds_kz_C4
+	kz_damage 0		
+	kz_minradius .75	
+	kz_maxradius .75	
+
+	effects_table
+		move       none						none				0
+		obj        Effect_FX50CalObj		IMP_BULLET_DIRT		15
+		dirt       Effect_FX50CalDirt		IMP_BULLET_DIRT		15
+		grass      Effect_FX50CalGrass		imp_bullet_grass	15
+		snow       Effect_FX50CalDirt		IMP_BULLET_DIRT		1
+		cement     Effect_FX50CalStone		IMP_BULLET_CEMENT		15
+		packeddirt Effect_FX50CalDirt		IMP_BULLET_DIRT		15
+		water      Effect_WatersplshMed		IMP_BULLET_WATER	5
+		railroad   Effect_FX50CalMetal		IMP_BULLET_METAL	15
+		mud        Effect_FX50CalDirt		imp_bullet_mud		15
+		ice        Effect_AmHitSnow		imp_bullet_mud		15
+		sand       Effect_FX50CalSand		IMP_BULLET_SAND		15
+		quicksand  Effect_FX50CalSand		IMP_BULLET_SAND		15
+		stone      Effect_FX50CalStone		IMP_BULLET_CEMENT		15
+		wood       Effect_FX50CalWood		IMP_BULLET_WOOD		5
+		metal      Effect_FX50CalMetal		IMP_BULLET_METAL	15
+		bodyarmor  Effect_bdyarmhit   		IMP_BULLET_BARMOR  	15
+		glass      Effect_FX50CalGlass		IMP_BULLET_GLASS			5
+		cloth      Effect_FX50CalObj		IMP_BULLET_CLOTH	3
+		foliage    Effect_FX50CalWoodF		IMP_BULLET_FOLIAGE	3
+		hmetal     Effect_FX50CalMetal		IMP_BULLET_ARMOR	15
+		flesh      Effect_FX50CalBody		IMP_BULLET_FLESH	3
+		player		Effect_FX50CalBody		imp_bullet_flesh	10
+		zip			none					wsh_bullet_by		10
+	end
+end
+
+
+ammo ANTIAIR
+	max_age				3.5
+	velocity			887
+	min_stable_velocity 	0 
+	error				3
+	tumble_error		0.01
+	drag				0.295
+	weight_in_grains	500
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	armor_density		15	5	30
+	recoil				7 7 7
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	
+	tracerRate	 3				
+
+	scar_type 1
+
+    ai_launch		GS_50CAL   
+	bullet_radius  0.2
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move       none					none				0
+		obj        Effect_FX50CalObj	none				15
+		dirt       Effect_FX50CalDirt	IMP_50CAL_DIRT		15
+		grass      Effect_FX50CalGrass	imp_bullet_grass	15
+		snow       Effect_FX50CalDirt	IMP_50CAL_DIRT		1
+		cement     Effect_FX50CalStone	IMP_50CAL_CEMENT	15
+		packeddirt Effect_FX50CalDirt	IMP_50CAL_DIRT		15
+		water      Effect_WatersplshMed	imp_bullet_water	5
+		railroad   Effect_FX50CalMetal	IMP_50CAL_METAL		15
+		mud        Effect_FX50CalDirt	imp_bullet_mud		15
+		ice        Effect_AmHitSnow		imp_bullet_mud		15
+		sand       Effect_FX50CalSand	imp_bullet_sand		15
+		quicksand  Effect_FX50CalSand	imp_bullet_sand		15
+		stone      Effect_FX50CalStone	IMP_50CAL_CEMENT	15
+		wood       Effect_FX50CalWood	IMP_50CAL_WOOD		5
+		metal      Effect_FX50CalMetal	IMP_50CAL_METAL		15
+		bodyarmor  Effect_bdyarmhit   	IMP_BULLET_BARMOR  	15
+		glass      Effect_FX50CalGlass	IMP_BULLET_GLASS    5
+		cloth      Effect_FX50CalObj	IMP_BULLET_CLOTH	3
+		foliage    Effect_FX50CalWoodF	IMP_20MM_FOLIAGE	3
+		hmetal     Effect_FX50CalMetal	IMP_50CAL_ARMOR		15
+		flesh      Effect_FX50CalBody	imp_bullet_flesh	3
+		player	   Effect_FX50CalBody	IMP_BULLET_PLAYER	10
+		zip		   none					wsh_shell_by		20
+	end
+end
+
+ammo 50CAL
+	max_age				3.5
+	velocity			887
+	min_stable_velocity 	0 
+	error				3
+	tumble_error		0.01
+	drag				0.295
+	weight_in_grains	500
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	armor_density		15	5	30
+	recoil				7 7 7
+	kztype				rounds_kz_C4  
+	kz_damage			0
+	kz_minradius		2.5
+	kz_maxradius		2.5
+	
+	tracerRate	 3				
+
+	scar_type 1
+    ai_launch		GS_50CAL   
+	bullet_radius  0.2
+	Mf_Light 100
+
+	tracer_type		stdred stdgreen
+
+	effects_table
+		move       none					none				0
+		obj        Effect_FX50CalObj	none				15
+		dirt       Effect_FX50CalDirt	IMP_50CAL_DIRT		15
+		grass      Effect_FX50CalGrass	imp_bullet_grass	15
+		snow       Effect_FX50CalDirt	IMP_50CAL_DIRT		1
+		cement     Effect_FX50CalStone	IMP_50CAL_CEMENT	15
+		packeddirt Effect_FX50CalDirt	IMP_50CAL_DIRT		15
+		water      Effect_WatersplshMed	imp_bullet_water	5
+		railroad   Effect_FX50CalMetal	IMP_50CAL_METAL		15
+		mud        Effect_FX50CalDirt	imp_bullet_mud		15
+		ice        Effect_AmHitSnow		imp_bullet_mud		15
+		sand       Effect_FX50CalSand	imp_bullet_sand		15
+		quicksand  Effect_FX50CalSand	imp_bullet_sand		15
+		stone      Effect_FX50CalStone	IMP_50CAL_CEMENT	15
+		wood       Effect_FX50CalWood	IMP_50CAL_WOOD		5
+		metal      Effect_FX50CalMetal	IMP_50CAL_METAL		15
+		bodyarmor  Effect_bdyarmhit   	IMP_BULLET_BARMOR  	15
+		glass      Effect_FX50CalGlass	IMP_BULLET_GLASS    5
+		cloth      Effect_FX50CalObj	IMP_BULLET_CLOTH	3
+		foliage    Effect_FX50CalWoodF	IMP_20MM_FOLIAGE	3
+		hmetal     Effect_FX50CalMetal	IMP_50CAL_ARMOR		15
+		flesh      Effect_FX50CalBody	imp_bullet_flesh	3
+		player	   Effect_FX50CalBody	IMP_BULLET_PLAYER	10
+		zip		   none					wsh_shell_by		20
+	end
+end
+
+ammo kz_OrganicBlast
+	max_age		1     
+	arm_age		0      
+	velocity	6		
+	min_stable_velocity 0
+	error 1
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+
+
+	flag instantkillzone
+	flag NoMItems
+	flag NoDItems	
+
+	kztype rounds_kz_RadiusBlast
+	kz_minradius 4.0	
+	kz_maxradius 4.0	
+	kz_damage 1000		
+    kz_physics 1		
+
+	effects_table
+		move		none		none		0
+		obj			none		none		200	
+		dirt		none		none		20	
+		grass		none		none		20	
+		snow		none		none		20	
+		cement		none		none		20	
+		packeddirt	none		none 		20	
+		water		none		none		20	
+		railroad	none		none		20	
+		mud			none		none		20	
+		ice			none		none		20	
+		quicksand	none		none		20	
+		sand		none		none 		20	
+		stone		none		none		20	
+		wood		none		none		20	
+		metal		none		none		20	
+		glass		none		none		20	
+		cloth		none		none		20	
+		foliage		none		none		20	
+		hmetal		none		none		20	
+		flesh		none		none		20	
+		player		none		none		20	
+		zip			none		none		10	
+	end
+end
+
+ammo kz_MItemBlast
+	max_age		1     
+	arm_age		0      
+	velocity	6		
+	min_stable_velocity 0
+	error 1
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+
+	scorch_id	2
+	scar_type	2
+
+	flag instantkillzone
+	flag NoOItems
+	flag NoDItems	
+
+	kztype rounds_kz_Standard
+	kz_minradius 4.0	
+	kz_maxradius 4.0	
+	kz_damage 2000		
+    kz_physics 1		
+
+	effects_table
+		move		none		none		0
+		obj			none		none		200	
+		dirt		none		none		20	
+		grass		none		none		20	
+		snow		none		none		20	
+		cement		none		none		20	
+		packeddirt	none		none 		20	
+		water		none		none		20	
+		railroad	none		none		20	
+		mud			none		none		20	
+		ice			none		none		20	
+		quicksand	none		none		20	
+		sand		none		none 		20	
+		stone		none		none		20	
+		wood		none		none		20	
+		metal		none		none		20	
+		glass		none		none		20	
+		cloth		none		none		20	
+		foliage		none		none		20	
+		hmetal		none		none		20	
+		flesh		none		none		20	
+		player		none		none		20	
+		zip			none		none		10	
+	end
+end
+
+ammo kz_DebrisBlast
+	max_age		1     
+	arm_age		0      
+	velocity	6		
+	min_stable_velocity 0
+	error 1
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+
+	scorch_id	2
+	scar_type	2
+
+	flag instantkillzone
+	flag NoMItems
+	flag NoDItems	
+
+	kztype rounds_kz_Standard
+	kz_minradius 1.0	
+	kz_maxradius 1.0	
+	kz_damage 2000		
+    kz_physics 1		
+
+	effects_table
+		move		none		none		0
+		obj			none		none		200	
+		dirt		none		none		20	
+		grass		none		none		20	
+		snow		none		none		20	
+		cement		none		none		20	
+		packeddirt	none		none 		20	
+		water		none		none		20	
+		railroad	none		none		20	
+		mud			none		none		20	
+		ice			none		none		20	
+		quicksand	none		none		20	
+		sand		none		none 		20	
+		stone		none		none		20	
+		wood		none		none		20	
+		metal		none		none		20	
+		glass		none		none		20	
+		cloth		none		none		20	
+		foliage		none		none		20	
+		hmetal		none		none		20	
+		flesh		none		none		20	
+		player		none		none		20	
+		zip			none		none		10	
+	end
+end
+
+
+ammo AI_CLOSEKZ
+	max_age 1     
+	velocity 1		
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag  1
+	weight_in_grains	0
+	min_damage			100
+	max_damage			100
+	penetration_impact	0
+	penetration_kz		0
+
+    
+	flag instantkillzone
+	kztype rounds_kz_Slash
+	kz_damage 13
+	kz_minradius .5
+	kz_maxradius .5
+
+	effects_table
+		move       none						none				0
+		obj        none						none				15
+		dirt       Effect_AmHitDirt			IMP_BULLET_DIRT		15
+		grass      Effect_AmHitGrass		imp_bullet_grass	15
+		snow       Effect_AmHitSnow			IMP_BULLET_DIRT		1
+		cement     Effect_AmHitStone		IMP_BULLET_DIRT		15
+		packeddirt Effect_AmHitDirt			IMP_BULLET_DIRT		15
+		water      Effect_AmHitWater		imp_20mm_water		5
+		railroad   Effect_AmHitMetal		imp_20mm_metal		15
+		mud        Effect_AmHitDirt			imp_bullet_mud		15
+		ice        Effect_AmHitSnow			imp_bullet_mud		15
+		sand       Effect_AmHitSand			IMP_BULLET_SAND		15
+		quicksand  Effect_AmHitSand			IMP_BULLET_SAND		15
+		stone      Effect_AmHitStone		imp_20mm_rock		15
+		wood       Effect_AmHitDirt			IMP_50CAL_WOOD		5
+		metal      Effect_AmHitMetal		imp_20mm_metal		15
+		glass      Effect_AmHitGlass		IMP_BULLET_GLASS			5
+		cloth      Effect_AmHitCloth		IMP_BULLET_CLOTH	 3
+		foliage    Effect_AmHitGrass		imp_20mm_foliage	 3
+		hmetal     Effect_AmHitMetal		IMP_50CAL_ARMOR		15
+		flesh      Effect_AmHitBody			IMP_KNIFE_FLESH		3
+		player		none					IMP_KNIFE_FLESH		10
+		zip			none					wsh_shell_by		10
+	end
+end
+
+ammo AMMO_DESIGNATOR  
+
+	max_age		0     
+	arm_age		0      
+	velocity	0		
+	min_stable_velocity 0
+	error 0
+	tumble_error 0
+	drag		1
+	weight_in_grains	0
+	min_damage			0
+	max_damage			0
+	penetration_impact	0
+	penetration_kz		0
+
+	recoil		0 0 0
+	
+	flag DesignateTarget
+
+	effects_table
+		move		none	none	0
+		obj			none	none	200	
+		dirt		none	none	20	
+		grass		none	none	20	
+		snow		none	none	20	
+		cement		none	none	20	
+		packeddirt	none	none	20	
+		water		none	none	20	
+		railroad	none	none	20	
+		mud			none	none	20	
+		ice			none	none	20	
+		quicksand	none	none	20	
+		sand		none	none	20	
+		stone		none	none	20	
+		wood		none	none	20	
+		metal		none	none	20	
+		glass		none	none	20	
+		cloth		none	none	20	
+		foliage		none	none	20	
+		hmetal		none	none	20	
+		flesh		none	none	20	
+		player		none	none	20	
+		zip			none	none	10	
+	end
+end
+
+ammo GRENADE_NOEXP	
+	frndlyTrcrID		1874   
+	max_age				7    
+	arm_age				.21
+	velocity			244
+	min_stable_velocity 	0 
+	recoil				8 8 8
+	error				1
+	tumble_error		0.01
+	drag				0.5
+	weight_in_grains	2000
+	min_damage			0
+	max_damage			0
+	penetration_impact	60
+	penetration_kz		60
+	kztype				rounds_kz_C4
+
+	bullet_radius		0.02
+
+
+	tracer_type		grenade
+
+    kz_physics 1		
+
+
+	flag LAWR
+	flag forcetracer
+	flag ClipWater
+	
+	effects_table
+		move       none					none				0	
+		obj        Effect_FX50CalObj	IMP_GREN_DIRT		15
+		dirt       Effect_FX50CalDirt	IMP_GREN_DIRT					15
+		grass      Effect_FX50CalGrass	IMP_GREN_DIRT		15
+		snow       Effect_FX50CalDirt	IMP_GREN_DIRT		1
+		cement     Effect_FX50CalStone	IMP_GREN_STON		15
+		packeddirt Effect_FX50CalDirt	IMP_GREN_DIRT		15
+		water      Effect_WatersplshMed	IMP_DEBSML_WATER	5
+		railroad   Effect_FX50CalMetal	IMP_GREN_METAL		15
+		mud        Effect_FX50CalDirt	IMP_GREN_DIRT		15
+		ice        Effect_AmHitSnow		IMP_GREN_DIRT		15
+		sand       Effect_FX50CalSand	IMP_GREN_DIRT		15
+		quicksand  Effect_FX50CalSand	IMP_GREN_DIRT		15
+		stone      Effect_FX50CalStone	IMP_GREN_STON		15
+		wood       Effect_FX50CalWood	IMP_GREN_WOOD		5
+		metal      Effect_FX50CalMetal	IMP_GREN_METAL		15
+		bodyarmor      Effect_AmHitMetal   	IMP_GREN_FLESH  	15
+		glass      Effect_FX50CalGlass	IMP_GREN_GLASS	   5
+		cloth      Effect_FX50CalObj	IMP_GREN_CANV		3
+		foliage    Effect_FX50CalWoodF	IMP_GREN_FOLIAGE	3
+		hmetal     Effect_FX50CalMetal	IMP_GREN_METAL		15
+		flesh      Effect_FX50CalBody	IMP_GREN_FLESH		3
+		player	   Effect_FX50CalBody	IMP_GREN_FLESH		10
+		zip		   none					wsh_shell_by		20
+		uwaterdeep		Effect_underH2O1	EXPLO_UWATER_L		20	
+		uwatershallow	effect_shalH2O		EXPLO_WATER_M		20	
+		uwatersurface	Effect_surfaceRings	EXPLO_UWATERS_L		20	
+	end
+end
+
+ammo T80Round
+	max_age					2     
+	velocity				1200
+	min_stable_velocity		0
+	error					0
+	tumble_error			0.01
+	drag					0.5
+	weight_in_grains		8750
+	min_damage				200
+	max_damage				0
+	penetration_impact		80
+	penetration_kz			80
+	kztype					rounds_kz_Bullets
+	kz_damage				205
+	kz_minradius			6.0
+	kz_maxradius			12.0
+	recoil					10 10 10
+	bullet_radius			0.20
+
+	scorch_id 1
+	scar_type 1
+    ai_launch		GS_TANK 
+
+	tracerRate	 1				
+	tracer_type		stdred stdgreen
+	
+	Mf_Light 100
+
+	effects_table
+		move       none						none				0
+		obj        fx_m1a1_mtl_exp			explo_ammo_med		15
+		dirt       fx_m1a1_drt_exp			explo_dirt			15
+		grass      fx_m1a1_fol_exp			explo_ammo_med		15
+		snow       fx_m1a1_drt_exp			explo_dirt			1
+		cement     fx_m1a1_stn_exp			explo_ammo_med		15
+		packeddirt fx_m1a1_drt_exp			explo_dirt			15
+		water      Effect_WaterExp			imp_20mm_water		5
+		railroad   fx_m1a1_mtl_exp			IMP_ROCKET_ARMOR	15
+		mud        fx_m1a1_drt_exp			explo_ammo_med		15
+		ice        fx_m1a1_drt_exp			explo_dirt			15
+		sand       fx_m1a1_drt_exp			explo_dirt			15
+		quicksand  fx_m1a1_drt_exp			explo_dirt			15
+		stone      fx_m1a1_stn_exp			explo_ammo_med		15
+		wood       fx_m1a1_wd_exp		    explo_ammo_med		5
+		metal      fx_m1a1_mtl_exp		    IMP_ROCKET_METAL	15
+		glass      fx_m1a1_drt_exp			explo_ammo_med		5
+		cloth      fx_m1a1_drt_exp			explo_ammo_med		3
+		foliage    fx_m1a1_fol_exp			explo_foliage		3
+		hmetal     fx_m1a1_mtl_exp			IMP_ROCKET_ARMOR	15
+		flesh      fx_m1a1_drt_exp			explo_ammo_med		3
+		player	   fx_m1a1_drt_exp			explo_ammo_med		10
+		zip			none					none				10
+	end
+end
+
+ammo M1Round 
+	max_age					2     
+	velocity				1200
+	min_stable_velocity		0
+	error					0
+	tumble_error			0.01
+	drag					0.5
+	weight_in_grains		8750
+	min_damage				200
+	max_damage				0
+	penetration_impact		80
+	penetration_kz			80
+	kztype					rounds_kz_Bullets
+	kz_damage				205
+	kz_minradius			6.0
+	kz_maxradius			12.0
+	recoil					10 10 10
+	bullet_radius			0.20
+
+	scorch_id 1
+	scar_type 1
+    ai_launch		GS_TANK 
+
+	tracerRate	 1				
+	tracer_type		stdred stdgreen
+	
+	Mf_Light 100
+
+	effects_table
+		move       none						none				0
+		obj        fx_m1a1_mtl_exp			explo_ammo_med		15
+		dirt       fx_m1a1_drt_exp			explo_dirt			15
+		grass      fx_m1a1_fol_exp			explo_ammo_med		15
+		snow       fx_m1a1_drt_exp			explo_dirt			1
+		cement     fx_m1a1_stn_exp			explo_ammo_med		15
+		packeddirt fx_m1a1_drt_exp			explo_dirt			15
+		water      Effect_WaterExp			imp_20mm_water		5
+		railroad   fx_m1a1_mtl_exp			IMP_ROCKET_ARMOR	15
+		mud        fx_m1a1_drt_exp			explo_ammo_med		15
+		ice        fx_m1a1_drt_exp			explo_dirt			15
+		sand       fx_m1a1_drt_exp			explo_dirt			15
+		quicksand  fx_m1a1_drt_exp			explo_dirt			15
+		stone      fx_m1a1_stn_exp			explo_ammo_med		15
+		wood       fx_m1a1_wd_exp		    explo_ammo_med		5
+		metal      fx_m1a1_mtl_exp		    IMP_ROCKET_METAL	15
+		glass      fx_m1a1_drt_exp			explo_ammo_med		5
+		cloth      fx_m1a1_drt_exp			explo_ammo_med		3
+		foliage    fx_m1a1_fol_exp			explo_foliage		3
+		hmetal     fx_m1a1_mtl_exp			IMP_ROCKET_ARMOR	15
+		flesh      fx_m1a1_drt_exp			explo_ammo_med		3
+		player	   fx_m1a1_drt_exp			explo_ammo_med		10
+		zip			none					none				10
+	end
+end
+ 

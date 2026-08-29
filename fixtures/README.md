@@ -26,10 +26,13 @@ in the private `opennova-net/opennova-reference-assets` repository.
   decision recorded there and in the table below.
 - Every file is referenced by a test, the ctest registration, a workflow, a script,
   or a doc (this README counts): a fixture nothing reads is deleted, not kept.
-- Every file is LFS-tracked (`.gitattributes` `fixtures/**`), except the text
-  carve-out (`*.md`, `.gitignore`), and no tracked file under `fixtures/` or
-  `assets/` exceeds 2 MiB; the three oversize `assets/mnml*` files carry a reason
-  in the allowlist's `size_exceptions`.
+- Every binary file is LFS-tracked (`.gitattributes` `fixtures/**`) and every
+  plain-text file (`.def`, `.mnu`, `.ptl`, the manifests, ...) is a plain git blob
+  that diffs and reviews normally (the per-extension carve-outs there; the lint
+  judges by content, so a new text format gets its extension carved out in the
+  same change). No tracked file under `fixtures/` or `assets/` exceeds 2 MiB; the
+  three oversize `assets/mnml*` files carry a reason in the allowlist's
+  `size_exceptions`.
 - CI runs the lint with `--require-pulled`: every LFS fixture must be materialized
   in the checkout the tests read (the scoped `git lfs pull` in `ci.yml`).
 

@@ -1,3 +1,90 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:f723704b01c1728f25593c83f9f07fd7cbe9f070fe7aafcdc695844567897b3a
-size 1441
+// Script: gamescript
+// Original source: C:\opennova\fixtures\mus\synth_gamemus.mus
+//
+// IMPORTANT: Load MUSIC.LAN before opening this file in MDEdit
+// The following methods are used: GEcho, GGRnd, GSV, GSDV, GFB, F.Set, F.Clear, F.IsSet, F.IsClear, T.Start, T.Stop
+
+script gamescript
+
+// Sound bind declarations (play requires bind identifiers)
+bind sound_0 "sound_0"
+bind sound_1 "sound_1"
+bind sound_2 "sound_2"
+bind sound_3 "sound_3"
+bind sound_4 "sound_4"
+bind sound_5 "sound_5"
+bind sound_6 "sound_6"
+
+// Global variables
+// Used global offsets from original: [4, 8]
+// Original globals_area = 64 bytes
+// NOTE: MDEdit pre-defines Var00-Var15 at offsets 0-60 (64 bytes)
+
+// Section forward declarations
+declsection Begin
+declsection Testmission
+declsection Missionnull
+declsection Missionwin
+declsection Win000
+declsection Lose000
+declsection Missionlose
+declsection Multiplayerstart
+
+
+section Begin
+{
+SV(200)
+enter Testmission
+}
+
+section Missionnull
+{
+enter Missionnull
+}
+
+section Missionwin
+{
+on (Var02) enter Win000 Lose000 Missionnull
+}
+
+section Win000
+{
+play sound_2
+play sound_3
+play sound_4
+enter Missionnull
+}
+
+section Missionlose
+{
+enter Lose000
+}
+
+section Lose000
+{
+play sound_5
+play sound_6
+FB()
+enter Missionnull
+}
+
+section Testmission
+{
+if ((Var01 != 0))
+{
+    enter Missionnull
+}
+else
+{
+    enter Multiplayerstart
+}
+}
+
+section Multiplayerstart
+{
+play sound_0
+play sound_0
+play sound_0
+play sound_1
+enter Missionnull
+}

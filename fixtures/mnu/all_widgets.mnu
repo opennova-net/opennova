@@ -1,3 +1,227 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:2da020ad825c31a9b52fdcf14d189bd20447475cc667d91ff7f7aacc35966e2b
-size 6683
+<SCREEN>
+  <NAME>ALL</NAME>
+  <MUSICVAR>2</MUSICVAR>
+  <WINDOW type="window" name="ROOT">
+    <TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>640</RIGHT>
+      <BOTTOM>480</BOTTOM>
+    </POSITION>
+    <FONT>
+      <NAME>%DEF_FONTNAME%</NAME>
+      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+    </FONT>
+
+    <WINDOW type="edit" name="NameEdit">
+      <POSITION>
+        <LEFT>20</LEFT>
+        <TOP>20</TOP>
+        <RIGHT>220</RIGHT>
+        <BOTTOM>44</BOTTOM>
+      </POSITION>
+      <STRING>Player</STRING>
+      <SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+    </WINDOW>
+
+    <WINDOW type="multiline_edit" name="Notes" READONLY>
+      <POSITION>
+        <LEFT>20</LEFT>
+        <TOP>50</TOP>
+        <RIGHT>320</RIGHT>
+        <BOTTOM>120</BOTTOM>
+      </POSITION>
+      <STRING>First line</STRING>
+    </WINDOW>
+
+    <WINDOW type="goto" name="QuickExit">
+      <ACTION type="screen" target="TARGET"></ACTION>
+      <HOTKEY>VK_ESCAPE</HOTKEY>
+    </WINDOW>
+
+    <WINDOW type="list" name="MissionList">
+      <POSITION>
+        <LEFT>20</LEFT>
+        <TOP>130</TOP>
+        <RIGHT>220</RIGHT>
+        <BOTTOM>260</BOTTOM>
+      </POSITION>
+      <ITEMS justify="LEFT">
+        <ITEM type="id" value="0">MM_Alpha</ITEM>
+        <ITEM type="id" value="1">MM_Bravo</ITEM>
+        <APPEARANCE state="selected" type="color">3060C0</APPEARANCE>
+      </ITEMS>
+      <MIN_ITEM_HEIGHT>16</MIN_ITEM_HEIGHT>
+    </WINDOW>
+
+    <WINDOW type="multi" name="MapPicker">
+      <POSITION>
+        <LEFT>230</LEFT>
+        <TOP>130</TOP>
+        <RIGHT>410</RIGHT>
+        <BOTTOM>260</BOTTOM>
+      </POSITION>
+      <ITEMS justify="LEFT">
+        <ITEM value="0">Desert</ITEM>
+        <ITEM value="1">Jungle</ITEM>
+        <ITEM value="2">Urban</ITEM>
+      </ITEMS>
+    </WINDOW>
+
+    <WINDOW type="spinlist" name="Difficulty">
+      <POSITION>
+        <LEFT>20</LEFT>
+        <TOP>270</TOP>
+        <RIGHT>220</RIGHT>
+        <BOTTOM>290</BOTTOM>
+      </POSITION>
+      <ITEMS justify="CENTER">
+        <ITEM type="id" value="0">OPTION_LOW</ITEM>
+        <ITEM type="id" value="1">OPTION_MED</ITEM>
+        <ITEM type="id" value="2">OPTION_HIGH</ITEM>
+      </ITEMS>
+      <SPINUP>
+        <POSITION>
+          <LEFT>200</LEFT>
+          <TOP>270</TOP>
+          <RIGHT>220</RIGHT>
+          <BOTTOM>280</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="image" state="default">spinup.tga</APPEARANCE>
+      </SPINUP>
+      <SPINDOWN>
+        <POSITION>
+          <LEFT>200</LEFT>
+          <TOP>280</TOP>
+          <RIGHT>220</RIGHT>
+          <BOTTOM>290</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="image" state="default">spindown.tga</APPEARANCE>
+      </SPINDOWN>
+    </WINDOW>
+
+    <WINDOW type="combo" name="ServerList">
+      <POSITION>
+        <LEFT>230</LEFT>
+        <TOP>270</TOP>
+        <RIGHT>410</RIGHT>
+        <BOTTOM>290</BOTTOM>
+      </POSITION>
+      <LIST_BOX>
+        <POSITION>
+          <LEFT>230</LEFT>
+          <TOP>290</TOP>
+          <RIGHT>410</RIGHT>
+          <BOTTOM>360</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="default" type="color">101820</APPEARANCE>
+        <ITEMS justify="LEFT">
+          <ITEM value="0">Easy Server</ITEM>
+          <ITEM value="1">Hard Server</ITEM>
+          <ITEM value="2">LAN Server</ITEM>
+          <APPEARANCE state="selected" type="color">3060C0</APPEARANCE>
+        </ITEMS>
+        <MIN_ITEM_HEIGHT>14</MIN_ITEM_HEIGHT>
+        <SCROLLBAR>
+          <SHUTTLE type="image" state="default">shuttle.tga</SHUTTLE>
+          <SCROLLUP type="image" state="default">scrollup.tga</SCROLLUP>
+          <SCROLLDOWN type="image" state="default">scrolldown.tga</SCROLLDOWN>
+        </SCROLLBAR>
+      </LIST_BOX>
+    </WINDOW>
+
+    <WINDOW type="scroll" name="VolumeBar">
+      <POSITION>
+        <LEFT>420</LEFT>
+        <TOP>20</TOP>
+        <RIGHT>440</RIGHT>
+        <BOTTOM>200</BOTTOM>
+      </POSITION>
+      <ORIENTATION>VERTICAL</ORIENTATION>
+      <SHUTTLE type="image" state="default">shuttle.tga</SHUTTLE>
+      <SCROLLUP type="image" state="default">scrollup.tga</SCROLLUP>
+      <SCROLLDOWN type="image" state="default">scrolldown.tga</SCROLLDOWN>
+    </WINDOW>
+
+    <WINDOW type="table" name="MissionTable">
+      <POSITION>
+        <LEFT>20</LEFT>
+        <TOP>300</TOP>
+        <RIGHT>400</RIGHT>
+        <BOTTOM>440</BOTTOM>
+      </POSITION>
+      <COLUMN count="3" spacing="4">
+        <HEADER column="0" width="120" justify="LEFT" sort="A">Name</HEADER>
+        <HEADER column="1" width="80" justify="CENTER">Players</HEADER>
+        <HEADER column="2" width="60" justify="RIGHT">Ping</HEADER>
+        <BODY column="2" bitmap_draw bitmap_flags="STANDARD_TRANSPARENT"></BODY>
+        <SUBST column="2" value="lan" file>ping_lan.tga</SUBST>
+      </COLUMN>
+      <ITEMS MULTISELECT>
+        <APPEARANCE state="default" type="outline">204060</APPEARANCE>
+        <APPEARANCE state="selected" type="color">3060C0</APPEARANCE>
+      </ITEMS>
+      <MIN_ITEM_HEIGHT>18</MIN_ITEM_HEIGHT>
+      <SCROLLBAR>
+        <SHUTTLE type="image" state="default">shuttle.tga</SHUTTLE>
+        <SCROLLUP type="image" state="default">scrollup.tga</SCROLLUP>
+        <SCROLLDOWN type="image" state="default">scrolldown.tga</SCROLLDOWN>
+      </SCROLLBAR>
+    </WINDOW>
+
+    <WINDOW type="map" name="TacMap">
+      <POSITION>
+        <LEFT>450</LEFT>
+        <TOP>20</TOP>
+        <RIGHT>620</RIGHT>
+        <BOTTOM>200</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="image" state="default">tacmap.tga</APPEARANCE>
+    </WINDOW>
+
+    <WINDOW type="globe" name="CampaignGlobe">
+      <POSITION>
+        <LEFT>450</LEFT>
+        <TOP>210</TOP>
+        <RIGHT>620</RIGHT>
+        <BOTTOM>400</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="image" state="default">globe.tga</APPEARANCE>
+    </WINDOW>
+
+    <WINDOW type="marquee" name="Credits">
+      <POSITION>
+        <LEFT>20</LEFT>
+        <TOP>450</TOP>
+        <RIGHT>400</RIGHT>
+        <BOTTOM>478</BOTTOM>
+      </POSITION>
+      <ORIENTATION>VERTICAL</ORIENTATION>
+      <DATASOURCE>credits.txt</DATASOURCE>
+      <STRING>Rolling credits</STRING>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+
+<SCREEN>
+  <NAME>TARGET</NAME>
+  <WINDOW type="window" name="ROOT2">
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>640</RIGHT>
+      <BOTTOM>480</BOTTOM>
+    </POSITION>
+    <WINDOW type="button" name="BackBtn">
+      <POSITION>
+        <LEFT>20</LEFT>
+        <TOP>440</TOP>
+        <RIGHT>120</RIGHT>
+        <BOTTOM>470</BOTTOM>
+      </POSITION>
+      <STRING type="id">MM_Back</STRING>
+      <ACTION type="POP_SCREEN"></ACTION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>

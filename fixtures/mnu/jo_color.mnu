@@ -1,3 +1,771 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:0fefc8ffc8ae3f0406e225cbfeb2a7402e35b55eda22f94e0ce7ca97000dacf1
-size 35622
+<SCREEN>
+	<NAME>COLOR</NAME>
+	<WINDOW type="window" name="MAIN">
+		<APPEARANCE state="default"></APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>0</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
+		<FONT>
+			<NAME>frank22b.fnt</NAME>
+			<DEFAULT_FG>FFFFFF</DEFAULT_FG>
+			<MOUSEOVER_FG>FFba58</MOUSEOVER_FG>
+			<SELECTED_FG>e2900a</SELECTED_FG>
+			<DISABLED_FG>746038</DISABLED_FG>
+		</FONT>
+
+		<WINDOW type="window" name="COLORSET_WINDOW">
+			<POSITION>
+				<LEFT>40</LEFT>
+				<TOP>50</TOP>
+			</POSITION>
+			<WINDOW type="radio" name="TIME1">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>25</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TIME2">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>25</TOP>
+					<BOTTOM>50</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TIME3">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>50</TOP>
+					<BOTTOM>75</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TIME4">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>75</TOP>
+					<BOTTOM>100</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TIME5">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>100</TOP>
+					<BOTTOM>125</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TIME6">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>125</TOP>
+					<BOTTOM>150</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TIME7">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>150</TOP>
+					<BOTTOM>175</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TIME8">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>175</TOP>
+					<BOTTOM>200</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TIME9">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>200</TOP>
+					<BOTTOM>225</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TIME10">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>225</TOP>
+					<BOTTOM>250</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">--:--</STRING>
+			</WINDOW>
+			<WINDOW type="radio" name="TEST">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>250</TOP>
+					<BOTTOM>275</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">Test</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="SET_TIME">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>300</TOP>
+					<BOTTOM>325</BOTTOM>
+				</POSITION>
+				<STRING type="ID" justify="CENTER" vjustify="CENTER">Set Time</STRING>
+			</WINDOW>
+
+			<WINDOW type="button" name="SUN_COLOR">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>25</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Sun Color</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="MOON_COLOR">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>25</TOP>
+					<BOTTOM>50</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Moon Color</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="SKY_LIGHT">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>50</TOP>
+					<BOTTOM>75</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Sky Light</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="GROUND_LIGHT">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>75</TOP>
+					<BOTTOM>100</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Ground Light</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="SKY_FOG_COLOR">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>100</TOP>
+					<BOTTOM>125</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Sky Fog Color</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="FOG_COLOR">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>125</TOP>
+					<BOTTOM>150</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Fog Color</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="FOG_DISTANCE">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>150</TOP>
+					<BOTTOM>175</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Fog Distance</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="SKY_BASE">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>175</TOP>
+					<BOTTOM>200</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Sky Base</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="SKY_BRIGHT">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>200</TOP>
+					<BOTTOM>225</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Sky Bright</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="SKY_HIGHLIGHT">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>225</TOP>
+					<BOTTOM>250</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Sky Highlight</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CLOUD_BASE">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>250</TOP>
+					<BOTTOM>275</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Cloud Base</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CLOUD_HIGHLIGHT">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>275</TOP>
+					<BOTTOM>300</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Cloud Highlight</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CLOUD_EDGES">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>300</RIGHT>
+					<TOP>300</TOP>
+					<BOTTOM>325</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Cloud Edges</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="WATER_COLOR">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>0</TOP>
+					<BOTTOM>25</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Water Color</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="WATER_MURK">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>25</TOP>
+					<BOTTOM>50</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Water Murk</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="WATER_HEIGHT">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>50</TOP>
+					<BOTTOM>75</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Water Height</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="FOG_TYPE">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>75</TOP>
+					<BOTTOM>100</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Fog Type</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CLOUD_COLOR">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>100</TOP>
+					<BOTTOM>125</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Cloud Color</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="LIGHTNING_COLOR">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>125</TOP>
+					<BOTTOM>150</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Lightning Color</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CEILING_LIGHT">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>150</TOP>
+					<BOTTOM>175</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Ceiling Light</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="FLOOR_LIGHT">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>175</TOP>
+					<BOTTOM>200</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Floor Light</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="SKY_HEIGHT">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>200</TOP>
+					<BOTTOM>225</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Sky Height</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="SKY_SPEED">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>350</LEFT>
+					<RIGHT>500</RIGHT>
+					<TOP>225</TOP>
+					<BOTTOM>250</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Sky Speed</STRING>
+			</WINDOW>
+		</WINDOW>
+		
+		<WINDOW type="window" name="COLOR_CONTROL" HIDDEN>
+			<POSITION>
+				<LEFT>40</LEFT>
+				<TOP>90</TOP>
+			</POSITION>
+			<WINDOW type="static" name="STATIC_RED">
+				<POSITION>
+					<RIGHT>40</RIGHT>
+					<BOTTOM>16</BOTTOM>
+				</POSITION>
+				<STRING justify="RIGHT" vjustify="CENTER">Red</STRING>
+			</WINDOW>
+			<WINDOW type="scroll" name="RED">
+				<POSITION>
+					<LEFT>50</LEFT>
+					<TOP>0</TOP>
+					<RIGHT>300</RIGHT>
+					<BOTTOM>16</BOTTOM>
+				</POSITION>
+				<HEIGHT>12</HEIGHT>
+				<ORIENTATION>HORIZONTAL</ORIENTATION>
+				<SHUTTLE type="color" state="default">7FFF0000</SHUTTLE>
+				<SCROLLUP type="image" state="default" map_state=0 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="mouseover" map_state=1 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="selected" map_state=2 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="disabled" map_state=3 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLDOWN type="image" state="default" map_state=0 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="mouseover" map_state=1 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="selected" map_state=2 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="disabled" map_state=3 height=16>Btnrght.tga</SCROLLDOWN>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_GREEN">
+				<POSITION>
+					<RIGHT>40</RIGHT>
+					<TOP>20</TOP>
+					<BOTTOM>36</BOTTOM>
+				</POSITION>
+				<STRING justify="RIGHT" vjustify="CENTER">Green</STRING>
+			</WINDOW>
+			<WINDOW type="scroll" name="GREEN">
+				<POSITION>
+					<LEFT>50</LEFT>
+					<TOP>20</TOP>
+					<RIGHT>300</RIGHT>
+					<BOTTOM>36</BOTTOM>
+				</POSITION>
+				<HEIGHT>12</HEIGHT>
+				<ORIENTATION>HORIZONTAL</ORIENTATION>
+				<SHUTTLE type="color" state="default">7F00FF00</SHUTTLE>
+				<SCROLLUP type="image" state="default" map_state=0 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="mouseover" map_state=1 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="selected" map_state=2 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="disabled" map_state=3 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLDOWN type="image" state="default" map_state=0 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="mouseover" map_state=1 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="selected" map_state=2 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="disabled" map_state=3 height=16>Btnrght.tga</SCROLLDOWN>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_BLUE">
+				<POSITION>
+					<RIGHT>40</RIGHT>
+					<TOP>40</TOP>
+					<BOTTOM>56</BOTTOM>
+				</POSITION>
+				<STRING justify="RIGHT" vjustify="CENTER">Blue</STRING>
+			</WINDOW>
+			<WINDOW type="scroll" name="BLUE">
+				<POSITION>
+					<LEFT>50</LEFT>
+					<TOP>40</TOP>
+					<RIGHT>300</RIGHT>
+					<BOTTOM>56</BOTTOM>
+				</POSITION>
+				<HEIGHT>12</HEIGHT>
+				<ORIENTATION>HORIZONTAL</ORIENTATION>
+				<SHUTTLE type="color" state="default">7F0000FF</SHUTTLE>
+				<SCROLLUP type="image" state="default" map_state=0 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="mouseover" map_state=1 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="selected" map_state=2 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="disabled" map_state=3 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLDOWN type="image" state="default" map_state=0 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="mouseover" map_state=1 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="selected" map_state=2 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="disabled" map_state=3 height=16>Btnrght.tga</SCROLLDOWN>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_HUE">
+				<POSITION>
+					<LEFT>300</LEFT>
+					<RIGHT>400</RIGHT>
+					<BOTTOM>16</BOTTOM>
+				</POSITION>
+				<STRING justify="RIGHT" vjustify="CENTER">Hue</STRING>
+			</WINDOW>
+			<WINDOW type="scroll" name="HUE">
+				<POSITION>
+					<LEFT>410</LEFT>
+					<TOP>0</TOP>
+					<RIGHT>660</RIGHT>
+					<BOTTOM>16</BOTTOM>
+				</POSITION>
+				<HEIGHT>12</HEIGHT>
+				<ORIENTATION>HORIZONTAL</ORIENTATION>
+				<SHUTTLE type="color" state="default">7F00FF00</SHUTTLE>
+				<SCROLLUP type="image" state="default" map_state=0 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="mouseover" map_state=1 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="selected" map_state=2 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="disabled" map_state=3 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLDOWN type="image" state="default" map_state=0 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="mouseover" map_state=1 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="selected" map_state=2 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="disabled" map_state=3 height=16>Btnrght.tga</SCROLLDOWN>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_SAT">
+				<POSITION>
+					<LEFT>300</LEFT>
+					<RIGHT>400</RIGHT>
+					<TOP>20</TOP>
+					<BOTTOM>36</BOTTOM>
+				</POSITION>
+				<STRING justify="RIGHT" vjustify="CENTER">Saturation</STRING>
+			</WINDOW>
+			<WINDOW type="scroll" name="SATURATION">
+				<POSITION>
+					<LEFT>410</LEFT>
+					<TOP>20</TOP>
+					<RIGHT>660</RIGHT>
+					<BOTTOM>36</BOTTOM>
+				</POSITION>
+				<HEIGHT>12</HEIGHT>
+				<ORIENTATION>HORIZONTAL</ORIENTATION>
+				<SHUTTLE type="color" state="default">7F00FF00</SHUTTLE>
+				<SCROLLUP type="image" state="default" map_state=0 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="mouseover" map_state=1 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="selected" map_state=2 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="disabled" map_state=3 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLDOWN type="image" state="default" map_state=0 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="mouseover" map_state=1 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="selected" map_state=2 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="disabled" map_state=3 height=16>Btnrght.tga</SCROLLDOWN>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_VALUE">
+				<POSITION>
+					<LEFT>300</LEFT>
+					<RIGHT>400</RIGHT>
+					<TOP>40</TOP>
+					<BOTTOM>56</BOTTOM>
+				</POSITION>
+				<STRING justify="RIGHT" vjustify="CENTER">Value</STRING>
+			</WINDOW>
+			<WINDOW type="scroll" name="VALUE">
+				<POSITION>
+					<LEFT>410</LEFT>
+					<TOP>40</TOP>
+					<RIGHT>660</RIGHT>
+					<BOTTOM>56</BOTTOM>
+				</POSITION>
+				<HEIGHT>12</HEIGHT>
+				<ORIENTATION>HORIZONTAL</ORIENTATION>
+				<SHUTTLE type="color" state="default">7F00FF00</SHUTTLE>
+				<SCROLLUP type="image" state="default" map_state=0 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="mouseover" map_state=1 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="selected" map_state=2 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="disabled" map_state=3 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLDOWN type="image" state="default" map_state=0 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="mouseover" map_state=1 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="selected" map_state=2 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="disabled" map_state=3 height=16>Btnrght.tga</SCROLLDOWN>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_RGB">
+				<POSITION>
+					<LEFT>300</LEFT>
+					<RIGHT>400</RIGHT>
+					<TOP>75</TOP>
+					<BOTTOM>100</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">(0,0,0)</STRING>
+			</WINDOW>
+		</WINDOW>
+
+		<WINDOW type="window" name="GENERIC_CONTROL" HIDDEN>
+			<POSITION>
+				<LEFT>40</LEFT>
+				<TOP>90</TOP>
+			</POSITION>
+			<WINDOW type="scroll" name="GENERIC_VALUE">
+				<POSITION>
+					<LEFT>0</LEFT>
+					<TOP>0</TOP>
+					<RIGHT>600</RIGHT>
+					<BOTTOM>16</BOTTOM>
+				</POSITION>
+				<ORIENTATION>HORIZONTAL</ORIENTATION>
+				<SHUTTLE type="color" state="default">7F00FF00</SHUTTLE>
+				<SHUTTLE type="color" state="mouseover">7F7F0000</SHUTTLE>
+				<SHUTTLE type="color" state="selected">7FFF0000</SHUTTLE>
+				<SCROLLUP type="image" state="default" map_state=0 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="mouseover" map_state=1 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="selected" map_state=2 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLUP type="image" state="disabled" map_state=3 height=16>Btnleft.tga</SCROLLUP>
+				<SCROLLDOWN type="image" state="default" map_state=0 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="mouseover" map_state=1 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="selected" map_state=2 height=16>Btnrght.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="disabled" map_state=3 height=16>Btnrght.tga</SCROLLDOWN>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_GENERIC_VALUE">
+				<POSITION>
+					<LEFT>200</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>50</TOP>
+					<BOTTOM>75</BOTTOM>
+				</POSITION>
+				<STRING justify="LEFT" vjustify="CENTER">0</STRING>
+			</WINDOW>
+		</WINDOW>
+
+		<WINDOW type="window" name="ACCEPT_CANCEL" HIDDEN>
+			<POSITION>
+				<LEFT>40</LEFT>
+				<TOP>50</TOP>
+			</POSITION>
+			<WINDOW type="button" name="ACCEPT">
+				<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>100</RIGHT>
+					<TOP>125</TOP>
+					<BOTTOM>150</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Accept</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CANCEL">
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp4_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp4_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>150</LEFT>
+					<RIGHT>250</RIGHT>
+					<TOP>125</TOP>
+					<BOTTOM>150</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER">Cancel</STRING>
+			</WINDOW>
+		</WINDOW>
+				
+		<WINDOW type="button" name="DONE">
+			<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+			<APPEARANCE state="default"></APPEARANCE>
+			<APPEARANCE state="mouseover"></APPEARANCE>
+			<APPEARANCE state="selected"></APPEARANCE>
+			<APPEARANCE state="disabled"></APPEARANCE>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			<FONT>
+				<NAME>Impact32.fnt</NAME>
+				<DEFAULT_FG>c4c4c4</DEFAULT_FG>
+				<DISABLED_FG>746038</DISABLED_FG>
+				<SELECTED_FG>e2900a</SELECTED_FG>
+				<MOUSEOVER_FG>FF0000</MOUSEOVER_FG>
+			</FONT>
+			<POSITION>
+				<LEFT>425</LEFT>
+				<TOP>363</TOP>
+			</POSITION>
+			<STRING justify="LEFT">DONE</STRING>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+

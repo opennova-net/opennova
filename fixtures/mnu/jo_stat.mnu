@@ -1,3 +1,207 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:ad2ffccc978468e82c5819cf6bb07d681f0816680c26582fef3528c80b44da5a
-size 8251
+<SCREEN>
+	<NAME>STAT</NAME>
+	<MUSICVAR>12</MUSICVAR>
+	<WINDOW type="window" name="MAIN">
+		<APPEARANCE state="default"></APPEARANCE>
+		<FRAME>
+			<STENCIL size="32">BORDER2.tga</STENCIL>
+			<BRUSH>BOXTILE.tga</BRUSH>
+			<MONOGRAM>MONOGRAM.tga</MONOGRAM>
+		</FRAME>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>0</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+		</CURSOR>
+		<FONT>
+			<NAME>%DEF_FONTNAME%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+
+		<WINDOW type="window" name="STATS" DRAW_FRAME>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>770</RIGHT>
+				<TOP>20</TOP>
+				<BOTTOM>460</BOTTOM>
+			</POSITION>
+			<WINDOW type="radio" name="RADIO_TAB_OVERALL">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp5_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp5_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp5_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp5_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>20</LEFT>
+					<TOP>20</TOP>
+					<BOTTOM>45</BOTTOM>
+				</POSITION>
+				<STRING type="id" justify="CENTER" vjustify="CENTER">STR_ALL</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>
+			<WINDOW type="radio" name="RADIO_TAB_REDTEAM">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp5_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp5_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp5_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp5_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>220</LEFT>
+					<TOP>20</TOP>
+					<BOTTOM>45</BOTTOM>
+				</POSITION>
+				<STRING type="id" justify="CENTER" vjustify="CENTER">MP_TEAM_RED</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>
+			<WINDOW type="radio" name="RADIO_TAB_BLUETEAM">
+				<GROUP>1</GROUP>
+				<APPEARANCE type="image" state="default" map_state="0" height="24">tmp5_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">tmp5_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">tmp5_btn.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">tmp5_btn.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>420</LEFT>
+					<TOP>20</TOP>
+					<BOTTOM>45</BOTTOM>
+				</POSITION>
+				<STRING type="id" justify="CENTER" vjustify="CENTER">MP_TEAM_BLUE</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>
+
+			<WINDOW type="window" name="RESULTS">
+				<POSITION>
+					<LEFT>0</LEFT>
+					<TOP>75</TOP>
+				</POSITION>
+				<WINDOW type="table" name="RESULTLIST">
+					<POSITION>
+						<TOP>0</TOP>
+						<LEFT>10</LEFT>
+						<RIGHT>700</RIGHT>
+						<BOTTOM>330</BOTTOM>
+					</POSITION>
+					<ITEMS>
+						<APPEARANCE type="outline" state="default">%ITEM_SELECTED_BG%</APPEARANCE>
+						<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+					</ITEMS>
+					<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+					<SCROLLBAR>
+						<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+						<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+						<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+						<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+						<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+						<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+						<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+						<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+						<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+						<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+						<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+						<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+						<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+						<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+						<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+						<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+						<POSITION>
+							<LEFT>700</LEFT>
+							<TOP>0</TOP>
+							<RIGHT>720</RIGHT>
+							<BOTTOM>330</BOTTOM>
+						</POSITION>
+					</SCROLLBAR>
+				</WINDOW>
+				<WINDOW type="button" name="HIDDEN_BACK">
+					<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+					<ACTION type="window" state="SHOW">CONFIRM_EXIT</ACTION>
+					<ACTION type="window" state="HIDE">STATS</ACTION>
+					<APPEARANCE state="default"></APPEARANCE>
+					<APPEARANCE state="mouseover"></APPEARANCE>
+					<APPEARANCE state="selected"></APPEARANCE>
+					<POSITION>
+						<LEFT>0</LEFT>
+						<TOP>200</TOP>
+					</POSITION>
+					<STRING></STRING>
+					<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				</WINDOW>
+			</WINDOW>
+		</WINDOW>
+
+<!-- CONFIRM EXIT -->
+		<WINDOW type="window" name="CONFIRM_EXIT" HIDDEN DRAW_FRAME>
+			<APPEARANCE state="default"></APPEARANCE>
+			<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+			<CURSOR>
+				<FILE>newarow1.tga</FILE>
+			</CURSOR>
+			<FONT>
+				<NAME>%IMPACT_FONTNAME%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<POSITION>
+				<LEFT>206</LEFT>
+				<TOP>225</TOP>
+				<RIGHT>562</RIGHT>
+				<BOTTOM>345</BOTTOM>
+			</POSITION>
+			<WINDOW type="static" name="STATIC_CONFIRM">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>356</RIGHT>
+					<TOP>5</TOP>
+				</POSITION>
+				<STRING type="id" justify="CENTER">ARE_YOU_SURE</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CONFIRM_YES">
+				<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+				<ACTION type="window" state="SHOW">STATS</ACTION>
+				<ACTION type="window" state="HIDE">CONFIRM_EXIT</ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<POSITION>
+					<LEFT>206</LEFT>
+					<RIGHT>306</RIGHT>
+					<TOP>65</TOP>
+				</POSITION>
+				<STRING type="id" justify="RIGHT">YES</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>
+			<WINDOW type="button" name="CONFIRM_NO">
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<ACTION type="window" state="SHOW">STATS</ACTION>
+				<ACTION type="window" state="HIDE">CONFIRM_EXIT</ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<POSITION>
+					<LEFT>50</LEFT>
+					<RIGHT>150</RIGHT>
+					<TOP>65</TOP>
+				</POSITION>
+				<STRING type="id" justify="LEFT">NO</STRING>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+			</WINDOW>
+		</WINDOW>
+
+	</WINDOW>
+</SCREEN>
+

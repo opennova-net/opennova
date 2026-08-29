@@ -1,3 +1,229 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:64d45e90780c113a49a2168a91bd9739abdfc3bef4202989d8b122a6f0848a37
-size 7834
+<SCREEN>
+	<NAME>DEATH</NAME>
+	<MUSICVAR>3</MUSICVAR>
+	<WINDOW type="window" name="MAIN">
+		<APPEARANCE state="default"></APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>0</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
+		<FONT>
+			<NAME>Gunpl22b.fnt</NAME>
+			<DEFAULT_FG>FFFFFF</DEFAULT_FG>
+			<MOUSEOVER_FG>FF0000</MOUSEOVER_FG>
+			<SELECTED_FG>FF0000</SELECTED_FG>
+			<DISABLED_FG>545252</DISABLED_FG>
+		</FONT>
+		<FRAME>
+			<STENCIL size="32">BORDER2.tga</STENCIL>
+			<BRUSH>BOXTILE.tga</BRUSH>
+			<MONOGRAM>MONOGRAM.tga</MONOGRAM>
+		</FRAME>
+
+		<WINDOW type="window" name="DEATH_SHROUD" DRAW_FRAME>
+			<APPEARANCE type="window" state="default"></APPEARANCE>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>780</RIGHT>
+				<TOP>20</TOP>
+				<BOTTOM>545</BOTTOM>
+			</POSITION>
+			<WINDOW type="window" name="MAP">
+				<APPEARANCE type="custom" state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>10</LEFT>
+					<RIGHT>540</RIGHT>
+					<TOP>10</TOP>
+					<BOTTOM>470</BOTTOM>
+				</POSITION>
+			</WINDOW>
+			<WINDOW type="button" name="SWAP_TEAMS">
+				<APPEARANCE type="image" state="default" map_state="0" height="24">btn20.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn20.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected" map_state="2" height="24">btn20.tga</APPEARANCE>
+				<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn20.tga</APPEARANCE>
+				<POSITION>
+					<LEFT>550</LEFT>
+					<RIGHT>755</RIGHT>
+					<TOP>10</TOP>
+					<BOTTOM>34</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER" type="id">MP_SWAPTEAMS</STRING>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_LIST_TITLE">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>550</LEFT>
+					<RIGHT>750</RIGHT>
+					<TOP>50</TOP>
+					<BOTTOM>75</BOTTOM>
+				</POSITION>
+				<STRING justify="LEFT" vjustify="CENTER" type="id">SPAWNPOINTS</STRING>
+			</WINDOW>
+			<WINDOW type="list" name="SPAWNPOINTS_LIST">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>550</LEFT>
+					<RIGHT>750</RIGHT>
+					<TOP>80</TOP>
+					<BOTTOM>350</BOTTOM>
+				</POSITION>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>180</LEFT>
+						<TOP>20</TOP>
+						<RIGHT>200</RIGHT>
+						<BOTTOM>270</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_RESPAWN_MSG1">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>550</LEFT>
+					<RIGHT>750</RIGHT>
+					<TOP>360</TOP>
+					<BOTTOM>385</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER"></STRING>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_PSPRESPAWN_MSG1">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>550</LEFT>
+					<RIGHT>750</RIGHT>
+					<TOP>390</TOP>
+					<BOTTOM>415</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER"></STRING>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_MEDIC_MSG1">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>550</LEFT>
+					<RIGHT>750</RIGHT>
+					<TOP>420</TOP>
+					<BOTTOM>445</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER"></STRING>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_CALLMEDIC_MSG">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>550</LEFT>
+					<RIGHT>750</RIGHT>
+					<TOP>450</TOP>
+					<BOTTOM>475</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER"></STRING>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_INSTRUCTIONS_MSG">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>10</LEFT>
+					<RIGHT>690</RIGHT>
+					<TOP>475</TOP>
+					<BOTTOM>500</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER"></STRING>
+			</WINDOW>
+			<WINDOW type="static" name="STATIC_INSTRUCTIONS2_MSG">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>10</LEFT>
+					<RIGHT>690</RIGHT>
+					<TOP>500</TOP>
+					<BOTTOM>525</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="CENTER"></STRING>
+			</WINDOW>
+			<WINDOW type="button" name="HIDDEN_BACK">
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<ACTION type="window" state="SHOW">CONFIRM_EXIT</ACTION>
+				<ACTION type="window" state="HIDE">DEATH_SHROUD</ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<TOP>0</TOP>
+				</POSITION>
+			</WINDOW>
+		</WINDOW>
+<!-- CONFIRM EXIT -->
+		<WINDOW type="window" name="CONFIRM_EXIT" HIDDEN DRAW_FRAME MODAL>
+			<POSITION>
+				<LEFT>206</LEFT>
+				<TOP>225</TOP>
+				<RIGHT>562</RIGHT>
+				<BOTTOM>345</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>IMPACT50.fnt</NAME>
+				<DEFAULT_FG>FFFFFF</DEFAULT_FG>
+				<MOUSEOVER_FG>FFba58</MOUSEOVER_FG>
+				<SELECTED_FG>e2900a</SELECTED_FG>
+				<DISABLED_FG>746038</DISABLED_FG>
+			</FONT>
+			<WINDOW type="static" name="STATIC_CONFIRM">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>356</RIGHT>
+					<TOP>5</TOP>
+				</POSITION>
+				<STRING type="id" justify="CENTER">ARE_YOU_SURE</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CONFIRM_YES">
+				<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+				<ACTION type="window" state="HIDE">CONFIRM_EXIT</ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<POSITION>
+					<LEFT>206</LEFT>
+					<RIGHT>306</RIGHT>
+					<TOP>65</TOP>
+				</POSITION>
+				<STRING type="id" justify="RIGHT">YES</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="CONFIRM_NO">
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<ACTION type="window" state="SHOW">DEATH_SHROUD</ACTION>
+				<ACTION type="window" state="HIDE">CONFIRM_EXIT</ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<POSITION>
+					<LEFT>50</LEFT>
+					<RIGHT>150</RIGHT>
+					<TOP>65</TOP>
+				</POSITION>
+				<STRING type="id" justify="LEFT">NO</STRING>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+

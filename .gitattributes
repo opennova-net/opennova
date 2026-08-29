@@ -26,6 +26,26 @@ deploy/env/*.env text eol=lf
 fixtures/**/*.md text eol=lf filter= diff= merge=
 fixtures/**/.gitignore text eol=lf filter= diff= merge=
 
+# Plain-text fixtures are plain git blobs so they diff and review normally;
+# only binary fixtures ride LFS (scripts/lint/fixture_lint.py judges by
+# content). They keep `-text -eol`, never eol=lf: the retail parsers are not
+# LF-tolerant (see the assets/ block below) and the minted files are
+# byte-guarded by their generators, so git must not normalise them in either
+# direction. Last-match precedence: these must follow fixtures/** and *.env.
+fixtures/**/*.adm -text -eol filter= diff= merge=
+fixtures/**/*.def -text -eol filter= diff= merge=
+fixtures/**/*.env -text -eol filter= diff= merge=
+fixtures/**/*.hexcap -text -eol filter= diff= merge=
+fixtures/**/*.ini -text -eol filter= diff= merge=
+fixtures/**/*.mns -text -eol filter= diff= merge=
+fixtures/**/*.mnu -text -eol filter= diff= merge=
+fixtures/**/*.nwmsg -text -eol filter= diff= merge=
+fixtures/**/*.ptl -text -eol filter= diff= merge=
+fixtures/**/*.ptu -text -eol filter= diff= merge=
+fixtures/**/*.trn -text -eol filter= diff= merge=
+fixtures/**/*.txt -text -eol filter= diff= merge=
+fixtures/**/*.wac -text -eol filter= diff= merge=
+
 # The render-evidence manifests and READMEs under screenshots/ are plain text
 # the docs link into — same exception as fixtures/ above, or GitHub renders
 # three-line LFS pointer stubs where the evidence should be. NO eol

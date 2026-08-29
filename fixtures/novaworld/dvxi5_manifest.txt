@@ -1,3 +1,39 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:f973f0e819e04b0331ab4857f940faede107e4ba317bb8ccff1449d051f42829
-size 2331
+# Authored ground-truth manifest for the "ON RE Probe AS dvxi5" mission.
+#
+# Source of truth: the authored mission.bms (designer "OpenNova"), decoded to
+# .mis text via the libs/mission BMS reader (opennova_mission_save_mis_path).
+# This is the independent oracle the in-game pool decoders are cross-validated
+# against in nw_pool_groundtruth_test — the sibling of the /profile .sph check
+# (D-NET-61), extended from pool-0 players to the AI/vehicle/marker pools the
+# .sph cannot see.
+#
+# The matching loopback capture is
+#   .scratch/host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng
+# and its /profile recordings are .scratch/{host,client}.sph.
+#
+# Positions are i32 16.16 world fixed-point (the same units the wire 0x0D / 0x20
+# records carry at entity+4/+8/+12). The layout is deliberately asymmetric
+# (x in {0,+-55,+-70,+-85}, y in {-40,-15,0,25,45}) so an axis swap or sign flip
+# in the decoder cannot alias one authored value onto another.
+#
+# wire_tag: which S2C message replicates this entity (witnessed via the pool the
+#   slot id resolves to: 0x0D = pool-1 items/vehicles, 0x20 = pool-3 markers,
+#   0x0C = pool-0 organics). type_id is the raw wire itemTypeId (== items.def
+#   id - 100000). team 0 = none (the 0x0010 / 0x08 team gate must be CLEAR).
+#   facing_deg is the authored .mis facing; the wire BAM heading = (90 - facing)
+#   (the IDA-verified "90 - yaw" heading convention).
+#
+# columns: wire_tag  type_id  bms_id  pos_x  pos_y  pos_z  team  facing_deg  group  role
+#
+0x0D 0x0576  1         0         0  2482176  0    0  0  objective_marker_a
+0x0D 0x0575  2         0  -2621440  2957312  0   90  0  objective_marker_b
+0x0D 0x050E  7  -5570560   2949120  2480896  1    0  0  blue_truck
+0x0D 0x050E 12   5570560   2949120  3356672  2  180  0  red_truck
+0x20 0x1773  3  -4587520   1638400  2434304  1    0  0  blue_start_a
+0x20 0x1773  4  -3604480   1638400  2256896  1    0  0  blue_start_b
+0x20 0x1774  8   4587520   1638400  3633152  2  180  0  red_start_a
+0x20 0x1774  9   3604480   1638400  3552768  2  180  0  red_start_b
+0x0C 0x0816  5  -4587520   -983040  2406400  1    0  1  blue_ai_a
+0x0C 0x0816  6  -3604480   -983040  2702080  1   90  1  blue_ai_b
+0x0C 0x0816 10   4587520   -983040  2557952  2  180  2  red_ai_a
+0x0C 0x0816 11   3604480   -983040  2689792  2  270  2  red_ai_b

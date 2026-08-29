@@ -12,9 +12,11 @@ in the tree.
 
 Rules (each hit names the file and the rule):
 
-  lfs           every fixtures/ file is LFS-tracked (.gitattributes) except
-                the text carve-out (*.md, .gitignore), and a carve-out file is
-                never an LFS pointer
+  lfs           a binary fixture is LFS-tracked and a plain-text one is a
+                plain git blob (.gitattributes fixtures/** plus the text
+                extension carve-outs), judged by the materialized content:
+                no NUL byte and printable throughout is text; an unpulled
+                pointer counts as binary
   size          no tracked file under fixtures/ or assets/ exceeds 2 MiB
                 (the size comes from the LFS pointer, so this needs no pull);
                 scripts/lint/fixture_allowlist.json "size_exceptions" carries
@@ -51,7 +53,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "fixture_allowlist.json"
 SIZE_LIMIT = 2 * 1024 * 1024
-TEXT_CARVE_OUT = ("*.md", ".gitignore")
 REFERENCE_ROOTS = ("tests/", "godot/tests/", "godot/probes/", ".github/workflows/", "scripts/",
                    "docs/", "fixtures/README.md")
 REFERENCE_SUFFIXES = (".cpp", ".h", ".c", ".gd", ".tscn", ".txt", ".cmake", ".py", ".ps1",
@@ -101,6 +102,26 @@ def is_pointer_file(path: str) -> bool:
             return handle.read(len(POINTER_HEAD)) == POINTER_HEAD
     except OSError:
         return False
+
+
+def is_text_file(path: str) -> bool:
+    """Plain text by content: no NUL byte (bar the single terminator a retail
+    .def table ends in), and (bar the odd cp1252 byte) every byte printable or
+    a tab/newline. An unpulled LFS pointer is NOT text (its content is
+    unknown); an unreadable file is not text either."""
+    try:
+        data = (REPO / path).read_bytes()
+    except OSError:
+        return False
+    if not data or data.startswith(POINTER_HEAD):
+        return False
+    if data.endswith(b"\0"):
+        data = data[:-1]
+    if not data or b"\0" in data:
+        return False
+    printable = sum(1 for b in data if 32 <= b < 127 or b in (9, 10, 13) or b >= 0x80)
+    high = sum(1 for b in data if b >= 0x80)
+    return printable / len(data) > 0.99 and high / len(data) < 0.15
 
 
 def reference_corpus() -> str:
@@ -171,15 +192,13 @@ def main() -> int:
     classes: Counter = Counter()
 
     for rel in fixtures:
-        carve_out = any(fnmatch.fnmatch(rel.rsplit("/", 1)[-1], g) for g in TEXT_CARVE_OUT)
         is_lfs = attrs.get(rel) == "lfs"
-        if carve_out:
+        if is_text_file(rel):
             if is_lfs:
-                hits["lfs"].append(f"{rel}: text carve-out file is LFS-tracked")
-            elif is_pointer_file(rel):
-                hits["lfs"].append(f"{rel}: text carve-out file is an LFS pointer")
+                hits["lfs"].append(
+                    f"{rel}: plain-text fixture is LFS-tracked (carve its extension out in .gitattributes)")
         elif not is_lfs:
-            hits["lfs"].append(f"{rel}: not LFS-tracked (.gitattributes fixtures/** rule)")
+            hits["lfs"].append(f"{rel}: binary fixture is not LFS-tracked (.gitattributes fixtures/** rule)")
 
         if args.require_pulled and is_lfs and is_pointer_file(rel):
             hits["pulled"].append(f"{rel}: LFS pointer, not materialized")
@@ -203,8 +222,6 @@ def main() -> int:
             classes[cls] += 1
 
     for rel in fixtures + assets:
-        if attrs.get(rel) not in ("lfs",) and rel.endswith(TEXT_CARVE_OUT[0]):
-            continue
         try:
             size = blob_size(rel, attrs.get(rel) == "lfs")
         except subprocess.CalledProcessError:
@@ -239,7 +256,8 @@ def main() -> int:
     if total and args.enforce:
         print("[fixture-lint] FAIL: every fixture is minted by a generator, authored, or a "
               "keep-set retail-interop file named in scripts/lint/fixture_allowlist.json, "
-              "LFS-tracked, under 2 MiB, and referenced by a test or doc (fixtures/README.md).")
+              "LFS-tracked when binary (a plain blob when text), under 2 MiB, and referenced by a "
+              "test or doc (fixtures/README.md).")
         return 1
     return 0
 
