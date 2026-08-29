@@ -1,3 +1,100 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:c7b65b632c1121cab8726b3c5d13baedfd6068d9075ca3050c9616d0850e0e8b
-size 2718
+<SCREEN>
+  <NAME>MAIN</NAME>
+  <MUSICVAR>3</MUSICVAR>
+  <WINDOW type="window" name="ROOT" DRAW_FRAME>
+    <TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+    <CURSOR>
+      <FILE>newarow1.tga</FILE>
+      <FLAGS>STANDARD_TRANSPARENT</FLAGS>
+    </CURSOR>
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>640</RIGHT>
+      <BOTTOM>480</BOTTOM>
+    </POSITION>
+    <FRAME>
+      <STENCIL size="8">border2.tga</STENCIL>
+      <BRUSH>boxtile.tga</BRUSH>
+    </FRAME>
+    <FONT>
+      <NAME>%DEF_FONTNAME%</NAME>
+      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+    </FONT>
+    <WINDOW type="static" name="Title">
+      <POSITION>
+        <LEFT>200</LEFT>
+        <TOP>20</TOP>
+        <RIGHT>440</RIGHT>
+        <BOTTOM>60</BOTTOM>
+      </POSITION>
+      <STRING type="id" justify="CENTER">MM_Title</STRING>
+    </WINDOW>
+    <WINDOW type="button" name="StartBtn">
+      <POSITION>
+        <LEFT>270</LEFT>
+        <TOP>120</TOP>
+        <RIGHT>370</RIGHT>
+        <BOTTOM>150</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="image" state="default">btn_up.tga</APPEARANCE>
+      <APPEARANCE type="image" state="mouseover">btn_over.tga</APPEARANCE>
+      <STRING type="id" justify="CENTER">MM_Start</STRING>
+      <ACTION type="screen" target="OPTIONS"></ACTION>
+      <SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+    </WINDOW>
+    <WINDOW type="checkbox" name="SoundChk" CHECKED>
+      <POSITION>
+        <LEFT>270</LEFT>
+        <TOP>170</TOP>
+        <RIGHT>370</RIGHT>
+        <BOTTOM>190</BOTTOM>
+      </POSITION>
+      <STRING>Sound</STRING>
+    </WINDOW>
+    <WINDOW type="spinlist" name="Difficulty">
+      <POSITION>
+        <LEFT>270</LEFT>
+        <TOP>210</TOP>
+        <RIGHT>370</RIGHT>
+        <BOTTOM>230</BOTTOM>
+      </POSITION>
+      <ITEMS justify="CENTER">
+        <ITEM type="ID" value="0">OPTION_LOW</ITEM>
+        <ITEM type="ID" value="1">OPTION_MED</ITEM>
+        <ITEM type="ID" value="2">OPTION_HIGH</ITEM>
+      </ITEMS>
+    </WINDOW>
+    <WINDOW type="label" name="Version">
+      <POSITION>
+        <LEFT>10</LEFT>
+        <TOP>460</TOP>
+        <RIGHT>120</RIGHT>
+        <BOTTOM>478</BOTTOM>
+      </POSITION>
+      <STRING>v1.0</STRING>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+
+<SCREEN>
+  <NAME>OPTIONS</NAME>
+  <WINDOW type="window" name="ROOT2">
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>640</RIGHT>
+      <BOTTOM>480</BOTTOM>
+    </POSITION>
+    <WINDOW type="button" name="BackBtn">
+      <POSITION>
+        <LEFT>20</LEFT>
+        <TOP>440</TOP>
+        <RIGHT>120</RIGHT>
+        <BOTTOM>470</BOTTOM>
+      </POSITION>
+      <STRING type="id">MM_Back</STRING>
+      <ACTION type="POP_SCREEN"></ACTION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>

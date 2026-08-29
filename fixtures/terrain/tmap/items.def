@@ -1,3 +1,130 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:3031bda62bf93f7353425649fe451a8fa51c7d37e07263da0fbb4fb18e9f4719
-size 1799
+
+
+begin "Drivable Dune Buggy"
+  id 101291
+  type vehicle
+  graphic Dbuggy1
+  sid dbuggy1
+  anim_def Dbuggy1
+  husk Dbuggy1X
+  hp 3000
+  sound_profile SP_BuggyEngine
+end
+
+begin "ATV Quad"
+  id 101292
+  type vehicle
+  graphic Datv1
+  sid datv1
+  anim_def Datv1
+  husk Datv1X
+  hp 2000
+  sound_profile SP_ATVEngine
+end
+
+begin "Marker Alpha"
+  id 100001
+  type marker
+  graphic MrkAlpha
+  sid mrk_alpha
+  anim_def MrkAlpha
+  hp 0
+end
+
+begin "Guard Tower"
+  id 102001
+  type building
+  graphic GuardTwr1
+  sid guardtwr1
+  anim_def GuardTwr1
+  husk GuardTwr1X
+  hp 5000
+end
+
+begin "Palm Tree"
+  id 103001
+  type foliage
+  graphic PalmTree1
+  sid palmtree1
+  anim_def PalmTree1
+  hp 100
+end
+
+begin "Ammo Crate"
+  id 104001
+  type powerup
+  graphic AmmoCrate
+  sid ammocrate1
+  anim_def AmmoCrate
+  hp 50
+end
+
+begin "Wooden Fence"
+  id 105001
+  type decoration
+  graphic WoodFence1
+  sid woodfence1
+  anim_def WoodFence1
+  husk WoodFence1X
+  hp 200
+end
+
+begin "Barrel"
+  id 105002
+  type object
+  graphic Barrel1
+  sid barrel1
+  anim_def Barrel1
+  husk Barrel1X
+  hp 75
+end
+
+begin "Sandbag Wall"
+  id 105003
+  type decoration
+  graphic Sandbag1
+  sid sandbag1
+  anim_def Sandbag1
+  hp 500
+end
+
+begin "Player #1, Single player"
+  id 105310
+  type person
+  graphic US01
+  graphicenemy Indo01
+  sid player1_sp
+  anim_def US01
+  hp 150
+  sound_profile SP_JO_SP_PlayerM1
+  sound_profileFemale SP_JO_SP_PlayerF1
+end
+
+begin "Generic Soldier"
+  id 105311
+  type person
+  graphic US02
+  sid soldier1
+  anim_def US02
+  hp 100
+  sound_profile SP_JO_SP_SoldierM1
+end
+
+begin "Helicopter"
+  id 106001
+  type vehicle
+  graphic DAH61
+  sid dah61
+  anim_def DAH61
+  husk DAH61X
+  hp 8000
+  sound_profile SP_HeloEngine
+end
+
+begin "Static Crate"
+  id 105004
+  type object
+  graphic StaticCrate1
+  sid staticcrate1
+  hp 50
+end

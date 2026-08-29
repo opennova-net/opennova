@@ -1,3 +1,79 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:45c9bfb78ae9a4c31eb251e50c1af5e38123fe67f55a5c3d5363412493931b87
-size 1603
+
+[effectdef]
+{
+	id = Buildup;
+	pdefs = Buildup dots;
+
+}
+
+[particledef]
+{
+id	= Buildup dots;
+flags	=  TOPALIGN ;
+move	=  GRAVITATE ;
+lod	= 0.000;
+
+	emit_dur	= 60.000;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 400.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 60.000;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 2;
+	emit_shape_size	= 10.000, 10.000, 10.000;
+	emit_shape_size_skip	= 10.000, 10.000, 10.000;
+
+	age	= 0.600;
+	age_adj	= 0.000;
+	alpha	= 1.000;
+	color1	= 127, 127, 127;
+	color2	= 127, 127, 127;
+	color3	= 127, 127, 127;
+	color4	= 127, 127, 127;
+	bump_scale	= 0.000;
+	scale	= 2.000;
+	scale_adj	= 0.000;
+	scale_func	= synth_grow reverse;
+	red_func	= synth_red;
+	green_func	= synth_green;
+	blue_func	= synth_blue;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 0.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 0.000;
+	speed	= 0.000;
+	speed_adj	= 0.000;
+	elastic	= 0.000;
+	gravity	= 600.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 180.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	spark.tga, additive;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 127, 127, 127;
+	g1_color2	= 127, 127, 127;
+	g1_color3	= 127, 127, 127;
+	g1_color4	= 127, 127, 127;
+	g1_alpha	= 1.000;
+	g1_scale	= 2.000;
+	g1_scale_adj	= 0.000;
+	g1_scale_func	= synth_grow reverse;
+	g1_red_func	= synth_red;
+	g1_green_func	= synth_green;
+	g1_blue_func	= synth_blue;
+
+}

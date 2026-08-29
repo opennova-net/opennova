@@ -1,3 +1,292 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:06cb60c2920b6eb4a432f9cbc1a3daa724054ecdc125d7bcfebece2be983fcf8
-size 4882
+
+
+begin "Drivable Dune Buggy"
+  id 101291
+  type vehicle
+  graphic Dbuggy1
+  sid dbuggy1
+  anim_def Dbuggy1
+  husk Dbuggy1X
+  hp 3000
+  radarsig 500
+  heatsig  650
+  sound_profile SP_BuggyEngine
+  ai_function chel
+  render_function cveh
+  move_function cveh
+  attrib: AIData noscar neutral PlayerControl forceasset DynamicShadow
+  particlefx Effect_whiteExhaust FX00
+  particlefxw2 Effect_DirtWake FX01
+  particlefxs Effect_DirtWakeS FX01
+  particledeath Effect_Fuelxp3
+  particleh2odeath Effect_H2OVeExp
+  particlefinale Effect_VehDrtPuftrk
+  particleother Effect_SmkNStemNP
+end
+
+begin "ATV Quad"
+  id 101292
+  shadow atvshdw.tga 3 4.5 0 -0.75
+  type vehicle
+  graphic Datv1
+  sid datv1
+  anim_def Datv1
+  husk Datv1X
+  hp 2000
+  sound_profile SP_ATVEngine
+end
+
+begin "Marker Alpha"
+  id 100001
+  type marker
+  graphic MrkAlpha
+  sid mrk_alpha
+  anim_def MrkAlpha
+  hp 0
+end
+
+begin "Guard Tower"
+  id 102001
+  type building
+  graphic GuardTwr1
+  sid guardtwr1
+  anim_def GuardTwr1
+  husk GuardTwr1X
+  hp 5000
+end
+
+begin "Palm Tree"
+  id 103001
+  type foliage
+  graphic PalmTree1
+  sid palmtree1
+  anim_def PalmTree1
+  hp 100
+end
+
+begin "Ammo Crate"
+  id 104001
+  type powerup
+  graphic AmmoCrate
+  sid ammocrate1
+  anim_def AmmoCrate
+  hp 50
+end
+
+begin "Wooden Fence"
+  id 105001
+  type decoration
+  graphic WoodFence1
+  sid woodfence1
+  anim_def WoodFence1
+  husk WoodFence1X
+  hp 200
+end
+
+begin "Barrel"
+  id 105002
+  type object
+  graphic Barrel1
+  sid barrel1
+  anim_def Barrel1
+  husk Barrel1X
+  huskfinal Barrel1XF
+  hp 75
+  armor 12 4
+  kz 4.0
+  sounddeath EXPLO_BARREL
+  unit_type 6
+  husk_sub_parts 4
+  husk_sub_part_types 02_CHUNK_M 03_CHUNK_S 04_wheel
+  husk_swap_at_sec 2.0
+  husk_swap_at 3.0
+  scale 1.1
+  debris_scale 1.5
+end
+
+begin "Sandbag Wall"
+  id 105003
+  type decoration
+  graphic Sandbag1
+  sid sandbag1
+  anim_def Sandbag1
+  hp 500
+end
+
+begin "Player #1, Single player"
+  id 105310
+  type person
+  graphic US01
+  graphicenemy Indo01
+  sid player1_sp
+  anim_def US01
+  hp 150
+  sound_profile SP_JO_SP_PlayerM1
+  sound_profileFemale SP_JO_SP_PlayerF1
+  ai_function plyr
+  disk_function PLAYER
+  move_function org2
+end
+
+begin "Player #1, Multiplayer"
+  id 105305
+  type person
+  unit_type 9
+  graphic US01
+  graphicenemy Indo01
+  sid player1_mp
+  anim_def US01
+  hp 150
+  sound_profile SP_JO_SP_PlayerM1
+  sound_profileFemale SP_JO_SP_PlayerF1
+  ai_function plyr
+  disk_function PLAYER
+  move_function org2
+end
+
+begin "Generic Soldier"
+  id 105311
+  type person
+  graphic US02
+  sid soldier1
+  anim_def US02
+  hp 100
+  sound_profile SP_JO_SP_SoldierM1
+  ai_function org1
+  move_function org1
+end
+
+begin "Helicopter"
+  id 106001
+  type vehicle
+  graphic DAH61
+  sid dah61
+  anim_def DAH61
+  husk DAH61X
+  hp 8000
+  sound_profile SP_HeloEngine
+end
+
+begin "Static Crate"
+  id 105004
+  type object
+  graphic StaticCrate1
+  sid staticcrate1
+  hp 50
+end
+
+begin "Static Vehicle"
+  id 106002
+  type vehicle
+  graphic StaticVehicle1
+  sid staticvehicle1
+  hp 1000
+end
+
+begin "NON-Armored Emplaced 50cal for FAV"
+  id 101419
+  type object
+  graphic mount
+  attrib: EWeap forceasset
+  HP 10
+  armor -1
+  ai_function ewep
+  move_function ewep
+  render_function ewep
+  disk_function EMPLACE
+  phrase_set 4						
+  primary_weapon WPN_EMPLCD50NA
+ 
+	weaplbup bullet
+	weaplmup mflash01
+	weaplcup bcasing
+	weaprbup bullet
+	weaprmup mflash01
+	weaprcup bcasing
+end
+
+begin "Test UseGun Emplacement A"
+  id 101294
+  type object
+  attrib: EWeap forceasset
+  HP 10
+  armor -1
+  ai_function ewep
+  move_function ewep
+  render_function ewep
+  disk_function EMPLACE
+  primary_weapon WPN_AVENGER
+end
+
+begin "Test UseGun Emplacement B"
+  id 101295
+  type object
+  attrib: EWeap forceasset
+  HP 10
+  armor -1
+  ai_function ewep
+  move_function ewep
+  render_function ewep
+  disk_function EMPLACE
+  primary_weapon WPN_EMPLCD50
+end
+
+begin "Test UseGun Emplacement C"
+  id 101296
+  type object
+  attrib: EWeap forceasset
+  HP 10
+  armor -1
+  ai_function ewep
+  move_function ewep
+  render_function ewep
+  disk_function EMPLACE
+  primary_weapon WPN_EMPLCD50
+end
+
+begin "3rd person High explosive grenade"
+  id 101883
+  type object
+  attrib: NoTool
+  graphic Frag_3rd
+  move_function nade
+  ai_function nade
+end
+
+begin "3rd person Flashbang grenade"
+  id 101875
+  type object
+  attrib: NoTool
+  graphic Flsh_3rd
+  move_function nade
+  ai_function nade
+end
+
+# --- Wire-presenter test items (authored test data): graphics resolve against
+# the synthetic model fixtures (fixtures/threedi/synth), copied into a flat root by the test setup. ---
+begin "Wire Test Pump"
+  id 106100
+  type object
+  graphic pump
+end
+
+begin "Wire Test Armory"
+  id 106101
+  type building
+  graphic armory
+end
+
+begin "Wire Test Rifleman"
+  id 106102
+  type person
+  graphic shed
+  anim_def soldier
+  launchups_closeattack mflash01
+end
+
+begin "Wire Test Scaled Pump"
+  id 106103
+  type object
+  graphic pump
+  scale 1.5
+end

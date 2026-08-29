@@ -1,3 +1,7 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:aed832e10262439900bbbfdc1880eab305ca27658f92bcfd78d0581cef69441b
-size 190
+anim_reset				"idle.bad"
+anim_idle				"idle.bad"
+anim_idle_2				"idle.bad"
+anim_walk_forward			"walk.bad"
+anim_jog_forward			"walk.bad"
+anim_run_forward			"walk.bad"
+anim_stop				"idle.bad"

@@ -1,3 +1,182 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:37e062142898c6b299b09a9fbe15687fd9fa66b7398976f997b95e95bcf94342
-size 7180
+<SCREEN>
+	<NAME>SINGLE_PLAYER</NAME>
+	<MUSICVAR>11</MUSICVAR>
+	<WINDOW type="window" name="MAIN">
+		<APPEARANCE type="image" state="default">Ltrbx_sp.tga</APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>0</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
+		<FONT>
+			<NAME>%DEF_FONTNAME%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+
+		<WINDOW type="window" name="ALIGNMENT_WRAPPER">
+			<POSITION>
+				<TOP>75</TOP>
+				<LEFT>0</LEFT>
+			</POSITION>
+<!-- bink panels begin-->
+			<WINDOW type="window" name="LOGO_SPLASH_HDR">
+				<APPEARANCE type="custom" state="default"></APPEARANCE>
+				<POSITION>
+					<TOP>-75</TOP>
+					<BOTTOM>0</BOTTOM>
+					<LEFT>0</LEFT>
+					<RIGHT>801</RIGHT>
+				</POSITION>
+			</WINDOW>
+			<WINDOW type="window" name="LOGO_SPLASH_FTR">
+				<APPEARANCE type="custom" state="default"></APPEARANCE>
+				<POSITION>
+					<TOP>450</TOP>
+					<BOTTOM>525</BOTTOM>
+					<LEFT>0</LEFT>
+					<RIGHT>801</RIGHT>
+				</POSITION>
+			</WINDOW>
+<!-- bink panels end-->
+
+			<WINDOW type="static" name="CA_LABEL">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>41</LEFT>
+					<TOP>42</TOP>
+				</POSITION>
+				<STRING type="ID" justify="LEFT">SP_Campaigns</STRING>
+			</WINDOW>
+			<WINDOW type="list" name="IA_LIST">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>40</LEFT>
+					<TOP>73</TOP>
+					<RIGHT>320</RIGHT>
+					<BOTTOM>395</BOTTOM>
+				</POSITION>
+				<ITEMS justify="LEFT" vjustify="CENTER">
+					<APPEARANCE type="color" state="selected">%ITEM_SELECTED_BG%</APPEARANCE>
+				</ITEMS>
+				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>280</LEFT>
+						<TOP>0</TOP>
+						<RIGHT>300</RIGHT>
+						<BOTTOM>318</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</WINDOW>
+			<WINDOW type="static" name="BRIEFING_LABEL">
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>429</LEFT>
+					<TOP>42</TOP>
+				</POSITION>
+				<STRING type="id" justify="LEFT">SP_MissionDesc</STRING>
+			</WINDOW>
+			<WINDOW type="multiline_edit" name="BRIEFING" READONLY>
+				<APPEARANCE state="default"></APPEARANCE>
+				<POSITION>
+					<LEFT>416</LEFT>
+					<TOP>73</TOP>
+					<RIGHT>706</RIGHT>
+					<BOTTOM>396</BOTTOM>
+				</POSITION>
+				<STRING justify="CENTER" vjustify="TOP"></STRING>
+				<SCROLLBAR>
+					<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+					<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+					<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+					<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+					<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLUP type="image" state="disabled" map_state="3 height="24">up2arrw.tga</SCROLLUP>
+					<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+					<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+					<POSITION>
+						<LEFT>321</LEFT>
+						<TOP>0</TOP>
+						<RIGHT>341</RIGHT>
+						<BOTTOM>318</BOTTOM>
+					</POSITION>
+				</SCROLLBAR>
+			</WINDOW>
+			<WINDOW type="button" name="BACK">
+				<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+				<ACTION type="POP_SCREEN"></ACTION>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<APPEARANCE state="disabled"></APPEARANCE>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				<FONT>
+					<NAME>%DEF_FONTNAME_LG%</NAME>
+					<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+					<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+					<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+					<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+				</FONT>
+				<POSITION>
+					<LEFT>5</LEFT>
+					<TOP>425</TOP>
+				</POSITION>
+				<STRING type="id" justify="LEFT">NAV_BACK</STRING>
+			</WINDOW>
+			<WINDOW type="button" name="ACCEPT">
+				<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+				<APPEARANCE state="default"></APPEARANCE>
+				<APPEARANCE state="mouseover"></APPEARANCE>
+				<APPEARANCE state="selected"></APPEARANCE>
+				<APPEARANCE state="disabled"></APPEARANCE>
+				<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+				<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+				<FONT>
+					<NAME>%DEF_FONTNAME_LG%</NAME>
+					<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+					<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+					<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+					<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+				</FONT>
+				<POSITION>
+					<LEFT>795</LEFT>
+					<TOP>425</TOP>
+				</POSITION>
+				<STRING type="id" justify="RIGHT">NAV_ACCEPT</STRING>
+			</WINDOW>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
+

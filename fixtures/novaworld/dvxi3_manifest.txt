@@ -1,3 +1,139 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:463803b22ebb6a8db7c8fa94ee919be37247f6bb0db6f9d60f4b3b887d79342a
-size 11483
+# Authored ground-truth manifest for the "ON RE Probe TDM Dvxi3" mission (probe 2).
+#
+# Source of truth: the authored probe2.bms (designer "OpenNova RE"), saved to the
+# retail JO game root and read back field-for-field from the live ONED mission
+# model (the same MissionDocument the libs/mission writer serializes). It is the
+# successor to dvxi5_manifest.txt, moved from Advance & Secure to TEAM DEATHMATCH
+# (Header.attrib_flags = 0x20000000) on a different terrain (Dvxi3, coastal island)
+# and environment (FULL_03), to force in-match tags the dvxi5 probe never emitted:
+# host->joiner mission/file transfer (S2C 0x60/0x64 + C2S 0x33/0x37 - the file is
+# ~37 KB / multi-chunk), TDM loadout/armory (0x49/0x5A/0x66), player-list/sync
+# (0x16/0x46), team roster (0x6E), and the kill/respawn lifecycle.
+#
+# The matching loopback capture (to be recorded via the capture run-book) is
+#   .scratch/host_and_join_opennovaworld_loopback_probe2_tdm.pcapng
+# with paired /profile recordings .scratch/host.sph and .scratch/client.sph.
+#
+# Positions are i32 16.16 world fixed-point (the units the wire 0x0D / 0x20 records
+# carry at entity+4/+8/+12). The WITNESSED layer is deliberately asymmetric
+# (world x in {0,+-55,+-70,+-85}, z in {-40,-15,0,25,45}; Blue at -x, Red at +x,
+# neutral at x=0) so an axis swap or sign flip in the decoder cannot alias one
+# authored value onto another. BMS pos_x = world x; pos_y = -world z; pos_z = the
+# terrain-grounded height. facing_deg is the authored yaw; wire BAM = (90 - facing).
+#
+# wire_tag: which S2C message replicates this entity, by the pool the slot
+#   resolves to — VALIDATED against the probe2 capture (every type observed on
+#   exactly one pool): 0x0C = pool-0 organics (AI/players), 0x0D = pool-1 items/
+#   vehicles + destructible/AI objects (oil-field LFP 0x0135/0x0136, fuel truck),
+#   0x20 = pool-3 markers (player starts), 0x10 = pool-2 PURE statics (armory,
+#   oil pump, towers/pipes/docks/tanks). The pool split is by entity CAPABILITY,
+#   not editor kind: a destructible "object" rides 0x0D, an inert structure 0x10.
+#   type_id is the raw wire itemTypeId (== items.def id - 100000). team 1 = Blue,
+#   2 = Red, 0 = none/neutral.
+#
+# columns: wire_tag  type_id  bms_id  pos_x  pos_y  pos_z  team  facing_deg  group  role
+#
+# === WITNESSED (tier-1, asymmetric; cross-validated field-for-field) ===
+0x0C 0x11B1 9      -3604480     983040   1647104   1     0   0  blue_ai1
+0x0C 0x11B1 10     -3604480    2621440   1838080   1    90   0  blue_ai2
+0x10 0x0465 1      -5570560   -2949120   1517082   1     0   0  blue_armory1
+0x10 0x048D 2      -4587520   -1499274   1533421   1    90   0  blue_armory2_mobile
+0x0D 0x050D 4      -4587520    2621440   1659392   1   270   0  blue_boat_zodiac
+0x0D 0x050C 3      -5570560     983040   1596416   1   180   0  blue_heli_littlebird_benches
+0x20 0x1773 6      -3604480   -1638400   1232896   1    90   0  blue_start1
+0x20 0x1773 7      -5570560          0   1554432   1   180   0  blue_start2
+0x20 0x1773 8      -4587520          0   1527808   1   270   0  blue_start3
+0x0D 0x050E 5      -3604480   -2949120   1219328   1     0   0  blue_truck
+0x0C 0x11B1 19      3604480     983040   1695744   2     0   0  red_ai1
+0x0C 0x11B1 20      3604480    2621440   2265600   2    90   0  red_ai2
+0x10 0x0465 11      5570560   -2949120   1139994   2     0   0  red_armory1
+0x10 0x048D 12      4587520   -1499274   1268205   2    90   0  red_armory2_mobile
+0x0D 0x07D3 14      4587520    2621440   2350080   2   270   0  red_boat_zodiac_m60
+0x0D 0x051A 13      5570560     983040   2087424   2   180   0  red_heli_littlebird_minigun
+0x20 0x1774 16      3604480   -1638400   1011200   2    90   0  red_start1
+0x20 0x1774 17      5570560          0   1751040   2   180   0  red_start2
+0x20 0x1774 18      4587520          0   1507328   2   270   0  red_start3
+0x0D 0x050E 15      3604480   -2949120    964864   2     0   0  red_truck
+0x0D 0x050B 25            0     983040   1744896   0   270   0  buggy
+0x0D 0x0514 23            0    2621440   2260992   0    90   0  chinook
+0x20 0x1772 22            0   -2949120    950272   0     0   0  dmatch_start
+0x0D 0x051B 24            0   -1638400    950272   0   180   0  heli_ah6_rockets
+0x10 0x0042 21            0          0   1368064   0     0   0  oil_pump
+#
+# === FILLER (tier-2 oil-field bulk; padding so the .bms is multi-chunk for the
+#     file-transfer target - positions tiled on a periphery grid, not anti-aliased) ===
+0x0D 0x0135 50    -19660800   -6553600   1085918   0     0   0  filler_100309_oil_field_lfp_1
+0x0D 0x0136 51    -19660800   -9830400   1120157   0    30   0  filler_100310_oil_field_lfp_2
+0x0D 0x0072 62    -16384000    3276800    922880   0     0   0  filler_100114_drivable_fuel_truck
+0x0D 0x0135 92     -9830400    3276800   2510558   0   180   0  filler_100309_oil_field_lfp_1
+0x0D 0x0136 93     -9830400          0   1922973   0   210   0  filler_100310_oil_field_lfp_2
+0x10 0x0063 26    -22939912   22935090   1962629   0     0   0  filler_100099_oil_tower
+0x10 0x007A 27    -22937600   19660800    524288   0    30   0  filler_100122_oil_tower_2
+0x10 0x007B 28    -22937600   16384000    540672   0    60   0  filler_100123_oil_tower_3
+0x10 0x007C 29    -22937600   13107200    458752   0    90   0  filler_100124_oil_pipe_1
+0x10 0x007D 30    -22937600    9830400    393216   0   120   0  filler_100125_oil_pipe_2
+0x10 0x007E 31    -22937600    6553600    516096   0   150   0  filler_100126_oil_pipe_3
+0x10 0x007F 32    -22937600    3276800    683008   0   180   0  filler_100127_oil_pipe_4
+0x10 0x0080 33    -22937600          0    581632   0   210   0  filler_100128_oil_pipe_valve_station
+0x10 0x0172 34    -22937600   -3276800    595712   0   240   0  filler_100370_oil_pipe_5_smaller_base
+0x10 0x0075 35    -22937600   -6553600    622592   0   270   0  filler_100117_oil_dockpiece_1
+0x10 0x0076 36    -22937600   -9830400    623360   0   300   0  filler_100118_oil_dockpiece_2
+0x10 0x0077 37    -22937600  -13107200    445184   0   330   0  filler_100119_oil_dockpiece_3
+0x10 0x0078 38    -22937600  -16384000    404224   0     0   0  filler_100120_oil_dockpiece_4
+0x10 0x0079 39    -22937600  -19660800    579840   0    30   0  filler_100121_oil_dockpiece_5
+0x10 0x00C0 40    -22937600  -22937600    917504   0    60   0  filler_100192_oil_dockpiece_6
+0x10 0x00C1 41    -19660800   22937600    742656   0    90   0  filler_100193_oil_dockpiece_7
+0x10 0x00C2 42    -19660800   19660800    578304   0   120   0  filler_100194_oil_dockpiece_8
+0x10 0x00C3 43    -19660800   16384000    451072   0   150   0  filler_100195_oil_dockpiece_9
+0x10 0x00C6 44    -19660800   13107200    416512   0   180   0  filler_100198_oil_dockpiece_10
+0x10 0x0145 45    -19660838    9830400    648208   0   210   0  filler_100325_oil_storage_tank_1
+0x10 0x0146 46    -19660840    6553600    629996   0   240   0  filler_100326_oil_storage_tank_2
+0x10 0x052C 47    -19660800    3276800    966656   0   270   0  filler_101324_oil_tank_1
+0x10 0x052D 48    -19660800     -40861   1051171   0   300   0  filler_101325_oil_tank_2
+0x10 0x052E 49    -19660800   -3276800    603392   0   330   0  filler_101326_oil_tank_3
+0x10 0x0180 52    -19660800  -13107200    904414   0    60   0  filler_100384_oil_field_lfp_1_non_lfp
+0x10 0x0181 53    -19660800  -16384000    450560   0    90   0  filler_100385_oil_field_lfp_2_non_lfp
+0x10 0x0821 54    -19660800  -19660800    418304   0   120   0  filler_102081_civilian_boat_1
+0x10 0x0822 55    -19660800  -22937600    696320   0   150   0  filler_102082_civilian_boat_2
+0x10 0x0823 56    -16384000   22937600    786432   0   180   0  filler_102083_civilian_boat_3
+0x10 0x0824 57    -16384000   19660800    927232   0   210   0  filler_102084_civilian_boat_4
+0x10 0x052F 58    -16384000   16384000    843776   0   240   0  filler_101327_civilian_boat_5
+0x10 0x0530 59    -16384000   13107200    773632   0   270   0  filler_101328_civilian_boat_6
+0x10 0x0531 60    -16384000    9830400    843776   0   300   0  filler_101329_civilian_boat_7
+0x10 0x0532 61    -16384000    6553600    974848   0   330   0  filler_101330_civilian_boat_8
+0x10 0x0852 63    -16384000          0    868352   0    30   0  filler_102130_item
+0x10 0x0853 64    -16384000   -3276800    920576   0    60   0  filler_102131_telephone_pole_single_po
+0x10 0x10D9 65    -16384000   -6553600    942080   0    90   0  filler_104313_item
+0x10 0x10EB 66    -16384000   -9830400   1053952   0   120   0  filler_104331_64_ft_section_of_chain_l
+0x10 0x0863 67    -16384000  -13107200    921856   0   150   0  filler_102147_item
+0x10 0x0063 68    -16386313  -16386510   1826693   0   180   0  filler_100099_oil_tower
+0x10 0x007A 69    -16384000  -19660800    502272   0   210   0  filler_100122_oil_tower_2
+0x10 0x007B 70    -16384000  -22937600   1130496   0   240   0  filler_100123_oil_tower_3
+0x10 0x007C 71    -13107200   22937600    844544   0   270   0  filler_100124_oil_pipe_1
+0x10 0x007D 72    -13107200   19660800    872448   0   300   0  filler_100125_oil_pipe_2
+0x10 0x007E 73    -13107200   16384000    924160   0   330   0  filler_100126_oil_pipe_3
+0x10 0x007F 74    -13107200   13107200    917504   0     0   0  filler_100127_oil_pipe_4
+0x10 0x0080 75    -13107200    9830400   1247744   0    30   0  filler_100128_oil_pipe_valve_station
+0x10 0x0172 76    -13107200    6553600   2092288   0    60   0  filler_100370_oil_pipe_5_smaller_base
+0x10 0x0075 77    -13107200    3276800   2045952   0    90   0  filler_100117_oil_dockpiece_1
+0x10 0x0076 78    -13107200          0   1425408   0   120   0  filler_100118_oil_dockpiece_2
+0x10 0x0077 79    -13107200   -3276800   1230848   0   150   0  filler_100119_oil_dockpiece_3
+0x10 0x0078 80    -13107200   -6553600   2078208   0   180   0  filler_100120_oil_dockpiece_4
+0x10 0x0079 81    -13107200   -9830400   1271296   0   210   0  filler_100121_oil_dockpiece_5
+0x10 0x00C0 82    -13107200  -13107200    640256   0   240   0  filler_100192_oil_dockpiece_6
+0x10 0x00C1 83    -13107200  -16384000    615936   0   270   0  filler_100193_oil_dockpiece_7
+0x10 0x00C2 84    -13107200  -19660800    404736   0   300   0  filler_100194_oil_dockpiece_8
+0x10 0x00C3 85    -13107200  -22937600    466176   0   330   0  filler_100195_oil_dockpiece_9
+0x10 0x00C6 86     -9830400   22937600    815104   0     0   0  filler_100198_oil_dockpiece_10
+0x10 0x0145 87     -9830438   19660800   1057040   0    30   0  filler_100325_oil_storage_tank_1
+0x10 0x0146 88     -9830439   16384000    749804   0    60   0  filler_100326_oil_storage_tank_2
+0x10 0x052C 89     -9830400   13107200   1318912   0    90   0  filler_101324_oil_tank_1
+0x10 0x052D 90     -9830400    9789539   2353699   0   120   0  filler_101325_oil_tank_2
+0x10 0x052E 91     -9830400    6553600   2220544   0   150   0  filler_101326_oil_tank_3
+0x10 0x0180 94     -9830400   -3276800   1706718   0   240   0  filler_100384_oil_field_lfp_1_non_lfp
+0x10 0x0181 95     -9830400   -6553600   1643264   0   270   0  filler_100385_oil_field_lfp_2_non_lfp
+0x10 0x0821 96     -9830400   -9830400   1581824   0   300   0  filler_102081_civilian_boat_1
+0x10 0x0822 97     -9830400  -13107200   1160448   0   330   0  filler_102082_civilian_boat_2
+0x10 0x0823 98     -9830400  -16384000    819200   0     0   0  filler_102083_civilian_boat_3
+0x10 0x0824 99     -9830400  -19660800    614144   0    30   0  filler_102084_civilian_boat_4
+0x10 0x052F 100    -9830400  -22937600    429568   0    60   0  filler_101327_civilian_boat_5

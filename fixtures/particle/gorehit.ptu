@@ -1,3 +1,71 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:ffdc2585b5675c5d314818b530d483a12c5cd38beb4bdb6f4fb922788e69df10
-size 1717
+// Gore-set fixture: the `.ptu` half of the effect catalog. Retail ships the blood
+// and .50cal impact effectdefs in `.ptu` (US) / `.ptg` (German) files that carry the
+// SAME grammar as `.ptl` and load alongside it
+// [orig: CEffectSystem_Init @ 0x5f6070 matches ".ptl" OR the selected extension
+//  @0x5f64f3 and parses both through CEffectWorld_ParseSectionCallback @ 0x5ecb40].
+// Modeled on US_BLOOD.PTU: `Effect_GoreHit` mixes a pdef defined here with one that
+// lives in a mounted `.ptl`, so it pins cross-extension pdef resolution too.
+
+[effectdef]
+{
+	id = Effect_GoreHit;
+	pdefs = GoreHit_Mist, Buildup dots;
+
+}
+
+[particledef]
+{
+id	= GoreHit_Mist;
+flags	=  EMITVECTOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.100;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 40.000;
+	emit_rate_adj	= 20.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.125;
+	age_adj	= 0.100;
+	alpha	= 1.000;
+	color1	= 139, 0, 0;
+	color2	= 139, 0, 0;
+	color3	= 139, 0, 0;
+	color4	= 139, 0, 0;
+	bump_scale	= 0.000;
+	scale	= 1.000;
+	scale_adj	= 0.250;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 360.000, 360.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 30.000;
+	speed	= 8.000;
+	speed_adj	= 0.200;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	drag	= 0.000;
+	spread	= 30.000;
+	spread_skip	= 0.000;
+	graphic1 =	line.tga, additive;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 139, 0, 0;
+	g1_color2	= 139, 0, 0;
+	g1_color3	= 139, 0, 0;
+	g1_color4	= 139, 0, 0;
+	g1_scale	= 1.000;
+	g1_scale_adj	= 0.250;
+
+}
