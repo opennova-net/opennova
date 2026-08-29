@@ -51,7 +51,6 @@ authored file.
 | `mus/jo_gamemus.bin`, `mus/jo_menumus.bin`, `mus/golden_jo_gamemus.mus.txt` | the music director scripts and their decoded golden |
 | `adm/mp5_1st.adm`, `bad/BINOC.bad`, `bad/BINOC_twist.bad` | the retail animation-definition and clip formats (skinned-rig twist parity) |
 | `particle/*.ptl` | the particle catalogue parser's retail corpus |
-| `cbin/nlist*.reference.kda` | the credits-list container in its JO, JOX01 and BHD encodings |
 | `avatars/Avatars.def` | the avatar definition table |
 | `novaworld/**` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
 
@@ -122,9 +121,12 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 
 - `terrain/tmap` — `tests/fixtures/minimal_terrain_gen.cpp` (the second map beside
   `assets/mnml`).
-- `fnt/synth_*.fnt`, `cbin/credits_image.png`, `cbin/particle_dot.tga` —
-  `tests/fixtures/minimal_fnt_gen.cpp`, `minimal_cbin_gen.cpp` (the .tga is the
-  sprite the effect-world test's synthetic particle file names).
+- `fnt/synth_*.fnt`, `cbin/synth_nlist*.kda`, `cbin/credits_image.png`,
+  `cbin/particle_dot.tga` — `tests/fixtures/minimal_fnt_gen.cpp`,
+  `minimal_cbin_gen.cpp`: the credits lists in their JO, JOX01 and BHD shapes
+  through `cbin::encode` (the shipped trio is `cbin_roundtrip`'s reference-tree
+  leg), the image and font stand-ins the tests stage beside them, and the .tga
+  sprite the effect-world test's synthetic particle file names.
 - `env/synth_full.env`, `env/cloud01.pcx`, `env/cloud01b.pcx` — `tests/fixtures/minimal_env_gen.cpp`:
   the synthetic environment (every keyword authored, ten time-of-day keyframes,
   written by `save_env`) and the two sky maps it names (the bright square-rooted

@@ -1,6 +1,6 @@
 // The CBIN display view: Color/Justify controls collapse into stamped items
 // (credits_display_items) and re-emit by diff (credits_entries_from_display).
-// The fixture leg proves the display view round-trips a real credits file
+// The fixture leg proves the display view round-trips a minted credits file
 // SEMANTICALLY (the re-emission
 // canonicalizes redundant control runs, so byte identity is cbin_roundtrip's
 // job, not this test's).
@@ -17,7 +17,7 @@
 #endif
 
 static constexpr const char* kFixturePath =
-    OPENNOVA_SOURCE_DIR "/fixtures/cbin/nlist.reference.kda";
+    OPENNOVA_SOURCE_DIR "/fixtures/cbin/synth_nlist.kda";
 
 static bool load_file(const char* path, std::vector<uint8_t>& out) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -118,7 +118,7 @@ int main() {
         TEST_EXPECT(entries[0].type == EntryType::Text);
     }
 
-    // Fixture leg: the display view round-trips a real credits file
+    // Fixture leg: the display view round-trips a minted credits file
     // semantically — decode -> items -> entries -> encode -> decode -> items
     // produces the identical item sequence.
     {

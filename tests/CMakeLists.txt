@@ -599,10 +599,13 @@ target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_fnt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
-# fixtures/cbin/credits_image.png (the 8x8 PNG the credits tests stage under
-# the retail .kda's image name; a self-contained PNG writer) and
-# fixtures/cbin/particle_dot.tga (the effect-world test's particle sprite).
+# fixtures/cbin: the synthetic credits lists (synth_nlist*.kda through
+# cbin::encode; the shipped trio is cbin_roundtrip's reference-tree leg),
+# credits_image.png (the 8x8 PNG the credits tests stage under the image name
+# the minted .kda references; a self-contained PNG writer) and particle_dot.tga
+# (the effect-world test's particle sprite).
 add_executable(minimal_cbin_gen_test fixtures/minimal_cbin_gen.cpp)
+target_link_libraries(minimal_cbin_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_cbin_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_cbin_gen COMMAND minimal_cbin_gen_test)
 
