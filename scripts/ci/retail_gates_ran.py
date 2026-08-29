@@ -58,7 +58,8 @@ MIXED = {
         "occlusion_armry", "threedi_panm_ctrl", "particle_smoke_all_fixtures", "sound_profile",
         "def_parse_items", "infantry", "minimap_overlay",
         # The reference fixture set (<assets>/fixtures/**) legs.
-        "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency",
+        "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency", "avatars_parse",
+        "avatars_roundtrip",
     ],
     "mission_corpus": [],
 }

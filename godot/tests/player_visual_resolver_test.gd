@@ -1,6 +1,6 @@
 extends GutTest
 
-const AVATARS_FIXTURE := "res://../fixtures/avatars/Avatars.def"
+const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
 
 func _load_avatar_db() -> AvatarDatabase:

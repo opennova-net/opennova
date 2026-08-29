@@ -162,7 +162,15 @@ add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
 
 # AVATARS (Avatars.def) tests: parse against the retail fixture + from-scratch
 # writer round-trip (docs/playerinfo/avatars-re.md, docs/adr/0021).
+# fixtures/avatars/synth_avatars.def: the synthetic avatar table through avatars_write.
+add_executable(minimal_avatars_gen_test fixtures/minimal_avatars_gen.cpp)
+target_link_libraries(minimal_avatars_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_avatars_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_avatars_gen COMMAND minimal_avatars_gen_test)
+
 foreach(test parse roundtrip)
+    # The minted fixtures/avatars/synth_avatars.def carries the shape; the shipped
+    # table is each test's OPENNOVA_JO_ASSETS reference leg.
     add_executable(avatars_${test}_test avatars/avatars_${test}_test.cpp)
     target_link_libraries(avatars_${test}_test PRIVATE opennova_formats)
     target_include_directories(avatars_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

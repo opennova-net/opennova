@@ -6,11 +6,11 @@ extends GutTest
 # cascade, and re-filters by the SIDE_BLUE/SIDE_RED team -- riding a MenuDriver over
 # a real MnuDocument (the compiled-menu surface; the Control tree is gone). This pins
 # the wiring against the witnessed original (docs/playerinfo/avatars-re.md,
-# D-PLAYERINFO-5/7); the live in-engine render is the manual smoke. Avatars.def comes
-# from the committed retail fixture, injected directly (root-less) like the avatar
-# data tests.
+# D-PLAYERINFO-5/7); the live in-engine render is the manual smoke. The table is the minted
+# synth_avatars.def fixture (tests/fixtures/minimal_avatars_gen.cpp), injected directly
+# (root-less) like the avatar data tests.
 
-const AVATARS_FIXTURE := "res://../fixtures/avatars/Avatars.def"
+const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
 
 # Strings is a shared autoload; keep the registry clean so the raw-key tests below see
@@ -26,8 +26,27 @@ func after_all() -> void:
 func _load_db() -> AvatarDatabase:
 	var db := AvatarDatabase.new()
 	var path := ProjectSettings.globalize_path(AVATARS_FIXTURE)
-	assert_eq(db.load(path), OK, "Avatars.def fixture loads")
+	assert_eq(db.load(path), OK, "the minted avatar table loads")
 	return db
+
+
+# A resource root whose Avatars.def is the minted table: the companion reads the
+# table under the name the engine binds [orig: CAvatarDefs_Init @ 0x57b180], so the
+# fixture is staged under that name in the cache dir (ResourceRoot.set_root_dir
+# rejects user://). Null when the fixture cannot be staged.
+func _staged_avatars_root() -> ResourceRoot:
+	var bytes := FileAccess.get_file_as_bytes(AVATARS_FIXTURE)
+	if bytes.is_empty():
+		return null
+	var dir := OS.get_cache_dir().path_join("opennova_player_info_seam_test")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var f := FileAccess.open(dir.path_join("Avatars.def"), FileAccess.WRITE)
+	if f == null:
+		return null
+	f.store_buffer(bytes)
+	f.close()
+	var root := ResourceRoot.new()
+	return root if root.set_root_dir(dir) == OK else null
 
 
 # --- Driver harness (the compiled-menu seam) ----------------------------------
@@ -83,11 +102,15 @@ func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
 	var classes: Array = profile.get("player_classes", [])
 	var avatars: Array = profile.get("avatars", [])
 
-	assert_eq(ids, [0x0200, 0x8207],
-			"fresh profile selects the first good/evil Avatars.def entries")
+	# The first combo of each alignment in table order (N00 D00 combo 1; N04 D00
+	# combo 1). The shipped table yields 0x8207 there (its first evil entry is N07).
+	assert_eq(ids, [0x0200, 0x8204],
+			"fresh profile selects the first good/evil avatar-table entries")
 	assert_eq(classes, [8, 8],
 			"fresh retail profile is rifleman on both sides")
-	assert_eq(avatars, [1, 10],
+	# SYN_HEAD_BOONIE (N00 D00 combo 1) carries voice 1; N04 D00 combo 1 wears
+	# SYN_HEAD_11, voice 3 (tests/fixtures/minimal_avatars_gen.cpp).
+	assert_eq(avatars, [1, 3],
 			"zero voice overrides resolve through each selected combo's head voice")
 	assert_eq(int(profile.get("team_request", 0)), -1,
 			"fresh profile asks the companion to assign a side")
@@ -115,7 +138,7 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 
 	assert_eq(int(ids[0]), 0x0400,
 			"nat 0 / div 0 / combo id 2 packs into bits 0..14")
-	assert_eq(int(ids[1]), 0x8207,
+	assert_eq(int(ids[1]), 0x8204,
 			"choosing side A does not erase side B's profile selection")
 	assert_eq(int(avatars[0]), int(head.get("voice", -1)),
 			"the selected combo supplies its retail avatar byte")
@@ -173,11 +196,11 @@ func test_populates_avatar_lists_and_combo_label() -> void:
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
 
 	assert_gt(driver.item_count(driver.widget_id("NATIONALITY")), 0, "nationalities populate")
-	# The initial team-0 cascade selects the first good nationality (US, index 0) and its
-	# first division (SEAL): division + combo lists fill from the avatar tree.
-	assert_eq(driver.item_count(driver.widget_id("DIVISION")), 9, "US has 9 divisions")
+	# The initial team-0 cascade selects the first good nationality (N00, index 0) and
+	# its first division (D00): division + combo lists fill from the avatar tree.
+	assert_eq(driver.item_count(driver.widget_id("DIVISION")), 4, "N00 has 4 divisions")
 	var combos := driver.widget_id("COMBO_LIST")
-	assert_eq(driver.item_count(combos), 4, "the SEAL division has 4 combos")
+	assert_eq(driver.item_count(combos), 4, "division D00 has 4 combos")
 
 	# Each combo row is "<head display> - <body display>". With no gametext table registered
 	# (before_each cleared Strings) the names fall back to their raw keys.
@@ -328,8 +351,8 @@ func test_snapshot_reports_current_selection() -> void:
 	assert_eq(sides.size(), 2, "snapshot carries both retail side records")
 	assert_eq(int((sides[0] as Dictionary).get("avatar_packed", -1)), 0x0200,
 			"the active side stores the exact packed Avatars.def identity")
-	assert_eq(int((sides[1] as Dictionary).get("avatar_packed", -1)), 0x8207,
-			"the opposite side is initialized to retail's resolved default")
+	assert_eq(int((sides[1] as Dictionary).get("avatar_packed", -1)), 0x8204,
+			"the opposite side is initialized to the resolved default (its first combo)")
 
 
 func test_persisted_side_profiles_restore_each_team_cascade() -> void:
@@ -360,9 +383,10 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 		],
 	})
 	var driver := _make_avatar_driver()
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/avatars")), OK)
+	var root := _staged_avatars_root()
+	assert_not_null(root, "the minted table stages as the root's Avatars.def")
+	if root == null:
+		return
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
 	assert_eq(driver.selected_row(driver.widget_id("COMBO_LIST")),
 			int(blue.get("combo_index", -1)))
@@ -401,9 +425,10 @@ func test_accept_emits_avatar_chosen() -> void:
 
 
 func test_voice_preview_requests_selected_avatar_voice() -> void:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/avatars")), OK,
-		"the avatar fixture directory mounts as a retail resource root")
+	var root := _staged_avatars_root()
+	assert_not_null(root, "the minted table stages as the root's Avatars.def")
+	if root == null:
+		return
 
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(
@@ -420,9 +445,9 @@ func test_voice_preview_requests_selected_avatar_voice() -> void:
 		"the retail PLAYER_INFO screen authors its voice-preview button")
 	driver.widget_activated.emit(driver.widget_id("TESTPLAYERVOICE"), "TESTPLAYERVOICE")
 
-	# The fixture's initially selected US/SEAL head carries voice 1. Retail formats
-	# that avatar-derived fallback as VOICE_1 and plays it from the dedicated menu.lwf
-	# bank. [orig: PlayerInfo_PreviewVoice @ 0x55ff70]
+	# The table's initially selected N00/D00 head (SYN_HEAD_BOONIE) carries voice 1.
+	# Retail formats that avatar-derived fallback as VOICE_1 and plays it from the
+	# dedicated menu.lwf bank. [orig: PlayerInfo_PreviewVoice @ 0x55ff70]
 	assert_signal_emitted_with_parameters(driver, "sound_requested", ["menu.lwf", "VOICE_1"])
 
 

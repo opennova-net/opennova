@@ -1,10 +1,10 @@
 extends GutTest
 
 # Smoke test for the AvatarDatabase GDExtension binding over the committed
-# retail Avatars.def fixture (fixtures/avatars/Avatars.def). Mirrors the
+# minted synth_avatars.def fixture (tests/fixtures/minimal_avatars_gen.cpp). Mirrors the
 # engine/formats/avatars ctests one layer up, and exercises the model bridge
 # (get_model/set_model) and the save path.
-const AVATARS_FIXTURE := "res://../fixtures/avatars/Avatars.def"
+const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
 
 func _load() -> AvatarDatabase:
@@ -26,38 +26,38 @@ func _write_temp_avatars(name: String, text: String) -> String:
 func test_load_counts_and_spot_values() -> void:
 	var db := _load()
 	assert_true(db.is_loaded(), "is_loaded after load")
-	assert_eq(db.get_part_count(), 109, "109 parts (51 head + 36 body + 22 arms)")
+	assert_eq(db.get_part_count(), 26, "26 parts (12 head + 8 body + 6 arms)")
 	assert_eq(db.get_nationality_count(), 8, "8 nationalities")
 
-	var seal: Dictionary = db.get_part(AvatarDatabase.PART_HEAD, "JO_HEAD_SEAL")
-	assert_eq(String(seal.get("display_name", "")), "AV_BOONIEHAT")
-	assert_eq(String(seal.get("graphic", "")), "Boonie.3di")
+	var seal: Dictionary = db.get_part(AvatarDatabase.PART_HEAD, "SYN_HEAD_BOONIE")
+	assert_eq(String(seal.get("display_name", "")), "AV_SYNTH_BOONIE")
+	assert_eq(String(seal.get("graphic", "")), "synth_boonie.3di")
 	assert_eq(int(seal.get("voice", -1)), 1)
 	assert_eq(int(seal.get("sex", -1)), AvatarDatabase.SEX_MALE)
 
-	assert_eq(db.get_part_names(AvatarDatabase.PART_HEAD).size(), 51, "51 head parts")
-	assert_eq(db.get_part_names(AvatarDatabase.PART_BODY).size(), 36, "36 body parts")
-	assert_eq(db.get_part_names(AvatarDatabase.PART_ARMS).size(), 22, "22 arms parts")
+	assert_eq(db.get_part_names(AvatarDatabase.PART_HEAD).size(), 12, "12 head parts")
+	assert_eq(db.get_part_names(AvatarDatabase.PART_BODY).size(), 8, "8 body parts")
+	assert_eq(db.get_part_names(AvatarDatabase.PART_ARMS).size(), 6, "6 arms parts")
 
 
 func test_tree_and_resolve() -> void:
 	var db := _load()
 
 	var us: Dictionary = db.get_nationality(0)
-	assert_eq(String(us.get("name_key", "")), "AV_NAT_UNITEDSTATES")
+	assert_eq(String(us.get("name_key", "")), "AV_NAT_SYNTH_ALPHA")
 	assert_eq(int(us.get("alignment", -1)), AvatarDatabase.ALIGN_GOOD)
-	assert_eq(int(us.get("division_count", 0)), 9, "US has 9 divisions")
+	assert_eq(int(us.get("division_count", 0)), 4, "nationality 0 has 4 divisions")
 
 	var d0: Dictionary = db.get_division(0, 0)
-	assert_eq(String(d0.get("name_key", "")), "AV_DIV_SEAL")
+	assert_eq(String(d0.get("name_key", "")), "AV_DIV_SYNTH_0_0")
 	assert_eq(String(d0.get("flags", "")), "skipdemo", "trailing flag preserved")
 	assert_eq(int(d0.get("combo_count", 0)), 4)
 
 	var resolved: Dictionary = db.resolve_combo(0, 0, 0)
-	assert_eq(String(resolved.get("head_name", "")), "JO_HEAD_SEAL")
+	assert_eq(String(resolved.get("head_name", "")), "SYN_HEAD_BOONIE")
 	assert_true(resolved.has("head"), "head part reference resolved")
 	var head: Dictionary = resolved.get("head", {})
-	assert_eq(String(head.get("graphic", "")), "Boonie.3di", "resolved head graphic")
+	assert_eq(String(head.get("graphic", "")), "synth_boonie.3di", "resolved head graphic")
 	assert_true(resolved.has("body"), "body part reference resolved")
 	assert_eq(int(resolved.get("alignment", -1)), AvatarDatabase.ALIGN_GOOD)
 
