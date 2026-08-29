@@ -291,6 +291,9 @@ add_test(NAME footstep_slot COMMAND footstep_slot_test)
 # mission_audio.gd (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
 add_executable(ambient_mixer_test audio/ambient_mixer_test.cpp)
 target_link_libraries(ambient_mixer_test PRIVATE opennova_runtime)
+target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
+add_test(NAME ambient_mixer COMMAND ambient_mixer_test)
 
 # S13 (ADR 0028): the envs-marker resolution — the items.def dispatch-tag gate across
 # entity pools, the authored soundloop slots passed through unfiltered, walk order,
@@ -302,9 +305,6 @@ add_test(NAME audio_envs_markers COMMAND envs_markers_test)
 add_executable(bank_chain_test audio/bank_chain_test.cpp)
 target_link_libraries(bank_chain_test PRIVATE opennova_runtime)
 add_test(NAME audio_bank_chain COMMAND bank_chain_test)
-target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
-add_test(NAME ambient_mixer COMMAND ambient_mixer_test)
 
 # SndProf.def sound-profile parse + lookup (asset-gated retail spot check via JO_ASSETS).
 add_executable(sound_profile_test audio/sound_profile_test.cpp)
@@ -1066,10 +1066,7 @@ opennova_add_gated_test(cpt_jo_assets_sweep COMMAND cpt_jo_assets_sweep_test)
 
 add_executable(trn_config_roundtrip_test terrain/trn_config_roundtrip_test.cpp)
 target_link_libraries(trn_config_roundtrip_test PRIVATE opennova_formats)
-target_include_directories(trn_config_roundtrip_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/engine/runtime/terrain/include
-)
+target_include_directories(trn_config_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME trn_config_roundtrip COMMAND trn_config_roundtrip_test)
 
 # Terrain world->source coordinate transform kernel (engine/runtime/terrain/coords).
@@ -1411,25 +1408,28 @@ target_include_directories(collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(collision_test PRIVATE cxx_std_17)
 add_test(NAME collision COMMAND collision_test)
 
-# Asset-gated (OPENNOVA_JO_DIR): the 05TRcoop bunker walk-in repro — the real
-# Cbunker2 collision at the mission pose, a capsule walking the authored
-# route into it. Diagnostic/report-only while the frozen-clump divergence is
-# open; reports Skipped without a JO install.
 # Asset-gated (OPENNOVA_JO_DIR): mission-script report — which authored BMS
-# events fire in a headless run and what the unfired ones would have done.
-# Diagnostic; never fails on unfired events.
+# events fire in a headless run of the kernel-booted mission and what the
+# unfired ones would have done. Diagnostic beyond its two zone floors; never
+# fails on unfired events.
 add_executable(mission_script_report_test mission/mission_script_report_test.cpp)
-target_link_libraries(mission_script_report_test PRIVATE opennova_runtime)
-target_include_directories(mission_script_report_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(mission_script_report_test PRIVATE opennova_test_rig)
 target_compile_features(mission_script_report_test PRIVATE cxx_std_17)
 opennova_add_gated_test(mission_script_report COMMAND mission_script_report_test)
 
+# Asset-gated (OPENNOVA_JO_DIR): the 05TRcoop bunker walk-in repro — the real
+# Cbunker2 collision attached at the mission pose by the kernel boot, a
+# capsule walking the authored route into it. The pipeline preconditions are
+# asserted; the walk-in verdict stays a report while the frozen-clump
+# divergence is open. Reports Skipped without a JO install.
 add_executable(bunker_walkin_test world/bunker_walkin_test.cpp)
-target_link_libraries(bunker_walkin_test PRIVATE opennova_runtime)
-target_include_directories(bunker_walkin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(bunker_walkin_test PRIVATE opennova_test_rig)
 target_compile_features(bunker_walkin_test PRIVATE cxx_std_17)
 opennova_add_gated_test(bunker_walkin COMMAND bunker_walkin_test)
 
+# Asset-gated (OPENNOVA_JO_DIR): the 00TRg transport-unload repro over the
+# real DTruck1 collision; the pipeline preconditions are asserted, the escape
+# verdict stays a report while the divergence is open.
 add_executable(truck_dismount_test world/truck_dismount_test.cpp)
 target_link_libraries(truck_dismount_test PRIVATE opennova_runtime)
 target_include_directories(truck_dismount_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1470,8 +1470,9 @@ target_compile_features(occlusion_test PRIVATE cxx_std_17)
 add_test(NAME occlusion COMMAND occlusion_test)
 
 # Real-asset occlusion probe: retail Armry01.3di (the 00TRa armory) through the
-# host's IR->runtime conversions, camera walked room to room, per-room section
-# masks asserted (window/portal/open-slot legs over authored OFAC topology).
+# engine's 3DI3 read and occlusion-model build (the parsed struct IS the model,
+# ADR 0027), camera walked room to room, per-room section masks asserted
+# (window/portal/open-slot legs over authored OFAC topology).
 # Uses the committed Armry01 fixture in CI; OPENNOVA_JO_ASSETS can override it
 # for a retail-install parity run.
 add_executable(occlusion_armry_test world/occlusion_armry_test.cpp)
@@ -1765,6 +1766,25 @@ target_include_directories(mission_kernel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(mission_kernel_test PRIVATE cxx_std_17)
 add_test(NAME mission_kernel COMMAND mission_kernel_test)
 
+# The kernel's lifecycle contract over the same synthetic mission, ungated: the
+# ordering guards, the sealed play-start baseline (capture/restore rewinds the
+# registry, the player, the clock and the event latches), the strict-vs-lenient
+# WAC diagnostic policy, and the no-terrain path.
+add_executable(mission_kernel_lifecycle_test mission/mission_kernel_lifecycle_test.cpp)
+target_link_libraries(mission_kernel_lifecycle_test PRIVATE opennova_runtime)
+target_include_directories(mission_kernel_lifecycle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_kernel_lifecycle_test PRIVATE cxx_std_17)
+add_test(NAME mission_kernel_lifecycle COMMAND mission_kernel_lifecycle_test)
+
+# inmatch::listen_host over the kernel (ADR 0042 d3), ungated: the SP listen
+# bring-up and its per-tick frame over a null socket, the local C2S gameplay
+# drain, and the dedicated (HostOnly) bring-up.
+add_executable(listen_host_test mission/listen_host_test.cpp)
+target_link_libraries(listen_host_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(listen_host_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(listen_host_test PRIVATE cxx_std_17)
+add_test(NAME listen_host COMMAND listen_host_test)
+
 # Emplacement mount: the seat model + canonical root/child seat selection and attach
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the
 # snapshot/restore rewind of a mount.
@@ -1912,10 +1932,6 @@ add_executable(session_protocol_test novaworld/session_protocol_test.cpp)
 target_link_libraries(session_protocol_test PRIVATE opennova_net)
 target_include_directories(session_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME session_protocol COMMAND session_protocol_test)
-
-# NOTE (P8): the old joiner_session_test (the legacy novaworld::JoinerSession driven against the
-# retired HostSessionAccept) was deleted — np::JoinerConnection is the promoted in-match client and is
-# covered on the World path by npruntime_client_runtime + npruntime_two_endpoint_socket.
 
 # Connection registry / manager tests
 add_executable(connection_registry_test novaworld/connection_registry_test.cpp)
@@ -2492,13 +2508,13 @@ add_test(NAME npruntime_round_sim COMMAND npruntime_round_sim_test)
 # [orig: Server_CheckWinConditions @0x51ad40], the round-end latch + host effect
 # [orig: Server_ProcessRoundEnd @0x5164f0], and the post-round respawn hold.
 add_executable(coop_convoy_test mission/coop_convoy_test.cpp)
-target_include_directories(coop_convoy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(coop_convoy_test PRIVATE opennova_runtime opennova_formats)
+target_link_libraries(coop_convoy_test PRIVATE opennova_test_rig)
 opennova_add_gated_test(mission_coop_convoy COMMAND coop_convoy_test)
 
+# The headless AI path conformance report over the kernel-booted mission (the
+# fast half of the host-parity loop; --report / --ticks / --bms for diagnosis).
 add_executable(ai_path_conformance_test mission/ai_path_conformance_test.cpp)
-target_include_directories(ai_path_conformance_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(ai_path_conformance_test PRIVATE opennova_runtime opennova_formats)
+target_link_libraries(ai_path_conformance_test PRIVATE opennova_test_rig)
 opennova_add_gated_test(mission_ai_path_conformance COMMAND ai_path_conformance_test)
 
 # The retail-mission ports of the former in-game probes (ADR 0041: an
@@ -2539,10 +2555,9 @@ target_link_libraries(npruntime_round_end_test PRIVATE opennova_net opennova_run
 add_test(NAME npruntime_round_end COMMAND npruntime_round_end_test)
 
 # P2: the per-connection handshake — the server legs over the np free functions + the reactive §5.1
-# reply path (handshake_server), and the golden 0x81/0x82 byte-parity. (The old World-less
-# joiner_connection_test, which drove the client mirror through the retired game_runtime spawn-gate
-# mirror, was removed at P8: the real JoinerConnection join->spawn->C2S->SNAP flow is covered on the
-# World path by npruntime_client_runtime + npruntime_two_endpoint_socket.)
+# reply path (handshake_server), and the golden 0x81/0x82 byte-parity. The real JoinerConnection
+# join->spawn->C2S->SNAP flow is covered on the World path by npruntime_client_runtime +
+# npruntime_two_endpoint_socket.
 add_executable(npruntime_handshake_server_test npruntime/handshake_server_test.cpp)
 target_link_libraries(npruntime_handshake_server_test
     PRIVATE opennova_net opennova_runtime opennova_formats)
@@ -2576,7 +2591,7 @@ opennova_add_gated_test(npruntime_golden_lan_join COMMAND npruntime_golden_lan_j
 # P4 golden — np::Server_TickUpdate round-trips a REAL retail C2S 0x0C uplink into an S2C 0x0A frame
 # (0x0C-in -> SNAP -> 0x0A-out), sourced from the in-match gameplay capture. Env-gated + skip-if-absent
 # (no committed derived oracle); unlike the order-only lan_join golden this drives the npruntime runtime,
-# so it links opennova_npruntime + opennova_netsim + opennova_world.
+# so it links the net and runtime group targets (opennova_net + opennova_runtime, ADR 0029).
 add_executable(npruntime_golden_gameplay_test npruntime/golden_gameplay_test.cpp)
 target_include_directories(npruntime_golden_gameplay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_golden_gameplay_test
@@ -2588,6 +2603,7 @@ opennova_add_gated_test(npruntime_golden_gameplay COMMAND npruntime_golden_gamep
 # plus the host-as-client D-NET-121/122 anchor/fold path. No capture needed.
 add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)
 target_link_libraries(npruntime_client_runtime_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_client_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}) # common/null_datagram_socket.h
 add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
 
 # D-NET-194: a joiner retains the host's exact S2C 0x0B BMS header and

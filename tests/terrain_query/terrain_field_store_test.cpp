@@ -142,6 +142,15 @@ int main() {
 				"no charmap leaves the surface view zeroed");
 		check(terrain::surface_type_at_fixed(bare.surface_map(), 300 << 16, -(200 << 16)) == 1,
 				"the zeroed view is the sampler's 'no charmap -> surface 1' leg");
+		// The occupant water clamp's plane rides beside the field in the same
+		// 16.16 units the ground solve compares [orig: worldY @0x26C6454]; a
+		// rebuild starts without one.
+		check(!bare.height_field().has_water, "a fresh build carries no water plane");
+		bare.set_water_plane(12 << 16);
+		check(bare.height_field().has_water && bare.height_field().water_y == (12 << 16),
+				"set_water_plane feeds the clamp plane");
+		bare.set_water_plane(0);
+		check(!bare.height_field().has_water, "a zero plane is no authored water");
 		bare.clear();
 		check(!bare.valid(), "clear() invalidates the store");
 	}

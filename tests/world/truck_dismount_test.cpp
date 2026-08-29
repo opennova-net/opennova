@@ -18,8 +18,11 @@
 // (ResourceIndex -> SimModelCache -> collision_model_from_3di), places the
 // truck at the origin facing +y, drops a capsule at a rear passenger seat and
 // walks it forward at the live root step, resolving every tick exactly as the
-// infantry tick does. Diagnostic/report-only while the divergence is open, in
-// the bunker_walkin_test tradition: it prints whether the capsule escapes.
+// infantry tick does. The pipeline preconditions are asserted (the model
+// converts, its six rear passenger user points read off the model, all six
+// bodies mount and dismount through the real seat machinery); the escape
+// verdict itself stays a printed diagnostic while the divergence is open, in
+// the bunker_walkin_test tradition.
 // Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install).
 #include <cctype>
 #include <cmath>
@@ -43,6 +46,14 @@ namespace {
 using namespace opennova;
 namespace w = opennova::world;
 
+int failures = 0;
+bool expect(bool cond, const char *msg) {
+	if (cond) return true;
+	std::fprintf(stderr, "FAIL: %s\n", msg);
+	++failures;
+	return false;
+}
+
 int32_t fx(double v) { return static_cast<int32_t>(v * 65536.0); }
 
 } // namespace
@@ -59,11 +70,13 @@ int main() {
 	if (m3 == nullptr || m3->collision == nullptr)
 		return retail::skip("DTruck1.3di (with collision) on the OPENNOVA_JO_DIR mount");
 	w::CollisionModel model;
-	if (!simassets::collision_model_from_3di(m3->collision, model,
-	                                         simassets::model_has_collision(*m3))) {
-		std::fprintf(stderr, "FAIL: DTruck1 collision did not convert\n");
+	if (!expect(simassets::collision_model_from_3di(m3->collision, model,
+	                                                simassets::model_has_collision(*m3)),
+	            "DTruck1 collision converts")) {
 		return 1;
 	}
+	expect(!model.sections.empty() && !model.volumes.empty(),
+	       "DTruck1 carries collision sections and volumes");
 	std::printf("DTruck1: %zu sections, %zu volumes\n", model.sections.size(),
 	            model.volumes.size());
 	std::printf("  model AABB: x=[%.2f..%.2f] y=[%.2f..%.2f] z=[%.2f..%.2f]\n",
@@ -98,6 +111,7 @@ int main() {
 		std::printf("    -> type1=%d other=%d\n", t1, other);
 	}
 	std::printf("  DTruck1 user points: %zu\n", m3->user_point_count);
+	int passenger_points = 0;
 	for (size_t ui = 0; ui < m3->user_point_count; ++ui) {
 		const ThreediUserPoint &up = m3->user_points[ui];
 		std::string low(up.name);
@@ -105,11 +119,15 @@ int main() {
 		if (low.rfind("sitex",0) != 0 && low.rfind("ctrlx",0) != 0 &&
 		    low.rfind("drvrx",0) != 0 && low.rfind("usegun",0) != 0)
 			continue;
+		if (low.rfind("sitex", 0) == 0) ++passenger_points;
 		float p3[3];
 		threedi_user_point_position(&up, p3);
 		std::printf("    USRP %-10s model=(%.3f, %.3f, %.3f)\n", up.name,
 		            p3[0], p3[1], p3[2]);
 	}
+	// The six rear passenger seats the hand-built truck below carries are the
+	// model's own `sitex` user points (the source the seat extraction reads).
+	expect(passenger_points >= 6, "DTruck1 authors at least six sitex passenger points");
 
 	// A SOLDIER's real bound radius, against the 0x10000 (1.0 u) that D-COL-3
 	// hardcodes into the peer-repulsion threshold. Eindo11 is the 00TRg
@@ -232,6 +250,8 @@ int main() {
 		for (size_t bi = 0; bi < bodies.size(); ++bi)
 			if (world.commands.dismount(uint16_t(70002 + bi))) ++dropped_n;
 		std::printf("  mounted %d, dismounted %d\n", mounted_n, dropped_n);
+		expect(mounted_n == body_count, "every body takes a distinct rear seat");
+		expect(dropped_n == body_count, "every body dismounts through the real seat machinery");
 		for (size_t bi = 0; bi < bodies.size(); ++bi) {
 			if (const w::Entity *se = world.registry.get(bodies[bi].h)) {
 				bodies[bi].pos[0] = fx(se->position.x);
@@ -297,5 +317,6 @@ int main() {
 	else
 		std::printf("truck dismount: PINNED — the capsule never reached the node "
 		            "(closest %.2f u). This is the live 00TRg defect.\n", closest);
-	return 0;
+	if (failures == 0) std::printf("truck dismount: the pipeline preconditions hold\n");
+	return failures ? 1 : 0;
 }

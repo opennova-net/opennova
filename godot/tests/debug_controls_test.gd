@@ -97,7 +97,6 @@ func before_each() -> void:
 	seams.world_loading_source = func(): return false
 	seams.dev_tools_open_source = func(): return false
 	seams.resume_action = func(): pass
-	seams.return_to_menu_action = func(): pass
 	seams.quit_action = func(): pass
 	_adapter = add_child_autofree(AuthorityAdapter.new())
 	_adapter.configure(seams)

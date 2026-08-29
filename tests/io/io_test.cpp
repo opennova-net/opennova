@@ -1,9 +1,11 @@
 // opennova::io unit tests: LE primitives, fixed-point, bounds-checked byte
 // cursors, LSB-first bit streams, and the ASCII string helpers.
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -290,6 +292,61 @@ static int test_log_ring_cursor_drain_and_wrap()
     return 0;
 }
 
+static int test_log_ring_concurrent_record_and_drain()
+{
+    using opennova::io::LogLevel;
+    using opennova::io::LogRing;
+    using opennova::io::LogRingEntry;
+
+    // The header's contract: the mutex keeps record/drain safe if an embedder
+    // ever logs off the main thread. One producer records kCapacity * 4
+    // entries while the main thread drains by cursor: every drained batch is
+    // strictly increasing, no batch spans more than the ring's capacity, a
+    // gap only ever means the ring wrapped past unread entries (never a
+    // duplicate or a reordering), and the final sequence is the total.
+    static constexpr size_t kTotal = LogRing::kCapacity * 4;
+    LogRing ring;
+    std::atomic<bool> done{false};
+    std::thread producer([&ring, &done]() {
+        for (size_t i = 0; i < kTotal; ++i)
+            ring.record(LogLevel::kInfo, ("worker " + std::to_string(i + 1)).c_str());
+        done.store(true);
+    });
+    uint64_t cursor = 0;
+    uint64_t last_seen = 0;
+    size_t drained = 0;
+    bool monotonic = true;
+    bool bounded = true;
+    while (true) {
+        const bool finished = done.load();
+        const std::vector<LogRingEntry> batch = ring.entries_after(cursor);
+        if (!batch.empty()) {
+            if (batch.size() > LogRing::kCapacity) bounded = false;
+            for (const LogRingEntry &entry : batch) {
+                if (entry.sequence <= last_seen) monotonic = false;
+                if (entry.text != "worker " + std::to_string(entry.sequence)) monotonic = false;
+                last_seen = entry.sequence;
+            }
+            drained += batch.size();
+            cursor = batch.back().sequence;
+        }
+        if (finished && batch.empty()) break;
+        std::this_thread::yield();
+    }
+    producer.join();
+    TEST_EXPECT(monotonic);
+    TEST_EXPECT(bounded);
+    TEST_EXPECT(drained > 0 && drained <= kTotal);
+    TEST_EXPECT(last_seen == kTotal);
+    TEST_EXPECT(ring.last_sequence() == kTotal);
+    // Everything after the drain's cursor is gone: the ring holds exactly the
+    // newest kCapacity entries, already seen.
+    TEST_EXPECT(ring.entries_after(cursor).empty());
+    TEST_EXPECT(ring.entries_after(0).size() == LogRing::kCapacity);
+    TEST_EXPECT(ring.entries_after(0).front().sequence == kTotal - LogRing::kCapacity + 1);
+    return 0;
+}
+
 static int test_log_ring_install_chains_downstream()
 {
     using opennova::io::LogLevel;
@@ -412,6 +469,7 @@ int main()
     if (test_byte_reader_truncation_latch()) return 1;
     if (test_log_sink()) return 1;
     if (test_log_ring_cursor_drain_and_wrap()) return 1;
+    if (test_log_ring_concurrent_record_and_drain()) return 1;
     if (test_log_ring_install_chains_downstream()) return 1;
     std::printf("io_test: all checks passed\n");
     return 0;

@@ -6,10 +6,18 @@
 // do: a 430 s round plus a decode, through a sampled wire, to observe state we
 // own in-process.
 //
-// So this test is our side of that comparison: load the REAL shipped mission,
-// promote it, tick the world headless, and report each AI's authored routing
-// inputs next to the distance it actually travelled. Deterministic (no player,
-// no network), unsampled, and seconds instead of minutes.
+// So this test is our side of that comparison: load the REAL shipped mission
+// through the engine's own mission kernel (the live host's boot: model-derived
+// seats, items.def traits, the mission terrain, collision, root motion, the
+// WAC layers - ADR 0042 d3), tick the world headless, and report each AI's
+// authored routing inputs next to the distance it actually travelled.
+// Deterministic (no player, no network), unsampled, and seconds instead of
+// minutes. Every one of those boot legs was once omitted by a hand-assembled
+// harness that then measured its own omission (concept 7.4c: seatless
+// carriers that never board, clipless soldiers that never walk, traitless
+// vehicles that never drive, a terrain-less rig with no ground solve, a
+// collision-less rig that sails through hulls) - the kernel boot is the one
+// implementation, so the harness cannot drift from the game again.
 //
 // Measured divergence it exists to close (idle-vs-idle, 430 s, zero player input,
 // AI-PARITY-CONCEPT.md 6.3d): retail moves every AI except s8/s15/s16, while we
@@ -26,41 +34,22 @@
 // below are the regression pins. `--ticks <n>` (default 2500) and `--bms <name>`
 // (default 00TRg.bms) point the same harness at the 430 s capture budget or the
 // 05TRcoop bunker-garrison pin; the ctest registration passes neither.
-#include <runtime/mission/event_runtime.h>
-#include <runtime/mission/promote.h>
-
 #include <formats/mission/bms.h>
-
+#include <runtime/mission/event_runtime.h>
 #include <runtime/world/ai.h>
-#include <runtime/world/collision.h>
-#include <runtime/world/occlusion.h>
-#include <runtime/simassets/collision_resolve.h>
-#include <runtime/simassets/sim_collision_pose.h>
-#include <runtime/simassets/sim_model_cache.h>
 #include <runtime/world/world.h>
-
-#include <formats/def/def.h>
-#include <base/resource_index/resource_index.h>
-#include <runtime/simassets/seat_spec_extract.h>
-#include <formats/threedi/threedi_3di3.h>
-#include <runtime/simassets/adm_root_motion.h>
-#include <runtime/simassets/item_traits.h>
-#include <formats/cpt/cpt_io.h>
-#include <formats/trn/trn_io.h>
-#include <runtime/terrain_query/height_field.h>
-#include <runtime/terrain_query/terrain_field_build.h>
-#include <sstream>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
-#include "common/retail_mission.h"
+#include "common/retail_mission_files.h"
+#include "common/retail_mission_open.h"
 #include "common/retail_paths.h"
 
 namespace {
@@ -130,192 +119,59 @@ int main(int argc, char **argv) {
 	// the SAME full-tick harness pointed at a different authored mission.
 	const char *bms_arg = arg_value(argc, argv, "--bms");
 	const std::string bms_name = (bms_arg != nullptr && *bms_arg) ? bms_arg : "00TRg.bms";
-	// The mounted archives: the mission, the seat extraction and the root-motion
-	// clips all read through this one index.
-	ResourceIndex index;
-	std::vector<uint8_t> bytes;
-	std::string served_by;
-	if (!retail::read_mission(install, bms_name, index, bytes, served_by))
+	// The mission through the engine's own boot (ADR 0042 d3): the rig's kernel
+	// mounts the install, extracts the seat specs from the models, installs the
+	// .aip profiles, promotes the mission, grounds the AI on the .cpt/.trn
+	// field, registers E_STAND.adm + each soldier's own .adm, resolves the
+	// items.def traits and the collision instances, loads weapon.def/ammo.def
+	// and the WAC layers - in the S9 order the shipping game runs.
+	testrig::RetailMissionRig rig;
+	std::string error, served_by;
+	if (!retail::open_mission(rig, install, bms_name, error, served_by))
 		return retail::skip((bms_name + " on the OPENNOVA_JO_DIR mount (base or an expansion) "
 		                     "or under OPENNOVA_MISSION_CORPUS").c_str());
-	bms::File m;
-	std::string error;
-	if (!expect(bms::parse(bytes.data(), bytes.size(), m, error), (bms_name + " parses").c_str())) {
-		std::fprintf(stderr, "  parse error: %s\n", error.c_str());
+	testrig::BootOptions options;
+	options.playable = false;      // the idle pair: no player
+	options.listen_server = false; // the bare no-net tick
+	if (!expect(rig.boot(options, error), (bms_name + " boots through the mission kernel").c_str())) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-
-	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
-	// The BMS EVENT SYSTEM issues the scripted route orders (RedirectGroupTo and
-	// friends). Without it the mission's own scripting never runs and a large
-	// share of the AI never receive the route the mission intends -- another way
-	// for the harness to measure its own omission (7.4c).
-	mission::BmsEventSystem events;
-	events.load(m.events, m.triggers, m.actions);
-
-	// SEATS COME FROM THE MODEL, NOT items.def. promote grants a vehicle its
-	// seats only from PromoteOptions::item_seat_specs, and the live game builds
-	// that table by walking each model's seat userpoints (sitex/ctrlx/drvrx/
-	// UseGun bones) -- items.def carries no seat rows at all
-	// [orig: seat typing Entity_GetBoneSlotType @0x434ed0]. A harness that skips
-	// this gives every carrier seats=0, so the board think's find_best_seat
-	// returns -1, the arrival ring widens, and the soldiers 'arrive' beside a
-	// seatless hull and never attach -- measuring the harness, not the engine.
-	mission::PromoteOptions opts;
-	DefItemsFile items{};
-	std::vector<uint8_t> items_bytes;
-	// value.second = 'resolved'; a failed parse caches a negative so each
-	// graphic is attempted once.
-	std::map<std::string, std::pair<Threedi3di3, bool>> model_cache;
-	if (index.read_file("items.def", items_bytes) &&
-			def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0) {
-		std::vector<int> seeds;
-		seeds.reserve(m.items.size() + m.organics.size());
-		for (const bms::Entity &b : m.items) seeds.push_back(100000 + b.type_id);
-		for (const bms::Entity &b : m.organics) seeds.push_back(100000 + b.type_id);
-		simassets::ModelLookupFn model_for =
-				[&](const std::string &key) -> const Threedi3di3 * {
-			auto it = model_cache.find(key);
-			if (it != model_cache.end())
-				return it->second.second ? &it->second.first : nullptr;
-			std::vector<uint8_t> raw;
-			Threedi3di3 parsed{};
-			if (index.read_file(key + ".3di", raw) &&
-					threedi_3di3_read_memory(raw.data(), raw.size(), &parsed) == 0) {
-				auto &slot = model_cache[key];
-				slot.first = parsed;
-				slot.second = true;
-				return &slot.first;
-			}
-			model_cache[key] = {Threedi3di3{}, false};
-			return nullptr;
-		};
-		simassets::SeatSpecExtraction extraction;
-		simassets::extract_item_seat_specs(items, model_for, seeds, extraction);
-		opts.item_seat_specs = extraction.specs;
-		std::printf("seat specs extracted: %zu (from %zu seed ids)\n",
-				extraction.specs.size(), seeds.size());
-		for (const mission::ItemSeatSpec &sp : opts.item_seat_specs) {
-			int g = 0, pa = 0, ct = 0, dr = 0;
-			for (const world::Seat &st : sp.seats) {
-				if (st.type == world::SeatType::Gunner) ++g;
-				else if (st.type == world::SeatType::Passenger) ++pa;
-				else if (st.type == world::SeatType::Controller) ++ct;
-				else if (st.type == world::SeatType::Driver) ++dr;
-			}
-			if (g > 0 || sp.seats.size() > 1)
-				std::printf("   SPEC type=%-7d seats=%-3zu [pass %d ctrl %d GUN %d drv %d] attach=%zu\n",
-						sp.type_id, sp.seats.size(), pa, ct, g, dr,
-						sp.emplacement_attachments.size());
-		}
-	}
-	const mission::PromoteResult promo = mission::promote_mission(m, world, ai, opts);
-	expect(promo.nav_channels > 0, "nav channels promoted");
-
-	// INFANTRY DO NOT MOVE WITHOUT ROOT MOTION. Locomotion comes from the anim
-	// clips, exactly as in the original: with `root_motion` null every state is
-	// unavailable, the selector idles, and every soldier stands still
-	// [orig: AnimMap_UpdateEntity @0x40b5f0; the contract is stated on
-	// AiSystem::root_motion in world/ai.h]. A headless harness that omits this
-	// measures nothing about pathing -- it measures its own missing clips, and
-	// reports 52/52 still. E_STAND.adm is the shell's default set (adm_id 0),
-	// which is what every entity grounds off until its own model's .adm is
-	// resolved [orig: AnimMap_RegisterEntity @0x40bb60; the same default the
-	// game shell installs in Simulation::set_infantry_anim_map].
-	simassets::AdmRootMotion root_motion;
-	const int default_adm = root_motion.register_adm(&index, "E_STAND.adm");
-	if (default_adm != 0)
+	// INFANTRY DO NOT MOVE WITHOUT ROOT MOTION [orig: AnimMap_UpdateEntity
+	// @0x40b5f0]: the kernel registers E_STAND.adm as the default clip set; a
+	// mount without it cannot measure pathing at all.
+	if (rig.root_motion.empty())
 		return retail::skip("E_STAND.adm on the OPENNOVA_JO_DIR mount (infantry cannot locomote without clips)");
-	ai.root_motion = &root_motion;
-	for (int i = 0; i < ai.count(); ++i) {
-		if (w::AiEntity *e = ai.at(i)) e->inf.adm_id = 0;
-	}
-
-	// VEHICLE TRAITS, or the whole motor pass is skipped. AiSystem's pool-1
-	// motor loop is gated on `!world.vehicle_traits.empty()`
-	// (ai_system.cpp:468), and the table is filled from the items.def rows
-	// [orig: Entity_InitFromItemDef @0x49e550; ItemDef_ParsePhysicsProperty
-	// @0x49d870]. Without it a carrier is never driven, its motor never mirrors
-	// the hull transform back into the brain, and the brain's own locomotion
-	// walks its internal pos along the route while the hull stays parked --
-	// which reads exactly like a pathing defect. coop_convoy_test hand-sets a
-	// traits row for the same reason.
-	if (items.count > 0) {
-		simassets::resolve_item_traits(world, items,
-				[](int32_t) -> uint8_t { return 0; });
-	}
-
-	// TERRAIN. Without it the ground solve NEVER RUNS: infantry.cpp:1626 and
-	// :1853 gate the ground RESAMPLE and the ground-SETTLE leg on
-	// `terrain != nullptr`, and vehicle_motor.cpp:679 hardcodes
-	// `m.grounded = true` with the comment "no terrain wired (unit worlds):
-	// drive on a flat plane". A terrain-less rig therefore walks every body
-	// with NO ground solve and drives every vehicle with PERMANENT contact, so
-	// it cannot reproduce any ground or contact defect by construction --
-	// reporting it as a positive control measures the harness, not the engine
-	// (concept 7.4c). That is exactly what happened on 2026-08-24: both the
-	// convoy pace loss and the 05TRcoop bunker-garrison pin were declared
-	// "does not reproduce headless, therefore the sim is exonerated" against
-	// this rig, which had no ground under either of them.
-	// Same pipeline the game uses: the engine's one owning cpt/trn field
-	// builder (terrain_field_store_build, ADR 0042 d4 — the store
-	// Simulation::set_terrain_height_field fills).
-	opennova::CptFile cpt;
-	opennova::TrnConfig trn;
-	opennova::terrain::TerrainFieldStore terrain_store;
-	{
-		const std::string tname = m.get_terrain();
-		std::vector<uint8_t> cpt_bytes, trn_bytes;
-		std::string terr_err;
-		if (!tname.empty() && index.read_file(tname + ".cpt", cpt_bytes) &&
-				index.read_file(tname + ".trn", trn_bytes) &&
-				opennova::load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, terr_err)) {
-			std::string raw(reinterpret_cast<const char *>(trn_bytes.data()), trn_bytes.size());
-			std::istringstream ts(raw);
-			if (opennova::load_trn(ts, trn, terr_err) && !cpt.depth_buffer.empty())
-				opennova::terrain::terrain_field_store_build(terrain_store, cpt, trn);
+	w::World &world = rig.world;
+	w::AiSystem &ai = rig.ai;
+	mission::BmsEventSystem &events = rig.events;
+	const bms::File &m = rig.mission;
+	expect(rig.promo.nav_channels > 0, "nav channels promoted");
+	// The boot legs whose absence once made the harness measure itself: a
+	// carrier needs its model-derived seats, the ground solve needs the field
+	// [orig: the terrain gates in Entity_UpdateInfantryPlayerBody / the vehicle
+	// motor], and bodies need the hulls they walk around.
+	expect(!rig.seat_specs.empty(), "the seat specs come from the mission's models");
+	expect(rig.has_terrain(), "the mission terrain loaded (the ground solve runs)");
+	expect(rig.collision_attached > 0, "the collision instances attached");
+	std::printf("kernel boot: %zu seat specs, terrain %s (dim %d), %d collision instances, "
+	            "wac %s, mission served by %s\n",
+			rig.seat_specs.size(), rig.has_terrain() ? "loaded" : "NOT LOADED",
+			rig.has_terrain() ? rig.terrain_store.height_field().dim : 0,
+			rig.collision_attached, rig.wac_loaded ? "loaded" : "absent", served_by.c_str());
+	for (const mission::ItemSeatSpec &sp : rig.seat_specs) {
+		int g = 0, pa = 0, ct = 0, dr = 0;
+		for (const world::Seat &st : sp.seats) {
+			if (st.type == world::SeatType::Gunner) ++g;
+			else if (st.type == world::SeatType::Passenger) ++pa;
+			else if (st.type == world::SeatType::Controller) ++ct;
+			else if (st.type == world::SeatType::Driver) ++dr;
 		}
-		if (terrain_store.valid()) {
-			world.terrain = &terrain_store.height_field();
-			ai.terrain = &terrain_store.height_field();
-			std::printf("terrain: %s loaded, dim %d\n", tname.c_str(),
-					terrain_store.height_field().dim);
-		} else {
-			std::printf("terrain: NOT LOADED (ref=%s) - THE GROUND SOLVE WILL NOT RUN\n",
-					tname.c_str());
-		}
+		if (report && (g > 0 || sp.seats.size() > 1))
+			std::printf("   SPEC type=%-7d seats=%-3zu [pass %d ctrl %d GUN %d drv %d] attach=%zu\n",
+					sp.type_id, sp.seats.size(), pa, ct, g, dr,
+					sp.emplacement_attachments.size());
 	}
-
-	// COLLISION. Without this the rig walks every body and vehicle through empty
-	// space, which is why its "60 AI, 56 moved" reports looked healthy for an
-	// entire slice while the live game was pinning AI against a truck, and why
-	// the transports here sail to their drive-on node when the game's do not
-	// (concept 6.4p / 6.4t). Same pipeline the game uses:
-	// ResourceIndex -> SimModelCache -> resolve_collision_instances.
-	w::CollisionWorld collision;
-	w::OcclusionWorld occlusion;
-	simassets::SimCollisionPoseProvider collision_pose;
-	simassets::SimModelCache collision_models;
-	simassets::CollisionResolveState collision_state;
-	{
-		collision_models.set_index(&index);
-		collision_pose.set_resource_index(&index);
-		const simassets::CollisionResolveDeps deps{collision, occlusion,
-		                                           collision_pose, collision_models};
-		const int attached =
-				simassets::resolve_collision_instances(world, items, collision_state, deps);
-		collision.set_section_matrix_provider(&collision_pose);
-		collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
-		world.collision = &collision;
-		ai.collision = &collision;
-		std::printf("collision: %d entities attached to a model\n", attached);
-	}
-
-	world.add_system(&events);
-	world.add_system(&ai);
-	world.load_systems();
 
 	// Carrier START positions: a mounted passenger only travels if its VEHICLE
 	// drives. Retail's boarded soldiers cover hundreds of thousands of wire units
@@ -366,7 +222,7 @@ int main(int argc, char **argv) {
 	std::vector<uint8_t> ever_target(size_t(ai.count()) + 64, 0);
 	int peak_targets = 0;
 	for (int t = 0; t < ticks; ++t) {
-		world.run_logic_tick(/*is_authority=*/true);
+		rig.tick();
 		{
 			int now = 0;
 			for (int k = 0; k < ai.count(); ++k) {

@@ -157,17 +157,13 @@ func _call(name: String, args: Dictionary = {}) -> McpToolResult:
 
 
 func test_shared_catalog_registers_all_runtime_tools() -> void:
-	for name in [
-		"game_state",
-		"game_entities",
-		"game_control",
-		"game_debug",
-		"game_render_diagnostics",
-		"game_capture_bundle",
-		"game_screenshot",
-		"game_logs",
-	]:
-		assert_true(registry.has_tool(name), "registered %s" % name)
+	# The catalog IS the list: a definition dropped from register_all (or a
+	# registration whose handler stopped resolving) fails here, game_menu and
+	# game_probe included.
+	var definitions: Array[McpToolDef] = GameMcpCatalog.definitions()
+	assert_gt(definitions.size(), 0, "the shared catalog carries the runtime tools")
+	for def in definitions:
+		assert_true(registry.has_tool(def.name), "registered %s" % def.name)
 
 
 func test_entity_listing_and_inspection_route_through_public_adapter_seams() -> void:

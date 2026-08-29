@@ -7,18 +7,20 @@
 //        AND group 10 inside area 3 (the Stryker's own parking spot)
 //     -> BMS event 82 (2 s activation delay): MisvarChange var20=1 +
 //        RedirectGroupTo group 10 -> route list 7
-//     -> the vehicle brain takes route 7 and the SM mover drives the hull.
+//     -> the vehicle brain takes route 7 and the motor drives the hull.
 //
 // This is the scripted behavior a live host shows when a player mounts the
-// Stryker gun; the test pins it deterministically against the shipped mission.
+// Stryker gun; the test pins it deterministically against the shipped mission
+// booted through the engine's own mission kernel (ADR 0042 d3): the Stryker's
+// and the Blackhawk's control seats come from their models, the vehicle traits
+// from items.def, the ground from the mission terrain, the hulls from the
+// collision instances - the live host's world, not a hand-typed seat table.
 // Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install).
 #include <runtime/mission/event_runtime.h>
-#include <runtime/mission/promote.h>
 
 #include <formats/mission/bms.h>
 
 #include <runtime/world/ai.h>
-#include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_mount.h>
 #include <runtime/world/world.h>
@@ -26,10 +28,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
 #include <string>
 #include <vector>
-#include "common/retail_mission.h"
+#include "common/retail_mission_files.h"
+#include "common/retail_mission_open.h"
 #include "common/retail_paths.h"
 
 namespace {
@@ -50,65 +52,46 @@ bool expect(bool cond, const char *msg) {
 int main() {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install serving 05TRcoop.bms)");
-	opennova::ResourceIndex index;
-	std::vector<uint8_t> bytes;
-	std::string served_by;
-	if (!retail::read_mission(install, "05TRcoop.bms", index, bytes, served_by))
+	testrig::RetailMissionRig rig;
+	std::string error, served_by;
+	if (!retail::open_mission(rig, install, "05TRcoop.bms", error, served_by))
 		return retail::skip("05TRcoop.bms on the OPENNOVA_JO_DIR mount (base or an expansion) "
 		                    "or under OPENNOVA_MISSION_CORPUS");
-	bms::File m;
-	std::string error;
-	if (!expect(bms::parse(bytes.data(), bytes.size(), m, error),
-	            "05TRcoop.bms parses")) {
-		std::fprintf(stderr, "  parse error: %s\n", error.c_str());
+	// The bare no-net tick: the scripted chain under test needs no session,
+	// and the host's own player spawns at the mission start marker.
+	testrig::BootOptions options;
+	options.listen_server = false;
+	if (!expect(rig.boot(options, error), "05TRcoop boots through the mission kernel")) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-
-	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
-	mission::BmsEventSystem events;
-	events.load(m.events, m.triggers, m.actions);
-
-	// The Stryker (type 2015) needs a control seat for promote to grant it a
-	// vehicle brain; supply the minimal spec (the live game derives it from the
-	// item database).
-	mission::PromoteOptions opts;
-	mission::ItemSeatSpec stryker_seats;
-	stryker_seats.type_id = 2015;
-	w::Seat driver;
-	driver.type = w::SeatType::Driver;
-	stryker_seats.seats.push_back(driver);
-	opts.item_seat_specs.push_back(stryker_seats);
-	// The Blackhawk (2010) needs its control seat AT promote so the vehicle
-	// brain exists for the flight leg.
-	mission::ItemSeatSpec helo_seats;
-	helo_seats.type_id = 2010;
-	w::Seat helo_ctrl;
-	helo_ctrl.type = w::SeatType::Controller;
-	helo_seats.seats.push_back(helo_ctrl);
-	opts.item_seat_specs.push_back(helo_seats);
-	const mission::PromoteResult promo = mission::promote_mission(m, world, ai, opts);
-	expect(promo.nav_channels > 0, "nav channels promoted");
-
-	world.add_system(&events);
-	world.add_system(&ai);
-	world.load_systems();
+	w::World &world = rig.world;
+	w::AiSystem &ai = rig.ai;
+	mission::BmsEventSystem &events = rig.events;
+	expect(rig.promo.nav_channels > 0, "nav channels promoted");
+	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	std::printf("kernel boot: %zu seat specs, terrain %s, %d collision instances, wac %s, "
+	            "mission served by %s\n",
+			rig.seat_specs.size(), rig.has_terrain() ? "loaded" : "NOT LOADED",
+			rig.collision_attached, rig.wac_loaded ? "loaded" : "absent", served_by.c_str());
 
 	const w::EntityHandle stryker = world.registry.find_by_net_id(21);
 	w::Entity *veh = world.registry.get(stryker);
 	if (!expect(veh != nullptr, "Stryker SSN 21 promoted")) return 1;
+	// The Stryker (type 2015) needs a control seat for promote to grant it a
+	// vehicle brain; the kernel's seat-spec extraction reads it off the model's
+	// seat userpoints [orig: seat typing Entity_GetBoneSlotType @0x434ed0].
+	expect(!veh->seats.empty(), "the Stryker's seats come from its model");
 	const float start_x = veh->position.x;
 	const float start_y = veh->position.y;
 
 	// The player, seated on the Stryker's emplaced-cannon child — the exact
-	// live scenario (the gunner's carrier chain: player -> gun -> hull).
-	w::PlayerSpawn ps;
-	ps.position = {veh->position.x + 2.0f, veh->position.y, veh->position.z};
-	ps.team = 1;
-	const w::EntityHandle player = w::spawn_player(world, ps);
-	if (!expect(player.valid(), "player spawned")) return 1;
-	world.cached.local_player = player;
+	// live scenario (the gunner's carrier chain: player -> gun -> hull). The
+	// kernel spawned the player at the start marker; walk it to the hull and
+	// seat it on a synthetic emplacement child parented to the Stryker.
+	rig.teleport_local_player(
+			w::Vec3{veh->position.x + 2.0f, veh->position.y, veh->position.z}, 0.0, 0.0);
+	const w::EntityHandle player = world.cached.local_player;
 	w::Entity gun_seed{};
 	gun_seed.alive = true;
 	gun_seed.net_id = 60001;
@@ -118,12 +101,11 @@ int main() {
 	gun_seat.type = w::SeatType::Gunner;
 	gun_seed.seats.push_back(gun_seat);
 	const w::EntityHandle gun = world.registry.spawn(1, gun_seed);
+	if (!expect(gun.valid(), "a pool-1 slot for the synthetic gun child")) return 1;
 	world.registry.get(gun)->emplacement_parent = stryker;
 	// The orphan peeler validates the parent's spawn generation every tick; an
 	// unstamped id reads as a dead parent and dismounts the gunner.
 	world.registry.get(gun)->emplacement_parent_spawn_id = veh->registry_spawn_id;
-	w::Entity *pl = world.registry.get(player);
-	pl->item_id = 5305; // ItemTypeIndex gate [orig: @0x4f19a0]
 	if (!expect(world.commands.mount(10000, 60001),
 	            "the player mounts the gun through the real seat machinery"))
 		return 1;
@@ -132,9 +114,9 @@ int main() {
 	       "the seated player is on the Stryker's carrier chain");
 
 	// Run the mission: the quarter pass evaluates every 16 ticks, event 82
-	// carries a 2 s activation delay, then the route order lands and the SM
-	// mover drives. 2500 ticks = ~40 s of mission time.
-	for (int t = 0; t < 2500; ++t) world.run_logic_tick(/*is_authority=*/true);
+	// carries a 2 s activation delay, then the route order lands and the
+	// motor drives. 2500 ticks = ~40 s of mission time.
+	rig.tick(2500);
 
 	std::printf("diag: fired80=%d fired81=%d fired82=%d postMounted=%d postChain=%d\n",
 	            int(events.event_fired(80)), int(events.event_fired(81)),
@@ -152,10 +134,9 @@ int main() {
 		expect(brain->brain.f[w::AiBrain::kWpChannel] == 7,
 		       "event 82 routed the Stryker onto list 7");
 	}
-	// Displacement asserts on the AI domain: without item vehicle traits (the
-	// live game supplies them from the item database) the SM kinematic mover
-	// drives the brain entity and the registry mirror in the traits-gated motor
-	// pass never runs — the ROUTE traversal is the behavior under test.
+	// Displacement asserts on the AI domain: with the items.def traits the
+	// motor pass drives the hull and mirrors it back into the brain, so the
+	// ROUTE traversal is the behavior under test on the real ground.
 	if (brain != nullptr) {
 		const float dx = brain->pos[0] / 65536.0f - start_x;
 		const float dy = brain->pos[1] / 65536.0f - start_y;
@@ -174,18 +155,22 @@ int main() {
 		const w::EntityHandle helo = world.registry.find_by_net_id(420);
 		w::Entity *hv = world.registry.get(helo);
 		if (expect(hv != nullptr, "helo SSN 420 promoted")) {
-			// The item db is absent in a bare engine world: supply the traits
-			// row (family Helicopter) and a control seat, as the live game
-			// derives from items.def.
-			w::VehicleTraits ht;
-			ht.family = w::VehicleFamily::Helicopter;
-			ht.player_control = true;
-			ht.turn_rate = 8000000;
-			ht.acceleration = 1200;
-			// The air vertical clamp [+cs, -2cs] — zero pins the climb servo
-			// to the ground; the live game reads itemDef+0x920.
-			ht.climb_speed = 30000;
-			world.vehicle_traits.set(hv->item_id, ht);
+			// The kernel resolves the traits row (family Helicopter, the air
+			// vertical clamp from itemDef+0x920) from items.def and the control
+			// seat from the model; a mount whose items.def lacks the row keeps
+			// the pre-kernel stand-in so the flight leg still runs, and says so.
+			if (world.vehicle_traits.get(hv->item_id) == nullptr) {
+				std::printf("diag helo: no items.def traits row for item %d - stand-in row\n",
+				            hv->item_id);
+				w::VehicleTraits ht;
+				ht.family = w::VehicleFamily::Helicopter;
+				ht.player_control = true;
+				ht.turn_rate = 8000000;
+				ht.acceleration = 1200;
+				ht.climb_speed = 30000;
+				world.vehicle_traits.set(hv->item_id, ht);
+			}
+			expect(!hv->seats.empty(), "the Blackhawk's control seat comes from its model");
 			if (hv->seats.empty()) {
 				w::Seat ctrl;
 				ctrl.type = w::SeatType::Controller;
@@ -198,23 +183,26 @@ int main() {
 			pilot_seed.item_id = 2063;
 			pilot_seed.kind = w::EntityKind::Organic;
 			pilot_seed.position = hv->position;
-			world.registry.spawn(0, pilot_seed);
+			expect(world.registry.spawn(0, pilot_seed).valid(), "a pool-0 slot for the pilot");
 			expect(world.commands.mount(61001, 420), "AI pilot mounts the helo");
-			// The AI PROFILE TYPE, absent for the same reason the traits row is:
-			// a bare engine world loads no .aip, and mission promotion is what
-			// fills it in the live game (mission/promote.cpp). The rotor machine
-			// is selected by it — type 1 picks the HELO twin, and an unresolved
-			// 0 runs NEITHER machine [orig: the class gate `brain+4 ->
-			//  profile+16 == 2` @0x4928C9..0x4928D1 / the `== 1` twin @0x48FA70].
-			if (w::AiEntity *hb = ai.for_handle(helo)) hb->profile.type = 1;
+			// The AI PROFILE TYPE selects the rotor machine — type 1 picks the
+			// HELO twin, and an unresolved 0 runs NEITHER machine [orig: the
+			// class gate `brain+4 -> profile+16 == 2` @0x4928C9..0x4928D1 / the
+			// `== 1` twin @0x48FA70]. The kernel's .aip install resolves it from
+			// the mission's profile set; an unresolved row keeps the stand-in.
+			if (w::AiEntity *hb = ai.for_handle(helo)) {
+				if (hb->profile.type == 0) {
+					std::printf("diag helo: profile type unresolved - stand-in type 1\n");
+					hb->profile.type = 1;
+				}
+			}
 			// The mission's authored helo route order.
 			expect(world.commands.set_ssn_waypoint(420, 6, 0),
 			       "route 6 lands on the helo");
 
 			const float hx = hv->position.x, hy = hv->position.y,
 			            hz = hv->position.z;
-			for (int t = 0; t < 3000; ++t)
-				world.run_logic_tick(/*is_authority=*/true);
+			rig.tick(3000);
 
 			const w::Entity *ha = world.registry.get(helo);
 			const float dx = ha->position.x - hx;
@@ -245,7 +233,7 @@ int main() {
 			       "the rotor reached full speed");
 			const int32_t phase_a = ha->veh.part_spin.angle;
 			const int32_t reg_a = w::vehicle_ctrl_registers(ha->veh).rotor;
-			world.run_logic_tick(/*is_authority=*/true);
+			rig.tick();
 			const w::Entity *hb2 = world.registry.get(helo);
 			expect(hb2->veh.part_spin.angle != phase_a, "the blade phase advances");
 			expect(w::vehicle_ctrl_registers(hb2->veh).rotor != reg_a,

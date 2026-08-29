@@ -3643,18 +3643,36 @@ int main() {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
         const int32_t floor_z = fx(50) + kFloorStand;
 
-        World w; // scale 0 (the image default) disables fall damage entirely
+        // fallmps 0 has NO zero test in retail: the threshold is 0 (not "off"),
+        // so an airborne landing damages by the WHOLE landing speed,
+        // (0 - vel_z) >> 4, where fallmps 1 above charges (-1057 - vel_z) >> 4
+        // [orig: org1 @0x4bf82e..0x4bf841 `imul eax, -1057; cmp ecx, eax; jg
+        // skip` -- no compare against 0].
+        World w;
         AiSystem ai;
         ai.terrain = &flat.field;
         w.wac_values.fallmps = 0;
         AiEntity *e = soldier(ai);
         e->pos[0] = fx(100);
         e->pos[1] = fx(100);
-        e->pos[2] = fx(200);
-        e->health = 100;
-        run_ticks(ai, w, 0, 600);
+        e->pos[2] = floor_z + fx(3); // past the 0xF000 airborne gap
+        e->health = 30000;
+        int32_t min_vel = 0;
+        TickContext ctx;
+        ctx.world = &w;
+        ctx.is_authority = true;
+        for (uint32_t t = 0; t < 120; ++t) {
+            ctx.logic_tick = t;
+            ai.tick(w, ctx);
+            if (e->inf.vel[2] < min_vel) min_vel = e->inf.vel[2];
+        }
         CHECK(e->pos[2] == floor_z);
-        CHECK(e->health == 100);
+        CHECK(min_vel < 0);
+        // The landing tick integrates one more -416 gravity step before the
+        // clearance check, so the sampled minimum is one step short of the
+        // speed the damage read [orig: org1 @0x4bf7bf then @0x4bf82e].
+        const int32_t landing_vel = min_vel - 416;
+        CHECK(e->health == 30000 - ((-landing_vel) >> 4));
     }
 
     // ---- gravity cadence: BOTH motors fall EVERY tick, asymmetric steps — the NPC

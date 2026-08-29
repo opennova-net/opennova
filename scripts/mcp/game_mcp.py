@@ -34,6 +34,8 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_PORT = 8975
+# The game_logs `sources` enum (godot/game/mcp/game_mcp_catalog.gd; docs/mcp.md).
+LOG_SOURCES = ("server", "script", "engine", "godot", "probe")
 PROTOCOL_VERSION = "2025-06-18"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_DIR = REPO_ROOT / "godot"
@@ -695,7 +697,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_endpoint_options(logs)
     logs.add_argument("--cursor", type=int, default=0)
     logs.add_argument("--limit", type=int, default=200)
-    logs.add_argument("--sources", default="", help="comma list: server,script,engine,probe")
+    logs.add_argument("--sources", default="",
+                      help="comma list: " + ",".join(LOG_SOURCES))
     logs.add_argument("--follow", action="store_true")
     logs.add_argument("--interval", type=float, default=1.0)
     logs.set_defaults(func=cmd_logs)

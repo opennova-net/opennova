@@ -8,7 +8,7 @@
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/imgui_abi.h>
-#include <runtime/devtools/inspect_snapshot.h>
+#include <runtime/devtools/entity_directory_snapshot.h>
 #include <runtime/devtools/stats_window.h>
 
 #include <imgui.h>

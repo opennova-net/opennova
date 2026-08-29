@@ -21,7 +21,6 @@ func _adapter(
 	seams.world_loading_source = loading_source
 	seams.dev_tools_open_source = func(): return false
 	seams.resume_action = func(): pass
-	seams.return_to_menu_action = func(): pass
 	seams.quit_action = func(): pass
 	adapter.configure(seams)
 	return adapter

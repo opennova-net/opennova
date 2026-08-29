@@ -13,8 +13,6 @@
 #define OPENNOVA_TEST_RETAIL_MISSION_FILES_H
 
 #include <base/io/bam.h>
-#include <formats/cpt/cpt.h>
-#include <formats/trn/trn.h>
 #include <net/inmatch/listen_host.h>
 #include <net/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
@@ -60,9 +58,9 @@ class RetailMissionRig : public mission::MissionKernel, public inmatch::TickTarg
 public:
 	RetailMissionRig();
 
-	// The S9 boot over the opened mission: the terrain-document load first
-	// (this pair owns the parsed cpt/trn), then the kernel boot with the
-	// listen bring-up hook when listen_server is on.
+	// The S9 boot over the opened mission: the terrain load first (the
+	// engine's one cpt/trn(+charmap) loader into the kernel's store), then the
+	// kernel boot with the listen bring-up hook when listen_server is on.
 	bool boot(const BootOptions &options, std::string &error);
 
 	// One authoritative logic tick: the listen frame
@@ -75,10 +73,6 @@ public:
 	// --- the SP listen server (npruntime) ------------------------------------
 	bool listen_server = false;
 	inmatch::ListenHostState host;
-
-	// --- terrain data (the mounted cpt/trn) -----------------------------------
-	CptFile cpt;
-	TrnConfig trn;
 
 	// inmatch::TickTarget
 	inmatch::TickOutcome advance_mission_tick(const inmatch::TickInput &input) override;

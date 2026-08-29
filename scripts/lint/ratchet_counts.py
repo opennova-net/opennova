@@ -93,7 +93,9 @@ def count_test_private_pokes() -> int:
             except OSError:
                 continue
             for line in text.splitlines():
-                stripped = SELF_POKE.sub("", line)
+                # Code only: a comment naming `GameWorld._runtime` documents a
+                # seam, it does not poke one.
+                stripped = SELF_POKE.sub("", line.split("#", 1)[0])
                 if PRIVATE_POKE.search(stripped):
                     count += 1
     return count
