@@ -79,10 +79,11 @@ void ClientReplicaPipeline::apply_player_list(const std::vector<uint8_t> &body) 
 		ClientRosterSlot &slot = state_.roster[r.slot_id];
 		if (!slot.bound) {
 			// Retail: PlayerSlotTable_GetActiveSlot null -> the row is skipped
-			// and a C2S 0x22 {slot, 0x1CF7} re-request is queued [orig:
-			// @0x42fc05..0x42fc3a]. The retry is the embedder's send-path
-			// residual; the DATA rule is the drop.
+			// and a C2S 0x22 {slot, 0x1CF7} re-request is queued, one per
+			// dropped row [orig: @0x42fc05..0x42fc3a]. The DATA rule is the
+			// drop; the runtime's send path frames the queued slot ids.
 			++sb.rows_dropped_unknown_slot;
+			sb.pending_sync_requests.push_back(r.slot_id);
 			continue;
 		}
 		ClientScoreboardRow row;
@@ -103,6 +104,7 @@ void ClientReplicaPipeline::apply_player_list(const std::vector<uint8_t> &body) 
 		apply_team_to_entity(state_, slot, row.team);
 		sb.rows.push_back(std::move(row));
 	}
+	sb.team_count = list.team_count;  // [orig: g_scoreboard_team_count @0x42fdda]
 	sb.teams.clear();
 	sb.teams.reserve(list.teams.size());
 	for (const PlayerListTeamRow &t : list.teams) {

@@ -670,6 +670,22 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					joiner_->begin_redeployment();
 				}
 			}
+			// Every 0x16 row whose connection slot the roster has not bound yet
+			// is dropped by the reducer and re-requested here: one reliable C2S
+			// 0x22 {slot, 0x1CF7} per dropped row, through the same session
+			// framing the housekeeping rides, released at the next send boundary
+			// [orig: NapiNPClientMsg_PlayerList @0x42fc05..0x42fc3a ->
+			//  CNapiNetwork_QueueReliableMessage(ctx, 0x22, 1, 0,
+			//  {slot, 0xF7, 0x1C}, 3) @0x42fc35].
+			std::vector<uint8_t> &sync_retries =
+					view_.state().scoreboard.pending_sync_requests;
+			for (const uint8_t slot : sync_retries) {
+				std::vector<uint8_t> datagram = joiner_->frame_inner(
+						c2s::PLAYER_SYNC_REQUEST,
+						std::vector<uint8_t>{slot, 0xF7, 0x1C});
+				if (!datagram.empty()) framed_send_queue_.push_back(std::move(datagram));
+			}
+			sync_retries.clear();
 			// The host's tick seed anchors our whole network-role clock. A seed of ZERO is a
 			// real, witnessed value (the round-end disarm form), so it is applied like any
 			// other — it parks the tick, which is exactly what retail does.
