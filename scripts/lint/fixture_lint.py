@@ -28,7 +28,10 @@ Rules (each hit names the file and the rule):
                 is named by a tests/fixtures/*_gen.cpp, or a "minted_by" row
                 names the test that regenerates it), or matches an
                 "authored" / "keep" glob in the allowlist; a "minted_by"
-                row's generator must be a registered ctest source
+                row's generator must be a registered ctest source; a "keep"
+                glob lives only under fixtures/novaworld/ (the sanctioned wire
+                captures) -- every other retail file reads from the reference
+                fixture set (docs/asset-gated-tests.md), never from the tree
   pulled        (--require-pulled, CI) every LFS-tracked fixture is
                 materialized in the working tree, not a pointer stub
 
@@ -228,6 +231,12 @@ def main() -> int:
             continue
         if size > SIZE_LIMIT and rel not in size_exceptions:
             hits["size"].append(f"{rel}: {size} bytes exceeds {SIZE_LIMIT} (add a size_exceptions row with a why)")
+    # The keep set is the NovaWorld wire set and nothing else: a keep glob
+    # outside fixtures/novaworld/ is a retail file creeping back into the tree.
+    for glob in allow.get("keep", []):
+        if not glob.startswith("fixtures/novaworld/"):
+            hits["provenance"].append(
+                f"{glob}: keep rows live only under fixtures/novaworld/ (retail files read from the reference fixture set)")
     for rel in size_exceptions:
         if rel not in fixtures and rel not in assets:
             hits["size"].append(f"{rel}: size exception names an untracked file")

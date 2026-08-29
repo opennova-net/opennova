@@ -20,10 +20,12 @@ in the private `opennova-net/opennova-reference-assets` repository.
 ## Rules (enforced by `scripts/lint/fixture_lint.py`)
 
 - Every file is one of the three classes: minted files are named (by path or
-  directory) in the `tests/fixtures/minimal_*_gen.cpp` that writes them; authored
-  and keep files carry a row in `scripts/lint/fixture_allowlist.json`. A retail
-  blob outside the keep rows fails the lint, and a keep row is a deliberate
-  decision recorded there and in the table below.
+  directory) in the `tests/fixtures/*_gen.cpp` that writes them; authored and
+  keep files carry a row in `scripts/lint/fixture_allowlist.json`. A retail blob
+  outside the keep rows fails the lint, and a keep row may live only under
+  `novaworld/` (the lint refuses any other): every other retail file the tests
+  read comes from the reference fixture set (`docs/asset-gated-tests.md`), never
+  from this tree.
 - Every file is referenced by a test, the ctest registration, a workflow, a script,
   or a doc (this README counts): a fixture nothing reads is deleted, not kept.
 - Every binary file is LFS-tracked (`.gitattributes` `fixtures/**`) and every
@@ -41,10 +43,11 @@ gate.
 
 ## The keep set
 
-Original files kept byte-for-byte because a test proves the parser reads what the
-shipped game wrote (or because a wire test replays what a retail peer sent).
-Everything else that ever came from a retail install was replaced by a minted or
-authored file.
+The NovaWorld wire captures, kept byte-for-byte because the codec tests replay
+what a retail peer sent (the bytes are the product). Everything else that ever
+came from a retail install was replaced by a minted or authored file, or moved to
+the reference fixture set the gated tests read (`retail::reference_fixture`,
+`RetailData.fixture`; `docs/asset-gated-tests.md`).
 
 | Files | Why they stay |
 |---|---|

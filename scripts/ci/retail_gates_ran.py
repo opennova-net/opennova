@@ -37,6 +37,8 @@ MUST_RUN = {
         "mission_ai_path_conformance", "truck_dismount", "ai_threat", "ladder_00tra",
         "truck_rest_00tra", "ai_muzzle_pose", "vehicle_ride_00tra", "defense_00trg",
         "lose_flow_04tr", "particle_gore_set_catalog",
+        # Served by the install (00TRg through revx02) or by the extracted tree.
+        "npruntime_authored_payload_00trg",
     ],
     "jo_assets": [
         "root_motion", "anim_positions_from_model_corpus", "anim_reload_clips_us01",
