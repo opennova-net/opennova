@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
 	std::string error, served_by;
 	if (!retail::open_mission(rig, install, bms_name, error, served_by))
 		return retail::skip((bms_name + " on the OPENNOVA_JO_DIR mount (base or an expansion) "
-		                     "or under OPENNOVA_MISSION_CORPUS").c_str());
+		                     "or loose under OPENNOVA_JO_ASSETS").c_str());
 	testrig::BootOptions options;
 	options.playable = false;      // the idle pair: no player
 	options.listen_server = false; // the bare no-net tick

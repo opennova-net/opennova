@@ -19,11 +19,6 @@ static func assets() -> String:
 	return _dir("OPENNOVA_JO_ASSETS")
 
 
-## A directory of real shipped .bms missions: OPENNOVA_MISSION_CORPUS.
-static func mission_corpus() -> String:
-	return _dir("OPENNOVA_MISSION_CORPUS")
-
-
 ## `<assets>/fixtures/<rel>`: the retail-interop fixture set the reference tree
 ## mirrors under its `fixtures/` subtree (the retail files the parsers prove they
 ## read as shipped: menus, string tables, defs, rigs, ...; they never live in

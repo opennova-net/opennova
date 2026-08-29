@@ -12,7 +12,7 @@ id and judges each run by the probe's verdict (its 11-file output contract:
 The probe refuses, before its publication transaction, when the window is
 missing or the wrong size: run from an interactive desktop session.
 
-Machine paths default to the documented roots (OPENNOVA_MISSION_CORPUS for the
+Machine paths default to the documented roots (OPENNOVA_JO_ASSETS for the
 loose .bms corpus, OPENNOVA_JO_DIR for the retail install, GODOT_BIN for the
 binary) -- never tracked defaults.
 
@@ -53,9 +53,9 @@ if (-not $SourceCommit) { $SourceCommit = (& git rev-parse HEAD).Trim() }
 if ($SourceCommit -notmatch "^[0-9a-f]{40}$") {
     throw "SourceCommit must be a full lowercase 40-hex sha: $SourceCommit"
 }
-if (-not $MissionResourceDir) { $MissionResourceDir = Get-OpenNovaMissionCorpus }
+if (-not $MissionResourceDir) { $MissionResourceDir = Get-OpenNovaRetailAssets }
 if (-not $MissionResourceDir -or -not (Test-Path $MissionResourceDir)) {
-    throw "MissionResourceDir (or OPENNOVA_MISSION_CORPUS) must name the loose .bms corpus"
+    throw "MissionResourceDir (or OPENNOVA_JO_ASSETS) must name the loose .bms corpus"
 }
 if (-not $RuntimeResourceDir) { $RuntimeResourceDir = Get-OpenNovaRetailInstall }
 if (-not $RuntimeResourceDir -or -not (Test-Path $RuntimeResourceDir)) {

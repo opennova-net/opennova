@@ -230,7 +230,7 @@ target_compile_features(mission_mis_idempotency_test PRIVATE cxx_std_17)
 add_test(NAME mission_mis_idempotency COMMAND mission_mis_idempotency_test)
 
 # Corpus round-trip: parse->write byte-exact over a directory of real shipped .bms missions.
-# Gated on OPENNOVA_MISSION_CORPUS (copyrighted assets, not committed); skips + passes when unset.
+# Gated on OPENNOVA_JO_ASSETS (the tree's loose .bms; copyrighted, not committed); skips + passes when unset.
 add_executable(mission_corpus_test mission/mission_corpus_test.cpp)
 target_link_libraries(mission_corpus_test PRIVATE opennova_formats)
 target_include_directories(mission_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1749,8 +1749,8 @@ foreach(test behavior corpus)
     target_compile_features(wac_${test}_test PRIVATE cxx_std_17)
 endforeach()
 add_test(NAME wac_behavior COMMAND wac_behavior_test)
-# The corpus sweep walks OPENNOVA_JO_ASSETS + OPENNOVA_MISSION_CORPUS (argv dirs
-# override); it reports Skipped without either.
+# The corpus sweep walks OPENNOVA_JO_ASSETS (argv dirs override); it reports
+# Skipped without it.
 opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)
 
 # The layered game.wac/server.wac/<mission>.wac load every mission boot walks

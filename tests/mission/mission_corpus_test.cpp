@@ -3,8 +3,8 @@
 // to that canonical form and bms::equal must report the same modeled mission.
 //
 // The corpus is copyrighted game data and is NOT committed. The test is gated on
-// OPENNOVA_MISSION_CORPUS (a directory of retail .bms, e.g. an extracted JOX tree);
-// without it the test reports Skipped, so it never runs bare in CI.
+// OPENNOVA_JO_ASSETS (the extracted retail tree carries the shipped .bms loose at
+// its root); without it the test reports Skipped, so it never runs bare in CI.
 
 #include <algorithm>
 #include <cstdint>
@@ -116,14 +116,14 @@ bool check_mission(const fs::path &path) {
 } // namespace
 
 int main() {
-	RETAIL_REQUIRE_OR_SKIP(corpus, retail::mission_corpus(),
-			"OPENNOVA_MISSION_CORPUS (a directory of retail .bms missions)");
+	RETAIL_REQUIRE_OR_SKIP(corpus, retail::assets(),
+			"OPENNOVA_JO_ASSETS (the extracted tree's shipped .bms missions)");
 	const char *corpus_env = corpus.c_str();
 
 	const fs::path corpus_dir(corpus_env);
 	std::error_code ec;
 	if (!fs::is_directory(corpus_dir, ec)) {
-		std::fprintf(stderr, "mission_corpus: OPENNOVA_MISSION_CORPUS is not a directory: %s\n",
+		std::fprintf(stderr, "mission_corpus: OPENNOVA_JO_ASSETS is not a directory: %s\n",
 		             corpus_env);
 		return 1;
 	}

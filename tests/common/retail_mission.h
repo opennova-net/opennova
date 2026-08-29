@@ -18,10 +18,11 @@
 namespace retail {
 
 // Read mission `name`: the base mount first, then each expansion the install
-// carries, and failing both, loose from OPENNOVA_MISSION_CORPUS (the extracted
-// mission set). `index` is left scanned on the mount that served the mission
-// (the base mount for a corpus hit) so the caller's asset reads see the same
-// layer; `served_by` names it. False when no layer carries the mission.
+// carries, and failing both, loose from the extracted asset tree
+// (OPENNOVA_JO_ASSETS carries the shipped .bms at its root). `index` is left
+// scanned on the mount that served the mission (the base mount for a loose
+// hit) so the caller's asset reads see the same layer; `served_by` names it.
+// False when no layer carries the mission.
 inline bool read_mission(const std::string &install, const std::string &name,
                          opennova::ResourceIndex &index, std::vector<uint8_t> &out,
                          std::string &served_by) {
@@ -36,12 +37,12 @@ inline bool read_mission(const std::string &install, const std::string &name,
 			return true;
 		}
 	}
-	const std::string corpus = mission_corpus();
-	if (!corpus.empty()) {
-		std::ifstream f(join(corpus, name), std::ios::binary);
+	const std::string tree = assets();
+	if (!tree.empty()) {
+		std::ifstream f(join(tree, name), std::ios::binary);
 		if (f) {
 			out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-			served_by = "OPENNOVA_MISSION_CORPUS";
+			served_by = "OPENNOVA_JO_ASSETS";
 			index.scan(install);
 			return !out.empty();
 		}

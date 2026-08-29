@@ -6,7 +6,7 @@ argv option, a debug-catalog action or an MCP tool argument. If a variable is
 not listed here it must not exist: `scripts/lint/env_lint.py --enforce` (CI)
 fails on any other read, and a new hook lands here in the same PR that adds it.
 
-## The four machine roots
+## The three machine roots
 
 Read only by the three resolvers — `tests/common/retail_paths.h` (ctests),
 `godot/tests/support/retail_data.gd` (GUT), `scripts/net/lib.ps1` (the
@@ -17,8 +17,7 @@ PowerShell getters) — plus the `--resource-dir` default of
 | Var | Points at | Who consumes it |
 |---|---|---|
 | `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set, expansions under `expansion/`) | the `JO_DIR`-gated ctests and GUT tests ([asset-gated-tests.md](asset-gated-tests.md)), the `game_mcp.py launch` default, the render/net scripts' defaults |
-| `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, models, `.adm`, `.bms`) | the `JO_ASSETS`-gated ctests and GUT tests |
-| `OPENNOVA_MISSION_CORPUS` | a directory of retail `.bms` missions (loose) | `mission_corpus`, the GUT corpus binding, the render fixture capture's loose mission |
+| `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, models, `.adm`, the shipped `.bms` missions loose at its root, the reference fixture set under `fixtures/`) | the `JO_ASSETS`-gated ctests and GUT tests (including `mission_corpus` and the GUT corpus binding), the render fixture capture's loose mission |
 | `OPENNOVA_CAPTURES` | the captures/goldens root (default `<repo>/.scratch`) | the capture-gated ctests read fixed names under it: `golden/retail-gameplay-session.pcapng`, `golden/retail-lan-host-join.pcapng`, `golden/retail-lan-host-join-session.pcapng`, `golden/retail-vehicle-session.pcapng`, `host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng`, `probe2.pcapng`, `probe3.pcapng`, `probe3_again.pcapng`, `operation_whitenoise.pcapng`, `karo-guided.pcapng`, `ingame.hexcap`, `sph/host.sph`, `sph/client.sph`, `sph/hostprof_probe3again.sph` |
 
 A gated ctest reports **Skipped** (exit 77, `opennova_add_gated_test`) without

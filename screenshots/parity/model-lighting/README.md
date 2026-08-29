@@ -82,7 +82,7 @@ Generate and validate a fresh OpenNova image:
 ```powershell
 .\scripts\render\test_model_lighting_parity.ps1 `
     -GodotPath $env:GODOT_BIN `
-    -MissionResourceDir $env:OPENNOVA_MISSION_CORPUS `
+    -MissionResourceDir $env:OPENNOVA_JO_ASSETS `
     -RuntimeResourceDir $env:OPENNOVA_JO_DIR `
     -Expansion revx02 `
     -RetailImage .\screenshots\parity\model-lighting\courtyard-retail-revx02.png `

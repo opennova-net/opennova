@@ -61,7 +61,7 @@ From source, the game takes its data as launch flags after `--`
 (`docs/dev-env-vars.md`): `--resource-dir <dir>` (a packed install or a loose
 tree), `/exp <name>`, `--mission <name.bms>` to boot straight into a mission,
 `--lan-host`/`--lan-join` for a LAN role. The documented machine roots
-(`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`, `OPENNOVA_MISSION_CORPUS`) live in
+(`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`) live in
 `.claude/settings.local.json` `env`; they may point at copyrighted retail
 assets. If a required value is unset, ask the user; never guess or commit a
 local path.

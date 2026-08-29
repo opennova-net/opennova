@@ -1,12 +1,13 @@
 name: Mount the reference data
 description: >-
   Restore or check out the two private reference repositories the asset gates
-  read (docs/asset-gated-tests.md) and export the three roots. One definition
+  read (docs/asset-gated-tests.md) and export the two roots. One definition
   for the engine test job and the Godot test job.
 
 # The retail data the asset gates need lives in two private repositories:
 # opennova-net/opennova-reference-assets (the extracted tree behind
-# OPENNOVA_JO_ASSETS / OPENNOVA_MISSION_CORPUS) and
+# OPENNOVA_JO_ASSETS: the loose asset set, the shipped .bms missions and the
+# reference fixture set under fixtures/) and
 # opennova-net/opennova-reference-retail-packed (the retail JO:CA .pff set +
 # expansion/jox01 behind OPENNOVA_JO_DIR, 1.1 GB committed as 95 MiB parts
 # that reassemble.sh rebuilds against MANIFEST.sha256). With the
@@ -101,5 +102,4 @@ runs:
       shell: bash
       run: |
         echo "OPENNOVA_JO_ASSETS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
-        echo "OPENNOVA_MISSION_CORPUS=${GITHUB_WORKSPACE}/.reference-assets" >> "$GITHUB_ENV"
         echo "OPENNOVA_JO_DIR=${GITHUB_WORKSPACE}/.reference-retail-packed" >> "$GITHUB_ENV"
