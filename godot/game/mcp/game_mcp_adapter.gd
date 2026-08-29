@@ -39,7 +39,7 @@ func mcp_game_menu(_args: Dictionary) -> Variant:
 	return {}
 
 
-func get_debug_session() -> DebugSession:
+func get_debug_controls() -> DebugControls:
 	return null
 
 

@@ -2265,8 +2265,8 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 # internal child constructed in _init; the views it builds still attach under
 # THIS node, so world-relative lookups (SkeletonDebug/PickDebug/...) are
 # unchanged. These one-line delegates keep the presentation-facing names on GameWorld:
-# the F3 option registry dispatches its setters against the world script
-# (debug_options), and probes duck-find the world by these methods.
+# the typed debug-control table (DebugControls) calls these public setters,
+# and probes drive the world by the same methods.
 
 func set_skeleton_debug(enabled: bool) -> void:
 	_debug_views.set_skeleton_debug(enabled)
@@ -2339,7 +2339,7 @@ func get_debug_view_statuses() -> Array[DebugViewStatus]:
 ## The dev tools' Particles seams (the existing get_effect_world() is
 ## the data source; these are the two debug toggles).
 ## Delegates to the item-effect director; the name stays on GameWorld for the
-## F3 option registry dispatch (debug_options) + probe duck-calls.
+## typed debug-control table (DebugControls) + probe calls.
 func set_particles_hidden(hidden: bool) -> void:
 	_item_fx.set_particles_hidden(hidden)
 

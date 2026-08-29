@@ -10,26 +10,18 @@ extends GameMcpAdapter
 
 const MCP_ENTITY_LIMIT_MAX := 128
 
-var _session := DebugSession.new()
 var _service: GameMcpService = null
 # The one typed record of shell seams (GameShellSeams): suppliers, state
 # reads, action legs, and capture presentation, all resolved live per call.
 var _seams: GameShellSeams = null
+# The typed debug-control table (ADR 0042 d5), built once over the adopted
+# seams; every row re-resolves its live owner per call.
+var _controls: DebugControls = null
 
 
 func configure(seams: GameShellSeams) -> void:
 	_seams = seams
-	DebugCatalog.install(_session)
-	DebugCatalog.bind_runtime_targets(
-			_session,
-			seams.runtime_source,
-			seams.world_source,
-			seams.presenter_source,
-			_current_viewport,
-			_current_scene_tree,
-			func(): return self)
-	_session.set_authority_source(has_debug_authority)
-	_session.set_status_source(runtime_status)
+	_controls = DebugControls.new(seams, self)
 
 
 ## The runtime MCP endpoint rides `--mcp-port <n>` (LaunchFlags); an unflagged
@@ -47,8 +39,8 @@ func start_runtime_endpoint() -> void:
 				port, error_string(err)])
 
 
-func get_debug_session() -> DebugSession:
-	return _session
+func get_debug_controls() -> DebugControls:
+	return _controls
 
 
 ## The same record configure() adopted; the probe runner drives its suppliers
@@ -370,8 +362,8 @@ func debug_set_audio_bus_volume(bus_name: String, volume_db: float) -> Error:
 	if bus < 0:
 		return ERR_INVALID_PARAMETER
 	if not is_finite(volume_db) \
-			or volume_db < DebugCatalog.AUDIO_BUS_VOLUME_MIN_DB \
-			or volume_db > DebugCatalog.AUDIO_BUS_VOLUME_MAX_DB:
+			or volume_db < DebugControls.AUDIO_BUS_VOLUME_MIN_DB \
+			or volume_db > DebugControls.AUDIO_BUS_VOLUME_MAX_DB:
 		return ERR_INVALID_PARAMETER
 	AudioServer.set_bus_volume_db(bus, volume_db)
 	return OK

@@ -1,8 +1,8 @@
 extends GutTest
 
 
-class DebugSessionStub:
-	extends DebugSession
+class DebugControlsStub:
+	extends DebugControls
 
 	var invoked_id: StringName
 	var invoked_args: Variant
@@ -28,14 +28,17 @@ class DebugSessionStub:
 		var state := DebugControlState.new()
 		state.id = id
 		state.available = true
-		# Writable like a session whose F3 Live-edits latch is open, so the
-		# adapter's per-caller gating is observable.
+		# Writable no matter the caller, so the transport's own per-caller
+		# refusals stay observable against an always-accepting table.
 		state.writable = true
 		return state
 
-	func definition(id: StringName) -> DebugControlDef:
-		var definition := DebugControlDef.action_control(
-				id, &"Test", String(id), "", &"test", &"test")
+	func control(id: StringName) -> DebugControls.Row:
+		var row := DebugControls.Row.new()
+		row.id = id
+		row.page = &"Test"
+		row.label = String(id)
+		row.kind = DebugControls.Kind.ACTION
 		if id in [
 			&"teleport_local_player",
 			&"set_entity_health",
@@ -43,9 +46,9 @@ class DebugSessionStub:
 			&"runtime_transport",
 			&"set_mission_variable",
 		]:
-			definition.requires_unlock = true
-			definition.authority = DebugControlDef.Authority.HOST_ONLY
-		return definition
+			row.requires_confirm = true
+			row.authority = DebugControls.Authority.HOST_ONLY
+		return row
 
 	func set_control_value(
 			id: StringName,
@@ -79,7 +82,7 @@ class DebugSessionStub:
 class AdapterStub:
 	extends GameMcpAdapter
 
-	var debug := DebugSessionStub.new()
+	var debug := DebugControlsStub.new()
 	var last_action := ""
 	var entity_page := {
 		"total": 2,
@@ -97,7 +100,7 @@ class AdapterStub:
 		"passes": {"root": {"shadow_draw_calls": 17}},
 	}
 
-	func get_debug_session() -> DebugSession:
+	func get_debug_controls() -> DebugControls:
 		return debug
 
 	func get_mcp_game_state() -> Variant:
@@ -242,31 +245,6 @@ func test_state_rows_reflect_the_callers_confirmed_authority() -> void:
 			"an unconfirmed caller still sees the locked F3 policy view")
 
 
-func test_unconfirmed_rows_for_gated_controls_mirror_the_write_precheck() -> void:
-	# The session can report writable while F3's Live-edits latch is open, but
-	# an unconfirmed automation caller's set/invoke is refused by the
-	# confirm_authority precheck — its rows must tell the same story.
-	var result := await _call("game_debug", {
-		"op": "get",
-		"id": "teleport_local_player",
-	})
-	assert_false(bool(result.structured["writable"]),
-			"an unconfirmed caller cannot be shown a write it will be refused")
-	assert_true(String(result.structured["reason"]).contains("confirm_authority"))
-
-	result = await _call("game_debug", {
-		"op": "get",
-		"id": "teleport_local_player",
-		"confirm_authority": true,
-	})
-	assert_true(bool(result.structured["writable"]),
-			"a confirmed caller keeps the session's writable view")
-
-	result = await _call("game_debug", {"op": "get", "id": "plain_control"})
-	assert_true(bool(result.structured["writable"]),
-			"ungated controls stay writable for unconfirmed callers")
-
-
 func test_authority_confirmation_requires_a_json_boolean() -> void:
 	await _call("game_debug", {
 		"op": "set",
@@ -333,9 +311,10 @@ func test_debug_actions_decode_json_arguments_for_public_engine_methods() -> voi
 	assert_eq(adapter.debug.invoked_args, ["SFX", true])
 
 
-func test_f3_unlock_cannot_substitute_for_mcp_per_call_confirmation() -> void:
-	# The stub deliberately accepts any write, like a shared session whose F3
-	# edit latch is already open. The MCP adapter must reject before reaching it.
+func test_gated_actions_require_per_call_confirmation_before_marshalling() -> void:
+	# The stub table deliberately accepts any write. The transport's precheck
+	# must refuse an unconfirmed gated call before reaching it (and before
+	# marshalling its args).
 	adapter.debug.invoked_id = &""
 	var result := await _call("game_debug", {
 		"op": "invoke",

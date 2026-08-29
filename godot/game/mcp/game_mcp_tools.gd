@@ -151,55 +151,49 @@ func _tool_game_control(args: Dictionary, _ctx: McpToolContext) -> Variant:
 
 func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	if adapter == null:
-		return McpToolResult.error("The game's debug session is unavailable.")
-	var session := adapter.get_debug_session()
-	if session == null:
-		return McpToolResult.error("The game's debug session is unavailable.")
+		return McpToolResult.error("The game's debug controls are unavailable.")
+	var controls := adapter.get_debug_controls()
+	if controls == null:
+		return McpToolResult.error("The game's debug controls are unavailable.")
 	var op := String(args.get("op", ""))
-	# State rows answer "can THIS caller write?" in both directions: a
-	# confirm_authority caller is not told its permitted writes are locked
-	# behind F3's latch, and an unconfirmed caller is not shown writable rows
-	# whose set/invoke the confirm_authority precheck will refuse.
+	# State rows answer "can THIS caller write?": the table reports writability
+	# for the caller's own confirm_authority, so a confirmed caller is not told
+	# its permitted writes are locked and an unconfirmed caller is not shown
+	# writable rows whose set/invoke the confirmation precheck will refuse.
 	var confirmed := _authority_confirmed(args)
 	match op:
 		"list":
-			var rows: Array[Dictionary] = session.list_controls(
+			return {"controls": controls.list_controls(
 					StringName(String(args.get("page", ""))),
 					String(args.get("filter", "")),
-					confirmed)
-			for row in rows:
-				_apply_confirmation_gate(session,
-						StringName(String(row.get("id", ""))),
-						confirmed, row.get("state"))
-			return {"controls": rows}
+					confirmed)}
 		"get":
 			var id := StringName(String(args.get("id", "")))
 			if id.is_empty():
 				return McpToolResult.error("game_debug op=get requires id.")
-			return _apply_confirmation_gate(session, id, confirmed,
-					session.get_control_state(id, confirmed).to_json_value())
+			return controls.get_control_state(id, confirmed).to_json_value()
 		"set":
 			var id := StringName(String(args.get("id", "")))
 			if id.is_empty() or not args.has("value"):
 				return McpToolResult.error(
 						"game_debug op=set requires id and value.")
-			if _automation_confirmation_required(session, id) and not confirmed:
+			if _automation_confirmation_required(controls, id) and not confirmed:
 				return McpToolResult.error(_debug_error(id, ERR_UNAUTHORIZED))
-			var err: Error = session.set_control_value(
+			var err: Error = controls.set_control_value(
 					id, args["value"], confirmed)
 			if err != OK:
 				return McpToolResult.error(_debug_error(id, err))
-			return session.get_control_state(id, confirmed).to_json_value()
+			return controls.get_control_state(id, confirmed).to_json_value()
 		"invoke":
 			var id := StringName(String(args.get("id", "")))
 			if id.is_empty():
 				return McpToolResult.error("game_debug op=invoke requires id.")
-			if _automation_confirmation_required(session, id) and not confirmed:
+			if _automation_confirmation_required(controls, id) and not confirmed:
 				return McpToolResult.error(_debug_error(id, ERR_UNAUTHORIZED))
 			var call_args: Variant = _debug_action_args(id, args.get("args"))
 			if call_args is McpToolResult:
 				return call_args
-			var outcome: Variant = session.invoke_control(
+			var outcome: Variant = controls.invoke_control(
 					id,
 					call_args,
 					confirmed)
@@ -211,16 +205,11 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 				return McpToolResult.error(_debug_error(id, err))
 			return outcome
 		"snapshot":
-			var snapshot: Dictionary = session.capture_snapshot(
+			var snapshot: Dictionary = controls.capture_snapshot(
 					String(args.get("filter", "")), confirmed)
 			if snapshot.is_empty():
 				return McpToolResult.error(
 						"Start a playable mission before capturing a debug snapshot.")
-			for row in snapshot.get("controls", []):
-				if row is Dictionary:
-					_apply_confirmation_gate(session,
-							StringName(String(row.get("id", ""))),
-							confirmed, row.get("state"))
 			return snapshot
 		_:
 			return McpToolResult.error(
@@ -500,33 +489,19 @@ static func _authority_confirmed(args: Dictionary) -> bool:
 	return typeof(value) == TYPE_BOOL and bool(value)
 
 
+## The op=set/invoke precheck: a confirmation-gated control is refused for an
+## unconfirmed caller before its JSON args are even marshalled. The table's
+## own policy repeats the refusal (and reports it in state rows); the
+## precheck keeps the boundary's refusal order stable.
 static func _automation_confirmation_required(
-		session: DebugSession,
+		controls: DebugControls,
 		id: StringName) -> bool:
-	if session == null:
+	if controls == null:
 		return false
-	var definition: DebugControlDef = session.definition(id)
-	return definition != null and (
-			definition.requires_unlock
-			or definition.authority == DebugControlDef.Authority.HOST_ONLY)
-
-
-## Mirror the op=set/invoke confirm_authority precheck in reported rows: for
-## an unconfirmed caller a confirmation-gated control is not writable no
-## matter what F3's Live-edits latch says, because that caller's write would
-## be refused before reaching the session.
-static func _apply_confirmation_gate(
-		session: DebugSession,
-		id: StringName,
-		confirmed: bool,
-		state: Variant) -> Variant:
-	if confirmed or not (state is Dictionary) \
-			or not _automation_confirmation_required(session, id):
-		return state
-	if bool(state.get("writable", false)):
-		state["writable"] = false
-		state["reason"] = "This control changes authoritative state; pass confirm_authority=true on an authority-owning session."
-	return state
+	var row: DebugControls.Row = controls.control(id)
+	return row != null and (
+			row.requires_confirm
+			or row.authority == DebugControls.Authority.HOST_ONLY)
 
 
 static func _finite_number(value: Variant) -> Variant:

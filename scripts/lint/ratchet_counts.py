@@ -20,7 +20,9 @@ in maturity_baseline.json:
                         home or died as verified dead code -- bank it with
                         --write-baseline. The marker-rewrite exit is gone;
                         only code that moves banks the counter.
-  mcp_boundary_cites    "[orig:" citations in godot/game/mcp GDScript. An
+  mcp_boundary_cites    "[orig:" citations in godot/game/mcp GDScript plus
+                        the typed debug-control table
+                        (godot/game/debug/debug_controls.gd, ADR 0042 d5). An
                         ABSOLUTE zero floor, not baseline-relative (ADR 0042
                         d7): the MCP boundary converts typed records to JSON,
                         and a converter that needs a witness cite is
@@ -150,13 +152,24 @@ def count_adapter_cpp_orig_cites() -> int:
     return count
 
 
+# The debug-control table (ADR 0042 d5) shares the boundary floor: its rows
+# forward into engine functions, and a row needing a witness cite would be
+# re-deriving engine behavior instead of calling it.
+MCP_BOUNDARY_EXTRA_FILES = (
+    Path("godot") / "game" / "debug" / "debug_controls.gd",
+)
+
+
 def count_mcp_boundary_cites() -> int:
-    """`[orig:` citations in godot/game/mcp GDScript: an ABSOLUTE zero floor
-    (ADR 0042 d7), not a baseline-relative ratchet. The MCP boundary converts
-    typed engine records to JSON; a converter that needs a witness cite is
-    re-deriving engine facts at the boundary."""
+    """`[orig:` citations in godot/game/mcp GDScript plus the typed
+    debug-control table: an ABSOLUTE zero floor (ADR 0042 d7), not a
+    baseline-relative ratchet. The MCP boundary converts typed engine records
+    to JSON; a converter that needs a witness cite is re-deriving engine
+    facts at the boundary."""
     count = 0
-    for path in (REPO / "godot" / "game" / "mcp").rglob("*.gd"):
+    paths = list((REPO / "godot" / "game" / "mcp").rglob("*.gd"))
+    paths += [REPO / extra for extra in MCP_BOUNDARY_EXTRA_FILES]
+    for path in paths:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
