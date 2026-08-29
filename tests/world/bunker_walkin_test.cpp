@@ -5,21 +5,20 @@
 // correction cancels the walk (root step ~0.09u/tick, correction its
 // negative; probe instrument 2026-08-20). Retail soldiers enter the bunker.
 //
-// This harness loads the REAL Cbunker2 collision through the real pipeline
-// (ResourceIndex -> SimModelCache -> collision_model_from_3di), places it at
-// the mission pose, and walks a capsule from the live pin position toward the
-// authored node, resolving each step. It reports the volume inventory and
-// whether the capsule reaches the interior. Diagnostic/report-only while the
-// divergence is open; flip the verdict to an assert once the walk-in works.
+// This harness boots 05TRcoop through the engine's own mission kernel (ADR
+// 0042 d3) - the REAL Cbunker2 collision attached at the mission pose by the
+// same resolve_collision_instances the shipping game runs, every static in
+// its neighbourhood with it - and walks a capsule from the live pin position
+// toward the authored node, resolving each step against the kernel's
+// collision world. It reports the volume inventory and whether the capsule
+// reaches the interior. The pipeline preconditions are asserted (the model
+// converts, the instance promotes and attaches, the ground probe finds the
+// slab); the walk-in verdict itself stays a printed diagnostic while the
+// divergence is open - flip it to an assert once the walk-in works.
 // Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install).
 #include <formats/mission/bms.h>
-#include <runtime/mission/promote.h>
 
-#include <formats/def/def.h>
-#include <base/resource_index/resource_index.h>
-#include <runtime/simassets/collision_resolve.h>
 #include <runtime/simassets/model_builders.h>
-#include <runtime/simassets/sim_model_cache.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
@@ -31,16 +30,24 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <string>
 #include <vector>
-#include "common/retail_mission.h"
+#include "common/retail_mission_files.h"
+#include "common/retail_mission_open.h"
 #include "common/retail_paths.h"
 
 namespace {
 
 using namespace opennova;
 namespace w = opennova::world;
+
+int failures = 0;
+bool expect(bool cond, const char *msg) {
+	if (cond) return true;
+	std::fprintf(stderr, "FAIL: %s\n", msg);
+	++failures;
+	return false;
+}
 
 int32_t fx(double v) { return static_cast<int32_t>(v * 65536.0); }
 
@@ -66,23 +73,41 @@ static void parse_point(const char *text, double *x, double *y, double *z) {
 int main(int argc, char **argv) {
 	RETAIL_REQUIRE_OR_SKIP(install, retail::install(),
 			"OPENNOVA_JO_DIR (a retail JO install carrying Cbunker2)");
-	const char *dir = install.c_str();
+
+	// The mission pose for the east-base instance (SSN-less static) and every
+	// static around it, through the kernel's own boot: promote, then the
+	// collision resolve over the sim's model cache. No WAC, no player: the
+	// scene under the capsule stays exactly as authored.
+	testrig::RetailMissionRig rig;
+	std::string error, served_by;
+	if (!retail::open_mission(rig, install, "05TRcoop.bms", error, served_by))
+		return retail::skip("05TRcoop.bms on the OPENNOVA_JO_DIR mount (base or an expansion) "
+		                    "or under OPENNOVA_MISSION_CORPUS");
+	testrig::BootOptions options;
+	options.playable = false;
+	options.wac = false;
+	options.listen_server = false;
+	if (!expect(rig.boot(options, error), "05TRcoop boots through the mission kernel")) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
+		return 1;
+	}
+	w::World &world = rig.world;
+	w::CollisionWorld &cw = rig.collision;
+	simassets::SimModelCache &cache = rig.models;
 
 	// The real model, through the real pipeline.
-	opennova::ResourceIndex index;
-	if (!index.scan(dir)) return retail::skip("a mountable OPENNOVA_JO_DIR install");
-	simassets::SimModelCache cache;
-	cache.set_index(&index);
 	const Threedi3di3 *m3 = cache.model_for("Cbunker2");
 	if (m3 == nullptr || m3->collision == nullptr) {
 		return retail::skip("Cbunker2.3di on the OPENNOVA_JO_DIR mount");
 	}
 	w::CollisionModel model;
-	if (!simassets::collision_model_from_3di(m3->collision, model,
-	                                         simassets::model_has_collision(*m3))) {
-		std::fprintf(stderr, "FAIL: Cbunker2 collision did not convert\n");
+	if (!expect(simassets::collision_model_from_3di(m3->collision, model,
+	                                                simassets::model_has_collision(*m3)),
+	            "Cbunker2 collision converts")) {
 		return 1;
 	}
+	expect(!model.sections.empty() && !model.volumes.empty(),
+	       "Cbunker2 carries collision sections and volumes");
 
 	// Volume inventory: what the resolver walks (type counts + z spans per
 	// section) — the entrance question is whether a gap exists at floor level.
@@ -102,77 +127,30 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	// The mission pose for the east-base instance (SSN-less static): promote
-	// 05TRcoop and find item 1359 with x > 0.
-	std::vector<uint8_t> bytes;
-	std::string served_by;
-	if (!retail::read_mission(install, "05TRcoop.bms", index, bytes, served_by))
-		return retail::skip("05TRcoop.bms on the OPENNOVA_JO_DIR mount (base or an expansion) "
-		                    "or under OPENNOVA_MISSION_CORPUS");
-	bms::File m;
-	std::string error;
-	if (!bms::parse(bytes.data(), bytes.size(), m, error)) {
-		std::fprintf(stderr, "FAIL: 05TRcoop parse: %s\n", error.c_str());
-		return 1;
-	}
-	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
-	mission::promote_mission(m, world, ai, {});
-
+	// The east-base instance (SSN-less static): item 1359 with x > 0.
 	w::EntityHandle bunker{};
 	world.registry.for_each([&](const w::Entity &e) {
 		if (e.item_id == 1359 && e.position.x > 0.0f) bunker = e.handle;
 	});
 	w::Entity *be = world.registry.get(bunker);
-	if (be == nullptr) {
-		std::fprintf(stderr, "FAIL: east-base Cbunker2 instance not promoted\n");
-		return 1;
-	}
+	if (!expect(be != nullptr, "the east-base Cbunker2 instance promoted")) return 1;
 	std::printf("bunker instance: pos=(%.1f, %.1f, %.1f) yaw=%d\n",
 	            be->position.x, be->position.y, be->position.z, int(be->yaw));
-
-	// Collision world: the bunker plus EVERY static within 40u — the live
-	// candidate slice's neighborhood (towers etc.), each through the same
-	// pipeline. Graphic names come from items.def (read through the index).
-	w::CollisionWorld cw;
-	const int32_t mid = cw.add_model(std::move(model));
-	cw.assign_entity(bunker, mid, be->registry_spawn_id);
-
-	DefItemsFile items{};
+	// The kernel's collision resolve attached the bunker and every static
+	// around it (towers etc.) through the same pipeline the game runs.
+	expect(rig.collision_attached > 0, "the collision instances attached");
 	{
-		std::vector<uint8_t> ib;
-		if (index.read_file("items.def", ib) &&
-		    def_parse_items_memory(ib.data(), ib.size(), &items) == 0) {
-			const float bx = be->position.x, by = be->position.y;
-			int attached = 0;
-			world.registry.for_each([&](const w::Entity &e) {
-				if (e.handle == bunker || e.handle.pool() == 0) return;
-				const float dx = e.position.x - bx, dy = e.position.y - by;
-				if (dx * dx + dy * dy > 40.0f * 40.0f) return;
-				const DefItemDef *def = simassets::find_item_def(
-						simassets::visual_item_id_for_runtime_type(e.item_id, items) != 0
-								? items : items,
-						simassets::visual_item_id_for_runtime_type(e.item_id, items));
-				if (def == nullptr || def->graphic[0] == '\0') return;
-				const Threedi3di3 *nm = cache.model_for(def->graphic);
-				if (nm == nullptr || nm->collision == nullptr) return;
-				w::CollisionModel cm;
-				if (!simassets::collision_model_from_3di(
-				            nm->collision, cm, simassets::model_has_collision(*nm)))
-					return;
-				const int32_t nid = cw.add_model(std::move(cm));
-				cw.assign_entity(e.handle, nid, e.registry_spawn_id);
-				++attached;
-				std::printf("  neighbor: item %d '%s' at (%.1f, %.1f) graphic %s\n",
-				            e.item_id, def->graphic, e.position.x, e.position.y,
-				            def->graphic);
-			});
-			std::printf("neighbor statics attached: %d\n", attached);
-		} else {
-			std::printf("  (items.def unavailable — bunker-only scene)\n");
+		int nearby = 0;
+		for (const w::CollisionWorld::DebugInstance &inst :
+				rig.collision_instances(be->position, 40.0f, 256)) {
+			if (inst.handle == bunker) continue;
+			++nearby;
 		}
+		std::printf("collision instances: %d attached, %d within 40 u of the bunker\n",
+		            rig.collision_attached, nearby);
 	}
+	expect(!rig.collision_instances(be->position, 1.0f, 8).empty(),
+	       "the bunker itself carries an attached collision instance");
 
 	w::Entity s;
 	s.kind = w::EntityKind::Organic;
@@ -185,6 +163,7 @@ int main(int argc, char **argv) {
 	s.position = {static_cast<float>(from_x), static_cast<float>(from_y),
 	              static_cast<float>(from_z)};
 	const w::EntityHandle soldier = world.registry.spawn(0, s);
+	if (!expect(soldier.valid(), "a pool-0 slot for the walking capsule")) return 1;
 	for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
 
 	// Walk toward the authored node (the bunker interior) at the live root
@@ -297,6 +276,7 @@ int main(int argc, char **argv) {
 		std::printf("ground probe at (155.3, 318.2, 36.0): ground=%.2f hit=%u "
 		            "(expect ~35.1 on the slab)\n",
 		            g / 65536.0, unsigned(hit.packed));
+		expect(g != INT32_MIN, "the ground probe finds support under the interior spawn");
 	}
 
 	// ---- Yaw-convention sweep: at which collision yaw is retail's interior
@@ -397,5 +377,6 @@ int main(int argc, char **argv) {
 		            "divergence reproduces offline\n",
 		            closest);
 	}
-	return 0;
+	if (failures == 0) std::printf("bunker walk-in: the pipeline preconditions hold\n");
+	return failures ? 1 : 0;
 }

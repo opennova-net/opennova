@@ -107,7 +107,7 @@ int main() {
 	CHECK(near_equal(kernel.player_position().y, 0.0f, 0.001f));
 	CHECK(kernel.have_baseline);
 	CHECK(!kernel.has_terrain()); // no terrain documents were supplied
-	CHECK(kernel.text_source == static_cast<int>(ms::MissionTextSource::kNone));
+	CHECK(kernel.text_source == ms::MissionTextSource::kNone);
 
 	// One no-net tick advances the authoritative logic clock.
 	const uint32_t tick0 = kernel.world.logic_tick;

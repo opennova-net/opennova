@@ -145,7 +145,6 @@ func test_game_debug_adapter_handles_every_cataloged_public_control_action() -> 
 	seams.world_loading_source = func(): return false
 	seams.dev_tools_open_source = func(): return false
 	seams.resume_action = func(): pass
-	seams.return_to_menu_action = func(): pass
 	seams.quit_action = func(): pass
 	adapter.configure(seams)
 	for action in GameMcpCatalog.PUBLIC_GAME_CONTROL_ACTIONS:
@@ -1012,6 +1011,112 @@ func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:
 	var inventory: Dictionary = world.get_sim().get_local_player_inventory()
 	assert_eq(String(inventory.get("equipped_name", "")), "WPN_M4",
 		"the spawned simulation equips the same selected primary")
+
+
+# Every DebugControls row resolves its live owner over a loaded world (ADR 0042
+# d5). The no-world harness (debug_controls_test.gd) can only read the engine
+# rows as unavailable; here each value row is available and writable for a
+# confirmed authority caller, writes its own value back through its owner and
+# reads it back, and each action reaches its engine or device verdict instead
+# of "no owner" (ERR_UNAVAILABLE) or "no row" (ERR_DOES_NOT_EXIST). A row whose
+# read/write/invoke closure stops resolving fails here, on the real shell.
+func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var terrain = world.get_node("Terrain")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	var boot_clear: Color = world.get_current_frame_clear_color()
+	menu_shell.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	_assert_loaded(world, terrain, menu_shell)
+	await get_tree().process_frame
+
+	var adapter: GameDebugAdapter = _shell.get_game_debug_adapter()
+	var controls: DebugControls = adapter.get_debug_controls()
+	assert_true(adapter.has_debug_authority(), "the SP shell owns debug authority")
+	var ids := controls.row_ids()
+	assert_gt(ids.size(), 0, "the table carries its rows")
+	var engine_rows := 0
+	for id in ids:
+		var row := controls.control(id)
+		var state := controls.get_control_state(id, true)
+		assert_true(state.available,
+				"'%s' resolves its owner over the loaded world (%s)" % [id, state.reason])
+		if not state.available:
+			continue
+		if row.owner == DebugControls.OWNER_ENGINE:
+			engine_rows += 1
+		assert_true(state.writable,
+				"'%s' is writable for a confirmed authority caller (%s)" % [id, state.reason])
+		if row.kind == DebugControls.Kind.ACTION:
+			continue
+		assert_ne(state.value, null, "'%s' reads a live value" % id)
+		var normalized: Dictionary = DebugControls.normalize_value(row, state.value)
+		assert_true(bool(normalized["ok"]), "'%s' reads a value inside its own domain" % id)
+		assert_eq(controls.set_control_value(id, state.value, true), OK,
+				"'%s' writes its own value back through its owner" % id)
+		var read_back: Variant = controls.get_control_state(id, true).value
+		if row.kind == DebugControls.Kind.SLIDER:
+			assert_almost_eq(float(read_back), float(normalized["value"]), maxf(row.step, 0.001),
+					"'%s' reads back the value it wrote" % id)
+		else:
+			assert_eq(read_back, normalized["value"], "'%s' reads back the value it wrote" % id)
+	assert_gt(engine_rows, 0, "the engine rows answer over the loaded world")
+
+	# The actions, each with in-domain arguments, against the engine's or the
+	# device's own verdict. The audio rows write the mixer, so they restore it.
+	var master := AudioServer.get_bus_index("Master")
+	var master_volume := AudioServer.get_bus_volume_db(master)
+	var master_mute := AudioServer.is_bus_mute(master)
+	var must_succeed: Array = [
+		[&"teleport_local_player", [Vector3(1.0, 1.0, 1.0), 0.0, 0.0]],
+		[&"cycle_map_mode", []],
+		[&"set_audio_bus_volume", ["Master", master_volume]],
+		[&"set_audio_bus_mute", ["Master", master_mute]],
+		[&"set_audio_bus_solo", ["Master", false]],
+		[&"set_audio_bus_bypass", ["Master", false]],
+		[&"runtime_transport", ["pause"]],
+		[&"runtime_transport", ["resume"]],
+		[&"set_mission_variable", [0, 0]],
+		[&"environment_lightning_short", []],
+		[&"environment_lightning_long", []],
+		[&"deploy_pick", [0]],
+		[&"set_viewmodel_weapon", ["WPN_M4"]],
+		[&"clear_viewmodel_weapon", []],
+		[&"kill_group", [1]],
+		[&"local_player_look", [1.0, 0.0]],
+	]
+	for case in must_succeed:
+		var outcome := controls.invoke_control(case[0], case[1], true)
+		assert_eq(int(outcome["error"]), OK,
+				"action '%s' reaches its owner's verdict" % case[0])
+	# In-domain arguments that name entities this minimal world may not carry:
+	# the engine answers with its own refusal, never with a missing owner.
+	var may_refuse: Array = [
+		[&"set_entity_health", [0, 100]],
+		[&"set_entity_position", [0, Vector3(1.0, 1.0, 1.0)]],
+		[&"crew_vehicle", [1, 2]],
+		[&"crew_local_player", [1]],
+	]
+	for case in may_refuse:
+		var outcome := controls.invoke_control(case[0], case[1], true)
+		var error := int(outcome["error"])
+		assert_true(error == OK or error == ERR_INVALID_PARAMETER,
+				"action '%s' reaches the engine (error %d)" % [case[0], error])
+	AudioServer.set_bus_volume_db(master, master_volume)
+	AudioServer.set_bus_mute(master, master_mute)
+
+	# The one action that ends the world runs last, and leaves a clean menu.
+	var leave := controls.invoke_control(&"runtime_return_to_menu", [], true)
+	assert_eq(int(leave["error"]), OK, "runtime_return_to_menu reaches the shell")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
+	assert_false(controls.get_control_state(&"show_collision").available,
+			"the world rows read unavailable again once the world is gone")
 
 
 func _make_shell():

@@ -18,7 +18,7 @@
     "net/npwire/replay/wire_capture.cpp"
   ],
   "counters": {
-    "adapter_cpp_orig_cites": 606,
+    "adapter_cpp_orig_cites": 600,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 0,
@@ -28,7 +28,7 @@
     "oversize_cpp_files": 1,
     "oversize_cpp_headers": 0,
     "oversize_gd_files": 1,
-    "test_private_pokes": 29
+    "test_private_pokes": 25
   },
   "dict_contract_allowlist": [
     "player_profile.gd|static func load_character_profile(",
@@ -45,7 +45,6 @@
     "effect_world.gd|func get_debug_draw_list_report()",
     "game_render_diagnostics.gd|func to_json_value()",
     "effect_light_report.gd|func to_json_value()",
-    "debug_options.gd|static func find(",
     "debug_controls.gd|static func normalize_value(",
     "debug_entity_picker.gd|static func pick_at_crosshair(",
     "game_packer.gd|static func pack(",

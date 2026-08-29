@@ -25,11 +25,13 @@ in the path is what makes the layering visible, so this check reads it:
      engine's portability is a ratcheted property, not a re-verified one.
   5. BINDING ROOT — godot/src has no subdirectory named like an engine group,
      so a binding's quoted root-relative include can never alias an engine path.
-  6. IMGUI CONTAINMENT (ADR 0042 d6) — an include of a Dear ImGui header
-     (target starting `imgui`/`imconfig`: imgui.h, imgui_internal.h, ...) is
-     allowed only under engine/runtime/devtools/ and tests/devtools/; the
-     engine's ImGui pass is the one dev-tools surface (previously the
-     containment was a single CMake PRIVATE keyword).
+  6. IMGUI CONTAINMENT (ADR 0042 d6) — an include of a Dear ImGui header (a
+     path segment starting `imgui`/`imconfig`: imgui.h, imgui_internal.h,
+     misc/cpp/imgui_stdlib.h, backends/imgui_impl_*.h, ...) is allowed only
+     under engine/runtime/devtools/ and tests/devtools/; the engine's ImGui
+     pass is the one dev-tools surface (previously the containment was a
+     single CMake PRIVATE keyword). The engine's own `<runtime/devtools/
+     imgui_abi.h>` seam is a group-qualified engine include, not an ImGui one.
 
 Modes:
   (default)   report violations; exit 0
@@ -90,8 +92,12 @@ TERRAIN_QUERY_HEADERS = {
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
 
 # Rule 6: Dear ImGui stays behind the engine's dev-tools pass (ADR 0042 d6).
-# `opennova_imconfig.h` deliberately does not match — it names the project.
-IMGUI_INCLUDE = re.compile(r"^(?:imgui|imconfig)")
+# Every form Dear ImGui ships matches — `imgui.h`, `imgui_internal.h`,
+# `misc/cpp/imgui_stdlib.h`, `backends/imgui_impl_*.h`, `imconfig.h` — by its
+# final path segment; `opennova_imconfig.h` deliberately does not (it names the
+# project), and a group-qualified engine path (`runtime/devtools/imgui_abi.h`)
+# is an engine include, checked by the group rules instead.
+IMGUI_INCLUDE = re.compile(r"(?:^|/)(?:imgui|imconfig)[^/]*\.h$")
 IMGUI_ALLOWED_TREES = ("engine/runtime/devtools", "tests/devtools")
 
 
@@ -168,7 +174,13 @@ def scan() -> tuple[list[str], int]:
             if rel.parts[0] in GODOT_FREE_ROOTS and "godot" in inc.lower():
                 violations.append(f"[godot-free] {where}")
                 continue
-            if IMGUI_INCLUDE.match(inc) and not any(
+            # A quoted include that resolves locally is the includer's own
+            # sibling / binding / test header (`"devtools/imgui_pass_node.h"`
+            # is the shell's node, not Dear ImGui).
+            resolves_locally = quote == '"' and any(
+                    (r / inc).is_file() for r in local_roots(rel))
+            if IMGUI_INCLUDE.search(inc) and not resolves_locally and \
+                    inc.split("/")[0] not in GROUPS and not any(
                     posix == t or posix.startswith(t + "/")
                     for t in IMGUI_ALLOWED_TREES):
                 violations.append(

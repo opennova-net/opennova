@@ -52,8 +52,8 @@ REPO = Path(__file__).resolve().parents[2]
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "fixture_allowlist.json"
 SIZE_LIMIT = 2 * 1024 * 1024
 TEXT_CARVE_OUT = ("*.md", ".gitignore")
-REFERENCE_ROOTS = ("tests/", "godot/tests/", ".github/workflows/", "scripts/", "docs/",
-                   "fixtures/README.md")
+REFERENCE_ROOTS = ("tests/", "godot/tests/", "godot/probes/", ".github/workflows/", "scripts/",
+                   "docs/", "fixtures/README.md")
 REFERENCE_SUFFIXES = (".cpp", ".h", ".c", ".gd", ".tscn", ".txt", ".cmake", ".py", ".ps1",
                       ".sh", ".yml", ".yaml", ".md", ".json", ".cfg")
 GENERATOR_GLOB = "tests/fixtures/*_gen.cpp"

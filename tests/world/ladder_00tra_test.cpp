@@ -176,9 +176,10 @@ int main() {
 	// The entry probe teleports the body to just under the top and lets it drop
 	// past the 8.5 u column on every no-latch hover; with retail's fall-damage
 	// tolerance (fallmps 13) the third such drop kills it and the probe reads a
-	// death anim. That is a rig artifact, not the entry gate: disable fall damage
-	// through the WAC-writable named value for the probe.
-	rig.world.wac_values.fallmps = 0;
+	// death anim. That is a rig artifact, not the entry gate: raise the
+	// WAC-writable tolerance past any drop the probe makes. (0 is not "off":
+	// retail's landing check has no zero test, so 0 damages every landing.)
+	rig.world.wac_values.fallmps = 1000;
 	bool latched = false;
 	float hold_z = 0.0f;
 	for (const w::Vec3 &h : hovers) {

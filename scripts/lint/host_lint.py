@@ -54,11 +54,16 @@ ALLOWLIST_PATH = Path(__file__).resolve().parent / "host_allowlist.json"
 CODE_SUFFIXES = (
     ".gd", ".tscn", ".tres", ".gdshader", ".cpp", ".cc", ".c", ".h", ".hpp",
     ".py", ".ps1", ".sh", ".ts", ".vue", ".cs", ".sql", ".toml", ".cfg",
+    ".cmake", ".yml", ".yaml",
 )
+# The build lists and the workflow files carry project prose too (a test
+# registration comment, a job description); only files NAMED CMakeLists.txt
+# count, never data .txt files.
+CODE_BASENAMES = ("CMakeLists.txt",)
 SCAN_PREFIXES = (
     "godot/", "engine/", "apps/", "scripts/", "web/src/",
     "tests/", "launcher/", "backend/",
-    "tools/", "deploy/", "infra/", "fixtures/",
+    "tools/", "deploy/", "infra/", "fixtures/", ".github/",
 )
 HARD_EXCLUDES = ("third_party/", "/build/", "scripts/lint/host_lint.py",
                  "scripts/lint/host_allowlist.json")
@@ -85,6 +90,7 @@ COMMENT_MARKERS = {
     ".gd": "#", ".py": "#", ".sh": "#", ".ps1": "#", ".toml": "#",
     ".cfg": "#", ".cpp": "//", ".cc": "//", ".c": "//", ".h": "//",
     ".hpp": "//", ".cs": "//", ".ts": "//", ".gdshader": "//", ".sql": "--",
+    ".txt": "#", ".cmake": "#", ".yml": "#", ".yaml": "#",
 }
 
 # Wire/retail-frozen strings: a rename phase must never make one of these
@@ -139,7 +145,7 @@ def tracked_code_files() -> list[str]:
             continue
         if any(marker in rel for marker in HARD_EXCLUDES):
             continue
-        if rel.endswith(CODE_SUFFIXES):
+        if rel.endswith(CODE_SUFFIXES) or rel.endswith(CODE_BASENAMES):
             files.append(rel)
     return files
 

@@ -67,6 +67,9 @@ PATTERNS = {
     ],
     "sh": [
         (re.compile(r"\$\{([A-Z][A-Z0-9_]*)(?::-|:=|:\?|-|\})"), 1),
+        # The bare `$VAR` read (`"$GODOT_BIN"`); the script's own upper-case
+        # locals are filtered by SH_LOCAL below.
+        (re.compile(r"(?<![\w$])\$([A-Z][A-Z0-9_]*)\b"), 1),
         (re.compile(r"\bexport\s+([A-Z][A-Z0-9_]*)="), 1),
     ],
     "py": [

@@ -67,7 +67,9 @@ def load_allowlist() -> dict[str, str]:
 
 
 def _skip(path: Path) -> bool:
-    return any(part in SKIP_PARTS or part.startswith("build") for part in path.parts)
+    # Directory parts only: a FILE named build_*.cpp is source, not build output
+    # (the same rule include_graph_check applies).
+    return any(part in SKIP_PARTS or part.startswith("build") for part in path.parts[:-1])
 
 
 def source_files(roots: tuple[str, ...], suffixes: tuple[str, ...]) -> list[Path]:

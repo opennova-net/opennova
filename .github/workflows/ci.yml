@@ -331,11 +331,13 @@ jobs:
           token: ${{ secrets.REFERENCE_ASSETS_TOKEN }}
           enabled: ${{ env.HAVE_REFERENCE_ASSETS }}
 
+      # runner.os, like the package and release jobs: one cache entry serves
+      # every job that installs this binary.
       - name: Cache Godot binary
         uses: actions/cache@v4
         with:
           path: .godot-bin
-          key: godot-${{ matrix.os }}-${{ env.GODOT_VERSION }}
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
       # The suite runs on the Windows console binary (the GDExtension is built
       # for Windows only); GODOT_BIN below is that path.

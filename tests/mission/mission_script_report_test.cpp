@@ -10,11 +10,15 @@
 // receives its route order, a trigger family we evaluate as permanently
 // false, an action type we drop on the floor.
 //
+// The mission boots through the engine's own mission kernel (ADR 0042 d3):
+// the model-derived seats, the items.def traits, the terrain, collision, the
+// WAC layers and the host's own player - the live host's world, so what the
+// report sees firing is what a player would.
+//
 // Gated on OPENNOVA_JO_DIR (reports Skipped without the install); the pinned
 // case is 05TRcoop.bms over 40000 ticks (≈ 10 min of mission time).
 #include <formats/mission/bms.h>
 #include <runtime/mission/event_runtime.h>
-#include <runtime/mission/promote.h>
 
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
@@ -23,17 +27,25 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
-#include "common/retail_mission.h"
+#include "common/retail_mission_files.h"
+#include "common/retail_mission_open.h"
 #include "common/retail_paths.h"
 
 namespace {
 
 using namespace opennova;
 namespace w = opennova::world;
+
+int failures = 0;
+bool expect(bool cond, const char *msg) {
+	if (cond) return true;
+	std::fprintf(stderr, "FAIL: %s\n", msg);
+	++failures;
+	return false;
+}
 
 const char *action_name(bms::ActionType t) {
 	switch (t) {
@@ -67,28 +79,31 @@ int main() {
 	const std::string mission_file = "05TRcoop.bms";
 	const int ticks = 40000;
 
-	opennova::ResourceIndex index;
-	std::vector<uint8_t> bytes;
-	std::string served_by;
-	if (!retail::read_mission(install, mission_file, index, bytes, served_by))
+	testrig::RetailMissionRig rig;
+	std::string error, served_by;
+	if (!retail::open_mission(rig, install, mission_file, error, served_by))
 		return retail::skip((mission_file + " on the OPENNOVA_JO_DIR mount (base or an expansion) "
 		                     "or under OPENNOVA_MISSION_CORPUS").c_str());
-	bms::File m;
-	std::string error;
-	if (!bms::parse(bytes.data(), bytes.size(), m, error)) {
-		std::fprintf(stderr, "FAIL: %s parse: %s\n", mission_file.c_str(), error.c_str());
+	// The bare no-net tick with the host's own player at the start marker: the
+	// zone tour below walks THAT body, the same pool the group-in-area triggers
+	// scan [orig: Entity_IsTeamInTriggerBounds @0x43c730].
+	testrig::BootOptions options;
+	options.listen_server = false;
+	if (!expect(rig.boot(options, error), "the mission boots through the mission kernel")) {
+		std::fprintf(stderr, "  %s\n", error.c_str());
 		return 1;
 	}
-
-	w::World world;
-	w::AiSystem ai;
-	world.ai = &ai;
-	mission::BmsEventSystem events;
-	events.load(m.events, m.triggers, m.actions);
-	mission::promote_mission(m, world, ai, {});
-	world.add_system(&events);
-	world.add_system(&ai);
-	world.load_systems();
+	if (!expect(rig.has_local_player(), "the host's own player spawned")) return 1;
+	// The play-start baseline the tours rewind to: post-spawn, pre-tick (the
+	// kernel's boot baseline is the post-PreMission point before the spawn).
+	rig.capture_baseline();
+	w::World &world = rig.world;
+	mission::BmsEventSystem &events = rig.events;
+	const bms::File &m = rig.mission;
+	std::printf("kernel boot: %zu seat specs, terrain %s, %d collision instances, wac %s, "
+	            "mission served by %s\n",
+			rig.seat_specs.size(), rig.has_terrain() ? "loaded" : "NOT LOADED",
+			rig.collision_attached, rig.wac_loaded ? "loaded" : "absent", served_by.c_str());
 
 	// Record the tick each event FIRST fires. "Which events fire" was not enough
 	// to compare against retail: 05TRcoop's ten scripted kills all land inside
@@ -99,7 +114,7 @@ int main() {
 	std::vector<int> death_tick;
 	size_t seen_deaths = 0;
 	for (int t = 0; t < ticks; ++t) {
-		world.run_logic_tick(/*is_authority=*/true);
+		rig.tick();
 		for (size_t i = 0; i < first_fire.size(); ++i)
 			if (first_fire[i] < 0 && events.event_fired(i)) first_fire[i] = t;
 		// Nothing drains the death list headless, so its growth timestamps the
@@ -365,12 +380,13 @@ int main() {
 	}
 	// ZONE SWEEP, then a TOUR. Most of what stays shut in a headless run is
 	// waiting on a player standing somewhere, and guessing which zone costs a
-	// three-minute live round per guess. Do it offline instead: run the mission
-	// with a stand-in group-1 body visiting zone centres and report what extra
-	// script that unlocks. Players carry commandGroup 1 (player_spawn.cpp), and
-	// retail's Entity_IsTeamInTriggerBounds @0x43c730 scans the player pool as
-	// well as the AI pool, so a pool-1 body with group_id 1 is exactly what the
-	// group-in-area triggers look for.
+	// three-minute live round per guess. Do it offline instead: rewind the
+	// kernel to its play-start baseline, walk the host's own player from zone
+	// centre to zone centre and report what extra script that unlocks. Players
+	// carry commandGroup 1 (player_spawn.cpp), and retail's
+	// Entity_IsTeamInTriggerBounds @0x43c730 scans the player pool as well as
+	// the AI pool, so the real player body is exactly what the group-in-area
+	// triggers look for.
 	//
 	// A single-zone sweep only ever finds the mission's FIRST gate, because a
 	// linear mission opens each phase with the previous one. So the tour moves
@@ -387,45 +403,27 @@ int main() {
 			             0.5f * (a->bounds.min.y + a->bounds.max.y)};
 		}
 		auto run_tour = [&](const std::vector<int> &stops, std::map<std::string, int> *acts) {
-			w::World w2;
-			w::AiSystem ai2;
-			w2.ai = &ai2;
-			mission::BmsEventSystem ev2;
-			ev2.load(m.events, m.triggers, m.actions);
-			mission::promote_mission(m, w2, ai2, {});
-			w::EntityHandle body{};
-			if (!stops.empty()) {
-				w2.registry.configure_pool(1, 4);
-				w::Entity p{};
-				p.kind = w::EntityKind::Organic;
-				p.team = 1;
-				p.health = 100;
-				p.alive = true;
-				p.group_id = 1;
-				p.net_id = 0x7000;
-				p.flags = 0x100u; // player classifier, movement gate CLEAR
-				p.position = w::Vec3{centre[stops[0]].first, centre[stops[0]].second, 0.0f};
-				body = w2.registry.spawn(1, p);
-			}
-			w2.add_system(&ev2);
-			w2.add_system(&ai2);
-			w2.load_systems();
+			// The baseline restore rewinds the registry, the mission variables,
+			// the WAC runtime state and every event's fired latch (the BMS
+			// system's on_load zeroes them [orig: EventSystem_FreeAll @0x453210]).
+			if (!expect(rig.restore_baseline(), "the play-start baseline restores between tours"))
+				return 0;
 			const size_t hops = stops.empty() ? 1u : stops.size();
 			for (size_t h = 0; h < hops; ++h) {
 				if (!stops.empty()) {
-					if (w::Entity *e = w2.registry.get(body)) {
-						e->position.x = centre[stops[h]].first;
-						e->position.y = centre[stops[h]].second;
-					}
+					const float cx = centre[stops[h]].first;
+					const float cy = centre[stops[h]].second;
+					const float ground = rig.has_terrain() ? rig.ground_height(cx, cy) : 0.0f;
+					rig.teleport_local_player(w::Vec3{cx, cy, ground + 1.0f}, 0.0, 0.0);
 				}
-				for (int t = 0; t < hop_ticks; ++t) w2.run_logic_tick(true);
+				rig.tick(hop_ticks);
 			}
 			int n = 0;
-			for (size_t i = 0; i < ev2.events().size(); ++i) {
-				if (!ev2.event_fired(i)) continue;
+			for (size_t i = 0; i < events.events().size(); ++i) {
+				if (!events.event_fired(i)) continue;
 				++n;
 				if (acts != nullptr)
-					for (const bms::Action &a : ev2.events()[i].actions)
+					for (const bms::Action &a : events.events()[i].actions)
 						(*acts)[action_name(a.action_type)] += 1;
 			}
 			// An event running a KillGroup does not mean anyone DIED - the group may
@@ -434,13 +432,13 @@ int main() {
 			// so the final size is the run's death total. Retail's baseline capture
 			// shows twelve, so this is the number to compare against.
 			if (acts != nullptr)
-				(*acts)["<deaths raised>"] = static_cast<int>(w2.round_sim.deaths.size());
+				(*acts)["<deaths raised>"] = static_cast<int>(world.round_sim.deaths.size());
 			return n;
 		};
 		std::map<std::string, int> base_acts;
 		const int base = run_tour({}, &base_acts);
-		std::printf("zone tour (%d ticks per stop): baseline with no player = %d events,"
-		            " deaths raised %d\n",
+		std::printf("zone tour (%d ticks per stop): baseline with the player at its spawn = "
+		            "%d events, deaths raised %d\n",
 		            hop_ticks, base, base_acts["<deaths raised>"]);
 		std::vector<int> tour;
 		int have = base;
@@ -475,6 +473,7 @@ int main() {
 		}
 	}
 
-	std::printf("mission script report: done (diagnostic only)\n");
+	if (failures != 0) return 1;
+	std::printf("mission script report: done (diagnostic beyond the zone floors)\n");
 	return 0;
 }

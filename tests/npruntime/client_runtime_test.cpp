@@ -32,6 +32,7 @@
 #include <net/netsim/connection.h>
 #include <net/netsim/client_replica_pipeline.h>
 #include <net/netsim/idatagram_socket.h>
+#include "common/null_datagram_socket.h"
 #include <net/netsim/loopback_channel.h>
 #include <net/netsim/session_transport.h>
 #include <net/netsim/udp_session_transport.h>
@@ -1520,10 +1521,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 			"legacy family vectors remain diagnostic views of the same packet");
 }
 
-struct NullDatagramSocket final : ns::IDatagramSocket {
-	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
-	void send_to(const PeerAddr &, const uint8_t *, std::size_t) override {}
-};
+using opennova::testrig::NullDatagramSocket;
 
 struct HostPumpHookProbe {
 	np::HostOwner *owner = nullptr;
