@@ -121,10 +121,21 @@ and rejected on evidence, not on precedent.
   `inmatch::State::Paused`, `session_role()` as the authority source, engine constants for the
   512/62.5 literals) land under this ADR's rule.
 
-## Verification
+## Verification (the record of what ran, PR #587)
 
-- The campaign's slices each land green (full ctest, GUT with single-file isolation, the ten CI
-  lints); the Simulation-embeds-kernel slice is additionally proven by the retail-interop recipe
-  both directions and an `nw_pp` before/after decode of the 00TRg loopback pcap (byte-identical
-  S2C stream over the first 2,000 ticks).
-- Landed hashes are recorded here as the slices merge.
+- Every slice landed green: full ctest (415 tests at close, retail-gated missions included on a
+  machine with the four roots), the full GUT suite with no silently dropped scripts, and the ten
+  CI lints. Landed hashes: slice 0 `6c7988b95..feafc2920` (dead code, -2k lines), 1 `adea78a67`
+  (this ADR), 2 `da0d27f84`, 3 `a6fc88864`, 4 `b12f5c11b`, 5 `aa20c5d56`, 6 `972c774de`
+  (the kernel), 7 `6510891bb` (Simulation embeds it), 8 `9e3f47733` (nw_server), 9 `531b775d1`
+  (world::inspect), 10 `67590f183`, 11 `6ec8b27cf`, 12 `6fc3f7934`, 13 `73479c953`.
+- Live proofs run through the game MCP: 00TRg SP boot/tick, the ESC pause cycle reaching
+  `inmatch::State::Paused` and back (also pinned in GUT), a 01TR LAN pair with the joiner
+  admitted to `in_match` (phase 4, local player spawned, host `peers=1`), the `game_entities`
+  and `game_debug` wire shapes diffed key-identical against the pre-campaign tree, the
+  `runtime_root_window` and `frame_stats` probes green with the Entities window registered, and
+  an `nw-server` smoke hosting a fully booted 00TRg (terrain, tables, 864 collision instances).
+- OUTSTANDING, named rather than claimed: the retail-interop recipe both directions (a stock
+  client joining our listen host; ours joining a retail host, `.agents/README.md`) has not been
+  re-run on this branch — it needs the retail install driven through onhook. Run it before or
+  at merge; the wire goldens and the LAN-pair admission are the evidence in hand.
