@@ -1,12 +1,15 @@
-// Parse test for opennova engine/formats/avatars over the real retail Avatars.def.
-// Fixture: fixtures/avatars/Avatars.def, copied verbatim from a retail
-// Joint Operations + JOX extract (Desktop/REVX02/AVATARS.DEF). Pins the parser
-// against the witnessed grammar (docs/playerinfo/avatars-re.md): part pool,
+// Parse test for opennova engine/formats/avatars: the minted fixtures/avatars/synth_avatars.def
+// (tests/fixtures/minimal_avatars_gen.cpp) unconditionally, the shipped Avatars.def from the
+// reference fixture set behind OPENNOVA_JO_ASSETS.
+// The retail leg pins the shipped table (a retail JO + JOX extract,
+// Desktop/REVX02/AVATARS.DEF) against the witnessed grammar; the synthetic leg pins the parser
+// over the same shapes (docs/playerinfo/avatars-re.md): part pool,
 // nationality -> division -> combo tree, trailing flags, quoted values.
 #include <cstdio>
 #include <cstring>
 #include <string>
 
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <formats/avatars/avatars.h>
@@ -33,10 +36,91 @@ bool has_diag(const AvatarsFile &f, const char *code) {
 
 } // namespace
 
-int main() {
-    const std::string root = test_paths_repo_root(__FILE__);
-    const std::string path = root + "/fixtures/avatars/Avatars.def";
+// The minted table (tests/fixtures/minimal_avatars_gen.cpp): 12 heads + 8
+// bodies + 6 arms = 26 parts; 8 nationalities (0..3 good, 4..7 evil); 39 combos.
+int check_synth(const std::string &path) {
+    AvatarsFile f;
+    TEST_EXPECT(avatars_parse(path.c_str(), &f) == 0);
+    TEST_EXPECT(f.parts_count == 26);
+    TEST_EXPECT(f.nationalities_count == 8);
+    size_t heads = 0, bodies = 0, arms = 0, combos = 0;
+    for (size_t i = 0; i < f.parts_count; ++i) {
+        switch (f.parts[i].kind) {
+        case AVATAR_PART_HEAD: ++heads; break;
+        case AVATAR_PART_BODY: ++bodies; break;
+        case AVATAR_PART_ARMS: ++arms; break;
+        default: break;
+        }
+    }
+    TEST_EXPECT(heads == 12);
+    TEST_EXPECT(bodies == 8);
+    TEST_EXPECT(arms == 6);
+    for (size_t i = 0; i < f.nationalities_count; ++i)
+        for (size_t j = 0; j < f.nationalities[i].divisions_count; ++j)
+            combos += f.nationalities[i].divisions[j].combos_count;
+    TEST_EXPECT(combos == 39);
 
+    // First head: define head SYN_HEAD_BOONIE { name AV_SYNTH_BOONIE; graphic synth_boonie.3di;
+    //   camo 0 0 0; voice 1; sex m }.
+    const AvatarPart *boonie = find_part(f, "SYN_HEAD_BOONIE");
+    TEST_EXPECT(boonie != nullptr);
+    TEST_EXPECT(boonie->kind == AVATAR_PART_HEAD);
+    TEST_EXPECT(std::strcmp(boonie->display_name, "AV_SYNTH_BOONIE") == 0);
+    TEST_EXPECT(std::strcmp(boonie->graphic, "synth_boonie.3di") == 0);
+    TEST_EXPECT(boonie->camo[0] == 0 && boonie->camo[1] == 0 && boonie->camo[2] == 0);
+    TEST_EXPECT(boonie->voice == 1);
+    TEST_EXPECT(boonie->sex == AVATAR_SEX_MALE);
+
+    // camo variant indices are preserved (camo 3 0 0).
+    const AvatarPart *camo1 = find_part(f, "SYN_HEAD_BOONIE_CAMO_1");
+    TEST_EXPECT(camo1 != nullptr);
+    TEST_EXPECT(camo1->camo[0] == 3 && camo1->camo[1] == 0 && camo1->camo[2] == 0);
+
+    // Quoted multi-word value: name "Synth Bare Arms" (quote-aware tokenization).
+    const AvatarPart *bare = find_part(f, "SYN_ARMS_BARE");
+    TEST_EXPECT(bare != nullptr);
+    TEST_EXPECT(bare->kind == AVATAR_PART_ARMS);
+    TEST_EXPECT(std::strcmp(bare->display_name, "Synth Bare Arms") == 0);
+
+    // Nationality N00, alignment good, 4 divisions (D00..D03).
+    const AvatarNationality *alpha = find_nat(f, "N00");
+    TEST_EXPECT(alpha != nullptr);
+    TEST_EXPECT(alpha->id == 0); // lenient id parse skips the leading 'N'
+    TEST_EXPECT(std::strcmp(alpha->name_key, "AV_NAT_SYNTH_ALPHA") == 0);
+    TEST_EXPECT(alpha->has_alignment && alpha->alignment == AVATAR_ALIGN_GOOD);
+    TEST_EXPECT(alpha->divisions_count == 4);
+
+    // Division D00, trailing "skipdemo" flag, 4 combos; first combo 001 wears the boonie set.
+    const AvatarDivision *d0 = &alpha->divisions[0];
+    TEST_EXPECT(std::strcmp(d0->raw_id, "D00") == 0);
+    TEST_EXPECT(d0->id == 0);
+    TEST_EXPECT(std::strcmp(d0->name_key, "AV_DIV_SYNTH_0_0") == 0);
+    TEST_EXPECT(std::strcmp(d0->flags, "skipdemo") == 0);
+    TEST_EXPECT(d0->combos_count == 4);
+    const AvatarCombo *c0 = &d0->combos[0];
+    TEST_EXPECT(std::strcmp(c0->raw_id, "001") == 0);
+    TEST_EXPECT(c0->id == 1);
+    TEST_EXPECT(std::strcmp(c0->head_name, "SYN_HEAD_BOONIE") == 0);
+    TEST_EXPECT(std::strcmp(c0->body_name, "SYN_BODY_0") == 0);
+    TEST_EXPECT(std::strcmp(c0->arms_name, "SYN_ARMS_1") == 0);
+
+    // Nationality-level trailing flag (N01 skipdemo); a division with no flag (N00 D02); an
+    // evil nationality (N07).
+    const AvatarNationality *bravo = find_nat(f, "N01");
+    TEST_EXPECT(bravo != nullptr);
+    TEST_EXPECT(std::strcmp(bravo->flags, "skipdemo") == 0);
+    TEST_EXPECT(std::strcmp(alpha->divisions[2].name_key, "AV_DIV_SYNTH_0_2") == 0);
+    TEST_EXPECT(alpha->divisions[2].flags[0] == '\0');
+    const AvatarNationality *hotel = find_nat(f, "N07");
+    TEST_EXPECT(hotel != nullptr && hotel->alignment == AVATAR_ALIGN_EVIL);
+    TEST_EXPECT(!has_diag(f, "AVATAR_DUPLICATE_PART"));
+
+    avatars_free(&f);
+    return 0;
+}
+
+// The shipped table: 51 heads + 36 bodies + 22 arms = 109 parts; 8 nationalities; 69 combos.
+int check_retail(const std::string &path) {
     AvatarsFile f;
     TEST_EXPECT(avatars_parse(path.c_str(), &f) == 0);
 
@@ -112,6 +196,12 @@ int main() {
     TEST_EXPECT(us->divisions[2].flags[0] == '\0');
 
     avatars_free(&f);
+    return 0;
+}
+
+int main() {
+    const std::string root = test_paths_repo_root(__FILE__);
+    if (check_synth(root + "/fixtures/avatars/synth_avatars.def") != 0) return 1;
 
     {
         const char src[] =
@@ -226,5 +316,11 @@ int main() {
         TEST_EXPECT(avatars_parse_memory(src.data(), src.size(), &model) != 0);
     }
 
+    // The retail leg: the shipped Avatars.def from the reference fixture set.
+    const std::string retail = retail::reference_fixture("avatars/Avatars.def");
+    if (retail.empty())
+        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/avatars/Avatars.def (the shipped avatar table)");
+    if (check_retail(retail) != 0) return 1;
+    std::printf("retail leg: Avatars.def parsed with the shipped pins\n");
     return 0;
 }

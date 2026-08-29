@@ -422,20 +422,28 @@ func test_comparison_contract_uses_production_spawn_profile_and_presentation_wit
 	})
 	var avatar_db := AvatarDatabase.new()
 	assert_eq(avatar_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/avatars/Avatars.def")), OK)
+			"res://../fixtures/avatars/synth_avatars.def")), OK)
 	var join_profile := NetSessionDrive.character_join_profile_from_database(
 			avatar_db, RenderFixtureContract.comparison_spawn_profile(hidden_profile_contract))
 	assert_eq(join_profile.get("character_ids", []), [0x0402, 0x8207],
 			"the staged tree selections resolve to retail slot 0's character IDs")
 	assert_eq(join_profile.get("player_classes", []), [9, 9])
-	var resolved_blue: Dictionary = avatar_db.resolve_character_id(0x0402, 0)
-	var combo: Dictionary = avatar_db.resolve_combo(
-			int(resolved_blue.get("nationality_index", -1)),
-			int(resolved_blue.get("division_index", -1)),
-			int(resolved_blue.get("combo_index", -1)))
-	var arms: Dictionary = combo.get("arms", {})
-	assert_eq(String(arms.get("graphic", "")), "IndoArms.3di")
-	assert_eq(Array(arms.get("camo", [])), [1, 0, 0])
+	# The reference leg: in the shipped table blue's 0x0402 wears the arms the retail
+	# capture shows (IndoArms.3di, camo 1).
+	var retail_avatars := RetailData.fixture("avatars/Avatars.def")
+	if retail_avatars.is_empty():
+		pending(RetailData.fixture_pending_text("avatars/Avatars.def"))
+	else:
+		var retail_db := AvatarDatabase.new()
+		assert_eq(retail_db.load(retail_avatars), OK)
+		var resolved_blue: Dictionary = retail_db.resolve_character_id(0x0402, 0)
+		var combo: Dictionary = retail_db.resolve_combo(
+				int(resolved_blue.get("nationality_index", -1)),
+				int(resolved_blue.get("division_index", -1)),
+				int(resolved_blue.get("combo_index", -1)))
+		var arms: Dictionary = combo.get("arms", {})
+		assert_eq(String(arms.get("graphic", "")), "IndoArms.3di")
+		assert_eq(Array(arms.get("camo", [])), [1, 0, 0])
 	assert_true(RenderFixtureContract.verify_comparison_spawn(
 			world, contract).has("error"),
 			"the mission-overridden M4 spawn must not pass as matched evidence")

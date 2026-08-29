@@ -7,8 +7,8 @@ addresses are Jointops.exe retail (imagebase 0x400000).
 
 ## Context
 
-`Avatars.def` is a hand-authored ASCII config (see the retail fixture
-`fixtures/avatars/Avatars.def`): `////` comment banners, tab-aligned columns,
+`Avatars.def` is a hand-authored ASCII config (the shipped table is `avatars/Avatars.def` in the
+reference fixture set, `docs/asset-gated-tests.md`): `////` comment banners, tab-aligned columns,
 blank-line grouping, and trailing demo-build flags (`skipdemo`) on nationality
 and division lines. The original engine has **no writer** — it only parses the
 file ([orig: CAvatarDefs_ParseConfigLine @ 0x57a3f0]) and denormalizes the

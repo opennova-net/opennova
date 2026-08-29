@@ -1,12 +1,14 @@
 extends GutTest
 
-# AvatarPreview composes a resolved combo's part models. The fixture's parts
-# reference real .3di basenames; without a mounted resource root the part .3di
-# files cannot be resolved, so load_combo composes zero models but must not error
-# (a missing graphic skips its slot). With no resource root we still verify the
-# clear()/load_combo lifecycle is exercised cleanly on the SubViewport scaffold.
+# AvatarPreview composes a resolved combo's part models. The minted fixture's
+# parts name synthetic .3di basenames no root carries, so load_combo composes
+# zero models but must not error (a missing graphic skips its slot); the
+# lifecycle (clear()/load_combo) is exercised on the SubViewport scaffold. The
+# retail-root tests compose the shipped table's parts (the reference fixture
+# set's Avatars.def over the install's PFFs).
 const AvatarPreviewScript = preload("res://game/avatar/avatar_preview.gd")
-const AVATARS_FIXTURE := "res://../fixtures/avatars/Avatars.def"
+const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
+const RETAIL_AVATARS_REL := "avatars/Avatars.def"
 
 var _preview: AvatarPreview
 
@@ -25,7 +27,23 @@ func _resolved_combo() -> Dictionary:
 	var db := AvatarDatabase.new()
 	if db.load(path) != OK:
 		return {}
-	# First nationality/division with a combo.
+	return _first_combo(db)
+
+
+# The shipped table from the reference fixture set: its parts name the retail
+# .3di the mounted install carries. {} without OPENNOVA_JO_ASSETS/fixtures.
+func _retail_resolved_combo() -> Dictionary:
+	var path := RetailData.fixture(RETAIL_AVATARS_REL)
+	if path.is_empty():
+		return {}
+	var db := AvatarDatabase.new()
+	if db.load(path) != OK:
+		return {}
+	return _first_combo(db)
+
+
+# First nationality/division with a combo.
+func _first_combo(db: AvatarDatabase) -> Dictionary:
 	for n in range(db.get_nationality_count()):
 		for d in range(db.get_division_count(n)):
 			if db.get_combo_count(n, d) > 0:
@@ -99,9 +117,9 @@ func test_retail_combo_preview_excludes_incompatible_arm_rig() -> void:
 	if root == null:
 		pending("OPENNOVA_JO_DIR / retail PFFs not configured")
 		return
-	var combo := _resolved_combo()
+	var combo := _retail_resolved_combo()
 	if combo.is_empty():
-		pending("Avatars.def fixture missing or has no combos")
+		pending(RetailData.fixture_pending_text(RETAIL_AVATARS_REL))
 		return
 	_preview.set_resource_root(root)
 	_preview.load_combo(combo)
@@ -270,9 +288,9 @@ func test_runtime_portrait_binds_idle_on_skinned_parts_with_real_assets() -> voi
 	if root == null:
 		pending("OPENNOVA_JO_DIR / retail PFFs not configured; skeletal idle bind verified live")
 		return
-	var combo := _resolved_combo()
+	var combo := _retail_resolved_combo()
 	if combo.is_empty():
-		pending("Avatars.def fixture missing or has no combos")
+		pending(RetailData.fixture_pending_text(RETAIL_AVATARS_REL))
 		return
 	_preview.set_resource_root(root)
 	_preview.load_combo(combo)

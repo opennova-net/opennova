@@ -49,7 +49,6 @@ authored file.
 | `def/weapon.def`, `def/ammo.def`, `def/hudpos.def` | the wire-visible weapon/ammo order (the weapon table bakes indices from it) and the HUD layout table |
 | `mus/jo_gamemus.bin`, `mus/jo_menumus.bin`, `mus/golden_jo_gamemus.mus.txt` | the music director scripts and their decoded golden |
 | `adm/mp5_1st.adm`, `bad/BINOC.bad`, `bad/BINOC_twist.bad` | the retail animation-definition and clip formats (skinned-rig twist parity) |
-| `avatars/Avatars.def` | the avatar definition table |
 | `novaworld/**` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
 
 ## Authored files
@@ -138,6 +137,10 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   `rtxt_jo_install_sweep` and the menu-driven GUT tests.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
 - `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.
+- `avatars/synth_avatars.def` — `tests/fixtures/minimal_avatars_gen.cpp`: the avatar
+  table through `avatars_write` (26 parts, eight nationalities of divisions and
+  combos with both `skipdemo` flag levels, four good and four evil); the shipped
+  table is the reference-tree leg of `avatars_parse` and `avatars_roundtrip`.
 - `bms/synth_dense.bms` — `tests/fixtures/minimal_bms_gen.cpp`: a dense mission
   authored through `MissionDocument` and written by `bms::write` (four populated
   pools, one item id each, zero-valued optional fields, the minted terrain and

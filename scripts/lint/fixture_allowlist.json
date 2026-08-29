@@ -17,7 +17,6 @@
   ],
   "keep": [
     "fixtures/adm/mp5_1st.adm",
-    "fixtures/avatars/Avatars.def",
     "fixtures/bad/BINOC.bad",
     "fixtures/bad/BINOC_twist.bad",
     "fixtures/def/weapon.def",

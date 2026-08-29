@@ -10,6 +10,7 @@
 #include <cstring>
 #include <string>
 
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <formats/avatars/avatars.h>
@@ -28,11 +29,9 @@ size_t total_combos(const AvatarsFile &f) {
 
 } // namespace
 
-int main() {
-    const std::string root = test_paths_repo_root(__FILE__);
-    const std::string path = root + "/fixtures/avatars/Avatars.def";
-
-    // --- Idempotent round-trip over the retail fixture ---
+// Lossless + idempotent over a table on disk (the minted synth_avatars.def unconditionally, the
+// shipped Avatars.def as the reference-tree leg).
+int check_roundtrip(const std::string &path) {
     AvatarsFile m1;
     TEST_EXPECT(avatars_parse(path.c_str(), &m1) == 0);
 
@@ -61,6 +60,12 @@ int main() {
     avatars_free(&m2);
     avatars_free_buffer(b1);
     avatars_free_buffer(b2);
+    return 0;
+}
+
+int main() {
+    const std::string root = test_paths_repo_root(__FILE__);
+    if (check_roundtrip(root + "/fixtures/avatars/synth_avatars.def") != 0) return 1;
 
     // --- From-scratch construction (the writer never depends on parsed input) ---
     AvatarPart parts[2];
@@ -137,5 +142,11 @@ int main() {
 
     avatars_free(&fp);
     avatars_free_buffer(fb);
+    // The retail leg: the shipped Avatars.def from the reference fixture set.
+    const std::string retail = retail::reference_fixture("avatars/Avatars.def");
+    if (retail.empty())
+        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/avatars/Avatars.def (the shipped avatar table)");
+    if (check_roundtrip(retail) != 0) return 1;
+    std::printf("retail leg: Avatars.def round-trips losslessly and idempotently\n");
     return 0;
 }
