@@ -7,12 +7,15 @@ extends GutTest
 
 const MenuShellScript := preload("res://game/menu_shell.gd")
 
-const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
-const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target
-const OPTIONS_FIXTURE := "res://../fixtures/mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
-const SP_PLAY_FIXTURE := "res://../fixtures/mnu/jo_sp.mnu"  # play screen: mission list IA_LIST + ACCEPT
-const MISSION_BIN_FIXTURE := "res://../fixtures/rtxt/00tra.bin"  # real per-mission bin: info/Title + briefing
-const MUS_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"  # decrypted SCR0 MUS program
+# The retail menu set, mission text and music program come from the reference
+# fixture set (docs/asset-gated-tests.md, RetailData.fixture); the whole script
+# skips without it.
+const MAIN_FIXTURE := "mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
+const SP_FIXTURE := "mnu/jo_loadout.mnu"  # the cross-.mnu target
+const OPTIONS_FIXTURE := "mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
+const SP_PLAY_FIXTURE := "mnu/jo_sp.mnu"  # play screen: mission list IA_LIST + ACCEPT
+const MISSION_BIN_FIXTURE := "rtxt/00tra.bin"  # real per-mission bin: info/Title + briefing
+const MUS_FIXTURE := "mus/jo_gamemus.bin"  # decrypted SCR0 MUS program
 const SBF_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"  # synthetic SBF bank (banks stream loose)
 
 
@@ -96,11 +99,27 @@ func _make_dir() -> String:
 	return dir
 
 
-func _copy(res_path: String, dst: String) -> void:
+func _copy(source: String, dst: String) -> void:
 	var f := FileAccess.open(dst, FileAccess.WRITE)
 	if f != null:
-		f.store_buffer(FileAccess.get_file_as_bytes(res_path))
+		f.store_buffer(_fixture_bytes(source))
 		f.close()
+
+
+# The bytes of a fixture: a res:// path reads directly (the synthetic SBF bank);
+# anything else is a path into the reference fixture set.
+func _fixture_bytes(source: String) -> PackedByteArray:
+	if source.begins_with("res://"):
+		return FileAccess.get_file_as_bytes(source)
+	return FileAccess.get_file_as_bytes(RetailData.fixture(source))
+
+
+func should_skip_script():
+	for rel in [MAIN_FIXTURE, SP_FIXTURE, OPTIONS_FIXTURE, SP_PLAY_FIXTURE,
+			MISSION_BIN_FIXTURE, MUS_FIXTURE]:
+		if RetailData.fixture(rel).is_empty():
+			return RetailData.fixture_pending_text(rel)
+	return false
 
 
 func test_hidden_menu_suspends_shell_frame_processing() -> void:
@@ -515,11 +534,11 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
 	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
 	assert_not_null(file)
-	file.store_buffer(FileAccess.get_file_as_bytes(OPTIONS_FIXTURE))
+	file.store_buffer(_fixture_bytes(OPTIONS_FIXTURE))
 	file.close()
 	file = FileAccess.open(dir.path_join("menumus.bin"), FileAccess.WRITE)
 	assert_not_null(file)
-	file.store_buffer(FileAccess.get_file_as_bytes(MUS_FIXTURE))
+	file.store_buffer(_fixture_bytes(MUS_FIXTURE))
 	file.close()
 	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
 	# The expansion pair exists ON DISK (list_expansions scans the path), but the
@@ -638,7 +657,7 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 	var mns := "// test stylesheet\nDEF_FONTNAME_LG Gunpl27b.fnt\nDEF_TEXT_FG FFFFFFFF\n" \
 		+ "DEF_TEXT_MOUSEOVER_FG FFFF0000\nDEF_TEXT_SELECTED_FG FFFF0000\nDEF_TEXT_DISABLED_FG FF545252\n"
 	_write_pff(dir.path_join("resource.pff"), [
-		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menu_style.mns", "bytes": mns},
 	])
 	var root := ResourceRoot.new()
@@ -680,12 +699,12 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 # full context reload [orig: AudioVM_OpenMusicContext @ 0x6722a0] and seeds the
 # witnessed mission-start vars [orig: Game_StartMission @ 0x5255b3-0x52561b].
 func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
-	var mus := FileAccess.get_file_as_bytes(MUS_FIXTURE)
+	var mus := _fixture_bytes(MUS_FIXTURE)
 	var sbf := FileAccess.get_file_as_bytes(SBF_FIXTURE)
 	var dir := OS.get_temp_dir().path_join("menu_shell_mus_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir)
 	_write_pff(dir.path_join("resource.pff"), [
-		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menumus.bin", "bytes": mus},
 		{"name": "gamemus.bin", "bytes": mus},
 	])
@@ -744,11 +763,11 @@ func _rm_music_ctx_dir(dir: String) -> void:
 # pair [orig: Expansion_LoadAssets @ 0x4a4767-75; AudioVM_OpenContextFile
 # @ 0x672160].
 func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
-	var mus := FileAccess.get_file_as_bytes(MUS_FIXTURE)
+	var mus := _fixture_bytes(MUS_FIXTURE)
 	var dir := OS.get_temp_dir().path_join("menu_shell_musx_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
 	_write_pff(dir.path_join("resource.pff"), [
-		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menumus.bin", "bytes": mus},
 		{"name": "gamemus.bin", "bytes": mus},
 	])
@@ -791,11 +810,11 @@ func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
 # The converse incomplete pair also keeps the expansion stem. The bank opens,
 # then the missing VFS script makes the context silent.
 func test_music_incomplete_expansion_bank_only_stays_expansion() -> void:
-	var mus := FileAccess.get_file_as_bytes(MUS_FIXTURE)
+	var mus := _fixture_bytes(MUS_FIXTURE)
 	var dir := OS.get_temp_dir().path_join("menu_shell_musk_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
 	_write_pff(dir.path_join("resource.pff"), [
-		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menumus.bin", "bytes": mus},
 		{"name": "gamemus.bin", "bytes": mus},
 	])
@@ -834,11 +853,11 @@ func _rm_music_bank_only_dir(dir: String) -> void:
 
 # A mounted expansion with no music is silent even when the base pair exists.
 func test_musicless_expansion_does_not_reselect_base_pair() -> void:
-	var mus := FileAccess.get_file_as_bytes(MUS_FIXTURE)
+	var mus := _fixture_bytes(MUS_FIXTURE)
 	var dir := OS.get_temp_dir().path_join("menu_shell_musb_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
 	_write_pff(dir.path_join("resource.pff"), [
-		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menumus.bin", "bytes": mus},
 		{"name": "gamemus.bin", "bytes": mus},
 	])
@@ -912,12 +931,12 @@ func _make_runtime_dir() -> String:
 	var dir := OS.get_temp_dir().path_join("menu_shell_mods_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
 	_write_pff(dir.path_join("resource.pff"), [
-		{"name": "options.mnu", "bytes": FileAccess.get_file_as_bytes(OPTIONS_FIXTURE)},
-		{"name": "menumus.bin", "bytes": FileAccess.get_file_as_bytes(MUS_FIXTURE)},
+		{"name": "options.mnu", "bytes": _fixture_bytes(OPTIONS_FIXTURE)},
+		{"name": "menumus.bin", "bytes": _fixture_bytes(MUS_FIXTURE)},
 	])
 	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
-		{"name": "Mjox01.bin", "bytes": FileAccess.get_file_as_bytes(MUS_FIXTURE)},
+		{"name": "Mjox01.bin", "bytes": _fixture_bytes(MUS_FIXTURE)},
 	])
 	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
 	# Deliberately use retail-style uppercase to pin case-insensitive resolution
@@ -996,7 +1015,7 @@ func test_control_mapping_remap_flow() -> void:
 	DirAccess.make_dir_recursive_absolute(dir)
 	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
 	assert_not_null(file)
-	file.store_buffer(FileAccess.get_file_as_bytes(OPTIONS_FIXTURE))
+	file.store_buffer(_fixture_bytes(OPTIONS_FIXTURE))
 	file.close()
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
@@ -1063,7 +1082,7 @@ func test_control_mapping_capture_dies_on_screen_change() -> void:
 	DirAccess.make_dir_recursive_absolute(dir)
 	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
 	assert_not_null(file)
-	file.store_buffer(FileAccess.get_file_as_bytes(OPTIONS_FIXTURE))
+	file.store_buffer(_fixture_bytes(OPTIONS_FIXTURE))
 	file.close()
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)

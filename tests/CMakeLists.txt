@@ -526,13 +526,15 @@ foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup)
 endforeach()
 
 # Minimal authored fixture set — the fatal-set RTXT string tables
-# (assets/). Regenerates each in memory and guards it byte-matches
-# the committed file + round-trips. See assets/README.md.
+# (assets/) and the synthetic parity set (fixtures/rtxt). Regenerates each
+# in memory and guards it byte-matches the committed file + round-trips.
+# See assets/README.md and fixtures/README.md.
 add_executable(minimal_rtxt_gen_test fixtures/minimal_rtxt_gen.cpp)
 target_link_libraries(minimal_rtxt_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_rtxt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(minimal_rtxt_gen_test PRIVATE
-    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+    RTXT_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/rtxt")
 add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
 
 # Minimal set's hand-authored text resources must be CRLF: retail's text
@@ -631,13 +633,14 @@ target_link_libraries(minimal_pff_package_test PRIVATE opennova_runtime opennova
 target_compile_definitions(minimal_pff_package_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 
-# RTXT parity against committed retail string tables (format invariants + byte roundtrip)
-add_executable(rtxt_real_parity_test rtxt/real_parity_test.cpp)
-target_link_libraries(rtxt_real_parity_test PRIVATE opennova_formats)
-target_include_directories(rtxt_real_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
-target_compile_definitions(rtxt_real_parity_test PRIVATE
+# RTXT parity over the minted synthetic string tables (format invariants + byte
+# roundtrip); the same checks over the retail bins are the gated install sweep.
+add_executable(rtxt_synth_parity_test rtxt/synth_parity_test.cpp)
+target_link_libraries(rtxt_synth_parity_test PRIVATE opennova_formats)
+target_include_directories(rtxt_synth_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
+target_compile_definitions(rtxt_synth_parity_test PRIVATE
     RTXT_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/rtxt")
-add_test(NAME rtxt_real_parity COMMAND rtxt_real_parity_test)
+add_test(NAME rtxt_synth_parity COMMAND rtxt_synth_parity_test)
 
 # Full-install RTXT sweep through the engine-faithful VFS (skips unless OPENNOVA_JO_DIR set)
 add_executable(rtxt_jo_install_sweep_test rtxt/jo_install_sweep_test.cpp)

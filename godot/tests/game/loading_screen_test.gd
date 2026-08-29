@@ -160,7 +160,8 @@ func test_sp_setup_loads_image_only() -> void:
 
 
 func test_mp_setup_carries_the_session_variables() -> void:
-	_register_gametext_fixture()
+	if not _register_gametext_fixture():
+		return
 	var screen := _setup_screen({
 		"mission_file": "00TRg.bms",
 		"in_session": true,
@@ -256,12 +257,18 @@ func _setup_screen(info: Dictionary) -> LoadingScreen:
 	return screen
 
 
-func _register_gametext_fixture() -> void:
+# The shipped gametext.bin (the LTGT_* game-type labels live in its table) comes
+# from the reference fixture set (docs/asset-gated-tests.md); false = pending.
+func _register_gametext_fixture() -> bool:
+	var path := RetailData.fixture("rtxt/gametext.bin")
+	if path.is_empty():
+		pending(RetailData.fixture_pending_text("rtxt/gametext.bin"))
+		return false
 	var table := RtxtStringFile.new()
-	assert_eq(table.load_from_byte_array(
-		FileAccess.get_file_as_bytes("res://../fixtures/rtxt/gametext.bin")), OK,
-		"gametext.bin fixture loads")
+	assert_eq(table.load_from_byte_array(FileAccess.get_file_as_bytes(path)), OK,
+		"the reference gametext.bin loads")
 	Strings.register_table("gametext", table)
+	return true
 
 
 func _make_temp_dir(name: String) -> String:
