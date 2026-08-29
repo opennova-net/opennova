@@ -1286,13 +1286,13 @@ Accepted/divergent (each a documented decision, not a defect):
   stock keymap (ledger register; the palette port itself is hud-re.md's
   `hud_color_index` scheme).
 
-- **D-MNU-1 (`%VAR%` mechanism):** per-field build-time expansion vs whole-buffer
+- **D-MNU-1 (`%VAR%` mechanism; PERMANENT 2026-08-29, ADR 0022 register):** per-field build-time expansion vs whole-buffer
   pre-parse - the runtime result matches for stylesheet vars; shell-var-in-text is a
   plumbing follow-up (ADR 0005).
-- **D-MNU-2 (sound jitter):** the shared `SoundSelector` reproduces member selection
+- **D-MNU-2 (sound jitter; PERMANENT 2026-08-29, ADR 0022 register):** the shared `SoundSelector` reproduces member selection
   but not the interleaved per-play volume/pitch jitter draws (same accepted divergence
   as the mission sound owner).
-- **D-MNU-3 (strictness / authoring superset):** the format layer preserves attributes
+- **D-MNU-3 (strictness / authoring superset; PERMANENT 2026-08-29, ADR 0022 register):** the format layer preserves attributes
   the runtime ignores (ADR 0002) and a shell `sound_profile` fallback services file-less
   `<SOUND>` nodes the engine would fail to parse.
 - **D-MNU-4 (per-quad int truncation):** the original truncates each scaled element rect
@@ -1923,7 +1923,7 @@ g_hostClassAllowMask`; `WeaponLoadout_ApplyFromBuffer` param 3 ->
   serialize the selected row. First open restores counts from the authoritative
   canonical kit, but separate remembered buffers per class remain deferred.
 
-- **D-MNU-10 (offline class selection, deliberate — user decision 2026-07-11):**
+- **D-MNU-10 (offline class selection, deliberate — user decision 2026-07-11; PERMANENT 2026-08-29, ADR 0022 register):**
   the retail WEAPON screen enables the PLAYER_CLASS spin only **in a network
   session** `[orig: UI_InitTeamClassSelection @ 0x567370 is_in_session branch;
   the SP-only open UI_OpenWeaponScreenSinglePlayer @ 0x424390 exists because SP

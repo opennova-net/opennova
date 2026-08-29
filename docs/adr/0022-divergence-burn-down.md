@@ -106,6 +106,29 @@ substrate; the divergence is wire/visually equivalent or reimpl-internal.
   effect index → fine depth) is a device-era mechanism; the reimpl's internal opaque
   ordering serves the same intent, with the key semantics preserved as T1-pinned pure
   functions. (Ratified at REN-3; entry back-filled here 2026-07-06.)
+- **D-THROW-2** — the bounce-kick and claymore-fan draws keep world-local streams of
+  retail's generator shape instead of the shared process globals at `0x31BFBB0/B8`:
+  distribution-faithful, every coupled value authority-drawn-and-shipped, so no draw
+  order is observable — the D-NET-115 ratification applied to the throwable family.
+  (Ratified 2026-08-29.)
+- **D-COL-7** — the vertical ground probe reads the bilinear column height where retail
+  marches + bisects (`Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`); equal for vertical rays
+  on a heightfield, and oblique rays already take `terrain_raycast_refined`. (Ratified 2026-08-29.)
+- **D-MNU-1 / D-MNU-2 / D-MNU-3 / D-MNU-10** — the menu-layer structural choices tabled
+  2026-08-04: per-field `%VAR%` expansion (rendered output identical, ADR 0005), the
+  un-modelled per-play sound jitter draws, the authoring-superset format strictness
+  (ADR 0002), and the offline PLAYER_CLASS spin (deliberate 2026-07-11: the runtime hosts a
+  listen session even for SP, ADR 0009). (Ratified 2026-08-29.)
+- **D-SND-1 / D-SND-3 / D-SND-4 / D-SND-10 / D-SND-13** — the sound-layer structural
+  choices tabled 2026-08-04: the merged bank chain (a collision-free superset), the
+  authoring-side parser strictness, the dialog FIFO (no overlap either way), the
+  ChuteFlap/FreeFall voice coalescing (audibly equivalent), and the per-load SndProf.def
+  parse (same file, same table). (Ratified 2026-08-29.)
+- **D-LOADSCR-1 / D-LOADSCR-6 / D-LOADSCR-7** — the loading-screen structural choices
+  tabled 2026-08-04: the coarser progress granularity (same values, same pump), the
+  unmodulated background (MODULATE2X-neutral, net-identical), and the uninterruptible
+  synchronous SP/host map load (no reachable poll window; the joiner waits honour ESC).
+  (Ratified 2026-08-29.)
 **Original-bug / garbage class** (basis:
 [ADR 0003](0003-no-raw-passthrough-create-from-scratch.md)).
 
