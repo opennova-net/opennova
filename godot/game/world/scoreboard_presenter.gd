@@ -27,7 +27,8 @@ func reset() -> void:
 	_pushed = false
 
 
-func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool) -> void:
+func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
+		frame_counter: int) -> void:
 	if hud == null or world == null:
 		return
 	var down := ControlsBindings.pressed("playerlist_alt")
@@ -36,7 +37,7 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool) -> v
 	_was_down = down
 	if not _open:
 		if _pushed:
-			hud.set_scoreboard(false, 0, {}, null)
+			hud.set_scoreboard(false, 0, 0, {}, null)
 			_pushed = false
 		return
 	var sim: Simulation = world.get_sim()
@@ -77,6 +78,8 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool) -> v
 					table.get_string_in_section("Client", "STRCLI23"), spectators]
 		if table.has_string_in_section("Text", "CHANGE_SCREEN"):
 			strings["footer"] = table.get_string_in_section("Text", "CHANGE_SCREEN")
-	# The rows never round-trip through script: the overlay pulls them
-	# natively from the sim (HudOverlay.set_scoreboard -> fill_scoreboard_rows).
-	hud.set_scoreboard(true, game_type, strings, sim)
+	# The rows never round-trip through script: the overlay pulls them (and the
+	# team count the 4-team page reads) natively from the sim
+	# (HudOverlay.set_scoreboard -> fill_scoreboard_rows); the frame counter is
+	# the HUD tick the page alternates on [orig: dword_A87060 & 0x80 @0x423cdd].
+	hud.set_scoreboard(true, game_type, frame_counter, strings, sim)

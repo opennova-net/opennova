@@ -1537,3 +1537,8 @@ bool Simulation::fill_scoreboard_rows(
 	opennova::netsim::project_scoreboard(runtime_->state(), r_rows);
 	return true;
 }
+
+int Simulation::scoreboard_team_count() const {
+	if (!runtime_) return 0;
+	return static_cast<int>(runtime_->state().scoreboard.team_count);
+}

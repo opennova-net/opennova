@@ -423,6 +423,14 @@ struct HudScoreboardState {
 	std::string spectators_line; // "<Client/STRCLI23> <count>", empty when none
 	std::string footer;        // Text/CHANGE_SCREEN paging hint
 	std::vector<ScoreboardEntry> rows;   // wire order; the server sorts
+	// The 4-team page inputs (hud_scoreboard.h scoreboard_team_page): the
+	// session's side count — a joiner reads it off the 0x16 team table the
+	// host serializes from its g_num_teams_config [orig: @0x50db3a ->
+	// g_scoreboard_team_count @0x42fdda] — and the HUD frame counter, the
+	// per-main-frame clock the LFP panel blinks on too [orig: dword_A87060,
+	// Game_TickHudFrameCounters @0x434c14].
+	int team_count = 0;
+	int frame_counter = 0;
 };
 
 // One seat box on the mounted-vehicle panel.

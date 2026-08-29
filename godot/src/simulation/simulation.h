@@ -1588,6 +1588,10 @@ public:
 	// runtime exists.
 	bool fill_scoreboard_rows(
 			std::vector<opennova::hud::ScoreboardEntry> &r_rows) const;
+	// The folded board's team-table count — the host's configured side count
+	// as the 0x16 carries it [orig: g_scoreboard_team_count @0x42fdda]; 0
+	// without a runtime. NOT ClassDB-bound; HudOverlay reads it beside the rows.
+	int scoreboard_team_count() const;
 	// The mounted-vehicle panel (hud/hud_vehicle_panel.h, world/vehicle_panel_feed.h):
 	// {shown, item_id} — the panel's root vehicle (the attached gun child
 	// re-roots to its parent), whose items.def sid the shell joins to its

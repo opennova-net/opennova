@@ -1679,6 +1679,11 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	// residual, so the base never scrolls [orig: the page fold @0x423c1c].
 	const float list_base = hy + static_cast<float>(kListGap);
 	const bool non_team = scoreboard_is_non_team(state.scoreboard.game_type);
+	// The two teams (and colors) a team-mode board columns this frame: 1/2,
+	// or the 3/4 page on the frame counter's bit 7 once more than two sides
+	// are configured [orig: @0x423cd0-0x423cf1].
+	const ScoreboardTeamPage page = scoreboard_team_page(
+			state.scoreboard.team_count, state.scoreboard.frame_counter);
 
 	// The pre-pass mirrors the draw rules to seed the spectator cursor below
 	// the LONGER player column, plus two spacer rows when both players and
@@ -1696,9 +1701,9 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 				toggle ^= 1;
 				if (toggle) ++count_a;
 				else ++count_b;
-			} else if (e.has_entity && e.team == 1) {
+			} else if (e.has_entity && e.team == page.team_a) {
 				++count_a;
-			} else if (e.has_entity && e.team == 2) {
+			} else if (e.has_entity && e.team == page.team_b) {
 				++count_b;
 			}
 		}
@@ -1718,13 +1723,14 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	int ordinal = 0;
 	for (const ScoreboardEntry &e : state.scoreboard.rows) {
 		// Team modes draw only rows whose slot still binds a live entity on
-		// team 1/2 — a leaver's row vanishes; the 4-team variant is a
-		// recorded residual [orig: the entity-null fallthrough @0x423d1b].
+		// one of the page's two teams — a leaver's row vanishes, and the
+		// other page's teams wait their 128 frames [orig: the entity-null
+		// fallthrough @0x423d1b; the team tests @0x423d28/@0x423d45].
 		if (!non_team && !e.spectator &&
-				!(e.has_entity && (e.team == 1 || e.team == 2))) {
+				!(e.has_entity && (e.team == page.team_a || e.team == page.team_b))) {
 			continue;
 		}
-		const int col = scoreboard_column_x(e, non_team, ordinal);
+		const int col = scoreboard_column_x(e, non_team, ordinal, page);
 		if (!e.spectator) ++ordinal;
 		const int row_rank = rank;
 		if (!e.spectator) ++rank;
@@ -1735,7 +1741,7 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 		// Rows draw only inside the panel [orig: the < 490 arm @0x424168;
 		// the >= base arm only matters once paging lands].
 		if (row_y >= static_cast<float>(kListBottom)) continue;
-		const uint32_t color = scoreboard_row_color(e, non_team, hud);
+		const uint32_t color = scoreboard_row_color(e, non_team, hud, page);
 		// Spectators carry no rank [orig: the rank sprintf sits inside the
 		// non-spectator arm @0x42416e].
 		if (!e.spectator) {
