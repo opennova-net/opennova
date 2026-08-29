@@ -1,5 +1,7 @@
 #include "simulation/entity_card.h"
 
+#include "simulation/simulation_internal.h" // godot_from_mission_vec3, the ONE axis map
+
 #include <godot_cpp/variant/array.hpp>
 
 namespace godot {
@@ -11,7 +13,7 @@ using opennova::world::inspect::SeatRow;
 using opennova::world::inspect::WorldDetail;
 
 Vector3 godot_from_mission(const opennova::world::Vec3 &p) {
-	return Vector3(p.x, p.z, -p.y);
+	return sim_internal::godot_from_mission_vec3(p);
 }
 
 Vector3 raw_mission(const opennova::world::Vec3 &p) {
@@ -233,14 +235,11 @@ Vector3 EntityCardSeat::get_local() const {
 }
 
 void EntityCardSeat::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_seat_index"), &EntityCardSeat::get_seat_index);
 	ClassDB::bind_method(D_METHOD("get_type"), &EntityCardSeat::get_type);
 	ClassDB::bind_method(D_METHOD("get_retail_slot"), &EntityCardSeat::get_retail_slot);
 	ClassDB::bind_method(D_METHOD("get_bone_index"), &EntityCardSeat::get_bone_index);
 	ClassDB::bind_method(D_METHOD("get_pose_index"), &EntityCardSeat::get_pose_index);
 	ClassDB::bind_method(D_METHOD("get_source_name"), &EntityCardSeat::get_source_name);
-	ClassDB::bind_method(D_METHOD("get_local"), &EntityCardSeat::get_local);
-	ClassDB::bind_method(D_METHOD("get_yaw_offset"), &EntityCardSeat::get_yaw_offset);
 	ClassDB::bind_method(D_METHOD("is_occupied"), &EntityCardSeat::is_occupied);
 }
 
@@ -363,7 +362,6 @@ Dictionary EntityCard::to_json_value() const {
 void EntityCard::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_ai"), &EntityCard::has_ai);
 	ClassDB::bind_method(D_METHOD("has_world"), &EntityCard::has_world);
-	ClassDB::bind_method(D_METHOD("has_replica"), &EntityCard::has_replica);
 	ClassDB::bind_method(D_METHOD("get_wire_handle"), &EntityCard::get_wire_handle);
 	ClassDB::bind_method(D_METHOD("get_ai_index"), &EntityCard::get_ai_index);
 	ClassDB::bind_method(D_METHOD("get_kind"), &EntityCard::get_kind);
@@ -384,7 +382,6 @@ void EntityCard::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_yaw_deg"), &EntityCard::get_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_state"), &EntityCard::get_state);
 	ClassDB::bind_method(D_METHOD("get_state_name"), &EntityCard::get_state_name);
-	ClassDB::bind_method(D_METHOD("get_alert"), &EntityCard::get_alert);
 	ClassDB::bind_method(D_METHOD("get_profile_type"), &EntityCard::get_profile_type);
 	ClassDB::bind_method(D_METHOD("has_primary_occupant"), &EntityCard::has_primary_occupant);
 	ClassDB::bind_method(D_METHOD("get_character_anim_slot"), &EntityCard::get_character_anim_slot);
@@ -410,7 +407,6 @@ void EntityCard::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mount_target_seats"), &EntityCard::get_mount_target_seats);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon_clip"), &EntityCard::get_primary_weapon_clip);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon_reserve"), &EntityCard::get_primary_weapon_reserve);
-	ClassDB::bind_method(D_METHOD("get_seat_count"), &EntityCard::get_seat_count);
 	ClassDB::bind_method(D_METHOD("get_seats"), &EntityCard::get_seats);
 	ClassDB::bind_method(D_METHOD("to_json_value"), &EntityCard::to_json_value);
 }

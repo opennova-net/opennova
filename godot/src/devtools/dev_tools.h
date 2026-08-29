@@ -121,7 +121,10 @@ private:
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
 	bool open_ = false; // the last state the shell was told about
-	Simulation *simulation_ = nullptr; // world-load..world-unload; never owned
+	// world-load..world-unload, never owned: an ObjectID so a runtime freed
+	// off the shell's teardown legs resolves to null instead of dangling.
+	ObjectID simulation_id_;
+	Simulation *simulation() const;
 	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;

@@ -1,5 +1,7 @@
 #include "simulation/entity_row.h"
 
+#include "simulation/simulation_internal.h" // godot_from_mission_vec3, the ONE axis map
+
 namespace godot {
 
 String EntityRow::get_name() const {
@@ -11,8 +13,7 @@ String EntityRow::get_state_name() const {
 }
 
 Vector3 EntityRow::get_world_position() const {
-	return Vector3(value_.mission_position.x, value_.mission_position.z,
-			-value_.mission_position.y);
+	return sim_internal::godot_from_mission_vec3(value_.mission_position);
 }
 
 Vector3 EntityRow::get_mission_position() const {
@@ -52,13 +53,10 @@ void EntityRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_index"), &EntityRow::get_index);
 	ClassDB::bind_method(D_METHOD("get_ai_index"), &EntityRow::get_ai_index);
 	ClassDB::bind_method(D_METHOD("is_editable"), &EntityRow::is_editable);
-	ClassDB::bind_method(D_METHOD("is_presented"), &EntityRow::is_presented);
-	ClassDB::bind_method(D_METHOD("is_registry_present"), &EntityRow::is_registry_present);
 	ClassDB::bind_method(D_METHOD("get_kind"), &EntityRow::get_kind);
 	ClassDB::bind_method(D_METHOD("get_source_index"), &EntityRow::get_source_index);
 	ClassDB::bind_method(D_METHOD("get_bms_id"), &EntityRow::get_bms_id);
 	ClassDB::bind_method(D_METHOD("get_net_id"), &EntityRow::get_net_id);
-	ClassDB::bind_method(D_METHOD("get_type_id"), &EntityRow::get_type_id);
 	ClassDB::bind_method(D_METHOD("get_wire_handle"), &EntityRow::get_wire_handle);
 	ClassDB::bind_method(D_METHOD("get_name"), &EntityRow::get_name);
 	ClassDB::bind_method(D_METHOD("get_state_name"), &EntityRow::get_state_name);
@@ -66,7 +64,6 @@ void EntityRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_team"), &EntityRow::get_team);
 	ClassDB::bind_method(D_METHOD("is_alive"), &EntityRow::is_alive);
 	ClassDB::bind_method(D_METHOD("is_hidden"), &EntityRow::is_hidden);
-	ClassDB::bind_method(D_METHOD("get_world_position"), &EntityRow::get_world_position);
 	ClassDB::bind_method(D_METHOD("get_mission_position"), &EntityRow::get_mission_position);
 	ClassDB::bind_method(D_METHOD("to_json_value"), &EntityRow::to_json_value);
 }

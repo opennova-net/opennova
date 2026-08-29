@@ -5,6 +5,7 @@
 // (hud/end_round_overlay.h) and the stat.mnu RESULTLIST feed
 // (npruntime/stat_screen_feed.h).
 #include "simulation/simulation_internal.h"
+#include "simulation/end_round_state.h"
 
 #include "rtxt/rtxt_string_file.h"
 
@@ -60,45 +61,49 @@ Dictionary arg_to_dict(const opennova::hud::EndRoundArg &a) {
 
 } // namespace
 
-Dictionary Simulation::get_end_round_state() const {
+Ref<EndRoundState> Simulation::get_end_round_state() const {
 	// [orig: the S2C 0x1D landing NapiNPClientMsg_0x01D @0x430840 —
 	// g_spawn_success_gate, g_endround_winner_team, g_scoreTeamScore0/1,
 	// g_endround_draw_flag, dword_A81B2C = GetTickCount; the 0x56 board
 	// completion.] Role-agnostic: every role's view folds both lanes.
-	Dictionary out;
-	if (!runtime_) return out;
-	const opennova::netsim::ClientEndRoundStats &er = runtime_->state().end_round;
-	out["header_known"] = er.header_known;
-	out["board_known"] = er.known;
-	out["game_type"] = static_cast<int64_t>(runtime_->game_type());
-	out["winner"] = static_cast<int>(er.header.winner_team);
-	Array scores;
-	scores.push_back(static_cast<int>(er.header.team_score_0));
-	scores.push_back(static_cast<int>(er.header.team_score_1));
-	out["team_scores"] = scores;
-	out["draw"] = er.header.draw != 0;
-	out["my_index"] = static_cast<int>(er.header.player_index);
-	// The authority reads its own Match clock; a joiner reads the folded
-	// 0x0A sub-block-1 copy. [orig: g_round_time_remaining @0x24C1958,
-	// the joiner store @0x430219..0x430235]
-	const int32_t remaining = joiner_
-			? runtime_->state().round_time_remaining_ticks
-			: (kernel_ ? kernel_->world.match.remaining_ticks() : -1);
-	out["round_ticks"] = std::max(0, remaining);
-	out["death_screen"] = local_death_screen_active();
-	out["local_team"] = static_cast<int>(runtime_->assigned_team());
-	// The team-mode arm stat.mnu's RADIO_TAB_* trio rides (the g_GameType
-	// 0x10000 bit, world/game_type.h; the show callback's witness is
-	// stat_screen_feed.h's).
-	out["team_mode"] = opennova::game_type::is_team(runtime_->game_type());
-	// The round-cycle handoff's session half: the host's post-round linger
-	// expiry closes the session [orig: Server_TickUpdate's drain sets
-	// g_mission_exit_reason = 3 @0x51db63 — the map cycle]; a joiner's session
-	// dies with the host's exit.
-	out["session_open"] = joiner_
-			? !(runtime_ && runtime_->session_lost())
-			: ctx_.is_in_session != 0;
-	return out;
+	Ref<EndRoundState> record;
+	record.instantiate();
+	EndRoundState::Value v;
+	if (runtime_) {
+		const opennova::netsim::ClientEndRoundStats &er = runtime_->state().end_round;
+		v.header_known = er.header_known;
+		v.board_known = er.known;
+		v.game_type = runtime_->game_type();
+		v.winner = static_cast<int>(er.header.winner_team);
+		v.team_score_0 = static_cast<int>(er.header.team_score_0);
+		v.team_score_1 = static_cast<int>(er.header.team_score_1);
+		v.draw = er.header.draw != 0;
+		v.my_index = static_cast<int>(er.header.player_index);
+		// The authority reads its own Match clock; a joiner reads the folded
+		// 0x0A sub-block-1 copy. [orig: g_round_time_remaining @0x24C1958,
+		// the joiner store @0x430219..0x430235]
+		const int32_t remaining = joiner_
+				? runtime_->state().round_time_remaining_ticks
+				: (kernel_ ? kernel_->world.match.remaining_ticks() : -1);
+		v.round_ticks = std::max(0, remaining);
+		v.death_screen = local_death_screen_active();
+		v.local_team = static_cast<int>(runtime_->assigned_team());
+		// The team-mode arm stat.mnu's RADIO_TAB_* trio rides (the g_GameType
+		// 0x10000 bit, world/game_type.h; the show callback's witness is
+		// stat_screen_feed.h's).
+		v.team_mode = opennova::game_type::is_team(runtime_->game_type());
+		// The round-cycle handoff's session half: the host's post-round linger
+		// expiry closes the session [orig: Server_TickUpdate's drain sets
+		// g_mission_exit_reason = 3 @0x51db63 — the map cycle]; a joiner's
+		// session dies with the host's exit.
+		v.session_open = joiner_ ? !runtime_->session_lost() : ctx_.is_in_session != 0;
+	}
+	record->assign(v);
+	return record;
+}
+
+bool Simulation::is_mp_session() const {
+	return kernel_ != nullptr && kernel_->world.mp_session;
 }
 
 opennova::hud::EndRoundOverlayInput Simulation::end_round_overlay_input() const {

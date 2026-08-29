@@ -118,14 +118,10 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("health_color_band", "fraction"), &HudPos::health_color_band);
 	ClassDB::bind_static_method("HudPos", D_METHOD("message_expire_tick", "now_ticks", "prev_expire", "has_prev"), &HudPos::message_expire_tick);
 	ClassDB::bind_static_method("HudPos", D_METHOD("format_ammo", "clip", "reserve", "capacity"), &HudPos::format_ammo);
-	ClassDB::bind_static_method("HudPos", D_METHOD("weapon_name_x_nudge", "narrow_surface", "align"), &HudPos::weapon_name_x_nudge);
 	ClassDB::bind_static_method("HudPos", D_METHOD("round_icon_count", "clip", "reserve", "capacity", "divisor"), &HudPos::round_icon_count);
 	ClassDB::bind_static_method("HudPos", D_METHOD("folded_reserve", "clip", "reserve", "capacity"), &HudPos::folded_reserve);
 	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_distance_m", "ground_delta"), &HudPos::waypoint_distance_m);
-	ClassDB::bind_static_method("HudPos", D_METHOD("heat_fill_span", "extent_px", "heat"), &HudPos::heat_fill_span);
-	ClassDB::bind_static_method("HudPos", D_METHOD("heat_bar_is_horizontal", "bar_size"), &HudPos::heat_bar_is_horizontal);
 	ClassDB::bind_static_method("HudPos", D_METHOD("power_throw_progress_fp16", "held_ticks"), &HudPos::power_throw_progress_fp16);
-	ClassDB::bind_static_method("HudPos", D_METHOD("power_fill_span", "progress_fp16", "extent_px"), &HudPos::power_fill_span);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_step", "displayed", "reported"), &HudPos::loading_bar_step);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_span", "x", "w", "displayed"), &HudPos::loading_bar_fill_span);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_spread_px_fp16", "spread_fp16", "fov_deg", "screen_w"), &HudPos::crosshair_spread_px_fp16);

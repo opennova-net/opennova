@@ -1008,8 +1008,6 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::widget_name);
 	ClassDB::bind_method(D_METHOD("widget_kind", "index"),
 			&MenuFrame::widget_kind);
-	ClassDB::bind_method(D_METHOD("widget_authored_text", "index"),
-			&MenuFrame::widget_authored_text);
 	ClassDB::bind_method(D_METHOD("is_widget_disabled", "index"),
 			&MenuFrame::is_widget_disabled);
 	ClassDB::bind_method(D_METHOD("is_widget_shown", "index"),
@@ -1026,8 +1024,6 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::hit_test);
 	ClassDB::bind_method(D_METHOD("list_row_at", "index", "position"),
 			&MenuFrame::list_row_at);
-	ClassDB::bind_method(D_METHOD("list_visible_rows", "index"),
-			&MenuFrame::list_visible_rows);
 	ClassDB::bind_method(D_METHOD("combo_popup_rect", "index"),
 			&MenuFrame::combo_popup_rect);
 	ClassDB::bind_method(

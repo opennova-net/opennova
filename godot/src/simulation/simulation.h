@@ -40,6 +40,7 @@ namespace godot {
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
 class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 0042 d5)
 class EntityRow;      // one typed entity-directory row
+class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
 #include "wac/wac_program.h"
@@ -803,12 +804,6 @@ private:
 	// kernel_->view_tracker; the witnessed gates in world/local_player_view.h);
 	// this class converts frames and routes wire requests
 	// (simulation_player_view.cpp).
-	// The client medic-call cooldown (retail dword_B76804): 310 ticks from the
-	// send, one per tick, cleared on the local death edge.
-	int medic_request_cooldown_ticks_ = 0;
-	int medic_request_serial_ = 0;
-	bool local_dead_edge_seen_ = false;
-	void tick_local_medic_cooldown();
 	opennova::world::LocalViewSessionInputs local_view_session_inputs() const;
 	void reset_local_player_view_effects();
 	void refresh_local_player_view_effects();
@@ -1265,8 +1260,11 @@ public:
 	// the 0x1D header edge + the 0x56 board through the ONE ClientEndRoundStats
 	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)
 	// and the stat.mnu RESULTLIST columns/rows (npruntime/stat_screen_feed.h).
-	Dictionary get_end_round_state() const;
+	Ref<EndRoundState> get_end_round_state() const;
 	TypedArray<Dictionary> get_end_round_lines() const;
+	// The retail is_in_session fact for the shell's round-cycle and HUD
+	// arms: the world's mp_session bit (the 0x1D header form).
+	bool is_mp_session() const;
 	// The ladder's input from this role's view (C++ only, not bound): the
 	// shared producer of get_end_round_lines / get_end_round_overlay.
 	opennova::hud::EndRoundOverlayInput end_round_overlay_input() const;
@@ -1969,6 +1967,10 @@ public:
 	// (-1 = no brain / no kernel) — the dev-tools drain resolves a queued
 	// request's handle onto the ai_index the debug delegates key on.
 	int native_ai_index_for_handle(int p_handle) const;
+	// The engine's tool/probe mutation seam by entity handle (ADR 0042 d5),
+	// for the C++ embedders (DevTools) that already hold a handle; null
+	// without a kernel.
+	opennova::world::EntityCommands *entity_commands();
 	// The full card by packed wire handle; null when nothing resolves. The
 	// AI-index and SSN forms wrap the same builder (edit seams key on
 	// ai_index; pool-1 vehicles carry no brain and resolve by SSN).
@@ -2206,8 +2208,8 @@ public:
 	int get_local_player_sun_quality() const { return local_sun_quality_; }
 	// Quality (1..4) -> the effectScale the render-state stack multiplies —
 	// engine-owned so the mapping has ONE writer (renderer::
-	// sun_visibility_factor; retail: Entity_ComputeSunVisibility @0x5c6800,
-	// stack write @0x5c7fa5, see docs/render/render-lighting-re.md). Both
+	// sun_visibility_factor carries the Entity_ComputeSunVisibility cite,
+	// see docs/render/render-lighting-re.md). Both
 	// presentation consumers (the occlusion sun feed and the local-player
 	// body) call this instead of re-deriving the 0.25 step.
 	float sun_quality_factor(int p_quality) const;

@@ -819,10 +819,7 @@ String Simulation::ai_state_name(int p_state) {
 }
 
 String Simulation::infantry_anim_key(int p_state) {
-	if (p_state < 0 || p_state >= opennova::world::kInfantryAnimStateCount) return String();
-	const char *name = opennova::world::kInfantryAnimNames[p_state];
-	if (!name || !name[0]) return String();
-	return String("anim_") + String(name);
+	return String(opennova::world::infantry_anim_key(p_state).c_str());
 }
 
 int64_t Simulation::infantry_anim_flags(int p_state) {

@@ -18,43 +18,18 @@
 
 using namespace godot;
 
-namespace {
-
-// The retail client medic-call cooldown: 310 ticks stamped at the send
-// [orig: Input_HandleActionBinding case 217 @0x49b511 `dword_B76804 =
-// 0x136`; decremented once per frame in Player_UpdatePerFrame @0x4de73e;
-// cleared on the local death path @0x4b4d06, see docs/net/novaworld-net-re.md
-// 0x2E].
-constexpr int kMedicRequestCooldownTicks = 0x136;
-
-} // namespace
-
 bool Simulation::local_player_dead() const {
 	// The one role-agnostic read of the local player's dead bit: the joiner's
-	// recipient-local 0x0A health channel, the authority's entity flags.
-	if (joiner_) {
-		// The recipient-local 0x0A health tail (the client stores it as its own
-		// Health) or the self record's dead bit (byte13 bit 0x02 -> Flags & 2 in
-		// the local apply @0x4c1005).
-		if (runtime_ == nullptr) return false;
-		const opennova::netsim::ClientState &cs = runtime_->state();
-		if (cs.local_health <= 0) return true;
-		if (!runtime_->has_self_handle()) return false;
-		const opennova::netsim::ClientEntityState *self = cs.find(runtime_->self_handle());
-		return self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
-	}
-	if (!kernel_->world.cached.local_player.valid()) return false;
-	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
-	return e != nullptr &&
-			((e->flags | e->engine_flags) & opennova::world::kEntityFlagDead) != 0;
+	// replica (np::ClientRuntime), the authority's entity flags (the kernel).
+	if (joiner_) return runtime_ != nullptr && runtime_->local_player_dead();
+	return kernel_ != nullptr && kernel_->local_player_dead();
 }
 
 bool Simulation::request_local_player_medic() {
-	// The action gates [orig: case 217 @0x49b4b4..0x49b4da — in session, a
-	// local entity, `Flags & 2`, the cooldown at zero].
+	// The session/entity gates are the binding's (a live runtime, a local
+	// entity); the dead-bit and cooldown gates are the kernel's.
 	if (!runtime_ || !kernel_->world.cached.local_player.valid()) return false;
-	if (!local_player_dead()) return false;
-	if (medic_request_cooldown_ticks_ != 0) return false;
+	if (!kernel_->medic_request_allowed(local_player_dead())) return false;
 	bool sent = false;
 	if (joiner_) {
 		sent = runtime_->queue_medic_request();
@@ -68,28 +43,16 @@ bool Simulation::request_local_player_medic() {
 				opennova::encode_medic_request(request));
 		sent = true;
 	}
-	if (sent) {
-		medic_request_cooldown_ticks_ = kMedicRequestCooldownTicks;
-		++medic_request_serial_;
-	}
+	if (sent) kernel_->stamp_medic_request();
 	return sent;
 }
 
-void Simulation::tick_local_medic_cooldown() {
-	// [orig: Player_UpdatePerFrame @0x4de736..0x4de744 — one per frame while
-	// nonzero; the local death path @0x4b4d06 zeroes it.]
-	const bool dead = local_player_dead();
-	if (dead && !local_dead_edge_seen_) medic_request_cooldown_ticks_ = 0;
-	local_dead_edge_seen_ = dead;
-	if (medic_request_cooldown_ticks_ > 0) --medic_request_cooldown_ticks_;
-}
-
 int Simulation::local_medic_request_cooldown_ticks() const {
-	return medic_request_cooldown_ticks_;
+	return kernel_ ? kernel_->medic_request_cooldown_ticks : 0;
 }
 
 int Simulation::local_medic_request_serial() const {
-	return medic_request_serial_;
+	return kernel_ ? kernel_->medic_request_serial : 0;
 }
 
 void Simulation::set_server_text(const String &p_medic_request_format) {
@@ -154,8 +117,8 @@ Dictionary Simulation::get_deploy_status() {
 	out["queued_numbered"] = line.numbered;
 	out["show_psp_respawn"] = statics.psp_respawn;
 	out["show_medic"] = statics.medic;
-	out["medic_cooldown_ticks"] = medic_request_cooldown_ticks_;
-	out["medic_request_serial"] = medic_request_serial_;
+	out["medic_cooldown_ticks"] = kernel_ ? kernel_->medic_request_cooldown_ticks : 0;
+	out["medic_request_serial"] = kernel_ ? kernel_->medic_request_serial : 0;
 	return out;
 }
 

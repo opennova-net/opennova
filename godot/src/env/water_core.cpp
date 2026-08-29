@@ -8,7 +8,6 @@ void WaterCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("update", "frame_counter"), &WaterCore::update);
 	ClassDB::bind_method(D_METHOD("get_color_rgba8"), &WaterCore::get_color_rgba8);
 	ClassDB::bind_method(D_METHOD("get_normal_rgba8"), &WaterCore::get_normal_rgba8);
-	ClassDB::bind_method(D_METHOD("strip_indices"), &WaterCore::strip_indices);
 }
 
 void WaterCore::update(int p_frame_counter) {

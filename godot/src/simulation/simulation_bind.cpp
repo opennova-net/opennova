@@ -2,6 +2,7 @@
 #include "simulation/simulation_internal.h"
 
 #include "rtxt/rtxt_string_file.h" // the gametext table type the end-round / deploy feeds bind
+#include "simulation/end_round_state.h" // the typed end-of-round record
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
 #include "simulation/entity_row.h"
 
@@ -160,6 +161,7 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_server_text);
 	ClassDB::bind_method(D_METHOD("is_local_player_dead"), &Simulation::local_player_dead);
 	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
+	ClassDB::bind_method(D_METHOD("is_mp_session"), &Simulation::is_mp_session);
 	ClassDB::bind_method(D_METHOD("get_end_round_overlay", "gametext"),
 	                     &Simulation::get_end_round_overlay);
 	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width", "gametext"),

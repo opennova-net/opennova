@@ -84,7 +84,6 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_state"), &NovaWorldClient::get_state);
 	ClassDB::bind_method(D_METHOD("is_session_active"), &NovaWorldClient::is_session_active);
 	ClassDB::bind_method(D_METHOD("get_server_info"), &NovaWorldClient::get_server_info);
-	ClassDB::bind_method(D_METHOD("get_session_debug"), &NovaWorldClient::get_session_debug);
 	ClassDB::bind_method(D_METHOD("get_server_rows"), &NovaWorldClient::get_server_rows);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);

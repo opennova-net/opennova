@@ -28,13 +28,10 @@ public:
 	int get_index() const { return value_.index; }
 	int get_ai_index() const { return value_.ai_index; }
 	bool is_editable() const { return value_.editable; }
-	bool is_presented() const { return value_.presented; }
-	bool is_registry_present() const { return value_.registry_present; }
 	int get_kind() const { return value_.kind; }
 	int get_source_index() const { return value_.source_index; }
 	int get_bms_id() const { return value_.bms_id; }
 	int get_net_id() const { return value_.net_id; }
-	int get_type_id() const { return value_.item_id; }
 	int get_wire_handle() const { return static_cast<int>(value_.wire_handle); }
 	String get_name() const;
 	String get_state_name() const;

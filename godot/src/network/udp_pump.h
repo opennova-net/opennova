@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <base/pcapio/pcap_writer.h>
+#include <net/npwire/peer_addr.h>
 
 #include <deque>
 #include <memory>
@@ -51,8 +52,11 @@ public:
 	bool has_inbound() const { return !inbound_.empty(); }
 	int inbound_count() const { return static_cast<int>(inbound_.size()); }
 	// Pop the next received datagram as {ip:String, port:int, bytes:PackedByteArray}; an empty
-	// Dictionary when none. The source address routes it to its connection's transport.
+	// Dictionary when none (the GDScript/test form).
 	Dictionary take_inbound();
+	// The native form the Simulation's datagram-socket adapter drains: the
+	// source address already packed at poll time. False when none is queued.
+	bool take_inbound_native(opennova::PeerAddr &from, PackedByteArray &bytes);
 
 	// Send `bytes` to a specific peer (host side, per joiner) — set_dest_address + put_packet.
 	int send_to(const String &ip, int port, const PackedByteArray &bytes);
@@ -95,6 +99,7 @@ private:
 	struct Inbound {
 		String ip;
 		int port = 0;
+		opennova::PeerAddr addr; // ip/port packed once at poll time
 		PackedByteArray bytes;
 	};
 	std::deque<Inbound> inbound_;

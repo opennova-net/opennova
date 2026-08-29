@@ -197,31 +197,10 @@ bool Simulation::local_player_toggle_mount() {
 				hit.vehicle.packed,
 				vehicle->seats[static_cast<size_t>(hit.seat_index)].bone_index);
 	}
-	// The null EquippedSlot rejection belongs to UseGun itself, not the
-	// top-level USE action: an unarmed local player can still enter an ordinary
-	// passenger/control seat. It is also deliberately an out-of-session-only
-	// player gate; force/script and NAPI authority paths bypass it.
-	// [orig: Entity_AttachToUseGunSlot @0x546b80, reject
-	//  !is_in_session && Flags&0x100 && !EquippedSlot @0x546c07]
-	if (!listen_server_ && !kernel_->weapon.active) {
-		opennova::world::VehicleSeatSelection hit;
-		if (opennova::world::find_mount_toggle_candidate(
-					kernel_->world, *toggle_player, hit) &&
-				hit.type == opennova::world::SeatType::Gunner)
-			return false;
-	}
-	const bool changed = opennova::world::player_toggle_vehicle_mount(
-			kernel_->world, kernel_->world.cached.local_player);
-	if (changed) {
-		// A successful ToSpecial/use-item transition clears the raw binocular
-		// request, not merely the effective first-person view.
-		kernel_->view.binoculars_requested = false;
-		kernel_->view_tracker.binocular_yaw_offset_deg = 0.0f;
-		kernel_->view_tracker.binocular_pitch_offset_deg = 0.0f;
-		refresh_local_player_view_effects();
-		kernel_->sync_local_mounted_input_heading();
-		sync_local_usegun_weapon_transition();
-	}
+	// The authority's toggle is the kernel's one body (the out-of-session
+	// UseGun rejection, the seat transition, the view/weapon folds).
+	const bool changed = kernel_->toggle_mount();
+	if (changed) refresh_local_player_view_effects();
 	return changed;
 }
 
