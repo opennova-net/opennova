@@ -101,6 +101,17 @@ inline std::string asset_file(const char *name) {
     return std::string();
 }
 
+// `<assets>/fixtures/<rel>`: the retail-interop fixture set the reference tree
+// mirrors under its `fixtures/` subtree (the retail files the parsers prove they
+// read as shipped: menus, string tables, defs, rigs, ...; they never live in this
+// repository). "" when the tree is unset or the file is absent.
+inline std::string reference_fixture(const char *rel) {
+    const std::string root = assets();
+    if (root.empty() || !dir_exists(root)) return std::string();
+    const std::string path = join(join(root, "fixtures"), rel);
+    return file_exists(path) ? path : std::string();
+}
+
 // The expansion names shipped under <install>/expansion/, sorted; empty when
 // the install is unset or carries none. Which expansions a machine has is
 // machine-specific (JO:CA ships jox01, JOTAC ships revx02), so a test that
