@@ -10,6 +10,7 @@
     "fixtures/mnu/widgets.mnu",
     "fixtures/mnu/all_widgets.mnu",
     "fixtures/mns/test_style.mns",
+    "fixtures/particle/gorehit.ptu",
     "fixtures/score/score_sample.ini",
     "fixtures/terrain/tmap/items.def",
     "fixtures/novaworld/*_manifest.txt"
@@ -33,7 +34,6 @@
     "fixtures/novaworld/*.hexcap",
     "fixtures/novaworld/run_*/*",
     "fixtures/particle/*.ptl",
-    "fixtures/particle/gorehit.ptu",
     "fixtures/rtxt/*.bin"
   ],
   "size_exceptions": [

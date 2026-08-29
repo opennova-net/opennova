@@ -52,7 +52,7 @@ authored file.
 | `mus/jo_gamemus.bin`, `mus/jo_menumus.bin`, `mus/golden_jo_gamemus.mus.txt` | the music director scripts and their decoded golden |
 | `adm/mp5_1st.adm`, `bad/BINOC.bad`, `bad/BINOC_twist.bad` | the retail animation-definition and clip formats (skinned-rig twist parity) |
 | `env/full_00.env` | a complete retail environment file (every section populated) |
-| `particle/*.ptl`, `particle/gorehit.ptu` | the particle catalogue parser's retail corpus, including one gore-set file |
+| `particle/*.ptl` | the particle catalogue parser's retail corpus |
 | `cbin/nlist*.reference.kda` | the credits-list container in its JO, JOX01 and BHD encodings |
 | `dbf/00TRg.DBF` | the dialog bank format |
 | `avatars/Avatars.def` | the avatar definition table |
@@ -62,8 +62,10 @@ authored file.
 
 `def/items.def` (test rows 106100..), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
 `mnu/all_widgets.mnu`, `mns/test_style.mns`, `score/score_sample.ini`,
-`anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`), the
-`novaworld/*_manifest.txt` records, and this README.
+`anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`),
+`particle/gorehit.ptu` (the gore-set half of the effect catalog, written in the
+retail `.ptu` grammar with our own effect), the `novaworld/*_manifest.txt`
+records, and this README.
 
 ## threedi/synth — the synthetic 3DI model set (minted)
 

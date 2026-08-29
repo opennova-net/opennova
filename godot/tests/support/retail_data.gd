@@ -24,6 +24,25 @@ static func mission_corpus() -> String:
 	return _dir("OPENNOVA_MISSION_CORPUS")
 
 
+## `<assets>/fixtures/<rel>`: the retail-interop fixture set the reference tree
+## mirrors under its `fixtures/` subtree (the retail files the parsers prove they
+## read as shipped: menus, string tables, defs, rigs, ...; they never live in
+## this repository). "" when the tree is unset or the file is absent; a test then
+## pends with fixture_pending_text(rel) so the CI attestation sees the root's name.
+static func fixture(rel: String) -> String:
+	var root := assets()
+	if root.is_empty():
+		return ""
+	var path := root.path_join("fixtures").path_join(rel)
+	return path if FileAccess.file_exists(path) else ""
+
+
+## The pending() text for a missing reference fixture; names OPENNOVA_JO_ASSETS
+## because scripts/ci/retail_gates_ran.py keys on the root's variable.
+static func fixture_pending_text(rel: String) -> String:
+	return "OPENNOVA_JO_ASSETS/fixtures/%s (the reference fixture set) is required" % rel
+
+
 ## The expansion names the install carries (the engine's own enumeration of
 ## <install>/expansion), sorted; empty without an install.
 static func expansions() -> PackedStringArray:
