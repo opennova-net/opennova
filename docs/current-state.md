@@ -63,14 +63,19 @@ screen, the character registry). The remainder is queued in
 [ADR 0040](adr/0040-the-engine-is-one-namespace.md)'s ladder, which is that
 queue's only home: A3, Train B's `simulation_*.cpp` remainder, its feed
 marshallers and the `simulation.h` state-model split, the Train C tail
-including the `mission_audio.gd` reverb, and Train D in full. The counters sit at 341 and 730, not yet at a seam-contract
-floor; the campaign is finished when both hold only documented seam contracts.
+including the `mission_audio.gd` reverb, and Train D in full. The counters
+(read them from the baseline, not here) are not yet at a seam-contract floor;
+the campaign is finished when both hold only documented seam contracts.
 [ADR 0042](adr/0042-godot-permanent-shell-one-mission-kernel.md) (2026-08-28)
 closed the boundary question: Godot is the permanent sole shell (ADR 0033 R4
-CLOSED), and the campaign's next structural slices are the mission kernel
-(`engine/runtime/mission`) + listen-host frame (`engine/net/inmatch`) promoted
-from the retail-mission rig, with typed inspect/control surfaces for MCP and
-F3.
+CLOSED), and its campaign LANDED (PR #587): the mission kernel
+(`engine/runtime/mission/mission_kernel`) + listen-host frame
+(`engine/net/inmatch/listen_host`) promoted from the retail-mission rig with
+`Simulation`, `nw_server` and the ctests as the three embedders, the
+`world::inspect` typed records + the typed debug-control table behind MCP and
+F3, and the F3 Entities window as the records-in/requests-out template. The
+0040 ladder rows A3/B carry the hashes; the Godot-only witnessed remainder is
+on-touch.
 It subsumes the structural slot earlier programs
 held: the **2026-07 quality campaign** closed at W4 (#310–#375; its W5
 residue is absorbed: the perf-span unify became ADR 0039's `FrameStatsBoard`,
