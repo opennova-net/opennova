@@ -551,6 +551,54 @@ bool run_end_round_named_header_kicks_and_folds() {
 			"the reducer retains the named header's rows and index");
 }
 
+// A 0x16 row for a connection slot the roster has not bound yet is dropped by
+// the reducer AND re-requested on the wire: one reliable C2S 0x22 {slot,
+// 0x1CF7} per dropped row, leaving through the session framing at the next
+// send boundary; a bound slot's row folds and asks for nothing
+// [orig: NapiNPClientMsg_PlayerList @0x42fc05..0x42fc3a ->
+//  CNapiNetwork_QueueReliableMessage(ctx, 0x22, 1, 0, {slot, 0xF7, 0x1C}, 3)].
+bool run_unknown_scoreboard_row_requests_player_sync() {
+	const std::string client_scrk = "CLIENT-SYNC-RETRY-SCRK";
+	const std::string server_scrk = "SERVER-SYNC-RETRY-SCRK";
+	np::ClientRuntime client("SyncRetryRuntime");
+	client.seed_session(0x63748596u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+	PlayerReplicationState known;
+	known.player_slot = 3;
+	known.player_name = "Known";
+	const std::vector<uint8_t> datagram = frame_server_session(
+			server_tx, server_scrk, 1u, {
+					make_protocol_message(
+							0x46, encode_player_sync(known, kPlayerSyncHasName)),
+					make_protocol_message(
+							0x16, encode_test_player_list({{3, 1}, {9, 2}})),
+			});
+	client.receive(datagram.data(), datagram.size());
+	std::vector<std::vector<uint8_t>> sync_requests;
+	for (const std::vector<uint8_t> &out : client.Client_ProcessNetworkFrame(1)) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(out, client_scrk, header, messages)) continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == c2s::PLAYER_SYNC_REQUEST) sync_requests.push_back(m.payload);
+	}
+	const ns::ClientScoreboard &board = client.state().scoreboard;
+	if (!expect(board.rows.size() == 1 && board.rows[0].slot_id == 3 &&
+	                    board.rows_dropped_unknown_slot == 1 &&
+	                    board.pending_sync_requests.empty(),
+	            "the bound slot's row folds, the unknown slot's row drops, the retry queue drains"))
+		return false;
+	std::size_t for_unknown = 0;
+	std::size_t for_known = 0;
+	for (const std::vector<uint8_t> &payload : sync_requests) {
+		if (payload == std::vector<uint8_t>({9, 0xF7, 0x1C})) ++for_unknown;
+		if (!payload.empty() && payload[0] == 3) ++for_known;
+	}
+	return expect(for_unknown == 1 && for_known == 0,
+	              "exactly one C2S 0x22 {slot, 0x1CF7} re-request for the dropped row, none for the bound slot");
+}
+
 // Retail S2C 0x76 replaces the client-global class availability word. It is
 // not a clock: a short body explicitly clears the word to zero.
 // [orig: NapiNPClientMsg_HandleClassAllowMask @0x42d540]
@@ -5193,6 +5241,7 @@ int main() {
 	                run_end_round_header_pulls_complete_board() &&
 	                run_end_round_named_header_kicks_and_folds() &&
 	                run_class_allow_mask_follows_retail_host() &&
+	                run_unknown_scoreboard_row_requests_player_sync() &&
 	                run_team_latch_is_falsifiable() &&
 	                run_player_sync_ack_walks_inclusive_roster_capacity() &&
 	                run_padding_echo_retail_clamp(/*requested_len=*/0, /*expected_body=*/12) &&
