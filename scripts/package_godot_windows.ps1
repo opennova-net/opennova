@@ -259,9 +259,13 @@ function Test-GodotAppBoot {
     $stdoutLog = [System.IO.Path]::GetTempFileName()
     $stderrLog = [System.IO.Path]::GetTempFileName()
     try {
+        # Headless uses Godot's Dummy renderer, so a render loop cannot validate
+        # GPU work here. Disable it to keep --quit-after from racing render-server
+        # teardown while this smoke still loads the product scene, scripts,
+        # shaders, and GDExtension.
         $proc = Start-Process `
             -FilePath $ExePath `
-            -ArgumentList "--headless --quit-after 120 --verbose" `
+            -ArgumentList "--headless --disable-render-loop --quit-after 120 --verbose" `
             -NoNewWindow `
             -Wait `
             -PassThru `

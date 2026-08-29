@@ -494,6 +494,34 @@ func test_offscreen_production_q3_source_is_culled_before_vertex_packing() -> vo
 	assert_eq(int(report.get("q3_submitted_commands", -1)), 0)
 
 
+func test_q3_viewport_resize_retires_invalidated_uniform_sets_cleanly() -> void:
+	var view := _q3_lum_view(true)
+	var renderer := view.terminal as FrameFx
+	for _frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	var report := renderer.get_backend_report()
+	if not bool(report.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_gt(int(report.get("q3_drawn_commands", 0)), 0,
+			String(report.get("q3_failure", "Q3 setup draw failed")))
+
+	# Resizing replaces the compositor-owned beauty snapshot. Godot invalidates
+	# uniform sets that sampled the prior texture; cleanup must query their typed
+	# validity instead of sending those stale RIDs through free_rid again.
+	(view.viewport as SubViewport).size = Vector2i(160, 90)
+	renderer.advance_frame()
+	for _frame in 3:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	assert_engine_error_count(0,
+			"Q3 resize cleanup skips uniform sets Godot already invalidated")
+	renderer.shutdown()
+
+
 func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_order() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(64, 64)

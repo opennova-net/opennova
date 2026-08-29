@@ -187,6 +187,24 @@ func row_ids() -> Array[StringName]:
 	return _order.duplicate()
 
 
+## Break the Row -> closure -> DebugControls ownership cycle before the game
+## shell is destroyed. RefCounted does not collect cycles, so merely dropping
+## the adapter's _controls reference leaves every row and bound owner alive.
+func clear() -> void:
+	for value in _rows.values():
+		var row := value as Row
+		if row == null:
+			continue
+		row.availability = Callable()
+		row.read = Callable()
+		row.write = Callable()
+		row.invoke = Callable()
+	_rows.clear()
+	_order.clear()
+	_shell = null
+	_seams = null
+
+
 ## JSON-safe definitions paired with a live state, suitable for MCP.
 ## `allow_authority` mirrors the write path's per-call confirmation: rows
 ## report writability for THAT caller, so an MCP client holding

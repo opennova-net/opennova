@@ -698,6 +698,26 @@ public:
 		p_rid = RID();
 	}
 
+	void release_uniform_rid(RID &p_rid) {
+		if (rd != nullptr && p_rid.is_valid() &&
+				rd->uniform_set_is_valid(p_rid))
+			rd->free_rid(p_rid);
+		p_rid = RID();
+	}
+
+	void release_pipeline_rid(RID &p_rid) {
+		if (rd != nullptr && p_rid.is_valid() &&
+				rd->render_pipeline_is_valid(p_rid))
+			rd->free_rid(p_rid);
+		p_rid = RID();
+	}
+
+	void release_texture_rid(RID &p_rid) {
+		if (rd != nullptr && p_rid.is_valid() && rd->texture_is_valid(p_rid))
+			rd->free_rid(p_rid);
+		p_rid = RID();
+	}
+
 	void discard_device_state() {
 		transient_uniforms.clear();
 		pipelines.clear();
@@ -722,11 +742,11 @@ public:
 		}
 		rd = p_rd;
 		for (RID &uniform : transient_uniforms)
-			release_rid(uniform);
+			release_uniform_rid(uniform);
 		for (auto &entry : pipelines)
-			release_rid(entry.second);
+			release_pipeline_rid(entry.second);
 		release_rid(vertex_buffer);
-		release_rid(fallback_texture);
+		release_texture_rid(fallback_texture);
 		release_rid(sampler);
 		release_rid(shader);
 		discard_device_state();
@@ -961,7 +981,7 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 		return false;
 	}
 	for (RID &uniform : transient_uniforms)
-		release_rid(uniform);
+		release_uniform_rid(uniform);
 	transient_uniforms.clear();
 	const Projection world_to_clip = scene_data->get_view_projection(p_view) *
 			Projection(scene_data->get_cam_transform().affine_inverse());
