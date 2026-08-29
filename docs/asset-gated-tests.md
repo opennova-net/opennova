@@ -2,7 +2,7 @@
 
 Some tests exercise data we cannot commit: retail game installs, extracted retail
 assets, retail mission corpora, and network captures of retail sessions. Each such
-test is gated on one of three documented roots and **reports Skipped** without it:
+test is gated on one of two documented roots and **reports Skipped** without it:
 a fully gated ctest returns 77 (`opennova_add_gated_test` sets
 `SKIP_RETURN_CODE`, so `ctest` prints `***Skipped`) after a `SKIP: needs ...`
 line; a mixed test runs its synthetic legs and prints `SKIP-LEG: needs ...` for
@@ -10,10 +10,9 @@ the retail leg, exiting 0; the GUT gates `pending()`. A green run therefore
 never hides an unexercised gate, but it also never proves the gate ran: when
 touching a gated area, set the root and read the test's output.
 
-The three roots (`docs/dev-env-vars.md`) are read only by the resolvers —
+The two roots (`docs/dev-env-vars.md`) are read only by the resolvers —
 `tests/common/retail_paths.h` (`retail::install()`, `assets()`,
-`captures_root()`, `golden(name)`, `capture(name)`,
-`sph(name)`, `asset_file(name)`, `expansions()`, `weapon_sav()`, `skip`,
+`reference_fixture(rel)`, `asset_file(name)`, `expansions()`, `weapon_sav()`, `skip`,
 `skip_leg`, `RETAIL_REQUIRE_OR_SKIP`), `godot/tests/support/retail_data.gd`
 (`RetailData.install()`, `assets()`, `expansions()`,
 `mount_install_with(witness)`), and the
@@ -24,15 +23,12 @@ The three roots (`docs/dev-env-vars.md`) are read only by the resolvers —
 
 | Root | Points at | Gates |
 |---|---|---|
-| `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set; expansions under `expansion/<name>/`) | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `bink_retail`, `sbf_jo_install_sweep`, `mission_ai_path_conformance`, `mission_coop_convoy`, `mission_script_report`, `bunker_walkin`, `truck_dismount`, `npruntime_authored_payload_00trg` (00TRg through revx02, or the `OPENNOVA_JO_ASSETS` tree); the mission-kernel ctests (`mission::MissionKernel` over `tests/common/retail_mission_files`) `ai_threat`, `ladder_00tra`, `truck_rest_00tra`, `ai_muzzle_pose` (CP01), `vehicle_ride_00tra`, `defense_00trg`, `lose_flow_04tr`, `particle_gore_set_catalog`; the SKIP-LEG legs of `mnu_compat` (every `.mnu` the packed install serves, base mount and each expansion), `terrain_tile_composer` (iterates `expansions()` for the CP12/00TRa tile witnesses), `ground_conform` (the CP01 standing leg), `score_roundtrip` (the `score.ini` the install ships loose beside its archives), `playersav_weapon_sav` (`weapon.sav` at the root or under an expansion), `minimap_overlay` (00TRg with revx02), `npruntime_weapon_table` (the live `weapon.def` oracle over the install's expansions); GUT `avatar_preview_test`, `e50trib_mount_alignment_test`, `skeletal_anim_test`, `sound_pff_install_test` (every expansion), `terrain_static_shadow_runtime_test`, `veg_assets_test`, `vehicle_emplacement_alignment_test` |
-| `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, `ammo.def`, models, `.adm`, the shipped `.bms` missions loose at its root, `.til`, `.lwf`, ...) plus its `fixtures/` subtree: the retail-interop fixture set (`retail::reference_fixture(rel)` / `RetailData.fixture(rel)` resolve `<assets>/fixtures/<rel>`), the retail files whose in-tree copies this repository no longer carries | ctest `mission_corpus` (every loose `.bms`), `mnu_compat` and `mnu_coverage` (the fifteen shipped revx02 menus from the reference fixture set), `adm_parse` (mp5_1st.adm), `simassets_adm_skeletal_clips_weapon_channel` (BINOC.bad and its twist) and `def_parse_hudpos` (hudpos.def), `root_motion`, `anim_positions_from_model_corpus`, `anim_reload_clips_us01`, `anim_weapon_action_clips`, `wac_corpus` (plus argv corpus dirs), `cpt_jo_assets_sweep`, `lwf_jo_assets_sweep`, `npruntime_authored_payload_00trg` (00TRg; also served by the install's revx02), `netsim_client_replica_pipeline_capture_parent_follow` (`items.def`, and the vehicle capture below: Skipped whenever either is absent); the mission-kernel ctests `ai_corpse`, `rock_collision_00trg`, `soak_00trg`, `native_assets_00trg`, `npruntime_remote_body_state`, `npruntime_held_weapon_attach`; the SKIP-LEG legs of `occlusion_armry`, `threedi_panm_ctrl` (the six retail controlled models), `particle_smoke_all_fixtures` (the `.ptl` corpus), `sound_profile` (`sndprof.def`), `def_parse_items` (the particlefx rows), `infantry` (the weapon-channel leg), `minimap_overlay` (00TRg), the loose-mission fallback of the `OPENNOVA_JO_DIR` mission-kernel tests; GUT `mission_corpus_binding_test`, `sound_dialog_test`, `sound_integration_test`; the render-fixture capture's loose mission (`scripts/render/*.ps1`); over the `fixtures/` subtree (the reference fixture set) the SKIP-LEG legs of `dbf_roundtrip` (00TRg.DBF), `cbin_roundtrip` (the three shipped `nlist.kda`), `mission_mis_idempotency` (ash_i5b), `avatars_parse` and `avatars_roundtrip` (Avatars.def), `mns_document` (menu_style.mns), `bad_parse` and `anim_sample` (BINOC.bad), `def_parse_weapons`, `def_parse_ammo`, `npruntime_weapon_table` and `npruntime_handshake_server` (the shipped weapon.def / ammo.def pins), `mus_parse`, `mus_compat`, `mus_decompile`, `mus_roundtrip`, `mus_names_roundtrip`, `mus_entry_roundtrip`, `mus_encode_idempotence` and `mus_vm` (jo_gamemus.bin, jo_menumus.bin and the decoded golden: the MDEdit layout pins, the decompile golden and the Unicorn-proved VM streams), the menu-driven GUT scripts `armory_menu_seam_test`, `armory_presenter_test`, `deploy_screen_presenter_test`, `host_punt_surfacing_test`, `menu_shell_test`, `mnu_corpus_test`, `hud_pos_test`, `throwable_repro_test`, `wire_present_pass_test`, `local_player_presenter_test`, `coop_two_sim_test`, `wire_header_world_materialization_test` (whole scripts, `should_skip_script`; the def scripts stage the shipped weapon.def / ammo.def / hudpos.def through `RetailData.def_root()`) and the legs `game_world_test` (the armory weapon-database reuse), `loading_screen_test` (the session-variable overlay), `avatar_preview_test` (the retail-root portrait legs compose the shipped table's parts) and `render_fixture_capture_probe_test` (the arms blue's 0x0402 wears in the shipped table), `mnu_document_test` (jo_main's 800x600 canvas, the shipped style sheet's entries and edits), `player_info_menu_seam_test` (the two legs over the shipped player.mnu) `main_game_lifecycle_test` (the ESC/armory screen verbs over the shipped game.mnu / weapon.mnu) `simulation_test` (the seven posed-collision rig tests over BINOC.bad and the sixteen weapon-table tests over the shipped defs), `player_info_menu_seam_test` (the loadout legs), `hud_overlay_test`, `listen_server_test`, `mission_presentation_test` and `weapon_profile_kit_test` (their shipped-def legs) |
-| `OPENNOVA_CAPTURES` | the captures/goldens root (default `<repo>/.scratch`) | fixed names: `golden/retail-gameplay-session.pcapng` (`npruntime_golden_gameplay`, `npruntime_golden_client`, `nw_golden_diff`'s golden side), `golden/retail-lan-host-join.pcapng` (`npruntime_golden_lan_join`, `npruntime_two_endpoint_socket`'s cross-check leg), `golden/retail-lan-host-join-session.pcapng` (`npruntime_golden_lan_join_session`), `golden/retail-vehicle-session.pcapng` (`netsim_client_replica_pipeline_capture_parent_follow`), `host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng` (`nw_pool_groundtruth`), `probe2.pcapng` (`nw_dvxi3_groundtruth`), `probe3.pcapng` (`nw_dvxc1_groundtruth`), `probe3_again.pcapng` + `sph/hostprof_probe3again.sph` (`nw_probe3again_lifecycle`, `nw_capture_decoder`'s extra leg), `operation_whitenoise.pcapng` (`nw_whitenoise_coverage`), `karo-guided.pcapng` (`nw_karo_guided`, the D-NET-64 wire leg), `ingame.hexcap` (`nw_ingame_histogram`, `nw_ingame_pool_records`), `sph/host.sph` + `sph/client.sph` (`nw_serverlog_decode`) |
+| `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set; expansions under `expansion/<name>/`) | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `bink_retail`, `sbf_jo_install_sweep`, `mission_ai_path_conformance`, `truck_dismount`, `npruntime_authored_payload_00trg` (00TRg through revx02, or the `OPENNOVA_JO_ASSETS` tree); the mission-kernel ctests (`mission::MissionKernel` over `tests/common/retail_mission_files`) `ai_threat`, `ladder_00tra`, `truck_rest_00tra`, `ai_muzzle_pose` (CP01), `vehicle_ride_00tra`, `defense_00trg`, `lose_flow_04tr`, `particle_gore_set_catalog`; the SKIP-LEG legs of `mnu_compat` (every `.mnu` the packed install serves, base mount and each expansion), `terrain_tile_composer` (iterates `expansions()` for the CP12/00TRa tile witnesses), `ground_conform` (the CP01 standing leg), `score_roundtrip` (the `score.ini` the install ships loose beside its archives), `playersav_weapon_sav` (`weapon.sav` at the root or under an expansion), `minimap_overlay` (00TRg with revx02), `npruntime_weapon_table` (the live `weapon.def` oracle over the install's expansions); GUT `avatar_preview_test`, `e50trib_mount_alignment_test`, `skeletal_anim_test`, `sound_pff_install_test` (every expansion), `terrain_static_shadow_runtime_test`, `veg_assets_test`, `vehicle_emplacement_alignment_test` |
+| `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, `ammo.def`, models, `.adm`, the shipped `.bms` missions loose at its root, `.til`, `.lwf`, ...) plus its `fixtures/` subtree: the retail-interop fixture set (`retail::reference_fixture(rel)` / `RetailData.fixture(rel)` resolve `<assets>/fixtures/<rel>`), the retail files whose in-tree copies this repository no longer carries | ctest `mission_corpus` (every loose `.bms`), `mnu_compat` and `mnu_coverage` (the fifteen shipped revx02 menus from the reference fixture set), `adm_parse` (mp5_1st.adm), `simassets_adm_skeletal_clips_weapon_channel` (BINOC.bad and its twist) and `def_parse_hudpos` (hudpos.def), `root_motion`, `anim_positions_from_model_corpus`, `anim_reload_clips_us01`, `anim_weapon_action_clips`, `wac_corpus` (plus argv corpus dirs), `cpt_jo_assets_sweep`, `lwf_jo_assets_sweep`, `npruntime_authored_payload_00trg` (00TRg; also served by the install's revx02); the mission-kernel ctests `ai_corpse`, `rock_collision_00trg`, `soak_00trg`, `native_assets_00trg`, `npruntime_remote_body_state`, `npruntime_held_weapon_attach`; the SKIP-LEG legs of `occlusion_armry`, `particle_smoke_all_fixtures` (the `.ptl` corpus), `sound_profile` (`sndprof.def`), `def_parse_items` (the particlefx rows), `infantry` (the weapon-channel leg), `minimap_overlay` (00TRg), the loose-mission fallback of the `OPENNOVA_JO_DIR` mission-kernel tests; GUT `mission_corpus_binding_test`, `sound_dialog_test`, `sound_integration_test`; the render-fixture capture's loose mission (`scripts/render/*.ps1`); over the `fixtures/` subtree (the reference fixture set) the SKIP-LEG legs of `dbf_roundtrip` (00TRg.DBF), `cbin_roundtrip` (the three shipped `nlist.kda`), `mission_mis_idempotency` (ash_i5b), `avatars_parse` and `avatars_roundtrip` (Avatars.def), `mns_document` (menu_style.mns), `bad_parse` and `anim_sample` (BINOC.bad), `def_parse_weapons`, `def_parse_ammo`, `npruntime_weapon_table` and `npruntime_handshake_server` (the shipped weapon.def / ammo.def pins), `mus_parse`, `mus_compat`, `mus_decompile`, `mus_roundtrip`, `mus_names_roundtrip`, `mus_entry_roundtrip`, `mus_encode_idempotence` and `mus_vm` (jo_gamemus.bin, jo_menumus.bin and the decoded golden: the MDEdit layout pins, the decompile golden and the Unicorn-proved VM streams), the menu-driven GUT scripts `armory_menu_seam_test`, `armory_presenter_test`, `deploy_screen_presenter_test`, `host_punt_surfacing_test`, `menu_shell_test`, `mnu_corpus_test`, `hud_pos_test`, `throwable_repro_test`, `wire_present_pass_test`, `local_player_presenter_test`, `coop_two_sim_test`, `wire_header_world_materialization_test` (whole scripts, `should_skip_script`; the def scripts stage the shipped weapon.def / ammo.def / hudpos.def through `RetailData.def_root()`) and the legs `game_world_test` (the armory weapon-database reuse), `loading_screen_test` (the session-variable overlay), `avatar_preview_test` (the retail-root portrait legs compose the shipped table's parts) and `render_fixture_capture_probe_test` (the arms blue's 0x0402 wears in the shipped table), `mnu_document_test` (jo_main's 800x600 canvas, the shipped style sheet's entries and edits), `player_info_menu_seam_test` (the two legs over the shipped player.mnu) `main_game_lifecycle_test` (the ESC/armory screen verbs over the shipped game.mnu / weapon.mnu) `simulation_test` (the seven posed-collision rig tests over BINOC.bad and the sixteen weapon-table tests over the shipped defs), `player_info_menu_seam_test` (the loadout legs), `hud_overlay_test`, `listen_server_test`, `mission_presentation_test` and `weapon_profile_kit_test` (their shipped-def legs) |
 
-The live "ours" side of the golden diff is argv, not a root:
-`nw_golden_diff_test --ours <capture>` (a `ctest` run without it reports Skipped).
-Developer knobs are argv too: `mnu_compat_test <extra.mnu>...`,
-`wac_corpus_test <dir>...`, `ai_path_conformance_test --report/--ticks/--bms`,
-`bunker_walkin_test --from/--to/--column`; dumps are `--dump`, `--write`,
+Developer knobs are argv, not roots: `mnu_compat_test <extra.mnu>...`,
+`wac_corpus_test <dir>...`, `ai_path_conformance_test --report/--ticks/--bms`;
+dumps are `--dump`, `--write`,
 `--write-fixture`, `--write-pff` (`docs/dev-env-vars.md`).
 
 The 00TRa tile-composer leg fingerprints the archived `TRNTILE10.TGA`
@@ -68,13 +64,12 @@ extract. A test that needs one of those files reads
 `retail::reference_fixture("mnu/jo_main.mnu")` (ctest) or
 `RetailData.fixture("mnu/jo_main.mnu")` (GUT) and skips or pends without it.
 
-Capture-gated ctests need no variable when the files sit at their fixed names
-under the main checkout's `.scratch/` (the default `OPENNOVA_CAPTURES`).
-Captures are produced by the recipes in `.agents/README.md` (retail-join
-stack) and consumed via `nw_pp --stream` first — see the capture policy in
-`.agents/interop.md`. A packed install without an expansion the test needs
-(revx02 for the 00TRg payload oracle) skips that leg; the extracted tree
-carries the same pair and serves it.
+A packed install without an expansion the test needs (revx02 for the 00TRg
+payload oracle) skips that leg; the extracted tree carries the same pair and
+serves it. No test reads a machine-local capture: the wire coverage that used
+to ride gitignored `.scratch/` pcaps is the in-tree `fixtures/novaworld/` set
+(`nw_self_capture`, `nw204_lobby_decode`, the `.nwmsg` replays) plus the
+inline-pcap unit tests.
 
 Run the gated set with the roots exported, e.g. `ctest --test-dir build -C
 Release -R "00tra|00trg|ai_|muzzle|reload_clips|weapon_action|remote_body|held_weapon|authored_payload|gore_set"`,
@@ -100,10 +95,9 @@ repositories) the `test` and `godot-tests` jobs check the assets out beside
 the tree (both restored from the Actions cache keyed by each repository's
 `main` commit and saved as soon as the data is ready, so a miss clones — and
 reassembles the packed set — once, even when the tests then fail), and point
-the two roots at them, so every root-gated test except the capture gates
-runs in CI instead of reporting Skipped; without the secret the gates stay
-closed and the job is still green. The `OPENNOVA_CAPTURES` gate stays local.
-`.github/workflows/ci.yml` is the record.
+the two roots at them, so every root-gated test runs in CI instead of
+reporting Skipped; without the secret the gates stay closed and the job is
+still green. `.github/workflows/ci.yml` is the record.
 
 A green run still never proves a gate opened, so with the data mounted both
 jobs end by attesting it: `scripts/ci/retail_gates_ran.py` reads ctest's JUnit
@@ -113,18 +107,14 @@ and fails on any fully gated test that reported Skipped or any `SKIP-LEG:` /
 page's matrix; a new gated test is added to both, and
 `retail_gates_ran.py --check-docs` (the lint job, and again after the build
 with `--junit` for the full ctest universe) fails when a root's table and its
-row here name different ctests. The one known gap it reports
-without failing: `mission_coop_convoy`, `mission_script_report` and
-`bunker_walkin` promote `05TRcoop.bms`, which no known retail mount or corpus
-carries (they read it through the mount, then loose under `OPENNOVA_JO_ASSETS`,
-and skip honestly), and
-`netsim_client_replica_pipeline_capture_parent_follow` also needs the vehicle
-capture, which never rides CI.
+row here name different ctests. With the data mounted nothing is exempt: the
+`KNOWN_ABSENT` table is empty and every Skipped gate is a gap.
 
-The logic the capture gates would exercise is covered in CI by the
+The wire logic the retired capture gates exercised is covered in CI by the
 **inline-pcap unit tests** (`nw_pool_decode_unit_test`,
 `nw_capture_decoder_test` craft tiny in-memory pcaps and run unconditionally)
-— the sanctioned CI substitute, per the net-test convention.
+and the committed `fixtures/novaworld/` replays — the sanctioned substitute,
+per the net-test convention.
 
 ## Why captures are never committed
 
@@ -150,7 +140,7 @@ maturity program (docs/maturity-program.md) closes that with two tiers:
   the wire moves. Updating a vector is a wire-format change: it requires the
   [orig] witness or a D-NET entry in the same commit, never a bare regeneration
   (`nw_codec_identity_test --dump` prints the replacement table). The second
-  tier-1 leg (NET-0b) is `nw_self_capture` — `nw_golden_diff`'s self mode: a
+  tier-1 leg (NET-0b) is `nw_self_capture` — the opennova-vs-opennova coverage diff: a
   deterministic in-process opennova↔opennova join + play session is captured
   live and coverage-diffed per (direction, tag) against the committed
   opennova-produced fixture `fixtures/novaworld/self-capture-session.pcap` (LFS;
@@ -159,10 +149,10 @@ maturity program (docs/maturity-program.md) closes that with two tiers:
   a missing fixture FAILS rather than skips. Regenerating the fixture
   (`nw_self_capture_test --write-fixture`, which re-reads and re-verifies the
   file) is a wire-coverage change: justify the tag delta in the same commit.
-- **Tier 2 — local, mandatory protocol for net-touching PRs.** Run the retail
-  golden diff (`nw_golden_diff_test --ours <capture>` against the
-  `golden/retail-gameplay-session.pcapng` under `OPENNOVA_CAPTURES`) and the
-  npruntime golden joins against local retail data, and **attest the run in the
-  PR description** (the commands + PASS lines). A net-touching PR without the
-  attestation is not reviewable. This is the standing substitute for the
-  un-CI-able retail gates above.
+- **Tier 2 — local, mandatory protocol for net-touching PRs.** Run the live
+  retail interop harness (`scripts/net/README.md`: an OpenNova host with a
+  retail client, and a retail host with an OpenNova joiner, decoded with
+  `nw_pp --coverage`), and **attest the run in the PR description** (the
+  commands + the decode summary). A net-touching PR without the attestation
+  is not reviewable. This is the standing substitute for the retail sessions
+  CI cannot run.

@@ -1,4 +1,4 @@
-// Self-capture coverage diff — nw_golden_diff's SELF MODE, and the second NET-0
+// Self-capture coverage diff — the opennova-vs-opennova coverage gate, and the second NET-0
 // tier-1 gate next to nw_codec_identity (docs/maturity-program.md).
 //
 // Runs a deterministic in-process opennova host + opennova joiner session — the

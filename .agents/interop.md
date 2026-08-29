@@ -82,12 +82,10 @@ Supported inputs:
 - `nw_pp <capture.hexcap>`
 - `nw_pp <host.sph>` or `nw_pp <client.sph>`
 
-Capture-gated witnesses read their files under `OPENNOVA_CAPTURES` (default
-`.scratch/`; the fixed names are in [docs/asset-gated-tests.md](../docs/asset-gated-tests.md)):
-`nw_ingame_histogram`/`nw_ingame_pool_records` (`ingame.hexcap`), `nw_serverlog_decode`
-(`sph/`), `nw_pool_groundtruth`/`nw_dvxi3_groundtruth`/`nw_dvxc1_groundtruth`,
-`nw_probe3again_lifecycle`, `nw_whitenoise_coverage`, the `npruntime_golden_*` joins and
-`nw_golden_diff` (`golden/`).
+No ctest reads a machine-local capture: the wire witnesses that ride CI are the
+committed `fixtures/novaworld/` set (`nw204_lobby_decode`, `nw_self_capture`, the
+`.nwmsg` replays) and the inline-pcap unit tests; a fresh capture is inspected by
+hand with `nw_pp` and, when it earns a place, promoted as a sanitized fixture.
 
 ## Packet-Diff Matrix
 

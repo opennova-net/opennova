@@ -13,10 +13,9 @@
 //       drains+SNAPs the entity + fans an S2C 0x0A -> the owner reframes it 0x83 over UDP -> the client
 //       folds it into ClientState. The peer SNAPs to the uplink, no synthetic host player exists, and
 //       the client's ClientState anchor == the joiner's post-SNAP position.
-//   (3) The host's emitted S2C stream (recorded at the joiner socket) appears in the §5.2a order, and —
-//       when the gitignored golden is present (<OPENNOVA_CAPTURES>/golden) — agrees pairwise with the retail LAN
-//       host/join capture's S2C order on the common tags. Order-only (body byte-parity is deferred: our
-//       world stream is built from our own minimal World, not the capture's mission).
+//   (3) The host's emitted S2C stream (recorded at the joiner socket) appears in the §5.2a order.
+//       Order-only (body byte-parity is deferred: our world stream is built from our own minimal
+//       World).
 
 #include <net/npruntime/host_session.h> // the host owner loop (promoted to engine/net/npruntime; SAME loop main.cpp runs)
 
@@ -255,8 +254,8 @@ int main() {
 		return 1;
 	}
 	// Order assertions only for tags our host actually emits (the §5.2a serializers 0x45/0x7E/0x1A are
-	// deferred-as-nothing per the structural-P3 rule, so 0x1A is absent here — its order vs the retail
-	// capture is the env-gated cross-check below). Observed: 1C 0B 11 | 10 0C 20 | 0C(named) 0A...
+	// deferred-as-nothing per the structural-P3 rule, so 0x1A is absent here). Observed:
+	// 1C 0B 11 | 10 0C 20 | 0C(named) 0A...
 	bool order = true;
 	order = expect(order_ok(ours_s2c, 0x0B, 0x10), "§5.2a: 0x0B (player-sync) precedes 0x10 world-stream") && order;
 	order = expect(order_ok(ours_s2c, 0x0B, 0x0C), "§5.2a: 0x0B precedes 0x0C organic spawns") && order;
@@ -264,41 +263,6 @@ int main() {
 	order = expect(order_ok(ours_s2c, 0x0C, 0x20), "§5.2a: 0x0C organics precede 0x20 pool-3 sync") && order;
 	if (!order) { net::shutdown(); return 1; }
 
-	// ---- env-gated cross-check vs the retail LAN host/join golden (order agreement on common tags). ----
-	const std::string path = retail::golden("retail-lan-host-join.pcapng");
-	std::vector<net::PcapDatagram> pkts;
-	if (!net::read_pcap_udp_file(path, pkts)) {
-		retail::skip_leg("<OPENNOVA_CAPTURES>/golden/retail-lan-host-join.pcapng (the retail golden cross-check; our 5.2a order asserted above)");
-		net::shutdown();
-		std::printf("OK\n");
-		return 0;
-	}
-	std::vector<CaptureDatagram> caps;
-	caps.reserve(pkts.size());
-	for (const net::PcapDatagram &p : pkts) {
-		CaptureDatagram c;
-		c.frame_index = p.frame_index;
-		c.src_port = p.srcport;
-		c.dst_port = p.dstport;
-		c.payload = p.payload;
-		caps.push_back(std::move(c));
-	}
-	std::vector<uint8_t> retail_s2c;
-	for (const InGameMessage &m : decode_capture_to_messages(caps)) {
-		if (m.dir != 'S' || m.settings_update) continue;
-		retail_s2c.push_back(static_cast<uint8_t>(m.tag & 0xFF));
-	}
-	// Each §5.2a order relation we assert on our stream must also hold (or be absent) in the retail
-	// stream — i.e. the retail capture never CONTRADICTS our order on the common world-stream tags.
-	const std::pair<uint8_t, uint8_t> rels[] = {{0x0B, 0x10}, {0x0B, 0x0C}, {0x10, 0x0C}, {0x0C, 0x20}, {0x20, 0x1A}};
-	bool agree = true;
-	for (const auto &r : rels) {
-		const int a = first_of(retail_s2c, r.first), b = first_of(retail_s2c, r.second);
-		const bool contradicts = (a >= 0 && b >= 0 && a > b); // both present but in the WRONG order
-		agree = expect(!contradicts, "retail golden S2C order agrees with §5.2a (no contradiction)") && agree;
-	}
-	if (!agree) { net::shutdown(); return 1; }
-	std::printf("[two-endpoint] retail golden S2C order agrees with our §5.2a order on the common tags\n");
 
 	net::shutdown();
 	std::printf("OK\n");

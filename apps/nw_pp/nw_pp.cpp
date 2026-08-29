@@ -1,10 +1,10 @@
 // nw_pp — NovaWorld in-game packet pretty-printer.
 //
 // Reads a pcap/pcapng OR a hexcap (the format `tools/net/pcap_to_hexcap.py`
-// produces; the env-var input for `nw_ingame_histogram_test`) and emits one
+// produces and the committed `fixtures/novaworld/*.hexcap` carry) and emits one
 // line per outer datagram plus one structured block per inner protocol
-// message. Drives the SAME outer-decode pipeline as `nw_ingame_histogram_test`
-// and `nw_ingame_pool_records_test` — envelope CRC → outer NWU → per-session
+// message. Drives the SAME outer-decode pipeline as the `nw_*` ctests
+// (`nw204_lobby_decode`, `nw_capture_decoder`) — envelope CRC → outer NWU → per-session
 // SCRK → 0x43/0x83 → reassembly — so what it prints is the exact byte stream
 // the shipping libs see, not a parallel re-implementation.
 //
@@ -16,7 +16,7 @@
 // stderr warning). Anything else is read as hexcap text.
 //
 // Tag-specific decoders live in `engine/net/npwire/ingame_decode.h`
-// (shared with `nw_ingame_pool_records_test` and the future real handlers).
+// (shared with the in-match runtime's fold paths and the `nw_*` ctests).
 // As new tags get field maps in docs/net/novaworld-net-re.md, their decoders
 // land there and a printer for them lands here.
 //

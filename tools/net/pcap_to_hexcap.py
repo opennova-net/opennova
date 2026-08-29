@@ -2,8 +2,8 @@
 """Convert a .pcapng/.pcap capture into the hexcap format the NovaWorld in-game
 decoder test consumes.
 
-Output format (one UDP datagram per line, exactly what
-`tests/novaworld/nw_ingame_histogram_test.cpp` reads as <OPENNOVA_CAPTURES>/ingame.hexcap):
+Output format (one UDP datagram per line, the shape of the committed
+`fixtures/novaworld/nw204_lobby.hexcap` that `nw204_lobby_decode` and `nw_pp` read):
 
     <srcport> <frame> <udp_payload_hex>
 

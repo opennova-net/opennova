@@ -269,7 +269,6 @@
     "simulation_net.cpp|Role::Host",
     "resource_root_contract_test.gd|host's authoritative",
     "scripts/lint/maturity_lint.py|LAN host port range",
-    "tests/mission/event_runtime_test.cpp|test_empty_host_holds_the_script",
-    "tests/mission/mission_script_report_test.cpp|retail's host counts itself"
+    "tests/mission/event_runtime_test.cpp|test_empty_host_holds_the_script"
   ]
 }

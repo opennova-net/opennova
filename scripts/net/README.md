@@ -18,7 +18,6 @@ hash-bound parity verdict.
 | `detect_capture.ps1` | Locate `dumpcap` and list usable capture interfaces. |
 | `capture.ps1` | Start or stop a tagged local packet capture. |
 | `decode.ps1` | Decode a capture with the native `nw_pp` application. |
-| `diff_vs_golden.ps1` | Compare native decoder tag coverage against a local golden capture. |
 | `diff_0a.py` | Per-FIELD shape diff of the S2C 0x0A stream vs a retail-host golden (sub-block cycle, record-class mix, field population); caches `<golden>.0a.json` beside the input. |
 | `exercise_retail_input.ps1` | Drive the bounded Windows input trajectory used by live probes. |
 | `host_opennova.ps1` | Start an OpenNova LAN host on launch flags, await LAN discovery and its MCP endpoint. |
@@ -80,29 +79,16 @@ allow inbound UDP on the selected port. The host waits for a valid discovery
 reply before reporting ready; process creation or a bound socket alone is not
 sufficient.
 
-## Golden coverage check
+## Coverage check
 
-`diff_vs_golden.ps1` is an exploratory per-tag comparison. It is useful for
-finding missing or unexpected traffic, but it does not prove field-level or
-session-level parity.
-
-```powershell
-pwsh -File scripts\net\diff_vs_golden.ps1 `
-    -Ours .scratch\ours.pcapng `
-    -Golden .scratch\golden\retail-gameplay-session.pcapng `
-    -Items C:\path\to\ITEMS.DEF
-```
-
-For automated native coverage, run the relevant `nw_*`, `npruntime_*`, and
-`netsim_*` CTests. Asset-gated cases skip successfully when their environment
-variables or local captures are absent, so read their output as well as the
-exit code.
+`nw_pp --coverage <capture>` ranks a capture's undecoded backlog by volume; the
+automated native coverage is the `nw_*`, `npruntime_*` and `netsim_*` ctests
+over the committed `fixtures/novaworld/` set and the inline-pcap unit tests.
 
 ## 0x0A shape diff
 
-`diff_vs_golden.ps1` is a per-TAG coverage diff (which messages flow). For the
-in-match replication core, `diff_0a.py` is a per-FIELD **shape** diff of just the
-S2C `0x0A` stream — the two captures are different sessions, so it compares what
+For the in-match replication core, `diff_0a.py` is a per-FIELD **shape** diff
+of just the S2C `0x0A` stream — the two captures are different sessions, so it compares what
 should match between any two hosts on the same map rather than raw bytes:
 
 ```bash

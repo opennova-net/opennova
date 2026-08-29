@@ -27,7 +27,6 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
-#include "common/retail_paths.h"
 
 using namespace opennova;
 
@@ -342,21 +341,6 @@ int main() {
 	{
 		CaptureDecoder dec;
 		EXPECT(dec.push({1, 0, 0, {}}).empty()); // compatibility projection unchanged
-	}
-
-	// --- real 3-player capture (the retail leg) ------------------------------
-	const std::string pcap_path = retail::capture("probe3_again.pcapng");
-
-	std::vector<net::PcapDatagram> pkts;
-	if (net::read_pcap_udp_file(pcap_path, pkts)) {
-		std::vector<CaptureDatagram> caps;
-		caps.reserve(pkts.size());
-		for (auto &pk : pkts)
-			caps.push_back({pk.frame_index, pk.srcport, pk.dstport, std::move(pk.payload)});
-		std::printf("probe3_again: %zu datagrams\n", caps.size());
-		EXPECT(streaming_equals_batch(caps, "probe3_again"));
-	} else {
-		retail::skip_leg("<OPENNOVA_CAPTURES>/probe3_again.pcapng (the real-capture equivalence check)");
 	}
 
 	if (g_failures) {

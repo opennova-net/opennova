@@ -64,7 +64,7 @@ MIXED = {
         "mnu_compat",
     ],
     "jo_assets": [
-        "occlusion_armry", "threedi_panm_ctrl", "particle_smoke_all_fixtures", "sound_profile",
+        "occlusion_armry", "particle_smoke_all_fixtures", "sound_profile",
         "def_parse_items", "infantry", "minimap_overlay",
         # The reference fixture set (<assets>/fixtures/**) legs.
         "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency", "avatars_parse",
@@ -77,14 +77,8 @@ MIXED = {
 }
 
 # Gated tests the reference data cannot serve yet; reported, never a gap.
-KNOWN_ABSENT = {
-    "mission_coop_convoy": "05TRcoop.bms is on no known retail mount or corpus",
-    "mission_script_report": "05TRcoop.bms is on no known retail mount or corpus",
-    "bunker_walkin": "05TRcoop.bms is on no known retail mount or corpus",
-    "netsim_client_replica_pipeline_capture_parent_follow":
-        "needs <OPENNOVA_CAPTURES>/golden/retail-vehicle-session.pcapng beside items.def; "
-        "captures never ride CI",
-}
+# Empty: every gated test runs with the two roots mounted.
+KNOWN_ABSENT: dict[str, str] = {}
 
 
 def check_junit(path: Path, roots: list[str]) -> list[str]:
