@@ -80,6 +80,16 @@ int count_quads_with_texture(const MenuDrawList &dl, int32_t slot) {
 	return n;
 }
 
+int count_quads_with_texture2(const MenuDrawList &dl, int32_t slot) {
+	int n = 0;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture2 == slot) {
+			++n;
+		}
+	}
+	return n;
+}
+
 // --- the shared fixture ------------------------------------------------------
 
 const char *kScreenXml = R"(
@@ -140,26 +150,32 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	CHECK(dl.quads[0].texture == kMenuTexNone &&
 					(dl.quads[0].color & 0xFFFFFFu) == 0x102030u,
 			"the root color fill is the first quad");
-	// The frame: brush fill + 8 stencil pieces follow the fill.
+	// The frame: the stencil atlas fill cell + 8 stencil/brush material
+	// pieces follow the appearance fill. Retail copies stencil cell (3, 0)
+	// into border_fill_material, then builds border_material from STENCIL and
+	// BRUSH as two texture stages [orig: init_border_materials @ 0x646f70].
 	CHECK(dl.quads.size() >= 10, "frame quads follow");
-	CHECK(dl.quads[1].texture == brush && dl.quads[1].tiled,
-			"the frame brush tiles right after the fill");
+	CHECK(dl.quads[1].texture == border && dl.quads[1].tiled,
+			"the stencil fill cell tiles right after the appearance fill");
+	CHECK(dl.quads[1].texture2 == kMenuTexNone,
+			"the fill material uses only the copied stencil cell");
+	CHECK(dl.quads[1].u0 == 0.75f && dl.quads[1].v0 == 0.0f &&
+				dl.quads[1].u1 == 1.0f && dl.quads[1].v1 == 0.25f,
+			"the fill samples stencil cell (3, 0)");
 	int stencil_quads = 0;
 	bool stencil_quads_are_untinted = true;
 	for (size_t i = 2; i < 10; ++i) {
-		if (dl.quads[i].texture == border) {
+		if (dl.quads[i].texture == border && dl.quads[i].texture2 == brush) {
 			++stencil_quads;
 			stencil_quads_are_untinted =
 					stencil_quads_are_untinted && dl.quads[i].color == 0xFFFFFFFFu;
 		}
 	}
-	CHECK(stencil_quads == 8, "eight stencil border pieces");
+	CHECK(stencil_quads == 8, "eight stencil/brush border material pieces");
 	CHECK(dl.quads[1].color == 0xFFFFFFFFu,
-			"the frame brush is untinted for the ordinary-multiply backend");
+			"the frame fill preserves the copied stencil color and alpha");
 	CHECK(stencil_quads_are_untinted,
-			"the frame stencil is untinted for the ordinary-multiply backend");
-	CHECK(dl.quads[1].u1 > 12.0f && dl.quads[1].v1 > 9.0f,
-			"the brush fill carries tile repeat counts");
+			"the frame material carries no extra compiler tint");
 	// Default state: the idle art draws, the hover art does not.
 	CHECK(count_quads_with_texture(dl, ok_idle) == 1,
 			"default state draws the default appearance");
@@ -1320,17 +1336,17 @@ void test_draw_frame_gate(const fnt_font_t *font) {
 	MenuFrameState state;
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
 	CHECK(dl.widgets_drawn == 2, "both windows draw");
-	// The parent authored the FRAME but no DRAW_FRAME: exactly ONE brush fill
-	// and ONE eight-piece stencil set appear — the DRAW_FRAME child's.
-	CHECK(count_quads_with_texture(dl, brush) == 1,
-			"no DRAW_FRAME on the parent: only the child's brush fill draws");
-	CHECK(count_quads_with_texture(dl, border) == 8,
-			"only the child's eight stencil pieces draw");
-	// The child's brush fill covers the CHILD rect (100,100)-(300,250), not
-	// the parent window: the inherited textures never become full-window camo.
+	// The parent authored the FRAME but no DRAW_FRAME: exactly one stencil
+	// fill cell and one eight-piece stencil+brush set appear — the child’s.
+	CHECK(count_quads_with_texture(dl, border) == 9,
+			"no DRAW_FRAME on the parent: one child fill plus eight borders draw");
+	CHECK(count_quads_with_texture2(dl, brush) == 8,
+			"only the child's eight border material pieces use the brush");
+	// The child's stencil fill covers the CHILD rect (100,100)-(300,250), not
+	// the parent window: inherited frame assets stay scoped to DRAW_FRAME.
 	const MenuQuad *fill = nullptr;
 	for (const MenuQuad &q : dl.quads) {
-		if (q.texture == brush) {
+		if (q.texture == border && q.texture2 == kMenuTexNone && q.tiled) {
 			fill = &q;
 		}
 	}

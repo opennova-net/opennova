@@ -94,16 +94,24 @@ reference-repo choice). With no resolvable font the compiler measures a nominal
 
 The stencil is a grid of `SIZE x SIZE` tiles (canonically 4*SIZE square):
 row 0 = top corners + top edge (+ fill tile at col 3), row 1 = left/right edges,
-row 2 = bottom row. The drawer paints a center fill quad (the BRUSH, tiled) plus 8
-INDEPENDENT border pieces: corners at `SIZE`, edges stretched between them, the whole
-border hanging OUTSIDE the window rect by `SIZE` and pulled back by the authored
-`STENCIL INSETX/INSETY` (floats at elem+0x288/+0x28C, default 0). Every quad is
-modulated by `0x7F7F7F`, which is neutral in retail's modulate-2x fixed-function
-path and therefore produces no visible tint `[orig: CUIElement_DrawFrame
-@ 0x64a210; init_border_materials @ 0x646f70]`. Reimpl:
-`MenuFrameCompiler::emit_frame` emits effective white (`0xFFFFFFFF`) for the
-Godot ordinary-multiply applier, preserving the retail result rather than
-darkening the BRUSH and eight STENCIL quads to half intensity.
+row 2 = bottom row. Retail copies cell `(3, 0)` from the STENCIL into a dedicated
+`SIZE x SIZE` `border_fill_material`; that texture tiles the center at native
+device pixels, using the absolute destination rectangle as its UV phase. The
+eight border pieces use a two-texture `border_material`: STENCIL is stage 0 and
+BRUSH is stage 1, both sampling the same tile UVs. The corners stay at `SIZE`,
+the edges stretch between them, and the whole border hangs OUTSIDE the window
+rect by `SIZE`, pulled back by the authored `STENCIL INSETX/INSETY` (floats at
+elem+0x288/+0x28C, default 0).
+
+Every frame quad is submitted with diffuse `0xFF7F7F7F`. In material mode
+`0x651`, the first MODULATE2X stage cancels that half-intensity diffuse and the
+second yields the effective RGB equation `(508/255) * STENCIL * BRUSH`; alpha
+is the product of both texture alphas. `[orig: init_border_materials @ 0x646f70
+creates `border_material` from both texture handles and copies the fill cell;
+CUIElement_DrawFrame @ 0x64a210; decode_mode_color_stage @ 0x681080]`. Reimpl:
+`MenuFrameCompiler::emit_frame` carries the stencil fill region and the paired
+border texture slots; the Godot device leg caches the phased fill tile and
+rasterized two-stage pieces.
 The old 4x4 mirrored-corner NinePatch bake with hardcoded 16/24 insets is retired.
 
 A frame draws ONLY when the window's `DRAW_FRAME` flag is set: the render gate is

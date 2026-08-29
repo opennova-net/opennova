@@ -23,6 +23,11 @@ third_party/modsuperoed/
 
 # Build artifacts
 build/
+# Keep a Godot ignore sentinel in the in-project GDExtension build tree. MSVC
+# object files also use .obj, which Godot otherwise treats as Wavefront meshes.
+!godot/src/build/
+godot/src/build/*
+!godot/src/build/.gdignore
 *.o
 *.os
 *.a
