@@ -22,7 +22,6 @@
     "fixtures/bad/BINOC_twist.bad",
     "fixtures/bms/ash_i5b.reference.bms",
     "fixtures/cbin/nlist*.reference.kda",
-    "fixtures/dbf/00TRg.DBF",
     "fixtures/def/weapon.def",
     "fixtures/def/ammo.def",
     "fixtures/def/hudpos.def",

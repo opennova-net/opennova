@@ -57,6 +57,8 @@ MIXED = {
     "jo_assets": [
         "occlusion_armry", "threedi_panm_ctrl", "particle_smoke_all_fixtures", "sound_profile",
         "def_parse_items", "infantry", "minimap_overlay",
+        # The reference fixture set (<assets>/fixtures/**) legs.
+        "dbf_roundtrip",
     ],
     "mission_corpus": [],
 }

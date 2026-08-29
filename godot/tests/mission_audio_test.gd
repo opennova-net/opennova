@@ -592,13 +592,13 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	DirAccess.make_dir_recursive_absolute(fixture_dir)
 	_write_bytes(fixture_dir.path_join("first.DBF"),
 		FileAccess.get_file_as_bytes(
-			ProjectSettings.globalize_path("res://../fixtures/dbf/00TRg.DBF")))
+			ProjectSettings.globalize_path("res://../fixtures/dbf/synth_bank.dbf")))
 	_write_bytes(fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
 	var lwf := LwfData.new()
 	lwf.create_empty()
-	_add_lwf_set(lwf, "Z00gR100", "tone.wav", 200)
+	_add_lwf_set(lwf, "SynR100", "tone.wav", 200)
 	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
 
 	var root := ResourceRoot.new()
@@ -609,7 +609,7 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	add_child_autofree(container)
 	var audio = MissionAudio.new(root, null)
 	audio.setup(mission, "first.bms", container)
-	assert_eq(audio.resolve_dialog_set(1), "Z00gR100")
+	assert_eq(audio.resolve_dialog_set(1), "SynR100")
 	assert_true(audio.play_dialog(1))
 	var old_dialog: AudioStreamPlayer = audio.dialog_voice()
 	assert_not_null(old_dialog)
