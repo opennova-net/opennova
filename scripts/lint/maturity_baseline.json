@@ -2,10 +2,10 @@
   "citation_allowlist_engine": [
     "bfc1",
     "devtools",
-    "gameprofile",
+    "base/gameprofile/gameprofile.c",
     "pcapio",
-    "resource_index",
-    "vfs",
+    "base/resource_index/boot_policy.cpp",
+    "base/vfs/vfs_decode.cpp",
     "net/novaworld/service",
     "net/netsim/loopback_channel.cpp",
     "net/netsim/udp_session_transport.cpp",

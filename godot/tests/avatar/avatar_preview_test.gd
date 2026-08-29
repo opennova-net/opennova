@@ -304,7 +304,7 @@ func test_runtime_portrait_binds_idle_on_skinned_parts_with_real_assets() -> voi
 		assert_true(body.has_skeleton(), "the skinned body part builds a Skeleton3D under the idle")
 		assert_eq(body.get_active_body_clip(), "anim_idle", "the idle clip is playing on the part")
 	else:
-		pending("OPENNOVA_JO_DIR: body part is not vertex-skinned on this asset set (rigid-attach is D-PLAYERINFO-1)")
+		pending("OPENNOVA_JO_DIR: body part is not vertex-skinned on this asset set (a rigid-attach part builds no Skeleton3D)")
 
 
 # Copy the committed fixtures/anim/idle.bad into a temp dir under the names the preview binds

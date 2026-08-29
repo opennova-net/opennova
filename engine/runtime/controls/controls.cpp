@@ -277,7 +277,7 @@ std::vector<ControlRow> build_rows(Device device) {
     row.cls = action_class_name(a.cls);
     row.action = a.name;
     // Keyboard shows the byte-exact catalog defaults; mouse/joystick share the action
-    // list but their default-binding arrays are not yet ported (D-CTRL-2).
+    // list but their default-binding arrays are not yet ported (D-CTRL-1).
     if (device == Device::Keyboard) {
       row.control = format_binding(a.default_key, a.default_key2);
     }
