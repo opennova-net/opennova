@@ -20,6 +20,7 @@
 
 namespace godot {
 
+class Simulation;
 class SubViewport;
 
 // The game's dev tools (ADR 0039): the ImGui workspace behind F3 with the
@@ -53,6 +54,15 @@ public:
 
 	void set_frame_stats(const Ref<FrameStats> &p_stats);
 	Ref<FrameStats> get_frame_stats() const { return frame_stats_; }
+
+	// The Simulation the engine-fact windows read and mutate through
+	// (ADR 0042 d6): a raw pointer the shell sets on world load and nulls on
+	// world unload (and _exit_tree nulls) — the stats-board pattern. The
+	// per-frame leg pushes the entity-directory record (built by the ENGINE
+	// join, world::inspect::entity_directory, at the window's 0.5 s cadence
+	// and only while the window shows) and drains the windows' typed
+	// DebugRequests into the same debug delegates the MCP control plane uses.
+	void set_simulation(Simulation *p_simulation);
 
 	// Every tool window back inside the main viewport on the next layout pass
 	// (ImGui's ini remembers a window dragged out to another monitor); the
@@ -94,10 +104,14 @@ private:
 #if OPENNOVA_DEVTOOLS
 	void draw(int p_requested_width, int p_requested_height) override;
 	void apply_game_requests();
+	void apply_debug_requests();
+	void push_entity_directory();
 	void set_game_playing_internal(bool p_playing);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
 	bool open_ = false; // the last state the shell was told about
+	Simulation *simulation_ = nullptr; // world-load..world-unload; never owned
+	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

@@ -759,11 +759,7 @@ Dictionary Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
 TypedArray<EntityRow> Simulation::entity_directory() const {
 	TypedArray<EntityRow> out;
 	if (!kernel_) return out;
-	// A joiner never mixes its non-authoritative tooling AI pool into the
-	// decoded view; the host joins registry rows to their AI cards.
-	const std::vector<opennova::world::inspect::EntityRow> rows =
-			opennova::world::inspect::entity_directory(
-					kernel_->world, joiner_ ? nullptr : &kernel_->ai);
+	const std::vector<opennova::world::inspect::EntityRow> rows = native_entity_directory();
 	for (const opennova::world::inspect::EntityRow &row : rows) {
 		Ref<EntityRow> typed;
 		typed.instantiate();
@@ -771,6 +767,20 @@ TypedArray<EntityRow> Simulation::entity_directory() const {
 		out.push_back(typed);
 	}
 	return out;
+}
+
+std::vector<opennova::world::inspect::EntityRow> Simulation::native_entity_directory() const {
+	if (!kernel_) return {};
+	// A joiner never mixes its non-authoritative tooling AI pool into the
+	// decoded view; the host joins registry rows to their AI cards.
+	return opennova::world::inspect::entity_directory(
+			kernel_->world, joiner_ ? nullptr : &kernel_->ai);
+}
+
+int Simulation::native_ai_index_for_handle(int p_handle) const {
+	if (!kernel_ || p_handle < 0 || p_handle > 0xFFFF) return -1;
+	return kernel_->ai.index_for_handle(
+			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)});
 }
 
 Ref<EntityCard> Simulation::entity_card(int p_handle) const {

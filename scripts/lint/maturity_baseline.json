@@ -46,6 +46,7 @@
     "game_render_diagnostics.gd|func to_json_value()",
     "effect_light_report.gd|func to_json_value()",
     "debug_options.gd|static func find(",
+    "debug_controls.gd|static func normalize_value(",
     "debug_entity_picker.gd|static func pick_at_crosshair(",
     "game_packer.gd|static func pack(",
     "game_packer.gd|static func stage_loose(",

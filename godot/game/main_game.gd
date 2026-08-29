@@ -146,6 +146,8 @@ func begin_runtime_shutdown() -> WorldLoadOperation:
 	if _world != null:
 		_world.cancel_join_preload()
 		_world.cancel_join_admission()
+		# The F3 windows' Simulation dies with the runtime unload frees.
+		_dev_tools.set_simulation(null)
 		_world.unload()
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	return load_operation
@@ -811,6 +813,10 @@ func _on_world_loaded() -> void:
 	_world.set_pick_debug(_pick_list)
 	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
+	# The F3 engine-fact windows read and mutate through this Simulation from
+	# here until unload (ADR 0042 d6): DevTools holds it in C++ (the stats-board
+	# pattern) and does the record push / request drain with no GDScript relay.
+	_dev_tools.set_simulation(sim)
 	if sim != null and bool(sim.is_joiner()) \
 			and not bool(sim.is_joined_in_match()):
 		return
@@ -1039,6 +1045,8 @@ func _teardown_world_to_menu() -> void:
 		_end_round_presenter.teardown()  # same stale-root hazard: the stat.mnu frame and
 		# its MenuAudio hold the OLD world's resource root, and a frame left visible when
 		# the session ends mid-STAT would be re-shown over the next mission
+	# The F3 windows' Simulation dies with the runtime unload frees.
+	_dev_tools.set_simulation(null)
 	_world.unload()
 	if _player_presenter != null:
 		_player_presenter.setup(_world, _camera, _camera)
