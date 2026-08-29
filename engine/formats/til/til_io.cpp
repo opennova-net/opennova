@@ -6,6 +6,8 @@
 //  the network form; the overlay render is PolyTrn_RenderTile @0x60df0d, docs/tiles/til-re.md]
 // docs/engine_spec_tiles.md 4.1, 5.1
 
+#include <base/io/le.h>
+
 #include <limits>
 
 namespace opennova {
@@ -15,25 +17,14 @@ namespace {
 constexpr size_t TIL_HEADER_SIZE = 16;
 constexpr size_t TIL_ENTRY_SIZE = 12;
 
-uint16_t read_u16_le(const uint8_t *data) {
-	return static_cast<uint16_t>(data[0])
-		| (static_cast<uint16_t>(data[1]) << 8);
-}
-
-uint32_t read_u32_le(const uint8_t *data) {
-	return static_cast<uint32_t>(data[0])
-		| (static_cast<uint32_t>(data[1]) << 8)
-		| (static_cast<uint32_t>(data[2]) << 16)
-		| (static_cast<uint32_t>(data[3]) << 24);
-}
+// The byte primitives are the shared opennova::io ones; the local names stay so
+// the walk below reads as the witnessed layout.
+using io::read_u16_le;
+using io::read_u32_le;
+using io::write_u16_le;
 
 int32_t read_i32_le(const uint8_t *data) {
 	return static_cast<int32_t>(read_u32_le(data));
-}
-
-void write_u16_le(uint8_t *dst, uint16_t value) {
-	dst[0] = static_cast<uint8_t>(value & 0xFFu);
-	dst[1] = static_cast<uint8_t>((value >> 8) & 0xFFu);
 }
 
 void write_u32_le(uint8_t *dst, uint32_t value) {
