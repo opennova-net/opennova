@@ -1,6 +1,6 @@
 extends GutTest
 
-const SCRIPT_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
+const SCRIPT_FIXTURE := "res://../fixtures/mus/synth_gamemus.bin"
 const BANK_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"
 
 

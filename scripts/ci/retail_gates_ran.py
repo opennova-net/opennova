@@ -59,7 +59,8 @@ MIXED = {
         "def_parse_items", "infantry", "minimap_overlay",
         # The reference fixture set (<assets>/fixtures/**) legs.
         "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency", "avatars_parse",
-        "avatars_roundtrip",
+        "avatars_roundtrip", "mus_parse", "mus_compat", "mus_decompile", "mus_roundtrip",
+        "mus_names_roundtrip", "mus_entry_roundtrip", "mus_encode_idempotence", "mus_vm",
     ],
     "mission_corpus": [],
 }

@@ -4,7 +4,7 @@ extends GutTest
 # the SBF entry names down through engine/formats/mus's mus_decompile_with_names so
 # play / bind statements show real names instead of "sound_N" placeholders.
 
-const SCRIPT_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
+const SCRIPT_FIXTURE := "res://../fixtures/mus/synth_gamemus.bin"
 const BANK_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"
 
 
@@ -59,9 +59,10 @@ func test_names_aware_decompile_substitutes_real_names():
 	assert_true(matched_any, "at least one bind sound_N \"<entry>\" pair lands in the text")
 
 
-# Specific: the synthetic bank's slot 1 is TONE01 (retail jo_gamemus's is
-# GAMINT, the user-visible win that motivated the entire change). If a future
-# fixture rotates the order, swap the slot index here.
+# Specific: the synthetic bank's slot 1 is TONE01 (the shipped gamemus bank's is
+# GAMINT, the user-visible win that motivated the entire change) and the minted
+# gamescript plays sound_1. If a future fixture rotates the order, swap the slot
+# index here.
 func test_synth_gamemus_slot_1_resolves_to_tone01():
 	var script := MusicScript.new()
 	script.load_from_path(SCRIPT_FIXTURE)

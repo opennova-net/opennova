@@ -3,6 +3,10 @@
 #include <string.h>
 #include <formats/mus/mus.h>
 
+#include <string>
+
+#include "common/retail_paths.h"
+
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \
     if (fn()) { printf("PASS\n"); ++passed; } \
@@ -14,16 +18,20 @@ static int passed = 0, failed = 0;
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif
 
+static std::string g_retail_gamemus;
+
 /* Roundtrip: decompile(compile(decompile(x))) must equal decompile(x).
 
    This is the validation that the compiler is the inverse of the
    decompiler at the text-level: any text the decompiler can produce, the
    compiler must accept, and re-decompiling the recompiled bytecode must
    yield the same text. The bytecode itself is allowed to differ (different
-   but equivalent opcode sequences are fine). */
-static int test_roundtrip_jo_gamemus(void) {
+   but equivalent opcode sequences are fine). Runs over the minted
+   synth_gamemus.bin unconditionally and over the shipped jo_gamemus.bin from
+   the reference fixture set (OPENNOVA_JO_ASSETS) as the retail leg. */
+static int roundtrip(const char *path) {
     MusFile mf;
-    int rc = mus_open(&mf, MUS_FIXTURE_DIR "/jo_gamemus.bin");
+    int rc = mus_open(&mf, path);
     CHECK(rc == 0, "open original");
 
     /* Decompile the original to text1. */
@@ -83,8 +91,28 @@ static int test_roundtrip_jo_gamemus(void) {
     return 1;
 }
 
+static int test_roundtrip_synth_gamemus(void) {
+    return roundtrip(MUS_FIXTURE_DIR "/synth_gamemus.bin");
+}
+
+static int test_roundtrip_synth_menumus(void) {
+    return roundtrip(MUS_FIXTURE_DIR "/synth_menumus.bin");
+}
+
+static int test_roundtrip_jo_gamemus(void) {
+    return roundtrip(g_retail_gamemus.c_str());
+}
+
 int main(void) {
-    RUN_TEST(test_roundtrip_jo_gamemus);
+    RUN_TEST(test_roundtrip_synth_gamemus);
+    RUN_TEST(test_roundtrip_synth_menumus);
+
+    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
+    if (g_retail_gamemus.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_gamemus.bin (the shipped game script)");
+    } else {
+        RUN_TEST(test_roundtrip_jo_gamemus);
+    }
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

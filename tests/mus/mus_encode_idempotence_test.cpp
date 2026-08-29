@@ -18,7 +18,10 @@
    Define canonical(b) = encode(compile(decompile(open(b)))). Then
    canonical(original) == canonical(canonical(original)) byte-for-byte. This
    is the writer invariant: a no-op decompile/compile/encode cycle must
-   reproduce the canonical bytes exactly.
+   reproduce the canonical bytes exactly. The minted synth_{gamemus,menumus}.bin
+   (already the canonical form, so canonical(minted) == minted as well) run
+   unconditionally; the shipped pair from the reference fixture set
+   (OPENNOVA_JO_ASSETS) is the retail leg.
 
    The decompiler emitter must never change (its golden text round-trip is
    byte-exact); this test exercises the compile+encode side only. */
@@ -27,6 +30,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <formats/mus/mus.h>
+
+#include <string>
+
+#include "common/retail_paths.h"
 
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \
@@ -38,6 +45,8 @@ static int passed = 0, failed = 0;
 #ifndef MUS_FIXTURE_DIR
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif
+
+static std::string g_retail_gamemus, g_retail_menumus;
 
 /* canonical(script) = encode_file(compile(decompile(script))). Allocates
    *out via mus_encode_file (release with mus_free). Returns 1 on success. */
@@ -95,7 +104,7 @@ static int assert_fixed_point(const char *path) {
     CHECK(memcmp(lap1, lap2, n1) == 0, "canonical form is a byte-stable fixed point");
 
     /* Informational: document the shrink vs the original (not a gate). */
-    fprintf(stderr, "  [info] %s: canonical %zu bytes (original is larger; "
+    fprintf(stderr, "  [info] %s: canonical %zu bytes (a shipped original is larger; "
             "editor debug-info region is not reproduced)\n", path, n1);
 
     mus_free(lap1);
@@ -105,17 +114,60 @@ static int assert_fixed_point(const char *path) {
     return 1;
 }
 
+/* The minted programs are the encoder's own output, so they are ALREADY the
+   canonical form: canonical(minted) reproduces the committed bytes. */
+static int assert_minted_is_canonical(const char *path) {
+    FILE *f = fopen(path, "rb");
+    CHECK(f != NULL, "open minted");
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *committed = (uint8_t *)malloc((size_t)n);
+    CHECK(committed != NULL && fread(committed, 1, (size_t)n, f) == (size_t)n, "read minted");
+    fclose(f);
+
+    MusFile mf;
+    CHECK(mus_open_memory(&mf, committed, (size_t)n) == 0, "open minted bytes");
+    uint8_t *lap = NULL; size_t lap_n = 0;
+    CHECK(canonical_from_script(&mf.scripts[0], &lap, &lap_n), "canonical(minted)");
+    CHECK(lap_n == (size_t)n && memcmp(lap, committed, lap_n) == 0,
+          "the minted program is its own canonical form");
+    mus_free(lap);
+    mus_close(&mf);
+    free(committed);
+    return 1;
+}
+
+static int test_synth_gamemus_fixed_point(void) {
+    return assert_fixed_point(MUS_FIXTURE_DIR "/synth_gamemus.bin")
+        && assert_minted_is_canonical(MUS_FIXTURE_DIR "/synth_gamemus.bin");
+}
+
+static int test_synth_menumus_fixed_point(void) {
+    return assert_fixed_point(MUS_FIXTURE_DIR "/synth_menumus.bin")
+        && assert_minted_is_canonical(MUS_FIXTURE_DIR "/synth_menumus.bin");
+}
+
 static int test_gamemus_fixed_point(void) {
-    return assert_fixed_point(MUS_FIXTURE_DIR "/jo_gamemus.bin");
+    return assert_fixed_point(g_retail_gamemus.c_str());
 }
 
 static int test_menumus_fixed_point(void) {
-    return assert_fixed_point(MUS_FIXTURE_DIR "/jo_menumus.bin");
+    return assert_fixed_point(g_retail_menumus.c_str());
 }
 
 int main(void) {
-    RUN_TEST(test_gamemus_fixed_point);
-    RUN_TEST(test_menumus_fixed_point);
+    RUN_TEST(test_synth_gamemus_fixed_point);
+    RUN_TEST(test_synth_menumus_fixed_point);
+
+    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
+    g_retail_menumus = retail::reference_fixture("mus/jo_menumus.bin");
+    if (g_retail_gamemus.empty() || g_retail_menumus.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_{gamemus,menumus}.bin (the shipped programs)");
+    } else {
+        RUN_TEST(test_gamemus_fixed_point);
+        RUN_TEST(test_menumus_fixed_point);
+    }
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

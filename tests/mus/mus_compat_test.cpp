@@ -1,16 +1,21 @@
-/* Parse the committed MUS fixtures (gamemus + menumus). Both are the plaintext
-   SCR0 form extracted from JO_CLIENT/localres.pff, so the parser must open them
-   cleanly. No external/Desktop assets: everything is a committed fixture. */
+/* Open the MUS programs cleanly: the minted synth_gamemus.bin + synth_menumus.bin
+   (tests/fixtures/synth_mus_gen.cpp) unconditionally; the shipped gamemus +
+   menumus (the plaintext SCR0 form extracted from JO_CLIENT/localres.pff) from
+   the reference fixture set behind OPENNOVA_JO_ASSETS. */
 
 #include <stdio.h>
 #include <string.h>
 #include <formats/mus/mus.h>
 
+#include <string>
+
+#include "common/retail_paths.h"
+
 #ifndef MUS_FIXTURE_DIR
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif
 
-static int check(const char *path) {
+static int check(const char *path, const char *script_name) {
     MusFile mf;
     int rc = mus_open(&mf, path);
     if (rc != 0) {
@@ -19,6 +24,11 @@ static int check(const char *path) {
     }
     if (mf.header.magic != MUS_MAGIC_SCR0) {
         fprintf(stderr, "  FAIL %s bad magic 0x%08x\n", path, mf.header.magic);
+        mus_close(&mf);
+        return 0;
+    }
+    if (strncmp(mf.scripts[0].name, script_name, MUS_NAME_SIZE) != 0) {
+        fprintf(stderr, "  FAIL %s first script %.16s, expected %s\n", path, mf.scripts[0].name, script_name);
         mus_close(&mf);
         return 0;
     }
@@ -32,7 +42,16 @@ static int check(const char *path) {
 
 int main(void) {
     int fail = 0;
-    if (!check(MUS_FIXTURE_DIR "/jo_gamemus.bin")) ++fail;
-    if (!check(MUS_FIXTURE_DIR "/jo_menumus.bin")) ++fail;
+    if (!check(MUS_FIXTURE_DIR "/synth_gamemus.bin", "gamescript")) ++fail;
+    if (!check(MUS_FIXTURE_DIR "/synth_menumus.bin", "menuscript")) ++fail;
+
+    const std::string game = retail::reference_fixture("mus/jo_gamemus.bin");
+    const std::string menu = retail::reference_fixture("mus/jo_menumus.bin");
+    if (game.empty() || menu.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_{gamemus,menumus}.bin (the shipped programs)");
+    } else {
+        if (!check(game.c_str(), "gamescript")) ++fail;
+        if (!check(menu.c_str(), "menuscript")) ++fail;
+    }
     return fail == 0 ? 0 : 1;
 }

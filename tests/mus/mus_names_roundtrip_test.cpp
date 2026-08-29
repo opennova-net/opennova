@@ -3,9 +3,11 @@
    bank is loaded (mus_decompile_with_names); before the bind-aware compiler that
    text failed to recompile ("play GAMINT" -> "expected 'sound_N'"), which broke
    Compile/Compile&Run/Save with a bank. These tests pin:
-     1. real fixture: decompile_with_names(jo_gamemus) recompiles, byte-identical
+     1. a program on disk: decompile_with_names(x) recompiles, byte-identical
         to the names-less decompile's bytecode (incl. a name with a space -> the
-        play target is quoted and still resolves);
+        play target is quoted and still resolves) -- the minted synth_gamemus.bin
+        unconditionally, the shipped jo_gamemus.bin from the reference fixture
+        set (OPENNOVA_JO_ASSETS) as the retail leg;
      2. a hand-written script: `play "Name"` / `play Name` / `play sound_N` all
         resolve through the bind map to the right index; an unbound name fails. */
 
@@ -13,6 +15,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <formats/mus/mus.h>
+
+#include <string>
+
+#include "common/retail_paths.h"
 
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \
@@ -24,6 +30,8 @@ static int passed = 0, failed = 0;
 #ifndef MUS_FIXTURE_DIR
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif
+
+static std::string g_retail_gamemus;
 
 /* Decompile `s` (names-aware when names!=NULL), compile, and hand the caller the
    recompiled bytecode. Returns 1 on success. */
@@ -51,9 +59,9 @@ static int decompile_compile(const MusScript *s,
     return rc == 0;
 }
 
-static int test_names_roundtrip_jo_gamemus(void) {
+static int names_roundtrip(const char *path) {
     MusFile mf;
-    int rc = mus_open(&mf, MUS_FIXTURE_DIR "/jo_gamemus.bin");
+    int rc = mus_open(&mf, path);
     CHECK(rc == 0, "open original");
 
     /* SBF entry names: index 0 deliberately contains a space (forces a quoted
@@ -82,6 +90,14 @@ static int test_names_roundtrip_jo_gamemus(void) {
     mus_script_free(&plain);
     mus_close(&mf);
     return 1;
+}
+
+static int test_names_roundtrip_synth_gamemus(void) {
+    return names_roundtrip(MUS_FIXTURE_DIR "/synth_gamemus.bin");
+}
+
+static int test_names_roundtrip_jo_gamemus(void) {
+    return names_roundtrip(g_retail_gamemus.c_str());
 }
 
 /* Count occurrences of the 2-byte play opcode (0x3E, idx) in a code buffer. */
@@ -132,8 +148,15 @@ static int test_bind_resolves_play_by_name(void) {
 }
 
 int main(void) {
-    RUN_TEST(test_names_roundtrip_jo_gamemus);
+    RUN_TEST(test_names_roundtrip_synth_gamemus);
     RUN_TEST(test_bind_resolves_play_by_name);
+
+    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
+    if (g_retail_gamemus.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_gamemus.bin (the shipped game script)");
+    } else {
+        RUN_TEST(test_names_roundtrip_jo_gamemus);
+    }
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

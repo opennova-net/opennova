@@ -1,7 +1,15 @@
+/* Parse pins for engine/formats/mus: the minted fixtures/mus/synth_gamemus.bin
+   (tests/fixtures/synth_mus_gen.cpp) unconditionally; the shipped jo_gamemus.bin
+   from the reference fixture set behind OPENNOVA_JO_ASSETS (the byte offsets
+   MDEdit laid out, the retail section labels and source path). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <formats/mus/mus.h>
+
+#include <string>
+
+#include "common/retail_paths.h"
 
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \
@@ -13,6 +21,11 @@ static int passed = 0, failed = 0;
 #ifndef MUS_FIXTURE_DIR
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif
+
+#define SYNTH_GAMEMUS MUS_FIXTURE_DIR "/synth_gamemus.bin"
+
+/* The shipped table's path from the reference fixture set; set in main. */
+static std::string g_retail_gamemus;
 
 static uint8_t *slurp(const char *path, size_t *out_size) {
     FILE *f = fopen(path, "rb");
@@ -28,9 +41,60 @@ static uint8_t *slurp(const char *path, size_t *out_size) {
     return buf;
 }
 
+/* The canonical eleven intrinsic names, in MDEdit order (position == method index). */
+static int check_intrinsics(const MusFile *mf) {
+    CHECK(mf->intrinsic_count == 11, "11 intrinsic names parsed");
+    CHECK(strncmp(mf->intrinsic_names[0],  "GEcho",    5)  == 0, "intrinsic[0] GEcho");
+    CHECK(strncmp(mf->intrinsic_names[1],  "GGRnd",    5)  == 0, "intrinsic[1] GGRnd");
+    CHECK(strncmp(mf->intrinsic_names[2],  "GSV",      3)  == 0, "intrinsic[2] GSV");
+    CHECK(strncmp(mf->intrinsic_names[3],  "GSDV",     4)  == 0, "intrinsic[3] GSDV");
+    CHECK(strncmp(mf->intrinsic_names[4],  "GFB",      3)  == 0, "intrinsic[4] GFB");
+    CHECK(strncmp(mf->intrinsic_names[5],  "FSet",     4)  == 0, "intrinsic[5] FSet");
+    CHECK(strncmp(mf->intrinsic_names[6],  "FClear",   6)  == 0, "intrinsic[6] FClear");
+    CHECK(strncmp(mf->intrinsic_names[7],  "FIsSet",   6)  == 0, "intrinsic[7] FIsSet");
+    CHECK(strncmp(mf->intrinsic_names[8],  "FIsClear", 8)  == 0, "intrinsic[8] FIsClear");
+    CHECK(strncmp(mf->intrinsic_names[9],  "TStart",   6)  == 0, "intrinsic[9] TStart");
+    CHECK(strncmp(mf->intrinsic_names[10], "TStop",    5)  == 0, "intrinsic[10] TStop");
+    return 1;
+}
+
+/* The minted gamescript: eight named sections (Begin first, Multiplayerstart
+   last), entry 0, the authored source path, section offsets inside the
+   bytecode. */
+static int test_open_synth_gamemus(void) {
+    size_t n;
+    uint8_t *buf = slurp(SYNTH_GAMEMUS, &n);
+    CHECK(buf, "fixture present");
+    MusFile mf;
+    int rc = mus_open_memory(&mf, buf, n);
+    CHECK(rc == 0, "open succeeded");
+    CHECK(mf.header.magic == MUS_MAGIC_SCR0, "magic");
+    CHECK(mf.header.chunk_count == 1, "single chunk");
+    CHECK(mf.header.name_count == 11, "11 intrinsic names");
+    CHECK(mf.scripts != NULL, "scripts allocated");
+    const MusScript *s = &mf.scripts[0];
+    CHECK(strncmp(s->name, "gamescript", 10) == 0, "first script gamescript");
+    CHECK(s->globals_size == 0x40, "globals_size 0x40 (the MDEdit Var00..Var15 area)");
+    CHECK(s->section_count == 8, "8 sections");
+    CHECK(s->entry_section_index == 0, "entry section 0");
+    CHECK(s->code_size > 0 && s->code != NULL, "bytecode present");
+    for (uint32_t i = 0; i < s->section_count; ++i)
+        CHECK(s->sections[i].code_offset < s->code_size, "section offset inside the bytecode");
+    CHECK(s->sections[0].code_offset == 0, "the entry section starts the bytecode");
+    /* The editor debug export table carries the authored labels. */
+    CHECK(strcmp(s->sections[0].name, "Begin") == 0, "sec[0] name Begin");
+    CHECK(strcmp(s->sections[7].name, "Multiplayerstart") == 0, "sec[7] name Multiplayerstart");
+    CHECK(strstr(s->source_path, "synth_gamemus.mus") != NULL, "source_path embeds synth_gamemus.mus");
+    CHECK(check_intrinsics(&mf), "intrinsics");
+    mus_close(&mf);
+    free(buf);
+    return 1;
+}
+
+/* The shipped gamescript, as MDEdit laid it out. */
 static int test_open_jo_gamemus(void) {
     size_t n;
-    uint8_t *buf = slurp(MUS_FIXTURE_DIR "/jo_gamemus.bin", &n);
+    uint8_t *buf = slurp(g_retail_gamemus.c_str(), &n);
     CHECK(buf, "fixture present");
     MusFile mf;
     int rc = mus_open_memory(&mf, buf, n);
@@ -61,19 +125,7 @@ static int test_open_jo_gamemus(void) {
     /* Editor source path lives at the head of the debug section. */
     CHECK(strstr(mf.scripts[0].source_path, "gamemus.mus") != NULL,
           "source_path embeds gamemus.mus");
-    /* Intrinsic names */
-    CHECK(mf.intrinsic_count == 11, "11 intrinsic names parsed");
-    CHECK(strncmp(mf.intrinsic_names[0],  "GEcho",    5)  == 0, "intrinsic[0] GEcho");
-    CHECK(strncmp(mf.intrinsic_names[1],  "GGRnd",    5)  == 0, "intrinsic[1] GGRnd");
-    CHECK(strncmp(mf.intrinsic_names[2],  "GSV",      3)  == 0, "intrinsic[2] GSV");
-    CHECK(strncmp(mf.intrinsic_names[3],  "GSDV",     4)  == 0, "intrinsic[3] GSDV");
-    CHECK(strncmp(mf.intrinsic_names[4],  "GFB",      3)  == 0, "intrinsic[4] GFB");
-    CHECK(strncmp(mf.intrinsic_names[5],  "FSet",     4)  == 0, "intrinsic[5] FSet");
-    CHECK(strncmp(mf.intrinsic_names[6],  "FClear",   6)  == 0, "intrinsic[6] FClear");
-    CHECK(strncmp(mf.intrinsic_names[7],  "FIsSet",   6)  == 0, "intrinsic[7] FIsSet");
-    CHECK(strncmp(mf.intrinsic_names[8],  "FIsClear", 8)  == 0, "intrinsic[8] FIsClear");
-    CHECK(strncmp(mf.intrinsic_names[9],  "TStart",   6)  == 0, "intrinsic[9] TStart");
-    CHECK(strncmp(mf.intrinsic_names[10], "TStop",    5)  == 0, "intrinsic[10] TStop");
+    CHECK(check_intrinsics(&mf), "intrinsics");
     mus_close(&mf);
     free(buf);
     return 1;
@@ -89,7 +141,7 @@ static int test_close_idempotent(void) {
 
 static int test_open_file(void) {
     MusFile mf;
-    int rc = mus_open(&mf, MUS_FIXTURE_DIR "/jo_gamemus.bin");
+    int rc = mus_open(&mf, SYNTH_GAMEMUS);
     CHECK(rc == 0, "open from path");
     CHECK(mf.header.chunk_count == 1, "single chunk");
     CHECK(strncmp(mf.scripts[0].name, "gamescript", 10) == 0, "gamescript");
@@ -107,15 +159,16 @@ static int test_open_missing_file(void) {
     return 1;
 }
 
-static int test_find_section(void) {
+/* A section name from the debug export table round-trips through find; the
+   returned pointer is the table entry itself. */
+static int find_section_over(const char *path, uint32_t win_index, uint32_t win_offset) {
     MusFile mf;
-    CHECK(mus_open(&mf, MUS_FIXTURE_DIR "/jo_gamemus.bin") == 0, "open");
+    CHECK(mus_open(&mf, path) == 0, "open");
     CHECK(mf.scripts[0].section_count == 8, "8 sections");
-    /* Real section name from the debug export table should round-trip through find. */
     const MusSection *s3 = mus_find_section(&mf.scripts[0], "Win000");
     CHECK(s3 != NULL, "Win000 found");
-    CHECK(s3 == &mf.scripts[0].sections[3], "ptr match");
-    CHECK(s3->code_offset == 0x21, "Win000 code_offset 0x21 (bytecode-relative)");
+    CHECK(s3 == &mf.scripts[0].sections[win_index], "ptr match");
+    CHECK(s3->code_offset == win_offset, "Win000 code_offset (bytecode-relative)");
     const MusSection *miss = mus_find_section(&mf.scripts[0], "NOPE");
     CHECK(miss == NULL, "miss returns NULL");
     /* NULL guards */
@@ -125,12 +178,40 @@ static int test_find_section(void) {
     return 1;
 }
 
+static int test_find_section_synth(void) {
+    /* The compiler interns sections in first-mention order: Begin, Testmission
+       (forward-referenced from Begin), Missionnull, Missionwin, Win000, ... */
+    MusFile mf;
+    CHECK(mus_open(&mf, SYNTH_GAMEMUS) == 0, "open");
+    uint32_t win_index = 0, win_offset = 0;
+    for (uint32_t i = 0; i < mf.scripts[0].section_count; ++i)
+        if (strcmp(mf.scripts[0].sections[i].name, "Win000") == 0) {
+            win_index = i;
+            win_offset = mf.scripts[0].sections[i].code_offset;
+        }
+    mus_close(&mf);
+    CHECK(win_index == 4, "Win000 is the fifth interned section");
+    return find_section_over(SYNTH_GAMEMUS, win_index, win_offset);
+}
+
+static int test_find_section_jo(void) {
+    return find_section_over(g_retail_gamemus.c_str(), 3, 0x21);
+}
+
 int main(void) {
-    RUN_TEST(test_open_jo_gamemus);
+    RUN_TEST(test_open_synth_gamemus);
     RUN_TEST(test_close_idempotent);
     RUN_TEST(test_open_file);
     RUN_TEST(test_open_missing_file);
-    RUN_TEST(test_find_section);
+    RUN_TEST(test_find_section_synth);
+
+    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
+    if (g_retail_gamemus.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_gamemus.bin (the shipped game script)");
+    } else {
+        RUN_TEST(test_open_jo_gamemus);
+        RUN_TEST(test_find_section_jo);
+    }
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

@@ -415,7 +415,15 @@ target_link_libraries(sbf_jo_install_sweep_test PRIVATE opennova_formats)
 target_include_directories(sbf_jo_install_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_gated_test(sbf_jo_install_sweep COMMAND sbf_jo_install_sweep_test)
 
-# MUS tests
+# MUS tests. fixtures/mus/synth_{gamemus,menumus}.bin and the decompile golden
+# golden_synth_gamemus.mus.txt: two authored programs through mus_compile +
+# mus_encode_file; the shipped jo_gamemus.bin / jo_menumus.bin and their golden
+# are each fixture test's OPENNOVA_JO_ASSETS reference leg.
+add_executable(synth_mus_gen_test fixtures/synth_mus_gen.cpp)
+target_link_libraries(synth_mus_gen_test PRIVATE opennova_formats)
+target_include_directories(synth_mus_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME synth_mus_gen COMMAND synth_mus_gen_test)
+
 add_executable(mus_header_test mus/mus_header_test.cpp)
 target_link_libraries(mus_header_test PRIVATE opennova_formats)
 target_include_directories(mus_header_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
