@@ -624,6 +624,13 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 		// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]
 		owner.ctx.world->throwables.team_trigger_claymore =
 				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribClaymorePref) != 0;
+		// The MP NoTracers rule: bit 0 of the same rules word kills the tracer
+		// visual at round spawn unless the ammo is FORCETRACER; the lobby
+		// publishes its inverse as the "Tracers" key [orig: g_rules_flags
+		// @ 0x24D1E34 & 1 at RoundData_SpawnRound @ 0x4ec41f; admin set
+		// @ 0x405c80; Lobby_UpdateServerInfo "Tracers" @ 0x4fee4f]
+		owner.ctx.world->round_sim.no_tracers_rule =
+				(owner.ctx.config.mp_attributes & GameConfig::kMpAttribNoTracers) != 0;
 	}
 	configure_session_runtime(owner.ctx);
 
