@@ -18,7 +18,7 @@ namespace {
 
 std::string fixture_path() {
 	const std::string root = test_paths_repo_root(__FILE__);
-	return root + "/fixtures/bms/ash_i5b.reference.bms";
+	return root + "/fixtures/bms/synth_dense.bms";
 }
 
 using test_io::read_file;

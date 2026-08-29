@@ -47,7 +47,6 @@ authored file.
 |---|---|
 | `mnu/jo_*.mnu` (15), `mns/menu_style.mns` | the shipped JO menu screens and style: the menu compiler, the widget tests and the GUT shells pin retail widget ids and layouts |
 | `def/weapon.def`, `def/ammo.def`, `def/hudpos.def` | the wire-visible weapon/ammo order (the weapon table bakes indices from it) and the HUD layout table |
-| `bms/ash_i5b.reference.bms` | the mission reference the BMS writer round-trips against |
 | `mus/jo_gamemus.bin`, `mus/jo_menumus.bin`, `mus/golden_jo_gamemus.mus.txt` | the music director scripts and their decoded golden |
 | `adm/mp5_1st.adm`, `bad/BINOC.bad`, `bad/BINOC_twist.bad` | the retail animation-definition and clip formats (skinned-rig twist parity) |
 | `avatars/Avatars.def` | the avatar definition table |
@@ -139,6 +138,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   `rtxt_jo_install_sweep` and the menu-driven GUT tests.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
 - `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.
+- `bms/synth_dense.bms` — `tests/fixtures/minimal_bms_gen.cpp`: a dense mission
+  authored through `MissionDocument` and written by `bms::write` (four populated
+  pools, one item id each, zero-valued optional fields, the minted terrain and
+  environment in its header); the shipped ash_i5b is `mission_mis_idempotency`'s
+  reference-tree leg and the whole shipped corpus is the gated `mission_corpus`.
 - `particle/synth_*.ptl` — `tests/fixtures/minimal_particle_gen.cpp`: five particle
   files through `save_particles` (a lone table, a table with its edit handles,
   seven effects over a blank particle, a three-layer particle with curves and

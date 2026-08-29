@@ -1,5 +1,7 @@
-// Retail-fixture .mis idempotency: load the committed .bms fixture, export .mis (gen1), parse
-// gen1, export again (gen2) -> gen1 == gen2 BYTE-EQUAL. This is the fixture-blind-spot closer
+// .mis idempotency: load a .bms, export .mis (gen1), parse gen1, export again (gen2) -> gen1 ==
+// gen2 BYTE-EQUAL, over the minted fixtures/bms/synth_dense.bms (tests/fixtures/minimal_bms_gen.cpp:
+// four populated pools, zero-valued optional fields) and, behind OPENNOVA_JO_ASSETS, the shipped
+// ash_i5b from the reference fixture set. This is the fixture-blind-spot closer
 // for D-MIS-5: the authored-fixture tests exercise the same authoring defaults the parser seeds
 // (spawns/no_more_than = 1, ...), which is exactly how the writer/parser default asymmetry hid —
 // on retail data every zero-valued field mutated per round-trip (all 1365 entities on 00TRg
@@ -17,6 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include <formats/mission/bms.h>
@@ -26,7 +29,7 @@ namespace {
 
 std::string fixture_path() {
 	const std::string root = test_paths_repo_root(__FILE__);
-	return root + "/fixtures/bms/ash_i5b.reference.bms";
+	return root + "/fixtures/bms/synth_dense.bms";
 }
 
 const opennova::bms::Entity *find_by_id(const std::vector<opennova::bms::Entity> &pool, int32_t id) {
@@ -58,12 +61,12 @@ bool texts_equal(const std::string &a, const std::string &b) {
 
 } // namespace
 
-int main() {
+int check(const std::string &path) {
 	using namespace opennova::mission;
 	namespace bms = opennova::bms;
 
 	MissionDocument doc;
-	TEST_EXPECT(doc.load_bms_file(fixture_path()));
+	TEST_EXPECT(doc.load_bms_file(path));
 	const bms::File &source = doc.bms_file();
 	const std::vector<bms::Entity> *source_pools[4] = {
 			&source.items, &source.buildings, &source.markers, &source.organics};
@@ -71,7 +74,7 @@ int main() {
 	                     source.markers.size() + source.organics.size();
 	TEST_EXPECT(total > 0);
 	// The classification is only exercised when the fixture populates more than the
-	// generic item pool (ash_i5b carries all four).
+	// generic item pool (both fixtures carry all four).
 	TEST_EXPECT(source.buildings.size() + source.markers.size() + source.organics.size() > 0);
 
 	// The items.def TYPE resolver, derived from the fixture's own pool membership: each
@@ -143,5 +146,16 @@ int main() {
 	TEST_EXPECT(reparsed.write_mis_text(gen2));
 	TEST_EXPECT(texts_equal(gen1, gen2));
 
+	return 0;
+}
+
+int main() {
+	if (check(fixture_path()) != 0) return 1;
+	// The retail leg: the shipped ash_i5b (87 items, 1088 buildings, 432 markers).
+	const std::string retail = retail::reference_fixture("bms/ash_i5b.reference.bms");
+	if (retail.empty())
+		return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bms/ash_i5b.reference.bms (the shipped mission)");
+	if (check(retail) != 0) return 1;
+	std::printf("retail leg: ash_i5b .mis export is idempotent\n");
 	return 0;
 }

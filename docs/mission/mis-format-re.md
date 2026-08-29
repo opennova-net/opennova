@@ -114,7 +114,9 @@ BMS record has no such fields; they are text-authoring concepts).
 - `tests/mission/mission_mis_test.cpp`: author → save `.mis` → reload →
   field asserts, now incl. `height_lock`/`extra_bheight` round-trip, the
   octal regression (`0120` → 120), and `fog_level`/`gen_def_val*` symmetry.
-- Retail-fixture idempotency: `fixtures/bms/ash_i5b.reference.bms` →
+- Fixture idempotency (`tests/mission/mission_mis_idempotency_test.cpp`): the minted
+  `fixtures/bms/synth_dense.bms` and, behind `OPENNOVA_JO_ASSETS`, the reference
+  tree's `fixtures/bms/ash_i5b.reference.bms` →
   `.mis` gen1 → parse → gen2, byte-equal (the fixture-blind-spot closer:
   the authored-fixture tests exercise the same defaults the parser seeds,
   which is how D-MIS-5 hid). The same reparse pins the D-MIS-1 pool

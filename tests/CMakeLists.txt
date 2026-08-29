@@ -194,6 +194,14 @@ add_executable(mission_load_plan_test mission/mission_load_plan_test.cpp)
 target_link_libraries(mission_load_plan_test PRIVATE opennova_runtime)
 add_test(NAME mission_load_plan COMMAND mission_load_plan_test)
 
+# fixtures/bms/synth_dense.bms: the synthetic dense mission (four populated
+# pools, zero-valued optional fields) authored through MissionDocument and
+# written by bms::write; mission_bms and mission_mis_idempotency read it.
+add_executable(minimal_bms_gen_test fixtures/minimal_bms_gen.cpp)
+target_link_libraries(minimal_bms_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_bms_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_bms_gen COMMAND minimal_bms_gen_test)
+
 add_executable(mission_bms_test mission/mission_bms_test.cpp)
 target_link_libraries(mission_bms_test PRIVATE opennova_formats)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -205,7 +213,8 @@ target_include_directories(mission_mis_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_mis_test PRIVATE cxx_std_17)
 add_test(NAME mission_mis COMMAND mission_mis_test)
 
-# Retail-fixture .mis idempotency: .bms -> .mis (gen1) -> parse -> .mis (gen2), byte-equal.
+# .mis idempotency: .bms -> .mis (gen1) -> parse -> .mis (gen2), byte-equal, over the
+# minted dense mission, plus the shipped ash_i5b as an OPENNOVA_JO_ASSETS reference leg.
 add_executable(mission_mis_idempotency_test mission/mission_mis_idempotency_test.cpp)
 target_link_libraries(mission_mis_idempotency_test PRIVATE opennova_formats)
 target_include_directories(mission_mis_idempotency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

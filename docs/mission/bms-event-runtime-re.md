@@ -509,7 +509,8 @@ Addresses are Jointops.exe retail (imagebase 0x400000) except §8, which is dfx2
 ## 6. Appendix: BMS on-disk format evidence (S1–S7)
 
 Format grill of `Mission_LoadBMSFile @0x40f4e0`. Primary fixture
-`fixtures/bms/ash_i5b.reference.bms` (BMS v0x13); corpus = 115 shipped retail `.bms`
+`ash_i5b.reference.bms` (BMS v0x13; the reference tree's `fixtures/bms/` copy, read behind
+`OPENNOVA_JO_ASSETS`); corpus = 115 shipped retail `.bms`
 (all v0x13), **115/115 round-trip byte-exact** (`tests/mission/mission_corpus_test.cpp`,
 parse→write byte-exact + `bms::equal` + count invariants; GUT
 `mission_corpus_binding_test.gd`, env-gated).

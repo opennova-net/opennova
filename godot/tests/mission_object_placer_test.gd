@@ -7,7 +7,7 @@ extends GutTest
 # error). Full render-placement is validated against real assets out-of-band.
 
 
-const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
+const BMS_PATH := "res://../fixtures/bms/synth_dense.bms"
 const ITEMS_PATH := "res://../fixtures/def/items.def"
 
 
