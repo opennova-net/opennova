@@ -942,12 +942,11 @@ of this leg.) The host
 copies JOIN `EXP` into the pending player record and `Server_ValidatePlayerJoinRequest @0x512100`
 compares it with the active expansion. A mismatch rejects with generic disconnect
 class `DC=2` and the specific reason `DPC=47`—`DC` alone is not the validator result.
-`VERSIONCRCSTRING` remains `"0"` when the active expansion has no loose
-`expansion/<name>/version.txt`; retail otherwise computes its expansion-version
-checksum from that file. OpenNova currently emits `"0"` unconditionally: this matches the
-live `revx02` install used here because that loose file is absent, while nonzero expansion
-checksums remain a compatibility gap until the runtime supplies the resource path
-(D-NET-166).
+`VERSIONCRCSTRING` is the CRC-32/MPEG-2 of the loose `expansion/<name>/version.txt`
+under the install root the binding supplies (`vfs_expansion_version_checksum`), computed
+at JOIN-build time for the latched SUS2 expansion name; it remains `"0"` only when there is
+no root, no active expansion, or no loose file — retail's own value in each of those cases
+(D-NET-166, FIXED 2026-08-29).
 
 The game ClientAuth's environment CU block is validated against LITERALS, not host
 config (decompile witness 2026-07-24): `Server_ValidatePlayerJoinRequest @0x512100`
@@ -976,7 +975,7 @@ challenge. Header-only ACKs are inert; malformed, duplicated-in-turn, or
 out-of-order messages tear the pending node down. `self_id_seen`, player spawn,
 roster publication, and the world stream remain gated until the final echo. The
 unmodeled retail rejection overlay/reason packet is still D-NET-171; the modeled
-no-`version.txt` CRC remains D-NET-166.
+expansion-version CRC closed as D-NET-166 (FIXED 2026-08-29).
 
 The admission exchanges through frame 23 are **reactive and pre-world**: they run even while the
 binding has not installed the advertised mission. Initial `0x33`/`0x37` requests carry eight zero
@@ -9141,7 +9140,8 @@ left of it, so the linear cooldown is implicit and costs no per-tick work.
 
 Ported as `DefWeaponDef::heat_*` + `WeaponFsmDef::heat_*`/`WeaponSlotState::
 heat_window_end_tick`/`weapon_slot_accumulated_heat` + the `Simulation` weapon-view
-feed. The submerged term has no live source yet (D-WPN-29).
+feed. The submerged term is the owner's body Z against `env.water_z` (the local pump,
+`player_weapon.cpp`; D-WPN-29 FIXED 2026-08-29).
 
 **What the glow half still needs (D-WPN-28; writer audit corrected 2026-07-29).**
 The level is ported. Retail has two dedicated model CTRL writers plus a separate
@@ -11401,7 +11401,7 @@ in [divergence-ledger.md](../divergence-ledger.md).
   `CNapiNPConnection_SendSessionPacket @ 0x61edd0` /
   `NapiNP_HandleResendList @ 0x623800`]
 - **D-NET-165** [LOW, FIXED 2026-08-03] LAN `0x81.P2` is now the live `CNapiServerConfig_BuildFlags` snapshot shared with S2C `0x08`, not zero or a captured constant. The four fresh `p403f16` retail↔retail maps all advertise `0x904`, including non-team 03TR; codec ordering, handler semantics, and the optional retail golden are pinned. `SUS1` was not part of this LAN defect: every fresh retail LAN oracle omits it, confirming that its separately gated server-user string must not be synthesized from `session_seed_id`. [orig: `CNapiServerConfig_BuildFlags @0x4c4dc0`; `NapiNPProtocol_SendServerInfoPacket @0x6204b0`]
-- **D-NET-166** [MED, OPEN] The C2S JOIN `VERSIONCRCSTRING` is emitted as the constant `"0"`. When the host runs an expansion, `Server_ValidatePlayerJoinRequest @0x512100` compares `atol()` of the uploaded string against its `g_expansion_checksum` @0xb4c5a4 (reject DPC=48) — retail computes that checksum as CRC-32/MPEG-2 over the loose `expansion/<name>/version.txt`. `"0"` matches every install without that file (the live revx02 golden) and is rejected by any host whose install carries one. Close by plumbing the runtime resource path into the joiner and computing the same CRC over the same file (§5.0d).
+- **D-NET-166** [FIXED 2026-08-29 — the joiner CRCs the loose `expansion/<name>/version.txt` under the binding-supplied install root at JOIN-build time (`vfs_expansion_version_checksum`, `JoinerConnection::expansion_version_root_`, `Simulation::set_join_expansion_version_root`), the host computes its `g_expansion_checksum` analog from `game_root`; `"0"` only when no root/expansion/file exists, which is retail's own value there. Original finding:] The C2S JOIN `VERSIONCRCSTRING` was emitted as the constant `"0"`. When the host runs an expansion, `Server_ValidatePlayerJoinRequest @0x512100` compares `atol()` of the uploaded string against its `g_expansion_checksum` @0xb4c5a4 (reject DPC=48) — retail computes that checksum as CRC-32/MPEG-2 over the loose `expansion/<name>/version.txt`. `"0"` matches every install without that file (the live revx02 golden) and is rejected by any host whose install carries one. Close by plumbing the runtime resource path into the joiner and computing the same CRC over the same file (§5.0d).
 - **D-NET-167** [LOW, OPEN] The game ClientAuth never carries the join-password `FID` or team-choice `JSP` CUs. `@0x512100`'s squad-password (DC=21) and side-password (DC=18/19/20, `jsp[60]` team choice) legs therefore reject every OpenNova join to a password-protected host. Close with a join-password prompt feeding `FID` (+ `JSP` for the team preference). LAN-reachable: retail LAN hosts can set passwords.
 - **D-NET-168** [MED, FIXED 2026-07-24] The joiner's post-`0x1A` `0x2F` pair uploaded a FIXED default kit (capture-shaped header `02 08 C3|D4` + seven ADM rows) — the shell's applied local kit had no wire seam, so the host's granted per-slot table reflected the default, not the player's pick. Closed by the client-builder witness (§5.56, `NetPacket_SendLoadoutSubmit @ 0x42cdc0`): `JoinerConnection` now latches the wire team from the S2C 0x04 tail byte (`byte_A85B48` parity) and composes both submissions from the binding's `set_loadout_kit` seam (`Simulation::push_joiner_loadout_kit` — the applied spawn kit's ADM rows, the latched class, slot 195 then the equipped combo, mirroring `Game_StartMission @ 0x525836/@ 0x525c2e`). Headless callers keep the capture-default kit byte-for-byte. Pinned by `npruntime_client_runtime` (exact canned pair under the 0x04 team; injected kit through the zones e2e) and `nw_ingame_encode` `loadout_submit_roundtrip`. **De-tabled ledger detail (2026-08-06):** The joiner's `0x2F` loadout pair was a fixed default kit with no wire seam to the shell's applied selection; closed via the `NetPacket_SendLoadoutSubmit @0x42cdc0` witness — the S2C 0x04 team latch + the `set_loadout_kit` seam derive both submissions from the applied kit (headless callers keep the capture default). **Amended 2026-07-25:** the witnessed team latch (`byte_A85B48`) has THREE writers, and only one was ported at first close — (1) the S2C `0x04` tail byte `@0x425499`, (2) S2C `0x50` team-assign `@0x4319db`, and (3) the death-screen-close leg of the `0x0A` handler. Source (2) is now ported (`decode_team_assign` + the joiner `0x50` dispatch): it re-latches our own team, folds `entity->Team` for ANY pool 0..4 entity `@0x4319ee`, surfaces the own-team edge so the sim moves `Entity::team` + `round_sim.local_team`, and re-sends ONE C2S `0x2F` with the NEW team and slot **195 raw** `@0x431a9e`. Source (3) remains a residual. Four legs of the `0x50` self arm are also deferred with witnesses: the per-side profile CLASS reselect `@0x431a35..0x431a9a` (we hold ONE applied kit, so the kit's class is re-sent), the C2S `0x22`/`0x23` acks `@0x431acb..0x431b05` (byte layout ambiguous in the decompile), `Player_InitPlayer(1)` `@0x431b14`, and the minimap NetId maintenance `@0x431b3a..0x431b91`
 - **D-NET-169** [MED, OPEN (guarded) + NEEDS-RE] Self-identification stays NAME-MATCH (D.0/§5.23) while retail's is numeric (`Player_FindLocalPlayerEntity @0x4e0090` walks the player table by ConnectionId/dcb; the roster binding arrives via 0x4D player-index + 0x46 player-sync `entity_slot_id`, §5.21). Name-match cannot disambiguate two live players sharing a callsign. GUARDS (2026-07-24): the joiner fails the join with a duplicate-callsign error when a second same-name organic record with a different slot arrives pre-release (post-release it keeps its latched handle), and the shell's default callsign is uniquified per machine (`PlayerProfile`). Burn-down = witness the 0x4D semantics and port the numeric walk.
