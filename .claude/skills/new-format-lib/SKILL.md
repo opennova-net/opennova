@@ -82,8 +82,8 @@ FFI wrapper. One thing still matters:
   as LFS objects, then run `python scripts/lint/fixture_lint.py --report`
   (CI runs it `--enforce --require-pulled`).
 - Bulk retail corpora are NEVER committed (copyright). Gate a sweep test on one
-  of the three machine roots through `tests/common/retail_paths.h`
-  (`retail::install()` / `retail::assets()` / `retail::capture(name)`, with `RETAIL_REQUIRE_OR_SKIP` or `retail::skip`):
+  of the two machine roots through `tests/common/retail_paths.h`
+  (`retail::install()` / `retail::assets()` / `retail::reference_fixture(rel)`, with `RETAIL_REQUIRE_OR_SKIP` or `retail::skip`):
   absent data returns exit 77, and the test is registered with
   `opennova_add_gated_test` so ctest reports Skipped, never Passed. A test whose
   synthetic legs ran reports its missing retail leg with `retail::skip_leg` and

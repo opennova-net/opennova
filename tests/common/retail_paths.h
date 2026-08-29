@@ -1,6 +1,6 @@
 // The machine-local retail data the asset-gated ctests read, behind ONE seam.
 //
-// Three documented roots (docs/asset-gated-tests.md), read here and nowhere
+// Two documented roots (docs/asset-gated-tests.md), read here and nowhere
 // else (scripts/lint/env_lint.py enforces it):
 //
 //   OPENNOVA_JO_DIR          a packed retail JO install (the .pff set)
@@ -8,12 +8,10 @@
 //                            weapon.def, models, .bad/.adm, score.ini, the
 //                            shipped .bms missions loose at its root, and the
 //                            reference fixture set under fixtures/)
-//   OPENNOVA_CAPTURES        the captures/goldens root; default <repo>/.scratch
 //
-// Everything else is a convention under those roots: goldens at
-// <captures>/golden/<name>, probe captures at <captures>/<name>, .sph
-// recordings at <captures>/sph/<name>, ITEMS.DEF and the .bms corpus directly
-// under the asset tree, weapon.sav beside the install's expansion.
+// Everything else is a convention under those roots: ITEMS.DEF and the .bms
+// corpus directly under the asset tree, weapon.sav beside the install's
+// expansion.
 //
 // A test whose whole body needs retail data returns retail::skip(...) — exit
 // code 77, which tests/CMakeLists.txt's opennova_add_gated_test maps to
@@ -66,17 +64,6 @@ inline bool dir_exists(const std::string &path) {
 inline std::string install() { return strip_trailing_separators(env_or_empty("OPENNOVA_JO_DIR")); }
 // The extracted retail asset tree, or "".
 inline std::string assets() { return strip_trailing_separators(env_or_empty("OPENNOVA_JO_ASSETS")); }
-// The captures/goldens root: OPENNOVA_CAPTURES, else <repo>/.scratch.
-inline std::string captures_root() {
-    const std::string configured = env_or_empty("OPENNOVA_CAPTURES");
-    if (!configured.empty()) return strip_trailing_separators(configured);
-    return join(test_paths_repo_root(__FILE__), ".scratch");
-}
-
-inline std::string golden(const char *name) { return join(join(captures_root(), "golden"), name); }
-inline std::string capture(const char *name) { return join(captures_root(), name); }
-inline std::string sph(const char *name) { return join(join(captures_root(), "sph"), name); }
-
 inline std::string lower_ascii(std::string s) {
     for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;

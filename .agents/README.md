@@ -56,13 +56,11 @@ divergences in its §8 catalog):
   `engine/net/npwire/ingame_message_catalog.h` maps `(dir, tag) → name →
   coverage → decoder → doc §`, shared by `nw_pp` and the `nw_message_coverage` gate. Add a
   message there first; `nw_pp --coverage <capture>` ranks the undecoded backlog by volume.
-- **Capture → validate-vs-golden loop**: host from the Godot game, `dumpcap`, then
-  `scripts/net/diff_vs_golden.ps1 -Ours <cap> -Golden .scratch/golden/retail-gameplay-session.pcapng`
-  (GAP = worklist, SPURIOUS = regression). The retail golden diff is Skipped in CI (its
-  golden rides `OPENNOVA_CAPTURES` and its "ours" side is `nw_golden_diff_test --ours
-  <capture>`); the unconditional CI substitutes are `nw_codec_identity` and
-  `nw_self_capture` (`docs/asset-gated-tests.md`, the two-tier gate). Full loop in
-  `scripts/net/README.md`.
+- **Capture → inspect loop**: host from the Godot game, `dumpcap`, then
+  `nw_pp --coverage <cap>` (undecoded backlog by volume) and `nw_pp --stream <cap>`.
+  The CI wire gates are `nw_codec_identity` and `nw_self_capture` over the committed
+  `fixtures/novaworld/` set (`docs/asset-gated-tests.md`, the two-tier gate). Full
+  loop in `scripts/net/README.md`.
 - **Server state authority is `world::EntityRegistry`** — the net layer reads handle/pose/
   team *through* it, never a parallel cache. Host bring-up is the one shared
   `np::start_host_session` helper. See `docs/adr/0013-consolidated-net-core.md`.

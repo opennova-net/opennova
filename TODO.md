@@ -12,8 +12,8 @@ hardening, and project health. Divergences from the original engine belong in
       over `export_parity_corpus.py`) was retired with the Python FFI (ADR 0038; last
       at 5820432c1), so no PARITY_STATUS verdict exists. To produce one: run the four
       `scripts/net/run_parity_topology.ps1` cells (RR/RO/OR/OO) per case under one
-      RunId prefix (`.agents/retail-lan-parity.md`), gate each on the wire-ready witness
-      + `diff_vs_golden.ps1`, and re-express the retired verifier's RO/OR/OO-vs-RR
+      RunId prefix (`.agents/retail-lan-parity.md`), gate each on the wire-ready witness,
+      and re-express the retired verifier's RO/OR/OO-vs-RR
       comparison (both directions, packet grouping, 0x0A/0x0C state) as a ctest or
       PowerShell verifier. Upstream blockers still open in opennova-int (the runner stops the
       `deploy_hold` RR/RO cells and the OR retail joiner with a named UPSTREAM BLOCKER

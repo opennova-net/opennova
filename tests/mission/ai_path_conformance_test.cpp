@@ -25,15 +25,15 @@
 // spawn at the SAME position as retail and retail still walks them 625k/543k/583k
 // wire units, so they carry no placement ambiguity and no scenario confound.
 //
-// Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install), like
-// tests/mission/mission_corpus_test.cpp and coop_convoy_test.cpp.
+// Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install), like the
+// other mission-kernel ctests.
 //
 // REPORT MODE: `ai_path_conformance_test --report` dumps the full per-slot table
 // (authored group/waypoint/wp_number + brain waypoint state + travel) plus the
 // event/trigger/area census. That dump is the diagnosis surface; the assertions
 // below are the regression pins. `--ticks <n>` (default 2500) and `--bms <name>`
-// (default 00TRg.bms) point the same harness at the 430 s capture budget or the
-// 05TRcoop bunker-garrison pin; the ctest registration passes neither.
+// (default 00TRg.bms) point the same harness at the 430 s capture budget or
+// another mission; the ctest registration passes neither.
 #include <formats/mission/bms.h>
 #include <runtime/mission/event_runtime.h>
 #include <runtime/world/ai.h>
@@ -194,8 +194,8 @@ int main(int argc, char **argv) {
 		for (int k = 0; k < 3; ++k) start[size_t(i) * 3 + k] = e->pos[k];
 	}
 
-	// 2500 ticks = ~40 s of mission time at the 62.5 Hz logic rate — the same
-	// budget coop_convoy_test uses, and long enough for an authored patrol leg.
+	// 2500 ticks = ~40 s of mission time at the 62.5 Hz logic rate — long
+	// enough for an authored patrol leg.
 	// The capture baseline is 430 s, so comparing counts against it needs
 	// `--ticks 27000` -- a 40 s run scoring fewer movers than a 430 s capture is
 	// a BUDGET difference, not a defect.

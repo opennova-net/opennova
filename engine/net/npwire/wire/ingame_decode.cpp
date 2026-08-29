@@ -9,9 +9,8 @@
 #include <base/io/fixed.h>
 
 // Decoders for S2C 0x0D / 0x20 — see docs/net/novaworld-net-re.md §5.11/§5.12.
-// Cross-witnessed byte-exact against the 2026-06-16b loopback by
-// nw_ingame_pool_records_test (437 × 0x0D / 792 × 0x20 records, zero
-// leftover bytes).
+// Cross-witnessed byte-exact against the 2026-06-16b loopback capture
+// (437 × 0x0D / 792 × 0x20 records, zero leftover bytes) when it was RE'd.
 
 namespace opennova {
 

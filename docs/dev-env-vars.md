@@ -6,7 +6,7 @@ argv option, a debug-catalog action or an MCP tool argument. If a variable is
 not listed here it must not exist: `scripts/lint/env_lint.py --enforce` (CI)
 fails on any other read, and a new hook lands here in the same PR that adds it.
 
-## The three machine roots
+## The two machine roots
 
 Read only by the three resolvers — `tests/common/retail_paths.h` (ctests),
 `godot/tests/support/retail_data.gd` (GUT), `scripts/net/lib.ps1` (the
@@ -18,7 +18,6 @@ PowerShell getters) — plus the `--resource-dir` default of
 |---|---|---|
 | `OPENNOVA_JO_DIR` | a packed retail JO install (the `.pff` set, expansions under `expansion/`) | the `JO_DIR`-gated ctests and GUT tests ([asset-gated-tests.md](asset-gated-tests.md)), the `game_mcp.py launch` default, the render/net scripts' defaults |
 | `OPENNOVA_JO_ASSETS` | an extracted retail asset tree (`items.def`, `weapon.def`, models, `.adm`, the shipped `.bms` missions loose at its root, the reference fixture set under `fixtures/`) | the `JO_ASSETS`-gated ctests and GUT tests (including `mission_corpus` and the GUT corpus binding), the render fixture capture's loose mission |
-| `OPENNOVA_CAPTURES` | the captures/goldens root (default `<repo>/.scratch`) | the capture-gated ctests read fixed names under it: `golden/retail-gameplay-session.pcapng`, `golden/retail-lan-host-join.pcapng`, `golden/retail-lan-host-join-session.pcapng`, `golden/retail-vehicle-session.pcapng`, `host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng`, `probe2.pcapng`, `probe3.pcapng`, `probe3_again.pcapng`, `operation_whitenoise.pcapng`, `karo-guided.pcapng`, `ingame.hexcap`, `sph/host.sph`, `sph/client.sph`, `sph/hostprof_probe3again.sph` |
 
 A gated ctest reports **Skipped** (exit 77, `opennova_add_gated_test`) without
 its root and prints `SKIP: needs ...`; a mixed test runs its synthetic legs and
@@ -89,12 +88,10 @@ override), `kill_group {group}`, `crew_vehicle {occupant_ssn, vehicle_ssn}`,
 | `nw-server` | `--mission --env --resource-root --port --game-type --num-teams --capture-duration-seconds --capture-speed-setting --spawn-wave-time-base --spawn-wave-time-zone --default-spawn-requires-no-team-zone --log-debug` (`apps/nw_server/README.md`) |
 | `nw_pp` | `--hexcap-max <n>` |
 | `opennova-extract` | `--game <dir> [/exp <name>] [/game <code>] [/d] --out <dir> <name>...` |
-| `nw_golden_diff_test` | `--ours <capture>` (the live "ours" side) |
 | `renderer_state_vectors_test`, `nw_codec_identity_test` | `--dump` (print the replacement vector table) |
 | `nw_self_capture_test` | `--write-fixture` (regenerate `fixtures/novaworld/self-capture-session.pcap`) |
 | `minimal_*_gen_test` | `--write` (regenerate that generator's minted fixtures); `minimal_pff_package_test --write-pff` / `--install <dir>` |
 | `ai_path_conformance_test` | `--report`, `--ticks`, `--bms` |
-| `bunker_walkin_test` | `--from x,y[,z]`, `--to x,y`, `--column x,y` |
 | `mnu_compat_test` | extra loose menus as positional arguments |
 | `wac_corpus_test` | extra corpus directories as positional arguments |
 | `scripts/build.sh` | `--no-godot`, `--jobs N`; `scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N]`; `scripts/test_godot.sh --keep-user-dir` |

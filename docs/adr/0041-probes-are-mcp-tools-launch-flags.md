@@ -53,10 +53,10 @@ files-on-disk IPC.
    and `--mcp-port`; every post-boot environment hook became a debug-catalog
    action (`deploy_pick`, `set_viewmodel_weapon`, `kill_group`, `crew_vehicle`,
    `crew_local_player`, `local_player_look`, `net_joiner_diagnostics`) or was
-   deleted. Three documented roots remain for machine paths
-   (`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`, `OPENNOVA_CAPTURES`; the
-   extracted tree also serves the loose `.bms` corpus its former fourth root
-   named), read only by the three resolvers
+   deleted. Two documented roots remain for machine paths
+   (`OPENNOVA_JO_DIR`, `OPENNOVA_JO_ASSETS`; the extracted tree also serves the
+   loose `.bms` corpus a former root named, and the capture root went with the
+   machine-local capture gates), read only by the three resolvers
    (`tests/common/retail_paths.h`, `godot/tests/support/retail_data.gd`,
    `scripts/net/lib.ps1`) and the `--resource-dir` default of
    `scripts/mcp/game_mcp.py launch`, plus `GODOT_BIN` for the scripts and the deployed

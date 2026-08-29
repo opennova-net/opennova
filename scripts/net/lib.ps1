@@ -283,10 +283,9 @@ function Find-GodotBinary {
 }
 
 # The documented machine roots (docs/dev-env-vars.md): a packed retail install
-# (OPENNOVA_JO_DIR), an extracted asset tree (OPENNOVA_JO_ASSETS, which also
-# carries the shipped .bms missions loose at its root) and the captures root
-# (OPENNOVA_CAPTURES, default <repo>\.scratch). Scripts resolve them here and
-# nowhere else. The two retail getters return $null when the variable is unset
+# (OPENNOVA_JO_DIR) and an extracted asset tree (OPENNOVA_JO_ASSETS, which also
+# carries the shipped .bms missions loose at its root). Scripts resolve them
+# here and nowhere else. Both getters return $null when the variable is unset
 # or the directory is missing; the caller decides whether that is fatal.
 # Cross-language twins: tests/common/retail_paths.h (C++) and
 # godot/tests/support/retail_data.gd (GUT) - change all three together.
@@ -302,12 +301,6 @@ function Get-OpenNovaRetailAssets {
         return (Resolve-Path -LiteralPath $env:OPENNOVA_JO_ASSETS).Path
     }
     return $null
-}
-
-# Captures are written as well as read, so the root need not exist yet.
-function Get-OpenNovaCapturesRoot {
-    if ($env:OPENNOVA_CAPTURES) { return $env:OPENNOVA_CAPTURES }
-    return (Join-Path (Get-RepoRoot) ".scratch")
 }
 
 # A file under the extracted asset tree by case-insensitive name (retail

@@ -563,7 +563,7 @@ private:
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the
-	// determinism contract npruntime_golden_client asserts — seed_session is "for replay/parity only").
+	// determinism contract of the replay path — seed_session is "for replay/parity only").
 	bool replay_mode_ = false;
 };
 

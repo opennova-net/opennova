@@ -218,8 +218,8 @@ Order of operations when you need an engine truth:
      (98/98 retail bins), `tests/terrain/cdep_roundtrip_test.cpp` and
      `tests/terrain/trn_config_roundtrip_test.cpp`, the `.bad`/3DI
      roundtrips under `tests/<domain>/`.
-   - Retail-install sweeps and corpus tests, gated on the three documented roots (`OPENNOVA_JO_DIR`,
-     `OPENNOVA_JO_ASSETS`, `OPENNOVA_CAPTURES` — see docs/asset-gated-tests.md).
+   - Retail-install sweeps and corpus tests, gated on the two documented roots (`OPENNOVA_JO_DIR`,
+     `OPENNOVA_JO_ASSETS` — see docs/asset-gated-tests.md).
 5. **Runtime introspection:**
    - The dev tools (F3 in the standalone game, ADR 0039): engine-owned Dear ImGui
      windows under `engine/runtime/devtools/` — the Stats window over the

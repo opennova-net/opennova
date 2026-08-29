@@ -3,8 +3,7 @@
 
 docs/dev-env-vars.md is the registry. After the 2026-08 cut the whole set is:
 
-  the three machine roots OPENNOVA_JO_DIR, OPENNOVA_JO_ASSETS,
-                          OPENNOVA_CAPTURES - read ONLY
+  the two machine roots   OPENNOVA_JO_DIR, OPENNOVA_JO_ASSETS - read ONLY
                           by the three resolvers (tests/common/retail_paths.h,
                           godot/tests/support/retail_data.gd, scripts/net/lib.ps1)
   GODOT_BIN               the scripts' Godot binary
@@ -178,7 +177,7 @@ def main() -> int:
         if names:
             print("[env-lint] uncovered names: " + ", ".join(f"{n} x{c}" for n, c in names.most_common()))
     if buckets["UNCOVERED"] and args.enforce:
-        print("[env-lint] FAIL: only the three machine roots (through their resolvers), GODOT_BIN "
+        print("[env-lint] FAIL: only the two machine roots (through their resolvers), GODOT_BIN "
               "(scripts), the deployed service's config and the listed OS variables may be read "
               "from the environment; everything else is a launch flag, an argv option or an MCP "
               "argument (docs/dev-env-vars.md).")

@@ -9,7 +9,7 @@
 // (437 × 0x0D records / 792 × 0x20 records, zero leftover bytes).
 //
 // Single decoder shared between:
-//   - tests/novaworld/nw_ingame_pool_records_test  (byte-witness assertions)
+//   - tests/novaworld (the inline-pcap and fixture replays)
 //   - apps/nw_pp                                   (pretty-printer)
 //   - engine/net/npruntime + engine/net/netsim                 (the in-match runtime's fold paths)
 //   - any future replay tool                       (re-emit captured C2S)

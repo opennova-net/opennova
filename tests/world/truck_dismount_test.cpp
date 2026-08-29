@@ -21,8 +21,7 @@
 // infantry tick does. The pipeline preconditions are asserted (the model
 // converts, its six rear passenger user points read off the model, all six
 // bodies mount and dismount through the real seat machinery); the escape
-// verdict itself stays a printed diagnostic while the divergence is open, in
-// the bunker_walkin_test tradition.
+// verdict itself stays a printed diagnostic while the divergence is open.
 // Gated on OPENNOVA_JO_DIR (reports Skipped without a JO install).
 #include <cctype>
 #include <cmath>
