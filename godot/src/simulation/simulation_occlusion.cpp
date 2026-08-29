@@ -613,10 +613,11 @@ Dictionary Simulation::get_collision_debug() const {
 		anchor[0] = opennova::world::to_fixed(lp->position.x);
 		anchor[1] = opennova::world::to_fixed(lp->position.y);
 		anchor[2] = opennova::world::to_fixed(lp->position.z);
-		range = 150 << 16;
+		range = 150 << 16; // the pose-row filter below shares the sweep box
 	}
 	const std::vector<opennova::world::CollisionWorld::DebugInstance> insts =
-	    kernel_->collision.debug_instances(kernel_->world, anchor, range, 128);
+	    kernel_->collision_instances(lp != nullptr ? lp->position : opennova::world::Vec3{},
+	                                 lp != nullptr ? 150.0f : -1.0f, 128);
 	for (const opennova::world::CollisionWorld::DebugInstance &inst : insts) {
 		Dictionary d;
 		d["entity_handle"] = static_cast<int>(inst.handle.packed);
@@ -756,10 +757,11 @@ Dictionary Simulation::get_hitbox_debug() {
 		anchor[0] = opennova::world::to_fixed(lp->position.x);
 		anchor[1] = opennova::world::to_fixed(lp->position.y);
 		anchor[2] = opennova::world::to_fixed(lp->position.z);
-		debug_range = 80 << 16;
+		debug_range = 80 << 16; // the organic-fallback scan below shares the budget
 	}
 	const std::vector<opennova::world::CollisionWorld::DebugHitboxEntity> ents =
-	    kernel_->collision.debug_hitboxes(kernel_->world, anchor, debug_range, kEntityCap, 24000);
+	    kernel_->hitboxes(lp != nullptr ? lp->position : opennova::world::Vec3{},
+	                      lp != nullptr ? 80.0f : -1.0f, kEntityCap, 24000);
 	for (const opennova::world::CollisionWorld::DebugHitboxEntity &ent : ents) {
 		Dictionary d;
 		d["entity_handle"] = static_cast<int>(ent.handle.packed);

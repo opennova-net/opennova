@@ -9,6 +9,20 @@ namespace godot {
 
 namespace {
 
+// Godot reports the datagram source as a dotted-quad String; pack it once
+// into the engine's PeerAddr (an unparseable address packs as 0).
+opennova::PeerAddr peer_addr_from(const String &ip, int port) {
+	uint32_t packed = 0;
+	const PackedStringArray parts = ip.split(".");
+	if (parts.size() == 4) {
+		packed = static_cast<uint32_t>(parts[0].to_int() & 0xFF) |
+		         (static_cast<uint32_t>(parts[1].to_int() & 0xFF) << 8) |
+		         (static_cast<uint32_t>(parts[2].to_int() & 0xFF) << 16) |
+		         (static_cast<uint32_t>(parts[3].to_int() & 0xFF) << 24);
+	}
+	return opennova::PeerAddr{packed, static_cast<uint16_t>(port)};
+}
+
 // This end of every recorded datagram. The socket binds 0.0.0.0, so there is no
 // single local address to report; loopback keeps the synthesized IP header valid
 // and the PORTS — which is what partitions a session downstream — exact.
@@ -118,6 +132,7 @@ int UdpPump::poll() {
 		Inbound in;
 		in.ip = socket_->get_packet_ip();
 		in.port = static_cast<int>(socket_->get_packet_port());
+		in.addr = peer_addr_from(in.ip, in.port);
 		// A listener accepts every source to discover joiners. A dialed pump is
 		// bound to exactly one resolved endpoint; discard injected datagrams at
 		// the UDP boundary before any protocol consumer can observe them.
@@ -131,6 +146,15 @@ int UdpPump::poll() {
 		++n;
 	}
 	return n;
+}
+
+bool UdpPump::take_inbound_native(opennova::PeerAddr &from, PackedByteArray &bytes) {
+	if (inbound_.empty()) return false;
+	Inbound in = std::move(inbound_.front());
+	inbound_.pop_front();
+	from = in.addr;
+	bytes = std::move(in.bytes);
+	return true;
 }
 
 Dictionary UdpPump::take_inbound() {

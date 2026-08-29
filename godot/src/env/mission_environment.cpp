@@ -194,8 +194,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::set_fill_light);
 	ClassDB::bind_method(D_METHOD("set_sun_light", "value"),
 			&MissionEnvironment::set_sun_light);
-	ClassDB::bind_method(D_METHOD("set_fog_color_rt", "value"),
-			&MissionEnvironment::set_fog_color_rt);
 	ClassDB::bind_method(D_METHOD("set_sky_ambient_rt", "value"),
 			&MissionEnvironment::set_sky_ambient_rt);
 	ClassDB::bind_method(

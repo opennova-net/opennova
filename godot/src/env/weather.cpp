@@ -305,10 +305,10 @@ void Weather::advance_world_driven(double p_delta, Object *p_sim) {
 	for (int i = 0; i < tick_count; ++i) {
 		env->advance_mission_clock(1);
 		tick_fixed();
-		if (authority) {
-			sim->advance_network_environment_tick();
-			push_network_environment(sim);
-		}
+		// The per-tick advance of the world's network sample rides the engine
+		// tick (listen_host::frame / MissionKernel::tick_no_net); the device
+		// side only pushes its settled sample.
+		if (authority) push_network_environment(sim);
 	}
 }
 

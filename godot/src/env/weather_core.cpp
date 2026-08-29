@@ -72,8 +72,6 @@ void WeatherCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_rate_per_second"), &WeatherCore::get_cloud_uv_rate_per_second);
 	ClassDB::bind_method(D_METHOD("get_water_uv_state", "cam_x", "cam_z", "fog_distance"),
 			&WeatherCore::get_water_uv_state);
-	ClassDB::bind_method(D_METHOD("set_wind_intensity", "value"), &WeatherCore::set_wind_intensity);
-	ClassDB::bind_method(D_METHOD("set_wind_duration_ticks", "ticks"), &WeatherCore::set_wind_duration_ticks);
 	ClassDB::bind_method(D_METHOD("trigger_lightning_short"), &WeatherCore::trigger_lightning_short);
 	ClassDB::bind_method(D_METHOD("trigger_lightning_long"), &WeatherCore::trigger_lightning_long);
 	ClassDB::bind_method(

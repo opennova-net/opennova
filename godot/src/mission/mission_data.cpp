@@ -87,7 +87,6 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_header_string", "field", "value"), &MissionData::set_header_string);
 	ClassDB::bind_method(D_METHOD("set_header_int", "field", "value"), &MissionData::set_header_int);
 	ClassDB::bind_method(D_METHOD("set_header_flag", "bit", "on"), &MissionData::set_header_flag);
-	ClassDB::bind_method(D_METHOD("set_header_float", "field", "value"), &MissionData::set_header_float);
 	ClassDB::bind_method(D_METHOD("get_game_mode"), &MissionData::get_game_mode);
 	ClassDB::bind_method(D_METHOD("set_game_mode", "bit"), &MissionData::set_game_mode);
 	ClassDB::bind_method(D_METHOD("add_entity", "kind", "item_id", "position", "rotation_deg"), &MissionData::add_entity);
@@ -123,11 +122,7 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_event", "index", "flags", "reset_after", "delay"), &MissionData::set_event);
 	ClassDB::bind_method(D_METHOD("add_event_trigger", "event_index", "trigger"), &MissionData::add_event_trigger);
 	ClassDB::bind_method(D_METHOD("set_event_trigger", "event_index", "local_index", "trigger"), &MissionData::set_event_trigger);
-	ClassDB::bind_method(D_METHOD("remove_event_trigger", "event_index", "local_index"), &MissionData::remove_event_trigger);
-	ClassDB::bind_method(D_METHOD("move_event_trigger", "event_index", "local_index", "delta"), &MissionData::move_event_trigger);
 	ClassDB::bind_method(D_METHOD("add_event_action", "event_index", "action"), &MissionData::add_event_action);
-	ClassDB::bind_method(D_METHOD("remove_event_action", "event_index", "local_index"), &MissionData::remove_event_action);
-	ClassDB::bind_method(D_METHOD("move_event_action", "event_index", "local_index", "delta"), &MissionData::move_event_action);
 	ClassDB::bind_method(D_METHOD("save_file"), &MissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &MissionData::save_as);
 	ClassDB::bind_method(D_METHOD("set_mis_base_heights", "flat_write_order"), &MissionData::set_mis_base_heights);

@@ -24,8 +24,6 @@ protected:
 
 public:
 	void assign(const opennova::world::inspect::SeatRow &p_value) { value_ = p_value; }
-
-	int get_seat_index() const { return value_.index; }
 	int get_type() const { return value_.type; }
 	int get_retail_slot() const { return value_.retail_slot; }
 	int get_bone_index() const { return value_.bone_index; }
@@ -33,7 +31,6 @@ public:
 	String get_source_name() const;
 	// The authored seat offset, raw mission components (Z-up).
 	Vector3 get_local() const;
-	int get_yaw_offset() const { return value_.yaw_offset; }
 	bool is_occupied() const { return value_.occupied; }
 };
 
@@ -58,7 +55,6 @@ public:
 
 	bool has_ai() const { return value_.has_ai; }
 	bool has_world() const { return value_.has_world; }
-	bool has_replica() const { return replica_.valid; }
 
 	// --- identity (AI half preferred, the legacy detail-card precedence) ----
 	int get_wire_handle() const { return static_cast<int>(value_.handle); }
@@ -84,7 +80,6 @@ public:
 	double get_yaw_deg() const { return value_.ai.yaw_deg; }
 	int get_state() const { return value_.ai.state; }
 	String get_state_name() const;
-	int get_alert() const { return value_.ai.alert; }
 	int get_profile_type() const { return value_.ai.profile_type; }
 	// The engine-running claimant latch (world::Entity::primary_occupant).
 	bool has_primary_occupant() const { return value_.ai.primary_occupant; }
@@ -113,7 +108,6 @@ public:
 	// --- the world half -----------------------------------------------------
 	int get_primary_weapon_clip() const { return value_.world.primary_weapon_clip; }
 	int get_primary_weapon_reserve() const { return value_.world.primary_weapon_reserve; }
-	int get_seat_count() const { return static_cast<int>(value_.world.seats.size()); }
 	TypedArray<EntityCardSeat> get_seats() const;
 
 	// The MCP boundary conversion only: the legacy get_entity_debug /

@@ -385,8 +385,6 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_wrap_y", "value"), &TerrainData::set_wrap_y);
 	ClassDB::bind_method(D_METHOD("get_wrap_y"), &TerrainData::get_wrap_y);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "wrap_y"), "set_wrap_y", "get_wrap_y");
-	ClassDB::bind_method(D_METHOD("get_quadrant_locks"),
-	                     &TerrainData::get_quadrant_locks);
 
 	// Environment
 	ADD_GROUP("Environment", "");

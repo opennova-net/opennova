@@ -443,9 +443,9 @@ void SlotShadow::advance_frame() {
 	// The frame-open slot projection direction: get_light_direction now
 	// serves the Godot-axes vector (the env_axes x/z swap IS the witnessed
 	// (g2, g1, g0) surface->light mapping of the raw getter tuple), so the
-	// planner law only clamps and negates it [orig: Environment_GetLight-
-	// DirectionFloat @0x57d870 into render_shadow_pass @0x5d7b70, see
-	// docs/render/render-lighting-re.md].
+	// planner law only clamps and negates it
+	// [orig: Environment_GetLightDirectionFloat @0x57d870 into
+	// render_shadow_pass @0x5d7b70, see docs/render/render-lighting-re.md].
 	const Vector3 tuple = env->get_light_direction();
 	const std::array<float, 3> sun_dir = opennova::renderer::slot_projection_direction(
 			{float(tuple.x), float(tuple.y), float(tuple.z)});

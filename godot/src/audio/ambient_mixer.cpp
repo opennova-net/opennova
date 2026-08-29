@@ -38,8 +38,6 @@ void AmbientMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_seconds", "dt"),
 			&AmbientMixer::advance_seconds);
 	ClassDB::bind_method(D_METHOD("mix", "listener"), &AmbientMixer::mix);
-	ClassDB::bind_method(D_METHOD("live_slot_count"),
-			&AmbientMixer::live_slot_count);
 	ClassDB::bind_method(D_METHOD("clock_tick"), &AmbientMixer::clock_tick);
 	ClassDB::bind_method(D_METHOD("marker_count"), &AmbientMixer::marker_count);
 	ClassDB::bind_static_method("AmbientMixer",

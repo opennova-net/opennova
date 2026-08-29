@@ -130,8 +130,7 @@ void Simulation::set_local_player_eye_offset(const Vector3 &p_offset_godot, bool
 }
 
 Dictionary Simulation::get_local_player_view() const {
-	opennova::world::LocalPlayerViewFrame f;
-	opennova::world::local_player_view_frame(&kernel_->world, kernel_->weapon, kernel_->view, kernel_->view_tracker, f);
+	const opennova::world::LocalPlayerViewFrame f = kernel_->view_frame();
 	Dictionary out;
 	out["scope_engaged"] = f.scope_engaged;
 	out["binoculars_requested"] = f.binoculars_requested;

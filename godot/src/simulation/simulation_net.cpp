@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 
+#include <net/npruntime/server_initial_state.h> // install_mission_location_names
 #include <net/npruntime/session_status.h>
 #include <runtime/terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
@@ -95,27 +96,7 @@ void Simulation::bringup_host_runtime() {
 	ctx_.mission_text_loaded = mission_text_loaded_;
 	ctx_.mission_briefing3 = mission_briefing3_;
 	ctx_.mission_briefing2 = mission_briefing2_;
-	ctx_.mission_location_names.clear();
-	int32_t location_index = 1;
-	for (const opennova::bms::Entity &marker : kernel_->mission.markers) {
-		if (marker.type_id != 2044) continue;
-		// Retail assigns LOCATION001.. in type-2044 marker spawn order. The
-		// BMS ttool_index is zero for both 00TRg markers and is not the text key.
-		const auto found = mission_location_texts_.find(location_index);
-		std::string label;
-		if (found != mission_location_texts_.end()) {
-			label = found->second;
-		} else {
-			const std::string suffix = std::to_string(location_index);
-			label = "LOCATION";
-			if (suffix.size() < 3) label.append(3 - suffix.size(), '0');
-			label += suffix;
-		}
-		// Retail stores the resolved text in a 64-byte location-name slot.
-		if (label.size() > 63) label.resize(63);
-		ctx_.mission_location_names.push_back(std::move(label));
-		++location_index;
-	}
+	np::install_mission_location_names(ctx_, kernel_->mission, mission_location_texts_);
 	// Server_TickUpdate owns the per-frame C2S drain + S2C fan over connection_list; there is no
 	// separate net ISystem (retired P8).
 
@@ -161,6 +142,7 @@ void Simulation::bringup_host_runtime() {
 		host_cfg.local_character_vars = local_character_vars_;
 	}
 	np::start_host_session(host_owner_, host_cfg);
+	kernel_->session_open = true; // the retail is_in_session fact
 	if (serve_and_play) {
 		// The host's own replica pipeline (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
 		// each frame into the ClientState the present pass reads.
@@ -204,19 +186,8 @@ public:
 			pump_->poll();
 			if (!pump_->has_inbound()) return 0;
 		}
-		const Dictionary d = pump_->take_inbound();
-		const String ip = d.get("ip", String());
-		const int port = d.get("port", 0);
-		const PackedByteArray bytes = d.get("bytes", PackedByteArray());
-		uint32_t packed = 0;
-		const PackedStringArray parts = ip.split(".");
-		if (parts.size() == 4) {
-			packed = static_cast<uint32_t>(parts[0].to_int() & 0xFF) |
-			         (static_cast<uint32_t>(parts[1].to_int() & 0xFF) << 8) |
-			         (static_cast<uint32_t>(parts[2].to_int() & 0xFF) << 16) |
-			         (static_cast<uint32_t>(parts[3].to_int() & 0xFF) << 24);
-		}
-		from = opennova::PeerAddr{packed, static_cast<uint16_t>(port)};
+		PackedByteArray bytes;
+		if (!pump_->take_inbound_native(from, bytes)) return 0;
 		const std::size_t n = std::min(cap, static_cast<std::size_t>(bytes.size()));
 		if (n > 0) std::memcpy(buf, bytes.ptr(), n);
 		return static_cast<int>(n);
@@ -287,7 +258,7 @@ void Simulation::host_pump() {
 			profiling ? &host_perf : nullptr);
 	if (profiling)
 		frame_phase_perf_.host_session += host_perf;
-	tick_local_medic_cooldown(); // the medic-call cooldown (Player_UpdatePerFrame)
+	kernel_->tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	// The kernel pump's wire-facing reload outcome relays onto the loopback so
 	// the shared dispatcher broadcasts the S2C 0x49 to every client next frame
 	// (the authority already performed WeaponSlot_ReloadAmmo inside the pump;
@@ -473,7 +444,7 @@ void Simulation::joiner_pump() {
 	hooks.tick_view = [this] { tick_local_player_view(); };
 	hooks.tick_weapon = [this] {
 		tick_local_player_weapon();
-		tick_local_medic_cooldown();
+		kernel_->tick_medic_cooldown(local_player_dead());
 	};
 	joiner_bridge_.pump(ctx, hooks);
 	// An S2C 0x41 applied inside the pump mutated the live charattr table; the
@@ -756,7 +727,7 @@ void Simulation::configure_host_session(Dictionary p_options) {
 				opennova::np::find_integrity_challenge_profile(id) != nullptr) {
 			config.integrity_profile = id;
 		} else {
-			UtilityFunctions::push_error(
+			UtilityFunctions::push_warning(
 					String("Unknown authority integrity profile: ") + requested);
 			config.integrity_profile.clear();
 		}
@@ -1502,9 +1473,9 @@ String Simulation::format_feed_camp_line(const String &p_template,
 // players — authored rows defer to the authority presenter and never enter
 // the wire plan), and the authority tick's sound pass never reaches
 // net-snapped peers (tick_infantry returns at the net-snap gate before the
-// consume — retail: the @0x4b9a03 flag test exits past the sound block, and
-// each machine instead consumes from the body updater of every body it
-// draws; see docs/audio/lwf-dbf-sound-re.md).
+// consume, the gate AiSystem::tick_infantry cites; each machine instead
+// consumes from the body updater of every body it draws; see
+// docs/audio/lwf-dbf-sound-re.md).
 void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 		int p_wire_handle, int p_carrier_handle, int p_anim_state,
 		int p_from_phase, int p_to_phase, const Vector3 &p_pos) {

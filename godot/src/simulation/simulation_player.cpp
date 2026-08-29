@@ -25,26 +25,14 @@ bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_t
 	spawn.yaw = static_cast<int16_t>(p_yaw_deg);
 	spawn.team = static_cast<uint8_t>(p_team);
 	if (listen_server_) spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
-	const opennova::world::EntityHandle h = opennova::world::spawn_player(kernel_->world, spawn);
-	if (!h.valid()) return false;
-	kernel_->resolve_new_infantry_adm_ids();
-	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
-	kernel_->reset_local_player_input(
-			opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg));
-	reset_local_player_view_effects();
-	return true;
+	return kernel_->spawn_local_player(spawn);
 }
 
 uint32_t Simulation::mission_game_type() const {
-	// Derive the same g_GameType code word as the mission catalog. A mission
-	// with no multiplayer bit is stock Co-op (0x10020), which reaches 00TRa's
-	// exact 6001 fallback rather than requiring a cross-mode family scan.
-	// [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360,
-	// see docs/net/novaworld-net-re.md 5.2c]
-	return opennova::game_type::for_mission_mode(
-			opennova::bms::selected_game_mode(
-					static_cast<opennova::bms::AttribFlags>(
-							kernel_ ? kernel_->world.mission_attrib_flags : 0u)));
+	// The engine's one derivation (game_type::for_mission_attribs) over the
+	// world's retained mission attribs.
+	return opennova::game_type::for_mission_attribs(
+			kernel_ ? kernel_->world.mission_attrib_flags : 0u);
 }
 
 int Simulation::spawn_local_player_at_start() {
@@ -86,7 +74,7 @@ void Simulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool
 			p_lean_left, p_lean_right, p_jump);
 }
 
-// One frame of mouse pixels through the kernel's witnessed integer pipeline
+// One frame of mouse pixels onto the kernel's look accumulator
 // (the center-lock accumulator, the scoped sensitivity reduction, the prone
 // up-limit) [orig: Input_ProcessMouseAxisBindings @ 0x499680].
 void Simulation::add_local_player_look(float p_dx_px, float p_dy_px) {

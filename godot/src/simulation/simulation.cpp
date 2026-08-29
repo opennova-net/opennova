@@ -76,14 +76,6 @@ opennova::bms::File make_demo_mission() {
 	return m;
 }
 
-// The session g_GameType word a mission document implies (no multiplayer bit
-// -> stock Co-op 0x10020) [orig: AI_GetTaskTypeFromFlags @0x40DAE0 ->
-// Game_StartMission @0x524360, see docs/net/novaworld-net-re.md 5.2c].
-uint32_t mission_game_type_for(const opennova::bms::File &mission) {
-	return opennova::game_type::for_mission_mode(opennova::bms::selected_game_mode(
-			static_cast<opennova::bms::AttribFlags>(mission.header.attrib_flags)));
-}
-
 } // namespace
 
 Simulation::Simulation() : session_(*this) {
@@ -250,6 +242,7 @@ void Simulation::apply_sound_state_to_world() {
 		kernel_->world.sound_profiles.parse(reinterpret_cast<const char *>(sndprof_text_.data()),
 		                             sndprof_text_.size());
 	kernel_->world.env.water_z = env_water_z_q16_;
+	kernel_->sync_water_plane();
 }
 
 void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
@@ -283,7 +276,10 @@ void Simulation::apply_character_traits_to_world() {
 
 void Simulation::set_water_z(double p_water_y) {
 	env_water_z_q16_ = static_cast<int32_t>(p_water_y * 65536.0);
-	if (kernel_) kernel_->world.env.water_z = env_water_z_q16_;
+	if (kernel_) {
+		kernel_->world.env.water_z = env_water_z_q16_;
+		kernel_->sync_water_plane();
+	}
 }
 
 Array Simulation::drain_slot_sounds() {
@@ -463,6 +459,9 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// The mission's raw .til bytes: the S2C 0x45 stream source AND the
 	// placed-tile surface array (D-SND-15).
 	set_terrain_til_data(p_terrain_til);
+	// The previous mission's retained terrain must not rebuild into the fresh
+	// kernel: set_terrain_height_field below builds the store exactly once.
+	terrain_data_.unref();
 
 	reset_world();
 	if (p_resource_root.is_valid()) set_asset_root(p_resource_root);
@@ -505,7 +504,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	options.joiner = joiner_;
 	options.wac = !p_wac_basename.is_empty();
 	options.wac_basename = std::string(p_wac_basename.utf8().get_data());
-	options.game_type = mission_game_type_for(kernel_->mission);
+	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	options.infantry_adm = p_infantry_adm.is_empty()
 			? std::string(ms::kDefaultInfantryAdm)
 			: std::string(p_infantry_adm.utf8().get_data());
@@ -568,7 +567,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	opennova::mission::KernelBootOptions options;
 	options.playable = false; // callers spawn explicitly (or the listen bring-up auto-spawns)
 	options.joiner = joiner_;
-	options.game_type = mission_game_type_for(kernel_->mission);
+	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
 	if (!kernel_->boot(options, boot_error)) {
@@ -589,7 +588,7 @@ void Simulation::build_demo_mission() {
 	opennova::mission::KernelBootOptions options;
 	options.playable = false;
 	options.joiner = joiner_;
-	options.game_type = mission_game_type_for(kernel_->mission);
+	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
 	if (!kernel_->boot(options, boot_error)) {
@@ -641,7 +640,7 @@ bool Simulation::advance_world_tick() {
 	kernel_->view_session_inputs = local_view_session_inputs();
 	opennova::world::LogicTickPerf world_perf;
 	kernel_->tick_no_net(runtime_profiling_enabled_ ? &world_perf : nullptr);
-	tick_local_medic_cooldown(); // the medic-call cooldown (Player_UpdatePerFrame)
+	kernel_->tick_medic_cooldown(local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	if (runtime_profiling_enabled_) {
 		// The direct tick attributes its world phases onto the same F3 keys
 		// the listen frame's server pump fills.
@@ -730,7 +729,11 @@ void Simulation::set_wac_program(const Ref<WacProgram> &p_program) {
 }
 
 bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
-	ERR_FAIL_COND_V_MSG(!world_installed_, false, "compile_and_set_wac needs a loaded world (the registry resolves symbolic names).");
+	if (!world_installed_) {
+		UtilityFunctions::push_warning(
+				"compile_and_set_wac needs a loaded world (the registry resolves symbolic names).");
+		return false;
+	}
 	std::vector<std::string> sources;
 	sources.reserve(static_cast<size_t>(p_sources.size()));
 	for (int64_t i = 0; i < p_sources.size(); ++i) {
@@ -858,20 +861,14 @@ void Simulation::set_mission_variable(int index, int value) {
 
 Error Simulation::debug_kill_player_entity(int p_handle) {
 	if (!kernel_ || joiner_) return ERR_UNAVAILABLE;
-	const opennova::world::EntityHandle victim{static_cast<uint16_t>(p_handle)};
-	const opennova::world::Entity *e = kernel_->world.registry.get(victim);
-	if (e == nullptr || (e->flags & opennova::world::kEntityFlagPlayer) == 0) return ERR_INVALID_PARAMETER;
-	// The damage path that produces a real RoundDeath has already driven the
-	// victim's Health to zero; mirror that so the recipient's 0x0A tail health
-	// (the joiner's death channel) reads the death too.
-	if (opennova::world::Entity *victim_row = kernel_->world.registry.get(victim)) victim_row->health = 0;
-	opennova::world::RoundDeath d;
-	d.victim = victim;
-	d.victim_handle = victim.packed;
-	d.killer = kernel_->world.cached.local_player;
-	d.killer_handle = kernel_->world.cached.local_player.valid() ? kernel_->world.cached.local_player.packed : 0xFFFFu;
-	kernel_->world.round_sim.deaths.push_back(d);
-	return OK;
+	// The engine transaction (EntityCommands::kill_player): the health write
+	// the real damage path makes plus the RoundDeath record, the local player
+	// as the killer.
+	return kernel_->world.commands.kill_player(
+				   opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)},
+				   kernel_->world.cached.local_player)
+			? OK
+			: ERR_INVALID_PARAMETER;
 }
 
 // Probe/diagnostic seam: delegate to the engine's both-store health mutator
@@ -975,24 +972,16 @@ Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 	return OK;
 }
 
+// The by-net-id sibling of debug_set_entity_position: the net-id resolve is
+// the binding's lookup, the both-store move is the engine's
+// (EntityCommands::set_entity_position).
 void Simulation::debug_set_world_entity_position(int p_net_id,
                                                      const Vector3 &p_mission_pos) {
 	if (!kernel_ || p_net_id <= 0 || p_net_id > 0xFFFF) return;
 	const opennova::world::EntityHandle h =
 			kernel_->world.registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
-	opennova::world::Entity *ent = kernel_->world.registry.get(h);
-	if (!ent) return;
-	ent->position.x = p_mission_pos.x;
-	ent->position.y = p_mission_pos.y;
-	ent->position.z = p_mission_pos.z;
-	// Keep the AI mirror in step when the entity carries a brain (harmless otherwise).
-	if (kernel_) {
-		if (AiEntity *ae = kernel_->ai.for_handle(h)) {
-			ae->pos[0] = static_cast<int32_t>(p_mission_pos.x * 65536.0f);
-			ae->pos[1] = static_cast<int32_t>(p_mission_pos.y * 65536.0f);
-			ae->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
-		}
-	}
+	(void)kernel_->world.commands.set_entity_position(h,
+			opennova::world::Vec3{p_mission_pos.x, p_mission_pos.y, p_mission_pos.z});
 }
 
 Error Simulation::debug_set_world_entity_weapon_ammo(
@@ -1001,13 +990,13 @@ Error Simulation::debug_set_world_entity_weapon_ammo(
 		return ERR_INVALID_PARAMETER;
 	const opennova::world::EntityHandle h =
 			kernel_->world.registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
-	opennova::world::Entity *ent = kernel_->world.registry.get(h);
-	if (ent == nullptr) return ERR_DOES_NOT_EXIST;
-	ent->primary_weapon_slot.clip =
-			opennova::world::retail_signed_i16(p_clip);
-	ent->primary_weapon_slot.reserve =
-			opennova::world::retail_signed_i16(p_reserve);
-	return OK;
+	return kernel_->world.commands.set_entity_weapon_ammo(h, p_clip, p_reserve)
+			? OK
+			: ERR_DOES_NOT_EXIST;
+}
+
+opennova::world::EntityCommands *Simulation::entity_commands() {
+	return kernel_ ? &kernel_->world.commands : nullptr;
 }
 
 int Simulation::get_mission_variable(int index) const {

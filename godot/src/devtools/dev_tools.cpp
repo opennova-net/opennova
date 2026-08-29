@@ -8,10 +8,11 @@
 
 #if OPENNOVA_DEVTOOLS
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <runtime/devtools/debug_request.h>
 #include <runtime/devtools/entities_window.h>
-#include <runtime/devtools/inspect_snapshot.h>
+#include <runtime/devtools/entity_directory_snapshot.h>
 #include <runtime/devtools/stats_window.h>
 
 #include <algorithm>
@@ -251,13 +252,20 @@ void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
 	}
 }
 
+Simulation *DevTools::simulation() const {
+	return simulation_id_.is_valid()
+			? Object::cast_to<Simulation>(ObjectDB::get_instance(simulation_id_))
+			: nullptr;
+}
+
 void DevTools::set_simulation(Simulation *p_simulation) {
-	if (simulation_ == p_simulation) {
+	const ObjectID id = p_simulation != nullptr ? ObjectID(p_simulation->get_instance_id()) : ObjectID();
+	if (simulation_id_ == id) {
 		return;
 	}
-	simulation_ = p_simulation;
+	simulation_id_ = id;
 	last_entity_push_ms_ = -1;
-	if (simulation_ == nullptr) {
+	if (p_simulation == nullptr) {
 		// The unload edge: an invalid snapshot clears the pushed record so a
 		// window left open never shows a dead world's rows.
 		tools_->set_entity_directory(opennova::devtools::EntityDirectorySnapshot{});
@@ -269,28 +277,26 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 // with no world behind them drain and drop.
 void DevTools::apply_debug_requests() {
 	opennova::devtools::DebugRequest request;
+	Simulation *simulation_ = simulation();
 	while (tools_->take_debug_request(request)) {
 		if (simulation_ == nullptr) {
 			continue;
 		}
+		// The window's requests carry the engine handle; they reach the engine
+		// mutators (EntityCommands, ADR 0042 d5) by that handle, no index detour.
+		opennova::world::EntityCommands *commands = simulation_->entity_commands();
 		switch (request.kind) {
-			case opennova::devtools::DebugRequest::Kind::SetEntityHealth: {
-				const int ai_index =
-						simulation_->native_ai_index_for_handle(request.target.packed);
-				if (ai_index >= 0) {
-					simulation_->debug_set_entity_health(ai_index, request.health);
+			case opennova::devtools::DebugRequest::Kind::SetEntityHealth:
+				if (commands != nullptr) {
+					(void)commands->set_entity_health(request.target, request.health);
 				}
 				break;
-			}
-			case opennova::devtools::DebugRequest::Kind::SetEntityPosition: {
-				const int ai_index =
-						simulation_->native_ai_index_for_handle(request.target.packed);
-				if (ai_index >= 0) {
-					simulation_->debug_set_entity_position(ai_index,
-							Vector3(request.pos[0], request.pos[1], request.pos[2]));
+			case opennova::devtools::DebugRequest::Kind::SetEntityPosition:
+				if (commands != nullptr) {
+					(void)commands->set_entity_position(request.target,
+							opennova::world::Vec3{request.pos[0], request.pos[1], request.pos[2]});
 				}
 				break;
-			}
 			case opennova::devtools::DebugRequest::Kind::TeleportLocalPlayer:
 				simulation_->debug_teleport_local_player(
 						Vector3(request.pos[0], request.pos[1], request.pos[2]),
@@ -305,6 +311,7 @@ void DevTools::apply_debug_requests() {
 // the Simulation's native accessor — no TypedArray/Variant round-trip
 // (ADR 0042 d6).
 void DevTools::push_entity_directory() {
+	Simulation *simulation_ = simulation();
 	if (simulation_ == nullptr || !tools_->needs_entity_directory()) {
 		last_entity_push_ms_ = -1;
 		return;

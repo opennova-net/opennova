@@ -63,6 +63,7 @@
 #include "mission/mission_catalog.h"
 #include "mission/mission_data.h"
 #include "simulation/entity_card.h"
+#include "simulation/end_round_state.h"
 #include "simulation/entity_row.h"
 #include "simulation/present_applier.h"
 #include "simulation/present_stats.h"
@@ -166,6 +167,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PresentApplier);
 	GDREGISTER_CLASS(MissionPresentStats);
 	GDREGISTER_CLASS(EntityRow);
+	GDREGISTER_CLASS(EndRoundState);
 	GDREGISTER_CLASS(EntityCardSeat);
 	GDREGISTER_CLASS(EntityCard);
 	GDREGISTER_CLASS(MissionFrameInput);

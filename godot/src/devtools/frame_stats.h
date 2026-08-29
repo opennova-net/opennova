@@ -62,8 +62,6 @@ public:
 	// keyed on the current render frame.
 	void add(int p_slot, int64_t p_amount);
 	Ref<FrameStatsWindow> drain();
-
-	static int slot_count() { return opennova::devtools::kSlotCount; }
 	static String slot_name(int p_slot);
 	static String slot_description(int p_slot);
 

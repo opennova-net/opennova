@@ -126,7 +126,6 @@ void ParticleDef::_bind_methods() {
 
 	// Canonical-table introspection + deep clone (editor helpers).
 	BIND_CONSTANT(FLAG_FOREVER_EMIT);
-	ClassDB::bind_static_method("ParticleDef", D_METHOD("format_particle_flags", "bits"), &ParticleDef::format_particle_flags);
 	ClassDB::bind_method(D_METHOD("clone"), &ParticleDef::clone);
 
 	ADD_GROUP("Identity", "");
