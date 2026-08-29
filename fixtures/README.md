@@ -52,7 +52,6 @@ authored file.
 | `adm/mp5_1st.adm`, `bad/BINOC.bad`, `bad/BINOC_twist.bad` | the retail animation-definition and clip formats (skinned-rig twist parity) |
 | `particle/*.ptl` | the particle catalogue parser's retail corpus |
 | `cbin/nlist*.reference.kda` | the credits-list container in its JO, JOX01 and BHD encodings |
-| `dbf/00TRg.DBF` | the dialog bank format |
 | `avatars/Avatars.def` | the avatar definition table |
 | `novaworld/**` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
 
@@ -139,3 +138,5 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   `rtxt_jo_install_sweep` and the menu-driven GUT tests.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
 - `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.
+- `dbf/synth_bank.dbf` — `tests/fixtures/minimal_dbf_gen.cpp`: eleven dialog groups
+  through `encode_dbf`; the shipped 00TRg bank is `dbf_roundtrip`'s reference-tree leg.
