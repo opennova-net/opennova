@@ -240,7 +240,9 @@ Everything below was decompiled and read this session (pseudocode dumps:
    **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`
    (`dword_C6EAE4` is the writable named value `fallmps`, seeded 13 by
    `WacScript_FreeAll @ 0x4f638b` at every mission load; ported 2026-08-28 as
-   `World::wac_values.fallmps`, authority-gated and skipping Indestructible bodies);
+   `World::wac_values.fallmps`, authority-gated and skipping Indestructible bodies;
+   retail has no zero test, so a script that writes `fallmps 0` makes every
+   landing damage by `(-vel_z)>>4` — the port carries that);
    >61440 ⇒ set swim (flag 0x2000, states 47/31 hmm 47=tread/31 per anim availability).
    The 81920·dir pool-0 probe → state 32 sits in the ON-LADDER block, not a
    water-edge climb-out: it is the ladder CONGESTION hold (someone climbing
@@ -2541,7 +2543,7 @@ surviving person to `Physics_RaycastAgainstBoneSections @ 0x4e4670`. Its
 `Math_FloatMatrixToFixedPoint22 @ 0x611140`; the callback output is already the
 FINAL world-space pose, including the current primary animation, body/aim
 overlays, any live secondary weapon channel, pivots, and entity placement.
-The port mirrors that boundary in `Simulation::build_section_matrices`:
+The port mirrors that boundary in `MissionKernel::build_section_matrices`:
 each organic entity owns its ADM source and playhead, the pose is sampled
 synchronously from simulation state (including headless authority), FK is
 resolved against the canonical shared rest, and the entity transform is
@@ -4507,9 +4509,11 @@ missions).
 
 Port notes (`vehicle_attach.cpp`): `player_toggle_vehicle_mount` +
 `find_nearest_free_seat` + `attach_to_seat_index` over our seat model; the
-witnessed constants verbatim; deviations ledgered as D-AI-11. The sim binding
-is `Simulation::local_player_toggle_mount` (the weapon gate reads the
-ported weapon FSM slot), the shell key is main_game.gd's USE-ITEM handler
+witnessed constants verbatim; deviations ledgered as D-AI-11. The engine owner
+is `MissionKernel::toggle_mount` (the weapon gate reads the ported weapon
+FSM slot; the out-of-session UseGun rejection reads the kernel's `session_open`
+fact), `Simulation::local_player_toggle_mount` forwards to it, the shell key is
+main_game.gd's USE-ITEM handler
 (armory leg first, faithful order).
 
 ### 23.2 The BMS Player mount triggers (cat 7 subs 38-41)

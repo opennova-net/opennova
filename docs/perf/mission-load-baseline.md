@@ -120,7 +120,7 @@ the placer layer.
 
 ## Reproduction status
 
-The committed probe and its editor host no longer exist. Preserve the original
+The committed probe and the editor scene that embedded it no longer exist. Preserve the original
 protocol when building a replacement harness: use the real mission-load path,
 record the second OS-warm run, and keep the three-mission corpus above so new
 numbers remain comparable. The historical `JO_PROBE_MISSIONS` override is not

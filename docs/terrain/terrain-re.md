@@ -81,8 +81,9 @@ retired with the retail terrain corpus; the format record below stands.
   first-seen vertex sort with the exact quicksort/insertion-sort hybrid,
   forward/inverse remap, `max_index = max + 1`). Retail treats existing tile
   files as a cache (the cache-trust semantics tracked in TODO.md).
-- The raw `Output.dep` depth intermediate the bake hands to the CPT export is
-  its own minimal lib (`engine/formats/dep`): headerless 1024×1024 u16,
+- The raw `Output.dep` depth intermediate the bake hands to the CPT export was
+  its own minimal lib (`engine/formats/dep`, removed with ADR 0037; the format
+  record stands): headerless 1024×1024 u16,
   short/missing file reads zero-filled.
 
 ## Runtime surface shading (REN-4, retail Jointops.exe — witness map)

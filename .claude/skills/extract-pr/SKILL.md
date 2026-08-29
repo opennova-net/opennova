@@ -35,7 +35,7 @@ All commands are Git Bash, inside the current worktree only.
     bash scripts/build_godot.sh              # GDExtension (if godot/ touched)
     bash scripts/test_godot.sh               # GUT (use the gut skill's GODOT_BIN setup)
     for c in ratchet_counts maturity_lint link_graph_check include_graph_check \
-             orphan_header_check host_lint fixture_lint env_lint; do
+             orphan_header_check host_lint fixture_lint env_lint conventions_lint; do
         python scripts/lint/$c.py --enforce; done   # the CI lint gates
     python scripts/lint/ledger_check.py --check      # (ledger_check takes --check)
 

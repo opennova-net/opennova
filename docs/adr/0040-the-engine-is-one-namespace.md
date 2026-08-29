@@ -96,7 +96,8 @@ carrying the uniqueness load; nothing enforced it.
 - One rule for a reader: an angle include with a group prefix is the engine,
   a quoted root-relative include is the binding tree, a bare name is a
   sibling. The twin lib names (`mission`, `particle`, `wac`) stop aliasing.
-- The `adapter_cpp_orig_cites_*`, `gd_orig_cites`, and size ratchets key on
+- The `adapter_cpp_orig_cites_*` [since ADR 0042 d7 the one `adapter_cpp_orig_cites`],
+  `gd_orig_cites`, and size ratchets key on
   paths and survive the rename by rewriting their baselines in the same
   change; the maturity instruments are otherwise untouched.
 - Historical records keep their historical names where they describe a past
@@ -108,9 +109,9 @@ carrying the uniqueness load; nothing enforced it.
 
 With the names and the include roots settled, the witnessed behavior still
 living Godot-side moves to an engine home. The gauges are
-`adapter_cpp_orig_cites_pushdown` (the `[orig:` markers under
-`godot/src/{simulation,object,mission}`) and `gd_orig_cites` (the same markers
-under `godot/game` + `godot/modtools`), both in
+`adapter_cpp_orig_cites` (one `[orig:` count over all of `godot/src`, ADR 0042
+d7) and `gd_orig_cites` (the same markers under `godot/game` + `godot/modtools`
++ `godot/probes`), both in
 `scripts/lint/maturity_baseline.json`: a slice moves code, banks the counter,
 and keeps fidelity, because the cites travel with the code they cite.
 
@@ -132,6 +133,10 @@ reach any particular number.
 | B3a | the occlusion frame camera build | `engine/runtime/world/occlusion_camera.h` | LANDED `c2e41b97c` |
 | B3b | the iris exposure march | `engine/runtime/world/iris_march.{h,cpp}` | LANDED `97fb7a83b` |
 | B (remainder) | `simulation_present.cpp`'s data model, `simulation_net.cpp`'s GameConfig policy + pumps, `simulation_player_loadout.cpp` / `simulation_player_weapon.cpp` / `simulation_player.cpp`, `simulation_assets.cpp`, the feed marshallers, then the `simulation.h` state-model split, after which `Simulation` is a `TickTarget` adapter — reframed by ADR 0042: the rig-twinned half moves into the kernel; the Godot-only witnessed blocks stay binding-side until grilled | the rig-twinned half: `mission_kernel` + `listen_host` | PART-LANDED `6510891bb` (the boot/tick/player/table bodies); the Godot-only witnessed blocks (present rows, sun feed, scar gate, the joiner pump) stay binding-side ON-TOUCH after a grill |
+| B1 | `Simulation::bringup_host_runtime` re-implements `listen_host::bringup` (the same `SinglePlayer_StartMission @0x561af0` body twice): parameterize `listen_host::bringup(kernel, state, ListenBringupOptions{host_cfg, socket_mode, serve_and_play, local_character_vars, mission text/til installs})`, adopt `state.client_runtime` as the HostClient runtime, and make the binding a converter | `engine/net/inmatch/listen_host` | QUEUED (2026-08-29 hygiene census C-01; proven by the retail-interop recipe + the nw_pp pcap diff, not GUT) |
+| B2 | the deploy-screen zone rows and status composed in `simulation_net.cpp` (`get_deploy_spawn_zones`, `UI_UpdateDeathScreenContent @0x5536a0`) and re-parsed from their own Dictionaries | `engine/runtime/world/deploy_screen_feed` (`build_deploy_zone_rows` + a typed `DeployZoneRow` record) | QUEUED (census C-04) |
+| B3 | the kill-feed policy composed in `drain_feed_events` (camp detection, the own/verbose gate, the STRCND48 bonus recompose) | `engine/runtime/hud/feed_format` (`feed_event_rows` + a typed `FeedRow` record) | QUEUED (census C-05) |
+| B4 | the local-player view/aim frames and the character profile still crossing as Dictionaries (`get_local_player_view`, `get_local_player_aim_overlay`, `MissionSetupOptions.local_character_profile`) | typed `LocalPlayerViewFrame` / `AimOverlay` / `CharacterProfile` records assigned from the engine structs | QUEUED (census C-15, C-22) |
 | C1 | the mission load plan (`Game_StartMission`'s sequence + progress schedule) | `engine/runtime/mission/mission_load_plan.h` | LANDED `d081d2908` |
 | C2 | the HUD presenter's config tokens and feed units | `engine/runtime/hud/hud_config_tokens.h` | LANDED `d8fa149b2` |
 | C3+C4 | the presenter's swizzles/rangefinder and the viewmodel rig's frame math | `engine/runtime/world/presentation_frame.h` + `engine/runtime/simassets/fp_viewmodel_spec.h` | LANDED `0b07c5f9f` |

@@ -74,17 +74,23 @@ session. There is no callback lattice and no second legacy frame sequence.
 - reset, close, terminal error propagation, and frame timing;
 - typed `FrameInput`, `TickInput`, `TickOutcome`, and `FrameOutcome` values.
 
-Its one internal seam is `inmatch::TickTarget`. The Godot `Simulation` adapter
-and `apps/nw_server` each provide a target, which proves the session interface
-does not depend on Godot. ADR 0042 names the end state: the concrete targets
-embed the engine's `mission::MissionKernel` and call
-`inmatch::listen_host::frame`, so the kernel and the frame are the one
-implementation. The target owns the concrete mission kernel it knows
-how to construct (becoming: the target embeds the engine's MissionKernel —
-ADR 0042). In the game that remains `Simulation`: one `World`, WAC,
-BMS, AI, collision, and the selected network runtime. This is intentional
-locality—resource resolution and Godot value conversion do not leak into the
-portable session state machine.
+Its one internal seam is `inmatch::TickTarget`. Both targets — the Godot
+`Simulation` binding and `apps/nw_server`'s dedicated host — embed the engine's
+`mission::MissionKernel` and drive `inmatch::listen_host::frame` (ADR 0042 d3,
+PR #587), so boot, state and the no-net tick have one implementation and the
+session interface provably does not depend on Godot. The target adds only
+resource resolution, Godot value conversion and the device pipeline; none of
+that leaks into the portable session state machine. The kernel also carries the
+session facts the tooling and the shell flow used to re-derive: `session_open`
+(retail's is_in_session, set by the net bring-ups; it gates the UseGun
+null-slot rejection inside `toggle_mount`), the medic-call cooldown
+(`tick_medic_cooldown` / `stamp_medic_request`), the local dead bit
+(`local_player_dead`; a joiner reads its replica through
+`np::ClientRuntime::local_player_dead`), the water plane the occupant clamp
+reads (`sync_water_plane` from `World::env.water_z`), and the per-tick
+environment advance, which runs inside `listen_host::frame` and `tick_no_net`
+rather than in each embedder. The headless embedders load their terrain
+through the engine's one `terrain::terrain_field_store_load`.
 
 That `World` is constructed in place and keeps one address for the mission.
 It is deliberately non-copyable and non-movable because `EntityCommands`

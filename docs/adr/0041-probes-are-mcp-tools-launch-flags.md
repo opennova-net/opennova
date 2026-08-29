@@ -2,9 +2,9 @@
 
 - **Status**: accepted (2026-08-27; hard cut)
 - **Updated**: [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
-  (2026-08-28) updates decision 5's rig reference: once the kernel slices
-  land, the mission kernel boots (`tests/common` retains only retail path
-  glue).
+  (2026-08-28) updates decision 5's rig reference: the mission kernel
+  (`mission::MissionKernel`, PR #587) boots the gated ctests; `tests/common`
+  retains only retail path glue.
 - **Owners**: the game shell, `godot/probes/`, `scripts/mcp/`, `scripts/net/`,
   the test suites
 - **Supersedes/updates**: updates ADR 0037's "ONED has no MCP" (unchanged for
@@ -68,7 +68,9 @@ files-on-disk IPC.
    C++ test under `tests/<domain>/`, gated on the retail roots when it needs
    retail data and Skipped (exit 77, `opennova_add_gated_test`) without them;
    the retail-mission rig (`tests/common/retail_mission_rig.*`) boots a mission
-   through the engine's own boot policy and listen server for them. Only what
+   through the engine's own boot policy and listen server for them [ADR 0042:
+   the engine's `mission::MissionKernel` + `inmatch::listen_host` boot them;
+   `tests/common/retail_mission_files.*` supplies retail paths only]. Only what
    needs the live Godot runtime is a probe.
 6. **Retail is driven only through onhook-mcp.** The parity runner keeps
    `onhook-mcp.exe` for `Jointops.exe` and drives OpenNova through its own

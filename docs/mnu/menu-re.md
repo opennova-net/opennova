@@ -1372,8 +1372,8 @@ Accepted/divergent (each a documented decision, not a defect):
   stands in; either miss leaves it empty), the `[Info] BRIEFING` text
   pointer (+1300), the loose-scan flag (+4380: 1 loose / 0 archive), and
   the session code word (+4392: `AI_GetTaskTypeFromFlags(header+0x88)`
-  through the code-word switch — our `bms::selected_game_mode` +
-  `game_type::for_mission_mode` pair). The SP populate
+  through the code-word switch — our `game_type::for_mission_attribs`, the
+  `bms::selected_game_mode` + `game_type::for_mission_mode` pair). The SP populate
   (`SinglePlayer_PopulateMissionList @ 0x561840`, a strip-enabling activate
   handler) filters `(gt & 0xFFFDFFFF) == 0x10020` (the waypoint/Co-op
   family), prefixes loose rows `*`, falls back to the FILENAME when the

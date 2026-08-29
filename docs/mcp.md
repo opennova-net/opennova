@@ -5,7 +5,7 @@ parity workflow:
 
 - **`opennova-game`** (this repository) is embedded in the game runtime. A launch
   with `--mcp-port <n>` starts it on `http://127.0.0.1:<n>/mcp`; it exposes the
-  game's state, the F3 debug catalog, the compiled menu, captures, logs and the
+  game's state, the typed debug-control table, the compiled menu, captures, logs and the
   registered runtime probes (`game_probe`). It never launches anything itself.
 - **`onhook-mcp`** (the `opennova-int` repository) drives the retail
   `Jointops.exe` through onHook. The parity runner
@@ -79,7 +79,7 @@ from the in-process ring as source `engine`. A headless launch reports
 | `game_state` | the shell, the in-match session (`session.state`/`session.role` from the portable inmatch session), mission, runtime (entity/brain counts, the network role: `host` with its port and peers, `joiner` with its phase and admission, or `local`) and player state |
 | `game_entities` | `op=list` a bounded page of the rendered entity view; `op=inspect` one entity's public debug card (its `ai_index` is the edit target for `game_debug`) |
 | `game_control` | `quit`, pause/step/resume, `open_ingame_menu`, `open_armory`, ...; `quit` cancels a running probe first |
-| `game_debug` | the F3 debug catalog without the UI: `op=list/get/set/invoke/snapshot`; the automation actions `teleport_local_player`, `set_entity_health/position`, `deploy_pick`, `set_viewmodel_weapon`/`clear_viewmodel_weapon`, `kill_group`, `crew_vehicle`, `crew_local_player`, `local_player_look`, the audio bus actions, `runtime_transport`, `set_mission_variable`; the `net_joiner_diagnostics` check |
+| `game_debug` | the typed debug-control table (`DebugControls`, ADR 0042 d5) over MCP: `op=list/get/set/invoke/snapshot`; the automation actions `teleport_local_player`, `set_entity_health/position`, `deploy_pick`, `set_viewmodel_weapon`/`clear_viewmodel_weapon`, `kill_group`, `crew_vehicle`, `crew_local_player`, `local_player_look`, the audio bus actions, `runtime_transport`, `set_mission_variable`; the `net_joiner_diagnostics` check |
 | `game_render_diagnostics` | one frame-correlated render snapshot (camera/projection, environment, lights, shadow config, pass counts) |
 | `game_capture_bundle` | the next completed frame as a lossless PNG + diagnostics JSON under `user://render-captures` (`world_only` hides the canvas UI) |
 | `game_menu` | drive the compiled menu: `state`, `press`, `press_at`, `click_at`, `key`, `screen`, `open` |
