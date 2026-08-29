@@ -430,9 +430,12 @@ func test_voice_preview_requests_selected_avatar_voice() -> void:
 	if root == null:
 		return
 
+	var player_mnu := RetailData.fixture("mnu/jo_player.mnu")
+	if player_mnu.is_empty():
+		pending(RetailData.fixture_pending_text("mnu/jo_player.mnu"))
+		return
 	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(
-			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_player.mnu")), OK,
+	assert_eq(doc.load_from_bytes(FileAccess.get_file_as_bytes(player_mnu)), OK,
 		"the retail player menu fixture loads")
 	var driver := MenuDriver.new()
 	assert_true(driver.open_document(doc, root, null, null, "player.mnu", "PLAYER_INFO"),
@@ -626,9 +629,12 @@ func test_snapshot_carries_class_without_a_weapon_database() -> void:
 # through the same control names/document the runtime opens, not just a stand-in. Runs
 # in GUT so the autoloads (Strings) and the GDExtension are loaded.
 func test_real_player_mnu_loadout_populates() -> void:
+	var player_mnu := RetailData.fixture("mnu/jo_player.mnu")
+	if player_mnu.is_empty():
+		pending(RetailData.fixture_pending_text("mnu/jo_player.mnu"))
+		return
 	var doc := MnuDocument.new()
-	assert_eq(doc.load_from_bytes(
-			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_player.mnu")), OK,
+	assert_eq(doc.load_from_bytes(FileAccess.get_file_as_bytes(player_mnu)), OK,
 			"the shipped jo_player.mnu fixture loads")
 	var driver := MenuDriverFixture.driver_over(self, doc, "player.mnu", "PLAYER_INFO")
 

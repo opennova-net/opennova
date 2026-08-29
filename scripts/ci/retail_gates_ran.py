@@ -46,6 +46,8 @@ MUST_RUN = {
         "npruntime_authored_payload_00trg",
         # The shipped .bms missions loose at the tree's root.
         "mission_corpus",
+        # The reference fixture set (<assets>/fixtures/**): the fifteen revx02 menus.
+        "mnu_compat", "mnu_coverage",
     ],
 }
 
@@ -54,6 +56,8 @@ MIXED = {
     "jo_dir": [
         "terrain_tile_composer", "ground_conform", "minimap_overlay", "score_roundtrip",
         "playersav_weapon_sav", "npruntime_weapon_table",
+        # The packed install's .mnu sweep.
+        "mnu_compat",
     ],
     "jo_assets": [
         "occlusion_armry", "threedi_panm_ctrl", "particle_smoke_all_fixtures", "sound_profile",
@@ -62,6 +66,7 @@ MIXED = {
         "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency", "avatars_parse",
         "avatars_roundtrip", "mus_parse", "mus_compat", "mus_decompile", "mus_roundtrip",
         "mus_names_roundtrip", "mus_entry_roundtrip", "mus_encode_idempotence", "mus_vm",
+        "mns_document",
     ],
 }
 

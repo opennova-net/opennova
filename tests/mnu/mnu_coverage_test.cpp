@@ -20,6 +20,8 @@
 
 #include <formats/mnu/mnu.h>
 
+#include "common/retail_paths.h"
+
 static std::string upper(std::string s) {
   for (char &c : s) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
   return s;
@@ -211,26 +213,27 @@ static int check_menu(const char *path) {
 }
 
 int main(void) {
-  // The full shipped revx02 JO-family menu set (15 files), committed under
-  // fixtures/mnu/. Every one must round-trip without losing an authored key.
-  const char *fixtures[] = {
-      "fixtures/mnu/jo_main.mnu",    "fixtures/mnu/jo_sp.mnu",
-      "fixtures/mnu/jo_mp.mnu",      "fixtures/mnu/jo_options.mnu",
-      "fixtures/mnu/jo_game.mnu",    "fixtures/mnu/jo_player.mnu",
-      "fixtures/mnu/jo_weapon.mnu",  "fixtures/mnu/jo_loadout.mnu",
-      "fixtures/mnu/jo_color.mnu",   "fixtures/mnu/jo_cmap.mnu",
-      "fixtures/mnu/jo_stat.mnu",    "fixtures/mnu/jo_death.mnu",
-      "fixtures/mnu/jo_vehicle.mnu", "fixtures/mnu/jo_item_db.mnu",
-      "fixtures/mnu/jo_splash.mnu",
+  // The full shipped revx02 JO-family menu set (15 files) from the reference
+  // fixture set (the whole test is gated on it). Every one must round-trip
+  // without losing an authored key.
+  static const char *const kMenus[] = {
+      "jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player", "jo_weapon", "jo_loadout",
+      "jo_color", "jo_cmap", "jo_stat", "jo_death", "jo_vehicle", "jo_item_db", "jo_splash",
   };
+  std::vector<std::string> paths;
+  for (const char *name : kMenus) {
+    const std::string path = retail::reference_fixture((std::string("mnu/") + name + ".mnu").c_str());
+    if (path.empty())
+      return retail::skip("OPENNOVA_JO_ASSETS/fixtures/mnu/jo_*.mnu (the fifteen shipped revx02 menus)");
+    paths.push_back(path);
+  }
   int fail = 0;
-  for (const char *p : fixtures)
-    if (!check_menu(p)) ++fail;
+  for (const std::string &p : paths)
+    if (!check_menu(p.c_str())) ++fail;
   if (fail > 0) {
     fprintf(stderr, "\n%d MNU fixture(s) lost keys on round-trip\n", fail);
     return 1;
   }
-  printf("\nAll %zu menus preserved every authored key.\n",
-         sizeof(fixtures) / sizeof(fixtures[0]));
+  printf("\nAll %zu menus preserved every authored key.\n", paths.size());
   return 0;
 }

@@ -564,6 +564,11 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 
 
 func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
+	# The ESC overlay and the armory are the shipped game.mnu / weapon.mnu.
+	for rel in ["mnu/jo_game.mnu", "mnu/jo_weapon.mnu"]:
+		if RetailData.fixture(rel).is_empty():
+			pending(RetailData.fixture_pending_text(rel))
+			return
 	_shell = await _make_shell()
 	if _shell == null:
 		return
@@ -1162,12 +1167,18 @@ func _fixture_entries(filenames: Array) -> Array:
 		# while retaining that logical archive name.
 		if filename == "mnml.trn":
 			source = BAKED_TERRAIN_DIR.path_join("Tmap.trn")
-		# The in-world screens (ESC pause overlay + armory) pack the real JO
-		# menu fixtures under their retail archive names.
+		# The in-world screens (ESC pause overlay + armory) pack the shipped JO
+		# menus from the reference fixture set under their retail archive names;
+		# without the set the boot packs the minted main menu under those names
+		# (a valid menu; the screen-verb test that opens them pends).
 		elif filename == "game.mnu":
-			source = "res://../fixtures/mnu/jo_game.mnu"
+			source = RetailData.fixture("mnu/jo_game.mnu")
+			if source.is_empty():
+				source = FIXTURE_DIR.path_join("main.mnu")
 		elif filename == "weapon.mnu":
-			source = "res://../fixtures/mnu/jo_weapon.mnu"
+			source = RetailData.fixture("mnu/jo_weapon.mnu")
+			if source.is_empty():
+				source = FIXTURE_DIR.path_join("main.mnu")
 		var bytes := FileAccess.get_file_as_bytes(source)
 		if filename == "weapon.def":
 			bytes = LIFECYCLE_WEAPON_DEF.to_utf8_buffer()

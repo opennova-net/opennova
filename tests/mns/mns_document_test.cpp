@@ -26,11 +26,16 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+
+#include "common/retail_paths.h"
 #include <vector>
 
 namespace {
 
-const char *kRealFixture = "fixtures/mns/menu_style.mns";
+// The shipped menu_style.mns from the reference fixture set; "" without
+// OPENNOVA_JO_ASSETS, when the retail legs below are skipped (SKIP-LEG).
+std::string g_real_fixture;
+const char *kRealFixture = "";
 
 bool read_file(const char *path, std::string &out) {
 	std::ifstream f(path, std::ios::binary);
@@ -419,7 +424,7 @@ static int test_add_rename_remove_move() {
 		TEST_EXPECT(to_string(doc.serialize()) == "FOO bar\r\nNEW\tvalue\r\n");
 	}
 	// Same shape on the real fixture (CRLF document EOL).
-	{
+	if (!g_real_fixture.empty()) {
 		std::string src;
 		TEST_EXPECT(read_file(kRealFixture, src));
 		opennova::mns::Document doc = opennova::mns::Document::parse(src);
@@ -537,7 +542,7 @@ static int test_source_text_get_set() {
 		TEST_EXPECT(to_string(doc.serialize()) == with_bom.substr(0, 3) + "FOO baz\n");
 	}
 	// get -> set -> serialize is byte-faithful on the real file.
-	{
+	if (!g_real_fixture.empty()) {
 		std::string src;
 		TEST_EXPECT(read_file(kRealFixture, src));
 		opennova::mns::Document doc = opennova::mns::Document::parse(src);
@@ -616,9 +621,14 @@ static int test_retail_evaluation_result() {
 
 int main() {
 	int failures = 0;
-	failures += test_real_file_byte_roundtrip();
-	failures += test_real_file_flatten();
-	failures += test_real_file_entries();
+	g_real_fixture = retail::reference_fixture("mns/menu_style.mns");
+	kRealFixture = g_real_fixture.c_str();
+	const bool retail_leg = !g_real_fixture.empty();
+	if (retail_leg) {
+		failures += test_real_file_byte_roundtrip();
+		failures += test_real_file_flatten();
+		failures += test_real_file_entries();
+	}
 	failures += test_synthetic_byte_roundtrips();
 	failures += test_inline_comment_ends_value();
 	failures += test_escapes_flatten();
@@ -626,7 +636,7 @@ int main() {
 	failures += test_conditionals_document();
 	failures += test_duplicate_name_diagnostics();
 	failures += test_invalid_name_diagnostic();
-	failures += test_edit_stability_set_value();
+	if (retail_leg) failures += test_edit_stability_set_value();
 	failures += test_edit_preserves_inline_comment();
 	failures += test_edit_multiline_collapse();
 	failures += test_add_rename_remove_move();
@@ -639,5 +649,7 @@ int main() {
 	if (failures == 0) {
 		std::printf("\nAll tests passed!\n");
 	}
+	if (failures == 0 && !retail_leg)
+		return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mns/menu_style.mns (the shipped style sheet)");
 	return failures == 0 ? 0 : 1;
 }

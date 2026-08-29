@@ -5,7 +5,8 @@ extends GutTest
 # MenuFrameCompiler) without crashing - the runtime counterpart to the C++
 # round-trip coverage test. Real game textures/fonts are not present, so assets
 # degrade gracefully; the hard assertion is "parses + every screen configures
-# and emits a non-empty draw list".
+# and emits a non-empty draw list". The menus come from the reference fixture
+# set (RetailData.fixture); the whole script skips without it.
 
 const MENUS := [
 	"jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player",
@@ -14,9 +15,17 @@ const MENUS := [
 ]
 
 
+func should_skip_script():
+	for menu_name in MENUS:
+		var rel := "mnu/%s.mnu" % menu_name
+		if RetailData.fixture(rel).is_empty():
+			return RetailData.fixture_pending_text(rel)
+	return false
+
+
 func test_all_shipped_menu_screens_compile() -> void:
 	for menu_name in MENUS:
-		var path := "res://../fixtures/mnu/%s.mnu" % menu_name
+		var path := RetailData.fixture("mnu/%s.mnu" % menu_name)
 		var bytes := FileAccess.get_file_as_bytes(path)
 		assert_gt(bytes.size(), 0, "%s readable" % menu_name)
 		if bytes.is_empty():
