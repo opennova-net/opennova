@@ -1,9 +1,9 @@
 class_name DebugControlState
 extends RefCounted
-## One authoritative observation of a DebugControlDef.
+## One authoritative observation of a DebugControls.Row.
 
 var id: StringName
-var kind := DebugControlDef.Kind.CHECK
+var kind := DebugControls.Kind.CHECK
 var value: Variant
 var desired_value: Variant
 var available := false
@@ -28,13 +28,13 @@ func to_json_value() -> Variant:
 
 func _kind_name() -> String:
 	match kind:
-		DebugControlDef.Kind.CHECK:
+		DebugControls.Kind.CHECK:
 			return "check"
-		DebugControlDef.Kind.SLIDER:
+		DebugControls.Kind.SLIDER:
 			return "slider"
-		DebugControlDef.Kind.ENUM:
+		DebugControls.Kind.ENUM:
 			return "enum"
-		DebugControlDef.Kind.ACTION:
+		DebugControls.Kind.ACTION:
 			return "action"
 	return "unknown"
 

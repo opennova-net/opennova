@@ -106,7 +106,7 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 	assert_eq(debug_adapter.debug_set_audio_bus_volume("Master", INF),
 			ERR_INVALID_PARAMETER)
 	assert_eq(debug_adapter.debug_set_audio_bus_volume(
-			"Master", DebugCatalog.AUDIO_BUS_VOLUME_MAX_DB + 0.5),
+			"Master", DebugControls.AUDIO_BUS_VOLUME_MAX_DB + 0.5),
 			ERR_INVALID_PARAMETER)
 	var bus := AudioServer.get_bus_index("SFX")
 	if bus < 0:

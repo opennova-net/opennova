@@ -435,8 +435,6 @@ func _toggle_fullscreen() -> void:
 
 func get_dev_tools() -> DevTools:
 	return _dev_tools
-func get_debug_session() -> DebugSession:
-	return get_game_debug_adapter().get_debug_session()
 func get_game_debug_adapter() -> GameDebugAdapter:
 	if _debug_adapter == null:
 		_debug_adapter = GameDebugAdapterScript.new()
