@@ -44,8 +44,7 @@ func after_each() -> void:
 
 func _def_root() -> ResourceRoot:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	return root
 
 
@@ -209,6 +208,9 @@ func test_character_save_refuses_to_replace_a_corrupt_existing_profile() -> void
 
 
 func test_an_unlatched_team_commits_no_page() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# The side selector is the S2C 0x04 tail byte [orig: byte_A85B48 @0x425499], and
 	# side_for_team maps anything that is not 1 or 3 to the RED block [orig: @0x525798].
 	# Retail cannot reach the page copy before that byte is latched — admission delivers

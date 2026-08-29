@@ -5,17 +5,24 @@
 #include <string.h>
 
 #include <formats/def/def.h>
-#include "common/test_paths.h"
+
+#include <string>
+
+#include "common/retail_paths.h"
 
 #define FEPS 0.01f
 
 int main(void) {
-    const char *repo_root = test_paths_repo_root(__FILE__);
-    char path[4096];
-    snprintf(path, sizeof(path), "%s/fixtures/def/weapon.def", repo_root);
+    /* The shipped weapon.def from the reference fixture set (OPENNOVA_JO_ASSETS):
+       its field/pos/sights/actions pins and the memory-parse parity are the
+       SKIP-LEG retail leg; the inline blocks run unconditionally. */
+    const std::string fixture = retail::reference_fixture("def/weapon.def");
+    const bool have_retail = !fixture.empty();
+    const char *path = fixture.c_str();
 
     DefWeaponsFile wf;
     memset(&wf, 0, sizeof(wf));
+    if (have_retail) {
     if (def_parse_weapons(path, &wf) != 0) {
         fprintf(stderr, "FAIL: def_parse_weapons failed for %s\n", path);
         return 1;
@@ -449,6 +456,7 @@ int main(void) {
         def_free_weapons(&wf);
         return 1;
     }
+    }  /* retail leg */
     {
         static const char kFovDef[] =
             "weapon \"WPN_FOVTEST\"\n"
@@ -600,7 +608,7 @@ int main(void) {
 
     /* def_parse_weapons_memory parity: same bytes, same result (covers both the
        string armory fields and the D-PLAYERINFO-11 loadout slot/masks). */
-    {
+    if (have_retail) {
         FILE *fp = fopen(path, "rb");
         if (!fp) {
             fprintf(stderr, "FAIL: could not reopen fixture for memory parity\n");
@@ -705,6 +713,9 @@ int main(void) {
         printf("nested-action refusal + delay alias OK\n");
     }
 
+    def_free_weapons(&wf);
+    if (!have_retail)
+        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def (the shipped weapon table)");
     printf("PASS: weapon parsing OK\n");
     return 0;
 }

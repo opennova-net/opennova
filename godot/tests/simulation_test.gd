@@ -1010,6 +1010,9 @@ func test_aim_overlay_exports_the_retail_authored_pitch_sign() -> void:
 
 
 func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# HUD ERROR is selected from two stance triplets. Air/water/mount overrides
 	# live in the body; this public seam pins the ordinary stance order and the
 	# settled-first-person +3 verdict. [orig: HUD_DrawCrosshair
@@ -1021,7 +1024,7 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+			RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	# A compact deterministic FSM is enough for the view toggle; the entity's
 	# equipped ADM index still resolves the exact M4 ERROR table loaded above.
@@ -1200,6 +1203,9 @@ func test_decoded_round_stance_uses_retail_animation_flags() -> void:
 
 
 func test_local_fire_exports_recoil_camera_and_hud_spread() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# Keep the world's built-in player ItemDef traits intact: the compact items.def
 	# fixture intentionally lacks retail's player template 105305, while recoil's
 	# source gate requires a person with an ItemDef. [orig: RoundData_SpawnRound
@@ -1211,7 +1217,7 @@ func test_local_fire_exports_recoil_camera_and_hud_spread() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+			RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
 	sim.set_local_player_weapon({
@@ -1550,6 +1556,9 @@ func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void
 
 
 func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# The listen-server loopback handler skips C2S 0x06 because retail local fire
 	# already appends/spawns synchronously. Pin that local action seam end-to-end:
 	# FSM fired -> RoundSim -> the organic effects_table row.
@@ -1570,7 +1579,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	sim.resolve_item_traits(item_db)
@@ -1644,6 +1653,9 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 
 
 func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	if _binoc_path().is_empty():
 		return
 	# Exact player report: the target rendered in a rotated UseGun seat must keep
@@ -1711,7 +1723,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+			RetailData.def_root()), OK)
 	assert_eq(sim.load_ammo_table(root, "ammo.def"), OK)
 	# Advance one authoritative frame so collision and the decoded presentation
 	# snapshot expose the same mounted body pose.
@@ -1812,6 +1824,9 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 
 
 func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	if _binoc_path().is_empty():
 		return
 	# Config 6 is the decisive per-config witness: the mounted body/neck stay on
@@ -1863,8 +1878,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	assert_gte(sim.resolve_collision_instances(item_db), 1,
 			"the mounted enemy owns authored posed COBJ collision")
 	var ammo_root := ResourceRoot.new()
-	assert_eq(ammo_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(ammo_root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_ammo_table(ammo_root, "ammo.def"), OK)
 
 	# Advance one authoritative frame so the mounted seat frame, collision pose,
@@ -2116,13 +2130,16 @@ func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
 
 
 func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 
 	assert_eq(sim.get_local_player_class(), 8, "spawned player exposes its rifleman class")
@@ -2161,13 +2178,16 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 
 
 func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
@@ -2206,13 +2226,16 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 
 
 func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 
 	assert_true(sim.apply_local_player_loadout([
@@ -2220,8 +2243,7 @@ func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
 		{"name": "WPN_colt45"},
 	], 8))
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var primary_index := weapons.find_weapon("WPN_M4AUTO")
 	assert_gte(primary_index, 0)
 	sim.set_local_player_weapon(weapons.get_weapon(primary_index), {})
@@ -2242,13 +2264,16 @@ func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
 
 
 func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_true(sim.apply_local_player_loadout([
 		{"name": "WPN_M4AUTO"},
@@ -2256,8 +2281,7 @@ func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -
 	], 8))
 
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var primary_index := weapons.find_weapon("WPN_M4AUTO")
 	var secondary_index := weapons.find_weapon("WPN_colt45")
 	assert_gte(primary_index, 0)
@@ -2371,6 +2395,9 @@ func test_restart_rebinds_baseline_player_to_own_adm() -> void:
 
 
 func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# MissionPresentation resolves per-entity ADMs once after the host player spawn. A
 	# joiner's local L and host-admitted remote players spawn later; they must still
 	# receive US01 rather than retaining the default E_STAND/soldier map. Otherwise
@@ -2398,12 +2425,10 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	assert_true(sim.spawn_local_player(Vector3(2, 0, 0), 0.0, 1))
 
 	var weapon_root := ResourceRoot.new()
-	assert_eq(weapon_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(weapon_root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(weapon_root, "weapon.def"), OK)
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	sim.set_local_player_weapon(
 			weapons.get_weapon(weapons.find_weapon("WPN_M4AUTO")), {})
 	for _tick in range(120):
@@ -2916,6 +2941,9 @@ end
 # Player_MountWeaponSlot @0x4dfa40; switch commits @0x543475/@0x543539;
 # Entity_DetachFromVehicle restore @0x43565f]
 func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# Retail suppresses the parent model only after THIS parent's MountSlot is
 	# EquippedSlot in first person. Pre-commit attach, third person, and detach
 	# render it normally. [orig: Entity_RenderVehicleModel @0x4407d0;
@@ -2940,12 +2968,11 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+			RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal: Dictionary = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
 	var mounted: Dictionary = weapons.get_weapon(
@@ -2996,6 +3023,9 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 
 
 func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# The emplacement carries a deterministic HEAT_GLOW collision track: the
 	# mount fixture with its LOD0 rows replaced by one register-driven slide of
 	# part 1 (0..4 wu on CTRL 0 = HEAT_GLOW). The scoped parent visual/collision
@@ -3042,13 +3072,11 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal: Dictionary = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
 	var mounted: Dictionary = weapons.get_weapon(
@@ -3123,6 +3151,9 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 
 
 func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# mount's authored PANM binds its turret and barrel to the semantic
 	# EWEAP_GUNYAW/EWEAP_GUNPITCH registers. A mounted local player's live look
 	# must pose those parts in authoritative model space, not only turn the camera.
@@ -3160,13 +3191,11 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	assert_gt(absf(wrapf(sim.get_local_player_yaw_deg(), -180.0, 180.0)),
 			90.0, 'fixture starts far from the gun yaw')
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal: Dictionary = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
 	var mounted: Dictionary = weapons.get_weapon(
@@ -3259,6 +3288,9 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 
 
 func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var gun := md.add_entity(
@@ -3277,15 +3309,14 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+			RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_true(sim.apply_local_player_loadout([
 		{"name": "WPN_M4AUTO"},
 		{"name": "WPN_M4"},
 	], 1))
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal_idx := weapons.find_weapon("WPN_M4AUTO")
 	var mounted_idx := weapons.find_weapon("WPN_AVENGER")
 	assert_gte(personal_idx, 0)
@@ -3432,6 +3463,9 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 
 
 func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var first_gun := md.add_entity(MissionData.KIND_ITEM, 101294,
@@ -3461,11 +3495,10 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+			RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal: Dictionary = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
 	var first_mount: Dictionary = weapons.get_weapon(
@@ -3566,6 +3599,9 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 
 
 func test_death_during_usegun_draw_restores_personal_weapon() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	assert_false(md.add_entity(MissionData.KIND_ITEM, 101294,
@@ -3580,11 +3616,10 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
-			ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+			RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var mounted_def: Dictionary = weapons.get_weapon(
 			weapons.find_weapon("WPN_AVENGER"))
 	var personal_def: Dictionary = weapons.get_weapon(

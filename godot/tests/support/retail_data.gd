@@ -38,6 +38,39 @@ static func fixture_pending_text(rel: String) -> String:
 	return "OPENNOVA_JO_ASSETS/fixtures/%s (the reference fixture set) is required" % rel
 
 
+const DEF_RELS := ["def/weapon.def", "def/ammo.def", "def/hudpos.def"]
+static var _def_root_cache := ""
+
+
+## A flat resource root carrying the shipped weapon.def / ammo.def / hudpos.def
+## from the reference fixture set beside the authored fixtures/def/items.def,
+## staged once per run under the cache dir (ResourceRoot indexes flat names and
+## rejects user://). "" when the set is absent; a test then pends with
+## fixture_pending_text("def/weapon.def") or skips its script.
+static func def_root() -> String:
+	if not _def_root_cache.is_empty() and DirAccess.dir_exists_absolute(_def_root_cache):
+		return _def_root_cache
+	var sources := {
+		"items.def": ProjectSettings.globalize_path("res://../fixtures/def/items.def"),
+	}
+	for rel in DEF_RELS:
+		var path := fixture(rel)
+		if path.is_empty():
+			return ""
+		sources[rel.get_file()] = path
+	var dir := OS.get_cache_dir().path_join("opennova_retail_defs")
+	if DirAccess.make_dir_recursive_absolute(dir) != OK:
+		return ""
+	for name in sources:
+		var target := dir.path_join(name)
+		if FileAccess.file_exists(target):
+			DirAccess.remove_absolute(target)
+		if DirAccess.copy_absolute(sources[name], target) != OK:
+			return ""
+	_def_root_cache = dir
+	return dir
+
+
 ## The expansion names the install carries (the engine's own enumeration of
 ## <install>/expansion), sorted; empty without an install.
 static func expansions() -> PackedStringArray:

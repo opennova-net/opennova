@@ -22,6 +22,9 @@ static func _options_with_placer(placer: MissionObjectPlacer) -> MissionSetupOpt
 
 
 func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# The mission loadout chunk -> the sim spawn kit, end to end through the
 	# engine's SP-vs-net promotion (world/player_loadout.h, S7b): a REAL mission
 	# document's chunk strings stash at load and promote as ints once the weapon
@@ -34,8 +37,7 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(m))
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	var kit: Array = sim.get_local_player_loadout()
 	assert_eq(kit.size(), 1, "one mission row promotes to one kit row")
@@ -358,6 +360,9 @@ func test_transport_still_works_for_a_local_runtime() -> void:
 
 
 func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# Joiner S2C tag-2 descriptors append to the visual RoundSim's fired queue
 	# and may carry a flying throwable TrcrID. MissionPresentation must own both
 	# consumers on the joiner just as it does on the host. A pre-connected sim
@@ -387,8 +392,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	assert_eq(throwable_stats.live, 0)
 
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(rt.get_sim().load_ammo_table(root, "ammo.def"), OK)
 	for _frame in range(64):
 		assert_gte(rt.get_sim().debug_spawn_round(
@@ -621,6 +625,9 @@ func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() ->
 
 
 func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_expiry() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# The scene-node present stays batched, but a round-bound effects_table move
 	# group is part of the fixed-tick particle simulation. A four-second
 	# flashbang exercises the same attached-effect path as the smoke grenade in
@@ -636,7 +643,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	catchup_options.effect_anchors = anchor_mount
 	rt.setup(w.mission, w.container, catchup_options)
 	var def_root := ResourceRoot.new()
-	def_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def"))
+	def_root.set_root_dir(RetailData.def_root())
 	assert_eq(rt.get_sim().load_ammo_table(def_root, "ammo.def"), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(

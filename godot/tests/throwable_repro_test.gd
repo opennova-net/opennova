@@ -11,7 +11,6 @@ extends GutTest
 #    onto a later shot,
 #  - the thrown grenade flies as its TrcrID item and dies by fuse, never by
 #    ground contact.
-const DEF_FIXTURES := "res://../fixtures/def"
 
 var _sim: Simulation = null
 var _db: WeaponDatabase = null
@@ -25,6 +24,12 @@ var _terrain_root := ""
 
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
 # assets it names; one root per test file, removed at the end.
+func should_skip_script():
+	if RetailData.def_root().is_empty():
+		return RetailData.fixture_pending_text("def/weapon.def")
+	return false
+
+
 func _tmap_trn() -> String:
 	if _terrain_root.is_empty():
 		_terrain_root = TestFs.stage_terrain_root("throwable")
@@ -40,8 +45,8 @@ func after_all() -> void:
 func before_each() -> void:
 	_reinstall_pending = ""
 	_reinstall_ticks = 0
-	var def_root := ProjectSettings.globalize_path(DEF_FIXTURES)
-	assert_true(DirAccess.dir_exists_absolute(def_root), "committed def fixtures exist")
+	var def_root := RetailData.def_root()
+	assert_true(DirAccess.dir_exists_absolute(def_root), "the shipped def tables are staged")
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	_sim = Simulation.new()

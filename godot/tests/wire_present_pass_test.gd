@@ -20,6 +20,12 @@ const TYPE_UNRESOLVED_B := 666
 static var _flat_dir := ""
 
 
+func should_skip_script():
+	if RetailData.def_root().is_empty():
+		return RetailData.fixture_pending_text("def/weapon.def")
+	return false
+
+
 func before_all() -> void:
 	# One flat resource root per run: ResourceRoot indexes flat filenames
 	# only (and refuses user://), so committed fixtures are copied into the OS
@@ -29,8 +35,6 @@ func before_all() -> void:
 	DirAccess.make_dir_recursive_absolute(_flat_dir)
 	var copies := {
 		"res://../fixtures/def/items.def": "items.def",
-		"res://../fixtures/def/weapon.def": "weapon.def",
-		"res://../fixtures/def/ammo.def": "ammo.def",
 		"res://../fixtures/threedi/synth/pump.3di": "pump.3di",
 		"res://../fixtures/threedi/synth/armory.3di": "armory.3di",
 		"res://../fixtures/threedi/synth/shed.3di": "shed.3di",
@@ -39,6 +43,10 @@ func before_all() -> void:
 		"res://../fixtures/anim/idle.bad": "idle.bad",
 		"res://../fixtures/anim/walk.bad": "walk.bad",
 	}
+	# The shipped weapon.def (its first row's gfx3 is the held-weapon witness)
+	# and ammo.def come from the reference fixture set (should_skip_script).
+	copies[RetailData.fixture("def/weapon.def")] = "weapon.def"
+	copies[RetailData.fixture("def/ammo.def")] = "ammo.def"
 	for src in copies.keys():
 		var err := DirAccess.copy_absolute(
 				ProjectSettings.globalize_path(src), _flat_dir + "/" + copies[src])

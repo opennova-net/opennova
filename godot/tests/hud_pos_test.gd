@@ -1,14 +1,19 @@
 extends GutTest
 
 # Exercises the HudPos GDExtension binding over engine/formats/def hudpos.def parsing.
-# Values mirror tests/def/def_parse_hudpos_test.cpp against fixtures/def/hudpos.def.
+# Values mirror tests/def/def_parse_hudpos_test.cpp against the shipped hudpos.def
+# from the reference fixture set (the whole script skips without it).
 
-const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"
+
+func should_skip_script():
+	if RetailData.def_root().is_empty():
+		return RetailData.fixture_pending_text("def/hudpos.def")
+	return false
 
 
 func _load() -> HudPos:
 	var hud := HudPos.new()
-	var abs := ProjectSettings.globalize_path(HUDPOS_PATH)
+	var abs := RetailData.fixture("def/hudpos.def")
 	var err := hud.load(abs)
 	assert_eq(err, OK, "HudPos.load should parse the hudpos.def fixture.")
 	return hud
