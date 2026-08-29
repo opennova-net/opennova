@@ -124,6 +124,11 @@ public:
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
 	PackedStringArray list_expansions(const String &path) const;
+	// The expansion's own EXP_NAME / EXP_DESC (with the scan's fallbacks) out of
+	// <name>.bin under <path>/expansion/<name>/ — engine vfs_expansion_info, which
+	// resolves the .bin independently of the mounted stack.
+	String expansion_name(const String &path, const String &expansion) const;
+	String expansion_description(const String &path, const String &expansion) const;
 	String get_root_dir() const;
 	String get_last_error() const;
 	void clear();

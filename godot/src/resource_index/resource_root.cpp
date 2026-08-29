@@ -39,6 +39,9 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
 			&ResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &ResourceRoot::list_expansions);
+	ClassDB::bind_method(D_METHOD("expansion_name", "path", "expansion"), &ResourceRoot::expansion_name);
+	ClassDB::bind_method(D_METHOD("expansion_description", "path", "expansion"),
+			&ResourceRoot::expansion_description);
 	ClassDB::bind_method(D_METHOD("get_expansion"), &ResourceRoot::get_expansion);
 	ClassDB::bind_method(D_METHOD("is_runtime_mount"), &ResourceRoot::is_runtime_mount);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &ResourceRoot::get_root_dir);
@@ -243,6 +246,24 @@ PackedStringArray ResourceRoot::list_expansions(const String &path) const {
 		out.push_back(String(name.c_str()));
 	}
 	return out;
+}
+
+String ResourceRoot::expansion_name(const String &path, const String &expansion) const {
+	const String clean = normalize_dir(path);
+	if (clean.is_empty()) {
+		return String();
+	}
+	return String::utf8(opennova::vfs_expansion_info(
+			clean.utf8().get_data(), expansion.utf8().get_data()).name.c_str());
+}
+
+String ResourceRoot::expansion_description(const String &path, const String &expansion) const {
+	const String clean = normalize_dir(path);
+	if (clean.is_empty()) {
+		return String();
+	}
+	return String::utf8(opennova::vfs_expansion_info(
+			clean.utf8().get_data(), expansion.utf8().get_data()).description.c_str());
 }
 
 String ResourceRoot::get_root_dir() const {

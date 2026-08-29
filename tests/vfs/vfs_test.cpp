@@ -1,6 +1,7 @@
 // Tests for the engine-faithful VFS: mount precedence, mount_game expansion override, and
 // SCR decode-on-read. Fixtures are synthesized in a temp dir (no game data needed).
 #include <algorithm>
+#include <formats/rtxt/rtxt.h>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -18,6 +19,9 @@ using opennova::Vfs;
 using opennova::VfsLookupPolicy;
 using opennova::VfsSource;
 using opennova::vfs_expansion_version_checksum;
+using opennova::ExpansionInfo;
+using opennova::vfs_expansion_info;
+namespace rtxt = opennova::rtxt;
 using opennova::vfs_version_crc;
 
 // SCR keys (mirror engine/formats/scr/scr.h; vfs_test doesn't link opennova_scr).
@@ -520,6 +524,50 @@ static int test_expansion_version_checksum() {
     return 1;
 }
 
+// The expansion scan's name/description read [orig: Expansion_ScanAndRegister @ 0x4a43d0]:
+// [exp_info] EXP_NAME / EXP_DESC out of <n>.bin, loose first, then <n>L.pff, then <n>.pff,
+// each key with its own fallback.
+static std::string exp_info_bin(const char *name, const char *desc) {
+    rtxt::File file;
+    file.sections.push_back({"exp_info", 0});
+    if (name) { file.entries.push_back({"EXP_NAME", name, {}, 0}); ++file.sections[0].string_count; }
+    if (desc) { file.entries.push_back({"EXP_DESC", desc, {}, 0}); ++file.sections[0].string_count; }
+    std::vector<uint8_t> out;
+    std::string error;
+    if (!rtxt::write(file, out, error)) return std::string();
+    return std::string(out.begin(), out.end());
+}
+
+static int test_expansion_info() {
+    fs::path root = fresh_dir("exp_info_game");
+    fs::path exp = root / "expansion" / "jox01";
+    fs::create_directories(exp);
+
+    ExpansionInfo none = vfs_expansion_info(root.string(), "jox01");
+    CHECK(none.name == "Unnamed Expansion" && none.description == "This expansion lacks a description.",
+          "no <n>.bin at all -> both fallbacks [orig: @ 0x4a4670 / @ 0x4a46b2]");
+
+    write_pff1(exp / "jox01.pff", "jox01.bin", exp_info_bin("Base Name", nullptr));
+    ExpansionInfo base = vfs_expansion_info(root.string(), "jox01");
+    CHECK(base.name == "Base Name" && base.description == "This expansion lacks a description.",
+          "the base archive serves the .bin; a missing EXP_DESC falls back alone [orig: @ 0x4a4648]");
+
+    write_pff1(exp / "jox01L.pff", "jox01.bin", exp_info_bin(nullptr, "L description"));
+    ExpansionInfo l = vfs_expansion_info(root.string(), "jox01");
+    CHECK(l.name == "Unnamed Expansion" && l.description == "L description",
+          "the L archive wins over the base one (the last primary installed) [orig: @ 0x4a450a]; "
+          "a missing EXP_NAME falls back alone [orig: @ 0x4a45c2]");
+
+    write_loose(exp / "jox01.bin", exp_info_bin("Loose Name", "Loose description"));
+    ExpansionInfo loose = vfs_expansion_info(root.string(), "jox01");
+    CHECK(loose.name == "Loose Name" && loose.description == "Loose description",
+          "a loose <n>.bin beside the archives wins (the scan's search path is loose-first) [orig: @ 0x4a446a]");
+
+    CHECK(vfs_expansion_info(root.string(), "").name == "Unnamed Expansion",
+          "an empty expansion name probes nothing");
+    return 1;
+}
+
 int main() {
     std::error_code ec;
     g_root = (fs::temp_directory_path(ec) / "opennova_vfs_test").string();
@@ -542,6 +590,7 @@ int main() {
     RUN_TEST(test_vfs_scr_policy);
     RUN_TEST(test_list_files);
     RUN_TEST(test_expansion_version_checksum);
+    RUN_TEST(test_expansion_info);
 
     fs::remove_all(g_root, ec);
     printf("\n%d passed, %d failed\n", passed, failed);
