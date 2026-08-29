@@ -33,7 +33,7 @@ func has_screen() -> bool:
 func begin(winner: int, sim: Simulation) -> void:
 	if _round_ended:
 		return
-	if sim != null and bool(sim.get_round_outcome_debug().get("mp_session", false)):
+	if sim != null and sim.is_mp_session():
 		return
 	_round_ended = true
 	_winner = winner

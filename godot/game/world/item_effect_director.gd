@@ -211,7 +211,7 @@ func reattach() -> void:
 	var effect_world: EffectWorld = _world.get_effect_world()
 	if effect_world == null:
 		return
-	var item_db = _resolve_item_db()
+	var item_db := _resolve_item_db()
 	if item_db == null:
 		return
 	var attached := 0

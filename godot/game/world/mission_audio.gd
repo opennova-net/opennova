@@ -198,7 +198,7 @@ func setup(mission: MissionData, mission_name: String, container: Node3D) -> Sta
 	# set name(s) it plays; loaded only if present.
 	var dbf_name := mission_name.get_file().get_basename() + ".DBF"
 	if _resource_root.has_file(dbf_name):
-		var dbf = DbfData.new()
+		var dbf := DbfData.new()
 		if dbf.open_from_resource_root(_resource_root, dbf_name) == OK:
 			_dbf = dbf
 			_stats.dialogs = dbf.get_dialog_count()
@@ -718,7 +718,7 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 
 
 func _resolve_candidate_stream(descriptor: Dictionary) -> AudioStreamWAV:
-	var injected = descriptor.get("stream")
+	var injected: Variant = descriptor.get("stream")
 	if injected is AudioStreamWAV:
 		return injected
 	if _bank == null:

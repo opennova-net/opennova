@@ -320,7 +320,8 @@ func _prune_sessions(now: int) -> void:
 			_sessions.erase(id)
 		return
 	var ids := _sessions.keys()
-	ids.sort_custom(func(a, b): return int(_sessions[a]["last_seen_ms"]) < int(_sessions[b]["last_seen_ms"]))
+	ids.sort_custom(func(a: String, b: String) -> bool:
+		return int(_sessions[a]["last_seen_ms"]) < int(_sessions[b]["last_seen_ms"]))
 	while _sessions.size() > MAX_SESSIONS:
 		_sessions.erase(ids.pop_front())
 

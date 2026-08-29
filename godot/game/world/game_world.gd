@@ -235,8 +235,8 @@ func _init() -> void:
 	var ref: WeakRef = weakref(self)
 	var user_point_sources := func() -> Array:
 		return _placer.get_static_user_point_sources() if _placer != null else []
-	var effect_world_getter := func():
-		var world = ref.get_ref()
+	var effect_world_getter := func() -> EffectWorld:
+		var world: GameWorld = ref.get_ref()
 		return world.get_effect_world() if world != null else null
 	_debug_views.setup(self, user_point_sources, effect_world_getter)
 	add_child(_debug_views)
@@ -1056,8 +1056,9 @@ func _load_terrain(trn_path: String) -> bool:
 	_terrain_data = data
 	_terrain.terrain_data = data
 	if _slot_shadow != null:
-		# The shadow anchor march probes this terrain (retail:
-		# Terrain_GetHeightAtPosition @0x606720 in RenderSlot_UpdateEntityLight).
+		# The shadow anchor march probes this terrain through the engine's
+		# Terrain_GetHeightAtPosition port (the cite lives with the native
+		# SlotShadow planner, godot/src/env/slot_shadow.cpp).
 		_slot_shadow.set_terrain_data(data)
 	_terrain.build()
 	if _water != null:
@@ -1259,7 +1260,7 @@ var _frame_camera_pos := Vector3()
 # quirk, bisected 2026-08-09); the Variant carries the camera transform.
 # Several GUT files still construct GameWorld.new() without autofree, so the
 # leak is not pinned to one test.
-var _frame_camera_xform = Transform3D()
+var _frame_camera_xform := Transform3D()
 var _frame_delta := 0.0
 var _frame_probe_enabled := false
 var _frame_stats_on := false
@@ -2392,7 +2393,7 @@ func _route_mission_effects(effects: Array) -> void:
 			# outMillis/off_849934 after resolving the entity grid cell.]
 			if _effect_world != null and _runtime != null:
 				var ssn := int(eff.get("b", 0))
-				var pos = _runtime.entity_position_for_ssn(ssn)
+				var pos: Variant = _runtime.entity_position_for_ssn(ssn)
 				if pos != null:
 					var orientation := Vector3.UP
 					if _terrain_data != null:
@@ -2687,7 +2688,7 @@ func _republish_network_environment() -> void:
 # + gamelocl.LWF, resolve each marker to a sound set by name, and spawn looping 3D
 # voices. Reuses the placer's item database for the item_id -> soundloop_1..4 lookup.
 func _start_mission_audio(mission: MissionData, bms_name: String) -> void:
-	var item_db = _placer.get_item_db() if _placer != null else null
+	var item_db: ItemDatabase = _placer.get_item_db() if _placer != null else null
 	_mission_audio = MissionAudio.new(_resource_root, item_db)
 	# Sound occlusion runs LOS through the sim's collision world + terrain
 	# [orig: Sound_ApplyOcclusionDistance @ 0x529970]; hosts without a sim mix

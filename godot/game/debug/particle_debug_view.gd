@@ -57,10 +57,11 @@ func refresh_now() -> void:
 	if not _effect_world_source.is_valid():
 		_hide_stale_labels({})
 		return
-	var world = _effect_world_source.call()
-	if world == null or not is_instance_valid(world):
+	var world_value: Variant = _effect_world_source.call()
+	if world_value == null or not is_instance_valid(world_value):
 		_hide_stale_labels({})
 		return
+	var world: EffectWorld = world_value
 	var seen := {}
 	var segments: Array = []
 	for group_v in world.get_debug_group_report():

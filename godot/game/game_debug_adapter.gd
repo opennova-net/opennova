@@ -53,8 +53,8 @@ func get_shell_seams() -> GameShellSeams:
 ## JSON-facing game boundary; the underlying runtime contracts stay typed.
 func get_mcp_game_state() -> Variant:
 	var world := _current_world()
-	var runtime: Variant = _current_runtime()
-	var sim: Variant = runtime.get_sim() if runtime != null else null
+	var runtime := _current_runtime()
+	var sim: Simulation = runtime.get_sim() if runtime != null else null
 	var runtime_state := runtime_status()
 	if sim != null:
 		runtime_state["entity_count"] = int(sim.get_entity_count())
@@ -93,7 +93,7 @@ func get_mcp_game_state() -> Variant:
 ## The in-match session facts (ADR 0042: Simulation.session_state()/
 ## session_role() re-export the portable inmatch::Session — the authority,
 ## never the transport flags), as transport labels.
-func _session_facts(sim: Variant) -> Dictionary:
+func _session_facts(sim: Simulation) -> Dictionary:
 	if sim == null:
 		return {}
 	return {
@@ -217,8 +217,8 @@ func capture_mcp_render_bundle(
 ## row's ai_index. JSON conversion happens here, at the MCP boundary, via the
 ## records' own to_json_value() — the wire shape is the legacy key set.
 func get_mcp_game_entities(offset: int, limit: int) -> Variant:
-	var runtime: Variant = _current_runtime()
-	var sim: Variant = runtime.get_sim() if runtime != null else null
+	var runtime := _current_runtime()
+	var sim: Simulation = runtime.get_sim() if runtime != null else null
 	if sim == null:
 		return {}
 	var rows: Array = sim.entity_directory()
@@ -241,8 +241,8 @@ func get_mcp_game_entities(offset: int, limit: int) -> Variant:
 
 
 func get_mcp_game_entity(index: int) -> Variant:
-	var runtime: Variant = _current_runtime()
-	var sim: Variant = runtime.get_sim() if runtime != null else null
+	var runtime := _current_runtime()
+	var sim: Simulation = runtime.get_sim() if runtime != null else null
 	if index < 0 or sim == null:
 		return {}
 	var rows: Array = sim.entity_directory()
@@ -338,8 +338,7 @@ func mcp_game_menu(args: Dictionary) -> Variant:
 ## session's own refusal for multiplayer roles (the network pump must keep
 ## running); the adapter adds no shell-side role gate.
 func mcp_game_control(action: String) -> Error:
-	var world := _current_world()
-	var runtime: Variant = _current_runtime()
+	var runtime := _current_runtime()
 	match action:
 		"pause":
 			# The engine refuses net-role pauses (inmatch::Session::pause is
@@ -373,12 +372,15 @@ func mcp_game_control(action: String) -> Error:
 			if armory_err != OK:
 				return armory_err
 		"return_to_menu":
-			if world == null or not world.is_loaded() \
-					or bool(_seams.world_loading_source.call()):
+			# The shell's one gated return leg (MainGame.return_to_menu: busy
+			# while a load is pending, unavailable without a loaded world).
+			if not _seams.return_to_menu.is_valid():
 				return ERR_UNAVAILABLE
-			_seams.return_to_menu_action.call()
+			var menu_err: Error = _seams.return_to_menu.call()
+			if menu_err != OK:
+				return menu_err
 		"quit":
-			call_deferred("_deferred_quit")
+			_deferred_quit.call_deferred()
 		_:
 			return ERR_INVALID_PARAMETER
 	return OK
@@ -431,13 +433,13 @@ func has_debug_authority() -> bool:
 	# Authority is the session-role fact: ROLE_JOINER is the one
 	# non-authoritative role; every other session role owns the world.
 	var world := _current_world()
-	var sim: Variant = world.get_sim() if world != null else null
+	var sim: Simulation = world.get_sim() if world != null else null
 	return sim != null and int(sim.session_role()) != Simulation.ROLE_JOINER
 
 
 func runtime_status() -> Dictionary:
-	var runtime: Variant = _current_runtime()
-	var sim: Variant = runtime.get_sim() if runtime != null else null
+	var runtime := _current_runtime()
+	var sim: Simulation = runtime.get_sim() if runtime != null else null
 	if runtime == null or sim == null:
 		return {
 			"label": "No mission",
@@ -470,7 +472,7 @@ func runtime_status() -> Dictionary:
 	}
 
 
-func _network_state(sim: Variant) -> Dictionary:
+func _network_state(sim: Simulation) -> Dictionary:
 	if sim == null:
 		return {"role": "none"}
 	if int(sim.session_role()) == Simulation.ROLE_JOINER:
@@ -514,8 +516,13 @@ func _current_world() -> GameWorld:
 	return value as GameWorld
 
 
-func _current_runtime() -> Variant:
-	return _seams.runtime_source.call()
+func _current_runtime() -> MissionPresentation:
+	if _seams == null or not _seams.runtime_source.is_valid():
+		return null
+	var value: Variant = _seams.runtime_source.call()
+	if value is MissionPresentation and is_instance_valid(value):
+		return value
+	return null
 
 
 func _is_world_loading() -> bool:

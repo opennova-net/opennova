@@ -132,8 +132,8 @@ func tick() -> void:
 	var sim: Simulation = _world.get_sim()
 	if sim == null:
 		return
-	var state: Dictionary = sim.get_end_round_state()
-	if not bool(state.get("header_known", false)):
+	var state: EndRoundState = sim.get_end_round_state()
+	if not state.is_header_known():
 		if _header_seen:
 			reset()
 		return
@@ -141,7 +141,7 @@ func tick() -> void:
 		_header_seen = true
 		_header_edge_msec = Time.get_ticks_msec()
 		_stat_opened = false
-		_team_mode = bool(state.get("team_mode", false))
+		_team_mode = state.is_team_mode()
 	if not _stat_opened:
 		# Only the PRE-STAT phase tears the deploy/armory scene down (every
 		# pass) and draws the overlay; once the STAT phase latches, retail's
@@ -153,7 +153,7 @@ func tick() -> void:
 		#  and once more on the open pass @0x5b862a]
 		_tear_down_screens()
 		_apply_overlay(sim)
-		if bool(state.get("board_known", false)) \
+		if state.is_board_known() \
 				and Time.get_ticks_msec() - _header_edge_msec \
 						>= Simulation.end_round_stat_screen_delay_msec():
 			_tear_down_screens()

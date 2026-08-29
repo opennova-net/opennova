@@ -306,7 +306,7 @@ func _place_viewmodel_at_camera() -> void:
 	# same seam.
 	# [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Bone(+0xF4) + the interp
 	#  bias; the interp CNetPlayerInterp_Setup @0x4df36e runs +0x10C -> +0x124]
-	var sim = _world.get_sim() if _world != null else null
+	var sim: Simulation = _world.get_sim() if _world != null else null
 	var view_offset := _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS)
 	if sim != null:
 		# Sampling the viewport size is this rig's device work; the
@@ -344,7 +344,7 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 		weapon_view: PlayerWeaponView) -> void:
 	# setup()'s world contract already includes get_sim; LocalPlayerPresenter and its
 	# value-only harness doubles both use that same explicit seam.
-	var sim = _world.get_sim() if _world != null else null
+	var sim: Simulation = _world.get_sim() if _world != null else null
 	for visual in _vm_parts:
 		if not is_instance_valid(visual):
 			continue

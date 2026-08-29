@@ -78,10 +78,12 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	_end_leg(FrameStats.WORLD_ENV_NODES, leg_start)
 	# Terrain samples the viewport camera directly and tracks the visible
 	# terrain bounds the water leg's g_WaterActive test reads, so it runs
-	# first (retail: terrain_setup_view_and_lighting precedes the reflection
-	# prerender, and the water pass draws after the terrain pass); the water
-	# noise the terrain binds is the previous frame's, exactly as retail's
-	# water pass regenerates it after the terrain draw.
+	# first: in the original frame terrain_setup_view_and_lighting precedes
+	# the reflection prerender and the water pass draws after the terrain
+	# pass (the witnessed order is cited at the engine's render frame,
+	# docs/render/render-order-re.md); the water noise the terrain binds is
+	# the previous frame's, exactly as the original water pass regenerates it
+	# after the terrain draw.
 	leg_start = _begin_leg()
 	_world.render_terrain_frame()
 	_end_leg(FrameStats.WORLD_TERRAIN, leg_start)
