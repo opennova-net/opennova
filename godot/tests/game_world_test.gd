@@ -994,18 +994,24 @@ func test_wire_header_mission_uses_host_metadata_without_a_local_bms_body() -> v
 
 func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	Strings.clear()
+	# The retail weapon.mnu, weapon.def and string tables come from the
+	# reference fixture set (docs/asset-gated-tests.md).
+	var staged := {
+		"mnu/jo_weapon.mnu": "weapon.mnu",
+		"def/weapon.def": "weapon.def",
+		"rtxt/menutxt.bin": "menutxt.BIN",
+		"rtxt/gametext.bin": "gametext.bin",
+	}
+	for rel in staged:
+		if RetailData.fixture(rel).is_empty():
+			pending(RetailData.fixture_pending_text(rel))
+			return
 	var root_dir := _stage_minimal_fixture("first_armory_open")
-	for files in [
-		["res://../fixtures/mnu/jo_weapon.mnu", "weapon.mnu"],
-		["res://../fixtures/def/weapon.def", "weapon.def"],
-		["res://../fixtures/rtxt/menutxt.bin", "menutxt.BIN"],
-		["res://../fixtures/rtxt/gametext.bin", "gametext.bin"],
-	]:
-		var target := root_dir.path_join(files[1])
+	for rel in staged:
+		var target := root_dir.path_join(staged[rel])
 		if FileAccess.file_exists(target):
 			assert_eq(DirAccess.remove_absolute(target), OK)
-		assert_eq(DirAccess.copy_absolute(
-				ProjectSettings.globalize_path(files[0]), target), OK)
+		assert_eq(DirAccess.copy_absolute(RetailData.fixture(rel), target), OK)
 
 	var world := _make_world()
 	add_child_autofree(world)

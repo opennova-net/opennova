@@ -40,6 +40,15 @@ const LOCALRES_FILES := ["main.mnu", "menu_style.mns", "items.def"]
 const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)
 const SPAWN_ZONE_TYPE := 1359  # pool-1 fixture; ItemDef supplies SpawnPoint
 
+# The retail death.mnu and the string tables it resolves come from the
+# reference fixture set (docs/asset-gated-tests.md); the whole script skips
+# without it.
+const STAGED_FIXTURES := {
+	"mnu/jo_death.mnu": "death.mnu",
+	"rtxt/menutxt.bin": "menutxt.BIN",
+	"rtxt/gametext.bin": "gametext.bin",
+}
+
 var _saved_config := PackedByteArray()
 var _had_config := false
 var _temp_dir := ""
@@ -69,9 +78,15 @@ func before_each() -> void:
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
 	if not DirAccess.dir_exists_absolute(dir):
 		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
-	_copy_fixture("res://../fixtures/mnu/jo_death.mnu", dir.path_join("death.mnu"))
-	_copy_fixture("res://../fixtures/rtxt/menutxt.bin", dir.path_join("menutxt.BIN"))
-	_copy_fixture("res://../fixtures/rtxt/gametext.bin", dir.path_join("gametext.bin"))
+	for rel in STAGED_FIXTURES:
+		_copy_fixture(RetailData.fixture(rel), dir.path_join(STAGED_FIXTURES[rel]))
+
+
+func should_skip_script():
+	for rel in STAGED_FIXTURES:
+		if RetailData.fixture(rel).is_empty():
+			return RetailData.fixture_pending_text(rel)
+	return false
 
 
 func after_each() -> void:
@@ -107,7 +122,7 @@ func after_each() -> void:
 
 func after_all() -> void:
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	for name in ["death.mnu", "menutxt.BIN", "gametext.bin"]:
+	for name in STAGED_FIXTURES.values():
 		var path := dir.path_join(name)
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(path)

@@ -108,8 +108,11 @@ def check_gut_log(path: Path, roots: list[str]) -> list[str]:
     text = re.sub(r"\x1b\[[0-9;]*m", "", text)
     vars_ = [ROOT_VARS[r] for r in roots]
     gaps = []
+    # A gated GUT test pends per function ("[Pending]") or skips its whole
+    # script from should_skip_script() ("[Script skipped]"); either line names
+    # the root it needs (RetailData.fixture_pending_text).
     for line in text.splitlines():
-        if "[Pending]" in line and any(v in line for v in vars_):
+        if ("[Pending]" in line or "[Script skipped]" in line) and any(v in line for v in vars_):
             gaps.append(line.strip())
     return sorted(set(gaps))
 

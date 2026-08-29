@@ -11,7 +11,18 @@ extends GutTest
 # useitem key, action 177, on entity Flags 0x400000 @0x4e0b4d) lives in main_game +
 # the collision resolver (ctest collision_test) — here the screen itself is the unit.
 
-const WEAPON_FIXTURE := "res://../fixtures/def/weapon.def"
+# The retail weapon.def, weapon.mnu and gametext.bin come from the reference
+# fixture set (docs/asset-gated-tests.md); the whole script skips without it.
+const WEAPON_FIXTURE_REL := "def/weapon.def"
+const WEAPON_MNU_REL := "mnu/jo_weapon.mnu"
+const GAMETEXT_REL := "rtxt/gametext.bin"
+
+
+func should_skip_script():
+	for rel in [WEAPON_FIXTURE_REL, WEAPON_MNU_REL, GAMETEXT_REL]:
+		if RetailData.fixture(rel).is_empty():
+			return RetailData.fixture_pending_text(rel)
+	return false
 
 
 func before_each() -> void:
@@ -24,8 +35,8 @@ func after_all() -> void:
 
 func _load_weapons() -> WeaponDatabase:
 	var wdb := WeaponDatabase.new()
-	var path := ProjectSettings.globalize_path(WEAPON_FIXTURE)
-	assert_eq(wdb.load(path), OK, "weapon.def fixture loads")
+	var path := RetailData.fixture(WEAPON_FIXTURE_REL)
+	assert_eq(wdb.load(path), OK, "the reference weapon.def loads")
 	return wdb
 
 
@@ -34,7 +45,7 @@ func _load_weapons_with_weight(weapon_name: String, weight: float) -> WeaponData
 	# reaching into ArmoryMenuCompanion's private row cache. Restrict the substitution to
 	# the named weapon's top-level block so identically named properties elsewhere
 	# in the production-sized fixture remain untouched.
-	var source := FileAccess.get_file_as_string(WEAPON_FIXTURE)
+	var source := FileAccess.get_file_as_string(RetailData.fixture(WEAPON_FIXTURE_REL))
 	var block_start := source.find('weapon "%s"' % weapon_name)
 	assert_gte(block_start, 0, "%s exists in the weapon.def fixture" % weapon_name)
 	var block_end := source.find("\nend", block_start)
@@ -117,7 +128,7 @@ func _items(driver: MenuDriver, name: String) -> Array:
 func test_weapon_labels_resolve_from_gametext_wepdes() -> void:
 	var t := RtxtStringFile.new()
 	assert_eq(t.load_from_byte_array(
-			FileAccess.get_file_as_bytes("res://../fixtures/rtxt/gametext.bin")), OK,
+			FileAccess.get_file_as_bytes(RetailData.fixture(GAMETEXT_REL))), OK,
 			"gametext.bin fixture loads")
 	Strings.register_table("gametext", t)
 	var expected := t.get_string_in_section("WepDes", "WEAP_SHORT_M4")
@@ -215,7 +226,7 @@ func test_populates_classes_slots_and_ammo() -> void:
 func test_ammo_rows_resolve_the_shipped_wepdes_labels() -> void:
 	var gametext := RtxtStringFile.new()
 	assert_eq(gametext.load_from_byte_array(
-			FileAccess.get_file_as_bytes("res://../fixtures/rtxt/gametext.bin")), OK,
+			FileAccess.get_file_as_bytes(RetailData.fixture(GAMETEXT_REL))), OK,
 			"the shipped GameText fixture loads")
 	Strings.register_table("gametext", gametext)
 
@@ -440,7 +451,7 @@ func test_degrades_without_weapon_def() -> void:
 func test_real_weapon_mnu_populates() -> void:
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(
-			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_weapon.mnu")), OK,
+			FileAccess.get_file_as_bytes(RetailData.fixture(WEAPON_MNU_REL))), OK,
 			"the shipped jo_weapon.mnu fixture loads")
 	var driver := MenuDriverFixture.driver_over(self, doc, "weapon.mnu", "WEAPON")
 
@@ -463,7 +474,7 @@ func test_real_weapon_mnu_populates() -> void:
 func test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open() -> void:
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(
-			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_weapon.mnu")), OK)
+			FileAccess.get_file_as_bytes(RetailData.fixture(WEAPON_MNU_REL))), OK)
 	var driver := MenuDriverFixture.driver_over(self, doc, "weapon.mnu", "WEAPON")
 
 	var companion := ArmoryMenuCompanion.new()

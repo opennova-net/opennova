@@ -46,7 +46,6 @@ authored file.
 | Files | Why they stay |
 |---|---|
 | `mnu/jo_*.mnu` (15), `mns/menu_style.mns` | the shipped JO menu screens and style: the menu compiler, the widget tests and the GUT shells pin retail widget ids and layouts |
-| `rtxt/gametext.bin`, `rtxt/menutxt.bin`, `rtxt/00tra.bin`, `rtxt/ash_g3d.bin` | the string tables the menus reference by retail string id; `00tra`/`ash_g3d` are the mission-text parity pair |
 | `def/weapon.def`, `def/ammo.def`, `def/hudpos.def` | the wire-visible weapon/ammo order (the weapon table bakes indices from it) and the HUD layout table |
 | `bms/ash_i5b.reference.bms` | the mission reference the BMS writer round-trips against |
 | `mus/jo_gamemus.bin`, `mus/jo_menumus.bin`, `mus/golden_jo_gamemus.mus.txt` | the music director scripts and their decoded golden |
@@ -131,5 +130,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 - `env/cloud01.pcx`, `env/cloud01b.pcx` — `tests/fixtures/minimal_env_gen.cpp`: the
   two sky maps `env/full_00.env` names (the bright square-rooted cloud field and the
   modulation layer centered at 128), 64x64 indexed PCX by our writer.
+- `rtxt/synth_*.bin` — `tests/fixtures/minimal_rtxt_gen.cpp` (beside the `assets/`
+  boot tables it also mints): the parity set `rtxt_synth_parity` grills — a
+  multi-section game table with position hints, a menu table, a mission sidecar
+  with cp1252 text and odd-length padding, and the one-entry case. The shipped
+  string tables are read from the reference tree by the gated
+  `rtxt_jo_install_sweep` and the menu-driven GUT tests.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
 - `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.

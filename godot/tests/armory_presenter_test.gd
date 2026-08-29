@@ -10,6 +10,23 @@ extends GutTest
 const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_presenter_test"
 
+# The retail weapon.mnu, weapon.def and string tables the screen resolves come
+# from the reference fixture set (docs/asset-gated-tests.md); the whole script
+# skips without it.
+const STAGED_FIXTURES := {
+	"mnu/jo_weapon.mnu": "weapon.mnu",
+	"def/weapon.def": "weapon.def",
+	"rtxt/menutxt.bin": "menutxt.BIN",
+	"rtxt/gametext.bin": "gametext.bin",
+}
+
+
+func should_skip_script():
+	for rel in STAGED_FIXTURES:
+		if RetailData.fixture(rel).is_empty():
+			return RetailData.fixture_pending_text(rel)
+	return false
+
 
 class ArmoryWorldHarness:
 	extends GameWorld
@@ -54,10 +71,8 @@ func before_each() -> void:
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
 	if not DirAccess.dir_exists_absolute(dir):
 		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
-	_copy_fixture("res://../fixtures/mnu/jo_weapon.mnu", dir.path_join("weapon.mnu"))
-	_copy_fixture("res://../fixtures/def/weapon.def", dir.path_join("weapon.def"))
-	_copy_fixture("res://../fixtures/rtxt/menutxt.bin", dir.path_join("menutxt.BIN"))
-	_copy_fixture("res://../fixtures/rtxt/gametext.bin", dir.path_join("gametext.bin"))
+	for rel in STAGED_FIXTURES:
+		_copy_fixture(RetailData.fixture(rel), dir.path_join(STAGED_FIXTURES[rel]))
 
 
 func after_each() -> void:
@@ -66,7 +81,7 @@ func after_each() -> void:
 
 func after_all() -> void:
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	for name in ["weapon.mnu", "weapon.def", "menutxt.BIN", "gametext.bin"]:
+	for name in STAGED_FIXTURES.values():
 		var path := dir.path_join(name)
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(path)
