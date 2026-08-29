@@ -27,8 +27,8 @@ func test_draws_bones_for_skeletons_in_the_subtree() -> void:
 	view.setup(root)
 	await get_tree().process_frame  # let the skeleton initialise its poses
 
-	view._process(0.0)
-	assert_gt(view._mesh.get_surface_count(), 0,
+	view.rebuild()
+	assert_gt(view.get_debug_surface_count(), 0,
 		"a skeleton in the subtree produces bone-line geometry")
 
 
@@ -42,8 +42,8 @@ func test_no_skeletons_emits_no_surface() -> void:
 	add_child_autofree(view)
 	view.setup(root)
 
-	view._process(0.0)
-	assert_eq(view._mesh.get_surface_count(), 0, "nothing to draw -> no surface, no error")
+	view.rebuild()
+	assert_eq(view.get_debug_surface_count(), 0, "nothing to draw -> no surface, no error")
 
 
 func test_rebuilds_each_frame_when_a_skeleton_disappears() -> void:
@@ -57,10 +57,10 @@ func test_rebuilds_each_frame_when_a_skeleton_disappears() -> void:
 	add_child_autofree(view)
 	view.setup(root)
 	await get_tree().process_frame
-	view._process(0.0)
-	assert_gt(view._mesh.get_surface_count(), 0)
+	view.rebuild()
+	assert_gt(view.get_debug_surface_count(), 0)
 
 	root.remove_child(skel)
 	skel.free()
-	view._process(0.0)
-	assert_eq(view._mesh.get_surface_count(), 0, "the freed skeleton drops out next frame")
+	view.rebuild()
+	assert_eq(view.get_debug_surface_count(), 0, "the freed skeleton drops out next frame")
