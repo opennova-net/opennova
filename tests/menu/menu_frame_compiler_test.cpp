@@ -1315,7 +1315,7 @@ void test_draw_frame_gate(const fnt_font_t *font) {
   <WINDOW type="window" name="MAIN">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <FRAME>
-      <STENCIL size="8">border.tga</STENCIL>
+      <STENCIL size="32">border.tga</STENCIL>
       <BRUSH>tile.tga</BRUSH>
     </FRAME>
     <WINDOW type="window" name="BOX" DRAW_FRAME>
@@ -1330,7 +1330,7 @@ void test_draw_frame_gate(const fnt_font_t *font) {
 	const int32_t border = slot_of(c, "border.tga");
 	const int32_t brush = slot_of(c, "tile.tga");
 	CHECK(border >= 0 && brush >= 0, "the parent's FRAME textures intern");
-	c.set_texture_size(border, 32, 32);
+	c.set_texture_size(border, 128, 96);
 	c.set_texture_size(brush, 64, 64);
 
 	MenuFrameState state;
@@ -1353,6 +1353,18 @@ void test_draw_frame_gate(const fnt_font_t *font) {
 	CHECK(fill != nullptr && fill->x0 == 100.0f && fill->y0 == 100.0f &&
 					fill->x1 == 300.0f && fill->y1 == 250.0f,
 			"the inherited frame fills the DRAW_FRAME child's rect only");
+	const MenuQuad *top_left = nullptr;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture == border && q.texture2 == brush && q.u0 == 0.0f &&
+				q.v0 == 0.0f) {
+			top_left = &q;
+			break;
+		}
+	}
+	CHECK(top_left != nullptr && top_left->x0 == 80.0f &&
+				top_left->y0 == 76.0f && top_left->x1 == 112.0f &&
+				top_left->y1 == 108.0f,
+			"an omitted STENCIL inset uses retail's 12x8 constructor defaults");
 }
 
 // The witnessed edit-input operations [orig: edit_widget_insert_char

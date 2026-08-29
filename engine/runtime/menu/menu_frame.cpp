@@ -675,9 +675,8 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 	if (!has_brush) {
 		return;
 	}
-	const int insetx = frame.has_insetx ? frame.insetx : 0;
-	const int insety = frame.has_insety ? frame.insety : 0;
-	const auto pieces = mnu::frame_border_layout(tile, insetx, insety);
+	const auto pieces =
+			mnu::frame_border_layout(tile, frame.insetx, frame.insety);
 	for (const mnu::FrameBorderPiece &piece : pieces) {
 		const mnu::FrameTileRect uv =
 				mnu::frame_tile_rect(tile, piece.tile_col, piece.tile_row);
