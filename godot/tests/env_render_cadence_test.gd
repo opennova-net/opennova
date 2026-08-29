@@ -6,7 +6,7 @@ extends GutTest
 # noise textures are excluded because retail regenerates those once per
 # rendered water frame.
 
-const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
+const FULL_00_ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 
 
 func _loaded_env() -> EnvFile:

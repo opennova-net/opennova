@@ -4,7 +4,7 @@ extends GutTest
 # [orig: render_skybox @ 0x579080]. The per-fragment combine itself is shader
 # code (verified by visual A/B); these pin what SkyDome pushes into it.
 
-const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
+const FULL_00_ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 const SKY_SHADER := "res://shaders/sky.gdshader"
 const TICK := 1.0 / 62.0
 
@@ -59,14 +59,18 @@ func test_keyframed_colors_use_retail_upload_scale_without_redoubling_fog() -> v
 		_shader_color_units(mat, "u_cloud_edge"),
 		_shader_color_units(mat, "u_fog_color"),
 	]
+	# synth_full.env's 1200 keyframe (tests/fixtures/minimal_env_gen.cpp):
+	# skybase 60,80,140; skybright 20,20,32; skyhighlight 150,160,150;
+	# cloudbase 140,140,140; cloudhighlight 20,24,10; cloudedge 150,160,170;
+	# skyfog 80,96,140 (its doubled blue saturates).
 	assert_eq(actual, [
-		[114, 154, 276],
-		[38, 38, 62],
-		[292, 324, 294],
-		[274, 274, 274],
-		[38, 46, 18],
-		[308, 316, 330],
-		[154, 182, 255],
+		[120, 160, 280],
+		[40, 40, 64],
+		[300, 320, 300],
+		[280, 280, 280],
+		[40, 48, 20],
+		[300, 320, 340],
+		[160, 192, 255],
 	], "six sky/cloud constants use retail 2/255; active packed skyfog stays byte/255")
 
 

@@ -50,7 +50,6 @@ authored file.
 | `bms/ash_i5b.reference.bms` | the mission reference the BMS writer round-trips against |
 | `mus/jo_gamemus.bin`, `mus/jo_menumus.bin`, `mus/golden_jo_gamemus.mus.txt` | the music director scripts and their decoded golden |
 | `adm/mp5_1st.adm`, `bad/BINOC.bad`, `bad/BINOC_twist.bad` | the retail animation-definition and clip formats (skinned-rig twist parity) |
-| `env/full_00.env` | a complete retail environment file (every section populated) |
 | `particle/*.ptl` | the particle catalogue parser's retail corpus |
 | `cbin/nlist*.reference.kda` | the credits-list container in its JO, JOX01 and BHD encodings |
 | `dbf/00TRg.DBF` | the dialog bank format |
@@ -127,9 +126,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
 - `fnt/synth_*.fnt`, `cbin/credits_image.png`, `cbin/particle_dot.tga` —
   `tests/fixtures/minimal_fnt_gen.cpp`, `minimal_cbin_gen.cpp` (the .tga is the
   sprite the effect-world test's synthetic particle file names).
-- `env/cloud01.pcx`, `env/cloud01b.pcx` — `tests/fixtures/minimal_env_gen.cpp`: the
-  two sky maps `env/full_00.env` names (the bright square-rooted cloud field and the
-  modulation layer centered at 128), 64x64 indexed PCX by our writer.
+- `env/synth_full.env`, `env/cloud01.pcx`, `env/cloud01b.pcx` — `tests/fixtures/minimal_env_gen.cpp`:
+  the synthetic environment (every keyword authored, ten time-of-day keyframes,
+  written by `save_env`) and the two sky maps it names (the bright square-rooted
+  cloud field and the modulation layer centered at 128), 64x64 indexed PCX by our
+  writer. The shipped `.env` set is the gated `env_jo_install` sweep.
 - `rtxt/synth_*.bin` — `tests/fixtures/minimal_rtxt_gen.cpp` (beside the `assets/`
   boot tables it also mints): the parity set `rtxt_synth_parity` grills — a
   multi-section game table with position hints, a menu table, a mission sidecar

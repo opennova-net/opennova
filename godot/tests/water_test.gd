@@ -17,7 +17,7 @@ extends GutTest
 # =============================================================================
 
 const WATER_SHADER := "res://shaders/water.gdshader"
-const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
+const FULL_00_ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
 const TICK := 1.0 / 62.0

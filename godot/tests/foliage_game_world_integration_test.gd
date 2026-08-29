@@ -5,7 +5,7 @@ extends GutTest
 # then drives GameWorld exactly through its public load/tick surface.
 
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
-const ENV_FIXTURE := "res://../fixtures/env/full_00.env"
+const ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 const MODEL_FIXTURE := "res://../fixtures/threedi/synth/crate.3di"
 const ROUTED_WITNESS_WORLD := Vector2(-120.0, -24.0)
 const ROUTED_WITNESS_MAP := Vector2i(98, 122)
