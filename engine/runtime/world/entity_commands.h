@@ -56,6 +56,17 @@ public:
     bool set_ssn_held(uint16_t ssn, bool held);
     bool set_ssn_disabled(uint16_t ssn, bool disabled);
 
+    // --- entity (by handle; the tool/probe mutation seam, ADR 0042 d5) ---
+    // Write an entity's health through BOTH stores the scripted SETHP path
+    // touches — the registry row (alive follows hp) and the AI motor's
+    // entity+286 mirror [orig: the WAC SETHP op writes entity+286]. False when
+    // the handle resolves no registry row.
+    bool set_entity_health(EntityHandle h, int32_t hp);
+    // Move an entity through both position stores (registry float + the AI
+    // 16.16 mirror), mission-space coordinates. False when the handle resolves
+    // no registry row.
+    bool set_entity_position(EntityHandle h, const Vec3 &mission_pos);
+
     // --- queries ---
     bool ssn_exists(uint16_t ssn) const;
     bool ssn_alive(uint16_t ssn) const;

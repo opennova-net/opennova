@@ -411,42 +411,6 @@ void Simulation::on_replica_world_changed(
 		resolve_collision_instances(collision_item_db_);
 }
 
-Dictionary Simulation::get_client_entity_debug(int p_handle) const {
-	Dictionary out;
-	if (runtime_ == nullptr || p_handle < 0 || p_handle > 0xFFFF) return out;
-	for (const opennova::netsim::ClientEntityState &es :
-			runtime_->state().entities) {
-		if (es.handle != static_cast<uint16_t>(p_handle)) continue;
-		out["handle"] = static_cast<int>(es.handle);
-		out["type_id"] = static_cast<int>(es.type_id);
-		out["cls"] = static_cast<int>(es.cls);
-		out["net_id"] = static_cast<int>(es.net_id);
-		out["name"] = String(es.name.c_str());
-		out["carrier_handle"] = static_cast<int>(es.carrier_handle);
-		out["mount_bone"] = static_cast<int>(es.mount_bone);
-		out["seat_type"] = static_cast<int>(es.seat_type);
-		out["net_seat_valid"] = es.net_seat_valid;
-		out["heading_bam"] = es.heading_bam;
-		out["heading_deg"] =
-				opennova::world::mission_yaw_deg_from_bam_heading(es.heading_bam);
-		out["heading_known"] = es.heading_known;
-		out["pitch_bam"] = es.pitch_bam;
-		out["yaw_byte"] = static_cast<int>(es.yaw_byte);
-		out["mission_position"] = Vector3(
-				static_cast<float>(es.x) / 65536.0f,
-				static_cast<float>(es.y) / 65536.0f,
-				static_cast<float>(es.z) / 65536.0f);
-		out["anim_state_id"] = static_cast<int>(es.anim_state_id);
-		out["state_flags"] = static_cast<int>(es.state_flags);
-		out["state_flags_known"] = es.state_flags_known;
-		out["team"] = static_cast<int>(es.team);
-		out["compact_revision"] = static_cast<int64_t>(es.compact_revision);
-		out["spawn_revision"] = static_cast<int64_t>(es.spawn_revision);
-		return out;
-	}
-	return out;
-}
-
 void Simulation::joiner_pump() {
 	if (!runtime_) {
 		if (runtime_profiling_enabled_) last_net_tick_us_ = 0;

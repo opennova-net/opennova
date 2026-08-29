@@ -892,20 +892,11 @@ w::AiEntity *MissionKernel::ai_for(w::EntityHandle h) {
 }
 
 void MissionKernel::set_entity_position(w::EntityHandle h, const w::Vec3 &mission_pos) {
-	if (w::Entity *e = world.registry.get(h)) e->position = mission_pos;
-	if (w::AiEntity *a = ai.for_handle(h)) {
-		a->pos[0] = static_cast<int32_t>(mission_pos.x * 65536.0f);
-		a->pos[1] = static_cast<int32_t>(mission_pos.y * 65536.0f);
-		a->pos[2] = static_cast<int32_t>(mission_pos.z * 65536.0f);
-	}
+	world.commands.set_entity_position(h, mission_pos);
 }
 
 void MissionKernel::set_entity_health(w::EntityHandle h, int32_t hp) {
-	if (w::AiEntity *a = ai.for_handle(h)) a->health = static_cast<int16_t>(hp);
-	if (w::Entity *e = world.registry.get(h)) {
-		e->health = hp;
-		e->alive = hp > 0;
-	}
+	world.commands.set_entity_health(h, hp);
 }
 
 // --- terrain ----------------------------------------------------------------

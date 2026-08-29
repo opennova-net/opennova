@@ -886,7 +886,7 @@ Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
                                              float p_max_range_units) {
 	Dictionary out;
 	// Typed defaults on every key so the shape is stable for every outcome
-	// (the get_entity_debug convention).
+	// (the stable-card-shape convention).
 	out["hit"] = false;
 	out["blocked"] = String();
 	out["hit_class"] = String();

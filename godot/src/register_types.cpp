@@ -61,6 +61,8 @@
 #include "hud/hud_pos.h"
 #include "mission/mission_catalog.h"
 #include "mission/mission_data.h"
+#include "simulation/entity_card.h"
+#include "simulation/entity_row.h"
 #include "simulation/present_applier.h"
 #include "simulation/present_stats.h"
 #include "simulation/inmatch_session_values.h"
@@ -158,6 +160,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionCatalog);
 	GDREGISTER_CLASS(PresentApplier);
 	GDREGISTER_CLASS(MissionPresentStats);
+	GDREGISTER_CLASS(EntityRow);
+	GDREGISTER_CLASS(EntityCardSeat);
+	GDREGISTER_CLASS(EntityCard);
 	GDREGISTER_CLASS(MissionFrameInput);
 	GDREGISTER_CLASS(MissionTickOutcome);
 	GDREGISTER_CLASS(MissionFrameOutcome);

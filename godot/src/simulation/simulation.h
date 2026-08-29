@@ -12,6 +12,7 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/variant/vector4i.hpp>
@@ -37,6 +38,8 @@
 
 namespace godot {
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
+class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 0042 d5)
+class EntityRow;      // one typed entity-directory row
 }
 
 #include "wac/wac_program.h"
@@ -1913,8 +1916,8 @@ public:
 	// Per-entity destruction diagnostics by bms_id (probe/F3 seam): health,
 	// bound_radius, flags, traits presence, KZ/bridge-DEAD anchors — the damage
 	// chain's gate inputs.
-	// (get_entity_debug is the AI-pool-index detail card; this one resolves by
-	// the placed bms_id and carries the §24 gate fields.)
+	// (entity_card is the per-entity debug card; this one resolves by the
+	// placed bms_id and carries the §24 gate fields.)
 	Dictionary get_destruction_debug(int p_bms_id) const;
 
 	// Mission scripting state on the shared world (the dword_C6B240 var store + event gates).
@@ -1949,13 +1952,20 @@ public:
 	// [i] = 1 when event i has fired (active latch + delay elapsed): the bulk
 	// form of has_event_fired for an event readout. Empty when unloaded.
 	PackedByteArray get_fired_events_snapshot() const;
-	// Scalars-only detail card for ONE selected entity ({} when the index is
-	// invalid). The key set is STABLE: a registry-despawned entity (scripted
-	// remove) still carries every key, with typed defaults for the registry
-	// half (kind/index -1, alive false, empty name, ...). Dictionary/String
-	// allocation is fine at selected-entity-only low-Hz use; the per-tick
-	// present loop has get_present_snapshot instead.
-	Dictionary get_entity_debug(int p_index) const;
+	// The typed entity inspection API (world::inspect, ADR 0042 d5). The join
+	// and both card halves are computed engine-side; this binding forwards and
+	// converts into typed records — JSON conversion lives on the records
+	// themselves and runs only at the MCP boundary (to_json_value). A joiner's
+	// directory carries no AI join (the non-authoritative tooling pool never
+	// mixes into the decoded view), and its cards ride the decoded replica
+	// section (np::client_replica_card).
+	TypedArray<EntityRow> entity_directory() const;
+	// The full card by packed wire handle; null when nothing resolves. The
+	// AI-index and SSN forms wrap the same builder (edit seams key on
+	// ai_index; pool-1 vehicles carry no brain and resolve by SSN).
+	Ref<EntityCard> entity_card(int p_handle) const;
+	Ref<EntityCard> entity_card_by_ai_index(int p_index) const;
+	Ref<EntityCard> entity_card_by_net_id(int p_net_id) const;
 	// Probe seam: write an AI entity's health via the scripted-SETHP stores
 	// (registry + motor copy) so in-game probes can shorten a fight. Returns
 	// ERR_UNAVAILABLE without a live sim, ERR_INVALID_PARAMETER for a missing
@@ -1975,14 +1985,8 @@ public:
 	// position stores, for probes defeated by mission geography. Uses the same
 	// truthful Error contract as debug_set_entity_health.
 	Error debug_set_entity_position(int p_index, const Vector3 &p_mission_pos);
-	// World-registry probe seams by SSN (pool-1 vehicles carry no AI brain and are
-	// invisible to the AI-index seams): entity card + mission-space teleport.
-	Dictionary get_world_entity_debug(int p_net_id) const;
-	// The decoded joiner-side client row for one wire handle — the ClientState
-	// twin of get_world_entity_debug (which reads the materialized registry):
-	// exactly what the wire carried and the fold retained, before presentation.
-	// Empty when not a joiner or the handle has no row.
-	Dictionary get_client_entity_debug(int p_handle) const;
+	// World-registry probe seam by SSN: mission-space teleport (the by-SSN
+	// entity card is entity_card_by_net_id above).
 	void debug_set_world_entity_position(int p_net_id, const Vector3 &p_mission_pos);
 	// Exact-slot parity probe: set the authoritative MountSlot words on a
 	// world entity so a real UDP phase-8 sample can prove receiver application.

@@ -192,6 +192,7 @@
     "engine/formats/mission/*",
     "engine/runtime/simassets/*",
     "engine/runtime/wac/*",
+    "tests/wac/*",
     "godot/tests/destruction_present_pass_test.gd",
     "godot/tests/mission_presentation_test.gd",
     "godot/tests/game/main_game_test.gd",

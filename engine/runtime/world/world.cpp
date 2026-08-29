@@ -404,6 +404,33 @@ bool EntityCommands::remove_ssn(uint16_t ssn) {
     return true;
 }
 
+bool EntityCommands::set_entity_health(EntityHandle h, int32_t hp) {
+    Entity *e = world_.registry.get(h);
+    if (!e) return false;
+    e->health = hp;
+    e->alive = hp > 0;
+    // The AI motor's entity+286 mirror follows, or the next infantry tick
+    // hydrates the registry row back [orig: the WAC SETHP op writes entity+286].
+    if (world_.ai != nullptr) {
+        if (AiEntity *a = world_.ai->for_handle(h)) a->health = static_cast<int16_t>(hp);
+    }
+    return true;
+}
+
+bool EntityCommands::set_entity_position(EntityHandle h, const Vec3 &mission_pos) {
+    Entity *e = world_.registry.get(h);
+    if (!e) return false;
+    e->position = mission_pos;
+    if (world_.ai != nullptr) {
+        if (AiEntity *a = world_.ai->for_handle(h)) {
+            a->pos[0] = static_cast<int32_t>(mission_pos.x * 65536.0f);
+            a->pos[1] = static_cast<int32_t>(mission_pos.y * 65536.0f);
+            a->pos[2] = static_cast<int32_t>(mission_pos.z * 65536.0f);
+        }
+    }
+    return true;
+}
+
 bool EntityCommands::set_ssn_hp(uint16_t ssn, int32_t hp) {
     Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;

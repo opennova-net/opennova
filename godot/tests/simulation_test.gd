@@ -891,25 +891,25 @@ func test_physicsless_air_definitions_install_direct_traits_without_enabling_gro
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
-	var air_a_card: Dictionary = sim.get_world_entity_debug(int(air_a["bms_id"]))
-	var air_b_card: Dictionary = sim.get_world_entity_debug(int(air_b["bms_id"]))
-	var ground_card: Dictionary = sim.get_world_entity_debug(int(ground["bms_id"]))
-	var plane_card: Dictionary = sim.get_world_entity_debug(int(plane["bms_id"]))
-	assert_eq(int(air_a_card.get("item_id", -1)), 5008,
+	var air_a_card: EntityCard = sim.entity_card_by_net_id(int(air_a["bms_id"]))
+	var air_b_card: EntityCard = sim.entity_card_by_net_id(int(air_b["bms_id"]))
+	var ground_card: EntityCard = sim.entity_card_by_net_id(int(ground["bms_id"]))
+	var plane_card: EntityCard = sim.entity_card_by_net_id(int(plane["bms_id"]))
+	assert_eq(air_a_card.get_item_id(), 5008,
 			"the public pool-1 probe resolves the first parsed definition")
-	assert_eq(int(air_b_card.get("item_id", -1)), 5009,
+	assert_eq(air_b_card.get_item_id(), 5009,
 			"the public pool-1 probe resolves the second parsed definition")
-	assert_eq(int(ground_card.get("item_id", -1)), 5010,
+	assert_eq(ground_card.get_item_id(), 5010,
 			"the public pool-1 probe resolves the ground control")
-	assert_eq(int(plane_card.get("item_id", -1)), 5011,
+	assert_eq(plane_card.get_item_id(), 5011,
 			"the public pool-1 probe resolves the parsed cpln definition")
-	assert_eq(int(air_a_card.get("vehicle_family", -2)), 2,
+	assert_eq(air_a_card.get_vehicle_family(), 2,
 			"plain chel installs the Helicopter prediction family without physics")
-	assert_eq(int(air_b_card.get("vehicle_family", -2)), 2,
+	assert_eq(air_b_card.get_vehicle_family(), 2,
 			"case-folded fourcc chel installs the same air prediction family")
-	assert_eq(int(ground_card.get("vehicle_family", -2)), -1,
+	assert_eq(ground_card.get_vehicle_family(), -1,
 			"zero remains the no-motor selector for the ground cveh family")
-	assert_eq(int(plane_card.get("vehicle_family", -2)), 3,
+	assert_eq(plane_card.get_vehicle_family(), 3,
 			"physicsless cpln installs the Plane prediction family")
 	sim.free()
 
@@ -1685,12 +1685,12 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	# Co-located with the carrier, the first think boards.
 	for _board_tick in range(48):
 		sim.step()
-	var reference_card: Dictionary = sim.get_entity_debug(0)
-	var rotated_card: Dictionary = sim.get_entity_debug(1)
-	assert_true(bool(reference_card.get("mounted", false)))
-	assert_true(bool(rotated_card.get("mounted", false)))
-	assert_eq(int(rotated_card.get("mount_type", 0)), 3)
-	var health_before := int(rotated_card.get("health", 0))
+	var reference_card: EntityCard = sim.entity_card_by_ai_index(0)
+	var rotated_card: EntityCard = sim.entity_card_by_ai_index(1)
+	assert_true(reference_card.is_mounted())
+	assert_true(rotated_card.is_mounted())
+	assert_eq(rotated_card.get_mount_type(), 3)
+	var health_before := rotated_card.get_health()
 	assert_gt(health_before, 0)
 
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
@@ -1739,8 +1739,8 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	assert_eq(reference_by_section.size(), 19)
 	assert_eq(rotated_by_section.size(), 19)
 
-	var reference_pos: Vector3 = reference_card.get("position", Vector3.ZERO)
-	var rotated_pos: Vector3 = rotated_card.get("position", Vector3.ZERO)
+	var reference_pos: Vector3 = reference_card.get_position()
+	var rotated_pos: Vector3 = rotated_card.get_position()
 	# PF_YAW_DEG / debug yaw is the gunner's independent look. The final body
 	# field is the basis PresentApplier.aim_apply actually applies to the rendered model
 	# and the same body class build_section_matrices uses for posed collision.
@@ -1790,8 +1790,8 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 			"a local-owned live round starts through the rendered section")
 	for _i in range(2):
 		sim.step()
-	var rotated_after: Dictionary = sim.get_entity_debug(1)
-	assert_lt(int(rotated_after.get("health", health_before)), health_before,
+	var rotated_after: EntityCard = sim.entity_card_by_ai_index(1)
+	assert_lt(rotated_after.get_health(), health_before,
 			"the local round damages the rotated mounted enemy organic")
 	sim.free()
 
@@ -1861,11 +1861,11 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 		sim.step()
 	var enemy_idx := _first_organic_ai_index(sim)
 	assert_gte(enemy_idx, 0)
-	var card := sim.get_entity_debug(enemy_idx)
-	assert_true(bool(card.get("mounted", false)))
-	assert_true(bool(card.get("mount_config_valid", false)))
-	assert_eq(int(card.get("mount_config", -1)), 6)
-	assert_eq(String(card.get("anim_key", "")), "anim_emplaced")
+	var card: EntityCard = sim.entity_card_by_ai_index(enemy_idx)
+	assert_true(card.is_mounted())
+	assert_true(card.is_mount_config_valid())
+	assert_eq(card.get_mount_config(), 6)
+	assert_eq(card.get_anim_key(), "anim_emplaced")
 	var enemy_handle := sim.get_entity_wire_handle(enemy_idx)
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
@@ -1904,8 +1904,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 			snapshot[row_base + Simulation.PF_POS_X],
 			snapshot[row_base + Simulation.PF_POS_Y],
 			snapshot[row_base + Simulation.PF_POS_Z])
-	assert_lt(presented_position.distance_to(
-			card.get("position", Vector3.ZERO)), 0.5,
+	assert_lt(presented_position.distance_to(card.get_position()), 0.5,
 			"the selected row is the mounted placed enemy")
 	model.global_position = presented_position
 	model.play_body_clip_at(
@@ -1968,7 +1967,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 		assert_true(collision_hand.is_zero_approx(),
 				"authoritative COBJ 16 retains retail's separate all-zero final row")
 
-	var health_before := int(card.get("health", 0))
+	var health_before := card.get_health()
 	var incoming := rendered_head_matrix.basis.x.normalized()
 	assert_gte(sim.debug_spawn_round(
 			rendered_head_center - incoming * 2.0,
@@ -1996,7 +1995,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 		assert_lt((impact.get("direction", Vector3.ZERO) as Vector3).distance_to(
 				incoming), 0.001,
 				"the incoming shot direction remains authoritative for reactions")
-	assert_lt(int(sim.get_entity_debug(enemy_idx).get("health", health_before)),
+	assert_lt(sim.entity_card_by_ai_index(enemy_idx).get_health(),
 			health_before, "the posed head shot damages the mounted enemy")
 	sim.free()
 
@@ -2334,11 +2333,11 @@ func test_restart_rebinds_baseline_player_to_own_adm() -> void:
 	var player_ai_index := -1
 	var local_handle := sim.get_local_player_wire_handle()
 	for ai_index in range(sim.get_entity_count()):
-		if int(sim.get_entity_debug(ai_index).get("wire_handle", 0)) == local_handle:
+		if sim.get_entity_wire_handle(ai_index) == local_handle:
 			player_ai_index = ai_index
 			break
 	assert_gte(player_ai_index, 0)
-	assert_eq(String(sim.get_entity_debug(player_ai_index).get("adm_name", "")),
+	assert_eq(sim.entity_card_by_ai_index(player_ai_index).get_adm_name(),
 			"US01.adm", "the live host player owns its graphic ADM")
 	sim.set_player_input(true, false, false, false, false, false, false)
 	sim.step()
@@ -2346,7 +2345,7 @@ func test_restart_rebinds_baseline_player_to_own_adm() -> void:
 			"US01 lacks the requested gait and resolves through its own idle clip")
 
 	sim.reset_session()
-	assert_eq(String(sim.get_entity_debug(player_ai_index).get("adm_name", "")),
+	assert_eq(sim.entity_card_by_ai_index(player_ai_index).get_adm_name(),
 			"US01.adm", "restart immediately repopulates the restored baseline row")
 	sim.set_player_input(true, false, false, false, false, false, false)
 	sim.step()
@@ -2549,29 +2548,29 @@ end
 		"the forward-facing ctrlx13 point carries a zero yaw offset")
 	# The mounted anim state (89 = anim_sit_13) is asserted via the debug card below; the present
 	# snapshot is the listen-server ClientState now (covered by listen_server_test).
-	var card: Dictionary = sim.get_entity_debug(soldier_idx)
-	assert_true(bool(card["mounted"]), "debug card marks mounted occupants")
-	assert_eq(int(card["mount_target_net_id"]), int(vehicle["bms_id"]))
-	assert_eq(int(card["mount_seat"]), 0, "ctrlx seat was selected by original priority")
-	assert_eq(int(card["mount_type"]), 2, "seat type is ctrlx/controller")
-	assert_eq(int(card["mount_seat_bone"]), 1, "the 1-based USRP row of ctrlx13")
-	assert_eq(int(card["mount_seat_pose_index"]), 13)
-	assert_eq(String(card["mount_seat_source_name"]), "ctrlx13")
-	assert_true(Vector3(card["mount_seat_local"]).is_equal_approx(
+	var card: EntityCard = sim.entity_card_by_ai_index(soldier_idx)
+	assert_true(card.is_mounted(), "debug card marks mounted occupants")
+	assert_eq(card.get_mount_target_net_id(), int(vehicle["bms_id"]))
+	assert_eq(card.get_mount_seat(), 0, "ctrlx seat was selected by original priority")
+	assert_eq(card.get_mount_type(), 2, "seat type is ctrlx/controller")
+	assert_eq(card.get_mount_seat_bone(), 1, "the 1-based USRP row of ctrlx13")
+	assert_eq(card.get_mount_seat_pose_index(), 13)
+	assert_eq(card.get_mount_seat_source_name(), "ctrlx13")
+	assert_true(card.get_mount_seat_local().is_equal_approx(
 			Vector3(-ctrl_point.x, ctrl_point.z, ctrl_point.y)),
 			"seat local is the authored point in the mission seat frame")
-	assert_eq(int(card["mount_seat_yaw_offset"]), 0)
-	var target_seats: Array = card["mount_target_seats"]
+	assert_eq(card.get_mount_seat_yaw_offset(), 0)
+	var target_seats: Array = card.get_mount_target_seats()
 	assert_eq(target_seats.size(), 5, "debug card carries every target seat candidate")
-	assert_eq(String((target_seats[0] as Dictionary)["source_name"]), "ctrlx13")
-	assert_eq(int((target_seats[0] as Dictionary)["type"]), 2)
-	assert_eq(int((target_seats[0] as Dictionary)["pose_index"]), 13)
-	assert_eq(int((target_seats[0] as Dictionary)["retail_slot"]), 8)
-	assert_eq(String((target_seats[1] as Dictionary)["source_name"]), "sitex00d")
-	assert_eq(int((target_seats[1] as Dictionary)["type"]), 1)
-	assert_eq(int((target_seats[1] as Dictionary)["retail_slot"]), 0)
-	assert_eq(int(card["anim_state"]), 89)
-	assert_eq(String(card["anim_key"]), "anim_sit_13")
+	assert_eq((target_seats[0] as EntityCardSeat).get_source_name(), "ctrlx13")
+	assert_eq((target_seats[0] as EntityCardSeat).get_type(), 2)
+	assert_eq((target_seats[0] as EntityCardSeat).get_pose_index(), 13)
+	assert_eq((target_seats[0] as EntityCardSeat).get_retail_slot(), 8)
+	assert_eq((target_seats[1] as EntityCardSeat).get_source_name(), "sitex00d")
+	assert_eq((target_seats[1] as EntityCardSeat).get_type(), 1)
+	assert_eq((target_seats[1] as EntityCardSeat).get_retail_slot(), 0)
+	assert_eq(card.get_anim_state(), 89)
+	assert_eq(card.get_anim_key(), "anim_sit_13")
 
 	# The second rider found the controller claimed and took the first
 	# passenger row; sitex00d faces backward, so the seat's non-zero yaw
@@ -2580,26 +2579,26 @@ end
 	for ai_index in range(sim.get_entity_count()):
 		if ai_index == soldier_idx:
 			continue
-		var row: Dictionary = sim.get_entity_debug(ai_index)
-		if row.is_empty():
+		var row: EntityCard = sim.entity_card_by_ai_index(ai_index)
+		if row == null:
 			break
-		if int(row.get("pool", -1)) == 0:
+		if row.get_pool() == 0:
 			rider_idx = ai_index
 			break
 	assert_gte(rider_idx, 0, "found the rider's AI row")
-	var rider_card: Dictionary = sim.get_entity_debug(rider_idx)
-	assert_true(bool(rider_card["mounted"]))
-	assert_eq(int(rider_card["mount_type"]), 1, "the rider fell back to sitex00d")
-	assert_eq(String(rider_card["mount_seat_source_name"]), "sitex00d")
-	assert_eq(absi(int(rider_card["mount_seat_yaw_offset"])), 180,
+	var rider_card: EntityCard = sim.entity_card_by_ai_index(rider_idx)
+	assert_true(rider_card.is_mounted())
+	assert_eq(rider_card.get_mount_type(), 1, "the rider fell back to sitex00d")
+	assert_eq(rider_card.get_mount_seat_source_name(), "sitex00d")
+	assert_eq(absi(rider_card.get_mount_seat_yaw_offset()), 180,
 			"the backward-facing passenger point extracts a half-turn offset")
 	assert_almost_eq(absf(wrapf(sim.get_entity_yaw_deg(rider_idx), -180.0, 180.0)),
 			180.0, 0.01, "non-gunner mounted seats carry their local yaw offset")
 	var expected_rider := MissionObjectPlacer.entity_transform(
 			Vector3(10, 0, 0), Vector3.ZERO) * passenger_point
 	assert_lt(sim.get_entity_position(rider_idx).distance_to(expected_rider), 0.001)
-	assert_eq(int(rider_card["anim_state"]), 76)
-	assert_eq(String(rider_card["anim_key"]), "anim_sit")
+	assert_eq(rider_card.get_anim_state(), 76)
+	assert_eq(rider_card.get_anim_key(), "anim_sit")
 	sim.free()
 
 
@@ -2781,19 +2780,19 @@ end
 # pass, so organics no longer sit at AI index 0 — resolve the first pool-0 row.
 func _organic_ai_index_with_mount_type(sim: Simulation, mount_type: int) -> int:
 	for i in 64:
-		var d: Dictionary = sim.get_entity_debug(i)
-		if d.is_empty():
+		var d: EntityCard = sim.entity_card_by_ai_index(i)
+		if d == null:
 			break
-		if int(d.get("pool", -1)) == 0 and int(d.get("mount_type", -1)) == mount_type:
+		if d.get_pool() == 0 and d.get_mount_type() == mount_type:
 			return i
 	return -1
 
 func _first_organic_ai_index(sim: Simulation) -> int:
 	for i in 64:
-		var d: Dictionary = sim.get_entity_debug(i)
-		if d.is_empty():
+		var d: EntityCard = sim.entity_card_by_ai_index(i)
+		if d == null:
 			break
-		if int(d.get("pool", -1)) == 0:
+		if d.get_pool() == 0:
 			return i
 	return -1
 
@@ -2887,9 +2886,9 @@ end
 	for _i in range(40):
 		sim.step()
 	assert_true(sim.local_player_toggle_mount(), "the idle toggle mounts")
-	var card: Dictionary = sim.get_world_entity_debug(int(vehicle["bms_id"]))
-	var seats: Array = card.get("seats", [])
-	assert_true(seats.size() == 1 and bool(seats[0]["occupied"]),
+	var card: EntityCard = sim.entity_card_by_net_id(int(vehicle["bms_id"]))
+	var seats: Array = card.get_seats()
+	assert_true(seats.size() == 1 and (seats[0] as EntityCardSeat).is_occupied(),
 		"the scan took the truck's one sitex seat")
 	sim.free()
 
@@ -3686,15 +3685,15 @@ end
 		sim.step()
 	# The mounted anim state (67 = anim_emplaced) is asserted via the debug card below; the present
 	# snapshot is the listen-server ClientState now (covered by listen_server_test).
-	var card: Dictionary = sim.get_entity_debug(0)
-	assert_true(bool(card["mounted"]), "debug card marks UseGun occupant mounted")
-	assert_eq(int(card["mount_type"]), 3, "seat type is UseGun/gunner")
-	assert_true(bool(card["mount_config_valid"]))
-	assert_eq(int(card["mount_config"]), 3)
-	assert_true(bool(card["mount_target_config_valid"]))
-	assert_eq(int(card["mount_target_config"]), 3)
-	assert_eq(int(card["anim_state"]), 67)
-	assert_eq(String(card["anim_key"]), "anim_emplaced")
+	var card: EntityCard = sim.entity_card_by_ai_index(0)
+	assert_true(card.is_mounted(), "debug card marks UseGun occupant mounted")
+	assert_eq(card.get_mount_type(), 3, "seat type is UseGun/gunner")
+	assert_true(card.is_mount_config_valid())
+	assert_eq(card.get_mount_config(), 3)
+	assert_true(card.is_mount_target_config_valid())
+	assert_eq(card.get_mount_target_config(), 3)
+	assert_eq(card.get_anim_state(), 67)
+	assert_eq(card.get_anim_key(), "anim_emplaced")
 	sim.free()
 
 
@@ -3852,21 +3851,23 @@ func test_fired_events_snapshot_matches_scalar() -> void:
 func test_entity_debug_card_carries_named_scalars() -> void:
 	var sim := Simulation.new()
 	sim.build_demo_mission()
-	var card: Dictionary = sim.get_entity_debug(0)
-	assert_false(card.is_empty(), "a live entity has a card")
-	assert_eq(int(card["state"]), 16, "routed organic starts in GROUND_FOLLOWWP")
-	assert_eq(String(card["state_name"]), "GROUND_FOLLOWWP", "...with its readable name")
-	assert_eq(card["position"], sim.get_entity_position(0), "position matches the scalar getter")
-	assert_almost_eq(float(card["yaw_deg"]), sim.get_entity_yaw_deg(0), 0.01)
-	assert_eq(int(card["net_id"]), sim.get_entity_net_id(0))
-	assert_eq(int(card["kind"]), sim.get_entity_kind(0))
-	assert_true(bool(card["alive"]))
-	assert_true(card.has("health") and card.has("ai_health"),
+	var card: EntityCard = sim.entity_card_by_ai_index(0)
+	assert_not_null(card, "a live entity has a card")
+	assert_true(card.has_ai() and card.has_world(), "both card halves resolve")
+	assert_eq(card.get_state(), 16, "routed organic starts in GROUND_FOLLOWWP")
+	assert_eq(card.get_state_name(), "GROUND_FOLLOWWP", "...with its readable name")
+	assert_eq(card.get_position(), sim.get_entity_position(0),
+			"position matches the scalar getter")
+	assert_almost_eq(float(card.get_yaw_deg()), sim.get_entity_yaw_deg(0), 0.01)
+	assert_eq(card.get_net_id(), sim.get_entity_net_id(0))
+	assert_eq(card.get_kind(), sim.get_entity_kind(0))
+	assert_true(card.is_alive())
+	assert_eq(card.get_health(), card.get_ai_health(),
 		"both health mirrors ride the card (they diverge under damage)")
-	assert_true(bool(card["infantry"]), "demo organics route through the infantry motor")
+	assert_true(card.is_infantry(), "demo organics route through the infantry motor")
 
-	assert_true(sim.get_entity_debug(-1).is_empty(), "invalid index reads an empty card")
-	assert_true(sim.get_entity_debug(999).is_empty())
+	assert_null(sim.entity_card_by_ai_index(-1), "invalid index reads no card")
+	assert_null(sim.entity_card_by_ai_index(999))
 	sim.free()
 
 
@@ -3892,17 +3893,16 @@ func test_debug_entity_mutations_report_missing_invalid_and_success() -> void:
 			ERR_UNAVAILABLE, "a live world without a local player is still unavailable")
 
 	assert_eq(int(sim.debug_set_entity_health(0, 37)), OK)
-	var card: Dictionary = sim.get_entity_debug(0)
-	assert_eq(int(card.get("health", -1)), 37)
-	assert_eq(int(card.get("ai_health", -1)), 37)
+	var card: EntityCard = sim.entity_card_by_ai_index(0)
+	assert_eq(card.get_health(), 37)
+	assert_eq(card.get_ai_health(), 37)
 
 	var entity_mission_position := Vector3(6.0, 5.0, 7.0)
 	assert_eq(int(sim.debug_set_entity_position(0, entity_mission_position)), OK)
 	assert_lt(sim.get_entity_position(0).distance_to(Vector3(6.0, 7.0, -5.0)),
 			0.001, "the successful move mutates the AI position mirror")
-	var world_card: Dictionary = sim.get_world_entity_debug(int(card.get("net_id", 0)))
-	var world_mission_position: Vector3 = world_card.get(
-			"mission_position", Vector3.ZERO)
+	var world_card: EntityCard = sim.entity_card_by_net_id(card.get_net_id())
+	var world_mission_position: Vector3 = world_card.get_mission_position()
 	assert_lt(world_mission_position.distance_to(entity_mission_position), 0.001,
 			"the successful move mutates the registry position mirror")
 
@@ -4917,8 +4917,8 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 	# presentation filters the local avatar before any posed/fallback row escapes.
 	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty(),
 			"the local avatar never renders posed or fallback hitboxes")
-	var local_bms_id := int(sim.get_entity_debug(
-			sim.get_entity_count() - 1).get("bms_id", -1))
+	var local_bms_id := sim.entity_card_by_ai_index(
+			sim.get_entity_count() - 1).get_bms_id()
 	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
 			"has_collision_instance", false)),
 			"the hidden local avatar was nevertheless attached on demand")
@@ -5004,8 +5004,8 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 
 	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty(),
 			"the newly resolved local avatar remains hidden from F3")
-	var local_bms_id := int(sim.get_entity_debug(
-			sim.get_entity_count() - 1).get("bms_id", -1))
+	var local_bms_id := sim.entity_card_by_ai_index(
+			sim.get_entity_count() - 1).get_bms_id()
 	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
 			"has_collision_instance", false)),
 			"the old negative attempt cannot suppress the new slot identity")
@@ -5049,8 +5049,8 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 		sim.step()
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	assert_true((sim.get_hitbox_debug().get("organics", []) as Array).is_empty())
-	var local_bms_id := int(sim.get_entity_debug(
-			sim.get_entity_count() - 1).get("bms_id", -1))
+	var local_bms_id := sim.entity_card_by_ai_index(
+			sim.get_entity_count() - 1).get_bms_id()
 	assert_true(bool(sim.get_destruction_debug(local_bms_id).get(
 			"has_collision_instance", false)),
 			"the replacement local occupant receives the cached graphic")
@@ -5194,13 +5194,14 @@ func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
 	for _i in range(16):
 		sim.step()
 
-	var card: Dictionary = sim.get_entity_debug(0)
-	assert_false(card.is_empty(), "the AI entity outlives its registry slot")
-	assert_true(card.has("kind") and card.has("alive") and card.has("name"),
-		"the registry half keeps its keys")
-	assert_eq(int(card["kind"]), -1, "...with typed defaults (kind -1)")
-	assert_false(bool(card["alive"]), "...alive false")
-	assert_eq(int(card["net_id"]), ssn, "the AI half still reports its scalars")
+	var card: EntityCard = sim.entity_card_by_ai_index(0)
+	assert_not_null(card, "the AI entity outlives its registry slot")
+	assert_true(card.has_ai() and not card.has_world(),
+		"the registry slot is gone; the card keeps its stable AI shape")
+	assert_eq(card.get_kind(), -1, "...with typed defaults (kind -1)")
+	assert_false(card.is_alive(), "...alive false")
+	assert_eq(card.get_name(), "", "...empty name")
+	assert_eq(card.get_net_id(), ssn, "the AI half still reports its scalars")
 	assert_true(sim.get_entity_effect_state_for_ssn(ssn).is_empty(),
 			"attached effects detach as soon as VaporizeSingle removes the registry slot")
 	sim.free()

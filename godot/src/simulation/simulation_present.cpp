@@ -3,6 +3,10 @@
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/simulation_internal.h"
 
+#include "simulation/entity_card.h" // the typed per-entity debug card (ADR 0042 d5)
+#include "simulation/entity_row.h"  // one typed entity-directory row
+
+#include <net/npruntime/client_replica_card.h> // the joiner's decoded replica section
 #include <net/npruntime/minimap_markers.h> // the retained marker rows (bank walk + local restore)
 #include <runtime/hud/hud_minimap_feed.h>  // the feed layout the snapshot carries
 #include <net/npruntime/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
@@ -748,248 +752,56 @@ Dictionary Simulation::compile_tracer_ribbons(const PackedFloat32Array &rows,
 	return out;
 }
 
-Dictionary Simulation::get_entity_debug(int p_index) const {
-	Dictionary out;
+// The typed entity inspection API (ADR 0042 d5): the directory join and the
+// per-entity card are engine facts (world/inspect.h); this binding forwards
+// and converts into the typed records. The joiner's decoded replica section
+// is the npruntime card (net/npruntime/client_replica_card.h).
+TypedArray<EntityRow> Simulation::entity_directory() const {
+	TypedArray<EntityRow> out;
 	if (!kernel_) return out;
-	AiEntity *e = kernel_->ai.at(p_index);
-	if (!e) return out;
-	// A scripted remove (VaporizeSingle / removeSSN) despawns the registry slot
-	// while the AiEntity stays in the AI pool, so the registry block emits TYPED
-	// DEFAULTS rather than dropping keys - the card's shape is stable whether
-	// the entity is whole or registry-despawned.
-	const opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
-	out["kind"] = ent ? opennova::world::spawn_origin_kind(ent->spawn_origin) : -1;
-	out["index"] = ent ? static_cast<int>(opennova::world::spawn_origin_index(ent->spawn_origin)) : -1;
-	out["bms_id"] = ent ? ent->bms_id : 0;
-	out["item_id"] = ent ? ent->item_id : 0;
-	// NOTE: retail BMS names are Windows-1252; non-ASCII bytes will read as
-	// invalid UTF-8 here. Names are ASCII in practice; revisit if mojibake shows.
-	out["name"] = ent ? String(ent->name.c_str()) : String();
-	out["group_id"] = ent ? static_cast<int>(ent->group_id) : 0;
-	out["team"] = ent ? static_cast<int>(ent->team) : -1;
-	out["pool"] = ent ? ent->handle.pool() : -1;
-	out["engine_flags"] = ent ? static_cast<int64_t>(ent->engine_flags) : 0;
-	// The BMS/gameplay flags word is a SEPARATE store from engine_flags, and the
-	// motor's suppression gates read the union (ladder zeroes the horizontal root
-	// pair, drowning the vertical) — a card exposing only engine_flags cannot
-	// explain a body that animates without translating.
-	out["bms_flags"] = ent ? static_cast<int64_t>(ent->flags) : 0;
-	out["waypoint_id"] = ent ? static_cast<int>(ent->waypoint_id) : 0;
-	out["wp_number"] = ent ? ent->wp_number : 0;
-	out["health"] = ent ? ent->health : 0;
-	out["alive"] = ent ? ent->alive : false;
-	out["hidden"] = ent ? ent->hidden : false;
-	out["held"] = ent ? ent->held : false;
-	out["disabled"] = ent ? ent->disabled : false;
-	out["vehicle_family"] = -1;
-	if (ent != nullptr) {
-		if (const opennova::world::VehicleTraits *traits =
-					kernel_->world.vehicle_traits.get(ent->item_id)) {
-			out["vehicle_family"] = static_cast<int>(traits->family);
-		}
+	// A joiner never mixes its non-authoritative tooling AI pool into the
+	// decoded view; the host joins registry rows to their AI cards.
+	const std::vector<opennova::world::inspect::EntityRow> rows =
+			opennova::world::inspect::entity_directory(
+					kernel_->world, joiner_ ? nullptr : &kernel_->ai);
+	for (const opennova::world::inspect::EntityRow &row : rows) {
+		Ref<EntityRow> typed;
+		typed.instantiate();
+		typed->assign(row);
+		out.push_back(typed);
 	}
-	out["body_anim_slot"] = ent ? ent->body_anim_slot : -1;
-	out["character_anim_slot"] = ent ? static_cast<int>(ent->anim_slot) : -1;
-	out["minimap_net_id"] = ent ? static_cast<int>(ent->minimap_net_id) : 0;
-	out["mounted"] = ent ? ent->mounted : false;
-	out["mount_target_net_id"] = 0;
-	out["mount_seat"] = ent ? static_cast<int>(ent->mount_seat) : -1;
-	out["mount_type"] = ent ? static_cast<int>(ent->mount_type) : 0;
-	out["mount_config_valid"] = ent ? ent->mounted_config_valid : false;
-	out["mount_config"] =
-			(ent && ent->mounted_config_valid) ? static_cast<int>(ent->mounted_config) : 0;
-	out["mount_seat_bone"] = 0;
-	out["mount_seat_pose_index"] = 0;
-	out["mount_seat_source_name"] = String();
-	out["mount_seat_local"] = Vector3();
-	out["mount_seat_yaw_offset"] = 0;
-	out["mount_target_config_valid"] = false;
-	out["mount_target_config"] = 0;
-	out["mount_target_seat_count"] = 0;
-	out["mount_target_seats"] = Array();
-	if (ent && ent->mounted) {
-		const opennova::world::Entity *target = kernel_->world.registry.get(ent->mount_target);
-		if (target) {
-			out["mount_target_net_id"] = static_cast<int>(target->net_id);
-			out["mount_target_config_valid"] = target->emplaced_config_valid;
-			out["mount_target_config"] =
-					target->emplaced_config_valid ? static_cast<int>(target->emplaced_config) : 0;
-			out["mount_target_seat_count"] = static_cast<int>(target->seats.size());
-			Array target_seats;
-			for (int i = 0; i < static_cast<int>(target->seats.size()); ++i) {
-				const opennova::world::Seat &seat = target->seats[i];
-				Dictionary d;
-				d["index"] = i;
-				d["type"] = static_cast<int>(seat.type);
-				d["retail_slot"] = static_cast<int>(seat.retail_slot);
-				d["bone_index"] = static_cast<int>(seat.bone_index);
-				d["pose_index"] = static_cast<int>(seat.pose_index);
-				d["source_name"] = String(seat.source_name.c_str());
-				d["local"] = Vector3(seat.seat_local.x, seat.seat_local.y, seat.seat_local.z);
-				d["yaw_offset"] = static_cast<int>(seat.yaw_offset);
-				d["occupied"] = seat.occupant.valid();
-				target_seats.push_back(d);
-			}
-			out["mount_target_seats"] = target_seats;
-			if (ent->mount_seat >= 0 && ent->mount_seat < static_cast<int>(target->seats.size())) {
-				const opennova::world::Seat &seat = target->seats[ent->mount_seat];
-				out["mount_type"] = static_cast<int>(seat.type);
-				out["mount_seat_bone"] = static_cast<int>(seat.bone_index);
-				out["mount_seat_pose_index"] = static_cast<int>(seat.pose_index);
-				out["mount_seat_source_name"] = String(seat.source_name.c_str());
-				out["mount_seat_local"] = Vector3(seat.seat_local.x, seat.seat_local.y, seat.seat_local.z);
-				out["mount_seat_yaw_offset"] = static_cast<int>(seat.yaw_offset);
-			}
-		}
-	}
-	out["net_id"] = e->net_id;
-	out["wire_handle"] = static_cast<int>(e->handle.packed);
-	out["team"] = static_cast<int>(e->team);
-	// The AI-side entity+286 mirror; diverges from the registry health under
-	// some damage paths, so the card shows both.
-	out["ai_health"] = static_cast<int>(e->health);
-	out["position"] = get_entity_position(p_index);
-	out["yaw_deg"] = get_entity_yaw_deg(p_index);
-	const int state = e->brain.f[AiBrain::kCurState];
-	out["state"] = state;
-	out["state_name"] = ai_state_name(state);
-	out["pending_state"] = e->brain.f[AiBrain::kPendState];
-	// The BRAIN kAlert register is NOT what the think tests. Every alert gate in
-	// infantry.cpp reads slot.bytes()[AiSlot::kAlertByte] (slot byte 136), which
-	// is also what the retail probe reads (AiSlot dword 34). Emitting the brain
-	// register here made our side read 0 in every sample and produced a false
-	// "we never raise alert" divergence -- the fourth false friend in this
-	// effort, and the first one on our own side.
-	out["alert"] = e->slot.bytes()[opennova::world::AiSlot::kAlertByte];
-	out["alert_brain"] = e->brain.f[AiBrain::kAlert];
-	out["wp_channel"] = e->brain.f[AiBrain::kWpChannel];
-	out["wp_node"] = e->brain.f[AiBrain::kWpNode];
-	out["wp_distance"] = e->brain.f[AiBrain::kWpDistance];
-	out["out_speed"] = e->brain.f[AiBrain::kOutSpeed];
-	// Rotor spin, so a live round can show the blades actually turning rather
-	// than only the code that says they should.
-	if (const opennova::world::Entity *ve = kernel_->world.registry.get(e->handle)) {
-		out["rotor_speed"] = ve->veh.part_spin.speed;
-		out["rotor_phase"] = ve->veh.part_spin.angle;
-		// The rotor machine's three gates, so a still rotor names its cause: the
-		// seeded rate, the brain's profile type (the HELO twin runs only for
-		// type 1 — retail: Entity_UpdateHeloRotorSpin @0x48FA70, the
-		// `profile+0x10 == 1` test @0x48fa98) and the engine-running claimant
-		// latch (+0x170; world::Entity::primary_occupant).
-		out["rotor_rate"] = ve->veh.part_spin.rate;
-		out["profile_type"] = e->profile.type;
-		out["primary_occupant"] = ve->primary_occupant.valid();
-		// The mover family, so a rotor check can tell "no helicopter here" from
-		// "the helicopter's blades are not turning".
-		const opennova::world::VehicleTraits *vt =
-				kernel_->world.vehicle_traits.get(ve->item_id);
-		out["veh_family"] = vt != nullptr ? int(vt->family) : -1;
-		out["player_control"] = vt != nullptr && vt->player_control;
-		// Flight-command chain, so a "the helicopter will not move" report can
-		// name WHICH link is dead: the pilot's packed MoveOrder, the staged
-		// cyclic pair, and the altitude target.
-		// Motor-internal taps for the convoy-pace hunt (AI-PARITY-CONCEPT 6.12g):
-		// the integrated speed vs the command names which stage loses the pace.
-		out["vp"] = ve->pitch;
-		out["vr"] = ve->roll;
-		out["mspd"] = ve->veh.speed;
-		{
-			Array wc;
-			for (int wi = 0; wi < 4; ++wi) wc.append(ve->veh.wheel_comp[wi]);
-			out["wc"] = wc;
-		}
-		{
-			Array pd; // per-pad contact depths (diagnostic, §6.15 flap hunt)
-			for (int wi = 0; wi < 4; ++wi) pd.append(ve->veh.dbg_pad_depth[wi]);
-			out["pd"] = pd;
-		}
-		out["macc"] = ve->veh.speed_accel;
-		out["mgnd"] = ve->veh.grounded;
-		out["cmd_fwd"] = ve->veh.cmd_speed;
-		out["cmd_lat"] = ve->veh.cmd_lateral_speed;
-		out["alt_tgt"] = ve->veh.net_alt_target;
-		out["engine_on"] = ve->veh.net_engine_on;
-		int pilot_move = -1;
-		for (const opennova::world::Seat &st : ve->seats) {
-			if (!st.occupant.valid()) continue;
-			const opennova::world::Entity *oc = kernel_->world.registry.get(st.occupant);
-			if (oc != nullptr && oc->player_class != 0)
-				pilot_move = static_cast<int>(oc->net_move_input);
-		}
-		out["pilot_move"] = pilot_move;
-	}
-	out["infantry"] = e->inf.active;
-	out["adm_id"] = e->inf.active ? e->inf.adm_id : -1;
-	out["adm_name"] = e->inf.active
-			? String::utf8(kernel_->root_motion.adm_name(e->inf.adm_id).c_str())
-			: String();
-	out["infantry_move_mode"] = e->inf.move_mode;
-	// The frozen-clump instrument: this tick's integrated root step vs the
-	// collision resolver's horizontal correction (16.16 fixed).
-	out["root_dx"] = e->inf.dbg_root_dx;
-	out["root_dy"] = e->inf.dbg_root_dy;
-	out["res_dx"] = e->inf.dbg_res_dx;
-	out["res_dy"] = e->inf.dbg_res_dy;
-	out["contact_item"] = e->inf.dbg_contact_item;
-	// AI DECISION STATE, named to match the retail probe (onhook ai_probe.c) so
-	// the two recordings join field-for-field. Retail reads these straight off
-	// the entity and its AiSlot; these are our equivalents:
-	//   parent  = the carrier we are mounted to   [orig: entity->parentEntity +364]
-	//   ground  = what we are standing on         [orig: entity->groundEntity +0x28]
-	//   s35/37/38 = has-route / command / node    [orig: AiSlot +140/+148/+152]
-	// Without them a retail-vs-OpenNova diff can see THAT a body is stuck but not
-	// what order it believes it is under, which is the question that matters.
-	out["parent"] = -1;
-	out["ground"] = -1;
-	if (const opennova::world::Entity *pe =
-				ent && ent->mounted ? kernel_->world.registry.get(ent->mount_target) : nullptr)
-		out["parent"] = static_cast<int>(pe->bms_id);
-	if (const opennova::world::Entity *ge =
-				ent ? kernel_->world.registry.get(ent->ground_target) : nullptr)
-		out["ground"] = static_cast<int>(ge->bms_id);
-	out["s35"] = e->slot.f[35];
-	out["s37"] = e->slot.f[37];
-	out["s38"] = e->slot.f[38];
-	out["fires_aimed"] = e->inf.dbg_fires_aimed;
-	out["fires_body"] = e->inf.dbg_fires_body;
-	// The fall-through instrument: the sim's own ground value under this body
-	// and whether it is airborne (a body whose ground sits far below it every
-	// tick falls forever).
-	out["ground_cache"] = e->inf.ground_cache;
-	out["ground_valid"] = e->inf.ground_cache_valid;
-	out["airborne"] = e->inf.airborne;
-	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
-	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
-	// Infantry combat diagnostics (the P1 threat-loop bring-up surface): the
-	// perception/attack ranges the scan reads (AiSlot +68/+60, world units), the
-	// D-AI-5 weapon seed (AiProfile ammo index + clip, the live magazine word),
-	// and the current combat target.
-	out["sight_range_u"] =
-			e->slot.f[opennova::world::AiSlot::kSightRange] / 65536.0;
-	out["attack_range_u"] =
-			e->slot.f[opennova::world::AiSlot::kAttackRange] / 65536.0;
-	out["ammo_primary"] = e->profile.ammo_primary;
-	out["clip_size"] = e->profile.clip_size;
-	out["magazine"] = static_cast<int>(e->inf.magazine);
-	out["combat_target_valid"] = e->inf.combat_target.valid();
-	// The fire-origin readback (probe surface): the launch userpoint on this
-	// body's posed skeleton, resolved now by the sim's own provider — the same
-	// point the fire pass, LOS rays, and aim eye read (world/muzzle_pose.h).
-	{
-		int32_t muzzle[3] = {};
-		const bool muzzle_valid = kernel_->world.muzzle_pose_provider != nullptr &&
-				kernel_->world.muzzle_pose_provider->resolve_muzzle_pose(
-						kernel_->world, e->handle, muzzle);
-		out["muzzle_valid"] = muzzle_valid;
-		out["muzzle"] = muzzle_valid ? godot_from_fixed3(muzzle) : Vector3();
-	}
-	// Death presentation (P1c): the damage-time selection still pending consume,
-	// the live corpse countdown, and the def traits behind them (world-wac-ai-re §19).
-	out["death_anim_state"] = ent ? ent->death_anim_state : 0;
-	out["corpse_timer"] = ent ? ent->corpse_timer : 0;
-	out["deathtime_ticks"] = ent ? ent->deathtime_ticks : 0;
-	out["leave_corpse"] = ent ? ent->leave_corpse : false;
 	return out;
+}
+
+Ref<EntityCard> Simulation::entity_card(int p_handle) const {
+	if (!kernel_ || p_handle < 0 || p_handle > 0xFFFF) return Ref<EntityCard>();
+	const opennova::world::EntityHandle handle{static_cast<uint16_t>(p_handle)};
+	Ref<EntityCard> card;
+	card.instantiate();
+	card->assign(opennova::world::inspect::build_entity_card(
+			kernel_->world, &kernel_->ai, handle,
+			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); }));
+	// The joiner's decoded replica row for the same handle, when one exists.
+	if (joiner_ && runtime_ != nullptr) {
+		card->assign_replica(opennova::np::client_replica_card(
+				runtime_->state(), handle.packed));
+	}
+	return card->native_valid() ? card : Ref<EntityCard>();
+}
+
+Ref<EntityCard> Simulation::entity_card_by_ai_index(int p_index) const {
+	if (!kernel_) return Ref<EntityCard>();
+	const AiEntity *e = kernel_->ai.at(p_index);
+	if (!e) return Ref<EntityCard>();
+	return entity_card(static_cast<int>(e->handle.packed));
+}
+
+Ref<EntityCard> Simulation::entity_card_by_net_id(int p_net_id) const {
+	if (!kernel_ || p_net_id <= 0 || p_net_id > 0xFFFF) return Ref<EntityCard>();
+	const opennova::world::EntityHandle h = kernel_->world.registry.find_by_net_id(
+			static_cast<uint16_t>(p_net_id));
+	if (!h.valid()) return Ref<EntityCard>();
+	return entity_card(static_cast<int>(h.packed));
 }
 
 String Simulation::ai_state_name(int p_state) {

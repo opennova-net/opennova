@@ -228,6 +228,11 @@ AiEntity *AiSystem::at(int ai_index) {
     return &entities_[ai_index];
 }
 
+const AiEntity *AiSystem::at(int ai_index) const {
+    if (ai_index < 0 || ai_index >= static_cast<int>(entities_.size())) return nullptr;
+    return &entities_[ai_index];
+}
+
 AiEntity *AiSystem::for_handle(EntityHandle h) {
     if (!h.valid()) return nullptr;
     if (handle_to_ai_index_.size() != 65536) return nullptr;
@@ -235,6 +240,18 @@ AiEntity *AiSystem::for_handle(EntityHandle h) {
     if (index < 0 || index >= static_cast<int>(entities_.size())) return nullptr;
     AiEntity &e = entities_[index];
     return e.handle == h ? &e : nullptr;
+}
+
+const AiEntity *AiSystem::for_handle(EntityHandle h) const {
+    return const_cast<AiSystem *>(this)->for_handle(h);
+}
+
+int AiSystem::index_for_handle(EntityHandle h) const {
+    if (!h.valid()) return -1;
+    if (handle_to_ai_index_.size() != 65536) return -1;
+    const int index = handle_to_ai_index_[h.packed];
+    if (index < 0 || index >= static_cast<int>(entities_.size())) return -1;
+    return entities_[index].handle == h ? index : -1;
 }
 
 // [orig: AI_BeginUpdate @0x457b40] copy working fields, then the shared-budget gate.

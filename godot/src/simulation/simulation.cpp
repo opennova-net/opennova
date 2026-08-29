@@ -856,10 +856,6 @@ void Simulation::set_mission_variable(int index, int value) {
 	if (kernel_) kernel_->world.vars.set_mission(index, value);
 }
 
-// Probe/diagnostic seam beside get_entity_debug: write an AI entity's health through
-// the same stores the scripted SETHP path touches (registry + the motor copy)
-// [orig: the WAC SETHP op writes entity+286]. Lets in-game probes shorten a fight
-// without bypassing the damage/death chain under test.
 Error Simulation::debug_kill_player_entity(int p_handle) {
 	if (!kernel_ || joiner_) return ERR_UNAVAILABLE;
 	const opennova::world::EntityHandle victim{static_cast<uint16_t>(p_handle)};
@@ -878,16 +874,16 @@ Error Simulation::debug_kill_player_entity(int p_handle) {
 	return OK;
 }
 
+// Probe/diagnostic seam: delegate to the engine's both-store health mutator
+// (EntityCommands::set_entity_health) so in-game probes can shorten a fight
+// without bypassing the damage/death chain under test.
 Error Simulation::debug_set_entity_health(int p_index, int p_hp) {
 	if (!kernel_) return ERR_UNAVAILABLE;
 	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return ERR_INVALID_PARAMETER;
-	opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
-	if (ent == nullptr) return ERR_UNAVAILABLE;
-	e->health = static_cast<int16_t>(p_hp);
-	ent->health = p_hp;
-	ent->alive = p_hp > 0;
-	return OK;
+	return kernel_->world.commands.set_entity_health(e->handle, p_hp)
+			? OK
+			: ERR_UNAVAILABLE;
 }
 
 // Debug: seat an AI body in a vehicle's control seat, by authored SSN. The
@@ -931,96 +927,19 @@ Error Simulation::debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn) {
 			: ERR_INVALID_PARAMETER;
 }
 
-// Probe seam beside debug_set_entity_health: teleport an AI entity through both
-// position stores (registry + motor copy) — mission-space coordinates. Lets
-// in-game probes bring a reachable victim to the player when the mission
-// geography (interiors, fences) defeats straight-line navigation.
+// Probe seam beside debug_set_entity_health: delegate to the engine's
+// both-store position mutator (EntityCommands::set_entity_position) —
+// mission-space coordinates. Lets in-game probes bring a reachable victim to
+// the player when the mission geography defeats straight-line navigation.
 Error Simulation::debug_set_entity_position(int p_index, const Vector3 &p_mission_pos) {
 	if (!kernel_) return ERR_UNAVAILABLE;
 	AiEntity *e = kernel_->ai.at(p_index);
 	if (!e) return ERR_INVALID_PARAMETER;
-	opennova::world::Entity *ent = kernel_->world.registry.get(e->handle);
-	if (ent == nullptr) return ERR_UNAVAILABLE;
-	e->pos[0] = static_cast<int32_t>(p_mission_pos.x * 65536.0f);
-	e->pos[1] = static_cast<int32_t>(p_mission_pos.y * 65536.0f);
-	e->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
-	ent->position.x = p_mission_pos.x;
-	ent->position.y = p_mission_pos.y;
-	ent->position.z = p_mission_pos.z;
-	return OK;
-}
-
-// World-registry probe seams keyed by SSN — pool-1 vehicles (and anything else
-// without an AI brain) are invisible to the AI-index seams above; vehicle probes
-// need to find and place them. Mission-space coordinates, same convention as
-// debug_set_entity_position.
-Dictionary Simulation::get_world_entity_debug(int p_net_id) const {
-	Dictionary out;
-	if (!kernel_ || p_net_id <= 0 || p_net_id > 0xFFFF) return out;
-	const opennova::world::EntityHandle h =
-			kernel_->world.registry.find_by_net_id(static_cast<uint16_t>(p_net_id));
-	const opennova::world::Entity *ent = kernel_->world.registry.get(h);
-	if (!ent) return out;
-	out["net_id"] = static_cast<int>(ent->net_id);
-	out["bms_id"] = ent->bms_id;
-	out["pool"] = h.pool();
-	out["kind"] = ent->spawn_origin == opennova::world::kSpawnOriginNone
-			? -1
-			: opennova::world::spawn_origin_kind(ent->spawn_origin);
-	out["index"] = ent->spawn_origin == opennova::world::kSpawnOriginNone
-			? -1
-			: static_cast<int>(
-					  opennova::world::spawn_origin_index(ent->spawn_origin));
-	out["item_id"] = ent->item_id;
-	out["name"] = String(ent->name.c_str());
-	out["team"] = static_cast<int>(ent->team);
-	out["alive"] = ent->alive;
-	out["hidden"] = ent->hidden;
-	out["health"] = ent->health;
-	out["has_item_def"] = ent->has_item_def;
-	out["handle"] = static_cast<int>(h.packed);
-	out["item_type"] = static_cast<int>(ent->item_type);
-	out["item_unit_type"] = ent->item_unit_type;
-	out["item_attrib"] = static_cast<int64_t>(ent->item_attrib);
-	out["item_attrib2"] = static_cast<int64_t>(ent->item_attrib2);
-	out["vehicle_family"] = -1;
-	if (const opennova::world::VehicleTraits *traits =
-			kernel_->world.vehicle_traits.get(ent->item_id)) {
-		out["vehicle_family"] = static_cast<int>(traits->family);
-	}
-	out["has_minimap_model_marker"] = ent->has_minimap_model_marker;
-	out["is_capture_trigger"] = ent->is_capture_trigger;
-	out["is_spawn_point"] = ent->is_spawn_point;
-	out["zone_number"] = static_cast<int>(ent->zone_number);
-	out["zone_radius"] = static_cast<int>(ent->zone_radius);
-	out["zone_control"] = ent->zone_control;
-	int zone_chain_index = -1;
-	for (size_t i = 0; i < kernel_->world.zone_chain.zones.size(); ++i) {
-		if (kernel_->world.zone_chain.zones[i] == h) {
-			zone_chain_index = static_cast<int>(i);
-			break;
-		}
-	}
-	out["zone_chain_index"] = zone_chain_index;
-	out["mission_position"] = Vector3(ent->position.x, ent->position.y, ent->position.z);
-	out["position"] = Vector3(ent->position.x, ent->position.z, -ent->position.y);
-	out["yaw"] = static_cast<int>(ent->yaw);
-	out["pitch"] = static_cast<int>(ent->pitch);
-	out["roll"] = static_cast<int>(ent->roll);
-	out["primary_weapon_clip"] = ent->primary_weapon_slot.clip;
-	out["primary_weapon_reserve"] = ent->primary_weapon_slot.reserve;
-	out["seat_count"] = static_cast<int>(ent->seats.size());
-	Array seats;
-	for (const opennova::world::Seat &s : ent->seats) {
-		Dictionary sd;
-		sd["type"] = static_cast<int>(s.type);
-		sd["occupied"] = s.occupant.valid();
-		sd["local"] = Vector3(s.seat_local.x, s.seat_local.y, s.seat_local.z);
-		sd["name"] = String(s.source_name.c_str());
-		seats.push_back(sd);
-	}
-	out["seats"] = seats;
-	return out;
+	return kernel_->world.commands.set_entity_position(e->handle,
+				   opennova::world::Vec3{p_mission_pos.x, p_mission_pos.y,
+						   p_mission_pos.z})
+			? OK
+			: ERR_UNAVAILABLE;
 }
 
 // Probe/diagnostic seam beside debug_set_world_entity_position: land the
@@ -1045,37 +964,14 @@ Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) {
 		return ERR_UNAVAILABLE;
 	}
-	const opennova::world::EntityHandle h = kernel_->world.cached.local_player;
-	opennova::world::Entity *e = kernel_->world.registry.get(h);
-	AiEntity *p = kernel_->world.ai->for_handle(h);
-	if (e == nullptr || p == nullptr) return ERR_UNAVAILABLE;
-	e->position.x = p_mission_pos.x;
-	e->position.y = p_mission_pos.y;
-	e->position.z = p_mission_pos.z;
-	p->pos[0] = static_cast<int32_t>(p_mission_pos.x * 65536.0f);
-	p->pos[1] = static_cast<int32_t>(p_mission_pos.y * 65536.0f);
-	p->pos[2] = static_cast<int32_t>(p_mission_pos.z * 65536.0f);
-	p->heading = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
-	p->pitch = static_cast<int32_t>(
-			static_cast<double>(p_pitch_deg) / opennova::world::kDegreesPerBam);
-	// The view is INPUT-owned: without mirroring the stated yaw/pitch into the
-	// motor's input channels AND the host mouse record, the next pre-tick input
-	// apply snaps the look straight back — the teleported view silently never
-	// held (the ladder probe's entry gate saw pitch 0 forever).
-	p->inf.target_heading = p->heading;
-	p->inf.look_pitch = p->pitch;
-	kernel_->input.look_heading = p->heading;
-	kernel_->input.look_pitch = p->pitch;
-	// A teleport is not a ladder exit: drop any live CL latch (else the next
-	// resolve runs the exit push + arms the pitch restore at the destination),
-	// disarm a pending restore, and invalidate the resolver's prev-position
-	// gate so the first resolve does not plane-test against a cross-map pose.
-	e->flags &= ~opennova::world::kEntityFlagLadderContact;
-	e->engine_flags &= ~opennova::world::kEntityFlagLadderContact;
-	p->inf.pitch_restore_active = false;
-	p->inf.pitch_restore_target = 0;
-	p->inf.pitch_restore_prev = 0;
-	p->collide_state = {};
+	if (kernel_->player() == nullptr || kernel_->player_ai() == nullptr) {
+		return ERR_UNAVAILABLE;
+	}
+	// The engine owns the full teleport transaction (both position stores, the
+	// input-owned view mirrors, the ladder-latch drop, the resolver reset).
+	kernel_->teleport_local_player(
+			opennova::world::Vec3{p_mission_pos.x, p_mission_pos.y, p_mission_pos.z},
+			p_yaw_deg, p_pitch_deg);
 	return OK;
 }
 
