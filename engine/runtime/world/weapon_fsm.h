@@ -277,7 +277,9 @@ struct WeaponFsmInputs {
     // rather than stored. [orig: current_tick @ 0x24C1968]
     int32_t current_tick = 0;
     // Owner submerged: the original drops the heat window (and the glow) the moment
-    // the firing entity goes under, unless the def carries Underwater (Flags 0x4).
+    // the firing entity's body Z is at or below the water plane, unless the def
+    // carries Underwater (Flags 0x4). The local pump feeds it from
+    // `env.water_z` (player_weapon.cpp).
     // [orig: the Env_WaterHeightFixed compare @ 0x54101c -> the clear @ 0x54125f]
     bool submerged = false;
 };

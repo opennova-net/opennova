@@ -740,10 +740,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			view.scope_engaged && !player_view_scope_ease_active(view);
 	in.instant_emplaced_switch = local_usegun_switch_is_instant(world, w);
 	// The heat window is a deadline against the logic tick, not a stored level.
-	// `submerged` stays false: the sim has no per-entity water test at the weapon
-	// site yet, and above water is what the runtime actually plays (D-WPN-29).
-	// [orig: current_tick @ 0x24C1968; the water gate @ 0x54101c]
+	// [orig: current_tick @ 0x24C1968]
 	in.current_tick = static_cast<int32_t>(world.logic_tick);
+	// The window's water gate is the owner's BODY Z against the global water
+	// plane, not the drowning bit and not the eye height: `Position.Z >
+	// Env_WaterHeightFixed` keeps the window, at-or-below (with no Underwater def
+	// flag) clears it. No authored water (env.water_z == 0) never submerges.
+	// [orig: WeaponAction_ProcessFrame @ 0x540e50, the gate @ 0x54101c]
+	in.submerged = player != nullptr && world.env.water_z != 0 &&
+			to_fixed(player->position.z) <= world.env.water_z;
 	if (!accept_weapon_input) active_slot.refire_queued = false;
 	WeaponFsmEvents ev;
 	weapon_fsm_tick(w.def, active_slot, in, ev);
