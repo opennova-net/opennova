@@ -5,8 +5,10 @@
 #include "object/object_model.h"
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/occluder_instance3d.hpp>
 
 #include <algorithm>
+#include <limits>
 
 #include "env/slot_shadow.h"
 #include "terrain/terrain.h"
@@ -19,6 +21,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "object/object_shader_cache.h"
+#include <runtime/renderer/object_lod.h>
 #include <runtime/renderer/render_order.h>
 
 namespace godot {
@@ -147,6 +150,7 @@ ObjectModel::~ObjectModel() {
 		awake_models_.erase(this);
 	}
 	match_terrain_models_.erase(this);
+	authored_lod_models_.erase(this);
 }
 
 void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
@@ -495,6 +499,14 @@ void ObjectModel::set_section_visibility_mask(int64_t p_mask) {
 			kv.value->set_visible(p_mask == -1 || ((p_mask >> kv.key) & 1) == 1);
 		}
 	}
+	for (const KeyValue<int, OccluderInstance3D *> &kv : authored_occluders_) {
+		if (kv.value != nullptr) {
+			kv.value->set_visible(
+					p_mask == -1 ||
+					(kv.key < 63 &&
+							((static_cast<uint64_t>(p_mask) >> kv.key) & 1u) != 0));
+		}
+	}
 }
 
 Array ObjectModel::get_surface_materials() const {
@@ -526,7 +538,44 @@ void ObjectModel::set_active_lod(int p_lod_index) {
 		return;
 	}
 	active_lod_ = next_lod;
-	rebuild();
+	if (!authored_lod_enabled_) {
+		// Editor/preview models keep the historical one-LOD footprint. Mission
+		// models opt into retained authored LODs before their first data build.
+		rebuild_scene();
+		return;
+	}
+	refresh_retained_lod_visibility();
+	refresh_active_lod_rest_transforms();
+	panm_applied_revision_ = 0;
+	refresh_live_panm_classification();
+	point_light_draw_parts_dirty_ = true;
+	render_order_dirty_ = true;
+	bounds_dirty_ = true;
+	wake_runtime_frame();
+	apply_runtime_state(0.0);
+}
+
+void ObjectModel::set_authored_lod_enabled(bool p_enabled) {
+	if (authored_lod_enabled_ == p_enabled) {
+		return;
+	}
+	authored_lod_enabled_ = p_enabled;
+	active_lod_ = 0;
+	if (object_data_.is_valid() && object_data_->has_document()) {
+		rebuild_scene();
+		return;
+	}
+	authored_lod_models_.erase(this);
+}
+
+void ObjectModel::set_authored_occluders_enabled(bool p_enabled) {
+	if (authored_occluders_enabled_ == p_enabled) {
+		return;
+	}
+	authored_occluders_enabled_ = p_enabled;
+	if (object_data_.is_valid() && object_data_->has_document()) {
+		rebuild_scene();
+	}
 }
 
 int64_t ObjectModel::ctrl_dword(int64_t p_value) {
@@ -728,7 +777,68 @@ void ObjectModel::on_object_changed() {
 HashSet<ObjectModel *> ObjectModel::awake_models_;
 HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
+HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
 uint64_t ObjectModel::lifetime_generation_ = 0;
+
+int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
+		float p_vertical_fov_degrees,
+		float p_viewport_width,
+		float p_viewport_height) {
+	if (authored_lod_models_.is_empty() || p_viewport_width <= 0.0f ||
+			p_viewport_height <= 0.0f) {
+		return 0;
+	}
+	const float half_fov =
+			Math::deg_to_rad(CLAMP(p_vertical_fov_degrees, 1.0f, 179.0f)) * 0.5f;
+	const float focal_pixels = p_viewport_height * 0.5f / Math::tan(half_fov);
+	// Retail's highest shipped detail profile uses the fixed 2.0 quality
+	// multiplier then normalizes the projection to a 640-wide viewport.
+	// The portable selector owns the retail witness for this frame scale.
+	const float projection_scale = 2.0f * 640.0f / p_viewport_width;
+	const Vector3 forward = -p_camera_transform.basis.get_column(2).normalized();
+	LocalVector<ObjectModel *> batch;
+	batch.reserve(authored_lod_models_.size());
+	for (ObjectModel *model : authored_lod_models_) {
+		batch.push_back(model);
+	}
+	int changed = 0;
+	for (ObjectModel *model : batch) {
+		if (!authored_lod_models_.has(model) || !model->is_inside_tree() ||
+				!model->is_visible_in_tree()) {
+			continue;
+		}
+		const float depth =
+				forward.dot(model->get_global_position() - p_camera_transform.origin);
+		const float source_radius =
+				model->model_sphere_radius_ > 0.0f
+				? model->model_sphere_radius_
+				: model->model_bounds_.get_longest_axis_size() * 0.5f;
+		const Basis model_basis = model->get_global_basis();
+		const float uniform_scale = std::max({
+				model_basis.get_column(0).length(),
+				model_basis.get_column(1).length(),
+				model_basis.get_column(2).length()});
+		const float radius = source_radius * uniform_scale;
+		const float projected_pixels =
+				depth > 0.0001f
+				? radius * focal_pixels / depth
+				: static_cast<float>(std::numeric_limits<int16_t>::max());
+		const double projected_q16 =
+				Math::round(static_cast<double>(projected_pixels) * 65536.0);
+		const int32_t bounded_q16 = static_cast<int32_t>(CLAMP(
+				projected_q16, static_cast<double>(std::numeric_limits<int32_t>::min()),
+				static_cast<double>(std::numeric_limits<int32_t>::max())));
+		const opennova::renderer::ObjectLodSelection selection =
+				opennova::renderer::select_object_lod(
+						model->authored_lod_thresholds_q16_, bounded_q16, projection_scale,
+						model->authored_lod_available_);
+		if (selection.lod_index >= 0 && selection.lod_index != model->active_lod_) {
+			model->set_active_lod(selection.lod_index);
+			++changed;
+		}
+	}
+	return changed;
+}
 
 void ObjectModel::advance_awake_frame(double p_delta) {
 	advance_awake_frame_impl(p_delta, nullptr);
@@ -1046,6 +1156,44 @@ int ObjectModel::clamp_lod_index(int p_lod_index) const {
 	const Dictionary summary = object_data_->get_summary();
 	const int lod_count = int(summary.get("lod_count", 1));
 	return CLAMP(p_lod_index, 0, MAX(lod_count - 1, 0));
+}
+
+void ObjectModel::refresh_retained_lod_visibility() {
+	LocalVector<Node *> stack;
+	stack.push_back(this);
+	while (!stack.is_empty()) {
+		Node *parent = stack[stack.size() - 1];
+		stack.remove_at(stack.size() - 1);
+		for (int i = 0; i < parent->get_child_count(); ++i) {
+			Node *child = parent->get_child(i);
+			stack.push_back(child);
+			GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(child);
+			if (geometry == nullptr || !geometry->has_meta("_opennova_lod_index")) {
+				continue;
+			}
+			geometry->set_visible(int(geometry->get_meta("_opennova_lod_index", 0)) ==
+					active_lod_);
+		}
+	}
+}
+
+void ObjectModel::refresh_active_lod_rest_transforms() {
+	robj_rest_transforms_.clear();
+	if (object_data_.is_null() || !object_data_->has_document()) {
+		return;
+	}
+	const Threedi3di3 &model = object_data_->native_model();
+	if (active_lod_ < 0 ||
+			static_cast<std::size_t>(active_lod_) >= model.lod_count ||
+			model.lods == nullptr) {
+		return;
+	}
+	const ThreediLod &lod = model.lods[active_lod_];
+	for (std::size_t i = 0; i < lod.render_object_count; ++i) {
+		const ThreediRenderObject &part = lod.render_objects[i];
+		robj_rest_transforms_[static_cast<int>(i)] =
+				Transform3D(Basis(), Vector3(-part.abs[0], part.abs[1], part.abs[2]));
+	}
 }
 
 Node3D *ObjectModel::get_or_create_robj_node(int p_robj_index) {
@@ -1399,8 +1547,15 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("refresh_match_terrain_frame", "terrain"),
 			&ObjectModel::refresh_match_terrain_frame);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("update_authored_lods",
+					"camera_transform", "vertical_fov",
+					"viewport_width", "viewport_height"),
+			&ObjectModel::update_authored_lods);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
 			&ObjectModel::is_runtime_frame_awake);
+	ClassDB::bind_method(D_METHOD("get_scene_build_serial"),
+			&ObjectModel::get_scene_build_serial);
 	ClassDB::bind_method(D_METHOD("wake_runtime_frame"),
 			&ObjectModel::wake_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_object_data", "data"), &ObjectModel::set_object_data);
@@ -1458,7 +1613,16 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_panm_clock", "clock"), &ObjectModel::set_panm_clock);
 	ClassDB::bind_method(D_METHOD("set_active_lod", "lod_index"),
 			&ObjectModel::set_active_lod);
-	ClassDB::bind_method(D_METHOD("get_active_lod"), &ObjectModel::get_active_lod);
+	ClassDB::bind_method(D_METHOD("get_active_lod"),
+			&ObjectModel::get_active_lod);
+	ClassDB::bind_method(D_METHOD("set_authored_lod_enabled", "enabled"),
+			&ObjectModel::set_authored_lod_enabled);
+	ClassDB::bind_method(D_METHOD("is_authored_lod_enabled"),
+			&ObjectModel::is_authored_lod_enabled);
+	ClassDB::bind_method(D_METHOD("set_authored_occluders_enabled", "enabled"),
+			&ObjectModel::set_authored_occluders_enabled);
+	ClassDB::bind_method(D_METHOD("are_authored_occluders_enabled"),
+			&ObjectModel::are_authored_occluders_enabled);
 	ClassDB::bind_method(D_METHOD("rebuild"), &ObjectModel::rebuild);
 	ClassDB::bind_method(D_METHOD("advance_runtime_frame", "delta"),
 			&ObjectModel::advance_runtime_frame);

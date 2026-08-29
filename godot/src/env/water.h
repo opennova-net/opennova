@@ -21,7 +21,9 @@
 
 namespace godot {
 
+class Compositor;
 class EnvFile;
+class FrameFxCompositorEffect;
 class MissionEnvironment;
 class Weather;
 
@@ -173,6 +175,11 @@ private:
 	Ref<ShaderMaterial> water_material_;
 	SubViewport *reflection_viewport_ = nullptr;
 	Camera3D *reflection_camera_ = nullptr;
+	// The reflection camera owns a decode-only FrameFx effect. Keep both
+	// resources here so process-exit teardown can detach and drain the render
+	// callback while RenderingServer is still alive, before deleting the view.
+	Ref<FrameFxCompositorEffect> reflection_decode_effect_;
+	Ref<Compositor> reflection_compositor_;
 	bool built_ = false;
 	bool has_drawable_surface_ = false;
 	ObjectID env_node_id_;

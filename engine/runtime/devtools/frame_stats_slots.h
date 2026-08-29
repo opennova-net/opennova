@@ -192,8 +192,8 @@
     X(RENDER_ROOT_GPU, "") \
     X(RENDER_WATER_CPU, "") \
     X(RENDER_WATER_GPU, "") \
-    X(RENDER_Q3_CPU, "FrameFx's shared-world Q3 view") \
-    X(RENDER_Q3_GPU, "") \
+    X(RENDER_Q3_CPU, "RETIRED: focused Q3 compositor CPU is included in root viewport time") \
+    X(RENDER_Q3_GPU, "RETIRED: focused Q3 compositor GPU is included in root viewport time") \
     X(RENDER_SLOT_CPU, "summed over the slot-shadow captures that rendered") \
     X(RENDER_SLOT_GPU, "") \
     /* Per-pass render counts (RenderingServer per-viewport render info for the */ \
@@ -206,8 +206,8 @@
     X(RENDER_SHADOW_DRAWS, "VALUE: root viewport shadow-pass draw calls") \
     X(RENDER_WATER_OBJECTS, "VALUE: water mirror visible-pass objects") \
     X(RENDER_WATER_DRAWS, "VALUE: water mirror visible-pass draw calls") \
-    X(RENDER_Q3_OBJECTS, "VALUE: Q3 view visible-pass objects") \
-    X(RENDER_Q3_DRAWS, "VALUE: Q3 view visible-pass draw calls") \
+    X(RENDER_Q3_OBJECTS, "VALUE: focused Q3 compiler draw commands") \
+    X(RENDER_Q3_DRAWS, "VALUE: focused Q3 RenderingDevice draw calls") \
     X(RENDER_SLOT_OBJECTS, "VALUE: slot captures' visible-pass objects (rendered slots only)") \
     X(RENDER_SLOT_DRAWS, "VALUE: slot captures' visible-pass draw calls") \
     X(RENDER_SLOT_VIEWPORTS, "VALUE: slot captures that rendered") \

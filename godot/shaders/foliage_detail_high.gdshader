@@ -6,5 +6,4 @@ render_mode unshaded, cull_disabled, blend_mix, depth_draw_always;
 // write depth; discarded texels leave none.
 // [orig: Foliage_SetupFarSlotDraw @ 0x6008d4;
 // Foliage_LoadDefAssets technique block @ 0x60141f..0x601427]
-#define NOVA_Q3_DEPTH_OCCLUDER
 #include "res://shaders/foliage_detail.gdshaderinc"

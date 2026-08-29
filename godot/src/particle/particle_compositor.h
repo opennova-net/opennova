@@ -74,6 +74,9 @@ public:
 	// requests the warm here, then force_draw() services it synchronously.
 	void request_pipeline_warm();
 	void cancel_pipeline_warm();
+	// Release RenderingDevice objects only while the owning renderer has a
+	// known-live RenderingServer. Destruction is deliberately discard-only.
+	void release_device_resources();
 	Dictionary get_backend_report() const;
 
 	void _render_callback(int32_t p_effect_callback_type,

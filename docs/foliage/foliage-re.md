@@ -527,8 +527,20 @@ The fresh implementation deliberately has three layers:
 2. `Terrain` — exact runtime 16-unit detail-cell collection from terrain
    height bounds.
 3. `FoliageDispatcher` — definition/mesh adaptation, live samplers, model
-   expansion, persistent slot/key/revision mesh caches, and dynamic
-   per-submission draw pools for detail high, detail low, and silhouette.
+   expansion, persistent slot/key/revision mesh caches, and retained
+   `RenderingServer` scenario-instance RID pools for detail and silhouette.
+   The typed `FoliageDrawList` is diff-applied in submission order; mesh,
+   material, uniform, and visibility stamps update only the fields that
+   changed, with no `MeshInstance3D` fallback.
+
+`FoliageDispatcher.get_backend_report()` exposes the opaque backend's pool
+sizes, ordered portable pass identities, and per-frame server-write counters
+without exposing RIDs. A stable live frame has zero instance creation,
+scenario, configuration, base, material, material-parameter, and visibility
+writes. The retail wind clocks still advance, so their instance-uniform writes
+are expected rather than structural churn. Raster probes use the public
+`apply_probe_draw_control` seam to pin wind and isolate a typed pass; they do
+not discover backend state through scene children.
 
 The discarded placement, dispatcher, model-dispatcher, and fd-bake clusters
 were deleted. The live foliage-map resource now single-sources DETAIL sampling,
@@ -571,8 +583,10 @@ claim or divergence.
   aggregation, view-depth gate, no
   manufactured anchors, cache identity/eviction ordering, reset behavior, and
   the additive/depth shader-state contract.
-- Adapter regressions pin ordered near HIGH/LOW draw nodes and their depth
-  states, exact `00TRa` entry #25's stored-negated-Z decode directly onto the
+- Adapter regressions pin the retained RID backend, zero structural server
+  writes on a stable live draw list, ordered near HIGH/LOW pass identities and
+  their depth states, scenario/reset/visibility lifecycle, exact `00TRa` entry
+  #25's stored-negated-Z decode directly onto the
   positive terrain/Godot Z plane, the blocked armory-truck center and uncovered
   c3/c4/c5 controls, selective rather than blanket blocking, and active-blocker
   frame diagnostics.
@@ -591,11 +605,14 @@ claim or divergence.
 - the `foliage_flicker_regression` probe: real rasterized destination-color
   preservation, strict alpha acceptance/rejection, retained late-consumer
   depth, screenshot-shaped exact-black-component detection, and fixed-input
-  frame stability for both tiers.
+  frame stability for both tiers. It pins wind through the dispatcher's public
+  RID probe-control seam rather than searching for draw children.
 - the `foliage_spawn_capture` probe with `flicker: true`: the real
   `00TRe.bms` player spawn, fixed-input HIGH/automatic coverage with deliberate
-  dropout and fade-response controls. LOW-far is explicitly reported as
-  skipped when it has no pixels in the exact spawn view.
+  dropout and fade-response controls selected by portable pass identity. Its
+  material/mesh diagnostics come from `get_backend_report`; LOW-far is
+  explicitly reported as skipped when it has no pixels in the exact spawn
+  view.
 - the runtime scene (the retired `runtime_scene_probe`) and the visual probes: detail camera selection uses
   the flat gate oracle; the runtime scene consumes Terrain's typed native
   detail-cell vector, while its minimal fixture intentionally contains no

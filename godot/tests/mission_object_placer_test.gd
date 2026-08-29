@@ -211,6 +211,98 @@ func test_runtime_static_batch_publishes_effect_source() -> void:
 	assert_eq(int(placer.get_static_light_draw_sources()[0].get("atlas_row", -1)), 0)
 
 
+func test_static_batches_partition_opaque_geometry_but_keep_blended_global() -> void:
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var first := mission.add_entity(
+			MissionData.KIND_BUILDING, 105004,
+			Vector3(10, -10, 0), Vector3.ZERO)
+	var second := mission.add_entity(
+			MissionData.KIND_BUILDING, 105004,
+			Vector3(530, -10, 0), Vector3.ZERO)
+	assert_false(first.is_empty())
+	assert_false(second.is_empty())
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	var opaque_mesh := BoxMesh.new()
+	opaque_mesh.size = Vector3(4, 6, 8)
+	var blended_mesh := BoxMesh.new()
+	blended_mesh.size = Vector3(2, 2, 2)
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", ObjectData.new(), [{
+				"mesh": opaque_mesh, "material": null,
+				"offset": Transform3D(Basis(), Vector3(0, 3, 0)),
+				"submesh": 0,
+			}, {
+				"mesh": blended_mesh, "material": null,
+				"offset": Transform3D(Basis(), Vector3(0, 7, 0)),
+				"submesh": 1, "blended_draw": true,
+			}]))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	var stats: Dictionary = placer.place(mission, parent)
+
+	assert_eq(int(stats.get("static_bins", -1)), 2,
+			"opaque populations follow the terrain's 512-unit sector cells")
+	assert_eq(int(stats.get("static_binned_batches", -1)), 2)
+	assert_eq(int(stats.get("static_global_batches", -1)), 1,
+			"the blended strip remains one explicitly global population")
+	assert_eq(int(stats.get("batches", -1)), 3)
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	assert_not_null(container)
+	if container == null:
+		return
+	var binned: Array[MultiMeshInstance3D] = []
+	var global: MultiMeshInstance3D = null
+	for child in container.get_children():
+		var mmi := child as MultiMeshInstance3D
+		if mmi == null:
+			continue
+		if String(mmi.get_meta("static_batch_population", "")) == "bin":
+			binned.append(mmi)
+		elif String(mmi.get_meta("static_batch_population", "")) == "global":
+			global = mmi
+	assert_eq(binned.size(), 2)
+	assert_not_null(global)
+	if global != null:
+		assert_eq(global.multimesh.instance_count, 2,
+				"the global blended population retains both placements")
+		assert_false(global.has_meta("static_batch_bin_x"))
+	var bin_xs: Array[int] = []
+	for mmi in binned:
+		var bin_x := int(mmi.get_meta("static_batch_bin_x", -99))
+		bin_xs.append(bin_x)
+		assert_eq(int(mmi.get_meta("static_batch_bin_z", -99)), 0)
+		assert_eq(mmi.multimesh.instance_count, 1)
+		var authored_position := Vector3(10, -10, 0) \
+				if bin_x == 0 else Vector3(530, -10, 0)
+		var entity_xform := MissionObjectPlacer.entity_transform(
+				authored_position, Vector3.ZERO)
+		var batch_offset := Transform3D(Basis(), Vector3(0, 3, 0))
+		var expected_bounds: AABB = (entity_xform * batch_offset) \
+				* opaque_mesh.get_aabb()
+		assert_true(mmi.custom_aabb.position.is_equal_approx(
+				expected_bounds.position))
+		assert_true(mmi.custom_aabb.size.is_equal_approx(expected_bounds.size),
+				"each MultiMesh advertises the exact bounds of its emitted geometry")
+	bin_xs.sort()
+	assert_eq(bin_xs, [0, 1])
+
+	var first_bms_id := int(first.get("bms_id", 0))
+	assert_ne(first_bms_id, 0)
+	assert_eq(placer.get_static_instance_binding_count(first_bms_id), 2,
+			"destruction owns the emitted bin slot and global blended slot")
+	assert_false(placer.hide_static_instance(first_bms_id) == null)
+	assert_true(placer.is_static_instance_hidden(first_bms_id))
+	assert_true(placer.show_static_instance(first_bms_id),
+			"one destruction record restores its binned opaque and global "
+			+ "blended slots")
+
+
 func test_runtime_static_vehicle_rides_the_mirror_visible_layer() -> void:
 	# env #30: the water mirror's above-water collection keeps only
 	# ItemDefType==vehicle entities [orig: Entity_InitFromModel @ 0x40e20a

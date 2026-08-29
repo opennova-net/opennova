@@ -10,6 +10,7 @@
 #include <godot_cpp/core/math.hpp>
 
 #include "object/object_shader_cache.h"
+#include "render/frame_fx.h"
 
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/object_shader_template.h>
@@ -133,6 +134,14 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 
 	int32_t key = shader_cache->classify(shader_tag, material_flags, emissive_type,
 			is_glass_flag, alpha_test_byte);
+	const CharString shader_tag_utf8 = shader_tag.utf8();
+	const opennova::renderer::ObjectMaterialClassification q3_classification =
+			opennova::renderer::classify_object_material(
+					std::string(shader_tag_utf8.get_data()),
+					static_cast<uint8_t>(material_flags),
+					static_cast<uint8_t>(emissive_type),
+					static_cast<uint8_t>(is_glass_flag),
+					static_cast<uint8_t>(alpha_test_byte));
 	if (detail.is_null()) {
 		// Retail runs the _MT second stage only with its texture bound — an
 		// unresolved secondary composes the no-detail shader
@@ -206,6 +215,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	material->set_shader_parameter("u_local_light_intensity", 1.0f);
 	material->set_shader_parameter("u_local_light_atten_start", 0.0f);
 	material->set_shader_parameter("u_local_light_atten_end", 5.0f);
+	FrameFx::register_q3_object_material(material, q3_classification);
 	// No shadow-receiver next pass on world models: retail's render-slot
 	// entity ground shadows drape TERRAIN-FOLLOWING patches only — a live
 	// silhouette never lands on another model [orig:

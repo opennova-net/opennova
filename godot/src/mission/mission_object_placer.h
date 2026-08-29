@@ -29,10 +29,10 @@ class MissionData;
 // entity to its visual model and instances it under a "MissionObjects"
 // container.
 //
-// Batching strategy (hybrid): static models merge into one
-// MultiMeshInstance3D per (graphic, submesh) — real maps place hundreds of
-// identical props, and batching collapses them into a handful of draw calls
-// at the cost of per-instance frustum culling. Animated/skinned models
+// Batching strategy (hybrid): opaque and alpha-tested static surfaces merge
+// into 512-unit terrain-aligned MultiMesh populations; blended surfaces keep
+// one global population so their retail ordering is unchanged.
+// Animated/skinned models
 // (persons, anim_def carriers), portal-carrying buildings (per-section
 // occlusion masks), and live-PANM graphics (the original re-poses those from
 // the global clock every rendered frame) each get an individual ObjectModel.
@@ -115,7 +115,8 @@ public:
 	// ledger) and "skip_kinds"
 	// (the joiner places the mission minus organics). Returns a stats
 	// Dictionary (placed/batched/animated/unresolved/markers/graphics/
-	// batches + per-stage "spans" usec timings).
+	// batches/static_bins/static_binned_batches/static_global_batches +
+	// per-stage "spans" usec timings).
 	Dictionary place(const Ref<MissionData> &p_mission, Node3D *p_parent,
 			const Dictionary &p_options = Dictionary());
 
@@ -133,7 +134,8 @@ public:
 	ObjectModel *build_model_from_graphic(const String &p_graphic,
 			const String &p_adm_name, Node3D *p_parent,
 			const String &p_clip_key = String(),
-			const String &p_rig_graphic = String());
+			const String &p_rig_graphic = String(),
+			bool p_retain_authored_lods = false);
 
 	// --- read-back seams --------------------------------------------------
 	Array get_placed_entity_records() const { return placed_entity_records_; }
@@ -162,9 +164,12 @@ public:
 	Ref<ObjectData> object_data_for(const String &p_graphic);
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------
-	// Diagnostic/read-back identity for the exact MultiMesh population whose
-	// slot is carved. Distinct policies may share the same authored graphic.
+	// Diagnostic/read-back identity for the entity's graphic/reflection group.
+	// Distinct policies may share the same authored graphic.
 	String get_static_instance_batch_key(int p_bms_id) const;
+	// Number of exact MultiMesh slots the carve owns across spatial, global,
+	// and shadow populations. Public read-back for renderer diagnostics/tests.
+	int get_static_instance_binding_count(int p_bms_id) const;
 	// The carved instance's authored reflection policy, so the husk graft can
 	// keep reflecting: retail's husk swap flips only the husk-model flag,
 	// never the reflect flag the mirror collectors filter on (witnesses in
@@ -214,6 +219,7 @@ private:
 		int submesh = 0;
 		int robj_index = 0;
 		bool auxiliary_draw = false;
+		bool blended_draw = false;
 	};
 
 	void _check_epoch();
@@ -224,6 +230,7 @@ private:
 	String _model_name_for(const String &p_graphic) const;
 	bool _needs_individual_node(int p_item_id);
 	bool _graphic_needs_live_panm(const String &p_graphic);
+	bool _graphic_has_multiple_lods(const String &p_graphic);
 	bool _has_occlusion_records(int p_item_id);
 	bool _item_is_mirror_reflected(int p_item_id) const;
 	bool _placement_is_mirror_reflected(uint32_t p_entity_attrib,
@@ -286,24 +293,31 @@ private:
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
 	HashMap<String, Vector<StaticBatch>> static_batch_cache_;
 	HashMap<String, bool> graphic_panm_cache_;
+	HashMap<String, bool> graphic_multiple_lods_cache_;
 	HashMap<int64_t, bool> occlusion_cache_;
 	uint64_t built_epoch_ = 0;
 
 	// Destruction carve state: batched statics have no per-entity node; a
-	// destroyed one is zero-scaled out of its graphic/reflection population's
-	// MultiMesh batches and the caller grafts the husk model at the returned
+	// destroyed one is zero-scaled out of every exact emitted MultiMesh slot
+	// and the caller grafts the husk model at the returned
 	// transform.
-	HashMap<String, Vector<Ref<MultiMesh>>> destruction_batches_;
+	struct DestructionBinding {
+		Ref<MultiMesh> multimesh;
+		int index = -1;
+	};
 	struct DestructionInstance {
 		String graphic;
-		// Static rendering can split one graphic into independent retail
-		// reflection populations; this selects the MultiMeshes whose slot index
-		// belongs to this record. Legacy/manual registrations use `graphic`.
+		// Stable diagnostic identity for the graphic/reflection population.
+		// Legacy/manual registrations use `graphic`.
 		String batch_key;
 		int index = -1;
 		Transform3D xform;
 		bool casts_static_shadow = false;
 		bool mirror_reflected = false;
+		// One entity may now occupy a spatial opaque population, a global
+		// blended population, and a filtered shadow twin. Carving follows the
+		// exact emitted slots instead of assuming one shared group-local index.
+		Vector<DestructionBinding> bindings;
 	};
 	HashMap<int64_t, DestructionInstance> destruction_instances_;
 	HashMap<int64_t, Array> hidden_destruction_instances_;

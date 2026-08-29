@@ -43,6 +43,7 @@ namespace godot {
 
 class Terrain;
 class MeshInstance3D;
+class OccluderInstance3D;
 
 // The env-derived world lighting/fog values (ADR 0017's typed record,
 // native). Computed once per env change; the object shader family reads the
@@ -259,6 +260,7 @@ private:
 	uint32_t viewmodel_pass_stamped_serial_ = 0;
 	int64_t panm_applied_revision_ = 0;
 	int64_t section_visibility_mask_ = -1;
+	HashMap<int, OccluderInstance3D *> authored_occluders_;
 	PackedInt32Array surface_material_indices_;
 	Vector<Ref<ShaderMaterial>> surface_materials_;
 	HashMap<int64_t, Array> anim_frames_by_mat_;
@@ -285,6 +287,10 @@ private:
 	int64_t anim_time_ms_ = 0;
 	Ref<PanmClock> panm_clock_;
 	int active_lod_ = 0;
+	bool authored_lod_enabled_ = false;
+	bool authored_occluders_enabled_ = false;
+	std::vector<int32_t> authored_lod_thresholds_q16_;
+	std::vector<bool> authored_lod_available_;
 	bool is_playing_ = true;
 	AABB model_bounds_;
 	float lighting_effect_scale_ = 1.0f;
@@ -334,6 +340,7 @@ private:
 	// leg. GameWorld refreshes their resident terrain-page binding after the
 	// terrain cache has processed this frame's requests.
 	static HashSet<ObjectModel *> match_terrain_models_;
+	static HashSet<ObjectModel *> authored_lod_models_;
 
 	// Main-body skeletal animation (.bad/.adm via SkeletalAnim).
 	Ref<SkeletalAnim> skeletal_;
@@ -437,6 +444,8 @@ private:
 	bool needs_runtime_frame_work() const;
 	void refresh_live_panm_classification();
 	int clamp_lod_index(int p_lod_index) const;
+	void refresh_retained_lod_visibility();
+	void refresh_active_lod_rest_transforms();
 	void stamp_match_terrain_instances(bool p_page_ready, float p_layer,
 			const Vector4 &p_projection);
 	void set_model_bounds(const AABB &p_bounds);
@@ -616,6 +625,10 @@ public:
 	// the viewmodel rung. Re-stamps after a scene rebuild; idempotent per frame.
 	void set_viewmodel_pass(bool p_enabled);
 	static void refresh_match_terrain_frame(Terrain *p_terrain);
+	static int update_authored_lods(const Transform3D &p_camera_transform,
+			float p_vertical_fov_degrees,
+			float p_viewport_width,
+			float p_viewport_height);
 	Dictionary get_render_part_nodes() const;
 	void set_section_visibility_mask(int64_t p_mask);
 	// The occlusion pass's last-applied mask (-1 = no verdict yet, all
@@ -630,6 +643,12 @@ public:
 	void set_panm_clock(const Ref<PanmClock> &p_clock);
 	void set_active_lod(int p_lod_index);
 	int get_active_lod() const { return active_lod_; }
+	void set_authored_lod_enabled(bool p_enabled);
+	bool is_authored_lod_enabled() const { return authored_lod_enabled_; }
+	void set_authored_occluders_enabled(bool p_enabled);
+	bool are_authored_occluders_enabled() const {
+		return authored_occluders_enabled_;
+	}
 	void rebuild();
 	void refresh_render_order();
 	static void mark_render_order_dirty_all();

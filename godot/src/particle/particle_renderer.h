@@ -38,6 +38,7 @@ private:
 	ObjectID reflection_camera_;
 	float water_height_ = 0.0f;
 	bool hidden_ = false;
+	bool shutdown_ = false;
 	bool procedural_fallback_enabled_ = false;
 	std::vector<Node *> warm_nodes_;
 
@@ -77,6 +78,8 @@ public:
 	// quads and cancels an unserviced compositor request.
 	void warm_pipelines(const Vector3 &p_position);
 	void clear_warm_pipelines();
+	// Process-exit boundary for compositor callbacks and device-owned effects.
+	void shutdown();
 
 	// Compiles the latest fixed-tick scene snapshot for both render domains and
 	// publishes an immutable World copy across the render-thread boundary.

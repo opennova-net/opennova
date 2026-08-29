@@ -4,10 +4,21 @@
 // 2026-08-09 de-scripting.
 
 #include "object/object_model.h"
+#include "render/frame_fx.h"
+
+#include <runtime/renderer/authored_occluder.h>
+#include <runtime/simassets/model_builders.h>
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/array_occluder3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/occluder_instance3d.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
+
+#include <algorithm>
 
 namespace godot {
 
@@ -25,6 +36,10 @@ void ObjectModel::rebuild_scene() {
 	screen_notifier_ = nullptr;
 	robj_nodes_.clear();
 	robj_rest_transforms_.clear();
+	authored_occluders_.clear();
+	authored_lod_thresholds_q16_.clear();
+	authored_lod_available_.clear();
+	authored_lod_models_.erase(this);
 	skeleton_ = nullptr;
 	skeleton_skin_.unref();
 	muzzle_bone_ = -1;
@@ -56,6 +71,21 @@ void ObjectModel::rebuild_scene() {
 
 	build_material_defs();
 	active_lod_ = clamp_lod_index(active_lod_);
+	const Threedi3di3 &native_model = object_data_->native_model();
+	authored_lod_thresholds_q16_.reserve(native_model.lod_count);
+	authored_lod_available_.resize(native_model.lod_count, false);
+	const std::size_t first_retained_lod = authored_lod_enabled_
+			? 0
+			: static_cast<std::size_t>(active_lod_);
+	const std::size_t retained_lod_end = authored_lod_enabled_
+			? native_model.lod_count
+			: std::min(native_model.lod_count, first_retained_lod + 1);
+	for (std::size_t lod_index = first_retained_lod;
+			lod_index < retained_lod_end;
+			++lod_index) {
+		authored_lod_thresholds_q16_.push_back(
+				native_model.lods[lod_index].lod_threshold);
+	}
 	refresh_live_panm_classification();
 	// A loaded .adm drives the model: build a Skeleton3D from its .bad
 	// skeleton — per-vertex skinned models AND rigid first-person weapons
@@ -67,99 +97,182 @@ void ObjectModel::rebuild_scene() {
 	}
 	const int bone_count =
 			skeletal_mode && skeleton_ != nullptr ? skeleton_->get_bone_count() : 0;
-	const Array submeshes = object_data_->build_lod_submeshes(active_lod_,
-			skeletal_mode, bone_count, false);
-	for (int64_t entry = 0; entry < submeshes.size(); ++entry) {
-		const Dictionary submesh = submeshes[entry];
-		const Ref<ArrayMesh> mesh = submesh.get("mesh", Variant());
-		if (mesh.is_null()) {
-			continue;
-		}
-		const int robj_index =
-				int(submesh.get("robj_index", submesh.get("part_index", 0)));
-		const int material_index = int(submesh.get("material_index", 0));
-		if (!robj_rest_transforms_.has(robj_index)) {
-			robj_rest_transforms_[robj_index] =
-					Transform3D(Basis(), submesh.get("abs", Vector3()));
-		}
-		MeshInstance3D *instance = memnew(MeshInstance3D);
-		instance->set_mesh(mesh);
-		// The stored presentation policy: fresh instances take the layer/cast
-		// decision the owner already made, so a rebuild never resets it.
-		instance->set_cast_shadows_setting(presentation_cast_setting(false));
-		instance->set_layer_mask(presentation_layer_mask(false));
-		Ref<ShaderMaterial> material = material_for_index(material_index);
-		// One source submesh is one retail strip. Transparent strips must own
-		// their material instance because Godot stores render_priority on the
-		// material, while retail chooses Q1/Q2 independently for every strip on
-		// every frame (renderer/render_order owns the cited queue contract).
-		// Opaque strips may keep sharing their retained
-		// material cache entry.
-		if (bool(submesh.get("is_alpha", false)) && material.is_valid()) {
-			material = material->duplicate();
-		}
-		instance->set_material_override(material);
-		// Skinned + rigid-fake-skinned submeshes bind to the shared
-		// Skeleton3D; everything else stays under its Robj part node so PANM
-		// part transforms keep working.
-		if (skeletal_mode && skeleton_ != nullptr &&
-				bool(submesh.get("is_skinned", false))) {
-			skeleton_->add_child(instance);
-			instance->set_skin(skeleton_skin_);
-			instance->set_skeleton_path(instance->get_path_to(skeleton_));
-		} else {
-			Node3D *node = get_or_create_robj_node(robj_index);
-			node->add_child(instance);
-		}
-		if (bool(submesh.get("is_alpha", false)) && material.is_valid()) {
-			AlphaStripDraw draw;
-			draw.instance = instance;
-			draw.material = material;
-			draw.local_center = mesh->get_aabb().get_center();
-			draw.bone_path = skeletal_mode &&
-					bool(submesh.get("is_skinned", false));
-			alpha_strip_draws_.push_back(draw);
-		}
-		// Retail multi-pass effects retain one logical material but submit the
-		// same strip geometry again. Pair those auxiliary materials through
-		// metadata and duplicate geometry only; never duplicate logical rows.
-		auto add_auxiliary_draw = [&](const StringName &p_material_meta,
-				const String &p_name, const StringName &p_kind_meta) {
-			if (!material->has_meta(p_material_meta)) {
-				return;
+	for (std::size_t lod_index = first_retained_lod;
+			lod_index < retained_lod_end;
+			++lod_index) {
+		const Array submeshes = object_data_->build_lod_submeshes(
+				static_cast<int>(lod_index), skeletal_mode, bone_count, false);
+		authored_lod_available_[lod_index] = !submeshes.is_empty();
+		for (int64_t entry = 0; entry < submeshes.size(); ++entry) {
+			const Dictionary submesh = submeshes[entry];
+			const Ref<ArrayMesh> mesh = submesh.get("mesh", Variant());
+			if (mesh.is_null()) {
+				continue;
 			}
-			const Ref<ShaderMaterial> auxiliary_material = material->get_meta(
-					p_material_meta, Variant());
-			if (auxiliary_material.is_null()) {
-				return;
+			const int robj_index =
+					int(submesh.get("robj_index", submesh.get("part_index", 0)));
+			const int material_index = int(submesh.get("material_index", 0));
+			if (static_cast<int>(lod_index) == active_lod_ &&
+					!robj_rest_transforms_.has(robj_index)) {
+				robj_rest_transforms_[robj_index] =
+						Transform3D(Basis(), submesh.get("abs", Vector3()));
 			}
-			MeshInstance3D *auxiliary_instance = memnew(MeshInstance3D);
-			auxiliary_instance->set_name(p_name);
-			auxiliary_instance->set_mesh(mesh);
-			auxiliary_instance->set_material_override(auxiliary_material);
-			auxiliary_instance->set_cast_shadows_setting(
-					presentation_cast_setting(true));
-			auxiliary_instance->set_layer_mask(presentation_layer_mask(true));
-			auxiliary_instance->set_meta("_opennova_auxiliary_draw", true);
-			auxiliary_instance->set_meta(p_kind_meta, true);
-			Node *surface_parent = instance->get_parent();
-			if (surface_parent == nullptr) {
-				memdelete(auxiliary_instance);
-				return;
+			MeshInstance3D *instance = memnew(MeshInstance3D);
+			instance->set_mesh(mesh);
+			instance->set_meta("_opennova_lod_index",
+					static_cast<int64_t>(lod_index));
+			instance->set_visible(static_cast<int>(lod_index) == active_lod_);
+			// The stored presentation policy: fresh instances take the layer/cast
+			// decision the owner already made, so a rebuild never resets it.
+			instance->set_cast_shadows_setting(presentation_cast_setting(false));
+			instance->set_layer_mask(presentation_layer_mask(false));
+			Ref<ShaderMaterial> material = material_for_index(material_index);
+			// One source submesh is one retail strip. Transparent strips must own
+			// their material instance because Godot stores render_priority on the
+			// material, while retail chooses Q1/Q2 independently for every strip on
+			// every frame (renderer/render_order owns the cited queue contract).
+			// Opaque strips may keep sharing their retained
+			// material cache entry.
+			if (bool(submesh.get("is_alpha", false)) && material.is_valid()) {
+				const Ref<ShaderMaterial> shared_material = material;
+				material = material->duplicate();
+				FrameFx::clone_q3_object_material(shared_material, material);
 			}
-			surface_parent->add_child(auxiliary_instance);
+			instance->set_material_override(material);
+			FrameFx::register_q3_object_source(instance, material);
+			const bool blended_draw = bool(submesh.get("is_alpha", false));
+			if (blended_draw) {
+				// Static harvesting keeps retail's independently ordered alpha strips
+				// in one global population instead of assigning them to spatial
+				// MultiMeshes whose changing centers would perturb Q1/Q2 ordering.
+				instance->set_meta("_opennova_blended_draw", true);
+			}
+			// Skinned + rigid-fake-skinned submeshes bind to the shared
+			// Skeleton3D; everything else stays under its Robj part node so PANM
+			// part transforms keep working.
 			if (skeletal_mode && skeleton_ != nullptr &&
 					bool(submesh.get("is_skinned", false))) {
-				auxiliary_instance->set_skin(skeleton_skin_);
-				auxiliary_instance->set_skeleton_path(
-						auxiliary_instance->get_path_to(skeleton_));
+				skeleton_->add_child(instance);
+				instance->set_skin(skeleton_skin_);
+				instance->set_skeleton_path(instance->get_path_to(skeleton_));
+			} else {
+				Node3D *node = get_or_create_robj_node(robj_index);
+				node->add_child(instance);
 			}
-		};
-		add_auxiliary_draw("_opennova_postmultiply_material", "PostMultiply",
-				"_opennova_postmultiply_proxy");
-		surface_material_indices_.append(material_index);
-		surface_materials_.push_back(material);
-		collect_anim_frames(material_index);
+			if (bool(submesh.get("is_alpha", false)) && material.is_valid()) {
+				AlphaStripDraw draw;
+				draw.instance = instance;
+				draw.material = material;
+				draw.local_center = mesh->get_aabb().get_center();
+				draw.bone_path =
+						skeletal_mode && bool(submesh.get("is_skinned", false));
+				alpha_strip_draws_.push_back(draw);
+			}
+			// Retail multi-pass effects retain one logical material but submit the
+			// same strip geometry again. Pair those auxiliary materials through
+			// metadata and duplicate geometry only; never duplicate logical rows.
+			auto add_auxiliary_draw = [&](const StringName &p_material_meta,
+											  const String &p_name,
+											  const StringName &p_kind_meta) {
+				if (material.is_null() || !material->has_meta(p_material_meta)) {
+					return;
+				}
+				const Ref<ShaderMaterial> auxiliary_material =
+						material->get_meta(p_material_meta, Variant());
+				if (auxiliary_material.is_null()) {
+					return;
+				}
+				MeshInstance3D *auxiliary_instance = memnew(MeshInstance3D);
+				auxiliary_instance->set_name(p_name);
+				auxiliary_instance->set_mesh(mesh);
+				auxiliary_instance->set_material_override(auxiliary_material);
+				auxiliary_instance->set_cast_shadows_setting(
+						presentation_cast_setting(true));
+				auxiliary_instance->set_layer_mask(presentation_layer_mask(true));
+				auxiliary_instance->set_meta("_opennova_auxiliary_draw", true);
+				auxiliary_instance->set_meta("_opennova_lod_index",
+						static_cast<int64_t>(lod_index));
+				auxiliary_instance->set_visible(static_cast<int>(lod_index) ==
+						active_lod_);
+				if (blended_draw) {
+					auxiliary_instance->set_meta("_opennova_blended_draw", true);
+				}
+				auxiliary_instance->set_meta(p_kind_meta, true);
+				Node *surface_parent = instance->get_parent();
+				if (surface_parent == nullptr) {
+					memdelete(auxiliary_instance);
+					return;
+				}
+				surface_parent->add_child(auxiliary_instance);
+				if (skeletal_mode && skeleton_ != nullptr &&
+						bool(submesh.get("is_skinned", false))) {
+					auxiliary_instance->set_skin(skeleton_skin_);
+					auxiliary_instance->set_skeleton_path(
+							auxiliary_instance->get_path_to(skeleton_));
+				}
+			};
+			add_auxiliary_draw("_opennova_postmultiply_material", "PostMultiply",
+					"_opennova_postmultiply_proxy");
+			surface_material_indices_.append(material_index);
+			surface_materials_.push_back(material);
+			collect_anim_frames(material_index);
+		}
+	}
+
+	refresh_active_lod_rest_transforms();
+	if (authored_lod_enabled_ && authored_lod_thresholds_q16_.size() > 1) {
+		authored_lod_models_.insert(this);
+	}
+
+	if (authored_occluders_enabled_) {
+		opennova::world::OcclusionModel occlusion_model;
+		if (opennova::simassets::occlusion_model_from_3di(native_model,
+					occlusion_model)) {
+			const std::vector<opennova::renderer::AuthoredOccluderSection> sections =
+					opennova::renderer::build_authored_occluder_sections(occlusion_model);
+			for (const opennova::renderer::AuthoredOccluderSection &section :
+					sections) {
+				PackedVector3Array vertices;
+				vertices.resize(static_cast<int64_t>(section.vertices.size()));
+				for (std::size_t i = 0; i < section.vertices.size(); ++i) {
+					const opennova::renderer::OccluderVertex &vertex =
+							section.vertices[i];
+					vertices.set(static_cast<int64_t>(i),
+							Vector3(-vertex.x, vertex.y, vertex.z));
+				}
+				PackedInt32Array indices;
+				indices.resize(static_cast<int64_t>(section.indices.size()));
+				for (std::size_t i = 0; i < section.indices.size(); ++i) {
+					indices.set(static_cast<int64_t>(i), section.indices[i]);
+				}
+				Ref<ArrayOccluder3D> occluder;
+				occluder.instantiate();
+				occluder->set_arrays(vertices, indices);
+				OccluderInstance3D *instance = memnew(OccluderInstance3D);
+				instance->set_name(String("AuthoredOccluder_Section") +
+						String::num_int64(section.section));
+				instance->set_occluder(occluder);
+				instance->set_visible(
+						section_visibility_mask_ == -1 ||
+						(section.section < 63 &&
+								((static_cast<uint64_t>(section_visibility_mask_) >>
+										 section.section) &
+										1u) != 0));
+				add_child(instance);
+				authored_occluders_[section.section] = instance;
+			}
+		}
+	}
+	if (!authored_occluders_.is_empty() && is_inside_tree()) {
+		RenderingServer *rendering = RenderingServer::get_singleton();
+		Viewport *viewport = get_viewport();
+		if (rendering != nullptr && rendering->get_rendering_device() != nullptr &&
+				viewport != nullptr) {
+			// Authored closed OOBJ faces augment the retail section/portal verdict.
+			// Enable Godot's consumer only on Forward+/Mobile; headless and
+			// Compatibility expose no RenderingDevice-backed occlusion path.
+			viewport->set_use_occlusion_culling(true);
+		}
 	}
 
 	classify_materials();
@@ -265,8 +378,10 @@ AABB ObjectModel::compute_transformed_mesh_bounds() const {
 			continue;
 		}
 		for (int i = 0; i < node->get_child_count(); ++i) {
-			MeshInstance3D *instance = Object::cast_to<MeshInstance3D>(node->get_child(i));
-			if (instance == nullptr || instance->get_mesh().is_null()) {
+			MeshInstance3D *instance =
+					Object::cast_to<MeshInstance3D>(node->get_child(i));
+			if (instance == nullptr || !instance->is_visible() ||
+					instance->get_mesh().is_null()) {
 				continue;
 			}
 			const AABB mesh_aabb = instance->get_mesh()->get_aabb();

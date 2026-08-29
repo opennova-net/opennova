@@ -56,13 +56,6 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	leg_start = _begin_leg()
 	_world.present_local_view_frame()
 	_end_leg(FrameStats.WORLD_LOCAL_VIEW, leg_start)
-	# The renderer's auxiliary views share this world and restore their color
-	# into the beauty target, so they must take THIS frame's pose. Ordered
-	# here, never self-clocked: a process callback races the placement above
-	# and shears foliage/scars/coronas against the ground on every turn.
-	leg_start = _begin_leg()
-	_world.sync_framefx_frame()
-	_end_leg(FrameStats.WORLD_FRAMEFX, leg_start)
 	# Retail re-applies fog/ambient per scene pass. Classify the adjusted render
 	# eye after camera placement and publish that pass payload before terrain,
 	# foliage, objects, viewmodel, and particles consume it.
@@ -119,6 +112,13 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	leg_start = _begin_leg()
 	_world.render_material_frame()
 	_end_leg(FrameStats.WORLD_MATERIAL, leg_start)
+	# Compile focused Q3 only after this frame's celestial, water, occlusion,
+	# and object-material producers have published their final transforms and
+	# parameters. The typed snapshot is consumed by the terminal compositor;
+	# it is never self-clocked from a stale process callback.
+	leg_start = _begin_leg()
+	_world.sync_framefx_frame()
+	_end_leg(FrameStats.WORLD_FRAMEFX, leg_start)
 	# The render-slot ground shadows plan against the light select published
 	# above and stamp the model subtrees the material frame just rebuilt
 	# (ex-self-clocked SlotShadow _process, which ran after the whole frame).

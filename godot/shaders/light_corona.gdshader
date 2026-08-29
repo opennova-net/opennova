@@ -13,7 +13,6 @@ render_mode unshaded, depth_draw_never, cull_disabled, blend_add;
 
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 
 // The procedural 128x128 radial falloff "texlightcrn" [orig:
 // Lighting_InitTextures @ 0x5a94f0 — intensity = 255 x (0.4 - 0.45 x d),
@@ -34,9 +33,6 @@ void vertex() {
 }
 
 void fragment() {
-	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		discard;
-	}
 	// Gamma-space modulate and accumulation before the terminal transfer.
 	ALBEDO = scene_output(texture(u_corona_tex, UV).rgb * COLOR.rgb);
 	ALPHA = 1.0;

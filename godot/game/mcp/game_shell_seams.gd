@@ -84,6 +84,40 @@ var hud_hidden_capture_end_action := Callable()
 var hud_hidden_capture_witness_source := Callable()
 
 
+## Break every shell-capturing edge before MainGame's script is destroyed.
+## Exported builds otherwise report these closures as orphaned and can fault
+## while verbose ObjectDB cleanup walks their invalid owners.
+func clear() -> void:
+	game_source = Callable()
+	world_source = Callable()
+	runtime_source = Callable()
+	presenter_source = Callable()
+	hud_presenter_source = Callable()
+	menu_shell_source = Callable()
+	armory_presenter_source = Callable()
+	deploy_presenter_source = Callable()
+	dev_tools_source = Callable()
+	frame_stats_source = Callable()
+	viewport_source = Callable()
+	resource_root_source = Callable()
+	adapter_source = Callable()
+	shell_state_source = Callable()
+	world_loading_source = Callable()
+	dev_tools_open_source = Callable()
+	start_mission = Callable()
+	start_saved_mission = Callable()
+	return_to_menu = Callable()
+	resume_action = Callable()
+	quit_action = Callable()
+	open_ingame_menu_action = Callable()
+	open_armory_action = Callable()
+	render_capture_begin_action = Callable()
+	render_capture_end_action = Callable()
+	hud_hidden_capture_begin_action = Callable()
+	hud_hidden_capture_end_action = Callable()
+	hud_hidden_capture_witness_source = Callable()
+
+
 ## The game shell's seams: its private presenters and state reads arrive as
 ## supplied Callables, everything else binds the shell's public methods by name
 ## (MainGame: get_dev_tools, get_frame_stats, get_viewport,

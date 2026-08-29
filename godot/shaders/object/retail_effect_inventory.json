@@ -164,7 +164,7 @@
     "TECHNIQUE_GLOW": {
       "declaration_count": 1,
       "pass_declaration_count": 1,
-      "disposition": "ported_isolated_q3_framefx_d3d12_raster_validated",
+      "disposition": "ported_typed_q3_framefx_rd_draw_list",
       "evidence": {
         "Glass.fx": ["TGlassFFP"]
       }

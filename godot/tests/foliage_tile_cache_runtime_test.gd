@@ -27,6 +27,16 @@ func _sample_foliage(_world_x: float, _world_z: float) -> int:
 	return 1
 
 
+func _visible_detail_draws(dispatcher: FoliageDispatcher) -> Array:
+	var rows: Array = []
+	var report: Dictionary = dispatcher.get_backend_report()
+	for row_value in report.get("draws", []):
+		var row := row_value as Dictionary
+		if bool(row.get("visible", false)) and String(row.get("tier", "")) == "detail":
+			rows.append(row)
+	return rows
+
+
 func _settle_tile_cache_with_foliage(
 		terrain: Terrain, dispatcher: FoliageDispatcher, camera: Camera3D) -> Dictionary:
 	var diagnostics: Dictionary = {}
@@ -87,13 +97,10 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	dispatcher.render_frame(camera.global_transform)
 	dispatcher.render_frame(camera.global_transform)
 	var pending_fallback_draws := 0
-	for child in dispatcher.get_children():
-		if not child.name.begins_with("FoliageDetailDraw") or not child.visible:
-			continue
+	for row_value in _visible_detail_draws(dispatcher):
+		var pending_draw := row_value as Dictionary
 		pending_fallback_draws += 1
-		var pending_draw := child as MeshInstance3D
-		assert_false(bool(pending_draw.get_instance_shader_parameter(
-			"u_instance_tile_cache_ready")),
+		assert_false(bool(pending_draw.tile_cache_ready),
 			"pending terrain pages must leave detail foliage on its analytic fallback")
 	assert_gt(pending_fallback_draws, 0,
 		"the cold frame must exercise visible detail foliage fallback")
@@ -106,29 +113,26 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	assert_not_null(page_array)
 	var ready_draws := 0
 	var fine_ready_draws := 0
-	for child in dispatcher.get_children():
-		if not child.name.begins_with("FoliageDetailDraw") or not child.visible:
-			continue
-		var draw := child as MeshInstance3D
-		var material := draw.material_override as ShaderMaterial
+	for row_value in _visible_detail_draws(dispatcher):
+		var draw := row_value as Dictionary
+		var material := draw.material as ShaderMaterial
 		assert_not_null(material)
 		if material == null:
 			continue
 		assert_same(material.get_shader_parameter("u_tile_cache"), page_array,
 			"Terrain and detail foliage must sample one shared Texture2DArray.")
 		assert_true(bool(material.get_shader_parameter("u_has_tile_cache")))
-		if not bool(draw.get_instance_shader_parameter("u_instance_tile_cache_ready")):
+		if not bool(draw.tile_cache_ready):
 			continue
 		ready_draws += 1
-		var layer := int(draw.get_instance_shader_parameter("u_instance_tile_cache_layer"))
+		var layer := int(draw.tile_cache_layer)
 		assert_between(layer, 0, page_array.get_layers() - 1)
-		var page := draw.get_instance_shader_parameter(
-			"u_instance_tile_cache_projection") as Vector4
+		var page := draw.tile_cache_projection as Vector4
 		assert_true(page.w == 64.0 or page.w == 128.0 or page.w == 256.0 or page.w == 512.0)
 		if page.w == 64.0:
 			fine_ready_draws += 1
 		assert_almost_eq(page.z, 1.0 / page.w, 0.000001)
-		var shared_point: Vector3 = draw.mesh.get_aabb().get_center()
+		var shared_point: Vector3 = (draw.mesh as Mesh).get_aabb().get_center()
 		assert_between(shared_point.x, page.x, page.x + page.w)
 		assert_between(shared_point.z, page.y, page.y + page.w)
 
@@ -146,15 +150,11 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	terrain.set_lod_quality(0.3)
 	terrain.render_frame()
 	dispatcher.render_frame(camera.global_transform)
-	for child in dispatcher.get_children():
-		if not child.name.begins_with("FoliageDetailDraw") or not child.visible:
+	for row_value in _visible_detail_draws(dispatcher):
+		var transition_draw := row_value as Dictionary
+		if not bool(transition_draw.tile_cache_ready):
 			continue
-		var transition_draw := child as MeshInstance3D
-		if not bool(transition_draw.get_instance_shader_parameter(
-				"u_instance_tile_cache_ready")):
-			continue
-		var transition_page := transition_draw.get_instance_shader_parameter(
-			"u_instance_tile_cache_projection") as Vector4
+		var transition_page := transition_draw.tile_cache_projection as Vector4
 		assert_ne(transition_page.w, 64.0,
 			"the transition frame must not borrow a stale fine page while coarse work is pending")
 	await _settle_tile_cache_with_foliage(terrain, dispatcher, camera)
@@ -162,14 +162,11 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 		"The coarse regression frame must retain a live terrain detail handoff.")
 	var current_coarse_draws := 0
 	var stale_fine_draws := 0
-	for child in dispatcher.get_children():
-		if not child.name.begins_with("FoliageDetailDraw") or not child.visible:
+	for row_value in _visible_detail_draws(dispatcher):
+		var draw := row_value as Dictionary
+		if not bool(draw.tile_cache_ready):
 			continue
-		var draw := child as MeshInstance3D
-		if not bool(draw.get_instance_shader_parameter("u_instance_tile_cache_ready")):
-			continue
-		var page := draw.get_instance_shader_parameter(
-			"u_instance_tile_cache_projection") as Vector4
+		var page := draw.tile_cache_projection as Vector4
 		if page.w > 64.0:
 			current_coarse_draws += 1
 		elif page.w == 64.0:

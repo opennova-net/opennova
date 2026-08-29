@@ -1,0 +1,240 @@
+#pragma once
+
+// Portable Q3 frame compilation. This is the seam between device presenters
+// and the focused beauty-depth Q3 adapter: producers publish generation-bound
+// resource leases plus plain values; the compiler validates, orders, and owns
+// one immutable draw list until the next compile. No Godot or RenderingDevice
+// facts cross this interface.
+
+#include <runtime/renderer/material_classify.h>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+namespace opennova::renderer {
+
+// These are the five witnessed draws in FrameFX's bloom-source bracket:
+// glow-capable object duplicates first, followed by the NV water redraw,
+// celestial discs, and the occlusion-independent sun glow.
+// [orig: CRenderBatchQueue_SortAndFlush(4) @ 0x582a54;
+// render_water_surface(view, 1) @ 0x582a62;
+// render_celestial_bodies(1) / render_skybox_sun_glow(0, 0) @ 0x582a77].
+enum class Q3Technique : std::uint8_t {
+	NormalCopy = 0,
+	RotatedSpecularGlass = 1,
+	WaterNightVision = 2,
+	CelestialBody = 3,
+	SunGlow = 4,
+	Count = 5,
+};
+
+// LightScene coronas are deliberately named here only so a producer cannot
+// silently submit them as sun glow. They are ordinary world additive draws
+// and the current retail-backed shader explicitly discards them from Q3.
+enum class Q3Source : std::uint8_t {
+	Object = 0,
+	Water = 1,
+	CelestialBody = 2,
+	SunGlow = 3,
+	LightCorona = 4,
+};
+
+enum class Q3GeometryKind : std::uint8_t {
+	Rigid = 0,
+	StaticInstances = 1,
+	Skinned = 2,
+};
+
+// An opaque portable identity, not a GPU handle. The adapter resolves both
+// words together and must fail the draw if the generation no longer matches.
+struct Q3ResourceLease {
+	std::uint64_t resource_id = 0;
+	std::uint64_t generation = 0;
+
+	bool valid() const { return resource_id != 0 && generation != 0; }
+};
+
+struct Q3Vec2 {
+	float x = 0.0f;
+	float y = 0.0f;
+};
+
+struct Q3Vec3 {
+	float x = 0.0f;
+	float y = 0.0f;
+	float z = 0.0f;
+};
+
+struct Q3Vec4 {
+	float x = 0.0f;
+	float y = 0.0f;
+	float z = 0.0f;
+	float w = 0.0f;
+};
+
+// Column-major transform/bone matrix, directly convertible at the adapter.
+struct Q3Matrix4 {
+	std::array<float, 16> values{
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 0.0f, 1.0f,
+	};
+};
+
+// Only values needed by the focused object Q3 techniques live here. NORMAL
+// copy samples beauty but still needs the diffuse-alpha coverage source;
+// Glass's Q3 technique uses ReflectColor and the global sun-aligned analytic
+// CubeRotSpecular lobe. [orig: _FFP.fx LUM GLOW copy @ 0x5afc7f;
+// Glass.fx TECHNIQUE_GLOW].
+struct Q3ObjectMaterialParameters {
+	ObjectMaterialClassification classification{};
+	Q3ResourceLease base_texture{};
+	Q3ResourceLease detail_texture{};
+	Q3Vec4 self_lum_color{1.0f, 1.0f, 1.0f, 1.0f};
+	Q3Vec4 reflect_color{0.7f, 0.8f, 0.9f, 0.35f};
+	float alpha_mod = 1.0f;
+	std::array<float, 9> uv_transform{
+		1.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f,
+		0.0f, 0.0f, 1.0f,
+	};
+};
+
+// Dynamic water inputs consumed by Water_PSBumpReflectNV. Per-vertex diffuse,
+// specular, fog, and projective rows remain in the leased geometry.
+struct Q3WaterMaterialParameters {
+	Q3ResourceLease reflection_texture{};
+	Q3ResourceLease noise_color_texture{};
+	Q3ResourceLease noise_normal_texture{};
+	Q3Vec3 water_color{0.408f, 0.314f, 0.224f};
+	Q3Vec4 water_uv{1.0f, 0.2f, 0.0f, 0.0f};
+	Q3Vec2 reflection_uv_scale{1.0f, 1.0f};
+	bool has_reflection = false;
+	bool underwater_view = false;
+};
+
+// Shared parameter block for the body and sun-glow techniques. `opacity` is
+// already the producer's pass-specific value: body opacity for CelestialBody,
+// or glare_q3_peak_opacity for SunGlow.
+struct Q3CelestialMaterialParameters {
+	Q3ResourceLease diffuse_texture{};
+	Q3Vec3 tint{1.0f, 1.0f, 1.0f};
+	float opacity = 1.0f;
+	Q3Vec3 anchor_camera_world{};
+	Q3Vec3 glare_direction{0.0f, 1.0f, 0.0f};
+	bool additive = false;
+	bool billboard = false;
+	bool glare_view_fade = false;
+};
+
+// One producer row. Input order is retail submission order. Ranges address
+// Q3FrameSnapshot's flat arrays and are copied/remapped into the draw list.
+struct Q3SubmissionSnapshot {
+	std::uint64_t submission_id = 0;
+	Q3Source source = Q3Source::Object;
+	Q3GeometryKind geometry_kind = Q3GeometryKind::Rigid;
+	Q3ResourceLease geometry{};
+	Q3ResourceLease material{};
+	std::uint32_t surface_index = 0;
+	float view_depth = 0.0f;
+	std::uint32_t submit_flags = 0;
+	std::size_t first_transform = 0;
+	std::size_t transform_count = 0;
+	std::size_t first_bone = 0;
+	std::size_t bone_count = 0;
+	Q3ObjectMaterialParameters object{};
+	Q3WaterMaterialParameters water{};
+	Q3CelestialMaterialParameters celestial{};
+	bool visible = true;
+};
+
+struct Q3FrameSnapshot {
+	std::uint64_t frame_id = 0;
+	std::uint64_t scene_generation = 0;
+	std::vector<Q3SubmissionSnapshot> submissions;
+	std::vector<Q3Matrix4> transforms;
+	std::vector<Q3Matrix4> bone_palette;
+};
+
+enum class Q3RejectReason : std::uint8_t {
+	GlowCopySuppressed = 0,
+	UnsupportedObjectMaterial = 1,
+	UnsupportedSource = 2,
+	InvalidResourceLease = 3,
+	InvalidTransformRange = 4,
+	InvalidBoneRange = 5,
+	NonFiniteInput = 6,
+};
+
+struct Q3RejectedSubmission {
+	std::uint64_t submission_id = 0;
+	std::size_t input_index = 0;
+	Q3RejectReason reason = Q3RejectReason::UnsupportedSource;
+};
+
+struct Q3DrawCommand {
+	std::uint64_t submission_id = 0;
+	std::size_t input_index = 0;
+	Q3Technique technique = Q3Technique::NormalCopy;
+	Q3GeometryKind geometry_kind = Q3GeometryKind::Rigid;
+	Q3ResourceLease geometry{};
+	Q3ResourceLease material{};
+	std::uint32_t surface_index = 0;
+	std::uint32_t sort_key = 0;
+	std::uint32_t first_transform = 0;
+	std::uint32_t transform_count = 0;
+	std::uint32_t first_bone = 0;
+	std::uint32_t bone_count = 0;
+	Q3ObjectMaterialParameters object{};
+	Q3WaterMaterialParameters water{};
+	Q3CelestialMaterialParameters celestial{};
+};
+
+struct Q3FrameDebugCounters {
+	std::size_t input_submissions = 0;
+	std::size_t invisible_submissions = 0;
+	std::size_t emitted_submissions = 0;
+	std::size_t rejected_submissions = 0;
+	std::size_t invalid_resource_submissions = 0;
+	std::size_t unsupported_light_coronas = 0;
+	std::array<std::size_t, static_cast<std::size_t>(Q3Technique::Count)>
+			emitted_by_technique{};
+};
+
+struct Q3DrawList {
+	std::uint64_t frame_id = 0;
+	std::uint64_t scene_generation = 0;
+	std::vector<Q3DrawCommand> commands;
+	std::vector<Q3Matrix4> transforms;
+	std::vector<Q3Matrix4> bone_palette;
+	std::vector<Q3RejectedSubmission> rejected;
+	Q3FrameDebugCounters debug{};
+};
+
+// Deep in-process module: one call validates every resource/range, derives
+// object techniques from the authoritative material classification, applies
+// the witnessed FrameFX bracket and Q3 back-to-front key, and snapshots every
+// value needed by the device adapter.
+//
+// The result remains valid until the next compile call. Unsupported inputs are
+// omitted and reported; the compiler never guesses a technique.
+class Q3FrameCompiler {
+public:
+	const Q3DrawList &compile(const Q3FrameSnapshot &snapshot);
+	const Q3DrawList &draw_list() const { return draw_list_; }
+
+private:
+	struct PreparedSubmission {
+		std::size_t input_index = 0;
+		Q3Technique technique = Q3Technique::NormalCopy;
+		std::uint32_t sort_key = 0;
+	};
+
+	Q3DrawList draw_list_{};
+	std::vector<PreparedSubmission> prepared_;
+};
+
+} // namespace opennova::renderer

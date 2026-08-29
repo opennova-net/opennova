@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 195,
+  "resource_count": 193,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
@@ -47,8 +47,8 @@
     },
     {
       "id": "gamma-transfer",
-      "patterns": ["color.gdshaderinc", "frame_pass.gdshaderinc"],
-      "light_behavior": "gamma_framebuffer_transfer_and_q3_device_signature",
+      "patterns": ["color.gdshaderinc"],
+      "light_behavior": "gamma_framebuffer_transfer",
       "parity_status": "matching",
       "docs": ["docs/render/render-material-re.md", "docs/render/render-order-re.md"],
       "retail_citations": [

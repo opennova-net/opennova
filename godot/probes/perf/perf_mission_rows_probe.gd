@@ -47,8 +47,6 @@ const ENGINE_SLOT_SAMPLES := {
 	"render_root_gpu": FrameStats.RENDER_ROOT_GPU,
 	"render_water_cpu": FrameStats.RENDER_WATER_CPU,
 	"render_water_gpu": FrameStats.RENDER_WATER_GPU,
-	"render_q3_cpu": FrameStats.RENDER_Q3_CPU,
-	"render_q3_gpu": FrameStats.RENDER_Q3_GPU,
 	"render_slot_cpu": FrameStats.RENDER_SLOT_CPU,
 	"render_slot_gpu": FrameStats.RENDER_SLOT_GPU,
 }

@@ -251,9 +251,10 @@ function Test-GodotAppBoot {
     Write-Host "=== Boot smoke: $PackageName ==="
     $exeDir = Split-Path $ExePath -Parent
     $dllBeside = Join-Path $exeDir (Split-Path $SHIPPED_DLL -Leaf)
-    if (-not (Test-Path $dllBeside)) {
-        Copy-Item -LiteralPath $SHIPPED_DLL -Destination $dllBeside -Force
-    }
+    # The export directory survives repeated -SkipBuild validation runs. Always
+    # refresh the side-by-side extension so the smoke cannot execute a DLL from
+    # an earlier build while claiming to validate the current source tree.
+    Copy-Item -LiteralPath $SHIPPED_DLL -Destination $dllBeside -Force
 
     $stdoutLog = [System.IO.Path]::GetTempFileName()
     $stderrLog = [System.IO.Path]::GetTempFileName()

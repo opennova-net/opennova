@@ -484,7 +484,7 @@ Node3D *WirePresentPass::rebuild_held_weapon(int p_handle, int p_adm) {
 	Node3D *parent = container();
 	if (!graphic.is_empty() && placer_.is_valid() && parent != nullptr) {
 		ObjectModel *built = placer_->build_model_from_graphic(graphic,
-				String(), parent, String());
+				String(), parent, String(), String(), true);
 		if (built != nullptr) {
 			built->set_name(vformat("WireWeapon_%04x", p_handle));
 			built->set_shadow_caster_enabled(true);

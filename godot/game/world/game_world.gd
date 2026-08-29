@@ -794,6 +794,10 @@ func unload() -> void:
 ## Process-exit-only release for renderer resources intentionally retained by
 ## unload() so world-to-menu and mission-to-mission transitions stay warm.
 func release_runtime_renderer_resources() -> void:
+	# FrameFx publishes Q3 frames that retain sampled producer resources. Drain
+	# its compositor callback before Water releases those source textures.
+	if _framefx != null:
+		_framefx.shutdown()
 	var runtime_water := _water as Water
 	if runtime_water != null:
 		runtime_water.release_runtime_renderer_resources()
@@ -1150,9 +1154,8 @@ var _perf_probe_occlusion_skipped := false
 var _frame_stats: FrameStats = null
 # Weakref edge latch for measured render time on the water reflection RTT.
 var _stats_water_vp_ref: WeakRef = null
-# The other auxiliary scene renders (FrameFx's Q3 view, the slot-shadow
+# Focused Q3 is part of the root compositor; the remaining auxiliary scene is the slot-shadow
 # capture chain) — measured only while the board captures.
-var _q3_render_stats: ViewportRenderStatsSampler = null
 var _slot_render_stats: ViewportRenderStatsSampler = null
 # The captures the previous frame armed: their counters are that draw's.
 var _slot_render_armed_mask := 0
@@ -1168,20 +1171,14 @@ func set_frame_stats(board: FrameStats) -> void:
 		if _frame_stats.capture_changed.is_connected(old_capture_changed):
 			_frame_stats.capture_changed.disconnect(old_capture_changed)
 	_stop_water_render_stats()
-	if _q3_render_stats != null:
-		_q3_render_stats.stop()
 	if _slot_render_stats != null:
 		_slot_render_stats.stop()
-	_q3_render_stats = null
 	_slot_render_stats = null
 	_frame_stats = board
 	if _frame_stats != null:
 		var capture_changed := _on_frame_stats_capture_changed
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
-		_q3_render_stats = ViewportRenderStatsSampler.new(board,
-				FrameStats.RENDER_Q3_CPU, FrameStats.RENDER_Q3_GPU,
-				FrameStats.RENDER_Q3_OBJECTS, FrameStats.RENDER_Q3_DRAWS)
 		_slot_render_stats = ViewportRenderStatsSampler.new(board,
 				FrameStats.RENDER_SLOT_CPU, FrameStats.RENDER_SLOT_GPU,
 				FrameStats.RENDER_SLOT_OBJECTS, FrameStats.RENDER_SLOT_DRAWS)
@@ -1365,11 +1362,10 @@ func present_local_view_frame() -> void:
 		_local_view_presenter.after_world_tick()
 
 
-## Copy the just-placed beauty camera onto the renderer's auxiliary views. This
-## MUST run after present_local_view_frame() and before any auxiliary viewport
-## draws: those views share the world and their color is restored into the
-## beauty target, so a pose taken from the previous frame shears foliage,
-## scars and coronas against the ground while the view turns (D-RORD-8).
+## Compile the typed focused-Q3 snapshot after the camera and every live
+## celestial/water/object producer has published this frame's final state. The
+## immutable draw list is consumed by the terminal compositor against resolved
+## beauty depth; there is no shared-world auxiliary camera or Q3 viewport.
 func sync_framefx_frame() -> void:
 	if _framefx != null:
 		_framefx.advance_frame()
@@ -1585,19 +1581,17 @@ func finish_device_frame() -> void:
 	_sample_auxiliary_render_stats(_frame_stats_on)
 
 
-# The auxiliary scene renders the root-viewport rows cannot see: FrameFx's
-# shared-world Q3 view and the slot-shadow capture chain. Slot captures count
+# The auxiliary scene render the root-viewport rows cannot see is the
+# slot-shadow capture chain. Slot captures count
 # only the viewports the PREVIOUS frame armed — an UPDATE_ONCE viewport keeps
 # its last counters, so an unarmed slot would report a stale render.
 func _sample_auxiliary_render_stats(stats_on: bool) -> void:
-	if _q3_render_stats != null and _q3_render_stats.begin_frame(stats_on):
-		# FrameFx parks the Q3 viewport in UPDATE_DISABLED without a beauty
-		# camera; a disabled viewport keeps its last counters like an unarmed
-		# slot, so it counts only while it renders.
-		var q3_viewport: SubViewport = 				_framefx.get_q3_viewport() if _framefx != null else null
-		_q3_render_stats.sample_viewport(0, q3_viewport,
-				q3_viewport != null and q3_viewport.render_target_update_mode
-						!= SubViewport.UPDATE_DISABLED)
+	if stats_on and _framefx != null:
+		var q3_report := _framefx.get_backend_report()
+		_frame_stats.add(FrameStats.RENDER_Q3_OBJECTS,
+				int(q3_report.get("q3_drawn_commands", 0)))
+		_frame_stats.add(FrameStats.RENDER_Q3_DRAWS,
+				int(q3_report.get("q3_gpu_draw_calls", 0)))
 	var armed := _slot_render_armed_mask
 	_slot_render_armed_mask = (
 			_slot_shadow.get_armed_capture_mask() if _slot_shadow != null else 0)
@@ -1621,6 +1615,12 @@ func render_material_frame() -> void:
 	# (after occlusion resolves visibility, before the particle composite)
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30 computes model runtime
 	# constants during the render sector walk].
+	var viewport := get_viewport() if is_inside_tree() else null
+	var camera := viewport.get_camera_3d() if viewport != null else null
+	if camera != null:
+		var viewport_size := viewport.get_visible_rect().size
+		ObjectModel.update_authored_lods(camera.global_transform, camera.fov,
+				viewport_size.x, viewport_size.y)
 	if not _frame_stats_on:
 		ObjectModel.advance_awake_frame(_frame_delta)
 		return
@@ -1773,6 +1773,10 @@ func get_runtime_perf_counters() -> Dictionary:
 		"audio_us": _perf_audio_us,
 		"runtime": _runtime.get_perf_counters() if _runtime != null else {},
 		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
+		"foliage_backend": _dispatcher.get_backend_report() \
+				if _dispatcher != null else {},
+		"framefx": _framefx.get_backend_report() if _framefx != null else {},
+		"mission_placement": _mission_stats.duplicate(true),
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
 	}
 
@@ -1821,7 +1825,7 @@ func build_local_player_held_weapon(graphic: String) -> ObjectModel:
 	if _placer == null or graphic.is_empty():
 		return null
 	var model: ObjectModel = _placer.build_model_from_graphic(
-			graphic, "", self, "")
+			graphic, "", self, "", "", true)
 	if model != null:
 		model.set_shadow_caster_enabled(true)
 		# The 3P gun silhouettes inside the AVATAR's render slot, exactly like
@@ -2350,9 +2354,9 @@ func is_particles_hidden() -> bool:
 
 
 # --- Hide foliage (the dev tools' "Hide foliage") ----------------------------
-# The dispatcher renders the scattered vegetation through child MultiMeshInstance3D slots,
-# so hiding the dispatcher node hides all foliage at once -- without touching the placement
-# caches, so re-showing is instant and the next dispatch is already current.
+# The dispatcher renders scattered vegetation through retained scenario instances;
+# its visibility notification hides those instances without touching placement caches,
+# so re-showing is instant and the next dispatch is already current.
 
 func set_foliage_hidden(hidden: bool) -> void:
 	_foliage_hidden = hidden

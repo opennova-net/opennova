@@ -95,7 +95,7 @@ inline CelestialBodyFrame build_glare_frame(const EnvironmentState &env,
 	return frame;
 }
 
-// The glare's PEAK opacity in the isolated Q3 (bloom source) view:
+// The glare's PEAK opacity in the typed Q3 bloom-source draw:
 // FrameFX_RenderBloomPass draws the glow with NO occlusion test and the
 // fog-based brightness [orig: render_skybox_sun_glow(0, 0) called from
 // FrameFX_RenderBloomPass @ 0x582a77; the no-occlusion brightness

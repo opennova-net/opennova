@@ -8,8 +8,6 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_back;
 #define OBJ_VERTEX_POINT_LIGHTS_NONE
 #define OBJ_PROJSHAD_DIFFUSE_ALPHA_FFP
 #define OBJ_MATCHTERRAIN_NO_PASS
-#define OBJ_GLOW_NORMAL_COPY
-#define OBJ_Q3_DEPTH_OCCLUDER
 
 #include "res://shaders/object/shared.gdshaderinc"
 #include "res://shaders/object/sampling/single.gdshaderinc"
@@ -17,7 +15,6 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_back;
 #include "res://shaders/object/normal/none.gdshaderinc"
 #include "res://shaders/object/surface.gdshaderinc"
 #include "res://shaders/object/match_terrain.gdshaderinc"
-#include "res://shaders/object/glow.gdshaderinc"
 #include "res://shaders/object/vertex_standard.gdshaderinc"
 #include "res://shaders/object/fog/regular.gdshaderinc"
 #include "res://shaders/object/technique/self_lit.gdshaderinc"

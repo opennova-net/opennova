@@ -25,7 +25,6 @@ render_mode unshaded, blend_mix, depth_draw_never, cull_back;
 // Gamma-space pipeline (D-RMAT-7): raw texel sampling, gamma-space combine,
 // the exact inverse of the blit's transfer curve on the way out.
 #include "res://shaders/color.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 
 uniform sampler2D albedo_tex : repeat_disable, filter_linear_mipmap;
 
@@ -43,9 +42,6 @@ void vertex() {
 }
 
 void fragment() {
-	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		discard;
-	}
 	vec4 tex = texture(albedo_tex, UV);
 	// MODULATE2X(TEXTURE, DIFFUSE), saturating [orig: decode_mode_color_stage
 	// @0x681080 family 0x600 under GfxDevice_Modulate2XEnabled].

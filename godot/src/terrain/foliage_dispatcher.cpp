@@ -9,11 +9,12 @@
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
-#include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -84,6 +85,7 @@ Vector2 foliage_detail_cell_center(uint32_t p_cell_key) {
 
 FoliageDispatcher::FoliageDispatcher() = default;
 FoliageDispatcher::~FoliageDispatcher() {
+  _release_draw_pools();
   const Callable terrain_changed =
       callable_mp(this, &FoliageDispatcher::_on_terrain_data_changed);
   if (terrain_data_.is_valid() &&
@@ -147,6 +149,12 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::get_total_instances);
   ClassDB::bind_method(D_METHOD("get_frame_stats"),
                        &FoliageDispatcher::get_frame_stats);
+  ClassDB::bind_method(D_METHOD("get_backend_report"),
+                       &FoliageDispatcher::get_backend_report);
+  ClassDB::bind_method(
+      D_METHOD("apply_probe_draw_control", "selection", "isolate",
+               "hide_selected", "wind_phase", "fade_adjust"),
+      &FoliageDispatcher::apply_probe_draw_control);
   ClassDB::bind_method(D_METHOD("get_slot_diagnostics"),
                        &FoliageDispatcher::get_slot_diagnostics);
   ClassDB::bind_static_method("FoliageDispatcher",
@@ -171,6 +179,21 @@ void FoliageDispatcher::_bind_methods() {
   ADD_PROPERTY(
       PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "silhouette_anchors"),
       "set_silhouette_anchors", "get_silhouette_anchors");
+
+  BIND_ENUM_CONSTANT(PROBE_DRAW_ALL);
+  BIND_ENUM_CONSTANT(PROBE_DRAW_DETAIL_HIGH);
+  BIND_ENUM_CONSTANT(PROBE_DRAW_DETAIL_LOW_FAR);
+  BIND_ENUM_CONSTANT(PROBE_DRAW_DETAIL_AUTO);
+}
+
+void FoliageDispatcher::_notification(int p_what) {
+  if (p_what == NOTIFICATION_ENTER_WORLD) {
+    _bind_current_scenario();
+  } else if (p_what == NOTIFICATION_EXIT_WORLD) {
+    _release_draw_pools();
+  } else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
+    _set_draw_pool_visibility(is_visible_in_tree());
+  }
 }
 
 void FoliageDispatcher::configure_slots(const Array &p_defs,
@@ -633,74 +656,158 @@ void FoliageDispatcher::_update_materials() {
                                      tile_overlay_tint);
       material->set_shader_parameter("u_tile_cache", tile_cache);
       material->set_shader_parameter("u_has_tile_cache", has_tile_cache);
+      frame_stats_.backend_material_parameter_writes += 11;
     }
 
     const Ref<ShaderMaterial> silhouette = silhouette_materials_[slot];
     if (silhouette.is_valid()) {
       silhouette->set_shader_parameter("u_fd_texture", fd_texture);
       silhouette->set_shader_parameter("u_has_fd_texture", has_fd_texture);
+      frame_stats_.backend_material_parameter_writes += 2;
     }
   }
 }
 
-MeshInstance3D *FoliageDispatcher::_ensure_draw_node(
-    std::vector<MeshInstance3D *> &r_pool,
-    std::vector<DrawNodeStamp> &r_stamps, size_t p_index,
-    const String &p_prefix) {
+RID FoliageDispatcher::_ensure_draw_instance(
+    std::vector<RID> &r_pool,
+    std::vector<DrawInstanceStamp> &r_stamps, size_t p_index) {
   if (r_stamps.size() <= p_index) {
     r_stamps.resize(p_index + 1);
   }
+  if (!_bind_current_scenario()) {
+    return RID();
+  }
+  RenderingServer *server = RenderingServer::get_singleton();
+  if (server == nullptr) {
+    return RID();
+  }
   while (r_pool.size() <= p_index) {
-    MeshInstance3D *instance = memnew(MeshInstance3D);
-    instance->set_name(p_prefix +
-                       String::num_int64(static_cast<int64_t>(r_pool.size())));
-    add_child(instance);
-    instance->set_as_top_level(true);
-    instance->set_transform(Transform3D());
+    const RID instance = server->instance_create();
+    ++frame_stats_.backend_instance_creates;
+    server->instance_set_scenario(instance, draw_scenario_);
+    ++frame_stats_.backend_scenario_writes;
+    server->instance_set_transform(instance, Transform3D());
     // Fresh audit: attrib shadow (0x02) is parsed but never read, and both
     // foliage tiers are excluded from retail shadow-caster passes. They still
     // receive static model projection through retail's composed tile cache.
-    instance->set_cast_shadows_setting(
-        GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+    server->instance_geometry_set_cast_shadows_setting(
+        instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
     // The generic attenuation catcher cannot reproduce foliage-card alpha,
     // two-sided rasterization, and wind deformation without dark rectangles.
     // Keep foliage on the ordinary world layer until the retail tile-cache
     // compositor (which supplies the alpha-lighting term before this pass) is
     // ported.
-    instance->set_layer_mask(1u << 0);
-    instance->set_extra_cull_margin(8.0f);
-    instance->set_visible(false);
+    server->instance_set_layer_mask(instance, 1u << 0);
+    server->instance_set_extra_visibility_margin(instance, 8.0f);
+    frame_stats_.backend_configuration_writes += 4;
+    server->instance_set_visible(instance, false);
+    ++frame_stats_.backend_visibility_writes;
     r_pool.push_back(instance);
   }
   return r_pool[p_index];
 }
 
-void FoliageDispatcher::_hide_draw_pools() {
-  _hide_pool_tail(detail_draw_pool_, detail_draw_stamps_, 0);
-  _hide_pool_tail(model_draw_pool_, model_draw_stamps_, 0);
+bool FoliageDispatcher::_bind_current_scenario() {
+  RID scenario;
+  if (is_inside_tree()) {
+    const Ref<World3D> world = get_world_3d();
+    if (world.is_valid()) {
+      scenario = world->get_scenario();
+    }
+  }
+  if (scenario == draw_scenario_) {
+    return scenario.is_valid();
+  }
+  RenderingServer *server = RenderingServer::get_singleton();
+  if (server == nullptr) {
+    draw_scenario_ = RID();
+    return false;
+  }
+  const auto rebind = [&](const std::vector<RID> &p_pool) {
+    for (const RID &instance : p_pool) {
+      if (!instance.is_valid()) {
+        continue;
+      }
+      server->instance_set_scenario(instance, scenario);
+      ++frame_stats_.backend_scenario_writes;
+    }
+  };
+  rebind(detail_draw_pool_);
+  rebind(model_draw_pool_);
+  draw_scenario_ = scenario;
+  return scenario.is_valid();
+}
+
+void FoliageDispatcher::_set_draw_pool_visibility(bool p_visible) {
+  RenderingServer *server = RenderingServer::get_singleton();
+  if (server == nullptr) {
+    return;
+  }
+  const auto update = [&](const std::vector<RID> &p_pool,
+                          std::vector<DrawInstanceStamp> &r_stamps) {
+    const size_t count = std::min(p_pool.size(), r_stamps.size());
+    for (size_t index = 0; index < count; ++index) {
+      DrawInstanceStamp &stamp = r_stamps[index];
+      const bool visible = p_visible && stamp.bound;
+      if (!p_pool[index].is_valid() || stamp.visible == visible) {
+        continue;
+      }
+      server->instance_set_visible(p_pool[index], visible);
+      ++frame_stats_.backend_visibility_writes;
+      stamp.visible = visible;
+    }
+  };
+  update(detail_draw_pool_, detail_draw_stamps_);
+  update(model_draw_pool_, model_draw_stamps_);
+}
+
+void FoliageDispatcher::_release_draw_pools() {
+  RenderingServer *server = RenderingServer::get_singleton();
+  if (server != nullptr) {
+    const auto release = [&](std::vector<RID> &r_pool) {
+      for (RID &instance : r_pool) {
+        if (instance.is_valid()) {
+          server->free_rid(instance);
+        }
+        instance = RID();
+      }
+      r_pool.clear();
+    };
+    release(detail_draw_pool_);
+    release(model_draw_pool_);
+  } else {
+    detail_draw_pool_.clear();
+    model_draw_pool_.clear();
+  }
+  detail_draw_stamps_.clear();
+  model_draw_stamps_.clear();
+  draw_scenario_ = RID();
 }
 
 void FoliageDispatcher::_hide_pool_tail(
-    std::vector<MeshInstance3D *> &r_pool,
-    std::vector<DrawNodeStamp> &r_stamps, size_t p_first) {
+    std::vector<RID> &r_pool,
+    std::vector<DrawInstanceStamp> &r_stamps, size_t p_first) {
+  RenderingServer *server = RenderingServer::get_singleton();
+  if (server == nullptr) {
+    return;
+  }
   for (size_t i = p_first; i < r_pool.size(); ++i) {
-    MeshInstance3D *instance = r_pool[i];
-    DrawNodeStamp *stamp = i < r_stamps.size() ? &r_stamps[i] : nullptr;
-    if (instance == nullptr || (stamp != nullptr && !stamp->bound)) {
+    const RID instance = r_pool[i];
+    DrawInstanceStamp *stamp =
+        i < r_stamps.size() ? &r_stamps[i] : nullptr;
+    if (!instance.is_valid() || stamp == nullptr || !stamp->bound) {
       continue;
     }
-    instance->set_visible(false);
+    if (stamp->visible) {
+      server->instance_set_visible(instance, false);
+      ++frame_stats_.backend_visibility_writes;
+    }
     // Drop the draw's mesh ownership: resident meshes stay owned by the
     // caches, an evicted identity frees with its last binding.
-    instance->set_mesh(Ref<Mesh>());
-    if (stamp != nullptr) {
-      *stamp = DrawNodeStamp{};
-    }
+    server->instance_set_base(instance, RID());
+    ++frame_stats_.backend_base_writes;
+    *stamp = DrawInstanceStamp{};
   }
-}
-
-void FoliageDispatcher::_clear_meshes() {
-  _hide_draw_pools();
 }
 
 void FoliageDispatcher::reset() {
@@ -709,7 +816,7 @@ void FoliageDispatcher::reset() {
   total_frame_calls_ = 0;
   detail_mesh_cache_.clear();
   model_mesh_cache_.clear();
-  _clear_meshes();
+  _release_draw_pools();
 }
 
 int FoliageDispatcher::get_total_instances() const {
@@ -754,6 +861,48 @@ Dictionary FoliageDispatcher::get_frame_stats() const {
   result["detail_mesh_uploads"] = frame_stats_.detail_mesh_uploads;
   result["model_mesh_hits"] = frame_stats_.model_mesh_hits;
   result["model_mesh_uploads"] = frame_stats_.model_mesh_uploads;
+  result["foliage_backend"] = "rendering_server_rid";
+  result["backend_pool_size"] = static_cast<int64_t>(
+      detail_draw_pool_.size() + model_draw_pool_.size());
+  int64_t backend_active_draws = 0;
+  int64_t backend_visible_draws = 0;
+  const auto count_draws = [&](const std::vector<DrawInstanceStamp> &p_stamps) {
+    for (const DrawInstanceStamp &stamp : p_stamps) {
+      if (!stamp.bound) {
+        continue;
+      }
+      ++backend_active_draws;
+      if (stamp.visible) {
+        ++backend_visible_draws;
+      }
+    }
+  };
+  count_draws(detail_draw_stamps_);
+  count_draws(model_draw_stamps_);
+  result["backend_active_draws"] = backend_active_draws;
+  result["backend_visible_draws"] = backend_visible_draws;
+  result["backend_instance_creates"] =
+      frame_stats_.backend_instance_creates;
+  result["backend_scenario_writes"] =
+      frame_stats_.backend_scenario_writes;
+  result["backend_configuration_writes"] =
+      frame_stats_.backend_configuration_writes;
+  result["backend_base_writes"] = frame_stats_.backend_base_writes;
+  result["backend_material_writes"] = frame_stats_.backend_material_writes;
+  result["backend_material_parameter_writes"] =
+      frame_stats_.backend_material_parameter_writes;
+  result["backend_uniform_writes"] = frame_stats_.backend_uniform_writes;
+  result["backend_visibility_writes"] =
+      frame_stats_.backend_visibility_writes;
+  result["backend_server_writes"] =
+      frame_stats_.backend_instance_creates +
+      frame_stats_.backend_scenario_writes +
+      frame_stats_.backend_configuration_writes +
+      frame_stats_.backend_base_writes +
+      frame_stats_.backend_material_writes +
+      frame_stats_.backend_material_parameter_writes +
+      frame_stats_.backend_uniform_writes +
+      frame_stats_.backend_visibility_writes;
   result["terrain_scene_counter"] = frame_stats_.terrain_scene_counter;
   result["native_detail_source"] = frame_stats_.native_detail_source;
   result["preview_detail_source"] = frame_stats_.preview_detail_source;
@@ -761,6 +910,166 @@ Dictionary FoliageDispatcher::get_frame_stats() const {
   result["authored_slots"] = authored_slot_count_;
   result["enabled_slots"] = enabled_slot_count_;
   result["disabled_slots"] = disabled_slot_count_;
+  return result;
+}
+
+Dictionary FoliageDispatcher::get_backend_report() const {
+  Dictionary result;
+  result["backend"] = "rendering_server_rid";
+  result["scenario_bound"] = draw_scenario_.is_valid();
+  result["detail_pool_size"] =
+      static_cast<int64_t>(detail_draw_pool_.size());
+  result["model_pool_size"] =
+      static_cast<int64_t>(model_draw_pool_.size());
+  result["pool_size"] = static_cast<int64_t>(
+      detail_draw_pool_.size() + model_draw_pool_.size());
+
+  Array draws;
+  int64_t active_draws = 0;
+  int64_t visible_draws = 0;
+  const auto append_rows = [&](const std::vector<RID> &p_pool,
+                               const std::vector<DrawInstanceStamp> &p_stamps,
+                               const StringName &p_tier) {
+    const size_t count = std::min(p_pool.size(), p_stamps.size());
+    for (size_t index = 0; index < count; ++index) {
+      const DrawInstanceStamp &stamp = p_stamps[index];
+      if (!p_pool[index].is_valid() || !stamp.bound) {
+        continue;
+      }
+      Dictionary row;
+      row["order"] = stamp.order;
+      row["pool_index"] = static_cast<int64_t>(index);
+      row["tier"] = p_tier;
+      row["pass"] = stamp.pass;
+      row["slot"] = stamp.slot;
+      row["submission_id"] = stamp.submission_id;
+      row["cell_key"] = stamp.cell_key;
+      row["revision"] = stamp.revision;
+      row["visible"] = stamp.visible;
+      row["mesh"] = stamp.mesh;
+      row["material"] = stamp.material;
+      row["fade"] = stamp.fade;
+      row["alpha_reference"] = stamp.alpha_reference;
+      row["high_pass_cutoff"] = stamp.high_pass_cutoff;
+      row["wind_phase"] = stamp.wind_phase;
+      row["tile_cache_ready"] = stamp.tile_cache_ready;
+      row["tile_cache_layer"] = stamp.tile_cache_layer;
+      row["tile_cache_projection"] = stamp.tile_cache_projection;
+      row["casts_shadows"] = false;
+      row["layer_mask"] = static_cast<int64_t>(1u << 0);
+      draws.append(row);
+      ++active_draws;
+      if (stamp.visible) {
+        ++visible_draws;
+      }
+    }
+  };
+  append_rows(detail_draw_pool_, detail_draw_stamps_, StringName("detail"));
+  append_rows(model_draw_pool_, model_draw_stamps_, StringName("silhouette"));
+  result["active_draws"] = active_draws;
+  result["visible_draws"] = visible_draws;
+  result["draws"] = draws;
+
+  const Dictionary stats = get_frame_stats();
+  result["instance_creates"] = stats["backend_instance_creates"];
+  result["scenario_writes"] = stats["backend_scenario_writes"];
+  result["configuration_writes"] = stats["backend_configuration_writes"];
+  result["base_writes"] = stats["backend_base_writes"];
+  result["material_writes"] = stats["backend_material_writes"];
+  result["material_parameter_writes"] =
+      stats["backend_material_parameter_writes"];
+  result["uniform_writes"] = stats["backend_uniform_writes"];
+  result["visibility_writes"] = stats["backend_visibility_writes"];
+  result["server_writes"] = stats["backend_server_writes"];
+  return result;
+}
+
+Dictionary FoliageDispatcher::apply_probe_draw_control(
+    int p_selection, bool p_isolate, bool p_hide_selected,
+    float p_wind_phase, float p_fade_adjust) {
+  Dictionary result;
+  const bool valid_selection = p_selection >= PROBE_DRAW_ALL &&
+                               p_selection <= PROBE_DRAW_DETAIL_AUTO;
+  result["valid_selection"] = valid_selection;
+  result["kept"] = 0;
+  result["fade_min"] = 0.0f;
+  result["fade_max"] = 0.0f;
+  RenderingServer *server = RenderingServer::get_singleton();
+  if (!valid_selection || server == nullptr || !std::isfinite(p_wind_phase) ||
+      !std::isfinite(p_fade_adjust)) {
+    return result;
+  }
+
+  int64_t kept = 0;
+  float fade_min = std::numeric_limits<float>::infinity();
+  float fade_max = -std::numeric_limits<float>::infinity();
+  const auto apply = [&](const std::vector<RID> &p_pool,
+                         std::vector<DrawInstanceStamp> &r_stamps,
+                         bool p_detail) {
+    const size_t count = std::min(p_pool.size(), r_stamps.size());
+    for (size_t index = 0; index < count; ++index) {
+      const RID instance = p_pool[index];
+      DrawInstanceStamp &stamp = r_stamps[index];
+      if (!instance.is_valid() || !stamp.bound) {
+        continue;
+      }
+      bool matches = false;
+      switch (p_selection) {
+        case PROBE_DRAW_ALL:
+          matches = true;
+          break;
+        case PROBE_DRAW_DETAIL_HIGH:
+          matches = p_detail && stamp.pass == StringName("high");
+          break;
+        case PROBE_DRAW_DETAIL_LOW_FAR:
+          matches = p_detail && stamp.pass == StringName("low") &&
+                    stamp.high_pass_cutoff <= 0.0f;
+          break;
+        case PROBE_DRAW_DETAIL_AUTO:
+          matches = p_detail;
+          break;
+      }
+
+      const bool selected_visible = matches && stamp.visible;
+      if (selected_visible) {
+        ++kept;
+        fade_min = std::min(fade_min, stamp.fade);
+        fade_max = std::max(fade_max, stamp.fade);
+        server->instance_geometry_set_shader_parameter(
+            instance, StringName("u_wind_phase"), p_wind_phase);
+        ++frame_stats_.backend_uniform_writes;
+        stamp.wind_phase = p_wind_phase;
+        if (p_detail && p_fade_adjust != 0.0f) {
+          const float adjusted_fade =
+              std::max(stamp.fade + p_fade_adjust, 0.0f);
+          server->instance_geometry_set_shader_parameter(
+              instance, StringName("u_fade"), adjusted_fade);
+          ++frame_stats_.backend_uniform_writes;
+          stamp.fade = adjusted_fade;
+        }
+      }
+
+      bool desired_visible = stamp.visible;
+      if (p_isolate) {
+        desired_visible = selected_visible && !p_hide_selected;
+      } else if (selected_visible && p_hide_selected) {
+        desired_visible = false;
+      }
+      if (stamp.visible != desired_visible) {
+        server->instance_set_visible(instance, desired_visible);
+        ++frame_stats_.backend_visibility_writes;
+        stamp.visible = desired_visible;
+      }
+    }
+  };
+  apply(detail_draw_pool_, detail_draw_stamps_, true);
+  apply(model_draw_pool_, model_draw_stamps_, false);
+
+  result["kept"] = kept;
+  if (kept > 0) {
+    result["fade_min"] = fade_min;
+    result["fade_max"] = fade_max;
+  }
   return result;
 }
 
@@ -1081,7 +1390,7 @@ Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
     uvs.set(i, Vector2(v.u, v.v));
     uv2s.set(i, Vector2(v.u2, v.v2));
     // Only the source-height bend byte is resident geometry. Fade, alpha
-    // reference, and pass are per-submission state on the draw node.
+    // reference, and pass are per-submission state on the draw instance.
     colors.set(i, Color(v.bend, 0.0f, 0.0f, 1.0f));
     if (detail) {
       normals.set(i, Vector3(v.nx, v.ny, v.nz));
@@ -1127,8 +1436,10 @@ void FoliageDispatcher::_apply_draw_list(
   }
 
   // 2) Bind the draw list's draw commands onto the pools, in draw-list order.
+  RenderingServer *server = RenderingServer::get_singleton();
   size_t detail_draw_index = 0;
   size_t model_draw_index = 0;
+  int64_t draw_order = 0;
   for (const opennova::renderer::FoliageDrawCommand &command : p_draw_list.commands) {
     const int slot = command.slot;
     if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS) {
@@ -1145,56 +1456,67 @@ void FoliageDispatcher::_apply_draw_list(
     }
 
     const size_t draw_index = detail ? detail_draw_index++ : model_draw_index++;
-    std::vector<DrawNodeStamp> &stamps =
+    std::vector<DrawInstanceStamp> &stamps =
         detail ? detail_draw_stamps_ : model_draw_stamps_;
-    MeshInstance3D *draw =
-        detail ? _ensure_draw_node(detail_draw_pool_, stamps, draw_index,
-                                   String("FoliageDetailDraw"))
-               : _ensure_draw_node(model_draw_pool_, stamps, draw_index,
-                                   String("FoliageModelDraw"));
-    // Diff-apply against what the node already holds: a steady frame writes
-    // nothing to the RenderingServer (instance_set_base tears down and
-    // re-pairs the instance; every uniform write is a server call).
-    DrawNodeStamp &stamp = stamps[draw_index];
+    const RID draw = detail
+                         ? _ensure_draw_instance(detail_draw_pool_, stamps,
+                                                 draw_index)
+                         : _ensure_draw_instance(model_draw_pool_, stamps,
+                                                 draw_index);
+    if (server == nullptr || !draw.is_valid()) {
+      continue;
+    }
+    // Diff-apply against what the server instance already holds. A stable
+    // draw list avoids every base/material/visibility write; only values whose
+    // portable compiler clock advanced reach the server as uniform writes.
+    DrawInstanceStamp &stamp = stamps[draw_index];
     const bool fresh = !stamp.bound;
     const Ref<Mesh> mesh = found->second.mesh;
     if (fresh || stamp.mesh != mesh) {
-      draw->set_mesh(mesh);
+      server->instance_set_base(draw, mesh->get_rid());
+      ++frame_stats_.backend_base_writes;
       stamp.mesh = mesh;
     }
     Ref<Material> material;
+    bool high = false;
     if (detail) {
-      const bool high =
-          command.pass == opennova::foliage::DetailPass::HighAlphaTest;
+      high = command.pass == opennova::foliage::DetailPass::HighAlphaTest;
       material = high ? detail_high_materials_[slot]
                       : detail_low_materials_[slot];
     } else {
       material = silhouette_materials_[slot];
     }
     if (fresh || stamp.material != material) {
-      draw->set_material_override(material);
+      server->instance_geometry_set_material_override(
+          draw, material.is_valid() ? material->get_rid() : RID());
+      ++frame_stats_.backend_material_writes;
       stamp.material = material;
     }
     if (detail && (fresh || stamp.fade != command.fade)) {
-      draw->set_instance_shader_parameter(StringName("u_fade"), command.fade);
+      server->instance_geometry_set_shader_parameter(
+          draw, StringName("u_fade"), command.fade);
+      ++frame_stats_.backend_uniform_writes;
       stamp.fade = command.fade;
     }
     if (fresh || stamp.alpha_reference != command.alpha_reference) {
-      draw->set_instance_shader_parameter(StringName("u_alpha_ref"),
-                                          command.alpha_reference);
+      server->instance_geometry_set_shader_parameter(
+          draw, StringName("u_alpha_ref"), command.alpha_reference);
+      ++frame_stats_.backend_uniform_writes;
       stamp.alpha_reference = command.alpha_reference;
     }
     if (detail && (fresh || stamp.high_pass_cutoff != command.high_pass_cutoff)) {
       // The near secondary LOW draw runs under strict D3DCMP_LESS in retail;
       // the cutoff discard keeps it off every texel the HIGH pass accepted.
       // [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912, see docs/foliage/foliage-re.md]
-      draw->set_instance_shader_parameter(StringName("u_high_pass_cutoff"),
-                                          command.high_pass_cutoff);
+      server->instance_geometry_set_shader_parameter(
+          draw, StringName("u_high_pass_cutoff"), command.high_pass_cutoff);
+      ++frame_stats_.backend_uniform_writes;
       stamp.high_pass_cutoff = command.high_pass_cutoff;
     }
     if (fresh || stamp.wind_phase != command.wind_phase) {
-      draw->set_instance_shader_parameter(StringName("u_wind_phase"),
-                                          command.wind_phase);
+      server->instance_geometry_set_shader_parameter(
+          draw, StringName("u_wind_phase"), command.wind_phase);
+      ++frame_stats_.backend_uniform_writes;
       stamp.wind_phase = command.wind_phase;
     }
     if (detail) {
@@ -1221,33 +1543,47 @@ void FoliageDispatcher::_apply_draw_list(
         }
       }
       if (fresh || stamp.tile_cache_ready != ready) {
-        draw->set_instance_shader_parameter(
-            StringName("u_instance_tile_cache_ready"), ready);
+        server->instance_geometry_set_shader_parameter(
+            draw, StringName("u_instance_tile_cache_ready"), ready);
+        ++frame_stats_.backend_uniform_writes;
         stamp.tile_cache_ready = ready;
       }
       if (fresh || stamp.tile_cache_layer != layer) {
-        draw->set_instance_shader_parameter(
-            StringName("u_instance_tile_cache_layer"), layer);
+        server->instance_geometry_set_shader_parameter(
+            draw, StringName("u_instance_tile_cache_layer"), layer);
+        ++frame_stats_.backend_uniform_writes;
         stamp.tile_cache_layer = layer;
       }
       if (fresh || stamp.tile_cache_projection != projection_row) {
-        draw->set_instance_shader_parameter(
-            StringName("u_instance_tile_cache_projection"), projection_row);
+        server->instance_geometry_set_shader_parameter(
+            draw, StringName("u_instance_tile_cache_projection"),
+            projection_row);
+        ++frame_stats_.backend_uniform_writes;
         stamp.tile_cache_projection = projection_row;
       }
     }
-    if (fresh) {
-      draw->set_visible(true);
-      stamp.bound = true;
+    stamp.order = draw_order++;
+    stamp.submission_id = static_cast<int64_t>(command.submission_id);
+    stamp.cell_key = static_cast<int64_t>(command.cell_key);
+    stamp.revision = static_cast<int64_t>(command.revision);
+    stamp.slot = slot;
+    stamp.pass = detail ? (high ? StringName("high") : StringName("low"))
+                        : StringName("silhouette");
+    stamp.bound = true;
+    const bool visible = is_visible_in_tree();
+    if (stamp.visible != visible) {
+      server->instance_set_visible(draw, visible);
+      ++frame_stats_.backend_visibility_writes;
+      stamp.visible = visible;
     }
   }
-  // Pool nodes past this frame's command count held the previous frame's
+  // Pool instances past this frame's command count held the previous frame's
   // draws: hide them once (they stay hidden until rebound).
   _hide_pool_tail(detail_draw_pool_, detail_draw_stamps_, detail_draw_index);
   _hide_pool_tail(model_draw_pool_, model_draw_stamps_, model_draw_index);
 
   // 3) A regenerated identity may still have been submitted earlier in this
-  // same draw_list. Draw nodes retain its Ref<ArrayMesh>; remove cache ownership
+  // same draw_list. Draw instances retain its Ref<ArrayMesh>; remove cache ownership
   // only after every command has consumed the frame.
   _erase_cache_identities(p_draw_list.detail_evicted, detail_mesh_cache_);
   _erase_cache_identities(p_draw_list.model_evicted, model_mesh_cache_);

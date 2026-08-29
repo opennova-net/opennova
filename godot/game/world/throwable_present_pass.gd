@@ -211,7 +211,7 @@ func _build_model(_key: int, item_id: int) -> Dictionary:
 	if graphic.is_empty():
 		return {}
 	var model: Node3D = _placer.build_model_from_graphic(
-			graphic, "", _container, "")
+			graphic, "", _container, "", "", true)
 	if model == null:
 		return {}
 	model.name = "Throwable_%d" % item_id

@@ -482,7 +482,7 @@ func _apply_matchterrain_probe_state(entries: Array[Dictionary], state: String,
 
 # Highest-quality GLOW proof. _FFP LUM copies NORMAL, fixed Glass uses the
 # sun-rotated specular cube, and every other live runtime technique has no
-# GLOW pass. Ring pixels exercise the production isolated Q3 target and exact
+# GLOW pass. Ring pixels exercise the compositor-owned typed Q3 target and exact
 # FrameFX kernel; the away-sun capture proves Glass tracks MatRotSpecular.
 func glow_mode(out_dir: String, prefix: String) -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
@@ -588,9 +588,8 @@ func glow_mode(out_dir: String, prefix: String) -> void:
 			"glow_on_aligned", "glow_off_away", "glow_on_away"]
 	for state in states:
 		frame_renderer.visible = state in ["nopass_on", "glow_on_aligned", "glow_on_away"]
-		# In play the GameFramePipeline leg syncs the Q3 view to the beauty
-		# camera every frame (never a process callback); the stage has no
-		# pipeline, so the probe runs that sync after each visibility change.
+		# In play GameFramePipeline compiles focused Q3 from the final beauty
+		# camera every frame; this stage drives that leg explicitly.
 		frame_renderer.advance_frame()
 		var aligned: bool = not state.ends_with("_away")
 		var show_glow_contracts: bool = state.begins_with("glow_")
@@ -618,13 +617,6 @@ func glow_mode(out_dir: String, prefix: String) -> void:
 			return
 		frame.convert(Image.FORMAT_RGBA8)
 		captures[state] = frame
-		# The Q3 source beside every capture: the isolated view the bloom
-		# kernel samples, so a missing ring is attributable to the source or
-		# to the composite.
-		var q3_view := frame_renderer.get_q3_viewport()
-		var q3_image: Image = q3_view.get_texture().get_image() if q3_view != null else null
-		if q3_image != null and not q3_image.is_empty():
-			q3_image.save_png(out_dir.path_join("%s_%s_q3.png" % [prefix, state]))
 		if frame.save_png(out_dir.path_join("%s_%s.png" % [prefix, state])) != OK:
 			_sink.error("render_swatch_probe glow: could not save %s" % state)
 			_sink.quit(1)

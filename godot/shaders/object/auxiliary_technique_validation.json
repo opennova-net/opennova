@@ -104,7 +104,7 @@
     "TECHNIQUE_GLOW": {
       "scope": "live",
       "parity_status": "matching",
-      "disposition": "ported_isolated_q3_framefx_d3d12_raster_validated",
+      "disposition": "ported_typed_q3_framefx_rd_draw_list",
       "declaration_count": 1,
       "pass_declaration_count": 1,
       "manifest_contracts": ["glow_contracts"],
@@ -113,8 +113,7 @@
       ],
       "runtime_evidence": [
         {"path": "docs/render/render-material-re.md", "tokens": ["LUM effects copy their NORMAL pass block into the GLOW slot"]},
-        {"path": "godot/shaders/object/glow.gdshaderinc", "tokens": ["pow(aligned, 800.0)", "pow(aligned, 40.0)", "obj_glass_glow"]},
-        {"path": "godot/shaders/object/output_opaque.gdshaderinc", "tokens": ["is_q3_pass", "OBJ_GLOW_NO_PASS", "OBJ_GLOW_ROTATED_SPECULAR", "OBJ_GLOW_NORMAL_COPY"]},
+        {"path": "godot/src/render/q3_frame_adapter.cpp", "tokens": ["pow(aligned, 800.0)", "pow(aligned, 40.0)", "Q3Technique::RotatedSpecularGlass", "Q3Technique::NormalCopy"]},
         {"path": "godot/src/render/frame_fx.cpp", "tokens": ["FramePass::AverageFour", "FramePass::WeightedFour", "FramePass::FinalAverage", "BlendMode::SourceAlphaAdd"]},
         {"path": "godot/game/world/game_world.tscn", "tokens": ["type=\"FrameFx\""]},
         {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["glow_off_away", "sun glint", "no-pass contracts"]}

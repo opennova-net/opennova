@@ -204,6 +204,36 @@ func test_reflection_rtt_carries_the_witnessed_post_scene_dim() -> void:
 			"out = dst x 64/255 — SRCBLEND=DESTCOLOR/DESTBLEND=ZERO's multiply")
 
 
+func test_process_exit_releases_the_reflection_decode_before_its_viewport() -> void:
+	var fixture := _make_water_fixture()
+	var water := fixture["water"] as Water
+	water.advance_frame(TICK)
+
+	var mirror_camera := water.get_reflection_camera()
+	assert_not_null(mirror_camera)
+	var compositor := mirror_camera.compositor
+	assert_not_null(compositor)
+	var effects := compositor.get_compositor_effects()
+	assert_eq(effects.size(), 1)
+	var decode := effects[0] as FrameFxCompositorEffect
+	assert_not_null(decode)
+	if decode == null:
+		return
+	assert_false(bool(decode.get_backend_report().get("shutdown", false)))
+
+	water.release_runtime_renderer_resources()
+	assert_true(bool(decode.get_backend_report().get("shutdown", false)),
+			"Water drains the reflection decode while RenderingDevice is live")
+	assert_eq(compositor.get_compositor_effects().size(), 0,
+			"the retained mirror compositor no longer owns the decode effect")
+	assert_null(water.get_reflection_viewport())
+	assert_null(water.get_reflection_camera())
+
+	# MainGame's explicit release and SceneTree fallback may converge here.
+	water.release_runtime_renderer_resources()
+	assert_true(bool(decode.get_backend_report().get("shutdown", false)))
+
+
 func test_reflection_camera_matches_orthogonal_and_frustum_sources() -> void:
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]

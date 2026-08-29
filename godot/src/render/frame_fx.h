@@ -11,20 +11,25 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/rid.hpp>
 
+#include <runtime/renderer/q3_frame.h>
+
 namespace godot {
 
 class Camera3D;
 class Compositor;
-class SubViewport;
+class GeometryInstance3D;
+class Material;
+class Viewport;
 class WorldEnvironment;
 
 // The frame's terminal compositor effect: the post-transparent device leg
 // that composites the Q3 glow source and performs the sole display decode
 // (FrameFX_RenderBloomPass @0x582940; targets create_frame_effect_render_targets @0x583c40;
 // capture FrameFX_CaptureRenderTarget @0x584020 - docs/render/render-order-re.md).
-// The source RID is the isolated Q3 view owned by FrameFx; the effect runs
-// the POT capture, 256x256 two-axis weighted blur, half-strength additive
-// composite, and the final gamma->linear bridge.
+// The Q3 source is an effect-owned full-resolution color target sharing the
+// resolved beauty depth. The effect consumes Q3FrameCompiler's immutable draw
+// list, runs the POT capture, 256x256 two-axis weighted blur, half-strength
+// additive composite, and the final gamma->linear bridge.
 class FrameFxCompositorEffect : public CompositorEffect {
 	GDCLASS(FrameFxCompositorEffect, CompositorEffect)
 
@@ -39,25 +44,23 @@ public:
 	FrameFxCompositorEffect();
 	~FrameFxCompositorEffect() override;
 
-	void set_q3_texture_rid(const RID &p_texture);
-	void clear_q3_texture_rid();
+	void compile_q3_frame(Node *p_scope, Viewport *p_viewport,
+			Camera3D *p_camera);
+	void clear_q3_frame();
+	void release_device_resources();
 	Dictionary get_backend_report() const;
 
 	void _render_callback(int32_t p_effect_callback_type,
 			RenderData *p_render_data) override;
 };
 
-// World-owned coordinator. One private shared-world view owns the isolated
-// Q3 (glow/envmap duplicate) pass at FrameFX's working size; the terminal
-// compositor effect installed on the shared WorldEnvironment consumes it.
-// Callers publish no pass plumbing: this module installs the terminal
-// FrameFX compositor effect and reports through get_backend_report().
+// World-owned coordinator. The terminal compositor owns the sole focused Q3
+// renderer and its beauty-depth target. Producers register typed scene
+// sources; no auxiliary view, camera mask, or source RID exists.
 class FrameFx : public Node3D {
 	GDCLASS(FrameFx, Node3D)
 
 private:
-	SubViewport *q3_viewport_ = nullptr;
-	Camera3D *q3_camera_ = nullptr;
 	// The owning WorldEnvironment by identity: an embedder may free it before
 	// this node leaves the tree (preview teardown), so never a raw pointer.
 	ObjectID world_environment_id_;
@@ -67,16 +70,12 @@ private:
 	ObjectID synced_camera_id_;
 	uint32_t synced_camera_original_mask_ = 0;
 	bool has_synced_camera_mask_ = false;
+	bool shutdown_ = false;
 
-	void build_auxiliary_views();
+	void build_compositor();
 	void install_compositor();
 	void uninstall_compositor();
 	void restore_synced_camera_mask();
-
-public:
-	// The shared-world Q3 view, for the F3 render samplers (measured render
-	// time + visible-pass counts); null until the node is ready.
-	SubViewport *get_q3_viewport() const { return q3_viewport_; }
 
 protected:
 	static void _bind_methods();
@@ -86,12 +85,28 @@ public:
 	FrameFx();
 	~FrameFx() override;
 
+	// Typed producer registry. Object materials are classified once at their
+	// authoritative creation seam; visible geometry then publishes only a
+	// material identity. Explicit water/celestial sources never infer a Q3
+	// technique from shader names or device state.
+	static void register_q3_object_material(const Ref<Material> &p_material,
+			const opennova::renderer::ObjectMaterialClassification &p_classification);
+	static void clone_q3_object_material(const Ref<Material> &p_source,
+			const Ref<Material> &p_clone);
+	static void register_q3_object_source(GeometryInstance3D *p_source,
+			const Ref<Material> &p_material);
+	static void register_q3_source(GeometryInstance3D *p_source,
+			opennova::renderer::Q3Source p_kind);
+
 	// Ordered device leg, driven from GameFramePipeline immediately after the
 	// local-view camera placement. This module must NOT self-clock: a node
-	// process callback races the pipeline's camera producer, and a Q3 view
-	// rendered from last frame's pose composites a stale glow over the
+	// process callback races the pipeline's camera producer, and a Q3 frame
+	// compiled from last frame's pose composites stale glow over the
 	// current beauty frame.
 	void advance_frame();
+	// Process-exit boundary: stop render callbacks and release compositor-owned
+	// device resources while RenderingServer and RenderingDevice are still live.
+	void shutdown();
 
 	Dictionary get_backend_report() const;
 };

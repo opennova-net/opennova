@@ -2,7 +2,7 @@ class_name ViewportRenderStatsSampler
 extends RefCounted
 
 ## Measured render time + visible-pass submission counts for one auxiliary
-## viewport set on the F3 Stats board (the Q3 view, the viewmodel pass, the
+## viewport set on the F3 Stats board (the viewmodel pass, the
 ## slot-shadow capture chain). Measurement is RenderingServer state that costs
 ## while armed, so it flips on only while the board captures and off on the
 ## capture close edge; the previous frame's numbers land on the board each

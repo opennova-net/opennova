@@ -1,6 +1,8 @@
 extends GutTest
 
 const PROBE_PATH := "res://probes/render/foliage_spawn_capture_probe.gd"
+const FLICKER_PROBE_PATH := \
+		"res://probes/stage/foliage_flicker_regression_probe.gd"
 const ProbeScript := preload(PROBE_PATH)
 
 
@@ -32,6 +34,20 @@ func test_spawn_capture_uses_real_player_and_public_foliage_api() -> void:
 	]:
 		assert_false(source.contains(forbidden),
 			"Probe must not search painted cells, teleport the camera, or synthesize input: %s" % forbidden)
+
+
+func test_foliage_raster_probes_control_rid_draws_through_the_public_seam() -> void:
+	for path in [PROBE_PATH, FLICKER_PROBE_PATH]:
+		var source := FileAccess.get_file_as_string(path)
+		assert_false(source.is_empty(), "Foliage probe source should be readable: %s" % path)
+		assert_true(source.contains("apply_probe_draw_control("),
+				"RID-backed foliage probes must use the public diagnostic control seam: %s" % path)
+		assert_false(source.contains("dispatcher.get_children()"),
+				"A retained RID has no discoverable child node: %s" % path)
+		assert_false(source.contains("FoliageDetailDraw"),
+				"Probe admission must use portable pass identity, not a retired node name: %s" % path)
+		assert_false(source.contains("FoliageModelDraw"),
+				"Probe admission must use portable pass identity, not a retired node name: %s" % path)
 
 
 func test_spawn_capture_requires_requested_runtime_expansion_and_archive_winners() -> void:

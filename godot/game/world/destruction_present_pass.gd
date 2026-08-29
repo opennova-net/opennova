@@ -261,7 +261,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		var individual_mirror_reflected := node is ObjectModel \
 				and bool((node as ObjectModel).mirror_reflected)
 		var model: ObjectModel = _placer.build_model_from_graphic(
-				husk_graphic, "", node, "")
+				husk_graphic, "", node, "", "", true)
 		if model == null:
 			_husked[husk_key] = null
 			_stats.no_husk += 1
@@ -314,7 +314,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 	var batched_mirror_reflected: bool = \
 			bool(_placer.static_instance_is_mirror_reflected(bms_id))
 	var graft: ObjectModel = _placer.build_model_from_graphic(
-			husk_graphic, "", _container, "")
+			husk_graphic, "", _container, "", "", true)
 	if graft == null:
 		_husked[husk_key] = null
 		_stats.no_husk += 1

@@ -29,7 +29,7 @@ func test_every_checked_in_shader_resource_loads_through_godot() -> void:
 	var paths := PackedStringArray()
 	_collect_sources(SHADER_ROOT, paths)
 	paths.sort()
-	assert_eq(paths.size(), 195, "the runtime inventory must stay closed")
+	assert_eq(paths.size(), 193, "the runtime inventory must stay closed")
 	var wrappers := 0
 	var includes := 0
 	for path in paths:
@@ -46,4 +46,4 @@ func test_every_checked_in_shader_resource_loads_through_godot() -> void:
 			assert_eq(resource.get_class(), "ShaderInclude",
 					"%s must load as ShaderInclude" % path)
 	assert_eq(wrappers, 154)
-	assert_eq(includes, 41)
+	assert_eq(includes, 39)

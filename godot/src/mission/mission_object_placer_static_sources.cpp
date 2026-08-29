@@ -268,6 +268,11 @@ String MissionObjectPlacer::get_static_instance_batch_key(int p_bms_id) const {
 	return rec->batch_key.is_empty() ? rec->graphic : rec->batch_key;
 }
 
+int MissionObjectPlacer::get_static_instance_binding_count(int p_bms_id) const {
+	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	return rec != nullptr ? rec->bindings.size() : 0;
+}
+
 bool MissionObjectPlacer::static_instance_is_mirror_reflected(
 		int p_bms_id) const {
 	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
@@ -280,8 +285,8 @@ bool MissionObjectPlacer::static_instance_casts_terrain_shadow(
 	return rec != nullptr && rec->casts_static_shadow;
 }
 
-// Hide a destroyed batched static in every batch of its graphic/reflection
-// population (zero-scale at its own origin — the batch keeps its instance
+// Hide a destroyed batched static in every exact emitted population
+// (zero-scale at its own origin — the batch keeps its instance
 // count); returns the instance's placed transform for the husk graft.
 Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
@@ -293,22 +298,16 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 	}
 	const Transform3D carved(Basis().scaled(Vector3()), rec->xform.origin);
 	Array originals;
-	const String batch_key = rec->batch_key.is_empty()
-			? rec->graphic
-			: rec->batch_key;
-	const Vector<Ref<MultiMesh>> *batches =
-			destruction_batches_.getptr(batch_key);
-	if (batches != nullptr) {
-		for (const Ref<MultiMesh> &mm : *batches) {
-			if (mm.is_valid() && rec->index >= 0 &&
-					rec->index < mm->get_instance_count()) {
-				Dictionary saved;
-				saved["multimesh"] = mm;
-				saved["transform"] = mm->get_instance_transform(rec->index);
-				saved["index"] = rec->index;
-				originals.push_back(saved);
-				mm->set_instance_transform(rec->index, carved);
-			}
+	for (const DestructionBinding &binding : rec->bindings) {
+		if (binding.multimesh.is_valid() && binding.index >= 0 &&
+				binding.index < binding.multimesh->get_instance_count()) {
+			Dictionary saved;
+			saved["multimesh"] = binding.multimesh;
+			saved["transform"] =
+					binding.multimesh->get_instance_transform(binding.index);
+			saved["index"] = binding.index;
+			originals.push_back(saved);
+			binding.multimesh->set_instance_transform(binding.index, carved);
 		}
 	}
 	hidden_destruction_instances_[p_bms_id] = originals;
@@ -563,6 +562,8 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 		retained_batch.offset = batch.get("offset", Transform3D());
 		retained_batch.submesh = int(batch.get("submesh", 0));
 		retained_batch.robj_index = int(batch.get("robj_index", 0));
+		retained_batch.blended_draw = bool(batch.get("blended_draw",
+				batch.get("is_alpha", false)));
 		retained.push_back(retained_batch);
 	}
 	object_data_cache_[p_graphic] = p_data;

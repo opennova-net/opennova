@@ -47,11 +47,10 @@ void SunShadow::_ready() {
 	// The light's OWN visual layer decides which views render it - and
 	// therefore which views re-render the directional shadow
 	// atlas. The beauty camera (0x18C01) and the water mirror (0x8001) need
-	// it; the isolated Q3 bloom source (0x10401) is entirely unshaded black
-	// occluders + self-lit content and must NOT pay a per-frame shadow-atlas
-	// re-render. TERRAIN_SHADOW_RECEIVER (bit 15) is in exactly the first two
-	// masks, so the light lives there (a plumbing bit, like the mask values
-	// themselves).
+	// it. Focused Q3 attaches resolved beauty depth and renders only typed
+	// self-lit draws, so it never submits this Light3D or pays another shadow
+	// atlas render. TERRAIN_SHADOW_RECEIVER (bit 15) is in exactly the beauty
+	// and mirror camera masks, so the light lives there.
 	set_layer_mask(Water::VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
 	// One-time Godot shadow-map quality tuning (device knobs, not witnessed
 	// retail constants).

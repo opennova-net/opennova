@@ -1,4 +1,5 @@
 #include "env/celestial.h"
+#include "render/frame_fx.h"
 
 #include <cmath>
 
@@ -235,6 +236,15 @@ void Celestial::_rebuild_if_needed() {
 		body.model = model;
 		body.materials = _apply_material_override(model, material);
 		body.tint = spec.tint;
+		if (spec.key == "sun" || spec.key == "moon" || spec.key == "glare") {
+			Vector<MeshInstance3D *> q3_meshes;
+			_collect_meshes(model, q3_meshes);
+			const opennova::renderer::Q3Source source = spec.key == "glare" ?
+					opennova::renderer::Q3Source::SunGlow :
+					opennova::renderer::Q3Source::CelestialBody;
+			for (MeshInstance3D *mesh_instance : q3_meshes)
+				FrameFx::register_q3_source(mesh_instance, source);
+		}
 		if (spec.key == "sun" || spec.key == "moon") {
 			_stamp_environment_capture_layer(model);
 			// The disc bodies far-pin in BOTH shaders: the authored sun/moon
@@ -490,12 +500,12 @@ void Celestial::advance_frame(double p_delta) {
 			glare_occlusion_->tick(visible_a, visible_b, state.fog_level());
 			frame = opennova::env::build_glare_frame(state, cam_rf,
 					glare_occlusion_->get_brightness());
-			// The isolated Q3 (bloom source) view draws the glare with NO
+			// The focused Q3 (bloom source) draw uses NO
 			// occlusion test and the fog-based brightness - the glow still
 			// blooms over a ridge that blocks the occlusion rays
 			// (render_skybox_sun_glow(0, 0) from FrameFX_RenderBloomPass
-			// @ 0x582a77 - docs/env/env-tod-re.md). The shader picks this
-			// opacity when the pass camera is the Q3 signature.
+			// @ 0x582a77 - docs/env/env-tod-re.md). The typed producer publishes
+			// this pass-specific opacity to Q3FrameCompiler.
 			const float q3_opacity =
 					opennova::env::glare_q3_peak_opacity(state);
 			_set_body_parameter(body, "u_q3_opacity", q3_opacity);

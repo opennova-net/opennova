@@ -415,12 +415,24 @@ func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
 	assert_eq(camera.compositor.get_compositor_effects().size(), 4,
 			"steady-state renders do not duplicate effects")
 
+	var first_effects := camera.compositor.get_compositor_effects().slice(0, 2)
+	first.shutdown()
+	first.shutdown()
+	for effect in first_effects:
+		assert_true(bool(effect.get_backend_report().get("shutdown", false)),
+				"explicit shutdown retires each compositor effect exactly once")
+	assert_eq(camera.compositor.get_compositor_effects().size(), 2,
+			"shutdown removes only the departing renderer's pair")
 	viewport.remove_child(first)
 	first.free()
 	assert_not_null(camera.compositor)
 	assert_eq(camera.compositor.get_compositor_effects().size(), 2,
-			"non-LIFO teardown removes only the departing renderer's pair")
+			"EXIT_TREE remains idempotent after explicit shutdown")
 
+	second.shutdown()
+	second.shutdown()
+	assert_null(camera.compositor,
+			"the last explicit shutdown restores the inherited compositor")
 	viewport.remove_child(second)
 	second.free()
 	assert_null(camera.compositor,

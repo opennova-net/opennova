@@ -1,4 +1,7 @@
 #include "mission/mission_object_placer.h"
+#include "render/frame_fx.h"
+
+#include <cmath>
 
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -16,6 +19,16 @@ namespace godot {
 namespace {
 
 constexpr const char *kContainerName = "MissionObjects";
+constexpr float kStaticBatchBinSize = 512.0f;
+
+int static_batch_bin_coord(float p_world) {
+	return static_cast<int>(std::floor(p_world / kStaticBatchBinSize));
+}
+
+uint64_t static_batch_bin_key(int p_x, int p_z) {
+	return (static_cast<uint64_t>(static_cast<uint32_t>(p_x)) << 32) |
+			static_cast<uint32_t>(p_z);
+}
 
 } // namespace
 
@@ -91,9 +104,9 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::build_player_animated_model, DEFVAL(0));
 	ClassDB::bind_method(
 			D_METHOD("build_model_from_graphic", "graphic", "adm_name",
-					"parent", "clip_key", "rig_graphic"),
+					"parent", "clip_key", "rig_graphic", "retain_authored_lods"),
 			&MissionObjectPlacer::build_model_from_graphic, DEFVAL(String()),
-			DEFVAL(String()));
+			DEFVAL(String()), DEFVAL(false));
 
 	ClassDB::bind_method(D_METHOD("get_placed_entity_records"),
 			&MissionObjectPlacer::get_placed_entity_records);
@@ -109,6 +122,8 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::get_static_light_draw_sources);
 	ClassDB::bind_method(D_METHOD("get_static_light_draw_source_revision"),
 			&MissionObjectPlacer::get_static_light_draw_source_revision);
+	ClassDB::bind_method(D_METHOD("get_static_instance_binding_count", "bms_id"),
+			&MissionObjectPlacer::get_static_instance_binding_count);
 	ClassDB::bind_method(
 			D_METHOD("get_static_terrain_shadow_source_diagnostics"),
 			&MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics);
@@ -230,6 +245,7 @@ void MissionObjectPlacer::_check_epoch() {
 	skeletal_cache_.clear();
 	static_batch_cache_.clear();
 	graphic_panm_cache_.clear();
+	graphic_multiple_lods_cache_.clear();
 	occlusion_cache_.clear();
 	for (int i = 0; i < static_terrain_shadow_sources_.size(); ++i) {
 		static_terrain_shadow_sources_.write[i].object_data.unref();
@@ -339,7 +355,9 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["markers"] = 0;
 	stats["graphics"] = 0;
 	stats["batches"] = 0;
-	destruction_batches_.clear();
+	stats["static_bins"] = 0;
+	stats["static_binned_batches"] = 0;
+	stats["static_global_batches"] = 0;
 	destruction_instances_.clear();
 	hidden_destruction_instances_.clear();
 	static_terrain_shadow_replacements_.clear();
@@ -476,12 +494,16 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	spans["bucket_entities"] = clock->get_ticks_usec() - stage_begin;
 	stage_begin = clock->get_ticks_usec();
 
-	// Static: one MultiMeshInstance3D per
-	// (graphic, retail reflection population, submesh).
+	// Opaque and alpha-tested statics are divided into the same 512-world-unit
+	// cells as terrain. Retail's blended strips remain global because their
+	// independently chosen Q1/Q2 order must not inherit spatial batch centers.
 	int placed = 0;
 	int batched = 0;
 	int graphics = 0;
 	int batch_count = 0;
+	int binned_batch_count = 0;
+	int global_batch_count = 0;
+	HashMap<uint64_t, bool> occupied_static_bins;
 	Vector<String> resolved_graphics;
 	for (const String &group_key : static_order) {
 		if (progress.is_valid()) {
@@ -490,47 +512,16 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		StaticGroup &group = static_groups[group_key];
 		const String graphic = group.graphic;
 		const int instance_count = group.xforms.size();
-		bool has_static_shadow = false;
-		bool all_static_shadow = instance_count > 0;
-		for (const bool slot : group.shadow_slots) {
-			has_static_shadow = has_static_shadow || slot;
-			all_static_shadow = all_static_shadow && slot;
-		}
-		const uint32_t batch_world_layer = group.mirror_reflected
-				? uint32_t(Water::VISUAL_LAYER_WORLD)
-				: uint32_t(Water::VISUAL_LAYER_WORLD_NO_MIRROR);
-		const bool graphic_has_split_policy = static_groups.has(
-				static_group_key(graphic, !group.mirror_reflected));
-		const String policy_suffix = graphic_has_split_policy
+		const uint32_t batch_world_layer =
+				group.mirror_reflected ? uint32_t(Water::VISUAL_LAYER_WORLD)
+									   : uint32_t(Water::VISUAL_LAYER_WORLD_NO_MIRROR);
+		const bool graphic_has_split_policy =
+				static_groups.has(static_group_key(graphic, !group.mirror_reflected));
+		const String policy_suffix =
+				graphic_has_split_policy
 				? (group.mirror_reflected ? "_Mirror" : "_NoMirror")
 				: String();
-		Array shadow_bms_ids;
-		Array shadow_item_ids;
-		Array shadow_attrib2;
-		Array shadow_slots;
-		for (int i = 0; i < instance_count; ++i) {
-			shadow_bms_ids.push_back(i < group.bms_ids.size()
-					? group.bms_ids[i]
-					: 0);
-			shadow_item_ids.push_back(i < group.item_ids.size()
-					? group.item_ids[i]
-					: 0);
-			shadow_attrib2.push_back(i < group.attrib2_values.size()
-					? int64_t(group.attrib2_values[i])
-					: int64_t(0));
-			shadow_slots.push_back(i < group.shadow_slots.size() &&
-					group.shadow_slots[i]);
-		}
-		const auto tag_static_shadow_source = [&](MultiMeshInstance3D *p_source) {
-			p_source->set_meta("static_shadow_bms_ids", shadow_bms_ids);
-			p_source->set_meta("static_shadow_item_ids", shadow_item_ids);
-			p_source->set_meta("static_shadow_attrib2", shadow_attrib2);
-			p_source->set_meta("static_shadow_slots", shadow_slots);
-			p_source->set_meta("static_shadow_graphic", graphic);
-			p_source->set_meta("static_shadow_batch_key", group_key);
-		};
-		const Vector<StaticBatch> batches =
-				_get_static_batches(graphic, container);
+		const Vector<StaticBatch> batches = _get_static_batches(graphic, container);
 		if (batches.is_empty()) {
 			unresolved += instance_count;
 			continue;
@@ -563,12 +554,12 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			xform_array.push_back(xform);
 		}
 		_record_static_user_point_group(graphic, xform_array);
-	Vector<int> effect_source_rows;
-	effect_source_rows.resize(instance_count);
-	for (int i = 0; i < effect_source_rows.size(); ++i) {
-		effect_source_rows.write[i] = -1;
-	}
-	for (int i = 0; i < group.effect_sources.size(); ++i) {
+		Vector<int> effect_source_rows;
+		effect_source_rows.resize(instance_count);
+		for (int i = 0; i < effect_source_rows.size(); ++i) {
+			effect_source_rows.write[i] = -1;
+		}
+		for (int i = 0; i < group.effect_sources.size(); ++i) {
 			Dictionary source = group.effect_sources[i];
 			effect_source_rows.write[i] = _append_static_item_effect_source(
 					int(source.get("kind", -1)),
@@ -613,29 +604,138 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				light_draw_rows[static_light_draw_key(i, robj_index)] = row;
 			}
 		}
-		for (const StaticBatch &batch : batches) {
-			Ref<MultiMesh> shadow_mm;
+
+		struct StaticBin {
+			int x = 0;
+			int z = 0;
+			Vector<int> slots;
+		};
+		HashMap<uint64_t, int> bin_rows;
+		Vector<StaticBin> bins;
+		for (int i = 0; i < instance_count; ++i) {
+			const int bin_x = static_batch_bin_coord(group.xforms[i].origin.x);
+			const int bin_z = static_batch_bin_coord(group.xforms[i].origin.z);
+			const uint64_t bin_key = static_batch_bin_key(bin_x, bin_z);
+			int *bin_row = bin_rows.getptr(bin_key);
+			if (bin_row == nullptr) {
+				StaticBin bin;
+				bin.x = bin_x;
+				bin.z = bin_z;
+				bins.push_back(bin);
+				bin_rows[bin_key] = bins.size() - 1;
+				bin_row = bin_rows.getptr(bin_key);
+			}
+			bins.write[*bin_row].slots.push_back(i);
+
+			const int bms_id = i < group.bms_ids.size() ? group.bms_ids[i] : 0;
+			if (bms_id != 0) {
+				DestructionInstance inst;
+				inst.graphic = graphic;
+				inst.batch_key = group_key;
+				inst.index = i;
+				inst.xform = group.xforms[i];
+				inst.casts_static_shadow =
+						i < group.shadow_slots.size() && group.shadow_slots[i];
+				inst.mirror_reflected = group.mirror_reflected;
+				destruction_instances_[bms_id] = inst;
+			}
+		}
+		Vector<int> global_slots;
+		global_slots.resize(instance_count);
+		for (int i = 0; i < instance_count; ++i) {
+			global_slots.write[i] = i;
+		}
+
+		const auto tag_static_shadow_source = [&](MultiMeshInstance3D *p_source,
+				const Vector<int> &p_slots) {
+			Array shadow_bms_ids;
+			Array shadow_item_ids;
+			Array shadow_attrib2;
+			Array shadow_slots;
+			for (const int slot : p_slots) {
+				shadow_bms_ids.push_back(
+						slot < group.bms_ids.size() ? group.bms_ids[slot] : 0);
+				shadow_item_ids.push_back(
+						slot < group.item_ids.size() ? group.item_ids[slot] : 0);
+				shadow_attrib2.push_back(slot < group.attrib2_values.size()
+								? int64_t(group.attrib2_values[slot])
+								: int64_t(0));
+				shadow_slots.push_back(slot < group.shadow_slots.size() &&
+						group.shadow_slots[slot]);
+			}
+			p_source->set_meta("static_shadow_bms_ids", shadow_bms_ids);
+			p_source->set_meta("static_shadow_item_ids", shadow_item_ids);
+			p_source->set_meta("static_shadow_attrib2", shadow_attrib2);
+			p_source->set_meta("static_shadow_slots", shadow_slots);
+			p_source->set_meta("static_shadow_graphic", graphic);
+			p_source->set_meta("static_shadow_batch_key", group_key);
+		};
+		const auto bind_destruction_slots = [&](const Ref<MultiMesh> &p_mm,
+				const Vector<int> &p_slots) {
+			for (int local_index = 0; local_index < p_slots.size(); ++local_index) {
+				const int slot = p_slots[local_index];
+				if (slot < 0 || slot >= group.bms_ids.size()) {
+					continue;
+				}
+				DestructionInstance *instance =
+						destruction_instances_.getptr(group.bms_ids[slot]);
+				if (instance == nullptr) {
+					continue;
+				}
+				DestructionBinding binding;
+				binding.multimesh = p_mm;
+				binding.index = local_index;
+				instance->bindings.push_back(binding);
+			}
+		};
+
+		const auto emit_population = [&](const StaticBatch &p_batch,
+				const Vector<int> &p_slots, bool p_global, int p_bin_x,
+				int p_bin_z) {
+			if (p_slots.is_empty() || p_batch.mesh.is_null()) {
+				return;
+			}
+			bool has_static_shadow = false;
+			bool all_static_shadow = true;
+			for (const int slot : p_slots) {
+				const bool casts = slot >= 0 && slot < group.shadow_slots.size() &&
+						group.shadow_slots[slot];
+				has_static_shadow = has_static_shadow || casts;
+				all_static_shadow = all_static_shadow && casts;
+			}
+
 			Ref<MultiMesh> mm;
 			mm.instantiate();
 			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
 			mm->set_use_custom_data(true);
-			mm->set_mesh(batch.mesh);
-			mm->set_instance_count(instance_count);
-			for (int i = 0; i < instance_count; ++i) {
-				mm->set_instance_transform(i, group.xforms[i] * batch.offset);
+			mm->set_mesh(p_batch.mesh);
+			mm->set_instance_count(p_slots.size());
+			AABB population_bounds;
+			bool has_population_bounds = false;
+			for (int local_index = 0; local_index < p_slots.size(); ++local_index) {
+				const int slot = p_slots[local_index];
+				const Transform3D surface_xform = group.xforms[slot] * p_batch.offset;
+				mm->set_instance_transform(local_index, surface_xform);
 				const int *row = light_draw_rows.getptr(
-						static_light_draw_key(i, batch.robj_index));
-				mm->set_instance_custom_data(i, Color(
-						row != nullptr ? static_cast<float>(*row + 1) : 0.0f,
-						0.0f, 0.0f, 0.0f));
+						static_light_draw_key(slot, p_batch.robj_index));
+				mm->set_instance_custom_data(
+						local_index,
+						Color(row != nullptr ? static_cast<float>(*row + 1) : 0.0f, 0.0f,
+								0.0f, 0.0f));
+				const AABB surface_bounds =
+						surface_xform.xform(p_batch.mesh->get_aabb());
+				population_bounds = has_population_bounds
+						? population_bounds.merge(surface_bounds)
+						: surface_bounds;
+				has_population_bounds = true;
 			}
+
 			MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
 			mmi->set_multimesh(mm);
-			if (all_static_shadow && !batch.auxiliary_draw) {
-				// The reimpl's static directional approximation reaches only
-				// the terrain receiver layer, so an all-eligible visible
-				// batch carries the static-caster marker without
-				// self-shadowing — no duplicate MultiMesh per submesh.
+			if (has_population_bounds) {
+				mmi->set_custom_aabb(population_bounds);
+			}
+			if (all_static_shadow && !p_batch.auxiliary_draw) {
 				mmi->set_layer_mask(batch_world_layer |
 						Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
 				mmi->set_cast_shadows_setting(
@@ -645,66 +745,102 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				mmi->set_cast_shadows_setting(
 						GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 			}
-			if (batch.material.is_valid()) {
-				mmi->set_material_override(batch.material);
+			if (p_batch.material.is_valid()) {
+				mmi->set_material_override(p_batch.material);
 			}
-			mmi->set_name(vformat("Batch_%s%s_%d", graphic, policy_suffix,
-					batch.submesh));
-			if (!batch.auxiliary_draw) {
-				tag_static_shadow_source(mmi);
+			mmi->set_meta("static_batch_population",
+					p_global ? String("global") : String("bin"));
+			if (!p_global) {
+				mmi->set_meta("static_batch_bin_x", p_bin_x);
+				mmi->set_meta("static_batch_bin_z", p_bin_z);
+			}
+			const bool legacy_name = p_global || bins.size() == 1;
+			mmi->set_name(legacy_name ? vformat("Batch_%s%s_%d", graphic,
+												policy_suffix, p_batch.submesh)
+									  : vformat("Batch_%s%s_BinX%d_Z%d_%d", graphic,
+												policy_suffix, p_bin_x, p_bin_z,
+												p_batch.submesh));
+			if (!p_batch.auxiliary_draw) {
+				tag_static_shadow_source(mmi, p_slots);
 			}
 			container->add_child(mmi);
+			if (!p_batch.auxiliary_draw) {
+				FrameFx::register_q3_object_source(mmi, p_batch.material);
+			}
 			++batch_count;
-			destruction_batches_[group_key].push_back(mm);
-			if (has_static_shadow && !all_static_shadow && !batch.auxiliary_draw) {
-				// Mixed eligibility: a shadows-only twin whose ineligible
-				// slots collapse to zero scale.
-				shadow_mm.instantiate();
-				shadow_mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-				shadow_mm->set_mesh(batch.mesh);
-				shadow_mm->set_instance_count(instance_count);
-				for (int i = 0; i < instance_count; ++i) {
-					Transform3D shadow_xform = group.xforms[i] * batch.offset;
-					if (i >= group.shadow_slots.size() ||
-							!group.shadow_slots[i]) {
-						shadow_xform.basis =
-								shadow_xform.basis.scaled(Vector3());
-					}
-					shadow_mm->set_instance_transform(i, shadow_xform);
+			if (p_global) {
+				++global_batch_count;
+			} else {
+				++binned_batch_count;
+				occupied_static_bins[static_batch_bin_key(p_bin_x, p_bin_z)] = true;
+			}
+			bind_destruction_slots(mm, p_slots);
+
+			if (!has_static_shadow || all_static_shadow || p_batch.auxiliary_draw) {
+				return;
+			}
+			Ref<MultiMesh> shadow_mm;
+			shadow_mm.instantiate();
+			shadow_mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+			shadow_mm->set_mesh(p_batch.mesh);
+			shadow_mm->set_instance_count(p_slots.size());
+			AABB shadow_bounds;
+			bool has_shadow_bounds = false;
+			for (int local_index = 0; local_index < p_slots.size(); ++local_index) {
+				const int slot = p_slots[local_index];
+				Transform3D shadow_xform = group.xforms[slot] * p_batch.offset;
+				const bool casts =
+						slot < group.shadow_slots.size() && group.shadow_slots[slot];
+				if (!casts) {
+					shadow_xform.basis = shadow_xform.basis.scaled(Vector3());
+				} else {
+					const AABB surface_bounds =
+							shadow_xform.xform(p_batch.mesh->get_aabb());
+					shadow_bounds = has_shadow_bounds
+							? shadow_bounds.merge(surface_bounds)
+							: surface_bounds;
+					has_shadow_bounds = true;
 				}
-				MultiMeshInstance3D *shadow_mmi = memnew(MultiMeshInstance3D);
-				shadow_mmi->set_multimesh(shadow_mm);
-				shadow_mmi->set_layer_mask(
-						Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
-				shadow_mmi->set_cast_shadows_setting(
-						GeometryInstance3D::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
-				if (batch.material.is_valid()) {
-					shadow_mmi->set_material_override(batch.material);
-				}
-				shadow_mmi->set_name(vformat("StaticShadow_%s%s_%d", graphic,
-						policy_suffix, batch.submesh));
-				tag_static_shadow_source(shadow_mmi);
-				container->add_child(shadow_mmi);
-				destruction_batches_[group_key].push_back(shadow_mm);
+				shadow_mm->set_instance_transform(local_index, shadow_xform);
+			}
+			MultiMeshInstance3D *shadow_mmi = memnew(MultiMeshInstance3D);
+			shadow_mmi->set_multimesh(shadow_mm);
+			if (has_shadow_bounds) {
+				shadow_mmi->set_custom_aabb(shadow_bounds);
+			}
+			shadow_mmi->set_layer_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
+			shadow_mmi->set_cast_shadows_setting(
+					GeometryInstance3D::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
+			if (p_batch.material.is_valid()) {
+				shadow_mmi->set_material_override(p_batch.material);
+			}
+			shadow_mmi->set_meta("static_batch_population",
+					p_global ? String("global") : String("bin"));
+			if (!p_global) {
+				shadow_mmi->set_meta("static_batch_bin_x", p_bin_x);
+				shadow_mmi->set_meta("static_batch_bin_z", p_bin_z);
+			}
+			shadow_mmi->set_name(legacy_name
+							? vformat("StaticShadow_%s%s_%d", graphic,
+									  policy_suffix, p_batch.submesh)
+							: vformat("StaticShadow_%s%s_BinX%d_Z%d_%d",
+									  graphic, policy_suffix, p_bin_x,
+									  p_bin_z, p_batch.submesh));
+			tag_static_shadow_source(shadow_mmi, p_slots);
+			container->add_child(shadow_mmi);
+			bind_destruction_slots(shadow_mm, p_slots);
+		};
+		for (const StaticBatch &batch : batches) {
+			if (batch.blended_draw) {
+				emit_population(batch, global_slots, true, 0, 0);
+				continue;
+			}
+			for (const StaticBin &bin : bins) {
+				emit_population(batch, bin.slots, false, bin.x, bin.z);
 			}
 		}
 		batched += instance_count;
 		placed += instance_count;
-		for (int i = 0;
-				i < MIN(group.bms_ids.size(), group.xforms.size()); ++i) {
-			const int bms_id = group.bms_ids[i];
-			if (bms_id != 0) {
-				DestructionInstance inst;
-				inst.graphic = graphic;
-				inst.batch_key = group_key;
-				inst.index = i;
-				inst.xform = group.xforms[i];
-				inst.casts_static_shadow = i < group.shadow_slots.size() &&
-						group.shadow_slots[i];
-				inst.mirror_reflected = group.mirror_reflected;
-				destruction_instances_[bms_id] = inst;
-			}
-		}
 	}
 	spans["static_batches"] = clock->get_ticks_usec() - stage_begin;
 	stage_begin = clock->get_ticks_usec();
@@ -746,8 +882,13 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		// The def names the AI muzzle: items.def launchups_closeattack is
 		// the launch userpoint on this item's graphic
 		// (world-wac-ai-re §21.2).
-		model->set_muzzle_point_name(
-				item_db_->get_launchups_closeattack(item_id));
+		model->set_muzzle_point_name(item_db_->get_launchups_closeattack(item_id));
+		// Mission-world models retain every authored RLOD and select by the
+		// retail projected-radius rule. Closed building OOBJ records also become
+		// Godot occluders; portal/window/open records stay with the section pass.
+		model->set_authored_lod_enabled(true);
+		model->set_authored_occluders_enabled(kind == MissionData::KIND_BUILDING &&
+				_has_occlusion_records(item_id));
 		// Drive the build explicitly (not via _ready) so it is independent
 		// of when place() runs relative to the main loop.
 		model->set_object_data(data);
@@ -792,6 +933,9 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["unresolved"] = unresolved;
 	stats["graphics"] = graphics;
 	stats["batches"] = batch_count;
+	stats["static_bins"] = occupied_static_bins.size();
+	stats["static_binned_batches"] = binned_batch_count;
+	stats["static_global_batches"] = global_batch_count;
 	stats["spans"] = spans;
 	return stats;
 }
@@ -810,6 +954,7 @@ ObjectModel *MissionObjectPlacer::build_animated_model(int p_item_id,
 	}
 	ObjectModel *model = memnew(ObjectModel);
 	model->set_panm_clock(panm_clock_);
+	model->set_authored_lod_enabled(true);
 	model->set_name(vformat("PlayerAvatar_%s", graphic));
 	// Wire-streamed and avatar builds share this chain: vehicles reflect in
 	// the water mirror, persons and everything else never do (env #30).
@@ -923,7 +1068,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 			? item_db_->get_anim_def(item_id)
 			: String();
 	ObjectModel *body = build_model_from_graphic(body_graphic, adm_name,
-			p_parent, String(), body_graphic);
+			p_parent, String(), body_graphic, true);
 	if (body == nullptr) {
 		return build_animated_model(item_id, p_parent);
 	}
@@ -945,7 +1090,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	_configure_item_shadow(body, item_id);
 
 	ObjectModel *head = build_model_from_graphic(head_graphic, adm_name,
-			body, String(), body_graphic);
+			body, String(), body_graphic, true);
 	if (head == nullptr) {
 		// A head that fails to build mirrors the zero-handle case: tear the
 		// composed body down and render the plain item model instead of a
@@ -972,7 +1117,8 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 
 ObjectModel *MissionObjectPlacer::build_model_from_graphic(
 		const String &p_graphic, const String &p_adm_name, Node3D *p_parent,
-		const String &p_clip_key, const String &p_rig_graphic) {
+		const String &p_clip_key, const String &p_rig_graphic,
+		bool p_retain_authored_lods) {
 	if (p_graphic.is_empty() || p_parent == nullptr) {
 		return nullptr;
 	}
@@ -982,6 +1128,7 @@ ObjectModel *MissionObjectPlacer::build_model_from_graphic(
 	}
 	ObjectModel *model = memnew(ObjectModel);
 	model->set_panm_clock(panm_clock_);
+	model->set_authored_lod_enabled(p_retain_authored_lods);
 	model->set_name(vformat("Viewmodel_%s", p_graphic));
 	p_parent->add_child(model);
 	if (!p_adm_name.is_empty()) {
@@ -1075,7 +1222,9 @@ bool MissionObjectPlacer::_needs_individual_node(int p_item_id) {
 	if (!item_db_->get_anim_def(p_item_id).is_empty()) {
 		return true;
 	}
-	return _has_occlusion_records(p_item_id);
+	const String graphic = _graphic_for(p_item_id);
+	return _has_occlusion_records(p_item_id) ||
+			(!graphic.is_empty() && _graphic_has_multiple_lods(graphic));
 }
 
 // A graphic whose model carries a live PANM track must not be frozen into a
@@ -1095,6 +1244,20 @@ bool MissionObjectPlacer::_graphic_needs_live_panm(const String &p_graphic) {
 		result = data->has_live_panm();
 	}
 	graphic_panm_cache_[p_graphic] = result;
+	return result;
+}
+
+bool MissionObjectPlacer::_graphic_has_multiple_lods(const String &p_graphic) {
+	const bool *cached = graphic_multiple_lods_cache_.getptr(p_graphic);
+	if (cached != nullptr) {
+		return *cached;
+	}
+	bool result = false;
+	const Ref<ObjectData> data = _load_object_data(p_graphic);
+	if (data.is_valid() && data->has_document()) {
+		result = data->native_model().lod_count > 1;
+	}
+	graphic_multiple_lods_cache_[p_graphic] = result;
 	return result;
 }
 
@@ -1298,8 +1461,10 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 				batch.offset = part_node->get_transform() * mi->get_transform();
 				batch.submesh = submesh;
 				batch.robj_index = int(part_keys[k]);
-				batch.auxiliary_draw = bool(mi->get_meta(
-						"_opennova_auxiliary_draw", false));
+				batch.auxiliary_draw =
+						bool(mi->get_meta("_opennova_auxiliary_draw", false));
+				batch.blended_draw =
+						bool(mi->get_meta("_opennova_blended_draw", false));
 				batches.push_back(batch);
 				++submesh;
 			}
@@ -1318,27 +1483,80 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 void MissionObjectPlacer::_add_individual_static_shadow_siblings(
 		ObjectModel *p_model, const String &p_graphic,
 		const Transform3D &p_local_xform, const String &p_suffix) {
-	const Vector<StaticBatch> batches = _get_static_batches(p_graphic, p_model);
-	for (const StaticBatch &batch : batches) {
-		if (batch.auxiliary_draw) {
-			continue;
+	if (p_model == nullptr) {
+		return;
+	}
+	Vector<MeshInstance3D *> sources;
+	LocalVector<Node *> stack;
+	stack.push_back(p_model);
+	while (!stack.is_empty()) {
+		Node *parent = stack[stack.size() - 1];
+		stack.remove_at(stack.size() - 1);
+		for (int i = 0; i < parent->get_child_count(); ++i) {
+			Node *child = parent->get_child(i);
+			stack.push_back(child);
+			MeshInstance3D *source = Object::cast_to<MeshInstance3D>(child);
+			if (source != nullptr && source->get_mesh().is_valid() &&
+					!bool(source->get_meta("_opennova_auxiliary_draw", false))) {
+				sources.push_back(source);
+			}
 		}
+	}
+	// Registered/synthetic graphics can supply harvested static batches without
+	// an ObjectModel scene. Keep that owner-facing seam useful while production
+	// models clone their retained per-LOD MeshInstance descendants below.
+	if (sources.is_empty()) {
+		const Vector<StaticBatch> batches = _get_static_batches(p_graphic, p_model);
+		for (const StaticBatch &batch : batches) {
+			if (batch.auxiliary_draw || batch.mesh.is_null()) {
+				continue;
+			}
+			Ref<MultiMesh> mm;
+			mm.instantiate();
+			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+			mm->set_mesh(batch.mesh);
+			mm->set_instance_count(1);
+			mm->set_instance_transform(0, p_local_xform * batch.offset);
+			MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
+			mmi->set_multimesh(mm);
+			mmi->set_layer_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
+			mmi->set_cast_shadows_setting(
+					GeometryInstance3D::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
+			if (batch.material.is_valid()) {
+				mmi->set_material_override(batch.material);
+			}
+			mmi->set_name(vformat("StaticShadow_%s_%s_%d", p_graphic,
+					p_suffix, batch.submesh));
+			p_model->add_child(mmi);
+		}
+		return;
+	}
+	const Transform3D model_inverse = p_model->get_global_transform().affine_inverse();
+	int submesh = 0;
+	for (MeshInstance3D *source : sources) {
 		Ref<MultiMesh> mm;
 		mm.instantiate();
 		mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-		mm->set_mesh(batch.mesh);
+		mm->set_mesh(source->get_mesh());
 		mm->set_instance_count(1);
-		mm->set_instance_transform(0, p_local_xform * batch.offset);
+		mm->set_instance_transform(0, p_local_xform * model_inverse *
+				source->get_global_transform());
 		MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
 		mmi->set_multimesh(mm);
 		mmi->set_layer_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
 		mmi->set_cast_shadows_setting(
 				GeometryInstance3D::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
-		if (batch.material.is_valid()) {
-			mmi->set_material_override(batch.material);
+		const Ref<Material> material = source->get_material_override();
+		if (material.is_valid()) {
+			mmi->set_material_override(material);
+		}
+		if (source->has_meta("_opennova_lod_index")) {
+			mmi->set_meta("_opennova_lod_index",
+					source->get_meta("_opennova_lod_index"));
+			mmi->set_visible(source->is_visible());
 		}
 		mmi->set_name(vformat("StaticShadow_%s_%s_%d", p_graphic, p_suffix,
-				batch.submesh));
+				submesh++));
 		p_model->add_child(mmi);
 	}
 }

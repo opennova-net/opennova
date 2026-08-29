@@ -91,8 +91,8 @@ Lighting validation is layered:
    cull-mask gate; `matchterrain` proves stance, page residency,
    coverage, and the exact `2 * tile.rgb * (HemiSky + tile.a * DirLight)`
    combine; `glow` proves LUM NORMAL-copy, Glass's rotated two-lobe sun glint,
-   and every no-pass contract. The GLOW mode also asserts the native isolated
-   Q3 viewport, exact POT-floor capture, four weighted downsample taps, four
+   and every no-pass contract. The GLOW mode also asserts the typed focused-Q3
+   compiler/RenderingDevice target, resolved beauty depth, exact capture, four weighted downsample taps, four
    cardinal blur draws, 45-degree final average, and `SRCALPHA/ONE` composite.
    All run against Forward+ over D3D12.
 6. `render_swatch` mode `calibrate` proves the production terminal

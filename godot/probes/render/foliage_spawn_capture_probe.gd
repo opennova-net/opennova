@@ -422,51 +422,15 @@ func _probe_flicker_tier(
 func _configure_flicker_draws(
 		dispatcher: FoliageDispatcher, tier: String,
 		hide_selected: bool, fade_adjust: float) -> Dictionary:
-	var kept := 0
-	var fade_min := INF
-	var fade_max := -INF
-	for child in dispatcher.get_children():
-		var draw := child as MeshInstance3D
-		if draw == null:
-			continue
-		var was_visible := draw.visible
-		var name_text := String(draw.name)
-		var material := draw.material_override as ShaderMaterial
-		var shader_file := ""
-		if material != null and material.shader != null:
-			shader_file = material.shader.resource_path.get_file()
-		var fade := 0.0
-		var fade_value: Variant = draw.get_instance_shader_parameter("u_fade")
-		if fade_value is float or fade_value is int:
-			fade = float(fade_value)
-		var cutoff := 0.0
-		var cutoff_value: Variant = draw.get_instance_shader_parameter("u_high_pass_cutoff")
-		if cutoff_value is float or cutoff_value is int:
-			cutoff = float(cutoff_value)
-		var matches := false
-		if name_text.begins_with("FoliageDetailDraw"):
-			if tier == "detail_high":
-				matches = shader_file == "foliage_detail_high.gdshader"
-			elif tier == "detail_low_far":
-				# Primary LOW (>= 33u) carries no strict-LESS cutoff; the near
-				# secondary does. Both share the unscaled distance fade.
-				matches = shader_file == "foliage_detail_low.gdshader" and cutoff <= 0.0
-			elif tier == "detail_auto":
-				matches = true
-		var keep := was_visible and matches
-		draw.visible = keep and not hide_selected
-		if keep:
-			kept += 1
-			fade_min = minf(fade_min, fade)
-			fade_max = maxf(fade_max, fade)
-			draw.set_instance_shader_parameter(&"u_wind_phase", 0.0)
-			if not is_zero_approx(fade_adjust):
-				draw.set_instance_shader_parameter(&"u_fade", maxf(fade + fade_adjust, 0.0))
-	return {
-		"kept": kept,
-		"fade_min": fade_min if kept > 0 else 0.0,
-		"fade_max": fade_max if kept > 0 else 0.0,
-	}
+	var selection := FoliageDispatcher.PROBE_DRAW_DETAIL_AUTO
+	if tier == "detail_high":
+		selection = FoliageDispatcher.PROBE_DRAW_DETAIL_HIGH
+	elif tier == "detail_low_far":
+		# Primary LOW (>= 33u) carries no strict-LESS cutoff; the near
+		# secondary does. Both share the unscaled distance fade.
+		selection = FoliageDispatcher.PROBE_DRAW_DETAIL_LOW_FAR
+	return dispatcher.apply_probe_draw_control(
+			selection, true, hide_selected, 0.0, fade_adjust)
 
 
 func _grab_flicker_image(viewport: Viewport) -> Image:
@@ -715,7 +679,8 @@ func _texture_meta(value: Variant) -> Dictionary:
 
 
 func _print_foliage_material_state(world: GameWorld) -> void:
-	var dispatcher: Node = world.get_node_or_null("Terrain/FoliageDispatcher")
+	var dispatcher := world.get_node_or_null(
+			"Terrain/FoliageDispatcher") as FoliageDispatcher
 	if dispatcher == null:
 		_logv(["[spawn-capture] detail materials: dispatcher missing"])
 		return
@@ -724,11 +689,13 @@ func _print_foliage_material_state(world: GameWorld) -> void:
 	var uv2_min := Vector2(INF, INF)
 	var uv2_max := Vector2(-INF, -INF)
 	var uv2_count := 0
-	for child in dispatcher.get_children():
-		var draw := child as MeshInstance3D
-		if draw == null or not draw.visible or not String(draw.name).begins_with("FoliageDetailDraw"):
+	var backend := dispatcher.get_backend_report()
+	for draw_value in backend.get("draws", []):
+		var draw := draw_value as Dictionary
+		if not bool(draw.get("visible", false)) \
+				or String(draw.get("tier", "")) != "detail":
 			continue
-		var material := draw.material_override as ShaderMaterial
+		var material := draw.get("material") as ShaderMaterial
 		var shader_path := material.shader.resource_path if material != null and material.shader != null else ""
 		var tier := shader_path.get_file()
 		tier_counts[tier] = int(tier_counts.get(tier, 0)) + 1
@@ -747,7 +714,7 @@ func _print_foliage_material_state(world: GameWorld) -> void:
 				"u_tile_overlay_tint": material.get_shader_parameter("u_tile_overlay_tint"),
 				"u_emitter_color": material.get_shader_parameter("u_emitter_color"),
 			}])
-		var mesh := draw.mesh
+		var mesh := draw.get("mesh") as Mesh
 		if mesh == null:
 			continue
 		for surface in range(mesh.get_surface_count()):

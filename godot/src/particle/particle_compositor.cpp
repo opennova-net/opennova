@@ -310,6 +310,7 @@ public:
 	mutable std::mutex submission_mutex;
 	std::shared_ptr<const ParticleWorldSubmission> latest_submission;
 	std::atomic<bool> hidden{false};
+	std::atomic<bool> shutdown_requested{false};
 	// Low bit is the pending request; upper bits form an epoch. Both request
 	// and cancel advance the epoch, so a failed callback can rearm only the
 	// exact request it claimed without resurrecting a later cancellation or
@@ -339,9 +340,10 @@ public:
 	std::vector<ViewTarget> targets;
 	std::uint64_t target_buffers_id = 0;
 
-	~Impl() {
-		release_all();
-	}
+	// RenderingServer owns the RenderingDevice. ParticleRenderer::shutdown()
+	// releases live RIDs explicitly; destruction may run after server teardown
+	// and must not query or call through that process-owned singleton.
+	~Impl() = default;
 
 	void set_failure(const std::string &reason,
 			const std::string &status = "failed") {
@@ -452,6 +454,8 @@ public:
 };
 
 bool ParticleCompositorEffect::Impl::initialize_rd() {
+	if (shutdown_requested.load(std::memory_order_acquire))
+		return false;
 	if (rd != nullptr && shader.is_valid() && sampler.is_valid() &&
 			fallback_scene_texture.is_valid() &&
 			fallback_scene_uniform_set.is_valid() &&
@@ -1401,6 +1405,7 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 			String("RenderingDevice is unavailable; use Forward+ or Mobile");
 	result["callback_seen"] = diagnostics.callback_seen;
 	result["rd_available"] = renderer_supported;
+	result["shutdown"] = shutdown_requested.load(std::memory_order_acquire);
 	result["submitted_frame_id"] = godot_token(diagnostics.submitted_frame_id);
 	result["drawn_frame_id"] = godot_token(diagnostics.drawn_frame_id);
 	result["submitted_commands"] =
@@ -1441,11 +1446,16 @@ ParticleCompositorEffect::ParticleCompositorEffect() :
 
 ParticleCompositorEffect::~ParticleCompositorEffect() = default;
 
-void ParticleCompositorEffect::_bind_methods() {}
+void ParticleCompositorEffect::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("release_device_resources"),
+			&ParticleCompositorEffect::release_device_resources);
+	ClassDB::bind_method(D_METHOD("get_backend_report"),
+			&ParticleCompositorEffect::get_backend_report);
+}
 
 void ParticleCompositorEffect::publish(
 		const std::shared_ptr<const ParticleWorldSubmission> &p_submission) {
-	if (impl_)
+	if (impl_ && !impl_->shutdown_requested.load(std::memory_order_acquire))
 		impl_->publish(p_submission);
 }
 
@@ -1455,7 +1465,7 @@ void ParticleCompositorEffect::clear_submission() {
 }
 
 void ParticleCompositorEffect::set_particles_hidden(bool p_hidden) {
-	if (!impl_)
+	if (!impl_ || impl_->shutdown_requested.load(std::memory_order_acquire))
 		return;
 	impl_->hidden.store(p_hidden, std::memory_order_release);
 	set_enabled(!p_hidden);
@@ -1479,7 +1489,7 @@ void ParticleCompositorEffect::set_particles_hidden(bool p_hidden) {
 }
 
 void ParticleCompositorEffect::request_pipeline_warm() {
-	if (!impl_)
+	if (!impl_ || impl_->shutdown_requested.load(std::memory_order_acquire))
 		return;
 	{
 		std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
@@ -1519,6 +1529,20 @@ void ParticleCompositorEffect::cancel_pipeline_warm() {
 	}
 }
 
+void ParticleCompositorEffect::release_device_resources() {
+	set_enabled(false);
+	if (!impl_ || impl_->shutdown_requested.exchange(true,
+			std::memory_order_acq_rel))
+		return;
+	impl_->pipeline_warm_state.store(0, std::memory_order_release);
+	impl_->publish(nullptr);
+	impl_->release_all();
+	std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
+	impl_->diagnostics.rd_available = false;
+	impl_->diagnostics.status = "shutdown";
+	impl_->diagnostics.failure.clear();
+}
+
 Dictionary ParticleCompositorEffect::get_backend_report() const {
 	Dictionary result = impl_ ? impl_->report() : Dictionary();
 	const EffectCallbackType callback_type = get_effect_callback_type();
@@ -1530,7 +1554,7 @@ Dictionary ParticleCompositorEffect::get_backend_report() const {
 
 void ParticleCompositorEffect::_render_callback(
 		int32_t p_effect_callback_type, RenderData *p_render_data) {
-	if (!impl_)
+	if (!impl_ || impl_->shutdown_requested.load(std::memory_order_acquire))
 		return;
 	{
 		std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);

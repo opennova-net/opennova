@@ -9,7 +9,6 @@ render_mode unshaded, depth_draw_never, cull_disabled, blend_mix;
 
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 
 // Raw sampling per the gamma-space convention (color.gdshaderinc).
 uniform sampler2D u_diffuse : filter_linear_mipmap;
@@ -33,20 +32,13 @@ void vertex() {
 	// (reverse-Z depth 0). An epsilon is NOT safe here: distant terrain
 	// writes depth near/dist (a 560 u ridge is ~1e-4 at near 0.05), and any
 	// epsilon puts the disc IN FRONT of everything past near/epsilon.
-	// The Q3 (bloom source) pass keeps the 64 u depth: retail redraws the
-	// discs there against the beauty depth, so terrain past 64 u does not
-	// occlude the bloom source [orig: render_celestial_bodies(1) from
-	// FrameFX_RenderBloomPass @ 0x582a77].
-	if (!is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		POSITION.z = 0.0;
-	}
+	// Focused Q3 uses its typed source transform and resolved beauty depth;
+	// this shader serves beauty only.
+	POSITION.z = 0.0;
 }
 
 void fragment() {
-	// Sky bodies draw in the beauty transparent list at the sky rung
-	// (renderer::render_order) and again in the isolated Q3 source
-	// (retail: render_celestial_bodies(1) in FrameFX_RenderBloomPass
-	// @0x582a77, see docs/render/render-order-re.md).
+	// Sky bodies draw in the beauty transparent list at the sky rung.
 	vec4 tex = texture(u_diffuse, UV);
 	// Gamma-space modulate; the terminal compositor runs only after this
 	// alpha blend has completed in the retail gamma domain.

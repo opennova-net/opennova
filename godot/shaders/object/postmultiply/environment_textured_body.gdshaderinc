@@ -24,9 +24,6 @@ void vertex() {
 }
 
 void fragment() {
-	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		discard;
-	}
 	vec4 source = texture(u_diffuse, v_raw_uv);
 	#ifdef OBJ_POSTMULTIPLY_CUTOUT
 	bool accepted = u_alpha_test_invert > 0.5

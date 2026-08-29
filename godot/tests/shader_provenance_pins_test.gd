@@ -236,7 +236,7 @@ func test_environment_cube_capture_is_live_and_highest_quality() -> void:
 		"pow(aligned, 800.0)", "pow(aligned, 40.0)", "static_lobe * opennova_sun_light * 2.0",
 	], "object/shared.gdshaderinc")
 	# The six capture cameras cull to the aliased water layer ALONE, so water
-	# rejects them by exact camera mask (is_q3_pass pattern), never by a
+	# rejects them by exact camera mask, never by a
 	# stale capture-origin distance.
 	assert_true(water.contains("NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u"))
 	assert_true(water.contains("CAMERA_VISIBLE_LAYERS == NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK"))
@@ -888,7 +888,7 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 	_contains_all(frame_renderer, [
 		"FramePass::GammaDecode", "EFFECT_CALLBACK_TYPE_POST_TRANSPARENT",
 		"framebuffer_blend_domain\"] = \"gamma\"",
-		"kBeautyCameraMask = 0x00018C01u", "kQ3CameraMask = 0x00010401u",
+		"kBeautyCameraMask = 0x00018C01u",
 		"DATA_FORMAT_R8G8B8A8_UNORM", "direction_for_degrees(30.0f, 1.0f / 1024.0f)",
 		"1.0f / 2048.0f", "* 0.50", "* 0.46", "* 0.35", "* 0.19",
 		"Vector2i(kFrameFxSide, kFrameFxSide), 90.0f", "Vector2i(kFrameFxSide, kFrameFxSide), 0.0f",
@@ -896,6 +896,31 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		"BlendMode::SourceAlphaAdd, FramePass::FinalAverage",
 		"result[\"capture_filter\"] = \"linear_rgba8_highest_quality\"",
 	], "frame_fx.cpp")
+	assert_false(frame_renderer.contains("kQ3CameraMask"),
+			"the typed Q3 adapter is the sole focused renderer")
+	var q3_adapter := _read_repo("godot/src/render/q3_frame_adapter.cpp")
+	_contains_all(q3_adapter, [
+		"vec3(1.4) * pow(aligned, 800.0)",
+		"vec3(1.0, 248.0 / 255.0, 240.0 / 255.0)",
+		"pow(aligned, 40.0)",
+		"const Vector3 light_gain = frame->light_gain",
+		"if (frame->fog_type == 1)",
+		"fog_visibility",
+		"object_alpha > pc.params.z",
+		"texture(secondary_texture, detail_uv).a",
+		"Mesh::ARRAY_TEX_UV2",
+		"candidate.submission.object.detail_texture = lease_for(detail)",
+		"glare_view_fade = bool_parameter",
+		"view_dot_sq * view_dot_sq",
+		"model_uniform_scale",
+		"p_command.technique != Q3Technique::SunGlow",
+		"classification.is_two_sided",
+		"fallback_pixel.ptrw()[0] = 255",
+		"(in_position - pc.camera_local.xyz) * (1.0 - 3.0e-4)",
+		"case ObjectBlendMode::Additive:",
+		"Q3DeviceBlend::Add",
+		"result[\"q3_sun_depth_test\"] = false",
+	], "q3_frame_adapter.cpp")
 
 	# The first-person viewmodel draws inside the beauty pass through the
 	# shader-side renderfov projection + depth band; no composite shader.

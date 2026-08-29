@@ -757,7 +757,7 @@ add_test(NAME simassets_seat_spec_extract COMMAND simassets_seat_spec_extract_te
 # Object renderer/shader tests
 foreach(test light_runtime light_scene light_terrain_pass material_classify material_eval
         particle_atlas_contract particle_frame_compiler_contract render_order
-        render_slot_shadow
+        q3_frame render_slot_shadow
         state_vectors tracer_frame)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
@@ -920,6 +920,14 @@ add_executable(terrain_lod_family_test terrain/terrain_lod_family_test.cpp)
 target_link_libraries(terrain_lod_family_test PRIVATE opennova_runtime)
 target_include_directories(terrain_lod_family_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_lod_family COMMAND terrain_lod_family_test)
+
+add_executable(object_lod_test renderer/object_lod_test.cpp)
+target_link_libraries(object_lod_test PRIVATE opennova_runtime)
+add_test(NAME object_lod COMMAND object_lod_test)
+
+add_executable(authored_occluder_test renderer/authored_occluder_test.cpp)
+target_link_libraries(authored_occluder_test PRIVATE opennova_runtime)
+add_test(NAME authored_occluder COMMAND authored_occluder_test)
 
 add_executable(terrain_foliage_detail_collector_test terrain/terrain_foliage_detail_collector_test.cpp)
 target_link_libraries(terrain_foliage_detail_collector_test PRIVATE opennova_runtime)

@@ -9,7 +9,6 @@ render_mode unshaded, depth_draw_never, cull_disabled, blend_add;
 
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 
 // Raw sampling per the gamma-space convention (color.gdshaderinc).
 uniform sampler2D u_diffuse : filter_linear_mipmap;
@@ -27,12 +26,8 @@ uniform bool u_billboard = false;
 uniform bool u_depth_far_pin = false;
 uniform bool u_glare_view_fade = false;
 uniform vec3 u_glare_direction = vec3(0.0, 1.0, 0.0);
-// The isolated Q3 (bloom source) pass draws the glare with the
-// occlusion-INDEPENDENT fog-based opacity (retail's bloom pass calls the
-// glow with no occlusion test [orig: render_skybox_sun_glow(0, 0) from
-// FrameFX_RenderBloomPass @ 0x582a77]); every other additive body leaves
-// this at 0 and drops out of the Q3 view (retail's bloom pass draws only
-// the glow and the celestial discs - no stars, no glint).
+// The typed Q3 producer reads this occlusion-independent fog-based opacity;
+// the beauty shader itself always uses u_opacity.
 uniform float u_q3_opacity = 0.0;
 
 varying float v_glare_view_fade;
@@ -65,7 +60,7 @@ void vertex() {
 	float view_dot_sq = view_dot * view_dot;
 	v_glare_view_fade = view_dot_sq * view_dot_sq;
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
-	if (u_depth_far_pin && !is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
+	if (u_depth_far_pin) {
 		// Exact far plane (reverse-Z depth 0); an epsilon fails because
 		// distant terrain's depth near/dist drops below any epsilon. The
 		// BEAUTY view only: retail's bloom pass redraws the discs at the
@@ -80,11 +75,7 @@ void vertex() {
 
 void fragment() {
 	vec4 tex = texture(u_diffuse, UV);
-	float pass_opacity = u_opacity;
-	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		pass_opacity = u_q3_opacity;
-	}
-	float opacity = pass_opacity * (u_glare_view_fade ? v_glare_view_fade : 1.0);
+	float opacity = u_opacity * (u_glare_view_fade ? v_glare_view_fade : 1.0);
 	// Gamma-space modulate; additive accumulation precedes the terminal
 	// display transfer and therefore remains in the retail gamma domain.
 	// COLOR = per-instance brightness for the star field's twinkle (env #33;

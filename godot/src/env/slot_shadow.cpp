@@ -261,7 +261,7 @@ void SlotShadow::_ensure_captures() {
 		// breathing first-person camera (the witnessed eye rides the posed
 		// head bone). MSAA on the capture supplies the same partial-coverage
 		// RGB that retail's multisampled black-on-white RT resolves, like the
-		// Q3 view's MSAA stands in for the StretchRect box filter.
+		// FrameFX's capture stretch supplies the bloom-source box filter.
 		viewport->set_msaa_3d(Viewport::MSAA_4X);
 		viewport->set_update_mode(SubViewport::UPDATE_DISABLED);
 		viewport->set_disable_3d(false);

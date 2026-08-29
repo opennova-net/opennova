@@ -27,6 +27,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/quad_mesh.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
@@ -614,9 +615,9 @@ public:
 				CompositorEffect::EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT);
 	}
 
-	~Impl() {
-		detach_compositors();
-	}
+	// ParticleRenderer::shutdown() detaches while camera and server ownership
+	// are known-live. Late destruction must only discard retained references.
+	~Impl() = default;
 
 	void invalidate_catalog() {
 		catalog_dirty = true;
@@ -1402,6 +1403,7 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::get_procedural_fallback_enabled);
 	ClassDB::bind_method(D_METHOD("render_now"),
 			&ParticleRenderer::render_now);
+	ClassDB::bind_method(D_METHOD("shutdown"), &ParticleRenderer::shutdown);
 	ClassDB::bind_method(D_METHOD("get_rendered_quad_count"),
 			&ParticleRenderer::get_rendered_quad_count);
 	ClassDB::bind_method(D_METHOD("get_draw_command_count"),
@@ -1435,8 +1437,7 @@ void ParticleRenderer::_notification(int p_what) {
 		set_process(false);
 		render_now();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
-		if (impl_)
-			impl_->detach_compositors();
+		shutdown();
 	}
 }
 
@@ -1546,6 +1547,32 @@ void ParticleRenderer::clear_warm_pipelines() {
 	warm_nodes_.clear();
 }
 
+void ParticleRenderer::shutdown() {
+	if (shutdown_)
+		return;
+	shutdown_ = true;
+	clear_warm_pipelines();
+	if (!impl_)
+		return;
+
+	impl_->clear_draws();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+		effect->set_enabled(false);
+	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
+		effect->set_enabled(false);
+	impl_->detach_compositors();
+
+	// Detaching affects the next render setup. Drain a callback already queued
+	// on the render thread before releasing the RIDs it can still consume.
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (server != nullptr && server->get_rendering_device() != nullptr)
+		server->force_sync();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+		effect->release_device_resources();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
+		effect->release_device_resources();
+}
+
 void ParticleRenderer::set_hidden(bool p_hidden) {
 	if (hidden_ == p_hidden)
 		return;
@@ -1584,7 +1611,7 @@ bool ParticleRenderer::get_procedural_fallback_enabled() const {
 }
 
 void ParticleRenderer::render_now() {
-	if (!impl_)
+	if (shutdown_ || !impl_)
 		return;
 	impl_->ensure_visuals(this);
 	if (hidden_)

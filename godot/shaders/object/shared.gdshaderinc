@@ -3,7 +3,6 @@
 // statically selected includes; this file contains no capability switches.
 
 #include "res://shaders/color.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 
 uniform vec3 u_uv_transform_u = vec3(1.0, 0.0, 0.0);
@@ -199,13 +198,11 @@ void obj_apply_water_reflection_clip(vec3 camera_position_world) {
 
 // A camera that culls to the reserved capture channels alone is one of the
 // SlotShadow capture cameras (set_cull_mask(kCaptureLayerBits[i])): the beauty
-// (0x18C01, which admits the viewmodel layer), Q3 (0x10401), mirror
-// (0x8001 / 0x18001), and environment-capture (0x400) cameras all carry bits
-// outside that mask. One
+// (0x18C01, which admits the viewmodel layer), mirror (0x8001 / 0x18001), and
+// environment-capture (0x400) cameras all carry bits outside that mask. One
 // uint test replaces twelve per-fragment eye distances. Godot leaves
 // CAMERA_VISIBLE_LAYERS unset for light shadow passes (RenderSceneDataRD
-// camera_visible_layers is never assigned in _render_shadow_append), the
-// same exposure is_q3_pass already carries there.
+// camera_visible_layers is never assigned in _render_shadow_append).
 bool obj_is_slot_shadow_capture(uint camera_visible_layers,
 		bool in_shadow_pass) {
 	if (in_shadow_pass) {

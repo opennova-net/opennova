@@ -2,7 +2,6 @@ shader_type spatial;
 render_mode unshaded, cull_disabled, blend_add, depth_draw_always, fog_disabled;
 
 #include "res://shaders/foliage_fd_sampling.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 
 // The distant MODEL tier is an unfogged, unlit, color-invisible depth mask.
 // Retail emits black RGB under SRC=ONE/DEST=ONE additive blending: accepted
