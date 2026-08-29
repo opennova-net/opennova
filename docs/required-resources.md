@@ -62,7 +62,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `assets.cd` | optional-fallback | [orig: Game_ReadAssetsCDFile @ 0x4a5800] | missing → empty string, silent |
 | `CC.BIN` | optional-fallback | [orig: Game_ReadCCBinFile @ 0x4a5860; value @ 0x4a5950] | missing → empty, silent (country code, XOR 0xABADABAD @ 0x4a6dd7) |
 | `filter.txt` | optional-fallback | [orig: ChatFilter_LoadFromFile @ 0x4fd640] | silent skip |
-| `expansion\<n>\<n>.pff`, `<n>L.pff` | expansion discovery | [orig: Expansion_ScanAndRegister @ 0x4a43d0; Expansion_LoadAssets @ 0x4a4730] | absent → expansion unregistered, base game proceeds; `<n>.bin` gives EXP_NAME/EXP_DESC (fallback "Unnamed Expansion"); `version.txt` → CRC |
+| `expansion\<n>\<n>.pff`, `<n>L.pff` | expansion discovery | [orig: Expansion_ScanAndRegister @ 0x4a43d0; Expansion_LoadAssets @ 0x4a4730] | absent → expansion unregistered, base game proceeds; `<n>.bin` `[exp_info]` gives EXP_NAME/EXP_DESC (fallbacks "Unnamed Expansion" / "This expansion lacks a description."; loose-first, then `<n>L.pff`, then `<n>.pff` — `vfs_expansion_info`); `version.txt` → CRC |
 | PFF set + `gameerr.bin`/`gametext.bin`/`vmacros.bin`/`keyhelp.bin` | **fatal set** | see table above | see table above |
 | `weapon.def` | boot + mission | [orig: WeaponDef_LoadAll @ 0x54dd10; mission slots @ 0x5254b8] | missing → silent; table left with one "None" entry. SCR-encrypted supported, key 0x2A5A8EAD |
 | `Avatars.def` | optional-fallback | [orig: CAvatarDefs_Init @ 0x57b180] | silent skip |

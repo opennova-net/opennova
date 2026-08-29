@@ -139,6 +139,25 @@ private:
 // (i.e. the expansions mount_game accepts). Returns the bare expansion names.
 std::vector<std::string> vfs_list_expansions(const std::string &game_root);
 
+// An expansion's own name and description, as retail's expansion scan reads them: the
+// [exp_info] EXP_NAME / EXP_DESC entries of <name>.bin, each with its own fallback. The
+// scan resolves the .bin independently of the mounted stack — a loose file under
+// expansion/<name>/ first (that search path is loose-first), then the L archive (the LAST
+// primary the scan installs), then the base archive — so an unmounted expansion reads
+// the same way; a missing or unparseable .bin yields both fallbacks.
+// [orig: Expansion_ScanAndRegister @ 0x4a43d0 — loose-first search path @ 0x4a446a,
+//  <n>.pff primary @ 0x4a44cd then <n>L.pff primary @ 0x4a450a,
+//  TextResource_LoadFile("<n>.bin") @ 0x4a455b, EXP_NAME @ 0x4a4578 else
+//  "Unnamed Expansion" @ 0x4a45c2 (and the no-.bin arm @ 0x4a4670), EXP_DESC @ 0x4a45ef
+//  else "This expansion lacks a description." @ 0x4a4648 / @ 0x4a46b2]
+struct ExpansionInfo {
+    std::string name;
+    std::string description;
+};
+inline constexpr const char *kExpansionUnnamed = "Unnamed Expansion";
+inline constexpr const char *kExpansionNoDescription = "This expansion lacks a description.";
+ExpansionInfo vfs_expansion_info(const std::string &game_root, const std::string &expansion);
+
 // The expansion version-file CRC [orig: CRC_ComputeCustomTable @ 0x53c820]:
 // MSB-first CRC-32, polynomial 0x04C11DB7, init -1, no reflection, no final
 // xor ("CRC-32/MPEG-2"; the 256-entry table @ 0x830780 — entries [1]
