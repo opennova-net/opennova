@@ -393,13 +393,32 @@ public:
 		rid = RID();
 	}
 
+	void release_framebuffer_rid(RID &rid) {
+		if (rd != nullptr && rid.is_valid() && rd->framebuffer_is_valid(rid))
+			rd->free_rid(rid);
+		rid = RID();
+	}
+
+	void release_texture_rid(RID &rid) {
+		if (rd != nullptr && rid.is_valid() && rd->texture_is_valid(rid))
+			rd->free_rid(rid);
+		rid = RID();
+	}
+
+	void release_pipeline_rid(RID &rid) {
+		if (rd != nullptr && rid.is_valid() &&
+				rd->render_pipeline_is_valid(rid))
+			rd->free_rid(rid);
+		rid = RID();
+	}
+
 	void release_targets() {
 		for (ViewTarget &target : targets) {
 			release_uniform_set_rid(target.source_uniform_set);
 			release_uniform_set_rid(target.scratch_uniform_set);
-			release_rid(target.scratch_framebuffer);
-			release_rid(target.framebuffer);
-			release_rid(target.scratch);
+			release_framebuffer_rid(target.scratch_framebuffer);
+			release_framebuffer_rid(target.framebuffer);
+			release_texture_rid(target.scratch);
 		}
 		targets.clear();
 		target_buffers_id = 0;
@@ -408,7 +427,7 @@ public:
 	void release_atlas() {
 		for (GpuAtlasPage &page : gpu_atlas_pages) {
 			release_uniform_set_rid(page.uniform_set);
-			release_rid(page.texture);
+			release_texture_rid(page.texture);
 		}
 		gpu_atlas_pages.clear();
 		gpu_atlas_generation = kNoAtlasGeneration;
@@ -421,13 +440,13 @@ public:
 		release_atlas();
 		release_rid(vertex_buffer);
 		for (auto &entry : pipelines)
-			release_rid(entry.second);
+			release_pipeline_rid(entry.second);
 		pipelines.clear();
 		for (auto &entry : scene_snapshot_pipelines)
-			release_rid(entry.second);
+			release_pipeline_rid(entry.second);
 		scene_snapshot_pipelines.clear();
 		release_uniform_set_rid(fallback_scene_uniform_set);
-		release_rid(fallback_scene_texture);
+		release_texture_rid(fallback_scene_texture);
 		release_rid(sampler);
 		release_rid(scene_snapshot_shader);
 		scene_snapshot_shader_initialization_failed = false;

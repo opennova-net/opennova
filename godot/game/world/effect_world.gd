@@ -65,6 +65,15 @@ func _ensure_renderer() -> void:
 	_renderer.set_hidden(_particles_disabled)
 
 
+## Retire compositor callbacks and their RenderingDevice resources while the
+## mission viewport and RenderingServer targets they reference are still live.
+## ParticleRenderer's EXIT_TREE hook is only an idempotent fallback: queued
+## mission teardown can otherwise reach it after those target RIDs are gone.
+func release_runtime_renderer_resources() -> void:
+	if is_instance_valid(_renderer):
+		_renderer.shutdown()
+
+
 func set_environment_source(source: Node) -> void:
 	_environment_source = source
 	_ensure_renderer()

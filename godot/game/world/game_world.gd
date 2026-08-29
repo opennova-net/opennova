@@ -771,6 +771,7 @@ func unload() -> void:
 		_runtime.queue_free()  # frees its off-tree sim too (MissionPresentation._exit_tree)
 	_runtime = null
 	if _effect_world != null:
+		_effect_world.release_runtime_renderer_resources()
 		_effect_world.queue_free()
 		_effect_world = null
 	_mission_audio = null

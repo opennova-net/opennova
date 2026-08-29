@@ -388,6 +388,9 @@ func test_pipeline_warm_is_serviced_by_the_real_rd_compositor() -> void:
 	assert_gt(int(backend.get("warmed_framebuffer_formats", 0)), 0)
 	assert_true(bool(backend.get("scene_snapshot_pipeline_warmed", false)),
 			"Distort's resolved-scene copy pipeline must be warmed too")
+	renderer.shutdown()
+	assert_engine_error_count(0,
+			"explicit shutdown frees warmed RenderingDevice resources exactly once")
 
 
 func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
