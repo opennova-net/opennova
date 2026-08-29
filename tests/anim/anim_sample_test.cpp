@@ -5,8 +5,9 @@
 //   1. the native conversion conventions (bad_channel_quat = normalize(w, x, y, z) reorder
 //      only; bone bind position used as-is),
 //   2. quaternion helper correctness, and
-//   3. world<->local self-consistency on the real BINOC.bad fixture (catches sign /
-//      multiply-order bugs; space-independent).
+//   3. world<->local self-consistency on the shipped BINOC.bad (the reference fixture
+//      set, OPENNOVA_JO_ASSETS; a SKIP-LEG retail leg -- catches sign / multiply-order
+//      bugs; space-independent).
 
 #include <runtime/anim/anim_sample.h>
 
@@ -15,8 +16,10 @@
 #include <cmath>
 #include <cstdio>
 
+#include <string>
+
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
-#include "common/test_paths.h"
 
 using opennova::anim::Quat;
 using opennova::anim::Vec3;
@@ -56,13 +59,12 @@ int main() {
         TEST_EXPECT(approx(v.x, 0.0f) && approx(v.y, 1.0f) && approx(v.z, 0.0f));
     }
 
-    // --- sample the real fixture ---
-    char path[4096];
-    std::snprintf(path, sizeof(path), "%s%cfixtures%cbad%cBINOC.bad",
-                  test_paths_repo_root(__FILE__), TEST_PATHS_SEP,
-                  TEST_PATHS_SEP, TEST_PATHS_SEP);
+    // --- sample the shipped rig (the retail leg) ---
+    const std::string binoc = retail::reference_fixture("bad/BINOC.bad");
+    const bool retail_leg = !binoc.empty();
     BadFile bad = {};
-    TEST_EXPECT(bad_parse(path, &bad) == 0);
+    if (retail_leg) {
+    TEST_EXPECT(bad_parse(binoc.c_str(), &bad) == 0);
 
     Clip clip = sample_clip(bad);
     TEST_EXPECT(clip.bones.size() == 19);
@@ -175,6 +177,7 @@ int main() {
         TEST_EXPECT(rest_follows_shared);
         TEST_EXPECT(default_rest_is_bad);
     }
+    }  // retail_leg
 
     // --- compressed clip: per-bone sparse keyframes with non-uniform durations (regression) ---
     // A flat rotations[frame] index snaps a bone to IDENTITY once frame >= its keyframe count; the
@@ -496,6 +499,7 @@ int main() {
         TEST_EXPECT(approx(far[0].x, -1.0f) && approx(far[0].y, 2.0f) && approx(far[0].z, 3.0f));
     }
 
-    bad_free(&bad);
+    if (retail_leg) bad_free(&bad);
+    else return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bad/BINOC.bad (the shipped 19-bone rig)");
     return 0;
 }

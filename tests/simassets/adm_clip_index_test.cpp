@@ -1,10 +1,17 @@
 /* engine/runtime/simassets AdmClipIndex — the native clip-length source the
-   weapon FSM bake rings from (S6b). Pinned over the committed fixtures:
-   fixtures/anim (resolvable .bads) and fixtures/adm/mp5_1st.adm (a real rig
-   map whose .bads are absent — the continue-on-failure edge). */
+   weapon FSM bake rings from (S6b). Pinned over the authored fixtures/anim
+   (resolvable .bads) and a rig map staged in a temp dir whose .bads are
+   absent (the continue-on-failure edge). */
 
 #include <cstdio>
+#include <fstream>
 #include <string>
+
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"
@@ -46,11 +53,25 @@ int main() {
     }
 
     {
-        // A real weapon rig map whose .bads are absent: every variant skips
-        // (continue-on-failure), the load degrades to zero keys, and the FSM's
-        // 'auto' delays collapse exactly as the model-never-loads path did.
+        // A weapon rig map whose .bads are absent (the shipped MP5 map's shape,
+        // staged alone in a temp dir): every variant skips (continue-on-failure),
+        // the load degrades to zero keys, and the FSM's 'auto' delays collapse
+        // exactly as the model-never-loads path did.
+        const std::string dir = std::string(test_paths_temp_dir()) + "/opennova_clipindex_test";
+#ifdef _WIN32
+        _mkdir(dir.c_str());
+#else
+        mkdir(dir.c_str(), 0777);
+#endif
+        {
+            std::ofstream f(dir + "/mp5_1st.adm", std::ios::binary);
+            TEST_EXPECT(static_cast<bool>(f));
+            f << "\r\nanim_reset\t\t\t\t\"mp5_RST\"\r\n"
+                 "anim_wpn_fire\t\t\t\t\"mp5_1f\"\r\n"
+                 "anim_wpn_reload\t\t\t\t\"mp5_1r\"\r\n";
+        }
         opennova::ResourceIndex index;
-        TEST_EXPECT(index.scan(std::string(root) + "/fixtures/adm"));
+        TEST_EXPECT(index.scan(dir));
         AdmClipIndex clips;
         TEST_EXPECT(clips.load(&index, "mp5_1st.adm") == 0);
         TEST_EXPECT(!clips.loaded());

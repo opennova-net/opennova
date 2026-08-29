@@ -1,6 +1,8 @@
 /* engine/runtime/simassets AdmSkeletalClips — the SECONDARY (upper-body weapon)
-   channel's composition, pinned headless over the committed BINOC.bad rig (the
-   real 19-tag BN01..BN19 body skeleton the weapon mask keys on):
+   channel's composition, pinned headless over the shipped BINOC.bad rig (the
+   real 19-tag BN01..BN19 body skeleton the weapon mask keys on; both rigs come
+   from the reference fixture set, OPENNOVA_JO_ASSETS, and the whole test is
+   gated on them):
 
      1. the mask splice: mask bones take the weapon channel's world rotation,
         unmasked bones keep the primary's, and the hierarchy re-localizes exactly
@@ -17,7 +19,7 @@
    The healthy-export trap: with only real retail clips a naive test passes for
    the wrong reason (channel-at-reset == bind). So the second clip is BINOC.bad
    with ONE mask bone (BN06 R UpperArm) rotated 90 deg and ONE unmasked bone
-   (BN08 R Thigh) rotated 90 deg: the committed fixtures/bad/BINOC_twist.bad,
+   (BN08 R Thigh) rotated 90 deg: the reference set's bad/BINOC_twist.bad,
    minted once from the retired from-scratch .bad writer (ADR 0038). Its
    provenance is ASSERTED below against twist_channel's in-memory expectation,
    never assumed, and it is staged into the temp dir beside a byte copy of
@@ -38,6 +40,7 @@
 #endif
 
 #include "common/test_expect.h"
+#include "common/retail_paths.h"
 #include "common/test_paths.h"
 
 #include <runtime/anim/aim_overlay.h>
@@ -117,9 +120,10 @@ bool copy_bytes(const std::string &src, const std::string &dst) {
 } // namespace
 
 int main() {
-    const char *root = test_paths_repo_root(__FILE__);
-    const std::string binoc = std::string(root) + "/fixtures/bad/BINOC.bad";
-    const std::string twist_fixture = std::string(root) + "/fixtures/bad/BINOC_twist.bad";
+    const std::string binoc = retail::reference_fixture("bad/BINOC.bad");
+    const std::string twist_fixture = retail::reference_fixture("bad/BINOC_twist.bad");
+    if (binoc.empty() || twist_fixture.empty())
+        return retail::skip("OPENNOVA_JO_ASSETS/fixtures/bad/BINOC.bad + BINOC_twist.bad (the shipped rig and its twist)");
 
     // ---- fixture provenance: BINOC_twist.bad IS BINOC.bad with bones 5 and 7 twisted ----
     // Parse-level, not a byte diff: the retired writer zero-filled the 32-byte

@@ -76,15 +76,20 @@ target_compile_features(minimal_3di_gen_test PRIVATE cxx_std_17)
 target_include_directories(minimal_3di_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_3di_gen COMMAND minimal_3di_gen_test)
 
-# ADM tests
+# ADM tests. adm_parse pins the shipped mp5_1st.adm from the reference fixture
+# set (gated on OPENNOVA_JO_ASSETS); the rest author their maps in memory.
 foreach(test comment trim_value parse variants)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
     target_link_libraries(adm_${test}_test PRIVATE opennova_formats)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+endforeach()
+foreach(test comment trim_value variants)
     add_test(NAME adm_${test} COMMAND adm_${test}_test)
 endforeach()
+opennova_add_gated_test(adm_parse COMMAND adm_parse_test)
 
-# BAD tests
+# BAD tests: the null guard unconditionally, the shipped BINOC.bad pins as the
+# reference-set SKIP-LEG leg.
 add_executable(bad_parse_test bad/bad_parse_test.cpp)
 target_link_libraries(bad_parse_test PRIVATE opennova_formats)
 target_include_directories(bad_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -102,7 +107,7 @@ target_link_libraries(bink_retail_test PRIVATE opennova_formats)
 opennova_add_gated_test(bink_retail COMMAND bink_retail_test)
 
 # ANIM skeletal sampler (engine/runtime/anim): coordinate conventions, quaternion helpers, and
-# world<->local self-consistency on the real BINOC.bad fixture.
+# world<->local self-consistency on the shipped BINOC.bad (a reference-set SKIP-LEG leg).
 add_executable(anim_sample_test anim/anim_sample_test.cpp)
 target_link_libraries(anim_sample_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(anim_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -723,13 +728,14 @@ target_link_libraries(simassets_adm_clip_index_test PRIVATE opennova_runtime)
 target_include_directories(simassets_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME simassets_adm_clip_index COMMAND simassets_adm_clip_index_test)
 
-# The SECONDARY (weapon) channel composition over the committed BINOC.bad rig
-# plus fixtures/bad/BINOC_twist.bad (the two-bone twist minted once from the
-# retired writer; the test asserts that provenance before probing).
+# The SECONDARY (weapon) channel composition over the shipped BINOC.bad rig
+# plus its BINOC_twist.bad (the two-bone twist minted once from the retired
+# writer; the test asserts that provenance before probing). Both come from the
+# reference fixture set; gated on OPENNOVA_JO_ASSETS.
 add_executable(simassets_adm_skeletal_clips_weapon_channel_test simassets/adm_skeletal_clips_weapon_channel_test.cpp)
 target_link_libraries(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE opennova_runtime)
 target_include_directories(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME simassets_adm_skeletal_clips_weapon_channel COMMAND simassets_adm_skeletal_clips_weapon_channel_test)
+opennova_add_gated_test(simassets_adm_skeletal_clips_weapon_channel COMMAND simassets_adm_skeletal_clips_weapon_channel_test)
 
 add_executable(simassets_item_traits_test simassets/item_traits_test.cpp)
 target_link_libraries(simassets_item_traits_test PRIVATE opennova_runtime)

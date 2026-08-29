@@ -3,14 +3,22 @@
 #include <cstdio>
 #include <cstring>
 
-#include "common/test_expect.h"
-#include "common/test_paths.h"
+#include <string>
 
+#include "common/retail_paths.h"
+#include "common/test_expect.h"
+
+// The null guard runs unconditionally; the shipped BINOC.bad (the reference
+// fixture set, OPENNOVA_JO_ASSETS) is the SKIP-LEG retail leg that pins the
+// rig's layout.
 int main() {
-    char path[4096];
-    std::snprintf(path, sizeof(path), "%s%cfixtures%cbad%cBINOC.bad",
-                  test_paths_repo_root(__FILE__), TEST_PATHS_SEP,
-                  TEST_PATHS_SEP, TEST_PATHS_SEP);
+    BadFile invalid = {};
+    TEST_EXPECT(bad_parse(nullptr, &invalid) == -1);
+
+    const std::string fixture = retail::reference_fixture("bad/BINOC.bad");
+    if (fixture.empty())
+        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bad/BINOC.bad (the shipped 19-bone rig)");
+    const char *path = fixture.c_str();
 
     BadFile file = {};
     TEST_EXPECT(bad_parse(path, &file) == 0);
@@ -43,8 +51,6 @@ int main() {
     TEST_EXPECT(file.channels == nullptr);
     TEST_EXPECT(file.events == nullptr);
 
-    BadFile invalid = {};
-    TEST_EXPECT(bad_parse(nullptr, &invalid) == -1);
-
+    std::printf("retail leg: BINOC.bad parsed with the shipped pins\n");
     return 0;
 }
