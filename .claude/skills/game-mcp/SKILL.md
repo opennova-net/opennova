@@ -44,8 +44,9 @@ python scripts/mcp/game_mcp.py entities --watch --interval 1 --out .scratch/enti
 python scripts/mcp/game_mcp.py logs
 ```
 
-`game_debug` is the F3 catalog without the UI; entity mutations take the
-`ai_index` from `game_entities` rows with `editable: true`.
+`game_debug` drives the typed `DebugControls` table (engine rows end in
+`Simulation`/`EntityCommands`, device rows in the shell; ADR 0042 d5); entity
+mutations take the `ai_index` from `game_entities` rows with `editable: true`.
 
 ## 3. Probe
 

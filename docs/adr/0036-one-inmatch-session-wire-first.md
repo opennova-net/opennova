@@ -2,10 +2,10 @@
 
 - **Status**: accepted (2026-08-22; full cutover)
 - **Updated**: [ADR 0042](0042-godot-permanent-shell-one-mission-kernel.md)
-  (2026-08-28) updates decision 2's implementer sentence: once the kernel
-  slices land, the concrete targets embed `mission::MissionKernel` and call
-  `inmatch::listen_host::frame` — the kernel and the frame are the one
-  implementation.
+  (2026-08-28) updates decision 2's implementer sentence: the concrete
+  targets (`Simulation`, `apps/nw_server`) embed `mission::MissionKernel` and
+  call `inmatch::listen_host::frame` (PR #587) — the kernel and the frame are
+  the one implementation.
 - **Owners**: runtime architecture, in-match networking, gameplay
 - **Supersedes**: ADR 0009 decisions 1-2 as a public module topology and ADR
   0035 decision 1's `opennova::np::MissionSession` name/location. The witnessed

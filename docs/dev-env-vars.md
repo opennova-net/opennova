@@ -58,7 +58,7 @@ option.
 | `/exp <name>` | mount that expansion on top of the base set |
 | `/game <code>` | the game profile (SCR policy) |
 | `/d` | loose files override archive entries |
-| `--loose-root <dir>`, `--loose-mission <name.bms>` | boot a loose mission from a loose tree |
+| `--loose-root`, `--loose-mission <name.bms>` | treat the data directory as a loose tree (a bare flag) / boot the named loose mission from it |
 | `--mission <name.bms>` | boot straight into a single-player mission (the world parks un-ticked under the start splash until the player is spawned) |
 | `--lan-host <mission.bms>` | boot as a co-op LAN listen host |
 | `--lan-join <ip[:port]>` | boot as a LAN joiner dialing that host (the mission comes from the wire, D-NET-194) |
@@ -73,7 +73,7 @@ option.
 
 ## Debug controls that replaced post-boot hooks
 
-The F3 debug catalog (`game_debug` over MCP) carries the actions the old env
+The typed debug-control table (`DebugControls`, driven as `game_debug` over MCP) carries the actions the old env
 hooks performed after boot: `teleport_local_player {position, yaw_deg,
 pitch_deg}` (the debug pose), `deploy_pick {zone}` (the auto-deploy hook),
 `set_viewmodel_weapon {weapon}` / `clear_viewmodel_weapon` (the viewmodel
@@ -98,7 +98,7 @@ override), `kill_group {group}`, `crew_vehicle {occupant_ssn, vehicle_ssn}`,
 | `bunker_walkin_test` | `--from x,y[,z]`, `--to x,y`, `--column x,y` |
 | `mnu_compat_test` | extra loose menus as positional arguments |
 | `wac_corpus_test` | extra corpus directories as positional arguments |
-| `scripts/build.sh` | `--no-godot`, `--jobs N`; `scripts/build_godot.sh [--jobs N]`; `scripts/test_godot.sh --keep-user-dir` |
+| `scripts/build.sh` | `--no-godot`, `--jobs N`; `scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N]`; `scripts/test_godot.sh --keep-user-dir` |
 | `scripts/ida/cite_sweep.py` | `--url` |
 
 GUT-side regeneration is an uncollected script run alone:

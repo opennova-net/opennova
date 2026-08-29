@@ -231,7 +231,7 @@ the `world_only` diagnostic catalog at 1600x900 / vertical FOV 50.534, for
 within-run subsystem isolation via
 [`build_render_comparison.ps1`](../../scripts/render/build_render_comparison.ps1)
 `-ComparisonMode subsystem-ab`.
-[`render-fixtures-retail-v4.json`](render-fixtures-retail-v4.json) is the
+[`render-fixtures-retail-v5.json`](render-fixtures-retail-v5.json) is the
 registered publication catalog at 2000x1200 / vertical FOV 53.4468. The
 diagnostic workflow is never a substitute for a registered HUD-hidden retail
 comparison, and the legacy `retail-parity` comparison mode is not sanctioned

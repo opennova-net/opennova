@@ -28,9 +28,9 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
       every file under `engine/runtime/terrain` now carries an anchor, and the cpt/til/trn
       resource formats moved to `engine/formats/` carrying theirs, so the gap is
-      `godot/src/terrain/`, where the foliage def/map pair, the static-shadow rasterizer
-      and the tile cache device/entry files carry none and `terrain_tile_info.cpp` carries
-      only its foliage-block anchor; `docs/terrain/terrain-re.md`
+      `godot/src/terrain/`, where the foliage def/map pair and the tile cache device/entry files carry
+      none, `terrain_tile_info.cpp` carries only its foliage-block anchor and the
+      static-shadow rasterizer only its collector/tile-walk anchors; `docs/terrain/terrain-re.md`
       is still partial (PAR-R1); narrow or close this entry after the sweep
 - [ ] Present-pass / entity-reconcile citation pass: the present anchors live at
       the native walks (`present_applier.{h,cpp}` 10, the wire walk +
@@ -58,7 +58,8 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
 - [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
       recipe): the retired F3 pages return as engine ImGui windows as they are
-      wanted — the pick-list feed into the Entities window, sim transport
+      wanted (the Entities window landed as the ADR 0042 d6 template, PR #587);
+      still open: the pick-list feed into it, sim transport
       (play/pause/step; the MCP
       `game_debug` control plane still drives these), script vars, net, particles,
       occlusion, rounds, terrain, rendering/world-view toggles (`GameWorld`'s
@@ -72,9 +73,10 @@ hardening, and project health. Divergences from the original engine belong in
       fire/destruction/throwable/wire present stats, occlusion counts (`occl`),
       the sim row's entity count + role. Each returns as a VALUE slot fed by the
       shell sampler that owns the source.
-- [ ] Expansion description in the menu shell: `menu_shell.gd` shows the raw expansion
-      folder name; read the description from the expansion `.pff` (the retail launcher
-      reads it from the archive) instead of the folder name.
+- [ ] Expansion description in the menu shell: `menu_shell.gd` maps known expansions to
+      hardcoded friendly labels and shows unknown ones by folder name; read the
+      description from the expansion `.pff` (the retail launcher reads it from the
+      archive) and drop the label table.
 - [ ] Managed-game shutdown: ONED close/Stop may still require forced termination.
       Add a bounded graceful-quit window before the current forced termination,
       and keep the process-handle lifecycle reliable so a stopped retail child
@@ -88,8 +90,8 @@ hardening, and project health. Divergences from the original engine belong in
       operator sequence in `plan/pr21-cutover-runbook.md` (its "#136 open"
       premise is historical; commands remain current)
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, and Godot gates.
-- [ ] Full Linux core tests: add an Ubuntu leg for the complete native suite after triaging any platform-only failures. Acceptance: the full CTest suite runs on Linux for every PR without relying on the net-only or packaging jobs.
-- [ ] Incremental conventional linting: establish project-owned formatting settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
+- [ ] Full Linux core tests on PRs: `test-linux` (`.github/workflows/ci.yml`) already runs the whole ctest suite on ubuntu for master pushes and manual runs; extend it to pull requests once its cost is acceptable, after triaging any platform-only failures. Acceptance: the full CTest suite runs on Linux for every PR without relying on the net-only or packaging jobs.
+- [ ] Incremental conventional linting (vocabulary conventions already ride `scripts/lint/conventions_lint.py` as a CI gate; this row is formatting + per-language linters): establish project-owned formatting settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
 - [ ] Serve mode (PROD-1, ADR 0015): `opennova.exe --server` / `--headless
       --server` and a packaging boot-smoke leg — tracked future work, never
       implemented; specs live in `docs/maturity-program.md` §PROD.
@@ -98,14 +100,13 @@ hardening, and project health. Divergences from the original engine belong in
       GSB name strings Latin-1 -> UTF-8 on the read side. Carried over from the
       completed NovaWorld integration record (`plan/status.md`), which had no owner
       for it.
-- [ ] NovaWorld session-builder grill wave (PAR-NET): `build_server_hello` /
-      `build_server_auth` (`engine/net/npwire/session_hello.h` +
-      `engine/net/npwire/session/session_hello.cpp`, the builders the ROADMAP still
-      calls the `engine/net/novaworld` ones) hold the whole remaining 0x81/0x82
-      byte-parity gap (CI/MI/CS values, the game-server field block, LAN-CU
-      suppression), and the ~8 §5.2a initial-state serializers with no witnessed
-      byte format are still emitted-as-nothing-and-logged rather than faked, as is
-      the `Server_OnPlayerJoin` join-burst tail (`0x42/0x0F/0x4D/seed/0x3E`). Witness
-      each at the addresses cited in `engine/net/npruntime/server_initial_state.cpp`
-      -> `ingame_encode`, land the record via `re-doc`. Detail:
+- [ ] NovaWorld session-builder residue (PAR-NET): the 0x81/0x82 builders
+      (`build_server_hello` / `build_server_auth`, `engine/net/npwire/session_hello.h` +
+      `engine/net/npwire/session/session_hello.cpp`) were grilled and fixed 2026-06-27
+      (ROADMAP Wave 3); what remains is the host-specific seed values the golden byte-diff
+      still shows (the 0x81 `CI` host-node index, the 0x82 `MI` host dcb, the identity
+      strings) and the ~8 §5.2a initial-state serializers `log_deferred_once` skips
+      (`engine/net/npruntime/server_initial_state.cpp`, "emitted as nothing pending the
+      grill wave"), which stay unemitted-and-logged rather than faked. Witness each at the
+      addresses cited there -> `ingame_encode`, land the record via `re-doc`. Detail:
       `engine/net/npruntime/ROADMAP.md`.

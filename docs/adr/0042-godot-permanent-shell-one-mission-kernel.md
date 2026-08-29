@@ -95,8 +95,8 @@ and rejected on evidence, not on precedent.
    `tests/devtools` (previously the containment was a single CMake PRIVATE keyword).
 
 7. **One cite marker.** The `(retail: ...)` device-note convention is retired: a witness citation
-   is `[orig: Name @0xADDR]` everywhere, and the counters (`adapter_cpp_orig_cites_*`,
-   `gd_orig_cites` — now including `godot/probes`) are non-increasing. The marker rewrite that
+   is `[orig: Name @0xADDR]` everywhere, and the counters (`adapter_cpp_orig_cites`, one count over
+   all of `godot/src`; `gd_orig_cites`, now including `godot/probes`) are non-increasing. The marker rewrite that
    let 117 citations leave the pushdown gauge is no longer an exit: only code that moves banks a
    counter. `godot/game/mcp` carries a zero-cite floor (a converter that needs a witness cite is
    re-deriving).
@@ -136,6 +136,7 @@ and rejected on evidence, not on precedent.
   `runtime_root_window` and `frame_stats` probes green with the Entities window registered, and
   an `nw-server` smoke hosting a fully booted 00TRg (terrain, tables, 864 collision instances).
 - OUTSTANDING, named rather than claimed: the retail-interop recipe both directions (a stock
-  client joining our listen host; ours joining a retail host, `.agents/README.md`) has not been
-  re-run on this branch — it needs the retail install driven through onhook. Run it before or
-  at merge; the wire goldens and the LAN-pair admission are the evidence in hand.
+  client joining our listen host; ours joining a retail host, `.agents/README.md`) was not
+  re-run before the 2026-08-28 merge (PR #587) — it needs the retail install driven through
+  onhook, whose MCP the tooling currently rejects (the retail-LAN parity row in TODO.md names
+  the upstream blockers); the wire goldens and the LAN-pair admission are the evidence in hand.

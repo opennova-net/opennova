@@ -25,7 +25,7 @@ shared 1Password document and secrets come from the vault:
 
 (`deploy/bin/on-deploy` runs `terraform -chdir=infra/github` with its own
 `tfstate-github` 1Password document and injects `TF_VAR_github_token` /
-`TF_VAR_github_owner` / `shared_repository_secrets` from `deploy/env/github.env.tpl`.)
+`TF_VAR_github_owner` / `shared_repository_secrets` from `deploy/env/github.tfvars.json.tpl`.)
 
 ## One-time import of the existing repos
 

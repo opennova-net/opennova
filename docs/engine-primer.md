@@ -210,7 +210,7 @@ Order of operations when you need an engine truth:
      ends in a per-system verdict, landed via the `re-doc` skill.
 4. **Ground truth without IDA:**
    - **Has the three-way link drifted?** → `scripts/ida/cite_sweep.py` joins every
-     `[orig:`/`(retail:` marker in code and docs against the live IDB by address and
+     `[orig:` marker (the one citation form, ADR 0042 d7) in code and docs against the live IDB by address and
      prints the disagreements (stale names, auto-names, undefined or other-image
      addresses, stale `reimpl:` back-links); run it after a merge train and before a
      release (grill-ida `LIFECYCLE.md` §4).
@@ -223,8 +223,9 @@ Order of operations when you need an engine truth:
 5. **Runtime introspection:**
    - The dev tools (F3 in the standalone game, ADR 0039): engine-owned Dear ImGui
      windows under `engine/runtime/devtools/` — the Stats window over the
-     frame-stats board today, further inspection/control windows as they are
-     wanted (`engine/runtime/devtools/README.md` is the recipe). Debug builds
+     frame-stats board and the Entities window over
+     `world::inspect::entity_directory` (records in, typed requests out, ADR
+     0042 d6), further inspection/control windows as they are wanted (`engine/runtime/devtools/README.md` is the recipe). Debug builds
      only. ONED's Run OpenNova loose action launches that same standalone game
      against the selected data directory; ONED has no embedded preview or dev
      tools (its own run surface is an engine ImGui window on the same pass).
