@@ -81,5 +81,5 @@ func update(hud: HudOverlay, world: GameWorld, chorded: bool, active: bool,
 	# The rows never round-trip through script: the overlay pulls them (and the
 	# team count the 4-team page reads) natively from the sim
 	# (HudOverlay.set_scoreboard -> fill_scoreboard_rows); the frame counter is
-	# the HUD tick the page alternates on [orig: dword_A87060 & 0x80 @0x423cdd].
+	# the HUD tick the engine's page alternates on (hud_scoreboard.h).
 	hud.set_scoreboard(true, game_type, frame_counter, strings, sim)
