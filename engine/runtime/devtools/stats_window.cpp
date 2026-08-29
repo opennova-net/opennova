@@ -234,8 +234,22 @@ void StatsWindow::format_info() {
 		set_info("mission_rows", buf);
 	}
 	if (slot_samples(w, Slot::SIM_TICKS) > 0) {
-		std::snprintf(buf, sizeof(buf), "%.1f t/f", mean_count(w, Slot::SIM_TICKS));
+		int n = std::snprintf(buf, sizeof(buf), "%.1f t/f", mean_count(w, Slot::SIM_TICKS));
+		if (n > 0 && slot_samples(w, Slot::SIM_ENTITY_COUNT) > 0) {
+			// The role is constant over a capture, so its mean is its value.
+			static const char *const kRoleNames[] = {"single player", "host", "joiner"};
+			const int role = static_cast<int>(std::lround(mean_count(w, Slot::SIM_ROLE)));
+			const char *role_name = (role >= 0 && role < 3) ? kRoleNames[role] : "?";
+			std::snprintf(buf + n, sizeof(buf) - static_cast<size_t>(n), " | %d entities | %s",
+					static_cast<int>(std::lround(mean_count(w, Slot::SIM_ENTITY_COUNT))),
+					role_name);
+		}
 		set_info("sim", buf);
+	}
+	if (slot_samples(w, Slot::NET_PEER_COUNT) > 0) {
+		std::snprintf(buf, sizeof(buf), "%d peers",
+				static_cast<int>(std::lround(mean_count(w, Slot::NET_PEER_COUNT))));
+		set_info("net", buf);
 	}
 	if (slot_samples(w, Slot::TRACE_CALLS) > 0) {
 		std::snprintf(buf, sizeof(buf), "%.1f calls/f | S %.1f D %.1f P %.1f surv/f | %.1f/%.1f faces/f",
