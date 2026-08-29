@@ -13,6 +13,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_view.h>
+#include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
 
@@ -300,6 +301,71 @@ void test_set_eye_mirrors_the_head_into_the_world() {
 
 } // namespace
 
+// --- the heat window's water gate at the local pump (D-WPN-29) ---------------
+// [orig: WeaponAction_ProcessFrame @ 0x540e50 — `Position.Z > Env_WaterHeightFixed
+//  || (Def->Flags & 4)` @ 0x54101c keeps the window, else the clear @ 0x54125f]:
+// the pump feeds the owner's BODY Z against env.water_z, so a body at or below
+// the plane drops a live window unless the def carries Underwater; no authored
+// water (water_z == 0) never submerges.
+
+LocalPlayerWeapon heated_weapon(uint32_t flags, int32_t window_end) {
+    LocalPlayerWeapon w = scoped_weapon(flags);
+    w.def.heat_per_shot = 1310;
+    w.def.heat_decay_per_tick = 42;
+    w.slot.heat_window_end_tick = window_end;
+    return w;
+}
+
+void pump_once(LocalWorld &lw, LocalPlayerWeapon &w, PlayerViewState &v) {
+    LocalWeaponPumpIO io;
+    io.view = &v;
+    local_weapon_pump_tick(lw.w, w, io);
+}
+
+void test_pump_feeds_the_heat_window_water_gate_from_the_body_z() {
+    // Body at z=3.0 (the rig), water plane at 5.0: submerged -> the window clears.
+    {
+        LocalWorld lw;
+        lw.w.logic_tick = 100;
+        lw.w.env.water_z = to_fixed(5.0);
+        LocalPlayerWeapon w = heated_weapon(0, 500);
+        PlayerViewState v;
+        pump_once(lw, w, v);
+        CHECK(w.slot.heat_window_end_tick == 0); // [orig: @ 0x54125f]
+    }
+    // Same body, same plane, an Underwater def: the window survives.
+    {
+        LocalWorld lw;
+        lw.w.logic_tick = 100;
+        lw.w.env.water_z = to_fixed(5.0);
+        LocalPlayerWeapon w = heated_weapon(0, 500);
+        w.def.flags |= static_cast<int32_t>(weapon_flag::kUnderwater);
+        PlayerViewState v;
+        pump_once(lw, w, v);
+        CHECK(w.slot.heat_window_end_tick == 500);
+    }
+    // Water plane below the body: above water, the window survives.
+    {
+        LocalWorld lw;
+        lw.w.logic_tick = 100;
+        lw.w.env.water_z = to_fixed(1.0);
+        LocalPlayerWeapon w = heated_weapon(0, 500);
+        PlayerViewState v;
+        pump_once(lw, w, v);
+        CHECK(w.slot.heat_window_end_tick == 500);
+    }
+    // No authored water: never submerged, even with a body at z=3.0 and water_z 0.
+    {
+        LocalWorld lw;
+        lw.w.logic_tick = 100;
+        lw.w.env.water_z = 0;
+        LocalPlayerWeapon w = heated_weapon(0, 500);
+        PlayerViewState v;
+        pump_once(lw, w, v);
+        CHECK(w.slot.heat_window_end_tick == 500);
+    }
+}
+
 int main() {
     test_scope_toggle_refuses_inactive_weapon();
     test_scope_up_refused_while_moving_on_scoped_weapon();
@@ -313,6 +379,7 @@ int main() {
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
     test_set_eye_mirrors_the_head_into_the_world();
+    test_pump_feeds_the_heat_window_water_gate_from_the_body_z();
     if (failures == 0) std::printf("local_player_view_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
