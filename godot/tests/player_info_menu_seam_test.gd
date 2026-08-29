@@ -456,13 +456,11 @@ func test_voice_preview_requests_selected_avatar_voice() -> void:
 
 # --- Loadout (PRIMARY/SECONDARY/ACCESSORY) ------------------------------------
 
-const WEAPON_FIXTURE := "res://../fixtures/def/weapon.def"
-
-
+# The shipped weapon.def from the reference fixture set; the loadout legs pend
+# without it.
 func _load_weapons() -> WeaponDatabase:
 	var wdb := WeaponDatabase.new()
-	var path := ProjectSettings.globalize_path(WEAPON_FIXTURE)
-	assert_eq(wdb.load(path), OK, "weapon.def fixture loads")
+	assert_eq(wdb.load(RetailData.fixture("def/weapon.def")), OK, "the shipped weapon.def loads")
 	return wdb
 
 
@@ -566,6 +564,9 @@ func _items(name: String) -> Array:
 
 
 func test_populates_loadout_slots_filtered_by_class_and_team() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var wdb := _load_weapons()
 	var _companion := _make_ammo_companion(wdb)
 
@@ -578,6 +579,9 @@ func test_populates_loadout_slots_filtered_by_class_and_team() -> void:
 
 
 func test_loadout_class_filter_includes_and_excludes() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var _companion := _make_ammo_companion(_load_weapons())
 
 	# Medic (value 5): WPN_M4AUTO (charfilter medic|rifleman|engineer, blue) is a primary -> present.
@@ -590,6 +594,9 @@ func test_loadout_class_filter_includes_and_excludes() -> void:
 
 
 func test_snapshot_carries_the_selected_loadout_weapon_ids() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var wdb := _load_weapons()
 	var companion := _make_ammo_companion(wdb)
 
@@ -629,6 +636,9 @@ func test_snapshot_carries_class_without_a_weapon_database() -> void:
 # through the same control names/document the runtime opens, not just a stand-in. Runs
 # in GUT so the autoloads (Strings) and the GDExtension are loaded.
 func test_real_player_mnu_loadout_populates() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var player_mnu := RetailData.fixture("mnu/jo_player.mnu")
 	if player_mnu.is_empty():
 		pending(RetailData.fixture_pending_text("mnu/jo_player.mnu"))
@@ -669,6 +679,9 @@ func test_real_player_mnu_loadout_populates() -> void:
 # --- Ammo combos + weight + icons (D-PLAYERINFO-11) -----------------------------
 
 func test_primary_ammo_rows_follow_selected_weapon() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
@@ -685,6 +698,9 @@ func test_primary_ammo_rows_follow_selected_weapon() -> void:
 
 
 func test_none_selection_hides_ammo_and_clears_icon() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var wdb := _load_weapons()
 	# The icon mounts are frame children, so this case runs with a real MenuFrame.
 	var _presenter := _make_ammo_companion(wdb, true)
@@ -698,6 +714,9 @@ func test_none_selection_hides_ammo_and_clears_icon() -> void:
 
 
 func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
 	# The M203 carbines are rifleman-filtered; switch PLAYERCLASS to Rifleman
@@ -719,6 +738,9 @@ func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 
 
 func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
 	var expected: Array = wdb.get_slot_weapons(
@@ -740,6 +762,9 @@ func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 
 
 func test_weight_label_renders_witnessed_format_and_band() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
@@ -766,6 +791,9 @@ func test_weight_label_renders_witnessed_format_and_band() -> void:
 
 
 func test_ammo_selection_recomputes_weight_and_snapshot() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var wdb := _load_weapons()
 	var companion := _make_ammo_companion(wdb)
 	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
@@ -838,6 +866,9 @@ end
 
 
 func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# The witnessed asymmetry [orig: calculate_loadout_weight @ 0x55f1f0]:
 	# grenades default -1 -> maxclips, but a PICKED 0 stays 0 (the zero row) —
 	# unlike the parents' <=0 -> maxclips rule.
@@ -858,6 +889,9 @@ func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
 
 
 func test_weapon_dict_carries_loadout_subclasses() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	var wdb := _load_weapons()
 	var idx := wdb.find_weapon("WPN_M4M203AUTO")
 	assert_gt(idx, 0)

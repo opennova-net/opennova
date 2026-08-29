@@ -1,12 +1,11 @@
 extends GutTest
 
 # The runtime HudOverlay (native, over the engine HudFrameCompiler): configure
-# from a real hudpos.def, feed typed per-frame state, and assert on the
+# from the shipped hudpos.def (the reference fixture set; those legs pend
+# without it), feed typed per-frame state, and assert on the
 # compiled draw list (get_draw_list_stats) plus the visible canvas geometry.
 # The shell-side HudSightsCard child stack is covered here too.
 
-const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"
-const WEAPON_PATH := "res://../fixtures/def/weapon.def"
 const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"  # staged as Gunpl22b.fnt
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
@@ -73,7 +72,7 @@ func _make_overlay() -> HudOverlay:
 
 func _load_weapon(name: String) -> Dictionary:
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(WEAPON_PATH)), OK,
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK,
 		"weapon.def fixture loads")
 	var index := weapons.find_weapon(name)
 	assert_gte(index, 0, "%s exists in the weapon.def fixture" % name)
@@ -87,6 +86,9 @@ func _set_hud_weapon(hud: HudOverlay, def: PlayerHudWeaponDef, display_name: Str
 
 
 func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/hudpos.def"))
+		return
 	var weapon := _load_weapon("WPN_M4AUTO")
 	assert_false(weapon.is_empty())
 	if weapon.is_empty():
@@ -153,9 +155,12 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 
 
 func test_overlay_draws_health_from_fixture_layout() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/hudpos.def"))
+		return
 	var hud := _make_overlay()
 	var hp := HudPos.new()
-	assert_eq(hp.load(ProjectSettings.globalize_path(HUDPOS_PATH)), OK, "Fixture loads.")
+	assert_eq(hp.load(RetailData.fixture("def/hudpos.def")), OK, "Fixture loads.")
 	hud.configure(hp, null) # null root -> layout only, no art/font
 	assert_true(hud.is_configured())
 	hud.set_player_state(0, 0.5, 1, 80.0)
@@ -407,11 +412,14 @@ func test_stance_index_bounds_safe() -> void:
 
 
 func test_weapon_cluster_artless_safe() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/hudpos.def"))
+		return
 	# The weapon-coupled elements with a real weapon record but no art/root: text
 	# has no font, and the clip indicator and crosshair skip cleanly.
 	var hud := _make_overlay()
 	var hp := HudPos.new()
-	assert_eq(hp.load(ProjectSettings.globalize_path(HUDPOS_PATH)), OK)
+	assert_eq(hp.load(RetailData.fixture("def/hudpos.def")), OK)
 	hud.configure(hp, null)
 	_set_hud_weapon(hud, PlayerHudWeaponDef.from_weapon_dict({
 		"name": "WPN_AK47",

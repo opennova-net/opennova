@@ -1,5 +1,5 @@
 // D-NET-141 — the armory table build + the witnessed loadout-service rules, exercised against
-// the committed fixtures/def/weapon.def (94 weapons; NOTE a live install's VFS-resolved
+// the shipped weapon.def from the reference fixture set (94 weapons; NOTE a live install's VFS-resolved
 // weapon.def differs — e.g. the JO:CA host resolves 126 weapons — so LIVE index anchors beyond
 // the shared low range belong to the live wire gates, not this unit test).
 //
@@ -90,10 +90,13 @@ int main(void) {
 		retail::skip_leg("OPENNOVA_JO_DIR (the live weapon.def oracle over the install's expansions)");
 	}
 
-	const char *repo_root = test_paths_repo_root(__FILE__);
-	char path[4096];
-	std::snprintf(path, sizeof(path), "%s/fixtures/def/weapon.def", repo_root);
-
+	// The shipped weapon.def from the reference fixture set: the index/field pins
+	// below are its SKIP-LEG retail leg; the inline tables after it run always.
+	const std::string fixture = retail::reference_fixture("def/weapon.def");
+	if (fixture.empty()) {
+		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def (the shipped weapon table's index and field pins)");
+	} else {
+	const char *path = fixture.c_str();
 	DefWeaponsFile wf;
 	std::memset(&wf, 0, sizeof(wf));
 	if (def_parse_weapons(path, &wf) != 0) {
@@ -288,6 +291,7 @@ int main(void) {
 	}
 
 	def_free_weapons(&wf);
+	}  // retail leg
 
 	// --- by-name reuse: a re-parsed name keeps its index and takes the new fields
 	//     [orig: WeaponDefs_ParseLineCallback @0x5436e1 AvatarDef_FindIndexByName leg].
@@ -328,7 +332,7 @@ int main(void) {
 				sizeof(kAutomatic) - 1, &automatic) == 0);
 
 		opennova::ResourceIndex index;
-		CHECK(index.scan(std::string(repo_root) + "/fixtures/anim"));
+		CHECK(index.scan(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/anim"));
 		const world::WeaponTable unresolved = world::build_weapon_table(automatic);
 		const world::WeaponTable resolved = world::build_weapon_table(automatic, &index);
 		const world::WeaponFsmAction &unresolved_fire =

@@ -48,6 +48,12 @@ const OBJECTIVE_COOP_START_TYPE := 6094
 const NATIVE_MODEL_DIR := "res://.godot/native_3dp_coop_two_sim"
 
 
+func should_skip_script():
+	if RetailData.def_root().is_empty():
+		return RetailData.fixture_pending_text("def/weapon.def")
+	return false
+
+
 func before_all() -> void:
 	DirAccess.make_dir_recursive_absolute(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR))
@@ -77,8 +83,7 @@ func _native_asset_root() -> ResourceRoot:
 
 func _fixture_items_db() -> ItemDatabase:
 	var def_root := ResourceRoot.new()
-	assert_eq(def_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(def_root.set_root_dir(RetailData.def_root()), OK)
 	var db := ItemDatabase.new()
 	assert_eq(db.load_from_resource_root(def_root, "items.def"), OK)
 	return db
@@ -273,8 +278,7 @@ end
 
 func _install_combat_tables(sim: Simulation) -> void:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	sim.resolve_item_traits(item_db)
@@ -284,8 +288,7 @@ func _install_combat_tables(sim: Simulation) -> void:
 
 func _retail_m4() -> Dictionary:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M4AUTO")
@@ -295,8 +298,7 @@ func _retail_m4() -> Dictionary:
 
 func _retail_m9() -> Dictionary:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M9Beretta")
@@ -306,8 +308,7 @@ func _retail_m9() -> Dictionary:
 
 func _retail_smoke_grenade() -> Dictionary:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_GRENADESM")
@@ -317,8 +318,7 @@ func _retail_smoke_grenade() -> Dictionary:
 
 func _retail_emplaced_50() -> Dictionary:
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_EMPLCD50NA")
@@ -964,14 +964,12 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"the native install resolved the carrier model source")
 	assert_true(host.load_from_mission_data(mission))
 	var def_root := ResourceRoot.new()
-	assert_eq(def_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(def_root.set_root_dir(RetailData.def_root()), OK)
 	assert_eq(host.load_weapon_table(def_root, "weapon.def"), OK)
 	assert_true(host.spawn_local_player(Vector3.ZERO, 120.0, 1))
 	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
 	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/weapon.def")), OK)
+	assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 	var personal: Dictionary = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
 	var mounted: Dictionary = weapons.get_weapon(
@@ -2727,8 +2725,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 			{"action_type": 37, "param1": gunner_ssn}).is_empty())
 
 	var fixture_def_root := ResourceRoot.new()
-	assert_eq(fixture_def_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
+	assert_eq(fixture_def_root.set_root_dir(RetailData.def_root()), OK)
 	var fixture_item_db := ItemDatabase.new()
 	assert_eq(fixture_item_db.load_from_resource_root(
 			fixture_def_root, "items.def"), OK)

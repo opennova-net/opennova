@@ -83,6 +83,9 @@ func _packed_aim_angles(
 
 
 func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() -> void:
+	if RetailData.def_root().is_empty():
+		pending(RetailData.fixture_pending_text("def/weapon.def"))
+		return
 	# The local avatar and the listen-server client view are two consumers of the
 	# same authoritative selector result. Config 0 is deliberately included: an
 	# explicit zero must survive as a real counter-lean branch, not become unknown.
@@ -116,12 +119,10 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		# loaded weapon.def yet. Complete the normal mission-start weapon/loadout
 		# leg so the parent's embedded MountSlot and its presentation resolve.
 		var root := ResourceRoot.new()
-		assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-				"res://../fixtures/def")), OK)
+		assert_eq(root.set_root_dir(RetailData.def_root()), OK)
 		assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 		var weapons := WeaponDatabase.new()
-		assert_eq(weapons.load(ProjectSettings.globalize_path(
-				"res://../fixtures/def/weapon.def")), OK)
+		assert_eq(weapons.load(RetailData.fixture("def/weapon.def")), OK)
 		var personal_index := weapons.find_weapon("WPN_M4AUTO")
 		assert_gte(personal_index, 0)
 		if personal_index >= 0:

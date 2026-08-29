@@ -29,6 +29,7 @@
 #include <runtime/world/world.h>
 
 #include "common/test_paths.h"
+#include "common/retail_paths.h"
 #include "host_test_setup.h"
 
 #include <net/netsim/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
@@ -1989,19 +1990,21 @@ bool run_loadout_resolve_with_armory() {
 	np::NapiNPServerCtx ctx;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 
-	// The armory: fixtures/def/weapon.def -> the witnessed table (null@0 + file order).
-	const char *repo_root = test_paths_repo_root(__FILE__);
-	char def_path[4096];
-	std::snprintf(def_path, sizeof(def_path), "%s/fixtures/def/weapon.def", repo_root);
+	// The armory: the shipped weapon.def from the reference fixture set -> the
+	// witnessed table (null@0 + file order). A SKIP-LEG retail leg without it.
+	const std::string def_path = retail::reference_fixture("def/weapon.def");
+	const std::string ammo_path = retail::reference_fixture("def/ammo.def");
+	if (def_path.empty() || ammo_path.empty()) {
+		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def + ammo.def (the shipped armory the loadout resolve keys on)");
+		return true;
+	}
 	DefWeaponsFile wf{};
-	if (!expect(def_parse_weapons(def_path, &wf) == 0, "fixture weapon.def parses")) return false;
+	if (!expect(def_parse_weapons(def_path.c_str(), &wf) == 0, "fixture weapon.def parses")) return false;
 	world::World world;
 	world.weapons = world::build_weapon_table(wf);
 	def_free_weapons(&wf);
-	char ammo_path[4096];
-	std::snprintf(ammo_path, sizeof(ammo_path), "%s/fixtures/def/ammo.def", repo_root);
 	DefAmmoFile af{};
-	if (!expect(def_parse_ammo(ammo_path, &af) == 0, "fixture ammo.def parses")) return false;
+	if (!expect(def_parse_ammo(ammo_path.c_str(), &af) == 0, "fixture ammo.def parses")) return false;
 	world.ammo = world::build_ammo_table(af);
 	def_free_ammo(&af);
 	world::resolve_weapon_round_types(world.weapons, world.ammo);

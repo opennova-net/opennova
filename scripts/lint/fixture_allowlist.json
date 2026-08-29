@@ -16,9 +16,6 @@
     "fixtures/novaworld/*_manifest.txt"
   ],
   "keep": [
-    "fixtures/def/weapon.def",
-    "fixtures/def/ammo.def",
-    "fixtures/def/hudpos.def",
     "fixtures/novaworld/*.gsb",
     "fixtures/novaworld/*.hexcap",
     "fixtures/novaworld/run_*/*"

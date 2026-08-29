@@ -37,13 +37,18 @@ var TICK := Simulation.tick_dt()
 
 const MINIMAL_FIXTURE_DIR := "res://../assets"
 const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
-const WEAPON_DEF_FIXTURE := "res://../fixtures/def/weapon.def"
 const PERSON_FIXTURE := "res://../fixtures/threedi/synth/person.3di"
 const SOLDIER_ADM_FIXTURE := "res://../fixtures/anim/soldier.adm"
 const IDLE_BAD_FIXTURE := "res://../fixtures/anim/idle.bad"
 const WALK_BAD_FIXTURE := "res://../fixtures/anim/walk.bad"
 
 var _shared_root := ""
+
+
+func should_skip_script():
+	if RetailData.def_root().is_empty():
+		return RetailData.fixture_pending_text("def/weapon.def")
+	return false
 
 
 func before_all() -> void:
@@ -60,7 +65,8 @@ func after_each() -> void:
 
 # --- real-world staging -------------------------------------------------------
 # The minimal fixture plus the committed model/anim fixtures arranged under the
-# names the production resolvers ask for: the full weapon.def (WPN_M4AUTO with
+# names the production resolvers ask for: the shipped weapon.def from the
+# reference fixture set (should_skip_script without it; WPN_M4AUTO with
 # its gfx/animadm/pos rows), a person items.def row for the player visual item
 # (105310 -> person + soldier.adm), the infantry clip set (E_STAND.adm) so
 # the motor's body selection runs, and the 19-bone person staged as the M4's
@@ -84,7 +90,7 @@ func _stage_root() -> String:
 	# The full weapon.def: WPN_M4AUTO / WPN_SATCHEL_CHARGE with real action rows.
 	assert_eq(DirAccess.remove_absolute(root_dir.path_join("weapon.def")), OK)
 	assert_eq(DirAccess.copy_absolute(
-			ProjectSettings.globalize_path(WEAPON_DEF_FIXTURE),
+			RetailData.fixture("def/weapon.def"),
 			root_dir.path_join("weapon.def")), OK)
 	# The player's third-person avatar: items.def person row 105310 (the placer's
 	# PLAYER_VISUAL_ITEM_ID) over the committed 19-bone person + soldier.adm.

@@ -49,6 +49,7 @@ MUST_RUN = {
         # The reference fixture set (<assets>/fixtures/**): the fifteen revx02 menus,
         # the shipped MP5 rig map, the BINOC rig and its twist.
         "mnu_compat", "mnu_coverage", "adm_parse", "simassets_adm_skeletal_clips_weapon_channel",
+        "def_parse_hudpos",
     ],
 }
 
@@ -68,6 +69,8 @@ MIXED = {
         "avatars_roundtrip", "mus_parse", "mus_compat", "mus_decompile", "mus_roundtrip",
         "mus_names_roundtrip", "mus_entry_roundtrip", "mus_encode_idempotence", "mus_vm",
         "mns_document", "bad_parse", "anim_sample",
+        # The shipped weapon.def / ammo.def pins.
+        "def_parse_weapons", "def_parse_ammo", "npruntime_weapon_table", "npruntime_handshake_server",
     ],
 }
 

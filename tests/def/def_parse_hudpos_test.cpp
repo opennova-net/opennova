@@ -4,12 +4,18 @@
 #include <string.h>
 
 #include <formats/def/def.h>
-#include "common/test_paths.h"
+#include <string>
+
+#include "common/retail_paths.h"
 
 int main(void) {
-    const char *repo_root = test_paths_repo_root(__FILE__);
-    char path[4096];
-    snprintf(path, sizeof(path), "%s/fixtures/def/hudpos.def", repo_root);
+    /* Every leg here reads the shipped hudpos.def (the memory legs compare
+       against its path parse), so the whole test gates on the reference
+       fixture set (OPENNOVA_JO_ASSETS). */
+    const std::string fixture = retail::reference_fixture("def/hudpos.def");
+    if (fixture.empty())
+        return retail::skip("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (the shipped HUD layout table)");
+    const char *path = fixture.c_str();
 
     DefHudPosFile hudpos;
     memset(&hudpos, 0, sizeof(hudpos));
