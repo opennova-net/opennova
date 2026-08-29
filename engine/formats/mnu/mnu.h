@@ -188,18 +188,21 @@ struct ListBox {
 
 // Frame/border definition.
 struct Frame {
+  static constexpr int kDefaultInsetX = 12;
+  static constexpr int kDefaultInsetY = 8;
+
   std::string stencil;   // Border texture (9-slice style)
   bool has_stencil_size = false;
   int stencil_size = 0;  // Border thickness in px (STENCIL size=, orig elem+0x284)
   std::string brush;     // Tiling background texture
   std::string monogram;  // Watermark/logo overlay
-  // Data-driven 9-patch border insets the original reads from the STENCIL element
-  // (INSETX -> elem+0x288, INSETY -> elem+0x28C @ CUIElement_ParseXMLDefinition).
-  // Preserved for round-trip even when the bake ignores them.
+  // Retail constructs every window with INSETX=12 and INSETY=8, then lets
+  // authored STENCIL attributes override those fields (elem+0x288/+0x28C).
+  // has_* remains separate so omitted defaults and explicit values round-trip.
   bool has_insetx = false;
-  int insetx = 0;
+  int insetx = kDefaultInsetX;
   bool has_insety = false;
-  int insety = 0;
+  int insety = kDefaultInsetY;
 };
 
 // Spin button (up/down arrows) for SpinList.

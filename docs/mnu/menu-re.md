@@ -100,8 +100,9 @@ device pixels, using the absolute destination rectangle as its UV phase. The
 eight border pieces use a two-texture `border_material`: STENCIL is stage 0 and
 BRUSH is stage 1, both sampling the same tile UVs. The corners stay at `SIZE`,
 the edges stretch between them, and the whole border hangs OUTSIDE the window
-rect by `SIZE`, pulled back by the authored `STENCIL INSETX/INSETY` (floats at
-elem+0x288/+0x28C, default 0).
+rect by `SIZE`, pulled back by `STENCIL INSETX/INSETY` (floats at
+elem+0x288/+0x28C). `CWnd_Construct` initializes those fields to `12.0` and
+`8.0`; authored attributes override the defaults.
 
 Every frame quad is submitted with diffuse `0xFF7F7F7F`. In material mode
 `0x651`, the first MODULATE2X stage cancels that half-intensity diffuse and the
