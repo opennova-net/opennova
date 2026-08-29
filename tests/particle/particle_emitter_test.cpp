@@ -1138,12 +1138,12 @@ bool test_orbit_axis_y_keeps_y_constant() {
 }
 
 bool test_against_real_fixture() {
-	// Drive the emitter against a parsed fixture (buildup.ptl). Sanity-check
+	// Drive the emitter against a parsed fixture (synth_minimal_effect.ptl). Sanity-check
 	// that the parsed def hydrates the simulator without surprises.
 #ifdef OPENNOVA_SOURCE_DIR
-	const std::string path = std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/particle/buildup.ptl";
+	const std::string path = std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/particle/synth_minimal_effect.ptl";
 #else
-	const std::string path = "fixtures/particle/buildup.ptl";
+	const std::string path = "fixtures/particle/synth_minimal_effect.ptl";
 #endif
 	std::ifstream stream(path, std::ios::binary);
 	opennova::particle::ParticleFile file;

@@ -1120,6 +1120,14 @@ target_link_libraries(terrain_field_store_test PRIVATE opennova_runtime)
 target_include_directories(terrain_field_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_field_store COMMAND terrain_field_store_test)
 
+# fixtures/particle/synth_*.ptl: the five synthetic particle files the focused
+# tests read, written by save_particles from integer data (the shipped corpus
+# is particle_smoke_all_fixtures' OPENNOVA_JO_ASSETS leg).
+add_executable(minimal_particle_gen_test fixtures/minimal_particle_gen.cpp)
+target_link_libraries(minimal_particle_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_particle_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_particle_gen COMMAND minimal_particle_gen_test)
+
 # Particle (.ptl) tests. Format half (engine/formats/ptl: model/parser/writer/
 # tables) links opennova_formats; sim half (engine/runtime/particle: emitter +
 # effect scene) links opennova_runtime. Witness matrix:

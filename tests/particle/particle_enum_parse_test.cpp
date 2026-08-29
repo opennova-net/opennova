@@ -69,9 +69,9 @@ int main() {
 	const std::string flags_str = format_particle_flags(particle_flag::EmitVector | particle_flag::AmbientColor);
 	if (!expect(flags_str == " EMITVECTOR AMBIENTCOLOR ", "format_particle_flags follows table order")) return 1;
 
-	// 3. Fixture-driven projections — buildup.ptl: flags=TOPALIGN, move=GRAVITATE,
-	// graphic1 = line.tga, additive; scale_func = table12 reverse;
-	const ParticleFile buildup = load("buildup.ptl");
+	// 3. Fixture-driven projections — synth_minimal_effect.ptl: flags=TOPALIGN, move=GRAVITATE,
+	// graphic1 = spark.tga, additive; scale_func = synth_grow reverse;
+	const ParticleFile buildup = load("synth_minimal_effect.ptl");
 	const ParticleDef *p = buildup.find_particle("Buildup dots");
 	if (!expect(p != nullptr, "Buildup dots resolves")) return 1;
 	if (!expect(p->flags == particle_flag::TopAlign, "buildup flags = TopAlign bit")) return 1;
@@ -79,16 +79,16 @@ int main() {
 	if (!expect(p->scale_func.reverse && !p->scale_func.inverse, "scale_func reverse only")) return 1;
 	if (!expect(p->graphics[0].blend_mode == BlendMode::Additive, "graphic1 blend = Additive enum")) return 1;
 
-	// 4. Per-graphic blend modes via 30MM.ptl 30mmFolPuf (graphic1..3 all 'blend').
-	const ParticleFile thirty = load("30MM.ptl");
-	const ParticleDef *fol = thirty.find_particle("30mmFolPuf");
-	if (!expect(fol != nullptr, "30mmFolPuf resolves")) return 1;
-	if (!expect(fol->flags & particle_flag::EmitVector, "30mmFolPuf has EmitVector bit")) return 1;
-	if (!expect(fol->flags & particle_flag::AmbientColor, "30mmFolPuf has AmbientColor bit")) return 1;
+	// 4. Per-graphic blend modes via synth_multi_layer.ptl synth_fol_puf (graphic1..3 all 'blend').
+	const ParticleFile thirty = load("synth_multi_layer.ptl");
+	const ParticleDef *fol = thirty.find_particle("synth_fol_puf");
+	if (!expect(fol != nullptr, "synth_fol_puf resolves")) return 1;
+	if (!expect(fol->flags & particle_flag::EmitVector, "synth_fol_puf has EmitVector bit")) return 1;
+	if (!expect(fol->flags & particle_flag::AmbientColor, "synth_fol_puf has AmbientColor bit")) return 1;
 	if (!expect(fol->graphics[0].blend_mode == BlendMode::Blend, "graphic1 = blend")) return 1;
 	if (!expect(fol->graphics[1].blend_mode == BlendMode::Blend, "graphic2 = blend")) return 1;
 	if (!expect(fol->graphics[2].blend_mode == BlendMode::Blend, "graphic3 = blend")) return 1;
-	if (!expect(fol->scale_func.reverse, "30mmFolPuf scale_func reverse")) return 1;
+	if (!expect(fol->scale_func.reverse, "synth_fol_puf scale_func reverse")) return 1;
 
 	return 0;
 }

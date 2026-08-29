@@ -21,9 +21,9 @@ bool near(float actual, float expected, float epsilon = 0.0001f) {
 
 std::string fixture_path() {
 #ifdef OPENNOVA_SOURCE_DIR
-	return std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/particle/buildup.ptl";
+	return std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/particle/synth_minimal_effect.ptl";
 #else
-	return "fixtures/particle/buildup.ptl";
+	return "fixtures/particle/synth_minimal_effect.ptl";
 #endif
 }
 
@@ -43,8 +43,8 @@ int main() {
 		return 1;
 	}
 
-	if (!expect(file.effects.size() == 1, "buildup.ptl has one effectdef")) return 1;
-	if (!expect(file.particles.size() == 1, "buildup.ptl has one particledef")) return 1;
+	if (!expect(file.effects.size() == 1, "synth_minimal_effect.ptl has one effectdef")) return 1;
+	if (!expect(file.particles.size() == 1, "synth_minimal_effect.ptl has one particledef")) return 1;
 
 	const opennova::particle::EffectDef &effect = file.effects[0];
 	if (!expect(effect.id == "Buildup", "effect id parses")) return 1;
@@ -65,20 +65,20 @@ int main() {
 	if (!expect(near(particle.emit_shape_size.y, 10.0f), "emit_shape_size parses as vec3.y")) return 1;
 
 	if (!expect(particle.scale_func.present, "scale_func is present")) return 1;
-	if (!expect(particle.scale_func.name == "table12", "scale_func name parses")) return 1;
+	if (!expect(particle.scale_func.name == "synth_grow", "scale_func name parses")) return 1;
 	if (!expect(particle.scale_func.reverse, "scale_func reverse flag parses")) return 1;
-	if (!expect(particle.red_func.name == "buildup_red", "red_func name parses")) return 1;
+	if (!expect(particle.red_func.name == "synth_red", "red_func name parses")) return 1;
 	if (!expect(!particle.red_func.reverse, "red_func reverse defaults false")) return 1;
 
 	const opennova::particle::GraphicLayer &g1 = particle.graphics[0];
 	if (!expect(g1.present, "graphic1 is present")) return 1;
 	if (!expect(g1.index == 1, "graphic1 has index 1")) return 1;
-	if (!expect(g1.texture == "line.tga", "graphic1 texture parses")) return 1;
+	if (!expect(g1.texture == "spark.tga", "graphic1 texture parses")) return 1;
 	if (!expect(g1.blend_mode_raw == "additive", "graphic1 blend mode parses lowercase")) return 1;
 	if (!expect(g1.flip_frames == 1, "g1 flip_frames parses")) return 1;
 	if (!expect(g1.flip_rate == 8, "g1 flip_rate parses")) return 1;
 	if (!expect(near(g1.scale, 2.0f), "g1 scale parses (override)")) return 1;
-	if (!expect(g1.scale_func.name == "table12" && g1.scale_func.reverse, "g1 scale_func parses with reverse")) return 1;
+	if (!expect(g1.scale_func.name == "synth_grow" && g1.scale_func.reverse, "g1 scale_func parses with reverse")) return 1;
 
 	if (!expect(!particle.graphics[1].present, "graphic2 is absent")) return 1;
 	if (!expect(!particle.graphics[2].present, "graphic3 is absent")) return 1;
