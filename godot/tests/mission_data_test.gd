@@ -5,7 +5,7 @@ extends GutTest
 # world" depends on. Uses committed fixtures (the items.def fixture is a small
 # 12-item subset, so resolution is partial by design).
 
-const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
+const BMS_PATH := "res://../fixtures/bms/synth_dense.bms"
 const ITEMS_PATH := "res://../fixtures/def/items.def"
 
 
@@ -19,14 +19,14 @@ func _items_abs() -> String:
 
 func test_mission_data_parses_header_and_entities() -> void:
 	var m := MissionData.new()
-	assert_eq(m.open_file(_bms_abs()), OK, "ash_i5b.reference.bms should parse")
+	assert_eq(m.open_file(_bms_abs()), OK, "synth_dense.bms should parse")
 	assert_true(m.is_loaded(), "mission should report loaded")
-	assert_eq(m.get_terrain_ref(), "dvxi5", "header terrain reference")
-	assert_eq(m.get_environment_ref(), "full_00", "header environment reference")
+	assert_eq(m.get_terrain_ref(), "Tmap", "header terrain reference")
+	assert_eq(m.get_environment_ref(), "synth_full", "header environment reference")
 	assert_false(m.get_mission_name().is_empty(), "mission name should be populated")
 
 	var building_count := m.get_entity_count(MissionData.KIND_BUILDING)
-	assert_gt(building_count, 0, "ash_i5b places buildings")
+	assert_gt(building_count, 0, "the synthetic mission places buildings")
 
 	var buildings := m.get_entities(MissionData.KIND_BUILDING)
 	assert_eq(buildings.size(), building_count, "get_entities count matches get_entity_count")
@@ -988,13 +988,13 @@ func test_weapon_loadout_dictionary_and_round_trip() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var entries := m.get_weapon_loadout()
-	# The fixture canonicalizes to 7 loadout records in the public four-field view.
-	assert_eq(entries.size(), 7, "fixture loadout has 7 weapons")
+	# The minted mission authors 4 loadout records (tests/fixtures/minimal_bms_gen.cpp).
+	assert_eq(entries.size(), 4, "fixture loadout has 4 weapons")
 	var first := entries[0] as Dictionary
 	for key in ["index", "name", "ammo_primary", "ammo_secondary", "flags"]:
 		assert_true(first.has(key), "loadout dict exposes %s" % key)
-	assert_eq(String(first["name"]), "WPN_CAR15AUTO", "first weapon name")
-	assert_eq(String(first["ammo_primary"]), "-1", "first primary-ammo request")
+	assert_eq(String(first["name"]), "WPN_M4AUTO", "first weapon name")
+	assert_eq(String(first["ammo_primary"]), "6", "first primary-ammo request")
 	assert_eq(String(first["flags"]), "-1", "first damage class")
 	# Edit one entry + append a custom one; persist and reload.
 	entries[0]["ammo_primary"] = "5"
@@ -1007,11 +1007,11 @@ func test_weapon_loadout_dictionary_and_round_trip() -> void:
 	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK)
 	var reloaded := r.get_weapon_loadout()
-	assert_eq(reloaded.size(), 8, "edited loadout survives reload")
+	assert_eq(reloaded.size(), 5, "edited loadout survives reload")
 	assert_eq(String((reloaded[0] as Dictionary)["ammo_primary"]), "5", "edited primary-ammo request survives reload")
 	assert_eq(String((reloaded[0] as Dictionary)["flags"]), "1", "edited damage class survives reload")
-	assert_eq(String((reloaded[7] as Dictionary)["name"]), "WPN_TEST", "appended weapon survives reload")
-	assert_eq(String((reloaded[7] as Dictionary)["flags"]), "2", "appended damage class survives reload")
+	assert_eq(String((reloaded[4] as Dictionary)["name"]), "WPN_TEST", "appended weapon survives reload")
+	assert_eq(String((reloaded[4] as Dictionary)["flags"]), "2", "appended damage class survives reload")
 	# Clearing yields an empty list.
 	assert_true(m.set_weapon_loadout([]), "clearing the loadout succeeds")
 	assert_eq(m.get_weapon_loadout().size(), 0, "loadout is empty after clear")
