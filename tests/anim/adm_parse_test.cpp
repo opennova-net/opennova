@@ -1,15 +1,22 @@
-// Test parsing a real .adm file (mp5_1st.adm) with expected entries.
+// Parse the shipped mp5_1st.adm (the reference fixture set, OPENNOVA_JO_ASSETS;
+// the whole test is gated on it) and pin its entries. The authored rig maps
+// under fixtures/anim are the unconditional coverage (adm_variants, the
+// simassets clip index).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <formats/adm/adm.h>
-#include "common/test_paths.h"
+
+#include <string>
+
+#include "common/retail_paths.h"
 
 int main(void) {
-    const char *repo_root = test_paths_repo_root(__FILE__);
-    char path[4096];
-    snprintf(path, sizeof(path), "%s/fixtures/adm/mp5_1st.adm", repo_root);
+    const std::string fixture = retail::reference_fixture("adm/mp5_1st.adm");
+    if (fixture.empty())
+        return retail::skip("OPENNOVA_JO_ASSETS/fixtures/adm/mp5_1st.adm (the shipped MP5 rig map)");
+    const char *path = fixture.c_str();
 
     AdmFile adm;
     memset(&adm, 0, sizeof(adm));

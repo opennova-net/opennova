@@ -16,9 +16,6 @@
     "fixtures/novaworld/*_manifest.txt"
   ],
   "keep": [
-    "fixtures/adm/mp5_1st.adm",
-    "fixtures/bad/BINOC.bad",
-    "fixtures/bad/BINOC_twist.bad",
     "fixtures/def/weapon.def",
     "fixtures/def/ammo.def",
     "fixtures/def/hudpos.def",

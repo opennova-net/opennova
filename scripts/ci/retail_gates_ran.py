@@ -46,8 +46,9 @@ MUST_RUN = {
         "npruntime_authored_payload_00trg",
         # The shipped .bms missions loose at the tree's root.
         "mission_corpus",
-        # The reference fixture set (<assets>/fixtures/**): the fifteen revx02 menus.
-        "mnu_compat", "mnu_coverage",
+        # The reference fixture set (<assets>/fixtures/**): the fifteen revx02 menus,
+        # the shipped MP5 rig map, the BINOC rig and its twist.
+        "mnu_compat", "mnu_coverage", "adm_parse", "simassets_adm_skeletal_clips_weapon_channel",
     ],
 }
 
@@ -66,7 +67,7 @@ MIXED = {
         "dbf_roundtrip", "cbin_roundtrip", "mission_mis_idempotency", "avatars_parse",
         "avatars_roundtrip", "mus_parse", "mus_compat", "mus_decompile", "mus_roundtrip",
         "mus_names_roundtrip", "mus_entry_roundtrip", "mus_encode_idempotence", "mus_vm",
-        "mns_document",
+        "mns_document", "bad_parse", "anim_sample",
     ],
 }
 

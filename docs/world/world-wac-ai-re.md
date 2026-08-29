@@ -1811,7 +1811,7 @@ shared advance onto AI bodies:**
    `@0x40bc24 / @0x40bd2e`); an EMPTY key (the §14.8.6 gate off) remains the only
    no-splice case. Both splices route through `eval_pose_blended`, which already owns
    that fallback, so the two channels share one rule. Pinned by the new
-   `simassets_adm_skeletal_clips_weapon_channel` ctest over the committed BINOC.bad rig
+   `simassets_adm_skeletal_clips_weapon_channel` ctest over the reference set's BINOC.bad rig
    with a clip SYNTHESIZED in-test (one mask bone and one leg bone turned 90°) — the
    healthy-export trap makes a real-retail-only fixture pass for the wrong reason.
 3. **Per-entity BODY-adm variant rings.** `AdmRootMotion` now keeps the RING of tracks

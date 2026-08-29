@@ -144,13 +144,26 @@ func _bytes_with_renamed_user_point(bytes: PackedByteArray, from_name: String,
 	return bytes
 
 
+const BINOC_REL := "bad/BINOC.bad"
+
+
+# The shipped BINOC.bad from the reference fixture set; "" (after pending)
+# without OPENNOVA_JO_ASSETS. Every rig test starts by checking it.
+func _binoc_path() -> String:
+	var path := RetailData.fixture(BINOC_REL)
+	if path.is_empty():
+		pending(RetailData.fixture_pending_text(BINOC_REL))
+	return path
+
+
 # The 19-bone person + BINOC rig as a named organic graphic: <graphic>.3di,
 # <graphic>.adm (the anim map the native pose provider resolves through the
-# item's anim_def), and the shared BINOC.bad clip.
+# item's anim_def), and the shared BINOC.bad clip (the caller has checked
+# _binoc_path()).
 func _write_char_rig(dir: String, graphic: String) -> void:
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/person.3di",
 			graphic + ".3di")
-	_copy_fixture(dir, "res://../fixtures/bad/BINOC.bad", "BINOC.bad")
+	_write_fixture_bytes(dir, "BINOC.bad", FileAccess.get_file_as_bytes(RetailData.fixture(BINOC_REL)))
 	var quote := String.chr(34)
 	_write_fixture_text(dir, graphic + ".adm",
 			"anim_reset %sBINOC.bad%s\n" % [quote, quote]
@@ -1631,6 +1644,8 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 
 
 func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
+	if _binoc_path().is_empty():
+		return
 	# Exact player report: the target rendered in a rotated UseGun seat must keep
 	# its authored COBJ sections under the carried body basis while its look yaw
 	# remains independent, so a local-owned round through a visible section can
@@ -1797,6 +1812,8 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 
 
 func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot() -> void:
+	if _binoc_path().is_empty():
+		return
 	# Config 6 is the decisive per-config witness: the mounted body/neck stay on
 	# the carrier frame while the head alone consumes aim. Build an actual
 	# ObjectModel from the same person + BINOC rig as collision, feed it
@@ -1837,8 +1854,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/synth/person.3di")), OK)
 	var bad_root := ResourceRoot.new()
-	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/bad")), OK)
+	assert_eq(bad_root.set_root_dir(RetailData.fixture(BINOC_REL).get_base_dir()), OK)
 	var skeletal := SkeletalAnim.new()
 	assert_true(skeletal.load_from_bad_files(
 			bad_root, "BINOC.bad", {"anim_emplaced": "BINOC.bad"},
@@ -4805,7 +4821,9 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 
 
 func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
-	# BINOC is a committed 19-bone, three-frame BAD. Pair it with person's
+	if _binoc_path().is_empty():
+		return
+	# BINOC is the shipped 19-bone, three-frame BAD. Pair it with person's
 	# canonical 19-row model table/COBJ block so the real SkeletalAnim ->
 	# Simulation -> CollisionWorld path can be tested without retail assets.
 	var dir := _native_fixture_dir()
@@ -4893,6 +4911,8 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 
 
 func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
+	if _binoc_path().is_empty():
+		return
 	# Mission collision is resolved before deploy in production. A player added
 	# afterward must demand the same authored COBJ + ADM source instead of
 	# becoming the one-sphere fallback until the next explicit sweep.
@@ -4926,6 +4946,8 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 
 
 func test_f3_hides_local_player_and_omits_distant_posed_organic() -> void:
+	if _binoc_path().is_empty():
+		return
 	# The F3 person view is a nearby diagnostic. It must neither wrap the local
 	# avatar in debug spheres nor spend its pose/debug budget on a target more
 	# than 80 mission units away.
@@ -4964,6 +4986,8 @@ func test_f3_hides_unresolved_local_player_fallback() -> void:
 
 
 func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> void:
+	if _binoc_path().is_empty():
+		return
 	# US02 intentionally cannot resolve through this provider, so the mission
 	# soldier leaves a negative collision attempt on pool-0 slot 0. After WAC
 	# removes it, the local US01 player reuses that exact packed handle. The new
@@ -5013,6 +5037,8 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 
 
 func test_restart_re_resolves_the_restored_collision_identity() -> void:
+	if _binoc_path().is_empty():
+		return
 	# Collision caches live outside World::Snapshot. Reusing slot 0 during play
 	# must not leave the restored baseline actor unbound after Stop/Restart.
 	var md := MissionData.new()
