@@ -85,6 +85,27 @@ inline constexpr int kFooterY = 510;
 inline constexpr uint32_t kRankColor = 0xFFFFFF00u;
 inline constexpr uint32_t kTeamAColor = 0xFF80A0FFu;
 inline constexpr uint32_t kTeamBColor = 0xFFFF5050u;
+// The second page's pair — literals the drawer pushes for teams 3/4
+// [orig: 0xFFFFFF00 / 0xFFFF027F @0x423cec/@0x423cf1].
+inline constexpr uint32_t kTeamCColor = 0xFFFFFF00u;
+inline constexpr uint32_t kTeamDColor = 0xFFFF027Fu;
+
+// The two teams a team-mode board columns this frame, with their colors.
+// Two sides configured: teams 1/2 in the palette pair, always. More than two:
+// the board ALTERNATES between the 1/2 page and a 3/4 page on bit 7 of the
+// HUD frame counter — a 128-frame period on the same per-main-frame clock
+// the blink masks read [orig: Game_TickHudFrameCounters @0x434c14
+// ++dword_A87060] — and the 3/4 page swaps in kTeamC/DColor
+// [orig: HUD_DrawKillList @0x423cd0-0x423cf1: esi=1/edi=2 with the palette
+// pair, then `g_num_teams_config > 2 && (dword_A87060 & 0x80)` -> esi=3,
+// edi=4, ecx=0xFFFFFF00, edx=0xFFFF027F].
+struct ScoreboardTeamPage {
+	uint8_t team_a = 1;
+	uint8_t team_b = 2;
+	uint32_t color_a = kTeamAColor;
+	uint32_t color_b = kTeamBColor;
+};
+ScoreboardTeamPage scoreboard_team_page(int team_count, int frame_counter);
 
 // The non-team game types — these draw rows in two alternating columns with a
 // score; every other type columns BY TEAM and draws no score
@@ -140,17 +161,19 @@ std::string scoreboard_status_glyphs(uint16_t status_flags);
 std::string scoreboard_row_text(const ScoreboardEntry &e, bool non_team);
 
 // The column a row draws in. Non-team mode alternates A/B by non-spectator
-// ordinal; team mode maps team 1 -> A and team 2 -> B; spectators have their
-// own column [orig: @0x423d3b / @0x423d5c / @0x423d0f]. Team-mode rows with
-// any other team (or no live entity) do not draw at all — the 4-team variant
-// [orig: @0x423ce6] is a recorded residual.
-int scoreboard_column_x(const ScoreboardEntry &e, bool non_team, int ordinal);
+// ordinal; team mode maps the page's team_a -> A and team_b -> B; spectators
+// have their own column [orig: @0x423d3b / @0x423d5c / @0x423d0f]. Team-mode
+// rows with any other team (or no live entity) do not draw at all
+// [orig: the fallthrough @0x423d45-0x423d47].
+int scoreboard_column_x(const ScoreboardEntry &e, bool non_team, int ordinal,
+                        const ScoreboardTeamPage &page = ScoreboardTeamPage{});
 
 // The row's color: team modes take the team palette, non-team rows and
 // spectators take the active HUD color (passed in, since the scheme is a
 // client setting rather than wire data)
 // [orig: g_hudActiveColor @0x423d00/@0x423df8; the palette picks @0x423cb9].
 uint32_t scoreboard_row_color(const ScoreboardEntry &e, bool non_team,
-                              uint32_t hud_color);
+                              uint32_t hud_color,
+                              const ScoreboardTeamPage &page = ScoreboardTeamPage{});
 
 } // namespace opennova::hud

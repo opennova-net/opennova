@@ -522,7 +522,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 			not sim.is_mp_session(),
 			func() -> void: _message_log.close(_game_hud))
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
-	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active)
+	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active,
+			_hud_ticks())
 	if timing:
 		var probe_t5 := Time.get_ticks_usec()
 		if probe_enabled:

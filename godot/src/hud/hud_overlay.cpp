@@ -212,7 +212,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_view_state);
 	ClassDB::bind_method(D_METHOD("set_objectives_header", "text"), &HudOverlay::set_objectives_header);
 	ClassDB::bind_method(
-			D_METHOD("set_scoreboard", "shown", "game_type", "strings", "sim"),
+			D_METHOD("set_scoreboard", "shown", "game_type", "frame_counter", "strings", "sim"),
 			&HudOverlay::set_scoreboard);
 	ClassDB::bind_method(D_METHOD("set_vehicle_panel", "shown", "block", "stance", "sim"),
 			&HudOverlay::set_vehicle_panel);
@@ -845,11 +845,14 @@ void HudOverlay::set_objectives_header(const String &p_text) {
 	state_.objectives_header = p_text.utf8().get_data();
 }
 
-void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
+void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
 		const Dictionary &p_strings, Simulation *p_sim) {
 	opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	sb.shown = p_shown;
 	sb.game_type = static_cast<uint32_t>(p_game_type);
+	// The 4-team page clock: the shell's 62 Hz HUD tick, the same fold (and the
+	// same frame-rate caveat) as the LFP panel's blink counter below.
+	sb.frame_counter = p_frame_counter;
 	sb.title = String(p_strings.get("title", "")).utf8().get_data();
 	sb.server_name = String(p_strings.get("server", "")).utf8().get_data();
 	sb.mission_title = String(p_strings.get("mission", "")).utf8().get_data();
@@ -861,8 +864,10 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
 	// Dictionary round-trip to drop fields or lose the score sign.
 	if (p_shown && p_sim != nullptr) {
 		p_sim->fill_scoreboard_rows(sb.rows);
+		sb.team_count = p_sim->scoreboard_team_count();
 	} else {
 		sb.rows.clear();
+		sb.team_count = 0;
 	}
 	queue_redraw();
 }

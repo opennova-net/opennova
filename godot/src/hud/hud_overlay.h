@@ -101,8 +101,8 @@ public:
 	// (Simulation::fill_scoreboard_rows — no script-side row round-trip).
 	// Typed cross-class args on the bound API follow the set_minimap_terrain
 	// precedent; pass null when hiding.
-	void set_scoreboard(bool p_shown, int64_t p_game_type, const Dictionary &p_strings,
-			Simulation *p_sim);
+	void set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
+			const Dictionary &p_strings, Simulation *p_sim);
 	// The end-of-round overlay (net-re §5.68): the resolved Impact38 text
 	// ladder (hud/end_round_overlay.h lines the presenter formatted) and the
 	// overlay safe-area top/bottom in design px.
