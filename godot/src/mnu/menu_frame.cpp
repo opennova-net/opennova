@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <string>
@@ -40,6 +41,31 @@ Color argb_to_color(uint32_t argb) {
 
 std::string to_std(const String &s) {
 	return std::string(s.utf8().get_data());
+}
+
+int positive_mod(int value, int divisor) {
+	const int result = value % divisor;
+	return result < 0 ? result + divisor : result;
+}
+
+Color sample_bilinear(const Ref<Image> &image, float u, float v) {
+	const int width = image->get_width();
+	const int height = image->get_height();
+	const float px = std::clamp(u * static_cast<float>(width) - 0.5f,
+			0.0f, static_cast<float>(width - 1));
+	const float py = std::clamp(v * static_cast<float>(height) - 0.5f,
+			0.0f, static_cast<float>(height - 1));
+	const int x0 = static_cast<int>(std::floor(px));
+	const int y0 = static_cast<int>(std::floor(py));
+	const int x1 = std::min(x0 + 1, width - 1);
+	const int y1 = std::min(y0 + 1, height - 1);
+	const float fx = px - static_cast<float>(x0);
+	const float fy = py - static_cast<float>(y0);
+	const Color top = image->get_pixel(x0, y0).lerp(
+			image->get_pixel(x1, y0), fx);
+	const Color bottom = image->get_pixel(x0, y1).lerp(
+			image->get_pixel(x1, y1), fx);
+	return top.lerp(bottom, fy);
 }
 
 } // namespace
@@ -97,6 +123,8 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	root_ = p_root;
 	configured_ = false;
 	textures_.clear();
+	texture_images_.clear();
+	frame_texture_cache_.clear();
 	compiler_.clear_registered_fonts();
 	free_fonts_();
 	state_ = opennova::menu::MenuFrameState{};
@@ -213,6 +241,7 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	// the engine-side rect fallbacks.
 	const std::vector<std::string> &tex_names = compiler_.texture_names();
 	textures_.resize(tex_names.size());
+	texture_images_.resize(tex_names.size());
 	for (size_t i = 0; i < tex_names.size(); ++i) {
 		if (root_.is_null()) {
 			++unresolved_assets_;
@@ -232,6 +261,7 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 		}
 		const Ref<Texture2D> tex = ImageTexture::create_from_image(image);
 		textures_[i] = tex;
+		texture_images_[i] = image;
 		if (tex.is_valid()) {
 			compiler_.set_texture_size(static_cast<int32_t>(i),
 					tex->get_width(), tex->get_height());
@@ -261,6 +291,112 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 
 bool MenuFrame::is_configured() const {
 	return configured_;
+}
+
+Ref<Texture2D> MenuFrame::texture_for_quad_(
+		const opennova::menu::MenuQuad &p_quad) {
+	const auto valid_slot = [this](int32_t slot) {
+		return slot >= 0 && slot < static_cast<int32_t>(textures_.size()) &&
+				textures_[static_cast<size_t>(slot)].is_valid() &&
+				texture_images_[static_cast<size_t>(slot)].is_valid();
+	};
+	if (!valid_slot(p_quad.texture)) {
+		return Ref<Texture2D>();
+	}
+	const bool has_second = p_quad.texture2 != opennova::menu::kMenuTexNone;
+	if (has_second && !valid_slot(p_quad.texture2)) {
+		return Ref<Texture2D>();
+	}
+	const bool full_uv = p_quad.u0 == 0.0f && p_quad.v0 == 0.0f &&
+			p_quad.u1 == 1.0f && p_quad.v1 == 1.0f;
+	if (!has_second && (!p_quad.tiled || full_uv)) {
+		return textures_[static_cast<size_t>(p_quad.texture)];
+	}
+
+	const Ref<Image> first = texture_images_[static_cast<size_t>(p_quad.texture)];
+	const int first_w = first->get_width();
+	const int first_h = first->get_height();
+	const int src_x0 = std::clamp(
+			static_cast<int>(std::lround(p_quad.u0 * first_w)), 0, first_w);
+	const int src_y0 = std::clamp(
+			static_cast<int>(std::lround(p_quad.v0 * first_h)), 0, first_h);
+	const int src_x1 = std::clamp(
+			static_cast<int>(std::lround(p_quad.u1 * first_w)), src_x0, first_w);
+	const int src_y1 = std::clamp(
+			static_cast<int>(std::lround(p_quad.v1 * first_h)), src_y0, first_h);
+	const int src_w = src_x1 - src_x0;
+	const int src_h = src_y1 - src_y0;
+	if (src_w <= 0 || src_h <= 0) {
+		return Ref<Texture2D>();
+	}
+
+	if (p_quad.tiled) {
+		// draw_textured_quad_from_rect feeds absolute device coordinates as UVs,
+		// so the native-pixel fill pattern is screen-aligned rather than
+		// restarting at each window's top-left.
+		const int phase_x = positive_mod(
+				static_cast<int>(std::floor(p_quad.x0)), src_w);
+		const int phase_y = positive_mod(
+				static_cast<int>(std::floor(p_quad.y0)), src_h);
+		const std::string key = "tile:" + std::to_string(p_quad.texture) + ":" +
+				std::to_string(src_x0) + ":" + std::to_string(src_y0) + ":" +
+				std::to_string(src_w) + ":" + std::to_string(src_h) + ":" +
+				std::to_string(phase_x) + ":" + std::to_string(phase_y);
+		const auto cached = frame_texture_cache_.find(key);
+		if (cached != frame_texture_cache_.end()) {
+			return cached->second;
+		}
+		Ref<Image> tile = Image::create(src_w, src_h, false, Image::FORMAT_RGBA8);
+		for (int y = 0; y < src_h; ++y) {
+			for (int x = 0; x < src_w; ++x) {
+				tile->set_pixel(x, y,
+						first->get_pixel(src_x0 + (phase_x + x) % src_w,
+								src_y0 + (phase_y + y) % src_h));
+			}
+		}
+		const Ref<Texture2D> texture = ImageTexture::create_from_image(tile);
+		frame_texture_cache_[key] = texture;
+		return texture;
+	}
+
+	const int dst_w = std::max(
+			1, static_cast<int>(std::lround(p_quad.x1 - p_quad.x0)));
+	const int dst_h = std::max(
+			1, static_cast<int>(std::lround(p_quad.y1 - p_quad.y0)));
+	const std::string key = "frame:" + std::to_string(p_quad.texture) + ":" +
+			std::to_string(p_quad.texture2) + ":" + std::to_string(src_x0) + ":" +
+			std::to_string(src_y0) + ":" + std::to_string(src_w) + ":" +
+			std::to_string(src_h) + ":" + std::to_string(dst_w) + ":" +
+			std::to_string(dst_h);
+	const auto cached = frame_texture_cache_.find(key);
+	if (cached != frame_texture_cache_.end()) {
+		return cached->second;
+	}
+	const Ref<Image> second =
+			texture_images_[static_cast<size_t>(p_quad.texture2)];
+	Ref<Image> composed =
+			Image::create(dst_w, dst_h, false, Image::FORMAT_RGBA8);
+	// Two MODULATE2X stages with retail's 0x7F vertex diffuse reduce to
+	// (4 * 127/255) * stencil * brush = (508/255) * stencil * brush.
+	constexpr float kFrameRgbScale = 508.0f / 255.0f;
+	for (int y = 0; y < dst_h; ++y) {
+		const float v = p_quad.v0 + (p_quad.v1 - p_quad.v0) *
+				(static_cast<float>(y) + 0.5f) / static_cast<float>(dst_h);
+		for (int x = 0; x < dst_w; ++x) {
+			const float u = p_quad.u0 + (p_quad.u1 - p_quad.u0) *
+					(static_cast<float>(x) + 0.5f) / static_cast<float>(dst_w);
+			const Color stencil = sample_bilinear(first, u, v);
+			const Color brush = sample_bilinear(second, u, v);
+			composed->set_pixel(x, y,
+					Color(std::min(1.0f, kFrameRgbScale * stencil.r * brush.r),
+							std::min(1.0f, kFrameRgbScale * stencil.g * brush.g),
+							std::min(1.0f, kFrameRgbScale * stencil.b * brush.b),
+							stencil.a * brush.a));
+		}
+	}
+	const Ref<Texture2D> texture = ImageTexture::create_from_image(composed);
+	frame_texture_cache_[key] = texture;
+	return texture;
 }
 
 opennova::menu::MenuWidgetState &MenuFrame::widget_(int p_index) {
@@ -789,7 +925,7 @@ void MenuFrame::_draw() {
 		Ref<Texture2D> tex;
 		if (quad.texture >= 0 &&
 				quad.texture < static_cast<int32_t>(textures_.size())) {
-			tex = textures_[static_cast<size_t>(quad.texture)];
+			tex = texture_for_quad_(quad);
 		}
 		if (tex.is_null()) {
 			if (quad.texture == opennova::menu::kMenuTexNone) {
@@ -799,7 +935,12 @@ void MenuFrame::_draw() {
 			// on a successful texture load].
 			return;
 		}
-		if (quad.tiled) {
+		if (quad.texture2 != opennova::menu::kMenuTexNone) {
+			// texture_for_quad_ already rasterized retail's two-stage material
+			// at the final device size, so this is a straight 1:1 submission.
+			rs->canvas_item_add_texture_rect(target, rect, tex->get_rid(), false,
+					color);
+		} else if (quad.tiled) {
 			rs->canvas_item_add_texture_rect(target, rect, tex->get_rid(), true,
 					color);
 		} else if (quad.u0 != 0.0f || quad.v0 != 0.0f || quad.u1 != 1.0f ||

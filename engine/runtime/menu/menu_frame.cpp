@@ -624,11 +624,13 @@ void MenuFrameCompiler::emit_appearance(const WidgetNode &node,
 	emit_state_pass(rect, s, node.states[appearance_slot]);
 }
 
-// The 8-piece frame + tiled brush fill. Retail submits 0x7F7F7F through its
-// modulate-2x material (therefore no tint); MenuQuad carries the effective
-// ordinary-multiply backend color, so the equivalent value is white.
-// resolves [orig: CUIElement_DrawFrame @ 0x64a210 over init_border_materials
-// @ 0x646f70].
+// The tiled fill is stencil atlas cell (3, 0), copied by retail into a
+// SIZE-by-SIZE border_fill_material. The eight border pieces use the stencil
+// cell as texture stage 0 and the brush as stage 1. Retail submits 0x7F7F7F;
+// stage 0's modulate-2x cancels that tint, then stage 1 produces the effective
+// 2 * stencil * brush material carried here as texture + texture2.
+// [orig: init_border_materials @ 0x646f70; CUIElement_DrawFrame @ 0x64a210;
+// decode_mode_color_stage @ 0x681080 for material mode 0x651].
 void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s) {
 	if (node.frame_owner < 0) {
@@ -638,29 +640,14 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 			nodes_[static_cast<size_t>(node.frame_owner)].window->frame;
 	const bool has_stencil = node.frame_stencil >= 0;
 	const bool has_brush = node.frame_brush >= 0;
-	if (!has_stencil && !has_brush) {
+	if (!has_stencil) {
 		return;
 	}
 	const int w = rect.right - rect.left;
 	const int h = rect.bottom - rect.top;
-	if (has_brush) {
-		const auto &size =
-				texture_sizes_[static_cast<size_t>(node.frame_brush)];
-		const float tiles_u = size.first > 0
-				? static_cast<float>(w) / static_cast<float>(size.first)
-				: 1.0f;
-		const float tiles_v = size.second > 0
-				? static_cast<float>(h) / static_cast<float>(size.second)
-				: 1.0f;
-		emit_rect_quad(rect, s, 0xFFFFFFFFu, node.frame_brush, true, tiles_u,
-				tiles_v);
-	}
-	if (!has_stencil) {
-		return;
-	}
 	const auto &stencil_size =
 			texture_sizes_[static_cast<size_t>(node.frame_stencil)];
-	if (stencil_size.first <= 0) {
+	if (stencil_size.first <= 0 || stencil_size.second <= 0) {
 		return;
 	}
 	const int tile = mnu::frame_stencil_tile_size(
@@ -669,11 +656,28 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 	if (tile <= 0) {
 		return;
 	}
+	const float tex_w = static_cast<float>(stencil_size.first);
+	const float tex_h = static_cast<float>(stencil_size.second);
+	const mnu::FrameTileRect fill_uv = mnu::frame_tile_rect(tile, 3, 0);
+	MenuQuad fill;
+	fill.x0 = emit_x(rect.left, s.x);
+	fill.y0 = emit_x(rect.top, s.y);
+	fill.x1 = emit_x(rect.right, s.x);
+	fill.y1 = emit_x(rect.bottom, s.y);
+	fill.color = 0xFFFFFFFFu;
+	fill.texture = node.frame_stencil;
+	fill.tiled = true;
+	fill.u0 = static_cast<float>(fill_uv.x) / tex_w;
+	fill.v0 = static_cast<float>(fill_uv.y) / tex_h;
+	fill.u1 = static_cast<float>(fill_uv.x + fill_uv.size) / tex_w;
+	fill.v1 = static_cast<float>(fill_uv.y + fill_uv.size) / tex_h;
+	push_quad(fill);
+	if (!has_brush) {
+		return;
+	}
 	const int insetx = frame.has_insetx ? frame.insetx : 0;
 	const int insety = frame.has_insety ? frame.insety : 0;
 	const auto pieces = mnu::frame_border_layout(tile, insetx, insety);
-	const float tex_w = static_cast<float>(stencil_size.first);
-	const float tex_h = static_cast<float>(stencil_size.second);
 	for (const mnu::FrameBorderPiece &piece : pieces) {
 		const mnu::FrameTileRect uv =
 				mnu::frame_tile_rect(tile, piece.tile_col, piece.tile_row);
@@ -700,6 +704,7 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 		quad.y1 = emit_x(dest.bottom, s.y);
 		quad.color = 0xFFFFFFFFu;
 		quad.texture = node.frame_stencil;
+		quad.texture2 = node.frame_brush;
 		if (tex_w > 0.0f && tex_h > 0.0f) {
 			quad.u0 = static_cast<float>(uv.x) / tex_w;
 			quad.v0 = static_cast<float>(uv.y) / tex_h;

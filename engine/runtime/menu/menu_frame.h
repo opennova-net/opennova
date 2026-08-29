@@ -46,10 +46,14 @@ inline constexpr int kMenuDesignWidth = 800;
 inline constexpr int kMenuDesignHeight = 600;
 
 // One draw-list quad. `texture` indexes the compiler's interned texture-name
-// table (texture_names()); kMenuTexNone is an untextured color fill. `tiled`
-// marks the frame BRUSH fill (UVs carry the repeat counts; the applier tiles)
-// [orig: CUIElement_DrawFrame @ 0x64a210 center fill]. Everything else is
-// stretched into the quad, UV 0..1 (or a stencil sub-rect)
+// table (texture_names()); kMenuTexNone is an untextured color fill. A valid
+// `texture2` asks the device leg for retail's two-stage frame material:
+// 2 * texture * texture2, with the first texture's alpha masking the result.
+// [orig: init_border_materials @ 0x646f70 creates border_material from the
+// STENCIL and BRUSH handles with mode 0x651 / two stages]. `tiled` repeats the
+// selected UV region at native device pixels; frame fills select the stencil
+// atlas cell (3, 0), copied by retail into border_fill_material. Everything
+// else is stretched into the quad, UV 0..1 (or an atlas sub-rect)
 // [orig: CUIElement_DrawStretchedTexture @ 0x647d40; the IMAGE pass
 //  CUIElement_DrawTextureNative @ 0x647e40 -> CTextureManager_DrawScaledRect
 //  @ 0x654e60].
@@ -64,6 +68,7 @@ struct MenuQuad {
 	float v1 = 1.0f;
 	uint32_t color = 0xFFFFFFFFu; // 0xAARRGGBB modulate
 	int32_t texture = kMenuTexNone;
+	int32_t texture2 = kMenuTexNone;
 	bool tiled = false;
 };
 
@@ -239,8 +244,8 @@ public:
 	const std::vector<std::string> &font_names() const { return font_names_; }
 
 	// Report a loaded texture's pixel size. The three-stage POSITION
-	// fallback, spin-arrow sizing, native-size item images, the frame brush
-	// tiling, and the cursor consume these; an unreported texture keeps size
+	// fallback, spin-arrow sizing, native-size item images, the frame stencil
+	// atlas, and the cursor consume these; an unreported texture keeps size
 	// 0 (degenerate rects stay empty) [orig: the parse-tail POSITION solve
 	// @ 0x648120].
 	void set_texture_size(int32_t slot, int width, int height);

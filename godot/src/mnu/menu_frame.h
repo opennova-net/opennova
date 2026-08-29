@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -15,6 +16,7 @@
 #include <formats/fnt/fnt.h>
 #include <runtime/menu/menu_frame.h>
 
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -224,6 +226,7 @@ private:
 	};
 
 	opennova::menu::MenuWidgetState &widget_(int p_index);
+	Ref<Texture2D> texture_for_quad_(const opennova::menu::MenuQuad &p_quad);
 	void collect_font_names_(const void *p_window,
 			std::vector<String> &r_names) const;
 	void load_assets_();
@@ -241,6 +244,11 @@ private:
 	opennova::menu::MenuFrameCompiler compiler_;
 	opennova::menu::MenuFrameState state_;
 	std::vector<Ref<Texture2D>> textures_;
+	// Source pixels are retained for the frame material adapter. Retail's
+	// border is a fixed-function two-texture material, not either authored
+	// texture by itself; derived textures are cached by slots/UV/destination.
+	std::vector<Ref<Image>> texture_images_;
+	std::map<std::string, Ref<Texture2D>> frame_texture_cache_;
 	// The parsed .fnt storage the compiler borrows.
 	std::vector<std::unique_ptr<LoadedFont>> owned_fonts_;
 	// fonts_[i] backs the compiler's font slot i (slot 0 = the default).
