@@ -95,11 +95,6 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Serve mode (PROD-1, ADR 0015): `opennova.exe --server` / `--headless
       --server` and a packaging boot-smoke leg — tracked future work, never
       implemented; specs live in `docs/maturity-program.md` §PROD.
-- [ ] GSB server-name decode: browse rows carry Latin-1 bytes and are read as
-      UTF-8, so a `©` (0xA9) in a server name trips a Godot UTF-8 warning. Decode
-      GSB name strings Latin-1 -> UTF-8 on the read side. Carried over from the
-      completed NovaWorld integration record (`plan/status.md`), which had no owner
-      for it.
 - [ ] NovaWorld session-builder residue (PAR-NET): the 0x81/0x82 builders
       (`build_server_hello` / `build_server_auth`, `engine/net/npwire/session_hello.h` +
       `engine/net/npwire/session/session_hello.cpp`) were grilled and fixed 2026-06-27
