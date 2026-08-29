@@ -132,7 +132,7 @@ int main() {
 	fnt_font_t reparsed;
 	err = fnt_parse(written.data(), written.size(), &reparsed);
 	if (!expect(err == FNT_OK, "written font should reparse")) return 1;
-	if (!expect(reparsed.glyph_spacing == -3, "shadow offset should round-trip")) return 1;
+	if (!expect(reparsed.glyph_spacing == -3, "glyph spacing should round-trip")) return 1;
 	int width = 0;
 	int height = 0;
 	fnt_get_glyph_size(&reparsed.glyphs[0], &width, &height);

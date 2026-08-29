@@ -672,7 +672,12 @@ Closed 2026-07-16: **D-PTL-23** -> `FIXED` — Curve-table duplicate selection t
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-VFS-5 | Encrypted-entry streaming: retail decrypts whole-file reads only; ours always — corpus check needed | B | NEEDS-RE | PAR (vfs) |
+
+The mount stack, resolution order and read disciplines are **MATCHING** vs retail
+(`PFF_Open @ 0x7682e0`, `PFF_FindEntry @ 0x7685d0`, `PFF_LoadFileToMemory @ 0x768920`);
+D-VFS-1/2/3/5/7 are closed and D-VFS-4/6/8/9/10/11 ratified permanent.
+
+Closed 2026-08-29: **D-VFS-5** -> `FIXED` — corpus-checked, faithful-nothing: every entry `flags` word in the five retail JO archives is 0 (`language.pff` 3913, `localres.pff` 2812, `resource.pff` 2565, `expansion/jox01/jox01.pff` 1481, `jox01L.pff` 805 = 11,576 entries, none bit0-encrypted), so retail's whole-file-only decrypt (`PFF_LoadFileToMemory @ 0x768920` vs the never-decrypting `PFF_ReadFilePartial @ 0x768ab0` / `FileSystem_Read @ 0x75abe0`) has no reachable surface in JO — and our VFS exposes no partial or streaming read at all (`vfs.cpp` routes every archive read through `pff_extract`). Full detail: vfs-pff-mount-re.md.
 
 D-VFS-4/6/8/9/10/11 are ratified permanent decisions (register below). Closed 2026-07-05:
 **D-VFS-2** -> `FIXED` — `Vfs::mount_game` defaults to the witnessed fixed boot
@@ -842,11 +847,15 @@ Closed 2026-07-16: **D-FOLIAGE-13** -> `FIXED` — Detail-cell collection was a 
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-FNT-3 | Offset +12 (`hdr3`) named `shadow_offset` but only STORED by the loader — the shadow semantics are unconfirmed | B | NEEDS-RE | PAR (fonts) |
+
+The `.fnt` header, glyph-table and text-engine contract are **MATCHING** vs retail
+`CGameFont_MeasureText @ 0x674e70` / `CGameFont_DrawText @ 0x6752c0`; D-FNT-1..4 are all
+closed.
 
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
+Closed 2026-08-23: **D-FNT-3** -> `FIXED` — Offset +12 (`hdr3`) is the inter-glyph SPACING term, not a shadow offset: both the measurer and the drawer advance by `glyph_width + (glyph_spacing - 1) * scale` and the measured width strips the trailing pad `[orig: CGameFont_MeasureText @ 0x674e70 this+356; CGameFont_DrawText @ 0x6752c0]`; the drawer's shadow is a format flag plus fixed sub-pixel offsets. `fnt_font_t.shadow_offset` -> `glyph_spacing`, `FntResource.get/set_glyph_spacing`, pinned by `fnt_roundtrip` + `strings_encoding_test.gd` (the ledger row lagged the record by six days; full detail: fnt-re.md + git history).
 Closed: **D-FNT-1** -> `FIXED` — Offset +4 is the design-width scale reference, not a version (full detail: fnt-re.md + git history).
 Closed: **D-FNT-2** -> `FIXED` — The per-font design scale `800/designWidth` was not retained (full detail: fnt-re.md + git history).
 Closed 2026-07-19: **D-FNT-4** -> `FIXED` — cp1252 specials: `to_font_file` keyed glyphs at raw bytes while display text was Unicode, so Godot substituted a SYSTEM font where retail selected the `.fnt` slot by byte (full detail: maturity-program.md + git history).
@@ -1154,13 +1163,11 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | UI (menu/ctrl/sound/playerinfo/HUD) | 25 | 0 | 3 | 28 | 0 |
 | Mission `.mis` | 0 | 1 | 1 | 2 | 0 |
 | 3DI `.3di` (GP) | 0 | 1 | 0 | 1 | 0 |
-| VFS / PFF mount stack | 0 | 1 | 0 | 1 | 0 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 0 |
 | Terrain | 1 | 0 | 0 | 1 | 0 |
 | Foliage | 3 | 0 | 0 | 3 | 0 |
-| Fonts | 0 | 1 | 0 | 1 | 0 |
 | Render — draw order | 1 | 0 | 0 | 1 | 0 |
-| **Total** | **95** | **9** | **16** | **120** | 0 |
+| **Total** | **95** | **7** | **16** | **118** | 0 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-97.
 
