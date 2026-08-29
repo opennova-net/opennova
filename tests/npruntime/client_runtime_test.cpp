@@ -3297,6 +3297,39 @@ bool run_host_startup_maps_claymore_preference() {
 	return true;
 }
 
+// The advertised NoTracers mission attribute (rules word bit 0) feeds the authoritative
+// tracer-visual gate the same way [orig: g_rules_flags @ 0x24D1E34 & 1 @ 0x4ec41f].
+bool run_host_startup_maps_no_tracers_rule() {
+	{
+		w::World world;
+		np::HostOwner owner;
+		owner.ctx.world = &world;
+		np::HostConfig cfg;
+		cfg.config.mp_attributes = 0x0001u;
+		cfg.socket_mode = np::SocketMode::Socketless;
+		np::start_host_session(owner, cfg);
+		if (!expect(world.round_sim.no_tracers_rule,
+		            "host startup arms the NoTracers rule for mp_attributes 0x0001"))
+			return false;
+	}
+
+	{
+		w::World world;
+		world.round_sim.no_tracers_rule = true;
+		np::HostOwner owner;
+		owner.ctx.world = &world;
+		np::HostConfig cfg;
+		cfg.config.mp_attributes = 0x3A06u;
+		cfg.socket_mode = np::SocketMode::Socketless;
+		np::start_host_session(owner, cfg);
+		if (!expect(!world.round_sim.no_tracers_rule,
+		            "host startup clears the NoTracers rule for default mp_attributes 0x3A06"))
+			return false;
+	}
+
+	return true;
+}
+
 // ---------------------------------------------------------------------------------------------------
 // (E) Host-owner registration boundary: a player created by tick_connections must be visible to
 // adapter registration before its first authoritative body tick and per-connection 0x0A fan.
@@ -5138,6 +5171,7 @@ int main() {
 	                run_host_as_client() &&
 	                run_host_startup_seeds_mounted_no_callback_carrier() &&
 	                run_host_startup_maps_claymore_preference() &&
+	                run_host_startup_maps_no_tracers_rule() &&
 	                run_host_pump_hook_observes_remote_before_first_tick() &&
 	                run_periodic_request_quartet_is_answered() &&
 	                run_reverse_rtt_probe_is_echoed() &&
