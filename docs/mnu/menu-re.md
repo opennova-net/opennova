@@ -1675,7 +1675,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `UI_InitWeaponClassSelection @ 0x567250` (CHARCLASS_* rows, values 5..9) | `ArmoryMenuCompanion._populate_classes` |
 | `Armory_ResolveSelectedClass @ 0x5642f0` + `SpinList_SelectItemByValue @ 0x64ba50` | `ArmoryMenuCompanion._resolve_selected_class` + select-by-value |
 | `populate_three_category_lists @ 0x566db0` (+ `ListWidget_SortRows @ 0x644990` / `cmp @ 0x6448a0`) | `ArmoryMenuCompanion._populate_slots/_fill_slot` (sorted rows, NONE at 0) |
-| `update_weapon_weight_display @ 0x565640` + `calculate_equipped_weapons_weight @ 0x565490` | `ArmoryMenuCompanion._update_weight` (witnessed format + encumbrance bands; D-MNU-9 on the ammo model) |
+| `update_weapon_weight_display @ 0x565640` + `calculate_equipped_weapons_weight @ 0x565490` | `ArmoryMenuCompanion._update_weight/_update_icons` (witnessed format, encumbrance bands, and selected-weapon icon swaps; D-MNU-9 on the ammo model) |
 | `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (ACCEPT/CANCEL, `skip_apply` arg) | `ArmoryMenuCompanion._on_accept/_on_cancel` -> the shell's SP apply |
 
 IDB state note (2026-06-23): the 2026-06-23 render grill renamed `sub_639480 ->
@@ -1847,7 +1847,10 @@ then `update_weapon_weight_display @ 0x565640` renders STATIC_TOTAL_WEIGHT as
 `sprintf "%s %.1f %s (%s)"` = TOTAL_WEIGHT / `calculate_equipped_weapons_weight
 @ 0x565490` / LBS / encumbrance (`< 33.3 LIGHT_ENCUMBRANCE`, `< 66.6 NORMAL_`,
 else `HEAVY_`), and swaps PRIMARY/SECONDARY/ACCESSORY_ICON from the 192-byte
-icon table `@ 0x2540D70`. The weight sum: selected weapon `adm[85]/65536` per
+icon table `@ 0x2540D70`. Reimpl: `_update_icons` mounts a `TextureRect` over
+each blank authored `*_ICON` window, resolves the selected weapon's
+`loadout_menu_icon` through the resource root, and clears it for NONE. The
+weight sum: selected weapon `adm[85]/65536` per
 slot + `(ammoRow+1) × selectedAmmoDef[84]/65536` per ammo combo — the ammo
 TYPE's own def carries the clip weight. A class flip
 `[orig: handle_team_class_selection @ 0x566f60]` (MP-only) first serializes the
@@ -1904,7 +1907,7 @@ in `ArmoryMenuCompanion`'s header): the per-class loadout buffer MEMORY
 submission (the UI stays gated in a network session until that authoritative
 path is exposed; the S2C 0x66/admin availability writers ride it), MP class
 selection, the `*_AMMO1_TYPE` round-type cascade + per-ammo-def weight,
-`*_AMMO2`, the icon swaps, the MP scoreboard overlay, and
+`*_AMMO2`, the MP scoreboard overlay, and
 the use-item key's non-armory leg (the ACCEPT hotkeys landed with the weapon
 round — see the on-show section above). Open questions: the runtime site that stamps the shipped default keys
 into the binding rows (default.key ships in no JO PFF; the KeyChart is the
