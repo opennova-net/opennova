@@ -17,9 +17,9 @@ bool expect(bool condition, const char *message) {
 
 std::string fixture_path() {
 #ifdef OPENNOVA_SOURCE_DIR
-	return std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/particle/30MM.ptl";
+	return std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/particle/synth_multi_layer.ptl";
 #else
-	return "fixtures/particle/30MM.ptl";
+	return "fixtures/particle/synth_multi_layer.ptl";
 #endif
 }
 
@@ -79,49 +79,49 @@ int main() {
 		return 1;
 	}
 
-	// 30MM.ptl ships at least 4 effectdefs (30mmDirtHit, FolHit, MetalHit, WoodHit)
-	// and a richer particle catalogue. Be lenient on counts; assert the anchors.
-	if (!expect(file.effects.size() >= 4, "30MM.ptl has >= 4 effectdefs")) return 1;
-	if (!expect(file.particles.size() >= 3, "30MM.ptl has >= 3 particledefs")) return 1;
+	// synth_multi_layer.ptl carries four effectdefs (dirt, foliage, metal, wood hits)
+	// and three particledefs. Be lenient on counts; assert the anchors.
+	if (!expect(file.effects.size() >= 4, "synth_multi_layer.ptl has >= 4 effectdefs")) return 1;
+	if (!expect(file.particles.size() >= 3, "synth_multi_layer.ptl has >= 3 particledefs")) return 1;
 
-	// 30mmFolPuf: 3 graphic layers (graphic1=dirtpuf, graphic2=thinpuf, graphic3=CDirtpuf).
-	const opennova::particle::ParticleDef *folpuf = file.find_particle("30mmFolPuf");
-	if (!expect(folpuf != nullptr, "30mmFolPuf particle resolves")) return 1;
+	// synth_fol_puf: 3 graphic layers (graphic1=puf_a, graphic2=puf_b, graphic3=PufC).
+	const opennova::particle::ParticleDef *folpuf = file.find_particle("synth_fol_puf");
+	if (!expect(folpuf != nullptr, "synth_fol_puf particle resolves")) return 1;
 
 	if (!expect(folpuf->flags_raw == "EMITVECTOR AMBIENTCOLOR",
 				"flags preserves multi-token whitespace-separated value")) return 1;
 
 	if (!expect(folpuf->graphics[0].present && folpuf->graphics[0].index == 1,
-				"30mmFolPuf graphic1 is present at index 1")) return 1;
+				"synth_fol_puf graphic1 is present at index 1")) return 1;
 	if (!expect(folpuf->graphics[1].present && folpuf->graphics[1].index == 2,
-				"30mmFolPuf graphic2 is present at index 2")) return 1;
+				"synth_fol_puf graphic2 is present at index 2")) return 1;
 	if (!expect(folpuf->graphics[2].present && folpuf->graphics[2].index == 3,
-				"30mmFolPuf graphic3 is present at index 3")) return 1;
-	if (!expect(!folpuf->graphics[3].present, "30mmFolPuf graphic4 is absent")) return 1;
+				"synth_fol_puf graphic3 is present at index 3")) return 1;
+	if (!expect(!folpuf->graphics[3].present, "synth_fol_puf graphic4 is absent")) return 1;
 
-	if (!expect(folpuf->graphics[0].texture == "dirtpuf.tga", "graphic1 texture")) return 1;
-	if (!expect(folpuf->graphics[1].texture == "thinpuf.tga", "graphic2 texture")) return 1;
-	if (!expect(folpuf->graphics[2].texture == "CDirtpuf.tga", "graphic3 texture (case-preserving)")) return 1;
+	if (!expect(folpuf->graphics[0].texture == "puf_a.tga", "graphic1 texture")) return 1;
+	if (!expect(folpuf->graphics[1].texture == "puf_b.tga", "graphic2 texture")) return 1;
+	if (!expect(folpuf->graphics[2].texture == "PufC.tga", "graphic3 texture (case-preserving)")) return 1;
 
 	if (!expect(folpuf->graphics[0].blend_mode_raw == "blend", "graphic1 blend = blend")) return 1;
 
-	if (!expect(folpuf->alpha_func.name == "table1" && !folpuf->alpha_func.reverse,
+	if (!expect(folpuf->alpha_func.name == "synth_fade" && !folpuf->alpha_func.reverse,
 				"alpha_func parses without reverse")) return 1;
-	if (!expect(folpuf->scale_func.name == "table4" && folpuf->scale_func.reverse,
+	if (!expect(folpuf->scale_func.name == "synth_grow" && folpuf->scale_func.reverse,
 				"scale_func parses with reverse")) return 1;
 
-	// Per-layer color overrides — color1 should match (220, 183, 140).
+	// Per-layer color overrides: graphic1 color1 is (200, 160, 120).
 	const opennova::particle::GraphicLayer &g1 = folpuf->graphics[0];
 	if (!expect(g1.color_overrides_set, "graphic1 has explicit color overrides")) return 1;
-	if (!expect(g1.color1.r == 220 && g1.color1.g == 183 && g1.color1.b == 140,
+	if (!expect(g1.color1.r == 200 && g1.color1.g == 160 && g1.color1.b == 120,
 				"graphic1 color1 parses")) return 1;
 
-	// 30mmFlash: only graphic1 with mbFlash2.tga, additive
-	const opennova::particle::ParticleDef *flash = file.find_particle("30mmFlash");
-	if (!expect(flash != nullptr, "30mmFlash resolves")) return 1;
-	if (!expect(flash->graphics[0].texture == "mbFlash2.tga", "30mmFlash texture")) return 1;
-	if (!expect(flash->graphics[0].blend_mode_raw == "additive", "30mmFlash blend = additive")) return 1;
-	if (!expect(!flash->graphics[1].present, "30mmFlash has no graphic2")) return 1;
+	// synth_flash: only graphic1 with flash.tga, additive
+	const opennova::particle::ParticleDef *flash = file.find_particle("synth_flash");
+	if (!expect(flash != nullptr, "synth_flash resolves")) return 1;
+	if (!expect(flash->graphics[0].texture == "flash.tga", "synth_flash texture")) return 1;
+	if (!expect(flash->graphics[0].blend_mode_raw == "additive", "synth_flash blend = additive")) return 1;
+	if (!expect(!flash->graphics[1].present, "synth_flash has no graphic2")) return 1;
 
 	return 0;
 }

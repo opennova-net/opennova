@@ -315,11 +315,11 @@ int main() {
 	if (!roundtrip_synthetic_full_particle()) return 1;
 
 	const char *fixtures[] = {
-		"troytabl.ptl",
-		"buildup.ptl",
-		"stock.ptl",
-		"30MM.ptl",
-		"boatwake.ptl",
+		"synth_smallest.ptl",
+		"synth_minimal_effect.ptl",
+		"synth_multi_section.ptl",
+		"synth_multi_layer.ptl",
+		"synth_table_handles.ptl",
 	};
 
 	int failures = 0;

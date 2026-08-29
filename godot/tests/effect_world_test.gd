@@ -26,7 +26,7 @@ func before_each() -> void:
 	# rejected by ResourceRoot.is_valid_root (mirrors the other fixture roots).
 	_root_dir = OS.get_cache_dir().path_join("opennova_effect_world_test").path_join("root_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(_root_dir)
-	for fixture in ["buildup.ptl", "stock.ptl", "troytabl.ptl", "gorehit.ptu"]:
+	for fixture in ["synth_minimal_effect.ptl", "synth_multi_section.ptl", "synth_smallest.ptl", "gorehit.ptu"]:
 		var src := ProjectSettings.globalize_path("res://../fixtures/particle/%s" % fixture)
 		var bytes := FileAccess.get_file_as_bytes(src)
 		assert_gt(bytes.size(), 0, "fixture readable: %s" % fixture)
@@ -120,9 +120,9 @@ func test_load_from_resource_root_scans_every_ptl() -> void:
 	var world := _make_world()
 	var count := world.load_from_resource_root(_make_root())
 	assert_eq(world.file_count(), 4,
-			"every mounted .ptl parses (buildup + stock + troytabl) plus the .ptu gore set")
-	# buildup declares 1 effect, stock declares 7, gorehit.ptu declares 1;
-	# troytabl is table-only.
+			"every mounted .ptl parses (minimal_effect + multi_section + smallest) plus the .ptu gore set")
+	# synth_minimal_effect declares 1 effect, synth_multi_section 7, gorehit.ptu 1;
+	# synth_smallest is table-only.
 	assert_eq(count, 9, "all effects across the mounts register")
 	assert_gt(world.effect_count(), 0)
 	assert_true(world.get_texture_provider().is_valid(), "textures route through the mounted root")
@@ -151,7 +151,7 @@ func test_gore_set_effects_load_and_resolve_across_extensions() -> void:
 	assert_eq(world.effect_name_for_handle(handle), "Effect_GoreHit")
 
 	# Effect_GoreHit's pdefs list mixes its own particledef with `Buildup dots` from
-	# buildup.ptl. The catalog registers every particledef across ALL documents before
+	# synth_minimal_effect.ptl. The catalog registers every particledef across ALL documents before
 	# resolving ANY effectdef, so the reference resolves across extensions. An effect
 	# with any unresolved pdef is cleared WHOLE (D-PTL-8 all-or-nothing) and spawns
 	# nothing, so a successful spawn is the proof that both halves resolved.
@@ -174,7 +174,7 @@ func test_intern_is_case_insensitive_and_stable() -> void:
 		assert_ne(other, handle, "distinct names take distinct handles")
 	# Unknown names clone the stockeffect def under the requested name
 	# [orig: CEffectWorld_InternEffectHandle @ 0x5f7310 — the vtable+28 clone;
-	# D-PTL-8 CLOSED]. stock.ptl is mounted here, so the clone must intern.
+	# D-PTL-8 CLOSED]. synth_multi_section.ptl (stockeffect) is mounted here, so the clone must intern.
 	var cloned := world.intern_effect("no-such-effect-xyz")
 	assert_gt(cloned, 0, "unknown name clones stockeffect under the requested name")
 	assert_ne(cloned, handle, "the clone takes its own handle")

@@ -50,7 +50,6 @@ authored file.
 | `bms/ash_i5b.reference.bms` | the mission reference the BMS writer round-trips against |
 | `mus/jo_gamemus.bin`, `mus/jo_menumus.bin`, `mus/golden_jo_gamemus.mus.txt` | the music director scripts and their decoded golden |
 | `adm/mp5_1st.adm`, `bad/BINOC.bad`, `bad/BINOC_twist.bad` | the retail animation-definition and clip formats (skinned-rig twist parity) |
-| `particle/*.ptl` | the particle catalogue parser's retail corpus |
 | `avatars/Avatars.def` | the avatar definition table |
 | `novaworld/**` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
 
@@ -140,5 +139,11 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   `rtxt_jo_install_sweep` and the menu-driven GUT tests.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
 - `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.
+- `particle/synth_*.ptl` — `tests/fixtures/minimal_particle_gen.cpp`: five particle
+  files through `save_particles` (a lone table, a table with its edit handles,
+  seven effects over a blank particle, a three-layer particle with curves and
+  per-layer colours, and the `Buildup` effect the authored `gorehit.ptu` also
+  references); the shipped `.ptl` corpus is `particle_smoke_all_fixtures`'
+  reference-tree leg.
 - `dbf/synth_bank.dbf` — `tests/fixtures/minimal_dbf_gen.cpp`: eleven dialog groups
   through `encode_dbf`; the shipped 00TRg bank is `dbf_roundtrip`'s reference-tree leg.

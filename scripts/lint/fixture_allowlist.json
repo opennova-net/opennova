@@ -29,8 +29,7 @@
     "fixtures/mus/*",
     "fixtures/novaworld/*.gsb",
     "fixtures/novaworld/*.hexcap",
-    "fixtures/novaworld/run_*/*",
-    "fixtures/particle/*.ptl"
+    "fixtures/novaworld/run_*/*"
   ],
   "size_exceptions": [
     { "path": "assets/mnml.cpt", "why": "the minimal map's baked terrain (CDEP + tiles); the writer's exact output, needed at its authored 1024^2 resolution" },

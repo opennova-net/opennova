@@ -1,6 +1,7 @@
 // Smoke test: every .ptl under fixtures/particle/ must parse without error
-// (field assertions live in the focused tests; this is the regression net
-// for a new fixture). With <OPENNOVA_JO_ASSETS> set, the same sweep runs
+// and survive save_particles -> parse with its section counts intact (field
+// assertions live in the focused tests; this is the regression net for a new
+// fixture). With <OPENNOVA_JO_ASSETS> set, the same sweep runs
 // over the extracted retail .ptl corpus; without it that leg prints SKIP-LEG
 // and the committed sweep alone decides the result.
 
@@ -8,6 +9,7 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include "common/retail_paths.h"
 
@@ -42,6 +44,29 @@ int sweep(const std::string &dir, const char *label, int &parsed) {
 		if (!opennova::particle::load_particles_from_file(entry.path().string(), file, error)) {
 			std::fprintf(stderr, "FAIL: %s: %s line %d: %s\n", label,
 					entry.path().filename().string().c_str(), error.line, error.message.c_str());
+			++failures;
+			continue;
+		}
+		// The writer's output re-parses to the same section counts (the
+		// per-field comparison is particle_writer_roundtrip's job over the
+		// minted set; here the shipped corpus proves the writer emits what
+		// the parser accepts for every retail shape).
+		std::ostringstream serialized;
+		std::string write_error;
+		opennova::particle::ParticleFile replayed;
+		if (!opennova::particle::save_particles(serialized, file, write_error)) {
+			std::fprintf(stderr, "FAIL: %s: %s save: %s\n", label, entry.path().filename().string().c_str(),
+					write_error.c_str());
+			++failures;
+			continue;
+		}
+		if (!opennova::particle::load_particles_from_buffer(serialized.str().data(), serialized.str().size(),
+				replayed, error) ||
+				replayed.effects.size() != file.effects.size() || replayed.particles.size() != file.particles.size() ||
+				replayed.tables.size() != file.tables.size() ||
+				replayed.table_handles.size() != file.table_handles.size()) {
+			std::fprintf(stderr, "FAIL: %s: %s does not re-parse from the writer's output (%s)\n", label,
+					entry.path().filename().string().c_str(), error.message.c_str());
 			++failures;
 			continue;
 		}

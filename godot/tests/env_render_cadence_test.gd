@@ -270,7 +270,7 @@ func test_network_environment_sample_roundtrips_exact_retail_units_through_live_
 	# own authored fog/cloud values.
 	env.environment_data = _loaded_env()
 	assert_eq(env.get_fog_level_target(), 1000.0)
-	assert_eq(env.get_sky_speed(), 15.0)
+	assert_eq(env.get_sky_speed(), 12.0, "synth_full.env authors sky_speed 12")
 	assert_eq(env.get_overcast_blend(), 0.0)
 
 
