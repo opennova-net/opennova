@@ -1,8 +1,10 @@
 /* MNU compat sweep: parse + round-trip real shipped .mnu menus.
 
-   Three committed fixtures (real JO-family menus, sourced from the revx02 menu
-   set) are required-pass; the rest of that set is swept skip-without-fail when
-   present on the developer's disk. CI green requires only the committed three.
+   The fifteen revx02 JO-family menus come from the reference fixture set
+   (<OPENNOVA_JO_ASSETS>/fixtures/mnu/jo_*.mnu; the whole test is gated on
+   them) and are required-pass; every .mnu the packed retail install carries
+   (OPENNOVA_JO_DIR, the base mount plus each expansion) is swept as a
+   SKIP-LEG retail leg. Extra loose menus still sweep from argv.
 
    This closes the gap the hand-authored widgets.mnu / all_widgets.mnu fixtures
    leave open: those exercise the widget vocabulary but are not shipped content,
@@ -22,8 +24,12 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
+#include <base/vfs/vfs.h>
 #include <formats/mnu/mnu.h>
+
+#include "common/retail_paths.h"
 
 static bool read_file(const char *path, std::string &out) {
   std::ifstream f(path, std::ios::binary);
@@ -40,18 +46,8 @@ static int count_windows(const opennova::mnu::Window &w) {
   return n;
 }
 
-/* Returns 1 = OK (or absent and not required), 0 = present-but-failed. */
-static int try_menu(const char *path, bool required) {
-  std::string src;
-  if (!read_file(path, src)) {
-    if (required) {
-      printf("  MISSING %s (required fixture)\n", path);
-      return 0;
-    }
-    printf("  SKIP %s (absent)\n", path);
-    return 1;
-  }
-
+/* Returns 1 = OK, 0 = failed, over a menu's source bytes. */
+static int check_source(const char *path, const std::string &src) {
   opennova::mnu::Document doc;
   std::string err;
   if (!opennova::mnu::parse(src, doc, err)) {
@@ -90,27 +86,72 @@ static int try_menu(const char *path, bool required) {
   return 1;
 }
 
+/* Returns 1 = OK (or absent and not required), 0 = present-but-failed. */
+static int try_menu(const char *path, bool required) {
+  std::string src;
+  if (!read_file(path, src)) {
+    if (required) {
+      printf("  MISSING %s (required fixture)\n", path);
+      return 0;
+    }
+    printf("  SKIP %s (absent)\n", path);
+    return 1;
+  }
+  return check_source(path, src);
+}
+
+/* Every .mnu one mount layer of the packed install serves. Returns the number
+   of failures; `checked` accumulates the menus seen. */
+static int sweep_mount(const std::string &install, const std::string &expansion, int &checked) {
+  opennova::Vfs vfs;
+  if (!vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed)) {
+    printf("  FAIL mount_game(%s, %s): %s\n", install.c_str(), expansion.c_str(),
+           vfs.last_error().c_str());
+    return 1;
+  }
+  int fail = 0;
+  for (const auto &loc : vfs.list_files()) {
+    const std::string &name = loc.logical_name;
+    if (name.size() < 4) continue;
+    std::string ext = name.substr(name.size() - 4);
+    for (auto &c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (ext != ".mnu") continue;
+    std::vector<uint8_t> bytes;
+    if (!vfs.read_file_raw(name, bytes)) {
+      printf("  FAIL %s (unreadable on the %s mount)\n", name.c_str(),
+             expansion.empty() ? "base" : expansion.c_str());
+      ++fail;
+      continue;
+    }
+    ++checked;
+    const std::string label = (expansion.empty() ? std::string("<install>/") : expansion + "/") + name;
+    if (!check_source(label.c_str(), std::string(bytes.begin(), bytes.end()))) ++fail;
+  }
+  return fail;
+}
+
 int main(int argc, char **argv) {
   int fail = 0;
 
-  /* All 15 committed revx02 menus are required-pass; the fixed-point idempotence
-     proof now matches mnu_coverage's set (both run over fixtures/mnu/jo_*.mnu). */
-  const char *fixtures[] = {
-      "fixtures/mnu/jo_main.mnu",    "fixtures/mnu/jo_sp.mnu",
-      "fixtures/mnu/jo_mp.mnu",      "fixtures/mnu/jo_options.mnu",
-      "fixtures/mnu/jo_game.mnu",    "fixtures/mnu/jo_player.mnu",
-      "fixtures/mnu/jo_weapon.mnu",  "fixtures/mnu/jo_loadout.mnu",
-      "fixtures/mnu/jo_color.mnu",   "fixtures/mnu/jo_cmap.mnu",
-      "fixtures/mnu/jo_stat.mnu",    "fixtures/mnu/jo_death.mnu",
-      "fixtures/mnu/jo_vehicle.mnu", "fixtures/mnu/jo_item_db.mnu",
-      "fixtures/mnu/jo_splash.mnu",
+  /* The fifteen shipped revx02 menus from the reference fixture set are
+     required-pass; the fixed-point idempotence proof matches mnu_coverage's
+     set. */
+  static const char *const kMenus[] = {
+      "jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player", "jo_weapon", "jo_loadout",
+      "jo_color", "jo_cmap", "jo_stat", "jo_death", "jo_vehicle", "jo_item_db", "jo_splash",
   };
-  for (const char *p : fixtures)
-    if (!try_menu(p, true)) ++fail;
+  std::vector<std::string> paths;
+  for (const char *name : kMenus) {
+    const std::string path = retail::reference_fixture((std::string("mnu/") + name + ".mnu").c_str());
+    if (path.empty())
+      return retail::skip("OPENNOVA_JO_ASSETS/fixtures/mnu/jo_*.mnu (the fifteen shipped revx02 menus)");
+    paths.push_back(path);
+  }
+  for (const std::string &p : paths)
+    if (!try_menu(p.c_str(), true)) ++fail;
 
-  /* Developer-only: menus not yet committed (e.g. PRE.MNU) still sweep when
-     passed on the command line (`mnu_compat_test <path.mnu> ...`), without
-     failing the ctest registration, which passes none. */
+  /* Developer-only: extra loose menus passed on the command line still sweep
+     without failing the ctest registration, which passes none. */
   for (int i = 1; i < argc; ++i)
     try_menu(argv[i], false);
 
@@ -118,5 +159,24 @@ int main(int argc, char **argv) {
     fprintf(stderr, "\n%d required MNU fixture(s) FAILED\n", fail);
     return 1;
   }
+
+  /* The retail leg: every .mnu the packed install serves, base mount and each
+     expansion. */
+  const std::string install = retail::install();
+  if (install.empty())
+    return retail::skip_leg("OPENNOVA_JO_DIR (the packed install's .mnu set)");
+  int checked = 0;
+  fail += sweep_mount(install, std::string(), checked);
+  for (const std::string &expansion : retail::expansions())
+    fail += sweep_mount(install, expansion, checked);
+  if (fail > 0) {
+    fprintf(stderr, "\n%d installed menu(s) FAILED\n", fail);
+    return 1;
+  }
+  if (checked == 0) {
+    fprintf(stderr, "\nthe packed install served no .mnu\n");
+    return 1;
+  }
+  printf("retail leg: %d installed menu(s) parsed and round-tripped\n", checked);
   return 0;
 }

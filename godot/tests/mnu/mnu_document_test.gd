@@ -4,7 +4,10 @@ extends GutTest
 # verify a serialize round-trip plus the core mutation surface.
 
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
-const JO_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"
+# The shipped menus and style sheet come from the reference fixture set; the
+# legs that read them pend without it.
+const JO_MAIN_REL := "mnu/jo_main.mnu"
+const MNS_REL := "mns/menu_style.mns"
 
 
 func _load_doc() -> MnuDocument:
@@ -27,7 +30,11 @@ func test_menu_size_derived_from_content() -> void:
 	assert_eq(widgets.get_menu_size(), Vector2i(640, 480),
 		"640x480 menu derives its own size")
 
-	var jo_bytes := FileAccess.get_file_as_bytes(JO_FIXTURE)
+	var jo_path := RetailData.fixture(JO_MAIN_REL)
+	if jo_path.is_empty():
+		pending(RetailData.fixture_pending_text(JO_MAIN_REL))
+		return
+	var jo_bytes := FileAccess.get_file_as_bytes(jo_path)
 	assert_gt(jo_bytes.size(), 0, "jo_main fixture bytes are non-empty")
 	var jo := MnuDocument.new()
 	assert_eq(jo.load_from_bytes(jo_bytes), OK, "jo_main loads")
@@ -314,13 +321,21 @@ func test_mns_stylesheet() -> void:
 
 # --- MNS document surface (lossless model behind MnsStyleSheet, ADR 0014) -------
 
+# The shipped style sheet's bytes, empty (after pending) without the reference set.
 func _real_mns_bytes() -> PackedByteArray:
-	return FileAccess.get_file_as_bytes("res://../fixtures/mns/menu_style.mns")
+	var path := RetailData.fixture(MNS_REL)
+	if path.is_empty():
+		pending(RetailData.fixture_pending_text(MNS_REL))
+		return PackedByteArray()
+	return FileAccess.get_file_as_bytes(path)
 
 
 func test_mns_entries_expose_document_order() -> void:
+	var bytes := _real_mns_bytes()
+	if bytes.is_empty():
+		return
 	var sheet := MnsStyleSheet.new()
-	assert_eq(sheet.load_from_bytes(_real_mns_bytes()), OK, "real stylesheet loads")
+	assert_eq(sheet.load_from_bytes(bytes), OK, "real stylesheet loads")
 	var entries := sheet.get_entries()
 	assert_eq(entries.size(), 12, "12 defines in the shipped file")
 	assert_eq(sheet.get_entry_count(), 12, "entry count matches")
@@ -368,6 +383,8 @@ func test_mns_runtime_evaluation_validity_is_distinct_from_repairable_load() -> 
 
 func test_mns_source_text_round_trip_byte_faithful() -> void:
 	var original := _real_mns_bytes()
+	if original.is_empty():
+		return
 	var sheet := MnsStyleSheet.new()
 	assert_eq(sheet.load_from_bytes(original), OK)
 	assert_eq(sheet.to_byte_array(), original, "untouched load -> serialize is byte-identical")
@@ -376,15 +393,18 @@ func test_mns_source_text_round_trip_byte_faithful() -> void:
 
 
 func test_mns_set_variable_preserves_layout_and_emits_changed() -> void:
+	var original_bytes := _real_mns_bytes()
+	if original_bytes.is_empty():
+		return
 	var sheet := MnsStyleSheet.new()
-	assert_eq(sheet.load_from_bytes(_real_mns_bytes()), OK)
+	assert_eq(sheet.load_from_bytes(original_bytes), OK)
 	watch_signals(sheet)
 	sheet.set_variable("DEF_TEXT_FG", "11223344")
 	assert_signal_emit_count(sheet, "changed", 1, "a real edit emits changed once")
 	sheet.set_variable("DEF_TEXT_FG", "11223344")
 	assert_signal_emit_count(sheet, "changed", 1, "an equal value is a no-op (no dirty flip)")
 
-	var original := _real_mns_bytes().get_string_from_utf8().split("\n")
+	var original := original_bytes.get_string_from_utf8().split("\n")
 	var edited := sheet.to_byte_array().get_string_from_utf8().split("\n")
 	assert_eq(edited.size(), original.size(), "line count unchanged")
 	var diffs := 0

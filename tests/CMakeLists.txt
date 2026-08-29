@@ -1218,36 +1218,34 @@ target_link_libraries(mnu_unit_test PRIVATE opennova_formats)
 target_include_directories(mnu_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mnu_unit COMMAND mnu_unit_test)
 
-# Compat sweep over real shipped .mnu menus (committed fixtures required-pass,
-# developer Desktop set skip-if-absent). Reads fixtures/mnu/ so it runs from the
-# repo root, like sbf_compat.
+# Compat sweep over real shipped .mnu menus: the fifteen revx02 menus from the
+# reference fixture set (gated on OPENNOVA_JO_ASSETS) required-pass, then every
+# .mnu the packed install serves (OPENNOVA_JO_DIR, a SKIP-LEG retail leg).
 add_executable(mnu_compat_test mnu/mnu_compat_test.cpp)
-target_link_libraries(mnu_compat_test PRIVATE opennova_formats)
+target_link_libraries(mnu_compat_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mnu_compat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME mnu_compat COMMAND mnu_compat_test
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+opennova_add_gated_test(mnu_compat COMMAND mnu_compat_test)
 
 # Round-trip key-coverage: catches attributes/tags dropped at parse time, which
-# the idempotence sweep above cannot see (see ADR 0002). Reads fixtures/mnu/.
+# the idempotence sweep above cannot see (see ADR 0002). The same fifteen
+# reference menus; gated on OPENNOVA_JO_ASSETS.
 add_executable(mnu_coverage_test mnu/mnu_coverage_test.cpp)
 target_link_libraries(mnu_coverage_test PRIVATE opennova_formats)
 target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME mnu_coverage COMMAND mnu_coverage_test
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+opennova_add_gated_test(mnu_coverage COMMAND mnu_coverage_test)
 
 add_executable(mns_parse_test mns/mns_parse_test.cpp)
 target_link_libraries(mns_parse_test PRIVATE opennova_formats)
 target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mns_parse COMMAND mns_parse_test)
 
-# Lossless MNS document model (ADR 0009): byte round-trip on the real shipped
-# menu_style.mns, minimal-delta edit stability, diagnostics. Reads
-# fixtures/mns/ so it runs from the repo root, like mnu_compat.
+# Lossless MNS document model (ADR 0009): synthetic byte round-trips, edit
+# stability and diagnostics unconditionally; the shipped menu_style.mns legs
+# read the reference fixture set (SKIP-LEG without OPENNOVA_JO_ASSETS).
 add_executable(mns_document_test mns/mns_document_test.cpp)
 target_link_libraries(mns_document_test PRIVATE opennova_formats)
 target_include_directories(mns_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME mns_document COMMAND mns_document_test
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME mns_document COMMAND mns_document_test)
 
 # World runtime substrate: addressable entities (faithful find_by_net_id), shared
 # var store, entity-command primitives, the logic-tick clock, snapshot/restore.
