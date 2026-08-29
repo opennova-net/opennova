@@ -116,7 +116,7 @@ and rejected on evidence, not on precedent.
   feed, scar gate, the menu/HUD/armory GDScript).
 - The GUT doubles survive; `godot/tests` keeps driving the shell through typed seams
   (`MissionFrameInput`/`MissionFrameOutcome`, the pipeline's sanctioned `_world` double,
-  the `ProbeShellSeams` verbs).
+  the `GameShellSeams` verbs, née `ProbeShellSeams`).
 - The dead-code sweep (Slice 0 of the campaign) and the stop-inventing fixes (SP pause through
   `inmatch::State::Paused`, `session_role()` as the authority source, engine constants for the
   512/62.5 literals) land under this ADR's rule.

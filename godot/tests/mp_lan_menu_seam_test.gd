@@ -303,11 +303,11 @@ func test_hosted_mission_game_type_reaches_native_session_config() -> void:
 		add_child_autofree(runtime)
 		var container := Node3D.new()
 		add_child_autofree(container)
-		assert_gt(int(runtime.setup(mission, container, {
-			"simulation": sim,
-			"host_session": config,
-			"mission_file": String(row["mission"]),
-		})), 0)
+		var options := MissionSetupOptions.new()
+		options.simulation = sim
+		options.host_session = config
+		options.mission_file = String(row["mission"])
+		assert_gt(int(runtime.setup(mission, container, options)), 0)
 		assert_eq(int(sim.get_host_session_config().get("gametype", -1)),
 				int(row["expected"]),
 				"%s reaches the native wire configuration" % String(row["mission"]))

@@ -15,6 +15,12 @@ func _advance_ticks(runtime: MissionPresentation, delta: float) -> int:
 	return outcome.get_ticks_run() if outcome != null else 0
 
 
+static func _options_with_placer(placer: MissionObjectPlacer) -> MissionSetupOptions:
+	var options := MissionSetupOptions.new()
+	options.placer = placer
+	return options
+
+
 func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 	# The mission loadout chunk -> the sim spawn kit, end to end through the
 	# engine's SP-vs-net promotion (world/player_loadout.h, S7b): a REAL mission
@@ -201,7 +207,7 @@ class CatchupEffectWorld:
 # key. The runtime builds its EntityIndex from options.placer's construction-time
 # placed_entity_records ({model, ref} — the channel MissionObjectPlacer.place() records; never a
 # container scan), so the harness registers through that same channel and every setup below passes
-# {"placer": w.placer}. The tests assert only Node3D position/visible on the model.
+# _options_with_placer(w.placer). The tests assert only Node3D position/visible on the model.
 func _make_world(authored: Transform3D) -> Dictionary:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -224,7 +230,7 @@ func test_setup_promotes_and_counts() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	var count := int(rt.setup(w.mission, w.container, {"placer": w.placer}))
+	var count := int(rt.setup(w.mission, w.container, _options_with_placer(w.placer)))
 	# P7: every preview is the in-process listen server, so the host player auto-spawns at bring-up —
 	# the world is the one authored organic + the host player.
 	assert_eq(count, 2, "one organic + the auto-spawned host player")
@@ -253,7 +259,7 @@ func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> 
 	var revision := placer.get_static_terrain_shadow_source_revision()
 	var runtime := MissionPresentation.new()
 	add_child_autofree(runtime)
-	assert_gt(int(runtime.setup(mission, container, { "placer": placer })), 0)
+	assert_gt(int(runtime.setup(mission, container, _options_with_placer(placer))), 0)
 	assert_true(runtime.tick())
 	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
 			"production MissionPresentation passes its placer into PresentApplier")
@@ -270,7 +276,7 @@ func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.set_frame_stats(board)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	var sim := rt.get_sim()
 	assert_false(sim.is_runtime_profiling_enabled(),
 			"an attached but closed Stats board leaves native profiling off")
@@ -320,11 +326,10 @@ func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	assert_true(joiner.enable_join("127.0.0.1", 9, "TransportLockJoiner"))
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	assert_gt(int(rt.setup(w.mission, w.container, {
-		"simulation": joiner,
-		"net_transport": "lan-join",
-		"placer": w.placer,
-	})), 0)
+	var lock_options := _options_with_placer(w.placer)
+	lock_options.simulation = joiner
+	lock_options.net_transport = "lan-join"
+	assert_gt(int(rt.setup(w.mission, w.container, lock_options)), 0)
 
 	assert_true(rt.is_transport_locked(), "a joiner runtime reports a locked transport")
 	rt.play()
@@ -341,7 +346,7 @@ func test_transport_still_works_for_a_local_runtime() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	assert_gt(int(rt.setup(w.mission, w.container, {"placer": w.placer})), 0)
+	assert_gt(int(rt.setup(w.mission, w.container, _options_with_placer(w.placer))), 0)
 	# A directly instantiated runtime has no bound socket or peers, so it is not
 	# a live net session and keeps its transport.
 	assert_false(rt.is_transport_locked(),
@@ -367,12 +372,11 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	var audio := FireAudioStub.new()
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	assert_gt(int(rt.setup(w.mission, w.container, {
-		"simulation": joiner,
-		"join_target": target,
-		"fire_audio": func(): return audio,
-		"placer": w.placer,
-	})), 0)
+	var join_options := _options_with_placer(w.placer)
+	join_options.simulation = joiner
+	join_options.join_target = target
+	join_options.fire_audio = func(): return audio
+	assert_gt(int(rt.setup(w.mission, w.container, join_options)), 0)
 
 	var fire_stats := rt.get_fire_present_stats()
 	assert_not_null(fire_stats,
@@ -420,7 +424,7 @@ func test_wire_presenter_resets_with_runtime_stop() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	var wire_present := rt.get_wire_presenter()
 	assert_not_null(wire_present)
 	var reset_wire := Callable(wire_present, "reset_runtime_state")
@@ -434,7 +438,7 @@ func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.set_presentation_time_ms(0x1ffffffff)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	assert_eq(rt.get_sim().get_panm_time_ms(), 0xffffffff,
 		"preconfigured clock is injected after mission-load reset")
 	rt.set_presentation_time_ms(1234)
@@ -446,11 +450,10 @@ func test_setup_exposes_normalized_diagnostic_mission_identity() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {
-		"debug_mission_file": "C:\\missions\\00TRe.bms",
-		"debug_mission_name": "Training Grounds",
-		"placer": w.placer,
-	})
+	var identity_options := _options_with_placer(w.placer)
+	identity_options.mission_file = "C:\\missions\\00TRe.bms"
+	identity_options.mission_name = "Training Grounds"
+	rt.setup(w.mission, w.container, identity_options)
 	assert_eq(rt.get_mission_file(), "00TRe.bms",
 			"diagnostics expose a portable basename, never the editor's local path")
 	assert_eq(rt.get_mission_name(), "Training Grounds")
@@ -462,7 +465,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.step_once()
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
 	assert_true((w.model as Node3D).position.is_equal_approx(sim_pos),
@@ -484,7 +487,7 @@ func test_tick_and_step_advance_and_present_like_the_game() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	assert_true(rt.tick(), "tick() advances one logic tick")
 	rt.step_once()
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
@@ -523,7 +526,7 @@ func test_session_frame_accumulates_fixed_quanta() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
 	# 0.1 s of wall-clock at 62.5 Hz = floor(0.1 / 0.016) = 6 ticks.
 	assert_eq(_advance_ticks(rt, 0.1), 6, "0.1 s banks 6 fixed-step ticks")
@@ -536,7 +539,7 @@ func test_session_frame_clamps_catchup() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
 	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's
 	# catch-up at the native world::TickAccumulator::kMaxCatchupTicks (S14).
@@ -549,7 +552,7 @@ func test_session_frame_ignored_when_not_playing() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	# Not played -> paused -> banks nothing regardless of elapsed wall-clock (no burst on Play).
 	assert_eq(_advance_ticks(rt, 1.0), 0, "a paused runtime banks nothing")
 	rt.play()
@@ -560,7 +563,7 @@ func test_session_frame_still_presents_a_zero_tick_render_frame() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
 	assert_eq(_advance_ticks(rt, Simulation.tick_dt()), 1,
 			"seed one decoded presentation snapshot")
@@ -576,7 +579,7 @@ func test_session_frame_presents_latest_state_once() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
 	assert_gt(_advance_ticks(rt, 0.1), 0, "the batch ran at least one tick")
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
@@ -591,7 +594,7 @@ func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() ->
 	var w := _make_world(authored)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	var entity_ref := {"kind": 3, "index": 0, "bms_id": 0}
 	var observed: Array = []
 	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
@@ -628,11 +631,10 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	add_child_autofree(effect_world)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {
-		"fire_fx": func() -> Variant: return effect_world,
-		"effect_anchors": anchor_mount,
-		"placer": w.placer,
-	})
+	var catchup_options := _options_with_placer(w.placer)
+	catchup_options.fire_fx = func() -> Variant: return effect_world
+	catchup_options.effect_anchors = anchor_mount
+	rt.setup(w.mission, w.container, catchup_options)
 	var def_root := ResourceRoot.new()
 	def_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def"))
 	assert_eq(rt.get_sim().load_ammo_table(def_root, "ammo.def"), OK)
@@ -720,7 +722,7 @@ func _run_realtime(step: float, count: int) -> Dictionary:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, {"placer": w.placer})
+	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	rt.play()
 	var ticks := 0
 	for _i in range(count):

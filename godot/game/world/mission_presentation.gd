@@ -71,19 +71,23 @@ var _effect_pose_snapshot_tick := -1
 
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
-## the present pass. options: { loco_scale, present_options, and for a net
-## session the typed request under "host_session" (HostSessionConfig) or "join_target"
-## (JoinTarget) }. Returns the AI entity count, or 0 on load failure (the orphan sim is
+## the present pass. `options` is the typed MissionSetupOptions record (ADR
+## 0017); a net session carries its request as options.host_session
+## (HostSessionConfig) or options.join_target (JoinTarget). Returns the AI
+## entity count, or 0 on load failure (the orphan sim is
 ## freed). Inspect get_setup_error() to distinguish a valid empty mission from a setup
 ## failure. The sim is held off-tree by this driver.
-func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> int:
+func setup(mission: MissionData, container: Node,
+		options: MissionSetupOptions = null) -> int:
+	if options == null:
+		options = MissionSetupOptions.new()
 	_clear_present_effect_poses()
 	_setup_error = OK
 	# A remote join may already own the live socket + NP session while it waits
 	# for S2C 0x7B to identify the mission. Keep that exact connection across the
 	# wire-header world construction instead of reconnecting after discovery. Standalone host/SP and
 	# isolated test/tooling callers do not provide a simulation and retain the fresh-instance path.
-	_sim = options.get("simulation", null)
+	_sim = options.simulation
 	if _sim == null:
 		_sim = Simulation.new()
 		# `--capture-pcap <path>` (LaunchFlags) records this process's datagrams.
@@ -91,33 +95,28 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	_sim.set_frame_stats(_frame_stats)
 	_has_trace_stats_sampling = _sim != null
 	_sync_runtime_profiling()
-	var mission_path := String(options.get(
-			"debug_mission_file", options.get("mission_file", "")))
-	_mission_file = mission_path.replace("\\", "/").get_file()
-	_mission_name = String(options.get(
-			"debug_mission_name", options.get("mission_name", "")))
+	_mission_file = options.mission_file.replace("\\", "/").get_file()
+	_mission_name = options.mission_name
 	if _mission_name.is_empty() and mission != null:
 		_mission_name = String(mission.get_mission_name()).strip_edges()
 	if _mission_name.is_empty() and not _mission_file.is_empty():
 		_mission_name = _mission_file.get_file().get_basename()
 
-	if options.has("loco_scale"):
-		_sim.set_loco_scale(int(options["loco_scale"]))
 	# The listen host stamps its own type-2 connection during role bring-up, so
 	# its two per-side character selections must already be present here. The
 	# same profile is what a joiner uploads through ClientAuth.
 	# [orig: apply_session_settings_to_globals @0x551500;
 	#  Server_PlayerAdd @0x51CBC0 -> packed id @0x51D0B1]
-	if options.has("local_character_profile"):
-		_sim.set_local_character_profile(options["local_character_profile"])
+	if not options.local_character_profile.is_empty():
+		_sim.set_local_character_profile(options.local_character_profile)
 	# P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	# load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	# sole live runtime owner (ADR 0025). Isolated tests may instantiate this same
 	# seam, but ONED does not. A co-op LAN host additionally binds a real UDP
 	# socket; a joiner is the non-authority client.
-	var playable := bool(options.get("playable", false))
-	var join_target: JoinTarget = options.get("join_target")
-	var host_session: HostSessionConfig = options.get("host_session")
+	var playable := options.playable
+	var join_target: JoinTarget = options.join_target
+	var host_session: HostSessionConfig = options.host_session
 	var is_joiner := join_target != null or _sim.is_joiner()
 	if is_joiner:
 		# Co-op LAN JOINER (a non-authority client): dial the host and run the witnessed
@@ -127,10 +126,10 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		# screen was up; do not replace its connection, restart its handshake, or
 		# reload charattr after ordered S2C 0x41 mutations have already landed.
 		var needs_join_connection := not _sim.is_joiner()
-		if needs_join_connection and options.get("resource_root") != null:
-			_sim.load_charattr_challenge(options["resource_root"])
-		if needs_join_connection and options.has("join_character_profile"):
-			_sim.set_join_character_profile(options["join_character_profile"])
+		if needs_join_connection and options.resource_root != null:
+			_sim.load_charattr_challenge(options.resource_root)
+		if needs_join_connection and not options.join_character_profile.is_empty():
+			_sim.set_join_character_profile(options.join_character_profile)
 		if needs_join_connection and not join_target.integrity_profile.is_empty() and not \
 				_sim.set_join_integrity_profile(join_target.integrity_profile):
 			push_warning("MissionPresentation: unknown join integrity profile '%s'." % \
@@ -146,9 +145,8 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 				join_target.host_ip, join_target.port])
 		# The JOIN VERSIONCRCSTRING checksum reads the loose
 		# expansion/<name>/version.txt under the install root (D-NET-166).
-		var join_resource_root: ResourceRoot = options.get("resource_root")
-		if needs_join_connection and join_resource_root != null:
-			_sim.set_join_expansion_version_root(join_resource_root.get_root_dir())
+		if needs_join_connection and options.resource_root != null:
+			_sim.set_join_expansion_version_root(options.resource_root.get_root_dir())
 	elif host_session != null:
 		# Co-op LAN HOST: encode the typed session request at the FFI boundary (ADR 0017)
 		# and stamp the mission-derived identity the session advertises on top. bind_port
@@ -161,16 +159,15 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 			if mission != null:
 				mission_mode = int(mission.get_game_mode())
 			session_options["gametype"] = HostSessionConfig.game_type_for_mission_mode(mission_mode)
-		var mission_name := String(options.get("mission_name", "")).strip_edges()
+		var mission_name := options.mission_name.strip_edges()
 		if mission_name.is_empty() and mission != null:
 			mission_name = String(mission.get_mission_name()).strip_edges()
-		var mission_file := String(options.get("mission_file", ""))
-		if mission_name.is_empty() and not mission_file.is_empty():
-			mission_name = mission_file.get_basename()
-		if not mission_file.is_empty():
-			session_options["mission_file"] = mission_file
-		if options.has("spawn_names"):
-			session_options["spawn_names"] = options["spawn_names"]
+		if mission_name.is_empty() and not options.mission_file.is_empty():
+			mission_name = options.mission_file.get_basename()
+		if not options.mission_file.is_empty():
+			session_options["mission_file"] = options.mission_file
+		if not options.spawn_names.is_empty():
+			session_options["spawn_names"] = Array(options.spawn_names)
 		if not mission_name.is_empty():
 			session_options["mission_name"] = mission_name
 			if Array(session_options.get("spawn_names", [])).is_empty():
@@ -179,16 +176,15 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		# CRC'd from the loose expansion/<name>/version.txt under the install root;
 		# the join gate compares it against each joiner's VERSIONCRCSTRING while an
 		# expansion is active (D-NET-166).
-		var session_resource_root: ResourceRoot = options.get("resource_root")
-		if session_resource_root != null:
-			session_options["game_root"] = session_resource_root.get_root_dir()
+		if options.resource_root != null:
+			session_options["game_root"] = options.resource_root.get_root_dir()
 		_sim.configure_host_session(session_options)
 		# Retail builds the active game-type score table, then overlays the loose
 		# VERSION 40 score.ini before answering C2S 0x2D with S2C 0x58. This
 		# caller is explicitly loose-first even in a packed runtime: retail opens
 		# score.ini from the game directory rather than resolving it from a PFF.
-		if session_resource_root != null:
-			var score_ini_bytes := session_resource_root.read_file(
+		if options.resource_root != null:
+			var score_ini_bytes := options.resource_root.read_file(
 					"score.ini", ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 			if not score_ini_bytes.is_empty() and not _sim.set_score_config_data(score_ini_bytes):
 				push_warning("MissionPresentation: rejected score.ini; session status uses zero score values.")
@@ -213,14 +209,14 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# are gone). Role bring-up ran above; presentation composition follows.
 	var boot_err := int(_sim.boot_mission(
 			mission,
-			options.get("resource_root"),
-			options.get("item_db"),
-			options.get("terrain"),
-			options.get("terrain_til", PackedByteArray()),
-			String(options.get("wac_basename", "")),
-			String(options.get("infantry_adm", "")),
+			options.resource_root,
+			options.item_db,
+			options.terrain,
+			options.terrain_til,
+			options.wac_basename,
+			options.infantry_adm,
 			_mission_file.get_file().get_basename(),
-			playable or bool(options.get("player", false))))
+			playable))
 	if boot_err != OK:
 		_setup_error = ERR_CANT_OPEN
 		_sim.free()  # Simulation is a Node (not RefCounted); free the orphan on load failure
@@ -236,7 +232,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# This MissionPresentation node itself IS in the tree — GameWorld adds it and
 	# drives advance_session_frame() explicitly (ADR 0025: the game shell is the only live runtime owner).
 	_index = EntityIndex.new()
-	var registry_placer: MissionObjectPlacer = options.get("placer")
+	var registry_placer: MissionObjectPlacer = options.placer
 	_index.build(registry_placer.placed_entity_records if registry_placer != null else [],
 			mission.get_area_triggers() if mission != null else [])
 	# The registry present drives whichever authored mission nodes actually exist. A
@@ -246,14 +242,19 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# Complete-BMS/debug joins still retain authored nodes and the ordinary defer identity.
 	_present = PresentApplier.new()
 	_present.setup(_sim, _index, registry_placer)
-	_apply_present_options(_present, options.get("present_options", {}))
+	# The shell's shared occlusion/visibility maps (shared BY REFERENCE: GameWorld
+	# mutates the hidden set in place; the release lands on the sim's current
+	# intent so neither visibility writer fights the other). Output channels keep
+	# the applier's native OUTPUT_ALL default.
+	_present.set_shared_visibility_maps(
+			options.occlusion_hidden_ids, options.present_visibility)
 	# Co-op renders decoded remote rows WIRE-DIRECT. On a host that principally covers
 	# dynamically admitted players; on a header-only joiner it covers every remote row,
 	# because none has an authored placed node. Complete-BMS/debug roles still defer any
 	# row resolved by _index so MissionPresentPass and WirePresentPass never double-render.
 	var full_wire_present := is_joiner or _sim.is_host_listening()
 	var sp_attachment_present := (
-			not full_wire_present and options.get("placer") != null)
+			not full_wire_present and options.placer != null)
 	if full_wire_present or sp_attachment_present:
 		_wire_present = WirePresentPass.new()
 		# A retail network join has no local BMS identity table. Pools 1-3 are
@@ -264,7 +265,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		var wire_defer_index: EntityIndex = _index
 		if mission != null and mission.is_wire_header_only():
 			wire_defer_index = null
-		_wire_present.setup(_sim, options.get("placer"), container,
+		_wire_present.setup(_sim, options.placer, container,
 				wire_defer_index)
 		_wire_present.set_synthetic_origin_only(sp_attachment_present)
 		simulation_restarted.connect(
@@ -275,19 +276,19 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# this queue too. FirePresentPass filters the locally predicted round by
 	# is_local_player; the first-person action slot remains its sole presenter.
 	# [orig: remote tag-2 receive -> RoundData_SpawnRound; net-re §5.60]
-	if options.has("fire_audio"):
+	if not options.fire_audio.is_null():
 		_fire_present = FirePresentPass.new()
 		# The muzzle anchor for retail's adm-arm fire effect. Bound to the WIRE pass
 		# (built just above) because that pass owns the per-handle held-weapon node the
 		# effect spawns at; an absent wire pass simply leaves the Callable invalid and
 		# the fire pass keeps the wire position, which is the pre-existing behaviour.
 		_fire_present.setup(_sim, container,
-			options.get("fire_audio", Callable()),
-			options.get("fire_fx", Callable()),
-			options.get("fire_listener", Callable()),
+			options.fire_audio,
+			options.fire_fx,
+			options.fire_listener,
 			_wire_present.muzzle_world_for if _wire_present != null
 					else Callable(),
-			options.get("muzzle_light", Callable()))
+			options.muzzle_light)
 		# The sim's fire-sound distance gate reads the camera listener at fire
 		# time on the logic clock (world/fire_sound.h); GameFramePipeline stamps
 		# it into each typed session frame (MissionFrameInput.set_camera_sample).
@@ -302,14 +303,14 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# from its own pools).
 	# [orig: NapiNPClientMsg_EntityDeath @0x42EB50 -> deathCallback(entity,4,0);
 	#  Entity_UpdateAllEntities @0x4c2100 drains unconditionally on every peer]
-	if options.has("fire_audio"):
+	if not options.fire_audio.is_null():
 		_destruction_present = DestructionPresentPass.new()
-		_destruction_present.setup(_sim, container, _index, options.get("placer"),
-			options.get("item_db"), options.get("effect_anchors"),
-			options.get("fire_audio", Callable()),
-			options.get("fire_fx", Callable()),
+		_destruction_present.setup(_sim, container, _index, options.placer,
+			options.item_db, options.effect_anchors,
+			options.fire_audio,
+			options.fire_fx,
 			_wire_present,
-			options.get("death_light", Callable()))
+			options.death_light)
 		simulation_restarted.connect(
 				Callable(_destruction_present, 'reset_runtime_state'))
 	# The throwable-presentation pass: item models for flying grenades/satchels
@@ -319,9 +320,9 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# unported 0x59/0x12 seam; enabling this read-only pass does not invent it.
 	# (world-wac-ai-re §27; the sim stays render-free).
 	_throwable_present = ThrowablePresentPass.new()
-	_throwable_present.setup(_sim, container, options.get("placer"),
-		options.get("item_db"),
-		options.get("fire_fx", Callable()), options.get("effect_anchors"))
+	_throwable_present.setup(_sim, container, options.placer,
+		options.item_db,
+		options.fire_fx, options.effect_anchors)
 	simulation_restarted.connect(
 		Callable(_throwable_present, 'reset_runtime_state'))
 	# The impact-scar presentation pass (world-wac-ai-re §24.9): the sim's scar
@@ -333,9 +334,9 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# renderer's cull and vertex colour read (fire_listener IS the camera).
 	_scar_present = ScarPresentPass.new()
 	_scar_present.setup(_sim, container, _index, _wire_present,
-		options.get("resource_root"),
-		options.get("fire_listener", Callable()),
-		options.get("environment_node", Callable()))
+		options.resource_root,
+		options.fire_listener,
+		options.environment_node)
 	simulation_restarted.connect(
 		Callable(_scar_present, 'reset_runtime_state'))
 	# ADR 0035: the native session owns lifecycle/cadence and invokes one
@@ -345,28 +346,6 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
 	return _sim.get_entity_count()
-
-
-# Translate the composition's present_options bundle onto the native applier:
-# the four drive_* channel flags plus the shell's shared occlusion/visibility
-# maps (shared BY REFERENCE: GameWorld mutates the hidden set in place; the
-# release lands on the sim's current intent so neither visibility writer
-# fights the other).
-static func _apply_present_options(applier: PresentApplier,
-		options: Dictionary) -> void:
-	var channels := int(PresentApplier.OUTPUT_ALL)
-	if not bool(options.get("drive_transform", true)):
-		channels &= ~PresentApplier.OUTPUT_TRANSFORM
-	if not bool(options.get("drive_part_anim", true)):
-		channels &= ~PresentApplier.OUTPUT_PART_ANIM
-	if not bool(options.get("drive_visibility", true)):
-		channels &= ~PresentApplier.OUTPUT_VISIBILITY
-	if not bool(options.get("drive_body_anim", true)):
-		channels &= ~PresentApplier.OUTPUT_BODY_ANIM
-	applier.set_output_channels(channels)
-	applier.set_shared_visibility_maps(
-			options.get("occlusion_hidden_ids", {}),
-			options.get("present_visibility", {}))
 
 
 func get_setup_error() -> int:

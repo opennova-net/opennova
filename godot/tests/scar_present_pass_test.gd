@@ -408,7 +408,7 @@ func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
 	add_child_autofree(boot_container)
 	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
-	rt.setup(mission, boot_container, {})
+	rt.setup(mission, boot_container)
 	var sim := rt.get_sim()
 	assert_not_null(sim, "the runtime boots a real simulation over the mission")
 	if sim == null:

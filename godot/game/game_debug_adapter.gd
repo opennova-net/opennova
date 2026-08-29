@@ -12,51 +12,19 @@ const MCP_ENTITY_LIMIT_MAX := 128
 
 var _session := DebugSession.new()
 var _service: GameMcpService = null
-var _runtime_source: Callable
-var _world_source: Callable
-var _player_source: Callable
-var _shell_state_source: Callable
-var _world_loading_source: Callable
-var _dev_tools_open_source: Callable
-var _resume_action: Callable
-var _return_to_menu_action: Callable
-var _quit_action: Callable
-var _menu_shell_source: Callable
-var _open_ingame_menu_action: Callable
-var _open_armory_action: Callable
-var _render_capture_begin_action: Callable
-var _render_capture_end_action: Callable
-var _hud_hidden_capture_begin_action: Callable
-var _hud_hidden_capture_end_action: Callable
-var _hud_hidden_capture_witness_source: Callable
-var _probe_seams: ProbeShellSeams = null
+# The one typed record of shell seams (GameShellSeams): suppliers, state
+# reads, action legs, and capture presentation, all resolved live per call.
+var _seams: GameShellSeams = null
 
 
-func configure(
-		runtime_source: Callable,
-		world_source: Callable,
-		player_source: Callable,
-		shell_state_source: Callable,
-		world_loading_source: Callable,
-		dev_tools_open_source: Callable,
-		resume_action: Callable,
-		return_to_menu_action: Callable,
-		quit_action: Callable) -> void:
-	_runtime_source = runtime_source
-	_world_source = world_source
-	_player_source = player_source
-	_shell_state_source = shell_state_source
-	_world_loading_source = world_loading_source
-	_dev_tools_open_source = dev_tools_open_source
-	_resume_action = resume_action
-	_return_to_menu_action = return_to_menu_action
-	_quit_action = quit_action
+func configure(seams: GameShellSeams) -> void:
+	_seams = seams
 	DebugCatalog.install(_session)
 	DebugCatalog.bind_runtime_targets(
 			_session,
-			_runtime_source,
-			_world_source,
-			_player_source,
+			seams.runtime_source,
+			seams.world_source,
+			seams.presenter_source,
 			_current_viewport,
 			_current_scene_tree,
 			func(): return self)
@@ -83,14 +51,10 @@ func get_debug_session() -> DebugSession:
 	return _session
 
 
-## Additive seam: the shell's live suppliers and mission verbs the probe
-## runner drives (ADR 0041).
-func set_probe_seams(seams: ProbeShellSeams) -> void:
-	_probe_seams = seams
-
-
-func get_probe_seams() -> ProbeShellSeams:
-	return _probe_seams
+## The same record configure() adopted; the probe runner drives its suppliers
+## and mission verbs (ADR 0041).
+func get_shell_seams() -> GameShellSeams:
+	return _seams
 
 
 ## Curated transport snapshot. Dictionaries begin here because this is the
@@ -118,12 +82,12 @@ func get_mcp_game_state() -> Variant:
 		player["weapon_state"] = sim.get_local_player_weapon_state()
 	return {
 		"shell": {
-			"state": String(_shell_state_source.call()),
-			"world_loading": bool(_world_loading_source.call()),
+			"state": String(_seams.shell_state_source.call()),
+			"world_loading": bool(_seams.world_loading_source.call()),
 			"world_loaded": world != null and world.is_loaded(),
 			"mission_file": world.get_loaded_mission_file() \
 					if world != null else "",
-			"dev_tools_open": bool(_dev_tools_open_source.call()),
+			"dev_tools_open": bool(_seams.dev_tools_open_source.call()),
 		},
 		"runtime": runtime_state,
 		"player": player,
@@ -145,7 +109,7 @@ func get_mcp_render_diagnostics() -> Variant:
 	var snapshot: GameRenderDiagnostics = world.get_render_diagnostics(camera)
 	var value := snapshot.to_json_value()
 	value["shell"] = {
-		"state": String(_shell_state_source.call()),
+		"state": String(_seams.shell_state_source.call()),
 		"world_loading": _is_world_loading(),
 		"gameplay_camera_available": camera != null and camera.is_current(),
 	}
@@ -186,12 +150,12 @@ func capture_mcp_render_bundle(
 	var diagnostics_source := get_mcp_render_diagnostics
 	match presentation_mode:
 		"world_only":
-			presentation_begin = _render_capture_begin_action
-			presentation_finish = _render_capture_end_action
+			presentation_begin = _seams.render_capture_begin_action
+			presentation_finish = _seams.render_capture_end_action
 		"hud_hidden":
-			presentation_begin = _hud_hidden_capture_begin_action
-			presentation_finish = _hud_hidden_capture_end_action
-			if not _hud_hidden_capture_witness_source.is_valid():
+			presentation_begin = _seams.hud_hidden_capture_begin_action
+			presentation_finish = _seams.hud_hidden_capture_end_action
+			if not _seams.hud_hidden_capture_witness_source.is_valid():
 				return {"error": "HUD-hidden render capture witness is unavailable in this game shell."}
 			diagnostics_source = func() -> Variant:
 				var diagnostics_value: Variant = get_mcp_render_diagnostics()
@@ -267,49 +231,8 @@ func get_mcp_game_entity(index: int) -> Variant:
 	return result
 
 
-## Narrow transport used by GameMcpTools. Pause and step report the engine
-## session's own refusal for multiplayer roles (the network pump must keep
-## running); the adapter adds no shell-side role gate.
-# Additive seam (keeps configure()'s arity stable): the menu shell the
-# game_menu tool drives.
-func set_menu_shell_source(source: Callable) -> void:
-	_menu_shell_source = source
-
-
-# Additive seam (same arity contract): the in-world screen verbs game_control
-# routes — the ESC pause overlay and the armory's direct-open. Each returns the
-# shell's Error verdict; unset callables report the verb unavailable.
-func set_ingame_screen_actions(
-		open_ingame_menu: Callable,
-		open_armory: Callable) -> void:
-	_open_ingame_menu_action = open_ingame_menu
-	_open_armory_action = open_armory
-
-
-## Additive shell-owned presentation seam for `world_only` captures. The begin
-## action returns Error after snapshotting/hiding presentation; end restores the
-## exact prior state after the async readback, including failure/cancellation.
-func set_render_capture_actions(
-		begin_action: Callable,
-		end_action: Callable) -> void:
-	_render_capture_begin_action = begin_action
-	_render_capture_end_action = end_action
-
-
-## Screenshot-scoped counterpart to world-only presentation. The witness is
-## sampled inside the correlated completed-draw callback while the transaction
-## is active; begin/finish never span settle frames or bundle persistence.
-func set_hud_hidden_capture_actions(
-		begin_action: Callable,
-		end_action: Callable,
-		witness_source: Callable) -> void:
-	_hud_hidden_capture_begin_action = begin_action
-	_hud_hidden_capture_end_action = end_action
-	_hud_hidden_capture_witness_source = witness_source
-
-
 func _hud_hidden_capture_witness_json() -> Dictionary:
-	var value: Variant = _hud_hidden_capture_witness_source.call()
+	var value: Variant = _seams.hud_hidden_capture_witness_source.call()
 	if not (value is HudHiddenCaptureWitness):
 		return {}
 	var witness := value as HudHiddenCaptureWitness
@@ -326,9 +249,9 @@ func _hud_hidden_capture_witness_json() -> Dictionary:
 
 
 func _menu_shell() -> MenuShell:
-	if _menu_shell_source.is_null():
+	if _seams == null or _seams.menu_shell_source.is_null():
 		return null
-	return _menu_shell_source.call() as MenuShell
+	return _seams.menu_shell_source.call() as MenuShell
 
 
 func mcp_game_menu(args: Dictionary) -> Variant:
@@ -385,6 +308,9 @@ func mcp_game_menu(args: Dictionary) -> Variant:
 	return {"error": "unknown game_menu op '%s'" % op}
 
 
+## Narrow transport used by GameMcpTools. Pause and step report the engine
+## session's own refusal for multiplayer roles (the network pump must keep
+## running); the adapter adds no shell-side role gate.
 func mcp_game_control(action: String) -> Error:
 	var world := _current_world()
 	var runtime: Variant = _current_runtime()
@@ -401,30 +327,30 @@ func mcp_game_control(action: String) -> Error:
 			runtime.play()
 			# The armory rides the same resume leg as the pause overlay
 			# (_on_resume closes whichever is up and hands play back).
-			if String(_shell_state_source.call()) in ["paused", "armory"]:
-				_resume_action.call()
+			if String(_seams.shell_state_source.call()) in ["paused", "armory"]:
+				_seams.resume_action.call()
 		"step":
 			# Same engine verdict as "pause": a net-role session declines the
 			# manual step natively.
 			if runtime == null or not runtime.step_once():
 				return ERR_UNAVAILABLE
 		"open_ingame_menu":
-			if not _open_ingame_menu_action.is_valid():
+			if not _seams.open_ingame_menu_action.is_valid():
 				return ERR_UNAVAILABLE
-			var menu_err: Error = _open_ingame_menu_action.call()
+			var menu_err: Error = _seams.open_ingame_menu_action.call()
 			if menu_err != OK:
 				return menu_err
 		"open_armory":
-			if not _open_armory_action.is_valid():
+			if not _seams.open_armory_action.is_valid():
 				return ERR_UNAVAILABLE
-			var armory_err: Error = _open_armory_action.call()
+			var armory_err: Error = _seams.open_armory_action.call()
 			if armory_err != OK:
 				return armory_err
 		"return_to_menu":
 			if world == null or not world.is_loaded() \
-					or bool(_world_loading_source.call()):
+					or bool(_seams.world_loading_source.call()):
 				return ERR_UNAVAILABLE
-			_return_to_menu_action.call()
+			_seams.return_to_menu_action.call()
 		"quit":
 			call_deferred("_deferred_quit")
 		_:
@@ -558,17 +484,17 @@ func _audio_bus_state() -> Array:
 
 
 func _current_world() -> GameWorld:
-	var value: Variant = _world_source.call()
+	var value: Variant = _seams.world_source.call()
 	return value as GameWorld
 
 
 func _current_runtime() -> Variant:
-	return _runtime_source.call()
+	return _seams.runtime_source.call()
 
 
 func _is_world_loading() -> bool:
-	return _world_loading_source.is_valid() \
-			and bool(_world_loading_source.call())
+	return _seams != null and _seams.world_loading_source.is_valid() \
+			and bool(_seams.world_loading_source.call())
 
 
 func _current_viewport() -> Viewport:
@@ -580,4 +506,4 @@ func _current_scene_tree() -> SceneTree:
 
 
 func _deferred_quit() -> void:
-	_quit_action.call()
+	_seams.quit_action.call()

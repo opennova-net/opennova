@@ -43,7 +43,7 @@ func get_debug_session() -> DebugSession:
 	return null
 
 
-## The shell seams the probe runner drives (ProbeShellSeams); null in a
+## The shell seams the probe runner drives (GameShellSeams); null in a
 ## shell that runs no probes.
-func get_probe_seams() -> ProbeShellSeams:
+func get_shell_seams() -> GameShellSeams:
 	return null

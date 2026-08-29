@@ -23,7 +23,7 @@ const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 #
 # The two shared dictionaries below are created ONCE here and NEVER
 # reassigned: GameWorld._start_runtime hands these SAME instances by reference
-# into present_options (PresentApplier stores them; the shared-reference
+# on MissionSetupOptions (PresentApplier stores them; the shared-reference
 # contract is pinned by mission_present_pass_test). Unload clears IN PLACE.
 
 # The GameWorld whose render nodes this pass drives — a direct reference,

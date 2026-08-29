@@ -2476,19 +2476,18 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	# A mission with no AI still ticks (BMS events / WAC); only a promote failure leaves a null sim.
 	# Hand the loaded terrain to the runtime so promoted AI grounds on it (entities hug the terrain),
 	# and the resource root so soldiers resolve their .adm/.bad root-motion clips.
-	var opts := {
-		"terrain": _terrain_data,
-		"resource_root": _resource_root,
-		"wac_basename": bms_name.get_basename(),
-		"mission_file": mission_file,
-		"mission_name": mission_label,
-		"spawn_names": [mission_label],
-		# The placer's item database (item_id -> anim_def), so each soldier grounds off its own
-		# model's .adm clip set (per-entity capsule_bottom), not the shared default. [D-INF-6]
-		"item_db": _placer.get_item_db() if _placer != null else null,
-	}
+	var opts := MissionSetupOptions.new()
+	opts.terrain = _terrain_data
+	opts.resource_root = _resource_root
+	opts.wac_basename = bms_name.get_basename()
+	opts.mission_file = mission_file
+	opts.mission_name = mission_label
+	opts.spawn_names = PackedStringArray([mission_label])
+	# The placer's item database (item_id -> anim_def), so each soldier grounds off its own
+	# model's .adm clip set (per-entity capsule_bottom), not the shared default. [D-INF-6]
+	opts.item_db = _placer.get_item_db() if _placer != null else null
 	if not _local_character_profile.is_empty():
-		opts["local_character_profile"] = _local_character_profile.duplicate(true)
+		opts.local_character_profile = _local_character_profile.duplicate(true)
 	# Serve-and-play hosts run the listen server AND spawn their own player (ADR 0011/0012, net-re
 	# §5.2b/§5.38). A DEDICATED host (config "dedicated") serves WITHOUT a local player — same listen
 	# server, just no own-player spawn; main_game skips the HUD when there is no local player. Diagnostic
@@ -2499,48 +2498,46 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	# [orig: Terrain_LoadTileInfoFile @ 0x60a740;
 	# serialize_terrain_tiles @ 0x6080f0]. Reuse the payload parsed before terrain build.
 	if not _mission_til_bytes.is_empty():
-		opts["terrain_til"] = _mission_til_bytes
-	opts["playable"] = _playable and not _net_drive.pending_dedicated()
-	# Spread the staged net-session request (typed record + derived staging +
-	# the surrendered preload sim, consumed once per load) into the runtime's
-	# options — MissionPresentation alone adopts opts["simulation"] (ADR 0011/0012).
+		opts.terrain_til = _mission_til_bytes
+	opts.playable = _playable and not _net_drive.pending_dedicated()
+	# Stamp the staged net-session request (typed record + derived staging +
+	# the surrendered preload sim, consumed once per load) onto the runtime's
+	# options — MissionPresentation alone adopts opts.simulation (ADR 0011/0012).
 	_net_drive.stage_runtime_options(opts)
 	# The placer + environment node let the wire present pass resolve + light its
 	# remote-entity avatars (build_player_animated_model): every remote row on a
 	# joiner, and the admitted players' synthetic-origin rows on the host.
-	opts["placer"] = _placer
+	opts.placer = _placer
 	# The occlusion-claim set the present pass consults (two-bit visibility
 	# ownership; see OcclusionFramePass._set_occlusion_hidden). Shared by
 	# reference: the pass created these dictionaries once and mutates them in
 	# place across the mission's occlusion frames — hand the SAME instances.
-	opts["present_options"] = {
-		"occlusion_hidden_ids": _occlusion.occlusion_hidden_ids(),
-		"present_visibility": _occlusion.present_visibility(),
-	}
+	opts.occlusion_hidden_ids = _occlusion.occlusion_hidden_ids()
+	opts.present_visibility = _occlusion.present_visibility()
 	# The fire present pass's providers (AI/remote fire sound + muzzle + tracers): audio
 	# and effect world resolve lazily (mission audio is set up after the runtime), the
 	# listener is the same camera position the audio render pass ticks with.
-	opts["fire_audio"] = get_mission_audio
-	opts["fire_fx"] = get_effect_world
-	opts["fire_listener"] = _fire_listener_position
+	opts.fire_audio = get_mission_audio
+	opts.fire_fx = get_effect_world
+	opts.fire_listener = _fire_listener_position
 	# The destruction/throwable present passes anchor their wreck/piece/move
 	# effect groups through the ItemEffectDirector's owner-anchor registry
 	# (the typed seam; GameWorld's register_effect_anchor delegates to the
 	# same instance).
-	opts["effect_anchors"] = _item_fx
+	opts.effect_anchors = _item_fx
 	# The scar present pass reads the fog distance + the combined terrain light
 	# off the live environment node each present frame (world-wac-ai-re §24.9).
-	opts["environment_node"] = get_environment_node
+	opts.environment_node = get_environment_node
 	# The dynamic light-pool routes (renderer/light_scene.h witness map): the
 	# MF_Light muzzle glow per presented fire, the death flash per husk death.
 	if _light_director != null:
-		opts["muzzle_light"] = _light_director.on_muzzle_fire
-		opts["death_light"] = _light_director.on_death_light
+		opts.muzzle_light = _light_director.on_muzzle_fire
+		opts.death_light = _light_director.on_death_light
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		var setup_error := int(_runtime.get_setup_error())
-		var lan_bind_failure := String(opts.get("net_transport", "")) == "lan"
-		var bind_port := int(opts.get("bind_port", HostSessionConfig.DEFAULT_LAN_PORT))
+		var lan_bind_failure := opts.net_transport == "lan"
+		var bind_port := opts.bind_port
 		# Free before emitting: a load_failed handler may synchronously tear
 		# the world down (the game shell returns to the menu via unload()),
 		# and unload() frees _runtime — emitting first turned this leg into a
