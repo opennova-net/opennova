@@ -35,6 +35,5 @@ bool load_particles_from_buffer(const char *data, std::size_t size, ParticleFile
 // LF line endings (engine uses bare "\n" in fprintf format strings; on Windows
 // stdio in text mode the OS may translate to CRLF).
 bool save_particles(std::ostream &output, const ParticleFile &file, std::string &error);
-bool save_particles_to_file(const std::string &path, const ParticleFile &file, std::string &error);
 
 } // namespace opennova::particle

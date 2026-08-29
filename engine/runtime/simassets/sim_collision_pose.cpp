@@ -36,16 +36,6 @@ constexpr int kRightHandBoneIndex = 16;
 constexpr double kBamToRadians = 6.28318530717958647692 / 4294967296.0;
 constexpr double kHalfPi = 1.57079632679489661923;
 
-// anim-state id -> the .adm clip key ("anim_" + the retail state name).
-// [orig: g_animStateNameTable @0x8135F0]
-std::string infantry_anim_key(int state) {
-	if (state < 0 || state >= opennova::world::kInfantryAnimStateCount)
-		return std::string();
-	const char *name = opennova::world::kInfantryAnimNames[state];
-	if (name == nullptr || name[0] == '\0') return std::string();
-	return std::string("anim_") + name;
-}
-
 anim::Quat quat_axis_x(double angle) {
 	const double h = angle * 0.5;
 	return anim::Quat{static_cast<float>(std::cos(h)),
@@ -395,7 +385,7 @@ bool SimCollisionPoseProvider::eval_entity_pose(world::World &world,
 		return rig->has_clip(reset_key) ? reset_key : key;
 	};
 	const std::string primary_key =
-			resolve_primary_key(infantry_anim_key(r_ai->inf.anim_state));
+			resolve_primary_key(opennova::world::infantry_anim_key(r_ai->inf.anim_state));
 	if (primary_key.empty()) return false;
 	const float primary_fps = rig->clip_fps(primary_key, 0);
 	const double primary_seconds = primary_fps > 0.0f
@@ -407,7 +397,7 @@ bool SimCollisionPoseProvider::eval_entity_pose(world::World &world,
 	const bool primary_blend = r_ai->inf.body_blend_active();
 	if (primary_blend) {
 		source_key = resolve_primary_key(
-				infantry_anim_key(r_ai->inf.anim_prev));
+				opennova::world::infantry_anim_key(r_ai->inf.anim_prev));
 		const float source_fps = rig->clip_fps(source_key, 0);
 		if (source_fps > 0.0f)
 			source_seconds =
@@ -437,7 +427,7 @@ bool SimCollisionPoseProvider::eval_entity_pose(world::World &world,
 			world::infantry_weapon_channel_visible(
 					r_ai->inf, weapon_active,
 					mount_blocks_weapon_channel(*r_entity))) {
-		weapon_key = infantry_anim_key(r_ai->inf.wpn_state);
+		weapon_key = opennova::world::infantry_anim_key(r_ai->inf.wpn_state);
 		weapon_variant = r_ai->inf.wpn_variant;
 		const float weapon_fps = rig->clip_fps(weapon_key, weapon_variant);
 		if (weapon_fps > 0.0f)
@@ -449,7 +439,7 @@ bool SimCollisionPoseProvider::eval_entity_pose(world::World &world,
 		// exactly as it does into presentation, so hitboxes and the drawn body
 		// agree through the window [orig: the shared AnimMap_UpdateEntity re-init].
 		if (r_ai->inf.weapon_blend_active()) {
-			weapon_prev_key = infantry_anim_key(r_ai->inf.wpn_prev);
+			weapon_prev_key = opennova::world::infantry_anim_key(r_ai->inf.wpn_prev);
 			weapon_prev_variant = r_ai->inf.wpn_prev_variant;
 			weapon_blend = r_ai->inf.wpn_blend_weight;
 			const float prev_fps = rig->clip_fps(weapon_prev_key, weapon_prev_variant);

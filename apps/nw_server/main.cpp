@@ -9,8 +9,9 @@
 // crypto, framing, cadence, and mission state live in the libs; this binary
 // owns the flag surface, the socket, and the wall-clock pacing only.
 //
-// It NEVER links godot-cpp (godot-cpp is a separate SCons build, not in this CMake graph). Separate from
-// the matchmaking apps/novaworld_server (gate/lobby/HTTP) — this is the authoritative game server.
+// It NEVER links godot-cpp (godot-cpp is add_subdirectory'd only from the GDExtension's own
+// CMake root). Separate from the matchmaking apps/novaworld_server (gate/lobby/HTTP) — this is
+// the authoritative game server.
 
 #include <base/io/log.h>
 #include <base/resource_index/resource_index.h>
@@ -211,61 +212,16 @@ void app_log_sink(opennova::io::LogLevel level, const char *msg) {
 	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n", msg);
 }
 
-// A fixed-width BMS header slot (environment[16]) as a string.
-std::string fixed_string(const char *data, size_t size) {
-	size_t n = 0;
-	while (n < size && data[n] != '\0') ++n;
-	return std::string(data, n);
-}
-
 // The mission's .cpt/.trn(+charmap) height field, built into the kernel's own
 // terrain field store BEFORE boot — the embedder-side format-typed leg on the
-// far side of the ADR 0020 seam, exactly the retail-mission rig's load_terrain.
-// The raw .til bytes feed the S2C 0x45 terrain-tile load a wire joiner streams
-// (net-re §5.37); absent, the tile stream is skipped.
+// far side of the ADR 0020 seam, through the engine's one loader. The raw .til
+// bytes feed the S2C 0x45 terrain-tile load a wire joiner streams (net-re
+// §5.37); absent, the tile stream is skipped.
 bool load_terrain(opennova::mission::MissionKernel &kernel,
 		const opennova::ResourceIndex &index,
 		std::vector<uint8_t> &til_bytes, std::string &error) {
-	using namespace opennova;
-	const std::string tname = kernel.mission.get_terrain();
-	if (tname.empty()) {
-		error = "the mission names no terrain";
-		return false;
-	}
-	std::vector<uint8_t> cpt_bytes, trn_bytes;
-	if (!index.read_file(tname + ".cpt", cpt_bytes) ||
-			!index.read_file(tname + ".trn", trn_bytes)) {
-		error = tname + ".cpt/.trn are not under the resource root";
-		return false;
-	}
-	std::string terr_err;
-	CptFile cpt;
-	if (!load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, terr_err)) {
-		error = tname + ".cpt: " + terr_err;
-		return false;
-	}
-	TrnConfig trn;
-	std::string raw(reinterpret_cast<const char *>(trn_bytes.data()), trn_bytes.size());
-	std::istringstream ts(raw);
-	if (!load_trn(ts, trn, terr_err) || cpt.depth_buffer.empty()) {
-		error = tname + ".trn: " + terr_err;
-		return false;
-	}
-	// The charmap surface raster for the footstep surface pick; absent or
-	// undecodable = no surface map, the sampler's "no charmap -> surface 1" leg.
-	IndexedImage8 charmap;
-	std::vector<uint8_t> charmap_bytes;
-	if (!trn.charmap.empty() && index.read_file(trn.charmap, charmap_bytes)) {
-		std::string charmap_err;
-		if (!decode_pcx_indexed(charmap_bytes.data(), charmap_bytes.size(), charmap,
-					charmap_err))
-			charmap = IndexedImage8{};
-	}
-	terrain::terrain_field_store_build(kernel.terrain_store, cpt, trn,
-			charmap.empty() ? nullptr : charmap.indices.data(),
-			charmap.width, charmap.height);
-	(void)index.read_file(tname + ".til", til_bytes);
-	return kernel.terrain_store.valid();
+	return opennova::terrain::terrain_field_store_load(kernel.terrain_store, index,
+			kernel.mission.get_terrain(), error, &til_bytes);
 }
 
 // The dedicated host's one adapter to inmatch::Session: the portable session
@@ -281,7 +237,6 @@ public:
 
 	opennova::inmatch::TickOutcome advance_mission_tick(
 			const opennova::inmatch::TickInput &) override {
-		kernel_.world.network_env.advance_tick();
 		opennova::inmatch::listen_host::frame(kernel_, host_, socket_,
 				/*viewport_height=*/0, /*perf=*/nullptr);
 		return {opennova::inmatch::TickStatus::Ran,
@@ -365,8 +320,7 @@ int main(int argc, char **argv) {
 	// --- The authoritative T0 environment sample, published before the boot
 	//     (retail order: ENV parse + BMS overrides before Game_StartMission
 	//     snapshots the network-visible targets). ---
-	const std::string environment_name = fixed_string(
-			kernel.mission.header.environment, sizeof(kernel.mission.header.environment));
+	const std::string environment_name = kernel.mission.get_environment();
 	if (environment_name.empty() && (opt.env == nullptr || *opt.env == '\0')) {
 		std::fprintf(stderr,
 		             "nw-server: mission '%s' has no environment reference; "
@@ -418,39 +372,16 @@ int main(int argc, char **argv) {
 	host_cfg.config.max_players = 16;
 	host_cfg.config.mission_name = kernel.mission.get_mission_name();
 	host_cfg.config.mission_file = mission_path.filename().string();
-	host_cfg.config.game_type = game_type::for_mission_mode(
-			bms::selected_game_mode(kernel.mission.header.attrib_flags));
+	host_cfg.config.game_type =
+			game_type::for_mission_attribs(kernel.mission.header.attrib_flags);
 	// The harness has no host-options UI, so install the same fresh-host rule
 	// defaults the retail config path would have applied before mission start.
-	host_cfg.config.respawn_time = game_rules::kDefaultRespawnTime;
-	host_cfg.config.time_limit_minutes = game_rules::kDefaultTimeLimitMinutes;
-	host_cfg.config.replay_enabled = game_rules::kDefaultReplayEnabled;
-	host_cfg.config.max_team_lives = game_rules::kDefaultMaxTeamLives;
-	host_cfg.config.score_limit = game_rules::kDefaultScoreLimit;
-	host_cfg.config.max_score = game_rules::kDefaultMaxScore;
-	host_cfg.config.koth_delta = game_rules::kDefaultKothDelta;
-	host_cfg.config.flag_return_ticks = game_rules::kDefaultFlagReturnTicks;
-	host_cfg.config.capture_duration_seconds =
-			game_rules::kDefaultCaptureDurationSeconds;
-	host_cfg.config.capture_speed_setting =
-			game_rules::kDefaultCaptureSpeedSetting;
-	host_cfg.config.spawn_wave_time_base =
-			game_rules::kDefaultSpawnWaveTimeBase;
-	host_cfg.config.spawn_wave_time_zone =
-			game_rules::kDefaultSpawnWaveTimeZone;
-	host_cfg.config.default_spawn_requires_no_team_zone =
-			game_rules::kDefaultSpawnRequiresNoTeamZone;
-	host_cfg.config.num_teams = static_cast<uint8_t>(game_rules::kDefaultNumTeams);
-	host_cfg.config.respawn_timeout = game_rules::kDefaultRespawnTimeout;
-	host_cfg.config.start_delay = game_rules::kDefaultStartDelay;
-	host_cfg.config.destroy_buildings = game_rules::kDefaultDestroyBuildings;
-	host_cfg.config.death_messages = game_rules::kDefaultDeathMessages;
+	np::apply_fresh_host_rule_defaults(host_cfg.config);
 	// The BMS task vocabulary has no authored Flag Me bit even though retail's
 	// Game_StartMission retains its type-12 -> g_GameType 8 branch. The harness
 	// therefore accepts an explicit numeric code so every witnessed wire mode
-	// remains capturable; ordinary hosts continue to derive the mission type.
-	// [orig: AI_GetTaskTypeFromFlags @0x40DAE0;
-	// Game_StartMission @0x524360]
+	// remains capturable; ordinary hosts continue to derive the mission type
+	// (game_type::for_mission_attribs).
 	if (opt.game_type) host_cfg.config.game_type = *opt.game_type;
 	if (!game_type::is_retail_code_word(host_cfg.config.game_type)) {
 		std::fprintf(stderr,
@@ -459,8 +390,8 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 	if (opt.num_teams) {
-		if (*opt.num_teams > 0xFFu) {
-			std::fprintf(stderr, "nw-server: --num-teams must fit a uint8\n");
+		if (*opt.num_teams < 1u || *opt.num_teams > 0xFFu) {
+			std::fprintf(stderr, "nw-server: --num-teams must be 1..255\n");
 			return 2;
 		}
 		host_cfg.config.num_teams = static_cast<uint8_t>(*opt.num_teams);

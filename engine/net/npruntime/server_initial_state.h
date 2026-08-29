@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
+#include <formats/mission/bms.h>
 #include <net/npruntime/napi_np_connection.h>
 #include <net/npruntime/napi_np_server_ctx.h>
 
@@ -45,5 +48,13 @@ uint32_t build_server_config_flags(const NapiNPServerCtx &ctx);
 // 0x76 configured class-allow mask + 0x1A timestamp bodies. [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
 InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                      uint32_t now_tick = 0);
+
+// The deploy-map LOCATION labels for every type-2044 marker in spawn order:
+// the mission text's [Locations] LOCATION%03i string, else the LOCATION%03i
+// key itself, each clipped to retail's 64-byte location-name slot. Every host
+// embedder installs them at bring-up; the S2C 0x0F writer copies them onto a
+// joining client. [orig: Entity_SpawnFromBMSRecord @0x40f182-0x40f221]
+void install_mission_location_names(NapiNPServerCtx &ctx, const bms::File &mission,
+                                    const std::unordered_map<int32_t, std::string> &location_texts);
 
 } // namespace opennova::np

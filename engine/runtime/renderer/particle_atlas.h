@@ -17,8 +17,9 @@ namespace opennova::renderer {
 
 using ParticleAtlasEntryId = std::size_t;
 
-// CParticleDef_ReloadGraphicFrameTextures @ 0x5e4bb0. one_based_frame is in
-// [1, frame_count] when frame_count is greater than one.
+// The retail flipbook frame-name registrar
+// [orig: CParticleDef_ReloadGraphicFrameTextures @0x5e4bb0]. one_based_frame is
+// in [1, frame_count] when frame_count is greater than one.
 std::string retail_particle_frame_name(std::string_view authored,
 		int frame_count, int one_based_frame);
 

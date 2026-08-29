@@ -3,7 +3,7 @@
 // The game.wac / server.wac / <mission>.wac layered load: read the layers in
 // the retail order through the embedder's mounted-file source, compile them as
 // ONE program (V#/G# scope spans the layers), and install it on the WacSystem
-// [orig: WacScript_InitAndLoad]. Promoted from the retail-mission rig's
+// [orig: WacScript_InitAndLoad @0x4f91f0]. Promoted from the retail-mission rig's
 // install_wac step (ADR 0042 d3); the dedicated host (apps/nw_server) is the
 // strict-mode consumer, through KernelBootOptions::wac_strict_diagnostics.
 

@@ -1,7 +1,6 @@
 #include <formats/particle/parser.h>
 
 #include <cstdio>
-#include <fstream>
 #include <ostream>
 #include <string>
 
@@ -244,15 +243,6 @@ bool save_particles(std::ostream &output, const ParticleFile &file, std::string 
 		return false;
 	}
 	return true;
-}
-
-bool save_particles_to_file(const std::string &path, const ParticleFile &file, std::string &error) {
-	std::ofstream stream(path, std::ios::binary);
-	if (!stream) {
-		error = "Cannot open " + path;
-		return false;
-	}
-	return save_particles(stream, file, error);
 }
 
 } // namespace opennova::particle

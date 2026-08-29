@@ -144,10 +144,6 @@ const WeaponSlotState *resolve_mounted_ammo_slot(
 // [orig: Entity_DetachFromVehicle restore @0x435671-0x435687,
 //  NPC clear @0x435694-0x4356aa]
 void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle);
-// True when at least one Controller/Driver seat has a live, internally consistent
-// occupant link. Motor input only — NOT the effect-lifecycle predicate (that is the
-// primary-occupant claim above).
-bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicle);
 
 // Entity_RequestVehicleAttach snaps the requester yaw to the chosen seat before
 // authority applies the relationship. Keep the registry Entity and our split

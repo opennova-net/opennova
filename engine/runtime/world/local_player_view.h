@@ -146,8 +146,8 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w,
 void local_player_set_eye(World *world, LocalPlayerWeapon &w,
                           const float eye_mission[3], bool valid);
 // The posed head as a BODY-RELATIVE delta (head minus the skeleton origin)
-// (retail: the mounted local eye leg @0x4b6908 stores head - Position from a
-//  skeleton posed in the SAME tick).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b6908 -- the mounted local eye
+//  leg stores head - Position from a skeleton posed in the SAME tick].
 void local_player_set_eye_offset(World *world, const float offset_mission[3],
                                  bool valid);
 

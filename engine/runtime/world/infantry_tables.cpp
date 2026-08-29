@@ -12,6 +12,13 @@
 
 namespace opennova::world {
 
+std::string infantry_anim_key(int state) {
+    if (state < 0 || state >= kInfantryAnimStateCount) return std::string();
+    const char *name = kInfantryAnimNames[state];
+    if (name == nullptr || name[0] == '\0') return std::string();
+    return std::string("anim_") + name;
+}
+
 const char *const kInfantryAnimNames[kInfantryAnimStateCount] = {
     /*  0 */ "reset",
     /*  1 */ "walk_forward", "walk_forwardright", "walk_right", "walk_backright",

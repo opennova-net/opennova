@@ -323,7 +323,6 @@ public:
 	std::vector<WaypointSummary> waypoint_summaries() const;
 	size_t waypoint_path_count() const;
 	bool get_waypoint_path(size_t index, WaypointPath &out) const;
-	std::vector<WaypointPath> waypoint_paths() const;
 	bool set_waypoint_path(size_t index, const std::vector<int> &marker_indices, int flags, WaypointPath *out = nullptr);
 	bool clear_waypoint_path(size_t index, WaypointPath *out = nullptr);
 	bool add_waypoint_marker(size_t path_index,

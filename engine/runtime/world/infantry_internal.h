@@ -8,7 +8,7 @@
 
 namespace opennova::world {
 
-// BAM bearing of (dx, dy) [orig: atan2 * 2^31/pi (dbl_7C19D8)]; the body-state
+// BAM bearing of (dx, dy) [orig: dbl_7C19D8 @0x7c19d8 -- atan2 * 2^31/pi]; the body-state
 // commit with the gait->stance insert. Both defined in infantry.cpp, shared with
 // infantry_combat.cpp.
 int32_t bearing_to(int32_t dx, int32_t dy);

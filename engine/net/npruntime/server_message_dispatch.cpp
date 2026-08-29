@@ -2296,7 +2296,7 @@ void broadcast_player_sync_on_join(const GameConfig &config,
 	// never runs the joiner's C2S 0x22 walk — carry the loopback player's OWN
 	// sync so the host-side roster (D-HUD-24) binds its slot and its 0x16 rows
 	// are accepted rather than dropped as unknown.
-	if (joined.type == 2 && joined.link.transport != nullptr)
+	if (joined.type == NapiNPConnection::kTypeClientSide && joined.link.transport != nullptr)
 		joined.link.transport->host_send(s2c::PLAYER_SYNC, body);
 }
 

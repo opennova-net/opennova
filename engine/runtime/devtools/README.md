@@ -27,7 +27,7 @@ Two products compose it:
 | `game_window.h/.cpp` | The mandatory embedded Game window, its narrow viewport adapter, and typed Play/Interact/Close request policy |
 | `stats_window.h/.cpp`, `stats_window_rows.h` | The Stats window: the row tree over a drained window, refreshed every 0.5 s |
 | `entities_window.h/.cpp` | The Entities window: the filterable entity-directory table over the pushed snapshot, with selected-row debug actions leaving as typed requests |
-| `inspect_snapshot.h` | `EntityDirectorySnapshot`: the value record the embedder pushes (the engine `world::inspect::entity_directory` join + the logic tick) |
+| `entity_directory_snapshot.h` | `EntityDirectorySnapshot`: the value record the embedder pushes (the engine `world::inspect::entity_directory` join + the logic tick) |
 | `debug_request.h` | `DebugRequest`: the typed mutation queue entry the embedder drains into the engine-backed debug delegates |
 | `demo_window.h/.cpp` | ImGui's demo window, the docking/multi-viewport smoke test |
 | `oned_ui.h/.cpp` | ONED's surface: the fields it owns, the state the app pushes, the typed request queue the app drains |
@@ -49,7 +49,7 @@ Two products compose it:
 4. Engine facts flow records-in / requests-out (ADR 0042 d6; the Entities
    window is the template). No feed framework ahead of a window — each window
    lands with its own record: a plain value struct beside the window
-   (`inspect_snapshot.h`), pushed by value through a `GameDevTools::set_*`
+   (`entity_directory_snapshot.h`), pushed by value through a `GameDevTools::set_*`
    (an invalid record clears), gated by a `GameDevTools::needs_*()`
    (pass open && window open) so the embedder skips building records nobody
    shows, and refreshed on the window's 0.5 s cadence. Mutations leave as a

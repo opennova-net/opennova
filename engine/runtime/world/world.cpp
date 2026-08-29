@@ -177,19 +177,6 @@ void vehicle_release_use_gun_slot(Entity &occupant, Entity *vehicle) {
     occupant.use_gun_slot_swapped = false;
 }
 
-bool vehicle_has_valid_control_occupant(const World &world, const Entity &vehicle) {
-    for (const Seat &seat : vehicle.seats) {
-        if (!is_vehicle_control_seat(seat.type) || !seat.occupant.valid()) continue;
-        const Entity *occupant = world.registry.get(seat.occupant);
-        if (occupant != nullptr && occupant->mounted &&
-            occupant->mount_target == vehicle.handle &&
-            is_vehicle_control_seat(occupant->mount_type)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local) {
     // Build the SAME frame collision serves (target_view): heading from the
     // stored mission yaw, pitch/roll BAM-wrapped from degrees, through
@@ -431,6 +418,27 @@ bool EntityCommands::set_entity_position(EntityHandle h, const Vec3 &mission_pos
     return true;
 }
 
+bool EntityCommands::kill_player(EntityHandle victim, EntityHandle killer) {
+    Entity *e = world_.registry.get(victim);
+    if (e == nullptr || (e->flags & kEntityFlagPlayer) == 0) return false;
+    e->health = 0;
+    RoundDeath d;
+    d.victim = victim;
+    d.victim_handle = victim.packed;
+    d.killer = killer;
+    d.killer_handle = killer.valid() ? killer.packed : 0xFFFFu;
+    world_.round_sim.deaths.push_back(d);
+    return true;
+}
+
+bool EntityCommands::set_entity_weapon_ammo(EntityHandle h, int32_t clip, int32_t reserve) {
+    Entity *e = world_.registry.get(h);
+    if (e == nullptr) return false;
+    e->primary_weapon_slot.clip = retail_signed_i16(clip);
+    e->primary_weapon_slot.reserve = retail_signed_i16(reserve);
+    return true;
+}
+
 bool EntityCommands::set_ssn_hp(uint16_t ssn, int32_t hp) {
     Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
@@ -480,27 +488,6 @@ bool EntityCommands::set_ssn_waypoint(uint16_t ssn, int32_t wp, int32_t node) {
     Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
     apply_waypoint_order(world_, *e, wp, node);
-    return true;
-}
-
-bool EntityCommands::set_ssn_alert(uint16_t ssn, int32_t state) {
-    Entity *e = world_.registry.get(resolve_ssn(ssn));
-    if (!e) return false;
-    e->alert_state = static_cast<uint8_t>(state);
-    return true;
-}
-
-bool EntityCommands::set_ssn_target(uint16_t ssn, uint16_t target) {
-    Entity *e = world_.registry.get(resolve_ssn(ssn));
-    if (!e) return false;
-    e->ai_target = target;
-    return true;
-}
-
-bool EntityCommands::set_ssn_move_speed(uint16_t ssn, int32_t kph) {
-    Entity *e = world_.registry.get(resolve_ssn(ssn));
-    if (!e) return false;
-    e->move_speed_kph = kph;
     return true;
 }
 

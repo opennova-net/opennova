@@ -67,6 +67,20 @@ static_assert(for_mission_mode(static_cast<uint32_t>(bms::AttribFlags::Deathmatc
 static_assert(for_mission_mode(static_cast<uint32_t>(bms::AttribFlags::SearchAndDestroy)) == kSearchAndDestroy);
 static_assert(for_mission_mode(0) == kCoop, "no multiplayer attrib -> stock/training Co-op");
 
+// The session g_GameType word a mission HEADER implies: the mission
+// catalog's derivation over the raw attrib_flags word (no multiplayer bit ->
+// stock Co-op 0x10020). The one home of this derivation -- every embedder
+// (the listen bring-up, the dedicated host, the shell, the ctest rig) calls
+// it. [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission
+// @0x524360; docs/net/novaworld-net-re.md 5.2c]
+inline uint32_t for_mission_attribs(bms::AttribFlags attrib_flags) {
+	return for_mission_mode(bms::selected_game_mode(attrib_flags));
+}
+// The same over the raw header word a world retains (World::mission_attrib_flags).
+inline uint32_t for_mission_attribs(uint32_t attrib_flags) {
+	return for_mission_attribs(static_cast<bms::AttribFlags>(attrib_flags));
+}
+
 // --- The MULTI_PLAYER_HOST dialog's witnessed game-type rules (D-MNU-17) ----
 
 // The GAME_TYPE spin's ALL-types value [orig: init_host_settings_dialog

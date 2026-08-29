@@ -19,8 +19,8 @@ class World;
 
 // ----------------------------------------------------------------------------
 // Shared entity-command primitive layer. Models the original Entity_* mutation
-// functions (Entity_KillByNetId, Entity_SetWaypointByTeam, Entity_SetAlertByNetId,
-// Entity_SetMoveSpeedKPH, ...) that BOTH EventAction_Dispatch and the WacScript_*
+// functions (Entity_KillByNetId, Entity_SetWaypointByTeam, ...) that BOTH
+// EventAction_Dispatch and the WacScript_*
 // handlers funnel through. WAC handlers and BMS actions both call these.
 // ----------------------------------------------------------------------------
 class EntityCommands {
@@ -45,9 +45,6 @@ public:
     // `node < 0` selects the nearest node on the list (the two-argument WAC form);
     // BMS RedirectSingleTo carries an explicit node in param3.
     bool set_ssn_waypoint(uint16_t ssn, int32_t wp, int32_t node = -1);
-    bool set_ssn_alert(uint16_t ssn, int32_t state);
-    bool set_ssn_target(uint16_t ssn, uint16_t target);
-    bool set_ssn_move_speed(uint16_t ssn, int32_t kph);
     bool set_ssn_engage_min(uint16_t ssn, int32_t v);
     bool set_ssn_engage_max(uint16_t ssn, int32_t v);
     bool set_ssn_attack_max(uint16_t ssn, int32_t v);
@@ -66,6 +63,15 @@ public:
     // 16.16 mirror), mission-space coordinates. False when the handle resolves
     // no registry row.
     bool set_entity_position(EntityHandle h, const Vec3 &mission_pos);
+    // Kill a PLAYER entity outright as `killer`'s victim: the health write the
+    // real damage path would have made (so the recipient's 0x0A tail health --
+    // the joiner's death channel -- reads the death too) plus the RoundDeath
+    // record the round-end and kill-feed consumers key on. False when the
+    // handle resolves no player row.
+    bool kill_player(EntityHandle victim, EntityHandle killer);
+    // Write the primary weapon slot's clip/reserve counts (retail's signed
+    // i16 words). False when the handle resolves no registry row.
+    bool set_entity_weapon_ammo(EntityHandle h, int32_t clip, int32_t reserve);
 
     // --- queries ---
     bool ssn_exists(uint16_t ssn) const;

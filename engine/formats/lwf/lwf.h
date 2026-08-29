@@ -157,11 +157,8 @@ struct File {
   std::vector<uint8_t> string_pool;        // raw blob from string_pool_off to EOF
 };
 
-// Parse an on-disk .LWF into strongly typed structures.
-// Returns false on validation errors, with `error` describing the issue.
-bool parse_lwf(const std::string &path, File &out, std::string &error);
-
-// Parse LWF from memory buffer.
+// Parse an .LWF from memory into strongly typed structures. Returns false on
+// validation errors, with `error` describing the issue.
 bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &error);
 
 // Encode a File structure to binary LWF format.

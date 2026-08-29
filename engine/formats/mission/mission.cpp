@@ -562,18 +562,6 @@ bool MissionDocument::get_waypoint_path(size_t index, WaypointPath &out) const {
 	return true;
 }
 
-std::vector<WaypointPath> MissionDocument::waypoint_paths() const {
-	std::vector<WaypointPath> out;
-	if (!impl_->loaded) {
-		return out;
-	}
-	out.reserve(impl_->file.waypoint_records.size());
-	for (size_t i = 0; i < impl_->file.waypoint_records.size(); ++i) {
-		out.push_back(to_path(impl_->file.waypoint_records[i], i));
-	}
-	return out;
-}
-
 bool MissionDocument::set_waypoint_path(size_t index, const std::vector<int> &marker_indices, int flags, WaypointPath *out) {
 	if (!impl_->loaded) {
 		impl_->last_error = "No mission loaded";

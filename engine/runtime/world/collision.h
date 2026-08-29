@@ -7,7 +7,7 @@
 //   COBJ section records — volume list + local AABB + bound sphere
 //   BVOL volume records  — collidable type + local AABB + plane run + flags
 //   BPLN plane records   — int16 Q14 normal + 16.16 distance
-// The host builds these PODs from the parsed .3di collision IR (the same
+// The embedder builds these PODs from the parsed .3di collision IR (the same
 // leaf-consumer seam as terrain_query's TerrainHeightField, ADR 0020): engine/runtime/world
 // never touches the format stack.
 //
@@ -592,7 +592,7 @@ struct ContactResult {
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
                              BlinkAccum &blink, LadderContact &ladder, ContactResult &out);
 
-// Host/model callback for the final world-space matrix array consumed by every
+// Embedder/model callback for the final world-space matrix array consumed by every
 // collision walk. Matrix slot i corresponds to COBJ/collision section i by
 // ordinal; COBJ::parent_subobject_index is hierarchy metadata, not a selector.
 // [orig: model+168 callback -> one 16-dword matrix per COBJ, consumed in lockstep
@@ -600,7 +600,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
 class ICollisionSectionMatrixProvider {
 public:
     virtual ~ICollisionSectionMatrixProvider() = default;
-    // A host may learn about dynamic entities after its mission-start model
+    // An embedder may learn about dynamic entities after its mission-start model
     // sweep (notably the local player deploy). Give query callers one shared,
     // idempotent way to attach that entity before choosing an unresolved
     // fallback. Returning true means the provider attached a usable instance.
@@ -799,7 +799,7 @@ public:
     // Profiling is disabled by default. Each enable/disable edge clears the
     // snapshot so a new consumer never inherits another capture's counters.
     void set_trace_profile_enabled(bool enabled);
-    // --- model registry (host-fed, keyed by an opaque graphic id) ---
+    // --- model registry (embedder-fed, keyed by an opaque graphic id) ---
     int32_t add_model(CollisionModel model); // returns model id
     const CollisionModel *model(int32_t id) const;
     // Attach a model instance to a live entity (net_id keyed like the traits sweep).
@@ -813,7 +813,7 @@ public:
     // Install the model-animation callback that supplies final per-section
     // matrices. Null restores the static shared-entity-matrix fallback.
     void set_section_matrix_provider(ICollisionSectionMatrixProvider *provider);
-    // Resolve a host-owned late-spawn instance on demand. Existing instances
+    // Resolve an embedder-owned late-spawn instance on demand. Existing instances
     // never call the provider, so repeated round/F3 queries are idempotent.
     bool ensure_entity_instance(World &world, EntityHandle h);
     // Publish the pose owner's current world-space Q22 section matrices. Retail
@@ -1205,10 +1205,10 @@ public:
     };
     LocalResolveDebug local_resolve_debug;
 
-    // Host-wired terrain (shared with the AI system's field).
+    // Embedder-wired terrain (shared with the AI system's field).
     const terrain::TerrainHeightField *terrain = nullptr;
 
-    // --- introspection for tests/host ---
+    // --- introspection for tests/embedders ---
     int32_t static_count() const { return static_count_; }
     int32_t static_building_count() const { return static_building_count_; }
     int32_t candidate_count(EntityHandle h) const;
@@ -1256,7 +1256,7 @@ public:
             const World &world, EntityHandle h,
             const Vec3 &blast_center) const;
 
-    // Read-only world-space geometry snapshot for a host collision debug view.
+    // Read-only world-space geometry snapshot for an embedder collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /
     // collision_matrix_from_heading path every query uses, so what the host
     // draws is exactly what the resolver tests. Corner order: index bit 0 = max

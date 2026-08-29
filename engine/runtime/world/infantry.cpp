@@ -972,7 +972,8 @@ static bool entity_is_player_class(const World &world, EntityHandle handle) {
 
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
                              AiTickPerf *perf) {
-    // Recoil/dispersion live ahead of the network-snap motor exit. Received
+    // Recoil/dispersion live ahead of the network-snap motor exit [orig: the
+    // Entity_UpdateInfantryAI flag test @0x4b9a03 exits past the sound block]. Received
     // shots are applied during the network pump, then decay in this frame's
     // body pass; locally generated shots happen later and first decay on the
     // following frame. The recoil PRNG draw is unconditional, including R=0.
@@ -1907,8 +1908,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
             // back toward 0 through the clamp]; a damaging landing also stages the
             // fall death-anim selection (+0x2C0, cause 4 -> 174) [orig:
             // @0x4bf85d-0x4bf879 — the staged selector matches our generic-death
-            // fallback].
-            if (inf.airborne && e.health > 0 && world.wac_values.fallmps > 0 && is_authority &&
+            // fallback]. There is NO zero test on fallmps: a tolerance of 0
+            // makes every landing (vel_z <= 0) damaging by (-vel_z) >> 4
+            // [orig: org1 @0x4bf82e..0x4bf841 `imul eax, -1057; cmp ecx, eax;
+            // jg skip`; org2 @0x4b7d0d..0x4b7d21].
+            if (inf.airborne && e.health > 0 && is_authority &&
                 (tick_flags & kEntityFlagIndestructible) == 0 &&
                 inf.vel[2] <= -1057 * world.wac_values.fallmps) {
                 int32_t excess = (-1057 * world.wac_values.fallmps) - inf.vel[2];

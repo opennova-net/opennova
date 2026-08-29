@@ -438,10 +438,10 @@ void local_player_view_frame(World *world, const LocalPlayerWeapon &w, const Pla
     // the aircraft looking at its own underside. Re-anchoring the stored
     // OFFSET to the live position removes that: a seated pilot's offset barely
     // changes between frames while his position moves a whole unit per tick.
-    // (retail: the MOUNTED local eye leg @0x4b6908 (selector @0x4b66d0,
-    //  unfloored) stores head-Position into +0x6C/+0x70/+0x74;
-    //  Camera_ComputeThirdPersonView @0x437fa5..0x437fb7 adds the triple to
-    //  the tracked entity's position)
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b6908 -- the MOUNTED local
+    //  eye leg (selector @0x4b66d0, unfloored) stores head-Position into
+    //  +0x6C/+0x70/+0x74; Camera_ComputeThirdPersonView @0x437fa5..0x437fb7
+    //  adds the triple to the tracked entity's position]
     float anchor_eye[3] = {w.eye_mission[0], w.eye_mission[1], w.eye_mission[2]};
     const bool seated_eye = e->mounted && (e->eye_offset_x != 0 || e->eye_offset_y != 0 ||
                                            e->eye_offset_z != 0);
@@ -472,12 +472,14 @@ void local_player_viewmodel_bias(World *world, const LocalPlayerWeapon &w,
                                 tpos_raw_units, out);
     // The per-frame motion lead: the witnessed pre-rotation add takes the
     // world-delta components RAW onto the view-frame lanes (no frame
-    // conversion) (retail: @0x4dd549..0x4dd56c -- see player_view.h).
+    // conversion) [orig: Player_UpdateFirstPersonCamera @0x4dd549..0x4dd56c,
+    // see player_view.h].
     int32_t lead[3];
     player_view_motion_lead_update(t.motion_lead, t.tick_delta, lead);
     for (int i = 0; i < 3; ++i) out[i] += static_cast<float>(lead[i]) / 65536.0f;
-    // The 4:3 framing drop -- the 3w<=4h rule (retail: @0x4dd571..0x4dd578 --
-    // player_view_narrow_aspect); the caller only samples the viewport.
+    // The 4:3 framing drop -- the 3w<=4h rule [orig: Player_UpdateFirstPersonCamera
+    // @0x4dd571..0x4dd578 -> player_view_narrow_aspect]; the caller only
+    // samples the viewport.
     if (player_view_narrow_aspect(viewport_w, viewport_h))
         out[2] -= static_cast<float>(kFpNarrowAspectDropQ16) / 65536.0f;
 }

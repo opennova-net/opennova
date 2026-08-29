@@ -25,7 +25,7 @@
 
 namespace opennova::env {
 
-// The host-facing exact native sample (S2C 0x0A phase-2). The weather owns
+// The embedder-facing exact native sample (S2C 0x0A phase-2). The weather owns
 // the live scalar currents; the environment state owns the authored targets
 // and mission clock.
 struct NetEnvSnapshot {

@@ -239,7 +239,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 
 	// The type-2 loopback is the host's OWN client (input-ordered, publishes cached.local_player); a
 	// type-1 node is a remote joiner the host snaps from the wire (never the local player). [ADR 0012]
-	const bool is_host_own = (conn.type == 2);
+	const bool is_host_own = (conn.type == NapiNPConnection::kTypeClientSide);
 
 	// Character stamp from the joiner's 0x42 CU vars, picked per ASSIGNED team — side A for teams
 	// 1/3 or any non-team-based game type, side B otherwise [orig: Server_PlayerAdd @0x51cbc0
