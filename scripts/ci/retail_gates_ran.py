@@ -14,7 +14,8 @@ mounted root.
     python scripts/ci/retail_gates_ran.py --gut-log gut.log --roots jo_dir,jo_assets
 
 Exit 1 on any gap, listing it. The expectations below are the root -> test
-matrix of docs/asset-gated-tests.md; keep the two in step.
+matrix of docs/asset-gated-tests.md; `--check-docs` (the lint job) proves the
+two name the same ctests per root.
 """
 from __future__ import annotations
 
@@ -120,18 +121,71 @@ def check_gut_log(path: Path, roots: list[str]) -> list[str]:
     return sorted(set(gaps))
 
 
+REPO = Path(__file__).resolve().parents[2]
+DOC = REPO / "docs" / "asset-gated-tests.md"
+CMAKE = REPO / "tests" / "CMakeLists.txt"
+
+
+def registered_ctests() -> set[str]:
+    """The ctest names tests/CMakeLists.txt registers literally (foreach-generated
+    names are not resolved; a doc token that is not a literal registration is
+    simply not compared)."""
+    text = CMAKE.read_text(encoding="utf-8", errors="replace")
+    names = set(re.findall(r"add_test\(NAME\s+([A-Za-z0-9_]+)", text))
+    names |= set(re.findall(r"opennova_add_gated_test\(\s*([A-Za-z0-9_]+)", text))
+    return names
+
+
+def check_docs(junit: Path | None) -> list[str]:
+    """The docs matrix and the tables above name the same ctests per root:
+    every table name is in its root's row, and every ctest the row names is in
+    that root's table (the ctest universe is the JUnit report when given, else
+    the literal registrations; a foreach-generated name outside both is not
+    compared in that direction)."""
+    text = DOC.read_text(encoding="utf-8", errors="replace")
+    if junit is not None:
+        ctests = {case.get("name", "") for case in ET.parse(junit).getroot().iter("testcase")}
+    else:
+        ctests = registered_ctests()
+    gaps: list[str] = []
+    for root, var in ROOT_VARS.items():
+        row = next((line for line in text.splitlines() if line.startswith(f"| `{var}` |")), None)
+        if row is None:
+            gaps.append(f"docs: no matrix row for {var}")
+            continue
+        doc_tokens = set(re.findall(r"`([A-Za-z0-9_]+)`", row))
+        table_names = set(MUST_RUN[root]) | set(MIXED[root])
+        for name in sorted(table_names - doc_tokens):
+            gaps.append(f"{name}: in the {root} table here, not in the {var} row of docs/asset-gated-tests.md")
+        for name in sorted((doc_tokens & ctests) - table_names - set(KNOWN_ABSENT)):
+            gaps.append(f"{name}: in the {var} row of docs/asset-gated-tests.md, not in the {root} table here")
+    return gaps
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--junit", type=Path, help="ctest --output-junit report")
     ap.add_argument("--gut-log", type=Path, help="the GUT run's captured output")
     ap.add_argument("--roots", default="jo_dir,jo_assets",
                     help="comma-separated mounted roots (jo_dir, jo_assets)")
+    ap.add_argument("--check-docs", action="store_true",
+                    help="the tables here name the same ctests as the docs matrix rows "
+                         "(lint mode; --junit widens the ctest universe to the report)")
     args = ap.parse_args()
     roots = [r.strip() for r in args.roots.split(",") if r.strip()]
     unknown = [r for r in roots if r not in ROOT_VARS]
     if unknown:
         print(f"[retail-gates] unknown roots: {', '.join(unknown)}")
         return 2
+    if args.check_docs:
+        gaps = check_docs(args.junit)
+        if gaps:
+            print(f"[retail-gates] FAIL: {len(gaps)} mismatch(es) between the tables and docs/asset-gated-tests.md:")
+            for gap in gaps:
+                print(f"  {gap}")
+            return 1
+        print("[retail-gates] OK: the tables and the docs matrix name the same ctests")
+        return 0
     if args.junit is None and args.gut_log is None:
         print("[retail-gates] nothing to check: pass --junit and/or --gut-log")
         return 2
