@@ -105,6 +105,9 @@ jobs:
           # no em dashes in public-facing copy, no checked-off checklist rows
           # (completed entries are deleted, not ticked).
           python scripts/lint/conventions_lint.py --enforce
+          # The asset-gate attestation tables (scripts/ci/retail_gates_ran.py)
+          # and the docs/asset-gated-tests.md matrix name the same ctests.
+          python scripts/ci/retail_gates_ran.py --check-docs
 
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search
@@ -138,6 +141,7 @@ jobs:
         run: |
           python scripts/ci/retail_gates_ran.py --junit build/Testing/ctest.xml \
             --roots jo_dir,jo_assets
+          python scripts/ci/retail_gates_ran.py --check-docs --junit build/Testing/ctest.xml
 
       - name: sccache stats
         if: always()

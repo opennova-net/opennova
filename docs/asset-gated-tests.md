@@ -110,7 +110,10 @@ jobs end by attesting it: `scripts/ci/retail_gates_ran.py` reads ctest's JUnit
 report (`scripts/build.sh` writes `build/Testing/ctest.xml`) and the GUT log,
 and fails on any fully gated test that reported Skipped or any `SKIP-LEG:` /
 `[Pending]` line that names a mounted root. Its expectation tables are this
-page's matrix; a new gated test is added to both. The one known gap it reports
+page's matrix; a new gated test is added to both, and
+`retail_gates_ran.py --check-docs` (the lint job, and again after the build
+with `--junit` for the full ctest universe) fails when a root's table and its
+row here name different ctests. The one known gap it reports
 without failing: `mission_coop_convoy`, `mission_script_report` and
 `bunker_walkin` promote `05TRcoop.bms`, which no known retail mount or corpus
 carries (they read it through the mount, then loose under `OPENNOVA_JO_ASSETS`,
