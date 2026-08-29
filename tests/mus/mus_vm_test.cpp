@@ -7,6 +7,10 @@
 #include <string.h>
 #include <formats/mus/mus.h>
 
+#include <string>
+
+#include "common/retail_paths.h"
+
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \
     if (fn()) { printf("PASS\n"); ++passed; } \
@@ -1120,20 +1124,20 @@ static int test_vm_pc_accessor(void) {
     return 1;
 }
 
-/* End-to-end smoke: load the JO fixture and tick the VM until first sound
-   trigger. The fixture's gamescript runs through `enter Testmission` ->
+/* End-to-end smoke: load a gamescript program and tick the VM until the first
+   sound trigger. Both the minted synth_gamemus.bin (tests/fixtures/synth_mus_gen.cpp)
+   and the shipped jo_gamemus.bin run through `enter Testmission` ->
    `enter Multiplayerstart` (since Var01 == 0) -> first opcode is play sound_0.
-   Assert on_play_sound fires with index=0 within 10 tick budget. */
+   Assert on_play_sound fires with index=0 within the tick budget. The shipped
+   programs come from the reference fixture set (OPENNOVA_JO_ASSETS) and are the
+   retail legs of the three fixture tests below. */
 #ifdef MUS_FIXTURE_DIR
-static int test_vm_jo_fixture_first_sound(void) {
-    char path[512];
-    snprintf(path, sizeof(path), "%s/jo_gamemus.bin", MUS_FIXTURE_DIR);
+static std::string g_retail_gamemus, g_retail_menumus;
+
+static int fixture_first_sound(const char *path) {
     MusFile mf;
     int rc = mus_open(&mf, path);
-    if (rc != 0) {
-        fprintf(stderr, "  skip: fixture not found at %s (rc=%d)\n", path, rc);
-        return 1;
-    }
+    CHECK(rc == 0, "open the program");
     CHECK(mf.scripts != NULL, "scripts present");
     CHECK(mf.header.chunk_count >= 1, ">=1 chunk");
 
@@ -1169,17 +1173,24 @@ static int test_vm_jo_fixture_first_sound(void) {
     return 1;
 }
 
+static int test_vm_synth_fixture_first_sound(void) {
+    return fixture_first_sound(MUS_FIXTURE_DIR "/synth_gamemus.bin");
+}
+
+static int test_vm_jo_fixture_first_sound(void) {
+    return fixture_first_sound(g_retail_gamemus.c_str());
+}
+
 /* Executable form of the opcode census: drive the real shipped scripts through
    the VM for many ticks and assert the engine-width walk never desyncs into an
    unknown opcode (MUS_VM_ERROR). gamescript exercises enter/tablexec/method;
    menuscript exercises the large push_g/l_and/brfalse/setstate/play state
    machine. Proves the VM executes the stock bins faithfully. */
-static int run_fixture_no_error(const char *fname, int max_ticks) {
-    char path[512];
-    snprintf(path, sizeof(path), "%s/%s", MUS_FIXTURE_DIR, fname);
+static int run_fixture_no_error(const char *path, int max_ticks) {
+    const char *fname = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
     MusFile mf;
     int rc = mus_open(&mf, path);
-    if (rc != 0) { fprintf(stderr, "  skip: %s (rc=%d)\n", path, rc); return 1; }
+    CHECK(rc == 0, "open the program");
     CHECK(mf.scripts != NULL, "scripts present");
     MusVM *vm = mus_vm_create();
     mus_vm_load_script(vm, &mf.scripts[0]);
@@ -1200,9 +1211,15 @@ static int run_fixture_no_error(const char *fname, int max_ticks) {
     return ok;
 }
 
+static int test_vm_synth_fixtures_no_desync(void) {
+    CHECK(run_fixture_no_error(MUS_FIXTURE_DIR "/synth_gamemus.bin", 500),  "gamescript runs without VM error");
+    CHECK(run_fixture_no_error(MUS_FIXTURE_DIR "/synth_menumus.bin", 2000), "menuscript runs without VM error");
+    return 1;
+}
+
 static int test_vm_jo_fixtures_no_desync(void) {
-    CHECK(run_fixture_no_error("jo_gamemus.bin", 500),  "gamescript runs without VM error");
-    CHECK(run_fixture_no_error("jo_menumus.bin", 2000), "menuscript runs without VM error");
+    CHECK(run_fixture_no_error(g_retail_gamemus.c_str(), 500),  "gamescript runs without VM error");
+    CHECK(run_fixture_no_error(g_retail_menumus.c_str(), 2000), "menuscript runs without VM error");
     return 1;
 }
 
@@ -1225,9 +1242,8 @@ static void beh_sect(void *u, const char *nm) {
     if (!strcmp(nm, "Multiplayerstart")) L->saw_mpstart = 1;
     if (!strcmp(nm, "Missionnull"))      L->saw_null = 1;
 }
-static void beh_run(const char *fname, uint8_t varIdx, int32_t varVal, int ticks, BehLog *L) {
+static void beh_run(const char *path, uint8_t varIdx, int32_t varVal, int ticks, BehLog *L) {
     memset(L, 0, sizeof(*L));
-    char path[512]; snprintf(path, sizeof(path), "%s/%s", MUS_FIXTURE_DIR, fname);
     MusFile mf; if (mus_open(&mf, path) != 0) return;
     MusVM *vm = mus_vm_create();
     MusVMHooks h = {}; h.user = L;
@@ -1242,23 +1258,61 @@ static void beh_run(const char *fname, uint8_t varIdx, int32_t varVal, int ticks
 
 static int test_vm_jo_behavioral(void) {
     BehLog L;
-    beh_run("jo_gamemus.bin", 1, 0, 12, &L);
-    if (L.ev[0] == 0) { fprintf(stderr, "  skip: gamemus fixture absent\n"); return 1; }
+    beh_run(g_retail_gamemus.c_str(), 1, 0, 12, &L);
+    CHECK(L.ev[0] != 0, "the shipped gamescript produced a stream");
     /* Var1=0 (no mission): SV(200), then Multiplayerstart loops sound_0. */
     CHECK(strcmp(L.ev, "V13107200 P0 P0 P0 P0 P0 P0 P0 P0 P0 P0 ") == 0, "gamemus Var1=0 stream == original");
     CHECK(L.saw_mpstart && !L.saw_null, "gamemus Var1=0 routes to Multiplayerstart");
 
-    beh_run("jo_gamemus.bin", 1, 1, 12, &L);
+    beh_run(g_retail_gamemus.c_str(), 1, 1, 12, &L);
     /* Var1=1 (mission active): branch routes to silent Missionnull -- the discriminator. */
     CHECK(strcmp(L.ev, "V13107200 ") == 0, "gamemus Var1=1 stream == original (SV200 then silent)");
     CHECK(L.saw_null && !L.saw_mpstart, "gamemus Var1=1 routes to Missionnull (branch discriminator)");
 
-    beh_run("jo_menumus.bin", 2, 0, 12, &L);
+    beh_run(g_retail_menumus.c_str(), 2, 0, 12, &L);
     CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 P0 P0 ") == 0, "menumus Var2=0 stream == original");
-    beh_run("jo_menumus.bin", 2, 1, 12, &L);
+    beh_run(g_retail_menumus.c_str(), 2, 1, 12, &L);
     CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 P3 P4 P5 P6 P7 P8 P2 ") == 0, "menumus Var2=1 stream == original (P2..P8 loop)");
-    beh_run("jo_menumus.bin", 2, 2, 12, &L);
+    beh_run(g_retail_menumus.c_str(), 2, 2, 12, &L);
     CHECK(strcmp(L.ev, "V13107200 V13107200 P1 V13107200 V13107200 P2 V13107200 P2 V13107200 P2 ") == 0, "menumus Var2=2 stream == original (V,P2 loop)");
+    return 1;
+}
+
+/* The same proof over the minted programs, whose streams follow from their
+   source (tests/fixtures/synth_mus_gen.cpp) under the witnessed halting rules
+   (a play, setstate or done ends the tick; a method call does not, and an
+   on-switch whose entry jumps FORWARD continues the tick with the target
+   entered [orig: AudioVM_Op_TableExec @ 0x672C05]): the
+   gamescript's Begin sets the volume and enters Testmission; Var01 routes to
+   Multiplayerstart (three sound_0, one sound_1, then the silent Missionnull
+   self-loop) or straight to Missionnull; the menuscript's Attract plays sound_1
+   then Var02 dispatches into the Idle / Browse / Ambient loops. */
+/* Pin one observable stream; on a mismatch print the actual one for triage. */
+static int beh_expect(const BehLog *L, const char *expected) {
+    if (strcmp(L->ev, expected) == 0) return 1;
+    fprintf(stderr, "  stream: \"%s\" (expected \"%s\")\n", L->ev, expected);
+    return 0;
+}
+
+static int test_vm_synth_behavioral(void) {
+    BehLog L;
+    const char *game = MUS_FIXTURE_DIR "/synth_gamemus.bin";
+    const char *menu = MUS_FIXTURE_DIR "/synth_menumus.bin";
+    beh_run(game, 1, 0, 12, &L);
+    CHECK(beh_expect(&L, "V13107200 P0 P0 P0 P1 "), "synth gamemus Var1=0: SV(200), Multiplayerstart's four plays, then silence");
+    CHECK(L.saw_mpstart && L.saw_null, "synth gamemus Var1=0 routes to Multiplayerstart and runs out into Missionnull");
+
+    beh_run(game, 1, 1, 12, &L);
+    CHECK(beh_expect(&L, "V13107200 "), "synth gamemus Var1=1: SV(200) then silent");
+    CHECK(L.saw_null && !L.saw_mpstart, "synth gamemus Var1=1 routes to Missionnull (branch discriminator)");
+
+    beh_run(menu, 2, 0, 12, &L);
+    CHECK(beh_expect(&L, "V13107200 P1 P2 P0 P2 P0 P2 P0 P2 "), "synth menumus Var2=0: Attract then the Idle loop");
+    beh_run(menu, 2, 1, 12, &L);
+    CHECK(beh_expect(&L, "V13107200 P1 P2 P3 P4 P2 P3 P4 P2 P3 "), "synth menumus Var2=1: Attract then the Browse loop");
+    beh_run(menu, 2, 2, 12, &L);
+    CHECK(beh_expect(&L, "V13107200 P1 V13107200 P2 V13107200 P2 V13107200 P2 V13107200 P2 V13107200 P2 "),
+          "synth menumus Var2=2: Attract then the Ambient (SV, sound_2) loop");
     return 1;
 }
 #endif
@@ -1374,9 +1428,19 @@ int main(void) {
     RUN_TEST(test_vm_jump_unknown_section);
     RUN_TEST(test_vm_pc_accessor);
 #ifdef MUS_FIXTURE_DIR
-    RUN_TEST(test_vm_jo_fixture_first_sound);
-    RUN_TEST(test_vm_jo_fixtures_no_desync);
-    RUN_TEST(test_vm_jo_behavioral);
+    RUN_TEST(test_vm_synth_fixture_first_sound);
+    RUN_TEST(test_vm_synth_fixtures_no_desync);
+    RUN_TEST(test_vm_synth_behavioral);
+    /* The retail legs: the shipped programs from the reference fixture set. */
+    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
+    g_retail_menumus = retail::reference_fixture("mus/jo_menumus.bin");
+    if (g_retail_gamemus.empty() || g_retail_menumus.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_{gamemus,menumus}.bin (the shipped programs)");
+    } else {
+        RUN_TEST(test_vm_jo_fixture_first_sound);
+        RUN_TEST(test_vm_jo_fixtures_no_desync);
+        RUN_TEST(test_vm_jo_behavioral);
+    }
 #endif
 
     printf("\n%d passed, %d failed\n", passed, failed);

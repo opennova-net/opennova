@@ -47,7 +47,6 @@ authored file.
 |---|---|
 | `mnu/jo_*.mnu` (15), `mns/menu_style.mns` | the shipped JO menu screens and style: the menu compiler, the widget tests and the GUT shells pin retail widget ids and layouts |
 | `def/weapon.def`, `def/ammo.def`, `def/hudpos.def` | the wire-visible weapon/ammo order (the weapon table bakes indices from it) and the HUD layout table |
-| `mus/jo_gamemus.bin`, `mus/jo_menumus.bin`, `mus/golden_jo_gamemus.mus.txt` | the music director scripts and their decoded golden |
 | `adm/mp5_1st.adm`, `bad/BINOC.bad`, `bad/BINOC_twist.bad` | the retail animation-definition and clip formats (skinned-rig twist parity) |
 | `novaworld/**` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
 
@@ -136,6 +135,12 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   string tables are read from the reference tree by the gated
   `rtxt_jo_install_sweep` and the menu-driven GUT tests.
 - `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
+- `mus/synth_gamemus.bin`, `mus/synth_menumus.bin`, `mus/golden_synth_gamemus.mus.txt` —
+  `tests/fixtures/synth_mus_gen.cpp`: two music-director programs authored in the
+  MDEdit source dialect through `mus_compile` + `mus_encode_file` (the gamescript
+  in the shipped eight-section routing shape, the menuscript a Var02-dispatched
+  state machine) and the decompiler's own golden over the gamescript. The shipped
+  programs and their decoded golden are the reference-tree legs of the mus ctests.
 - `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.
 - `avatars/synth_avatars.def` — `tests/fixtures/minimal_avatars_gen.cpp`: the avatar
   table through `avatars_write` (26 parts, eight nationalities of divisions and

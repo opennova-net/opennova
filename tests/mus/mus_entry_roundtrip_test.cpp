@@ -3,6 +3,10 @@
 #include <string.h>
 #include <formats/mus/mus.h>
 
+#include <string>
+
+#include "common/retail_paths.h"
+
 static int passed = 0, failed = 0;
 #define RUN_TEST(fn) do { printf("Running %s... ", #fn); \
     if (fn()) { printf("PASS\n"); ++passed; } \
@@ -14,6 +18,8 @@ static int passed = 0, failed = 0;
 #define MUS_FIXTURE_DIR "fixtures/mus"
 #endif
 
+static std::string g_retail_gamemus, g_retail_menumus;
+
 /* Entry-section round-trip fidelity.
 
    The compiler hardcodes entry_section_index = 0 (mus_compile.cpp), i.e. the
@@ -21,15 +27,18 @@ static int passed = 0, failed = 0;
    code-offset order, so a faithful round-trip requires the original's entry
    section to also be its lowest-offset section. This is true for both shipped
    stock bins -- verified by reading the on-disk section tables: entry index 0 IS
-   the lowest-offset section (offsets are monotonic by index). This test pins that
-   property: re-compiling a decompiled stock script must keep playback starting at
+   the lowest-offset section (offsets are monotonic by index) -- and for the
+   minted programs, which the same compiler wrote. This test pins that
+   property: re-compiling a decompiled script must keep playback starting at
    the SAME NAMED section.
 
    It exists because neither sibling test can see an entry drift: the text
    round-trip (mus_roundtrip_test) doesn't encode the entry index in the text, and
    encode-idempotence (mus_encode_idempotence_test) compares the compiler's output
    to itself. If a future change made the decompiler stop emitting the entry first
-   (so the recompiled index 0 names a different section), this fails. */
+   (so the recompiled index 0 names a different section), this fails. The minted
+   synth_{gamemus,menumus}.bin run unconditionally; the shipped pair from the
+   reference fixture set (OPENNOVA_JO_ASSETS) is the retail leg. */
 static int entry_roundtrip(const char *path) {
     MusFile mf;
     int rc = mus_open(&mf, path);
@@ -79,17 +88,34 @@ static int entry_roundtrip(const char *path) {
     return 1;
 }
 
+static int test_entry_roundtrip_synth_gamemus(void) {
+    return entry_roundtrip(MUS_FIXTURE_DIR "/synth_gamemus.bin");
+}
+
+static int test_entry_roundtrip_synth_menumus(void) {
+    return entry_roundtrip(MUS_FIXTURE_DIR "/synth_menumus.bin");
+}
+
 static int test_entry_roundtrip_gamemus(void) {
-    return entry_roundtrip(MUS_FIXTURE_DIR "/jo_gamemus.bin");
+    return entry_roundtrip(g_retail_gamemus.c_str());
 }
 
 static int test_entry_roundtrip_menumus(void) {
-    return entry_roundtrip(MUS_FIXTURE_DIR "/jo_menumus.bin");
+    return entry_roundtrip(g_retail_menumus.c_str());
 }
 
 int main(void) {
-    RUN_TEST(test_entry_roundtrip_gamemus);
-    RUN_TEST(test_entry_roundtrip_menumus);
+    RUN_TEST(test_entry_roundtrip_synth_gamemus);
+    RUN_TEST(test_entry_roundtrip_synth_menumus);
+
+    g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
+    g_retail_menumus = retail::reference_fixture("mus/jo_menumus.bin");
+    if (g_retail_gamemus.empty() || g_retail_menumus.empty()) {
+        retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_{gamemus,menumus}.bin (the shipped programs)");
+    } else {
+        RUN_TEST(test_entry_roundtrip_gamemus);
+        RUN_TEST(test_entry_roundtrip_menumus);
+    }
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

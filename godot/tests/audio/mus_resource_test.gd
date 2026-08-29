@@ -1,6 +1,6 @@
 extends GutTest
 
-const FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
+const FIXTURE := "res://../fixtures/mus/synth_gamemus.bin"
 func test_script_count_at_least_one() -> void:
 	var ms := MusicScript.new()
 	ms.load_from_path(FIXTURE)

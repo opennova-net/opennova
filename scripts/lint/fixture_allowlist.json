@@ -24,7 +24,6 @@
     "fixtures/def/hudpos.def",
     "fixtures/mns/menu_style.mns",
     "fixtures/mnu/jo_*.mnu",
-    "fixtures/mus/*",
     "fixtures/novaworld/*.gsb",
     "fixtures/novaworld/*.hexcap",
     "fixtures/novaworld/run_*/*"
