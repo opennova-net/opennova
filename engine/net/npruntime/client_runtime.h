@@ -369,6 +369,16 @@ public:
 	bool in_match() const { return joiner_ && joiner_->in_match(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
 	uint16_t self_handle() const { return joiner_ ? joiner_->self_handle() : 0; }
+	// The joiner's read of its own dead bit: the recipient-local 0x0A health
+	// tail (the client stores it as its own Health) or the self record's dead
+	// bit (byte13 bit 0x02 -> Flags & 2 in the local apply [orig: @0x4c1005]).
+	bool local_player_dead() const {
+		const netsim::ClientState &cs = state();
+		if (cs.local_health <= 0) return true;
+		if (!has_self_handle()) return false;
+		const netsim::ClientEntityState *self = cs.find(self_handle());
+		return self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
+	}
 	JoinerConnection::Phase phase() const {
 		return joiner_ ? joiner_->phase() : JoinerConnection::Phase::Idle;
 	}

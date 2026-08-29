@@ -15,7 +15,7 @@
 
 #include <runtime/devtools/debug_request.h>
 #include <runtime/devtools/imgui_pass.h>
-#include <runtime/devtools/inspect_snapshot.h>
+#include <runtime/devtools/entity_directory_snapshot.h>
 
 #include <array>
 #include <cstdint>

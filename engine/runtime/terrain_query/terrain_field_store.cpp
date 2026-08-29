@@ -1,4 +1,9 @@
 #include <runtime/terrain_query/terrain_field_build.h>
+#include <sstream>
+#include <formats/trn/trn_io.h>
+#include <formats/pcx/pcx_io.h>
+#include <formats/cpt/cpt_io.h>
+#include <base/io/log.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 
 #include <cmath>
@@ -37,10 +42,9 @@ void TerrainFieldStore::build(const uint16_t *heightmap, size_t heightmap_count,
 	field_.layout.origin_x = origin_x;
 	field_.layout.origin_y = origin_y;
 	field_.locks = locks;
-	// Water clamp deferred: water_height units (vs the 16.16 worldY @0x26C6454
-	// the original compares) are not yet verified, so leave has_water off
-	// rather than float entities onto a wrong plane. The ground-following path
-	// does not need it.
+	// The water plane arrives separately (set_water_plane, fed from the
+	// world's environment): a rebuilt field starts without one.
+	field_.water_y = 0;
 	field_.has_water = false;
 
 	// The charmap surface raster for the footstep surface pick (owned copy like
@@ -91,6 +95,55 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 	store.build(cpt.depth_buffer.data(), cpt.depth_buffer.size(),
 			&trn.sector_grid[0][0], trn.origin_x, trn.origin_y,
 			coords_locks_from(trn), charmap, charmap_width, charmap_height);
+}
+
+bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
+		const std::string &terrain_name, std::string &error,
+		std::vector<uint8_t> *til_bytes) {
+	if (terrain_name.empty()) {
+		error = "the mission names no terrain";
+		return false;
+	}
+	std::vector<uint8_t> cpt_bytes, trn_bytes;
+	if (!index.read_file(terrain_name + ".cpt", cpt_bytes) ||
+			!index.read_file(terrain_name + ".trn", trn_bytes)) {
+		error = terrain_name + ".cpt/.trn are not under the mount";
+		return false;
+	}
+	std::string doc_error;
+	CptFile cpt;
+	if (!load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, doc_error)) {
+		error = terrain_name + ".cpt: " + doc_error;
+		return false;
+	}
+	TrnConfig trn;
+	std::string raw(reinterpret_cast<const char *>(trn_bytes.data()), trn_bytes.size());
+	std::istringstream ts(raw);
+	if (!load_trn(ts, trn, doc_error) || cpt.depth_buffer.empty()) {
+		error = terrain_name + ".trn: " + doc_error;
+		return false;
+	}
+	IndexedImage8 charmap;
+	std::vector<uint8_t> charmap_bytes;
+	if (!trn.charmap.empty()) {
+		if (!index.read_file(trn.charmap, charmap_bytes)) {
+			io::logf(io::LogLevel::kWarn, "terrain: charmap %s is not under the mount - no surface map",
+					trn.charmap.c_str());
+		} else {
+			std::string charmap_error;
+			if (!decode_pcx_indexed(charmap_bytes.data(), charmap_bytes.size(), charmap,
+						charmap_error)) {
+				charmap = IndexedImage8{};
+				io::logf(io::LogLevel::kWarn, "terrain: charmap %s did not decode (%s) - no surface map",
+						trn.charmap.c_str(), charmap_error.c_str());
+			}
+		}
+	}
+	terrain_field_store_build(store, cpt, trn,
+			charmap.empty() ? nullptr : charmap.indices.data(),
+			charmap.width, charmap.height);
+	if (til_bytes != nullptr) (void)index.read_file(terrain_name + ".til", *til_bytes);
+	return store.valid();
 }
 
 } // namespace opennova::terrain

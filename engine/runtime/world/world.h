@@ -306,7 +306,8 @@ struct WacNamedValues {
     // mirrors it from that packet (NapiNPClientMsg_0x00A @0x4301bc) for its local
     // red-flash only, since the landing damage itself is authority-gated. Damage when
     // landing with vel_z <= -1057*fallmps: health -= excess>>4 [orig: @0x4bf839 /
-    // @0x4b7d13]. 0 disables.
+    // @0x4b7d13]. There is no zero test: 0 damages EVERY landing by
+    // (-vel_z)>>4 (a WAC can write it; no shipped script does).
     static constexpr int32_t kDefaultFallmps = 13;
     int32_t fallmps = kDefaultFallmps;
 };

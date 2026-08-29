@@ -1431,8 +1431,8 @@ std::string File::get_mission_name() const {
     return fixed_string(header.mission_name, sizeof(header.mission_name));
 }
 
-std::string File::get_designer() const {
-    return fixed_string(header.designer, sizeof(header.designer));
+std::string File::get_environment() const {
+    return fixed_string(header.environment, sizeof(header.environment));
 }
 
 std::string File::get_terrain() const {

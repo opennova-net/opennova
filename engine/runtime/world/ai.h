@@ -249,8 +249,6 @@ struct AiProfile {
     // ---- the SM state-17 tick (vehicles/emplacements; world-wac-ai-re §17.6) ----
     int32_t fire_interval_a = 0;  // +124: primary fire interval (cooldown word +208 gate)
     int32_t fire_interval_b = 0;  // +156: secondary fire interval (word +210 gate)
-    uint8_t weapon_a = 0;         // +148 byte: primary ammo-def id
-    uint8_t weapon_b = 0;         // +180 byte: secondary ammo-def id
     // The two .aip weapon def blocks the fire-transform solver reads
     // (profile+120 primary / +152 secondary; engine/formats/aip WeaponBlock).
     // ammo_index is the world.ammo row resolved from the authored weapon NAME
@@ -272,8 +270,6 @@ struct AiProfile {
                                   // [orig: the ai.def copy block seeds brain[43]; source
                                   // field unwitnessed — part of Entity_CopyVehicleDefToAIComp]
     int32_t approach_cap = 0;     // +76: chase range cap (16.16)
-    int32_t min_range = 0;        // +188: minimum engage range (16.16)
-    int32_t match_speed_range = 0;// +184: follow-at-target-speed range (16.16)
     // ---- the infantry combat pass (org1 riflemen; world-wac-ai-re §17.4, D-AI-5) ----
     // One ammo id + clip stands in for the four anim-fire weapon bytes (+0x358..0x35B —
     // JO riflemen author all four = the rifle round) until the block-copy writer is
@@ -656,7 +652,7 @@ public:
     // capture_spawn_baseline() has run.]
     void on_load(World &world) override;
 
-    // Capture the current AI state as the restore baseline. The host calls this once at
+    // Capture the current AI state as the restore baseline. The embedder calls this once at
     // play start (after promote + the pre-mission pass), when it snapshots the World.
     void capture_spawn_baseline();
 
@@ -702,7 +698,7 @@ public:
     // every step; see apply_ground_clamp.]
     const terrain::TerrainHeightField *terrain = nullptr;
     GroundClearance ground_clearance{};
-    // World-object collision (host-wired like `terrain`; null = terrain-only motor).
+    // World-object collision (embedder-wired like `terrain`; null = terrain-only motor).
     // When set, the tick rebuilds the proximity tables [orig: Entity_UpdateAllEntities
     // @0x4c2100 -> Entity_BuildAllProximityLists @0x4c20f0] and the infantry vertical
     // resolve routes through CollisionWorld::resolve_entity (D-INF-3 burn-down).

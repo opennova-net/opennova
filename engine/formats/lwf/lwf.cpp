@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <fstream>
 #include <sstream>
 
 namespace opennova {
@@ -100,36 +99,6 @@ void write_fixed_string(std::vector<uint8_t> &buf, const std::string &s, size_t 
   for (size_t i = 0; i < len; ++i) {
     buf.push_back(i < s.size() ? static_cast<uint8_t>(s[i]) : 0);
   }
-}
-
-bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &error);
-
-bool parse_lwf(const std::string &path, File &out, std::string &error) {
-  out = File{};
-  error.clear();
-
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    error = "failed to open file";
-    return false;
-  }
-
-  file.seekg(0, std::ios::end);
-  const std::streamoff size = file.tellg();
-  if (size <= 0) {
-    error = "empty file";
-    return false;
-  }
-  file.seekg(0, std::ios::beg);
-
-  std::vector<uint8_t> buffer(static_cast<size_t>(size));
-  file.read(reinterpret_cast<char *>(buffer.data()), size);
-  if (!file) {
-    error = "failed to read file";
-    return false;
-  }
-
-  return parse_lwf_buffer(buffer.data(), buffer.size(), out, error);
 }
 
 // [orig: SoundBank_OpenFile @ 0x75caa0 + SoundBank_LoadTriggerSets @ 0x75c370]

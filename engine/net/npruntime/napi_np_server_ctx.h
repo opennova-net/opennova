@@ -125,11 +125,10 @@ struct NapiNPServerCtx {
 	// (golden frame 160).
 	std::vector<std::pair<uint8_t, uint8_t>> weapon_restrictions;
 
-	// [orig +0x1198..0x11A0] the SendFiltered send descriptor (preserved names). Present but the
-	// 2-peer MVP broadcasts the whole world (filter == 1); the per-connection cull is deferred.
-	uint32_t send_mask = 0;          // [orig +0x1198]
-	uint32_t send_target_player = 0; // [orig +0x119C]
-	uint32_t send_target_state = 0;  // [orig +0x11A0]
+	// [orig +0x1198] the SendFiltered send mask (preserved name). Present but the
+	// 2-peer MVP broadcasts the whole world (filter == 1); the per-connection cull
+	// (retail's +0x119C target player / +0x11A0 target state) is not modelled.
+	uint32_t send_mask = 0;
 
 	// [orig: g_scoreboard_broadcast_timer @0xC8D80C] One global mission
 	// counter shared by the 0x16 scoreboard and 0x30/0x31 integrity broadcast.
@@ -137,23 +136,11 @@ struct NapiNPServerCtx {
 	// so a fresh mission reaches its first boundary after 311 calls. Mission
 	// start resets it through create_session; round init does not.
 	uint32_t scoreboard_broadcast_timer = 0;
-	// Round-end wire pass edge latch. Retail has no equivalent field because
-	// Server_ProcessRoundEnd @0x5164f0 IS the one-shot: it runs the per-slot
-	// wire block inline behind its own `if (!g_spawn_success_gate)` guard
-	// [orig: @0x516502] and latches the gate at the end [orig: @0x5168e4]. Our
-	// World::process_round_end owns that guard/latch on the sim side, so the
-	// NET side observes `round_end.ended` as a LEVEL and needs its own edge
-	// memory to fire the block exactly once. DIVERGENCE (placement only): the
-	// wire block runs from the server tick on the ended-edge rather than inline
-	// inside process_round_end, because the world layer holds no connection
-	// list. The emitted bytes and their order are unchanged.
-	bool round_end_wire_sent = false;
-	// [orig: g_endround_linger_timer @0xc8d820] MP-only, set to 2790 (45 s at
-	// the 62 Hz tick) BEFORE the per-slot loop and gated on is_in_session
-	// [orig: @0x5166c4]. Drained by Server_TickUpdate (authority) / the client
-	// frame; SP never drains it — the epilog owns the SP exit. Stored here, not
-	// in World, because it is a session-lifetime net timer.
-	uint32_t endround_linger_timer = 0;
+	// NOT MODELLED: retail's g_endround_linger_timer [orig: @0xc8d820] -- MP-only,
+	// set to 2790 (45 s at the 62 Hz tick) BEFORE the per-slot round-end loop and
+	// gated on is_in_session [orig: @0x5166c4], drained by Server_TickUpdate
+	// (authority) / the client frame; SP never drains it (the epilog owns the SP
+	// exit). The round-end wire pass keys on World::round_end instead.
 	// [orig: dword_24C10C0] The process-global family toggle. Executable initial
 	// storage is zero: false selects 0x31, true selects 0x30, then every boundary
 	// XORs it even when no player is eligible. Neither session nor round init

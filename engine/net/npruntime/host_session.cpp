@@ -270,7 +270,7 @@ void send_or_stage_established_datagram(
 	if (is_established_s2c_datagram(datagram)) {
 		for (const NapiNPConnection &connection :
 				owner.ctx.np_protocol.connection_list) {
-			if (connection.type != 1 || !(connection.peer == peer)) continue;
+			if (connection.type != NapiNPConnection::kTypeServerSide || !(connection.peer == peer)) continue;
 			owner.pending_session_datagrams[peer].push_back(datagram);
 			return;
 		}
@@ -408,7 +408,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 	// producer runs. Closed peers retain their semantic/burst state; open peers
 	// may build packets during the remainder of this pump.
 	for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
-		if (c.type != 1) continue;
+		if (c.type != NapiNPConnection::kTypeServerSide) continue;
 		if (!c.s2c_send_holdoff_dictated) {
 			c.s2c_send_holdoff_countdown = 0;
 			c.s2c_send_boundary_open = true;
@@ -478,7 +478,7 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock,
 	// only an open boundary frames and sends it. The host's own type-2 loopback
 	// is consumed in-process and skipped here.
 	for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
-		if (c.type != 1) continue;
+		if (c.type != NapiNPConnection::kTypeServerSide) continue;
 		// A type-1 remote peer's transport is always the UdpSessionTransport admit_peer attached, so the
 		// downcast to reach pop_outbound (an owner-boundary method, not on the base ISessionTransport) is
 		// safe — the host's own type-2 loopback (a LoopbackChannel) is skipped above.
@@ -588,7 +588,7 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	// vars, so its per-side character selection is installed here — before
 	// Server_ProcessPendingPlayerSpawns stamps the local player from it.
 	for (NapiNPConnection &connection : owner.ctx.np_protocol.connection_list) {
-		if (connection.type == 2) {
+		if (connection.type == NapiNPConnection::kTypeClientSide) {
 			connection.char_vars = cfg.local_character_vars;
 		}
 	}

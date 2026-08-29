@@ -41,6 +41,7 @@
 #include <runtime/world/player_input.h>
 #include <runtime/world/player_loadout.h>
 #include <runtime/world/player_look.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/vehicle_mount.h>
@@ -188,10 +189,11 @@ public:
 	void set_movement_keys(bool forward, bool back, bool left, bool right,
 			bool lean_left, bool lean_right, bool jump);
 	// Stance SELECT request (0 stand / 1 crouch / 2 prone): mutual exclusion
-	// at apply, REFUSED while the equipped weapon has ForceCrouch. Returns
-	// whether the latch changed. [orig: input cases 169/170/172 @0x4e0d77..
-	// -> NapiNPServerMsg_HandleStanceChange @0x501c60; the ForceCrouch gate
-	// Entity_CheckWeaponSeatFlags(equipped, 0x40000) @0x4e0d8a]
+	// at apply, REFUSED while the equipped weapon has ForceCrouch or the
+	// player sits in the UseGun seat. Returns whether the latch changed.
+	// [orig: input cases 169/170/172 @0x4e0d77.. -> NapiNPServerMsg_HandleStanceChange
+	// @0x501c60; the ForceCrouch gate Entity_CheckWeaponSeatFlags(equipped,
+	// 0x40000) @0x4e0d8a; the `parentSlot == 3` gate @0x4e0da0..0x4e0db5]
 	bool request_stance(int stance);
 	// The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
 	// dword_B76484 prone-latch equivalent the render-slot drape gate reads.
@@ -233,13 +235,42 @@ public:
 	// fallback, -1 = failed. [orig: Server_PositionPlayerForSpawn @0x50cf60 ->
 	// Entity_FindBestSpawnPoint @0x50ccc0]
 	int spawn_local_player_at_start(uint32_t game_type);
-	// The USE-ITEM mount toggle.
+	// Spawn the local player at an explicit pose (the shell's authored-pose
+	// and legacy LAN-host spawns): the same spawn tail the marker select runs
+	// -- the .adm ground, the input reset seeded from the spawn facing, the
+	// view reset. False when the registry refuses the spawn.
+	bool spawn_local_player(const world::PlayerSpawn &spawn);
+	// The USE-ITEM mount toggle [orig: Input_ProcessFrame release edge
+	// @0x49d6dc -> Entity_ToggleVehicleMount @0x436950], including the
+	// out-of-session UseGun rejection (session_open gates it).
 	bool toggle_mount();
 	world::LocalPlayerViewFrame view_frame();
 	// The Player_CanFireWeapon verdict the body updater and the HUD share
 	// [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper
 	// @0x4dcd30].
 	bool local_player_can_fire(const world::AiEntity *body) const;
+	// The authority's read of the local player's dead bit (the entity flags;
+	// a joiner reads its replica through np::ClientRuntime::local_player_dead).
+	bool local_player_dead() const;
+
+	// --- the medic call (the dead player's C2S 0x2E) -------------------------
+	// The retail client medic-call cooldown: 310 ticks stamped at the send
+	// [orig: Input_HandleActionBinding case 217 @0x49b511 `dword_B76804 =
+	// 0x136`; decremented once per frame in Player_UpdatePerFrame @0x4de73e;
+	// cleared on the local death path @0x4b4d06; net-re 0x2E].
+	static constexpr int kMedicRequestCooldownTicks = 0x136;
+	int medic_request_cooldown_ticks = 0;
+	int medic_request_serial = 0;
+	// The action gates past the session/entity checks: a dead local player
+	// with the cooldown at zero [orig: case 217 @0x49b4b4..0x49b4da].
+	bool medic_request_allowed(bool local_dead) const {
+		return local_dead && medic_request_cooldown_ticks == 0;
+	}
+	// The send stamp: the cooldown and the serial the HUD keys its line on.
+	void stamp_medic_request();
+	// One per tick: the local death edge zeroes the cooldown, else it counts
+	// down [orig: Player_UpdatePerFrame @0x4de736..0x4de744; @0x4b4d06].
+	void tick_medic_cooldown(bool local_dead);
 
 	// --- entities ------------------------------------------------------------
 	world::Entity *by_net_id(uint16_t ssn);
@@ -256,6 +287,8 @@ public:
 
 	// --- observation ---------------------------------------------------------
 	std::vector<world::Effect> drain_effects();
+	// The collision debug views around a mission-space anchor; a negative
+	// range_units lifts the range gate (every instance / hitbox).
 	std::vector<world::CollisionWorld::DebugInstance> collision_instances(
 			const world::Vec3 &anchor, float range_units, int32_t max_instances);
 	std::vector<world::CollisionWorld::DebugHitboxEntity> hitboxes(
@@ -272,6 +305,11 @@ public:
 	bool items_ok = false;
 
 	// --- the world and its systems -------------------------------------------
+	// The retail is_in_session fact: a net session (listen or dedicated) has
+	// been brought up over this kernel. The net bring-ups set it; the bare
+	// no-net kernel keeps false. Gates the UseGun null-slot rejection
+	// [orig: Entity_AttachToUseGunSlot @0x546c07].
+	bool session_open = false;
 	world::World world;
 	world::AiSystem ai;
 	BmsEventSystem events;
@@ -288,7 +326,7 @@ public:
 	std::vector<PromoteOptions::AiProfileRow> ai_profiles;
 	PromoteResult promo;
 	int collision_attached = 0;
-	int text_source = 0; // mission::MissionTextSource
+	MissionTextSource text_source = MissionTextSource::kNone;
 	size_t text_size = 0;
 	world::World::Snapshot baseline;
 	bool have_baseline = false;
@@ -345,6 +383,10 @@ public:
 	// the collision world (the embedder re-layers its own device-fed surface
 	// extras — placed tiles, sound profiles — after wire_terrain).
 	void wire_terrain();
+	// Re-feed the terrain store's water plane from World::env.water_z (the
+	// occupant water clamp's 16.16 worldY); wire_terrain runs it, and the
+	// embedder calls it after every environment change.
+	void sync_water_plane();
 	void wire_collision();
 	// The post-tick "sim wrote the view" fold, exposed for the embedder's
 	// mount-change edges (the joiner's authoritative attach echo).
@@ -388,6 +430,7 @@ private:
 	float look_accum_x_ = 0.0f;
 	float look_accum_y_ = 0.0f;
 	int stance_latch_ = 0;
+	bool medic_dead_edge_seen_ = false;
 
 	struct MountedPoseRest {
 		simassets::MountedPosePartMatrices parts;

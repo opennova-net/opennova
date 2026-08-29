@@ -570,18 +570,4 @@ bool reassemble_protocol_payload(ProtocolReassemblyState &state,
 	return true;
 }
 
-bool decode_protocol_packet(uint8_t *body, size_t body_len,
-                            std::string_view session_nwu_key,
-                            std::string_view client_scrk,
-                            ProtocolPacketHeader &hdr_out,
-                            std::vector<ProtocolMessage> &messages_out) {
-	if (!body || body_len < PROTOCOL_PACKET_HEADER_SIZE || session_nwu_key.empty()) {
-		return false;
-	}
-	// Outer decrypt: matches PFF_EncryptBuffer on the recv side.
-	nwu_encrypt(body, body_len, session_nwu_key);
-	return decode_protocol_packet_plaintext(body, body_len, client_scrk,
-			hdr_out, messages_out);
-}
-
 } // namespace opennova

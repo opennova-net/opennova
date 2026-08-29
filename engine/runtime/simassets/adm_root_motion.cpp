@@ -100,10 +100,10 @@ int AdmRootMotion::parse_adm(const opennova::ResourceIndex *index,
 	}
 	adm_free(&adm);
 
-	using opennova::world::kInfantryAnimNames;
 	using opennova::world::kInfantryAnimStateCount;
 	for (int state = 0; state < kInfantryAnimStateCount; ++state) {
-		const std::string key = std::string("anim_") + kInfantryAnimNames[state];
+		const std::string key = opennova::world::infantry_anim_key(state);
+		if (key.empty()) continue;
 		auto it = values.find(key);
 		if (it == values.end()) {
 			continue;

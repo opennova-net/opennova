@@ -225,7 +225,7 @@ static_assert(kDescriptionFlags == 0xA0);
 // an ordinary frame while HostOwner still has one chance to flush the record.
 bool stage_host_disconnect(
 		NapiNPConnection &conn, const DisconnectEvent &event) {
-	if (conn.host_disconnect_sent || conn.type != 1 ||
+	if (conn.host_disconnect_sent || conn.type != NapiNPConnection::kTypeServerSide ||
 			conn.link.transport == nullptr)
 		return false;
 	conn.link.transport->host_send(
@@ -281,7 +281,7 @@ void send_minimap_overlay_batches(NapiNPConnection &conn,
 void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_in_session) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if ((conn.type != 1 &&
+		if ((conn.type != NapiNPConnection::kTypeServerSide &&
 				conn.link.mode != netsim::TransportMode::Loopback) ||
 				!is_in_match(conn) || conn.link.transport == nullptr)
 			continue;
@@ -1085,7 +1085,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 		// and remains eligible before the initial burst reaches InMatch.
 		// [orig: Server_TickUpdate @0x51E109, compare 0x57E40]
 		const bool join_deploy_idle_gate = ctx.is_in_session &&
-				!conn.host_disconnect_sent && conn.type == 1 &&
+				!conn.host_disconnect_sent && conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.phase >= ConnectionPhase::PlayerAdded &&
 				conn.phase < ConnectionPhase::Goodbye &&
 				conn.link.transport != nullptr &&
@@ -1108,7 +1108,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 		// a normal type-1 connection corresponds to all of them being clear.
 		// [orig: counter @0x51E066..0x51E07D; punt @0x51E187..0x51E18E]
 		const bool dead_state6 = ctx.is_in_session &&
-				!conn.host_disconnect_sent && conn.type == 1 &&
+				!conn.host_disconnect_sent && conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.phase >= ConnectionPhase::PlayerAdded &&
 				conn.phase < ConnectionPhase::Goodbye &&
 				age_player != nullptr &&
@@ -1663,7 +1663,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 		bool any_record_recipient = false;
 		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!is_in_match(conn)) continue;
-			if (conn.type == 1 && !conn.s2c_send_boundary_open) continue;
+			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
 			if (world.cached.local_player.valid() &&
 					conn.link.owned_entity == world.cached.local_player)
 				continue;
@@ -1703,12 +1703,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 			// fan). Type-1 peers receive one fresh 0x0A only when their
 			// configured S2C send boundary opens; queuing all intervening
 			// snapshots would burst stale frames at that boundary.
-			if (conn.type == 1 && !conn.s2c_send_boundary_open) continue;
+			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
 			netsim::ConnectionS2CPerf fan_perf;
 			const uint64_t fan_start = perf != nullptr ? io::perf_now_us() : 0;
 			netsim::emit_connection_s2c(
 					world, conn.link, ents, ctx.config.game_type,
-					conn.type == 1 ? kMaxFrameUpdateBodyBytes : 0,
+					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0,
 					perf != nullptr ? &fan_perf : nullptr);
 			if (perf != nullptr) {
 				perf->replication_fan_us += io::perf_now_us() - fan_start;

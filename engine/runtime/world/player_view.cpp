@@ -502,7 +502,7 @@ void player_view_compose_camera(const PlayerViewState &v,
     // The eye anchor: the shell-fed head-bone eye floored kEyeMinAbovePosition
     // over Position, or the non-person +1.0 bump. The 0x2000-equivalent floor
     // is a DEFENSIVE stand-in on this leg: retail floors only the sample-less
-    // capsule leg (retail: @ 0x4b6b98) — the head-bone legs store unfloored
+    // capsule leg [orig: Entity_UpdateInfantryPlayerBody @0x4b6b98] — the head-bone legs store unfloored
     // (on-foot @ 0x4b6bb3..0x4b6cc8, mounted @ 0x4b6908..0x4b696c; D-INF-18).
     // [orig: the bump @ 0x437e8f]
     float eye[3];

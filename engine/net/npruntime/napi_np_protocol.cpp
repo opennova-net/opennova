@@ -154,7 +154,7 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 	}
 	if (it == list.end()) return false;
 
-	const bool had_player = it->type == 1 &&
+	const bool had_player = it->type == NapiNPConnection::kTypeServerSide &&
 			(it->link.owned_entity.valid() || it->phase >= ConnectionPhase::PlayerAdded);
 	const world::EntityHandle owned_entity = it->link.owned_entity;
 	const uint8_t player_slot = it->reply.player_slot;
@@ -203,7 +203,7 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 uint32_t occupied_player_count(const NapiNPServerCtx &ctx) {
 	uint32_t occupied = 0;
 	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list) {
-		if (connection.type == 2 || connection.phase >= ConnectionPhase::Joined) ++occupied;
+		if (connection.type == NapiNPConnection::kTypeClientSide || connection.phase >= ConnectionPhase::Joined) ++occupied;
 	}
 	return occupied;
 }
@@ -359,7 +359,7 @@ void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage
 	}
 	// Protocol-only tests may drive tick_connections without a HostOwner. Keep
 	// their remote framed fallback; a loopback without a transport has no sink.
-	if (conn.type == 2) return;
+	if (conn.type == NapiNPConnection::kTypeClientSide) return;
 	// Frame EACH drained burst message as its OWN 0x83 SESSION datagram — do NOT coalesce the whole
 	// burst into one packet. The original emits a separate NapiNPServer_SendFiltered per tag; coalescing
 	// the 616 B 0x0B BMS header plus the 0x0C pool-0 batch into one datagram would exceed the UDP MTU and
@@ -833,7 +833,7 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// minimap-slot + 0x6A squad broadcasts and the team spawn-token return
 	// (@0x51b661..0x51b67a). The 120-second receive-timeout sweep uses this same teardown path.
 	NapiNPConnection *conn = find_connection(ctx, peer);
-	if (conn == nullptr || conn->type != 1 || body.size() < 4) return;
+	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide || body.size() < 4) return;
 	const uint32_t receiver_local_key =
 			static_cast<uint32_t>(body[0]) |
 			(static_cast<uint32_t>(body[1]) << 8) |
@@ -862,7 +862,7 @@ void configure_session_runtime(NapiNPServerCtx &ctx) {
 	// configure_session_runtime would silently delete it).
 	auto &list = ctx.np_protocol.connection_list;
 	for (auto it = list.begin(); it != list.end();) {
-		if (it->type == 1) it = list.erase(it);
+		if (it->type == NapiNPConnection::kTypeServerSide) it = list.erase(it);
 		else ++it;
 	}
 }
@@ -916,7 +916,7 @@ std::vector<TickOut> flush_server_missing_requests(
 		NapiNPServerCtx &ctx, bool respect_s2c_send_boundary) {
 	std::vector<TickOut> out;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.type != 1 || !conn.seq.missing_request_pending) continue;
+		if (conn.type != NapiNPConnection::kTypeServerSide || !conn.seq.missing_request_pending) continue;
 		if (respect_s2c_send_boundary && !conn.s2c_send_boundary_open) continue;
 		conn.seq.missing_request_pending = false;
 		if (conn.seq.queued_inbound.empty()) continue;
@@ -943,7 +943,7 @@ std::vector<TickOut> tick_connections(
 	// teardown erases vector nodes and may broadcast roster removal through surviving transports.
 	std::vector<PeerAddr> timed_out;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.type != 1 || conn.phase < ConnectionPhase::Joined) continue;
+		if (conn.type != NapiNPConnection::kTypeServerSide || conn.phase < ConnectionPhase::Joined) continue;
 		if (elapsed_ms > 0) {
 			const uint64_t total =
 					static_cast<uint64_t>(conn.receive_inactive_ms) +
@@ -968,7 +968,7 @@ std::vector<TickOut> tick_connections(
 	}
 
 	auto append_active_probe = [](NapiNPConnection &conn, TickOut &to) {
-		if (conn.type != 1 || conn.server_scrk.empty() ||
+		if (conn.type != NapiNPConnection::kTypeServerSide || conn.server_scrk.empty() ||
 		    conn.seq.retained_outbound_message_count == 0 ||
 		    conn.active_send_elapsed_ms <= kActiveSendIntervalMilliseconds) {
 			return;
@@ -986,7 +986,7 @@ std::vector<TickOut> tick_connections(
 		// header probe until afterward. Any semantic packet framed below resets the timer and takes
 		// this sequence slot, matching BuildOutgoingPackets rather than inserting an empty packet
 		// immediately before queued data.
-		if (conn.type == 1 && !conn.server_scrk.empty()) {
+		if (conn.type == NapiNPConnection::kTypeServerSide && !conn.server_scrk.empty()) {
 			if (conn.seq.retained_outbound_message_count == 0) {
 				conn.active_send_elapsed_ms = 0;
 			} else if (elapsed_ms > 0) {
@@ -1000,7 +1000,7 @@ std::vector<TickOut> tick_connections(
 			}
 		}
 		const bool send_boundary_closed =
-				respect_s2c_send_boundary && conn.type == 1 &&
+				respect_s2c_send_boundary && conn.type == NapiNPConnection::kTypeServerSide &&
 				!conn.s2c_send_boundary_open;
 		if (conn.burst.spawned) {
 			// Spawned peers: Server_TickUpdate owns their per-frame 0x0A — but the roster
@@ -1012,7 +1012,7 @@ std::vector<TickOut> tick_connections(
 			if (send_boundary_closed) continue;
 			TickOut to;
 			to.peer = conn.peer;
-			if (conn.type == 1 &&
+			if (conn.type == NapiNPConnection::kTypeServerSide &&
 			    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
 				std::vector<ProtocolMessage> roster_reply{build_player_list_message(
 						ctx.config, ctx.np_protocol.connection_list, ctx.world)};
@@ -1038,7 +1038,7 @@ std::vector<TickOut> tick_connections(
 		// captured admission tick is an explicit lower bound as well as the
 		// packet latches below.
 		const bool staged_join_ready =
-				conn.type == 1 &&
+				conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.admission_stage == GameAdmissionStage::Complete &&
 				conn.reply.admission_metadata_pushed &&
 				ctx.world != nullptr &&
@@ -1075,7 +1075,7 @@ std::vector<TickOut> tick_connections(
 		// (type 2) bypasses the gate. Remote peers have no timeout shortcut: the bundled client now
 		// drives this captured exchange, and bypassing it marks malformed/out-of-order joins as players.
 		const bool roster_ready =
-				conn.type != 1 ||
+				conn.type != NapiNPConnection::kTypeServerSide ||
 				(conn.admission_stage == GameAdmissionStage::Complete &&
 				 conn.reply.roster_pushed &&
 				 now_tick != conn.reply.roster_completed_tick);
@@ -1103,7 +1103,7 @@ std::vector<TickOut> tick_connections(
 		// Covers the joiner's OWN spawn — the client needs its own slot to bind its local
 		// player and deploy (golden: 0x16 31→39 just before the first C2S 0x0C) — and every
 		// later roster change (join/leave). One framed push per generation per connection.
-		if (conn.type == 1 && conn.burst.spawned &&
+		if (conn.type == NapiNPConnection::kTypeServerSide && conn.burst.spawned &&
 		    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
 			std::vector<ProtocolMessage> roster_reply{
 					build_player_list_message(ctx.config, ctx.np_protocol.connection_list, ctx.world)};

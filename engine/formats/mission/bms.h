@@ -802,8 +802,9 @@ struct File {
 
     // Get mission name as string
     std::string get_mission_name() const;
-    std::string get_designer() const;
     std::string get_terrain() const;
+    // The environment[16] header slot (the .env base name).
+    std::string get_environment() const;
 
 private:
     // Parse-time provenance for retail's network-header memcpy. The canonical

@@ -144,14 +144,19 @@ void MissionKernel::set_items_table(const DefItemsFile *items_table_ptr) {
 	items_override_ = items_table_ptr;
 }
 
+void MissionKernel::sync_water_plane() {
+	terrain_store.set_water_plane(world.env.water_z);
+}
+
 void MissionKernel::wire_terrain() {
+	sync_water_plane();
 	world.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	ai.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	ai.ground_clearance = w::GroundClearance{};
 	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
-	// The footstep surface pick reads the charmap through this view, exactly
-	// as Simulation::apply_terrain_to_ai wires it (the kernel has no mission
-	// .til path here, matching the sim's empty-tiles leg).
+	// The footstep surface pick reads the charmap through this view; the
+	// shell's apply_terrain_to_ai calls this and then re-layers its
+	// device-fed extras (placed tiles, sound profiles).
 	world.surface_map = terrain_store.surface_map();
 }
 
@@ -229,15 +234,18 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 		spawn.roll = sel.roll;
 	}
 	spawn.team = 1;
-	const w::EntityHandle h = w::spawn_player(world, spawn);
-	if (!h.valid()) return -1;
-	resolve_new_infantry_adm_ids();
-	input = w::PlayerInput{};
-	input.look_heading = w::bam_heading_from_mission_yaw_deg(spawn.yaw);
-	stance_latch_ = 0;
-	look_accum_x_ = look_accum_y_ = 0.0f;
-	w::local_player_view_reset(&world, weapon, view, view_tracker);
+	if (!spawn_local_player(spawn)) return -1;
 	return sel.found ? 1 : 0;
+}
+
+bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
+	const w::EntityHandle h = w::spawn_player(world, spawn);
+	if (!h.valid()) return false;
+	resolve_new_infantry_adm_ids();
+	// Seed the look heading from the spawn facing so the body starts aligned.
+	reset_local_player_input(w::bam_heading_from_mission_yaw_deg(spawn.yaw));
+	w::local_player_view_reset(&world, weapon, view, view_tracker);
+	return true;
 }
 
 void MissionKernel::resolve_new_infantry_adm_ids() {
@@ -399,7 +407,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	steps.install_terrain_til = [] {};
 	steps.install_mission_text = [&] {
 		std::vector<uint8_t> text;
-		text_source = static_cast<int>(resolve_mission_text(files_, mission_basename, text));
+		text_source = resolve_mission_text(files_, mission_basename, text);
 		text_size = text.size();
 	};
 	steps.load_mission = [&] { return load_mission_into_world(); };
@@ -483,8 +491,7 @@ bool MissionKernel::local_player_can_fire(const w::AiEntity *body) const {
 	// [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80; Sighted helper
 	// @0x4dcd30].
 	const w::Entity *local = world.registry.get(world.cached.local_player);
-	if (local == nullptr || body == nullptr || !local->alive || local->health <= 0 || !weapon.active)
-		return false;
+	if (local == nullptr || body == nullptr || !weapon.active) return false;
 	bool mount_allows = true;
 	if (local->mounted)
 		mount_allows = local->mount_type == w::SeatType::Passenger ||
@@ -503,9 +510,31 @@ bool MissionKernel::local_player_can_fire(const w::AiEntity *body) const {
 	const bool in_air = body->inf.airborne || (entity_flags & w::kEntityFlagInAir) != 0;
 	const bool submerged = (entity_flags & w::kEntityFlagDrowning) != 0 ||
 			w::entity_eye_below_water(world, body->pos[2], local->eye_offset_z);
-	const bool ordinary = !in_air && (sighted || (scoped && !body->inf.player_moving)) &&
+	// Dead (Flags & 0x2) and airborne (0x2000) share ONE can_fire=0 group
+	// that the FORCESCOPED override reverses, so a dead body holding a
+	// ForceScoped weapon still reads can_fire [orig: `Flags & 0x2002` @0x5cf7fb;
+	// the override @0x5cf845].
+	const bool dead = !local->alive || local->health <= 0;
+	const bool ordinary = !dead && !in_air && (sighted || (scoped && !body->inf.player_moving)) &&
 			(sighted || !submerged);
 	return (flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0 || ordinary;
+}
+
+bool MissionKernel::local_player_dead() const {
+	if (!world.cached.local_player.valid()) return false;
+	const w::Entity *e = world.registry.get(world.cached.local_player);
+	return e != nullptr && ((e->flags | e->engine_flags) & w::kEntityFlagDead) != 0;
+}
+
+void MissionKernel::stamp_medic_request() {
+	medic_request_cooldown_ticks = kMedicRequestCooldownTicks;
+	++medic_request_serial;
+}
+
+void MissionKernel::tick_medic_cooldown(bool local_dead) {
+	if (local_dead && !medic_dead_edge_seen_) medic_request_cooldown_ticks = 0;
+	medic_dead_edge_seen_ = local_dead;
+	if (medic_request_cooldown_ticks > 0) --medic_request_cooldown_ticks;
 }
 
 void MissionKernel::apply_player_input_pre_tick() {
@@ -526,11 +555,16 @@ void MissionKernel::apply_player_input_pre_tick() {
 		p->inf.aimed_shot_available = local_player_can_fire(p);
 	}
 	if (w::Entity *entity = world.registry.get(world.cached.local_player)) {
+		// The per-frame view-flag restamp onto the body's Flags word
+		// [orig: the g_NVGActive / g_binocularsRaised / g_weaponScopeActive
+		// refresh in Player_PackInputStateToEntity @0x4df450].
 		uint32_t view_flags = 0;
-		if (view.nvg_active) view_flags |= 0x4u;
-		if (view.binoculars_raised) view_flags |= 0x8u;
-		if (scope_promoted) view_flags |= 0x10u;
-		entity->flags = (entity->flags & ~0x1cu) | view_flags;
+		if (view.nvg_active) view_flags |= w::kEntityFlagNVGWorn;
+		if (view.binoculars_raised) view_flags |= w::kEntityFlagBinoculars;
+		if (scope_promoted) view_flags |= w::kEntityFlagScopeRaised;
+		constexpr uint32_t kViewFlagMask =
+				w::kEntityFlagNVGWorn | w::kEntityFlagBinoculars | w::kEntityFlagScopeRaised;
+		entity->flags = (entity->flags & ~kViewFlagMask) | view_flags;
 	}
 }
 
@@ -597,9 +631,14 @@ void MissionKernel::set_movement_keys(bool forward, bool back, bool left,
 bool MissionKernel::request_stance(int stance) {
 	if (stance < 0 || stance > 2) return false;
 	// ForceCrouch weapons refuse stance changes [orig: the case-169/170/172
-	// gate Entity_CheckWeaponSeatFlags(equipped, 0x40000) @0x4e0d8a; the
-	// seat-kind-3 mount refusal rides the unported mounting slice].
+	// gate Entity_CheckWeaponSeatFlags(equipped, 0x40000) @0x4e0d8a].
 	if (weapon.active && weapon.force_crouch) return false;
+	// So does the UseGun seat: a mounted gunner never sends the C2S 0x1D
+	// [orig: Input_HandleActionBinding_0 cases 169/170/172 `parentEntity &&
+	// parentSlot == 3` @0x4e0da0..0x4e0db5].
+	if (const w::Entity *p = player();
+			p != nullptr && p->mounted && p->mount_type == w::SeatType::Gunner)
+		return false;
 	if (stance_latch_ == stance) return false;
 	// SELECT with mutual exclusion — the 0x1D apply writes one stance bit and
 	// clears the other [orig: NapiNPServerMsg_HandleStanceChange @0x501c60:
@@ -611,6 +650,10 @@ bool MissionKernel::request_stance(int stance) {
 }
 
 void MissionKernel::tick_no_net(w::LogicTickPerf *perf) {
+	// The authority's per-tick environment advance (TOD, quake, the fog
+	// approach) precedes the logic tick, the order the dedicated host's golden
+	// captures pin; a joiner never advances (its sample is wire-fed).
+	world.network_env.advance_tick();
 	apply_player_input_pre_tick();
 	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay, perf);
 	run_local_player_post_tick();
@@ -722,15 +765,16 @@ int32_t MissionKernel::player_health() const {
 }
 
 std::string MissionKernel::player_anim_key() const {
-	const w::AiEntity *e = world.cached.local_player.valid()
-			? const_cast<w::AiSystem &>(ai).for_handle(world.cached.local_player)
-			: nullptr;
+	const w::AiEntity *e =
+			world.cached.local_player.valid() ? ai.for_handle(world.cached.local_player) : nullptr;
 	if (e == nullptr || !e->inf.active) return std::string();
-	const int state = e->inf.anim_state;
-	if (state < 0 || state >= w::kInfantryAnimStateCount) return std::string();
-	return std::string("anim_") + w::kInfantryAnimNames[state];
+	return w::infantry_anim_key(e->inf.anim_state);
 }
 
+// Mouse pixels onto the look angles through the witnessed integer pipeline
+// [orig: Input_ProcessMouseAxisBindings @0x499680]. The float accumulator is
+// the device-input fold over retail's integer remainder pump [orig:
+// Game_ProcessMainFrame @0x526481..0x5264a9, dword_24E0E78].
 void MissionKernel::look(float dx_px, float dy_px) {
 	int32_t scoped_zoom = 0;
 	if (!view.binoculars_view_active && weapon.active && view.scope_engaged && weapon.scope_max_mag > 1.0f)
@@ -762,9 +806,9 @@ void MissionKernel::teleport_local_player(const w::Vec3 &mission_pos, double yaw
 	w::AiEntity *p = player_ai();
 	if (e == nullptr || p == nullptr) return;
 	e->position = mission_pos;
-	p->pos[0] = static_cast<int32_t>(mission_pos.x * 65536.0f);
-	p->pos[1] = static_cast<int32_t>(mission_pos.y * 65536.0f);
-	p->pos[2] = static_cast<int32_t>(mission_pos.z * 65536.0f);
+	p->pos[0] = w::to_fixed(mission_pos.x);
+	p->pos[1] = w::to_fixed(mission_pos.y);
+	p->pos[2] = w::to_fixed(mission_pos.z);
 	p->heading = w::bam_heading_from_mission_yaw_deg(yaw_deg);
 	p->pitch = static_cast<int32_t>(pitch_deg / w::kDegreesPerBam);
 	// The input-owned view mirrors, or the next pre-tick snaps the view back.
@@ -847,9 +891,13 @@ bool MissionKernel::toggle_mount() {
 	if (active_slot != nullptr &&
 			!w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next))
 		return false;
-	// The out-of-session UseGun rejection: an unarmed local player still
-	// enters an ordinary seat [orig: Entity_AttachToUseGunSlot @0x546b80].
-	if (!weapon.active) {
+	// The null-EquippedSlot rejection belongs to UseGun itself, not the
+	// top-level USE action: an unarmed local player still enters an ordinary
+	// passenger/control seat, and it is an out-of-session-only player gate
+	// (force/script and NAPI authority paths bypass it) [orig:
+	// Entity_AttachToUseGunSlot @0x546b80, reject `!is_in_session &&
+	// Flags&0x100 && !EquippedSlot` @0x546c07].
+	if (!session_open && !weapon.active) {
 		w::VehicleSeatSelection hit;
 		if (w::find_mount_toggle_candidate(world, *toggle_player, hit) && hit.type == w::SeatType::Gunner)
 			return false;
@@ -917,24 +965,24 @@ std::vector<w::Effect> MissionKernel::drain_effects() {
 
 std::vector<w::CollisionWorld::DebugInstance> MissionKernel::collision_instances(
 		const w::Vec3 &anchor, float range_units, int32_t max_instances) {
-	const int32_t a[3] = {static_cast<int32_t>(anchor.x * 65536.0f),
-			static_cast<int32_t>(anchor.y * 65536.0f), static_cast<int32_t>(anchor.z * 65536.0f)};
-	return collision.debug_instances(world, a, static_cast<int32_t>(range_units * 65536.0f), max_instances);
+	const int32_t a[3] = {w::to_fixed(anchor.x), w::to_fixed(anchor.y), w::to_fixed(anchor.z)};
+	const int32_t range = range_units < 0.0f ? -1 : w::to_fixed(range_units);
+	return collision.debug_instances(world, a, range, max_instances);
 }
 
 std::vector<w::CollisionWorld::DebugHitboxEntity> MissionKernel::hitboxes(
 		const w::Vec3 &anchor, float range_units, int32_t max_entities, int32_t max_faces) {
-	const int32_t a[3] = {static_cast<int32_t>(anchor.x * 65536.0f),
-			static_cast<int32_t>(anchor.y * 65536.0f), static_cast<int32_t>(anchor.z * 65536.0f)};
-	return collision.debug_hitboxes(world, a, static_cast<int32_t>(range_units * 65536.0f),
-			max_entities, max_faces);
+	const int32_t a[3] = {w::to_fixed(anchor.x), w::to_fixed(anchor.y), w::to_fixed(anchor.z)};
+	const int32_t range = range_units < 0.0f ? -1 : w::to_fixed(range_units);
+	return collision.debug_hitboxes(world, a, range, max_entities, max_faces);
 }
 
 // --- world::IMountedPoseProvider --------------------------------------------
 
 bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &carrier,
 		const w::Seat &seat, w::MountedPose &out) {
-	// The native-only mounted-pose resolver (Simulation::resolve_mounted_pose_native).
+	// The kernel IS the world's IMountedPoseProvider: the one mounted-pose
+	// resolver every embedder's world reaches.
 	if (&p_world != &world || seat.type != w::SeatType::Gunner || seat.bone_index == 0) return false;
 	++mounted_queries;
 	const Threedi3di3 *model_ptr = nullptr;

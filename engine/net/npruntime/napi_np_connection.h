@@ -355,7 +355,9 @@ struct NapiNPConnection {
 	// [orig: CNapiNPConnection_Create @0x62ACB0 direction mirroring, §6.5] 1 = server-side
 	// connection (the host's view of a client), 2 = client-side connection (a client's view of
 	// the host, incl. the host's own local loopback client).
-	uint8_t type = 1;
+	static constexpr uint8_t kTypeServerSide = 1;
+	static constexpr uint8_t kTypeClientSide = 2;
+	uint8_t type = kTypeServerSide;
 
 	// Where this node is in its lifecycle (above).
 	ConnectionPhase phase = ConnectionPhase::New;

@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include <net/npwire/game_type.h> // game_rules::kDefault* (the Config_SetDefaults baseline)
 #include <net/npwire/protocol_message.h>
 
 // GameConfig — the ONE consolidated in-match server-state config (ADR 0013, D-NET-132; §6.9). It
@@ -62,10 +63,9 @@ struct GameConfig {
 	std::string server_password;               // [orig game_settings +0x20] BuildFlags |0x8
 	std::string side_a_password;               // [orig game_settings +0x40] BuildFlags |0x20; join-reject 19
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20
-	std::string internet_address;              // [orig game_settings +0x80] connect-target; default "0.0.0.0"
+	// (retail game_settings +0x80 internet_address, +0xC4 use_lineup_queue and
+	//  +0xC8 lineup_queue_size have no reader here and are not modelled.)
 	uint32_t max_players = 1;                   // [orig game_settings +0xC0] clamped 1..kMaxPlayersCap
-	uint32_t use_lineup_queue = 0;             // [orig game_settings +0xC4]
-	uint32_t lineup_queue_size = 0;            // [orig game_settings +0xC8]
 
 	// g_GameType @0x24D2128 — the ONE gametype global. Read by the 0x08 block dword[3], the 0x7B/0x60
 	// reply bodies, the BuildFlags team-gate (game_settings.game_type copy, equal in a live session),
@@ -243,5 +243,31 @@ struct GameConfig {
 		}
 	}
 };
+
+// Seed a config with the fresh-host rule defaults the retail config path
+// applies before a mission starts -- the one place the game_rules baseline
+// lands on the live wire fields (a dev host that skips this stays inert at
+// zero). [orig: Config_SetDefaults @0x54D030 -> apply_session_settings_to_globals
+// @0x551500; GameType_CreateDefaultSettings @0x52dd00]
+inline void apply_fresh_host_rule_defaults(GameConfig &config) {
+	config.respawn_time = game_rules::kDefaultRespawnTime;
+	config.time_limit_minutes = game_rules::kDefaultTimeLimitMinutes;
+	config.replay_enabled = game_rules::kDefaultReplayEnabled;
+	config.max_team_lives = game_rules::kDefaultMaxTeamLives;
+	config.score_limit = game_rules::kDefaultScoreLimit;
+	config.max_score = game_rules::kDefaultMaxScore;
+	config.koth_delta = game_rules::kDefaultKothDelta;
+	config.flag_return_ticks = game_rules::kDefaultFlagReturnTicks;
+	config.capture_duration_seconds = game_rules::kDefaultCaptureDurationSeconds;
+	config.capture_speed_setting = game_rules::kDefaultCaptureSpeedSetting;
+	config.spawn_wave_time_base = game_rules::kDefaultSpawnWaveTimeBase;
+	config.spawn_wave_time_zone = game_rules::kDefaultSpawnWaveTimeZone;
+	config.default_spawn_requires_no_team_zone = game_rules::kDefaultSpawnRequiresNoTeamZone;
+	config.num_teams = static_cast<uint8_t>(game_rules::kDefaultNumTeams);
+	config.respawn_timeout = game_rules::kDefaultRespawnTimeout;
+	config.start_delay = game_rules::kDefaultStartDelay;
+	config.destroy_buildings = game_rules::kDefaultDestroyBuildings;
+	config.death_messages = game_rules::kDefaultDeathMessages;
+}
 
 } // namespace opennova::np

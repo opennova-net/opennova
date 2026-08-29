@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <formats/mission/bms.h>                  // bms::File, bms::encode_loaded_header_blob (0x0B body)
@@ -644,7 +645,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	// Most remote phases produce one record per eligible boundary. The witnessed
 	// player-sync tail (subphase 16) and game-start bundle are atomic exceptions.
 	constexpr std::size_t kPacedMsgsPerTick = 1; // ~1 datagram/host-frame; golden is ~0.4 batch/frame
-	const bool is_remote = (conn.type == 1);
+	const bool is_remote = (conn.type == NapiNPConnection::kTypeServerSide);
 	const std::size_t budget = is_remote ? kPacedMsgsPerTick : 0xFFFFu; // loopback: effectively unpaced
 
 	// Backlog throttle [orig: 0x51bf1b (player-sync track) / 0x51bc04 (world-stream track)]: the
@@ -710,6 +711,31 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 
 	step.advanced = true;
 	return step;
+}
+
+void install_mission_location_names(NapiNPServerCtx &ctx, const bms::File &mission,
+                                    const std::unordered_map<int32_t, std::string> &location_texts) {
+	ctx.mission_location_names.clear();
+	int32_t location_index = 1;
+	for (const bms::Entity &marker : mission.markers) {
+		if (marker.type_id != 2044) continue;
+		// LOCATION001.. follow type-2044 marker spawn order; the BMS ttool_index
+		// is zero for both 00TRg markers and is not the text key.
+		const auto found = location_texts.find(location_index);
+		std::string label;
+		if (found != location_texts.end()) {
+			label = found->second;
+		} else {
+			const std::string suffix = std::to_string(location_index);
+			label = "LOCATION";
+			if (suffix.size() < 3) label.append(3 - suffix.size(), '0');
+			label += suffix;
+		}
+		// Retail stores the resolved text in a 64-byte location-name slot.
+		if (label.size() > 63) label.resize(63);
+		ctx.mission_location_names.push_back(std::move(label));
+		++location_index;
+	}
 }
 
 } // namespace opennova::np

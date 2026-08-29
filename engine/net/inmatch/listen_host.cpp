@@ -14,12 +14,21 @@ namespace opennova::inmatch::listen_host {
 
 namespace {
 
-// The same g_GameType word the mission catalog derives: a mission with no
-// multiplayer bit is stock Co-op (0x10020) [orig: AI_GetTaskTypeFromFlags
-// @0x40DAE0 -> Game_StartMission @0x524360; net-re 5.2c].
-uint32_t mission_game_type(const bms::File &mission) {
-	return game_type::for_mission_mode(bms::selected_game_mode(
-			static_cast<bms::AttribFlags>(mission.header.attrib_flags)));
+// The shared bring-up preamble: a fresh loopback + owner over the kernel's
+// world and mission, the rule words the world reads at tick time, and the
+// is_in_session fact.
+void reset_state(mission::MissionKernel &kernel, ListenHostState &state,
+		const np::GameConfig &config, bool serve_and_play) {
+	state.client_runtime.reset();
+	state.host_loop = netsim::LoopbackChannel{};
+	state.host_owner = np::HostOwner{};
+	state.host_owner.serve_and_play = serve_and_play;
+	state.host_owner.ctx.world = &kernel.world;
+	state.host_owner.ctx.mission = &kernel.mission;
+	state.host_owner.ctx.mission_text_loaded = false;
+	kernel.world.fat_bullets = config.fat_bullets;
+	kernel.world.one_shot_kill = config.one_shot_kill;
+	kernel.session_open = true;
 }
 
 // host_session_pump's before-server-tick hook: ground every soldier the tick
@@ -33,20 +42,12 @@ void before_server_tick(void *context) {
 
 // [orig: SinglePlayer_StartMission @0x561af0]
 void bringup(mission::MissionKernel &kernel, ListenHostState &state) {
-	state.client_runtime.reset();
-	state.host_loop = netsim::LoopbackChannel{};
-	state.host_owner = np::HostOwner{};
-	state.host_owner.host_loopback = &state.host_loop;
-	state.host_owner.serve_and_play = true;
-	state.host_owner.ctx.world = &kernel.world;
-	state.host_owner.ctx.mission = &kernel.mission;
-	state.host_owner.ctx.mission_text_loaded = false;
 	np::GameConfig config;
 	config.server_name = "SINGLEPLAYERGAME";
 	config.max_players = 1;
-	config.game_type = mission_game_type(kernel.mission);
-	kernel.world.fat_bullets = config.fat_bullets;
-	kernel.world.one_shot_kill = config.one_shot_kill;
+	config.game_type = game_type::for_mission_attribs(kernel.mission.header.attrib_flags);
+	reset_state(kernel, state, config, /*serve_and_play=*/true);
+	state.host_owner.host_loopback = &state.host_loop;
 	np::HostConfig host_cfg;
 	host_cfg.config = config;
 	host_cfg.socket_mode = np::SocketMode::Socketless;
@@ -61,15 +62,7 @@ void bringup(mission::MissionKernel &kernel, ListenHostState &state) {
 
 void bringup_dedicated(mission::MissionKernel &kernel, ListenHostState &state,
 		const np::HostConfig &host_cfg) {
-	state.client_runtime.reset();
-	state.host_loop = netsim::LoopbackChannel{};
-	state.host_owner = np::HostOwner{};
-	state.host_owner.serve_and_play = false;
-	state.host_owner.ctx.world = &kernel.world;
-	state.host_owner.ctx.mission = &kernel.mission;
-	state.host_owner.ctx.mission_text_loaded = false;
-	kernel.world.fat_bullets = host_cfg.config.fat_bullets;
-	kernel.world.one_shot_kill = host_cfg.config.one_shot_kill;
+	reset_state(kernel, state, host_cfg.config, /*serve_and_play=*/false);
 	// HostOnly registers no local-player connection: no type-2 loopback is
 	// handed to create_session and no local player spawns.
 	np::HostConfig cfg = host_cfg;
@@ -81,7 +74,7 @@ void drain_host_client_gameplay_requests(mission::MissionKernel &kernel,
 		ListenHostState &state) {
 	np::NapiNPConnection *local = nullptr;
 	for (np::NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list) {
-		if (conn.type == 2 && conn.link.transport == &state.host_loop) {
+		if (conn.type == np::NapiNPConnection::kTypeClientSide && conn.link.transport == &state.host_loop) {
 			local = &conn;
 			break;
 		}
@@ -118,6 +111,9 @@ void frame(mission::MissionKernel &kernel, ListenHostState &state,
 	state.host_owner.ctx.loaded_model_viewport_height =
 			viewport_height > 0 ? static_cast<uint32_t>(viewport_height) : 0u;
 	const uint32_t now = state.host_owner.now_tick;
+	// The authority's per-tick environment advance precedes the server tick so
+	// the 0x0A fan reads the advanced sample (the golden-capture order).
+	kernel.world.network_env.advance_tick();
 	drain_host_client_gameplay_requests(kernel, state);
 	kernel.apply_player_input_pre_tick();
 	np::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,

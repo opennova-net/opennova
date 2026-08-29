@@ -129,9 +129,6 @@ static inline int threedi_panm_track_present(uint32_t flags, ThreediPanmTarget t
 
 typedef struct ThreediControlFuncInfo {
     const char *name;     // Static string for the control function (or NULL).
-    // Generic generator-family metadata. Individual consumers dispatch the
-    // 0x71..0x75 range differently; PANM uses only 0x71 as a register read.
-    int is_register_func;
 } ThreediControlFuncInfo;
 
 // Lookup control function metadata. Returns NULL if the code is unknown.
@@ -163,10 +160,6 @@ int threedi_panm_parameter_is_ctrl_reference(uint8_t code);
 #define THREEDI_STYLE_CONTROL_SKEW     0x73
 #define THREEDI_STYLE_CONTROL_MULTIPLY 0x74
 #define THREEDI_STYLE_CONTROL_ROTATE   0x75
-
-// Number of canonical styles, and the code at a catalog index (-1 when out of
-// range). Names for a code come from threedi_control_func_info.
-int threedi_generator_style_count(void);
 
 // The retail consumers of the generator-style byte. Their 0x71..0x75 dispatch
 // differs: UV reads the CTRL value for the whole range, RGB/light for

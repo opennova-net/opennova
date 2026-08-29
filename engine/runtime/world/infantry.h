@@ -5,6 +5,7 @@
 #define OPENNOVA_WORLD_INFANTRY_H
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 
 #include <runtime/world/body_anim.h>
@@ -25,6 +26,11 @@ inline constexpr int32_t kInfantryAirborneGap = 0xF000;
 
 // State id -> .adm key without the "anim_" prefix. [orig: g_animStateNameTable @0x8135F0]
 extern const char *const kInfantryAnimNames[kInfantryAnimStateCount];
+// The .adm clip key for a state ("anim_" + the retail state name); empty for
+// an out-of-range or unnamed state. The ONE builder every consumer (the
+// kernel, the inspect records, the root-motion and collision-pose caches,
+// the shell) calls. [orig: g_animStateNameTable @0x8135F0]
+std::string infantry_anim_key(int state);
 
 // Per-state behavior flags. [orig: g_animStateFlagsTable @0x8139E8]
 extern const uint32_t kInfantryAnimFlags[kInfantryAnimStateCount];

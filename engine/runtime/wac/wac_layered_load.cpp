@@ -17,7 +17,7 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 	error.clear();
 	if (!files.valid()) return WacLayeredLoadStatus::kAbsent;
 	// The original layering, absent files skipped in order
-	// [orig: WacScript_InitAndLoad].
+	// [orig: WacScript_InitAndLoad @0x4f91f0].
 	std::vector<std::string> sources;
 	for (const std::string &name : {std::string("game.wac"),
 				 std::string("server.wac"), mission_basename + ".wac"}) {

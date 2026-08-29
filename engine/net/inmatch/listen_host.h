@@ -54,11 +54,13 @@ void bringup_dedicated(mission::MissionKernel &kernel, ListenHostState &state,
 // The local player's own C2S gameplay messages (the witnessed local reload
 // producer) reach the SAME per-message server dispatcher a remote connection
 // does; every other datagram stays queued for Server_TickUpdate's drain.
+// frame() runs it first; the listen-host ctest drives it directly.
 void drain_host_client_gameplay_requests(mission::MissionKernel &kernel,
 		ListenHostState &state);
 
-// The listen frame: input -> the local player's body, Server_TickUpdate (the
-// C2S drain, ONE logic tick, the 0x0A fan) through the shared owner loop, the
+// The listen frame: the environment advance, input -> the local player's
+// body, Server_TickUpdate (the C2S drain, ONE logic tick, the 0x0A fan)
+// through the shared owner loop, the
 // local view/weapon pumps, the local ClientState fold, then the new-soldier
 // .adm ground. `viewport_height` feeds the S2C 0x68 wrap seam (0 for a
 // headless embedder — npruntime then suppresses 0x68, D-NET-206); `perf` is

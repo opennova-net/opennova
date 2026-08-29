@@ -23,13 +23,6 @@ Vec3 mission_from_fixed3(const int32_t pos[3]) {
 			static_cast<float>(pos[2]) / kFixed16};
 }
 
-std::string infantry_anim_key(int state) {
-	if (state < 0 || state >= kInfantryAnimStateCount) return {};
-	const char *name = kInfantryAnimNames[state];
-	if (name == nullptr || name[0] == '\0') return {};
-	return std::string("anim_") + name;
-}
-
 SeatRow seat_row(const Seat &seat, int32_t index) {
 	SeatRow row;
 	row.index = index;
@@ -139,8 +132,8 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 		d.rotor_phase = ve->veh.part_spin.angle;
 		// The rotor machine's three gates, so a still rotor names its cause:
 		// the seeded rate, the brain's profile type (the HELO twin runs only
-		// for type 1 — retail: Entity_UpdateHeloRotorSpin @0x48FA70, the
-		// `profile+0x10 == 1` test @0x48fa98) and the engine-running claimant
+		// for type 1 [orig: Entity_UpdateHeloRotorSpin @0x48FA70, the
+		// `profile+0x10 == 1` test @0x48fa98]) and the engine-running claimant
 		// latch (+0x170; world::Entity::primary_occupant).
 		d.rotor_rate = ve->veh.part_spin.rate;
 		d.profile_type = e.profile.type;

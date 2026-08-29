@@ -412,16 +412,5 @@ bool reassemble_protocol_payload(ProtocolReassemblyState &state,
                                  std::vector<uint8_t> &payload_out,
                                  bool *was_fragmented = nullptr);
 
-// Convenience: given a buffer that has already had its CRC envelope
-// stripped and opcode byte skipped (so `body` is the outer-encrypted
-// region), run the two-layer decrypt + parse end-to-end. `session_nwu_key`
-// is the global SESSION_NWU_KEY literal; `client_scrk` is the
-// per-session key we received in ClientAuth. `body` is outer-decrypted in
-// place; the inner-message region is decoded into `messages_out`.
-bool decode_protocol_packet(uint8_t *body, size_t body_len,
-                            std::string_view session_nwu_key,
-                            std::string_view client_scrk,
-                            ProtocolPacketHeader &hdr_out,
-                            std::vector<ProtocolMessage> &messages_out);
 
 } // namespace opennova
