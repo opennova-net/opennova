@@ -16,6 +16,13 @@ func setup(world: GameWorld, pick_list: DebugPickList) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	handle_click(event)
+
+
+## The picker body: a left press ray-picks through the live camera and adds
+## the hit to the pick list, consuming the event. Public so the tests can feed
+## synthetic events without the viewport's input routing.
+func handle_click(event: InputEvent) -> void:
 	var button := event as InputEventMouseButton
 	if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
 		return

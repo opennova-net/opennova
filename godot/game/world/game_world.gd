@@ -2454,7 +2454,7 @@ func is_foliage_hidden() -> bool:
 # through the co-named .DBF and plays the LWF set). WAC fx commands surface with the effect name in
 # `str`; route them to the effect world. Other kinds are still emitted via mission_effects for downstream
 # consumers (HUD, etc.).
-func _route_mission_effects(effects: Array) -> void:
+func route_mission_effects(effects: Array) -> void:
 	for e in effects:
 		var eff: Dictionary = e
 		var kind := String(eff.get("kind", ""))
@@ -2706,7 +2706,7 @@ func _on_runtime_effects(effects: Array) -> void:
 		routed.append(effect_v)
 	if routed.is_empty():
 		return
-	_route_mission_effects(routed)
+	route_mission_effects(routed)
 	mission_effects.emit(routed)
 
 

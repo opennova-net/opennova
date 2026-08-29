@@ -199,7 +199,7 @@ func test_lod0_aggregation_keeps_every_submesh_surface() -> void:
 	var second := ArrayMesh.new()
 	_add_triangle_surface(second, 20.0)
 
-	var aggregate: ArrayMesh = VegAssetsScript._aggregate_lod0_submeshes([
+	var aggregate: ArrayMesh = VegAssetsScript.aggregate_lod0_submeshes([
 		{"mesh": first, "material_index": 3},
 		{"mesh": second, "material_index": 9},
 	])
@@ -228,18 +228,18 @@ func test_cache_epoch_is_monotonic_and_bumped_by_mount() -> void:
 func test_caches_self_clear_when_epoch_moves() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
 	VegAssetsScript.list_graphics(resource_root, true)
-	assert_false(VegAssetsScript._graphics_cache_by_root.is_empty(),
+	assert_gt(VegAssetsScript.cache_entry_count(), 0,
 		"Listing should fill the graphics cache.")
 
 	# Any mount/rescan/clear in this process bumps the global epoch; the next
 	# cache access self-clears before refilling, so a rescanned resource dir is
 	# never served a stale listing or mesh.
 	ResourceRoot.bump_cache_epoch()
-	VegAssetsScript._check_epoch()
-	assert_true(VegAssetsScript._graphics_cache_by_root.is_empty(),
-		"An epoch move should drop the listing cache on next access.")
-	assert_true(VegAssetsScript._mesh_cache.is_empty(),
-		"An epoch move should drop the mesh cache on next access.")
+	# A root-less listing is the cheapest public access: it runs the epoch
+	# check (the self-clear) and refills nothing.
+	VegAssetsScript.list_graphics(null)
+	assert_eq(VegAssetsScript.cache_entry_count(), 0,
+		"An epoch move should drop every cache (listing and mesh) on next access.")
 
 
 func _prepare_veg_fixture(filename: String) -> ResourceRoot:

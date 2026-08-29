@@ -44,6 +44,13 @@ func setup(root: Node) -> void:
 
 
 func _process(_delta: float) -> void:
+	rebuild()
+
+
+## The per-frame body: regather every Skeleton3D under the root and re-emit
+## the overlay's line surfaces. Public so a caller (the tests) can drive one
+## rebuild without a frame.
+func rebuild() -> void:
 	if _mesh == null or _root == null or not is_instance_valid(_root):
 		_drawable_count = 0
 		return
@@ -65,6 +72,12 @@ func _process(_delta: float) -> void:
 ## Number of skeletons currently contributing geometry to this overlay.
 func get_debug_drawable_count() -> int:
 	return _drawable_count
+
+
+## Number of line surfaces the overlay mesh holds right now (0 when the last
+## rebuild gathered nothing, or before setup).
+func get_debug_surface_count() -> int:
+	return 0 if _mesh == null else _mesh.get_surface_count()
 
 
 # Every Skeleton3D in `node`'s subtree (recursive). A per-frame walk is cheap for the handful
