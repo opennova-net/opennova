@@ -3,6 +3,8 @@
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
+#include "util/string_convert.h"
+
 #include <cstdint>
 #include <cstring>
 #include <random>
@@ -31,7 +33,9 @@ PackedByteArray to_packed_bytes(const std::vector<uint8_t> &bytes) {
 
 Dictionary row_dictionary(const opennova::np::LanDiscoveryRow &row) {
 	Dictionary out;
-	const String server_name = String::utf8(row.server.server_name.c_str());
+	// Retail hosts advertise the typed server name in the host's single-byte
+	// codepage (cp1252), never UTF-8.
+	const String server_name = opennova::cp1252_to_gd(row.server.server_name);
 	out["name"] = server_name;
 	out["server_name"] = server_name;
 	out["host_ip"] = String::utf8(row.host_ip.c_str());

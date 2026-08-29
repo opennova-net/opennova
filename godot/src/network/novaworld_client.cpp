@@ -1,6 +1,7 @@
 #include "network/novaworld_client.h"
 
 #include "network/novaworld_identity.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/http_client.hpp>
 #include <godot_cpp/classes/http_request.hpp>
@@ -513,9 +514,11 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 	for (const auto &s : parsed.servers) {
 		Dictionary row;
 		row["rid"] = static_cast<int64_t>(s.rid);
-		row["name"] = String(s.server_name.c_str());
-		row["game_type"] = String(s.game_type.c_str());
-		row["mission_name"] = String(s.mission_name.c_str());
+		// GSB text fields are the host's cp1252 bytes, not UTF-8 (a copyright
+		// sign in a server name is one 0xA9 byte).
+		row["name"] = opennova::cp1252_to_gd(s.server_name);
+		row["game_type"] = opennova::cp1252_to_gd(s.game_type);
+		row["mission_name"] = opennova::cp1252_to_gd(s.mission_name);
 		row["players"] = s.players;
 		row["max_players"] = s.max_players;
 		row["dedicated"] = String(s.dedicated.c_str());
