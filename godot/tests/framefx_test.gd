@@ -1090,3 +1090,103 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 			"the redraw weights the copy instead of erasing it; " + diagnostic)
 	renderer.shutdown()
 	water.release_runtime_renderer_resources()
+
+
+func _additive_lum_slab_view(background: Color) -> Dictionary:
+	# The mount fixture's FF_ST_AD_LUM heat slab, dimmed to u_rgb_mod 0.25,
+	# centred 10 u ahead of and 5 u below the eye over the given background;
+	# every other surface stays out of the frame.
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(192, 144)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+
+	var environment_resource := Environment.new()
+	environment_resource.background_mode = Environment.BG_COLOR
+	environment_resource.background_color = background
+	environment_resource.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	environment_resource.glow_enabled = false
+	var environment := WorldEnvironment.new()
+	environment.environment = environment_resource
+	viewport.add_child(environment)
+
+	var camera := Camera3D.new()
+	camera.position = Vector3(100.3, 27.0, -33.7)
+	camera.current = true
+	viewport.add_child(camera)
+
+	var model := ObjectModel.new()
+	viewport.add_child(model)
+	model.set_process(false)
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(Q3_ADDITIVE_LUM_3DI)), OK)
+	model.set_object_data(data)
+	model.scale = Vector3.ONE * 10.0
+	_keep_only_shader_surfaces(model, "/self_lit/additive")
+	model.advance_runtime_frame(1.0 / 62.0)
+	for row in model.get_surface_materials():
+		var material := row as ShaderMaterial
+		if material != null and material.shader != null \
+				and "/self_lit/" in material.shader.resource_path:
+			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			material.set_shader_parameter("u_rgb_mod", Vector3(0.25, 0.25, 0.25))
+			material.set_shader_parameter("u_alpha_mod", 1.0)
+	var slab := _first_visible_mesh(model)
+	assert_not_null(slab, "the mount fixture carries an additive LUM surface")
+	var pixel := Vector2i.ZERO
+	if slab != null:
+		var target := Vector3(100.3, 22.0, -43.7)
+		var slab_center: Vector3 = slab.global_transform * slab.get_aabb().get_center()
+		model.position += target - slab_center
+		pixel = Vector2i(camera.unproject_position(target))
+	var renderer := FrameFx.new()
+	viewport.add_child(renderer)
+	return {"viewport": viewport, "renderer": renderer, "pixel": pixel,
+			"slab": slab, "environment": environment_resource}
+
+
+func test_lum_q3_copy_is_the_selflum_block_not_the_beauty_pixel() -> void:
+	# The LUM GLOW slot is a copy of the NORMAL block re-shaded into the
+	# black-cleared Q3 target (_FFP.fx LUM GLOW copy), never the finished
+	# beauty pixel. Over a coloured background an additive LUM card's beauty
+	# pixel is background + card; its Q3 copy must be the SELFLUM value
+	# alone: white Diffuse1 x u_rgb_mod 0.25 x min(gain, 1) x 2 = 0.5 grey per
+	# additive face, with no background in it and no dependence on it.
+	var over_blue := _additive_lum_slab_view(Color(0.2, 0.4, 0.6))
+	if over_blue.slab == null:
+		return
+	var blue_renderer := over_blue.renderer as FrameFx
+	var blue_image: Image = await _render_q3_frame(blue_renderer)
+	var report := blue_renderer.get_backend_report()
+	if not bool(report.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_gt(int(report.get("q3_drawn_commands", 0)), 0,
+			"the additive LUM slab reaches the Q3 draw list: %s" % report)
+	assert_not_null(blue_image, "the terminal effect exposes its Q3 target")
+	if blue_image == null:
+		return
+	var pixel: Vector2i = over_blue.pixel
+	var copy := blue_image.get_pixel(pixel.x, pixel.y)
+	assert_gt(copy.r, 0.45,
+			"the slab's SELFLUM copy reaches the Q3 target at %s: %s" % [pixel, copy])
+	assert_lt(absf(copy.b - copy.r), 0.03,
+			"the copy is the grey SELFLUM value; a beauty copy carries the blue "
+			+ "background (+0.4 blue over red): %s" % copy)
+	assert_lt(absf(copy.g - copy.r), 0.03, "%s" % copy)
+	# The same copy over black: the Q3 pixel must not move with the beauty
+	# background at all.
+	var over_black := _additive_lum_slab_view(Color.BLACK)
+	var black_renderer := over_black.renderer as FrameFx
+	var black_image: Image = await _render_q3_frame(black_renderer)
+	assert_not_null(black_image)
+	if black_image == null:
+		return
+	var black_copy := black_image.get_pixel(pixel.x, pixel.y)
+	assert_lt(absf(black_copy.r - copy.r) + absf(black_copy.g - copy.g)
+			+ absf(black_copy.b - copy.b), 3.0 / 255.0,
+			"the SELFLUM copy is independent of the beauty background: %s vs %s" %
+			[copy, black_copy])
+	blue_renderer.shutdown()
+	black_renderer.shutdown()
