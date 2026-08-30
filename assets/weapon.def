@@ -35,9 +35,16 @@ weapon "WPN_M4AUTO"
 	category 1
 	rank     0
 	statid   100
-	ammo     AM_556MM
-	clip     30
-	maxclips 7
+	// The magazine + reserve keys the parser actually reads [orig: WeaponDef_ParseProperty
+	// @ 0x54d730]: clipsize is the magazine (no key = a no-clip weapon, so the reload
+	// gate refuses), ammoclass names the carried pool the reserve reads through
+	// (units per round; the ammoclass_max_carry cap above clamps it), startrounds
+	// seeds that pool on spawn (7 clips x 30), round_type names the ammo.def round.
+	clipsize    30
+	maxclips    7
+	startrounds 210
+	ammoclass   CLASS_556MM 1
+	round_type  AM_556MM
 
 	ANIMADM	AKM_1ST
 	GFX1	AKM_1st
@@ -109,9 +116,16 @@ weapon "WPN_AK47AUTO"
 	category 1
 	rank     0
 	statid   101
-	ammo     AM_556MM
-	clip     30
-	maxclips 7
+	// The magazine + reserve keys the parser actually reads [orig: WeaponDef_ParseProperty
+	// @ 0x54d730]: clipsize is the magazine (no key = a no-clip weapon, so the reload
+	// gate refuses), ammoclass names the carried pool the reserve reads through
+	// (units per round; the ammoclass_max_carry cap above clamps it), startrounds
+	// seeds that pool on spawn (7 clips x 30), round_type names the ammo.def round.
+	clipsize    30
+	maxclips    7
+	startrounds 210
+	ammoclass   CLASS_556MM 1
+	round_type  AM_556MM
 
 	ANIMADM	AKM_1ST
 	GFX1	AKM_1st
