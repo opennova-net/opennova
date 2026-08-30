@@ -320,11 +320,6 @@ void WeatherState::set_wind_scale(int32_t value) {
 
 void WeatherState::tick_sim(World *world, WeatherTickEvents &events) {
     events = WeatherTickEvents{};
-    // The precipitation fall of the entity update that precedes the weather
-    // tick in the frame — it reads the PREVIOUS tick's rain current
-    // [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
-    //  @ 0x4c2214, before Environment_UpdateWeatherTick @ 0x526774].
-    precipitation.fall_tick(core.scalar_channels.rain_pct_fp, precipitation_kind);
     // The clock: the TOD colors compute at curtime + advance, i.e. at the
     // advanced clock [orig: @ 0x57e9c7]; the 310-tick minute counter
     // [orig: @ 0x57e9da..0x57e9ef].

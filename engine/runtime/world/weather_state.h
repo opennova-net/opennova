@@ -214,9 +214,11 @@ struct WeatherState {
     // quake jitter over pools 0/1 (@ 0x57eb12..0x57ec61), both lightning
     // sequencers with their thunder epochs (@ 0x57ec6f..0x57edc4), the
     // scalar springs (@ 0x57ede2..0x57ef92) and the cloud-scroll rate ramp
-    // (@ 0x57eecc); the precipitation fall of the entity update that precedes
-    // it in the frame [orig: Precipitation_FallTick (ex sub_5DE8F0) @ 0x5de8f0
-    // from Entity_UpdateAllEntities @ 0x4c2214]. `world` may be null (a
+    // (@ 0x57eecc). The precipitation fall is NOT here: it belongs to the
+    // entity update that precedes the weather tick in the frame and rides its
+    // gate (World::run_logic_tick) [orig: Precipitation_FallTick (ex
+    // sub_5DE8F0) @ 0x5de8f0 from Entity_UpdateAllEntities @ 0x4c2214], so the
+    // 255-tick mission-start settle never falls a drop. `world` may be null (a
     // headless owner without entities). The TOD color compute sits between the
     // clock advance and the oscillator in retail; the render half runs it from
     // overcast_for_tod_q16.

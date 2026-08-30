@@ -1546,6 +1546,17 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
         throwables.events.clear();
         throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
     }
+    // The precipitation fall: while it rains every drop slot lowers by the
+    // kind's per-tick amount, once per ENTITY update — retail runs it inside
+    // Entity_UpdateAllEntities after the pool-1 walk and before
+    // DeathPiece_TickAll, so it rides the entity update's frame gate (never
+    // the 255-tick weather settle, never the pre-mission pass) and every peer
+    // falls its own drops from the rain current the previous weather tick left
+    // [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
+    //  @ 0x4c2214].
+    if (gameplay)
+        weather.precipitation.fall_tick(weather.core.scalar_channels.rain_pct_fp,
+                                        weather.precipitation_kind);
     if (perf != nullptr) {
         const uint64_t now = io::perf_now_us();
         perf->throwables_us = now - phase_start;

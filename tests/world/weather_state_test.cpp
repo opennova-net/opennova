@@ -195,15 +195,40 @@ void test_tick_advances_the_clock_and_fires_thunder() {
 	ws.command_rain(100, 1);
 	ws.tick_sim(nullptr, events);
 	CHECK(ws.rain_pct_current_q16() == 1057u);
-	// The drops fall only once the current passes 48.
+	// The drops fall with the ENTITY update, never the weather tick (so the
+	// 255-tick settle keeps the pool still) [orig: Precipitation_FallTick
+	// @ 0x4c2214 inside Entity_UpdateAllEntities].
 	CHECK(ws.raining());
 	const int32_t z_before = ws.precipitation.slots[0].z;
 	ws.tick_sim(nullptr, events);
-	CHECK(ws.precipitation.slots[0].z == z_before - 12288);
+	CHECK(ws.precipitation.slots[0].z == z_before);
 	// The overcast the TOD compute reads lags the spring by one tick.
 	ws.command_overcast(100, 0);
 	ws.tick_sim(nullptr, events);
 	CHECK(ws.overcast_for_tod_q16 == 0 && ws.overcast_blend_q16() != 0u);
+}
+
+void test_entity_update_falls_the_drops_on_gameplay_ticks_only() {
+	// [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
+	//  @ 0x4c2214 — behind the entity update's frame gate, on every peer]
+	w::World world;
+	world.weather.seed(seed_800());
+	world.weather.command_rain(100, 0);
+	w::WeatherTickEvents events;
+	world.weather.tick_sim(&world, events);
+	CHECK(world.weather.raining());
+	const int32_t z_before = world.weather.precipitation.slots[0].z;
+	// The pre-mission pass and the weather tick leave the pool still.
+	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
+	world.weather.tick_sim(&world, events);
+	CHECK(world.weather.precipitation.slots[0].z == z_before);
+	// Each gameplay entity update lowers every slot by the rain rate, on the
+	// authority and on a client alike.
+	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay);
+	CHECK(world.weather.precipitation.slots[0].z == z_before - 12288);
+	world.run_logic_tick(/*is_authority=*/false, w::TickPhase::Gameplay);
+	CHECK(world.weather.precipitation.slots[0].z == z_before - 2 * 12288);
+	CHECK(world.weather.precipitation.fall_accum_z == -2 * 12288);
 }
 
 void test_quake_displaces_pool_entities_and_arms_the_local_shake() {
@@ -333,6 +358,7 @@ int main() {
 	test_block_color_command_sets_the_active_target_and_step();
 	test_mission_start_init_snaps_currents_and_installs_the_clamps();
 	test_tick_advances_the_clock_and_fires_thunder();
+	test_entity_update_falls_the_drops_on_gameplay_ticks_only();
 	test_quake_displaces_pool_entities_and_arms_the_local_shake();
 	test_wire_sample_writes_targets_only();
 	test_night_phase_follows_the_clock();
