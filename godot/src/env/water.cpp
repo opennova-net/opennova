@@ -206,24 +206,7 @@ void Water::release_runtime_renderer_resources() {
 	if (reflection_camera_ != nullptr) {
 		reflection_camera_->clear_current();
 	}
-	Ref<FrameFxCompositorEffect> decode_effect = reflection_decode_effect_;
-	if (decode_effect.is_valid())
-		decode_effect->set_enabled(false);
-	if (reflection_camera_ != nullptr &&
-			reflection_camera_->get_compositor() == reflection_compositor_)
-		reflection_camera_->set_compositor(Ref<Compositor>());
-	if (reflection_compositor_.is_valid())
-		reflection_compositor_->set_compositor_effects(
-				TypedArray<Ref<CompositorEffect>>());
-	// Detaching affects the next render setup. Drain a callback already queued
-	// for the mirror before releasing the RIDs it can still consume. Keep the
-	// owner Refs alive until the viewport graph itself has been deleted: Godot
-	// 4.6 can still inspect those resources while dismantling the camera.
-	if (decode_effect.is_valid() && server != nullptr &&
-			server->get_rendering_device() != nullptr)
-		server->force_sync();
-	if (decode_effect.is_valid())
-		decode_effect->release_device_resources();
+	_release_reflection_decode();
 	if (water_material_.is_valid()) {
 		water_material_->set_shader_parameter("u_has_reflection", false);
 		water_material_->set_shader_parameter("u_reflection", Variant());
@@ -244,9 +227,6 @@ void Water::release_runtime_renderer_resources() {
 		reflection_viewport_ = nullptr;
 		reflection_camera_ = nullptr;
 	}
-	reflection_decode_effect_.unref();
-	reflection_compositor_.unref();
-	decode_effect.unref();
 	noise_color_tex_.unref();
 	noise_normal_tex_.unref();
 	noise_color_img_.unref();
@@ -334,7 +314,55 @@ void Water::_sync_render_activity() {
 void Water::_notification(int p_what) {
 	if (p_what == NOTIFICATION_VISIBILITY_CHANGED && built_) {
 		_sync_render_activity();
+	} else if (p_what == NOTIFICATION_ENTER_TREE && built_ &&
+			reflection_camera_ != nullptr &&
+			reflection_decode_effect_.is_null()) {
+		// Re-entry after an EXIT_TREE release: the retained mirror camera needs
+		// a fresh decode effect (the released one stays shut down).
+		_install_reflection_decode();
 	}
+}
+
+// The mirror camera's decode-only terminal effect: one FrameFxCompositorEffect
+// on a compositor the camera owns (never the beauty WorldEnvironment's chain).
+void Water::_install_reflection_decode() {
+	if (reflection_camera_ == nullptr) {
+		return;
+	}
+	reflection_decode_effect_.instantiate();
+	reflection_compositor_.instantiate();
+	TypedArray<Ref<CompositorEffect>> capture_effects;
+	Ref<CompositorEffect> generic_decode = reflection_decode_effect_;
+	capture_effects.push_back(generic_decode);
+	reflection_compositor_->set_compositor_effects(capture_effects);
+	reflection_camera_->set_compositor(reflection_compositor_);
+}
+
+// Idempotent release of the mirror decode chain, the same EXIT_TREE leg
+// FrameFx runs: disable the effect, detach the mirror camera's compositor,
+// drain a callback already queued for the mirror while RenderingDevice is
+// live, then free the effect-owned device resources. A Water freed outside
+// release_runtime_renderer_resources() (GUT fixtures, embedder previews)
+// otherwise leaks its RD chain.
+void Water::_release_reflection_decode() {
+	Ref<FrameFxCompositorEffect> decode_effect = reflection_decode_effect_;
+	if (decode_effect.is_valid())
+		decode_effect->set_enabled(false);
+	if (reflection_camera_ != nullptr &&
+			reflection_camera_->get_compositor() == reflection_compositor_)
+		reflection_camera_->set_compositor(Ref<Compositor>());
+	if (reflection_compositor_.is_valid())
+		reflection_compositor_->set_compositor_effects(
+				TypedArray<Ref<CompositorEffect>>());
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (decode_effect.is_valid() && server != nullptr &&
+			server->get_rendering_device() != nullptr)
+		server->force_sync();
+	if (decode_effect.is_valid())
+		decode_effect->release_device_resources();
+	reflection_decode_effect_.unref();
+	reflection_compositor_.unref();
+	decode_effect.unref();
 }
 
 void Water::_exit_tree() {
@@ -359,6 +387,9 @@ void Water::_exit_tree() {
 		water_material_->set_shader_parameter("u_has_reflection", false);
 		water_material_->set_shader_parameter("u_reflection", Variant());
 	}
+	// The mirror decode chain never outlives the node's time in the tree;
+	// ENTER_TREE re-installs it on the retained camera.
+	_release_reflection_decode();
 }
 
 void Water::_ready() {
@@ -489,13 +520,7 @@ void Water::build() {
 		// inherit the beauty WorldEnvironment's chain. An HDR 2D target would
 		// skip the encode but run the canvas dim in linear space (0x40/255
 		// becomes ~0.05), which is the wrong domain for that multiply.
-		reflection_decode_effect_.instantiate();
-		reflection_compositor_.instantiate();
-		TypedArray<Ref<CompositorEffect>> capture_effects;
-		Ref<CompositorEffect> generic_decode = reflection_decode_effect_;
-		capture_effects.push_back(generic_decode);
-		reflection_compositor_->set_compositor_effects(capture_effects);
-		reflection_camera_->set_compositor(reflection_compositor_);
+		_install_reflection_decode();
 		// The witnessed mirror scene: sky/terrain/celestials/foliage plus the
 		// flag-0x400 world population — vehicles by item type and records
 		// whose BMS attribute authors Reflective. It has no water surface, FP

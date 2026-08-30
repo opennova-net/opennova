@@ -234,6 +234,55 @@ func test_process_exit_releases_the_reflection_decode_before_its_viewport() -> v
 	assert_true(bool(decode.get_backend_report().get("shutdown", false)))
 
 
+func test_leaving_the_tree_releases_the_reflection_decode_and_reentry_rearms_it() -> void:
+	# A Water freed or detached outside release_runtime_renderer_resources()
+	# (GUT fixtures, embedder previews) must not leak its RenderingDevice
+	# chain: EXIT_TREE runs the same idempotent release leg FrameFx has, and
+	# ENTER_TREE re-arms a fresh decode on the retained mirror camera.
+	var fixture := _make_water_fixture()
+	var water := fixture["water"] as Water
+	var strip_vp: SubViewport = fixture["viewport"]
+	water.advance_frame(TICK)
+	var mirror_camera := water.get_reflection_camera()
+	assert_not_null(mirror_camera)
+	var first_compositor := mirror_camera.compositor
+	assert_not_null(first_compositor)
+	var first_decode := first_compositor.get_compositor_effects()[0] 			as FrameFxCompositorEffect
+	assert_not_null(first_decode)
+	if first_decode == null:
+		return
+
+	strip_vp.remove_child(water)
+	assert_true(bool(first_decode.get_backend_report().get("shutdown", false)),
+			"leaving the tree drains and releases the mirror decode")
+	assert_false(first_decode.enabled)
+	assert_null(mirror_camera.compositor,
+			"the mirror camera no longer carries the released compositor")
+	assert_eq(first_compositor.get_compositor_effects().size(), 0)
+
+	strip_vp.add_child(water)
+	var second_compositor := mirror_camera.compositor
+	assert_not_null(second_compositor, "re-entry re-arms the mirror decode")
+	if second_compositor == null:
+		return
+	var second_decode := second_compositor.get_compositor_effects()[0] 			as FrameFxCompositorEffect
+	assert_not_null(second_decode)
+	if second_decode == null:
+		return
+	assert_ne(second_decode.get_instance_id(), first_decode.get_instance_id(),
+			"the released effect stays shut down; re-entry uses a fresh one")
+	assert_false(bool(second_decode.get_backend_report().get("shutdown", true)))
+	water.advance_frame(TICK)
+	assert_eq(water.get_reflection_viewport().render_target_update_mode,
+			SubViewport.UPDATE_ALWAYS, "the strip and mirror resume after re-entry")
+
+	# The explicit process-exit release converges with the EXIT_TREE leg.
+	water.release_runtime_renderer_resources()
+	assert_true(bool(second_decode.get_backend_report().get("shutdown", false)))
+	assert_null(water.get_reflection_camera())
+	water.release_runtime_renderer_resources()
+
+
 func test_reflection_camera_matches_orthogonal_and_frustum_sources() -> void:
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
