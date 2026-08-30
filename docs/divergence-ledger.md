@@ -1065,9 +1065,11 @@ hemisphere-reflection and Phong approximations are gone. The selected path
 hosts retail's 256² CubeEnvironment synchronously before the visible draw:
 six mapped 90° faces at player+1/clamped terrain+10, the callback's sky plus
 sun/moon only, exact 0x60 gamma-byte multiply, and the additive
-CubeRotSpecular/Env_LightBlock lobe. Godot's X/Z basis swap, documented
-Cubemap image order, all six face orientations, same-frame publication, and
-full/midtone bytes pass the checked-in Forward+ D3D12 probe. The exact 256²
+CubeRotSpecular/Env_LightBlock lobe. Godot's X/Z basis swap, the cube
+layer order, all six face orientations, same-frame publication, and
+full/midtone bytes pass the checked-in Forward+ D3D12 probe (2026-08-30: the
+faces are copied into the published RD cubemap on the RenderingDevice, no
+CPU readback, the same bytes). The exact 256²
 PhongMap and every source-specific pow-8/pow-16/pow-4/64 alpha-controlled
 lobe are separately generated and raster-pinned `[orig:
 init_render_textures @ 0x58f6e0; update_environment_cubemap @ 0x6106a0;
