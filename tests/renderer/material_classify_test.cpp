@@ -499,6 +499,58 @@ int main() {
 		}
 	}
 
+	// The PROJSHAD coverage source per technique (the pipeline manifest's
+	// projected_shadow_contracts): _FFP keeps Diffuse1.a x AlphaGenValue, its
+	// _MT blocks x Diffuse2.a, every file effect Diffuse1.a alone, and the
+	// no-pass effects sample nothing [orig: _FFP.fx TBoringFFPProjShad].
+	{
+		struct CoverageCase {
+			ObjectShaderTechnique technique;
+			ObjectProjectedShadowCoverage coverage;
+			const char *name;
+		};
+		const CoverageCase cases[] = {
+			{ObjectShaderTechnique::Unsupported, ObjectProjectedShadowCoverage::NoPass, "no_pass"},
+			{ObjectShaderTechnique::Fixed, ObjectProjectedShadowCoverage::DiffuseAlphaFfp, "diffuse_alpha_ffp"},
+			{ObjectShaderTechnique::FixedSkinned, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::FixedDetail, ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp, "diffuse_detail_alpha_ffp"},
+			{ObjectShaderTechnique::SelfLit, ObjectProjectedShadowCoverage::DiffuseAlphaFfp, "diffuse_alpha_ffp"},
+			{ObjectShaderTechnique::SelfLitDetail, ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp, "diffuse_detail_alpha_ffp"},
+			{ObjectShaderTechnique::Tracer, ObjectProjectedShadowCoverage::NoPass, "no_pass"},
+			{ObjectShaderTechnique::Flag, ObjectProjectedShadowCoverage::NoPass, "no_pass"},
+			{ObjectShaderTechnique::PhongTangentDiffuse, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::PhongTangentSpecular, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::PhongTangentSpecularSkinned, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::PhongObjectDiffuse, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::PhongObjectSpecular, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::PhongObjectSpecularPhongMap, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::Dot3Tangent, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::Dot3TangentDetail, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::Dot3TangentSkinned, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::Dot3TangentDetailSkinned, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::Dot3Object, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::Dot3ObjectDetail, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::EnvironmentMirror, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::EnvironmentMirrorTextured, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::EnvironmentPhong, ObjectProjectedShadowCoverage::DiffuseAlpha, "diffuse_alpha"},
+			{ObjectShaderTechnique::GlassFixed, ObjectProjectedShadowCoverage::NoPass, "no_pass"},
+			{ObjectShaderTechnique::GlassSkinned, ObjectProjectedShadowCoverage::NoPass, "no_pass"},
+		};
+		for (const CoverageCase &test : cases) {
+			const ObjectProjectedShadowCoverage coverage =
+					object_projected_shadow_coverage(test.technique);
+			expect(coverage == test.coverage,
+			       "every object technique samples its retail PROJSHAD coverage source");
+			expect(std::string(object_projected_shadow_coverage_name(coverage)) == test.name,
+			       "the coverage name is the manifest token");
+			// A no-pass coverage never pairs with a live state and vice versa.
+			expect((coverage == ObjectProjectedShadowCoverage::NoPass) ==
+			       (object_projected_shadow_policy(test.technique) ==
+			        ObjectProjectedShadowPolicy::NoPass),
+			       "coverage and state agree on which techniques submit a pass");
+		}
+	}
+
 	std::cerr << "renderer_material_classify_test ok\n";
 	return 0;
 }

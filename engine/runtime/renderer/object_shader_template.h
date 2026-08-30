@@ -128,6 +128,31 @@ enum class ObjectProjectedShadowPolicy : uint8_t {
 ObjectProjectedShadowPolicy object_projected_shadow_policy(
 		ObjectShaderTechnique technique) noexcept;
 
+// The PROJSHAD coverage source per technique: the alpha the black pass tests
+// (alpha-test materials) or blends (MaterialBlend). _FFP's TBoringFFPProjShad
+// keeps Diffuse1.a times the AlphaGenValue register (the FFP families'
+// u_alpha_mod), its _MT variants also multiply Diffuse2.a over UV2; every file
+// effect's PROJSHAD pass takes Diffuse1.a alone (vscPostBlackT1 /
+// vscSkinPostBlackT1 write the black diffuse, the texture stage keeps the
+// texture alpha); tracer/flag/glass declare no pass.
+// [orig: _FFP.fx TBoringFFPProjShad (Diffuse1 x AlphaGenValue, _MT Diffuse2);
+// _vsPost.fx vscPostBlackT1; _vsSkPost.fx vscSkinPostBlackT1; the 15 shipped
+// PROJSHAD declarations]
+enum class ObjectProjectedShadowCoverage : uint8_t {
+	NoPass,
+	DiffuseAlpha,
+	DiffuseAlphaFfp,
+	DiffuseDetailAlphaFfp,
+};
+
+ObjectProjectedShadowCoverage object_projected_shadow_coverage(
+		ObjectShaderTechnique technique) noexcept;
+// The manifest token of a coverage source ("no_pass", "diffuse_alpha",
+// "diffuse_alpha_ffp", "diffuse_detail_alpha_ffp"): the object pipeline
+// manifest's projected_shadow_contracts names the same table per technique.
+const char *object_projected_shadow_coverage_name(
+		ObjectProjectedShadowCoverage coverage) noexcept;
+
 struct ObjectShaderPipelineDescriptor {
 	ObjectShaderKey key = 0;
 	ObjectShaderFamily family = ObjectShaderFamily::Unknown;

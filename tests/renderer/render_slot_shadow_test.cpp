@@ -60,6 +60,50 @@ int main() {
 	CHECK(near_f(silhouette_half_extent(1.0f), 1.25f));   // r*1.25
 	CHECK(near_f(silhouette_half_extent(8.0f), 8.75f));   // clamp r+0.75
 
+	// --- capture view basis [orig: build_direction_look_at_matrix @ 0x612c90]:
+	// forward = the slot direction, right = (fwd.z, 0, -fwd.x) normalized,
+	// up = fwd x right; a vertical direction degenerates (retail zeroes the
+	// right/up rows, the port substitutes x and reports it).
+	{
+		const SlotCaptureBasis b = silhouette_capture_basis({0.6f, -0.8f, 0.0f});
+		CHECK(!b.degenerate);
+		CHECK(near_f(b.forward[0], 0.6f) && near_f(b.forward[1], -0.8f) &&
+				near_f(b.forward[2], 0.0f));
+		CHECK(near_f(b.right[0], 0.0f) && near_f(b.right[1], 0.0f) &&
+				near_f(b.right[2], -1.0f));
+		CHECK(near_f(b.up[0], 0.8f) && near_f(b.up[1], 0.6f) && near_f(b.up[2], 0.0f));
+		// Unnormalized input: the basis normalizes first.
+		const SlotCaptureBasis scaled = silhouette_capture_basis({1.2f, -1.6f, 0.0f});
+		CHECK(near_f(scaled.forward[0], 0.6f) && near_f(scaled.up[1], 0.6f));
+		// Orthonormal for a general direction.
+		const SlotCaptureBasis g = silhouette_capture_basis({0.3f, -0.5f, 0.7f});
+		const auto dot = [](const std::array<float, 3> &a, const std::array<float, 3> &b) {
+			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+		};
+		CHECK(near_f(dot(g.right, g.forward), 0.0f, 1.0e-4f));
+		CHECK(near_f(dot(g.up, g.forward), 0.0f, 1.0e-4f));
+		CHECK(near_f(dot(g.up, g.right), 0.0f, 1.0e-4f));
+		CHECK(near_f(dot(g.up, g.up), 1.0f, 1.0e-4f));
+		CHECK(near_f(g.right[1], 0.0f));  // the right row stays horizontal
+		// The zenith sun (the clamped-negated (0, -1, 0)): degenerate.
+		const SlotCaptureBasis zenith = silhouette_capture_basis({0.0f, -1.0f, 0.0f});
+		CHECK(zenith.degenerate);
+		CHECK(near_f(zenith.forward[1], -1.0f));
+		CHECK(near_f(zenith.right[0], 1.0f));
+		CHECK(near_f(dot(zenith.up, zenith.up), 1.0f, 1.0e-4f));
+		CHECK(near_f(dot(zenith.up, zenith.forward), 0.0f, 1.0e-4f));
+		const SlotCaptureBasis none = silhouette_capture_basis({0.0f, 0.0f, 0.0f});
+		CHECK(none.degenerate);
+		CHECK(near_f(kSilhouetteCaptureNear, 0.2f));
+		CHECK(near_f(kSilhouetteCaptureFar, 5000.2f));
+		// The device eye spans the whole model sphere: eye distance minus the
+		// radius lies beyond the near plane, eye plus radius inside the far.
+		const SlotCaptureEye eye = silhouette_capture_eye(3.0f);
+		CHECK(eye.distance - 3.0f > eye.near);
+		CHECK(eye.distance + 3.0f < eye.far);
+		CHECK(near_f(eye.distance, 8.0f));
+	}
+
 	// --- RT chain [orig: RenderSlot_InitTextureChain @ 0x5d5320].
 	CHECK(slot_texture_size(0, 2) == 512);
 	CHECK(slot_texture_size(1, 2) == 512);

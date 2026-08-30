@@ -46,6 +46,52 @@ float silhouette_half_extent(float bound_radius_units) {
 	return std::min(bound_radius_units * 1.25f, bound_radius_units + 0.75f);
 }
 
+SlotCaptureBasis silhouette_capture_basis(const std::array<float, 3> &direction) {
+	// [orig: build_direction_look_at_matrix @ 0x612c90 — forward = dir / |dir|
+	// (zero for a zero direction @ 0x612d05), right = (fwd.z, 0, -fwd.x) /
+	// |(fwd.z, -fwd.x)| (all zero when that length is zero @ 0x612d5b),
+	// up = fwd x right normalized (zero when degenerate @ 0x612dfa)].
+	SlotCaptureBasis basis;
+	const float length = std::sqrt(direction[0] * direction[0] +
+			direction[1] * direction[1] + direction[2] * direction[2]);
+	if (length > 0.0f) {
+		basis.forward = {direction[0] / length, direction[1] / length,
+				direction[2] / length};
+	}
+	const float fx = basis.forward[0];
+	const float fy = basis.forward[1];
+	const float fz = basis.forward[2];
+	const float horizontal = std::sqrt(fx * fx + fz * fz);
+	if (horizontal > 0.0f) {
+		basis.right = {fz / horizontal, 0.0f, -fx / horizontal};
+	} else {
+		basis.degenerate = true;
+		basis.right = {1.0f, 0.0f, 0.0f};
+	}
+	const std::array<float, 3> &r = basis.right;
+	const std::array<float, 3> up = {fy * r[2] - r[1] * fz, fz * r[0] - r[2] * fx,
+			r[1] * fx - r[0] * fy};
+	const float up_length = std::sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
+	if (up_length > 0.0f) {
+		basis.up = {up[0] / up_length, up[1] / up_length, up[2] / up_length};
+	} else {
+		basis.degenerate = true;
+	}
+	return basis;
+}
+
+SlotCaptureEye silhouette_capture_eye(float model_sphere_radius_units) {
+	// The device fold documented on the header: back the eye off along
+	// -forward by two sphere diameters plus the retail near band's margin, and
+	// span the band across the sphere so nothing the entity's children add
+	// beyond it clips (retail's band runs to 5000.2 u from the entity origin).
+	SlotCaptureEye eye;
+	eye.distance = model_sphere_radius_units * 2.0f + 2.0f;
+	eye.near = kSilhouetteCaptureNear * 0.25f;
+	eye.far = eye.distance * 2.0f + model_sphere_radius_units;
+	return eye;
+}
+
 int slot_texture_size(int texture_order, int shadow_detail) {
 	// [orig: RenderSlot_InitTextureChain @ 0x5d5320 — base 256/512/1024 by the
 	// shadow-detail option, halving after every second slot, 32 px floor].
