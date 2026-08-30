@@ -612,12 +612,8 @@ bool SlotCaptureAdapter::Impl::initialize(RenderingDevice *p_rd) {
 	}
 	if (clear_white.is_empty()) {
 		// The retail slot RT clear (renderer::kSlotCaptureClearArgb, white RGB
-		// and alpha 0 — 0x00FFFFFF as Color(1.0f, 1.0f, 1.0f, 0.0f)); the
-		// drape reads the RGB.
-		const uint32_t argb = kSlotCaptureClearArgb;
-		clear_white.push_back(Color(float((argb >> 16) & 0xFF) / 255.0f,
-				float((argb >> 8) & 0xFF) / 255.0f, float(argb & 0xFF) / 255.0f,
-				float((argb >> 24) & 0xFF) / 255.0f));
+		// and alpha 0); the drape reads the RGB.
+		clear_white.push_back(slot_capture_clear_color());
 	}
 	return true;
 }
@@ -897,7 +893,7 @@ Dictionary SlotCaptureAdapter::Impl::report() const {
 	Dictionary result;
 	result["slot_backend"] = "typed_rendering_device_pre_opaque_pass";
 	result["slot_capture_msaa"] = 4;
-	result["slot_capture_clear"] = Color(1.0f, 1.0f, 1.0f, 0.0f);
+	result["slot_capture_clear"] = slot_capture_clear_color();
 	result["slot_depth_compare"] = "greater_or_equal";
 	result["slot_depth_write"] = true;
 	result["slot_skinning"] = "gpu_bone_palette";

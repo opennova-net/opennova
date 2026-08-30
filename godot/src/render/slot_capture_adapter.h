@@ -16,9 +16,21 @@
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
+#include <runtime/renderer/render_slot_shadow.h>
+
 namespace godot {
 
 class RenderingDevice;
+
+// The retail slot RT clear as a device colour: renderer::kSlotCaptureClearArgb
+// (0x00FFFFFF, white RGB and alpha 0) decoded once for the capture pass's
+// clear and for a fresh resolve target that no capture has landed on yet.
+inline Color slot_capture_clear_color() {
+	const uint32_t argb = opennova::renderer::kSlotCaptureClearArgb;
+	return Color(float((argb >> 16) & 0xFF) / 255.0f,
+			float((argb >> 8) & 0xFF) / 255.0f, float(argb & 0xFF) / 255.0f,
+			float((argb >> 24) & 0xFF) / 255.0f);
+}
 
 // One armed render-slot silhouette capture for this frame: the typed request
 // SlotShadow publishes per armed slot order (engine/runtime/renderer/

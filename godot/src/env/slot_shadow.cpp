@@ -370,6 +370,16 @@ void SlotShadow::_ensure_captures() {
 	if (effect_.is_null()) {
 		effect_.instantiate();
 	}
+	// Follow the live compositor: FrameFx::install_compositor and
+	// DisplayDecode::install replace the scope WorldEnvironment's compositor
+	// with a fresh one (carrying the previous effects) after their own READY,
+	// and a scope may swap its WorldEnvironment; an install keyed on the old
+	// compositor object would leave the report false and the uninstall
+	// editing a compositor nothing renders. Re-install into whatever the
+	// WorldEnvironment holds now (a present effect is not added twice).
+	if (installed_into_.is_valid() && !is_capture_effect_installed()) {
+		_uninstall_effect();
+	}
 	_install_effect();
 }
 
@@ -415,6 +425,16 @@ bool SlotShadow::_ensure_capture_target(int p_order, int p_size) {
 	view.instantiate();
 	target = rd->texture_create(format, view);
 	capture_target_sizes_[p_order] = target.is_valid() ? p_size : 0;
+	if (target.is_valid()) {
+		// A fresh target reads as the retail cleared RT (white RGB, the
+		// no-shadow sample) until its first capture resolves into it: the
+		// drape samples every published order the same frame, and an order
+		// whose pass has not drawn yet (no WorldEnvironment in scope, a
+		// latched device failure) must multiply white into the terrain, not
+		// undefined texels. The SubViewport chain this replaced was always
+		// cleared by its background colour.
+		rd->texture_clear(target, slot_capture_clear_color(), 0, 1, 0, 1);
+	}
 	if (capture_textures_[p_order].is_valid()) {
 		capture_textures_[p_order]->set_texture_rd_rid(target);
 	}

@@ -320,6 +320,93 @@ func test_capture_effect_installs_on_the_scope_world_environment_and_re_enters()
 	shadow.free()
 
 
+func _effect_count(world_environment: WorldEnvironment) -> int:
+	var count := 0
+	if world_environment.compositor == null:
+		return 0
+	for effect in world_environment.compositor.compositor_effects:
+		if effect is SlotCaptureCompositorEffect:
+			count += 1
+	return count
+
+
+func test_capture_effect_follows_a_replaced_scope_compositor() -> void:
+	# FrameFx::install_compositor and DisplayDecode::install replace the
+	# WorldEnvironment's compositor with a fresh one carrying the previous
+	# effects; a scope may also hand it an empty one. The install must follow
+	# the live compositor on the next frame so the report, the draw and the
+	# uninstall all name the compositor the view renders with.
+	var scope := _scope_with_world_environment()
+	var world_environment := scope.get_node("ClearColor") as WorldEnvironment
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	assert_true(shadow.is_capture_effect_installed())
+	var first := world_environment.compositor
+	# The FrameFx shape: a new Compositor that copies the previous effects.
+	var copied := Compositor.new()
+	copied.compositor_effects = first.compositor_effects.duplicate()
+	world_environment.compositor = copied
+	assert_false(shadow.is_capture_effect_installed(),
+			"the install is keyed on the compositor object, so the copy reads stale")
+	shadow.advance_frame()
+	assert_true(shadow.is_capture_effect_installed(),
+			"advance_frame re-installs into the live compositor")
+	assert_eq(_effect_count(world_environment), 1,
+			"the carried-over effect is not added a second time")
+	# An empty replacement: the effect must be re-added.
+	world_environment.compositor = Compositor.new()
+	shadow.advance_frame()
+	assert_true(shadow.is_capture_effect_installed())
+	assert_eq(_effect_count(world_environment), 1,
+			"a compositor that dropped the effect gets it back")
+	assert_true(bool(shadow.get_report()["capture_effect_installed"]))
+	scope.remove_child(shadow)
+	assert_false(_effect_present(world_environment),
+			"exit-tree uninstalls from the live compositor, not the stale one")
+	shadow.free()
+
+
+func test_fresh_capture_target_reads_the_retail_white_before_any_draw() -> void:
+	# A target no capture has landed on yet samples as the retail cleared RT
+	# (0x00FFFFFF, renderer::kSlotCaptureClearArgb): here the scope has no
+	# WorldEnvironment, so the effect never installs and nothing draws, yet the
+	# armed order's target exists and the drape would sample it.
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var scope := Node3D.new()
+	add_child_autofree(scope)
+	var environment := _environment()
+	var camera := Camera3D.new()
+	camera.current = true
+	scope.add_child(camera)
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	shadow.set_environment_node(environment)
+	shadow.set_shadow_detail(3)
+	var crate := _crate_caster(scope, Vector3.ZERO)
+	crate.advance_runtime_frame(1.0 / 62.0)
+	shadow.advance_frame()
+	assert_false(shadow.is_capture_effect_installed(),
+			"no WorldEnvironment in scope: the capture effect has nowhere to install")
+	var order := shadow.get_capture_order_of(crate)
+	assert_true(order >= 0, "the crate still takes a slot and arms a target")
+	assert_eq(shadow.get_capture_target_size(order), 512)
+	for i in range(2):
+		await get_tree().process_frame
+	RenderingServer.force_sync()
+	var image := shadow.get_capture_image(order)
+	assert_not_null(image, "the never-drawn target reads back")
+	if image != null:
+		var stats := _corner_and_center(image)
+		assert_gt(float(stats["corner_min"]), 0.99, "the corners are the white clear")
+		assert_gt(float(stats["center_max"]), 0.99,
+				"the center is the white clear too: no capture landed, no shadow")
+	crate.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
 func test_local_player_first_person_drape_gates() -> void:
 	# Retail skips the local player's own drape in first person while
 	# prone-latched or below shadow detail 2
