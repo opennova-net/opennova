@@ -47,8 +47,36 @@ enum class Q3GeometryKind : std::uint8_t {
 	Skinned = 2,
 };
 
-// An opaque portable identity, not a GPU handle. The adapter resolves both
-// words together and must fail the draw if the generation no longer matches.
+// Glass.fx's GLOW technique samples the static CubeRotSpecular cube through
+// the sun-aligned MatRotSpecular. Render_FillStaticCubemaps builds that cube
+// from two coincident -Z lobes, a white pow-800 lobe at intensity 1.4 and a
+// warm (1, 248/255, 240/255) pow-40 lobe at intensity 1.0, summed and
+// clamped; the adapter evaluates that generator analytically against the
+// live sun direction. [orig: Glass.fx TGlassFFP TECHNIQUE_GLOW;
+// Render_FillStaticCubemaps @ 0x58f290; generate_cubemap_lighting
+// @ 0x685bb0; apply_shader_parameters MatRotSpecular @ 0x58e14b].
+inline constexpr float kQ3GlassWhiteLobeGain = 1.4f;
+inline constexpr float kQ3GlassWhiteLobePower = 800.0f;
+inline constexpr std::array<float, 3> kQ3GlassWarmLobeColor{
+	1.0f, 248.0f / 255.0f, 240.0f / 255.0f};
+inline constexpr float kQ3GlassWarmLobePower = 40.0f;
+
+// The NV water redraw's bright pass: Water_PSBumpReflectNV keeps
+// saturate(luma(0.25, 0.60, 0.15)^2 - 0.15) of the reflected colour, with
+// the device fog colour forced black. [orig: render_water_surface(view, 1)
+// @ 0x5c3311..0x5c3320 (detail gate), @ 0x5c3442..0x5c3458
+// (SetFogAndBlendMode(2) + Water_ShaderBlendNV); Water_PSBumpReflectNV
+// source @ 0x7dbd28, assembled in Water_InitSurfaceShaders @ 0x5c1bc4; NV
+// descriptors @ 0x5c1c27..0x5c1c81 (blend 1/2/5 and opaque 0x20000);
+// CD3DDevice_SetFogAndBlendMode @ 0x677740 case 2 @ 0x6778ed].
+inline constexpr std::array<float, 3> kQ3WaterNvLumaWeights{
+	0.25f, 0.60f, 0.15f};
+inline constexpr float kQ3WaterNvBrightBias = 0.15f;
+
+// An opaque portable identity, not a GPU handle. The adapter resolves the
+// resource by its id; every lease is currently minted at generation 1 (the
+// geometry lease carries the frame id), so `valid()` is the only check the
+// generation word serves today.
 struct Q3ResourceLease {
 	std::uint64_t resource_id = 0;
 	std::uint64_t generation = 0;
@@ -123,10 +151,8 @@ struct Q3CelestialMaterialParameters {
 	Q3ResourceLease diffuse_texture{};
 	Q3Vec3 tint{1.0f, 1.0f, 1.0f};
 	float opacity = 1.0f;
-	Q3Vec3 anchor_camera_world{};
 	Q3Vec3 glare_direction{0.0f, 1.0f, 0.0f};
 	bool additive = false;
-	bool billboard = false;
 	bool glare_view_fade = false;
 };
 

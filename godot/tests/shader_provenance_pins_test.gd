@@ -900,9 +900,14 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 			"the typed Q3 adapter is the sole focused renderer")
 	var q3_adapter := _read_repo("godot/src/render/q3_frame_adapter.cpp")
 	_contains_all(q3_adapter, [
-		"vec3(1.4) * pow(aligned, 800.0)",
-		"vec3(1.0, 248.0 / 255.0, 240.0 / 255.0)",
-		"pow(aligned, 40.0)",
+		"glsl_float(kQ3GlassWhiteLobeGain)",
+		"glsl_float(kQ3GlassWhiteLobePower)",
+		"glsl_float(kQ3GlassWarmLobeColor[1])",
+		"glsl_float(kQ3GlassWarmLobePower)",
+		"glsl_float(kQ3WaterNvLumaWeights[0])",
+		"glsl_float(kQ3WaterNvBrightBias)",
+		"pow(aligned, @GLASS_WHITE_POWER@)",
+		"pow(aligned, @GLASS_WARM_POWER@)",
 		"const Vector3 light_gain = frame->light_gain",
 		"runtime/renderer/device_fog.h",
 		"float q3_fog_visibility(float dist, float fog_start, float fog_end,",

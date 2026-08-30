@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -171,7 +172,10 @@ void main() {
 }
 )GLSL";
 
-const char *kQ3FragmentShader = R"GLSL(#version 450
+// The witnessed shading constants live in runtime/renderer/q3_frame.h
+// (kQ3Glass* and kQ3WaterNv*); q3_fragment_shader_source() splices them into
+// the @TOKEN@ slots below so the GLSL text never restates them.
+const char *kQ3FragmentShaderTemplate = R"GLSL(#version 450
 layout(set = 0, binding = 0) uniform sampler2D beauty_color;
 layout(set = 0, binding = 1) uniform sampler2D primary_texture;
 layout(set = 0, binding = 2) uniform sampler2D secondary_texture;
@@ -236,9 +240,11 @@ void main() {
 		vec3 reflected = reflect(-eye, normalize(local_normal));
 		float aligned = max(dot(reflected,
 				normalize(pc.light_local_gain.xyz)), 0.0);
-		vec3 lobe = clamp(vec3(1.4) * pow(aligned, 800.0) +
-				vec3(1.0, 248.0 / 255.0, 240.0 / 255.0) *
-						pow(aligned, 40.0), vec3(0.0), vec3(1.0));
+		// kQ3GlassWhiteLobeGain/Power + kQ3GlassWarmLobeColor/Power.
+		vec3 lobe = clamp(vec3(@GLASS_WHITE_GAIN@) *
+				pow(aligned, @GLASS_WHITE_POWER@) +
+				vec3(@GLASS_WARM_R@, @GLASS_WARM_G@, @GLASS_WARM_B@) *
+						pow(aligned, @GLASS_WARM_POWER@), vec3(0.0), vec3(1.0));
 		float model_uniform_scale = max(abs(pc.light_local_gain.w), 1.0e-6);
 		float fog_visibility = fog_enabled ? q3_fog_visibility(
 				length(pc.camera_local.xyz - local_position) * model_uniform_scale,
@@ -261,8 +267,10 @@ void main() {
 		vec3 result = clamp(reflection * color.rgb * 2.0, 0.0, 1.0);
 		result = clamp(result * noise.rgb * 4.0, 0.0, 1.0);
 		result = clamp(result + custom1.rgb, 0.0, 1.0);
-		float bright = clamp(pow(dot(result, vec3(0.25, 0.60, 0.15)), 2.0)
-				- 0.15, 0.0, 1.0);
+		// kQ3WaterNvLumaWeights + kQ3WaterNvBrightBias.
+		float bright = clamp(pow(dot(result,
+				vec3(@NV_LUMA_R@, @NV_LUMA_G@, @NV_LUMA_B@)), 2.0)
+				- @NV_BRIGHT_BIAS@, 0.0, 1.0);
 		result *= bright * custom1.a;
 		float alpha = clamp(noise.a * color.a * 2.0, 0.0, 1.0);
 		frag_color = vec4(result, 1.0 - alpha);
@@ -278,6 +286,41 @@ void main() {
 	}
 }
 )GLSL";
+
+// A GLSL float literal for an engine constant: %.9g round-trips every float,
+// and a trailing ".0" keeps integral values typed as floats.
+std::string glsl_float(float p_value) {
+	char buffer[32];
+	std::snprintf(buffer, sizeof(buffer), "%.9g", static_cast<double>(p_value));
+	std::string text(buffer);
+	if (text.find_first_of(".eE") == std::string::npos)
+		text += ".0";
+	return text;
+}
+
+void splice_token(std::string &p_text, const char *p_token,
+		const std::string &p_value) {
+	const std::string token(p_token);
+	for (std::size_t at = p_text.find(token); at != std::string::npos;
+			at = p_text.find(token, at + p_value.size()))
+		p_text.replace(at, token.size(), p_value);
+}
+
+std::string q3_fragment_shader_source() {
+	std::string source(kQ3FragmentShaderTemplate);
+	splice_token(source, "@GLASS_WHITE_GAIN@", glsl_float(kQ3GlassWhiteLobeGain));
+	splice_token(source, "@GLASS_WHITE_POWER@",
+			glsl_float(kQ3GlassWhiteLobePower));
+	splice_token(source, "@GLASS_WARM_R@", glsl_float(kQ3GlassWarmLobeColor[0]));
+	splice_token(source, "@GLASS_WARM_G@", glsl_float(kQ3GlassWarmLobeColor[1]));
+	splice_token(source, "@GLASS_WARM_B@", glsl_float(kQ3GlassWarmLobeColor[2]));
+	splice_token(source, "@GLASS_WARM_POWER@", glsl_float(kQ3GlassWarmLobePower));
+	splice_token(source, "@NV_LUMA_R@", glsl_float(kQ3WaterNvLumaWeights[0]));
+	splice_token(source, "@NV_LUMA_G@", glsl_float(kQ3WaterNvLumaWeights[1]));
+	splice_token(source, "@NV_LUMA_B@", glsl_float(kQ3WaterNvLumaWeights[2]));
+	splice_token(source, "@NV_BRIGHT_BIAS@", glsl_float(kQ3WaterNvBrightBias));
+	return source;
+}
 
 Ref<RDUniform> sampled_texture_uniform(int p_binding, const RID &p_sampler,
 		const RID &p_texture) {
@@ -800,7 +843,7 @@ bool Q3FrameAdapter::Impl::initialize(RenderingDevice *p_rd) {
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
 			String::utf8(kQ3VertexShader));
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
-			String::utf8(kQ3FragmentShader));
+			String::utf8(q3_fragment_shader_source().c_str()));
 	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
 	if (spirv.is_null() || !spirv->get_stage_compile_error(
 			RenderingDevice::SHADER_STAGE_VERTEX).is_empty() ||
@@ -1425,16 +1468,10 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 				candidate.submission.celestial.opacity = float_parameter(shader_material,
 						registration.source == Q3Source::SunGlow ? "u_q3_opacity" :
 						"u_opacity", 1.0f);
-				const Vector3 anchor = vector3_parameter(shader_material,
-						"u_anchor_camera_world", Vector3());
-				candidate.submission.celestial.anchor_camera_world =
-						{anchor.x, anchor.y, anchor.z};
 				const Vector3 glare = vector3_parameter(shader_material,
 						"u_glare_direction", Vector3(0, 1, 0));
 				candidate.submission.celestial.glare_direction =
 						{glare.x, glare.y, glare.z};
-				candidate.submission.celestial.billboard = bool_parameter(
-						shader_material, "u_billboard", false);
 				candidate.submission.celestial.glare_view_fade = bool_parameter(
 						shader_material, "u_glare_view_fade", false);
 				candidate.submission.celestial.additive =

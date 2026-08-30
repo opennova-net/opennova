@@ -285,9 +285,27 @@ void check_multitexture_detail_contract() {
 	CHECK(draw.rejected[0].reason == Q3RejectReason::InvalidResourceLease);
 }
 
+void check_shading_constants_are_engine_homed() {
+	// The device adapter splices these into its GLSL; the witnessed values
+	// live here [orig: Glass.fx TGlassFFP TECHNIQUE_GLOW;
+	// Render_FillStaticCubemaps @ 0x58f290; Water_PSBumpReflectNV source
+	// @ 0x7dbd28].
+	CHECK(kQ3GlassWhiteLobeGain == 1.4f);
+	CHECK(kQ3GlassWhiteLobePower == 800.0f);
+	CHECK(kQ3GlassWarmLobeColor[0] == 1.0f);
+	CHECK(kQ3GlassWarmLobeColor[1] == 248.0f / 255.0f);
+	CHECK(kQ3GlassWarmLobeColor[2] == 240.0f / 255.0f);
+	CHECK(kQ3GlassWarmLobePower == 40.0f);
+	CHECK(kQ3WaterNvLumaWeights[0] == 0.25f);
+	CHECK(kQ3WaterNvLumaWeights[1] == 0.60f);
+	CHECK(kQ3WaterNvLumaWeights[2] == 0.15f);
+	CHECK(kQ3WaterNvBrightBias == 0.15f);
+}
+
 } // namespace
 
 int main() {
+	check_shading_constants_are_engine_homed();
 	check_technique_derivation_and_ordering();
 	check_skinned_ranges_are_copied();
 	check_fail_closed_rejections();

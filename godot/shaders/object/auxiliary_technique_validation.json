@@ -113,7 +113,7 @@
       ],
       "runtime_evidence": [
         {"path": "docs/render/render-material-re.md", "tokens": ["LUM effects copy their NORMAL pass block into the GLOW slot"]},
-        {"path": "godot/src/render/q3_frame_adapter.cpp", "tokens": ["pow(aligned, 800.0)", "pow(aligned, 40.0)", "Q3Technique::RotatedSpecularGlass", "Q3Technique::NormalCopy"]},
+        {"path": "godot/src/render/q3_frame_adapter.cpp", "tokens": ["kQ3GlassWhiteLobePower", "kQ3GlassWarmLobePower", "Q3Technique::RotatedSpecularGlass", "Q3Technique::NormalCopy"]},
         {"path": "godot/src/render/frame_fx.cpp", "tokens": ["FramePass::AverageFour", "FramePass::WeightedFour", "FramePass::FinalAverage", "BlendMode::SourceAlphaAdd"]},
         {"path": "godot/game/world/game_world.tscn", "tokens": ["type=\"FrameFx\""]},
         {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["glow_off_away", "sun glint", "no-pass contracts"]}
