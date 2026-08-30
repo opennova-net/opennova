@@ -605,6 +605,115 @@ func test_windowed_alpha_blend_ffp_caster_blends_a_partial_silhouette() -> void:
 	shadow.advance_frame()
 
 
+const ANIM_FIXTURES := "res://../fixtures/anim"
+
+
+func _black_centroid(image: Image) -> Dictionary:
+	var sum := Vector2.ZERO
+	var count := 0
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			var p := image.get_pixel(x, y)
+			if maxf(p.r, maxf(p.g, p.b)) < 0.5:
+				sum += Vector2(x, y)
+				count += 1
+	return {"count": count, "centroid": sum / maxf(float(count), 1.0)}
+
+
+func _capture_after_frames(shadow: SlotShadow, order: int, frames: int) -> Image:
+	for i in range(frames):
+		await get_tree().process_frame
+	RenderingServer.force_sync()
+	return shadow.get_capture_image(order)
+
+
+func test_windowed_skinned_caster_silhouette_follows_the_posed_bone() -> void:
+	# The capture skins on the GPU from the frame's bone palette (skeleton
+	# global pose x skin bind pose over the packed bind-space positions): a
+	# rigid crate fake-skinned onto the soldier skeleton (every vertex on bone
+	# 0) casts at its bind position first, and after bone 0 is translated the
+	# silhouette moves with it - black at the posed position, the bind
+	# position reading the white clear again.
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var scope := _scope_with_world_environment()
+	var environment := _environment()
+	var camera := Camera3D.new()
+	camera.current = true
+	scope.add_child(camera)
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	shadow.set_environment_node(environment)
+	shadow.set_shadow_detail(4)  # mask 0: every slot re-captures every frame
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(ANIM_FIXTURES)), OK)
+	var skeletal := SkeletalAnim.new()
+	assert_true(skeletal.load_from_resource_root(root, "soldier.adm"),
+			"soldier.adm loads: %s" % skeletal.get_last_error())
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(CRATE_3DI)), OK)
+	var model := ObjectModel.new()
+	scope.add_child(model)
+	model.set_process(false)
+	model.set_skeletal_anim(skeletal)
+	model.set_object_data(data)
+	assert_true(model.has_skeleton(), "the rigid crate fake-skins onto the soldier skeleton")
+	model.set_shadow_caster_enabled(true)
+	# A wide capture so the posed crate stays inside the extent: half extent
+	# = min(1.25 x 4, 4 + 0.75) = 4.75 u over the 1024 px detail-4 base.
+	model.set_shadow_bound_radii(4.0, 4.0)
+	model.advance_runtime_frame(1.0 / 62.0)
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(model)
+	assert_true(order >= 0, "the skinned crate takes a slot")
+	var report: Dictionary = shadow.get_report()
+	assert_gt(int(report["slot_skinned_commands"]), 0,
+			"the crate's surface compiles as a GPU-skinned command")
+	var bind_image: Image = await _capture_after_frames(shadow, order, 3)
+	assert_not_null(bind_image)
+	if bind_image == null:
+		return
+	var size := bind_image.get_width()
+	var bind := _black_centroid(bind_image)
+	assert_gt(int(bind["count"]), 100, "the bind-pose crate draws a silhouette")
+
+	var skeleton: Skeleton3D = model.get_skeleton()
+	assert_not_null(skeleton)
+	if skeleton == null:
+		return
+	var rest_origin: Vector3 = skeleton.get_bone_rest(0).origin
+	# A 2 u world-x translation of bone 0: the capture looks along the slot
+	# direction, so its image shift is the offset's component across that
+	# direction, 2 u x sqrt(1 - fwd.x^2) over the 9.5 u extent (fwd is the
+	# clamped noon sun: fwd.x^2 stays well below 0.7).
+	skeleton.set_bone_pose_position(0, rest_origin + Vector3(2.0, 0.0, 0.0))
+	shadow.advance_frame()
+	var posed_image: Image = await _capture_after_frames(shadow, order, 3)
+	assert_not_null(posed_image)
+	if posed_image == null:
+		return
+	var posed := _black_centroid(posed_image)
+	assert_gt(int(posed["count"]), 100, "the posed crate still draws a silhouette")
+	var shift: float = (Vector2(posed["centroid"]) - Vector2(bind["centroid"])).length()
+	var full_shift := 2.0 / 9.5 * float(size)
+	assert_gt(shift, full_shift * 0.55,
+			"the silhouette follows the posed bone (shift %s px of %s)" % [shift, full_shift])
+	assert_lt(shift, full_shift * 1.05,
+			"the silhouette moves no further than the bone offset projects")
+	var bind_center := Vector2i(Vector2(bind["centroid"]))
+	var at_bind := posed_image.get_pixel(bind_center.x, bind_center.y)
+	assert_gt(minf(at_bind.r, minf(at_bind.g, at_bind.b)), 0.99,
+			"the bind position reads the white clear once the bone has moved away")
+	var posed_center := Vector2i(Vector2(posed["centroid"]))
+	var at_posed := posed_image.get_pixel(posed_center.x, posed_center.y)
+	assert_lt(maxf(at_posed.r, maxf(at_posed.g, at_posed.b)), 0.05,
+			"the posed position is black")
+	model.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
 func test_windowed_capture_draws_the_caster_black_over_the_white_clear() -> void:
 	# The retail slot RT: cleared 0x00FFFFFF, the PROJSHAD pass draws the
 	# caster black (render_shadow_pass @0x5d7b70; vscPostBlackT1). Needs a live
