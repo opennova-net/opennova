@@ -99,6 +99,7 @@ struct DeviceFrame {
 	Vector3 light_direction = Vector3(0, 1, 0);
 	Vector3 light_gain = Vector3(1, 1, 1);
 	bool fog_enabled = false;
+	Vector3 fog_color;
 	float fog_start = 0.0f;
 	float fog_end = 0.0f;
 	int fog_type = 0;
@@ -194,10 +195,9 @@ void main() {
 // (kQ3Glass* and kQ3WaterNv*); q3_fragment_shader_source() splices them into
 // the @TOKEN@ slots below so the GLSL text never restates them.
 const char *kQ3FragmentShaderTemplate = R"GLSL(#version 450
-layout(set = 0, binding = 0) uniform sampler2D beauty_color;
-layout(set = 0, binding = 1) uniform sampler2D primary_texture;
-layout(set = 0, binding = 2) uniform sampler2D secondary_texture;
-layout(set = 0, binding = 3) uniform sampler2D tertiary_texture;
+layout(set = 0, binding = 0) uniform sampler2D primary_texture;
+layout(set = 0, binding = 1) uniform sampler2D secondary_texture;
+layout(set = 0, binding = 2) uniform sampler2D tertiary_texture;
 
 layout(push_constant, std430) uniform Q3Push {
 	mat4 mvp;
@@ -235,29 +235,46 @@ float q3_fog_visibility(float dist, float fog_start, float fog_end,
 void main() {
 	uint mode = uint(pc.params.x + 0.5);
 	// Object-technique flag bits: 1 alpha test, 2 detail stage, 4 fog enabled,
-	// 8|16 fog type.
+	// 8|16 fog type, 32 regular fog (mix toward the fog colour carried in
+	// light_local_gain.xyz; clear = the additive fold toward black).
 	uint coverage_flags = uint(pc.params.y + 0.5);
 	bool fog_enabled = (coverage_flags & 4u) != 0u;
 	uint fog_type = (coverage_flags >> 3u) & 3u;
-	float object_alpha = texture(primary_texture, uv).a * pc.params.w;
-	if (mode == 0u && (coverage_flags & 2u) != 0u) {
-		object_alpha *= texture(secondary_texture, detail_uv).a;
-	}
-	// Glass.fx TECHNIQUE_GLOW keeps Diffuse1's alpha only as the cutout
-	// variants' alpha-test source; the base glass wrappers ignore alpha_mod
-	// (OBJ_ALPHA_MOD_NONE) and the glint itself is never modulated by it.
-	float coverage = mode == 1u ? texture(primary_texture, uv).a : object_alpha;
-	if (mode <= 1u && (coverage_flags & 1u) != 0u) {
-		bool passes = coverage > pc.params.z;
-		if (pc.light_local_gain.w < 0.0) passes = !passes;
-		if (!passes) discard;
-	}
-	if (mode == 0u) {
-		vec4 beauty = texelFetch(beauty_color, ivec2(gl_FragCoord.xy), 0);
-		frag_color = vec4(beauty.rgb, object_alpha);
-		return;
-	}
-	if (mode == 1u) {
+	if (mode <= 1u) {
+		// Coverage: the LUM NORMAL block is the SELFLUM specialization, whose
+		// MaterialDiffuse.a = 0 makes its alpha-test source 0 (the beauty
+		// wrappers' OBJ_COVERAGE_ZERO); Glass.fx TECHNIQUE_GLOW keeps
+		// Diffuse1's alpha only for the cutout variants. Neither consumes
+		// alpha_mod (OBJ_ALPHA_MOD_NONE).
+		float coverage = mode == 1u ? texture(primary_texture, uv).a : 0.0;
+		if ((coverage_flags & 1u) != 0u) {
+			bool passes = coverage > pc.params.z;
+			if (pc.light_local_gain.w < 0.0) passes = !passes;
+			if (!passes) discard;
+		}
+		float model_uniform_scale = max(abs(pc.light_local_gain.w), 1.0e-6);
+		float fog_visibility = fog_enabled ? q3_fog_visibility(
+				length(pc.camera_local.xyz - local_position) * model_uniform_scale,
+				pc.camera_local.w, pc.draw_color.w, fog_type) : 1.0;
+		if (mode == 0u) {
+			// The LUM GLOW slot is a copy of the NORMAL block, re-shaded here as
+			// the SELFLUM specialization (technique/self_lit.gdshaderinc): base =
+			// Diffuse1 (x Detail MODULATE2X over UV2 for _MT), x u_rgb_mod x
+			// min(gain, 1) x 2 (draw_color.rgb carries u_rgb_mod x gain x 2),
+			// the wrapper's fog policy, and alpha 0 (SELFLUM MaterialDiffuse.a):
+			// an AlphaBlend LUM contributes nothing, an Additive LUM adds its
+			// colour, an opaque LUM replaces.
+			vec3 base = texture(primary_texture, uv).rgb;
+			if ((coverage_flags & 2u) != 0u) {
+				base *= texture(secondary_texture, detail_uv).rgb * 2.0;
+			}
+			vec3 lit = base * pc.draw_color.rgb;
+			vec3 fogged = (coverage_flags & 32u) != 0u ?
+					mix(pc.light_local_gain.xyz, lit, fog_visibility) :
+					lit * fog_visibility;
+			frag_color = vec4(clamp(fogged, 0.0, 1.0), 0.0);
+			return;
+		}
 		vec3 eye = normalize(pc.camera_local.xyz - local_position);
 		vec3 reflected = reflect(-eye, normalize(local_normal));
 		float aligned = max(dot(reflected,
@@ -267,10 +284,6 @@ void main() {
 				pow(aligned, @GLASS_WHITE_POWER@) +
 				vec3(@GLASS_WARM_R@, @GLASS_WARM_G@, @GLASS_WARM_B@) *
 						pow(aligned, @GLASS_WARM_POWER@), vec3(0.0), vec3(1.0));
-		float model_uniform_scale = max(abs(pc.light_local_gain.w), 1.0e-6);
-		float fog_visibility = fog_enabled ? q3_fog_visibility(
-				length(pc.camera_local.xyz - local_position) * model_uniform_scale,
-				pc.camera_local.w, pc.draw_color.w, fog_type) : 1.0;
 		// TexCubeRotSpecular x ReflectColor x gain (x 2) under the additive
 		// fog fold; no diffuse-alpha term.
 		frag_color = vec4(clamp(pc.draw_color.rgb * lobe * fog_visibility,
@@ -850,10 +863,9 @@ public:
 	RID pipeline_for(int64_t p_framebuffer_format,
 			const Q3DrawCommand &p_command);
 	bool ensure_vertices(const PackedByteArray &p_vertices);
-	RID make_uniform(const RID &p_beauty, const DeviceCommand &p_command);
+	RID make_uniform(const DeviceCommand &p_command);
 	bool draw(RenderData *p_render_data, std::uint32_t p_view,
-			const RID &p_framebuffer, const RID &p_beauty,
-			std::size_t &r_draw_calls);
+			const RID &p_framebuffer, std::size_t &r_draw_calls);
 	Dictionary report() const;
 };
 
@@ -1043,8 +1055,7 @@ bool Q3FrameAdapter::Impl::ensure_vertices(const PackedByteArray &p_vertices) {
 	return true;
 }
 
-RID Q3FrameAdapter::Impl::make_uniform(const RID &p_beauty,
-		const DeviceCommand &p_command) {
+RID Q3FrameAdapter::Impl::make_uniform(const DeviceCommand &p_command) {
 	RenderingServer *server = RenderingServer::get_singleton();
 	auto resolve = [&](const RID &p_server_rid) {
 		const RID result = server != nullptr && p_server_rid.is_valid() ?
@@ -1052,19 +1063,17 @@ RID Q3FrameAdapter::Impl::make_uniform(const RID &p_beauty,
 		return result.is_valid() ? result : fallback_texture;
 	};
 	TypedArray<Ref<RDUniform>> uniforms;
-	uniforms.push_back(sampled_texture_uniform(0, sampler, p_beauty));
-	uniforms.push_back(sampled_texture_uniform(1, sampler,
+	uniforms.push_back(sampled_texture_uniform(0, sampler,
 			resolve(p_command.primary_texture)));
-	uniforms.push_back(sampled_texture_uniform(2, sampler,
+	uniforms.push_back(sampled_texture_uniform(1, sampler,
 			resolve(p_command.secondary_texture)));
-	uniforms.push_back(sampled_texture_uniform(3, sampler,
+	uniforms.push_back(sampled_texture_uniform(2, sampler,
 			resolve(p_command.tertiary_texture)));
 	return rd->uniform_set_create(uniforms, shader, 0);
 }
 
 bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
-		const RID &p_framebuffer, const RID &p_beauty,
-		std::size_t &r_draw_calls) {
+		const RID &p_framebuffer, std::size_t &r_draw_calls) {
 	const std::shared_ptr<const DeviceFrame> frame = frame_snapshot();
 	if (!frame || frame->commands.empty())
 		return true;
@@ -1105,7 +1114,7 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 	}
 	std::size_t draws = 0;
 	for (const DeviceCommand &command : frame->commands) {
-		RID uniform = make_uniform(p_beauty, command);
+		RID uniform = make_uniform(command);
 		if (!uniform.is_valid()) {
 			rd->draw_list_end();
 			set_failure("RenderingDevice could not bind focused Q3 textures");
@@ -1148,7 +1157,23 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 						draw.object.classification.alpha_test_invert ?
 								-model_uniform_scale : model_uniform_scale;
 			}
-			if (draw.technique == Q3Technique::RotatedSpecularGlass) {
+			if (draw.technique == Q3Technique::NormalCopy) {
+				// The SELFLUM NORMAL block: u_rgb_mod x min(gain, 1) x 2 rides
+				// draw_color.rgb, the wrapper's fog policy follows the blend
+				// (fog/additive.gdshaderinc for _AD, fog/regular.gdshaderinc for
+				// _OP/_AB) and the regular fog colour rides light_local_gain.xyz.
+				push.draw_color = {
+					draw.object.self_lum_color.x * std::min(light_gain.x, 1.0f) * 2.0f,
+					draw.object.self_lum_color.y * std::min(light_gain.y, 1.0f) * 2.0f,
+					draw.object.self_lum_color.z * std::min(light_gain.z, 1.0f) * 2.0f,
+					fog_end};
+				push.camera_local[3] = fog_start;
+				push.light_local_gain[0] = frame->fog_color.x;
+				push.light_local_gain[1] = frame->fog_color.y;
+				push.light_local_gain[2] = frame->fog_color.z;
+				if (draw.object.classification.blend != ObjectBlendMode::Additive)
+					push.params[1] += 32.0f;
+			} else if (draw.technique == Q3Technique::RotatedSpecularGlass) {
 				push.draw_color = {draw.object.reflect_color.x,
 						draw.object.reflect_color.y, draw.object.reflect_color.z,
 						draw.object.reflect_color.w};
@@ -1461,6 +1486,10 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 						"u_reflect_color", Vector4(0.7f, 0.8f, 0.9f, 0.35f));
 				candidate.submission.object.reflect_color = {reflect.x, reflect.y,
 						reflect.z, reflect.w};
+				const Vector3 self_lum = vector3_parameter(shader_material,
+						"u_rgb_mod", Vector3(1, 1, 1));
+				candidate.submission.object.self_lum_color = {self_lum.x,
+						self_lum.y, self_lum.z, 1.0f};
 				candidate.submission.object.alpha_mod = float_parameter(shader_material,
 						"u_alpha_mod", 1.0f);
 			} else if (registration.source == Q3Source::Water) {
@@ -1532,6 +1561,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		frame->fog_start = environment->get_scene_fog_start();
 		frame->fog_end = environment->get_scene_fog_end();
 		frame->fog_type = environment->get_scene_fog_type();
+		frame->fog_color = environment->get_scene_fog_color();
 	}
 	if (light_values.is_valid()) {
 		frame->light_direction = light_values->dir;
@@ -1541,6 +1571,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			frame->fog_start = light_values->fog_start;
 			frame->fog_end = light_values->fog_end;
 			frame->fog_type = light_values->fog_type;
+			frame->fog_color = light_values->fog_color;
 		}
 	}
 	for (const Q3DrawCommand &draw : draw_list.commands) {
@@ -1591,10 +1622,9 @@ bool Q3FrameAdapter::has_commands() const {
 
 bool Q3FrameAdapter::draw_view(RenderingDevice *p_rd, RenderData *p_render_data,
 		std::uint32_t p_view, const RID &p_framebuffer,
-		const RID &p_beauty_snapshot, const Vector2i &,
 		std::size_t &r_draw_calls) {
 	return impl_ && impl_->initialize(p_rd) && impl_->draw(p_render_data, p_view,
-			p_framebuffer, p_beauty_snapshot, r_draw_calls);
+			p_framebuffer, r_draw_calls);
 }
 
 void Q3FrameAdapter::release_device(RenderingDevice *p_rd) {

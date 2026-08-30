@@ -41,9 +41,11 @@ public:
 	void clear_frame();
 	bool has_commands() const;
 
+	// Draw the published frame into p_framebuffer (the Q3 colour attachment
+	// sharing resolved beauty depth). Every technique shades from its leased
+	// textures and snapshotted values; nothing samples the beauty colour.
 	bool draw_view(RenderingDevice *p_rd, RenderData *p_render_data,
 			std::uint32_t p_view, const RID &p_framebuffer,
-			const RID &p_beauty_snapshot, const Vector2i &p_size,
 			std::size_t &r_draw_calls);
 	// Free resources only through the caller's known-live device. A null device
 	// discards cached handles without dereferencing the adapter's old raw pointer.

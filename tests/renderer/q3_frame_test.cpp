@@ -228,6 +228,8 @@ void check_object_blend_and_coverage_contracts() {
 
 	auto additive = object_submission(40, "FF_ST_AD_LUM", 30.0f, 0, 1);
 	CHECK(additive.object.classification.blend == ObjectBlendMode::Additive);
+	// The SELFLUM re-shade's RGB modulator rides the snapshot unchanged.
+	additive.object.self_lum_color = {0.25f, 0.5f, 0.75f, 1.0f};
 	snapshot.submissions.push_back(additive);
 
 	auto textureless_glass = object_submission(41, "FFP_GLASS", 20.0f, 1, 1);
@@ -251,6 +253,8 @@ void check_object_blend_and_coverage_contracts() {
 	CHECK(draw.commands[0].submission_id == 40);
 	CHECK(draw.commands[0].object.classification.blend ==
 			ObjectBlendMode::Additive);
+	CHECK(draw.commands[0].object.self_lum_color.x == 0.25f);
+	CHECK(draw.commands[0].object.self_lum_color.z == 0.75f);
 	CHECK(draw.commands[1].submission_id == 41);
 	CHECK(draw.commands[1].technique == Q3Technique::RotatedSpecularGlass);
 	CHECK(!draw.commands[1].object.base_texture.valid());

@@ -127,11 +127,14 @@ struct Q3Matrix4 {
 	};
 };
 
-// Only values needed by the focused object Q3 techniques live here. NORMAL
-// copy samples beauty but still needs the diffuse-alpha coverage source;
-// Glass's Q3 technique uses ReflectColor and the global sun-aligned analytic
-// CubeRotSpecular lobe. [orig: _FFP.fx LUM GLOW copy @ 0x5afc7f;
-// Glass.fx TECHNIQUE_GLOW].
+// Only values needed by the focused object Q3 techniques live here. The LUM
+// GLOW slot is a copy of the NORMAL pass block, so NormalCopy re-shades the
+// SELFLUM specialization from the leased Diffuse1/Detail textures and
+// `self_lum_color` (the material's RGB modulator) with alpha 0; Glass's Q3
+// technique uses ReflectColor and the global sun-aligned analytic
+// CubeRotSpecular lobe. Neither consumes `alpha_mod` (the SELFLUM and glass
+// wrappers ignore it); it is snapshotted for the coverage contract only.
+// [orig: _FFP.fx LUM GLOW copy @ 0x5afc7f; Glass.fx TECHNIQUE_GLOW].
 struct Q3ObjectMaterialParameters {
 	ObjectMaterialClassification classification{};
 	Q3ResourceLease base_texture{};

@@ -801,16 +801,11 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget &target = targets[view];
 		if (q3_adapter.has_commands()) {
-			// NORMAL-copy inputs must sample the completed beauty target without
-			// a read/write hazard. The same scratch surface is reused below for
-			// the final display decode after the Q3 draw has consumed this copy.
-			if (!draw_one(target.scene_scratch_framebuffer, target.color_uniform,
-					BlendMode::Replace, FramePass::Snapshot, target.size,
-					target.size, 0, 0, 0, 0, false, true))
-				return false;
-			++draws;
+			// Every Q3 technique re-shades from its own leased inputs into the
+			// black-cleared Q3 target (retail's altbuffer); the beauty colour is
+			// never sampled, only its resolved depth is tested.
 			if (!q3_adapter.draw_view(rd, render_data, view,
-					target.q3_framebuffer, target.scene_scratch, target.size, draws))
+					target.q3_framebuffer, draws))
 				return false;
 			if (!draw_one(target.capture_framebuffer, target.q3_uniform,
 					BlendMode::Replace, FramePass::Stretch,
