@@ -549,9 +549,20 @@ func test_production_object_q3_contributes_pixels_and_obeys_beauty_depth() -> vo
 	assert_gt(float(footprint.fraction), 0.9,
 			"the LUM copy passes its own beauty depth across its footprint: %s" %
 			footprint)
+	# The bulb's Q3 copy is the SELFLUM block of a white Diffuse1 under the
+	# noon default gain (1, 1, 1): min(1, 1 x 1 x 2) = white. FrameFX then
+	# composites the blurred capture at the witnessed SRCALPHA/ONE alpha 0.5,
+	# so over a black beauty pixel the composite adds at most 0.5 per channel
+	# (1.5 summed) and, for a bulb this size, at least the old per-channel
+	# 0.1 pin (0.3 summed) somewhere inside the kernel's reach.
 	var focused_image: Image = focused.viewport.get_texture().get_image()
-	assert_gt(float(_max_rgb_delta(focused_image, beauty_image).delta), 0.02,
-			"the focused composite adds the bulb's glow over beauty")
+	var composite_delta := _max_rgb_delta(focused_image, beauty_image)
+	assert_gt(float(composite_delta.delta), 0.3,
+			"the half-strength composite adds the bulb's glow over beauty: %s" %
+			composite_delta)
+	assert_lt(float(composite_delta.delta), 1.5 + 3.0 / 255.0,
+			"the composite never exceeds alpha 0.5 of a saturated white blur: %s" %
+			composite_delta)
 
 	# Put the same opaque beauty surface in front of both models. Their beauty
 	# remains identical, but the focused renderer must now reject every model
