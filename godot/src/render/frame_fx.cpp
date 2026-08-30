@@ -850,6 +850,11 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	std::size_t draws = 0;
 	bool sampled_q3 = false;
 	bool q3_failed = false;
+	// The published Q3 frame is consumed every render, commands or not: a
+	// frame with nothing to draw still names the cache entries evicted since
+	// the last consumed one, and their device buffers are freed here rather
+	// than held until the next non-empty frame.
+	q3_adapter.consume_frame(rd);
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget &target = targets[view];
 		if (q3_adapter.has_commands() && !q3_failed) {

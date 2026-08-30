@@ -56,6 +56,12 @@ public:
 	void clear_frame();
 	bool has_commands() const;
 
+	// Consume the published frame on the render side without drawing it:
+	// frees the device buffers of every cache entry it names as evicted and
+	// stamps it consumed. The compositor runs this every render, so a frame
+	// with no commands (the last glow source pruned, every source out of
+	// frustum) still releases what the cache evicted.
+	void consume_frame(RenderingDevice *p_rd);
 	// Draw the published frame into p_framebuffer (the Q3 colour attachment
 	// sharing resolved beauty depth). Every technique shades from its leased
 	// textures and snapshotted values; nothing samples the beauty colour.

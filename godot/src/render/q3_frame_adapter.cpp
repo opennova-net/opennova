@@ -659,6 +659,9 @@ public:
 	std::size_t instance_row_reads_this_frame = 0;
 	std::size_t cached_entries = 0;
 	std::size_t cached_vertex_bytes = 0;
+	// Device vertex buffers currently held (one per uploaded cache entry),
+	// republished from the render side after every consume/draw.
+	std::size_t device_buffers = 0;
 
 	// Main-thread geometry cache; its streams are shared immutably with the
 	// render side, which keeps one device buffer per entry below.
@@ -752,12 +755,36 @@ public:
 		device_geometry.erase(found);
 	}
 
+	void publish_device_buffer_count() {
+		std::lock_guard<std::mutex> lock(diagnostics_mutex);
+		device_buffers = device_geometry.size();
+	}
+
+	// Evicted entries are named by every frame published until one is
+	// consumed, so freeing here can never race a later frame that draws them.
+	// Runs on the render side for every frame, drawn or not.
+	void consume_frame(RenderingDevice *p_rd) {
+		const std::shared_ptr<const DeviceFrame> frame = frame_snapshot();
+		if (!frame)
+			return;
+		// Buffers belong to the device that created them: a replaced device
+		// is discarded through initialize()/release_device, never freed here.
+		if (rd != nullptr && rd != p_rd)
+			return;
+		for (const std::uint64_t entry_id : frame->evicted_entries)
+			release_device_geometry(entry_id);
+		consumed_frame_id.store(frame->draw_list.frame_id,
+				std::memory_order_release);
+		publish_device_buffer_count();
+	}
+
 	void release_device(RenderingDevice *p_rd) {
 		// A null current device is an invalidation signal, not permission to
 		// call through the previously cached server-owned pointer. Likewise, RIDs
 		// from one device must never be freed through a replacement device.
 		if (p_rd == nullptr || (rd != nullptr && rd != p_rd)) {
 			discard_device_state();
+			publish_device_buffer_count();
 			return;
 		}
 		rd = p_rd;
@@ -771,6 +798,7 @@ public:
 		release_rid(sampler);
 		release_rid(shader);
 		discard_device_state();
+		publish_device_buffer_count();
 	}
 
 	bool initialize(RenderingDevice *p_rd);
@@ -998,11 +1026,7 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 	const std::shared_ptr<const DeviceFrame> frame = frame_snapshot();
 	if (!frame)
 		return true;
-	// Evicted entries are named by every frame published until one is
-	// consumed, so freeing here can never race a later frame that draws them.
-	for (const std::uint64_t entry_id : frame->evicted_entries)
-		release_device_geometry(entry_id);
-	consumed_frame_id.store(frame->draw_list.frame_id, std::memory_order_release);
+	consume_frame(rd);
 	if (frame->commands.empty())
 		return true;
 	RenderSceneData *scene_data = p_render_data != nullptr ?
@@ -1013,9 +1037,12 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 	}
 	// Uploads precede the draw list: a buffer update inside one is rejected.
 	for (const DeviceCommand &command : frame->commands) {
-		if (!command.stream || !upload_stream(*command.stream))
+		if (!command.stream || !upload_stream(*command.stream)) {
+			publish_device_buffer_count();
 			return false;
+		}
 	}
+	publish_device_buffer_count();
 	for (RID &uniform : transient_uniforms)
 		release_uniform_rid(uniform);
 	transient_uniforms.clear();
@@ -1210,6 +1237,7 @@ Dictionary Q3FrameAdapter::Impl::report() const {
 	result["q3_cached_entries"] = static_cast<int64_t>(cached_entries);
 	result["q3_cached_vertex_bytes"] =
 			static_cast<int64_t>(cached_vertex_bytes);
+	result["q3_device_buffers"] = static_cast<int64_t>(device_buffers);
 	result["q3_geometry_submission"] = "cached_per_source_surface_streams";
 	result["q3_static_instance_submission"] = "retained_transform_ranges";
 	result["q3_skinned_submission"] = "immutable_cpu_pose_snapshot";
@@ -1647,6 +1675,11 @@ bool Q3FrameAdapter::has_commands() const {
 		return false;
 	const std::shared_ptr<const DeviceFrame> frame = impl_->frame_snapshot();
 	return frame && !frame->commands.empty();
+}
+
+void Q3FrameAdapter::consume_frame(RenderingDevice *p_rd) {
+	if (impl_)
+		impl_->consume_frame(p_rd);
 }
 
 bool Q3FrameAdapter::draw_view(RenderingDevice *p_rd, RenderData *p_render_data,

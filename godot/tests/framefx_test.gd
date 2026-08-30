@@ -646,6 +646,46 @@ func test_stable_q3_scene_packs_once_and_never_reads_the_server_back() -> void:
 	assert_eq(int(fourth.get("q3_packed_vertices", -1)), 0)
 
 
+func test_pruned_q3_source_frees_its_device_buffer_on_an_empty_frame() -> void:
+	# Evictions are handed to the render side through the published frame.
+	# Once the last glow source is gone that frame has no commands; its
+	# evicted entries must still be consumed (their RD vertex buffers freed)
+	# instead of waiting for the next non-empty frame.
+	var view := _q3_lum_view(true)
+	var renderer := view.terminal as FrameFx
+	for _frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	var drawn := renderer.get_backend_report()
+	if not bool(drawn.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_gt(int(drawn.get("q3_drawn_commands", 0)), 0,
+			String(drawn.get("q3_failure", "Q3 setup draw failed")))
+	assert_gt(int(drawn.get("q3_device_buffers", 0)), 0,
+			"the drawn LUM surfaces hold device buffers: %s" % drawn)
+
+	var model := view.model as Node
+	(view.viewport as Node).remove_child(model)
+	model.free()
+	renderer.advance_frame()
+	var pruned := renderer.get_backend_report()
+	assert_eq(int(pruned.get("q3_submitted_commands", -1)), 0,
+			"the pruned source leaves an empty frame")
+	assert_eq(int(pruned.get("q3_cached_entries", -1)), 0,
+			"the cache evicted the pruned source's entries")
+	for _frame in 3:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	var consumed := renderer.get_backend_report()
+	assert_eq(int(consumed.get("q3_device_buffers", -1)), 0,
+			"the empty frame's render frees the evicted device buffers: %s" %
+			consumed)
+	renderer.shutdown()
+
+
 func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 	# A static RLOD switch or destruction carve rewrites MultiMesh rows only;
 	# the population's mesh never changes. The placer therefore invalidates
