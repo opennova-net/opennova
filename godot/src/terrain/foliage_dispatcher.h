@@ -27,6 +27,7 @@
 namespace godot {
 
 class Image;
+class RenderingServer;
 class Terrain;
 class TerrainData;
 class TerrainTileInfo;
@@ -292,7 +293,11 @@ private:
   _extract_source_geometry(const Ref<Mesh> &p_mesh) const;
   void _ensure_visuals();
   void _update_materials();
-  RID _ensure_draw_instance(std::vector<RID> &r_pool,
+  // Grow one pool to cover p_index. The apply loop binds the scenario once
+  // (_bind_current_scenario) and passes the server down: nothing here walks
+  // the tree per draw.
+  RID _ensure_draw_instance(RenderingServer *p_server,
+                            std::vector<RID> &r_pool,
                             std::vector<DrawInstanceStamp> &r_stamps,
                             size_t p_index);
   bool _bind_current_scenario();
