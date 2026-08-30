@@ -569,8 +569,7 @@ func _log_window(index: int, count: int, frames: int, summaries: Dictionary) -> 
 	var engine_parts := PackedStringArray()
 	for key in ["process_callbacks", "deferred_flush", "draw", "pacing_input",
 			"hud_draw_compile", "hud_draw_emit", "render_root_cpu",
-			"render_root_gpu", "render_q3_cpu", "render_q3_gpu", "render_water_cpu",
-			"render_water_gpu"]:
+			"render_root_gpu", "render_water_cpu", "render_water_gpu"]:
 		var part: Dictionary = summaries[key]
 		if int(part["samples"]) > 0:
 			engine_parts.append("%s %.3f" % [key, float(part["mean_ms"])])
