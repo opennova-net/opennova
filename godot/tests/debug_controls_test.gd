@@ -135,7 +135,7 @@ func test_the_table_registers_the_wire_catalog() -> void:
 		var json: Dictionary = row.to_json_value()
 		assert_eq(json.keys(), WIRE_ROW_KEYS,
 				"'%s' keeps the legacy wire row keys" % id)
-	assert_eq(owner_counts[DebugControls.OWNER_ENGINE], 35,
+	assert_eq(owner_counts[DebugControls.OWNER_ENGINE], 36,
 			"engine rows end in a Simulation/Terrain/Weather/environment call")
 	assert_eq(owner_counts[DebugControls.OWNER_DEVICE], 21,
 			"device rows are viewport/overlay/audio/shell state")
