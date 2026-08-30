@@ -605,12 +605,24 @@ func test_slot_capture_camera_signature_pins_the_water_layer_table() -> void:
 		assert_eq(beauty_mask.get_string(1).hex_to_int() & expected_mask, 0,
 				"the beauty mask stays disjoint from slot capture")
 
+	# The live captures are SlotShadow's RenderingDevice pass: no runtime
+	# camera culls to the signature layers any more (the shader branch stays
+	# for the render-swatch projshadow probe's capture camera), and the pass
+	# keeps the retail clear, the 4x resolve and the PRE_OPAQUE ordering.
 	var slot_shadow := _read(_repo_path("godot/src/env/slot_shadow.cpp"))
-	for token in ["camera->set_cull_mask(kCaptureLayerBits[i]);",
-			"viewport->set_transparent_background(true);",
-			"capture_environment->set_bg_color(Color(1.0f, 1.0f, 1.0f));",
-			"viewport->set_msaa_3d(Viewport::MSAA_4X);"]:
-		assert_true(slot_shadow.contains(token), token)
+	assert_false(slot_shadow.contains("set_cull_mask("),
+			"SlotShadow no longer aims a camera at the capture layers")
+	assert_false(slot_shadow.contains("SubViewport"),
+			"SlotShadow no longer owns a capture SubViewport chain")
+	var adapter := _read(_repo_path("godot/src/render/slot_capture_adapter.cpp"))
+	for token in ["kSlotCaptureClearArgb",
+			"RenderingDevice::TEXTURE_SAMPLES_4",
+			"texture_resolve_multisample(",
+			"EFFECT_CALLBACK_TYPE_PRE_OPAQUE",
+			"object_projected_shadow_coverage(",
+			"object_projected_shadow_policy(",
+			"frag_color = vec4(0.0, 0.0, 0.0, 1.0);"]:
+		assert_true(adapter.contains(token), token)
 
 	for output in ["output_opaque.gdshaderinc", "output_alpha.gdshaderinc"]:
 		assert_true(_normalized(OBJECT_ROOT.path_join(output)).contains(

@@ -51,7 +51,8 @@ MainGame._process
                                             placer's retained static instances), then the
                                             per-model ObjectModel advance
       sync_framefx_frame                    compile typed focused-Q3 draws after every producer published
-      render slot shadows
+      render slot shadows                   plan the 24/12 admission, publish the armed captures
+                                            (drawn by the beauty compositor's PRE_OPAQUE pass)
       render particles
       mix mission audio
       update frame clear

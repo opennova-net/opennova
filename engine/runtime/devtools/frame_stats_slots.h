@@ -194,8 +194,8 @@
     X(RENDER_WATER_GPU, "") \
     X(RENDER_Q3_CPU, "RETIRED: focused Q3 compositor CPU is included in root viewport time") \
     X(RENDER_Q3_GPU, "RETIRED: focused Q3 compositor GPU is included in root viewport time") \
-    X(RENDER_SLOT_CPU, "summed over the slot-shadow captures that rendered") \
-    X(RENDER_SLOT_GPU, "") \
+    X(RENDER_SLOT_CPU, "RETIRED: the slot captures draw inside the root viewport's PRE_OPAQUE compositor pass; included in root viewport time") \
+    X(RENDER_SLOT_GPU, "RETIRED: the slot captures draw inside the root viewport's PRE_OPAQUE compositor pass; included in root viewport time") \
     /* Per-pass render counts (RenderingServer per-viewport render info for the */ \
     /* previous frame). VALUE slots: what each pass actually submitted, so pass */ \
     /* cost attribution (main view vs shadow maps vs the water mirror) is read */ \
@@ -208,9 +208,11 @@
     X(RENDER_WATER_DRAWS, "VALUE: water mirror visible-pass draw calls") \
     X(RENDER_Q3_OBJECTS, "VALUE: focused Q3 compiler draw commands") \
     X(RENDER_Q3_DRAWS, "VALUE: focused Q3 RenderingDevice draw calls") \
-    X(RENDER_SLOT_OBJECTS, "VALUE: slot captures' visible-pass objects (rendered slots only)") \
-    X(RENDER_SLOT_DRAWS, "VALUE: slot captures' visible-pass draw calls") \
-    X(RENDER_SLOT_VIEWPORTS, "VALUE: slot captures that rendered") \
+    X(RENDER_SLOT_OBJECTS, "VALUE: slot capture surfaces compiled (the RD pass's draw commands)") \
+    X(RENDER_SLOT_DRAWS, "VALUE: slot capture RenderingDevice draw calls") \
+    X(RENDER_SLOT_CAPTURES, "VALUE: slot captures drawn this frame (armed by the retail cadence)") \
+    X(RENDER_SLOT_PACKED_VERTICES, "VALUE: vertices packed for the slot captures this frame (a stable frame packs 0)") \
+    X(RENDER_SLOT_SKINNED, "VALUE: skinned slot capture commands (GPU bone palette)") \
     /* end */
 
 namespace opennova::devtools {

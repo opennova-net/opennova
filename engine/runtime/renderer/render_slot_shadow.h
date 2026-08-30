@@ -127,6 +127,11 @@ SlotCaptureEye silhouette_capture_eye(float model_sphere_radius_units);
 // [orig: RenderSlot_InitTextureChain @ 0x5d5320].
 inline constexpr int kSlotTextureCount = 12;
 int slot_texture_size(int texture_order, int shadow_detail);
+// Each capture clears its RT to 0x00FFFFFF — white RGB, alpha 0 — before
+// the PROJSHAD black draws [orig: RenderSlot_RenderEntityAndChildren
+// @ 0x5d780f, GTexRT_SelectThunk with color_mask 0xFFFFFF]; the drape reads
+// the RGB, so a white texel is the no-shadow sample.
+inline constexpr uint32_t kSlotCaptureClearArgb = 0x00FFFFFFu;
 
 // Frame-skip cadence: a slot re-renders when
 // (frame & mask) == (slot_index & mask) or its dirty bit is set; mask = 7

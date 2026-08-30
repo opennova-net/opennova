@@ -1,10 +1,15 @@
 extends GutTest
 
 ## The render-slot entity ground-shadow device (SlotShadow): the 24-patch /
-## 12-capture admission, the per-slot capture layer channels, and the local
-## player's first-person drape gates. The planning laws themselves are pinned
-## portable (tests/renderer/render_slot_shadow_test.cpp); this suite pins the
-## device wiring (docs/render/render-lighting-re.md, the render-slot side).
+## 12-capture admission, the per-armed-slot capture requests the
+## RenderingDevice pass draws, the capture-with child walk, the retail
+## refresh cadence, the PROJSHAD coverage table, the compositor lifecycle and
+## the local player's first-person drape gates. The planning laws themselves
+## are pinned portable (tests/renderer/render_slot_shadow_test.cpp); this
+## suite pins the device wiring (docs/render/render-lighting-re.md, the
+## render-slot side).
+
+const CRATE_3DI := "res://../fixtures/threedi/synth/crate.3di"
 
 
 func _environment() -> MissionEnvironment:
@@ -74,37 +79,62 @@ func test_admission_caps_follow_the_retail_patch_and_capture_budgets() -> void:
 			"the drape patch budget binds the nearest 24 (retail: 24 slots)")
 	assert_eq(int(report["captures"]), 12,
 			"the silhouette RT budget captures the nearest 12 (retail chain)")
+	# Every fresh capture order is dirty on its first assignment, so all
+	# twelve arm a request this frame (RenderSlot_SortAndAssign dword3).
+	assert_eq(int(report["armed"]), 12, "every newly ordered slot arms a capture")
+	assert_eq(shadow.get_armed_capture_mask(), 0xFFF)
 
 
-func test_admitted_casters_carry_exactly_one_capture_channel() -> void:
+func test_drape_binds_the_twelve_capture_textures_once() -> void:
+	# The retail RT chain: twelve textures the drape samples through
+	# u_slot_tex_i, each a Texture2DRD over the live device's resolve target
+	# (RenderSlot_InitTextureChain @0x5d5320).
+	var drape := SlotShadow.get_drape_material()
+	assert_eq(SlotShadow.get_capture_count(), 12)
+	for order in range(12):
+		var bound: Texture2D = drape.get_shader_parameter("u_slot_tex_%d" % order)
+		assert_not_null(bound, "u_slot_tex_%d is bound" % order)
+		assert_true(bound is Texture2DRD, "the drape samples a Texture2DRD")
+		assert_eq(bound, SlotShadow.get_capture_texture(order),
+				"the bound texture is the order's capture texture")
+	assert_null(SlotShadow.get_capture_texture(12), "no texture past the chain")
+
+
+func test_admitted_caster_publishes_one_capture_request() -> void:
 	var environment := _environment()
 	var camera := _camera()
 	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
 	var shadow := _fresh_shadow(environment)
 	var near_model := _caster_at(5.0)
-	var mesh := near_model.get_child(0) as VisualInstance3D
-	var before := mesh.layers
 	shadow.advance_frame()
-	var capture_bits: int = mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
-	assert_ne(capture_bits, 0, "an admitted caster gains its capture channel")
-	assert_eq(capture_bits & (capture_bits - 1), 0,
-			"exactly one per-slot channel bit is assigned")
-	assert_eq(mesh.layers & ~Water.VISUAL_LAYER_SLOT_CAPTURE_MASK,
-			before & ~Water.VISUAL_LAYER_SLOT_CAPTURE_MASK,
-			"the stamp never disturbs the base/caster layers")
-	# Releasing the caster clears the channel on the next plan.
+	var order := shadow.get_capture_order_of(near_model)
+	assert_true(order >= 0 and order < 12, "an admitted caster takes a slot order")
+	assert_eq(shadow.get_capture_caster_count(order), 1,
+			"the request carries the caster alone")
+	assert_ne(shadow.get_armed_capture_mask() & (1 << order), 0,
+			"the fresh order is armed (dirty)")
+	assert_eq(int(shadow.get_report()["armed"]), 1)
+	# The target side follows the retail chain for the detail level
+	# (render_slot_shadow.h slot_texture_size) once a device exists; without
+	# one the request still publishes and the size stays 0.
+	var size := shadow.get_capture_target_size(order)
+	if RenderingServer.get_rendering_device() != null:
+		assert_eq(size, 512, "detail 3 order 0 = the 512 px chain base")
+	else:
+		assert_eq(size, 0, "no device target headless")
+	# Releasing the caster drops its order on the next plan.
 	near_model.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
-	assert_eq(mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, 0,
-			"a released caster loses its capture channel")
+	assert_eq(shadow.get_capture_order_of(near_model), -1,
+			"a released caster leaves its slot")
+	assert_eq(int(shadow.get_report()["armed"]), 0)
 
 
-func _child_shares_parent_channel(parent_first: bool) -> void:
+func _child_shares_parent_slot(parent_first: bool) -> void:
 	# The retail child walk renders a capture-with child (held weapon, mounted
 	# child) into its PARENT's slot RT (RenderSlot_RenderEntityAndChildren
 	# @0x5d78ef..0x5d79d6); the child's own slot is excluded. Registration
-	# order must not matter: the child's own (excluded) row once cleared the
-	# bit the parent's row had just stamped.
+	# order must not matter.
 	var environment := _environment()
 	var camera := _camera()
 	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
@@ -119,31 +149,31 @@ func _child_shares_parent_channel(parent_first: bool) -> void:
 		parent = _caster_at(5.0)
 	child.set_slot_shadow_capture_with(parent)
 	shadow.advance_frame()
-	var parent_mesh := parent.get_child(0) as VisualInstance3D
-	var child_mesh := child.get_child(0) as VisualInstance3D
-	var parent_bits: int = parent_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
-	var order := "parent first" if parent_first else "child first"
-	assert_ne(parent_bits, 0, "the parent captures (%s)" % order)
-	assert_eq(child_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, parent_bits,
-			"the linked child renders into its parent's slot RT (%s)" % order)
+	var order_label := "parent first" if parent_first else "child first"
+	var parent_order := shadow.get_capture_order_of(parent)
+	assert_true(parent_order >= 0, "the parent captures (%s)" % order_label)
+	assert_eq(shadow.get_capture_order_of(child), parent_order,
+			"the linked child renders into its parent's slot (%s)" % order_label)
+	assert_eq(shadow.get_capture_caster_count(parent_order), 2,
+			"the request carries the parent and its claimed child (%s)" % order_label)
 	assert_eq(int(shadow.get_report()["captures"]), 1,
-			"the child's own slot is excluded (%s)" % order)
+			"the child's own slot is excluded (%s)" % order_label)
 
 
 func test_capture_with_child_rides_its_parent_slot_parent_registered_first() -> void:
-	_child_shares_parent_channel(true)
+	_child_shares_parent_slot(true)
 
 
 func test_capture_with_child_rides_its_parent_slot_child_registered_first() -> void:
-	_child_shares_parent_channel(false)
+	_child_shares_parent_slot(false)
 
 
 func test_capture_with_child_refused_by_the_full_table_still_rides_its_parent() -> void:
 	# The fixed 256-record table refuses the 257th registration
 	# (RenderSlot_AllocSlot @0x5d5690), so a linked child past the cap has no
 	# assignment row of its own; the child walk follows the entity hierarchy,
-	# not the table, so it still captures into its parent's RT — and gives
-	# the channel back once the link drops, even while it stays row-less.
+	# not the table, so it still captures into its parent's slot — and leaves
+	# once the link drops, even while it stays row-less.
 	var environment := _environment()
 	var camera := _camera()
 	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
@@ -156,16 +186,138 @@ func test_capture_with_child_refused_by_the_full_table_still_rides_its_parent() 
 	shadow.advance_frame()
 	assert_eq(int(shadow.get_report()["registered"]), 256,
 			"the fixed table holds 256 records, so the linked child is refused")
-	var parent_mesh := parent.get_child(0) as VisualInstance3D
-	var child_mesh := child.get_child(0) as VisualInstance3D
-	var parent_bits: int = parent_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
-	assert_ne(parent_bits, 0, "the nearest caster captures")
-	assert_eq(child_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, parent_bits,
-			"a row-less linked child still renders into its parent's slot RT")
+	var parent_order := shadow.get_capture_order_of(parent)
+	assert_true(parent_order >= 0, "the nearest caster captures")
+	assert_eq(shadow.get_capture_order_of(child), parent_order,
+			"a row-less linked child still renders into its parent's slot")
+	assert_eq(shadow.get_capture_caster_count(parent_order), 2)
 	child.set_slot_shadow_capture_with(null)
 	shadow.advance_frame()
-	assert_eq(child_mesh.layers & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, 0,
-			"dropping the link clears the inherited channel on the next plan")
+	assert_eq(shadow.get_capture_order_of(child), -1,
+			"dropping the link leaves the parent's slot on the next plan")
+
+
+func test_refresh_cadence_arms_by_record_index_and_the_local_player_every_frame() -> void:
+	# Detail 3: mask 1, a slot re-captures when (frame & 1) == (index & 1) or
+	# its order just changed; the local player refreshes every frame from
+	# detail 3 up [orig: RenderSlot_RenderEntityAndChildren @0x5d76d9..0x5d7748].
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)  # frame 1
+	var model := _caster_at(5.0)
+	shadow.advance_frame()  # frame 2: the fresh order is dirty -> armed
+	var order := shadow.get_capture_order_of(model)
+	assert_true(order >= 0)
+	assert_ne(shadow.get_armed_capture_mask() & (1 << order), 0, "dirty order arms")
+	var armed_history := []
+	for i in range(4):
+		shadow.advance_frame()  # frames 3..6
+		armed_history.append((shadow.get_armed_capture_mask() & (1 << order)) != 0)
+		assert_eq(shadow.get_capture_order_of(model), order,
+				"the capture order stays sticky across the cadence")
+	assert_eq(armed_history, [false, true, false, true],
+			"record 0 re-captures on even frames only at detail 3 (mask 1)")
+	assert_eq(shadow.get_capture_caster_count(order), 1,
+			"an armed frame publishes the caster's request")
+	shadow.advance_frame()  # frame 7: unarmed
+	assert_eq(shadow.get_capture_caster_count(order), 0,
+			"an unarmed frame publishes no request; the target keeps its capture")
+	shadow.set_local_player_model(model)
+	for i in range(3):
+		shadow.advance_frame()
+		assert_ne(shadow.get_armed_capture_mask() & (1 << order), 0,
+				"the local player's slot re-captures every frame from detail 3")
+
+
+func test_projshad_coverage_follows_the_engine_table_per_technique() -> void:
+	# The capture samples the coverage the technique's PROJSHAD pass samples
+	# (engine object_projected_shadow_coverage = the pipeline manifest's
+	# projected_shadow_contracts): _FFP keeps Diffuse1.a x AlphaGenValue, its
+	# _MT blocks x Diffuse2.a, the file effects Diffuse1.a alone, glass none.
+	var cache := ObjectShaderCache.get_singleton()
+	assert_not_null(cache)
+	if cache == null:
+		return
+	var expectations := {
+		"FF_ST_OP": "diffuse_alpha_ffp",
+		"FF_ST_AB": "diffuse_alpha_ffp",
+		"FF_MT_OP": "diffuse_detail_alpha_ffp",
+		"FF_ST_OP_LUM": "diffuse_alpha_ffp",
+		"FF_MT_OP_LUM": "diffuse_detail_alpha_ffp",
+		"VS_PHONGT": "diffuse_alpha",
+		"VS_DOT3DIFF": "diffuse_alpha",
+		"VS_DOT3DIFFOBJ": "diffuse_alpha",
+		"VS_BMTXMIRRT": "diffuse_alpha",
+		"VS_SKBASIC": "diffuse_alpha",
+		"FFP_GLASS": "no_pass",
+		"VS_SKGLASS": "no_pass",
+	}
+	var manifest_text := FileAccess.get_file_as_string(
+			"res://shaders/object/pipeline_manifest.json")
+	var manifest: Dictionary = JSON.parse_string(manifest_text)
+	var contracts: Dictionary = manifest["projected_shadow_contracts"]
+	var known: Array = Array(contracts.values())
+	for tag in expectations:
+		var emissive := 2 if String(tag).ends_with("_LUM") else 0
+		var key := cache.classify(tag, 0, emissive, 0, 128)
+		var coverage := cache.projected_shadow_coverage_for_key(key)
+		assert_eq(coverage, expectations[tag], "%s PROJSHAD coverage" % tag)
+		assert_true(known.has(coverage),
+				"%s names a manifest projected_shadow_contracts token" % tag)
+
+
+func _scope_with_world_environment() -> Node3D:
+	var scope := Node3D.new()
+	add_child_autofree(scope)
+	var world_environment := WorldEnvironment.new()
+	world_environment.name = "ClearColor"
+	var environment := Environment.new()
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color.BLACK
+	world_environment.environment = environment
+	scope.add_child(world_environment)
+	return scope
+
+
+func _effect_present(world_environment: WorldEnvironment) -> bool:
+	var compositor := world_environment.compositor
+	if compositor == null:
+		return false
+	for effect in compositor.compositor_effects:
+		if effect is SlotCaptureCompositorEffect:
+			return true
+	return false
+
+
+func test_capture_effect_installs_on_the_scope_world_environment_and_re_enters() -> void:
+	# The captures draw at PRE_OPAQUE on the beauty view's compositor so the
+	# drape samples finished targets in the same frame; exit-tree releases
+	# the effect and its device resources, re-entry rebuilds them (the
+	# FrameFx contract).
+	var scope := _scope_with_world_environment()
+	var world_environment := scope.get_node("ClearColor") as WorldEnvironment
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	assert_true(shadow.is_capture_effect_installed(),
+			"ready installs the capture effect on the scope's WorldEnvironment")
+	assert_true(_effect_present(world_environment))
+	var report: Dictionary = shadow.get_report()
+	assert_true(bool(report["capture_effect_installed"]))
+	assert_eq(int(report["slot_callback_type"]),
+			CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_OPAQUE,
+			"the captures run before the opaque pass")
+	scope.remove_child(shadow)
+	assert_false(shadow.is_capture_effect_installed(), "exit-tree uninstalls")
+	assert_false(_effect_present(world_environment),
+			"the compositor no longer carries the effect")
+	# Shutdown is idempotent: a second exit-tree path finds nothing to free.
+	scope.add_child(shadow)
+	assert_true(shadow.is_capture_effect_installed(), "re-entry reinstalls")
+	assert_true(_effect_present(world_environment))
+	scope.remove_child(shadow)
+	assert_false(shadow.is_capture_effect_installed())
+	shadow.free()
 
 
 func test_local_player_first_person_drape_gates() -> void:
@@ -248,3 +400,82 @@ func test_terrain_material_chains_the_shared_drape_passes() -> void:
 			"the authored-blob pass chains behind the silhouette pass")
 	assert_true(drape.shader.resource_path.ends_with(
 			"slot_shadow_drape.gdshader"))
+
+
+func _crate_caster(scope: Node3D, at: Vector3) -> ObjectModel:
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(CRATE_3DI)), OK)
+	var model := ObjectModel.new()
+	scope.add_child(model)
+	model.set_process(false)
+	model.set_object_data(data)
+	model.position = at
+	model.set_shadow_caster_enabled(true)
+	return model
+
+
+func _corner_and_center(image: Image) -> Dictionary:
+	var w := image.get_width()
+	var h := image.get_height()
+	var corners := [image.get_pixel(1, 1), image.get_pixel(w - 2, 1),
+			image.get_pixel(1, h - 2), image.get_pixel(w - 2, h - 2)]
+	var brightest_corner := 0.0
+	for corner in corners:
+		brightest_corner = maxf(brightest_corner,
+				minf(corner.r, minf(corner.g, corner.b)))
+	var darkest := 1.0
+	for y in range(h / 2 - 2, h / 2 + 3):
+		for x in range(w / 2 - 2, w / 2 + 3):
+			var p := image.get_pixel(x, y)
+			darkest = minf(darkest, maxf(p.r, maxf(p.g, p.b)))
+	return {"corner_min": brightest_corner, "center_max": darkest}
+
+
+func test_windowed_capture_draws_the_caster_black_over_the_white_clear() -> void:
+	# The retail slot RT: cleared 0x00FFFFFF, the PROJSHAD pass draws the
+	# caster black (render_shadow_pass @0x5d7b70; vscPostBlackT1). Needs a live
+	# RenderingDevice (a windowed forward_plus run); headless stays pending.
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var scope := _scope_with_world_environment()
+	var environment := _environment()
+	var camera := Camera3D.new()
+	camera.current = true
+	scope.add_child(camera)
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	shadow.set_environment_node(environment)
+	shadow.set_shadow_detail(3)
+	var crate := _crate_caster(scope, Vector3.ZERO)
+	crate.advance_runtime_frame(1.0 / 62.0)
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(crate)
+	assert_true(order >= 0, "the crate takes a slot")
+	assert_ne(shadow.get_armed_capture_mask() & (1 << order), 0, "its fresh order is armed")
+	assert_eq(shadow.get_capture_target_size(order), 512)
+	var report: Dictionary = shadow.get_report()
+	assert_gt(int(report["slot_surfaces_compiled"]), 0,
+			"the crate's FF_ST_OP strip compiles a black-pass command")
+	assert_eq(int(report["slot_unclassified_surfaces"]), 0)
+	# Let the beauty view render (the PRE_OPAQUE effect draws the capture).
+	for i in range(3):
+		await get_tree().process_frame
+	RenderingServer.force_sync()
+	report = shadow.get_report()
+	assert_eq(String(report["slot_status"]), "drawn", String(report["slot_failure"]))
+	assert_gte(int(report["slot_captures_drawn"]), 1, "the armed capture drew")
+	assert_gt(int(report["slot_draw_calls"]), 0)
+	var image := shadow.get_capture_image(order)
+	assert_not_null(image, "the resolve target reads back")
+	if image == null:
+		return
+	assert_eq(image.get_width(), 512)
+	var stats := _corner_and_center(image)
+	assert_gt(float(stats["corner_min"]), 0.99,
+			"the corners keep the white clear (no caster there)")
+	assert_lt(float(stats["center_max"]), 0.05,
+			"the caster's silhouette is black at the capture center")
+	crate.set_shadow_caster_enabled(false)
+	shadow.advance_frame()

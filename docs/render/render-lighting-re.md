@@ -796,7 +796,16 @@ clamped [6, 20] (`@ 0x5d6d5c..0x5d6dac`).
 *Silhouette render* — `RenderSlot_RenderEntityAndChildren @ 0x5d7690`
 renders the entity plus its standing/mounted children into the slot RT
 (ortho extent = radius·1.25 clamped radius + 0.75,
-`setup_shadow_cascade_matrices @ 0x58d300`), on the detail-scaled refresh
+`setup_shadow_cascade_matrices @ 0x58d300`: a rotation-only D3D view from
+the slot direction through `build_direction_look_at_matrix @ 0x612c90` —
+forward = normalize(dir), right = normalize(fwd.z, 0, −fwd.x), up = fwd ×
+right, a vertical direction leaving right/up ZERO — with the entity rendered
+at that view's origin (`Entity_RenderWithLODCallback @ 0x5d6ef0` zeroes the
+position for a null origin, children at their offset `@ 0x5d795a/0x5d79c8`)
+under an orthographic projection of scale 1/extent over the depth band
+0.2..5000.2 (`@ 0x58d38b..0x58d3a3`: 1/(far − near) = 0.0002, −near/(far −
+near) = −0.00004); ported 2026-08-29 as `renderer::silhouette_capture_basis`
+and the `kSilhouetteCaptureNear/Far` constants), on the detail-scaled refresh
 cadence: `(frame & mask) == (slotIndex & mask)` with mask 7 below detail 2,
 3 at 2, 1 at 3, every frame at 4+; the local player (or its parent) skips
 only below detail 3; the dirty bit forces. Lighting via
@@ -847,25 +856,48 @@ on TERRAIN ONLY — the patches are terrain-following meshes.
 *The port* — planning and color laws are portable in
 `engine/runtime/renderer/render_slot_shadow.{h,cpp}` (direction clamp,
 alloc/grazing LOD, RT chain, cadence, scoring/24-12 assignment with sticky
-captures, dominant-light pick, anchor march, fade + ambient/darkening and
-silhouette-combine laws; ctest `renderer_render_slot_shadow` pins each). The device half
-(`godot/src/env/slot_shadow.cpp` + `slot_shadow_drape.gdshader` on
-the terrain material; `engine/formats/def` parses the `shadow` line;
-GUT `slot_shadow_test`) realizes the capture as 12 per-slot SubViewports
-at the witnessed chain sizes culling per-slot capture layers, and the
-drape as a per-pixel projection over the terrain surface. Device folds,
-each serving the same observable: the terrain surface stands in for the
-21×21 patch mesh and the projection is evaluated per pixel, bounded (since
-2026-08-22) by the lod × lod patch the anchor march places
-(`renderer::slot_patch_bounds` over `TerrainData`'s height query) and clipped
-by the shadowztex stage (`renderer::slot_depth_clip`), both published per
-slot to the shader; held weapons ride their owner's slot via the
-capture-with link (`ObjectModel.set_slot_shadow_capture_with` — the
+captures, dominant-light pick, anchor march, the capture view basis and
+depth band, fade + ambient/darkening and silhouette-combine laws; ctest
+`renderer_render_slot_shadow` pins each), and the per-technique PROJSHAD
+coverage source in `object_shader_template` (`object_projected_shadow_coverage`
+beside the pass-state table; ctest `renderer_material_classify`). The device
+half (`godot/src/env/slot_shadow.cpp` + `godot/src/render/slot_capture_adapter.cpp`
++ `slot_shadow_drape.gdshader` on the terrain material; `engine/formats/def`
+parses the `shadow` line; GUT `slot_shadow_test`) realizes the capture
+(since 2026-08-29) as one RenderingDevice pass: `SlotShadow` publishes a
+typed request per armed slot (order, the capture pose from the witnessed
+basis, the ortho projection of the witnessed extent, the caster and its
+claimed capture-with children) and the `SlotCaptureCompositorEffect` on
+the beauty view's compositor draws them at PRE_OPAQUE — before the terrain
+drape samples them in the same frame — into twelve 4x-MSAA colour targets
+at the witnessed chain sizes, cleared to the retail 0x00FFFFFF, black
+fragments under the technique's PROJSHAD coverage (Diffuse1.a, × Detail.a
+for the _MT FFP blocks, × AlphaGen for the FFP families, the alpha test
+where the material carries one, no pass for tracer/flag/glass, the
+material-blend additive variants skipped as a no-op) with depth test and
+write inside the target, resolved into RGBA8 textures the drape samples
+through `Texture2DRD`s. The geometry rides the shared `Q3GeometryCache`
+(packed once per surface; skinned strips pack their bone indices/weights
+and skin on the GPU from the frame's bone palette). Device folds, each
+serving the same observable: the capture eye backs off along −forward
+(`renderer::silhouette_capture_eye`) where retail renders the entity at
+the origin of its rotation-only view, and the zenith degeneracy takes the
+world x axis; the terrain surface stands in for the 21×21 patch mesh and
+the projection is evaluated per pixel, bounded (since 2026-08-22) by the
+lod × lod patch the anchor march places (`renderer::slot_patch_bounds` over
+`TerrainData`'s height query) and clipped by the shadowztex stage
+(`renderer::slot_depth_clip`), both published per slot to the shader; held
+weapons ride their owner's slot via the capture-with link
+(`ObjectModel.set_slot_shadow_capture_with` — the
 `RenderSlot_RenderEntityAndChildren` child walk) while tree-parented
 riders fold into the ancestor exclusion; the attached-light drape folds
 the light's attenuation at the entity into the per-slot term (retail
 varies it per patch vertex); and `scene_output` leaves the factor in
 the retail gamma-byte domain for the shared FrameFx display decode. The
+object shaders' `obj_is_slot_shadow_capture` branch (the twelve-layer
+camera signature) no longer serves a live camera; it remains for the
+render-swatch projshadow raster probe until its retirement regenerates the
+shader hash golden. The
 packaged runtime serves shadow detail 3, retail's highest SHADOWQUALITY
 (`options.mnu` rows 0..3; `Settings_ClampGraphicsOptions` clamps to 3
 `@ 0x54d546`; the 0x34-byte settings block copy `@ 0x551500` lands it in
@@ -980,11 +1012,14 @@ shader contract / light isolation tests.
   RT chain, refresh cadence, priority scoring + 24-patch/12-capture
   assignment with sticky orders, dominant-light pick, anchor march, drape
   fade + the per-channel sun ambient law + the attached-light darkening
-  constants — ctest `renderer_render_slot_shadow`. Device:
-  `godot/src/env/slot_shadow.cpp` (12 capture SubViewports +
-  per-slot layers + uniform push) + `godot/shaders/slot_shadow_drape.gdshader`
-  (the terrain drape next pass); `engine/formats/def` parses the authored
-  `shadow` decal line.
+  constants, the capture view basis and depth band — ctest
+  `renderer_render_slot_shadow`; the PROJSHAD coverage source per technique
+  in `object_shader_template`. Device: `godot/src/env/slot_shadow.cpp`
+  (the per-armed-slot capture requests + the drape uniform push) +
+  `godot/src/render/slot_capture_adapter.cpp` (the PRE_OPAQUE
+  RenderingDevice capture pass over the shared Q3 geometry cache) +
+  `godot/shaders/slot_shadow_drape.gdshader` (the terrain drape next pass);
+  `engine/formats/def` parses the authored `shadow` decal line.
 - `terrain_lighting.gdshaderinc`: c0/c1 corrected to (sky, light) — the
   prior combined/fill pairing was a gobj-era stand-in. Its tile-alpha path also
   preserves EnvFile's direct retail getter tuple and applies the witnessed

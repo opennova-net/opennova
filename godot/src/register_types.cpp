@@ -142,6 +142,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);
+	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
 	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);
 	GDREGISTER_CLASS(WeatherCore);

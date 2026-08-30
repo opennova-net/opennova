@@ -94,6 +94,7 @@ int main() {
 		CHECK(near_f(dot(zenith.up, zenith.forward), 0.0f, 1.0e-4f));
 		const SlotCaptureBasis none = silhouette_capture_basis({0.0f, 0.0f, 0.0f});
 		CHECK(none.degenerate);
+		CHECK(kSlotCaptureClearArgb == 0x00FFFFFFu);  // white RGB, alpha 0
 		CHECK(near_f(kSilhouetteCaptureNear, 0.2f));
 		CHECK(near_f(kSilhouetteCaptureFar, 5000.2f));
 		// The device eye spans the whole model sphere: eye distance minus the

@@ -47,8 +47,6 @@ const ENGINE_SLOT_SAMPLES := {
 	"render_root_gpu": FrameStats.RENDER_ROOT_GPU,
 	"render_water_cpu": FrameStats.RENDER_WATER_CPU,
 	"render_water_gpu": FrameStats.RENDER_WATER_GPU,
-	"render_slot_cpu": FrameStats.RENDER_SLOT_CPU,
-	"render_slot_gpu": FrameStats.RENDER_SLOT_GPU,
 }
 # Every FrameStats slot under the World tick (GameWorld.tick legs, the
 # awake-model walk, the occlusion frame, the sim step tree, traces, effects,
@@ -80,7 +78,10 @@ const ENGINE_COUNT_SAMPLES := {
 	"render_q3_objects": FrameStats.RENDER_Q3_OBJECTS,
 	"render_q3_draws": FrameStats.RENDER_Q3_DRAWS,
 	"render_slot_objects": FrameStats.RENDER_SLOT_OBJECTS,
-	"render_slot_viewports": FrameStats.RENDER_SLOT_VIEWPORTS,
+	"render_slot_draws": FrameStats.RENDER_SLOT_DRAWS,
+	"render_slot_captures": FrameStats.RENDER_SLOT_CAPTURES,
+	"render_slot_packed_vertices": FrameStats.RENDER_SLOT_PACKED_VERTICES,
+	"render_slot_skinned": FrameStats.RENDER_SLOT_SKINNED,
 }
 const COUNTER_KEYS := [
 	"plan_rebuilds",
@@ -569,7 +570,7 @@ func _log_window(index: int, count: int, frames: int, summaries: Dictionary) -> 
 	for key in ["process_callbacks", "deferred_flush", "draw", "pacing_input",
 			"hud_draw_compile", "hud_draw_emit", "render_root_cpu",
 			"render_root_gpu", "render_q3_cpu", "render_q3_gpu", "render_water_cpu",
-			"render_water_gpu", "render_slot_cpu", "render_slot_gpu"]:
+			"render_water_gpu"]:
 		var part: Dictionary = summaries[key]
 		if int(part["samples"]) > 0:
 			engine_parts.append("%s %.3f" % [key, float(part["mean_ms"])])

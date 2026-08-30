@@ -86,7 +86,7 @@ void test_drain_reports_render_frames_and_resets_atomically() {
 void test_slot_names_and_descriptions_cover_the_table() {
 	CHECK(kSlotCount > 150, "the slot table survived the transcription");
 	CHECK(std::strcmp(opennova::devtools::slot_name(Slot::FRAME_WALL), "FRAME_WALL") == 0, "first slot name");
-	CHECK(std::strcmp(opennova::devtools::slot_name(Slot::RENDER_SLOT_VIEWPORTS), "RENDER_SLOT_VIEWPORTS") == 0, "last slot name");
+	CHECK(std::strcmp(opennova::devtools::slot_name(Slot::RENDER_SLOT_SKINNED), "RENDER_SLOT_SKINNED") == 0, "last slot name");
 	CHECK(opennova::devtools::slot_name(Slot::COUNT) == nullptr, "COUNT is not a slot");
 	CHECK(std::strlen(opennova::devtools::slot_description(Slot::FRAME_WALL)) > 0, "descriptions carried over");
 	for (int i = 0; i < kSlotCount; ++i) {

@@ -1175,11 +1175,9 @@ var _perf_probe_occlusion_skipped := false
 var _frame_stats: FrameStats = null
 # Weakref edge latch for measured render time on the water reflection RTT.
 var _stats_water_vp_ref: WeakRef = null
-# Focused Q3 is part of the root compositor; the remaining auxiliary scene is the slot-shadow
-# capture chain) — measured only while the board captures.
-var _slot_render_stats: ViewportRenderStatsSampler = null
-# The captures the previous frame armed: their counters are that draw's.
-var _slot_render_armed_mask := 0
+# Focused Q3 and the slot-shadow captures both draw inside the root
+# compositor (POST_TRANSPARENT and PRE_OPAQUE); their per-pass counts come off
+# the effects' typed reports, their time rides the root viewport rows.
 
 
 ## The game shell hands its FrameStats here; the world re-hands it to
@@ -1192,17 +1190,11 @@ func set_frame_stats(board: FrameStats) -> void:
 		if _frame_stats.capture_changed.is_connected(old_capture_changed):
 			_frame_stats.capture_changed.disconnect(old_capture_changed)
 	_stop_water_render_stats()
-	if _slot_render_stats != null:
-		_slot_render_stats.stop()
-	_slot_render_stats = null
 	_frame_stats = board
 	if _frame_stats != null:
 		var capture_changed := _on_frame_stats_capture_changed
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
-		_slot_render_stats = ViewportRenderStatsSampler.new(board,
-				FrameStats.RENDER_SLOT_CPU, FrameStats.RENDER_SLOT_GPU,
-				FrameStats.RENDER_SLOT_OBJECTS, FrameStats.RENDER_SLOT_DRAWS)
 	_occlusion.set_frame_stats(board)
 	if _runtime != null:
 		_runtime.set_frame_stats(board)
@@ -1602,31 +1594,30 @@ func finish_device_frame() -> void:
 	_sample_auxiliary_render_stats(_frame_stats_on)
 
 
-# The auxiliary scene render the root-viewport rows cannot see is the
-# slot-shadow capture chain. Slot captures count
-# only the viewports the PREVIOUS frame armed — an UPDATE_ONCE viewport keeps
-# its last counters, so an unarmed slot would report a stale render.
+# The two compositor passes the root-viewport rows cannot split out: the
+# focused Q3 draw list and the slot-shadow captures. Both report typed
+# per-frame counts (the compile of this frame, the draw of the previous one).
 func _sample_auxiliary_render_stats(stats_on: bool) -> void:
-	if stats_on and _framefx != null:
+	if not stats_on:
+		return
+	if _framefx != null:
 		var q3_report := _framefx.get_backend_report()
 		_frame_stats.add(FrameStats.RENDER_Q3_OBJECTS,
 				int(q3_report.get("q3_drawn_commands", 0)))
 		_frame_stats.add(FrameStats.RENDER_Q3_DRAWS,
 				int(q3_report.get("q3_gpu_draw_calls", 0)))
-	var armed := _slot_render_armed_mask
-	_slot_render_armed_mask = (
-			_slot_shadow.get_armed_capture_mask() if _slot_shadow != null else 0)
-	if _slot_render_stats == null or _slot_shadow == null \
-			or not _slot_render_stats.begin_frame(stats_on):
-		return
-	var rendered := 0
-	for order in range(SlotShadow.get_capture_count()):
-		var counted := (armed & (1 << order)) != 0
-		_slot_render_stats.sample_viewport(order,
-				_slot_shadow.get_capture_viewport(order), counted)
-		if counted:
-			rendered += 1
-	_frame_stats.add(FrameStats.RENDER_SLOT_VIEWPORTS, rendered)
+	if _slot_shadow != null:
+		var slot_report := _slot_shadow.get_report()
+		_frame_stats.add(FrameStats.RENDER_SLOT_OBJECTS,
+				int(slot_report.get("slot_surfaces_compiled", 0)))
+		_frame_stats.add(FrameStats.RENDER_SLOT_DRAWS,
+				int(slot_report.get("slot_draw_calls", 0)))
+		_frame_stats.add(FrameStats.RENDER_SLOT_CAPTURES,
+				int(slot_report.get("slot_captures_drawn", 0)))
+		_frame_stats.add(FrameStats.RENDER_SLOT_PACKED_VERTICES,
+				int(slot_report.get("slot_packed_vertices", 0)))
+		_frame_stats.add(FrameStats.RENDER_SLOT_SKINNED,
+				int(slot_report.get("slot_skinned_commands", 0)))
 
 
 func render_material_frame() -> void:
