@@ -267,6 +267,16 @@ std::vector<std::uint64_t> Q3GeometryCache::pending_evictions(
 	return result;
 }
 
+void Q3GeometryCache::append_generations(
+		std::vector<Q3ResourceGeneration> &r_generations) const {
+	r_generations.reserve(r_generations.size() + entries_.size());
+	for (const auto &entry : entries_) {
+		if (entry.second.stream)
+			r_generations.push_back({entry.second.entry_id,
+					entry.second.generation});
+	}
+}
+
 void Q3GeometryCache::clear() {
 	entries_.clear();
 	instances_.clear();

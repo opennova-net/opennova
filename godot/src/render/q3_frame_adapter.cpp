@@ -1490,13 +1490,12 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			});
 			if (!candidate.stream)
 				continue;
-			// The geometry lease is the cache entry and its packed generation;
-			// the snapshot publishes that generation so the compiler can hold
-			// the lease to it.
+			// The geometry lease is the cache entry and the packed generation
+			// this producer saw; the cache publishes its own generation table
+			// after the walk (append_generations) and the compiler holds every
+			// lease to that table.
 			candidate.submission.geometry = {candidate.stream->entry_id,
 					candidate.stream->generation};
-			snapshot.resource_generations.push_back({candidate.stream->entry_id,
-					candidate.stream->generation});
 			candidate.submission.first_transform = snapshot.transforms.size();
 			if (multimesh.is_valid())
 				candidate.submission.geometry_kind = Q3GeometryKind::StaticInstances;
@@ -1597,6 +1596,9 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			candidates.push_back(std::move(candidate));
 		}
 	}
+	// The lease table comes from the cache's entry table, not from the
+	// candidates: a lease is checked against what its owner currently holds.
+	cache.append_generations(snapshot.resource_generations);
 	const Q3DrawList &draw_list = impl_->compiler.compile(snapshot);
 	auto frame = std::make_shared<DeviceFrame>();
 	frame->draw_list = draw_list;

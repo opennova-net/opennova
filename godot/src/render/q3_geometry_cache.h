@@ -145,6 +145,13 @@ public:
 	// after `p_consumed_frame_id`. Older ones are dropped here.
 	std::vector<std::uint64_t> pending_evictions(
 			std::uint64_t p_consumed_frame_id);
+	// The owner's generation table for the compiler's lease check: every
+	// retained entry's id and current packed generation, appended to
+	// `r_generations`. A lease minted from an entry the cache has since
+	// re-packed or evicted no longer matches this table and is rejected.
+	void append_generations(
+			std::vector<opennova::renderer::Q3ResourceGeneration>
+					&r_generations) const;
 	// Forgets every entry and pending eviction (the device side is released
 	// separately through the adapter's known-live device).
 	void clear();
