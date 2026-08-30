@@ -389,6 +389,62 @@ func test_display_decode_reentry_recreates_released_terminal_effect() -> void:
 	decoder.free()
 
 
+func test_framefx_reentry_recreates_released_terminal_effect() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(32, 32)
+	viewport.own_world_3d = true
+	add_child_autofree(viewport)
+
+	var environment := WorldEnvironment.new()
+	environment.environment = Environment.new()
+	viewport.add_child(environment)
+
+	var camera := Camera3D.new()
+	camera.current = true
+	camera.cull_mask = 0x12345
+	viewport.add_child(camera)
+
+	var renderer := FrameFx.new()
+	viewport.add_child(renderer)
+	var first_compositor := environment.compositor
+	assert_not_null(first_compositor)
+	var first_effect := first_compositor.compositor_effects[0] \
+			as FrameFxCompositorEffect
+	assert_not_null(first_effect)
+	assert_true(first_effect.enabled)
+	assert_eq(camera.cull_mask, 101377)
+
+	viewport.remove_child(renderer)
+	assert_null(environment.compositor,
+			"leaving the tree restores the inherited compositor")
+	assert_false(first_effect.enabled,
+			"leaving the tree disables the detached render callback")
+	assert_eq(camera.cull_mask, 0x12345)
+	assert_true(bool(renderer.get_backend_report().get("shutdown", false)))
+
+	# A plain re-add (no request_ready from the caller) must revive the node.
+	viewport.add_child(renderer)
+	var second_compositor := environment.compositor
+	assert_not_null(second_compositor,
+			"re-entry reinstalls the terminal compositor")
+	var second_effect := second_compositor.compositor_effects[0] \
+			as FrameFxCompositorEffect
+	assert_not_null(second_effect)
+	assert_true(second_effect.enabled)
+	assert_ne(second_effect.get_instance_id(), first_effect.get_instance_id(),
+			"re-entry uses a fresh effect after the prior device owner shut down")
+	assert_false(bool(renderer.get_backend_report().get("shutdown", true)),
+			"re-entry clears the shutdown latch")
+	assert_eq(camera.cull_mask, 101377,
+			"re-entry re-applies the beauty camera signature")
+
+	viewport.remove_child(renderer)
+	assert_null(environment.compositor)
+	assert_false(second_effect.enabled)
+	assert_eq(camera.cull_mask, 0x12345)
+	renderer.free()
+
+
 func test_production_water_source_reaches_the_typed_q3_draw_list() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(256, 144)

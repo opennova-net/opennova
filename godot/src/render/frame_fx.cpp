@@ -1146,7 +1146,16 @@ void FrameFx::shutdown() {
 }
 
 void FrameFx::_notification(int p_what) {
-	if (p_what == NOTIFICATION_READY) {
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		// Re-entry after an exit-tree (or explicit) shutdown, the same
+		// contract DisplayDecode keeps: the released terminal effect is rebuilt
+		// by the READY leg below, so clear the latch and ask for that leg again
+		// (READY fires only once on its own).
+		if (shutdown_) {
+			shutdown_ = false;
+			request_ready();
+		}
+	} else if (p_what == NOTIFICATION_READY) {
 		build_compositor();
 		install_compositor();
 		// One placement-independent sync so a headless/no-pipeline embedder
