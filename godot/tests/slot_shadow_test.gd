@@ -762,3 +762,68 @@ func test_windowed_capture_draws_the_caster_black_over_the_white_clear() -> void
 			"the caster's silhouette is black at the capture center")
 	crate.set_shadow_caster_enabled(false)
 	shadow.advance_frame()
+
+
+const PUMP_3DI := "res://../fixtures/threedi/synth/pump.3di"
+
+
+func test_capture_follows_the_casters_authored_rlod_switch() -> void:
+	# An authored RLOD switch keeps the caster's surface slots (the same
+	# MeshInstance3D nodes) and swaps the level's ArrayMesh onto them
+	# (ObjectModel.apply_level_surfaces). The capture pass keys its packed
+	# geometry on the mesh as well as the node, so a crossing packs the new
+	# level once (the pump's LOD1 drops the base slab's post: fewer packed
+	# vertices), a return to a level seen before re-packs nothing, and the
+	# silhouette never stays the first-seen level's. The compile runs with or
+	# without a RenderingDevice; a windowed run draws what it compiles.
+	var scope := _scope_with_world_environment()
+	var environment := _environment()
+	var camera := Camera3D.new()
+	camera.current = true
+	scope.add_child(camera)
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	shadow.set_environment_node(environment)
+	shadow.set_shadow_detail(4)  # mask 0: every slot re-captures every frame
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(PUMP_3DI)), OK)
+	var model := ObjectModel.new()
+	scope.add_child(model)
+	model.set_process(false)
+	model.set_authored_lod_enabled(true)
+	model.set_object_data(data)
+	assert_gt(model.get_level_surface_count(1), 0,
+			"the pump retains its coarser authored level")
+	model.set_shadow_caster_enabled(true)
+	model.advance_runtime_frame(1.0 / 62.0)
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(model)
+	assert_true(order >= 0, "the pump takes a slot")
+	var report: Dictionary = shadow.get_report()
+	var level0_vertices := int(report["slot_packed_vertices"])
+	assert_gt(level0_vertices, 0, "LOD0's surfaces pack at first sight")
+	shadow.advance_frame()
+	assert_eq(int(shadow.get_report()["slot_packed_vertices"]), 0,
+			"a stable frame re-packs nothing")
+
+	model.set_active_lod(1)
+	shadow.advance_frame()
+	report = shadow.get_report()
+	var level1_vertices := int(report["slot_packed_vertices"])
+	assert_gt(level1_vertices, 0,
+			"the level swapped onto the retained slots packs once")
+	assert_lt(level1_vertices, level0_vertices,
+			"LOD1 packs the coarser geometry (the post is gone), not LOD0's again")
+	assert_gt(int(report["slot_surfaces_compiled"]), 0,
+			"the switched caster still compiles its black pass")
+	shadow.advance_frame()
+	assert_eq(int(shadow.get_report()["slot_packed_vertices"]), 0,
+			"the switched level is stable on the next frame")
+
+	model.set_active_lod(0)
+	shadow.advance_frame()
+	assert_eq(int(shadow.get_report()["slot_packed_vertices"]), 0,
+			"LOD0's entry was retained through the crossing and needs no re-pack")
+	model.set_shadow_caster_enabled(false)
+	shadow.advance_frame()

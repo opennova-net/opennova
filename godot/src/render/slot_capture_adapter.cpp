@@ -1055,8 +1055,16 @@ void SlotCaptureAdapter::compile_frame(
 					++counters.no_pass_surfaces;
 					continue;
 				}
+				// Keyed on the mesh as well as the node: an ObjectModel surface
+				// slot swaps a different ArrayMesh onto the same MeshInstance3D
+				// per authored RLOD level (apply_level_surfaces), and the slot
+				// pass follows no per-source geometry generation, so each
+				// level's arrays are their own retained entry and a crossing
+				// selects the level's packed stream instead of drawing the
+				// first-seen level's silhouette forever.
 				Q3GeometryCache::Request cache_request;
-				cache_request.key = {source_id, surface};
+				cache_request.key = {source_id, surface,
+					static_cast<std::uint64_t>(array_mesh->get_rid().get_id())};
 				cache_request.geometry_generation = 1;
 				cache_request.pack.source = Q3Source::Object;
 				cache_request.pack.uv_u = vector3_parameter(shader_material,

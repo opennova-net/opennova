@@ -80,15 +80,21 @@ struct Q3PackedStream {
 };
 
 // Main-thread geometry cache for the focused Q3 adapter, keyed by (source
-// node id, surface index). An entry packs once when first seen and re-packs
-// only when its generation moves: the producer published new arrays, the
-// source's geometry was invalidated, or the pack parameters (the material's
-// UV transform, the water UV state, the skin channels) changed. Nothing here
-// reads a mesh back through the server per frame; the one-time first-sight
-// read is counted so a stable frame can prove it made none. The cache also
-// retains MultiMesh instance rows per source under the source's separate
-// instance generation: a static RLOD switch or destruction carve rewrites
-// rows only, so it re-reads the rows and never touches the packed surfaces.
+// node id, surface index) plus, for a consumer whose source swaps its mesh
+// in place, the mesh id: an ObjectModel surface slot carries a different
+// ArrayMesh per authored RLOD level, so a consumer that has no per-source
+// geometry generation to follow (the slot capture) keys each level's
+// arrays separately and a crossing swaps between retained entries instead
+// of re-packing the first-seen level. An entry packs once when first seen
+// and re-packs only when its generation moves: the producer published new
+// arrays, the source's geometry was invalidated, or the pack parameters
+// (the material's UV transform, the water UV state, the skin channels)
+// changed. Nothing here reads a mesh back through the server per frame; the
+// one-time first-sight read is counted so a stable frame can prove it made
+// none. The cache also retains MultiMesh instance rows per source under the
+// source's separate instance generation: a static RLOD switch or
+// destruction carve rewrites rows only, so it re-reads the rows and never
+// touches the packed surfaces.
 //
 // Threading: every method runs on the compile (main) thread. Streams are
 // shared immutably with the render side; evictions are handed over through
@@ -98,10 +104,16 @@ public:
 	struct Key {
 		std::uint64_t source_id = 0;
 		int surface = 0;
+		// The mesh the surface belongs to (RID id), or 0 for a consumer whose
+		// source keeps one mesh per node and follows a geometry generation.
+		std::uint64_t mesh_id = 0;
 
 		bool operator<(const Key &p_other) const {
-			return source_id != p_other.source_id ? source_id < p_other.source_id :
-					surface < p_other.surface;
+			if (source_id != p_other.source_id)
+				return source_id < p_other.source_id;
+			if (surface != p_other.surface)
+				return surface < p_other.surface;
+			return mesh_id < p_other.mesh_id;
 		}
 	};
 

@@ -907,7 +907,11 @@ variants skipped as a no-op, and an ArrayMesh surface whose material carries
 no registered object classification drawn nothing and counted as
 `slot_unclassified_surfaces`) with depth test and write inside the target,
 resolved into RGBA8 textures the drape samples through `Texture2DRD`s. The geometry rides the shared `Q3GeometryCache`
-(packed once per surface; skinned strips pack their bone indices/weights
+(packed once per surface and per mesh: a caster's surface slot swaps a
+different ArrayMesh onto the same node per authored RLOD level, so each
+level's arrays are their own retained entry and a crossing selects the
+level's packed stream, `slot_shadow_test` "capture follows the caster's
+authored RLOD switch"; skinned strips pack their bone indices/weights
 and skin on the GPU from the frame's bone palette). Device folds, each
 serving the same observable: the capture eye backs off along −forward in
 `slot_shadow.cpp` (D-RLIT-10 below) where retail renders the entity at the
