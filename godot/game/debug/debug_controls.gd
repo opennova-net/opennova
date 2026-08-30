@@ -682,20 +682,10 @@ func _register_rendering_rows() -> void:
 			return ERR_UNAVAILABLE
 		viewport.debug_draw = int(value) as Viewport.DebugDraw
 		return OK
-	var culling := _world_check(&"occlusion_culling", &"Rendering",
-			"Godot occlusion culling",
-			"Run Godot's occluder pass over the world viewport: the conservative second layer under the retail portal verdict, off by default (it cost ~0.6 ms of render CPU per frame and culled nothing at the measured poses) and usable only while the loaded mission placed authored OOBJ occluders. Flip it to weigh the pass against what it culls (render-occlusion-re.md, Conservative device occluders).",
+	_world_check(&"occlusion_culling", &"Rendering", "Godot occlusion culling",
+			"Run Godot's occluder pass over the world viewport: the conservative second layer under the retail portal verdict, off by default (it cost ~0.6 ms of render CPU per frame and culled nothing at the measured poses). It only has something to cull with while the loaded mission placed authored OOBJ occluders (game_render_diagnostics mission_placement.authored_occluder_models counts them). Flip it to weigh the pass against what it culls (render-occlusion-re.md, Conservative device occluders).",
 			func(world: GameWorld) -> bool: return world.is_occlusion_culling_enabled(),
 			func(world: GameWorld, on: bool) -> void: world.set_occlusion_culling_enabled(on))
-	# The row also tells whether the mission has occluders at all: without
-	# them the switch has nothing to cull with and reads unavailable.
-	culling.availability = func() -> String:
-		var world := _world()
-		if world == null:
-			return "No game world is loaded."
-		if world.get_authored_occluder_model_count() <= 0:
-			return "The loaded mission placed no authored occluders."
-		return ""
 
 
 func _register_edit_actions() -> void:
@@ -707,7 +697,7 @@ func _register_edit_actions() -> void:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_teleport_args(args):
+		if not DebugControlArgs.teleport(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(sim.debug_teleport_local_player(
 				args[0], float(args[1]), float(args[2])))
@@ -730,7 +720,7 @@ func _register_edit_actions() -> void:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_health_args(args):
+		if not DebugControlArgs.health(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(sim.debug_set_entity_health(
 				int(args[0]), int(args[1])))
@@ -743,7 +733,7 @@ func _register_edit_actions() -> void:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_entity_position_args(args):
+		if not DebugControlArgs.entity_position(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(sim.debug_set_entity_position(
 				int(args[0]), args[1]))
@@ -756,7 +746,7 @@ func _register_audio_actions() -> void:
 	volume.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_audio_bus_volume_args(args):
+		if not DebugControlArgs.audio_bus_volume(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(_shell.debug_set_audio_bus_volume(
 				String(args[0]), float(args[1])))
@@ -767,7 +757,7 @@ func _register_audio_actions() -> void:
 	mute.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_audio_bus_switch_args(args):
+		if not DebugControlArgs.audio_bus_switch(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(_shell.debug_set_audio_bus_mute(
 				String(args[0]), bool(args[1])))
@@ -778,7 +768,7 @@ func _register_audio_actions() -> void:
 	solo.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_audio_bus_switch_args(args):
+		if not DebugControlArgs.audio_bus_switch(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(_shell.debug_set_audio_bus_solo(
 				String(args[0]), bool(args[1])))
@@ -789,7 +779,7 @@ func _register_audio_actions() -> void:
 	bypass.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_audio_bus_switch_args(args):
+		if not DebugControlArgs.audio_bus_switch(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(_shell.debug_set_audio_bus_bypass(
 				String(args[0]), bool(args[1])))
@@ -803,7 +793,7 @@ func _register_runtime_rows() -> void:
 	transport.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_transport_args(args):
+		if not DebugControlArgs.transport(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(_shell.mcp_game_control(String(args[0])))
 
@@ -837,7 +827,7 @@ func _register_runtime_rows() -> void:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_mission_variable_args(args):
+		if not DebugControlArgs.mission_variable(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		sim.set_mission_variable(int(args[0]), int(args[1]))
 		return _action_result(null)
@@ -905,7 +895,7 @@ func _register_automation_actions() -> void:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_deploy_pick_args(args):
+		if not DebugControlArgs.deploy_pick(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_result(sim.send_deployment_pick(int(args[0])))
 
@@ -917,7 +907,7 @@ func _register_automation_actions() -> void:
 		var world := _world()
 		if world == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_weapon_name_args(args):
+		if not DebugControlArgs.weapon_name(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_result(world.set_local_player_weapon_by_name(String(args[0])))
 
@@ -953,7 +943,7 @@ func _register_automation_actions() -> void:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_kill_group_args(args):
+		if not DebugControlArgs.kill_group(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_result(sim.debug_kill_group(int(args[0])))
 
@@ -965,7 +955,7 @@ func _register_automation_actions() -> void:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_crew_vehicle_args(args):
+		if not DebugControlArgs.crew_vehicle(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(sim.debug_crew_vehicle(int(args[0]), int(args[1])))
 
@@ -977,7 +967,7 @@ func _register_automation_actions() -> void:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_crew_local_player_args(args):
+		if not DebugControlArgs.crew_local_player(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(sim.debug_crew_local_player(int(args[0])))
 
@@ -989,7 +979,7 @@ func _register_automation_actions() -> void:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not _valid_look_args(args):
+		if not DebugControlArgs.look(args):
 			return _action_error(ERR_INVALID_PARAMETER)
 		sim.add_local_player_look(float(args[0]), float(args[1]))
 		return _action_result(null)
@@ -1099,110 +1089,3 @@ func _environment_availability() -> String:
 
 func _weather_availability() -> String:
 	return "" if _weather() != null else "The current world has no weather controller."
-
-
-# --- typed action-argument checks --------------------------------------------
-
-
-static func _valid_transport_args(args: Array) -> bool:
-	return args.size() == 1 \
-			and typeof(args[0]) == TYPE_STRING \
-			and String(args[0]) in ["resume", "pause", "step"]
-
-
-static func _valid_mission_variable_args(args: Array) -> bool:
-	if args.size() != 2 or not _is_integer_number(args[0]) \
-			or not _is_integer_number(args[1]):
-		return false
-	var index := int(args[0])
-	var value := int(args[1])
-	return index >= 0 and index < MISSION_VAR_COUNT \
-			and value >= -2147483648 and value <= 2147483647
-
-
-static func _valid_health_args(args: Array) -> bool:
-	if args.size() != 2 or not _is_integer_number(args[0]) \
-			or not _is_integer_number(args[1]):
-		return false
-	var index := int(args[0])
-	var health := int(args[1])
-	return index >= 0 and health >= ENTITY_HEALTH_MIN \
-			and health <= ENTITY_HEALTH_MAX
-
-
-static func _valid_entity_position_args(args: Array) -> bool:
-	return args.size() == 2 and _is_integer_number(args[0]) \
-			and int(args[0]) >= 0 \
-			and args[1] is Vector3 and _valid_mission_position(args[1])
-
-
-static func _valid_teleport_args(args: Array) -> bool:
-	if args.size() != 3 or not (args[0] is Vector3) \
-			or not _valid_mission_position(args[0]) \
-			or not _is_finite_number(args[1]) \
-			or not _is_finite_number(args[2]):
-		return false
-	var yaw := float(args[1])
-	var pitch := float(args[2])
-	return is_finite(yaw) and yaw >= -360.0 and yaw <= 360.0 \
-			and is_finite(pitch) and pitch >= -90.0 and pitch <= 90.0
-
-
-static func _valid_deploy_pick_args(args: Array) -> bool:
-	return args.size() == 1 and _is_integer_number(args[0]) and int(args[0]) >= 0
-
-
-static func _valid_weapon_name_args(args: Array) -> bool:
-	return args.size() == 1 and typeof(args[0]) == TYPE_STRING \
-			and not String(args[0]).strip_edges().is_empty()
-
-
-static func _valid_look_args(args: Array) -> bool:
-	return args.size() == 2 and _is_finite_number(args[0]) and _is_finite_number(args[1])
-
-
-static func _valid_kill_group_args(args: Array) -> bool:
-	return args.size() == 1 and _is_integer_number(args[0]) and int(args[0]) > 0
-
-
-static func _valid_crew_vehicle_args(args: Array) -> bool:
-	return args.size() == 2 and _is_integer_number(args[0]) \
-			and _is_integer_number(args[1]) \
-			and int(args[0]) > 0 and int(args[1]) > 0
-
-
-static func _valid_crew_local_player_args(args: Array) -> bool:
-	return args.size() == 1 and _is_integer_number(args[0]) and int(args[0]) > 0
-
-
-static func _valid_audio_bus_volume_args(args: Array) -> bool:
-	return args.size() == 2 \
-			and typeof(args[0]) == TYPE_STRING \
-			and not String(args[0]).is_empty() \
-			and _is_finite_number(args[1]) \
-			and float(args[1]) >= AUDIO_BUS_VOLUME_MIN_DB \
-			and float(args[1]) <= AUDIO_BUS_VOLUME_MAX_DB
-
-
-static func _valid_audio_bus_switch_args(args: Array) -> bool:
-	return args.size() == 2 \
-			and typeof(args[0]) == TYPE_STRING \
-			and not String(args[0]).is_empty() \
-			and typeof(args[1]) == TYPE_BOOL
-
-
-static func _valid_mission_position(position: Vector3) -> bool:
-	return position.is_finite() \
-			and position.x >= MISSION_COORD_MIN and position.x <= MISSION_COORD_MAX \
-			and position.y >= MISSION_COORD_MIN and position.y <= MISSION_COORD_MAX \
-			and position.z >= MISSION_COORD_MIN and position.z <= MISSION_COORD_MAX
-
-
-static func _is_finite_number(value: Variant) -> bool:
-	if typeof(value) != TYPE_INT and typeof(value) != TYPE_FLOAT:
-		return false
-	return is_finite(float(value))
-
-
-static func _is_integer_number(value: Variant) -> bool:
-	return _is_finite_number(value) and float(value) == floorf(float(value))
