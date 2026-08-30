@@ -272,7 +272,9 @@ touches 0 records and reads 0 object materials; a move, a visibility change
 or a named material is picked up through its record alone). Measured with
 the perf probe (1600x900 windowed, Ryzen 7735HS iGPU, median of per-run p50
 over 2 runs): WORLD_FRAMEFX 1.16 -> 0.57 ms on 00TRa and
-1.04 -> 0.40 ms on CP19.
+1.04 -> 0.40 ms on CP19 with the records alone; the stream packer reading
+the surface arrays through their raw pointers into one sized buffer (the
+water strip re-packs every frame) takes it to 0.22 ms and 0.08 ms.
 The render callback re-shades each LUM copy as the SELFLUM NORMAL block into
 the black-cleared Q3 target (`_FFP.fx` copies the NORMAL pass block into the
 GLOW slot `@ 0x5afc7f`: Diffuse1 x Detail MODULATE2X x RGB modulator x

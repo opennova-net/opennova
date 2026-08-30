@@ -1,6 +1,7 @@
 #include "render/q3_geometry_cache.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 
 #include <godot_cpp/classes/mesh.hpp>
@@ -13,33 +14,25 @@ using namespace opennova::renderer;
 
 namespace {
 
-void append_f32(PackedByteArray &p_bytes, float p_value) {
-	const int64_t offset = p_bytes.size();
-	p_bytes.resize(offset + 4);
-	std::memcpy(p_bytes.ptrw() + offset, &p_value, sizeof(p_value));
-}
+// One packed vertex: position, normal, UV, colour, CUSTOM0..2, UV2 as 26
+// floats at kQ3VertexStride; the writer stores straight into the stream.
+struct Q3VertexWriter {
+	float *dst = nullptr;
 
-void append_vec2(PackedByteArray &p_bytes, const Vector2 &p_value) {
-	append_f32(p_bytes, p_value.x);
-	append_f32(p_bytes, p_value.y);
-}
+	void f32(float p_value) { *dst++ = p_value; }
+	void vec2(const Vector2 &p_value) { f32(p_value.x); f32(p_value.y); }
+	void vec3(const Vector3 &p_value) { f32(p_value.x); f32(p_value.y); f32(p_value.z); }
+	void vec4(const Vector4 &p_value) {
+		f32(p_value.x); f32(p_value.y); f32(p_value.z); f32(p_value.w);
+	}
+	void color(const Color &p_value) {
+		f32(p_value.r); f32(p_value.g); f32(p_value.b); f32(p_value.a);
+	}
+};
 
-void append_vec3(PackedByteArray &p_bytes, const Vector3 &p_value) {
-	append_f32(p_bytes, p_value.x);
-	append_f32(p_bytes, p_value.y);
-	append_f32(p_bytes, p_value.z);
-}
-
-void append_color(PackedByteArray &p_bytes, const Color &p_value) {
-	append_f32(p_bytes, p_value.r);
-	append_f32(p_bytes, p_value.g);
-	append_f32(p_bytes, p_value.b);
-	append_f32(p_bytes, p_value.a);
-}
-
-Vector4 custom_at(const PackedFloat32Array &p_values, int p_index) {
-	const int base = p_index * 4;
-	if (base < 0 || base + 3 >= p_values.size())
+Vector4 custom_at(const float *p_values, int64_t p_size, int p_index) {
+	const int64_t base = static_cast<int64_t>(p_index) * 4;
+	if (base < 0 || base + 3 >= p_size)
 		return Vector4();
 	return Vector4(p_values[base], p_values[base + 1],
 			p_values[base + 2], p_values[base + 3]);
@@ -50,6 +43,9 @@ Vector4 custom_at(const PackedFloat32Array &p_values, int p_index) {
 // wrappers' obj_transform_uv over both) take the material's row-vector UV
 // transform, water UVs the witnessed camera-relative world/128 pair;
 // positions stay in bind space (a skin-channel consumer skins on the GPU).
+// The arrays are read through their raw pointers and the stream is sized
+// once: the water strip re-packs every frame, so the pack is a plain
+// per-element store, never a per-float resize.
 bool pack_surface(const Q3SurfaceArrays &p_arrays,
 		const Q3PackParameters &p_pack, PackedByteArray &r_vertices) {
 	if (p_arrays.empty())
@@ -57,19 +53,42 @@ bool pack_surface(const Q3SurfaceArrays &p_arrays,
 	const int vertex_count = static_cast<int>(p_arrays.element_count());
 	if (vertex_count <= 0)
 		return false;
-	r_vertices.resize(0);
+	const int64_t position_count = p_arrays.positions.size();
+	const Vector3 *positions = p_arrays.positions.ptr();
+	const int64_t normal_count = p_arrays.normals.size();
+	const Vector3 *normals = p_arrays.normals.ptr();
+	const int64_t uv_count = p_arrays.uvs.size();
+	const Vector2 *uvs = p_arrays.uvs.ptr();
+	const int64_t uv2_count = p_arrays.uv2s.size();
+	const Vector2 *uv2s = p_arrays.uv2s.ptr();
+	const int64_t color_count = p_arrays.colors.size();
+	const Color *colors = p_arrays.colors.ptr();
+	const int64_t custom0_count = p_arrays.custom0.size();
+	const float *custom0 = p_arrays.custom0.ptr();
+	const int64_t custom1_count = p_arrays.custom1.size();
+	const float *custom1 = p_arrays.custom1.ptr();
+	const int64_t custom2_count = p_arrays.custom2.size();
+	const float *custom2 = p_arrays.custom2.ptr();
+	const int64_t bone_count = p_arrays.bones.size();
+	const int32_t *bones = p_arrays.bones.ptr();
+	const int64_t weight_count = p_arrays.weights.size();
+	const float *weights = p_arrays.weights.ptr();
+	const int64_t index_count = p_arrays.indices.size();
+	const int32_t *indices = p_arrays.indices.ptr();
+	r_vertices.resize(static_cast<int64_t>(vertex_count) * kQ3VertexStride);
+	std::uint8_t *out = r_vertices.ptrw();
 	for (int element = 0; element < vertex_count; ++element) {
-		const int index = p_arrays.indices.is_empty() ? element :
-				p_arrays.indices[element];
-		if (index < 0 || index >= p_arrays.positions.size())
+		const int index = index_count == 0 ? element : indices[element];
+		if (index < 0 || index >= position_count)
 			return false;
-		const Vector3 position = p_arrays.positions[index];
-		const Vector3 normal = index < p_arrays.normals.size() ?
-				p_arrays.normals[index] : Vector3(0, 1, 0);
-		const bool has_skin_rows = p_arrays.bones.size() >= (index + 1) * 4 &&
-				p_arrays.weights.size() >= (index + 1) * 4;
-		Vector2 uv = index < p_arrays.uvs.size() ? p_arrays.uvs[index] : Vector2();
-		Vector2 uv2 = index < p_arrays.uv2s.size() ? p_arrays.uv2s[index] : Vector2();
+		Q3VertexWriter writer{reinterpret_cast<float *>(
+				out + static_cast<std::size_t>(element) * kQ3VertexStride)};
+		const Vector3 position = positions[index];
+		const Vector3 normal = index < normal_count ? normals[index] : Vector3(0, 1, 0);
+		const bool has_skin_rows = bone_count >= static_cast<int64_t>(index + 1) * 4 &&
+				weight_count >= static_cast<int64_t>(index + 1) * 4;
+		Vector2 uv = index < uv_count ? uvs[index] : Vector2();
+		Vector2 uv2 = index < uv2_count ? uv2s[index] : Vector2();
 		if (p_pack.source == Q3Source::Object) {
 			// The same two rows the wrappers apply to UV and UV2
 			// (vertex_standard.gdshaderinc), so a detail sampled over the packed
@@ -88,36 +107,32 @@ bool pack_surface(const Q3SurfaceArrays &p_arrays,
 					Vector2(p_pack.water_uv.y, p_pack.water_uv.y) +
 					Vector2(p_pack.water_uv.z, p_pack.water_uv.w);
 		}
-		append_vec3(r_vertices, position);
-		append_vec3(r_vertices, normal);
-		append_vec2(r_vertices, uv);
-		append_color(r_vertices, index < p_arrays.colors.size() ?
-				p_arrays.colors[index] : Color(1, 1, 1, 1));
-		Vector4 c0 = custom_at(p_arrays.custom0, index);
-		Vector4 c1 = custom_at(p_arrays.custom1, index);
-		const Vector4 c2 = custom_at(p_arrays.custom2, index);
+		writer.vec3(position);
+		writer.vec3(normal);
+		writer.vec2(uv);
+		writer.color(index < color_count ? colors[index] : Color(1, 1, 1, 1));
+		Vector4 c0 = custom_at(custom0, custom0_count, index);
+		Vector4 c1 = custom_at(custom1, custom1_count, index);
+		const Vector4 c2 = custom_at(custom2, custom2_count, index);
 		if (p_pack.skin_channels) {
 			// Bone indices as floats (exactly representable) and their weights;
 			// an unskinned surface carries an identity row (bone 0, weight 1)
 			// so one vertex shader serves rigid and skinned surfaces alike.
 			if (has_skin_rows) {
 				const int row = index * 4;
-				c0 = Vector4(float(p_arrays.bones[row]), float(p_arrays.bones[row + 1]),
-						float(p_arrays.bones[row + 2]), float(p_arrays.bones[row + 3]));
-				c1 = Vector4(p_arrays.weights[row], p_arrays.weights[row + 1],
-						p_arrays.weights[row + 2], p_arrays.weights[row + 3]);
+				c0 = Vector4(float(bones[row]), float(bones[row + 1]),
+						float(bones[row + 2]), float(bones[row + 3]));
+				c1 = Vector4(weights[row], weights[row + 1],
+						weights[row + 2], weights[row + 3]);
 			} else {
 				c0 = Vector4();
 				c1 = Vector4(1.0f, 0.0f, 0.0f, 0.0f);
 			}
 		}
-		append_f32(r_vertices, c0.x); append_f32(r_vertices, c0.y);
-		append_f32(r_vertices, c0.z); append_f32(r_vertices, c0.w);
-		append_f32(r_vertices, c1.x); append_f32(r_vertices, c1.y);
-		append_f32(r_vertices, c1.z); append_f32(r_vertices, c1.w);
-		append_f32(r_vertices, c2.x); append_f32(r_vertices, c2.y);
-		append_f32(r_vertices, c2.z); append_f32(r_vertices, c2.w);
-		append_vec2(r_vertices, uv2);
+		writer.vec4(c0);
+		writer.vec4(c1);
+		writer.vec4(c2);
+		writer.vec2(uv2);
 	}
 	return r_vertices.size() ==
 			static_cast<int64_t>(vertex_count) * kQ3VertexStride;
