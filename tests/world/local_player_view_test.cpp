@@ -302,7 +302,7 @@ void test_set_eye_mirrors_the_head_into_the_world() {
 } // namespace
 
 // --- the heat window's water gate at the local pump (D-WPN-29) ---------------
-// [orig: WeaponAction_ProcessFrame @ 0x540e50 — `Position.Z > Env_WaterHeightFixed
+// [orig: WeaponAction_ProcessFrame @ 0x540e60 — `Position.Z > Env_WaterHeightFixed
 //  || (Def->Flags & 4)` @ 0x54101c keeps the window, else the clear @ 0x54125f]:
 // the pump feeds the owner's BODY Z against env.water_z, so a body at or below
 // the plane drops a live window unless the def carries Underwater; no authored
