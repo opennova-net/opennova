@@ -6,7 +6,6 @@ render_mode unshaded;
 #include "res://shaders/terrain_lighting.gdshaderinc"
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 
 // Debug: 0=off, 1=LOD colors, 2=sector colors, 3=normals, 4=heightmap
 uniform int u_debug_mode = 0;
@@ -80,11 +79,6 @@ vec3 sector_color(float sx, float sz) {
 }
 
 void fragment() {
-	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		// Ordinary opaque Q3 queue entries retain depth while contributing
-		// black to the isolated color target.
-		ALBEDO = vec3(0.0);
-	} else {
 	vec4 colormap;
 	if (u_has_tile_cache && u_instance_tile_cache_ready) {
 		vec2 page_uv = (v_world_pos.xz -
@@ -134,5 +128,4 @@ void fragment() {
 	// shows exactly those bytes (D-RMAT-7). Debug overlays ride the same
 	// transform (diagnostic-only).
 	ALBEDO = scene_output(result);
-	}
 }

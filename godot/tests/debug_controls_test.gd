@@ -29,6 +29,7 @@ const EXPECTED_IDS: Array[StringName] = [
 	&"terrain_force_leaves",
 	&"terrain_force_lod0",
 	&"viewport_debug_draw",
+	&"occlusion_culling",
 	&"teleport_local_player",
 	&"cycle_map_mode",
 	&"set_entity_health",
@@ -125,10 +126,28 @@ func test_the_table_registers_the_wire_catalog() -> void:
 				"'%s' keeps the legacy wire row keys" % id)
 	assert_eq(owner_counts[DebugControls.OWNER_ENGINE], 25,
 			"engine rows end in a Simulation/Terrain/Weather/environment call")
-	assert_eq(owner_counts[DebugControls.OWNER_DEVICE], 20,
+	assert_eq(owner_counts[DebugControls.OWNER_DEVICE], 21,
 			"device rows are viewport/overlay/audio/shell state")
 	assert_ne(JSON.stringify(_controls.capture_snapshot()), "",
 			"the entire MCP snapshot is JSON-safe")
+
+
+func test_release_breaks_every_row_callable_cycle() -> void:
+	var retained_controls := _controls
+	var retained_row := _controls.control(&"show_skeletons")
+	assert_true(retained_row.availability.is_valid())
+	assert_true(retained_row.read.is_valid())
+	assert_true(retained_row.write.is_valid())
+
+	_adapter.release_shell_seams()
+
+	assert_null(_adapter.get_debug_controls())
+	assert_true(retained_controls.row_ids().is_empty())
+	assert_null(retained_controls.control(&"show_skeletons"))
+	assert_false(retained_row.availability.is_valid())
+	assert_false(retained_row.read.is_valid())
+	assert_false(retained_row.write.is_valid())
+	assert_false(retained_row.invoke.is_valid())
 
 
 func test_list_pairs_definitions_with_live_state_and_filters() -> void:

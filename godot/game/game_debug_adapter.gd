@@ -24,6 +24,16 @@ func configure(seams: GameShellSeams) -> void:
 	_controls = DebugControls.new(seams, self)
 
 
+## Release the shell-capturing Callable graph before its script teardown.
+func release_shell_seams() -> void:
+	if _controls != null:
+		_controls.clear()
+	if _seams != null:
+		_seams.clear()
+	_controls = null
+	_seams = null
+
+
 ## The runtime MCP endpoint rides `--mcp-port <n>` (LaunchFlags); an unflagged
 ## launch runs none.
 func start_runtime_endpoint() -> void:

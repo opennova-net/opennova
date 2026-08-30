@@ -1,8 +1,8 @@
 #pragma once
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/mesh.hpp>
-#include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
@@ -27,6 +27,7 @@
 namespace godot {
 
 class Image;
+class RenderingServer;
 class Terrain;
 class TerrainData;
 class TerrainTileInfo;
@@ -37,13 +38,23 @@ class TerrainTileInfo;
 // gate, both retail placement algorithms, per-identity vertex expansion, the
 // per-submission uniform state, and both wind clocks. This node applies the
 // typed FoliageDrawList: source Mesh extraction at configure time, sampler
-// bindings, ArrayMesh uploads for the draw list's mesh builds, draw-node pooling,
-// and material binding. [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+// bindings, ArrayMesh uploads for the draw list's mesh builds, retained
+// scenario-instance pooling, and material binding.
+// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
 // Foliage_GenerateModelTileInstances @ 0x600980, see docs/foliage/foliage-re.md]
 class FoliageDispatcher : public Node3D {
   GDCLASS(FoliageDispatcher, Node3D)
 
 public:
+  // Diagnostic-only selection keys for the raster probes. These classify the
+  // portable draw-list record itself, never a node name or shader filename.
+  enum ProbeDrawSelection {
+    PROBE_DRAW_ALL = 0,
+    PROBE_DRAW_DETAIL_HIGH = 1,
+    PROBE_DRAW_DETAIL_LOW_FAR = 2,
+    PROBE_DRAW_DETAIL_AUTO = 3,
+  };
+
   FoliageDispatcher();
   ~FoliageDispatcher();
 
@@ -100,6 +111,23 @@ public:
   void reset();
   int get_total_instances() const;
   Dictionary get_frame_stats() const;
+  // Device-only diagnostics for tests and live inspection. `draws` is the
+  // active draw-list order; the retained RenderingServer RIDs stay opaque.
+  Dictionary get_backend_report() const;
+  // Immediate diagnostic control for the current retained draw list. Raster
+  // probes use this after render_frame/render_preview to pin wind, optionally
+  // isolate one retail pass family, and nudge its fade without discovering
+  // server instances through scene children. The next compiled frame restores
+  // ordinary runtime state through the normal diff applier.
+  // Bound unconditionally on purpose: it is the stable diagnostic seam the
+  // source-only game_probe raster probes (ADR 0041) drive, and it is
+  // self-healing (every write lands in the stamp diff, so the next apply
+  // restores the compiled state); gating it per build flavour would only
+  // make the probes flavour-dependent.
+  Dictionary apply_probe_draw_control(int p_selection, bool p_isolate,
+                                      bool p_hide_selected,
+                                      float p_wind_phase,
+                                      float p_fade_adjust);
   // Persistent configuration result, one row per retail slot. Authored slots
   // report enabled, missing_mesh, or invalid_mesh instead of failing silently.
   Array get_slot_diagnostics() const;
@@ -110,6 +138,7 @@ public:
 
 protected:
   static void _bind_methods();
+  void _notification(int p_what);
 
 private:
   struct FrameStats {
@@ -141,6 +170,14 @@ private:
     int64_t detail_mesh_uploads = 0;
     int64_t model_mesh_hits = 0;
     int64_t model_mesh_uploads = 0;
+    int64_t backend_instance_creates = 0;
+    int64_t backend_scenario_writes = 0;
+    int64_t backend_configuration_writes = 0;
+    int64_t backend_base_writes = 0;
+    int64_t backend_material_writes = 0;
+    int64_t backend_material_parameter_writes = 0;
+    int64_t backend_uniform_writes = 0;
+    int64_t backend_visibility_writes = 0;
     int64_t terrain_scene_counter = 0;
     bool native_detail_source = false;
     bool preview_detail_source = false;
@@ -211,16 +248,25 @@ private:
       detail_mesh_cache_;
   std::unordered_map<MeshCacheKey, CachedMesh, MeshCacheKeyHash>
       model_mesh_cache_;
-  std::vector<MeshInstance3D *> detail_draw_pool_;
-  std::vector<MeshInstance3D *> model_draw_pool_;
-  // What each pool node currently holds on the RenderingServer, so a steady
-  // frame writes nothing: the draw list is diff-applied per slot (mesh,
-  // material, instance uniforms) and only the pool tail past this frame's
-  // command count is hidden. `bound` = the node is visible with a mesh.
-  struct DrawNodeStamp {
+  std::vector<RID> detail_draw_pool_;
+  std::vector<RID> model_draw_pool_;
+  RID draw_scenario_;
+  // What each pool instance currently holds on the RenderingServer. The draw
+  // list is diff-applied per slot (mesh, material, instance uniforms), so a
+  // stable frame only writes fields whose compiler clock advanced; only the
+  // pool tail past this frame's command count is hidden. `bound` means the
+  // instance has an active mesh.
+  struct DrawInstanceStamp {
     bool bound = false;
+    bool visible = false;
     Ref<Mesh> mesh;
     Ref<Material> material;
+    int64_t order = 0;
+    int64_t submission_id = 0;
+    int64_t cell_key = 0;
+    int64_t revision = 0;
+    int slot = 0;
+    StringName pass;
     float fade = 0.0f;
     float alpha_reference = 0.0f;
     float high_pass_cutoff = 0.0f;
@@ -229,8 +275,8 @@ private:
     float tile_cache_layer = 0.0f;
     Vector4 tile_cache_projection;
   };
-  std::vector<DrawNodeStamp> detail_draw_stamps_;
-  std::vector<DrawNodeStamp> model_draw_stamps_;
+  std::vector<DrawInstanceStamp> detail_draw_stamps_;
+  std::vector<DrawInstanceStamp> model_draw_stamps_;
   // The material inputs last written (texture RIDs + tint): _update_materials
   // writes the ~100 material parameters only when one of them changes.
   struct MaterialInputs {
@@ -252,15 +298,21 @@ private:
   _extract_source_geometry(const Ref<Mesh> &p_mesh) const;
   void _ensure_visuals();
   void _update_materials();
-  MeshInstance3D *_ensure_draw_node(std::vector<MeshInstance3D *> &r_pool,
-                                    std::vector<DrawNodeStamp> &r_stamps,
-                                    size_t p_index, const String &p_prefix);
-  void _hide_draw_pools();
-  // Hide (and unbind) every pool node from p_first on; earlier nodes keep
+  // Grow one pool to cover p_index. The apply loop binds the scenario once
+  // (_bind_current_scenario) and passes the server down: nothing here walks
+  // the tree per draw.
+  RID _ensure_draw_instance(RenderingServer *p_server,
+                            std::vector<RID> &r_pool,
+                            std::vector<DrawInstanceStamp> &r_stamps,
+                            size_t p_index);
+  bool _bind_current_scenario();
+  void _set_draw_pool_visibility(bool p_visible);
+  void _release_draw_pools();
+  // Hide (and unbind) every pool instance from p_first on; earlier instances keep
   // this frame's bindings.
-  void _hide_pool_tail(std::vector<MeshInstance3D *> &r_pool,
-                       std::vector<DrawNodeStamp> &r_stamps, size_t p_first);
-  void _clear_meshes();
+  void _hide_pool_tail(std::vector<RID> &r_pool,
+                       std::vector<DrawInstanceStamp> &r_stamps,
+                       size_t p_first);
   void _on_terrain_data_changed();
   void _on_tile_info_changed();
   void _on_colormap_source_changed();
@@ -288,3 +340,5 @@ private:
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::FoliageDispatcher::ProbeDrawSelection);

@@ -912,6 +912,12 @@ int main() {
 		const int moon_700 = celestial_moon_alpha_fixed(700.0f, 0, false);
 		if (!expect(moon_700 >= 0x7FFE && moon_700 <= 0x8001, "moon half at fog 700")) return 1;
 		if (!expect(celestial_moon_alpha_fixed(1024.0f, 0x10000, false) == 0, "overcast hides the moon")) return 1;
+		// The fog-shader leg (the bloom-pass redraw, render_celestial_bodies(1)):
+		// fogInt x 0.0002 x (1 - overcast), 0.2048 at fog 1024, saturating past 5000.
+		const int moon_q3_1024 = celestial_moon_alpha_fixed(1024.0f, 0, true);
+		if (!expect(moon_q3_1024 > 0x3400 && moon_q3_1024 < 0x3500, "moon Q3 opacity at fog 1024 is 0.2048")) return 1;
+		if (!expect(celestial_moon_alpha_fixed(6000.0f, 0, true) == 0x10000, "moon Q3 opacity saturates at fog 6000")) return 1;
+		if (!expect(celestial_moon_alpha_fixed(1024.0f, 0x10000, true) == 0, "overcast hides the Q3 moon")) return 1;
 
 		// Jitter pattern from the frame-index bits.
 		const GlareRayJitter j0 = glare_ray_jitter(0);

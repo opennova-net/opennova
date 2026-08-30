@@ -17,19 +17,3 @@ vec4 obj_sample_base() {
 	#endif
 	return base;
 }
-
-float obj_proj_shadow_coverage() {
-	#ifdef OBJ_PROJSHAD_NO_PASS
-	return 0.0;
-	#else
-	float coverage = texture(u_diffuse, v_uv).a;
-	#ifdef OBJ_PROJSHAD_DIFFUSE_DETAIL_ALPHA_FFP
-	coverage *= texture(u_detail, v_uv2).a;
-	coverage *= u_alpha_mod;
-	#endif
-	#ifdef OBJ_PROJSHAD_DIFFUSE_ALPHA_FFP
-	coverage *= u_alpha_mod;
-	#endif
-	return coverage;
-	#endif
-}

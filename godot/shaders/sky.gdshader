@@ -16,7 +16,6 @@ render_mode unshaded, cull_front;
 
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 
 uniform vec3 u_sky_base = vec3(0.3, 0.4, 0.7); // c11 skybase
 uniform vec3 u_sky_bright = vec3(0.5, 0.6, 0.9); // c11 + c12
@@ -120,11 +119,6 @@ void vertex() {
 
 
 void fragment() {
-	// FrameFX renders water, celestial bodies, and the skybox sun glow after
-	// the Q3 object queue; the ordinary sky dome is not in that source.
-	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		discard;
-	}
 	vec3 col;
 	if (u_flat_pass) {
 		// advanced_clouds == 0: flat cloud-color dome, no texture

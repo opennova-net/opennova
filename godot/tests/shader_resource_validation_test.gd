@@ -7,6 +7,10 @@ extends GutTest
 ## then forces the object wrappers through the actual rasterizer.
 
 const SHADER_ROOT := "res://shaders"
+const INSTANCE_UNIFORM_VALUES_PER_GEOMETRY := 16
+const RETAINED_OBJECT_GEOMETRY_BUDGET := 16384
+const REQUIRED_GLOBAL_SHADER_BUFFER_SIZE := (
+		INSTANCE_UNIFORM_VALUES_PER_GEOMETRY * RETAINED_OBJECT_GEOMETRY_BUDGET)
 
 
 func _collect_sources(directory: String, out: PackedStringArray) -> void:
@@ -29,7 +33,7 @@ func test_every_checked_in_shader_resource_loads_through_godot() -> void:
 	var paths := PackedStringArray()
 	_collect_sources(SHADER_ROOT, paths)
 	paths.sort()
-	assert_eq(paths.size(), 195, "the runtime inventory must stay closed")
+	assert_eq(paths.size(), 193, "the runtime inventory must stay closed")
 	var wrappers := 0
 	var includes := 0
 	for path in paths:
@@ -46,4 +50,15 @@ func test_every_checked_in_shader_resource_loads_through_godot() -> void:
 			assert_eq(resource.get_class(), "ShaderInclude",
 					"%s must load as ShaderInclude" % path)
 	assert_eq(wrappers, 154)
-	assert_eq(includes, 41)
+	assert_eq(includes, 39)
+
+
+func test_global_shader_buffer_covers_retained_object_geometry() -> void:
+	# Godot reserves 16 vec4 values for every geometry RID whose shader declares
+	# instance uniforms. Retaining all authored object LODs exhausts the default
+	# 4,096-instance buffer while loading the retail 00TRa mission, before its
+	# first frame. Keep a 16,384-instance / 4 MiB device-side budget.
+	assert_gte(int(ProjectSettings.get_setting(
+			"rendering/limits/global_shader_variables/buffer_size", 0)),
+			REQUIRED_GLOBAL_SHADER_BUFFER_SIZE,
+			"global instance-uniform buffer must cover retained retail geometry")

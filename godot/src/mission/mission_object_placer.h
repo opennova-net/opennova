@@ -6,12 +6,18 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/aabb.hpp>
+#include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <runtime/mission/placement_traits.h>
+
+#include <cstdint>
+#include <vector>
 
 #include "object/item_database.h"
 #include "object/avatar_database.h"
@@ -29,10 +35,19 @@ class MissionData;
 // entity to its visual model and instances it under a "MissionObjects"
 // container.
 //
-// Batching strategy (hybrid): static models merge into one
-// MultiMeshInstance3D per (graphic, submesh) — real maps place hundreds of
-// identical props, and batching collapses them into a handful of draw calls
-// at the cost of per-instance frustum culling. Animated/skinned models
+// Batching strategy (hybrid): opaque and alpha-tested static surfaces merge
+// into 512-unit terrain-aligned MultiMesh populations; blended surfaces keep
+// one global population so their retail ordering is unchanged. Every authored
+// RLOD of a static graphic is harvested and emitted as its own population
+// over the same slot list, and a population carries ONLY the slots whose
+// selected level it draws: its rows are packed dense [0, live) with
+// visible_instance_count = live, a level switch swap-removes the slot from
+// the old level's population and appends it to the new one, and a population
+// with no live row is hidden (Godot's cull tree skips it). The GPU and every
+// viewport's cull therefore see one row per live instance, while the level
+// is still chosen per entity by the retail selector each frame
+// (update_static_lods).
+// Animated/skinned models
 // (persons, anim_def carriers), portal-carrying buildings (per-section
 // occlusion masks), and live-PANM graphics (the original re-poses those from
 // the global clock every rendered frame) each get an individual ObjectModel.
@@ -109,15 +124,51 @@ public:
 
 	// --- placement --------------------------------------------------------
 	// Place every renderable entity under a fresh MissionObjects node
-	// parented to `parent` (any previous one is cleared). `options` may
+	// parented to `parent` (any previous one is cleared): the individual
+	// models as its children, every static population (per-bin, blended
+	// global, shadow twin) under its one StaticPopulations child. `options` may
 	// carry "progress" (a per-model Callable pulse, mirroring the original's
 	// per-model loading-screen presents — witness: placement_traits.h
 	// ledger) and "skip_kinds"
 	// (the joiner places the mission minus organics). Returns a stats
 	// Dictionary (placed/batched/animated/unresolved/markers/graphics/
-	// batches + per-stage "spans" usec timings).
+	// batches/static_bins/static_binned_batches/static_global_batches/
+	// static_instances_retained/static_lod_populations/static_shadow_batches/
+	// authored_occluder_models + per-stage "spans" usec timings).
+	// "batched" and "animated" are the honest individual/batched split:
+	// a multi-RLOD graphic never leaves the batched count on its own.
 	Dictionary place(const Ref<MissionData> &p_mission, Node3D *p_parent,
 			const Dictionary &p_options = Dictionary());
+
+	// Per-frame RLOD selection for every retained static instance, driven by
+	// GameWorld beside ObjectModel.update_authored_lods. Each instance's
+	// bound sphere is projected with the engine's projector and frame scale,
+	// retail's sub-pixel floor drops it from every population, and only an
+	// instance whose level changed has its rows moved (swap-removed from the
+	// old level's populations, appended to the new level's, shadow twins
+	// following) with the touched populations' visibility, shadow row map
+	// and Q3 instance rows refreshed. Returns the switch count.
+	int update_static_lods(const Transform3D &p_camera_transform,
+			float p_vertical_fov_degrees, float p_viewport_width,
+			float p_viewport_height);
+	int get_static_lod_switch_count() const { return static_lod_switches_; }
+	// The level currently live for a placed static entity (-1 = below the
+	// sub-pixel floor or no level available, -2 = not a retained static).
+	int get_static_instance_lod(int p_bms_id) const;
+	// The names of the visible populations that currently carry a live row
+	// for the entity (empty when carved, culled or unknown). Headless Godot
+	// stores no MultiMesh instance data, so tests pin the placer's own row
+	// bookkeeping through this typed read-back.
+	Array get_static_instance_live_populations(int p_bms_id) const;
+	// The bms ids of one emitted population's live rows in row order (row r
+	// of the MultiMesh draws the entity at index r), empty for a node that is
+	// not one of the placer's populations. Pins the dense packing and the
+	// swap-remove order without a device (see above).
+	PackedInt32Array get_static_population_live_bms_ids(
+			MultiMeshInstance3D *p_population) const;
+	// Emitted populations (visible batches and shadow twins) that currently
+	// carry at least one live row; the rest are hidden from the cull.
+	int get_static_live_population_count() const;
 
 	// Build ONE animated ObjectModel for an item type, in rest pose, for an
 	// owner-managed entity with no BMS placement (the local-player avatar).
@@ -127,13 +178,20 @@ public:
 			int p_character_id);
 	ObjectModel *build_player_animated_model(int p_runtime_type_id,
 			Node3D *p_parent, int p_character_id = 0);
+	// The composed avatar's head part under a body build_player_animated_model
+	// returned, or null for a plain item-model avatar. Retail draws the
+	// one-shot overlays (the held weapon, the mounted child) with the HEAD
+	// submit and skips them on the flagged body submit, so the head is the
+	// attachment RLOD owner of a composed avatar.
+	static ObjectModel *avatar_head_part(ObjectModel *p_body);
 	// Build ONE animated ObjectModel from an EXPLICIT graphic + .adm name
 	// (the first-person weapon viewmodel path; the arms + gun share the
 	// equipped gun's rig table — witness: placement_traits.h ledger).
 	ObjectModel *build_model_from_graphic(const String &p_graphic,
 			const String &p_adm_name, Node3D *p_parent,
 			const String &p_clip_key = String(),
-			const String &p_rig_graphic = String());
+			const String &p_rig_graphic = String(),
+			bool p_retain_authored_lods = false);
 
 	// --- read-back seams --------------------------------------------------
 	Array get_placed_entity_records() const { return placed_entity_records_; }
@@ -162,9 +220,13 @@ public:
 	Ref<ObjectData> object_data_for(const String &p_graphic);
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------
-	// Diagnostic/read-back identity for the exact MultiMesh population whose
-	// slot is carved. Distinct policies may share the same authored graphic.
+	// Diagnostic/read-back identity for the entity's graphic/reflection group.
+	// Distinct policies may share the same authored graphic.
 	String get_static_instance_batch_key(int p_bms_id) const;
+	// Number of exact MultiMesh slots the carve owns across spatial, global,
+	// per-RLOD and shadow populations. Public read-back for renderer
+	// diagnostics/tests.
+	int get_static_instance_binding_count(int p_bms_id) const;
 	// The carved instance's authored reflection policy, so the husk graft can
 	// keep reflecting: retail's husk swap flips only the husk-model flag,
 	// never the reflect flag the mirror collectors filter on (witnesses in
@@ -192,9 +254,14 @@ public:
 
 	// Register an already-resolved object plus its static render batches —
 	// the construction seam for callers that already own parsed geometry
-	// (including asset-free tests).
+	// (including asset-free tests). Each batch row may carry "lod_index"
+	// (default 0); `lod_profile` may carry "thresholds_q16"
+	// (PackedInt32Array, fine to coarse, one row per level) and
+	// "sphere_radius" (the model bound sphere); absent entries derive from
+	// the object's document, else from the level-0 geometry.
 	bool register_resolved_static_graphic(const String &p_graphic,
-			const Ref<ObjectData> &p_data, const Array &p_batches);
+			const Ref<ObjectData> &p_data, const Array &p_batches,
+			const Dictionary &p_lod_profile = Dictionary());
 	// Cache-inject a resolved object for a graphic without batches (the
 	// classification seam: live-PANM routing reads the injected data).
 	bool register_object_data(const String &p_graphic,
@@ -213,9 +280,58 @@ private:
 		Transform3D offset;
 		int submesh = 0;
 		int robj_index = 0;
+		int lod_index = 0;
 		bool auxiliary_draw = false;
+		bool blended_draw = false;
 	};
-
+	// A graphic's authored RLOD profile, harvested beside its batches: the
+	// selector's threshold table (fine to coarse), which levels carry
+	// harvested geometry, and the bound sphere the projector consumes.
+	struct StaticLodProfile {
+		std::vector<int32_t> thresholds_q16;
+		std::vector<bool> available;
+		float sphere_radius = 0.0f;
+	};
+	// One emitted MultiMesh population: capacity = the slot list it was
+	// emitted over, live rows packed [0, live) (visible_instance_count) in
+	// swap-remove order. The row tables name the retained instance/binding
+	// and the population-local slot each live row draws.
+	struct StaticPopulation {
+		Ref<MultiMesh> multimesh;
+		uint64_t instance_node = 0; // MultiMeshInstance3D ObjectID
+		int lod_index = 0;
+		bool shadow_only = false; // the filtered shadow twin
+		bool custom_data = false; // rows carry the light-atlas custom data
+		bool shadow_tagged = false; // carries the static_shadow_* metas
+		int live = 0;
+		Vector<int> row_instance;
+		Vector<int> row_binding;
+		Vector<int> row_slot;
+	};
+	// One slot of a retained static instance in one population: the row it
+	// occupies while its level is live (-1 otherwise) and what that row is
+	// written with.
+	struct StaticLodBinding {
+		int population = -1;
+		int slot = -1; // the population-local slot (the shadow meta index)
+		int row = -1;
+		int lod_index = 0;
+		Transform3D live_xform; // the row's transform while the level is live
+		Color custom_data; // the light-atlas row (visible populations)
+		bool shadow_only = false; // the filtered shadow twin
+		bool casts = true; // whether the slot is ever live in a shadow twin
+	};
+	// One retained static entity: its world bound sphere, the level live for
+	// it, and every population slot it occupies across levels/populations.
+	struct StaticLodInstance {
+		int profile = -1;
+		int bms_id = 0;
+		Vector3 origin;
+		float radius = 0.0f;
+		int active_lod = 0; // -1 = below the sub-pixel floor / none available
+		bool carved = false;
+		Vector<StaticLodBinding> bindings;
+	};
 	void _check_epoch();
 	void _ensure_item_db();
 	void _ensure_avatar_db();
@@ -242,6 +358,33 @@ private:
 			const PackedInt32Array &p_bone_parents);
 	Vector<StaticBatch> _get_static_batches(const String &p_graphic,
 			Node *p_tree_parent);
+	// The profile _get_static_batches / register_resolved_static_graphic
+	// filled for the graphic (a single-level profile when neither did).
+	StaticLodProfile _static_lod_profile_for(const String &p_graphic) const;
+	static void _complete_static_lod_profile(StaticLodProfile &r_profile,
+			const Vector<StaticBatch> &p_batches);
+	// Whether one emitted slot is live when `p_live_lod` is the instance's
+	// level: its population's level matches, and a shadow twin only carries
+	// slots that cast.
+	static bool _static_slot_live(const StaticLodBinding &p_binding,
+			int p_live_lod);
+	// Move one retained instance's rows so it is live exactly in the
+	// populations of `p_live_lod`: removed (swap-remove, the last live row
+	// fills the hole) where it no longer belongs, appended where it now
+	// does. Every population touched is collected for the flush below.
+	void _write_static_instance_slots(int p_instance_row, int p_live_lod,
+			HashSet<int> &r_touched);
+	void _static_population_append(int p_population, int p_instance_row,
+			int p_binding);
+	void _static_population_remove(int p_population, int p_instance_row,
+			int p_binding);
+	// After a batch of row moves: hide/show each touched population by its
+	// live count, republish its shadow row map, and invalidate its Q3
+	// instance rows (the populations' meshes never change, so only their
+	// rows are re-read; the packed Q3 surfaces stay cached).
+	void _flush_static_population_changes(const HashSet<int> &p_touched);
+	static PackedInt32Array _static_population_row_slots(
+			const StaticPopulation &p_population);
 	void _add_individual_static_shadow_siblings(ObjectModel *p_model,
 			const String &p_graphic, const Transform3D &p_local_xform,
 			const String &p_suffix);
@@ -285,28 +428,40 @@ private:
 	HashMap<String, Ref<ObjectData>> object_data_cache_;
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
 	HashMap<String, Vector<StaticBatch>> static_batch_cache_;
+	HashMap<String, StaticLodProfile> static_lod_profile_cache_;
 	HashMap<String, bool> graphic_panm_cache_;
 	HashMap<int64_t, bool> occlusion_cache_;
 	uint64_t built_epoch_ = 0;
 
+	// The retained static instances of the current placement (one per
+	// batched entity), the per-graphic profiles they select from, and the
+	// populations their rows live in (looked up by MultiMeshInstance3D id
+	// for the read-backs).
+	Vector<StaticLodProfile> static_lod_profiles_;
+	Vector<StaticLodInstance> static_lod_instances_;
+	Vector<StaticPopulation> static_populations_;
+	HashMap<uint64_t, int> static_population_by_node_;
+	int static_lod_switches_ = 0;
+
 	// Destruction carve state: batched statics have no per-entity node; a
-	// destroyed one is zero-scaled out of its graphic/reflection population's
-	// MultiMesh batches and the caller grafts the husk model at the returned
-	// transform.
-	HashMap<String, Vector<Ref<MultiMesh>>> destruction_batches_;
+	// destroyed one has its row removed from every population it is live in
+	// (every level's population and shadow twin) and the caller grafts the
+	// husk model at the returned transform.
 	struct DestructionInstance {
 		String graphic;
-		// Static rendering can split one graphic into independent retail
-		// reflection populations; this selects the MultiMeshes whose slot index
-		// belongs to this record. Legacy/manual registrations use `graphic`.
+		// Stable diagnostic identity for the graphic/reflection population.
+		// Legacy/manual registrations use `graphic`.
 		String batch_key;
 		int index = -1;
 		Transform3D xform;
 		bool casts_static_shadow = false;
 		bool mirror_reflected = false;
+		// The retained instance whose slots the carve rewrites (-1 for a
+		// manual registration without emitted populations).
+		int lod_instance = -1;
 	};
 	HashMap<int64_t, DestructionInstance> destruction_instances_;
-	HashMap<int64_t, Array> hidden_destruction_instances_;
+	HashSet<int64_t> hidden_destruction_instances_;
 	HashMap<int64_t, StaticTerrainShadowSource>
 			static_terrain_shadow_replacements_;
 };

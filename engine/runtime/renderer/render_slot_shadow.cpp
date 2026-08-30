@@ -46,6 +46,12 @@ float silhouette_half_extent(float bound_radius_units) {
 	return std::min(bound_radius_units * 1.25f, bound_radius_units + 0.75f);
 }
 
+SlotCaptureBasis silhouette_capture_basis(const std::array<float, 3> &direction) {
+	// The slot view frame is the shared retail look-at
+	// (direction_look_at.h, build_direction_look_at_matrix @ 0x612c90).
+	return direction_look_at(direction);
+}
+
 int slot_texture_size(int texture_order, int shadow_detail) {
 	// [orig: RenderSlot_InitTextureChain @ 0x5d5320 — base 256/512/1024 by the
 	// shadow-detail option, halving after every second slot, 32 px floor].

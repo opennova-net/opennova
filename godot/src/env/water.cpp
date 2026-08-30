@@ -1,4 +1,5 @@
 #include "env/water.h"
+#include "render/frame_fx.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/canvas_item_material.hpp>
@@ -15,7 +16,6 @@
 #include "env/env_render_camera.h"
 #include "env/mission_environment.h"
 #include "env/weather.h"
-#include "render/frame_fx.h"
 #include "object/object_shader_cache.h"
 
 #include <runtime/renderer/render_order.h>
@@ -110,8 +110,6 @@ void Water::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_SHADOW_CASTER_MASK", VISUAL_LAYER_SHADOW_CASTER_MASK);
 	ClassDB::bind_integer_constant(get_class_static(), "",
-			"VISUAL_LAYER_SLOT_CAPTURE_MASK", VISUAL_LAYER_SLOT_CAPTURE_MASK);
-	ClassDB::bind_integer_constant(get_class_static(), "",
 			"REFLECTION_CULL_MASK", REFLECTION_CULL_MASK);
 }
 
@@ -193,10 +191,12 @@ void Water::set_world_rendering_enabled(bool p_value) {
 void Water::release_runtime_renderer_resources() {
 	set_process(false);
 	world_rendering_enabled_ = false;
-	RenderingServer::get_singleton()->global_shader_parameter_set(
-			"opennova_water_active", false);
-	RenderingServer::get_singleton()->global_shader_parameter_set(
-			"opennova_water_reflection_clip_active", false);
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (server != nullptr) {
+		server->global_shader_parameter_set("opennova_water_active", false);
+		server->global_shader_parameter_set(
+				"opennova_water_reflection_clip_active", false);
+	}
 	has_drawable_surface_ = false;
 	if (reflection_viewport_ != nullptr) {
 		reflection_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
@@ -204,6 +204,7 @@ void Water::release_runtime_renderer_resources() {
 	if (reflection_camera_ != nullptr) {
 		reflection_camera_->clear_current();
 	}
+	_release_reflection_decode();
 	if (water_material_.is_valid()) {
 		water_material_->set_shader_parameter("u_has_reflection", false);
 		water_material_->set_shader_parameter("u_reflection", Variant());
@@ -311,7 +312,55 @@ void Water::_sync_render_activity() {
 void Water::_notification(int p_what) {
 	if (p_what == NOTIFICATION_VISIBILITY_CHANGED && built_) {
 		_sync_render_activity();
+	} else if (p_what == NOTIFICATION_ENTER_TREE && built_ &&
+			reflection_camera_ != nullptr &&
+			reflection_decode_effect_.is_null()) {
+		// Re-entry after an EXIT_TREE release: the retained mirror camera needs
+		// a fresh decode effect (the released one stays shut down).
+		_install_reflection_decode();
 	}
+}
+
+// The mirror camera's decode-only terminal effect: one FrameFxCompositorEffect
+// on a compositor the camera owns (never the beauty WorldEnvironment's chain).
+void Water::_install_reflection_decode() {
+	if (reflection_camera_ == nullptr) {
+		return;
+	}
+	reflection_decode_effect_.instantiate();
+	reflection_compositor_.instantiate();
+	TypedArray<Ref<CompositorEffect>> capture_effects;
+	Ref<CompositorEffect> generic_decode = reflection_decode_effect_;
+	capture_effects.push_back(generic_decode);
+	reflection_compositor_->set_compositor_effects(capture_effects);
+	reflection_camera_->set_compositor(reflection_compositor_);
+}
+
+// Idempotent release of the mirror decode chain, the same EXIT_TREE leg
+// FrameFx runs: disable the effect, detach the mirror camera's compositor,
+// drain a callback already queued for the mirror while RenderingDevice is
+// live, then free the effect-owned device resources. A Water freed outside
+// release_runtime_renderer_resources() (GUT fixtures, embedder previews)
+// otherwise leaks its RD chain.
+void Water::_release_reflection_decode() {
+	Ref<FrameFxCompositorEffect> decode_effect = reflection_decode_effect_;
+	if (decode_effect.is_valid())
+		decode_effect->set_enabled(false);
+	if (reflection_camera_ != nullptr &&
+			reflection_camera_->get_compositor() == reflection_compositor_)
+		reflection_camera_->set_compositor(Ref<Compositor>());
+	if (reflection_compositor_.is_valid())
+		reflection_compositor_->set_compositor_effects(
+				TypedArray<Ref<CompositorEffect>>());
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (decode_effect.is_valid() && server != nullptr &&
+			server->get_rendering_device() != nullptr)
+		server->force_sync();
+	if (decode_effect.is_valid())
+		decode_effect->release_device_resources();
+	reflection_decode_effect_.unref();
+	reflection_compositor_.unref();
+	decode_effect.unref();
 }
 
 void Water::_exit_tree() {
@@ -336,6 +385,9 @@ void Water::_exit_tree() {
 		water_material_->set_shader_parameter("u_has_reflection", false);
 		water_material_->set_shader_parameter("u_reflection", Variant());
 	}
+	// The mirror decode chain never outlives the node's time in the tree;
+	// ENTER_TREE re-installs it on the retained camera.
+	_release_reflection_decode();
 }
 
 void Water::_ready() {
@@ -417,6 +469,8 @@ void Water::build() {
 	// prerender never draws the water surface itself (water_mirror.h).
 	mesh_instance_->set_layer_mask(VISUAL_LAYER_WATER);
 	add_child(mesh_instance_);
+	FrameFx::register_q3_source(mesh_instance_,
+			opennova::renderer::Q3Source::Water);
 	built_ = true;
 
 	// The witnessed per-frame noise texture pair (created once, updated per
@@ -464,15 +518,7 @@ void Water::build() {
 		// inherit the beauty WorldEnvironment's chain. An HDR 2D target would
 		// skip the encode but run the canvas dim in linear space (0x40/255
 		// becomes ~0.05), which is the wrong domain for that multiply.
-		Ref<FrameFxCompositorEffect> decode_effect;
-		decode_effect.instantiate();
-		Ref<Compositor> capture_compositor;
-		capture_compositor.instantiate();
-		TypedArray<Ref<CompositorEffect>> capture_effects;
-		Ref<CompositorEffect> generic_decode = decode_effect;
-		capture_effects.push_back(generic_decode);
-		capture_compositor->set_compositor_effects(capture_effects);
-		reflection_camera_->set_compositor(capture_compositor);
+		_install_reflection_decode();
 		// The witnessed mirror scene: sky/terrain/celestials/foliage plus the
 		// flag-0x400 world population — vehicles by item type and records
 		// whose BMS attribute authors Reflective. It has no water surface, FP
@@ -755,7 +801,8 @@ void Water::_rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
 	// the screen-marched row coordinates registered to the actual main view.
 	water_core_->strip_set_view(p_cam->get_camera_transform(),
 			p_cam->get_camera_projection(), vp_size, pass_fog_end);
-	// The nightvision redraw variant is a FrameFX pass, not ported yet.
+	// The typed focused-Q3 WaterNightVision producer reuses this live strip;
+	// beauty and Q3 therefore share the same authored wave geometry.
 	const int rows = water_core_->strip_build(water_height_, p_murk, p_lit,
 			p_uv_state.x, p_uv_state.y, underwater, false);
 	if (rows < 2) {
@@ -782,6 +829,10 @@ void Water::_rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
 					(Mesh::ARRAY_CUSTOM_RGBA_FLOAT
 							<< Mesh::ARRAY_FORMAT_CUSTOM2_SHIFT));
 	mesh->surface_set_material(0, water_material_);
+	// The NV Q3 redraw shares this strip: hand the arrays over so the focused
+	// Q3 cache re-packs them from memory instead of reading the freshly
+	// uploaded surface back through the server in the same frame.
+	FrameFx::publish_q3_geometry(mesh_instance_, 0, arrays);
 	// The witnessed per-side material swap: camera-above -> the blend
 	// material, underwater -> the opaque one — ported as the shader's
 	// u_underwater_view branch.
@@ -796,6 +847,10 @@ void Water::_clear_strip_surfaces() {
 	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
 	if (mesh.is_valid() && mesh->get_surface_count() > 0) {
 		mesh->clear_surfaces();
+		// The focused Q3 record lists this strip's surface: the clear is a
+		// rebuild too, so its surface list is re-read (to none) before the
+		// next compile instead of drawing the last published strip.
+		FrameFx::invalidate_q3_source(mesh_instance_);
 	}
 }
 

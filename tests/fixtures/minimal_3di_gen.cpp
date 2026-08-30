@@ -637,6 +637,17 @@ const std::vector<Recipe> &recipes() {
 		{"mount_mtrl0_rgbgen113_reg1", make_mount, [](Model &m) {
 			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0.0, kBlack, kWhite);
 		}},
+		// --- Q3 bloom source (framefx_test.gd): the heat slab as an AlphaBlend
+		// LUM (its SELFLUM copy carries alpha 0 into the Q3 target) ---
+		{"mount_mtrl2_ab_lum", make_mount, [](Model &m) {
+			std::snprintf(m.materials[2].shader_name, sizeof(m.materials[2].shader_name), "FF_ST_AB_LUM");
+		}},
+		// --- Q3 bloom source (framefx_test.gd): a per-vertex skinned model wearing
+		// a LUM material; retail's bone path never copies it into Q3 ---
+		{"person_mtrl0_ad_lum", make_person, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AD_LUM");
+			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
+		}},
 		{"armory_lght0_colorgen113_flicker", make_armory, [](Model &m) {
 			ThreediLight &l = m.lights[0];
 			l.flags = static_cast<uint8_t>(l.flags & ~THREEDI_LIGHT_FLAG_DISABLE_OBJECTS);
@@ -677,6 +688,13 @@ const std::vector<Recipe> &recipes() {
 			m.materials[0].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
 			m.materials[0].u_params.style = 16;
 			m.materials[0].u_params.gen_rate = 1.0f;
+		}},
+		// --- render_swatch projshadow (render_swatch_pass_modes.gd): the _MT
+		// post alpha-tested so the slot capture's Diffuse2.a coverage is
+		// observable at the discard boundary ---
+		{"pump_mtrl1_mt_alphatest", make_pump, [](Model &m) {
+			m.materials[1].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
+			m.materials[1].alpha_test_value_byte = 32;
 		}},
 		// --- simulation_test.gd ---
 		{"mount_heat_glow_slide_part1", make_mount, [](Model &m) {

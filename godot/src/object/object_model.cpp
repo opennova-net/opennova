@@ -5,8 +5,10 @@
 #include "object/object_model.h"
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/occluder_instance3d.hpp>
 
 #include <algorithm>
+#include <limits>
 
 #include "env/slot_shadow.h"
 #include "terrain/terrain.h"
@@ -19,6 +21,9 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "object/object_shader_cache.h"
+#include "render/frame_fx.h"
+#include "render/object_lod_frame.h"
+#include <runtime/renderer/object_lod.h>
 #include <runtime/renderer/render_order.h>
 
 namespace godot {
@@ -147,6 +152,8 @@ ObjectModel::~ObjectModel() {
 		awake_models_.erase(this);
 	}
 	match_terrain_models_.erase(this);
+	authored_lod_models_.erase(this);
+	retire_geometry_instances();
 }
 
 void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
@@ -383,18 +390,16 @@ GeometryInstance3D::ShadowCastingSetting ObjectModel::presentation_cast_setting(
 }
 
 void ObjectModel::apply_presentation_layer_below(Node *p_root) {
-	// The render-slot capture channel bits are SlotShadow's per-slot stamp on
-	// this subtree (gated on its own bit/serial edges); a policy write keeps
-	// them.
-	const uint32_t preserved = SlotShadow::capture_layer_mask();
+	// The render-slot captures walk this subtree's geometry directly
+	// (SlotShadow's RenderingDevice pass); no capture channel rides the
+	// layer mask, so a policy write is the whole mask.
 	for (int i = 0; i < p_root->get_child_count(); ++i) {
 		Node *child = p_root->get_child(i);
 		VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(child);
 		if (visual != nullptr) {
 			const bool auxiliary =
 					bool(visual->get_meta("_opennova_auxiliary_draw", false));
-			visual->set_layer_mask((visual->get_layer_mask() & preserved) |
-					presentation_layer_mask(auxiliary));
+			visual->set_layer_mask(presentation_layer_mask(auxiliary));
 			GeometryInstance3D *geometry =
 					Object::cast_to<GeometryInstance3D>(child);
 			if (geometry != nullptr) {
@@ -495,6 +500,14 @@ void ObjectModel::set_section_visibility_mask(int64_t p_mask) {
 			kv.value->set_visible(p_mask == -1 || ((p_mask >> kv.key) & 1) == 1);
 		}
 	}
+	for (const KeyValue<int, OccluderInstance3D *> &kv : authored_occluders_) {
+		if (kv.value != nullptr) {
+			kv.value->set_visible(
+					p_mask == -1 ||
+					(kv.key < 63 &&
+							((static_cast<uint64_t>(p_mask) >> kv.key) & 1u) != 0));
+		}
+	}
 }
 
 Array ObjectModel::get_surface_materials() const {
@@ -526,7 +539,60 @@ void ObjectModel::set_active_lod(int p_lod_index) {
 		return;
 	}
 	active_lod_ = next_lod;
-	rebuild();
+	if (!authored_lod_enabled_) {
+		// Editor/preview models keep the historical one-LOD footprint. Mission
+		// models opt into retained authored LODs before their first data build.
+		rebuild_scene();
+		return;
+	}
+	// The retained slots take the level's rows in place: no node is created
+	// or freed, the build serial does not move.
+	apply_level_surfaces();
+	refresh_active_lod_rest_transforms();
+	panm_applied_revision_ = 0;
+	refresh_live_panm_classification();
+	point_light_draw_parts_dirty_ = true;
+	render_order_dirty_ = true;
+	bounds_dirty_ = true;
+	wake_runtime_frame();
+	apply_runtime_state(0.0);
+}
+
+void ObjectModel::set_authored_lod_owner(ObjectModel *p_owner) {
+	authored_lod_owner_ = p_owner != nullptr && p_owner != this
+			? p_owner->get_instance_id()
+			: ObjectID();
+}
+
+ObjectModel *ObjectModel::get_authored_lod_owner() const {
+	if (authored_lod_owner_.is_null()) {
+		return nullptr;
+	}
+	return Object::cast_to<ObjectModel>(
+			ObjectDB::get_instance(authored_lod_owner_));
+}
+
+void ObjectModel::set_authored_lod_enabled(bool p_enabled) {
+	if (authored_lod_enabled_ == p_enabled) {
+		return;
+	}
+	authored_lod_enabled_ = p_enabled;
+	active_lod_ = 0;
+	if (object_data_.is_valid() && object_data_->has_document()) {
+		rebuild_scene();
+		return;
+	}
+	authored_lod_models_.erase(this);
+}
+
+void ObjectModel::set_authored_occluders_enabled(bool p_enabled) {
+	if (authored_occluders_enabled_ == p_enabled) {
+		return;
+	}
+	authored_occluders_enabled_ = p_enabled;
+	if (object_data_.is_valid() && object_data_->has_document()) {
+		rebuild_scene();
+	}
 }
 
 int64_t ObjectModel::ctrl_dword(int64_t p_value) {
@@ -728,7 +794,110 @@ void ObjectModel::on_object_changed() {
 HashSet<ObjectModel *> ObjectModel::awake_models_;
 HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
+HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
 uint64_t ObjectModel::lifetime_generation_ = 0;
+int64_t ObjectModel::live_geometry_instance_count_ = 0;
+
+void ObjectModel::retire_geometry_instances() {
+	live_geometry_instance_count_ -= geometry_instance_count_;
+	geometry_instance_count_ = 0;
+}
+
+int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
+		float p_vertical_fov_degrees,
+		float p_viewport_width,
+		float p_viewport_height) {
+	if (authored_lod_models_.is_empty()) {
+		return 0;
+	}
+	// The frame scale, the projected radius and the selector are engine facts
+	// (runtime/renderer/object_lod.h); the frame struct converts the camera.
+	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
+			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
+	if (!frame.valid) {
+		return 0;
+	}
+	// The cheap math runs over the registered set in place; a level change is
+	// applied after the walk so set_active_lod's runtime-state refresh never
+	// runs against the set being iterated. Nothing allocates while no model
+	// crosses a threshold.
+	struct LodSwitch {
+		ObjectModel *model = nullptr;
+		int lod_index = 0;
+	};
+	// Frame scratch that keeps its capacity across calls (deliberately never
+	// freed: a static with a Godot allocator destructor would run after the
+	// extension's allocator hooks are gone), so a frame with attachments or
+	// crossings allocates nothing once warm.
+	static LocalVector<LodSwitch> &switches = *memnew(LocalVector<LodSwitch>);
+	switches.clear();
+	// Attachments take their owner's level after the owners' own selections
+	// have been applied (renderer::attachment_lod_index).
+	static LocalVector<ObjectModel *> &attachments =
+			*memnew(LocalVector<ObjectModel *>);
+	attachments.clear();
+	for (ObjectModel *model : authored_lod_models_) {
+		if (!model->is_inside_tree()) {
+			continue;
+		}
+		if (!model->authored_lod_owner_.is_null()) {
+			attachments.push_back(model);
+			continue;
+		}
+		const Transform3D world = model->get_global_transform();
+		const float source_radius =
+				model->model_sphere_radius_ > 0.0f
+				? model->model_sphere_radius_
+				: model->model_bounds_.get_longest_axis_size() * 0.5f;
+		const float radius =
+				source_radius * ObjectLodFrame::uniform_scale(world.basis);
+		int32_t projected_q16 = 0;
+		// A model outside the frustum keeps its level: retail never reaches the
+		// selector for an entity its collector rejected.
+		if (!frame.project(world.origin, radius, projected_q16)) {
+			continue;
+		}
+		const opennova::renderer::ObjectLodSelection selection =
+				opennova::renderer::select_object_lod(
+						model->authored_lod_thresholds_q16_, projected_q16,
+						frame.projection_scale, model->authored_lod_available_);
+		if (selection.lod_index < 0 || selection.lod_index == model->active_lod_) {
+			continue;
+		}
+		// The tree-visibility walk only for the models that actually cross: a
+		// hidden model re-selects on the frame it becomes visible.
+		if (!model->is_visible_in_tree()) {
+			continue;
+		}
+		switches.push_back(LodSwitch{ model, selection.lod_index });
+	}
+	int applied = 0;
+	for (const LodSwitch &change : switches) {
+		// A switch applied earlier in this loop can unregister or free another
+		// queued model (set_active_lod's runtime-state refresh reaches child
+		// nodes); only a still-registered model is dereferenced.
+		if (!authored_lod_models_.has(change.model)) {
+			continue;
+		}
+		change.model->set_active_lod(change.lod_index);
+		++applied;
+	}
+	for (ObjectModel *attachment : attachments) {
+		if (!authored_lod_models_.has(attachment)) {
+			continue;
+		}
+		const ObjectModel *owner = attachment->get_authored_lod_owner();
+		const int level = opennova::renderer::attachment_lod_index(
+				owner != nullptr ? owner->active_lod_ : 0,
+				static_cast<int>(attachment->authored_lod_thresholds_q16_.size()));
+		if (level < 0 || level == attachment->active_lod_) {
+			continue;
+		}
+		attachment->set_active_lod(level);
+		++applied;
+	}
+	return applied;
+}
 
 void ObjectModel::advance_awake_frame(double p_delta) {
 	advance_awake_frame_impl(p_delta, nullptr);
@@ -785,6 +954,9 @@ void ObjectModel::advance_awake_frame_impl(double p_delta,
 // @0x5d9ff3 - docs/render/render-material-re.md).
 void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 		float p_layer, const Vector4 &p_projection) {
+	match_terrain_page_ready_ = p_page_ready;
+	match_terrain_page_layer_ = p_layer;
+	match_terrain_page_projection_ = p_projection;
 	const StringName enabled_name("u_match_terrain_enabled");
 	const StringName ready_name("u_match_terrain_page_ready");
 	const StringName layer_name("u_match_terrain_page_layer");
@@ -813,6 +985,26 @@ void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 				static_cast<Object *>(robj_dense_[entry])));
 	}
 	apply_to(skeleton_);
+}
+
+void ObjectModel::stamp_instance_uniforms(GeometryInstance3D *p_instance) const {
+	if (p_instance == nullptr) {
+		return;
+	}
+	p_instance->set_instance_shader_parameter(
+			StringName("u_match_terrain_enabled"), match_terrain_enabled_);
+	p_instance->set_instance_shader_parameter(
+			StringName("u_match_terrain_page_ready"),
+			match_terrain_enabled_ && match_terrain_page_ready_);
+	p_instance->set_instance_shader_parameter(
+			StringName("u_match_terrain_page_layer"), match_terrain_page_layer_);
+	p_instance->set_instance_shader_parameter(
+			StringName("u_match_terrain_page_projection"),
+			match_terrain_page_projection_);
+	// The same flag and margin set_viewmodel_pass stamps on the built set.
+	p_instance->set_instance_shader_parameter(
+			StringName("u_viewmodel_pass"), viewmodel_pass_);
+	p_instance->set_extra_cull_margin(viewmodel_pass_ ? 8.0f : 0.0f);
 }
 
 void ObjectModel::set_viewmodel_pass(bool p_enabled) {
@@ -973,6 +1165,7 @@ void ObjectModel::_notification(int p_what) {
 			awake_models_.erase(this);
 		}
 		alpha_strip_models_.erase(this);
+		retire_geometry_instances();
 	}
 }
 
@@ -1046,6 +1239,25 @@ int ObjectModel::clamp_lod_index(int p_lod_index) const {
 	const Dictionary summary = object_data_->get_summary();
 	const int lod_count = int(summary.get("lod_count", 1));
 	return CLAMP(p_lod_index, 0, MAX(lod_count - 1, 0));
+}
+
+void ObjectModel::refresh_active_lod_rest_transforms() {
+	robj_rest_transforms_.clear();
+	if (object_data_.is_null() || !object_data_->has_document()) {
+		return;
+	}
+	const Threedi3di3 &model = object_data_->native_model();
+	if (active_lod_ < 0 ||
+			static_cast<std::size_t>(active_lod_) >= model.lod_count ||
+			model.lods == nullptr) {
+		return;
+	}
+	const ThreediLod &lod = model.lods[active_lod_];
+	for (std::size_t i = 0; i < lod.render_object_count; ++i) {
+		const ThreediRenderObject &part = lod.render_objects[i];
+		robj_rest_transforms_[static_cast<int>(i)] =
+				Transform3D(Basis(), Vector3(-part.abs[0], part.abs[1], part.abs[2]));
+	}
 }
 
 Node3D *ObjectModel::get_or_create_robj_node(int p_robj_index) {
@@ -1129,6 +1341,9 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 		const int material_index = surface_material_indices_[i];
 		MaterialRuntimeStamp &stamp = material_runtime_stamps_[
 				static_cast<size_t>(i)];
+		// The focused Q3 compile caches this material's block; every write
+		// below names the material so its surfaces re-read it once.
+		bool q3_parameters_changed = false;
 		if (material_needs_eval_[i]) {
 			opennova::renderer::MaterialRuntime runtime;
 			if (object_data_->eval_material_runtime_native(material_index,
@@ -1139,21 +1354,25 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 						runtime.uv.m20 != previous.uv.m20) {
 					material->set_shader_parameter("u_uv_transform_u",
 							Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20));
+					q3_parameters_changed = true;
 				}
 				if (!stamp.runtime_valid || runtime.uv.m01 != previous.uv.m01 ||
 						runtime.uv.m11 != previous.uv.m11 ||
 						runtime.uv.m21 != previous.uv.m21) {
 					material->set_shader_parameter("u_uv_transform_v",
 							Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21));
+					q3_parameters_changed = true;
 				}
 				if (!stamp.runtime_valid || runtime.rgb_r != previous.rgb_r ||
 						runtime.rgb_g != previous.rgb_g ||
 						runtime.rgb_b != previous.rgb_b) {
 					material->set_shader_parameter("u_rgb_mod",
 							Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b));
+					q3_parameters_changed = true;
 				}
 				if (!stamp.runtime_valid || runtime.alpha != previous.alpha) {
 					material->set_shader_parameter("u_alpha_mod", runtime.alpha);
+					q3_parameters_changed = true;
 				}
 				stamp.runtime = runtime;
 				stamp.runtime_valid = true;
@@ -1169,8 +1388,12 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 				if (frame.is_valid()) {
 					set_material_and_auxiliary_parameter(material, "u_diffuse", frame);
 					stamp.anim_frame = frame_index;
+					q3_parameters_changed = true;
 				}
 			}
+		}
+		if (q3_parameters_changed) {
+			FrameFx::invalidate_q3_object_material(material);
 		}
 	}
 	if (p_profile != nullptr) {
@@ -1399,8 +1622,18 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("refresh_match_terrain_frame", "terrain"),
 			&ObjectModel::refresh_match_terrain_frame);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("update_authored_lods",
+					"camera_transform", "vertical_fov",
+					"viewport_width", "viewport_height"),
+			&ObjectModel::update_authored_lods);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("get_live_geometry_instance_count"),
+			&ObjectModel::get_live_geometry_instance_count);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
 			&ObjectModel::is_runtime_frame_awake);
+	ClassDB::bind_method(D_METHOD("get_scene_build_serial"),
+			&ObjectModel::get_scene_build_serial);
 	ClassDB::bind_method(D_METHOD("wake_runtime_frame"),
 			&ObjectModel::wake_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_object_data", "data"), &ObjectModel::set_object_data);
@@ -1458,7 +1691,30 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_panm_clock", "clock"), &ObjectModel::set_panm_clock);
 	ClassDB::bind_method(D_METHOD("set_active_lod", "lod_index"),
 			&ObjectModel::set_active_lod);
-	ClassDB::bind_method(D_METHOD("get_active_lod"), &ObjectModel::get_active_lod);
+	ClassDB::bind_method(D_METHOD("get_active_lod"),
+			&ObjectModel::get_active_lod);
+	ClassDB::bind_method(D_METHOD("set_authored_lod_enabled", "enabled"),
+			&ObjectModel::set_authored_lod_enabled);
+	ClassDB::bind_method(D_METHOD("is_authored_lod_enabled"),
+			&ObjectModel::is_authored_lod_enabled);
+	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner"),
+			&ObjectModel::set_authored_lod_owner);
+	ClassDB::bind_method(D_METHOD("get_authored_lod_owner"),
+			&ObjectModel::get_authored_lod_owner);
+	ClassDB::bind_method(D_METHOD("get_surface_slot_count"),
+			&ObjectModel::get_surface_slot_count);
+	ClassDB::bind_method(D_METHOD("get_level_surface_count", "lod_index"),
+			&ObjectModel::get_level_surface_count);
+	ClassDB::bind_method(D_METHOD("get_retained_surface_instance_count"),
+			&ObjectModel::get_retained_surface_instance_count);
+	ClassDB::bind_method(D_METHOD("add_level_bound_visual", "lod_index", "visual"),
+			&ObjectModel::add_level_bound_visual);
+	ClassDB::bind_method(D_METHOD("set_authored_occluders_enabled", "enabled"),
+			&ObjectModel::set_authored_occluders_enabled);
+	ClassDB::bind_method(D_METHOD("are_authored_occluders_enabled"),
+			&ObjectModel::are_authored_occluders_enabled);
+	ClassDB::bind_method(D_METHOD("get_authored_occluder_count"),
+			&ObjectModel::get_authored_occluder_count);
 	ClassDB::bind_method(D_METHOD("rebuild"), &ObjectModel::rebuild);
 	ClassDB::bind_method(D_METHOD("advance_runtime_frame", "delta"),
 			&ObjectModel::advance_runtime_frame);

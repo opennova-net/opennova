@@ -18,7 +18,7 @@ static func create(ctx: ProbeContext, size: Vector2i, mirror: Viewport = null,
 	stage.name = "ProbeStage"
 	stage.size = size
 	# A fresh World3D assigned directly: get_world_3d() then names the world
-	# the stage renders, which auxiliary views (FrameFx's Q3 view) copy.
+	# the stage renders. Focused Q3 snapshots typed producers separately.
 	# own_world_3d would render a private duplicate and leave get_world_3d()
 	# pointing at an empty original.
 	stage.world_3d = World3D.new()

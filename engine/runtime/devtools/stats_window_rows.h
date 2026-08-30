@@ -173,7 +173,7 @@ inline constexpr StatsRow kRows[] = {
 	{"scars", "Scars", 4, RowKind::SPAN, Slot::PRESENT_SCARS, nullptr, 0},
 	{"runtime_overhead", "Session/presentation overhead", 3, RowKind::RESIDUAL, Slot::WORLD_RUNTIME, k_runtime_overhead, 9},
 	{"local_view", "Local view publication", 2, RowKind::SPAN, Slot::WORLD_LOCAL_VIEW, nullptr, 0},
-	{"framefx", "Auxiliary-view pose sync", 2, RowKind::SPAN, Slot::WORLD_FRAMEFX, nullptr, 0},
+	{"framefx", "Q3 compile", 2, RowKind::SPAN, Slot::WORLD_FRAMEFX, nullptr, 0},
 	{"scene_env", "Scene fog/ambient publication", 2, RowKind::SPAN, Slot::WORLD_SCENE_ENV, nullptr, 0},
 	{"env_nodes", "Sky/celestial/sun/weather smoothing", 2, RowKind::SPAN, Slot::WORLD_ENV_NODES, nullptr, 0},
 	{"terrain", "Terrain frame publication", 2, RowKind::SPAN, Slot::WORLD_TERRAIN, nullptr, 0},
@@ -240,12 +240,8 @@ inline constexpr StatsRow kRows[] = {
 	{"render_water", "Water mirror", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
 	{"render_water_cpu", "Water RTT CPU", 2, RowKind::SPAN, Slot::RENDER_WATER_CPU, nullptr, 0},
 	{"render_water_gpu", "Water RTT GPU", 2, RowKind::SPAN, Slot::RENDER_WATER_GPU, nullptr, 0},
-	{"render_q3", "FrameFX Q3 view", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
-	{"render_q3_cpu", "Q3 CPU", 2, RowKind::SPAN, Slot::RENDER_Q3_CPU, nullptr, 0},
-	{"render_q3_gpu", "Q3 GPU", 2, RowKind::SPAN, Slot::RENDER_Q3_GPU, nullptr, 0},
+	{"render_q3", "FrameFX focused Q3", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
 	{"render_slot", "Slot-shadow captures", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
-	{"render_slot_cpu", "Captures CPU", 2, RowKind::SPAN, Slot::RENDER_SLOT_CPU, nullptr, 0},
-	{"render_slot_gpu", "Captures GPU", 2, RowKind::SPAN, Slot::RENDER_SLOT_GPU, nullptr, 0},
 };
 
 inline constexpr int kRowCount = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));

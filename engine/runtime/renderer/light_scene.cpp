@@ -1,5 +1,6 @@
 #include <runtime/renderer/light_scene.h>
 
+#include <runtime/renderer/device_fog.h>
 #include <runtime/renderer/light_scene_internal.h>
 #include <runtime/renderer/material_eval.h>
 
@@ -472,30 +473,11 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 	constexpr float kStepFactor = 0.1f;
 	constexpr float kSegmentShrink = 0.66f;
 	constexpr int kSegments = 3;
-	// The witnessed device fog policy (the object/terrain shaders' shared
-	// implementation): exp(-d * ln64/end) for type 0, linear (end - d) /
-	// (end - start) with start = passed (type 1), end/2 (type 2), end/4
-	// (type 3) [orig: Render_SetFogState @ 0x58a950;
-	// CD3DDevice_SetFogParameters @ 0x677960].
+	// The primary device fog (renderer/device_fog.h carries the witness):
+	// the inputs already hold the Render_SetFogState start/end.
 	const auto fog_visibility = [&inputs](float dist) -> float {
-		if (!inputs.fog_enabled) {
-			return 1.0f;
-		}
-		const float safe_end = std::max(inputs.fog_end, 1.0f);
-		if (inputs.fog_type == 0) {
-			constexpr float kLn64 = 4.1588830833596715f;
-			return std::clamp(
-					std::exp(-std::max(dist, 0.0f) * (kLn64 / safe_end)),
-					0.0f, 1.0f);
-		}
-		float start = inputs.fog_start;
-		if (inputs.fog_type == 2) {
-			start = safe_end * 0.5f;
-		} else if (inputs.fog_type == 3) {
-			start = safe_end * 0.25f;
-		}
-		return std::clamp((safe_end - dist) / std::max(safe_end - start, 1.0f),
-				0.0f, 1.0f);
+		return device_fog_visibility(dist, inputs.fog_start, inputs.fog_end,
+				inputs.fog_type, inputs.fog_enabled);
 	};
 	const std::array<float, 3> camera_world = {
 		static_cast<float>(inputs.camera_fixed[0]) / 65536.0f,

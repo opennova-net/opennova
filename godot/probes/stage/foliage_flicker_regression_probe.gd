@@ -6,7 +6,7 @@ extends GameProbe
 ## dispatcher submissions. The assertions consume real rasterized viewport
 ## bytes (a probe, not a GUT test). The fixture is asset-free but exercises
 ## FoliageDispatcher, its retail one-frame detail cache, generated
-## ArrayMeshes, draw pools, ShaderMaterials, and the production foliage
+## ArrayMeshes, retained draw instances, ShaderMaterials, and the production foliage
 ## detail and MODEL shaders, each on its own probe stage. Needs a window;
 ## run it on gl_compatibility as well as Forward+ (both renderers own the
 ## symptom).
@@ -23,7 +23,7 @@ const MODEL_CONTRACT_DELTA := 2
 const MIN_MODEL_CONTRACT_PIXELS := 1000
 const MODEL_ALPHA_REF := 128.0 / 255.0
 # The animated/environment inputs pinned for the run (restored at finish):
-# any remaining pixel change is draw pool/material/cache instability, not
+# any remaining pixel change is draw-instance/material/cache instability, not
 # expected wind or time-of-day motion.
 const PINNED_GLOBALS := {
 	&"opennova_sky_ambient": Vector3(0.35, 0.35, 0.35),
@@ -548,11 +548,9 @@ func _sample_foliage(_world_x: float, _world_z: float) -> int:
 
 
 func _pin_wind(dispatcher: FoliageDispatcher) -> void:
-	for child in dispatcher.get_children():
-		if child is MeshInstance3D and child.visible and (
-			child.name.begins_with("FoliageDetailDraw")
-			or child.name.begins_with("FoliageModelDraw")):
-			child.set_instance_shader_parameter(&"u_wind_phase", 0.0)
+	dispatcher.apply_probe_draw_control(
+			FoliageDispatcher.PROBE_DRAW_ALL,
+			false, false, 0.0, 0.0)
 
 
 func _make_cross_mesh() -> ArrayMesh:

@@ -40,7 +40,6 @@ MainGame._process
           per-tick Godot presentation sink  effects + fixed-tick listeners
         present entity/effect rows once
       present local view                    camera/viewmodel placement (D-RORD-8)
-      FrameFx.advance_frame                 the isolated Q3 glow view takes this frame's pose
       Terrain.render_frame                  compiled TerrainDrawList
       FoliageDispatcher.render_frame        compiled FoliageDrawList
       drive network session edges
@@ -48,7 +47,12 @@ MainGame._process
       apply blink gates when a tick ran
       apply camera occlusion
       sample iris
-      render material frame                 per-model ObjectModel advance
+      render material frame                 authored RLOD selection (individual models, then the
+                                            placer's retained static instances), then the
+                                            per-model ObjectModel advance
+      sync_framefx_frame                    compile typed focused-Q3 draws after every producer published
+      render slot shadows                   plan the 24/12 admission, publish the armed captures
+                                            (drawn by the beauty compositor's PRE_OPAQUE pass)
       render particles
       mix mission audio
       update frame clear

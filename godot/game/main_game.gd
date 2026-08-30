@@ -171,6 +171,8 @@ func finish_runtime_shutdown() -> void:
 	if _root != null:
 		_root.clear()
 	VegAssetsScript.clear_cache()
+	if _debug_adapter != null:
+		_debug_adapter.release_shell_seams()
 
 
 ## True from the menu-to-loading handoff until the world reports success or

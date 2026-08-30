@@ -7,7 +7,7 @@
 // anchor gate, submission grouping, per-identity vertex builds (only for
 // identities that became resident this frame), per-submission uniform state,
 // and both retail wind clocks live here; the embedder keeps GPU uploads,
-// draw-node pooling, and material binding.
+// retained scenario-instance RID pooling, and material binding.
 // [orig: generate_foliage_instances_0 @ 0x5ffdd0;
 //  Foliage_GenerateModelTileInstances @ 0x600980;
 //  Foliage_RenderFarPatches @ 0x60a659..0x60a694]

@@ -57,9 +57,6 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"
-// The isolated Q3 (FrameFX bloom source) camera signature.
-#include "res://shaders/frame_pass.gdshaderinc"
-
 // Env_WaterColorLit — since env #30 this is only the reflection-LESS
 // stand-in for the t2 sample (headless owners/tests, u_has_reflection false).
 uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
@@ -91,8 +88,7 @@ uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 // the six cameras can admit only sky + sun/moon without consuming a 21st Godot
 // layer. Reject those six pass eyes by their exact camera mask — the capture
 // cameras cull to the aliased layer ALONE (EnvironmentCubeCapture
-// set_cull_mask), while the beauty/mirror/Q3 masks are wider — the same
-// signature pattern as is_q3_pass. IN_SHADOW_PASS guards the read:
+// set_cull_mask), while the beauty/mirror masks are wider. IN_SHADOW_PASS guards the read:
 // shadow passes leave CAMERA_VISIBLE_LAYERS unset.
 const uint NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u; // 0x00000400
 // The underwater pass swaps to the OPAQUE material — blend OFF, flags 0x20000
@@ -225,31 +221,8 @@ void fragment() {
 	// the far water renders to the full march extent, converging to the fog color.
 	float alpha = alpha_dist;
 
-	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		// FrameFX redraws the surface into the isolated bloom source with the
-		// NV material pair: the same 4-texture chain and blend states plus a
-		// bright pass on the specular-added result, and the device fog color
-		// forced to BLACK (SetFogAndBlendMode(2) -> FOGCOLOR 0xFF000000), so
-		// far water fades out of the source instead of toward the sky fog.
-		// Water_DetailLevel <= 1 skips the redraw entirely; the pinned
-		// highest-quality policy is detail 3. The decal pass is not redrawn.
-		//   dp3     r1.rgb, r0, c0   ; c0 = (0.25, 0.60, 0.15)
-		//   mad_sat r1.rgb, r1, r1, c1 ; c1 = -0.15
-		//   mul     r0.rgb, r0, r1
-		// [orig: render_water_surface(view, 1) @ 0x5c3311..0x5c3320 (detail
-		//  gate), @ 0x5c3442..0x5c3458 (SetFogAndBlendMode(2) +
-		//  Water_ShaderBlendNV); Water_PSBumpReflectNV source @ 0x7dbd28,
-		//  assembled in Water_InitSurfaceShaders @ 0x5c1bc4; NV descriptors
-		//  @ 0x5c1c27..0x5c1c81 (blend 1/2/5 and opaque 0x20000);
-		//  CD3DDevice_SetFogAndBlendMode @ 0x677740 case 2 @ 0x6778ed]
-		float luma = dot(color, vec3(0.25, 0.60, 0.15));
-		float bright = clamp(luma * luma - 0.15, 0.0, 1.0);
-		color = color * bright * v_fog;
-		ALBEDO = scene_output(color);
-		ALPHA = u_underwater_view ? 1.0 : (1.0 - alpha);
-	} else {
-		// Scene fog toward u_fog_color by the witnessed per-row factor (see v_fog).
-		color = mix(u_fog_color, color, v_fog);
+	// Scene fog toward u_fog_color by the witnessed per-row factor (see v_fog).
+	color = mix(u_fog_color, color, v_fog);
 
 		// The witnessed blend is out = src + dst * a (ONE + dst*SRCALPHA): under
 		// Godot's premul pass (out = src.rgb + dst * (1 - ALPHA)) that is
@@ -257,7 +230,6 @@ void fragment() {
 		// multiplied by a — retail's SrcBlend is ONE.
 		// Both source and destination remain gamma-domain numeric values until the
 		// terminal compositor, so this blend matches the retail framebuffer.
-		ALBEDO = scene_output(color);
-		ALPHA = u_underwater_view ? 1.0 : (1.0 - alpha);
-	}
+	ALBEDO = scene_output(color);
+	ALPHA = u_underwater_view ? 1.0 : (1.0 - alpha);
 }

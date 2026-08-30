@@ -345,6 +345,9 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 			"the bound JoinTarget enters the two-frame loading-screen barrier")
 	target = null
 
+	var retained_seams: GameShellSeams = _shell.get_game_debug_adapter().get_shell_seams()
+	assert_true(retained_seams.world_loading_source.is_valid(),
+			"the configured debug seam captures MainGame before shutdown")
 	var load_operation: WorldLoadOperation = _shell.begin_runtime_shutdown()
 	assert_not_null(load_operation)
 	if not load_operation.is_settled():
@@ -359,6 +362,13 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 			"finish_runtime_shutdown leaves the frame unconfigured")
 	assert_null(weak_cursor.get_ref(),
 			"the cooperative shutdown path drops its global custom cursor before exit")
+	assert_null(_shell.get_game_debug_adapter().get_shell_seams(),
+			"shutdown releases every Callable edge back into MainGame")
+	for property in retained_seams.get_property_list():
+		if property["type"] == TYPE_CALLABLE:
+			var callable: Callable = retained_seams.get(property["name"])
+			assert_false(callable.is_valid(),
+					"shutdown invalidates retained seam %s" % property["name"])
 
 
 func test_picker_pick_persists_only_for_unmanaged_runs() -> void:

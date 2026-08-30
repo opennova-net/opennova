@@ -224,8 +224,8 @@ func test_provenance_contract_covers_every_shader_resource_once() -> void:
 	var provenance: Dictionary = _load_json(PROVENANCE_PATH)
 	var sources := _shader_sources()
 	assert_eq(int(provenance["schema"]), 2)
-	assert_eq(sources.size(), 195, "the runtime inventory must stay closed")
-	assert_eq(int(provenance["resource_count"]), 195)
+	assert_eq(sources.size(), 193, "the runtime inventory must stay closed")
+	assert_eq(int(provenance["resource_count"]), 193)
 	var ids := {}
 	for contract in provenance["contracts"]:
 		ids[contract["id"]] = true
@@ -418,13 +418,13 @@ func test_auxiliary_shader_resources_match_their_manifest_contracts() -> void:
 			assert_true(source.contains("#define OBJ_POSTMULTIPLY_CUTOUT"), key)
 
 	assert_false(DirAccess.dir_exists_absolute(OBJECT_ROOT.path_join("glow_proxy")))
-	var glow := _read(OBJECT_ROOT.path_join("glow.gdshaderinc"))
 	var output := _read(OBJECT_ROOT.path_join("output_opaque.gdshaderinc"))
-	for token in ["obj_glass_glow(CAMERA_POSITION_WORLD)", "obj_apply_additive_fog",
-			"OBJ_GLOW_ROTATED_SPECULAR", "OBJ_GLOW_NORMAL_COPY", "OBJ_GLOW_NO_PASS",
-			"is_q3_pass"]:
-		assert_true((glow + output).contains(token), token)
-	assert_false((glow + output).contains("u_glow_hdr_scale"))
+	for token in ["is_q3_pass", "OBJ_GLOW_ROTATED_SPECULAR",
+			"OBJ_GLOW_NORMAL_COPY", "OBJ_GLOW_NO_PASS", "OBJ_Q3_DEPTH_OCCLUDER"]:
+		assert_false(output.contains(token), "%s retired from beauty output" % token)
+	assert_false(FileAccess.file_exists(OBJECT_ROOT.path_join("glow.gdshaderinc")),
+			"the direct typed adapter owns Glass/LUM Q3 techniques")
+	assert_false(output.contains("u_glow_hdr_scale"))
 
 	var body := _read(OBJECT_ROOT.path_join("postmultiply/environment_textured_body.gdshaderinc"))
 	for token in ["texture(u_diffuse, v_raw_uv)", "textureLod(u_post_screen, SCREEN_UV, 0.0)",
@@ -450,15 +450,12 @@ func test_every_wrapper_matches_manifest_topology() -> void:
 					"#define OBJ_COVERAGE_%s" % String(technique["coverage_source"]).to_upper(),
 					"#define OBJ_CLIP_%s" % String(technique["clip_class"]).to_upper(),
 					"#define OBJ_VERTEX_POINT_LIGHTS_%s" % String(technique["vertex_point_lights"]).to_upper(),
-					"#define OBJ_PROJSHAD_%s" % String(manifest["projected_shadow_contracts"][engine_enum]).to_upper(),
 					"#define OBJ_MATCHTERRAIN_%s" % String(manifest["match_terrain_contracts"][engine_enum]).to_upper(),
-					"#define OBJ_GLOW_%s" % String(manifest["glow_contracts"][engine_enum]).to_upper(),
 					"#include \"res://shaders/object/shared.gdshaderinc\"",
 					"#include \"res://shaders/object/sampling/%s.gdshaderinc\"" % technique["sampling"],
 					"#include \"res://shaders/object/coverage/%s.gdshaderinc\"" % policy["coverage"],
 					"#include \"res://shaders/object/normal/%s.gdshaderinc\"" % technique["normal"],
 					"#include \"res://shaders/object/match_terrain.gdshaderinc\"",
-					"#include \"res://shaders/object/glow.gdshaderinc\"",
 					"#include \"res://shaders/object/fog/%s.gdshaderinc\"" % technique.get("fog", policy["fog"]),
 					"#include \"res://shaders/object/technique/%s.gdshaderinc\"" % technique["implementation"],
 					"/object/%s.gdshaderinc\"" % ("vertex_flag" if technique["vertex"] == "flag" else "vertex_standard"),
@@ -571,76 +568,56 @@ func test_vertex_point_light_products_match_technique_consumption() -> void:
 # --- slot capture / projected shadow ------------------------------------
 
 
-func test_slot_capture_camera_signature_pins_the_water_layer_table() -> void:
-	# PROJSHAD capture is a camera-mask signature, not twelve eye distances.
-	# SlotShadow gives each capture camera one reserved visual layer; the object
-	# shaders recognise a camera that culls to those layers alone. Pin the
-	# shader constant to the Water layer table and keep the signature disjoint
-	# from the beauty/Q3 device masks so a layer reallocation cannot silently
-	# re-route the NORMAL pass into the silhouette pass.
-	var water_header := _read(_repo_path("godot/src/env/water.h"))
-	var table_re := RegEx.create_from_string("(?s)VISUAL_LAYER_SLOT_CAPTURE_MASK\\s*=\\s*([^,]+?),\\n")
-	var table := table_re.search(water_header)
-	assert_not_null(table, "Water must publish the slot capture layer table")
-	if table == null:
-		return
-	var expected_mask := 0
-	var bit_re := RegEx.create_from_string("1\\s*<<\\s*(\\d+)")
-	for m in bit_re.search_all(table.get_string(1)):
-		expected_mask |= 1 << int(m.get_string(1))
-	assert_eq(expected_mask, 0x000E03FE)
-
+func test_projshadow_lives_in_the_slot_capture_pass_not_the_wrappers() -> void:
+	# The PROJSHAD pass is SlotShadow's RenderingDevice pass over the engine's
+	# per-technique coverage and blend tables: the object wrappers carry no
+	# capture branch, no camera-mask signature and no per-technique PROJSHAD
+	# define any more, Water reserves no capture layers, and the pass keeps
+	# the retail clear, the 4x resolve, the PRE_OPAQUE ordering and the
+	# blended alpha-blend variant.
 	var shared := _normalized(OBJECT_ROOT.path_join("shared.gdshaderinc"))
-	var declared := RegEx.create_from_string(
-			"const uint NOVA_SLOT_CAPTURE_LAYER_MASK = (\\d+)u;").search(shared)
-	assert_not_null(declared, "shared.gdshaderinc must declare the capture signature")
-	if declared != null:
-		assert_eq(int(declared.get_string(1)), expected_mask)
-	assert_true(shared.contains("bool obj_is_slot_shadow_capture(uint camera_visible_layers,"))
-	assert_true(shared.contains("~NOVA_SLOT_CAPTURE_LAYER_MASK"))
-
-	var retail_pass := _normalized(SHADER_ROOT.path_join("frame_pass.gdshaderinc"))
-	for name in ["NOVA_BEAUTY_CAMERA_MASK", "NOVA_Q3_CAMERA_MASK"]:
-		var device_mask := RegEx.create_from_string(
-				"const uint %s = (\\d+)u;" % name).search(retail_pass)
-		assert_not_null(device_mask, name)
-		if device_mask != null:
-			assert_eq(int(device_mask.get_string(1)) & expected_mask, 0, name)
-
-	var slot_shadow := _read(_repo_path("godot/src/env/slot_shadow.cpp"))
-	for token in ["camera->set_cull_mask(kCaptureLayerBits[i]);",
-			"viewport->set_transparent_background(true);",
-			"capture_environment->set_bg_color(Color(1.0f, 1.0f, 1.0f));",
-			"viewport->set_msaa_3d(Viewport::MSAA_4X);"]:
-		assert_true(slot_shadow.contains(token), token)
-
-	for output in ["output_opaque.gdshaderinc", "output_alpha.gdshaderinc"]:
-		assert_true(_normalized(OBJECT_ROOT.path_join(output)).contains(
-				"obj_is_slot_shadow_capture(CAMERA_VISIBLE_LAYERS,"), output)
+	assert_false(shared.contains("NOVA_SLOT_CAPTURE_LAYER_MASK"),
+			"the twelve-layer capture signature is retired")
+	assert_false(shared.contains("obj_is_slot_shadow_capture"),
+			"no wrapper predicate selects a capture camera")
 	var includes: Array = []
 	_collect(OBJECT_ROOT, PackedStringArray([".gdshaderinc"]), includes)
 	for path in includes:
-		assert_false(_normalized(path).contains("opennova_slot_shadow_capture"),
-				"%s reintroduced the per-fragment capture-eye gate" % String(path).get_file())
+		var source := _normalized(path)
+		var label := String(path).get_file()
+		assert_false(source.contains("obj_proj_shadow_coverage"),
+				"%s carries no PROJSHAD coverage sampler" % label)
+		assert_false(source.contains("OBJ_PROJSHAD_"),
+				"%s carries no PROJSHAD define" % label)
+		assert_false(source.contains("opennova_slot_shadow_capture"),
+				"%s reintroduced the per-fragment capture-eye gate" % label)
+	var wrappers: Array = []
+	_collect(OBJECT_ROOT, PackedStringArray([".gdshader"]), wrappers)
+	assert_gt(wrappers.size(), 100)
+	for path in wrappers:
+		assert_false(_read(path).contains("OBJ_PROJSHAD_"),
+				"%s carries no PROJSHAD define" % String(path).get_file())
+	var water_header := _read(_repo_path("godot/src/env/water.h"))
+	assert_false(water_header.contains("VISUAL_LAYER_SLOT_CAPTURE_MASK"),
+			"Water reserves no capture layers")
 
-
-func test_projshadow_capture_is_retail_black_over_the_white_clear() -> void:
-	# The live slot RT stores the fixed-function black silhouette itself.
-	for output in ["output_opaque.gdshaderinc", "output_alpha.gdshaderinc"]:
-		var source := _normalized(OBJECT_ROOT.path_join(output))
-		var head := "} else if (obj_is_slot_shadow_capture(CAMERA_VISIBLE_LAYERS,"
-		var start := source.find(head)
-		assert_gte(start, 0, "%s has the capture branch" % output)
-		if start < 0:
-			continue
-		var after := source.substr(start + head.length())
-		var stop := after.find("\n\t} else {")
-		assert_gte(stop, 0, "%s closes the capture branch" % output)
-		var capture := after.substr(0, stop) if stop >= 0 else after
-		assert_true(capture.contains("obj_apply_coverage(coverage);"), output)
-		assert_true(capture.contains("ALBEDO = vec3(0.0);"), output)
-		assert_false(capture.contains("obj_evaluate_surface"), output)
-		assert_false(capture.contains("capture_lit"), output)
+	var slot_shadow := _read(_repo_path("godot/src/env/slot_shadow.cpp"))
+	assert_false(slot_shadow.contains("set_cull_mask("),
+			"SlotShadow aims no camera at capture layers")
+	assert_false(slot_shadow.contains("SubViewport"),
+			"SlotShadow owns no capture viewport chain")
+	assert_true(slot_shadow.contains("SlotCaptureRequest"),
+			"SlotShadow publishes typed capture requests")
+	var adapter := _read(_repo_path("godot/src/render/slot_capture_adapter.cpp"))
+	for token in ["kSlotCaptureClearArgb",
+			"RenderingDevice::TEXTURE_SAMPLES_4",
+			"texture_resolve_multisample(",
+			"EFFECT_CALLBACK_TYPE_PRE_OPAQUE",
+			"object_projected_shadow_coverage(",
+			"object_projected_shadow_policy(",
+			"frag_color = vec4(0.0, 0.0, 0.0, alpha);",
+			"BLEND_FACTOR_SRC_ALPHA", "BLEND_FACTOR_ONE_MINUS_SRC_ALPHA"]:
+		assert_true(adapter.contains(token), token)
 
 
 # --- transitive-source golden -------------------------------------------

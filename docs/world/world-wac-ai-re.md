@@ -1042,9 +1042,15 @@ org0/org1/org2 *motor* split of §1.2). It builds the bone matrices
 
 Draws 5 and 6 are *both* additionally suppressed wholesale when the render-pass flag
 `numEntries & 0x10000000` is set. REN-3 identified that word as `Render_SubmitEntity`'s
-RENDER FLAGS argument and `0x10000000` as the **repeat-draw marker** — dual-LOD entities
-draw twice (far LOD, then near LOD with the flag set), so one-shot overlay children
-render once ([render-order-re.md](../render/render-order-re.md), submit-flags table).
+RENDER FLAGS argument; the 2026-08-29 D-RORD-11 witness corrected what the flag marks:
+it is the **second part of the two-model player avatar**, not a dual-LOD repeat draw.
+`Terrain_RenderSectorEntitiesBySide @ 0x5c7fea..0x5c8020` draws a composed avatar twice
+with the same projected radius, the HEAD model first (`@ 0x5c7ffc`, carrying draws 5
+and 6) and then the BODY model with the flag (`@ 0x5c8020`), so the one-shot overlay
+children render once per entity ([render-order-re.md](../render/render-order-re.md),
+submit-flags table). Every overlay model here draws at the parent's selected RLOD
+clamped to its own LOD count (`graphicModel[4]`, `@ 0x4e39c4..0x4e3e51`), never through
+a threshold walk of its own (`renderer::attachment_lod_index`).
 
 ### 13.2 The held-weapon submit (draw 5) and its predicate
 [orig: `BoneCallback_org0_World @ 0x4e3940`]

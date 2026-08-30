@@ -45,6 +45,7 @@
 #include "particle/particle_compositor.h"
 #include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
+#include "render/q3_source_registry.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
 #include "object/object_data.h"
@@ -142,6 +143,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);
+	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
 	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);
 	GDREGISTER_CLASS(WeatherCore);
@@ -245,6 +247,7 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ObjectShaderCache::destroy_singleton();
 	SlotShadow::cleanup_statics();
+	Q3SourceRegistry::cleanup_statics();
 }
 
 extern "C" {

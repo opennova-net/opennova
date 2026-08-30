@@ -44,6 +44,8 @@
 #pragma once
 
 #include <array>
+
+#include <runtime/renderer/direction_look_at.h>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -85,6 +87,28 @@ int grazing_slot_lod(int base_lod, float dir_y);
 // @ 0x5d783e..0x5d7871 — slot float24/float25].
 float silhouette_half_extent(float bound_radius_units);
 
+// The silhouette capture view. Retail builds a rotation-only D3D view from
+// the slot direction [orig: setup_shadow_cascade_matrices @ 0x58d300 ->
+// build_direction_look_at_matrix @ 0x612c90, the shared
+// renderer::direction_look_at frame in direction_look_at.h: forward =
+// normalize(dir), right = normalize(forward.z, 0, -forward.x), up = forward x
+// right; a vertical direction leaves right and up ZERO in retail and the
+// frame substitutes the world x axis, reported as degenerate]. The entity
+// renders at the origin of that view [orig: Entity_RenderWithLODCallback
+// @ 0x5d6ef0 zeroes the position for a null origin; children at their offset
+// from the parent @ 0x5d795a/0x5d79c8] under an orthographic projection of
+// scale 1/half_extent over the depth band 0.2..5000.2 [orig:
+// @ 0x58d38b..0x58d3a3 — 1/(far - near) = 0.0002, -near/(far - near) =
+// -0.00004]. As read, that band starts 0.2 u in front of the view origin the
+// entity sits at; the RenderingDevice pass in the shell places its own eye
+// and band around the model sphere (docs/render/render-lighting-re.md,
+// D-RLIT-10) — an orthographic silhouette is invariant under that
+// translation.
+using SlotCaptureBasis = DirectionLookAt<float>;
+SlotCaptureBasis silhouette_capture_basis(const std::array<float, 3> &direction);
+inline constexpr float kSilhouetteCaptureNear = 0.2f;     // @ 0x58d3a3
+inline constexpr float kSilhouetteCaptureFar = 5000.2f;   // @ 0x58d399
+
 // ---------------------------------------------------------------------------
 // Render-target chain and refresh cadence (the retail texture budget)
 // ---------------------------------------------------------------------------
@@ -94,6 +118,11 @@ float silhouette_half_extent(float bound_radius_units);
 // [orig: RenderSlot_InitTextureChain @ 0x5d5320].
 inline constexpr int kSlotTextureCount = 12;
 int slot_texture_size(int texture_order, int shadow_detail);
+// Each capture clears its RT to 0x00FFFFFF — white RGB, alpha 0 — before
+// the PROJSHAD black draws [orig: RenderSlot_RenderEntityAndChildren
+// @ 0x5d780f, GTexRT_SelectThunk with color_mask 0xFFFFFF]; the drape reads
+// the RGB, so a white texel is the no-shadow sample.
+inline constexpr uint32_t kSlotCaptureClearArgb = 0x00FFFFFFu;
 
 // Frame-skip cadence: a slot re-renders when
 // (frame & mask) == (slot_index & mask) or its dirty bit is set; mask = 7

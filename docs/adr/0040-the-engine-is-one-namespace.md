@@ -44,7 +44,7 @@ carrying the uniqueness load; nothing enforced it.
 
 1. **No Nova prefix anywhere.** Files, identifiers, macros, header guards,
    GDScript `class_name`s, preload aliases, autoloads (`MusicService`),
-   shader helper functions (`scene_output`, `is_q3_pass`, ...), and the
+   shader helper functions (`scene_output`, `terrain_fog_factor`, ...), and the
    C-linkage `gameprofile` set (`GameProfile`, `GameId`, `BootPhase`,
    `RequiredResource`, `ResourceSeverity`; enumerators `GAME_*`,
    `BOOT_PHASE_*`, `RES_*`). Survivors: `NovaWorld*` classes and the

@@ -251,16 +251,21 @@ function Test-GodotAppBoot {
     Write-Host "=== Boot smoke: $PackageName ==="
     $exeDir = Split-Path $ExePath -Parent
     $dllBeside = Join-Path $exeDir (Split-Path $SHIPPED_DLL -Leaf)
-    if (-not (Test-Path $dllBeside)) {
-        Copy-Item -LiteralPath $SHIPPED_DLL -Destination $dllBeside -Force
-    }
+    # The export directory survives repeated -SkipBuild validation runs. Always
+    # refresh the side-by-side extension so the smoke cannot execute a DLL from
+    # an earlier build while claiming to validate the current source tree.
+    Copy-Item -LiteralPath $SHIPPED_DLL -Destination $dllBeside -Force
 
     $stdoutLog = [System.IO.Path]::GetTempFileName()
     $stderrLog = [System.IO.Path]::GetTempFileName()
     try {
+        # Headless uses Godot's Dummy renderer, so a render loop cannot validate
+        # GPU work here. Disable it to keep --quit-after from racing render-server
+        # teardown while this smoke still loads the product scene, scripts,
+        # shaders, and GDExtension.
         $proc = Start-Process `
             -FilePath $ExePath `
-            -ArgumentList "--headless --quit-after 120 --verbose" `
+            -ArgumentList "--headless --disable-render-loop --quit-after 120 --verbose" `
             -NoNewWindow `
             -Wait `
             -PassThru `

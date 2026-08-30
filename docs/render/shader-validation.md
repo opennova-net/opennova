@@ -1,7 +1,7 @@
 # Shader validation contract
 
 The checked-in shader set is a closed inventory: 154 `.gdshader` entry points
-and 41 `.gdshaderinc` implementation files (195 resources total). The executable
+and 39 `.gdshaderinc` implementation files (193 resources total). The executable
 contract is `godot/shaders/provenance.json`, validated by
 `godot/tests/shader_resource_contract_test.gd` and
 `godot/tests/shader_provenance_pins_test.gd` (the textual contract) and by
@@ -86,13 +86,18 @@ Lighting validation is layered:
    swatches, never catalog screenshots.
 5. Four pass-class modes complete the auxiliary matrix: `clip` proves the
    above-water reflection plane plus NORMAL fallback/skinned skip behavior;
-   `projshadow` proves retail-black output over the white slot clear, every
-   Diffuse1/Diffuse2/AlphaGen coverage contract, and the capture-camera
-   cull-mask gate; `matchterrain` proves stance, page residency,
+   `projshadow` proves the render-slot RenderingDevice pass
+   (`SlotCaptureAdapter`): retail-black output over the white slot clear,
+   the Diffuse1/Diffuse2/AlphaGen coverage contracts at the alpha-test
+   discard boundary and through the alpha-blend variant's gray, the
+   additive-LUM and glass no-pass surfaces, and the beauty frame keeping
+   NORMAL shading where the capture is black (the synthetic 3DI fixtures
+   stand in for the technique matrix, which ctest
+   `renderer_material_classify` pins per technique); `matchterrain` proves stance, page residency,
    coverage, and the exact `2 * tile.rgb * (HemiSky + tile.a * DirLight)`
    combine; `glow` proves LUM NORMAL-copy, Glass's rotated two-lobe sun glint,
-   and every no-pass contract. The GLOW mode also asserts the native isolated
-   Q3 viewport, exact POT-floor capture, four weighted downsample taps, four
+   and every no-pass contract. The GLOW mode also asserts the typed focused-Q3
+   compiler/RenderingDevice target, resolved beauty depth, exact capture, four weighted downsample taps, four
    cardinal blur draws, 45-degree final average, and `SRCALPHA/ONE` composite.
    All run against Forward+ over D3D12.
 6. `render_swatch` mode `calibrate` proves the production terminal

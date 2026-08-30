@@ -1,5 +1,4 @@
 #include "res://shaders/color.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 #include "res://shaders/foliage_fd_sampling.gdshaderinc"
 
 // Expanded detail foliage. Retail emits the source model once per accepted
@@ -128,14 +127,6 @@ void fragment() {
 	if (u_high_pass_cutoff > 0.0 && retail_alpha > u_high_pass_cutoff) {
 		discard;
 	}
-	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		#ifdef NOVA_Q3_DEPTH_OCCLUDER
-		ALBEDO = vec3(0.0);
-		ALPHA = 1.0;
-		#else
-		discard;
-		#endif
-	} else {
 	vec4 tile = vec4(0.5, 0.5, 0.5, 1.0);
 	if (u_has_tile_cache && u_instance_tile_cache_ready) {
 		vec2 page_uv = v_tile_cache_uv;
@@ -193,5 +184,4 @@ void fragment() {
 	// D3D fog folds into the source color before blending, so the blended
 	// weight is exactly the retail SRCALPHA term.
 	ALPHA = clamp(retail_alpha, 0.0, 1.0);
-	}
 }

@@ -625,6 +625,47 @@ func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 			"disabling the probe releases the native timer through the same seam")
 
 
+func test_perf_counters_estimate_the_retained_instance_uniform_geometry() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	var idle: Dictionary = world.get_runtime_perf_counters().get(
+			"instance_uniform_geometry_estimate", {})
+	assert_eq(int(idle.get("budget", 0)),
+			int(ProjectSettings.get_setting(
+					"rendering/limits/global_shader_variables/buffer_size", 0)) / 16,
+			"the budget is the project's buffer_size in 16-value geometry slots")
+	assert_eq(int(idle.get("total", -1)),
+			int(idle.get("foliage_pool", 0)) + int(idle.get("static_populations", 0))
+			+ int(idle.get("object_geometry", 0)),
+			"the total is the sum of the three shell-owned terms")
+
+	# An authored building places a real ObjectModel (house.3di as GuardTwr1):
+	# its retained surface instances are the object term of the estimate.
+	var root_dir := _stage_building_fixture("instance_uniform_estimate")
+	var before_load := int(ObjectModel.get_live_geometry_instance_count())
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
+		mission.add_entity(
+				MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))
+	var loaded: Dictionary = world.get_runtime_perf_counters().get(
+			"instance_uniform_geometry_estimate", {})
+	var placement: Dictionary = world.get_runtime_perf_counters().get(
+			"mission_placement", {})
+	assert_eq(int(loaded.get("static_populations", -1)),
+			int(placement.get("batches", 0)) + int(placement.get("static_shadow_batches", 0)),
+			"static populations count the placer's visible batches and shadow twins")
+	assert_gt(int(loaded.get("object_geometry", 0)), before_load,
+			"the placed building's ObjectModel retains instance-uniform geometry")
+	assert_eq(int(loaded.get("object_geometry", -1)),
+			int(ObjectModel.get_live_geometry_instance_count()),
+			"the object term is the live ObjectModel surface-instance count")
+	assert_lte(int(loaded.get("total", 0)), int(loaded.get("budget", 0)),
+			"the minimal mission stays inside the instance-uniform budget")
+	world.unload()
+	await get_tree().process_frame
+	assert_eq(int(ObjectModel.get_live_geometry_instance_count()), before_load,
+			"unloading the mission retires every surface instance it counted")
+
+
 func test_tick_gates_the_runtime_on_its_transport() -> void:
 	# The game shell's tick must respect inmatch::Session state - the debug
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
@@ -3357,3 +3398,48 @@ func _write_bytes(path: String, bytes: PackedByteArray) -> void:
 # The shared PFF3 fixture writer (TestPff.write), asserted here.
 func _write_pff(path: String, entries: Array) -> void:
 	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
+
+
+# Stage the minimal fixture plus the armory.3di fixture (authored OOBJ
+# records) as item 102001's GuardTwr1 graphic, so the placed building builds
+# authored occluders.
+func _stage_occluder_building_fixture(name: String) -> String:
+	var root_dir := _stage_minimal_fixture(name)
+	assert_eq(DirAccess.copy_absolute(
+			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/armory.3di"),
+			root_dir.path_join("GuardTwr1.3di")), OK)
+	_append_building_item(root_dir)
+	return root_dir
+
+
+func test_world_owns_the_occlusion_culling_switch() -> void:
+	# Godot's occlusion consumer is a world-level decision (docs/render/
+	# render-occlusion-re.md "Conservative device occluders"): off by default
+	# (the pass costs more than it culls under the retail section verdict),
+	# switched on live through the world's typed toggle only for an RD-backed
+	# viewport, and reset by a load and an unload. No ObjectModel flips it.
+	var root_dir := _stage_occluder_building_fixture("occl_switch")
+	var world := _make_world()
+	add_child_autofree(world)
+	var viewport := world.get_viewport()
+	viewport.use_occlusion_culling = true
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
+		mission.add_entity(
+				MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))
+	var stats: Dictionary = world.get_mission_stats()
+	assert_gt(int(stats.get("authored_occluder_models", 0)), 0,
+			"the armory building placed authored occluders")
+	assert_eq(world.get_authored_occluder_model_count(),
+			int(stats.get("authored_occluder_models", 0)),
+			"the debug row reads the placed occluder count from the world")
+	assert_false(viewport.use_occlusion_culling,
+			"a load re-applies the default: the consumer stays off")
+	assert_false(world.is_occlusion_culling_enabled())
+	var rd_backed := RenderingServer.get_rendering_device() != null
+	world.set_occlusion_culling_enabled(true)
+	assert_eq(viewport.use_occlusion_culling, rd_backed,
+			"the toggle switches the consumer on only for an RD-backed viewport")
+	assert_eq(world.is_occlusion_culling_enabled(), rd_backed)
+	world.unload()
+	assert_false(viewport.use_occlusion_culling,
+			"unload switches the consumer off for the next mission")

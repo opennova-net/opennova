@@ -217,26 +217,52 @@ func test_provenance_contracts_are_reviewable_and_citations_resolve_to_docs() ->
 
 func test_environment_cube_capture_is_live_and_highest_quality() -> void:
 	var shared := _read(OBJECT_ROOT.path_join("shared.gdshaderinc"))
+	var engine_header := _read_repo("engine/runtime/renderer/environment_cube.h")
 	var capture_header := _read_repo("godot/src/env/environment_cube_capture.h")
 	var capture_source := _read_repo("godot/src/env/environment_cube_capture.cpp")
+	var blit_source := _read_repo("godot/src/render/environment_cube_blit.cpp")
 	var water := _read(SHADER_ROOT.path_join("water.gdshader"))
 	var project := _read("res://project.godot")
 
-	_contains_all(capture_header, ["kCaptureSize = 256", "kRefreshFrames = 128", "kSkyDimByte = 0x60"],
-			"the capture header")
+	# The witnessed facts live in the engine header (ADR 0042); the capture
+	# node consumes them and never re-derives a number.
+	_contains_all(engine_header, [
+		"kEnvironmentCubeFaceSize = 256", "kEnvironmentCubeRefreshFrames = 128",
+		"kEnvironmentCubeDimByte = 0x60", "kEnvironmentCubeFaceFovDegrees = 90.0f",
+		"kEnvironmentCubeFaceNear = 0.5f", "kEnvironmentCubeFaceFar = 1000.0f",
+		"kEnvironmentCubeEyeRaise = 1.0f", "kEnvironmentCubeTerrainClearance = 10.0f",
+		"update_environment_cubemap @ 0x6106a0", "GTexture_RenderCubeMapFace @ 0x6864d0",
+	], "the engine environment-cube header")
+	_contains_all(capture_header, [
+		"kCaptureSize =", "opennova::renderer::kEnvironmentCubeFaceSize",
+		"kRefreshFrames =", "opennova::renderer::kEnvironmentCubeRefreshFrames",
+		"kSkyDimByte =", "opennova::renderer::kEnvironmentCubeDimByte",
+	], "the capture header")
 	_contains_all(capture_source, [
-		"camera->set_fov(90.0f)", "camera->set_near(0.5f)", "camera->set_far(1000.0f)",
-		"terrain_y + 10.0f", "capture_origin_.y += 1.0f",
+		"camera->set_fov(opennova::renderer::kEnvironmentCubeFaceFovDegrees)",
+		"camera->set_near(opennova::renderer::kEnvironmentCubeFaceNear)",
+		"camera->set_far(opennova::renderer::kEnvironmentCubeFaceFar)",
+		"opennova::renderer::environment_cube_eye_height(",
+		"opennova::renderer::environment_cube_refresh_due(",
 		"Water::VISUAL_LAYER_ENVIRONMENT_CAPTURE", "camera->set_compositor(capture_compositor)",
+		"call_on_render_thread", "set_texture_rd_rid(cube)",
 	], "the capture source")
-	assert_false(capture_source.contains("image->linear_to_srgb()"))
+	# No CPU readback, Image or Cubemap resource: the faces reach the
+	# published RD cubemap through the RenderingDevice copy leg, which
+	# applies the engine's dim-byte product in integer shader math.
+	assert_false(capture_source.contains("get_image("))
+	assert_false(capture_source.contains("linear_to_srgb"))
+	_contains_all(blit_source, [
+		"RenderingDevice::TEXTURE_TYPE_CUBE", "DATA_FORMAT_R8G8B8A8_UNORM",
+		"(bytes * pc.dim_byte + 127u) / 255u",
+	], "the environment cube blit")
 	_contains_all(shared, [
 		"global uniform samplerCube opennova_environment_cube",
 		"texture(opennova_environment_cube, direction)",
 		"pow(aligned, 800.0)", "pow(aligned, 40.0)", "static_lobe * opennova_sun_light * 2.0",
 	], "object/shared.gdshaderinc")
 	# The six capture cameras cull to the aliased water layer ALONE, so water
-	# rejects them by exact camera mask (is_q3_pass pattern), never by a
+	# rejects them by exact camera mask, never by a
 	# stale capture-origin distance.
 	assert_true(water.contains("NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u"))
 	assert_true(water.contains("CAMERA_VISIBLE_LAYERS == NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK"))
@@ -888,7 +914,7 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 	_contains_all(frame_renderer, [
 		"FramePass::GammaDecode", "EFFECT_CALLBACK_TYPE_POST_TRANSPARENT",
 		"framebuffer_blend_domain\"] = \"gamma\"",
-		"kBeautyCameraMask = 0x00018C01u", "kQ3CameraMask = 0x00010401u",
+		"kBeautyCameraMask = 0x00018C01u",
 		"DATA_FORMAT_R8G8B8A8_UNORM", "direction_for_degrees(30.0f, 1.0f / 1024.0f)",
 		"1.0f / 2048.0f", "* 0.50", "* 0.46", "* 0.35", "* 0.19",
 		"Vector2i(kFrameFxSide, kFrameFxSide), 90.0f", "Vector2i(kFrameFxSide, kFrameFxSide), 0.0f",
@@ -896,6 +922,75 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		"BlendMode::SourceAlphaAdd, FramePass::FinalAverage",
 		"result[\"capture_filter\"] = \"linear_rgba8_highest_quality\"",
 	], "frame_fx.cpp")
+	assert_false(frame_renderer.contains("kQ3CameraMask"),
+			"the typed Q3 adapter is the sole focused renderer")
+	var q3_adapter := _read_repo("godot/src/render/q3_frame_adapter.cpp")
+	_contains_all(q3_adapter, [
+		"glsl_float(kQ3GlassWhiteLobeGain)",
+		"glsl_float(kQ3GlassWhiteLobePower)",
+		"glsl_float(kQ3GlassWarmLobeColor[1])",
+		"glsl_float(kQ3GlassWarmLobePower)",
+		"glsl_float(kQ3WaterNvLumaWeights[0])",
+		"glsl_float(kQ3WaterNvBrightBias)",
+		"pow(aligned, @GLASS_WHITE_POWER@)",
+		"pow(aligned, @GLASS_WARM_POWER@)",
+		"const Vector3 light_gain = frame->light_gain",
+		"runtime/renderer/device_fog.h",
+		"float q3_fog_visibility(float dist, float fog_start, float fog_end,",
+		"4.1588830833596715 / safe_end",
+		"const float fog_start = frame->fog_start;",
+		"fog_visibility",
+		"coverage > pc.params.z",
+		"pc.draw_color.rgb * lobe * fog_visibility",
+		"texture(secondary_texture, detail_uv).rgb * 2.0",
+		"vec3 lit = base * pc.draw_color.rgb;",
+		"frag_color = vec4(clamp(fogged, 0.0, 1.0), 0.0);",
+		"draw.object.self_lum_color.x * std::min(light_gain.x, 1.0f) * 2.0f",
+		"view_dot_sq * view_dot_sq",
+		"model_uniform_scale",
+		"glsl_float(1.0f - kQ3FarBandMaxZ)",
+		"glsl_float(kQ3FarBandMaxZ - kQ3FarBandMinZ)",
+		"(@FAR_BAND_REV_MIN@ + z_rev * @FAR_BAND_REV_SPAN@)",
+		"depth->set_enable_depth_test(true)",
+		"classification.is_two_sided",
+		"fallback_pixel.ptrw()[0] = 255",
+		"(in_position - pc.camera_local.xyz) * (1.0 - 3.0e-4)",
+		"case ObjectBlendMode::Additive:",
+		"Q3DeviceBlend::Add",
+		"result[\"q3_sun_depth_test\"] = true",
+		"result[\"q3_far_band\"] = Vector2(kQ3FarBandMinZ, kQ3FarBandMaxZ)",
+		"cache.acquire(request",
+		"result[\"q3_readbacks_this_frame\"]",
+		"result[\"q3_instance_row_reads_this_frame\"]",
+		"result[\"q3_records_touched_this_frame\"]",
+		"request.geometry_generation = record.geometry_generation",
+		"Q3SourceRegistry::live_records()",
+		"frustum.outside(row.world_bounds)",
+	], "q3_frame_adapter.cpp")
+	# The per-source records: the material block is read through the
+	# material only when its parameter version moved, the MultiMesh rows
+	# once per instance generation, and the producer-published arrays ride
+	# the record.
+	var q3_registry := _read_repo("godot/src/render/q3_source_registry.cpp")
+	_contains_all(q3_registry, [
+		"\"u_rgb_mod\"",
+		"object.self_lum_color = {self_lum.x, self_lum.y, self_lum.z, 1.0f}",
+		"object.detail_texture = lease_for(detail)",
+		"glare_view_fade = bool_parameter",
+		"r_surface.parameter_version == version",
+		"rows_generation != r_record.instance_generation",
+		"++r_counters.instance_row_reads",
+		"callable_mp_static(&Q3SourceRegistry::on_visibility_changed)",
+	], "q3_source_registry.cpp")
+	# The interleaved Q3 stream (with the detail UV2 row) is packed once per
+	# cache entry generation, never re-read through the server per frame.
+	var q3_cache := _read_repo("godot/src/render/q3_geometry_cache.cpp")
+	_contains_all(q3_cache, [
+		"Mesh::ARRAY_TEX_UV2",
+		"++counters_.readbacks",
+		"++counters_.instance_row_reads",
+		"kQ3VertexStride",
+	], "q3_geometry_cache.cpp")
 
 	# The first-person viewmodel draws inside the beauty pass through the
 	# shader-side renderfov projection + depth band; no composite shader.

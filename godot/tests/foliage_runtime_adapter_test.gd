@@ -55,6 +55,142 @@ func _camera_xform() -> Transform3D:
 	return Transform3D(Basis(), Vector3(0.0, 10.0, 0.0))
 
 
+func _backend_draws(tier := "") -> Array:
+	var report: Dictionary = _dispatcher.get_backend_report()
+	var rows: Array = []
+	for row_value in report.get("draws", []):
+		var row := row_value as Dictionary
+		if not bool(row.get("visible", false)):
+			continue
+		if not tier.is_empty() and String(row.get("tier", "")) != tier:
+			continue
+		rows.append(row)
+	return rows
+
+
+func test_draw_backend_uses_retained_rendering_server_instances() -> void:
+	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform())
+
+	var report: Dictionary = _dispatcher.get_backend_report()
+	assert_eq(String(report.get("backend", "")), "rendering_server_rid")
+	assert_gt(int(report.get("pool_size", 0)), 0,
+		"Visible draw-list rows must own retained scenario instances.")
+	assert_gt(int(report.get("visible_draws", 0)), 0)
+	assert_eq(report.get("visible_draws", -1), report.get("active_draws", -2))
+	assert_gt((report.get("draws", []) as Array).size(), 0)
+
+	var draw_nodes := 0
+	for child in _dispatcher.get_children():
+		if child is MeshInstance3D:
+			draw_nodes += 1
+	assert_eq(draw_nodes, 0,
+		"The replacement backend must not retain a MeshInstance3D fallback.")
+
+	var pool_size := int(report.get("pool_size", 0))
+	_dispatcher.render_preview(_camera_xform())
+	var steady := _dispatcher.get_backend_report()
+	assert_eq(int(steady.get("pool_size", -1)), pool_size,
+		"A steady draw list must retain the same scenario instances.")
+	assert_eq(int(steady.get("instance_creates", -1)), 0)
+	assert_eq(int(steady.get("scenario_writes", -1)), 0)
+	assert_eq(int(steady.get("configuration_writes", -1)), 0)
+	assert_eq(int(steady.get("base_writes", -1)), 0)
+	assert_eq(int(steady.get("material_writes", -1)), 0)
+	assert_eq(int(steady.get("material_parameter_writes", -1)), 0)
+	assert_eq(int(steady.get("visibility_writes", -1)), 0)
+	assert_gt(int(steady.get("uniform_writes", 0)), 0,
+		"Only retail's advancing wind clock should touch a stable visible draw.")
+
+
+func test_probe_draw_control_targets_retained_draws_by_public_pass_identity() -> void:
+	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform())
+	var before := _dispatcher.get_backend_report()
+	assert_gt(int(before.get("visible_draws", 0)), 0)
+	var before_high_fades := {}
+	var expected_fade_min := INF
+	var expected_fade_max := -INF
+	for row_value in before.get("draws", []):
+		var row := row_value as Dictionary
+		if bool(row.get("visible", false)) \
+				and String(row.get("tier", "")) == "detail" \
+				and String(row.get("pass", "")) == "high":
+			var fade := float(row.get("fade", 0.0))
+			before_high_fades[int(row.get("order", -1))] = fade
+			expected_fade_min = minf(expected_fade_min, fade)
+			expected_fade_max = maxf(expected_fade_max, fade)
+	assert_gt(before_high_fades.size(), 0)
+
+	var control: Dictionary = _dispatcher.apply_probe_draw_control(
+			FoliageDispatcher.PROBE_DRAW_DETAIL_HIGH,
+			true, false, 0.0, -0.125)
+	assert_gt(int(control.get("kept", 0)), 0)
+	assert_almost_eq(float(control.get("fade_min", 0.0)),
+			expected_fade_min, 0.000001)
+	assert_almost_eq(float(control.get("fade_max", 0.0)),
+			expected_fade_max, 0.000001)
+
+	var visible := _backend_draws()
+	assert_eq(visible.size(), int(control.get("kept", -1)))
+	for row_value in visible:
+		var row := row_value as Dictionary
+		assert_eq(String(row.get("tier", "")), "detail")
+		assert_eq(String(row.get("pass", "")), "high")
+		assert_almost_eq(float(row.get("wind_phase", -1.0)), 0.0, 0.000001)
+		var before_fade := float(before_high_fades.get(
+				int(row.get("order", -1)), -1.0))
+		assert_almost_eq(float(row.get("fade", 0.0)),
+				maxf(before_fade - 0.125, 0.0), 0.000001)
+
+	# Pinning all retained draws must not isolate or otherwise change admission.
+	_dispatcher.render_preview(_camera_xform())
+	var restored := _dispatcher.get_backend_report()
+	_dispatcher.apply_probe_draw_control(
+			FoliageDispatcher.PROBE_DRAW_ALL,
+			false, false, 0.0, 0.0)
+	var pinned := _dispatcher.get_backend_report()
+	assert_eq(pinned.get("visible_draws", -1), restored.get("visible_draws", -2))
+	for row_value in pinned.get("draws", []):
+		var row := row_value as Dictionary
+		if bool(row.get("visible", false)):
+			assert_almost_eq(float(row.get("wind_phase", -1.0)), 0.0, 0.000001)
+
+
+func test_backend_visibility_tracks_dispatcher_without_dropping_bindings() -> void:
+	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform())
+	var shown := _dispatcher.get_backend_report()
+	assert_gt(int(shown.active_draws), 0)
+
+	_dispatcher.visible = false
+	var hidden := _dispatcher.get_backend_report()
+	assert_eq(int(hidden.visible_draws), 0)
+	assert_eq(hidden.active_draws, shown.active_draws,
+		"Hiding foliage must retain its draw-list bindings and placement caches.")
+
+	_dispatcher.visible = true
+	var restored := _dispatcher.get_backend_report()
+	assert_eq(restored.visible_draws, restored.active_draws)
+
+
+func test_backend_recreates_retained_instances_after_world_exit() -> void:
+	_dispatcher.render_preview(_camera_xform())
+	_dispatcher.render_preview(_camera_xform())
+	assert_gt(int(_dispatcher.get_backend_report().pool_size), 0)
+
+	var parent := _dispatcher.get_parent()
+	parent.remove_child(_dispatcher)
+	assert_eq(int(_dispatcher.get_backend_report().pool_size), 0,
+		"Leaving a World3D must release every scenario instance.")
+	parent.add_child(_dispatcher)
+	_dispatcher.render_preview(_camera_xform())
+	var rebound := _dispatcher.get_backend_report()
+	assert_true(bool(rebound.scenario_bound))
+	assert_gt(int(rebound.pool_size), 0)
+	assert_gt(int(rebound.instance_creates), 0)
+
+
 func test_render_tiers_use_distinct_foliage_sampler_callbacks() -> void:
 	_dispatcher.detail_foliage_sampler = Callable(self, "_sample_detail_only")
 	_dispatcher.foliage_sampler = Callable(self, "_sample_model_only")
@@ -103,28 +239,26 @@ func test_detail_preview_uses_foliage_map() -> void:
 	assert_gt(int(stats.detail_mesh_uploads), 0)
 	assert_eq(int(stats.terrain_scene_counter), 2)
 
-	var found_draw := false
-	for child in _dispatcher.get_children():
-		if not child.name.begins_with("FoliageDetailDraw") or not child.visible:
-			continue
-		found_draw = true
-		assert_almost_eq(float(child.get_instance_shader_parameter("u_wind_phase")), 0.002, 0.000001)
-		var alpha_ref := float(child.get_instance_shader_parameter("u_alpha_ref"))
+	var draws := _backend_draws("detail")
+	for draw_value in draws:
+		var draw := draw_value as Dictionary
+		assert_almost_eq(float(draw.wind_phase), 0.002, 0.000001)
+		var alpha_ref := float(draw.alpha_reference)
 		assert_true(
 			is_equal_approx(alpha_ref, 180.0 / 255.0) or is_equal_approx(alpha_ref, 8.0 / 255.0),
 			"Each resident cell draw carries its current pass alpha reference."
 		)
-		assert_eq(child.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+		assert_false(bool(draw.casts_shadows),
 			"Fresh retail audit confirms both foliage tiers are absent from shadow passes.")
-		assert_eq(child.layers & Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
+		assert_eq(int(draw.layer_mask) & Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
 			"an alpha-blind catcher must not darken whole foliage cards")
-		var material := child.material_override as ShaderMaterial
+		var material := draw.material as ShaderMaterial
 		assert_not_null(material)
 		if material != null:
 			var shadow_receiver := material.next_pass as ShaderMaterial
 			assert_null(shadow_receiver,
 				"foliage waits for the alpha-aware retail tile-cache compositor")
-	assert_true(found_draw)
+	assert_gt(draws.size(), 0)
 
 func test_aerial_preview_rejects_detail_cells_beyond_retail_3d_distance() -> void:
 	var aerial_camera := Transform3D(Basis(), Vector3(0.0, 747.0, 0.0))
@@ -147,13 +281,12 @@ func test_preview_altitude_distance_drives_detail_alpha_fade() -> void:
 
 	var half_fade_draws := 0
 	var found_secondary_cutoff := false
-	for child in _dispatcher.get_children():
-		if not child.name.begins_with("FoliageDetailDraw") or not child.visible:
-			continue
-		var fade := float(child.get_instance_shader_parameter("u_fade"))
+	for draw_value in _backend_draws("detail"):
+		var draw := draw_value as Dictionary
+		var fade := float(draw.fade)
 		if is_equal_approx(fade, 0.5):
 			half_fade_draws += 1
-			var cutoff := float(child.get_instance_shader_parameter("u_high_pass_cutoff"))
+			var cutoff := float(draw.high_pass_cutoff)
 			if is_equal_approx(cutoff, 180.0 / 255.0):
 				found_secondary_cutoff = true
 	assert_gt(half_fade_draws, 1,
@@ -166,23 +299,16 @@ func test_near_detail_submits_high_then_exact_low_secondary() -> void:
 	_dispatcher.render_preview(_camera_xform())
 	_dispatcher.render_preview(_camera_xform())
 	var stats := _dispatcher.get_frame_stats()
-	var visible_draws: Array[MeshInstance3D] = []
-	for child in _dispatcher.get_children():
-		if (
-			child is MeshInstance3D
-			and child.name.begins_with("FoliageDetailDraw")
-			and child.visible
-		):
-			visible_draws.append(child)
+	var visible_draws := _backend_draws("detail")
 	assert_eq(visible_draws.size(), int(stats.detail_cache_submissions),
 		"Every portable detail submission must remain a distinct reimpl draw.")
 
 	var found_ordered_pair := false
 	for index in range(visible_draws.size() - 1):
-		var high := visible_draws[index]
-		var low := visible_draws[index + 1]
-		var high_material := high.material_override as ShaderMaterial
-		var low_material := low.material_override as ShaderMaterial
+		var high := visible_draws[index] as Dictionary
+		var low := visible_draws[index + 1] as Dictionary
+		var high_material := high.material as ShaderMaterial
+		var low_material := low.material as ShaderMaterial
 		if high_material == null or low_material == null:
 			continue
 		var high_code := high_material.shader.code
@@ -195,9 +321,9 @@ func test_near_detail_submits_high_then_exact_low_secondary() -> void:
 		found_ordered_pair = true
 		assert_same(high.mesh, low.mesh,
 			"The LOW secondary must reuse the exact HIGH resident geometry.")
-		assert_almost_eq(float(high.get_instance_shader_parameter("u_alpha_ref")),
+		assert_almost_eq(float(high.alpha_reference),
 			180.0 / 255.0, 0.000001)
-		assert_almost_eq(float(low.get_instance_shader_parameter("u_alpha_ref")),
+		assert_almost_eq(float(low.alpha_reference),
 			8.0 / 255.0, 0.000001)
 		assert_true(high_code.contains("depth_draw_always"),
 			"The first near pass writes depth for alpha-test survivors.")
@@ -311,13 +437,12 @@ func test_silhouette_uses_foliage_map_and_view_depth() -> void:
 	assert_gt(int(far_stats.runtime_silhouette_intents), 0,
 		"A foliagemap match at view depth >= 38 emits silhouettes.")
 	var found_model_draw := false
-	for child in _dispatcher.get_children():
-		if not child.name.begins_with("FoliageModelDraw") or not child.visible:
-			continue
+	for draw_value in _backend_draws("silhouette"):
+		var draw := draw_value as Dictionary
 		found_model_draw = true
-		assert_eq(child.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+		assert_false(bool(draw.casts_shadows),
 			"Retail does not invoke the MODEL pass while rendering shadows.")
-		var material := child.material_override as ShaderMaterial
+		var material := draw.material as ShaderMaterial
 		assert_not_null(material)
 		var shader_code := material.shader.code
 		assert_true(shader_code.contains("blend_add"),
@@ -337,11 +462,8 @@ func test_silhouette_uses_foliage_map_and_view_depth() -> void:
 	assert_eq(int(near_stats.silhouette_anchors_visible), 0)
 	assert_eq(int(near_stats.runtime_silhouette_intents), 0,
 		"Anchors shall not enter the silhouette tier before view depth 38.")
-	for child in _dispatcher.get_children():
-		if child.name.begins_with("FoliageModelDraw"):
-			assert_false(child.visible)
-			assert_null(child.mesh,
-				"Unused draw nodes must release meshes when no longer submitted.")
+	assert_eq(_backend_draws("silhouette").size(), 0,
+		"Unused draw instances must release meshes when no longer submitted.")
 
 
 func test_preview_does_not_manufacture_silhouette_anchors() -> void:
@@ -360,6 +482,8 @@ func test_reset_clears_render_batches() -> void:
 	_dispatcher.reset()
 	assert_eq(_dispatcher.get_total_instances(), 0)
 	assert_eq(int(_dispatcher.get_frame_stats().terrain_scene_counter), 0)
+	assert_eq(int(_dispatcher.get_backend_report().pool_size), 0,
+		"Reset must release every retained RenderingServer RID.")
 
 
 func test_detail_mesh_cache_reuses_resident_geometry() -> void:

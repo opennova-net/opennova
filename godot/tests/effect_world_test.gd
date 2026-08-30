@@ -547,6 +547,22 @@ func test_render_now_submits_a_freshly_advanced_warm_snapshot() -> void:
 			"the public warm facade synchronously submits non-empty material runs")
 
 
+func test_runtime_renderer_release_is_explicit_and_idempotent() -> void:
+	var world := _make_world()
+	await get_tree().process_frame
+	world.release_runtime_renderer_resources()
+	world.release_runtime_renderer_resources()
+	var report := world.get_debug_draw_list_report()
+	for key in [
+		"world_far_backend", "world_camera_backend",
+		"reflection_far_backend", "reflection_camera_backend",
+	]:
+		assert_true(bool((report.get(key, {}) as Dictionary).get("shutdown", false)),
+				"%s is retired before EffectWorld leaves the tree" % key)
+	assert_engine_error_count(0,
+			"explicit particle renderer release remains clean and idempotent")
+
+
 func test_empty_catalog_warm_cleans_pipeline_helpers() -> void:
 	var world := _make_world()
 	assert_eq(_warm_helper_count(world), 0)

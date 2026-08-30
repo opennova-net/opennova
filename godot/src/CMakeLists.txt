@@ -77,7 +77,13 @@ add_library(${TARGET_NAME} SHARED
     particle/effect_scene.cpp
     particle/particle_compositor.cpp
     particle/particle_renderer.cpp
+    render/environment_cube_blit.cpp
     render/frame_fx.cpp
+    render/object_lod_frame.cpp
+    render/q3_frame_adapter.cpp
+    render/q3_geometry_cache.cpp
+    render/q3_source_registry.cpp
+    render/slot_capture_adapter.cpp
     object/entity_index.cpp
     object/object_model.cpp
     object/object_model_anim.cpp

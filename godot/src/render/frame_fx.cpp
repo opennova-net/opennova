@@ -1,7 +1,11 @@
 #include "render/frame_fx.h"
+#include "render/q3_frame_adapter.h"
+#include "render/q3_source_registry.h"
+#include "render/rd_fullscreen.h"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -13,7 +17,8 @@
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/compositor.hpp>
-#include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/geometry_instance3d.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
 #include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
@@ -30,9 +35,7 @@
 #include <godot_cpp/classes/render_scene_buffers_rd.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
-#include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/viewport.hpp>
-#include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -52,17 +55,9 @@ namespace {
 // are unwitnessed, D-RORD-10). That gives shaders a collision-free exact-mask
 // signature without admitting caster or slot-capture geometry anywhere.
 constexpr std::uint32_t kBeautyCameraMask = 0x00018C01u;
-constexpr std::uint32_t kQ3CameraMask = 0x00010401u;
-// FrameFX's working size: the 256-square blur targets, and the height of the
-// shared-world Q3 view. Retail draws its Q3 flush into a backbuffer-sized
-// altbuffer only because D3D9 keeps the beauty depth buffer bound there;
-// the sole consumer of that surface is a StretchRect into a power-of-two
-// capture that feeds the 256-square kernel (the altbuffer/capture witnesses
-// ride D-RORD-10 in docs/render/render-order-re.md). Godot cannot share the
-// beauty depth with a second view, so the Q3 view re-rasterizes depth
-// occluders; it therefore renders at the kernel's own working height (beauty
-// aspect preserved, 8x MSAA standing in for the StretchRect box filter)
-// instead of at full resolution.
+// FrameFX's 256-square blur target size. Focused Q3 is rendered at beauty
+// resolution into the compositor's color attachment with resolved beauty
+// depth attached; this constant applies only after the capture stretch.
 constexpr std::uint32_t kFrameFxSide = 256u;
 constexpr std::uint32_t kPushConstantBytes = 48u;
 constexpr float kPi = 3.14159265358979323846f;
@@ -81,16 +76,6 @@ enum class BlendMode : std::uint8_t {
 	Add = 1,
 	SourceAlphaAdd = 2,
 };
-
-const char *kFrameVertexShader = R"GLSL(#version 450
-void main() {
-	const vec2 positions[3] = vec2[3](
-			vec2(-1.0, -1.0),
-			vec2(3.0, -1.0),
-			vec2(-1.0, 3.0));
-	gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-}
-)GLSL";
 
 const char *kFrameFragmentShader = R"GLSL(#version 450
 layout(set = 0, binding = 0) uniform sampler2D source_color;
@@ -257,9 +242,12 @@ public:
 
 	struct ViewTarget {
 		RID color;
+		RID depth;
 		RID color_framebuffer;
 		RID scene_scratch;
 		RID scene_scratch_framebuffer;
+		RID q3_color;
+		RID q3_framebuffer;
 		RID capture;
 		RID capture_framebuffer;
 		RID low_a;
@@ -272,19 +260,11 @@ public:
 		RID low_a_uniform;
 		RID low_b_uniform;
 		RID q3_uniform;
-		RID q3_rd_texture;
-		Vector2i q3_size;
 		Vector2i size;
 		Vector2i capture_size;
 	};
 
-	mutable std::mutex source_mutex;
-	RID q3_server_texture;
-	// The render-thread view of the Q3 source: the server RID it was resolved
-	// from and the RenderingDevice texture behind it. Re-resolved only when the
-	// source changes or the dependent uniform set is invalidated.
-	RID q3_resolved_server_texture;
-	RID q3_resolved_rd_texture;
+	Q3FrameAdapter q3_adapter;
 	mutable std::mutex diagnostics_mutex;
 	std::string status = "waiting_for_frame";
 	std::string failure;
@@ -296,6 +276,7 @@ public:
 	Vector2i last_size;
 	Vector2i last_capture_size;
 	bool q3_sampled = false;
+	std::atomic<bool> shutdown_requested{false};
 
 	RenderingDevice *rd = nullptr;
 	RID shader;
@@ -306,23 +287,16 @@ public:
 	PackedByteArray push_constants;
 	PackedColorArray clear_black;
 
-	~Impl() { release_all(); }
+	// RenderingServer owns the RenderingDevice. FrameFx::shutdown() releases
+	// live RIDs explicitly; destruction can occur after server teardown and must
+	// not query or call through that process-owned singleton.
+	~Impl() = default;
 
 	void set_failure(const std::string &reason,
 			const std::string &next_status = "failed") {
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
 		status = next_status;
 		failure = reason;
-	}
-
-	RID source_snapshot() const {
-		std::lock_guard<std::mutex> lock(source_mutex);
-		return q3_server_texture;
-	}
-
-	void set_source(const RID &texture) {
-		std::lock_guard<std::mutex> lock(source_mutex);
-		q3_server_texture = texture;
 	}
 
 	void release_rid(RID &rid) {
@@ -367,11 +341,13 @@ public:
 		release_framebuffer(target.low_a_framebuffer);
 		release_framebuffer(target.capture_framebuffer);
 		release_framebuffer(target.scene_scratch_framebuffer);
+		release_framebuffer(target.q3_framebuffer);
 		release_framebuffer(target.color_framebuffer);
 		release_texture(target.low_b);
 		release_texture(target.low_a);
 		release_texture(target.capture);
 		release_texture(target.scene_scratch);
+		release_texture(target.q3_color);
 		target = ViewTarget();
 	}
 
@@ -385,6 +361,7 @@ public:
 	void release_all() {
 		RenderingServer *server = RenderingServer::get_singleton();
 		rd = server != nullptr ? server->get_rendering_device() : nullptr;
+		q3_adapter.release_device(rd);
 		release_targets();
 		for (auto &entry : pipelines)
 			release_pipeline(entry.second);
@@ -395,12 +372,11 @@ public:
 
 	bool initialize_rd();
 	RID make_texture(const Vector2i &size,
-			RenderingDevice::DataFormat format);
+			RenderingDevice::DataFormat format, bool readback = false);
 	RID make_framebuffer(const RID &texture);
 	RID make_uniform(const RID &texture);
 	bool ensure_targets(RenderSceneBuffersRD *buffers,
 			std::uint32_t count, const Vector2i &size);
-	bool ensure_q3_uniform(ViewTarget &target, const RID &q3_rd_texture);
 	RID pipeline_for(int64_t framebuffer_format, BlendMode blend);
 	void set_push(FramePass pass, const Vector2i &target_size,
 			const Vector2i &source_size, float base_u, float base_v,
@@ -412,11 +388,47 @@ public:
 			bool discard_previous);
 	bool draw_weighted_pair(const RID &framebuffer, const RID &uniform,
 			const Vector2i &target_size, float first_degrees);
+	bool composite_q3(ViewTarget &target, RenderData *render_data,
+			std::uint32_t view, std::size_t &draws);
 	bool render(RenderData *render_data);
+	Ref<Image> capture_q3_target();
 	Dictionary report() const;
 };
 
+Ref<Image> FrameFxCompositorEffect::Impl::capture_q3_target() {
+	if (rd == nullptr || targets.empty() ||
+			shutdown_requested.load(std::memory_order_acquire))
+		return Ref<Image>();
+	const ViewTarget &target = targets.front();
+	if (!target.q3_color.is_valid() || !rd->texture_is_valid(target.q3_color))
+		return Ref<Image>();
+	const Ref<RDTextureFormat> format = rd->texture_get_format(target.q3_color);
+	if (format.is_null())
+		return Ref<Image>();
+	Image::Format image_format = Image::FORMAT_RGBA8;
+	switch (format->get_format()) {
+		case RenderingDevice::DATA_FORMAT_R16G16B16A16_SFLOAT:
+			image_format = Image::FORMAT_RGBAH;
+			break;
+		case RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT:
+			image_format = Image::FORMAT_RGBAF;
+			break;
+		case RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM:
+			image_format = Image::FORMAT_RGBA8;
+			break;
+		default:
+			return Ref<Image>();
+	}
+	const PackedByteArray data = rd->texture_get_data(target.q3_color, 0);
+	if (data.is_empty())
+		return Ref<Image>();
+	return Image::create_from_data(format->get_width(), format->get_height(),
+			false, image_format, data);
+}
+
 bool FrameFxCompositorEffect::Impl::initialize_rd() {
+	if (shutdown_requested.load(std::memory_order_acquire))
+		return false;
 	if (rd != nullptr && shader.is_valid() && sampler.is_valid())
 		return true;
 	release_all();
@@ -438,7 +450,7 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	source.instantiate();
 	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kFrameVertexShader));
+			String::utf8(kRdFullscreenVertexShader));
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
 			String::utf8(kFrameFragmentShader));
 	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
@@ -497,7 +509,7 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 }
 
 RID FrameFxCompositorEffect::Impl::make_texture(const Vector2i &size,
-		RenderingDevice::DataFormat format) {
+		RenderingDevice::DataFormat format, bool readback) {
 	Ref<RDTextureFormat> texture_format;
 	texture_format.instantiate();
 	texture_format->set_format(format);
@@ -508,9 +520,13 @@ RID FrameFxCompositorEffect::Impl::make_texture(const Vector2i &size,
 	texture_format->set_mipmaps(1);
 	texture_format->set_texture_type(RenderingDevice::TEXTURE_TYPE_2D);
 	texture_format->set_samples(RenderingDevice::TEXTURE_SAMPLES_1);
-	texture_format->set_usage_bits(BitField<RenderingDevice::TextureUsageBits>(
-			RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
-			RenderingDevice::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT));
+	int64_t usage = RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
+			RenderingDevice::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+	if (readback) {
+		// capture_q3_target() reads this attachment back for the GUT pins.
+		usage |= RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+	}
+	texture_format->set_usage_bits(BitField<RenderingDevice::TextureUsageBits>(usage));
 	Ref<RDTextureView> view;
 	view.instantiate();
 	return rd->texture_create(texture_format, view);
@@ -542,6 +558,7 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		for (std::uint32_t view = 0; view < count; ++view) {
 			const ViewTarget &target = targets[view];
 			if (target.size != size || target.color != buffers->get_color_layer(view) ||
+					target.depth != buffers->get_depth_layer(view) ||
 					!target.color_framebuffer.is_valid() ||
 					!rd->framebuffer_is_valid(target.color_framebuffer)) {
 				matches = false;
@@ -553,21 +570,22 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		return true;
 
 	release_targets();
-	// The Q3 view is already kernel-sized, so the retail StretchRect into a
-	// power-of-two capture reduces to the format conversion into this
-	// 256-square RGBA8 surface (the 1/2048-base four-tap downsample then runs
-	// against it exactly as witnessed).
+	// The focused Q3 renderer draws at beauty resolution against the resolved
+	// beauty depth. Its sole consumer remains the power-of-two capture feeding
+	// the 256-square kernel.
 	const Vector2i capture_size(kFrameFxSide, kFrameFxSide);
 	targets.reserve(count);
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget target;
 		target.color = buffers->get_color_layer(view);
+		target.depth = buffers->get_depth_layer(view);
 		target.size = size;
 		target.capture_size = capture_size;
 		const Ref<RDTextureFormat> color_format =
 				rd->texture_get_format(target.color);
-		if (!target.color.is_valid() || color_format.is_null()) {
-			set_failure("Resolved scene color is unavailable for FrameFX view " +
+		if (!target.color.is_valid() || !target.depth.is_valid() ||
+				color_format.is_null()) {
+			set_failure("Resolved scene color/depth is unavailable for FrameFX view " +
 					std::to_string(view), "render_targets_invalid");
 			release_target(target);
 			release_targets();
@@ -576,6 +594,11 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		target.color_framebuffer = make_framebuffer(target.color);
 		target.scene_scratch = make_texture(size, color_format->get_format());
 		target.scene_scratch_framebuffer = make_framebuffer(target.scene_scratch);
+		target.q3_color = make_texture(size, color_format->get_format(), true);
+		TypedArray<RID> q3_attachments;
+		q3_attachments.push_back(target.q3_color);
+		q3_attachments.push_back(target.depth);
+		target.q3_framebuffer = rd->framebuffer_create(q3_attachments);
 		target.capture = make_texture(capture_size,
 				RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
 		target.capture_framebuffer = make_framebuffer(target.capture);
@@ -590,15 +613,17 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		target.capture_uniform = make_uniform(target.capture);
 		target.low_a_uniform = make_uniform(target.low_a);
 		target.low_b_uniform = make_uniform(target.low_b);
+		target.q3_uniform = make_uniform(target.q3_color);
 		const bool valid = target.color_framebuffer.is_valid() &&
 				target.scene_scratch.is_valid() &&
 				target.scene_scratch_framebuffer.is_valid() &&
+				target.q3_color.is_valid() && target.q3_framebuffer.is_valid() &&
 				target.capture.is_valid() && target.capture_framebuffer.is_valid() &&
 				target.low_a.is_valid() && target.low_a_framebuffer.is_valid() &&
 				target.low_b.is_valid() && target.low_b_framebuffer.is_valid() &&
 				target.color_uniform.is_valid() && target.scratch_uniform.is_valid() &&
 				target.capture_uniform.is_valid() && target.low_a_uniform.is_valid() &&
-				target.low_b_uniform.is_valid();
+				target.low_b_uniform.is_valid() && target.q3_uniform.is_valid();
 		if (!valid) {
 			set_failure("RenderingDevice could not allocate the FrameFX "
 					"target chain for view " + std::to_string(view),
@@ -611,24 +636,6 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 	}
 	target_buffers_id = buffers_id;
 	return true;
-}
-
-bool FrameFxCompositorEffect::Impl::ensure_q3_uniform(
-		ViewTarget &target, const RID &q3_rd_texture) {
-	if (target.q3_rd_texture == q3_rd_texture && target.q3_uniform.is_valid() &&
-			rd->uniform_set_is_valid(target.q3_uniform))
-		return true;
-	release_uniform(target.q3_uniform);
-	target.q3_rd_texture = q3_rd_texture;
-	target.q3_size = Vector2i();
-	if (!q3_rd_texture.is_valid())
-		return false;
-	const Ref<RDTextureFormat> q3_format = rd->texture_get_format(q3_rd_texture);
-	if (q3_format.is_valid())
-		target.q3_size = Vector2i(q3_format->get_width(), q3_format->get_height());
-	target.q3_uniform = make_uniform(q3_rd_texture);
-	return target.q3_uniform.is_valid() &&
-			rd->uniform_set_is_valid(target.q3_uniform);
 }
 
 RID FrameFxCompositorEffect::Impl::pipeline_for(
@@ -764,6 +771,54 @@ bool FrameFxCompositorEffect::Impl::draw_weighted_pair(
 	return true;
 }
 
+// The focused Q3 draw plus the witnessed capture, blur, and half-strength
+// additive composite over the beauty target for one view. Every Q3 technique
+// re-shades from its own leased inputs into the black-cleared Q3 target
+// (retail's altbuffer); the beauty colour is never sampled, only its resolved
+// depth is tested.
+bool FrameFxCompositorEffect::Impl::composite_q3(ViewTarget &target,
+		RenderData *render_data, std::uint32_t view, std::size_t &draws) {
+	if (!q3_adapter.draw_view(rd, render_data, view, target.q3_framebuffer,
+			draws))
+		return false;
+	if (!draw_one(target.capture_framebuffer, target.q3_uniform,
+			BlendMode::Replace, FramePass::Stretch,
+			target.capture_size, target.size, 0, 0, 0, 0,
+			false, true))
+		return false;
+	++draws;
+	const auto downsample_direction =
+			direction_for_degrees(30.0f, 1.0f / 1024.0f);
+	if (!draw_one(target.low_a_framebuffer, target.capture_uniform,
+			BlendMode::Replace, FramePass::AverageFour,
+			Vector2i(kFrameFxSide, kFrameFxSide), target.capture_size,
+			1.0f / 2048.0f, 1.0f / 2048.0f,
+			downsample_direction[0], downsample_direction[1],
+			false, true))
+		return false;
+	++draws;
+	if (!draw_weighted_pair(target.low_b_framebuffer,
+			target.low_a_uniform,
+			Vector2i(kFrameFxSide, kFrameFxSide), 90.0f))
+		return false;
+	draws += 2;
+	if (!draw_weighted_pair(target.low_a_framebuffer,
+			target.low_b_uniform,
+			Vector2i(kFrameFxSide, kFrameFxSide), 0.0f))
+		return false;
+	draws += 2;
+	const auto final_direction =
+			direction_for_degrees(45.0f, 0.0027621093f);
+	if (!draw_one(target.color_framebuffer, target.low_a_uniform,
+			BlendMode::SourceAlphaAdd, FramePass::FinalAverage,
+			target.size, Vector2i(kFrameFxSide, kFrameFxSide),
+			1.0f / 512.0f, 1.0f / 512.0f,
+			final_direction[0], final_direction[1], false, false))
+		return false;
+	++draws;
+	return true;
+}
+
 bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	if (!initialize_rd() || render_data == nullptr) {
 		if (render_data == nullptr)
@@ -784,63 +839,25 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	const Vector2i size = buffers->get_internal_size();
 	if (!ensure_targets(buffers, count, size))
 		return false;
-
-	const RID q3_texture = source_snapshot();
-	const bool q3_uniform_stale = targets.empty() ||
-			!targets.front().q3_uniform.is_valid() ||
-			!rd->uniform_set_is_valid(targets.front().q3_uniform);
-	if (q3_texture != q3_resolved_server_texture || q3_uniform_stale) {
-		RenderingServer *server = RenderingServer::get_singleton();
-		q3_resolved_server_texture = q3_texture;
-		q3_resolved_rd_texture = server != nullptr && q3_texture.is_valid()
-				? server->texture_get_rd_texture(q3_texture, false)
-				: RID();
-	}
-	const RID q3_rd_texture = q3_resolved_rd_texture;
 	std::size_t draws = 0;
 	bool sampled_q3 = false;
+	bool q3_failed = false;
+	// The published Q3 frame is consumed every render, commands or not: a
+	// frame with nothing to draw still names the cache entries evicted since
+	// the last consumed one, and their device buffers are freed here rather
+	// than held until the next non-empty frame.
+	q3_adapter.consume_frame(rd);
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget &target = targets[view];
-		if (ensure_q3_uniform(target, q3_rd_texture)) {
-			const Vector2i q3_size = target.q3_size != Vector2i()
-					? target.q3_size
-					: target.capture_size;
-			if (!draw_one(target.capture_framebuffer, target.q3_uniform,
-					BlendMode::Replace, FramePass::Stretch,
-					target.capture_size, q3_size, 0, 0, 0, 0,
-					false, true))
-				return false;
-			++draws;
-			const auto downsample_direction =
-					direction_for_degrees(30.0f, 1.0f / 1024.0f);
-			if (!draw_one(target.low_a_framebuffer, target.capture_uniform,
-					BlendMode::Replace, FramePass::AverageFour,
-					Vector2i(kFrameFxSide, kFrameFxSide), target.capture_size,
-					1.0f / 2048.0f, 1.0f / 2048.0f,
-					downsample_direction[0], downsample_direction[1],
-					false, true))
-				return false;
-			++draws;
-			if (!draw_weighted_pair(target.low_b_framebuffer,
-					target.low_a_uniform,
-					Vector2i(kFrameFxSide, kFrameFxSide), 90.0f))
-				return false;
-			draws += 2;
-			if (!draw_weighted_pair(target.low_a_framebuffer,
-					target.low_b_uniform,
-					Vector2i(kFrameFxSide, kFrameFxSide), 0.0f))
-				return false;
-			draws += 2;
-			const auto final_direction =
-					direction_for_degrees(45.0f, 0.0027621093f);
-			if (!draw_one(target.color_framebuffer, target.low_a_uniform,
-					BlendMode::SourceAlphaAdd, FramePass::FinalAverage,
-					target.size, Vector2i(kFrameFxSide, kFrameFxSide),
-					1.0f / 512.0f, 1.0f / 512.0f,
-					final_direction[0], final_direction[1], false, false))
-				return false;
-			++draws;
-			sampled_q3 = true;
+		if (q3_adapter.has_commands() && !q3_failed) {
+			// A focused-Q3 device failure keeps its diagnostic and skips the
+			// capture/blur/composite for this frame, but must never skip the
+			// terminal display decode below: a frame presented without it is
+			// double-encoded and flickers as glow sources enter and leave.
+			if (composite_q3(target, render_data, view, draws))
+				sampled_q3 = true;
+			else
+				q3_failed = true;
 		}
 
 		// All 3D retail draws have blended as gamma-domain numeric values. Copy
@@ -859,8 +876,12 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	}
 	{
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
-		status = sampled_q3 ? "drawn" : "drawn_without_q3";
-		failure.clear();
+		if (q3_failed)
+			status = "drawn_q3_failed";
+		else
+			status = sampled_q3 ? "drawn" : "drawn_without_q3";
+		if (!q3_failed)
+			failure.clear();
 		++rendered_frames;
 		gpu_draw_calls = draws;
 		view_count = count;
@@ -905,6 +926,11 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["frame_size"] = last_size;
 	result["capture_size"] = last_capture_size;
 	result["q3_sampled"] = q3_sampled;
+	result["shutdown"] = shutdown_requested.load(std::memory_order_acquire);
+	const Dictionary q3_report = q3_adapter.get_report();
+	const Array q3_keys = q3_report.keys();
+	for (int64_t i = 0; i < q3_keys.size(); ++i)
+		result[q3_keys[i]] = q3_report[q3_keys[i]];
 	return result;
 }
 
@@ -912,7 +938,7 @@ FrameFxCompositorEffect::FrameFxCompositorEffect() :
 		impl_(std::make_unique<Impl>()) {
 	set_effect_callback_type(EFFECT_CALLBACK_TYPE_POST_TRANSPARENT);
 	set_access_resolved_color(true);
-	set_access_resolved_depth(false);
+	set_access_resolved_depth(true);
 	set_enabled(true);
 }
 
@@ -923,23 +949,41 @@ void FrameFxCompositorEffect::_bind_methods() {
 			&FrameFxCompositorEffect::get_backend_report);
 }
 
-void FrameFxCompositorEffect::set_q3_texture_rid(const RID &p_texture) {
-	if (impl_)
-		impl_->set_source(p_texture);
+void FrameFxCompositorEffect::compile_q3_frame(Node *p_scope,
+		Viewport *p_viewport, Camera3D *p_camera) {
+	if (impl_ && !impl_->shutdown_requested.load(std::memory_order_acquire))
+		impl_->q3_adapter.compile_frame(p_scope, p_viewport, p_camera);
 }
 
-void FrameFxCompositorEffect::clear_q3_texture_rid() {
+void FrameFxCompositorEffect::clear_q3_frame() {
 	if (impl_)
-		impl_->set_source(RID());
+		impl_->q3_adapter.clear_frame();
+}
+
+void FrameFxCompositorEffect::release_device_resources() {
+	set_enabled(false);
+	if (!impl_ || impl_->shutdown_requested.exchange(true,
+			std::memory_order_acq_rel))
+		return;
+	impl_->q3_adapter.clear_frame();
+	impl_->release_all();
+	std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
+	impl_->rd_available = false;
+	impl_->status = "shutdown";
+	impl_->failure.clear();
 }
 
 Dictionary FrameFxCompositorEffect::get_backend_report() const {
 	return impl_ ? impl_->report() : Dictionary();
 }
 
+Ref<Image> FrameFxCompositorEffect::capture_q3_target() {
+	return impl_ ? impl_->capture_q3_target() : Ref<Image>();
+}
+
 void FrameFxCompositorEffect::_render_callback(
 		int32_t p_effect_callback_type, RenderData *p_render_data) {
-	if (!impl_)
+	if (!impl_ || impl_->shutdown_requested.load(std::memory_order_acquire))
 		return;
 	{
 		std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
@@ -957,73 +1001,88 @@ FrameFx::FrameFx() = default;
 
 FrameFx::~FrameFx() = default;
 
+void FrameFx::register_q3_object_material(const Ref<Material> &p_material,
+		const opennova::renderer::ObjectMaterialClassification &p_classification) {
+	Q3SourceRegistry::register_object_material(p_material, p_classification);
+}
+
+void FrameFx::clone_q3_object_material(const Ref<Material> &p_source,
+		const Ref<Material> &p_clone) {
+	Q3SourceRegistry::clone_object_material(p_source, p_clone);
+}
+
+void FrameFx::invalidate_q3_object_material(const Ref<Material> &p_material) {
+	Q3SourceRegistry::invalidate_object_material(p_material);
+}
+
+void FrameFx::register_q3_object_source(GeometryInstance3D *p_source,
+		const Ref<Material> &p_material) {
+	Q3SourceRegistry::register_object_source(p_source, p_material);
+}
+
+void FrameFx::unregister_q3_source(GeometryInstance3D *p_source) {
+	Q3SourceRegistry::unregister_source(p_source);
+}
+
+bool FrameFx::q3_object_material_classification(const Ref<Material> &p_material,
+		opennova::renderer::ObjectMaterialClassification &r_classification) {
+	return Q3SourceRegistry::object_material_classification(p_material,
+			r_classification);
+}
+
+void FrameFx::register_q3_source(GeometryInstance3D *p_source,
+		opennova::renderer::Q3Source p_kind, uint32_t p_additive_surfaces) {
+	Q3SourceRegistry::register_source(p_source, p_kind, p_additive_surfaces);
+}
+
+void FrameFx::publish_q3_geometry(GeometryInstance3D *p_source, int p_surface,
+		const Array &p_arrays) {
+	Q3SourceRegistry::publish_geometry(p_source, p_surface, p_arrays);
+}
+
+void FrameFx::invalidate_q3_source(GeometryInstance3D *p_source) {
+	Q3SourceRegistry::invalidate_source(p_source);
+}
+
+void FrameFx::invalidate_q3_instances(GeometryInstance3D *p_source) {
+	Q3SourceRegistry::invalidate_instances(p_source);
+}
+
 void FrameFx::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&FrameFx::get_backend_report);
 	ClassDB::bind_method(D_METHOD("advance_frame"),
 			&FrameFx::advance_frame);
-	ClassDB::bind_method(D_METHOD("get_q3_viewport"),
-			&FrameFx::get_q3_viewport);
+	ClassDB::bind_method(D_METHOD("shutdown"), &FrameFx::shutdown);
+	ClassDB::bind_method(D_METHOD("get_q3_target_image"),
+			&FrameFx::get_q3_target_image);
+	ClassDB::bind_static_method("FrameFx",
+			D_METHOD("invalidate_q3_source", "source"),
+			&FrameFx::invalidate_q3_source);
+	ClassDB::bind_static_method("FrameFx",
+			D_METHOD("invalidate_q3_instances", "source"),
+			&FrameFx::invalidate_q3_instances);
+	ClassDB::bind_static_method("FrameFx",
+			D_METHOD("invalidate_q3_object_material", "material"),
+			&FrameFx::invalidate_q3_object_material);
 	BIND_CONSTANT(kBeautyCameraMask);
-	BIND_CONSTANT(kQ3CameraMask);
 }
 
-void FrameFx::build_auxiliary_views() {
-	if (q3_viewport_ != nullptr)
+Ref<Image> FrameFx::get_q3_target_image() const {
+	return terminal_effect_.is_valid() ?
+			terminal_effect_->capture_q3_target() : Ref<Image>();
+}
+
+void FrameFx::build_compositor() {
+	if (shutdown_)
 		return;
 	if (terminal_effect_.is_null())
 		terminal_effect_.instantiate();
-
-	q3_viewport_ = memnew(SubViewport);
-	q3_viewport_->set_name("Q3View");
-	q3_viewport_->set_size(Vector2i(kFrameFxSide, kFrameFxSide));
-	q3_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
-	q3_viewport_->set_clear_mode(SubViewport::CLEAR_MODE_ALWAYS);
-	q3_viewport_->set_transparent_background(true);
-	q3_viewport_->set_disable_3d(false);
-	q3_viewport_->set_use_own_world_3d(false);
-	q3_viewport_->set_handle_input_locally(false);
-	q3_viewport_->set_positional_shadow_atlas_size(0);
-	// Retail's altbuffer inherits the backbuffer multisample mode
-	// (FrameFX_CreateAltBufferTexture @0x582120, CreateRenderTarget @0x58217e -
-	// docs/render/render-order-re.md D-RORD-10); here the
-	// samples also stand in for the StretchRect box filter over the missing
-	// full-resolution source (see kFrameFxSide).
-	q3_viewport_->set_msaa_3d(Viewport::MSAA_8X);
-	q3_viewport_->set_screen_space_aa(Viewport::SCREEN_SPACE_AA_DISABLED);
-	q3_viewport_->set_use_taa(false);
-	q3_viewport_->set_use_debanding(false);
-	// Every retail pass writes gamma-domain numeric values and this view has
-	// no terminal decode, so keep Godot's sRGB output encode OFF: an HDR 2D
-	// target stores the numbers the Q3 shaders wrote, which is what the
-	// FrameFX capture samples (the display transfer runs once, on the beauty
-	// target, after the composite).
-	q3_viewport_->set_use_hdr_2d(true);
-	add_child(q3_viewport_);
-
-	q3_camera_ = memnew(Camera3D);
-	q3_camera_->set_name("Q3Camera");
-	q3_camera_->set_cull_mask(kQ3CameraMask);
-	Ref<Environment> black_environment;
-	black_environment.instantiate();
-	black_environment->set_background(Environment::BG_COLOR);
-	black_environment->set_bg_color(Color(0, 0, 0, 0));
-	black_environment->set_ambient_source(Environment::AMBIENT_SOURCE_DISABLED);
-	black_environment->set_glow_enabled(false);
-	q3_camera_->set_environment(black_environment);
-	// The shared WorldEnvironment owns the terminal effect. Q3 is its source,
-	// never another consumer of it.
-	Ref<Compositor> empty_compositor;
-	empty_compositor.instantiate();
-	q3_camera_->set_compositor(empty_compositor);
-	q3_viewport_->add_child(q3_camera_);
-	q3_camera_->make_current();
-	Ref<ViewportTexture> q3_texture = q3_viewport_->get_texture();
-	if (q3_texture.is_valid())
-		terminal_effect_->set_q3_texture_rid(q3_texture->get_rid());
 }
 
 void FrameFx::install_compositor() {
+	if (shutdown_)
+		return;
 	Node *scope = get_parent() != nullptr ? get_parent() : this;
 	WorldEnvironment *world_environment = find_world_environment(scope);
 	if (world_environment == nullptr || terminal_effect_.is_null())
@@ -1061,16 +1120,14 @@ void FrameFx::restore_synced_camera_mask() {
 }
 
 void FrameFx::advance_frame() {
-	if (q3_viewport_ == nullptr || q3_camera_ == nullptr ||
-			terminal_effect_.is_null())
+	if (shutdown_ || terminal_effect_.is_null())
 		return;
 	Viewport *viewport = get_viewport();
 	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
 	const bool active = camera != nullptr && is_visible_in_tree();
 	if (!active) {
 		restore_synced_camera_mask();
-		q3_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
-		terminal_effect_->clear_q3_texture_rid();
+		terminal_effect_->clear_q3_frame();
 		return;
 	}
 	const ObjectID camera_id(camera->get_instance_id());
@@ -1083,58 +1140,51 @@ void FrameFx::advance_frame() {
 	// Standardize the highest-quality retail beauty pass. The layers removed
 	// here are rendered only by their dedicated capture/viewmodel devices.
 	camera->set_cull_mask(kBeautyCameraMask);
+	Node *scope = get_parent() != nullptr ? get_parent() : this;
+	terminal_effect_->compile_q3_frame(scope, viewport, camera);
+}
 
-	// Kernel height, beauty aspect: the camera projection copied below then
-	// frames exactly the beauty view, and the FrameFX capture squashes it
-	// into the 256-square like retail's StretchRect of the altbuffer
-	// (FrameFX_CaptureRenderTarget @0x584020 - docs/render/render-order-re.md).
-	const Vector2 visible_size = viewport->get_visible_rect().size;
-	const float aspect = visible_size.y > 0.0f
-			? visible_size.x / visible_size.y
-			: 1.0f;
-	const Vector2i target_size = aspect >= 1.0f
-			? Vector2i(std::max(1, static_cast<int>(std::round(
-					  static_cast<float>(kFrameFxSide) * aspect))),
-					  static_cast<int>(kFrameFxSide))
-			: Vector2i(static_cast<int>(kFrameFxSide),
-					  std::max(1, static_cast<int>(std::round(
-					  static_cast<float>(kFrameFxSide) / aspect))));
-	if (q3_viewport_->get_size() != target_size)
-		q3_viewport_->set_size(target_size);
-	q3_viewport_->set_world_3d(viewport->get_world_3d());
-	q3_camera_->set_global_transform(camera->get_global_transform());
-	q3_camera_->set_projection(camera->get_projection());
-	q3_camera_->set_fov(camera->get_fov());
-	q3_camera_->set_size(camera->get_size());
-	q3_camera_->set_frustum_offset(camera->get_frustum_offset());
-	q3_camera_->set_near(camera->get_near());
-	q3_camera_->set_far(camera->get_far());
-	q3_camera_->set_keep_aspect_mode(camera->get_keep_aspect_mode());
-	q3_camera_->set_h_offset(camera->get_h_offset());
-	q3_camera_->set_v_offset(camera->get_v_offset());
-	q3_camera_->set_attributes(camera->get_attributes());
-	q3_camera_->set_cull_mask(kQ3CameraMask);
-	q3_viewport_->set_update_mode(SubViewport::UPDATE_ALWAYS);
-	Ref<ViewportTexture> q3_texture = q3_viewport_->get_texture();
-	if (q3_texture.is_valid())
-		terminal_effect_->set_q3_texture_rid(q3_texture->get_rid());
+void FrameFx::shutdown() {
+	if (shutdown_)
+		return;
+	shutdown_ = true;
+
+	Ref<FrameFxCompositorEffect> effect = terminal_effect_;
+	if (effect.is_valid())
+		effect->set_enabled(false);
+	restore_synced_camera_mask();
+	uninstall_compositor();
+
+	// Detaching only changes the next render setup. Drain any callback already
+	// submitted before freeing the RenderingDevice objects it may still read.
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (server != nullptr && server->get_rendering_device() != nullptr)
+		server->force_sync();
+	if (effect.is_valid())
+		effect->release_device_resources();
+	terminal_effect_.unref();
+	effect.unref();
 }
 
 void FrameFx::_notification(int p_what) {
-	if (p_what == NOTIFICATION_READY) {
-		build_auxiliary_views();
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		// Re-entry after an exit-tree (or explicit) shutdown, the same
+		// contract DisplayDecode keeps: the released terminal effect is rebuilt
+		// by the READY leg below, so clear the latch and ask for that leg again
+		// (READY fires only once on its own).
+		if (shutdown_) {
+			shutdown_ = false;
+			request_ready();
+		}
+	} else if (p_what == NOTIFICATION_READY) {
+		build_compositor();
 		install_compositor();
 		// One placement-independent sync so a headless/no-pipeline embedder
 		// still boots with coherent views; the live per-frame sync is the
 		// ordered GameFramePipeline leg, never a process callback.
 		advance_frame();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
-		if (q3_viewport_ != nullptr)
-			q3_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
-		if (terminal_effect_.is_valid())
-			terminal_effect_->clear_q3_texture_rid();
-		restore_synced_camera_mask();
-		uninstall_compositor();
+		shutdown();
 	}
 }
 
@@ -1143,19 +1193,8 @@ Dictionary FrameFx::get_backend_report() const {
 			terminal_effect_->get_backend_report() :
 			Dictionary();
 	result["beauty_camera_mask"] = static_cast<int64_t>(kBeautyCameraMask);
-	result["q3_camera_mask"] = static_cast<int64_t>(kQ3CameraMask);
-	result["q3_viewport_present"] = q3_viewport_ != nullptr;
-	result["q3_viewport_size"] = q3_viewport_ != nullptr ?
-			q3_viewport_->get_size() : Vector2i();
 	result["q3_working_height"] = static_cast<int64_t>(kFrameFxSide);
-	result["q3_msaa_3d"] = q3_viewport_ != nullptr ?
-			static_cast<int>(q3_viewport_->get_msaa_3d()) :
-			static_cast<int>(Viewport::MSAA_DISABLED);
-	result["q3_hdr_2d"] = q3_viewport_ != nullptr &&
-			q3_viewport_->is_using_hdr_2d();
-	result["q3_update_mode"] = q3_viewport_ != nullptr ?
-			static_cast<int>(q3_viewport_->get_update_mode()) :
-			static_cast<int>(SubViewport::UPDATE_DISABLED);
+	result["shutdown"] = shutdown_;
 	WorldEnvironment *world_environment =
 			world_environment_from_id(world_environment_id_);
 	result["terminal_compositor_installed"] = world_environment != nullptr &&
@@ -1192,6 +1231,9 @@ void DisplayDecode::install() {
 }
 
 void DisplayDecode::uninstall() {
+	Ref<FrameFxCompositorEffect> effect = effect_;
+	if (effect.is_valid())
+		effect->set_enabled(false);
 	WorldEnvironment *world_environment =
 			world_environment_from_id(world_environment_id_);
 	if (world_environment != nullptr &&
@@ -1204,6 +1246,13 @@ void DisplayDecode::uninstall() {
 	world_.unref();
 	installed_compositor_.unref();
 	previous_compositor_.unref();
+	if (effect.is_valid() && server != nullptr &&
+			server->get_rendering_device() != nullptr)
+		server->force_sync();
+	if (effect.is_valid())
+		effect->release_device_resources();
+	effect_.unref();
+	effect.unref();
 }
 
 void DisplayDecode::_notification(int p_what) {

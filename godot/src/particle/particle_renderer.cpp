@@ -27,6 +27,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/quad_mesh.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
@@ -606,6 +607,14 @@ public:
 	std::int32_t fog_type = 1;
 
 	Impl() {
+		create_effects();
+	}
+
+	// A fresh compositor set: the constructor's, and the replacement a
+	// re-entering renderer needs. release_device_resources() retires an
+	// effect for good (its render callback never runs again), so a renderer
+	// that left the tree can only render again through new effects.
+	void create_effects() {
 		for (Ref<ParticleCompositorEffect> &effect : world_effects)
 			effect.instantiate();
 		for (Ref<ParticleCompositorEffect> &effect : reflection_effects)
@@ -614,9 +623,9 @@ public:
 				CompositorEffect::EFFECT_CALLBACK_TYPE_PRE_TRANSPARENT);
 	}
 
-	~Impl() {
-		detach_compositors();
-	}
+	// ParticleRenderer::shutdown() detaches while camera and server ownership
+	// are known-live. Late destruction must only discard retained references.
+	~Impl() = default;
 
 	void invalidate_catalog() {
 		catalog_dirty = true;
@@ -1402,6 +1411,7 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::get_procedural_fallback_enabled);
 	ClassDB::bind_method(D_METHOD("render_now"),
 			&ParticleRenderer::render_now);
+	ClassDB::bind_method(D_METHOD("shutdown"), &ParticleRenderer::shutdown);
 	ClassDB::bind_method(D_METHOD("get_rendered_quad_count"),
 			&ParticleRenderer::get_rendered_quad_count);
 	ClassDB::bind_method(D_METHOD("get_draw_command_count"),
@@ -1430,14 +1440,35 @@ void ParticleRenderer::_bind_methods() {
 }
 
 void ParticleRenderer::_notification(int p_what) {
-	if (p_what == NOTIFICATION_READY) {
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		_restore_device_state();
+	} else if (p_what == NOTIFICATION_READY) {
 		impl_->ensure_visuals(this);
 		set_process(false);
 		render_now();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
-		if (impl_)
-			impl_->detach_compositors();
+		shutdown();
 	}
+}
+
+// The re-entry half of the EXIT_TREE/shutdown contract (the same shape
+// DisplayDecode follows: release on exit, recreate on entry). A renderer that
+// left the tree, or was released explicitly, holds retired compositor effects
+// and a latched shutdown_; entering the tree again replaces the effects and
+// clears the latch so the next render_now attaches and publishes as on the
+// first entry. The retained CPU state (catalog, atlas snapshot, first-person
+// batch child) is untouched: the new effects re-upload from it on publish.
+void ParticleRenderer::_restore_device_state() {
+	if (!shutdown_)
+		return;
+	shutdown_ = false;
+	if (!impl_)
+		return;
+	impl_->create_effects();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+		effect->set_particles_hidden(hidden_);
+	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
+		effect->set_particles_hidden(hidden_);
 }
 
 void ParticleRenderer::_invalidate_catalog() {
@@ -1546,6 +1577,32 @@ void ParticleRenderer::clear_warm_pipelines() {
 	warm_nodes_.clear();
 }
 
+void ParticleRenderer::shutdown() {
+	if (shutdown_)
+		return;
+	shutdown_ = true;
+	clear_warm_pipelines();
+	if (!impl_)
+		return;
+
+	impl_->clear_draws();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+		effect->set_enabled(false);
+	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
+		effect->set_enabled(false);
+	impl_->detach_compositors();
+
+	// Detaching affects the next render setup. Drain a callback already queued
+	// on the render thread before releasing the RIDs it can still consume.
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (server != nullptr && server->get_rendering_device() != nullptr)
+		server->force_sync();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+		effect->release_device_resources();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
+		effect->release_device_resources();
+}
+
 void ParticleRenderer::set_hidden(bool p_hidden) {
 	if (hidden_ == p_hidden)
 		return;
@@ -1584,7 +1641,7 @@ bool ParticleRenderer::get_procedural_fallback_enabled() const {
 }
 
 void ParticleRenderer::render_now() {
-	if (!impl_)
+	if (shutdown_ || !impl_)
 		return;
 	impl_->ensure_visuals(this);
 	if (hidden_)
@@ -1747,6 +1804,7 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	result["reflection_compositor_inherited_effects"] =
 			impl_->inherited_reflection_compositor;
 	result["world_mesh_instance"] = false;
+	result["shutdown"] = shutdown_;
 	result["water_height"] = water_height_;
 	Dictionary environment_fog;
 	environment_fog["color"] = Vector3(impl_->fog_color[0],

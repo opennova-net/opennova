@@ -103,9 +103,10 @@ one population cannot carve the other, and the husk graft keeps the carved
 slot's reflect policy (retail's husk swap never clears flag `0x400`).
 Cross-run pixel sheets remain a **non-gating visual diagnostic** because
 water/particle phases are not canonical across launches. Semantic unit tests
-and same-run fixture state are the gate. A remaining Godot-side performance
-divergence stands: Godot batches per graphic, whereas retail culls sector
-cells spatially.
+and same-run fixture state are the gate. Opaque and alpha-tested static rows
+are now split into terrain-aligned 512-unit X/Z bins with exact custom AABBs;
+blended rows remain global so spatial population centers cannot perturb their
+ordering.
 
 ### Typed, checked-in object shader pipelines
 

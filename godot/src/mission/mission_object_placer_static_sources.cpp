@@ -1,7 +1,10 @@
 #include "mission/mission_object_placer.h"
 
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+
+#include <runtime/simassets/model_builders.h>
 
 #include "mission/mission_object_placer_keys.h"
 
@@ -268,6 +271,15 @@ String MissionObjectPlacer::get_static_instance_batch_key(int p_bms_id) const {
 	return rec->batch_key.is_empty() ? rec->graphic : rec->batch_key;
 }
 
+int MissionObjectPlacer::get_static_instance_binding_count(int p_bms_id) const {
+	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	if (rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return 0;
+	}
+	return static_lod_instances_[rec->lod_instance].bindings.size();
+}
+
 bool MissionObjectPlacer::static_instance_is_mirror_reflected(
 		int p_bms_id) const {
 	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
@@ -280,9 +292,10 @@ bool MissionObjectPlacer::static_instance_casts_terrain_shadow(
 	return rec != nullptr && rec->casts_static_shadow;
 }
 
-// Hide a destroyed batched static in every batch of its graphic/reflection
-// population (zero-scale at its own origin — the batch keeps its instance
-// count); returns the instance's placed transform for the husk graft.
+// Hide a destroyed batched static: its row leaves every population it is
+// live in (its level's population and shadow twin; the populations keep
+// their capacity); returns the instance's placed transform for the husk
+// graft.
 Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
 	if (rec == nullptr) {
@@ -291,54 +304,43 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 	if (hidden_destruction_instances_.has(p_bms_id)) {
 		return rec->xform;
 	}
-	const Transform3D carved(Basis().scaled(Vector3()), rec->xform.origin);
-	Array originals;
-	const String batch_key = rec->batch_key.is_empty()
-			? rec->graphic
-			: rec->batch_key;
-	const Vector<Ref<MultiMesh>> *batches =
-			destruction_batches_.getptr(batch_key);
-	if (batches != nullptr) {
-		for (const Ref<MultiMesh> &mm : *batches) {
-			if (mm.is_valid() && rec->index >= 0 &&
-					rec->index < mm->get_instance_count()) {
-				Dictionary saved;
-				saved["multimesh"] = mm;
-				saved["transform"] = mm->get_instance_transform(rec->index);
-				saved["index"] = rec->index;
-				originals.push_back(saved);
-				mm->set_instance_transform(rec->index, carved);
-			}
-		}
+	if (rec->lod_instance >= 0 &&
+			rec->lod_instance < static_lod_instances_.size()) {
+		static_lod_instances_.write[rec->lod_instance].carved = true;
+		HashSet<int> touched;
+		_write_static_instance_slots(rec->lod_instance, -1, touched);
+		_flush_static_population_changes(touched);
 	}
-	hidden_destruction_instances_[p_bms_id] = originals;
+	hidden_destruction_instances_.insert(p_bms_id);
 	++static_light_draw_source_revision_;
 	_bump_static_terrain_shadow_source_revision();
 	return rec->xform;
 }
 
-// Restore a carved static; repeated reset calls are safe (false when the
-// instance was not hidden).
+// Restore a carved static at the level last selected for it; the next
+// update_static_lods re-evaluates the instance against the camera like any
+// other. Repeated reset calls are safe (false when the instance was not
+// hidden).
 bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
-	const Array *originals = hidden_destruction_instances_.getptr(p_bms_id);
-	if (originals == nullptr) {
+	if (!hidden_destruction_instances_.has(p_bms_id)) {
 		return false;
 	}
-	for (int i = 0; i < originals->size(); ++i) {
-		const Dictionary saved = (*originals)[i];
-		const Ref<MultiMesh> mm = saved.get("multimesh", Variant());
-		const int index = int(saved.get("index", -1));
-		if (mm.is_valid() && index >= 0 && index < mm->get_instance_count()) {
-			mm->set_instance_transform(index,
-					saved.get("transform", Transform3D()));
-		}
+	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	if (rec != nullptr && rec->lod_instance >= 0 &&
+			rec->lod_instance < static_lod_instances_.size()) {
+		StaticLodInstance &instance =
+				static_lod_instances_.write[rec->lod_instance];
+		instance.carved = false;
+		HashSet<int> touched;
+		_write_static_instance_slots(rec->lod_instance, instance.active_lod,
+				touched);
+		_flush_static_population_changes(touched);
 	}
 	hidden_destruction_instances_.erase(p_bms_id);
 	++static_light_draw_source_revision_;
 	_bump_static_terrain_shadow_source_revision();
 	return true;
 }
-
 bool MissionObjectPlacer::update_static_terrain_shadow_source_transform(
 		int p_kind, int p_index, const Transform3D &p_xform) {
 	_check_epoch();
@@ -542,7 +544,7 @@ void MissionObjectPlacer::register_occlusion_verdict(int p_item_id,
 
 bool MissionObjectPlacer::register_resolved_static_graphic(
 		const String &p_graphic, const Ref<ObjectData> &p_data,
-		const Array &p_batches) {
+		const Array &p_batches, const Dictionary &p_lod_profile) {
 	_check_epoch();
 	if (p_graphic.is_empty() || p_data.is_null() || p_batches.is_empty()) {
 		return false;
@@ -563,12 +565,36 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 		retained_batch.offset = batch.get("offset", Transform3D());
 		retained_batch.submesh = int(batch.get("submesh", 0));
 		retained_batch.robj_index = int(batch.get("robj_index", 0));
+		retained_batch.lod_index = MAX(int(batch.get("lod_index", 0)), 0);
+		retained_batch.blended_draw = bool(batch.get("blended_draw",
+				batch.get("is_alpha", false)));
 		retained.push_back(retained_batch);
 	}
+	StaticLodProfile profile;
+	if (p_lod_profile.has("thresholds_q16")) {
+		const PackedInt32Array thresholds = p_lod_profile.get("thresholds_q16",
+				PackedInt32Array());
+		for (int64_t i = 0; i < thresholds.size(); ++i) {
+			profile.thresholds_q16.push_back(thresholds[i]);
+		}
+	} else if (p_data->has_document()) {
+		const Threedi3di3 &native_model = p_data->native_model();
+		for (std::size_t lod = 0; lod < native_model.lod_count; ++lod) {
+			profile.thresholds_q16.push_back(native_model.lods[lod].lod_threshold);
+		}
+	}
+	if (p_lod_profile.has("sphere_radius")) {
+		profile.sphere_radius = float(p_lod_profile.get("sphere_radius", 0.0));
+	} else if (p_data->has_document()) {
+		profile.sphere_radius =
+				opennova::simassets::model_bound_radius_from_3di(
+						p_data->native_model());
+	}
+	_complete_static_lod_profile(profile, retained);
 	object_data_cache_[p_graphic] = p_data;
 	static_batch_cache_[p_graphic] = retained;
+	static_lod_profile_cache_[p_graphic] = profile;
 	_bump_static_terrain_shadow_source_revision();
 	return true;
 }
-
 } // namespace godot

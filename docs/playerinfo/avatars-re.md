@@ -201,7 +201,13 @@ the draw ownership:
 - composed world player: head store/call `@0x5C7FEC` then the head model
   (blip +4) submit, body store `@0x5C800F` then the body model (blip +0)
   submit; blip handles of 0 draw the entity's own item model instead
-  (`Terrain_RenderSectorEntitiesBySide @0x5c7fea..0x5c8039`);
+  (`Terrain_RenderSectorEntitiesBySide @0x5c7fea..0x5c8039`). Both parts
+  take the entity's ONE projected radius (`*entityListIter`) and each walks
+  its own RLOD table (the `forced_model` table swap `@0x5c41b4`); the head
+  submit carries the entity's one-shot overlays (the held weapon, the
+  mounted child) and the body submit's flag `0x10000000` skips them
+  ([render-order-re.md](../render/render-order-re.md) D-RORD-11, closed
+  2026-08-29: the pair is not a dual-LOD submission);
 - PLAYER_INFO preview: body `@0x56110B`, head `@0x56113C`;
 - first-person arms: `@0x4DF008` and `@0x4DF070` immediately before the arms
   submit; the arms MODEL is blip +8 (the combo arms graphic,

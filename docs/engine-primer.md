@@ -67,7 +67,7 @@ appear only where a record says so. Known scales, each owned by its record:
 | Infantry root motion | forward step/tick in 16.16; scale `32768 = 65536/2` bakes the ~2-sim-ticks-per-30fps-anim-frame ratio | [world-wac-ai-re.md](world/world-wac-ai-re.md) |
 | Angles | BAM: `deg * 2^32/360` (`kBamPerDegree = 11930464`); engine heading = `90 - yaw` | [world-wac-ai-re.md §7](world/world-wac-ai-re.md) |
 | 3DI collision geometry | positions/normals packed as i16 16.16 (CVRT/CNRM); plane/bbox distances fp16.16 (CFAC) | [3di-gp-format-re.md](threedi/3di-gp-format-re.md) |
-| LOD thresholds | `lod_dist_threshold_q16` (GP) / `lod_threshold_fp16` (3DI3 RMDL) — Q16.16 view distances | [3di-gp-format-re.md](threedi/3di-gp-format-re.md) |
+| LOD thresholds | `lod_dist_threshold_q16` (GP) is a Q16.16 view-distance field; `lod_threshold_fp16` (3DI3 RMDL) is instead compared with the model sphere's projected screen radius after the frame's resolution/detail normalization | [3di-gp-format-re.md](threedi/3di-gp-format-re.md), [render-order-re.md](render/render-order-re.md) |
 | Skeletal bind matrices | BadBone fp16.16; the decode is `* 1/65536` | [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md) |
 | PANM part-anim phase | control value 0..65535 = the 16.16 phase; `ANIMTIME` is raw 16.16 seconds | [world-wac-ai-re.md §8](world/world-wac-ai-re.md) |
 

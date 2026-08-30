@@ -19,6 +19,9 @@ extends Node3D
 #     audio, env overrides) before loading another mission or leaving.
 
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
+# Godot's per-geometry reservation in the global shader buffer (vec4 values) for
+# a shader that declares instance uniforms; see _instance_uniform_geometry_estimate.
+const INSTANCE_UNIFORM_VALUES_PER_GEOMETRY := 16
 const GameFramePipelineScript := preload("res://game/world/game_frame_pipeline.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
@@ -649,6 +652,7 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	options["progress"] = func() -> void: load_progress.emit(
 			MissionData.load_progress_percent(MissionData.LOAD_STAGE_OBJECTS))
 	_mission_stats = _placer.place(mission, self, options)
+	_apply_occlusion_culling_policy()
 	# Static tile shadows are composed from the placer's resolved ObjectData and
 	# exact entity transforms. Attach only after place() has finished building
 	# that immutable mission snapshot; Terrain invalidates any pre-placement
@@ -661,6 +665,46 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 		int(_mission_stats.unresolved),
 		int(_mission_stats.markers),
 	])
+
+
+## Godot's occlusion consumer is a world-level decision (a conservative second
+## layer under the retail section/portal verdict, docs/render/
+## render-occlusion-re.md "Conservative device occluders"); no ObjectModel
+## flips viewport state. It stays OFF by default: measured 2026-08-30 through
+## the "occlusion_culling" debug row (1600x900, Ryzen 7735HS iGPU, medians of
+## p50 over two runs, the missions carrying 19 / 26 buildings with authored
+## occluders), the occluder pass cost 0.64 / 0.59 ms of render_root_cpu
+## (frame 14.47 -> 13.55 ms on 00TRa, 14.50 -> 13.68 ms on CP01) and culled
+## nothing (487 -> 489 and 416 -> 416 root draw calls) because the retail
+## section verdict already hides what the OOBJ faces would. A mission load
+## and an unload both re-apply the default; the debug row switches the pass
+## on live while the mission carries occluders.
+func _apply_occlusion_culling_policy() -> void:
+	set_occlusion_culling_enabled(false)
+
+
+## The occlusion consumer as a live device switch (the F3/MCP
+## "occlusion_culling" row): it reads and writes the world viewport directly,
+## never on a viewport without a RenderingDevice (headless and Compatibility
+## expose no occlusion path), and the next mission load re-applies the policy
+## default above (a fresh mission gets fresh debug state; nothing replays).
+func set_occlusion_culling_enabled(enabled: bool) -> void:
+	var viewport := get_viewport() if is_inside_tree() else null
+	if viewport == null:
+		return
+	viewport.use_occlusion_culling = enabled \
+			and RenderingServer.get_rendering_device() != null
+
+
+func is_occlusion_culling_enabled() -> bool:
+	var viewport := get_viewport() if is_inside_tree() else null
+	return viewport != null and viewport.use_occlusion_culling
+
+
+## How many placed buildings carry authored OOBJ occluders in the loaded
+## mission (0 = the occluder pass has nothing to cull with).
+func get_authored_occluder_model_count() -> int:
+	return int(_mission_stats.get("authored_occluder_models", 0))
 
 
 func get_loaded_mission() -> MissionData:
@@ -703,6 +747,14 @@ func get_mission_stats() -> Dictionary:
 	return _mission_stats
 
 
+## The placer's static populations that currently carry at least one live
+## row (the per-frame RLOD selection empties and refills them); 0 before a
+## mission is placed.
+func get_static_live_population_count() -> int:
+	return int(_placer.get_static_live_population_count()) \
+			if _placer != null else 0
+
+
 ## Tear down a loaded world so the shell can return to the menu (or load a
 ## different mission) without the previous world lingering. Frees the dynamically
 ## placed MissionObjects subtree and resets the load state; the terrain /
@@ -739,6 +791,7 @@ func unload() -> void:
 	# This also invalidates pages composed with the departing caster snapshot.
 	if _terrain != null:
 		_terrain.set_static_shadow_placer(null)
+	_apply_occlusion_culling_policy()
 	var container := get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		container.queue_free()
@@ -771,6 +824,7 @@ func unload() -> void:
 		_runtime.queue_free()  # frees its off-tree sim too (MissionPresentation._exit_tree)
 	_runtime = null
 	if _effect_world != null:
+		_effect_world.release_runtime_renderer_resources()
 		_effect_world.queue_free()
 		_effect_world = null
 	_mission_audio = null
@@ -794,6 +848,10 @@ func unload() -> void:
 ## Process-exit-only release for renderer resources intentionally retained by
 ## unload() so world-to-menu and mission-to-mission transitions stay warm.
 func release_runtime_renderer_resources() -> void:
+	# FrameFx publishes Q3 frames that retain sampled producer resources. Drain
+	# its compositor callback before Water releases those source textures.
+	if _framefx != null:
+		_framefx.shutdown()
 	var runtime_water := _water as Water
 	if runtime_water != null:
 		runtime_water.release_runtime_renderer_resources()
@@ -1150,12 +1208,9 @@ var _perf_probe_occlusion_skipped := false
 var _frame_stats: FrameStats = null
 # Weakref edge latch for measured render time on the water reflection RTT.
 var _stats_water_vp_ref: WeakRef = null
-# The other auxiliary scene renders (FrameFx's Q3 view, the slot-shadow
-# capture chain) — measured only while the board captures.
-var _q3_render_stats: ViewportRenderStatsSampler = null
-var _slot_render_stats: ViewportRenderStatsSampler = null
-# The captures the previous frame armed: their counters are that draw's.
-var _slot_render_armed_mask := 0
+# Focused Q3 and the slot-shadow captures both draw inside the root
+# compositor (POST_TRANSPARENT and PRE_OPAQUE); their per-pass counts come off
+# the effects' typed reports, their time rides the root viewport rows.
 
 
 ## The game shell hands its FrameStats here; the world re-hands it to
@@ -1168,23 +1223,11 @@ func set_frame_stats(board: FrameStats) -> void:
 		if _frame_stats.capture_changed.is_connected(old_capture_changed):
 			_frame_stats.capture_changed.disconnect(old_capture_changed)
 	_stop_water_render_stats()
-	if _q3_render_stats != null:
-		_q3_render_stats.stop()
-	if _slot_render_stats != null:
-		_slot_render_stats.stop()
-	_q3_render_stats = null
-	_slot_render_stats = null
 	_frame_stats = board
 	if _frame_stats != null:
 		var capture_changed := _on_frame_stats_capture_changed
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
-		_q3_render_stats = ViewportRenderStatsSampler.new(board,
-				FrameStats.RENDER_Q3_CPU, FrameStats.RENDER_Q3_GPU,
-				FrameStats.RENDER_Q3_OBJECTS, FrameStats.RENDER_Q3_DRAWS)
-		_slot_render_stats = ViewportRenderStatsSampler.new(board,
-				FrameStats.RENDER_SLOT_CPU, FrameStats.RENDER_SLOT_GPU,
-				FrameStats.RENDER_SLOT_OBJECTS, FrameStats.RENDER_SLOT_DRAWS)
 	_occlusion.set_frame_stats(board)
 	if _runtime != null:
 		_runtime.set_frame_stats(board)
@@ -1365,11 +1408,10 @@ func present_local_view_frame() -> void:
 		_local_view_presenter.after_world_tick()
 
 
-## Copy the just-placed beauty camera onto the renderer's auxiliary views. This
-## MUST run after present_local_view_frame() and before any auxiliary viewport
-## draws: those views share the world and their color is restored into the
-## beauty target, so a pose taken from the previous frame shears foliage,
-## scars and coronas against the ground while the view turns (D-RORD-8).
+## Compile the typed focused-Q3 snapshot after the camera and every live
+## celestial/water/object producer has published this frame's final state. The
+## immutable draw list is consumed by the terminal compositor against resolved
+## beauty depth; there is no shared-world auxiliary camera or Q3 viewport.
 func sync_framefx_frame() -> void:
 	if _framefx != null:
 		_framefx.advance_frame()
@@ -1585,33 +1627,30 @@ func finish_device_frame() -> void:
 	_sample_auxiliary_render_stats(_frame_stats_on)
 
 
-# The auxiliary scene renders the root-viewport rows cannot see: FrameFx's
-# shared-world Q3 view and the slot-shadow capture chain. Slot captures count
-# only the viewports the PREVIOUS frame armed — an UPDATE_ONCE viewport keeps
-# its last counters, so an unarmed slot would report a stale render.
+# The two compositor passes the root-viewport rows cannot split out: the
+# focused Q3 draw list and the slot-shadow captures. Both report typed
+# per-frame counts (the compile of this frame, the draw of the previous one).
 func _sample_auxiliary_render_stats(stats_on: bool) -> void:
-	if _q3_render_stats != null and _q3_render_stats.begin_frame(stats_on):
-		# FrameFx parks the Q3 viewport in UPDATE_DISABLED without a beauty
-		# camera; a disabled viewport keeps its last counters like an unarmed
-		# slot, so it counts only while it renders.
-		var q3_viewport: SubViewport = 				_framefx.get_q3_viewport() if _framefx != null else null
-		_q3_render_stats.sample_viewport(0, q3_viewport,
-				q3_viewport != null and q3_viewport.render_target_update_mode
-						!= SubViewport.UPDATE_DISABLED)
-	var armed := _slot_render_armed_mask
-	_slot_render_armed_mask = (
-			_slot_shadow.get_armed_capture_mask() if _slot_shadow != null else 0)
-	if _slot_render_stats == null or _slot_shadow == null \
-			or not _slot_render_stats.begin_frame(stats_on):
+	if not stats_on:
 		return
-	var rendered := 0
-	for order in range(SlotShadow.get_capture_count()):
-		var counted := (armed & (1 << order)) != 0
-		_slot_render_stats.sample_viewport(order,
-				_slot_shadow.get_capture_viewport(order), counted)
-		if counted:
-			rendered += 1
-	_frame_stats.add(FrameStats.RENDER_SLOT_VIEWPORTS, rendered)
+	if _framefx != null:
+		var q3_report := _framefx.get_backend_report()
+		_frame_stats.add(FrameStats.RENDER_Q3_OBJECTS,
+				int(q3_report.get("q3_drawn_commands", 0)))
+		_frame_stats.add(FrameStats.RENDER_Q3_DRAWS,
+				int(q3_report.get("q3_gpu_draw_calls", 0)))
+	if _slot_shadow != null:
+		var slot_report := _slot_shadow.get_report()
+		_frame_stats.add(FrameStats.RENDER_SLOT_OBJECTS,
+				int(slot_report.get("slot_surfaces_compiled", 0)))
+		_frame_stats.add(FrameStats.RENDER_SLOT_DRAWS,
+				int(slot_report.get("slot_draw_calls", 0)))
+		_frame_stats.add(FrameStats.RENDER_SLOT_CAPTURES,
+				int(slot_report.get("slot_captures_drawn", 0)))
+		_frame_stats.add(FrameStats.RENDER_SLOT_PACKED_VERTICES,
+				int(slot_report.get("slot_packed_vertices", 0)))
+		_frame_stats.add(FrameStats.RENDER_SLOT_SKINNED,
+				int(slot_report.get("slot_skinned_commands", 0)))
 
 
 func render_material_frame() -> void:
@@ -1621,6 +1660,17 @@ func render_material_frame() -> void:
 	# (after occlusion resolves visibility, before the particle composite)
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30 computes model runtime
 	# constants during the render sector walk].
+	var viewport := get_viewport() if is_inside_tree() else null
+	var camera := viewport.get_camera_3d() if viewport != null else null
+	if camera != null:
+		var viewport_size := viewport.get_visible_rect().size
+		ObjectModel.update_authored_lods(camera.global_transform, camera.fov,
+				viewport_size.x, viewport_size.y)
+		# The retained static instances select their RLOD per entity from the
+		# same camera frame (the placer rewrites only the slots that crossed).
+		if _placer != null:
+			_placer.update_static_lods(camera.global_transform, camera.fov,
+					viewport_size.x, viewport_size.y)
 	if not _frame_stats_on:
 		ObjectModel.advance_awake_frame(_frame_delta)
 		return
@@ -1766,6 +1816,8 @@ func _sync_runtime_profiling() -> void:
 
 
 func get_runtime_perf_counters() -> Dictionary:
+	var foliage_backend: Dictionary = (
+			_dispatcher.get_backend_report() if _dispatcher != null else {})
 	return {
 		"tick_us": _perf_tick_us,
 		"foliage_us": _perf_foliage_us,
@@ -1773,7 +1825,41 @@ func get_runtime_perf_counters() -> Dictionary:
 		"audio_us": _perf_audio_us,
 		"runtime": _runtime.get_perf_counters() if _runtime != null else {},
 		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
+		"foliage_backend": foliage_backend,
+		"framefx": _framefx.get_backend_report() if _framefx != null else {},
+		"mission_placement": _mission_stats.duplicate(true),
+		"static_live_populations": get_static_live_population_count(),
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
+		"instance_uniform_geometry_estimate":
+				_instance_uniform_geometry_estimate(foliage_backend),
+	}
+
+
+# Godot reserves INSTANCE_UNIFORM_VALUES_PER_GEOMETRY vec4 values of the global
+# shader buffer for every geometry instance whose shader declares instance
+# uniforms, visible or not, and prints "Too many instances using shader
+# instance variables. Increase buffer size in Project Settings." once the
+# buffer_size budget is exhausted (16384 instances with the project's setting;
+# shader_resource_validation_test.gd pins it). Godot does not expose the live
+# allocation, so this sums the retained instance-uniform geometry the shell
+# itself owns: the foliage draw pools (FoliageDispatcher), the placer's static
+# populations (visible batches plus their shadow twins), and every surface
+# instance of every live ObjectModel scene. Terrain patches, water, and the
+# per-model shadow twins the placer parents under animated models are not
+# counted: read the total as a floor on the allocation, not the exact figure.
+func _instance_uniform_geometry_estimate(foliage_backend: Dictionary) -> Dictionary:
+	var foliage_pool := int(foliage_backend.get("pool_size", 0))
+	var static_populations := (int(_mission_stats.get("batches", 0))
+			+ int(_mission_stats.get("static_shadow_batches", 0)))
+	var object_geometry := int(ObjectModel.get_live_geometry_instance_count())
+	var buffer_size := int(ProjectSettings.get_setting(
+			"rendering/limits/global_shader_variables/buffer_size", 0))
+	return {
+		"total": foliage_pool + static_populations + object_geometry,
+		"budget": buffer_size / INSTANCE_UNIFORM_VALUES_PER_GEOMETRY,
+		"foliage_pool": foliage_pool,
+		"static_populations": static_populations,
+		"object_geometry": object_geometry,
 	}
 
 
@@ -1821,7 +1907,7 @@ func build_local_player_held_weapon(graphic: String) -> ObjectModel:
 	if _placer == null or graphic.is_empty():
 		return null
 	var model: ObjectModel = _placer.build_model_from_graphic(
-			graphic, "", self, "")
+			graphic, "", self, "", "", true)
 	if model != null:
 		model.set_shadow_caster_enabled(true)
 		# The 3P gun silhouettes inside the AVATAR's render slot, exactly like
@@ -2350,9 +2436,9 @@ func is_particles_hidden() -> bool:
 
 
 # --- Hide foliage (the dev tools' "Hide foliage") ----------------------------
-# The dispatcher renders the scattered vegetation through child MultiMeshInstance3D slots,
-# so hiding the dispatcher node hides all foliage at once -- without touching the placement
-# caches, so re-showing is instant and the next dispatch is already current.
+# The dispatcher renders scattered vegetation through retained scenario instances;
+# its visibility notification hides those instances without touching placement caches,
+# so re-showing is instant and the next dispatch is already current.
 
 func set_foliage_hidden(hidden: bool) -> void:
 	_foliage_hidden = hidden

@@ -1,16 +1,19 @@
 #include "env/slot_shadow.h"
 
-#include <godot_cpp/classes/compositor.hpp>
-#include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/compositor_effect.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/rd_texture_format.hpp>
+#include <godot_cpp/classes/rd_texture_view.hpp>
+#include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/viewport.hpp>
-#include <godot_cpp/classes/viewport_texture.hpp>
-#include <godot_cpp/classes/visual_instance3d.hpp>
+#include <godot_cpp/classes/world_environment.hpp>
 #include <godot_cpp/variant/projection.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <cmath>
@@ -18,7 +21,6 @@
 #include <vector>
 
 #include "env/mission_environment.h"
-#include "env/water.h"
 #include "env/weather.h"
 #include "lights/light_scene.h"
 #include "object/object_model.h"
@@ -30,38 +32,40 @@ namespace godot {
 Ref<ShaderMaterial> SlotShadow::drape_material_;
 Ref<ShaderMaterial> SlotShadow::blob_material_;
 Ref<ImageTexture> SlotShadow::shadowztex_;
+Ref<Texture2DRD> SlotShadow::capture_textures_[opennova::renderer::kSlotCaptureCount];
 
-// Free visual layers reserved as per-slot capture channels (device plumbing;
-// the 12-slot budget itself is the retail RT chain — render_slot_shadow.h).
-static constexpr uint32_t kCaptureLayerBits[opennova::renderer::kSlotCaptureCount] = {
-	1u << 1, 1u << 2, 1u << 3, 1u << 4, 1u << 5, 1u << 6, 1u << 7, 1u << 8,
-	1u << 9, 1u << 17, 1u << 18, 1u << 19
-};
+namespace {
 
-static_assert(((1u << 1) | (1u << 2) | (1u << 3) | (1u << 4) | (1u << 5) |
-					   (1u << 6) | (1u << 7) | (1u << 8) | (1u << 9) |
-					   (1u << 17) | (1u << 18) | (1u << 19)) ==
-				uint32_t(Water::VISUAL_LAYER_SLOT_CAPTURE_MASK),
-		"the capture layer bits must match the Water layer table");
+// A replaced capture target outlives the frames that named it: the render
+// side draws frame N while the main thread compiles N + 1, so a target
+// published in frame N is free to release two main-thread frames later.
+constexpr uint32_t kTargetReleaseFrameLag = 2;
+
+WorldEnvironment *find_world_environment(Node *p_root) {
+	if (p_root == nullptr) {
+		return nullptr;
+	}
+	if (WorldEnvironment *environment = Object::cast_to<WorldEnvironment>(p_root)) {
+		return environment;
+	}
+	for (int i = 0; i < p_root->get_child_count(); ++i) {
+		if (WorldEnvironment *environment = find_world_environment(p_root->get_child(i))) {
+			return environment;
+		}
+	}
+	return nullptr;
+}
+
+RenderingDevice *main_rendering_device() {
+	RenderingServer *server = RenderingServer::get_singleton();
+	return server != nullptr ? server->get_rendering_device() : nullptr;
+}
+
+} // namespace
 
 const StringName &SlotShadow::caster_group() {
 	static const StringName group("slot_shadow_casters");
 	return group;
-}
-
-uint32_t SlotShadow::capture_layer_bit(int p_order) {
-	if (p_order < 0 || p_order >= opennova::renderer::kSlotCaptureCount) {
-		return 0;
-	}
-	return kCaptureLayerBits[p_order];
-}
-
-uint32_t SlotShadow::capture_layer_mask() {
-	uint32_t mask = 0;
-	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
-		mask |= kCaptureLayerBits[i];
-	}
-	return mask;
 }
 
 // The per-slot uniform names, built once: the device names up to two per
@@ -132,13 +136,38 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 			opennova::renderer::kShadowZTexHeight, false, Image::FORMAT_RGBA8, bytes);
 	shadowztex_ = ImageTexture::create_from_image(image);
 	drape_material_->set_shader_parameter("u_shadowztex", shadowztex_);
+	// The twelve capture textures, bound once: a Texture2DRD per slot order
+	// that the live device points at its resolve target (the retail RT
+	// chain, RenderSlot_InitTextureChain @0x5d5320).
+	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
+		if (capture_textures_[i].is_null()) {
+			capture_textures_[i].instantiate();
+		}
+		drape_material_->set_shader_parameter(slot_uniforms().tex[i],
+				capture_textures_[i]);
+	}
 	return drape_material_;
+}
+
+Ref<Texture2D> SlotShadow::get_capture_texture(int p_order) {
+	if (p_order < 0 || p_order >= opennova::renderer::kSlotCaptureCount) {
+		return Ref<Texture2D>();
+	}
+	get_drape_material();
+	return capture_textures_[p_order];
+}
+
+int SlotShadow::get_capture_count() {
+	return static_cast<int>(opennova::renderer::kSlotCaptureCount);
 }
 
 void SlotShadow::cleanup_statics() {
 	drape_material_.unref();
 	blob_material_.unref();
 	shadowztex_.unref();
+	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
+		capture_textures_[i].unref();
+	}
 	// Release the uniform-name table before the engine tears the StringName
 	// table down (the function-local static would otherwise outlive it).
 	SlotUniformNames &names = slot_uniforms();
@@ -175,10 +204,21 @@ void SlotShadow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_report"), &SlotShadow::get_report);
 	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_capture_count"),
 			&SlotShadow::get_capture_count);
-	ClassDB::bind_method(D_METHOD("get_capture_viewport", "order"),
-			&SlotShadow::get_capture_viewport);
+	ClassDB::bind_static_method("SlotShadow",
+			D_METHOD("get_capture_texture", "order"),
+			&SlotShadow::get_capture_texture);
 	ClassDB::bind_method(D_METHOD("get_armed_capture_mask"),
 			&SlotShadow::get_armed_capture_mask);
+	ClassDB::bind_method(D_METHOD("get_capture_order_of", "model"),
+			&SlotShadow::get_capture_order_of);
+	ClassDB::bind_method(D_METHOD("get_capture_caster_count", "order"),
+			&SlotShadow::get_capture_caster_count);
+	ClassDB::bind_method(D_METHOD("get_capture_target_size", "order"),
+			&SlotShadow::get_capture_target_size);
+	ClassDB::bind_method(D_METHOD("is_capture_effect_installed"),
+			&SlotShadow::is_capture_effect_installed);
+	ClassDB::bind_method(D_METHOD("get_capture_image", "order"),
+			&SlotShadow::get_capture_image);
 	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_drape_material"),
 			&SlotShadow::get_drape_material);
 }
@@ -231,70 +271,221 @@ void SlotShadow::set_local_player_prone(bool p_prone) {
 }
 
 void SlotShadow::_notification(int p_what) {
-	if (p_what == NOTIFICATION_READY) {
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		// Re-entry after an exit-tree shutdown (the FrameFx contract): the
+		// released effect and targets are rebuilt by the READY leg below.
+		if (shutdown_) {
+			shutdown_ = false;
+			request_ready();
+		}
+	} else if (p_what == NOTIFICATION_READY) {
 		_ensure_captures();
+	} else if (p_what == NOTIFICATION_EXIT_TREE) {
+		_release_captures();
 	}
 }
 
-void SlotShadow::_ensure_captures() {
-	if (viewports_[0] != nullptr) {
+void SlotShadow::_install_effect() {
+	if (effect_.is_null() || installed_into_.is_valid()) {
 		return;
 	}
-	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
-		SubViewport *viewport = memnew(SubViewport);
-		viewport->set_name(vformat("SlotCapture%d", i));
-		// The retail RT chain size for this slot order
-		// (render_slot_shadow.h carries the witness).
-		const int size = opennova::renderer::slot_texture_size(i, shadow_detail_);
-		viewport->set_size(Vector2i(size, size));
-		// Retail clears 0x00FFFFFF: white RGB and alpha 0 (the slot pass
-		// render_shadow_pass @0x5d7b70 - engine/runtime/renderer/render_slot_shadow.h
-		// carries the witness map). The drape samples
-		// the resolved RGB, while transparent_background preserves that alpha
-		// byte. This target stays plain RGBA8: HDR 2D is
-		// not needed for the gamma contract here, and it breaks
-		// transparent_background (the world background filled the RT and
-		// draped the whole patch as one featureless blob).
-		viewport->set_transparent_background(true);
-		// Antialias the silhouette: the drape preserves the resolved gray RGB
-		// edge, and a hard-aliased 1-2 px silhouette line scintillates against the
-		// breathing first-person camera (the witnessed eye rides the posed
-		// head bone). MSAA on the capture supplies the same partial-coverage
-		// RGB that retail's multisampled black-on-white RT resolves, like the
-		// Q3 view's MSAA stands in for the StretchRect box filter.
-		viewport->set_msaa_3d(Viewport::MSAA_4X);
-		viewport->set_update_mode(SubViewport::UPDATE_DISABLED);
-		viewport->set_disable_3d(false);
-		viewport->set_use_own_world_3d(false);
-		viewport->set_positional_shadow_atlas_size(0);
-		add_child(viewport);
-		Camera3D *camera = memnew(Camera3D);
-		camera->set_name("Camera");
-		Ref<Compositor> capture_compositor;
-		capture_compositor.instantiate();
-		camera->set_compositor(capture_compositor);
-		// A plain-color environment override: the capture must not render
-		// the world's sky/fog — only the clear plus the entity (the slot
-		// pass clear 0x00FFFFFF + fog color 0 @0x5d780f/@0x5d78b6 -
-		// docs/render/render-lighting-re.md; the transparent clear retains
-		// white RGB as the drape's no-op sample).
-		Ref<Environment> capture_environment;
-		capture_environment.instantiate();
-		capture_environment->set_background(Environment::BG_COLOR);
-		capture_environment->set_bg_color(Color(1.0f, 1.0f, 1.0f));
-		camera->set_environment(capture_environment);
-		camera->set_projection(Camera3D::PROJECTION_ORTHOGONAL);
-		camera->set_cull_mask(kCaptureLayerBits[i]);
-		viewport->add_child(camera);
-		viewports_[i] = viewport;
-		cameras_[i] = camera;
+	Node *scope = get_parent() != nullptr ? get_parent() : this;
+	WorldEnvironment *world_environment = find_world_environment(scope);
+	if (world_environment == nullptr) {
+		return;
 	}
-	// Bind the capture textures to the drape pass once.
-	const Ref<ShaderMaterial> drape = get_drape_material();
-	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
-		drape->set_shader_parameter(slot_uniforms().tex[i],
-				viewports_[i]->get_texture());
+	// The effect joins the WorldEnvironment's compositor in place (created
+	// when the environment has none): FrameFx keeps its identity check on
+	// that compositor, and the particle renderer mirrors its effect list
+	// onto the beauty camera's own compositor when the ids change.
+	Ref<Compositor> compositor = world_environment->get_compositor();
+	if (compositor.is_null()) {
+		compositor.instantiate();
+		world_environment->set_compositor(compositor);
 	}
+	TypedArray<Ref<CompositorEffect>> effects = compositor->get_compositor_effects();
+	bool present = false;
+	for (int64_t i = 0; i < effects.size(); ++i) {
+		Ref<CompositorEffect> existing = effects[i];
+		if (existing.is_valid() &&
+				existing->get_instance_id() == effect_->get_instance_id()) {
+			present = true;
+			break;
+		}
+	}
+	if (!present) {
+		effects.push_back(effect_);
+		compositor->set_compositor_effects(effects);
+	}
+	installed_into_ = compositor;
+	world_environment_id_ = ObjectID(world_environment->get_instance_id());
+}
+
+void SlotShadow::_uninstall_effect() {
+	if (installed_into_.is_valid() && effect_.is_valid()) {
+		TypedArray<Ref<CompositorEffect>> effects =
+				installed_into_->get_compositor_effects();
+		TypedArray<Ref<CompositorEffect>> kept;
+		for (int64_t i = 0; i < effects.size(); ++i) {
+			Ref<CompositorEffect> existing = effects[i];
+			if (existing.is_valid() &&
+					existing->get_instance_id() == effect_->get_instance_id()) {
+				continue;
+			}
+			kept.push_back(existing);
+		}
+		installed_into_->set_compositor_effects(kept);
+	}
+	installed_into_.unref();
+	world_environment_id_ = ObjectID();
+}
+
+bool SlotShadow::is_capture_effect_installed() const {
+	if (installed_into_.is_null() || effect_.is_null()) {
+		return false;
+	}
+	WorldEnvironment *world_environment = Object::cast_to<WorldEnvironment>(
+			ObjectDB::get_instance(world_environment_id_));
+	if (world_environment == nullptr ||
+			world_environment->get_compositor() != installed_into_) {
+		return false;
+	}
+	const TypedArray<Ref<CompositorEffect>> effects =
+			installed_into_->get_compositor_effects();
+	for (int64_t i = 0; i < effects.size(); ++i) {
+		Ref<CompositorEffect> existing = effects[i];
+		if (existing.is_valid() &&
+				existing->get_instance_id() == effect_->get_instance_id()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void SlotShadow::_ensure_captures() {
+	if (shutdown_ || !is_inside_tree()) {
+		return;
+	}
+	get_drape_material();
+	if (effect_.is_null()) {
+		effect_.instantiate();
+	}
+	// Follow the live compositor: FrameFx::install_compositor and
+	// DisplayDecode::install replace the scope WorldEnvironment's compositor
+	// with a fresh one (carrying the previous effects) after their own READY,
+	// and a scope may swap its WorldEnvironment; an install keyed on the old
+	// compositor object would leave the report false and the uninstall
+	// editing a compositor nothing renders. Re-install into whatever the
+	// WorldEnvironment holds now (a present effect is not added twice).
+	if (installed_into_.is_valid() && !is_capture_effect_installed()) {
+		_uninstall_effect();
+	}
+	_install_effect();
+}
+
+// The resolve target of one order at the retail chain size for this order
+// (render_slot_shadow.h carries the witness): RGBA8, sampled by the drape
+// through the order's Texture2DRD, resolved into from the effect's 4x MSAA
+// colour target (the MSAA rationale sits with the adapter's target). A
+// replaced target is released after the render side is done with it.
+bool SlotShadow::_ensure_capture_target(int p_order, int p_size) {
+	if (p_order < 0 || p_order >= opennova::renderer::kSlotCaptureCount || p_size <= 0) {
+		return false;
+	}
+	RenderingDevice *rd = main_rendering_device();
+	if (rd == nullptr) {
+		return false;
+	}
+	RID &target = capture_targets_[p_order];
+	if (target.is_valid() && capture_target_sizes_[p_order] == p_size &&
+			rd->texture_is_valid(target)) {
+		return true;
+	}
+	if (target.is_valid()) {
+		deferred_frees_.push_back({target, frame_});
+		target = RID();
+	}
+	Ref<RDTextureFormat> format;
+	format.instantiate();
+	format->set_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+	format->set_width(p_size);
+	format->set_height(p_size);
+	format->set_depth(1);
+	format->set_array_layers(1);
+	format->set_mipmaps(1);
+	format->set_texture_type(RenderingDevice::TEXTURE_TYPE_2D);
+	format->set_samples(RenderingDevice::TEXTURE_SAMPLES_1);
+	// Sampled by the drape, the resolve destination, and readable for the
+	// GUT capture pins.
+	format->set_usage_bits(BitField<RenderingDevice::TextureUsageBits>(
+			RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
+			RenderingDevice::TEXTURE_USAGE_CAN_COPY_TO_BIT |
+			RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT));
+	Ref<RDTextureView> view;
+	view.instantiate();
+	target = rd->texture_create(format, view);
+	capture_target_sizes_[p_order] = target.is_valid() ? p_size : 0;
+	if (target.is_valid()) {
+		// A fresh target reads as the retail cleared RT (white RGB, the
+		// no-shadow sample) until its first capture resolves into it: the
+		// drape samples every published order the same frame, and an order
+		// whose pass has not drawn yet (no WorldEnvironment in scope, a
+		// latched device failure) must multiply white into the terrain, not
+		// undefined texels (the viewport chain this replaced was always cleared
+		// by its background colour).
+		rd->texture_clear(target, slot_capture_clear_color(), 0, 1, 0, 1);
+	}
+	if (capture_textures_[p_order].is_valid()) {
+		capture_textures_[p_order]->set_texture_rd_rid(target);
+	}
+	return target.is_valid();
+}
+
+void SlotShadow::_flush_deferred_frees(bool p_all) {
+	RenderingDevice *rd = main_rendering_device();
+	std::vector<DeferredFree> kept;
+	for (const DeferredFree &entry : deferred_frees_) {
+		if (p_all || frame_ >= entry.frame + kTargetReleaseFrameLag) {
+			if (rd != nullptr && entry.rid.is_valid() && rd->texture_is_valid(entry.rid)) {
+				rd->free_rid(entry.rid);
+			}
+		} else {
+			kept.push_back(entry);
+		}
+	}
+	deferred_frees_ = std::move(kept);
+}
+
+void SlotShadow::_release_captures() {
+	shutdown_ = true;
+	_uninstall_effect();
+	// Detaching only changes the next render setup: drain any callback
+	// already submitted before freeing what it may still read.
+	RenderingServer *server = RenderingServer::get_singleton();
+	RenderingDevice *rd = server != nullptr ? server->get_rendering_device() : nullptr;
+	if (rd != nullptr) {
+		server->force_sync();
+	}
+	if (effect_.is_valid()) {
+		effect_->release_device_resources();
+		effect_.unref();
+	}
+	for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
+		if (capture_textures_[i].is_valid() &&
+				capture_textures_[i]->get_texture_rd_rid() == capture_targets_[i]) {
+			capture_textures_[i]->set_texture_rd_rid(RID());
+		}
+		if (capture_targets_[i].is_valid()) {
+			deferred_frees_.push_back({capture_targets_[i], frame_});
+			capture_targets_[i] = RID();
+		}
+		capture_target_sizes_[i] = 0;
+	}
+	_flush_deferred_frees(true);
+	requests_.clear();
+	capture_orders_.clear();
+	armed_capture_mask_ = 0;
+	_clear_all_terms();
 }
 
 void SlotShadow::_clear_all_terms() {
@@ -305,28 +496,6 @@ void SlotShadow::_clear_all_terms() {
 	}();
 	get_drape_material()->set_shader_parameter("u_slot_term", zero);
 	blob_material_->set_shader_parameter("u_slot_term", zero);
-}
-
-void SlotShadow::_apply_capture_layers(ObjectModel *p_model, uint32_t p_bit) {
-	if (p_model == nullptr) {
-		return;
-	}
-	// Per-instance stamp over the model subtree; ObjectModel.rebuild()
-	// recreates mesh children, so admitted models re-stamp every frame (the
-	// same contract as the player presenter's layer stamps).
-	struct Walker {
-		static void walk(Node *node, uint32_t bit, uint32_t mask) {
-			VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(node);
-			if (visual != nullptr) {
-				visual->set_layer_mask(
-						(visual->get_layer_mask() & ~mask) | bit);
-			}
-			for (int i = 0; i < node->get_child_count(); ++i) {
-				walk(node->get_child(i), bit, mask);
-			}
-		}
-	};
-	Walker::walk(p_model, p_bit, capture_layer_mask());
 }
 
 Ref<Texture2D> SlotShadow::_blob_texture(const String &p_name) {
@@ -366,24 +535,57 @@ Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
 	return to_uv * Projection(view);
 }
 
-int SlotShadow::get_capture_count() {
-	return static_cast<int>(opennova::renderer::kSlotCaptureCount);
+int SlotShadow::get_capture_order_of(ObjectModel *p_model) const {
+	if (p_model == nullptr) {
+		return -1;
+	}
+	const int *order = capture_orders_.getptr(uint64_t(p_model->get_instance_id()));
+	return order != nullptr ? *order : -1;
 }
 
-SubViewport *SlotShadow::get_capture_viewport(int p_order) const {
-	if (p_order < 0 || p_order >= static_cast<int>(opennova::renderer::kSlotCaptureCount)) {
-		return nullptr;
+int SlotShadow::get_capture_caster_count(int p_order) const {
+	for (const SlotCaptureRequest &request : requests_) {
+		if (request.order == p_order) {
+			return static_cast<int>(request.casters.size());
+		}
 	}
-	return viewports_[p_order];
+	return 0;
+}
+
+int SlotShadow::get_capture_target_size(int p_order) const {
+	if (p_order < 0 || p_order >= opennova::renderer::kSlotCaptureCount) {
+		return 0;
+	}
+	return capture_target_sizes_[p_order];
+}
+
+Ref<Image> SlotShadow::get_capture_image(int p_order) const {
+	if (p_order < 0 || p_order >= opennova::renderer::kSlotCaptureCount) {
+		return Ref<Image>();
+	}
+	RenderingDevice *rd = main_rendering_device();
+	const RID target = capture_targets_[p_order];
+	if (rd == nullptr || !target.is_valid() || !rd->texture_is_valid(target)) {
+		return Ref<Image>();
+	}
+	const PackedByteArray data = rd->texture_get_data(target, 0);
+	if (data.is_empty()) {
+		return Ref<Image>();
+	}
+	const int size = capture_target_sizes_[p_order];
+	return Image::create_from_data(size, size, false, Image::FORMAT_RGBA8, data);
 }
 
 void SlotShadow::advance_frame() {
-	if (!is_inside_tree()) {
+	if (!is_inside_tree() || shutdown_) {
 		return;
 	}
 	_ensure_captures();
 	++frame_;
+	_flush_deferred_frees(false);
 	armed_capture_mask_ = 0;
+	requests_.clear();
+	capture_orders_.clear();
 	const Ref<ShaderMaterial> drape = get_drape_material();
 	MissionEnvironment *env = Object::cast_to<MissionEnvironment>(
 			ObjectDB::get_instance(environment_node_id_));
@@ -415,25 +617,19 @@ void SlotShadow::advance_frame() {
 
 	// Registration diff against the plan.
 	std::vector<uint64_t> stale;
-	for (const KeyValue<uint64_t, uint32_t> &entry : applied_bits_) {
-		if (!caster_index.has(entry.key)) {
-			stale.push_back(entry.key);
+	for (const uint64_t id : registered_ids_) {
+		if (!caster_index.has(id)) {
+			stale.push_back(id);
 		}
 	}
 	for (uint64_t id : stale) {
 		plan_.release_entity(id);
-		ObjectModel *model = Object::cast_to<ObjectModel>(
-				ObjectDB::get_instance(ObjectID(id)));
-		if (model != nullptr) {
-			_apply_capture_layers(model, 0);
-		}
-		applied_bits_.erase(id);
-		applied_scene_serials_.erase(id);
+		registered_ids_.erase(id);
 	}
 	if (!live) {
 		_clear_all_terms();
-		for (int i = 0; i < opennova::renderer::kSlotCaptureCount; ++i) {
-			viewports_[i]->set_update_mode(SubViewport::UPDATE_DISABLED);
+		if (effect_.is_valid()) {
+			effect_->adapter().clear_frame();
 		}
 		report_bound_ = report_captures_ = report_blobs_ = 0;
 		return;
@@ -461,9 +657,7 @@ void SlotShadow::advance_frame() {
 		ObjectModel *model = info.model;
 		const uint64_t id = uint64_t(model->get_instance_id());
 		plan_.register_entity(id);
-		if (!applied_bits_.has(id)) {
-			applied_bits_[id] = 0;
-		}
+		registered_ids_.insert(id);
 		const Vector3 pos = model->get_global_position();
 		// The two radii the slot reads: the model sphere (gpm[5]) sizes the
 		// capture extent and the depth clip; the entity bound (entity+0 —
@@ -583,25 +777,19 @@ void SlotShadow::advance_frame() {
 	report_bound_ = report_captures_ = report_blobs_ = 0;
 
 	// The retail child walk: models linked capture-with an admitted caster
-	// (held weapons, mounted children) render into the parent's slot RT
-	// [orig: RenderSlot_RenderEntityAndChildren @0x5d78ef..0x5d79d6]. A
-	// linked child is excluded from its own slot and its own row lands
-	// before or after the parent's in registration order, so resolve every
-	// claim first: child id -> the parent's capture bit this frame.
-	HashMap<uint64_t, uint32_t> claimed;
-	HashSet<uint64_t> rowed;
-	for (const opennova::renderer::SlotAssignment &assignment : assignments) {
-		rowed.insert(assignment.id);
-		if (!assignment.draws_silhouette || assignment.excluded) {
-			continue;
-		}
-		const uint32_t bit = capture_layer_bit(assignment.capture_order);
+	// (held weapons, mounted children) render into the parent's slot
+	// [orig: RenderSlot_RenderEntityAndChildren @0x5d78ef..0x5d79d6]. The
+	// walk follows the entity hierarchy, not the slot table: a linked child
+	// the full table refused (no row of its own) still rides its parent.
+	const auto claimed_children = [&](uint64_t p_parent) {
+		std::vector<uint64_t> children;
 		for (const std::pair<uint64_t, uint64_t> &link : capture_links) {
-			if (link.second == assignment.id) {
-				claimed[link.first] = bit;
+			if (link.second == p_parent) {
+				children.push_back(link.first);
 			}
 		}
-	}
+		return children;
+	};
 
 	for (const opennova::renderer::SlotAssignment &assignment : assignments) {
 		const size_t *index = caster_index.getptr(assignment.id);
@@ -612,23 +800,6 @@ void SlotShadow::advance_frame() {
 		ObjectModel *model = info.model;
 		const bool captures =
 				assignment.draws_silhouette && !assignment.excluded;
-		// Capture-layer churn: stamp an admitted model when its bit changes
-		// or its scene was rebuilt since the last stamp (rebuild() recreates
-		// the mesh children), clear once on the way out. A claimed child
-		// carries its parent's bit, never its own excluded row's zero.
-		const uint32_t *claim = claimed.getptr(assignment.id);
-		const uint32_t want_bit = captures
-				? capture_layer_bit(assignment.capture_order)
-				: (claim != nullptr ? *claim : 0u);
-		uint32_t &applied = applied_bits_[assignment.id];
-		uint32_t &applied_serial = applied_scene_serials_[assignment.id];
-		const uint32_t scene_serial = model->get_scene_build_serial();
-		if (want_bit != applied ||
-				(want_bit != 0 && scene_serial != applied_serial)) {
-			_apply_capture_layers(model, want_bit);
-			applied = want_bit;
-			applied_serial = scene_serial;
-		}
 		if (assignment.bound && !assignment.excluded) {
 			++report_bound_;
 		}
@@ -723,39 +894,64 @@ void SlotShadow::advance_frame() {
 			continue;
 		}
 
-		// Capture camera along the slot direction, sized from the MODEL
+		// The capture view along the slot direction, sized from the MODEL
 		// sphere [orig: RenderSlot_RenderEntityAndChildren @0x5d7835 —
-		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)].
+		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)]: the witnessed
+		// rotation-only basis (renderer::silhouette_capture_basis, its
+		// zenith degeneracy substituted).
 		const int order = assignment.capture_order;
 		const float radius = info.capture_radius;
 		const float half_extent = opennova::renderer::silhouette_half_extent(radius);
-		const float cam_dist = radius * 2.0f + 2.0f;
-		Camera3D *slot_camera = cameras_[order];
-		Vector3 up = Vector3(0, 1, 0);
-		if (std::fabs(dir.dot(up)) > 0.99f) {
-			up = Vector3(1, 0, 0);
-		}
+		const opennova::renderer::SlotCaptureBasis basis =
+				opennova::renderer::silhouette_capture_basis(
+						{float(dir.x), float(dir.y), float(dir.z)});
+		const Vector3 forward(basis.forward[0], basis.forward[1], basis.forward[2]);
+		// The RenderingDevice depth band (the device fold D-RLIT-10 in
+		// docs/render/render-lighting-re.md): retail renders the entity at the
+		// origin of that rotation-only view under its 0.2..5000.2 band
+		// (renderer::kSilhouetteCaptureNear/Far), a band that as read starts
+		// in front of the entity's own origin; the RD ortho clips outside
+		// [near, far] the same way, so this eye backs off along -forward by
+		// two sphere diameters plus the retail near margin and the band
+		// spans the sphere. An orthographic silhouette is invariant under that
+		// translation, so the capture is the same image.
+		const float eye_distance = radius * 2.0f + 2.0f;
+		const float eye_near = opennova::renderer::kSilhouetteCaptureNear * 0.25f;
+		const float eye_far = eye_distance * 2.0f + radius;
 		Transform3D pose;
-		pose.origin = center - dir * cam_dist;
-		pose = pose.looking_at(center, up);
-		slot_camera->set_global_transform(pose);
-		slot_camera->set_size(2.0f * half_extent);
-		slot_camera->set_near(0.05f);
-		slot_camera->set_far(cam_dist * 2.0f + radius);
+		// A Godot camera looks down its local -Z: columns x = right, y = up,
+		// z = -forward.
+		pose.basis = Basis(Vector3(basis.right[0], basis.right[1], basis.right[2]),
+				Vector3(basis.up[0], basis.up[1], basis.up[2]), -forward);
+		pose.origin = center - forward * eye_distance;
 
 		// The refresh cadence (opennova::renderer::slot_refresh_mask_for carries the
 		// local-player exception).
 		const uint32_t effective_mask = opennova::renderer::slot_refresh_mask_for(
 				shadow_detail_, assignment.id == local_id);
-		SubViewport *slot_viewport = viewports_[order];
 		const int want_size =
 				opennova::renderer::slot_texture_size(order, shadow_detail_);
-		if (slot_viewport->get_size().x != want_size) {
-			slot_viewport->set_size(Vector2i(want_size, want_size));
+		const std::vector<uint64_t> children = claimed_children(assignment.id);
+		capture_orders_[assignment.id] = order;
+		for (const uint64_t child : children) {
+			capture_orders_[child] = order;
 		}
 		if (opennova::renderer::slot_refresh_due(assignment.record_index, frame_,
 					effective_mask, assignment.capture_dirty)) {
-			slot_viewport->set_update_mode(SubViewport::UPDATE_ONCE);
+			SlotCaptureRequest request;
+			request.order = order;
+			request.size = want_size;
+			request.view = pose;
+			request.projection = Projection::create_orthogonal(-half_extent,
+					half_extent, -half_extent, half_extent, eye_near, eye_far);
+			if (_ensure_capture_target(order, want_size)) {
+				request.target = capture_targets_[order];
+			}
+			request.casters.push_back(assignment.id);
+			for (const uint64_t child : children) {
+				request.casters.push_back(child);
+			}
+			requests_.push_back(std::move(request));
 			armed_capture_mask_ |= 1u << order;
 		}
 
@@ -791,8 +987,7 @@ void SlotShadow::advance_frame() {
 			q = Vector3(term[0], term[1], term[2]);
 		}
 		drape->set_shader_parameter(slot_uniforms().mat[order],
-				_drape_projection(pose, half_extent, half_extent,
-						slot_camera->get_far()));
+				_drape_projection(pose, half_extent, half_extent, eye_far));
 		silhouette_terms[order] = Vector4(q.x, q.y, q.z, 1.0f);
 		// The patch around the marched anchor, from the stored direction.
 		const Vector3 entity_pos = model->get_global_position();
@@ -816,30 +1011,10 @@ void SlotShadow::advance_frame() {
 	drape->set_shader_parameter("u_slot_clip_v", clip_v);
 	blob_material_->set_shader_parameter("u_slot_term", blob_terms);
 	blob_material_->set_shader_parameter("u_slot_patch", blob_patches);
-	// The object shaders select their retail PROJSHAD blocks from the capture
-	// camera's cull mask (exactly one of the twelve capture layer bits, see
-	// kCaptureLayerBits); the main view and unrelated SubViewports carry bits
-	// outside that set and stay on NORMAL.
-
-	// Casters the full table refused (no assignment row of their own): a
-	// linked child still rides its parent's slot RT — retail's child walk
-	// follows the entity hierarchy, not the slot table (the
-	// RenderSlot_RenderEntityAndChildren walk the claim pass above cites) —
-	// and a row-less caster whose link dropped gives its inherited channel
-	// back (no row of its own ever clears it).
-	for (const CasterInfo &info : casters) {
-		const uint64_t id = uint64_t(info.model->get_instance_id());
-		if (rowed.has(id)) {
-			continue;
-		}
-		const uint32_t *claim = claimed.getptr(id);
-		const uint32_t want_bit = claim != nullptr ? *claim : 0u;
-		uint32_t &applied = applied_bits_[id];
-		if (want_bit == 0 && applied == 0) {
-			continue;
-		}
-		_apply_capture_layers(info.model, want_bit);
-		applied = want_bit;
+	// The armed requests compile into this frame's device draw list; an
+	// unarmed order keeps its previous capture (retail's sticky RT).
+	if (effect_.is_valid()) {
+		effect_->adapter().compile_frame(requests_);
 	}
 }
 
@@ -850,6 +1025,15 @@ Dictionary SlotShadow::get_report() const {
 	report["blobs"] = report_blobs_;
 	report["registered"] = int(plan_.registered_count());
 	report["detail"] = shadow_detail_;
+	report["armed"] = static_cast<int>(requests_.size());
+	report["capture_effect_installed"] = is_capture_effect_installed();
+	if (effect_.is_valid()) {
+		const Dictionary backend = effect_->get_backend_report();
+		const Array keys = backend.keys();
+		for (int64_t i = 0; i < keys.size(); ++i) {
+			report[keys[i]] = backend[keys[i]];
+		}
+	}
 	return report;
 }
 

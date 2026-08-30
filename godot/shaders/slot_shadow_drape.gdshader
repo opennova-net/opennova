@@ -2,7 +2,6 @@ shader_type spatial;
 render_mode blend_mul, depth_draw_never, cull_back, unshaded, fog_disabled;
 
 #include "res://shaders/color.gdshaderinc"
-#include "res://shaders/frame_pass.gdshaderinc"
 
 // The render-slot entity ground-shadow drape, as a multiplicative next pass
 // over the hand-lit terrain surface. Retail drapes each bound shadow slot
@@ -116,9 +115,6 @@ mat4 slot_matrix(int i) {
 }
 
 void fragment() {
-	if (is_q3_pass(CAMERA_VISIBLE_LAYERS, IN_SHADOW_PASS)) {
-		discard;
-	}
 	// The drape distance fade (renderer::drape_fade: 0 inside the start
 	// distance, ramping to 1 over the range).
 	float fade = clamp((length(VERTEX) - u_drape_fade_range.x) /

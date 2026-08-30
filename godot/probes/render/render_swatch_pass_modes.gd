@@ -482,7 +482,7 @@ func _apply_matchterrain_probe_state(entries: Array[Dictionary], state: String,
 
 # Highest-quality GLOW proof. _FFP LUM copies NORMAL, fixed Glass uses the
 # sun-rotated specular cube, and every other live runtime technique has no
-# GLOW pass. Ring pixels exercise the production isolated Q3 target and exact
+# GLOW pass. Ring pixels exercise the compositor-owned typed Q3 target and exact
 # FrameFX kernel; the away-sun capture proves Glass tracks MatRotSpecular.
 func glow_mode(out_dir: String, prefix: String) -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
@@ -588,9 +588,8 @@ func glow_mode(out_dir: String, prefix: String) -> void:
 			"glow_on_aligned", "glow_off_away", "glow_on_away"]
 	for state in states:
 		frame_renderer.visible = state in ["nopass_on", "glow_on_aligned", "glow_on_away"]
-		# In play the GameFramePipeline leg syncs the Q3 view to the beauty
-		# camera every frame (never a process callback); the stage has no
-		# pipeline, so the probe runs that sync after each visibility change.
+		# In play GameFramePipeline compiles focused Q3 from the final beauty
+		# camera every frame; this stage drives that leg explicitly.
 		frame_renderer.advance_frame()
 		var aligned: bool = not state.ends_with("_away")
 		var show_glow_contracts: bool = state.begins_with("glow_")
@@ -618,13 +617,6 @@ func glow_mode(out_dir: String, prefix: String) -> void:
 			return
 		frame.convert(Image.FORMAT_RGBA8)
 		captures[state] = frame
-		# The Q3 source beside every capture: the isolated view the bloom
-		# kernel samples, so a missing ring is attributable to the source or
-		# to the composite.
-		var q3_view := frame_renderer.get_q3_viewport()
-		var q3_image: Image = q3_view.get_texture().get_image() if q3_view != null else null
-		if q3_image != null and not q3_image.is_empty():
-			q3_image.save_png(out_dir.path_join("%s_%s_q3.png" % [prefix, state]))
 		if frame.save_png(out_dir.path_join("%s_%s.png" % [prefix, state])) != OK:
 			_sink.error("render_swatch_probe glow: could not save %s" % state)
 			_sink.quit(1)
@@ -691,186 +683,225 @@ func glow_mode(out_dir: String, prefix: String) -> void:
 		_sink.quit(1)
 
 
-# Raster proof for the retail PROJSHAD technique used by the live 12-slot
-# dynamic-shadow captures. Every technique is compiled and observed as black
-# coverage over retail's white clear under the real camera gate. The matrix
-# proves no-pass effects, Diffuse1.a for all
-# sixteen explicit blocks, Diffuse2.a on the two _MT FFP blocks, AlphaGenValue
-# on the four FFP families, and isolation from the main/unrelated camera.
+# Raster proof for the render-slot PROJSHAD capture: SlotShadow's typed
+# requests drawn by the SlotCaptureAdapter RenderingDevice pass over the
+# engine's per-technique coverage and blend tables (which ctest
+# renderer_material_classify pins per technique). The synthetic 3DI fixtures
+# stand in for the technique matrix, each caster alone in its own slot: the
+# opaque FFP crate (black replace), the mount's alpha-tested FFP sight
+# (Diffuse1.a x AlphaGen at the discard boundary), the pump's alpha-tested
+# _MT post (x Diffuse2.a), the shed's alpha-blend FFP bulb (black blended by
+# its coverage), and the two no-pass surfaces (the mount's additive LUM slab,
+# the armory's glass). Every capture is read back from its resolve target
+# under paired texture-alpha / detail-alpha / AlphaGen states, and the stage's
+# beauty frame proves the NORMAL technique stays where the capture is black.
+# Run without a mission: the caster group is scene-tree wide.
+const PROJSHADOW_CASTERS: Array[Dictionary] = [
+	{"name": "crate_ffp_opaque", "fixture": "crate", "surfaces": "", "kind": "opaque"},
+	{"name": "mount_ffp_alpha_test", "fixture": "mount", "surfaces": "/fixed/cutout",
+		"kind": "alpha_test", "detail": false},
+	{"name": "pump_mt_alpha_test", "fixture": "pump_mtrl1_mt_alphatest",
+		"surfaces": "/fixed/cutout", "kind": "alpha_test", "detail": true},
+	{"name": "shed_ffp_alpha_blend", "fixture": "shed", "surfaces": "/fixed/alpha",
+		"kind": "blend"},
+	{"name": "mount_additive_lum", "fixture": "mount", "surfaces": "/self_lit/additive",
+		"kind": "no_pass"},
+	{"name": "armory_glass", "fixture": "armory", "surfaces": "/glass/", "kind": "no_pass"},
+]
+const PROJSHADOW_STATES: Array[String] = ["diffuse_low", "diffuse_high",
+		"detail_low", "detail_high", "alpha_gen_low", "alpha_gen_high"]
+# The alpha test ref of the cutout fixtures is byte 32 (0.125): the "high"
+# texture alpha 192 (0.753) passes, the "low" alpha 16 (0.063) fails, and
+# AlphaGen 0.1 pulls the high alpha (0.075) under the ref while 1.0 keeps it.
+const PROJSHADOW_ALPHA_LOW := 16
+const PROJSHADOW_ALPHA_HIGH := 192
+const PROJSHADOW_ALPHA_GEN_LOW := 0.1
+
+
 func projshadow_mode(out_dir: String, prefix: String) -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	_stage.set_stage_size(Vector2i(1280, 720))
 	_ctx.set_time_scale(0.0)
-
-	var parsed = JSON.parse_string(FileAccess.get_file_as_string(
-			"res://shaders/object/pipeline_manifest.json"))
-	if not parsed is Dictionary:
-		_sink.error("render_swatch_probe projshadow: object pipeline manifest did not parse")
-		_sink.quit(1)
-		return
-	var contracts = parsed.get("projected_shadow_contracts", {})
-	if not contracts is Dictionary:
-		_sink.error("render_swatch_probe projshadow: projected-shadow contracts did not parse")
-		_sink.quit(1)
-		return
 
 	var scene := Node3D.new()
 	_stage.add_scene(scene)
 	var world_env := WorldEnvironment.new()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color.WHITE
+	env.background_color = Color(0.1, 0.1, 0.12)
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
 	world_env.environment = env
 	scene.add_child(world_env)
 	RenderSwatchSupport.add_framefx(scene, false)
-
-	var textures := {
-		"diffuse_low": RenderSwatchSupport.make_channel_diffuse_texture(64),
-		"diffuse_high": RenderSwatchSupport.make_channel_diffuse_texture(192),
-		"detail_low": RenderSwatchSupport.make_channel_detail_texture(64),
-		"detail_high": RenderSwatchSupport.make_channel_detail_texture(192),
-		"normal": RenderSwatchSupport.make_lighting_normal_texture(),
-	}
-	var entries: Array[Dictionary] = []
-	var techniques: Array = parsed.get("techniques", [])
-	const COLS := 6
-	const SPACING := 2.2
-	for i in range(techniques.size()):
-		var technique: Dictionary = techniques[i]
-		var name := str(technique["engine_enum"])
-		var policies: Array = technique.get("policies", [])
-		# Use one authored alpha-test policy so the black pass makes each
-		# PROJSHAD coverage source observable at the real discard boundary.
-		var policy := ""
-		for candidate in ["cutout_mix", "cutout_alpha", "cutout_additive"]:
-			if policies.has(candidate):
-				policy = candidate
-				break
-		if policy.is_empty():
-			_sink.error("render_swatch_probe projshadow: no cutout policy for %s" % name)
-			_sink.quit(1)
-			return
-		var path := "res://shaders/object/%s/%s.gdshader" % [
-				technique["directory"], policy]
-		var shader := load(path) as Shader
-		if shader == null:
-			_sink.error("render_swatch_probe projshadow: could not load %s" % path)
-			_projshadow_probe_disarm()
-			_sink.quit(1)
-			return
-		var material := ShaderMaterial.new()
-		material.shader = shader
-		if not RenderSwatchSupport.bind_production_object_resources(material,
-				str(technique["implementation"])):
-			_sink.error("render_swatch_probe projshadow: production resources unavailable for %s" % path)
-			_projshadow_probe_disarm()
-			_sink.quit(1)
-			return
-		var quad := QuadMesh.new()
-		quad.size = Vector2(1.55, 1.55)
-		var mesh := MeshInstance3D.new()
-		mesh.mesh = quad
-		mesh.material_override = material
-		mesh.position = Vector3((i % COLS) * SPACING,
-				-(i / COLS) * SPACING, 0.0)
-		mesh.set_instance_shader_parameter("u_point_light_count", 0.0)
-		scene.add_child(mesh)
-		entries.append({
-			"name": name,
-			"contract": str(contracts.get(name, "missing")),
-			"material": material,
-			"mesh": mesh,
-		})
-
-	var rows := int(ceil(float(entries.size()) / float(COLS)))
-	var grid_w := COLS * SPACING
-	var grid_h := rows * SPACING
-	var aspect := 1280.0 / 720.0
+	var env_data := EnvFile.new()
+	env_data.reset_to_default()
+	env_data.set_curtime(1200)
+	var mission_env := MissionEnvironment.new()
+	mission_env.environment_data = env_data
+	scene.add_child(mission_env)
 	var camera := Camera3D.new()
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = maxf(grid_h, grid_w / aspect) + 0.6
-	camera.position = Vector3((COLS - 1) * SPACING * 0.5,
-			-(rows - 1) * SPACING * 0.5, 18.0)
 	camera.current = true
 	scene.add_child(camera)
+	var shadow := SlotShadow.new()
+	scene.add_child(shadow)
+	shadow.set_environment_node(mission_env)
+	shadow.set_shadow_detail(4)  # mask 0: every slot re-captures every frame
+
+	var textures := {
+		"diffuse_low": RenderSwatchSupport.make_channel_diffuse_texture(PROJSHADOW_ALPHA_LOW),
+		"diffuse_high": RenderSwatchSupport.make_channel_diffuse_texture(PROJSHADOW_ALPHA_HIGH),
+		"detail_low": RenderSwatchSupport.make_channel_detail_texture(PROJSHADOW_ALPHA_LOW),
+		"detail_high": RenderSwatchSupport.make_channel_detail_texture(PROJSHADOW_ALPHA_HIGH),
+	}
+	const SPACING := 8.0
+	var casters: Array[Dictionary] = []
+	for i in range(PROJSHADOW_CASTERS.size()):
+		var recipe: Dictionary = PROJSHADOW_CASTERS[i]
+		var path := "res://../fixtures/threedi/synth/%s.3di" % String(recipe["fixture"])
+		var data := ObjectData.new()
+		if data.open_file(ProjectSettings.globalize_path(path)) != OK:
+			_sink.error("render_swatch_probe projshadow: could not open %s" % path)
+			_sink.quit(1)
+			return
+		var model := ObjectModel.new()
+		scene.add_child(model)
+		model.set_process(false)
+		model.set_object_data(data)
+		model.position = Vector3(float(i) * SPACING, 0.0, 0.0)
+		model.set_shadow_caster_enabled(true)
+		# The whole model inside its capture (the placer's sphere stamp is the
+		# fallback law: half the model-bounds diagonal).
+		var radius := maxf(0.5, model.get_model_bounds().size.length() * 0.5)
+		model.set_shadow_bound_radii(radius, radius)
+		var surfaces := String(recipe["surfaces"])
+		if not surfaces.is_empty():
+			_keep_only_shader_surfaces(model, surfaces)
+		model.advance_runtime_frame(1.0 / 62.0)
+		var materials: Array[ShaderMaterial] = []
+		for row in model.get_surface_materials():
+			var material := row as ShaderMaterial
+			if material != null:
+				materials.append(material)
+		casters.append({"recipe": recipe, "model": model, "materials": materials})
+	var row_center := Vector3(float(PROJSHADOW_CASTERS.size() - 1) * SPACING * 0.5, 0.5, 0.0)
+	camera.position = row_center + Vector3(0.0, 6.0, 16.0)
+	camera.look_at(row_center, Vector3.UP)
 
 	var captures := {}
-	var states := ["inactive", "wrong_eye", "diffuse_low", "diffuse_high",
-			"detail_low", "detail_high", "alpha_gen_low", "alpha_gen_high"]
-	for state in states:
-		_apply_projshadow_probe_state(entries, state, textures, camera)
+	var beauty := {}
+	var reports := {}
+	for state in PROJSHADOW_STATES:
+		_apply_projshadow_probe_state(casters, state, textures)
+		shadow.advance_frame()
 		var frame: Image = await _capture_lighting_image()
 		if frame == null:
-			_sink.error("render_swatch_probe projshadow: no viewport image for %s" % state)
-			_projshadow_probe_disarm()
+			_sink.error("render_swatch_probe projshadow: no stage image for %s" % state)
 			_sink.quit(1)
 			return
+		RenderingServer.force_sync()
 		frame.convert(Image.FORMAT_RGBA8)
-		captures[state] = frame
-		if frame.save_png(out_dir.path_join("%s_%s.png" % [prefix, state])) != OK:
-			_sink.error("render_swatch_probe projshadow: could not save %s" % state)
-			_projshadow_probe_disarm()
+		beauty[state] = frame
+		reports[state] = shadow.get_report()
+		var per_caster := {}
+		for entry in casters:
+			var name := String(entry["recipe"]["name"])
+			var order: int = shadow.get_capture_order_of(entry["model"])
+			if order < 0:
+				_sink.error("render_swatch_probe projshadow: %s took no slot in %s" % [name, state])
+				_sink.quit(1)
+				return
+			var image: Image = shadow.get_capture_image(order)
+			if image == null:
+				_sink.error("render_swatch_probe projshadow: %s has no capture in %s" % [name, state])
+				_sink.quit(1)
+				return
+			per_caster[name] = image
+			if image.save_png(out_dir.path_join("%s_%s_%s.png" % [prefix, name, state])) != OK:
+				_sink.error("render_swatch_probe projshadow: could not save %s %s" % [name, state])
+				_sink.quit(1)
+				return
+		captures[state] = per_caster
+		if frame.save_png(out_dir.path_join("%s_beauty_%s.png" % [prefix, state])) != OK:
+			_sink.error("render_swatch_probe projshadow: could not save the %s beauty frame" % state)
 			_sink.quit(1)
 			return
 
-	var pixel_scale := float((captures["diffuse_high"] as Image).get_height()) / camera.size
-	var radius_px := maxi(8, int(0.60 * pixel_scale))
-	var reports: Array[Dictionary] = []
 	var failures: Array[String] = []
-	for entry in entries:
-		var mesh: MeshInstance3D = entry["mesh"]
-		var center := camera.unproject_position(mesh.global_position)
-		var rect := Rect2i(int(center.x) - radius_px, int(center.y) - radius_px,
-				radius_px * 2, radius_px * 2)
-		var contract := str(entry["contract"])
-		var capture_darkness := 1.0 - RenderSwatchSupport.lighting_mean_luminance(
-				captures["diffuse_high"], rect)
-		var wrong_eye_delta := RenderSwatchSupport.lighting_mean_delta(
-				captures["inactive"], captures["wrong_eye"], rect)
-		var diffuse_delta := RenderSwatchSupport.lighting_mean_delta(
-				captures["diffuse_low"], captures["diffuse_high"], rect)
-		var detail_delta := RenderSwatchSupport.lighting_mean_delta(
-				captures["detail_low"], captures["detail_high"], rect)
-		var alpha_gen_delta := RenderSwatchSupport.lighting_mean_delta(
-				captures["alpha_gen_low"], captures["alpha_gen_high"], rect)
-		var has_pass := contract != "no_pass"
-		var uses_detail := contract == "diffuse_detail_alpha_ffp"
-		var uses_alpha_gen := contract.ends_with("_ffp")
-		reports.append({
-			"technique": entry["name"],
-			"contract": contract,
-			"capture_darkness": capture_darkness,
-			"wrong_eye_delta": wrong_eye_delta,
-			"diffuse_alpha_delta": diffuse_delta,
-			"detail_alpha_delta": detail_delta,
-			"alpha_gen_delta": alpha_gen_delta,
-		})
-		if contract == "missing":
-			failures.append("%s has no projected-shadow contract" % entry["name"])
-		if has_pass and capture_darkness < 0.12:
-			failures.append("%s did not render its PROJSHAD pass (%f)" % [
-					entry["name"], capture_darkness])
-		elif not has_pass and capture_darkness > 0.02:
-			failures.append("%s invented a PROJSHAD pass (%f)" % [
-					entry["name"], capture_darkness])
-		if wrong_eye_delta > 0.001:
-			failures.append("%s applied PROJSHAD to an unrelated camera (%f)" % [
-					entry["name"], wrong_eye_delta])
-		RenderSwatchSupport.channel_expect_delta(failures, entry["name"], "PROJSHAD Diffuse1.a",
-				diffuse_delta, has_pass, 0.05, 0.001)
-		RenderSwatchSupport.channel_expect_delta(failures, entry["name"], "PROJSHAD Diffuse2.a",
-				detail_delta, uses_detail, 0.03, 0.001)
-		RenderSwatchSupport.channel_expect_delta(failures, entry["name"], "PROJSHAD AlphaGenValue",
-				alpha_gen_delta, uses_alpha_gen, 0.03, 0.001)
+	var rows: Array[Dictionary] = []
+	for entry in casters:
+		var recipe: Dictionary = entry["recipe"]
+		var name := String(recipe["name"])
+		var kind := String(recipe["kind"])
+		var black := {}
+		var darkest := {}
+		for state in PROJSHADOW_STATES:
+			var image: Image = captures[state][name]
+			black[state] = _projshadow_black_count(image)
+			darkest[state] = _projshadow_darkest(image)
+		rows.append({"caster": name, "kind": kind, "black_pixels": black, "darkest": darkest})
+		match kind:
+			"opaque":
+				for state in PROJSHADOW_STATES:
+					if int(black[state]) < 50:
+						failures.append("%s did not render its PROJSHAD pass in %s" % [name, state])
+				if absi(int(black["diffuse_low"]) - int(black["diffuse_high"])) > 2 \
+						or absi(int(black["alpha_gen_low"]) - int(black["alpha_gen_high"])) > 2:
+					failures.append("%s (opaque replace) reacted to a coverage change" % name)
+			"alpha_test":
+				var uses_detail := bool(recipe.get("detail", false))
+				_projshadow_expect_present(failures, name, "diffuse_high", black, true)
+				_projshadow_expect_present(failures, name, "diffuse_low", black, false)
+				_projshadow_expect_present(failures, name, "alpha_gen_high", black, true)
+				_projshadow_expect_present(failures, name, "alpha_gen_low", black, false)
+				_projshadow_expect_present(failures, name, "detail_high", black, true)
+				_projshadow_expect_present(failures, name, "detail_low", black, not uses_detail)
+			"blend":
+				if float(darkest["diffuse_high"]) > 0.35 or float(darkest["diffuse_high"]) < 0.12:
+					failures.append("%s did not blend its coverage (darkest %f, expected ~0.25)" % [
+							name, darkest["diffuse_high"]])
+				if float(darkest["diffuse_low"]) < 0.85:
+					failures.append("%s did not react to Diffuse1.a (darkest %f)" % [name, darkest["diffuse_low"]])
+				if float(darkest["alpha_gen_low"]) < 0.85:
+					failures.append("%s did not react to AlphaGenValue (darkest %f)" % [name, darkest["alpha_gen_low"]])
+				if absf(float(darkest["detail_low"]) - float(darkest["detail_high"])) > 0.02:
+					failures.append("%s (single-texture) invented a Diffuse2.a response" % name)
+			"no_pass":
+				for state in PROJSHADOW_STATES:
+					if int(black[state]) != 0 or float(darkest[state]) < 0.98:
+						failures.append("%s invented a PROJSHAD pass in %s" % [name, state])
+	# The adapter's own accounting of the walk: two no-pass surfaces (the
+	# additive LUM slab and the glass) and one blended command per state.
+	for state in PROJSHADOW_STATES:
+		var report: Dictionary = reports[state]
+		if String(report.get("slot_status", "")) != "drawn":
+			failures.append("the slot pass did not draw in %s: %s" % [state, report.get("slot_failure", "")])
+		if int(report.get("slot_no_pass_surfaces", 0)) < 2:
+			failures.append("fewer than two no-pass surfaces counted in %s" % state)
+		if int(report.get("slot_blended_commands", 0)) < 1:
+			failures.append("no blended command compiled in %s" % state)
+		if int(report.get("slot_unclassified_surfaces", 0)) != 0:
+			failures.append("an unclassified surface reached the walk in %s" % state)
+	# Beauty isolation: the crate's top reads its NORMAL shading in the stage
+	# frame while its capture is black.
+	var crate: ObjectModel = casters[0]["model"]
+	var crate_pixel := Vector2i(camera.unproject_position(crate.global_position + Vector3(0.0, 0.5, 0.0)))
+	var beauty_frame: Image = beauty["diffuse_high"]
+	var beauty_color := beauty_frame.get_pixel(
+			clampi(crate_pixel.x, 0, beauty_frame.get_width() - 1),
+			clampi(crate_pixel.y, 0, beauty_frame.get_height() - 1))
+	if maxf(beauty_color.r, maxf(beauty_color.g, beauty_color.b)) < 0.1:
+		failures.append("the beauty frame is black at the crate (%s): the NORMAL technique was replaced" % beauty_color)
 
 	var manifest := {
-		"version": 2,
+		"version": 3,
 		"probe": "object-slot-projected-shadow",
 		"window": [1280, 720],
-		"technique_count": entries.size(),
-		"states": states,
-		"techniques": reports,
+		"backend": String(reports["diffuse_high"].get("slot_backend", "")),
+		"caster_count": casters.size(),
+		"states": PROJSHADOW_STATES,
+		"casters": rows,
+		"beauty_at_crate": [beauty_color.r, beauty_color.g, beauty_color.b],
 		"failures": failures,
 	}
 	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
@@ -878,10 +909,9 @@ func projshadow_mode(out_dir: String, prefix: String) -> void:
 		mf.store_string(JSON.stringify(manifest, "\t"))
 		mf.close()
 	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
-	_projshadow_probe_disarm()
 	if failures.is_empty():
-		_sink.logv(["render_swatch_probe projshadow: PASS - ", entries.size(),
-				" techniques render black-on-white coverage and honor no-pass, texture-alpha, AlphaGen, and camera contracts"])
+		_sink.logv(["render_swatch_probe projshadow: PASS - ", casters.size(),
+				" casters through the RenderingDevice slot pass honor black-over-white, texture-alpha, detail-alpha, AlphaGen, blend and no-pass contracts"])
 		_sink.quit(0)
 	else:
 		for failure in failures:
@@ -889,15 +919,56 @@ func projshadow_mode(out_dir: String, prefix: String) -> void:
 		_sink.quit(1)
 
 
-func _apply_projshadow_probe_state(entries: Array[Dictionary], state: String,
-		textures: Dictionary, camera: Camera3D) -> void:
+func _keep_only_shader_surfaces(root: Node, shader_fragment: String) -> void:
+	if root is MeshInstance3D:
+		var mesh_instance := root as MeshInstance3D
+		var material := mesh_instance.get_active_material(0) as ShaderMaterial
+		var shader_path := material.shader.resource_path \
+				if material != null and material.shader != null else ""
+		mesh_instance.visible = shader_fragment in shader_path
+	for child in root.get_children():
+		_keep_only_shader_surfaces(child, shader_fragment)
+
+
+func _projshadow_black_count(image: Image) -> int:
+	var count := 0
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			var p := image.get_pixel(x, y)
+			if maxf(p.r, maxf(p.g, p.b)) < 0.5:
+				count += 1
+	return count
+
+
+func _projshadow_darkest(image: Image) -> float:
+	var darkest := 1.0
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			var p := image.get_pixel(x, y)
+			darkest = minf(darkest, maxf(p.r, maxf(p.g, p.b)))
+	return darkest
+
+
+func _projshadow_expect_present(failures: Array[String], name: String, state: String,
+		black: Dictionary, present: bool) -> void:
+	var count := int(black[state])
+	if present and count < 20:
+		failures.append("%s was discarded in %s (%d black pixels): the coverage fell under the alpha ref" % [
+				name, state, count])
+	elif not present and count != 0:
+		failures.append("%s survived %s (%d black pixels): the coverage did not fall under the alpha ref" % [
+				name, state, count])
+
+
+func _apply_projshadow_probe_state(casters: Array[Dictionary], state: String,
+		textures: Dictionary) -> void:
 	var diffuse = textures["diffuse_low"] if state == "diffuse_low" else \
 			textures["diffuse_high"]
 	var detail = textures["detail_low"] if state == "detail_low" else \
 			textures["detail_high"]
-	var alpha_mod := 0.25 if state == "alpha_gen_low" else 1.0
+	var alpha_mod := PROJSHADOW_ALPHA_GEN_LOW if state == "alpha_gen_low" else 1.0
 	# The lighting block is pass-global: publish this probe's flat register
-	# with every state so each capture starts from its own values.
+	# with every state so the beauty frame starts from its own values.
 	RenderingServer.global_shader_parameter_set("opennova_light_block_gain", Vector3.ONE)
 	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky",
 			Vector3(0.2, 0.2, 0.2))
@@ -908,33 +979,11 @@ func _apply_projshadow_probe_state(entries: Array[Dictionary], state: String,
 	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
 			Vector3(0.2, 0.2, 0.2))
 	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
-	for entry in entries:
-		var material: ShaderMaterial = entry["material"]
-		material.set_shader_parameter("u_diffuse", diffuse)
-		material.set_shader_parameter("u_detail", detail)
-		material.set_shader_parameter("u_normal_map", textures["normal"])
-		material.set_shader_parameter("u_uv_transform_u", Vector3(1.0, 0.0, 0.0))
-		material.set_shader_parameter("u_uv_transform_v", Vector3(0.0, 1.0, 0.0))
-		material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
-		material.set_shader_parameter("u_alpha_mod", alpha_mod)
-		material.set_shader_parameter("u_reflect_color", Color(0.7, 0.8, 0.9, 0.8))
-		material.set_shader_parameter("u_alpha_test_threshold", 0.5)
-		material.set_shader_parameter("u_alpha_test_invert", 0.0)
-		material.set_shader_parameter("u_local_light_count", 0)
-	# A slot capture camera is recognised by its cull mask: exactly one of the
-	# twelve capture layer bits and nothing else. "inactive" is an ordinary
-	# camera; "wrong_eye" is the beauty signature (a camera that is NOT a
-	# capture) and must render the NORMAL technique, not coverage.
-	if state == "inactive":
-		camera.cull_mask = 0xFFFFF
-	elif state == "wrong_eye":
-		camera.cull_mask = FrameFx.kBeautyCameraMask
-	else:
-		camera.cull_mask = 1 << 1
-	for entry in entries:
-		var mesh: MeshInstance3D = entry["mesh"]
-		mesh.layers = 0xFFFFF
-
-
-func _projshadow_probe_disarm() -> void:
-	pass
+	for entry in casters:
+		for material in entry["materials"]:
+			material.set_shader_parameter("u_diffuse", diffuse)
+			material.set_shader_parameter("u_detail", detail)
+			material.set_shader_parameter("u_uv_transform_u", Vector3(1.0, 0.0, 0.0))
+			material.set_shader_parameter("u_uv_transform_v", Vector3(0.0, 1.0, 0.0))
+			material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
+			material.set_shader_parameter("u_alpha_mod", alpha_mod)

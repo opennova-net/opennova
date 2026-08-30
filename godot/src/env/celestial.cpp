@@ -1,4 +1,5 @@
 #include "env/celestial.h"
+#include "render/frame_fx.h"
 
 #include <cmath>
 
@@ -233,8 +234,22 @@ void Celestial::_rebuild_if_needed() {
 				_make_celestial_material(spec.additive, spec.priority);
 		Body body;
 		body.model = model;
-		body.materials = _apply_material_override(model, material);
+		const InstalledMaterials installed =
+				_apply_material_override(model, material);
+		body.materials = installed.materials;
 		body.tint = spec.tint;
+		if (spec.key == "sun" || spec.key == "moon" || spec.key == "glare") {
+			// The registration carries the blend each surface was installed
+			// with, so the focused Q3 adapter adds or alpha-blends the disc
+			// exactly as the beauty material does.
+			const opennova::renderer::Q3Source source = spec.key == "glare" ?
+					opennova::renderer::Q3Source::SunGlow :
+					opennova::renderer::Q3Source::CelestialBody;
+			for (const InstalledMesh &mesh : installed.meshes) {
+				FrameFx::register_q3_source(mesh.mesh, source,
+						mesh.additive_surfaces);
+			}
+		}
 		if (spec.key == "sun" || spec.key == "moon") {
 			_stamp_environment_capture_layer(model);
 			// The disc bodies far-pin in BOTH shaders: the authored sun/moon
@@ -293,17 +308,21 @@ Ref<ShaderMaterial> Celestial::_make_celestial_material(bool p_additive,
 }
 
 // Walk the model's MeshInstance3D parts, reuse each surface's diffuse texture
-// in our celestial material, and return the ACTUAL installed materials.
-// ObjectModel puts its generated material in
-// GeometryInstance3D.material_override; clear that whole-mesh override AFTER
-// harvesting its texture so these surface overrides own the draw and remain
-// the objects updated by the TOD pass.
-Vector<Ref<ShaderMaterial>> Celestial::_apply_material_override(Node3D *p_model,
-		const Ref<ShaderMaterial> &p_base_material) {
-	Vector<Ref<ShaderMaterial>> installed;
+// in our celestial material, and return the ACTUAL installed materials with
+// the blend each surface was given. ObjectModel puts its generated material
+// in GeometryInstance3D.material_override; clear that whole-mesh override
+// AFTER harvesting its texture so these surface overrides own the draw and
+// remain the objects updated by the TOD pass.
+Celestial::InstalledMaterials Celestial::_apply_material_override(
+		Node3D *p_model, const Ref<ShaderMaterial> &p_base_material) {
+	InstalledMaterials installed;
+	const bool base_additive =
+			p_base_material->get_shader() == celestial_additive_shader_;
 	Vector<MeshInstance3D *> meshes;
 	_collect_meshes(p_model, meshes);
 	for (MeshInstance3D *mesh_instance : meshes) {
+		InstalledMesh installed_mesh;
+		installed_mesh.mesh = mesh_instance;
 		// The vertex shader relocates celestials for the active render-pass
 		// camera. Keep the source-camera AABB/occlusion result from rejecting
 		// the mirror pass before that relocation reaches the GPU.
@@ -320,8 +339,13 @@ Vector<Ref<ShaderMaterial>> Celestial::_apply_material_override(Node3D *p_model,
 			Ref<ShaderMaterial> material = p_base_material->duplicate();
 			// Preserve the source material's blend classification while
 			// replacing only the celestial placement/tint shader logic.
-			if (source_material_uses_additive(src)) {
+			const bool additive = base_additive ||
+					source_material_uses_additive(src);
+			if (additive && !base_additive) {
 				material->set_shader(celestial_additive_shader_);
+			}
+			if (additive && surface < 32) {
+				installed_mesh.additive_surfaces |= 1u << surface;
 			}
 			Ref<ShaderMaterial> src_shader = src;
 			if (src_shader.is_valid()) {
@@ -339,19 +363,17 @@ Vector<Ref<ShaderMaterial>> Celestial::_apply_material_override(Node3D *p_model,
 		for (int surface = 0; surface < surface_count; ++surface) {
 			const Ref<ShaderMaterial> &material = surface_materials[surface];
 			mesh_instance->set_surface_override_material(surface, material);
-			installed.push_back(material);
+			installed.materials.push_back(material);
 		}
+		installed.meshes.push_back(installed_mesh);
 	}
 	return installed;
 }
 
 bool Celestial::source_material_uses_additive(const Ref<Material> &p_source) {
-	Ref<ShaderMaterial> shader_material = p_source;
-	if (shader_material.is_null()) {
-		return false;
-	}
-	Ref<Shader> shader = shader_material->get_shader();
-	return shader.is_valid() && shader->get_code().contains("blend_add");
+	opennova::renderer::ObjectMaterialClassification classification;
+	return FrameFx::q3_object_material_classification(p_source, classification) &&
+			classification.blend == opennova::renderer::ObjectBlendMode::Additive;
 }
 
 void Celestial::_collect_meshes(Node *p_node,
@@ -490,12 +512,12 @@ void Celestial::advance_frame(double p_delta) {
 			glare_occlusion_->tick(visible_a, visible_b, state.fog_level());
 			frame = opennova::env::build_glare_frame(state, cam_rf,
 					glare_occlusion_->get_brightness());
-			// The isolated Q3 (bloom source) view draws the glare with NO
+			// The focused Q3 (bloom source) draw uses NO
 			// occlusion test and the fog-based brightness - the glow still
 			// blooms over a ridge that blocks the occlusion rays
 			// (render_skybox_sun_glow(0, 0) from FrameFX_RenderBloomPass
-			// @ 0x582a77 - docs/env/env-tod-re.md). The shader picks this
-			// opacity when the pass camera is the Q3 signature.
+			// @ 0x582a77 - docs/env/env-tod-re.md). The typed producer publishes
+			// this pass-specific opacity to Q3FrameCompiler.
 			const float q3_opacity =
 					opennova::env::glare_q3_peak_opacity(state);
 			_set_body_parameter(body, "u_q3_opacity", q3_opacity);
@@ -515,6 +537,16 @@ void Celestial::advance_frame(double p_delta) {
 									: to_vector3(state.sun_color()));
 		_set_body_parameter(body, "u_opacity", frame.opacity);
 		body.last_opacity = frame.opacity;
+		// The typed Q3 disc read: the bloom pass redraws the discs through the
+		// fog-shader path, whose moon alpha leg differs from the direct draw
+		// while the sun has no such variant (celestial_frame.h carries the
+		// cites). The glare published its own Q3 opacity above.
+		if (kv.key == "moon") {
+			_set_body_parameter(body, "u_q3_opacity",
+					opennova::env::celestial_moon_q3_opacity(state));
+		} else if (kv.key == "sun") {
+			_set_body_parameter(body, "u_q3_opacity", frame.opacity);
+		}
 	}
 
 	// The sun-glare screen veil + exposure stop-down, once per frame after

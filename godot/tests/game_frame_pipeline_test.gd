@@ -92,20 +92,19 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 			"the one sampled input object crosses the pipeline unchanged")
 	assert_almost_eq(input.delta_seconds, 0.0125, 0.000001)
 	assert_eq(world.trace, [
-		"begin", "session", "local_view", "framefx", "scene_environment",
+		"begin", "session", "local_view", "scene_environment",
 		"environment_nodes", "terrain", "water", "foliage", "network",
-		"weather", "occlusion", "iris", "sun_veil", "lights", "materials", "slot_shadows",
+		"weather", "occlusion", "iris", "sun_veil", "lights", "materials", "framefx", "slot_shadows",
 		"particles", "audio:0", "clear", "environment_cube", "finish",
 	])
 	assert_eq(world.terrain_camera_generation, 1,
 			"terrain samples the post-present camera generation")
 	assert_eq(world.foliage_camera_generation, 1,
 			"foliage samples the post-present camera generation")
-	# The renderer's auxiliary views restore their color into the beauty
-	# target, so a pose one generation stale shears every surface the beauty
-	# pass still owns (foliage, scars, coronas) whenever the view turns.
+	# The terminal compositor's typed Q3 snapshot must carry the same current
+	# camera generation as beauty after all current-frame producers update.
 	assert_eq(world.framefx_camera_generation, 1,
-			"the auxiliary render views sample the post-present camera generation")
+			"typed Q3 samples the post-present camera generation")
 
 
 func test_network_install_failure_suppresses_every_later_device_phase() -> void:
@@ -119,5 +118,5 @@ func test_network_install_failure_suppresses_every_later_device_phase() -> void:
 			MissionFrameInput.new())
 
 	assert_eq(world.trace,
-			["begin", "session", "local_view", "framefx", "scene_environment",
+			["begin", "session", "local_view", "scene_environment",
 			"environment_nodes", "terrain", "water", "foliage", "network"])

@@ -21,7 +21,9 @@
 
 namespace godot {
 
+class Compositor;
 class EnvFile;
+class FrameFxCompositorEffect;
 class MissionEnvironment;
 class Weather;
 
@@ -62,21 +64,15 @@ public:
 		VISUAL_LAYER_WORLD_NO_MIRROR = 1 << 16,
 		VISUAL_LAYER_SHADOW_CASTER_MASK = VISUAL_LAYER_STATIC_SHADOW_CASTER |
 				VISUAL_LAYER_DYNAMIC_SHADOW_CASTER,
-		// Per-slot silhouette-capture channels for the render-slot entity
-		// ground shadows (12 = the retail RT budget; SlotShadow assigns the
-		// per-order bits — env/slot_shadow.h). Every beauty/mirror
-		// camera excludes them; only the slot capture cameras cull to them.
-		VISUAL_LAYER_SLOT_CAPTURE_MASK = (1 << 1) | (1 << 2) | (1 << 3) |
-				(1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8) |
-				(1 << 9) | (1 << 17) | (1 << 18) | (1 << 19),
 		// The mirror camera's above-water mask; a below-water view adds
-		// WORLD_NO_MIRROR back (retail collects unfiltered there).
+		// WORLD_NO_MIRROR back (retail collects unfiltered there). The
+		// render-slot captures draw through SlotShadow's RenderingDevice pass
+		// and reserve no visual layer.
 		REFLECTION_CULL_MASK = 0xFFFFF &
 				~(VISUAL_LAYER_WATER | VISUAL_LAYER_VIEWMODEL |
 						VISUAL_LAYER_FP_BODY_SHADOW_ONLY |
 						VISUAL_LAYER_SHADOW_CASTER_MASK |
-						VISUAL_LAYER_WORLD_NO_MIRROR |
-						VISUAL_LAYER_SLOT_CAPTURE_MASK),
+						VISUAL_LAYER_WORLD_NO_MIRROR),
 	};
 
 	void set_environment_path(const NodePath &p_path);
@@ -149,6 +145,8 @@ private:
 	void _push_water_split_height();
 	void _sync_render_activity();
 	void _update_reflection_camera(Camera3D *p_cam);
+	void _install_reflection_decode();
+	void _release_reflection_decode();
 	void _rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
 			float p_murk, float p_fog_end, const Vector4 &p_uv_state,
 			const Color &p_lit, const Ref<EnvFile> &p_env_data);
@@ -173,6 +171,11 @@ private:
 	Ref<ShaderMaterial> water_material_;
 	SubViewport *reflection_viewport_ = nullptr;
 	Camera3D *reflection_camera_ = nullptr;
+	// The reflection camera owns a decode-only FrameFx effect. Keep both
+	// resources here so process-exit teardown can detach and drain the render
+	// callback while RenderingServer is still alive, before deleting the view.
+	Ref<FrameFxCompositorEffect> reflection_decode_effect_;
+	Ref<Compositor> reflection_compositor_;
 	bool built_ = false;
 	bool has_drawable_surface_ = false;
 	ObjectID env_node_id_;
