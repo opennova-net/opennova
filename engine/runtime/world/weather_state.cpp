@@ -110,10 +110,13 @@ void WeatherState::seed(const WeatherSeed &seed) {
 
 void WeatherState::mission_start_init() {
     // [orig: Environment_MissionStartInit (ex sub_57F1E0) @ 0x57f1e0..0x57f873]
-    // Every color block: current <- active target, per-channel step 0x2800000.
+    // Every color block (the two modulators too): current <- active target,
+    // per-channel step 0x2800000, the lightning additive [12] <- 0 (the
+    // sixteen `mov dword_xxx, esi` stores with esi = 0 @ 0x57f2d0..0x57f836).
     const auto init_block = [](env::WeatherColorBlock &block) {
         block.snap(block.target);
         for (int32_t &rate : block.max_rate) rate = 0x02800000;
+        block.additive = 0;
     };
     init_block(core.fill_block);
     init_block(core.sun_block);

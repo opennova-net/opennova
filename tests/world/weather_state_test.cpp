@@ -231,6 +231,22 @@ void test_entity_update_falls_the_drops_on_gameplay_ticks_only() {
 	CHECK(world.weather.precipitation.fall_accum_z == -2 * 12288);
 }
 
+void test_mission_start_init_zeroes_the_lightning_additives() {
+	// [orig: Environment_MissionStartInit @ 0x57f2d0..0x57f836 — every
+	//  block's [12] <- 0, the modulators included]
+	w::WeatherState ws;
+	ws.seed(seed_800());
+	ws.core.sky_block.additive = 0x00101010u;
+	ws.core.fog_block.additive = 0x00080808u;
+	ws.core.fill_block.additive = 0x00040404u;
+	ws.core.sky_color_blocks.skyfog.additive = 0x00080808u;
+	ws.core.modulator_chain.modulator.additive = 0x00010101u;
+	ws.mission_start_init();
+	CHECK(ws.core.sky_block.additive == 0u && ws.core.fog_block.additive == 0u &&
+	      ws.core.fill_block.additive == 0u && ws.core.sky_color_blocks.skyfog.additive == 0u &&
+	      ws.core.modulator_chain.modulator.additive == 0u);
+}
+
 void test_quake_displaces_pool_entities_and_arms_the_local_shake() {
 	w::World world;
 	w::AiSystem ai;
@@ -359,6 +375,7 @@ int main() {
 	test_mission_start_init_snaps_currents_and_installs_the_clamps();
 	test_tick_advances_the_clock_and_fires_thunder();
 	test_entity_update_falls_the_drops_on_gameplay_ticks_only();
+	test_mission_start_init_zeroes_the_lightning_additives();
 	test_quake_displaces_pool_entities_and_arms_the_local_shake();
 	test_wire_sample_writes_targets_only();
 	test_night_phase_follows_the_clock();
