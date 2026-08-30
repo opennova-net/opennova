@@ -192,10 +192,9 @@
     X(RENDER_ROOT_GPU, "") \
     X(RENDER_WATER_CPU, "") \
     X(RENDER_WATER_GPU, "") \
-    X(RENDER_Q3_CPU, "RETIRED: focused Q3 compositor CPU is included in root viewport time") \
-    X(RENDER_Q3_GPU, "RETIRED: focused Q3 compositor GPU is included in root viewport time") \
-    X(RENDER_SLOT_CPU, "RETIRED: the slot captures draw inside the root viewport's PRE_OPAQUE compositor pass; included in root viewport time") \
-    X(RENDER_SLOT_GPU, "RETIRED: the slot captures draw inside the root viewport's PRE_OPAQUE compositor pass; included in root viewport time") \
+    /* The focused Q3 pass (the FrameFX compositor) and the slot captures (the */ \
+    /* PRE_OPAQUE compositor pass) render inside the root viewport, so their */ \
+    /* time is inside RENDER_ROOT_*; only their submission counts below remain. */ \
     /* Per-pass render counts (RenderingServer per-viewport render info for the */ \
     /* previous frame). VALUE slots: what each pass actually submitted, so pass */ \
     /* cost attribution (main view vs shadow maps vs the water mirror) is read */ \
