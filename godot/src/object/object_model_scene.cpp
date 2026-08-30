@@ -139,7 +139,12 @@ void ObjectModel::rebuild_scene() {
 				FrameFx::clone_q3_object_material(shared_material, material);
 			}
 			instance->set_material_override(material);
-			FrameFx::register_q3_object_source(instance, material);
+			// A per-vertex skinned model rides retail's bone path, which never
+			// collects a Q3 copy (renderer::q3_object_source_admitted).
+			if (opennova::renderer::q3_object_source_admitted(
+						object_data_->is_skinned(static_cast<int>(lod_index)))) {
+				FrameFx::register_q3_object_source(instance, material);
+			}
 			const bool blended_draw = bool(submesh.get("is_alpha", false));
 			if (blended_draw) {
 				// Static harvesting keeps retail's independently ordered alpha strips

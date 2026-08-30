@@ -637,6 +637,17 @@ const std::vector<Recipe> &recipes() {
 		{"mount_mtrl0_rgbgen113_reg1", make_mount, [](Model &m) {
 			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0.0, kBlack, kWhite);
 		}},
+		// --- Q3 bloom source (framefx_test.gd): the heat slab as an AlphaBlend
+		// LUM (its SELFLUM copy carries alpha 0 into the Q3 target) ---
+		{"mount_mtrl2_ab_lum", make_mount, [](Model &m) {
+			std::snprintf(m.materials[2].shader_name, sizeof(m.materials[2].shader_name), "FF_ST_AB_LUM");
+		}},
+		// --- Q3 bloom source (framefx_test.gd): a per-vertex skinned model wearing
+		// a LUM material; retail's bone path never copies it into Q3 ---
+		{"person_mtrl0_ad_lum", make_person, [](Model &m) {
+			std::snprintf(m.materials[0].shader_name, sizeof(m.materials[0].shader_name), "FF_ST_AD_LUM");
+			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
+		}},
 		{"armory_lght0_colorgen113_flicker", make_armory, [](Model &m) {
 			ThreediLight &l = m.lights[0];
 			l.flags = static_cast<uint8_t>(l.flags & ~THREEDI_LIGHT_FLAG_DISABLE_OBJECTS);
