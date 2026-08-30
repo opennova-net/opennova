@@ -231,6 +231,26 @@ void test_entity_update_falls_the_drops_on_gameplay_ticks_only() {
 	CHECK(world.weather.precipitation.fall_accum_z == -2 * 12288);
 }
 
+void test_wac_arguments_land_raw() {
+	// No handler takes an absolute value or clamps a negative
+	// [orig: WacCmd_Quake @ 0x4ed4c9 `6 * value`; WacCmd_ColorFade @ 0x4edcbd
+	//  `62 * n`; WacCmd_Rain @ 0x4edf84..0x4edfb6 `62 * s` -> the idiv].
+	w::WeatherState ws;
+	ws.seed(seed_800());
+	ws.command_quake(-1);
+	CHECK(ws.quake_ticks == 0xFFFFFFFAu);
+	ws.command_color_fade(-2);
+	CHECK(ws.color_fade_ticks == -124);
+	// rain(100, -1): target 0x10000, ticks -62, step = abs32(0x10000 - 31 - 0)
+	// / -62 = -1056 (truncating toward zero).
+	ws.command_rain(100, -1);
+	CHECK(ws.rain_pct_target_q16() == 0x10000u);
+	CHECK(ws.core.scalar_channels.rain_step_fp == -1056);
+	// A negative percent lands negative (no floor).
+	ws.command_overcast(-50, 1);
+	CHECK(ws.core.scalar_channels.overcast_target_fp == -(50 << 16) / 100);
+}
+
 void test_mission_start_init_zeroes_the_lightning_additives() {
 	// [orig: Environment_MissionStartInit @ 0x57f2d0..0x57f836 — every
 	//  block's [12] <- 0, the modulators included]
@@ -394,6 +414,7 @@ int main() {
 	test_mission_start_init_snaps_currents_and_installs_the_clamps();
 	test_tick_advances_the_clock_and_fires_thunder();
 	test_entity_update_falls_the_drops_on_gameplay_ticks_only();
+	test_wac_arguments_land_raw();
 	test_mission_start_init_zeroes_the_lightning_additives();
 	test_keyframe_snap_writes_channels_render_and_target_only();
 	test_quake_displaces_pool_entities_and_arms_the_local_shake();

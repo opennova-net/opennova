@@ -11,37 +11,51 @@ namespace opennova::world {
 
 namespace {
 
-// WAC seconds -> ticks: 62 per second, zero seconds rounds up to one tick
-// [orig: WacCmd_Rain @ 0x4edf60 `imul eax, 62` then the `test/jnz` zero
-// guard; the same idiom in Overcast @ 0x4ee040, MoveFog @ 0x4ee0a0, SunFade
-// @ 0x4edf10].
+// WAC seconds -> ticks: 62 per second (a wrapping 32-bit imul), zero
+// seconds rounds up to one tick; a negative argument stays negative — no
+// handler takes an absolute value [orig: WacCmd_Rain @ 0x4edf84 `imul eax,
+// 62` then the `test/jnz` zero guard; the same idiom in Overcast @ 0x4ee040,
+// MoveFog @ 0x4ee0b4, SunFade @ 0x4edf22].
 int32_t wac_ticks(int32_t seconds) noexcept {
-    int64_t ticks = static_cast<int64_t>(seconds) * WeatherState::kWacTicksPerSecond;
+    int32_t ticks = static_cast<int32_t>(static_cast<uint32_t>(seconds) *
+            static_cast<uint32_t>(WeatherState::kWacTicksPerSecond));
     if (ticks == 0) ticks = 1;
-    if (ticks < 0) ticks = -ticks;
-    return static_cast<int32_t>(std::min<int64_t>(ticks, 0x7FFFFFFF));
+    return ticks;
 }
 
-// |target + ticks/2 - current| / ticks — the transition step every timed
-// weather command installs (rounded division, magnitude only).
+// The 32-bit wrapping negate abs32 uses (INT32_MIN stays INT32_MIN).
+int32_t wrap_abs(int32_t v) noexcept {
+    return v < 0 ? static_cast<int32_t>(0u - static_cast<uint32_t>(v)) : v;
+}
+
+// abs32(target + (ticks >> 1) - current) / ticks — the transition step every
+// timed weather command installs: wrapping 32-bit adds, then the SIGNED
+// divide, so a negative tick count installs a negative step exactly as the
+// original idiv does [orig: WacCmd_Rain @ 0x4edfb6; MoveFog @ 0x4ee0ec;
+// SunFade @ 0x4edf52].
 int32_t transition_step(int32_t current, int32_t target, int32_t ticks) noexcept {
-    int64_t centered = static_cast<int64_t>(target) - current + ticks / 2;
-    if (centered < 0) centered = -centered;
-    return static_cast<int32_t>(std::min<int64_t>(centered / ticks, 0x7FFFFFFF));
+    const int32_t centered = static_cast<int32_t>(static_cast<uint32_t>(target) +
+            static_cast<uint32_t>(ticks >> 1) - static_cast<uint32_t>(current));
+    // INT32_MIN / -1 faults the original's idiv; the wrapped quotient stands in.
+    return static_cast<int32_t>(static_cast<int64_t>(wrap_abs(centered)) / ticks);
 }
 
-// min((percent << 16) / 100, 0x10000) — the rain/overcast percent target
-// [orig: WacCmd_Rain @ 0x4edf60].
+// min((percent << 16) / 100, 0x10000) — the rain/overcast percent target; the
+// shift wraps at 32 bits and a negative percent lands negative
+// [orig: WacCmd_Rain @ 0x4edf82..0x4edf95].
 int32_t percent_target_q16(int32_t percent) noexcept {
-    const int64_t fixed = (static_cast<int64_t>(percent) << 16) / 100;
-    return static_cast<int32_t>(std::clamp<int64_t>(fixed, INT32_MIN, 0x10000));
+    const int32_t fixed = static_cast<int32_t>(static_cast<uint32_t>(percent) << 16) / 100;
+    return fixed > 0x10000 ? 0x10000 : fixed;
 }
 
-// clamp(metres << 16, 2 m, Env_FogDistReference) — the fog distance target
-// [orig: WacCmd_FogDist @ 0x4ee100; WacCmd_MoveFog @ 0x4ee0a0].
+// min(metres << 16, Env_FogDistReference) raised to 2 m — the fog distance
+// target, the shift wrapping at 32 bits [orig: WacCmd_FogDist
+// @ 0x4ee10c..0x4ee117; WacCmd_MoveFog @ 0x4ee0b8..0x4ee0c4].
 int32_t fog_command_target_q16(int32_t metres, int32_t reference_q16) noexcept {
-    const int64_t fixed = static_cast<int64_t>(metres) << 16;
-    return static_cast<int32_t>(std::clamp<int64_t>(fixed, 2 << 16, reference_q16));
+    int32_t fixed = static_cast<int32_t>(static_cast<uint32_t>(metres) << 16);
+    if (fixed > reference_q16) fixed = reference_q16;
+    if (fixed < 0x20000) fixed = 0x20000;
+    return fixed;
 }
 
 uint16_t precipitation_rand16(void *ctx) {
@@ -94,6 +108,10 @@ void WeatherState::seed(const WeatherSeed &seed) {
     quake_ticks = 0;
     precipitation_kind = static_cast<uint32_t>(PrecipitationKind::Rain);
     fog_type = seed.fog_type;
+    // Env_FogDistReference: 1024.0 at init, re-set at terrain init to 768.0 or
+    // 1024.0 by adapter-caps bit 0x40 and forced to 1024.0 on the session
+    // authority [orig: Environment_InitDefaults @ 0x57c0b0; Terrain_Init
+    //  @ 0x60fc9a/0x60fca3].
     fog_reference_q16 = static_cast<int32_t>(env::kFogDistReferenceDefault);
     lightning_color = pack_rgb(seed.lightning_color);
     // WacScript_InitAndLoad zeroes the color-fade seconds at every load.
@@ -196,7 +214,8 @@ void WeatherState::command_fog_distance(int32_t metres) {
     // accel = |target - current| (an immediate arrival).
     env::EnvScalarChannels &ch = core.scalar_channels;
     ch.fog_dist_target_fp = fog_command_target_q16(metres, fog_reference_q16);
-    ch.fog_step_fp = std::abs(ch.fog_dist_target_fp - ch.fog_dist_fp);
+    ch.fog_step_fp = wrap_abs(static_cast<int32_t>(
+            static_cast<uint32_t>(ch.fog_dist_target_fp) - static_cast<uint32_t>(ch.fog_dist_fp)));
     bump_command();
 }
 
@@ -223,9 +242,9 @@ void WeatherState::command_sky_height(int32_t height_raw) {
 }
 
 void WeatherState::command_quake(int32_t seconds) {
-    // [orig: WacCmd_Quake @ 0x4ed4c0] Env_QuakeTicks = 6 * value.
-    quake_ticks = seconds <= 0 ? 0u
-                               : static_cast<uint32_t>(static_cast<uint64_t>(seconds) * 6u);
+    // [orig: WacCmd_Quake @ 0x4ed4c0] Env_QuakeTicks = 6 * value, raw: a
+    // negative argument wraps to a huge count the tick counts down (@ 0x57ec61).
+    quake_ticks = static_cast<uint32_t>(seconds) * 6u;
     bump_command();
 }
 
@@ -255,17 +274,17 @@ void WeatherState::command_sun_fade(int32_t percent, int32_t seconds) {
     // max clamp has no writer in the image, so the current never leaves 0.
     const int32_t ticks = wac_ticks(seconds);
     env::EnvScalarChannels &ch = core.scalar_channels;
-    ch.sun_dim_target_fp = static_cast<int32_t>(
-            std::clamp<int64_t>(static_cast<int64_t>(percent) << 16, INT32_MIN, 0x640000));
+    const int32_t shifted = static_cast<int32_t>(static_cast<uint32_t>(percent) << 16);
+    ch.sun_dim_target_fp = shifted > 0x640000 ? 0x640000 : shifted;
     ch.sun_dim_step_fp = transition_step(ch.sun_dim_fp, ch.sun_dim_target_fp, ticks);
     bump_command();
 }
 
 void WeatherState::command_color_fade(int32_t seconds) {
-    // [orig: WacCmd_ColorFade @ 0x4edcb0] Env_ColorFadeTicks = 62 * s.
+    // [orig: WacCmd_ColorFade @ 0x4edcb0] Env_ColorFadeTicks = 62 * s, raw: a
+    // negative count reaches ColorBlock_SetStepDeltas' idiv (@ 0x57d98f) as is.
     color_fade_ticks = static_cast<int32_t>(
-            std::clamp<int64_t>(static_cast<int64_t>(seconds) * kWacTicksPerSecond,
-                    0, 0x7FFFFFFF));
+            static_cast<uint32_t>(seconds) * static_cast<uint32_t>(kWacTicksPerSecond));
     bump_command();
 }
 
