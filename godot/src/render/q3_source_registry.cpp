@@ -198,8 +198,11 @@ void connect_signals(Q3SourceRecord &r_record, GeometryInstance3D *p_source) {
 			callable_mp_static(&Q3SourceRegistry::on_tree_exiting).bind(id));
 	const Error visibility = p_source->connect("visibility_changed",
 			callable_mp_static(&Q3SourceRegistry::on_visibility_changed).bind(id));
-	r_record.signals_connected = true;
-	ERR_FAIL_COND_MSG(entered != OK || exiting != OK || visibility != OK,
+	// Connected only when every signal took: a record whose tree_exiting
+	// connect failed must not enter the live set (the walk dereferences a
+	// live record's node), and the next registration retries the connects.
+	r_record.signals_connected = entered == OK && exiting == OK && visibility == OK;
+	ERR_FAIL_COND_MSG(!r_record.signals_connected,
 			"A Q3 source refused its tree/visibility signals; its record cannot follow it");
 }
 
@@ -220,7 +223,9 @@ Q3SourceRecord &register_record(GeometryInstance3D *p_source) {
 	record.surfaces_dirty = true;
 	record.bounds_dirty = true;
 	connect_signals(record, p_source);
-	if (p_source->is_inside_tree())
+	// A record without its signals stays dormant: nothing would deactivate
+	// it when the node leaves the tree.
+	if (record.signals_connected && p_source->is_inside_tree())
 		activate(record);
 	return record;
 }
