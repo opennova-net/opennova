@@ -210,9 +210,10 @@ double EnvironmentState::mission_start_time_hhmm(int start_time_q8_8) {
 // --- the weather-home reads --------------------------------------------------
 
 void EnvironmentState::sync_clock_from_weather() {
-	// An unseeded home has no clock to publish (a World bound before its
-	// seed must not replace the configured clock with 00:00).
-	if (!weather_live()) {
+	// A World home bound before its seed has no clock to publish (it must
+	// not replace the configured clock with 00:00); the standalone home's
+	// clock is always the owner's (configure_mission_clock / the seed).
+	if (!weather_is_standalone() && !weather_live()) {
 		return;
 	}
 	set_render_time_of_day(weather_->tod_hhmm());
