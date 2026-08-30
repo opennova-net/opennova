@@ -891,11 +891,17 @@ the beauty view's compositor draws them at PRE_OPAQUE — before the terrain
 drape samples them in the same frame — into twelve 4x-MSAA colour targets
 at the witnessed chain sizes, cleared to the retail 0x00FFFFFF, black
 fragments under the technique's PROJSHAD coverage (Diffuse1.a, × Detail.a
-for the _MT FFP blocks, × AlphaGen for the FFP families, the alpha test
-where the material carries one, no pass for tracer/flag/glass, the
-material-blend additive variants skipped as a no-op) with depth test and
-write inside the target, resolved into RGBA8 textures the drape samples
-through `Texture2DRD`s. The geometry rides the shared `Q3GeometryCache`
+over the transformed UV2 for the _MT FFP blocks, × AlphaGen for the FFP
+families, the alpha test where the material carries one) in the
+technique's PROJSHAD blend state (the file effects and the _FFP opaque and
+multiplicative variants replace; the _FFP alpha-blend variant blends the
+black by that coverage, SRCALPHA/INVSRCALPHA over the white clear, so a
+translucent strip casts a partial silhouette — `_FFP.fx TBoringFFPProjShad`,
+decoded; no pass for tracer/flag/glass, the material-blend additive
+variants skipped as a no-op, and an ArrayMesh surface whose material carries
+no registered object classification drawn nothing and counted as
+`slot_unclassified_surfaces`) with depth test and write inside the target,
+resolved into RGBA8 textures the drape samples through `Texture2DRD`s. The geometry rides the shared `Q3GeometryCache`
 (packed once per surface; skinned strips pack their bone indices/weights
 and skin on the GPU from the frame's bone palette). Device folds, each
 serving the same observable: the capture eye backs off along −forward

@@ -114,11 +114,16 @@ enum class ObjectShaderTechnique : uint8_t {
 };
 
 // The PROJSHAD pass is not a copy of NORMAL's blend policy. The four _FFP
-// techniques compile material blend variants, the live file-effect passes
+// techniques compile material blend variants (BLEND_NONE ONE/ZERO;
+// BLEND_ALPHA SRCALPHA/INVSRCALPHA, the black source blended by
+// Diffuse1.a x AlphaGenValue (x Diffuse2.a for the _MT blocks) through
+// TSSAlpha(0, Modulate, Texture, Diffuse) with MaterialDiffuse =
+// (ColorSrcZero, AlphaGenValue); BLEND_ADD ONE/ONE, a no-op for black;
+// BLEND_MULT DESTCOLOR/SRCCOLOR, black again), the live file-effect passes
 // force opaque ONE/ZERO state, and effects without a PROJSHAD declaration do
 // not submit a fallback pass.
-// [orig: _FFP.fx TBoringFFPProjShad; the 15 shipped shader PROJSHAD
-// declarations; HLSLEffect_LoadFromFile @ 0x5AE690]
+// [orig: _FFP.fx TBoringFFPProjShad (decoded, SCR key 0xA55B1EED); the 15
+// shipped shader PROJSHAD declarations; HLSLEffect_LoadFromFile @ 0x5AE690]
 enum class ObjectProjectedShadowPolicy : uint8_t {
 	NoPass,
 	MaterialBlend,

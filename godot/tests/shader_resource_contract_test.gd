@@ -621,7 +621,8 @@ func test_slot_capture_camera_signature_pins_the_water_layer_table() -> void:
 			"EFFECT_CALLBACK_TYPE_PRE_OPAQUE",
 			"object_projected_shadow_coverage(",
 			"object_projected_shadow_policy(",
-			"frag_color = vec4(0.0, 0.0, 0.0, 1.0);"]:
+			"frag_color = vec4(0.0, 0.0, 0.0, alpha);",
+			"BLEND_FACTOR_SRC_ALPHA", "BLEND_FACTOR_ONE_MINUS_SRC_ALPHA"]:
 		assert_true(adapter.contains(token), token)
 
 	for output in ["output_opaque.gdshaderinc", "output_alpha.gdshaderinc"]:

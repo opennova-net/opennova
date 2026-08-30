@@ -59,6 +59,10 @@ constexpr std::uint32_t kFlagAlphaInvert = 2u;
 constexpr std::uint32_t kFlagAlphaMod = 4u;
 constexpr std::uint32_t kFlagDetailAlpha = 8u;
 constexpr std::uint32_t kFlagSkinned = 16u;
+// The _FFP material-blend PROJSHAD variant of an alpha-blend material: the
+// fragment carries its coverage as alpha for the SRCALPHA/INVSRCALPHA
+// pipeline instead of the opaque pass's alpha 1.
+constexpr std::uint32_t kFlagBlendCoverage = 32u;
 constexpr std::uint32_t kBoneMatrixBytes = 64u;
 
 // The black PROJSHAD pass over the retail 0x00FFFFFF clear: the geometry
@@ -119,16 +123,19 @@ void main() {
 }
 )GLSL";
 
-// The four PROJSHAD coverage policies of the object wrappers
-// (godot/shaders/object/output_opaque.gdshaderinc's capture branch over
-// sampling/single|detail.gdshaderinc obj_proj_shadow_coverage + the coverage
-// include): coverage = Diffuse1.a, x Detail.a over UV2 for the _MT FFP
-// blocks, x u_alpha_mod for the FFP families; alpha-test materials keep
-// coverage > ref (invert: <= ref) and discard the rest; every kept fragment
-// writes black at alpha 1 (output_alpha's capture branch writes ALPHA = 1.0).
-// The no-pass techniques never reach the device (skipped at compile).
-// The engine's object_shader_template.h carries the witness for both the
-// per-technique table (object_projected_shadow_coverage) and the alpha-test
+// The PROJSHAD coverage per technique (the engine's
+// object_projected_shadow_coverage table): coverage = Diffuse1.a, x Detail.a
+// over the transformed UV2 for the _MT FFP blocks, x u_alpha_mod
+// (AlphaGenValue) for the FFP families; alpha-test materials keep coverage
+// > ref (invert: <= ref) and discard the rest. Every kept fragment writes
+// black; its alpha is 1 for the opaque state (ONE/ZERO replaces) and the
+// coverage itself for the _FFP alpha-blend variant, whose SRCALPHA/
+// INVSRCALPHA pipeline blends black by Diffuse1.a x AlphaGenValue (x
+// Diffuse2.a) over the white clear (the _FFP.fx TBoringFFPProjShad blend
+// law the engine's object_shader_template.h cites beside its
+// ObjectProjectedShadowPolicy::MaterialBlend). The no-pass techniques never
+// reach the device (skipped at compile). The engine header carries the
+// witness for the per-technique table, the blend state and the alpha-test
 // compare; this shader only evaluates them.
 const char *kSlotCaptureFragmentShader = R"GLSL(#version 450
 layout(set = 0, binding = 0) uniform sampler2D diffuse_texture;
@@ -159,7 +166,8 @@ void main() {
 			discard;
 		}
 	}
-	frag_color = vec4(0.0, 0.0, 0.0, 1.0);
+	float alpha = (flags & 32u) != 0u ? clamp(coverage, 0.0, 1.0) : 1.0;
+	frag_color = vec4(0.0, 0.0, 0.0, alpha);
 }
 )GLSL";
 
@@ -186,6 +194,9 @@ struct DeviceCommand {
 	float alpha_mod = 1.0f;
 	std::uint32_t flags = 0;
 	bool two_sided = false;
+	// SRCALPHA/INVSRCALPHA over the clear (the _FFP alpha-blend variant)
+	// instead of the opaque replace.
+	bool blend_coverage = false;
 };
 
 struct DeviceCapture {
@@ -318,10 +329,12 @@ public:
 	struct PipelineKey {
 		int64_t framebuffer_format = -1;
 		bool two_sided = false;
+		bool blend_coverage = false;
 
 		bool operator<(const PipelineKey &p_other) const {
-			return std::tie(framebuffer_format, two_sided) <
-					std::tie(p_other.framebuffer_format, p_other.two_sided);
+			return std::tie(framebuffer_format, two_sided, blend_coverage) <
+					std::tie(p_other.framebuffer_format, p_other.two_sided,
+							p_other.blend_coverage);
 		}
 	};
 
@@ -500,7 +513,8 @@ public:
 	RID make_texture(int p_size, RenderingDevice::DataFormat p_format,
 			int64_t p_usage);
 	bool ensure_target(Target &r_target, int p_size);
-	RID pipeline_for(int64_t p_framebuffer_format, bool p_two_sided);
+	RID pipeline_for(int64_t p_framebuffer_format, bool p_two_sided,
+			bool p_blend_coverage);
 	bool upload_stream(const Q3PackedStream &p_stream);
 	bool upload_bones(const std::vector<Transform3D> &p_bones);
 	RID make_uniform(const DeviceCommand &p_command);
@@ -670,8 +684,8 @@ bool SlotCaptureAdapter::Impl::ensure_target(Target &r_target, int p_size) {
 }
 
 RID SlotCaptureAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
-		bool p_two_sided) {
-	const PipelineKey key{p_framebuffer_format, p_two_sided};
+		bool p_two_sided, bool p_blend_coverage) {
+	const PipelineKey key{p_framebuffer_format, p_two_sided, p_blend_coverage};
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
@@ -691,13 +705,25 @@ RID SlotCaptureAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
 	depth->set_enable_depth_test(true);
 	depth->set_enable_depth_write(true);
 	depth->set_depth_compare_operator(RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
-	// Every kept fragment writes black at alpha 1, so the MaterialBlend
-	// alpha-blend variants replace exactly like the beauty wrappers' capture
-	// branch (output_alpha writes ALPHA = 1.0); additive variants never reach
-	// the device (black adds nothing).
+	// The PROJSHAD blend state per technique (object_projected_shadow_policy):
+	// the file effects and the _FFP BLEND_NONE / BLEND_MULT variants replace
+	// (ONE/ZERO; DESTCOLOR/SRCCOLOR of a black source is black too), the
+	// _FFP BLEND_ALPHA variant blends the black fragment by its coverage
+	// alpha (SRCALPHA/INVSRCALPHA), and the additive variants never reach the
+	// device (black adds nothing).
 	Ref<RDPipelineColorBlendStateAttachment> attachment;
 	attachment.instantiate();
-	attachment->set_enable_blend(false);
+	attachment->set_enable_blend(p_blend_coverage);
+	if (p_blend_coverage) {
+		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
+		attachment->set_dst_color_blend_factor(
+				RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
+		attachment->set_color_blend_op(RenderingDevice::BLEND_OP_ADD);
+		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
+		attachment->set_dst_alpha_blend_factor(
+				RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
+		attachment->set_alpha_blend_op(RenderingDevice::BLEND_OP_ADD);
+	}
 	Ref<RDPipelineColorBlendState> color_blend;
 	color_blend.instantiate();
 	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
@@ -821,7 +847,8 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 			return false;
 		const int64_t framebuffer_format = rd->framebuffer_get_format(target.framebuffer);
 		for (const DeviceCommand &command : capture.commands) {
-			if (!pipeline_for(framebuffer_format, command.two_sided).is_valid())
+			if (!pipeline_for(framebuffer_format, command.two_sided,
+						command.blend_coverage).is_valid())
 				return false;
 		}
 		// Clear to the retail 0x00FFFFFF and the reverse-Z far depth, draw the
@@ -840,7 +867,8 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 				return false;
 			}
 			transient_uniforms.push_back(uniform);
-			const RID pipeline = pipeline_for(framebuffer_format, command.two_sided);
+			const RID pipeline = pipeline_for(framebuffer_format, command.two_sided,
+					command.blend_coverage);
 			rd->draw_list_bind_render_pipeline(draw_list, pipeline);
 			rd->draw_list_bind_uniform_set(draw_list, uniform, 0);
 			rd->draw_list_bind_uniform_set(draw_list, bone_uniform, 1);
@@ -904,6 +932,7 @@ Dictionary SlotCaptureAdapter::Impl::report() const {
 	result["slot_captures_compiled"] = counters.captures_compiled;
 	result["slot_surfaces_compiled"] = counters.surfaces_compiled;
 	result["slot_skinned_commands"] = counters.skinned_commands;
+	result["slot_blended_commands"] = counters.blended_commands;
 	result["slot_packed_vertices"] = counters.packed_vertices;
 	result["slot_unclassified_surfaces"] = counters.unclassified_surfaces;
 	result["slot_no_pass_surfaces"] = counters.no_pass_surfaces;
@@ -1070,6 +1099,16 @@ void SlotCaptureAdapter::compile_frame(
 					command.flags |= kFlagAlphaMod;
 				if (coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp)
 					command.flags |= kFlagDetailAlpha;
+				if (policy == ObjectProjectedShadowPolicy::MaterialBlend &&
+						classification.blend == ObjectBlendMode::AlphaBlend) {
+					// The _FFP BLEND_ALPHA variant: black blended by the
+					// coverage (Diffuse1.a x AlphaGenValue x Diffuse2.a)
+					// over the white clear, a partial silhouette for a
+					// translucent strip.
+					command.flags |= kFlagBlendCoverage;
+					command.blend_coverage = true;
+					++counters.blended_commands;
+				}
 				command.two_sided = classification.is_two_sided;
 				capture.commands.push_back(std::move(command));
 			}

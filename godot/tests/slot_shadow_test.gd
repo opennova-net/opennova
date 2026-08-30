@@ -518,6 +518,93 @@ func _corner_and_center(image: Image) -> Dictionary:
 	return {"corner_min": brightest_corner, "center_max": darkest}
 
 
+const AB_LUM_3DI := "res://../fixtures/threedi/synth/mount_mtrl2_ab_lum.3di"
+
+
+## Hides every drawn surface of the model whose wrapper path lacks the
+## fragment, so the capture walks only the surfaces under test.
+func _keep_only_shader_surfaces(root: Node, shader_fragment: String) -> void:
+	if root is MeshInstance3D:
+		var mesh_instance := root as MeshInstance3D
+		var material := mesh_instance.get_active_material(0) as ShaderMaterial
+		var shader_path := material.shader.resource_path \
+				if material != null and material.shader != null else ""
+		mesh_instance.visible = shader_fragment in shader_path
+	for child in root.get_children():
+		_keep_only_shader_surfaces(child, shader_fragment)
+
+
+func _darkest_max_channel(image: Image) -> float:
+	var darkest := 1.0
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			var p := image.get_pixel(x, y)
+			darkest = minf(darkest, maxf(p.r, maxf(p.g, p.b)))
+	return darkest
+
+
+func test_windowed_alpha_blend_ffp_caster_blends_a_partial_silhouette() -> void:
+	# The _FFP alpha-blend PROJSHAD variant blends black by Diffuse1.a x
+	# AlphaGenValue (SRCALPHA/INVSRCALPHA over the white clear) instead of
+	# replacing at alpha 1, so a translucent FF_ST_AB strip casts a partial
+	# (gray) silhouette: the mount fixture's FF_ST_AB_LUM heat slab alone, its
+	# AlphaGen at 0.5 over the no-texture white default, reads mid-gray.
+	if RenderingServer.get_rendering_device() == null:
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var scope := _scope_with_world_environment()
+	var environment := _environment()
+	var camera := Camera3D.new()
+	camera.current = true
+	scope.add_child(camera)
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	shadow.set_environment_node(environment)
+	shadow.set_shadow_detail(3)
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(AB_LUM_3DI)), OK)
+	var model := ObjectModel.new()
+	scope.add_child(model)
+	model.set_process(false)
+	model.set_object_data(data)
+	model.set_shadow_caster_enabled(true)
+	_keep_only_shader_surfaces(model, "/self_lit/")
+	model.advance_runtime_frame(1.0 / 62.0)
+	var slab_materials := 0
+	for row in model.get_surface_materials():
+		var material := row as ShaderMaterial
+		if material != null and material.shader != null \
+				and "/self_lit/" in material.shader.resource_path:
+			material.set_shader_parameter("u_alpha_mod", 0.5)
+			slab_materials += 1
+	assert_gt(slab_materials, 0, "the fixture carries the FF_ST_AB_LUM heat slab")
+	shadow.advance_frame()
+	var order := shadow.get_capture_order_of(model)
+	assert_true(order >= 0, "the slab caster takes a slot")
+	var report: Dictionary = shadow.get_report()
+	assert_gt(int(report["slot_blended_commands"]), 0,
+			"the alpha-blend FFP strip compiles onto the blended pipeline")
+	assert_eq(int(report["slot_surfaces_compiled"]), int(report["slot_blended_commands"]),
+			"only the slab draws: every hidden opaque surface stays out of the walk")
+	for i in range(3):
+		await get_tree().process_frame
+	RenderingServer.force_sync()
+	report = shadow.get_report()
+	assert_eq(String(report["slot_status"]), "drawn", String(report["slot_failure"]))
+	var image := shadow.get_capture_image(order)
+	assert_not_null(image, "the resolve target reads back")
+	if image == null:
+		return
+	var stats := _corner_and_center(image)
+	assert_gt(float(stats["corner_min"]), 0.99, "the corners keep the white clear")
+	var darkest := _darkest_max_channel(image)
+	assert_gt(darkest, 0.3, "no fragment of the translucent slab replaces to black")
+	assert_lt(darkest, 0.7, "the slab's silhouette is blended by its 0.5 coverage")
+	model.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
 func test_windowed_capture_draws_the_caster_black_over_the_white_clear() -> void:
 	# The retail slot RT: cleared 0x00FFFFFF, the PROJSHAD pass draws the
 	# caster black (render_shadow_pass @0x5d7b70; vscPostBlackT1). Needs a live

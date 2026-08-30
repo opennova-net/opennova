@@ -60,6 +60,9 @@ struct SlotCaptureFrameCounters {
 	int captures_compiled = 0;
 	int surfaces_compiled = 0;
 	int skinned_commands = 0;
+	// Commands on the _FFP alpha-blend PROJSHAD variant (SRCALPHA/
+	// INVSRCALPHA by coverage instead of the opaque replace).
+	int blended_commands = 0;
 	int packed_vertices = 0;
 	int unclassified_surfaces = 0;
 	int no_pass_surfaces = 0;
