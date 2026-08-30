@@ -414,9 +414,12 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                         char fl[16];
                         size_t fll = tok[ti].len < 15 ? tok[ti].len : 15;
                         to_lower_buf(fl, tok[ti].s, fll);
-                        if (fll == 5 && memcmp(fl, "blend", 5) == 0) se.blend = 0;
-                        else if (fll == 3 && memcmp(fl, "add", 3) == 0) se.blend = 1;
-                        else if (fll == 7 && memcmp(fl, "blendat", 7) == 0) se.blend = 2;
+                        if (fll == 5 && memcmp(fl, "blend", 5) == 0) se.blend = DEF_SIGHT_BLEND_BLEND;
+                        else if (fll == 3 && memcmp(fl, "add", 3) == 0) se.blend = DEF_SIGHT_BLEND_ADD;
+                        else if (fll == 7 && memcmp(fl, "blendat", 7) == 0) se.blend = DEF_SIGHT_BLEND_BLEND_AT;
+                        else if (fll == 8 && memcmp(fl, "multiply", 8) == 0) se.blend = DEF_SIGHT_BLEND_MULTIPLY;
+                        else if (fll == 5 && memcmp(fl, "addat", 5) == 0) se.blend = DEF_SIGHT_BLEND_ADD_AT;
+                        else if (fll == 10 && memcmp(fl, "multiplyat", 10) == 0) se.blend = DEF_SIGHT_BLEND_MULTIPLY_AT;
                         else if (fll == 5 && memcmp(fl, "scale", 5) == 0) se.scale = 1;
                         else if (fll == 5 && memcmp(fl, "slide", 5) == 0) {
                             se.slide = 1;
