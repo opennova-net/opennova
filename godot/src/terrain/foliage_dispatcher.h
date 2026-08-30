@@ -119,6 +119,11 @@ public:
   // isolate one retail pass family, and nudge its fade without discovering
   // server instances through scene children. The next compiled frame restores
   // ordinary runtime state through the normal diff applier.
+  // Bound unconditionally on purpose: it is the stable diagnostic seam the
+  // source-only game_probe raster probes (ADR 0041) drive, and it is
+  // self-healing (every write lands in the stamp diff, so the next apply
+  // restores the compiled state); gating it per build flavour would only
+  // make the probes flavour-dependent.
   Dictionary apply_probe_draw_control(int p_selection, bool p_isolate,
                                       bool p_hide_selected,
                                       float p_wind_phase,
