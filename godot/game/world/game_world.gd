@@ -1639,6 +1639,11 @@ func render_material_frame() -> void:
 		var viewport_size := viewport.get_visible_rect().size
 		ObjectModel.update_authored_lods(camera.global_transform, camera.fov,
 				viewport_size.x, viewport_size.y)
+		# The retained static instances select their RLOD per entity from the
+		# same camera frame (the placer rewrites only the slots that crossed).
+		if _placer != null:
+			_placer.update_static_lods(camera.global_transform, camera.fov,
+					viewport_size.x, viewport_size.y)
 	if not _frame_stats_on:
 		ObjectModel.advance_awake_frame(_frame_delta)
 		return

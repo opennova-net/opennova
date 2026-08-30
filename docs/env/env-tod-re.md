@@ -1083,7 +1083,11 @@ In a network session the server-synced time + TOD rate replace the local start T
 "per graphic" performance note is superseded: opaque and alpha-tested static
 rows now use terrain-aligned 512-unit X/Z populations with exact custom AABBs.
 Only blended rows remain global, intentionally, so spatial population centers
-cannot perturb transparent ordering.
+cannot perturb transparent ordering. A graphic with more than one authored
+RLOD stays in those populations: every level is emitted as its own population
+over the same slot list and the retail selector picks the level per instance
+each frame (render-order-re.md, "Authored object RLOD selection"), so
+batching never decides which level an entity draws.
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 

@@ -1,12 +1,15 @@
 #include "mission/mission_object_placer.h"
 #include "render/frame_fx.h"
+#include "render/object_lod_frame.h"
 
 #include <cmath>
 
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/core/object.hpp>
 
+#include <runtime/renderer/object_lod.h>
 #include <runtime/simassets/model_builders.h>
 #include <runtime/world/entity.h>
 
@@ -28,6 +31,12 @@ int static_batch_bin_coord(float p_world) {
 uint64_t static_batch_bin_key(int p_x, int p_z) {
 	return (static_cast<uint64_t>(static_cast<uint32_t>(p_x)) << 32) |
 			static_cast<uint32_t>(p_z);
+}
+
+// A slot that draws nothing: zero-scaled at its own origin so the population
+// keeps its instance count and the slot's identity.
+Transform3D static_carved_transform(const Transform3D &p_live) {
+	return Transform3D(Basis().scaled(Vector3()), p_live.origin);
 }
 
 } // namespace
@@ -91,6 +100,17 @@ void MissionObjectPlacer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("place", "mission", "parent", "options"),
 			&MissionObjectPlacer::place, DEFVAL(Dictionary()));
+	ClassDB::bind_method(
+			D_METHOD("update_static_lods", "camera_transform",
+					"vertical_fov_degrees", "viewport_width", "viewport_height"),
+			&MissionObjectPlacer::update_static_lods);
+	ClassDB::bind_method(D_METHOD("get_static_lod_switch_count"),
+			&MissionObjectPlacer::get_static_lod_switch_count);
+	ClassDB::bind_method(D_METHOD("get_static_instance_lod", "bms_id"),
+			&MissionObjectPlacer::get_static_instance_lod);
+	ClassDB::bind_method(
+			D_METHOD("get_static_instance_live_populations", "bms_id"),
+			&MissionObjectPlacer::get_static_instance_live_populations);
 	ClassDB::bind_method(
 			D_METHOD("resolve_player_visual_item_id", "runtime_type_id"),
 			&MissionObjectPlacer::resolve_player_visual_item_id);
@@ -166,8 +186,9 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::clear_static_terrain_shadow_replacement);
 	ClassDB::bind_method(
 			D_METHOD("register_resolved_static_graphic", "graphic", "data",
-					"batches"),
-			&MissionObjectPlacer::register_resolved_static_graphic);
+					"batches", "lod_profile"),
+			&MissionObjectPlacer::register_resolved_static_graphic,
+			DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("register_object_data", "graphic", "data"),
 			&MissionObjectPlacer::register_object_data);
 	ClassDB::bind_method(
@@ -244,8 +265,8 @@ void MissionObjectPlacer::_check_epoch() {
 	object_data_cache_.clear();
 	skeletal_cache_.clear();
 	static_batch_cache_.clear();
+	static_lod_profile_cache_.clear();
 	graphic_panm_cache_.clear();
-	graphic_multiple_lods_cache_.clear();
 	occlusion_cache_.clear();
 	for (int i = 0; i < static_terrain_shadow_sources_.size(); ++i) {
 		static_terrain_shadow_sources_.write[i].object_data.unref();
@@ -358,9 +379,14 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["static_bins"] = 0;
 	stats["static_binned_batches"] = 0;
 	stats["static_global_batches"] = 0;
+	stats["static_instances_retained"] = 0;
+	stats["static_lod_populations"] = 0;
 	stats["authored_occluder_models"] = 0;
 	destruction_instances_.clear();
 	hidden_destruction_instances_.clear();
+	static_lod_profiles_.clear();
+	static_lod_instances_.clear();
+	static_lod_switches_ = 0;
 	static_terrain_shadow_replacements_.clear();
 	static_user_point_sources_ = Array();
 	static_item_effect_sources_ = Array();
@@ -498,14 +524,19 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	// Opaque and alpha-tested statics are divided into the same 512-world-unit
 	// cells as terrain. Retail's blended strips remain global because their
 	// independently chosen Q1/Q2 order must not inherit spatial batch centers.
+	// Every authored RLOD is emitted as its own population over the same slot
+	// list; a slot is live only in the populations of its selected level
+	// (level 0 until the first update_static_lods evaluates the camera).
 	int placed = 0;
 	int batched = 0;
 	int graphics = 0;
 	int batch_count = 0;
 	int binned_batch_count = 0;
 	int global_batch_count = 0;
+	int lod_population_count = 0;
 	HashMap<uint64_t, bool> occupied_static_bins;
 	Vector<String> resolved_graphics;
+	HashMap<String, int> profile_rows;
 	for (const String &group_key : static_order) {
 		if (progress.is_valid()) {
 			progress.call();
@@ -530,6 +561,16 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		if (!resolved_graphics.has(graphic)) {
 			resolved_graphics.push_back(graphic);
 			++graphics;
+		}
+		// The graphic's authored RLOD profile rides beside its batches; one
+		// row per graphic serves both reflection policy groups.
+		int profile_row = -1;
+		if (const int *existing = profile_rows.getptr(graphic)) {
+			profile_row = *existing;
+		} else {
+			static_lod_profiles_.push_back(_static_lod_profile_for(graphic));
+			profile_row = static_lod_profiles_.size() - 1;
+			profile_rows[graphic] = profile_row;
 		}
 		Ref<ObjectData> shadow_data;
 		if (const Ref<ObjectData> *resolved =
@@ -571,7 +612,8 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		}
 		// One atlas row per retained entity/ROBJ. Multiple material surfaces
 		// under that ROBJ share the row, while its query AABB is the exact merge
-		// of those surfaces in model-rest space transformed by the entity.
+		// of those surfaces (every level's) in model-rest space transformed by
+		// the entity.
 		HashMap<int, AABB> local_robj_bounds;
 		Vector<int> robj_order;
 		for (const StaticBatch &batch : batches) {
@@ -603,6 +645,23 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 						i < group.item_ids.size() ? group.item_ids[i] : 0,
 						robj_index, group.xforms[i].xform(*local_bounds));
 				light_draw_rows[static_light_draw_key(i, robj_index)] = row;
+			}
+		}
+		// One retained instance per slot: the world bound sphere the projector
+		// consumes (the profile's model sphere under the entity's uniform
+		// scale) and, filled by the populations below, every slot it occupies.
+		Vector<int> lod_rows;
+		lod_rows.resize(instance_count);
+		{
+			const StaticLodProfile &profile = static_lod_profiles_[profile_row];
+			for (int i = 0; i < instance_count; ++i) {
+				StaticLodInstance retained;
+				retained.profile = profile_row;
+				retained.origin = group.xforms[i].origin;
+				retained.radius = profile.sphere_radius *
+						ObjectLodFrame::uniform_scale(group.xforms[i].basis);
+				static_lod_instances_.push_back(retained);
+				lod_rows.write[i] = static_lod_instances_.size() - 1;
 			}
 		}
 
@@ -638,6 +697,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				inst.casts_static_shadow =
 						i < group.shadow_slots.size() && group.shadow_slots[i];
 				inst.mirror_reflected = group.mirror_reflected;
+				inst.lod_instance = lod_rows[i];
 				destruction_instances_[bms_id] = inst;
 			}
 		}
@@ -671,23 +731,32 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			p_source->set_meta("static_shadow_graphic", graphic);
 			p_source->set_meta("static_shadow_batch_key", group_key);
 		};
-		const auto bind_destruction_slots = [&](const Ref<MultiMesh> &p_mm,
-				const Vector<int> &p_slots) {
+		// Every emitted slot joins its retained instance so a level switch or
+		// a destruction carve rewrites exactly the populations it occupies.
+		const auto bind_lod_slots = [&](const Ref<MultiMesh> &p_mm,
+				MultiMeshInstance3D *p_mmi, const Vector<int> &p_slots,
+				const StaticBatch &p_batch, bool p_shadow_only) {
 			for (int local_index = 0; local_index < p_slots.size(); ++local_index) {
 				const int slot = p_slots[local_index];
-				if (slot < 0 || slot >= group.bms_ids.size()) {
+				if (slot < 0 || slot >= lod_rows.size()) {
 					continue;
 				}
-				DestructionInstance *instance =
-						destruction_instances_.getptr(group.bms_ids[slot]);
-				if (instance == nullptr) {
-					continue;
-				}
-				DestructionBinding binding;
+				StaticLodBinding binding;
 				binding.multimesh = p_mm;
+				binding.instance_node =
+						p_mmi != nullptr ? p_mmi->get_instance_id() : 0;
 				binding.index = local_index;
-				instance->bindings.push_back(binding);
+				binding.lod_index = p_batch.lod_index;
+				binding.live_xform = group.xforms[slot] * p_batch.offset;
+				binding.shadow_only = p_shadow_only;
+				binding.casts =
+						slot < group.shadow_slots.size() && group.shadow_slots[slot];
+				static_lod_instances_.write[lod_rows[slot]].bindings.push_back(
+						binding);
 			}
+		};
+		const auto slot_level_live = [&](int p_slot, int p_lod_index) {
+			return static_lod_instances_[lod_rows[p_slot]].active_lod == p_lod_index;
 		};
 
 		const auto emit_population = [&](const StaticBatch &p_batch,
@@ -711,12 +780,17 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			mm->set_use_custom_data(true);
 			mm->set_mesh(p_batch.mesh);
 			mm->set_instance_count(p_slots.size());
+			// The population's bounds cover every slot's live transform so a
+			// later level switch never draws outside the advertised AABB.
 			AABB population_bounds;
 			bool has_population_bounds = false;
 			for (int local_index = 0; local_index < p_slots.size(); ++local_index) {
 				const int slot = p_slots[local_index];
 				const Transform3D surface_xform = group.xforms[slot] * p_batch.offset;
-				mm->set_instance_transform(local_index, surface_xform);
+				mm->set_instance_transform(local_index,
+						slot_level_live(slot, p_batch.lod_index)
+								? surface_xform
+								: static_carved_transform(surface_xform));
 				const int *row = light_draw_rows.getptr(
 						static_light_draw_key(slot, p_batch.robj_index));
 				mm->set_instance_custom_data(
@@ -751,6 +825,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			}
 			mmi->set_meta("static_batch_population",
 					p_global ? String("global") : String("bin"));
+			mmi->set_meta("static_batch_lod", p_batch.lod_index);
 			if (!p_global) {
 				mmi->set_meta("static_batch_bin_x", p_bin_x);
 				mmi->set_meta("static_batch_bin_z", p_bin_z);
@@ -769,13 +844,16 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				FrameFx::register_q3_object_source(mmi, p_batch.material);
 			}
 			++batch_count;
+			if (p_batch.lod_index > 0) {
+				++lod_population_count;
+			}
 			if (p_global) {
 				++global_batch_count;
 			} else {
 				++binned_batch_count;
 				occupied_static_bins[static_batch_bin_key(p_bin_x, p_bin_z)] = true;
 			}
-			bind_destruction_slots(mm, p_slots);
+			bind_lod_slots(mm, mmi, p_slots, p_batch, false);
 
 			if (!has_static_shadow || all_static_shadow || p_batch.auxiliary_draw) {
 				return;
@@ -792,15 +870,16 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				Transform3D shadow_xform = group.xforms[slot] * p_batch.offset;
 				const bool casts =
 						slot < group.shadow_slots.size() && group.shadow_slots[slot];
-				if (!casts) {
-					shadow_xform.basis = shadow_xform.basis.scaled(Vector3());
-				} else {
+				if (casts) {
 					const AABB surface_bounds =
 							shadow_xform.xform(p_batch.mesh->get_aabb());
 					shadow_bounds = has_shadow_bounds
 							? shadow_bounds.merge(surface_bounds)
 							: surface_bounds;
 					has_shadow_bounds = true;
+				}
+				if (!casts || !slot_level_live(slot, p_batch.lod_index)) {
+					shadow_xform = static_carved_transform(shadow_xform);
 				}
 				shadow_mm->set_instance_transform(local_index, shadow_xform);
 			}
@@ -817,6 +896,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			}
 			shadow_mmi->set_meta("static_batch_population",
 					p_global ? String("global") : String("bin"));
+			shadow_mmi->set_meta("static_batch_lod", p_batch.lod_index);
 			if (!p_global) {
 				shadow_mmi->set_meta("static_batch_bin_x", p_bin_x);
 				shadow_mmi->set_meta("static_batch_bin_z", p_bin_z);
@@ -829,7 +909,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 									  p_bin_z, p_batch.submesh));
 			tag_static_shadow_source(shadow_mmi, p_slots);
 			container->add_child(shadow_mmi);
-			bind_destruction_slots(shadow_mm, p_slots);
+			bind_lod_slots(shadow_mm, shadow_mmi, p_slots, p_batch, true);
 		};
 		for (const StaticBatch &batch : batches) {
 			if (batch.blended_draw) {
@@ -941,6 +1021,8 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["static_bins"] = occupied_static_bins.size();
 	stats["static_binned_batches"] = binned_batch_count;
 	stats["static_global_batches"] = global_batch_count;
+	stats["static_instances_retained"] = static_lod_instances_.size();
+	stats["static_lod_populations"] = lod_population_count;
 	stats["authored_occluder_models"] = authored_occluder_models;
 	stats["spans"] = spans;
 	return stats;
@@ -1228,9 +1310,9 @@ bool MissionObjectPlacer::_needs_individual_node(int p_item_id) {
 	if (!item_db_->get_anim_def(p_item_id).is_empty()) {
 		return true;
 	}
-	const String graphic = _graphic_for(p_item_id);
-	return _has_occlusion_records(p_item_id) ||
-			(!graphic.is_empty() && _graphic_has_multiple_lods(graphic));
+	// Multiple authored RLODs are no reason to leave the batch: the retained
+	// populations select the level per instance (update_static_lods).
+	return _has_occlusion_records(p_item_id);
 }
 
 // A graphic whose model carries a live PANM track must not be frozen into a
@@ -1250,20 +1332,6 @@ bool MissionObjectPlacer::_graphic_needs_live_panm(const String &p_graphic) {
 		result = data->has_live_panm();
 	}
 	graphic_panm_cache_[p_graphic] = result;
-	return result;
-}
-
-bool MissionObjectPlacer::_graphic_has_multiple_lods(const String &p_graphic) {
-	const bool *cached = graphic_multiple_lods_cache_.getptr(p_graphic);
-	if (cached != nullptr) {
-		return *cached;
-	}
-	bool result = false;
-	const Ref<ObjectData> data = _load_object_data(p_graphic);
-	if (data.is_valid() && data->has_document()) {
-		result = data->native_model().lod_count > 1;
-	}
-	graphic_multiple_lods_cache_[p_graphic] = result;
 	return result;
 }
 
@@ -1424,14 +1492,15 @@ void MissionObjectPlacer::_apply_skeletal_anim(ObjectModel *p_model,
 	}
 }
 
-// Build a template ObjectModel, let it assemble the rest-pose meshes and
-// fidelity materials, then harvest one batch per submesh. The model enters
-// the live tree only for the harvest (so bounds/global-transform math is
-// valid and silent), then frees; the harvested Mesh/Material refs survive.
-// Each batch offset is the submesh's model-local rest transform relative to
-// the entity origin — NO ground-anchor offset (the engine bakes the Ground
-// userpoint into the stored position at author-time; witness:
-// placement_traits.h ledger).
+// Build a template ObjectModel with every authored RLOD retained, pose it at
+// each level in turn, and harvest one batch per (level, submesh) together
+// with the graphic's RLOD profile (thresholds, model sphere, harvested
+// levels). The model enters the live tree only for the harvest (so
+// bounds/global-transform math is valid and silent), then frees; the
+// harvested Mesh/Material refs survive. Each batch offset is the submesh's
+// model-local rest transform at its level relative to the entity origin — NO
+// ground-anchor offset (the engine bakes the Ground userpoint into the stored
+// position at author-time; witness: placement_traits.h ledger).
 Vector<MissionObjectPlacer::StaticBatch>
 MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 		Node *p_tree_parent) {
@@ -1440,48 +1509,236 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 		return *cached;
 	}
 	Vector<StaticBatch> batches;
+	StaticLodProfile profile;
 	const Ref<ObjectData> data = _load_object_data(p_graphic);
 	if (data.is_valid() && p_tree_parent != nullptr) {
 		ObjectModel *model = memnew(ObjectModel);
+		// Retain every level (each instance tagged _opennova_lod_index) so the
+		// walk below can pose the part nodes at one level at a time.
+		model->set_authored_lod_enabled(true);
 		p_tree_parent->add_child(model);
 		model->set_object_data(data);
-		model->rebuild();
+		const int lod_count = data->has_document()
+				? MAX(1, static_cast<int>(data->native_model().lod_count))
+				: 1;
 		int submesh = 0;
-		const Dictionary part_nodes = model->get_render_part_nodes();
-		const Array part_keys = part_nodes.keys();
-		for (int k = 0; k < part_keys.size(); ++k) {
-			Node3D *part_node =
-					Object::cast_to<Node3D>(part_nodes[part_keys[k]]);
-			if (part_node == nullptr) {
-				continue;
+		for (int lod = 0; lod < lod_count; ++lod) {
+			// Posing the level writes that level's ROBJ rest transforms (the
+			// same pose an individual model shows at the level).
+			model->set_active_lod(lod);
+			if (model->get_active_lod() != lod) {
+				break;
 			}
-			for (int c = 0; c < part_node->get_child_count(); ++c) {
-				MeshInstance3D *mi =
-						Object::cast_to<MeshInstance3D>(part_node->get_child(c));
-				if (mi == nullptr || mi->get_mesh().is_null()) {
+			const Dictionary part_nodes = model->get_render_part_nodes();
+			const Array part_keys = part_nodes.keys();
+			for (int k = 0; k < part_keys.size(); ++k) {
+				Node3D *part_node =
+						Object::cast_to<Node3D>(part_nodes[part_keys[k]]);
+				if (part_node == nullptr) {
 					continue;
 				}
-				StaticBatch batch;
-				batch.mesh = mi->get_mesh();
-				batch.material = mi->get_material_override();
-				batch.offset = part_node->get_transform() * mi->get_transform();
-				batch.submesh = submesh;
-				batch.robj_index = int(part_keys[k]);
-				batch.auxiliary_draw =
-						bool(mi->get_meta("_opennova_auxiliary_draw", false));
-				batch.blended_draw =
-						bool(mi->get_meta("_opennova_blended_draw", false));
-				batches.push_back(batch);
-				++submesh;
+				for (int c = 0; c < part_node->get_child_count(); ++c) {
+					MeshInstance3D *mi =
+							Object::cast_to<MeshInstance3D>(part_node->get_child(c));
+					if (mi == nullptr || mi->get_mesh().is_null() ||
+							int(mi->get_meta("_opennova_lod_index", 0)) != lod) {
+						continue;
+					}
+					StaticBatch batch;
+					batch.mesh = mi->get_mesh();
+					batch.material = mi->get_material_override();
+					batch.offset = part_node->get_transform() * mi->get_transform();
+					batch.submesh = submesh;
+					batch.robj_index = int(part_keys[k]);
+					batch.lod_index = lod;
+					batch.auxiliary_draw =
+							bool(mi->get_meta("_opennova_auxiliary_draw", false));
+					batch.blended_draw =
+							bool(mi->get_meta("_opennova_blended_draw", false));
+					batches.push_back(batch);
+					++submesh;
+				}
 			}
+		}
+		if (data->has_document()) {
+			const Threedi3di3 &native_model = data->native_model();
+			for (int lod = 0; lod < lod_count; ++lod) {
+				profile.thresholds_q16.push_back(native_model.lods[lod].lod_threshold);
+			}
+			// The .3di header's origin sphere (gpm[5]), the same source the
+			// individual model's shadow radii and RLOD evaluation use.
+			profile.sphere_radius =
+					opennova::simassets::model_bound_radius_from_3di(native_model);
 		}
 		p_tree_parent->remove_child(model);
 		memdelete(model);
 	}
+	_complete_static_lod_profile(profile, batches);
 	static_batch_cache_[p_graphic] = batches;
+	static_lod_profile_cache_[p_graphic] = profile;
 	return batches;
 }
 
+MissionObjectPlacer::StaticLodProfile
+MissionObjectPlacer::_static_lod_profile_for(const String &p_graphic) const {
+	const StaticLodProfile *cached = static_lod_profile_cache_.getptr(p_graphic);
+	if (cached != nullptr) {
+		return *cached;
+	}
+	StaticLodProfile profile;
+	_complete_static_lod_profile(profile, Vector<StaticBatch>());
+	return profile;
+}
+
+// Fill what the harvest or the registration seam left implicit: one
+// threshold row per harvested level, which levels carry geometry, and the
+// level-0 geometry bounds as the sphere fallback (the same fallback
+// ObjectModel uses for a document without a header sphere).
+void MissionObjectPlacer::_complete_static_lod_profile(
+		StaticLodProfile &r_profile, const Vector<StaticBatch> &p_batches) {
+	std::size_t level_count = 1;
+	for (const StaticBatch &batch : p_batches) {
+		level_count = MAX(level_count,
+				static_cast<std::size_t>(MAX(batch.lod_index, 0)) + 1);
+	}
+	if (r_profile.thresholds_q16.size() < level_count) {
+		r_profile.thresholds_q16.resize(level_count, 0);
+	}
+	r_profile.available.assign(r_profile.thresholds_q16.size(), false);
+	for (const StaticBatch &batch : p_batches) {
+		if (batch.lod_index >= 0 &&
+				static_cast<std::size_t>(batch.lod_index) <
+						r_profile.available.size()) {
+			r_profile.available[static_cast<std::size_t>(batch.lod_index)] = true;
+		}
+	}
+	if (r_profile.sphere_radius > 0.0f) {
+		return;
+	}
+	AABB bounds;
+	bool has_bounds = false;
+	for (const StaticBatch &batch : p_batches) {
+		if (batch.lod_index != 0 || batch.mesh.is_null()) {
+			continue;
+		}
+		const AABB surface_bounds = batch.offset.xform(batch.mesh->get_aabb());
+		bounds = has_bounds ? bounds.merge(surface_bounds) : surface_bounds;
+		has_bounds = true;
+	}
+	r_profile.sphere_radius =
+			has_bounds ? bounds.get_longest_axis_size() * 0.5f : 0.0f;
+}
+
+// [engine: renderer::project_bound_sphere_radius_q16, the sub-pixel floor
+//  kObjectLodSubPixelCullQ16, renderer::select_object_lod and
+//  object_lod_frame_scale own the witnessed rule; this walk only feeds them
+//  each retained instance and rewrites the slots of the ones that crossed]
+int MissionObjectPlacer::update_static_lods(
+		const Transform3D &p_camera_transform, float p_vertical_fov_degrees,
+		float p_viewport_width, float p_viewport_height) {
+	static_lod_switches_ = 0;
+	if (static_lod_instances_.is_empty()) {
+		return 0;
+	}
+	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
+			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
+	if (!frame.valid) {
+		return 0;
+	}
+	HashSet<uint64_t> touched;
+	StaticLodInstance *instances = static_lod_instances_.ptrw();
+	const int instance_count = static_lod_instances_.size();
+	for (int row = 0; row < instance_count; ++row) {
+		StaticLodInstance &instance = instances[row];
+		if (instance.carved || instance.profile < 0 ||
+				instance.profile >= static_lod_profiles_.size()) {
+			continue;
+		}
+		int32_t radius_q16 = 0;
+		// Outside the frustum the instance keeps its level: retail never
+		// reaches the selector for an entity its collector rejected.
+		if (!frame.project(instance.origin, instance.radius, radius_q16)) {
+			continue;
+		}
+		int next_lod = -1;
+		if (radius_q16 > opennova::renderer::kObjectLodSubPixelCullQ16) {
+			const StaticLodProfile &profile = static_lod_profiles_[instance.profile];
+			next_lod = opennova::renderer::select_object_lod(
+					profile.thresholds_q16, radius_q16, frame.projection_scale,
+					profile.available).lod_index;
+		}
+		if (next_lod == instance.active_lod) {
+			continue;
+		}
+		_write_static_instance_slots(instance, next_lod, touched);
+		instance.active_lod = next_lod;
+		++static_lod_switches_;
+	}
+	_invalidate_static_q3_sources(touched);
+	return static_lod_switches_;
+}
+
+int MissionObjectPlacer::get_static_instance_lod(int p_bms_id) const {
+	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	if (rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return -2;
+	}
+	return static_lod_instances_[rec->lod_instance].active_lod;
+}
+
+Array MissionObjectPlacer::get_static_instance_live_populations(
+		int p_bms_id) const {
+	Array out;
+	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	if (rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return out;
+	}
+	const StaticLodInstance &instance = static_lod_instances_[rec->lod_instance];
+	const int live_lod = instance.carved ? -1 : instance.active_lod;
+	for (const StaticLodBinding &binding : instance.bindings) {
+		if (binding.shadow_only || !_static_slot_live(binding, live_lod)) {
+			continue;
+		}
+		Node *node = Object::cast_to<Node>(
+				ObjectDB::get_instance(binding.instance_node));
+		out.push_back(node != nullptr ? String(node->get_name()) : String());
+	}
+	return out;
+}
+
+bool MissionObjectPlacer::_static_slot_live(const StaticLodBinding &p_binding,
+		int p_live_lod) {
+	return p_binding.lod_index == p_live_lod &&
+			(!p_binding.shadow_only || p_binding.casts);
+}
+
+void MissionObjectPlacer::_write_static_instance_slots(
+		StaticLodInstance &p_instance, int p_live_lod,
+		HashSet<uint64_t> &r_touched) {
+	for (const StaticLodBinding &binding : p_instance.bindings) {
+		if (binding.multimesh.is_null() || binding.index < 0 ||
+				binding.index >= binding.multimesh->get_instance_count()) {
+			continue;
+		}
+		const bool live = _static_slot_live(binding, p_live_lod);
+		binding.multimesh->set_instance_transform(binding.index,
+				live ? binding.live_xform
+					 : static_carved_transform(binding.live_xform));
+		if (!binding.shadow_only && binding.instance_node != 0) {
+			r_touched.insert(binding.instance_node);
+		}
+	}
+}
+
+void MissionObjectPlacer::_invalidate_static_q3_sources(
+		const HashSet<uint64_t> &p_touched) {
+	for (const uint64_t node_id : p_touched) {
+		FrameFx::invalidate_q3_source(Object::cast_to<GeometryInstance3D>(
+				ObjectDB::get_instance(node_id)));
+	}
+}
 // Visible portal/PANM models live below camera-masked ROBJ nodes; retail's
 // terrain-tile collector ignores those masks and submits every selected-LOD
 // ROBJ, so harvest one independent all-section shadow-only sibling per
@@ -1531,6 +1788,11 @@ void MissionObjectPlacer::_add_individual_static_shadow_siblings(
 			if (batch.material.is_valid()) {
 				mmi->set_material_override(batch.material);
 			}
+			// The owner's retained-level visibility walk toggles these like
+			// its own per-level instances.
+			mmi->set_meta("_opennova_lod_index",
+					static_cast<int64_t>(batch.lod_index));
+			mmi->set_visible(batch.lod_index == p_model->get_active_lod());
 			mmi->set_name(vformat("StaticShadow_%s_%s_%d", p_graphic,
 					p_suffix, batch.submesh));
 			p_model->add_child(mmi);

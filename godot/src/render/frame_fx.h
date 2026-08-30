@@ -97,6 +97,10 @@ public:
 			const Ref<Material> &p_material);
 	static void register_q3_source(GeometryInstance3D *p_source,
 			opennova::renderer::Q3Source p_kind);
+	// A registered source's instance data was rewritten in place (the
+	// placer's per-instance static RLOD switches): forward the source's
+	// generation bump to the Q3 adapter.
+	static void invalidate_q3_source(GeometryInstance3D *p_source);
 
 	// Ordered device leg, driven from GameFramePipeline immediately after the
 	// local-view camera placement. This module must NOT self-clock: a node

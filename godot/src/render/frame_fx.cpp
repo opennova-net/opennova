@@ -15,6 +15,7 @@
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/compositor.hpp>
+#include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
 #include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
@@ -964,6 +965,13 @@ void FrameFx::register_q3_object_source(GeometryInstance3D *p_source,
 void FrameFx::register_q3_source(GeometryInstance3D *p_source,
 		opennova::renderer::Q3Source p_kind) {
 	Q3FrameAdapter::register_source(p_source, p_kind);
+}
+
+void FrameFx::invalidate_q3_source(GeometryInstance3D *p_source) {
+	if (p_source == nullptr) {
+		return;
+	}
+	Q3FrameAdapter::invalidate_source(p_source->get_instance_id());
 }
 
 void FrameFx::_bind_methods() {

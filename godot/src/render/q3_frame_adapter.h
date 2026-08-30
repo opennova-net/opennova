@@ -36,6 +36,11 @@ public:
 			const Ref<Material> &p_material);
 	static void register_source(GeometryInstance3D *p_source,
 			opennova::renderer::Q3Source p_kind);
+	// A producer rewrote a registered source's instance data outside the
+	// scene-tree notification path (the placer's per-instance static RLOD
+	// switches rewrite MultiMesh slots in place): bump that source's
+	// generation so a packed-frame source cache re-extracts it.
+	static void invalidate_source(std::uint64_t p_node_id);
 
 	void compile_frame(Node *p_scope, Viewport *p_viewport, Camera3D *p_camera);
 	void clear_frame();

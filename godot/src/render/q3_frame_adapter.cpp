@@ -1172,6 +1172,24 @@ void Q3FrameAdapter::clone_object_material(const Ref<Material> &p_source,
 		g_materials[p_clone->get_instance_id()] = found->second;
 }
 
+namespace {
+
+// Per-source generation counters bumped by invalidate_source. The scene
+// extraction re-reads every registered source each frame, so the counters
+// only carry the invalidation for a source cache; the mutex keeps the bump
+// safe from any thread a producer runs on.
+std::mutex g_source_generations_mutex;
+std::map<std::uint64_t, std::uint64_t> g_source_generations;
+
+} // namespace
+
+void Q3FrameAdapter::invalidate_source(std::uint64_t p_node_id) {
+	if (p_node_id == 0)
+		return;
+	const std::lock_guard<std::mutex> lock(g_source_generations_mutex);
+	++g_source_generations[p_node_id];
+}
+
 void Q3FrameAdapter::register_object_source(GeometryInstance3D *p_source,
 		const Ref<Material> &p_material) {
 	if (p_source == nullptr || p_material.is_null())
