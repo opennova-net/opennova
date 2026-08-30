@@ -3,9 +3,13 @@
 tree against the LIVE IDB and report the disagreements (the three-way-link drift check of
 .claude/skills/grill-ida/LIFECYCLE.md section 4, made mechanical).
 
-Needs IDA running with the ida-pro-mcp plugin on http://127.0.0.1:13337/mcp and the
-retail `Jointops.exe.kong.i64` loaded (docs/correspondence.md pins the image: imagebase
-0x400000). It is a maintainer tool, not a CI lint -- CI has no IDA.
+Needs either IDA running with the ida-pro-mcp plugin on http://127.0.0.1:13337/mcp and the
+retail `Jointops.exe.kong.i64` loaded, or -- `--snapshot path.i64` -- an idat executable and
+a copy of that database, which the sweep opens headless on a private copy (the snapshot is
+never written; `--fix-reimpl --apply` is refused there). Either way the IDB's input-file
+SHA-256 must equal the pin in docs/engine-primer.md section 2 (retail `Jointops.exe`,
+imagebase 0x400000): a different hash is a different image, and the sweep stops before
+joining. It is a maintainer tool, not a CI lint -- CI has no IDA.
 
 For each marker the tool asks the IDB what lives at the address and classifies the pair:
 
@@ -52,6 +56,7 @@ Usage:
   python scripts/ida/cite_sweep.py --tsv out.tsv   # keep the full join for adjudication
   python scripts/ida/cite_sweep.py --fix-reimpl    # plan the reverse-link rewrites (dry run)
   python scripts/ida/cite_sweep.py --fix-reimpl --apply --save   # write them, then idb_save
+  python scripts/ida/cite_sweep.py --snapshot D:/ida_dbs/Jointops.exe.kong.i64   # headless, no IDA session
 """
 
 from __future__ import annotations
@@ -61,6 +66,7 @@ import bisect
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -164,6 +170,115 @@ def py_eval_big(code, rid):
             return json.load(f)
     finally:
         os.remove(path)
+
+
+# ---------------------------------------------------------------- the image pin
+
+PIN_DOC = "docs/engine-primer.md"
+PIN_ROW = re.compile(r"IDB input `Jointops\.exe` SHA-256 \| `([0-9a-f]{64})`")
+SHA_CODE = "import ida_nalt, json\nresult = json.dumps(ida_nalt.retrieve_input_file_sha256().hex())"
+
+
+def pinned_sha256():
+    """The IDB input hash docs/engine-primer.md section 2 pins. The sweep joins against
+    nothing else: a demo, another title, or an IDB rebuilt from another file all carry a
+    different hash and would silently invalidate every address."""
+    with open(os.path.join(REPO, PIN_DOC), encoding="utf-8") as f:
+        m = PIN_ROW.search(f.read())
+    if not m:
+        sys.exit("[cite-sweep] %s no longer carries the `IDB input Jointops.exe SHA-256` pin row" % PIN_DOC)
+    return m.group(1)
+
+
+# ---------------------------------------------------------------- IDB backends
+#
+# A backend runs IDAPython snippets and hands back their values. A snippet is
+# ("small", code) when it sets `result` to a JSON string (the MCP reply fits its ~1 KB cap)
+# or ("big", code) when it leaves `payload` for the temp-file transport.
+
+class LiveIdb:
+    """The ida-pro-mcp endpoint of a running IDA: the read/write backend."""
+
+    writable = True
+
+    def __init__(self, url):
+        global URL
+        URL = url
+        connect()
+        self.input_sha256 = py_eval(SHA_CODE, rid=1)
+
+    def run(self, snippets):
+        out = []
+        for i, (kind, code) in enumerate(snippets):
+            out.append(py_eval_big(code, rid=100 + i) if kind == "big" else py_eval(code, rid=100 + i))
+            sys.stderr.write("  idb %d/%d\n" % (i + 1, len(snippets)))
+        return out
+
+    def call(self, name, arguments, rid):
+        return rpc("tools/call", {"name": name, "arguments": arguments}, rid=rid)
+
+
+IDAT_CANDIDATES = (
+    "C:/Program Files/IDA Essential 9.3/idat.exe",
+    "C:/Program Files/IDA Pro 9.3/idat.exe",
+    "C:/Program Files/IDA 9.3/idat.exe",
+)
+
+
+def find_idat(explicit):
+    for cand in ([explicit] if explicit else []) + [shutil.which("idat"), shutil.which("idat64")] + list(IDAT_CANDIDATES):
+        if cand and os.path.isfile(cand):
+            return cand
+    sys.exit("[cite-sweep] idat not found: pass --idat <path to idat.exe>")
+
+
+class SnapshotIdb:
+    """A `.i64` file opened headless by idat on a private copy (scripts/ida/idb_batch.py):
+    the snapshot is never written and no IDA session is needed. Every snippet runs in ONE
+    idat pass, so the whole sweep costs one database open."""
+
+    writable = False
+
+    def __init__(self, i64, idat):
+        if not os.path.isfile(i64):
+            sys.exit("[cite-sweep] no such database: %s" % i64)
+        self.i64, self.idat, self.input_sha256 = i64, idat, None
+
+    def run(self, snippets):
+        work = tempfile.mkdtemp(prefix="cite_sweep_snap_")
+        try:
+            db = os.path.join(work, os.path.basename(self.i64))
+            shutil.copyfile(self.i64, db)
+            shutil.copyfile(os.path.join(REPO, "scripts", "ida", "idb_batch.py"), os.path.join(work, "idb_batch.py"))
+            with open(os.path.join(work, "job.json"), "w", encoding="utf-8") as f:
+                json.dump({"snippets": [code for _, code in snippets]}, f)
+            # bare names + cwd=work: idat splits the -S value on spaces, so no path may carry one
+            cmd = [self.idat, "-A", "-Lidat.log", "-Sidb_batch.py job.json out.json", db]
+            sys.stderr.write("  idat %s (%d snippet(s))\n" % (os.path.basename(self.i64), len(snippets)))
+            proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=1800)
+            out_path = os.path.join(work, "out.json")
+            if proc.returncode != 0 or not os.path.isfile(out_path):
+                log = ""
+                try:
+                    with open(os.path.join(work, "idat.log"), encoding="utf-8", errors="replace") as f:
+                        log = f.read()[-2000:]
+                except OSError:
+                    pass
+                sys.exit("[cite-sweep] idat failed (rc=%d)\n%s%s%s" % (proc.returncode, proc.stdout[-1000:], proc.stderr[-1000:], log))
+            with open(out_path, encoding="utf-8") as f:
+                out = json.load(f)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        self.input_sha256 = out["input_sha256"]
+        values = []
+        for i, r in enumerate(out["results"]):
+            if not r["ok"]:
+                sys.exit("[cite-sweep] snippet %d failed in idat:\n%s" % (i, r["error"]))
+            values.append(r["value"])
+        return values
+
+    def call(self, name, arguments, rid):
+        sys.exit("[cite-sweep] %s needs the live IDB: a snapshot is read-only" % name)
 
 
 # ---------------------------------------------------------------- extraction
@@ -323,28 +438,16 @@ def classify(tok, addr, ctx, info):
 # comment (slot 0), the repeatable function comment (1), the regular (2) or repeatable (3)
 # instruction comment. The leg reads every slot and rewrites only the slot it found.
 
-REIMPL_EAS_CODE = r'''
-import idc, idautils, json
-eas = []
-for ea in idautils.Functions():
-    for i in range(4):
-        c = idc.get_func_cmt(ea, i) if i < 2 else idc.get_cmt(ea, i - 2)
-        if c and "reimpl:" in c:
-            eas.append("0x%x" % ea)
-            break
-payload = eas
-'''
-
 REIMPL_ROWS_CODE = r'''
-import idc, ida_funcs, json
+import idc, idautils, ida_funcs, json
 rows = []
-for a in EAS:
-    ea = int(a, 16)
-    f = ida_funcs.get_func(ea)
+for ea in idautils.Functions():
+    f = None
     for i in range(4):
         c = idc.get_func_cmt(ea, i) if i < 2 else idc.get_cmt(ea, i - 2)
         if c and "reimpl:" in c:
-            rows.append([a, "0x%x" % (f.start_ea if f else ea), "0x%x" % (f.end_ea if f else ea + 1),
+            f = f or ida_funcs.get_func(ea)
+            rows.append(["0x%x" % ea, "0x%x" % (f.start_ea if f else ea), "0x%x" % (f.end_ea if f else ea + 1),
                          idc.get_func_name(ea) or "", i, c])
 payload = rows
 '''
@@ -361,12 +464,6 @@ result = json.dumps(n)
 
 REIMPL_LINE = re.compile(r"reimpl:\s*([^\n]+)")
 REIMPL_TOKEN = re.compile(r"([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:cpp|h|hpp|gdshaderinc|gdshader|gd|py))(?![A-Za-z0-9])")
-
-
-def reimpl_rows():
-    """Every `reimpl:` comment in the IDB as [ea, func_start, func_end, func_name, slot, text]."""
-    eas = py_eval_big(REIMPL_EAS_CODE, rid=700)
-    return py_eval_big("EAS = %s\n" % json.dumps(eas) + REIMPL_ROWS_CODE, rid=701)
 
 
 def stem_siblings(path):
@@ -480,11 +577,10 @@ def classify_reimpl(rows, pairs, all_tracked):
     return n, out, edits
 
 
-def apply_reimpl(edits, batch):
-    n = 0
-    for i in range(0, len(edits), batch):
-        n += py_eval("EDITS = %s\n" % json.dumps(edits[i:i + batch]) + REIMPL_WRITE_CODE, rid=800 + i)
-    return n
+def apply_reimpl(idb, edits, batch):
+    snippets = [("small", "EDITS = %s\n" % json.dumps(edits[i:i + batch]) + REIMPL_WRITE_CODE)
+                for i in range(0, len(edits), batch)]
+    return sum(idb.run(snippets))
 
 
 # ---------------------------------------------------------------- main
@@ -501,9 +597,14 @@ def main():
     ap.add_argument("--apply", action="store_true", help="with --fix-reimpl: write the planned rewrites into the IDB")
     ap.add_argument("--save", action="store_true", help="with --apply: idb_save afterwards")
     ap.add_argument("--url", default=DEFAULT_URL, help="the IDA MCP endpoint (default %(default)s)")
+    ap.add_argument("--snapshot", metavar="I64",
+                    help="join against this .i64 headless via idat (on a private copy; never written) instead of the live endpoint")
+    ap.add_argument("--idat", help="the idat executable for --snapshot (default: PATH, then the IDA 9.3 install directories)")
+    ap.add_argument("--no-pin-check", action="store_true",
+                    help="report on an IDB whose input hash differs from the docs/engine-primer.md pin (to diagnose the mismatch only)")
     args = ap.parse_args()
-    global URL
-    URL = args.url
+    if args.snapshot and args.apply:
+        sys.exit("[cite-sweep] --apply writes the IDB: run it against the live endpoint, not a snapshot")
 
     code_paths = tracked_files(CODE_ROOTS, CODE_EXT)
     doc_paths = [] if args.no_docs else tracked_files(DOC_ROOTS, DOC_EXT)
@@ -511,13 +612,23 @@ def main():
     keys = sorted({(addr, tok or "") for _, _, tok, addr, ctx in pairs
                    if ctx != "(other-image)" and 0x401000 <= int(addr, 16) < 0x10000000})
 
-    connect()
+    idb = SnapshotIdb(args.snapshot, find_idat(args.idat)) if args.snapshot else LiveIdb(args.url)
+    pin = pinned_sha256()
+    if idb.input_sha256 and idb.input_sha256 != pin and not args.no_pin_check:
+        sys.exit(pin_mismatch(idb.input_sha256, pin))
+    snippets = [("small", "KEYS = " + json.dumps(keys[i:i + args.batch]) + "\n" + (IDB_CODE % (AUTO_PREFIXES,)))
+                for i in range(0, len(keys), args.batch)]
+    if not args.no_reimpl:
+        snippets.append(("big", REIMPL_ROWS_CODE))
+    values = idb.run(snippets)
+    if idb.input_sha256 != pin:
+        msg = pin_mismatch(idb.input_sha256, pin)
+        if not args.no_pin_check:
+            sys.exit(msg)
+        sys.stderr.write(msg + "\n")
     info = {}
-    for i in range(0, len(keys), args.batch):
-        chunk = keys[i:i + args.batch]
-        code = "KEYS = " + json.dumps(chunk) + "\n" + (IDB_CODE % (AUTO_PREFIXES,))
-        info.update(py_eval(code, rid=100 + i))
-        sys.stderr.write("  idb join %d/%d\n" % (min(i + args.batch, len(keys)), len(keys)))
+    for chunk in values[:len(values) - (0 if args.no_reimpl else 1)]:
+        info.update(chunk)
 
     rows = []
     for path, ln, tok, addr, ctx in pairs:
@@ -537,7 +648,7 @@ def main():
     n_reimpl, edits = 0, []
     if not args.no_reimpl:
         every_tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True).stdout.split("\n")
-        n_reimpl, reimpl_findings, edits = classify_reimpl(reimpl_rows(), pairs, [p for p in every_tracked if p])
+        n_reimpl, reimpl_findings, edits = classify_reimpl(values[-1], pairs, [p for p in every_tracked if p])
         rows.extend(reimpl_findings)
 
     if args.tsv:
@@ -548,8 +659,9 @@ def main():
 
     counts = Counter(r[0] for r in rows)
     n_defect = sum(counts[c] for c in DEFECTS)
-    print("[cite-sweep] %d marker addresses (%d code files, %d docs), %d IDB reimpl links; %d disagreements: %s"
-          % (len(pairs), len(code_paths), len(doc_paths), n_reimpl, n_defect,
+    print("[cite-sweep] %s sha256=%s; %d marker addresses (%d code files, %d docs), %d IDB reimpl links; %d disagreements: %s"
+          % ("snapshot " + os.path.basename(args.snapshot) if args.snapshot else "live IDB", idb.input_sha256,
+             len(pairs), len(code_paths), len(doc_paths), n_reimpl, n_defect,
              ", ".join("%s=%d" % (k, v) for k, v in sorted(counts.items()))))
     for r in sorted(rows, key=lambda r: (r[0], r[1], r[6])):
         if r[0] in DEFECTS or args.all:
@@ -559,11 +671,17 @@ def main():
         for ea, slot, text in edits:
             print("\t%s\tslot%d\t%s" % (ea, slot, " | ".join(REIMPL_LINE.findall(text))[:200]))
         if args.apply and edits:
-            print("[fix-reimpl] %d written" % apply_reimpl(edits, 100))
+            print("[fix-reimpl] %d written" % apply_reimpl(idb, edits, 100))
             if args.save:
-                rpc("tools/call", {"name": "idb_save", "arguments": {}}, rid=900)
+                idb.call("idb_save", {}, rid=900)
                 print("[fix-reimpl] idb_save done")
     return 1 if n_defect else 0
+
+
+def pin_mismatch(actual, pin):
+    return ("[cite-sweep] IDB input SHA-256 %s is not the pinned retail Jointops.exe %s (%s section 2): "
+            "a demo, another title, or an IDB rebuilt from another file -- every address would be wrong. "
+            "--no-pin-check reports anyway, for diagnosis only." % (actual, pin, PIN_DOC))
 
 
 if __name__ == "__main__":
