@@ -374,6 +374,27 @@ func apply_sound_emitters(events: Array) -> void:
 				(event_value as Dictionary).duplicate())
 
 
+## The weather tick's thunder: the THUNDER trigger set played at a distance
+## from the listener along a bearing (a 0..255 turn; 128 = behind the camera)
+## (retail Sound_PlayTriggerSetScaled @ 0x527b90 — the 24-byte emitter
+## {0x10000, bearing, g_SoundVolumeOption, 0, distance, 0} into
+## SoundBank_PlayTriggerEntries @ 0x75ccd0 on dword_24E0914; sequencer A at
+## 1 m centred @ 0x57ecfb, B at 10 m from behind @ 0x57edc4).
+func play_weather_sounds(events: Array, camera_xform: Transform3D) -> void:
+	if events.is_empty() or _bank == null or _audio_root == null:
+		return
+	var forward := -camera_xform.basis.z
+	for event_value in events:
+		if not (event_value is Dictionary):
+			continue
+		var event: Dictionary = event_value
+		var distance := float(event.get("distance", 1.0))
+		var bearing := int(event.get("bearing", 0))
+		var dir := forward.rotated(Vector3.UP, float(bearing) * TAU / 256.0)
+		var pos := camera_xform.origin + dir * distance
+		_bank.play_oneshot_3d(_audio_root, pos, "THUNDER", SFX_BUS, camera_xform.origin)
+
+
 ## PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 ## position. The .bms action param -> set-name decode is left to the caller (the
 ## engine resolves a pre-loaded sound_id handle; the action path plays it at full

@@ -188,7 +188,7 @@ void WeaponDatabase::append_entry(const DefWeaponDef &e) {
 		row["y1"] = se.y1;
 		row["x2"] = se.x2;
 		row["y2"] = se.y2;
-		row["blend"] = se.blend; // 0=Blend 1=Add 2=BlendAt
+		row["blend"] = se.blend; // DefSightBlendMode transport value.
 		row["scale"] = se.scale != 0;
 		row["slide"] = se.slide != 0;
 		row["slide_frames"] = se.slide_frames;

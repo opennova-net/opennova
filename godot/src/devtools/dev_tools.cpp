@@ -14,6 +14,9 @@
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
+#include <runtime/devtools/environment_request.h>
+#include <runtime/devtools/environment_snapshot.h>
+#include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/stats_window.h>
 
 #include <algorithm>
@@ -110,7 +113,9 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 	}
 	apply_game_requests();
 	apply_debug_requests();
+	apply_environment_requests();
 	push_entity_detail(push_entity_directory());
+	push_environment_snapshot();
 	if (open_ && !tools_->pass().is_open()) {
 		// Closed from inside (Escape, the menu).
 		set_game_playing_internal(false);
@@ -269,6 +274,7 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 	simulation_id_ = id;
 	last_entity_push_ms_ = -1;
 	last_detail_handle_ = -1;
+	last_environment_push_ms_ = -1;
 	// A packed handle names a slot, not an entity: the selection never crosses
 	// from one world to the next.
 	tools_->clear_entity_selection();
@@ -277,6 +283,7 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 		// left open never shows a dead world's rows or card.
 		tools_->set_entity_directory(opennova::devtools::EntityDirectorySnapshot{});
 		tools_->set_entity_detail(opennova::devtools::EntityDetailSnapshot{});
+		tools_->set_environment_snapshot(opennova::devtools::EnvironmentSnapshot{});
 	}
 }
 
@@ -398,6 +405,70 @@ void DevTools::push_entity_detail(bool p_directory_pushed) {
 	detail.card = simulation_->native_entity_card(handle);
 	detail.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
 	tools_->set_entity_detail(std::move(detail));
+}
+
+// Drain the Environment window's typed weather commands into the ONE
+// command layer (world::EntityCommands, ADR 0042 d5) — the same handlers the
+// WAC VM and the MCP rows reach.
+void DevTools::apply_environment_requests() {
+	opennova::devtools::EnvironmentRequest request;
+	Simulation *simulation_ = simulation();
+	while (tools_->take_environment_request(request)) {
+		if (simulation_ == nullptr || simulation_->is_joiner()) {
+			continue;
+		}
+		opennova::world::EntityCommands *commands = simulation_->entity_commands();
+		if (commands == nullptr) {
+			continue;
+		}
+		using Kind = opennova::devtools::EnvironmentRequest::Kind;
+		switch (request.kind) {
+			case Kind::Rain: commands->set_rain(request.a, request.b); break;
+			case Kind::Snow: commands->set_snow(request.a, request.b); break;
+			case Kind::Overcast: commands->set_overcast(request.a, request.b); break;
+			case Kind::FogDistance: commands->set_fog_distance(request.a); break;
+			case Kind::MoveFog: commands->move_fog(request.a, request.b); break;
+			case Kind::SkySpeed: commands->set_sky_speed(request.a); break;
+			case Kind::SkyHeight: commands->set_sky_height(request.a); break;
+			case Kind::Quake: commands->quake(request.a); break;
+			case Kind::TimeOfDayMinutes: commands->set_time_of_day_minutes(request.a); break;
+			case Kind::FogType: commands->set_fog_type(request.a); break;
+			case Kind::SunFade: commands->sun_fade(request.a, request.b); break;
+			case Kind::ColorFade: commands->set_color_fade(request.a); break;
+			case Kind::Flash: commands->lightning_flash(); break;
+			case Kind::FarFlash: commands->lightning_far_flash(); break;
+			case Kind::WindScale: commands->set_wind_scale(request.a); break;
+			case Kind::BlockColor:
+				commands->set_weather_color(
+						static_cast<opennova::world::WeatherColorTarget>(request.a),
+						static_cast<uint32_t>(request.b));
+				break;
+			case Kind::LightningColor:
+				commands->set_lightning_color(static_cast<uint32_t>(request.b));
+				break;
+		}
+	}
+}
+
+// Push the environment record while the Environment window shows, on its
+// 0.25 s cadence: the ENGINE join (Simulation::native_environment_snapshot)
+// over the weather home — no Variant round-trip (ADR 0042 d6).
+void DevTools::push_environment_snapshot() {
+	Simulation *simulation_ = simulation();
+	if (simulation_ == nullptr || !tools_->needs_environment_snapshot()) {
+		last_environment_push_ms_ = -1;
+		return;
+	}
+	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	const int64_t cadence_ms = static_cast<int64_t>(
+			opennova::devtools::EnvironmentWindow::kRefreshSeconds * 1000.0);
+	if (last_environment_push_ms_ >= 0 && now_ms - last_environment_push_ms_ < cadence_ms) {
+		return;
+	}
+	last_environment_push_ms_ = now_ms;
+	opennova::devtools::EnvironmentSnapshot snapshot;
+	simulation_->native_environment_snapshot(snapshot);
+	tools_->set_environment_snapshot(snapshot);
 }
 
 void DevTools::reset_layout() {

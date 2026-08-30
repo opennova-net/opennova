@@ -4,6 +4,7 @@
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_properties_window.h>
+#include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/stats_window.h>
 
@@ -40,6 +41,9 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	auto properties = std::make_unique<EntityPropertiesWindow>(*entities_window_);
 	entity_properties_window_ = properties.get();
 	pass_.register_window(std::move(properties));
+	auto environment = std::make_unique<EnvironmentWindow>();
+	environment_window_ = environment.get();
+	pass_.register_window(std::move(environment));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -111,6 +115,18 @@ void GameDevTools::set_entity_detail(EntityDetailSnapshot detail) {
 bool GameDevTools::needs_entity_detail() const {
 	return pass_.is_open() && entity_properties_window_->open &&
 			entities_window_->selected_handle() != world::EntityHandle::kInvalid;
+}
+
+void GameDevTools::set_environment_snapshot(const EnvironmentSnapshot &snapshot) {
+	environment_window_->set_snapshot(snapshot);
+}
+
+bool GameDevTools::needs_environment_snapshot() const {
+	return pass_.is_open() && environment_window_->open;
+}
+
+bool GameDevTools::take_environment_request(EnvironmentRequest &request) {
+	return environment_window_->take_request(request);
 }
 
 }  // namespace opennova::devtools

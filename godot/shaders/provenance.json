@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 193,
+  "resource_count": 194,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
@@ -126,6 +126,17 @@
         { "address": "0x5acaa0", "function": "render_celestial_bodies", "function_start": "0x5acaa0" }
       ],
       "exceptions": ["D-RLIT-2"]
+    },
+    {
+      "id": "precipitation-streaks",
+      "patterns": ["precipitation.gdshader"],
+      "light_behavior": "prelit_or_light_derived_effect",
+      "parity_status": "matching",
+      "docs": ["docs/env/env-tod-re.md"],
+      "retail_citations": [
+        { "address": "0x5dee10", "function": "render_weather_trail_particles", "function_start": "0x5dee10" }
+      ],
+      "exceptions": []
     },
     {
       "id": "light-derived-effects",

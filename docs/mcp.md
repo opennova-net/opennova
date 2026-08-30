@@ -186,6 +186,9 @@ each schema; the table above is the map, the catalog is the truth.
 - Looking around from a pose: `game_debug invoke teleport_local_player
   {position, yaw_deg, pitch_deg}` then `local_player_look {dx_px, dy_px}`, then
   `game_capture_bundle` (formerly the bend-capture and render-align probes).
+- Weather: the `environment_rain` / `environment_snow` / `environment_overcast` / `environment_fog_distance` / `environment_move_fog` / `environment_sky_speed` / `environment_quake` / `environment_fog_type` actions take the WAC arguments (`rain 100 5` = `rain(100, 5)`); the F3 Environment window drives the same command layer.
+  `environment_weather_snapshot` reads the weather home (the clock, springs,
+  sequencers, the smoothed color blocks and the combined terrain light).
 - A time-of-day visual baseline: `game_debug set environment_time_of_day`
   four times with a `game_capture_bundle` each, compared with `render_swatch
   {mode: compare}` (formerly `env_visual_baseline_probe`).

@@ -5,6 +5,9 @@
 // fingerprint is the pinned one (the imgui-godot addon rejects any other).
 #include <runtime/devtools/debug_request.h>
 #include <runtime/devtools/entities_window.h>
+#include <runtime/devtools/environment_request.h>
+#include <runtime/devtools/environment_snapshot.h>
+#include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/imgui_abi.h>
@@ -25,6 +28,9 @@ using opennova::devtools::CaptureWindow;
 using opennova::devtools::DebugRequest;
 using opennova::devtools::EntitiesWindow;
 using opennova::devtools::EntityDetailSnapshot;
+using opennova::devtools::EnvironmentRequest;
+using opennova::devtools::EnvironmentSnapshot;
+using opennova::devtools::EnvironmentWindow;
 using opennova::devtools::EntityDirectorySnapshot;
 using opennova::devtools::EntityPropertiesWindow;
 using opennova::devtools::GameViewport;
@@ -132,7 +138,8 @@ void test_attach_sets_docking_and_viewport_policy() {
 
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 5, "Game + Stats + Entities + Entity Properties + demo registered");
+	CHECK(tools.pass().window_count() == 6,
+			"Game + Stats + Entities + Entity Properties + Environment + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -151,7 +158,10 @@ void test_game_window_is_mandatory_and_detachable() {
 	CHECK(!tools.pass().window(3).open, "the Entity Properties window starts closed");
 	CHECK(tools.pass().window(3).initial_dock_placement() == InitialDockPlacement::RightBottom,
 			"Entity Properties starts under the right column, its own dock node");
-	CHECK(!tools.pass().window(4).open, "the demo window starts closed");
+	CHECK(std::strcmp(tools.pass().window(4).title(), "Environment") == 0,
+			"Environment registers after Entity Properties");
+	CHECK(!tools.pass().window(4).open, "the Environment window starts closed");
+	CHECK(!tools.pass().window(5).open, "the demo window starts closed");
 }
 
 void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
@@ -283,9 +293,10 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 5, "Game + Stats + Entities + Entity Properties + demo registered");
+	CHECK(tools.pass().window_count() == 6,
+			"Game + Stats + Entities + Entity Properties + Environment + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
-	CHECK(!tools.pass().window(4).open, "the demo window starts closed");
+	CHECK(!tools.pass().window(5).open, "the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
 
 	ImGui::NewFrame();
@@ -885,6 +896,114 @@ void test_entity_edits_gate_on_the_pushed_authority() {
 	CHECK(!entities.authority() && !properties.edits_enabled(), "no world: no authority, no edits");
 }
 
+// The Environment window formats the retail page rows [orig:
+// Debug_DrawEnvironmentValues @ 0x4ef000] from the pushed record, seeds its
+// control strip from the live values, and drops everything on the
+// visibility close.
+void test_environment_window_formats_the_pushed_record() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	CHECK(!tools.needs_environment_snapshot(), "a closed Environment window needs no snapshot");
+	tools.environment_window().open = true;
+	CHECK(tools.needs_environment_snapshot(), "pass open && window open arms the feed");
+
+	EnvironmentSnapshot snapshot;
+	snapshot.valid = true;
+	snapshot.logic_tick = 310;
+	snapshot.env_name = "full_00";
+	snapshot.trn_name = "Dvxi1";
+	snapshot.blink_flags = 0x02u | 0x20u;
+	snapshot.fog_type = 2;
+	snapshot.fog_dist_metres = 640;
+	snapshot.fog_target_metres = 200;
+	snapshot.color_fade_seconds = 3;
+	snapshot.sun_fade_pct = 0;
+	snapshot.night = true;
+	snapshot.fog_rgb = 0x102030u;
+	snapshot.sun_rgb = 0xE6D9BFu;
+	snapshot.outdoor_rgb = 0x405060u;
+	snapshot.gain_rgb = 0x404040u;
+	snapshot.iris_rgb = 0x404040u;
+	snapshot.fov_degrees = 80;
+	snapshot.sky_height_metres = 175;
+	snapshot.sky_speed = 15;
+	snapshot.rain_pct = 37;
+	snapshot.rain_target_pct = 100;
+	snapshot.overcast_pct = 50;
+	snapshot.overcast_target_pct = 50;
+	snapshot.complexity = 12;
+	snapshot.minute_of_day = 750;
+	snapshot.quake_ticks = 42;
+	snapshot.precipitation_kind = 1;
+	snapshot.wind_scale = 256;
+	snapshot.authority = true;
+	tools.set_environment_snapshot(snapshot);
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with the Environment window open");
+	ImGui::Render();
+	CHECK(ImGui::FindWindowByName("Environment") != nullptr, "the Environment window exists after a pass");
+
+	const EnvironmentWindow &window = tools.environment_window();
+	CHECK(window.snapshot_valid(), "the pushed snapshot is the reading");
+	CHECK(window.row_count() == EnvironmentWindow::kRowCount, "every retail row formats");
+	CHECK(std::strcmp(window.row_text(0), "Env: full_00") == 0, "Env row");
+	CHECK(std::strcmp(window.row_text(1), "Trn: Dvxi1") == 0, "Trn row");
+	CHECK(std::strcmp(window.row_text(2), "Blink: V---O") == 0, "the blink bits print V/S/W/L/O");
+	CHECK(std::strcmp(window.row_text(3), "Fogtype: 2") == 0, "Fogtype row");
+	CHECK(std::strcmp(window.row_text(4), "Fogdist: 640m") == 0, "Fogdist row (the hi word, metres)");
+	CHECK(std::strcmp(window.row_text(5), "ColorFade: 3 seconds") == 0, "ColorFade row");
+	CHECK(std::strcmp(window.row_text(6), "SunFade: 0%") == 0, "SunFade row");
+	CHECK(std::strcmp(window.row_text(7), "MoonLight: 1") == 0, "MoonLight row");
+	CHECK(std::strcmp(window.row_text(8), "Fog: (16, 32, 48)") == 0, "the color rows print (r, g, b)");
+	CHECK(std::strcmp(window.row_text(11), "FOV: 80 degrees") == 0, "FOV row");
+	CHECK(std::strcmp(window.row_text(12), "Sun: (230, 217, 191)") == 0, "Sun row");
+	CHECK(std::strcmp(window.row_text(18), "SkyHeight: 175m") == 0, "SkyHeight row");
+	CHECK(std::strcmp(window.row_text(19), "SkySpeed: 15m") == 0, "SkySpeed row (the retail format)");
+	CHECK(std::strcmp(window.row_text(20), "OutDoor: (64, 80, 96)") == 0, "OutDoor row");
+	CHECK(std::strcmp(window.row_text(24), "Rain: 37%") == 0, "Rain row");
+	CHECK(std::strcmp(window.row_text(25), "Overcast: 50%") == 0, "Overcast row");
+	CHECK(std::strcmp(window.row_text(26), "Complexity: 12") == 0, "Complexity row");
+	CHECK(std::strcmp(window.row_text(27), "DCB: 692") == 0, "the DCB literal");
+	CHECK(window.rain_percent_edit() == 100, "the control strip seeds from the live rain target");
+
+	tools.set_environment_snapshot(EnvironmentSnapshot{});
+	CHECK(!window.snapshot_valid() && window.row_count() == 0,
+			"an invalid snapshot clears the page (the world unloaded)");
+	tools.set_environment_snapshot(snapshot);
+	CHECK(window.row_count() == EnvironmentWindow::kRowCount, "a re-push restores the page");
+	tools.pass().set_open(false);
+	CHECK(!tools.needs_environment_snapshot(), "closing the pass drops the need");
+	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
+}
+
+// The EnvironmentRequest channel: enqueue/take round-trips the typed weather
+// commands in order and drains exactly once.
+void test_environment_request_queue() {
+	GameDevTools tools;
+	EnvironmentRequest request;
+	CHECK(!tools.take_environment_request(request), "fresh tools hold no environment request");
+	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::Rain, 100, 5});
+	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::MoveFog, 200, 2});
+	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::Flash, 0, 0});
+	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::BlockColor, 2, 0x102030});
+	CHECK(tools.take_environment_request(request) && request.kind == EnvironmentRequest::Kind::Rain &&
+					request.a == 100 && request.b == 5,
+			"the rain request round-trips first");
+	CHECK(tools.take_environment_request(request) && request.kind == EnvironmentRequest::Kind::MoveFog &&
+					request.a == 200 && request.b == 2,
+			"the move-fog request follows");
+	CHECK(tools.take_environment_request(request) && request.kind == EnvironmentRequest::Kind::Flash,
+			"the flash request follows");
+	CHECK(tools.take_environment_request(request) &&
+					request.kind == EnvironmentRequest::Kind::BlockColor && request.a == 2 &&
+					request.b == 0x102030,
+			"the block color request carries its target and packed rgb");
+	CHECK(!tools.take_environment_request(request), "the queue drains exactly once");
+}
+
 }  // namespace
 
 int main() {
@@ -902,6 +1021,8 @@ int main() {
 	test_entities_window_selects_the_picked_handle();
 	test_entity_properties_window_card_and_attrib_toggles();
 	test_entity_edits_gate_on_the_pushed_authority();
+	test_environment_window_formats_the_pushed_record();
+	test_environment_request_queue();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

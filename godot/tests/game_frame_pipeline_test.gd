@@ -60,7 +60,7 @@ class FakeWorld:
 	func drive_network_frame() -> bool:
 		trace.append("network")
 		return network_ok
-	func advance_weather_frame() -> void: trace.append("weather")
+	func render_precipitation_frame() -> void: trace.append("precipitation")
 	func apply_blink_frame() -> void: trace.append("blink")
 	func apply_occlusion_frame() -> void: trace.append("occlusion")
 	func sample_iris_frame() -> void: trace.append("iris")
@@ -94,8 +94,8 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 	assert_eq(world.trace, [
 		"begin", "session", "local_view", "scene_environment",
 		"environment_nodes", "terrain", "water", "foliage", "network",
-		"weather", "occlusion", "iris", "sun_veil", "lights", "materials", "framefx", "slot_shadows",
-		"particles", "audio:0", "clear", "environment_cube", "finish",
+		"occlusion", "iris", "sun_veil", "lights", "materials", "framefx", "slot_shadows",
+		"particles", "precipitation", "audio:0", "clear", "environment_cube", "finish",
 	])
 	assert_eq(world.terrain_camera_generation, 1,
 			"terrain samples the post-present camera generation")

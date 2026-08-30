@@ -446,6 +446,7 @@ void Simulation::joiner_pump() {
 		tick_local_player_weapon();
 		kernel_->tick_medic_cooldown(local_player_dead());
 	};
+	hooks.tick_weather = [this] { kernel_->tick_weather(); };
 	joiner_bridge_.pump(ctx, hooks);
 	// An S2C 0x41 applied inside the pump mutated the live charattr table; the
 	// World's per-class ATTRIBUTES words follow it the same frame [orig: the
@@ -969,7 +970,6 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 		kernel_->world.mp_session = true;
 	}
 	joiner_bridge_.reset_for_join();
-	joiner_environment_revision_seen_ = 0;
 	joiner_applied_loadout_revision_ = 0;
 	if (!session_.begin_connect().applied()) {
 		joiner_ = false;
@@ -1298,27 +1298,6 @@ int Simulation::get_joiner_phase() const {
 
 int Simulation::get_joiner_self_handle() const {
 	return joiner_ ? static_cast<int>(joiner_bridge_.self_wire_handle()) : 0;
-}
-
-Dictionary Simulation::take_join_environment_update() {
-	Dictionary out;
-	if (!joiner_ || runtime_ == nullptr) return out;
-	const opennova::netsim::ClientEnvironmentState &environment =
-			runtime_->state().environment;
-	if (!environment.present ||
-			environment.revision == joiner_environment_revision_seen_)
-		return out;
-	joiner_environment_revision_seen_ = environment.revision;
-	out["revision"] = static_cast<int64_t>(environment.revision);
-	out["fog_dist"] = static_cast<int64_t>(environment.fog_dist);
-	out["fog_accel"] = static_cast<int64_t>(environment.fog_accel);
-	out["tod_fixed"] = static_cast<int64_t>(environment.tod_fixed);
-	out["quake_ticks"] = static_cast<int64_t>(environment.quake_ticks);
-	out["cloud_scroll"] = static_cast<int64_t>(environment.cloud_scroll);
-	out["rain_pct"] = static_cast<int64_t>(environment.rain_pct);
-	out["overcast"] = static_cast<int64_t>(environment.overcast);
-	out["precipitation_kind"] = static_cast<int64_t>(environment.env_param);
-	return out;
 }
 
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 — the leave sends a burst of

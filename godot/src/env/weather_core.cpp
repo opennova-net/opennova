@@ -63,8 +63,8 @@ void WeatherCore::_bind_methods() {
 								  "sky_speed"),
 			&WeatherCore::tick);
 	ClassDB::bind_method(D_METHOD("tick_cloud_scroll", "sky_speed"), &WeatherCore::tick_cloud_scroll);
-	ClassDB::bind_method(D_METHOD("apply_network_environment_sample", "fog_dist", "fog_accel", "rain_pct", "overcast"),
-			&WeatherCore::apply_network_environment_sample);
+	ClassDB::bind_method(D_METHOD("apply_wire_sample", "fog_dist", "fog_accel", "rain_pct", "overcast"),
+			&WeatherCore::apply_wire_sample);
 	ClassDB::bind_method(D_METHOD("get_fog_distance"), &WeatherCore::get_fog_distance);
 	ClassDB::bind_method(D_METHOD("get_sky_height"), &WeatherCore::get_sky_height);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset1", "cam_x", "cam_z"), &WeatherCore::get_cloud_uv_offset1);
@@ -275,7 +275,7 @@ Vector4 WeatherCore::get_water_uv_state(float p_cam_x, float p_cam_z, float p_fo
 	return Vector4(state.scale, state.bias, state.offset_u, state.offset_v);
 }
 
-void WeatherCore::apply_network_environment_sample(int p_fog_dist,
+void WeatherCore::apply_wire_sample(int p_fog_dist,
 		int p_fog_accel, int p_rain_pct, int p_overcast) {
 	core_.scalar_channels.apply_network_sample(
 			static_cast<uint16_t>(std::clamp(p_fog_dist, 0, 0xFFFF)),

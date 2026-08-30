@@ -37,6 +37,8 @@
 #include <runtime/wac/wac_system.h>
 
 namespace godot {
+
+class Weather;
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
 class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 0042 d5)
 class EntityRow;      // one typed entity-directory row
@@ -73,7 +75,9 @@ class EndRoundState;  // the typed end-of-round session facts (simulation_end_ro
 #include <formats/score/score.h> // the retained score.ini parse (score_config_)
 
 #include "mission/mission_data.h"
-#include <runtime/mission/mission_kernel.h> // the ONE mission boot + state + no-net tick (ADR 0042 d3)
+#include <runtime/mission/mission_kernel.h>
+#include <runtime/renderer/precipitation_frame.h>
+#include <runtime/devtools/environment_snapshot.h> // the ONE mission boot + state + no-net tick (ADR 0042 d3)
 #include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
 #include <net/inmatch/listen_host.h>              // ListenHostState + the listen bring-up/frame (ADR 0042 d3)
@@ -391,6 +395,14 @@ private:
 	// (reset_world) and NEVER null after construction; this binding converts
 	// Godot Refs into the kernel's sources and orders device work around it.
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
+	// The Weather node bound through set_weather_render_owner; released
+	// whenever the kernel (and the WeatherState it owns) is replaced or dies.
+	ObjectID weather_owner_id_;
+	void _release_weather_owner();
+	opennova::renderer::PrecipitationDrawState precipitation_draw_;
+	// The compiled streak frame, reused across frames (its vertex capacity
+	// survives clear()).
+	opennova::renderer::PrecipitationDrawFrame precipitation_frame_;
 	void apply_collision_to_ai();
 	// The shell input the sweep reads (its retained items.def rows feed the
 	// engine resolve). RefCounted, so retaining it also keeps its object/ADM
@@ -646,7 +658,6 @@ private:
 	// The live environment owner consumes each decoded phase-2 edge once. The
 	// ClientState revision is monotonic for one ClientRuntime; fresh runtimes
 	// reset this cursor with their other receive-side cursors.
-	uint32_t joiner_environment_revision_seen_ = 0;
 	// The 0x81 score-feedback edge cursor (ClientScoreFeedback::updates).
 	uint32_t score_feedback_updates_seen_ = 0;
 	// Last authoritative S2C 0x5A grant installed into the local slot pool.
@@ -940,20 +951,62 @@ private:
 	void reset_world();
 
 public:
-	// The authority network-environment mirrors — the weather device drives
-	// these natively (Weather.advance_world_driven / run_mission_start_boundary).
-	void set_network_environment(int64_t p_fog_target_q16,
-	                             int64_t p_fog_current_q16,
-	                             int64_t p_fog_accel_clamp,
-	                             int64_t p_tod_fixed24,
-	                             int64_t p_tod_advance_per_tick,
-	                             int64_t p_quake_ticks,
-	                             int64_t p_cloud_scroll_rate_target,
-	                             int64_t p_rain_pct_current_q16,
-	                             int64_t p_overcast_blend_q16,
-	                             int64_t p_precipitation_kind);
-	void advance_network_environment_tick();
-	void initialize_network_environment_mission_start();
+	// --- the weather home (world::WeatherState, ADR 0042 d2/d5) --------------
+	// The World's weather, the ONE home the WAC handlers write, the kernel's
+	// weather tick advances, the 0x0A projection serializes and a joiner's
+	// decoder writes back. Null without a kernel. C++ seams for the sibling
+	// native nodes (the Weather node binds its render owner here).
+	opennova::world::WeatherState *weather_state();
+	const opennova::world::WeatherState *weather_state() const;
+	// True once a world is installed (the weather home exists for the debug
+	// rows to command).
+	bool weather_state_bound() const { return weather_state() != nullptr; }
+	// The mission-start seed from the parsed .env + the mission header (the
+	// embedder's ONE derivation, env::weather_seed_from_config).
+	void seed_weather(const opennova::world::WeatherSeed &p_seed);
+	// The render owner the kernel's weather tick calls after the sim legs
+	// (null detaches). The owner node is remembered so the World's death
+	// (reset_world, destruction) releases the owner's pointer into it before
+	// the environment can read a freed WeatherState.
+	void set_weather_render_owner(Weather *p_owner);
+	// The authority's mission-start boundary after the eager WAC execution:
+	// the currents snap to the authored targets, the clamps install, 255 full
+	// ticks settle (retail Environment_MissionStartInit @ 0x57f1e0). False for
+	// a joiner or without a world.
+	bool settle_weather_mission_start();
+	// The precipitation drop pool's per-render update + compile for a camera
+	// (Godot frame): {positions: PackedVector3Array (three per drop), drops,
+	// color (ARGB int), snow} — the kernel re-floors the wrapped drops
+	// over terrain/water/entities, the renderer builds the streaks
+	// (renderer/precipitation_frame.h carries the cites).
+	Dictionary compile_precipitation_frame(const Vector3 &p_camera,
+			const Vector3 &p_camera_right, const Vector3 &p_camera_up,
+			int p_terrain_light_rgb);
+	// The weather tick's thunder one-shots since the last drain:
+	// [{distance: float, bearing: int}] (weather_state.h carries the cites).
+	Array drain_weather_sounds();
+	// The probe/test view of the weather home in native units.
+	Dictionary get_weather_state() const;
+	// The F3 Environment window's record (ADR 0042 d6), built by the ENGINE
+	// join over the weather home, the mission document, the occlusion blink
+	// flags and the local view; false without a world.
+	bool native_environment_snapshot(opennova::devtools::EnvironmentSnapshot &out) const;
+	// The MCP/debug rows' authority-gated weather commands (the F3 window
+	// reaches EntityCommands natively through DevTools). False on a joiner.
+	bool command_rain(int p_percent, int p_seconds);
+	bool command_snow(int p_percent, int p_seconds);
+	bool command_overcast(int p_percent, int p_seconds);
+	bool command_fog_distance(int p_metres);
+	bool command_move_fog(int p_metres, int p_seconds);
+	bool command_sky_speed(int p_rate);
+	bool command_quake(int p_seconds);
+	bool command_time_of_day_minutes(int p_minute_of_day);
+	// The exact dev-tool scrub (not the WAC `tod` math).
+	bool debug_set_time_of_day_minutes(double p_minute_of_day);
+	bool command_fog_type(int p_type);
+	bool command_lightning_flash();
+	bool command_lightning_far_flash();
+	bool command_wind_scale(int p_value);
 
 private:
 	// The shared post-kernel-boot binding legs: session-header capture, HUD
@@ -1177,7 +1230,6 @@ public:
 	String get_join_mission_file() const;
 	// Consume the latest decoded S2C 0x0A phase-2 state once per receive
 	// revision. Empty means no new authoritative sample.
-	Dictionary take_join_environment_update();
 	// The S2C 0x81 hit-confirm edge: {} unless a positive/negative score delta
 	// landed since the last take, else {score, delta, tone} with the tone name
 	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
@@ -1355,6 +1407,8 @@ public:
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
 	Vector3 get_local_player_position() const;
+	// The AI row's 16.16 position (mission x/y ground, z up) the retail hashes read; false without a player row.
+	bool local_player_position_q16(int32_t (&r_pos)[3]) const;
 	// Raw engine heading (BAM32) for the heading-up spinmap.
 	int64_t get_local_player_heading_bam() const;
 	// Radar zoom: positive = radarout (x1.15 toward 0x100000), negative =
@@ -1963,45 +2017,38 @@ public:
 	// mixes into the decoded view), and its cards ride the decoded replica
 	// section (np::client_replica_card).
 	TypedArray<EntityRow> entity_directory() const;
-	// Native (unbound) form for the in-process C++ dev tools (ADR 0042 d6):
-	// the same engine join, returned as the engine vector — no
-	// TypedArray/Variant round-trip. Empty without a kernel.
+	// Native (unbound) form for the in-process C++ dev tools (ADR 0042 d6): the same engine
+	// join, returned as the engine vector — no TypedArray/Variant round-trip. Empty without a kernel.
 	std::vector<opennova::world::inspect::EntityRow> native_entity_directory() const;
-	// Native (unbound): the AI pool index behind a packed wire handle
-	// (-1 = no brain / no kernel) — the dev-tools drain resolves a queued
-	// request's handle onto the ai_index the debug delegates key on.
+	// Native (unbound): the AI pool index behind a packed wire handle (-1 = no brain / no kernel) —
+	// the dev-tools drain resolves a queued request's handle onto the ai_index the delegates key on.
 	int native_ai_index_for_handle(int p_handle) const;
-	// The engine's tool/probe mutation seam by entity handle (ADR 0042 d5),
-	// for the C++ embedders (DevTools) that already hold a handle; null
-	// without a kernel.
+	// The engine's tool/probe mutation seam by entity handle (ADR 0042 d5), for the C++
+	// embedders (DevTools) that already hold a handle; null without a kernel.
 	opennova::world::EntityCommands *entity_commands();
-	// Native (unbound): the engine card by value for the C++ dev tools
-	// (invalid without a kernel or a resolving handle).
+	// Native (unbound): the engine card by value for the C++ dev tools; invalid without a kernel
+	// or a resolving handle.
 	opennova::world::inspect::EntityCard native_entity_card(int p_handle) const;
-	// The full card by packed wire handle; null when nothing resolves. The
-	// AI-index and SSN forms wrap the same builder (edit seams key on
-	// ai_index; pool-1 vehicles carry no brain and resolve by SSN).
+	// The full card by packed wire handle; null when nothing resolves. The AI-index and SSN forms
+	// wrap the same builder (edit seams key on ai_index; pool-1 vehicles have no brain, resolve by SSN).
 	Ref<EntityCard> entity_card(int p_handle) const;
 	Ref<EntityCard> entity_card_by_ai_index(int p_index) const;
 	Ref<EntityCard> entity_card_by_net_id(int p_net_id) const;
-	// Probe seam: write an AI entity's health via the scripted-SETHP stores
-	// (registry + motor copy) so in-game probes can shorten a fight. Returns
-	// ERR_UNAVAILABLE without a live sim, ERR_INVALID_PARAMETER for a missing
-	// AI index, and OK only after both authoritative mirrors are mutated.
+	// Probe seam: write an AI entity's health via the scripted-SETHP stores (registry + motor
+	// copy) so in-game probes can shorten a fight. Returns ERR_UNAVAILABLE without a live sim,
+	// ERR_INVALID_PARAMETER for a missing AI index, and OK only after both mirrors are mutated.
 	Error debug_set_entity_health(int p_index, int p_hp);
 	Error debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn);
 	void set_local_player_eye_offset(const Vector3 &p_offset_godot, bool p_valid);
 	bool local_player_fp_weapon_hidden() const;
 	Error debug_crew_local_player(int p_vehicle_ssn);
-	// Authority test seam: queue a RoundDeath for the player entity at `handle`
-	// (killer = the local player) so the next host tick runs the witnessed
-	// death transaction (route_round_deaths: 0x13 fan, 0x52 camera, 0x54 medic
-	// state, the dead flag on the 0x0A record). Not the health setter above:
-	// remote players are not AI rows.
+	// Authority test seam: queue a RoundDeath for the player entity at `handle` (killer = the
+	// local player) so the next host tick runs the witnessed death transaction
+	// (route_round_deaths: 0x13 fan, 0x52 camera, 0x54 medic state, the dead flag on the 0x0A
+	// record). Not the health setter above: remote players are not AI rows.
 	Error debug_kill_player_entity(int p_handle);
-	// Probe seam: teleport an AI entity (mission-space coords) through both
-	// position stores, for probes defeated by mission geography. Uses the same
-	// truthful Error contract as debug_set_entity_health.
+	// Probe seam: teleport an AI entity (mission-space coords) through both position stores, for
+	// probes defeated by mission geography. Same truthful Error contract as debug_set_entity_health.
 	Error debug_set_entity_position(int p_index, const Vector3 &p_mission_pos);
 	// World-registry probe seam by SSN: mission-space teleport (the by-SSN
 	// entity card is entity_card_by_net_id above).
@@ -2010,10 +2057,9 @@ public:
 	// world entity so a real UDP phase-8 sample can prove receiver application.
 	Error debug_set_world_entity_weapon_ammo(int p_net_id, int p_clip,
 	                                         int p_reserve);
-	// Per-entity items.def attrib override by packed wire handle (brainless
-	// rows included): EntityCommands::set_entity_item_attrib. ERR_UNAVAILABLE
-	// without a kernel, ERR_INVALID_PARAMETER for a handle/word out of range,
-	// ERR_DOES_NOT_EXIST when nothing resolves.
+	// Per-entity items.def attrib override by packed wire handle (brainless rows included):
+	// EntityCommands::set_entity_item_attrib. ERR_UNAVAILABLE without a kernel,
+	// ERR_INVALID_PARAMETER for a handle/word out of range, ERR_DOES_NOT_EXIST when nothing resolves.
 	Error debug_set_entity_item_attrib(int p_handle, int64_t p_attrib, int64_t p_attrib2);
 	// Land the local player at an exact F3-dumped pose (probe seam). Returns
 	// ERR_UNAVAILABLE until the complete local-player subject exists.

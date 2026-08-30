@@ -3,8 +3,13 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/core/object.hpp>
 
+#include "env/env_file.h"
 #include "env/mission_environment.h"
+#include "object/object_data.h"
 #include "simulation/simulation.h"
+
+#include <formats/mission/bms.h>
+#include <runtime/environment/weather_seed.h>
 
 namespace godot {
 
@@ -37,6 +42,10 @@ void Weather::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "iris_samples"),
 			"set_iris_samples", "get_iris_samples");
 
+	ClassDB::bind_method(D_METHOD("bind_simulation", "sim"), &Weather::bind_simulation);
+	ClassDB::bind_method(D_METHOD("run_mission_start_boundary", "sim",
+			"start_time_q8_8", "minutes_per_day"),
+			&Weather::run_mission_start_boundary);
 	ClassDB::bind_method(D_METHOD("set_world_tick_driven", "enabled"),
 			&Weather::set_world_tick_driven);
 	ClassDB::bind_method(D_METHOD("prepare_world_driven"),
@@ -54,23 +63,25 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sun_veil_stopdown", "stopdown"),
 			&Weather::set_sun_veil_stopdown);
 
-	ClassDB::bind_method(D_METHOD("get_network_environment_snapshot"),
-			&Weather::get_network_environment_snapshot);
-	ClassDB::bind_method(D_METHOD("advance_world_driven", "delta", "sim"),
-			&Weather::advance_world_driven);
-	ClassDB::bind_method(D_METHOD("push_network_environment", "sim"),
-			&Weather::push_network_environment);
-	ClassDB::bind_method(D_METHOD("run_mission_start_boundary", "sim"),
-			&Weather::run_mission_start_boundary);
-	ClassDB::bind_method(D_METHOD("apply_join_network_update", "sim"),
-			&Weather::apply_join_network_update);
-	ClassDB::bind_method(D_METHOD("apply_network_environment_sample", "sample"),
-			&Weather::apply_network_environment_sample);
+	ClassDB::bind_method(D_METHOD("get_weather_snapshot"),
+			&Weather::get_weather_snapshot);
+	ClassDB::bind_method(D_METHOD("apply_wire_sample", "sample"),
+			&Weather::apply_wire_sample);
 
 	ClassDB::bind_method(D_METHOD("trigger_lightning_short"),
 			&Weather::trigger_lightning_short);
 	ClassDB::bind_method(D_METHOD("trigger_lightning_long"),
 			&Weather::trigger_lightning_long);
+	ClassDB::bind_method(D_METHOD("command_fog_distance", "metres"), &Weather::command_fog_distance);
+	ClassDB::bind_method(D_METHOD("command_move_fog", "metres", "seconds"), &Weather::command_move_fog);
+	ClassDB::bind_method(D_METHOD("command_rain", "percent", "seconds"), &Weather::command_rain);
+	ClassDB::bind_method(D_METHOD("command_snow", "percent", "seconds"), &Weather::command_snow);
+	ClassDB::bind_method(D_METHOD("command_overcast", "percent", "seconds"), &Weather::command_overcast);
+	ClassDB::bind_method(D_METHOD("command_sky_speed", "rate"), &Weather::command_sky_speed);
+	ClassDB::bind_method(D_METHOD("command_quake", "seconds"), &Weather::command_quake);
+	ClassDB::bind_method(D_METHOD("command_time_of_day_minutes", "minute_of_day"),
+			&Weather::command_time_of_day_minutes);
+	ClassDB::bind_method(D_METHOD("command_fog_type", "type"), &Weather::command_fog_type);
 	ClassDB::bind_method(D_METHOD("set_wind_duration", "seconds"),
 			&Weather::set_wind_duration);
 	ClassDB::bind_method(D_METHOD("get_wind_duration"),
@@ -80,6 +91,8 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sway_phase"), &Weather::get_sway_phase);
 	ClassDB::bind_method(D_METHOD("get_lightning_intensity"),
 			&Weather::get_lightning_intensity);
+	ClassDB::bind_method(D_METHOD("get_terrain_light_combined_rgb"),
+			&Weather::get_terrain_light_combined_rgb);
 
 	ClassDB::bind_method(D_METHOD("get_smooth_fill"), &Weather::get_smooth_fill);
 	ClassDB::bind_method(D_METHOD("get_smooth_sun"), &Weather::get_smooth_sun);
@@ -123,8 +136,6 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
 			&Weather::advance_frame);
 
-	ClassDB::bind_integer_constant(get_class_static(), "", "WEATHER_TICK_HZ",
-			62);
 	ClassDB::bind_integer_constant(get_class_static(), "", "MAX_CATCHUP_TICKS",
 			opennova::env::WeatherRuntime::kMaxCatchupTicks);
 	ClassDB::bind_integer_constant(get_class_static(), "",
@@ -149,12 +160,24 @@ void Weather::_resolve_environment() {
 	}
 	env_node_id_ = env != nullptr ? ObjectID(env->get_instance_id())
 								  : ObjectID();
+	if (!_bound_sim()) {
+		// No env resolves: fall back to the runtime's own idle home so the
+		// runtime never keeps pointing into a freed MissionEnvironment.
+		runtime_.attach_state(nullptr, env != nullptr ? &env->state() : nullptr);
+	}
 }
 
 MissionEnvironment *Weather::_env_node() const {
 	if (env_node_id_.is_valid()) {
 		return Object::cast_to<MissionEnvironment>(
 				ObjectDB::get_instance(env_node_id_));
+	}
+	return nullptr;
+}
+
+Simulation *Weather::_bound_sim() const {
+	if (sim_id_.is_valid()) {
+		return Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
 	}
 	return nullptr;
 }
@@ -181,12 +204,34 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 	rs->global_shader_parameter_set("opennova_fog_start",
 			globals.base.fog_start);
 	rs->global_shader_parameter_set("opennova_fog_type", globals.base.fog_type);
+	// The HUD cache's per-frame CTRL publication: the local player's position
+	// hashed into the wave rings lands in the global FLICKER (amp ring) and
+	// SWING (osc ring) registers every model's CTRL tracks read (retail
+	// HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3dd1 -> 0x83FD00 / 0x83FD08).
+	// The rings for the models that hash their own position, then the local
+	// player's pair as the frame default (retail's HUD/viewmodel legs).
+	const opennova::env::WeatherOscillator &osc = runtime_.core().oscillator;
+	ObjectData::set_weather_rings(osc);
+	Simulation *sim = _bound_sim();
+	int32_t pos_q16[3];
+	if (sim != nullptr && sim->local_player_position_q16(pos_q16)) {
+		const uint8_t slot = osc.ring_slot(pos_q16[0], pos_q16[1], pos_q16[2]);
+		ObjectData::set_weather_ctrl_registers(osc.amp_ring[slot], osc.osc_ring[slot]);
+	}
 }
 
 void Weather::_ready() {
 	set_process_priority(-10);
 	set_process(true);
 	_resolve_environment();
+}
+
+void Weather::_exit_tree() {
+	bind_simulation(nullptr);
+}
+
+Weather::~Weather() {
+	bind_simulation(nullptr);
 }
 
 void Weather::_process(double p_delta) {
@@ -199,7 +244,101 @@ void Weather::advance_frame(double p_delta) {
 	_post_runtime(env);
 }
 
+// --- the simulation binding ---------------------------------------------------
+
+void Weather::bind_simulation(Object *p_sim) {
+	Simulation *previous = _bound_sim();
+	if (previous != nullptr) {
+		previous->set_weather_render_owner(nullptr);
+	}
+	Simulation *sim = Object::cast_to<Simulation>(p_sim);
+	MissionEnvironment *env = _env_node();
+	opennova::world::WeatherState *state = sim != nullptr ? sim->weather_state() : nullptr;
+	sim_id_ = state != nullptr ? ObjectID(sim->get_instance_id()) : ObjectID();
+	runtime_.attach_state(state, env != nullptr ? &env->state() : nullptr);
+	if (state != nullptr) {
+		sim->set_weather_render_owner(this);
+		runtime_.set_world_tick_driven(true);
+	} else {
+		// No mission behind the registers: the last hash must not keep
+		// feeding every model outside one.
+		ObjectData::set_weather_ctrl_registers(0, 0);
+		ObjectData::clear_weather_rings();
+	}
+}
+
+bool Weather::tod_keyframed() const {
+	const MissionEnvironment *env = _env_node();
+	return env == nullptr || env->state().has_tod_keyframes();
+}
+
+void Weather::release_simulation() {
+	sim_id_ = ObjectID();
+	ObjectData::set_weather_ctrl_registers(0, 0);
+	ObjectData::clear_weather_rings();
+	MissionEnvironment *env = _env_node();
+	runtime_.attach_state(nullptr, env != nullptr ? &env->state() : nullptr);
+}
+
+void Weather::weather_render_tick(opennova::world::WeatherState &p_weather) {
+	(void)p_weather; // the runtime is attached to this same home
+	MissionEnvironment *env = _env_node();
+	runtime_.tick_render(env != nullptr ? &env->state() : nullptr);
+	// Device work (the typed publication + the shader globals) is the
+	// display frame's: advance_frame pushes once per frame after the
+	// ticks it banked (the 255-tick settle and catch-up frames would
+	// otherwise push per tick).
+}
+
+void Weather::run_mission_start_boundary(Object *p_sim, int p_start_time_q8_8,
+		int p_minutes_per_day) {
+	Simulation *sim = Object::cast_to<Simulation>(p_sim);
+	MissionEnvironment *env = _env_node();
+	if (sim == nullptr || env == nullptr || sim->weather_state() == nullptr) {
+		prewarm_mission_start();
+		return;
+	}
+	// The seed: the loaded .env (its mission overrides already layered) + the
+	// BMS clock, the ONE derivation every serving embedder runs (retail
+	// Environment_SnapStateToTargets @ 0x57d1e0; Game_StartMission clock
+	// @ 0x525371).
+	opennova::bms::Header header{};
+	header.start_time = p_start_time_q8_8;
+	header.minutes_per_day = p_minutes_per_day;
+	if (env->state().config() != nullptr) {
+		opennova::world::WeatherSeed seed = opennova::env::weather_seed_from_config(
+				*env->state().config(), header);
+		seed.wind_scale = static_cast<int32_t>(runtime_.wind_strength_pct() / 100.0f * 256.0f);
+		sim->seed_weather(seed);
+	}
+	bind_simulation(sim);
+	runtime_.resync_colors();
+	runtime_.tick_weather(&env->state(), 0);
+	// The authority's eager WAC execution precedes the initializer; both
+	// roles then settle 255 complete ticks (the kernel calls this node's
+	// render legs each tick) (retail Game_StartMission @ 0x525cb8 -> @ 0x57f878).
+	if (!sim->is_joiner()) {
+		sim->run_mission_start_wac();
+	}
+	sim->settle_weather_mission_start();
+	if (!sim->is_joiner()) {
+		sim->seal_mission_start_baseline();
+	}
+	_post_runtime(env);
+}
+
 void Weather::set_wind_strength(float p_value) {
+	// The `wind` named value: on a mission it lands through the bound
+	// Simulation's command layer like every other weather command (a joiner
+	// is refused and keeps the host's value); the standalone home takes it
+	// directly. The accepted strength is remembered for the next seed.
+	if (Simulation *sim = _bound_sim(); sim != nullptr) {
+		if (!sim->command_wind_scale(static_cast<int>(p_value / 100.0f * 256.0f))) {
+			return;
+		}
+		runtime_.remember_wind_strength_pct(p_value);
+		return;
+	}
 	runtime_.set_wind_strength_pct(p_value);
 }
 
@@ -229,6 +368,9 @@ void Weather::prepare_world_driven() {
 }
 
 void Weather::prepare_autonomous() {
+	// Autonomous means the standalone home: drop a bound Simulation first
+	// (otherwise the kernel hook and process_delta would both tick).
+	bind_simulation(nullptr);
 	MissionEnvironment *env = _env_node();
 	runtime_.prepare_autonomous(env != nullptr ? &env->state() : nullptr);
 	iris_samples_ = PackedInt32Array();
@@ -270,112 +412,35 @@ void Weather::settle_exposure() {
 	_post_runtime(env);
 }
 
-Dictionary Weather::get_network_environment_snapshot() {
+Dictionary Weather::get_weather_snapshot() const {
 	Dictionary result;
-	MissionEnvironment *env = _env_node();
-	opennova::env::NetEnvSnapshot snapshot;
-	if (env == nullptr ||
-			!runtime_.network_snapshot(&env->state(), snapshot)) {
-		return result;
-	}
-	result["fog_target_q16"] = snapshot.fog_target_q16;
-	result["fog_current_q16"] = snapshot.fog_current_q16;
-	result["fog_accel_clamp"] = snapshot.fog_accel_clamp;
-	result["tod_fixed24"] = snapshot.tod_fixed24;
-	result["tod_advance_per_tick"] = snapshot.tod_advance_per_tick;
-	result["quake_ticks"] = snapshot.quake_ticks;
-	result["cloud_scroll_rate_target"] = snapshot.cloud_scroll_rate_target;
-	result["rain_pct_current_q16"] = snapshot.rain_pct_current_q16;
-	result["overcast_blend_q16"] = snapshot.overcast_blend_q16;
-	result["precipitation_kind"] = snapshot.precipitation_kind;
+	const opennova::world::WeatherState &w = runtime_.state();
+	result["valid"] = w.valid;
+	result["fog_target_q16"] = static_cast<int64_t>(w.fog_target_q16());
+	result["fog_current_q16"] = static_cast<int64_t>(w.fog_current_q16());
+	result["fog_accel_clamp"] = static_cast<int64_t>(w.fog_accel_clamp());
+	result["fog_type"] = w.fog_type;
+	result["tod_fixed24"] = static_cast<int64_t>(w.tod_fixed24);
+	result["tod_advance_per_tick"] = static_cast<int64_t>(w.tod_advance_per_tick);
+	result["quake_ticks"] = static_cast<int64_t>(w.quake_ticks);
+	result["cloud_scroll_rate_target"] = static_cast<int64_t>(w.cloud_scroll_rate_target);
+	result["cloud_scroll_rate"] = static_cast<int64_t>(w.cloud_scroll_rate());
+	result["rain_pct_current_q16"] = static_cast<int64_t>(w.rain_pct_current_q16());
+	result["rain_pct_target_q16"] = static_cast<int64_t>(w.rain_pct_target_q16());
+	result["overcast_blend_q16"] = static_cast<int64_t>(w.overcast_blend_q16());
+	result["overcast_target_q16"] = static_cast<int64_t>(w.overcast_target_q16());
+	result["sun_dim_pct_q16"] = static_cast<int64_t>(w.sun_dim_pct_q16());
+	result["sky_height_q16"] = static_cast<int64_t>(w.sky_height_q16());
+	result["precipitation_kind"] = static_cast<int64_t>(w.precipitation_kind);
+	result["lightning_color"] = static_cast<int64_t>(w.lightning_color);
+	result["wind_scale"] = static_cast<int64_t>(w.wind_scale());
+	result["night"] = w.is_night_phase();
 	return result;
 }
 
-void Weather::advance_world_driven(double p_delta, Object *p_sim) {
+void Weather::apply_wire_sample(const Dictionary &p_sample) {
 	MissionEnvironment *env = _env_node();
-	if (env == nullptr) {
-		return;
-	}
-	const int tick_count = runtime_.consume_world_tick_credits(p_delta);
-	if (tick_count <= 0) {
-		return;
-	}
-	Simulation *sim = Object::cast_to<Simulation>(p_sim);
-	const bool authority = sim != nullptr && !sim->is_joiner();
-	for (int i = 0; i < tick_count; ++i) {
-		env->advance_mission_clock(1);
-		tick_fixed();
-		// The per-tick advance of the world's network sample rides the engine
-		// tick (listen_host::frame / MissionKernel::tick_no_net); the device
-		// side only pushes its settled sample.
-		if (authority) push_network_environment(sim);
-	}
-}
-
-void Weather::push_network_environment(Object *p_sim) {
-	Simulation *sim = Object::cast_to<Simulation>(p_sim);
-	if (sim == nullptr || sim->is_joiner()) {
-		return;
-	}
-	MissionEnvironment *env = _env_node();
-	opennova::env::NetEnvSnapshot snapshot;
-	if (env == nullptr ||
-			!runtime_.network_snapshot(&env->state(), snapshot)) {
-		return;
-	}
-	sim->set_network_environment(snapshot.fog_target_q16,
-			snapshot.fog_current_q16, snapshot.fog_accel_clamp,
-			snapshot.tod_fixed24, snapshot.tod_advance_per_tick,
-			snapshot.quake_ticks, snapshot.cloud_scroll_rate_target,
-			snapshot.rain_pct_current_q16, snapshot.overcast_blend_q16,
-			snapshot.precipitation_kind);
-}
-
-void Weather::run_mission_start_boundary(Object *p_sim) {
-	Simulation *sim = Object::cast_to<Simulation>(p_sim);
-	const bool authority = sim != nullptr && !sim->is_joiner();
-	// The first publication seeds native retail units at the authored T0. It
-	// is local state only; no host pump or phase-2 packet runs inside this
-	// boundary.
-	if (authority) {
-		push_network_environment(sim);
-		sim->run_mission_start_wac();
-		sim->initialize_network_environment_mission_start();
-	}
-	// WAC direct execution precedes the complete-weather-update settle.
-	// Joiners settle their local render owner but never run authority WAC.
-	prewarm_mission_start();
-	if (authority) {
-		for (int i = 0;
-				i < opennova::env::WeatherRuntime::kMissionStartPrewarmTicks;
-				++i) {
-			sim->advance_network_environment_tick();
-		}
-		// Non-scripted values adopt the settled resource sample; WAC-owned
-		// channels survive through the ownership masks.
-		push_network_environment(sim);
-		sim->seal_mission_start_baseline();
-	}
-}
-
-void Weather::apply_join_network_update(Object *p_sim) {
-	Simulation *sim = Object::cast_to<Simulation>(p_sim);
-	if (sim == nullptr || !sim->is_joiner()) {
-		return;
-	}
-	Dictionary sample = sim->take_join_environment_update();
-	if (sample.is_empty()) {
-		return;
-	}
-	apply_network_environment_sample(sample);
-}
-
-void Weather::apply_network_environment_sample(const Dictionary &p_sample) {
-	MissionEnvironment *env = _env_node();
-	if (env == nullptr) {
-		return;
-	}
-	opennova::env::NetEnvSample sample;
+	opennova::world::WeatherWireSample sample;
 	sample.fog_dist = static_cast<int>(p_sample.get("fog_dist", 0));
 	sample.fog_accel = static_cast<int>(p_sample.get("fog_accel", 0));
 	sample.rain_pct = static_cast<int>(p_sample.get("rain_pct", 0));
@@ -385,19 +450,90 @@ void Weather::apply_network_environment_sample(const Dictionary &p_sample) {
 	sample.tod_fixed = static_cast<int>(p_sample.get("tod_fixed", 0));
 	sample.precipitation_kind =
 			static_cast<int>(p_sample.get("precipitation_kind", 0));
-	runtime_.apply_network_sample(&env->state(), sample);
+	runtime_.state().apply_wire_sample(sample);
+	// Publish immediately even when this render frame contains no quantum.
+	runtime_.tick_weather(env != nullptr ? &env->state() : nullptr, 0);
 	_post_runtime(env);
 }
 
+// The command legs: a bound Simulation owns the mutation path; the
+// standalone home takes the command and republishes at zero ticks.
+#define OPENNOVA_WEATHER_NODE_COMMAND(sim_call, state_call)             \
+	do {                                                                \
+		Simulation *sim = _bound_sim();                                 \
+		if (sim != nullptr) {                                           \
+			sim->sim_call;                                              \
+			return;                                                     \
+		}                                                               \
+		runtime_.state().state_call;                                    \
+		MissionEnvironment *env = _env_node();                          \
+		runtime_.tick_weather(env != nullptr ? &env->state() : nullptr, 0); \
+		_post_runtime(env);                                             \
+	} while (0)
+
+void Weather::command_fog_distance(int p_metres) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_fog_distance(p_metres), command_fog_distance(p_metres));
+}
+
+void Weather::command_move_fog(int p_metres, int p_seconds) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_move_fog(p_metres, p_seconds), command_move_fog(p_metres, p_seconds));
+}
+
+void Weather::command_rain(int p_percent, int p_seconds) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_rain(p_percent, p_seconds), command_rain(p_percent, p_seconds));
+}
+
+void Weather::command_snow(int p_percent, int p_seconds) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_snow(p_percent, p_seconds), command_snow(p_percent, p_seconds));
+}
+
+void Weather::command_overcast(int p_percent, int p_seconds) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_overcast(p_percent, p_seconds), command_overcast(p_percent, p_seconds));
+}
+
+void Weather::command_sky_speed(int p_rate) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_sky_speed(p_rate), command_sky_speed(p_rate));
+}
+
+void Weather::command_quake(int p_seconds) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_quake(p_seconds), command_quake(p_seconds));
+}
+
+void Weather::command_time_of_day_minutes(int p_minute_of_day) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_time_of_day_minutes(p_minute_of_day),
+			command_time_of_day_minutes(p_minute_of_day));
+}
+
+void Weather::command_fog_type(int p_type) {
+	OPENNOVA_WEATHER_NODE_COMMAND(command_fog_type(p_type), command_fog_type(p_type));
+}
+
+#undef OPENNOVA_WEATHER_NODE_COMMAND
+
 void Weather::trigger_lightning_short() {
+	Simulation *sim = _bound_sim();
+	if (sim != nullptr) {
+		sim->command_lightning_flash();
+		return;
+	}
 	runtime_.trigger_lightning_short();
 }
 
 void Weather::trigger_lightning_long() {
+	Simulation *sim = _bound_sim();
+	if (sim != nullptr) {
+		sim->command_lightning_far_flash();
+		return;
+	}
 	runtime_.trigger_lightning_long();
 }
 
 void Weather::set_wind_duration(int p_seconds) {
+	// The authoring extension follows the same authority rule: a joiner never
+	// edits the attached home.
+	if (Simulation *sim = _bound_sim(); sim != nullptr && sim->is_joiner()) {
+		return;
+	}
 	runtime_.set_wind_duration_seconds(p_seconds);
 }
 
@@ -415,6 +551,10 @@ float Weather::get_sway_phase() const {
 
 float Weather::get_lightning_intensity() const {
 	return runtime_.lightning_intensity();
+}
+
+int Weather::get_terrain_light_combined_rgb() const {
+	return static_cast<int>(runtime_.terrain_light_combined_rgb());
 }
 
 Vector3 Weather::get_smooth_fill() const {

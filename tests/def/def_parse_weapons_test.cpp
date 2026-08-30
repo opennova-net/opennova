@@ -458,6 +458,51 @@ int main(void) {
     }
     }  /* retail leg */
     {
+        /* WeaponDef_CreateBlendNamedMaterial recognizes all six tokens at
+           0x5401b9..0x540257. Keep the established Blend/Add/BlendAt values
+           stable while assigning distinct transport values to the three
+           previously dropped spellings. */
+        static const char kSightBlendDef[] =
+            "weapon \"WPN_SIGHT_BLEND_TEST\"\n"
+            "\tsights blend.tga 0 0 8 8 blend\n"
+            "\tsights add.tga 0 0 8 8 add\n"
+            "\tsights blendat.tga 0 0 8 8 blendat\n"
+            "\tsights multiply.tga 0 0 8 8 multiply\n"
+            "\tsights addat.tga 0 0 8 8 addat\n"
+            "\tsights multiplyat.tga 0 0 8 8 multiplyat\n"
+            "end\n";
+        static const int expected[] = {
+            DEF_SIGHT_BLEND_BLEND,
+            DEF_SIGHT_BLEND_ADD,
+            DEF_SIGHT_BLEND_BLEND_AT,
+            DEF_SIGHT_BLEND_MULTIPLY,
+            DEF_SIGHT_BLEND_ADD_AT,
+            DEF_SIGHT_BLEND_MULTIPLY_AT,
+        };
+        DefWeaponsFile sf;
+        memset(&sf, 0, sizeof(sf));
+        if (def_parse_weapons_memory((const unsigned char *)kSightBlendDef,
+                                     sizeof(kSightBlendDef) - 1, &sf) != 0 ||
+            sf.count != 1 || sf.entries[0].sights_count != 6) {
+            fprintf(stderr, "FAIL: sight blend-token inline parse failed\n");
+            def_free_weapons(&sf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        for (size_t i = 0; i < 6; ++i) {
+            if (sf.entries[0].sights[i].blend != expected[i]) {
+                fprintf(stderr,
+                        "FAIL: sight blend token %zu mapped to %d, expected %d\n",
+                        i, sf.entries[0].sights[i].blend, expected[i]);
+                def_free_weapons(&sf);
+                def_free_weapons(&wf);
+                return 1;
+            }
+        }
+        def_free_weapons(&sf);
+        printf("sight blend-token map OK\n");
+    }
+    {
         static const char kFovDef[] =
             "weapon \"WPN_FOVTEST\"\n"
             "\trenderfov 40\n"

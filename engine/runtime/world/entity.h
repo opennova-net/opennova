@@ -398,6 +398,11 @@ struct Entity {
     // (same dword on ai.h's def_attrib profile mirror).
     uint32_t item_attrib = 0;
     uint32_t item_attrib2 = 0; // raw ItemDefAttrib2 dword (ItemDef+88)
+    // The building-interior daylight transfer (ItemDef+0x218, the def's
+    // light_transfer x 0.01), stamped by the item-traits sweep. The rain
+    // ambient inside a pool-2 building scales by (transfer x 0.5 + 0.5)
+    // [orig: Entity_UpdateInfantryPlayerBody @ 0x4b4747..0x4b490e].
+    float light_transfer = 0.0f;
     // Signed impact/KZ armor classes and vehicle occupant-reduction factors
     // from ItemDef +0x190/+0x192 and +0x188/+0x18C.
     int32_t armor_impact = 0; // signed i16 retail storage carried sign-extended

@@ -171,10 +171,19 @@ typedef struct DefAmmoFile {
 /* Weapon Definitions                                                        */
 /* ========================================================================= */
 
+typedef enum DefSightBlendMode {
+    DEF_SIGHT_BLEND_BLEND = 0,
+    DEF_SIGHT_BLEND_ADD = 1,
+    DEF_SIGHT_BLEND_BLEND_AT = 2,
+    DEF_SIGHT_BLEND_MULTIPLY = 3,
+    DEF_SIGHT_BLEND_ADD_AT = 4,
+    DEF_SIGHT_BLEND_MULTIPLY_AT = 5
+} DefSightBlendMode;
+
 typedef struct DefSightEntry {
     char texture[128];
     int x1, y1, x2, y2;
-    int blend;        /* 0=Blend, 1=Add, 2=BlendAt */
+    int blend;        /* DefSightBlendMode */
     int scale;        /* boolean */
     int slide;        /* boolean */
     int slide_frames;

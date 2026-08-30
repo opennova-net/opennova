@@ -333,6 +333,18 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
                                          (e->flags & kEntityFlagIndoors) != 0, eye);
     }
     player_view_tick(v, eye);
+    // The per-quantum camera compose advances the three shake IIR filters
+    // from the tick's weather PRNG word (the deltas it yields are overwritten
+    // by the rendered frame's own compose below, exactly as retail's per-frame
+    // call re-derives the view) [orig: Game_ProcessMainFrame @ 0x526774 ->
+    //  Camera_ComputeThirdPersonView @ 0x526781, the mode-0 block
+    //  @ 0x43803c..0x4380df]. Any other camera mode leaves the filters be.
+    if (v.camera_mode == 0) {
+        int32_t d_yaw = 0;
+        int32_t d_pitch = 0;
+        int32_t d_roll = 0;
+        camera_shake_sample(v.shake, world->weather.core.oscillator.prng, d_yaw, d_pitch, d_roll);
+    }
 }
 
 void local_player_set_eye(World *world, LocalPlayerWeapon &w, const float eye_mission[3],
@@ -459,6 +471,24 @@ void local_player_view_frame(World *world, const LocalPlayerWeapon &w, const Pla
                                // entirely. The roll is the seat-carried hull bank the
                                // mount pose wrote, never the standing torso tilt.
                                seated_eye, static_cast<float>(e->roll), out.camera);
+    // The first-person shake: every RENDERED frame samples the three IIR
+    // filters again from the current weather PRNG word (unchanged between
+    // ticks) and adds the deltas to the composed view rotation — retail's
+    // scene frame calls Camera_ComputeThirdPersonView once more per frame
+    // after the per-quantum call [orig: Render_ProcessMainSceneFrame
+    //  @ 0x5ca34d; the mode-0 block @ 0x43803c..0x4380df, the >> 6 applies
+    //  @ 0x4380b0..0x4380d9]. The radar-compass overlay's extra call
+    //  (@ 0x5c9841, when it draws) is not mirrored.
+    if (!out.camera.third_person && world != nullptr) {
+        int32_t d_yaw = 0;
+        int32_t d_pitch = 0;
+        int32_t d_roll = 0;
+        camera_shake_sample(v.shake, world->weather.core.oscillator.prng, d_yaw, d_pitch, d_roll);
+        constexpr float kDegPerBam = 360.0f / 4294967296.0f;
+        out.camera.yaw_deg += static_cast<float>(d_yaw) * kDegPerBam;
+        out.camera.pitch_deg += static_cast<float>(d_pitch) * kDegPerBam;
+        out.camera.roll_deg += static_cast<float>(d_roll) * kDegPerBam;
+    }
     out.camera_pose_valid = true;
 }
 
