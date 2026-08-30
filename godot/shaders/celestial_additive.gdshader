@@ -63,12 +63,15 @@ void vertex() {
 	if (u_depth_far_pin) {
 		// Exact far plane (reverse-Z depth 0); an epsilon fails because
 		// distant terrain's depth near/dist drops below any epsilon. The
-		// BEAUTY view only: retail's bloom pass redraws the discs at the
-		// 64 u anchor against the beauty depth, so terrain past 64 u does
-		// NOT occlude the disc in the bloom source - the hidden sun still
-		// blooms over a ridge [orig: render_celestial_bodies(1) from
-		// FrameFX_RenderBloomPass @ 0x582a77 with the beauty depth-stencil
-		// still bound].
+		// BEAUTY view only: retail's bloom pass redraws the discs through
+		// Render_SetViewportFarDepth's far-band viewport (MinZ 0.98 / MaxZ
+		// 0.99996948) and the ordinary z-tested flush, so in the bloom
+		// source every nearer surface occludes the disc: a sun behind a
+		// ridge does not bloom over it. The focused Q3 adapter applies that
+		// band (runtime/renderer/q3_frame.h kQ3FarBandMinZ/MaxZ)
+		// [orig: FrameFX_RenderBloomPass @ 0x582940: Render_SetViewportFarDepth
+		// @ 0x582a70 -> render_celestial_bodies(1) @ 0x582a77;
+		// Render_SetViewportFarDepth @ 0x58a840].
 		POSITION.z = 0.0;
 	}
 }
