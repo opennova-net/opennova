@@ -236,8 +236,9 @@ object duplicates back-to-front, and retains the fixed water/celestial/sun
 bracket. Geometry is packed once per (source, surface) into the adapter's
 retained cache (`q3_geometry_cache`): one server read at first sight, one
 device buffer per entry uploaded per generation, MultiMesh rows read once per
-instance generation, skinned sources re-skinned from their cached bind-space
-arrays; the water strip publishes the CPU arrays it uploads each frame, and a
+instance generation (no Q3 producer carries a bone palette: the bone path is
+never a Q3 source and the fake-skinned rigid models that could are never on
+the world layer); the water strip publishes the CPU arrays it uploads each frame, and a
 static RLOD switch or destruction carve invalidates only its populations'
 instance rows (the packed surfaces and their device buffers stay), so a stable
 frame reads nothing back and re-packs nothing and a row rewrite re-reads rows

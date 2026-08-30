@@ -126,29 +126,6 @@ void check_technique_derivation_and_ordering() {
 	CHECK(draw.commands[0].material.generation == 7);
 }
 
-void check_skinned_ranges_are_copied() {
-	Q3FrameSnapshot snapshot{};
-	snapshot.transforms.push_back(translated(7.0f, 8.0f, 9.0f));
-	snapshot.bone_palette.push_back(translated(1.0f, 2.0f, 3.0f));
-	snapshot.bone_palette.push_back(translated(4.0f, 5.0f, 6.0f));
-
-	Q3SubmissionSnapshot submission = object_submission(20,
-			"FF_ST_OP_LUM", 20.0f, 0, 1);
-	submission.geometry_kind = Q3GeometryKind::Skinned;
-	submission.first_bone = 0;
-	submission.bone_count = 2;
-	snapshot.submissions.push_back(submission);
-
-	Q3FrameCompiler compiler;
-	const Q3DrawList &draw = compiler.compile(snapshot);
-	CHECK(draw.commands.size() == 1);
-	CHECK(draw.commands[0].geometry_kind == Q3GeometryKind::Skinned);
-	CHECK(draw.commands[0].first_bone == 0);
-	CHECK(draw.commands[0].bone_count == 2);
-	CHECK(draw.bone_palette.size() == 2);
-	CHECK(draw.bone_palette[1].values[13] == 5.0f);
-}
-
 void check_fail_closed_rejections() {
 	Q3FrameSnapshot snapshot{};
 	snapshot.transforms.push_back(Q3Matrix4{});
@@ -171,26 +148,20 @@ void check_fail_closed_rejections() {
 			std::numeric_limits<float>::quiet_NaN(), 0, 1);
 	snapshot.submissions.push_back(bad_depth);
 
-	auto bad_bones = object_submission(16, "FF_ST_OP_LUM", 10.0f, 0, 1);
-	bad_bones.geometry_kind = Q3GeometryKind::Skinned;
-	bad_bones.bone_count = 1;
-	snapshot.submissions.push_back(bad_bones);
-
 	auto corona = explicit_submission(15, Q3Source::LightCorona, 0);
 	snapshot.submissions.push_back(corona);
 
 	Q3FrameCompiler compiler;
 	const Q3DrawList &draw = compiler.compile(snapshot);
 	CHECK(draw.commands.empty());
-	CHECK(draw.rejected.size() == 7);
+	CHECK(draw.rejected.size() == 6);
 	CHECK(draw.rejected[0].reason == Q3RejectReason::UnsupportedObjectMaterial);
 	CHECK(draw.rejected[1].reason == Q3RejectReason::GlowCopySuppressed);
 	CHECK(draw.rejected[2].reason == Q3RejectReason::InvalidResourceLease);
 	CHECK(draw.rejected[3].reason == Q3RejectReason::InvalidTransformRange);
 	CHECK(draw.rejected[4].reason == Q3RejectReason::NonFiniteInput);
-	CHECK(draw.rejected[5].reason == Q3RejectReason::InvalidBoneRange);
-	CHECK(draw.rejected[6].reason == Q3RejectReason::UnsupportedSource);
-	CHECK(draw.debug.rejected_submissions == 7);
+	CHECK(draw.rejected[5].reason == Q3RejectReason::UnsupportedSource);
+	CHECK(draw.debug.rejected_submissions == 6);
 	CHECK(draw.debug.unsupported_light_coronas == 1);
 }
 
@@ -359,7 +330,6 @@ void check_shading_constants_are_engine_homed() {
 int main() {
 	check_shading_constants_are_engine_homed();
 	check_technique_derivation_and_ordering();
-	check_skinned_ranges_are_copied();
 	check_fail_closed_rejections();
 	check_invisible_and_invalid_texture_paths();
 	check_object_blend_and_coverage_contracts();

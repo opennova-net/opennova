@@ -50,15 +50,14 @@ enum class Q3Source : std::uint8_t {
 enum class Q3GeometryKind : std::uint8_t {
 	Rigid = 0,
 	StaticInstances = 1,
-	Skinned = 2,
 };
 
 // Whether a model's strips can publish Q3 copies at all. Only the rigid
 // object path collects the glow-capable duplicate; a per-vertex skinned
 // (bone-path) model never does, whatever its materials' capability words
-// say, so the bone path is never a Q3 producer. (Q3GeometryKind::Skinned
-// remains the rigid path's per-part posed geometry: a rigid model driven
-// through a bone palette, never a bone-path mesh.)
+// say, so the bone path is never a Q3 producer. A Q3 source is therefore
+// always rigid geometry under one transform (or a MultiMesh population);
+// no producer carries a bone palette.
 // [orig: Render_SubmitEntity @ 0x5dade0 (modelData+16 & 1 selects the bone
 //  path); collect_render_batches_for_entity @ 0x5d94b0 appends only the
 //  opaque list and the Q1/Q2 alpha queues (@ 0x5d97ca, @ 0x5d983b); the Q3
@@ -150,7 +149,7 @@ struct Q3Vec4 {
 	float w = 0.0f;
 };
 
-// Column-major transform/bone matrix, directly convertible at the adapter.
+// Column-major transform matrix, directly convertible at the adapter.
 struct Q3Matrix4 {
 	std::array<float, 16> values{
 		1.0f, 0.0f, 0.0f, 0.0f,
@@ -220,8 +219,6 @@ struct Q3SubmissionSnapshot {
 	std::uint32_t submit_flags = 0;
 	std::size_t first_transform = 0;
 	std::size_t transform_count = 0;
-	std::size_t first_bone = 0;
-	std::size_t bone_count = 0;
 	Q3ObjectMaterialParameters object{};
 	Q3WaterMaterialParameters water{};
 	Q3CelestialMaterialParameters celestial{};
@@ -233,7 +230,6 @@ struct Q3FrameSnapshot {
 	std::uint64_t scene_generation = 0;
 	std::vector<Q3SubmissionSnapshot> submissions;
 	std::vector<Q3Matrix4> transforms;
-	std::vector<Q3Matrix4> bone_palette;
 	std::vector<Q3ResourceGeneration> resource_generations;
 };
 
@@ -243,9 +239,8 @@ enum class Q3RejectReason : std::uint8_t {
 	UnsupportedSource = 2,
 	InvalidResourceLease = 3,
 	InvalidTransformRange = 4,
-	InvalidBoneRange = 5,
-	NonFiniteInput = 6,
-	StaleResourceLease = 7,
+	NonFiniteInput = 5,
+	StaleResourceLease = 6,
 };
 
 struct Q3RejectedSubmission {
@@ -265,8 +260,6 @@ struct Q3DrawCommand {
 	std::uint32_t sort_key = 0;
 	std::uint32_t first_transform = 0;
 	std::uint32_t transform_count = 0;
-	std::uint32_t first_bone = 0;
-	std::uint32_t bone_count = 0;
 	Q3ObjectMaterialParameters object{};
 	Q3WaterMaterialParameters water{};
 	Q3CelestialMaterialParameters celestial{};
@@ -289,7 +282,6 @@ struct Q3DrawList {
 	std::uint64_t scene_generation = 0;
 	std::vector<Q3DrawCommand> commands;
 	std::vector<Q3Matrix4> transforms;
-	std::vector<Q3Matrix4> bone_palette;
 	std::vector<Q3RejectedSubmission> rejected;
 	Q3FrameDebugCounters debug{};
 };

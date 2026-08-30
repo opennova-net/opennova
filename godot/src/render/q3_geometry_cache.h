@@ -60,11 +60,10 @@ struct Q3PackParameters {
 	Vector3 uv_v = Vector3(0, 1, 0);
 	Vector4 water_uv = Vector4(1.0f, 0.2f, 0.0f, 0.0f);
 	Vector3 camera_position;
-	// GPU-skin packing: the bind-space positions stay unskinned and the
-	// surface's bone indices ride CUSTOM0 (as floats) with the weights in
-	// CUSTOM1, so a consumer with a bone-palette buffer skins in its vertex
-	// shader and the entry packs once like a rigid one. Never combined with a
-	// CPU skin palette (the request's palette is ignored).
+	// GPU-skin packing (the slot capture pass): the bind-space positions stay
+	// unskinned and the surface's bone indices ride CUSTOM0 (as floats) with
+	// the weights in CUSTOM1, so a consumer with a bone-palette buffer skins
+	// in its vertex shader and the entry packs once like a rigid one.
 	bool skin_channels = false;
 
 	bool operator==(const Q3PackParameters &p_other) const;
@@ -84,8 +83,7 @@ struct Q3PackedStream {
 // node id, surface index). An entry packs once when first seen and re-packs
 // only when its generation moves: the producer published new arrays, the
 // source's geometry was invalidated, or the pack parameters (the material's
-// UV transform, the water UV state) changed. Skinned entries keep their
-// bind-space arrays and re-skin into a fresh stream every call. Nothing here
+// UV transform, the water UV state, the skin channels) changed. Nothing here
 // reads a mesh back through the server per frame; the one-time first-sight
 // read is counted so a stable frame can prove it made none. The cache also
 // retains MultiMesh instance rows per source under the source's separate
@@ -116,9 +114,6 @@ public:
 		const Q3SurfaceArrays *published = nullptr;
 		std::uint64_t published_generation = 0;
 		Q3PackParameters pack;
-		// Non-empty for CPU-skinned sources: the entry re-skins every call
-		// (ignored when the pack parameters ask for skin channels instead).
-		const std::vector<Transform3D> *skin_palette = nullptr;
 	};
 
 	struct FrameCounters {
@@ -126,7 +121,6 @@ public:
 		// MultiMesh sources whose instance rows were (re-)read this frame.
 		std::size_t instance_row_reads = 0;
 		std::size_t repacked_entries = 0;
-		std::size_t skinned_entries = 0;
 		std::size_t packed_vertices = 0;
 		std::size_t packed_vertex_bytes = 0;
 	};

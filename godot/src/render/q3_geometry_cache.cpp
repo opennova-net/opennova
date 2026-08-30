@@ -48,52 +48,26 @@ Vector4 custom_at(const PackedFloat32Array &p_values, int p_index) {
 // Packs one surface into the interleaved Q3 stream: position, normal, UV,
 // colour, CUSTOM0..2, UV2. Object UVs (UV1 and the detail UV2 alike, the
 // wrappers' obj_transform_uv over both) take the material's row-vector UV
-// transform, water UVs the witnessed camera-relative world/128 pair; skinned
-// sources are blended by the caller's palette in bind space.
+// transform, water UVs the witnessed camera-relative world/128 pair;
+// positions stay in bind space (a skin-channel consumer skins on the GPU).
 bool pack_surface(const Q3SurfaceArrays &p_arrays,
-		const Q3PackParameters &p_pack,
-		const std::vector<Transform3D> *p_skin_palette,
-		PackedByteArray &r_vertices) {
+		const Q3PackParameters &p_pack, PackedByteArray &r_vertices) {
 	if (p_arrays.empty())
 		return false;
 	const int vertex_count = static_cast<int>(p_arrays.element_count());
 	if (vertex_count <= 0)
 		return false;
-	const bool skinned = !p_pack.skin_channels && p_skin_palette != nullptr &&
-			!p_skin_palette->empty();
 	r_vertices.resize(0);
 	for (int element = 0; element < vertex_count; ++element) {
 		const int index = p_arrays.indices.is_empty() ? element :
 				p_arrays.indices[element];
 		if (index < 0 || index >= p_arrays.positions.size())
 			return false;
-		Vector3 position = p_arrays.positions[index];
-		Vector3 normal = index < p_arrays.normals.size() ?
+		const Vector3 position = p_arrays.positions[index];
+		const Vector3 normal = index < p_arrays.normals.size() ?
 				p_arrays.normals[index] : Vector3(0, 1, 0);
 		const bool has_skin_rows = p_arrays.bones.size() >= (index + 1) * 4 &&
 				p_arrays.weights.size() >= (index + 1) * 4;
-		if (skinned && has_skin_rows) {
-			Vector3 skinned_position;
-			Vector3 skinned_normal;
-			float total = 0.0f;
-			for (int influence = 0; influence < 4; ++influence) {
-				const int offset = index * 4 + influence;
-				const int bone = p_arrays.bones[offset];
-				const float weight = p_arrays.weights[offset];
-				if (weight <= 0.0f || bone < 0 ||
-						bone >= static_cast<int>(p_skin_palette->size()))
-					continue;
-				const Transform3D &transform = (*p_skin_palette)[bone];
-				skinned_position += transform.xform(position) * weight;
-				skinned_normal += transform.basis.xform(normal) * weight;
-				total += weight;
-			}
-			if (total > 0.0f) {
-				position = skinned_position / total;
-				normal = skinned_normal.length_squared() > 0.0f ?
-						skinned_normal.normalized() : normal;
-			}
-		}
 		Vector2 uv = index < p_arrays.uvs.size() ? p_arrays.uvs[index] : Vector2();
 		Vector2 uv2 = index < p_arrays.uv2s.size() ? p_arrays.uv2s[index] : Vector2();
 		if (p_pack.source == Q3Source::Object) {
@@ -216,12 +190,10 @@ std::shared_ptr<const Q3PackedStream> Q3GeometryCache::acquire(
 	}
 	if (entry.arrays.empty())
 		return nullptr;
-	const bool skinned = !p_request.pack.skin_channels &&
-			p_request.skin_palette != nullptr && !p_request.skin_palette->empty();
-	if (!dirty && !skinned && entry.stream && entry.pack == p_request.pack)
+	if (!dirty && entry.stream && entry.pack == p_request.pack)
 		return entry.stream;
 	PackedByteArray bytes;
-	if (!pack_surface(entry.arrays, p_request.pack, p_request.skin_palette, bytes))
+	if (!pack_surface(entry.arrays, p_request.pack, bytes))
 		return nullptr;
 	auto stream = std::make_shared<Q3PackedStream>();
 	stream->entry_id = entry.entry_id;
@@ -230,10 +202,7 @@ std::shared_ptr<const Q3PackedStream> Q3GeometryCache::acquire(
 	stream->bytes = bytes;
 	entry.stream = stream;
 	entry.pack = p_request.pack;
-	if (skinned)
-		++counters_.skinned_entries;
-	else
-		++counters_.repacked_entries;
+	++counters_.repacked_entries;
 	counters_.packed_vertices += stream->vertex_count;
 	counters_.packed_vertex_bytes += static_cast<std::size_t>(bytes.size());
 	return stream;

@@ -38,8 +38,6 @@
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
-#include <godot_cpp/classes/skeleton3d.hpp>
-#include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/aabb.hpp>
@@ -571,26 +569,6 @@ Ref<Material> active_material(GeometryInstance3D *p_source,
 	return material;
 }
 
-std::vector<Transform3D> skin_palette(MeshInstance3D *p_instance) {
-	std::vector<Transform3D> result;
-	if (p_instance == nullptr || p_instance->get_skeleton_path().is_empty())
-		return result;
-	Skeleton3D *skeleton = Object::cast_to<Skeleton3D>(
-			p_instance->get_node_or_null(p_instance->get_skeleton_path()));
-	const Ref<Skin> skin = p_instance->get_skin();
-	if (skeleton == nullptr || skin.is_null() || skin->get_bind_count() <= 0)
-		return result;
-	result.reserve(skin->get_bind_count());
-	for (int bind = 0; bind < skin->get_bind_count(); ++bind) {
-		const int bone = skin->get_bind_bone(bind);
-		if (bone < 0 || bone >= skeleton->get_bone_count())
-			return {};
-		result.push_back(skeleton->get_bone_global_pose(bone) *
-				skin->get_bind_pose(bind));
-	}
-	return result;
-}
-
 Q3DeviceBlend blend_for(const Q3DrawCommand &p_command) {
 	switch (p_command.technique) {
 		case Q3Technique::NormalCopy:
@@ -648,7 +626,6 @@ public:
 	std::size_t rejected_commands = 0;
 	std::size_t drawn_commands = 0;
 	std::size_t gpu_draw_calls = 0;
-	std::size_t cpu_skinned_commands = 0;
 	std::size_t registered_sources = 0;
 	std::size_t frustum_culled_sources = 0;
 	std::size_t frustum_culled_instances = 0;
@@ -979,8 +956,7 @@ RID Q3FrameAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
 }
 
 // One device buffer per cache entry, uploaded only when the entry's packed
-// generation moved since the last upload (rigid and static entries therefore
-// upload once; skinned entries upload their fresh stream every frame).
+// generation moved since the last upload (a stable entry uploads once).
 bool Q3FrameAdapter::Impl::upload_stream(const Q3PackedStream &p_stream) {
 	if (p_stream.bytes.is_empty())
 		return false;
@@ -1219,13 +1195,12 @@ Dictionary Q3FrameAdapter::Impl::report() const {
 	result["q3_rejected_commands"] = static_cast<int64_t>(rejected_commands);
 	result["q3_drawn_commands"] = static_cast<int64_t>(drawn_commands);
 	result["q3_gpu_draw_calls"] = static_cast<int64_t>(gpu_draw_calls);
-	result["q3_cpu_skinned_commands"] = static_cast<int64_t>(cpu_skinned_commands);
 	result["q3_registered_sources"] = static_cast<int64_t>(registered_sources);
 	result["q3_frustum_culled_sources"] =
 			static_cast<int64_t>(frustum_culled_sources);
 	result["q3_frustum_culled_instances"] =
 			static_cast<int64_t>(frustum_culled_instances);
-	// Packed THIS frame (skinned re-skins included) versus the retained cache.
+	// Packed THIS frame versus the retained cache.
 	result["q3_packed_vertices"] = static_cast<int64_t>(packed_vertices);
 	result["q3_packed_vertex_bytes"] =
 			static_cast<int64_t>(packed_vertex_bytes);
@@ -1242,7 +1217,6 @@ Dictionary Q3FrameAdapter::Impl::report() const {
 	result["q3_device_buffers"] = static_cast<int64_t>(device_buffers);
 	result["q3_geometry_submission"] = "cached_per_source_surface_streams";
 	result["q3_static_instance_submission"] = "retained_transform_ranges";
-	result["q3_skinned_submission"] = "immutable_cpu_pose_snapshot";
 	return result;
 }
 
@@ -1378,7 +1352,6 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	snapshot.frame_id = g_frame_id.fetch_add(1);
 	snapshot.scene_generation = p_viewport->get_instance_id();
 	std::vector<Candidate> candidates;
-	std::size_t cpu_skinned = 0;
 	std::size_t frustum_culled_sources = 0;
 	std::size_t frustum_culled_instances = 0;
 	Q3GeometryCache &cache = impl_->geometry_cache;
@@ -1422,10 +1395,6 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			continue;
 		}
 
-		const std::vector<Transform3D> palette =
-				registration.source == Q3Source::Object ?
-					skin_palette(Object::cast_to<MeshInstance3D>(source)) :
-					std::vector<Transform3D>();
 		std::vector<Transform3D> emitted_transforms;
 		AABB emitted_world_bounds;
 		bool has_emitted_world_bounds = false;
@@ -1502,7 +1471,6 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 						"u_water_uv", Vector4(1.0f, 0.2f, 0.0f, 0.0f));
 				request.pack.camera_position = p_camera->get_global_position();
 			}
-			request.skin_palette = palette.empty() ? nullptr : &palette;
 			candidate.stream = cache.acquire(request, [&]() {
 				return array_mesh->surface_get_arrays(surface);
 			});
@@ -1515,22 +1483,12 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			candidate.submission.geometry = {candidate.stream->entry_id,
 					candidate.stream->generation};
 			candidate.submission.first_transform = snapshot.transforms.size();
-			if (multimesh.is_valid())
-				candidate.submission.geometry_kind = Q3GeometryKind::StaticInstances;
-			else
-				candidate.submission.geometry_kind = palette.empty() ?
-						Q3GeometryKind::Rigid : Q3GeometryKind::Skinned;
+			candidate.submission.geometry_kind = multimesh.is_valid() ?
+					Q3GeometryKind::StaticInstances : Q3GeometryKind::Rigid;
 			for (const Transform3D &transform : emitted_transforms)
 				snapshot.transforms.push_back(q3_matrix(transform));
 			candidate.submission.transform_count = snapshot.transforms.size() -
 					candidate.submission.first_transform;
-			if (!palette.empty()) {
-				candidate.submission.first_bone = snapshot.bone_palette.size();
-				for (const Transform3D &bone : palette)
-					snapshot.bone_palette.push_back(q3_matrix(bone));
-				candidate.submission.bone_count = palette.size();
-				++cpu_skinned;
-			}
 			candidate.submission.view_depth = population_view_depth;
 			if (registration.source == Q3Source::Object) {
 				candidate.submission.object.classification = object_classification;
@@ -1672,7 +1630,6 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		impl_->submitted_frame_id = snapshot.frame_id;
 		impl_->submitted_commands = frame->commands.size();
 		impl_->rejected_commands = draw_list.rejected.size();
-		impl_->cpu_skinned_commands = cpu_skinned;
 		impl_->registered_sources = registrations.size();
 		impl_->frustum_culled_sources = frustum_culled_sources;
 		impl_->frustum_culled_instances = frustum_culled_instances;

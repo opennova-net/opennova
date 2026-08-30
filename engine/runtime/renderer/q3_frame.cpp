@@ -182,7 +182,6 @@ const Q3DrawList &Q3FrameCompiler::compile(const Q3FrameSnapshot &snapshot) {
 	draw_list_.scene_generation = snapshot.scene_generation;
 	draw_list_.commands.clear();
 	draw_list_.transforms.clear();
-	draw_list_.bone_palette.clear();
 	draw_list_.rejected.clear();
 	draw_list_.debug = {};
 	draw_list_.debug.input_submissions = snapshot.submissions.size();
@@ -222,9 +221,7 @@ const Q3DrawList &Q3FrameCompiler::compile(const Q3FrameSnapshot &snapshot) {
 				(submission.geometry_kind == Q3GeometryKind::Rigid &&
 						submission.transform_count == 1) ||
 				(submission.geometry_kind == Q3GeometryKind::StaticInstances &&
-						submission.transform_count > 0) ||
-				(submission.geometry_kind == Q3GeometryKind::Skinned &&
-						submission.transform_count == 1);
+						submission.transform_count > 0);
 		if (!transform_shape_valid ||
 				submission.transform_count >
 						std::numeric_limits<std::uint32_t>::max() ||
@@ -234,29 +231,11 @@ const Q3DrawList &Q3FrameCompiler::compile(const Q3FrameSnapshot &snapshot) {
 					Q3RejectReason::InvalidTransformRange);
 			continue;
 		}
-		const bool bones_valid =
-				submission.geometry_kind == Q3GeometryKind::Skinned ?
-						submission.bone_count > 0 &&
-							submission.bone_count <=
-									std::numeric_limits<std::uint32_t>::max() &&
-							range_valid(submission.first_bone,
-								submission.bone_count,
-								snapshot.bone_palette.size()) :
-						submission.bone_count == 0;
-		if (!bones_valid) {
-			reject(draw_list_, i, submission, Q3RejectReason::InvalidBoneRange);
-			continue;
-		}
 		bool all_finite = parameters_finite(submission);
 		for (std::size_t transform = 0;
 				all_finite && transform < submission.transform_count; ++transform) {
 			all_finite = finite(snapshot.transforms[
 					submission.first_transform + transform]);
-		}
-		for (std::size_t bone = 0;
-				all_finite && bone < submission.bone_count; ++bone) {
-			all_finite = finite(snapshot.bone_palette[
-					submission.first_bone + bone]);
 		}
 		if (!all_finite) {
 			reject(draw_list_, i, submission, Q3RejectReason::NonFiniteInput);
@@ -306,17 +285,6 @@ const Q3DrawList &Q3FrameCompiler::compile(const Q3FrameSnapshot &snapshot) {
 					static_cast<std::ptrdiff_t>(submission.first_transform +
 						submission.transform_count));
 
-		command.first_bone =
-				static_cast<std::uint32_t>(draw_list_.bone_palette.size());
-		command.bone_count = static_cast<std::uint32_t>(submission.bone_count);
-		if (submission.bone_count > 0) {
-			draw_list_.bone_palette.insert(draw_list_.bone_palette.end(),
-				snapshot.bone_palette.begin() +
-						static_cast<std::ptrdiff_t>(submission.first_bone),
-				snapshot.bone_palette.begin() +
-						static_cast<std::ptrdiff_t>(submission.first_bone +
-							submission.bone_count));
-		}
 		command.object = submission.object;
 		command.water = submission.water;
 		command.celestial = submission.celestial;
