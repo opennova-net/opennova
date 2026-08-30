@@ -69,61 +69,69 @@ int spring_step(int current, int target, int step_clamp, int max_abs);
 // between the lightning sequencers and the 16 color-block smoothers
 // [orig: Environment_UpdateWeatherTick @ 0x57edd7..0x57ef92]: fog distance
 // (spring, {cur, target, parsed, step, max} @ 0x26c681c..), sun-dim percent
-// (spring @ 0x26c6830.. — dims the sun body + glare; default 0, no .env
-// keyword), sky height (eighth-snap @ 0x26c6858/5c), rain percent (spring
-// @ 0x26c6880.. Env_RainPct*, REN-6-identified; >48 drives weather-particle
-// fall decay), overcast blend (spring @ 0x26c6894..). The camera FOV
-// eighth-snap (@ 0x26c6844) rides the camera system, not this struct. All
-// values are 16.16 fixed (percent channels are 16.16 percent: 0x640000 =
-// 100). The per-channel step/max clamps are COMMAND-driven (the weather
-// command setter @ 0x57f1e0 computes |target-cur|/ticks; net apply 0x00A) —
-// they default effectively-unclamped here and tighten when the weather
-	// command wiring lands. Environment_SnapStateToTargets @0x57d1e0 refreshes
-	// targets; the later mission-start initializer @0x57f1e0 copies those targets
-	// into currents. Network target updates do not perform that local-start snap.
+// (spring @ 0x26c6830.. — dims the sun body + glare; the `sunfade` WAC
+// command writes its target/step, but its max clamp @ 0x26c6840 has NO
+// writer in the image, so the current can never leave 0: sunfade is inert
+// in retail), sky height (eighth-snap @ 0x26c6858/5c), rain percent (spring
+// @ 0x26c6880.. Env_RainPct*; > 48 gates the precipitation drops), overcast
+// blend (spring @ 0x26c6894..). The camera FOV eighth-snap (@ 0x26c6844)
+// rides the camera system, not this struct. All values are 16.16 fixed
+// (percent channels are 16.16 fractions: 0x10000 = 100 %).
+//
+// The per-channel step/max clamps are what the image writes: the WAC handlers
+// compute a step per command (world::WeatherState::command_*) and the
+// mission-start initializer installs the recovered clamps
+// [orig: Environment_MissionStartInit (ex sub_57F1E0) @ 0x57f7fa..0x57f873:
+//  RainPctMax = OvercastMax = 0xFFFF, RainPctStep = OvercastStep = 0x1000,
+//  FogDistAccelClamp = 0xFF0000, FogDistMax = 1000 << 16]. The defaults here
+// ARE those running clamps: the zero BSS maxes of the retail image exist only
+// between the load-time snap and the initializer, a window no weather tick
+// runs in.
 struct EnvScalarChannels {
-	static constexpr int32_t kUnclamped = 0x40000000;
+	// The recovered mission-start clamps [orig: @ 0x57f805..0x57f873].
+	static constexpr int32_t kMissionRainMax = 0xFFFF;
+	static constexpr int32_t kMissionRainStep = 0x1000;
+	static constexpr int32_t kMissionFogAccel = 0x00FF0000;
+	static constexpr int32_t kMissionFogMax = 1000 << 16;
 
 	int32_t fog_dist_fp = 1024 << 16; // [orig defaults: Environment_InitDefaults @ 0x57c010]
 	int32_t fog_dist_target_fp = 1024 << 16;
 	// Environment_InitDefaults seeds the fog acceleration clamp to 255.0;
 	// phase-2 projects this native 16.16 value as unsigned 8.8.
 	int32_t fog_step_fp = 0x00FF0000;
-	int32_t fog_max_fp = kUnclamped;
+	int32_t fog_max_fp = 1000 << 16;
 
 	int32_t sun_dim_fp = 0;
 	int32_t sun_dim_target_fp = 0;
-	int32_t sun_dim_step_fp = kUnclamped;
-	int32_t sun_dim_max_fp = kUnclamped;
+	int32_t sun_dim_step_fp = 0;
+	int32_t sun_dim_max_fp = 0; // never written in retail (@ 0x26c6840 has no writer)
 
 	int32_t sky_height_fp = 175 << 16; // the authoring default (the raw-200 boot quirk is divergence #12)
 	int32_t sky_height_target_fp = 175 << 16;
 
 	int32_t rain_pct_fp = 0;
 	int32_t rain_pct_target_fp = 0;
-	int32_t rain_step_fp = kUnclamped;
-	int32_t rain_max_fp = kUnclamped;
+	int32_t rain_step_fp = kMissionRainStep;
+	int32_t rain_max_fp = kMissionRainMax;
 
 	int32_t overcast_fp = 0;
 	int32_t overcast_target_fp = 0;
-	int32_t overcast_step_fp = kUnclamped;
-	int32_t overcast_max_fp = kUnclamped;
+	int32_t overcast_step_fp = kMissionRainStep;
+	int32_t overcast_max_fp = kMissionRainMax;
 
-	// One 62 Hz step of every channel, in the witnessed in-tick order
+	// One 62.5 Hz step of every channel, in the witnessed in-tick order
 	// (fog -> sun-dim -> [FOV: camera-side] -> sky height -> [cloud scroll:
 	// CloudScrollState] -> rain -> overcast).
 	void tick();
-	// The local mission-start initializer's scalar current <- target copy plus
-	// recovered default clamps (fog 0x00FF0000/max 1000, rain/overcast 0x1000).
-	// This is intentionally separate from apply_network_sample(), whose retail
-	// client path preserves currents and lets them chase newly received targets.
-	void snap_currents_to_targets();
-
-	// Apply the complete scalar subset carried by an S2C 0x0A phase-2 sample.
-	// The sample is already narrowed by the authority: fog distance is an
-	// integer, while fog acceleration/rain/overcast are unsigned 8.8. The host
-	// serializes its rain/overcast CURRENTS, but the retail receiver writes those
-	// bytes into its TARGET globals; the local currents keep chasing at 62 Hz.
+	// The mission-start initializer's scalar leg: every current <- target,
+	// then the recovered default clamps. Retail runs this once per mission
+	// start, never on a network apply (whose currents keep chasing).
+	void mission_start_init();
+	// Apply the scalar subset of an S2C 0x0A phase-2 sample in WIRE units:
+	// fog distance is an integer, fog acceleration/rain/overcast are unsigned
+	// 8.8. The authority serializes its rain/overcast CURRENTS, but the retail
+	// receiver writes those bytes into its TARGET globals; the local currents
+	// keep chasing at 62.5 Hz.
 	void apply_network_sample(uint16_t fog_dist, uint16_t fog_accel,
 	                          uint8_t rain_pct, uint8_t overcast);
 };
@@ -197,13 +205,20 @@ LightningAdditivesPacked lightning_additives_packed(uint32_t lightning_packed, i
 // [orig: Environment_UpdateWeatherTick @ 0x57ec6f (A) / @ 0x57ed0a (B);
 //  reset Environment_SnapStateToTargets @ 0x57d1e0]
 struct LightningSequencers {
-	int timer_a = 0; // Env_LightningTimerA
-	int timer_b = 0; // Env_LightningTimerB
+	int timer_a = 0; // Env_LightningTimerA @ 0x26c68b8
+	int timer_b = 0; // Env_LightningTimerB @ 0x26c68bc
 	int level = 0;   // last SET flash level, 0..255
+	// The thunder epochs this tick: sequencer A reaching 0 plays the THUNDER
+	// set at 1 m, centred (@ 0x57ecfb); B reaching 0 plays it at 10 m from
+	// behind (bearing 128, @ 0x57edc4). Cleared by every tick.
+	bool thunder_a = false;
+	bool thunder_b = false;
 
+	// [orig: Env_TriggerLightningFlashA @ 0x4ed500 (WAC `flash`) /
+	//  Env_TriggerLightningFlashB @ 0x4ed510 (WAC `farflash`)]
 	void trigger_short() { timer_a = 16; }
 	void trigger_long() { timer_b = 32; }
-	// One 62 Hz tick; returns true when an epoch (re)set the level this tick.
+	// One 62.5 Hz tick; returns true when an epoch (re)set the level this tick.
 	bool tick();
 };
 
@@ -236,17 +251,42 @@ struct WeatherOscillator {
 	uint32_t reroll();
 	// One 62 Hz oscillator tick; returns the tick's scaled amplitude.
 	int tick();
+	// The ring slot every reader hashes a mission-frame 16.16 position onto:
+	// (z >> 15) + (y >> 14) + (x >> 14) + ring_index, the low byte. The light
+	// gen block reads amp_ring[slot] per light; the HUD cache reads
+	// amp_ring[slot] and osc_ring[slot] at the LOCAL PLAYER into the global
+	// CTRL FLICKER (3) / SWING (4) registers every frame
+	// [orig: Light_TickGenBlock @ 0x5a8ae0; HUD_CacheEntityDisplayInfo
+	//  @ 0x4a3d9e..0x4a3dd1 -> 0x83FD00 / 0x83FD08].
+	uint8_t ring_slot(int32_t x_q16, int32_t y_q16, int32_t z_q16) const;
 };
 
 // ---------------------------------------------------------------------------
-// Rain fade [orig: Environment_UpdateWeatherTick @ 0x57eaf9 (decay);
-//            factor consumed per color block in interpolate_weather_color
-//            @ 0x57d9e0; reset @ 0x57d1e0]
+// The hit blackout (ex "rain fade" — the kong misnomer): the local player
+// taking a damage impulse SETS the intensity to 0xA000 with a fade rate, so
+// every color block multiplies to black for the frame and fades back
+// [orig: Entity_ApplyCollisionForce @ 0x4af4a0 case 3 — self/friendly hit
+//  @ 0x4af764..0x4af77e (rate 0x8000 / ((124 * mult) >> 2)), enemy hit
+//  @ 0x4af724..0x4af73e (rate (mult << 13) / ((310 * mult) >> 2)), mult 4 or
+//  3 when the source is within 90 degrees of the yaw; the per-tick decay
+//  @ 0x57eaf9; the factor consumed per block in interpolate_weather_color
+//  @ 0x57d9e0; zeroed by Game_InitNewRound @ 0x422796 and the mission-start
+//  snap @ 0x57d2f5]. Nothing weather-related writes it.
 
-struct RainState {
-	int intensity = 0; // Env_RainIntensity (0..0x8000 attenuates fully)
-	int fade_rate = 0; // Env_RainFadeRate
+struct HitDimState {
+	static constexpr int kHitIntensity = 0xA000;
+	int intensity = 0; // Env_HitDimIntensity (ex Env_RainIntensity @ 0x26c68b0)
+	int fade_rate = 0; // Env_HitDimFadeRate (ex Env_RainFadeRate @ 0x26c68b4)
 
+	// The damage-impulse arm: `facing` = the source within 90 degrees of the
+	// victim's yaw (multiplier 3, else 4); `friendly` = self or same-group
+	// same-team source.
+	void arm(bool facing, bool friendly) {
+		const int mult = facing ? 3 : 4;
+		intensity = kHitIntensity;
+		fade_rate = friendly ? 0x8000 / ((124 * mult) >> 2)
+		                     : ((mult << 15) >> 2) / ((310 * mult) >> 2);
+	}
 	void tick() {
 		intensity -= fade_rate;
 		if (intensity < 0) {
@@ -258,15 +298,15 @@ struct RainState {
 // (0x8000 - intensity), zeroed when intensity exceeds 0x8000 unsigned —
 // the per-block modulator blend factor [orig: interpolate_weather_color
 // @ 0x57d9e0].
-int rain_blend_factor(int rain_intensity);
+int hit_dim_factor(int hit_dim_intensity);
 
 // ---------------------------------------------------------------------------
 // Weather color block — the full per-block pipeline of
 // [orig: interpolate_weather_color @ 0x57d9e0] (16 such blocks tick per
 // frame @ 0x57ef9c..0x57f032): 12.20 step toward the packed target under
 // PER-CHANNEL max rates, saturating add of the lightning additive slot
-// (paddusb), then the modulator x rain blend
-//   out_c = min(255, ((c * m) >> 1) * (rain_factor >> 4) >> 16)
+// (paddusb), then the modulator x hit-dim blend
+//   out_c = min(255, ((c * m) >> 1) * (hit_dim_factor >> 4) >> 16)
 // (pmullw / psrlw 1 / pmulhw / packuswb). The modulator chain is the iris
 // auto-exposure consumer (env #17): most blocks modulate against the
 // modulator block, the modulator against modulator-2, modulator-2 against
@@ -286,8 +326,17 @@ struct WeatherColorBlock {
 
 	// Snaps the accumulators and both packed colors to `packed`.
 	void snap(uint32_t packed);
+	// The per-tick TOD keyframe write: the 12.20 channels [2..5], the render
+	// slot [0] and both target slots [10]/[11] <- packed; [1] and the lightning
+	// additive [12] stay. The step that follows finds current == target and
+	// moves nothing, so a keyframed block never smooths — only its additive
+	// and the modulation apply, and a WAC-written target is overwritten before
+	// it can act [orig: Environment_ComputeTimeOfDayColors @ 0x57e078..
+	// 0x57e3c9 — light/sky/ground/fog/skyfog/skybase/skybright/skyhighlight/
+	// cloudbase/cloudhighlight/cloudedge, every tick a keyframe table exists].
+	void snap_keyframe(uint32_t packed);
 	// One 62 Hz tick [orig: interpolate_weather_color @ 0x57d9e0].
-	void tick(uint32_t modulator_packed, int rain_intensity);
+	void tick(uint32_t modulator_packed, int hit_dim_intensity);
 	// Sets the per-channel max step rates so the current accumulators reach
 	// `target` in `frames` ticks (rounded division; frames 0 clamps to 1)
 	// [orig: ColorBlock_SetStepDeltas @ 0x57d940].
@@ -317,9 +366,9 @@ struct SkyWeatherColorBlocks {
 	void snap(const std::array<uint32_t, kCount> &packed_colors);
 	void set_targets(const std::array<uint32_t, kCount> &packed_colors);
 	void set_skyfog_additive(uint32_t packed_additive);
-	void tick_skyfog(uint32_t modulator_packed, int rain_intensity);
-	void tick_statics(uint32_t modulator_packed, int rain_intensity);
-	void tick_dome(uint32_t modulator_packed, int rain_intensity);
+	void tick_skyfog(uint32_t modulator_packed, int hit_dim_intensity);
+	void tick_statics(uint32_t modulator_packed, int hit_dim_intensity);
+	void tick_dome(uint32_t modulator_packed, int hit_dim_intensity);
 };
 
 // ---------------------------------------------------------------------------
@@ -385,9 +434,9 @@ struct ModulatorChain {
 
 	// One 62 Hz tick, ahead of the color blocks; the color blocks then tick
 	// with `render_color()` [orig: block order @ 0x57ef97..].
-	void tick(int rain_intensity) {
-		modulator2.tick(kModulatorIdentityPacked, rain_intensity);
-		modulator.tick(modulator2.render_color, rain_intensity);
+	void tick(int hit_dim_intensity) {
+		modulator2.tick(kModulatorIdentityPacked, hit_dim_intensity);
+		modulator.tick(modulator2.render_color, hit_dim_intensity);
 	}
 
 	uint32_t render_color() const { return modulator.render_color; }
@@ -415,8 +464,17 @@ struct CloudScrollState {
 	int32_t acc_l2_v = 0; // dword_26C6814 (rate - rate/3, render V axis)
 	int32_t acc_l2_u = 0; // dword_26C6818 (rate + rate/3, render U axis, negated)
 
-	// One 62 Hz tick; rate_target = sky_speed << 10.
-	void tick(int rate_target);
+	// The rate ramp [orig: @ 0x57eecc] — the scalar tail's cloud-scroll leg.
+	void tick_rate(int rate_target);
+	// The four accumulators [orig: @ 0x57f1a5..0x57f1d1] — the tick's tail,
+	// after every color block. rate/3 is the original's idiv (toward zero).
+	void tick_accumulators();
+	// Both in order (the standalone owners' one call); rate_target =
+	// sky_speed << 10.
+	void tick(int rate_target) {
+		tick_rate(rate_target);
+		tick_accumulators();
+	}
 };
 
 // The final per-layer UV translations for a camera at (cam_x, cam_z) render/

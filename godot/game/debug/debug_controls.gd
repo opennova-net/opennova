@@ -1,5 +1,7 @@
 class_name DebugControls
 extends RefCounted
+
+const WeatherRows := preload("res://game/debug/debug_controls_weather_rows.gd")
 ## The typed debug-control table (ADR 0042 d5): every F3/MCP debug knob as one
 ## Row with typed read/write/invoke closures over the GameShellSeams suppliers
 ## and the Simulation typed API. Reflective StringName dispatch (the retired
@@ -880,6 +882,12 @@ func _register_runtime_rows() -> void:
 			return _action_error(ERR_UNAVAILABLE)
 		weather.trigger_lightning_long()
 		return _action_result(null)
+
+	# The Environment rows (the WAC weather commands + the weather-home read)
+	# live in debug_controls_weather_rows.gd; they register here so the table
+	# order (the wire ids the MCP catalog test pins) is unchanged.
+	WeatherRows.register(self)
+
 
 
 ## The controls scripted runs drive over MCP in place of the retired NW_*

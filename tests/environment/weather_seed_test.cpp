@@ -1,14 +1,14 @@
-// The engine's mission-start network environment sample (runtime/environment/
-// env_network_sample): every serving embedder must seed the same
-// authoritative environment owner from the mission-selected resources — the
-// ENV parse + BMS header overrides and retail's 255-tick weather prewarm —
-// before a client can receive phase 2, through the same real wire projection.
+// The engine's mission-start weather seed (runtime/environment/weather_seed):
+// every serving embedder must seed the same weather home from the
+// mission-selected resources — the ENV parse + BMS header overrides and
+// retail's 255-tick weather settle — before a client can receive phase 2,
+// through the same real wire projection.
 
 #include "netsim/conn_fan_test_util.h"
 
 #include <net/netsim/loopback_channel.h>
 #include <net/npwire/ingame_decode.h>
-#include <runtime/environment/env_network_sample.h>
+#include <runtime/environment/weather_seed.h>
 #include <runtime/world/world.h>
 
 #include <cstdio>
@@ -73,10 +73,10 @@ void test_resource_values_reach_the_real_wire_projection() {
 			"fog_level 733\n"
 			"sky_speed 37\n");
 	std::string error;
-	CHECK(env::publish_initial_network_environment(
-			input, header, world.network_env, error));
+	CHECK(env::seed_weather_from_env(
+			input, header, world.weather, error));
 	CHECK(error.empty());
-	CHECK(world.network_env.valid);
+	CHECK(world.weather.valid);
 
 	const nw::FrameUpdate frame = emit_phase2(world);
 	CHECK(frame.env.fog_dist == 733);
@@ -88,10 +88,11 @@ void test_resource_values_reach_the_real_wire_projection() {
 	CHECK(frame.env.overcast == 0);
 	CHECK(frame.env.env_param == 0);
 
-	const uint32_t before = world.network_env.tod_fixed24;
-	world.network_env.advance_tick();
+	const uint32_t before = world.weather.tod_fixed24;
+	w::WeatherTickEvents events;
+	world.weather.tick_sim(&world, events);
 	const uint32_t expected_rate = (24u << 24) / (3720u * 123u);
-	CHECK(world.network_env.tod_fixed24 - before == expected_rate);
+	CHECK(world.weather.tod_fixed24 - before == expected_rate);
 }
 
 void test_bms_fog_override_precedes_the_environment_resource() {
@@ -103,8 +104,8 @@ void test_bms_fog_override_precedes_the_environment_resource() {
 	header.minutes_per_day = 60;
 	std::istringstream input("fog_level 733\nsky_speed 19\n");
 	std::string error;
-	CHECK(env::publish_initial_network_environment(
-			input, header, world.network_env, error));
+	CHECK(env::seed_weather_from_env(
+			input, header, world.weather, error));
 	CHECK(emit_phase2(world).env.fog_dist == 811);
 }
 
@@ -116,12 +117,14 @@ void test_mission_start_prewarms_255_environment_ticks() {
 	header.minutes_per_day = 60;
 	std::istringstream input("fog_level 733\nsky_speed 19\n");
 	std::string error;
-	CHECK(env::publish_initial_network_environment(
-			input, header, world.network_env, error));
-	const uint32_t start = world.network_env.tod_fixed24;
+	CHECK(env::seed_weather_from_env(
+			input, header, world.weather, error));
+	const uint32_t start = world.weather.tod_fixed24;
 	const uint32_t rate = (24u << 24) / (3720u * 60u);
-	env::prewarm_network_environment(world.network_env);
-	CHECK(world.network_env.tod_fixed24 ==
+	w::WeatherTickEvents events;
+	world.weather.mission_start_init();
+	for (int tick = 0; tick < 255; ++tick) world.weather.tick_sim(&world, events);
+	CHECK(world.weather.tod_fixed24 ==
 			(start + 255u * rate) % (24u << 24));
 }
 
@@ -132,16 +135,17 @@ void test_prewarm_runs_complete_weather_ticks_after_eager_scripts() {
 	// then the 255-tick prewarm, leaving exactly 45.
 	w::World world;
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 733 << 16;
-	base.fog_current_q16 = base.fog_target_q16;
+	w::WeatherSeed base;
+	base.fog_level_q16 = 733 << 16;
 	base.tod_fixed24 = 100;
 	base.tod_advance_per_tick = 7;
-	world.network_env.publish_complete(base);
-	world.network_env.command_quake(50);
-	env::prewarm_network_environment(world.network_env);
-	CHECK(world.network_env.quake_ticks == 45);
-	CHECK(world.network_env.tod_fixed24 == 100 + 255 * 7);
+	world.weather.seed(base);
+	world.weather.command_quake(50);
+	w::WeatherTickEvents events;
+	world.weather.mission_start_init();
+	for (int tick = 0; tick < 255; ++tick) world.weather.tick_sim(&world, events);
+	CHECK(world.weather.quake_ticks == 45);
+	CHECK(world.weather.tod_fixed24 == 100 + 255 * 7);
 }
 
 } // namespace
@@ -151,8 +155,8 @@ int main() {
 	test_bms_fog_override_precedes_the_environment_resource();
 	test_mission_start_prewarms_255_environment_ticks();
 	test_prewarm_runs_complete_weather_ticks_after_eager_scripts();
-	std::printf(failures ? "ENV NETWORK SAMPLE TEST FAILED (%d)\n"
-	                     : "env network sample test passed\n",
+	std::printf(failures ? "WEATHER SEED TEST FAILED (%d)\n"
+	                     : "weather seed test passed\n",
 	            failures);
 	return failures ? 1 : 0;
 }

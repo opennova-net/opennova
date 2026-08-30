@@ -2,7 +2,8 @@
 // Game surface, the Stats window (both open by default), the Entities window
 // (closed by default; the pushed-record/typed-request channel, ADR 0042 d6),
 // the Weapon window (closed by default; the DCC-style ACTION editor over the
-// equipped weapon's FSM), and ImGui's demo window (the docking/multi-viewport
+// equipped weapon's FSM), the Environment window (closed by default; the
+// weather page), and ImGui's demo window (the docking/multi-viewport
 // smoke test). Debug builds only
 // (OPENNOVA_DEVTOOLS); the release GDExtension flavour compiles this out and
 // its DevTools node is inert.
@@ -20,6 +21,7 @@ class GameWindow;
 class GameViewport;
 class EntitiesWindow;
 class WeaponWindow;
+class EnvironmentWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct DebugRequest;
@@ -27,6 +29,8 @@ struct EntityDirectorySnapshot;
 struct WeaponDefinitionSnapshot;
 struct WeaponLiveSnapshot;
 struct WeaponRequest;
+struct EnvironmentRequest;
+struct EnvironmentSnapshot;
 
 class GameDevTools {
 public:
@@ -40,6 +44,8 @@ public:
 	const EntitiesWindow &entities_window() const { return *entities_window_; }
 	WeaponWindow &weapon_window() { return *weapon_window_; }
 	const WeaponWindow &weapon_window() const { return *weapon_window_; }
+	EnvironmentWindow &environment_window() { return *environment_window_; }
+	const EnvironmentWindow &environment_window() const { return *environment_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_input_mode(GameInputMode mode);
@@ -70,12 +76,21 @@ public:
 	uint64_t weapon_definition_serial() const;
 	bool take_weapon_request(WeaponRequest &request);
 
+	// The Environment window's record/request channel (the same shape): the
+	// weather page record pushed by value on its cadence while shown, and
+	// the typed weather commands drained into the engine command layer.
+	void set_environment_snapshot(const EnvironmentSnapshot &snapshot);
+	bool needs_environment_snapshot() const;
+	bool take_environment_request(EnvironmentRequest &request);
+
+
 private:
 	ImGuiPass pass_;
 	GameWindow *game_window_ = nullptr;
 	StatsWindow *stats_window_ = nullptr;
 	EntitiesWindow *entities_window_ = nullptr;
 	WeaponWindow *weapon_window_ = nullptr;
+	EnvironmentWindow *environment_window_ = nullptr;
 };
 
 }  // namespace opennova::devtools

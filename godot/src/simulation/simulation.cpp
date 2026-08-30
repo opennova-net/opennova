@@ -4,6 +4,9 @@
 // The class spans several TUs; see simulation_internal.h for the map.
 #include "simulation/simulation_internal.h"
 
+#include "env/weather.h"
+#include <runtime/environment/environment_state.h>
+
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <net/npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
 #include <runtime/terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
@@ -84,10 +87,18 @@ Simulation::Simulation() : session_(*this) {
 }
 
 Simulation::~Simulation() {
+	_release_weather_owner();
 	(void)session_.close();
 }
 
 void Simulation::reset_world() {
+	// The bound Weather node points into this kernel's World (its
+	// WeatherState is the environment's live view): release it before the
+	// kernel is replaced.
+	_release_weather_owner();
+	// The drawer's last-camera latch is mission-scoped: a stale one would
+	// hand the next mission's first rain frame a bogus (clamped) streak.
+	precipitation_draw_ = opennova::renderer::PrecipitationDrawState{};
 	joiner_bridge_.reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	// A fresh EntityRegistry restarts its spawn ids at 1, so the per-handle
@@ -174,46 +185,231 @@ void Simulation::reset_world() {
 	apply_collision_to_ai();
 }
 
-void Simulation::set_network_environment(
-		int64_t p_fog_target_q16,
-		int64_t p_fog_current_q16,
-		int64_t p_fog_accel_clamp,
-		int64_t p_tod_fixed24,
-		int64_t p_tod_advance_per_tick,
-		int64_t p_quake_ticks,
-		int64_t p_cloud_scroll_rate_target,
-		int64_t p_rain_pct_current_q16,
-		int64_t p_overcast_blend_q16,
-		int64_t p_precipitation_kind) {
-	const auto u32 = [](int64_t value) -> uint32_t {
-		return value <= 0 ? 0u
-		                  : (value >= 0xFFFFFFFFll ? 0xFFFFFFFFu
-		                                           : static_cast<uint32_t>(value));
+opennova::world::WeatherState *Simulation::weather_state() {
+	return world_installed_ && kernel_ ? &kernel_->world.weather : nullptr;
+}
+
+const opennova::world::WeatherState *Simulation::weather_state() const {
+	return world_installed_ && kernel_ ? &kernel_->world.weather : nullptr;
+}
+
+void Simulation::seed_weather(const opennova::world::WeatherSeed &p_seed) {
+	if (!world_installed_ || kernel_ == nullptr) return;
+	kernel_->world.weather.seed(p_seed);
+}
+
+void Simulation::set_weather_render_owner(Weather *p_owner) {
+	weather_owner_id_ = p_owner != nullptr ? ObjectID(p_owner->get_instance_id())
+										: ObjectID();
+	if (kernel_ == nullptr) return;
+	kernel_->weather_render =
+			p_owner != nullptr ? p_owner->render_tick_interface() : nullptr;
+}
+
+void Simulation::_release_weather_owner() {
+	if (kernel_ != nullptr) {
+		kernel_->weather_render = nullptr;
+	}
+	if (!weather_owner_id_.is_valid()) return;
+	Weather *owner = Object::cast_to<Weather>(
+			ObjectDB::get_instance(weather_owner_id_));
+	weather_owner_id_ = ObjectID();
+	if (owner != nullptr) {
+		owner->release_simulation();
+	}
+}
+
+bool Simulation::settle_weather_mission_start() {
+	// Both roles run the initializer + settle (Game_StartMission is the
+	// shared client/host path); only the WAC execution before it is the
+	// authority's.
+	if (!world_installed_ || kernel_ == nullptr) return false;
+	kernel_->settle_weather_mission_start();
+	return true;
+}
+
+Dictionary Simulation::compile_precipitation_frame(const Vector3 &p_camera,
+		const Vector3 &p_camera_right, const Vector3 &p_camera_up,
+		int p_terrain_light_rgb) {
+	Dictionary out;
+	out["drops"] = 0;
+	if (!world_installed_ || kernel_ == nullptr) return out;
+	opennova::world::WeatherState &weather = kernel_->world.weather;
+	// Godot (x, y, z) -> mission 16.16 (x, -z, y).
+	const int32_t cam_q16[3] = {
+		static_cast<int32_t>(std::lround(static_cast<double>(p_camera.x) * 65536.0)),
+		static_cast<int32_t>(std::lround(static_cast<double>(-p_camera.z) * 65536.0)),
+		static_cast<int32_t>(std::lround(static_cast<double>(p_camera.y) * 65536.0)),
 	};
-	opennova::world::EnvNetworkSample sample;
-	sample.fog_target_q16 = static_cast<int32_t>(std::min<uint32_t>(
-			u32(p_fog_target_q16), static_cast<uint32_t>(INT32_MAX)));
-	sample.fog_current_q16 = static_cast<int32_t>(std::min<uint32_t>(
-			u32(p_fog_current_q16), static_cast<uint32_t>(INT32_MAX)));
-	sample.fog_accel_clamp = u32(p_fog_accel_clamp);
-	sample.tod_fixed24 = u32(p_tod_fixed24);
-	sample.tod_advance_per_tick = u32(p_tod_advance_per_tick);
-	sample.quake_ticks = u32(p_quake_ticks);
-	sample.cloud_scroll_rate_target = u32(p_cloud_scroll_rate_target);
-	sample.rain_pct_current_q16 = u32(p_rain_pct_current_q16);
-	sample.overcast_blend_q16 = u32(p_overcast_blend_q16);
-	sample.precipitation_kind = u32(p_precipitation_kind);
-	kernel_->world.network_env.publish_complete(sample);
+	// The per-render update precedes the compile (retail the drawer calls
+	// update_weather_particle_positions first @ 0x5dee65).
+	if (weather.raining()) kernel_->update_precipitation(cam_q16[0], cam_q16[1], cam_q16[2]);
+	opennova::renderer::PrecipitationCamera camera;
+	for (int i = 0; i < 3; ++i) camera.position_q16[i] = cam_q16[i];
+	camera.right[0] = p_camera_right.x;
+	camera.right[1] = p_camera_right.y;
+	camera.right[2] = p_camera_right.z;
+	camera.up[0] = p_camera_up.x;
+	camera.up[1] = p_camera_up.y;
+	camera.up[2] = p_camera_up.z;
+	opennova::renderer::PrecipitationDrawFrame &frame = precipitation_frame_;
+	opennova::renderer::compile_precipitation_frame(weather.precipitation,
+			weather.core.scalar_channels.rain_pct_fp, weather.precipitation_kind,
+			static_cast<uint32_t>(p_terrain_light_rgb), camera, precipitation_draw_, frame);
+	// The positions only: the per-drop uv triple {(0.5, 0), (0, 1), (1, 1)}
+	// is a constant of the streak build the presenter keeps in its static
+	// attribute stream.
+	PackedVector3Array positions;
+	const int64_t verts = static_cast<int64_t>(frame.drops) * 3;
+	positions.resize(verts);
+	Vector3 *pw = positions.ptrw();
+	for (int64_t i = 0; i < verts; ++i) {
+		const float *v = frame.vertices.data() + i * 5;
+		pw[i] = Vector3(v[0], v[1], v[2]);
+	}
+	out["positions"] = positions;
+	out["drops"] = frame.drops;
+	out["color"] = static_cast<int64_t>(frame.color_argb);
+	out["snow"] = frame.snow;
+	return out;
 }
 
-void Simulation::advance_network_environment_tick() {
-	kernel_->world.network_env.advance_tick();
+Array Simulation::drain_weather_sounds() {
+	Array out;
+	if (!world_installed_ || kernel_ == nullptr) return out;
+	for (const opennova::world::WeatherSoundEvent &ev : kernel_->world.weather_sounds) {
+		Dictionary d;
+		d["distance"] = static_cast<float>(ev.distance_q16) / 65536.0f;
+		d["bearing"] = static_cast<int>(ev.bearing);
+		out.push_back(d);
+	}
+	kernel_->world.weather_sounds.clear();
+	return out;
 }
 
-void Simulation::initialize_network_environment_mission_start() {
-	if (!world_installed_ || joiner_ || kernel_ == nullptr) return;
-	kernel_->world.network_env.initialize_mission_start();
+Dictionary Simulation::get_weather_state() const {
+	Dictionary out;
+	const opennova::world::WeatherState *w = weather_state();
+	if (w == nullptr) return out;
+	out["valid"] = w->valid;
+	out["generation"] = static_cast<int64_t>(w->generation);
+	out["command_generation"] = static_cast<int64_t>(w->command_generation);
+	out["fog_target_q16"] = static_cast<int64_t>(w->fog_target_q16());
+	out["fog_current_q16"] = static_cast<int64_t>(w->fog_current_q16());
+	out["fog_accel_clamp"] = static_cast<int64_t>(w->fog_accel_clamp());
+	out["fog_type"] = w->fog_type;
+	out["tod_fixed24"] = static_cast<int64_t>(w->tod_fixed24);
+	out["tod_advance_per_tick"] = static_cast<int64_t>(w->tod_advance_per_tick);
+	out["quake_ticks"] = static_cast<int64_t>(w->quake_ticks);
+	out["cloud_scroll_rate_target"] = static_cast<int64_t>(w->cloud_scroll_rate_target);
+	out["cloud_scroll_rate"] = static_cast<int64_t>(w->cloud_scroll_rate());
+	out["rain_pct_current_q16"] = static_cast<int64_t>(w->rain_pct_current_q16());
+	out["rain_pct_target_q16"] = static_cast<int64_t>(w->rain_pct_target_q16());
+	out["overcast_blend_q16"] = static_cast<int64_t>(w->overcast_blend_q16());
+	out["overcast_target_q16"] = static_cast<int64_t>(w->overcast_target_q16());
+	out["sun_dim_pct_q16"] = static_cast<int64_t>(w->sun_dim_pct_q16());
+	out["sky_height_q16"] = static_cast<int64_t>(w->sky_height_q16());
+	out["precipitation_kind"] = static_cast<int64_t>(w->precipitation_kind);
+	out["lightning_color"] = static_cast<int64_t>(w->lightning_color);
+	out["color_fade_ticks"] = static_cast<int64_t>(w->color_fade_ticks);
+	out["wind_scale"] = static_cast<int64_t>(w->wind_scale());
+	out["lightning_timer_a"] = w->core.lightning.timer_a;
+	out["lightning_timer_b"] = w->core.lightning.timer_b;
+	out["lightning_level"] = w->core.lightning.level;
+	out["night"] = w->is_night_phase();
+	return out;
 }
+
+bool Simulation::native_environment_snapshot(
+		opennova::devtools::EnvironmentSnapshot &out) const {
+	out = opennova::devtools::EnvironmentSnapshot{};
+	if (!world_installed_ || kernel_ == nullptr) return false;
+	const opennova::world::WeatherState &w = kernel_->world.weather;
+	const opennova::env::WeatherCore &core = w.core;
+	// (retail Debug_DrawEnvironmentValues @ 0x4ef000 — the rows' sources)
+	out.valid = true;
+	out.logic_tick = kernel_->world.logic_tick;
+	out.env_name = kernel_->mission.get_environment();
+	out.trn_name = kernel_->mission.get_terrain();
+	out.blink_flags = kernel_->collision.local_player_blink_flags;
+	out.fog_type = w.fog_type;
+	out.fog_dist_metres = w.fog_current_q16() >> 16;
+	out.fog_target_metres = w.fog_target_q16() >> 16;
+	out.color_fade_seconds = (w.color_fade_ticks + 31) / 62;
+	out.sun_fade_pct = w.sun_dim_pct_q16() >> 16;
+	out.night = w.is_night_phase();
+	const auto rgb = [](uint32_t packed) { return packed & 0x00FFFFFFu; };
+	out.fog_rgb = rgb(core.fog_block.render_color);
+	out.skyfog_rgb = rgb(core.sky_color_blocks.skyfog.render_color);
+	out.cloud_rgb = rgb(core.sky_color_blocks.cloud.render_color);
+	out.sun_rgb = rgb(core.sun_block.render_color);
+	out.lightning_rgb = rgb(w.lightning_color);
+	out.sky_rgb = rgb(core.sky_block.render_color);
+	out.ground_rgb = rgb(core.fill_block.render_color);
+	out.ceiling_rgb = rgb(core.sky_color_blocks.ceiling.render_color);
+	out.floor_rgb = rgb(core.sky_color_blocks.floor.render_color);
+	// Env_TerrainLightCombined = light x 0xB5/256 + sky; Env_CeilingFloorBlend
+	// = ceiling x 0xB5/256 + floor x 0xB5/256 (retail @ 0x57f0b3..0x57f110).
+	const auto combine = [](uint32_t a, uint32_t a_scale, uint32_t b, uint32_t b_scale) {
+		uint32_t out_rgb = 0;
+		for (int shift = 0; shift < 24; shift += 8) {
+			const uint32_t ca = ((a >> shift) & 0xFFu) * a_scale >> 8;
+			const uint32_t cb = ((b >> shift) & 0xFFu) * b_scale >> 8;
+			const uint32_t sum = ca + cb;
+			out_rgb |= (sum > 0xFFu ? 0xFFu : sum) << shift;
+		}
+		return out_rgb;
+	};
+	out.outdoor_rgb = combine(out.sun_rgb, 0xB5u, out.sky_rgb, 256u);
+	out.indoor_rgb = combine(out.ceiling_rgb, 0xB5u, out.floor_rgb, 0xB5u);
+	out.gain_rgb = rgb(core.modulator_chain.modulator.render_color);
+	out.iris_rgb = rgb(core.modulator_chain.modulator2.render_color);
+	out.fov_degrees = static_cast<int32_t>(
+			opennova::world::player_view_fov_h_deg(kernel_->view, 0, 1.0f));
+	out.sky_height_metres = w.sky_height_q16() >> 16;
+	out.sky_speed = w.cloud_scroll_rate() >> 10;
+	out.rain_pct = static_cast<int32_t>((100u * w.rain_pct_current_q16()) >> 16);
+	out.rain_target_pct = static_cast<int32_t>((100u * w.rain_pct_target_q16()) >> 16);
+	out.overcast_pct = static_cast<int32_t>((100u * w.overcast_blend_q16()) >> 16);
+	out.overcast_target_pct = static_cast<int32_t>((100u * w.overcast_target_q16()) >> 16);
+	out.complexity = kernel_->world.cached.local_player.valid()
+			? kernel_->collision.candidate_count(kernel_->world.cached.local_player)
+			: 0;
+	out.minute_of_day = static_cast<int32_t>(
+			opennova::env::EnvironmentState::hhmm_to_minute_of_day(w.tod_hhmm()));
+	out.quake_ticks = static_cast<int32_t>(w.quake_ticks);
+	out.precipitation_kind = static_cast<int32_t>(w.precipitation_kind);
+	out.wind_scale = w.wind_scale();
+	out.lightning_timer_a = core.lightning.timer_a;
+	out.lightning_timer_b = core.lightning.timer_b;
+	out.lightning_level = core.lightning.level;
+	out.authority = !joiner_;
+	out.tod_keyframed = kernel_->weather_render == nullptr || kernel_->weather_render->tod_keyframed();
+	return true;
+}
+
+// The MCP/debug rows' commands: authority-gated forwarders into the ONE
+// command layer (world::EntityCommands, ADR 0042 d5).
+#define OPENNOVA_WEATHER_COMMAND(call)                                    \
+	if (!world_installed_ || joiner_ || kernel_ == nullptr) return false; \
+	kernel_->world.commands.call;                                         \
+	return true
+
+bool Simulation::command_rain(int p_percent, int p_seconds) { OPENNOVA_WEATHER_COMMAND(set_rain(p_percent, p_seconds)); }
+bool Simulation::debug_set_time_of_day_minutes(double p_minute_of_day) { OPENNOVA_WEATHER_COMMAND(debug_set_time_of_day_minutes(p_minute_of_day)); }
+bool Simulation::command_snow(int p_percent, int p_seconds) { OPENNOVA_WEATHER_COMMAND(set_snow(p_percent, p_seconds)); }
+bool Simulation::command_overcast(int p_percent, int p_seconds) { OPENNOVA_WEATHER_COMMAND(set_overcast(p_percent, p_seconds)); }
+bool Simulation::command_fog_distance(int p_metres) { OPENNOVA_WEATHER_COMMAND(set_fog_distance(p_metres)); }
+bool Simulation::command_move_fog(int p_metres, int p_seconds) { OPENNOVA_WEATHER_COMMAND(move_fog(p_metres, p_seconds)); }
+bool Simulation::command_sky_speed(int p_rate) { OPENNOVA_WEATHER_COMMAND(set_sky_speed(p_rate)); }
+bool Simulation::command_quake(int p_seconds) { OPENNOVA_WEATHER_COMMAND(quake(p_seconds)); }
+bool Simulation::command_time_of_day_minutes(int p_minute_of_day) { OPENNOVA_WEATHER_COMMAND(set_time_of_day_minutes(p_minute_of_day)); }
+bool Simulation::command_fog_type(int p_type) { OPENNOVA_WEATHER_COMMAND(set_fog_type(p_type)); }
+bool Simulation::command_lightning_flash() { OPENNOVA_WEATHER_COMMAND(lightning_flash()); }
+bool Simulation::command_lightning_far_flash() { OPENNOVA_WEATHER_COMMAND(lightning_far_flash()); }
+bool Simulation::command_wind_scale(int p_value) { OPENNOVA_WEATHER_COMMAND(set_wind_scale(p_value)); }
+
+#undef OPENNOVA_WEATHER_COMMAND
 
 // Wire the kernel's terrain field into the world/AI/collision systems, then
 // layer the shell-fed surface extras back on (the placed-tile override and the
@@ -366,7 +562,6 @@ std::function<void()> Simulation::role_bringup_hook() {
 			// not started yet and retain the historical fresh-runtime reset.
 			if (!joiner_bridge_.started() || !runtime_) {
 				runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
-				joiner_environment_revision_seen_ = 0;
 				joiner_bridge_.reset_for_runtime_rebuild();
 				install_charattr_challenge_table();
 				install_character_join_vars();

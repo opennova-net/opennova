@@ -27,6 +27,7 @@ Two products compose it:
 | `game_window.h/.cpp` | The mandatory embedded Game window, its narrow viewport adapter, and typed Play/Interact/Close request policy |
 | `stats_window.h/.cpp`, `stats_window_rows.h` | The Stats window: the row tree over a drained window, refreshed every 0.5 s |
 | `entities_window.h/.cpp` | The Entities window: the filterable entity-directory table over the pushed snapshot, with selected-row debug actions leaving as typed requests |
+| `environment_window.h/.cpp`, `environment_snapshot.h`, `environment_request.h` | The Environment window: the retail environment debug page's rows (`Debug_DrawEnvironmentValues`) over the pushed weather record, with a control strip of the WAC weather commands leaving as typed requests |
 | `entity_directory_snapshot.h` | `EntityDirectorySnapshot`: the value record the embedder pushes (the engine `world::inspect::entity_directory` join + the logic tick) |
 | `debug_request.h` | `DebugRequest`: the typed mutation queue entry the embedder drains into the engine-backed debug delegates |
 | `weapon_window.h/.cpp` | The Weapon window: a DCC-style dope sheet over the equipped weapon's twelve ACTION slots (strips retimed by dragging), stacked over an NLA-style trace of the FSM as it actually ran. Custom `ImDrawList` geometry — ImGui ships no timeline widget. REC keeps the engine's 1024-tick ring armed through a hide (one sample copy per pump tick), so closing F3 to shoot and reopening shows the burst |

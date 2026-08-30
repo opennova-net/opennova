@@ -119,6 +119,14 @@ int hhmm_to_hours_fp(float hhmm);
 // [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 + helpers]
 TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, float envscale = 1.0f);
 
+// The overcast cross-fade: the final TOD colors interpolated between the .env
+// snapshot and the .trn/overcast.def snapshot by the weather's overcast blend
+// (16.16, clamped to 0x10000) — the same per-byte lerp with the 63356 snap
+// quirk [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 ->
+// Environment_LerpKeyframeSet @ 0x57c3b0 over (env, trn, clamp(Env_OvercastBlend))].
+TodState blend_tod_states(const TodState &env_state, const TodState &overcast_state,
+		int overcast_blend_fp);
+
 Vec3 compute_sun_direction(float tod_time);
 Vec3 compute_moon_direction(float tod_time);
 // ---------------------------------------------------------------------------

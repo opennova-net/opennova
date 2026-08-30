@@ -1,5 +1,9 @@
 #include "terrain/foliage_dispatcher.h"
 
+#include "env/weather.h"
+
+#include <godot_cpp/classes/time.hpp>
+
 #include "terrain/terrain.h"
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_tile_info.h"
@@ -147,6 +151,10 @@ void FoliageDispatcher::_bind_methods() {
       &FoliageDispatcher::configure_slots);
   ClassDB::bind_method(D_METHOD("set_terrain", "terrain"),
                        &FoliageDispatcher::set_terrain);
+  ClassDB::bind_method(D_METHOD("set_weather", "weather"),
+                       &FoliageDispatcher::set_weather);
+  ClassDB::bind_method(D_METHOD("set_wind_clock_override_ms", "ms"),
+                       &FoliageDispatcher::set_wind_clock_override_ms);
   ClassDB::bind_method(D_METHOD("set_terrain_data", "data"),
                        &FoliageDispatcher::set_terrain_data);
   ClassDB::bind_method(D_METHOD("get_terrain_data"),
@@ -312,6 +320,21 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
 
 void FoliageDispatcher::set_terrain(Terrain *p_terrain) {
   terrain_ = p_terrain;
+}
+
+void FoliageDispatcher::set_weather(Weather *p_weather) {
+  weather_id_ = p_weather != nullptr ? p_weather->get_instance_id() : ObjectID();
+}
+
+void FoliageDispatcher::set_wind_clock_override_ms(int64_t p_ms) {
+  wind_clock_override_ms_ = p_ms;
+}
+
+Weather *FoliageDispatcher::_weather() const {
+  if (!weather_id_.is_valid()) {
+    return nullptr;
+  }
+  return Object::cast_to<Weather>(ObjectDB::get_instance(weather_id_));
 }
 
 void FoliageDispatcher::set_terrain_data(
@@ -1146,6 +1169,15 @@ FoliageDispatcher::_view_input(const Transform3D &p_camera_xform) const {
   input.cam_x = static_cast<float>(p_camera_xform.origin.x);
   input.cam_y = static_cast<float>(p_camera_xform.origin.y);
   input.cam_z = static_cast<float>(p_camera_xform.origin.z);
+  // The detail sway clock (retail GetTickCount) and the weather oscillator's
+  // ring slot 0; the compiler carries the witness.
+  input.time_ms = static_cast<uint32_t>(
+      wind_clock_override_ms_ >= 0
+          ? wind_clock_override_ms_
+          : static_cast<int64_t>(Time::get_singleton()->get_ticks_msec()));
+  if (const Weather *weather = _weather(); weather != nullptr) {
+    input.wind_osc_ring0 = weather->runtime().core().oscillator.osc_ring[0];
+  }
 
   // Column-major view matrix from the camera's inverse transform (the same
   // construction Terrain feeds TerrainFrameCompiler).

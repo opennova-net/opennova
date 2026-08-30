@@ -27,12 +27,29 @@ static_assert(static_cast<float>(Simulation::DEFAULT_PLAYER_FOV_H_DEG) ==
               opennova::world::kPlayerCameraFovHDeg);
 
 void Simulation::_bind_methods() {
-	ClassDB::bind_method(
-			D_METHOD("set_network_environment", "fog_target_q16", "fog_current_q16",
-			         "fog_accel_clamp",
-			         "tod_fixed24", "tod_advance_per_tick", "quake_ticks", "cloud_scroll_rate_target",
-			         "rain_pct_current_q16", "overcast_blend_q16", "precipitation_kind"),
-			&Simulation::set_network_environment);
+	ClassDB::bind_method(D_METHOD("settle_weather_mission_start"),
+			&Simulation::settle_weather_mission_start);
+	ClassDB::bind_method(D_METHOD("compile_precipitation_frame", "camera", "camera_right",
+			"camera_up", "terrain_light_rgb"),
+			&Simulation::compile_precipitation_frame);
+	ClassDB::bind_method(D_METHOD("drain_weather_sounds"), &Simulation::drain_weather_sounds);
+	ClassDB::bind_method(D_METHOD("get_weather_state"), &Simulation::get_weather_state);
+	ClassDB::bind_method(D_METHOD("weather_state_bound"), &Simulation::weather_state_bound);
+	ClassDB::bind_method(D_METHOD("command_rain", "percent", "seconds"), &Simulation::command_rain);
+	ClassDB::bind_method(D_METHOD("command_snow", "percent", "seconds"), &Simulation::command_snow);
+	ClassDB::bind_method(D_METHOD("command_overcast", "percent", "seconds"), &Simulation::command_overcast);
+	ClassDB::bind_method(D_METHOD("command_fog_distance", "metres"), &Simulation::command_fog_distance);
+	ClassDB::bind_method(D_METHOD("command_move_fog", "metres", "seconds"), &Simulation::command_move_fog);
+	ClassDB::bind_method(D_METHOD("command_sky_speed", "rate"), &Simulation::command_sky_speed);
+	ClassDB::bind_method(D_METHOD("command_quake", "seconds"), &Simulation::command_quake);
+	ClassDB::bind_method(D_METHOD("command_time_of_day_minutes", "minute_of_day"),
+			&Simulation::command_time_of_day_minutes);
+	ClassDB::bind_method(D_METHOD("debug_set_time_of_day_minutes", "minute_of_day"),
+			&Simulation::debug_set_time_of_day_minutes);
+	ClassDB::bind_method(D_METHOD("command_fog_type", "type"), &Simulation::command_fog_type);
+	ClassDB::bind_method(D_METHOD("command_lightning_flash"), &Simulation::command_lightning_flash);
+	ClassDB::bind_method(D_METHOD("command_lightning_far_flash"), &Simulation::command_lightning_far_flash);
+	ClassDB::bind_method(D_METHOD("command_wind_scale", "value"), &Simulation::command_wind_scale);
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &Simulation::load_from_mission_data);
 	ClassDB::bind_method(D_METHOD("boot_mission", "mission", "resource_root",
 			"item_db", "terrain", "terrain_til",
@@ -116,8 +133,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_server_name"), &Simulation::get_join_server_name);
 	ClassDB::bind_method(D_METHOD("get_join_mission_name"), &Simulation::get_join_mission_name);
 	ClassDB::bind_method(D_METHOD("get_join_mission_file"), &Simulation::get_join_mission_file);
-	ClassDB::bind_method(D_METHOD("take_join_environment_update"),
-	                     &Simulation::take_join_environment_update);
 	ClassDB::bind_method(D_METHOD("take_score_feedback"), &Simulation::take_score_feedback);
 	ClassDB::bind_method(D_METHOD("get_join_mission_header"), &Simulation::get_join_mission_header);
 	ClassDB::bind_method(D_METHOD("get_join_terrain_til_state"),

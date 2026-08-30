@@ -418,6 +418,105 @@ bool EntityCommands::set_entity_position(EntityHandle h, const Vec3 &mission_pos
     return true;
 }
 
+// --- the WAC weather handlers (the observable EnvState mirror + the weather
+// home; every command bumps the mirror's generation the way the VM did) ------
+
+void EntityCommands::set_fog_type(int32_t type) {
+    world_.env.fog_type = type;
+    ++world_.env.generation;
+    world_.weather.command_fog_type(type);
+}
+
+void EntityCommands::set_fog_distance(int32_t metres) {
+    world_.env.fog_dist = metres;
+    ++world_.env.generation;
+    world_.weather.command_fog_distance(metres);
+}
+
+void EntityCommands::move_fog(int32_t metres, int32_t seconds) {
+    world_.env.fog_dist = metres;
+    ++world_.env.generation;
+    world_.weather.command_move_fog(metres, seconds);
+}
+
+void EntityCommands::set_rain(int32_t percent, int32_t seconds) {
+    world_.env.rain = percent;
+    ++world_.env.generation;
+    world_.weather.command_rain(percent, seconds);
+}
+
+void EntityCommands::set_snow(int32_t percent, int32_t seconds) {
+    world_.env.snow = percent;
+    ++world_.env.generation;
+    world_.weather.command_snow(percent, seconds);
+}
+
+void EntityCommands::set_overcast(int32_t percent, int32_t seconds) {
+    world_.env.overcast = percent;
+    ++world_.env.generation;
+    world_.weather.command_overcast(percent, seconds);
+}
+
+void EntityCommands::set_sky_speed(int32_t rate) {
+    world_.env.sky_speed = rate;
+    ++world_.env.generation;
+    world_.weather.command_sky_speed(rate);
+}
+
+void EntityCommands::set_sky_height(int32_t height_raw) {
+    world_.weather.command_sky_height(height_raw);
+}
+
+void EntityCommands::quake(int32_t seconds) {
+    world_.weather.command_quake(seconds);
+}
+
+void EntityCommands::set_time_of_day_minutes(int32_t minute_of_day) {
+    world_.env.time_of_day = minute_of_day;
+    ++world_.env.generation;
+    world_.weather.command_time_of_day_minutes(minute_of_day);
+}
+
+void EntityCommands::debug_set_time_of_day_minutes(double minute_of_day) {
+    world_.env.time_of_day = static_cast<int32_t>(minute_of_day);
+    ++world_.env.generation;
+    world_.weather.debug_set_time_of_day_minutes(minute_of_day);
+}
+
+void EntityCommands::sun_fade(int32_t percent, int32_t seconds) {
+    world_.weather.command_sun_fade(percent, seconds);
+}
+
+void EntityCommands::set_color_fade(int32_t seconds) {
+    world_.weather.command_color_fade(seconds);
+}
+
+void EntityCommands::set_lightning_color(uint32_t rgb) {
+    world_.weather.command_lightning_color(rgb);
+}
+
+void EntityCommands::lightning_flash() {
+    world_.weather.command_flash();
+}
+
+void EntityCommands::lightning_far_flash() {
+    world_.weather.command_far_flash();
+}
+
+void EntityCommands::set_weather_color(WeatherColorTarget target, uint32_t rgb) {
+    switch (target) {
+        case WeatherColorTarget::Sun: world_.env.sun_rgb = rgb; ++world_.env.generation; break;
+        case WeatherColorTarget::Sky: world_.env.sky_rgb = rgb; ++world_.env.generation; break;
+        case WeatherColorTarget::Fog: world_.env.fog_rgb = rgb; ++world_.env.generation; break;
+        default: break;
+    }
+    world_.weather.command_block_color(target, rgb);
+}
+
+void EntityCommands::set_wind_scale(int32_t value) {
+    world_.weather.set_wind_scale(value);
+}
+
 bool EntityCommands::kill_player(EntityHandle victim, EntityHandle killer) {
     Entity *e = world_.registry.get(victim);
     if (e == nullptr || (e->flags & kEntityFlagPlayer) == 0) return false;
@@ -1327,188 +1426,6 @@ int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_ty
 // World
 // ----------------------------------------------------------------------------
 
-namespace {
-
-constexpr int32_t kFogMinimumQ16 = 2 << 16;
-constexpr int32_t kFogReferenceQ16 = 1024 << 16;
-constexpr uint32_t kTodDayFixed24 = 24u << 24;
-
-int32_t authored_distance_q16(int32_t distance) noexcept {
-    const int64_t fixed = static_cast<int64_t>(distance) << 16;
-    return static_cast<int32_t>(std::clamp<int64_t>(
-            fixed, kFogMinimumQ16, kFogReferenceQ16));
-}
-
-uint32_t transition_step(int32_t current, int32_t target, int32_t seconds) noexcept {
-    // Rounded per-tick step over seconds*62 ticks — the same rounding the
-    // witnessed weather scalar transition uses on the render side
-    // [orig: Environment_UpdateWeatherTick @ 0x57ede2 family; engine/formats/env mirror].
-    int64_t ticks = static_cast<int64_t>(seconds) * 62;
-    if (ticks == 0) ticks = 1;
-    if (ticks < 0) ticks = -ticks;
-    int64_t centered = static_cast<int64_t>(target) - current + ticks / 2;
-    if (centered < 0) centered = -centered;
-    return static_cast<uint32_t>(std::min<int64_t>(centered / ticks, 0xFFFFFFFFll));
-}
-
-int32_t authored_percent_q16(int32_t percent) noexcept {
-    const int64_t fixed = (static_cast<int64_t>(percent) << 16) / 100;
-    return static_cast<int32_t>(std::min<int64_t>(fixed, 0x10000));
-}
-
-int32_t spring_tick(int32_t current, int32_t target, uint32_t step,
-                    int32_t max_abs) noexcept {
-    // 1/32 spring toward target with a per-tick step clamp — the witnessed
-    // weather spring [orig: Environment_UpdateWeatherTick @ 0x57ede2].
-    int64_t delta = (static_cast<int64_t>(target) - current + 31) >> 5;
-    const int64_t clamp = std::min<uint64_t>(step, 0x7FFFFFFFu);
-    delta = std::clamp<int64_t>(delta, -clamp, clamp);
-    return static_cast<int32_t>(std::clamp<int64_t>(
-            static_cast<int64_t>(current) + delta, -max_abs, max_abs));
-}
-
-} // namespace
-
-void EnvNetworkState::publish_complete(const EnvNetworkSample &sample) noexcept {
-    const bool first = !valid;
-    if (first || (scripted_channels_ & kScriptedFog) == 0) {
-        fog_target_q16 = sample.fog_target_q16;
-        fog_current_q16_ = sample.fog_current_q16;
-        fog_accel_clamp = sample.fog_accel_clamp;
-    }
-    if (first) {
-        tod_fixed24 = sample.tod_fixed24;
-        tod_advance_per_tick_ = sample.tod_advance_per_tick;
-    } else if ((scripted_channels_ & kScriptedTod) == 0) {
-        tod_fixed24 = sample.tod_fixed24;
-    } else if (tod_advance_per_tick_ == 0) {
-        // An external 62-Hz owner (Godot) advances the resource clock. Retain
-        // the scripted absolute time while applying only that base clock delta.
-        const uint32_t previous = last_external_tod_fixed24_ % kTodDayFixed24;
-        const uint32_t current = sample.tod_fixed24 % kTodDayFixed24;
-        const uint32_t delta = (current + kTodDayFixed24 - previous) % kTodDayFixed24;
-        tod_fixed24 = (tod_fixed24 + delta) % kTodDayFixed24;
-    }
-    last_external_tod_fixed24_ = sample.tod_fixed24;
-    if (first || (scripted_channels_ & kScriptedQuake) == 0)
-        quake_ticks = sample.quake_ticks;
-    if (first || (scripted_channels_ & kScriptedCloud) == 0)
-        cloud_scroll_rate_target = sample.cloud_scroll_rate_target;
-    if (first || (scripted_channels_ & kScriptedPrecipitation) == 0) {
-        rain_pct_current_q16 = sample.rain_pct_current_q16;
-        rain_target_q16_ = static_cast<int32_t>(sample.rain_pct_current_q16);
-        precipitation_kind = sample.precipitation_kind;
-    }
-    if (first || (scripted_channels_ & kScriptedOvercast) == 0) {
-        overcast_blend_q16 = sample.overcast_blend_q16;
-        overcast_target_q16_ = static_cast<int32_t>(sample.overcast_blend_q16);
-    }
-    valid = true;
-    ++generation;
-}
-
-void EnvNetworkState::initialize_mission_start() noexcept {
-    if (!valid) return;
-    fog_current_q16_ = fog_target_q16;
-    fog_accel_clamp = 0x00FF0000u;
-    fog_reference_q16_ = 1000 << 16;
-    rain_pct_current_q16 = static_cast<uint32_t>(rain_target_q16_);
-    rain_step_q16_ = 0x1000u;
-    overcast_blend_q16 = static_cast<uint32_t>(overcast_target_q16_);
-    overcast_step_q16_ = 0x1000u;
-    ++generation;
-}
-
-void EnvNetworkState::command_fog_distance(int32_t authored_distance) noexcept {
-    const int32_t target = authored_distance_q16(authored_distance);
-    const int64_t delta = static_cast<int64_t>(target) - fog_current_q16_;
-    fog_target_q16 = target;
-    fog_accel_clamp = static_cast<uint32_t>(delta < 0 ? -delta : delta);
-    scripted_channels_ |= kScriptedFog;
-    ++generation;
-}
-
-void EnvNetworkState::command_move_fog(int32_t authored_distance, int32_t seconds) noexcept {
-    const int32_t target = authored_distance_q16(authored_distance);
-    fog_target_q16 = target;
-    fog_accel_clamp = transition_step(fog_current_q16_, target, seconds);
-    scripted_channels_ |= kScriptedFog;
-    ++generation;
-}
-
-void EnvNetworkState::command_sky_speed(int32_t authored_rate) noexcept {
-    cloud_scroll_rate_target = static_cast<uint32_t>(authored_rate) << 10;
-    scripted_channels_ |= kScriptedCloud;
-    ++generation;
-}
-
-void EnvNetworkState::command_precipitation(int32_t authored_percent, int32_t seconds,
-                                            PrecipitationKind kind) noexcept {
-    rain_target_q16_ = authored_percent_q16(authored_percent);
-    rain_step_q16_ = transition_step(
-            static_cast<int32_t>(rain_pct_current_q16), rain_target_q16_, seconds);
-    precipitation_kind = static_cast<uint32_t>(kind);
-    scripted_channels_ |= kScriptedPrecipitation;
-    ++generation;
-}
-
-void EnvNetworkState::command_overcast(int32_t authored_percent, int32_t seconds) noexcept {
-    overcast_target_q16_ = authored_percent_q16(authored_percent);
-    overcast_step_q16_ = transition_step(
-            static_cast<int32_t>(overcast_blend_q16), overcast_target_q16_, seconds);
-    scripted_channels_ |= kScriptedOvercast;
-    ++generation;
-}
-
-void EnvNetworkState::command_quake(int32_t authored_duration) noexcept {
-    // [orig: WacCmd_Quake (ex sub_4ED4C0) — Env_QuakeTicks = 6 * value]
-    quake_ticks = authored_duration <= 0
-            ? 0u
-            : static_cast<uint32_t>(static_cast<uint64_t>(authored_duration) * 6u);
-    scripted_channels_ |= kScriptedQuake;
-    ++generation;
-}
-
-void EnvNetworkState::command_time_of_day_minutes(int32_t minute_of_day) noexcept {
-    // [orig: TOD handler @0x4EDC70] ParamType::Hour resolves to minutes;
-    // the handler multiplies directly by 0x44444 into the 8.24 accumulator.
-    tod_fixed24 = static_cast<uint32_t>(minute_of_day) * 0x44444u;
-    scripted_channels_ |= kScriptedTod;
-    ++generation;
-}
-
-void EnvNetworkState::advance_tick() noexcept {
-    bool changed = false;
-    if (tod_advance_per_tick_ != 0) {
-        tod_fixed24 = (tod_fixed24 + tod_advance_per_tick_) % kTodDayFixed24;
-        changed = true;
-    }
-    if ((scripted_channels_ & kScriptedQuake) != 0 && quake_ticks != 0) {
-        --quake_ticks;
-        changed = true;
-    }
-    if ((scripted_channels_ & kScriptedFog) != 0) {
-        const int32_t next = spring_tick(fog_current_q16_, fog_target_q16,
-                                        fog_accel_clamp, fog_reference_q16_);
-        changed |= next != fog_current_q16_;
-        fog_current_q16_ = next;
-    }
-    if ((scripted_channels_ & kScriptedPrecipitation) != 0) {
-        const int32_t current = static_cast<int32_t>(rain_pct_current_q16);
-        const int32_t next = spring_tick(current, rain_target_q16_, rain_step_q16_, 0x10000);
-        changed |= next != current;
-        rain_pct_current_q16 = static_cast<uint32_t>(next);
-    }
-    if ((scripted_channels_ & kScriptedOvercast) != 0) {
-        const int32_t current = static_cast<int32_t>(overcast_blend_q16);
-        const int32_t next = spring_tick(
-                current, overcast_target_q16_, overcast_step_q16_, 0x10000);
-        changed |= next != current;
-        overcast_blend_q16 = static_cast<uint32_t>(next);
-    }
-    if (changed) ++generation;
-}
-
 uint16_t World::next_prng16() noexcept {
     // [orig: PRNG_Next16 @0x6130a0 / @0x613140, both over
     // dword_31BFBB0] s = rol4(s + rol11(s)) ^ 1; return low word.
@@ -1629,6 +1546,19 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
         throwables.events.clear();
         throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
     }
+    // The precipitation fall: while it rains every drop slot lowers by the
+    // kind's per-tick amount, once per ENTITY update — retail runs it inside
+    // Entity_UpdateAllEntities after the pool-1 walk and before
+    // DeathPiece_TickAll, so it rides the entity update's frame gate (never
+    // the 255-tick weather settle, never the pre-mission pass) and every peer
+    // falls its own drops from the rain current the previous weather tick left
+    // Entity_UpdateAllEntities itself returns before it without a local
+    // player entity (@ 0x4c2110); its epilog-screen path skips it as well.
+    // [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
+    //  @ 0x4c2214].
+    if (gameplay && cached.local_player.valid())
+        weather.precipitation.fall_tick(weather.core.scalar_channels.rain_pct_fp,
+                                        weather.precipitation_kind);
     if (perf != nullptr) {
         const uint64_t now = io::perf_now_us();
         perf->throwables_us = now - phase_start;
@@ -1799,7 +1729,7 @@ World::Snapshot World::snapshot() const {
     s.vars = vars;
     s.wac_values = wac_values;
     s.env = env;
-    s.network_env = network_env;
+    s.weather = weather;
     s.match = match;
     s.spawn_waves = spawn_waves;
     s.zone_capture_state = zone_capture_state;
@@ -1817,7 +1747,7 @@ void World::restore(const Snapshot &s) {
     vars = s.vars;
     wac_values = s.wac_values;
     env = s.env;
-    network_env = s.network_env;
+    weather = s.weather;
     match = s.match;
     spawn_waves = s.spawn_waves;
     zone_capture_state = s.zone_capture_state;

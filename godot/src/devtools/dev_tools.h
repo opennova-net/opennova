@@ -122,6 +122,8 @@ private:
 	void push_entity_directory();
 	void push_weapon_records();
 	void apply_weapon_requests();
+	void apply_environment_requests();
+	void push_environment_snapshot();
 	void set_game_playing_internal(bool p_playing);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
@@ -143,6 +145,7 @@ private:
 	std::string weapon_def_name_;
 	size_t weapon_def_rings_ = 0;
 	bool weapon_records_live_ = false;
+	int64_t last_environment_push_ms_ = -1;
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

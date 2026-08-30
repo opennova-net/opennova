@@ -4,6 +4,8 @@
 
 #include "object/object_model.h"
 
+#include <cmath>
+
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/occluder_instance3d.hpp>
 
@@ -1306,6 +1308,31 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 		// Everything below derives from the absolute clock + the register/pose
 		// state advanced above; it re-derives on the next visible frame.
 		return;
+	}
+	// The weather's FLICKER / SWING registers hashed on THIS model's position:
+	// retail's gnrc/Sway world bone callbacks run HUD_CacheEntityDisplayInfo
+	// on their own entity right before the batch collector snapshots the
+	// registers (BoneCallback_gnrc_World @ 0x4e286c, BoneCallback_Sway_World
+	// @ 0x4e2b22, the collect @ 0x5d968d); only a model whose 3DI declares
+	// either register can read them, so only those hash. Written straight into
+	// the dictionary the evaluations below read (no batch replay: the value
+	// moves every tick anyway).
+	if (object_data_.is_valid() && object_data_->uses_weather_ctrl_registers()) {
+		const Vector3 p = get_global_position(); // Godot (x, up, -y)
+		int32_t flicker = 0;
+		int32_t swing = 0;
+		if (ObjectData::weather_ctrl_registers_at(
+					static_cast<int32_t>(std::lround(static_cast<double>(p.x) * 65536.0)),
+					static_cast<int32_t>(std::lround(static_cast<double>(-p.z) * 65536.0)),
+					static_cast<int32_t>(std::lround(static_cast<double>(p.y) * 65536.0)),
+					flicker, swing)) {
+			static const String flicker_register =
+					ObjectData::canonical_control_register_name("FLICKER");
+			static const String swing_register =
+					ObjectData::canonical_control_register_name("SWING");
+			ctrl_values_[flicker_register] = static_cast<int64_t>(flicker);
+			ctrl_values_[swing_register] = static_cast<int64_t>(swing);
+		}
 	}
 	// Retail poses PANM during entity submission before the later render-batch
 	// flush evaluates material generators — noise waveforms share one random

@@ -32,11 +32,12 @@ add_library(opennova_runtime STATIC
     # target-feed/writeback order) + the mission-start network sample
     # derivation (ENV resource + BMS header -> world::EnvNetworkState); the
     # witnessed math cores stay in engine/formats/env
-    ${CMAKE_CURRENT_SOURCE_DIR}/environment/env_network_sample.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/environment/precipitation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/environment_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/sky_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/water_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/weather_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/environment/weather_seed.cpp
     # hud — pure witnessed HUD math (the shell owns every draw/Font blit)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_math.cpp
     # menu — the .mnu screen draw-list compiler (ADR 0033 R2; witness:
@@ -90,6 +91,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_order.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_slot_shadow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/precipitation_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/uv_anim.cpp
     # simassets — sim-consumed asset resolution (ADR 0028; Model B only)
@@ -138,6 +140,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/match.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/world.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/weather_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_combat.cpp     # acquisition, engagement, commands
@@ -230,6 +233,7 @@ if(OPENNOVA_DEVTOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/demo_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entities_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/environment_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/stats_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/weapon_window.cpp
     )

@@ -29,6 +29,7 @@
 #include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
+#include "env/precipitation.h"
 #include "env/weather_core.h"
 #include "env/glare_occlusion.h"
 #include "env/star_field.h"
@@ -146,6 +147,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
 	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);
+	GDREGISTER_CLASS(Precipitation);
 	GDREGISTER_CLASS(WeatherCore);
 	GDREGISTER_CLASS(WaterCore);
 	GDREGISTER_CLASS(StarField);

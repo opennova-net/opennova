@@ -114,6 +114,16 @@ Vector3 Simulation::get_local_player_position() const {
 	return Vector3(e->position.x, e->position.z, -e->position.y);
 }
 
+bool Simulation::local_player_position_q16(int32_t (&r_pos)[3]) const {
+	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return false;
+	const AiEntity *body = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);
+	if (body == nullptr) return false;
+	r_pos[0] = body->pos[0];
+	r_pos[1] = body->pos[1];
+	r_pos[2] = body->pos[2];
+	return true;
+}
+
 int64_t Simulation::get_local_player_heading_bam() const {
 	if (!kernel_->world.ai || !kernel_->world.cached.local_player.valid()) return 0;
 	const AiEntity *player = kernel_->world.ai->for_handle(kernel_->world.cached.local_player);

@@ -30,6 +30,7 @@
 #include <runtime/world/water_cross.h>
 #include <runtime/world/fire_sound.h>
 #include <runtime/world/sound_emitter_mailbox.h>
+#include <runtime/world/weather_state.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/terrain_scorch_events.h>
 #include <runtime/world/var_store.h>
@@ -150,82 +151,6 @@ struct EnvState {
     uint32_t sky_rgb = 0;
     uint32_t fog_rgb = 0;
     uint32_t generation = 0;   // bumped on any change, for change detection
-};
-
-// One complete authoritative environment publication in the units retained by
-// the retail engine. The extra fog current and TOD rate are owner-side sources
-// used by scripted transitions; they are not projected onto the wire directly.
-struct EnvNetworkSample {
-    int32_t fog_target_q16 = 0;
-    int32_t fog_current_q16 = 0;
-    uint32_t fog_accel_clamp = 0x00FF0000u;
-    uint32_t tod_fixed24 = 0;
-    uint32_t tod_advance_per_tick = 0;
-    uint32_t quake_ticks = 0;
-    uint32_t cloud_scroll_rate_target = 0;
-    uint32_t rain_pct_current_q16 = 0;
-    uint32_t overcast_blend_q16 = 0;
-    uint32_t precipitation_kind = 0;
-};
-
-enum class PrecipitationKind : uint8_t {
-    Rain = 0,
-    Snow = 1,
-};
-
-// Authoritative environment values in the units retained by the retail
-// engine.  This is deliberately separate from EnvState: EnvState is the WAC
-// command/render-facing model, while these values are the lossless source for
-// the scheduled 0x0A phase-2 projection.  Keeping the native values here lets
-// the network boundary perform retail's narrowing and clamping exactly once.
-struct EnvNetworkState {
-    bool valid = false; // set only after an owner publishes a complete sample
-    int32_t fog_target_q16 = 0; // phase 2 takes the high word
-    // Retail initializes the acceleration clamp to 255.0 in 16.16.  Its wire
-    // projection caps at this value before converting to unsigned 8.8.
-    uint32_t fog_accel_clamp = 0x00FF0000u;
-    uint32_t tod_fixed24 = 0; // rounded by +0x1000, then shifted right 13
-    uint32_t quake_ticks = 0; // phase 2 saturates to one byte
-    uint32_t cloud_scroll_rate_target = 0; // phase 2 shifts right 10
-    uint32_t rain_pct_current_q16 = 0; // phase 2 shifts right 8
-    uint32_t overcast_blend_q16 = 0; // phase 2 shifts right 8
-    uint32_t precipitation_kind = 0; // phase 2 takes the low byte
-    uint32_t generation = 0;
-
-    // Publish a complete resource/runtime sample. Once a WAC command owns a
-    // channel, later external base refreshes cannot erase that scripted value.
-    void publish_complete(const EnvNetworkSample &sample) noexcept;
-	// Post-WAC mission initialization: currents take the just-authored targets,
-	// then the recovered default clamps are installed before 255 weather ticks.
-	void initialize_mission_start() noexcept;
-    void command_fog_distance(int32_t authored_distance) noexcept;
-    void command_move_fog(int32_t authored_distance, int32_t seconds) noexcept;
-    void command_sky_speed(int32_t authored_rate) noexcept;
-    void command_precipitation(int32_t authored_percent, int32_t seconds,
-                               PrecipitationKind kind) noexcept;
-    void command_overcast(int32_t authored_percent, int32_t seconds) noexcept;
-    void command_quake(int32_t authored_duration) noexcept;
-    void command_time_of_day_minutes(int32_t minute_of_day) noexcept;
-    void advance_tick() noexcept;
-
-private:
-    enum ScriptedChannel : uint32_t {
-        kScriptedCloud = 1u << 0,
-        kScriptedFog = 1u << 1,
-        kScriptedPrecipitation = 1u << 2,
-        kScriptedOvercast = 1u << 3,
-        kScriptedQuake = 1u << 4,
-        kScriptedTod = 1u << 5,
-    };
-    uint32_t scripted_channels_ = 0;
-    int32_t fog_current_q16_ = 0;
-    int32_t fog_reference_q16_ = 1024 << 16;
-    int32_t rain_target_q16_ = 0;
-    uint32_t rain_step_q16_ = 0x40000000u;
-    int32_t overcast_target_q16_ = 0;
-    uint32_t overcast_step_q16_ = 0x40000000u;
-    uint32_t tod_advance_per_tick_ = 0;
-    uint32_t last_external_tod_fixed24_ = 0;
 };
 
 // Non-entity side effects (text/sound/fx/objective) recorded for observability
@@ -419,7 +344,11 @@ public:
     ScriptVarStore vars;       // shared by WAC + BMS (the C6B240/C6BA40 seam)
     WacNamedValues wac_values; // writable named engine values (the @0x82EEF0 table)
     EnvState env;
-    EnvNetworkState network_env;
+    // The retail weather globals, ONE home (weather_state.h): the WAC weather
+    // handlers write it through EntityCommands, the weather tick advances it
+    // after the logic tick, the wire projection serializes it, a joiner's
+    // decoder writes its targets back.
+    WeatherState weather;
     EffectLog effects;
     CachedFrameState cached;
     LocalSink local_sink;
@@ -690,6 +619,9 @@ public:
     }
     std::vector<SoundSlotEvent> slot_sounds;
     SoundEmitterMailbox sound_emitters;
+    // The weather tick's thunder one-shots (weather_state.h carries the
+    // cites); the presentation owner drains them per frame.
+    std::vector<WeatherSoundEvent> weather_sounds;
 
     // The fire-sound propagation-delay queue on the logic clock, seeded inline
     // at round spawn and counted down at the head of run_logic_tick; the
@@ -773,7 +705,7 @@ public:
         ScriptVarStore vars;
         WacNamedValues wac_values;
         EnvState env;
-        EnvNetworkState network_env;
+        WeatherState weather;
         Match match;
         SpawnWaveList spawn_waves;
         ZoneCaptureState zone_capture_state;

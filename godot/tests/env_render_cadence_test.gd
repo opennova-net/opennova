@@ -211,7 +211,7 @@ func test_mission_start_prewarm_advances_exactly_255_weather_ticks() -> void:
 	expected.free()
 
 
-func test_network_environment_sample_roundtrips_exact_retail_units_through_live_owner() -> void:
+func test_wire_sample_roundtrips_exact_retail_units_through_the_weather_home() -> void:
 	var fixture := _world_driven_weather_fixture()
 	var env := fixture[0] as MissionEnvironment
 	var weather := fixture[1] as Weather
@@ -226,8 +226,8 @@ func test_network_environment_sample_roundtrips_exact_retail_units_through_live_
 		"precipitation_kind": 0x9A,
 	}
 
-	weather.apply_network_environment_sample(wire_sample)
-	var native: Dictionary = weather.get_network_environment_snapshot()
+	weather.apply_wire_sample(wire_sample)
+	var native: Dictionary = weather.get_weather_snapshot()
 	assert_eq(int(native.get("fog_target_q16", -1)), 380 << 16)
 	assert_eq(int(native.get("fog_current_q16", -1)), 1000 << 16,
 			"the client preserves its fog current when the network target changes")
@@ -248,27 +248,27 @@ func test_network_environment_sample_roundtrips_exact_retail_units_through_live_
 			"the received overcast byte is a target, not an immediate current snap")
 
 	weather.tick_fixed()
-	native = weather.get_network_environment_snapshot()
+	native = weather.get_weather_snapshot()
 	assert_eq(int(native.get("fog_current_q16", -1)), 0x03D4A000)
 	assert_eq(int(native.get("rain_pct_current_q16", -1)), 0x000002B0)
 	assert_eq(int(native.get("overcast_blend_q16", -1)), 0x000003C0)
-	assert_almost_eq(env.get_network_rain_current(), 0x02B0 / 65536.0, 0.000001)
+	assert_almost_eq(env.get_rain_current(), 0x02B0 / 65536.0, 0.000001)
 	assert_almost_eq(env.get_overcast_blend(), 0x03C0 / 65536.0, 0.000001,
 			"fog/celestial consumers see the locally smoothed overcast current")
 
 	env.advance_mission_clock(1)
-	assert_eq(env.get_network_quake_ticks(), 16,
-			"joiner quake duration counts down once per 62 Hz environment tick")
+	assert_eq(env.get_quake_ticks(), 15,
+			"the clock advance is the weather tick: the quake counts down with it")
 	env.advance_mission_clock(100)
-	assert_eq(env.get_network_quake_ticks(), 0)
-	weather.apply_network_environment_sample(wire_sample)
-	assert_eq(env.get_network_quake_ticks(), 17,
+	assert_eq(env.get_quake_ticks(), 0)
+	weather.apply_wire_sample(wire_sample)
+	assert_eq(env.get_quake_ticks(), 17,
 			"a later authoritative phase-2 sample replaces the local countdown")
 
-	# Applying the same wire state is still safe, but a discrete replacement ENV
-	# must clear the remote-owner overrides so the next mission starts from its
-	# own authored fog/cloud values.
+	# A discrete replacement ENV re-seeds the standalone weather home from its
+	# own authored fog/cloud values (the mission reset epoch).
 	env.environment_data = _loaded_env()
+	weather.prepare_world_driven()
 	assert_eq(env.get_fog_level_target(), 1000.0)
 	assert_eq(env.get_sky_speed(), 12.0, "synth_full.env authors sky_speed 12")
 	assert_eq(env.get_overcast_blend(), 0.0)

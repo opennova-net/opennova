@@ -1,5 +1,9 @@
 #include <runtime/environment/environment_state.h>
 
+#include <formats/env/tod_clock.h>
+#include <formats/mission/bms.h>
+#include <runtime/environment/weather_seed.h>
+
 #include <formats/env/env_weather.h>
 
 #include <algorithm>
@@ -41,12 +45,30 @@ uint32_t to_fixed_16_16(float units) {
 } // namespace
 
 void EnvironmentState::set_config(const Config *config, bool loaded) {
-	clear_network_state();
 	config_ = config;
 	loaded_ = loaded;
 }
 
+void EnvironmentState::set_overcast_config(const Config *overcast) {
+	overcast_config_ = overcast;
+	if (is_loaded()) {
+		update_tod();
+	}
+}
+
 void EnvironmentState::set_time_of_day(double hhmm) {
+	time_of_day_ = fposmod(hhmm, kHhmmDay);
+	// The standalone home is the clock the tick publishes back: an owner
+	// setting the TOD (the authored curtime, a preview scrub) moves it too.
+	if (weather_is_standalone()) {
+		standalone_weather_.tod_fixed24 = hhmm_to_fixed24(time_of_day_);
+	}
+	if (is_loaded()) {
+		update_tod();
+	}
+}
+
+void EnvironmentState::set_render_time_of_day(double hhmm) {
 	time_of_day_ = fposmod(hhmm, kHhmmDay);
 	if (is_loaded()) {
 		update_tod();
@@ -69,6 +91,17 @@ void EnvironmentState::update_tod() {
 	if (tod_valid_) {
 		tod_ = interpolate_tod(config_->keyframes,
 				static_cast<float>(time_of_day_), config_->envscale);
+		// The overcast cross-fade (env #16): both tables interpolate, then the
+		// weather's overcast blend (read BEFORE its spring stepped this tick)
+		// lerps the .env colors toward the overcast table's
+		// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 ->
+		//  Environment_LerpKeyframeSet @ 0x57c3b0].
+		if (overcast_config_ != nullptr && !overcast_config_->keyframes.empty() &&
+				weather_live() && weather_->overcast_for_tod_q16 > 0) {
+			const TodState overcast = interpolate_tod(overcast_config_->keyframes,
+					static_cast<float>(time_of_day_), overcast_config_->envscale);
+			tod_ = blend_tod_states(tod_, overcast, weather_->overcast_for_tod_q16);
+		}
 	}
 	if (!weather_driven_ && tod_valid_) {
 		// Standalone (no weather tick): this state owns the current render
@@ -95,41 +128,61 @@ void EnvironmentState::update_tod() {
 		skyfog_color_rt_ = derive_skyfog_render_color(
 				fog_raw, tod_.skyfog, fog_level());
 	}
-	if (!weather_driven_) {
-		fog_distance_ = config_->fog_level;
-	}
 	// A TOD recompute can move any object-consumed value (weather-driven, the
 	// moving targets flow through the smoothers instead); the bump keeps
 	// material restamps tracking either way.
 	bump_env_generation();
 }
 
-// --- mission clock ---------------------------------------------------------
+// --- the mission clock ------------------------------------------------------
+
+void EnvironmentState::reset_standalone_weather(int wind_scale) {
+	bms::Header header{};
+	header.start_time = clock_start_q8_8_;
+	header.minutes_per_day = clock_minutes_per_day_;
+	world::WeatherSeed seed = config_ != nullptr
+			? weather_seed_from_config(*config_, header)
+			: weather_seed_from_config(Config{}, header);
+	seed.wind_scale = wind_scale;
+	standalone_weather_.seed(seed);
+	if (!clock_configured_) {
+		// No mission clock configured: a preview holds its render TOD (the
+		// authored curtime or the embedder's scrub) and does not run it.
+		standalone_weather_.tod_fixed24 = hhmm_to_fixed24(time_of_day_);
+		standalone_weather_.tod_advance_per_tick = 0;
+	}
+}
 
 void EnvironmentState::configure_mission_clock(int start_time_q8_8,
 		int minutes_per_day) {
-	clear_network_state();
-	mission_time_fixed24_ = tod_start_fixed24(start_time_q8_8);
-	mission_advance_per_tick_ = tod_advance_per_tick(minutes_per_day);
-	set_time_of_day(mission_start_time_hhmm(start_time_q8_8));
+	clock_start_q8_8_ = start_time_q8_8;
+	clock_minutes_per_day_ = minutes_per_day;
+	clock_configured_ = true;
+	// The standalone home takes the clock now (its other channels keep their
+	// state; a later reset re-seeds everything from the same numbers).
+	standalone_weather_.tod_fixed24 = static_cast<uint32_t>(tod_start_fixed24(start_time_q8_8)) %
+			world::WeatherState::kTodDayFixed24;
+	standalone_weather_.tod_advance_per_tick =
+			static_cast<uint32_t>(tod_advance_per_tick(minutes_per_day));
+	standalone_weather_.tod_minute_tickdown = world::WeatherState::kTodMinuteTicks;
+	if (weather_is_standalone()) {
+		sync_clock_from_weather();
+	}
 }
 
-double EnvironmentState::mission_start_time_hhmm(int start_time_q8_8) {
-	return fixed24_to_hhmm(tod_start_fixed24(start_time_q8_8));
+int EnvironmentState::mission_advance_per_tick() const {
+	return static_cast<int>(weather_->tod_advance_per_tick);
 }
 
 void EnvironmentState::advance_mission_clock(int ticks) {
-	if (ticks <= 0) {
+	if (ticks <= 0 || !weather_is_standalone()) {
 		return;
 	}
-	// Net receive writes Env_QuakeTicks, but retail's shared 62 Hz environment
-	// tick still owns the countdown between phase-2 samples.
-	if (network_environment_active_ && network_quake_ticks_ > 0) {
-		network_quake_ticks_ = std::max(0, network_quake_ticks_ - ticks);
+	world::WeatherTickEvents events;
+	for (int i = 0; i < ticks; ++i) {
+		standalone_weather_.tick_sim(nullptr, events);
 	}
-	mission_time_fixed24_ = tod_advance(
-			mission_time_fixed24_, ticks, mission_advance_per_tick_);
-	set_time_of_day(fixed24_to_hhmm(mission_time_fixed24_));
+	sync_clock_from_weather();
 }
 
 bool EnvironmentState::debug_set_mission_minute_of_day(double minute_of_day) {
@@ -137,10 +190,8 @@ bool EnvironmentState::debug_set_mission_minute_of_day(double minute_of_day) {
 			minute_of_day >= kClockMinutesPerDay) {
 		return false;
 	}
-	mission_time_fixed24_ = static_cast<int>(std::lround(
-			minute_of_day * static_cast<double>(kFixed24OneHour) /
-			kMinutesPerHour)) % kTodDayFixed24;
-	set_time_of_day(minute_of_day_to_hhmm(minute_of_day));
+	weather_->debug_set_time_of_day_minutes(minute_of_day);
+	sync_clock_from_weather();
 	return true;
 }
 
@@ -148,45 +199,48 @@ double EnvironmentState::mission_minute_of_day() const {
 	return hhmm_to_minute_of_day(time_of_day_);
 }
 
-// --- network phase-2 overrides ---------------------------------------------
-
-void EnvironmentState::apply_network_sample(const NetEnvSample &sample) {
-	network_environment_active_ = true;
-	network_fog_target_ = static_cast<float>(
-			std::clamp(sample.fog_dist, 0, 0xFFFF));
-	network_sky_speed_ = static_cast<float>(
-			std::clamp(sample.cloud_scroll, 0, 0xFF));
-	network_quake_ticks_ = std::clamp(sample.quake_ticks, 0, 0xFF);
-	network_precipitation_kind_ = std::clamp(sample.precipitation_kind, 0, 0xFF);
-	mission_time_fixed24_ =
-			(std::clamp(sample.tod_fixed, 0, 0xFFFF) << 13) % kTodDayFixed24;
-	set_time_of_day(fixed24_to_hhmm(mission_time_fixed24_));
+int EnvironmentState::mission_time_fixed24() const {
+	return static_cast<int>(weather_->tod_fixed24);
 }
 
-void EnvironmentState::clear_network_state() {
-	network_environment_active_ = false;
-	network_fog_target_ = 0.0f;
-	network_sky_speed_ = 0.0f;
-	network_quake_ticks_ = 0;
-	network_rain_current_ = 0.0f;
-	network_overcast_blend_ = 0.0f;
-	network_precipitation_kind_ = 0;
+double EnvironmentState::mission_start_time_hhmm(int start_time_q8_8) {
+	return fixed24_to_hhmm(tod_start_fixed24(start_time_q8_8));
 }
 
-int EnvironmentState::network_quake_ticks() const {
-	return network_environment_active_ ? network_quake_ticks_ : 0;
+// --- the weather-home reads --------------------------------------------------
+
+void EnvironmentState::sync_clock_from_weather() {
+	// A World home bound before its seed has no clock to publish (it must
+	// not replace the configured clock with 00:00); the standalone home's
+	// clock is always the owner's (configure_mission_clock / the seed).
+	if (!weather_is_standalone() && !weather_live()) {
+		return;
+	}
+	set_render_time_of_day(weather_->tod_hhmm());
 }
 
-float EnvironmentState::network_rain_current() const {
-	return network_environment_active_ ? network_rain_current_ : 0.0f;
+int EnvironmentState::quake_ticks() const {
+	return weather_live() ? static_cast<int>(weather_->quake_ticks) : 0;
+}
+
+float EnvironmentState::rain_current() const {
+	return weather_live()
+			? static_cast<float>(weather_->core.scalar_channels.rain_pct_fp) / 65536.0f
+			: 0.0f;
 }
 
 float EnvironmentState::overcast_blend() const {
-	return network_environment_active_ ? network_overcast_blend_ : 0.0f;
+	return weather_live()
+			? static_cast<float>(weather_->core.scalar_channels.overcast_fp) / 65536.0f
+			: 0.0f;
 }
 
-int EnvironmentState::network_precipitation_kind() const {
-	return network_environment_active_ ? network_precipitation_kind_ : 0;
+int EnvironmentState::precipitation_kind() const {
+	return weather_live() ? static_cast<int>(weather_->precipitation_kind) : 0;
+}
+
+bool EnvironmentState::raining() const {
+	return weather_live() && weather_->raining();
 }
 
 // --- HHMM conversions ------------------------------------------------------
@@ -206,6 +260,20 @@ double EnvironmentState::hhmm_to_minute_of_day(double hhmm) {
 double EnvironmentState::fixed24_to_hhmm(int value) {
 	return hours_to_hhmm(
 			static_cast<double>(value) / static_cast<double>(kFixed24OneHour));
+}
+
+uint32_t EnvironmentState::hhmm_to_fixed24(double hhmm) {
+	const double hours = hhmm_to_minute_of_day(hhmm) / kMinutesPerHour;
+	const double units = hours * static_cast<double>(kFixed24OneHour);
+	return static_cast<uint32_t>(std::llround(units)) %
+			static_cast<uint32_t>(kTodDayFixed24);
+}
+
+void EnvironmentState::ensure_standalone_weather_seeded(int wind_scale) {
+	if (!is_loaded() || standalone_weather_.valid) {
+		return;
+	}
+	reset_standalone_weather(wind_scale);
 }
 
 double EnvironmentState::hours_to_hhmm(double hours) {
@@ -462,18 +530,18 @@ void EnvironmentState::set_color_src_gain(const Rgb &value) {
 	}
 }
 
-// --- env #27 smoothed scalars ---------------------------------------------
+// --- the smoothed scalars (env #27) ------------------------------------------
 
 float EnvironmentState::fog_level() const {
-	if (fog_dist_smoothed_ >= 0.0f) {
-		return fog_dist_smoothed_;
+	if (weather_live()) {
+		return static_cast<float>(weather_->core.scalar_channels.fog_dist_fp) / 65536.0f;
 	}
 	return config_ != nullptr ? config_->fog_level : 1000.0f;
 }
 
 float EnvironmentState::fog_level_target() const {
-	if (network_environment_active_) {
-		return network_fog_target_;
+	if (weather_live()) {
+		return static_cast<float>(weather_->core.scalar_channels.fog_dist_target_fp) / 65536.0f;
 	}
 	// The parsed .env value — the spring target the weather tick chases.
 	return config_ != nullptr ? config_->fog_level : 1000.0f;
@@ -489,40 +557,39 @@ float EnvironmentState::fog_end_distance() const {
 }
 
 int EnvironmentState::fog_type() const {
+	// Env_FogType: the .env value at the seed, the `fogtype` WAC after
+	// [orig: @ 0x26c6808].
+	if (weather_live()) {
+		return weather_->fog_type;
+	}
 	return config_ != nullptr ? config_->fog_type : 2;
 }
 
 float EnvironmentState::sky_speed() const {
-	if (network_environment_active_) {
-		return network_sky_speed_;
+	if (weather_live()) {
+		return static_cast<float>(weather_->cloud_scroll_rate_target >> 10);
 	}
 	return config_ != nullptr ? config_->sky_speed : 15.0f;
 }
 
 float EnvironmentState::sky_height() const {
-	if (sky_height_smoothed_ >= 0.0f) {
-		return sky_height_smoothed_;
+	if (weather_live()) {
+		return static_cast<float>(weather_->core.scalar_channels.sky_height_fp) / 65536.0f;
 	}
 	return config_ != nullptr ? config_->sky_height : 175.0f;
 }
 
 float EnvironmentState::sky_height_target() const {
-	// The parsed .env value — the eighth-snap target.
+	if (weather_live()) {
+		return static_cast<float>(weather_->core.scalar_channels.sky_height_target_fp) / 65536.0f;
+	}
 	return config_ != nullptr ? config_->sky_height : 175.0f;
 }
 
-void EnvironmentState::set_smoothed_scalars(float fog_distance,
-		float sky_height, float sun_dim_pct, float rain_current,
-		float overcast_blend) {
-	const bool fog_changed = fog_dist_smoothed_ != fog_distance;
-	fog_dist_smoothed_ = fog_distance;
-	sky_height_smoothed_ = sky_height;
-	sun_dim_smoothed_ = sun_dim_pct;
-	network_rain_current_ = rain_current;
-	network_overcast_blend_ = overcast_blend;
-	if (fog_changed) {
-		bump_env_generation();
-	}
+float EnvironmentState::sun_dim_pct() const {
+	return weather_live()
+			? static_cast<float>(weather_->core.scalar_channels.sun_dim_fp) / 65536.0f
+			: 0.0f;
 }
 
 // --- typed value builders --------------------------------------------------
@@ -581,8 +648,6 @@ EnvShaderGlobals EnvironmentState::build_shader_globals(
 	globals.fog_end = fog.end;
 	globals.fog_start = fog.start;
 	globals.fog_type = fog.type;
-	globals.wind_sway_amount = 1.0f;
-	globals.wind_sway_phase = 0.0f;
 	return globals;
 }
 

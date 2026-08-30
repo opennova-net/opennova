@@ -2,6 +2,7 @@
 
 #include <runtime/devtools/demo_window.h>
 #include <runtime/devtools/entities_window.h>
+#include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/stats_window.h>
 #include <runtime/devtools/weapon_window.h>
@@ -37,6 +38,9 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	auto weapon = std::make_unique<WeaponWindow>();
 	weapon_window_ = weapon.get();
 	pass_.register_window(std::move(weapon));
+	auto environment = std::make_unique<EnvironmentWindow>();
+	environment_window_ = environment.get();
+	pass_.register_window(std::move(environment));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -99,5 +103,18 @@ uint64_t GameDevTools::weapon_definition_serial() const {
 bool GameDevTools::take_weapon_request(WeaponRequest &request) {
 	return weapon_window_->take_request(request);
 }
+
+void GameDevTools::set_environment_snapshot(const EnvironmentSnapshot &snapshot) {
+	environment_window_->set_snapshot(snapshot);
+}
+
+bool GameDevTools::needs_environment_snapshot() const {
+	return pass_.is_open() && environment_window_->open;
+}
+
+bool GameDevTools::take_environment_request(EnvironmentRequest &request) {
+	return environment_window_->take_request(request);
+}
+
 
 }  // namespace opennova::devtools
