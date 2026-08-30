@@ -117,7 +117,7 @@ public:
 	float get_cloud_uv_rate_per_second() const;
 	// Apply the scalar subset decoded from one S2C 0x0A phase-2 sample. Inputs
 	// are the narrowed wire units; engine/formats/env owns the exact reconstruction.
-	void apply_network_environment_sample(int p_fog_dist, int p_fog_accel,
+	void apply_wire_sample(int p_fog_dist, int p_fog_accel,
 			int p_rain_pct, int p_overcast);
 	// The smoothed scalar currents (world units / percent).
 	float get_fog_distance() const;

@@ -72,14 +72,21 @@ void MissionEnvironment::_bind_methods() {
 			D_METHOD("hhmm_to_minute_of_day", "hhmm"),
 			&MissionEnvironment::hhmm_to_minute_of_day);
 
-	ClassDB::bind_method(D_METHOD("apply_network_environment_sample", "sample"),
-			&MissionEnvironment::apply_network_environment_sample);
-	ClassDB::bind_method(D_METHOD("get_network_quake_ticks"),
-			&MissionEnvironment::get_network_quake_ticks);
-	ClassDB::bind_method(D_METHOD("get_network_rain_current"),
-			&MissionEnvironment::get_network_rain_current);
+	ClassDB::bind_method(D_METHOD("get_quake_ticks"),
+			&MissionEnvironment::get_quake_ticks);
+	ClassDB::bind_method(D_METHOD("get_rain_current"),
+			&MissionEnvironment::get_rain_current);
 	ClassDB::bind_method(D_METHOD("get_overcast_blend"),
 			&MissionEnvironment::get_overcast_blend);
+	ClassDB::bind_method(D_METHOD("get_precipitation_kind"),
+			&MissionEnvironment::get_precipitation_kind);
+	ClassDB::bind_method(D_METHOD("is_raining"), &MissionEnvironment::is_raining);
+	ClassDB::bind_method(D_METHOD("set_overcast_data", "data"),
+			&MissionEnvironment::set_overcast_data);
+	ClassDB::bind_method(D_METHOD("get_overcast_data"),
+			&MissionEnvironment::get_overcast_data);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "overcast_data", PROPERTY_HINT_RESOURCE_TYPE, "EnvFile"),
+			"set_overcast_data", "get_overcast_data");
 
 	ClassDB::bind_method(D_METHOD("set_weather_driven", "driven"),
 			&MissionEnvironment::set_weather_driven);
@@ -226,11 +233,6 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_sky_height);
 	ClassDB::bind_method(D_METHOD("get_sky_height_target"),
 			&MissionEnvironment::get_sky_height_target);
-	ClassDB::bind_method(
-			D_METHOD("set_smoothed_scalars", "fog_distance", "sky_height",
-					"sun_dim_pct", "rain_current", "overcast_blend"),
-			&MissionEnvironment::set_smoothed_scalars, DEFVAL(0.0f), DEFVAL(0.0f),
-			DEFVAL(0.0f));
 
 	ClassDB::bind_method(D_METHOD("get_sky_map1_tex"),
 			&MissionEnvironment::get_sky_map1_tex);
@@ -527,31 +529,33 @@ double MissionEnvironment::hhmm_to_minute_of_day(double p_hhmm) {
 
 // --- network phase-2 --------------------------------------------------------
 
-void MissionEnvironment::apply_network_environment_sample(
-		const Dictionary &p_sample) {
-	opennova::env::NetEnvSample sample;
-	sample.fog_dist = static_cast<int>(p_sample.get("fog_dist", 0));
-	sample.cloud_scroll = static_cast<int>(p_sample.get("cloud_scroll", 0));
-	sample.quake_ticks = static_cast<int>(p_sample.get("quake_ticks", 0));
-	sample.tod_fixed = static_cast<int>(p_sample.get("tod_fixed", 0));
-	sample.precipitation_kind =
-			static_cast<int>(p_sample.get("precipitation_kind", 0));
-	state_.apply_network_sample(sample);
-	if (state_.is_loaded()) {
-		_after_tod_update();
-	}
+int MissionEnvironment::get_quake_ticks() const {
+	return state_.quake_ticks();
 }
 
-int MissionEnvironment::get_network_quake_ticks() const {
-	return state_.network_quake_ticks();
-}
-
-float MissionEnvironment::get_network_rain_current() const {
-	return state_.network_rain_current();
+float MissionEnvironment::get_rain_current() const {
+	return state_.rain_current();
 }
 
 float MissionEnvironment::get_overcast_blend() const {
 	return state_.overcast_blend();
+}
+
+int MissionEnvironment::get_precipitation_kind() const {
+	return state_.precipitation_kind();
+}
+
+bool MissionEnvironment::is_raining() const {
+	return state_.raining();
+}
+
+void MissionEnvironment::set_overcast_data(const Ref<EnvFile> &p_data) {
+	overcast_data_ = p_data;
+	state_.set_overcast_config(
+			p_data.is_valid() ? &p_data->native_config() : nullptr);
+	if (state_.is_loaded()) {
+		_after_tod_update();
+	}
 }
 
 // --- weather split / NVG ----------------------------------------------------
@@ -913,14 +917,6 @@ float MissionEnvironment::get_sky_height() const {
 
 float MissionEnvironment::get_sky_height_target() const {
 	return state_.sky_height_target();
-}
-
-void MissionEnvironment::set_smoothed_scalars(float p_fog_distance,
-		float p_sky_height, float p_sun_dim_pct, float p_rain_current,
-		float p_overcast_blend) {
-	state_.set_smoothed_scalars(p_fog_distance, p_sky_height, p_sun_dim_pct,
-			p_rain_current, p_overcast_blend);
-	flush_publication();
 }
 
 Ref<Texture2D> MissionEnvironment::get_sky_map1_tex() const {

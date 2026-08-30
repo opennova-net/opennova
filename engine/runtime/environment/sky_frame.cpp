@@ -53,7 +53,7 @@ SkyFrameState build_sky_frame(const EnvironmentState &env) {
 
 void ScrollFallback::advance(double delta, float sky_speed) {
 	tick_credit += std::max(delta, 0.0) *
-			static_cast<double>(WeatherRuntime::kWeatherTickHz);
+			static_cast<double>(WeatherRuntime::kTicksPerSecond);
 	int tick_count = static_cast<int>(std::floor(tick_credit + 1.0e-9));
 	if (tick_count > 0) {
 		tick_credit = std::max(0.0, tick_credit - static_cast<double>(tick_count));

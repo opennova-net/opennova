@@ -62,6 +62,7 @@ add_library(${TARGET_NAME} SHARED
     env/sun_shadow.cpp
     env/water.cpp
     env/weather.cpp
+    env/precipitation.cpp
     env/weather_core.cpp
     env/water_core.cpp
     env/star_field.cpp

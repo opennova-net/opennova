@@ -105,7 +105,14 @@ int main() {
 		ch.fog_dist_target_fp = 500 << 16;
 		ch.sky_height_target_fp = 200 << 16;
 		ch.tick();
-		// fog spring: ((500-1024)<<16 + 31) >> 5 = -1073152 (arithmetic shift).
+		// fog spring: ((500-1024)<<16 + 31) >> 5 = -1073152 (arithmetic shift)
+		// lands at 1007.6 m, above the witnessed 1000 m FogDistMax, so the
+		// result clamps there [orig: Environment_MissionStartInit @ 0x57f873].
+		if (!expect(ch.fog_dist_fp == (1000 << 16), "fog dist takes the 1/32 spring step under the 1000 m max")) return 1;
+		ch.fog_max_fp = 0x40000000;
+		ch.fog_dist_fp = 1024 << 16;
+		ch.sky_height_fp = 175 << 16;
+		ch.tick();
 		if (!expect(ch.fog_dist_fp == (1024 << 16) - 1073152, "fog dist takes the witnessed 1/32 spring step")) return 1;
 		// sky eighth-snap: ((200-175)<<16 + 7) >> 3 = 204800.
 		if (!expect(ch.sky_height_fp == (175 << 16) + 204800, "sky height takes the witnessed 1/8 step")) return 1;
@@ -144,7 +151,7 @@ int main() {
 		startup.sky_height_target_fp = 211 << 16;
 		startup.rain_pct_target_fp = 0x00004000;
 		startup.overcast_target_fp = 0x00002000;
-		startup.snap_currents_to_targets();
+		startup.mission_start_init();
 		if (!expect(startup.fog_dist_fp == (733 << 16) &&
 					startup.sky_height_fp == (211 << 16) &&
 					startup.rain_pct_fp == 0x00004000 &&
@@ -568,12 +575,12 @@ int main() {
 		if (!expect(add.ground == 0x0A0B07u, "packed ground additive >> 10")) return 1;
 	}
 
-	// --- Rain factor + weather color block [orig: interpolate_weather_color
+	// --- Hit-dim factor + weather color block [orig: interpolate_weather_color
 	//     @ 0x57d9e0] --------------------------------------------------------
 	{
-		if (!expect(rain_blend_factor(0) == 0x8000, "rain factor at 0")) return 1;
-		if (!expect(rain_blend_factor(0x4000) == 0x4000, "rain factor at half")) return 1;
-		if (!expect(rain_blend_factor(0x8001) == 0, "rain factor over-range zeroes")) return 1;
+		if (!expect(hit_dim_factor(0) == 0x8000, "hit-dim factor at 0")) return 1;
+		if (!expect(hit_dim_factor(0x4000) == 0x4000, "hit-dim factor at half")) return 1;
+		if (!expect(hit_dim_factor(0x8001) == 0, "hit-dim factor over-range zeroes")) return 1;
 
 		// With identity modulator (byte 64), zero rain, zero additive, the
 		// block pipeline reduces EXACTLY to the ColorChannelState step.

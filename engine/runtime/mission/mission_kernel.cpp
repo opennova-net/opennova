@@ -650,14 +650,72 @@ bool MissionKernel::request_stance(int stance) {
 }
 
 void MissionKernel::tick_no_net(w::LogicTickPerf *perf) {
-	// The authority's per-tick environment advance (TOD, quake, the fog
-	// approach) precedes the logic tick, the order the dedicated host's golden
-	// captures pin; a joiner never advances (its sample is wire-fed).
-	world.network_env.advance_tick();
 	apply_player_input_pre_tick();
 	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay, perf);
+	// The weather tick follows the entity update [orig: Game_ProcessMainFrame
+	// @ 0x52674b -> @ 0x526774].
+	tick_weather();
 	run_local_player_post_tick();
 	resolve_new_infantry_adm_ids();
+}
+
+void MissionKernel::tick_weather() {
+	w::WeatherTickEvents events;
+	world.weather.tick_sim(&world, events);
+	if (events.thunder_a) world.weather_sounds.push_back(w::WeatherSoundEvent{0x10000, 0});
+	if (events.thunder_b) world.weather_sounds.push_back(w::WeatherSoundEvent{0xA0000, 128});
+	// The quake HARD-SETS the shake counter [orig: @ 0x57eb7d / @ 0x57ec29].
+	if (events.quake_shake_local) view.shake.counter = w::kShakeQuakeLevel;
+	if (weather_render != nullptr) weather_render->weather_render_tick(world.weather);
+}
+
+void MissionKernel::settle_weather_mission_start() {
+	world.weather.mission_start_init();
+	for (int i = 0; i < 255; ++i) tick_weather();
+}
+
+namespace {
+
+struct PrecipitationFloorContext {
+	MissionKernel *kernel = nullptr;
+};
+
+int32_t precipitation_terrain_height(void *ctx, int32_t x, int32_t y) {
+	MissionKernel *kernel = static_cast<PrecipitationFloorContext *>(ctx)->kernel;
+	if (!kernel->has_terrain()) return 0;
+	// [orig: Terrain_SampleHeightBilinear @ 0x6067b0] over the mission frame.
+	const float h = kernel->ground_height(static_cast<float>(x) / 65536.0f,
+			static_cast<float>(y) / 65536.0f);
+	return static_cast<int32_t>(h * 65536.0f);
+}
+
+bool precipitation_entity_hit(void *ctx, int32_t x, int32_t y, int32_t z_top,
+		int32_t z_bottom, int32_t &hit_z) {
+	MissionKernel *kernel = static_cast<PrecipitationFloorContext *>(ctx)->kernel;
+	if (kernel->world.collision == nullptr) return false;
+	// The ray from floor + 200 m down to the floor through the local player's
+	// candidate slice [orig: Physics_RaycastIntContext @ 0x5385e0 +
+	// raycast_proximity_entities @ 0x538350 — the end clips to the first hit].
+	const int32_t start[3] = {x, y, z_top};
+	int32_t end[3] = {x, y, z_bottom};
+	const w::EntityHandle hit = kernel->world.collision->clip_segment_to_nearest_collision(
+			kernel->world, kernel->world.cached.local_player, start, end);
+	if (!hit.valid()) return false;
+	hit_z = end[2];
+	return true;
+}
+
+} // namespace
+
+void MissionKernel::update_precipitation(int32_t cam_x, int32_t cam_y, int32_t cam_z) {
+	PrecipitationFloorContext ctx;
+	ctx.kernel = this;
+	env::PrecipitationFloorSampler sampler;
+	sampler.terrain_height = &precipitation_terrain_height;
+	sampler.entity_hit = &precipitation_entity_hit;
+	sampler.ctx = &ctx;
+	world.weather.precipitation.update(cam_x, cam_y, cam_z,
+			world.weather.core.scalar_channels.rain_pct_fp, world.env.water_z, sampler);
 }
 
 void MissionKernel::reset_local_player_input(int32_t look_heading_bam) {

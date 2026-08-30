@@ -9,24 +9,26 @@
 #include <godot_cpp/variant/vector4.hpp>
 
 #include <runtime/environment/weather_runtime.h>
+#include <runtime/world/weather_state.h>
 
 namespace godot {
 
 class MissionEnvironment;
+class Simulation;
 
-// The weather/light smoothing owner node — the ADR 0033 device leg over the
-// engine's env::WeatherRuntime (engine/runtime/environment), which owns the
-// witnessed embedding of the retail weather tick (the engine header
-// carries the cites):
-// the 62 Hz tick-credit accumulator, the mission reset epoch, the 255-tick
-// prewarm, the per-tick target-feed/snap/writeback sequence, and the typed
-// network snapshot/sample projection (the math cluster itself is
-// env::WeatherCore in engine/formats/env). This node keeps only device work:
-// the environment NodePath resolution, the _process hook, the iris-sample
+// The weather's render-owner node — the ADR 0033 device leg over the
+// engine's env::WeatherRuntime (engine/runtime/environment), the color half
+// of the retail weather tick over ONE weather home (world::WeatherState in
+// the Simulation's World on a mission, the runtime's private state
+// standalone; the engine headers carry the cites). Bound to a Simulation it
+// registers itself as the kernel's per-tick render owner (the sim legs run in
+// the kernel after every logic tick, then this node's color legs), seeds the
+// World's weather from the mission environment at load, and runs the
+// mission-start boundary. This node keeps only device work: the environment
+// NodePath resolution, the _process hook (standalone owners), the iris-sample
 // property the in-world shell stamps, and the opennova_* global shader
-// parameter pushes. Ported from weather.gd (2026-08-09 de-scripting);
-// RE record: docs/env/env-tod-re.md.
-class Weather : public Node3D {
+// parameter pushes. RE record: docs/env/env-tod-re.md.
+class Weather : public Node3D, private opennova::world::IWeatherRenderTick {
 	GDCLASS(Weather, Node3D)
 
 public:
@@ -44,6 +46,18 @@ public:
 	void set_iris_samples(const PackedInt32Array &p_samples);
 	PackedInt32Array get_iris_samples() const;
 
+	// --- the simulation binding (ADR 0042 d2/d3) ----------------------------
+	// Bind the World's weather home: the runtime attaches to it, the env's
+	// scalar/clock reads follow it, and the kernel calls this node's render
+	// legs after each sim tick. Null unbinds back to the private state.
+	void bind_simulation(Object *p_sim);
+	// The mission-start environment boundary: seed the World's weather from
+	// the loaded .env + the mission clock (the ONE derivation,
+	// env::weather_seed_from_config), the authority's eager WAC execution,
+	// the initializer + 255-tick settle (both roles), the baseline seal.
+	void run_mission_start_boundary(Object *p_sim, int p_start_time_q8_8,
+			int p_minutes_per_day);
+
 	void set_world_tick_driven(bool p_enabled);
 	void prepare_world_driven();
 	void prepare_autonomous();
@@ -60,36 +74,36 @@ public:
 	// carries the cites and the freeze contract).
 	void settle_exposure();
 
-	Dictionary get_network_environment_snapshot();
-	void apply_network_environment_sample(const Dictionary &p_sample);
-
-	// --- world-composer orchestration (ADR 0033; the witnessed sequencing
-	// lives in engine/runtime/environment weather_runtime.h) ---------------
-	// The world's weather leg: bank the render delta on the engine's
-	// recovered 62 Hz weather clock and run each due quantum's sequence —
-	// advance the integer mission clock, tick every weather block once, and
-	// on the authority advance + republish the network environment.
-	void advance_world_driven(double p_delta, Object *p_sim);
-	// Publish the live typed network snapshot onto the authority sim
-	// (no-op for joiners / without a loaded environment).
-	void push_network_environment(Object *p_sim);
-	// The mission-start environment boundary: T0 seed publication, authority
-	// WAC direct execution, the prewarm settle (local + network mirrors),
-	// the settled republication, and the baseline seal.
-	void run_mission_start_boundary(Object *p_sim);
-	// Drain one authoritative phase-2 join environment update (if any) into
-	// the weather/env owners. Joiner-only; render-frame safe (the sim owns
-	// the receive-revision cursor).
-	void apply_join_network_update(Object *p_sim);
+	// The probe/test view of the attached weather home in native units.
+	Dictionary get_weather_snapshot() const;
+	// A decoded phase-2 sample in WIRE units into the attached home's
+	// targets (the standalone test seam; a joiner's samples land in the
+	// engine bridge).
+	void apply_wire_sample(const Dictionary &p_sample);
 
 	void trigger_lightning_short();
 	void trigger_lightning_long();
+	// The WAC weather commands on the attached home: through the bound
+	// Simulation's command layer on a mission (ADR 0042 d5), directly on the
+	// standalone home otherwise (previews, fixtures). world::WeatherState
+	// carries the handler cites.
+	void command_fog_distance(int p_metres);
+	void command_move_fog(int p_metres, int p_seconds);
+	void command_rain(int p_percent, int p_seconds);
+	void command_snow(int p_percent, int p_seconds);
+	void command_overcast(int p_percent, int p_seconds);
+	void command_sky_speed(int p_rate);
+	void command_quake(int p_seconds);
+	void command_time_of_day_minutes(int p_minute_of_day);
+	void command_fog_type(int p_type);
 	void set_wind_duration(int p_seconds);
 	int get_wind_duration() const;
 
 	float get_sway_amount() const;
 	float get_sway_phase() const;
 	float get_lightning_intensity() const;
+	// Env_TerrainLightCombined packed 0x00RRGGBB — the precipitation color.
+	int get_terrain_light_combined_rgb() const;
 
 	Vector3 get_smooth_fill() const;
 	Vector3 get_smooth_sun() const;
@@ -120,7 +134,7 @@ public:
 	Vector4 get_water_uv_state(float p_cam_x, float p_cam_z,
 			float p_fog_distance) const;
 
-	// C++-only seam for sibling native appliers.
+	// C++-only seams for sibling native appliers.
 	opennova::env::WeatherRuntime &runtime() { return runtime_; }
 	const opennova::env::WeatherRuntime &runtime() const { return runtime_; }
 
@@ -129,13 +143,18 @@ public:
 	void advance_frame(double p_delta);
 
 	void _ready() override;
+	void _exit_tree() override;
 	void _process(double p_delta) override;
 
 protected:
 	static void _bind_methods();
 
 private:
+	// The kernel's per-tick render hook (world::IWeatherRenderTick).
+	void weather_render_tick(opennova::world::WeatherState &p_weather) override;
+
 	MissionEnvironment *_env_node() const;
+	Simulation *_bound_sim() const;
 	// Re-resolve the cached env node from environment_path_ (in-tree only).
 	// Deliberately separate from the setter: _ready re-resolves without
 	// re-assigning the stored path (NodePath self-assignment through the
@@ -149,6 +168,7 @@ private:
 	NodePath environment_path_;
 	opennova::env::WeatherRuntime runtime_;
 	ObjectID env_node_id_;
+	ObjectID sim_id_;
 	PackedInt32Array iris_samples_;
 };
 

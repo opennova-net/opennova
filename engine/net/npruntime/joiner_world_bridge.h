@@ -191,6 +191,10 @@ public:
 		std::function<void()> tick_view;
 		// The equipped-slot FSM pump (the bridge gates it on L's existence).
 		std::function<void()> tick_weapon;
+		// The weather tick after the local world tick (the kernel's ONE
+		// tick_weather: sim legs, thunder/shake events, the render owner's
+		// color legs) [orig: Game_ProcessMainFrame @ 0x526774].
+		std::function<void()> tick_weather;
 	};
 
 	// The joiner's per-frame pump. Retail dispatches received messages before
@@ -263,6 +267,7 @@ private:
 	FrameSignals run_client_net_frame(
 			const PumpContext &ctx, const PumpHooks &hooks);
 	void wire_frame_providers(const PumpContext &ctx, const PumpHooks &hooks);
+	void apply_weather_sample(const PumpContext &ctx);
 	void materialize_replica_world(
 			const PumpContext &ctx, const PumpHooks &hooks);
 	void spawn_and_arm_local_player(
@@ -309,6 +314,8 @@ private:
 	// valid handle; runtime.has_self_handle() carries validity independently.
 	uint16_t self_wire_handle_ = 0;
 	uint32_t now_tick_ = 0;
+	// The last S2C 0x0A phase-2 ENV revision folded into the weather home.
+	uint32_t weather_revision_seen_ = 0;
 
 	// ~1 Hz frozen-session tripwire state.
 	std::size_t last_gap_depth_ = 0;

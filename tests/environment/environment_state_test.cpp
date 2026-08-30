@@ -8,6 +8,8 @@
 #include <runtime/environment/sky_frame.h>
 #include <runtime/environment/water_frame.h>
 #include <runtime/environment/weather_runtime.h>
+#include <runtime/environment/weather_seed.h>
+#include <runtime/world/weather_state.h>
 #include <runtime/renderer/device_fog.h>
 #include <formats/env/env_celestial.h>
 #include <formats/env/env_weather.h>
@@ -72,30 +74,35 @@ int main() {
 	ok &= expect(
 			near(EnvironmentState::fixed24_to_hhmm(12 << 24), 1200.0f),
 			"12h fixed24 reads 12:00");
-	ok &= expect(near(EnvironmentState::mission_start_time_hhmm(0x0C80),
-						  1230.0f),
-			"Q8.8 12.5h widens to the 12:30 display clock");
 
-	// --- mission clock over the exact tod_clock increments ------------------
+	// --- the mission clock lives in the weather home ---------------------------
 	{
 		EnvironmentState env;
 		const opennova::env::Config cfg = make_config();
 		env.set_config(&cfg, true);
-		env.configure_mission_clock(0x0C00, 1440);
-		ok &= expect(env.mission_time_fixed24() == (12 << 24),
+		opennova::bms::Header header{};
+		header.start_time = 0x0C00;
+		header.minutes_per_day = 1440;
+		opennova::world::WeatherState weather;
+		weather.seed(opennova::env::weather_seed_from_config(cfg, header));
+		env.bind_weather(&weather);
+		ok &= expect(weather.tod_fixed24 == (12u << 24),
 				"the Q8.8 noon start widens into the 8.24 accumulator");
-		const int per_tick = env.mission_advance_per_tick();
-		ok &= expect(per_tick == 0x18000000 / (3720 * 1440),
+		const uint32_t per_tick = weather.tod_advance_per_tick;
+		ok &= expect(per_tick == 0x18000000u / (3720u * 1440u),
 				"the witnessed per-tick increment");
-		env.advance_mission_clock(5);
-		ok &= expect(env.mission_time_fixed24() == (12 << 24) + 5 * per_tick,
+		opennova::world::WeatherTickEvents events;
+		for (int i = 0; i < 5; ++i) weather.tick_sim(nullptr, events);
+		ok &= expect(weather.tod_fixed24 == (12u << 24) + 5u * per_tick,
 				"five ticks advance exactly five increments");
-		ok &= expect(env.debug_set_mission_minute_of_day(750.0f),
-				"in-range debug minute accepted");
-		ok &= expect(!env.debug_set_mission_minute_of_day(1440.0f),
-				"a full day is out of the debug slider range");
-		ok &= expect(near(env.mission_minute_of_day(), 750.0f),
-				"the debug write moves the minute view");
+		env.sync_clock_from_weather();
+		ok &= expect(near(env.time_of_day(), EnvironmentState::fixed24_to_hhmm(
+										  static_cast<int>(weather.tod_fixed24)), 0.01f),
+				"the env clock follows the weather clock");
+		weather.command_time_of_day_minutes(750);
+		env.sync_clock_from_weather();
+		ok &= expect(near(EnvironmentState::hhmm_to_minute_of_day(env.time_of_day()), 750.0f, 0.01f),
+				"the TOD command moves the minute view");
 	}
 
 	// --- the weather-driven targets/currents split --------------------------
@@ -196,35 +203,33 @@ int main() {
 		const opennova::env::Config cfg = make_config();
 		env.set_config(&cfg, true);
 		env.set_time_of_day(1200.0f);
-		env.configure_mission_clock(0x0C00, 1440);
 		WeatherRuntime weather;
 		weather.prepare_world_driven(&env);
 		ok &= expect(env.is_weather_driven(),
 				"the reset epoch claims the currents");
+		ok &= expect(weather.standalone() && env.weather() == &weather.state(),
+				"a runtime without a simulation binds its private weather home");
 		ok &= expect(near(weather.core().scalar_channels.fog_dist_fp / 65536.0f,
 							  640.0f),
-				"mission init snaps scalar currents to the authored targets");
+				"the seed snaps scalar currents to the authored targets");
 		// Snap-to-targets seeded the blocks [orig: @ 0x57d1e0].
 		ok &= expect(rgb_near(weather.smooth_ceiling(),
 							  env.ceiling_color_target(), 1.0f / 255.0f),
 				"the color snap lands on the scaled targets");
-		const int start_fixed24 = env.mission_time_fixed24();
+		const uint32_t start_fixed24 = weather.state().tod_fixed24;
 		weather.prewarm_mission_start(&env);
-		ok &= expect(env.mission_time_fixed24() ==
-						start_fixed24 +
-								255 * env.mission_advance_per_tick(),
+		ok &= expect(weather.state().tod_fixed24 ==
+						start_fixed24 + 255u * weather.state().tod_advance_per_tick,
 				"prewarm advances exactly 255 weather ticks "
-				"[orig: sub_57F1E0 @ 0x57f878]");
-		opennova::env::NetEnvSnapshot snapshot;
-		ok &= expect(weather.network_snapshot(&env, snapshot),
-				"a loaded env backs the snapshot");
-		ok &= expect(snapshot.fog_target_q16 == 640 << 16,
+				"[orig: Environment_MissionStartInit @ 0x57f878]");
+		ok &= expect(weather.state().fog_target_q16() == (640 << 16),
 				"fog target packs q16");
-		ok &= expect(snapshot.cloud_scroll_rate_target ==
-						static_cast<int>(std::lround(cfg.sky_speed * 1024.0f)),
+		ok &= expect(weather.state().cloud_scroll_rate_target ==
+						static_cast<uint32_t>(std::lround(cfg.sky_speed * 1024.0f)),
 				"cloud scroll rate packs sky_speed << 10");
-		ok &= expect(snapshot.tod_fixed24 == env.mission_time_fixed24(),
-				"the snapshot carries the exact integer clock");
+		ok &= expect(near(env.time_of_day(), EnvironmentState::fixed24_to_hhmm(
+										  static_cast<int>(weather.state().tod_fixed24)), 0.01f),
+				"the env clock reads the exact integer clock");
 	}
 
 	// --- settle_exposure: the frozen-fixture chase fixed point --------------
@@ -237,7 +242,6 @@ int main() {
 		const opennova::env::Config cfg = make_config();
 		env.set_config(&cfg, true);
 		env.set_time_of_day(1200.0f);
-		env.configure_mission_clock(0x0C00, 1440);
 		WeatherRuntime weather;
 		weather.prepare_world_driven(&env);
 		ok &= expect(near(weather.color_src_gain().r, 1.0f) &&
@@ -248,7 +252,7 @@ int main() {
 		weather.set_iris_samples(samples, 3);
 		const opennova::env::CloudScrollState scroll_before =
 				weather.core().cloud_scroll;
-		const int clock_before = env.mission_time_fixed24();
+		const uint32_t clock_before = weather.state().tod_fixed24;
 		weather.settle_exposure(&env);
 		// Expected: the outdoor iris gain over the byte-quantized snapped
 		// blocks [orig: terrain_sector_compute_lighting @ 0x5c7550;
@@ -273,7 +277,7 @@ int main() {
 						1.0f,
 				"settle_exposure lands the modulator on the iris target "
 				"(the 12.20 chase may truncate one LSB short)");
-		ok &= expect(env.mission_time_fixed24() == clock_before,
+		ok &= expect(weather.state().tod_fixed24 == clock_before,
 				"the settle may not advance the mission clock");
 		ok &= expect(weather.core().cloud_scroll.rate == scroll_before.rate &&
 						weather.core().cloud_scroll.acc_l1_u ==
@@ -418,10 +422,11 @@ int main() {
 		EnvironmentState env;
 		const opennova::env::Config cfg = make_config();
 		env.set_config(&cfg, true);
-		env.set_time_of_day(2200.0f); // night: the moon owns the light
+		env.configure_mission_clock(22 << 8, 1440); // night: the moon owns the light
 		ok &= expect(env.is_night_phase(), "22:00 reads as night");
 		WeatherRuntime weather;
 		weather.prepare_world_driven(&env);
+		ok &= expect(env.is_night_phase(), "the standalone weather home keeps the configured clock");
 		const opennova::env::WeatherShaderGlobals globals =
 				opennova::env::build_weather_shader_globals(env, weather);
 		const opennova::env::Vec3 light = env.light_direction();
@@ -477,11 +482,10 @@ int main() {
 		cfg.fog_type = 2;
 		env.set_config(&cfg, true);
 		env.set_time_of_day(1200.0f);
-		opennova::env::NetEnvSample sample;
-		sample.fog_dist = 640;
-		sample.tod_fixed = 0x8000;
-		env.apply_network_sample(sample);
-		env.set_smoothed_scalars(640.0f, 175.0f, 0.0f, 0.0f, 0.5f);
+		WeatherRuntime weather;
+		weather.prepare_world_driven(&env);
+		weather.state().core.scalar_channels.fog_dist_fp = 640 << 16;
+		weather.state().core.scalar_channels.overcast_fp = 0x8000;
 		ok &= expect(near(env.overcast_blend(), 0.5f), "overcast 0.5 is live");
 		const float device_end = env.fog_end_distance();
 		ok &= expect(near(device_end, 640.0f * 0.75f),
@@ -520,7 +524,7 @@ int main() {
 				"overcast-scaled device end");
 	}
 
-	// --- the 62 Hz autonomous accumulator clamp ------------------------------
+	// --- the 62.5 Hz autonomous accumulator clamp ----------------------------
 	{
 		EnvironmentState env;
 		const opennova::env::Config cfg = make_config();
@@ -530,8 +534,13 @@ int main() {
 		weather.prepare_autonomous(&env);
 		ok &= expect(!weather.world_tick_driven(),
 				"autonomous mode leaves the render accumulator armed");
-		// A huge stall clamps at 31 catch-up ticks and drops the credit.
+		// A huge stall clamps at 31 catch-up ticks and drops the credit; the
+		// private state's clock moves with them.
+		const uint32_t before = weather.state().tod_fixed24;
 		weather.process_delta(&env, 10.0f);
+		ok &= expect(weather.state().tod_fixed24 ==
+						before + 31u * weather.state().tod_advance_per_tick,
+				"the autonomous accumulator runs 31 full ticks on a stall");
 		weather.set_world_tick_driven(true);
 		ok &= expect(weather.world_tick_driven(), "world-driven flips on");
 	}

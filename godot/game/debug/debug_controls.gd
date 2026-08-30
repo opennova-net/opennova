@@ -881,6 +881,115 @@ func _register_runtime_rows() -> void:
 		weather.trigger_lightning_long()
 		return _action_result(null)
 
+	# The WAC weather commands (world::WeatherState carries the handler cites),
+	# each on the Weather node's command seam: the bound Simulation's command
+	# layer on a mission, the standalone home otherwise. Args mirror the WAC
+	# signatures.
+	var rain_row := _action(&"environment_rain", &"Environment", "Rain",
+			"rain(percent, seconds): rain percent over a transition.",
+			TARGET_WEATHER, OWNER_ENGINE)
+	_authoritative(rain_row)
+	rain_row.invoke = func(args: Array) -> Dictionary:
+		var weather := _weather()
+		if weather == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if args.size() < 2:
+			return _action_error(ERR_INVALID_PARAMETER)
+		weather.command_rain(int(args[0]), int(args[1]))
+		return _action_result(null)
+
+	var snow_row := _action(&"environment_snow", &"Environment", "Snow",
+			"snow(percent, seconds): snow percent over a transition.",
+			TARGET_WEATHER, OWNER_ENGINE)
+	_authoritative(snow_row)
+	snow_row.invoke = func(args: Array) -> Dictionary:
+		var weather := _weather()
+		if weather == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if args.size() < 2:
+			return _action_error(ERR_INVALID_PARAMETER)
+		weather.command_snow(int(args[0]), int(args[1]))
+		return _action_result(null)
+
+	var overcast_row := _action(&"environment_overcast", &"Environment", "Overcast",
+			"overcast(percent, seconds): overcast blend over a transition.",
+			TARGET_WEATHER, OWNER_ENGINE)
+	_authoritative(overcast_row)
+	overcast_row.invoke = func(args: Array) -> Dictionary:
+		var weather := _weather()
+		if weather == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if args.size() < 2:
+			return _action_error(ERR_INVALID_PARAMETER)
+		weather.command_overcast(int(args[0]), int(args[1]))
+		return _action_result(null)
+
+	var fog_distance_row := _action(&"environment_fog_distance", &"Environment", "Fog distance",
+			"fogdist(metres): the fog distance target (2 m .. the 1024 m reference).",
+			TARGET_WEATHER, OWNER_ENGINE)
+	_authoritative(fog_distance_row)
+	fog_distance_row.invoke = func(args: Array) -> Dictionary:
+		var weather := _weather()
+		if weather == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if args.size() < 1:
+			return _action_error(ERR_INVALID_PARAMETER)
+		weather.command_fog_distance(int(args[0]))
+		return _action_result(null)
+
+	var move_fog_row := _action(&"environment_move_fog", &"Environment", "Move fog",
+			"movefog(metres, seconds): the fog distance target over a transition.",
+			TARGET_WEATHER, OWNER_ENGINE)
+	_authoritative(move_fog_row)
+	move_fog_row.invoke = func(args: Array) -> Dictionary:
+		var weather := _weather()
+		if weather == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if args.size() < 2:
+			return _action_error(ERR_INVALID_PARAMETER)
+		weather.command_move_fog(int(args[0]), int(args[1]))
+		return _action_result(null)
+
+	var sky_speed_row := _action(&"environment_sky_speed", &"Environment", "Sky speed",
+			"skyspeed(rate): the cloud scroll rate target.",
+			TARGET_WEATHER, OWNER_ENGINE)
+	_authoritative(sky_speed_row)
+	sky_speed_row.invoke = func(args: Array) -> Dictionary:
+		var weather := _weather()
+		if weather == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if args.size() < 1:
+			return _action_error(ERR_INVALID_PARAMETER)
+		weather.command_sky_speed(int(args[0]))
+		return _action_result(null)
+
+	var quake_row := _action(&"environment_quake", &"Environment", "Quake",
+			"quake(seconds): the earthquake jitter duration.",
+			TARGET_WEATHER, OWNER_ENGINE)
+	_authoritative(quake_row)
+	quake_row.invoke = func(args: Array) -> Dictionary:
+		var weather := _weather()
+		if weather == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if args.size() < 1:
+			return _action_error(ERR_INVALID_PARAMETER)
+		weather.command_quake(int(args[0]))
+		return _action_result(null)
+
+	var fog_type_row := _action(&"environment_fog_type", &"Environment", "Fog type",
+			"fogtype(type): the fog model 0..3.",
+			TARGET_WEATHER, OWNER_ENGINE)
+	_authoritative(fog_type_row)
+	fog_type_row.invoke = func(args: Array) -> Dictionary:
+		var weather := _weather()
+		if weather == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if args.size() < 1:
+			return _action_error(ERR_INVALID_PARAMETER)
+		weather.command_fog_type(int(args[0]))
+		return _action_result(null)
+
+
 
 ## The controls scripted runs drive over MCP in place of the retired NW_*
 ## environment hooks (ADR 0041): the deploy pick, the viewmodel A/B rig, the

@@ -4,6 +4,7 @@
 
 #include <runtime/world/entity.h>
 #include <runtime/world/vehicle_mount.h> // SeatSelectionMode default args
+#include <runtime/world/weather_state.h>  // WeatherColorTarget
 
 // EntityCommands: the shared host-authoritative command layer. Split from
 // the world.h umbrella (W3-7); World holds it by value and world.h
@@ -72,6 +73,29 @@ public:
     // Write the primary weapon slot's clip/reserve counts (retail's signed
     // i16 words). False when the handle resolves no registry row.
     bool set_entity_weapon_ammo(EntityHandle h, int32_t clip, int32_t reserve);
+
+    // --- the WAC weather handlers (world::WeatherState carries the cites) ---
+    // Every environment command lands here: the VM's handlers, the BMS
+    // actions, the F3 window and the MCP rows all mutate the ONE weather home
+    // through these (ADR 0042 d5), which also keep the observable EnvState
+    // mirror the behavior tests read.
+    void set_fog_type(int32_t type);                       // fogtype
+    void set_fog_distance(int32_t metres);                 // fogdist
+    void move_fog(int32_t metres, int32_t seconds);        // movefog
+    void set_rain(int32_t percent, int32_t seconds);       // rain
+    void set_snow(int32_t percent, int32_t seconds);       // snow
+    void set_overcast(int32_t percent, int32_t seconds);   // overcast
+    void set_sky_speed(int32_t rate);                      // skyspeed
+    void set_sky_height(int32_t height_raw);               // skyheight
+    void quake(int32_t seconds);                           // quake
+    void set_time_of_day_minutes(int32_t minute_of_day);   // TOD
+    void sun_fade(int32_t percent, int32_t seconds);       // sunfade
+    void set_color_fade(int32_t seconds);                  // colorfade
+    void set_lightning_color(uint32_t rgb);                // lightning
+    void lightning_flash();                                // flash
+    void lightning_far_flash();                            // farflash
+    void set_weather_color(WeatherColorTarget target, uint32_t rgb); // sun/sky/ground/floor/ceiling/cloud/fog/skyfog/gain
+    void set_wind_scale(int32_t value);                    // the `wind` named value
 
     // --- queries ---
     bool ssn_exists(uint16_t ssn) const;

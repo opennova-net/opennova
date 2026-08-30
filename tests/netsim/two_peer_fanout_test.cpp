@@ -521,15 +521,15 @@ bool run_0a_subblock_phase_cycle() {
 
 
 	// Nontrivial engine-native values prove phase 2 is data-driven rather than a fixed map table.
-	world.network_env.valid = true;
-	world.network_env.fog_target_q16 = 0x01230000u;
-	world.network_env.fog_accel_clamp = 0x00123456u;
-	world.network_env.tod_fixed24 = (0x1234u << 13) - 0x1000u;
-	world.network_env.quake_ticks = 0x012Cu;
-	world.network_env.cloud_scroll_rate_target = 0x0002ABCDu;
-	world.network_env.rain_pct_current_q16 = 0x000056FFu;
-	world.network_env.overcast_blend_q16 = 0x000078AAu;
-	world.network_env.precipitation_kind = 0x1234569Au;
+	world.weather.valid = true;
+	world.weather.core.scalar_channels.fog_dist_target_fp = 0x01230000;
+	world.weather.core.scalar_channels.fog_step_fp = 0x00123456;
+	world.weather.tod_fixed24 = (0x1234u << 13) - 0x1000u;
+	world.weather.quake_ticks = 0x012Cu;
+	world.weather.cloud_scroll_rate_target = 0x0002ABCDu;
+	world.weather.core.scalar_channels.rain_pct_fp = 0x000056FF;
+	world.weather.core.scalar_channels.overcast_fp = 0x000078AA;
+	world.weather.precipitation_kind = 0x1234569Au;
 	// The phase-0 writer truncates the seconds dword to its low wire byte.
 	// [orig: NetPacket_WritePlayerState @0x4FF82D..0x4FF837]
 	world.preround_delay_seconds = 0x123u;

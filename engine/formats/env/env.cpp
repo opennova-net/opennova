@@ -454,6 +454,45 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	return true;
 }
 
+namespace {
+
+Rgb lerp_rgb_bytes(const Rgb &a, const Rgb &b, int fraction_fp) {
+	// Both inputs are already-quantized engine bytes (envscale applied at
+	// interpolation), so the lerp runs at scale 1.
+	return lerp_rgb_quantized(a, b, fraction_fp, 1.0f);
+}
+
+} // namespace
+
+TodState blend_tod_states(const TodState &env_state, const TodState &overcast_state,
+		int overcast_blend_fp) {
+	// [orig: Environment_LerpKeyframeSet @ 0x57c3b0] — fractions above 63356
+	// snap to 1.0 (the transposed-65536 typo), negatives to 0.
+	int fraction = overcast_blend_fp;
+	if (fraction < 0) {
+		fraction = 0;
+	} else if (fraction > 63356) {
+		fraction = 0x10000;
+	}
+	if (fraction == 0) {
+		return env_state;
+	}
+	TodState out;
+	out.sun = lerp_rgb_bytes(env_state.sun, overcast_state.sun, fraction);
+	out.ground = lerp_rgb_bytes(env_state.ground, overcast_state.ground, fraction);
+	out.fog = lerp_rgb_bytes(env_state.fog, overcast_state.fog, fraction);
+	out.sky = lerp_rgb_bytes(env_state.sky, overcast_state.sky, fraction);
+	out.moon = lerp_rgb_bytes(env_state.moon, overcast_state.moon, fraction);
+	out.skyfog = lerp_rgb_bytes(env_state.skyfog, overcast_state.skyfog, fraction);
+	out.skybase = lerp_rgb_bytes(env_state.skybase, overcast_state.skybase, fraction);
+	out.skybright = lerp_rgb_bytes(env_state.skybright, overcast_state.skybright, fraction);
+	out.skyhighlight = lerp_rgb_bytes(env_state.skyhighlight, overcast_state.skyhighlight, fraction);
+	out.cloudbase = lerp_rgb_bytes(env_state.cloudbase, overcast_state.cloudbase, fraction);
+	out.cloudhighlight = lerp_rgb_bytes(env_state.cloudhighlight, overcast_state.cloudhighlight, fraction);
+	out.cloudedge = lerp_rgb_bytes(env_state.cloudedge, overcast_state.cloudedge, fraction);
+	return out;
+}
+
 TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, float envscale) {
 	// Engine-faithful per-tick interpolation. Parameter space is 16.16 HOURS
 	// (a day = 0x180000), bracketing and fraction are integer math

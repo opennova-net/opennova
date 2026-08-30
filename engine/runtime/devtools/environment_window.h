@@ -1,0 +1,87 @@
+// The Environment window (ADR 0042 d6): the retail environment debug page's
+// rows [orig: Debug_DrawEnvironmentValues @ 0x4ef000 — "Script & Env Values",
+// two columns at x 10 / 200] over the EnvironmentSnapshot the embedder pushes,
+// plus a control strip whose every action is one of the WAC weather commands,
+// leaving as typed EnvironmentRequests the embedder drains into the ONE
+// command layer (world::EntityCommands).
+//
+// The window holds only the pushed value record — it never reaches into a
+// live World or into Godot. Visibility-armed: while hidden it drops its
+// snapshot and the embedder (gated on GameDevTools::needs_environment_snapshot)
+// stops building new ones. Rows are formatted once per push (the 0.25 s
+// cadence below); a frame between pushes only re-emits cached strings.
+#pragma once
+
+#include <runtime/devtools/environment_request.h>
+#include <runtime/devtools/environment_snapshot.h>
+#include <runtime/devtools/imgui_pass.h>
+
+#include <array>
+#include <cstdint>
+#include <deque>
+#include <string>
+
+namespace opennova::devtools {
+
+class EnvironmentWindow : public Window {
+public:
+	// Seconds per pushed snapshot: the springs move per tick, so the page
+	// refreshes twice as often as the Stats/Entities readings.
+	static constexpr double kRefreshSeconds = 0.25;
+	// The retail page's row labels, in its two-column order.
+	static constexpr int kRowCount = 30;
+
+	const char *title() const override { return "Environment"; }
+	InitialDockPlacement initial_dock_placement() const override {
+		return InitialDockPlacement::Right;
+	}
+	void draw(ImGuiPass &pass, uint64_t frame_index) override;
+	void on_visibility(bool visible) override;
+
+	// The pushed record, by value; an invalid snapshot clears the page.
+	void set_snapshot(const EnvironmentSnapshot &snapshot);
+	// (pass open && window open): the embedder skips building snapshots
+	// nobody shows.
+	bool wants_snapshot() const { return shown_; }
+
+	// The typed request queue the embedder drains. enqueue_request is the one
+	// path the drawn controls feed — and the headless test seam.
+	void enqueue_request(const EnvironmentRequest &request);
+	bool take_request(EnvironmentRequest &request);
+
+	// The formatted page, for tests and probes (the StatsWindow row-text
+	// seam): row i is the i-th retail label, "Label: value".
+	int row_count() const;
+	const char *row_text(int row) const;
+	bool snapshot_valid() const { return snapshot_.valid; }
+
+	// The control strip's edit seeds (tests read what a click would send).
+	int32_t rain_percent_edit() const { return rain_pct_edit_; }
+	int32_t transition_seconds_edit() const { return seconds_edit_; }
+
+private:
+	void format_rows();
+	void draw_rows();
+	void draw_controls();
+
+	EnvironmentSnapshot snapshot_{};
+	std::array<std::string, kRowCount> rows_{};
+	bool shown_ = false;
+	std::deque<EnvironmentRequest> requests_;
+	// The control strip's edit state, seeded from the pushed record on the
+	// first valid push so an untouched Apply is a no-op-shaped write.
+	bool seeded_ = false;
+	int32_t rain_pct_edit_ = 0;
+	int32_t overcast_pct_edit_ = 0;
+	int32_t seconds_edit_ = 5;
+	int32_t fog_metres_edit_ = 1000;
+	int32_t sky_speed_edit_ = 0;
+	int32_t quake_seconds_edit_ = 5;
+	int32_t minute_edit_ = 720;
+	int32_t fog_type_edit_ = 2;
+	int32_t sun_fade_pct_edit_ = 0;
+	int32_t color_fade_seconds_edit_ = 0;
+	int32_t wind_edit_ = 256;
+};
+
+}  // namespace opennova::devtools

@@ -135,6 +135,7 @@ enum class Builtin : uint32_t {
     AccuracySpread = 14, // writable AI error multiplier [orig: @0xC6EAE8, read @0x4bc5ea]
     Fallmps = 15,        // writable fall-damage tolerance [orig: @0xC6EAE4, read @0x4bf839 /
                          //  @0x4b7d13; seeded 13 by WacScript_FreeAll @0x4f638b]
+    Night = 16,          // Env_IsNightPhase @0x26c645c (the `night` row of the table @0x82EEF0)
 };
 
 } // namespace opennova::wac

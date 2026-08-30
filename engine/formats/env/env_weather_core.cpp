@@ -33,16 +33,18 @@ float WeatherCore::lightning_intensity() const {
 void WeatherCore::tick(uint32_t fill_target, uint32_t sun_target,
 		uint32_t fog_target, uint32_t sky_target, uint32_t lightning_packed,
 		float sky_speed) {
-	fill_block.target = fill_target;
-	sun_block.target = sun_target;
-	fog_block.target = fog_target;
-	sky_block.target = sky_target;
+	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0] — the standalone
+	// owner has no entity pools, so the quake seam between the two sim legs
+	// is empty here; rate_target = sky_speed << 10, the atol parse scale
+	// [orig: TimeOfDay_ParseProperty @ 0x57cc0d].
+	tick_sim_head();
+	tick_sim_tail(lightning_packed, static_cast<int>(sky_speed) << 10);
+	tick_render(fill_target, sun_target, fog_target, sky_target);
+}
 
-	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0] tick order: the
-	// oscillator, rain fade, the lightning sequencers (whose epoch hits
-	// rewrite the additive slots via Environment_SetLightningFlash
-	// @ 0x57d320 — sky >> 8, fog >> 9, ground >> 10, the directional slot
-	// zeroed), then every color block's step/additive/modulate pipeline.
+void WeatherCore::tick_sim_head() {
+	// [orig: @ 0x57e9fc..0x57eaed] the oscillator, then [orig: @ 0x57eaf9]
+	// the hit-dim fade.
 	oscillator.tick();
 	// Authoring extension (see header): only an ARMED, expired gust decays.
 	if (wind_duration_ticks > 0) {
@@ -55,12 +57,13 @@ void WeatherCore::tick(uint32_t fill_target, uint32_t sun_target,
 			wind_armed = false;
 		}
 	}
-	rain.tick();
-	// The scalar spring channels step between the sequencers and the color
-	// blocks — the witnessed in-tick position [orig: the scalar tail
-	// @ 0x57edd7..0x57ef92 runs before the 16 interpolate_weather_color
-	// calls @ 0x57ef97..] (env #27).
-	scalar_channels.tick();
+	hit_dim.tick();
+}
+
+void WeatherCore::tick_sim_tail(uint32_t lightning_packed, int cloud_rate_target) {
+	// The lightning sequencers, whose epoch hits rewrite the additive slots
+	// via Environment_SetLightningFlash @ 0x57d320 — sky >> 8, fog >> 9,
+	// ground >> 10, the directional slot zeroed [orig: @ 0x57ec6f..0x57edc4].
 	if (lightning.tick()) {
 		const LightningAdditivesPacked additives = lightning_additives_packed(
 				lightning_packed & 0xFFFFFFu, lightning.level);
@@ -70,24 +73,36 @@ void WeatherCore::tick(uint32_t fill_target, uint32_t sun_target,
 		fill_block.additive = additives.ground;
 		sun_block.additive = 0;
 	}
+	// The scalar springs [orig: @ 0x57ede2..0x57ef92] with the cloud-scroll
+	// rate ramp between the sky-height and rain channels [orig: @ 0x57eecc];
+	// the channels are independent, so the ramp runs after the set.
+	scalar_channels.tick();
+	cloud_scroll.tick_rate(cloud_rate_target);
+}
+
+void WeatherCore::tick_render(uint32_t fill_target, uint32_t sun_target,
+		uint32_t fog_target, uint32_t sky_target) {
+	fill_block.target = fill_target;
+	sun_block.target = sun_target;
+	fog_block.target = fog_target;
+	sky_block.target = sky_target;
 	// The iris modulator chain (env #17, REN-5): modulator-2 then the
 	// modulator tick FIRST, then every color block modulates against the
 	// modulator's fresh render color — the witnessed same-tick order
 	// [orig: Environment_UpdateWeatherTick block sequence @ 0x57ef97..
 	//  0x57f03c: 0x26c6678 modulator2, 0x26c6644 modulator, then the color
-	//  blocks]. Rain enters as the witnessed per-block blend factor.
-	modulator_chain.tick(rain.intensity);
+	//  blocks]. The hit dim enters as the witnessed per-block blend factor.
+	modulator_chain.tick(hit_dim.intensity);
 	const uint32_t modulator_packed = modulator_chain.render_color();
-	sun_block.tick(modulator_packed, rain.intensity);
-	sky_block.tick(modulator_packed, rain.intensity);
-	fill_block.tick(modulator_packed, rain.intensity);
-	fog_block.tick(modulator_packed, rain.intensity);
-	sky_color_blocks.tick_skyfog(modulator_packed, rain.intensity);
-	sky_color_blocks.tick_statics(modulator_packed, rain.intensity);
-	sky_color_blocks.tick_dome(modulator_packed, rain.intensity);
-
+	sun_block.tick(modulator_packed, hit_dim.intensity);
+	sky_block.tick(modulator_packed, hit_dim.intensity);
+	fill_block.tick(modulator_packed, hit_dim.intensity);
+	fog_block.tick(modulator_packed, hit_dim.intensity);
+	sky_color_blocks.tick_skyfog(modulator_packed, hit_dim.intensity);
+	sky_color_blocks.tick_statics(modulator_packed, hit_dim.intensity);
+	sky_color_blocks.tick_dome(modulator_packed, hit_dim.intensity);
 	// The tick's tail [orig: accumulators @ 0x57f1a5..0x57f1d1].
-	tick_cloud_scroll(sky_speed);
+	cloud_scroll.tick_accumulators();
 }
 
 void WeatherCore::tick_cloud_scroll(float sky_speed) {

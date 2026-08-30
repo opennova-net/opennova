@@ -89,6 +89,7 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// them here is the retail recv-before-actions boundary, not presentation work.
 	refresh_wire_collision_proxies(ctx, hooks);
 	apply_gameplay_events(ctx);
+	apply_weather_sample(ctx);
 
 	const bool preround_active = ctx.world.preround_delay_seconds != 0;
 	hooks.apply_input_pre_tick(); // input latches stay live through the phase
@@ -116,6 +117,9 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 			ctx.world.ai->refresh_mounted_pose(*local_ai, ctx.world);
 		}
 	}
+	// The weather tick follows the entity update on a client exactly as on
+	// the host [orig: Game_ProcessMainFrame @ 0x52674b -> @ 0x526774].
+	if (hooks.tick_weather) hooks.tick_weather();
 	hooks.sync_mounted_input_heading();
 	hooks.tick_view();   // retail promotes the per-frame view before weapon actions
 	// The equipped-slot FSM pump, after the view promoter. Gated on L: retail
@@ -126,6 +130,25 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// [orig: WeaponAction_ProcessAllEntities @ 0x526786]
 	if (local_spawned_) hooks.tick_weapon();
 	++now_tick_;
+}
+
+void JoinerWorldBridge::apply_weather_sample(const PumpContext &ctx) {
+	// Each newly received phase-2 ENV sub-block lands in the weather home's
+	// TARGET globals exactly once; the local currents keep chasing
+	// [orig: NapiNPClientMsg_0x00A case 2 @ 0x430244..0x43034c].
+	const netsim::ClientEnvironmentState &environment = ctx.runtime.state().environment;
+	if (!environment.present || environment.revision == weather_revision_seen_) return;
+	weather_revision_seen_ = environment.revision;
+	world::WeatherWireSample sample;
+	sample.fog_dist = environment.fog_dist;
+	sample.fog_accel = environment.fog_accel;
+	sample.tod_fixed = environment.tod_fixed;
+	sample.quake_ticks = environment.quake_ticks;
+	sample.cloud_scroll = environment.cloud_scroll;
+	sample.rain_pct = environment.rain_pct;
+	sample.overcast = environment.overcast;
+	sample.precipitation_kind = environment.env_param;
+	ctx.world.weather.apply_wire_sample(sample);
 }
 
 void JoinerWorldBridge::wire_frame_providers(

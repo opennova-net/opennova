@@ -1,10 +1,14 @@
 // The per-tick weather state cluster and its witnessed order-of-operations —
 // the [orig: Environment_UpdateWeatherTick @ 0x57e9b0] aggregate over the
-// env_weather.h pieces: the wind-sway oscillator, rain fade, both lightning
-// flash sequencers, the smoothed scalar channels, the iris modulator chain,
-// the fourteen color-block pipelines in retail order, and the cloud-scroll
-// tail. The shell binding (godot/src/env/weather_core.*) owns only
-// the Godot boxing over this struct. RE record: docs/env/env-tod-re.md.
+// env_weather.h pieces: the wind-sway oscillator, the hit blackout, both
+// lightning flash sequencers, the smoothed scalar channels, the iris modulator
+// chain, the fourteen color-block pipelines in retail order, and the
+// cloud-scroll tail. The tick is split at the witnessed seams so ONE owner
+// (world::WeatherState, the simulation) runs the sim legs with the quake
+// jitter between them and the render owner (env::WeatherRuntime) runs the
+// color legs against the same core — one tick, one clock. The shell binding
+// (godot/src/env/weather_core.*) owns only the Godot boxing over this struct.
+// RE record: docs/env/env-tod-re.md.
 #ifndef OPENNOVA_ENV_WEATHER_CORE_H
 #define OPENNOVA_ENV_WEATHER_CORE_H
 
@@ -17,7 +21,7 @@ namespace opennova::env {
 struct WeatherCore {
 	WeatherOscillator oscillator;
 	LightningSequencers lightning;
-	RainState rain;
+	HitDimState hit_dim;
 	WeatherColorBlock fill_block; // ground light
 	WeatherColorBlock sun_block;  // directional light (never flashed)
 	WeatherColorBlock fog_block;
@@ -51,20 +55,38 @@ struct WeatherCore {
 	static constexpr int32_t kIrisSampleIndoor = -1;
 	static constexpr int32_t kIrisSampleIndoorNoData = -2;
 
-	// One 62 Hz weather tick in the witnessed order: oscillator, wind-decay
-	// extension, rain fade, lightning sequencers (whose epoch hits rewrite the
-	// additive slots [orig: Environment_SetLightningFlash @ 0x57d320 —
+	// One 62.5 Hz weather tick in the witnessed order: oscillator, wind-decay
+	// extension, hit-dim fade, lightning sequencers (whose epoch hits rewrite
+	// the additive slots [orig: Environment_SetLightningFlash @ 0x57d320 —
 	// sky >> 8, fog >> 9, ground >> 10, the directional slot zeroed]), the
-	// scalar springs, modulator-2 then modulator, the block pipelines against
-	// the fresh modulator color, then the cloud-scroll tail. Color targets and
-	// the lightning color are packed 0x00RRGGBB (targets may carry alpha).
+	// scalar springs + cloud-scroll rate ramp, modulator-2 then modulator, the
+	// block pipelines against the fresh modulator color, then the cloud-scroll
+	// accumulators. Color targets and the lightning color are packed
+	// 0x00RRGGBB (targets may carry alpha). The standalone owners' one call —
+	// the split legs below are the same sequence with the quake seam exposed.
 	void tick(uint32_t fill_target, uint32_t sun_target, uint32_t fog_target,
 			uint32_t sky_target, uint32_t lightning_packed, float sky_speed);
+
+	// --- the split tick (the world owner + the render owner) ----------------
+	// The sim head: the oscillator (+ the wind-decay extension) and the
+	// hit-dim fade [orig: @ 0x57e9fc..0x57eb01]. The owner's quake jitter runs
+	// next [orig: @ 0x57eb12..0x57ec61] — it needs the entity pools.
+	void tick_sim_head();
+	// The sim tail: both lightning sequencers with their additive rewrites
+	// [orig: @ 0x57ec6f..0x57edc4], the scalar springs [orig: @ 0x57ede2..
+	// 0x57ef92] and the cloud-scroll rate ramp [orig: @ 0x57eecc];
+	// cloud_rate_target = Env_CloudScrollRateTarget (sky_speed << 10).
+	void tick_sim_tail(uint32_t lightning_packed, int cloud_rate_target);
+	// The render legs: modulator-2, the modulator, every color block against
+	// the fresh modulator [orig: @ 0x57ef97..0x57f03c], then the cloud-scroll
+	// accumulators [orig: @ 0x57f1a5..0x57f1d1].
+	void tick_render(uint32_t fill_target, uint32_t sun_target,
+			uint32_t fog_target, uint32_t sky_target);
 
 	// The cloud-scroll sub-tick alone (rate ramp toward sky_speed << 10, the
 	// atol parse scale [orig: TimeOfDay_ParseProperty @ 0x57cc0d; ramp
 	// @ 0x57eecc], plus the accumulators) — for embedders with no weather
-	// colors (the standalone-sky fallback path). tick() calls this itself.
+	// colors (the standalone-sky fallback path).
 	void tick_cloud_scroll(float sky_speed);
 
 	// Raw Env_WindScale units; arming semantics per the extension note above.

@@ -1,5 +1,6 @@
-// WAC-authored weather must survive an external base-sample refresh and be
-// observable through the real S2C 0x0A phase-2 projection.
+// WAC-authored weather lands in the ONE weather home and is observable
+// through the real S2C 0x0A phase-2 projection; the tick that advances it is
+// the world's weather tick.
 
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/wac_system.h>
@@ -63,19 +64,19 @@ nw::FrameUpdate emit_phase2(w::World &world) {
 	return frame;
 }
 
-void test_scripted_sky_speed_survives_external_refresh() {
+void test_scripted_sky_speed_reaches_the_wire() {
 	w::World world;
+	w::WeatherTickEvents events;
     // A mission only advances while a human is in the world - retail holds the
     // WAC tick and the BMS event pump on `wac_var_humans || !wac_var_ticks`
     // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
     // so they stand a player up; the empty-server hold has its own test.
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 733 << 16;
-	base.fog_current_q16 = base.fog_target_q16;
+	w::WeatherSeed base;
+	base.fog_level_q16 = 733 << 16;
 	base.tod_fixed24 = 9u << 24;
 	base.cloud_scroll_rate_target = 13u << 10;
-	world.network_env.publish_complete(base);
+	world.weather.seed(base);
 
 	opennova::wac::CompileEnv compile_env;
 	opennova::wac::WacSystem system;
@@ -85,21 +86,18 @@ void test_scripted_sky_speed_survives_external_refresh() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	// GameWorld republishes its resource/weather sample on the following 62 Hz
-	// quantum. The WAC-owned cloud target remains authoritative.
-	world.network_env.publish_complete(base);
 	const nw::FrameUpdate frame = emit_phase2(world);
 	CHECK(frame.env.cloud_scroll == 47);
 }
 
 void test_movefog_publishes_retail_target_and_duration_step() {
 	w::World world;
+	w::WeatherTickEvents events;
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 800 << 16;
-	base.fog_current_q16 = base.fog_target_q16;
+	w::WeatherSeed base;
+	base.fog_level_q16 = 800 << 16;
 	base.cloud_scroll_rate_target = 15 << 10;
-	world.network_env.publish_complete(base);
+	world.weather.seed(base);
 
 	opennova::wac::CompileEnv compile_env;
 	opennova::wac::WacSystem system;
@@ -109,7 +107,6 @@ void test_movefog_publishes_retail_target_and_duration_step() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	world.network_env.publish_complete(base);
 	const nw::FrameUpdate frame = emit_phase2(world);
 	CHECK(frame.env.fog_dist == 200);
 	// IDA @0x4EE0A0: seconds*62 ticks; abs(target-current+ticks/2)/ticks,
@@ -117,14 +114,17 @@ void test_movefog_publishes_retail_target_and_duration_step() {
 	CHECK(frame.env.fog_accel == 0x04D7);
 }
 
-void test_movefog_uses_live_external_fog_current() {
+void test_movefog_uses_live_fog_current() {
 	w::World world;
+	w::WeatherTickEvents events;
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 800 << 16;
-	base.fog_current_q16 = 600 << 16;
+	w::WeatherSeed base;
+	base.fog_level_q16 = 800 << 16;
 	base.cloud_scroll_rate_target = 15 << 10;
-	world.network_env.publish_complete(base);
+	world.weather.seed(base);
+	// The live spring current is 600 (an earlier fogdist landed it there)
+	// while the authored .env target was 800.
+	world.weather.core.scalar_channels.fog_dist_fp = 600 << 16;
 
 	opennova::wac::CompileEnv compile_env;
 	opennova::wac::WacSystem system;
@@ -134,21 +134,19 @@ void test_movefog_uses_live_external_fog_current() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	world.network_env.publish_complete(base);
 	const nw::FrameUpdate frame = emit_phase2(world);
 	CHECK(frame.env.fog_dist == 200);
-	// The live spring current is 600 even though its authored target is 800.
 	// Retail derives the two-second transition from 600 -> 200, yielding 0x033A.
 	CHECK(frame.env.fog_accel == 0x033A);
 }
 
 void test_rain_advances_on_the_explicit_weather_tick() {
 	w::World world;
+	w::WeatherTickEvents events;
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 500 << 16;
-	base.fog_current_q16 = base.fog_target_q16;
-	world.network_env.publish_complete(base);
+	w::WeatherSeed base;
+	base.fog_level_q16 = 500 << 16;
+	world.weather.seed(base);
 
 	opennova::wac::CompileEnv compile_env;
 	opennova::wac::WacSystem system;
@@ -158,8 +156,7 @@ void test_rain_advances_on_the_explicit_weather_tick() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	world.network_env.advance_tick();
-	world.network_env.publish_complete(base);
+	world.weather.tick_sim(&world, events);
 	const nw::FrameUpdate frame = emit_phase2(world);
 	// 100% -> 0x10000; duration 62 ticks gives step 1057. One tick's
 	// current narrows from 1057 Q16 to unsigned 8.8 byte 4.
@@ -167,14 +164,13 @@ void test_rain_advances_on_the_explicit_weather_tick() {
 	CHECK(frame.env.env_param == 0); // rain precipitation kind
 }
 
-void test_snow_kind_survives_external_refresh() {
+void test_snow_kind_reaches_the_wire() {
 	w::World world;
+	w::WeatherTickEvents events;
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 500 << 16;
-	base.fog_current_q16 = base.fog_target_q16;
-	base.precipitation_kind = static_cast<uint32_t>(w::PrecipitationKind::Rain);
-	world.network_env.publish_complete(base);
+	w::WeatherSeed base;
+	base.fog_level_q16 = 500 << 16;
+		world.weather.seed(base);
 
 	opennova::wac::CompileEnv compile_env;
 	opennova::wac::WacSystem system;
@@ -184,8 +180,7 @@ void test_snow_kind_survives_external_refresh() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	world.network_env.advance_tick();
-	world.network_env.publish_complete(base);
+	world.weather.tick_sim(&world, events);
 	const nw::FrameUpdate frame = emit_phase2(world);
 	CHECK(frame.env.rain_pct == 4);
 	CHECK(frame.env.env_param == 1); // snow precipitation kind
@@ -193,11 +188,11 @@ void test_snow_kind_survives_external_refresh() {
 
 void test_overcast_advances_on_the_explicit_weather_tick() {
 	w::World world;
+	w::WeatherTickEvents events;
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 500 << 16;
-	base.fog_current_q16 = base.fog_target_q16;
-	world.network_env.publish_complete(base);
+	w::WeatherSeed base;
+	base.fog_level_q16 = 500 << 16;
+	world.weather.seed(base);
 
 	opennova::wac::CompileEnv compile_env;
 	opennova::wac::WacSystem system;
@@ -207,8 +202,7 @@ void test_overcast_advances_on_the_explicit_weather_tick() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	world.network_env.advance_tick();
-	world.network_env.publish_complete(base);
+	world.weather.tick_sim(&world, events);
 	const nw::FrameUpdate frame = emit_phase2(world);
 	// 50% -> 0x8000; two seconds gives a 264-Q16 step, narrowed to 1.
 	CHECK(frame.env.overcast == 1);
@@ -216,11 +210,11 @@ void test_overcast_advances_on_the_explicit_weather_tick() {
 
 void test_quake_uses_retail_six_tick_units_and_countdown() {
 	w::World world;
+	w::WeatherTickEvents events;
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 500 << 16;
-	base.fog_current_q16 = base.fog_target_q16;
-	world.network_env.publish_complete(base);
+	w::WeatherSeed base;
+	base.fog_level_q16 = 500 << 16;
+	world.weather.seed(base);
 
 	opennova::wac::CompileEnv compile_env;
 	opennova::wac::WacSystem system;
@@ -230,20 +224,19 @@ void test_quake_uses_retail_six_tick_units_and_countdown() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	world.network_env.advance_tick();
-	world.network_env.publish_complete(base);
+	world.weather.tick_sim(&world, events);
 	const nw::FrameUpdate frame = emit_phase2(world);
 	CHECK(frame.env.quake_ticks == 41); // 7*6 authored ticks, then one weather tick
 }
 
 void test_tod_uses_retail_minute_to_fixed24_multiply() {
 	w::World world;
+	w::WeatherTickEvents events;
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 500 << 16;
-	base.fog_current_q16 = base.fog_target_q16;
+	w::WeatherSeed base;
+	base.fog_level_q16 = 500 << 16;
 	base.tod_fixed24 = 9u << 24;
-	world.network_env.publish_complete(base);
+	world.weather.seed(base);
 
 	opennova::wac::CompileEnv compile_env;
 	opennova::wac::WacSystem system;
@@ -253,7 +246,6 @@ void test_tod_uses_retail_minute_to_fixed24_multiply() {
 	system.set_program(std::move(program));
 	run_one_wac_execution(world, system);
 
-	world.network_env.publish_complete(base);
 	const nw::FrameUpdate frame = emit_phase2(world);
 	// Handler @0x4EDC70 stores minute-of-day * 0x44444. For 05:30 the
 	// phase-2 (+0x1000)>>13 projection is exactly 0x2C00.
@@ -262,14 +254,15 @@ void test_tod_uses_retail_minute_to_fixed24_multiply() {
 
 void test_eager_wac_initializer_and_255_tick_boundary() {
 	w::World world;
+	w::WeatherTickEvents events;
 	world.cached.humans = 1;
-	w::EnvNetworkSample base;
-	base.fog_target_q16 = 800 << 16;
-	base.fog_current_q16 = 600 << 16;
+	w::WeatherSeed base;
+	base.fog_level_q16 = 800 << 16;
 	base.tod_fixed24 = 9u << 24;
 	base.tod_advance_per_tick = 0x1234u;
 	base.cloud_scroll_rate_target = 15u << 10;
-	world.network_env.publish_complete(base);
+	world.weather.seed(base);
+	world.weather.core.scalar_channels.fog_dist_fp = 600 << 16;
 
 	opennova::wac::CompileEnv compile_env;
 	opennova::wac::WacSystem system;
@@ -285,8 +278,8 @@ void test_eager_wac_initializer_and_255_tick_boundary() {
 	CHECK(system.runs() == 1);
 	CHECK(world.logic_tick == 0);
 
-	world.network_env.initialize_mission_start();
-	for (int tick = 0; tick < 255; ++tick) world.network_env.advance_tick();
+	world.weather.mission_start_init();
+	for (int tick = 0; tick < 255; ++tick) world.weather.tick_sim(&world, events);
 	const nw::FrameUpdate frame = emit_phase2(world);
 	CHECK(frame.env.fog_dist == 200);
 	CHECK(frame.env.fog_accel == 0xFF00);
@@ -309,11 +302,11 @@ void test_eager_wac_initializer_and_255_tick_boundary() {
 } // namespace
 
 int main() {
-	test_scripted_sky_speed_survives_external_refresh();
+	test_scripted_sky_speed_reaches_the_wire();
 	test_movefog_publishes_retail_target_and_duration_step();
-	test_movefog_uses_live_external_fog_current();
+	test_movefog_uses_live_fog_current();
 	test_rain_advances_on_the_explicit_weather_tick();
-	test_snow_kind_survives_external_refresh();
+	test_snow_kind_reaches_the_wire();
 	test_overcast_advances_on_the_explicit_weather_tick();
 	test_quake_uses_retail_six_tick_units_and_countdown();
 	test_tod_uses_retail_minute_to_fixed24_multiply();

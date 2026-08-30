@@ -7,16 +7,19 @@
 //   windows.
 // - [orig: Environment_ApplyFogAndAmbient @ 0x57e440] pushes fog state;
 //   fog/skyfog render colors are doubled with saturation (@ 0x57f17c).
-// It owns: the one mission TOD clock (8.24 accumulator, env/tod_clock.h), the
-// keyframe-TARGET vs smoothed-CURRENT color split shared with the weather
-// tick, the S2C 0x0A phase-2 network overrides, the NVG hemisphere rewrite,
-// the env #27 smoothed scalar currents, and the change-gated env generation
-// every lit consumer keys on. The shell node owns only device work: shader
+// It owns: the .env keyframe table plus the .trn/overcast.def table the
+// overcast blend cross-fades against, the keyframe-TARGET vs smoothed-CURRENT
+// color split shared with the weather tick, the NVG hemisphere rewrite, and
+// the change-gated env generation every lit consumer keys on. The mission
+// clock, the weather scalars (fog distance, sky height, sun dim, rain,
+// overcast, cloud scroll, quake, fog type, precipitation kind) live in ONE
+// home, world::WeatherState (runtime/world/weather_state.h); this state reads
+// them through a bound view. The shell node owns only device work: shader
 // global pushes, EnvLightState publication, and texture handles.
 #pragma once
 
 #include <formats/env/env.h>
-#include <formats/env/tod_clock.h>
+#include <runtime/world/weather_state.h>
 
 #include <cstdint>
 
@@ -84,19 +87,6 @@ struct TerrainEnvUniforms {
 	int fog_type = 0;
 };
 
-// One decoded S2C 0x0A phase-2 sample, environment half — the wire view
-// reconstructed into native units exactly once here.
-struct NetEnvSample {
-	int fog_dist = 0;           // u16 world units
-	int fog_accel = 0;          // u16 16.16 step clamp (weather core half)
-	int rain_pct = 0;           // u8 (weather core half)
-	int overcast = 0;           // u8 (weather core half)
-	int cloud_scroll = 0;       // u8 sky-speed byte
-	int quake_ticks = 0;        // u8 countdown seed
-	int tod_fixed = 0;          // u16, <<13 into the 8.24 accumulator
-	int precipitation_kind = 0; // u8
-};
-
 class EnvironmentState {
 public:
 	static constexpr int kHoursPerDay = 24;
@@ -108,15 +98,39 @@ public:
 	static constexpr double kClockMinutesPerDay = kHoursPerDay * kMinutesPerHour;
 	static constexpr int kFixed24OneHour = 1 << 24;
 	static constexpr int kTodDayFixed24 = kHoursPerDay * kFixed24OneHour;
-	static constexpr int kDefaultMinutesPerDay = 1440;
-	static constexpr int kDefaultStartHour = 12;
 
 	// Attach/detach the parsed .env document (the live, mission-override-
-	// layered view). Clears every remote network override — a replacement .env
-	// resets remote state exactly like the shell's document setter did.
-	// `loaded` mirrors the document's parse state: a non-null unparsed doc
-	// keeps serving its global colors while TOD interpolation stays inert.
+	// layered view). `loaded` mirrors the document's parse state: a non-null
+	// unparsed doc keeps serving its global colors while TOD interpolation
+	// stays inert.
 	void set_config(const Config *config, bool loaded);
+	// The overcast table: the .trn + overcast.def keyframes the overcast blend
+	// cross-fades the .env colors against (env #16) [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57db30 — the first parse pass into
+	// Env_TrnSnapshotTable @ 0x26c7414]. Null = no table (a clear-weather
+	// mission renders the .env table alone).
+	void set_overcast_config(const Config *overcast);
+	const Config *overcast_config() const { return overcast_config_; }
+	// The weather view this state reads its scalars, fog type, precipitation
+	// kind, overcast blend and clock through: the World's WeatherState on a
+	// mission, else this state's own standalone home (null binds it back).
+	// An unseeded home serves the parsed .env values with a static clock.
+	void bind_weather(world::WeatherState *weather) {
+		weather_ = weather != nullptr ? weather : &standalone_weather_;
+	}
+	const world::WeatherState *weather() const { return weather_; }
+	world::WeatherState *weather() { return weather_; }
+	// The standalone weather home (previews, fixtures, an environment with no
+	// simulation behind it) — the ONE WeatherState implementation, owned here
+	// so a render owner without a World still ticks the retail weather.
+	world::WeatherState &standalone_weather() { return standalone_weather_; }
+	bool weather_is_standalone() const { return weather_ == &standalone_weather_; }
+	// The bound weather is seeded (a mission T0 ran).
+	bool weather_live() const { return weather_->valid; }
+	// Seed the standalone home from the loaded config + the remembered clock
+	// (the ONE derivation, env::weather_seed_from_config); the mission's World
+	// home is seeded by the embedder at its boundary instead.
+	void reset_standalone_weather(int wind_scale = 256);
 	// Refresh only the parse flag (a document reload/edit event) — network
 	// overrides survive, unlike a document replacement.
 	void set_loaded(bool loaded) { loaded_ = loaded; }
@@ -128,54 +142,46 @@ public:
 	double time_of_day() const { return time_of_day_; }
 
 	// The core witnessed TOD orchestration: sun/moon direction recompute, the
-	// 06:00/18:45 sun-vs-moon phase select, keyframe interpolation, the
+	// 06:00/18:45 sun-vs-moon phase select, keyframe interpolation of BOTH
+	// tables cross-faded by the weather's overcast blend [orig:
+	// Environment_ComputeTimeOfDayColors @ 0x57de40 -> Environment_LerpKeyframeSet
+	// @ 0x57c3b0 over (env, trn, clamp(Env_OvercastBlend))], the
 	// standalone-owner raw color writes vs weather-driven target-only refresh,
-	// the fog/skyfog undoubled-blend-then-double derivation, the fog distance
-	// reseed, and the generation bump. The shell decides afterwards whether to
-	// push shader globals (standalone owners only).
+	// the fog/skyfog undoubled-blend-then-double derivation, and the
+	// generation bump. The shell decides afterwards whether to push shader
+	// globals (standalone owners only).
 	void update_tod();
 
-	// --- the one runtime mission clock (env/tod_clock.h) ------------------
+	// --- the mission clock (the weather home owns it) -----------------------
 
-	// Start the clock from the BMS header. The Q8.8 widening, the day wrap,
-	// and retail's 60-minute floor are tod_clock.h's
-	// [orig: Game_StartMission @ 0x525371;
-	//  Environment_SetTodAdvanceRate @ 0x57d170].
+	// Remember the BMS clock for the standalone home and (re)seed its clock
+	// fields [orig: Game_StartMission @ 0x525371 (start_time << 16);
+	// Environment_SetTodAdvanceRate @ 0x57d170, the 60-minute floor]. A
+	// bound World home keeps its own (the embedder seeded it).
 	void configure_mission_clock(int start_time_q8_8, int minutes_per_day);
-	int mission_advance_per_tick() const { return mission_advance_per_tick_; }
-	static double mission_start_time_hhmm(int start_time_q8_8);
-
-	// Advance by completed logic ticks using the exact native integer
-	// increment [orig: Env_TodAdvancePerTick =
-	// 0x18000000 / (3720 * minutes_per_day) @ 0x57d108].
+	int mission_advance_per_tick() const;
+	// Advance the STANDALONE home by complete weather ticks (sim legs; the
+	// TOD recompute follows); a bound World home advances in its kernel.
 	void advance_mission_clock(int ticks);
-
 	// The debug clock seam (minute-of-day form so linear sliders contain no
-	// impossible 12:79 values). Returns false on a non-finite/out-of-range
-	// input. Updating the fixed-point accumulator is essential: merely
-	// assigning the HHMM view would be overwritten by the next world-driven
-	// weather tick.
+	// impossible 12:79 values): the TOD command on the bound home
+	// [orig: WacCmd_Tod @ 0x4edc70]. False on a non-finite/out-of-range input.
 	bool debug_set_mission_minute_of_day(double minute_of_day);
 	double mission_minute_of_day() const;
+	// The bound home's exact 8.24 clock.
+	int mission_time_fixed24() const;
+	static double mission_start_time_hhmm(int start_time_q8_8);
 
-	// Exact retail-native mission clock used by the 0x0A phase-2 projection.
-	// Consumers must not reconstruct this value from the display clock.
-	int mission_time_fixed24() const { return mission_time_fixed24_; }
+	// --- the weather-home reads (world::WeatherState carries the cites) ----
 
-	// --- network phase-2 overrides ---------------------------------------
-
-	// Apply one decoded S2C 0x0A phase-2 sample: only the wire-carried values
-	// override; the local .env remains the source for colors, fog type, sky
-	// height, and every other unreplicated channel. Retail writes the received
-	// rain/overcast bytes into TARGET globals; the weather core retains the
-	// local currents and writes their 62 Hz chase back through
-	// set_smoothed_scalars().
-	void apply_network_sample(const NetEnvSample &sample);
-	void clear_network_state();
-	int network_quake_ticks() const;
-	float network_rain_current() const;
-	float overcast_blend() const;
-	int network_precipitation_kind() const;
+	// The clock: the bound weather's 8.24 accumulator as HHMM; the render
+	// owner pushes it through set_time_of_day each tick.
+	void sync_clock_from_weather();
+	int quake_ticks() const;
+	float rain_current() const;          // Env_RainPctCurrent / 65536
+	float overcast_blend() const;        // Env_OvercastBlend / 65536
+	int precipitation_kind() const;      // 0 rain, 1 snow
+	bool raining() const;                // Env_RainPctCurrent > 48
 
 	// --- HHMM conversion statics ------------------------------------------
 
@@ -344,15 +350,15 @@ public:
 	// light record whenever this moves.
 	int64_t env_generation() const { return env_generation_; }
 
-	// --- env #27 smoothed scalar currents ---------------------------------
+	// --- the smoothed scalar currents (env #27; the weather home's springs) --
 
-	float fog_distance() const { return fog_distance_; }
-	// The SMOOTHED fog distance when the weather tick drives it (env #27):
-	// the scrub/keyframe value is the spring TARGET, the served value ramps
+	// The SMOOTHED fog distance when a live weather drives it (env #27):
+	// the authored value is the spring TARGET, the served value ramps
 	// [orig: Env_FogDistCurrent @ 0x26c681c <- the (d+31)>>5 spring
 	// @ 0x57edd7; targets-only snap @ 0x57d1e0]. Every consumer (dome c9,
 	// water UV state, object/terrain fog ends, the frame clear) reads through
 	// here, so the ramp reaches them all.
+	float fog_distance() const { return fog_level(); }
 	float fog_level() const;
 	float fog_level_target() const;
 	// Policy lives in env_render [orig: Render_SetFogState @ 0x58a950].
@@ -372,15 +378,11 @@ public:
 	// eighth-snap @ 0x57ee97; the dome rebuild gate @ 0x57e4f4].
 	float sky_height() const;
 	float sky_height_target() const;
-	// env #27: the weather tick pushes the smoothed scalar currents back here
-	// (the same writeback seam as the smoothed colors), so every scalar
-	// consumer serves the ramped values.
-	void set_smoothed_scalars(float fog_distance, float sky_height,
-			float sun_dim_pct, float rain_current, float overcast_blend);
-	// The smoothed Env_SunDimPct channel (0..100; default 0 — nothing writes
-	// the target in stock data) — dims the sun body + glare
-	// [orig: @ 0x26c6830 spring @ 0x57ee17; consumers @ 0x5acbc1/0x5acfb8].
-	float sun_dim_pct() const { return sun_dim_smoothed_; }
+	// The smoothed Env_SunDimPct channel (0..100; the `sunfade` WAC writes its
+	// target, the unwritten max clamp pins the current at 0 in retail) — dims
+	// the sun body + glare [orig: @ 0x26c6830 spring @ 0x57ee17; consumers
+	// @ 0x5acbc1/0x5acfb8].
+	float sun_dim_pct() const;
 
 	// --- typed value builders for the shell's device legs -----------------
 
@@ -437,6 +439,11 @@ private:
 	void bump_env_generation() { ++env_generation_; }
 
 	const Config *config_ = nullptr;
+	const Config *overcast_config_ = nullptr;
+	world::WeatherState standalone_weather_;
+	world::WeatherState *weather_ = &standalone_weather_;
+	int clock_start_q8_8_ = 12 << 8;
+	int clock_minutes_per_day_ = 1440;
 	bool loaded_ = false;
 
 	double time_of_day_ = 1200.0;
@@ -474,28 +481,9 @@ private:
 	// color_src_gain*f/10 here [orig: NVG world-light gain rewrite].
 	Rgb apply_nvg_hemi_gain(const Rgb &color) const;
 
-	float fog_distance_ = 1000.0f;
-	int mission_time_fixed24_ = kDefaultStartHour * kFixed24OneHour;
-	int mission_advance_per_tick_ = tod_advance_per_tick(kDefaultMinutesPerDay);
-
-	// A remote authority's phase-2 state overrides only the values actually
-	// carried on the wire.
-	bool network_environment_active_ = false;
-	float network_fog_target_ = 0.0f;
-	float network_sky_speed_ = 0.0f;
-	int network_quake_ticks_ = 0;
-	float network_rain_current_ = 0.0f;
-	float network_overcast_blend_ = 0.0f;
-	int network_precipitation_kind_ = 0;
-
 	bool weather_driven_ = false;
 	int64_t env_generation_ = 0;
 
-	// env #27 smoothed scalar currents (negative = not driven; parsed
-	// fallback).
-	float fog_dist_smoothed_ = -1.0f;
-	float sky_height_smoothed_ = -1.0f;
-	float sun_dim_smoothed_ = 0.0f;
 };
 
 } // namespace opennova::env

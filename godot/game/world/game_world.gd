@@ -87,6 +87,7 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _framefx: FrameFx = \
 		get_node_or_null("FrameFx")
 @onready var _weather: Weather = get_node_or_null("Weather")
+@onready var _precipitation: Precipitation = get_node_or_null("Precipitation")
 @onready var _celestial: Celestial = get_node_or_null("Celestial")
 @onready var _sky_dome: SkyDome = get_node_or_null("SkyDome")
 @onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
@@ -107,6 +108,9 @@ var _join_wire_assets_failed := false
 var _join_wire_asset_failure_emitted := false
 var _world_ready := false
 var _loaded_mission: MissionData
+# The BMS clock the weather home is seeded with at the mission-start boundary.
+var _mission_clock_start_q8_8: int = 0
+var _mission_clock_minutes_per_day: int = MissionEnvironment.DEFAULT_MINUTES_PER_DAY
 # The BMS argument that completed the active mission load. This is runtime
 # state, deliberately separate from mission_file (the exported boot option).
 var _loaded_mission_file: String = ""
@@ -532,11 +536,11 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	# runtime is constructed. The authority publishes this T0 sample after setup
 	# but before play, so its first network tick cannot observe stale/default data.
 	var mission_info: Dictionary = mission.get_info()
+	_mission_clock_start_q8_8 = int(mission_info.get("start_time", 0))
+	_mission_clock_minutes_per_day = int(mission_info.get(
+			"minutes_per_day", MissionEnvironment.DEFAULT_MINUTES_PER_DAY))
 	if _env != null:
-		_env.configure_mission_clock(
-				int(mission_info.get("start_time", 0)),
-				int(mission_info.get(
-						"minutes_per_day", MissionEnvironment.DEFAULT_MINUTES_PER_DAY)))
+		_env.configure_mission_clock(_mission_clock_start_q8_8, _mission_clock_minutes_per_day)
 	_prepare_world_driven_weather()
 	timeline.end_span()
 	load_progress.emit(MissionData.load_progress_percent(MissionData.LOAD_STAGE_TERRAIN))
@@ -866,6 +870,14 @@ func _load_environment(env_path: String) -> bool:
 		return false
 	# MissionEnvironment's setter reloads + pushes shader globals on assignment.
 	_env.environment_data = env
+	# The overcast table the overcast blend cross-fades against: overcast.def
+	# appended after the .trn pass (stock .trn files carry no TOD blocks)
+	# (retail Environment_LoadTimeOfDayConfig @ 0x57db30).
+	var overcast := EnvFile.new()
+	if overcast.load_from_resource_root(_resource_root, "overcast.def") == OK:
+		_env.overcast_data = overcast
+	else:
+		_env.overcast_data = null
 	# GameWorld retains one Weather node across loads. A replacement ENV is
 	# a discrete state change: retail snaps every color block to the new mission
 	# targets instead of easing over from the previous mission's currents.
@@ -874,6 +886,8 @@ func _load_environment(env_path: String) -> bool:
 		weather.resync_colors()
 	if _celestial != null:
 		_celestial.set_resource_root(_resource_root)
+	if _precipitation != null:
+		_precipitation.set_resource_root(_resource_root)
 	if _environment_cube != null:
 		_environment_cube.force_capture()
 	return true
@@ -938,21 +952,19 @@ func _prepare_autonomous_weather() -> void:
 		weather.prepare_autonomous()
 	else:
 		_set_weather_world_tick_driven(false)
+		if _weather != null:
+			_weather.bind_simulation(null)
 
 
 # The witnessed mission-start environment boundary runs natively on the
-# weather device (Weather.run_mission_start_boundary): T0 seed publication,
-# authority WAC direct execution, the 255-tick settle, republication, seal.
+# weather device (Weather.run_mission_start_boundary): the World's weather
+# seed from the loaded .env + the BMS clock, the authority's WAC direct
+# execution, the initializer + 255-tick settle, the baseline seal.
 func _run_mission_start_environment_boundary() -> void:
 	var weather: Weather = _weather
 	if weather != null:
-		weather.run_mission_start_boundary(get_sim())
-
-
-func _apply_join_network_environment_update() -> void:
-	var weather: Weather = _weather
-	if weather != null:
-		weather.apply_join_network_update(get_sim())
+		weather.run_mission_start_boundary(get_sim(),
+				_mission_clock_start_q8_8, _mission_clock_minutes_per_day)
 
 
 # Retail loads <mission>.til into one shared g_TerrainTileArray used by
@@ -1360,27 +1372,25 @@ func drive_network_frame() -> bool:
 		return false
 	# Net-session edges (admission/deploy/loss) + the gate's occupancy report.
 	_net_drive.observe_tick(_runtime)
-	_apply_join_network_environment_update()
 	return _runtime != null
 
 
-func advance_weather_frame() -> void:
-	# Weather/TOD is a distinct 62 Hz fixed clock; the mission simulation
-	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
-	# recomputes TOD targets, then ticks every weather block exactly once
-	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0].
+## The precipitation presenter leg: the kernel re-floors the drop pool for
+## this frame's camera and the renderer compiles the streaks
+## (retail render_weather_trail_particles @ 0x5dee10 — after the camera-side
+## particle pass, before the foliage billboards).
+func render_precipitation_frame() -> void:
 	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
-	if (_world_ready and _runtime != null and _runtime.is_playing()
-			and _env != null):
-		var weather: Weather = _weather
-		if weather != null:
-			weather.advance_world_driven(_frame_delta, get_sim())
+	if _world_ready and _runtime != null and _precipitation != null:
+		var viewport := get_viewport()
+		_precipitation.render_frame(get_sim(),
+				viewport.get_camera_3d() if viewport != null else null)
 	if _frame_timing:
-		var weather_us := Time.get_ticks_usec() - probe_phase_start
+		var precipitation_us := Time.get_ticks_usec() - probe_phase_start
 		if _frame_probe_enabled:
-			_perf_probe_spans["weather"] = weather_us
+			_perf_probe_spans["precipitation"] = precipitation_us
 		if _frame_stats_on:
-			_frame_stats.add(FrameStats.WORLD_WEATHER, weather_us)
+			_frame_stats.add(FrameStats.WORLD_WEATHER, precipitation_us)
 
 
 func apply_blink_frame() -> void:
@@ -1585,6 +1595,10 @@ func mix_audio_frame(ticks_run: int) -> void:
 			var audio_sim := _runtime.get_sim()
 			if audio_sim != null:
 				_mission_audio.advance_ticks(int(audio_sim.get_logic_tick()))
+				# The weather tick's thunder one-shots, placed around the
+				# listener (mission_audio.gd carries the cites).
+				_mission_audio.play_weather_sounds(
+						audio_sim.drain_weather_sounds(), _frame_camera_xform)
 		_mission_audio.tick(_frame_camera_pos, _frame_delta)
 		_music_var_pump()
 		_perf_audio_us = Time.get_ticks_usec() - audio_start
@@ -2752,7 +2766,7 @@ func _on_runtime_simulation_restarted() -> void:
 	if _terrain != null:
 		_terrain.clear_terrain_scorches()
 	if _effect_world == null:
-		_republish_network_environment()
+		_resync_weather_after_restore()
 		return
 	_effect_world.reset_runtime_state()
 	# Persistent item effects belong to the restored entity set, not the scene
@@ -2761,13 +2775,15 @@ func _on_runtime_simulation_restarted() -> void:
 	_item_fx.reattach()
 	if _light_director != null:
 		_light_director.reattach()
-	_republish_network_environment()
+	_resync_weather_after_restore()
 
 
-func _republish_network_environment() -> void:
+# The restored baseline rewound the World's weather home; the render owner
+# snaps its color blocks back onto the restored targets.
+func _resync_weather_after_restore() -> void:
 	var weather: Weather = _weather
 	if weather != null:
-		weather.push_network_environment(get_sim())
+		weather.resync_colors_now()
 
 
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF
@@ -2959,7 +2975,13 @@ func get_debug_mission_minute_of_day() -> float:
 func debug_set_mission_minute_of_day(minute_of_day: float) -> Error:
 	if _env == null or not _env.is_loaded():
 		return ERR_UNAVAILABLE
-	var err: Error = _env.debug_set_mission_minute_of_day(minute_of_day)
+	var sim: Simulation = get_sim()
+	var err: Error = OK
+	if sim != null and sim.weather_state_bound():
+		if not sim.command_time_of_day_minutes(int(minute_of_day)):
+			err = ERR_UNAVAILABLE
+	else:
+		err = _env.debug_set_mission_minute_of_day(minute_of_day)
 	if err != OK:
 		return err
 	var weather := get_weather_node()

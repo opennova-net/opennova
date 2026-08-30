@@ -117,6 +117,8 @@ private:
 	void apply_game_requests();
 	void apply_debug_requests();
 	void push_entity_directory();
+	void apply_environment_requests();
+	void push_environment_snapshot();
 	void set_game_playing_internal(bool p_playing);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
@@ -126,6 +128,7 @@ private:
 	ObjectID simulation_id_;
 	Simulation *simulation() const;
 	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
+	int64_t last_environment_push_ms_ = -1;
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

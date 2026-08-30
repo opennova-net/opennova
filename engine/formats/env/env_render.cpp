@@ -148,16 +148,19 @@ void EnvScalarChannels::tick() {
 	overcast_fp = spring_step(overcast_fp, overcast_target_fp, overcast_step_fp, overcast_max_fp);
 }
 
-void EnvScalarChannels::snap_currents_to_targets() {
-	fog_dist_fp = fog_dist_target_fp;
-	fog_step_fp = 0x00FF0000;
-	fog_max_fp = 1000 << 16;
+void EnvScalarChannels::mission_start_init() {
+	// [orig: Environment_MissionStartInit (ex sub_57F1E0) @ 0x57f7d8..0x57f873]
 	sun_dim_fp = sun_dim_target_fp;
 	sky_height_fp = sky_height_target_fp;
 	rain_pct_fp = rain_pct_target_fp;
-	rain_step_fp = 0x1000;
+	rain_max_fp = kMissionRainMax;
+	overcast_max_fp = kMissionRainMax;
+	fog_dist_fp = fog_dist_target_fp;
+	rain_step_fp = kMissionRainStep;
 	overcast_fp = overcast_target_fp;
-	overcast_step_fp = 0x1000;
+	overcast_step_fp = kMissionRainStep;
+	fog_step_fp = kMissionFogAccel;
+	fog_max_fp = kMissionFogMax;
 }
 
 void EnvScalarChannels::apply_network_sample(uint16_t fog_dist,
@@ -247,6 +250,8 @@ bool LightningSequencers::tick() {
 	// overwrites, never maxes). A processes before B, so a same-tick collision
 	// resolves to B's level, as in the original's statement order.
 	bool set = false;
+	thunder_a = false;
+	thunder_b = false;
 	if (timer_a) {
 		--timer_a;
 		const int lvl = lightning_flash_level(
@@ -255,6 +260,8 @@ bool LightningSequencers::tick() {
 			level = lvl;
 			set = true;
 		}
+		// Epoch 0 plays the thunder set [orig: @ 0x57ecfb].
+		thunder_a = timer_a == 0;
 	}
 	if (timer_b) {
 		--timer_b;
@@ -264,6 +271,8 @@ bool LightningSequencers::tick() {
 			level = lvl;
 			set = true;
 		}
+		// The second thunder [orig: @ 0x57edc4].
+		thunder_b = timer_b == 0;
 	}
 	return set;
 }
@@ -298,13 +307,13 @@ int WeatherOscillator::tick() {
 // ---------------------------------------------------------------------------
 // Rain + weather color blocks
 
-int rain_blend_factor(int rain_intensity) {
+int hit_dim_factor(int hit_dim_intensity) {
 	// [orig: interpolate_weather_color @ 0x57d9e0] — the unsigned over-range
 	// check zeroes the factor, otherwise 0x8000 - intensity.
-	if (static_cast<uint32_t>(rain_intensity) > 0x8000u) {
+	if (static_cast<uint32_t>(hit_dim_intensity) > 0x8000u) {
 		return 0;
 	}
-	return 0x8000 - rain_intensity;
+	return 0x8000 - hit_dim_intensity;
 }
 
 namespace {
@@ -345,7 +354,7 @@ void WeatherColorBlock::set_step_deltas(int frames) {
 	max_rate[3] = rate_for(static_cast<int>((target >> 24) & 0xFF), channels.a_fp);
 }
 
-void WeatherColorBlock::tick(uint32_t modulator_packed, int rain_intensity) {
+void WeatherColorBlock::tick(uint32_t modulator_packed, int hit_dim_intensity) {
 	// [orig: interpolate_weather_color @ 0x57d9e0] — the full block pipeline.
 	// Step: per-channel (delta >> 3) clamped to that channel's max rate,
 	// accumulate in 12.20, repack with +0x80000 rounding.
@@ -368,10 +377,11 @@ void WeatherColorBlock::tick(uint32_t modulator_packed, int rain_intensity) {
 	// (paddusb into state[1]).
 	pre_mod_color = paddusb(stepped, additive);
 
-	// Modulator x rain: out_c = ((c * m) >> 1) * (factor >> 4) >> 16, packed
+	// Modulator x hit dim: out_c = ((c * m) >> 1) * (factor >> 4) >> 16, packed
 	// with unsigned saturation (pmullw / psrlw 1 / pmulhw / packuswb). The
-	// identity modulator byte is 64 (with rain 0 the chain is exact identity).
-	const uint32_t factor = static_cast<uint32_t>(rain_blend_factor(rain_intensity)) >> 4;
+	// identity modulator byte is 64 (with the dim at 0 the chain is exact
+	// identity).
+	const uint32_t factor = static_cast<uint32_t>(hit_dim_factor(hit_dim_intensity)) >> 4;
 	uint32_t modulated = 0;
 	for (int shift = 0; shift < 32; shift += 8) {
 		const uint32_t c = (pre_mod_color >> shift) & 0xFF;
@@ -412,33 +422,36 @@ void SkyWeatherColorBlocks::set_skyfog_additive(uint32_t packed_additive) {
 	skyfog.additive = packed_additive;
 }
 
-void SkyWeatherColorBlocks::tick_skyfog(uint32_t modulator_packed, int rain_intensity) {
-	skyfog.tick(modulator_packed, rain_intensity);
+void SkyWeatherColorBlocks::tick_skyfog(uint32_t modulator_packed, int hit_dim_intensity) {
+	skyfog.tick(modulator_packed, hit_dim_intensity);
 }
 
-void SkyWeatherColorBlocks::tick_statics(uint32_t modulator_packed, int rain_intensity) {
-	ceiling.tick(modulator_packed, rain_intensity);
-	cloud.tick(modulator_packed, rain_intensity);
-	floor.tick(modulator_packed, rain_intensity);
+void SkyWeatherColorBlocks::tick_statics(uint32_t modulator_packed, int hit_dim_intensity) {
+	ceiling.tick(modulator_packed, hit_dim_intensity);
+	cloud.tick(modulator_packed, hit_dim_intensity);
+	floor.tick(modulator_packed, hit_dim_intensity);
 }
 
-void SkyWeatherColorBlocks::tick_dome(uint32_t modulator_packed, int rain_intensity) {
-	skybase.tick(modulator_packed, rain_intensity);
-	skybright.tick(modulator_packed, rain_intensity);
-	skyhighlight.tick(modulator_packed, rain_intensity);
-	cloudbase.tick(modulator_packed, rain_intensity);
-	cloudhighlight.tick(modulator_packed, rain_intensity);
-	cloudedge.tick(modulator_packed, rain_intensity);
+void SkyWeatherColorBlocks::tick_dome(uint32_t modulator_packed, int hit_dim_intensity) {
+	skybase.tick(modulator_packed, hit_dim_intensity);
+	skybright.tick(modulator_packed, hit_dim_intensity);
+	skyhighlight.tick(modulator_packed, hit_dim_intensity);
+	cloudbase.tick(modulator_packed, hit_dim_intensity);
+	cloudhighlight.tick(modulator_packed, hit_dim_intensity);
+	cloudedge.tick(modulator_packed, hit_dim_intensity);
 }
 
 // ---------------------------------------------------------------------------
 // Cloud scroll
 
-void CloudScrollState::tick(int rate_target) {
-	// [orig: Environment_UpdateWeatherTick — rate ramp @ 0x57eecc,
-	//  accumulators @ 0x57f1a5..0x57f1d1]. rate/3 is the original's idiv:
-	//  truncation toward zero.
+void CloudScrollState::tick_rate(int rate_target) {
+	// [orig: Environment_UpdateWeatherTick — rate ramp @ 0x57eecc]
 	rate = smooth_eighth(rate, rate_target);
+}
+
+void CloudScrollState::tick_accumulators() {
+	// [orig: Environment_UpdateWeatherTick — accumulators @ 0x57f1a5..0x57f1d1].
+	// rate/3 is the original's idiv: truncation toward zero.
 	acc_l1_v += rate;
 	acc_l1_u += rate;
 	acc_l2_v += rate - rate / 3;
