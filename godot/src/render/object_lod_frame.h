@@ -39,8 +39,7 @@ struct ObjectLodFrame {
 	static float uniform_scale(const Basis &p_basis);
 
 	// Whether a world bound sphere touches the view frustum (the near/side
-	// plane rejection alone, no projection): the coarse test a group of
-	// instances (a 512-unit static cell) runs before any member is projected.
+	// plane rejection alone, no projection): project()'s own first step.
 	bool sphere_in_frustum(const Vector3 &p_center, float p_radius) const;
 
 	// Project a world bound sphere. Returns false when the sphere lies wholly
