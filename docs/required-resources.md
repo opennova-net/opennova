@@ -112,8 +112,13 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `couri20b.fnt` | optional | [orig: @ 0x572a67 / @ 0x572f24] | graceful |
 
 Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
-`_netlog.txt`, `SYSDUMP.TXT`, `activesrvr.txt`, `mru.txt`,
+`_netlog.txt`, `SYSDUMP.TXT`, `mru.txt`,
 `hello.bin`/`hello2.bin` [orig: ChunkFile_TestWriteAndReload @ 0x56f810].
+`activesrvr.txt` is never written by retail: its only creator is the dead
+`Game_HostMultiplayerSession @ 0x4a65a0` (no xref, address bytes absent from the
+image; the lock file it would `fopen("wb")` at `0x4a65d7`), and the live path only
+deletes it at shutdown [orig: Game_Run @ 0x4a8009 → `DeleteFileA`] — a stale lock
+from an older build is cleaned up, nothing is created (checked 2026-08-30).
 
 ## Ordered boot sequence (witnessed)
 

@@ -7,8 +7,10 @@
 // guards, expressed here as explicit options:
 //
 //   * resolve_world_sample (runtime, jodemo.exe Terrain_SampleHeightBilinear
-//     @0x5C6770 / Terrain_GetFoliageMapValue @0x5C65E0): wraps the grid index
-//     with & 0xF, uses the raw sector id, and does not clamp the local offset.
+//     @0x5C6770 / Terrain_GetFoliageMapValue @0x5C65E0; the retail twin of the
+//     sampler is Terrain_SampleHeightBilinear @0x6067b0, cited in height_field.h):
+//     wraps the grid index with & 0xF, uses the raw sector id, and does not clamp
+//     the local offset.
 //   * The bounds-checked raycast path rejects cells outside the configured
 //     rows/cols, clamps the sector id to [0,4], and clamps the local offset to
 //     [0, 512 - 0.001].
