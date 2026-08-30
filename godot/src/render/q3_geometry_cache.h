@@ -60,6 +60,12 @@ struct Q3PackParameters {
 	Vector3 uv_v = Vector3(0, 1, 0);
 	Vector4 water_uv = Vector4(1.0f, 0.2f, 0.0f, 0.0f);
 	Vector3 camera_position;
+	// GPU-skin packing: the bind-space positions stay unskinned and the
+	// surface's bone indices ride CUSTOM0 (as floats) with the weights in
+	// CUSTOM1, so a consumer with a bone-palette buffer skins in its vertex
+	// shader and the entry packs once like a rigid one. Never combined with a
+	// CPU skin palette (the request's palette is ignored).
+	bool skin_channels = false;
 
 	bool operator==(const Q3PackParameters &p_other) const;
 };
@@ -110,7 +116,8 @@ public:
 		const Q3SurfaceArrays *published = nullptr;
 		std::uint64_t published_generation = 0;
 		Q3PackParameters pack;
-		// Non-empty for skinned sources: the entry re-skins every call.
+		// Non-empty for CPU-skinned sources: the entry re-skins every call
+		// (ignored when the pack parameters ask for skin channels instead).
 		const std::vector<Transform3D> *skin_palette = nullptr;
 	};
 

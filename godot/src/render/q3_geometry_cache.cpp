@@ -58,7 +58,8 @@ bool pack_surface(const Q3SurfaceArrays &p_arrays,
 	const int vertex_count = static_cast<int>(p_arrays.element_count());
 	if (vertex_count <= 0)
 		return false;
-	const bool skinned = p_skin_palette != nullptr && !p_skin_palette->empty();
+	const bool skinned = !p_pack.skin_channels && p_skin_palette != nullptr &&
+			!p_skin_palette->empty();
 	r_vertices.resize(0);
 	for (int element = 0; element < vertex_count; ++element) {
 		const int index = p_arrays.indices.is_empty() ? element :
@@ -68,8 +69,9 @@ bool pack_surface(const Q3SurfaceArrays &p_arrays,
 		Vector3 position = p_arrays.positions[index];
 		Vector3 normal = index < p_arrays.normals.size() ?
 				p_arrays.normals[index] : Vector3(0, 1, 0);
-		if (skinned && p_arrays.bones.size() >= (index + 1) * 4 &&
-				p_arrays.weights.size() >= (index + 1) * 4) {
+		const bool has_skin_rows = p_arrays.bones.size() >= (index + 1) * 4 &&
+				p_arrays.weights.size() >= (index + 1) * 4;
+		if (skinned && has_skin_rows) {
 			Vector3 skinned_position;
 			Vector3 skinned_normal;
 			float total = 0.0f;
@@ -107,9 +109,24 @@ bool pack_surface(const Q3SurfaceArrays &p_arrays,
 		append_vec2(r_vertices, uv);
 		append_color(r_vertices, index < p_arrays.colors.size() ?
 				p_arrays.colors[index] : Color(1, 1, 1, 1));
-		const Vector4 c0 = custom_at(p_arrays.custom0, index);
-		const Vector4 c1 = custom_at(p_arrays.custom1, index);
+		Vector4 c0 = custom_at(p_arrays.custom0, index);
+		Vector4 c1 = custom_at(p_arrays.custom1, index);
 		const Vector4 c2 = custom_at(p_arrays.custom2, index);
+		if (p_pack.skin_channels) {
+			// Bone indices as floats (exactly representable) and their weights;
+			// an unskinned surface carries an identity row (bone 0, weight 1)
+			// so one vertex shader serves rigid and skinned surfaces alike.
+			if (has_skin_rows) {
+				const int row = index * 4;
+				c0 = Vector4(float(p_arrays.bones[row]), float(p_arrays.bones[row + 1]),
+						float(p_arrays.bones[row + 2]), float(p_arrays.bones[row + 3]));
+				c1 = Vector4(p_arrays.weights[row], p_arrays.weights[row + 1],
+						p_arrays.weights[row + 2], p_arrays.weights[row + 3]);
+			} else {
+				c0 = Vector4();
+				c1 = Vector4(1.0f, 0.0f, 0.0f, 0.0f);
+			}
+		}
 		append_f32(r_vertices, c0.x); append_f32(r_vertices, c0.y);
 		append_f32(r_vertices, c0.z); append_f32(r_vertices, c0.w);
 		append_f32(r_vertices, c1.x); append_f32(r_vertices, c1.y);
@@ -151,7 +168,8 @@ std::size_t Q3SurfaceArrays::element_count() const {
 bool Q3PackParameters::operator==(const Q3PackParameters &p_other) const {
 	return source == p_other.source && uv_u == p_other.uv_u &&
 			uv_v == p_other.uv_v && water_uv == p_other.water_uv &&
-			camera_position == p_other.camera_position;
+			camera_position == p_other.camera_position &&
+			skin_channels == p_other.skin_channels;
 }
 
 void Q3GeometryCache::begin_frame(std::uint64_t p_frame_id) {
@@ -189,8 +207,8 @@ std::shared_ptr<const Q3PackedStream> Q3GeometryCache::acquire(
 	}
 	if (entry.arrays.empty())
 		return nullptr;
-	const bool skinned = p_request.skin_palette != nullptr &&
-			!p_request.skin_palette->empty();
+	const bool skinned = !p_request.pack.skin_channels &&
+			p_request.skin_palette != nullptr && !p_request.skin_palette->empty();
 	if (!dirty && !skinned && entry.stream && entry.pack == p_request.pack)
 		return entry.stream;
 	PackedByteArray bytes;
