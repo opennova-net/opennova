@@ -10,6 +10,8 @@
 #include <runtime/devtools/imgui_abi.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
 #include <runtime/devtools/stats_window.h>
+#include <runtime/devtools/weapon_request.h>
+#include <runtime/devtools/weapon_window.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -30,6 +32,7 @@ using opennova::devtools::GameDevTools;
 using opennova::devtools::FrameStatsBoard;
 using opennova::devtools::Slot;
 using opennova::devtools::StatsWindow;
+using opennova::devtools::WeaponWindow;
 
 namespace {
 
@@ -126,7 +129,8 @@ void test_attach_sets_docking_and_viewport_policy() {
 
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 4, "Game + Stats + Entities + demo registered");
+	CHECK(tools.pass().window_count() == 5,
+			"Game + Stats + Entities + Weapon + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -140,7 +144,14 @@ void test_game_window_is_mandatory_and_detachable() {
 	CHECK(std::strcmp(tools.pass().window(2).title(), "Entities") == 0,
 			"Entities registers after Stats");
 	CHECK(!tools.pass().window(2).open, "the Entities window starts closed");
-	CHECK(!tools.pass().window(3).open, "the demo window starts closed");
+	CHECK(std::strcmp(tools.pass().window(3).title(), "Weapon") == 0,
+			"Weapon registers after Entities");
+	CHECK(!tools.pass().window(3).open, "the Weapon window starts closed");
+	CHECK(tools.pass().window(3).initial_dock_placement() == InitialDockPlacement::None,
+			"Weapon floats: the right dock is too narrow for a timeline");
+	CHECK(tools.pass().window(3).preferred_size().width > 0.0f,
+			"and asks for a first-open size wide enough to draw one");
+	CHECK(!tools.pass().window(4).open, "the demo window starts closed");
 }
 
 void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
@@ -272,9 +283,10 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 4, "Game + Stats + Entities + demo registered");
+	CHECK(tools.pass().window_count() == 5,
+			"Game + Stats + Entities + Weapon + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
-	CHECK(!tools.pass().window(3).open, "the demo window starts closed");
+	CHECK(!tools.pass().window(4).open, "the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
 
 	ImGui::NewFrame();
@@ -524,6 +536,235 @@ void test_entities_debug_request_queue_and_gating() {
 	CHECK(!tools.take_debug_request(request), "the queue drains exactly once");
 }
 
+// A snapshot shaped like the shipped minimal weapon.def: FIRE authored {0, 5},
+// RELOAD authored {196, auto} baked to 31 from its clip, RECOIL {0, 0} (the
+// zero-length tail that a frame-rate sampler would miss), and SCOPEUP left
+// unauthored the way every shipped corpus leaves it.
+opennova::devtools::WeaponActionSnapshot make_weapon_snapshot() {
+	namespace wa = opennova::world::weapon_action;
+	opennova::devtools::WeaponActionSnapshot snapshot;
+	snapshot.valid = true;
+	snapshot.weapon_name = "WPN_AK47AUTO";
+	snapshot.adm_index = 2;
+	snapshot.logic_tick = 8800;
+	snapshot.clip = 29;
+	snapshot.clip_capacity = 30;
+	snapshot.reserve = 210;
+	snapshot.current = wa::kRecoil;
+	snapshot.phase = opennova::world::weapon_phase::kActive;
+	snapshot.counter = 3;
+	snapshot.player_alive = true;
+
+	for (int id = 0; id < wa::kCount; ++id) {
+		opennova::devtools::WeaponActionRow &row = snapshot.actions[id];
+		row.authored = id <= wa::kSwitchRank;  // the nine rows shipped data writes
+		row.authored_name = "IDLE";
+		row.function = "WPN_STD_IDLE";
+	}
+	opennova::devtools::WeaponActionRow &fire = snapshot.actions[wa::kFire];
+	fire.authored_name = "FIRE";
+	fire.function = "WPN_STD_FIRE";
+	fire.delay_start = 0;
+	fire.delay_end = 5;
+	fire.authored_delay_start = 0;
+	fire.authored_delay_end = 5;
+	fire.has_anim = true;
+	fire.anim_key = "anim_wpn_fire";
+	fire.soundsetend = "GS_M4";  // the gunshot rides the END leg on most rows
+	fire.clip_ticks = 7;
+
+	opennova::devtools::WeaponActionRow &recoil = snapshot.actions[wa::kRecoil];
+	recoil.authored_name = "RECOIL";
+	recoil.function = "WPN_STD_RECOIL";
+	recoil.particle = "Effect_CAR15MF";
+
+	opennova::devtools::WeaponActionRow &reload = snapshot.actions[wa::kReload];
+	reload.authored_name = "RELOAD";
+	reload.function = "WPN_STD_RELOAD";
+	reload.delay_start = 196;
+	reload.delay_end = 31;
+	reload.authored_delay_start = 196;
+	reload.authored_delay_end = -1;  // `auto`
+	reload.has_anim = true;
+	reload.anim_key = "anim_wpn_reload";
+	reload.clip_ticks = 31;
+	return snapshot;
+}
+
+opennova::world::WeaponTraceSample make_trace_sample(uint32_t tick, int32_t current,
+		uint8_t phase, int32_t counter) {
+	opennova::world::WeaponTraceSample sample;
+	sample.tick = tick;
+	sample.current = current;
+	sample.phase = phase;
+	sample.counter = counter;
+	return sample;
+}
+
+void test_weapon_window_formats_the_pushed_snapshot() {
+	namespace wa = opennova::world::weapon_action;
+	GameDevTools tools;
+	WeaponWindow &weapon = tools.weapon_window();
+	CHECK(!weapon.snapshot_valid(), "a fresh window holds nothing");
+
+	weapon.set_snapshot(make_weapon_snapshot());
+	CHECK(weapon.snapshot_valid(), "the pushed record lands");
+	CHECK(std::strcmp(weapon.weapon_name(), "WPN_AK47AUTO") == 0, "the equipped name");
+	// An explicit delay reads as itself; `auto` reads as auto AND what it baked
+	// to, because those are different authorings the editor must not conflate.
+	CHECK(std::strcmp(weapon.action_timing(wa::kFire), "0 / 5") == 0,
+			"explicit delays read as their values");
+	CHECK(std::strcmp(weapon.action_timing(wa::kReload), "196 / auto(31)") == 0,
+			"an auto delay shows the sentinel and its baked value");
+	CHECK(std::strcmp(weapon.action_timing(wa::kRecoil), "0 / 0") == 0,
+			"a zero-length tail is still a value, not a blank");
+	CHECK(std::strcmp(weapon.action_label(wa::kFire), "FIRE") == 0, "authored rows read plainly");
+	CHECK(std::strcmp(weapon.action_label(wa::kScopeUp), "SCOPEUP *") == 0,
+			"a slot with no authored row is marked: its edits cannot be written back");
+
+	// An invalid record clears the window (the world unloaded).
+	weapon.set_snapshot(opennova::devtools::WeaponActionSnapshot{});
+	CHECK(!weapon.snapshot_valid(), "an invalid snapshot clears");
+	CHECK(weapon.trace_count() == 0, "and drops the trace with it");
+}
+
+void test_weapon_window_accumulates_the_trace_delta() {
+	namespace wa = opennova::world::weapon_action;
+	namespace wp = opennova::world::weapon_phase;
+	GameDevTools tools;
+	WeaponWindow &weapon = tools.weapon_window();
+
+	// The embedder pushes only what the pump recorded since the last push; the
+	// window is what accumulates them into a scrollback.
+	opennova::devtools::WeaponActionSnapshot first = make_weapon_snapshot();
+	first.trace.push_back(make_trace_sample(8801, wa::kFire, wp::kEntered, 0));
+	opennova::world::WeaponTraceSample fired =
+			make_trace_sample(8802, wa::kRecoil, wp::kActive, 4);
+	fired.fired = true;
+	fired.action_finished = wa::kFire;
+	first.trace.push_back(fired);
+	weapon.set_snapshot(std::move(first));
+	CHECK(weapon.trace_count() == 2, "the first delta lands");
+
+	opennova::devtools::WeaponActionSnapshot second = make_weapon_snapshot();
+	second.trace.push_back(make_trace_sample(8803, wa::kRecoil, wp::kActive, 3));
+	weapon.set_snapshot(std::move(second));
+	CHECK(weapon.trace_count() == 3, "the next delta appends rather than replacing");
+
+	CHECK(std::strcmp(weapon.trace_row(0), "8801 FIRE ENTER c0") == 0,
+			"a plain tick formats as tick/action/phase/counter");
+	CHECK(std::strcmp(weapon.trace_row(1), "8802 RECOIL ACTIVE c4 fired end=FIRE") == 0,
+			"and an eventful tick names what happened on it");
+
+	// A different weapon is a different definition: nothing carries over.
+	opennova::devtools::WeaponActionSnapshot other = make_weapon_snapshot();
+	other.weapon_name = "WPN_M4AUTO";
+	weapon.set_snapshot(std::move(other));
+	CHECK(weapon.trace_count() == 0, "switching weapons drops the previous trace");
+}
+
+void test_weapon_window_request_queue_and_gating() {
+	namespace wa = opennova::world::weapon_action;
+	using opennova::devtools::WeaponRequest;
+	GameDevTools tools;
+	WeaponWindow &weapon = tools.weapon_window();
+
+	CHECK(!weapon.wants_snapshot(), "a closed window asks the embedder for nothing");
+	CHECK(!tools.needs_weapon_snapshot(), "and the gate agrees");
+	weapon.open = true;
+	CHECK(!tools.needs_weapon_snapshot(), "a window open inside a closed pass still wants nothing");
+	tools.pass().set_open(true);
+
+	WeaponRequest request;
+	// Becoming visible arms the engine ring; that IS the first request.
+	CHECK(tools.take_weapon_request(request), "visibility queues the trace arm");
+	CHECK(request.kind == WeaponRequest::Kind::ArmTrace && request.armed,
+			"armed on the way in");
+	CHECK(weapon.is_recording(), "and the window says it is recording");
+	CHECK(weapon.wants_snapshot(), "a visible window wants records");
+	CHECK(tools.needs_weapon_snapshot(), "and the embedder gate opens");
+
+	// The drawn controls all funnel through enqueue_request, which is also the
+	// headless seam: clicking a real button needs a real backend.
+	WeaponRequest delays;
+	delays.kind = WeaponRequest::Kind::SetActionDelays;
+	delays.action_id = wa::kFire;
+	delays.delay_start = 0;
+	delays.delay_end = 9;
+	weapon.enqueue_request(delays);
+	WeaponRequest trigger;
+	trigger.kind = WeaponRequest::Kind::TriggerAction;
+	trigger.trigger = WeaponRequest::Trigger::Reload;
+	weapon.enqueue_request(trigger);
+
+	CHECK(tools.take_weapon_request(request), "the queue drains through GameDevTools");
+	CHECK(request.kind == WeaponRequest::Kind::SetActionDelays && request.action_id == wa::kFire &&
+					request.delay_end == 9,
+			"FIFO: the delay edit comes back first, intact");
+	CHECK(tools.take_weapon_request(request), "then the trigger");
+	CHECK(request.kind == WeaponRequest::Kind::TriggerAction &&
+					request.trigger == WeaponRequest::Trigger::Reload,
+			"and it carries the real input seam, not a raw action id");
+	CHECK(!tools.take_weapon_request(request), "the queue is empty");
+
+	// Hiding drops the live record but not the scrollback, and with REC on the
+	// engine ring stays armed: the loop is close F3, shoot, reopen, read.
+	opennova::devtools::WeaponActionSnapshot held = make_weapon_snapshot();
+	held.trace.push_back(make_trace_sample(9000, wa::kIdle, opennova::world::weapon_phase::kDone, 3));
+	weapon.set_snapshot(std::move(held));
+	tools.pass().set_open(false);
+	CHECK(!weapon.wants_snapshot(), "hidden again");
+	CHECK(!weapon.snapshot_valid(), "and it drops the record it held");
+	CHECK(weapon.trace_count() == 1, "but keeps the scrollback");
+	CHECK(!tools.take_weapon_request(request), "and queues no disarm while REC is on");
+
+	// A re-show hands back ticks already held; only newer ones append.
+	tools.pass().set_open(true);
+	opennova::devtools::WeaponActionSnapshot reshown = make_weapon_snapshot();
+	reshown.trace.push_back(make_trace_sample(9000, wa::kIdle, opennova::world::weapon_phase::kDone, 3));
+	reshown.trace.push_back(make_trace_sample(9001, wa::kIdle, opennova::world::weapon_phase::kDone, 2));
+	weapon.set_snapshot(std::move(reshown));
+	CHECK(weapon.trace_count() == 2, "the duplicate tick is skipped, the new one lands");
+	while (tools.take_weapon_request(request)) {
+	}
+
+	// REC off releases the ring on the way out.
+	weapon.set_recording_for_test(false);
+	tools.pass().set_open(false);
+	CHECK(tools.take_weapon_request(request), "hiding with REC off queues the disarm");
+	CHECK(request.kind == WeaponRequest::Kind::ArmTrace && !request.armed, "disarmed on the way out");
+}
+
+void test_weapon_window_draws_its_panes() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	WeaponWindow &weapon = tools.weapon_window();
+	weapon.open = true;
+	tools.pass().set_open(true);
+
+	// The dope sheet and the trace are custom draw-list geometry rather than
+	// stock widgets, so the layout pass is the only thing that exercises them.
+	opennova::devtools::WeaponActionSnapshot snapshot = make_weapon_snapshot();
+	snapshot.trace.push_back(make_trace_sample(8801, opennova::world::weapon_action::kFire,
+			opennova::world::weapon_phase::kEntered, 0));
+	snapshot.trace.push_back(make_trace_sample(8802, opennova::world::weapon_action::kRecoil,
+			opennova::world::weapon_phase::kActive, 4));
+	weapon.set_snapshot(std::move(snapshot));
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(11), "the pass drew");
+	ImGui::Render();
+	CHECK(ImGui::GetDrawData()->TotalVtxCount > 0, "the Weapon panes produced geometry");
+
+	// And with no weapon it degrades to a sentence rather than dividing by a
+	// zero-length axis.
+	weapon.set_snapshot(opennova::devtools::WeaponActionSnapshot{});
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(12), "an empty window still lays out");
+	ImGui::Render();
+}
+
 }  // namespace
 
 int main() {
@@ -538,6 +779,10 @@ int main() {
 	test_layout_reset_brings_windows_home();
 	test_entities_window_formats_the_pushed_directory();
 	test_entities_debug_request_queue_and_gating();
+	test_weapon_window_formats_the_pushed_snapshot();
+	test_weapon_window_accumulates_the_trace_delta();
+	test_weapon_window_request_queue_and_gating();
+	test_weapon_window_draws_its_panes();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

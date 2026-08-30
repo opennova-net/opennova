@@ -653,6 +653,70 @@ void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
 // world tick owns the parallel NPC UseGun parent-slot pump; this remains the
 // first-person player's input/presentation seam.
 // [orig: WeaponAction_ProcessAllEntities @0x542690 pumps every pooled entity]
+void weapon_trace_arm(LocalPlayerWeapon &w, bool armed) {
+	if (armed == w.trace_armed) return;
+	w.trace_armed = armed;
+	if (armed) {
+		w.trace.assign(kWeaponTraceCapacity, WeaponTraceSample{});
+	} else {
+		w.trace.clear();
+		w.trace.shrink_to_fit();
+	}
+	w.trace_head = 0;
+	w.trace_wrapped = false;
+}
+
+void weapon_trace_clear(LocalPlayerWeapon &w) {
+	w.trace_head = 0;
+	w.trace_wrapped = false;
+}
+
+std::vector<WeaponTraceSample> weapon_trace_samples(const LocalPlayerWeapon &w) {
+	std::vector<WeaponTraceSample> out;
+	if (!w.trace_armed || w.trace.empty()) return out;
+	const size_t count = w.trace_wrapped ? w.trace.size() : w.trace_head;
+	out.reserve(count);
+	const size_t first = w.trace_wrapped ? w.trace_head : 0;
+	for (size_t i = 0; i < count; ++i) {
+		out.push_back(w.trace[(first + i) % w.trace.size()]);
+	}
+	return out;
+}
+
+namespace {
+
+// One recorded tick. Reads the slot AFTER the pump's ammo mirroring so clip and
+// reserve are the values the frame actually ends on.
+void weapon_trace_record(LocalPlayerWeapon &w, const WeaponSlotState &slot,
+		const WeaponFsmEvents &ev, uint32_t tick) {
+	if (!w.trace_armed || w.trace.empty()) return;
+	WeaponTraceSample &out = w.trace[w.trace_head];
+	out = WeaponTraceSample{};
+	out.tick = tick;
+	out.current = slot.current;
+	out.next = slot.next;
+	out.prev = slot.prev;
+	out.phase = slot.phase;
+	out.counter = slot.counter;
+	out.clip = slot.clip;
+	out.reserve = slot.reserve;
+	out.heat = weapon_slot_accumulated_heat(w.def, slot, static_cast<int32_t>(tick));
+	out.action_started = ev.action_started;
+	out.action_finished = ev.action_finished;
+	out.action_effect = ev.action_effect;
+	out.fired = ev.fired;
+	out.dry_fired = ev.dry_fired;
+	out.reload_requested = ev.reload_requested;
+	out.reload_applied = ev.reload_applied;
+	out.advance_anim = ev.advance_anim;
+	std::snprintf(out.anim_key, sizeof(out.anim_key), "%s", w.anim_key.c_str());
+	out.anim_variant = w.anim_variant;
+	w.trace_head = (w.trace_head + 1) % w.trace.size();
+	if (w.trace_head == 0) w.trace_wrapped = true;
+}
+
+} // namespace
+
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
 	io.fired = LocalWeaponFiredWire{};
@@ -1106,6 +1170,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		player_view_set_engaged(view, true,
 				(w.def.flags2 & weapon_flag2::kInset) != 0);
 	}
+	// Devtools instrumentation, last: the slot has finished mirroring, so the
+	// sample is the state this tick actually ends on.
+	weapon_trace_record(w, active_slot, ev, world.logic_tick);
 }
 
 } // namespace opennova::world

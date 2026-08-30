@@ -4,6 +4,7 @@
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/stats_window.h>
+#include <runtime/devtools/weapon_window.h>
 
 #include <utility>
 
@@ -33,6 +34,9 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	auto entities = std::make_unique<EntitiesWindow>();
 	entities_window_ = entities.get();
 	pass_.register_window(std::move(entities));
+	auto weapon = std::make_unique<WeaponWindow>();
+	weapon_window_ = weapon.get();
+	pass_.register_window(std::move(weapon));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -74,6 +78,26 @@ bool GameDevTools::needs_entity_directory() const {
 
 bool GameDevTools::take_debug_request(DebugRequest &request) {
 	return entities_window_->take_request(request);
+}
+
+void GameDevTools::set_weapon_snapshot(WeaponActionSnapshot snapshot) {
+	weapon_window_->set_snapshot(std::move(snapshot));
+}
+
+void GameDevTools::set_weapon_catalog(WeaponCatalog catalog) {
+	weapon_window_->set_catalog(std::move(catalog));
+}
+
+bool GameDevTools::needs_weapon_snapshot() const {
+	return pass_.is_open() && weapon_window_->open;
+}
+
+uint64_t GameDevTools::weapon_catalog_serial() const {
+	return weapon_window_->catalog_serial();
+}
+
+bool GameDevTools::take_weapon_request(WeaponRequest &request) {
+	return weapon_window_->take_request(request);
 }
 
 }  // namespace opennova::devtools

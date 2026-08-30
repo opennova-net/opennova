@@ -611,6 +611,9 @@ private:
 	// H-learned pose); remote entities render wire-direct (present + wire_present_pass). enable_join
 	// turns it on; a sim is host XOR joiner. [orig: NapiNPClientMsg_0x00C @0x42E730 self name-match]
 	bool joiner_ = false;
+	// The F3 Weapon window's held-trigger latch. OR'd into the per-tick weapon
+	// input so a devtools hold survives the shell's own per-frame write.
+	bool debug_weapon_fire_held_ = false;
 	bool joiner_net_diagnostics_ = false;
 	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): the frame
 	// sequence, its latches (started/spawned/redeploy/tripwire), the
@@ -1975,6 +1978,41 @@ public:
 	// for the C++ embedders (DevTools) that already hold a handle; null
 	// without a kernel.
 	opennova::world::EntityCommands *entity_commands();
+
+	// --- the F3 Weapon window's native seams (devtools; ADR 0042 d6) -------
+	// The live equipped-weapon cluster (the baked FSM def, the slot, the clip
+	// rings); null without a kernel or with nothing equipped. The Weapon
+	// window's embedder assembles its record from this plus the retained parse
+	// below — no Variant round-trip.
+	const opennova::world::LocalPlayerWeapon *native_local_player_weapon() const;
+	// The retained weapon.def row behind the equipped weapon: the AUTHORED
+	// delays a re-bake starts from, which differ from the baked ones wherever
+	// a row wrote `auto`. Null when the equipped name has no retained row.
+	const DefWeaponDef *native_equipped_weapon_row() const;
+	// The equipped weapon's index in the armory table; -1 when unresolved.
+	int native_equipped_weapon_adm_index() const;
+	// The equipped clip keys (.adm rings), for the window's ANIM picker.
+	std::vector<std::string> native_equipped_weapon_clip_keys() const;
+
+	// Live ACTION edits. Both write the LIVE baked slot (instant, no re-bake,
+	// no slot disturbance — correct for dragging a strip edge while the
+	// trigger is held) and mirror into the retained row so a re-install keeps
+	// them. `auto` (-1) and an ANIM change re-bake, because both re-resolve
+	// from the clip. NOTHING here touches the filesystem.
+	// p_action_id is opennova::world::weapon_action::*; p_field is
+	// devtools::WeaponRequest::TextField (paired by static_assert at the drain).
+	bool debug_weapon_set_action_delays(int p_action_id, int p_delay_start, int p_delay_end);
+	bool debug_weapon_set_action_text(int p_action_id, int p_field, const String &p_text);
+	// Queue an action through the REAL input seam and its real gate; false when
+	// the gate refuses. p_trigger is devtools::WeaponRequest::Trigger.
+	bool debug_weapon_trigger(int p_trigger);
+	// The devtools held-trigger latch, OR'd into the per-tick weapon input so
+	// it survives the shell's own write.
+	void debug_weapon_set_fire_held(bool p_held);
+	bool debug_weapon_fire_held() const { return debug_weapon_fire_held_; }
+	// Arm, disarm and clear the pump's 62.5 Hz trace ring.
+	void debug_weapon_arm_trace(bool p_armed);
+	void debug_weapon_clear_trace();
 	// The full card by packed wire handle; null when nothing resolves. The
 	// AI-index and SSN forms wrap the same builder (edit seams key on
 	// ai_index; pool-1 vehicles carry no brain and resolve by SSN).

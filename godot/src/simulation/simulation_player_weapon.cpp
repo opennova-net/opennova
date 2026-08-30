@@ -8,6 +8,8 @@
 
 #include <formats/def/def.h> // the weapon.def flag mirrors pinned below
 
+#include <cstdio>
+
 using namespace sim_internal;
 
 // The world-side flag mirrors must stay the def parser's exact bits.
@@ -253,8 +255,11 @@ void Simulation::set_local_player_first_person_model_available(bool p_available)
 
 void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
 		bool p_reload_pressed) {
+	// This is the ONE funnel both roles feed (apply_frame_input, once per tick),
+	// so the F3 Weapon window's hold is OR'd in here rather than raced against
+	// the shell's own per-frame write.
 	opennova::world::local_weapon_set_input(kernel_->weapon, kernel_->view,
-			p_fire_held, p_fire_pressed, p_reload_pressed);
+			p_fire_held || debug_weapon_fire_held_, p_fire_pressed, p_reload_pressed);
 }
 
 // One 62.5 Hz pump of the local player's slot, after the world logic tick — the
@@ -638,4 +643,185 @@ Array Simulation::drain_local_player_weapon_events() {
 	}
 	kernel_->weapon.events.clear();
 	return out;
+}
+
+
+// =========================================================================
+// The F3 Weapon window's native seams (devtools; ADR 0042 d6). Records out as
+// engine types, edits in through the engine's own weapon seams. Every trigger
+// takes the REAL input path and its real gate — nothing here fakes ammo, and
+// nothing here writes a file.
+// =========================================================================
+
+namespace {
+
+namespace wa = opennova::world::weapon_action;
+
+// The retained weapon.def ACTION row bound to a slot, matched the way the bake
+// itself binds it: by the slot's suffix name, case-insensitively (the witnessed
+// rule and its citation live on weapon_fsm_bake, engine/runtime/world/weapon_fsm.h).
+// The retained weapon.def entry for a weapon name, or null.
+DefWeaponDef *find_weapon_row(DefWeaponsFile &file, const std::string &name) {
+	if (name.empty()) return nullptr;
+	for (size_t i = 0; i < file.count; ++i) {
+		if (opennova::strutil::iequals(file.entries[i].weapon_name, name)) {
+			return &file.entries[i];
+		}
+	}
+	return nullptr;
+}
+
+DefWeaponAction *find_action_row(DefWeaponDef *row, int action_id) {
+	if (row == nullptr || action_id < 0 || action_id >= wa::kCount) return nullptr;
+	const char *suffix = opennova::world::kWeaponActionSuffixes[action_id];
+	for (size_t i = 0; i < row->actions_count; ++i) {
+		if (opennova::strutil::iequals(row->actions[i].name, suffix)) {
+			return &row->actions[i];
+		}
+	}
+	return nullptr;
+}
+
+}  // namespace
+
+const opennova::world::LocalPlayerWeapon *Simulation::native_local_player_weapon() const {
+	if (!kernel_ || !kernel_->weapon.active) return nullptr;
+	return &kernel_->weapon;
+}
+
+const DefWeaponDef *Simulation::native_equipped_weapon_row() const {
+	if (!kernel_ || !kernel_->weapon_defs_ok) return nullptr;
+	// The const_cast is confined here: the finder is shared with the mutating
+	// edits below, and the retained parse is this object's own member.
+	return find_weapon_row(const_cast<DefWeaponsFile &>(kernel_->weapon_defs),
+			kernel_->weapon.def_name);
+}
+
+int Simulation::native_equipped_weapon_adm_index() const {
+	if (!kernel_ || kernel_->weapon.def_name.empty()) return -1;
+	return kernel_->world.weapons.index_of(kernel_->weapon.def_name.c_str());
+}
+
+std::vector<std::string> Simulation::native_equipped_weapon_clip_keys() const {
+	std::vector<std::string> out;
+	if (!kernel_) return out;
+	out.reserve(kernel_->weapon.clip_rings.size());
+	for (const auto &entry : kernel_->weapon.clip_rings) {
+		out.push_back(entry.first);
+	}
+	return out;
+}
+
+bool Simulation::debug_weapon_set_action_delays(int p_action_id, int p_delay_start,
+		int p_delay_end) {
+	if (!kernel_ || p_action_id < 0 || p_action_id >= wa::kCount) return false;
+	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
+	if (!weapon.active) return false;
+
+	// Mirror into the retained row first, so a re-install (an armory accept, a
+	// respawn) keeps the edit. -1 is the parser's `auto` sentinel.
+	DefWeaponAction *row = find_action_row(
+			kernel_->weapon_defs_ok
+					? find_weapon_row(kernel_->weapon_defs, weapon.def_name)
+					: nullptr,
+			p_action_id);
+	if (row != nullptr) {
+		row->delaystart = p_delay_start;
+		row->delayend = p_delay_end;
+	}
+	// `auto` has to come back through the bake, which is what resolves it from
+	// the clip ring; an explicit value patches the live slot with no re-bake so
+	// dragging an edge mid-burst never disturbs the running action.
+	if (p_delay_start < 0 || p_delay_end < 0) {
+		return row != nullptr &&
+				kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true);
+	}
+	opennova::world::WeaponFsmAction &baked = weapon.def.actions[p_action_id];
+	baked.delay_start = p_delay_start;
+	baked.delay_end = p_delay_end;
+	return true;
+}
+
+bool Simulation::debug_weapon_set_action_text(int p_action_id, int p_field,
+		const String &p_text) {
+	if (!kernel_ || p_action_id < 0 || p_action_id >= wa::kCount) return false;
+	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
+	if (!weapon.active) return false;
+	const CharString utf8 = p_text.utf8();
+	const char *value = utf8.get_data() != nullptr ? utf8.get_data() : "";
+
+	DefWeaponAction *row = find_action_row(
+			kernel_->weapon_defs_ok
+					? find_weapon_row(kernel_->weapon_defs, weapon.def_name)
+					: nullptr,
+			p_action_id);
+	opennova::world::WeaponFsmAction &baked = weapon.def.actions[p_action_id];
+	const auto write = [&](char *dst, size_t dst_size, char *row_dst, size_t row_size) {
+		if (row_dst != nullptr) std::snprintf(row_dst, row_size, "%s", value);
+		std::snprintf(dst, dst_size, "%s", value);
+	};
+	// p_field is devtools::WeaponRequest::TextField; the drain static_asserts
+	// the pairing rather than this TU including a devtools header.
+	switch (p_field) {
+		case 0:  // Anim — re-resolves the clip, so any `auto` delay re-derives.
+			if (row == nullptr) return false;
+			std::snprintf(row->anim, sizeof(row->anim), "%s", value);
+			return kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true);
+		case 1:
+			write(baked.soundset, sizeof(baked.soundset), row ? row->soundset : nullptr,
+					row ? sizeof(row->soundset) : 0);
+			return true;
+		case 2:
+			write(baked.soundsetend, sizeof(baked.soundsetend), row ? row->soundsetend : nullptr,
+					row ? sizeof(row->soundsetend) : 0);
+			return true;
+		case 3:
+			write(baked.particle, sizeof(baked.particle), row ? row->particle : nullptr,
+					row ? sizeof(row->particle) : 0);
+			return true;
+		case 4:
+			write(baked.particle_userpoint, sizeof(baked.particle_userpoint),
+					row ? row->particleuserpoint : nullptr,
+					row ? sizeof(row->particleuserpoint) : 0);
+			return true;
+		default:
+			return false;
+	}
+}
+
+bool Simulation::debug_weapon_trigger(int p_trigger) {
+	if (!kernel_) return false;
+	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
+	if (!weapon.active || local_player_dead()) return false;
+	opennova::world::WeaponSlotState *slot =
+			opennova::world::active_local_weapon_slot(kernel_->world, weapon);
+	if (slot == nullptr) return false;
+	// p_trigger is devtools::WeaponRequest::Trigger, paired at the drain.
+	switch (p_trigger) {
+		case 0:  // Fire: the press edge, latched until the pump consumes it.
+			kernel_->set_weapon_input(weapon.fire_held, true, false);
+			return true;
+		case 1:  // Reload: refused exactly where the input dispatcher refuses it.
+			if (!opennova::world::weapon_fsm_reload_allowed(weapon.def, *slot)) return false;
+			kernel_->set_weapon_input(weapon.fire_held, false, true);
+			return true;
+		case 2:  // The ADS toggle request — the same seam the right button uses.
+			request_local_player_scope_toggle();
+			return true;
+		case 3: request_local_player_weapon_cycle(1); return true;
+		case 4: request_local_player_weapon_cycle(-1); return true;
+		default: return false;
+	}
+}
+
+void Simulation::debug_weapon_set_fire_held(bool p_held) { debug_weapon_fire_held_ = p_held; }
+
+void Simulation::debug_weapon_arm_trace(bool p_armed) {
+	if (!kernel_) return;
+	opennova::world::weapon_trace_arm(kernel_->weapon, p_armed);
+}
+
+void Simulation::debug_weapon_clear_trace() {
+	if (!kernel_) return;
+	opennova::world::weapon_trace_clear(kernel_->weapon);
 }

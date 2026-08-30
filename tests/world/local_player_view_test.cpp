@@ -7,6 +7,7 @@
 //  runs them in, pinned where they used to live in the Godot binding.
 #include <cstdint>
 #include <cstdio>
+#include <vector>
 
 #include <formats/def/def.h>
 #include <runtime/world/ai.h>
@@ -366,6 +367,57 @@ void test_pump_feeds_the_heat_window_water_gate_from_the_body_z() {
     }
 }
 
+// --- the F3 Weapon window's tick trace ---------------------------------------
+// Devtools instrumentation on the pump: disarmed it records nothing, armed it
+// takes one sample per PUMP tick (which is why a 1-tick action or RECOIL's
+// zero-length tail cannot fall between two display frames), and the ring wraps
+// oldest-first rather than growing.
+
+void test_weapon_trace_records_one_sample_per_pump_tick() {
+    LocalWorld lw;
+    PlayerViewState v;
+    LocalPlayerWeapon w = scoped_weapon(0);
+
+    lw.w.logic_tick = 100;
+    pump_once(lw, w, v);
+    CHECK(weapon_trace_samples(w).empty(), "a disarmed pump records nothing");
+    CHECK(w.trace.empty(), "and holds no ring at all");
+
+    weapon_trace_arm(w, true);
+    CHECK(weapon_trace_samples(w).empty(), "arming starts empty");
+    for (uint32_t i = 0; i < 5; ++i) {
+        lw.w.logic_tick = 200 + i;
+        pump_once(lw, w, v);
+    }
+    std::vector<WeaponTraceSample> samples = weapon_trace_samples(w);
+    CHECK(samples.size() == 5, "one sample per pump tick");
+    CHECK(samples.front().tick == 200 && samples.back().tick == 204,
+          "oldest first, on the pump's own logic ticks");
+    CHECK(samples.back().current == w.slot.current && samples.back().counter == w.slot.counter,
+          "the sample is the state the tick ended on");
+
+    weapon_trace_clear(w);
+    CHECK(weapon_trace_samples(w).empty(), "clear drops the samples but keeps the ring armed");
+    CHECK(w.trace_armed, "still armed");
+
+    // Wrap: the ring holds a fixed window, so a long run keeps the NEWEST
+    // kWeaponTraceCapacity ticks rather than growing without bound.
+    for (uint32_t i = 0; i < kWeaponTraceCapacity + 7; ++i) {
+        lw.w.logic_tick = 1000 + i;
+        pump_once(lw, w, v);
+    }
+    samples = weapon_trace_samples(w);
+    CHECK(samples.size() == kWeaponTraceCapacity, "the ring caps at its capacity");
+    CHECK(samples.front().tick == 1000 + 7, "and the oldest ticks are the ones dropped");
+    CHECK(samples.back().tick == 1000 + kWeaponTraceCapacity + 6, "newest last");
+
+    weapon_trace_arm(w, false);
+    CHECK(w.trace.empty(), "disarming releases the ring so a closed window costs nothing");
+    lw.w.logic_tick = 5000;
+    pump_once(lw, w, v);
+    CHECK(weapon_trace_samples(w).empty(), "and recording stops");
+}
+
 int main() {
     test_scope_toggle_refuses_inactive_weapon();
     test_scope_up_refused_while_moving_on_scoped_weapon();
@@ -380,6 +432,7 @@ int main() {
     test_frame_reads_the_state_and_the_card_selector();
     test_set_eye_mirrors_the_head_into_the_world();
     test_pump_feeds_the_heat_window_water_gate_from_the_body_z();
+    test_weapon_trace_records_one_sample_per_pump_tick();
     if (failures == 0) std::printf("local_player_view_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

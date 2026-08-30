@@ -189,6 +189,10 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			window_class.DockNodeFlagsOverrideSet |= ImGuiDockNodeFlags_NoUndocking;
 			ImGui::SetNextWindowClass(&window_class);
 		}
+		const WindowSizeHint hint = window.preferred_size();
+		if (hint.width > 0.0f && hint.height > 0.0f) {
+			ImGui::SetNextWindowSize(ImVec2(hint.width, hint.height), ImGuiCond_FirstUseEver);
+		}
 		bool *open = window.is_closeable() ? &window.open : nullptr;
 		if (ImGui::Begin(window.title(), open, flags)) {
 			window.draw(*this, frame_index);

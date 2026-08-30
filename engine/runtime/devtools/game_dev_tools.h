@@ -1,7 +1,9 @@
 // The game's dev tools (ADR 0039): the ImGui pass behind F3 with its mandatory
 // Game surface, the Stats window (both open by default), the Entities window
 // (closed by default; the pushed-record/typed-request channel, ADR 0042 d6),
-// and ImGui's demo window (the docking/multi-viewport smoke test). Debug builds only
+// the Weapon window (closed by default; the DCC-style ACTION editor over the
+// equipped weapon's FSM), and ImGui's demo window (the docking/multi-viewport
+// smoke test). Debug builds only
 // (OPENNOVA_DEVTOOLS); the release GDExtension flavour compiles this out and
 // its DevTools node is inert.
 #pragma once
@@ -9,16 +11,22 @@
 #include <runtime/devtools/frame_stats_board.h>
 #include <runtime/devtools/imgui_pass.h>
 
+#include <cstdint>
+
 namespace opennova::devtools {
 
 class StatsWindow;
 class GameWindow;
 class GameViewport;
 class EntitiesWindow;
+class WeaponWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct DebugRequest;
 struct EntityDirectorySnapshot;
+struct WeaponActionSnapshot;
+struct WeaponCatalog;
+struct WeaponRequest;
 
 class GameDevTools {
 public:
@@ -30,6 +38,8 @@ public:
 	const StatsWindow &stats_window() const { return *stats_window_; }
 	EntitiesWindow &entities_window() { return *entities_window_; }
 	const EntitiesWindow &entities_window() const { return *entities_window_; }
+	WeaponWindow &weapon_window() { return *weapon_window_; }
+	const WeaponWindow &weapon_window() const { return *weapon_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_input_mode(GameInputMode mode);
@@ -49,11 +59,22 @@ public:
 	bool needs_entity_directory() const;
 	bool take_debug_request(DebugRequest &request);
 
+	// The Weapon window's record/request channel. The live record is pushed
+	// EVERY frame rather than on the Entities window's 0.5 s cadence — the
+	// trace pane is a scope on a 62.5 Hz signal — while the picker catalogs
+	// only move when a weapon installs or a sound bank loads.
+	void set_weapon_snapshot(WeaponActionSnapshot snapshot);
+	void set_weapon_catalog(WeaponCatalog catalog);
+	bool needs_weapon_snapshot() const;
+	uint64_t weapon_catalog_serial() const;
+	bool take_weapon_request(WeaponRequest &request);
+
 private:
 	ImGuiPass pass_;
 	GameWindow *game_window_ = nullptr;
 	StatsWindow *stats_window_ = nullptr;
 	EntitiesWindow *entities_window_ = nullptr;
+	WeaponWindow *weapon_window_ = nullptr;
 };
 
 }  // namespace opennova::devtools

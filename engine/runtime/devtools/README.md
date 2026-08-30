@@ -8,8 +8,8 @@ addon's `NewFrame` and `Render` (the `ImGuiPassNode` seam in `godot/src/devtools
 Two products compose it:
 
 - the **game's dev tools** (`game_dev_tools.*`, F3): an opaque workspace with
-  a mandatory Game viewport, the frame-stats window, the Entities window
-  (closed by default), and ImGui's demo window.
+  a mandatory Game viewport, the frame-stats window, the Entities window and the
+  Weapon window (both closed by default), and ImGui's demo window.
   Debug builds only
   (`OPENNOVA_DEVTOOLS`; off for the release GDExtension flavour).
 - **ONED's run surface** (`oned_ui.*`): the one window with the game-data
@@ -29,6 +29,9 @@ Two products compose it:
 | `entities_window.h/.cpp` | The Entities window: the filterable entity-directory table over the pushed snapshot, with selected-row debug actions leaving as typed requests |
 | `entity_directory_snapshot.h` | `EntityDirectorySnapshot`: the value record the embedder pushes (the engine `world::inspect::entity_directory` join + the logic tick) |
 | `debug_request.h` | `DebugRequest`: the typed mutation queue entry the embedder drains into the engine-backed debug delegates |
+| `weapon_window.h/.cpp` | The Weapon window: a DCC-style dope sheet over the equipped weapon's twelve ACTION slots (strips retimed by dragging), stacked over an NLA-style trace of the FSM as it actually ran. Custom `ImDrawList` geometry — ImGui ships no timeline widget. REC keeps the engine's 512-tick ring armed through a hide (one sample copy per pump tick), so closing F3 to shoot and reopening shows the burst |
+| `weapon_action_snapshot.h` | `WeaponActionSnapshot` (baked slots + the authored rows behind them + the live slot + the trace delta, pushed every frame) and `WeaponCatalog` (the ANIM picker's clip keys, pushed on change) |
+| `weapon_request.h` | `WeaponRequest`: the Weapon window's typed edits and triggers. Triggers name the REAL input seams (fire, reload, scope toggle, weapon cycle), never the FSM's internal queue writers |
 | `demo_window.h/.cpp` | ImGui's demo window, the docking/multi-viewport smoke test |
 | `oned_ui.h/.cpp` | ONED's surface: the fields it owns, the state the app pushes, the typed request queue the app drains |
 
@@ -38,7 +41,10 @@ Two products compose it:
    override `on_visibility(bool)` to arm/disarm any data capture on the
    (pass open && window open) edge; declare close, dock, collapse, scroll, and
    initial-placement policy through the explicit virtuals; override
-   `owns_frame()` only for a window that issues its own `ImGui::Begin/End`.
+   `owns_frame()` only for a window that issues its own `ImGui::Begin/End`, and
+   `preferred_size()` for a surface the cascade default is too small for (a
+   timeline) — it applies `ImGuiCond_FirstUseEver`, so the user's own sizing and
+   ImGui's ini always win afterwards.
 2. Register it in `GameDevTools::GameDevTools()` (`pass_.register_window(std::make_unique<MyWindow>())`);
    it appears in the "Windows" menu. Keep `open` false unless the window is
    the default surface.
@@ -52,7 +58,10 @@ Two products compose it:
    (`entity_directory_snapshot.h`), pushed by value through a `GameDevTools::set_*`
    (an invalid record clears), gated by a `GameDevTools::needs_*()`
    (pass open && window open) so the embedder skips building records nobody
-   shows, and refreshed on the window's 0.5 s cadence. Mutations leave as a
+   shows, and refreshed on the window's 0.5 s cadence — unless the window is a
+   scope on a fast signal, which the Weapon window is: it pushes every frame and
+   drains the pump's 62.5 Hz trace ring incrementally, because a 1-tick action
+   or a zero-length tail falls between two display frames. Mutations leave as a
    typed request struct (`debug_request.h`) the window queues and
    `GameDevTools::take_*_request` drains. The `DevTools` node
    (`godot/src/devtools/dev_tools.cpp`) holds the `Simulation` in C++ (set on

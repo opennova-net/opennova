@@ -15,8 +15,11 @@
 #if OPENNOVA_DEVTOOLS
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
+#include <runtime/devtools/weapon_action_snapshot.h>
 
 #include <memory>
+#include <string>
+#include <vector>
 #endif
 
 namespace godot {
@@ -117,6 +120,8 @@ private:
 	void apply_game_requests();
 	void apply_debug_requests();
 	void push_entity_directory();
+	void push_weapon_snapshot();
+	void apply_weapon_requests();
 	void set_game_playing_internal(bool p_playing);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
@@ -126,6 +131,12 @@ private:
 	ObjectID simulation_id_;
 	Simulation *simulation() const;
 	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
+	// The Weapon window's trace is drained incrementally: only samples newer
+	// than this reach the window, so a per-frame push stays small.
+	uint32_t last_weapon_trace_tick_ = 0;
+	bool weapon_trace_primed_ = false;
+	uint64_t weapon_catalog_serial_ = 0;
+	std::string weapon_catalog_weapon_;
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

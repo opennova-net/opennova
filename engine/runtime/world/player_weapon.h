@@ -77,6 +77,44 @@ struct WeaponClipRing {
 // @ 0x546b80; the action-handler commit seams @ 0x543475 / @ 0x543539]
 enum class LocalUseGunSwitch : uint8_t { kNone, kAttach, kSwap, kDetach };
 
+// One pump tick of the local weapon FSM, recorded for the F3 Weapon window's
+// trace pane. The FSM runs at the 62.5 Hz logic tick while the display frame
+// does not, so a 1-tick action (SWITCHTO/SWITCHRANK) or a zero-length tail
+// (RECOIL's delayend) can pass entirely between two frames — a frame-rate
+// sampler would simply never see them. This is devtools instrumentation, not
+// engine behaviour: nothing in the pump reads it back.
+struct WeaponTraceSample {
+    uint32_t tick = 0;
+    int32_t current = 0;   // weapon_action::*
+    int32_t next = 0;
+    int32_t prev = 0;
+    uint8_t phase = 0;     // weapon_phase::*
+    int32_t counter = 0;
+    int32_t clip = 0;
+    int32_t reserve = 0;
+    int32_t heat = 0;
+    int32_t action_started = -1;
+    int32_t action_finished = -1;
+    int32_t action_effect = -1;
+    bool fired = false;
+    bool dry_fired = false;
+    bool reload_requested = false;
+    bool reload_applied = false;
+    bool advance_anim = false;
+    // The clip the FP channel is holding this tick (LocalPlayerWeapon::anim_key,
+    // latched on the play edge) and its ring variant — NOT the play-edge key,
+    // which is set on one tick per action. `advance_anim` says whether the
+    // channel actually stepped this tick; retail clocks it from the counter,
+    // so a held clip is a visible fact worth drawing.
+    char anim_key[64] = {};
+    int32_t anim_variant = 0;
+};
+
+// Samples the trace ring holds: 512 ticks is ~8.2 s at 62.5 Hz, long enough to
+// frame a whole reload (RELOAD's authored delaystart alone runs 196 ticks).
+inline constexpr size_t kWeaponTraceCapacity = 512;
+
+
 // The local player's whole equipped-weapon state — the moved binding members,
 // one aggregate the embedder holds beside the world.
 struct LocalPlayerWeapon {
@@ -142,6 +180,14 @@ struct LocalPlayerWeapon {
     bool eye_valid = false;
 
     std::vector<WeaponPresentationEvent> events;
+
+    // The F3 Weapon window's tick trace (devtools only). Disarmed by default:
+    // the pump pays one bool test per tick for it. `trace_head` is the next
+    // write index once the ring has filled; `trace_wrapped` says it has.
+    std::vector<WeaponTraceSample> trace;
+    size_t trace_head = 0;
+    bool trace_wrapped = false;
+    bool trace_armed = false;
 };
 
 // The plain install payload — both embedder feeders (the retained weapon.def
@@ -261,5 +307,14 @@ void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
 // (the world's own pump skips L — external_local_mounted_weapon_pump).
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                             LocalWeaponPumpIO &io);
+
+// Arm or disarm the devtools tick trace. Arming sizes the ring and starts it
+// empty; disarming releases it, so a closed Weapon window costs the pump one
+// bool test and no memory.
+void weapon_trace_arm(LocalPlayerWeapon &w, bool armed);
+// Drop every recorded sample, keeping the ring armed.
+void weapon_trace_clear(LocalPlayerWeapon &w);
+// The recorded samples oldest-first (empty when disarmed).
+std::vector<WeaponTraceSample> weapon_trace_samples(const LocalPlayerWeapon &w);
 
 } // namespace opennova::world
