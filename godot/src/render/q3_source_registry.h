@@ -72,7 +72,10 @@ struct Q3PublishedGeometry {
 struct Q3SourceRecord {
 	std::uint64_t node_id = 0;
 	// Dereferenced only while `in_tree`: a node inside the tree leaves it
-	// (tree_exited) before it can be freed, and a record outside the tree is
+	// (tree_exiting, emitted for every node of a departing subtree before
+	// any ancestor's exit-tree handler runs; tree_exited is skipped for a
+	// node freed by such a handler, which is how a shell releases its water
+	// strip) before it can be freed, and a record outside the tree is
 	// checked against ObjectDB before any use.
 	GeometryInstance3D *node = nullptr;
 	opennova::renderer::Q3Source source = opennova::renderer::Q3Source::Object;
@@ -192,10 +195,10 @@ public:
 			Q3SurfaceRecord &r_surface, FrameCounters &r_counters);
 
 	// The source node's signal targets (bound to its id at registration):
-	// tree_entered/tree_exited move the record between the live and dormant
+	// tree_entered/tree_exiting move the record between the live and dormant
 	// sets, visibility_changed marks its visibility for the next compile.
 	static void on_tree_entered(std::uint64_t p_node_id);
-	static void on_tree_exited(std::uint64_t p_node_id);
+	static void on_tree_exiting(std::uint64_t p_node_id);
 	static void on_visibility_changed(std::uint64_t p_node_id);
 };
 

@@ -189,12 +189,17 @@ void connect_signals(Q3SourceRecord &r_record, GeometryInstance3D *p_source) {
 	const std::uint64_t id = r_record.node_id;
 	const Error entered = p_source->connect("tree_entered",
 			callable_mp_static(&Q3SourceRegistry::on_tree_entered).bind(id));
-	const Error exited = p_source->connect("tree_exited",
-			callable_mp_static(&Q3SourceRegistry::on_tree_exited).bind(id));
+	// tree_exiting, not tree_exited: a node freed inside an ancestor's
+	// exit-tree handler (the shell's world releasing the water strip while
+	// the shell leaves the tree) never emits tree_exited, because its parent
+	// is already outside the tree when remove_child runs; tree_exiting is
+	// emitted for every node of the departing subtree first.
+	const Error exiting = p_source->connect("tree_exiting",
+			callable_mp_static(&Q3SourceRegistry::on_tree_exiting).bind(id));
 	const Error visibility = p_source->connect("visibility_changed",
 			callable_mp_static(&Q3SourceRegistry::on_visibility_changed).bind(id));
 	r_record.signals_connected = true;
-	ERR_FAIL_COND_MSG(entered != OK || exited != OK || visibility != OK,
+	ERR_FAIL_COND_MSG(entered != OK || exiting != OK || visibility != OK,
 			"A Q3 source refused its tree/visibility signals; its record cannot follow it");
 }
 
@@ -593,7 +598,7 @@ void Q3SourceRegistry::on_tree_entered(std::uint64_t p_node_id) {
 		activate(*record);
 }
 
-void Q3SourceRegistry::on_tree_exited(std::uint64_t p_node_id) {
+void Q3SourceRegistry::on_tree_exiting(std::uint64_t p_node_id) {
 	std::lock_guard<std::recursive_mutex> lock(g_mutex);
 	if (Q3SourceRecord *record = find_record(p_node_id))
 		deactivate(*record);

@@ -255,8 +255,11 @@ The producer registry is a set of persistent per-source records
 and, at its first in-frustum sight, its surface list with each material's
 classification and Q3 block (`u_diffuse`/`u_detail`/`u_rgb_mod`/
 `u_alpha_mod`/`u_reflect_color`/the UV rows); the node's `tree_entered`/
-`tree_exited`/`visibility_changed` signals move the record between the live
-and dormant sets and mark its visibility, ObjectModel's runtime parameter
+`tree_exiting`/`visibility_changed` signals move the record between the live
+and dormant sets and mark its visibility (`tree_exiting`, not `tree_exited`:
+a source freed inside an ancestor's exit-tree handler, the shell's world
+releasing its water strip as the shell leaves the tree, never emits
+`tree_exited`; `framefx_test` pins it), ObjectModel's runtime parameter
 writes name the material (`FrameFx::invalidate_q3_object_material`, a
 parameter version per registered material) so a stable object material is
 never re-read, and a record outside the tree is the only one checked

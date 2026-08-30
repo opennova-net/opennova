@@ -980,6 +980,59 @@ func test_cleared_water_strip_leaves_the_q3_draw_list() -> void:
 	water.release_runtime_renderer_resources()
 
 
+class ExitTreeWaterReleaser extends Node3D:
+	# The shell's exit-tree path: GameWorld releases the water's renderer
+	# resources (the strip MeshInstance3D is freed) while the shell subtree is
+	# leaving the tree. A node freed there never emits tree_exited.
+	var water: Water = null
+
+	func _exit_tree() -> void:
+		if water != null:
+			water.release_runtime_renderer_resources()
+
+
+func test_q3_source_freed_inside_an_ancestor_exit_tree_leaves_the_records() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(256, 144)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(100.3, 27.0, -33.7)
+	camera.current = true
+	viewport.add_child(camera)
+	var holder := ExitTreeWaterReleaser.new()
+	viewport.add_child(holder)
+	var water := Water.new()
+	water.water_height = 7.0
+	holder.add_child(water)
+	holder.water = water
+	water.advance_frame(1.0 / 62.0)
+	var renderer := FrameFx.new()
+	viewport.add_child(renderer)
+	renderer.advance_frame()
+	var drawn := renderer.get_backend_report()
+	var live_records := int(drawn.get("q3_records", 0))
+	assert_gt(int(drawn.get("q3_submitted_commands", 0)), 0,
+			"the strip compiles into Q3: %s" % drawn)
+	assert_gt(live_records, 0)
+
+	# The holder leaves the tree; its _exit_tree frees the registered strip
+	# node after the strip's own exit-tree notification and before any
+	# tree_exited signal could reach the registry.
+	viewport.remove_child(holder)
+	assert_null(water.get_mesh_instance(),
+			"the strip node is freed inside the ancestor's exit-tree handler")
+	renderer.advance_frame()
+	var after := renderer.get_backend_report()
+	assert_eq(int(after.get("q3_records", -1)), live_records - 1,
+			"the freed strip's record is reaped, never walked: %s" % after)
+	assert_eq(int(after.get("q3_submitted_commands", -1)), 0,
+			"nothing draws from the freed source")
+	holder.free()
+	renderer.shutdown()
+
+
 func test_q3_viewport_resize_retires_invalidated_uniform_sets_cleanly() -> void:
 	var view := _q3_lum_view(true)
 	var renderer := view.terminal as FrameFx
