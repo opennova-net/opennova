@@ -652,8 +652,7 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	options["progress"] = func() -> void: load_progress.emit(
 			MissionData.load_progress_percent(MissionData.LOAD_STAGE_OBJECTS))
 	_mission_stats = _placer.place(mission, self, options)
-	_apply_occlusion_culling_policy(
-			int(_mission_stats.get("authored_occluder_models", 0)))
+	_apply_occlusion_culling_policy()
 	# Static tile shadows are composed from the placer's resolved ObjectData and
 	# exact entity transforms. Attach only after place() has finished building
 	# that immutable mission snapshot; Terrain invalidates any pre-placement
@@ -680,7 +679,7 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 ## section verdict already hides what the OOBJ faces would. A mission load
 ## and an unload both re-apply the default; the debug row switches the pass
 ## on live while the mission carries occluders.
-func _apply_occlusion_culling_policy(_authored_occluder_models: int) -> void:
+func _apply_occlusion_culling_policy() -> void:
 	set_occlusion_culling_enabled(false)
 
 
@@ -792,7 +791,7 @@ func unload() -> void:
 	# This also invalidates pages composed with the departing caster snapshot.
 	if _terrain != null:
 		_terrain.set_static_shadow_placer(null)
-	_apply_occlusion_culling_policy(0)
+	_apply_occlusion_culling_policy()
 	var container := get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		container.queue_free()
