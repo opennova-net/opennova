@@ -32,9 +32,9 @@ const RetailVideoQualityPolicy := preload("res://game/retail_video_quality_polic
 # rebuilds in place) before the director's first _process tick, so the VM
 # starts in the right section.
 
-# Friendly labels for known expansions. The list item + persisted key stay the raw
-# folder name (e.g. "jox01"); unknown expansions display their raw folder name.
-const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
+# The list item and the persisted key stay the raw folder name (e.g. "jox01");
+# the description text is cached per name once read.
+var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 
 # Asset names resolved from the resource dir. JO defaults; override per game. A
 # blank discovery name falls back to the first file of that kind in the dir.
@@ -791,13 +791,18 @@ func _update_mod_desc(name: String) -> void:
 		_driver.set_widget_text(desc, _describe(name))
 
 
-# Names-only is all the VFS exposes today; show a friendly label when we know one,
-# else the raw folder name (the .pff description read is a TODO.md item).
+# The expansion's own name and description, read by the engine the way the
+# retail scan reads them (ResourceRoot.expansion_name / expansion_description:
+# <n>.bin's EXP_NAME / EXP_DESC with their fallbacks, resolved independently
+# of the mounted stack, so a not-yet-mounted expansion previews the same way).
 func _describe(name: String) -> String:
-	if name.is_empty():
+	if name.is_empty() or _root == null:
 		return ""
-	var label := String(EXPANSION_DISPLAY_NAMES.get(name, name))
-	return "%s\n\n(expansion: %s)" % [label, name]
+	if not _expansion_descriptions.has(name):
+		var dir := _root.get_root_dir()
+		_expansion_descriptions[name] = "%s\n\n%s" % [
+				_root.expansion_name(dir, name), _root.expansion_description(dir, name)]
+	return _expansion_descriptions[name]
 
 
 func _current_expansion() -> String:

@@ -118,6 +118,36 @@ void test_row_colors() {
 	CHECK(scoreboard_row_color(s, false, hud) == hud);  // spectators too
 }
 
+// With more than two sides configured the board alternates pages on bit 7 of
+// the HUD frame counter: teams 1/2 in the palette pair, then teams 3/4 in the
+// page's own yellow/pink literals; two sides never page
+// [orig: HUD_DrawKillList @0x423cd0-0x423cf1].
+void test_team_page() {
+	const ScoreboardTeamPage two = scoreboard_team_page(2, 0x80);
+	CHECK(two.team_a == 1 && two.team_b == 2);
+	CHECK(two.color_a == kTeamAColor && two.color_b == kTeamBColor);
+	const ScoreboardTeamPage first = scoreboard_team_page(4, 0x7F);
+	CHECK(first.team_a == 1 && first.team_b == 2);
+	const ScoreboardTeamPage second = scoreboard_team_page(4, 0x80);
+	CHECK(second.team_a == 3 && second.team_b == 4);
+	CHECK(second.color_a == 0xFFFFFF00u && second.color_b == 0xFFFF027Fu);
+	// The predicate is > 2 (three sides page too) and the counter wraps back
+	// to the first page every 128 frames.
+	CHECK(scoreboard_team_page(3, 0x180).team_a == 3);
+	CHECK(scoreboard_team_page(3, 0x100).team_a == 1);
+	// The page drives the column and the color of the rows it admits.
+	const ScoreboardEntry c = player("c", 5, 0, 3);
+	const ScoreboardEntry d = player("d", 6, 0, 4);
+	CHECK(scoreboard_column_x(c, false, 0, second) == kColumnAX);
+	CHECK(scoreboard_column_x(d, false, 0, second) == kColumnBX);
+	CHECK(scoreboard_row_color(c, false, 0xFF00FF00u, second) == kTeamCColor);
+	CHECK(scoreboard_row_color(d, false, 0xFF00FF00u, second) == kTeamDColor);
+	// The default page keeps the two-team calls exact.
+	const ScoreboardEntry a = player("a", 1, 0, 1);
+	CHECK(scoreboard_column_x(a, false, 0) == kColumnAX);
+	CHECK(scoreboard_row_color(a, false, 0xFF00FF00u) == kTeamAColor);
+}
+
 // The layout constants are raw retail design-space numbers; pin the handful the
 // drawer derives others from so a stray edit is visible.
 void test_layout_constants() {
@@ -140,6 +170,7 @@ int main() {
 	test_row_formats();
 	test_columns();
 	test_row_colors();
+	test_team_page();
 	test_layout_constants();
 	if (failures == 0) std::printf("scoreboard_format_test: all passed\n");
 	return failures == 0 ? 0 : 1;

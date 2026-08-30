@@ -375,12 +375,16 @@ func test_lan_join_emits_selected_server() -> void:
 	watch_signals(mp)
 	var driver := _make_lan_driver()
 	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
-	mp._servers = [{"name": "biggy", "host_ip": "192.168.1.10", "port": 32768}]
+	# The browse result arrives the way the live session delivers it: the
+	# injected LanSession's servers_changed signal.
+	var session := LanSession.new()
+	mp.set_lan_session(session)
+	session.servers_changed.emit([{"name": "biggy", "host_ip": "192.168.1.10", "port": 32768}])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
 	# A single-click selection relays the row index through the driver's aggregate signal.
 	driver.select_row(lan_list, 0)
-	mp._on_lan_join()
+	_press(driver, "LAN_JOINGAME")
 	assert_signal_emitted(mp, "lan_join_requested")
 	var target: JoinTarget = get_signal_parameters(mp, "lan_join_requested")[0]
 	assert_eq(target.host_ip, "192.168.1.10")

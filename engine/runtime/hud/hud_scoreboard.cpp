@@ -53,16 +53,31 @@ std::string scoreboard_row_text(const ScoreboardEntry &e, bool non_team) {
 	return std::string(buf) + scoreboard_status_glyphs(e.status_flags);
 }
 
-int scoreboard_column_x(const ScoreboardEntry &e, bool non_team, int ordinal) {
+ScoreboardTeamPage scoreboard_team_page(int team_count, int frame_counter) {
+	// [orig: HUD_DrawKillList @0x423cd0-0x423cf1 — the palette pair for
+	// teams 1/2 unless `g_num_teams_config > 2` AND bit 7 of the HUD frame
+	// counter, which selects teams 3/4 with the two literal colors]
+	ScoreboardTeamPage page;
+	if (team_count > 2 && (frame_counter & 0x80) != 0) {
+		page.team_a = 3;
+		page.team_b = 4;
+		page.color_a = kTeamCColor;
+		page.color_b = kTeamDColor;
+	}
+	return page;
+}
+
+int scoreboard_column_x(const ScoreboardEntry &e, bool non_team, int ordinal,
+                        const ScoreboardTeamPage &page) {
 	if (e.spectator) return kColumnSpectatorX;
 	if (non_team) return (ordinal & 1) == 0 ? kColumnAX : kColumnBX;
-	return e.team == 1 ? kColumnAX : kColumnBX;
+	return e.team == page.team_a ? kColumnAX : kColumnBX;
 }
 
 uint32_t scoreboard_row_color(const ScoreboardEntry &e, bool non_team,
-                              uint32_t hud_color) {
+                              uint32_t hud_color, const ScoreboardTeamPage &page) {
 	if (e.spectator || non_team) return hud_color;
-	return e.team == 1 ? kTeamAColor : kTeamBColor;
+	return e.team == page.team_a ? page.color_a : page.color_b;
 }
 
 } // namespace opennova::hud

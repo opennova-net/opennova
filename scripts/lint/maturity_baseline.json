@@ -2,10 +2,10 @@
   "citation_allowlist_engine": [
     "bfc1",
     "devtools",
-    "gameprofile",
+    "base/gameprofile/gameprofile.c",
     "pcapio",
-    "resource_index",
-    "vfs",
+    "base/resource_index/boot_policy.cpp",
+    "base/vfs/vfs_decode.cpp",
     "net/novaworld/service",
     "net/netsim/loopback_channel.cpp",
     "net/netsim/udp_session_transport.cpp",
@@ -26,7 +26,7 @@
     "oversize_cpp_files": 1,
     "oversize_cpp_headers": 0,
     "oversize_gd_files": 1,
-    "test_private_pokes": 25
+    "test_private_pokes": 4
   },
   "dict_contract_allowlist": [
     "player_profile.gd|static func load_character_profile(",

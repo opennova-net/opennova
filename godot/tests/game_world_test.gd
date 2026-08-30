@@ -860,7 +860,7 @@ func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
 	world.add_child(effects)
 	world.install_probes(effects, null)
 
-	world._route_mission_effects([{"kind": "fx2ssn", "b": ssn, "str": "Dust"}])
+	world.route_mission_effects([{"kind": "fx2ssn", "b": ssn, "str": "Dust"}])
 	assert_eq(effects.spawns.size(), 1)
 	if effects.spawns.is_empty():
 		return

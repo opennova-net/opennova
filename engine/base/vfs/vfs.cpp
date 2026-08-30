@@ -3,12 +3,15 @@
 #include <base/vfs/vfs_decode.h>
 
 #include <formats/pff/pff.h>
+#include <formats/rtxt/rtxt.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <vector>
 #include <unordered_map>
 
 #include <base/io/strutil.h>
@@ -654,6 +657,69 @@ std::vector<std::string> vfs_list_expansions(const std::string &game_root) {
     }
     std::sort(out.begin(), out.end());
     return out;
+}
+
+namespace {
+
+// <n>.bin's bytes the way the scan resolves them (loose, then <n>L.pff, then <n>.pff).
+bool read_expansion_text_bytes(const fs::path &exp_dir, const std::string &expansion,
+                               std::vector<uint8_t> &out) {
+    const std::string bin_name = expansion + ".bin";
+    std::error_code ec;
+    const fs::path loose = exp_dir / bin_name;
+    if (fs::is_regular_file(loose, ec)) {
+        std::ifstream in(loose, std::ios::binary);
+        out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        if (!out.empty()) return true;
+    }
+    for (const std::string &archive : {expansion + "L.pff", expansion + ".pff"}) {
+        PffArchive ar{};
+        if (pff_open(&ar, (exp_dir / archive).string().c_str()) != 0) continue;
+        const PffEntry *entry = pff_find(&ar, bin_name.c_str());
+        bool ok = false;
+        if (entry != nullptr) {
+            out.resize(entry->size);
+            ok = pff_extract(&ar, entry, out.empty() ? nullptr : out.data(), out.size()) == 0 &&
+                 !out.empty();
+        }
+        pff_close(&ar);
+        if (ok) return true;
+    }
+    out.clear();
+    return false;
+}
+
+// [orig: TextResource_FindEntryBySectionAndKey @ 0x75d250 — the section by name, then the
+//  key within it; case-insensitive like every rtxt lookup]
+const rtxt::Entry *find_in_section(const rtxt::File &file, const char *section,
+                                   const char *key) {
+    const std::string want_section = rtxt::to_upper(section);
+    const std::string want_key = rtxt::to_upper(key);
+    for (uint32_t s = 0; s < file.sections.size(); ++s) {
+        if (rtxt::to_upper(file.sections[s].name) != want_section) continue;
+        for (const rtxt::Entry &e : file.entries) {
+            if (e.section_index == s && rtxt::to_upper(e.key) == want_key) return &e;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+ExpansionInfo vfs_expansion_info(const std::string &game_root, const std::string &expansion) {
+    ExpansionInfo info{kExpansionUnnamed, kExpansionNoDescription};
+    if (expansion.empty()) return info;
+    const fs::path exp_dir = fs::path(game_root) / "expansion" / expansion;
+    std::vector<uint8_t> bytes;
+    if (!read_expansion_text_bytes(exp_dir, expansion, bytes)) return info;  // @ 0x4a4664
+    rtxt::File file;
+    std::string error;
+    if (!rtxt::parse(bytes.data(), bytes.size(), file, error)) return info;
+    if (const rtxt::Entry *e = find_in_section(file, "exp_info", "EXP_NAME"))  // @ 0x4a4578
+        info.name = e->text;
+    if (const rtxt::Entry *e = find_in_section(file, "exp_info", "EXP_DESC"))  // @ 0x4a45ef
+        info.description = e->text;
+    return info;
 }
 
 int32_t vfs_version_crc(const uint8_t *data, size_t size) {

@@ -178,7 +178,7 @@ static func load_mesh(resource_root: ResourceRoot, graphic: String) -> Mesh:
 	if data.open_from_resource_root(resource_root, model_path, false) != OK:
 		return null
 	var submeshes: Array = data.build_lod_submeshes(0)
-	var mesh: ArrayMesh = _aggregate_lod0_submeshes(submeshes)
+	var mesh: ArrayMesh = aggregate_lod0_submeshes(submeshes)
 	if mesh != null and not submeshes.is_empty():
 		# Retail foliage expands the complete LOD0 model, but owns one :fd
 		# binding per definition. Keep the primary submesh's diffuse only as
@@ -202,7 +202,7 @@ static func load_mesh(resource_root: ResourceRoot, graphic: String) -> Mesh:
 ## Merge all geometry that build_lod_submeshes(0) emits. ArrayMesh surface
 ## arrays are copied into a private resource so callers never mutate
 ## ObjectData's shared submesh cache.
-static func _aggregate_lod0_submeshes(submeshes: Array) -> ArrayMesh:
+static func aggregate_lod0_submeshes(submeshes: Array) -> ArrayMesh:
 	var aggregate := ArrayMesh.new()
 	for entry_value in submeshes:
 		var entry: Dictionary = entry_value

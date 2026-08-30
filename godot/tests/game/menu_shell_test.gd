@@ -484,7 +484,9 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	var desc: int = driver.widget_id("MOD_DESC")
 	assert_gte(desc, 0, "MOD_DESC authored")
 	assert_string_contains(driver.get_widget_text(desc), "Kendari",
-		"friendly expansion name shown")
+		"the expansion's own EXP_NAME shows")
+	assert_string_contains(driver.get_widget_text(desc), "Kendari island: the JO expansion.",
+		"the expansion's own EXP_DESC shows")
 	# The expansion's packed asset is now reachable through the live root.
 	assert_eq(shell.get_resource_root().read_file("expmodel.3di").get_string_from_utf8(),
 		"exp model", "expansion archive mounted over the base game")
@@ -938,6 +940,12 @@ func _make_runtime_dir() -> String:
 		{"name": "expmodel.3di", "bytes": "exp model"},
 		{"name": "Mjox01.bin", "bytes": _fixture_bytes(MUS_FIXTURE)},
 	])
+	# The L archive carries the expansion's own name/description table, as the
+	# retail pair does (jox01.bin lives in jox01L.pff).
+	_write_pff(dir.path_join("expansion/jox01/jox01L.pff"), [
+		{"name": "jox01.bin", "bytes": _expansion_info_bin("Kendari",
+				"Kendari island: the JO expansion.")},
+	])
 	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
 	# Deliberately use retail-style uppercase to pin case-insensitive resolution
 	# on Linux/macOS while preserving the actual shell path.
@@ -959,9 +967,21 @@ func _make_runtime_shell(dir: String):
 
 func _rm_runtime_dir(dir: String) -> void:
 	for sub in ["resource.pff", "menumus.sbf", "expansion/jox01/jox01.pff",
-			"expansion/jox01/MJOX01.SBF", "expansion/jox01", "expansion"]:
+			"expansion/jox01/jox01L.pff", "expansion/jox01/MJOX01.SBF",
+			"expansion/jox01", "expansion"]:
 		DirAccess.remove_absolute(dir.path_join(sub))
 	DirAccess.remove_absolute(dir)
+
+
+# An expansion's <n>.bin: the [exp_info] EXP_NAME / EXP_DESC pair retail's
+# scan reads [orig: Expansion_ScanAndRegister @0x4a4578 / @0x4a45ef], minted
+# through the string-table writer.
+func _expansion_info_bin(exp_name: String, exp_desc: String) -> PackedByteArray:
+	var table := RtxtStringFile.new()
+	var section := table.add_section("exp_info")
+	table.add_entry("EXP_NAME", exp_name, section, Vector2i.ZERO)
+	table.add_entry("EXP_DESC", exp_desc, section, Vector2i.ZERO)
+	return table.to_byte_array()
 
 
 # The shared PFF3 fixture writer (TestPff.write), asserted here.

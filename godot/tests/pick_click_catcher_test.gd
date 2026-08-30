@@ -44,7 +44,7 @@ func test_left_press_ray_picks_through_the_live_sim() -> void:
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
-	catcher._unhandled_input(click)
+	catcher.handle_click(click)
 
 	assert_true(viewport.is_input_handled(),
 			"the click ray-picked through the sim and consumed the event")
@@ -61,13 +61,13 @@ func test_other_input_is_ignored() -> void:
 	var release := InputEventMouseButton.new()
 	release.button_index = MOUSE_BUTTON_LEFT
 	release.pressed = false
-	catcher._unhandled_input(release)
+	catcher.handle_click(release)
 	var right := InputEventMouseButton.new()
 	right.button_index = MOUSE_BUTTON_RIGHT
 	right.pressed = true
-	catcher._unhandled_input(right)
+	catcher.handle_click(right)
 	var motion := InputEventMouseMotion.new()
-	catcher._unhandled_input(motion)
+	catcher.handle_click(motion)
 
 	assert_false(viewport.is_input_handled(), "no ray ever ran")
 	assert_eq(list.get_picks().size(), 0)
@@ -80,7 +80,7 @@ func test_detached_pick_list_never_consumes_the_click() -> void:
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
-	catcher._unhandled_input(click)
+	catcher.handle_click(click)
 	assert_false(viewport.is_input_handled(),
 			"no list means no pick and an unconsumed event")
 

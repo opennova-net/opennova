@@ -87,10 +87,17 @@ struct ClientScoreboard {
 	uint8_t spectator_count = 0;
 	std::vector<ClientScoreboardRow> rows;
 	std::vector<ClientScoreboardTeam> teams;  // T0 neutral + one per team
+	// The team-table count byte — the host serializes it from its configured
+	// side count, so on a joiner it IS g_num_teams_config
+	// [orig: g_scoreboard_team_count @0x42fdda <- @0x50db3a].
+	uint8_t team_count = 0;
 	// Rows skipped because their connection slot has no roster binding yet.
-	// Retail drops these too and queues a C2S 0x22 {slot, 0x1CF7} retry
-	// [orig: @0x42fc05..0x42fc3a]; the retry send is a D-HUD-24 residual.
+	// Retail drops these too and queues one reliable C2S 0x22 {slot, 0x1CF7}
+	// re-request per dropped row [orig: @0x42fc05..0x42fc3a]: the DATA rule is
+	// the drop (counted here); the slot ids wait in pending_sync_requests for
+	// the runtime's send path, which frames and clears them.
 	std::uint32_t rows_dropped_unknown_slot = 0;
+	std::vector<uint8_t> pending_sync_requests;
 	std::uint64_t revision = 0;
 };
 

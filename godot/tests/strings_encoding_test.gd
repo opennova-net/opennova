@@ -150,7 +150,7 @@ func test_specials_zone_glyphs_follow_decoded_cp1252_codepoints() -> void:
 		"retail bitmap fonts never substitute glyphs from a system-font face")
 
 	# The decoded codepoint must retain the source slot's own metric (advance =
-	# rect width + shadow_offset - 1: the synthetic font's 12 px cell + 0 - 1).
+	# rect width + glyph_spacing - 1: the synthetic font's 12 px cell + 0 - 1).
 	# This proves the engine draw resolves the bitmap font, not a system
 	# fallback face.
 	assert_eq(font.get_string_size(String.chr(LEFT_QUOTE_CODEPOINT), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x, 11.0,

@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/le.h>
 #include <base/io/strutil.h>
 
 namespace opennova::mission::detail {
@@ -59,11 +60,7 @@ inline const uint8_t *header_bytes(const bms::Header &header) {
 }
 
 inline uint32_t read_u32_at(const bms::Header &header, size_t offset) {
-	const uint8_t *bytes = header_bytes(header);
-	return static_cast<uint32_t>(bytes[offset]) |
-	       (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
-	       (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
-	       (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+	return io::read_u32_le(header_bytes(header) + offset);
 }
 
 // The .mis writer emits gen_def_val1..4 from raw header offsets 264..276; the parser stores them
@@ -79,10 +76,7 @@ static_assert(offsetof(bms::Header, water_override) == 152, "water_level u32 sta
 static_assert(offsetof(bms::Header, fog_override) == 158, "fog_level u32 (@156) ends in fog_override @158");
 
 inline int32_t read_i32_at(const uint8_t *bytes, size_t offset) {
-	return static_cast<int32_t>(static_cast<uint32_t>(bytes[offset]) |
-	                            (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
-	                            (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
-	                            (static_cast<uint32_t>(bytes[offset + 3]) << 24));
+	return static_cast<int32_t>(io::read_u32_le(bytes + offset));
 }
 
 inline void write_i32_at(uint8_t *bytes, size_t offset, int32_t value) {

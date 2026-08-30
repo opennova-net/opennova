@@ -59,3 +59,17 @@ func test_fed_reading_is_readable_by_row_id() -> void:
 	assert_eq(dev_tools.stats_row_peak("frame"), "20.00")
 	assert_eq(dev_tools.stats_row_average("world"), "1.20")
 	assert_eq(dev_tools.stats_row_average("sim"), "", "a slot without samples stays empty")
+
+	# The counter cells: the sim row's ticks/entities/role and the Net row's
+	# peers are VALUE slots averaged over the window's frames (10 here).
+	sums[FrameStats.SIM_TICKS] = 10
+	samples[FrameStats.SIM_TICKS] = 10
+	sums[FrameStats.SIM_ENTITY_COUNT] = 120
+	samples[FrameStats.SIM_ENTITY_COUNT] = 10
+	sums[FrameStats.SIM_ROLE] = 10  # 1 = host, every frame
+	samples[FrameStats.SIM_ROLE] = 10
+	sums[FrameStats.NET_PEER_COUNT] = 30
+	samples[FrameStats.NET_PEER_COUNT] = 10
+	dev_tools.feed_stats_window(10, sums, peaks, samples)
+	assert_eq(dev_tools.stats_row_info("sim"), "1.0 t/f | 12 entities | host")
+	assert_eq(dev_tools.stats_row_info("net"), "3 peers")

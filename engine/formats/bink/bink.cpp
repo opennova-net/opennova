@@ -2,6 +2,8 @@
 
 #include <formats/bink/bink_tables.h>
 
+#include <base/io/le.h>
+
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -28,10 +30,7 @@ constexpr uint32_t kMaximumDimension = 16384;
 constexpr uint32_t kMaximumFrames = 1000000;
 
 uint32_t read_le32(const uint8_t *bytes) {
-	return static_cast<uint32_t>(bytes[0]) |
-			(static_cast<uint32_t>(bytes[1]) << 8) |
-			(static_cast<uint32_t>(bytes[2]) << 16) |
-			(static_cast<uint32_t>(bytes[3]) << 24);
+	return io::read_u32_le(bytes);
 }
 
 uint32_t align_up(uint32_t value, uint32_t alignment) {

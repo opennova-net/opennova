@@ -179,6 +179,8 @@ void test_unknown_slot_rows_drop() {
 	CHECK(sb.rows.size() == 1);
 	if (sb.rows.size() == 1) CHECK(sb.rows[0].slot_id == 1);
 	CHECK(sb.rows_dropped_unknown_slot == 1);
+	// ...and the dropped slot waits for the runtime's C2S 0x22 re-request.
+	CHECK(sb.pending_sync_requests == std::vector<std::uint8_t>{9});
 }
 
 // Rows keep the names copied into them at apply time: a roster removal does

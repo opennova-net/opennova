@@ -109,7 +109,8 @@ Counts come from the ledger's generated scoreboard — read them there, not here
 because `scripts/lint/ledger_check.py --check` keeps that table honest and
 nothing keeps this sentence honest. As of the 2026-08-29 check the shape
 was:
-**World/AI** carries the largest share (56 of 121 domain-open), **UI** (28 — the
+**World/AI** carries the largest share (56 of 118 domain-open; Fonts and VFS emptied
+that day), **UI** (28 — the
 2026-08-04 D-SND/D-MNU/D-LOADSCR catalog tabling's twelve register candidates were
 ratified `PERMANENT` on 2026-08-29; the rest are small) and **Net** (22) the next
 largest, and every other domain is in single digits.
