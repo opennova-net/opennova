@@ -1,6 +1,6 @@
 #include "render/slot_capture_adapter.h"
-#include "render/q3_frame_adapter.h"
 #include "render/q3_geometry_cache.h"
+#include "render/q3_source_registry.h"
 
 #include <algorithm>
 #include <array>
@@ -1020,7 +1020,7 @@ void SlotCaptureAdapter::compile_frame(
 				const Ref<ShaderMaterial> shader_material = material;
 				ObjectMaterialClassification classification;
 				if (shader_material.is_null() ||
-						!Q3FrameAdapter::object_material_classification(material,
+						!Q3SourceRegistry::object_material_classification(material,
 								classification)) {
 					// An ArrayMesh surface whose material is not a registered
 					// object material (no ObjectMaterialClassification): retail

@@ -100,6 +100,12 @@ public:
 			const opennova::renderer::ObjectMaterialClassification &p_classification);
 	static void clone_q3_object_material(const Ref<Material> &p_source,
 			const Ref<Material> &p_clone);
+	// A producer rewrote one of an object material's Q3 parameters
+	// (u_diffuse, u_detail, u_rgb_mod, u_alpha_mod, u_reflect_color, the UV
+	// rows): the surfaces on it re-read their cached block at their next
+	// sight. ObjectModel's runtime writes call this; a stable material is
+	// never re-read per frame.
+	static void invalidate_q3_object_material(const Ref<Material> &p_material);
 	static void register_q3_object_source(GeometryInstance3D *p_source,
 			const Ref<Material> &p_material);
 	// The classification an object material was registered with (false and
@@ -116,10 +122,11 @@ public:
 	// Producers that already hold a surface's CPU arrays publish them here
 	// (the water strip every frame), so the Q3 geometry cache re-packs from
 	// memory instead of reading the mesh back through the server. A producer
-	// that rebuilt a registered mesh invalidates the source (its surfaces are
-	// re-read once); one that only rewrote a MultiMesh's instance transforms
-	// (a static RLOD switch, a destruction carve) invalidates its instances,
-	// which re-reads the rows and never the packed surfaces.
+	// that rebuilt (or cleared) a registered mesh invalidates the source (its
+	// surface list is re-read, its arrays re-read once at the next sight);
+	// one that only rewrote a MultiMesh's instance transforms (a static RLOD
+	// switch, a destruction carve) invalidates its instances, which re-reads
+	// the rows and the population bounds and never the packed surfaces.
 	static void publish_q3_geometry(GeometryInstance3D *p_source, int p_surface,
 			const Array &p_arrays);
 	static void invalidate_q3_source(GeometryInstance3D *p_source);

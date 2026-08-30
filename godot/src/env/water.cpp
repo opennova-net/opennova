@@ -847,6 +847,10 @@ void Water::_clear_strip_surfaces() {
 	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
 	if (mesh.is_valid() && mesh->get_surface_count() > 0) {
 		mesh->clear_surfaces();
+		// The focused Q3 record lists this strip's surface: the clear is a
+		// rebuild too, so its surface list is re-read (to none) before the
+		// next compile instead of drawing the last published strip.
+		FrameFx::invalidate_q3_source(mesh_instance_);
 	}
 }
 

@@ -82,6 +82,7 @@ add_library(${TARGET_NAME} SHARED
     render/object_lod_frame.cpp
     render/q3_frame_adapter.cpp
     render/q3_geometry_cache.cpp
+    render/q3_source_registry.cpp
     render/slot_capture_adapter.cpp
     object/entity_index.cpp
     object/object_model.cpp

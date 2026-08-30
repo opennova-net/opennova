@@ -946,9 +946,6 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		"vec3 lit = base * pc.draw_color.rgb;",
 		"frag_color = vec4(clamp(fogged, 0.0, 1.0), 0.0);",
 		"draw.object.self_lum_color.x * std::min(light_gain.x, 1.0f) * 2.0f",
-		"\"u_rgb_mod\", Vector3(1, 1, 1)",
-		"candidate.submission.object.detail_texture = lease_for(detail)",
-		"glare_view_fade = bool_parameter",
 		"view_dot_sq * view_dot_sq",
 		"model_uniform_scale",
 		"glsl_float(1.0f - kQ3FarBandMaxZ)",
@@ -965,9 +962,26 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		"cache.acquire(request",
 		"result[\"q3_readbacks_this_frame\"]",
 		"result[\"q3_instance_row_reads_this_frame\"]",
-		"registration.instance_generation, multimesh.ptr()",
-		"request.geometry_generation = registration.geometry_generation",
+		"result[\"q3_records_touched_this_frame\"]",
+		"request.geometry_generation = record.geometry_generation",
+		"Q3SourceRegistry::live_records()",
+		"frustum.outside(row.world_bounds)",
 	], "q3_frame_adapter.cpp")
+	# The per-source records: the material block is read through the
+	# material only when its parameter version moved, the MultiMesh rows
+	# once per instance generation, and the producer-published arrays ride
+	# the record.
+	var q3_registry := _read_repo("godot/src/render/q3_source_registry.cpp")
+	_contains_all(q3_registry, [
+		"\"u_rgb_mod\"",
+		"object.self_lum_color = {self_lum.x, self_lum.y, self_lum.z, 1.0f}",
+		"object.detail_texture = lease_for(detail)",
+		"glare_view_fade = bool_parameter",
+		"r_surface.parameter_version == version",
+		"rows_generation != r_record.instance_generation",
+		"++r_counters.instance_row_reads",
+		"callable_mp_static(&Q3SourceRegistry::on_visibility_changed)",
+	], "q3_source_registry.cpp")
 	# The interleaved Q3 stream (with the detail UV2 row) is packed once per
 	# cache entry generation, never re-read through the server per frame.
 	var q3_cache := _read_repo("godot/src/render/q3_geometry_cache.cpp")

@@ -807,6 +807,173 @@ func test_offscreen_production_q3_source_is_culled_before_vertex_packing() -> vo
 	assert_eq(int(report.get("q3_submitted_commands", -1)), 0)
 
 
+func test_stable_q3_frame_touches_no_records_beyond_the_frustum_test() -> void:
+	# Every registered source is a persistent record: a stable frame walks
+	# the live records, probes their transforms and refreshes nothing; a moved
+	# or hidden source is picked up through its record alone, never a walk
+	# that re-reads every source.
+	var view := _q3_lum_view(true)
+	var renderer := view.terminal as FrameFx
+	renderer.advance_frame()
+	var stable := renderer.get_backend_report()
+	assert_gt(int(stable.get("q3_records", 0)), 0,
+			"the LUM model's sources are live records: %s" % stable)
+	assert_eq(int(stable.get("q3_records_touched_this_frame", -1)), 0,
+			"a stable frame refreshes no record: %s" % stable)
+	assert_eq(int(stable.get("q3_material_reads_this_frame", -1)), 0,
+			"a stable frame reads no material block")
+	var stable_commands := int(stable.get("q3_submitted_commands", 0))
+	assert_gt(stable_commands, 0)
+
+	var bulb := _first_visible_mesh(view.model)
+	assert_not_null(bulb)
+	if bulb == null:
+		return
+	# A move refreshes the bounds of the moved model's visible sources only;
+	# its hidden LOD/material sources and every other record stay untouched.
+	(view.model as ObjectModel).position += Vector3(0.5, 0.0, 0.0)
+	renderer.advance_frame()
+	var moved := renderer.get_backend_report()
+	var moved_touched := int(moved.get("q3_records_touched_this_frame", 0))
+	assert_gt(moved_touched, 0, "the move is picked up: %s" % moved)
+	assert_lte(moved_touched, int(moved.get("q3_submitted_commands", 0)) +
+			int(moved.get("q3_frustum_culled_sources", 0)),
+			"only the visible sources refresh: %s" % moved)
+	assert_eq(int(moved.get("q3_submitted_commands", -1)), stable_commands)
+	renderer.advance_frame()
+	var settled := renderer.get_backend_report()
+	assert_eq(int(settled.get("q3_records_touched_this_frame", -1)), 0,
+			"the moved model settles: %s" % settled)
+
+	# A visibility change reaches its record through the node's signal.
+	bulb.visible = false
+	renderer.advance_frame()
+	var hidden := renderer.get_backend_report()
+	assert_eq(int(hidden.get("q3_records_touched_this_frame", -1)), 1,
+			"the hidden source alone is refreshed: %s" % hidden)
+	assert_lt(int(hidden.get("q3_submitted_commands", 0)), stable_commands,
+			"and its copy leaves the draw list")
+	bulb.visible = true
+	renderer.advance_frame()
+	var shown := renderer.get_backend_report()
+	assert_eq(int(shown.get("q3_records_touched_this_frame", -1)), 1,
+			"the shown source alone is refreshed: %s" % shown)
+	assert_eq(int(shown.get("q3_submitted_commands", -1)), stable_commands,
+			"and its copy is back")
+	assert_eq(int(shown.get("q3_readbacks_this_frame", -1)), 0,
+			"visibility never re-reads geometry")
+
+
+func test_object_material_parameter_write_reaches_q3_through_its_invalidation() -> void:
+	# An object surface's material block (u_diffuse, u_rgb_mod, ...) is read
+	# once into its record; a stable frame reads no material. ObjectModel's
+	# runtime writes name the material (FrameFx.invalidate_q3_object_material),
+	# and the surfaces on it re-read the block exactly at their next sight.
+	var view := _q3_lum_view(true)
+	var renderer := view.terminal as FrameFx
+	var bulb := _first_visible_mesh(view.model)
+	assert_not_null(bulb)
+	if bulb == null:
+		return
+	var camera := (view.viewport as SubViewport).get_camera_3d()
+	var pixel := Vector2i(camera.unproject_position(
+			bulb.global_transform * bulb.get_aabb().get_center()))
+	var bright_image: Image = await _render_q3_frame(renderer)
+	var stable := renderer.get_backend_report()
+	assert_eq(int(stable.get("q3_material_reads_this_frame", -1)), 0,
+			"a stable frame reads no material block: %s" % stable)
+
+	var material := bulb.get_active_material(0) as ShaderMaterial
+	assert_not_null(material)
+	if material == null:
+		return
+	material.set_shader_parameter("u_rgb_mod", Vector3(0.25, 0.25, 0.25))
+	renderer.advance_frame()
+	var unnamed := renderer.get_backend_report()
+	assert_eq(int(unnamed.get("q3_material_reads_this_frame", -1)), 0,
+			"a write that names no material is not re-read per frame")
+	FrameFx.invalidate_q3_object_material(material)
+	var dim_image: Image = await _render_q3_frame(renderer)
+	var named := renderer.get_backend_report()
+	assert_gte(int(named.get("q3_material_reads_this_frame", 0)), 1,
+			"the named material is re-read at its next sight: %s" % named)
+	assert_eq(int(named.get("q3_records_touched_this_frame", -1)), 0,
+			"a parameter write touches no scene state")
+	assert_eq(int(named.get("q3_readbacks_this_frame", -1)), 0,
+			"and re-reads no geometry")
+	renderer.advance_frame()
+	var settled := renderer.get_backend_report()
+	assert_eq(int(settled.get("q3_material_reads_this_frame", -1)), 0)
+	if not bool(settled.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_not_null(bright_image)
+	assert_not_null(dim_image)
+	if bright_image == null or dim_image == null:
+		return
+	# The SELFLUM copy is Diffuse1 x u_rgb_mod x min(gain, 1) x 2: the
+	# re-read block dims the white bulb's copy from saturated to 0.5 grey.
+	var bright_peak := _q3_peak_near(bright_image, pixel, 3)
+	var dim_peak := _q3_peak_near(dim_image, pixel, 3)
+	assert_gt(bright_peak, 2.5,
+			"the white bulb's copy saturates at %s: %f" % [pixel, bright_peak])
+	assert_between(dim_peak, 1.2, 1.8,
+			"the re-read u_rgb_mod 0.25 dims the copy to 0.5 grey: %f" % dim_peak)
+	renderer.shutdown()
+
+
+func test_cleared_water_strip_leaves_the_q3_draw_list() -> void:
+	# The water strip is a per-frame producer: its record follows every
+	# publication, and a frame whose march yields no strip clears the surface
+	# AND names the source, so the last published strip is never drawn again.
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(256, 144)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(100.3, 27.0, -33.7)
+	camera.current = true
+	viewport.add_child(camera)
+	var water := Water.new()
+	water.water_height = 7.0
+	viewport.add_child(water)
+	water.advance_frame(1.0 / 62.0)
+	assert_gt((water.get_mesh_instance().mesh as ArrayMesh).get_surface_count(), 0)
+	var renderer := FrameFx.new()
+	viewport.add_child(renderer)
+	renderer.advance_frame()
+	var drawn := renderer.get_backend_report()
+	assert_gt(int(drawn.get("q3_submitted_commands", 0)), 0,
+			"the strip compiles into Q3: %s" % drawn)
+
+	# The witnessed g_WaterActive gate: every tracked visible terrain sector
+	# above the water height turns the pass off, and the strip clears while
+	# the source node itself stays visible.
+	water.set_visible_terrain_bounds(true, 100.0, 200.0)
+	water.advance_frame(1.0 / 62.0)
+	assert_eq((water.get_mesh_instance().mesh as ArrayMesh).get_surface_count(), 0,
+			"the inactive water pass clears the strip")
+	renderer.advance_frame()
+	var cleared := renderer.get_backend_report()
+	assert_eq(int(cleared.get("q3_submitted_commands", -1)), 0,
+			"the cleared strip is not drawn from its last publication: %s" % cleared)
+	assert_eq(int(cleared.get("q3_readbacks_this_frame", -1)), 0)
+
+	# The pass comes back: the rebuilt strip is published and drawn again,
+	# from memory.
+	water.set_visible_terrain_bounds(false, 0.0, 0.0)
+	water.advance_frame(1.0 / 62.0)
+	renderer.advance_frame()
+	var restored := renderer.get_backend_report()
+	assert_gt(int(restored.get("q3_submitted_commands", 0)), 0,
+			"the strip is back: %s" % restored)
+	assert_eq(int(restored.get("q3_readbacks_this_frame", -1)), 0,
+			"the published strip is never read back through the server")
+	renderer.shutdown()
+	water.release_runtime_renderer_resources()
+
+
 func test_q3_viewport_resize_retires_invalidated_uniform_sets_cleanly() -> void:
 	var view := _q3_lum_view(true)
 	var renderer := view.terminal as FrameFx

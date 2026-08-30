@@ -250,6 +250,15 @@ void Q3GeometryCache::prune(
 	}
 }
 
+void Q3GeometryCache::evict_source(std::uint64_t p_source_id) {
+	for (auto it = entries_.lower_bound({p_source_id, 0});
+			it != entries_.end() && it->first.source_id == p_source_id;) {
+		evictions_.push_back({it->second.entry_id, frame_id_});
+		it = entries_.erase(it);
+	}
+	instances_.erase(p_source_id);
+}
+
 std::vector<std::uint64_t> Q3GeometryCache::pending_evictions(
 		std::uint64_t p_consumed_frame_id) {
 	evictions_.erase(std::remove_if(evictions_.begin(), evictions_.end(),

@@ -1,5 +1,6 @@
 #include "render/q3_frame_adapter.h"
 #include "render/q3_geometry_cache.h"
+#include "render/q3_source_registry.h"
 
 #include <algorithm>
 #include <array>
@@ -17,10 +18,6 @@
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
-#include <godot_cpp/classes/material.hpp>
-#include <godot_cpp/classes/mesh_instance3d.hpp>
-#include <godot_cpp/classes/multi_mesh.hpp>
-#include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
 #include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
@@ -37,7 +34,6 @@
 #include <godot_cpp/classes/render_scene_data.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
-#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/aabb.hpp>
@@ -60,31 +56,6 @@ enum class Q3DeviceBlend : std::uint8_t {
 	Water,
 };
 
-struct RegisteredQ3Source {
-	std::uint64_t node_id = 0;
-	Q3Source source = Q3Source::Object;
-	std::uint64_t material_id = 0;
-	// Bumped by invalidate_source (a rebuilt mesh): the geometry cache
-	// re-reads and re-packs the source's surfaces once when it moves.
-	std::uint64_t geometry_generation = 1;
-	// Bumped by invalidate_instances (rewritten MultiMesh rows): only the
-	// cached instance rows are re-read; the packed surfaces are untouched.
-	std::uint64_t instance_generation = 1;
-	// Celestial sources: bit i set = surface i was installed with the
-	// additive celestial material, so its Q3 disc draw adds.
-	std::uint32_t additive_surfaces = 0;
-};
-
-// The latest producer-published CPU arrays for one source surface.
-struct PublishedGeometry {
-	Q3SurfaceArrays arrays;
-	std::uint64_t generation = 0;
-};
-
-std::mutex g_registry_mutex;
-std::map<std::uint64_t, ObjectMaterialClassification> g_materials;
-std::map<std::uint64_t, RegisteredQ3Source> g_sources;
-std::map<Q3GeometryCache::Key, PublishedGeometry> g_published;
 std::atomic<std::uint64_t> g_frame_id{1};
 
 struct DeviceCommand {
@@ -396,15 +367,6 @@ Ref<RDUniform> sampled_texture_uniform(int p_binding, const RID &p_sampler,
 	return uniform;
 }
 
-std::uint64_t object_id(const Ref<RefCounted> &p_object) {
-	return p_object.is_valid() ? p_object->get_instance_id() : 0;
-}
-
-Q3ResourceLease lease_for(const Ref<RefCounted> &p_object,
-		std::uint64_t p_generation = 1) {
-	return {object_id(p_object), p_generation};
-}
-
 Q3Matrix4 q3_matrix(const Transform3D &p_transform) {
 	Q3Matrix4 result;
 	for (int column = 0; column < 3; ++column) {
@@ -425,53 +387,6 @@ Transform3D godot_transform(const Q3Matrix4 &p_matrix) {
 	}
 	return Transform3D(basis, Vector3(p_matrix.values[12],
 			p_matrix.values[13], p_matrix.values[14]));
-}
-
-Ref<Texture2D> texture_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name) {
-	if (p_material.is_null())
-		return Ref<Texture2D>();
-	const Variant value = p_material->get_shader_parameter(p_name);
-	if (value.get_type() != Variant::OBJECT)
-		return Ref<Texture2D>();
-	return value;
-}
-
-float float_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, float p_default) {
-	if (p_material.is_null())
-		return p_default;
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::FLOAT || value.get_type() == Variant::INT
-			? static_cast<float>(value) : p_default;
-}
-
-bool bool_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, bool p_default) {
-	if (p_material.is_null())
-		return p_default;
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::BOOL ? static_cast<bool>(value) : p_default;
-}
-
-Vector3 vector3_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, const Vector3 &p_default) {
-	if (p_material.is_null())
-		return p_default;
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::VECTOR3 ? static_cast<Vector3>(value) : p_default;
-}
-
-Vector4 vector4_parameter(const Ref<ShaderMaterial> &p_material,
-		const StringName &p_name, const Vector4 &p_default) {
-	if (p_material.is_null())
-		return p_default;
-	const Variant value = p_material->get_shader_parameter(p_name);
-	return value.get_type() == Variant::VECTOR4 ? static_cast<Vector4>(value) : p_default;
-}
-
-RID server_rid(const Ref<Texture2D> &p_texture) {
-	return p_texture.is_valid() ? p_texture->get_rid() : RID();
 }
 
 bool belongs_to_scope(Node *p_node, Node *p_scope, Viewport *p_viewport) {
@@ -559,16 +474,6 @@ MissionEnvironment *environment_in_scope(Node *p_root,
 	return nullptr;
 }
 
-Ref<Material> active_material(GeometryInstance3D *p_source,
-		const Ref<Mesh> &p_mesh, int p_surface) {
-	if (MeshInstance3D *mesh_instance = Object::cast_to<MeshInstance3D>(p_source))
-		return mesh_instance->get_active_material(p_surface);
-	Ref<Material> material = p_source->get_material_override();
-	if (material.is_null() && p_mesh.is_valid())
-		material = p_mesh->surface_get_material(p_surface);
-	return material;
-}
-
 Q3DeviceBlend blend_for(const Q3DrawCommand &p_command) {
 	switch (p_command.technique) {
 		case Q3Technique::NormalCopy:
@@ -627,6 +532,14 @@ public:
 	std::size_t drawn_commands = 0;
 	std::size_t gpu_draw_calls = 0;
 	std::size_t registered_sources = 0;
+	// The in-tree records the walk iterates, and how many of them had cached
+	// state refreshed this frame (0 on a stable frame).
+	std::size_t records = 0;
+	std::size_t records_touched = 0;
+	// Surfaces whose material block was read through get_shader_parameter
+	// this frame: object surfaces only after a parameter invalidation, the
+	// per-frame water and celestial producers at every sight.
+	std::size_t material_reads = 0;
 	std::size_t frustum_culled_sources = 0;
 	std::size_t frustum_culled_instances = 0;
 	// Per-frame packing work (0 packed vertices and 0 readbacks on a stable
@@ -645,6 +558,11 @@ public:
 	// Main-thread geometry cache; its streams are shared immutably with the
 	// render side, which keeps one device buffer per entry below.
 	Q3GeometryCache geometry_cache;
+	// The MissionEnvironment found under the scope, re-validated by identity
+	// each frame and searched for again only once it has gone.
+	ObjectID environment_id;
+	std::vector<std::uint64_t> dead_sources;
+	std::vector<Transform3D> emitted_transforms;
 	struct DeviceGeometry {
 		RID buffer;
 		std::uint32_t capacity = 0;
@@ -781,6 +699,7 @@ public:
 	}
 
 	bool initialize(RenderingDevice *p_rd);
+	MissionEnvironment *scope_environment(Node *p_scope, Viewport *p_viewport);
 	RID pipeline_for(int64_t p_framebuffer_format,
 			const Q3DrawCommand &p_command);
 	bool upload_stream(const Q3PackedStream &p_stream);
@@ -894,6 +813,22 @@ bool Q3FrameAdapter::Impl::initialize(RenderingDevice *p_rd) {
 	if (clear_black.is_empty())
 		clear_black.push_back(Color(0, 0, 0, 0));
 	return true;
+}
+
+MissionEnvironment *Q3FrameAdapter::Impl::scope_environment(Node *p_scope,
+		Viewport *p_viewport) {
+	if (environment_id.is_valid()) {
+		MissionEnvironment *environment = Object::cast_to<MissionEnvironment>(
+				ObjectDB::get_instance(environment_id));
+		if (environment != nullptr &&
+				belongs_to_scope(environment, p_scope, p_viewport))
+			return environment;
+		environment_id = ObjectID();
+	}
+	MissionEnvironment *environment = environment_in_scope(p_scope, p_viewport);
+	if (environment != nullptr)
+		environment_id = ObjectID(environment->get_instance_id());
+	return environment;
 }
 
 RID Q3FrameAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
@@ -1196,6 +1131,11 @@ Dictionary Q3FrameAdapter::Impl::report() const {
 	result["q3_drawn_commands"] = static_cast<int64_t>(drawn_commands);
 	result["q3_gpu_draw_calls"] = static_cast<int64_t>(gpu_draw_calls);
 	result["q3_registered_sources"] = static_cast<int64_t>(registered_sources);
+	result["q3_records"] = static_cast<int64_t>(records);
+	result["q3_records_touched_this_frame"] =
+			static_cast<int64_t>(records_touched);
+	result["q3_material_reads_this_frame"] =
+			static_cast<int64_t>(material_reads);
 	result["q3_frustum_culled_sources"] =
 			static_cast<int64_t>(frustum_culled_sources);
 	result["q3_frustum_culled_instances"] =
@@ -1224,130 +1164,15 @@ Q3FrameAdapter::Q3FrameAdapter() : impl_(std::make_unique<Impl>()) {}
 
 Q3FrameAdapter::~Q3FrameAdapter() = default;
 
-void Q3FrameAdapter::register_object_material(const Ref<Material> &p_material,
-		const ObjectMaterialClassification &p_classification) {
-	if (p_material.is_null())
-		return;
-	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	g_materials[p_material->get_instance_id()] = p_classification;
-}
-
-void Q3FrameAdapter::clone_object_material(const Ref<Material> &p_source,
-		const Ref<Material> &p_clone) {
-	if (p_source.is_null() || p_clone.is_null())
-		return;
-	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	const auto found = g_materials.find(p_source->get_instance_id());
-	if (found != g_materials.end())
-		g_materials[p_clone->get_instance_id()] = found->second;
-}
-
-void Q3FrameAdapter::register_object_source(GeometryInstance3D *p_source,
-		const Ref<Material> &p_material) {
-	if (p_source == nullptr || p_material.is_null())
-		return;
-	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	const auto classification = g_materials.find(p_material->get_instance_id());
-	if (classification == g_materials.end() ||
-			!classification->second.is_glow_capable)
-		return;
-	g_sources[p_source->get_instance_id()] = {p_source->get_instance_id(),
-			Q3Source::Object, p_material->get_instance_id()};
-}
-
-bool Q3FrameAdapter::object_material_classification(
-		const Ref<Material> &p_material,
-		ObjectMaterialClassification &r_classification) {
-	if (p_material.is_null())
-		return false;
-	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	const auto found = g_materials.find(p_material->get_instance_id());
-	if (found == g_materials.end())
-		return false;
-	r_classification = found->second;
-	return true;
-}
-
-void Q3FrameAdapter::register_source(GeometryInstance3D *p_source,
-		Q3Source p_kind, std::uint32_t p_additive_surfaces) {
-	if (p_source == nullptr || p_kind == Q3Source::Object ||
-			p_kind == Q3Source::LightCorona)
-		return;
-	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	RegisteredQ3Source &registration = g_sources[p_source->get_instance_id()];
-	registration = {};
-	registration.node_id = p_source->get_instance_id();
-	registration.source = p_kind;
-	registration.additive_surfaces = p_additive_surfaces;
-}
-
-void Q3FrameAdapter::publish_geometry(GeometryInstance3D *p_source,
-		int p_surface, const Array &p_arrays) {
-	if (p_source == nullptr || p_surface < 0)
-		return;
-	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	PublishedGeometry &published =
-			g_published[{p_source->get_instance_id(), p_surface}];
-	published.arrays = Q3SurfaceArrays::from_mesh_arrays(p_arrays);
-	++published.generation;
-}
-
-void Q3FrameAdapter::invalidate_source(GeometryInstance3D *p_source) {
-	if (p_source == nullptr)
-		return;
-	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	const auto found = g_sources.find(p_source->get_instance_id());
-	if (found != g_sources.end())
-		++found->second.geometry_generation;
-}
-
-void Q3FrameAdapter::invalidate_instances(GeometryInstance3D *p_source) {
-	if (p_source == nullptr)
-		return;
-	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	const auto found = g_sources.find(p_source->get_instance_id());
-	if (found != g_sources.end())
-		++found->second.instance_generation;
-}
-
 void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		Camera3D *p_camera) {
 	if (!impl_ || p_scope == nullptr || p_viewport == nullptr || p_camera == nullptr) {
 		clear_frame();
 		return;
 	}
-	std::vector<RegisteredQ3Source> registrations;
-	std::map<std::uint64_t, ObjectMaterialClassification> materials;
-	std::map<Q3GeometryCache::Key, PublishedGeometry> published;
-	{
-		std::lock_guard<std::mutex> lock(g_registry_mutex);
-		for (auto it = g_sources.begin(); it != g_sources.end();) {
-			if (ObjectDB::get_instance(it->first) == nullptr) {
-				it = g_sources.erase(it);
-			} else {
-				registrations.push_back(it->second);
-				++it;
-			}
-		}
-		for (auto it = g_published.begin(); it != g_published.end();) {
-			if (ObjectDB::get_instance(it->first.source_id) == nullptr)
-				it = g_published.erase(it);
-			else
-				++it;
-		}
-		published = g_published;
-		for (auto it = g_materials.begin(); it != g_materials.end();) {
-			// A cached ShaderMaterial may deliberately outlive every current
-			// source and later be reused. ObjectDB lifetime, not the live-source
-			// set, is therefore the safe pruning authority.
-			if (ObjectDB::get_instance(it->first) == nullptr) {
-				it = g_materials.erase(it);
-			} else {
-				++it;
-			}
-		}
-		materials = g_materials;
-	}
+	// The registry lock spans the walk: producers and the tree/visibility
+	// signals never interleave with a compile.
+	std::lock_guard<std::recursive_mutex> registry_lock(Q3SourceRegistry::mutex());
 	Q3FrameSnapshot snapshot;
 	snapshot.frame_id = g_frame_id.fetch_add(1);
 	snapshot.scene_generation = p_viewport->get_instance_id();
@@ -1356,123 +1181,118 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	std::size_t frustum_culled_instances = 0;
 	Q3GeometryCache &cache = impl_->geometry_cache;
 	cache.begin_frame(snapshot.frame_id);
-	cache.prune([](std::uint64_t p_source_id) {
-		return ObjectDB::get_instance(p_source_id) != nullptr;
-	});
+	Q3SourceRegistry::begin_frame(impl_->dead_sources);
+	for (const std::uint64_t source_id : impl_->dead_sources)
+		cache.evict_source(source_id);
+	Q3SourceRegistry::FrameCounters counters;
 	const CameraFrustum frustum = camera_frustum(p_camera, p_viewport);
-	for (const RegisteredQ3Source &registration : registrations) {
-		GeometryInstance3D *source = Object::cast_to<GeometryInstance3D>(
-				ObjectDB::get_instance(registration.node_id));
-		if (source == nullptr || !source->is_visible_in_tree() ||
-				!belongs_to_scope(source, p_scope, p_viewport))
+	const std::uint64_t scope_id = p_scope->get_instance_id();
+	const Vector3 camera_position = p_camera->get_global_position();
+	const Vector3 camera_forward = -p_camera->get_global_basis().get_column(2);
+	// Focused Q3 admits world/local-body object geometry, never the
+	// first-person render-FOV/depth-band or shadow/capture-only layers.
+	// World-no-mirror is still ordinary beauty geometry and remains eligible.
+	constexpr std::uint32_t kWorldLayer = 1u << 0;
+	constexpr std::uint32_t kWorldNoMirrorLayer = 1u << 16;
+	std::vector<Transform3D> &emitted_transforms = impl_->emitted_transforms;
+	const std::vector<Q3SourceRecord *> &live = Q3SourceRegistry::live_records();
+	for (std::size_t index = 0; index < live.size(); ++index) {
+		Q3SourceRecord &record = *live[index];
+		if (record.viewport != p_viewport)
 			continue;
-		// Focused Q3 admits world/local-body object geometry, never the
-		// first-person render-FOV/depth-band or shadow/capture-only layers.
-		// World-no-mirror is still ordinary beauty geometry and remains eligible.
-		constexpr std::uint32_t kWorldLayer = 1u << 0;
-		constexpr std::uint32_t kWorldNoMirrorLayer = 1u << 16;
-		if (registration.source == Q3Source::Object &&
-				(source->get_layer_mask() &
+		if (record.scope_id != scope_id) {
+			record.scope_id = scope_id;
+			record.in_scope = belongs_to_scope(record.node, p_scope, p_viewport);
+			++counters.records_touched;
+		}
+		if (!record.in_scope)
+			continue;
+		if (record.visibility_dirty) {
+			record.visibility_dirty = false;
+			record.visible = record.node->is_visible_in_tree();
+			++counters.records_touched;
+		}
+		if (!record.visible)
+			continue;
+		if (record.source == Q3Source::Object &&
+				(record.node->get_layer_mask() &
 						(kWorldLayer | kWorldNoMirrorLayer)) == 0)
 			continue;
-		Ref<Mesh> mesh;
-		Ref<MultiMesh> multimesh;
-		if (MeshInstance3D *mesh_instance = Object::cast_to<MeshInstance3D>(source))
-			mesh = mesh_instance->get_mesh();
-		else if (MultiMeshInstance3D *multi_instance =
-				Object::cast_to<MultiMeshInstance3D>(source)) {
-			multimesh = multi_instance->get_multimesh();
-			if (multimesh.is_valid())
-				mesh = multimesh->get_mesh();
+		// The one per-frame probe of a visible record: Godot exposes no
+		// transform-changed signal for an engine-class node to an extension,
+		// so the cached bounds and rows follow a compare of the transform.
+		const Transform3D global_transform = record.node->get_global_transform();
+		if (!record.transform_valid || global_transform != record.global_transform) {
+			record.global_transform = global_transform;
+			record.transform_valid = true;
+			record.bounds_dirty = true;
+			record.rows_world_dirty = true;
 		}
-		Ref<ArrayMesh> array_mesh = mesh;
-		if (array_mesh.is_null())
-			continue;
-		const AABB source_world_bounds = source->get_global_transform().xform(
-				source->get_aabb());
-		if (frustum.outside(source_world_bounds)) {
+		if (record.bounds_dirty) {
+			record.bounds_dirty = false;
+			record.world_bounds = global_transform.xform(record.node->get_aabb());
+			++counters.records_touched;
+		}
+		if (frustum.outside(record.world_bounds)) {
 			++frustum_culled_sources;
 			continue;
 		}
+		if (record.surfaces_dirty)
+			Q3SourceRegistry::refresh_surfaces(record, counters);
+		if (record.mesh.is_null() || record.surfaces.empty())
+			continue;
 
-		std::vector<Transform3D> emitted_transforms;
+		emitted_transforms.clear();
 		AABB emitted_world_bounds;
 		bool has_emitted_world_bounds = false;
-		if (multimesh.is_valid()) {
-			// Instance rows are read once per instance generation; only the
-			// frustum test against them runs per frame.
-			const std::vector<Transform3D> &local_transforms =
-					cache.instance_transforms(registration.node_id,
-							registration.instance_generation, multimesh.ptr());
-			const Transform3D source_transform = source->get_global_transform();
-			const AABB mesh_bounds = mesh->get_aabb();
-			emitted_transforms.reserve(local_transforms.size());
-			for (const Transform3D &local_transform : local_transforms) {
-				const Transform3D transform = source_transform * local_transform;
-				if (std::abs(transform.basis.determinant()) <= 1.0e-8f)
-					continue;
-				const AABB instance_world_bounds = transform.xform(mesh_bounds);
-				if (frustum.outside(instance_world_bounds)) {
+		if (record.is_multimesh) {
+			// Rows are read once per instance generation and their world
+			// bounds once per move; only the frustum test runs per frame.
+			Q3SourceRegistry::refresh_rows(record, counters);
+			emitted_transforms.reserve(record.rows.size());
+			for (const Q3InstanceRow &row : record.rows) {
+				if (frustum.outside(row.world_bounds)) {
 					++frustum_culled_instances;
 					continue;
 				}
-				emitted_transforms.push_back(transform);
+				emitted_transforms.push_back(row.world_transform);
 				merge_bounds(emitted_world_bounds, has_emitted_world_bounds,
-						instance_world_bounds);
+						row.world_bounds);
 			}
 		} else {
-			emitted_transforms.push_back(source->get_global_transform());
+			emitted_transforms.push_back(global_transform);
 			merge_bounds(emitted_world_bounds, has_emitted_world_bounds,
-					source_world_bounds);
+					record.world_bounds);
 		}
 		if (emitted_transforms.empty())
 			continue;
 		const Vector3 population_center = has_emitted_world_bounds ?
-				emitted_world_bounds.get_center() : source->get_global_position();
-		const Vector3 camera_position = p_camera->get_global_position();
-		const Vector3 camera_forward = -p_camera->get_global_basis().get_column(2);
+				emitted_world_bounds.get_center() : global_transform.origin;
 		const float population_view_depth = std::max(0.0f,
 				(population_center - camera_position).dot(camera_forward));
 
-		for (int surface = 0; surface < array_mesh->get_surface_count(); ++surface) {
-			const Ref<Material> material = active_material(source, mesh, surface);
-			const Ref<ShaderMaterial> shader_material = material;
-			if (shader_material.is_null())
-				continue;
-			ObjectMaterialClassification object_classification;
-			if (registration.source == Q3Source::Object) {
-				const auto classification = materials.find(material->get_instance_id());
-				if (classification == materials.end())
-					continue;
-				object_classification = classification->second;
-			}
+		for (Q3SurfaceRecord &surface : record.surfaces) {
+			Q3SourceRegistry::refresh_surface_parameters(record, surface, counters);
 			Candidate candidate;
-			candidate.submission.submission_id = registration.node_id ^
-					(static_cast<std::uint64_t>(surface + 1) << 48u);
-			candidate.submission.source = registration.source;
-			candidate.submission.material = lease_for(material);
-			candidate.submission.surface_index = surface;
+			candidate.submission.submission_id = record.node_id ^
+					(static_cast<std::uint64_t>(surface.surface + 1) << 48u);
+			candidate.submission.source = record.source;
+			candidate.submission.material = {surface.material_id, 1};
+			candidate.submission.surface_index = surface.surface;
 			Q3GeometryCache::Request request;
-			request.key = {registration.node_id, surface};
-			request.geometry_generation = registration.geometry_generation;
-			const auto publication = published.find(request.key);
-			if (publication != published.end()) {
+			request.key = {record.node_id, surface.surface};
+			request.geometry_generation = record.geometry_generation;
+			const auto publication = record.published.find(surface.surface);
+			if (publication != record.published.end()) {
 				request.published = &publication->second.arrays;
 				request.published_generation = publication->second.generation;
 			}
-			request.pack.source = registration.source;
-			if (registration.source == Q3Source::Object) {
-				request.pack.uv_u = vector3_parameter(shader_material,
-						"u_uv_transform_u", Vector3(1, 0, 0));
-				request.pack.uv_v = vector3_parameter(shader_material,
-						"u_uv_transform_v", Vector3(0, 1, 0));
-			} else if (registration.source == Q3Source::Water) {
-				request.pack.water_uv = vector4_parameter(shader_material,
-						"u_water_uv", Vector4(1.0f, 0.2f, 0.0f, 0.0f));
-				request.pack.camera_position = p_camera->get_global_position();
-			}
-			candidate.stream = cache.acquire(request, [&]() {
-				return array_mesh->surface_get_arrays(surface);
+			request.pack = surface.pack;
+			if (record.source == Q3Source::Water)
+				request.pack.camera_position = camera_position;
+			const int surface_index = surface.surface;
+			candidate.stream = cache.acquire(request, [&record, surface_index]() {
+				return record.mesh->surface_get_arrays(surface_index);
 			});
 			if (!candidate.stream)
 				continue;
@@ -1483,92 +1303,22 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			candidate.submission.geometry = {candidate.stream->entry_id,
 					candidate.stream->generation};
 			candidate.submission.first_transform = snapshot.transforms.size();
-			candidate.submission.geometry_kind = multimesh.is_valid() ?
+			candidate.submission.geometry_kind = record.is_multimesh ?
 					Q3GeometryKind::StaticInstances : Q3GeometryKind::Rigid;
 			for (const Transform3D &transform : emitted_transforms)
 				snapshot.transforms.push_back(q3_matrix(transform));
 			candidate.submission.transform_count = snapshot.transforms.size() -
 					candidate.submission.first_transform;
 			candidate.submission.view_depth = population_view_depth;
-			if (registration.source == Q3Source::Object) {
-				candidate.submission.object.classification = object_classification;
-				const Ref<Texture2D> base = texture_parameter(shader_material, "u_diffuse");
-				const Ref<Texture2D> detail = texture_parameter(shader_material, "u_detail");
-				candidate.submission.object.base_texture = lease_for(base);
-				candidate.submission.object.detail_texture = lease_for(detail);
-				candidate.primary_texture_resource = base;
-				candidate.secondary_texture_resource = detail;
-				candidate.primary_texture = server_rid(base);
-				candidate.secondary_texture = server_rid(detail);
-				const Vector4 reflect = vector4_parameter(shader_material,
-						"u_reflect_color", Vector4(0.7f, 0.8f, 0.9f, 0.35f));
-				candidate.submission.object.reflect_color = {reflect.x, reflect.y,
-						reflect.z, reflect.w};
-				const Vector3 self_lum = vector3_parameter(shader_material,
-						"u_rgb_mod", Vector3(1, 1, 1));
-				candidate.submission.object.self_lum_color = {self_lum.x,
-						self_lum.y, self_lum.z, 1.0f};
-				candidate.submission.object.alpha_mod = float_parameter(shader_material,
-						"u_alpha_mod", 1.0f);
-			} else if (registration.source == Q3Source::Water) {
-				const Ref<Texture2D> reflection = texture_parameter(shader_material,
-						"u_reflection");
-				const Ref<Texture2D> noise_color = texture_parameter(shader_material,
-						"u_noise_color");
-				const Ref<Texture2D> noise_normal = texture_parameter(shader_material,
-						"u_noise_normal");
-				candidate.submission.water.has_reflection = bool_parameter(shader_material,
-						"u_has_reflection", reflection.is_valid());
-				candidate.submission.water.reflection_texture = lease_for(reflection);
-				candidate.submission.water.noise_color_texture = lease_for(noise_color);
-				candidate.submission.water.noise_normal_texture = lease_for(noise_normal);
-				const Vector3 water_color = vector3_parameter(shader_material,
-						"u_water_color", Vector3(0.408f, 0.314f, 0.224f));
-				candidate.submission.water.water_color = {water_color.x,
-						water_color.y, water_color.z};
-				const Vector4 uv = vector4_parameter(shader_material, "u_water_uv",
-						Vector4(1, 0.2f, 0, 0));
-				candidate.submission.water.water_uv = {uv.x, uv.y, uv.z, uv.w};
-				const Variant scale_variant = shader_material->get_shader_parameter(
-						"u_reflection_uv_scale");
-				const Vector2 scale = scale_variant.get_type() == Variant::VECTOR2 ?
-						static_cast<Vector2>(scale_variant) : Vector2(1, 1);
-				candidate.submission.water.reflection_uv_scale = {scale.x, scale.y};
-				candidate.submission.water.underwater_view = bool_parameter(shader_material,
-						"u_underwater_view", false);
-				candidate.primary_texture_resource = noise_color;
-				candidate.secondary_texture_resource = noise_normal;
-				candidate.tertiary_texture_resource = reflection;
-				candidate.primary_texture = server_rid(noise_color);
-				candidate.secondary_texture = server_rid(noise_normal);
-				candidate.tertiary_texture = server_rid(reflection);
-			} else {
-				const Ref<Texture2D> diffuse = texture_parameter(shader_material,
-						"u_diffuse");
-				candidate.submission.celestial.diffuse_texture = lease_for(diffuse);
-				const Vector3 tint = vector3_parameter(shader_material, "u_tint",
-						Vector3(1, 1, 1));
-				candidate.submission.celestial.tint = {tint.x, tint.y, tint.z};
-				// Every celestial producer publishes its bloom-pass opacity as
-				// u_q3_opacity (the moon's fog-shader leg, the sun's body alpha,
-				// the glare's occlusion-free peak); an unpublished row draws
-				// nothing rather than borrowing the beauty formula.
-				candidate.submission.celestial.opacity = float_parameter(shader_material,
-						"u_q3_opacity", 0.0f);
-				const Vector3 glare = vector3_parameter(shader_material,
-						"u_glare_direction", Vector3(0, 1, 0));
-				candidate.submission.celestial.glare_direction =
-						{glare.x, glare.y, glare.z};
-				candidate.submission.celestial.glare_view_fade = bool_parameter(
-						shader_material, "u_glare_view_fade", false);
-				// The blend is the one the Celestial installed for this surface
-				// (registered beside the source), never the source kind: the
-				// authored sun/moon FF_ST_AD_LUM discs add like the glare.
-				candidate.submission.celestial.additive = surface < 32 &&
-						((registration.additive_surfaces >> surface) & 1u) != 0u;
-				candidate.primary_texture_resource = diffuse;
-				candidate.primary_texture = server_rid(diffuse);
-			}
+			candidate.submission.object = surface.object;
+			candidate.submission.water = surface.water;
+			candidate.submission.celestial = surface.celestial;
+			candidate.primary_texture_resource = surface.primary_texture_resource;
+			candidate.secondary_texture_resource = surface.secondary_texture_resource;
+			candidate.tertiary_texture_resource = surface.tertiary_texture_resource;
+			candidate.primary_texture = surface.primary_texture;
+			candidate.secondary_texture = surface.secondary_texture;
+			candidate.tertiary_texture = surface.tertiary_texture;
 			snapshot.submissions.push_back(candidate.submission);
 			candidates.push_back(std::move(candidate));
 		}
@@ -1580,7 +1330,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	auto frame = std::make_shared<DeviceFrame>();
 	frame->draw_list = draw_list;
 	Ref<EnvLightValues> light_values = EnvLightValues::retail_noon_defaults();
-	if (MissionEnvironment *environment = environment_in_scope(p_scope,
+	if (MissionEnvironment *environment = impl_->scope_environment(p_scope,
 			p_viewport)) {
 		const Ref<EnvLightState> light_state = environment->get_light_state();
 		if (light_state.is_valid() && light_state->get_values().is_valid())
@@ -1622,7 +1372,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	frame->evicted_entries = cache.pending_evictions(
 			impl_->consumed_frame_id.load(std::memory_order_acquire));
 	impl_->publish(frame);
-	const Q3GeometryCache::FrameCounters &counters = cache.frame_counters();
+	const Q3GeometryCache::FrameCounters &cache_counters = cache.frame_counters();
 	{
 		std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
 		impl_->status = frame->commands.empty() ? "compiled_empty" : "compiled";
@@ -1630,13 +1380,16 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		impl_->submitted_frame_id = snapshot.frame_id;
 		impl_->submitted_commands = frame->commands.size();
 		impl_->rejected_commands = draw_list.rejected.size();
-		impl_->registered_sources = registrations.size();
+		impl_->registered_sources = Q3SourceRegistry::record_count();
+		impl_->records = live.size();
+		impl_->records_touched = counters.records_touched;
+		impl_->material_reads = counters.material_reads;
 		impl_->frustum_culled_sources = frustum_culled_sources;
 		impl_->frustum_culled_instances = frustum_culled_instances;
-		impl_->packed_vertices = counters.packed_vertices;
-		impl_->packed_vertex_bytes = counters.packed_vertex_bytes;
-		impl_->repacked_entries = counters.repacked_entries;
-		impl_->readbacks_this_frame = counters.readbacks;
+		impl_->packed_vertices = cache_counters.packed_vertices;
+		impl_->packed_vertex_bytes = cache_counters.packed_vertex_bytes;
+		impl_->repacked_entries = cache_counters.repacked_entries;
+		impl_->readbacks_this_frame = cache_counters.readbacks;
 		impl_->instance_row_reads_this_frame = counters.instance_row_reads;
 		impl_->cached_entries = cache.entry_count();
 		impl_->cached_vertex_bytes = cache.cached_vertex_bytes();

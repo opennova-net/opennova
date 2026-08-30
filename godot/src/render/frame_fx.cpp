@@ -1,5 +1,6 @@
 #include "render/frame_fx.h"
 #include "render/q3_frame_adapter.h"
+#include "render/q3_source_registry.h"
 #include "render/rd_fullscreen.h"
 
 #include <algorithm>
@@ -1002,41 +1003,45 @@ FrameFx::~FrameFx() = default;
 
 void FrameFx::register_q3_object_material(const Ref<Material> &p_material,
 		const opennova::renderer::ObjectMaterialClassification &p_classification) {
-	Q3FrameAdapter::register_object_material(p_material, p_classification);
+	Q3SourceRegistry::register_object_material(p_material, p_classification);
 }
 
 void FrameFx::clone_q3_object_material(const Ref<Material> &p_source,
 		const Ref<Material> &p_clone) {
-	Q3FrameAdapter::clone_object_material(p_source, p_clone);
+	Q3SourceRegistry::clone_object_material(p_source, p_clone);
+}
+
+void FrameFx::invalidate_q3_object_material(const Ref<Material> &p_material) {
+	Q3SourceRegistry::invalidate_object_material(p_material);
 }
 
 void FrameFx::register_q3_object_source(GeometryInstance3D *p_source,
 		const Ref<Material> &p_material) {
-	Q3FrameAdapter::register_object_source(p_source, p_material);
+	Q3SourceRegistry::register_object_source(p_source, p_material);
 }
 
 bool FrameFx::q3_object_material_classification(const Ref<Material> &p_material,
 		opennova::renderer::ObjectMaterialClassification &r_classification) {
-	return Q3FrameAdapter::object_material_classification(p_material,
+	return Q3SourceRegistry::object_material_classification(p_material,
 			r_classification);
 }
 
 void FrameFx::register_q3_source(GeometryInstance3D *p_source,
 		opennova::renderer::Q3Source p_kind, uint32_t p_additive_surfaces) {
-	Q3FrameAdapter::register_source(p_source, p_kind, p_additive_surfaces);
+	Q3SourceRegistry::register_source(p_source, p_kind, p_additive_surfaces);
 }
 
 void FrameFx::publish_q3_geometry(GeometryInstance3D *p_source, int p_surface,
 		const Array &p_arrays) {
-	Q3FrameAdapter::publish_geometry(p_source, p_surface, p_arrays);
+	Q3SourceRegistry::publish_geometry(p_source, p_surface, p_arrays);
 }
 
 void FrameFx::invalidate_q3_source(GeometryInstance3D *p_source) {
-	Q3FrameAdapter::invalidate_source(p_source);
+	Q3SourceRegistry::invalidate_source(p_source);
 }
 
 void FrameFx::invalidate_q3_instances(GeometryInstance3D *p_source) {
-	Q3FrameAdapter::invalidate_instances(p_source);
+	Q3SourceRegistry::invalidate_instances(p_source);
 }
 
 void FrameFx::_bind_methods() {
@@ -1053,6 +1058,9 @@ void FrameFx::_bind_methods() {
 	ClassDB::bind_static_method("FrameFx",
 			D_METHOD("invalidate_q3_instances", "source"),
 			&FrameFx::invalidate_q3_instances);
+	ClassDB::bind_static_method("FrameFx",
+			D_METHOD("invalidate_q3_object_material", "material"),
+			&FrameFx::invalidate_q3_object_material);
 	BIND_CONSTANT(kBeautyCameraMask);
 }
 
