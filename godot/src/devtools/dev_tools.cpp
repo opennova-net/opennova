@@ -307,6 +307,12 @@ void DevTools::apply_debug_requests() {
 		if (simulation_ == nullptr) {
 			continue;
 		}
+		// A joiner never mutates: its rows are replicas the wire re-writes and
+		// its local player's pose rides the uplink. The windows disable the
+		// controls; this is the same refusal the debug-control table makes.
+		if (simulation_->session_role() == Simulation::ROLE_JOINER) {
+			continue;
+		}
 		drained = true;
 		// The window's requests carry the engine handle; they reach the engine
 		// mutators (EntityCommands, ADR 0042 d5) by that handle, no index detour.
@@ -364,6 +370,10 @@ bool DevTools::push_entity_directory() {
 	snapshot.rows = simulation_->native_entity_directory();
 	snapshot.valid = true;
 	snapshot.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
+	// The session-role fact the debug-control table reads too (ADR 0042 d5):
+	// the joiner is the one non-authoritative role.
+	snapshot.authority = simulation_->session_role() != Simulation::ROLE_JOINER;
+	snapshot.session_live = simulation_->is_host_listening();
 	tools_->set_entity_directory(std::move(snapshot));
 	return true;
 }
