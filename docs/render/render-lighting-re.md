@@ -667,11 +667,11 @@ glint. It then multiplies the completed gamma framebuffer by vertex color
 `0xFF606060` under `SRC=DESTCOLOR, DST=ZERO`, and additively draws the
 sun-aligned CubeRotSpecular sphere through `render_sky_mesh @ 0x5ac680` and
 the `Env_LightBlock` MODULATE2X descriptor. OpenNova mirrors that topology.
-The host facts (face count and size, the 128-frame cadence, the eye
+The witnessed facts (face count and size, the 128-frame cadence, the eye
 placement, the 90° square view, the dim byte and its rounded-half-up byte
 product) are the engine's `<runtime/renderer/environment_cube.h>`
-(`renderer_environment_cube` ctest); `EnvironmentCubeCapture` is the device
-host: six layer-isolated 256² SubViewports rendered together in the frame the
+(`renderer_environment_cube` ctest); `EnvironmentCubeCapture` is the shell's
+device side: six layer-isolated 256² SubViewports rendered together in the frame the
 cadence fires, then, on the next advance, a RenderingDevice copy leg
 (`godot/src/render/environment_cube_blit.cpp`, run through
 `RenderingServer::call_on_render_thread`) draws each face's render target by
@@ -681,7 +681,7 @@ multiply in integer arithmetic (the gamma value truncated to the framebuffer
 byte, then `(byte × 0x60 + 127) / 255`, `environment_cube_dim_byte`), and the
 cube is published as a `TextureCubemapRD` through the
 `opennova_environment_cube` shader global. No CPU readback, Image or Cubemap
-resource exists: the 2026-08-22 host read the six faces back with
+resource exists: the 2026-08-22 shell read the six faces back with
 `ViewportTexture::get_image` on every publish, a stall the 00TRa Mission Rows
 probe measured at 19.4 ms mean / 52.7 ms max on the publish frame's env-cube
 leg (2026-08-30, before); the copy leg measured 0.11 ms mean / 0.18 ms max on the same run shape (after), the publish-frame wall time within 1 ms of its neighbours. The
