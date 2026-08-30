@@ -400,6 +400,9 @@ private:
 	ObjectID weather_owner_id_;
 	void _release_weather_owner();
 	opennova::renderer::PrecipitationDrawState precipitation_draw_;
+	// The compiled streak frame, reused across frames (its vertex capacity
+	// survives clear()).
+	opennova::renderer::PrecipitationDrawFrame precipitation_frame_;
 	void apply_collision_to_ai();
 	// The shell input the sweep reads (its retained items.def rows feed the
 	// engine resolve). RefCounted, so retaining it also keeps its object/ADM
@@ -998,6 +1001,8 @@ public:
 	bool command_sky_speed(int p_rate);
 	bool command_quake(int p_seconds);
 	bool command_time_of_day_minutes(int p_minute_of_day);
+	// The exact dev-tool scrub (not the WAC `tod` math).
+	bool debug_set_time_of_day_minutes(double p_minute_of_day);
 	bool command_fog_type(int p_type);
 	bool command_lightning_flash();
 	bool command_lightning_far_flash();

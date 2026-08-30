@@ -58,6 +58,18 @@ void EnvironmentState::set_overcast_config(const Config *overcast) {
 
 void EnvironmentState::set_time_of_day(double hhmm) {
 	time_of_day_ = fposmod(hhmm, kHhmmDay);
+	// The standalone home is the clock the tick publishes back: an owner
+	// setting the TOD (the authored curtime, a preview scrub) moves it too.
+	if (weather_is_standalone()) {
+		standalone_weather_.tod_fixed24 = hhmm_to_fixed24(time_of_day_);
+	}
+	if (is_loaded()) {
+		update_tod();
+	}
+}
+
+void EnvironmentState::set_render_time_of_day(double hhmm) {
+	time_of_day_ = fposmod(hhmm, kHhmmDay);
 	if (is_loaded()) {
 		update_tod();
 	}
@@ -133,12 +145,19 @@ void EnvironmentState::reset_standalone_weather(int wind_scale) {
 			: weather_seed_from_config(Config{}, header);
 	seed.wind_scale = wind_scale;
 	standalone_weather_.seed(seed);
+	if (!clock_configured_) {
+		// No mission clock configured: a preview holds its render TOD (the
+		// authored curtime or the embedder's scrub) and does not run it.
+		standalone_weather_.tod_fixed24 = hhmm_to_fixed24(time_of_day_);
+		standalone_weather_.tod_advance_per_tick = 0;
+	}
 }
 
 void EnvironmentState::configure_mission_clock(int start_time_q8_8,
 		int minutes_per_day) {
 	clock_start_q8_8_ = start_time_q8_8;
 	clock_minutes_per_day_ = minutes_per_day;
+	clock_configured_ = true;
 	// The standalone home takes the clock now (its other channels keep their
 	// state; a later reset re-seeds everything from the same numbers).
 	standalone_weather_.tod_fixed24 = static_cast<uint32_t>(tod_start_fixed24(start_time_q8_8)) %
@@ -171,7 +190,7 @@ bool EnvironmentState::debug_set_mission_minute_of_day(double minute_of_day) {
 			minute_of_day >= kClockMinutesPerDay) {
 		return false;
 	}
-	weather_->command_time_of_day_minutes(static_cast<int32_t>(std::lround(minute_of_day)));
+	weather_->debug_set_time_of_day_minutes(minute_of_day);
 	sync_clock_from_weather();
 	return true;
 }
@@ -191,7 +210,12 @@ double EnvironmentState::mission_start_time_hhmm(int start_time_q8_8) {
 // --- the weather-home reads --------------------------------------------------
 
 void EnvironmentState::sync_clock_from_weather() {
-	set_time_of_day(weather_->tod_hhmm());
+	// An unseeded home has no clock to publish (a World bound before its
+	// seed must not replace the configured clock with 00:00).
+	if (!weather_live()) {
+		return;
+	}
+	set_render_time_of_day(weather_->tod_hhmm());
 }
 
 int EnvironmentState::quake_ticks() const {
@@ -235,6 +259,20 @@ double EnvironmentState::hhmm_to_minute_of_day(double hhmm) {
 double EnvironmentState::fixed24_to_hhmm(int value) {
 	return hours_to_hhmm(
 			static_cast<double>(value) / static_cast<double>(kFixed24OneHour));
+}
+
+uint32_t EnvironmentState::hhmm_to_fixed24(double hhmm) {
+	const double hours = hhmm_to_minute_of_day(hhmm) / kMinutesPerHour;
+	const double units = hours * static_cast<double>(kFixed24OneHour);
+	return static_cast<uint32_t>(std::llround(units)) %
+			static_cast<uint32_t>(kTodDayFixed24);
+}
+
+void EnvironmentState::ensure_standalone_weather_seeded(int wind_scale) {
+	if (!is_loaded() || standalone_weather_.valid) {
+		return;
+	}
+	reset_standalone_weather(wind_scale);
 }
 
 double EnvironmentState::hours_to_hhmm(double hours) {

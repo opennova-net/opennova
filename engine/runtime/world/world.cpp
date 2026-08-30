@@ -477,6 +477,12 @@ void EntityCommands::set_time_of_day_minutes(int32_t minute_of_day) {
     world_.weather.command_time_of_day_minutes(minute_of_day);
 }
 
+void EntityCommands::debug_set_time_of_day_minutes(double minute_of_day) {
+    world_.env.time_of_day = static_cast<int32_t>(minute_of_day);
+    ++world_.env.generation;
+    world_.weather.debug_set_time_of_day_minutes(minute_of_day);
+}
+
 void EntityCommands::sun_fade(int32_t percent, int32_t seconds) {
     world_.weather.command_sun_fade(percent, seconds);
 }

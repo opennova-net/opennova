@@ -257,8 +257,8 @@ func test_wire_sample_roundtrips_exact_retail_units_through_the_weather_home() -
 			"fog/celestial consumers see the locally smoothed overcast current")
 
 	env.advance_mission_clock(1)
-	assert_eq(env.get_quake_ticks(), 16,
-			"joiner quake duration counts down once per 62 Hz environment tick")
+	assert_eq(env.get_quake_ticks(), 15,
+			"the clock advance is the weather tick: the quake counts down with it")
 	env.advance_mission_clock(100)
 	assert_eq(env.get_quake_ticks(), 0)
 	weather.apply_wire_sample(wire_sample)

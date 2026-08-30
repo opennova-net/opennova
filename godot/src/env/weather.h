@@ -150,6 +150,9 @@ public:
 	void _ready() override;
 	void _exit_tree() override;
 	void _process(double p_delta) override;
+	// A Weather freed off-tree never sees _exit_tree: release the sim's
+	// render-owner pointer and the env's weather view here too.
+	~Weather() override;
 
 protected:
 	static void _bind_methods();

@@ -192,6 +192,10 @@ struct WeatherState {
     void command_sky_height(int32_t height_raw);                // [orig: WacCmd_SkyHeight @ 0x4edec0]
     void command_quake(int32_t seconds);                        // [orig: WacCmd_Quake @ 0x4ed4c0]
     void command_time_of_day_minutes(int32_t minute_of_day);    // [orig: WacCmd_Tod @ 0x4edc70]
+    // The dev-tool scrub (MCP rows, GameWorld's debug seam): the exact
+    // minute on the 8.24 clock. Not a witnessed handler — the WAC `tod`
+    // math above keeps its 0x44444-per-minute truncation.
+    void debug_set_time_of_day_minutes(double minute_of_day);
     void command_fog_type(int32_t type);                        // [orig: WacCmd_FogType @ 0x4eded0]
     void command_sun_fade(int32_t percent, int32_t seconds);    // [orig: WacCmd_SunFade @ 0x4edf10]
     void command_color_fade(int32_t seconds);                   // [orig: WacCmd_ColorFade @ 0x4edcb0]

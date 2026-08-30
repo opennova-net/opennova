@@ -1,5 +1,7 @@
 #include <runtime/devtools/environment_window.h>
 
+#include <runtime/world/weather_state.h>
+
 #include <imgui.h>
 
 #include <cstdio>
@@ -19,6 +21,17 @@ std::string int_row(const char *label, int32_t value, const char *suffix = "") {
 	char buf[64];
 	std::snprintf(buf, sizeof(buf), "%s: %d%s", label, value, suffix);
 	return buf;
+}
+
+constexpr int kNoTarget = -1;
+constexpr int kLightningTarget = -2;
+
+uint32_t pack_rgb(const std::array<float, 3> &rgb) {
+	const auto byte = [](float v) -> uint32_t {
+		const int scaled = static_cast<int>(v * 255.0f + 0.5f);
+		return static_cast<uint32_t>(scaled < 0 ? 0 : (scaled > 255 ? 255 : scaled));
+	};
+	return (byte(rgb[0]) << 16) | (byte(rgb[1]) << 8) | byte(rgb[2]);
 }
 
 ImVec4 swatch(uint32_t packed) {
@@ -145,17 +158,59 @@ void EnvironmentWindow::draw_rows() {
 		true, true, true, false, true, true, true, true, true, true, false, false,
 		true, true, true, true, false, false, false, false, false, false,
 	};
+	// The color rows a WAC handler targets open a picker that drives that
+	// handler (sun/sky/ground/floor/ceiling/cloud/fogcolor/skyfogcolor/gain,
+	// lightning); the derived blocks (outdoor, indoor, iris) stay read-only.
+	const int block_targets[kRowCount] = {
+		kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget,
+		static_cast<int>(world::WeatherColorTarget::Fog),
+		static_cast<int>(world::WeatherColorTarget::SkyFog),
+		static_cast<int>(world::WeatherColorTarget::Cloud), kNoTarget,
+		static_cast<int>(world::WeatherColorTarget::Sun), kLightningTarget,
+		static_cast<int>(world::WeatherColorTarget::Sky),
+		static_cast<int>(world::WeatherColorTarget::Ground),
+		static_cast<int>(world::WeatherColorTarget::Ceiling),
+		static_cast<int>(world::WeatherColorTarget::Floor), kNoTarget, kNoTarget,
+		kNoTarget, kNoTarget,
+		static_cast<int>(world::WeatherColorTarget::Gain), kNoTarget,
+		kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget,
+	};
+	const ImVec2 swatch_size(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
 	if (ImGui::BeginTable("environment_rows", 2, ImGuiTableFlags_SizingStretchSame)) {
 		for (int i = 0; i < kRowCount; ++i) {
 			if ((i & 1) == 0) ImGui::TableNextRow();
 			ImGui::TableNextColumn();
-			if (swatched[i]) {
+			ImGui::PushID(i);
+			if (swatched[i] && (block_targets[i] == kNoTarget || !snapshot_.authority)) {
 				ImGui::ColorButton("##swatch", swatch(swatches[i]),
-						ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker,
-						ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight()));
+						ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker, swatch_size);
+				ImGui::SameLine();
+			} else if (swatched[i]) {
+				std::array<float, 3> &rgb = color_edit_[static_cast<size_t>(i)];
+				const bool open = ImGui::IsPopupOpen("picker");
+				if (!open) {
+					const ImVec4 current = swatch(swatches[i]);
+					rgb = {current.x, current.y, current.z};
+				}
+				if (ImGui::ColorButton("##swatch", ImVec4(rgb[0], rgb[1], rgb[2], 1.0f),
+							ImGuiColorEditFlags_NoTooltip, swatch_size)) {
+					ImGui::OpenPopup("picker");
+				}
+				if (ImGui::BeginPopup("picker")) {
+					if (ImGui::ColorPicker3("##color", rgb.data(),
+								ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoSmallPreview |
+										ImGuiColorEditFlags_DisplayRGB)) {
+						const int32_t packed = static_cast<int32_t>(pack_rgb(rgb));
+						if (block_targets[i] == kLightningTarget) {
+							enqueue_request({EnvironmentRequest::Kind::LightningColor, 0, packed});
+						} else {
+							enqueue_request({EnvironmentRequest::Kind::BlockColor, block_targets[i], packed});
+						}
+					}
+					ImGui::EndPopup();
+				}
 				ImGui::SameLine();
 			}
-			ImGui::PushID(i);
 			ImGui::TextUnformatted(rows_[static_cast<size_t>(i)].c_str());
 			ImGui::PopID();
 		}

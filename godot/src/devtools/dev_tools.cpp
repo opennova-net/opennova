@@ -368,6 +368,14 @@ void DevTools::apply_environment_requests() {
 			case Kind::Flash: commands->lightning_flash(); break;
 			case Kind::FarFlash: commands->lightning_far_flash(); break;
 			case Kind::WindScale: commands->set_wind_scale(request.a); break;
+			case Kind::BlockColor:
+				commands->set_weather_color(
+						static_cast<opennova::world::WeatherColorTarget>(request.a),
+						static_cast<uint32_t>(request.b));
+				break;
+			case Kind::LightningColor:
+				commands->set_lightning_color(static_cast<uint32_t>(request.b));
+				break;
 		}
 	}
 }

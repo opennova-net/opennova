@@ -159,8 +159,10 @@ void Weather::_resolve_environment() {
 	}
 	env_node_id_ = env != nullptr ? ObjectID(env->get_instance_id())
 								  : ObjectID();
-	if (env != nullptr && !_bound_sim()) {
-		runtime_.attach_state(nullptr, &env->state());
+	if (!_bound_sim()) {
+		// No env resolves: fall back to the runtime's own idle home so the
+		// runtime never keeps pointing into a freed MissionEnvironment.
+		runtime_.attach_state(nullptr, env != nullptr ? &env->state() : nullptr);
 	}
 }
 
@@ -213,6 +215,10 @@ void Weather::_exit_tree() {
 	bind_simulation(nullptr);
 }
 
+Weather::~Weather() {
+	bind_simulation(nullptr);
+}
+
 void Weather::_process(double p_delta) {
 	advance_frame(p_delta);
 }
@@ -251,7 +257,10 @@ void Weather::weather_render_tick(opennova::world::WeatherState &p_weather) {
 	(void)p_weather; // the runtime is attached to this same home
 	MissionEnvironment *env = _env_node();
 	runtime_.tick_render(env != nullptr ? &env->state() : nullptr);
-	_post_runtime(env);
+	// Device work (the typed publication + the shader globals) is the
+	// display frame's: advance_frame pushes once per frame after the
+	// ticks it banked (the 255-tick settle and catch-up frames would
+	// otherwise push per tick).
 }
 
 void Weather::run_mission_start_boundary(Object *p_sim, int p_start_time_q8_8,
@@ -321,6 +330,9 @@ void Weather::prepare_world_driven() {
 }
 
 void Weather::prepare_autonomous() {
+	// Autonomous means the standalone home: drop a bound Simulation first
+	// (otherwise the kernel hook and process_delta would both tick).
+	bind_simulation(nullptr);
 	MissionEnvironment *env = _env_node();
 	runtime_.prepare_autonomous(env != nullptr ? &env->state() : nullptr);
 	iris_samples_ = PackedInt32Array();

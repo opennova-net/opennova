@@ -16,7 +16,7 @@
 // never spawn — they recycle through the volume forever. The compile into
 // triangles is renderer/precipitation_draw_list.h.
 
-#include <array>
+#include <vector>
 #include <cstdint>
 
 namespace opennova::env {
@@ -59,7 +59,9 @@ struct PrecipitationField {
     // [orig: the 0xC80000 constant @ 0x5dedc4].
     static constexpr int32_t kRaycastHeightQ16 = 0xC80000;
 
-    std::array<PrecipitationSlot, kSlots> slots{};
+    // Retail's static 3072-slot table; heap-backed here so the World (and
+    // every snapshot of it) stays small enough for stack-built worlds.
+    std::vector<PrecipitationSlot> slots = std::vector<PrecipitationSlot>(kSlots);
     // The accumulated fall since the last draw, the drawer's trail vector
     // source [orig: dword_2C05A2C, zeroed by the drawer @ 0x5deee8].
     int32_t fall_accum_z = 0;

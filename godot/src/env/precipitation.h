@@ -42,6 +42,9 @@ public:
 	// One display frame: update + compile the drops for `camera` (its
 	// global transform supplies position / right / up) and upload them.
 	void render_frame(Object *p_sim, Camera3D *p_camera);
+	// Below the rain gate the drawer never touches the device (retail
+	// returns @ 0x5dee48): hide the last frame's streaks once and stay idle.
+	void hide_frame();
 	// The last frame's drop count (probes/tests) and whether the snow
 	// texture was bound.
 	int get_last_drop_count() const { return last_drops_; }
@@ -66,6 +69,10 @@ private:
 	Ref<Texture2D> snow_texture_;
 	bool textures_loaded_ = false;
 	int last_drops_ = 0;
+	bool texture_bound_ = false;
+	bool bound_texture_snow_ = false;
+	StringName param_diffuse_ = StringName("diffuse");
+	StringName param_drop_texture_ = StringName("drop_texture");
 	bool last_snow_ = false;
 };
 

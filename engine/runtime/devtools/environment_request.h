@@ -26,6 +26,9 @@ struct EnvironmentRequest {
 		Flash,            // flash
 		FarFlash,         // farflash
 		WindScale,        // the `wind` named value
+		BlockColor,       // sun/sky/ground/floor/ceiling/cloud/fogcolor/skyfogcolor/gain(r, g, b):
+		                  // a = world::WeatherColorTarget, b = packed 0xRRGGBB
+		LightningColor,   // lightning(r, g, b): b = packed 0xRRGGBB
 	};
 
 	Kind kind = Kind::Rain;

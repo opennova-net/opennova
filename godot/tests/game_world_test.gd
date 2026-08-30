@@ -1569,13 +1569,14 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	assert_almost_eq(env.time_of_day, expected_clock.time_of_day, 0.000001,
 		"the BMS start time plus retail's 255-tick prewarm initializes the shared clock")
 
-	# 0.128 seconds advances eight 62.5 Hz simulation ticks but only seven
-	# recovered 62 Hz weather/TOD ticks. Those clocks must remain distinct.
+	# 0.128 seconds advances eight 62.5 Hz simulation ticks and the weather
+	# clock rides every one of them (retail Environment_UpdateWeatherTick runs
+	# once per drained quantum, Game_ProcessMainFrame @ 0x52674b).
 	world.tick(Vector3.ZERO, Transform3D(), 0.128)
 	var advanced := env.time_of_day
-	expected_clock.advance_mission_clock(7)
+	expected_clock.advance_mission_clock(8)
 	assert_almost_eq(advanced, expected_clock.time_of_day, 0.000001,
-			"the mission clock advances on the separate 62 Hz weather cadence")
+			"the mission clock advances once per simulation tick")
 	assert_eq(int(world.get_runtime().get_perf_counters().get("ticks", 0)), 8,
 			"mission simulation retains its 62.5 Hz cadence")
 	expected_clock.free()

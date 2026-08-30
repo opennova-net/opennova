@@ -89,6 +89,7 @@ public:
     void set_sky_height(int32_t height_raw);               // skyheight
     void quake(int32_t seconds);                           // quake
     void set_time_of_day_minutes(int32_t minute_of_day);   // TOD
+    void debug_set_time_of_day_minutes(double minute_of_day);
     void sun_fade(int32_t percent, int32_t seconds);       // sunfade
     void set_color_fade(int32_t seconds);                  // colorfade
     void set_lightning_color(uint32_t rgb);                // lightning

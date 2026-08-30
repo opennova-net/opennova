@@ -89,6 +89,11 @@ struct TerrainEnvUniforms {
 
 class EnvironmentState {
 public:
+	// weather_ may alias standalone_weather_: a copy would point into its
+	// source.
+	EnvironmentState() = default;
+	EnvironmentState(const EnvironmentState &) = delete;
+	EnvironmentState &operator=(const EnvironmentState &) = delete;
 	static constexpr int kHoursPerDay = 24;
 	// One day in the HHMM time-of-day encoding (0..2400): the wrap modulus
 	// every HHMM consumer shares.
@@ -127,6 +132,11 @@ public:
 	bool weather_is_standalone() const { return weather_ == &standalone_weather_; }
 	// The bound weather is seeded (a mission T0 ran).
 	bool weather_live() const { return weather_->valid; }
+	// A standalone home no owner seeded yet takes the loaded config's values
+	// (a render owner attaching without the embedder's prepare call).
+	void ensure_standalone_weather_seeded(int wind_scale);
+	// The weather tick's writeback: the render TOD only, never the clock.
+	void set_render_time_of_day(double hhmm);
 	// Seed the standalone home from the loaded config + the remembered clock
 	// (the ONE derivation, env::weather_seed_from_config); the mission's World
 	// home is seeded by the embedder at its boundary instead.
@@ -188,6 +198,7 @@ public:
 	static double minute_of_day_to_hhmm(double minute_of_day);
 	static double hhmm_to_minute_of_day(double hhmm);
 	static double fixed24_to_hhmm(int value);
+	static uint32_t hhmm_to_fixed24(double hhmm);
 	static double hours_to_hhmm(double hours);
 
 	// --- the weather-driven split -----------------------------------------
@@ -444,6 +455,7 @@ private:
 	world::WeatherState *weather_ = &standalone_weather_;
 	int clock_start_q8_8_ = 12 << 8;
 	int clock_minutes_per_day_ = 1440;
+	bool clock_configured_ = false;
 	bool loaded_ = false;
 
 	double time_of_day_ = 1200.0;

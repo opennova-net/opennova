@@ -38,6 +38,9 @@ void WeatherRuntime::attach_state(world::WeatherState *state, EnvironmentState *
 	standalone_ = state == nullptr;
 	if (env != nullptr) {
 		env->bind_weather(state);
+		if (state == nullptr) {
+			env->ensure_standalone_weather_seeded(configured_wind_intensity_);
+		}
 		state_ = env->weather();
 	} else {
 		state_ = state != nullptr ? state : &idle_state_;
@@ -253,6 +256,9 @@ void WeatherRuntime::tick_weather(EnvironmentState *env, int tick_count) {
 			env->bind_weather(standalone_ ? nullptr : state_);
 			state_ = env->weather();
 		}
+	}
+	if (standalone_) {
+		env->ensure_standalone_weather_seeded(configured_wind_intensity_);
 	}
 	env->sync_clock_from_weather();
 	// Claim the current render colors + shader globals: from here on the

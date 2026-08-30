@@ -312,6 +312,17 @@ void test_night_phase_follows_the_clock() {
 	CHECK(!ws.is_night_phase());
 }
 
+void test_debug_scrub_is_exact_while_the_wac_tod_truncates() {
+	w::WeatherState ws;
+	ws.command_time_of_day_minutes(9 * 60);
+	CHECK(ws.tod_fixed24 == 540u * 0x44444u); // [orig: WacCmd_Tod @ 0x4edc70]
+	CHECK(ws.tod_fixed24 != (9u << 24));
+	ws.debug_set_time_of_day_minutes(540.0);
+	CHECK(ws.tod_fixed24 == (9u << 24)); // the dev-tool scrub lands exactly
+	ws.debug_set_time_of_day_minutes(22.0 * 60.0 + 7.0);
+	CHECK(ws.tod_hhmm() > 2206.9999 && ws.tod_hhmm() < 2207.0001);
+}
+
 } // namespace
 
 int main() {
@@ -325,6 +336,7 @@ int main() {
 	test_quake_displaces_pool_entities_and_arms_the_local_shake();
 	test_wire_sample_writes_targets_only();
 	test_night_phase_follows_the_clock();
+	test_debug_scrub_is_exact_while_the_wac_tod_truncates();
 	std::printf(failures ? "WEATHER STATE TEST FAILED (%d)\n" : "weather state test passed\n",
 	            failures);
 	return failures ? 1 : 0;

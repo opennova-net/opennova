@@ -622,6 +622,7 @@ void test_environment_request_queue() {
 	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::Rain, 100, 5});
 	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::MoveFog, 200, 2});
 	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::Flash, 0, 0});
+	tools.environment_window().enqueue_request({EnvironmentRequest::Kind::BlockColor, 2, 0x102030});
 	CHECK(tools.take_environment_request(request) && request.kind == EnvironmentRequest::Kind::Rain &&
 					request.a == 100 && request.b == 5,
 			"the rain request round-trips first");
@@ -630,6 +631,10 @@ void test_environment_request_queue() {
 			"the move-fog request follows");
 	CHECK(tools.take_environment_request(request) && request.kind == EnvironmentRequest::Kind::Flash,
 			"the flash request follows");
+	CHECK(tools.take_environment_request(request) &&
+					request.kind == EnvironmentRequest::Kind::BlockColor && request.a == 2 &&
+					request.b == 0x102030,
+			"the block color request carries its target and packed rgb");
 	CHECK(!tools.take_environment_request(request), "the queue drains exactly once");
 }
 

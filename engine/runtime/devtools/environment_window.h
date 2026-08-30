@@ -68,6 +68,9 @@ private:
 	std::array<std::string, kRowCount> rows_{};
 	bool shown_ = false;
 	std::deque<EnvironmentRequest> requests_;
+	// The picker buffers of the color rows: a row follows its snapshot swatch
+	// until its picker opens, then the picker owns it until it closes.
+	std::array<std::array<float, 3>, kRowCount> color_edit_{};
 	// The control strip's edit state, seeded from the pushed record on the
 	// first valid push so an untouched Apply is a no-op-shaped write.
 	bool seeded_ = false;

@@ -30,6 +30,9 @@ namespace opennova::env {
 
 class WeatherRuntime {
 public:
+	// state_ may alias idle_state_: a copy would point into its source.
+	WeatherRuntime(const WeatherRuntime &) = delete;
+	WeatherRuntime &operator=(const WeatherRuntime &) = delete;
 	// The weather runs on the simulation clock — ONE clock, 62.5 Hz
 	// [orig: Game_ProcessMainFrame @ 0x526774 per drained 16 ms quantum].
 	static constexpr double kTicksPerSecond = 62.5;

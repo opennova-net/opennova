@@ -545,6 +545,35 @@ int main() {
 		ok &= expect(weather.world_tick_driven(), "world-driven flips on");
 	}
 
+	// --- the standalone home follows the owner's TOD -------------------------
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		env.set_time_of_day(2200.0f);
+		ok &= expect(env.standalone_weather().tod_fixed24 == (22u << 24),
+				"an owner TOD write moves the standalone clock");
+		env.ensure_standalone_weather_seeded(256);
+		ok &= expect(env.weather_live(), "the first seed comes from the loaded config");
+		ok &= expect(env.standalone_weather().tod_fixed24 == (22u << 24) &&
+						env.standalone_weather().tod_advance_per_tick == 0,
+				"without a configured mission clock a preview holds its TOD");
+		env.set_render_time_of_day(1200.0f);
+		ok &= expect(env.standalone_weather().tod_fixed24 == (22u << 24),
+				"the tick writeback never touches the clock");
+		env.ensure_standalone_weather_seeded(256);
+		ok &= expect(env.standalone_weather().tod_fixed24 == (22u << 24),
+				"a seeded home is never re-seeded by the attach path");
+		env.configure_mission_clock(9 << 8, 1440);
+		env.reset_standalone_weather(256);
+		ok &= expect(env.standalone_weather().tod_fixed24 == (9u << 24) &&
+						env.standalone_weather().tod_advance_per_tick != 0,
+				"a configured mission clock runs from the header");
+		ok &= expect(env.debug_set_mission_minute_of_day(540.0) &&
+						env.standalone_weather().tod_fixed24 == (9u << 24),
+				"the dev-tool scrub lands exactly on the 8.24 clock");
+	}
+
 	if (!ok) {
 		return 1;
 	}

@@ -1387,9 +1387,14 @@ func drive_network_frame() -> bool:
 func render_precipitation_frame() -> void:
 	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 	if _world_ready and _runtime != null and _precipitation != null:
-		var viewport := get_viewport()
-		_precipitation.render_frame(get_sim(),
-				viewport.get_camera_3d() if viewport != null else null)
+		if _env != null and _env.is_raining():
+			var viewport := get_viewport()
+			_precipitation.render_frame(get_sim(),
+					viewport.get_camera_3d() if viewport != null else null)
+		else:
+			# Below the rain gate the drawer never runs (retail returns at
+			# 0x5dee48 before touching the device).
+			_precipitation.hide_frame()
 	if _frame_timing:
 		var precipitation_us := Time.get_ticks_usec() - probe_phase_start
 		if _frame_probe_enabled:
@@ -2983,7 +2988,7 @@ func debug_set_mission_minute_of_day(minute_of_day: float) -> Error:
 	var sim: Simulation = get_sim()
 	var err: Error = OK
 	if sim != null and sim.weather_state_bound():
-		if not sim.command_time_of_day_minutes(int(minute_of_day)):
+		if not sim.debug_set_time_of_day_minutes(minute_of_day):
 			err = ERR_UNAVAILABLE
 	else:
 		err = _env.debug_set_mission_minute_of_day(minute_of_day)

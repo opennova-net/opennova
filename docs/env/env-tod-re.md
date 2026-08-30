@@ -442,9 +442,18 @@ columns (x 10 / x 200), each row's y scrolled by `dword_A895BC`:
 `DCB: %i` (the literal 692). Reimpl: the F3 `Environment` window (ADR 0039 —
 tool chrome is infrastructure; every VALUE it shows is engine state read from
 the weather home through `Simulation::native_environment_snapshot`), the same
-rows plus swatches and a control strip of the WAC handlers above; `Loc` is
+rows plus swatches (the rows a WAC handler targets open a picker driving
+that handler: sun/sky/ground/floor/ceiling/cloud/fogcolor/skyfogcolor/gain
+and `lightning`; outdoor/indoor/iris are derived and read-only) and a
+control strip of the WAC handlers above; `Loc` is
 omitted (unidentified) and `Reverb` awaits the unported reverb bed
 (docs/audio); the MCP `environment_*` debug rows drive the same commands.
+The strip's `TOD` control is the WAC `tod` handler (minute × 0x44444, so a
+9:00 scrub lands at 8:59.9993 exactly as retail's script would); the tool
+scrub behind `debug_set_mission_minute_of_day` (the MCP row, GameWorld's
+debug seam) is the exact minute on the 8.24 clock
+(`WeatherState::debug_set_time_of_day_minutes`) — a tool convenience, not a
+witnessed handler.
 
 ## Environment_ApplyFogAndAmbient walk (C6)
 

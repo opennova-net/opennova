@@ -44,6 +44,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("command_quake", "seconds"), &Simulation::command_quake);
 	ClassDB::bind_method(D_METHOD("command_time_of_day_minutes", "minute_of_day"),
 			&Simulation::command_time_of_day_minutes);
+	ClassDB::bind_method(D_METHOD("debug_set_time_of_day_minutes", "minute_of_day"),
+			&Simulation::debug_set_time_of_day_minutes);
 	ClassDB::bind_method(D_METHOD("command_fog_type", "type"), &Simulation::command_fog_type);
 	ClassDB::bind_method(D_METHOD("command_lightning_flash"), &Simulation::command_lightning_flash);
 	ClassDB::bind_method(D_METHOD("command_lightning_far_flash"), &Simulation::command_lightning_far_flash);

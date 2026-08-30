@@ -7,7 +7,7 @@ namespace opennova::env {
 
 void PrecipitationField::reset(uint16_t (*rand16)(void *), void *ctx) {
 	// [orig: Precipitation_Reset @ 0x5df3a0 — memset the table, seed, kind 0]
-	slots.fill(PrecipitationSlot{});
+	slots.assign(static_cast<size_t>(kSlots), PrecipitationSlot{});
 	fall_accum_z = 0;
 	seed(rand16, ctx);
 }
@@ -30,10 +30,11 @@ void PrecipitationField::fall_tick(int32_t rain_pct_q16, uint32_t precipitation_
 		return;
 	}
 	const int32_t decay = precipitation_kind == 1u ? -kSnowFallPerTick : -kRainFallPerTick;
+	// Wrapping adds: retail's 32-bit table simply wraps (no UB here either).
 	for (PrecipitationSlot &slot : slots) {
-		slot.z += decay;
+		slot.z = static_cast<int32_t>(static_cast<uint32_t>(slot.z) + static_cast<uint32_t>(decay));
 	}
-	fall_accum_z += decay;
+	fall_accum_z = static_cast<int32_t>(static_cast<uint32_t>(fall_accum_z) + static_cast<uint32_t>(decay));
 }
 
 int PrecipitationField::active_count(int32_t rain_pct_q16) {
@@ -61,17 +62,17 @@ void PrecipitationField::update(int32_t cam_x, int32_t cam_y, int32_t cam_z,
 		// high bits, then lifts a result below the bound by one span
 		// [orig: @ 0x5decf5..0x5ded03 (x), @ 0x5ded22..0x5ded30 (y),
 		//  @ 0x5ded48..0x5ded57 (z)].
-		if (static_cast<uint32_t>(slot.x - bound_x) >= static_cast<uint32_t>(kSpanXY)) {
+		if (static_cast<uint32_t>(slot.x) - static_cast<uint32_t>(bound_x) >= static_cast<uint32_t>(kSpanXY)) {
 			slot.x = bound_x ^ ((bound_x ^ slot.x) & (kSpanXY - 1));
 			if (slot.x < bound_x) slot.x += kSpanXY;
 			wrapped = true;
 		}
-		if (static_cast<uint32_t>(slot.y - bound_y) >= static_cast<uint32_t>(kSpanXY)) {
+		if (static_cast<uint32_t>(slot.y) - static_cast<uint32_t>(bound_y) >= static_cast<uint32_t>(kSpanXY)) {
 			slot.y = bound_y ^ ((bound_y ^ slot.y) & (kSpanXY - 1));
 			if (slot.y < bound_y) slot.y += kSpanXY;
 			wrapped = true;
 		}
-		if (static_cast<uint32_t>(slot.z - bound_z) >= static_cast<uint32_t>(kSpanZ)) {
+		if (static_cast<uint32_t>(slot.z) - static_cast<uint32_t>(bound_z) >= static_cast<uint32_t>(kSpanZ)) {
 			slot.z = bound_z ^ ((bound_z ^ slot.z) & (kSpanZ - 1));
 			if (slot.z < bound_z) slot.z += kSpanZ;
 			wrapped = true;

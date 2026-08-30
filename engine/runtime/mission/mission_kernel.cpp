@@ -664,6 +664,12 @@ void MissionKernel::tick_weather() {
 	world.weather.tick_sim(&world, events);
 	if (events.thunder_a) world.weather_sounds.push_back(w::WeatherSoundEvent{0x10000, 0});
 	if (events.thunder_b) world.weather_sounds.push_back(w::WeatherSoundEvent{0xA0000, 128});
+	// A host without an audio presenter (the dedicated host) never drains
+	// the queue: keep it bounded, dropping the oldest.
+	constexpr size_t kWeatherSoundQueueCap = 32;
+	while (world.weather_sounds.size() > kWeatherSoundQueueCap) {
+		world.weather_sounds.erase(world.weather_sounds.begin());
+	}
 	// The quake HARD-SETS the shake counter [orig: @ 0x57eb7d / @ 0x57ec29].
 	if (events.quake_shake_local) view.shake.counter = w::kShakeQuakeLevel;
 	if (weather_render != nullptr) weather_render->weather_render_tick(world.weather);

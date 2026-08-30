@@ -96,6 +96,9 @@ void Simulation::reset_world() {
 	// WeatherState is the environment's live view): release it before the
 	// kernel is replaced.
 	_release_weather_owner();
+	// The drawer's last-camera latch is mission-scoped: a stale one would
+	// hand the next mission's first rain frame a bogus (clamped) streak.
+	precipitation_draw_ = opennova::renderer::PrecipitationDrawState{};
 	joiner_bridge_.reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	// A fresh EntityRegistry restarts its spawn ids at 1, so the per-handle
@@ -249,7 +252,7 @@ Dictionary Simulation::compile_precipitation_frame(const Vector3 &p_camera,
 	camera.up[0] = p_camera_up.x;
 	camera.up[1] = p_camera_up.y;
 	camera.up[2] = p_camera_up.z;
-	opennova::renderer::PrecipitationDrawFrame frame;
+	opennova::renderer::PrecipitationDrawFrame &frame = precipitation_frame_;
 	opennova::renderer::compile_precipitation_frame(weather.precipitation,
 			weather.core.scalar_channels.rain_pct_fp, weather.precipitation_kind,
 			static_cast<uint32_t>(p_terrain_light_rgb), camera, precipitation_draw_, frame);
@@ -258,10 +261,12 @@ Dictionary Simulation::compile_precipitation_frame(const Vector3 &p_camera,
 	const int64_t verts = static_cast<int64_t>(frame.drops) * 3;
 	positions.resize(verts);
 	uvs.resize(verts);
+	Vector3 *pw = positions.ptrw();
+	Vector2 *uw = uvs.ptrw();
 	for (int64_t i = 0; i < verts; ++i) {
 		const float *v = frame.vertices.data() + i * 5;
-		positions.set(i, Vector3(v[0], v[1], v[2]));
-		uvs.set(i, Vector2(v[3], v[4]));
+		pw[i] = Vector3(v[0], v[1], v[2]);
+		uw[i] = Vector2(v[3], v[4]);
 	}
 	out["positions"] = positions;
 	out["uvs"] = uvs;
@@ -392,6 +397,7 @@ bool Simulation::native_environment_snapshot(
 	return true
 
 bool Simulation::command_rain(int p_percent, int p_seconds) { OPENNOVA_WEATHER_COMMAND(set_rain(p_percent, p_seconds)); }
+bool Simulation::debug_set_time_of_day_minutes(double p_minute_of_day) { OPENNOVA_WEATHER_COMMAND(debug_set_time_of_day_minutes(p_minute_of_day)); }
 bool Simulation::command_snow(int p_percent, int p_seconds) { OPENNOVA_WEATHER_COMMAND(set_snow(p_percent, p_seconds)); }
 bool Simulation::command_overcast(int p_percent, int p_seconds) { OPENNOVA_WEATHER_COMMAND(set_overcast(p_percent, p_seconds)); }
 bool Simulation::command_fog_distance(int p_metres) { OPENNOVA_WEATHER_COMMAND(set_fog_distance(p_metres)); }

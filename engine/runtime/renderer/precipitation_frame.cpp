@@ -39,6 +39,7 @@ void compile_precipitation_frame(env::PrecipitationField &field,
 		uint32_t terrain_light_combined_rgb, const PrecipitationCamera &camera,
 		PrecipitationDrawState &state, PrecipitationDrawFrame &out) {
 	out.clear();
+	out.vertices.reserve(static_cast<size_t>(env::PrecipitationField::kSlots) * 15u);
 	out.snow = precipitation_kind == 1u;
 	out.color_argb = (terrain_light_combined_rgb & 0x00FFFFFFu) | 0xFF000000u;
 	// The drop gate [orig: @ 0x5dee48].

@@ -1,3 +1,4 @@
+#include <cmath>
 #include <runtime/world/weather_state.h>
 
 #include <runtime/world/ai.h>
@@ -229,6 +230,12 @@ void WeatherState::command_time_of_day_minutes(int32_t minute_of_day) {
     // [orig: WacCmd_Tod @ 0x4edc70] minute-of-day * 0x44444 into the 8.24
     // accumulator.
     tod_fixed24 = (static_cast<uint32_t>(minute_of_day) * 0x44444u) % kTodDayFixed24;
+    bump_command();
+}
+
+void WeatherState::debug_set_time_of_day_minutes(double minute_of_day) {
+    const double units = std::max(0.0, minute_of_day) / 60.0 * 16777216.0;
+    tod_fixed24 = static_cast<uint32_t>(std::llround(units)) % kTodDayFixed24;
     bump_command();
 }
 

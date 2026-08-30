@@ -1243,6 +1243,9 @@ void JoinerWorldBridge::apply_gameplay_events(const PumpContext &ctx) {
 }
 
 void JoinerWorldBridge::reset_for_join() {
+	// A fresh ClientRuntime restarts the environment revision at 0: the
+	// phase-2 cursor must not swallow the first sample of a rejoin.
+	weather_revision_seen_ = 0;
 	// The verbatim enable_join latch reset. self_team_revision_seen_ is
 	// deliberately absent — the shipped binding never reset it on a fresh
 	// join, and this move preserves behavior exactly (S10b owns any

@@ -254,6 +254,7 @@ public:
 	// re-arms and the receive-side cursors restart with it.
 	void reset_for_runtime_rebuild() {
 		started_ = false;
+		weather_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
 	}
 	// Stop/Start restart with a live wire-header world: force one exact
