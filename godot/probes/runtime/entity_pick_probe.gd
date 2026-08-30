@@ -103,8 +103,11 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	ctx.log("crosshair ray: %s -> selected handle %d" % [
 			str(centre_pick.get("name", "")) if centre_handle >= 0 else "no entity",
 			dev_tools.selected_entity_handle()])
-	_check(dev_tools.selected_entity_handle() == centre_handle,
-			"the crosshair pick selects exactly what the engine's centre ray meets")
+	if centre_handle >= 0:
+		_check(dev_tools.selected_entity_handle() == centre_handle,
+				"the crosshair pick selects exactly what the engine's centre ray meets")
+	else:
+		ctx.log("crosshair leg skipped: the centre ray met no entity from this view")
 
 	# Re-select the clicked target so the capture shows its card, and let the
 	# detail push land.
@@ -112,9 +115,17 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	await ctx.wait_frames(SETTLE_FRAMES)
 
 	# The per-entity attrib override, through the seam the F3 toggle and the
-	# MCP action share; read back off the entity card.
+	# MCP action share. On the authority it lands and reads back off the
+	# entity card; on a joiner the same call must refuse outright (its rows
+	# are replicas the wire re-writes) while picking stays allowed.
 	var before: EntityCard = sim.entity_card(handle)
-	if before != null:
+	if before == null:
+		_check(false, "the entity card resolves for the picked handle")
+	elif int(sim.session_role()) == Simulation.ROLE_JOINER:
+		_check(int(sim.debug_set_entity_item_attrib(handle, 0, 0)) == ERR_UNAUTHORIZED,
+				"a joiner's attrib override is refused (read-only peer)")
+		ctx.log("joiner: set_entity_item_attrib refused as expected")
+	else:
 		var attrib := int(before.get_item_attrib())
 		var attrib2 := int(before.get_item_attrib2())
 		ctx.defer_restore(func() -> void:
@@ -134,8 +145,6 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 				attrib, int(after.get_item_attrib()) if after != null else 0,
 				after.get_item_name() if after != null else "",
 				int(after.get_health_max()) if after != null else 0])
-	else:
-		_check(false, "the entity card resolves for the picked handle")
 
 	await ctx.wait_frames(SETTLE_FRAMES)
 	# The whole window: the workspace with the Entities window beside the game.

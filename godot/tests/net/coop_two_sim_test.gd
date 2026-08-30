@@ -719,6 +719,16 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			host_joiner_kind = int(hsnap[base + Simulation.PF_KIND])
 			host_joiner_index = int(hsnap[base + Simulation.PF_INDEX])
 	assert_true(host_sees_joiner, "host's present includes the admitted joiner (a player row that isn't the host's own)")
+	# The per-entity attrib override is the authority's alone: the joiner's rows
+	# are replicas the wire re-writes, so its seam refuses outright while the
+	# host's accepts the same call on its own row.
+	assert_eq(int(joiner.debug_set_entity_item_attrib(host_own, 0, 0)), ERR_UNAUTHORIZED,
+			"a joiner never overrides an item attrib")
+	var host_card: EntityCard = host.entity_card(host_own)
+	assert_not_null(host_card)
+	assert_eq(int(host.debug_set_entity_item_attrib(host_own,
+			int(host_card.get_item_attrib()), int(host_card.get_item_attrib2()))), OK,
+			"the host's seam accepts the override on its own player row")
 	assert_eq(host_joiner_type, 0x14B9,
 			"the host's joiner row resolves the player runtime type so the wire pass builds its avatar")
 	# An admitted player has NO authored .bms identity: its row must carry the

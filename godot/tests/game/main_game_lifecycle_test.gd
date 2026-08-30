@@ -981,11 +981,16 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 	dev_tools.set_game_playing(true)
 	assert_true(dev_tools.is_game_playing())
 
+	# A selection never crosses worlds: packed handles name slots, not entities.
+	dev_tools.select_entity(0x3001)
+	assert_eq(dev_tools.selected_entity_handle(), 0x3001, "a pick selects while the world lives")
 	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
 	assert_true(_shell.is_dev_tools_open(), "the workspace may remain open in the menu")
 	assert_false(dev_tools.is_game_play_available(), "menu state disables Play")
+	assert_eq(dev_tools.selected_entity_handle(), -1,
+			"the world unload clears the Entities selection")
 	assert_false(dev_tools.is_game_playing(),
 			"world teardown cannot leave gameplay capture or mode latched")
 	# The tools stay open across the next load: the click picker returns once

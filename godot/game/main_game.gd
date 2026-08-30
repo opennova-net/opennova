@@ -834,7 +834,6 @@ func _finish_world_load_presentation() -> void:
 		return
 	_world_load_pending = false
 	_shell_presentation.finish_world_load(_world_load, _world, _hud)
-	_refresh_dev_tools_game_state()  # Play and the click picker wait on this edge
 
 
 func _on_join_admission_ready() -> void:

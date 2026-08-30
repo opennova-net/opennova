@@ -217,6 +217,10 @@ func test_actions_validate_typed_arguments_before_the_engine() -> void:
 		[&"crew_local_player", ["11"]],
 		[&"local_player_look", ["3", 1.0]],
 		[&"runtime_transport", ["warp"]],
+		[&"set_entity_item_attrib", [0xFFFF, 0, 0]],
+		[&"set_entity_item_attrib", [7, 0x100000000, 0]],
+		[&"set_entity_item_attrib", [7, 0, -1]],
+		[&"set_entity_item_attrib", [7, 0]],
 	]
 	for case in refused:
 		assert_eq(int(_controls.invoke_control(case[0], case[1], true)["error"]),

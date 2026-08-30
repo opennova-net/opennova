@@ -19,10 +19,13 @@ func setup(dev_tools: DevTools) -> void:
 
 
 ## A fresh mission gets a fresh pick set (stale handles never cross sessions);
-## the world renders/curates the shell-owned list from here on.
+## the world renders/curates the shell-owned list from here on, and the click
+## catcher follows the latch onto the new world.
 func begin_world(world: GameWorld) -> void:
 	list.clear()
 	world.set_pick_debug(list)
+	if _click_active:
+		world.set_pick_click_enabled(true)
 
 
 ## Install or remove the world's click catcher; a no-op without a world or when
