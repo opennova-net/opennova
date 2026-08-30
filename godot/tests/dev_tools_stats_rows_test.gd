@@ -28,6 +28,22 @@ func test_engine_log_ring_drain_contract() -> void:
 			"a drain after the newest sequence returns nothing")
 
 
+func test_select_entity_seam_reads_back_headless() -> void:
+	var dev_tools: DevTools = add_child_autofree(DevTools.new())
+	if dev_tools.stats_row_ids().is_empty():
+		pending("release flavour: the dev tools are compiled out")
+		return
+	assert_eq(dev_tools.selected_entity_handle(), -1, "nothing selected at first")
+	dev_tools.select_entity(0x3001)
+	assert_eq(dev_tools.selected_entity_handle(), 0x3001,
+			"a pick's handle is the selection (pending until a directory push carries it)")
+	dev_tools.select_entity(-1)
+	assert_eq(dev_tools.selected_entity_handle(), -1, "a negative handle clears")
+	dev_tools.select_entity(0x3001)
+	dev_tools.select_entity(0xFFFF)
+	assert_eq(dev_tools.selected_entity_handle(), -1, "the invalid handle clears too")
+
+
 func test_fed_reading_is_readable_by_row_id() -> void:
 	var dev_tools: DevTools = add_child_autofree(DevTools.new())
 	var ids := dev_tools.stats_row_ids()

@@ -1,7 +1,7 @@
 class_name DebugPickFlow
 ## The Shift+F6 pick flow: run the crosshair ray pick, file the card into the
-## shell-owned DebugPickList (the F3 Entities page renders it; snapshots embed
-## it), and confirm what happened with a brief toast over the HUD.
+## shell-owned DebugPickList (the world highlights it and the F3 Entities
+## window selects it), and confirm what happened with a brief toast over the HUD.
 
 const PICK_TOAST_SECONDS := 1.6
 
@@ -21,12 +21,7 @@ func pick_at_crosshair(sim: Simulation, camera: Camera3D,
 			_show_toast(toast_mount, "No entity (%s, %.0fu)." % [
 					blocked, float(pick.get("distance_units", 0.0))])
 		return
-	var row := pick_list.add(pick)
-	if row < 0:
-		_show_toast(toast_mount,
-				"Pick list full (%d) — remove one on the F3 Entities page." %
-				DebugPickList.MAX_PICKS)
-		return
+	pick_list.add(pick)
 	var pick_name := String(pick.get("name", ""))
 	if pick_name.is_empty():
 		pick_name = String(pick.get("hit_class", "entity"))

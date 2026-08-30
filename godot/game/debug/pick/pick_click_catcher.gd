@@ -1,13 +1,21 @@
 class_name PickClickCatcher
 extends Node
-## The tools-open mouse picker: while the dev tools are up (mouse released),
-## a left-click on the world ray-picks through the live camera and adds to
-## the injected pick list. It lives inside the world subtree so the root
-## viewport routes game clicks here while overlay-panel clicks (consumed by
-## Controls before the unhandled phase) never leak through.
+## The tools-open mouse picker: while the dev tools are up in Interact (mouse
+## released), a left-click on the world ray-picks through the live camera and
+## adds to the injected pick list. It lives inside the world subtree, so it
+## sees the click in the coordinates of the viewport the world renders in:
+## in the debug windowed runtime that is the SubViewport inside the ImGui Game
+## window, whose size follows that window and whose events arrive with
+## `position` already remapped to viewport-local pixels by the ImGui bridge.
+## The event's own position is therefore the ray's screen point; the polled
+## viewport mouse position is the root window's cursor and would land the ray
+## off by the Game window's offset on screen.
 
 var _world: GameWorld = null  # re-resolved for its sim every click
 var _pick_list: DebugPickList = null
+## The viewport-local position the last pick ray was built from (the test
+## seam; INF until a click ran).
+var last_pick_position := Vector2.INF
 
 
 func setup(world: GameWorld, pick_list: DebugPickList) -> void:
@@ -24,7 +32,8 @@ func _unhandled_input(event: InputEvent) -> void:
 ## synthetic events without the viewport's input routing.
 func handle_click(event: InputEvent) -> void:
 	var button := event as InputEventMouseButton
-	if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
+	if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT \
+			or button.double_click:
 		return
 	if _pick_list == null or _world == null or not is_instance_valid(_world):
 		return
@@ -34,8 +43,9 @@ func handle_click(event: InputEvent) -> void:
 	var camera := viewport.get_camera_3d()
 	if camera == null:
 		return
+	last_pick_position = button.position
 	var pick := DebugEntityPicker.pick_with_camera(
-			_world.get_sim(), camera, viewport.get_mouse_position(), "mouse_click")
+			_world.get_sim(), camera, button.position, "mouse_click")
 	if pick.is_empty():
 		return
 	_pick_list.add(pick)

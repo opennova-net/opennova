@@ -39,6 +39,17 @@ static func entity_position(args: Array) -> bool:
 			and args[1] is Vector3 and mission_position(args[1])
 
 
+## [wire_handle, attrib, attrib2]: a packed engine handle below the invalid
+## sentinel and two unsigned 32-bit words.
+static func item_attrib(args: Array) -> bool:
+	if args.size() != 3 or not is_integer_number(args[0]) \
+			or not is_integer_number(args[1]) or not is_integer_number(args[2]):
+		return false
+	return int(args[0]) >= 0 and int(args[0]) < 0xFFFF \
+			and int(args[1]) >= 0 and int(args[1]) <= 0xFFFFFFFF \
+			and int(args[2]) >= 0 and int(args[2]) <= 0xFFFFFFFF
+
+
 static func teleport(args: Array) -> bool:
 	if args.size() != 3 or not (args[0] is Vector3) \
 			or not mission_position(args[0]) \

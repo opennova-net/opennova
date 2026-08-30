@@ -988,12 +988,20 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 	assert_false(dev_tools.is_game_play_available(), "menu state disables Play")
 	assert_false(dev_tools.is_game_playing(),
 			"world teardown cannot leave gameplay capture or mode latched")
-	dev_tools.set_open(false)
+	# The tools stay open across the next load: the click picker returns once
+	# the load's presentation completes (Play availability waits on that edge).
 	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
-	assert_false(_shell.is_dev_tools_open(),
-			"the next mission keeps the tools' own closed lifecycle")
+	assert_true(_shell.is_dev_tools_open(), "the workspace survives into the next mission")
+	assert_true(dev_tools.is_game_play_available(), "the loaded mission re-enables Play")
+	assert_not_null(world.get_node_or_null("PickClickCatcher"),
+			"a load under open tools re-installs the click picker when the load completes")
+	dev_tools.set_open(false)
+	await get_tree().process_frame
+	assert_false(_shell.is_dev_tools_open(), "closing the tools in the next mission works")
+	assert_null(world.get_node_or_null("PickClickCatcher"),
+			"closing removes the click picker again")
 
 
 func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:

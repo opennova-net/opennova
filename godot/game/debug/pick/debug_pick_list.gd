@@ -1,18 +1,18 @@
 class_name DebugPickList
 extends RefCounted
 ## The debug pick list: the entities a developer picked in the live game
-## (crosshair hotkey or overlay-open click), shared between the host, the F3
-## overlay's picks section and the world highlight view. HOST-OWNED — a
-## crosshair pick must work before F3 has ever been opened, and the list must
-## survive overlay toggles — and cleared by the host on mission start/stop so
-## stale handles never cross sessions.
+## (crosshair hotkey or tools-open click), shared between the shell, the world
+## highlight view and, through the pick session, the F3 Entities window (every
+## landed pick selects its row there). SHELL-owned: a crosshair pick works
+## before F3 has ever been opened and the list survives tools toggles; the
+## shell clears it on mission start/stop so stale handles never cross sessions.
 ##
 ## Capped and deduped: re-picking a listed entity refreshes that row's pick
-## metadata (fresh hit position/tick) instead of appending; a full list
-## rejects new picks (add returns -1) rather than silently evicting the
-## oldest — the developer curates the set.
+## metadata (fresh hit position/tick) instead of appending; a full list evicts
+## its oldest row so picking never wedges (the highlight shows the newest eight).
 
-signal changed
+## A pick landed (appended or refreshed): the packed engine handle it names.
+signal picked(handle: int)
 
 const MAX_PICKS := 8
 
@@ -20,8 +20,7 @@ var _picks: Array[Dictionary] = []
 
 
 ## Add (or refresh) a pick card from Simulation.debug_pick_entity.
-## Returns the row index, or -1 when the pick is not an entity hit or the
-## list is full.
+## Returns the row index, or -1 when the pick is not an entity hit.
 func add(pick: Dictionary) -> int:
 	if not bool(pick.get("hit", false)):
 		return -1
@@ -31,31 +30,17 @@ func add(pick: Dictionary) -> int:
 	for i in range(_picks.size()):
 		if int(_picks[i].get("entity_handle", -1)) == handle:
 			_picks[i] = pick.duplicate(true)
-			changed.emit()
+			picked.emit(handle)
 			return i
 	if _picks.size() >= MAX_PICKS:
-		return -1
+		_picks.pop_front()
 	_picks.append(pick.duplicate(true))
-	changed.emit()
+	picked.emit(handle)
 	return _picks.size() - 1
 
 
-func remove_at(index: int) -> void:
-	if index < 0 or index >= _picks.size():
-		return
-	_picks.remove_at(index)
-	changed.emit()
-
-
 func clear() -> void:
-	if _picks.is_empty():
-		return
 	_picks.clear()
-	changed.emit()
-
-
-func is_full() -> bool:
-	return _picks.size() >= MAX_PICKS
 
 
 ## Deep copies — mutating a returned card never desyncs the list.
