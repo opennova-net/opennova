@@ -284,7 +284,15 @@ the perf probe (1600x900 windowed, Ryzen 7735HS iGPU, median of per-run p50
 over 2 runs): WORLD_FRAMEFX 1.16 -> 0.57 ms on 00TRa and
 1.04 -> 0.40 ms on CP19 with the records alone; the stream packer reading
 the surface arrays through their raw pointers into one sized buffer (the
-water strip re-packs every frame) takes it to 0.22 ms and 0.08 ms.
+water strip re-packs every frame) takes it to 0.22 ms and 0.08 ms. On the
+merged head (the records over the dense populations and the surface slots,
+Godot occlusion culling off, same protocol, n=2 on 00TRa/CP01 and n=1 on
+CP19, measured 2026-08-30 against the surface-slot head): WORLD_FRAMEFX
+1.04 -> 0.21 ms (00TRa), 1.09 -> 0.14 ms (CP01) and 1.26 -> 0.12 ms (CP19),
+the frame 13.48 -> 13.05, 13.73 -> 13.00 and 15.98 -> 14.47 ms, with root
+draw calls, primitives and the Q3 command count unchanged for a given
+spawn state (the Q3 source count on CP01 varies run to run with the bots'
+held weapons in view, 17 to 21).
 The render callback re-shades each LUM copy as the SELFLUM NORMAL block into
 the black-cleared Q3 target (`_FFP.fx` copies the NORMAL pass block into the
 GLOW slot `@ 0x5afc7f`: Diffuse1 x Detail MODULATE2X x RGB modulator x
