@@ -525,8 +525,6 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 			"the gameplay camera excludes the caster marker layers (the"
 			+ " camera-renderable hidden body must not leak through them)")
-	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_SLOT_CAPTURE_MASK, 0,
-			"the gameplay camera excludes the render-slot capture channels")
 	var rig: PlayerViewmodelRig = presenter.viewmodel_rig()
 	# The witnessed FP projection rides one shader global: the renderfov focal
 	# ratio against the live beauty projection, the 0.05 near swap, the far
@@ -556,7 +554,7 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	assert_gt(vm_instances.size(), 0, "the real viewmodel carries visual instances")
 	assert_gt(held_instances.size(), 0, "the real held weapon carries visual instances")
 	for vi in body_instances:
-		assert_eq(vi.layers & ~(Water.VISUAL_LAYER_SHADOW_CASTER_MASK | Water.VISUAL_LAYER_SLOT_CAPTURE_MASK),
+		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
 				Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
 				"first person: the body's visual instances ride the hidden FP layer")
 		if vi is GeometryInstance3D:
@@ -567,7 +565,7 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 					"first person: body geometry stays camera-renderable so the"
 					+ " slot capture cameras can photograph it (hidden by layer)")
 	for vi in held_instances:
-		assert_eq(vi.layers & ~(Water.VISUAL_LAYER_SHADOW_CASTER_MASK | Water.VISUAL_LAYER_SLOT_CAPTURE_MASK),
+		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
 				Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
 				"first person: the held weapon rides the hidden FP layer")
 		if vi is GeometryInstance3D:
@@ -592,7 +590,7 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	presenter.set_debug_third_person(true)
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
-		assert_eq(vi.layers & ~(Water.VISUAL_LAYER_SHADOW_CASTER_MASK | Water.VISUAL_LAYER_SLOT_CAPTURE_MASK),
+		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
 				Water.VISUAL_LAYER_WORLD,
 				"third person: the body returns to the normal world layer")
 		if vi is GeometryInstance3D:
@@ -600,7 +598,7 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 					"third person: body geometry renders and casts normally")
 	if held_weapon != null:
 		for vi in _visual_instances(held_weapon):
-			assert_eq(vi.layers & ~(Water.VISUAL_LAYER_SHADOW_CASTER_MASK | Water.VISUAL_LAYER_SLOT_CAPTURE_MASK),
+			assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
 					Water.VISUAL_LAYER_WORLD,
 					"third person: the held weapon returns to the normal world layer")
 			if vi is GeometryInstance3D:
@@ -620,7 +618,7 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	presenter.set_debug_body_in_first_person(true)
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
-		assert_eq(vi.layers & ~(Water.VISUAL_LAYER_SHADOW_CASTER_MASK | Water.VISUAL_LAYER_SLOT_CAPTURE_MASK),
+		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
 				Water.VISUAL_LAYER_WORLD,
 				"the debug first-person body uses the visible world layer")
 		if vi is GeometryInstance3D:
