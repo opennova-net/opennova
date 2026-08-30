@@ -277,12 +277,6 @@ void Q3GeometryCache::append_generations(
 	}
 }
 
-void Q3GeometryCache::clear() {
-	entries_.clear();
-	instances_.clear();
-	evictions_.clear();
-	counters_ = {};
-}
 
 std::size_t Q3GeometryCache::cached_vertex_bytes() const {
 	std::size_t total = 0;

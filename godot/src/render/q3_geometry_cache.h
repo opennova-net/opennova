@@ -152,9 +152,6 @@ public:
 	void append_generations(
 			std::vector<opennova::renderer::Q3ResourceGeneration>
 					&r_generations) const;
-	// Forgets every entry and pending eviction (the device side is released
-	// separately through the adapter's known-live device).
-	void clear();
 
 	const FrameCounters &frame_counters() const { return counters_; }
 	std::size_t entry_count() const { return entries_.size(); }
