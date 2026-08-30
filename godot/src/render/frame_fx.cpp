@@ -15,6 +15,7 @@
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/compositor.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
 #include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
@@ -378,7 +379,7 @@ public:
 
 	bool initialize_rd();
 	RID make_texture(const Vector2i &size,
-			RenderingDevice::DataFormat format);
+			RenderingDevice::DataFormat format, bool readback = false);
 	RID make_framebuffer(const RID &texture);
 	RID make_uniform(const RID &texture);
 	bool ensure_targets(RenderSceneBuffersRD *buffers,
@@ -395,8 +396,40 @@ public:
 	bool draw_weighted_pair(const RID &framebuffer, const RID &uniform,
 			const Vector2i &target_size, float first_degrees);
 	bool render(RenderData *render_data);
+	Ref<Image> capture_q3_target();
 	Dictionary report() const;
 };
+
+Ref<Image> FrameFxCompositorEffect::Impl::capture_q3_target() {
+	if (rd == nullptr || targets.empty() ||
+			shutdown_requested.load(std::memory_order_acquire))
+		return Ref<Image>();
+	const ViewTarget &target = targets.front();
+	if (!target.q3_color.is_valid() || !rd->texture_is_valid(target.q3_color))
+		return Ref<Image>();
+	const Ref<RDTextureFormat> format = rd->texture_get_format(target.q3_color);
+	if (format.is_null())
+		return Ref<Image>();
+	Image::Format image_format = Image::FORMAT_RGBA8;
+	switch (format->get_format()) {
+		case RenderingDevice::DATA_FORMAT_R16G16B16A16_SFLOAT:
+			image_format = Image::FORMAT_RGBAH;
+			break;
+		case RenderingDevice::DATA_FORMAT_R32G32B32A32_SFLOAT:
+			image_format = Image::FORMAT_RGBAF;
+			break;
+		case RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM:
+			image_format = Image::FORMAT_RGBA8;
+			break;
+		default:
+			return Ref<Image>();
+	}
+	const PackedByteArray data = rd->texture_get_data(target.q3_color, 0);
+	if (data.is_empty())
+		return Ref<Image>();
+	return Image::create_from_data(format->get_width(), format->get_height(),
+			false, image_format, data);
+}
 
 bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	if (shutdown_requested.load(std::memory_order_acquire))
@@ -481,7 +514,7 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 }
 
 RID FrameFxCompositorEffect::Impl::make_texture(const Vector2i &size,
-		RenderingDevice::DataFormat format) {
+		RenderingDevice::DataFormat format, bool readback) {
 	Ref<RDTextureFormat> texture_format;
 	texture_format.instantiate();
 	texture_format->set_format(format);
@@ -492,9 +525,13 @@ RID FrameFxCompositorEffect::Impl::make_texture(const Vector2i &size,
 	texture_format->set_mipmaps(1);
 	texture_format->set_texture_type(RenderingDevice::TEXTURE_TYPE_2D);
 	texture_format->set_samples(RenderingDevice::TEXTURE_SAMPLES_1);
-	texture_format->set_usage_bits(BitField<RenderingDevice::TextureUsageBits>(
-			RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
-			RenderingDevice::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT));
+	int64_t usage = RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT |
+			RenderingDevice::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+	if (readback) {
+		// capture_q3_target() reads this attachment back for the GUT pins.
+		usage |= RenderingDevice::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+	}
+	texture_format->set_usage_bits(BitField<RenderingDevice::TextureUsageBits>(usage));
 	Ref<RDTextureView> view;
 	view.instantiate();
 	return rd->texture_create(texture_format, view);
@@ -562,7 +599,7 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		target.color_framebuffer = make_framebuffer(target.color);
 		target.scene_scratch = make_texture(size, color_format->get_format());
 		target.scene_scratch_framebuffer = make_framebuffer(target.scene_scratch);
-		target.q3_color = make_texture(size, color_format->get_format());
+		target.q3_color = make_texture(size, color_format->get_format(), true);
 		TypedArray<RID> q3_attachments;
 		q3_attachments.push_back(target.q3_color);
 		q3_attachments.push_back(target.depth);
@@ -926,6 +963,10 @@ Dictionary FrameFxCompositorEffect::get_backend_report() const {
 	return impl_ ? impl_->report() : Dictionary();
 }
 
+Ref<Image> FrameFxCompositorEffect::capture_q3_target() {
+	return impl_ ? impl_->capture_q3_target() : Ref<Image>();
+}
+
 void FrameFxCompositorEffect::_render_callback(
 		int32_t p_effect_callback_type, RenderData *p_render_data) {
 	if (!impl_ || impl_->shutdown_requested.load(std::memory_order_acquire))
@@ -972,7 +1013,14 @@ void FrameFx::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_frame"),
 			&FrameFx::advance_frame);
 	ClassDB::bind_method(D_METHOD("shutdown"), &FrameFx::shutdown);
+	ClassDB::bind_method(D_METHOD("get_q3_target_image"),
+			&FrameFx::get_q3_target_image);
 	BIND_CONSTANT(kBeautyCameraMask);
+}
+
+Ref<Image> FrameFx::get_q3_target_image() const {
+	return terminal_effect_.is_valid() ?
+			terminal_effect_->capture_q3_target() : Ref<Image>();
 }
 
 void FrameFx::build_compositor() {

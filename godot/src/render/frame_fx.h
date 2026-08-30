@@ -3,6 +3,7 @@
 #include <memory>
 
 #include <godot_cpp/classes/compositor_effect.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/render_data.hpp>
 #include <godot_cpp/classes/world3d.hpp>
@@ -49,6 +50,11 @@ public:
 	void clear_q3_frame();
 	void release_device_resources();
 	Dictionary get_backend_report() const;
+	// Inspection seam for the GUT pins: the first view's focused Q3 colour
+	// target as drawn by the last completed frame. Call only after
+	// RenderingServer.force_sync(); an empty Ref means no target exists (no
+	// RenderingDevice, no frame yet, or an unmapped attachment format).
+	Ref<Image> capture_q3_target();
 
 	void _render_callback(int32_t p_effect_callback_type,
 			RenderData *p_render_data) override;
@@ -109,6 +115,9 @@ public:
 	void shutdown();
 
 	Dictionary get_backend_report() const;
+	// The terminal effect's focused Q3 target (see
+	// FrameFxCompositorEffect::capture_q3_target); empty without one.
+	Ref<Image> get_q3_target_image() const;
 };
 
 // The display decode for a 3D view that has no FrameFx (ONED
