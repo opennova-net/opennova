@@ -842,10 +842,18 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 		}
 		switches.push_back(LodSwitch{ model, selection.lod_index });
 	}
+	int applied = 0;
 	for (const LodSwitch &change : switches) {
+		// A switch applied earlier in this loop can unregister or free another
+		// queued model (set_active_lod's runtime-state refresh reaches child
+		// nodes); only a still-registered model is dereferenced.
+		if (!authored_lod_models_.has(change.model)) {
+			continue;
+		}
 		change.model->set_active_lod(change.lod_index);
+		++applied;
 	}
-	return static_cast<int>(switches.size());
+	return applied;
 }
 
 void ObjectModel::advance_awake_frame(double p_delta) {
