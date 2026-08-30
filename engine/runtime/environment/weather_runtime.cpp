@@ -304,22 +304,47 @@ void WeatherRuntime::tick_weather(EnvironmentState *env, int tick_count) {
 	if (env->config() != nullptr) {
 		feed_exposure_target(env);
 	}
-	// The smoothers chase the TOD keyframe targets, never their own written-
-	// back output [orig: Environment_ComputeTimeOfDayColors @ 0x57de40
-	// refreshes every KEYFRAMED block's target slot ahead of the weather
-	// tick]; the three statics keep their seeded / WAC-written targets.
+	// The eleven TOD-keyframed blocks SNAP to the tick's keyframe colors —
+	// channels, render slot and targets — so their step finds nothing to
+	// chase: only their lightning additive and the modulation still apply,
+	// and the WAC sun/sky/ground/fogcolor/skyfogcolor targets are overwritten
+	// before they can act. The three statics (ceiling/cloud/floor) and the two
+	// modulators are the only blocks that step, toward their seeded /
+	// WAC-written targets [orig: Environment_ComputeTimeOfDayColors
+	// @ 0x57de40 — the block writes @ 0x57e078..0x57e3c9 at the top of every
+	// weather tick (@ 0x57e9c7) while a keyframe table exists
+	// (Env_EnvSnapshotCount @ 0x57de8a); WacCmd_Sun @ 0x4edcd0 writes [11] +
+	// the step deltas]. Without a keyframe table the compute returns before
+	// the writes and the blocks chase whatever the WAC wrote.
+	const bool keyframed = env->has_tod_keyframes();
 	for (int i = 0; i < tick_count; ++i) {
-		core.sky_color_blocks.skyfog.target = pack_rgb(env->skyfog_color_target());
-		core.sky_color_blocks.skybase.target = pack_rgb(env->sky_base_target());
-		core.sky_color_blocks.skybright.target = pack_rgb(env->sky_bright_target());
-		core.sky_color_blocks.skyhighlight.target = pack_rgb(env->sky_highlight_target());
-		core.sky_color_blocks.cloudbase.target = pack_rgb(env->cloud_base_target());
-		core.sky_color_blocks.cloudhighlight.target = pack_rgb(env->cloud_highlight_target());
-		core.sky_color_blocks.cloudedge.target = pack_rgb(env->cloud_edge_target());
-		core.tick_render(pack_rgb(env->fill_light_target()),
-				pack_rgb(env->sun_light_target()),
-				pack_rgb(env->fog_color_base_target()),
-				pack_rgb(env->sky_ambient_target()));
+		const uint32_t fill = pack_rgb(env->fill_light_target());
+		const uint32_t sun = pack_rgb(env->sun_light_target());
+		const uint32_t fog = pack_rgb(env->fog_color_base_target());
+		const uint32_t sky = pack_rgb(env->sky_ambient_target());
+		SkyWeatherColorBlocks &sky_blocks = core.sky_color_blocks;
+		if (keyframed) {
+			core.sun_block.snap_keyframe(sun);
+			core.sky_block.snap_keyframe(sky);
+			core.fill_block.snap_keyframe(fill);
+			core.fog_block.snap_keyframe(fog);
+			sky_blocks.skyfog.snap_keyframe(pack_rgb(env->skyfog_color_target()));
+			sky_blocks.skybase.snap_keyframe(pack_rgb(env->sky_base_target()));
+			sky_blocks.skybright.snap_keyframe(pack_rgb(env->sky_bright_target()));
+			sky_blocks.skyhighlight.snap_keyframe(pack_rgb(env->sky_highlight_target()));
+			sky_blocks.cloudbase.snap_keyframe(pack_rgb(env->cloud_base_target()));
+			sky_blocks.cloudhighlight.snap_keyframe(pack_rgb(env->cloud_highlight_target()));
+			sky_blocks.cloudedge.snap_keyframe(pack_rgb(env->cloud_edge_target()));
+		} else {
+			sky_blocks.skyfog.target = pack_rgb(env->skyfog_color_target());
+			sky_blocks.skybase.target = pack_rgb(env->sky_base_target());
+			sky_blocks.skybright.target = pack_rgb(env->sky_bright_target());
+			sky_blocks.skyhighlight.target = pack_rgb(env->sky_highlight_target());
+			sky_blocks.cloudbase.target = pack_rgb(env->cloud_base_target());
+			sky_blocks.cloudhighlight.target = pack_rgb(env->cloud_highlight_target());
+			sky_blocks.cloudedge.target = pack_rgb(env->cloud_edge_target());
+		}
+		core.tick_render(fill, sun, fog, sky);
 	}
 	write_weather_state(*env);
 }

@@ -318,6 +318,15 @@ struct WeatherColorBlock {
 
 	// Snaps the accumulators and both packed colors to `packed`.
 	void snap(uint32_t packed);
+	// The per-tick TOD keyframe write: the 12.20 channels [2..5], the render
+	// slot [0] and both target slots [10]/[11] <- packed; [1] and the lightning
+	// additive [12] stay. The step that follows finds current == target and
+	// moves nothing, so a keyframed block never smooths — only its additive
+	// and the modulation apply, and a WAC-written target is overwritten before
+	// it can act [orig: Environment_ComputeTimeOfDayColors @ 0x57e078..
+	// 0x57e3c9 — light/sky/ground/fog/skyfog/skybase/skybright/skyhighlight/
+	// cloudbase/cloudhighlight/cloudedge, every tick a keyframe table exists].
+	void snap_keyframe(uint32_t packed);
 	// One 62 Hz tick [orig: interpolate_weather_color @ 0x57d9e0].
 	void tick(uint32_t modulator_packed, int hit_dim_intensity);
 	// Sets the per-channel max step rates so the current accumulators reach

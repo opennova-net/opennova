@@ -146,6 +146,11 @@ public:
 	void set_loaded(bool loaded) { loaded_ = loaded; }
 	const Config *config() const { return config_; }
 	bool is_loaded() const { return config_ != nullptr && loaded_; }
+	// True once update_tod found a .env keyframe table — retail's
+	// Env_EnvSnapshotCount != 0, the gate on the per-tick keyframe write into
+	// the eleven TOD blocks [orig: Environment_ComputeTimeOfDayColors
+	// @ 0x57de8a].
+	bool has_tod_keyframes() const { return tod_valid_; }
 
 	// HHMM setter: wraps into [0, 2400) and recomputes TOD when loaded.
 	void set_time_of_day(double hhmm);

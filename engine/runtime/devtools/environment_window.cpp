@@ -158,17 +158,20 @@ void EnvironmentWindow::draw_rows() {
 		true, true, true, false, true, true, true, true, true, true, false, false,
 		true, true, true, true, false, false, false, false, false, false,
 	};
-	// The color rows a WAC handler targets open a picker that drives that
-	// handler (sun/sky/ground/floor/ceiling/cloud/fogcolor/skyfogcolor/gain,
-	// lightning); the derived blocks (outdoor, indoor, iris) stay read-only.
+	// Only the color rows whose WAC handler still ACTS open a picker: the
+	// three static blocks (ceiling/cloud/floor), the gain modulator and the
+	// lightning color. The TOD-keyframed blocks (fog/skyfog/sun/sky/ground)
+	// are re-snapped by the TOD compute every tick, so their handlers are
+	// inert while a keyframe table exists [orig: Environment_ComputeTimeOf-
+	// DayColors @ 0x57e078..0x57e3c9 overwrites what WacCmd_Sun @ 0x4edcd0
+	// wrote]; they and the derived blocks (outdoor, indoor, iris) stay
+	// read-only swatches.
 	const int block_targets[kRowCount] = {
 		kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget,
-		static_cast<int>(world::WeatherColorTarget::Fog),
-		static_cast<int>(world::WeatherColorTarget::SkyFog),
+		kNoTarget, kNoTarget,
 		static_cast<int>(world::WeatherColorTarget::Cloud), kNoTarget,
-		static_cast<int>(world::WeatherColorTarget::Sun), kLightningTarget,
-		static_cast<int>(world::WeatherColorTarget::Sky),
-		static_cast<int>(world::WeatherColorTarget::Ground),
+		kNoTarget, kLightningTarget,
+		kNoTarget, kNoTarget,
 		static_cast<int>(world::WeatherColorTarget::Ceiling),
 		static_cast<int>(world::WeatherColorTarget::Floor), kNoTarget, kNoTarget,
 		kNoTarget, kNoTarget,

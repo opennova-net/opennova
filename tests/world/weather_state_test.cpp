@@ -247,6 +247,25 @@ void test_mission_start_init_zeroes_the_lightning_additives() {
 	      ws.core.modulator_chain.modulator.additive == 0u);
 }
 
+void test_keyframe_snap_writes_channels_render_and_target_only() {
+	// [orig: Environment_ComputeTimeOfDayColors @ 0x57e078..0x57e0b3 — the
+	//  light block's [4]/[3]/[2]/[5], then [0], [11], [10]; [1] and [12] stay]
+	opennova::env::WeatherColorBlock block;
+	block.snap(0x00101010u);
+	block.additive = 0x00050505u;
+	block.snap_keyframe(0x00404040u);
+	CHECK(block.channels.r_fp == (0x40 << 20) && block.channels.g_fp == (0x40 << 20) &&
+	      block.channels.b_fp == (0x40 << 20));
+	CHECK(block.render_color == 0x00404040u);
+	CHECK(block.target == 0x00404040u);
+	CHECK(block.pre_mod_color == 0x00101010u);
+	CHECK(block.additive == 0x00050505u);
+	// The step that follows finds nothing to chase: the modulated output is
+	// the keyframe (plus the additive), never a blend toward it.
+	block.tick(opennova::env::kModulatorIdentityPacked, 0);
+	CHECK(block.pre_mod_color == 0x00454545u);
+}
+
 void test_quake_displaces_pool_entities_and_arms_the_local_shake() {
 	w::World world;
 	w::AiSystem ai;
@@ -376,6 +395,7 @@ int main() {
 	test_tick_advances_the_clock_and_fires_thunder();
 	test_entity_update_falls_the_drops_on_gameplay_ticks_only();
 	test_mission_start_init_zeroes_the_lightning_additives();
+	test_keyframe_snap_writes_channels_render_and_target_only();
 	test_quake_displaces_pool_entities_and_arms_the_local_shake();
 	test_wire_sample_writes_targets_only();
 	test_night_phase_follows_the_clock();

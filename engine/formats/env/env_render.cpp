@@ -336,6 +336,14 @@ void WeatherColorBlock::snap(uint32_t packed) {
 	target = packed;
 }
 
+void WeatherColorBlock::snap_keyframe(uint32_t packed) {
+	// [orig: Environment_ComputeTimeOfDayColors @ 0x57e078..0x57e0b3 for the
+	//  light block: [4], [3], [2], [5] = byte << 20, then [0], [11], [10]]
+	channels.snap_to(packed);
+	render_color = packed;
+	target = packed;
+}
+
 void WeatherColorBlock::set_step_deltas(int frames) {
 	// [orig: ColorBlock_SetStepDeltas @ 0x57d940] — per channel:
 	// |target_byte << 20 + frames/2 - current| / frames (the +frames/2 rounds
