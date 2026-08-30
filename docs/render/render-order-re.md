@@ -184,8 +184,12 @@ The render callback snapshots beauty once for hazard-free LUM NORMAL copies,
 then emits Glass's CubeRotSpecular and water's NV bright pass
 (`Water_PSBumpReflectNV`: `color *= saturate(luma(0.25,0.60,0.15)² − 0.15)`
 with the device fog color forced black — `render_water_surface(view, 1)
-@ 0x5c3442..0x5c3492`, `CD3DDevice_SetFogAndBlendMode(2) @ 0x6778ed`).
-plus celestial/glare against beauty depth with no depth writes. No Q3
+@ 0x5c3442..0x5c3492`, `CD3DDevice_SetFogAndBlendMode(2) @ 0x6778ed`),
+then the celestial discs and the glare through the far-band viewport:
+`Render_SetViewportFarDepth @ 0x582a70` (MinZ 0.98 / MaxZ 0.99996948
+`@ 0x58a840`) remaps their depth into that band before the ordinary z-tested
+flush, so they survive only over cleared sky (`kQ3FarBandMinZ..MaxZ` in
+`renderer/q3_frame.h`; depth-tested, no depth writes). No Q3
 viewport, camera mask, depth-occluder rerasterization, proxy geometry, or
 compatibility renderer remains. The beauty camera is standardized to mask
 `0x18C01` (the viewmodel layer folded in, 2026-08-26).

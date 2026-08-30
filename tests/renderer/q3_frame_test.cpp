@@ -300,6 +300,11 @@ void check_shading_constants_are_engine_homed() {
 	CHECK(kQ3WaterNvLumaWeights[1] == 0.60f);
 	CHECK(kQ3WaterNvLumaWeights[2] == 0.15f);
 	CHECK(kQ3WaterNvBrightBias == 0.15f);
+	// The bloom pass's far-band viewport for the discs and the sun glow
+	// [orig: Render_SetViewportFarDepth @ 0x58a840].
+	CHECK(kQ3FarBandMinZ == 0.98000002f);
+	CHECK(kQ3FarBandMaxZ == 0.99996948f);
+	CHECK(kQ3FarBandMinZ < kQ3FarBandMaxZ && kQ3FarBandMaxZ < 1.0f);
 }
 
 } // namespace

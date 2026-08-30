@@ -922,13 +922,17 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		"glare_view_fade = bool_parameter",
 		"view_dot_sq * view_dot_sq",
 		"model_uniform_scale",
-		"p_command.technique != Q3Technique::SunGlow",
+		"glsl_float(1.0f - kQ3FarBandMaxZ)",
+		"glsl_float(kQ3FarBandMaxZ - kQ3FarBandMinZ)",
+		"(@FAR_BAND_REV_MIN@ + z_rev * @FAR_BAND_REV_SPAN@)",
+		"depth->set_enable_depth_test(true)",
 		"classification.is_two_sided",
 		"fallback_pixel.ptrw()[0] = 255",
 		"(in_position - pc.camera_local.xyz) * (1.0 - 3.0e-4)",
 		"case ObjectBlendMode::Additive:",
 		"Q3DeviceBlend::Add",
-		"result[\"q3_sun_depth_test\"] = false",
+		"result[\"q3_sun_depth_test\"] = true",
+		"result[\"q3_far_band\"] = Vector2(kQ3FarBandMinZ, kQ3FarBandMaxZ)",
 	], "q3_frame_adapter.cpp")
 
 	# The first-person viewmodel draws inside the beauty pass through the

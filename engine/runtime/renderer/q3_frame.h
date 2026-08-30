@@ -73,6 +73,21 @@ inline constexpr std::array<float, 3> kQ3WaterNvLumaWeights{
 	0.25f, 0.60f, 0.15f};
 inline constexpr float kQ3WaterNvBrightBias = 0.15f;
 
+// FrameFX's bloom pass draws the celestial discs and the sun glow through
+// Render_SetViewportFarDepth: a D3DVIEWPORT9 with MinZ 0.98 / MaxZ
+// 0.99996948 remaps their clip depth into that far band before the ordinary
+// z-tested flush, so both survive only where the beauty depth is at (or
+// within the band of) the far plane, i.e. cleared sky. Every nearer surface
+// occludes them in the bloom source. In Godot's reverse-Z [0, 1] clip depth
+// the band is [1 - MaxZ, 1 - MinZ]: z' = (1 - MaxZ) + z * (MaxZ - MinZ).
+// [orig: FrameFX_RenderBloomPass @ 0x582940 (Render_SetViewportFarDepth
+// @ 0x582a70 -> render_celestial_bodies(1) @ 0x582a77 ->
+// render_skybox_sun_glow(0, 0) @ 0x582a80); Render_SetViewportFarDepth
+// @ 0x58a840 (MinZ 0.98000002, MaxZ 0.99996948); the z-tested flushes
+// @ 0x5accee / 0x5ad118].
+inline constexpr float kQ3FarBandMinZ = 0.98000002f;
+inline constexpr float kQ3FarBandMaxZ = 0.99996948f;
+
 // An opaque portable identity, not a GPU handle. The adapter resolves the
 // resource by its id; every lease is currently minted at generation 1 (the
 // geometry lease carries the frame id), so `valid()` is the only check the

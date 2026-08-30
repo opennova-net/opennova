@@ -263,8 +263,13 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 	assert_true(bool(report.get("q3_uses_resolved_beauty_depth", false)))
 	assert_eq(String(report.get("q3_depth_compare", "")), "greater_or_equal")
 	assert_false(bool(report.get("q3_depth_write", true)))
-	assert_false(bool(report.get("q3_sun_depth_test", true)),
-			"retail SunGlow is the occlusion-independent Q3 tail")
+	assert_true(bool(report.get("q3_sun_depth_test", false)),
+			"the bloom pass z-tests the sun glow through the far-band viewport")
+	var far_band: Vector2 = report.get("q3_far_band", Vector2.ZERO)
+	assert_almost_eq(far_band.x, 0.98, 0.000001,
+			"Render_SetViewportFarDepth MinZ")
+	assert_almost_eq(far_band.y, 0.99996948, 0.000001,
+			"Render_SetViewportFarDepth MaxZ")
 	assert_eq(int(report.get("q3_working_height", -1)), 256)
 	assert_eq(int(report.get("q3_submitted_commands", -1)), 0,
 			"unregistered beauty geometry is not a Q3 producer")

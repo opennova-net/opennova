@@ -125,7 +125,9 @@ struct Q3Push {
 
 static_assert(sizeof(Q3Push) == kPushConstantBytes);
 
-const char *kQ3VertexShader = R"GLSL(#version 450
+// The far-band remap constants come from runtime/renderer/q3_frame.h
+// (kQ3FarBandMinZ/MaxZ); q3_vertex_shader_source() splices them in.
+const char *kQ3VertexShaderTemplate = R"GLSL(#version 450
 layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec3 in_normal;
 layout(location = 2) in vec2 in_uv;
@@ -167,6 +169,16 @@ void main() {
 				(in_position - pc.camera_local.xyz) * (1.0 - 3.0e-4);
 	}
 	gl_Position = pc.mvp * vec4(draw_position, 1.0);
+	if (uint(pc.params.x + 0.5) >= 3u && gl_Position.w > 0.0) {
+		// Render_SetViewportFarDepth's D3DVIEWPORT9 MinZ/MaxZ band for the
+		// celestial discs and the sun glow, expressed in reverse-Z clip depth
+		// (kQ3FarBandMinZ/MaxZ): z' = (1 - MaxZ) + z * (MaxZ - MinZ). The
+		// ordinary GREATER_OR_EQUAL test then keeps them only over beauty
+		// depth at or near the far plane.
+		float z_rev = gl_Position.z / gl_Position.w;
+		gl_Position.z = (@FAR_BAND_REV_MIN@ + z_rev * @FAR_BAND_REV_SPAN@) *
+				gl_Position.w;
+	}
 	uv = in_uv;
 	color = in_color;
 	custom0 = in_custom0;
@@ -320,6 +332,14 @@ void splice_token(std::string &p_text, const char *p_token,
 	for (std::size_t at = p_text.find(token); at != std::string::npos;
 			at = p_text.find(token, at + p_value.size()))
 		p_text.replace(at, token.size(), p_value);
+}
+
+std::string q3_vertex_shader_source() {
+	std::string source(kQ3VertexShaderTemplate);
+	splice_token(source, "@FAR_BAND_REV_MIN@", glsl_float(1.0f - kQ3FarBandMaxZ));
+	splice_token(source, "@FAR_BAND_REV_SPAN@",
+			glsl_float(kQ3FarBandMaxZ - kQ3FarBandMinZ));
+	return source;
 }
 
 std::string q3_fragment_shader_source() {
@@ -705,12 +725,11 @@ public:
 		int64_t framebuffer_format = -1;
 		Q3DeviceBlend blend = Q3DeviceBlend::Replace;
 		bool two_sided = true;
-		bool depth_test = true;
 
 		bool operator<(const PipelineKey &p_other) const {
-			return std::tie(framebuffer_format, blend, two_sided, depth_test) <
+			return std::tie(framebuffer_format, blend, two_sided) <
 					std::tie(p_other.framebuffer_format, p_other.blend,
-							p_other.two_sided, p_other.depth_test);
+							p_other.two_sided);
 		}
 	};
 
@@ -857,7 +876,7 @@ bool Q3FrameAdapter::Impl::initialize(RenderingDevice *p_rd) {
 	source.instantiate();
 	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kQ3VertexShader));
+			String::utf8(q3_vertex_shader_source().c_str()));
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
 			String::utf8(q3_fragment_shader_source().c_str()));
 	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);
@@ -950,9 +969,10 @@ RID Q3FrameAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
 			p_command.technique == Q3Technique::RotatedSpecularGlass;
 	const bool two_sided = !object_technique ||
 			p_command.object.classification.is_two_sided;
-	const bool depth_test = p_command.technique != Q3Technique::SunGlow;
-	const PipelineKey key{p_framebuffer_format, blend_for(p_command), two_sided,
-			depth_test};
+	// Every Q3 draw ends in the ordinary z-tested flush; the discs and the
+	// sun glow only reach it through the far-band viewport remap in the
+	// vertex shader.
+	const PipelineKey key{p_framebuffer_format, blend_for(p_command), two_sided};
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
@@ -965,7 +985,7 @@ RID Q3FrameAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
 	multisample->set_sample_count(RenderingDevice::TEXTURE_SAMPLES_1);
 	Ref<RDPipelineDepthStencilState> depth;
 	depth.instantiate();
-	depth->set_enable_depth_test(depth_test);
+	depth->set_enable_depth_test(true);
 	depth->set_enable_depth_write(false);
 	depth->set_depth_compare_operator(RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
 	Ref<RDPipelineColorBlendStateAttachment> attachment;
@@ -1200,7 +1220,8 @@ Dictionary Q3FrameAdapter::Impl::report() const {
 	result["q3_uses_resolved_beauty_depth"] = true;
 	result["q3_depth_compare"] = "greater_or_equal";
 	result["q3_depth_write"] = false;
-	result["q3_sun_depth_test"] = false;
+	result["q3_sun_depth_test"] = true;
+	result["q3_far_band"] = Vector2(kQ3FarBandMinZ, kQ3FarBandMaxZ);
 	result["q3_auxiliary_view"] = false;
 	result["q3_camera_mask"] = false;
 	result["q3_status"] = String::utf8(status.c_str());

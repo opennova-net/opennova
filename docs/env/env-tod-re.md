@@ -591,14 +591,21 @@ brightness is `(fog_km + 1.0) × 0.5 × dot_factor`
 (`@ 0x5ad013..0x5ad027`; `flt_7C3280` = 1.0, `flt_7C3B94` = 0.5, fog_km =
 `Env_FogDistCurrent × flt_7DA0C4` = 1/65536000), through the same
 quarter/overcast/SunDim tail. The bloom pass also redraws the celestial
-discs at the 64 u anchor against the beauty depth (`render_celestial_bodies(1)
-@ 0x582a77` with the beauty depth-stencil still bound), so terrain past 64 u
-does NOT occlude the disc in the bloom source — the hidden sun still blooms
-over a ridge while the beauty view's world overdraw hides the direct disc.
-Ported 2026-08-23, source replaced 2026-08-29: `glare_q3_alpha_fixed` +
+discs and the glow through the FAR-BAND viewport: `Render_SetViewportFarDepth
+@ 0x582a70` fills a D3DVIEWPORT9 with MinZ 0.98000002 / MaxZ 0.99996948
+(`@ 0x58a840`) before `render_celestial_bodies(1) @ 0x582a77` and
+`render_skybox_sun_glow(0, 0) @ 0x582a80`, and both draws end in the ordinary
+z-tested flush (`@ 0x5accee` / `@ 0x5ad118`) with the beauty depth-stencil
+still bound. The viewport remaps the primitives' depth into [0.98, 0.99997],
+so the disc and the glare survive only where the beauty depth is at or near
+the far plane (cleared sky): EVERY nearer surface, terrain past 64 u included,
+occludes them in the bloom source (the earlier "terrain past 64 u does not
+occlude the disc" reading was wrong). Ported 2026-08-23, source replaced
+2026-08-29, far band ported 2026-08-29: `glare_q3_alpha_fixed` +
 `glare_q3_peak_opacity` + the typed Celestial `SunGlow` producer read of
 `u_q3_opacity`; the beauty-only shader keeps the far-plane disc pin while the
-focused draw uses the authored 64 u transform against resolved beauty depth.
+focused draw remaps its clip depth into `kQ3FarBandMinZ..MaxZ`
+(`renderer/q3_frame.h`) and z-tests it against resolved beauty depth.
 Ported: `env::GlareOcclusionState`/
 `glare_ray_jitter`/`glare_occlusion_tick`/`glare_glow_alpha_fixed` +
 `celestial_sun/moon_alpha_fixed` + `kCelestialBodyDistance` (ctest landmark-pinned;
