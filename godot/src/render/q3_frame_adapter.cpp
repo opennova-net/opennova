@@ -195,9 +195,28 @@ layout(location = 6) in vec3 local_position;
 layout(location = 7) in vec2 detail_uv;
 layout(location = 0) out vec4 frag_color;
 
+// The primary device fog, mirrored from the engine's
+// runtime/renderer/device_fog.h (device_fog_visibility): type 0 is
+// exponential with density ln(64)/end, every other type is linear from the
+// caller's already-resolved Render_SetFogState start. The push block carries
+// start in camera_local.w and end in draw_color.w for the object techniques.
+float q3_fog_visibility(float dist, float fog_start, float fog_end,
+		uint fog_type) {
+	float safe_end = max(fog_end, 1.0);
+	if (fog_type == 0u) {
+		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)),
+				0.0, 1.0);
+	}
+	return clamp((safe_end - dist) / max(safe_end - fog_start, 1.0), 0.0, 1.0);
+}
+
 void main() {
 	uint mode = uint(pc.params.x + 0.5);
+	// Object-technique flag bits: 1 alpha test, 2 detail stage, 4 fog enabled,
+	// 8|16 fog type.
 	uint coverage_flags = uint(pc.params.y + 0.5);
+	bool fog_enabled = (coverage_flags & 4u) != 0u;
+	uint fog_type = (coverage_flags >> 3u) & 3u;
 	float object_alpha = texture(primary_texture, uv).a * pc.params.w;
 	if (mode <= 1u && (coverage_flags & 2u) != 0u) {
 		object_alpha *= texture(secondary_texture, detail_uv).a;
@@ -221,12 +240,9 @@ void main() {
 				vec3(1.0, 248.0 / 255.0, 240.0 / 255.0) *
 						pow(aligned, 40.0), vec3(0.0), vec3(1.0));
 		float model_uniform_scale = max(abs(pc.light_local_gain.w), 1.0e-6);
-		float fog_visibility = pc.draw_color.w > pc.camera_local.w ?
-				clamp((pc.draw_color.w -
-						length(pc.camera_local.xyz - local_position) *
-								model_uniform_scale) /
-						max(pc.draw_color.w - pc.camera_local.w, 1.0),
-						0.0, 1.0) : 1.0;
+		float fog_visibility = fog_enabled ? q3_fog_visibility(
+				length(pc.camera_local.xyz - local_position) * model_uniform_scale,
+				pc.camera_local.w, pc.draw_color.w, fog_type) : 1.0;
 		frag_color = vec4(pc.draw_color.rgb * lobe * object_alpha *
 				fog_visibility, 1.0);
 		return;
@@ -989,15 +1005,14 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 			-scene_data->get_cam_transform().basis.get_column(2).normalized();
 	const Vector3 light_direction = frame->light_direction;
 	const Vector3 light_gain = frame->light_gain;
+	// The environment already resolved the Render_SetFogState start for the
+	// fog type (engine compute_fog_params); the device evaluation in the
+	// shader mirrors renderer/device_fog.h and never re-derives it.
 	const bool fog_enabled = frame->fog_enabled;
-	float fog_start = frame->fog_start;
+	const float fog_start = frame->fog_start;
 	const float fog_end = frame->fog_end;
-	if (frame->fog_type == 1)
-		fog_start = fog_end * 0.75f;
-	else if (frame->fog_type == 2)
-		fog_start = fog_end * 0.5f;
-	else if (frame->fog_type == 3)
-		fog_start = fog_end * 0.25f;
+	const float fog_flags = (fog_enabled ? 4.0f : 0.0f) +
+			static_cast<float>((std::clamp(frame->fog_type, 0, 3)) << 3);
 	const int64_t framebuffer_format = rd->framebuffer_get_format(p_framebuffer);
 	for (const DeviceCommand &command : frame->commands) {
 		if (!pipeline_for(framebuffer_format, command.draw).is_valid())
@@ -1044,7 +1059,8 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 					draw.technique == Q3Technique::RotatedSpecularGlass) {
 				push.params[1] =
 						(draw.object.classification.alpha_test ? 1.0f : 0.0f) +
-						(draw.object.classification.has_detail ? 2.0f : 0.0f);
+						(draw.object.classification.has_detail ? 2.0f : 0.0f) +
+						fog_flags;
 				push.params[2] = draw.object.classification.alpha_test_value;
 				push.params[3] = draw.object.alpha_mod;
 				const float model_uniform_scale = std::max(1.0e-6f,
@@ -1060,8 +1076,8 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 				push.draw_color[0] *= light_gain.x * 2.0f;
 				push.draw_color[1] *= light_gain.y * 2.0f;
 				push.draw_color[2] *= light_gain.z * 2.0f;
-				push.camera_local[3] = fog_enabled ? fog_start : 0.0f;
-				push.draw_color[3] = fog_enabled ? fog_end : 0.0f;
+				push.camera_local[3] = fog_start;
+				push.draw_color[3] = fog_end;
 			} else if (draw.technique == Q3Technique::WaterNightVision) {
 				push.draw_color = {draw.water.water_color.x, draw.water.water_color.y,
 						draw.water.water_color.z, 1.0f};
