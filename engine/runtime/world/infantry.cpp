@@ -617,45 +617,55 @@ void AiSystem::infantry_select(AiEntity &e, const Entity *self) {
 // per-tick weapon mirrors (scope_raised, wpn_run_anim, wpn_force_crouch).
 // The local player's rain ambient [orig: Entity_UpdateInfantryPlayerBody
 // @ 0x4b4747..0x4b490e — on the frame's last 16 ms quantum, while
-// Env_RainPctCurrent != 0 and the kind is rain: the volume word is the rain
-// current (<= 0xFFFF by its max clamp), scaled by (lightTransfer x 0.5 + 0.5)
-// inside a pool-2 building (ItemDef+0x218); the LPNV_RAIN_L set registers at
-// pos + (2 m, 0, 0) on slot type 1 and LPNV_RAIN_R at pos - (2 m, 0, 0) on
-// slot type 2, lifetime 20, pitch 0x10000, through
-// SoundEmitter_RegisterSetLayers @ 0x528340]. Our per-tick registration
-// coalesces per (source, lane) in the mailbox exactly like the per-frame one.
+// Env_RainPctCurrent != 0, the rain set handles are loaded (dword_24E0E80)
+// and the kind is rain: the volume is the rain current (<= 0xFFFF by its max
+// clamp), scaled by (lightTransfer x 0.5 + 0.5) when the first blink hit
+// (entity+0x1D0) names a pool-2 building (ItemDef+0x218) — that hit alone
+// gates it, no indoor-flag test (@ 0x4b4770..0x4b47a8) — and its low 16 bits
+// are the 8.8 volume word (`mov word ptr [..], bx` @ 0x4b4845); the
+// LPNV_RAIN_L set registers at (x + 2 m, y, z + eyeOffsetZ) on slot type 1
+// and LPNV_RAIN_R at (x - 2 m, y, z + eyeOffsetZ) on slot type 2 (entity
+// +0x74 added to Z @ 0x4b47b0 / @ 0x4b4865), lifetime 20, pitch 0x10000,
+// through SoundEmitter_RegisterSetLayers @ 0x528340]. Our per-tick
+// registration coalesces per (source, lane) in the mailbox exactly like the
+// per-frame one.
 void infantry_rain_ambient(World &world, const Entity &ent) {
     const WeatherState &weather = world.weather;
     if (weather.core.scalar_channels.rain_pct_fp == 0 ||
         weather.precipitation_kind != static_cast<uint32_t>(PrecipitationKind::Rain))
         return;
     int32_t volume = weather.core.scalar_channels.rain_pct_fp;
-    if (volume < 0) volume = 0;
-    if (volume > 0xFFFF) volume = 0xFFFF;
-    // Inside a pool-2 building: the blink hit's owner entity carries the
-    // interior daylight transfer.
-    if ((ent.flags & kEntityFlagIndoors) != 0 && ent.blink_hits[0] != 0) {
+    // The first blink hit's owner carries the interior daylight transfer.
+    if (ent.blink_hits[0] != 0) {
         const EntityHandle building = EntityHandle::make(2, static_cast<int>(ent.blink_hits[0] >> 20));
         if (const Entity *b = world.registry.get(building)) {
             volume = static_cast<int32_t>((b->light_transfer * 0.5f + 0.5f) *
                                           static_cast<float>(volume));
         }
     }
+    // The registrar reads the word's high byte as the mixer level and treats
+    // a zero level as the unregister — below 0x100 there is nothing to keep
+    // alive, so publish nothing (the mailbox row expires the same way).
+    const uint16_t volume_word = static_cast<uint16_t>(volume);
+    if (volume_word < 0x100) return;
     constexpr uint16_t kLifetimeTicks = 20;
     constexpr int32_t kEarOffset = 2 << 16;
     const int32_t px = static_cast<int32_t>(ent.position.x * 65536.0f);
+    // The emitter Z is the entity Z plus the eye-offset Z (entity +0x74).
+    const float emitter_z = ent.position.z + static_cast<float>(ent.eye_offset_z) / 65536.0f;
     for (int side = 0; side < 2; ++side) {
         SoundEmitterEvent ev;
         ev.source_spawn_id = ent.registry_spawn_id;
         ev.source_handle = ent.handle.packed;
         ev.pos = ent.position;
         ev.pos.x = static_cast<float>(side == 0 ? px + kEarOffset : px - kEarOffset) / 65536.0f;
+        ev.pos.z = emitter_z;
         ev.source_bms_id = ent.bms_id;
         ev.emitted_tick = world.logic_tick + 1;
         ev.lane = static_cast<uint8_t>(side == 0 ? 1 : 2);
         ev.lifetime_ticks = kLifetimeTicks;
         ev.pitch_q16 = 0x10000;
-        ev.volume_q8_8 = static_cast<uint16_t>(volume);
+        ev.volume_q8_8 = volume_word;
         ev.set_name = side == 0 ? "LPNV_RAIN_L" : "LPNV_RAIN_R";
         world.sound_emitters.publish(std::move(ev));
     }
