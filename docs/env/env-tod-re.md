@@ -1107,7 +1107,18 @@ batching never decides which level an entity draws. Since 2026-08-30 a
 population carries rows only for the slots at its level (packed dense, a
 crossing moves the row between the level populations, an empty population is
 hidden), so the draw-call and cull cost is one row per live instance rather
-than one population per authored level per bin.
+than one population per authored level per bin (1600x900, Ryzen 7735HS
+iGPU, medians of per-run p50: 00TRa 696 root draws / 1.15M primitives /
+15.10 ms frame before, 487 / 0.87M / 14.66 ms after; CP01 564 / 2.04M /
+16.09 ms before, 416 / 1.11M / 14.84 ms after; CP19 360 / 2.76M / 17.33 ms
+before, 296 / 1.52M / 17.12 ms after; master draws 487 / 376 / 284). The
+bins were re-measured against one population per (graphic, policy, level,
+submesh) on the same build, 2 runs each: 00TRa bins 487 draws / 0.87M /
+14.66 ms vs no bins 485 / 1.05M / 14.73 ms; CP01 bins 416 / 1.11M /
+14.84 ms vs no bins 376 / 1.17M / 14.89 ms. The bins keep their per-bin
+frustum cull (fewer primitives, a lower root GPU time) for the same or a
+slightly lower frame time, so they stay; the extra draws they cost are the
+bins holding entities at two levels.
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 

@@ -22,15 +22,14 @@ namespace godot {
 namespace {
 
 constexpr const char *kContainerName = "MissionObjects";
+// The 512-unit bins stay now that populations are dense per level (measured
+// 2026-08-30 against one population per graphic x policy x level x submesh on
+// 00TRa / CP01: the bins draw fewer primitives through their per-bin frustum
+// cull for the same or a slightly lower frame time; the numbers live in
+// docs/env/env-tod-re.md, the static-batching note).
 constexpr float kStaticBatchBinSize = 512.0f;
-// EXPERIMENT SWITCH (lane 1A): false emits one population per
-// (graphic x policy x level x submesh) instead of one per 512-unit bin.
-constexpr bool kStaticBatchBinsEnabled = true;
 
 int static_batch_bin_coord(float p_world) {
-	if (!kStaticBatchBinsEnabled) {
-		return 0;
-	}
 	return static_cast<int>(std::floor(p_world / kStaticBatchBinSize));
 }
 
