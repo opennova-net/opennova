@@ -27,7 +27,7 @@ namespace {
 // flags1 signal byte and the 7-byte local-player tail's stance/mount fields.
 struct FrameHeaderState {
 	// flags1 [orig: NetPacket_WritePlayerState @0x4ff793-0x4ff7dd]: bit0 = spectator
-	// (slot+100567 — unmodeled 0), bit1 = RESPAWN-PENDING (slot+89912 & 0x10) — re-asserted
+	// (slot+100567), bit1 = RESPAWN-PENDING (slot+89912 & 0x10) — re-asserted
 	// EVERY frame; the client's deploy screen is g_deploy_screen_active = (flags1 & 2) != 0 each frame,
 	// so one bit1=0 frame closes it [orig: NapiNPClientMsg_0x00A @0x42ff82]. bit2 = the
 	// one-shot load hint (entity+44 & 0x1000 — unmodeled). (D-NET-156)
@@ -516,11 +516,14 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 			? (self->mount_handle != 0xFFFF ? self->mount_handle : self->ground_handle)
 			: 0xFFFF;
 	// The dead-or-spectator flag: the recipient entity's DEAD bit (flags & 2 —
-	// the everyday between-death-and-respawn state) OR the slot spectator flag
-	// playerState[89912] & 0x10 (that MODE is unmodeled and stays a D-NET-139
-	// residual) [orig: @0x50e677..0x50e693].
+	// the everyday between-death-and-respawn state) OR retail's deploy-hold
+	// storage slot+89912 & 0x10 [orig: @0x50e677..0x50e693] — which a
+	// never-deploying spectator holds. Modeled off the canonical spectator
+	// bit; the pre-deploy ordinary-player leg of the same predicate remains a
+	// D-NET-139 residual.
 	const bool self_dead_or_spectator =
-			self != nullptr && (self->state_flags & 0x02) != 0;
+			conn.spectator ||
+			(self != nullptr && (self->state_flags & 0x02) != 0);
 	if (perf != nullptr) {
 		const uint64_t now = io::perf_now_us();
 		perf->entity_setup_us = now - phase_start;
@@ -1014,7 +1017,9 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	// divided. Retail keeps these environment values in native fixed-point globals
 	// and quantizes only while writing the frame.
 	FrameHeaderState hs;
-	hs.flags1 = conn.respawn_pending ? 0x02 : 0x00;
+	hs.flags1 = static_cast<uint8_t>(
+			(conn.spectator ? 0x01u : 0x00u) |
+			(conn.respawn_pending ? 0x02u : 0x00u));
 	hs.preround_delay_seconds =
 			static_cast<uint8_t>(w.preround_delay_seconds);
 	hs.fallmps = static_cast<uint8_t>(std::clamp(w.wac_values.fallmps, 0, 255));

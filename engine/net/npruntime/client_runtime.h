@@ -243,6 +243,14 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		if (joiner_) joiner_->set_character_join_vars(vars);
 	}
+	void set_join_request(JoinRole role, std::string spectator_password) {
+		if (joiner_) {
+			joiner_->set_join_request(role, std::move(spectator_password));
+		}
+	}
+	bool is_spectator() const {
+		return joiner_ != nullptr && joiner_->spectator();
+	}
 	// The install root the JOIN VERSIONCRCSTRING checksum reads its loose
 	// expansion/<name>/version.txt from (D-NET-166; see
 	// JoinerConnection::set_expansion_version_root). Joiner only.

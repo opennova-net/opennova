@@ -47,6 +47,8 @@ func _screen_xml(screen_name: String, body: String) -> String:
 func _host_screen_xml(with_spins := false) -> String:
 	var body := _wnd("edit", "GAME_NAME", 10)
 	body += _wnd("edit", "MAX_PLAYERS", 34)
+	body += _wnd("checkbox", "ALLOW_SPECTATORS", 330)
+	body += _wnd("edit", "SPECTATOR_PW", 354)
 	body += _wnd("list", "MISSION_LIST", 58)
 	body += ('<WINDOW type="table" name="SELECTED_MISSIONS">'
 			+ '<POSITION><LEFT>300</LEFT><TOP>58</TOP><RIGHT>520</RIGHT><BOTTOM>200</BOTTOM></POSITION>'
@@ -158,6 +160,8 @@ func test_start_game_emits_host_config() -> void:
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
 	driver.set_widget_text(driver.widget_id("GAME_NAME"), "CoopNight")
 	driver.set_widget_text(driver.widget_id("MAX_PLAYERS"), "6")
+	driver.set_widget_checked(driver.widget_id("ALLOW_SPECTATORS"), true)
+	driver.set_widget_text(driver.widget_id("SPECTATOR_PW"), "watch")
 	mp.seed_host_pool([_pool_row("alpha.bms")])
 	var mission_list := driver.widget_id("MISSION_LIST")
 	driver.select_row(mission_list, 0)
@@ -167,6 +171,9 @@ func test_start_game_emits_host_config() -> void:
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
 	assert_eq(config.server_name, "CoopNight")
 	assert_eq(config.max_players, 6)
+	assert_eq(config.spectator_slots, -1,
+			"checked ALLOW_SPECTATORS retains retail's shared-capacity sentinel")
+	assert_eq(config.spectator_password, "watch")
 	assert_eq(config.game_type, HostSessionConfig.GAME_TYPE_COOP,
 		"the session uses the witnessed retail Co-op g_GameType, not an AS capture value")
 	assert_eq(config.game_type_attr, "", "no GAME_TYPE spin in the stand-in menu")
@@ -179,6 +186,8 @@ func test_start_game_emits_host_config() -> void:
 		"the FFI options retain the LAN cadence selector")
 	assert_eq(int(session_options.get("lan_mode", 0)), 1,
 		"a stock LAN request carries retail g_LanMode 1")
+	assert_eq(int(session_options.get("spectator_slots", 0)), -1)
+	assert_eq(String(session_options.get("spectator_password", "")), "watch")
 	# SERVERTYPE absent in this stand-in menu -> serve-and-play (dedicated=false). The real
 	# screen's SERVERTYPE spinlist (HG_SERVEONLY value=1) flips this; the value-attr read is
 	# pinned in test_servertype_value_attr_selects_dedicated_not_the_label below.
@@ -206,6 +215,9 @@ func test_start_game_defaults() -> void:
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
 	assert_eq(config.server_name, "COOPGAME", "blank name -> default")
 	assert_eq(config.max_players, 4, "blank cap -> default 4")
+	assert_eq(config.spectator_slots, 0,
+			"unchecked ALLOW_SPECTATORS disables spectator admission")
+	assert_eq(config.spectator_password, "")
 	assert_eq(config.mission, "alpha.bms", "the rotation head is the mission")
 	assert_eq(config.bind_port, HostSessionConfig.DEFAULT_LAN_PORT,
 		"the witnessed retail LAN host port rides the record default")
@@ -379,7 +391,13 @@ func test_lan_join_emits_selected_server() -> void:
 	# injected LanSession's servers_changed signal.
 	var session := LanSession.new()
 	mp.set_lan_session(session)
-	session.servers_changed.emit([{"name": "biggy", "host_ip": "192.168.1.10", "port": 32768}])
+	session.servers_changed.emit([{
+		"name": "biggy",
+		"host_ip": "192.168.1.10",
+		"port": 32768,
+		"server_flags": JoinTarget.FLAG_ALLOW_SPECTATORS
+				| JoinTarget.FLAG_SPECTATOR_PASSWORD,
+	}])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
 	# A single-click selection relays the row index through the driver's aggregate signal.
@@ -391,6 +409,9 @@ func test_lan_join_emits_selected_server() -> void:
 	assert_eq(target.port, 32768)
 	assert_eq(target.server_name, "biggy", "the browse-row name rides as a display hint")
 	assert_eq(target.mission, "", "map identity is absent pre-auth; 0x7B supplies it")
+	assert_true(target.allows_spectators(),
+			"the selected row carries ServerHello.P2 into the typed join target")
+	assert_true(target.spectator_password_required())
 
 
 func test_refreshed_lan_rows_require_a_fresh_selection() -> void:

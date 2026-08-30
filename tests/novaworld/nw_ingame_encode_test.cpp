@@ -872,8 +872,8 @@ int test_player_list_roundtrip() {
 	EXPECT(out.players[2].slot_id == 2 && out.players[2].flags == 5);
 	EXPECT(out.team_count == 2 && out.teams.size() == 3);
 	EXPECT(out.teams[1].score1 == 12 && out.teams[2].score2 == 550);
-	// Live trailer counts (D-NET-158): inGame = row count, spectators unmodeled 0 — the HUD
-	// player count is acceptedRows − spectatorCount, so a hardcoded trailer pinned it at 2.
+	// Live trailer counts (D-NET-158) are independent wire fields; the spectator row bit and
+	// trailer count both survive the round-trip. The HUD derives players as rows − spectators.
 	EXPECT(out.in_game_count == 2);
 	EXPECT(out.spectator_count == 1);
 	std::printf("PASS player_list_roundtrip\n");

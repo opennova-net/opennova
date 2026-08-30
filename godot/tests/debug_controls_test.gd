@@ -64,6 +64,7 @@ const EXPECTED_IDS: Array[StringName] = [
 	&"crew_vehicle",
 	&"crew_local_player",
 	&"local_player_look",
+	&"local_spectator",
 ]
 
 const WIRE_ROW_KEYS := ["id", "page", "label", "description", "kind", "target",
@@ -259,6 +260,9 @@ func test_confirmation_and_authority_are_distinct_gates() -> void:
 			"a confirmation-gated action refuses an unconfirmed caller")
 	assert_eq(_controls.set_control_value(&"runtime_wac_paused", true),
 			ERR_UNAUTHORIZED)
+	assert_eq(_controls.set_control_value(&"local_spectator", true),
+			ERR_UNAUTHORIZED,
+			"spectator mode cannot mutate authority without per-call confirmation")
 
 	var locked := _controls.get_control_state(&"teleport_local_player")
 	assert_false(locked.writable)
@@ -267,6 +271,8 @@ func test_confirmation_and_authority_are_distinct_gates() -> void:
 	assert_true(confirmed.writable,
 			"a per-call authority confirmation sees the write it may make")
 	assert_eq(confirmed.reason, "")
+	assert_true(_controls.get_control_state(&"local_spectator", true).writable,
+			"confirmed authority tooling may drive the real spectator state")
 	var rows := _controls.list_controls(&"", "Teleport", true)
 	assert_eq(rows.size(), 1)
 	assert_true(bool(rows[0]["state"]["writable"]),
@@ -279,6 +285,8 @@ func test_confirmation_and_authority_are_distinct_gates() -> void:
 	var joiner := _controls.get_control_state(&"teleport_local_player", true)
 	assert_false(joiner.writable)
 	assert_string_contains(joiner.reason, "host")
+	assert_false(_controls.get_control_state(&"local_spectator", true).writable,
+			"a joiner cannot use tooling to manufacture spectator authority")
 	_adapter.host_authority = true
 
 	assert_true(_controls.get_control_state(&"net_joiner_diagnostics").writable,

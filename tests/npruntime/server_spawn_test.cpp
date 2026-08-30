@@ -116,6 +116,62 @@ int main() {
 	if (!expect(joiner_ent->handle != world.cached.local_player,
 	            "joiner is a distinct pool-0 entity from the host")) return 1;
 
+	// The same authority transition backs the F3 checkbox and host-side tooling:
+	// it mutates the real connection/entity/AI state, then respawns through the
+	// ordinary marker chain when play resumes.
+	np::NapiNPConnection &joiner_conn =
+			ctx.np_protocol.connection_list.back();
+	const w::EntityHandle joiner_handle = joiner_ent->handle;
+	if (!expect(
+			np::Server_SetPlayerSpectator(ctx, joiner_conn, world, true),
+			"authority enters spectator mode for a live player")) return 1;
+	w::Entity *spectator = world.registry.get(joiner_handle);
+	w::AiEntity *spectator_ai = world.ai->for_handle(joiner_handle);
+	if (!expect(
+			joiner_conn.link.spectator && spectator != nullptr &&
+			spectator->team == 0 && (spectator->flags & 1u) != 0 &&
+			spectator->damage_state == -1 && spectator_ai != nullptr &&
+			spectator_ai->team == 0,
+			"spectator transition hides and neutralizes the authoritative player")) {
+		return 1;
+	}
+	spectator->position = {900.0f, 901.0f, 902.0f};
+	if (!expect(
+			np::Server_SetPlayerSpectator(ctx, joiner_conn, world, false),
+			"authority returns a spectator to play")) return 1;
+	w::Entity *restored = world.registry.get(joiner_handle);
+	if (!expect(
+			!joiner_conn.link.spectator && restored != nullptr &&
+			restored->team == 1 && (restored->flags & 1u) == 0 &&
+			restored->damage_state == 0 && restored->alive &&
+			restored->position.x == 123.0f &&
+			restored->position.y == 456.0f &&
+			spectator_ai->team == 1,
+			"leaving spectator mode restores team, body, AI, and spawn pose")) {
+		return 1;
+	}
+	{
+		np::NapiNPConnection joining_spectator;
+		joining_spectator.type = 1;
+		joining_spectator.connection_id = np::kFirstJoinerDcb + 1;
+		joining_spectator.self_id_seen = true;
+		joining_spectator.phase = np::ConnectionPhase::Joined;
+		joining_spectator.link.spectator = true;
+		ctx.np_protocol.connection_list.push_back(joining_spectator);
+	}
+	if (!expect(
+			np::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
+			"a newly admitted spectator receives its hidden player record")) return 1;
+	const w::Entity *joining_spectator =
+			pool0_player(world, np::kFirstJoinerDcb + 1);
+	if (!expect(
+			joining_spectator != nullptr && joining_spectator->team == 0 &&
+			(joining_spectator->flags & 1u) != 0 &&
+			joining_spectator->damage_state == -1,
+			"spectator admission spawns the retail team-0 hidden entity")) {
+		return 1;
+	}
+
 	// --- End-to-end §1 wiring: the 0x0C organic batch carries each player's real dcb at entity+0x78. ---
 	const opennova::OrganicSpawnBatch batch = ns::build_pool0_organic_batch(world);
 	bool saw_host = false, saw_joiner = false;

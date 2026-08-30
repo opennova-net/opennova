@@ -27,6 +27,7 @@ var _orbiting: bool = false
 var _panning: bool = false
 var _flying: bool = false
 var _gameplay_locked: bool = false
+var _spectator_mode: bool = false
 
 func _ready() -> void:
 	_yaw = rotation.y
@@ -50,6 +51,26 @@ func set_gameplay_locked(locked: bool) -> void:
 
 func is_gameplay_locked() -> bool:
 	return _gameplay_locked
+
+
+## Adopt the camera pose the player presenter last stamped before spectator
+## free-flight takes ownership. Without this edge sync, the first mouse motion
+## would jump back to FlyCamera's scene-start yaw/pitch.
+func set_spectator_mode(active: bool) -> void:
+	if active == _spectator_mode:
+		return
+	_spectator_mode = active
+	_flying = false
+	_orbiting = false
+	_panning = false
+	if active:
+		_yaw = rotation.y
+		_pitch = rotation.x
+		_pivot = global_position - global_transform.basis.z * _distance
+
+
+func is_spectator_mode() -> bool:
+	return _spectator_mode
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _gameplay_locked:

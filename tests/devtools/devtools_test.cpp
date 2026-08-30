@@ -224,6 +224,19 @@ void test_game_window_orders_play_interact_and_close_requests() {
 	game.set_play_available(false);
 	CHECK(game.take_request(request) && request == GameWindowRequest::EnterInteract,
 			"losing Play availability forces Interact");
+
+	CHECK(!game.spectator_available() && !game.spectator_active(),
+			"spectator mutation starts unavailable and off");
+	game.request_spectator(true);
+	CHECK(!game.take_request(request), "an unavailable spectator toggle queues nothing");
+	game.set_spectator_state(true, false);
+	game.request_spectator(true);
+	CHECK(game.take_request(request) && request == GameWindowRequest::EnableSpectator,
+			"the F3 control requests the authoritative spectator transition");
+	game.set_spectator_state(true, true);
+	game.request_spectator(false);
+	CHECK(game.take_request(request) && request == GameWindowRequest::DisableSpectator,
+			"the F3 control requests returning to a player");
 }
 
 void test_default_workspace_layout_is_created_once_and_preserves_user_layout() {

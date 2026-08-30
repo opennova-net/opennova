@@ -140,7 +140,8 @@ func setup(mission: MissionData, container: Node,
 			_has_trace_stats_sampling = false
 			return 0
 		if needs_join_connection and not _sim.enable_join(
-				join_target.host_ip, join_target.port, join_target.player_name):
+				join_target.host_ip, join_target.port, join_target.player_name,
+				join_target.join_role, join_target.spectator_password):
 			push_warning("MissionPresentation: could not dial co-op host %s:%d — joiner disabled." % [
 				join_target.host_ip, join_target.port])
 		# The JOIN VERSIONCRCSTRING checksum reads the loose

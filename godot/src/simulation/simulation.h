@@ -617,17 +617,16 @@ private:
 	mutable std::unordered_map<uint16_t, PoolPresentLifecycle> pool_present_lifecycle_;
 
 	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
-	// the boot's role hook; the runtime_ member is declared in the P7 block below). joiner_pump drives the
-	// connect legs + the per-frame S2C->ClientState fold + the C2S 0x0C uplink over a dialed UdpPump.
-	// It runs run_logic_tick(false) for its own player L (a motor-driven pool-0 entity spawned at the
-	// H-learned pose); remote entities render wire-direct (present + wire_present_pass). enable_join
-	// turns it on; a sim is host XOR joiner. [orig: NapiNPClientMsg_0x00C @0x42E730 self name-match]
+	// the boot's role hook; runtime_ is in the P7 block below). joiner_pump drives the connect legs +
+	// the per-frame S2C->ClientState fold + the C2S 0x0C uplink over a dialed UdpPump; its own player L
+	// runs run_logic_tick(false), remotes render wire-direct. [orig: NapiNPClientMsg_0x00C @0x42E730]
 	bool joiner_ = false;
 	bool joiner_net_diagnostics_ = false;
-	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): the frame
-	// sequence, its latches (started/spawned/redeploy/tripwire), the
-	// wire-header materializer, and the per-replica resolver state all live in
-	// engine/net/npruntime. This binding supplies the shell legs as PumpHooks.
+	opennova::np::JoinRole join_role_ = opennova::np::JoinRole::Player;
+	std::string join_spectator_password_;
+	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): frame sequence, latches
+	// (started/spawned/redeploy/tripwire), wire-header materializer, and per-replica resolver
+	// state live in engine/net/npruntime; this binding supplies the shell legs as PumpHooks.
 	opennova::np::JoinerWorldBridge joiner_bridge_;
 	// The shell-asset leg of the bridge's materialize phase: rebuild the
 	// collision/occlusion/trait/seat caches for the changed streamed rows.
@@ -1101,24 +1100,24 @@ public:
 	bool admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team);
 
 	// --- co-op LAN joiner (D.2) -------------------------------------------
-	// Turn the sim into a co-op LAN JOINER: dial the host at `host_ip:port` and run
-	// the witnessed in-match JOIN as a non-authority client. `player_name` rides the
-	// game ClientAuth.NA and is the key the host echoes into our organic-spawn record so
-	// we self-identify (name-match) and learn our wire handle H. Call BEFORE loading
-	// the mission (the next load arms the joiner frame path). Implies client replicas;
-	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
-	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
+	// Turn the sim into a co-op LAN JOINER: dial the host and run the witnessed in-match JOIN
+	// as a non-authority client. `player_name` rides the game ClientAuth.NA — the key the host
+	// echoes into our organic-spawn record (name-match self-ID, wire handle H). Call BEFORE
+	// loading the mission; a sim is host XOR joiner; false when the socket can't be dialed.
+	// `join_role` 1 = the retail spectator role (ClientAuth JSR=1 + optional JSPP).
+	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name,
+			int p_join_role = 0, const String &p_spectator_password = String());
 	bool is_joiner() const { return joiner_; }
-	// The client-local death screen latch (retail g_death_screen_active): the
-	// pass-level gate of the friendly-tags walks and the camera arbiter's
-	// sub-mode source. Fed by the local-player view (simulation_player_view.cpp).
+	// Live player-slot spectator state: joiner = S2C 0x75 latch; authority = Server_SetPlayerSpectator.
+	bool is_local_spectator() const;
+	bool set_local_spectator(bool p_spectator);
+	// The client-local death screen latch (retail g_death_screen_active): gates the
+	// friendly-tags walks + camera arbiter sub-mode; fed by simulation_player_view.cpp.
 	bool local_death_screen_active() const;
-	// True while a live net session owns this sim: the world tick is the ONLY
-	// pump for the session socket, so the Play/Step/Stop transport locks out
-	// (retail multiplayer has no pause; a stopped listen host reaps every
-	// joiner at cs_dir0.timeout_ms [orig: CNapiNetwork_Init @ 0x4ca4a0]).
-	// The single home for the rule — F3 transport, MCP, and the ESC pause all
-	// read this predicate.
+	// True while a live net session owns this sim: the world tick is the ONLY pump for the
+	// session socket, so the Play/Step/Stop transport locks out (retail MP has no pause; a
+	// stopped listen host reaps every joiner at cs_dir0.timeout_ms [orig: CNapiNetwork_Init
+	// @ 0x4ca4a0]). The single home for the rule — F3 transport, MCP, and ESC pause read it.
 	bool is_transport_locked() const { return joiner_ || host_listen_; }
 	// The portable session's live role/state records (net/inmatch/session.h),
 	// re-exported so the debug/MCP shell derives authority and role labels from

@@ -109,25 +109,31 @@ bool Simulation::reset_mission_to_baseline(
 
 opennova::inmatch::TickOutcome Simulation::advance_mission_tick(
 		const opennova::inmatch::TickInput &p_input) {
-	const opennova::world::PlayerInput &movement = p_input.player.movement;
+	const bool spectator = is_local_spectator();
+	const opennova::world::PlayerInput no_movement{};
+	const opennova::world::PlayerInput &movement =
+			spectator ? no_movement : p_input.player.movement;
 	set_player_input(movement.forward, movement.back, movement.left,
 			movement.right, movement.lean_left, movement.lean_right,
 			movement.jump);
-	if (p_input.player.look_delta_x != 0.0f ||
-			p_input.player.look_delta_y != 0.0f) {
+	if (!spectator && (p_input.player.look_delta_x != 0.0f ||
+			p_input.player.look_delta_y != 0.0f)) {
 		add_local_player_look(p_input.player.look_delta_x,
 				p_input.player.look_delta_y);
 	}
 	set_local_player_weapon_input(
-			(p_input.player.held_action_bits & MissionFrameInput::HELD_FIRE) != 0,
-			(p_input.player.pressed_action_bits &
-					MissionFrameInput::PRESSED_FIRE) != 0,
-			(p_input.player.pressed_action_bits &
-					MissionFrameInput::PRESSED_RELOAD) != 0);
+			!spectator &&
+					(p_input.player.held_action_bits & MissionFrameInput::HELD_FIRE) != 0,
+			!spectator &&
+					(p_input.player.pressed_action_bits &
+							MissionFrameInput::PRESSED_FIRE) != 0,
+			!spectator &&
+					(p_input.player.pressed_action_bits &
+							MissionFrameInput::PRESSED_RELOAD) != 0);
 	// The medic-call edge is an action binding, not weapon state: it fires
 	// its request immediately like retail's binding dispatch (the gates and
 	// cooldown live in request_local_player_medic).
-	if ((p_input.player.pressed_action_bits &
+	if (!spectator && (p_input.player.pressed_action_bits &
 				MissionFrameInput::PRESSED_MEDIC_REQUEST) != 0) {
 		request_local_player_medic();
 	}
