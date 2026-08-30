@@ -12,6 +12,7 @@
 #include <godot_cpp/classes/time.hpp>
 #include <runtime/devtools/debug_request.h>
 #include <runtime/devtools/entities_window.h>
+#include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
 #include <runtime/devtools/stats_window.h>
 
@@ -29,6 +30,8 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "stats"), &DevTools::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("get_frame_stats"), &DevTools::get_frame_stats);
 	ClassDB::bind_method(D_METHOD("set_simulation", "simulation"), &DevTools::set_simulation);
+	ClassDB::bind_method(D_METHOD("select_entity", "handle"), &DevTools::select_entity);
+	ClassDB::bind_method(D_METHOD("selected_entity_handle"), &DevTools::selected_entity_handle);
 	ClassDB::bind_method(D_METHOD("set_game_viewport", "viewport"), &DevTools::set_game_viewport);
 	ClassDB::bind_method(D_METHOD("set_game_play_available", "available"), &DevTools::set_game_play_available);
 	ClassDB::bind_method(D_METHOD("is_game_play_available"), &DevTools::is_game_play_available);
@@ -107,7 +110,7 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 	}
 	apply_game_requests();
 	apply_debug_requests();
-	push_entity_directory();
+	push_entity_detail(push_entity_directory());
 	if (open_ && !tools_->pass().is_open()) {
 		// Closed from inside (Escape, the menu).
 		set_game_playing_internal(false);
@@ -265,11 +268,32 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 	}
 	simulation_id_ = id;
 	last_entity_push_ms_ = -1;
+	last_detail_handle_ = -1;
+	// A packed handle names a slot, not an entity: the selection never crosses
+	// from one world to the next.
+	tools_->clear_entity_selection();
 	if (p_simulation == nullptr) {
-		// The unload edge: an invalid snapshot clears the pushed record so a
-		// window left open never shows a dead world's rows.
+		// The unload edge: invalid records clear the pushed state so a window
+		// left open never shows a dead world's rows or card.
 		tools_->set_entity_directory(opennova::devtools::EntityDirectorySnapshot{});
+		tools_->set_entity_detail(opennova::devtools::EntityDetailSnapshot{});
 	}
+}
+
+void DevTools::select_entity(int p_handle) {
+	if (p_handle < 0 || p_handle >= static_cast<int>(opennova::world::EntityHandle::kInvalid)) {
+		tools_->clear_entity_selection();
+		return;
+	}
+	tools_->select_entity(static_cast<uint16_t>(p_handle));
+	// The next frame pushes the directory (and then the detail card) at once
+	// rather than waiting out the cadence.
+	last_entity_push_ms_ = -1;
+}
+
+int DevTools::selected_entity_handle() const {
+	const uint16_t handle = tools_->selected_entity_handle();
+	return handle == opennova::world::EntityHandle::kInvalid ? -1 : static_cast<int>(handle);
 }
 
 // Drain the F3 windows' typed mutation requests into the SAME engine-backed
@@ -278,10 +302,12 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 void DevTools::apply_debug_requests() {
 	opennova::devtools::DebugRequest request;
 	Simulation *simulation_ = simulation();
+	bool drained = false;
 	while (tools_->take_debug_request(request)) {
 		if (simulation_ == nullptr) {
 			continue;
 		}
+		drained = true;
 		// The window's requests carry the engine handle; they reach the engine
 		// mutators (EntityCommands, ADR 0042 d5) by that handle, no index detour.
 		opennova::world::EntityCommands *commands = simulation_->entity_commands();
@@ -302,7 +328,18 @@ void DevTools::apply_debug_requests() {
 						Vector3(request.pos[0], request.pos[1], request.pos[2]),
 						request.yaw, request.pitch);
 				break;
+			case opennova::devtools::DebugRequest::Kind::SetEntityItemAttrib:
+				if (commands != nullptr) {
+					(void)commands->set_entity_item_attrib(request.target, request.attrib,
+							request.attrib2);
+				}
+				break;
 		}
+	}
+	if (drained) {
+		// The records pushed this same frame show the mutation, not the
+		// reading from up to half a second ago.
+		last_entity_push_ms_ = -1;
 	}
 }
 
@@ -310,17 +347,17 @@ void DevTools::apply_debug_requests() {
 // 0.5 s cadence: the ENGINE join (world::inspect::entity_directory) through
 // the Simulation's native accessor — no TypedArray/Variant round-trip
 // (ADR 0042 d6).
-void DevTools::push_entity_directory() {
+bool DevTools::push_entity_directory() {
 	Simulation *simulation_ = simulation();
 	if (simulation_ == nullptr || !tools_->needs_entity_directory()) {
 		last_entity_push_ms_ = -1;
-		return;
+		return false;
 	}
 	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
 	const int64_t cadence_ms = static_cast<int64_t>(
 			opennova::devtools::EntitiesWindow::kRefreshSeconds * 1000.0);
 	if (last_entity_push_ms_ >= 0 && now_ms - last_entity_push_ms_ < cadence_ms) {
-		return;
+		return false;
 	}
 	last_entity_push_ms_ = now_ms;
 	opennova::devtools::EntityDirectorySnapshot snapshot;
@@ -328,6 +365,29 @@ void DevTools::push_entity_directory() {
 	snapshot.valid = true;
 	snapshot.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
 	tools_->set_entity_directory(std::move(snapshot));
+	return true;
+}
+
+// Push the selected row's detail record (the ENGINE card,
+// world::inspect::build_entity_card, through the Simulation's native accessor)
+// while the window shows a selection: on every directory push, and at once
+// when the selection moved since the last detail push, so a row click never
+// shows a stale or empty pane for a cadence.
+void DevTools::push_entity_detail(bool p_directory_pushed) {
+	Simulation *simulation_ = simulation();
+	if (simulation_ == nullptr || !tools_->needs_entity_detail()) {
+		last_detail_handle_ = -1;
+		return;
+	}
+	const int handle = static_cast<int>(tools_->selected_entity_handle());
+	if (!p_directory_pushed && handle == last_detail_handle_) {
+		return;
+	}
+	last_detail_handle_ = handle;
+	opennova::devtools::EntityDetailSnapshot detail;
+	detail.card = simulation_->native_entity_card(handle);
+	detail.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
+	tools_->set_entity_detail(std::move(detail));
 }
 
 void DevTools::reset_layout() {
@@ -469,6 +529,14 @@ void DevTools::set_frame_stats(const Ref<FrameStats> &p_stats) {
 
 void DevTools::set_simulation(Simulation *p_simulation) {
 	(void)p_simulation;
+}
+
+void DevTools::select_entity(int p_handle) {
+	(void)p_handle;
+}
+
+int DevTools::selected_entity_handle() const {
+	return -1;
 }
 
 void DevTools::reset_layout() {}

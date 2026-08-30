@@ -65,6 +65,15 @@ public:
 	// DebugRequests into the same debug delegates the MCP control plane uses.
 	void set_simulation(Simulation *p_simulation);
 
+	// The shell's world pick lands here as a typed request into the Entities
+	// window carrying only the engine handle: the window opens, focuses, and
+	// selects that row (pending until the next directory push carries it).
+	// A negative or out-of-range handle clears the selection; the handle also
+	// clears when the Simulation changes (stale handles never cross missions).
+	// selected_entity_handle reads it back for probes/tests (-1 = none).
+	void select_entity(int p_handle);
+	int selected_entity_handle() const;
+
 	// Every tool window back inside the main viewport on the next layout pass
 	// (ImGui's ini remembers a window dragged out to another monitor); the
 	// "Reset layout" menu item's seam, and what a probe asks for before it
@@ -116,7 +125,8 @@ private:
 	void draw(int p_requested_width, int p_requested_height) override;
 	void apply_game_requests();
 	void apply_debug_requests();
-	void push_entity_directory();
+	bool push_entity_directory();
+	void push_entity_detail(bool p_directory_pushed);
 	void set_game_playing_internal(bool p_playing);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
@@ -126,6 +136,7 @@ private:
 	ObjectID simulation_id_;
 	Simulation *simulation() const;
 	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
+	int last_detail_handle_ = -1;      // the handle the last detail push carried; -1 = none
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

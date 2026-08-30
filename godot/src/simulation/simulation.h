@@ -1975,6 +1975,9 @@ public:
 	// for the C++ embedders (DevTools) that already hold a handle; null
 	// without a kernel.
 	opennova::world::EntityCommands *entity_commands();
+	// Native (unbound): the engine card by value for the C++ dev tools
+	// (invalid without a kernel or a resolving handle).
+	opennova::world::inspect::EntityCard native_entity_card(int p_handle) const;
 	// The full card by packed wire handle; null when nothing resolves. The
 	// AI-index and SSN forms wrap the same builder (edit seams key on
 	// ai_index; pool-1 vehicles carry no brain and resolve by SSN).
@@ -2007,6 +2010,11 @@ public:
 	// world entity so a real UDP phase-8 sample can prove receiver application.
 	Error debug_set_world_entity_weapon_ammo(int p_net_id, int p_clip,
 	                                         int p_reserve);
+	// Per-entity items.def attrib override by packed wire handle (brainless
+	// rows included): EntityCommands::set_entity_item_attrib. ERR_UNAVAILABLE
+	// without a kernel, ERR_INVALID_PARAMETER for a handle/word out of range,
+	// ERR_DOES_NOT_EXIST when nothing resolves.
+	Error debug_set_entity_item_attrib(int p_handle, int64_t p_attrib, int64_t p_attrib2);
 	// Land the local player at an exact F3-dumped pose (probe seam). Returns
 	// ERR_UNAVAILABLE until the complete local-player subject exists.
 	// TEST SCAFFOLDING (host authority): kill a BMS command group outright so an

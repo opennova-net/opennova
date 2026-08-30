@@ -783,14 +783,20 @@ int Simulation::native_ai_index_for_handle(int p_handle) const {
 			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)});
 }
 
+opennova::world::inspect::EntityCard Simulation::native_entity_card(int p_handle) const {
+	if (!kernel_ || p_handle < 0 || p_handle > 0xFFFF) return {};
+	return opennova::world::inspect::build_entity_card(
+			kernel_->world, &kernel_->ai,
+			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)},
+			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); });
+}
+
 Ref<EntityCard> Simulation::entity_card(int p_handle) const {
 	if (!kernel_ || p_handle < 0 || p_handle > 0xFFFF) return Ref<EntityCard>();
 	const opennova::world::EntityHandle handle{static_cast<uint16_t>(p_handle)};
 	Ref<EntityCard> card;
 	card.instantiate();
-	card->assign(opennova::world::inspect::build_entity_card(
-			kernel_->world, &kernel_->ai, handle,
-			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); }));
+	card->assign(native_entity_card(p_handle));
 	// The joiner's decoded replica row for the same handle, when one exists.
 	if (joiner_ && runtime_ != nullptr) {
 		card->assign_replica(opennova::np::client_replica_card(
