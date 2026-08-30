@@ -1,7 +1,7 @@
 # Shader validation contract
 
 The checked-in shader set is a closed inventory: 154 `.gdshader` entry points
-and 41 `.gdshaderinc` implementation files (195 resources total). The executable
+and 39 `.gdshaderinc` implementation files (193 resources total). The executable
 contract is `godot/shaders/provenance.json`, validated by
 `godot/tests/shader_resource_contract_test.gd` and
 `godot/tests/shader_provenance_pins_test.gd` (the textual contract) and by
