@@ -222,11 +222,12 @@ struct PlayerViewState {
     // on-foot chase, net-re §5.39): the debug affordance the onhook camera
     // patch provides, exposed on the debug menu and never on a gameplay key.
     bool debug_third_person_on_foot = false;
-    // The first-person camera shake (CameraShakeState below): the quake tick
-    // HARD-SETS its counter [orig: dword_B764B0 = 32 @ 0x57eb7d / @ 0x57ec29],
-    // the view tick decays it, and the camera compose samples it — the sample
-    // advances the IIR filters, so the read mutates (retail's globals do too).
-    mutable CameraShakeState shake;
+    // The first-person camera shake (CameraShakeState below): the pre-tick
+    // input pass decays its counter, the quake tick HARD-SETS it [orig:
+    // dword_B764B0 = 32 @ 0x57eb7d / @ 0x57ec29], and the post-tick view pass
+    // samples it once per tick into the tracker's BAM deltas (the sample
+    // advances the IIR filters); the camera compose only adds those deltas.
+    CameraShakeState shake;
     bool binoculars_requested = false;   // [orig: raw toggle g_binocularsToggle @ 0xB76539]
     bool binoculars_raised = false;      // [orig: body-pose g_binocularsRaised @ 0xB7653A]
     bool binoculars_view_active = false; // [orig: first-person view g_binocularsViewActive @ 0xB76538]

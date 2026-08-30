@@ -110,8 +110,6 @@ void local_player_view_refresh(World *world, PlayerViewState &v) {
     const bool alive = local != nullptr && local->alive && local->health > 0;
     const bool round_ended = world != nullptr && world->match.outcome().ended;
     player_view_update_effective_modes(v, alive, round_ended);
-    // The per-tick shake decay [orig: @ 0x4DE590].
-    camera_shake_decay(v.shake);
 }
 
 bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
@@ -249,6 +247,9 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
         player_view_update_effective_modes(v, false,
                                            world != nullptr && world->match.outcome().ended);
         v.tp_anchor_valid = false;
+        t.shake_yaw_bam = 0;
+        t.shake_pitch_bam = 0;
+        t.shake_roll_bam = 0;
         return;
     }
     const Entity *e = world->registry.get(world->cached.local_player);
@@ -335,6 +336,19 @@ void local_player_view_tick(World *world, const LocalPlayerWeapon &w, PlayerView
                                          (e->flags & kEntityFlagIndoors) != 0, eye);
     }
     player_view_tick(v, eye);
+    // The first-person shake sample: ONE weather-PRNG word per tick advances
+    // the three IIR filters and yields this tick's BAM deltas; retail runs the
+    // block inside Camera_ComputeThirdPersonView once per drained quantum,
+    // right after the weather tick that may have hard-set the counter
+    // [orig: Game_ProcessMainFrame @ 0x526774 -> @ 0x526781; the mode-0 block
+    //  @ 0x43803c..0x4380df]. Any other camera mode leaves the filters be.
+    t.shake_yaw_bam = 0;
+    t.shake_pitch_bam = 0;
+    t.shake_roll_bam = 0;
+    if (v.camera_mode == 0) {
+        camera_shake_sample(v.shake, world->weather.core.oscillator.prng, t.shake_yaw_bam,
+                            t.shake_pitch_bam, t.shake_roll_bam);
+    }
 }
 
 void local_player_set_eye(World *world, LocalPlayerWeapon &w, const float eye_mission[3],
@@ -461,18 +475,15 @@ void local_player_view_frame(World *world, const LocalPlayerWeapon &w, const Pla
                                // entirely. The roll is the seat-carried hull bank the
                                // mount pose wrote, never the standing torso tilt.
                                seated_eye, static_cast<float>(e->roll), out.camera);
-    // The first-person shake: three BAM32 deltas from the CURRENT weather PRNG
-    // word onto the composed view rotation [orig: the mode-0 block of
-    // Camera_ComputeThirdPersonView @ 0x43803c..0x4380df].
-    if (!out.camera.third_person && world != nullptr) {
-        int32_t d_yaw = 0;
-        int32_t d_pitch = 0;
-        int32_t d_roll = 0;
-        camera_shake_sample(v.shake, world->weather.core.oscillator.prng, d_yaw, d_pitch, d_roll);
+    // The first-person shake: the tick's BAM32 deltas (sampled once per tick
+    // in local_player_view_tick) onto the composed view rotation — every frame
+    // between two ticks sees the same displacement [orig: the mode-0 block of
+    // Camera_ComputeThirdPersonView, the >> 6 applies @ 0x4380b0..0x4380d9].
+    if (!out.camera.third_person) {
         constexpr float kDegPerBam = 360.0f / 4294967296.0f;
-        out.camera.yaw_deg += static_cast<float>(d_yaw) * kDegPerBam;
-        out.camera.pitch_deg += static_cast<float>(d_pitch) * kDegPerBam;
-        out.camera.roll_deg += static_cast<float>(d_roll) * kDegPerBam;
+        out.camera.yaw_deg += static_cast<float>(t.shake_yaw_bam) * kDegPerBam;
+        out.camera.pitch_deg += static_cast<float>(t.shake_pitch_bam) * kDegPerBam;
+        out.camera.roll_deg += static_cast<float>(t.shake_roll_bam) * kDegPerBam;
     }
     out.camera_pose_valid = true;
 }

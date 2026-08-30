@@ -542,6 +542,11 @@ void MissionKernel::apply_player_input_pre_tick() {
 	w::AiEntity *p = ai.for_handle(world.cached.local_player);
 	if (p == nullptr) return;
 	w::local_player_view_refresh(&world, view);
+	// The per-tick shake decay, ahead of the entity update's arms and the
+	// weather tick's quake hard-set: retail decays in Player_UpdatePerFrame
+	// from the client network frame that precedes both, once per quantum
+	// [orig: @ 0x4DE590; Game_ProcessMainFrame @ 0x52674b / @ 0x526774].
+	w::camera_shake_decay(view.shake);
 	w::apply_player_body_input(*p, w::pack_player_body_input(input));
 	const bool scope_promoted = weapon.active && view.scope_engaged &&
 			!w::player_view_scope_ease_active(view);
