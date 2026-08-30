@@ -1,6 +1,5 @@
 #include "env/environment_cube_capture.h"
 
-#include <algorithm>
 #include <cstdint>
 
 #include <godot_cpp/classes/compositor.hpp>
@@ -165,9 +164,9 @@ void EnvironmentCubeCapture::_ensure_capture_nodes() {
 		capture_compositor.instantiate();
 		camera->set_compositor(capture_compositor);
 		camera->set_projection(Camera3D::PROJECTION_PERSPECTIVE);
-		camera->set_fov(90.0f);
-		camera->set_near(0.5f);
-		camera->set_far(1000.0f);
+		camera->set_fov(opennova::renderer::kEnvironmentCubeFaceFovDegrees);
+		camera->set_near(opennova::renderer::kEnvironmentCubeFaceNear);
+		camera->set_far(opennova::renderer::kEnvironmentCubeFaceFar);
 		camera->set_cull_mask(Water::VISUAL_LAYER_ENVIRONMENT_CAPTURE);
 		viewport->add_child(camera);
 		camera->make_current();
@@ -186,8 +185,9 @@ void EnvironmentCubeCapture::advance_frame(
 		capture_pending_ = false;
 	}
 
-	const bool cadence_due = (render_frame_index_ % kRefreshFrames) == 0;
-	if (!capture_pending_ && (force_pending_ || !cube_ready_ || cadence_due)) {
+	if (!capture_pending_ &&
+			opennova::renderer::environment_cube_refresh_due(
+					render_frame_index_, force_pending_, cube_ready_)) {
 		// Retail renders all six faces in the offscreen-preparation leg of the
 		// same frame. Here the six UPDATE_ONCE faces render with this frame's
 		// ordinary draw and the readbacks publish at the next advance_frame:
@@ -206,12 +206,13 @@ void EnvironmentCubeCapture::force_capture() {
 void EnvironmentCubeCapture::_request_capture(
 		const Vector3 &p_player_position) {
 	capture_origin_ = p_player_position;
-	capture_origin_.y += 1.0f;
-	if (terrain_data_.is_valid()) {
-		const float terrain_y = terrain_data_->get_height_world_bilinear(
-				Vector3(p_player_position.x, 0.0f, p_player_position.z));
-		capture_origin_.y = std::max(capture_origin_.y, terrain_y + 10.0f);
-	}
+	const bool has_terrain = terrain_data_.is_valid();
+	const float terrain_y = has_terrain ?
+			terrain_data_->get_height_world_bilinear(
+					Vector3(p_player_position.x, 0.0f, p_player_position.z)) :
+			0.0f;
+	capture_origin_.y = opennova::renderer::environment_cube_eye_height(
+			p_player_position.y, has_terrain, terrain_y);
 
 	for (int i = 0; i < kFaceCount; ++i) {
 		cameras_[i]->look_at_from_position(capture_origin_,
@@ -252,9 +253,8 @@ Ref<Image> EnvironmentCubeCapture::_to_retail_dimmed_face(
 	uint8_t *write = pixels.ptrw();
 	for (int64_t i = 0; i + 3 < pixels.size(); i += 4) {
 		for (int channel = 0; channel < 3; ++channel) {
-			const uint32_t product =
-					static_cast<uint32_t>(write[i + channel]) * kSkyDimByte;
-			write[i + channel] = static_cast<uint8_t>((product + 127u) / 255u);
+			write[i + channel] = opennova::renderer::environment_cube_dim_byte(
+					write[i + channel]);
 		}
 		write[i + 3] = 255;
 	}

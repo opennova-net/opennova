@@ -1,11 +1,15 @@
 #pragma once
 
+#include <cstdint>
+
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/cubemap.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+
+#include <runtime/renderer/environment_cube.h>
 
 #include "terrain/terrain_data.h"
 
@@ -16,6 +20,8 @@ namespace godot {
 // frames. The callback intentionally sees only the sky dome and sun/moon; the
 // static sun-aligned CubeRotSpecular sphere is evaluated analytically by the
 // object shader after the captured sky has received its 0x60 dim multiply.
+// The constants, cadence, eye placement and dim byte are the engine's
+// <runtime/renderer/environment_cube.h>; this node is the device host.
 // Exact witness addresses and the quality selector are maintained in
 // docs/render/render-lighting-re.md (CubeEnvironment section):
 // (update_environment_cubemap @0x6106a0; GTexture_RenderCubeMapFace @0x6864d0;
@@ -24,10 +30,14 @@ class EnvironmentCubeCapture : public Node {
 	GDCLASS(EnvironmentCubeCapture, Node)
 
 public:
-	static constexpr int kFaceCount = 6;
-	static constexpr int kCaptureSize = 256;
-	static constexpr int kRefreshFrames = 128;
-	static constexpr uint8_t kSkyDimByte = 0x60;
+	static constexpr int kFaceCount =
+			opennova::renderer::kEnvironmentCubeFaceCount;
+	static constexpr int kCaptureSize =
+			opennova::renderer::kEnvironmentCubeFaceSize;
+	static constexpr int64_t kRefreshFrames =
+			opennova::renderer::kEnvironmentCubeRefreshFrames;
+	static constexpr uint8_t kSkyDimByte =
+			opennova::renderer::kEnvironmentCubeDimByte;
 
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
