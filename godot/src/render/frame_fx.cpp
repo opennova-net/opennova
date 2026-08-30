@@ -395,6 +395,8 @@ public:
 			bool discard_previous);
 	bool draw_weighted_pair(const RID &framebuffer, const RID &uniform,
 			const Vector2i &target_size, float first_degrees);
+	bool composite_q3(ViewTarget &target, RenderData *render_data,
+			std::uint32_t view, std::size_t &draws);
 	bool render(RenderData *render_data);
 	Ref<Image> capture_q3_target();
 	Dictionary report() const;
@@ -776,6 +778,54 @@ bool FrameFxCompositorEffect::Impl::draw_weighted_pair(
 	return true;
 }
 
+// The focused Q3 draw plus the witnessed capture, blur, and half-strength
+// additive composite over the beauty target for one view. Every Q3 technique
+// re-shades from its own leased inputs into the black-cleared Q3 target
+// (retail's altbuffer); the beauty colour is never sampled, only its resolved
+// depth is tested.
+bool FrameFxCompositorEffect::Impl::composite_q3(ViewTarget &target,
+		RenderData *render_data, std::uint32_t view, std::size_t &draws) {
+	if (!q3_adapter.draw_view(rd, render_data, view, target.q3_framebuffer,
+			draws))
+		return false;
+	if (!draw_one(target.capture_framebuffer, target.q3_uniform,
+			BlendMode::Replace, FramePass::Stretch,
+			target.capture_size, target.size, 0, 0, 0, 0,
+			false, true))
+		return false;
+	++draws;
+	const auto downsample_direction =
+			direction_for_degrees(30.0f, 1.0f / 1024.0f);
+	if (!draw_one(target.low_a_framebuffer, target.capture_uniform,
+			BlendMode::Replace, FramePass::AverageFour,
+			Vector2i(kFrameFxSide, kFrameFxSide), target.capture_size,
+			1.0f / 2048.0f, 1.0f / 2048.0f,
+			downsample_direction[0], downsample_direction[1],
+			false, true))
+		return false;
+	++draws;
+	if (!draw_weighted_pair(target.low_b_framebuffer,
+			target.low_a_uniform,
+			Vector2i(kFrameFxSide, kFrameFxSide), 90.0f))
+		return false;
+	draws += 2;
+	if (!draw_weighted_pair(target.low_a_framebuffer,
+			target.low_b_uniform,
+			Vector2i(kFrameFxSide, kFrameFxSide), 0.0f))
+		return false;
+	draws += 2;
+	const auto final_direction =
+			direction_for_degrees(45.0f, 0.0027621093f);
+	if (!draw_one(target.color_framebuffer, target.low_a_uniform,
+			BlendMode::SourceAlphaAdd, FramePass::FinalAverage,
+			target.size, Vector2i(kFrameFxSide, kFrameFxSide),
+			1.0f / 512.0f, 1.0f / 512.0f,
+			final_direction[0], final_direction[1], false, false))
+		return false;
+	++draws;
+	return true;
+}
+
 bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	if (!initialize_rd() || render_data == nullptr) {
 		if (render_data == nullptr)
@@ -798,51 +848,18 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		return false;
 	std::size_t draws = 0;
 	bool sampled_q3 = false;
+	bool q3_failed = false;
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget &target = targets[view];
-		if (q3_adapter.has_commands()) {
-			// Every Q3 technique re-shades from its own leased inputs into the
-			// black-cleared Q3 target (retail's altbuffer); the beauty colour is
-			// never sampled, only its resolved depth is tested.
-			if (!q3_adapter.draw_view(rd, render_data, view,
-					target.q3_framebuffer, draws))
-				return false;
-			if (!draw_one(target.capture_framebuffer, target.q3_uniform,
-					BlendMode::Replace, FramePass::Stretch,
-					target.capture_size, target.size, 0, 0, 0, 0,
-					false, true))
-				return false;
-			++draws;
-			const auto downsample_direction =
-					direction_for_degrees(30.0f, 1.0f / 1024.0f);
-			if (!draw_one(target.low_a_framebuffer, target.capture_uniform,
-					BlendMode::Replace, FramePass::AverageFour,
-					Vector2i(kFrameFxSide, kFrameFxSide), target.capture_size,
-					1.0f / 2048.0f, 1.0f / 2048.0f,
-					downsample_direction[0], downsample_direction[1],
-					false, true))
-				return false;
-			++draws;
-			if (!draw_weighted_pair(target.low_b_framebuffer,
-					target.low_a_uniform,
-					Vector2i(kFrameFxSide, kFrameFxSide), 90.0f))
-				return false;
-			draws += 2;
-			if (!draw_weighted_pair(target.low_a_framebuffer,
-					target.low_b_uniform,
-					Vector2i(kFrameFxSide, kFrameFxSide), 0.0f))
-				return false;
-			draws += 2;
-			const auto final_direction =
-					direction_for_degrees(45.0f, 0.0027621093f);
-			if (!draw_one(target.color_framebuffer, target.low_a_uniform,
-					BlendMode::SourceAlphaAdd, FramePass::FinalAverage,
-					target.size, Vector2i(kFrameFxSide, kFrameFxSide),
-					1.0f / 512.0f, 1.0f / 512.0f,
-					final_direction[0], final_direction[1], false, false))
-				return false;
-			++draws;
-			sampled_q3 = true;
+		if (q3_adapter.has_commands() && !q3_failed) {
+			// A focused-Q3 device failure keeps its diagnostic and skips the
+			// capture/blur/composite for this frame, but must never skip the
+			// terminal display decode below: a frame presented without it is
+			// double-encoded and flickers as glow sources enter and leave.
+			if (composite_q3(target, render_data, view, draws))
+				sampled_q3 = true;
+			else
+				q3_failed = true;
 		}
 
 		// All 3D retail draws have blended as gamma-domain numeric values. Copy
@@ -861,8 +878,12 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	}
 	{
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
-		status = sampled_q3 ? "drawn" : "drawn_without_q3";
-		failure.clear();
+		if (q3_failed)
+			status = "drawn_q3_failed";
+		else
+			status = sampled_q3 ? "drawn" : "drawn_without_q3";
+		if (!q3_failed)
+			failure.clear();
 		++rendered_frames;
 		gpu_draw_calls = draws;
 		view_count = count;
