@@ -55,8 +55,8 @@ float ObjectLodFrame::uniform_scale(const Basis &p_basis) {
 			p_basis.get_column(1).length(), p_basis.get_column(2).length() });
 }
 
-bool ObjectLodFrame::project(const Vector3 &p_center, float p_radius,
-		int32_t &r_radius_q16) const {
+bool ObjectLodFrame::sphere_in_frustum(const Vector3 &p_center,
+		float p_radius) const {
 	if (!valid) {
 		return false;
 	}
@@ -72,9 +72,16 @@ bool ObjectLodFrame::project(const Vector3 &p_center, float p_radius,
 		return false;
 	}
 	const float vertical = std::fabs(relative.dot(up));
-	if (vertical - depth * tan_half_vertical > p_radius * vertical_plane_scale) {
+	return vertical - depth * tan_half_vertical <=
+			p_radius * vertical_plane_scale;
+}
+
+bool ObjectLodFrame::project(const Vector3 &p_center, float p_radius,
+		int32_t &r_radius_q16) const {
+	if (!sphere_in_frustum(p_center, p_radius)) {
 		return false;
 	}
+	const float depth = (p_center - origin).dot(forward);
 	r_radius_q16 = opennova::renderer::project_bound_sphere_radius_q16(
 			world_to_q16(p_radius), world_to_q16(depth), focal_pixels);
 	return true;

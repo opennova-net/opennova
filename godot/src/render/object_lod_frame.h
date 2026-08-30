@@ -38,6 +38,11 @@ struct ObjectLodFrame {
 	// sphere radius is multiplied by.
 	static float uniform_scale(const Basis &p_basis);
 
+	// Whether a world bound sphere touches the view frustum (the near/side
+	// plane rejection alone, no projection): the coarse test a group of
+	// instances (a 512-unit static cell) runs before any member is projected.
+	bool sphere_in_frustum(const Vector3 &p_center, float p_radius) const;
+
 	// Project a world bound sphere. Returns false when the sphere lies wholly
 	// outside the frustum (r_radius_q16 untouched); otherwise r_radius_q16 is
 	// the engine's projected radius in Q16.16 pixels (a sphere the eye sits

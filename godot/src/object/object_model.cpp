@@ -824,10 +824,17 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 		ObjectModel *model = nullptr;
 		int lod_index = 0;
 	};
-	LocalVector<LodSwitch> switches;
+	// Frame scratch that keeps its capacity across calls (deliberately never
+	// freed: a static with a Godot allocator destructor would run after the
+	// extension's allocator hooks are gone), so a frame with attachments or
+	// crossings allocates nothing once warm.
+	static LocalVector<LodSwitch> &switches = *memnew(LocalVector<LodSwitch>);
+	switches.clear();
 	// Attachments take their owner's level after the owners' own selections
 	// have been applied (renderer::attachment_lod_index).
-	LocalVector<ObjectModel *> attachments;
+	static LocalVector<ObjectModel *> &attachments =
+			*memnew(LocalVector<ObjectModel *>);
+	attachments.clear();
 	for (ObjectModel *model : authored_lod_models_) {
 		if (!model->is_inside_tree()) {
 			continue;

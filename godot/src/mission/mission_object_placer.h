@@ -330,6 +330,18 @@ private:
 		bool carved = false;
 		Vector<StaticLodBinding> bindings;
 	};
+	// One 512-unit terrain cell of retained static instances (every graphic
+	// placed in it): a bound sphere covering every member's sphere and the
+	// member rows, so the per-frame walk rejects a whole cell outside the
+	// frustum before projecting any of its instances.
+	struct StaticLodCell {
+		Vector3 center;
+		float radius = 0.0f;
+		Vector<int> rows;
+	};
+	// Add the retained instance at `p_row` to its cell (created on first
+	// use), growing the cell's sphere to cover it.
+	void _bind_static_lod_cell(int p_row);
 
 	void _check_epoch();
 	void _ensure_item_db();
@@ -438,6 +450,8 @@ private:
 	// for the read-backs).
 	Vector<StaticLodProfile> static_lod_profiles_;
 	Vector<StaticLodInstance> static_lod_instances_;
+	Vector<StaticLodCell> static_lod_cells_;
+	HashMap<uint64_t, int> static_lod_cell_by_key_;
 	Vector<StaticPopulation> static_populations_;
 	HashMap<uint64_t, int> static_population_by_node_;
 	int static_lod_switches_ = 0;

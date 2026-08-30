@@ -391,6 +391,8 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	hidden_destruction_instances_.clear();
 	static_lod_profiles_.clear();
 	static_lod_instances_.clear();
+	static_lod_cells_.clear();
+	static_lod_cell_by_key_.clear();
 	static_populations_.clear();
 	static_population_by_node_.clear();
 	static_lod_switches_ = 0;
@@ -672,6 +674,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 						ObjectLodFrame::uniform_scale(group.xforms[i].basis);
 				static_lod_instances_.push_back(retained);
 				lod_rows.write[i] = static_lod_instances_.size() - 1;
+				_bind_static_lod_cell(lod_rows[i]);
 			}
 		}
 
@@ -1673,37 +1676,75 @@ int MissionObjectPlacer::update_static_lods(
 	if (!frame.valid) {
 		return 0;
 	}
+	// The touched set allocates only when a slot actually moves; a frame
+	// without a crossing walks the cells and allocates nothing.
 	HashSet<int> touched;
 	StaticLodInstance *instances = static_lod_instances_.ptrw();
 	const int instance_count = static_lod_instances_.size();
-	for (int row = 0; row < instance_count; ++row) {
-		StaticLodInstance &instance = instances[row];
-		if (instance.carved || instance.profile < 0 ||
-				instance.profile >= static_lod_profiles_.size()) {
+	for (const StaticLodCell &cell : static_lod_cells_) {
+		// A whole 512-unit cell outside the frustum keeps every member's
+		// level without projecting one of them (retail never reaches the
+		// selector for an entity its collector rejected).
+		if (!frame.sphere_in_frustum(cell.center, cell.radius)) {
 			continue;
 		}
-		int32_t radius_q16 = 0;
-		// Outside the frustum the instance keeps its level: retail never
-		// reaches the selector for an entity its collector rejected.
-		if (!frame.project(instance.origin, instance.radius, radius_q16)) {
-			continue;
+		for (const int row : cell.rows) {
+			if (row < 0 || row >= instance_count) {
+				continue;
+			}
+			StaticLodInstance &instance = instances[row];
+			if (instance.carved || instance.profile < 0 ||
+					instance.profile >= static_lod_profiles_.size()) {
+				continue;
+			}
+			int32_t radius_q16 = 0;
+			if (!frame.project(instance.origin, instance.radius, radius_q16)) {
+				continue;
+			}
+			int next_lod = -1;
+			if (radius_q16 > opennova::renderer::kObjectLodSubPixelCullQ16) {
+				const StaticLodProfile &profile =
+						static_lod_profiles_[instance.profile];
+				next_lod = opennova::renderer::select_object_lod(
+						profile.thresholds_q16, radius_q16, frame.projection_scale,
+						profile.available).lod_index;
+			}
+			if (next_lod == instance.active_lod) {
+				continue;
+			}
+			_write_static_instance_slots(row, next_lod, touched);
+			instance.active_lod = next_lod;
+			++static_lod_switches_;
 		}
-		int next_lod = -1;
-		if (radius_q16 > opennova::renderer::kObjectLodSubPixelCullQ16) {
-			const StaticLodProfile &profile = static_lod_profiles_[instance.profile];
-			next_lod = opennova::renderer::select_object_lod(
-					profile.thresholds_q16, radius_q16, frame.projection_scale,
-					profile.available).lod_index;
-		}
-		if (next_lod == instance.active_lod) {
-			continue;
-		}
-		_write_static_instance_slots(row, next_lod, touched);
-		instance.active_lod = next_lod;
-		++static_lod_switches_;
 	}
 	_flush_static_population_changes(touched);
 	return static_lod_switches_;
+}
+
+void MissionObjectPlacer::_bind_static_lod_cell(int p_row) {
+	if (p_row < 0 || p_row >= static_lod_instances_.size()) {
+		return;
+	}
+	const StaticLodInstance &instance = static_lod_instances_[p_row];
+	const int cell_x = static_batch_bin_coord(instance.origin.x);
+	const int cell_z = static_batch_bin_coord(instance.origin.z);
+	const uint64_t key = static_batch_bin_key(cell_x, cell_z);
+	int *cell_row = static_lod_cell_by_key_.getptr(key);
+	if (cell_row == nullptr) {
+		StaticLodCell cell;
+		// The cell's sphere sits on the terrain cell's XZ center at the first
+		// member's height and grows to cover every member's sphere.
+		cell.center = Vector3((static_cast<float>(cell_x) + 0.5f) * kStaticBatchBinSize,
+				instance.origin.y,
+				(static_cast<float>(cell_z) + 0.5f) * kStaticBatchBinSize);
+		static_lod_cells_.push_back(cell);
+		static_lod_cell_by_key_[key] = static_lod_cells_.size() - 1;
+		cell_row = static_lod_cell_by_key_.getptr(key);
+	}
+	StaticLodCell &cell = static_lod_cells_.write[*cell_row];
+	cell.radius = MAX(cell.radius,
+			(instance.origin - cell.center).length() + instance.radius);
+	cell.rows.push_back(p_row);
 }
 
 int MissionObjectPlacer::get_static_instance_lod(int p_bms_id) const {
