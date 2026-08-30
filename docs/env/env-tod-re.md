@@ -1099,7 +1099,13 @@ In a network session the server-synced time + TOD rate replace the local start T
 "per graphic" performance note is superseded: opaque and alpha-tested static
 rows now use terrain-aligned 512-unit X/Z populations with exact custom AABBs.
 Only blended rows remain global, intentionally, so spatial population centers
-cannot perturb transparent ordering. A graphic with more than one authored
+cannot perturb transparent ordering. Every
+population (per-bin, blended global, shadow twin) hangs under the
+container's one `StaticPopulations` child rather than beside the placed
+models (2026-08-30): the shell's per-frame walks over the container's
+children (the EffectWorld light select, the item-effect attach) then visit
+the entity models and one holder instead of a population per graphic x
+level x bin. A graphic with more than one authored
 RLOD stays in those populations: every level is emitted as its own population
 over the same slot list and the retail selector picks the level per instance
 each frame (render-order-re.md, "Authored object RLOD selection"), so

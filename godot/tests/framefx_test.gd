@@ -743,7 +743,7 @@ func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 	assert_eq(int(stats.get("batched", -1)), 2,
 			"the bulb population is one static batch over two rows: %s" % stats)
 	var population := parent.get_node_or_null(
-			"MissionObjects/Batch_StaticCrate1_0") as MultiMeshInstance3D
+			"MissionObjects/StaticPopulations/Batch_StaticCrate1_0") as MultiMeshInstance3D
 	assert_not_null(population, "the population is emitted")
 	if population == null:
 		return

@@ -21,6 +21,10 @@ namespace godot {
 namespace {
 
 constexpr const char *kContainerName = "MissionObjects";
+// The one child of the container that holds every static population (the
+// per-bin batches, the blended global batches, the shadow twins), so the
+// container's own children stay the placed entity models.
+constexpr const char *kPopulationsName = "StaticPopulations";
 // The 512-unit bins stay now that populations are dense per level (measured
 // 2026-08-30 against one population per graphic x policy x level x submesh on
 // 00TRa / CP01: the bins draw fewer primitives through their per-bin frustum
@@ -425,6 +429,20 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	// items/buildings/markers become ordinary placed nodes.
 	const Array skip_kinds = p_options.get("skip_kinds", Array());
 	Node3D *container = _ensure_container(p_parent);
+	// Every static population goes under one StaticPopulations node, minted
+	// with the first: the shell's per-frame walks over the container's
+	// children (the EffectWorld light select, the item-effect attach) visit
+	// the entity models and one holder, never a population per graphic x
+	// level x bin (00TRa places 835 of them beside 77 models).
+	Node3D *populations = nullptr;
+	const auto populations_parent = [&]() -> Node3D * {
+		if (populations == nullptr) {
+			populations = memnew(Node3D);
+			populations->set_name(kPopulationsName);
+			container->add_child(populations);
+		}
+		return populations;
+	};
 
 	// Bucket entities by graphic and retail reflection population, then split
 	// static vs animated. One graphic may be authored both with and without
@@ -875,7 +893,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				tag_static_shadow_source(mmi, p_slots);
 			}
 			attach_population(population_index, mmi, !p_batch.auxiliary_draw);
-			container->add_child(mmi);
+			populations_parent()->add_child(mmi);
 			if (!p_batch.auxiliary_draw) {
 				FrameFx::register_q3_object_source(mmi, p_batch.material);
 			}
@@ -943,7 +961,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 									  p_bin_z, p_batch.submesh));
 			tag_static_shadow_source(shadow_mmi, p_slots);
 			attach_population(shadow_population, shadow_mmi, true);
-			container->add_child(shadow_mmi);
+			populations_parent()->add_child(shadow_mmi);
 			++shadow_batch_count;
 		};
 		for (const StaticBatch &batch : batches) {

@@ -124,7 +124,9 @@ public:
 
 	// --- placement --------------------------------------------------------
 	// Place every renderable entity under a fresh MissionObjects node
-	// parented to `parent` (any previous one is cleared). `options` may
+	// parented to `parent` (any previous one is cleared): the individual
+	// models as its children, every static population (per-bin, blended
+	// global, shadow twin) under its one StaticPopulations child. `options` may
 	// carry "progress" (a per-model Callable pulse, mirroring the original's
 	// per-model loading-screen presents — witness: placement_traits.h
 	// ledger) and "skip_kinds"

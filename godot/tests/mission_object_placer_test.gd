@@ -150,7 +150,7 @@ func test_runtime_static_batch_publishes_effect_source() -> void:
 	assert_eq(int(stats.get("batches", -1)), 1, "one draw group for its single submesh")
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	assert_not_null(container)
-	var mmi := container.get_node_or_null("Batch_StaticCrate1_0") \
+	var mmi := container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0") \
 			as MultiMeshInstance3D
 	assert_not_null(mmi)
 	if mmi == null:
@@ -258,7 +258,7 @@ func test_static_batches_partition_opaque_geometry_but_keep_blended_global() -> 
 		return
 	var binned: Array[MultiMeshInstance3D] = []
 	var global: MultiMeshInstance3D = null
-	for child in container.get_children():
+	for child in _populations(container):
 		var mmi := child as MultiMeshInstance3D
 		if mmi == null:
 			continue
@@ -333,7 +333,7 @@ func test_runtime_static_vehicle_rides_the_mirror_visible_layer() -> void:
 	var stats: Dictionary = placer.place(mission, parent)
 	assert_eq(int(stats.get("placed", -1)), 1, "the static vehicle places")
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
-	var mmi := container.get_node_or_null("Batch_StaticVehicle1_0") \
+	var mmi := container.get_node_or_null("StaticPopulations/Batch_StaticVehicle1_0") \
 			as MultiMeshInstance3D
 	assert_not_null(mmi)
 	if mmi == null:
@@ -411,7 +411,7 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 
 	assert_eq(int(stats.get("batched", -1)), 2)
 	var container := parent.get_node_or_null("MissionObjects")
-	var visible_batch := container.get_node_or_null("Batch_StaticCrate1_0") \
+	var visible_batch := container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0") \
 			as MultiMeshInstance3D
 	assert_not_null(visible_batch)
 	if visible_batch != null:
@@ -432,7 +432,7 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 				expected_bms_ids,
 				"scratch attribution retains exact slot identity without changing geometry")
 		assert_eq(visible_batch.get_meta("static_shadow_slots"), [true, true])
-	assert_null(container.get_node_or_null("StaticShadow_StaticCrate1_0"),
+	assert_null(container.get_node_or_null("StaticPopulations/StaticShadow_StaticCrate1_0"),
 			"an all-eligible batch needs no shadow-only duplicate")
 	var shadow_sources := placer.get_static_terrain_shadow_source_diagnostics()
 	assert_eq(shadow_sources.size(), 2)
@@ -473,10 +473,10 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 	placer.place(mission, parent)
 
 	var container := parent.get_node_or_null("MissionObjects")
-	var visible_batch := container.get_node_or_null("Batch_StaticCrate1_0") \
+	var visible_batch := container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0") \
 			as MultiMeshInstance3D
 	var shadow_batch := container.get_node_or_null(
-			"StaticShadow_StaticCrate1_0") as MultiMeshInstance3D
+			"StaticPopulations/StaticShadow_StaticCrate1_0") as MultiMeshInstance3D
 	assert_not_null(visible_batch)
 	assert_not_null(shadow_batch,
 			"mixed admission retains a filtered shadow-only batch")
@@ -544,9 +544,9 @@ func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> v
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	assert_not_null(container)
 	var building_batch := container.get_node_or_null(
-			"Batch_StaticCrate1_Mirror_0") as MultiMeshInstance3D
+			"StaticPopulations/Batch_StaticCrate1_Mirror_0") as MultiMeshInstance3D
 	var item_batch := container.get_node_or_null(
-			"Batch_StaticCrate1_NoMirror_0") as MultiMeshInstance3D
+			"StaticPopulations/Batch_StaticCrate1_NoMirror_0") as MultiMeshInstance3D
 	assert_not_null(building_batch)
 	assert_not_null(item_batch)
 	assert_ne(building_batch, item_batch,
@@ -776,7 +776,7 @@ func test_authored_reflective_pool1_item_enters_the_mirror_population() -> void:
 
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	assert_not_null(container)
-	var batch := container.get_node_or_null("Batch_StaticCrate1_0") \
+	var batch := container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0") \
 			as MultiMeshInstance3D
 	assert_not_null(batch)
 	if batch != null:
@@ -871,7 +871,7 @@ func test_runtime_vehicle_without_anim_def_stays_in_static_batch() -> void:
 	assert_eq(int(stats.get("animated", -1)), 0,
 			"the vehicle does not enter runtime presentation")
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
-	assert_not_null(container.get_node_or_null("Batch_StaticVehicle1_0"))
+	assert_not_null(container.get_node_or_null("StaticPopulations/Batch_StaticVehicle1_0"))
 
 
 func test_godot_to_bms_position_axis_remap() -> void:
@@ -1091,8 +1091,16 @@ func test_live_panm_model_keeps_evaluating_robj_each_frame() -> void:
 # project_bound_sphere_radius_q16 and kObjectLodSubPixelCullQ16].
 
 
+## The static populations the placer emitted: every child of the container's
+## StaticPopulations holder (the container's own children are the models).
+func _populations(container: Node) -> Array[Node]:
+	var holder := container.get_node_or_null("StaticPopulations")
+	return holder.get_children() if holder != null else []
+
+
 func _lod_population(container: Node, population_name: String) -> MultiMeshInstance3D:
-	var mmi := container.get_node_or_null(population_name) as MultiMeshInstance3D
+	var mmi := container.get_node_or_null("StaticPopulations/" + population_name) \
+			as MultiMeshInstance3D
 	assert_not_null(mmi, "population %s is emitted" % population_name)
 	return mmi
 
@@ -1257,7 +1265,7 @@ func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
 	if container == null:
 		return
 	var levels := {}
-	for child in container.get_children():
+	for child in _populations(container):
 		var mmi := child as MultiMeshInstance3D
 		if mmi != null and mmi.has_meta("static_batch_lod"):
 			levels[int(mmi.get_meta("static_batch_lod"))] = true
