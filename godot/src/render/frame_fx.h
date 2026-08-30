@@ -100,8 +100,14 @@ public:
 			const opennova::renderer::ObjectMaterialClassification &p_classification);
 	static void clone_q3_object_material(const Ref<Material> &p_source,
 			const Ref<Material> &p_clone);
+	// An object surface instance with the material it currently draws: a
+	// glow-capable material registers it (a node registered before keeps its
+	// entry, its swapped mesh is re-read once); any other material, or
+	// unregister_q3_source, parks the entry without losing its generations
+	// (the ObjectModel level swap re-registers the same node many times).
 	static void register_q3_object_source(GeometryInstance3D *p_source,
 			const Ref<Material> &p_material);
+	static void unregister_q3_source(GeometryInstance3D *p_source);
 	// The classification an object material was registered with (false and
 	// untouched for a material outside the registry): the typed blend/family
 	// facts another producer may need about an ObjectModel surface.

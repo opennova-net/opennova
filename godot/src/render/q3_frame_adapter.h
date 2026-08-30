@@ -33,8 +33,15 @@ public:
 			const opennova::renderer::ObjectMaterialClassification &p_classification);
 	static void clone_object_material(const Ref<Material> &p_source,
 			const Ref<Material> &p_clone);
+	// Register (or re-register) an object surface instance with the material
+	// it currently draws: a glow-capable material makes it a compiled source
+	// (a node already registered keeps its entry and bumps its geometry
+	// generation, the swapped mesh is re-read once); any other material
+	// leaves an existing entry dormant. unregister_source parks an entry the
+	// same way without touching its generations.
 	static void register_object_source(GeometryInstance3D *p_source,
 			const Ref<Material> &p_material);
+	static void unregister_source(GeometryInstance3D *p_source);
 	// The classification a material was registered with; false (and
 	// r_classification untouched) for a material outside the registry.
 	static bool object_material_classification(const Ref<Material> &p_material,

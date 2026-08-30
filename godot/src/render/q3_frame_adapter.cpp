@@ -73,6 +73,11 @@ struct RegisteredQ3Source {
 	// Celestial sources: bit i set = surface i was installed with the
 	// additive celestial material, so its Q3 disc draw adds.
 	std::uint32_t additive_surfaces = 0;
+	// Cleared by unregister_source (an object slot swapped onto a level whose
+	// material carries no glow, or parked): the compile skips the source but
+	// the entry keeps its generations, so a later re-registration of the same
+	// node never hands the geometry cache a generation it has already seen.
+	bool active = true;
 };
 
 // The latest producer-published CPU arrays for one source surface.
@@ -1244,15 +1249,41 @@ void Q3FrameAdapter::clone_object_material(const Ref<Material> &p_source,
 
 void Q3FrameAdapter::register_object_source(GeometryInstance3D *p_source,
 		const Ref<Material> &p_material) {
-	if (p_source == nullptr || p_material.is_null())
+	if (p_source == nullptr)
 		return;
 	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	const auto classification = g_materials.find(p_material->get_instance_id());
+	const auto classification = p_material.is_valid() ?
+			g_materials.find(p_material->get_instance_id()) : g_materials.end();
+	const auto existing = g_sources.find(p_source->get_instance_id());
 	if (classification == g_materials.end() ||
-			!classification->second.is_glow_capable)
+			!classification->second.is_glow_capable) {
+		// A source whose material carries no glow is never compiled; one that
+		// was registered before (a surface slot swapped onto such a level)
+		// goes dormant in place.
+		if (existing != g_sources.end())
+			existing->second.active = false;
 		return;
+	}
+	if (existing != g_sources.end()) {
+		// The same node re-registered with the level's mesh and material
+		// swapped onto it: keep the entry and bump the geometry generation
+		// so the cache re-reads the surfaces once.
+		existing->second.material_id = p_material->get_instance_id();
+		existing->second.active = true;
+		++existing->second.geometry_generation;
+		return;
+	}
 	g_sources[p_source->get_instance_id()] = {p_source->get_instance_id(),
 			Q3Source::Object, p_material->get_instance_id()};
+}
+
+void Q3FrameAdapter::unregister_source(GeometryInstance3D *p_source) {
+	if (p_source == nullptr)
+		return;
+	std::lock_guard<std::mutex> lock(g_registry_mutex);
+	const auto found = g_sources.find(p_source->get_instance_id());
+	if (found != g_sources.end())
+		found->second.active = false;
 }
 
 bool Q3FrameAdapter::object_material_classification(
@@ -1361,6 +1392,8 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	});
 	const CameraFrustum frustum = camera_frustum(p_camera, p_viewport);
 	for (const RegisteredQ3Source &registration : registrations) {
+		if (!registration.active)
+			continue;
 		GeometryInstance3D *source = Object::cast_to<GeometryInstance3D>(
 				ObjectDB::get_instance(registration.node_id));
 		if (source == nullptr || !source->is_visible_in_tree() ||

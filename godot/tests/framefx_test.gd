@@ -721,6 +721,12 @@ func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 	var record := mission.add_entity(
 			MissionData.KIND_BUILDING, 105004, Vector3.ZERO, Vector3.ZERO)
 	assert_false(record.is_empty())
+	# A second bulb in the same 512-unit bin keeps the population live after
+	# the carve below: the dense populations hide an emptied level, and a
+	# hidden population is (rightly) never compiled or re-read.
+	assert_false(mission.add_entity(
+			MissionData.KIND_BUILDING, 105004, Vector3(2.0, 0.0, 0.0),
+			Vector3.ZERO).is_empty())
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(PLACER_ITEMS_DEF)), OK)
 	var root := ResourceRoot.new()
@@ -734,8 +740,8 @@ func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
 	var parent := Node3D.new()
 	viewport.add_child(parent)
 	var stats: Dictionary = placer.place(mission, parent)
-	assert_eq(int(stats.get("batched", -1)), 1,
-			"the bulb population is a static batch: %s" % stats)
+	assert_eq(int(stats.get("batched", -1)), 2,
+			"the bulb population is one static batch over two rows: %s" % stats)
 	var population := parent.get_node_or_null(
 			"MissionObjects/Batch_StaticCrate1_0") as MultiMeshInstance3D
 	assert_not_null(population, "the population is emitted")

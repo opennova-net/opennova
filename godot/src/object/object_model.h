@@ -13,6 +13,7 @@
 // GDScript origin); docs/adr/0007 + docs/world/world-wac-ai-re.md §14 for
 // the skeletal semantics, docs/render/render-lighting-re.md for lighting.
 
+#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/node3d.hpp>
@@ -44,6 +45,7 @@ namespace godot {
 class Terrain;
 class MeshInstance3D;
 class OccluderInstance3D;
+class VisualInstance3D;
 
 // The env-derived world lighting/fog values (ADR 0017's typed record,
 // native). Computed once per env change; the object shader family reads the
@@ -240,9 +242,53 @@ private:
 		int32_t rung = INT32_MIN;
 	};
 
+	// One authored submesh of one RLOD level: the mesh/material pair (an
+	// alpha strip owns its priority-bearing duplicate, an opaque strip shares
+	// the per-material cache entry) and the postmultiply auxiliary material,
+	// built once per rebuild and swapped onto the retained surface slot when
+	// the level becomes active. Nothing here is a node.
+	struct LevelSurface {
+		Ref<ArrayMesh> mesh;
+		Ref<ShaderMaterial> material;
+		Ref<ShaderMaterial> auxiliary_material;
+		int robj_index = 0;
+		int material_index = 0;
+		Vector3 local_center;
+		bool is_alpha = false;
+		bool is_skinned = false;
+		// The level's collector admits a Q3 copy (never a per-vertex skinned
+		// level: renderer::q3_object_source_admitted).
+		bool q3_admitted = false;
+	};
+	// One retained surface instance: slot k draws submesh k of the active
+	// level (mesh, material, part/skeleton parent and skin binding swapped
+	// in place on a level switch), hidden while the active level has fewer
+	// submeshes. The auxiliary postmultiply instance is created the first
+	// time a level's submesh k carries the pair and hidden otherwise.
+	struct SurfaceSlot {
+		MeshInstance3D *instance = nullptr;
+		MeshInstance3D *auxiliary = nullptr;
+	};
+	// A visual another owner parented under this model and bound to one
+	// authored level (the placer's static shadow siblings): shown only while
+	// that level is active, exactly like the model's own surfaces.
+	struct LevelBoundVisual {
+		ObjectID id;
+		int lod_index = 0;
+	};
+
 	Ref<ObjectData> object_data_;
 	HashMap<int64_t, Ref<ShaderMaterial>> material_cache_;
 	Vector<AlphaStripDraw> alpha_strip_draws_;
+	// level_surfaces_[lod] = that level's submeshes in authored order (empty
+	// for a level the build did not retain); surface_slots_ holds one
+	// instance per slot, sized to the largest retained level.
+	std::vector<std::vector<LevelSurface>> level_surfaces_;
+	std::vector<SurfaceSlot> surface_slots_;
+	std::vector<LevelBoundVisual> level_bound_visuals_;
+	// The level the slots currently carry (-1 = none applied since the build).
+	int applied_lod_ = -1;
+	bool skeletal_scene_ = false;
 	HashMap<int64_t, Dictionary> material_defs_;
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
@@ -345,7 +391,8 @@ private:
 	// Every GeometryInstance3D the scene builds carries instance uniforms
 	// (u_entity_light, the stance and viewmodel flags), so each one holds 16
 	// vec4 slots of Godot's global shader buffer for as long as it exists,
-	// visible or not, every retained RLOD included. The process-wide sum is
+	// visible or not (one per surface slot plus the auxiliary pairs, never
+	// one per retained RLOD). The process-wide sum is
 	// the shell's estimate of that allocation (Godot does not expose it):
 	// GameWorld.get_runtime_perf_counters reads it for the F3/perf path.
 	int geometry_instance_count_ = 0;
@@ -454,7 +501,15 @@ private:
 	bool needs_runtime_frame_work() const;
 	void refresh_live_panm_classification();
 	int clamp_lod_index(int p_lod_index) const;
-	void refresh_retained_lod_visibility();
+	// Swap the active level's submeshes onto the retained surface slots:
+	// mesh, material, part/skeleton parent, skin binding, the Q3 source
+	// registration, the auxiliary pair, the alpha-strip ladder rows, the
+	// dynamic-material slot tables, the level-bound visuals and the
+	// per-instance lighting stamps. Never creates or frees a slot instance.
+	void apply_level_surfaces();
+	// The Node3D a level surface hangs under: the shared Skeleton3D for a
+	// skinned strip, else its ROBJ part node.
+	Node3D *surface_parent_for(const LevelSurface &p_surface);
 	void refresh_active_lod_rest_transforms();
 	void stamp_match_terrain_instances(bool p_page_ready, float p_layer,
 			const Vector4 &p_projection);
@@ -663,6 +718,43 @@ public:
 	// level 0.
 	void set_authored_lod_owner(ObjectModel *p_owner);
 	ObjectModel *get_authored_lod_owner() const;
+	// The retained surface slots (one MeshInstance3D each, sized to the
+	// largest retained level) and the submesh count of one level (0 for a
+	// level the build did not retain): the typed read-back the tests pin the
+	// one-instance-per-slot contract against.
+	int get_surface_slot_count() const {
+		return static_cast<int>(surface_slots_.size());
+	}
+	int get_level_surface_count(int p_lod_index) const;
+	// Every surface instance this scene retains (the slots plus their
+	// auxiliary postmultiply pairs): the model's term of the shell's
+	// instance-uniform estimate.
+	int get_retained_surface_instance_count() const {
+		return geometry_instance_count_;
+	}
+	// One harvested row of a level's submeshes for the placer's static
+	// template: the shared mesh and the model's own material (an auxiliary
+	// postmultiply pair is its own row), the submesh's model-local transform
+	// at that level, and the facts the population emitter needs.
+	struct HarvestedSurface {
+		Ref<Mesh> mesh;
+		Ref<Material> material;
+		Transform3D offset;
+		int robj_index = 0;
+		int lod_index = 0;
+		bool auxiliary_draw = false;
+		bool blended_draw = false;
+	};
+	// Every retained level's submeshes in level order, each level posed in
+	// turn (its ROBJ part nodes carry that level's PANM base pose, so the
+	// offsets are exactly what an individual model draws at the level); the
+	// model is left at the level it had. Rows under the shared skeleton
+	// (skinned strips) are never harvested.
+	void harvest_level_surfaces(Vector<HarvestedSurface> &r_rows);
+	// Bind a visual another owner parented under this model to one authored
+	// level: it is shown only while that level is active. The binding lives
+	// until the next rebuild (which frees every child).
+	void add_level_bound_visual(int p_lod_index, VisualInstance3D *p_visual);
 	void set_authored_occluders_enabled(bool p_enabled);
 	bool are_authored_occluders_enabled() const {
 		return authored_occluders_enabled_;
@@ -675,7 +767,7 @@ public:
 		return static_cast<int>(authored_occluders_.size());
 	}
 	// The surface instances every live ObjectModel scene currently retains
-	// (all RLODs and auxiliary draws): the ObjectModel term of the shell's
+	// (the slots and auxiliary draws): the ObjectModel term of the shell's
 	// instance-uniform geometry estimate.
 	static int64_t get_live_geometry_instance_count() {
 		return live_geometry_instance_count_;

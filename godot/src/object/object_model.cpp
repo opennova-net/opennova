@@ -544,7 +544,9 @@ void ObjectModel::set_active_lod(int p_lod_index) {
 		rebuild_scene();
 		return;
 	}
-	refresh_retained_lod_visibility();
+	// The retained slots take the level's rows in place: no node is created
+	// or freed, the build serial does not move.
+	apply_level_surfaces();
 	refresh_active_lod_rest_transforms();
 	panm_applied_revision_ = 0;
 	refresh_live_panm_classification();
@@ -1208,31 +1210,6 @@ int ObjectModel::clamp_lod_index(int p_lod_index) const {
 	return CLAMP(p_lod_index, 0, MAX(lod_count - 1, 0));
 }
 
-void ObjectModel::refresh_retained_lod_visibility() {
-	LocalVector<Node *> stack;
-	stack.push_back(this);
-	while (!stack.is_empty()) {
-		Node *parent = stack[stack.size() - 1];
-		stack.remove_at(stack.size() - 1);
-		for (int i = 0; i < parent->get_child_count(); ++i) {
-			Node *child = parent->get_child(i);
-			// Each model owns only its own retained instances: a nested model (a
-			// husk graft under its intact building, an avatar head under the
-			// body) selects its level for itself and keeps its instances.
-			if (Object::cast_to<ObjectModel>(child) != nullptr) {
-				continue;
-			}
-			stack.push_back(child);
-			GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(child);
-			if (geometry == nullptr || !geometry->has_meta("_opennova_lod_index")) {
-				continue;
-			}
-			geometry->set_visible(int(geometry->get_meta("_opennova_lod_index", 0)) ==
-					active_lod_);
-		}
-	}
-}
-
 void ObjectModel::refresh_active_lod_rest_transforms() {
 	robj_rest_transforms_.clear();
 	if (object_data_.is_null() || !object_data_->has_document()) {
@@ -1682,6 +1659,14 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_authored_lod_owner);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_owner"),
 			&ObjectModel::get_authored_lod_owner);
+	ClassDB::bind_method(D_METHOD("get_surface_slot_count"),
+			&ObjectModel::get_surface_slot_count);
+	ClassDB::bind_method(D_METHOD("get_level_surface_count", "lod_index"),
+			&ObjectModel::get_level_surface_count);
+	ClassDB::bind_method(D_METHOD("get_retained_surface_instance_count"),
+			&ObjectModel::get_retained_surface_instance_count);
+	ClassDB::bind_method(D_METHOD("add_level_bound_visual", "lod_index", "visual"),
+			&ObjectModel::add_level_bound_visual);
 	ClassDB::bind_method(D_METHOD("set_authored_occluders_enabled", "enabled"),
 			&ObjectModel::set_authored_occluders_enabled);
 	ClassDB::bind_method(D_METHOD("are_authored_occluders_enabled"),

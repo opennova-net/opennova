@@ -5,7 +5,6 @@
 #include <cmath>
 
 #include <godot_cpp/classes/geometry_instance3d.hpp>
-#include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 
@@ -1546,15 +1545,17 @@ void MissionObjectPlacer::_apply_skeletal_anim(ObjectModel *p_model,
 	}
 }
 
-// Build a template ObjectModel with every authored RLOD retained, pose it at
-// each level in turn, and harvest one batch per (level, submesh) together
-// with the graphic's RLOD profile (thresholds, model sphere, harvested
-// levels). The model enters the live tree only for the harvest (so
-// bounds/global-transform math is valid and silent), then frees; the
-// harvested Mesh/Material refs survive. Each batch offset is the submesh's
-// model-local rest transform at its level relative to the entity origin — NO
-// ground-anchor offset (the engine bakes the Ground userpoint into the stored
-// position at author-time; witness: placement_traits.h ledger).
+// Build a template ObjectModel with every authored RLOD retained and harvest
+// one batch per (level, submesh) through its typed level harvest (the model
+// poses each level in turn, so every offset is the submesh's ROBJ base pose
+// at that level), together with the graphic's RLOD profile (thresholds,
+// model sphere, harvested levels). The model enters the live tree only for
+// the harvest (so bounds/global-transform math is valid and silent), then
+// frees; the harvested Mesh/Material refs survive. Each batch offset is the
+// submesh's model-local rest transform at its level relative to the entity
+// origin — NO ground-anchor offset (the engine bakes the Ground userpoint
+// into the stored position at author-time; witness: placement_traits.h
+// ledger).
 Vector<MissionObjectPlacer::StaticBatch>
 MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 		Node *p_tree_parent) {
@@ -1567,55 +1568,28 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 	const Ref<ObjectData> data = _load_object_data(p_graphic);
 	if (data.is_valid() && p_tree_parent != nullptr) {
 		ObjectModel *model = memnew(ObjectModel);
-		// Retain every level (each instance tagged _opennova_lod_index) so the
-		// walk below can pose the part nodes at one level at a time.
 		model->set_authored_lod_enabled(true);
 		p_tree_parent->add_child(model);
 		model->set_object_data(data);
-		const int lod_count = data->has_document()
-				? MAX(1, static_cast<int>(data->native_model().lod_count))
-				: 1;
+		Vector<ObjectModel::HarvestedSurface> rows;
+		model->harvest_level_surfaces(rows);
 		int submesh = 0;
-		for (int lod = 0; lod < lod_count; ++lod) {
-			// Posing the level writes that level's ROBJ rest transforms (the
-			// same pose an individual model shows at the level).
-			model->set_active_lod(lod);
-			if (model->get_active_lod() != lod) {
-				break;
-			}
-			const Dictionary part_nodes = model->get_render_part_nodes();
-			const Array part_keys = part_nodes.keys();
-			for (int k = 0; k < part_keys.size(); ++k) {
-				Node3D *part_node =
-						Object::cast_to<Node3D>(part_nodes[part_keys[k]]);
-				if (part_node == nullptr) {
-					continue;
-				}
-				for (int c = 0; c < part_node->get_child_count(); ++c) {
-					MeshInstance3D *mi =
-							Object::cast_to<MeshInstance3D>(part_node->get_child(c));
-					if (mi == nullptr || mi->get_mesh().is_null() ||
-							int(mi->get_meta("_opennova_lod_index", 0)) != lod) {
-						continue;
-					}
-					StaticBatch batch;
-					batch.mesh = mi->get_mesh();
-					batch.material = mi->get_material_override();
-					batch.offset = part_node->get_transform() * mi->get_transform();
-					batch.submesh = submesh;
-					batch.robj_index = int(part_keys[k]);
-					batch.lod_index = lod;
-					batch.auxiliary_draw =
-							bool(mi->get_meta("_opennova_auxiliary_draw", false));
-					batch.blended_draw =
-							bool(mi->get_meta("_opennova_blended_draw", false));
-					batches.push_back(batch);
-					++submesh;
-				}
-			}
+		for (const ObjectModel::HarvestedSurface &row : rows) {
+			StaticBatch batch;
+			batch.mesh = row.mesh;
+			batch.material = row.material;
+			batch.offset = row.offset;
+			batch.submesh = submesh;
+			batch.robj_index = row.robj_index;
+			batch.lod_index = row.lod_index;
+			batch.auxiliary_draw = row.auxiliary_draw;
+			batch.blended_draw = row.blended_draw;
+			batches.push_back(batch);
+			++submesh;
 		}
 		if (data->has_document()) {
 			const Threedi3di3 &native_model = data->native_model();
+			const int lod_count = MAX(1, static_cast<int>(native_model.lod_count));
 			for (int lod = 0; lod < lod_count; ++lod) {
 				profile.thresholds_q16.push_back(native_model.lods[lod].lod_threshold);
 			}
@@ -1922,90 +1896,57 @@ void MissionObjectPlacer::_flush_static_population_changes(
 // Visible portal/PANM models live below camera-masked ROBJ nodes; retail's
 // terrain-tile collector ignores those masks and submits every selected-LOD
 // ROBJ, so harvest one independent all-section shadow-only sibling per
-// submesh.
+// submesh of every retained level, bound to its level on the owner (shown
+// exactly while the owner draws that level).
 void MissionObjectPlacer::_add_individual_static_shadow_siblings(
 		ObjectModel *p_model, const String &p_graphic,
 		const Transform3D &p_local_xform, const String &p_suffix) {
 	if (p_model == nullptr) {
 		return;
 	}
-	Vector<MeshInstance3D *> sources;
-	LocalVector<Node *> stack;
-	stack.push_back(p_model);
-	while (!stack.is_empty()) {
-		Node *parent = stack[stack.size() - 1];
-		stack.remove_at(stack.size() - 1);
-		for (int i = 0; i < parent->get_child_count(); ++i) {
-			Node *child = parent->get_child(i);
-			stack.push_back(child);
-			MeshInstance3D *source = Object::cast_to<MeshInstance3D>(child);
-			if (source != nullptr && source->get_mesh().is_valid() &&
-					!bool(source->get_meta("_opennova_auxiliary_draw", false))) {
-				sources.push_back(source);
-			}
-		}
-	}
+	Vector<ObjectModel::HarvestedSurface> rows;
+	p_model->harvest_level_surfaces(rows);
 	// Registered/synthetic graphics can supply harvested static batches without
 	// an ObjectModel scene. Keep that owner-facing seam useful while production
-	// models clone their retained per-LOD MeshInstance descendants below.
-	if (sources.is_empty()) {
+	// models harvest their own retained levels.
+	if (rows.is_empty()) {
 		const Vector<StaticBatch> batches = _get_static_batches(p_graphic, p_model);
 		for (const StaticBatch &batch : batches) {
-			if (batch.auxiliary_draw || batch.mesh.is_null()) {
-				continue;
-			}
-			Ref<MultiMesh> mm;
-			mm.instantiate();
-			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-			mm->set_mesh(batch.mesh);
-			mm->set_instance_count(1);
-			mm->set_instance_transform(0, p_local_xform * batch.offset);
-			MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
-			mmi->set_multimesh(mm);
-			mmi->set_layer_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
-			mmi->set_cast_shadows_setting(
-					GeometryInstance3D::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
-			if (batch.material.is_valid()) {
-				mmi->set_material_override(batch.material);
-			}
-			// The owner's retained-level visibility walk toggles these like
-			// its own per-level instances.
-			mmi->set_meta("_opennova_lod_index",
-					static_cast<int64_t>(batch.lod_index));
-			mmi->set_visible(batch.lod_index == p_model->get_active_lod());
-			mmi->set_name(vformat("StaticShadow_%s_%s_%d", p_graphic,
-					p_suffix, batch.submesh));
-			p_model->add_child(mmi);
+			ObjectModel::HarvestedSurface row;
+			row.mesh = batch.mesh;
+			row.material = batch.material;
+			row.offset = batch.offset;
+			row.robj_index = batch.robj_index;
+			row.lod_index = batch.lod_index;
+			row.auxiliary_draw = batch.auxiliary_draw;
+			row.blended_draw = batch.blended_draw;
+			rows.push_back(row);
 		}
-		return;
 	}
-	const Transform3D model_inverse = p_model->get_global_transform().affine_inverse();
 	int submesh = 0;
-	for (MeshInstance3D *source : sources) {
+	for (const ObjectModel::HarvestedSurface &row : rows) {
+		if (row.auxiliary_draw || row.mesh.is_null()) {
+			continue;
+		}
 		Ref<MultiMesh> mm;
 		mm.instantiate();
 		mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-		mm->set_mesh(source->get_mesh());
+		mm->set_mesh(row.mesh);
 		mm->set_instance_count(1);
-		mm->set_instance_transform(0, p_local_xform * model_inverse *
-				source->get_global_transform());
+		mm->set_instance_transform(0, p_local_xform * row.offset);
 		MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
 		mmi->set_multimesh(mm);
 		mmi->set_layer_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
 		mmi->set_cast_shadows_setting(
 				GeometryInstance3D::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
-		const Ref<Material> material = source->get_material_override();
-		if (material.is_valid()) {
-			mmi->set_material_override(material);
-		}
-		if (source->has_meta("_opennova_lod_index")) {
-			mmi->set_meta("_opennova_lod_index",
-					source->get_meta("_opennova_lod_index"));
-			mmi->set_visible(source->is_visible());
+		if (row.material.is_valid()) {
+			mmi->set_material_override(row.material);
 		}
 		mmi->set_name(vformat("StaticShadow_%s_%s_%d", p_graphic, p_suffix,
 				submesh++));
 		p_model->add_child(mmi);
+		// The owner's level swap shows and hides these beside its own slots.
+		p_model->add_level_bound_visual(row.lod_index, mmi);
 	}
 }
 

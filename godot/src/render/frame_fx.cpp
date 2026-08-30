@@ -1015,6 +1015,10 @@ void FrameFx::register_q3_object_source(GeometryInstance3D *p_source,
 	Q3FrameAdapter::register_object_source(p_source, p_material);
 }
 
+void FrameFx::unregister_q3_source(GeometryInstance3D *p_source) {
+	Q3FrameAdapter::unregister_source(p_source);
+}
+
 bool FrameFx::q3_object_material_classification(const Ref<Material> &p_material,
 		opennova::renderer::ObjectMaterialClassification &r_classification) {
 	return Q3FrameAdapter::object_material_classification(p_material,
