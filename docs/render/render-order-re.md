@@ -351,12 +351,14 @@ target, through the same decode-only terminal effect and the same
 particle POST pair, and the only mirror-side code difference is the
 camera cull mask gaining the thirteen visual layers the retired slot
 captures reserved, which nothing in the scene occupies (no light, decal or
-instance sits on them); the ranked candidates are the terminal effect's
-resolved-colour/depth access on the mirror target and the render-server
-timestamp span absorbing device work the beauty chain now records around
-it, and a lane on it masks the mirror's terminal effect first, then the
-particle pair. The GPU total is what the frame pays, and it is 2.3-5.8 ms
-below master.
+instance sits on them). The mirror's terminal effect is eliminated: with
+it not installed at all (00TRa, two runs, same protocol) the row read
+1.50 ms against 1.55 with it, and the mirror still drew 290 objects / 275
+draw calls / 663734 primitives. What remains is the particle POST pair on
+the mirror camera and the render-server timestamp span absorbing device
+work the beauty chain now records around it; a lane on the row masks the
+particle pair next. The GPU total is what the frame pays, and it is
+2.3-5.8 ms below master.
 The render callback re-shades each LUM copy as the SELFLUM NORMAL block into
 the black-cleared Q3 target (`_FFP.fx` copies the NORMAL pass block into the
 GLOW slot `@ 0x5afc7f`: Diffuse1 x Detail MODULATE2X x RGB modulator x
