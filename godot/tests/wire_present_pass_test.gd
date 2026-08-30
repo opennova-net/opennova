@@ -1301,6 +1301,8 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	var weapon: ObjectModel = p.held_weapon_node(0x1004)
 	assert_not_null(weapon, "the model is resolved from the ADM index the wire carries")
 	assert_true(weapon.visible)
+	assert_eq(weapon.get_authored_lod_owner(), body,
+			"the held weapon draws at its body's RLOD level, never its own walk")
 	_assert_entity_light(weapon, expected_light,
 			"a late-built held weapon inherits its body's cached sun quality")
 	snap.entities[0]["hidden"] = 1

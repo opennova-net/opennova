@@ -288,6 +288,7 @@ private:
 	Ref<PanmClock> panm_clock_;
 	int active_lod_ = 0;
 	bool authored_lod_enabled_ = false;
+	ObjectID authored_lod_owner_;
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
 	std::vector<bool> authored_lod_available_;
@@ -654,6 +655,14 @@ public:
 	int get_active_lod() const { return active_lod_; }
 	void set_authored_lod_enabled(bool p_enabled);
 	bool is_authored_lod_enabled() const { return authored_lod_enabled_; }
+	// Attachment RLOD: an attached model (the third-person held weapon, the
+	// NVG/binocular items, a mounted child) never runs its own threshold
+	// walk; it draws at its owner's selected level clamped to its own LOD
+	// count (renderer::attachment_lod_index). update_authored_lods applies
+	// the owner's level after the frame's selections; a freed owner reads as
+	// level 0.
+	void set_authored_lod_owner(ObjectModel *p_owner);
+	ObjectModel *get_authored_lod_owner() const;
 	void set_authored_occluders_enabled(bool p_enabled);
 	bool are_authored_occluders_enabled() const {
 		return authored_occluders_enabled_;

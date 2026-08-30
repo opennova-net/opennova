@@ -160,6 +160,12 @@ public:
 			int p_character_id);
 	ObjectModel *build_player_animated_model(int p_runtime_type_id,
 			Node3D *p_parent, int p_character_id = 0);
+	// The composed avatar's head part under a body build_player_animated_model
+	// returned, or null for a plain item-model avatar. Retail draws the
+	// one-shot overlays (the held weapon, the mounted child) with the HEAD
+	// submit and skips them on the flagged body submit, so the head is the
+	// attachment RLOD owner of a composed avatar.
+	static ObjectModel *avatar_head_part(ObjectModel *p_body);
 	// Build ONE animated ObjectModel from an EXPLICIT graphic + .adm name
 	// (the first-person weapon viewmodel path; the arms + gun share the
 	// equipped gun's rig table — witness: placement_traits.h ledger).

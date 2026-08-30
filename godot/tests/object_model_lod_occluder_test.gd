@@ -122,6 +122,63 @@ func test_nested_model_keeps_its_instances_across_the_parent_lod_switch() -> voi
 			"the parent's own finer level is hidden")
 
 
+func test_attachment_takes_its_owner_level_clamped_to_its_own_count() -> void:
+	# An attached model (the third-person held weapon, the NVG/binocular
+	# items, a mounted child) never walks its own thresholds: retail's bone
+	# callback indexes every overlay model with the parent's selected level
+	# clamped to the overlay's own LOD count. The frame walk applies that
+	# after the owners' selections; the camera below looks away from both
+	# models, so the owner keeps the level set here rather than reselecting.
+	var owner := ObjectModel.new()
+	add_child_autofree(owner)
+	owner.set_authored_lod_enabled(true)
+	owner.set_object_data(_data(PUMP_3DI))
+	var lod_count := int(owner.get_object_data().get_summary().get("lod_count", 0))
+	assert_gt(lod_count, 1, "the owner carries multiple authored RLODs")
+	if lod_count <= 1:
+		return
+	var attachment := ObjectModel.new()
+	add_child_autofree(attachment)
+	attachment.set_authored_lod_enabled(true)
+	attachment.set_object_data(_data(PUMP_3DI))
+	attachment.set_authored_lod_owner(owner)
+	assert_eq(attachment.get_authored_lod_owner(), owner)
+	owner.position = Vector3(0.0, 0.0, 50.0)
+	attachment.position = Vector3(0.0, 0.0, 50.0)
+	var away := Transform3D(Basis.IDENTITY, Vector3.ZERO)
+
+	owner.set_active_lod(1)
+	ObjectModel.update_authored_lods(away, 60.0, 640.0, 480.0)
+	assert_eq(owner.get_active_lod(), 1, "an owner outside the frustum keeps its level")
+	assert_eq(attachment.get_active_lod(), 1,
+			"the attachment draws at its owner's level")
+	owner.set_active_lod(0)
+	ObjectModel.update_authored_lods(away, 60.0, 640.0, 480.0)
+	assert_eq(attachment.get_active_lod(), 0, "and follows it back down")
+
+	# A level past the attachment's own count clamps to its last level.
+	owner.set_active_lod(lod_count - 1)
+	var single := ObjectModel.new()
+	add_child_autofree(single)
+	single.set_authored_lod_enabled(true)
+	single.set_object_data(_data(ARMORY_3DI))
+	single.set_authored_lod_owner(owner)
+	single.position = Vector3(0.0, 0.0, 50.0)
+	ObjectModel.update_authored_lods(away, 60.0, 640.0, 480.0)
+	assert_eq(single.get_active_lod(),
+			mini(lod_count - 1, int(single.get_object_data().get_summary().get("lod_count", 1)) - 1),
+			"the owner's level clamps to the attachment's own count")
+
+	# A freed owner reads as level 0.
+	owner.set_active_lod(1)
+	ObjectModel.update_authored_lods(away, 60.0, 640.0, 480.0)
+	assert_eq(attachment.get_active_lod(), 1)
+	owner.free()
+	assert_null(attachment.get_authored_lod_owner())
+	ObjectModel.update_authored_lods(away, 60.0, 640.0, 480.0)
+	assert_eq(attachment.get_active_lod(), 0, "no owner selects the finest level")
+
+
 func test_closed_authored_records_create_section_owned_occluders() -> void:
 	var viewport := get_viewport()
 	var viewport_was_enabled := viewport.use_occlusion_culling

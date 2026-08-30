@@ -1209,6 +1209,20 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	return body;
 }
 
+ObjectModel *MissionObjectPlacer::avatar_head_part(ObjectModel *p_body) {
+	if (p_body == nullptr) {
+		return nullptr;
+	}
+	for (int i = 0; i < p_body->get_child_count(); ++i) {
+		ObjectModel *part = Object::cast_to<ObjectModel>(p_body->get_child(i));
+		if (part != nullptr && part->has_meta("avatar_part") &&
+				String(part->get_meta("avatar_part")) == "head") {
+			return part;
+		}
+	}
+	return nullptr;
+}
+
 ObjectModel *MissionObjectPlacer::build_model_from_graphic(
 		const String &p_graphic, const String &p_adm_name, Node3D *p_parent,
 		const String &p_clip_key, const String &p_rig_graphic,
