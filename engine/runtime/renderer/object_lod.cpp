@@ -21,8 +21,10 @@ constexpr float kObjectLodReferenceWidth = 640.0f;
 
 } // namespace
 
-// [orig: object RLOD threshold walk, coarsest-slot back-off and overlap
-//  fraction @ 0x5c3b20]
+// [orig: Model_SelectRlodLevel @ 0x5c3b20 — the threshold walk and the
+//  coarsest-slot back-off; the fraction it also stores (@ 0x5c3bb3/0x5c3bc2
+//  -> dword_29ACD9C) is dead retail data with no live reader and is not
+//  reproduced]
 ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
                                      int32_t projected_radius_q16,
                                      float projection_scale,
@@ -60,33 +62,12 @@ ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
 
   // Coarsest-slot back-off: on the final row (or a row whose next threshold
   // is zero) the UNSCALED radius must also exceed the row's threshold, or
-  // the level one finer is drawn and the blend's far threshold is rescaled
-  // by 1/scale (flt_2980558) [orig: @ 0x5c3b88..0x5c3b9b].
-  double near_threshold = threshold_at(selected + 1);
-  double far_threshold = threshold_at(selected);
+  // the level one finer is drawn [orig: @ 0x5c3b88..0x5c3b9b].
   if (selected > 0 &&
       (selected == level_count - 1 || threshold_at(selected + 1) == 0) &&
       projected_radius_q16 > threshold_at(selected)) {
     --selected;
     result.backed_off = true;
-    const double inverse_scale =
-        projection_scale != 0.0f ? 1.0 / static_cast<double>(projection_scale)
-                                 : 1.0;
-    far_threshold = static_cast<double>(threshold_at(selected)) * inverse_scale;
-    near_threshold = threshold_at(selected + 1);
-  }
-
-  // The overlap fraction belongs to the selector's row, before the
-  // submit-time null walk [orig: @ 0x5c3ba7..0x5c3bc2].
-  if (selected > 0) {
-    const double width = far_threshold - near_threshold;
-    if (width != 0.0) {
-      result.blend_fraction = static_cast<float>(std::clamp(
-          (static_cast<double>(result.scaled_projected_radius_q16) -
-           near_threshold) /
-              width,
-          0.0, 1.0));
-    }
   }
 
   if (!available.empty()) {

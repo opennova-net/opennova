@@ -19,6 +19,7 @@ int failures = 0;
 } // namespace
 
 int main() {
+  using opennova::renderer::attachment_lod_index;
   using opennova::renderer::kObjectLodBehindEyeRadiusQ16;
   using opennova::renderer::kObjectLodDetailLevelMax;
   using opennova::renderer::kObjectLodSubPixelCullQ16;
@@ -58,9 +59,6 @@ int main() {
       select_object_lod(thresholds, 4 << 16, 0.667f);
   CHECK(backed.lod_index == 1);
   CHECK(backed.backed_off);
-  // After the back-off the far threshold is rescaled by 1/scale, which puts
-  // the scaled radius at or below the new row's near threshold: no overlap.
-  CHECK(backed.blend_fraction == 0.0f);
   // The same unscaled radius at unit scale reaches row 1 without backing off.
   CHECK(select_object_lod(thresholds, 4 << 16, 1.0f).lod_index == 1);
   CHECK(!select_object_lod(thresholds, 4 << 16, 1.0f).backed_off);
@@ -82,7 +80,6 @@ int main() {
   const ObjectLodSelection gap = select_object_lod(zero_gap, 8 << 16, 0.5f);
   CHECK(gap.lod_index == 0);
   CHECK(gap.backed_off);
-  CHECK(gap.blend_fraction == 0.0f);
   CHECK(select_object_lod(zero_gap, 6 << 16, 1.0f).lod_index == 1);
   CHECK(!select_object_lod(zero_gap, 6 << 16, 1.0f).backed_off);
 
@@ -96,8 +93,18 @@ int main() {
 
   CHECK(select_object_lod({}, 100).lod_index == -1);
   CHECK(select_object_lod({0}, 100).lod_index == 0);
-  CHECK(std::fabs(select_object_lod(thresholds, 5 << 16).blend_fraction -
-                  0.5f) < 0.00001f);
+
+  // Attachments never run the threshold walk: the bone callback indexes the
+  // held weapon, the NVG/binocular items and the mounted child with the
+  // parent's level clamped to their own count
+  // [orig: BoneCallback_org0_World @ 0x4e39c4..0x4e39ce].
+  CHECK(attachment_lod_index(0, 3) == 0);
+  CHECK(attachment_lod_index(1, 3) == 1);
+  CHECK(attachment_lod_index(2, 3) == 2);
+  CHECK(attachment_lod_index(5, 3) == 2);
+  CHECK(attachment_lod_index(2, 1) == 0);
+  CHECK(attachment_lod_index(-1, 2) == 0);
+  CHECK(attachment_lod_index(1, 0) == -1);
 
   // The frame scale [orig: @ 0x5c940c..0x5c9468]: the highest shipped
   // profile's fixed 2.0 quality over the viewport width, times 640.
