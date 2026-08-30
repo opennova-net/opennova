@@ -7,6 +7,7 @@
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/water_frame.h>
 #include <runtime/environment/weather_runtime.h>
+#include <runtime/renderer/device_fog.h>
 #include <formats/env/env_celestial.h>
 #include <formats/env/env_weather.h>
 
@@ -461,6 +462,52 @@ int main() {
 		cfg.terrain_rgb = {200.0f / 255.0f, 128.0f / 255.0f, 0.0f};
 		ok &= expect(env.terrain_color_recip_packed() == 0xA3FF80u,
 				"200 -> 163, 128 -> 255 (clamp), 0 -> 0x80, packed r<<16|g<<8|b");
+	}
+
+	// --- the light values carry the one device fog range ---------------------
+	{
+		// Under overcast the device end is Environment_GetFogEndDistance's
+		// L * (1 - o/2) and Render_SetFogState's type-2 start is
+		// (1 - o) * 0.5 * that end; the corona fold and the Q3 copies read
+		// both from the light values, which must publish the same pair the
+		// scene fog (shader globals) carries, never the unscaled level.
+		EnvironmentState env;
+		opennova::env::Config cfg = make_config();
+		cfg.fog_type = 2;
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		opennova::env::NetEnvSample sample;
+		sample.fog_dist = 640;
+		sample.tod_fixed = 0x8000;
+		env.apply_network_sample(sample);
+		env.set_smoothed_scalars(640.0f, 175.0f, 0.0f, 0.0f, 0.5f);
+		ok &= expect(near(env.overcast_blend(), 0.5f), "overcast 0.5 is live");
+		const float device_end = env.fog_end_distance();
+		ok &= expect(near(device_end, 640.0f * 0.75f),
+				"the device fog end is the level scaled by (1 - overcast/2)");
+		opennova::env::WorldLightValues values;
+		ok &= expect(env.build_light_values({}, values, false),
+				"a loaded dry pass builds light values");
+		const opennova::env::SceneFogValues scene = env.build_scene_fog(false);
+		ok &= expect(near(values.fog_end, device_end) &&
+						near(values.fog_end, scene.end),
+				"the light values' fog end is the overcast-scaled device end");
+		ok &= expect(near(values.fog_start,
+						opennova::env::compute_fog_params(2, device_end, 0.5f)
+								.start) &&
+						near(values.fog_start, 0.5f * 0.5f * device_end) &&
+						near(values.fog_start, scene.start),
+				"the light values' fog start is Render_SetFogState's type-2 "
+				"start from that same end");
+		// The device evaluation over that pair: unfogged at the start,
+		// fully fogged at the end.
+		ok &= expect(near(opennova::renderer::device_fog_visibility(
+								values.fog_start, values.fog_start,
+								values.fog_end, values.fog_type, true), 1.0f) &&
+						near(opennova::renderer::device_fog_visibility(
+								values.fog_end, values.fog_start,
+								values.fog_end, values.fog_type, true), 0.0f),
+				"the corona fold's linear range runs start..end of the device pair");
 	}
 
 	// --- the 62 Hz autonomous accumulator clamp ------------------------------

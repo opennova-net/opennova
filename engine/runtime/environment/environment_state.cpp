@@ -548,8 +548,16 @@ bool EnvironmentState::build_light_values(const Vec3 &default_dir,
 	out.gain = color_src_gain();
 	out.fog_enabled = true;
 	out.fog_color = fog_color();
+	// The primary device fog block as Environment_ApplyFogAndAmbient sets it:
+	// the end is Environment_GetFogEndDistance's overcast-scaled distance
+	// (fog_end_distance, the same end build_scene_fog publishes to the shader
+	// globals) and the start is what Render_SetFogState resolved from that
+	// end for the fog type. The corona fog-to-black fold and the Q3 copies
+	// consume this pair, so both must fog over the one device range.
+	// [orig: Environment_ApplyFogAndAmbient @ 0x57e44c (GetFogEndDistance)
+	//  .. 0x57e4db (Render_SetFogState(0.5, fogEnd, type, overcast))]
 	out.fog_start = fog_start();
-	out.fog_end = fog_level();
+	out.fog_end = fog_end_distance();
 	out.fog_type = fog_type();
 	if (underwater_view) {
 		const SceneFogValues fog = build_scene_fog(true);
