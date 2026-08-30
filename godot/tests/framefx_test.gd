@@ -429,6 +429,25 @@ func test_production_water_source_reaches_the_typed_q3_draw_list() -> void:
 	var report := renderer.get_backend_report()
 	assert_gt(int(report.get("q3_submitted_commands", 0)), 0,
 			"the production Water registry row compiles into Q3")
+	# Water publishes the strip arrays it uploads, so the focused Q3 cache
+	# re-packs exactly that one entry per rebuilt frame from CPU memory and
+	# never reads the surface back through the server.
+	for _rebuild in 2:
+		water.advance_frame(1.0 / 62.0)
+		renderer.advance_frame()
+		var rebuilt := renderer.get_backend_report()
+		assert_eq(int(rebuilt.get("q3_repacked_entries", -1)), 1,
+				"a rebuilt strip re-packs exactly its own entry")
+		assert_eq(int(rebuilt.get("q3_readbacks_this_frame", -1)), 0,
+				"the published strip is never read back through the server")
+		assert_gt(int(rebuilt.get("q3_packed_vertices", 0)), 0)
+	renderer.advance_frame()
+	var stable := renderer.get_backend_report()
+	assert_eq(int(stable.get("q3_repacked_entries", -1)), 0,
+			"an unchanged strip is served from the cache")
+	assert_eq(int(stable.get("q3_readbacks_this_frame", -1)), 0)
+	assert_eq(int(stable.get("q3_packed_vertices", -1)), 0)
+	assert_gt(int(stable.get("q3_submitted_commands", 0)), 0)
 	if bool(report.get("rd_available", false)):
 		assert_true(bool(report.get("q3_sampled", false)),
 				"the terminal compositor samples its owned Q3 target")
@@ -507,6 +526,55 @@ func test_production_object_q3_contributes_pixels_and_obeys_beauty_depth() -> vo
 		assert_lt(float(occluded_presence.fraction), 0.05,
 				"the occluded bulb's former footprint is empty in the Q3 target: %s" %
 				occluded_presence)
+
+
+func test_stable_q3_scene_packs_once_and_never_reads_the_server_back() -> void:
+	# The view compiles twice: the READY compile read each LUM surface once
+	# into the retained cache, the second compile of the unchanged scene must
+	# have been served entirely from it.
+	var view := _q3_lum_view(true)
+	var renderer := view.terminal as FrameFx
+	var first := renderer.get_backend_report()
+	assert_gt(int(first.get("q3_submitted_commands", 0)), 0)
+	assert_gt(int(first.get("q3_cached_entries", 0)), 0,
+			"first sight packed each surface into the cache")
+	assert_gt(int(first.get("q3_cached_vertex_bytes", 0)), 0)
+	assert_eq(int(first.get("q3_readbacks_this_frame", -1)), 0,
+			"a stable frame reads nothing back through the server")
+	assert_eq(int(first.get("q3_packed_vertices", -1)), 0,
+			"a stable frame re-packs nothing")
+	assert_eq(int(first.get("q3_repacked_entries", -1)), 0)
+	assert_eq(String(first.get("q3_geometry_submission", "")),
+			"cached_per_source_surface_streams")
+
+	renderer.advance_frame()
+	var second := renderer.get_backend_report()
+	assert_eq(int(second.get("q3_submitted_commands", -1)),
+			int(first.get("q3_submitted_commands", 0)))
+	assert_eq(int(second.get("q3_readbacks_this_frame", -1)), 0)
+	assert_eq(int(second.get("q3_packed_vertices", -1)), 0)
+	assert_eq(int(second.get("q3_repacked_entries", -1)), 0)
+	assert_eq(int(second.get("q3_cached_entries", -1)),
+			int(first.get("q3_cached_entries", 0)))
+
+	# An invalidated source (a rebuilt mesh, carved MultiMesh rows) re-reads
+	# its surfaces exactly once at its next sight, then settles again.
+	var bulb := _first_visible_mesh(view.model)
+	assert_not_null(bulb)
+	if bulb == null:
+		return
+	FrameFx.invalidate_q3_source(bulb)
+	renderer.advance_frame()
+	var third := renderer.get_backend_report()
+	assert_gt(int(third.get("q3_readbacks_this_frame", 0)), 0,
+			"invalidation re-reads the source once")
+	assert_lte(int(third.get("q3_readbacks_this_frame", 0)),
+			(bulb.mesh as ArrayMesh).get_surface_count())
+	assert_gt(int(third.get("q3_packed_vertices", 0)), 0)
+	renderer.advance_frame()
+	var fourth := renderer.get_backend_report()
+	assert_eq(int(fourth.get("q3_readbacks_this_frame", -1)), 0)
+	assert_eq(int(fourth.get("q3_packed_vertices", -1)), 0)
 
 
 func test_offscreen_production_q3_source_is_culled_before_vertex_packing() -> void:

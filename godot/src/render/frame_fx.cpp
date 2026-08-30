@@ -15,6 +15,7 @@
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/compositor.hpp>
+#include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
@@ -1023,6 +1024,15 @@ void FrameFx::register_q3_source(GeometryInstance3D *p_source,
 	Q3FrameAdapter::register_source(p_source, p_kind);
 }
 
+void FrameFx::publish_q3_geometry(GeometryInstance3D *p_source, int p_surface,
+		const Array &p_arrays) {
+	Q3FrameAdapter::publish_geometry(p_source, p_surface, p_arrays);
+}
+
+void FrameFx::invalidate_q3_source(GeometryInstance3D *p_source) {
+	Q3FrameAdapter::invalidate_source(p_source);
+}
+
 void FrameFx::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&FrameFx::get_backend_report);
@@ -1031,6 +1041,9 @@ void FrameFx::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("shutdown"), &FrameFx::shutdown);
 	ClassDB::bind_method(D_METHOD("get_q3_target_image"),
 			&FrameFx::get_q3_target_image);
+	ClassDB::bind_static_method("FrameFx",
+			D_METHOD("invalidate_q3_source", "source"),
+			&FrameFx::invalidate_q3_source);
 	BIND_CONSTANT(kBeautyCameraMask);
 }
 

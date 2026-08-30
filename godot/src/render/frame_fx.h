@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/rid.hpp>
 
@@ -103,6 +104,14 @@ public:
 			const Ref<Material> &p_material);
 	static void register_q3_source(GeometryInstance3D *p_source,
 			opennova::renderer::Q3Source p_kind);
+	// Producers that already hold a surface's CPU arrays publish them here
+	// (the water strip every frame), so the Q3 geometry cache re-packs from
+	// memory instead of reading the mesh back through the server; producers
+	// that rebuild a registered mesh or rewrite MultiMesh instance transforms
+	// invalidate the source so its cache rows are re-read once.
+	static void publish_q3_geometry(GeometryInstance3D *p_source, int p_surface,
+			const Array &p_arrays);
+	static void invalidate_q3_source(GeometryInstance3D *p_source);
 
 	// Ordered device leg, driven from GameFramePipeline immediately after the
 	// local-view camera placement. This module must NOT self-clock: a node

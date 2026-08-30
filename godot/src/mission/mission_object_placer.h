@@ -304,6 +304,9 @@ private:
 	struct DestructionBinding {
 		Ref<MultiMesh> multimesh;
 		int index = -1;
+		// The MultiMeshInstance3D drawing `multimesh`, by identity: a carve
+		// rewrites its instance rows and must invalidate its Q3 source.
+		ObjectID instance_id;
 	};
 	struct DestructionInstance {
 		String graphic;

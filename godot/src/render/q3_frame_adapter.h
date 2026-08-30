@@ -4,6 +4,7 @@
 #include <memory>
 
 #include <godot_cpp/classes/ref.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
@@ -36,6 +37,16 @@ public:
 			const Ref<Material> &p_material);
 	static void register_source(GeometryInstance3D *p_source,
 			opennova::renderer::Q3Source p_kind);
+	// A producer that already holds a surface's CPU arrays (the water strip
+	// rebuilt from WaterCore every frame) hands them over here, so the cache
+	// re-packs from memory and never reads that surface back through the
+	// server. `p_arrays` is the Mesh::ARRAY_MAX layout the producer uploaded.
+	static void publish_geometry(GeometryInstance3D *p_source, int p_surface,
+			const Array &p_arrays);
+	// A producer that rebuilt a registered mesh or rewrote a MultiMesh's
+	// instance transforms bumps the source generation; the cache re-reads
+	// that source once at its next sight.
+	static void invalidate_source(GeometryInstance3D *p_source);
 
 	void compile_frame(Node *p_scope, Viewport *p_viewport, Camera3D *p_camera);
 	void clear_frame();

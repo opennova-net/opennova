@@ -921,7 +921,6 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		"frag_color = vec4(clamp(fogged, 0.0, 1.0), 0.0);",
 		"draw.object.self_lum_color.x * std::min(light_gain.x, 1.0f) * 2.0f",
 		"\"u_rgb_mod\", Vector3(1, 1, 1)",
-		"Mesh::ARRAY_TEX_UV2",
 		"candidate.submission.object.detail_texture = lease_for(detail)",
 		"glare_view_fade = bool_parameter",
 		"view_dot_sq * view_dot_sq",
@@ -937,7 +936,17 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		"Q3DeviceBlend::Add",
 		"result[\"q3_sun_depth_test\"] = true",
 		"result[\"q3_far_band\"] = Vector2(kQ3FarBandMinZ, kQ3FarBandMaxZ)",
+		"cache.acquire(request",
+		"result[\"q3_readbacks_this_frame\"]",
 	], "q3_frame_adapter.cpp")
+	# The interleaved Q3 stream (with the detail UV2 row) is packed once per
+	# cache entry generation, never re-read through the server per frame.
+	var q3_cache := _read_repo("godot/src/render/q3_geometry_cache.cpp")
+	_contains_all(q3_cache, [
+		"Mesh::ARRAY_TEX_UV2",
+		"++counters_.readbacks",
+		"kQ3VertexStride",
+	], "q3_geometry_cache.cpp")
 
 	# The first-person viewmodel draws inside the beauty pass through the
 	# shader-side renderfov projection + depth band; no composite shader.

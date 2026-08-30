@@ -1,4 +1,5 @@
 #include "render/q3_frame_adapter.h"
+#include "render/q3_geometry_cache.h"
 
 #include <algorithm>
 #include <array>
@@ -42,11 +43,6 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/aabb.hpp>
-#include <godot_cpp/variant/packed_color_array.hpp>
-#include <godot_cpp/variant/packed_float32_array.hpp>
-#include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/packed_vector2_array.hpp>
-#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
@@ -58,7 +54,6 @@ using namespace opennova::renderer;
 
 namespace {
 
-constexpr std::uint32_t kVertexStride = 104u;
 constexpr std::uint32_t kPushConstantBytes = 128u;
 
 enum class Q3DeviceBlend : std::uint8_t {
@@ -72,17 +67,28 @@ struct RegisteredQ3Source {
 	std::uint64_t node_id = 0;
 	Q3Source source = Q3Source::Object;
 	std::uint64_t material_id = 0;
+	// Bumped by invalidate_source; the geometry cache re-reads the source's
+	// surfaces and instance rows once when it moves.
+	std::uint64_t generation = 1;
+};
+
+// The latest producer-published CPU arrays for one source surface.
+struct PublishedGeometry {
+	Q3SurfaceArrays arrays;
+	std::uint64_t generation = 0;
 };
 
 std::mutex g_registry_mutex;
 std::map<std::uint64_t, ObjectMaterialClassification> g_materials;
 std::map<std::uint64_t, RegisteredQ3Source> g_sources;
+std::map<Q3GeometryCache::Key, PublishedGeometry> g_published;
 std::atomic<std::uint64_t> g_frame_id{1};
 
 struct DeviceCommand {
 	Q3DrawCommand draw{};
-	std::uint32_t first_vertex = 0;
-	std::uint32_t vertex_count = 0;
+	// The immutable packed stream this command draws; the render side owns
+	// one device buffer per cache entry and uploads each generation once.
+	std::shared_ptr<const Q3PackedStream> stream;
 	// Keep every sampled server resource alive across the main-thread compile
 	// -> render-thread draw handoff; the RID is only the device lookup key.
 	Ref<Texture2D> primary_texture_resource;
@@ -95,8 +101,10 @@ struct DeviceCommand {
 
 struct DeviceFrame {
 	Q3DrawList draw_list;
-	PackedByteArray vertices;
 	std::vector<DeviceCommand> commands;
+	// Cache entries evicted on the main thread whose device buffers the render
+	// side frees once it has consumed this frame (no later frame names them).
+	std::vector<std::uint64_t> evicted_entries;
 	Vector3 light_direction = Vector3(0, 1, 0);
 	Vector3 light_gain = Vector3(1, 1, 1);
 	bool fog_enabled = false;
@@ -108,7 +116,7 @@ struct DeviceFrame {
 
 struct Candidate {
 	Q3SubmissionSnapshot submission{};
-	PackedByteArray vertices;
+	std::shared_ptr<const Q3PackedStream> stream;
 	Ref<Texture2D> primary_texture_resource;
 	Ref<Texture2D> secondary_texture_resource;
 	Ref<Texture2D> tertiary_texture_resource;
@@ -416,35 +424,6 @@ Transform3D godot_transform(const Q3Matrix4 &p_matrix) {
 			p_matrix.values[13], p_matrix.values[14]));
 }
 
-void append_f32(PackedByteArray &p_bytes, float p_value) {
-	const int64_t offset = p_bytes.size();
-	p_bytes.resize(offset + 4);
-	std::memcpy(p_bytes.ptrw() + offset, &p_value, sizeof(p_value));
-}
-
-void append_vec2(PackedByteArray &p_bytes, const Vector2 &p_value) {
-	append_f32(p_bytes, p_value.x);
-	append_f32(p_bytes, p_value.y);
-}
-
-void append_vec3(PackedByteArray &p_bytes, const Vector3 &p_value) {
-	append_f32(p_bytes, p_value.x);
-	append_f32(p_bytes, p_value.y);
-	append_f32(p_bytes, p_value.z);
-}
-
-void append_color(PackedByteArray &p_bytes, const Color &p_value) {
-	append_f32(p_bytes, p_value.r);
-	append_f32(p_bytes, p_value.g);
-	append_f32(p_bytes, p_value.b);
-	append_f32(p_bytes, p_value.a);
-}
-
-Vector3 transformed_normal(const Basis &p_basis, const Vector3 &p_normal) {
-	const Vector3 result = p_basis.xform(p_normal);
-	return result.length_squared() > 0.0f ? result.normalized() : Vector3(0, 1, 0);
-}
-
 Ref<Texture2D> texture_parameter(const Ref<ShaderMaterial> &p_material,
 		const StringName &p_name) {
 	if (p_material.is_null())
@@ -607,103 +586,6 @@ std::vector<Transform3D> skin_palette(MeshInstance3D *p_instance) {
 	return result;
 }
 
-Vector4 custom_at(const PackedFloat32Array &p_values, int p_index) {
-	const int base = p_index * 4;
-	if (base < 0 || base + 3 >= p_values.size())
-		return Vector4();
-	return Vector4(p_values[base], p_values[base + 1],
-			p_values[base + 2], p_values[base + 3]);
-}
-
-bool pack_surface(const Array &p_arrays, const Ref<ShaderMaterial> &p_material,
-		Q3Source p_source, const Camera3D *p_camera,
-		const std::vector<Transform3D> &p_skin_palette,
-		PackedByteArray &r_vertices) {
-	if (p_arrays.size() <= Mesh::ARRAY_INDEX)
-		return false;
-	const PackedVector3Array positions = p_arrays[Mesh::ARRAY_VERTEX];
-	const PackedVector3Array normals = p_arrays[Mesh::ARRAY_NORMAL];
-	const PackedVector2Array uvs = p_arrays[Mesh::ARRAY_TEX_UV];
-	const PackedVector2Array uv2s = p_arrays[Mesh::ARRAY_TEX_UV2];
-	const PackedColorArray colors = p_arrays[Mesh::ARRAY_COLOR];
-	const PackedFloat32Array custom0 = p_arrays[Mesh::ARRAY_CUSTOM0];
-	const PackedFloat32Array custom1 = p_arrays[Mesh::ARRAY_CUSTOM1];
-	const PackedFloat32Array custom2 = p_arrays[Mesh::ARRAY_CUSTOM2];
-	const PackedInt32Array bones = p_arrays[Mesh::ARRAY_BONES];
-	const PackedFloat32Array weights = p_arrays[Mesh::ARRAY_WEIGHTS];
-	const PackedInt32Array indices = p_arrays[Mesh::ARRAY_INDEX];
-	if (positions.is_empty())
-		return false;
-	const int vertex_count = indices.is_empty() ? positions.size() : indices.size();
-	if (vertex_count <= 0)
-		return false;
-	r_vertices.resize(0);
-	const Vector3 uv_u = vector3_parameter(p_material, "u_uv_transform_u",
-			Vector3(1, 0, 0));
-	const Vector3 uv_v = vector3_parameter(p_material, "u_uv_transform_v",
-			Vector3(0, 1, 0));
-	const Vector4 water_uv = vector4_parameter(p_material, "u_water_uv",
-			Vector4(1.0f, 0.2f, 0.0f, 0.0f));
-	const Vector3 camera_position = p_camera != nullptr ?
-			p_camera->get_global_position() : Vector3();
-	for (int element = 0; element < vertex_count; ++element) {
-		const int index = indices.is_empty() ? element : indices[element];
-		if (index < 0 || index >= positions.size())
-			return false;
-		Vector3 position = positions[index];
-		Vector3 normal = index < normals.size() ? normals[index] : Vector3(0, 1, 0);
-		if (!p_skin_palette.empty() && bones.size() >= (index + 1) * 4 &&
-				weights.size() >= (index + 1) * 4) {
-			Vector3 skinned_position;
-			Vector3 skinned_normal;
-			float total = 0.0f;
-			for (int influence = 0; influence < 4; ++influence) {
-				const int offset = index * 4 + influence;
-				const int bone = bones[offset];
-				const float weight = weights[offset];
-				if (weight <= 0.0f || bone < 0 ||
-						bone >= static_cast<int>(p_skin_palette.size()))
-					continue;
-				const Transform3D &transform = p_skin_palette[bone];
-				skinned_position += transform.xform(position) * weight;
-				skinned_normal += transform.basis.xform(normal) * weight;
-				total += weight;
-			}
-			if (total > 0.0f) {
-				position = skinned_position / total;
-				normal = skinned_normal.length_squared() > 0.0f ?
-						skinned_normal.normalized() : normal;
-			}
-		}
-		Vector2 uv = index < uvs.size() ? uvs[index] : Vector2();
-		if (p_source == Q3Source::Object) {
-			uv = Vector2(uv_u.x * uv.x + uv_u.y * uv.y + uv_u.z,
-					uv_v.x * uv.x + uv_v.y * uv.y + uv_v.z);
-		} else if (p_source == Q3Source::Water) {
-			const Vector2 relative(position.z - camera_position.z,
-					position.x - camera_position.x);
-			uv = relative * (water_uv.x / 128.0f) - Vector2(water_uv.y, water_uv.y) +
-					Vector2(water_uv.z, water_uv.w);
-		}
-		append_vec3(r_vertices, position);
-		append_vec3(r_vertices, normal);
-		append_vec2(r_vertices, uv);
-		append_color(r_vertices, index < colors.size() ? colors[index] : Color(1, 1, 1, 1));
-		const Vector4 c0 = custom_at(custom0, index);
-		const Vector4 c1 = custom_at(custom1, index);
-		const Vector4 c2 = custom_at(custom2, index);
-		append_f32(r_vertices, c0.x); append_f32(r_vertices, c0.y);
-		append_f32(r_vertices, c0.z); append_f32(r_vertices, c0.w);
-		append_f32(r_vertices, c1.x); append_f32(r_vertices, c1.y);
-		append_f32(r_vertices, c1.z); append_f32(r_vertices, c1.w);
-		append_f32(r_vertices, c2.x); append_f32(r_vertices, c2.y);
-		append_f32(r_vertices, c2.z); append_f32(r_vertices, c2.w);
-		append_vec2(r_vertices,
-				index < uv2s.size() ? uv2s[index] : Vector2());
-	}
-	return r_vertices.size() == static_cast<int64_t>(vertex_count) * kVertexStride;
-}
-
 Q3DeviceBlend blend_for(const Q3DrawCommand &p_command) {
 	switch (p_command.technique) {
 		case Q3Technique::NormalCopy:
@@ -765,15 +647,32 @@ public:
 	std::size_t registered_sources = 0;
 	std::size_t frustum_culled_sources = 0;
 	std::size_t frustum_culled_instances = 0;
+	// Per-frame packing work (0 packed vertices and 0 readbacks on a stable
+	// frame) beside the retained cache footprint.
 	std::size_t packed_vertices = 0;
 	std::size_t packed_vertex_bytes = 0;
+	std::size_t repacked_entries = 0;
+	std::size_t readbacks_this_frame = 0;
+	std::size_t cached_entries = 0;
+	std::size_t cached_vertex_bytes = 0;
+
+	// Main-thread geometry cache; its streams are shared immutably with the
+	// render side, which keeps one device buffer per entry below.
+	Q3GeometryCache geometry_cache;
+	struct DeviceGeometry {
+		RID buffer;
+		std::uint32_t capacity = 0;
+		std::uint64_t uploaded_generation = 0;
+	};
+	std::map<std::uint64_t, DeviceGeometry> device_geometry;
+	// The last frame the render side consumed: evictions minted at or before
+	// it have had their device buffers freed.
+	std::atomic<std::uint64_t> consumed_frame_id{0};
 
 	RenderingDevice *rd = nullptr;
 	RID shader;
 	RID sampler;
 	RID fallback_texture;
-	RID vertex_buffer;
-	std::uint32_t vertex_capacity = 0;
 	int64_t vertex_format = RenderingDevice::INVALID_FORMAT_ID;
 	TypedArray<RID> vertex_buffers;
 	PackedInt64Array vertex_offsets;
@@ -831,15 +730,22 @@ public:
 	void discard_device_state() {
 		transient_uniforms.clear();
 		pipelines.clear();
-		vertex_buffer = RID();
+		device_geometry.clear();
 		fallback_texture = RID();
 		sampler = RID();
 		shader = RID();
 		vertex_buffers.clear();
 		vertex_offsets.clear();
-		vertex_capacity = 0;
 		vertex_format = RenderingDevice::INVALID_FORMAT_ID;
 		rd = nullptr;
+	}
+
+	void release_device_geometry(std::uint64_t p_entry_id) {
+		const auto found = device_geometry.find(p_entry_id);
+		if (found == device_geometry.end())
+			return;
+		release_rid(found->second.buffer);
+		device_geometry.erase(found);
 	}
 
 	void release_device(RenderingDevice *p_rd) {
@@ -855,7 +761,8 @@ public:
 			release_uniform_rid(uniform);
 		for (auto &entry : pipelines)
 			release_pipeline_rid(entry.second);
-		release_rid(vertex_buffer);
+		for (auto &entry : device_geometry)
+			release_rid(entry.second.buffer);
 		release_texture_rid(fallback_texture);
 		release_rid(sampler);
 		release_rid(shader);
@@ -865,7 +772,7 @@ public:
 	bool initialize(RenderingDevice *p_rd);
 	RID pipeline_for(int64_t p_framebuffer_format,
 			const Q3DrawCommand &p_command);
-	bool ensure_vertices(const PackedByteArray &p_vertices);
+	bool upload_stream(const Q3PackedStream &p_stream);
 	RID make_uniform(const DeviceCommand &p_command);
 	bool draw(RenderData *p_render_data, std::uint32_t p_view,
 			const RID &p_framebuffer, std::size_t &r_draw_calls);
@@ -954,7 +861,7 @@ bool Q3FrameAdapter::Impl::initialize(RenderingDevice *p_rd) {
 		attribute->set_binding(0);
 		attribute->set_format(p_format);
 		attribute->set_offset(p_offset);
-		attribute->set_stride(kVertexStride);
+		attribute->set_stride(kQ3VertexStride);
 		attribute->set_frequency(RenderingDevice::VERTEX_FREQUENCY_VERTEX);
 		attributes.push_back(attribute);
 	};
@@ -1037,24 +944,31 @@ RID Q3FrameAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
 	return pipeline;
 }
 
-bool Q3FrameAdapter::Impl::ensure_vertices(const PackedByteArray &p_vertices) {
-	if (p_vertices.is_empty())
+// One device buffer per cache entry, uploaded only when the entry's packed
+// generation moved since the last upload (rigid and static entries therefore
+// upload once; skinned entries upload their fresh stream every frame).
+bool Q3FrameAdapter::Impl::upload_stream(const Q3PackedStream &p_stream) {
+	if (p_stream.bytes.is_empty())
 		return false;
-	const std::uint32_t required = static_cast<std::uint32_t>(p_vertices.size());
-	if (!vertex_buffer.is_valid() || required > vertex_capacity) {
-		release_rid(vertex_buffer);
-		vertex_capacity = std::max(required, vertex_capacity + vertex_capacity / 2u);
-		vertex_buffer = rd->vertex_buffer_create(vertex_capacity);
-		if (!vertex_buffer.is_valid()) {
-			set_failure("RenderingDevice could not allocate the focused Q3 vertex buffer");
+	DeviceGeometry &geometry = device_geometry[p_stream.entry_id];
+	const std::uint32_t required = static_cast<std::uint32_t>(p_stream.bytes.size());
+	if (!geometry.buffer.is_valid() || required > geometry.capacity) {
+		release_rid(geometry.buffer);
+		geometry.capacity = required;
+		geometry.uploaded_generation = 0;
+		geometry.buffer = rd->vertex_buffer_create(geometry.capacity);
+		if (!geometry.buffer.is_valid()) {
+			set_failure("RenderingDevice could not allocate a focused Q3 vertex buffer");
 			return false;
 		}
-		vertex_buffers[0] = vertex_buffer;
 	}
-	if (rd->buffer_update(vertex_buffer, 0, required, p_vertices) != OK) {
+	if (geometry.uploaded_generation == p_stream.generation)
+		return true;
+	if (rd->buffer_update(geometry.buffer, 0, required, p_stream.bytes) != OK) {
 		set_failure("RenderingDevice rejected the focused Q3 vertex upload");
 		return false;
 	}
+	geometry.uploaded_generation = p_stream.generation;
 	return true;
 }
 
@@ -1078,14 +992,25 @@ RID Q3FrameAdapter::Impl::make_uniform(const DeviceCommand &p_command) {
 bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 		const RID &p_framebuffer, std::size_t &r_draw_calls) {
 	const std::shared_ptr<const DeviceFrame> frame = frame_snapshot();
-	if (!frame || frame->commands.empty())
+	if (!frame)
+		return true;
+	// Evicted entries are named by every frame published until one is
+	// consumed, so freeing here can never race a later frame that draws them.
+	for (const std::uint64_t entry_id : frame->evicted_entries)
+		release_device_geometry(entry_id);
+	consumed_frame_id.store(frame->draw_list.frame_id, std::memory_order_release);
+	if (frame->commands.empty())
 		return true;
 	RenderSceneData *scene_data = p_render_data != nullptr ?
 			p_render_data->get_render_scene_data() : nullptr;
-	if (scene_data == nullptr || !ensure_vertices(frame->vertices)) {
-		if (scene_data == nullptr)
-			set_failure("Focused Q3 draw has no RenderSceneData");
+	if (scene_data == nullptr) {
+		set_failure("Focused Q3 draw has no RenderSceneData");
 		return false;
+	}
+	// Uploads precede the draw list: a buffer update inside one is rejected.
+	for (const DeviceCommand &command : frame->commands) {
+		if (!command.stream || !upload_stream(*command.stream))
+			return false;
 	}
 	for (RID &uniform : transient_uniforms)
 		release_uniform_rid(uniform);
@@ -1212,12 +1137,12 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 						draw.celestial.tint.z, opacity};
 				push.params[1] = draw.celestial.additive ? 1.0f : 0.0f;
 			}
-			vertex_offsets[0] = static_cast<int64_t>(command.first_vertex) *
-					kVertexStride;
+			vertex_buffers[0] = device_geometry[command.stream->entry_id].buffer;
+			vertex_offsets[0] = 0;
 			rd->draw_list_bind_render_pipeline(draw_list, pipeline);
 			rd->draw_list_bind_uniform_set(draw_list, uniform, 0);
 			rd->draw_list_bind_vertex_buffers_format(draw_list, vertex_format,
-					command.vertex_count, vertex_buffers, vertex_offsets);
+					command.stream->vertex_count, vertex_buffers, vertex_offsets);
 			PackedByteArray push_bytes;
 			push_bytes.resize(kPushConstantBytes);
 			std::memcpy(push_bytes.ptrw(), &push, sizeof(push));
@@ -1267,9 +1192,17 @@ Dictionary Q3FrameAdapter::Impl::report() const {
 			static_cast<int64_t>(frustum_culled_sources);
 	result["q3_frustum_culled_instances"] =
 			static_cast<int64_t>(frustum_culled_instances);
+	// Packed THIS frame (skinned re-skins included) versus the retained cache.
 	result["q3_packed_vertices"] = static_cast<int64_t>(packed_vertices);
 	result["q3_packed_vertex_bytes"] =
 			static_cast<int64_t>(packed_vertex_bytes);
+	result["q3_repacked_entries"] = static_cast<int64_t>(repacked_entries);
+	result["q3_readbacks_this_frame"] =
+			static_cast<int64_t>(readbacks_this_frame);
+	result["q3_cached_entries"] = static_cast<int64_t>(cached_entries);
+	result["q3_cached_vertex_bytes"] =
+			static_cast<int64_t>(cached_vertex_bytes);
+	result["q3_geometry_submission"] = "cached_per_source_surface_streams";
 	result["q3_static_instance_submission"] = "retained_transform_ranges";
 	result["q3_skinned_submission"] = "immutable_cpu_pose_snapshot";
 	return result;
@@ -1320,6 +1253,26 @@ void Q3FrameAdapter::register_source(GeometryInstance3D *p_source,
 			p_kind, 0};
 }
 
+void Q3FrameAdapter::publish_geometry(GeometryInstance3D *p_source,
+		int p_surface, const Array &p_arrays) {
+	if (p_source == nullptr || p_surface < 0)
+		return;
+	std::lock_guard<std::mutex> lock(g_registry_mutex);
+	PublishedGeometry &published =
+			g_published[{p_source->get_instance_id(), p_surface}];
+	published.arrays = Q3SurfaceArrays::from_mesh_arrays(p_arrays);
+	++published.generation;
+}
+
+void Q3FrameAdapter::invalidate_source(GeometryInstance3D *p_source) {
+	if (p_source == nullptr)
+		return;
+	std::lock_guard<std::mutex> lock(g_registry_mutex);
+	const auto found = g_sources.find(p_source->get_instance_id());
+	if (found != g_sources.end())
+		++found->second.generation;
+}
+
 void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		Camera3D *p_camera) {
 	if (!impl_ || p_scope == nullptr || p_viewport == nullptr || p_camera == nullptr) {
@@ -1328,6 +1281,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	}
 	std::vector<RegisteredQ3Source> registrations;
 	std::map<std::uint64_t, ObjectMaterialClassification> materials;
+	std::map<Q3GeometryCache::Key, PublishedGeometry> published;
 	{
 		std::lock_guard<std::mutex> lock(g_registry_mutex);
 		for (auto it = g_sources.begin(); it != g_sources.end();) {
@@ -1338,6 +1292,13 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 				++it;
 			}
 		}
+		for (auto it = g_published.begin(); it != g_published.end();) {
+			if (ObjectDB::get_instance(it->first.source_id) == nullptr)
+				it = g_published.erase(it);
+			else
+				++it;
+		}
+		published = g_published;
 		for (auto it = g_materials.begin(); it != g_materials.end();) {
 			// A cached ShaderMaterial may deliberately outlive every current
 			// source and later be reused. ObjectDB lifetime, not the live-source
@@ -1357,8 +1318,11 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	std::size_t cpu_skinned = 0;
 	std::size_t frustum_culled_sources = 0;
 	std::size_t frustum_culled_instances = 0;
-	std::size_t packed_vertices = 0;
-	std::size_t packed_vertex_bytes = 0;
+	Q3GeometryCache &cache = impl_->geometry_cache;
+	cache.begin_frame(snapshot.frame_id);
+	cache.prune([](std::uint64_t p_source_id) {
+		return ObjectDB::get_instance(p_source_id) != nullptr;
+	});
 	const CameraFrustum frustum = camera_frustum(p_camera, p_viewport);
 	for (const RegisteredQ3Source &registration : registrations) {
 		GeometryInstance3D *source = Object::cast_to<GeometryInstance3D>(
@@ -1403,15 +1367,19 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		AABB emitted_world_bounds;
 		bool has_emitted_world_bounds = false;
 		if (multimesh.is_valid()) {
-			const int visible = multimesh->get_visible_instance_count();
-			const int count = visible < 0 ? multimesh->get_instance_count() : visible;
-			emitted_transforms.reserve(count);
-			for (int instance = 0; instance < count; ++instance) {
-				const Transform3D transform = source->get_global_transform() *
-						multimesh->get_instance_transform(instance);
+			// Instance rows are read once per source generation; only the
+			// frustum test against them runs per frame.
+			const std::vector<Transform3D> &local_transforms =
+					cache.instance_transforms(registration.node_id,
+							registration.generation, multimesh.ptr());
+			const Transform3D source_transform = source->get_global_transform();
+			const AABB mesh_bounds = mesh->get_aabb();
+			emitted_transforms.reserve(local_transforms.size());
+			for (const Transform3D &local_transform : local_transforms) {
+				const Transform3D transform = source_transform * local_transform;
 				if (std::abs(transform.basis.determinant()) <= 1.0e-8f)
 					continue;
-				const AABB instance_world_bounds = transform.xform(mesh->get_aabb());
+				const AABB instance_world_bounds = transform.xform(mesh_bounds);
 				if (frustum.outside(instance_world_bounds)) {
 					++frustum_culled_instances;
 					continue;
@@ -1450,14 +1418,40 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			candidate.submission.submission_id = registration.node_id ^
 					(static_cast<std::uint64_t>(surface + 1) << 48u);
 			candidate.submission.source = registration.source;
-			candidate.submission.geometry = {object_id(mesh), snapshot.frame_id};
 			candidate.submission.material = lease_for(material);
 			candidate.submission.surface_index = surface;
-			if (!pack_surface(array_mesh->surface_get_arrays(surface), shader_material,
-					registration.source, p_camera, palette, candidate.vertices))
+			Q3GeometryCache::Request request;
+			request.key = {registration.node_id, surface};
+			request.source_generation = registration.generation;
+			const auto publication = published.find(request.key);
+			if (publication != published.end()) {
+				request.published = &publication->second.arrays;
+				request.published_generation = publication->second.generation;
+			}
+			request.pack.source = registration.source;
+			if (registration.source == Q3Source::Object) {
+				request.pack.uv_u = vector3_parameter(shader_material,
+						"u_uv_transform_u", Vector3(1, 0, 0));
+				request.pack.uv_v = vector3_parameter(shader_material,
+						"u_uv_transform_v", Vector3(0, 1, 0));
+			} else if (registration.source == Q3Source::Water) {
+				request.pack.water_uv = vector4_parameter(shader_material,
+						"u_water_uv", Vector4(1.0f, 0.2f, 0.0f, 0.0f));
+				request.pack.camera_position = p_camera->get_global_position();
+			}
+			request.skin_palette = palette.empty() ? nullptr : &palette;
+			candidate.stream = cache.acquire(request, [&]() {
+				return array_mesh->surface_get_arrays(surface);
+			});
+			if (!candidate.stream)
 				continue;
-			packed_vertex_bytes += candidate.vertices.size();
-			packed_vertices += candidate.vertices.size() / kVertexStride;
+			// The geometry lease is the cache entry and its packed generation;
+			// the snapshot publishes that generation so the compiler can hold
+			// the lease to it.
+			candidate.submission.geometry = {candidate.stream->entry_id,
+					candidate.stream->generation};
+			snapshot.resource_generations.push_back({candidate.stream->entry_id,
+					candidate.stream->generation});
 			candidate.submission.first_transform = snapshot.transforms.size();
 			if (multimesh.is_valid())
 				candidate.submission.geometry_kind = Q3GeometryKind::StaticInstances;
@@ -1587,20 +1581,24 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		if (draw.input_index >= candidates.size())
 			continue;
 		const Candidate &candidate = candidates[draw.input_index];
+		if (!candidate.stream ||
+				draw.geometry.generation != candidate.stream->generation)
+			continue;
 		DeviceCommand command;
 		command.draw = draw;
-		command.first_vertex = frame->vertices.size() / kVertexStride;
-		command.vertex_count = candidate.vertices.size() / kVertexStride;
+		command.stream = candidate.stream;
 		command.primary_texture_resource = candidate.primary_texture_resource;
 		command.secondary_texture_resource = candidate.secondary_texture_resource;
 		command.tertiary_texture_resource = candidate.tertiary_texture_resource;
 		command.primary_texture = candidate.primary_texture;
 		command.secondary_texture = candidate.secondary_texture;
 		command.tertiary_texture = candidate.tertiary_texture;
-		frame->vertices.append_array(candidate.vertices);
 		frame->commands.push_back(command);
 	}
+	frame->evicted_entries = cache.pending_evictions(
+			impl_->consumed_frame_id.load(std::memory_order_acquire));
 	impl_->publish(frame);
+	const Q3GeometryCache::FrameCounters &counters = cache.frame_counters();
 	{
 		std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
 		impl_->status = frame->commands.empty() ? "compiled_empty" : "compiled";
@@ -1612,8 +1610,12 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		impl_->registered_sources = registrations.size();
 		impl_->frustum_culled_sources = frustum_culled_sources;
 		impl_->frustum_culled_instances = frustum_culled_instances;
-		impl_->packed_vertices = packed_vertices;
-		impl_->packed_vertex_bytes = packed_vertex_bytes;
+		impl_->packed_vertices = counters.packed_vertices;
+		impl_->packed_vertex_bytes = counters.packed_vertex_bytes;
+		impl_->repacked_entries = counters.repacked_entries;
+		impl_->readbacks_this_frame = counters.readbacks;
+		impl_->cached_entries = cache.entry_count();
+		impl_->cached_vertex_bytes = cache.cached_vertex_bytes();
 	}
 }
 

@@ -90,14 +90,25 @@ inline constexpr float kQ3FarBandMinZ = 0.98000002f;
 inline constexpr float kQ3FarBandMaxZ = 0.99996948f;
 
 // An opaque portable identity, not a GPU handle. The adapter resolves the
-// resource by its id; every lease is currently minted at generation 1 (the
-// geometry lease carries the frame id), so `valid()` is the only check the
-// generation word serves today.
+// resource by its id. A geometry lease names the adapter's cache entry and
+// the packed generation the producer saw; the snapshot publishes the current
+// generation of every leased geometry resource (`resource_generations`) and
+// the compiler rejects a submission whose lease no longer matches it
+// (StaleResourceLease), so a frame never draws a stream its owner has since
+// re-packed or evicted. Material and texture leases are identity-only and
+// minted at generation 1.
 struct Q3ResourceLease {
 	std::uint64_t resource_id = 0;
 	std::uint64_t generation = 0;
 
 	bool valid() const { return resource_id != 0 && generation != 0; }
+};
+
+// The current generation of one leased resource, as published by its owner
+// for this frame. A resource absent from the table is not generation-checked.
+struct Q3ResourceGeneration {
+	std::uint64_t resource_id = 0;
+	std::uint64_t generation = 0;
 };
 
 struct Q3Vec2 {
@@ -202,6 +213,7 @@ struct Q3FrameSnapshot {
 	std::vector<Q3SubmissionSnapshot> submissions;
 	std::vector<Q3Matrix4> transforms;
 	std::vector<Q3Matrix4> bone_palette;
+	std::vector<Q3ResourceGeneration> resource_generations;
 };
 
 enum class Q3RejectReason : std::uint8_t {
@@ -212,6 +224,7 @@ enum class Q3RejectReason : std::uint8_t {
 	InvalidTransformRange = 4,
 	InvalidBoneRange = 5,
 	NonFiniteInput = 6,
+	StaleResourceLease = 7,
 };
 
 struct Q3RejectedSubmission {
@@ -244,6 +257,7 @@ struct Q3FrameDebugCounters {
 	std::size_t emitted_submissions = 0;
 	std::size_t rejected_submissions = 0;
 	std::size_t invalid_resource_submissions = 0;
+	std::size_t stale_lease_submissions = 0;
 	std::size_t unsupported_light_coronas = 0;
 	std::array<std::size_t, static_cast<std::size_t>(Q3Technique::Count)>
 			emitted_by_technique{};

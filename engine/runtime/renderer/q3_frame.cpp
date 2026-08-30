@@ -71,6 +71,18 @@ bool parameters_finite(const Q3SubmissionSnapshot &submission) {
 	return false;
 }
 
+// True when every published generation for the submission's geometry lease
+// still matches it. Only geometry rides the table today; leases whose
+// resource is not published pass unchecked.
+bool geometry_lease_current(const Q3SubmissionSnapshot &submission,
+		const std::vector<Q3ResourceGeneration> &generations) {
+	for (const Q3ResourceGeneration &published : generations) {
+		if (published.resource_id == submission.geometry.resource_id)
+			return published.generation == submission.geometry.generation;
+	}
+	return true;
+}
+
 bool resource_leases_valid(const Q3SubmissionSnapshot &submission) {
 	if (!submission.geometry.valid() || !submission.material.valid())
 		return false;
@@ -157,6 +169,8 @@ void reject(Q3DrawList &draw_list, std::size_t input_index,
 	++draw_list.debug.rejected_submissions;
 	if (reason == Q3RejectReason::InvalidResourceLease)
 		++draw_list.debug.invalid_resource_submissions;
+	if (reason == Q3RejectReason::StaleResourceLease)
+		++draw_list.debug.stale_lease_submissions;
 	if (submission.source == Q3Source::LightCorona)
 		++draw_list.debug.unsupported_light_coronas;
 }
@@ -197,6 +211,11 @@ const Q3DrawList &Q3FrameCompiler::compile(const Q3FrameSnapshot &snapshot) {
 										!submission.object.detail_texture.valid())))) {
 			reject(draw_list_, i, submission,
 					Q3RejectReason::InvalidResourceLease);
+			continue;
+		}
+		if (!geometry_lease_current(submission, snapshot.resource_generations)) {
+			reject(draw_list_, i, submission,
+					Q3RejectReason::StaleResourceLease);
 			continue;
 		}
 		const bool transform_shape_valid =

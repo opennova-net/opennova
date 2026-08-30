@@ -831,6 +831,10 @@ void Water::_rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
 					(Mesh::ARRAY_CUSTOM_RGBA_FLOAT
 							<< Mesh::ARRAY_FORMAT_CUSTOM2_SHIFT));
 	mesh->surface_set_material(0, water_material_);
+	// The NV Q3 redraw shares this strip: hand the arrays over so the focused
+	// Q3 cache re-packs them from memory instead of reading the freshly
+	// uploaded surface back through the server in the same frame.
+	FrameFx::publish_q3_geometry(mesh_instance_, 0, arrays);
 	// The witnessed per-side material swap: camera-above -> the blend
 	// material, underwater -> the opaque one — ported as the shader's
 	// u_underwater_view branch.

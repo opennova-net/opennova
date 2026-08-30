@@ -289,6 +289,49 @@ void check_multitexture_detail_contract() {
 	CHECK(draw.rejected[0].reason == Q3RejectReason::InvalidResourceLease);
 }
 
+void check_stale_geometry_leases_are_rejected() {
+	// The adapter publishes the current generation of every geometry entry it
+	// leased; a submission still holding an older (re-packed or evicted)
+	// generation must never reach the draw list. Unpublished resources are not
+	// generation-checked, so identity-only material/texture leases still pass.
+	Q3FrameSnapshot snapshot{};
+	snapshot.transforms.resize(3);
+
+	auto current = object_submission(60, "FF_ST_OP_LUM", 10.0f, 0, 1);
+	current.geometry = {900, 4};
+	snapshot.submissions.push_back(current);
+
+	auto stale = object_submission(61, "FF_ST_OP_LUM", 20.0f, 1, 1);
+	stale.geometry = {901, 2};
+	snapshot.submissions.push_back(stale);
+
+	auto unpublished = explicit_submission(62, Q3Source::Water, 2);
+	unpublished.geometry = {902, 1};
+	snapshot.submissions.push_back(unpublished);
+
+	snapshot.resource_generations.push_back({900, 4});
+	snapshot.resource_generations.push_back({901, 3});
+
+	Q3FrameCompiler compiler;
+	const Q3DrawList &draw = compiler.compile(snapshot);
+	CHECK(draw.commands.size() == 2);
+	CHECK(draw.commands[0].submission_id == 60);
+	CHECK(draw.commands[0].geometry.generation == 4);
+	CHECK(draw.commands[1].submission_id == 62);
+	CHECK(draw.rejected.size() == 1);
+	CHECK(draw.rejected[0].submission_id == 61);
+	CHECK(draw.rejected[0].reason == Q3RejectReason::StaleResourceLease);
+	CHECK(draw.debug.stale_lease_submissions == 1);
+	CHECK(draw.debug.invalid_resource_submissions == 0);
+
+	// The owner re-packs: the same lease is now stale and the frame drops it.
+	snapshot.resource_generations[0].generation = 5;
+	const Q3DrawList &next = compiler.compile(snapshot);
+	CHECK(next.commands.size() == 1);
+	CHECK(next.commands[0].submission_id == 62);
+	CHECK(next.debug.stale_lease_submissions == 2);
+}
+
 void check_shading_constants_are_engine_homed() {
 	// The device adapter splices these into its GLSL; the witnessed values
 	// live here [orig: Glass.fx TGlassFFP TECHNIQUE_GLOW;
@@ -321,6 +364,7 @@ int main() {
 	check_invisible_and_invalid_texture_paths();
 	check_object_blend_and_coverage_contracts();
 	check_multitexture_detail_contract();
+	check_stale_geometry_leases_are_rejected();
 
 	if (failures != 0) {
 		std::printf("renderer_q3_frame: %d failure(s)\n", failures);

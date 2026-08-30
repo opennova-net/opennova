@@ -1,9 +1,27 @@
 #include "mission/mission_object_placer.h"
 
+#include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include "mission/mission_object_placer_keys.h"
+#include "render/frame_fx.h"
+
+namespace {
+
+// A carve rewrote this binding's instance rows: the focused Q3 cache holds
+// them per source generation and must re-read them.
+void invalidate_bound_q3_source(const godot::ObjectID &p_instance_id) {
+	godot::GeometryInstance3D *instance =
+			godot::Object::cast_to<godot::GeometryInstance3D>(
+					godot::ObjectDB::get_instance(
+							static_cast<uint64_t>(p_instance_id)));
+	if (instance != nullptr) {
+		godot::FrameFx::invalidate_q3_source(instance);
+	}
+}
+
+} // namespace
 
 // The placer's read-back seams and destruction-support registry: static
 // user-point / item-effect / light-draw sources, static terrain-shadow
@@ -308,6 +326,7 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 			saved["index"] = binding.index;
 			originals.push_back(saved);
 			binding.multimesh->set_instance_transform(binding.index, carved);
+			invalidate_bound_q3_source(binding.instance_id);
 		}
 	}
 	hidden_destruction_instances_[p_bms_id] = originals;
@@ -330,6 +349,11 @@ bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
 		if (mm.is_valid() && index >= 0 && index < mm->get_instance_count()) {
 			mm->set_instance_transform(index,
 					saved.get("transform", Transform3D()));
+		}
+	}
+	if (const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id)) {
+		for (const DestructionBinding &binding : rec->bindings) {
+			invalidate_bound_q3_source(binding.instance_id);
 		}
 	}
 	hidden_destruction_instances_.erase(p_bms_id);

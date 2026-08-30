@@ -671,7 +671,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			p_source->set_meta("static_shadow_batch_key", group_key);
 		};
 		const auto bind_destruction_slots = [&](const Ref<MultiMesh> &p_mm,
-				const Vector<int> &p_slots) {
+				MultiMeshInstance3D *p_instance, const Vector<int> &p_slots) {
 			for (int local_index = 0; local_index < p_slots.size(); ++local_index) {
 				const int slot = p_slots[local_index];
 				if (slot < 0 || slot >= group.bms_ids.size()) {
@@ -685,6 +685,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				DestructionBinding binding;
 				binding.multimesh = p_mm;
 				binding.index = local_index;
+				binding.instance_id = ObjectID(p_instance->get_instance_id());
 				instance->bindings.push_back(binding);
 			}
 		};
@@ -774,7 +775,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				++binned_batch_count;
 				occupied_static_bins[static_batch_bin_key(p_bin_x, p_bin_z)] = true;
 			}
-			bind_destruction_slots(mm, p_slots);
+			bind_destruction_slots(mm, mmi, p_slots);
 
 			if (!has_static_shadow || all_static_shadow || p_batch.auxiliary_draw) {
 				return;
@@ -828,7 +829,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 									  p_bin_z, p_batch.submesh));
 			tag_static_shadow_source(shadow_mmi, p_slots);
 			container->add_child(shadow_mmi);
-			bind_destruction_slots(shadow_mm, p_slots);
+			bind_destruction_slots(shadow_mm, shadow_mmi, p_slots);
 		};
 		for (const StaticBatch &batch : batches) {
 			if (batch.blended_draw) {
