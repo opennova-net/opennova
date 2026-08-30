@@ -1,13 +1,180 @@
-// Minimal weapon.def for fixtures/minimal/ — one selectable rifle so a joined
-// player spawns with a weapon. Authored from scratch (no retail asset); parses
-// through libs/def def_parse_weapons. Grows only as host+join validation needs.
+// Minimal weapon.def -- the rifle a spawned player carries AND the first-person
+// viewmodel it submits. Authored from scratch (no retail asset); parses through
+// engine/formats/def def_parse_weapons.
+//
+// TWO entries for ONE rifle, because the engine addresses two weapon names by
+// LITERAL and a minimal set that wants an armed player with a visible viewmodel
+// has to answer both -- the same principle as items.def's reserved fixed ids:
+//
+//   WPN_M4AUTO     the spawn/equip default, resolved BY NAME at player spawn
+//                  [orig: PlayerClass_InitEntity @ 0x4B1116 ->
+//                  AvatarDef_FindIndexByName("WPN_M4AUTO")], and the fresh
+//                  profile's single-player + class pages
+//                  (engine/formats/playersav/weapon_sav.cpp). Without it the
+//                  player spawns with no weapon at all.
+//   WPN_AK47AUTO   the name the first-person viewmodel bring-up resolves
+//                  [GameWorld.local_player_viewmodel_def ->
+//                  Simulation.viewmodel_bringup_fallback_weapon]. Resolving the
+//                  def from the player's EQUIPPED weapon instead is the open
+//                  follow-up (docs/net/novaworld-net-re.md section 5.40); until it
+//                  lands, both names carry the same viewmodel rows so the two
+//                  paths agree on what is in the player's hands.
+//
+// The GFX1/GFX1A/ANIMADM/pos/TPOS row shapes are the witnessed REVX02 weapon.def
+// layout [orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers
+// @ 0x54476b/@ 0x54471f]. GFX1A is parse-and-discard in the original -- the
+// first-person arms come from the CHARACTER's arms model
+// [orig: Player_RenderFirstPersonViewModel @ 0x4ded60] -- and is carried for
+// retail-shape fidelity while Avatars.def is what actually supplies them.
+//
+// No PARTICLE rows: the set ships no .ptl catalogue yet, and an entry is not
+// carried ahead of the asset it names.
 ammoclass_max_carry CLASS_556MM		1000
 
-weapon "WPN_M4"
+weapon "WPN_M4AUTO"
 	category 1
 	rank     0
 	statid   100
 	ammo     AM_556MM
 	clip     30
 	maxclips 7
+
+	ANIMADM	AKM_1ST
+	GFX1	AKM_1st
+	GFX1A	ARMSG
+	pos		10.0		0.0		-201.0			0.0		0.0		1.0
+	TPOS	-28.046		21.531		-187.857		0.0		0.0		0.0
+
+	ACTION	"IDLE"
+	DELAYEND	auto
+	ANIM		ANIM_WPN_IDLE
+	FUNCTION	WPN_STD_IDLE
+	END
+
+	ACTION	"EMPTYIDLE"
+	DELAYEND	auto
+	ANIM		ANIM_WPN_IDLE
+	FUNCTION	WPN_STD_IDLE
+	END
+
+	ACTION	"FIRE"
+	DELAYEND	5
+	ANIM		ANIM_WPN_FIRE
+	FUNCTION	WPN_STD_FIRE
+	END
+
+	ACTION	"RECOIL"
+	DELAYEND	0
+	ANIM		ANIM_WPN_RECOIL
+	FUNCTION	WPN_STD_RECOIL
+	END
+
+	ACTION	"RELOAD"
+	DELAYSTART	196
+	DELAYEND	auto
+	ANIM		ANIM_WPN_RELOAD
+	FUNCTION	WPN_STD_RELOAD
+	END
+
+	ACTION	"EMPTY"
+	DELAYSTART	0
+	DELAYEND	auto
+	ANIM		ANIM_WPN_EMPTY
+	FUNCTION	WPN_STD_EMPTY
+	END
+
+	ACTION	"SWITCHTO"
+	DELAYSTART	1
+	DELAYEND	1
+	ANIM		ANIM_WPN_SWITCHRANK
+	FUNCTION	WPN_STD_SWITCHTO
+	END
+
+	ACTION	"SWITCHFROM"
+	DELAYSTART	1
+	DELAYEND	1
+	ANIM		ANIM_WPN_SWITCHFROM
+	FUNCTION	WPN_STD_SWITCHFROM
+	END
+
+	ACTION	"SWITCHRANK"
+	DELAYSTART	1
+	DELAYEND	1
+	ANIM		ANIM_WPN_SWITCHRANK
+	FUNCTION	WPN_STD_SWITCHRANK
+	END
+end
+
+weapon "WPN_AK47AUTO"
+	category 1
+	rank     0
+	statid   101
+	ammo     AM_556MM
+	clip     30
+	maxclips 7
+
+	ANIMADM	AKM_1ST
+	GFX1	AKM_1st
+	GFX1A	ARMSG
+	pos		10.0		0.0		-201.0			0.0		0.0		1.0
+	TPOS	-28.046		21.531		-187.857		0.0		0.0		0.0
+
+	ACTION	"IDLE"
+	DELAYEND	auto
+	ANIM		ANIM_WPN_IDLE
+	FUNCTION	WPN_STD_IDLE
+	END
+
+	ACTION	"EMPTYIDLE"
+	DELAYEND	auto
+	ANIM		ANIM_WPN_IDLE
+	FUNCTION	WPN_STD_IDLE
+	END
+
+	ACTION	"FIRE"
+	DELAYEND	5
+	ANIM		ANIM_WPN_FIRE
+	FUNCTION	WPN_STD_FIRE
+	END
+
+	ACTION	"RECOIL"
+	DELAYEND	0
+	ANIM		ANIM_WPN_RECOIL
+	FUNCTION	WPN_STD_RECOIL
+	END
+
+	ACTION	"RELOAD"
+	DELAYSTART	196
+	DELAYEND	auto
+	ANIM		ANIM_WPN_RELOAD
+	FUNCTION	WPN_STD_RELOAD
+	END
+
+	ACTION	"EMPTY"
+	DELAYSTART	0
+	DELAYEND	auto
+	ANIM		ANIM_WPN_EMPTY
+	FUNCTION	WPN_STD_EMPTY
+	END
+
+	ACTION	"SWITCHTO"
+	DELAYSTART	1
+	DELAYEND	1
+	ANIM		ANIM_WPN_SWITCHRANK
+	FUNCTION	WPN_STD_SWITCHTO
+	END
+
+	ACTION	"SWITCHFROM"
+	DELAYSTART	1
+	DELAYEND	1
+	ANIM		ANIM_WPN_SWITCHFROM
+	FUNCTION	WPN_STD_SWITCHFROM
+	END
+
+	ACTION	"SWITCHRANK"
+	DELAYSTART	1
+	DELAYEND	1
+	ANIM		ANIM_WPN_SWITCHRANK
+	FUNCTION	WPN_STD_SWITCHRANK
+	END
 end
