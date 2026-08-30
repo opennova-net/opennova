@@ -689,6 +689,13 @@ const std::vector<Recipe> &recipes() {
 			m.materials[0].u_params.style = 16;
 			m.materials[0].u_params.gen_rate = 1.0f;
 		}},
+		// --- render_swatch projshadow (render_swatch_pass_modes.gd): the _MT
+		// post alpha-tested so the slot capture's Diffuse2.a coverage is
+		// observable at the discard boundary ---
+		{"pump_mtrl1_mt_alphatest", make_pump, [](Model &m) {
+			m.materials[1].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
+			m.materials[1].alpha_test_value_byte = 32;
+		}},
 		// --- simulation_test.gd ---
 		{"mount_heat_glow_slide_part1", make_mount, [](Model &m) {
 			rename_register(m, 0, "HEAT_GLOW");

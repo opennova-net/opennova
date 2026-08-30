@@ -86,9 +86,14 @@ Lighting validation is layered:
    swatches, never catalog screenshots.
 5. Four pass-class modes complete the auxiliary matrix: `clip` proves the
    above-water reflection plane plus NORMAL fallback/skinned skip behavior;
-   `projshadow` proves retail-black output over the white slot clear, every
-   Diffuse1/Diffuse2/AlphaGen coverage contract, and the capture-camera
-   cull-mask gate; `matchterrain` proves stance, page residency,
+   `projshadow` proves the render-slot RenderingDevice pass
+   (`SlotCaptureAdapter`): retail-black output over the white slot clear,
+   the Diffuse1/Diffuse2/AlphaGen coverage contracts at the alpha-test
+   discard boundary and through the alpha-blend variant's gray, the
+   additive-LUM and glass no-pass surfaces, and the beauty frame keeping
+   NORMAL shading where the capture is black (the synthetic 3DI fixtures
+   stand in for the technique matrix, which ctest
+   `renderer_material_classify` pins per technique); `matchterrain` proves stance, page residency,
    coverage, and the exact `2 * tile.rgb * (HemiSky + tile.a * DirLight)`
    combine; `glow` proves LUM NORMAL-copy, Glass's rotated two-lobe sun glint,
    and every no-pass contract. The GLOW mode also asserts the typed focused-Q3

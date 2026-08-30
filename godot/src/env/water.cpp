@@ -110,8 +110,6 @@ void Water::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_SHADOW_CASTER_MASK", VISUAL_LAYER_SHADOW_CASTER_MASK);
 	ClassDB::bind_integer_constant(get_class_static(), "",
-			"VISUAL_LAYER_SLOT_CAPTURE_MASK", VISUAL_LAYER_SLOT_CAPTURE_MASK);
-	ClassDB::bind_integer_constant(get_class_static(), "",
 			"REFLECTION_CULL_MASK", REFLECTION_CULL_MASK);
 }
 

@@ -64,24 +64,15 @@ public:
 		VISUAL_LAYER_WORLD_NO_MIRROR = 1 << 16,
 		VISUAL_LAYER_SHADOW_CASTER_MASK = VISUAL_LAYER_STATIC_SHADOW_CASTER |
 				VISUAL_LAYER_DYNAMIC_SHADOW_CASTER,
-		// The twelve visual layers the object shaders' PROJSHAD capture
-		// signature reserves (shared.gdshaderinc obj_is_slot_shadow_capture:
-		// a camera culling to these alone renders the black silhouette
-		// branch). The live render-slot captures draw through SlotShadow's
-		// RenderingDevice pass and stamp no layer; only the render-swatch
-		// projshadow probe's capture camera culls to them today. Every
-		// beauty/mirror camera excludes them.
-		VISUAL_LAYER_SLOT_CAPTURE_MASK = (1 << 1) | (1 << 2) | (1 << 3) |
-				(1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8) |
-				(1 << 9) | (1 << 17) | (1 << 18) | (1 << 19),
 		// The mirror camera's above-water mask; a below-water view adds
-		// WORLD_NO_MIRROR back (retail collects unfiltered there).
+		// WORLD_NO_MIRROR back (retail collects unfiltered there). The
+		// render-slot captures draw through SlotShadow's RenderingDevice pass
+		// and reserve no visual layer.
 		REFLECTION_CULL_MASK = 0xFFFFF &
 				~(VISUAL_LAYER_WATER | VISUAL_LAYER_VIEWMODEL |
 						VISUAL_LAYER_FP_BODY_SHADOW_ONLY |
 						VISUAL_LAYER_SHADOW_CASTER_MASK |
-						VISUAL_LAYER_WORLD_NO_MIRROR |
-						VISUAL_LAYER_SLOT_CAPTURE_MASK),
+						VISUAL_LAYER_WORLD_NO_MIRROR),
 	};
 
 	void set_environment_path(const NodePath &p_path);

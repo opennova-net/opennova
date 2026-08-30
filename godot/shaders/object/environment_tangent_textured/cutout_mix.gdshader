@@ -6,7 +6,6 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_back;
 #define OBJ_COVERAGE_REFLECT_ALPHA
 #define OBJ_CLIP_NORMAL_FALLBACK
 #define OBJ_VERTEX_POINT_LIGHTS_SELF_SHADOWED_ATTENUATION
-#define OBJ_PROJSHAD_DIFFUSE_ALPHA
 #define OBJ_MATCHTERRAIN_NO_PASS
 
 #include "res://shaders/object/shared.gdshaderinc"

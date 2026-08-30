@@ -931,10 +931,12 @@ riders fold into the ancestor exclusion; the attached-light drape folds
 the light's attenuation at the entity into the per-slot term (retail
 varies it per patch vertex); and `scene_output` leaves the factor in
 the retail gamma-byte domain for the shared FrameFx display decode. The
-object shaders' `obj_is_slot_shadow_capture` branch (the twelve-layer
-camera signature) no longer serves a live camera; it remains for the
-render-swatch projshadow raster probe until its retirement regenerates the
-shader hash golden. The
+object wrappers carry no PROJSHAD branch (the twelve-layer capture-camera
+signature, its `OBJ_PROJSHAD_*` defines and the reserved `Water` layers
+were retired 2026-08-30 with the shader hash golden regenerated); the
+render-swatch `projshadow` probe now proves the RenderingDevice pass on the
+synthetic fixtures (opaque, alpha-tested single and _MT, alpha-blend, and
+the additive-LUM / glass no-pass surfaces) beside the beauty frame. The
 packaged runtime serves shadow detail 3, retail's highest SHADOWQUALITY
 (`options.mnu` rows 0..3; `Settings_ClampGraphicsOptions` clamps to 3
 `@ 0x54d546`; the 0x34-byte settings block copy `@ 0x551500` lands it in

@@ -34,19 +34,12 @@ global uniform bool opennova_environment_cube_ready;
 global uniform vec3 opennova_sun_light;
 global uniform vec3 opennova_sun_direction;
 
-// PROJSHAD capture cameras. Retail renders a black silhouette whose alpha is
-// Diffuse1.a (plus _FFP's optional Diffuse2.a and AlphaGenValue) before the
-// terrain drape samples it. Each of SlotShadow's twelve capture cameras culls
-// to exactly one reserved visual layer (Water::VISUAL_LAYER_SLOT_CAPTURE_MASK,
-// assigned per render order by slot_shadow.cpp kCaptureLayerBits), a
-// device signature no beauty, Q3, mirror, viewmodel, or environment-capture
-// camera carries, so the ordinary scene keeps NORMAL shading while those
-// viewports encode the same black-on-white coverage for the reimpl drape.
-// The pass needs only "is this a capture camera"; the drape binds each slot's
-// texture itself, so no slot index is derived here. [orig: vscPostBlackT1 /
-// vscSkinPostBlackT1; 16 TECHNIQUE_PROJSHAD declarations; shadow slot pass
-// RenderSlot_RenderEntityAndChildren @ 0x5d7690].
-const uint NOVA_SLOT_CAPTURE_LAYER_MASK = 918526u; // 0x000E03FE: layers 1-9, 17-19
+// The PROJSHAD pass (the render-slot black silhouette whose alpha is
+// Diffuse1.a, plus _FFP's optional Diffuse2.a and AlphaGenValue) is not a
+// branch of these wrappers: SlotShadow's RenderingDevice pass
+// (godot/src/render/slot_capture_adapter.cpp) draws it from the engine's
+// per-technique coverage and blend tables, so every camera that renders an
+// object wrapper renders its NORMAL technique.
 
 // The pass-global world lighting block. Retail builds ONE 32-float constant
 // block per scene pass from the five environment color blocks and stores it
@@ -194,22 +187,6 @@ void obj_apply_water_reflection_clip(vec3 camera_position_world) {
 		discard;
 	}
 	#endif
-}
-
-// A camera that culls to the reserved capture channels alone is one of the
-// SlotShadow capture cameras (set_cull_mask(kCaptureLayerBits[i])): the beauty
-// (0x18C01, which admits the viewmodel layer), mirror (0x8001 / 0x18001), and
-// environment-capture (0x400) cameras all carry bits outside that mask. One
-// uint test replaces twelve per-fragment eye distances. Godot leaves
-// CAMERA_VISIBLE_LAYERS unset for light shadow passes (RenderSceneDataRD
-// camera_visible_layers is never assigned in _render_shadow_append).
-bool obj_is_slot_shadow_capture(uint camera_visible_layers,
-		bool in_shadow_pass) {
-	if (in_shadow_pass) {
-		return false;
-	}
-	return camera_visible_layers != 0u &&
-			(camera_visible_layers & ~NOVA_SLOT_CAPTURE_LAYER_MASK) == 0u;
 }
 
 // Full D3D COUNT2 affine transform. Coefficient rows preserve SET, shear,

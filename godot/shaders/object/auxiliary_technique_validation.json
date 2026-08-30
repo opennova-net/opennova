@@ -53,14 +53,11 @@
         {"path": "engine/runtime/renderer/object_shader_template.cpp", "tokens": ["object_projected_shadow_policy", "ObjectProjectedShadowPolicy::MaterialBlend", "ObjectProjectedShadowPolicy::Opaque", "ObjectProjectedShadowPolicy::NoPass"]},
         {"path": "engine/runtime/terrain/terrain_static_shadow_geometry.cpp", "tokens": ["casts_projected_shadow", "vsSkinPostBlackT1", "CalcSkinWorldPosAndNormal"]},
         {"path": "engine/runtime/terrain/terrain_static_shadow_raster.cpp", "tokens": ["depth_buffer", "triangle.two_sided", "CULLMODE CCW"]},
-        {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["NOVA_SLOT_CAPTURE_LAYER_MASK", "obj_is_slot_shadow_capture(uint camera_visible_layers,"]},
-        {"path": "godot/shaders/object/output_opaque.gdshaderinc", "tokens": ["obj_is_slot_shadow_capture(CAMERA_VISIBLE_LAYERS,", "ALBEDO = vec3(0.0);"]},
-        {"path": "godot/shaders/object/sampling/single.gdshaderinc", "tokens": ["obj_proj_shadow_coverage"]},
+        {"path": "godot/src/render/q3_geometry_cache.cpp", "tokens": ["skin_channels", "transform_uv(uv2)"]},
         {"path": "engine/runtime/renderer/object_shader_template.cpp", "tokens": ["object_projected_shadow_coverage", "ObjectProjectedShadowCoverage::DiffuseAlphaFfp", "ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp", "ObjectProjectedShadowCoverage::DiffuseAlpha"]},
         {"path": "godot/src/render/slot_capture_adapter.cpp", "tokens": ["EFFECT_CALLBACK_TYPE_PRE_OPAQUE", "kSlotCaptureClearArgb", "RenderingDevice::TEXTURE_SAMPLES_4", "texture_resolve_multisample(", "frag_color = vec4(0.0, 0.0, 0.0, alpha);", "BLEND_FACTOR_SRC_ALPHA"]},
-        {"path": "godot/src/env/slot_shadow.cpp", "tokens": ["silhouette_capture_basis", "silhouette_capture_eye", "SlotCaptureRequest"]},
-        {"path": "godot/src/env/water.h", "tokens": ["VISUAL_LAYER_SLOT_CAPTURE_MASK", "PROJSHAD capture"]},
-        {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["black-on-white coverage", "capture_darkness", "PROJSHAD Diffuse1.a", "invented a PROJSHAD pass"]}
+        {"path": "godot/src/env/slot_shadow.cpp", "tokens": ["silhouette_capture_basis", "kSilhouetteCaptureNear", "SlotCaptureRequest"]},
+        {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["SlotShadow.new()", "get_capture_image(", "slot_no_pass_surfaces", "slot_blended_commands", "invented a PROJSHAD pass"]}
       ],
       "raster_probes": ["projshadow"],
       "bounded_residuals": []

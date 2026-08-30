@@ -6,7 +6,6 @@ render_mode unshaded, blend_add, depth_draw_never, cull_back;
 #define OBJ_COVERAGE_ZERO
 #define OBJ_CLIP_EXPLICIT
 #define OBJ_VERTEX_POINT_LIGHTS_NONE
-#define OBJ_PROJSHAD_DIFFUSE_ALPHA_FFP
 #define OBJ_MATCHTERRAIN_NO_PASS
 
 #include "res://shaders/object/shared.gdshaderinc"

@@ -32,14 +32,12 @@ func _ready() -> void:
 	_yaw = rotation.y
 	_pitch = rotation.x
 	_pivot = global_position - global_transform.basis.z * _distance
-	# A beauty camera: never draw the layer-hidden FP body or the object
-	# shaders' PROJSHAD signature layers (the local body is camera-renderable
-	# but hidden by LAYER — see LocalPlayerPresenter.setup()); the FP
-	# viewmodel layer stays admitted (its instances apply their own
-	# projection + depth band).
+	# A beauty camera: never draw the layer-hidden FP body or the caster
+	# marker layers (the local body is camera-renderable but hidden by LAYER,
+	# see LocalPlayerPresenter.setup()); the FP viewmodel layer stays admitted
+	# (its instances apply their own projection + depth band).
 	cull_mask = (cull_mask | Water.VISUAL_LAYER_VIEWMODEL) \
 			& ~(Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
-			| Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
 			| Water.VISUAL_LAYER_SHADOW_CASTER_MASK)
 
 func set_gameplay_locked(locked: bool) -> void:

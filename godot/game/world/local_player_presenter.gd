@@ -129,19 +129,17 @@ func setup(world: GameWorld, camera: Camera3D,
 	# layer stays ADMITTED: the FP arms/weapon draw inside the beauty pass
 	# through their shader-side renderfov projection + depth band (retail's
 	# "viewmodel first" step; PlayerViewmodelRig feeds the projection). The
-	# camera excludes the render-slot capture channels (the object shaders'
-	# PROJSHAD signature layers; no live camera culls to them) AND the caster
-	# marker layers: the entity-shadow shadow map is retired (the slot
-	# pipeline owns entity shadows), so nothing needs the caster markers
-	# beauty-admitted any more — and the FP body/held weapon are
-	# camera-renderable (cast ON, hidden by LAYER) so SlotShadow's device
-	# pass walks their visible geometry; an admitted caster marker would leak
-	# them into the beauty pass.
+	# camera excludes the caster marker layers: the entity-shadow shadow map
+	# is retired (the slot pipeline owns entity shadows through SlotShadow's
+	# RenderingDevice pass, which reserves no visual layer), so nothing needs
+	# the caster markers beauty-admitted any more — and the FP body/held
+	# weapon are camera-renderable (cast ON, hidden by LAYER) so that pass
+	# walks their visible geometry; an admitted caster marker would leak them
+	# into the beauty pass.
 	if _camera != null:
 		_camera.cull_mask = (
 				(_camera.cull_mask | Water.VISUAL_LAYER_VIEWMODEL)
 				& ~(Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
-						| Water.VISUAL_LAYER_SLOT_CAPTURE_MASK
 						| Water.VISUAL_LAYER_SHADOW_CASTER_MASK))
 	_viewmodel_rig.setup(world, self, camera)
 	_reset_state()
