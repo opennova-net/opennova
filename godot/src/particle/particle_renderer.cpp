@@ -607,6 +607,14 @@ public:
 	std::int32_t fog_type = 1;
 
 	Impl() {
+		create_effects();
+	}
+
+	// A fresh compositor set: the constructor's, and the replacement a
+	// re-entering renderer needs. release_device_resources() retires an
+	// effect for good (its render callback never runs again), so a renderer
+	// that left the tree can only render again through new effects.
+	void create_effects() {
 		for (Ref<ParticleCompositorEffect> &effect : world_effects)
 			effect.instantiate();
 		for (Ref<ParticleCompositorEffect> &effect : reflection_effects)
@@ -1432,13 +1440,35 @@ void ParticleRenderer::_bind_methods() {
 }
 
 void ParticleRenderer::_notification(int p_what) {
-	if (p_what == NOTIFICATION_READY) {
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		_restore_device_state();
+	} else if (p_what == NOTIFICATION_READY) {
 		impl_->ensure_visuals(this);
 		set_process(false);
 		render_now();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		shutdown();
 	}
+}
+
+// The re-entry half of the EXIT_TREE/shutdown contract (the same shape
+// DisplayDecode follows: release on exit, recreate on entry). A renderer that
+// left the tree, or was released explicitly, holds retired compositor effects
+// and a latched shutdown_; entering the tree again replaces the effects and
+// clears the latch so the next render_now attaches and publishes as on the
+// first entry. The retained CPU state (catalog, atlas snapshot, first-person
+// batch child) is untouched: the new effects re-upload from it on publish.
+void ParticleRenderer::_restore_device_state() {
+	if (!shutdown_)
+		return;
+	shutdown_ = false;
+	if (!impl_)
+		return;
+	impl_->create_effects();
+	for (Ref<ParticleCompositorEffect> &effect : impl_->world_effects)
+		effect->set_particles_hidden(hidden_);
+	for (Ref<ParticleCompositorEffect> &effect : impl_->reflection_effects)
+		effect->set_particles_hidden(hidden_);
 }
 
 void ParticleRenderer::_invalidate_catalog() {
@@ -1774,6 +1804,7 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	result["reflection_compositor_inherited_effects"] =
 			impl_->inherited_reflection_compositor;
 	result["world_mesh_instance"] = false;
+	result["shutdown"] = shutdown_;
 	result["water_height"] = water_height_;
 	Dictionary environment_fog;
 	environment_fog["color"] = Vector3(impl_->fog_color[0],

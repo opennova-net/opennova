@@ -78,6 +78,7 @@ add_library(${TARGET_NAME} SHARED
     particle/particle_compositor.cpp
     particle/particle_renderer.cpp
     render/frame_fx.cpp
+    render/object_lod_frame.cpp
     render/q3_frame_adapter.cpp
     render/q3_geometry_cache.cpp
     object/entity_index.cpp

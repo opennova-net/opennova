@@ -296,18 +296,22 @@ static uint64_t panm_ctrl_hash(const GlobalCtrlValues &values) {
 
 // (Re)build the lod-fixed evaluation state after an invalidation or LOD swap.
 // The next evaluation after this re-arms a full apply (time sentinel).
-bool ObjectData::_panm_cache_prepare(int p_lod_index) const {
+ObjectData::PanmEvalCache *ObjectData::_panm_cache_prepare(
+		int p_lod_index) const {
 	if (!has_source_model || source_model.lods == nullptr || p_lod_index < 0 ||
 			static_cast<size_t>(p_lod_index) >= source_model.lod_count) {
-		return false;
+		return nullptr;
 	}
 	const ThreediLod &lod = source_model.lods[p_lod_index];
 	if (lod.render_object_count == 0 || lod.render_objects == nullptr) {
-		return false;
+		return nullptr;
 	}
-	PanmEvalCache &c = panm_cache_;
+	if (panm_caches_.size() < source_model.lod_count) {
+		panm_caches_.resize(source_model.lod_count);
+	}
+	PanmEvalCache &c = panm_caches_[static_cast<size_t>(p_lod_index)];
 	if (c.valid && c.lod == p_lod_index) {
-		return true;
+		return &c;
 	}
 	c.lod = p_lod_index;
 	c.time_ms = INT64_MIN; // sentinel: next evaluation marks every part changed
@@ -346,16 +350,17 @@ bool ObjectData::_panm_cache_prepare(int p_lod_index) const {
 	}
 	c.part_transforms.assign(lod.render_object_count, Transform3D());
 	c.part_revision.assign(lod.render_object_count, 0);
-	return true;
+	return &c;
 }
 
 int64_t ObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 		const Dictionary &p_ctrl_values, const Array &p_nodes,
 		int64_t p_applied_revision) const {
-	if (!_panm_cache_prepare(p_lod_index)) {
+	PanmEvalCache *cache = _panm_cache_prepare(p_lod_index);
+	if (cache == nullptr) {
 		return 0;
 	}
-	PanmEvalCache &c = panm_cache_;
+	PanmEvalCache &c = *cache;
 	const ThreediLod &lod = source_model.lods[p_lod_index];
 	const GlobalCtrlValues ctrl_table =
 			global_control_values_from_dict(p_ctrl_values);
@@ -363,7 +368,7 @@ int64_t ObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 	const bool first_eval = c.time_ms == INT64_MIN;
 	if (first_eval || c.has_noise ||
 			c.time_ms != p_time_ms || c.ctrl_hash != ctrl_hash) {
-		++c.evaluation_serial;
+		++panm_evaluation_serial_;
 		if (!c.anims.empty()) {
 			threedi_panm_build_node_matrices(c.anims.data(), c.anims.size(),
 					c.pivots.data(), nullptr, c.base_transforms.data(), nullptr,
@@ -408,7 +413,7 @@ int64_t ObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 }
 
 int64_t ObjectData::get_panm_evaluation_serial() const {
-	return static_cast<int64_t>(panm_cache_.evaluation_serial);
+	return static_cast<int64_t>(panm_evaluation_serial_);
 }
 
 Array ObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const {

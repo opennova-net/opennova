@@ -60,8 +60,11 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Simulation.viewmodel_fallback_rot_bias_deg(
 # @0x4dee29 / restore 0.2 @0x4df0aa, fov = WeaponDef+0x148 @0x4dee71 -> h->v conversion in
 # Render_SetViewAndProjectionMatrices @0x58d900, depth remap Render_SetViewportDepth01 @0x58a7b0;
 # default 80.0 = flt_7D1898 stored by AdmDef_InitEntryDefaults @0x53ff31; parser key 'renderfov'
-# @0x54482a]. Ported as a SubViewport sharing the world, camera cull-masked to the viewmodel
-# layer, composited over the finished frame (the depth-remap's visible equivalent).
+# @0x54482a]. Ported as a fold into the beauty pass: the viewmodel parts ride their own visual
+# layer (the beauty camera admits it, the mirror/Q3/capture cameras exclude it) and every
+# flagged instance applies the renderfov focal ratio plus the near depth band in the object
+# shaders (shaders/viewmodel_pass.gdshaderinc, fed by _update_viewmodel_projection) - the
+# depth-remap's visible equivalent, drawn into the same frame as the world.
 var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := Simulation.weapon_render_fov_h_deg_default()
 # (near-z lives engine-side: Simulation.viewmodel_pass_near_z())
 const CTRL_OWNER_FP_HEAT := "first_person:heat"

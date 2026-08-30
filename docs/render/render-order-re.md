@@ -70,15 +70,30 @@ sets flags bit 0 (CLIP) on the pushed entry and copies `g_WaterMirrorMatrix
 mirrored-pass clip machinery (env #30).
 
 **Object RLOD selection.** The input to the authored RLOD table is the model
-bound sphere projected into screen pixels, represented as Q16.16. The table is
-ordered fine/near to coarse/far; threshold slot 0 is unused, comparison starts
-at slot 1, and equality advances to the coarser level. The selected level is
-clamped to the final row, then a missing model walks back toward lower indices
-(finer geometry). The frame multiplier used by the highest shipped profile is
-`2.0 * 640 / viewport_width`; the selector also returns the normalized overlap
-fraction between its current and next thresholds. `[orig: object RLOD selector
-@ 0x5c3b20, projected-radius producer @ 0x4115e0, frame scale
-@ 0x5c9440..0x5c9499]`
+bound sphere projected into screen pixels, represented as Q16.16: the point
+projector computes `2^32 / depth`, `(focal << 16) * that + 0x8000 >> 16`,
+then `radius * that + 0x8000 >> 16`, and reports a fixed 4096 px when the
+depth is smaller than the radius. The sector-entity draw returns before the
+selector when that radius is at most 0.75 px (49152). The table is ordered
+fine/near to coarse/far; threshold slot 0 is unused, comparison starts at
+slot 1, and equality advances to the coarser level. The selected level is
+clamped to the final row; on the final row (or a row whose next threshold
+is zero) the UNSCALED radius must also exceed the row's threshold, or the
+level one finer is drawn and the blend's far threshold is rescaled by
+1/scale. The submit then walks a missing model back toward lower indices
+(finer geometry). The frame multiplier is the detail profile's quality term
+(`detail * 0.33 + 0.34`, replaced by the fixed 2.0 on the highest shipped
+profile 3) over the viewport width, times 640; a nonzero capture-quality
+override (`dword_B4C3C0`, an input-binding toggle that also forces the 512
+reflection target and a full cubemap refresh) substitutes 4.0 and is not
+modelled. The selector also returns the normalized overlap fraction between
+its current and next thresholds. `[orig: object RLOD selector @ 0x5c3b20,
+back-off @ 0x5c3b88..0x5c3b9b; sub-pixel gate and level consumption
+render_sector_entity @ 0x5c42de..0x5c42f0; projected-radius producer
+Viewport_TransformAndClipPoint @ 0x41177a..0x4117ec; frame scale
+Terrain_RenderSceneWithReflection @ 0x5c940c..0x5c9499 and
+Terrain_CollectVisibleEntitiesForReflection @ 0x5c90c3..0x5c9121; override
+writers @ 0x5c08d1, @ 0x6106cb]`
 
 **Submission.** `Render_SubmitEntity @ 0x5dad80`: stamps the shader clock
 globals (`GetTickCount`, seconds = `(tick % 0xFA000) · 0.001` → `flt_272140C`),
@@ -361,8 +376,8 @@ pure functions in `engine/runtime/renderer/render_order.{h,cpp}`:
 | D-RORD-6 | Not reproduced | two original key quirks: opaque key bits 15+ carry residual stack garbage (`@ 0x5d92b9`), and the transparent key lags one strip within a render object (`@ 0x5d9326` vs the `fst @ 0x5d9347` overwrite) | PERMANENT-candidates (original-bug/garbage class): reproducing either manufactures garbage (ADR 0022) |
 | D-RORD-7 | Two immutable main-view particle submissions use the exact emitter-scope water predicate: strict `< water` below, equality above, with far/camera order reversing at the main eye. Pass A is the PRE_TRANSPARENT compositor callback (before every transparent, water included) and pass B the POST_TRANSPARENT one; the mirror pair is consecutive after reflected geometry, selected by the main-camera side. Far-side object ALPHA strips therefore draw AFTER pass A | two calls to the global particle manager: pass A between far-side transparents and water, pass B after camera-side transparents (`[orig: Terrain_RenderSceneWithReflection @0x5c93a0; EffectWorld_RenderParticlePass @0x5f7240; CParticleGroup_RenderChildren @0x5e5890]`). Reflection receives the main-camera `< water` boolean and calls its two particle passes consecutively after reflected geometry (`[orig: render_main_scene @0x5c16ed..0x5c171f; Water_RenderReflectedWorldScene @0x5c8510]`) | OPEN (bounded) — the residual is a submerged/far-side transparent strip overlapping a far-side particle in screen space (strip-over-particle instead of particle-over-strip). The 2026-08-22 auxiliary far-alpha view closed it at the price of a second full-resolution scene render every frame and was withdrawn 2026-08-23; `framefx_test.gd` keeps the water-attenuation differential (far packet attenuated by water, camera packet not). The portable adversarial sorter contract separately pins retail's projected Z→X→Y recursive leaves and non-stable equal-key order (D-PTL-21 fixed). Reopen only with a scene that shows the strip/particle overlap |
 | D-RORD-8 | FIXED 2026-08-12. `GameFramePipeline` now runs session tick → local-view placement → terrain → foliage → the remaining device legs. Terrain samples the live viewport camera internally and foliage receives `GameWorld._render_camera_xform()`, so both compile from the view this frame's player state produced; foliage retains the frame-entry transform when no live camera exists, while terrain has no headless draw. Occlusion's post-present slot stands — present re-asserts base visibility, occlusion layers hides, Godot renders after both | collect-then-submit runs inside the render frame, before submission, against the view built from current player state (`Render_ProcessMainSceneFrame @0x5ca0f0`) | MATCHING for the camera-phase contract; `game_frame_pipeline_test` pins the order and a post-present camera-generation marker for both terrain and foliage |
-| D-RORD-10 | The Q3 bloom source was a second shared-world scene submission that rerasterized terrain/opaque depth occluders at kernel size | retail draws Q3 objects, NV water, celestial bodies, and sun glow into a backbuffer-sized altbuffer with beauty depth-stencil still bound; the only consumer is the StretchRect into the power-of-two capture (`[orig: FrameFX_RenderBloomPass @ 0x582940; FrameFX_CreateAltBufferTexture altbuffer CreateRenderTarget @ 0x58217e; create_frame_effect_render_targets @ 0x583c40; FrameFX_CaptureRenderTarget @ 0x584020]`) | **FIXED (2026-08-29)** — `Q3FrameCompiler` retains the retail bracket and typed generation-bound inputs; the terminal compositor draws them into one full-resolution Q3 attachment sharing resolved beauty depth from a retained per-source geometry cache (no per-frame server readback or re-upload). No auxiliary camera/view, camera-mask shader selection, or depth rerasterization remains |
-| D-RORD-11 | The exact authored RLOD selector is ported and all levels remain retained, but a threshold crossing hard-switches visibility. The portable result exposes the witnessed overlap fraction without consuming it | retail dual-submits the far level and then the near level through the transition band, marking the second submission with repeat-draw flag `0x10000000` and using the overlap fraction | OPEN (bounded) — only the authored transition band can visibly pop. The hard switch avoids overlapping retained draws; implement the dual submission only if a captured retail scene demonstrates a material difference |
+| D-RORD-10 | The Q3 bloom source was a second shared-world scene submission that rerasterized terrain/opaque depth occluders at kernel size | retail draws Q3 objects, NV water, celestial bodies, and sun glow into a backbuffer-sized altbuffer with beauty depth-stencil still bound; the only consumer is the StretchRect into the power-of-two capture (`[orig: FrameFX_RenderBloomPass @ 0x582940; FrameFX_CreateAltBufferTexture altbuffer CreateRenderTarget @ 0x58217e; create_frame_effect_render_targets @ 0x583c40; FrameFX_CaptureRenderTarget @ 0x584020]`) | **FIXED (2026-08-29)** — `Q3FrameCompiler` retains the retail bracket and typed generation-bound inputs; the terminal compositor draws them into one full-resolution Q3 attachment sharing resolved beauty depth. No auxiliary camera/view, camera-mask shader selection, or depth rerasterization remains |
+| D-RORD-11 | The authored RLOD selector, its coarsest-slot back-off, the frame scale, the integer projected radius and the sub-pixel cull are ported and every level remains retained (individual models and the per-instance static populations alike), but a threshold crossing hard-switches which level is drawn. The portable result exposes the witnessed overlap fraction without consuming it | retail dual-submits the far level and then the near level through the transition band, marking the second submission with repeat-draw flag `0x10000000` and using the overlap fraction | OPEN (bounded) — only the authored transition band can visibly pop. The hard switch avoids overlapping retained draws; implement the dual submission only if a captured retail scene demonstrates a material difference |
 | D-RORD-9 | The underwater murk quad is a `PlayerViewEffects` overlay after the shared-world `ViewmodelPass` (CanvasLayer 0) and behind the HUD (CanvasLayer 1), so it correctly covers scene + weapon and excludes HUD; it currently also covers the reimpl's 3D celestial/glow. `PlayerViewEffects` is created with the local-player HUD, so no-local-player/spectator views currently receive no murk quad | retail draws the source-over murk quad after the viewmodel/world/weather/foliage and then draws sun glow bright on top (`[orig: @ 0x5c96c5..0x5c9714]`) | MATCHING for CP01 and the registered full-frame fixtures, whose capture contract requires a spawned local player and HUD; OPEN bounded residuals are glare ordering and generic spectator/no-local-player parity |
 
 ## IDB changes made during the session

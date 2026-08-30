@@ -1,8 +1,9 @@
 extends GutTest
 
-# Mission ObjectModels retain all authored RLODs and switch visibility in place;
-# closed OOBJ faces become Godot occluders without replacing the retail section
-# mask owner.
+# Mission ObjectModels retain all authored RLODs and switch visibility in place
+# (each model only for its own instances); eligible OOBJ faces become Godot
+# occluders without replacing the retail section mask owner, and without the
+# model touching its viewport.
 
 const PUMP_3DI := "res://../fixtures/threedi/synth/pump.3di"
 const ARMORY_3DI := "res://../fixtures/threedi/synth/armory.3di"
@@ -87,11 +88,43 @@ func test_preview_lod_switch_keeps_the_single_lod_memory_contract() -> void:
 				"the preview still retains only its selected level")
 
 
+func test_nested_model_keeps_its_instances_across_the_parent_lod_switch() -> void:
+	# A husk graft is built as a child of its intact building and an avatar
+	# head under its body: each model owns only its own retained instances, so
+	# the parent's level switch must not hide a nested model's geometry.
+	var parent := ObjectModel.new()
+	add_child_autofree(parent)
+	parent.set_authored_lod_enabled(true)
+	parent.set_object_data(_data(PUMP_3DI))
+	var lod_count := int(parent.get_object_data().get_summary().get("lod_count", 0))
+	assert_gt(lod_count, 1, "the parent carries multiple authored RLODs")
+	if lod_count <= 1:
+		return
+	var child := ObjectModel.new()
+	parent.add_child(child)
+	child.set_authored_lod_enabled(true)
+	child.set_object_data(_data(ARMORY_3DI))
+	var child_instances := _lod_instances(child)
+	assert_gt(child_instances.size(), 0, "the nested model retains tagged instances")
+	var child_level := child.get_active_lod()
+	var visible_before := _visible_lod_count(child_instances, child_level)
+	assert_gt(visible_before, 0, "the nested model's selected level starts visible")
+
+	parent.set_active_lod(1)
+	assert_eq(parent.get_active_lod(), 1)
+	assert_eq(child.get_active_lod(), child_level,
+			"the parent's switch never selects for the nested model")
+	assert_eq(_visible_lod_count(child_instances, child_level), visible_before,
+			"the nested model's instances keep their visibility across the parent's switch")
+	assert_eq(_visible_lod_count(_lod_instances(parent).filter(
+			func(instance: GeometryInstance3D) -> bool:
+				return not child.is_ancestor_of(instance)), 0), 0,
+			"the parent's own finer level is hidden")
+
+
 func test_closed_authored_records_create_section_owned_occluders() -> void:
 	var viewport := get_viewport()
 	var viewport_was_enabled := viewport.use_occlusion_culling
-	var viewport_occlusion_supported := DisplayServer.get_name() != "headless" \
-			and RenderingServer.get_rendering_device() != null
 	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_authored_occluders_enabled(true)
@@ -99,10 +132,11 @@ func test_closed_authored_records_create_section_owned_occluders() -> void:
 	var occluders := model.find_children("AuthoredOccluder_Section*",
 			"OccluderInstance3D", true, false)
 	assert_gt(occluders.size(), 0,
-			"closed armory OOBJ records become ArrayOccluder3D instances")
-	assert_eq(viewport.use_occlusion_culling,
-			viewport_was_enabled or viewport_occlusion_supported,
-			"authored occluders activate Godot culling only on an RD-backed viewport")
+			"eligible armory OOBJ records become ArrayOccluder3D instances")
+	assert_eq(model.get_authored_occluder_count(), occluders.size(),
+			"the world reads the retained occluder count to decide on culling")
+	assert_eq(viewport.use_occlusion_culling, viewport_was_enabled,
+			"a model never flips its viewport's occlusion consumer; the world owns that")
 	for node in occluders:
 		var instance := node as OccluderInstance3D
 		assert_not_null(instance.occluder, "the retained instance owns geometry")

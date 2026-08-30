@@ -19,6 +19,9 @@ extends Node3D
 #     audio, env overrides) before loading another mission or leaving.
 
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
+# Godot's per-geometry reservation in the global shader buffer (vec4 values) for
+# a shader that declares instance uniforms; see _instance_uniform_geometry_estimate.
+const INSTANCE_UNIFORM_VALUES_PER_GEOMETRY := 16
 const GameFramePipelineScript := preload("res://game/world/game_frame_pipeline.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
@@ -649,6 +652,8 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	options["progress"] = func() -> void: load_progress.emit(
 			MissionData.load_progress_percent(MissionData.LOAD_STAGE_OBJECTS))
 	_mission_stats = _placer.place(mission, self, options)
+	_apply_occlusion_culling_policy(
+			int(_mission_stats.get("authored_occluder_models", 0)))
 	# Static tile shadows are composed from the placer's resolved ObjectData and
 	# exact entity transforms. Attach only after place() has finished building
 	# that immutable mission snapshot; Terrain invalidates any pre-placement
@@ -661,6 +666,20 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 		int(_mission_stats.unresolved),
 		int(_mission_stats.markers),
 	])
+
+
+## Godot's occlusion consumer is a world-level decision: on only while the
+## loaded mission placed authored OOBJ occluders (a conservative second layer
+## under the retail section/portal verdict, docs/render/render-occlusion-re.md
+## "Conservative device occluders") and only on an RD-backed viewport, since
+## headless and Compatibility expose no occlusion path. Unload switches it off;
+## no ObjectModel flips viewport state.
+func _apply_occlusion_culling_policy(authored_occluder_models: int) -> void:
+	var viewport := get_viewport() if is_inside_tree() else null
+	if viewport == null:
+		return
+	viewport.use_occlusion_culling = authored_occluder_models > 0 \
+			and RenderingServer.get_rendering_device() != null
 
 
 func get_loaded_mission() -> MissionData:
@@ -739,6 +758,7 @@ func unload() -> void:
 	# This also invalidates pages composed with the departing caster snapshot.
 	if _terrain != null:
 		_terrain.set_static_shadow_placer(null)
+	_apply_occlusion_culling_policy(0)
 	var container := get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		container.queue_free()
@@ -1622,6 +1642,11 @@ func render_material_frame() -> void:
 		var viewport_size := viewport.get_visible_rect().size
 		ObjectModel.update_authored_lods(camera.global_transform, camera.fov,
 				viewport_size.x, viewport_size.y)
+		# The retained static instances select their RLOD per entity from the
+		# same camera frame (the placer rewrites only the slots that crossed).
+		if _placer != null:
+			_placer.update_static_lods(camera.global_transform, camera.fov,
+					viewport_size.x, viewport_size.y)
 	if not _frame_stats_on:
 		ObjectModel.advance_awake_frame(_frame_delta)
 		return
@@ -1767,6 +1792,8 @@ func _sync_runtime_profiling() -> void:
 
 
 func get_runtime_perf_counters() -> Dictionary:
+	var foliage_backend: Dictionary = (
+			_dispatcher.get_backend_report() if _dispatcher != null else {})
 	return {
 		"tick_us": _perf_tick_us,
 		"foliage_us": _perf_foliage_us,
@@ -1774,11 +1801,40 @@ func get_runtime_perf_counters() -> Dictionary:
 		"audio_us": _perf_audio_us,
 		"runtime": _runtime.get_perf_counters() if _runtime != null else {},
 		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
-		"foliage_backend": _dispatcher.get_backend_report() \
-				if _dispatcher != null else {},
+		"foliage_backend": foliage_backend,
 		"framefx": _framefx.get_backend_report() if _framefx != null else {},
 		"mission_placement": _mission_stats.duplicate(true),
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
+		"instance_uniform_geometry_estimate":
+				_instance_uniform_geometry_estimate(foliage_backend),
+	}
+
+
+# Godot reserves INSTANCE_UNIFORM_VALUES_PER_GEOMETRY vec4 values of the global
+# shader buffer for every geometry instance whose shader declares instance
+# uniforms, visible or not, and prints "Too many instances using shader
+# instance variables. Increase buffer size in Project Settings." once the
+# buffer_size budget is exhausted (16384 instances with the project's setting;
+# shader_resource_validation_test.gd pins it). Godot does not expose the live
+# allocation, so this sums the retained instance-uniform geometry the shell
+# itself owns: the foliage draw pools (FoliageDispatcher), the placer's static
+# populations (visible batches plus their shadow twins), and every surface
+# instance of every live ObjectModel scene. Terrain patches, water, and the
+# per-model shadow twins the placer parents under animated models are not
+# counted: read the total as a floor on the allocation, not the exact figure.
+func _instance_uniform_geometry_estimate(foliage_backend: Dictionary) -> Dictionary:
+	var foliage_pool := int(foliage_backend.get("pool_size", 0))
+	var static_populations := (int(_mission_stats.get("batches", 0))
+			+ int(_mission_stats.get("static_shadow_batches", 0)))
+	var object_geometry := int(ObjectModel.get_live_geometry_instance_count())
+	var buffer_size := int(ProjectSettings.get_setting(
+			"rendering/limits/global_shader_variables/buffer_size", 0))
+	return {
+		"total": foliage_pool + static_populations + object_geometry,
+		"budget": buffer_size / INSTANCE_UNIFORM_VALUES_PER_GEOMETRY,
+		"foliage_pool": foliage_pool,
+		"static_populations": static_populations,
+		"object_geometry": object_geometry,
 	}
 
 

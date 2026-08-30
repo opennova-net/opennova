@@ -43,6 +43,7 @@ private:
 	std::vector<Node *> warm_nodes_;
 
 	void _invalidate_catalog();
+	void _restore_device_state();
 
 protected:
 	static void _bind_methods();
@@ -79,6 +80,9 @@ public:
 	void warm_pipelines(const Vector3 &p_position);
 	void clear_warm_pipelines();
 	// Process-exit boundary for compositor callbacks and device-owned effects.
+	// EXIT_TREE calls it too; the retired effects and the latch it leaves
+	// behind are undone by the next ENTER_TREE (fresh effects, latch cleared),
+	// so a renderer removed from and re-added to the tree renders again.
 	void shutdown();
 
 	// Compiles the latest fixed-tick scene snapshot for both render domains and

@@ -21,6 +21,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "object/object_shader_cache.h"
+#include "render/object_lod_frame.h"
 #include <runtime/renderer/object_lod.h>
 #include <runtime/renderer/render_order.h>
 
@@ -151,6 +152,7 @@ ObjectModel::~ObjectModel() {
 	}
 	match_terrain_models_.erase(this);
 	authored_lod_models_.erase(this);
+	retire_geometry_instances();
 }
 
 void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
@@ -779,65 +781,71 @@ HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
 HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
 uint64_t ObjectModel::lifetime_generation_ = 0;
+int64_t ObjectModel::live_geometry_instance_count_ = 0;
+
+void ObjectModel::retire_geometry_instances() {
+	live_geometry_instance_count_ -= geometry_instance_count_;
+	geometry_instance_count_ = 0;
+}
 
 int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 		float p_vertical_fov_degrees,
 		float p_viewport_width,
 		float p_viewport_height) {
-	if (authored_lod_models_.is_empty() || p_viewport_width <= 0.0f ||
-			p_viewport_height <= 0.0f) {
+	if (authored_lod_models_.is_empty()) {
 		return 0;
 	}
-	const float half_fov =
-			Math::deg_to_rad(CLAMP(p_vertical_fov_degrees, 1.0f, 179.0f)) * 0.5f;
-	const float focal_pixels = p_viewport_height * 0.5f / Math::tan(half_fov);
-	// Retail's highest shipped detail profile uses the fixed 2.0 quality
-	// multiplier then normalizes the projection to a 640-wide viewport.
-	// The portable selector owns the retail witness for this frame scale.
-	const float projection_scale = 2.0f * 640.0f / p_viewport_width;
-	const Vector3 forward = -p_camera_transform.basis.get_column(2).normalized();
-	LocalVector<ObjectModel *> batch;
-	batch.reserve(authored_lod_models_.size());
-	for (ObjectModel *model : authored_lod_models_) {
-		batch.push_back(model);
+	// The frame scale, the projected radius and the selector are engine facts
+	// (runtime/renderer/object_lod.h); the frame struct converts the camera.
+	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
+			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
+	if (!frame.valid) {
+		return 0;
 	}
-	int changed = 0;
-	for (ObjectModel *model : batch) {
-		if (!authored_lod_models_.has(model) || !model->is_inside_tree() ||
-				!model->is_visible_in_tree()) {
+	// The cheap math runs over the registered set in place; a level change is
+	// applied after the walk so set_active_lod's runtime-state refresh never
+	// runs against the set being iterated. Nothing allocates while no model
+	// crosses a threshold.
+	struct LodSwitch {
+		ObjectModel *model = nullptr;
+		int lod_index = 0;
+	};
+	LocalVector<LodSwitch> switches;
+	for (ObjectModel *model : authored_lod_models_) {
+		if (!model->is_inside_tree()) {
 			continue;
 		}
-		const float depth =
-				forward.dot(model->get_global_position() - p_camera_transform.origin);
+		const Transform3D world = model->get_global_transform();
 		const float source_radius =
 				model->model_sphere_radius_ > 0.0f
 				? model->model_sphere_radius_
 				: model->model_bounds_.get_longest_axis_size() * 0.5f;
-		const Basis model_basis = model->get_global_basis();
-		const float uniform_scale = std::max({
-				model_basis.get_column(0).length(),
-				model_basis.get_column(1).length(),
-				model_basis.get_column(2).length()});
-		const float radius = source_radius * uniform_scale;
-		const float projected_pixels =
-				depth > 0.0001f
-				? radius * focal_pixels / depth
-				: static_cast<float>(std::numeric_limits<int16_t>::max());
-		const double projected_q16 =
-				Math::round(static_cast<double>(projected_pixels) * 65536.0);
-		const int32_t bounded_q16 = static_cast<int32_t>(CLAMP(
-				projected_q16, static_cast<double>(std::numeric_limits<int32_t>::min()),
-				static_cast<double>(std::numeric_limits<int32_t>::max())));
+		const float radius =
+				source_radius * ObjectLodFrame::uniform_scale(world.basis);
+		int32_t projected_q16 = 0;
+		// A model outside the frustum keeps its level: retail never reaches the
+		// selector for an entity its collector rejected.
+		if (!frame.project(world.origin, radius, projected_q16)) {
+			continue;
+		}
 		const opennova::renderer::ObjectLodSelection selection =
 				opennova::renderer::select_object_lod(
-						model->authored_lod_thresholds_q16_, bounded_q16, projection_scale,
-						model->authored_lod_available_);
-		if (selection.lod_index >= 0 && selection.lod_index != model->active_lod_) {
-			model->set_active_lod(selection.lod_index);
-			++changed;
+						model->authored_lod_thresholds_q16_, projected_q16,
+						frame.projection_scale, model->authored_lod_available_);
+		if (selection.lod_index < 0 || selection.lod_index == model->active_lod_) {
+			continue;
 		}
+		// The tree-visibility walk only for the models that actually cross: a
+		// hidden model re-selects on the frame it becomes visible.
+		if (!model->is_visible_in_tree()) {
+			continue;
+		}
+		switches.push_back(LodSwitch{ model, selection.lod_index });
 	}
-	return changed;
+	for (const LodSwitch &change : switches) {
+		change.model->set_active_lod(change.lod_index);
+	}
+	return static_cast<int>(switches.size());
 }
 
 void ObjectModel::advance_awake_frame(double p_delta) {
@@ -1083,6 +1091,7 @@ void ObjectModel::_notification(int p_what) {
 			awake_models_.erase(this);
 		}
 		alpha_strip_models_.erase(this);
+		retire_geometry_instances();
 	}
 }
 
@@ -1166,6 +1175,12 @@ void ObjectModel::refresh_retained_lod_visibility() {
 		stack.remove_at(stack.size() - 1);
 		for (int i = 0; i < parent->get_child_count(); ++i) {
 			Node *child = parent->get_child(i);
+			// Each model owns only its own retained instances: a nested model (a
+			// husk graft under its intact building, an avatar head under the
+			// body) selects its level for itself and keeps its instances.
+			if (Object::cast_to<ObjectModel>(child) != nullptr) {
+				continue;
+			}
 			stack.push_back(child);
 			GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(child);
 			if (geometry == nullptr || !geometry->has_meta("_opennova_lod_index")) {
@@ -1552,6 +1567,9 @@ void ObjectModel::_bind_methods() {
 					"camera_transform", "vertical_fov",
 					"viewport_width", "viewport_height"),
 			&ObjectModel::update_authored_lods);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("get_live_geometry_instance_count"),
+			&ObjectModel::get_live_geometry_instance_count);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
 			&ObjectModel::is_runtime_frame_awake);
 	ClassDB::bind_method(D_METHOD("get_scene_build_serial"),
@@ -1623,6 +1641,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_authored_occluders_enabled);
 	ClassDB::bind_method(D_METHOD("are_authored_occluders_enabled"),
 			&ObjectModel::are_authored_occluders_enabled);
+	ClassDB::bind_method(D_METHOD("get_authored_occluder_count"),
+			&ObjectModel::get_authored_occluder_count);
 	ClassDB::bind_method(D_METHOD("rebuild"), &ObjectModel::rebuild);
 	ClassDB::bind_method(D_METHOD("advance_runtime_frame", "delta"),
 			&ObjectModel::advance_runtime_frame);
