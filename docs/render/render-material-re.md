@@ -293,7 +293,15 @@ keeps the byte-faithful OED dump values; the runtime-corrected words live on
 `TSSAlpha(0, Modulate, Texture, Diffuse)` (+ the same on stage 1 vs Current
 for `_MT`), FFP `Lighting = TRUE` with MaterialDiffuse `(1,1,1, AlphaGenValue)`
 + MaterialEmissive `AmbientColor` — SELFLUM swaps to Emissive
-`SelfLumColor x ColorSrcGlobalGain` with black diffuse/ambient. Blend per
+`SelfLumColor x ColorSrcGlobalGain` with black diffuse/ambient, and its
+`MaterialDiffuse = float4(ColorSrcZero, 0)` carries a ZERO alpha: the alpha
+stage stays `TSSAlpha(0, Modulate, Texture, Diffuse)`, so a SELFLUM fragment's
+alpha is texture alpha x 0 and an alpha-tested SELFLUM never passes the
+ref-128 test (confirmed 2026-08-29 against the decoded `_FFP.fx` P0 block,
+the SELFLUM material triple at its lines 167..171 versus the lit
+`float4(1,1,1, AlphaGenValue)` diffuse at 173; the beauty wrappers'
+`OBJ_COVERAGE_ZERO` and the Q3 NormalCopy's coverage 0 are that witness, not
+the texture alpha). Blend per
 variant: `_OP` FALSE/ONE/ZERO + FOGMODE_NORMAL + usevs (the spotlight
 ladder); `_AB` SRCALPHA/INVSRCALPHA; `_AD` ONE/ONE + FOGMODE_NORMALADD
 (black fog fades additive out). Opaque-only spotlight decomposition
