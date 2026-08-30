@@ -74,6 +74,15 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                  world::World &world);
 
+// Mutate an already-added authoritative player between the ordinary body and
+// retail spectator state. The connection flag is serialized by S2C 0x75; the
+// neutral/hidden entity keeps its roster identity while simulation continues.
+// Disabling respawns through the ordinary marker chain. Authority-only.
+// [orig: Server_PlayerAdd @0x51cbc0; NapiNPClientMsg_SetSpectatorMode
+// @0x4259e0; Entity_UpdateInfantryPlayerBody @0x4b40e0]
+bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
+		world::World &world, bool spectator);
+
 // Synthetic in-process peer admit WITHOUT a handshake — an owner/test hook (the Godot binding's
 // admit_test_remote_peer). Spawns a pool-0 REMOTE player at `spawn` (net_id forced to 0 — a player
 // carries no SSN, D-NET-112; identity is handle + ownerConnectionId), registers (or reuses) a type-1

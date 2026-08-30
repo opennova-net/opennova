@@ -32,6 +32,7 @@ public:
 	const EntitiesWindow &entities_window() const { return *entities_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
+	void set_game_spectator_state(bool available, bool active);
 	void set_game_input_mode(GameInputMode mode);
 	void reset_game_input_mode();
 	void request_game_escape();

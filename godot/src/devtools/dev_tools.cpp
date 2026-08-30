@@ -106,6 +106,7 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 		frame_stats_->add(FrameStats::FRAME_DEBUG_REFRESH, p_layout_us);
 	}
 	apply_game_requests();
+	sync_game_spectator_state();
 	apply_debug_requests();
 	push_entity_directory();
 	if (open_ && !tools_->pass().is_open()) {
@@ -225,8 +226,24 @@ void DevTools::apply_game_requests() {
 			case opennova::devtools::GameWindowRequest::CloseTools:
 				set_open(false);
 				return;
+			case opennova::devtools::GameWindowRequest::EnableSpectator:
+			case opennova::devtools::GameWindowRequest::DisableSpectator: {
+				Simulation *sim = simulation();
+				if (sim != nullptr && !sim->is_joiner()) {
+					(void)sim->set_local_spectator(
+							request == opennova::devtools::GameWindowRequest::EnableSpectator);
+				}
+				break;
+			}
 		}
 	}
+}
+
+void DevTools::sync_game_spectator_state() {
+	Simulation *sim = simulation();
+	const bool available = sim != nullptr && !sim->is_joiner() && sim->has_local_player();
+	tools_->set_game_spectator_state(
+			available, sim != nullptr && sim->is_local_spectator());
 }
 
 void DevTools::draw(int p_requested_width, int p_requested_height) {
@@ -270,6 +287,7 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 		// window left open never shows a dead world's rows.
 		tools_->set_entity_directory(opennova::devtools::EntityDirectorySnapshot{});
 	}
+	sync_game_spectator_state();
 }
 
 // Drain the F3 windows' typed mutation requests into the SAME engine-backed

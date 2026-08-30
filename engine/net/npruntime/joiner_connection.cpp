@@ -295,6 +295,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	max_player_slot_ = 0;
 	spawn_ = SelfSpawn{};
 	assigned_team_ = 0; // re-latched from the fresh session's S2C 0x04 (the kit seam persists);
+	spectator_mode_ = false;
 	                    // zero like retail's byte_A85B48 until the assignment arrives
 	class_allow_mask_ = 0x03FFu; // replaced by the fresh session's S2C 0x76
 	current_player_class_ = 0;
@@ -392,6 +393,16 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			character_join_vars_.avatar[0] != 0);
 	append_profile_value("VCB", character_join_vars_.avatar[1],
 			character_join_vars_.avatar[1] != 0);
+	// Spectator is opt-in. Keeping both fields absent for Player preserves the
+	// captured retail player-join bytes exactly.
+	// [orig: CNapiServerInfo_SerializeToSession @0x4c3650 writes JSR/JSPP]
+	if (join_role_ == JoinRole::Spectator) {
+		auth.cu.push_back(make_client_cu_chunk(2, "JSR", "1"));
+		if (!spectator_password_.empty()) {
+			auth.cu.push_back(make_client_cu_chunk(
+					2, "JSPP", spectator_password_));
+		}
+	}
 	for (const auto &field : {
 			std::pair{"TZB", "300"},
 			std::pair{"MPS", "1300"},
@@ -574,7 +585,16 @@ void JoinerConnection::on_server_auth(
 	// handshake is not this connection's failure.
 	if (sa.ci != client_index_ || sa.ck != client_key_) return;
 	if (sa.cr != 1) {
-		fail("ServerAuth rejected (cr != 1)");
+		switch (sa.jfc) {
+		case 14: fail("Spectators are disabled on this server"); break;
+		case 15: fail("The spectator slots are full"); break;
+		case 16: fail("The spectator password is incorrect"); break;
+		case 4:
+		case 5: fail("The server is full"); break;
+		default:
+			fail(!sa.jfs.empty() ? sa.jfs : "ServerAuth rejected");
+			break;
+		}
 		return;
 	}
 	conn_.server_sk = sa.sk;      // session_id for our outbound 0x43s
@@ -839,7 +859,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE &&
 		    m.tag == s2c::WORLD_STATE_LOAD && m.payload.size() > 22) {
 			deployment_policy_seen_ = true;
-			deployment_pick_required_ = (m.payload[22] & 0x01u) != 0;
+			deployment_pick_required_ =
+					join_role_ != JoinRole::Spectator && !spectator_mode_ &&
+					(m.payload[22] & 0x01u) != 0;
 		}
 	}
 	auto release_deployment = [&](bool deployment_complete) {
@@ -1189,6 +1211,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// 0x04, and its subsequent 0x2F copies this value verbatim.
 			// [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890 writes playerSlot+416;
 			// NapiNPClientMsg_SetSpectatorMode @0x425A32]
+			if (!m.payload.empty()) spectator_mode_ = (m.payload[0] & 1u) != 0;
 			if (m.payload.size() >= 2) assigned_team_ = m.payload[1];
 		} else if (m.tag == s2c::TEAM_ASSIGN) {
 			// S2C 0x50 TEAM ASSIGN — the SECOND witnessed writer of the byte_A85B48

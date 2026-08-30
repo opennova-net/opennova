@@ -412,6 +412,7 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		int32_t computed_score = 0;
 		row.slot = c.reply.player_slot;
 		row.team = team;
+		row.spectator = c.link.spectator;
 		if (world != nullptr) {
 			if (const world::MatchPlayer *player =
 					world->match.player(c.link.owned_entity)) {
@@ -477,6 +478,12 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	}
 	frame.in_game_count = static_cast<uint8_t>(
 			std::min<size_t>(frame.players.size(), 0xFFu));
+	frame.spectator_count = static_cast<uint8_t>(std::min<size_t>(
+			std::count_if(rows.begin(), rows.end(),
+					[](const ScoredPlayerListEntry &entry) {
+						return entry.row.spectator;
+					}),
+			0xFFu));
 	return encode_player_list(frame);
 }
 
@@ -786,7 +793,7 @@ std::vector<uint8_t> build_tag75_player_state(
 		if (const world::Entity *entity = world->registry.get(conn.link.owned_entity))
 			team = entity->team;
 	}
-	return {0x00, team}; // spectator slots are not modeled yet
+	return {static_cast<uint8_t>(conn.link.spectator ? 0x01u : 0x00u), team};
 }
 
 // tag=0x02 GLB_JOIN admission boundary. [orig: NapiNPServerMsg_0x002 @0x512FD0 emits
@@ -823,7 +830,7 @@ bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
                              std::vector<NapiNPConnection> &roster,
                              world::World *world, std::vector<ProtocolMessage> &out) {
 	const uint8_t capacity =
-			static_cast<uint8_t>(cfg.max_players < 251 ? cfg.max_players : 251); // [orig @0x24c0ca4]
+			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig @0x24c0ca4]
 	const std::optional<uint8_t> player_slot =
 			Server_ReservePlayerSlot(roster, conn, capacity);
 	if (!player_slot.has_value()) return false;
@@ -900,7 +907,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const std::vector<NapiNPConnection> &roster, world::World *world) {
 	std::vector<ProtocolMessage> messages;
 	const uint8_t capacity = static_cast<uint8_t>(
-			config.max_players < 251 ? config.max_players : 251);
+			config.total_player_slot_capacity());
 	const std::optional<uint8_t> player_slot =
 			Server_ReservePlayerSlot(roster, conn, capacity);
 	if (!player_slot.has_value()) return messages;
@@ -1527,15 +1534,17 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// slot list and NO state write — no class stamp, no damage-class table, no
 				// phase-8 gate, no retained body [orig: @0x5158a9 / @0x515fa5, both
 				// `return Server_SendWeaponSlotListToPlayer(player)`].
-				if (!loadout_envelope_accepted(req, config.game_type)) {
+				if (!conn.link.spectator &&
+				    !loadout_envelope_accepted(req, config.game_type)) {
 					replies.push_back(make_protocol_message(
 							0x5A, build_current_loadout_reply(
 										  st.last_loadout_reply,
 										  current_player_class(conn, world), armory)));
 					break;
 				}
-				const GrantedWeaponLoadout grant =
-						grant_weapon_loadout(req, config.class_allow_mask, armory);
+				const GrantedWeaponLoadout grant = conn.link.spectator
+						? GrantedWeaponLoadout{}
+						: grant_weapon_loadout(req, config.class_allow_mask, armory);
 				// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
 				// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
 				st.last_loadout_reply = encode_weapon_loadout(grant.reply);

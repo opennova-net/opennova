@@ -31,6 +31,8 @@
 //                               (derived from the mission).
 //   --lan-mode <1..4>           host LAN rate mode (the witnessed holdoffs).
 //   --lan-max-players <1..64>   listen-host capacity.
+//   --spectator                 request the spectator role when joining.
+//   --spectator-password <text> spectator password for that join request.
 //   --callsign <name>           the local player's callsign (wire clamp applies).
 //   --integrity-profile <name>  the session's integrity profile.
 //   --capture-pcap <path>       record this session's datagrams to a pcap.
@@ -63,6 +65,8 @@ struct LaunchFlags {
     int lan_gametype = -1;         // --lan-gametype; -1 = auto (>= 0 accepted)
     int lan_mode = 0;              // --lan-mode; 0 = unset (1..4 accepted)
     int lan_max_players = 0;       // --lan-max-players; 0 = unset (1..64 accepted)
+    bool spectator = false;        // --spectator
+    std::string spectator_password;// --spectator-password <text>
     std::string callsign;          // --callsign <name>
     std::string integrity_profile; // --integrity-profile <name>
     std::string capture_pcap;      // --capture-pcap <path>

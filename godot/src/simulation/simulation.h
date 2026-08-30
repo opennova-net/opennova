@@ -612,6 +612,8 @@ private:
 	// turns it on; a sim is host XOR joiner. [orig: NapiNPClientMsg_0x00C @0x42E730 self name-match]
 	bool joiner_ = false;
 	bool joiner_net_diagnostics_ = false;
+	opennova::np::JoinRole join_role_ = opennova::np::JoinRole::Player;
+	std::string join_spectator_password_;
 	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): the frame
 	// sequence, its latches (started/spawned/redeploy/tripwire), the
 	// wire-header materializer, and the per-replica resolver state all live in
@@ -1054,8 +1056,12 @@ public:
 	// we self-identify (name-match) and learn our wire handle H. Call BEFORE loading
 	// the mission (the next load arms the joiner frame path). Implies client replicas;
 	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
-	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
+	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name,
+			int p_join_role = 0,
+			const String &p_spectator_password = String());
 	bool is_joiner() const { return joiner_; }
+	bool is_local_spectator() const;
+	bool set_local_spectator(bool p_spectator);
 	// The client-local death screen latch (retail g_death_screen_active): the
 	// pass-level gate of the friendly-tags walks and the camera arbiter's
 	// sub-mode source. Fed by the local-player view (simulation_player_view.cpp).

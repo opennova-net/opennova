@@ -366,6 +366,8 @@ std::function<void()> Simulation::role_bringup_hook() {
 			// not started yet and retain the historical fresh-runtime reset.
 			if (!joiner_bridge_.started() || !runtime_) {
 				runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
+				runtime_->set_join_request(
+						join_role_, join_spectator_password_);
 				joiner_environment_revision_seen_ = 0;
 				joiner_bridge_.reset_for_runtime_rebuild();
 				install_charattr_challenge_table();

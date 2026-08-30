@@ -339,6 +339,9 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 	target.host_ip = "127.0.0.1"
 	target.port = 9
 	target.server_name = "shutdown barrier probe"
+	# This fixture exercises shutdown during an already-decided player join;
+	# unknown direct targets now perform spectator discovery before loading.
+	target.role_explicit = true
 	var weak_target: WeakRef = weakref(target)
 	_shell.join_lan_server(target)
 	assert_true(_shell.is_world_loading(),

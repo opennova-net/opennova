@@ -74,6 +74,7 @@ var debug_body_in_first_person := false
 # one override. Never a gameplay key.
 var debug_third_person := false
 var _camera_saved_cull_mask := -1
+var _spectator_active := false
 
 
 # The sim, re-resolved per use: mission reloads free the runtime and its sim,
@@ -315,8 +316,28 @@ func after_world_tick() -> void:
 		if _weapon_effects != null:
 			_weapon_effects.reset()
 		_view = null
+		_set_spectator_camera_active(false)
 		return
 	_view = _world.local_player_view()
+	if is_local_spectator():
+		# The first spectator frame starts at the last authoritative player
+		# camera pose (or the spectator entity's initial pose on a fresh join).
+		# Subsequent frames belong wholly to FlyCamera: never stamp them back
+		# onto the hidden team-0 entity.
+		if not _spectator_active:
+			_stamp_camera_pose()
+		_set_spectator_camera_active(true)
+		set_fly_camera_locked(false)
+		_input_router.release_mouse_capture()
+		clear_models()
+		_set_world_nvg_view(false, 0)
+		if _world != null:
+			_world.drain_local_player_weapon_events()
+		if _weapon_effects != null:
+			_weapon_effects.reset()
+		_third_person = true
+		return
+	_set_spectator_camera_active(false)
 	# The camera mode is the sim's resolved word (the arbiter ran this tick).
 	_third_person = _view != null and _presents_third_person(_view)
 	_set_world_nvg_view(_view != null and _view.nvg_visible,
@@ -337,7 +358,7 @@ func after_world_tick() -> void:
 # user points their production-tick pose; mission/vehicle Nodes retain the
 # render-frame-batched present path that prevents 00TRa transform flicker.
 func _present_fixed_weapon_tick(events: Array[PlayerWeaponEvent]) -> void:
-	if not has_player():
+	if not has_player() or is_local_spectator():
 		return
 	var weapon_view: PlayerWeaponView = _world.local_player_weapon_view()
 	if events.is_empty():
@@ -373,6 +394,7 @@ func _reset_state() -> void:
 		_weapon_effects.reset()
 	_input_router.reset()
 	_view = null
+	_set_spectator_camera_active(false)
 	_set_world_nvg_view(false, 0)
 	var sim := _sim()
 	if sim != null:
@@ -391,6 +413,11 @@ func has_player() -> bool:
 		return false
 	var sim := _sim()
 	return sim != null and sim.has_local_player()
+
+
+func is_local_spectator() -> bool:
+	var sim := _sim()
+	return sim != null and sim.is_local_spectator()
 
 
 ## The model lifetime around the input router's before-tick sample: build the
@@ -419,6 +446,14 @@ func clear_models() -> void:
 func set_fly_camera_locked(locked: bool) -> void:
 	if _fly_camera != null:
 		_fly_camera.set_gameplay_locked(locked)
+
+
+func _set_spectator_camera_active(active: bool) -> void:
+	if active == _spectator_active:
+		return
+	_spectator_active = active
+	if _fly_camera != null:
+		_fly_camera.set_spectator_mode(active)
 
 
 # The crosshair's witnessed anchor. First person PINS the exact screen center — the
@@ -601,6 +636,18 @@ func _update_player_camera() -> void:
 		return
 	var sim := _sim()
 	var pos: Vector3 = sim.get_local_player_position() if sim != null else Vector3.ZERO
+	_stamp_camera_pose()
+	_update_scope_camera()
+	_update_avatar(pos)
+	_update_model_lighting_context()
+	_viewmodel_rig.update_viewmodel(_view,
+			_weapon_effects.weapon_view() if _weapon_effects != null else null,
+			_third_person, debug_force_viewmodel)
+
+
+func _stamp_camera_pose() -> void:
+	if _camera == null:
+		return
 	if _view != null and _view.camera_pose_valid:
 		var forward := Simulation.presentation_forward(
 				_view.camera_yaw_deg, _view.camera_pitch_deg)
@@ -612,12 +659,6 @@ func _update_player_camera() -> void:
 		if absf(_view.camera_roll_deg) > 0.001:
 			_camera.rotate_object_local(
 					Vector3(0, 0, -1), deg_to_rad(_view.camera_roll_deg))
-	_update_scope_camera()
-	_update_avatar(pos)
-	_update_model_lighting_context()
-	_viewmodel_rig.update_viewmodel(_view,
-			_weapon_effects.weapon_view() if _weapon_effects != null else null,
-			_third_person, debug_force_viewmodel)
 
 
 func _update_model_lighting_context() -> void:

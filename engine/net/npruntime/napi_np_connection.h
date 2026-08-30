@@ -403,6 +403,8 @@ struct NapiNPConnection {
 
 	std::string pn;                // ClientHello.pn — game-session protocol identity
 	std::string player_name;       // game ClientAuth.na — echoed into the organic-spawn 0x0C (D.0)
+	// The team restored when the portable player-slot spectator bit is cleared.
+	uint8_t spectator_restore_team = 1;
 	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43
 	std::string server_scrk;       // our SCRK — encrypts outbound 0x83, echoed in ServerAuth
 	uint32_t client_ck = 0;        // ClientAuth.ck -> session_id on our S2C

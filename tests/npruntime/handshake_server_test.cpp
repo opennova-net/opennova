@@ -331,6 +331,8 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	config.game_type = 0x00010020u;
 	config.mp_attributes |= np::GameConfig::kMpAttribTeamChoose;
 	config.max_players = 11;
+	config.spectator_slots = -1;
+	config.spectator_password = "watch";
 	config.expansion = "jox99";
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Lan,
 	                        kHostKey, &loopback, config);
@@ -373,6 +375,8 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	if (!expect(found.gametype == config.game_type, "0x81 P1 reflects gametype")) return false;
 	if (!expect(found.current_players == 1, "0x81 NP counts the host loopback")) return false;
 	if (!expect(found.max_players == config.max_players, "0x81 MP reflects max_players")) return false;
+	if (!expect(found.server_flags == 0x00006904u,
+	            "LAN discovery exposes retail spectator and password BuildFlags")) return false;
 	if (!expect(found.expansion == config.expansion, "0x81 SUS2 reflects expansion")) return false;
 	if (!expect(found.session_id.empty(), "0x81 omits SUS1 when no real session user string exists")) return false;
 
@@ -385,7 +389,7 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	                              first_opcode, first_body) &&
 	                    parse_server_hello(first_body.data(), first_body.size(), foreign),
 	            "test can decode the discovered 0x81")) return false;
-	if (!expect(foreign.p2 == 0x00000904u,
+	if (!expect(foreign.p2 == 0x00006904u,
 	            "0x81 P2 carries the live retail BuildFlags value")) return false;
 	if (!expect(foreign.sus1.empty(),
 	            "LAN 0x81 omits SUS1 when no NovaWorld session user string exists")) return false;
@@ -1783,6 +1787,27 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 			"the first 0x37 boundary is exactly 0x75 + 0x64 + 0x16")) {
 		return false;
 	}
+	if (!expect(
+			np::Server_SetPlayerSpectator(ctx, *remote, world, true),
+			"authority can move the live player into spectator state")) {
+		return false;
+	}
+	const std::vector<ProtocolMessage> spectator_state =
+			np::dispatch_session_replies(
+					ctx.config, *remote, {make_protocol_message(0x47, {})},
+					7, ctx.np_protocol.connection_list, &world);
+	const ProtocolMessage *spectator_slot = find_reply(spectator_state, 0x75);
+	if (!expect(
+			spectator_slot != nullptr &&
+			spectator_slot->payload == std::vector<uint8_t>({0x01, 0x00}),
+			"0x75 bit 0 advertises free-fly spectator mode on team 0")) {
+		return false;
+	}
+	if (!expect(
+			np::Server_SetPlayerSpectator(ctx, *remote, world, false),
+			"authority can return the spectator to ordinary play")) {
+		return false;
+	}
 
 	std::vector<ProtocolMessage> same_tick_stream;
 	if (!expect(
@@ -1953,6 +1978,119 @@ bool run_retransmit_0x42_keeps_keys() {
 
 // The join leg enforces capacity. A dedicated host with max_players == 2 admits two joiners; the third
 // 0x42 is rejected. [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0 — current_player_count >= max]
+bool run_spectator_admission_codes_match_retail() {
+	const std::string scrk =
+			"TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	auto spectator_auth = [&](uint32_t ci, uint32_t ck, std::string_view password) {
+		ClientAuth auth = make_valid_client_auth(
+				ci, ck, kHostKey, "TestSpectator", scrk);
+		auth.cu.push_back(make_client_cu_chunk(2, "JSR", "1"));
+		if (!password.empty())
+			auth.cu.push_back(make_client_cu_chunk(2, "JSPP", password));
+		return craft(
+				SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+	};
+	auto decode_auth = [&](const np::HandleResult &result, ServerAuth &auth,
+	                       const char *message) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		return expect(
+				!result.outbound.empty() &&
+				nw_decode_inbound(
+						result.outbound.front().data(),
+						result.outbound.front().size(), opcode, body) &&
+				opcode == SESSION_OPCODE_SERVER_AUTH &&
+				parse_server_auth(body.data(), body.size(), auth),
+				message);
+	};
+
+	{
+		np::NapiNPServerCtx disabled;
+		np::test::bring_up_host(
+				disabled, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+				kHostKey);
+		const PeerAddr peer{0x0100007Fu, 32010};
+		const std::vector<uint8_t> datagram =
+				spectator_auth(10, 0x1010u, {});
+		const np::HandleResult result = np::handle_server_datagram(
+				disabled, peer, datagram.data(), datagram.size(), 1);
+		ServerAuth reply;
+		if (!decode_auth(
+					result, reply,
+					"disabled spectator join returns a ServerAuth rejection")) {
+			return false;
+		}
+		if (!expect(
+				reply.cr == 0 && reply.jfc == 14 &&
+				np::connection_count(disabled) == 0,
+				"retail JFC 14 rejects a spectator when spectating is disabled")) {
+			return false;
+		}
+	}
+
+	np::NapiNPServerCtx ctx;
+	np::GameConfig settings;
+	settings.max_players = 1;
+	settings.spectator_slots = 1;
+	settings.spectator_password = "watch";
+	np::test::bring_up_host(
+			ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+			kHostKey, nullptr, settings);
+
+	const PeerAddr wrong_peer{0x0100007Fu, 32011};
+	const std::vector<uint8_t> wrong_datagram =
+			spectator_auth(11, 0x1111u, "wrong");
+	const np::HandleResult wrong = np::handle_server_datagram(
+			ctx, wrong_peer, wrong_datagram.data(), wrong_datagram.size(), 2);
+	ServerAuth wrong_reply;
+	if (!decode_auth(
+				wrong, wrong_reply,
+				"wrong spectator password returns a ServerAuth rejection")) {
+		return false;
+	}
+	if (!expect(
+			wrong_reply.cr == 0 && wrong_reply.jfc == 16 &&
+			np::connection_count(ctx) == 0,
+			"retail JFC 16 rejects a bad spectator password")) {
+		return false;
+	}
+
+	const PeerAddr admitted_peer{0x0100007Fu, 32012};
+	const std::vector<uint8_t> admitted_datagram =
+			spectator_auth(12, 0x1212u, "watch");
+	const np::HandleResult admitted = np::handle_server_datagram(
+			ctx, admitted_peer, admitted_datagram.data(),
+			admitted_datagram.size(), 3);
+	ServerAuth admitted_reply;
+	if (!decode_auth(
+				admitted, admitted_reply,
+				"valid spectator credentials return ServerAuth")) {
+		return false;
+	}
+	if (!expect(
+			admitted_reply.cr == 1 && np::connection_count(ctx) == 1 &&
+			ctx.np_protocol.connection_list.front().link.spectator,
+			"valid JSR/JSPP admits and latches a spectator connection")) {
+		return false;
+	}
+
+	const PeerAddr full_peer{0x0100007Fu, 32013};
+	const std::vector<uint8_t> full_datagram =
+			spectator_auth(13, 0x1313u, "watch");
+	const np::HandleResult full = np::handle_server_datagram(
+			ctx, full_peer, full_datagram.data(), full_datagram.size(), 4);
+	ServerAuth full_reply;
+	if (!decode_auth(
+				full, full_reply,
+				"full spectator pool returns a ServerAuth rejection")) {
+		return false;
+	}
+	return expect(
+			full_reply.cr == 0 && full_reply.jfc == 15 &&
+			np::connection_count(ctx) == 1,
+			"retail JFC 15 rejects a spectator when spectator slots are full");
+}
+
 bool run_capacity_rejects_when_full() {
 	np::NapiNPServerCtx ctx;
 	np::GameConfig settings;
@@ -1973,7 +2111,20 @@ bool run_capacity_rejects_when_full() {
 	if (!expect(np::connection_count(ctx) == 2, "two joiners fill the server")) return false;
 
 	auto r3 = join(PeerAddr{0x0100007Fu, 32003}, 0x3333u, 3);
-	if (!expect(r3.outbound.empty(), "over-capacity 0x42 produces no ServerAuth")) return false;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ServerAuth rejected;
+	if (!expect(
+			!r3.outbound.empty() &&
+			nw_decode_inbound(
+					r3.outbound.front().data(), r3.outbound.front().size(),
+					opcode, body) &&
+			opcode == SESSION_OPCODE_SERVER_AUTH &&
+			parse_server_auth(body.data(), body.size(), rejected) &&
+			rejected.cr == 0 && rejected.jfc == 4,
+			"over-capacity player join returns retail ServerAuth JFC 4")) {
+		return false;
+	}
 	if (!expect(np::connection_count(ctx) == 2, "over-capacity join creates no node")) return false;
 	return true;
 }
@@ -2688,9 +2839,29 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 				list.players[0].slot_id == 0 && list.players[1].slot_id == 1 &&
 				list.in_game_count == 2 && list.spectator_count == 0;
 	}
-	return expect(
+	if (expect(
 			saw_repaired_list,
-			"tick 311 re-broadcasts the two-row list after retail learns slot 1");
+			"tick 311 re-broadcasts the two-row list after retail learns slot 1") == false)
+		return false;
+
+	// A spectator remains an in-game roster row, with flags bit 0 set and the
+	// trailer count incremented. Retail uses both values to move the row into
+	// the spectator column and subtract it from the HUD's player count.
+	remote.link.spectator = true;
+	world.registry.get(joiner_handle)->team = 0;
+	ctx.scoreboard_broadcast_timer = 310;
+	np::Server_TickUpdate(ctx);
+	bool saw_spectator_list = false;
+	while (transport.pop_outbound(staged)) {
+		if (staged.tag == 0x16 &&
+		    decode_player_list(staged.body.data(), staged.body.size(), list)) {
+			saw_spectator_list = list.players.size() == 2 &&
+				list.players[1].slot_id == 1 && list.players[1].flags == 0x01 &&
+				list.in_game_count == 2 && list.spectator_count == 1;
+		}
+	}
+	return expect(saw_spectator_list,
+			"periodic 0x16 marks and counts the spectator roster row");
 }
 
 } // namespace
@@ -2716,6 +2887,7 @@ int main() {
 	ok = run_full_player_info_is_recipient_scoped_lan_metadata() && ok;
 	ok = run_full_player_info_selects_retail_mission_title_branch() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
+	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
 	ok = run_character_join_vars_parsed() && ok;
 	ok = run_integrity_replies_validate_registered_profile() && ok;

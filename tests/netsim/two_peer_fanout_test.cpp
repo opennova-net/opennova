@@ -1076,6 +1076,16 @@ bool run_0a_priority_dead_recipient_social_score() {
 	const int id2 = record_index(f2, d_h.packed);
 	ok = ok && expect(ic2 >= 0 && id2 >= 0 && ic2 < id2,
 	                  "a dead recipient orders the same-team occupied C first (300+100 vs 0)");
+	// Clearing the entity death bit while setting the live player-slot
+	// spectator bit takes the identical retail social-score branch.
+	world.registry.get(host_h)->flags &= ~w::kEntityFlagDead;
+	conns[0].spectator = true;
+	nw::FrameUpdate f3;
+	if (!pump(f3)) return false;
+	const int ic3 = record_index(f3, c_h.packed);
+	const int id3 = record_index(f3, d_h.packed);
+	ok = ok && expect(ic3 >= 0 && id3 >= 0 && ic3 < id3,
+	                  "a spectator recipient takes the same flat social-score branch");
 	if (!ok) return false;
 	std::printf("PASS 0a_priority_dead_recipient_social_score\n");
 	return true;
@@ -1204,6 +1214,16 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	if (!expect(fu.flags1 == 0x00, "flags1 drops after the deploy clears pending")) return false;
 	if (!expect(fu.state_flag_byte == 0x00, "tail stance echo cleared")) return false;
 	if (!expect(fu.health > 0, "tail carries the live (alive) health")) return false;
+
+	// Spectator mode is the adjacent live player-slot bit and composes with
+	// the deploy bit in this same flags1 byte.
+	conns[0].spectator = true;
+	ns::test::emit_all(world, conns);
+	if (!expect(ch.client_recv(dg), "spectator-state 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "spectator-state 0x0A decodes")) return false;
+	if (!expect(fu.flags1 == 0x01, "flags1 bit0 carries spectator mode")) return false;
+	conns[0].spectator = false;
 
 	// The victim's own death signal (v33 "killee never knows"): a dead recipient's frame
 	// carries tail health 0 [orig: stored as the client's own Health @0x4305df] and its

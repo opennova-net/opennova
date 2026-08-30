@@ -328,6 +328,42 @@ func test_host_projectile_options_roundtrip() -> void:
 	sim.free()
 
 
+func test_host_spectator_options_and_live_f3_transition() -> void:
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var sim := Simulation.new()
+	sim.configure_host_session({
+		"max_players": 4,
+		"spectator_slots": -1,
+		"spectator_password": "watch",
+	})
+	var options: Dictionary = sim.get_host_session_config()
+	assert_eq(int(options.get("spectator_slots", 0)), -1)
+	assert_eq(String(options.get("spectator_password", "")), "watch")
+	assert_true(sim.enable_host_listen(0))
+	assert_true(sim.load_from_mission_data(mission))
+	assert_true(sim.has_local_player(),
+			"the listen host owns the player F3 will transition")
+
+	var start_tick := sim.get_logic_tick()
+	var body_position := sim.get_local_player_position()
+	assert_true(sim.set_local_spectator(true))
+	assert_true(sim.is_local_spectator())
+	sim.set_player_input(true, false, false, false, false, false, false)
+	for _i in range(3):
+		assert_true(sim.step())
+	assert_eq(sim.get_logic_tick(), start_tick + 3,
+			"spectator free flight does not pause the authoritative game")
+	assert_eq(sim.get_local_player_position(), body_position,
+			"spectator input is detached from the hidden player body")
+
+	assert_true(sim.set_local_spectator(false))
+	assert_false(sim.is_local_spectator())
+	assert_true(sim.has_local_player(),
+			"leaving spectator mode respawns the same playable slot")
+	sim.free()
+
+
 func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
 	var sim := Simulation.new()
 	assert_eq(sim.get_class_allow_mask(), 0x03FF,

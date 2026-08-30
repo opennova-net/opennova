@@ -69,3 +69,10 @@ func _edit_text(name: String, default_value := "") -> String:
 	if id < 0:
 		return default_value
 	return _driver.get_widget_text(id)
+
+
+func _is_checked(name: String, default_value := false) -> bool:
+	var id := _id(name)
+	if id < 0:
+		return default_value
+	return _driver.is_widget_checked(id)

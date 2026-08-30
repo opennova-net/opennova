@@ -29,6 +29,9 @@ void LaunchFlags::_bind_methods() {
 			&LaunchFlags::lan_mode);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_max_players", "fallback"),
 			&LaunchFlags::lan_max_players);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("spectator"), &LaunchFlags::spectator);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("spectator_password"),
+			&LaunchFlags::spectator_password);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("callsign"), &LaunchFlags::callsign);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("integrity_profile"),
 			&LaunchFlags::integrity_profile);
@@ -161,6 +164,14 @@ int LaunchFlags::lan_mode(int fallback) {
 
 int LaunchFlags::lan_max_players(int fallback) {
 	return opennova::launch_lan_max_players(parse(), fallback);
+}
+
+bool LaunchFlags::spectator() {
+	return parse().spectator;
+}
+
+String LaunchFlags::spectator_password() {
+	return from_std(parse().spectator_password);
 }
 
 String LaunchFlags::callsign() {

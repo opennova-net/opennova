@@ -177,6 +177,7 @@ func _init(seams: GameShellSeams = null, shell: GameDebugAdapter = null) -> void
 	_register_audio_actions()
 	_register_runtime_rows()
 	_register_automation_actions()
+	_register_spectator_row()
 
 
 func control(id: StringName) -> Row:
@@ -613,6 +614,21 @@ func _register_option_rows() -> void:
 			"Force the chase camera while on foot. Stock JO only resolves third person in a vehicle control seat with Chase View (F4) selected — the per-frame arbiter, net-re §5.39 — so this is the onhook debug patch's affordance, not a gameplay key.",
 			func(player: LocalPlayerPresenter) -> bool: return player.is_debug_third_person(),
 			func(player: LocalPlayerPresenter, on: bool) -> void: player.set_debug_third_person(on))
+
+
+func _register_spectator_row() -> void:
+	var spectator := _check(&"local_spectator", &"Player", "Spectator free camera",
+			"Detach the authority-owned local player from gameplay and unlock the free camera while the match continues ticking.",
+			TARGET_SIM, OWNER_ENGINE)
+	spectator.read = func() -> Variant:
+		var sim := _sim()
+		return sim.is_local_spectator() if sim != null else null
+	spectator.write = func(value: Variant) -> Error:
+		var sim := _sim()
+		if sim == null:
+			return ERR_UNAVAILABLE
+		return OK if sim.set_local_spectator(bool(value)) else ERR_UNAUTHORIZED
+	_authoritative(spectator)
 
 
 func _register_terrain_rows() -> void:

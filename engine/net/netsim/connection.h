@@ -117,6 +117,11 @@ struct Connection {
 	// @0x42ff82]), the player entity carries the hidden bit0, and the 0x0E handler accepts
 	// a deploy from an alive-but-undeployed player (the dead-or-pending gate @0x519cc7).
 	// Death does NOT set it — the death screen is client-local (D-NET-156).
+	// The live player-slot spectator mode. Admission and F3 both land here;
+	// 0x75, 0x16, 0x0A, and priority selection read this one canonical bit.
+	// [orig: playerSlot+100567; NetPacket_WritePlayerState @0x4ff793;
+	// Server_BuildEntityPriorityList @0x50e677]
+	bool spectator = false;
 	bool respawn_pending = false;
 
 	// Retail's post-death player-slot counters. Both are whole seconds and are

@@ -60,6 +60,35 @@ struct ParsedClientGameEnvironment {
 	long sopd = 0;
 };
 
+struct ParsedClientJoinRole {
+	bool spectator = false;
+	std::string spectator_password;
+};
+
+ParsedClientJoinRole parse_client_join_role(const ClientAuth &auth) {
+	ParsedClientJoinRole parsed;
+	for (const auto &blob : auth.cu) {
+		uint8_t cu_type = 0;
+		std::string cu_name;
+		std::string cu_value;
+		if (!parse_client_cu_chunk(
+					blob.data(), blob.size(), cu_type, cu_name, cu_value) ||
+		    cu_type != 2) {
+			continue;
+		}
+		// The connection tag-list loader is ordered and uses atol semantics;
+		// therefore the last duplicate wins for both JSR and JSPP.
+		// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260;
+		// Server_ValidatePlayerJoinRequest @0x512100]
+		if (str_case_equal(cu_name, "JSR")) {
+			parsed.spectator = std::strtol(cu_value.c_str(), nullptr, 10) != 0;
+		} else if (str_case_equal(cu_name, "JSPP")) {
+			parsed.spectator_password = std::move(cu_value);
+		}
+	}
+	return parsed;
+}
+
 ParsedClientGameEnvironment parse_client_game_environment(const ClientAuth &auth) {
 	ParsedClientGameEnvironment parsed;
 	for (const auto &blob : auth.cu) {
@@ -206,6 +235,33 @@ uint32_t occupied_player_count(const NapiNPServerCtx &ctx) {
 		if (connection.type == NapiNPConnection::kTypeClientSide || connection.phase >= ConnectionPhase::Joined) ++occupied;
 	}
 	return occupied;
+}
+
+uint32_t occupied_spectator_count(const NapiNPServerCtx &ctx) {
+	uint32_t occupied = 0;
+	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list) {
+		if (connection.link.spectator &&
+		    (connection.type == NapiNPConnection::kTypeClientSide ||
+		     connection.phase >= ConnectionPhase::Joined)) {
+			++occupied;
+		}
+	}
+	return occupied;
+}
+
+void reject_client_join(const ClientAuth &auth, const PeerAddr &peer,
+		uint32_t failure_code, const char *message, HandleResult &out) {
+	ServerAuth rejection;
+	rejection.ci = auth.ci;
+	rejection.ck = auth.ck;
+	rejection.cr = 0;
+	rejection.jfc = failure_code;
+	rejection.jfs = message;
+	rejection.na = auth.na;
+	rejection.rip = peer.ip;
+	rejection.rpn = peer.port;
+	out.outbound.push_back(nw_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(rejection)));
 }
 
 // Build + frame a 0x82 ServerAuth for `conn` from its CURRENT keys (server_sk / server_scrk /
@@ -467,9 +523,11 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
                         const std::vector<uint8_t> &body, HandleResult &out) {
 	ClientAuth auth;
 	if (!parse_client_auth(body.data(), body.size(), auth)) return;
-	// Validate the join before admitting it (no ServerAuth, no node, on failure). The original
-	// re-runs the SAME identity gate as Hello on the 0x42 and additionally checks the HK echo
-	// against the host key, dropping the join (return 0) otherwise. [orig:
+	// Validate the identity envelope before admitting it. These envelope failures are silent:
+	// no ServerAuth and no node. The original re-runs the SAME identity gate as Hello on the
+	// 0x42 and additionally checks the HK echo against the host key, dropping the join (return 0)
+	// otherwise. Role/capacity/password failures below instead send retail's CR=0 ServerAuth.
+	// [orig:
 	// NapiNPProtocol_HandleClientJoin @0x62b750 — NVS/PN/PG/PV1/PV2 + non-empty NA + HK]
 	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return; // host not started
 	if (!matches_jointoperations_identity(auth) || auth.na.empty()) return; // not a retail JO game join
@@ -483,6 +541,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// fail closed before replacement teardown, capacity accounting, or node allocation.
 		return;
 	}
+	const ParsedClientJoinRole join_role = parse_client_join_role(auth);
 
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750] The stateless 0x41 leaves
 	// no node, so a first 0x42 creates one. Only retransmit/address-reuse paths
@@ -525,16 +584,35 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// is already full: the witnessed gate rejects on current_player_count >= max_players (CNapiNetwork
 	// +0xF28; spectator slots add in when enabled). The player count is the host's own type-2 loopback
 	// (when present) plus already-admitted (>= Joined) joiners — matching networkCtx[11], which counts
-	// added players and the host. Retail replies
-	// with a draw-overlay reject (state 14, reason 4 "server full"); we model the reject as a silent
-	// drop + no node (consistent with the other 0x42 reject legs) — the overlay-reject packet is not
-	// modeled yet (tracked: D-NET overlay-reject).
+	// added players and the host. Retail replies with ServerAuth CR=0 and a
+	// join-failure code; spectator-specific validation uses codes 14/15/16.
 	const uint32_t occupied = occupied_player_count(ctx);
-	if (occupied >= ctx.np_protocol.max_players) {
-		return; // server full; the stateless 0x41 left no node to clean up
+	const uint32_t spectators = occupied_spectator_count(ctx);
+	const uint32_t players = occupied - spectators;
+	if (join_role.spectator) {
+		if (ctx.config.spectator_slots == 0) {
+			reject_client_join(auth, peer, 14, "spectators disabled", out);
+			return;
+		}
+		if ((ctx.config.spectator_slots > 0 &&
+		     spectators >= static_cast<uint32_t>(ctx.config.spectator_slots)) ||
+		    occupied >= ctx.config.total_player_slot_capacity()) {
+			reject_client_join(auth, peer, 15, "spectator slots full", out);
+			return;
+		}
+		if (!ctx.config.spectator_password.empty() &&
+		    join_role.spectator_password != ctx.config.spectator_password) {
+			reject_client_join(auth, peer, 16, "spectator password rejected", out);
+			return;
+		}
+	} else if (players >= ctx.np_protocol.max_players ||
+	           occupied >= ctx.config.total_player_slot_capacity()) {
+		reject_client_join(auth, peer, 4, "server full", out);
+		return;
 	}
 
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
+	conn.link.spectator = join_role.spectator;
 	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
 	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
 	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
