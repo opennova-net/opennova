@@ -72,6 +72,17 @@ public:
     // Write the primary weapon slot's clip/reserve counts (retail's signed
     // i16 words). False when the handle resolves no registry row.
     bool set_entity_weapon_ammo(EntityHandle h, int32_t clip, int32_t reserve);
+    // Override ONE entity's ItemDefAttrib words (items.def `attrib:` bits) in
+    // place: both raw dwords plus the per-entity facts derived from them go
+    // through the same stamp the trait sweep uses (world::stamp_item_attrib),
+    // so live readers (NoDismember, NoDie, the AS zone gates, ...) see the
+    // new value on their next read. Per-item caches keyed by item id
+    // (item_death_traits, vehicle_traits) and the AI profile mirror stay as
+    // the sweep left them; the override is not replicated (joiners re-stamp
+    // from their own items.def) and the next resolve_item_traits sweep
+    // (mission load, net topology sync) re-stamps it from the def. False when
+    // the handle resolves no registry row.
+    bool set_entity_item_attrib(EntityHandle h, uint32_t attrib, uint32_t attrib2);
 
     // --- queries ---
     bool ssn_exists(uint16_t ssn) const;

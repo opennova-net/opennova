@@ -293,6 +293,11 @@ int main() {
     CHECK(tank_e->health == -25536);
     CHECK(tank_e->item_unit_type == 7);
     CHECK(tank_e->uniform_scale_q16 == 0x18000);
+    // The display-name table: once per distinct id, the def row's name; an
+    // unknown id has no row.
+    CHECK(w.item_names.get(500) != nullptr && *w.item_names.get(500) == "S5 Tank");
+    CHECK(w.item_names.get(510) != nullptr && *w.item_names.get(510) == "S5 Rifleman");
+    CHECK(w.item_names.get(999) == nullptr);
 
     const Entity *rifle_e = w.registry.get(rifle_h);
     CHECK(rifle_e != nullptr);

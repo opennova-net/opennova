@@ -49,10 +49,12 @@ struct WorldDetail {
 	int32_t source_index = -1; // index within its kind's list
 	int32_t item_id = 0;
 	std::string name;
+	std::string item_name; // items.def display name (world.item_names); empty without a def
 	int32_t team = -1;
 	bool alive = false;
 	bool hidden = false;
 	int32_t health = 0;
+	int32_t health_max = 0;
 	bool has_item_def = false;
 	int32_t handle = -1;       // packed pool/slot wire handle
 	int32_t item_type = 0;
@@ -226,6 +228,7 @@ struct EntityRow {
 	int32_t item_id = 0; // the wire type id
 	uint16_t wire_handle = 0;
 	std::string name;
+	std::string item_name; // items.def display name (world.item_names); empty without a def
 	std::string state_name;
 	int32_t health = 0;
 	int32_t team = -1;

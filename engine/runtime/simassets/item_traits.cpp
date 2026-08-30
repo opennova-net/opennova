@@ -113,10 +113,16 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         const DefItemDef *def = find_item(by_id, def_id);
         e->has_item_def = def != nullptr;
         e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
-        e->item_attrib2 = def != nullptr ? def->attrib2 : 0u;
         e->uniform_scale_q16 = def != nullptr ? def->scale_q16 : 0;
-        e->is_ai_capable =
-                def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_AIDATA) != 0;
+        // Both ItemDefAttrib words and the per-entity facts derived from them
+        // (AI-capable, the AS zone gates, LeaveCorpse) go through the ONE
+        // stamp a runtime override also uses (world/entity.h stamp_item_attrib).
+        // [orig: def+84 gates in ZoneSlotChain_BuildFromMission @0x4a2de0 /
+        // Server_ResolveSpawnTargetHandle @0x4fe110; net-re §5.61; LeaveCorpse
+        // ItemDef_ParseProperty @0x4a09d3, consumer Entity_UpdateInfantryAI
+        // @0x4b9e54; world-wac-ai-re §19]
+        const uint32_t attrib = def != nullptr ? def->attrib : 0u;
+        world::stamp_item_attrib(*e, attrib, def != nullptr ? def->attrib2 : 0u);
         // The injected catalog supplies both the authoritative host stamp and
         // the decoded-client record width. Missing/ambiguous definitions fail
         // closed as Unknown (0).
@@ -149,20 +155,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             e->engine_flags |= 0x4000000u;
             e->sub_type = 0xFF;
         }
-        // AS zone traits from the attrib dword: 0x20000 "ChangeTeam" = capture trigger,
-        // 0x40000 "SpawnPoint" = deploy-selectable (the ASH_I5A "Change Team & Spawn
-        // Volume" objects carry both). [orig: def+84 gates in ZoneSlotChain_BuildFromMission
-        // @0x4a2de0 / Server_ResolveSpawnTargetHandle @0x4fe110; net-re §5.61]
-        const uint32_t attrib = def != nullptr ? def->attrib : 0u;
-        e->item_attrib = attrib;
-        e->is_capture_trigger = (attrib & DEF_ITEM_ATTRIB_CHANGETEAM) != 0;
-        e->is_spawn_point = (attrib & DEF_ITEM_ATTRIB_SPAWNPOINT) != 0;
-        // Death-presentation traits: LeaveCorpse (attrib 0x400000) keeps the corpse
-        // forever; deathtime (def+0x890, parse-scaled ticks) seeds the corpse timer at
-        // the death edge. [orig: ItemDef_ParseProperty @0x4a09d3 / @0x49fa6c; consumers
-        // Entity_UpdateInfantryAI @0x4b9e54 / @0x4b9c97; world-wac-ai-re §19]
-        e->leave_corpse = (attrib & DEF_ITEM_ATTRIB_LEAVECORPSE) != 0;
+        // Death-presentation timing: deathtime (def+0x890, parse-scaled ticks)
+        // seeds the corpse timer at the death edge; LeaveCorpse rides the stamp
+        // above. [orig: ItemDef_ParseProperty @0x49fa6c; consumer
+        // Entity_UpdateInfantryAI @0x4b9c97; world-wac-ai-re §19]
         e->deathtime_ticks = def != nullptr ? def->deathtime_ticks : 0;
+        // The item's display name, once per distinct id (tooling: the
+        // inspection records name an entity by its item, not only its label).
+        if (def != nullptr && world.item_names.get(e->item_id) == nullptr)
+            world.item_names.set(e->item_id, def->display_name);
         // Destruction traits (world/destruction.h; world-wac-ai-re §24): the death
         // chain's def fields, keyed by item id. Fills once per distinct id.
         // [orig: the ItemDef fields Entity_ApplyWeaponDamage / the death dispatch /
