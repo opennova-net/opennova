@@ -272,8 +272,12 @@ void main() {
 				vec3(@NV_LUMA_R@, @NV_LUMA_G@, @NV_LUMA_B@)), 2.0)
 				- @NV_BRIGHT_BIAS@, 0.0, 1.0);
 		result *= bright * custom1.a;
+		// The NV blend pipeline is src ONE / dst SRC_ALPHA, so the written
+		// alpha IS the retained destination weight: dst * (noiseA x diffuseA
+		// x 2), exactly the premultiplied blend water.gdshader runs in beauty.
+		// (The underwater opaque variant replaces and ignores it.)
 		float alpha = clamp(noise.a * color.a * 2.0, 0.0, 1.0);
-		frag_color = vec4(result, 1.0 - alpha);
+		frag_color = vec4(result, alpha);
 		return;
 	}
 	vec4 tex = texture(primary_texture, uv);

@@ -631,3 +631,149 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 			"water must attenuate the earlier far particle; " + diagnostic)
 	assert_almost_eq(without_water.g, with_water.g, 0.02,
 			"water must not attenuate the later camera-side particle; " + diagnostic)
+
+
+const Q3_ADDITIVE_LUM_3DI := "res://../fixtures/threedi/synth/mount.3di"
+
+
+func _keep_only_shader_surfaces(root: Node, shader_fragment: String) -> void:
+	if root is MeshInstance3D:
+		var mesh_instance := root as MeshInstance3D
+		var material := mesh_instance.get_active_material(0) as ShaderMaterial
+		var shader_path := material.shader.resource_path 				if material != null and material.shader != null else ""
+		mesh_instance.visible = shader_fragment in shader_path
+	for child in root.get_children():
+		_keep_only_shader_surfaces(child, shader_fragment)
+
+
+func _first_visible_mesh(root: Node) -> MeshInstance3D:
+	if root is MeshInstance3D and (root as MeshInstance3D).visible:
+		return root as MeshInstance3D
+	for child in root.get_children():
+		var found := _first_visible_mesh(child)
+		if found != null:
+			return found
+	return null
+
+
+func _q3_peak_near(image: Image, center: Vector2i, radius: int) -> float:
+	var best := 0.0
+	for y in range(center.y - radius, center.y + radius + 1):
+		for x in range(center.x - radius, center.x + radius + 1):
+			if x < 0 or y < 0 or x >= image.get_width() or y >= image.get_height():
+				continue
+			var pixel := image.get_pixel(x, y)
+			best = maxf(best, pixel.r + pixel.g + pixel.b)
+	return best
+
+
+func _render_q3_frame(renderer: FrameFx) -> Image:
+	renderer.advance_frame()
+	for _frame in 4:
+		await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	return renderer.get_q3_target_image()
+
+
+func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> void:
+	# The NV water redraw follows the object copies in the fixed FrameFX
+	# bracket with src ONE / dst SRC_ALPHA, so an additive LUM card in front
+	# of murky water keeps dst x (noiseA x diffuseA x 2) of its Q3 copy: a
+	# larger NV alpha retains MORE of the card. An inverted write (1 - a)
+	# would erase it as the alpha grows.
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(192, 144)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+
+	var environment_resource := Environment.new()
+	environment_resource.background_mode = Environment.BG_COLOR
+	environment_resource.background_color = Color.BLACK
+	environment_resource.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	environment_resource.glow_enabled = false
+	var environment := WorldEnvironment.new()
+	environment.environment = environment_resource
+	viewport.add_child(environment)
+
+	var camera := Camera3D.new()
+	camera.position = Vector3(100.3, 27.0, -33.7)
+	camera.current = true
+	viewport.add_child(camera)
+
+	var water := Water.new()
+	water.water_height = 7.0
+	viewport.add_child(water)
+	water.advance_frame(1.0 / 62.0)
+	var water_material := water.get_water_material()
+	water_material.set_shader_parameter("u_water_color", Vector3.ZERO)
+	water_material.set_shader_parameter("u_has_reflection", false)
+	water_material.set_shader_parameter("u_noise_normal",
+			_solid_texture(Color(0.5, 0.5, 1.0, 1.0)))
+	water_material.set_shader_parameter("u_noise_color",
+			_solid_texture(Color(1.0, 1.0, 1.0, 1.0)))
+
+	# The mount fixture's authored FF_ST_AD_LUM heat slab is the production
+	# additive LUM producer; every other surface stays out of the frame.
+	var model := ObjectModel.new()
+	viewport.add_child(model)
+	model.set_process(false)
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(Q3_ADDITIVE_LUM_3DI)), OK)
+	model.set_object_data(data)
+	model.scale = Vector3.ONE * 10.0
+	_keep_only_shader_surfaces(model, "/self_lit/additive")
+	model.advance_runtime_frame(1.0 / 62.0)
+	for row in model.get_surface_materials():
+		var material := row as ShaderMaterial
+		if material != null and material.shader != null 				and "/self_lit/" in material.shader.resource_path:
+			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
+			material.set_shader_parameter("u_alpha_mod", 1.0)
+	var slab := _first_visible_mesh(model)
+	assert_not_null(slab, "the mount fixture carries an additive LUM surface")
+	if slab == null:
+		return
+	# Centre the slab 10 u ahead of and 5 u below the eye: in front of the
+	# 7 u water plane, over water pixels, nothing else between.
+	var target := Vector3(100.3, 22.0, -43.7)
+	var slab_center: Vector3 = slab.global_transform * slab.get_aabb().get_center()
+	model.position += target - slab_center
+	var pixel := Vector2i(camera.unproject_position(target))
+
+	var renderer := FrameFx.new()
+	viewport.add_child(renderer)
+	var full_alpha_image: Image = await _render_q3_frame(renderer)
+	var report := renderer.get_backend_report()
+	if not bool(report.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_gte(int(report.get("q3_drawn_commands", 0)), 2,
+			"the additive LUM slab and the NV water both reach the Q3 draw list: %s" % report)
+	assert_not_null(full_alpha_image, "the terminal effect exposes its Q3 target")
+	if full_alpha_image == null:
+		return
+	var full_peak := _q3_peak_near(full_alpha_image, pixel, 2)
+
+	water_material.set_shader_parameter("u_noise_color",
+			_solid_texture(Color(1.0, 1.0, 1.0, 0.25)))
+	var quarter_alpha_image: Image = await _render_q3_frame(renderer)
+	var quarter_peak := _q3_peak_near(quarter_alpha_image, pixel, 2)
+
+	water.visible = false
+	var alone_image: Image = await _render_q3_frame(renderer)
+	var alone_peak := _q3_peak_near(alone_image, pixel, 2)
+	var diagnostic := "pixel=%s full=%f quarter=%f alone=%f" % [
+			pixel, full_peak, quarter_peak, alone_peak]
+
+	assert_gt(alone_peak, 0.2, "the additive LUM copy reaches the Q3 target; " + diagnostic)
+	assert_lt(quarter_peak, alone_peak - 0.02,
+			"the murky NV redraw attenuates the earlier copy; " + diagnostic)
+	assert_gt(full_peak, quarter_peak + 0.02,
+			"a larger NV alpha retains MORE of the copy (dst x a, not dst x (1 - a)); "
+			+ diagnostic)
+	assert_gt(full_peak, 0.1 * alone_peak,
+			"the redraw weights the copy instead of erasing it; " + diagnostic)
+	renderer.shutdown()
+	water.release_runtime_renderer_resources()
