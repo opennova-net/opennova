@@ -47,7 +47,9 @@ MainGame._process
       apply blink gates when a tick ran
       apply camera occlusion
       sample iris
-      render material frame                 per-model ObjectModel advance
+      render material frame                 authored RLOD selection (individual models, then the
+                                            placer's retained static instances), then the
+                                            per-model ObjectModel advance
       sync_framefx_frame                    compile typed focused-Q3 draws after every producer published
       render slot shadows
       render particles
