@@ -76,7 +76,10 @@ void GameDevTools::set_entity_directory(EntityDirectorySnapshot snapshot) {
 }
 
 bool GameDevTools::needs_entity_directory() const {
-	return pass_.is_open() && entities_window_->open;
+	// The Properties window reads the list's selected row, so the directory
+	// keeps flowing while either entity window shows (the list holds its
+	// selection pending across its own close and re-applies it per push).
+	return pass_.is_open() && (entities_window_->open || entity_properties_window_->open);
 }
 
 bool GameDevTools::take_debug_request(DebugRequest &request) {
@@ -94,6 +97,7 @@ void GameDevTools::select_entity(uint16_t handle) {
 
 void GameDevTools::clear_entity_selection() {
 	entities_window_->clear_selection();
+	entity_properties_window_->clear();
 }
 
 uint16_t GameDevTools::selected_entity_handle() const {

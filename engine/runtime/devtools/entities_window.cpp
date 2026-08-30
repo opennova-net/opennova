@@ -48,24 +48,27 @@ bool contains_ci(const char *haystack, const char *needle) {
 void EntitiesWindow::on_visibility(bool visible) {
 	shown_ = visible;
 	if (!visible) {
-		// Drop the snapshot so a closed window holds nothing; the embedder's
-		// needs_entity_directory gate stops the pushes on the same edge. The
-		// selection survives as a pending handle so reopening re-selects it.
+		// Drop the snapshot so a closed window holds nothing (the directory
+		// keeps flowing only while the Properties window still shows). The
+		// selection survives as a pending handle so the next push, or the
+		// reopened window, re-selects the same entity.
 		const uint16_t keep = selected_handle();
 		snapshot_ = EntityDirectorySnapshot{};
-		format_rows();
-		selected_ = -1;
+		format_rows(kNoHandle);
 		pending_select_handle_ = keep;
 		scroll_to_selected_ = false;
 	}
 }
 
 void EntitiesWindow::set_directory(EntityDirectorySnapshot snapshot) {
+	// The selection is re-keyed by wire handle, read BEFORE the rows move (the
+	// old index into the new rows names a different entity).
+	const uint16_t keep = selected_handle();
 	snapshot_ = std::move(snapshot);
 	if (!snapshot_.valid) {
 		snapshot_.rows.clear();
 	}
-	format_rows();
+	format_rows(keep);
 	apply_pending_selection();
 }
 
@@ -99,15 +102,9 @@ int EntitiesWindow::row_index_for_handle(uint16_t handle) const {
 	return -1;
 }
 
-void EntitiesWindow::format_rows() {
+void EntitiesWindow::format_rows(uint16_t keep_handle) {
 	texts_.clear();
 	texts_.reserve(snapshot_.rows.size());
-	// Keep the selection across pushes by wire handle (the directory reorders
-	// as entities die and spawn); a selection the push no longer carries is
-	// gone with its entity.
-	const uint16_t selected_handle_before = selected_row() != nullptr
-			? selected_row()->wire_handle
-			: kNoHandle;
 	for (size_t i = 0; i < snapshot_.rows.size(); ++i) {
 		const world::inspect::EntityRow &row = snapshot_.rows[i];
 		RowText text;
@@ -126,7 +123,11 @@ void EntitiesWindow::format_rows() {
 				row.mission_position.y, row.mission_position.z);
 		texts_.push_back(std::move(text));
 	}
-	selected_ = row_index_for_handle(selected_handle_before);
+	// Keep the selection across pushes by wire handle (the directory reorders
+	// as entities die and spawn); a selection the push no longer carries is
+	// gone with its entity. A pending pick is not touched here: the push
+	// that carries it applies it.
+	selected_ = row_index_for_handle(keep_handle);
 	apply_filter();
 }
 
@@ -170,15 +171,17 @@ void EntitiesWindow::select_handle(uint16_t handle) {
 	}
 	open = true;
 	request_focus();
-	set_filter("");
 	const int index = row_index_for_handle(handle);
 	if (index >= 0) {
+		// The row is here: clear the filter so it can show, select, scroll.
+		set_filter("");
 		select_row(index);
 		scroll_to_selected_ = true;
 		return;
 	}
 	// Not in the held directory (none pushed yet, or a fresh pick the next
-	// push will carry): deselect and wait for the push.
+	// push will carry): deselect and wait for the push; the filter stays
+	// until a row actually resolves.
 	selected_ = -1;
 	pending_select_handle_ = handle;
 }
@@ -245,14 +248,16 @@ void EntitiesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	if (!snapshot_.valid) {
 		ImGui::TextUnformatted("No entity directory pushed (load a mission).");
 		if (pending_select_handle_ != kNoHandle) {
+			const world::EntityHandle pending{pending_select_handle_};
 			ImGui::Text("Selected entity %d:%d awaits the next directory push.",
-					(pending_select_handle_ >> 12) & 0xF, pending_select_handle_ & 0xFFF);
+					pending.pool(), pending.slot());
 		}
 		return;
 	}
-	ImGui::Text("%d of %d entities | logic tick %llu (%.1f s readings)",
+	ImGui::Text("%d of %d entities | logic tick %llu (%.1f s readings)%s",
 			row_count(), static_cast<int>(snapshot_.rows.size()),
-			static_cast<unsigned long long>(snapshot_.logic_tick), kRefreshSeconds);
+			static_cast<unsigned long long>(snapshot_.logic_tick), kRefreshSeconds,
+			snapshot_.authority ? "" : " | read-only (joiner)");
 	ImGui::SetNextItemWidth(-64.0f);
 	if (ImGui::InputText("Filter", filter_.data(), filter_.size())) {
 		apply_filter();

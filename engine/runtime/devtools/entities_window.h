@@ -3,7 +3,7 @@
 // the selection every other entity surface keys on. The selected row's card,
 // its debug actions and its items.def attrib toggles live in the separate,
 // separately dockable Entity Properties window (entity_properties_window.h),
-// which reads this window's selection.
+// which reads this window's selection and the snapshot's authority fact.
 //
 // The window holds only the pushed value record — it never reaches into a
 // live World or into Godot. The shell's world pick reaches it as a selection
@@ -11,11 +11,12 @@
 // asks for focus, selects the row when the pushed directory has it, and
 // otherwise keeps the handle pending for the next push. Visibility-armed:
 // while hidden it drops its snapshot (the selection survives as a pending
-// handle so reopening F3 re-selects the same entity) and the embedder (gated
-// on GameDevTools::needs_entity_directory) stops building new ones, so a
-// closed window costs the producers nothing. Rows are formatted once per push
-// (the embedder pushes on the StatsWindow 0.5 s cadence, kRefreshSeconds); a
-// frame between pushes only re-emits cached strings.
+// handle so reopening re-selects the same entity), and the embedder (gated on
+// GameDevTools::needs_entity_directory, which the Properties window keeps
+// armed too) stops building new ones once no entity window shows. Rows are
+// formatted once per push (the embedder pushes on the StatsWindow 0.5 s
+// cadence, kRefreshSeconds); a frame between pushes only re-emits cached
+// strings.
 #pragma once
 
 #include <runtime/devtools/debug_request.h>
@@ -46,16 +47,18 @@ public:
 	// The pushed directory record, by value; an invalid snapshot clears the
 	// table (the world unloaded).
 	void set_directory(EntityDirectorySnapshot snapshot);
-	// (pass open && window open): the embedder skips building snapshots
-	// nobody shows.
-	bool wants_directory() const { return shown_; }
+	// The pushed authority facts (false until a valid push): this peer owns
+	// the world; a wire session is live under it.
+	bool authority() const { return snapshot_.valid && snapshot_.authority; }
+	bool session_live() const { return snapshot_.valid && snapshot_.session_live; }
 
 	// The selection seam. select_handle is what a world pick lands as: the
-	// window opens and asks for focus, the filter clears (a hidden row cannot
-	// be scrolled to), the row selects and scrolls into view when the pushed
-	// directory has it, else the handle stays pending until a push carries it
-	// (a push without it drops it: the entity is gone). selected_handle reads
-	// the selected row's handle, else the pending one, else kInvalid.
+	// window opens and asks for focus; when the pushed directory has the row
+	// the filter clears (a hidden row cannot be scrolled to) and the row
+	// selects and scrolls into view, else the handle stays pending until a
+	// push carries it (a push without it drops it: the entity is gone).
+	// selected_handle reads the selected row's handle, else the pending one,
+	// else kInvalid.
 	void select_handle(uint16_t handle);
 	void clear_selection();
 	uint16_t selected_handle() const;
@@ -88,6 +91,7 @@ public:
 	// The name filter (case-insensitive substring over name, item name and
 	// SSN); the drawn filter box edits the same buffer.
 	void set_filter(const char *text);
+	const char *filter() const { return filter_.data(); }
 
 private:
 	struct RowText {
@@ -101,7 +105,10 @@ private:
 		std::array<char, 48> pos{};
 	};
 
-	void format_rows();
+	// Format the held snapshot's rows and re-key the selection onto
+	// `keep_handle` (kInvalid = no selection; a handle the snapshot lacks
+	// leaves none, the entity is gone).
+	void format_rows(uint16_t keep_handle);
 	void apply_filter();
 	void apply_pending_selection();
 	void select_row(int snapshot_index);

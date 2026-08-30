@@ -132,11 +132,22 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		return false;
 	}
 
+	// A reset requested last frame (the menu item, a probe) rebuilds the
+	// default layout below and expands every window this frame.
+	const bool reset_layout = layout_reset_pending_;
+	layout_reset_pending_ = false;
+
 	if (options_.dockspace) {
-		// The workspace owns the main viewport. Install its default only when
-		// ImGui did not restore this dockspace from persisted settings.
+		// The workspace owns the main viewport. Install its default when ImGui
+		// did not restore this dockspace from persisted settings, and again on
+		// a reset: the persisted dockspace is torn down first, so every window
+		// (a new one the ini never saw, one dragged out to another monitor)
+		// docks back into its declared placement.
 		const ImGuiID dockspace_id = ImHashStr(kWorkspaceDockspace);
 		const ImGuiViewport *viewport = ImGui::GetMainViewport();
+		if (reset_layout) {
+			ImGui::DockBuilderRemoveNode(dockspace_id);
+		}
 		if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
 			create_default_layout(dockspace_id, *viewport, windows_);
 		}
@@ -171,22 +182,25 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	}
 	sync_visibility();
 
-	const bool reset_layout = layout_reset_pending_;
-	layout_reset_pending_ = false;
 	for (int i = 0; i < static_cast<int>(windows_.size()); ++i) {
 		Window &window = *windows_[static_cast<size_t>(i)];
 		if (!window.is_closeable()) {
 			window.open = true;
 		}
 		if (!window.open) {
+			// A closed window never carries a focus request forward: the pick
+			// that raised it was declined when the window was closed again.
+			window.take_focus_request();
 			continue;
 		}
 		if (window.owns_frame()) {
+			// No pass-owned Begin to focus; the request would only latch.
+			window.take_focus_request();
 			window.draw(*this, frame_index);
 			continue;
 		}
 		if (reset_layout) {
-			place_window_home(i);
+			ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always);
 		}
 		ImGuiWindowFlags flags = ImGuiWindowFlags_None;
 		if (!window.is_collapsible()) {
@@ -230,21 +244,6 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		set_open(false);
 	}
 	return true;
-}
-
-// The next Begin of window `index` lands it in the main viewport: no dock
-// node, expanded, cascaded from the work area's corner at a readable size.
-void ImGuiPass::place_window_home(int index) {
-	const ImGuiViewport *main = ImGui::GetMainViewport();
-	const float step = 32.0f * static_cast<float>(index);
-	ImGui::SetNextWindowViewport(main->ID);
-	ImGui::SetNextWindowDockID(0, ImGuiCond_Always);
-	ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always);
-	ImGui::SetNextWindowPos(ImVec2(main->WorkPos.x + 24.0f + step, main->WorkPos.y + 24.0f + step),
-			ImGuiCond_Always);
-	ImGui::SetNextWindowSize(ImVec2(std::min(main->WorkSize.x - 48.0f - step, 640.0f),
-									std::min(main->WorkSize.y - 48.0f - step, 720.0f)),
-			ImGuiCond_Always);
 }
 
 }  // namespace opennova::devtools

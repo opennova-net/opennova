@@ -19,6 +19,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 using opennova::devtools::CaptureWindow;
 using opennova::devtools::DebugRequest;
@@ -370,9 +371,10 @@ void test_external_feed_drives_the_window_without_draining() {
 	tools.set_frame_stats(nullptr);
 }
 
-// A parked Stats window (collapsed, pushed off to where a second monitor
-// would be) comes home on the layout pass after a reset request: expanded,
-// undocked, cascaded from the main viewport's work corner.
+// A reset request rebuilds the default docked layout on the next layout
+// pass: a window the persisted layout never placed (opened later, dragged
+// out, or new since the ini was written) docks into its declared node,
+// collapsed windows expand, and the pass consumes the request once.
 void test_layout_reset_brings_windows_home() {
 	NullBackend backend;
 	GameDevTools tools;
@@ -383,37 +385,64 @@ void test_layout_reset_brings_windows_home() {
 	tools.pass().draw_frame(1);
 	ImGui::Render();
 	ImGuiWindow *stats = ImGui::FindWindowByName("Stats");
-	CHECK(stats != nullptr, "the Stats window exists after a pass");
-	if (stats == nullptr) {
+	ImGuiWindow *game = ImGui::FindWindowByName("Game");
+	CHECK(stats != nullptr && game != nullptr, "the Game and Stats windows exist after a pass");
+	if (stats == nullptr || game == nullptr) {
 		return;
 	}
-	// The default workspace layout docks Stats into the right node beside the
-	// mandatory Game center; a docked window ignores a parked position, so the
-	// "away from home" state here IS the docked one.
 	ImGui::NewFrame();
 	tools.pass().draw_frame(2);
 	ImGui::Render();
-	CHECK(stats->DockId != 0, "parked in the default right dock node");
+	CHECK(stats->DockId != 0, "Stats docked in the default right dock node");
+
+	// The entity windows open after the layout was created (a pick does
+	// this): the persisted dockspace has no place for them, so they float,
+	// and Stats is pulled out of its node the way a user drag would.
+	tools.entities_window().open = true;
+	tools.entity_properties_window().open = true;
+	ImGui::SetWindowDock(stats, 0, ImGuiCond_Always);
+	stats->Collapsed = true;
+	ImGui::NewFrame();
+	tools.pass().draw_frame(3);
+	ImGui::Render();
+	ImGuiWindow *entities = ImGui::FindWindowByName("Entities");
+	ImGuiWindow *properties = ImGui::FindWindowByName("Entity Properties");
+	CHECK(entities != nullptr && properties != nullptr, "the entity windows exist once open");
+	if (entities == nullptr || properties == nullptr) {
+		return;
+	}
+	ImGui::NewFrame();
+	tools.pass().draw_frame(4);
+	ImGui::Render();
+	CHECK(stats->DockId == 0, "Stats undocked (the away-from-home state)");
 
 	tools.pass().request_layout_reset();
 	CHECK(tools.pass().is_layout_reset_pending(), "a reset is pending");
 	ImGui::NewFrame();
-	tools.pass().draw_frame(3);
+	tools.pass().draw_frame(5);
 	ImGui::Render();
 	CHECK(!tools.pass().is_layout_reset_pending(), "the pass consumed the reset");
-	const ImGuiViewport *main = ImGui::GetMainViewport();
-	// The cascade steps 32 px per registration index: Game is 0, Stats is 1.
-	const float home_x = main->WorkPos.x + 24.0f + 32.0f;
-	const float home_y = main->WorkPos.y + 24.0f + 32.0f;
-	CHECK(!stats->Collapsed, "expanded");
-	CHECK(stats->DockId == 0, "undocked");
-	CHECK(stats->Pos.x == home_x && stats->Pos.y == home_y,
-			"home = the work corner cascade at the window's registration index");
-	CHECK(stats->Viewport == ImGui::GetMainViewport(), "inside the main viewport");
 	ImGui::NewFrame();
-	tools.pass().draw_frame(4);
+	tools.pass().draw_frame(6);
 	ImGui::Render();
-	CHECK(stats->Pos.x == home_x, "a one-shot: the next pass leaves placement alone");
+	CHECK(!stats->Collapsed, "expanded");
+	CHECK(stats->DockId != 0, "Stats is docked again");
+	CHECK(entities->DockId == stats->DockId, "Entities shares the right node with Stats");
+	CHECK(properties->DockId != 0 && properties->DockId != stats->DockId,
+			"Entity Properties docks into its own node under the right column");
+	CHECK(game->DockId != 0 && game->DockId != stats->DockId, "Game keeps the center node");
+	CHECK(properties->Pos.y > stats->Pos.y, "the Properties node sits below the right node");
+	CHECK(stats->Pos.x > game->Pos.x, "the right column sits beside the Game center");
+	CHECK(stats->Viewport == ImGui::GetMainViewport(), "inside the main viewport");
+	const ImGuiID stats_node = stats->DockId;
+	ImGui::SetWindowDock(stats, 0, ImGuiCond_Always);
+	ImGui::NewFrame();
+	tools.pass().draw_frame(7);
+	ImGui::Render();
+	ImGui::NewFrame();
+	tools.pass().draw_frame(8);
+	ImGui::Render();
+	CHECK(stats->DockId != stats_node, "a one-shot: a later user undock is left alone");
 }
 
 // The Entities window (ADR 0042 d6): the pushed directory record formats into
@@ -645,12 +674,24 @@ void test_entities_window_selects_the_picked_handle() {
 	tools.set_entity_directory(two_row_directory());
 	CHECK(tools.selected_entity_handle() == 0x1002, "reopening and pushing re-selects the entity");
 
-	// A push without the selected entity drops the selection (it is gone).
+	// The selection follows its handle across a reorder: the other row moves
+	// into the selected index and must not inherit the selection.
+	EntityDirectorySnapshot reordered = two_row_directory();
+	std::swap(reordered.rows[0], reordered.rows[1]);
+	tools.set_entity_directory(reordered);
+	CHECK(tools.selected_entity_handle() == 0x1002, "a reorder keeps the selected entity");
+	CHECK(std::strcmp(entities.row_name(0), "BRAVO") == 0, "...while the rows moved");
+
+	// A push without the selected entity drops the selection (it is gone);
+	// removing the FIRST row is the case where the old index now names the
+	// other entity.
+	tools.select_entity(0x3001);
 	EntityDirectorySnapshot without = two_row_directory();
-	without.rows.pop_back();
+	without.rows.erase(without.rows.begin());
 	tools.set_entity_directory(without);
 	CHECK(tools.selected_entity_handle() == opennova::world::EntityHandle::kInvalid,
-			"a push without the entity clears the selection");
+			"a push without the entity clears the selection instead of sliding to the next row");
+	tools.set_entity_directory(two_row_directory());
 
 	tools.select_entity(0x3001);
 	tools.clear_entity_selection();
@@ -662,6 +703,43 @@ void test_entities_window_selects_the_picked_handle() {
 	CHECK(!tools.needs_entity_detail(), "a closed Properties window wants no card");
 	tools.entity_properties_window().open = true;
 	CHECK(tools.needs_entity_detail(), "reopening it wants the card again");
+
+	// Closing the list while the card stays open keeps the directory flowing
+	// (the card reads the list's row) and the selection re-applies per push.
+	tools.entities_window().open = false;
+	ImGui::NewFrame();
+	tools.pass().draw_frame(3);
+	ImGui::Render();
+	CHECK(tools.needs_entity_directory(), "an open Properties window keeps the directory pushes");
+	CHECK(tools.selected_entity_handle() == 0x3001, "the closed list holds the selection pending");
+	tools.set_entity_directory(two_row_directory());
+	CHECK(entities.selected_row() != nullptr && entities.selected_row()->wire_handle == 0x3001,
+			"the next push resolves the row for the card even with the list closed");
+	tools.entities_window().open = true;
+
+	// A pick the directory never carries keeps the user's filter.
+	tools.entities_window().set_filter("brav");
+	tools.select_entity(0x0777);
+	CHECK(std::strcmp(entities.filter(), "brav") == 0, "an unresolved pick leaves the filter");
+	tools.set_entity_directory(two_row_directory());
+	CHECK(std::strcmp(entities.filter(), "brav") == 0 &&
+					tools.selected_entity_handle() == opennova::world::EntityHandle::kInvalid,
+			"a push without it drops the pick and still leaves the filter");
+	tools.entities_window().set_filter("");
+
+	// A closed window carries no focus request forward: the pick opened it,
+	// the user closed it again before its next Begin.
+	tools.select_entity(0x3001);
+	tools.entities_window().open = false;
+	tools.entity_properties_window().open = false;
+	ImGui::NewFrame();
+	tools.pass().draw_frame(4);
+	ImGui::Render();
+	CHECK(!entities.focus_requested() && !tools.entity_properties_window().focus_requested(),
+			"closing the windows drops their focus requests");
+	tools.entities_window().open = true;
+	tools.entity_properties_window().open = true;
+	tools.set_entity_directory(two_row_directory());
 
 	// The invalid handle is a clear, never a selection (pool 0 slot 0 = 0 is valid).
 	tools.select_entity(0);
@@ -684,7 +762,9 @@ void test_entity_properties_window_card_and_attrib_toggles() {
 	EntityPropertiesWindow &properties = tools.entity_properties_window();
 	tools.entities_window().open = true;
 	tools.entity_properties_window().open = true;
-	tools.set_entity_directory(two_row_directory());
+	EntityDirectorySnapshot directory = two_row_directory();
+	directory.authority = true;
+	tools.set_entity_directory(directory);
 
 	tools.set_entity_detail(detail_for(0x3001, DEF_ITEM_ATTRIB_NODISMEMBER, 0));
 	CHECK(!properties.detail_valid(), "a card for an unselected handle is dropped");
@@ -748,6 +828,63 @@ void test_entity_properties_window_card_and_attrib_toggles() {
 	CHECK(!tools.take_debug_request(request), "a toggle without a card is a no-op");
 }
 
+// The authority gate: the pushed snapshot says whether this peer owns the
+// world; without it the Properties window queues nothing (its controls draw
+// disabled), and while a wire session is live the AIData bit stays refused.
+void test_entity_edits_gate_on_the_pushed_authority() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	EntityPropertiesWindow &properties = tools.entity_properties_window();
+	EntitiesWindow &entities = tools.entities_window();
+	entities.open = true;
+	properties.open = true;
+	CHECK(!entities.authority(), "no push: no authority");
+
+	// A joiner's push: everything reads, nothing writes.
+	EntityDirectorySnapshot joiner = two_row_directory();
+	joiner.authority = false;
+	tools.set_entity_directory(joiner);
+	tools.select_entity(0x3001);
+	tools.set_entity_detail(detail_for(0x3001, DEF_ITEM_ATTRIB_NODISMEMBER, 0));
+	CHECK(properties.detail_valid(), "the joiner still gets the card");
+	CHECK(!properties.edits_enabled(), "...but no edits");
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace draws read-only");
+	ImGui::Render();
+	DebugRequest request;
+	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NODISMEMBER);
+	properties.toggle_item_attrib2(DEF_ITEM_ATTRIB2_FARP);
+	CHECK(!tools.take_debug_request(request), "a toggle without authority queues nothing");
+	CHECK(properties.detail_attrib() == DEF_ITEM_ATTRIB_NODISMEMBER, "...and moves no bit");
+
+	// The authority's push with a live wire session: edits work, AIData stays.
+	EntityDirectorySnapshot live = two_row_directory();
+	live.authority = true;
+	live.session_live = true;
+	tools.set_entity_directory(live);
+	CHECK(entities.authority() && entities.session_live(), "the facts ride the snapshot");
+	CHECK(properties.edits_enabled(), "authority enables the edits");
+	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_AIDATA);
+	CHECK(!tools.take_debug_request(request), "the AIData bit is locked while a session is live");
+	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NODISMEMBER);
+	CHECK(tools.take_debug_request(request) && request.attrib == 0,
+			"the other bits toggle under a live session");
+
+	// Single player: AIData toggles too.
+	EntityDirectorySnapshot single = two_row_directory();
+	single.authority = true;
+	tools.set_entity_directory(single);
+	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_AIDATA);
+	CHECK(tools.take_debug_request(request) && request.attrib == DEF_ITEM_ATTRIB_AIDATA,
+			"AIData toggles without a wire session");
+
+	// An invalid push (the world unloaded) takes the authority with it.
+	tools.set_entity_directory(EntityDirectorySnapshot{});
+	CHECK(!entities.authority() && !properties.edits_enabled(), "no world: no authority, no edits");
+}
+
 }  // namespace
 
 int main() {
@@ -764,6 +901,7 @@ int main() {
 	test_entities_debug_request_queue_and_gating();
 	test_entities_window_selects_the_picked_handle();
 	test_entity_properties_window_card_and_attrib_toggles();
+	test_entity_edits_gate_on_the_pushed_authority();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

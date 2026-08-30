@@ -46,9 +46,10 @@ public:
 	void set_frame_stats(FrameStatsBoard *board);
 
 	// The Entities window's record/request channel (ADR 0042 d6). The
-	// embedder pushes the directory by value (an invalid snapshot clears),
-	// gated on needs_entity_directory (pass open && window open) so nobody
-	// builds snapshots a closed window would drop, and drains the window's
+	// embedder pushes the directory by value (an invalid snapshot clears; it
+	// carries the authority fact the edits gate on), gated on
+	// needs_entity_directory (pass open && either entity window open) so
+	// nobody builds snapshots no window would show, and drains the windows'
 	// typed debug requests into the engine-backed delegates.
 	void set_entity_directory(EntityDirectorySnapshot snapshot);
 	bool needs_entity_directory() const;

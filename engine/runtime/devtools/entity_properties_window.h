@@ -7,11 +7,15 @@
 // the game, the card underneath, or torn out onto another monitor).
 //
 // The window owns no selection: it reads the Entities window's (selected
-// row, pending handle) and queues its typed requests into that window's
-// queue, so the embedder drains one queue. Visibility-armed: while hidden it
-// drops its card and the embedder (gated on GameDevTools::needs_entity_detail)
-// stops building new ones. A card that no longer names the selection reads
-// as invalid (the selection moved; the embedder pushes the new card at once).
+// row, pending handle) and its pushed authority facts, and queues its typed
+// requests into that window's queue, so the embedder drains one queue. Every
+// edit is enabled only under authority (single player or the session host):
+// a joiner reads everything and changes nothing, and while a wire session
+// is live the AIData bit stays refused (it changes what the 0x0D record
+// carries for a stock client). Visibility-armed: while hidden it drops its
+// card and the embedder (gated on GameDevTools::needs_entity_detail) stops
+// building new ones. A card that no longer names the selection reads as
+// invalid (the selection moved; the embedder pushes the new card at once).
 #pragma once
 
 #include <runtime/devtools/debug_request.h>
@@ -40,25 +44,30 @@ public:
 	// selection is dropped); an invalid card clears the pane. The attrib edit
 	// words re-seed from every accepted push.
 	void set_detail(EntityDetailSnapshot detail);
-	// (pass open && window open && a selection): the embedder skips building
-	// cards nobody shows.
-	bool wants_detail() const;
+	// Drop the card and the action-edit seeds (the selection cleared, or the
+	// world changed: packed handles repeat across missions).
+	void clear();
 	bool detail_valid() const;
 	uint16_t detail_handle() const { return detail_.card.handle; }
 	uint32_t detail_attrib() const { return attrib_edit_; }
 	uint32_t detail_attrib2() const { return attrib2_edit_; }
 	int32_t detail_health_max() const { return detail_.card.world.health_max; }
 	const char *detail_item_name() const { return detail_.card.world.item_name.c_str(); }
+	// The edits are enabled: a valid card under authority.
+	bool edits_enabled() const;
 
 	// One items.def attrib bit flipped on the selected entity: the edit word
 	// changes and one SetEntityItemAttrib request carrying both full words
 	// leaves through the Entities window's queue. The checkbox handlers call
 	// these; they are also the headless test seam (clicking a checkbox needs
-	// a real backend). No-ops without a valid detail card.
+	// a real backend). No-ops without a valid card, without authority, and for
+	// the AIData bit while a wire session is live.
 	void toggle_item_attrib(uint32_t bit);
 	void toggle_item_attrib2(uint32_t bit);
 
 private:
+	void toggle_bit(bool second_word, uint32_t bit);
+	bool bit_locked(bool second_word, uint32_t bit) const;
 	void seed_edits_from_selection();
 	void draw_actions();
 	void draw_card();

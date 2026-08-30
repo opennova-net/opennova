@@ -2,7 +2,7 @@
 
 #include <runtime/devtools/entities_window.h>
 
-#include <formats/def/def.h> // the items.def attrib keyword tables (the parser's own)
+#include <formats/def/def.h> // the items.def attrib keyword + type-name tables (the parser's own)
 #include <formats/mission/mission.h> // kItemIdOffset: wire type id -> items.def id
 
 #include <imgui.h>
@@ -14,21 +14,6 @@ namespace opennova::devtools {
 namespace {
 
 constexpr uint16_t kNoHandle = world::EntityHandle::kInvalid;
-
-// The items.def `type` values as the def parser documents them (DefItemDef.type).
-const char *item_type_name(int type) {
-	switch (type) {
-		case 1: return "vehicle";
-		case 2: return "decoration";
-		case 3: return "person";
-		case 4: return "marker";
-		case 5: return "building";
-		case 6: return "object";
-		case 8: return "effect";
-		case 0: return "unset";
-		default: return "?";
-	}
-}
 
 int keyword_count(bool second_word) {
 	return second_word ? def_item_attrib2_keyword_count() : def_item_attrib_keyword_count();
@@ -55,19 +40,26 @@ uint32_t known_mask(bool second_word) {
 void EntityPropertiesWindow::on_visibility(bool visible) {
 	shown_ = visible;
 	if (!visible) {
-		// Drop the card so a closed window holds nothing; the embedder's
-		// needs_entity_detail gate stops the pushes on the same edge.
-		detail_ = EntityDetailSnapshot{};
+		// Drop the card and the seeds so a closed window holds nothing; the
+		// embedder's needs_entity_detail gate stops the pushes on the same edge.
+		clear();
 	}
 }
 
-bool EntityPropertiesWindow::wants_detail() const {
-	return shown_ && entities_.selected_handle() != kNoHandle;
+void EntityPropertiesWindow::clear() {
+	detail_ = EntityDetailSnapshot{};
+	attrib_edit_ = 0;
+	attrib2_edit_ = 0;
+	seeded_handle_ = kNoHandle;
 }
 
 bool EntityPropertiesWindow::detail_valid() const {
 	// A card for a selection that moved is stale, whatever it says.
 	return detail_.card.valid && detail_.card.handle == entities_.selected_handle();
+}
+
+bool EntityPropertiesWindow::edits_enabled() const {
+	return detail_valid() && entities_.authority();
 }
 
 void EntityPropertiesWindow::set_detail(EntityDetailSnapshot detail) {
@@ -83,12 +75,23 @@ void EntityPropertiesWindow::set_detail(EntityDetailSnapshot detail) {
 	attrib2_edit_ = static_cast<uint32_t>(detail_.card.world.item_attrib2);
 }
 
-void EntityPropertiesWindow::toggle_item_attrib(uint32_t bit) {
-	if (!detail_valid()) {
+// The AIData gate also decides what the 0x0D wire record carries: with a
+// wire session live it stays as the def authored it, for a stock client's sake.
+bool EntityPropertiesWindow::bit_locked(bool second_word, uint32_t bit) const {
+	return !second_word && bit == DEF_ITEM_ATTRIB_AIDATA && entities_.session_live();
+}
+
+void EntityPropertiesWindow::toggle_bit(bool second_word, uint32_t bit) {
+	if (!edits_enabled() || !detail_.card.has_world || bit_locked(second_word, bit)) {
 		return;
 	}
-	attrib_edit_ ^= bit;
-	detail_.card.world.item_attrib = static_cast<int64_t>(attrib_edit_);
+	if (second_word) {
+		attrib2_edit_ ^= bit;
+		detail_.card.world.item_attrib2 = static_cast<int64_t>(attrib2_edit_);
+	} else {
+		attrib_edit_ ^= bit;
+		detail_.card.world.item_attrib = static_cast<int64_t>(attrib_edit_);
+	}
 	DebugRequest request;
 	request.kind = DebugRequest::Kind::SetEntityItemAttrib;
 	request.target.packed = detail_.card.handle;
@@ -97,18 +100,12 @@ void EntityPropertiesWindow::toggle_item_attrib(uint32_t bit) {
 	entities_.enqueue_request(request);
 }
 
+void EntityPropertiesWindow::toggle_item_attrib(uint32_t bit) {
+	toggle_bit(false, bit);
+}
+
 void EntityPropertiesWindow::toggle_item_attrib2(uint32_t bit) {
-	if (!detail_valid()) {
-		return;
-	}
-	attrib2_edit_ ^= bit;
-	detail_.card.world.item_attrib2 = static_cast<int64_t>(attrib2_edit_);
-	DebugRequest request;
-	request.kind = DebugRequest::Kind::SetEntityItemAttrib;
-	request.target.packed = detail_.card.handle;
-	request.attrib = attrib_edit_;
-	request.attrib2 = attrib2_edit_;
-	entities_.enqueue_request(request);
+	toggle_bit(true, bit);
 }
 
 // Seed the action edits from the selected row once per selection, so
@@ -175,7 +172,6 @@ void EntityPropertiesWindow::draw_actions() {
 }
 
 void EntityPropertiesWindow::draw_attrib_grid(const char *label, bool second_word) {
-	const uint32_t word = second_word ? attrib2_edit_ : attrib_edit_;
 	ImGui::SeparatorText(label);
 	ImGui::PushID(label);
 	const int count = keyword_count(second_word);
@@ -183,23 +179,29 @@ void EntityPropertiesWindow::draw_attrib_grid(const char *label, bool second_wor
 		for (int i = 0; i < count; ++i) {
 			ImGui::TableNextColumn();
 			const uint32_t bit = keyword_bit(second_word, i);
+			// The live word: a toggle earlier in this pass already moved it.
+			const uint32_t word = second_word ? attrib2_edit_ : attrib_edit_;
 			bool checked = (word & bit) != 0;
+			const bool locked = bit_locked(second_word, bit);
+			ImGui::BeginDisabled(locked);
 			if (ImGui::Checkbox(keyword(second_word, i), &checked)) {
-				if (second_word) {
-					toggle_item_attrib2(bit);
-				} else {
-					toggle_item_attrib(bit);
-				}
+				toggle_bit(second_word, bit);
 			}
-			if (!second_word && bit == DEF_ITEM_ATTRIB_AIDATA && ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("The AI-class gate: also changes what the 0x0D wire record carries.\n"
-								  "Overrides are per entity, never replicated (joiners keep their own\n"
-								  "items.def), and re-stamped by the next items.def sweep\n"
-								  "(mission load, net topology sync).");
+			ImGui::EndDisabled();
+			if (!second_word && bit == DEF_ITEM_ATTRIB_AIDATA &&
+					ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip(locked
+						? "Locked while a wire session is live: the AI-class gate also decides\n"
+						  "what the 0x0D record carries, and a stock client reads its own def."
+						: "The AI-class gate: also changes what the 0x0D wire record carries.\n"
+						  "Overrides are per entity, never replicated (joiners keep their own\n"
+						  "items.def), and re-stamped by the next items.def sweep\n"
+						  "(mission load, net topology sync).");
 			}
 		}
 		ImGui::EndTable();
 	}
+	const uint32_t word = second_word ? attrib2_edit_ : attrib_edit_;
 	const uint32_t other = word & ~known_mask(second_word);
 	if (other != 0) {
 		ImGui::Text("other bits: 0x%08X", other);
@@ -213,24 +215,25 @@ void EntityPropertiesWindow::draw_card() {
 		return;
 	}
 	const world::inspect::EntityCard &card = detail_.card;
+	const world::EntityHandle handle{card.handle};
 	if (card.has_world) {
 		const world::inspect::WorldDetail &w = card.world;
 		ImGui::Text("Item: %s  (type %d / def %d, %s)",
 				w.item_name.empty() ? "(no def)" : w.item_name.c_str(), w.item_id,
-				w.item_id + mission::kItemIdOffset, item_type_name(w.item_type));
+				w.item_id + mission::kItemIdOffset, def_item_type_name(w.item_type));
 		ImGui::Text("Handle %d:%d  ssn %d  bms %d  team %d  %s%s",
-				(card.handle >> 12) & 0xF, card.handle & 0xFFF, w.net_id, w.bms_id, w.team,
+				handle.pool(), handle.slot(), w.net_id, w.bms_id, w.team,
 				w.alive ? "alive" : "dead", w.hidden ? ", hidden" : "");
-		ImGui::Text("Health %d / %d  at %.1f %.1f %.1f  yaw %.0f",
+		// Entity::yaw is whole mission degrees (inspect.h WorldDetail).
+		ImGui::Text("Health %d / %d  at %.1f %.1f %.1f  yaw %d",
 				w.health, w.health_max, w.mission_position.x, w.mission_position.y,
-				w.mission_position.z,
-				static_cast<double>(w.yaw) * (360.0 / 4294967296.0));
+				w.mission_position.z, w.yaw);
 	}
 	if (card.has_ai) {
 		const world::inspect::AiDetail &a = card.ai;
-		ImGui::Text("AI #%d: %s  alert %d  waypoint %d/%d  ai-health %d",
+		ImGui::Text("AI #%d: %s  alert %d  waypoint %d/%d  ai-health %d  heading %.0f",
 				card.ai_index, a.state_name.c_str(), a.alert, a.waypoint_id, a.wp_number,
-				a.ai_health);
+				a.ai_health, a.yaw_deg);
 	}
 	ImGui::Text("logic tick %llu", static_cast<unsigned long long>(detail_.logic_tick));
 	// The attrib words live on the registry row; a brain without a row has
@@ -251,15 +254,23 @@ void EntityPropertiesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	}
 	const world::inspect::EntityRow *row = entities_.selected_row();
 	if (row == nullptr) {
+		const world::EntityHandle pending{handle};
 		ImGui::Text("Selected entity %d:%d awaits the next directory push.",
-				(handle >> 12) & 0xF, handle & 0xFFF);
+				pending.pool(), pending.slot());
 		return;
 	}
 	seed_edits_from_selection();
 	ImGui::Text("%s  (ssn %d)", row->name.empty() ? "(unnamed)" : row->name.c_str(), row->net_id);
+	const bool authority = entities_.authority();
+	if (!authority) {
+		ImGui::TextUnformatted("Read-only: this peer is a joiner; the session authority owns entity state.");
+	}
+	// Every edit sits under the authority gate: the actions and the grids.
+	ImGui::BeginDisabled(!authority);
 	draw_actions();
 	ImGui::Separator();
 	draw_card();
+	ImGui::EndDisabled();
 }
 
 }  // namespace opennova::devtools
