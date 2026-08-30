@@ -555,6 +555,20 @@ void ObjectModel::set_active_lod(int p_lod_index) {
 	apply_runtime_state(0.0);
 }
 
+void ObjectModel::set_authored_lod_owner(ObjectModel *p_owner) {
+	authored_lod_owner_ = p_owner != nullptr && p_owner != this
+			? p_owner->get_instance_id()
+			: ObjectID();
+}
+
+ObjectModel *ObjectModel::get_authored_lod_owner() const {
+	if (authored_lod_owner_.is_null()) {
+		return nullptr;
+	}
+	return Object::cast_to<ObjectModel>(
+			ObjectDB::get_instance(authored_lod_owner_));
+}
+
 void ObjectModel::set_authored_lod_enabled(bool p_enabled) {
 	if (authored_lod_enabled_ == p_enabled) {
 		return;
@@ -809,8 +823,15 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 		int lod_index = 0;
 	};
 	LocalVector<LodSwitch> switches;
+	// Attachments take their owner's level after the owners' own selections
+	// have been applied (renderer::attachment_lod_index).
+	LocalVector<ObjectModel *> attachments;
 	for (ObjectModel *model : authored_lod_models_) {
 		if (!model->is_inside_tree()) {
+			continue;
+		}
+		if (!model->authored_lod_owner_.is_null()) {
+			attachments.push_back(model);
 			continue;
 		}
 		const Transform3D world = model->get_global_transform();
@@ -849,6 +870,20 @@ int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 			continue;
 		}
 		change.model->set_active_lod(change.lod_index);
+		++applied;
+	}
+	for (ObjectModel *attachment : attachments) {
+		if (!authored_lod_models_.has(attachment)) {
+			continue;
+		}
+		const ObjectModel *owner = attachment->get_authored_lod_owner();
+		const int level = opennova::renderer::attachment_lod_index(
+				owner != nullptr ? owner->active_lod_ : 0,
+				static_cast<int>(attachment->authored_lod_thresholds_q16_.size()));
+		if (level < 0 || level == attachment->active_lod_) {
+			continue;
+		}
+		attachment->set_active_lod(level);
 		++applied;
 	}
 	return applied;
@@ -1643,6 +1678,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_authored_lod_enabled);
 	ClassDB::bind_method(D_METHOD("is_authored_lod_enabled"),
 			&ObjectModel::is_authored_lod_enabled);
+	ClassDB::bind_method(D_METHOD("set_authored_lod_owner", "owner"),
+			&ObjectModel::set_authored_lod_owner);
+	ClassDB::bind_method(D_METHOD("get_authored_lod_owner"),
+			&ObjectModel::get_authored_lod_owner);
 	ClassDB::bind_method(D_METHOD("set_authored_occluders_enabled", "enabled"),
 			&ObjectModel::set_authored_occluders_enabled);
 	ClassDB::bind_method(D_METHOD("are_authored_occluders_enabled"),

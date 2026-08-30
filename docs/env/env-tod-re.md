@@ -435,7 +435,11 @@ positively on both axes (divergence minted at the sky binding slice).
 
 **VS constants** (uploads @ 0x579709..0x579868, both passes): c0-3 WVP, c4-7 world,
 **c8 = eye world position** (fog reference — the pre-C6 "sky highlight float mirror" label
-was wrong; @ 0x27219f0), c9 `[fogDist×0.9/65536, 0, 1, 0]`, c10 `[0, 0.5, 1, 0.25]`,
+was wrong; @ 0x27219f0), c9 `[fogDist×0.9/65536, 0, 1, 0]` (fogDist = the RAW smoothed
+`Env_FogDistCurrent` `@ 0x5792c2`, NOT the overcast-scaled `Environment_GetFogEndDistance`
+end the object/terrain passes fog with; confirmed 2026-08-29: `sky_frame.cpp` feeds the
+unscaled current and the `environment_state` ctest pins it against the scaled device
+end), c10 `[0, 0.5, 1, 0.25]`,
 c11 skybase, c12 (skybright − skybase), c13 = direct near-unit sun getter tuple (pass 1) /
 active getter tuple, moon at night (pass 2), c14 = the same point at camera + dir×2000 pushed
 through the view-proj transform and normalized (clip-space proximity reference),

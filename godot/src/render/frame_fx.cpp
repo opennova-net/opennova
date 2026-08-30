@@ -1,5 +1,6 @@
 #include "render/frame_fx.h"
 #include "render/q3_frame_adapter.h"
+#include "render/rd_fullscreen.h"
 
 #include <algorithm>
 #include <array>
@@ -74,16 +75,6 @@ enum class BlendMode : std::uint8_t {
 	Add = 1,
 	SourceAlphaAdd = 2,
 };
-
-const char *kFrameVertexShader = R"GLSL(#version 450
-void main() {
-	const vec2 positions[3] = vec2[3](
-			vec2(-1.0, -1.0),
-			vec2(3.0, -1.0),
-			vec2(-1.0, 3.0));
-	gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-}
-)GLSL";
 
 const char *kFrameFragmentShader = R"GLSL(#version 450
 layout(set = 0, binding = 0) uniform sampler2D source_color;
@@ -458,7 +449,7 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	source.instantiate();
 	source->set_language(RenderingDevice::SHADER_LANGUAGE_GLSL);
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_VERTEX,
-			String::utf8(kFrameVertexShader));
+			String::utf8(kRdFullscreenVertexShader));
 	source->set_stage_source(RenderingDevice::SHADER_STAGE_FRAGMENT,
 			String::utf8(kFrameFragmentShader));
 	Ref<RDShaderSPIRV> spirv = rd->shader_compile_spirv_from_source(source);

@@ -4,9 +4,11 @@ extends GameProbe
 ## environment cube. Needs a real Forward+ D3D12 display driver (not
 ## --headless, not gl_compatibility): it validates the complete live seam,
 ## six rendered SubViewports, retail's render-float -> Godot X/Z axis
-## conjugation, Image -> Cubemap layer order, face orientation, shader
-## sampling, and the gamma-byte 0x60 dim multiply, on a ProbeStage of its own
-## so the live world never enters the faces.
+## conjugation, the RenderingDevice copy of each face into its cubemap layer
+## (layer order, face orientation and the gamma-byte 0x60 dim multiply are
+## applied by that blit, with no CPU readback), and shader sampling of the
+## published TextureCubemapRD, on a ProbeStage of its own so the live world
+## never enters the faces.
 ## [orig: GTexture_RenderCubeMapFace @ 0x6864d0;
 ## update_environment_cubemap @ 0x6106a0; face callback @ 0x5c3700].
 
@@ -63,15 +65,21 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	stage.add_child(capture)
 	await ctx.tree.process_frame
 	capture.advance_frame(Vector3.ZERO)
-	# The six UPDATE_ONCE faces render with this frame; the readbacks publish
-	# on the following advance.
+	# The six UPDATE_ONCE faces render with this frame; the device copy
+	# publishes on the following advance.
 	await ctx.tree.process_frame
 	capture.advance_frame(Vector3.ZERO)
 	if not capture.is_cube_ready():
-		return ProbeVerdict.failed("six rendered faces did not publish on the following advance")
+		return ProbeVerdict.failed("six rendered faces did not publish on the following advance (%s)" %
+				capture.get_device_failure())
 	var cube := capture.get_environment_cube()
-	if cube == null or cube.get_layers() != EnvironmentCubeCapture.FACE_COUNT:
-		return ProbeVerdict.failed("published resource is not a six-layer Cubemap")
+	if cube == null or not (cube is TextureCubemapRD) or \
+			cube.get_layers() != EnvironmentCubeCapture.FACE_COUNT or \
+			not cube.texture_rd_rid.is_valid():
+		return ProbeVerdict.failed("published resource is not a six-layer TextureCubemapRD")
+	if capture.get_device_publish_count() != 1:
+		return ProbeVerdict.failed("expected exactly one device publication, got %d" %
+				capture.get_device_publish_count())
 
 	var sampler := _make_sampler(cube)
 	ctx.tree.root.add_child(sampler)
@@ -152,7 +160,7 @@ void fragment() {
 	return marker
 
 
-func _make_sampler(cube: Cubemap) -> SubViewport:
+func _make_sampler(cube: TextureCubemapRD) -> SubViewport:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(SAMPLE_COUNT * SAMPLE_CELL_WIDTH, SAMPLE_HEIGHT)
 	viewport.transparent_bg = false

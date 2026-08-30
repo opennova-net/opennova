@@ -947,6 +947,10 @@ func test_far_particles_water_and_camera_particles_reach_the_frame_in_retail_ord
 
 
 const Q3_ADDITIVE_LUM_3DI := "res://../fixtures/threedi/synth/mount.3di"
+# The same heat slab authored FF_ST_AB_LUM (minimal_3di_gen mount_mtrl2_ab_lum).
+const Q3_ALPHA_LUM_3DI := "res://../fixtures/threedi/synth/mount_mtrl2_ab_lum.3di"
+# The per-vertex skinned person wearing FF_ST_AD_LUM (person_mtrl0_ad_lum).
+const Q3_SKINNED_LUM_3DI := "res://../fixtures/threedi/synth/person_mtrl0_ad_lum.3di"
 
 
 func _keep_only_shader_surfaces(root: Node, shader_fragment: String) -> void:
@@ -1092,10 +1096,13 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 	water.release_runtime_renderer_resources()
 
 
-func _additive_lum_slab_view(background: Color) -> Dictionary:
-	# The mount fixture's FF_ST_AD_LUM heat slab, dimmed to u_rgb_mod 0.25,
-	# centred 10 u ahead of and 5 u below the eye over the given background;
-	# every other surface stays out of the frame.
+func _additive_lum_slab_view(background: Color,
+		fixture: String = Q3_ADDITIVE_LUM_3DI,
+		shader_fragment: String = "/self_lit/additive") -> Dictionary:
+	# The mount fixture's FF_ST_AD_LUM heat slab (or the named fixture's first
+	# surface on the named self_lit wrapper), dimmed to u_rgb_mod 0.25, centred
+	# 10 u ahead of and 5 u below the eye over the given background; every
+	# other surface stays out of the frame.
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(192, 144)
 	viewport.own_world_3d = true
@@ -1120,10 +1127,10 @@ func _additive_lum_slab_view(background: Color) -> Dictionary:
 	viewport.add_child(model)
 	model.set_process(false)
 	var data := ObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(Q3_ADDITIVE_LUM_3DI)), OK)
+	assert_eq(data.open_file(ProjectSettings.globalize_path(fixture)), OK)
 	model.set_object_data(data)
 	model.scale = Vector3.ONE * 10.0
-	_keep_only_shader_surfaces(model, "/self_lit/additive")
+	_keep_only_shader_surfaces(model, shader_fragment)
 	model.advance_runtime_frame(1.0 / 62.0)
 	for row in model.get_surface_materials():
 		var material := row as ShaderMaterial
@@ -1133,7 +1140,7 @@ func _additive_lum_slab_view(background: Color) -> Dictionary:
 			material.set_shader_parameter("u_rgb_mod", Vector3(0.25, 0.25, 0.25))
 			material.set_shader_parameter("u_alpha_mod", 1.0)
 	var slab := _first_visible_mesh(model)
-	assert_not_null(slab, "the mount fixture carries an additive LUM surface")
+	assert_not_null(slab, "the fixture carries a LUM surface on %s" % shader_fragment)
 	var pixel := Vector2i.ZERO
 	if slab != null:
 		var target := Vector3(100.3, 22.0, -43.7)
@@ -1143,7 +1150,75 @@ func _additive_lum_slab_view(background: Color) -> Dictionary:
 	var renderer := FrameFx.new()
 	viewport.add_child(renderer)
 	return {"viewport": viewport, "renderer": renderer, "pixel": pixel,
-			"slab": slab, "environment": environment_resource}
+			"slab": slab, "environment": environment_resource, "camera": camera}
+
+
+func test_alpha_blend_lum_strip_contributes_nothing_to_q3() -> void:
+	# _FFP.fx's SELFLUM block sets MaterialDiffuse = float4(ColorSrcZero, 0),
+	# so the LUM NORMAL copy carries alpha 0 into the Q3 target; under the
+	# AlphaBlend strip's SRCALPHA/INVSRCALPHA that leaves the black-cleared
+	# target untouched. The beauty pass still shows the strip (its wrapper
+	# writes texture alpha): the copy reaches the draw list and paints
+	# nothing.
+	var view := _additive_lum_slab_view(Color(0.2, 0.4, 0.6),
+			Q3_ALPHA_LUM_3DI, "/self_lit/alpha")
+	if view.slab == null:
+		return
+	var renderer := view.renderer as FrameFx
+	var q3_image: Image = await _render_q3_frame(renderer)
+	var report := renderer.get_backend_report()
+	if not bool(report.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_gt(int(report.get("q3_drawn_commands", 0)), 0,
+			"the AlphaBlend LUM slab reaches the Q3 draw list: %s" % report)
+	assert_not_null(q3_image, "the terminal effect exposes its Q3 target")
+	if q3_image == null:
+		return
+	var pixel: Vector2i = view.pixel
+	var beauty: Image = (view.viewport as SubViewport).get_texture().get_image()
+	var beauty_pixel := beauty.get_pixel(pixel.x, pixel.y)
+	assert_gt(absf(beauty_pixel.r - 0.2) + absf(beauty_pixel.g - 0.4)
+			+ absf(beauty_pixel.b - 0.6), 0.1,
+			"the beauty pass draws the AlphaBlend LUM strip over the background: %s"
+			% beauty_pixel)
+	var copy := q3_image.get_pixel(pixel.x, pixel.y)
+	assert_lt(copy.r + copy.g + copy.b, 3.0 / 255.0,
+			"the alpha-0 SELFLUM copy leaves the Q3 target black at %s: %s" % [pixel, copy])
+	assert_lt(_q3_peak_near(q3_image, pixel, 2), 3.0 / 255.0,
+			"nothing of the strip lands near %s in the Q3 target" % pixel)
+	renderer.shutdown()
+
+
+func test_skinned_lum_model_never_reaches_q3() -> void:
+	# Retail's bone path (collect_render_batches_for_entity) appends only the
+	# opaque list and the two alpha queues; the Q3 copy is the rigid object
+	# path's alone. A per-vertex skinned model wearing a LUM material is
+	# therefore never a Q3 producer (renderer::q3_object_source_admitted),
+	# however glow-capable its material word is.
+	var view := _additive_lum_slab_view(Color.BLACK, Q3_SKINNED_LUM_3DI,
+			"/self_lit/additive")
+	if view.slab == null:
+		return
+	var renderer := view.renderer as FrameFx
+	var q3_image: Image = await _render_q3_frame(renderer)
+	var report := renderer.get_backend_report()
+	if not bool(report.get("rd_available", false)):
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_eq(int(report.get("q3_drawn_commands", 0)), 0,
+			"a skinned LUM model publishes no Q3 source: %s" % report)
+	assert_not_null(q3_image, "the terminal effect exposes its Q3 target")
+	if q3_image == null:
+		return
+	var pixel: Vector2i = view.pixel
+	var beauty: Image = (view.viewport as SubViewport).get_texture().get_image()
+	var beauty_pixel := beauty.get_pixel(pixel.x, pixel.y)
+	assert_gt(beauty_pixel.r + beauty_pixel.g + beauty_pixel.b, 0.1,
+			"the beauty pass draws the skinned LUM model: %s" % beauty_pixel)
+	assert_lt(_q3_peak_near(q3_image, pixel, 2), 3.0 / 255.0,
+			"the Q3 target stays black where the skinned model draws")
+	renderer.shutdown()
 
 
 func test_lum_q3_copy_is_the_selflum_block_not_the_beauty_pixel() -> void:

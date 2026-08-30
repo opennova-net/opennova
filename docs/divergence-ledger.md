@@ -391,7 +391,7 @@ host fixture is removed. `[orig: WacAction_Win @0x4ED4A0;
 EventAction_Dispatch EventAction_Dispatch @0x4542E0, the RedWin case @0x454495; Server_TickUpdate @0x51DA04;
 Server_ProcessRoundEnd @0x5164F0]`
 
-Closed 2026-08-29: **D-WPN-29** -> `FIXED` — the heat window's submerged release has its live source: the local pump feeds `WeaponFsmInputs::submerged` from the owner's BODY Z against `env.water_z` (not the drowning bit, not the eye height), so a body at or below the water plane drops a live window unless the def carries Underwater, and no authored water never submerges `[orig: WeaponAction_ProcessFrame @0x540e50 — 'Position.Z > Env_WaterHeightFixed || (Def->Flags & 4)' @0x54101c keeps the window, the clear @0x54125f]` (`local_player_view_test` pump leg; net-re §5.62).
+Closed 2026-08-29: **D-WPN-29** -> `FIXED` — the heat window's submerged release has its live source: the local pump feeds `WeaponFsmInputs::submerged` from the owner's BODY Z against `env.water_z` (not the drowning bit, not the eye height), so a body at or below the water plane drops a live window unless the def carries Underwater, and no authored water never submerges `[orig: WeaponAction_ProcessFrame @0x540e60 — 'Position.Z > Env_WaterHeightFixed || (Def->Flags & 4)' @0x54101c keeps the window, the clear @0x54125f]` (`local_player_view_test` pump leg; net-re §5.62).
 
 Closed 2026-08-29: **D-THROW-2** -> `PERMANENT` — the bounce-kick and claymore-fan draws keep world-local streams of retail's generator shape rather than the shared process globals at `0x31BFBB0/B8`: the distribution is retail's, no coupled draw order is observable (every affected value is authority-drawn-and-shipped), and a shared clock-seeded stream is irreproducible by construction — the D-NET-115 ratification applied to the throwable family (register below; full entry: world-wac-ai-re §27.8).
 
@@ -965,7 +965,6 @@ object-model rungs), with the sort-key/pass-class semantics T1-pinned.
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-RORD-7 | Particle pass A runs at PRE_TRANSPARENT (before every transparent, water included) and pass B at POST_TRANSPARENT; retail draws far-side (below-water) object ALPHA strips before pass A, here they draw after it — a submerged transparent strip overlapping a far-side particle composites strip-over-particle instead of particle-over-strip. The emitter-scope water predicate, subset reversal, recursive packet order, and the mirror's consecutive pair are ported (render-order-re.md) | A | OPEN (bounded; reopened 2026-08-23 — the 2026-08-22 auxiliary far-alpha view closed it at the price of a second full-resolution scene render every frame and was withdrawn) | reopen only with a scene that shows the strip/particle overlap |
-| D-RORD-11 | The authored RLOD selector with its coarsest-slot back-off, frame scale, integer projected radius and sub-pixel cull is ported and every level stays retained, for individual models and for the per-instance static bin populations; threshold crossings still hard-switch the drawn level instead of dual-submitting far then near through retail's overlap fraction and repeat-draw path (render-order-re.md) | A | OPEN (bounded — visible only inside an authored RLOD transition band; hard switching avoids overlapping retained draws) | render-order RLOD transition; implement only if a captured scene shows a material pop |
 
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
@@ -978,6 +977,7 @@ Closed: **D-RORD-6** -> `PERMANENT` — The two original sort-key quirks (opaque
 Closed 2026-08-12: **D-RORD-8** -> `FIXED` — The frame pipeline now places the current-tick local view before terrain and foliage; terrain samples the live viewport camera and foliage consumes the same render transform, eliminating the hard-cut one-frame lag (full detail: render-order-re.md).
 Closed 2026-08-22: **D-RORD-5** -> `FIXED` — `FrameFx` owns the exact capture, 256² weighted blur, 45-degree half-strength SRCALPHA/ONE composite, and terminal ordering; water contributes its NV bright pass, not its full color. On 2026-08-29 the source became a typed `Q3FrameCompiler` draw list in a compositor-owned full-resolution target attached to resolved beauty depth; the auxiliary camera/view and proxy/fallback paths were deleted (full detail: render-order-re.md).
 Closed 2026-08-29: **D-RORD-10** -> `FIXED` — typed object, static-instance, skinned-pose, water, celestial, and sun producers feed the focused RenderingDevice target against resolved beauty depth, through a retained per-source geometry cache (packed once, device buffer per entry, no per-frame server readback; the water strip publishes its CPU arrays, a static RLOD switch or carve invalidates only its instance rows). No second shared-world submission or depth-occluder rerasterization remains.
+Closed 2026-08-29: **D-RORD-11** -> `FIXED` (MATCHING: the divergence claim was refuted, no drawn behaviour changed) — retail does NOT cross-fade or dual-submit across an RLOD threshold: `Model_SelectRlodLevel @ 0x5c3b20` returns one level in EAX, its overlap fraction goes only to `0x29ACD9C` whose sole reader is the callerless stub `@ 0x5c38c0`, and the `0x10000000` pair at `Terrain_RenderSectorEntitiesBySide @ 0x5c7ffc/@ 0x5c8020` is the head+body player avatar (each part walks its own table with one projected radius). The hard switch is the port; the dead `blend_fraction` output was deleted and the attachment rule (the parent's level clamped to the overlay's own count, `BoneCallback_org0_World @ 0x4e39c4..0x4e3e51`) ported as `renderer::attachment_lod_index` (full detail: render-order-re.md).
 Closed 2026-08-22: **D-RORD-3** -> `FIXED` — every retained rigid alpha strip owns its priority material and is classified from its live transformed authored center whenever its model transform or the water plane changes (2026-08-23: change-driven — the same result as retail's per-frame recompute, without keeping every alpha-strip model awake); bone-path alpha follows retail's entity-side submit selector, and the far/camera-side ladder reverses from the adjusted render eye when underwater (full detail: render-order-re.md; GUT `object_model_runtime_gate_test` / `render_shader_cache_handoff_test`).
 
 ### Render — lighting — [render/render-lighting-re.md](render/render-lighting-re.md) (D-RLIT catalog; REN-5)
@@ -1065,9 +1065,11 @@ hemisphere-reflection and Phong approximations are gone. The selected path
 hosts retail's 256² CubeEnvironment synchronously before the visible draw:
 six mapped 90° faces at player+1/clamped terrain+10, the callback's sky plus
 sun/moon only, exact 0x60 gamma-byte multiply, and the additive
-CubeRotSpecular/Env_LightBlock lobe. Godot's X/Z basis swap, documented
-Cubemap image order, all six face orientations, same-frame publication, and
-full/midtone bytes pass the checked-in Forward+ D3D12 probe. The exact 256²
+CubeRotSpecular/Env_LightBlock lobe. Godot's X/Z basis swap, the cube
+layer order, all six face orientations, same-frame publication, and
+full/midtone bytes pass the checked-in Forward+ D3D12 probe (2026-08-30: the
+faces are copied into the published RD cubemap on the RenderingDevice, no
+CPU readback, the same bytes). The exact 256²
 PhongMap and every source-specific pow-8/pow-16/pow-4/64 alpha-controlled
 lobe are separately generated and raster-pinned `[orig:
 init_render_textures @ 0x58f6e0; update_environment_cubemap @ 0x6106a0;
@@ -1144,8 +1146,8 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Terrain | 1 | 0 | 0 | 1 | 0 |
 | Foliage | 3 | 0 | 0 | 3 | 0 |
 | Fonts | 0 | 1 | 0 | 1 | 0 |
-| Render — draw order | 2 | 0 | 0 | 2 | 0 |
-| **Total** | **96** | **9** | **16** | **121** | 0 |
+| Render — draw order | 1 | 0 | 0 | 1 | 0 |
+| **Total** | **95** | **9** | **16** | **120** | 0 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-97.
 

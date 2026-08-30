@@ -493,6 +493,16 @@ Node3D *WirePresentPass::rebuild_held_weapon(int p_handle, int p_adm) {
 			// RenderSlot_RenderEntityAndChildren @0x5d78ef, see
 			// docs/render/render-lighting-re.md] — never a slot of its own.
 			built->set_slot_shadow_capture_with(resolve_wire_handle(p_handle));
+			// The held weapon draws at its owner's selected RLOD clamped to its
+			// own LOD count and never walks its own thresholds
+			// (renderer::attachment_lod_index). Retail draws it inside the
+			// HEAD submit of a composed avatar (the flagged body submit skips
+			// it), so the head part owns the level when there is one. The
+			// weapon never outlives its body (free_wire_node frees both), so
+			// one stamp at build suffices.
+			ObjectModel *body = resolve_wire_handle(p_handle);
+			ObjectModel *head = MissionObjectPlacer::avatar_head_part(body);
+			built->set_authored_lod_owner(head != nullptr ? head : body);
 			weapon_nodes_[p_handle] = built->get_instance_id();
 			apply_lighting_context(p_handle);
 		}

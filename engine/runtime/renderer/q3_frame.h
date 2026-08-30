@@ -17,10 +17,16 @@ namespace opennova::renderer {
 
 // These are the five witnessed draws in FrameFX's bloom-source bracket:
 // glow-capable object duplicates first, followed by the NV water redraw,
-// celestial discs, and the occlusion-independent sun glow.
+// celestial discs, and the occlusion-independent sun glow. They draw into
+// FrameFX's altbuffer, a backbuffer-sized render-target texture in the
+// display format (an X8R8G8B8 display gets an A8R8G8B8 altbuffer) with the
+// beauty depth-stencil still bound; the compiled list is that altbuffer's
+// content.
 // [orig: CRenderBatchQueue_SortAndFlush(4) @ 0x582a54;
 // render_water_surface(view, 1) @ 0x582a62;
-// render_celestial_bodies(1) / render_skybox_sun_glow(0, 0) @ 0x582a77].
+// render_celestial_bodies(1) / render_skybox_sun_glow(0, 0) @ 0x582a77;
+// FrameFX_CreateAltBufferTexture @ 0x582120 (format 22 -> 21 @ 0x582141,
+// CreateTexture @ 0x58217e)].
 enum class Q3Technique : std::uint8_t {
 	NormalCopy = 0,
 	RotatedSpecularGlass = 1,
@@ -46,6 +52,21 @@ enum class Q3GeometryKind : std::uint8_t {
 	StaticInstances = 1,
 	Skinned = 2,
 };
+
+// Whether a model's strips can publish Q3 copies at all. Only the rigid
+// object path collects the glow-capable duplicate; a per-vertex skinned
+// (bone-path) model never does, whatever its materials' capability words
+// say, so the bone path is never a Q3 producer. (Q3GeometryKind::Skinned
+// remains the rigid path's per-part posed geometry: a rigid model driven
+// through a bone palette, never a bone-path mesh.)
+// [orig: Render_SubmitEntity @ 0x5dade0 (modelData+16 & 1 selects the bone
+//  path); collect_render_batches_for_entity @ 0x5d94b0 appends only the
+//  opaque list and the Q1/Q2 alpha queues (@ 0x5d97ca, @ 0x5d983b); the Q3
+//  copy @ 0x5d93b5..0x5d9447 lives only in collect_render_objects_for_batch
+//  @ 0x5d8f20]
+inline constexpr bool q3_object_source_admitted(bool skinned_mesh) {
+	return !skinned_mesh;
+}
 
 // Glass.fx's GLOW technique samples the static CubeRotSpecular cube through
 // the sun-aligned MatRotSpecular. Render_FillStaticCubemaps builds that cube
