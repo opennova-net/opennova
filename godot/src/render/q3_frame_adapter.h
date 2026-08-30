@@ -4,7 +4,6 @@
 #include <memory>
 
 #include <godot_cpp/classes/ref.hpp>
-#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
@@ -14,58 +13,20 @@
 namespace godot {
 
 class Camera3D;
-class GeometryInstance3D;
-class Material;
 class Node;
 class RenderData;
 class RenderingDevice;
 class Viewport;
 
-// Device adapter for the portable Q3 compiler. Producer registration and
-// scene extraction run on the main thread; render callbacks consume only an
-// immutable packed frame and RenderingDevice/server RIDs.
+// Device adapter for the portable Q3 compiler. Producers register through
+// Q3SourceRegistry (persistent per-source records); the compile walks those
+// records on the main thread and touches only what changed; render
+// callbacks consume only an immutable packed frame and RenderingDevice/
+// server RIDs.
 class Q3FrameAdapter {
 public:
 	Q3FrameAdapter();
 	~Q3FrameAdapter();
-
-	static void register_object_material(const Ref<Material> &p_material,
-			const opennova::renderer::ObjectMaterialClassification &p_classification);
-	static void clone_object_material(const Ref<Material> &p_source,
-			const Ref<Material> &p_clone);
-	// Register (or re-register) an object surface instance with the material
-	// it currently draws: a glow-capable material makes it a compiled source
-	// (a node already registered keeps its entry and bumps its geometry
-	// generation, the swapped mesh is re-read once); any other material
-	// leaves an existing entry dormant. unregister_source parks an entry the
-	// same way without touching its generations.
-	static void register_object_source(GeometryInstance3D *p_source,
-			const Ref<Material> &p_material);
-	static void unregister_source(GeometryInstance3D *p_source);
-	// The classification a material was registered with; false (and
-	// r_classification untouched) for a material outside the registry.
-	static bool object_material_classification(const Ref<Material> &p_material,
-			opennova::renderer::ObjectMaterialClassification &r_classification);
-	// Water and celestial sources. `p_additive_surfaces` (bit i = surface i)
-	// is the blend the celestial producer installed per surface: a set bit
-	// draws that disc surface additively in Q3, a clear one alpha-blends it.
-	static void register_source(GeometryInstance3D *p_source,
-			opennova::renderer::Q3Source p_kind,
-			std::uint32_t p_additive_surfaces = 0);
-	// A producer that already holds a surface's CPU arrays (the water strip
-	// rebuilt from WaterCore every frame) hands them over here, so the cache
-	// re-packs from memory and never reads that surface back through the
-	// server. `p_arrays` is the Mesh::ARRAY_MAX layout the producer uploaded.
-	static void publish_geometry(GeometryInstance3D *p_source, int p_surface,
-			const Array &p_arrays);
-	// A producer that rebuilt a registered mesh bumps the source's geometry
-	// generation: the cache re-reads and re-packs that source's surfaces once
-	// at its next sight. A producer that only rewrote a MultiMesh's instance
-	// transforms (a static RLOD switch, a destruction carve) bumps the
-	// instance generation instead: only the cached rows are re-read, the
-	// packed surfaces and their device buffers stay.
-	static void invalidate_source(GeometryInstance3D *p_source);
-	static void invalidate_instances(GeometryInstance3D *p_source);
 
 	void compile_frame(Node *p_scope, Viewport *p_viewport, Camera3D *p_camera);
 	void clear_frame();

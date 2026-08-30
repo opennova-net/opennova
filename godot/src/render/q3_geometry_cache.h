@@ -142,6 +142,9 @@ public:
 	// Drops every entry and instance row whose source no longer exists; the
 	// entries become pending evictions for the render side.
 	void prune(const std::function<bool(std::uint64_t)> &p_source_alive);
+	// Drops one source's entries and instance rows (the focused compile
+	// names its dead sources from the registry instead of probing ObjectDB).
+	void evict_source(std::uint64_t p_source_id);
 	// Evictions the render side has not consumed yet: those minted in frames
 	// after `p_consumed_frame_id`. Older ones are dropped here.
 	std::vector<std::uint64_t> pending_evictions(

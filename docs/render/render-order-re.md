@@ -250,6 +250,38 @@ are packed dense, so the re-read covers live rows only), so a stable
 frame reads nothing back and re-packs nothing and a row rewrite re-reads rows
 alone (the backend report's `q3_readbacks_this_frame`,
 `q3_instance_row_reads_this_frame` and `q3_packed_vertices` pin it).
+The producer registry is a set of persistent per-source records
+(`q3_source_registry`, 2026-08-30): a registration stores the source's kind
+and, at its first in-frustum sight, its surface list with each material's
+classification and Q3 block (`u_diffuse`/`u_detail`/`u_rgb_mod`/
+`u_alpha_mod`/`u_reflect_color`/the UV rows); the node's `tree_entered`/
+`tree_exited`/`visibility_changed` signals move the record between the live
+and dormant sets and mark its visibility, ObjectModel's runtime parameter
+writes name the material (`FrameFx::invalidate_q3_object_material`, a
+parameter version per registered material) so a stable object material is
+never re-read, and a record outside the tree is the only one checked
+against ObjectDB. An ObjectModel level swap re-registers the same node with
+the level's material: the record keeps its identity and bumps its geometry
+generation (the swapped mesh is re-packed once), and a level whose material
+carries no glow (or `FrameFx::unregister_q3_source`) parks the record
+inactive without touching its generations, so the geometry cache never sees
+one node's generation twice. The per-frame compile walks the live, active
+records alone: it probes each visible record's transform and layer mask
+(Godot exposes no transform-changed signal for an engine-class node to an
+extension),
+frustum-tests the cached world bounds and, for a MultiMesh population, its
+cached per-row world bounds (the live rows only, read once per instance
+generation; a carved row never enters the list), and re-reads only the
+water and celestial blocks, whose producers publish per frame. The report's
+`q3_records`, `q3_records_touched_this_frame` and
+`q3_material_reads_this_frame` pin it (`framefx_test`: a stable frame
+touches 0 records and reads 0 object materials; a move, a visibility change
+or a named material is picked up through its record alone). Measured with
+the perf probe (1600x900 windowed, Ryzen 7735HS iGPU, median of per-run p50
+over 2 runs): WORLD_FRAMEFX 1.16 -> 0.57 ms on 00TRa and
+1.04 -> 0.40 ms on CP19 with the records alone; the stream packer reading
+the surface arrays through their raw pointers into one sized buffer (the
+water strip re-packs every frame) takes it to 0.22 ms and 0.08 ms.
 The render callback re-shades each LUM copy as the SELFLUM NORMAL block into
 the black-cleared Q3 target (`_FFP.fx` copies the NORMAL pass block into the
 GLOW slot `@ 0x5afc7f`: Diffuse1 x Detail MODULATE2X x RGB modulator x
