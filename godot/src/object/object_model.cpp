@@ -1166,6 +1166,12 @@ void ObjectModel::refresh_retained_lod_visibility() {
 		stack.remove_at(stack.size() - 1);
 		for (int i = 0; i < parent->get_child_count(); ++i) {
 			Node *child = parent->get_child(i);
+			// Each model owns only its own retained instances: a nested model (a
+			// husk graft under its intact building, an avatar head under the
+			// body) selects its level for itself and keeps its instances.
+			if (Object::cast_to<ObjectModel>(child) != nullptr) {
+				continue;
+			}
 			stack.push_back(child);
 			GeometryInstance3D *geometry = Object::cast_to<GeometryInstance3D>(child);
 			if (geometry == nullptr || !geometry->has_meta("_opennova_lod_index")) {
