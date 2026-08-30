@@ -50,6 +50,7 @@
 #include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
+#include "env/celestial.h"
 #include "env/mission_environment.h"
 
 using namespace godot;
@@ -317,13 +318,15 @@ void main() {
 		frag_color = vec4(result, alpha);
 		return;
 	}
+	// Celestial flag bit 1: the registered material blends additively
+	// (celestial_additive.gdshader's premultiplied form); clear = alpha blend.
 	vec4 tex = texture(primary_texture, uv);
-	if (mode == 3u) {
-		frag_color = vec4(tex.rgb * pc.draw_color.rgb,
-				tex.a * pc.draw_color.a);
-	} else {
+	if ((coverage_flags & 1u) != 0u) {
 		frag_color = vec4(tex.rgb * pc.draw_color.rgb * tex.a * pc.draw_color.a,
 				1.0);
+	} else {
+		frag_color = vec4(tex.rgb * pc.draw_color.rgb,
+				tex.a * pc.draw_color.a);
 	}
 }
 )GLSL";
@@ -1207,6 +1210,7 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 				}
 				push.draw_color = {draw.celestial.tint.x, draw.celestial.tint.y,
 						draw.celestial.tint.z, opacity};
+				push.params[1] = draw.celestial.additive ? 1.0f : 0.0f;
 			}
 			vertex_offsets[0] = static_cast<int64_t>(command.first_vertex) *
 					kVertexStride;
@@ -1531,17 +1535,22 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 				const Vector3 tint = vector3_parameter(shader_material, "u_tint",
 						Vector3(1, 1, 1));
 				candidate.submission.celestial.tint = {tint.x, tint.y, tint.z};
+				// Every celestial producer publishes its bloom-pass opacity as
+				// u_q3_opacity (the moon's fog-shader leg, the sun's body alpha,
+				// the glare's occlusion-free peak); an unpublished row draws
+				// nothing rather than borrowing the beauty formula.
 				candidate.submission.celestial.opacity = float_parameter(shader_material,
-						registration.source == Q3Source::SunGlow ? "u_q3_opacity" :
-						"u_opacity", 1.0f);
+						"u_q3_opacity", 0.0f);
 				const Vector3 glare = vector3_parameter(shader_material,
 						"u_glare_direction", Vector3(0, 1, 0));
 				candidate.submission.celestial.glare_direction =
 						{glare.x, glare.y, glare.z};
 				candidate.submission.celestial.glare_view_fade = bool_parameter(
 						shader_material, "u_glare_view_fade", false);
+				// The authored sun/moon materials are additive too; the blend
+				// follows the registered material's shader, never the source kind.
 				candidate.submission.celestial.additive =
-						registration.source == Q3Source::SunGlow;
+						Celestial::source_material_uses_additive(shader_material);
 				candidate.primary_texture_resource = diffuse;
 				candidate.primary_texture = server_rid(diffuse);
 			}

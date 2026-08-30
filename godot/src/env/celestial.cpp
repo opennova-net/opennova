@@ -525,6 +525,16 @@ void Celestial::advance_frame(double p_delta) {
 									: to_vector3(state.sun_color()));
 		_set_body_parameter(body, "u_opacity", frame.opacity);
 		body.last_opacity = frame.opacity;
+		// The typed Q3 disc read: the bloom pass redraws the discs through the
+		// fog-shader path, whose moon alpha leg differs from the direct draw
+		// while the sun has no such variant (celestial_frame.h carries the
+		// cites). The glare published its own Q3 opacity above.
+		if (kv.key == "moon") {
+			_set_body_parameter(body, "u_q3_opacity",
+					opennova::env::celestial_moon_q3_opacity(state));
+		} else if (kv.key == "sun") {
+			_set_body_parameter(body, "u_q3_opacity", frame.opacity);
+		}
 	}
 
 	// The sun-glare screen veil + exposure stop-down, once per frame after

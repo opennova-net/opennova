@@ -536,7 +536,12 @@ Terrain and other world passes continue to consume the active ordinary fog block
   (`@ 0x5acbc1..0x5acbfa`; the SunDim channel is one of the #27 spring family, default
   0, no `.env` parser writes it). Moon alpha = `clamp01((fogDistInt − 400)/600) ×
   (1 − overcast)` without the fog shader (`× fogDistInt × 0.0002` with)
-  (`@ 0x5acc40..0x5acccd`). There is NO `dir.y` visibility gate and NO
+  (`@ 0x5acc40..0x5acccd`). The bloom-pass redraw `render_celestial_bodies(1)
+  @ 0x582a77` is the fog-shader call (`CD3DDevice_SetFogAndBlendMode(&dword_3262260,
+  2) @ 0x5acb80`), so the typed Q3 disc opacity takes that leg for the moon
+  (`celestial_moon_q3_opacity`, published as `u_q3_opacity`; the sun has no
+  fog-shader variant and publishes its body alpha) and the Q3 blend follows the
+  authored material (the sun/moon `FF_ST_AD_LUM` discs add). There is NO `dir.y` visibility gate and NO
   `sky_height/175.69` distance scaling — the world overdraws the bodies (draw order:
   dome → bodies → world), which depth-tested no-write materials reproduce in the reimpl.
 - `render_skybox_sun_glow @ 0x5acd00` (live: `render_main_scene @ 0x5c1904` +

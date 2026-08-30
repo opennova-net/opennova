@@ -74,6 +74,20 @@ inline CelestialBodyFrame build_moon_frame(const EnvironmentState &env,
 	return frame;
 }
 
+// The moon's opacity in the typed Q3 bloom-source draw. The bloom pass calls
+// render_celestial_bodies(1), the fog-shader path: it sets
+// CD3DDevice_SetFogAndBlendMode(&dword_3262260, 2) and the moon alpha branch
+// takes the fog-shader leg, fogDistInt x 0.0002 x (1 - overcast), instead of
+// the (fogDistInt - 400) / 600 ramp of the direct draw. The sun alpha has no
+// fog-shader variant, so its Q3 opacity is the body opacity itself.
+// [orig: render_celestial_bodies @ 0x5acaa0 (use_fog_shader @ 0x5acb80; moon
+// alpha @ 0x5acc37..0x5acc61); FrameFX_RenderBloomPass @ 0x582a77].
+inline float celestial_moon_q3_opacity(const EnvironmentState &env) {
+	return static_cast<float>(celestial_moon_alpha_fixed(env.fog_level(),
+				   detail::to_fixed_16_16(env.overcast_blend()), true)) /
+			65536.0f;
+}
+
 // The glare's PEAK opacity: the recovered fixed-point occlusion/brightness/
 // dimming fold at dot=1. The shader applies the remaining positive dot^4
 // factor from EACH pass camera, so the mirror view never inherits the main
