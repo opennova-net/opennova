@@ -602,6 +602,17 @@ suppress the circle fallback and leave a blank reticle. REVX02's
 NoCardSwitch, and authors `M4ET_SGT.TGA` plus additive/scaled `et_rtcle.tga`;
 both textures exist in the retail resource root.
 
+`WeaponDef_CreateBlendNamedMaterial @0x540180` recognizes six tokens. The port
+keeps their transport values stable as `blend=0`, `add=1`, `blendat=2`,
+`multiply=3`, `addat=4`, and `multiplyat=5`. The decoder at `0x680f00` maps
+`multiply[at]` to D3D `SRCBLEND=DESTCOLOR`, `DESTBLEND=SRCCOLOR`, producing
+`2 * source * framebuffer`; this makes an authored 128-gray texel neutral.
+Each `at` spelling also carries flag `0x40000` and uses the global alpha-test
+reference 128 (`CGfxDevice_SetAlphaTestRef @0x5ccdae`, comparison GREATER).
+The Godot card reproduces those modes per row; in particular, transparent
+pixels in `multiplyat` textures are discarded instead of blacking out the
+scene.
+
 Port: `world::weapon_sights_card_eligible` owns the dynamic selector, the sim
 publishes it as `scope_card_active`, and `HudFrameCompiler::element_sights_card`
 + `godot/game/world/hud_sights_card.gd` always materialize the authored rows
