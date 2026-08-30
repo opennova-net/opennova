@@ -3,8 +3,10 @@
 > Consolidated from `notes/correspondence.md` (grill sessions 2026-06-01 → 2026-06-10) on 2026-06-10.
 
 Binary: retail `Jointops.exe` (Joint Operations: Combined Arms), imagebase `0x400000`,
-IDB `Jointops.exe.kong.i64`. All addresses are absolute in that image. Per-row status:
-matching | divergent | unknown, as of the cited grill.
+IDB `Jointops.exe.kong.i64`, input SHA-256 `9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57`
+(the full pin table, including the distinct runtime-probe executable hash, is
+[engine-primer.md §2](engine-primer.md)). All addresses are absolute in that image.
+Per-row status: matching | divergent | unknown, as of the cited grill.
 
 One page for two questions: **which original function does our X correspond to**, and
 **how verified is that correspondence**. The per-domain RE records own the format

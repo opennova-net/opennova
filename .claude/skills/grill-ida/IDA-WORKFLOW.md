@@ -23,10 +23,15 @@ Call order, every session, before touching anything:
    to `list_funcs`/`imports`/`find_regex` for that. Use `detail_level:"minimal"` for big binaries
    (>10k functions — `Jointops.exe` is one).
 
-**Verify the binary identity** against the repo pin in `docs/correspondence.md`: retail
-`Jointops.exe`, imagebase `0x400000`, IDB `Jointops.exe.kong.i64`. Every address in `docs/` is
+**Verify the binary identity** against the repo pin in `docs/engine-primer.md` §2: retail
+`Jointops.exe`, imagebase `0x400000`, IDB `Jointops.exe.kong.i64`, input MD5
+`b035a7cd46b4993def49ea02bb3bdc29` (what `survey_binary` prints); the exact check is one
+`py_eval` — `ida_nalt.retrieve_input_file_sha256().hex()` ==
+`9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57`. Every address in `docs/` is
 absolute in that image. If they don't match — a demo or another title's IDB is active, or the IDB
 was rebuilt — **stop and say so**; demo/retail address drift silently invalidates every citation.
+(The parity screenshots pin a second hash, `b9971c82…`: that is the installed runtime-probe
+executable, not the IDB input — see the primer's pin table.)
 (Wrong instance: `list_instances` → `select_instance`. Rebuilt IDB: [LIFECYCLE.md](LIFECYCLE.md) §3.)
 When a session legitimately targets a different binary (`dfx2med.exe`, `ModSuperOed.exe`,
 `dfvas.exe` — see `docs/engine-primer.md`), say which image you are on and never mix addresses

@@ -26,6 +26,18 @@ The canonical reference binary, from the [correspondence.md](correspondence.md) 
 > retail `Jointops.exe` (Joint Operations: Combined Arms), imagebase `0x400000`,
 > IDB `Jointops.exe.kong.i64`. All addresses are absolute in that image.
 
+The image identity is pinned by hash, so a wrong instance or a rebuilt IDB is caught
+before any address is trusted: the grill/research preflights assert it
+(`.claude/skills/grill-ida/IDA-WORKFLOW.md` §1) and `scripts/ida/cite_sweep.py`
+refuses to join against an IDB whose input hash differs.
+
+| Pin | Value |
+|---|---|
+| IDB | `Jointops.exe.kong.i64`, imagebase `0x400000` |
+| IDB input `Jointops.exe` SHA-256 | `9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57` |
+| IDB input `Jointops.exe` MD5 | `b035a7cd46b4993def49ea02bb3bdc29` (the value `survey_binary` reports) |
+| Runtime-probe executable SHA-256 | `b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac` — the installed copy the parity screenshots and D3D9 vtable probes run against ([registered-2026-08-22](../screenshots/parity/render-lighting-2026-08/registered-2026-08-22/README.md), [terrain-re.md](terrain/terrain-re.md) §PROJSHAD). A different file from the IDB input; every probe that compared them (the pixel-shader handle at `0x679005`, the `GfxBlend_ApplyToDevice @0x6818E5` writes) landed on the IDB's addresses, so citations transfer — the hash is what tells the two apart in a provenance line |
+
 **Rule:** every `[orig: Name @ 0xADDR]` citation means retail `Jointops.exe` unless
 the doc says otherwise ([docs/README.md](README.md) conventions). Binaries that do
 appear in tracked docs:

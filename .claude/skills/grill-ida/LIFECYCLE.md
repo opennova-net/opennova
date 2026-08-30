@@ -21,8 +21,11 @@ IDB annotations), so resumption is a read problem, not a recovery problem:
 1. Read `docs/<domain>/<system>-re.md` and the system's rows and tables in
    `docs/correspondence.md` — durable session state lives there; a session lands its
    findings before it ends.
-2. **Verify the binary first** — the `docs/correspondence.md` header pins (retail `Jointops.exe`,
-   imagebase `0x400000`, IDB `Jointops.exe.kong.i64`) against `survey_binary`. A mismatch means a
+2. **Verify the binary first** — the `docs/engine-primer.md` §2 pins (retail `Jointops.exe`,
+   imagebase `0x400000`, IDB `Jointops.exe.kong.i64`, input MD5 `b035a7cd46b4993def49ea02bb3bdc29`)
+   against `survey_binary`; the exact form is one `py_eval`:
+   `ida_nalt.retrieve_input_file_sha256().hex()` must equal the pinned SHA-256
+   (`9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57`). A mismatch means a
    rebuilt IDB or the wrong instance: stop and resolve (§3) before trusting any address.
 3. Resume from: any row with `status ≠ matching`, plus any row whose `[orig: … @ 0xADDR]` marker is
    missing from the source (`grep -rn "\[orig:" engine/ godot/ apps/`, join by address).
@@ -53,8 +56,10 @@ When the reimpl is fixed after a `divergent` verdict, don't re-grill the system:
 ## 3. Survive an IDB rebuild
 
 Addresses shift when the IDB is rebuilt; byte signatures don't. Detection: the
-`docs/correspondence.md` header pins no longer match `survey_binary`, or marker/row addresses stop
-resolving in the live IDB (resume step 2 catches both).
+`docs/engine-primer.md` §2 pins no longer match `survey_binary` / the input SHA-256, or marker/row
+addresses stop resolving in the live IDB (resume step 2 catches both). A rebuild from the SAME
+input keeps the hash and moves addresses; a different hash is a different file — re-pin §2 first
+and say so in the record.
 
 1. **Re-anchor everything first, write nothing yet**: for each row, re-locate the original via
    its byte signature (`make_signature_for_function`, minted at confirmation time; mint missing

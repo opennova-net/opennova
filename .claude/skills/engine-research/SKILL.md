@@ -32,8 +32,11 @@ report the open question to the user so it is not lost (durable open
 questions belong in the RE record's unknown/follow-up entries, via
 `re-doc`), and say what to start. When up: `list_instances` →
 `select_instance` → `survey_binary` (minimal detail), and confirm the repo
-pin from `docs/correspondence.md`: retail `Jointops.exe`, imagebase
-`0x400000`, IDB `Jointops.exe.kong.i64`. On any other image (demo, other
+pin from `docs/engine-primer.md` §2: retail `Jointops.exe`, imagebase
+`0x400000`, IDB `Jointops.exe.kong.i64`, input MD5
+`b035a7cd46b4993def49ea02bb3bdc29` (exact form: `py_eval`
+`ida_nalt.retrieve_input_file_sha256().hex()` ==
+`9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57`). On any other image (demo, other
 title, rebuilt IDB) the addresses in docs/ do not apply — say which image
 you are on, and never mix addresses from two images in one note.
 
