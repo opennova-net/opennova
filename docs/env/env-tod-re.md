@@ -354,7 +354,7 @@ wrong for the retail image.
 @ 0x57e3e0`): above water `smoothedFogDist × (1 − overcast/2)`; **underwater the end distance
 comes from water murk**: `(1 − 0.992·(1 − (1−m)(2−m)/2)) × 200` units (m = 0.8 → ≈ 25 u), and
 the fog color switches to the lit water color. A "white fog" pass uses constant `0x808080`.
-The applied fog distance also feeds the far clip/culling and the sky dome fog factor.
+The applied fog distance also feeds the far clip/culling. The sky dome does NOT take it: `render_skybox` loads its c9.x fog constant from the raw smoothed `Env_FogDistCurrent` with no underwater or overcast leg (`@ 0x5792ab..0x5792c2`, see the VS-constant table below), so the dome keeps the unscaled distance while the world passes fog to the murk end (the shell's `sky_dome.cpp` substituted the murk end underwater until 2026-08-30; `sky_dome_test` pins the unconditional value on both sides of the water plane).
 
 ### Underwater full-frame murk composite
 

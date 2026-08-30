@@ -140,20 +140,28 @@ func test_dome_fog_uses_skyfog_instead_of_world_fog() -> void:
 		"the sky wrapper swaps to skyfog while the world keeps ordinary fog")
 
 
-func test_underwater_dome_uses_pass_distance_without_rewriting_sky_wrapper() -> void:
+func test_underwater_dome_keeps_the_smoothed_fog_end_without_rewriting_sky_wrapper() -> void:
+	# render_skybox loads c9.x from the raw smoothed Env_FogDistCurrent with no
+	# underwater leg (env-tod-re.md, the VS-constant table), so the dome's fog
+	# end is the same unscaled distance on both sides of the water plane while
+	# the world passes fog to the murk-derived end.
 	var ctx := _make()
 	ctx.sky.advance_frame(TICK)
 	var mat: ShaderMaterial = ctx.sky.get_sky_material()
 	var dry_sky_base: Vector3 = mat.get_shader_parameter("u_sky_base")
+	var dry_fog_end := float(mat.get_shader_parameter("u_fog_end"))
+	assert_almost_eq(dry_fog_end, ctx.env_node.get_fog_level(), 0.001,
+			"the dome fog end is the raw smoothed distance above water")
 	ctx.env_node.set_underwater_view(true)
 	ctx.sky.advance_frame(TICK)
 
 	assert_eq(Vector3(mat.get_shader_parameter("u_fog_color")),
 			ctx.env_node.get_skyfog_color(),
 			"the dome keeps the witnessed skyfog wrapper underwater")
-	assert_almost_eq(float(mat.get_shader_parameter("u_fog_end")),
-			ctx.env_node.get_scene_fog_end(), 0.001,
-			"the dome's upper half uses the same murk visibility as the world")
+	assert_almost_eq(float(mat.get_shader_parameter("u_fog_end")), dry_fog_end, 0.001,
+			"the dome keeps the unscaled smoothed fog end underwater")
+	assert_true(absf(ctx.env_node.get_scene_fog_end() - dry_fog_end) > 1.0,
+			"the world's murk end differs from the dome's, so the pin is live")
 	assert_eq(Vector3(mat.get_shader_parameter("u_sky_base")), dry_sky_base,
 			"pass fog selection does not rewrite authored sky/TOD colors")
 

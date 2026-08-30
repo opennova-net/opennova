@@ -237,12 +237,12 @@ void SkyDome::advance_frame(double p_delta) {
 				render_float_to_godot(frame.light_dir));
 		sky_material_->set_shader_parameter("u_fog_color",
 				to_vector3(frame.skyfog_color));
-		// The sky wrapper keeps its dedicated skyfog color on both sides of the
-		// water plane, but uses the active pass visibility distance.
-		sky_material_->set_shader_parameter("u_fog_end",
-				env != nullptr && env->is_underwater_view()
-						? env->get_scene_fog_end()
-						: frame.fog_end);
+		// The sky wrapper keeps its dedicated skyfog color and its own fog end
+		// on both sides of the water plane: the engine frame's fog_end is the
+		// raw smoothed distance the dome VS constant c9.x carries unconditionally
+		// (sky_frame.cpp cites render_skybox @ 0x5792c2); the murk-derived
+		// world end is the object/terrain passes' alone.
+		sky_material_->set_shader_parameter("u_fog_end", frame.fog_end);
 		sky_material_->set_shader_parameter("u_sky_height", frame.sky_height);
 	}
 
