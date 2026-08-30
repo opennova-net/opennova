@@ -228,11 +228,15 @@ void main() {
 	bool fog_enabled = (coverage_flags & 4u) != 0u;
 	uint fog_type = (coverage_flags >> 3u) & 3u;
 	float object_alpha = texture(primary_texture, uv).a * pc.params.w;
-	if (mode <= 1u && (coverage_flags & 2u) != 0u) {
+	if (mode == 0u && (coverage_flags & 2u) != 0u) {
 		object_alpha *= texture(secondary_texture, detail_uv).a;
 	}
+	// Glass.fx TECHNIQUE_GLOW keeps Diffuse1's alpha only as the cutout
+	// variants' alpha-test source; the base glass wrappers ignore alpha_mod
+	// (OBJ_ALPHA_MOD_NONE) and the glint itself is never modulated by it.
+	float coverage = mode == 1u ? texture(primary_texture, uv).a : object_alpha;
 	if (mode <= 1u && (coverage_flags & 1u) != 0u) {
-		bool passes = object_alpha > pc.params.z;
+		bool passes = coverage > pc.params.z;
 		if (pc.light_local_gain.w < 0.0) passes = !passes;
 		if (!passes) discard;
 	}
@@ -255,8 +259,10 @@ void main() {
 		float fog_visibility = fog_enabled ? q3_fog_visibility(
 				length(pc.camera_local.xyz - local_position) * model_uniform_scale,
 				pc.camera_local.w, pc.draw_color.w, fog_type) : 1.0;
-		frag_color = vec4(pc.draw_color.rgb * lobe * object_alpha *
-				fog_visibility, 1.0);
+		// TexCubeRotSpecular x ReflectColor x gain (x 2) under the additive
+		// fog fold; no diffuse-alpha term.
+		frag_color = vec4(clamp(pc.draw_color.rgb * lobe * fog_visibility,
+				0.0, 1.0), 1.0);
 		return;
 	}
 	if (mode == 2u) {
