@@ -381,6 +381,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["static_global_batches"] = 0;
 	stats["static_instances_retained"] = 0;
 	stats["static_lod_populations"] = 0;
+	stats["static_shadow_batches"] = 0;
 	stats["authored_occluder_models"] = 0;
 	destruction_instances_.clear();
 	hidden_destruction_instances_.clear();
@@ -534,6 +535,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	int binned_batch_count = 0;
 	int global_batch_count = 0;
 	int lod_population_count = 0;
+	int shadow_batch_count = 0;
 	HashMap<uint64_t, bool> occupied_static_bins;
 	Vector<String> resolved_graphics;
 	HashMap<String, int> profile_rows;
@@ -909,6 +911,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 									  p_bin_z, p_batch.submesh));
 			tag_static_shadow_source(shadow_mmi, p_slots);
 			container->add_child(shadow_mmi);
+			++shadow_batch_count;
 			bind_lod_slots(shadow_mm, shadow_mmi, p_slots, p_batch, true);
 		};
 		for (const StaticBatch &batch : batches) {
@@ -1023,6 +1026,9 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["static_global_batches"] = global_batch_count;
 	stats["static_instances_retained"] = static_lod_instances_.size();
 	stats["static_lod_populations"] = lod_population_count;
+	// The shadow-only twins a mixed-caster population emits beside its visible
+	// batch: one more geometry instance (and instance-uniform allocation) each.
+	stats["static_shadow_batches"] = shadow_batch_count;
 	stats["authored_occluder_models"] = authored_occluder_models;
 	stats["spans"] = spans;
 	return stats;

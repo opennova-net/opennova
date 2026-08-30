@@ -341,6 +341,15 @@ private:
 	// terrain cache has processed this frame's requests.
 	static HashSet<ObjectModel *> match_terrain_models_;
 	static HashSet<ObjectModel *> authored_lod_models_;
+	// Every GeometryInstance3D the scene builds carries instance uniforms
+	// (u_entity_light, the stance and viewmodel flags), so each one holds 16
+	// vec4 slots of Godot's global shader buffer for as long as it exists,
+	// visible or not, every retained RLOD included. The process-wide sum is
+	// the shell's estimate of that allocation (Godot does not expose it):
+	// GameWorld.get_runtime_perf_counters reads it for the F3/perf path.
+	int geometry_instance_count_ = 0;
+	static int64_t live_geometry_instance_count_;
+	void retire_geometry_instances();
 
 	// Main-body skeletal animation (.bad/.adm via SkeletalAnim).
 	Ref<SkeletalAnim> skeletal_;
@@ -655,6 +664,12 @@ public:
 	// on for its viewport; a model never flips viewport state itself.
 	int get_authored_occluder_count() const {
 		return static_cast<int>(authored_occluders_.size());
+	}
+	// The surface instances every live ObjectModel scene currently retains
+	// (all RLODs and auxiliary draws): the ObjectModel term of the shell's
+	// instance-uniform geometry estimate.
+	static int64_t get_live_geometry_instance_count() {
+		return live_geometry_instance_count_;
 	}
 	void rebuild();
 	void refresh_render_order();

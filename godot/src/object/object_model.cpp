@@ -152,6 +152,7 @@ ObjectModel::~ObjectModel() {
 	}
 	match_terrain_models_.erase(this);
 	authored_lod_models_.erase(this);
+	retire_geometry_instances();
 }
 
 void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
@@ -780,6 +781,12 @@ HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
 HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
 uint64_t ObjectModel::lifetime_generation_ = 0;
+int64_t ObjectModel::live_geometry_instance_count_ = 0;
+
+void ObjectModel::retire_geometry_instances() {
+	live_geometry_instance_count_ -= geometry_instance_count_;
+	geometry_instance_count_ = 0;
+}
 
 int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 		float p_vertical_fov_degrees,
@@ -1084,6 +1091,7 @@ void ObjectModel::_notification(int p_what) {
 			awake_models_.erase(this);
 		}
 		alpha_strip_models_.erase(this);
+		retire_geometry_instances();
 	}
 }
 
@@ -1559,6 +1567,9 @@ void ObjectModel::_bind_methods() {
 					"camera_transform", "vertical_fov",
 					"viewport_width", "viewport_height"),
 			&ObjectModel::update_authored_lods);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("get_live_geometry_instance_count"),
+			&ObjectModel::get_live_geometry_instance_count);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
 			&ObjectModel::is_runtime_frame_awake);
 	ClassDB::bind_method(D_METHOD("get_scene_build_serial"),

@@ -19,6 +19,9 @@ extends Node3D
 #     audio, env overrides) before loading another mission or leaving.
 
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
+# Godot's per-geometry reservation in the global shader buffer (vec4 values) for
+# a shader that declares instance uniforms; see _instance_uniform_geometry_estimate.
+const INSTANCE_UNIFORM_VALUES_PER_GEOMETRY := 16
 const GameFramePipelineScript := preload("res://game/world/game_frame_pipeline.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
@@ -1789,6 +1792,8 @@ func _sync_runtime_profiling() -> void:
 
 
 func get_runtime_perf_counters() -> Dictionary:
+	var foliage_backend: Dictionary = (
+			_dispatcher.get_backend_report() if _dispatcher != null else {})
 	return {
 		"tick_us": _perf_tick_us,
 		"foliage_us": _perf_foliage_us,
@@ -1796,11 +1801,40 @@ func get_runtime_perf_counters() -> Dictionary:
 		"audio_us": _perf_audio_us,
 		"runtime": _runtime.get_perf_counters() if _runtime != null else {},
 		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
-		"foliage_backend": _dispatcher.get_backend_report() \
-				if _dispatcher != null else {},
+		"foliage_backend": foliage_backend,
 		"framefx": _framefx.get_backend_report() if _framefx != null else {},
 		"mission_placement": _mission_stats.duplicate(true),
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
+		"instance_uniform_geometry_estimate":
+				_instance_uniform_geometry_estimate(foliage_backend),
+	}
+
+
+# Godot reserves INSTANCE_UNIFORM_VALUES_PER_GEOMETRY vec4 values of the global
+# shader buffer for every geometry instance whose shader declares instance
+# uniforms, visible or not, and prints "Too many instances using shader
+# instance variables. Increase buffer size in Project Settings." once the
+# buffer_size budget is exhausted (16384 instances with the project's setting;
+# shader_resource_validation_test.gd pins it). Godot does not expose the live
+# allocation, so this sums the retained instance-uniform geometry the shell
+# itself owns: the foliage draw pools (FoliageDispatcher), the placer's static
+# populations (visible batches plus their shadow twins), and every surface
+# instance of every live ObjectModel scene. Terrain patches, water, and the
+# per-model shadow twins the placer parents under animated models are not
+# counted: read the total as a floor on the allocation, not the exact figure.
+func _instance_uniform_geometry_estimate(foliage_backend: Dictionary) -> Dictionary:
+	var foliage_pool := int(foliage_backend.get("pool_size", 0))
+	var static_populations := (int(_mission_stats.get("batches", 0))
+			+ int(_mission_stats.get("static_shadow_batches", 0)))
+	var object_geometry := int(ObjectModel.get_live_geometry_instance_count())
+	var buffer_size := int(ProjectSettings.get_setting(
+			"rendering/limits/global_shader_variables/buffer_size", 0))
+	return {
+		"total": foliage_pool + static_populations + object_geometry,
+		"budget": buffer_size / INSTANCE_UNIFORM_VALUES_PER_GEOMETRY,
+		"foliage_pool": foliage_pool,
+		"static_populations": static_populations,
+		"object_geometry": object_geometry,
 	}
 
 

@@ -625,6 +625,47 @@ func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 			"disabling the probe releases the native timer through the same seam")
 
 
+func test_perf_counters_estimate_the_retained_instance_uniform_geometry() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	var idle: Dictionary = world.get_runtime_perf_counters().get(
+			"instance_uniform_geometry_estimate", {})
+	assert_eq(int(idle.get("budget", 0)),
+			int(ProjectSettings.get_setting(
+					"rendering/limits/global_shader_variables/buffer_size", 0)) / 16,
+			"the budget is the project's buffer_size in 16-value geometry slots")
+	assert_eq(int(idle.get("total", -1)),
+			int(idle.get("foliage_pool", 0)) + int(idle.get("static_populations", 0))
+			+ int(idle.get("object_geometry", 0)),
+			"the total is the sum of the three shell-owned terms")
+
+	# An authored building places a real ObjectModel (house.3di as GuardTwr1):
+	# its retained surface instances are the object term of the estimate.
+	var root_dir := _stage_building_fixture("instance_uniform_estimate")
+	var before_load := int(ObjectModel.get_live_geometry_instance_count())
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
+		mission.add_entity(
+				MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))
+	var loaded: Dictionary = world.get_runtime_perf_counters().get(
+			"instance_uniform_geometry_estimate", {})
+	var placement: Dictionary = world.get_runtime_perf_counters().get(
+			"mission_placement", {})
+	assert_eq(int(loaded.get("static_populations", -1)),
+			int(placement.get("batches", 0)) + int(placement.get("static_shadow_batches", 0)),
+			"static populations count the placer's visible batches and shadow twins")
+	assert_gt(int(loaded.get("object_geometry", 0)), before_load,
+			"the placed building's ObjectModel retains instance-uniform geometry")
+	assert_eq(int(loaded.get("object_geometry", -1)),
+			int(ObjectModel.get_live_geometry_instance_count()),
+			"the object term is the live ObjectModel surface-instance count")
+	assert_lte(int(loaded.get("total", 0)), int(loaded.get("budget", 0)),
+			"the minimal mission stays inside the instance-uniform budget")
+	world.unload()
+	await get_tree().process_frame
+	assert_eq(int(ObjectModel.get_live_geometry_instance_count()), before_load,
+			"unloading the mission retires every surface instance it counted")
+
+
 func test_tick_gates_the_runtime_on_its_transport() -> void:
 	# The game shell's tick must respect inmatch::Session state - the debug
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists

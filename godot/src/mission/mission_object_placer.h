@@ -125,7 +125,7 @@ public:
 	// (the joiner places the mission minus organics). Returns a stats
 	// Dictionary (placed/batched/animated/unresolved/markers/graphics/
 	// batches/static_bins/static_binned_batches/static_global_batches/
-	// static_instances_retained/static_lod_populations/
+	// static_instances_retained/static_lod_populations/static_shadow_batches/
 	// authored_occluder_models + per-stage "spans" usec timings).
 	// "batched" and "animated" are the honest individual/batched split:
 	// a multi-RLOD graphic never leaves the batched count on its own.

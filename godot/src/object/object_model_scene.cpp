@@ -29,6 +29,7 @@ void ObjectModel::rebuild_scene() {
 		remove_child(child);
 		child->queue_free();
 	}
+	retire_geometry_instances();
 	// The submission notifier died in the sweep above; set_model_bounds
 	// recreates it against the rebuilt bounds (even equal ones).
 	screen_notifier_ = nullptr;
@@ -116,6 +117,7 @@ void ObjectModel::rebuild_scene() {
 						Transform3D(Basis(), submesh.get("abs", Vector3()));
 			}
 			MeshInstance3D *instance = memnew(MeshInstance3D);
+			++geometry_instance_count_;
 			instance->set_mesh(mesh);
 			instance->set_meta("_opennova_lod_index",
 					static_cast<int64_t>(lod_index));
@@ -181,6 +183,7 @@ void ObjectModel::rebuild_scene() {
 					return;
 				}
 				MeshInstance3D *auxiliary_instance = memnew(MeshInstance3D);
+				++geometry_instance_count_;
 				auxiliary_instance->set_name(p_name);
 				auxiliary_instance->set_mesh(mesh);
 				auxiliary_instance->set_material_override(auxiliary_material);
@@ -199,6 +202,7 @@ void ObjectModel::rebuild_scene() {
 				Node *surface_parent = instance->get_parent();
 				if (surface_parent == nullptr) {
 					memdelete(auxiliary_instance);
+					--geometry_instance_count_;
 					return;
 				}
 				surface_parent->add_child(auxiliary_instance);
@@ -264,6 +268,8 @@ void ObjectModel::rebuild_scene() {
 	// Whether Godot's occlusion consumer runs is the world's decision
 	// (GameWorld reads get_authored_occluder_count after placement); a model
 	// never flips its viewport's state.
+
+	live_geometry_instance_count_ += geometry_instance_count_;
 
 	classify_materials();
 	apply_runtime_state(0.0);
