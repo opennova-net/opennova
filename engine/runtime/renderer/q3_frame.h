@@ -54,7 +54,8 @@ enum class Q3GeometryKind : std::uint8_t {
 // clamped; the adapter evaluates that generator analytically against the
 // live sun direction. [orig: Glass.fx TGlassFFP TECHNIQUE_GLOW;
 // Render_FillStaticCubemaps @ 0x58f290; generate_cubemap_lighting
-// @ 0x685bb0; apply_shader_parameters MatRotSpecular @ 0x58e14b].
+// @ 0x685bb0; apply_shader_parameters @ 0x58e14b (the MatRotSpecular
+// upload)].
 inline constexpr float kQ3GlassWhiteLobeGain = 1.4f;
 inline constexpr float kQ3GlassWhiteLobePower = 800.0f;
 inline constexpr std::array<float, 3> kQ3GlassWarmLobeColor{
@@ -83,8 +84,8 @@ inline constexpr float kQ3WaterNvBrightBias = 0.15f;
 // [orig: FrameFX_RenderBloomPass @ 0x582940 (Render_SetViewportFarDepth
 // @ 0x582a70 -> render_celestial_bodies(1) @ 0x582a77 ->
 // render_skybox_sun_glow(0, 0) @ 0x582a80); Render_SetViewportFarDepth
-// @ 0x58a840 (MinZ 0.98000002, MaxZ 0.99996948); the z-tested flushes
-// @ 0x5accee / 0x5ad118].
+// @ 0x58a840 (MinZ 0.98000002 @ 0x58a859, MaxZ 0.99996948 @ 0x58a86b); the
+// z-tested flushes CRenderBatchQueue_SortAndFlush(0) @ 0x5acce9 / 0x5ad118].
 inline constexpr float kQ3FarBandMinZ = 0.98000002f;
 inline constexpr float kQ3FarBandMaxZ = 0.99996948f;
 
