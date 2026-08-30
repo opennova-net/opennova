@@ -164,7 +164,8 @@ func load_as_joiner(target: JoinTarget) -> int:
 				target.integrity_profile)
 		return ERR_INVALID_PARAMETER
 	if not _join_preload_sim.enable_join(
-			target.host_ip, target.port, target.player_name):
+			target.host_ip, target.port, target.player_name,
+			target.join_role, target.spectator_password):
 		_join_preload_sim.free()
 		_join_preload_sim = null
 		_clear_pending_session()

@@ -2,6 +2,7 @@
 
 #include <net/npruntime/charattr_challenge.h>
 #include <net/npruntime/integrity_challenge_profile.h>
+#include <net/npruntime/join_role.h>
 #include <net/npruntime/napi_np_connection.h>
 
 #include <net/npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
@@ -297,6 +298,13 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		character_join_vars_ = vars;
 	}
+	// Select the retail game-session join role before start(). Player leaves the
+	// legacy ClientAuth byte stream unchanged; Spectator emits JSR=1 and the
+	// optional JSPP password.
+	void set_join_request(JoinRole role, std::string spectator_password) {
+		join_role_ = role;
+		spectator_password_ = std::move(spectator_password);
+	}
 
 	// The install root the JOIN VERSIONCRCSTRING checksum is computed from
 	// (D-NET-166): at JOIN-build time the joiner CRCs the loose
@@ -500,6 +508,8 @@ public:
 	// delivers 0x04 ahead of the 0x1A submission trigger, and a harness that cares must
 	// feed the 0x04 it expects.
 	uint8_t assigned_team() const { return assigned_team_; }
+	bool spectator() const { return spectator_mode_; }
+	JoinRole requested_role() const { return join_role_; }
 	// Retail's host-global class availability word, replaced by every S2C 0x76.
 	// The malformed/short handler value is zero; before the initial-state message,
 	// retain the stock all-ten-classes default used by the local UI.
@@ -586,6 +596,9 @@ private:
 	uint32_t client_index_ = 1;
 	uint32_t client_key_ = 1;
 	std::string player_name_;
+	JoinRole join_role_ = JoinRole::Player;
+	std::string spectator_password_;
+	bool spectator_mode_ = false;
 	Phase phase_ = Phase::Idle;
 
 	// SCRK / seq / ack live on the client-side connection node (folded, as on the server side).

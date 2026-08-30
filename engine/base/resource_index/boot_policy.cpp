@@ -67,6 +67,8 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.lan_gametype = int_after(args, "--lan-gametype", 0, 0x7fffffffL, -1);
     f.lan_mode = int_after(args, "--lan-mode", 1, 4, 0);
     f.lan_max_players = int_after(args, "--lan-max-players", 1, 64, 0);
+    f.spectator = has_flag(args, "--spectator");
+    f.spectator_password = value_after(args, "--spectator-password");
     f.callsign = value_after(args, "--callsign");
     f.integrity_profile = value_after(args, "--integrity-profile");
     f.capture_pcap = value_after(args, "--capture-pcap");

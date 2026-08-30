@@ -115,6 +115,7 @@ private:
 #if OPENNOVA_DEVTOOLS
 	void draw(int p_requested_width, int p_requested_height) override;
 	void apply_game_requests();
+	void sync_game_spectator_state();
 	void apply_debug_requests();
 	void push_entity_directory();
 	void apply_environment_requests();

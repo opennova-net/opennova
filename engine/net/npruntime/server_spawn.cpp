@@ -1,7 +1,12 @@
 #include <net/npruntime/server_spawn.h>
 
+#include <runtime/world/ai.h>           // AiEntity / AiSystem
+#include <runtime/world/angle.h>        // bam_heading_from_mission_yaw_deg
+#include <runtime/world/entity_spawn.h> // entity_reset_to_spawn_state
+#include <runtime/world/infantry.h>     // infantry_respawn_snap
 #include <runtime/world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
 #include <runtime/world/spawn_select.h> // resolve_player_spawn_pose / world_has_spawn_zone
+#include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>        // World, registry, cached
 
 #include <net/npwire/game_type.h>
@@ -27,11 +32,16 @@ namespace {
 // Retail's misleading g_team1_name/g_team2_name symbols are the live SidePasswordA/B strings
 // (apply_session_settings_to_globals @0x552043/@0x552054), not a second team-name domain.
 // The current join protocol carries no FID credential, so the submitted-password leg is empty;
-// closing password-protected admission remains D-NET-167. Spectator is the other structural
-// residual because NapiNPConnection has no spectator bit.
+// closing password-protected admission remains D-NET-167.
 uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection &joining, const world::World &world) {
+	// A spectator is a roster player on neutral team zero, bypassing the team
+	// password/selection path. Retail gates the early return on being in a
+	// live MP session; a non-session add ignores the flag and takes team 1.
+	// [orig: Server_AssignPlayerTeam @0x4fe310 — `slot+100567 && is_in_session`
+	// -> +416 = 0, the FIRST leg before the co-op/solo team-1 return]
+	if (joining.link.spectator && is_in_session) return 0;
 	const uint32_t gt = config.game_type;
 	if (!is_in_session || opennova::game_type::is_waypoint_family(gt)) return 1;
 
@@ -196,7 +206,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	const std::optional<uint8_t> player_slot =
 			Server_ReservePlayerSlot(
 					ctx.np_protocol.connection_list, conn,
-					std::min<uint32_t>(ctx.config.max_players, 251u));
+					ctx.config.total_player_slot_capacity());
 	if (!player_slot.has_value()) return {};
 
 	world::PlayerSpawn spawn;
@@ -251,7 +261,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// @0x57ad40); the reimpl has no registry yet, so the id is echoed unvalidated and 0 falls back
 	// to the encoder's D-NET-137 shim (two default-profile joiners colliding on 0x8207 is a
 	// tracked deferral, harmless at 2-player scope).
-	const int side = (spawn.team == 1 || spawn.team == 3 ||
+	const int side = (conn.link.spectator || spawn.team == 1 || spawn.team == 3 ||
 	                  (ctx.config.game_type & 0x10000u) == 0)
 	        ? 0
 	        : 1;
@@ -299,7 +309,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// pre-deploy record byte13 = 0x01) [orig: NetPacket_WritePlayerState @0x4ff7dd ORs
 	// entity+36 bit0 each frame while pending]. The host's OWN loopback player skips the
 	// hold — it deploys through the local flow, not the wire. (D-NET-156)
-	if (!is_host_own && world::world_has_spawn_zone(world)) {
+	if (!conn.link.spectator && !is_host_own && world::world_has_spawn_zone(world)) {
 		conn.link.respawn_pending = true;
 		if (world::Entity *pe = world.registry.get(h)) {
 			pe->flags |= 1u;
@@ -308,6 +318,20 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// The join-time respawn countdown (entity+292 = 620 ticks) is display/wave state the
 		// 0x6E status reports; with default host wave options the deploy is pick-driven, so
 		// only the pending flag is modeled (tracked, §5.61).
+	}
+	if (conn.link.spectator) {
+		// Retail still creates a player entity for a spectator, but leaves it
+		// hidden and permanently damage-disabled while S2C 0x75 drives the
+		// client's free-fly camera: the spectator leg stores entity+36 |= 1
+		// and entity+292 = -1 (no 620-tick countdown — the dead/disabled
+		// sentinel). [orig: Server_PlayerAdd @0x51cbc0 — the slot+100567
+		// branch; Entity_UpdateInfantryPlayerBody @0x4b40e0]
+		conn.link.respawn_pending = false;
+		if (world::Entity *pe = world.registry.get(h)) {
+			pe->team = 0;
+			pe->flags |= 1u;
+			pe->damage_state = -1;
+		}
 	}
 
 	// Bind the per-connection reply state so the §5.1 roster (0x16) / player-sync (0x46) / player-index
@@ -371,6 +395,80 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 	return spawned;
 }
 
+bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
+		world::World &world, bool spectator) {
+	if (!ctx.is_authority || conn.phase < ConnectionPhase::PlayerAdded ||
+	    !conn.link.owned_entity.valid()) {
+		return false;
+	}
+	world::Entity *player = world.registry.get(conn.link.owned_entity);
+	if (player == nullptr) return false;
+	if (conn.link.spectator == spectator) return true;
+
+	world::AiEntity *ai =
+			world.ai != nullptr ? world.ai->for_handle(player->handle) : nullptr;
+	world::entity_detach_from_vehicle(world, player->handle);
+	conn.link.respawn_pending = false;
+
+	if (spectator) {
+		const uint8_t current_team =
+				player->team != 0 ? player->team : conn.assigned_team;
+		if (current_team != 0) conn.spectator_restore_team = current_team;
+		conn.link.spectator = true;
+		conn.assigned_team = 0;
+		conn.assigned_team_valid = true;
+		player->team = 0;
+		player->flags |= 1u;
+		// The witnessed spectator entity state: damage permanently disabled
+		// (-1 sentinel), not the 620-tick join countdown.
+		// [orig: Server_PlayerAdd @0x51cbc0 — entity+292 = -1]
+		player->damage_state = -1;
+		if (ai != nullptr) {
+			ai->team = 0;
+			ai->vel_x = 0;
+			ai->vel_z = 0;
+			ai->inf.player_moving = false;
+			ai->inf.vel[0] = ai->inf.vel[1] = ai->inf.vel[2] = 0;
+		}
+		return true;
+	}
+
+	conn.link.spectator = false;
+	uint8_t team = conn.spectator_restore_team;
+	if (team == 0) team = 1;
+	conn.assigned_team = team;
+	conn.assigned_team_valid = true;
+	const world::SpawnPointResult selected = world::resolve_player_spawn_pose(
+			world, player->handle, world::EntityHandle{},
+			conn.reply.player_slot, team, ctx.config.game_type);
+	if (selected.found) {
+		player->position = selected.position;
+		player->yaw = selected.yaw;
+		player->pitch = selected.pitch;
+		player->roll = selected.roll;
+	}
+	player->team = team;
+	player->flags &= ~1u;
+	player->flags &= ~world::kEntityFlagDead;
+	player->engine_flags &= ~world::kEntityFlagDead;
+	player->health = player->health_max > 0 ? player->health_max : 100;
+	player->alive = true;
+	world::entity_reset_to_spawn_state(*player);
+	if (ai != nullptr) {
+		const int32_t pos[3] = {
+				world::to_fixed(player->position.x),
+				world::to_fixed(player->position.y),
+				world::to_fixed(player->position.z)};
+		const int32_t heading =
+				world::bam_heading_from_mission_yaw_deg(player->yaw);
+		const int16_t health = static_cast<int16_t>(
+				std::min<int32_t>(player->health, 32767));
+		ai->team = team;
+		world::infantry_respawn_snap(*ai, pos, heading, health);
+	}
+	return true;
+}
+
 // See header. Synthetic in-process peer admit (no handshake) — the owner/test hook.
 world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &world, const PeerAddr &peer,
                                          const world::PlayerSpawn &spawn_in,
@@ -413,7 +511,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	}
 	const std::optional<uint8_t> player_slot = Server_ReservePlayerSlot(
 			ctx.np_protocol.connection_list, *conn,
-			std::min<uint32_t>(ctx.config.max_players, 251u));
+			ctx.config.total_player_slot_capacity());
 	if (!player_slot.has_value()) {
 		world.registry.despawn(h);
 		if (created_connection) ctx.np_protocol.connection_list.pop_back();

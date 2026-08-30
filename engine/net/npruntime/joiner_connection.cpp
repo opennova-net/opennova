@@ -295,6 +295,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	max_player_slot_ = 0;
 	spawn_ = SelfSpawn{};
 	assigned_team_ = 0; // re-latched from the fresh session's S2C 0x04 (the kit seam persists);
+	spectator_mode_ = false;
 	                    // zero like retail's byte_A85B48 until the assignment arrives
 	class_allow_mask_ = 0x03FFu; // replaced by the fresh session's S2C 0x76
 	current_player_class_ = 0;
@@ -392,6 +393,16 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			character_join_vars_.avatar[0] != 0);
 	append_profile_value("VCB", character_join_vars_.avatar[1],
 			character_join_vars_.avatar[1] != 0);
+	// Spectator is opt-in. Keeping both fields absent for Player preserves the
+	// captured retail player-join bytes exactly.
+	// [orig: CNapiServerInfo_SerializeToSession @0x4c3650 writes JSR/JSPP]
+	if (join_role_ == JoinRole::Spectator) {
+		auth.cu.push_back(make_client_cu_chunk(2, "JSR", "1"));
+		if (!spectator_password_.empty()) {
+			auth.cu.push_back(make_client_cu_chunk(
+					2, "JSPP", spectator_password_));
+		}
+	}
 	for (const auto &field : {
 			std::pair{"TZB", "300"},
 			std::pair{"MPS", "1300"},
@@ -574,7 +585,35 @@ void JoinerConnection::on_server_auth(
 	// handshake is not this connection's failure.
 	if (sa.ci != client_index_ || sa.ck != client_key_) return;
 	if (sa.cr != 1) {
-		fail("ServerAuth rejected (cr != 1)");
+		// A CR=0 0x82 carries the NP-layer failure family in JFC and, for the
+		// validate-callback family (JFC=14), the sub-reason in JFP. Spectator
+		// failures are NOT this packet — they arrive post-admission as DPC
+		// 14/15/16 description punts (on_host_disconnect below).
+		// [orig: NapiNPProtocol_SendJoinRejection @0x620cd0; the JFC values at
+		// the @0x62b750 call sites (3 HK / 4 PW / 5 empty NA / 6 disabled /
+		// 7 PV2 / 9,10,15 CU / 11 chunk / 12,14 callback); the JFP reasons
+		// CNapiNetwork_ValidateJoinRequest @0x4c61b0 (2 locked / 3 banned /
+		// 4 full / 5 full with spectator-only slots); client store
+		// NapiNP_HandleServerJoinResponse @0x629840]
+		if (sa.jfc == 14) {
+			switch (sa.jfp) {
+			case 2: fail("The server is locked"); break;
+			case 3: fail("You are banned from this server"); break;
+			case 4:
+			case 5: fail("The server is full"); break;
+			default:
+				fail("The server refused the join (reason " +
+						std::to_string(sa.jfp) + ")");
+				break;
+			}
+		} else if (sa.jfc == 4) {
+			fail("The server password is incorrect");
+		} else if (!sa.jfs.empty()) {
+			fail(sa.jfs);
+		} else {
+			fail("The server refused the join (code " +
+					std::to_string(sa.jfc) + ")");
+		}
 		return;
 	}
 	conn_.server_sk = sa.sk;      // session_id for our outbound 0x43s
@@ -839,7 +878,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE &&
 		    m.tag == s2c::WORLD_STATE_LOAD && m.payload.size() > 22) {
 			deployment_policy_seen_ = true;
-			deployment_pick_required_ = (m.payload[22] & 0x01u) != 0;
+			deployment_pick_required_ =
+					join_role_ != JoinRole::Spectator && !spectator_mode_ &&
+					(m.payload[22] & 0x01u) != 0;
 		}
 	}
 	auto release_deployment = [&](bool deployment_complete) {
@@ -1189,6 +1230,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// 0x04, and its subsequent 0x2F copies this value verbatim.
 			// [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890 writes playerSlot+416;
 			// NapiNPClientMsg_SetSpectatorMode @0x425A32]
+			if (!m.payload.empty()) spectator_mode_ = (m.payload[0] & 1u) != 0;
 			if (m.payload.size() >= 2) assigned_team_ = m.payload[1];
 		} else if (m.tag == s2c::TEAM_ASSIGN) {
 			// S2C 0x50 TEAM ASSIGN — the SECOND witnessed writer of the byte_A85B48
@@ -2128,6 +2170,28 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 	// therefore belong in the reason, alongside the sender's own tag and text (for the
 	// witnessed deploy-screen idle punt: DPC 33, DC 2, "LogPuntEvent", "t35").
 	// [orig: the DC gate @0x4c6563 and the DPC switch @0x4c6569]
+	// The game-layer join gate answers its spectator failures through this
+	// same record with empty strings — DPC 14 disabled / 15 full / 16 bad
+	// password. [orig: Server_ValidatePlayerJoinRequest @0x512100 via
+	// CNapiNPConnection_SendChatMessage @0x4c7ef0]
+	if (event.dc == 2) {
+		switch (event.dpc) {
+		case 14:
+			host_disconnect_reason_ = "Spectators are disabled on this server";
+			fail(host_disconnect_reason_);
+			return;
+		case 15:
+			host_disconnect_reason_ = "The spectator slots are full";
+			fail(host_disconnect_reason_);
+			return;
+		case 16:
+			host_disconnect_reason_ = "The spectator password is incorrect";
+			fail(host_disconnect_reason_);
+			return;
+		default:
+			break;
+		}
+	}
 	host_disconnect_reason_ = "the host closed the session (reason " +
 			std::to_string(event.dpc) + ", class " + std::to_string(event.dc) + ")";
 	if (!event.ddstr.empty()) host_disconnect_reason_ += ": " + event.ddstr;

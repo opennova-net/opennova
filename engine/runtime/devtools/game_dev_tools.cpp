@@ -48,6 +48,10 @@ void GameDevTools::set_game_play_available(bool available) {
 	game_window_->set_play_available(available);
 }
 
+void GameDevTools::set_game_spectator_state(bool available, bool active) {
+	game_window_->set_spectator_state(available, active);
+}
+
 void GameDevTools::set_game_input_mode(GameInputMode mode) {
 	game_window_->set_input_mode(mode);
 }

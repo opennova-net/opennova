@@ -60,6 +60,8 @@ option.
 | `--mission <name.bms>` | boot straight into a single-player mission (the world parks un-ticked under the start splash until the player is spawned) |
 | `--lan-host <mission.bms>` | boot as a co-op LAN listen host |
 | `--lan-join <ip[:port]>` | boot as a LAN joiner dialing that host (the mission comes from the wire, D-NET-194) |
+| `--spectator` | with `--lan-join`, explicitly authenticate as a spectator instead of showing the Player/Spectator prompt |
+| `--spectator-password <text>` | spectator password sent as ClientAuth `JSPP` (the retail host field is limited to 17 characters) |
 | `--lan-port <1..65535>` | host bind port (default: the retail LAN range head, `npwire/net_ports.h`) |
 | `--lan-gametype <n>` | numeric `g_GameType` (`0x` accepted; default Co-op) |
 | `--lan-mode <1..4>` | host LAN rate mode (the witnessed holdoffs 12/6/4/3) |
@@ -79,7 +81,14 @@ override), `kill_group {group}`, `crew_vehicle {occupant_ssn, vehicle_ssn}`,
 `crew_local_player {vehicle_ssn}` (the AI console), `local_player_look
 {dx_px, dy_px}`, the
 `net_joiner_diagnostics` check (the joiner tripwire diagnostics) and
-`third_person_on_foot` (the third-person override).
+`third_person_on_foot` (the third-person override). `local_spectator`
+switches an authority-owned local player onto the real spectator slot state;
+it is confirmation-gated like the other authoritative mutations.
+
+The same control is visible as **Spectator** in F3's Game window. Check it,
+enter **Play**, then hold right mouse and use WASD/Q/E to free-fly; the match
+continues ticking. Uncheck it to restore the player's team and respawn through
+the normal map spawn selection.
 
 ## Argv options that replaced env knobs
 

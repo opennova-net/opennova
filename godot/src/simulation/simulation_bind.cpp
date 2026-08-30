@@ -111,7 +111,15 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("configure_host_session", "options"), &Simulation::configure_host_session);
 	ClassDB::bind_method(D_METHOD("get_host_session_config"), &Simulation::get_host_session_config);
 	ClassDB::bind_method(D_METHOD("admit_test_remote_peer", "position", "yaw_deg", "team"), &Simulation::admit_test_remote_peer);
-	ClassDB::bind_method(D_METHOD("enable_join", "host_ip", "port", "player_name"), &Simulation::enable_join);
+	ClassDB::bind_method(
+			D_METHOD("enable_join", "host_ip", "port", "player_name",
+					"join_role", "spectator_password"),
+			&Simulation::enable_join, DEFVAL(0), DEFVAL(String()));
+	ClassDB::bind_method(
+			D_METHOD("is_local_spectator"), &Simulation::is_local_spectator);
+	ClassDB::bind_method(
+			D_METHOD("set_local_spectator", "spectator"),
+			&Simulation::set_local_spectator);
 	ClassDB::bind_method(D_METHOD("set_join_expansion_version_root", "game_root"),
 			&Simulation::set_join_expansion_version_root);
 	ClassDB::bind_method(D_METHOD("is_joiner"), &Simulation::is_joiner);

@@ -48,6 +48,7 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, LanDiscoverySer
 	parsed.session_id = std::move(hello.sus1);
 	parsed.expansion = std::move(hello.sus2);
 	parsed.gametype = hello.p1;
+	parsed.server_flags = hello.p2;
 	parsed.current_players = hello.np;
 	parsed.max_players = hello.mp;
 	out = std::move(parsed);

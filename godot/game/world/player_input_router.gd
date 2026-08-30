@@ -75,6 +75,16 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 		_presenter.clear_models()
 		_look_delta = Vector2.ZERO
 		return frame_input
+	var sim := _sim()
+	if sim != null and sim.is_local_spectator():
+		# A spectator owns no body motor. Submit the neutral frame while the
+		# existing FlyCamera consumes the viewport input; the world/session
+		# cadence continues through GameWorld.tick as normal.
+		_presenter.set_fly_camera_locked(false)
+		release_mouse_capture()
+		_presenter.clear_models()
+		_look_delta = Vector2.ZERO
+		return frame_input
 	_presenter.set_fly_camera_locked(true)
 	if capture_mouse and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
@@ -88,7 +98,6 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 	# MoveOrder bits 0x40/0x80, and the aircraft mover reads those same two
 	# bits as descend/ascend - the collective is the lean pair, overloaded.
 	var state := _read_input_state() if gameplay_input_active else {}
-	var sim := _sim()
 	frame_input.set_movement(
 			_bool(state, "forward"),
 			_bool(state, "back"),

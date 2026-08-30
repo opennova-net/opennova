@@ -18,6 +18,8 @@ enum class GameWindowRequest {
 	EnterPlay,
 	EnterInteract,
 	CloseTools,
+	EnableSpectator,
+	DisableSpectator,
 };
 
 // The only seam between the engine-owned window and a rendering device. The
@@ -43,6 +45,10 @@ public:
 	bool play_available() const { return play_available_; }
 	void set_input_mode(GameInputMode mode) { input_mode_ = mode; }
 	GameInputMode input_mode() const { return input_mode_; }
+	void set_spectator_state(bool available, bool active);
+	bool spectator_available() const { return spectator_available_; }
+	bool spectator_active() const { return spectator_active_; }
+	void request_spectator(bool active);
 	void request_enter_play();
 	void request_escape();
 	bool take_request(GameWindowRequest &request);
@@ -53,6 +59,8 @@ private:
 	GameViewport *viewport_ = nullptr;
 	GameInputMode input_mode_ = GameInputMode::Interact;
 	bool play_available_ = false;
+	bool spectator_available_ = false;
+	bool spectator_active_ = false;
 	bool escape_already_handled_ = false;
 	std::deque<GameWindowRequest> requests_;
 };

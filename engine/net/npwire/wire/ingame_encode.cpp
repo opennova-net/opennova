@@ -771,7 +771,7 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 // the LIVE [inGameCount][spectatorCount] pair. The HUD "Number of players" = accepted rows −
 // spectatorCount (g_scoreboard_row_count − g_scoreboard_spectator_count) — a hardcoded trailer pinned
 // every client's count at 2 (the v31 HUD-count defect, D-NET-158). Rows are accepted only for
-// 0x46-known slots; spectators are unmodeled (0).
+// 0x46-known slots; bit0 of each row and the trailer count identify live spectators.
 std::vector<uint8_t> encode_player_list(const PlayerListFrame &frame) {
 	std::vector<uint8_t> out;
 	Writer w{out};

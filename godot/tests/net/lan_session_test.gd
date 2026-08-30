@@ -43,6 +43,8 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 		"expansion": "jox01",
 		"gametype": 0x30020,
 		"max_players": 6,
+		"spectator_slots": -1,
+		"spectator_password": "watch",
 	})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(_mission()))
@@ -71,6 +73,11 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 		assert_eq(int(row.get("players", 0)), 1, "listen host occupies one player slot")
 		assert_eq(int(row.get("max_players", 0)), 6)
 		assert_eq(int(row.get("gametype", 0)), 0x30020)
+		var flags := int(row.get("server_flags", 0))
+		assert_ne(flags & JoinTarget.FLAG_ALLOW_SPECTATORS, 0,
+				"ServerHello.P2 advertises that spectators are enabled")
+		assert_ne(flags & JoinTarget.FLAG_SPECTATOR_PASSWORD, 0,
+				"ServerHello.P2 advertises the spectator-password prompt")
 		assert_eq(String(row.get("expansion", "")), "jox01")
 		assert_eq(String(row.get("session_id", "")), "",
 				"an unmodeled SUS1 is omitted instead of fabricated")
