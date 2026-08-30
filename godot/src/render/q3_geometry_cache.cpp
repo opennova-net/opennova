@@ -46,7 +46,8 @@ Vector4 custom_at(const PackedFloat32Array &p_values, int p_index) {
 }
 
 // Packs one surface into the interleaved Q3 stream: position, normal, UV,
-// colour, CUSTOM0..2, UV2. Object UVs take the material's row-vector UV
+// colour, CUSTOM0..2, UV2. Object UVs (UV1 and the detail UV2 alike, the
+// wrappers' obj_transform_uv over both) take the material's row-vector UV
 // transform, water UVs the witnessed camera-relative world/128 pair; skinned
 // sources are blended by the caller's palette in bind space.
 bool pack_surface(const Q3SurfaceArrays &p_arrays,
@@ -94,9 +95,18 @@ bool pack_surface(const Q3SurfaceArrays &p_arrays,
 			}
 		}
 		Vector2 uv = index < p_arrays.uvs.size() ? p_arrays.uvs[index] : Vector2();
+		Vector2 uv2 = index < p_arrays.uv2s.size() ? p_arrays.uv2s[index] : Vector2();
 		if (p_pack.source == Q3Source::Object) {
-			uv = Vector2(p_pack.uv_u.x * uv.x + p_pack.uv_u.y * uv.y + p_pack.uv_u.z,
-					p_pack.uv_v.x * uv.x + p_pack.uv_v.y * uv.y + p_pack.uv_v.z);
+			// The same two rows the wrappers apply to UV and UV2
+			// (vertex_standard.gdshaderinc), so a detail sampled over the packed
+			// UV2 (the slot capture's _MT coverage) follows a scrolled or
+			// scaled material like the beauty pass does.
+			const auto transform_uv = [&](const Vector2 &p_uv) {
+				return Vector2(p_pack.uv_u.x * p_uv.x + p_pack.uv_u.y * p_uv.y + p_pack.uv_u.z,
+						p_pack.uv_v.x * p_uv.x + p_pack.uv_v.y * p_uv.y + p_pack.uv_v.z);
+			};
+			uv = transform_uv(uv);
+			uv2 = transform_uv(uv2);
 		} else if (p_pack.source == Q3Source::Water) {
 			const Vector2 relative(position.z - p_pack.camera_position.z,
 					position.x - p_pack.camera_position.x);
@@ -133,8 +143,7 @@ bool pack_surface(const Q3SurfaceArrays &p_arrays,
 		append_f32(r_vertices, c1.z); append_f32(r_vertices, c1.w);
 		append_f32(r_vertices, c2.x); append_f32(r_vertices, c2.y);
 		append_f32(r_vertices, c2.z); append_f32(r_vertices, c2.w);
-		append_vec2(r_vertices, index < p_arrays.uv2s.size() ?
-				p_arrays.uv2s[index] : Vector2());
+		append_vec2(r_vertices, uv2);
 	}
 	return r_vertices.size() ==
 			static_cast<int64_t>(vertex_count) * kQ3VertexStride;
