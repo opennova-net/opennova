@@ -64,7 +64,12 @@ struct SlotCaptureFrameCounters {
 	// INVSRCALPHA by coverage instead of the opaque replace).
 	int blended_commands = 0;
 	int packed_vertices = 0;
+	// ArrayMesh surfaces under a caster whose material carries no registered
+	// object classification (drawn nothing); non-ArrayMesh instances are
+	// skipped before classification and are not counted here.
 	int unclassified_surfaces = 0;
+	// Classified surfaces whose technique declares no PROJSHAD pass, plus the
+	// material-blend additive variants (black added is a no-op).
 	int no_pass_surfaces = 0;
 	// Render-thread draw of the last frame that reached the device.
 	int captures_drawn = 0;

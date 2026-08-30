@@ -643,12 +643,14 @@ RID SlotCaptureAdapter::Impl::make_texture(int p_size,
 	format->set_array_layers(1);
 	format->set_mipmaps(1);
 	format->set_texture_type(RenderingDevice::TEXTURE_TYPE_2D);
-	// MSAA on the capture: the drape keeps the resolved partial-coverage RGB
-	// edge, and a hard-aliased 1-2 px silhouette line scintillates against
-	// the breathing first-person camera (the eye rides the posed head bone).
-	// The 4x resolve supplies the same coverage ramp retail's multisampled
-	// black-on-white RT resolves, like FrameFX's capture stretch supplies the
-	// bloom-source box filter.
+	// MSAA on the capture is a device fold, not a retail property: retail's
+	// slot RT chain is single-sampled (RenderSlot_InitTextureChain creates a
+	// plain D3DUSAGE_RENDERTARGET texture and a D3DMULTISAMPLE_NONE depth
+	// surface, create_render_target_surfaces @ 0x67f7b0) and its drape reads
+	// that RT bilinearly. The 4x resolve keeps a partial-coverage RGB edge in
+	// the resolve target so a hard-aliased 1-2 px silhouette line does not
+	// scintillate against the breathing first-person camera (the eye rides
+	// the posed head bone); the record lists it with the other slot folds.
 	format->set_samples(RenderingDevice::TEXTURE_SAMPLES_4);
 	format->set_usage_bits(BitField<RenderingDevice::TextureUsageBits>(p_usage));
 	Ref<RDTextureView> view;
@@ -1020,9 +1022,12 @@ void SlotCaptureAdapter::compile_frame(
 				if (shader_material.is_null() ||
 						!Q3FrameAdapter::object_material_classification(material,
 								classification)) {
-					// Not an object effect (no registered classification): retail
+					// An ArrayMesh surface whose material is not a registered
+					// object material (no ObjectMaterialClassification): retail
 					// submits no PROJSHAD pass for an effect without one, and no
-					// coverage source exists to invent one from.
+					// coverage source exists to invent one from. Counted as
+					// unclassified; a non-ArrayMesh instance (a PrimitiveMesh)
+					// never reaches this test and is not counted.
 					++counters.unclassified_surfaces;
 					continue;
 				}

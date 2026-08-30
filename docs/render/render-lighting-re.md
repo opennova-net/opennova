@@ -38,8 +38,8 @@ scalar function in this record; the GUT env vectors
 | Static sector/model sun shadows onto terrain/foliage | WITNESSED / hosted page-alpha subset | pool-2 buildings cast unless `NoShadow`; pool-1 items additionally require `StaticShadow`; every ROBJ in the selected LOD enters a black PROJSHAD temporary RT which is composited into terrain-tile alpha, not back onto sector models. Runtime now collects typed static sources, resolves selected LOD/all-ROBJ geometry and every diffuse-alpha frame, evaluates AlphaGen/full UV transforms and time/control flipbooks through the ordinary-object runtime functions, rasterizes A-only projections into the shared terrain/foliage page, and retires the global directional surrogate. The max-quality c7/c8 projection, skinned rigid collapse, material pass state, animation evaluator, and final ONE/ONE composite are exact `[orig: c7/c8 @ 0x60A220..0x60A34F; Terrain_CollectAndRenderTileModels @ 0x60D250; submit tick @ 0x5DAD9D; batch CTRL snapshot/restore @ 0x5D91AB..0x5D91DE / 0x5DA1B8..0x5DA1FD; material consumer @ 0x58DB80; PolyTrn_RenderTile composite @ 0x60E0C6..0x60E19D]`; scorch/order and cache cadence/edge/address/mip tails remain D-TERRAIN-7, while whole-process CTRL/RNG ordering remains D-3DI-2 |
 | Foliage/sector-model lighting constants | MATCHING (witnessed; values and max-quality non-response pinned) | the blend PS inherits the terrain device's c0/c1 and consumes cached-tile `t1.a*c1+c0`; `Foliage_WindSwayVS` writes `oD0=c6` and declares no normal/light input. The per-patch `Light_SelectAndEnableForDraw @0x60a5dc` call therefore mutates state with no consumer while that VS is bound; only the excluded failed-VS FVF fallback could consume it `[orig: Terrain_CreateFoliageVertexShaders @0x5ff630; Foliage_SetupFarSlotDraw @0x60087a; Foliage_RenderFarPatches @0x609de0]`. |
 | Lighting textures + DOT3 dynamic-light shader | witnessed / reimpl-native equivalent | procedural falloff set + the last embedded PS outside FrameFX `[orig: Lighting_InitTextures @ 0x5a94f0]` — the ps.1.1 DOT3 per-pixel light is the fixed-function era's OmniLight; the reimpl's real per-pixel lights serve the intent |
-| Cubemap and Phong lookup sources | MATCHING | the highest-quality 256² CubeEnvironment host synchronously re-renders the exact sky + sun/moon callback on all six faces every 128 frames, applies the 0x60 gamma-byte dim (the faces reach the published RD cubemap through a RenderingDevice copy leg, no CPU readback), and adds the rotated static lobe `[orig: init_render_textures @ 0x58f6e0; update_environment_cubemap @ 0x6106a0; callback @ 0x5c3700]`; the Forward+ D3D12 axis/orientation/byte probe validates the final samplerCube. Static sun-glint cube = white pow-800 + warm pow-40 along −Z, rotated by MatRotSpecular `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`; normalization cube `[orig: generate_normalmap_cubemap @ 0x685570]`; `Render_CreateSystemTextures @ 0x58aca0` creates the exact 256×256 `gsys_phong` lookup with N.H exponents 4/16/64 in RGB and N.L in alpha. |
-| Render-slot (entity ground shadow) pipeline | **PORTED with open 03TR low-sun defect (2026-08-24)** | the full slot family is witnessed and hosted: frame-open sun default with the 0.25 vertical clamp then negation `[orig: render_shadow_pass @ 0x5d7b70]`, slot registration + LOD `[orig: RenderSlot_AllocSlot @ 0x5d5690]`, priority scoring / 24-patch / 12-RT assignment `[orig: RenderSlot_SortAndAssign @ 0x5d6530]`, RT size chain `[orig: RenderSlot_InitTextureChain @ 0x5d5320]`, dominant-light pick + anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, slot render lighting `[orig: RenderSlot_SetupNextLighting @ 0x5d7250]`, refresh cadence `[orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690]`, and the terrain drape + authored blob decal `[orig: RenderSlot_DrawAllDrapes @ 0x5d6e20; RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0; RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]`. Planning/color laws portable in `engine/runtime/renderer/render_slot_shadow` (ctest `renderer_render_slot_shadow`); device capture + drape in `godot/src/env/slot_shadow.cpp` + `godot/shaders/slot_shadow_drape.gdshader` (GUT `slot_shadow_test`, `sun_shadow_test`). This supersedes the earlier ADR-0023-era "Shadow_/Scar_ family exclusion" note for the RenderSlot_* half; the Scar_ decal family remains out of REN scope. Open symptom: the 03TR dawn M939 drape has the same excess tail at rest and visibly flickers under lateral camera movement; see the note below. |
+| Cubemap and Phong lookup sources | MATCHING | the highest-quality 256² CubeEnvironment shell synchronously re-renders the exact sky + sun/moon callback on all six faces every 128 frames, applies the 0x60 gamma-byte dim (the faces reach the published RD cubemap through a RenderingDevice copy leg, no CPU readback), and adds the rotated static lobe `[orig: init_render_textures @ 0x58f6e0; update_environment_cubemap @ 0x6106a0; callback @ 0x5c3700]`; the Forward+ D3D12 axis/orientation/byte probe validates the final samplerCube. Static sun-glint cube = white pow-800 + warm pow-40 along −Z, rotated by MatRotSpecular `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`; normalization cube `[orig: generate_normalmap_cubemap @ 0x685570]`; `Render_CreateSystemTextures @ 0x58aca0` creates the exact 256×256 `gsys_phong` lookup with N.H exponents 4/16/64 in RGB and N.L in alpha. |
+| Render-slot (entity ground shadow) pipeline | **PORTED with open 03TR low-sun defect (2026-08-24)** | the full slot family is witnessed and hosted: frame-open sun default with the 0.25 vertical clamp then negation `[orig: render_shadow_pass @ 0x5d7b70]`, slot registration + LOD `[orig: RenderSlot_AllocSlot @ 0x5d5690]`, priority scoring / 24-patch / 12-RT assignment `[orig: RenderSlot_SortAndAssign @ 0x5d6530]`, RT size chain `[orig: RenderSlot_InitTextureChain @ 0x5d5320]`, dominant-light pick + anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, slot render lighting `[orig: RenderSlot_SetupNextLighting @ 0x5d7250]`, refresh cadence `[orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690]`, and the terrain drape + authored blob decal `[orig: RenderSlot_DrawAllDrapes @ 0x5d6e20; RenderSlot_DrawSilhouetteDrape @ 0x5d5ca0; RenderSlot_DrawAuthoredBlobDecal @ 0x5d59d0]`. Planning/color laws portable in `engine/runtime/renderer/render_slot_shadow` (ctest `renderer_render_slot_shadow`) with the PROJSHAD coverage and blend-state tables in `object_shader_template` (ctest `renderer_material_classify`); the device (since 2026-08-29) is `godot/src/env/slot_shadow.cpp` publishing one typed request per armed slot, `godot/src/render/slot_capture_adapter.cpp` drawing them as a PRE_OPAQUE RenderingDevice pass into the twelve resolve targets (the retail white clear, black under the technique's coverage and blend state, GPU bone-palette skinning) and `godot/shaders/slot_shadow_drape.gdshader` sampling them (GUT `slot_shadow_test` headless + windowed, `sun_shadow_test`). This supersedes the earlier ADR-0023-era "Shadow_/Scar_ family exclusion" note for the RenderSlot_* half; the Scar_ decal family remains out of REN scope. Open symptom: the 03TR dawn M939 drape has the same excess tail at rest and visibly flickers under lateral camera movement; see the note below. |
 
 **2026-08-22 object-point-light correction.** The broad "point lighting is
 vertex-rate" wording in the historical EffectWorld row applies only to fixed
@@ -893,8 +893,8 @@ typed request per armed slot (order, the capture pose from the witnessed
 basis, the ortho projection of the witnessed extent, the caster and its
 claimed capture-with children) and the `SlotCaptureCompositorEffect` on
 the beauty view's compositor draws them at PRE_OPAQUE — before the terrain
-drape samples them in the same frame — into twelve 4x-MSAA colour targets
-at the witnessed chain sizes, cleared to the retail 0x00FFFFFF, black
+drape samples them in the same frame — into twelve colour targets at the
+witnessed chain sizes, cleared to the retail 0x00FFFFFF, black
 fragments under the technique's PROJSHAD coverage (Diffuse1.a, × Detail.a
 over the transformed UV2 for the _MT FFP blocks, × AlphaGen for the FFP
 families, the alpha test where the material carries one) in the
@@ -912,7 +912,14 @@ and skin on the GPU from the frame's bone palette). Device folds, each
 serving the same observable: the capture eye backs off along −forward in
 `slot_shadow.cpp` (D-RLIT-10 below) where retail renders the entity at the
 origin of its rotation-only view, and the zenith degeneracy takes the
-world x axis; the terrain surface stands in for the 21×21 patch mesh and
+world x axis; the pass rasterizes each capture 4x multisampled and resolves
+it into the single-sample target the drape reads, where retail's chain is
+single-sampled end to end (`RenderSlot_InitTextureChain @ 0x5d5320` ->
+`create_render_target_surfaces @ 0x67f7b0`: a plain `D3DUSAGE_RENDERTARGET`
+texture and a `D3DMULTISAMPLE_NONE` depth surface) and its drape samples the
+RT bilinearly — the resolve keeps a partial-coverage edge so a hard-aliased
+1-2 px silhouette line does not scintillate against the breathing
+first-person camera; the terrain surface stands in for the 21×21 patch mesh and
 the projection is evaluated per pixel, bounded (since 2026-08-22) by the
 lod × lod patch the anchor march places (`renderer::slot_patch_bounds` over
 `TerrainData`'s height query) and clipped by the shadowztex stage
@@ -935,7 +942,16 @@ packaged runtime serves shadow detail 3, retail's highest SHADOWQUALITY
 `@ 0x5d6159`): the 512-base chain, the mask-1 refresh stagger for non-player
 slots, every-frame local player. The `>= 4` 1024-base every-frame tier
 (`RenderSlot_InitTextureChain @ 0x5d535a`) is unreachable from any retail
-config.
+config. Measured at the cutover (2026-08-29/30, the Mission Rows probe,
+1600x900 Forward+ D3D12, three 8 s windows each, mean per frame): CP01
+frame wall 16.14 ms -> 14.98 ms with the retired per-viewport
+`render_slot_cpu` 1.27 ms and `render_slot_gpu` 0.68 ms gone,
+`world_slot_shadow` 0.29 ms -> 0.44 ms (the compile now runs on the main
+thread), 2.5 captures/frame, 19.5 surfaces, 5 GPU-skinned commands; 00TRa
+frame wall 16.80 ms -> 14.60 ms with `render_slot_cpu` 2.18 ms and
+`render_slot_gpu` 0.70 ms retired, `world_slot_shadow` 0.13 ms -> 0.36 ms,
+2.0 captures/frame, 18 surfaces, 8 skinned commands; a stable frame packs
+0 vertices on both.
 
 **Low-sun drape defect remains open (revalidated 2026-08-24, 03TR dawn,
 PR #560).** At the 03TR spawn the M939 drape remains visibly different, and
