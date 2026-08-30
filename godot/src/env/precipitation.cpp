@@ -3,9 +3,12 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/aabb.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
@@ -13,6 +16,32 @@
 #include "simulation/simulation.h"
 
 namespace godot {
+
+namespace {
+
+// One Vector3 of the position stream, as the region update writes it.
+constexpr int kVertexBytes = static_cast<int>(sizeof(float) * 3);
+// The drops live within 32 m of the camera wherever it goes and the fixed
+// surface never re-derives its bounds: an unbounded instance AABB keeps the
+// frustum cull out of the picture.
+constexpr float kAabbHalfExtent = 1.0e6f;
+
+// The per-drop uv triple of the witnessed streak build: {(0.5, 0), (0, 1),
+// (1, 1)} for every slot (renderer/precipitation_frame.h) — a constant of
+// the layout, never of the frame.
+PackedVector2Array streak_uvs(int p_vertices) {
+	PackedVector2Array uvs;
+	uvs.resize(p_vertices);
+	Vector2 *w = uvs.ptrw();
+	for (int i = 0; i + 2 < p_vertices; i += 3) {
+		w[i] = Vector2(0.5f, 0.0f);
+		w[i + 1] = Vector2(0.0f, 1.0f);
+		w[i + 2] = Vector2(1.0f, 1.0f);
+	}
+	return uvs;
+}
+
+} // namespace
 
 void Precipitation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"),
@@ -30,6 +59,8 @@ void Precipitation::_bind_methods() {
 			&Precipitation::get_last_drop_count);
 	ClassDB::bind_method(D_METHOD("is_last_frame_snow"),
 			&Precipitation::is_last_frame_snow);
+	ClassDB::bind_method(D_METHOD("is_streaming_surface"),
+			&Precipitation::is_streaming_surface);
 }
 
 void Precipitation::set_resource_root(const Ref<ResourceRoot> &p_root) {
@@ -77,7 +108,66 @@ void Precipitation::_ensure_scene() {
 	mesh_instance_->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 	mesh_instance_->set_as_top_level(true);
 	mesh_instance_->set_ignore_occlusion_culling(true);
+	mesh_instance_->set_custom_aabb(AABB(
+			Vector3(-kAabbHalfExtent, -kAabbHalfExtent, -kAabbHalfExtent),
+			Vector3(2.0f * kAabbHalfExtent, 2.0f * kAabbHalfExtent, 2.0f * kAabbHalfExtent)));
+	mesh_instance_->set_visible(false);
 	add_child(mesh_instance_);
+	_build_surface();
+}
+
+void Precipitation::_build_surface() {
+	// The fixed surface: every vertex at the origin (collapsed, zero-area),
+	// the constant uv triple in the attribute stream once; from here on only
+	// the position stream changes, through surface_update_vertex_region.
+	PackedVector3Array positions;
+	positions.resize(kMaxVertices);
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = positions;
+	arrays[Mesh::ARRAY_TEX_UV] = streak_uvs(kMaxVertices);
+	mesh_->clear_surfaces();
+	mesh_->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	// The in-place write assumes the plain float triple per vertex (no
+	// compression was requested); anything else falls back to a rebuild.
+	const int64_t format = static_cast<int64_t>(mesh_->surface_get_format(0));
+	const uint32_t stride = RenderingServer::get_singleton()->mesh_surface_get_format_vertex_stride(
+			BitField<RenderingServer::ArrayFormat>(format), kMaxVertices);
+	surface_streams_ = stride == static_cast<uint32_t>(kVertexBytes);
+	uploaded_vertices_ = 0;
+}
+
+void Precipitation::_upload_positions(const PackedVector3Array &p_positions, int p_live_vertices) {
+	// This frame's streaks over the head of the stream, then the collapse of
+	// whatever the previous frame left live past them — two region writes at
+	// most, no allocation of a surface.
+	if (p_live_vertices > 0) {
+		PackedByteArray bytes = p_positions.to_byte_array();
+		const int64_t live_bytes = static_cast<int64_t>(p_live_vertices) * kVertexBytes;
+		if (bytes.size() > live_bytes) {
+			bytes.resize(live_bytes);
+		}
+		mesh_->surface_update_vertex_region(0, 0, bytes);
+	}
+	if (uploaded_vertices_ > p_live_vertices) {
+		PackedByteArray zeros;
+		zeros.resize(static_cast<int64_t>(uploaded_vertices_ - p_live_vertices) * kVertexBytes);
+		zeros.fill(0);
+		mesh_->surface_update_vertex_region(0, static_cast<int64_t>(p_live_vertices) * kVertexBytes, zeros);
+	}
+	uploaded_vertices_ = p_live_vertices;
+}
+
+void Precipitation::_rebuild_surface(const PackedVector3Array &p_positions, int p_live_vertices) {
+	PackedVector3Array positions = p_positions;
+	positions.resize(p_live_vertices);
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = positions;
+	arrays[Mesh::ARRAY_TEX_UV] = streak_uvs(p_live_vertices);
+	mesh_->clear_surfaces();
+	mesh_->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	uploaded_vertices_ = p_live_vertices;
 }
 
 Ref<Texture2D> Precipitation::_texture_for(bool p_snow) {
@@ -104,19 +194,24 @@ void Precipitation::render_frame(Object *p_sim, Camera3D *p_camera) {
 	const Dictionary frame = sim->compile_precipitation_frame(xform.origin,
 			basis.get_column(0).normalized(), basis.get_column(1).normalized(),
 			weather->get_terrain_light_combined_rgb());
-	const int drops = static_cast<int>(frame.get("drops", 0));
+	int drops = static_cast<int>(frame.get("drops", 0));
 	last_snow_ = static_cast<bool>(frame.get("snow", false));
 	if (drops <= 0) {
 		hide_frame();
 		return;
 	}
-	mesh_->clear_surfaces();
+	if (drops * 3 > kMaxVertices) {
+		drops = kMaxVertices / 3;
+	}
 	last_drops_ = drops;
-	Array arrays;
-	arrays.resize(Mesh::ARRAY_MAX);
-	arrays[Mesh::ARRAY_VERTEX] = frame.get("positions", PackedVector3Array());
-	arrays[Mesh::ARRAY_TEX_UV] = frame.get("uvs", PackedVector2Array());
-	mesh_->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	const PackedVector3Array positions = frame.get("positions", PackedVector3Array());
+	const int live_vertices = static_cast<int>(
+			positions.size() < static_cast<int64_t>(drops) * 3 ? positions.size() : static_cast<int64_t>(drops) * 3);
+	if (surface_streams_) {
+		_upload_positions(positions, live_vertices);
+	} else {
+		_rebuild_surface(positions, live_vertices);
+	}
 	const int64_t argb = static_cast<int64_t>(frame.get("color", 0xFF000000));
 	// Env_TerrainLightCombined | 0xFF000000: the diffuse the fixed-function
 	// combine modulates (x2) the texture with.
@@ -141,7 +236,8 @@ void Precipitation::hide_frame() {
 	if (mesh_instance_ == nullptr || (last_drops_ == 0 && !mesh_instance_->is_visible())) {
 		return;
 	}
-	mesh_->clear_surfaces();
+	// The live vertices stay where they are: the next frame's upload
+	// overwrites the head and collapses the tail past its own count.
 	mesh_instance_->set_visible(false);
 	last_drops_ = 0;
 }

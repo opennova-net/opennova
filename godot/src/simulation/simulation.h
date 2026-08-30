@@ -975,8 +975,8 @@ public:
 	// a joiner or without a world.
 	bool settle_weather_mission_start();
 	// The precipitation drop pool's per-render update + compile for a camera
-	// (Godot frame): {positions: PackedVector3Array, uvs: PackedVector2Array,
-	// drops, color (ARGB int), snow} — the kernel re-floors the wrapped drops
+	// (Godot frame): {positions: PackedVector3Array (three per drop), drops,
+	// color (ARGB int), snow} — the kernel re-floors the wrapped drops
 	// over terrain/water/entities, the renderer builds the streaks
 	// (renderer/precipitation_frame.h carries the cites).
 	Dictionary compile_precipitation_frame(const Vector3 &p_camera,
