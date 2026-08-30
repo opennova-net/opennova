@@ -117,18 +117,15 @@ class ResourceRoot;
 // lifecycle, input retention, fixed cadence, and terminal outcomes. One target
 // advance is the original's 62 Hz engine tick (current_tick in
 // Game_ProcessMainFrame @0x5263f0), while advance_session_frame runs 0..N of
-// those, faithful to Game_MainLoop @0x52b630. The per-system
-// cadences live INSIDE the systems, as in the original: the WAC VM self-gates to every
-// 62nd tick (WacScript_AdvanceTick @0x4f81b1) and the BMS evaluator quarter-passes every 16th
-// (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live owner for
-// this path; focused tests and non-gameplay tools may instantiate it directly:
-// promote a parsed BMS mission into the world
-// (mission/promote.h), register the systems in the faithful order
-// (mission/mission_systems.h), run a pre-mission pass, then tick. Entity transforms
-// (mission space -> Godot space) and the part-anim phase are exposed for a scene/renderer
-// to draw; presentation side effects (text/dialog/win) drain out of the World
-// EffectLog each tick. Runtime transport and fixture teardown use the same
-// play/pause/step/restart surface.
+// those, faithful to Game_MainLoop @0x52b630. Per-system cadences live INSIDE
+// the systems, as in the original: the WAC VM self-gates to every 62nd tick
+// (WacScript_AdvanceTick @0x4f81b1), the BMS evaluator quarter-passes every
+// 16th (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live
+// owner; focused tests and non-gameplay tools may instantiate it directly
+// (promote a parsed BMS mission, register the systems in the faithful order,
+// run a pre-mission pass, then tick). Entity transforms and the part-anim
+// phase are exposed for a scene/renderer to draw; presentation side effects
+// drain out of the World EffectLog each tick.
 class Simulation : public Node3D,
                        private opennova::inmatch::TickTarget {
 	GDCLASS(Simulation, Node3D)
@@ -146,8 +143,7 @@ public:
 	// the enum with its field documentation — and this class enum re-exports
 	// every entry with the engine's values so GDScript reads it as bound
 	// constants (BIND_ENUM_CONSTANT needs a class-scope enum; the assignments
-	// make drift impossible). Add new fields engine-side first, then mirror
-	// the entry here.
+	// make drift impossible). Add new fields engine-side first, then mirror the entry here.
 	enum PresentField {
 		PF_KIND = opennova::world::PF_KIND,
 		PF_INDEX = opennova::world::PF_INDEX,
@@ -335,8 +331,7 @@ public:
 		// One full PLAYPARTANIM sweep (16.16 1.0) — the phase/ACTIVE domain
 		// bound for the debug pages (world/ai.h kPartAnimPhaseOne).
 		PART_ANIM_PHASE_ONE = opennova::world::kPartAnimPhaseOne,
-		// The "no local record" wire-handle sentinel (world/entity.h
-		// EntityHandle::kInvalid).
+		// The "no local record" wire-handle sentinel (world/entity.h EntityHandle::kInvalid).
 		INVALID_WIRE_HANDLE = opennova::world::EntityHandle::kInvalid,
 		// The epilog/debrief ESC-less exit timeout in ticks (world/world.h
 		// kEpilogExitTimeoutTicks; epilog_exit_timeout_seconds() derives).
@@ -366,8 +361,7 @@ public:
 	};
 
 	// Spawn-origin provenance (world/entity.h): (kind << 24) | (index &
-	// 0xFFFFFF), kSpawnOriginNone = none. Fixed uint32_t so
-	// SPAWN_ORIGIN_NONE binds positive.
+	// 0xFFFFFF), kSpawnOriginNone = none. Fixed uint32_t so SPAWN_ORIGIN_NONE binds positive.
 	enum : uint32_t {
 		SPAWN_ORIGIN_NONE = opennova::world::kSpawnOriginNone,
 	};
@@ -395,13 +389,12 @@ private:
 	// (reset_world) and NEVER null after construction; this binding converts
 	// Godot Refs into the kernel's sources and orders device work around it.
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
-	// The Weather node bound through set_weather_render_owner; released
-	// whenever the kernel (and the WeatherState it owns) is replaced or dies.
+	// The Weather node bound through set_weather_render_owner; released when
+	// the kernel (and the WeatherState it owns) is replaced or dies.
 	ObjectID weather_owner_id_;
 	void _release_weather_owner();
 	opennova::renderer::PrecipitationDrawState precipitation_draw_;
-	// The compiled streak frame, reused across frames (its vertex capacity
-	// survives clear()).
+	// The compiled streak frame, reused across frames (capacity survives clear()).
 	opennova::renderer::PrecipitationDrawFrame precipitation_frame_;
 	void apply_collision_to_ai();
 	// The shell input the sweep reads (its retained items.def rows feed the
@@ -459,8 +452,7 @@ private:
 	std::vector<int32_t> occlusion_culled_bms_;
 	// Delta baselines for the render-occlusion apply path: what the shell last
 	// applied, so steady frames emit nothing. Cleared on world reset and via
-	// reset_occlusion_apply_baseline() (the occlusion A/B seam re-arms a full
-	// re-emit).
+	// reset_occlusion_apply_baseline() (the occlusion A/B seam re-arms a full re-emit).
 	std::unordered_map<uint32_t, int64_t> occl_apply_building_last_;
 	std::vector<int32_t> occl_apply_culled_last_;
 	// Per-entity sun-visibility quality last emitted to the shell, split by
@@ -623,8 +615,7 @@ private:
 	// H-learned pose); remote entities render wire-direct (present + wire_present_pass). enable_join
 	// turns it on; a sim is host XOR joiner. [orig: NapiNPClientMsg_0x00C @0x42E730 self name-match]
 	bool joiner_ = false;
-	// The F3 Weapon window's held-trigger latch. OR'd into the per-tick weapon
-	// input so a devtools hold survives the shell's own per-frame write.
+	// The F3 Weapon window's held-trigger latch (OR'd into per-tick weapon input).
 	bool debug_weapon_fire_held_ = false;
 	bool joiner_net_diagnostics_ = false;
 	// The joiner's per-frame world<->net bridge (S10a, ADR 0028): the frame
@@ -701,8 +692,7 @@ private:
 	// The whole equipped-weapon state (def/slot/rings/serials/UseGun/
 	// PowerThrow/presentation events) lives on the kernel (kernel_->weapon,
 	// with the retained weapon.def rows and the clip index beside it); this
-	// binding marshals installs, inputs, drains, and the two wire request
-	// records.
+	// binding marshals installs, inputs, drains, and the two wire request records.
 	using LocalUseGunSwitch = opennova::world::LocalUseGunSwitch;
 	// The UseGun borrow + slot selection live in world/player_weapon.h; these
 	// inline wrappers keep the family's call sites unchanged.
@@ -816,8 +806,7 @@ private:
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
 	// The view state and its trackers live on the kernel (kernel_->view /
 	// kernel_->view_tracker; the witnessed gates in world/local_player_view.h);
-	// this class converts frames and routes wire requests
-	// (simulation_player_view.cpp).
+	// this class converts frames and routes wire requests (simulation_player_view.cpp).
 	opennova::world::LocalViewSessionInputs local_view_session_inputs() const;
 	void reset_local_player_view_effects();
 	void refresh_local_player_view_effects();
@@ -957,42 +946,33 @@ public:
 	// --- the weather home (world::WeatherState, ADR 0042 d2/d5) --------------
 	// The World's weather, the ONE home the WAC handlers write, the kernel's
 	// weather tick advances, the 0x0A projection serializes and a joiner's
-	// decoder writes back. Null without a kernel. C++ seams for the sibling
+	// decoder writes back. Null without a kernel; C++ seams for the sibling
 	// native nodes (the Weather node binds its render owner here).
 	opennova::world::WeatherState *weather_state();
 	const opennova::world::WeatherState *weather_state() const;
-	// True once a world is installed (the weather home exists for the debug
-	// rows to command).
 	bool weather_state_bound() const { return weather_state() != nullptr; }
-	// The mission-start seed from the parsed .env + the mission header (the
-	// embedder's ONE derivation, env::weather_seed_from_config).
+	// The mission-start seed (the embedder's ONE derivation, env::weather_seed_from_config).
 	void seed_weather(const opennova::world::WeatherSeed &p_seed);
 	// The render owner the kernel's weather tick calls after the sim legs
-	// (null detaches). The owner node is remembered so the World's death
-	// (reset_world, destruction) releases the owner's pointer into it before
-	// the environment can read a freed WeatherState.
+	// (null detaches); remembered so the World's death releases the owner's
+	// pointer before the environment can read a freed WeatherState.
 	void set_weather_render_owner(Weather *p_owner);
 	// The authority's mission-start boundary after the eager WAC execution:
-	// the currents snap to the authored targets, the clamps install, 255 full
-	// ticks settle (retail Environment_MissionStartInit @ 0x57f1e0). False for
-	// a joiner or without a world.
+	// currents snap to targets, clamps install, 255 full ticks settle (retail
+	// Environment_MissionStartInit @ 0x57f1e0). False for a joiner / no world.
 	bool settle_weather_mission_start();
-	// The precipitation drop pool's per-render update + compile for a camera
-	// (Godot frame): {positions: PackedVector3Array (three per drop), drops,
-	// color (ARGB int), snow} — the kernel re-floors the wrapped drops
-	// over terrain/water/entities, the renderer builds the streaks
+	// The precipitation drop pool's per-render update + compile for a camera:
+	// {positions (three per drop), drops, color (ARGB int), snow}
 	// (renderer/precipitation_frame.h carries the cites).
 	Dictionary compile_precipitation_frame(const Vector3 &p_camera,
 			const Vector3 &p_camera_right, const Vector3 &p_camera_up,
 			int p_terrain_light_rgb);
-	// The weather tick's thunder one-shots since the last drain:
-	// [{distance: float, bearing: int}] (weather_state.h carries the cites).
+	// Thunder one-shots since the last drain: [{distance, bearing}] (weather_state.h carries the cites).
 	Array drain_weather_sounds();
 	// The probe/test view of the weather home in native units.
 	Dictionary get_weather_state() const;
-	// The F3 Environment window's record (ADR 0042 d6), built by the ENGINE
-	// join over the weather home, the mission document, the occlusion blink
-	// flags and the local view; false without a world.
+	// The F3 Environment window's record (ADR 0042 d6): the ENGINE join over
+	// the weather home; false without a world.
 	bool native_environment_snapshot(opennova::devtools::EnvironmentSnapshot &out) const;
 	// The MCP/debug rows' authority-gated weather commands (the F3 window
 	// reaches EntityCommands natively through DevTools). False on a joiner.
@@ -1120,8 +1100,7 @@ public:
 	// pump for the session socket, so the Play/Step/Stop transport locks out
 	// (retail multiplayer has no pause; a stopped listen host reaps every
 	// joiner at cs_dir0.timeout_ms [orig: CNapiNetwork_Init @ 0x4ca4a0]).
-	// The single home for the rule — F3 transport, MCP, and the ESC pause all
-	// read this predicate.
+	// The single home for the rule — F3 transport, MCP, and the ESC pause all read this predicate.
 	bool is_transport_locked() const { return joiner_ || host_listen_; }
 	// The portable session's live role/state records (net/inmatch/session.h),
 	// re-exported so the debug/MCP shell derives authority and role labels from
@@ -1168,8 +1147,7 @@ public:
 	// --- Portable session frame (ADR 0035) --------------------------------
 	// The input and outcomes are typed values. The one temporary tick sink keeps
 	// per-tick Godot presentation synchronous during catch-up without installing
-	// a persistent callback bus; GameFramePipeline orders concrete devices around
-	// this call.
+	// a persistent callback bus; GameFramePipeline orders concrete devices around this call.
 	Ref<MissionFrameOutcome> advance_session_frame(
 			const Ref<MissionFrameInput> &p_input,
 			const Callable &p_tick_sink = Callable());
@@ -1298,8 +1276,7 @@ public:
 	// wave line, the psp/medic show gates, and the medic-call cooldown.
 	Dictionary get_deploy_status();
 	// The STATIC_RESPAWN_MSG1 text of the current status line, resolved
-	// through the gametext table (the engine's deploy_status_text); "" when
-	// the static is hidden.
+	// through the gametext table (the engine's deploy_status_text); "" when the static is hidden.
 	String get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext);
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
@@ -1635,14 +1612,12 @@ public:
 	// session strings): known/team_mode/timed, the witnessed players count
 	// (accepted rows minus the spectator trailer, netsim::scoreboard_header),
 	// in_game/spectators, game_type, server and mission names. The rows no
-	// longer round-trip through script — HudOverlay pulls them natively via
-	// fill_scoreboard_rows.
+	// longer round-trip through script — HudOverlay pulls them natively via fill_scoreboard_rows.
 	Dictionary get_scoreboard() const;
 	// The native Tab-board row handoff: fills the drawer's entries via the
 	// netsim projection (netsim::project_scoreboard — wire order, the server
 	// sorts and the client never re-sorts). NOT ClassDB-bound; HudOverlay
-	// calls it through this typed seam. Returns false (rows cleared) when no
-	// runtime exists.
+	// calls it through this typed seam. Returns false (rows cleared) when no runtime exists.
 	bool fill_scoreboard_rows(
 			std::vector<opennova::hud::ScoreboardEntry> &r_rows) const;
 	// The folded board's team-table count (netsim ClientScoreboard::team_count,
@@ -1950,8 +1925,7 @@ public:
 	// color}. The presenter's light pool spawns a permanent (mode 1) light per
 	// id, follows it per tick, and despawns dropped ids [orig:
 	// RoundData_SpawnRound @0x4ec8da spawn, the per-tick follow @0x4eaa9f,
-	// Projectile_ReleaseEffects clear — witness map on
-	// engine/runtime/renderer/light_scene.h].
+	// Projectile_ReleaseEffects clear — witness map on engine/runtime/renderer/light_scene.h].
 	Array get_round_glow_rows() const;
 
 	// The styled ribbon compile over trail rows (renderer/tracer_frame.h owns
@@ -2029,49 +2003,31 @@ public:
 	// request's handle onto the ai_index the debug delegates key on.
 	int native_ai_index_for_handle(int p_handle) const;
 	// The engine's tool/probe mutation seam by entity handle (ADR 0042 d5),
-	// for the C++ embedders (DevTools) that already hold a handle; null
-	// without a kernel.
+	// for the C++ embedders (DevTools) that already hold a handle; null without a kernel.
 	opennova::world::EntityCommands *entity_commands();
 
 	// --- the F3 Weapon window's native seams (devtools; ADR 0042 d6) -------
-	// The live equipped-weapon cluster (the baked FSM def, the slot, the clip
-	// rings); null without a kernel or with nothing equipped. The Weapon
-	// window's embedder assembles its record from this plus the retained parse
-	// below — no Variant round-trip.
+	// Engine-typed records out (no Variant round-trip); null/-1 without a
+	// kernel or nothing equipped. The retained row carries the AUTHORED delays
+	// (-1 = `auto`); the ACTIVE slot is the UseGun-borrowed one when engaged;
+	// the input block names the pump's gate ("" = accepted). Full contracts:
+	// simulation_player_weapon.cpp.
 	const opennova::world::LocalPlayerWeapon *native_local_player_weapon() const;
-	// The retained weapon.def row behind the equipped weapon: the AUTHORED
-	// delays a re-bake starts from, which differ from the baked ones wherever
-	// a row wrote `auto`. Null when the equipped name has no retained row.
 	const DefWeaponDef *native_equipped_weapon_row() const;
-	// The equipped weapon's index in the armory table; -1 when unresolved.
 	int native_equipped_weapon_adm_index() const;
-	// The ACTIVE slot the pump runs: the borrowed UseGun parent slot when one
-	// is engaged, else the personal slot. Null without a weapon.
 	const opennova::world::WeaponSlotState *native_active_weapon_slot() const;
-	// The pump's own input gate as a reason ("" = input accepted).
 	const char *native_weapon_input_block() const;
-	// The equipped clip keys (.adm rings), for the window's ANIM picker.
 	std::vector<std::string> native_equipped_weapon_clip_keys() const;
-
-	// Live ACTION edits. Both write the LIVE baked slot (instant, no re-bake,
-	// no slot disturbance — correct for dragging a strip edge while the
-	// trigger is held) and mirror into the retained row so a re-install keeps
-	// them. `auto` (-1) and an ANIM change re-bake, because both re-resolve
-	// from the clip. NOTHING here touches the filesystem.
-	// p_action_id is opennova::world::weapon_action::*; p_field is
-	// devtools::WeaponRequest::TextField (paired by static_assert at the drain).
-	// Delays arrive in AUTHORED form (-1 = `auto`): both legs are mirrored
-	// into the retained row as given, only explicit legs patch the live baked
-	// slot, and `p_rebake` asks for the same-weapon re-bake that resolves a
-	// leg newly turned `auto` (the live slot, serials and scope survive it).
+	// Live ACTION edits — never the filesystem. Delays arrive AUTHORED and
+	// mirror into the retained row so a re-install keeps them; only explicit
+	// legs patch the live baked slot; `p_rebake` (a leg newly `auto`) or an
+	// ANIM change takes the same-weapon re-bake that keeps the live slot,
+	// serials and scope. p_field/p_trigger pair by static_assert at the drain.
 	bool debug_weapon_set_action_delays(int p_action_id, int p_delay_start, int p_delay_end,
 			bool p_rebake);
 	bool debug_weapon_set_action_text(int p_action_id, int p_field, const String &p_text);
-	// Queue an action through the REAL input seam and its real gate; false when
-	// the gate refuses. p_trigger is devtools::WeaponRequest::Trigger.
+	// Queue an action through the REAL input seam; false when its gate refuses.
 	bool debug_weapon_trigger(int p_trigger);
-	// The devtools held-trigger latch, OR'd into the per-tick weapon input so
-	// it survives the shell's own write.
 	void debug_weapon_set_fire_held(bool p_held);
 	bool debug_weapon_fire_held() const { return debug_weapon_fire_held_; }
 	// Arm, disarm and clear the pump's 62.5 Hz trace ring.
@@ -2126,8 +2082,7 @@ public:
 	// [orig: g_spawn_success_gate @0x24c1928 / g_round_winning_team @0x24c1924 /
 	// the 0xC846xx buckets]
 	Dictionary get_round_outcome_debug() const;
-	// Human-readable AI state name, "?" for the id gaps
-	// [orig: Entity_LookupAIStateName @0x455cc0].
+	// Human-readable AI state name, "?" for the id gaps [orig: Entity_LookupAIStateName @0x455cc0].
 	static String ai_state_name(int p_state);
 	// Infantry anim state id -> ADM clip key ("anim_<off_8135F0 name>"), empty for invalid gaps.
 	static String infantry_anim_key(int p_state);
@@ -2282,8 +2237,7 @@ public:
 	// (blink-hits + the outdoors three-ray latch). Camera in Godot space; fov_y in
 	// degrees; fog/water in mission units; force_indoors mirrors the mission
 	// attribute override [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
-	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 steps 1-4 + the collector
-	// gates]
+	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 steps 1-4 + the collector gates]
 	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
 	                         double p_aspect, double p_near, double p_fog_dist_units,
 	                         double p_water_z_units, bool p_force_indoors);
@@ -2422,8 +2376,7 @@ public:
 	// items.def id of the pool-2 building encoded by blink_hits[0], or 0 when
 	// the player is not inside a blink volume. Entity::item_id is the raw BMS
 	// type, so this accessor applies mission::kItemIdOffset for database lookup.
-	// Lighting keys from hit PRESENCE, independently of the aggregate
-	// "indoors" flag bit.
+	// Lighting keys from hit PRESENCE, independently of the aggregate "indoors" flag bit.
 	int local_player_interior_item_id() const;
 
 	// The blink-box owner for a model-light spawn at a world point: retail runs
@@ -2479,8 +2432,7 @@ public:
 	// proximity-candidate slice for blink classification, the nonzero-count sun
 	// gate, and both pool-1/pool-2 sun blockers.
 	// [orig: compute_ambient_light_along_direction @ 0x5c7a00;
-	//  terrain_sector_compute_lighting @ 0x5c7550;
-	//  raycast_entity_collision @ 0x413760]
+	//  terrain_sector_compute_lighting @ 0x5c7550;  raycast_entity_collision @ 0x413760]
 	PackedInt32Array compute_iris_samples(const Vector3 &cam_pos, const Vector3 &cam_forward,
 	                                      const Vector3 &light_dir);
 
