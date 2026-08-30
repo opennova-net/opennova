@@ -1803,6 +1803,7 @@ func get_runtime_perf_counters() -> Dictionary:
 		"foliage_backend": foliage_backend,
 		"framefx": _framefx.get_backend_report() if _framefx != null else {},
 		"mission_placement": _mission_stats.duplicate(true),
+		"static_live_populations": get_static_live_population_count(),
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
 		"instance_uniform_geometry_estimate":
 				_instance_uniform_geometry_estimate(foliage_backend),
