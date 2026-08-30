@@ -668,18 +668,44 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	])
 
 
-## Godot's occlusion consumer is a world-level decision: on only while the
-## loaded mission placed authored OOBJ occluders (a conservative second layer
-## under the retail section/portal verdict, docs/render/render-occlusion-re.md
-## "Conservative device occluders") and only on an RD-backed viewport, since
-## headless and Compatibility expose no occlusion path. Unload switches it off;
-## no ObjectModel flips viewport state.
-func _apply_occlusion_culling_policy(authored_occluder_models: int) -> void:
+## Godot's occlusion consumer is a world-level decision (a conservative second
+## layer under the retail section/portal verdict, docs/render/
+## render-occlusion-re.md "Conservative device occluders"); no ObjectModel
+## flips viewport state. It stays OFF by default: measured 2026-08-30 through
+## the "occlusion_culling" debug row (1600x900, Ryzen 7735HS iGPU, medians of
+## p50 over two runs, the missions carrying 19 / 26 buildings with authored
+## occluders), the occluder pass cost 0.64 / 0.59 ms of render_root_cpu
+## (frame 14.47 -> 13.55 ms on 00TRa, 14.50 -> 13.68 ms on CP01) and culled
+## nothing (487 -> 489 and 416 -> 416 root draw calls) because the retail
+## section verdict already hides what the OOBJ faces would. A mission load
+## and an unload both re-apply the default; the debug row switches the pass
+## on live while the mission carries occluders.
+func _apply_occlusion_culling_policy(_authored_occluder_models: int) -> void:
+	set_occlusion_culling_enabled(false)
+
+
+## The occlusion consumer as a live device switch (the F3/MCP
+## "occlusion_culling" row): it reads and writes the world viewport directly,
+## never on a viewport without a RenderingDevice (headless and Compatibility
+## expose no occlusion path), and the next mission load re-applies the policy
+## default above (a fresh mission gets fresh debug state; nothing replays).
+func set_occlusion_culling_enabled(enabled: bool) -> void:
 	var viewport := get_viewport() if is_inside_tree() else null
 	if viewport == null:
 		return
-	viewport.use_occlusion_culling = authored_occluder_models > 0 \
+	viewport.use_occlusion_culling = enabled \
 			and RenderingServer.get_rendering_device() != null
+
+
+func is_occlusion_culling_enabled() -> bool:
+	var viewport := get_viewport() if is_inside_tree() else null
+	return viewport != null and viewport.use_occlusion_culling
+
+
+## How many placed buildings carry authored OOBJ occluders in the loaded
+## mission (0 = the occluder pass has nothing to cull with).
+func get_authored_occluder_model_count() -> int:
+	return int(_mission_stats.get("authored_occluder_models", 0))
 
 
 func get_loaded_mission() -> MissionData:

@@ -682,6 +682,20 @@ func _register_rendering_rows() -> void:
 			return ERR_UNAVAILABLE
 		viewport.debug_draw = int(value) as Viewport.DebugDraw
 		return OK
+	var culling := _world_check(&"occlusion_culling", &"Rendering",
+			"Godot occlusion culling",
+			"Run Godot's occluder pass over the world viewport: the conservative second layer under the retail portal verdict, off by default (it cost ~0.6 ms of render CPU per frame and culled nothing at the measured poses) and usable only while the loaded mission placed authored OOBJ occluders. Flip it to weigh the pass against what it culls (render-occlusion-re.md, Conservative device occluders).",
+			func(world: GameWorld) -> bool: return world.is_occlusion_culling_enabled(),
+			func(world: GameWorld, on: bool) -> void: world.set_occlusion_culling_enabled(on))
+	# The row also tells whether the mission has occluders at all: without
+	# them the switch has nothing to cull with and reads unavailable.
+	culling.availability = func() -> String:
+		var world := _world()
+		if world == null:
+			return "No game world is loaded."
+		if world.get_authored_occluder_model_count() <= 0:
+			return "The loaded mission placed no authored occluders."
+		return ""
 
 
 func _register_edit_actions() -> void:

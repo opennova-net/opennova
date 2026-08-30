@@ -3414,23 +3414,32 @@ func _stage_occluder_building_fixture(name: String) -> String:
 
 func test_world_owns_the_occlusion_culling_switch() -> void:
 	# Godot's occlusion consumer is a world-level decision (docs/render/
-	# render-occlusion-re.md "Conservative device occluders"): on while the
-	# loaded mission placed authored OOBJ occluders and the viewport is
-	# RD-backed, off again on unload. No ObjectModel flips it.
+	# render-occlusion-re.md "Conservative device occluders"): off by default
+	# (the pass costs more than it culls under the retail section verdict),
+	# switched on live through the world's typed toggle only for an RD-backed
+	# viewport, and reset by a load and an unload. No ObjectModel flips it.
 	var root_dir := _stage_occluder_building_fixture("occl_switch")
 	var world := _make_world()
 	add_child_autofree(world)
 	var viewport := world.get_viewport()
-	viewport.use_occlusion_culling = false
+	viewport.use_occlusion_culling = true
 	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
 		mission.add_entity(
 				MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))
 	var stats: Dictionary = world.get_mission_stats()
 	assert_gt(int(stats.get("authored_occluder_models", 0)), 0,
 			"the armory building placed authored occluders")
+	assert_eq(world.get_authored_occluder_model_count(),
+			int(stats.get("authored_occluder_models", 0)),
+			"the debug row reads the placed occluder count from the world")
+	assert_false(viewport.use_occlusion_culling,
+			"a load re-applies the default: the consumer stays off")
+	assert_false(world.is_occlusion_culling_enabled())
 	var rd_backed := RenderingServer.get_rendering_device() != null
+	world.set_occlusion_culling_enabled(true)
 	assert_eq(viewport.use_occlusion_culling, rd_backed,
-			"the world switches the consumer on only for an RD-backed viewport")
+			"the toggle switches the consumer on only for an RD-backed viewport")
+	assert_eq(world.is_occlusion_culling_enabled(), rd_backed)
 	world.unload()
 	assert_false(viewport.use_occlusion_culling,
 			"unload switches the consumer off for the next mission")
