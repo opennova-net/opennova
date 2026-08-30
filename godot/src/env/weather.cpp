@@ -241,6 +241,12 @@ void Weather::bind_simulation(Object *p_sim) {
 	}
 }
 
+void Weather::release_simulation() {
+	sim_id_ = ObjectID();
+	MissionEnvironment *env = _env_node();
+	runtime_.attach_state(nullptr, env != nullptr ? &env->state() : nullptr);
+}
+
 void Weather::weather_render_tick(opennova::world::WeatherState &p_weather) {
 	(void)p_weather; // the runtime is attached to this same home
 	MissionEnvironment *env = _env_node();

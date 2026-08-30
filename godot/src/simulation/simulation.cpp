@@ -3,6 +3,8 @@
 // variables, perf counters.
 // The class spans several TUs; see simulation_internal.h for the map.
 #include "simulation/simulation_internal.h"
+
+#include "env/weather.h"
 #include <runtime/environment/environment_state.h>
 
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
@@ -85,10 +87,15 @@ Simulation::Simulation() : session_(*this) {
 }
 
 Simulation::~Simulation() {
+	_release_weather_owner();
 	(void)session_.close();
 }
 
 void Simulation::reset_world() {
+	// The bound Weather node points into this kernel's World (its
+	// WeatherState is the environment's live view): release it before the
+	// kernel is replaced.
+	_release_weather_owner();
 	joiner_bridge_.reset_world_stream();
 	invalidate_present_effect_pose_cache();
 	// A fresh EntityRegistry restarts its spawn ids at 1, so the per-handle
@@ -188,9 +195,25 @@ void Simulation::seed_weather(const opennova::world::WeatherSeed &p_seed) {
 	kernel_->world.weather.seed(p_seed);
 }
 
-void Simulation::set_weather_render_owner(opennova::world::IWeatherRenderTick *p_owner) {
+void Simulation::set_weather_render_owner(Weather *p_owner) {
+	weather_owner_id_ = p_owner != nullptr ? ObjectID(p_owner->get_instance_id())
+										: ObjectID();
 	if (kernel_ == nullptr) return;
-	kernel_->weather_render = p_owner;
+	kernel_->weather_render =
+			p_owner != nullptr ? p_owner->render_tick_interface() : nullptr;
+}
+
+void Simulation::_release_weather_owner() {
+	if (kernel_ != nullptr) {
+		kernel_->weather_render = nullptr;
+	}
+	if (!weather_owner_id_.is_valid()) return;
+	Weather *owner = Object::cast_to<Weather>(
+			ObjectDB::get_instance(weather_owner_id_));
+	weather_owner_id_ = ObjectID();
+	if (owner != nullptr) {
+		owner->release_simulation();
+	}
 }
 
 bool Simulation::settle_weather_mission_start() {

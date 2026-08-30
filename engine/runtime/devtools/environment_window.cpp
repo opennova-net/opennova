@@ -167,7 +167,7 @@ void EnvironmentWindow::draw_controls() {
 	ImGui::Separator();
 	ImGui::TextUnformatted(snapshot_.authority
 					? "Weather commands (the WAC handlers)"
-					: "Weather commands land on the host; this side only observes");
+					: "Weather commands land on the authority; a joiner only observes");
 	ImGui::BeginDisabled(!snapshot_.authority);
 	const float w = 96.0f;
 	ImGui::SetNextItemWidth(w);

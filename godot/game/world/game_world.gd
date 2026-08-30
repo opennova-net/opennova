@@ -776,6 +776,10 @@ func unload() -> void:
 	# Net-session teardown: the preload sim/root, the notification latches, the
 	# typed request staging, and the NovaWorld gate registration.
 	_net_drive.reset()
+	# The environment's weather view points into the departing sim's World:
+	# detach before the runtime (and its off-tree sim) is freed.
+	if _weather != null:
+		_weather.bind_simulation(null)
 	_set_weather_world_tick_driven(true)
 	_set_water_world_rendering_enabled(false)
 	if _env != null:
@@ -949,11 +953,12 @@ func _prepare_world_driven_weather() -> void:
 func _prepare_autonomous_weather() -> void:
 	var weather: Weather = _weather
 	if weather != null:
+		# A world without a mission runs the environment's standalone weather
+		# home: drop any bound Simulation first.
+		weather.bind_simulation(null)
 		weather.prepare_autonomous()
 	else:
 		_set_weather_world_tick_driven(false)
-		if _weather != null:
-			_weather.bind_simulation(null)
 
 
 # The witnessed mission-start environment boundary runs natively on the

@@ -37,6 +37,8 @@
 #include <runtime/wac/wac_system.h>
 
 namespace godot {
+
+class Weather;
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
 class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 0042 d5)
 class EntityRow;      // one typed entity-directory row
@@ -393,6 +395,10 @@ private:
 	// (reset_world) and NEVER null after construction; this binding converts
 	// Godot Refs into the kernel's sources and orders device work around it.
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
+	// The Weather node bound through set_weather_render_owner; released
+	// whenever the kernel (and the WeatherState it owns) is replaced or dies.
+	ObjectID weather_owner_id_;
+	void _release_weather_owner();
 	opennova::renderer::PrecipitationDrawState precipitation_draw_;
 	void apply_collision_to_ai();
 	// The shell input the sweep reads (its retained items.def rows feed the
@@ -956,8 +962,10 @@ public:
 	// embedder's ONE derivation, env::weather_seed_from_config).
 	void seed_weather(const opennova::world::WeatherSeed &p_seed);
 	// The render owner the kernel's weather tick calls after the sim legs
-	// (null detaches).
-	void set_weather_render_owner(opennova::world::IWeatherRenderTick *p_owner);
+	// (null detaches). The owner node is remembered so the World's death
+	// (reset_world, destruction) releases the owner's pointer into it before
+	// the environment can read a freed WeatherState.
+	void set_weather_render_owner(Weather *p_owner);
 	// The authority's mission-start boundary after the eager WAC execution:
 	// the currents snap to the authored targets, the clamps install, 255 full
 	// ticks settle (retail Environment_MissionStartInit @ 0x57f1e0). False for

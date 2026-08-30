@@ -51,6 +51,11 @@ public:
 	// scalar/clock reads follow it, and the kernel calls this node's render
 	// legs after each sim tick. Null unbinds back to the private state.
 	void bind_simulation(Object *p_sim);
+	// The bound Simulation's World is going away (reset_world / its
+	// destructor): drop the pointer into it and fall back to the
+	// environment's standalone weather home without touching the sim.
+	void release_simulation();
+	opennova::world::IWeatherRenderTick *render_tick_interface() { return this; }
 	// The mission-start environment boundary: seed the World's weather from
 	// the loaded .env + the mission clock (the ONE derivation,
 	// env::weather_seed_from_config), the authority's eager WAC execution,
