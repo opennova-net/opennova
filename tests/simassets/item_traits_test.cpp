@@ -501,6 +501,28 @@ int main() {
         CHECK(player_op->female == -1);
     }
 
+    // A per-entity attrib override (the F3 / MCP debug seam) is the sweep's to
+    // erase: the next resolve_item_traits re-stamps the def's words and the
+    // derived stamps, and the per-item death traits never followed the
+    // override in the first place.
+    {
+        Entity *rifle_override = w.registry.get(rifle_h);
+        CHECK(rifle_override != nullptr);
+        if (rifle_override != nullptr) {
+            const uint32_t authored = rifle_override->item_attrib;
+            CHECK(w.commands.set_entity_item_attrib(
+                    rifle_h, authored | DEF_ITEM_ATTRIB_NODIE | DEF_ITEM_ATTRIB_SPAWNPOINT, 0x2000u));
+            CHECK(rifle_override->is_spawn_point);
+            CHECK(w.item_death_traits.get(510) == nullptr || !w.item_death_traits.get(510)->no_die);
+            simassets::resolve_item_traits(w, file, wire_class);
+            rifle_override = w.registry.get(rifle_h);
+            CHECK(rifle_override != nullptr && rifle_override->item_attrib == authored);
+            CHECK(rifle_override != nullptr && rifle_override->item_attrib2 == 0u);
+            CHECK(rifle_override != nullptr && !rifle_override->is_spawn_point);
+            CHECK(rifle_override != nullptr && rifle_override->leave_corpse);
+        }
+    }
+
     def_free_items(&file);
     if (failures == 0) std::printf("simassets_item_traits: OK\n");
     return failures == 0 ? 0 : 1;

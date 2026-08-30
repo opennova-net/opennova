@@ -381,6 +381,21 @@ extern "C" uint32_t def_item_attrib2_keyword_bit(int index) {
     return (uint32_t)opennova::defscan::item_attrib2_table[index].bit;
 }
 
+/* The DefItemType names (def.h): the non-injective pairs keep both tokens. */
+extern "C" const char *def_item_type_name(int type) {
+    switch (type) {
+        case DEF_ITEM_TYPE_UNSET: return "unset";
+        case DEF_ITEM_TYPE_VEHICLE: return "vehicle";
+        case DEF_ITEM_TYPE_DECORATION: return "decoration/foliage";
+        case DEF_ITEM_TYPE_PERSON: return "person";
+        case DEF_ITEM_TYPE_MARKER: return "marker";
+        case DEF_ITEM_TYPE_BUILDING: return "building";
+        case DEF_ITEM_TYPE_POWERUP: return "powerup/object";
+        case DEF_ITEM_TYPE_EFFECT: return "effect";
+        default: return "?";
+    }
+}
+
 namespace opennova::defscan {
 
 /* Alignment parser: left=0, right=1, center=2 */

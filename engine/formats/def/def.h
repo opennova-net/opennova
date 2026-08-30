@@ -995,6 +995,10 @@ uint32_t def_item_attrib_keyword_bit(int index);
 int def_item_attrib2_keyword_count(void);
 const char *def_item_attrib2_keyword(int index);
 uint32_t def_item_attrib2_keyword_bit(int index);
+/* The DefItemType vocabulary by value ("vehicle", "decoration/foliage", ...,
+   "unset"; "?" for a value the table never produces) — one home for the
+   type names a tool prints. */
+const char *def_item_type_name(int type);
 
 int def_parse_hudpos(const char *path, DefHudPosFile *out);
 /* Parse hudpos.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
