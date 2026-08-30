@@ -1044,6 +1044,19 @@ families through `LightScene`. Per-draw live/static object delivery, lifecycle,
 terrain/corona legs, and the refuted max-quality foliage premise close
 D-RLIT-4 as of 2026-08-23.
 
+Minted 2026-08-30 (the PR #595 slot RenderingDevice pass review):
+**D-RLIT-10** -> `PERMANENT` (class C, register below) — the slot silhouette
+capture's eye and depth band. Retail renders the entity at the origin of
+its rotation-only look-at view under an ortho band 0.2..5000.2
+`[orig: setup_shadow_cascade_matrices @ 0x58d300; Entity_RenderWithLODCallback
+@ 0x5d6ef0]`, a band that as read starts in front of the entity's own
+origin; the shell's RD pass backs its eye off along −forward so the whole
+model sphere lies inside its clip band. The orthographic silhouette is the
+same image either way (render-lighting-re.md D-RLIT-10). The capture view
+basis itself is witnessed and shared: `renderer::direction_look_at`
+(`build_direction_look_at_matrix @ 0x612c90`) serves the slot view and the
+addeweap attachment frame from one engine home.
+
 Corrected 2026-08-22 by the exhaustive highest-quality technique audit: the
 earlier D-RLIT-4 statement that all object point lighting is vertex-rate was
 too broad. Fixed-function NORMAL families consume D3D vertex diffuse with its
@@ -1194,6 +1207,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-VFS-9 | `<exp>L.pff` mounted as our persistent primary vs retail's secondary slot 0 | Effective lookup precedence is identical; the slot bookkeeping is reimpl-internal. |
 | D-VFS-10 | Mounted loose lookups reject rooted/drive-qualified/ADS/`..` queries and symlink escapes, unlike retail's unchecked path construction [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] | A resource name must stay inside the explicitly mounted root. Preserving legitimate relative, case-insensitive lookup while refusing arbitrary local-file access is a reimpl safety boundary, not a gameplay fidelity loss. |
 | D-VFS-11 | Under `--loose-root` (ONED's Run OpenNova loose action) the game shell falls back to the selected loose directory when the fixed boot table opens zero archives, where retail aborts subsystem initialization [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44] | Running the exact selected loose file set is the managed launch's purpose ([ADR 0037](adr/0037-oned-runs-game-data.md)); every unflagged standalone run keeps the retail fatal, so shipped-game behavior is unchanged. |
+| D-RLIT-10 | The render-slot silhouette capture's RenderingDevice eye backs off the caster center along −forward (two model-sphere diameters plus 2 u) with a 0.05..(2·eye + r) ortho depth band, where retail renders the entity at the origin of its rotation-only look-at view under the 0.2..5000.2 band `[orig: setup_shadow_cascade_matrices @ 0x58d300; Entity_RenderWithLODCallback @ 0x5d6ef0]` | An orthographic silhouette is invariant under a translation along the view axis, so the shell's eye reproduces the witnessed image exactly; the literal band's near plane sits 0.2 u in front of the entity's origin and the retail render state that admits the entity's near half is unwitnessed, so porting it as read would clip half of every caster ([render/render-lighting-re.md](render/render-lighting-re.md) D-RLIT-10). |
 | D-RORD-2 | Retail's per-frame CPU quicksort of opaque batch entries (alpha-test bit → 256-unit depth slabs → effect index → fine depth) vs the reimpl renderer's internal opaque ordering | The sort is a device-era draw-call-batching strategy, not observable behavior for z-buffered opaques; reproducing it would fight the Godot pipeline for zero visual difference. The key semantics survive as T1-pinned functions (`renderer::opaque_sort_key`) so any future implementation that CAN consume them has the witnessed spec ([render/render-order-re.md](render/render-order-re.md)). |
 | D-CTRL-4 | The `hudcolor` action (catalog row 76, dispatch code 10) stays reachable by rebinding, while on the stock keymap the default F6 cycles `huddetail` exactly as retail's first-match shadowing does (`Input_HandleActionBinding_0 @0x4e0420`) | Retail leaves `hudcolor` dormant only as a keymap accident of two rows sharing F6; both rows are live dispatcher arms, so hiding the row would reproduce the accident rather than the mechanism, and the default-key behavior already matches |
 | D-MNU-18 | Menu wheel scrolling — a reimpl addition; retail menus never wheel-scroll (the witnessed pipeline dead-ends: `Menu_ShellMouseCallback @ 0x54b8c6` collapses both tick masks into event 0x100000B that no handler consumes, `Menu_InGameMouseCallback @ 0x568760` drops ticks) | Parity here means discarding wheel input a modern player expects at a witnessed dead end. The addition stays inside the witnessed dispatch shape (one notch = one CScrollWnd arrow step; open popup exclusive, else the front-most row owner under the point) and the CONTROLS remap capture keeps first claim, so the wheel stays bindable. Ratified 2026-08-12 (maintainer). |

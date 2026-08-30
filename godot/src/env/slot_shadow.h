@@ -54,8 +54,8 @@ class Weather;
 // fold into the ancestor exclusion and ride the parent's subtree walk; the
 // attached-light drape darkening folds the light's attenuation at the entity
 // into the per-slot term; the capture eye backs off the caster along the
-// slot direction (renderer::silhouette_capture_eye) where retail renders the
-// entity at the origin of a rotation-only view.
+// slot direction (the RenderingDevice depth band of advance_frame, D-RLIT-10)
+// where retail renders the entity at the origin of a rotation-only view.
 //
 // Driven once per display frame by GameFramePipeline through
 // GameWorld.render_slot_shadow_frame(), after the light select has pushed

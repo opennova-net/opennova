@@ -97,12 +97,12 @@ int main() {
 		CHECK(kSlotCaptureClearArgb == 0x00FFFFFFu);  // white RGB, alpha 0
 		CHECK(near_f(kSilhouetteCaptureNear, 0.2f));
 		CHECK(near_f(kSilhouetteCaptureFar, 5000.2f));
-		// The device eye spans the whole model sphere: eye distance minus the
-		// radius lies beyond the near plane, eye plus radius inside the far.
-		const SlotCaptureEye eye = silhouette_capture_eye(3.0f);
-		CHECK(eye.distance - 3.0f > eye.near);
-		CHECK(eye.distance + 3.0f < eye.far);
-		CHECK(near_f(eye.distance, 8.0f));
+		// The slot basis is the shared retail look-at frame (mounted_pose
+		// consumes the same one): identical outputs for the same direction.
+		const DirectionLookAt<float> shared = direction_look_at(
+				std::array<float, 3>{0.3f, -0.5f, 0.7f});
+		CHECK(near_f(shared.right[0], g.right[0]) && near_f(shared.up[1], g.up[1]) &&
+				near_f(shared.forward[2], g.forward[2]) && !shared.degenerate);
 	}
 
 	// --- RT chain [orig: RenderSlot_InitTextureChain @ 0x5d5320].

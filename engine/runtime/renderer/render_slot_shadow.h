@@ -44,6 +44,8 @@
 #pragma once
 
 #include <array>
+
+#include <runtime/renderer/direction_look_at.h>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -87,36 +89,25 @@ float silhouette_half_extent(float bound_radius_units);
 
 // The silhouette capture view. Retail builds a rotation-only D3D view from
 // the slot direction [orig: setup_shadow_cascade_matrices @ 0x58d300 ->
-// build_direction_look_at_matrix @ 0x612c90]: forward = normalize(dir),
-// right = normalize(forward.z, 0, -forward.x), up = forward x right (a
-// vertical direction, |forward.xz| = 0, leaves right and up ZERO — retail's
-// degenerate zenith matrix; the device substitutes the world x axis so the
-// capture keeps a frame). The entity renders at the origin of that view
-// [orig: Entity_RenderWithLODCallback @ 0x5d6ef0 zeroes the position for a
-// null origin; children at their offset from the parent @ 0x5d795a/0x5d79c8]
-// under an orthographic projection of scale 1/half_extent over the depth
-// band 0.2..5000.2 [orig: @ 0x58d38b..0x58d3a3 — 1/(far - near) = 0.0002,
-// -near/(far - near) = -0.00004].
-struct SlotCaptureBasis {
-	std::array<float, 3> right{};
-	std::array<float, 3> up{};
-	std::array<float, 3> forward{};
-	bool degenerate = false;  // retail's zero right/up (vertical direction)
-};
+// build_direction_look_at_matrix @ 0x612c90, the shared
+// renderer::direction_look_at frame in direction_look_at.h: forward =
+// normalize(dir), right = normalize(forward.z, 0, -forward.x), up = forward x
+// right; a vertical direction leaves right and up ZERO in retail and the
+// frame substitutes the world x axis, reported as degenerate]. The entity
+// renders at the origin of that view [orig: Entity_RenderWithLODCallback
+// @ 0x5d6ef0 zeroes the position for a null origin; children at their offset
+// from the parent @ 0x5d795a/0x5d79c8] under an orthographic projection of
+// scale 1/half_extent over the depth band 0.2..5000.2 [orig:
+// @ 0x58d38b..0x58d3a3 — 1/(far - near) = 0.0002, -near/(far - near) =
+// -0.00004]. As read, that band starts 0.2 u in front of the view origin the
+// entity sits at; the RenderingDevice pass in the shell places its own eye
+// and band around the model sphere (docs/render/render-lighting-re.md,
+// D-RLIT-10) — an orthographic silhouette is invariant under that
+// translation.
+using SlotCaptureBasis = DirectionLookAt<float>;
 SlotCaptureBasis silhouette_capture_basis(const std::array<float, 3> &direction);
 inline constexpr float kSilhouetteCaptureNear = 0.2f;     // @ 0x58d3a3
 inline constexpr float kSilhouetteCaptureFar = 5000.2f;   // @ 0x58d399
-// Device fold: a Godot ortho camera clips outside [near, far] like retail's
-// D3D band, so the capture eye backs off from the caster center along
-// -forward far enough that the whole model sphere lies inside its band —
-// the eye distance and the band below stand in for retail's origin eye
-// and 0.2..5000.2 band; the projected silhouette is identical.
-struct SlotCaptureEye {
-	float distance = 0.0f;  // eye = center - forward * distance
-	float near = 0.0f;
-	float far = 0.0f;
-};
-SlotCaptureEye silhouette_capture_eye(float model_sphere_radius_units);
 
 // ---------------------------------------------------------------------------
 // Render-target chain and refresh cadence (the retail texture budget)

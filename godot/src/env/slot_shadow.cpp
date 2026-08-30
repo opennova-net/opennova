@@ -431,8 +431,8 @@ bool SlotShadow::_ensure_capture_target(int p_order, int p_size) {
 		// drape samples every published order the same frame, and an order
 		// whose pass has not drawn yet (no WorldEnvironment in scope, a
 		// latched device failure) must multiply white into the terrain, not
-		// undefined texels. The SubViewport chain this replaced was always
-		// cleared by its background colour.
+		// undefined texels (the viewport chain this replaced was always cleared
+		// by its background colour).
 		rd->texture_clear(target, slot_capture_clear_color(), 0, 1, 0, 1);
 	}
 	if (capture_textures_[p_order].is_valid()) {
@@ -898,24 +898,32 @@ void SlotShadow::advance_frame() {
 		// sphere [orig: RenderSlot_RenderEntityAndChildren @0x5d7835 —
 		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)]: the witnessed
 		// rotation-only basis (renderer::silhouette_capture_basis, its
-		// zenith degeneracy substituted) with the eye backed off along
-		// -forward (renderer::silhouette_capture_eye, the device fold the
-		// header documents) so the whole sphere lies in the depth band.
+		// zenith degeneracy substituted).
 		const int order = assignment.capture_order;
 		const float radius = info.capture_radius;
 		const float half_extent = opennova::renderer::silhouette_half_extent(radius);
 		const opennova::renderer::SlotCaptureBasis basis =
 				opennova::renderer::silhouette_capture_basis(
 						{float(dir.x), float(dir.y), float(dir.z)});
-		const opennova::renderer::SlotCaptureEye eye =
-				opennova::renderer::silhouette_capture_eye(radius);
 		const Vector3 forward(basis.forward[0], basis.forward[1], basis.forward[2]);
+		// The RenderingDevice depth band (the device fold D-RLIT-10 in
+		// docs/render/render-lighting-re.md): retail renders the entity at the
+		// origin of that rotation-only view under its 0.2..5000.2 band
+		// (renderer::kSilhouetteCaptureNear/Far), a band that as read starts
+		// in front of the entity's own origin; the RD ortho clips outside
+		// [near, far] the same way, so this eye backs off along -forward by
+		// two sphere diameters plus the retail near margin and the band
+		// spans the sphere. An orthographic silhouette is invariant under that
+		// translation, so the capture is the same image.
+		const float eye_distance = radius * 2.0f + 2.0f;
+		const float eye_near = opennova::renderer::kSilhouetteCaptureNear * 0.25f;
+		const float eye_far = eye_distance * 2.0f + radius;
 		Transform3D pose;
 		// A Godot camera looks down its local -Z: columns x = right, y = up,
 		// z = -forward.
 		pose.basis = Basis(Vector3(basis.right[0], basis.right[1], basis.right[2]),
 				Vector3(basis.up[0], basis.up[1], basis.up[2]), -forward);
-		pose.origin = center - forward * eye.distance;
+		pose.origin = center - forward * eye_distance;
 
 		// The refresh cadence (opennova::renderer::slot_refresh_mask_for carries the
 		// local-player exception).
@@ -935,7 +943,7 @@ void SlotShadow::advance_frame() {
 			request.size = want_size;
 			request.view = pose;
 			request.projection = Projection::create_orthogonal(-half_extent,
-					half_extent, -half_extent, half_extent, eye.near, eye.far);
+					half_extent, -half_extent, half_extent, eye_near, eye_far);
 			if (_ensure_capture_target(order, want_size)) {
 				request.target = capture_targets_[order];
 			}
@@ -979,7 +987,7 @@ void SlotShadow::advance_frame() {
 			q = Vector3(term[0], term[1], term[2]);
 		}
 		drape->set_shader_parameter(slot_uniforms().mat[order],
-				_drape_projection(pose, half_extent, half_extent, eye.far));
+				_drape_projection(pose, half_extent, half_extent, eye_far));
 		silhouette_terms[order] = Vector4(q.x, q.y, q.z, 1.0f);
 		// The patch around the marched anchor, from the stored direction.
 		const Vector3 entity_pos = model->get_global_position();
