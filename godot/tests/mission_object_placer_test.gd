@@ -1267,3 +1267,279 @@ func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
 		assert_gt(int(stats.get("static_lod_populations", 0)), 0)
 	else:
 		assert_eq(int(stats.get("static_lod_populations", -1)), 0)
+
+
+# --- Dense populations: only live rows reach the GPU and the cull -------------
+# A population carries rows only for the slots at its level, packed [0, live)
+# with visible_instance_count = live; a level switch swap-removes the slot from
+# the old level's population (the last live row fills the hole) and appends it
+# to the new one; a population with no live row is hidden so Godot's cull tree
+# skips it. Headless Godot stores no MultiMesh instance data, so the row order
+# is pinned through the placer's bookkeeping (get_static_population_live_bms_ids)
+# and the device rows windowed.
+
+const DENSE_NEAR_CAMERA := Transform3D(Basis.IDENTITY, Vector3(10, 0, 220))
+const DENSE_MID_CAMERA := Transform3D(Basis.IDENTITY, Vector3(10, 0, 30))
+const DENSE_DISTANT_CAMERA := Transform3D(Basis.IDENTITY, Vector3(10, 0, 5010))
+
+
+func _dense_lod_switches(placer: MissionObjectPlacer, camera: Transform3D) -> int:
+	return placer.update_static_lods(camera, 70.0, 640.0, 480.0)
+
+
+# Three same-graphic buildings in one 512-unit bin at Godot z = 10 / 100 /
+# 200 (BMS y = -10 / -100 / -200), a two-level graphic (row 1 = 20 px). The
+# second one optionally carries the BMS NoShadow gate so the level
+# populations need a filtered shadow twin.
+func _dense_fixture(parent: Node3D, no_shadow_second: bool) -> Dictionary:
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var bms_ids: Array[int] = []
+	for y in [-10.0, -100.0, -200.0]:
+		var entity := mission.add_entity(
+				MissionData.KIND_BUILDING, 105004, Vector3(10, y, 0), Vector3.ZERO)
+		assert_false(entity.is_empty())
+		bms_ids.append(int(entity.get("bms_id", 0)))
+	if no_shadow_second:
+		assert_true(mission.set_entity_property_int(
+				MissionData.KIND_BUILDING, 1, "ai_flags", 0x01000000))
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	var fine := BoxMesh.new()
+	fine.size = Vector3(4, 4, 4)
+	var coarse := BoxMesh.new()
+	coarse.size = Vector3(3, 3, 3)
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", ObjectData.new(), [{
+				"mesh": fine, "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 0, "lod_index": 0,
+			}, {
+				"mesh": coarse, "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 1, "lod_index": 1,
+			}], {
+				"thresholds_q16": PackedInt32Array([0, 20 << 16]),
+				"sphere_radius": 2.0,
+			}))
+	var stats: Dictionary = placer.place(mission, parent)
+	return {
+		"placer": placer,
+		"mission": mission,
+		"stats": stats,
+		"bms": bms_ids,
+		"container": parent.get_node_or_null("MissionObjects"),
+	}
+
+
+func _live_bms(placer: MissionObjectPlacer, population: MultiMeshInstance3D) -> Array:
+	return Array(placer.get_static_population_live_bms_ids(population))
+
+
+func test_dense_population_packs_only_live_rows_and_hides_empty_levels() -> void:
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var fixture := _dense_fixture(parent, false)
+	var placer: MissionObjectPlacer = fixture.placer
+	var bms: Array[int] = fixture.bms
+	var container: Node3D = fixture.container
+	assert_not_null(container)
+	if container == null:
+		return
+	var level0 := _lod_population(container, "Batch_StaticCrate1_0")
+	var level1 := _lod_population(container, "Batch_StaticCrate1_1")
+	if level0 == null or level1 == null:
+		return
+	assert_eq(level0.multimesh.instance_count, 3,
+			"capacity is the bin's slot count")
+	assert_eq(level1.multimesh.instance_count, 3)
+	assert_eq(_live_bms(placer, level0), [bms[0], bms[1], bms[2]],
+			"before the first camera frame the level-0 population holds every "
+			+ "slot in slot order")
+	assert_eq(_live_bms(placer, level1), [],
+			"the coarser level starts with no live row")
+	assert_true(level0.visible)
+	assert_false(level1.visible,
+			"a population with no live row is hidden from the cull")
+	assert_eq(int(fixture.stats.get("static_live_populations", -1)), 1)
+	assert_eq(placer.get_static_live_population_count(), 1)
+
+	# 640x480 at 70 deg vertical: the z = 10 and z = 100 entities project to
+	# 6.5 px and 11.4 px (level 1); the z = 200 one to ~34 px (level 0).
+	assert_eq(_dense_lod_switches(placer, DENSE_NEAR_CAMERA), 2)
+	assert_eq(_live_bms(placer, level0), [bms[2]],
+			"swap-remove: the last live row (the third entity) filled the first "
+			+ "hole, then the second entity's row was the last and simply shrank")
+	assert_eq(_live_bms(placer, level1), [bms[0], bms[1]],
+			"appended in switch order")
+	assert_true(level1.visible, "the first append shows the population")
+	assert_true(level0.visible)
+	assert_eq(placer.get_static_live_population_count(), 2)
+	assert_eq(_live_populations(placer, bms[0]), ["Batch_StaticCrate1_1"])
+	assert_eq(_live_populations(placer, bms[1]), ["Batch_StaticCrate1_1"])
+	assert_eq(_live_populations(placer, bms[2]), ["Batch_StaticCrate1_0"])
+	assert_eq(placer.get_static_instance_binding_count(bms[0]), 2,
+			"a slot per level population, live or not")
+
+	# Beside the first entity (the other two are behind the camera and keep
+	# their level): the first entity returns to level 0; the second entity's
+	# row moves into its vacated level-1 row 0.
+	assert_eq(_dense_lod_switches(placer, DENSE_MID_CAMERA), 1)
+	assert_eq(_live_bms(placer, level1), [bms[1]])
+	assert_eq(_live_bms(placer, level0), [bms[2], bms[0]])
+
+	# Retail's sub-pixel floor drops every instance from every level: both
+	# populations empty and hide.
+	assert_eq(_dense_lod_switches(placer, DENSE_DISTANT_CAMERA), 3)
+	assert_eq(_live_bms(placer, level0), [])
+	assert_eq(_live_bms(placer, level1), [])
+	assert_false(level0.visible)
+	assert_false(level1.visible)
+	assert_eq(placer.get_static_live_population_count(), 0)
+	assert_eq(level0.multimesh.instance_count, 3,
+			"the capacity never changes; only the live count does")
+
+
+func test_dense_population_carve_and_restore_follow_the_compaction() -> void:
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var fixture := _dense_fixture(parent, false)
+	var placer: MissionObjectPlacer = fixture.placer
+	var bms: Array[int] = fixture.bms
+	var container: Node3D = fixture.container
+	if container == null:
+		return
+	var level0 := _lod_population(container, "Batch_StaticCrate1_0")
+	var level1 := _lod_population(container, "Batch_StaticCrate1_1")
+	if level0 == null or level1 == null:
+		return
+	assert_eq(_dense_lod_switches(placer, DENSE_NEAR_CAMERA), 2)
+	assert_eq(_dense_lod_switches(placer, DENSE_MID_CAMERA), 1)
+	assert_eq(_live_bms(placer, level0), [bms[2], bms[0]])
+	assert_eq(_live_bms(placer, level1), [bms[1]])
+
+	# Carving the third entity (row 0 of level 0) moves the first entity's
+	# row into the hole; its remap is what the later carve of the first
+	# entity must follow.
+	assert_true(placer.hide_static_instance(bms[2]) is Transform3D)
+	assert_eq(_live_bms(placer, level0), [bms[0]])
+	assert_eq(_live_populations(placer, bms[2]), [])
+	assert_eq(_live_populations(placer, bms[0]), ["Batch_StaticCrate1_0"],
+			"the moved slot is still live in the population it was moved within")
+	assert_true(placer.hide_static_instance(bms[0]) is Transform3D)
+	assert_eq(_live_bms(placer, level0), [],
+			"the remapped row was removed, not the stale one")
+	assert_false(level0.visible, "the emptied population hides")
+	assert_eq(_live_bms(placer, level1), [bms[1]],
+			"a carve never disturbs another population")
+	assert_true(placer.show_static_instance(bms[0]))
+	assert_true(placer.show_static_instance(bms[2]))
+	assert_eq(_live_bms(placer, level0), [bms[0], bms[2]],
+			"restored at the last selected level, appended in restore order")
+	assert_true(level0.visible)
+	# Carving the level-1 entity empties and hides that population; the
+	# restore re-shows it and the next frame re-evaluates it like any other.
+	assert_true(placer.hide_static_instance(bms[1]) is Transform3D)
+	assert_eq(_live_bms(placer, level1), [])
+	assert_false(level1.visible)
+	assert_true(placer.show_static_instance(bms[1]))
+	assert_eq(_live_bms(placer, level1), [bms[1]])
+	assert_true(level1.visible)
+	assert_eq(_dense_lod_switches(placer, DENSE_NEAR_CAMERA), 1,
+			"only the first entity (level 0, now far) crosses; the second "
+			+ "already sits at level 1")
+	assert_eq(_live_bms(placer, level0), [bms[2]])
+	assert_eq(_live_bms(placer, level1), [bms[1], bms[0]])
+
+
+func test_dense_shadow_twin_and_shadow_row_map_follow_the_compaction() -> void:
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var fixture := _dense_fixture(parent, true)
+	var placer: MissionObjectPlacer = fixture.placer
+	var bms: Array[int] = fixture.bms
+	var container: Node3D = fixture.container
+	if container == null:
+		return
+	var level0 := _lod_population(container, "Batch_StaticCrate1_0")
+	var level1 := _lod_population(container, "Batch_StaticCrate1_1")
+	var shadow0 := _lod_population(container, "StaticShadow_StaticCrate1_0")
+	var shadow1 := _lod_population(container, "StaticShadow_StaticCrate1_1")
+	if level0 == null or level1 == null or shadow0 == null or shadow1 == null:
+		return
+	assert_eq(_live_bms(placer, shadow0), [bms[0], bms[2]],
+			"the shadow twin carries rows only for the slots that cast")
+	assert_eq(_live_bms(placer, shadow1), [])
+	assert_false(shadow1.visible)
+	assert_eq(Array(level0.get_meta("static_shadow_rows")), [0, 1, 2],
+			"the row -> slot map starts in slot order")
+	assert_eq(Array(shadow0.get_meta("static_shadow_rows")), [0, 2],
+			"the twin's rows name the casting slots")
+	assert_eq(level0.get_meta("static_shadow_bms_ids"), [bms[0], bms[1], bms[2]],
+			"the slot identity arrays stay slot-ordered")
+	assert_eq(int(fixture.stats.get("static_live_populations", -1)), 2)
+
+	assert_eq(_dense_lod_switches(placer, DENSE_NEAR_CAMERA), 2)
+	assert_eq(_live_bms(placer, level0), [bms[2]])
+	assert_eq(_live_bms(placer, level1), [bms[0], bms[1]])
+	assert_eq(_live_bms(placer, shadow0), [bms[2]],
+			"the twin swap-removed the first entity")
+	assert_eq(_live_bms(placer, shadow1), [bms[0]],
+			"the NoShadow entity never enters a twin")
+	assert_true(shadow1.visible)
+	assert_eq(Array(level0.get_meta("static_shadow_rows")), [2])
+	assert_eq(Array(level1.get_meta("static_shadow_rows")), [0, 1])
+	assert_eq(Array(shadow0.get_meta("static_shadow_rows")), [2])
+	assert_eq(Array(shadow1.get_meta("static_shadow_rows")), [0])
+	assert_eq(_live_populations(placer, bms[0]), ["Batch_StaticCrate1_1"],
+			"the live-population read-back names visible populations only")
+
+
+func _device_multimesh_rows_available() -> bool:
+	return DisplayServer.get_name() != "headless" and \
+			RenderingServer.get_current_rendering_method() == "forward_plus"
+
+
+func test_dense_population_device_rows_match_the_bookkeeping() -> void:
+	if not _device_multimesh_rows_available():
+		pending("MultiMesh instance rows need a windowed Forward+ run")
+		return
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var fixture := _dense_fixture(parent, false)
+	var placer: MissionObjectPlacer = fixture.placer
+	var bms: Array[int] = fixture.bms
+	var container: Node3D = fixture.container
+	if container == null:
+		return
+	var level0 := _lod_population(container, "Batch_StaticCrate1_0")
+	var level1 := _lod_population(container, "Batch_StaticCrate1_1")
+	if level0 == null or level1 == null:
+		return
+	var expected := {}
+	for index in range(3):
+		expected[bms[index]] = MissionObjectPlacer.entity_transform(
+				Vector3(10, [-10.0, -100.0, -200.0][index], 0), Vector3.ZERO)
+	var check := func(population: MultiMeshInstance3D, label: String) -> void:
+		var rows := _live_bms(placer, population)
+		assert_eq(population.multimesh.visible_instance_count, rows.size(),
+				"%s draws exactly its live rows" % label)
+		for row in range(rows.size()):
+			var device: Transform3D = population.multimesh.get_instance_transform(row)
+			assert_true(device.is_equal_approx(expected[rows[row]]),
+					"%s row %d carries the entity it is booked for" % [label, row])
+			assert_gt(absf(device.basis.determinant()), 0.5,
+					"no zero-scaled row inside the live range")
+	check.call(level0, "level 0 at placement")
+	assert_eq(level1.multimesh.visible_instance_count, 0)
+	assert_eq(_dense_lod_switches(placer, DENSE_NEAR_CAMERA), 2)
+	check.call(level0, "level 0 after the switch")
+	check.call(level1, "level 1 after the switch")
+	assert_eq(_dense_lod_switches(placer, DENSE_MID_CAMERA), 1)
+	check.call(level0, "level 0 after the return")
+	check.call(level1, "level 1 after the return")
+	assert_true(placer.hide_static_instance(bms[2]) is Transform3D)
+	check.call(level0, "level 0 after the carve")
+	assert_true(placer.show_static_instance(bms[2]))
+	check.call(level0, "level 0 after the restore")

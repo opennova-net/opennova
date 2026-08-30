@@ -23,20 +23,20 @@ namespace {
 
 constexpr const char *kContainerName = "MissionObjects";
 constexpr float kStaticBatchBinSize = 512.0f;
+// EXPERIMENT SWITCH (lane 1A): false emits one population per
+// (graphic x policy x level x submesh) instead of one per 512-unit bin.
+constexpr bool kStaticBatchBinsEnabled = true;
 
 int static_batch_bin_coord(float p_world) {
+	if (!kStaticBatchBinsEnabled) {
+		return 0;
+	}
 	return static_cast<int>(std::floor(p_world / kStaticBatchBinSize));
 }
 
 uint64_t static_batch_bin_key(int p_x, int p_z) {
 	return (static_cast<uint64_t>(static_cast<uint32_t>(p_x)) << 32) |
 			static_cast<uint32_t>(p_z);
-}
-
-// A slot that draws nothing: zero-scaled at its own origin so the population
-// keeps its instance count and the slot's identity.
-Transform3D static_carved_transform(const Transform3D &p_live) {
-	return Transform3D(Basis().scaled(Vector3()), p_live.origin);
 }
 
 } // namespace
@@ -111,6 +111,11 @@ void MissionObjectPlacer::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("get_static_instance_live_populations", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_live_populations);
+	ClassDB::bind_method(
+			D_METHOD("get_static_population_live_bms_ids", "population"),
+			&MissionObjectPlacer::get_static_population_live_bms_ids);
+	ClassDB::bind_method(D_METHOD("get_static_live_population_count"),
+			&MissionObjectPlacer::get_static_live_population_count);
 	ClassDB::bind_method(
 			D_METHOD("resolve_player_visual_item_id", "runtime_type_id"),
 			&MissionObjectPlacer::resolve_player_visual_item_id);
@@ -381,12 +386,15 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["static_global_batches"] = 0;
 	stats["static_instances_retained"] = 0;
 	stats["static_lod_populations"] = 0;
+	stats["static_live_populations"] = 0;
 	stats["static_shadow_batches"] = 0;
 	stats["authored_occluder_models"] = 0;
 	destruction_instances_.clear();
 	hidden_destruction_instances_.clear();
 	static_lod_profiles_.clear();
 	static_lod_instances_.clear();
+	static_populations_.clear();
+	static_population_by_node_.clear();
 	static_lod_switches_ = 0;
 	static_terrain_shadow_replacements_.clear();
 	static_user_point_sources_ = Array();
@@ -526,8 +534,9 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	// cells as terrain. Retail's blended strips remain global because their
 	// independently chosen Q1/Q2 order must not inherit spatial batch centers.
 	// Every authored RLOD is emitted as its own population over the same slot
-	// list; a slot is live only in the populations of its selected level
-	// (level 0 until the first update_static_lods evaluates the camera).
+	// list; a population carries rows only for the slots at its level (level
+	// 0 until the first update_static_lods evaluates the camera), so the
+	// coarser levels start empty and hidden.
 	int placed = 0;
 	int batched = 0;
 	int graphics = 0;
@@ -659,6 +668,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			for (int i = 0; i < instance_count; ++i) {
 				StaticLodInstance retained;
 				retained.profile = profile_row;
+				retained.bms_id = i < group.bms_ids.size() ? group.bms_ids[i] : 0;
 				retained.origin = group.xforms[i].origin;
 				retained.radius = profile.sphere_radius *
 						ObjectLodFrame::uniform_scale(group.xforms[i].basis);
@@ -733,32 +743,65 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			p_source->set_meta("static_shadow_graphic", graphic);
 			p_source->set_meta("static_shadow_batch_key", group_key);
 		};
-		// Every emitted slot joins its retained instance so a level switch or
-		// a destruction carve rewrites exactly the populations it occupies.
-		const auto bind_lod_slots = [&](const Ref<MultiMesh> &p_mm,
-				MultiMeshInstance3D *p_mmi, const Vector<int> &p_slots,
-				const StaticBatch &p_batch, bool p_shadow_only) {
+		// One population over a slot list: capacity = the slot count, one
+		// binding per slot joining its retained instance (so a level switch
+		// or a destruction carve moves exactly the rows it owns), and the
+		// rows of the slots live at this level appended dense from row 0.
+		// Returns the population index.
+		const auto build_population = [&](const Ref<MultiMesh> &p_mm,
+				const Vector<int> &p_slots, const StaticBatch &p_batch,
+				bool p_shadow_only) -> int {
+			StaticPopulation population;
+			population.multimesh = p_mm;
+			population.lod_index = p_batch.lod_index;
+			population.shadow_only = p_shadow_only;
+			population.custom_data = !p_shadow_only;
+			population.row_instance.resize(p_slots.size());
+			population.row_binding.resize(p_slots.size());
+			population.row_slot.resize(p_slots.size());
+			static_populations_.push_back(population);
+			const int population_index = static_populations_.size() - 1;
 			for (int local_index = 0; local_index < p_slots.size(); ++local_index) {
 				const int slot = p_slots[local_index];
 				if (slot < 0 || slot >= lod_rows.size()) {
 					continue;
 				}
 				StaticLodBinding binding;
-				binding.multimesh = p_mm;
-				binding.instance_node =
-						p_mmi != nullptr ? p_mmi->get_instance_id() : 0;
-				binding.index = local_index;
+				binding.population = population_index;
+				binding.slot = local_index;
 				binding.lod_index = p_batch.lod_index;
 				binding.live_xform = group.xforms[slot] * p_batch.offset;
+				const int *row = light_draw_rows.getptr(
+						static_light_draw_key(slot, p_batch.robj_index));
+				binding.custom_data = Color(
+						row != nullptr ? static_cast<float>(*row + 1) : 0.0f, 0.0f,
+						0.0f, 0.0f);
 				binding.shadow_only = p_shadow_only;
 				binding.casts =
 						slot < group.shadow_slots.size() && group.shadow_slots[slot];
-				static_lod_instances_.write[lod_rows[slot]].bindings.push_back(
-						binding);
+				const int instance_row = lod_rows[slot];
+				StaticLodInstance &retained = static_lod_instances_.write[instance_row];
+				retained.bindings.push_back(binding);
+				if (_static_slot_live(binding, retained.active_lod)) {
+					_static_population_append(population_index, instance_row,
+							retained.bindings.size() - 1);
+				}
 			}
+			return population_index;
 		};
-		const auto slot_level_live = [&](int p_slot, int p_lod_index) {
-			return static_lod_instances_[lod_rows[p_slot]].active_lod == p_lod_index;
+		// Retail draws every selected entity; hidden here means the population
+		// has no live row this frame and the cull can skip it outright.
+		const auto attach_population = [&](int p_population,
+				MultiMeshInstance3D *p_mmi, bool p_shadow_tagged) {
+			StaticPopulation &population = static_populations_.write[p_population];
+			population.instance_node = p_mmi->get_instance_id();
+			population.shadow_tagged = p_shadow_tagged;
+			static_population_by_node_[population.instance_node] = p_population;
+			p_mmi->set_visible(population.live > 0);
+			if (p_shadow_tagged) {
+				p_mmi->set_meta("static_shadow_rows",
+						_static_population_row_slots(population));
+			}
 		};
 
 		const auto emit_population = [&](const StaticBatch &p_batch,
@@ -782,23 +825,13 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			mm->set_use_custom_data(true);
 			mm->set_mesh(p_batch.mesh);
 			mm->set_instance_count(p_slots.size());
+			mm->set_visible_instance_count(0);
 			// The population's bounds cover every slot's live transform so a
 			// later level switch never draws outside the advertised AABB.
 			AABB population_bounds;
 			bool has_population_bounds = false;
-			for (int local_index = 0; local_index < p_slots.size(); ++local_index) {
-				const int slot = p_slots[local_index];
+			for (const int slot : p_slots) {
 				const Transform3D surface_xform = group.xforms[slot] * p_batch.offset;
-				mm->set_instance_transform(local_index,
-						slot_level_live(slot, p_batch.lod_index)
-								? surface_xform
-								: static_carved_transform(surface_xform));
-				const int *row = light_draw_rows.getptr(
-						static_light_draw_key(slot, p_batch.robj_index));
-				mm->set_instance_custom_data(
-						local_index,
-						Color(row != nullptr ? static_cast<float>(*row + 1) : 0.0f, 0.0f,
-								0.0f, 0.0f));
 				const AABB surface_bounds =
 						surface_xform.xform(p_batch.mesh->get_aabb());
 				population_bounds = has_population_bounds
@@ -806,6 +839,8 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 						: surface_bounds;
 				has_population_bounds = true;
 			}
+			const int population_index =
+					build_population(mm, p_slots, p_batch, false);
 
 			MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
 			mmi->set_multimesh(mm);
@@ -841,6 +876,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			if (!p_batch.auxiliary_draw) {
 				tag_static_shadow_source(mmi, p_slots);
 			}
+			attach_population(population_index, mmi, !p_batch.auxiliary_draw);
 			container->add_child(mmi);
 			if (!p_batch.auxiliary_draw) {
 				FrameFx::register_q3_object_source(mmi, p_batch.material);
@@ -855,36 +891,34 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				++binned_batch_count;
 				occupied_static_bins[static_batch_bin_key(p_bin_x, p_bin_z)] = true;
 			}
-			bind_lod_slots(mm, mmi, p_slots, p_batch, false);
 
 			if (!has_static_shadow || all_static_shadow || p_batch.auxiliary_draw) {
 				return;
 			}
+			// The filtered shadow twin: rows only for the slots that cast.
 			Ref<MultiMesh> shadow_mm;
 			shadow_mm.instantiate();
 			shadow_mm->set_transform_format(MultiMesh::TRANSFORM_3D);
 			shadow_mm->set_mesh(p_batch.mesh);
 			shadow_mm->set_instance_count(p_slots.size());
+			shadow_mm->set_visible_instance_count(0);
 			AABB shadow_bounds;
 			bool has_shadow_bounds = false;
-			for (int local_index = 0; local_index < p_slots.size(); ++local_index) {
-				const int slot = p_slots[local_index];
-				Transform3D shadow_xform = group.xforms[slot] * p_batch.offset;
+			for (const int slot : p_slots) {
 				const bool casts =
 						slot < group.shadow_slots.size() && group.shadow_slots[slot];
-				if (casts) {
-					const AABB surface_bounds =
-							shadow_xform.xform(p_batch.mesh->get_aabb());
-					shadow_bounds = has_shadow_bounds
-							? shadow_bounds.merge(surface_bounds)
-							: surface_bounds;
-					has_shadow_bounds = true;
+				if (!casts) {
+					continue;
 				}
-				if (!casts || !slot_level_live(slot, p_batch.lod_index)) {
-					shadow_xform = static_carved_transform(shadow_xform);
-				}
-				shadow_mm->set_instance_transform(local_index, shadow_xform);
+				const AABB surface_bounds = (group.xforms[slot] * p_batch.offset)
+													.xform(p_batch.mesh->get_aabb());
+				shadow_bounds = has_shadow_bounds
+						? shadow_bounds.merge(surface_bounds)
+						: surface_bounds;
+				has_shadow_bounds = true;
 			}
+			const int shadow_population =
+					build_population(shadow_mm, p_slots, p_batch, true);
 			MultiMeshInstance3D *shadow_mmi = memnew(MultiMeshInstance3D);
 			shadow_mmi->set_multimesh(shadow_mm);
 			if (has_shadow_bounds) {
@@ -910,9 +944,9 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 									  graphic, policy_suffix, p_bin_x,
 									  p_bin_z, p_batch.submesh));
 			tag_static_shadow_source(shadow_mmi, p_slots);
+			attach_population(shadow_population, shadow_mmi, true);
 			container->add_child(shadow_mmi);
 			++shadow_batch_count;
-			bind_lod_slots(shadow_mm, shadow_mmi, p_slots, p_batch, true);
 		};
 		for (const StaticBatch &batch : batches) {
 			if (batch.blended_draw) {
@@ -1026,6 +1060,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["static_global_batches"] = global_batch_count;
 	stats["static_instances_retained"] = static_lod_instances_.size();
 	stats["static_lod_populations"] = lod_population_count;
+	stats["static_live_populations"] = get_static_live_population_count();
 	// The shadow-only twins a mixed-caster population emits beside its visible
 	// batch: one more geometry instance (and instance-uniform allocation) each.
 	stats["static_shadow_batches"] = shadow_batch_count;
@@ -1665,7 +1700,7 @@ int MissionObjectPlacer::update_static_lods(
 	if (!frame.valid) {
 		return 0;
 	}
-	HashSet<uint64_t> touched;
+	HashSet<int> touched;
 	StaticLodInstance *instances = static_lod_instances_.ptrw();
 	const int instance_count = static_lod_instances_.size();
 	for (int row = 0; row < instance_count; ++row) {
@@ -1690,11 +1725,11 @@ int MissionObjectPlacer::update_static_lods(
 		if (next_lod == instance.active_lod) {
 			continue;
 		}
-		_write_static_instance_slots(instance, next_lod, touched);
+		_write_static_instance_slots(row, next_lod, touched);
 		instance.active_lod = next_lod;
 		++static_lod_switches_;
 	}
-	_invalidate_static_q3_instances(touched);
+	_flush_static_population_changes(touched);
 	return static_lod_switches_;
 }
 
@@ -1716,16 +1751,47 @@ Array MissionObjectPlacer::get_static_instance_live_populations(
 		return out;
 	}
 	const StaticLodInstance &instance = static_lod_instances_[rec->lod_instance];
-	const int live_lod = instance.carved ? -1 : instance.active_lod;
 	for (const StaticLodBinding &binding : instance.bindings) {
-		if (binding.shadow_only || !_static_slot_live(binding, live_lod)) {
+		if (binding.shadow_only || binding.row < 0 || binding.population < 0 ||
+				binding.population >= static_populations_.size()) {
 			continue;
 		}
-		Node *node = Object::cast_to<Node>(
-				ObjectDB::get_instance(binding.instance_node));
+		Node *node = Object::cast_to<Node>(ObjectDB::get_instance(
+				static_populations_[binding.population].instance_node));
 		out.push_back(node != nullptr ? String(node->get_name()) : String());
 	}
 	return out;
+}
+
+PackedInt32Array MissionObjectPlacer::get_static_population_live_bms_ids(
+		MultiMeshInstance3D *p_population) const {
+	PackedInt32Array out;
+	if (p_population == nullptr) {
+		return out;
+	}
+	const int *index =
+			static_population_by_node_.getptr(p_population->get_instance_id());
+	if (index == nullptr || *index < 0 || *index >= static_populations_.size()) {
+		return out;
+	}
+	const StaticPopulation &population = static_populations_[*index];
+	for (int row = 0; row < population.live; ++row) {
+		const int instance_row = population.row_instance[row];
+		out.push_back(instance_row >= 0 && instance_row < static_lod_instances_.size()
+						? static_lod_instances_[instance_row].bms_id
+						: 0);
+	}
+	return out;
+}
+
+int MissionObjectPlacer::get_static_live_population_count() const {
+	int live = 0;
+	for (const StaticPopulation &population : static_populations_) {
+		if (population.live > 0) {
+			++live;
+		}
+	}
+	return live;
 }
 
 bool MissionObjectPlacer::_static_slot_live(const StaticLodBinding &p_binding,
@@ -1734,31 +1800,126 @@ bool MissionObjectPlacer::_static_slot_live(const StaticLodBinding &p_binding,
 			(!p_binding.shadow_only || p_binding.casts);
 }
 
-void MissionObjectPlacer::_write_static_instance_slots(
-		StaticLodInstance &p_instance, int p_live_lod,
-		HashSet<uint64_t> &r_touched) {
-	for (const StaticLodBinding &binding : p_instance.bindings) {
-		if (binding.multimesh.is_null() || binding.index < 0 ||
-				binding.index >= binding.multimesh->get_instance_count()) {
+void MissionObjectPlacer::_write_static_instance_slots(int p_instance_row,
+		int p_live_lod, HashSet<int> &r_touched) {
+	if (p_instance_row < 0 || p_instance_row >= static_lod_instances_.size()) {
+		return;
+	}
+	const int binding_count =
+			static_lod_instances_[p_instance_row].bindings.size();
+	for (int binding_index = 0; binding_index < binding_count; ++binding_index) {
+		const StaticLodBinding &binding =
+				static_lod_instances_[p_instance_row].bindings[binding_index];
+		if (binding.population < 0 ||
+				binding.population >= static_populations_.size()) {
 			continue;
 		}
 		const bool live = _static_slot_live(binding, p_live_lod);
-		binding.multimesh->set_instance_transform(binding.index,
-				live ? binding.live_xform
-					 : static_carved_transform(binding.live_xform));
-		if (!binding.shadow_only && binding.instance_node != 0) {
-			r_touched.insert(binding.instance_node);
+		if (live == (binding.row >= 0)) {
+			continue;
+		}
+		r_touched.insert(binding.population);
+		if (live) {
+			_static_population_append(binding.population, p_instance_row,
+					binding_index);
+		} else {
+			_static_population_remove(binding.population, p_instance_row,
+					binding_index);
 		}
 	}
 }
 
-void MissionObjectPlacer::_invalidate_static_q3_instances(
-		const HashSet<uint64_t> &p_touched) {
-	for (const uint64_t node_id : p_touched) {
-		FrameFx::invalidate_q3_instances(Object::cast_to<GeometryInstance3D>(
-				ObjectDB::get_instance(node_id)));
+// Append one slot as the population's next live row: the row takes the
+// binding's transform and light-atlas custom data, and visible_instance_count
+// grows to cover it.
+void MissionObjectPlacer::_static_population_append(int p_population,
+		int p_instance_row, int p_binding) {
+	StaticPopulation &population = static_populations_.write[p_population];
+	StaticLodBinding &binding =
+			static_lod_instances_.write[p_instance_row].bindings.write[p_binding];
+	if (population.multimesh.is_null() || binding.row >= 0 ||
+			population.live >= population.row_instance.size()) {
+		return;
+	}
+	const int row = population.live;
+	population.multimesh->set_instance_transform(row, binding.live_xform);
+	if (population.custom_data) {
+		population.multimesh->set_instance_custom_data(row, binding.custom_data);
+	}
+	population.row_instance.write[row] = p_instance_row;
+	population.row_binding.write[row] = p_binding;
+	population.row_slot.write[row] = binding.slot;
+	binding.row = row;
+	population.live = row + 1;
+	population.multimesh->set_visible_instance_count(population.live);
+}
+
+// Swap-remove one live row: the last live row moves into the hole (its
+// binding follows), and visible_instance_count shrinks past it.
+void MissionObjectPlacer::_static_population_remove(int p_population,
+		int p_instance_row, int p_binding) {
+	StaticPopulation &population = static_populations_.write[p_population];
+	StaticLodBinding &binding =
+			static_lod_instances_.write[p_instance_row].bindings.write[p_binding];
+	if (population.multimesh.is_null() || binding.row < 0 ||
+			binding.row >= population.live) {
+		return;
+	}
+	const int row = binding.row;
+	const int last = population.live - 1;
+	binding.row = -1;
+	if (row != last) {
+		const int moved_instance = population.row_instance[last];
+		const int moved_binding_index = population.row_binding[last];
+		StaticLodBinding &moved = static_lod_instances_.write[moved_instance]
+										  .bindings.write[moved_binding_index];
+		population.multimesh->set_instance_transform(row, moved.live_xform);
+		if (population.custom_data) {
+			population.multimesh->set_instance_custom_data(row, moved.custom_data);
+		}
+		population.row_instance.write[row] = moved_instance;
+		population.row_binding.write[row] = moved_binding_index;
+		population.row_slot.write[row] = moved.slot;
+		moved.row = row;
+	}
+	population.live = last;
+	population.multimesh->set_visible_instance_count(population.live);
+}
+
+PackedInt32Array MissionObjectPlacer::_static_population_row_slots(
+		const StaticPopulation &p_population) {
+	PackedInt32Array rows;
+	rows.resize(p_population.live);
+	for (int row = 0; row < p_population.live; ++row) {
+		rows[row] = p_population.row_slot[row];
+	}
+	return rows;
+}
+
+void MissionObjectPlacer::_flush_static_population_changes(
+		const HashSet<int> &p_touched) {
+	for (const int population_index : p_touched) {
+		if (population_index < 0 ||
+				population_index >= static_populations_.size()) {
+			continue;
+		}
+		const StaticPopulation &population = static_populations_[population_index];
+		MultiMeshInstance3D *node = Object::cast_to<MultiMeshInstance3D>(
+				ObjectDB::get_instance(population.instance_node));
+		if (node == nullptr) {
+			continue;
+		}
+		node->set_visible(population.live > 0);
+		if (population.shadow_tagged) {
+			node->set_meta("static_shadow_rows",
+					_static_population_row_slots(population));
+		}
+		if (!population.shadow_only) {
+			FrameFx::invalidate_q3_instances(node);
+		}
 	}
 }
+
 // Visible portal/PANM models live below camera-masked ROBJ nodes; retail's
 // terrain-tile collector ignores those masks and submits every selected-LOD
 // ROBJ, so harvest one independent all-section shadow-only sibling per

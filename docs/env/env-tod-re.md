@@ -1103,7 +1103,11 @@ cannot perturb transparent ordering. A graphic with more than one authored
 RLOD stays in those populations: every level is emitted as its own population
 over the same slot list and the retail selector picks the level per instance
 each frame (render-order-re.md, "Authored object RLOD selection"), so
-batching never decides which level an entity draws.
+batching never decides which level an entity draws. Since 2026-08-30 a
+population carries rows only for the slots at its level (packed dense, a
+crossing moves the row between the level populations, an empty population is
+hidden), so the draw-call and cull cost is one row per live instance rather
+than one population per authored level per bin.
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 

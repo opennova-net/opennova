@@ -722,6 +722,14 @@ func get_mission_stats() -> Dictionary:
 	return _mission_stats
 
 
+## The placer's static populations that currently carry at least one live
+## row (the per-frame RLOD selection empties and refills them); 0 before a
+## mission is placed.
+func get_static_live_population_count() -> int:
+	return int(_placer.get_static_live_population_count()) \
+			if _placer != null else 0
+
+
 ## Tear down a loaded world so the shell can return to the menu (or load a
 ## different mission) without the previous world lingering. Frees the dynamically
 ## placed MissionObjects subtree and resets the load state; the terrain /

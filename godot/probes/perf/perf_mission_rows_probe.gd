@@ -549,6 +549,7 @@ static func _build_fingerprint(world: GameWorld, runtime: MissionPresentation, b
 		"hidden_model_count": hidden_count,
 		"topology_sha256": topology_sha256,
 		"placement_stats": world.get_mission_stats(),
+		"static_live_populations": world.get_static_live_population_count(),
 	}
 
 

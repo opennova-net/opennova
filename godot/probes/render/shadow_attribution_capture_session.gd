@@ -191,8 +191,9 @@ func get_static_caster_inventory() -> Array:
 		if mm == null or mm.mesh == null:
 			continue
 		var identities := _static_source_identities(source)
-		for index in range(mini(mm.instance_count, identities.size())):
-			var identity: Dictionary = identities[index]
+		var row_slots := _static_source_row_slots(source, identities.size())
+		for index in range(row_slots.size()):
+			var identity: Dictionary = identities[row_slots[index]]
 			if not bool(identity.get("eligible", false)):
 				continue
 			var world_xform := source.global_transform \
@@ -292,6 +293,27 @@ static func _collect_static_multimeshes(
 static func _model_ref(model: ObjectModel) -> Dictionary:
 	var ref_value: Variant = model.get_meta("entity_ref", {})
 	return ref_value if ref_value is Dictionary else {}
+
+
+## The population-local slot each live MultiMesh row draws. The placer packs a
+## population's rows dense [0, visible_instance_count) in swap-remove order and
+## publishes the row -> slot map as `static_shadow_rows`; a source without that
+## map is slot-ordered (row == slot) over its instance count.
+static func _static_source_row_slots(source: MultiMeshInstance3D,
+		slot_count: int) -> PackedInt32Array:
+	var rows := PackedInt32Array()
+	if source.has_meta("static_shadow_rows"):
+		for slot in PackedInt32Array(source.get_meta("static_shadow_rows")):
+			if slot >= 0 and slot < slot_count:
+				rows.append(slot)
+		return rows
+	var mm := source.multimesh
+	var count := mini(mm.instance_count, slot_count) if mm != null else 0
+	if mm != null and mm.visible_instance_count >= 0:
+		count = mini(count, mm.visible_instance_count)
+	for index in range(count):
+		rows.append(index)
+	return rows
 
 
 static func _static_source_identities(source: MultiMeshInstance3D) -> Array:

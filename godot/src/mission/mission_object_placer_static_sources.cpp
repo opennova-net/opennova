@@ -292,10 +292,10 @@ bool MissionObjectPlacer::static_instance_casts_terrain_shadow(
 	return rec != nullptr && rec->casts_static_shadow;
 }
 
-// Hide a destroyed batched static in every exact emitted population (every
-// level's population and shadow twin, zero-scaled at its own origin — the
-// batches keep their instance counts); returns the instance's placed
-// transform for the husk graft.
+// Hide a destroyed batched static: its row leaves every population it is
+// live in (its level's population and shadow twin; the populations keep
+// their capacity); returns the instance's placed transform for the husk
+// graft.
 Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
 	if (rec == nullptr) {
@@ -306,12 +306,10 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 	}
 	if (rec->lod_instance >= 0 &&
 			rec->lod_instance < static_lod_instances_.size()) {
-		StaticLodInstance &instance =
-				static_lod_instances_.write[rec->lod_instance];
-		instance.carved = true;
-		HashSet<uint64_t> touched;
-		_write_static_instance_slots(instance, -1, touched);
-		_invalidate_static_q3_instances(touched);
+		static_lod_instances_.write[rec->lod_instance].carved = true;
+		HashSet<int> touched;
+		_write_static_instance_slots(rec->lod_instance, -1, touched);
+		_flush_static_population_changes(touched);
 	}
 	hidden_destruction_instances_.insert(p_bms_id);
 	++static_light_draw_source_revision_;
@@ -333,9 +331,10 @@ bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
 		StaticLodInstance &instance =
 				static_lod_instances_.write[rec->lod_instance];
 		instance.carved = false;
-		HashSet<uint64_t> touched;
-		_write_static_instance_slots(instance, instance.active_lod, touched);
-		_invalidate_static_q3_instances(touched);
+		HashSet<int> touched;
+		_write_static_instance_slots(rec->lod_instance, instance.active_lod,
+				touched);
+		_flush_static_population_changes(touched);
 	}
 	hidden_destruction_instances_.erase(p_bms_id);
 	++static_light_draw_source_revision_;
