@@ -40,7 +40,6 @@ MainGame._process
           per-tick Godot presentation sink  effects + fixed-tick listeners
         present entity/effect rows once
       present local view                    camera/viewmodel placement (D-RORD-8)
-      FrameFx.advance_frame                 compile typed focused-Q3 draws from this frame's pose
       Terrain.render_frame                  compiled TerrainDrawList
       FoliageDispatcher.render_frame        compiled FoliageDrawList
       drive network session edges
@@ -49,6 +48,8 @@ MainGame._process
       apply camera occlusion
       sample iris
       render material frame                 per-model ObjectModel advance
+      sync_framefx_frame                    compile typed focused-Q3 draws after every producer published
+      render slot shadows
       render particles
       mix mission audio
       update frame clear

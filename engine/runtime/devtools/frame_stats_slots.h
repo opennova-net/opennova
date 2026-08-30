@@ -45,7 +45,7 @@
     X(WORLD_IRIS, "") \
     X(WORLD_AUDIO, "") \
     X(WORLD_LOCAL_VIEW, "local-player camera/viewmodel publication") \
-    X(WORLD_FRAMEFX, "auxiliary-view pose synchronization") \
+    X(WORLD_FRAMEFX, "focused Q3 compile (typed draw list for the terminal compositor)") \
     X(WORLD_SCENE_ENV, "render-eye fog/ambient + water classifier") \
     X(WORLD_ENV_NODES, "weather smoothing, sun direction, sky dome, celestial bodies") \
     X(WORLD_WATER, "water strip march + mirror camera") \

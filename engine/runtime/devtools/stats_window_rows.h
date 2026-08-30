@@ -173,7 +173,7 @@ inline constexpr StatsRow kRows[] = {
 	{"scars", "Scars", 4, RowKind::SPAN, Slot::PRESENT_SCARS, nullptr, 0},
 	{"runtime_overhead", "Session/presentation overhead", 3, RowKind::RESIDUAL, Slot::WORLD_RUNTIME, k_runtime_overhead, 9},
 	{"local_view", "Local view publication", 2, RowKind::SPAN, Slot::WORLD_LOCAL_VIEW, nullptr, 0},
-	{"framefx", "Auxiliary-view pose sync", 2, RowKind::SPAN, Slot::WORLD_FRAMEFX, nullptr, 0},
+	{"framefx", "Q3 compile", 2, RowKind::SPAN, Slot::WORLD_FRAMEFX, nullptr, 0},
 	{"scene_env", "Scene fog/ambient publication", 2, RowKind::SPAN, Slot::WORLD_SCENE_ENV, nullptr, 0},
 	{"env_nodes", "Sky/celestial/sun/weather smoothing", 2, RowKind::SPAN, Slot::WORLD_ENV_NODES, nullptr, 0},
 	{"terrain", "Terrain frame publication", 2, RowKind::SPAN, Slot::WORLD_TERRAIN, nullptr, 0},
