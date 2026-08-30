@@ -27,6 +27,7 @@ enum class InitialDockPlacement {
 	None,
 	Center,
 	Right,
+	RightBottom, // the lower split of the right column
 };
 
 // One tool window. draw() runs inside ImGui::Begin/End for the window each
@@ -51,11 +52,25 @@ public:
 	// full-viewport surface) is drawn without the pass's wrapping Begin/End.
 	virtual bool owns_frame() const { return false; }
 
+	// Focus this window (and select its tab in its dock node) on the pass's
+	// next layout in which the window exists: a window sharing a dock node
+	// with another (Entities beside Stats) is otherwise an inactive tab when
+	// something opens it from outside the menu. One-shot; a request made the
+	// frame the window first opens lands on the frame after.
+	void request_focus() { focus_requested_ = true; }
+	bool focus_requested() const { return focus_requested_; }
+
 	bool open = false;
 
 private:
 	friend class ImGuiPass;
+	bool take_focus_request() {
+		const bool requested = focus_requested_;
+		focus_requested_ = false;
+		return requested;
+	}
 	bool visible_ = false;
+	bool focus_requested_ = false;
 };
 
 // ImGui's allocator hooks (ImGui::SetAllocatorFunctions), typed without an

@@ -8,8 +8,9 @@ addon's `NewFrame` and `Render` (the `ImGuiPassNode` seam in `godot/src/devtools
 Two products compose it:
 
 - the **game's dev tools** (`game_dev_tools.*`, F3): an opaque workspace with
-  a mandatory Game viewport, the frame-stats window, the Entities window
-  (closed by default), and ImGui's demo window.
+  a mandatory Game viewport, the frame-stats window, the Entities and Entity
+  Properties windows (closed by default; a world pick opens them), and ImGui's
+  demo window.
   Debug builds only
   (`OPENNOVA_DEVTOOLS`; off for the release GDExtension flavour).
 - **ONED's run surface** (`oned_ui.*`): the one window with the game-data
@@ -26,8 +27,10 @@ Two products compose it:
 | `game_dev_tools.h/.cpp` | The game's window set on a pass, with the board hand-off and the Entities record/request channel |
 | `game_window.h/.cpp` | The mandatory embedded Game window, its narrow viewport adapter, and typed Play/Interact/Close request policy |
 | `stats_window.h/.cpp`, `stats_window_rows.h` | The Stats window: the row tree over a drained window, refreshed every 0.5 s |
-| `entities_window.h/.cpp` | The Entities window: the filterable entity-directory table over the pushed snapshot, with selected-row debug actions leaving as typed requests |
+| `entities_window.h/.cpp` | The Entities window: the filterable entity-directory table over the pushed snapshot and the selection the shell's world pick lands on (`select_handle`, pending until a push carries the row); the one typed-request queue both entity windows feed |
+| `entity_properties_window.h/.cpp` | The Entity Properties window (its own dock node, so list and card dock independently): the selected row's card over the pushed detail record (identity, item, health, AI state), the debug actions, and both items.def attrib words as keyword-labelled checkboxes from the def parser's own table, each toggle leaving as a typed request |
 | `entity_directory_snapshot.h` | `EntityDirectorySnapshot`: the value record the embedder pushes (the engine `world::inspect::entity_directory` join + the logic tick) |
+| `entity_detail_snapshot.h` | `EntityDetailSnapshot`: the selected row's value record (the engine `world::inspect::build_entity_card` + the logic tick); an invalid card clears |
 | `debug_request.h` | `DebugRequest`: the typed mutation queue entry the embedder drains into the engine-backed debug delegates |
 | `demo_window.h/.cpp` | ImGui's demo window, the docking/multi-viewport smoke test |
 | `oned_ui.h/.cpp` | ONED's surface: the fields it owns, the state the app pushes, the typed request queue the app drains |
@@ -58,8 +61,11 @@ Two products compose it:
    (`godot/src/devtools/dev_tools.cpp`) holds the `Simulation` in C++ (set on
    world load, nulled on unload — the stats-board pattern) and does the
    push/drain against the ONE engine function per fact
-   (`world::inspect::entity_directory`, the debug delegates MCP uses); no
-   GDScript relay.
+   (`world::inspect::entity_directory` and `build_entity_card`, the
+   `EntityCommands` mutators MCP uses); no GDScript relay. A device event
+   that names an engine fact (the shell's world pick) crosses as a typed
+   request carrying only the engine handle (`DevTools.select_entity`); the
+   window reads everything else from the pushed records.
 5. Pin it in `tests/devtools/devtools_test.cpp` with the null backend: open the
    window, run a layout pass, assert what it formats; a record/request window
    also pins the push/clear and the queue round-trip directly (clicking its

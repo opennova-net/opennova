@@ -8,8 +8,11 @@
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/imgui_abi.h>
+#include <runtime/devtools/entity_detail_snapshot.h>
 #include <runtime/devtools/entity_directory_snapshot.h>
+#include <runtime/devtools/entity_properties_window.h>
 #include <runtime/devtools/stats_window.h>
+#include <formats/def/def.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -20,7 +23,9 @@
 using opennova::devtools::CaptureWindow;
 using opennova::devtools::DebugRequest;
 using opennova::devtools::EntitiesWindow;
+using opennova::devtools::EntityDetailSnapshot;
 using opennova::devtools::EntityDirectorySnapshot;
+using opennova::devtools::EntityPropertiesWindow;
 using opennova::devtools::GameViewport;
 using opennova::devtools::GameWindow;
 using opennova::devtools::GameInputMode;
@@ -126,7 +131,7 @@ void test_attach_sets_docking_and_viewport_policy() {
 
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 4, "Game + Stats + Entities + demo registered");
+	CHECK(tools.pass().window_count() == 5, "Game + Stats + Entities + Entity Properties + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -140,7 +145,12 @@ void test_game_window_is_mandatory_and_detachable() {
 	CHECK(std::strcmp(tools.pass().window(2).title(), "Entities") == 0,
 			"Entities registers after Stats");
 	CHECK(!tools.pass().window(2).open, "the Entities window starts closed");
-	CHECK(!tools.pass().window(3).open, "the demo window starts closed");
+	CHECK(std::strcmp(tools.pass().window(3).title(), "Entity Properties") == 0,
+			"Entity Properties registers after Entities (it reads that window's selection)");
+	CHECK(!tools.pass().window(3).open, "the Entity Properties window starts closed");
+	CHECK(tools.pass().window(3).initial_dock_placement() == InitialDockPlacement::RightBottom,
+			"Entity Properties starts under the right column, its own dock node");
+	CHECK(!tools.pass().window(4).open, "the demo window starts closed");
 }
 
 void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
@@ -272,9 +282,9 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 4, "Game + Stats + Entities + demo registered");
+	CHECK(tools.pass().window_count() == 5, "Game + Stats + Entities + Entity Properties + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
-	CHECK(!tools.pass().window(3).open, "the demo window starts closed");
+	CHECK(!tools.pass().window(4).open, "the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
 
 	ImGui::NewFrame();
@@ -524,6 +534,220 @@ void test_entities_debug_request_queue_and_gating() {
 	CHECK(!tools.take_debug_request(request), "the queue drains exactly once");
 }
 
+namespace {
+
+EntityDirectorySnapshot two_row_directory() {
+	EntityDirectorySnapshot snapshot;
+	opennova::world::inspect::EntityRow alpha;
+	alpha.index = 0;
+	alpha.ai_index = 2;
+	alpha.editable = true;
+	alpha.net_id = 1201;
+	alpha.wire_handle = 0x3001;
+	alpha.name = "ALPHA";
+	alpha.item_name = "Rifleman";
+	alpha.health = 100;
+	alpha.team = 1;
+	alpha.alive = true;
+	snapshot.rows.push_back(alpha);
+	opennova::world::inspect::EntityRow bravo;
+	bravo.index = 1;
+	bravo.ai_index = -1;
+	bravo.net_id = 1202;
+	bravo.wire_handle = 0x1002;
+	bravo.name = "BRAVO";
+	bravo.item_name = "Humvee";
+	bravo.team = 2;
+	snapshot.rows.push_back(bravo);
+	snapshot.valid = true;
+	snapshot.logic_tick = 62;
+	return snapshot;
+}
+
+EntityDetailSnapshot detail_for(uint16_t handle, uint32_t attrib, uint32_t attrib2) {
+	EntityDetailSnapshot detail;
+	detail.card.valid = true;
+	detail.card.handle = handle;
+	detail.card.has_world = true;
+	detail.card.world.handle = handle;
+	detail.card.world.item_attrib = attrib;
+	detail.card.world.item_attrib2 = attrib2;
+	detail.card.world.health_max = 120;
+	detail.card.world.item_name = "Rifleman";
+	detail.logic_tick = 70;
+	return detail;
+}
+
+}  // namespace
+
+// The selection seam (the shell's world pick): selecting a handle opens and
+// focuses the window, selects the row when the pushed directory has it and
+// otherwise waits for the push that carries it; the selection survives the
+// visibility close as a pending handle, and a push without it drops it.
+void test_entities_window_selects_the_picked_handle() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	EntitiesWindow &entities = tools.entities_window();
+	CHECK(tools.selected_entity_handle() == opennova::world::EntityHandle::kInvalid,
+			"nothing selected at first");
+	CHECK(!tools.needs_entity_detail(), "no selection: no detail needed");
+
+	// A pick before any push: both windows open and ask for focus, the list
+	// holds the handle pending.
+	tools.select_entity(0x3001);
+	CHECK(entities.open, "a pick opens the Entities window");
+	CHECK(entities.focus_requested(), "a pick asks the pass to focus the window");
+	CHECK(tools.entity_properties_window().open, "a pick opens the Entity Properties window too");
+	CHECK(tools.entity_properties_window().focus_requested(), "...and focuses it in its own dock node");
+	CHECK(tools.selected_entity_handle() == 0x3001, "the pending handle reads as the selection");
+	CHECK(tools.needs_entity_detail(), "a pending selection already wants its detail card");
+	CHECK(!entities.wants_scroll_to_selected(), "no row to scroll to yet");
+
+	tools.entities_window().set_filter("brav");
+	tools.set_entity_directory(two_row_directory());
+	CHECK(entities.row_count() == 2, "the pick cleared the filter so the row can show");
+	CHECK(tools.selected_entity_handle() == 0x3001, "the push applied the pending selection");
+	CHECK(entities.wants_scroll_to_selected(), "the applied selection scrolls into view");
+	CHECK(std::strcmp(entities.row_item(0), "Rifleman") == 0, "the Item column names the def");
+	CHECK(std::strcmp(entities.row_item(1), "Humvee") == 0, "the Item column names the def (2)");
+	tools.entities_window().set_filter("humv");
+	CHECK(entities.row_count() == 1 && std::strcmp(entities.row_name(0), "BRAVO") == 0,
+			"the filter matches the item name too");
+	tools.entities_window().set_filter("");
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with a selection");
+	ImGui::Render();
+	CHECK(ImGui::FindWindowByName("Entity Properties") != nullptr,
+			"the Entity Properties window exists after a pass");
+	CHECK(entities.focus_requested(),
+			"a window opening this frame keeps its focus request for the frame after (its tab exists then)");
+	CHECK(!entities.wants_scroll_to_selected(), "the drawn table consumed the scroll request");
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(2), "the next workspace frame draws");
+	ImGui::Render();
+	CHECK(!entities.focus_requested(), "the second layout pass consumed the focus request");
+	CHECK(!tools.entity_properties_window().focus_requested(), "...both of them");
+
+	// A pick of a row the directory already holds selects it at once.
+	tools.select_entity(0x1002);
+	CHECK(tools.selected_entity_handle() == 0x1002, "a held row selects immediately");
+	CHECK(entities.wants_scroll_to_selected(), "...and scrolls into view");
+
+	// The visibility close keeps the selection pending; the next push re-selects.
+	tools.pass().set_open(false);
+	CHECK(!entities.snapshot_valid() && entities.row_count() == 0, "closing drops the snapshot");
+	CHECK(tools.selected_entity_handle() == 0x1002, "the selection survives the close as pending");
+	CHECK(!tools.needs_entity_detail(), "a closed pass wants no detail card");
+	tools.pass().set_open(true);
+	tools.set_entity_directory(two_row_directory());
+	CHECK(tools.selected_entity_handle() == 0x1002, "reopening and pushing re-selects the entity");
+
+	// A push without the selected entity drops the selection (it is gone).
+	EntityDirectorySnapshot without = two_row_directory();
+	without.rows.pop_back();
+	tools.set_entity_directory(without);
+	CHECK(tools.selected_entity_handle() == opennova::world::EntityHandle::kInvalid,
+			"a push without the entity clears the selection");
+
+	tools.select_entity(0x3001);
+	tools.clear_entity_selection();
+	CHECK(tools.selected_entity_handle() == opennova::world::EntityHandle::kInvalid,
+			"clear_entity_selection empties it");
+	CHECK(!tools.needs_entity_detail(), "...and nothing is wanted");
+	tools.select_entity(0x3001);
+	tools.entity_properties_window().open = false;
+	CHECK(!tools.needs_entity_detail(), "a closed Properties window wants no card");
+	tools.entity_properties_window().open = true;
+	CHECK(tools.needs_entity_detail(), "reopening it wants the card again");
+
+	// The invalid handle is a clear, never a selection (pool 0 slot 0 = 0 is valid).
+	tools.select_entity(0);
+	CHECK(tools.selected_entity_handle() == 0, "handle 0 is a real entity (pool 0, slot 0)");
+	tools.select_entity(opennova::world::EntityHandle::kInvalid);
+	CHECK(tools.selected_entity_handle() == opennova::world::EntityHandle::kInvalid,
+			"selecting kInvalid clears");
+}
+
+// The Entity Properties window: a pushed card for the selected handle
+// populates the pane and seeds the edit words; a card for another handle is
+// dropped; a toggle flips the edit word and leaves as one SetEntityItemAttrib
+// request carrying both full words through the Entities window's queue;
+// selection changes and the visibility close clear the card.
+void test_entity_properties_window_card_and_attrib_toggles() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	EntityPropertiesWindow &properties = tools.entity_properties_window();
+	tools.entities_window().open = true;
+	tools.entity_properties_window().open = true;
+	tools.set_entity_directory(two_row_directory());
+
+	tools.set_entity_detail(detail_for(0x3001, DEF_ITEM_ATTRIB_NODISMEMBER, 0));
+	CHECK(!properties.detail_valid(), "a card for an unselected handle is dropped");
+
+	tools.select_entity(0x3001);
+	tools.set_entity_detail(detail_for(0x1002, DEF_ITEM_ATTRIB_NODIE, 0));
+	CHECK(!properties.detail_valid(), "a card for another handle is dropped");
+	tools.set_entity_detail(detail_for(0x3001,
+			DEF_ITEM_ATTRIB_NODISMEMBER | DEF_ITEM_ATTRIB_AIDATA, DEF_ITEM_ATTRIB2_FARP));
+	CHECK(properties.detail_valid() && properties.detail_handle() == 0x3001, "the selected card lands");
+	CHECK(properties.detail_attrib() == (DEF_ITEM_ATTRIB_NODISMEMBER | DEF_ITEM_ATTRIB_AIDATA),
+			"the attrib edit word seeds from the card");
+	CHECK(properties.detail_attrib2() == DEF_ITEM_ATTRIB2_FARP, "the attrib2 edit word seeds too");
+	CHECK(properties.detail_health_max() == 120, "health_max reads from the card");
+	CHECK(std::strcmp(properties.detail_item_name(), "Rifleman") == 0, "the item name reads from the card");
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with a detail card");
+	ImGui::Render();
+
+	DebugRequest request;
+	CHECK(!tools.take_debug_request(request), "no request before a toggle");
+	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NODISMEMBER);
+	CHECK(properties.detail_attrib() == DEF_ITEM_ATTRIB_AIDATA, "the toggle clears the bit locally");
+	CHECK(tools.take_debug_request(request) &&
+					request.kind == DebugRequest::Kind::SetEntityItemAttrib &&
+					request.target.packed == 0x3001 && request.attrib == DEF_ITEM_ATTRIB_AIDATA &&
+					request.attrib2 == DEF_ITEM_ATTRIB2_FARP,
+			"one request carries both full words behind the selected handle");
+	properties.toggle_item_attrib2(DEF_ITEM_ATTRIB2_LANDMINE);
+	CHECK(tools.take_debug_request(request) &&
+					request.attrib == DEF_ITEM_ATTRIB_AIDATA &&
+					request.attrib2 == (DEF_ITEM_ATTRIB2_FARP | DEF_ITEM_ATTRIB2_LANDMINE),
+			"the second word toggles the same way");
+	CHECK(!tools.take_debug_request(request), "the queue drains exactly once");
+
+	// A re-push re-seeds the edit words (the engine truth wins).
+	tools.set_entity_detail(detail_for(0x3001, DEF_ITEM_ATTRIB_NODIE, 0));
+	CHECK(properties.detail_attrib() == DEF_ITEM_ATTRIB_NODIE && properties.detail_attrib2() == 0,
+			"a re-push re-seeds the edit words");
+
+	// Selecting another row invalidates the card until its own push lands.
+	tools.select_entity(0x1002);
+	CHECK(!properties.detail_valid(), "another selection never shows the previous card");
+	tools.set_entity_detail(detail_for(0x1002, 0, 0));
+	CHECK(properties.detail_valid(), "its own card lands");
+	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NOSCAR);
+	CHECK(tools.take_debug_request(request) && request.target.packed == 0x1002 &&
+					request.attrib == DEF_ITEM_ATTRIB_NOSCAR,
+			"a brainless row (a vehicle) takes attrib overrides too");
+
+	// An invalid card clears; so does the Properties window's visibility close
+	// (the Entities window keeps the selection pending meanwhile).
+	tools.set_entity_detail(EntityDetailSnapshot{});
+	CHECK(!properties.detail_valid(), "an invalid card clears the pane");
+	tools.set_entity_detail(detail_for(0x1002, 0, 0));
+	tools.pass().set_open(false);
+	CHECK(!properties.detail_valid(), "the visibility close drops the card");
+	CHECK(tools.selected_entity_handle() == 0x1002, "the selection survives as pending");
+	properties.toggle_item_attrib(DEF_ITEM_ATTRIB_NOSCAR);
+	CHECK(!tools.take_debug_request(request), "a toggle without a card is a no-op");
+}
+
 }  // namespace
 
 int main() {
@@ -538,6 +762,8 @@ int main() {
 	test_layout_reset_brings_windows_home();
 	test_entities_window_formats_the_pushed_directory();
 	test_entities_debug_request_queue_and_gating();
+	test_entities_window_selects_the_picked_handle();
+	test_entity_properties_window_card_and_attrib_toggles();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

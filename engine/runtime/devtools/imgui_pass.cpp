@@ -29,12 +29,23 @@ void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport,
 	ImGuiID center_id = dockspace_id;
 	ImGuiID right_id = 0;
 	ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Right, 0.30f, &right_id, &center_id);
+	// The right column splits only when a window asks for its lower half, so
+	// a product without one keeps the whole column for its right windows.
+	ImGuiID right_bottom_id = 0;
+	for (const auto &window : windows) {
+		if (window->initial_dock_placement() == InitialDockPlacement::RightBottom) {
+			ImGui::DockBuilderSplitNode(right_id, ImGuiDir_Down, 0.45f, &right_bottom_id, &right_id);
+			break;
+		}
+	}
 	for (const auto &window : windows) {
 		const InitialDockPlacement placement = window->initial_dock_placement();
 		if (placement == InitialDockPlacement::Center) {
 			ImGui::DockBuilderDockWindow(window->title(), center_id);
 		} else if (placement == InitialDockPlacement::Right) {
 			ImGui::DockBuilderDockWindow(window->title(), right_id);
+		} else if (placement == InitialDockPlacement::RightBottom) {
+			ImGui::DockBuilderDockWindow(window->title(), right_bottom_id);
 		}
 	}
 	ImGui::DockBuilderFinish(dockspace_id);
@@ -190,6 +201,21 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			ImGui::SetNextWindowClass(&window_class);
 		}
 		bool *open = window.is_closeable() ? &window.open : nullptr;
+		if (window.focus_requested()) {
+			// Honoured once the window has had its first Begin (a window
+			// opening this very frame is docked by that Begin; the request
+			// waits a frame so the tab exists to select). Two windows may ask
+			// in the same frame (a pick raises the list and the card): each
+			// selects its own tab in its dock node explicitly, since ImGui's
+			// tab bar only follows the window that ends the frame focused.
+			if (ImGuiWindow *imgui_window = ImGui::FindWindowByName(window.title())) {
+				window.take_focus_request();
+				if (imgui_window->DockNode != nullptr && imgui_window->DockNode->TabBar != nullptr) {
+					imgui_window->DockNode->TabBar->NextSelectedTabId = imgui_window->TabId;
+				}
+				ImGui::SetNextWindowFocus();
+			}
+		}
 		if (ImGui::Begin(window.title(), open, flags)) {
 			window.draw(*this, frame_index);
 		}
