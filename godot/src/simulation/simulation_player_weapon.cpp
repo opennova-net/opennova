@@ -702,6 +702,17 @@ int Simulation::native_equipped_weapon_adm_index() const {
 	return kernel_->world.weapons.index_of(kernel_->weapon.def_name.c_str());
 }
 
+const opennova::world::WeaponSlotState *Simulation::native_active_weapon_slot() const {
+	if (!kernel_ || !kernel_->weapon.active) return nullptr;
+	return opennova::world::active_local_weapon_slot(kernel_->world, kernel_->weapon);
+}
+
+const char *Simulation::native_weapon_input_block() const {
+	if (!kernel_) return "no world";
+	return opennova::world::local_weapon_input_block_name(
+			opennova::world::local_weapon_input_block(kernel_->world, kernel_->weapon));
+}
+
 std::vector<std::string> Simulation::native_equipped_weapon_clip_keys() const {
 	std::vector<std::string> out;
 	if (!kernel_) return out;
@@ -713,13 +724,14 @@ std::vector<std::string> Simulation::native_equipped_weapon_clip_keys() const {
 }
 
 bool Simulation::debug_weapon_set_action_delays(int p_action_id, int p_delay_start,
-		int p_delay_end) {
+		int p_delay_end, bool p_rebake) {
 	if (!kernel_ || p_action_id < 0 || p_action_id >= wa::kCount) return false;
 	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
 	if (!weapon.active) return false;
 
-	// Mirror into the retained row first, so a re-install (an armory accept, a
-	// respawn) keeps the edit. -1 is the parser's `auto` sentinel.
+	// Mirror into the retained row AS AUTHORED, so a re-install (an armory
+	// accept, a respawn) keeps the edit and an untouched `auto` (-1) leg stays
+	// `auto`.
 	DefWeaponAction *row = find_action_row(
 			kernel_->weapon_defs_ok
 					? find_weapon_row(kernel_->weapon_defs, weapon.def_name)
@@ -729,16 +741,19 @@ bool Simulation::debug_weapon_set_action_delays(int p_action_id, int p_delay_sta
 		row->delaystart = p_delay_start;
 		row->delayend = p_delay_end;
 	}
-	// `auto` has to come back through the bake, which is what resolves it from
-	// the clip ring; an explicit value patches the live slot with no re-bake so
-	// dragging an edge mid-burst never disturbs the running action.
-	if (p_delay_start < 0 || p_delay_end < 0) {
-		return row != nullptr &&
-				kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true);
-	}
+	// Explicit legs patch the live slot with no re-bake, so dragging an edge
+	// mid-burst never disturbs the running action; an `auto` leg keeps what
+	// the clip last baked unless the edit asks for the re-bake that resolves a
+	// newly-auto leg — the same-weapon path, which keeps the live slot, the
+	// serials, the latches and the scope.
 	opennova::world::WeaponFsmAction &baked = weapon.def.actions[p_action_id];
-	baked.delay_start = p_delay_start;
-	baked.delay_end = p_delay_end;
+	if (p_delay_start >= 0) baked.delay_start = p_delay_start;
+	if (p_delay_end >= 0) baked.delay_end = p_delay_end;
+	if (p_rebake) {
+		return row != nullptr &&
+				kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true,
+						/*allow_same_weapon_rebake=*/true);
+	}
 	return true;
 }
 
@@ -766,7 +781,8 @@ bool Simulation::debug_weapon_set_action_text(int p_action_id, int p_field,
 		case 0:  // Anim — re-resolves the clip, so any `auto` delay re-derives.
 			if (row == nullptr) return false;
 			std::snprintf(row->anim, sizeof(row->anim), "%s", value);
-			return kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true);
+			return kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true,
+					/*allow_same_weapon_rebake=*/true);
 		case 1:
 			write(baked.soundset, sizeof(baked.soundset), row ? row->soundset : nullptr,
 					row ? sizeof(row->soundset) : 0);
@@ -792,7 +808,11 @@ bool Simulation::debug_weapon_set_action_text(int p_action_id, int p_field,
 bool Simulation::debug_weapon_trigger(int p_trigger) {
 	if (!kernel_) return false;
 	opennova::world::LocalPlayerWeapon &weapon = kernel_->weapon;
-	if (!weapon.active || local_player_dead()) return false;
+	// The pump's own gate: input it would zero is refused here instead.
+	if (opennova::world::local_weapon_input_block(kernel_->world, weapon) !=
+			opennova::world::LocalWeaponInputBlock::kNone) {
+		return false;
+	}
 	opennova::world::WeaponSlotState *slot =
 			opennova::world::active_local_weapon_slot(kernel_->world, weapon);
 	if (slot == nullptr) return false;

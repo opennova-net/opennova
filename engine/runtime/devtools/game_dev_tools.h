@@ -24,8 +24,8 @@ enum class GameInputMode;
 enum class GameWindowRequest;
 struct DebugRequest;
 struct EntityDirectorySnapshot;
-struct WeaponActionSnapshot;
-struct WeaponCatalog;
+struct WeaponDefinitionSnapshot;
+struct WeaponLiveSnapshot;
 struct WeaponRequest;
 
 class GameDevTools {
@@ -59,14 +59,15 @@ public:
 	bool needs_entity_directory() const;
 	bool take_debug_request(DebugRequest &request);
 
-	// The Weapon window's record/request channel. The live record is pushed
-	// EVERY frame rather than on the Entities window's 0.5 s cadence — the
-	// trace pane is a scope on a 62.5 Hz signal — while the picker catalogs
-	// only move when a weapon installs or a sound bank loads.
-	void set_weapon_snapshot(WeaponActionSnapshot snapshot);
-	void set_weapon_catalog(WeaponCatalog catalog);
-	bool needs_weapon_snapshot() const;
-	uint64_t weapon_catalog_serial() const;
+	// The Weapon window's record/request channel. The definition (the rows
+	// the dope sheet draws) is pushed on a serial bump — an install, an
+	// applied edit — while the live record is pushed EVERY frame rather than
+	// on the Entities window's 0.5 s cadence: the trace pane is a scope on a
+	// 62.5 Hz signal.
+	void set_weapon_definition(WeaponDefinitionSnapshot definition);
+	void set_weapon_live(WeaponLiveSnapshot live);
+	bool needs_weapon_records() const;
+	uint64_t weapon_definition_serial() const;
 	bool take_weapon_request(WeaponRequest &request);
 
 private:

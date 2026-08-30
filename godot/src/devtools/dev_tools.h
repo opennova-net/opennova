@@ -120,7 +120,7 @@ private:
 	void apply_game_requests();
 	void apply_debug_requests();
 	void push_entity_directory();
-	void push_weapon_snapshot();
+	void push_weapon_records();
 	void apply_weapon_requests();
 	void set_game_playing_internal(bool p_playing);
 
@@ -132,11 +132,17 @@ private:
 	Simulation *simulation() const;
 	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
 	// The Weapon window's trace is drained incrementally: only samples newer
-	// than this reach the window, so a per-frame push stays small.
+	// than this reach the window, so a per-frame push stays small; a newest
+	// tick below it is a restarted logic clock and re-primes the cursor.
 	uint32_t last_weapon_trace_tick_ = 0;
 	bool weapon_trace_primed_ = false;
-	uint64_t weapon_catalog_serial_ = 0;
-	std::string weapon_catalog_weapon_;
+	// The definition is rebuilt only when something moved it: an applied
+	// request, a different weapon, or the clip rings resolving.
+	bool weapon_def_dirty_ = true;
+	uint64_t weapon_def_serial_ = 0;
+	std::string weapon_def_name_;
+	size_t weapon_def_rings_ = 0;
+	bool weapon_records_live_ = false;
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

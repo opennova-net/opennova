@@ -45,6 +45,9 @@ weapon "WPN_M4AUTO"
 	startrounds 210
 	ammoclass   CLASS_556MM 1
 	round_type  AM_556MM
+	// Full auto: a held trigger sustains through the recoil re-queue [orig: token
+	// table @ 0x830bf0, auto = 0x100; WeaponSlot_CanFireInCurrentState @ 0x53f0b0].
+	flags       auto
 
 	ANIMADM	AKM_1ST
 	GFX1	AKM_1st
@@ -126,6 +129,9 @@ weapon "WPN_AK47AUTO"
 	startrounds 210
 	ammoclass   CLASS_556MM 1
 	round_type  AM_556MM
+	// Full auto: a held trigger sustains through the recoil re-queue [orig: token
+	// table @ 0x830bf0, auto = 0x100; WeaponSlot_CanFireInCurrentState @ 0x53f0b0].
+	flags       auto
 
 	ANIMADM	AKM_1ST
 	GFX1	AKM_1st

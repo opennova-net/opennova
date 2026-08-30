@@ -1991,6 +1991,11 @@ public:
 	const DefWeaponDef *native_equipped_weapon_row() const;
 	// The equipped weapon's index in the armory table; -1 when unresolved.
 	int native_equipped_weapon_adm_index() const;
+	// The ACTIVE slot the pump runs: the borrowed UseGun parent slot when one
+	// is engaged, else the personal slot. Null without a weapon.
+	const opennova::world::WeaponSlotState *native_active_weapon_slot() const;
+	// The pump's own input gate as a reason ("" = input accepted).
+	const char *native_weapon_input_block() const;
 	// The equipped clip keys (.adm rings), for the window's ANIM picker.
 	std::vector<std::string> native_equipped_weapon_clip_keys() const;
 
@@ -2001,7 +2006,12 @@ public:
 	// from the clip. NOTHING here touches the filesystem.
 	// p_action_id is opennova::world::weapon_action::*; p_field is
 	// devtools::WeaponRequest::TextField (paired by static_assert at the drain).
-	bool debug_weapon_set_action_delays(int p_action_id, int p_delay_start, int p_delay_end);
+	// Delays arrive in AUTHORED form (-1 = `auto`): both legs are mirrored
+	// into the retained row as given, only explicit legs patch the live baked
+	// slot, and `p_rebake` asks for the same-weapon re-bake that resolves a
+	// leg newly turned `auto` (the live slot, serials and scope survive it).
+	bool debug_weapon_set_action_delays(int p_action_id, int p_delay_start, int p_delay_end,
+			bool p_rebake);
 	bool debug_weapon_set_action_text(int p_action_id, int p_field, const String &p_text);
 	// Queue an action through the REAL input seam and its real gate; false when
 	// the gate refuses. p_trigger is devtools::WeaponRequest::Trigger.

@@ -93,12 +93,16 @@ opennova::devtools::ImGuiPass *DevTools::engine_pass() {
 void DevTools::_exit_tree() {
 	set_game_play_available(false);
 	set_game_playing_internal(false);
-	set_simulation(nullptr);
 	game_viewport_ = nullptr;
 	rendered_game_viewport_size_ = Vector2i();
 	tools_->set_game_viewport(nullptr);
 	tools_->reset_game_input_mode();
+	// Close the pass BEFORE dropping the Simulation: the windows' hide edges
+	// queue their teardown (the Weapon window releases its hold and, with REC
+	// off, its ring) and that drain needs a world to reach.
 	tools_->pass().set_open(false);
+	apply_weapon_requests();
+	set_simulation(nullptr);
 	tools_->set_frame_stats(nullptr);
 	if (frame_stats_.is_valid()) {
 		frame_stats_->sync_capture_signal();
@@ -115,7 +119,7 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 	apply_debug_requests();
 	apply_weapon_requests();
 	push_entity_directory();
-	push_weapon_snapshot();
+	push_weapon_records();
 	if (open_ && !tools_->pass().is_open()) {
 		// Closed from inside (Escape, the menu).
 		set_game_playing_internal(false);
@@ -271,8 +275,19 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 	if (simulation_id_ == id) {
 		return;
 	}
+	// The outgoing world takes nothing of the Weapon window's with it: the
+	// hold latch and the trace ring are released on the Simulation being
+	// dropped, whatever the window's own state.
+	if (Simulation *outgoing = simulation(); outgoing != nullptr && outgoing != p_simulation) {
+		outgoing->debug_weapon_set_fire_held(false);
+		outgoing->debug_weapon_arm_trace(false);
+	}
 	simulation_id_ = id;
 	last_entity_push_ms_ = -1;
+	weapon_trace_primed_ = false;
+	weapon_def_dirty_ = true;
+	weapon_def_name_.clear();
+	weapon_records_live_ = false;
 	if (p_simulation == nullptr) {
 		// The unload edge: an invalid snapshot clears the pushed record so a
 		// window left open never shows a dead world's rows.
@@ -365,12 +380,14 @@ void DevTools::apply_weapon_requests() {
 		}
 		switch (request.kind) {
 			case Request::Kind::SetActionDelays:
-				(void)simulation_->debug_weapon_set_action_delays(
-						request.action_id, request.delay_start, request.delay_end);
+				(void)simulation_->debug_weapon_set_action_delays(request.action_id,
+						request.delay_start, request.delay_end, request.rebake);
+				weapon_def_dirty_ = true;
 				break;
 			case Request::Kind::SetActionText:
 				(void)simulation_->debug_weapon_set_action_text(request.action_id,
 						static_cast<int>(request.field), String::utf8(request.text));
+				weapon_def_dirty_ = true;
 				break;
 			case Request::Kind::TriggerAction:
 				(void)simulation_->debug_weapon_trigger(static_cast<int>(request.trigger));
@@ -395,142 +412,157 @@ void DevTools::apply_weapon_requests() {
 	}
 }
 
-// Push the Weapon window's record EVERY frame while the window shows: the
-// trace pane is a scope on a 62.5 Hz signal, so the Entities window's 0.5 s
-// cadence would alias it away. The record is small, and the trace itself is
-// drained incrementally.
-void DevTools::push_weapon_snapshot() {
+// Push the Weapon window's records while it shows: the definition only when
+// something moved it (an applied request, a different weapon, the clip rings
+// resolving), the live state EVERY frame — the trace pane is a scope on a
+// 62.5 Hz signal, so the Entities window's 0.5 s cadence would alias it away.
+// The trace itself is drained incrementally from the pump's ring.
+void DevTools::push_weapon_records() {
 	Simulation *simulation_ = simulation();
 	if (simulation_ == nullptr) {
-		// The unload edge: an invalid record clears a window left open, and the
-		// trace cursor restarts with the next world.
-		tools_->set_weapon_snapshot(opennova::devtools::WeaponActionSnapshot{});
-		weapon_catalog_weapon_.clear();
+		// The unload edge: an invalid definition clears a window left open,
+		// and the trace cursor restarts with the next world.
+		if (weapon_records_live_) {
+			tools_->set_weapon_definition(opennova::devtools::WeaponDefinitionSnapshot{});
+			weapon_records_live_ = false;
+		}
 		weapon_trace_primed_ = false;
+		weapon_def_dirty_ = true;
+		weapon_def_name_.clear();
 		return;
 	}
 	// Hidden: no record is built, but the trace cursor is kept so the reopen
 	// drains exactly what the ring recorded meanwhile (REC keeps it armed).
-	if (!tools_->needs_weapon_snapshot()) return;
+	if (!tools_->needs_weapon_records()) return;
 	const opennova::world::LocalPlayerWeapon *weapon =
 			simulation_->native_local_player_weapon();
 	if (weapon == nullptr) {
-		tools_->set_weapon_snapshot(opennova::devtools::WeaponActionSnapshot{});
-		weapon_catalog_weapon_.clear();
+		if (weapon_records_live_) {
+			tools_->set_weapon_definition(opennova::devtools::WeaponDefinitionSnapshot{});
+			weapon_records_live_ = false;
+		}
 		weapon_trace_primed_ = false;
+		weapon_def_dirty_ = true;
+		weapon_def_name_.clear();
 		return;
 	}
+	weapon_records_live_ = true;
 
-	opennova::devtools::WeaponActionSnapshot snapshot;
-	snapshot.valid = true;
-	snapshot.weapon_name = weapon->def_name;
-	snapshot.adm_index = simulation_->native_equipped_weapon_adm_index();
-	snapshot.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
-
-	const DefWeaponDef *row = simulation_->native_equipped_weapon_row();
-	for (int id = 0; id < opennova::world::weapon_action::kCount; ++id) {
-		const opennova::world::WeaponFsmAction &baked = weapon->def.actions[id];
-		opennova::devtools::WeaponActionRow &out = snapshot.actions[id];
-		out.delay_start = baked.delay_start;
-		out.delay_end = baked.delay_end;
-		out.has_anim = baked.has_anim;
-		out.anim_key = baked.anim_key;
-		out.soundset = baked.soundset;
-		out.soundsetend = baked.soundsetend;
-		out.particle = baked.particle;
-		out.particle_userpoint = baked.particle_userpoint;
-		// The authored row behind the slot, matched the way the bake binds it.
-		if (row != nullptr) {
-			const char *suffix = opennova::world::kWeaponActionSuffixes[id];
-			for (size_t i = 0; i < row->actions_count; ++i) {
-				const DefWeaponAction &authored = row->actions[i];
-				if (!opennova::strutil::iequals(authored.name, suffix)) continue;
-				out.authored = true;
-				out.authored_name = authored.name;
-				out.function = authored.function;
-				out.authored_delay_start = authored.delaystart;
-				out.authored_delay_end = authored.delayend;
-				break;
+	// --- the definition, on change ---
+	const size_t rings = weapon->clip_rings.size();
+	if (weapon_def_dirty_ || weapon_def_name_ != weapon->def_name || weapon_def_rings_ != rings) {
+		weapon_def_dirty_ = false;
+		weapon_def_name_ = weapon->def_name;
+		weapon_def_rings_ = rings;
+		opennova::devtools::WeaponDefinitionSnapshot def;
+		def.valid = true;
+		def.serial = ++weapon_def_serial_;
+		def.weapon_name = weapon->def_name;
+		def.adm_index = simulation_->native_equipped_weapon_adm_index();
+		def.clip_capacity = weapon->def.clip_capacity;
+		def.auto_fire = weapon->def.auto_fire;
+		def.burst3 = weapon->def.burst3;
+		def.clip_keys = simulation_->native_equipped_weapon_clip_keys();
+		const DefWeaponDef *row = simulation_->native_equipped_weapon_row();
+		for (int id = 0; id < opennova::world::weapon_action::kCount; ++id) {
+			const opennova::world::WeaponFsmAction &baked = weapon->def.actions[id];
+			opennova::devtools::WeaponActionRow &out = def.actions[id];
+			out.delay_start = baked.delay_start;
+			out.delay_end = baked.delay_end;
+			out.has_anim = baked.has_anim;
+			out.anim_key = baked.anim_key;
+			out.soundset = baked.soundset;
+			out.soundsetend = baked.soundsetend;
+			out.particle = baked.particle;
+			out.particle_userpoint = baked.particle_userpoint;
+			// The authored row behind the slot, matched the way the bake binds it.
+			if (row != nullptr) {
+				const char *suffix = opennova::world::kWeaponActionSuffixes[id];
+				for (size_t i = 0; i < row->actions_count; ++i) {
+					const DefWeaponAction &authored = row->actions[i];
+					if (!opennova::strutil::iequals(authored.name, suffix)) continue;
+					out.authored = true;
+					out.authored_name = authored.name;
+					out.function = authored.function;
+					out.authored_delay_start = authored.delaystart;
+					out.authored_delay_end = authored.delayend;
+					break;
+				}
+			}
+			// The clip this row resolves to, in ticks — what an `auto` delay
+			// bakes from. Read WITHOUT advancing the ring: the bake's own reads
+			// are consuming, and a push must not rotate the variant order.
+			if (baked.anim_key[0] != '\0') {
+				std::string key = baked.anim_key;
+				for (char &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+				for (const auto &ring : weapon->clip_rings) {
+					if (ring.first != key || ring.second.lengths.empty()) continue;
+					const size_t head = static_cast<size_t>(ring.second.head) %
+							ring.second.lengths.size();
+					out.clip_ticks = opennova::world::weapon_anim_ticks_from_ms(
+							static_cast<int32_t>(ring.second.lengths[head] * 1000.0f));
+					break;
+				}
 			}
 		}
-		// The clip this row resolves to, in ticks — what an `auto` delay bakes
-		// from. Read WITHOUT advancing the ring: the bake's own reads are
-		// consuming, and a per-frame push must not rotate the variant order.
-		if (baked.anim_key[0] != '\0') {
-			std::string key = baked.anim_key;
-			for (char &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-			for (const auto &ring : weapon->clip_rings) {
-				if (ring.first != key || ring.second.lengths.empty()) continue;
-				const size_t head = static_cast<size_t>(ring.second.head) %
-						ring.second.lengths.size();
-				out.clip_ticks = opennova::world::weapon_anim_ticks_from_ms(
-						static_cast<int32_t>(ring.second.lengths[head] * 1000.0f));
-				break;
-			}
-		}
+		tools_->set_weapon_definition(std::move(def));
 	}
 
-	const opennova::world::WeaponSlotState &slot = weapon->slot;
-	snapshot.current = slot.current;
-	snapshot.next = slot.next;
-	snapshot.prev = slot.prev;
-	snapshot.phase = slot.phase;
-	snapshot.counter = slot.counter;
-	snapshot.clip = slot.clip;
-	snapshot.reserve = slot.reserve;
-	snapshot.clip_capacity = weapon->def.clip_capacity;
-	snapshot.auto_fire = weapon->def.auto_fire;
-	snapshot.burst3 = weapon->def.burst3;
-	snapshot.heat = opennova::world::weapon_slot_accumulated_heat(
-			weapon->def, slot, static_cast<int32_t>(snapshot.logic_tick));
-	// The REAL input-dispatcher gates decide; the strings only NAME which leg
-	// refused, so the window can say so instead of greying a button silently.
+	// --- the live state, every frame ---
+	opennova::devtools::WeaponLiveSnapshot live;
+	live.valid = true;
+	live.logic_tick = static_cast<uint64_t>(simulation_->get_logic_tick());
+	// The ACTIVE slot: the borrowed UseGun parent slot when one is engaged,
+	// which is what the pump runs and the trace records.
+	const opennova::world::WeaponSlotState *active = simulation_->native_active_weapon_slot();
+	const opennova::world::WeaponSlotState &slot = active != nullptr ? *active : weapon->slot;
+	live.current = slot.current;
+	live.next = slot.next;
+	live.prev = slot.prev;
+	live.phase = slot.phase;
+	live.counter = slot.counter;
+	live.clip = slot.clip;
+	live.reserve = slot.reserve;
+	live.heat = opennova::world::weapon_slot_accumulated_heat(
+			weapon->def, slot, static_cast<int32_t>(live.logic_tick));
+	// The REAL input gates decide; the strings only NAME which leg refused,
+	// so the window can say so instead of greying a button silently.
+	live.fire_block = simulation_->native_weapon_input_block();
 	if (!opennova::world::weapon_fsm_reload_allowed(weapon->def, slot)) {
 		if (weapon->def.clip_capacity <= 0) {
-			snapshot.reload_block =
-					"the def authors no clipsize, so there is no magazine to reload";
+			live.reload_block = "the def authors no clipsize, so there is no magazine to reload";
 		} else if (slot.clip == weapon->def.clip_capacity) {
-			snapshot.reload_block = "the magazine is already full";
+			live.reload_block = "the magazine is already full";
 		} else {
-			snapshot.reload_block = "the reserve is empty";
+			live.reload_block = "the reserve is empty";
 		}
 	}
 	if (!opennova::world::weapon_fsm_scope_toggle_allowed(weapon->def, slot)) {
 		if (slot.current == opennova::world::weapon_action::kReload ||
 				slot.current == opennova::world::weapon_action::kSwitchFrom) {
-			snapshot.scope_block = "a reload or holster is running";
+			live.scope_block = "a reload or holster is running";
 		} else {
-			snapshot.scope_block = "the def is not Scoped or Sighted (flags & 3)";
+			live.scope_block = "the def is not Scoped or Sighted (flags & 3)";
 		}
 	}
-	snapshot.player_alive = !simulation_->local_player_dead();
-	snapshot.fire_held = simulation_->debug_weapon_fire_held();
-	snapshot.trace_armed = weapon->trace_armed;
+	live.fire_held = simulation_->debug_weapon_fire_held();
+	live.trace_armed = weapon->trace_armed;
 
-	// The trace delta: only samples the window has not seen. `primed` covers
-	// the first push after arming, where every recorded sample is new.
-	const std::vector<opennova::world::WeaponTraceSample> samples =
-			opennova::world::weapon_trace_samples(*weapon);
-	for (const opennova::world::WeaponTraceSample &sample : samples) {
-		if (weapon_trace_primed_ && sample.tick <= last_weapon_trace_tick_) continue;
-		snapshot.trace.push_back(sample);
+	// The trace delta: only samples the window has not seen, walked back from
+	// the ring's write head. A newest tick below the cursor is a restarted
+	// logic clock (a round restart), so the cursor re-primes and the window
+	// takes the whole ring again.
+	const uint32_t newest = opennova::world::weapon_trace_samples_since(
+			*weapon, last_weapon_trace_tick_, !weapon_trace_primed_, live.trace);
+	if (weapon_trace_primed_ && newest != 0 && newest < last_weapon_trace_tick_) {
+		live.trace.clear();
+		opennova::world::weapon_trace_samples_since(*weapon, 0, true, live.trace);
 	}
-	if (!samples.empty()) {
-		last_weapon_trace_tick_ = samples.back().tick;
+	if (newest != 0) {
+		last_weapon_trace_tick_ = newest;
 		weapon_trace_primed_ = true;
 	}
-	tools_->set_weapon_snapshot(std::move(snapshot));
-
-	// The pickers only move when the weapon changes or the banks load.
-	if (weapon_catalog_weapon_ != weapon->def_name ||
-			tools_->weapon_catalog_serial() != weapon_catalog_serial_) {
-		weapon_catalog_weapon_ = weapon->def_name;
-		++weapon_catalog_serial_;
-		opennova::devtools::WeaponCatalog catalog;
-		catalog.serial = weapon_catalog_serial_;
-		catalog.clip_keys = simulation_->native_equipped_weapon_clip_keys();
-		tools_->set_weapon_catalog(std::move(catalog));
-	}
+	tools_->set_weapon_live(std::move(live));
 }
 
 void DevTools::reset_layout() {

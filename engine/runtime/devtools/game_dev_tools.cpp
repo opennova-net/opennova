@@ -80,20 +80,20 @@ bool GameDevTools::take_debug_request(DebugRequest &request) {
 	return entities_window_->take_request(request);
 }
 
-void GameDevTools::set_weapon_snapshot(WeaponActionSnapshot snapshot) {
-	weapon_window_->set_snapshot(std::move(snapshot));
+void GameDevTools::set_weapon_definition(WeaponDefinitionSnapshot definition) {
+	weapon_window_->set_definition(std::move(definition));
 }
 
-void GameDevTools::set_weapon_catalog(WeaponCatalog catalog) {
-	weapon_window_->set_catalog(std::move(catalog));
+void GameDevTools::set_weapon_live(WeaponLiveSnapshot live) {
+	weapon_window_->set_live(std::move(live));
 }
 
-bool GameDevTools::needs_weapon_snapshot() const {
+bool GameDevTools::needs_weapon_records() const {
 	return pass_.is_open() && weapon_window_->open;
 }
 
-uint64_t GameDevTools::weapon_catalog_serial() const {
-	return weapon_window_->catalog_serial();
+uint64_t GameDevTools::weapon_definition_serial() const {
+	return weapon_window_->definition_serial();
 }
 
 bool GameDevTools::take_weapon_request(WeaponRequest &request) {

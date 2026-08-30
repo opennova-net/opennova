@@ -1,7 +1,8 @@
-// The Weapon window's pushed value records (ADR 0042 d6): what the embedder
-// hands the F3 Weapon window each frame, and the slower-changing name catalogs
-// its pickers offer. Plain values — the window never reaches into a live World,
-// a MissionKernel or Godot.
+// The Weapon window's pushed value records (ADR 0042 d6), split by cadence:
+// the DEFINITION moves only on an install or an applied edit and is pushed on
+// a serial bump; the LIVE state is a scope on a 62.5 Hz signal and is pushed
+// every frame the window shows. Plain values — the window never reaches into
+// a live World, a MissionKernel or Godot.
 #pragma once
 
 #include <runtime/world/player_weapon.h>
@@ -45,17 +46,27 @@ struct WeaponActionRow {
 	int32_t clip_ticks = 0;
 };
 
-// The per-frame record. Pushed every frame rather than on the Entities window's
-// 0.5 s cadence: the trace pane is a live scope, and this is a small record.
-struct WeaponActionSnapshot {
+// The definition: what the dope sheet draws and the properties panel edits.
+// Pushed when `serial` moves — a weapon install, an applied edit, the clip
+// rings resolving — never per frame. An invalid one clears the window.
+struct WeaponDefinitionSnapshot {
 	bool valid = false;
+	uint64_t serial = 0;
 	std::string weapon_name;
 	int32_t adm_index = -1;
+	int32_t clip_capacity = 0;  // < 0: no clipsize authored, no magazine to track
+	bool auto_fire = false;
+	bool burst3 = false;
+	WeaponActionRow actions[world::weapon_action::kCount];
+	std::vector<std::string> clip_keys;  // the ANIM picker: .adm clip keys the weapon registered
+};
+
+// The live state: the ACTIVE slot (the borrowed UseGun parent slot when one is
+// engaged, else the personal slot), the input gates, and the trace delta.
+struct WeaponLiveSnapshot {
+	bool valid = false;
 	uint64_t logic_tick = 0;
 
-	WeaponActionRow actions[world::weapon_action::kCount];
-
-	// --- the live slot (world::WeaponSlotState) ---
 	int32_t current = 0;
 	int32_t next = 0;
 	int32_t prev = 0;
@@ -64,38 +75,22 @@ struct WeaponActionSnapshot {
 	int32_t clip = 0;
 	int32_t reserve = 0;
 	int32_t heat = 0;
-	int32_t clip_capacity = 0;
-	bool auto_fire = false;
-	bool burst3 = false;
 
-	// The real input-dispatcher gates, evaluated by the embedder through the
-	// engine predicates, as the ONED readiness idiom: an empty string enables
-	// the trigger, a non-empty one disables it AND is the tooltip that names
-	// which leg of the gate refused. The window never queues a request the
-	// FSM would reject.
-	std::string reload_block;
-	std::string scope_block;
-	bool player_alive = false;
-	bool fire_held = false;
+	// The real input gates, evaluated by the embedder through the engine
+	// predicates, as the ONED readiness idiom: an empty string enables the
+	// trigger, a non-empty one disables it AND is the tooltip that names which
+	// leg refused. The window never queues a request the FSM would reject.
+	std::string fire_block;    // the pump's own input gate (dead, seat, UseGun switch)
+	std::string reload_block;  // the reload dispatch gate
+	std::string scope_block;   // the ADS toggle gate
+
+	bool fire_held = false;    // the devtools hold latch as the embedder holds it
+	bool trace_armed = false;  // the engine ring's state, for the window to reconcile REC against
 
 	// Trace samples recorded since the last push, oldest first. The window
 	// accumulates them into its own ring; an empty delta is the common case
 	// between logic ticks.
 	std::vector<world::WeaponTraceSample> trace;
-	bool trace_armed = false;
-};
-
-// The ANIM picker's catalog. Pushed only when `serial` changes (a weapon
-// install) — the window keeps the last one it was given.
-//
-// There is deliberately no SOUNDSET catalog: the loaded .lwf trigger-set names
-// live in the shell's GDScript SoundBank, and the one wiring line that would
-// carry them has no legal home (main_game.gd sits exactly on its 1200-line
-// ratchet, and the alternative is a 3192-line god file). The sound legs are
-// therefore free text plus the trace markers that show when each one fired.
-struct WeaponCatalog {
-	uint64_t serial = 0;
-	std::vector<std::string> clip_keys;  // .adm clip keys the weapon registered
 };
 
 }  // namespace opennova::devtools

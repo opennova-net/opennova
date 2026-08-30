@@ -125,55 +125,83 @@ void draw_grid(ImDrawList *dl, float x0, float x1, float y, float height, float 
 
 // --- records in -----------------------------------------------------------
 
-void WeaponWindow::set_snapshot(WeaponActionSnapshot snapshot) {
-	// Drop the scrollback BEFORE taking the new delta: the world unloaded, or a
-	// different weapon is a different definition and nothing carries over. The
-	// incoming samples already belong to the new one.
-	const bool identity_changed = snapshot.valid && snapshot_.valid &&
-			snapshot_.weapon_name != snapshot.weapon_name;
-	if (!snapshot.valid || identity_changed) {
+void WeaponWindow::set_definition(WeaponDefinitionSnapshot definition) {
+	if (!definition.valid) {
+		// The world unloaded or the weapon cleared: nothing carries over.
+		definition_ = WeaponDefinitionSnapshot{};
+		live_ = WeaponLiveSnapshot{};
 		trace_.clear();
 		measure_valid_ = false;
+		field_action_ = -1;
+		format_rows();
+		return;
 	}
-	if (snapshot.valid && (!snapshot_.valid || identity_changed)) {
-		// A new definition gets the View All framing.
+	// A different weapon is a different definition. The definition is kept
+	// across a hide precisely so this comparison still works on the reopen.
+	if (!definition_.valid || definition_.weapon_name != definition.weapon_name) {
+		trace_.clear();
+		measure_valid_ = false;
 		fit_pending_ = true;
+		field_action_ = -1;
+	}
+	definition_ = std::move(definition);
+	format_rows();
+}
+
+void WeaponWindow::set_live(WeaponLiveSnapshot live) {
+	if (!live.valid) {
+		live_ = WeaponLiveSnapshot{};
+		return;
 	}
 	// The pushed vector holds only what the pump recorded since the last push;
 	// the window is what accumulates it into a scrollback. A re-show can hand
 	// back ticks already held (the embedder re-primes its cursor), so only
 	// ticks newer than the newest held one append; a batch that starts far
-	// below it is a restarted logic clock, not a duplicate.
-	if (snapshot.valid && !snapshot.trace.empty()) {
-		if (!trace_.empty() &&
-				snapshot.trace.front().tick + kTraceCapacity * 2 < trace_.back().tick) {
+	// below it is a restarted logic clock (a round restart, a new world), not
+	// a duplicate, and the scrollback restarts with it.
+	if (!live.trace.empty()) {
+		if (!trace_.empty() && live.trace.front().tick + kTraceCapacity * 2 < trace_.back().tick) {
 			trace_.clear();
 			measure_valid_ = false;
 		}
-		for (const world::WeaponTraceSample &sample : snapshot.trace) {
+		size_t appended = 0;
+		for (const world::WeaponTraceSample &sample : live.trace) {
 			if (!trace_.empty() && sample.tick <= trace_.back().tick) continue;
 			trace_.push_back(sample);
+			++appended;
 		}
 		while (trace_.size() > kTraceCapacity) trace_.pop_front();
+		// A batch of more than a second is a reopen pulling what the ring
+		// recorded while the window was hidden: View All, so the whole burst
+		// is on screen instead of its last two seconds riding the playhead.
+		if (appended > 62) fit_trace_pending_ = true;
 	}
-	snapshot_ = std::move(snapshot);
-	format_rows();
+	// Reconcile REC against the ring the embedder actually holds: an arm
+	// queued with no world behind it drains and drops, so the switch re-asks
+	// until the engine agrees.
+	if (live.trace_armed != recording_) {
+		WeaponRequest request;
+		request.kind = WeaponRequest::Kind::ArmTrace;
+		request.armed = recording_;
+		enqueue_request(request);
+	}
+	live_ = std::move(live);
 }
-
-void WeaponWindow::set_catalog(WeaponCatalog catalog) { catalog_ = std::move(catalog); }
 
 void WeaponWindow::on_visibility(bool visible) {
 	shown_ = visible;
 	if (!visible) {
-		// The live record goes (the embedder stops building it), the drag
-		// state goes, but the scrollback stays: the natural loop is to close
-		// F3, shoot with the real mouse, and reopen to read what happened.
-		snapshot_ = WeaponActionSnapshot{};
-		texts_ = {};
+		// The live record goes (the embedder stops building it) and the drag
+		// state goes, but the definition and the scrollback stay: the natural
+		// loop is to close F3, shoot with the real mouse, and reopen to read
+		// what happened.
+		live_ = WeaponLiveSnapshot{};
 		drag_action_ = -1;
+		// A hold cannot outlive the UI that shows it.
+		queue_fire_held(false);
 		// REC is the user's explicit switch. While it is on the engine ring
 		// keeps recording through a hide (one sample copy per pump tick), so
-		// the reopen shows the last ~8 s; off, the ring is released.
+		// the reopen shows the last ~16 s; off, the ring is released.
 		if (!recording_) {
 			WeaponRequest request;
 			request.kind = WeaponRequest::Kind::ArmTrace;
@@ -204,10 +232,10 @@ void WeaponWindow::select_action(int action_id) {
 
 void WeaponWindow::format_rows() {
 	for (int id = 0; id < wa::kCount; ++id) {
-		const WeaponActionRow &row = snapshot_.actions[id];
+		const WeaponActionRow &row = definition_.actions[id];
 		RowText &text = texts_[static_cast<size_t>(id)];
 		text.label = kActionNames[id];
-		if (!snapshot_.valid) {
+		if (!definition_.valid) {
 			text.timing.clear();
 			continue;
 		}
@@ -281,13 +309,44 @@ const char *WeaponWindow::trace_row(int index) const {
 
 // --- request helpers ------------------------------------------------------
 
-void WeaponWindow::queue_delays(int action_id, int32_t delay_start, int32_t delay_end) {
+void WeaponWindow::queue_delays(int action_id, int32_t delay_start, int32_t delay_end,
+		bool rebake) {
 	WeaponRequest request;
 	request.kind = WeaponRequest::Kind::SetActionDelays;
 	request.action_id = action_id;
 	request.delay_start = delay_start;
 	request.delay_end = delay_end;
+	request.rebake = rebake;
 	enqueue_request(request);
+}
+
+void WeaponWindow::request_delay_edit(int action_id, DelayLeg leg, int32_t value) {
+	if (action_id < 0 || action_id >= wa::kCount || !definition_.valid) return;
+	const WeaponActionRow &row = definition_.actions[action_id];
+	value = std::max<int32_t>(0, value);
+	// The untouched leg travels in its AUTHORED form so an `auto` stays `auto`;
+	// a slot with no authored row has only its baked values to keep.
+	const int32_t other_start = row.authored ? row.authored_delay_start : row.delay_start;
+	const int32_t other_end = row.authored ? row.authored_delay_end : row.delay_end;
+	if (leg == DelayLeg::Start) {
+		queue_delays(action_id, value, other_end, false);
+	} else {
+		queue_delays(action_id, other_start, value, false);
+	}
+}
+
+void WeaponWindow::request_delay_auto(int action_id, DelayLeg leg, bool is_auto) {
+	if (action_id < 0 || action_id >= wa::kCount || !definition_.valid) return;
+	const WeaponActionRow &row = definition_.actions[action_id];
+	if (!row.authored) return;  // no row to write `auto` into
+	// -1 is the parser's `auto` sentinel and needs the re-bake that resolves
+	// it from the clip; turning it off freezes the value the clip most
+	// recently baked to, which needs no re-bake at all.
+	const int32_t start = leg == DelayLeg::Start ? (is_auto ? -1 : row.delay_start)
+												: row.authored_delay_start;
+	const int32_t end = leg == DelayLeg::End ? (is_auto ? -1 : row.delay_end)
+											: row.authored_delay_end;
+	queue_delays(action_id, start, end, is_auto);
 }
 
 void WeaponWindow::queue_text(int action_id, WeaponRequest::TextField field, const char *text) {
@@ -303,6 +362,13 @@ void WeaponWindow::queue_trigger(WeaponRequest::Trigger trigger) {
 	WeaponRequest request;
 	request.kind = WeaponRequest::Kind::TriggerAction;
 	request.trigger = trigger;
+	enqueue_request(request);
+}
+
+void WeaponWindow::queue_fire_held(bool held) {
+	WeaponRequest request;
+	request.kind = WeaponRequest::Kind::SetFireHeld;
+	request.held = held;
 	enqueue_request(request);
 }
 
@@ -323,7 +389,9 @@ bool WeaponWindow::handle_axis_input(float x0, float x1, Axis &axis, bool clamp_
 	}
 	const ImGuiIO &io = ImGui::GetIO();
 	bool interacted = false;
-	const float mouse_x = std::clamp(io.MousePos.x, x0, x1);
+	// A pane narrower than its channel column has x1 < x0; clamp to a valid
+	// (possibly empty) range rather than hand std::clamp inverted bounds.
+	const float mouse_x = std::clamp(io.MousePos.x, x0, std::max(x0, x1));
 	if (io.MouseWheel != 0.0f) {
 		// Zoom about the cursor so the tick under the pointer stays put.
 		const double anchor = tick_of(x0, axis.pixels_per_tick, axis.origin_tick, mouse_x);
@@ -370,7 +438,7 @@ void WeaponWindow::draw_ruler(float x0, float x1, float y, const Axis &axis, dou
 void WeaponWindow::fit_dope_sheet(float width) {
 	// View All: the longest strip or clip ghost decides the scale.
 	double longest = 32.0;
-	for (const WeaponActionRow &row : snapshot_.actions) {
+	for (const WeaponActionRow &row : definition_.actions) {
 		longest = std::max(longest, static_cast<double>(row.delay_start) + row.delay_end);
 		longest = std::max(longest, static_cast<double>(row.clip_ticks));
 	}
@@ -382,7 +450,7 @@ void WeaponWindow::fit_dope_sheet(float width) {
 void WeaponWindow::frame_action(float width, int action_id) {
 	// View Selected: one strip across ~two thirds of the pane.
 	if (action_id < 0 || action_id >= wa::kCount) return;
-	const WeaponActionRow &row = snapshot_.actions[action_id];
+	const WeaponActionRow &row = definition_.actions[action_id];
 	const double span = std::max(8.0,
 			std::max(static_cast<double>(row.delay_start) + row.delay_end,
 					static_cast<double>(row.clip_ticks)));
@@ -392,6 +460,7 @@ void WeaponWindow::frame_action(float width, int action_id) {
 }
 
 void WeaponWindow::fit_trace(float width) {
+	fit_trace_pending_ = false;
 	if (trace_.empty()) return;
 	const double oldest = static_cast<double>(trace_.front().tick);
 	const double newest = static_cast<double>(trace_.back().tick);
@@ -399,7 +468,6 @@ void WeaponWindow::fit_trace(float width) {
 	trace_axis_.pixels_per_tick = fit_zoom(width, span);
 	trace_axis_.origin_tick = oldest - span * 0.01;
 	trace_follow_ = false;
-	fit_trace_pending_ = false;
 }
 
 // --- the dope sheet -------------------------------------------------------
@@ -417,7 +485,7 @@ void WeaponWindow::draw_dope_sheet(float height) {
 	const ImVec2 origin = ImGui::GetCursorScreenPos();
 	const float width = ImGui::GetContentRegionAvail().x;
 	const float x0 = origin.x + kChannelWidth;
-	const float x1 = origin.x + width;
+	const float x1 = std::max(origin.x + width, x0);
 	const float axis_w = std::max(x1 - x0, 1.0f);
 	ImDrawList *dl = ImGui::GetWindowDrawList();
 	const bool pane_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
@@ -457,7 +525,7 @@ void WeaponWindow::draw_dope_sheet(float height) {
 	dl->PushClipRect(ImVec2(x0, rows_y), ImVec2(x1, rows_y + rows_h), true);
 	draw_grid(dl, x0, x1, rows_y, rows_h, ppt, org);
 	for (int id = 0; id < wa::kCount; ++id) {
-		const WeaponActionRow &row = snapshot_.actions[id];
+		const WeaponActionRow &row = definition_.actions[id];
 		const float ry = rows_y + static_cast<float>(id) * kRowHeight;
 		const bool selected = id == selected_;
 
@@ -558,16 +626,20 @@ void WeaponWindow::draw_dope_sheet(float height) {
 				int32_t next_end = row.delay_end;
 				if (handle == 1) {
 					next_start = std::max(0, drag_start_value_ + delta);
-					// Ctrl keeps the total duration and moves only the split.
 					if (ImGui::GetIO().KeyCtrl) {
+						// Ctrl keeps the total duration and moves only the
+						// split: both legs go explicit.
 						next_start = std::min(next_start, drag_start_other_);
 						next_end = drag_start_other_ - next_start;
+						if (next_start != row.delay_start || next_end != row.delay_end) {
+							queue_delays(id, next_start, next_end, false);
+						}
+					} else if (next_start != row.delay_start) {
+						request_delay_edit(id, DelayLeg::Start, next_start);
 					}
 				} else {
 					next_end = std::max(0, drag_start_value_ + delta);
-				}
-				if (next_start != row.delay_start || next_end != row.delay_end) {
-					queue_delays(id, next_start, next_end);
+					if (next_end != row.delay_end) request_delay_edit(id, DelayLeg::End, next_end);
 				}
 				ImGui::SetTooltip("%s  %s\nDELAYSTART %d  (%.0f ms)\nDELAYEND   %d  (%.0f ms)",
 						kActionNames[id], handle == 1 ? "delaystart" : "delayend", next_start,
@@ -582,17 +654,17 @@ void WeaponWindow::draw_dope_sheet(float height) {
 	}
 
 	// The live playhead: where the running action's counter currently sits.
-	if (snapshot_.current >= 0 && snapshot_.current < wa::kCount) {
-		const WeaponActionRow &live = snapshot_.actions[snapshot_.current];
+	if (live_.valid && live_.current >= 0 && live_.current < wa::kCount) {
+		const WeaponActionRow &live = definition_.actions[live_.current];
 		// The counter runs DOWN, so elapsed is the far side of whichever
 		// segment is ticking; phase tells which.
-		const bool in_tail = (snapshot_.phase & static_cast<uint8_t>(~wp::kReloadPendingBit)) ==
+		const bool in_tail = (live_.phase & static_cast<uint8_t>(~wp::kReloadPendingBit)) ==
 				wp::kDone;
 		const double elapsed = in_tail
-				? static_cast<double>(live.delay_start) + (live.delay_end - snapshot_.counter)
-				: static_cast<double>(live.delay_start - snapshot_.counter);
+				? static_cast<double>(live.delay_start) + (live.delay_end - live_.counter)
+				: static_cast<double>(live.delay_start - live_.counter);
 		const float px = x_of(x0, ppt, org, std::max(elapsed, 0.0));
-		const float ry = rows_y + static_cast<float>(snapshot_.current) * kRowHeight;
+		const float ry = rows_y + static_cast<float>(live_.current) * kRowHeight;
 		dl->AddLine(ImVec2(px, ry), ImVec2(px, ry + kRowHeight - 1.0f),
 				IM_COL32(255, 90, 90, 240), 2.0f);
 	}
@@ -604,8 +676,8 @@ void WeaponWindow::draw_dope_sheet(float height) {
 		const float ry = rows_y + static_cast<float>(id) * kRowHeight;
 		const RowText &text = texts_[static_cast<size_t>(id)];
 		dl->AddText(ImVec2(origin.x + 4.0f, ry + 4.0f),
-				snapshot_.actions[id].authored ? IM_COL32(215, 215, 222, 255)
-											   : IM_COL32(130, 130, 138, 255),
+				definition_.actions[id].authored ? IM_COL32(215, 215, 222, 255)
+												 : IM_COL32(130, 130, 138, 255),
 				text.label.c_str());
 		const ImVec2 size = ImGui::CalcTextSize(text.timing.c_str());
 		dl->AddText(ImVec2(x0 - 6.0f - size.x, ry + 4.0f), IM_COL32(160, 165, 175, 255),
@@ -631,7 +703,7 @@ void WeaponWindow::draw_trace(float height) {
 	const ImVec2 origin = ImGui::GetCursorScreenPos();
 	const float width = ImGui::GetContentRegionAvail().x;
 	const float x0 = origin.x + kChannelWidth;
-	const float x1 = origin.x + width;
+	const float x1 = std::max(origin.x + width, x0);
 	const float axis_w = std::max(x1 - x0, 1.0f);
 	ImDrawList *dl = ImGui::GetWindowDrawList();
 
@@ -699,8 +771,7 @@ void WeaponWindow::draw_trace(float height) {
 	ImGui::InvisibleButton("##body", ImVec2(axis_w, body_h));
 	if (ImGui::IsItemHovered()) {
 		const double at = std::floor(tick_of(x0, ppt, org, ImGui::GetIO().MousePos.x));
-		// Recent samples are the likely target and ticks need not be monotonic
-		// across a world reload, so walk back from the newest.
+		// Recent samples are the likely target, so walk back from the newest.
 		int found = -1;
 		for (int i = static_cast<int>(trace_.size()) - 1; i >= 0; --i) {
 			if (static_cast<double>(trace_[static_cast<size_t>(i)].tick) == at) {
@@ -711,8 +782,11 @@ void WeaponWindow::draw_trace(float height) {
 		if (found >= 0) {
 			const world::WeaponTraceSample &s = trace_[static_cast<size_t>(found)];
 			char extra[96];
-			std::snprintf(extra, sizeof(extra), "clip %d  reserve %d%s%s", s.clip, s.reserve,
-					s.heat > 0 ? "  heat " : "", s.heat > 0 ? std::to_string(s.heat).c_str() : "");
+			if (s.heat > 0) {
+				std::snprintf(extra, sizeof(extra), "clip %d  reserve %d  heat %d", s.clip, s.reserve, s.heat);
+			} else {
+				std::snprintf(extra, sizeof(extra), "clip %d  reserve %d", s.clip, s.reserve);
+			}
 			ImGui::SetTooltip("%s\nanim %s%s%s\n%s", trace_row(found),
 					s.anim_key[0] != '\0' ? s.anim_key : "-",
 					s.anim_key[0] != '\0' ? (s.advance_anim ? "  (advancing)" : "  (held)") : "",
@@ -799,12 +873,12 @@ void WeaponWindow::draw_trace(float height) {
 			}
 		};
 		if (s.action_started >= 0 && s.action_started < wa::kCount) {
-			const std::string &set = snapshot_.actions[s.action_started].soundset;
+			const std::string &set = definition_.actions[s.action_started].soundset;
 			if (!set.empty()) marker(channel_y(2), IM_COL32(150, 220, 255, 245), set.c_str());
 		}
 		if (s.action_finished >= 0 && s.action_finished < wa::kCount) {
 			// The gunshot lives on the END leg for most shipped fire rows.
-			const std::string &set = snapshot_.actions[s.action_finished].soundsetend;
+			const std::string &set = definition_.actions[s.action_finished].soundsetend;
 			if (!set.empty()) marker(channel_y(2), IM_COL32(120, 255, 200, 245), set.c_str());
 		}
 		if (s.fired) marker(channel_y(3), IM_COL32(255, 120, 110, 245), "fired");
@@ -879,11 +953,11 @@ void WeaponWindow::draw_trace(float height) {
 // --- header, transport, properties ---------------------------------------
 
 void WeaponWindow::draw_header() {
-	ImGui::Text("%s", snapshot_.weapon_name.empty() ? "(unnamed)" : snapshot_.weapon_name.c_str());
+	ImGui::Text("%s", definition_.weapon_name.empty() ? "(unnamed)" : definition_.weapon_name.c_str());
 	ImGui::SameLine();
-	ImGui::TextDisabled("adm %d", snapshot_.adm_index);
+	ImGui::TextDisabled("adm %d", definition_.adm_index);
 	ImGui::SameLine();
-	if (snapshot_.clip_capacity < 0) {
+	if (definition_.clip_capacity < 0) {
 		// No magazine to track: the def authored no clipsize, so the FSM runs
 		// its infinite-ammo legs and a reload can never be requested.
 		ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.4f, 1.0f), "| no clipsize");
@@ -893,56 +967,55 @@ void WeaponWindow::draw_header() {
 							  "`clipsize`; a `clip` line is not one and lands in raw_lines.)");
 		}
 	} else {
-		ImGui::Text("| clip %d/%d  reserve %d", snapshot_.clip, snapshot_.clip_capacity,
-				snapshot_.reserve);
+		ImGui::Text("| clip %d/%d  reserve %d", live_.clip, definition_.clip_capacity, live_.reserve);
 	}
 	ImGui::SameLine();
-	ImGui::Text("| %s %s c%d", action_name(snapshot_.current), phase_name(snapshot_.phase),
-			snapshot_.counter);
+	ImGui::Text("| %s %s c%d", action_name(live_.current), phase_name(live_.phase), live_.counter);
 	ImGui::SameLine();
-	ImGui::TextDisabled("| tick %llu", static_cast<unsigned long long>(snapshot_.logic_tick));
+	ImGui::TextDisabled("| tick %llu", static_cast<unsigned long long>(live_.logic_tick));
 	ImGui::SameLine();
-	ImGui::TextDisabled("| %s%s", snapshot_.auto_fire ? "auto" : "semi",
-			snapshot_.burst3 ? " burst3" : "");
+	ImGui::TextDisabled("| %s%s", definition_.auto_fire ? "auto" : "semi",
+			definition_.burst3 ? " burst3" : "");
 	// Only the emplaced and vehicle heavy guns author a heat model; for every
 	// infantry weapon this row would be a permanent zero, so it is not drawn.
-	if (snapshot_.heat > 0) {
+	if (live_.heat > 0) {
 		ImGui::SameLine();
-		ImGui::Text("| heat %d", snapshot_.heat);
+		ImGui::Text("| heat %d", live_.heat);
 	}
 }
 
 void WeaponWindow::draw_transport() {
-	const char *dead = snapshot_.player_alive ? "" : "the local player is not alive";
-	if (action_button("Fire", dead)) queue_trigger(WeaponRequest::Trigger::Fire);
+	const char *fire_block = live_.fire_block.c_str();
+	const bool fire_ok = live_.fire_block.empty();
+	if (action_button("Fire", fire_block)) queue_trigger(WeaponRequest::Trigger::Fire);
 	ImGui::SameLine();
-	bool held = snapshot_.fire_held;
-	ImGui::BeginDisabled(!snapshot_.player_alive);
-	if (ImGui::Checkbox("Hold", &held)) {
-		WeaponRequest request;
-		request.kind = WeaponRequest::Kind::SetFireHeld;
-		request.held = held;
-		enqueue_request(request);
-	}
+	bool held = live_.fire_held;
+	ImGui::BeginDisabled(!fire_ok);
+	if (ImGui::Checkbox("Hold", &held)) queue_fire_held(held);
 	ImGui::EndDisabled();
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
-		ImGui::SetTooltip("Hold the trigger: on an auto weapon the recoil window's deferred\n"
-						  "re-queue sustains the volley, exactly as a held mouse button does.");
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip | ImGuiHoveredFlags_AllowWhenDisabled)) {
+		if (fire_ok) {
+			ImGui::SetTooltip("Hold the trigger: on an auto weapon the recoil window's deferred\n"
+							  "re-queue sustains the volley, exactly as a held mouse button does.\n"
+							  "Released when the window hides.");
+		} else {
+			ImGui::SetTooltip("%s", fire_block);
+		}
 	}
 	ImGui::SameLine();
-	// Strict preview: the button carries the FSM's own refusal rather than
-	// faking ammo to keep itself enabled.
-	if (action_button("Reload", snapshot_.player_alive ? snapshot_.reload_block.c_str() : dead)) {
+	// Strict preview: the buttons carry the FSM's own refusal rather than
+	// faking ammo to keep themselves enabled.
+	if (action_button("Reload", fire_ok ? live_.reload_block.c_str() : fire_block)) {
 		queue_trigger(WeaponRequest::Trigger::Reload);
 	}
 	ImGui::SameLine();
-	if (action_button("Scope toggle", snapshot_.player_alive ? snapshot_.scope_block.c_str() : dead)) {
+	if (action_button("Scope toggle", fire_ok ? live_.scope_block.c_str() : fire_block)) {
 		queue_trigger(WeaponRequest::Trigger::ScopeToggle);
 	}
 	ImGui::SameLine();
-	if (action_button("Next weapon", dead)) queue_trigger(WeaponRequest::Trigger::NextWeapon);
+	if (action_button("Next weapon", fire_block)) queue_trigger(WeaponRequest::Trigger::NextWeapon);
 	ImGui::SameLine();
-	if (action_button("Prev weapon", dead)) queue_trigger(WeaponRequest::Trigger::PrevWeapon);
+	if (action_button("Prev weapon", fire_block)) queue_trigger(WeaponRequest::Trigger::PrevWeapon);
 
 	ImGui::SameLine();
 	ImGui::TextDisabled("|");
@@ -980,7 +1053,7 @@ void WeaponWindow::draw_transport() {
 		// numbers can be carried out of the window without retyping them.
 		std::string out;
 		for (int id = 0; id < wa::kCount; ++id) {
-			const WeaponActionRow &row = snapshot_.actions[id];
+			const WeaponActionRow &row = definition_.actions[id];
 			if (!row.authored) continue;
 			char block[768];
 			char start[24];
@@ -1022,7 +1095,16 @@ void WeaponWindow::draw_transport() {
 void WeaponWindow::draw_properties() {
 	const int id = selected_;
 	if (id < 0 || id >= wa::kCount) return;
-	const WeaponActionRow &row = snapshot_.actions[id];
+	const WeaponActionRow &row = definition_.actions[id];
+
+	// Every field below is keyed by the selected action, so a selection change
+	// (a row click earlier this frame, a trace click) makes ImGui drop the old
+	// action's active field instead of committing its half-typed text here.
+	ImGui::PushID(id);
+	if (field_action_ != id) {
+		field_action_ = id;
+		field_active_ = {};
+	}
 
 	ImGui::Separator();
 	ImGui::Text("%s", kActionNames[id]);
@@ -1035,8 +1117,7 @@ void WeaponWindow::draw_properties() {
 
 	// Delays. `auto` is a distinct authoring, so it gets a checkbox rather than
 	// a magic value in the number field.
-	const auto delay_field = [&](const char *label, int32_t baked, int32_t authored,
-									 bool is_start) {
+	const auto delay_field = [&](const char *label, int32_t baked, int32_t authored, DelayLeg leg) {
 		ImGui::PushID(label);
 		bool is_auto = row.authored && authored < 0;
 		int value = baked;
@@ -1048,28 +1129,18 @@ void WeaponWindow::draw_properties() {
 		ImGui::TextDisabled("%.0f ms", value * kMsPerTick);
 		ImGui::SameLine();
 		ImGui::BeginDisabled(!row.authored);
-		if (ImGui::Checkbox("auto", &is_auto)) {
-			// -1 is the parser's `auto` sentinel; turning it off freezes the
-			// value the clip most recently baked to.
-			const int32_t start = is_start ? (is_auto ? -1 : baked) : row.delay_start;
-			const int32_t end = is_start ? row.delay_end : (is_auto ? -1 : baked);
-			queue_delays(id, start, end);
-		}
+		if (ImGui::Checkbox("auto", &is_auto)) request_delay_auto(id, leg, is_auto);
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::TextUnformatted(label);
 		ImGui::PopID();
-		if (changed && !is_auto) {
-			queue_delays(id, is_start ? value : row.delay_start,
-					is_start ? row.delay_end : value);
-		}
+		if (changed && !is_auto) request_delay_edit(id, leg, value);
 	};
-	delay_field("DELAYSTART", row.delay_start, row.authored_delay_start, true);
-	delay_field("DELAYEND", row.delay_end, row.authored_delay_end, false);
+	delay_field("DELAYSTART", row.delay_start, row.authored_delay_start, DelayLeg::Start);
+	delay_field("DELAYEND", row.delay_end, row.authored_delay_end, DelayLeg::End);
 
-	// The five name fields. Each is reseeded from the snapshot on any frame it
-	// is not the active item, so an external change lands without stealing what
-	// is being typed.
+	// The five name fields, reseeded from the definition on any frame they are
+	// not the active item.
 	const auto name_field = [&](const char *label, WeaponRequest::TextField field,
 									const std::string &current,
 									const std::vector<std::string> *catalog,
@@ -1118,7 +1189,7 @@ void WeaponWindow::draw_properties() {
 		ImGui::TextUnformatted(label);
 		ImGui::PopID();
 	};
-	name_field("ANIM", WeaponRequest::TextField::Anim, row.anim_key, &catalog_.clip_keys,
+	name_field("ANIM", WeaponRequest::TextField::Anim, row.anim_key, &definition_.clip_keys,
 			"no clip");
 	name_field("SOUNDSET", WeaponRequest::TextField::SoundSet, row.soundset, nullptr, "");
 	name_field("SOUNDSETEND", WeaponRequest::TextField::SoundSetEnd, row.soundsetend, nullptr, "");
@@ -1138,6 +1209,7 @@ void WeaponWindow::draw_properties() {
 		ImGui::TextDisabled("| clip %d ticks (%.0f ms)", row.clip_ticks,
 				row.clip_ticks * kMsPerTick);
 	}
+	ImGui::PopID();
 }
 
 // --- the frame ------------------------------------------------------------
@@ -1145,7 +1217,7 @@ void WeaponWindow::draw_properties() {
 void WeaponWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
-	if (!snapshot_.valid) {
+	if (!definition_.valid) {
 		ImGui::TextUnformatted("No weapon installed. Load a mission and spawn.");
 		return;
 	}

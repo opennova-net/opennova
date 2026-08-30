@@ -175,6 +175,8 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			continue;
 		}
 		if (reset_layout) {
+			// Home placement owns the size on a reset; the first-use hint
+			// below would otherwise overwrite its ImGuiCond_Always call.
 			place_window_home(i);
 		}
 		ImGuiWindowFlags flags = ImGuiWindowFlags_None;
@@ -190,7 +192,7 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			ImGui::SetNextWindowClass(&window_class);
 		}
 		const WindowSizeHint hint = window.preferred_size();
-		if (hint.width > 0.0f && hint.height > 0.0f) {
+		if (!reset_layout && hint.width > 0.0f && hint.height > 0.0f) {
 			ImGui::SetNextWindowSize(ImVec2(hint.width, hint.height), ImGuiCond_FirstUseEver);
 		}
 		bool *open = window.is_closeable() ? &window.open : nullptr;
@@ -220,8 +222,12 @@ void ImGuiPass::place_window_home(int index) {
 	ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always);
 	ImGui::SetNextWindowPos(ImVec2(main->WorkPos.x + 24.0f + step, main->WorkPos.y + 24.0f + step),
 			ImGuiCond_Always);
-	ImGui::SetNextWindowSize(ImVec2(std::min(main->WorkSize.x - 48.0f - step, 640.0f),
-									std::min(main->WorkSize.y - 48.0f - step, 720.0f)),
+	// A window that asked for a size keeps asking for it on the way home.
+	const WindowSizeHint hint = windows_[static_cast<size_t>(index)]->preferred_size();
+	const float width = hint.width > 0.0f ? hint.width : 640.0f;
+	const float height = hint.height > 0.0f ? hint.height : 720.0f;
+	ImGui::SetNextWindowSize(ImVec2(std::min(main->WorkSize.x - 48.0f - step, width),
+									std::min(main->WorkSize.y - 48.0f - step, height)),
 			ImGuiCond_Always);
 }
 

@@ -418,6 +418,65 @@ void test_weapon_trace_records_one_sample_per_pump_tick() {
     CHECK(weapon_trace_samples(w).empty(), "and recording stops");
 }
 
+// The per-frame consumer's read: only what is newer than its cursor, walked
+// back from the head so the common empty delta touches nothing, plus the
+// newest tick so a restarted clock is noticeable.
+void test_weapon_trace_samples_since_is_incremental() {
+    LocalWorld lw;
+    PlayerViewState v;
+    LocalPlayerWeapon w = scoped_weapon(0);
+    std::vector<WeaponTraceSample> out;
+    CHECK(weapon_trace_samples_since(w, 0, true, out) == 0 && out.empty(),
+          "disarmed: nothing, newest 0");
+
+    weapon_trace_arm(w, true);
+    for (uint32_t i = 0; i < 6; ++i) {
+        lw.w.logic_tick = 300 + i;
+        pump_once(lw, w, v);
+    }
+    CHECK(weapon_trace_samples_since(w, 0, true, out) == 305, "newest is the last pumped tick");
+    CHECK(out.size() == 6 && out.front().tick == 300 && out.back().tick == 305,
+          "take_all yields every sample oldest first");
+    out.clear();
+    CHECK(weapon_trace_samples_since(w, 303, false, out) == 305, "newest again");
+    CHECK(out.size() == 2 && out[0].tick == 304 && out[1].tick == 305,
+          "after 303: only 304 and 305, oldest first");
+    out.clear();
+    weapon_trace_samples_since(w, 305, false, out);
+    CHECK(out.empty(), "a cursor at the newest tick reads nothing");
+
+    // Past the wrap the walk still starts at the newest and stops at the cursor.
+    for (uint32_t i = 0; i < kWeaponTraceCapacity + 3; ++i) {
+        lw.w.logic_tick = 1000 + i;
+        pump_once(lw, w, v);
+    }
+    const uint32_t newest = 1000 + kWeaponTraceCapacity + 2;
+    CHECK(weapon_trace_samples_since(w, newest - 4, false, out) == newest, "newest after the wrap");
+    CHECK(out.size() == 4 && out.front().tick == newest - 3 && out.back().tick == newest,
+          "and the four newest come back oldest first");
+}
+
+// The pump's input gate as a predicate: what a tool refuses with a reason is
+// exactly what the pump would have zeroed.
+void test_local_weapon_input_block_mirrors_the_pump_gate() {
+    LocalWorld lw;
+    LocalPlayerWeapon w;
+    CHECK(local_weapon_input_block(lw.w, w) == LocalWeaponInputBlock::kInactive,
+          "no weapon installed");
+    w.active = true;
+    CHECK(local_weapon_input_block(lw.w, w) == LocalWeaponInputBlock::kNone, "alive and armed");
+    w.usegun_switch = LocalUseGunSwitch::kAttach;
+    CHECK(local_weapon_input_block(lw.w, w) == LocalWeaponInputBlock::kUseGunSwitch,
+          "a staged UseGun switch");
+    w.usegun_switch = LocalUseGunSwitch::kNone;
+    lw.entity().health = 0;
+    CHECK(local_weapon_input_block(lw.w, w) == LocalWeaponInputBlock::kDead, "dead");
+    CHECK(local_weapon_input_block_name(LocalWeaponInputBlock::kNone)[0] == '\0',
+          "kNone names nothing");
+    CHECK(local_weapon_input_block_name(LocalWeaponInputBlock::kSeat)[0] != '\0',
+          "every block has a reason");
+}
+
 int main() {
     test_scope_toggle_refuses_inactive_weapon();
     test_scope_up_refused_while_moving_on_scoped_weapon();
@@ -433,6 +492,8 @@ int main() {
     test_set_eye_mirrors_the_head_into_the_world();
     test_pump_feeds_the_heat_window_water_gate_from_the_body_z();
     test_weapon_trace_records_one_sample_per_pump_tick();
+    test_weapon_trace_samples_since_is_incremental();
+    test_local_weapon_input_block_mirrors_the_pump_gate();
     if (failures == 0) std::printf("local_player_view_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

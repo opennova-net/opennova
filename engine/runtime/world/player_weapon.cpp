@@ -671,6 +671,25 @@ void weapon_trace_clear(LocalPlayerWeapon &w) {
 	w.trace_wrapped = false;
 }
 
+uint32_t weapon_trace_samples_since(const LocalPlayerWeapon &w, uint32_t after_tick,
+		bool take_all, std::vector<WeaponTraceSample> &out) {
+	if (!w.trace_armed || w.trace.empty()) return 0;
+	const size_t cap = w.trace.size();
+	const size_t count = w.trace_wrapped ? cap : w.trace_head;
+	if (count == 0) return 0;
+	// Newest first from just behind the head; stop at the first sample the
+	// caller already holds.
+	const size_t first_out = out.size();
+	for (size_t i = 0; i < count; ++i) {
+		const size_t idx = (w.trace_head + cap - 1 - i) % cap;
+		const WeaponTraceSample &s = w.trace[idx];
+		if (!take_all && s.tick <= after_tick) break;
+		out.push_back(s);
+	}
+	std::reverse(out.begin() + static_cast<std::ptrdiff_t>(first_out), out.end());
+	return w.trace[(w.trace_head + cap - 1) % cap].tick;
+}
+
 std::vector<WeaponTraceSample> weapon_trace_samples(const LocalPlayerWeapon &w) {
 	std::vector<WeaponTraceSample> out;
 	if (!w.trace_armed || w.trace.empty()) return out;
@@ -681,6 +700,28 @@ std::vector<WeaponTraceSample> weapon_trace_samples(const LocalPlayerWeapon &w) 
 		out.push_back(w.trace[(first + i) % w.trace.size()]);
 	}
 	return out;
+}
+
+LocalWeaponInputBlock local_weapon_input_block(const World &world,
+		const LocalPlayerWeapon &w) {
+	if (!w.active) return LocalWeaponInputBlock::kInactive;
+	const Entity *player = world.registry.get(world.cached.local_player);
+	const bool alive = player != nullptr && player->alive && player->health > 0;
+	if (!alive) return LocalWeaponInputBlock::kDead;
+	if (w.usegun_switch != LocalUseGunSwitch::kNone) return LocalWeaponInputBlock::kUseGunSwitch;
+	if (mount_blocks_firing(*player)) return LocalWeaponInputBlock::kSeat;
+	return LocalWeaponInputBlock::kNone;
+}
+
+const char *local_weapon_input_block_name(LocalWeaponInputBlock block) {
+	switch (block) {
+		case LocalWeaponInputBlock::kNone: return "";
+		case LocalWeaponInputBlock::kInactive: return "no weapon is installed";
+		case LocalWeaponInputBlock::kDead: return "the local player is not alive";
+		case LocalWeaponInputBlock::kUseGunSwitch: return "a UseGun switch is in flight";
+		case LocalWeaponInputBlock::kSeat: return "the occupied seat blocks firing (controller/driver)";
+	}
+	return "";
 }
 
 namespace {
@@ -747,8 +788,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// The pilot's trigger is dead: retail's fire gate rejects a Controller or
 	// Driver seat before any slot work [orig: Player_CanFireWeapon @0x5cf780].
 	// A gunner seat is deliberately NOT in this set.
-	const bool accept_weapon_input = player_alive && !usegun_switch_pending &&
-			!(player != nullptr && mount_blocks_firing(*player));
+	const bool accept_weapon_input =
+			local_weapon_input_block(world, w) == LocalWeaponInputBlock::kNone;
 	in.fire_held = accept_weapon_input && w.fire_held;
 	in.fire_pressed = accept_weapon_input && w.fire_pressed;
 	// PowerThrow: the press never fires — it starts the windup; the release
