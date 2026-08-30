@@ -1,11 +1,10 @@
-#include <cmath>
 #include <runtime/world/weather_state.h>
 
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
-#include <cstdlib>
+#include <cmath>
 
 namespace opennova::world {
 
@@ -36,7 +35,8 @@ int32_t wrap_abs(int32_t v) noexcept {
 int32_t transition_step(int32_t current, int32_t target, int32_t ticks) noexcept {
     const int32_t centered = static_cast<int32_t>(static_cast<uint32_t>(target) +
             static_cast<uint32_t>(ticks >> 1) - static_cast<uint32_t>(current));
-    // INT32_MIN / -1 faults the original's idiv; the wrapped quotient stands in.
+    // The int64 divide keeps INT32_MIN / -1 defined (unreachable: the tick
+    // count is 62 * s or 1, never -1).
     return static_cast<int32_t>(static_cast<int64_t>(wrap_abs(centered)) / ticks);
 }
 
@@ -49,8 +49,10 @@ int32_t percent_target_q16(int32_t percent) noexcept {
 }
 
 // min(metres << 16, Env_FogDistReference) raised to 2 m — the fog distance
-// target, the shift wrapping at 32 bits [orig: WacCmd_FogDist
-// @ 0x4ee10c..0x4ee117; WacCmd_MoveFog @ 0x4ee0b8..0x4ee0c4].
+// target. The << 16 is the script compiler's kind-6 operand shift (the
+// handlers receive the 16.16 value), a 32-bit shift that wraps
+// [orig: Script_Compile @ 0x4f4167 / @ 0x4f42c5; the clamps WacCmd_FogDist
+//  @ 0x4ee10c..0x4ee117, WacCmd_MoveFog @ 0x4ee0b8..0x4ee0c4].
 int32_t fog_command_target_q16(int32_t metres, int32_t reference_q16) noexcept {
     int32_t fixed = static_cast<int32_t>(static_cast<uint32_t>(metres) << 16);
     if (fixed > reference_q16) fixed = reference_q16;

@@ -82,6 +82,10 @@ struct WeatherCore {
 	// accumulators [orig: @ 0x57f1a5..0x57f1d1].
 	void tick_render(uint32_t fill_target, uint32_t sun_target,
 			uint32_t fog_target, uint32_t sky_target);
+	// The same render legs without the four target writes — for the owner
+	// that snapped the keyframes itself, or that has no keyframe table (the
+	// blocks then keep their seeded / WAC-written targets).
+	void tick_render_blocks();
 
 	// The cloud-scroll sub-tick alone (rate ramp toward sky_speed << 10, the
 	// atol parse scale [orig: TimeOfDay_ParseProperty @ 0x57cc0d; ramp

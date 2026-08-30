@@ -643,11 +643,11 @@ void infantry_rain_ambient(World &world, const Entity &ent) {
                                           static_cast<float>(volume));
         }
     }
-    // The registrar reads the word's high byte as the mixer level and treats
-    // a zero level as the unregister — below 0x100 there is nothing to keep
-    // alive, so publish nothing (the mailbox row expires the same way).
+    // The word registers as is: the registrar tests the WHOLE word, so
+    // 1..0xFF keeps a live level-0 slot and only 0 is the unregister
+    // [orig: SoundEmitter_RegisterSetLayers @ 0x528377 `cmp [ecx+18h], bx`];
+    // the mailbox's zero-volume clear is the same contract.
     const uint16_t volume_word = static_cast<uint16_t>(volume);
-    if (volume_word < 0x100) return;
     constexpr uint16_t kLifetimeTicks = 20;
     constexpr int32_t kEarOffset = 2 << 16;
     const int32_t px = static_cast<int32_t>(ent.position.x * 65536.0f);

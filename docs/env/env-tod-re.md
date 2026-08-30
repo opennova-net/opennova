@@ -264,18 +264,27 @@ the weather keeps advancing while the entities are held (the reimpl's
   is the light flicker sample (`Light_TickGenBlock @ 0x5a8ae0`,
   `Light_SetupTerrainProjectedPass @ 0x5aaa13`, `foliage_setup_render_matrices
   @ 0x5aadf6` — each writes it into the global CTRL `FLICKER` slot `0x83FD00` before its
-  RgbGen evaluation) and, hashed on the LOCAL PLAYER's position by
-  `HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3dd1` every frame, the CTRL `FLICKER`
-  (ordinal 3, `0x83FD00`) and `SWING` (ordinal 4, `0x83FD08` = `Env_WaveOscRing[same]`)
-  registers every model's CTRL tracks read; `Env_WaveOscRing[0]` — the ring's slot 0,
+  RgbGen evaluation) and, through `HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3dd1`,
+  the global CTRL `FLICKER` (ordinal 3, `0x83FD00`) and `SWING` (ordinal 4,
+  `0x83FD08` = `Env_WaveOscRing[same]`) registers: the HUD and viewmodel legs
+  (`HUD_RenderAllOverlays @ 0x5a8341`, `Player_RenderFirstPersonViewModel @ 0x4dee8b`)
+  hash the LOCAL PLAYER, while the gnrc/Sway world bone callbacks
+  (`BoneCallback_gnrc_World @ 0x4e286c`, `BoneCallback_Sway_World @ 0x4e2b22`) hash
+  the RENDERED ENTITY right before its batch snapshots the registers
+  (`collect_render_batches_for_entity @ 0x5d968d` copies `dword_83FCE8[ordinal*8]`),
+  so a world model with those callbacks swings/flickers on its own position;
+  `Env_WaveOscRing[0]` — the ring's slot 0,
   refreshed once per 256 ticks — is the weather term of the DETAIL foliage sway phase,
   `c24.x = GetTickCount() * 0.003 + Env_WaveOscRing[0] / 65536` with `c24.w = 0.03`
   (`Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d`;
   [foliage-re.md](../foliage/foliage-re.md)). Reimpl: `env::WeatherOscillator::ring_slot`
-  is the shared hash; the light flicker (`renderer::light_flicker_value`) and the
-  `Weather` node's per-frame FLICKER/SWING publication (`ObjectData::
-  set_weather_ctrl_registers`, the local player's slot) read the ONE weather home's
-  rings, and the `FoliageDispatcher` feeds the ms clock + `osc_ring[0]` into
+  is the shared hash; the light flicker (`renderer::light_flicker_value`) reads the
+  ONE weather home's rings, the `Weather` node publishes the local player's pair as
+  the frame default plus a ring copy (`ObjectData::set_weather_ctrl_registers` /
+  `set_weather_rings`) and every `ObjectModel` whose 3DI declares FLICKER or SWING
+  hashes its own position into its CTRL dictionary each frame (the bone-callback
+  identity itself is not modeled: any declaring model hashes), and the
+  `FoliageDispatcher` feeds the ms clock + `osc_ring[0]` into
   `renderer::FoliageFrameCompiler`. The former `wind_sway_amount/phase` shader globals
   (an unwitnessed normalization nothing consumed) are gone; `sway_amount/sway_phase`
   remain as diagnostics of the same ring state.
@@ -287,11 +296,16 @@ the weather keeps advancing while the entities are held (the reimpl's
   HARD-SETS the camera shake counter to 32 (`dword_B764B0`, now
   `g_CameraShakeCounter`, `@ 0x57eb7d`; the counter decays in
   `Player_UpdatePerFrame @ 0x4de590` from the client frame that precedes the
-  entity update, and `Camera_ComputeThirdPersonView @ 0x526781` samples it —
-  advancing the three IIR filters — once per drained quantum right after this
-  tick, never per rendered frame: ported 2026-08-30 as the pre-tick decay +
-  the post-tick sample into `LocalPlayerViewTracker::shake_*_bam`, the frame
-  compose only adding the held deltas); pool-1 entities whose def carries
+  entity update — once per quantum, never per rendered frame — and
+  `Camera_ComputeThirdPersonView` samples it, advancing the three IIR filters,
+  once per drained quantum right after this tick (`@ 0x526781`) AND once per
+  rendered frame from the scene frame (`Render_ProcessMainSceneFrame
+  @ 0x5ca34d`; a third time from `Render_RadarCompassOverlay @ 0x5c9841` when
+  the compass overlay draws), each call re-deriving the view so the frame's
+  own sample renders: ported 2026-08-30 as the pre-tick decay, the post-tick
+  advance in `local_player_view_tick`, and the per-frame sample in
+  `local_player_view_frame` (the overlay's extra call is not mirrored));
+  pool-1 entities whose def carries
   `attrib & 0x40` likewise (`@ 0x57ebde..0x57ec29`, the shake when the player's
   parent is displaced); `--Env_QuakeTicks` (`@ 0x57ec61`). Then the HIT BLACKOUT
   fade (`Env_HitDimIntensity -= Env_HitDimFadeRate`, floor 0, `@ 0x57eaf9`) — the

@@ -2,6 +2,10 @@
 
 #include <atomic>
 
+namespace opennova::env {
+struct WeatherOscillator;
+}
+
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -253,13 +257,22 @@ public:
 	// evaluates every dynamic material without Dictionary/Variant round trips.
 	static opennova::renderer::ControlRegisterValues runtime_control_values(
 			const Dictionary &p_ctrl_values);
-	// The weather's global CTRL registers, FLICKER (3) and SWING (4): the HUD
-	// cache writes the local player's position hash into the wave rings there
-	// every frame and every model's CTRL tracks read them (retail
-	// HUD_CacheEntityDisplayInfo @ 0x4a3dcb / @ 0x4a3dd1 -> the global slots
-	// 0x83FD00 / 0x83FD08). A model's own dictionary entry wins; the Weather
-	// node publishes these once per display frame.
+	// The weather's CTRL registers, FLICKER (3) and SWING (4): the wave rings
+	// hashed on a position. Retail writes the global slots 0x83FD00 / 0x83FD08
+	// from HUD_CacheEntityDisplayInfo — on the LOCAL PLAYER from the HUD and
+	// viewmodel legs (@ 0x5a8341, @ 0x4dee8b) and on the RENDERED ENTITY from
+	// the gnrc/Sway world bone callbacks (@ 0x4e286c, @ 0x4e2b22) right before
+	// its batch snapshots the registers. The Weather node publishes the local
+	// player's pair (the frame default) and the ring copy every display
+	// frame; a model whose 3DI declares either register hashes its own
+	// position through weather_ctrl_registers_at. A model's own dictionary
+	// entry wins over the default.
 	static void set_weather_ctrl_registers(int32_t p_flicker, int32_t p_swing);
+	static void set_weather_rings(const opennova::env::WeatherOscillator &p_oscillator);
+	static void clear_weather_rings();
+	static bool weather_ctrl_registers_at(int32_t p_x_q16, int32_t p_y_q16, int32_t p_z_q16,
+			int32_t &r_flicker, int32_t &r_swing);
+	bool uses_weather_ctrl_registers() const;
 	bool eval_material_runtime_native(int p_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_values,
 			opennova::renderer::MaterialRuntime &r_runtime) const;

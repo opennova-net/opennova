@@ -49,8 +49,12 @@ void WeatherRuntime::attach_state(world::WeatherState *state, EnvironmentState *
 }
 
 void WeatherRuntime::set_wind_strength_pct(float pct) {
-	configured_wind_intensity_ = static_cast<int>(pct / 100.0f * 256.0f);
+	remember_wind_strength_pct(pct);
 	state_->set_wind_scale(configured_wind_intensity_);
+}
+
+void WeatherRuntime::remember_wind_strength_pct(float pct) {
+	configured_wind_intensity_ = static_cast<int>(pct / 100.0f * 256.0f);
 }
 
 float WeatherRuntime::wind_strength_pct() const {
@@ -315,19 +319,16 @@ void WeatherRuntime::tick_weather(EnvironmentState *env, int tick_count) {
 	// weather tick (@ 0x57e9c7) while a keyframe table exists
 	// (Env_EnvSnapshotCount @ 0x57de8a); WacCmd_Sun @ 0x4edcd0 writes [11] +
 	// the step deltas]. Without a keyframe table the compute returns before
-	// the writes and the blocks chase whatever the WAC wrote.
+	// the writes: no target is touched here and the eleven blocks chase
+	// whatever the load seeded or the WAC wrote.
 	const bool keyframed = env->has_tod_keyframes();
 	for (int i = 0; i < tick_count; ++i) {
-		const uint32_t fill = pack_rgb(env->fill_light_target());
-		const uint32_t sun = pack_rgb(env->sun_light_target());
-		const uint32_t fog = pack_rgb(env->fog_color_base_target());
-		const uint32_t sky = pack_rgb(env->sky_ambient_target());
-		SkyWeatherColorBlocks &sky_blocks = core.sky_color_blocks;
 		if (keyframed) {
-			core.sun_block.snap_keyframe(sun);
-			core.sky_block.snap_keyframe(sky);
-			core.fill_block.snap_keyframe(fill);
-			core.fog_block.snap_keyframe(fog);
+			SkyWeatherColorBlocks &sky_blocks = core.sky_color_blocks;
+			core.sun_block.snap_keyframe(pack_rgb(env->sun_light_target()));
+			core.sky_block.snap_keyframe(pack_rgb(env->sky_ambient_target()));
+			core.fill_block.snap_keyframe(pack_rgb(env->fill_light_target()));
+			core.fog_block.snap_keyframe(pack_rgb(env->fog_color_base_target()));
 			sky_blocks.skyfog.snap_keyframe(pack_rgb(env->skyfog_color_target()));
 			sky_blocks.skybase.snap_keyframe(pack_rgb(env->sky_base_target()));
 			sky_blocks.skybright.snap_keyframe(pack_rgb(env->sky_bright_target()));
@@ -335,16 +336,8 @@ void WeatherRuntime::tick_weather(EnvironmentState *env, int tick_count) {
 			sky_blocks.cloudbase.snap_keyframe(pack_rgb(env->cloud_base_target()));
 			sky_blocks.cloudhighlight.snap_keyframe(pack_rgb(env->cloud_highlight_target()));
 			sky_blocks.cloudedge.snap_keyframe(pack_rgb(env->cloud_edge_target()));
-		} else {
-			sky_blocks.skyfog.target = pack_rgb(env->skyfog_color_target());
-			sky_blocks.skybase.target = pack_rgb(env->sky_base_target());
-			sky_blocks.skybright.target = pack_rgb(env->sky_bright_target());
-			sky_blocks.skyhighlight.target = pack_rgb(env->sky_highlight_target());
-			sky_blocks.cloudbase.target = pack_rgb(env->cloud_base_target());
-			sky_blocks.cloudhighlight.target = pack_rgb(env->cloud_highlight_target());
-			sky_blocks.cloudedge.target = pack_rgb(env->cloud_edge_target());
 		}
-		core.tick_render(fill, sun, fog, sky);
+		core.tick_render_blocks();
 	}
 	write_weather_state(*env);
 }

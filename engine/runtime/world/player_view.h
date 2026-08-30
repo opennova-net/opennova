@@ -224,10 +224,12 @@ struct PlayerViewState {
     bool debug_third_person_on_foot = false;
     // The first-person camera shake (CameraShakeState below): the pre-tick
     // input pass decays its counter, the quake tick HARD-SETS it [orig:
-    // dword_B764B0 = 32 @ 0x57eb7d / @ 0x57ec29], and the post-tick view pass
-    // samples it once per tick into the tracker's BAM deltas (the sample
-    // advances the IIR filters); the camera compose only adds those deltas.
-    CameraShakeState shake;
+    // dword_B764B0 = 32 @ 0x57eb7d / @ 0x57ec29], and Camera_ComputeThird-
+    // PersonView samples it — advancing the IIR filters — once per quantum
+    // (the post-tick view pass) AND once per rendered frame (the camera
+    // compose, whose deltas render) [orig: the callers @ 0x526781 and
+    //  @ 0x5ca34d]; the frame read therefore mutates, like retail's globals.
+    mutable CameraShakeState shake;
     bool binoculars_requested = false;   // [orig: raw toggle g_binocularsToggle @ 0xB76539]
     bool binoculars_raised = false;      // [orig: body-pose g_binocularsRaised @ 0xB7653A]
     bool binoculars_view_active = false; // [orig: first-person view g_binocularsViewActive @ 0xB76538]

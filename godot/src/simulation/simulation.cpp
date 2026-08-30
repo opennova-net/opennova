@@ -384,6 +384,7 @@ bool Simulation::native_environment_snapshot(
 	out.lightning_timer_b = core.lightning.timer_b;
 	out.lightning_level = core.lightning.level;
 	out.authority = !joiner_;
+	out.tod_keyframed = kernel_->weather_render == nullptr || kernel_->weather_render->tod_keyframed();
 	return true;
 }
 

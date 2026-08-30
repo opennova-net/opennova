@@ -1407,6 +1407,8 @@ public:
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
 	Vector3 get_local_player_position() const;
+	// The AI row's 16.16 position (mission x/y ground, z up) the retail hashes read; false without a player row.
+	bool local_player_position_q16(int32_t (&r_pos)[3]) const;
 	// Raw engine heading (BAM32) for the heading-up spinmap.
 	int64_t get_local_player_heading_bam() const;
 	// Radar zoom: positive = radarout (x1.15 toward 0x100000), negative =

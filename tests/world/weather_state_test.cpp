@@ -212,6 +212,11 @@ void test_entity_update_falls_the_drops_on_gameplay_ticks_only() {
 	// [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
 	//  @ 0x4c2214 — behind the entity update's frame gate, on every peer]
 	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::Entity soldier;
+	soldier.kind = w::EntityKind::Organic;
+	soldier.item_id = 100;
+	world.cached.local_player = world.registry.spawn(0, soldier);
 	world.weather.seed(seed_800());
 	world.weather.command_rain(100, 0);
 	w::WeatherTickEvents events;
@@ -229,6 +234,10 @@ void test_entity_update_falls_the_drops_on_gameplay_ticks_only() {
 	world.run_logic_tick(/*is_authority=*/false, w::TickPhase::Gameplay);
 	CHECK(world.weather.precipitation.slots[0].z == z_before - 2 * 12288);
 	CHECK(world.weather.precipitation.fall_accum_z == -2 * 12288);
+	// Without a local player entity the entity update never runs it.
+	world.cached.local_player = w::EntityHandle();
+	world.run_logic_tick(/*is_authority=*/true, w::TickPhase::Gameplay);
+	CHECK(world.weather.precipitation.slots[0].z == z_before - 2 * 12288);
 }
 
 void test_wac_arguments_land_raw() {
@@ -284,6 +293,37 @@ void test_keyframe_snap_writes_channels_render_and_target_only() {
 	// the keyframe (plus the additive), never a blend toward it.
 	block.tick(opennova::env::kModulatorIdentityPacked, 0);
 	CHECK(block.pre_mod_color == 0x00454545u);
+}
+
+void test_negative_color_fade_pins_a_static_block_to_plus_rate_and_wraps() {
+	// [orig: interpolate_weather_color @ 0x57da2c..0x57da6b — the two-compare
+	//  clamp with the negate; @ 0x57da85..0x57da8e the low-byte repack]
+	w::WeatherState ws;
+	ws.seed(seed_800());
+	ws.core.sky_color_blocks.ceiling.snap(0x00FFFFFFu);
+	ws.command_color_fade(-1); // -62 frames
+	ws.command_block_color(w::WeatherColorTarget::Ceiling, 0x00000000u);
+	// rate = abs32(0 + (-62 >> 1) - (0xFF << 20)) / -62 = -4312692 per channel.
+	CHECK(ws.core.sky_color_blocks.ceiling.max_rate[2] == -4312692);
+	ws.core.sky_color_blocks.ceiling.tick(opennova::env::kModulatorIdentityPacked, 0);
+	// delta = (0 - 0xFF00000) >> 3 = -33423360, clamped: > -4312692? no;
+	// < +4312692 -> +4312692: the channel climbs PAST 255 and the repack
+	// takes the low byte, 259 -> 3.
+	CHECK(ws.core.sky_color_blocks.ceiling.channels.r_fp == 0x0FF00000 + 4312692);
+	CHECK(((ws.core.sky_color_blocks.ceiling.pre_mod_color >> 16) & 0xFFu) == 3u);
+}
+
+void test_sun_fade_extreme_argument_keeps_the_spring_defined() {
+	// sunfade(32768, 0): the shift lands INT32_MIN, the step INT32_MIN, and
+	// the spring's negate wraps instead of overflowing.
+	w::WeatherState ws;
+	ws.seed(seed_800());
+	ws.command_sun_fade(32768, 0);
+	CHECK(ws.core.scalar_channels.sun_dim_target_fp == INT32_MIN);
+	CHECK(ws.core.scalar_channels.sun_dim_step_fp == INT32_MIN);
+	w::WeatherTickEvents events;
+	ws.tick_sim(nullptr, events);
+	CHECK(ws.sun_dim_pct_q16() == 0); // the channel's max clamp is 0
 }
 
 void test_quake_displaces_pool_entities_and_arms_the_local_shake() {
@@ -417,6 +457,8 @@ int main() {
 	test_wac_arguments_land_raw();
 	test_mission_start_init_zeroes_the_lightning_additives();
 	test_keyframe_snap_writes_channels_render_and_target_only();
+	test_negative_color_fade_pins_a_static_block_to_plus_rate_and_wraps();
+	test_sun_fade_extreme_argument_keeps_the_spring_defined();
 	test_quake_displaces_pool_entities_and_arms_the_local_shake();
 	test_wire_sample_writes_targets_only();
 	test_night_phase_follows_the_clock();

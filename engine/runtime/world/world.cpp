@@ -1552,9 +1552,11 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
     // DeathPiece_TickAll, so it rides the entity update's frame gate (never
     // the 255-tick weather settle, never the pre-mission pass) and every peer
     // falls its own drops from the rain current the previous weather tick left
+    // Entity_UpdateAllEntities itself returns before it without a local
+    // player entity (@ 0x4c2110); its epilog-screen path skips it as well.
     // [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
     //  @ 0x4c2214].
-    if (gameplay)
+    if (gameplay && cached.local_player.valid())
         weather.precipitation.fall_tick(weather.core.scalar_channels.rain_pct_fp,
                                         weather.precipitation_kind);
     if (perf != nullptr) {

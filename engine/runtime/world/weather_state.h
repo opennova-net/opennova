@@ -92,6 +92,11 @@ class IWeatherRenderTick {
 public:
     virtual ~IWeatherRenderTick() = default;
     virtual void weather_render_tick(WeatherState &weather) = 0;
+    // Whether the mission carries a TOD keyframe table (Env_EnvSnapshotCount
+    // != 0): the TOD compute then re-snaps the keyframed blocks every tick
+    // and the WAC sun/sky/ground/fogcolor/skyfogcolor handlers are inert —
+    // what the dev tools show as read-only rows.
+    virtual bool tod_keyframed() const { return true; }
 };
 
 // Sim-tick outputs the tick's caller consumes (the world has no audio or

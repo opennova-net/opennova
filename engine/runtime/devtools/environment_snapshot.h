@@ -62,6 +62,7 @@ struct EnvironmentSnapshot {
 	int32_t lightning_timer_b = 0;
 	int32_t lightning_level = 0;
 	bool authority = false;         // the commands land (not a joiner)
+	bool tod_keyframed = true;      // a keyframe table re-snaps the five keyframed color rows
 };
 
 }  // namespace opennova::devtools

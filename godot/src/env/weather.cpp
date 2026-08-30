@@ -11,8 +11,6 @@
 #include <formats/mission/bms.h>
 #include <runtime/environment/weather_seed.h>
 
-#include <cmath>
-
 namespace godot {
 
 namespace {
@@ -210,14 +208,14 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 	// hashed into the wave rings lands in the global FLICKER (amp ring) and
 	// SWING (osc ring) registers every model's CTRL tracks read (retail
 	// HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3dd1 -> 0x83FD00 / 0x83FD08).
+	// The rings for the models that hash their own position, then the local
+	// player's pair as the frame default (retail's HUD/viewmodel legs).
+	const opennova::env::WeatherOscillator &osc = runtime_.core().oscillator;
+	ObjectData::set_weather_rings(osc);
 	Simulation *sim = _bound_sim();
-	if (sim != nullptr && sim->has_local_player()) {
-		const Vector3 p = sim->get_local_player_position(); // Godot (x, up, -y)
-		const opennova::env::WeatherOscillator &osc = runtime_.core().oscillator;
-		const uint8_t slot = osc.ring_slot(
-				static_cast<int32_t>(std::lround(static_cast<double>(p.x) * 65536.0)),
-				static_cast<int32_t>(std::lround(static_cast<double>(-p.z) * 65536.0)),
-				static_cast<int32_t>(std::lround(static_cast<double>(p.y) * 65536.0)));
+	int32_t pos_q16[3];
+	if (sim != nullptr && sim->local_player_position_q16(pos_q16)) {
+		const uint8_t slot = osc.ring_slot(pos_q16[0], pos_q16[1], pos_q16[2]);
 		ObjectData::set_weather_ctrl_registers(osc.amp_ring[slot], osc.osc_ring[slot]);
 	}
 }
@@ -261,11 +259,23 @@ void Weather::bind_simulation(Object *p_sim) {
 	if (state != nullptr) {
 		sim->set_weather_render_owner(this);
 		runtime_.set_world_tick_driven(true);
+	} else {
+		// No mission behind the registers: the last hash must not keep
+		// feeding every model outside one.
+		ObjectData::set_weather_ctrl_registers(0, 0);
+		ObjectData::clear_weather_rings();
 	}
+}
+
+bool Weather::tod_keyframed() const {
+	const MissionEnvironment *env = _env_node();
+	return env == nullptr || env->state().has_tod_keyframes();
 }
 
 void Weather::release_simulation() {
 	sim_id_ = ObjectID();
+	ObjectData::set_weather_ctrl_registers(0, 0);
+	ObjectData::clear_weather_rings();
 	MissionEnvironment *env = _env_node();
 	runtime_.attach_state(nullptr, env != nullptr ? &env->state() : nullptr);
 }
@@ -318,6 +328,17 @@ void Weather::run_mission_start_boundary(Object *p_sim, int p_start_time_q8_8,
 }
 
 void Weather::set_wind_strength(float p_value) {
+	// The `wind` named value: on a mission it lands through the bound
+	// Simulation's command layer like every other weather command (a joiner
+	// is refused and keeps the host's value); the standalone home takes it
+	// directly. The accepted strength is remembered for the next seed.
+	if (Simulation *sim = _bound_sim(); sim != nullptr) {
+		if (!sim->command_wind_scale(static_cast<int>(p_value / 100.0f * 256.0f))) {
+			return;
+		}
+		runtime_.remember_wind_strength_pct(p_value);
+		return;
+	}
 	runtime_.set_wind_strength_pct(p_value);
 }
 
@@ -508,6 +529,11 @@ void Weather::trigger_lightning_long() {
 }
 
 void Weather::set_wind_duration(int p_seconds) {
+	// The authoring extension follows the same authority rule: a joiner never
+	// edits the attached home.
+	if (Simulation *sim = _bound_sim(); sim != nullptr && sim->is_joiner()) {
+		return;
+	}
 	runtime_.set_wind_duration_seconds(p_seconds);
 }
 

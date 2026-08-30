@@ -160,6 +160,7 @@ protected:
 private:
 	// The kernel's per-tick render hook (world::IWeatherRenderTick).
 	void weather_render_tick(opennova::world::WeatherState &p_weather) override;
+	bool tod_keyframed() const override;
 
 	MissionEnvironment *_env_node() const;
 	Simulation *_bound_sim() const;

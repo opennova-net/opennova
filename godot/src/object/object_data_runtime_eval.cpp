@@ -3,6 +3,7 @@
 // evaluation on the retail clock.
 #include "object/object_data_internal.h"
 
+#include <formats/env/env_weather.h>
 #include <runtime/renderer/light_runtime.h>
 #include <runtime/renderer/material_eval.h>
 #include <formats/threedi/threedi_panm_pose.h> // liveness / noise / clock (one impl with the engine)
@@ -38,9 +39,12 @@ int32_t control_value_from_variant(const Variant &value) {
 
 using GlobalCtrlValues = opennova::renderer::ControlRegisterValues;
 
-// The weather's FLICKER / SWING registers (ObjectData::set_weather_ctrl_registers).
+// The weather's FLICKER / SWING registers (ObjectData::set_weather_ctrl_registers)
+// and the ring copy models hash their own position into (set_weather_rings).
 int32_t g_weather_ctrl_flicker = 0;
 int32_t g_weather_ctrl_swing = 0;
+opennova::env::WeatherOscillator g_weather_rings;
+bool g_weather_rings_valid = false;
 
 GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
 	GlobalCtrlValues values = {};
@@ -190,6 +194,36 @@ opennova::renderer::ControlRegisterValues ObjectData::runtime_control_values(
 void ObjectData::set_weather_ctrl_registers(int32_t p_flicker, int32_t p_swing) {
 	g_weather_ctrl_flicker = p_flicker;
 	g_weather_ctrl_swing = p_swing;
+}
+
+void ObjectData::set_weather_rings(const opennova::env::WeatherOscillator &p_oscillator) {
+	g_weather_rings = p_oscillator;
+	g_weather_rings_valid = true;
+}
+
+void ObjectData::clear_weather_rings() {
+	g_weather_rings_valid = false;
+}
+
+bool ObjectData::weather_ctrl_registers_at(int32_t p_x_q16, int32_t p_y_q16, int32_t p_z_q16,
+		int32_t &r_flicker, int32_t &r_swing) {
+	if (!g_weather_rings_valid) {
+		return false;
+	}
+	const uint8_t slot = g_weather_rings.ring_slot(p_x_q16, p_y_q16, p_z_q16);
+	r_flicker = g_weather_rings.amp_ring[slot];
+	r_swing = g_weather_rings.osc_ring[slot];
+	return true;
+}
+
+bool ObjectData::uses_weather_ctrl_registers() const {
+	for (const std::string &name : _runtime_control_names()) {
+		if (name == threedi_ctrl_register_name(THREEDI_CTRL_FLICKER) ||
+				name == threedi_ctrl_register_name(THREEDI_CTRL_SWING)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 bool ObjectData::eval_material_runtime_native(int p_index, int64_t p_time_ms,

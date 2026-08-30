@@ -158,25 +158,32 @@ void EnvironmentWindow::draw_rows() {
 		true, true, true, false, true, true, true, true, true, true, false, false,
 		true, true, true, true, false, false, false, false, false, false,
 	};
-	// Only the color rows whose WAC handler still ACTS open a picker: the
-	// three static blocks (ceiling/cloud/floor), the gain modulator and the
-	// lightning color. The TOD-keyframed blocks (fog/skyfog/sun/sky/ground)
-	// are re-snapped by the TOD compute every tick, so their handlers are
-	// inert while a keyframe table exists [orig: Environment_ComputeTimeOf-
-	// DayColors @ 0x57e078..0x57e3c9 overwrites what WacCmd_Sun @ 0x4edcd0
-	// wrote]; they and the derived blocks (outdoor, indoor, iris) stay
-	// read-only swatches.
+	// The color rows a WAC handler targets open a picker that drives that
+	// handler (fogcolor/skyfogcolor/cloud/sun/lightning/sky/ground/ceiling/
+	// floor/gain); the derived blocks (outdoor, indoor, iris) stay read-only.
+	// While the mission carries a TOD keyframe table the compute re-snaps
+	// the five keyframed rows every tick, so their handlers are inert and
+	// their pickers stay closed too [orig: Environment_ComputeTimeOfDayColors
+	// @ 0x57e078..0x57e3c9 overwrites what WacCmd_Sun @ 0x4edcd0 wrote; the
+	// early return @ 0x57de8a without a table leaves the handlers live].
 	const int block_targets[kRowCount] = {
 		kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget,
-		kNoTarget, kNoTarget,
+		static_cast<int>(world::WeatherColorTarget::Fog),
+		static_cast<int>(world::WeatherColorTarget::SkyFog),
 		static_cast<int>(world::WeatherColorTarget::Cloud), kNoTarget,
-		kNoTarget, kLightningTarget,
-		kNoTarget, kNoTarget,
+		static_cast<int>(world::WeatherColorTarget::Sun), kLightningTarget,
+		static_cast<int>(world::WeatherColorTarget::Sky),
+		static_cast<int>(world::WeatherColorTarget::Ground),
 		static_cast<int>(world::WeatherColorTarget::Ceiling),
 		static_cast<int>(world::WeatherColorTarget::Floor), kNoTarget, kNoTarget,
 		kNoTarget, kNoTarget,
 		static_cast<int>(world::WeatherColorTarget::Gain), kNoTarget,
 		kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget, kNoTarget,
+	};
+	const bool keyframed_rows[kRowCount] = {
+		false, false, false, false, false, false, false, false,
+		true, true, false, false, true, false, true, true, false, false, false, false,
+		false, false, false, false, false, false, false, false, false, false,
 	};
 	const ImVec2 swatch_size(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
 	if (ImGui::BeginTable("environment_rows", 2, ImGuiTableFlags_SizingStretchSame)) {
@@ -184,7 +191,8 @@ void EnvironmentWindow::draw_rows() {
 			if ((i & 1) == 0) ImGui::TableNextRow();
 			ImGui::TableNextColumn();
 			ImGui::PushID(i);
-			if (swatched[i] && (block_targets[i] == kNoTarget || !snapshot_.authority)) {
+			const bool inert = keyframed_rows[i] && snapshot_.tod_keyframed;
+			if (swatched[i] && (block_targets[i] == kNoTarget || !snapshot_.authority || inert)) {
 				ImGui::ColorButton("##swatch", swatch(swatches[i]),
 						ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker, swatch_size);
 				ImGui::SameLine();

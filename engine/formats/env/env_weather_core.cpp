@@ -86,6 +86,10 @@ void WeatherCore::tick_render(uint32_t fill_target, uint32_t sun_target,
 	sun_block.target = sun_target;
 	fog_block.target = fog_target;
 	sky_block.target = sky_target;
+	tick_render_blocks();
+}
+
+void WeatherCore::tick_render_blocks() {
 	// The iris modulator chain (env #17, REN-5): modulator-2 then the
 	// modulator tick FIRST, then every color block modulates against the
 	// modulator's fresh render color — the witnessed same-tick order

@@ -57,10 +57,6 @@ public:
 	// texture was bound.
 	int get_last_drop_count() const { return last_drops_; }
 	bool is_last_frame_snow() const { return last_snow_; }
-	// True while the fixed surface's vertex stream is written in place; false
-	// on the rebuild-per-frame fallback (a device whose vertex stride is not
-	// the plain float triple).
-	bool is_streaming_surface() const { return surface_streams_; }
 
 	void _ready() override;
 

@@ -60,6 +60,9 @@ public:
 	// state divergent (docs/env/env-tod-re.md).
 	void set_wind_strength_pct(float pct);
 	float wind_strength_pct() const;
+	// Record the strength the next seed carries without touching the attached
+	// home — the embedder's command layer already wrote it there.
+	void remember_wind_strength_pct(float pct);
 
 	// --- the standalone embedding ------------------------------------------
 	// The autonomous render-delta accumulator for standalone owners: every

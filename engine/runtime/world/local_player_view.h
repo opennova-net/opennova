@@ -40,15 +40,6 @@ struct LocalPlayerViewTracker {
     float tick_delta[3] = {0.0f, 0.0f, 0.0f};
     float tick_prev_pos[3] = {0.0f, 0.0f, 0.0f};
     bool tick_prev_valid = false;
-    // The first-person shake deltas (BAM32) sampled ONCE PER TICK from the
-    // tick's weather PRNG word and held until the next tick — retail advances
-    // the three IIR filters in Camera_ComputeThirdPersonView, called once per
-    // drained quantum after the weather tick, never per rendered frame
-    // [orig: Game_ProcessMainFrame @ 0x526774 -> @ 0x526781; the mode-0 block
-    //  @ 0x43803c..0x4380df]. The frame compose only adds them.
-    int32_t shake_yaw_bam = 0;
-    int32_t shake_pitch_bam = 0;
-    int32_t shake_roll_bam = 0;
     // The death stamp's edge detector [orig: g_camera_lerp_start_tick =
     // current_tick on the local death path @0x4b4d00 / @0x42ec0f].
     bool camera_local_dead_seen = false;

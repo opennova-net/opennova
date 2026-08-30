@@ -19,8 +19,11 @@ namespace godot {
 
 namespace {
 
-// One Vector3 of the position stream, as the region update writes it.
+// One Vector3 of the position stream, as the region update writes it — the
+// bytes to_byte_array() emits per element.
 constexpr int kVertexBytes = static_cast<int>(sizeof(float) * 3);
+static_assert(sizeof(Vector3) == static_cast<size_t>(kVertexBytes),
+		"the position stream assumes single-precision Vector3");
 // The drops live within 32 m of the camera wherever it goes and the fixed
 // surface never re-derives its bounds: an unbounded instance AABB keeps the
 // frustum cull out of the picture.
@@ -59,8 +62,6 @@ void Precipitation::_bind_methods() {
 			&Precipitation::get_last_drop_count);
 	ClassDB::bind_method(D_METHOD("is_last_frame_snow"),
 			&Precipitation::is_last_frame_snow);
-	ClassDB::bind_method(D_METHOD("is_streaming_surface"),
-			&Precipitation::is_streaming_surface);
 }
 
 void Precipitation::set_resource_root(const Ref<ResourceRoot> &p_root) {
@@ -141,19 +142,24 @@ void Precipitation::_upload_positions(const PackedVector3Array &p_positions, int
 	// This frame's streaks over the head of the stream, then the collapse of
 	// whatever the previous frame left live past them — two region writes at
 	// most, no allocation of a surface.
+	// Straight to the server: the ArrayMesh wrapper would broadcast a mesh
+	// change per write.
+	RenderingServer *rs = RenderingServer::get_singleton();
+	const RID mesh_rid = mesh_->get_rid();
 	if (p_live_vertices > 0) {
 		PackedByteArray bytes = p_positions.to_byte_array();
 		const int64_t live_bytes = static_cast<int64_t>(p_live_vertices) * kVertexBytes;
 		if (bytes.size() > live_bytes) {
 			bytes.resize(live_bytes);
 		}
-		mesh_->surface_update_vertex_region(0, 0, bytes);
+		rs->mesh_surface_update_vertex_region(mesh_rid, 0, 0, bytes);
 	}
 	if (uploaded_vertices_ > p_live_vertices) {
 		PackedByteArray zeros;
 		zeros.resize(static_cast<int64_t>(uploaded_vertices_ - p_live_vertices) * kVertexBytes);
 		zeros.fill(0);
-		mesh_->surface_update_vertex_region(0, static_cast<int64_t>(p_live_vertices) * kVertexBytes, zeros);
+		rs->mesh_surface_update_vertex_region(mesh_rid, 0,
+				static_cast<int32_t>(p_live_vertices) * kVertexBytes, zeros);
 	}
 	uploaded_vertices_ = p_live_vertices;
 }
