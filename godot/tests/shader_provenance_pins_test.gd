@@ -217,19 +217,45 @@ func test_provenance_contracts_are_reviewable_and_citations_resolve_to_docs() ->
 
 func test_environment_cube_capture_is_live_and_highest_quality() -> void:
 	var shared := _read(OBJECT_ROOT.path_join("shared.gdshaderinc"))
+	var engine_header := _read_repo("engine/runtime/renderer/environment_cube.h")
 	var capture_header := _read_repo("godot/src/env/environment_cube_capture.h")
 	var capture_source := _read_repo("godot/src/env/environment_cube_capture.cpp")
+	var blit_source := _read_repo("godot/src/render/environment_cube_blit.cpp")
 	var water := _read(SHADER_ROOT.path_join("water.gdshader"))
 	var project := _read("res://project.godot")
 
-	_contains_all(capture_header, ["kCaptureSize = 256", "kRefreshFrames = 128", "kSkyDimByte = 0x60"],
-			"the capture header")
+	# The witnessed facts live in the engine header (ADR 0042); the capture
+	# node consumes them and never re-derives a number.
+	_contains_all(engine_header, [
+		"kEnvironmentCubeFaceSize = 256", "kEnvironmentCubeRefreshFrames = 128",
+		"kEnvironmentCubeDimByte = 0x60", "kEnvironmentCubeFaceFovDegrees = 90.0f",
+		"kEnvironmentCubeFaceNear = 0.5f", "kEnvironmentCubeFaceFar = 1000.0f",
+		"kEnvironmentCubeEyeRaise = 1.0f", "kEnvironmentCubeTerrainClearance = 10.0f",
+		"update_environment_cubemap @ 0x6106a0", "GTexture_RenderCubeMapFace @ 0x6864d0",
+	], "the engine environment-cube header")
+	_contains_all(capture_header, [
+		"kCaptureSize =", "opennova::renderer::kEnvironmentCubeFaceSize",
+		"kRefreshFrames =", "opennova::renderer::kEnvironmentCubeRefreshFrames",
+		"kSkyDimByte =", "opennova::renderer::kEnvironmentCubeDimByte",
+	], "the capture header")
 	_contains_all(capture_source, [
-		"camera->set_fov(90.0f)", "camera->set_near(0.5f)", "camera->set_far(1000.0f)",
-		"terrain_y + 10.0f", "capture_origin_.y += 1.0f",
+		"camera->set_fov(opennova::renderer::kEnvironmentCubeFaceFovDegrees)",
+		"camera->set_near(opennova::renderer::kEnvironmentCubeFaceNear)",
+		"camera->set_far(opennova::renderer::kEnvironmentCubeFaceFar)",
+		"opennova::renderer::environment_cube_eye_height(",
+		"opennova::renderer::environment_cube_refresh_due(",
 		"Water::VISUAL_LAYER_ENVIRONMENT_CAPTURE", "camera->set_compositor(capture_compositor)",
+		"call_on_render_thread", "set_texture_rd_rid(cube)",
 	], "the capture source")
-	assert_false(capture_source.contains("image->linear_to_srgb()"))
+	# No CPU readback, Image or Cubemap resource: the faces reach the
+	# published RD cubemap through the RenderingDevice copy leg, which
+	# applies the engine's dim-byte product in integer shader math.
+	assert_false(capture_source.contains("get_image("))
+	assert_false(capture_source.contains("linear_to_srgb"))
+	_contains_all(blit_source, [
+		"RenderingDevice::TEXTURE_TYPE_CUBE", "DATA_FORMAT_R8G8B8A8_UNORM",
+		"(bytes * pc.dim_byte + 127u) / 255u",
+	], "the environment cube blit")
 	_contains_all(shared, [
 		"global uniform samplerCube opennova_environment_cube",
 		"texture(opennova_environment_cube, direction)",

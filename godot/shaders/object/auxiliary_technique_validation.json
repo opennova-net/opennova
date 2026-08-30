@@ -30,7 +30,8 @@
       "runtime_evidence": [
         {"path": "godot/shaders/object/technique_validation.json", "tokens": ["\"engine_enum\": \"Fixed\"", "\"engine_enum\": \"GlassSkinned\"", "\"specular_alpha\""]},
         {"path": "godot/probes/render/render_swatch_lighting_modes.gd", "tokens": ["directional_axis_reversal", "specular_alpha_low", "coverage_high"]},
-        {"path": "godot/src/env/environment_cube_capture.cpp", "tokens": ["kCaptureSize", "kRefreshFrames", "set_use_hdr_2d(true)", "SubViewport::UPDATE_ONCE", "kCubemapImageToCapture"]},
+        {"path": "godot/src/env/environment_cube_capture.cpp", "tokens": ["kCaptureSize", "kRefreshFrames", "set_use_hdr_2d(true)", "SubViewport::UPDATE_ONCE", "kCubeLayerToCapture", "call_on_render_thread"]},
+        {"path": "godot/src/render/environment_cube_blit.cpp", "tokens": ["RenderingDevice::TEXTURE_TYPE_CUBE", "(bytes * pc.dim_byte + 127u) / 255u"]},
         {"path": "godot/probes/render/environment_cube_capture_probe.gd", "tokens": ["Forward+ RenderingDevice", "publish on the following advance", "0x60 gamma-byte dim"]}
       ],
       "raster_probes": ["lighting", "channels"],
