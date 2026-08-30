@@ -277,22 +277,86 @@ cached per-row world bounds (the live rows only, read once per instance
 generation; a carved row never enters the list), and re-reads only the
 water and celestial blocks, whose producers publish per frame. The report's
 `q3_records`, `q3_records_touched_this_frame` and
-`q3_material_reads_this_frame` pin it (`framefx_test`: a stable frame
-touches 0 records and reads 0 object materials; a move, a visibility change
-or a named material is picked up through its record alone). Measured with
-the perf probe (1600x900 windowed, Ryzen 7735HS iGPU, median of per-run p50
-over 2 runs): WORLD_FRAMEFX 1.16 -> 0.57 ms on 00TRa and
-1.04 -> 0.40 ms on CP19 with the records alone; the stream packer reading
-the surface arrays through their raw pointers into one sized buffer (the
-water strip re-packs every frame) takes it to 0.22 ms and 0.08 ms. On the
-merged head (the records over the dense populations and the surface slots,
-Godot occlusion culling off, same protocol, n=2 on 00TRa/CP01 and n=1 on
-CP19, measured 2026-08-30 against the surface-slot head): WORLD_FRAMEFX
-1.04 -> 0.21 ms (00TRa), 1.09 -> 0.14 ms (CP01) and 1.26 -> 0.12 ms (CP19),
-the frame 13.48 -> 13.05, 13.73 -> 13.00 and 15.98 -> 14.47 ms, with root
-draw calls, primitives and the Q3 command count unchanged for a given
-spawn state (the Q3 source count on CP01 varies run to run with the bots'
-held weapons in view, 17 to 21).
+`q3_material_reads_this_frame` pin it (`framefx_test`: a stable frame of
+an object-only scene touches 0 records and reads 0 object materials; a
+move, a visibility change or a named material is picked up through its
+record alone). In a mission a stable frame still touches the records whose
+transforms move every frame, the water strip plus the celestial bodies
+(their bounds refresh on every transform compare mismatch): sampled at one
+frame the counter read 5 / 12 / 5, 5 / 8 / 1 and 1 / 12 / 1 across three
+runs each of 00TRa / CP01 / CP19 (2026-08-30 A/B), so a one-frame sample
+is not a per-frame rate. Measured with the perf probe (1600x900 windowed,
+Ryzen 7735HS iGPU, median of per-run p50 over 2 runs): WORLD_FRAMEFX
+1.16 -> 0.57 ms on 00TRa and 1.04 -> 0.40 ms on CP19 with the records
+alone; the stream packer reading the surface arrays through their raw
+pointers into one sized buffer (the water strip re-packs every frame) takes
+the leg to 0.22 ms and 0.08 ms. The packer's gain is that leg's alone: the
+wall frame between its before and after sessions moved 14.11 -> 14.59 ms
+(00TRa) and 16.24 -> 16.75 ms (CP19) with `render_root_gpu` +0.65 ms while
+within-session runs agreed to 0.03 ms, so those sessions drifted and carry
+no frame-level claim. On the merged head (the records over the dense
+populations and the surface slots, Godot occlusion culling off, same
+protocol, n=2 on 00TRa/CP01 and n=1 on CP19, measured 2026-08-30 against
+the surface-slot head in one session): WORLD_FRAMEFX 1.04 -> 0.21 ms
+(00TRa), 1.09 -> 0.14 ms (CP01) and 1.26 -> 0.12 ms (CP19), the frame
+13.48 -> 13.05, 13.73 -> 13.00 and 15.98 -> 14.47 ms, with root draw
+calls, primitives and the Q3 command count unchanged for a given spawn
+state (the Q3 source count on CP01 varies run to run with the bots' held
+weapons in view, 17 to 21).
+
+**Frame cost against master, 2026-08-30 (the closing A/B).** Master
+e17349529 against the head carrying every lane above plus the closing
+fixes (the slot-capture cache keyed on the mesh, the static populations
+under one holder, the cell walk dropped), 1600x900 windowed D3D12
+Forward+, Ryzen 7735HS iGPU, vsync off, Godot occlusion culling off on
+both, `--exp jox01` on both, `perf_mission_rows` (6 s warmup, three 8 s
+windows), three interleaved launches per tree and mission, medians of
+per-run p50 in ms (00TRa / CP01 / CP19, delta = head - master). Wall frame
+13.89 -> 12.90 / 14.12 -> 12.93 / 17.01 -> 14.48 (-0.99 / -1.19 / -2.53),
+frame p95 -1.06 / -3.89 / -2.26, `draw` (the RS::draw span) -1.20 / -1.43
+/ -3.83, GPU total over root + Q3 + water + slot -2.26 / -2.48 / -5.82,
+render-server CPU total over the same four -0.62 / -1.98 / -0.17; the
+128-frame environment-cube cycle costs 1.1 / 1.2 / 1.6 ms above the
+baseline frame instead of master's 35.0 / 57.8 / 53.9 (its worst frame
+16.8 / 16.6 / 19.2 ms instead of 39.9 / 53.0 / 57.1). Root draw calls
+487 -> 489 / 376 -> 416 / 284 -> 296 (the bins holding entities at two
+levels), root primitives -17 % / -5 % / -22 %. The main-thread `world`
+tick is the row that stays above master, +1.52 / +0.67 / +1.21, and it
+decomposes into rows that are each attributed: `world_slot_shadow` +0.33 /
++0.16 / +0.24 is the render-slot compile that master's separate viewports
+did inside `render_slot_cpu` (1.89 / 1.00 / 0.17 ms mean there, 0 here), a
+row move with a net win; `world_material` +0.18 / +0.17 / +0.19 is the
+two RLOD selector walks (the RLOD row above; master selected no level);
+`world_framefx` +0.19 / +0.12 / +0.09 is the incremental Q3 compile over
+its records (master's 0.03 ms compiled nothing on the main thread and paid
+1.19 / 0.97 / 0.48 ms of `render_q3_cpu` instead); `world_runtime` +0.19 /
++0.06 / +0.23 is `present_snapshot` and `present_mission_core` over the
+retained surface instances (560 / 1376 / 1640 geometry instances against
+master's per-level nodes); `world_light` +0.17 / +0.02 / -0.02, down from
++0.51 / +0.15 / +0.10 before the populations moved under their holder:
+`EffectLightDirector.render_frame` casts every child of the container to
+`ObjectModel` each frame, and the placer had emitted 835 / 490 / 494
+populations beside the 77 / 244 / 252 models, so the row tracked the
+population count and not the instance stamping (the remaining +0.17 on
+00TRa is within that mission's run-to-run band for the row, 0.76-0.93 ms
+on either tree). `render_root_cpu` +0.62 / +0.51 / +0.35 is the focused Q3
+capture/blur/composite pass executing as a compositor callback inside the
+root viewport's span (render-occlusion-re.md, the device-occluder row,
+carries the elimination of the population count and the occluders); the
+render server's CPU total is below master. `render_water_gpu` 0.72 ->
+1.55 / 0.94 -> 1.79 / 0.61 -> 1.48 is the one row without an attribution:
+the mirror viewport draws the same objects, draw calls and primitives on
+both trees (290 / 275 / 664K-668K on 00TRa), at the same 256-square
+target, through the same decode-only terminal effect and the same
+particle POST pair, and the only mirror-side code difference is the
+camera cull mask gaining the thirteen visual layers the retired slot
+captures reserved, which nothing in the scene occupies (no light, decal or
+instance sits on them); the ranked candidates are the terminal effect's
+resolved-colour/depth access on the mirror target and the render-server
+timestamp span absorbing device work the beauty chain now records around
+it, and a lane on it masks the mirror's terminal effect first, then the
+particle pair. The GPU total is what the frame pays, and it is 2.3-5.8 ms
+below master.
 The render callback re-shades each LUM copy as the SELFLUM NORMAL block into
 the black-cleared Q3 target (`_FFP.fx` copies the NORMAL pass block into the
 GLOW slot `@ 0x5afc7f`: Diffuse1 x Detail MODULATE2X x RGB modulator x

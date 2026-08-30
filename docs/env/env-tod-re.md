@@ -1099,13 +1099,20 @@ In a network session the server-synced time + TOD rate replace the local start T
 "per graphic" performance note is superseded: opaque and alpha-tested static
 rows now use terrain-aligned 512-unit X/Z populations with exact custom AABBs.
 Only blended rows remain global, intentionally, so spatial population centers
-cannot perturb transparent ordering. Every
+cannot perturb transparent ordering; inside one blended global population the
+rows sit in swap-remove order (a crossing moves the last live row into the
+hole), not slot order, so the instances of one alpha graphic blend within
+that single draw in an order that depends on past crossings. Retail's
+per-strip depth sort was never reproduced inside a population, so no
+documented rule breaks, and this is the only other ordering caveat. Every
 population (per-bin, blended global, shadow twin) hangs under the
 container's one `StaticPopulations` child rather than beside the placed
 models (2026-08-30): the shell's per-frame walks over the container's
 children (the EffectWorld light select, the item-effect attach) then visit
 the entity models and one holder instead of a population per graphic x
-level x bin. A graphic with more than one authored
+level x bin: `world_light` against master went from +0.51 / +0.15 / +0.10
+ms to +0.17 / +0.02 / -0.02 ms (00TRa / CP01 / CP19, the closing A/B in
+render-order-re.md). A graphic with more than one authored
 RLOD stays in those populations: every level is emitted as its own population
 over the same slot list and the retail selector picks the level per instance
 each frame (render-order-re.md, "Authored object RLOD selection"), so
@@ -1118,6 +1125,13 @@ iGPU, medians of per-run p50: 00TRa 696 root draws / 1.15M primitives /
 15.10 ms frame before, 487 / 0.87M / 14.66 ms after; CP01 564 / 2.04M /
 16.09 ms before, 416 / 1.11M / 14.84 ms after; CP19 360 / 2.76M / 17.33 ms
 before, 296 / 1.52M / 17.12 ms after; master draws 487 / 376 / 284). The
+final A/B against master (e17349529) on the merged head, 2026-08-30, same
+machine and protocol, three interleaved runs per tree and mission, medians
+of per-run p50, is the complete record for all three columns: root draws
+487 -> 489 / 376 -> 416 / 284 -> 296, root primitives 1.053M -> 0.871M /
+1.172M -> 1.110M / 1.944M -> 1.519M, wall frame 13.97 -> 13.19 /
+14.14 -> 13.05 / 17.02 -> 14.60 ms, frame p95 15.11 -> 14.15 /
+17.75 -> 14.09 / 18.12 -> 15.71 ms (00TRa / CP01 / CP19). The
 bins were re-measured against one population per (graphic, policy, level,
 submesh) on the same build, 2 runs each: 00TRa bins 487 draws / 0.87M /
 14.66 ms vs no bins 485 / 1.05M / 14.73 ms; CP01 bins 416 / 1.11M /
