@@ -97,6 +97,7 @@ private:
 	bool capture_pending_ = false;
 	bool cube_ready_ = false;
 	bool force_pending_ = true;
+	bool warned_device_failure_ = false;
 };
 
 } // namespace godot

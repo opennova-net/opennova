@@ -4,6 +4,7 @@
 
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include "env/water.h"
 
@@ -263,6 +264,15 @@ bool EnvironmentCubeCapture::_publish_completed_capture() {
 		blit_ = std::make_unique<EnvironmentCubeBlit>();
 	}
 	if (blit_->device_failed()) {
+		// Latched until the next exit-tree release: the shader/pipeline/cube
+		// creation failed, the object shaders keep their hemisphere fallback,
+		// and the reason is reported once here and through get_device_failure.
+		if (!warned_device_failure_) {
+			warned_device_failure_ = true;
+			UtilityFunctions::push_warning(
+					"EnvironmentCubeCapture: the environment cube device copy is "
+					"disabled: " + blit_->failure());
+		}
 		return false;
 	}
 	if (blit_->completed_requests() < requested_publishes_) {
@@ -349,6 +359,7 @@ void EnvironmentCubeCapture::_publish_inactive() {
 	blit_.reset();
 	requested_publishes_ = 0;
 	wired_publishes_ = 0;
+	warned_device_failure_ = false;
 	capture_pending_ = false;
 	cube_ready_ = false;
 	force_pending_ = true;
