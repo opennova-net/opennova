@@ -348,6 +348,41 @@ int lookup_item_attrib2(const char *name, size_t len) {
     return 0;
 }
 
+}  // namespace opennova::defscan
+
+/* The public index projection over the two tables above (def.h): a tool naming an
+   ItemDefAttrib bit reads the parser's own token list. [orig: ItemDef_ParseProperty
+   @0x49eb00] */
+extern "C" int def_item_attrib_keyword_count(void) {
+    return opennova::defscan::item_attrib_table_count;
+}
+
+extern "C" const char *def_item_attrib_keyword(int index) {
+    if (index < 0 || index >= opennova::defscan::item_attrib_table_count) return NULL;
+    return opennova::defscan::item_attrib_table[index].name;
+}
+
+extern "C" uint32_t def_item_attrib_keyword_bit(int index) {
+    if (index < 0 || index >= opennova::defscan::item_attrib_table_count) return 0u;
+    return (uint32_t)opennova::defscan::item_attrib_table[index].bit;
+}
+
+extern "C" int def_item_attrib2_keyword_count(void) {
+    return opennova::defscan::item_attrib2_table_count;
+}
+
+extern "C" const char *def_item_attrib2_keyword(int index) {
+    if (index < 0 || index >= opennova::defscan::item_attrib2_table_count) return NULL;
+    return opennova::defscan::item_attrib2_table[index].name;
+}
+
+extern "C" uint32_t def_item_attrib2_keyword_bit(int index) {
+    if (index < 0 || index >= opennova::defscan::item_attrib2_table_count) return 0u;
+    return (uint32_t)opennova::defscan::item_attrib2_table[index].bit;
+}
+
+namespace opennova::defscan {
+
 /* Alignment parser: left=0, right=1, center=2 */
 static int parse_alignment(const char *s, size_t len) {
     if (len == 5 && memcmp(s, "right", 5) == 0) return 1;

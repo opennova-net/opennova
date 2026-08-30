@@ -984,6 +984,18 @@ int def_parse_items(const char *path, DefItemsFile *out);
 int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out);
 void def_free_items(DefItemsFile *f);
 
+/* The items.def `attrib:` keyword tables, read-only by index: the SAME tables the
+   parser matches tokens against (def_scan.cpp item_attrib_table / item_attrib2_table),
+   so a tool that names an ItemDefAttrib bit shares the parser's vocabulary rather
+   than carrying a second list. Lowercase token + its bit; NULL / 0 out of range.
+   [orig: ItemDef_ParseProperty @0x49eb00] */
+int def_item_attrib_keyword_count(void);
+const char *def_item_attrib_keyword(int index);
+uint32_t def_item_attrib_keyword_bit(int index);
+int def_item_attrib2_keyword_count(void);
+const char *def_item_attrib2_keyword(int index);
+uint32_t def_item_attrib2_keyword_bit(int index);
+
 int def_parse_hudpos(const char *path, DefHudPosFile *out);
 /* Parse hudpos.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
    call; free with def_free_hudpos as usual. Returns 0 on success, -1 on bad input. */
