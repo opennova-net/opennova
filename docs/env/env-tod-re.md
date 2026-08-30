@@ -194,6 +194,23 @@ cloudbase `0x26c674c`, cloudhighlight `0x26c6780`, cloudedge `0x26c67b4`, plus s
 | [11] | active target (smoother chases this) |
 | [12] | additive overlay (lightning flash) |
 
+**Keyframed vs stepping blocks (witnessed 2026-08-30, ported the same day):**
+`Environment_ComputeTimeOfDayColors @ 0x57de40`, run at the top of every weather
+tick (`@ 0x57e9c7`) while a keyframe table exists (`Env_EnvSnapshotCount @ 0x57de8a`),
+writes each of the ELEVEN keyframed blocks — light, sky, ground, fog, skyfog, skybase,
+skybright, skyhighlight, cloudbase, cloudhighlight, cloudedge — directly: `[4]/[3]/[2]/[5]
+= byte << 20` (the 12.20 channels), then `[0]`, `[11]` and `[10]` = the packed blend
+(`@ 0x57e078..0x57e3c9`; `[1]` and the additive `[12]` are left alone). The step that
+follows therefore finds `current == target` and moves nothing — a keyframed block never
+smooths; only its lightning additive and the modulator chain apply on top. The three
+statics (ceiling/cloud/floor) and the two modulators are the only blocks that ever step,
+which is also why the WAC `sun/sky/ground/fogcolor/skyfogcolor` handlers (`[11]` +
+`ColorBlock_SetStepDeltas`) are inert while keyframes exist — the next tick's compute
+overwrites them — while `ceiling/cloud/floor/gain` act. Reimpl:
+`env::WeatherColorBlock::snap_keyframe` per tick in `env::WeatherRuntime::tick_weather`
+(gated on `EnvironmentState::has_tod_keyframes`); the F3 Environment pickers drive only
+ceiling/cloud/floor/gain/lightning.
+
 `interpolate_weather_color @ 0x57d9e0` (16 calls per tick): per channel
 `step = ((target<<20) - current) >> 3` clamped to ±max-step, accumulate in 12.20, repack with
 `+0x80000` rounding; then `[0] = ([0] + additive) × ModulatorBlock × rainFactor` where
@@ -220,10 +237,24 @@ are the same mechanism; the full curve is in §Iris auto-exposure below.
 (`Game_ProcessMainFrame @ 0x526774`, right after `Entity_UpdateAllEntities
 @ 0x52674b`, per drained 16 ms quantum — the reimpl's former separate 62 Hz
 weather clock was itself a divergence, closed 2026-08-30: the weather now
-rides the simulation tick through `MissionKernel::tick_weather`):
+rides the simulation tick through `MissionKernel::tick_weather`). The weather
+tick is UNGATED: the entity update sits behind the frame gate
+(`@ 0x526703..0x526742` — the authority skips it while `wac_var_ticks` is armed
+with no humans, while `dword_A85B64` is set, or in session behind the
+spawn-success gate), whereas the weather tick and `Camera_ComputeThirdPersonView
+@ 0x526781` (only `dword_A87050 == 0`) run every drained quantum regardless, so
+the weather keeps advancing while the entities are held (the reimpl's
+`tick_weather` likewise runs after every kernel tick, held entities or not):
 
-- `ComputeTimeOfDayColors(curtime + advance)` (TOD-keyframed blocks snap; only the static
-  blocks and scalars actually smooth).
+- `ComputeTimeOfDayColors(curtime + advance)` — the ELEVEN TOD-keyframed blocks SNAP
+  (channels `[2..5]`, `[0]`, `[10]`, `[11]` written outright, `@ 0x57e078..0x57e3c9`;
+  see §Color state blocks); only ceiling/cloud/floor, the modulators and the scalars
+  actually smooth. The `tod` WAC (`WacCmd_Tod @ 0x4edc70`) stores `minute * 0x44444`
+  RAW into `Env_CurTimeFixed24`; the wrap into `[0, 24 h)` happens HERE at the next
+  tick (`@ 0x57de48..0x57de84`, which stores the wrapped value back), so a minute
+  argument >= 1440 reads unwrapped until the following weather tick (nothing reads
+  the clock in between: the WAC runs inside the tick's entity half and the 0x0A
+  projection after the tick).
 - 310-tick "TOD minute" cadence counter.
 - Wind PRNG: `r = rol32(r, 9); if (r < 0) r += 0x1ABB09`; `rand = r & 0xFFF`. Wave amplitude
   `(windScale * (15*prev + rand²>>8)) >> 12` into a 256-entry ring (`0xFFFF - 2*amp`,
@@ -234,7 +265,13 @@ rides the simulation tick through `MissionKernel::tick_weather`):
   `Y += 4 * (int8)r`, `bodyHeading += (16 * r) >> 7` with the PRNG re-rolled per
   displaced entity (`@ 0x57eb48..0x57eb9e`); the local player's displacement
   HARD-SETS the camera shake counter to 32 (`dword_B764B0`, now
-  `g_CameraShakeCounter`, `@ 0x57eb7d`); pool-1 entities whose def carries
+  `g_CameraShakeCounter`, `@ 0x57eb7d`; the counter decays in
+  `Player_UpdatePerFrame @ 0x4de590` from the client frame that precedes the
+  entity update, and `Camera_ComputeThirdPersonView @ 0x526781` samples it —
+  advancing the three IIR filters — once per drained quantum right after this
+  tick, never per rendered frame: ported 2026-08-30 as the pre-tick decay +
+  the post-tick sample into `LocalPlayerViewTracker::shake_*_bam`, the frame
+  compose only adding the held deltas); pool-1 entities whose def carries
   `attrib & 0x40` likewise (`@ 0x57ebde..0x57ec29`, the shake when the player's
   parent is displaced); `--Env_QuakeTicks` (`@ 0x57ec61`). Then the HIT BLACKOUT
   fade (`Env_HitDimIntensity -= Env_HitDimFadeRate`, floor 0, `@ 0x57eaf9`) — the
@@ -249,9 +286,14 @@ rides the simulation tick through `MissionKernel::tick_weather`):
   timer A at ticks 10/6/4/2 → flash 200/255/200/255, at 0 → flash 0 + thunder; timer B at
   31/28/26/24/23/22/20 → 200/150/200/150/100/50/0, at 0 → second thunder. **Thunder wiring
   (C6)**: epoch 0 calls `Sound_PlayTriggerSetScaled (ex sub_527B90) → SoundBank_PlayTriggerEntries @ 0x75ccd0` on the bank
-  at `dword_24E0914` — sequencer A fires trigger id **0** (param 0x10000, @ 0x57ecfb),
-  sequencer B trigger id **0x80** (param 0xA0000, @ 0x57edc4), gated on
-  `g_napi_np_ctx.is_mp_session_peer`. **Starters**: the net text command **`SETFLASH1 [n]`**
+  at `dword_24E0914` with the 24-byte emitter `{pitch 0x10000, bearing,
+  g_SoundVolumeOption, 0, distance 16.16, 0}` (`Sound_PlayTriggerSetScaled @ 0x527b90`:
+  its second argument is the DISTANCE `emitter[4]`, its third the BEARING `emitter[1]`
+  — the pan `SoundBank_PlayTriggerEntries @ 0x75ce5b` takes for a positional layer;
+  the IDB's old `trigger_id`/`position` argument names were stale, corrected
+  2026-08-30) — sequencer A plays the set **1 m** from the listener at bearing **0**
+  (`0x10000`, `0`, @ 0x57ecfb), sequencer B **10 m** behind at bearing **128**
+  (`0xA0000`, `0x80`, @ 0x57edc4), gated on `g_napi_np_ctx.is_mp_session_peer`. **Starters**: the net text command **`SETFLASH1 [n]`**
   (`NapiNPClientMsg_HandleTextCommand @ 0x429ec9`: timer A = atol(arg), default 16; the
   host applies locally and sprintf-broadcasts `"SETFLASH1 16"` @ 0x4d2b6a) — one
   retail trigger path. **2026-08-30 correction:** `Env_TriggerLightningFlashA
@@ -337,7 +379,7 @@ path). Seconds multiply by 62 (`imul 62`; 0 -> 1 tick); a timed step is
 | `fogtype(n)` | `WacCmd_FogType @ 0x4eded0` | `Env_FogType = n` (+ an immediate `Render_SetFogState`) |
 | `sunfade(pct, s)` | `WacCmd_SunFade @ 0x4edf10` | the sun-dim channel: target `min(pct << 16, 0x640000)`, the timed step — INERT in retail: the channel's max clamp `@ 0x26c6840` has no writer, so the current never leaves 0 |
 | `colorfade(s)` | `WacCmd_ColorFade @ 0x4edcb0` | `Env_ColorFadeTicks @ 0xc60dd0 = 62 * s` (ex `frameCount`; 0 at WAC init) |
-| `sun/sky/ground/floor/ceiling/cloud/fogcolor/skyfogcolor(r, g, b)` | `WacCmd_Sun @ 0x4edcd0`, `Sky @ 0x4edd00`, `Ground @ 0x4edd60`, `Floor @ 0x4eddf0`, `Ceiling @ 0x4eddc0`, `Cloud @ 0x4edd90`, `FogColor @ 0x4ede40`, `SkyFogColor @ 0x4ede70` | the block's ACTIVE target `[11]` = the packed rgb + `ColorBlock_SetStepDeltas(block, Env_ColorFadeTicks)`; the TOD-keyframed blocks are overwritten by the next `ComputeTimeOfDayColors`, the statics (ceiling/cloud/floor) keep the value |
+| `sun/sky/ground/floor/ceiling/cloud/fogcolor/skyfogcolor(r, g, b)` | `WacCmd_Sun @ 0x4edcd0`, `Sky @ 0x4edd00`, `Ground @ 0x4edd60`, `Floor @ 0x4eddf0`, `Ceiling @ 0x4eddc0`, `Cloud @ 0x4edd90`, `FogColor @ 0x4ede40`, `SkyFogColor @ 0x4ede70` | the block's ACTIVE target `[11]` = the packed rgb + `ColorBlock_SetStepDeltas(block, Env_ColorFadeTicks)`; the TOD-keyframed blocks are overwritten by the next `ComputeTimeOfDayColors` (so `sun/sky/ground/fogcolor/skyfogcolor` are INERT while keyframes exist), the statics (ceiling/cloud/floor) keep the value. Every numeric WAC weather argument lands RAW: no handler takes an absolute value or clamps a negative (`quake` stores `6 * n` into the unsigned countdown, `colorfade` `62 * n` into the step divisor, the timed commands `62 * n` ticks with only the zero -> 1 guard, so a negative count installs a negative step — ported 2026-08-30) |
 | `gain(r, g, b)` | `WacCmd_Gain @ 0x4edd30` | the modulator block target + step deltas (re-targeted every render pass by the iris) |
 | `lightning(r, g, b)` | `Script_SetLightningColor @ 0x4ede20` | `Env_LightningColor @ 0x26c646c` |
 | `flash` / `farflash` | `Env_TriggerLightningFlashA @ 0x4ed500` / `B @ 0x4ed510` | timer A = 16 / timer B = 32 |
@@ -376,7 +418,11 @@ window no weather tick runs in.
   `WacCmd_Rain`/`Snow` and the 0x0A ENV block; read by the drawer, the fall tick
   and the rain-sound leg.
 - **Fall tick** (`Precipitation_FallTick @ 0x5de8f0`, per logic tick from
-  `Entity_UpdateAllEntities @ 0x4c2214`): its "wind origin" writes
+  `Entity_UpdateAllEntities @ 0x4c2214` — between the pool-1 walk and
+  `DeathPiece_TickAll @ 0x4c221c`, i.e. inside the ENTITY update and behind its
+  frame gate: the 255-tick mission-start settle and a held entity update never
+  fall a drop; ported 2026-08-30 into `World::run_logic_tick` on gameplay ticks,
+  every peer falling its own pool): its "wind origin" writes
   (`0x2c059f8..0x2c05a00`) have no readers (dead); while `Env_RainPctCurrent > 48`
   every slot `z -= 12288` (rain) / `2048` (snow) and `Env_PrecipitationFallAccumZ
   @ 0x2c05a2c` accumulates the same.
@@ -403,11 +449,16 @@ window no weather tick runs in.
   (SRCALPHA/INVSRCALPHA, alpha MODULATE, color MODULATE2X) with pass flags
   0x10500000 (lighting off, z-write off, cull none, no fog, no alpha test).
 - **Rain ambient** (`Entity_UpdateInfantryPlayerBody @ 0x4b4747..0x4b490e`, the
-  local player, on the frame's last 16 ms quantum): if `RainPctCurrent != 0` and
-  kind == rain: volume word = `RainPctCurrent` (<= 0xFFFF); inside a pool-2
-  building `(lightTransfer * 0.5 + 0.5) * RainPct` (ItemDef+0x218); registers
-  `LPNV_RAIN_L` at pos + (2 m, 0, 0) slot type 1 and `LPNV_RAIN_R` at pos -
-  (2 m, 0, 0) slot type 2, lifetime 20, pitch 0x10000, via
+  local player, on the frame's last 16 ms quantum): if `RainPctCurrent != 0`, the
+  set handles are loaded (`dword_24E0E80`) and kind == rain: volume =
+  `RainPctCurrent` (<= 0xFFFF), scaled `(lightTransfer * 0.5 + 0.5) *` when the
+  FIRST BLINK HIT (`entity+0x1D0`, `>> 20` = the pool-2 index) is non-zero — that
+  hit alone gates it, there is no indoor-flag test (`@ 0x4b4770..0x4b47a8`,
+  ItemDef+0x218) — and the word's low 16 bits are the 8.8 volume (`mov word ptr
+  [..], bx` @ 0x4b4845; a high byte of 0 is the registrar's unregister); registers
+  `LPNV_RAIN_L` at `(x + 2 m, y, z + eyeOffsetZ)` slot type 1 and `LPNV_RAIN_R` at
+  `(x - 2 m, y, z + eyeOffsetZ)` slot type 2 (the entity's +0x74 added to Z,
+  `@ 0x4b47b0` / `@ 0x4b4865`), lifetime 20, pitch 0x10000, via
   `SoundEmitter_RegisterSetLayers @ 0x528340` (set handles `dword_24E0918/1C`,
   the resolver table `@ 0x82F590`).
 - **Reimpl**: `env::PrecipitationField` (seed / fall_tick / update over
@@ -1486,7 +1537,7 @@ roadmap slice C7).
 | G3 terrain_rgb consumers | any consumer beyond the effects reciprocal? | **corrected 2026-07-13** — tile overlay is live; texture bake is dead; the foliage sample executes but is overwritten before emission | §iris/terrain_rgb + [foliage-re.md](../foliage/foliage-re.md) | keep tile tint and effects reciprocal; remove invented foliage tint consumer |
 | G4 ApplyFogAndAmbient | full state walk; ceiling/floor points; 0x5c7a00 wiring | **complete** — 8-row walk table; exposure application point = `Render_LightScaleRGB` shader constant | §Environment_ApplyFogAndAmbient walk | informs C7 fog/exposure plumbing; ceiling/floor wire-or-delete now decidable (keep: they are live exposure inputs + effect ambient) |
 | G5 overcast precedence | fallback or always-after? | **corrected** — never a fallback; additive after `.trn` success (no count reset); missing/failed `.trn` aborts all | §Load pipeline | comment-level in `engine/formats/env`; future overcast cross-fade uses the corrected order |
-| G6 thunder/oscillators | epoch→sound mapping; .env tunables | **feeder complete** — trigger ids 0/0x80, bank `dword_24E0914`, `SETFLASH1` net command; sequencer B unreachable; no rain/wind `.env` keywords | §weather tick | consumed by the WAC weather wave, not C7 |
+| G6 thunder/oscillators | epoch→sound mapping; .env tunables | **feeder complete** — the THUNDER set at bearing 0 / 1 m (A) and bearing 128 / 10 m (B) (the earlier "trigger ids 0/0x80" reading was the emitter's bearing word, corrected 2026-08-30), bank `dword_24E0914`, `SETFLASH1` net command; sequencer B reachable through the WAC `farflash` (2026-08-30 correction); no rain/wind `.env` keywords | §weather tick | consumed by the WAC weather wave, not C7 |
 
 ### IDB edits applied (sanctioned-grill policy; verify-before-edit; `idb_save` checkpoints)
 
