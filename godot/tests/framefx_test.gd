@@ -61,6 +61,24 @@ func _max_rgb_delta(lhs: Image, rhs: Image) -> Dictionary:
 	return {"delta": best, "position": best_position}
 
 
+# The share of the beauty footprint (non-black beauty pixels) that carries a
+# non-black Q3 pixel at the same position.
+func _q3_footprint_presence(beauty: Image, q3: Image) -> Dictionary:
+	var footprint := 0
+	var present := 0
+	for y in beauty.get_height():
+		for x in beauty.get_width():
+			var beauty_pixel := beauty.get_pixel(x, y)
+			if beauty_pixel.r + beauty_pixel.g + beauty_pixel.b <= 0.05:
+				continue
+			footprint += 1
+			var q3_pixel := q3.get_pixel(x, y)
+			if q3_pixel.r + q3_pixel.g + q3_pixel.b > 0.05:
+				present += 1
+	return {"footprint": footprint, "present": present,
+			"fraction": float(present) / float(maxi(footprint, 1))}
+
+
 func _lum_object_data() -> ObjectData:
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(Q3_LUM_3DI)), OK)
@@ -435,18 +453,25 @@ func test_production_object_q3_contributes_pixels_and_obeys_beauty_depth() -> vo
 		return
 	assert_true(bool(report.get("q3_sampled", false)), "%s" % report)
 	assert_gt(int(report.get("q3_drawn_commands", 0)), 0, "%s" % report)
-	var focused_image: Image = focused.viewport.get_texture().get_image()
+	# The opaque LUM bulb re-tests its OWN beauty depth in Q3. Count how much
+	# of its beauty footprint survives into the Q3 target: an unpulled copy
+	# loses a random ulp-level subset of its fragments (speckle), so the pin
+	# is a footprint fraction, never one centre pixel.
 	var beauty_image: Image = beauty_only.viewport.get_texture().get_image()
-	var positive_delta := _max_rgb_delta(focused_image, beauty_image)
-	var center := Vector2i(64, 48)
-	var focused_center := focused_image.get_pixelv(center)
-	var beauty_center := beauty_image.get_pixelv(center)
-	var center_delta: float = abs(focused_center.r - beauty_center.r) \
-			+ abs(focused_center.g - beauty_center.g) \
-			+ abs(focused_center.b - beauty_center.b)
-	assert_gt(center_delta, 0.02,
-			"a known model pixel receives the focused-Q3 contribution: %s" %
-			positive_delta)
+	var q3_image: Image = renderer.get_q3_target_image()
+	assert_not_null(q3_image, "the terminal effect exposes its Q3 target")
+	if q3_image == null:
+		return
+	assert_eq(q3_image.get_size(), beauty_image.get_size())
+	var footprint := _q3_footprint_presence(beauty_image, q3_image)
+	assert_gt(int(footprint.footprint), 50,
+			"the bulb covers a measurable beauty footprint")
+	assert_gt(float(footprint.fraction), 0.9,
+			"the LUM copy passes its own beauty depth across its footprint: %s" %
+			footprint)
+	var focused_image: Image = focused.viewport.get_texture().get_image()
+	assert_gt(float(_max_rgb_delta(focused_image, beauty_image).delta), 0.02,
+			"the focused composite adds the bulb's glow over beauty")
 
 	# Put the same opaque beauty surface in front of both models. Their beauty
 	# remains identical, but the focused renderer must now reject every model
@@ -467,15 +492,16 @@ func test_production_object_q3_contributes_pixels_and_obeys_beauty_depth() -> vo
 	var occluded_focused: Image = focused.viewport.get_texture().get_image()
 	var occluded_beauty: Image = beauty_only.viewport.get_texture().get_image()
 	var occluded_delta := _max_rgb_delta(occluded_focused, occluded_beauty)
-	var occluded_focused_center := occluded_focused.get_pixelv(center)
-	var occluded_beauty_center := occluded_beauty.get_pixelv(center)
-	var occluded_center_delta: float = \
-			abs(occluded_focused_center.r - occluded_beauty_center.r) \
-			+ abs(occluded_focused_center.g - occluded_beauty_center.g) \
-			+ abs(occluded_focused_center.b - occluded_beauty_center.b)
-	assert_lt(occluded_center_delta, 0.01,
-			"resolved beauty depth rejects the Q3 fragment behind the known pixel: %s" %
+	assert_lt(float(occluded_delta.delta), 0.01,
+			"resolved beauty depth rejects every Q3 fragment behind the occluder: %s" %
 			occluded_delta)
+	var occluded_q3: Image = renderer.get_q3_target_image()
+	assert_not_null(occluded_q3)
+	if occluded_q3 != null:
+		var occluded_presence := _q3_footprint_presence(beauty_image, occluded_q3)
+		assert_lt(float(occluded_presence.fraction), 0.05,
+				"the occluded bulb's former footprint is empty in the Q3 target: %s" %
+				occluded_presence)
 
 
 func test_offscreen_production_q3_source_is_culled_before_vertex_packing() -> void:

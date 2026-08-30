@@ -154,9 +154,15 @@ layout(location = 7) out vec2 detail_uv;
 
 void main() {
 	vec3 draw_position = in_position;
-	if (uint(pc.params.x + 0.5) == 2u) {
-		// Match water.gdshader's relative view-depth pull so GREATER_OR_EQUAL
-		// against resolved beauty depth does not reject the water's own Q3 redraw.
+	if (uint(pc.params.x + 0.5) <= 2u) {
+		// The tracked relative view-depth pull (env-tod-re.md row 29): the
+		// water's beauty rasterization runs this exact pull, and the object
+		// copies re-test their OWN beauty depth through a CPU-composed
+		// viewproj * inv(cam) * model chain that differs from Godot's GPU
+		// proj * (view * model) at the ulp level. Pulling every object and
+		// water Q3 vertex by the same factor keeps GREATER_OR_EQUAL against
+		// resolved beauty depth from rejecting a random subset of a LUM
+		// object's own fragments.
 		draw_position = pc.camera_local.xyz +
 				(in_position - pc.camera_local.xyz) * (1.0 - 3.0e-4);
 	}
