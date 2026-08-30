@@ -35,8 +35,16 @@ public:
 			const Ref<Material> &p_clone);
 	static void register_object_source(GeometryInstance3D *p_source,
 			const Ref<Material> &p_material);
+	// The classification a material was registered with; false (and
+	// r_classification untouched) for a material outside the registry.
+	static bool object_material_classification(const Ref<Material> &p_material,
+			opennova::renderer::ObjectMaterialClassification &r_classification);
+	// Water and celestial sources. `p_additive_surfaces` (bit i = surface i)
+	// is the blend the celestial producer installed per surface: a set bit
+	// draws that disc surface additively in Q3, a clear one alpha-blends it.
 	static void register_source(GeometryInstance3D *p_source,
-			opennova::renderer::Q3Source p_kind);
+			opennova::renderer::Q3Source p_kind,
+			std::uint32_t p_additive_surfaces = 0);
 	// A producer that already holds a surface's CPU arrays (the water strip
 	// rebuilt from WaterCore every frame) hands them over here, so the cache
 	// re-packs from memory and never reads that surface back through the

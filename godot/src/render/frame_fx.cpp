@@ -1024,9 +1024,15 @@ void FrameFx::register_q3_object_source(GeometryInstance3D *p_source,
 	Q3FrameAdapter::register_object_source(p_source, p_material);
 }
 
+bool FrameFx::q3_object_material_classification(const Ref<Material> &p_material,
+		opennova::renderer::ObjectMaterialClassification &r_classification) {
+	return Q3FrameAdapter::object_material_classification(p_material,
+			r_classification);
+}
+
 void FrameFx::register_q3_source(GeometryInstance3D *p_source,
-		opennova::renderer::Q3Source p_kind) {
-	Q3FrameAdapter::register_source(p_source, p_kind);
+		opennova::renderer::Q3Source p_kind, uint32_t p_additive_surfaces) {
+	Q3FrameAdapter::register_source(p_source, p_kind, p_additive_surfaces);
 }
 
 void FrameFx::publish_q3_geometry(GeometryInstance3D *p_source, int p_surface,

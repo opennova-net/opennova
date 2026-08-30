@@ -46,7 +46,6 @@
 #include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
-#include "env/celestial.h"
 #include "env/mission_environment.h"
 
 using namespace godot;
@@ -73,6 +72,9 @@ struct RegisteredQ3Source {
 	// Bumped by invalidate_instances (rewritten MultiMesh rows): only the
 	// cached instance rows are re-read; the packed surfaces are untouched.
 	std::uint64_t instance_generation = 1;
+	// Celestial sources: bit i set = surface i was installed with the
+	// additive celestial material, so its Q3 disc draw adds.
+	std::uint32_t additive_surfaces = 0;
 };
 
 // The latest producer-published CPU arrays for one source surface.
@@ -1279,14 +1281,30 @@ void Q3FrameAdapter::register_object_source(GeometryInstance3D *p_source,
 			Q3Source::Object, p_material->get_instance_id()};
 }
 
+bool Q3FrameAdapter::object_material_classification(
+		const Ref<Material> &p_material,
+		ObjectMaterialClassification &r_classification) {
+	if (p_material.is_null())
+		return false;
+	std::lock_guard<std::mutex> lock(g_registry_mutex);
+	const auto found = g_materials.find(p_material->get_instance_id());
+	if (found == g_materials.end())
+		return false;
+	r_classification = found->second;
+	return true;
+}
+
 void Q3FrameAdapter::register_source(GeometryInstance3D *p_source,
-		Q3Source p_kind) {
+		Q3Source p_kind, std::uint32_t p_additive_surfaces) {
 	if (p_source == nullptr || p_kind == Q3Source::Object ||
 			p_kind == Q3Source::LightCorona)
 		return;
 	std::lock_guard<std::mutex> lock(g_registry_mutex);
-	g_sources[p_source->get_instance_id()] = {p_source->get_instance_id(),
-			p_kind, 0};
+	RegisteredQ3Source &registration = g_sources[p_source->get_instance_id()];
+	registration = {};
+	registration.node_id = p_source->get_instance_id();
+	registration.source = p_kind;
+	registration.additive_surfaces = p_additive_surfaces;
 }
 
 void Q3FrameAdapter::publish_geometry(GeometryInstance3D *p_source,
@@ -1585,10 +1603,11 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 						{glare.x, glare.y, glare.z};
 				candidate.submission.celestial.glare_view_fade = bool_parameter(
 						shader_material, "u_glare_view_fade", false);
-				// The authored sun/moon materials are additive too; the blend
-				// follows the registered material's shader, never the source kind.
-				candidate.submission.celestial.additive =
-						Celestial::source_material_uses_additive(shader_material);
+				// The blend is the one the Celestial installed for this surface
+				// (registered beside the source), never the source kind: the
+				// authored sun/moon FF_ST_AD_LUM discs add like the glare.
+				candidate.submission.celestial.additive = surface < 32 &&
+						((registration.additive_surfaces >> surface) & 1u) != 0u;
 				candidate.primary_texture_resource = diffuse;
 				candidate.primary_texture = server_rid(diffuse);
 			}

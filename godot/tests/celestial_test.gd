@@ -78,17 +78,41 @@ func test_body_updates_reach_installed_surface_materials() -> void:
 
 
 func test_additive_source_material_keeps_black_as_transparent_zero() -> void:
-	var source_shader := Shader.new()
-	source_shader.code = "shader_type spatial; render_mode blend_add;"
-	var source_material := ShaderMaterial.new()
-	source_material.shader = source_shader
-	assert_true(Celestial.source_material_uses_additive(source_material),
-			"FF_ST_AD-style sun/moon textures must keep additive blend semantics")
+	# The blend is the material's typed classification from its ObjectModel
+	# creation seam: the mount fixture's FF_ST_AD_LUM heat slab is additive,
+	# its FF_ST_OP body is not. Shader text is never sniffed.
+	var model := ObjectModel.new()
+	add_child_autofree(model)
+	model.set_process(false)
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(
+			MODEL_FIXTURE_ROOT + "/mount.3di")), OK)
+	model.set_object_data(data)
+	var additive_seen := false
+	var opaque_seen := false
+	for row in model.get_surface_materials():
+		var material := row as ShaderMaterial
+		if material == null or material.shader == null:
+			continue
+		var path := material.shader.resource_path
+		if "/additive" in path:
+			additive_seen = true
+			assert_true(Celestial.source_material_uses_additive(material),
+					"FF_ST_AD_LUM keeps additive blend semantics: %s" % path)
+		elif path.ends_with("/opaque.gdshader"):
+			opaque_seen = true
+			assert_false(Celestial.source_material_uses_additive(material),
+					"FF_ST_OP is not additive: %s" % path)
+	assert_true(additive_seen, "the mount fixture carries an additive surface")
+	assert_true(opaque_seen, "the mount fixture carries an opaque surface")
 
-	source_shader = Shader.new()
-	source_shader.code = "shader_type spatial; render_mode blend_mix;"
-	source_material.shader = source_shader
-	assert_false(Celestial.source_material_uses_additive(source_material))
+	var unclassified_shader := Shader.new()
+	unclassified_shader.code = "shader_type spatial; render_mode blend_add;"
+	var unclassified := ShaderMaterial.new()
+	unclassified.shader = unclassified_shader
+	assert_false(Celestial.source_material_uses_additive(unclassified),
+			"a material outside the classification registry is never additive, "
+			+ "whatever its shader text says")
 
 
 func test_star_instances_are_local_to_a_camera_anchored_multimesh() -> void:

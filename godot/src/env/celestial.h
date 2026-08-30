@@ -53,10 +53,13 @@ public:
 		return environment_capture_layer_mask_;
 	}
 
-	// Whether a source surface uses additive blending that the celestial
-	// replacement material must preserve (the stock sun/moon models author
-	// FF_ST_AD_LUM with opaque black as the additive zero; forcing those
-	// surfaces through blend_mix exposes a dark quad at the horizon).
+	// Whether a source surface's material was classified additive at its
+	// ObjectModel creation seam (the FF_ST_AD* rows: the stock sun/moon
+	// models author FF_ST_AD_LUM with opaque black as the additive zero, and
+	// forcing those surfaces through blend_mix exposes a dark quad at the
+	// horizon), so the celestial replacement material must preserve it. A
+	// material without a registered classification is never additive; no
+	// shader text is inspected.
 	static bool source_material_uses_additive(const Ref<Material> &p_source);
 
 	// One render-frame advance (the _process body) — the externally-callable
@@ -116,7 +119,19 @@ private:
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
 	Ref<ShaderMaterial> _make_celestial_material(bool p_additive,
 			int p_priority);
-	Vector<Ref<ShaderMaterial>> _apply_material_override(Node3D *p_model,
+	// One mesh of a body and the blend each installed surface material was
+	// given: bit i set = surface i renders through celestial_additive. The
+	// mask rides the Q3 registration so the adapter blends the disc the way
+	// its material was installed.
+	struct InstalledMesh {
+		MeshInstance3D *mesh = nullptr;
+		uint32_t additive_surfaces = 0;
+	};
+	struct InstalledMaterials {
+		Vector<Ref<ShaderMaterial>> materials;
+		Vector<InstalledMesh> meshes;
+	};
+	InstalledMaterials _apply_material_override(Node3D *p_model,
 			const Ref<ShaderMaterial> &p_base_material);
 	static void _collect_meshes(Node *p_node, Vector<MeshInstance3D *> &r_out);
 	void _stamp_environment_capture_layer(Node3D *p_model);
