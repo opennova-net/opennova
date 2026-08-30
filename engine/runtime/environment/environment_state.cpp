@@ -648,8 +648,6 @@ EnvShaderGlobals EnvironmentState::build_shader_globals(
 	globals.fog_end = fog.end;
 	globals.fog_start = fog.start;
 	globals.fog_type = fog.type;
-	globals.wind_sway_amount = 1.0f;
-	globals.wind_sway_phase = 0.0f;
 	return globals;
 }
 

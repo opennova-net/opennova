@@ -102,12 +102,15 @@ struct WeatherCore {
 	void set_exposure_from_outdoor_iris(float light_x, float light_y,
 			float light_z, float iris_percent, float iris_center);
 
-	// The shader-facing sway pair and lightning intensity — ONE home for the
-	// WeatherRuntime owner and the Godot binding (they must never diverge).
-	// sway_amount = (oscillator.smoothed - 0x8000) / 0x8000 * 2 (the signed
-	// wind strength the vegetation-sway shaders scale by), sway_phase =
-	// oscillator.ring_index * (2*pi / 256) (the ring position as an angle),
-	// lightning_intensity = the last SET flash level / 255.
+	// Diagnostic normalizations of the witnessed oscillator state plus the
+	// lightning intensity — ONE home for the WeatherRuntime owner and the
+	// Godot binding (they must never diverge): sway_amount =
+	// (oscillator.smoothed - 0x8000) / 0x8000 * 2, sway_phase =
+	// oscillator.ring_index * (2*pi / 256), lightning_intensity = the last
+	// SET flash level / 255. No shader reads the sway pair: retail's wind
+	// consumers are the detail foliage phase (Env_WaveOscRing[0], the
+	// renderer's FoliageFrameCompiler), the light gen block and the HUD's
+	// CTRL FLICKER/SWING registers (WeatherOscillator::ring_slot).
 	float sway_amount() const;
 	float sway_phase() const;
 	float lightning_intensity() const;

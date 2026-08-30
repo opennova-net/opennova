@@ -439,8 +439,6 @@ int main() {
 		ok &= expect(!(near(light.x, sun.x) && near(light.y, sun.y) &&
 							 near(light.z, sun.z)),
 				"night publication is not pinned to the solar vector");
-		ok &= expect(globals.base.wind_sway_amount >= 0.25f,
-				"the sway floor holds");
 		const opennova::env::WeatherShaderGlobals underwater_globals =
 				opennova::env::build_weather_shader_globals(env, weather, true);
 		const opennova::env::SceneFogValues underwater =

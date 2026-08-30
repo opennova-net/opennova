@@ -425,6 +425,21 @@ The grid-placement wind term displaces render Z by the already-halved source
 height times `sin(counter × 0.001) × 0.08`; in this tier it moves depth coverage,
 not black scene color.
 
+The DETAIL tier's phase register is `c24 = (GetTickCount() × 0.003 +
+Env_WaveOscRing[0] / 65536, 1, 0, 0.03)` (`Foliage_SetupVertexShaderConstants
+@ 0x60074a..0x60079d`: `fild` the ms word, `fmul` 0.003 (`flt_7DE9D4`), `fild
+Env_WaveOscRing`, `fmul` 1/65536 (`flt_7DE9D0`), `faddp`; the same call site
+uploads `c9 = (sin(ms × 0.001) × 0.08, 1, 0, 0)` @ 0x600706..0x600748), so
+`Foliage_WindSwayVS`'s `sin(world.x + c24.x) × bend × c24.w` sways on a
+WALL-CLOCK phase (3 rad/s, one cycle every ~2.1 s) offset by the weather
+oscillator's ring slot 0 ([env-tod-re.md](../env/env-tod-re.md) §weather tick,
+the ring readers). **Corrected 2026-08-30:** the reimpl drove the detail phase
+from the terrain-scene counter (`× 0.001` per frame, ~50x slower than retail at
+60 fps) with no weather term; `renderer::FoliageFrameCompiler` now takes the
+embedder's ms clock and `osc_ring[0]` through `FoliageViewInput` (the
+dispatcher's `set_weather`), folding the clock term modulo 2π for float
+precision. The MODEL tier keeps its per-draw counter clock.
+
 ## The `:fd` asset bake
 
 Both tiers bind the same per-definition `:fd` texture. The load-time operation

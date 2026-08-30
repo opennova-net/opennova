@@ -38,8 +38,14 @@ int32_t control_value_from_variant(const Variant &value) {
 
 using GlobalCtrlValues = opennova::renderer::ControlRegisterValues;
 
+// The weather's FLICKER / SWING registers (ObjectData::set_weather_ctrl_registers).
+int32_t g_weather_ctrl_flicker = 0;
+int32_t g_weather_ctrl_swing = 0;
+
 GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
 	GlobalCtrlValues values = {};
+	values[THREEDI_CTRL_FLICKER] = g_weather_ctrl_flicker;
+	values[THREEDI_CTRL_SWING] = g_weather_ctrl_swing;
 	if (dict.is_empty()) {
 		return values;
 	}
@@ -179,6 +185,11 @@ const std::vector<std::string> &ObjectData::_runtime_control_names() const {
 opennova::renderer::ControlRegisterValues ObjectData::runtime_control_values(
 		const Dictionary &p_ctrl_values) {
 	return global_control_values_from_dict(p_ctrl_values);
+}
+
+void ObjectData::set_weather_ctrl_registers(int32_t p_flicker, int32_t p_swing) {
+	g_weather_ctrl_flicker = p_flicker;
+	g_weather_ctrl_swing = p_swing;
 }
 
 bool ObjectData::eval_material_runtime_native(int p_index, int64_t p_time_ms,

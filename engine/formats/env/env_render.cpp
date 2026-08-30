@@ -280,6 +280,13 @@ bool LightningSequencers::tick() {
 // ---------------------------------------------------------------------------
 // Weather oscillator
 
+uint8_t WeatherOscillator::ring_slot(int32_t x_q16, int32_t y_q16, int32_t z_q16) const {
+	// [orig: HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3db5 — y >> 14 +
+	//  Env_WaveRingIndex + z >> 15 + x >> 14, `and eax, 0FFh`; the same hash
+	//  in Light_TickGenBlock @ 0x5a8ae0]
+	return static_cast<uint8_t>((z_q16 >> 15) + (y_q16 >> 14) + (x_q16 >> 14) + ring_index);
+}
+
 uint32_t WeatherOscillator::reroll() {
 	// [orig: Environment_UpdateWeatherTick @ 0x57e9fc..0x57ea16] — rol 9, then
 	// the SIGNED carry: ((int32)rotated >> 31) & 0x1ABB09 (x86 cdq/and/add).

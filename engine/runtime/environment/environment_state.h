@@ -56,8 +56,6 @@ struct EnvShaderGlobals {
 	float fog_end = 0.0f;
 	float fog_start = 0.0f;
 	int fog_type = 0;
-	float wind_sway_amount = 1.0f;
-	float wind_sway_phase = 0.0f;
 };
 
 // The fog state selected for one rendered scene pass. Retail re-applies this

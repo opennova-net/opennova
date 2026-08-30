@@ -251,6 +251,14 @@ struct WeatherOscillator {
 	uint32_t reroll();
 	// One 62 Hz oscillator tick; returns the tick's scaled amplitude.
 	int tick();
+	// The ring slot every reader hashes a mission-frame 16.16 position onto:
+	// (z >> 15) + (y >> 14) + (x >> 14) + ring_index, the low byte. The light
+	// gen block reads amp_ring[slot] per light; the HUD cache reads
+	// amp_ring[slot] and osc_ring[slot] at the LOCAL PLAYER into the global
+	// CTRL FLICKER (3) / SWING (4) registers every frame
+	// [orig: Light_TickGenBlock @ 0x5a8ae0; HUD_CacheEntityDisplayInfo
+	//  @ 0x4a3d9e..0x4a3dd1 -> 0x83FD00 / 0x83FD08].
+	uint8_t ring_slot(int32_t x_q16, int32_t y_q16, int32_t z_q16) const;
 };
 
 // ---------------------------------------------------------------------------

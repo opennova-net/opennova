@@ -528,6 +528,18 @@ int main() {
 			}
 		}
 		if (!expect(wind.amp_ring[wind.ring_index] >= 0, "amp ring floors at 0")) return 1;
+		// The readers' position hash [orig: HUD_CacheEntityDisplayInfo
+		//  @ 0x4a3d9e..0x4a3db5; Light_TickGenBlock @ 0x5a8ae0]: (z >> 15) +
+		// (y >> 14) + (x >> 14) + the ring index, the low byte.
+		wind.ring_index = 7;
+		if (!expect(wind.ring_slot(3 << 14, 5 << 14, 11 << 15) ==
+						static_cast<uint8_t>(3 + 5 + 11 + 7),
+				"ring slot hashes the position onto the ring index")) return 1;
+		if (!expect(wind.ring_slot(-(1 << 14), 0, 0) == static_cast<uint8_t>(-1 + 7),
+				"ring slot keeps the arithmetic shift of a negative coordinate")) return 1;
+		wind.ring_index = 250;
+		if (!expect(wind.ring_slot(10 << 14, 0, 0) == static_cast<uint8_t>(260),
+				"ring slot wraps at the byte")) return 1;
 	}
 
 	// --- Lightning sequencers [orig: @ 0x57ec6f (A) / @ 0x57ed0a (B)] --------

@@ -259,6 +259,26 @@ the weather keeps advancing while the entities are held (the reimpl's
 - Wind PRNG: `r = rol32(r, 9); if (r < 0) r += 0x1ABB09`; `rand = r & 0xFFF`. Wave amplitude
   `(windScale * (15*prev + rand²>>8)) >> 12` into a 256-entry ring (`0xFFFF - 2*amp`,
   clamped ≥ 0) plus a sprung oscillator ring (1/32 + 63/64 damping toward 0x8000).
+  **Ring readers (witnessed 2026-08-30 — every path `Env_WindScale` reaches the frame):**
+  `Env_WaveAmpRing[(z >> 15) + (y >> 14) + (x >> 14) + Env_WaveRingIndex]` (the low byte)
+  is the light flicker sample (`Light_TickGenBlock @ 0x5a8ae0`,
+  `Light_SetupTerrainProjectedPass @ 0x5aaa13`, `foliage_setup_render_matrices
+  @ 0x5aadf6` — each writes it into the global CTRL `FLICKER` slot `0x83FD00` before its
+  RgbGen evaluation) and, hashed on the LOCAL PLAYER's position by
+  `HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3dd1` every frame, the CTRL `FLICKER`
+  (ordinal 3, `0x83FD00`) and `SWING` (ordinal 4, `0x83FD08` = `Env_WaveOscRing[same]`)
+  registers every model's CTRL tracks read; `Env_WaveOscRing[0]` — the ring's slot 0,
+  refreshed once per 256 ticks — is the weather term of the DETAIL foliage sway phase,
+  `c24.x = GetTickCount() * 0.003 + Env_WaveOscRing[0] / 65536` with `c24.w = 0.03`
+  (`Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d`;
+  [foliage-re.md](../foliage/foliage-re.md)). Reimpl: `env::WeatherOscillator::ring_slot`
+  is the shared hash; the light flicker (`renderer::light_flicker_value`) and the
+  `Weather` node's per-frame FLICKER/SWING publication (`ObjectData::
+  set_weather_ctrl_registers`, the local player's slot) read the ONE weather home's
+  rings, and the `FoliageDispatcher` feeds the ms clock + `osc_ring[0]` into
+  `renderer::FoliageFrameCompiler`. The former `wind_sway_amount/phase` shader globals
+  (an unwitnessed normalization nothing consumed) are gone; `sway_amount/sway_phase`
+  remain as diagnostics of the same ring state.
 - Earthquake jitter while `Env_QuakeTicks` counts down (ported 2026-08-30 as
   `WeatherState::apply_quake_jitter`): pool-0 entities with an item (`ItemTypeIndex`),
   not airborne (`Flags & 0x2000` clear), no parent — `X += (int16)r >> 6`,

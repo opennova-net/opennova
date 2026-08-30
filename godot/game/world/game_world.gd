@@ -286,6 +286,9 @@ func _ready() -> void:
 			# The applier reads the native detail-cell handoff and the composed
 			# surface textures through this wired owner (never a parent probe).
 			_dispatcher.set_terrain(_terrain)
+			# The detail sway phase reads the weather oscillator's ring slot 0
+			# (retail Env_WaveOscRing[0] in Foliage_SetupVertexShaderConstants).
+			_dispatcher.set_weather(_weather)
 	_sun_shadow = SunShadow.new()
 	_sun_shadow.name = "SunShadow"
 	_sun_shadow.projection_mode = SunShadow.PROJECTION_DYNAMIC

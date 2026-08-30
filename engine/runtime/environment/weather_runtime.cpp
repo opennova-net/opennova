@@ -493,9 +493,6 @@ WeatherShaderGlobals build_weather_shader_globals(
 		globals.base.fog_start = fog.start;
 		globals.base.fog_type = fog.type;
 	}
-	globals.base.wind_sway_amount =
-			std::max(0.25f, std::fabs(weather.sway_amount()));
-	globals.base.wind_sway_phase = weather.sway_phase();
 	// The modulator /64 gain (iris exposure) for self-lit/effect shaders
 	// [orig: Render_UnpackModulatorToLightScale @ 0x58db30].
 	globals.color_src_gain = weather.color_src_gain();

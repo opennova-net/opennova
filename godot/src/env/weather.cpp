@@ -5,10 +5,13 @@
 
 #include "env/env_file.h"
 #include "env/mission_environment.h"
+#include "object/object_data.h"
 #include "simulation/simulation.h"
 
 #include <formats/mission/bms.h>
 #include <runtime/environment/weather_seed.h>
+
+#include <cmath>
 
 namespace godot {
 
@@ -203,6 +206,20 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 	rs->global_shader_parameter_set("opennova_fog_start",
 			globals.base.fog_start);
 	rs->global_shader_parameter_set("opennova_fog_type", globals.base.fog_type);
+	// The HUD cache's per-frame CTRL publication: the local player's position
+	// hashed into the wave rings lands in the global FLICKER (amp ring) and
+	// SWING (osc ring) registers every model's CTRL tracks read (retail
+	// HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3dd1 -> 0x83FD00 / 0x83FD08).
+	Simulation *sim = _bound_sim();
+	if (sim != nullptr && sim->has_local_player()) {
+		const Vector3 p = sim->get_local_player_position(); // Godot (x, up, -y)
+		const opennova::env::WeatherOscillator &osc = runtime_.core().oscillator;
+		const uint8_t slot = osc.ring_slot(
+				static_cast<int32_t>(std::lround(static_cast<double>(p.x) * 65536.0)),
+				static_cast<int32_t>(std::lround(static_cast<double>(-p.z) * 65536.0)),
+				static_cast<int32_t>(std::lround(static_cast<double>(p.y) * 65536.0)));
+		ObjectData::set_weather_ctrl_registers(osc.amp_ring[slot], osc.osc_ring[slot]);
+	}
 }
 
 void Weather::_ready() {

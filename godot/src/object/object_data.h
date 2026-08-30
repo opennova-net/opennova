@@ -253,6 +253,13 @@ public:
 	// evaluates every dynamic material without Dictionary/Variant round trips.
 	static opennova::renderer::ControlRegisterValues runtime_control_values(
 			const Dictionary &p_ctrl_values);
+	// The weather's global CTRL registers, FLICKER (3) and SWING (4): the HUD
+	// cache writes the local player's position hash into the wave rings there
+	// every frame and every model's CTRL tracks read them (retail
+	// HUD_CacheEntityDisplayInfo @ 0x4a3dcb / @ 0x4a3dd1 -> the global slots
+	// 0x83FD00 / 0x83FD08). A model's own dictionary entry wins; the Weather
+	// node publishes these once per display frame.
+	static void set_weather_ctrl_registers(int32_t p_flicker, int32_t p_swing);
 	bool eval_material_runtime_native(int p_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_values,
 			opennova::renderer::MaterialRuntime &r_runtime) const;
