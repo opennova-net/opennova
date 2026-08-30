@@ -36,6 +36,14 @@ SkyFrameState build_sky_frame(const EnvironmentState &env) {
 	frame.sun_dir = env.sun_direction();
 	frame.light_dir = env.light_direction();
 	frame.skyfog_color = env.skyfog_color();
+	// The dome's fog constant c9.x is the RAW smoothed fog distance
+	// (Env_FogDistCurrent x 0.9 / 65536; the shader applies the 0.9), never
+	// Environment_GetFogEndDistance's overcast-scaled end that the object and
+	// terrain passes fog with: the dome rim keeps converging on the frame
+	// clear's skyfog at the authored distance while overcast pulls the world
+	// fog in. [orig: render_skybox @ 0x5792c2 (Env_FogDistCurrent *
+	// 0.00001373291 into c9.x, uploaded @ 0x579751 / @ 0x579991);
+	// Environment_GetFogEndDistance @ 0x57e40e..0x57e435 is the world end]
 	frame.fog_end = env.fog_level();
 	frame.sky_speed = env.sky_speed();
 	frame.sky_height = env.sky_height();

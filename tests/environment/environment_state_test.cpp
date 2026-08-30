@@ -5,6 +5,7 @@
 // generation discipline, the reset/prewarm epoch, the network wire units, and
 // the shader-global publication policy. RE record: docs/env/env-tod-re.md.
 #include <runtime/environment/environment_state.h>
+#include <runtime/environment/sky_frame.h>
 #include <runtime/environment/water_frame.h>
 #include <runtime/environment/weather_runtime.h>
 #include <runtime/renderer/device_fog.h>
@@ -508,6 +509,15 @@ int main() {
 								values.fog_end, values.fog_start,
 								values.fog_end, values.fog_type, true), 0.0f),
 				"the corona fold's linear range runs start..end of the device pair");
+		// The sky dome is the one consumer that does NOT take the scaled end:
+		// c9.x is the raw smoothed distance [orig: render_skybox @ 0x5792c2].
+		const opennova::env::SkyFrameState sky =
+				opennova::env::build_sky_frame(env);
+		ok &= expect(sky.loaded && near(sky.fog_end, env.fog_level()) &&
+						near(sky.fog_end, 640.0f) &&
+						!near(sky.fog_end, device_end),
+				"the dome fog end is the unscaled smoothed fog distance, not the "
+				"overcast-scaled device end");
 	}
 
 	// --- the 62 Hz autonomous accumulator clamp ------------------------------
