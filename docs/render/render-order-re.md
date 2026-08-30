@@ -199,11 +199,13 @@ object duplicates back-to-front, and retains the fixed water/celestial/sun
 bracket. Geometry is packed once per (source, surface) into the adapter's
 retained cache (`q3_geometry_cache`): one server read at first sight, one
 device buffer per entry uploaded per generation, MultiMesh rows read once per
-source generation, skinned sources re-skinned from their cached bind-space
-arrays; the water strip publishes the CPU arrays it uploads each frame and the
-static carve invalidates its batch, so a stable frame reads nothing back and
-re-packs nothing (the backend report's `q3_readbacks_this_frame` and
-`q3_packed_vertices` pin it).
+instance generation, skinned sources re-skinned from their cached bind-space
+arrays; the water strip publishes the CPU arrays it uploads each frame, and a
+static RLOD switch or destruction carve invalidates only its populations'
+instance rows (the packed surfaces and their device buffers stay), so a stable
+frame reads nothing back and re-packs nothing and a row rewrite re-reads rows
+alone (the backend report's `q3_readbacks_this_frame`,
+`q3_instance_row_reads_this_frame` and `q3_packed_vertices` pin it).
 The render callback re-shades each LUM copy as the SELFLUM NORMAL block into
 the black-cleared Q3 target (`_FFP.fx` copies the NORMAL pass block into the
 GLOW slot `@ 0x5afc7f`: Diffuse1 x Detail MODULATE2X x RGB modulator x

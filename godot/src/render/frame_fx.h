@@ -106,12 +106,15 @@ public:
 			opennova::renderer::Q3Source p_kind);
 	// Producers that already hold a surface's CPU arrays publish them here
 	// (the water strip every frame), so the Q3 geometry cache re-packs from
-	// memory instead of reading the mesh back through the server; producers
-	// that rebuild a registered mesh or rewrite MultiMesh instance transforms
-	// invalidate the source so its cache rows are re-read once.
+	// memory instead of reading the mesh back through the server. A producer
+	// that rebuilt a registered mesh invalidates the source (its surfaces are
+	// re-read once); one that only rewrote a MultiMesh's instance transforms
+	// (a static RLOD switch, a destruction carve) invalidates its instances,
+	// which re-reads the rows and never the packed surfaces.
 	static void publish_q3_geometry(GeometryInstance3D *p_source, int p_surface,
 			const Array &p_arrays);
 	static void invalidate_q3_source(GeometryInstance3D *p_source);
+	static void invalidate_q3_instances(GeometryInstance3D *p_source);
 
 	// Ordered device leg, driven from GameFramePipeline immediately after the
 	// local-view camera placement. This module must NOT self-clock: a node

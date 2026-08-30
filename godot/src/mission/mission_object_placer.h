@@ -327,11 +327,13 @@ private:
 			int p_live_lod);
 	// Write every population slot of one retained instance: live in the
 	// populations of `p_live_lod`, zero-scaled at its origin everywhere else.
-	// Visible populations touched are collected for the Q3 source
-	// invalidation.
+	// Visible populations touched are collected for the Q3 instance-row
+	// invalidation (the populations' meshes never change, so only their rows
+	// are re-read; the packed Q3 surfaces stay cached).
 	static void _write_static_instance_slots(StaticLodInstance &p_instance,
 			int p_live_lod, HashSet<uint64_t> &r_touched);
-	static void _invalidate_static_q3_sources(const HashSet<uint64_t> &p_touched);
+	static void _invalidate_static_q3_instances(
+			const HashSet<uint64_t> &p_touched);
 	void _add_individual_static_shadow_siblings(ObjectModel *p_model,
 			const String &p_graphic, const Transform3D &p_local_xform,
 			const String &p_suffix);

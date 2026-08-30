@@ -77,12 +77,14 @@ struct Q3PackedStream {
 // Main-thread geometry cache for the focused Q3 adapter, keyed by (source
 // node id, surface index). An entry packs once when first seen and re-packs
 // only when its generation moves: the producer published new arrays, the
-// source was invalidated, or the pack parameters (the material's UV
-// transform, the water UV state) changed. Skinned entries keep their
+// source's geometry was invalidated, or the pack parameters (the material's
+// UV transform, the water UV state) changed. Skinned entries keep their
 // bind-space arrays and re-skin into a fresh stream every call. Nothing here
 // reads a mesh back through the server per frame; the one-time first-sight
 // read is counted so a stable frame can prove it made none. The cache also
-// retains MultiMesh instance rows per source under the same generation.
+// retains MultiMesh instance rows per source under the source's separate
+// instance generation: a static RLOD switch or destruction carve rewrites
+// rows only, so it re-reads the rows and never touches the packed surfaces.
 //
 // Threading: every method runs on the compile (main) thread. Streams are
 // shared immutably with the render side; evictions are handed over through
@@ -101,8 +103,9 @@ public:
 
 	struct Request {
 		Key key;
-		// The registry generation of the source (invalidate_q3_source bumps it).
-		std::uint64_t source_generation = 1;
+		// The source's geometry generation (invalidate_q3_source bumps it when
+		// a producer rebuilt the mesh).
+		std::uint64_t geometry_generation = 1;
 		// A producer publication for this surface and its generation, or null.
 		const Q3SurfaceArrays *published = nullptr;
 		std::uint64_t published_generation = 0;
@@ -113,6 +116,8 @@ public:
 
 	struct FrameCounters {
 		std::size_t readbacks = 0;
+		// MultiMesh sources whose instance rows were (re-)read this frame.
+		std::size_t instance_row_reads = 0;
 		std::size_t repacked_entries = 0;
 		std::size_t skinned_entries = 0;
 		std::size_t packed_vertices = 0;
@@ -128,9 +133,10 @@ public:
 	std::shared_ptr<const Q3PackedStream> acquire(const Request &p_request,
 			const std::function<Array()> &p_read_arrays);
 	// Cached local instance rows of a MultiMesh source, re-read through the
-	// server only after an invalidation or an instance-count change.
+	// server only after an instance invalidation (invalidate_q3_instances) or
+	// an instance-count change; the packed surfaces are untouched by either.
 	const std::vector<Transform3D> &instance_transforms(
-			std::uint64_t p_source_id, std::uint64_t p_source_generation,
+			std::uint64_t p_source_id, std::uint64_t p_instance_generation,
 			MultiMesh *p_multimesh);
 	// Drops every entry and instance row whose source no longer exists; the
 	// entries become pending evictions for the render side.
@@ -151,7 +157,7 @@ private:
 	struct Entry {
 		std::uint64_t entry_id = 0;
 		std::uint64_t generation = 0;
-		std::uint64_t source_generation = 0;
+		std::uint64_t geometry_generation = 0;
 		std::uint64_t published_generation = 0;
 		bool arrays_read = false;
 		Q3SurfaceArrays arrays;
@@ -160,7 +166,7 @@ private:
 	};
 
 	struct InstanceRows {
-		std::uint64_t source_generation = 0;
+		std::uint64_t instance_generation = 0;
 		int instance_count = -1;
 		int visible_instance_count = -1;
 		std::vector<Transform3D> local_transforms;

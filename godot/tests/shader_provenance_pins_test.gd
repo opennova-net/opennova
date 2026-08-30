@@ -938,6 +938,9 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		"result[\"q3_far_band\"] = Vector2(kQ3FarBandMinZ, kQ3FarBandMaxZ)",
 		"cache.acquire(request",
 		"result[\"q3_readbacks_this_frame\"]",
+		"result[\"q3_instance_row_reads_this_frame\"]",
+		"registration.instance_generation, multimesh.ptr()",
+		"request.geometry_generation = registration.geometry_generation",
 	], "q3_frame_adapter.cpp")
 	# The interleaved Q3 stream (with the detail UV2 row) is packed once per
 	# cache entry generation, never re-read through the server per frame.
@@ -945,6 +948,7 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 	_contains_all(q3_cache, [
 		"Mesh::ARRAY_TEX_UV2",
 		"++counters_.readbacks",
+		"++counters_.instance_row_reads",
 		"kQ3VertexStride",
 	], "q3_geometry_cache.cpp")
 

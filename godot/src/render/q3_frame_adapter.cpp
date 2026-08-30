@@ -67,9 +67,12 @@ struct RegisteredQ3Source {
 	std::uint64_t node_id = 0;
 	Q3Source source = Q3Source::Object;
 	std::uint64_t material_id = 0;
-	// Bumped by invalidate_source; the geometry cache re-reads the source's
-	// surfaces and instance rows once when it moves.
-	std::uint64_t generation = 1;
+	// Bumped by invalidate_source (a rebuilt mesh): the geometry cache
+	// re-reads and re-packs the source's surfaces once when it moves.
+	std::uint64_t geometry_generation = 1;
+	// Bumped by invalidate_instances (rewritten MultiMesh rows): only the
+	// cached instance rows are re-read; the packed surfaces are untouched.
+	std::uint64_t instance_generation = 1;
 };
 
 // The latest producer-published CPU arrays for one source surface.
@@ -653,6 +656,7 @@ public:
 	std::size_t packed_vertex_bytes = 0;
 	std::size_t repacked_entries = 0;
 	std::size_t readbacks_this_frame = 0;
+	std::size_t instance_row_reads_this_frame = 0;
 	std::size_t cached_entries = 0;
 	std::size_t cached_vertex_bytes = 0;
 
@@ -1199,6 +1203,10 @@ Dictionary Q3FrameAdapter::Impl::report() const {
 	result["q3_repacked_entries"] = static_cast<int64_t>(repacked_entries);
 	result["q3_readbacks_this_frame"] =
 			static_cast<int64_t>(readbacks_this_frame);
+	// MultiMesh sources whose rows were re-read this frame (an instance
+	// invalidation or a count change); a stable frame reports 0.
+	result["q3_instance_row_reads_this_frame"] =
+			static_cast<int64_t>(instance_row_reads_this_frame);
 	result["q3_cached_entries"] = static_cast<int64_t>(cached_entries);
 	result["q3_cached_vertex_bytes"] =
 			static_cast<int64_t>(cached_vertex_bytes);
@@ -1270,7 +1278,16 @@ void Q3FrameAdapter::invalidate_source(GeometryInstance3D *p_source) {
 	std::lock_guard<std::mutex> lock(g_registry_mutex);
 	const auto found = g_sources.find(p_source->get_instance_id());
 	if (found != g_sources.end())
-		++found->second.generation;
+		++found->second.geometry_generation;
+}
+
+void Q3FrameAdapter::invalidate_instances(GeometryInstance3D *p_source) {
+	if (p_source == nullptr)
+		return;
+	std::lock_guard<std::mutex> lock(g_registry_mutex);
+	const auto found = g_sources.find(p_source->get_instance_id());
+	if (found != g_sources.end())
+		++found->second.instance_generation;
 }
 
 void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
@@ -1367,11 +1384,11 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		AABB emitted_world_bounds;
 		bool has_emitted_world_bounds = false;
 		if (multimesh.is_valid()) {
-			// Instance rows are read once per source generation; only the
+			// Instance rows are read once per instance generation; only the
 			// frustum test against them runs per frame.
 			const std::vector<Transform3D> &local_transforms =
 					cache.instance_transforms(registration.node_id,
-							registration.generation, multimesh.ptr());
+							registration.instance_generation, multimesh.ptr());
 			const Transform3D source_transform = source->get_global_transform();
 			const AABB mesh_bounds = mesh->get_aabb();
 			emitted_transforms.reserve(local_transforms.size());
@@ -1422,7 +1439,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			candidate.submission.surface_index = surface;
 			Q3GeometryCache::Request request;
 			request.key = {registration.node_id, surface};
-			request.source_generation = registration.generation;
+			request.geometry_generation = registration.geometry_generation;
 			const auto publication = published.find(request.key);
 			if (publication != published.end()) {
 				request.published = &publication->second.arrays;
@@ -1614,6 +1631,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 		impl_->packed_vertex_bytes = counters.packed_vertex_bytes;
 		impl_->repacked_entries = counters.repacked_entries;
 		impl_->readbacks_this_frame = counters.readbacks;
+		impl_->instance_row_reads_this_frame = counters.instance_row_reads;
 		impl_->cached_entries = cache.entry_count();
 		impl_->cached_vertex_bytes = cache.cached_vertex_bytes();
 	}

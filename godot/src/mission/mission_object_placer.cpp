@@ -1680,7 +1680,7 @@ int MissionObjectPlacer::update_static_lods(
 		instance.active_lod = next_lod;
 		++static_lod_switches_;
 	}
-	_invalidate_static_q3_sources(touched);
+	_invalidate_static_q3_instances(touched);
 	return static_lod_switches_;
 }
 
@@ -1738,10 +1738,10 @@ void MissionObjectPlacer::_write_static_instance_slots(
 	}
 }
 
-void MissionObjectPlacer::_invalidate_static_q3_sources(
+void MissionObjectPlacer::_invalidate_static_q3_instances(
 		const HashSet<uint64_t> &p_touched) {
 	for (const uint64_t node_id : p_touched) {
-		FrameFx::invalidate_q3_source(Object::cast_to<GeometryInstance3D>(
+		FrameFx::invalidate_q3_instances(Object::cast_to<GeometryInstance3D>(
 				ObjectDB::get_instance(node_id)));
 	}
 }

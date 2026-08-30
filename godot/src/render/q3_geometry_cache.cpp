@@ -165,10 +165,11 @@ std::shared_ptr<const Q3PackedStream> Q3GeometryCache::acquire(
 	if (entry.entry_id == 0)
 		entry.entry_id = next_entry_id_++;
 	bool dirty = false;
-	if (p_request.source_generation != entry.source_generation) {
-		// An invalidated source may have rebuilt its mesh: drop the arrays so
-		// they are re-read (once) unless a publication supersedes them.
-		entry.source_generation = p_request.source_generation;
+	if (p_request.geometry_generation != entry.geometry_generation) {
+		// A geometry-invalidated source rebuilt its mesh: drop the arrays so
+		// they are re-read (once) unless a publication supersedes them. Instance
+		// row invalidations never reach here.
+		entry.geometry_generation = p_request.geometry_generation;
 		entry.arrays = Q3SurfaceArrays();
 		entry.arrays_read = false;
 		entry.published_generation = 0;
@@ -212,18 +213,19 @@ std::shared_ptr<const Q3PackedStream> Q3GeometryCache::acquire(
 }
 
 const std::vector<Transform3D> &Q3GeometryCache::instance_transforms(
-		std::uint64_t p_source_id, std::uint64_t p_source_generation,
+		std::uint64_t p_source_id, std::uint64_t p_instance_generation,
 		MultiMesh *p_multimesh) {
 	if (p_multimesh == nullptr)
 		return no_transforms_;
 	InstanceRows &rows = instances_[p_source_id];
 	const int instance_count = p_multimesh->get_instance_count();
 	const int visible = p_multimesh->get_visible_instance_count();
-	if (rows.source_generation == p_source_generation &&
+	if (rows.instance_generation == p_instance_generation &&
 			rows.instance_count == instance_count &&
 			rows.visible_instance_count == visible)
 		return rows.local_transforms;
-	rows.source_generation = p_source_generation;
+	rows.instance_generation = p_instance_generation;
+	++counters_.instance_row_reads;
 	rows.instance_count = instance_count;
 	rows.visible_instance_count = visible;
 	const int count = visible < 0 ? instance_count : std::min(visible, instance_count);

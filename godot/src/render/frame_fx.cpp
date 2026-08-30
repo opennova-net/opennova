@@ -1033,6 +1033,10 @@ void FrameFx::invalidate_q3_source(GeometryInstance3D *p_source) {
 	Q3FrameAdapter::invalidate_source(p_source);
 }
 
+void FrameFx::invalidate_q3_instances(GeometryInstance3D *p_source) {
+	Q3FrameAdapter::invalidate_instances(p_source);
+}
+
 void FrameFx::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&FrameFx::get_backend_report);
@@ -1044,6 +1048,9 @@ void FrameFx::_bind_methods() {
 	ClassDB::bind_static_method("FrameFx",
 			D_METHOD("invalidate_q3_source", "source"),
 			&FrameFx::invalidate_q3_source);
+	ClassDB::bind_static_method("FrameFx",
+			D_METHOD("invalidate_q3_instances", "source"),
+			&FrameFx::invalidate_q3_instances);
 	BIND_CONSTANT(kBeautyCameraMask);
 }
 

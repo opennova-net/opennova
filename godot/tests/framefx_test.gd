@@ -1,6 +1,8 @@
 extends GutTest
 
 const Q3_LUM_3DI := "res://../fixtures/threedi/synth/armory.3di"
+const PLACER_ITEMS_DEF := "res://../fixtures/def/items.def"
+const PLACER_DEF_ROOT := "res://../fixtures/def"
 
 
 # Beauty-camera canary. Q3 sources are registered only by production typed
@@ -642,6 +644,111 @@ func test_stable_q3_scene_packs_once_and_never_reads_the_server_back() -> void:
 	var fourth := renderer.get_backend_report()
 	assert_eq(int(fourth.get("q3_readbacks_this_frame", -1)), 0)
 	assert_eq(int(fourth.get("q3_packed_vertices", -1)), 0)
+
+
+func test_static_row_rewrite_rereads_instance_rows_without_a_readback() -> void:
+	# A static RLOD switch or destruction carve rewrites MultiMesh rows only;
+	# the population's mesh never changes. The placer therefore invalidates
+	# the population's INSTANCES: the cache re-reads its rows once and keeps
+	# the packed surfaces, so no server readback and no re-pack follow.
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(96, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.current = true
+	viewport.add_child(camera)
+
+	# The production LUM material and mesh: the armory fixture's opaque bulb,
+	# harvested from a template ObjectModel the way the placer harvests.
+	var template := ObjectModel.new()
+	viewport.add_child(template)
+	template.set_process(false)
+	template.set_object_data(_lum_object_data())
+	_hide_non_opaque_lum_surfaces(template)
+	var bulb := _first_visible_mesh(template)
+	assert_not_null(bulb, "the armory fixture carries an opaque LUM bulb")
+	if bulb == null:
+		return
+	var bulb_mesh: Mesh = bulb.mesh
+	var bulb_material: Material = bulb.get_active_material(0)
+	viewport.remove_child(template)
+	template.free()
+
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var record := mission.add_entity(
+			MissionData.KIND_BUILDING, 105004, Vector3.ZERO, Vector3.ZERO)
+	assert_false(record.is_empty())
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(PLACER_ITEMS_DEF)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path(PLACER_DEF_ROOT))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", ObjectData.new(), [{
+				"mesh": bulb_mesh, "material": bulb_material,
+				"offset": Transform3D.IDENTITY, "submesh": 0,
+			}]))
+	var parent := Node3D.new()
+	viewport.add_child(parent)
+	var stats: Dictionary = placer.place(mission, parent)
+	assert_eq(int(stats.get("batched", -1)), 1,
+			"the bulb population is a static batch: %s" % stats)
+	var population := parent.get_node_or_null(
+			"MissionObjects/Batch_StaticCrate1_0") as MultiMeshInstance3D
+	assert_not_null(population, "the population is emitted")
+	if population == null:
+		return
+	# Look at the bulb from a few units away so both the population's source
+	# bounds and its one instance pass the frustum test under every renderer
+	# (headless Godot keeps no MultiMesh row data and reads rows as identity).
+	var center: Vector3 = population.global_transform * bulb_mesh.get_aabb().get_center()
+	camera.position = center + Vector3(0.0, 0.0, 8.0)
+	camera.look_at(center, Vector3.UP)
+
+	# The READY compile is the population's first sight.
+	var renderer := FrameFx.new()
+	viewport.add_child(renderer)
+	var first := renderer.get_backend_report()
+	assert_gt(int(first.get("q3_submitted_commands", 0)), 0,
+			"the static population is a typed Q3 source: %s" % first)
+	assert_eq(int(first.get("q3_instance_row_reads_this_frame", -1)), 1,
+			"first sight reads the population's rows once")
+	assert_eq(int(first.get("q3_readbacks_this_frame", -1)),
+			bulb_mesh.get_surface_count(),
+			"first sight reads each surface back once")
+	renderer.advance_frame()
+	var stable := renderer.get_backend_report()
+	assert_eq(int(stable.get("q3_readbacks_this_frame", -1)), 0)
+	assert_eq(int(stable.get("q3_packed_vertices", -1)), 0)
+	assert_eq(int(stable.get("q3_instance_row_reads_this_frame", -1)), 0,
+			"a stable frame re-reads no rows")
+	var cached_entries := int(stable.get("q3_cached_entries", 0))
+	assert_gt(cached_entries, 0)
+
+	# The destruction carve rewrites the population's rows through the
+	# production path (the RLOD switch shares _write_static_instance_slots).
+	var bms_id := int(record.get("bms_id", 0))
+	assert_true(placer.hide_static_instance(bms_id) is Transform3D)
+	renderer.advance_frame()
+	var carved := renderer.get_backend_report()
+	assert_eq(int(carved.get("q3_instance_row_reads_this_frame", -1)), 1,
+			"the rewritten rows are re-read once")
+	assert_eq(int(carved.get("q3_readbacks_this_frame", -1)), 0,
+			"a row rewrite never reads the population's mesh back: %s" % carved)
+	assert_eq(int(carved.get("q3_packed_vertices", -1)), 0,
+			"a row rewrite never re-packs the population's surfaces")
+	assert_eq(int(carved.get("q3_repacked_entries", -1)), 0)
+	assert_eq(int(carved.get("q3_cached_entries", -1)), cached_entries,
+			"the packed surfaces stay cached across the rewrite")
+	renderer.advance_frame()
+	var settled := renderer.get_backend_report()
+	assert_eq(int(settled.get("q3_instance_row_reads_this_frame", -1)), 0)
+	assert_eq(int(settled.get("q3_readbacks_this_frame", -1)), 0)
+	assert_eq(int(settled.get("q3_packed_vertices", -1)), 0)
+	renderer.shutdown()
 
 
 func test_offscreen_production_q3_source_is_culled_before_vertex_packing() -> void:

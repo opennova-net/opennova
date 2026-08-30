@@ -311,7 +311,7 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 		instance.carved = true;
 		HashSet<uint64_t> touched;
 		_write_static_instance_slots(instance, -1, touched);
-		_invalidate_static_q3_sources(touched);
+		_invalidate_static_q3_instances(touched);
 	}
 	hidden_destruction_instances_.insert(p_bms_id);
 	++static_light_draw_source_revision_;
@@ -335,7 +335,7 @@ bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
 		instance.carved = false;
 		HashSet<uint64_t> touched;
 		_write_static_instance_slots(instance, instance.active_lod, touched);
-		_invalidate_static_q3_sources(touched);
+		_invalidate_static_q3_instances(touched);
 	}
 	hidden_destruction_instances_.erase(p_bms_id);
 	++static_light_draw_source_revision_;
