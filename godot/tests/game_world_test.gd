@@ -3357,3 +3357,39 @@ func _write_bytes(path: String, bytes: PackedByteArray) -> void:
 # The shared PFF3 fixture writer (TestPff.write), asserted here.
 func _write_pff(path: String, entries: Array) -> void:
 	assert_eq(TestPff.write(path, entries), OK, "PFF fixture should be writable: %s" % path)
+
+
+# Stage the minimal fixture plus the armory.3di fixture (authored OOBJ
+# records) as item 102001's GuardTwr1 graphic, so the placed building builds
+# authored occluders.
+func _stage_occluder_building_fixture(name: String) -> String:
+	var root_dir := _stage_minimal_fixture(name)
+	assert_eq(DirAccess.copy_absolute(
+			ProjectSettings.globalize_path("res://../fixtures/threedi/synth/armory.3di"),
+			root_dir.path_join("GuardTwr1.3di")), OK)
+	_append_building_item(root_dir)
+	return root_dir
+
+
+func test_world_owns_the_occlusion_culling_switch() -> void:
+	# Godot's occlusion consumer is a world-level decision (docs/render/
+	# render-occlusion-re.md "Conservative device occluders"): on while the
+	# loaded mission placed authored OOBJ occluders and the viewport is
+	# RD-backed, off again on unload. No ObjectModel flips it.
+	var root_dir := _stage_occluder_building_fixture("occl_switch")
+	var world := _make_world()
+	add_child_autofree(world)
+	var viewport := world.get_viewport()
+	viewport.use_occlusion_culling = false
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
+		mission.add_entity(
+				MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))
+	var stats: Dictionary = world.get_mission_stats()
+	assert_gt(int(stats.get("authored_occluder_models", 0)), 0,
+			"the armory building placed authored occluders")
+	var rd_backed := RenderingServer.get_rendering_device() != null
+	assert_eq(viewport.use_occlusion_culling, rd_backed,
+			"the world switches the consumer on only for an RD-backed viewport")
+	world.unload()
+	assert_false(viewport.use_occlusion_culling,
+			"unload switches the consumer off for the next mission")

@@ -649,6 +649,13 @@ public:
 	bool are_authored_occluders_enabled() const {
 		return authored_occluders_enabled_;
 	}
+	// The retained OccluderInstance3D children the last build created (0 when
+	// authored occluders are off or the model carries no eligible records).
+	// The world decides from this whether to switch Godot's occlusion culling
+	// on for its viewport; a model never flips viewport state itself.
+	int get_authored_occluder_count() const {
+		return static_cast<int>(authored_occluders_.size());
+	}
 	void rebuild();
 	void refresh_render_order();
 	static void mark_render_order_dirty_all();

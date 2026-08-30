@@ -1,8 +1,9 @@
 extends GutTest
 
-# Mission ObjectModels retain all authored RLODs and switch visibility in place;
-# closed OOBJ faces become Godot occluders without replacing the retail section
-# mask owner.
+# Mission ObjectModels retain all authored RLODs and switch visibility in place
+# (each model only for its own instances); eligible OOBJ faces become Godot
+# occluders without replacing the retail section mask owner, and without the
+# model touching its viewport.
 
 const PUMP_3DI := "res://../fixtures/threedi/synth/pump.3di"
 const ARMORY_3DI := "res://../fixtures/threedi/synth/armory.3di"
@@ -124,8 +125,6 @@ func test_nested_model_keeps_its_instances_across_the_parent_lod_switch() -> voi
 func test_closed_authored_records_create_section_owned_occluders() -> void:
 	var viewport := get_viewport()
 	var viewport_was_enabled := viewport.use_occlusion_culling
-	var viewport_occlusion_supported := DisplayServer.get_name() != "headless" \
-			and RenderingServer.get_rendering_device() != null
 	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_authored_occluders_enabled(true)
@@ -133,10 +132,11 @@ func test_closed_authored_records_create_section_owned_occluders() -> void:
 	var occluders := model.find_children("AuthoredOccluder_Section*",
 			"OccluderInstance3D", true, false)
 	assert_gt(occluders.size(), 0,
-			"closed armory OOBJ records become ArrayOccluder3D instances")
-	assert_eq(viewport.use_occlusion_culling,
-			viewport_was_enabled or viewport_occlusion_supported,
-			"authored occluders activate Godot culling only on an RD-backed viewport")
+			"eligible armory OOBJ records become ArrayOccluder3D instances")
+	assert_eq(model.get_authored_occluder_count(), occluders.size(),
+			"the world reads the retained occluder count to decide on culling")
+	assert_eq(viewport.use_occlusion_culling, viewport_was_enabled,
+			"a model never flips its viewport's occlusion consumer; the world owns that")
 	for node in occluders:
 		var instance := node as OccluderInstance3D
 		assert_not_null(instance.occluder, "the retained instance owns geometry")

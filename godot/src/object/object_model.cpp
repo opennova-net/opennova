@@ -1630,6 +1630,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_authored_occluders_enabled);
 	ClassDB::bind_method(D_METHOD("are_authored_occluders_enabled"),
 			&ObjectModel::are_authored_occluders_enabled);
+	ClassDB::bind_method(D_METHOD("get_authored_occluder_count"),
+			&ObjectModel::get_authored_occluder_count);
 	ClassDB::bind_method(D_METHOD("rebuild"), &ObjectModel::rebuild);
 	ClassDB::bind_method(D_METHOD("advance_runtime_frame", "delta"),
 			&ObjectModel::advance_runtime_frame);

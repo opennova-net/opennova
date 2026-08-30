@@ -358,6 +358,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["static_bins"] = 0;
 	stats["static_binned_batches"] = 0;
 	stats["static_global_batches"] = 0;
+	stats["authored_occluder_models"] = 0;
 	destruction_instances_.clear();
 	hidden_destruction_instances_.clear();
 	static_terrain_shadow_replacements_.clear();
@@ -847,6 +848,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 
 	// Animated: an individual ObjectModel per entity.
 	int animated_count = 0;
+	int authored_occluder_models = 0;
 	for (int a_index = 0; a_index < animated.size(); ++a_index) {
 		const Dictionary a = animated[a_index];
 		if (progress.is_valid()) {
@@ -892,6 +894,9 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		// Drive the build explicitly (not via _ready) so it is independent
 		// of when place() runs relative to the main loop.
 		model->set_object_data(data);
+		if (model->get_authored_occluder_count() > 0) {
+			++authored_occluder_models;
+		}
 		if (item_casts_static_terrain_shadow(kind,
 					uint32_t(a.get("ai_flags", 0)),
 					item_db_->get_attrib(item_id),
@@ -936,6 +941,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	stats["static_bins"] = occupied_static_bins.size();
 	stats["static_binned_batches"] = binned_batch_count;
 	stats["static_global_batches"] = global_batch_count;
+	stats["authored_occluder_models"] = authored_occluder_models;
 	stats["spans"] = spans;
 	return stats;
 }

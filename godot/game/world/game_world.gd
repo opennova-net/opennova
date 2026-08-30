@@ -649,6 +649,8 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	options["progress"] = func() -> void: load_progress.emit(
 			MissionData.load_progress_percent(MissionData.LOAD_STAGE_OBJECTS))
 	_mission_stats = _placer.place(mission, self, options)
+	_apply_occlusion_culling_policy(
+			int(_mission_stats.get("authored_occluder_models", 0)))
 	# Static tile shadows are composed from the placer's resolved ObjectData and
 	# exact entity transforms. Attach only after place() has finished building
 	# that immutable mission snapshot; Terrain invalidates any pre-placement
@@ -661,6 +663,20 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 		int(_mission_stats.unresolved),
 		int(_mission_stats.markers),
 	])
+
+
+## Godot's occlusion consumer is a world-level decision: on only while the
+## loaded mission placed authored OOBJ occluders (a conservative second layer
+## under the retail section/portal verdict, docs/render/render-occlusion-re.md
+## "Conservative device occluders") and only on an RD-backed viewport, since
+## headless and Compatibility expose no occlusion path. Unload switches it off;
+## no ObjectModel flips viewport state.
+func _apply_occlusion_culling_policy(authored_occluder_models: int) -> void:
+	var viewport := get_viewport() if is_inside_tree() else null
+	if viewport == null:
+		return
+	viewport.use_occlusion_culling = authored_occluder_models > 0 \
+			and RenderingServer.get_rendering_device() != null
 
 
 func get_loaded_mission() -> MissionData:
@@ -739,6 +755,7 @@ func unload() -> void:
 	# This also invalidates pages composed with the departing caster snapshot.
 	if _terrain != null:
 		_terrain.set_static_shadow_placer(null)
+	_apply_occlusion_culling_policy(0)
 	var container := get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		container.queue_free()

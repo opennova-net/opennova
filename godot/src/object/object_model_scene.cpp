@@ -14,8 +14,6 @@
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/occluder_instance3d.hpp>
-#include <godot_cpp/classes/rendering_server.hpp>
-#include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
 #include <algorithm>
@@ -263,17 +261,9 @@ void ObjectModel::rebuild_scene() {
 			}
 		}
 	}
-	if (!authored_occluders_.is_empty() && is_inside_tree()) {
-		RenderingServer *rendering = RenderingServer::get_singleton();
-		Viewport *viewport = get_viewport();
-		if (rendering != nullptr && rendering->get_rendering_device() != nullptr &&
-				viewport != nullptr) {
-			// Authored closed OOBJ faces augment the retail section/portal verdict.
-			// Enable Godot's consumer only on Forward+/Mobile; headless and
-			// Compatibility expose no RenderingDevice-backed occlusion path.
-			viewport->set_use_occlusion_culling(true);
-		}
-	}
+	// Whether Godot's occlusion consumer runs is the world's decision
+	// (GameWorld reads get_authored_occluder_count after placement); a model
+	// never flips its viewport's state.
 
 	classify_materials();
 	apply_runtime_state(0.0);
