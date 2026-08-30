@@ -118,9 +118,12 @@ struct Connection {
 	// a deploy from an alive-but-undeployed player (the dead-or-pending gate @0x519cc7).
 	// Death does NOT set it — the death screen is client-local (D-NET-156).
 	// The live player-slot spectator mode. Admission and F3 both land here;
-	// 0x75, 0x16, 0x0A, and priority selection read this one canonical bit.
-	// [orig: playerSlot+100567; NetPacket_WritePlayerState @0x4ff793;
-	// Server_BuildEntityPriorityList @0x50e677]
+	// 0x75, 0x16, and 0x0A flags1 bit0 read this one canonical bit
+	// [orig: playerSlot+100567; NetPacket_WritePlayerState @0x4ff795]. The
+	// priority build's flat branch also keys off it here, standing in for
+	// retail's deploy-hold storage read (slot+89912 & 0x10 @0x50e67c) that a
+	// never-deploying spectator holds (D-NET-217; pre-deploy players stay a
+	// D-NET-139 residual).
 	bool spectator = false;
 	bool respawn_pending = false;
 

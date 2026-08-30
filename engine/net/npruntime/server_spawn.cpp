@@ -37,8 +37,11 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection &joining, const world::World &world) {
 	// A spectator is a roster player on neutral team zero, bypassing the team
-	// password/selection path. [orig: Server_PlayerAdd @0x51cbc0]
-	if (joining.link.spectator) return 0;
+	// password/selection path. Retail gates the early return on being in a
+	// live MP session; a non-session add ignores the flag and takes team 1.
+	// [orig: Server_AssignPlayerTeam @0x4fe310 — `slot+100567 && is_in_session`
+	// -> +416 = 0, the FIRST leg before the co-op/solo team-1 return]
+	if (joining.link.spectator && is_in_session) return 0;
 	const uint32_t gt = config.game_type;
 	if (!is_in_session || opennova::game_type::is_waypoint_family(gt)) return 1;
 
@@ -318,14 +321,16 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	}
 	if (conn.link.spectator) {
 		// Retail still creates a player entity for a spectator, but leaves it
-		// hidden/inactive while S2C 0x75 drives the client's free-fly camera.
-		// [orig: Server_PlayerAdd @0x51cbc0; Entity_UpdateInfantryPlayerBody
-		// @0x4b40e0]
+		// hidden and permanently damage-disabled while S2C 0x75 drives the
+		// client's free-fly camera: the spectator leg stores entity+36 |= 1
+		// and entity+292 = -1 (no 620-tick countdown — the dead/disabled
+		// sentinel). [orig: Server_PlayerAdd @0x51cbc0 — the slot+100567
+		// branch; Entity_UpdateInfantryPlayerBody @0x4b40e0]
 		conn.link.respawn_pending = false;
 		if (world::Entity *pe = world.registry.get(h)) {
 			pe->team = 0;
 			pe->flags |= 1u;
-			pe->damage_state = 620;
+			pe->damage_state = -1;
 		}
 	}
 
@@ -414,7 +419,10 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		conn.assigned_team_valid = true;
 		player->team = 0;
 		player->flags |= 1u;
-		player->damage_state = 620;
+		// The witnessed spectator entity state: damage permanently disabled
+		// (-1 sentinel), not the 620-tick join countdown.
+		// [orig: Server_PlayerAdd @0x51cbc0 — entity+292 = -1]
+		player->damage_state = -1;
 		if (ai != nullptr) {
 			ai->team = 0;
 			ai->vel_x = 0;

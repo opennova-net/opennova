@@ -267,7 +267,7 @@ func test_confirmation_and_authority_are_distinct_gates() -> void:
 			"a per-call authority confirmation sees the write it may make")
 	assert_eq(confirmed.reason, "")
 	assert_true(_controls.get_control_state(&"local_spectator", true).writable,
-			"confirmed host tooling may drive the real spectator state")
+			"confirmed authority tooling may drive the real spectator state")
 	var rows := _controls.list_controls(&"", "Teleport", true)
 	assert_eq(rows.size(), 1)
 	assert_true(bool(rows[0]["state"]["writable"]),

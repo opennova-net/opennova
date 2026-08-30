@@ -78,8 +78,19 @@ func test_wrong_spectator_password_surfaces_retail_join_failure() -> void:
 		OS.delay_msec(2)
 
 	assert_string_contains(reason.to_lower(), "spectator password",
-			"retail JFC 16 becomes an actionable join error")
-	assert_eq(host.get_host_peer_count(), 0,
-			"a rejected spectator never consumes a connection slot")
+			"the retail DPC 16 description punt becomes an actionable join error")
+	# Retail rejects the spectator AFTER admission (the game-layer join gate),
+	# then the punted joiner answers with CLIENT_GOODBYE and the host reaps the
+	# node. Pump both ends until that teardown completes.
+	var peers := host.get_host_peer_count()
+	for _i in range(200):
+		joiner.poll_join_preload()
+		host.step()
+		peers = host.get_host_peer_count()
+		if peers == 0:
+			break
+		OS.delay_msec(2)
+	assert_eq(peers, 0,
+			"the rejected spectator's punted connection is reaped")
 	host.free()
 	joiner.free()

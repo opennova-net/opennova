@@ -2004,30 +2004,10 @@ bool run_spectator_admission_codes_match_retail() {
 				message);
 	};
 
-	{
-		np::NapiNPServerCtx disabled;
-		np::test::bring_up_host(
-				disabled, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
-				kHostKey);
-		const PeerAddr peer{0x0100007Fu, 32010};
-		const std::vector<uint8_t> datagram =
-				spectator_auth(10, 0x1010u, {});
-		const np::HandleResult result = np::handle_server_datagram(
-				disabled, peer, datagram.data(), datagram.size(), 1);
-		ServerAuth reply;
-		if (!decode_auth(
-					result, reply,
-					"disabled spectator join returns a ServerAuth rejection")) {
-			return false;
-		}
-		if (!expect(
-				reply.cr == 0 && reply.jfc == 14 &&
-				np::connection_count(disabled) == 0,
-				"retail JFC 14 rejects a spectator when spectating is disabled")) {
-			return false;
-		}
-	}
-
+	// --- The 0x42 leg stores the request; it never carries spectator codes. ---
+	// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 stores JSR/JSPP on the
+	// connection; NapiNPProtocol_HandleClientJoin @0x62b750 has no spectator
+	// leg of its own]
 	np::NapiNPServerCtx ctx;
 	np::GameConfig settings;
 	settings.max_players = 1;
@@ -2037,58 +2017,186 @@ bool run_spectator_admission_codes_match_retail() {
 			ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
 			kHostKey, nullptr, settings);
 
-	const PeerAddr wrong_peer{0x0100007Fu, 32011};
-	const std::vector<uint8_t> wrong_datagram =
-			spectator_auth(11, 0x1111u, "wrong");
-	const np::HandleResult wrong = np::handle_server_datagram(
-			ctx, wrong_peer, wrong_datagram.data(), wrong_datagram.size(), 2);
-	ServerAuth wrong_reply;
-	if (!decode_auth(
-				wrong, wrong_reply,
-				"wrong spectator password returns a ServerAuth rejection")) {
-		return false;
-	}
-	if (!expect(
-			wrong_reply.cr == 0 && wrong_reply.jfc == 16 &&
-			np::connection_count(ctx) == 0,
-			"retail JFC 16 rejects a bad spectator password")) {
-		return false;
-	}
-
 	const PeerAddr admitted_peer{0x0100007Fu, 32012};
 	const std::vector<uint8_t> admitted_datagram =
-			spectator_auth(12, 0x1212u, "watch");
+			spectator_auth(12, 0x1212u, "WATCH");
 	const np::HandleResult admitted = np::handle_server_datagram(
 			ctx, admitted_peer, admitted_datagram.data(),
 			admitted_datagram.size(), 3);
 	ServerAuth admitted_reply;
 	if (!decode_auth(
 				admitted, admitted_reply,
-				"valid spectator credentials return ServerAuth")) {
+				"a spectator ClientAuth key-establishes like any other join")) {
 		return false;
 	}
 	if (!expect(
 			admitted_reply.cr == 1 && np::connection_count(ctx) == 1 &&
-			ctx.np_protocol.connection_list.front().link.spectator,
-			"valid JSR/JSPP admits and latches a spectator connection")) {
+			ctx.np_protocol.connection_list.front().join_spectator_request == 1 &&
+			ctx.np_protocol.connection_list.front().join_spectator_password ==
+					"WATCH" &&
+			!ctx.np_protocol.connection_list.front().link.spectator,
+			"the 0x42 stores JSR/JSPP without latching the live spectator bit")) {
 		return false;
 	}
 
-	const PeerAddr full_peer{0x0100007Fu, 32013};
-	const std::vector<uint8_t> full_datagram =
-			spectator_auth(13, 0x1313u, "watch");
-	const np::HandleResult full = np::handle_server_datagram(
-			ctx, full_peer, full_datagram.data(), full_datagram.size(), 4);
-	ServerAuth full_reply;
-	if (!decode_auth(
-				full, full_reply,
-				"full spectator pool returns a ServerAuth rejection")) {
-		return false;
+	// The 0x42 gate is ONE shared count against max_players + positive slots:
+	// an ordinary player may occupy the spectator headroom (retail has no
+	// separate ordinary cap), and the join past the shared total rejects with
+	// the CR=0 0x82 carrying JFC=14 and JFP=5 (the positive-spectator-slots
+	// reason). [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0 reasons 4/5;
+	// NapiNPProtocol_SendJoinRejection @0x620cd0]
+	{
+		const std::string player_scrk =
+				"TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+		auto player_auth = craft_auth(
+				"JOINTOPERATIONS", kHostKey, 0x1414u, player_scrk);
+		const PeerAddr player_peer{0x0100007Fu, 32014};
+		np::HandleResult player_result = np::handle_server_datagram(
+				ctx, player_peer, player_auth.data(), player_auth.size(), 4);
+		if (!expect(
+				!player_result.outbound.empty() &&
+				np::connection_count(ctx) == 2,
+				"an ordinary player occupies the spectator headroom (shared count)")) {
+			return false;
+		}
+		const PeerAddr third{0x0100007Fu, 32013};
+		const std::vector<uint8_t> datagram =
+				spectator_auth(13, 0x1313u, "watch");
+		np::HandleResult result = np::handle_server_datagram(
+				ctx, third, datagram.data(), datagram.size(), 5);
+		ServerAuth reply;
+		if (!decode_auth(result, reply, "join beyond shared capacity answers")) {
+			return false;
+		}
+		if (!expect(
+				reply.cr == 0 && reply.jfc == 14 && reply.jfp == 5 &&
+				np::connection_count(ctx) == 2,
+				"shared capacity rejects with JFC 14 / JFP 5 and no node")) {
+			return false;
+		}
 	}
-	return expect(
-			full_reply.cr == 0 && full_reply.jfc == 15 &&
-			np::connection_count(ctx) == 1,
-			"retail JFC 15 rejects a spectator when spectator slots are full");
+
+	// --- The game-layer 0x00 join gate answers the spectator codes as DPC
+	// punts through the connection-description record, after admission. ---
+	// [orig: Server_ValidatePlayerJoinRequest @0x512100 codes 14/15/16 via
+	// CNapiNPConnection_SendChatMessage @0x4c7ef0]
+	const std::vector<uint8_t> join_payload = [] {
+		std::vector<uint8_t> payload;
+		const char name[] = "VERSIONCRCSTRING";
+		payload.insert(payload.end(), name, name + sizeof(name));
+		payload.push_back(2);
+		payload.push_back(0);
+		payload.push_back('0');
+		payload.push_back(0);
+		return payload;
+	}();
+	struct JoinGate {
+		bool valid = false;
+		bool got_init = false;
+		bool rejected = false;
+		bool punt_staged = false;
+		bool spectator_latched = false;
+		DisconnectEvent event;
+	};
+	auto drive_join_gate = [&](const np::GameConfig &config,
+			std::vector<np::NapiNPConnection> &roster, size_t index) {
+		JoinGate out;
+		netsim::UdpSessionTransport transport(
+				netsim::UdpSessionTransport::Role::Host);
+		np::NapiNPConnection &conn = roster[index];
+		conn.link.transport = &transport;
+		const std::vector<ProtocolMessage> replies =
+				np::dispatch_session_replies(config, conn,
+						{make_protocol_message(0x00, join_payload)},
+						5, roster, nullptr);
+		out.valid = true;
+		for (const ProtocolMessage &reply : replies)
+			if (reply.tag == s2c::INIT) out.got_init = true;
+		out.rejected =
+				conn.admission_stage == np::GameAdmissionStage::Rejected;
+		netsim::Datagram staged;
+		if (transport.pop_outbound(staged)) {
+			out.punt_staged = parse_disconnect_event(
+					staged.body.data(), staged.body.size(), out.event);
+		}
+		out.spectator_latched = conn.link.spectator;
+		conn.link.transport = nullptr;
+		return out;
+	};
+	auto make_gate_conn = [](uint8_t spectator_request,
+			std::string password) {
+		np::NapiNPConnection conn;
+		conn.type = np::NapiNPConnection::kTypeServerSide;
+		conn.phase = np::ConnectionPhase::Joined;
+		conn.admission_stage = np::GameAdmissionStage::AwaitJoinRequest;
+		conn.join_spectator_request = spectator_request;
+		conn.join_spectator_password = std::move(password);
+		return conn;
+	};
+
+	{
+		// Spectating disabled: the gate latches, then punts DPC 14. (An empty
+		// expansion keeps the 0x00 payload to the bare VERSIONCRCSTRING TLV.)
+		np::GameConfig disabled;
+		disabled.expansion.clear();
+		std::vector<np::NapiNPConnection> roster;
+		roster.push_back(make_gate_conn(1, ""));
+		const JoinGate gate = drive_join_gate(disabled, roster, 0);
+		if (!expect(gate.rejected && !gate.got_init,
+				"a disabled-spectator join gate rejects without INIT")) {
+			return false;
+		}
+		if (!expect(gate.punt_staged,
+				"the disabled-spectator reject stages a description punt")) {
+			return false;
+		}
+		if (!expect(
+				gate.event.dc == 2 && gate.event.dpc == 14 &&
+				gate.event.dstr.empty() && gate.event.ddstr.empty(),
+				"retail DPC 14 punts a spectator when spectating is disabled")) {
+			return false;
+		}
+	}
+
+	np::GameConfig gate_config;
+	gate_config.expansion.clear();
+	gate_config.spectator_slots = 1;
+	gate_config.spectator_password = "watch";
+	{
+		// Wrong password: DPC 16. The compare is case-insensitive, so the
+		// mixed-case password must NOT reject.
+		std::vector<np::NapiNPConnection> roster;
+		roster.push_back(make_gate_conn(1, "wrong"));
+		const JoinGate gate = drive_join_gate(gate_config, roster, 0);
+		if (!expect(
+				gate.valid && gate.rejected && gate.punt_staged &&
+				gate.event.dc == 2 && gate.event.dpc == 16,
+				"retail DPC 16 punts a bad spectator password")) {
+			return false;
+		}
+	}
+	std::vector<np::NapiNPConnection> roster;
+	roster.push_back(make_gate_conn(1, "WATCH"));
+	{
+		const JoinGate gate = drive_join_gate(gate_config, roster, 0);
+		if (!expect(
+				gate.valid && !gate.rejected && gate.got_init &&
+				!gate.punt_staged && gate.spectator_latched,
+				"a case-insensitive JSPP match admits and latches the spectator")) {
+			return false;
+		}
+	}
+	{
+		// A second spectator past the positive slot count: the count includes
+		// the candidate's freshly latched flag, so it rejects on
+		// strictly-greater with DPC 15.
+		roster.push_back(make_gate_conn(1, "watch"));
+		const JoinGate gate = drive_join_gate(gate_config, roster, 1);
+		return expect(
+				gate.valid && gate.rejected && gate.punt_staged &&
+				gate.event.dc == 2 && gate.event.dpc == 15,
+				"retail DPC 15 punts a spectator past the slot count");
+	}
 }
 
 bool run_capacity_rejects_when_full() {
@@ -2121,8 +2229,8 @@ bool run_capacity_rejects_when_full() {
 					opcode, body) &&
 			opcode == SESSION_OPCODE_SERVER_AUTH &&
 			parse_server_auth(body.data(), body.size(), rejected) &&
-			rejected.cr == 0 && rejected.jfc == 4,
-			"over-capacity player join returns retail ServerAuth JFC 4")) {
+			rejected.cr == 0 && rejected.jfc == 14 && rejected.jfp == 4,
+			"over-capacity join returns the retail CR=0 0x82 with JFC 14 / JFP 4")) {
 		return false;
 	}
 	if (!expect(np::connection_count(ctx) == 2, "over-capacity join creates no node")) return false;

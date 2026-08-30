@@ -403,6 +403,13 @@ struct NapiNPConnection {
 
 	std::string pn;                // ClientHello.pn — game-session protocol identity
 	std::string player_name;       // game ClientAuth.na — echoed into the organic-spawn 0x0C (D.0)
+	// The ClientAuth CU JSR/JSPP values, stored at the 0x42 exactly like
+	// retail's connection tag list; the game-layer 0x00 join message latches
+	// link.spectator from the request and validates the password there.
+	// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 (JSR -> ci1, JSPP);
+	// the entry+55 latch in NapiNPServer_HandlePlayerJoinMessage @0x512aa0]
+	uint8_t join_spectator_request = 0;
+	std::string join_spectator_password;
 	// The team restored when the portable player-slot spectator bit is cleared.
 	uint8_t spectator_restore_team = 1;
 	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43

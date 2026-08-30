@@ -317,10 +317,11 @@ func _read_host_config() -> HostSessionConfig:
 		config.server_name = server_name
 	var max_text := _edit_text("MAX_PLAYERS", "")
 	config.max_players = clampi(int(max_text) if max_text.is_valid_int() else 4, 1, 99)
-	# HostDialog stores ALLOW_SPECTATORS as -1 when checked and 0 when
-	# unchecked. A separate positive limit remains available to typed/CLI
+	# Retail's host dialog stores ALLOW_SPECTATORS as -1 when checked and 0
+	# when unchecked. A separate positive limit remains available to typed/CLI
 	# producers, but the retail menu itself exposes the shared-capacity mode.
-	# [orig: HostDialog @0x555940]
+	# The witnessed reader lives engine-side (GameConfig.spectator_slots,
+	# docs/net/novaworld-net-re.md section 5.0e).
 	config.spectator_slots = -1 if _is_checked("ALLOW_SPECTATORS") else 0
 	config.spectator_password = _edit_text("SPECTATOR_PW", "").substr(0, 17)
 	config.missions = _selected_missions()

@@ -77,11 +77,13 @@ ParsedClientJoinRole parse_client_join_role(const ClientAuth &auth) {
 			continue;
 		}
 		// The connection tag-list loader is ordered and uses atol semantics;
-		// therefore the last duplicate wins for both JSR and JSPP.
-		// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260;
-		// Server_ValidatePlayerJoinRequest @0x512100]
+		// therefore the last duplicate wins for both JSR and JSPP. JSR is
+		// stored through a uint8 truncation before the nonzero test.
+		// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 — JSR ->
+		// (unsigned __int8)atol @0x4c7607, JSPP -> NapiNetConfig_SetJspp]
 		if (str_case_equal(cu_name, "JSR")) {
-			parsed.spectator = std::strtol(cu_value.c_str(), nullptr, 10) != 0;
+			parsed.spectator = static_cast<uint8_t>(
+					std::strtol(cu_value.c_str(), nullptr, 10)) != 0;
 		} else if (str_case_equal(cu_name, "JSPP")) {
 			parsed.spectator_password = std::move(cu_value);
 		}
@@ -237,31 +239,26 @@ uint32_t occupied_player_count(const NapiNPServerCtx &ctx) {
 	return occupied;
 }
 
-uint32_t occupied_spectator_count(const NapiNPServerCtx &ctx) {
-	uint32_t occupied = 0;
-	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list) {
-		if (connection.link.spectator &&
-		    (connection.type == NapiNPConnection::kTypeClientSide ||
-		     connection.phase >= ConnectionPhase::Joined)) {
-			++occupied;
-		}
-	}
-	return occupied;
-}
-
+// The witnessed 0x42-time rejection is a CR=0 0x82 carrying ONLY the identity
+// echo plus the JFC failure family, the JFP sub-reason, and an optional JFS
+// string — no MI/SK/CS/SCRK/NA. The validate-callback family is JFC=14 with
+// JFP from the capacity callback (2 locked / 3 banned / 4 full / 5 full with
+// positive spectator-only slots). [orig: NapiNPProtocol_SendJoinRejection
+// @0x620cd0 (ex "SendDrawOverlay"), called from NapiNPProtocol_HandleClientJoin
+// @0x62b750; CNapiNetwork_ValidateJoinRequest @0x4c61b0 writes +1520=14 /
+// +1524=reason]
 void reject_client_join(const ClientAuth &auth, const PeerAddr &peer,
-		uint32_t failure_code, const char *message, HandleResult &out) {
+		uint32_t failure_family, uint32_t failure_reason, HandleResult &out) {
+	(void)peer;
 	ServerAuth rejection;
 	rejection.ci = auth.ci;
 	rejection.ck = auth.ck;
 	rejection.cr = 0;
-	rejection.jfc = failure_code;
-	rejection.jfs = message;
-	rejection.na = auth.na;
-	rejection.rip = peer.ip;
-	rejection.rpn = peer.port;
+	rejection.jfc = failure_family;
+	rejection.jfp = failure_reason;
 	out.outbound.push_back(nw_encode_outbound(
-			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(rejection)));
+			SESSION_OPCODE_SERVER_AUTH,
+			server_auth_rejection_to_bytes(rejection)));
 }
 
 // Build + frame a 0x82 ServerAuth for `conn` from its CURRENT keys (server_sk / server_scrk /
@@ -581,38 +578,32 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, registered as the join-validate callback by
 	// CNapiGameSession_CreateSession @0x4c97c0 and invoked at the 0x42 join]. Reject when the session
-	// is already full: the witnessed gate rejects on current_player_count >= max_players (CNapiNetwork
-	// +0xF28; spectator slots add in when enabled). The player count is the host's own type-2 loopback
-	// (when present) plus already-admitted (>= Joined) joiners — matching networkCtx[11], which counts
-	// added players and the host. Retail replies with ServerAuth CR=0 and a
-	// join-failure code; spectator-specific validation uses codes 14/15/16.
+	// is already full. The witnessed gate is ONE shared count — players AND
+	// spectators against max_players plus positive spectator-only slots (a -1
+	// setting shares the ordinary cap; ordinary players may occupy spectator
+	// headroom — retail has no separate ordinary cap, here or at the game-layer
+	// join gate @0x512aa0). The count is the host's own type-2 loopback (when
+	// present) plus already-admitted (>= Joined) joiners — matching
+	// networkCtx[11]. The reject is the CR=0 0x82 with the validate-callback
+	// family JFC=14 and reason JFP=4, or JFP=5 when spectator-only slots exist
+	// (@0x4c624c). Spectator-specific validation (codes 14/15/16) is NOT this
+	// leg: it runs at the game-layer 0x00 join message and punts through the
+	// connection-description record (server_message_dispatch.cpp).
 	const uint32_t occupied = occupied_player_count(ctx);
-	const uint32_t spectators = occupied_spectator_count(ctx);
-	const uint32_t players = occupied - spectators;
-	if (join_role.spectator) {
-		if (ctx.config.spectator_slots == 0) {
-			reject_client_join(auth, peer, 14, "spectators disabled", out);
-			return;
-		}
-		if ((ctx.config.spectator_slots > 0 &&
-		     spectators >= static_cast<uint32_t>(ctx.config.spectator_slots)) ||
-		    occupied >= ctx.config.total_player_slot_capacity()) {
-			reject_client_join(auth, peer, 15, "spectator slots full", out);
-			return;
-		}
-		if (!ctx.config.spectator_password.empty() &&
-		    join_role.spectator_password != ctx.config.spectator_password) {
-			reject_client_join(auth, peer, 16, "spectator password rejected", out);
-			return;
-		}
-	} else if (players >= ctx.np_protocol.max_players ||
-	           occupied >= ctx.config.total_player_slot_capacity()) {
-		reject_client_join(auth, peer, 4, "server full", out);
+	if (occupied >= ctx.config.total_player_slot_capacity()) {
+		reject_client_join(auth, peer, 14,
+				ctx.config.spectator_slots > 0 ? 5u : 4u, out);
 		return;
 	}
 
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
-	conn.link.spectator = join_role.spectator;
+	// Retail stores the ClientAuth CU tags on the connection and only latches
+	// the live spectator flag at the game-layer join message; keep the same
+	// two-step shape so the roster/0x16/0x75 state cannot flip before the
+	// witnessed latch point. [orig: NapiNetConfig_LoadFromConnTags @0x4c7260;
+	// the entry+55 latch @0x512aa0]
+	conn.join_spectator_request = join_role.spectator ? 1 : 0;
+	conn.join_spectator_password = join_role.spectator_password;
 	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
 	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
 	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
@@ -822,8 +813,16 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			                         ctx.np_protocol.connection_list, ctx.world,
 			                         dispatch_inputs);
 	if (conn.admission_stage == GameAdmissionStage::Rejected) {
-		// The retail reject overlay is not modeled. Still release the pending node immediately:
-		// an out-of-order or malformed admission must not retain capacity or become an entity.
+		// A game-layer join-gate failure that STAGED retail's description punt
+		// (the spectator DPC 14/15/16 legs) must retain the node: the owner
+		// flushes the reliable record on its next boundary and the punted
+		// joiner answers with the CLIENT_GOODBYE burst that performs the real
+		// teardown. [orig: the @0x512aa0 failure return keeps the connection;
+		// teardown is the client's goodbye or the receive reap]
+		if (conn.host_disconnect_sent) return;
+		// The remaining silent legs are not modeled (D-NET-171). Release the
+		// pending node immediately: an out-of-order or malformed admission
+		// must not retain capacity or become an entity.
 		if (teardown_connection(ctx, peer)) {
 			HostAcceptEvent ev;
 			ev.kind = HostAcceptEvent::Kind::PeerGoodbye;

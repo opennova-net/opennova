@@ -769,12 +769,15 @@ against `Jointops.exe` and ported; the in-match flow is `0x41 → 0x81`, `0x42 �
   `networkCtx[11]` (current player count) `>= networkCtx[970]` (`max_players`, `+0xF28`; plus
   `networkCtx[972]` spectator slots when `networkCtx[971]` spectator-enabled). It also rejects on
   server-locked (`dword_C94794`, reason 2) and ban-list (`dword_C8FF28`, reason 3); a full server is
-  reason **4** (or **5** with spectators), overlay state **14**. The promoted legs admitted on
-  `is_authority && host_running` only, never reading the stored `max_players`. **Reimpl (npruntime
-  only):** `handle_client_join` counts ordinary players separately from spectators, caps players at
-  `max_players`, and expands the fixed slot table only for a positive spectator limit. A refused
-  ordinary player receives `ServerAuth CR=0/JFC=4`; spectator-specific failures use JFC 14/15/16
-  (§5.0e). Other validator failures still ride D-NET-171. **Copy divergence:** the capacity gate lives
+  reason **4** (or **5** with positive spectator-only slots), and the reject rides the CR=0 `0x82`
+  as **JFC=14** (the validate-callback family) with the reason in **JFP**
+  (`NapiNPProtocol_SendJoinRejection @0x620cd0` sends `conn+1520`/`conn+1524`). The promoted legs
+  admitted on `is_authority && host_running` only, never reading the stored `max_players`.
+  **Reimpl (npruntime only):** `handle_client_join` runs the same ONE shared count — players and
+  spectators against `max_players + max(spectator_slots, 0)` (ordinary players may occupy spectator
+  headroom, as retail's single gate allows) — and a refused join receives the exact
+  `CR=0/JFC=14/JFP=4|5` form; the spectator-specific legs live at the game-layer join gate
+  (§5.0e, D-NET-217). Other validator failures still ride D-NET-171. **Copy divergence:** the capacity gate lives
   only in npruntime, which models the `NapiNPProtocol.max_players` / CNapiNetwork capacity layer;
   `host_session_accept.cpp` (retired at P8, `engine/net/npruntime/ROADMAP.md`) was the pre-`NapiNPProtocol` simplified copy (no
   `max_players` model) and does NOT enforce capacity — it retires at ROADMAP P8 when npruntime takes
@@ -975,7 +978,7 @@ challenge. Header-only ACKs are inert; malformed, duplicated-in-turn, or
 out-of-order messages tear the pending node down. `self_id_seen`, player spawn,
 roster publication, and the world stream remain gated until the final echo. The
 remaining unmodeled validator rejection families stay on D-NET-171; ordinary
-full and spectator JFC 14/15/16 failures are modeled by D-NET-216. The
+session-full and spectator failures are modeled by D-NET-217. The
 expansion-version CRC closed as D-NET-166 (FIXED 2026-08-29).
 
 The admission exchanges through frame 23 are **reactive and pre-world**: they run even while the
@@ -1038,17 +1041,22 @@ CNapiNetwork_Init @ 0x4ca4a0 /
 CNapiNPConnection_PumpSendIntervals @ 0x628fd0 / CNapiNPConnection_BuildOutgoingPackets @ 0x628430 /
 CNapiNPConnection_SendSessionPacket @ 0x61edd0 / NapiNP_HandleResendList @ 0x623800]`
 
-### 5.0e — Spectator discovery, admission, and live mode (2026-08-30; D-NET-216)
+### 5.0e — Spectator discovery, admission, and live mode (2026-08-30; D-NET-217)
 
 Retail carries spectating as a game-session role, not as the deleted replay-viewer
 tooling described in §5.25. The complete contract is:
 
 - The host setting is signed: **0 disables spectators, -1 enables them inside
   `max_players`, and a positive value adds that many spectator-only slots**.
-  `HostDialog @0x555940` stores -1/0 from `ALLOW_SPECTATORS`; `SPECTATOR_PW`
-  is limited to 17 characters. `CNapiServerConfig_BuildFlags @0x4c4dc0`
-  advertises P2 bit `0x2000` when enabled and `0x4000` when a spectator
-  password exists. The same BuildFlags dword rides ServerHello and S2C `0x08`.
+  `HostDialog_ReadSettings @0x555940` stores -1/0 from `ALLOW_SPECTATORS`
+  (keeping an existing positive count) into `g_spectator_slots @0x2550924` and
+  `SPECTATOR_PW` into the 17-byte `g_spectator_password @0x2550928` (both IDB
+  names refreshed 2026-08-30 from the stale `g_squad_*` labels).
+  `CNapiServerConfig_BuildFlags @0x4c4dc0` advertises P2 bit `0x2000` when the
+  setting is nonzero and, **nested inside that check**, `0x4000` when the
+  password is non-empty (`@0x4c4e8a/@0x4c4ead`) — a password with spectating
+  off advertises neither. The same BuildFlags dword rides ServerHello and S2C
+  `0x08`.
 - A retail client presents the Player/Spectator choice after enumeration and
   before ClientAuth whenever P2 has `0x2000`. It asks for the spectator password
   only when P2 also has `0x4000`. A spectator ClientAuth adds type-2 CU
@@ -1056,17 +1064,41 @@ tooling described in §5.25. The complete contract is:
   Direct/NovaWorld rows that lack browse-time P2 are unicast-enumerated at the
   resolved game endpoint before OpenNova authenticates, so no speculative player
   ClientAuth can race the choice.
-- `Server_ValidatePlayerJoinRequest @0x512100` parses the ordered CU tag list
-  with last-value-wins/`atol` semantics. Spectator failures are JFC **14**
-  (disabled), **15** (spectator capacity), and **16** (bad spectator password).
-  The generic capacity callback `CNapiNetwork_ValidateJoinRequest @0x4c61b0`
-  uses `max_players + max(spectator_slots, 0)`; a -1 setting shares the ordinary
-  cap. Spectators skip the ordinary side/team-password assignment path.
+- The join carries TWO reject vehicles in two code domains. At the **0x42**,
+  the only reject is the CR=0 `0x82` built by `NapiNPProtocol_SendJoinRejection
+  @0x620cd0` (IDB-renamed 2026-08-30 from the wrong "SendDrawOverlay"): exactly
+  `CI/CK/CR/JFC/JFP[/JFS]`. The generic capacity callback
+  `CNapiNetwork_ValidateJoinRequest @0x4c61b0` gates ONE shared count against
+  `max_players + max(spectator_slots, 0)` (a -1 setting shares the ordinary
+  cap; there is no separate ordinary-player cap, so players may occupy
+  spectator headroom) and stamps the family/reason pair the reject carries:
+  **JFC=14** with **JFP** 2 locked / 3 banned / **4 full** (**5** full with
+  positive spectator-only slots). The client stores JFC/JFP verbatim
+  (`NapiNP_HandleServerJoinResponse @0x629840`).
+- The spectator-specific legs run LATER, at the game-layer 0x00 join message
+  (`NapiNPServer_HandlePlayerJoinMessage @0x512aa0` latches the player entry's
+  spectator flag `+55` from the stored JSR, then calls
+  `Server_ValidatePlayerJoinRequest @0x512100`), i.e. after CR=1 admission.
+  The stored ClientAuth CU tag list is ordered with last-value-wins/`atol`
+  semantics (`NapiNetConfig_LoadFromConnTags @0x4c7260`; JSR through a uint8
+  truncation). Failures answer the **connection-description punt** (the
+  D-NET-182 record: `DS=1, DC=2, DP1/DP2=0, DSTR="", DDSTR=""`, reason in
+  **DPC**): **DPC 14** disabled (`g_spectator_slots == 0`), **DPC 15** positive
+  slot count exceeded (the `+55` count includes the just-latched candidate, so
+  the compare is strictly-greater), **DPC 16** bad spectator password — a
+  **case-insensitive** compare (`Napi_StrCaseEqual @0x512405..0x512425`)
+  against `g_spectator_password`. Spectators skip the ordinary side/team
+  password legs (those sit behind `!ci1`).
 - `Server_PlayerAdd @0x51cbc0` still allocates a roster slot and pool-0 player
   entity, but assigns team 0 and leaves that body hidden/inactive. It does not
   enter spawn selection. S2C `0x75` is `[u8 spectator/death bit][u8 team]`;
-  the same live player-slot bit is repeated as S2C `0x0A flags1` bit 0 and
-  selects the flat dead-or-spectator entity-priority branch. S2C `0x16` marks
+  the same live player-slot bit (`slot+100567`) is repeated as S2C `0x0A
+  flags1` bit 0 (`@0x4ff795`). The 0x0A priority build's flat dead-or-spectator
+  branch reads a DIFFERENT storage — `slot+89912 & 0x10`, the deploy-hold bit
+  (`@0x50e67c`); a never-deploying spectator holds it, which is how the flat
+  branch covers spectating (OpenNova keys the branch off the canonical
+  spectator bit; the pre-deploy ordinary-player leg of the same predicate stays
+  a D-NET-139 residual). S2C `0x16` marks
   the row's low flag bit and increments the spectator trailer count, which moves
   it into the retail scoreboard's spectator column.
 - `Entity_UpdateInfantryPlayerBody @0x4b40e0` diverts a spectator/death-screen
@@ -1078,13 +1110,15 @@ tooling described in §5.25. The complete contract is:
   play restores the saved team and respawns through the ordinary marker resolver.
 
 The implementation is symmetric at the wire boundary: OpenNova emits and consumes
-the retail discovery bits, ClientAuth CUs, JFC failures, team-0 spawn, `0x75`,
-`0x0A`, and `0x16` forms. Thus retail-client→OpenNova-host,
-OpenNova-client→retail-host, retail↔retail, and OpenNova↔OpenNova use the same
-contract rather than compatibility shims. Native regressions pin admission,
-capacity, flags, spawn, scoreboard, priority, and F3 mutation; the Godot suite
-adds a real loopback-UDP spectator join (including JFC 16), prompt-before-auth,
-world-tick continuity, and first-free-look camera continuity.
+the retail discovery bits, ClientAuth CUs, the CR=0 `JFC=14/JFP=4|5` capacity
+reject, the DPC 14/15/16 spectator punts, team-0 spawn, `0x75`, `0x0A`, and
+`0x16` forms. Thus retail-client→OpenNova-host, OpenNova-client→retail-host,
+retail↔retail, and OpenNova↔OpenNova use the same contract rather than
+compatibility shims. Native regressions pin admission, capacity, flags, both
+reject vehicles, spawn, scoreboard, priority, and F3 mutation; the Godot suite
+adds a real loopback-UDP spectator join (including the DPC 16 password punt),
+prompt-before-auth, world-tick continuity, and first-free-look camera
+continuity.
 
 ### 5.1 Loading-progress counter — `dword_A82370`
 
@@ -12851,7 +12885,7 @@ De-tabled ledger rows without a prior §8 entry (transplanted verbatim 2026-08-0
 - **D-NET-172** [MED, FIXED 2026-08-22] `build_spawn_zone_list` reproduces the both-zero-key raw-address tie without allocator dependence: retail's one pool allocation places pool 1 at +232420 (stride 1360) and pool 2 at +1865416 (stride 812), so unnumbered co-op deploy letters put every pool-1 row before pool 2 exactly as the original bubble sort does. [orig: EntityPool_Allocate @0x442130; Entity_BuildSpawnZoneList @0x43EAE0, compare @0x43ECC6] (`zone_chain_test`)
 - **D-NET-174** [MED, OPEN] Our HOST does not implement the fire-freshness gate the S2C `0x61` tick seed anchors: retail stamps the per-player seed into `playerSlot+0x178D8`, rejects a C2S `0x06` whose tick is zero or not past it, and on acceptance re-stamps `floor = tick + adm[276]` (the per-weapon refire window — this also closes the unparsed `adm[276]` deferral at `server_message_dispatch.cpp`). We seed and re-roll per connection now (client + host), but accept every `0x06` regardless of its tick, so an OpenNova host cannot rate-limit or reject stale fire the way a stock host does. The SECOND leg of the same predicate is also unported: retail runs it locally on the AUTHORITY side too — `Entity_FireWeaponAndSendPacket @0x42bd80` splits on `is_authority` (`@0x42bdfd`) and the authority arm gates its own local player's shot on `PlayerSlot_IsActive @0x4fc760` (`@0x42be3a`, bail `@0x42be44`) before clearing `+0x178E2`, so a listen host rate-limits itself with the same floor it enforces on joiners. The joiner arm (`@0x42bf46`) has NO gate — a client fires locally and transmits regardless, and 2026-07-25 removed an invented client-side refusal that had been cited to the authority arm's addresses. Port `PlayerSlot_IsActive @0x4fc760` + the `@0x513740` stamp against the per-connection `tick_seed`, and the authority-side local-fire leg with it.
 - **D-NET-179** [LOW, OPEN + NEEDS-RE] `APPID` is conditional, not an always-missing parity field. The older retail-ashi5a f=199140 and retail_join_v18 f=47676 LAN captures carry an 18th CU with value **9360**, while both fresh `p403f16` retail-client legs (retail→retail and retail→OpenNova) carry the same 17-CU core as OpenNova and omit `APPID`. The static predicate is witnessed: `CNapiServerInfo_SerializeToSession @0x4c3650` writes it only when `NapiServerInfo+64` is nonzero. The LAN-path source of that slot remains unresolved: the known NovaWorld populate site is `UI_JoinSelectedSession @0x569b8e`, while its LAN branch clears the same block at `@0x569bbb`, suggesting another boot-persisted source in the older runs. No unconditional `9360` was added; parity comparison must follow the matching retail↔retail oracle's field presence. The receiver merely stores it (`NapiNetConfig_LoadFromConnTags @0x4c7260`, store `@0x4c7400`) and admission never reads it.
-- **D-NET-216** [FIXED 2026-08-30] OpenNova exposed neither half of retail spectating: its browser discarded ServerHello P2, its joiner always authenticated as a player, its host had no signed spectator capacity/password gate, and no live player-slot state could reach team 0, S2C 0x75/0x0A, the 0x16 spectator row, or a free camera. Fixed end to end: `GameConfig` models 0/-1/positive spectator slots and the 17-char password; BuildFlags exposes P2 0x2000/0x4000 through LAN discovery; every non-explicit join decides Player/Spectator before ClientAuth (direct endpoints receive a bounded unicast enumeration); ClientAuth writes type-2 `JSR=1` and optional `JSPP`; host validation returns JFC 14/15/16 and accounts for player versus spectator capacity; the canonical portable player-slot bit drives team-0 hidden spawn, deploy/loadout bypass, S2C 0x75, per-frame 0x0A bit0 plus the dead-or-spectator priority branch, and the 0x16 row/trailer. The joiner keeps the world ticking under neutral body input while `FlyCamera` owns presentation. F3 and MCP's confirmation-gated `local_spectator` mutate that same authority state and restore through normal spawn selection. The symmetric writer/reader closes retail-client→OpenNova-host and OpenNova-client→retail-host as well as OpenNova↔OpenNova; native wire/state tests and live loopback-UDP GUT coverage pin the contract. [orig: `HostDialog @0x555940; CNapiServerConfig_BuildFlags @0x4c4dc0; CNapiNetwork_ValidateJoinRequest @0x4c61b0; Server_ValidatePlayerJoinRequest @0x512100; Server_PlayerAdd @0x51cbc0; NapiNPClientMsg_SetSpectatorMode @0x4259e0; Entity_UpdateInfantryPlayerBody @0x4b40e0`]
+- **D-NET-217** [FIXED 2026-08-30] OpenNova exposed neither half of retail spectating: its browser discarded ServerHello P2, its joiner always authenticated as a player, its host had no signed spectator capacity/password gate, and no live player-slot state could reach team 0, S2C 0x75/0x0A, the 0x16 spectator row, or a free camera. Fixed end to end: `GameConfig` models 0/-1/positive spectator slots and the 17-char password (`g_spectator_slots @0x2550924` / `g_spectator_password @0x2550928` — IDB names refreshed from the stale `g_squad_*`); BuildFlags exposes P2 0x2000 with 0x4000 nested under it through LAN discovery; every non-explicit join decides Player/Spectator before ClientAuth (direct endpoints receive a bounded unicast enumeration); ClientAuth writes type-2 `JSR=1` and optional `JSPP`, stored on the connection at the 0x42 like retail's tag list. The rejects use retail's two vehicles: one shared 0x42 capacity count (players may occupy spectator headroom) answers the CR=0 0x82 `JFC=14/JFP=4` (JFP=5 with positive spectator-only slots) built by `NapiNPProtocol_SendJoinRejection @0x620cd0` (IDB-renamed from "SendDrawOverlay"), while the spectator legs run at the game-layer 0x00 join gate after CR=1 admission and punt the empty connection-description record with `DPC` **14** disabled / **15** slot count exceeded (candidate latched first, strictly-greater) / **16** case-insensitive password mismatch. The canonical portable player-slot bit drives team-0 hidden spawn (damage_state −1), deploy/loadout bypass, S2C 0x75, per-frame 0x0A bit0, the flat priority branch (retail's input there is the deploy-hold bit `slot+89912&0x10` a never-deploying spectator holds), and the 0x16 row/trailer. The joiner keeps the world ticking under neutral body input while `FlyCamera` owns presentation, and maps JFC=14 by its JFP plus DPC 14/15/16 onto actionable errors. F3 and MCP's confirmation-gated `local_spectator` mutate that same authority state and restore through normal spawn selection. Native wire/state tests and live loopback-UDP GUT coverage pin both reject vehicles and the contract. [orig: `HostDialog_ReadSettings @0x555940; CNapiServerConfig_BuildFlags @0x4c4dc0; CNapiNetwork_ValidateJoinRequest @0x4c61b0; NapiNPProtocol_SendJoinRejection @0x620cd0; NapiNPServer_HandlePlayerJoinMessage @0x512aa0; Server_ValidatePlayerJoinRequest @0x512100; Server_PlayerAdd @0x51cbc0; NapiNPClientMsg_SetSpectatorMode @0x4259e0; Entity_UpdateInfantryPlayerBody @0x4b40e0`]
 - **D-NET-215** [LOW, FIXED 2026-08-20] The S2C 0x14 header is `[channel][sender_slot][cstr text]`, not the reverse: the handler tail-jumps into the dispatcher as `Chat_DispatchToChannel(body[1], (char)body[0], &body[2])` `[orig: NapiNPClientMsg_ChatMessage @0x42F240]`, and the dispatcher's FIRST parameter indexes the roster (`PlayerSlotTable_GetActiveSlot`) and gates the line on the sender being neither muted nor a spectator while its SECOND is switched over 0..0xE for the line colour and sink `[orig: Chat_DispatchToChannel @0x42B910]`. `decode_chat_broadcast` and the coverage fixture were both authored to the swapped reading and were corrected together; the channel stays SIGNED because the call site reads `*(char *)packetData` and widens it. Residual (named, §5.52): the sender gate (`slot+0x4A & 2` muted; `slot+0x46 && !g_spawn_success_gate` spectator-while-live) is applied nowhere in the port, `ClientRosterSlot` lacking both slot bytes.
 - **D-NET-210** [LOW, FIXED 2026-08-10] LAN host bind scan ported: the authority arm feeds `{mplanserverportmin/max/delta, random=0}` into the socket open, `(max-min+1)/step` tries first at min, stepping by delta. [orig: CNapiNetwork_OpenTransportSocket @ 0x4c6a40 -> NapiUdpSocket_CreateAndBind @ 0x62d2a0; clamp NapiSocket_ClampBufferParams @ 0x62e180] Live-proven with two hosts on one machine. Residue: our joiner binds an OS-assigned port where retail's client arm scans its own authored quad — behavior-neutral against stock peers.
 

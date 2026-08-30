@@ -516,8 +516,11 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 			? (self->mount_handle != 0xFFFF ? self->mount_handle : self->ground_handle)
 			: 0xFFFF;
 	// The dead-or-spectator flag: the recipient entity's DEAD bit (flags & 2 —
-	// the everyday between-death-and-respawn state) OR its live slot spectator
-	// mode. [orig: @0x50e677..0x50e693].
+	// the everyday between-death-and-respawn state) OR retail's deploy-hold
+	// storage slot+89912 & 0x10 [orig: @0x50e677..0x50e693] — which a
+	// never-deploying spectator holds. Modeled off the canonical spectator
+	// bit; the pre-deploy ordinary-player leg of the same predicate remains a
+	// D-NET-139 residual.
 	const bool self_dead_or_spectator =
 			conn.spectator ||
 			(self != nullptr && (self->state_flags & 0x02) != 0);

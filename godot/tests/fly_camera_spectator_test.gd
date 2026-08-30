@@ -13,10 +13,10 @@ func test_spectator_entry_adopts_the_current_player_camera_pose() -> void:
 	var right_down := InputEventMouseButton.new()
 	right_down.button_index = MOUSE_BUTTON_RIGHT
 	right_down.pressed = true
-	camera._unhandled_input(right_down)
+	camera.get_viewport().push_input(right_down)
 	var look := InputEventMouseMotion.new()
 	look.relative = Vector2(10.0, -5.0)
-	camera._unhandled_input(look)
+	camera.get_viewport().push_input(look)
 
 	assert_almost_eq(camera.rotation.y, 0.70 - 10.0 * camera.mouse_sensitivity,
 			0.0001,

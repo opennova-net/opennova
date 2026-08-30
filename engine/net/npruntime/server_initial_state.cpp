@@ -78,8 +78,14 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	flags |= 0x800u;
 	if (static_cast<uint32_t>(ctx.transport_mode) == 1) flags &= ~0x800u; // SP clears it
 	if (!gs.server_password.empty()) flags |= 0x8u;
-	if (gs.spectator_slots != 0) flags |= 0x2000u;
-	if (!gs.spectator_password.empty()) flags |= 0x4000u;
+	// The password bit is NESTED under spectators-enabled: a configured
+	// password with spectating off advertises neither bit.
+	// [orig: CNapiServerConfig_BuildFlags @0x4c4dc0 — the 0x4000 strlen check
+	// @0x4c4ead sits inside the `if (g_spectator_slots)` @0x4c4e8a]
+	if (gs.spectator_slots != 0) {
+		flags |= 0x2000u;
+		if (!gs.spectator_password.empty()) flags |= 0x4000u;
+	}
 	if ((gs.game_type & 0x10000u) != 0) {     // team game
 		if ((gs.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) flags |= 0x4u;
 		if (!gs.side_a_password.empty()) flags |= 0x20u;

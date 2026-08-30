@@ -130,7 +130,7 @@ int main() {
 	if (!expect(
 			joiner_conn.link.spectator && spectator != nullptr &&
 			spectator->team == 0 && (spectator->flags & 1u) != 0 &&
-			spectator->damage_state == 620 && spectator_ai != nullptr &&
+			spectator->damage_state == -1 && spectator_ai != nullptr &&
 			spectator_ai->team == 0,
 			"spectator transition hides and neutralizes the authoritative player")) {
 		return 1;
@@ -167,7 +167,7 @@ int main() {
 	if (!expect(
 			joining_spectator != nullptr && joining_spectator->team == 0 &&
 			(joining_spectator->flags & 1u) != 0 &&
-			joining_spectator->damage_state == 620,
+			joining_spectator->damage_state == -1,
 			"spectator admission spawns the retail team-0 hidden entity")) {
 		return 1;
 	}
