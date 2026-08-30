@@ -116,6 +116,25 @@ int main() {
 	kernel.tick_no_net();
 	CHECK(kernel.world.logic_tick == tick0 + 2);
 
+	// The camera shake: the counter decays ONCE per tick in the pre-tick pass
+	// (never per frame), while every composed frame advances the IIR filters
+	// again from the same PRNG word — two frames between ticks differ
+	// [orig: @ 0x4de590; Camera_ComputeThirdPersonView @ 0x526781 / @ 0x5ca34d].
+	kernel.view.shake.counter = 10;
+	kernel.tick_no_net();
+	CHECK(kernel.view.shake.counter == 8);
+	{
+		const w::LocalPlayerViewFrame frame_a = kernel.view_frame();
+		const w::LocalPlayerViewFrame frame_b = kernel.view_frame();
+		CHECK(kernel.view.shake.counter == 8);
+		CHECK(frame_a.camera.yaw_deg != frame_b.camera.yaw_deg ||
+		      frame_a.camera.pitch_deg != frame_b.camera.pitch_deg ||
+		      frame_a.camera.roll_deg != frame_b.camera.roll_deg);
+	}
+	kernel.tick_no_net();
+	CHECK(kernel.view.shake.counter == 6);
+	kernel.view.shake.counter = 0;
+
 	// Teleport writes BOTH stores: the registry position and the AI 16.16
 	// mirror, with the input-owned view seeded to the new facing.
 	const w::EntityHandle player_h = kernel.player()->handle;

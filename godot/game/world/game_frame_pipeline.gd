@@ -91,7 +91,6 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	_end_leg(FrameStats.WORLD_NETWORK_FRAME, leg_start)
 	if not network_frame_ok:
 		return outcome
-	_world.advance_weather_frame()
 	if outcome != null and outcome.did_tick():
 		_world.apply_blink_frame()
 	_world.apply_occlusion_frame()
@@ -128,6 +127,10 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	leg_start = _begin_leg()
 	_world.render_particle_frame()
 	_end_leg(FrameStats.WORLD_PARTICLES, leg_start)
+	# The precipitation streaks after the particle pass and the trails,
+	# before the murk overlay (retail Terrain_RenderSceneWithReflection
+	# @ 0x5c96a6).
+	_world.render_precipitation_frame()
 	_world.mix_audio_frame(outcome.get_ticks_run() if outcome != null else 0)
 	leg_start = _begin_leg()
 	_world.update_clear_frame()

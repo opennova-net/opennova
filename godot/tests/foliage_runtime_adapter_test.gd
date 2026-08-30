@@ -222,6 +222,9 @@ func test_detail_preview_uses_foliage_map() -> void:
 	assert_eq(int(warmup.runtime_detail_intents), 0,
 		"Retail fills detail cache misses after the current draw.")
 	assert_gt(int(warmup.detail_cache_regenerations), 0)
+	# Pin the detail sway clock: retail's c24.x = ms x 0.003 + OscRing[0] /
+	# 65536 (Foliage_SetupVertexShaderConstants), no weather attached here.
+	_dispatcher.set_wind_clock_override_ms(1000)
 	_dispatcher.render_preview(_camera_xform())
 	var stats := _dispatcher.get_frame_stats()
 
@@ -242,7 +245,8 @@ func test_detail_preview_uses_foliage_map() -> void:
 	var draws := _backend_draws("detail")
 	for draw_value in draws:
 		var draw := draw_value as Dictionary
-		assert_almost_eq(float(draw.wind_phase), 0.002, 0.000001)
+		assert_almost_eq(float(draw.wind_phase), 3.0, 0.000001,
+			"The detail phase is the pinned clock x 0.003 with no oscillator term.")
 		var alpha_ref := float(draw.alpha_reference)
 		assert_true(
 			is_equal_approx(alpha_ref, 180.0 / 255.0) or is_equal_approx(alpha_ref, 8.0 / 255.0),

@@ -111,13 +111,14 @@ void frame(mission::MissionKernel &kernel, ListenHostState &state,
 	state.host_owner.ctx.loaded_model_viewport_height =
 			viewport_height > 0 ? static_cast<uint32_t>(viewport_height) : 0u;
 	const uint32_t now = state.host_owner.now_tick;
-	// The authority's per-tick environment advance precedes the server tick so
-	// the 0x0A fan reads the advanced sample (the golden-capture order).
-	kernel.world.network_env.advance_tick();
 	drain_host_client_gameplay_requests(kernel, state);
 	kernel.apply_player_input_pre_tick();
 	np::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
 			nullptr, nullptr, perf);
+	// The weather tick follows the server tick's entity update [orig:
+	// Game_ProcessMainFrame @ 0x52674b -> @ 0x526774]; the next frame's 0x0A
+	// fan projects the advanced weather.
+	kernel.tick_weather();
 	kernel.run_local_player_post_tick();
 	if (state.client_runtime)
 		state.client_runtime->Client_ProcessNetworkFrame(now, nullptr); // fold host_loop -> ClientState

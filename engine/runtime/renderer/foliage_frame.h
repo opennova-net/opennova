@@ -65,6 +65,11 @@ struct FoliageViewInput {
 	// True when the embedder supplies no frustum (a preview without a real
 	// projection); anchors then gate on view depth alone.
 	bool no_frustum = false;
+	// The detail tier's sway phase inputs: the wall clock in milliseconds
+	// (retail GetTickCount) and the weather oscillator's Env_WaveOscRing[0]
+	// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60076f].
+	uint32_t time_ms = 0;
+	int32_t wind_osc_ring0 = 0;
 };
 
 enum class FoliageTier : uint8_t {

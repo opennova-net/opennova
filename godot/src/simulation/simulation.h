@@ -37,6 +37,8 @@
 #include <runtime/wac/wac_system.h>
 
 namespace godot {
+
+class Weather;
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
 class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 0042 d5)
 class EntityRow;      // one typed entity-directory row
@@ -73,7 +75,9 @@ class EndRoundState;  // the typed end-of-round session facts (simulation_end_ro
 #include <formats/score/score.h> // the retained score.ini parse (score_config_)
 
 #include "mission/mission_data.h"
-#include <runtime/mission/mission_kernel.h> // the ONE mission boot + state + no-net tick (ADR 0042 d3)
+#include <runtime/mission/mission_kernel.h>
+#include <runtime/renderer/precipitation_frame.h>
+#include <runtime/devtools/environment_snapshot.h> // the ONE mission boot + state + no-net tick (ADR 0042 d3)
 #include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
 #include <net/inmatch/listen_host.h>              // ListenHostState + the listen bring-up/frame (ADR 0042 d3)
@@ -391,6 +395,14 @@ private:
 	// (reset_world) and NEVER null after construction; this binding converts
 	// Godot Refs into the kernel's sources and orders device work around it.
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
+	// The Weather node bound through set_weather_render_owner; released
+	// whenever the kernel (and the WeatherState it owns) is replaced or dies.
+	ObjectID weather_owner_id_;
+	void _release_weather_owner();
+	opennova::renderer::PrecipitationDrawState precipitation_draw_;
+	// The compiled streak frame, reused across frames (its vertex capacity
+	// survives clear()).
+	opennova::renderer::PrecipitationDrawFrame precipitation_frame_;
 	void apply_collision_to_ai();
 	// The shell input the sweep reads (its retained items.def rows feed the
 	// engine resolve). RefCounted, so retaining it also keeps its object/ADM
@@ -646,7 +658,6 @@ private:
 	// The live environment owner consumes each decoded phase-2 edge once. The
 	// ClientState revision is monotonic for one ClientRuntime; fresh runtimes
 	// reset this cursor with their other receive-side cursors.
-	uint32_t joiner_environment_revision_seen_ = 0;
 	// The 0x81 score-feedback edge cursor (ClientScoreFeedback::updates).
 	uint32_t score_feedback_updates_seen_ = 0;
 	// Last authoritative S2C 0x5A grant installed into the local slot pool.
@@ -940,20 +951,62 @@ private:
 	void reset_world();
 
 public:
-	// The authority network-environment mirrors — the weather device drives
-	// these natively (Weather.advance_world_driven / run_mission_start_boundary).
-	void set_network_environment(int64_t p_fog_target_q16,
-	                             int64_t p_fog_current_q16,
-	                             int64_t p_fog_accel_clamp,
-	                             int64_t p_tod_fixed24,
-	                             int64_t p_tod_advance_per_tick,
-	                             int64_t p_quake_ticks,
-	                             int64_t p_cloud_scroll_rate_target,
-	                             int64_t p_rain_pct_current_q16,
-	                             int64_t p_overcast_blend_q16,
-	                             int64_t p_precipitation_kind);
-	void advance_network_environment_tick();
-	void initialize_network_environment_mission_start();
+	// --- the weather home (world::WeatherState, ADR 0042 d2/d5) --------------
+	// The World's weather, the ONE home the WAC handlers write, the kernel's
+	// weather tick advances, the 0x0A projection serializes and a joiner's
+	// decoder writes back. Null without a kernel. C++ seams for the sibling
+	// native nodes (the Weather node binds its render owner here).
+	opennova::world::WeatherState *weather_state();
+	const opennova::world::WeatherState *weather_state() const;
+	// True once a world is installed (the weather home exists for the debug
+	// rows to command).
+	bool weather_state_bound() const { return weather_state() != nullptr; }
+	// The mission-start seed from the parsed .env + the mission header (the
+	// embedder's ONE derivation, env::weather_seed_from_config).
+	void seed_weather(const opennova::world::WeatherSeed &p_seed);
+	// The render owner the kernel's weather tick calls after the sim legs
+	// (null detaches). The owner node is remembered so the World's death
+	// (reset_world, destruction) releases the owner's pointer into it before
+	// the environment can read a freed WeatherState.
+	void set_weather_render_owner(Weather *p_owner);
+	// The authority's mission-start boundary after the eager WAC execution:
+	// the currents snap to the authored targets, the clamps install, 255 full
+	// ticks settle (retail Environment_MissionStartInit @ 0x57f1e0). False for
+	// a joiner or without a world.
+	bool settle_weather_mission_start();
+	// The precipitation drop pool's per-render update + compile for a camera
+	// (Godot frame): {positions: PackedVector3Array (three per drop), drops,
+	// color (ARGB int), snow} — the kernel re-floors the wrapped drops
+	// over terrain/water/entities, the renderer builds the streaks
+	// (renderer/precipitation_frame.h carries the cites).
+	Dictionary compile_precipitation_frame(const Vector3 &p_camera,
+			const Vector3 &p_camera_right, const Vector3 &p_camera_up,
+			int p_terrain_light_rgb);
+	// The weather tick's thunder one-shots since the last drain:
+	// [{distance: float, bearing: int}] (weather_state.h carries the cites).
+	Array drain_weather_sounds();
+	// The probe/test view of the weather home in native units.
+	Dictionary get_weather_state() const;
+	// The F3 Environment window's record (ADR 0042 d6), built by the ENGINE
+	// join over the weather home, the mission document, the occlusion blink
+	// flags and the local view; false without a world.
+	bool native_environment_snapshot(opennova::devtools::EnvironmentSnapshot &out) const;
+	// The MCP/debug rows' authority-gated weather commands (the F3 window
+	// reaches EntityCommands natively through DevTools). False on a joiner.
+	bool command_rain(int p_percent, int p_seconds);
+	bool command_snow(int p_percent, int p_seconds);
+	bool command_overcast(int p_percent, int p_seconds);
+	bool command_fog_distance(int p_metres);
+	bool command_move_fog(int p_metres, int p_seconds);
+	bool command_sky_speed(int p_rate);
+	bool command_quake(int p_seconds);
+	bool command_time_of_day_minutes(int p_minute_of_day);
+	// The exact dev-tool scrub (not the WAC `tod` math).
+	bool debug_set_time_of_day_minutes(double p_minute_of_day);
+	bool command_fog_type(int p_type);
+	bool command_lightning_flash();
+	bool command_lightning_far_flash();
+	bool command_wind_scale(int p_value);
 
 private:
 	// The shared post-kernel-boot binding legs: session-header capture, HUD
@@ -1177,7 +1230,6 @@ public:
 	String get_join_mission_file() const;
 	// Consume the latest decoded S2C 0x0A phase-2 state once per receive
 	// revision. Empty means no new authoritative sample.
-	Dictionary take_join_environment_update();
 	// The S2C 0x81 hit-confirm edge: {} unless a positive/negative score delta
 	// landed since the last take, else {score, delta, tone} with the tone name
 	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
@@ -1355,6 +1407,8 @@ public:
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
 	Vector3 get_local_player_position() const;
+	// The AI row's 16.16 position (mission x/y ground, z up) the retail hashes read; false without a player row.
+	bool local_player_position_q16(int32_t (&r_pos)[3]) const;
 	// Raw engine heading (BAM32) for the heading-up spinmap.
 	int64_t get_local_player_heading_bam() const;
 	// Radar zoom: positive = radarout (x1.15 toward 0x100000), negative =

@@ -175,11 +175,27 @@ static void test_paren_less_and_effects() {
     CompileEnv env;
     // paren-less args + an unimplemented command recorded as an effect.
     sys.set_program(compile_source(
+        "if never then dropflare() endif\n", env));
+    w.add_system(&sys);
+    w.load_systems();
+    run(w, sys, 1);
+    CHECK(w.effects.count("dropflare") == 1);
+}
+
+// `flash` is a weather handler now: it arms the short lightning sequencer
+// on the World's weather home instead of surfacing as an effect record
+// [orig: Env_TriggerLightningFlashA @ 0x4ed500].
+static void test_flash_arms_the_weather_home() {
+    BehaviorWorld w;
+    WacSystem sys;
+    CompileEnv env;
+    sys.set_program(compile_source(
         "if never then flash() endif\n", env));
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 1);
-    CHECK(w.effects.count("flash") == 1);
+    CHECK(w.effects.count("flash") == 0);
+    CHECK(w.weather.core.lightning.timer_a == 16);
 }
 
 // WAC scripted voice: wave/pwave route to a "dialog_wav" effect carrying the
@@ -402,6 +418,7 @@ int main() {
     test_else_branch();
     test_environment();
     test_paren_less_and_effects();
+    test_flash_arms_the_weather_home();
     test_wac_wave_emits_dialog_wav();
     test_wac_text_and_console_use_distinct_effect_channels();
     test_authority_gate();

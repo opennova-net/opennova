@@ -268,8 +268,19 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 	draw_list_.debug.runtime_silhouette_intents =
 			static_cast<int64_t>(output.silhouettes.size());
 
-	const float detail_wind_phase =
-			static_cast<float>(runtime_stats.terrain_scene_counter) * 0.001f;
+	// The detail tier's c24.x: the ms clock x 0.003 plus the weather
+	// oscillator's ring slot 0 / 65536 (`fild` the GetTickCount word, `fmul`
+	// flt_7DE9D4 = 0.003; `fild Env_WaveOscRing`, `fmul` flt_7DE9D0 =
+	// 1/65536; `faddp`), uploaded as c24 = (phase, 1, 0, 0.03) for
+	// Foliage_WindSwayVS' sin(world.x + c24.x) * bend * c24.w
+	// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d]. The
+	// clock term folds modulo 2 pi so a long session keeps the sine's float
+	// precision — the sine is periodic, nothing observable moves.
+	constexpr double kTwoPi = 6.283185307179586;
+	const double clock_term =
+			std::fmod(static_cast<double>(view.time_ms) * 0.003, kTwoPi);
+	const float detail_wind_phase = static_cast<float>(
+			clock_term + static_cast<double>(view.wind_osc_ring0) / 65536.0);
 
 	// --- Detail submissions ------------------------------------------------
 	for (size_t begin = 0; begin < output.detail.size();) {

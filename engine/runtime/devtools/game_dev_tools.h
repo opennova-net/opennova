@@ -15,10 +15,13 @@ class StatsWindow;
 class GameWindow;
 class GameViewport;
 class EntitiesWindow;
+class EnvironmentWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct DebugRequest;
 struct EntityDirectorySnapshot;
+struct EnvironmentRequest;
+struct EnvironmentSnapshot;
 
 class GameDevTools {
 public:
@@ -30,6 +33,8 @@ public:
 	const StatsWindow &stats_window() const { return *stats_window_; }
 	EntitiesWindow &entities_window() { return *entities_window_; }
 	const EntitiesWindow &entities_window() const { return *entities_window_; }
+	EnvironmentWindow &environment_window() { return *environment_window_; }
+	const EnvironmentWindow &environment_window() const { return *environment_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_input_mode(GameInputMode mode);
@@ -49,11 +54,19 @@ public:
 	bool needs_entity_directory() const;
 	bool take_debug_request(DebugRequest &request);
 
+	// The Environment window's record/request channel (the same shape): the
+	// weather page record pushed by value on its cadence while shown, and
+	// the typed weather commands drained into the engine command layer.
+	void set_environment_snapshot(const EnvironmentSnapshot &snapshot);
+	bool needs_environment_snapshot() const;
+	bool take_environment_request(EnvironmentRequest &request);
+
 private:
 	ImGuiPass pass_;
 	GameWindow *game_window_ = nullptr;
 	StatsWindow *stats_window_ = nullptr;
 	EntitiesWindow *entities_window_ = nullptr;
+	EnvironmentWindow *environment_window_ = nullptr;
 };
 
 }  // namespace opennova::devtools

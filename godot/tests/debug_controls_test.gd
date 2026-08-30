@@ -46,6 +46,15 @@ const EXPECTED_IDS: Array[StringName] = [
 	&"environment_wind_strength",
 	&"environment_lightning_short",
 	&"environment_lightning_long",
+	&"environment_rain",
+	&"environment_snow",
+	&"environment_overcast",
+	&"environment_fog_distance",
+	&"environment_move_fog",
+	&"environment_sky_speed",
+	&"environment_quake",
+	&"environment_fog_type",
+	&"environment_weather_snapshot",
 	&"deploy_pick",
 	&"set_viewmodel_weapon",
 	&"clear_viewmodel_weapon",
@@ -124,7 +133,7 @@ func test_the_table_registers_the_wire_catalog() -> void:
 		var json: Dictionary = row.to_json_value()
 		assert_eq(json.keys(), WIRE_ROW_KEYS,
 				"'%s' keeps the legacy wire row keys" % id)
-	assert_eq(owner_counts[DebugControls.OWNER_ENGINE], 25,
+	assert_eq(owner_counts[DebugControls.OWNER_ENGINE], 34,
 			"engine rows end in a Simulation/Terrain/Weather/environment call")
 	assert_eq(owner_counts[DebugControls.OWNER_DEVICE], 21,
 			"device rows are viewport/overlay/audio/shell state")

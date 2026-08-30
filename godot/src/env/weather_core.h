@@ -99,7 +99,7 @@ public:
 	Color get_cloudhighlight() const;
 	Color get_cloudedge() const;
 
-	// The shader-facing sway scalar/phase and lightning intensity — pure
+	// The diagnostic sway scalar/phase and lightning intensity — pure
 	// forwards of env::WeatherCore::sway_amount/sway_phase/lightning_intensity
 	// (env_weather_core.h is the formula home, shared with WeatherRuntime).
 	float get_sway_amount() const;
@@ -117,7 +117,7 @@ public:
 	float get_cloud_uv_rate_per_second() const;
 	// Apply the scalar subset decoded from one S2C 0x0A phase-2 sample. Inputs
 	// are the narrowed wire units; engine/formats/env owns the exact reconstruction.
-	void apply_network_environment_sample(int p_fog_dist, int p_fog_accel,
+	void apply_wire_sample(int p_fog_dist, int p_fog_accel,
 			int p_rain_pct, int p_overcast);
 	// The smoothed scalar currents (world units / percent).
 	float get_fog_distance() const;

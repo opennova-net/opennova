@@ -30,7 +30,7 @@
 #include <net/npruntime/session_status.h>
 #include <net/npwire/game_type.h>
 #include <net/npwire/net_ports.h>
-#include <runtime/environment/env_network_sample.h>
+#include <runtime/environment/weather_seed.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 #include <runtime/world/tick_accumulator.h>
@@ -338,13 +338,13 @@ int main(int argc, char **argv) {
 		if (!env_input) {
 			env_error = "environment resource '" + resolved_env.string() +
 					"' could not be opened";
-		} else if (!env::publish_initial_network_environment(
+		} else if (!env::seed_weather_from_env(
 						   env_input, kernel.mission.header,
-						   kernel.world.network_env, env_error)) {
+						   kernel.world.weather, env_error)) {
 			env_error = "failed to parse environment '" + resolved_env.string() +
 					"': " + env_error;
 		}
-		if (!kernel.world.network_env.valid) {
+		if (!kernel.world.weather.valid) {
 			std::fprintf(stderr,
 			             "nw-server: %s; pass --env <path-to %s.env> when the "
 			             "resource is not beside the mission\n",
@@ -482,8 +482,7 @@ int main(int argc, char **argv) {
 	// Retail order: the eager WAC execution (the boot's tail) precedes
 	// environment mission-start initialization and the 255 complete weather
 	// ticks that settle before any client can observe phase 2.
-	kernel.world.network_env.initialize_mission_start();
-	env::prewarm_network_environment(kernel.world.network_env);
+	kernel.settle_weather_mission_start();
 	// The per-join ctx feeds the bring-up left to the embedder: the S2C 0x45
 	// terrain-tile source and the "Server" gametext table.
 	host.host_owner.ctx.terrain_til_data = std::move(terrain_til_bytes);

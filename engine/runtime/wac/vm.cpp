@@ -89,7 +89,7 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::NearType: return w.cached.near_type;
                 case Builtin::NearDist: return w.cached.near_dist;
                 case Builtin::NearId: return w.cached.near_id;
-                case Builtin::Wind: return 0;
+                case Builtin::Wind: return w.weather.wind_scale();   // Env_WindScale [orig: @0x26c68c0]
                 case Builtin::Mana: return 0;
                 case Builtin::Bluekills: return w.kill_stats.bluekills_by_player;   // [orig: 0xC846F0]
                 case Builtin::Greenkills: return w.kill_stats.greenkills_by_player; // [orig: 0xC846F8]
@@ -103,6 +103,7 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
                 case Builtin::LoseVar: return w.match.outcome().winner_team == 2 ? 1 : 0;
                 case Builtin::AccuracySpread: return w.wac_values.accuracy_spread;
                 case Builtin::Fallmps: return w.wac_values.fallmps;               // [orig: 0xC6EAE4]
+                case Builtin::Night: return w.weather.is_night_phase() ? 1 : 0;   // Env_IsNightPhase [orig: @0x26c645c]
             }
             return 0;
         }
@@ -124,6 +125,8 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) const {
                 w.wac_values.accuracy_spread = v;
             else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Fallmps)
                 w.wac_values.fallmps = v;
+            else if (static_cast<Builtin>(operand_index(ref)) == Builtin::Wind)
+                w.commands.set_wind_scale(v); // Env_WindScale [orig: the `wind` row @0x82EEF0]
             break;
         default: break; // pool values are not lvalues
     }
@@ -254,57 +257,32 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "GroupMax")) return cmds.set_group_engage_max(A(0), A(1));
     if (ieq(n, "GroupAtt")) return cmds.set_group_attack_max(A(0), A(1));
 
-    // ---- environment ----
-    if (ieq(n, "fogtype")) { w.env.fog_type = A(0); ++w.env.generation; return 0; }
-    if (ieq(n, "fogdist")) {
-        w.env.fog_dist = A(0);
-        ++w.env.generation;
-        w.network_env.command_fog_distance(A(0));
-        return 0;
-    }
-    if (ieq(n, "movefog")) {
-        w.env.fog_dist = A(0);
-        ++w.env.generation;
-        w.network_env.command_move_fog(A(0), A(1));
-        return 0;
-    }
-    if (ieq(n, "rain")) {
-        w.env.rain = A(0);
-        ++w.env.generation;
-        w.network_env.command_precipitation(A(0), A(1), world::PrecipitationKind::Rain);
-        return 0;
-    }
-    if (ieq(n, "snow")) {
-        w.env.snow = A(0);
-        ++w.env.generation;
-        w.network_env.command_precipitation(A(0), A(1), world::PrecipitationKind::Snow);
-        return 0;
-    }
-    if (ieq(n, "overcast")) {
-        w.env.overcast = A(0);
-        ++w.env.generation;
-        w.network_env.command_overcast(A(0), A(1));
-        return 0;
-    }
-    if (ieq(n, "skyspeed")) {
-        w.env.sky_speed = A(0);
-        ++w.env.generation;
-        w.network_env.command_sky_speed(A(0));
-        return 0;
-    }
-    if (ieq(n, "quake")) {
-        w.network_env.command_quake(A(0));
-        return 0;
-    }
-    if (ieq(n, "TOD")) {
-        w.env.time_of_day = A(0);
-        ++w.env.generation;
-        w.network_env.command_time_of_day_minutes(A(0));
-        return 0;
-    }
-    if (ieq(n, "sun")) { w.env.sun_rgb = static_cast<uint32_t>(A(0)); ++w.env.generation; return 0; }
-    if (ieq(n, "sky")) { w.env.sky_rgb = static_cast<uint32_t>(A(0)); ++w.env.generation; return 0; }
-    if (ieq(n, "fog") || ieq(n, "fogcolor")) { w.env.fog_rgb = static_cast<uint32_t>(A(0)); ++w.env.generation; return 0; }
+    // ---- environment ---- (world::WeatherState carries the handler cites)
+    if (ieq(n, "fogtype")) { cmds.set_fog_type(A(0)); return 0; }
+    if (ieq(n, "fogdist")) { cmds.set_fog_distance(A(0)); return 0; }
+    if (ieq(n, "movefog")) { cmds.move_fog(A(0), A(1)); return 0; }
+    if (ieq(n, "rain")) { cmds.set_rain(A(0), A(1)); return 0; }
+    if (ieq(n, "snow")) { cmds.set_snow(A(0), A(1)); return 0; }
+    if (ieq(n, "overcast")) { cmds.set_overcast(A(0), A(1)); return 0; }
+    if (ieq(n, "skyspeed")) { cmds.set_sky_speed(A(0)); return 0; }
+    if (ieq(n, "skyheight")) { cmds.set_sky_height(A(0)); return 0; }
+    if (ieq(n, "quake")) { cmds.quake(A(0)); return 0; }
+    if (ieq(n, "TOD")) { cmds.set_time_of_day_minutes(A(0)); return 0; }
+    if (ieq(n, "sunfade")) { cmds.sun_fade(A(0), A(1)); return 0; }
+    if (ieq(n, "colorfade")) { cmds.set_color_fade(A(0)); return 0; }
+    if (ieq(n, "flash")) { cmds.lightning_flash(); return 0; }
+    if (ieq(n, "farflash")) { cmds.lightning_far_flash(); return 0; }
+    // The color commands' R,G,B arrive packed 0x00RRGGBB by the compiler.
+    if (ieq(n, "lightning")) { cmds.set_lightning_color(static_cast<uint32_t>(A(0))); return 0; }
+    if (ieq(n, "sun")) { cmds.set_weather_color(world::WeatherColorTarget::Sun, static_cast<uint32_t>(A(0))); return 0; }
+    if (ieq(n, "sky")) { cmds.set_weather_color(world::WeatherColorTarget::Sky, static_cast<uint32_t>(A(0))); return 0; }
+    if (ieq(n, "ground")) { cmds.set_weather_color(world::WeatherColorTarget::Ground, static_cast<uint32_t>(A(0))); return 0; }
+    if (ieq(n, "floor")) { cmds.set_weather_color(world::WeatherColorTarget::Floor, static_cast<uint32_t>(A(0))); return 0; }
+    if (ieq(n, "ceiling")) { cmds.set_weather_color(world::WeatherColorTarget::Ceiling, static_cast<uint32_t>(A(0))); return 0; }
+    if (ieq(n, "cloud")) { cmds.set_weather_color(world::WeatherColorTarget::Cloud, static_cast<uint32_t>(A(0))); return 0; }
+    if (ieq(n, "fog") || ieq(n, "fogcolor")) { cmds.set_weather_color(world::WeatherColorTarget::Fog, static_cast<uint32_t>(A(0))); return 0; }
+    if (ieq(n, "skyfog") || ieq(n, "skyfogcolor")) { cmds.set_weather_color(world::WeatherColorTarget::SkyFog, static_cast<uint32_t>(A(0))); return 0; }
+    if (ieq(n, "gain")) { cmds.set_weather_color(world::WeatherColorTarget::Gain, static_cast<uint32_t>(A(0))); return 0; }
 
     // ---- objective ----
     // [orig: WacAction_Win @0x4ed4a0 — Server_ProcessRoundEnd(team) straight through.]
