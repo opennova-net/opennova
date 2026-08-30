@@ -372,6 +372,10 @@ void ObjectModel::apply_level_surfaces() {
 				auxiliary->set_meta("_opennova_auxiliary_draw", true);
 				parent->add_child(auxiliary);
 				slot.auxiliary = auxiliary;
+				// Minted between the terrain-frame and viewmodel legs: it
+				// takes the retained page binding and pass flag now rather
+				// than drawing with default uniforms until the next leg.
+				stamp_instance_uniforms(auxiliary);
 			}
 			reparent(auxiliary, parent);
 			if (auxiliary->get_mesh() != surface.mesh) {

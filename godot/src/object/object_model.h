@@ -361,6 +361,11 @@ private:
 	bool on_screen_ = true;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool match_terrain_enabled_ = false;
+	// The last MATCHTERRAIN page state the terrain-frame leg stamped
+	// (refresh_match_terrain_frame), kept for instances minted between legs.
+	bool match_terrain_page_ready_ = false;
+	float match_terrain_page_layer_ = 0.0f;
+	Vector4 match_terrain_page_projection_;
 	bool awake_ = false; // in the shared awake set below
 
 	// The one runtime-frame set: every model holding live per-frame work (PANM,
@@ -513,6 +518,13 @@ private:
 	void refresh_active_lod_rest_transforms();
 	void stamp_match_terrain_instances(bool p_page_ready, float p_layer,
 			const Vector4 &p_projection);
+	// The per-instance uniforms every retained instance carries (the
+	// MATCHTERRAIN page binding, the viewmodel pass flag and cull margin),
+	// written from the model's retained state onto one instance: the
+	// terrain-frame and viewmodel legs stamp the built set, this stamps an
+	// instance minted later (a first-seen auxiliary of a level switch) so it
+	// never draws with default uniforms until the next leg.
+	void stamp_instance_uniforms(GeometryInstance3D *p_instance) const;
 	void set_model_bounds(const AABB &p_bounds);
 	static bool aabb_equal_approx(const AABB &p_a, const AABB &p_b);
 	Vector<ObjectModel *> live_presentation_links() const;

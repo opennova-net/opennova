@@ -954,6 +954,9 @@ void ObjectModel::advance_awake_frame_impl(double p_delta,
 // @0x5d9ff3 - docs/render/render-material-re.md).
 void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 		float p_layer, const Vector4 &p_projection) {
+	match_terrain_page_ready_ = p_page_ready;
+	match_terrain_page_layer_ = p_layer;
+	match_terrain_page_projection_ = p_projection;
 	const StringName enabled_name("u_match_terrain_enabled");
 	const StringName ready_name("u_match_terrain_page_ready");
 	const StringName layer_name("u_match_terrain_page_layer");
@@ -982,6 +985,26 @@ void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 				static_cast<Object *>(robj_dense_[entry])));
 	}
 	apply_to(skeleton_);
+}
+
+void ObjectModel::stamp_instance_uniforms(GeometryInstance3D *p_instance) const {
+	if (p_instance == nullptr) {
+		return;
+	}
+	p_instance->set_instance_shader_parameter(
+			StringName("u_match_terrain_enabled"), match_terrain_enabled_);
+	p_instance->set_instance_shader_parameter(
+			StringName("u_match_terrain_page_ready"),
+			match_terrain_enabled_ && match_terrain_page_ready_);
+	p_instance->set_instance_shader_parameter(
+			StringName("u_match_terrain_page_layer"), match_terrain_page_layer_);
+	p_instance->set_instance_shader_parameter(
+			StringName("u_match_terrain_page_projection"),
+			match_terrain_page_projection_);
+	// The same flag and margin set_viewmodel_pass stamps on the built set.
+	p_instance->set_instance_shader_parameter(
+			StringName("u_viewmodel_pass"), viewmodel_pass_);
+	p_instance->set_extra_cull_margin(viewmodel_pass_ ? 8.0f : 0.0f);
 }
 
 void ObjectModel::set_viewmodel_pass(bool p_enabled) {
