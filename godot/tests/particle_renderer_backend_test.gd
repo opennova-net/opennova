@@ -442,6 +442,65 @@ func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
 			"the last renderer restores null so WorldEnvironment inheritance resumes")
 
 
+func test_exit_tree_shutdown_is_undone_by_re_entry() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0, 0, 5)
+	camera.current = true
+	viewport.add_child(camera)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_world_scene()
+	renderer.procedural_fallback_enabled = true
+	viewport.add_child(renderer)
+	renderer.render_now()
+	var live := renderer.get_debug_draw_list_report()
+	assert_false(bool(live.get("shutdown", true)), "a fresh renderer is live")
+	assert_true(bool(live.get("world_compositor_attached", false)))
+	assert_eq(camera.compositor.get_compositor_effects().size(), 2)
+
+	# EXIT_TREE retires the compositor effects for good and latches shutdown.
+	viewport.remove_child(renderer)
+	var retired := renderer.get_debug_draw_list_report()
+	assert_true(bool(retired.get("shutdown", false)), "EXIT_TREE latches shutdown")
+	assert_true(bool((retired.get("world_camera_backend", {}) as Dictionary).get(
+			"shutdown", false)), "EXIT_TREE retires the camera-side effect")
+	assert_false(bool(retired.get("world_compositor_attached", true)),
+			"EXIT_TREE detaches from the camera compositor")
+	assert_null(camera.compositor, "the departing renderer restores the camera")
+
+	# Re-entry replaces the retired effects and clears the latch: the same
+	# instance renders again, EffectWorld keeps it because it is still valid.
+	viewport.add_child(renderer)
+	renderer.render_now()
+	var revived := renderer.get_debug_draw_list_report()
+	assert_false(bool(revived.get("shutdown", true)), "ENTER_TREE clears the latch")
+	for key in [
+		"world_far_backend", "world_camera_backend",
+		"reflection_far_backend", "reflection_camera_backend",
+	]:
+		assert_false(bool((revived.get(key, {}) as Dictionary).get("shutdown", true)),
+				"%s is a fresh effect after re-entry" % key)
+	assert_true(bool(revived.get("world_compositor_attached", false)),
+			"re-entry re-attaches the world camera")
+	assert_not_null(camera.compositor)
+	assert_eq(camera.compositor.get_compositor_effects().size(), 2,
+			"re-entry installs exactly one fresh pair, no stale effects")
+	assert_gt(renderer.get_draw_command_count(), 0,
+			"the retained scene publishes again through the new effects")
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	var backend: Dictionary = renderer.get_debug_draw_list_report().get(
+			"world_camera_backend", {})
+	if bool(backend.get("rd_available", false)):
+		assert_true(bool(backend.get("callback_seen", false)),
+				"the fresh effect's callback runs on the re-entered renderer")
+	assert_engine_error_count(0, "the retire/re-enter round trip is clean")
+
+
 func test_far_particles_lead_the_camera_chain_and_terminal_stays_last() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(64, 64)
