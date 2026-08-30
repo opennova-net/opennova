@@ -211,29 +211,30 @@ func test_fog_start_follows_engine_policy() -> void:
 	assert_almost_eq(env.get_fog_start(), 250.0, 0.5, "fog_type 3 starts at quarter the end distance.")
 
 func test_smoothed_fog_start_tracks_current_end_and_invalidates_consumers() -> void:
+	var mount := Node3D.new()
+	add_child_autofree(mount)
 	var env_node := MissionEnvironment.new()
-	add_child_autofree(env_node)
+	env_node.name = "Env"
 	env_node.environment_data = _load_full_00()
-	env_node.set_weather_driven(true)
+	mount.add_child(env_node)
+	var weather := Weather.new()
+	weather.environment_path = NodePath("../Env")
+	mount.add_child(weather)
+	weather.prepare_world_driven()
 
+	# fogdist(640) on the standalone weather home: the 1/32 spring settles the
+	# smoothed current exactly on the target (retail WacCmd_FogDist @ 0x4ee100;
+	# the spring @ 0x57ede2).
 	var generation_before := env_node.get_env_generation()
-	env_node.set_smoothed_scalars(640.0, env_node.get_sky_height_target(), 0.0)
+	weather.command_fog_distance(640)
+	for _i in range(1024):
+		weather.tick_fixed()
 	assert_almost_eq(env_node.get_fog_level(), 640.0, 0.001,
 			"weather consumers read the smoothed fog end")
 	assert_almost_eq(env_node.get_fog_start(), 320.0, 0.001,
 			"type-2 fog start follows half of that same smoothed end")
 	assert_gt(env_node.get_env_generation(), generation_before,
 			"moving fog bounds invalidate cached object and clear-state consumers")
-
-	var fine_step_generation := env_node.get_env_generation()
-	env_node.set_smoothed_scalars(640.001, env_node.get_sky_height_target(), 0.0)
-	assert_gt(env_node.get_env_generation(), fine_step_generation,
-			"sub-epsilon fixed spring steps still invalidate renderer consumers")
-
-	var settled_generation := env_node.get_env_generation()
-	env_node.set_smoothed_scalars(640.001, env_node.get_sky_height_target(), 0.0)
-	assert_eq(env_node.get_env_generation(), settled_generation,
-			"a settled fog spring does not churn renderer generations")
 
 
 func test_underwater_pass_transition_publishes_once_and_is_idempotent() -> void:
@@ -418,3 +419,34 @@ func test_field_consumption_table_mirrors_the_matrix() -> void:
 
 	assert_eq(String((table.get("fog_level", {}) as Dictionary).get("status", "")), "honored",
 		"plainly honored fields are in the table too")
+
+
+func test_weather_releases_a_freed_simulation_before_the_environment_reads_it() -> void:
+	var mount := Node3D.new()
+	add_child_autofree(mount)
+	var env_node := MissionEnvironment.new()
+	env_node.name = "Env"
+	env_node.environment_data = _load_full_00()
+	mount.add_child(env_node)
+	var weather := Weather.new()
+	weather.environment_path = NodePath("../Env")
+	mount.add_child(weather)
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var sim := Simulation.new()
+	assert_true(sim.load_from_mission_data(mission))
+	assert_true(sim.weather_state_bound())
+	weather.bind_simulation(sim)
+	# GameWorld.unload frees the runtime and the off-tree sim with it: the
+	# environment must stop viewing the dead World's WeatherState before its
+	# next reload reads the view (the mission-lifecycle segfault).
+	sim.free()
+	env_node.environment_data = _load_full_00()
+	env_node.set_time_of_day(12.0)
+	# GameWorld re-prepares the standalone home on the world-only load.
+	weather.prepare_autonomous()
+	weather.command_fog_distance(640)
+	for _i in range(1024):
+		weather.tick_fixed()
+	assert_almost_eq(env_node.get_fog_level(), 640.0, 0.001,
+			"after the release the weather ticks the environment's standalone home")

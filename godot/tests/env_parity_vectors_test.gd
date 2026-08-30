@@ -150,7 +150,7 @@ extends GutTest
 
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
-const TICK := 1.0 / 62.0
+const TICK := 1.0 / 62.5 # one weather tick per frame (the simulation quantum)
 const FLOAT_EPSILON := 1e-4
 
 # time_of_day grid: midnight, the 05:40->06:20 sunrise ramp (switch 06:00),

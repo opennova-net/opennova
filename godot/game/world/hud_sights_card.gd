@@ -8,12 +8,61 @@ extends Control
 ## render_hud_overlay @0x5d82da; HUD_RenderAllOverlays runs later in the
 ## frame]. Row rects live in the virtual 1024x768 design space and scale to the
 ## live viewport per draw [orig: Viewport_ScaleToVirtualCoords @0x5d2b20].
-## Additive rows ride a per-row CanvasItemMaterial — the blend token map
-## [orig: WeaponDef_CreateBlendNamedMaterial @0x540180 blend/add/...].
+## Rows carry the six-mode retail material map, including the doubled-source
+## multiply equation and the alpha-test variants [orig:
+## WeaponDef_CreateBlendNamedMaterial @0x540180; blend decoder @0x680f00;
+## CGfxDevice_SetAlphaTestRef(128) @0x5ccdae].
 ##
 ## This stays a shell-side child-control stack (not a HudDrawList element)
 ## because each row needs its own CanvasItem for its blend mode; the engine
 ## compiler's sights element is deliberately left unfed by HudOverlay.
+
+enum SightBlendMode {
+	BLEND,
+	ADD,
+	BLEND_AT,
+	MULTIPLY,
+	ADD_AT,
+	MULTIPLY_AT,
+}
+
+const BLEND_AT_SHADER_CODE := """
+shader_type canvas_item;
+render_mode blend_mix;
+
+void fragment() {
+	vec4 texel = texture(TEXTURE, UV);
+	if (texel.a <= 128.0 / 255.0) {
+		discard;
+	}
+	COLOR = texel;
+}
+"""
+const ADD_AT_SHADER_CODE := """
+shader_type canvas_item;
+render_mode blend_add;
+
+void fragment() {
+	vec4 texel = texture(TEXTURE, UV);
+	if (texel.a <= 128.0 / 255.0) {
+		discard;
+	}
+	COLOR = texel;
+}
+"""
+const MULTIPLY_SHADER_CODE := """
+shader_type canvas_item;
+render_mode blend_mul;
+uniform bool alpha_test = false;
+
+void fragment() {
+	vec4 texel = texture(TEXTURE, UV);
+	if (alpha_test && texel.a <= 128.0 / 255.0) {
+		discard;
+	}
+	COLOR = vec4(texel.rgb * 2.0, texel.a);
+}
+"""
 
 class SightRowControl:
 	extends Control
@@ -56,14 +105,9 @@ func set_weapon_sights(sights: Array, root: ResourceRoot) -> void:
 		var x1 := float(e.get("x1", 0))
 		var y1 := float(e.get("y1", 0))
 		row.rect_v = Rect2(x1, y1, float(e.get("x2", 0)) - x1, float(e.get("y2", 0)) - y1)
-		# Blend token 1 is the additive entry of the original's blend-token map
-		# [orig: WeaponDef_CreateBlendNamedMaterial @0x540180 blend/add/...]; the full map is not ported yet, so
-		# the token stays a literal here — no bound name exists until the
-		# WeaponDef_CreateBlendNamedMaterial blend-map port lands in the engine.
-		if int(e.get("blend", 0)) == 1:
-			var mat := CanvasItemMaterial.new()
-			mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
-			row.material = mat
+		var material := _material_for_blend(int(e.get("blend", SightBlendMode.BLEND)))
+		if material != null:
+			row.material = material
 		row.set_anchors_preset(Control.PRESET_FULL_RECT)
 		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.visible = _card_up
@@ -88,6 +132,37 @@ func is_card_up() -> bool:
 
 func row_count() -> int:
 	return _rows.size()
+
+
+static func _material_for_blend(blend: int) -> Material:
+	match blend:
+		SightBlendMode.ADD:
+			var material := CanvasItemMaterial.new()
+			material.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+			return material
+		SightBlendMode.BLEND_AT:
+			return _shader_material(BLEND_AT_SHADER_CODE)
+		SightBlendMode.MULTIPLY:
+			return _multiply_material(false)
+		SightBlendMode.ADD_AT:
+			return _shader_material(ADD_AT_SHADER_CODE)
+		SightBlendMode.MULTIPLY_AT:
+			return _multiply_material(true)
+	return null
+
+
+static func _multiply_material(alpha_test: bool) -> ShaderMaterial:
+	var material := _shader_material(MULTIPLY_SHADER_CODE)
+	material.set_shader_parameter("alpha_test", alpha_test)
+	return material
+
+
+static func _shader_material(code: String) -> ShaderMaterial:
+	var shader := Shader.new()
+	shader.code = code
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	return material
 
 
 static func _load_texture(root: ResourceRoot, name: String) -> Texture2D:

@@ -29,6 +29,7 @@ namespace godot {
 class Image;
 class RenderingServer;
 class Terrain;
+class Weather;
 class TerrainData;
 class TerrainTileInfo;
 
@@ -67,6 +68,13 @@ public:
   // The owning Terrain, wired by the game at world load. Supplies the native
   // detail-cell handoff and composed surface textures when available.
   void set_terrain(Terrain *p_terrain);
+  // The weather whose oscillator ring feeds the detail sway phase (retail
+  // Env_WaveOscRing[0] in Foliage_SetupVertexShaderConstants @ 0x60075e);
+  // null leaves the clock term alone.
+  void set_weather(Weather *p_weather);
+  // Tests and raster probes pin the detail sway clock (the wall-clock
+  // milliseconds behind the phase); a negative value restores the live clock.
+  void set_wind_clock_override_ms(int64_t p_ms);
 
   // Runtime fast path. Height, authored foliage-map, and terrain-atlas
   // projection all come directly from this resource.
@@ -227,6 +235,10 @@ private:
   int disabled_slot_count_ = 0;
 
   Terrain *terrain_ = nullptr;
+  // The weather by instance id: the node may go before the dispatcher.
+  ObjectID weather_id_;
+  Weather *_weather() const;
+  int64_t wind_clock_override_ms_ = -1;
   Ref<TerrainData> terrain_data_;
   Ref<TerrainTileInfo> tile_info_;
   Ref<TerrainData> colormap_source_;

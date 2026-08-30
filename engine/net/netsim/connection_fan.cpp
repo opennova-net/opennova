@@ -1021,19 +1021,24 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 			static_cast<uint8_t>(w.preround_delay_seconds);
 	hs.fallmps = static_cast<uint8_t>(std::clamp(w.wac_values.fallmps, 0, 255));
 	hs.round_time_remaining_ticks = w.match.remaining_ticks();
-	const world::EnvNetworkState &env = w.network_env;
+	// The weather home's native globals narrowed exactly once here
+	// [orig: NetPacket_WritePlayerState @0x4ff6b0 — Env_FogDistTarget hi word,
+	// (Env_FogDistAccelClamp capped 0xFF0000 + 0xFF) >> 8, (Env_CurTimeFixed24
+	// + 0x1000) >> 13, Env_QuakeTicks byte, Env_CloudScrollRateTarget >> 10,
+	// Env_RainPctCurrent >> 8, Env_OvercastBlend >> 8, the kind byte].
+	const world::WeatherState &env = w.weather;
 	hs.env.present = true;
-	hs.env.fog_dist = static_cast<uint16_t>(env.fog_target_q16 >> 16);
-	const uint32_t fog_accel = std::min<uint32_t>(env.fog_accel_clamp, 0x00FF0000u);
+	hs.env.fog_dist = static_cast<uint16_t>(env.fog_target_q16() >> 16);
+	const uint32_t fog_accel = std::min<uint32_t>(env.fog_accel_clamp(), 0x00FF0000u);
 	hs.env.fog_accel = static_cast<uint16_t>((fog_accel + 0xFFu) >> 8);
 	hs.env.tod_fixed = static_cast<uint16_t>((env.tod_fixed24 + 0x1000u) >> 13);
 	hs.env.quake_ticks = static_cast<uint8_t>(std::min<uint32_t>(env.quake_ticks, 0xFFu));
 	hs.env.cloud_scroll = static_cast<uint8_t>(
 			std::min<uint32_t>(env.cloud_scroll_rate_target >> 10, 0xFFu));
 	hs.env.rain_pct = static_cast<uint8_t>(
-			std::min<uint32_t>(env.rain_pct_current_q16 >> 8, 0xFFu));
+			std::min<uint32_t>(env.rain_pct_current_q16() >> 8, 0xFFu));
 	hs.env.overcast = static_cast<uint8_t>(
-			std::min<uint32_t>(env.overcast_blend_q16 >> 8, 0xFFu));
+			std::min<uint32_t>(env.overcast_blend_q16() >> 8, 0xFFu));
 	hs.env.env_param = static_cast<uint8_t>(env.precipitation_kind);
 	hs.mount_ammo.present = (flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute;
 	if (conn.owned_entity.valid()) {

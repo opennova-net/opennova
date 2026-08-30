@@ -289,9 +289,16 @@ the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| env #15 | Thunder SoundBank triggers (0 / 0x80) + `SETFLASH1` start — fully specced, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
+
+Closed 2026-08-30 (the weather port, ONE home / ONE clock): **env #15** ->
+`FIXED` — thunder epochs surface as `WeatherTickEvents`, the kernel logs
+`world::WeatherSoundEvent`s and `MissionAudio.play_weather_sounds` plays the
+THUNDER set; `flash`/`farflash` ARE `Env_TriggerLightningFlashA/B`. **env #16**
+-> `FIXED` — `overcast.def` is the live overcast table, cross-faded per tick by
+the weather's pre-spring overcast blend (`env::blend_tod_states`). **env #18**
+-> `FIXED` — the quake jitter + camera shake, the rain/snow drop pool, the rain
+ambient, and every WAC weather handler land through `world::WeatherState`
+(env-tod-re.md §The WAC weather handlers, §Precipitation).
 
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
@@ -1159,7 +1166,6 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
 | Net | 16 | 0 | 6 | 22 | 0 |
-| Environment | 0 | 0 | 3 | 3 | 0 |
 | World / AI + events | 49 | 4 | 3 | 56 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 25 | 0 | 3 | 28 | 0 |
 | Mission `.mis` | 0 | 1 | 1 | 2 | 0 |
@@ -1168,7 +1174,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Terrain | 1 | 0 | 0 | 1 | 0 |
 | Foliage | 3 | 0 | 0 | 3 | 0 |
 | Render — draw order | 1 | 0 | 0 | 1 | 0 |
-| **Total** | **95** | **7** | **16** | **118** | 0 |
+| **Total** | **95** | **7** | **13** | **115** | 0 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-97.
 

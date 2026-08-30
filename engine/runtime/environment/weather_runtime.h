@@ -1,54 +1,58 @@
-// The weather/light smoothing owner — the orchestration half of the witnessed
-// weather tick, ported verbatim from weather.gd (2026-08-09
-// de-scripting). env::WeatherCore (engine/formats/env) owns the witnessed
-// state cluster of [orig: Environment_UpdateWeatherTick @ 0x57e9b0]: the wind
-// PRNG/sway oscillator, both lightning flash sequencers
-// ([orig: Environment_SetLightningFlash @ 0x57d320] SET-per-epoch additives),
-// rain fade, and all fourteen non-modulator color-block pipelines
-// ([orig: interpolate_weather_color @ 0x57d9e0]). This runtime owns the
-// embedding: the 62 Hz tick-credit accumulator (autonomous render-delta or
-// world-driven exact ticks), the deterministic mission reset epoch, the
-// 255-tick mission-start prewarm, the per-tick target-feed/snap/writeback
-// sequence, the iris-exposure handoff, and the typed network environment
-// snapshot/sample projection. The shell node owns only device work (node
-// resolution, the _process hook, shader-global pushes).
-// RE record: docs/env/env-tod-re.md.
+// The weather's render owner — the color half of the witnessed weather tick
+// over ONE weather home. world::WeatherState (runtime/world/weather_state.h)
+// owns the retail globals and runs the sim legs of
+// [orig: Environment_UpdateWeatherTick @ 0x57e9b0] once per 62.5 Hz logic
+// tick (the clock, the oscillator, the hit dim, the quake, the lightning
+// sequencers, the scalar springs, the cloud-scroll ramp); this runtime runs
+// the color legs against the SAME core right after each sim tick (the
+// kernel's world::IWeatherRenderTick hook): the TOD target refresh from the
+// advanced clock, the iris exposure retarget, modulator-2 -> modulator ->
+// every color block ([orig: interpolate_weather_color @ 0x57d9e0]), the
+// cloud-scroll accumulators, and the writeback of the smoothed colors into
+// env::EnvironmentState. It also owns the standalone embedding (no
+// simulation: ONED previews, the GUT fixtures) — a private WeatherState
+// ticked from the render delta at the sim's 62.5 Hz, the deterministic
+// mission reset epoch, and the 255-tick mission-start settle. The shell node
+// owns only device work (node resolution, the hook registration, shader-
+// global pushes). RE record: docs/env/env-tod-re.md.
 #pragma once
 
 #include <runtime/environment/environment_state.h>
 
 #include <formats/env/env_water_render.h>
 #include <formats/env/env_weather_core.h>
+#include <runtime/world/weather_state.h>
 
 #include <cstdint>
 #include <vector>
 
 namespace opennova::env {
 
-// The embedder-facing exact native sample (S2C 0x0A phase-2). The weather owns
-// the live scalar currents; the environment state owns the authored targets
-// and mission clock.
-struct NetEnvSnapshot {
-	int fog_target_q16 = 0;
-	int fog_current_q16 = 0;
-	int fog_accel_clamp = 0;
-	int tod_fixed24 = 0;
-	int tod_advance_per_tick = 0;
-	int quake_ticks = 0;
-	int cloud_scroll_rate_target = 0;
-	int rain_pct_current_q16 = 0;
-	int overcast_blend_q16 = 0;
-	int precipitation_kind = 0;
-};
-
 class WeatherRuntime {
 public:
-	static constexpr float kWeatherTickHz = 62.0f;
+	// state_ may alias idle_state_: a copy would point into its source.
+	WeatherRuntime(const WeatherRuntime &) = delete;
+	WeatherRuntime &operator=(const WeatherRuntime &) = delete;
+	// The weather runs on the simulation clock — ONE clock, 62.5 Hz
+	// [orig: Game_ProcessMainFrame @ 0x526774 per drained 16 ms quantum].
+	static constexpr double kTicksPerSecond = 62.5;
 	static constexpr int kMaxCatchupTicks = 31;
 	// Retail settles the newly initialized environment through 255 complete
 	// weather ticks before gameplay/network publication
-	// [orig: sub_57F1E0 @ 0x57f878..0x57f880].
+	// [orig: Environment_MissionStartInit @ 0x57f878..0x57f880].
 	static constexpr int kMissionStartPrewarmTicks = 255;
+
+	WeatherRuntime();
+
+	// --- the weather home --------------------------------------------------
+	// Attach the World's weather (a mission) or detach back to the env's
+	// standalone home (null). The env's bound view follows.
+	void attach_state(world::WeatherState *state, EnvironmentState *env);
+	world::WeatherState &state() { return *state_; }
+	const world::WeatherState &state() const { return *state_; }
+	// True while ticking an env's standalone home (no simulation behind it):
+	// the runtime then runs the sim legs itself.
+	bool standalone() const { return standalone_; }
 
 	// Env_WindScale units: 100% maps to 256 [orig: Environment_InitDefaults
 	// @ 0x57c1d1, its only writer]. The oscillator's 15*prev feedback term is
@@ -56,38 +60,42 @@ public:
 	// state divergent (docs/env/env-tod-re.md).
 	void set_wind_strength_pct(float pct);
 	float wind_strength_pct() const;
+	// Record the strength the next seed carries without touching the attached
+	// home — the embedder's command layer already wrote it there.
+	void remember_wind_strength_pct(float pct);
 
-	// The autonomous render-delta accumulator for standalone owners.
-	// No-ops while world-tick-driven; zero-quantum frames still run a
-	// zero-tick publish so scrubs land.
+	// --- the standalone embedding ------------------------------------------
+	// The autonomous render-delta accumulator for standalone owners: every
+	// due 62.5 Hz quantum runs one FULL weather tick (sim legs on the private
+	// state, then the color legs). No-ops while world-driven; zero-quantum
+	// frames still run a zero-tick publish so scrubs land.
 	void process_delta(EnvironmentState *env, double delta);
-
-	// The world-driven twin of process_delta's accumulator: bank `delta`
-	// against the recovered 62 Hz weather clock and return the quantum count
-	// the world composer must run this frame (the kMaxCatchupTicks clamp
-	// drops the remainder). Zero while autonomous.
-	int consume_world_tick_credits(double delta);
-
-	// The world composer owns the recovered 62 Hz weather/TOD accumulator
-	// while a mission runtime is active.
+	// World-driven: the simulation's kernel ticks the weather; this runtime
+	// only answers the per-tick render hook. Standalone: process_delta drives.
 	void set_world_tick_driven(bool enabled);
 	bool world_tick_driven() const { return world_tick_driven_; }
-
 	// Enter world-driven mode and snap every block at the mission's authored
-	// T0 before the first clock advance. Lazy-snapping after T1 would skip
-	// retail's first target chase.
+	// T0 before the first tick. Lazy-snapping after T1 would skip retail's
+	// first target chase.
 	void prepare_world_driven(EnvironmentState *env);
 	// Start an independently ticking environment from the same deterministic
-	// mission reset epoch used by world-driven play.
+	// mission reset epoch used by world-driven play (the private state seeded
+	// from the env's parsed config).
 	void prepare_autonomous(EnvironmentState *env);
-
-	// The 255-tick settle; TOD targets are recomputed before every tick
-	// [orig: sub_57F1E0 @ 0x57f878..0x57f880].
+	// The standalone 255-tick settle after the seed [orig:
+	// Environment_MissionStartInit @ 0x57f1e0 + @ 0x57f878..0x57f880]. A
+	// mission's settle runs in the kernel (MissionKernel::
+	// settle_weather_mission_start) through the render hook.
 	void prewarm_mission_start(EnvironmentState *env);
 
-	// Advance exactly one recovered weather tick. The embedder advances the
-	// integer mission clock immediately before this call, so every target
-	// read sees curtime + advance like Environment_UpdateWeatherTick.
+	// --- the ticks -----------------------------------------------------------
+	// The render legs for the tick the sim just ran (the hook target): the
+	// clock -> TOD targets, the iris retarget, the blocks, the cloud-scroll
+	// accumulators, the writeback [orig: @ 0x57ef97..0x57f1d1].
+	void tick_render(EnvironmentState *env);
+	// One complete weather tick: standalone owners run the private state's
+	// sim legs then the render legs; a world-driven runtime (the kernel owns
+	// the sim legs) runs only the render legs.
 	void tick_fixed(EnvironmentState *env);
 
 	// Snap the smoothing state to the env's current targets on the next tick
@@ -96,14 +104,14 @@ public:
 	// Discrete runtime scrubs must update the rendered currents even while
 	// the mission transport is paused (no world-driven tick runs): a
 	// zero-tick refresh snaps the core to the new targets and writes them
-	// back without advancing wind, lightning, rain, or the mission clock.
+	// back without advancing wind, lightning, springs, or the mission clock.
 	void resync_colors_now(EnvironmentState *env);
 
 	// The sun-veil exposure stop-down (0..40) — forwarded once per render
 	// frame to modulator-2's witnessed target writer
 	// (env::ModulatorChain::set_sun_veil_stopdown carries the cites).
 	void set_sun_veil_stopdown(int stopdown) {
-		core_.modulator_chain.set_sun_veil_stopdown(stopdown);
+		state_->core.modulator_chain.set_sun_veil_stopdown(stopdown);
 	}
 
 	// The frozen-fixture exposure settle (capture/refresh seam only — live
@@ -113,29 +121,14 @@ public:
 	// modulator-chain tick, and every color block's modulate stage
 	// [orig: Environment_UpdateWeatherTick block sequence
 	// @ 0x57ef97..0x57f03c] — to the chase's fixed point at the current pose,
-	// then write back. Retail re-targets every render pass, so a steady
-	// camera converges onto the iris target asymptotically; the iteration
-	// count covers the worst-case 12.20 chase distance. Wind, lightning,
-	// rain, scalar springs, cloud-scroll accumulators, and the mission clock
-	// are deliberately untouched: this settles exposure, it does not advance
-	// weather time.
+	// then write back. Wind, lightning, springs, cloud-scroll accumulators,
+	// and the mission clock are deliberately untouched.
 	void settle_exposure(EnvironmentState *env);
 
-	// The witnessed wire-unit packing (q16 = round(x*65536),
-	// cloud_scroll_rate_target = sky_speed << 10, fixed24 TOD). Returns false
-	// when no loaded environment backs the snapshot.
-	bool network_snapshot(const EnvironmentState *env,
-			NetEnvSnapshot &out) const;
-
-	// Project one received phase-2 sample into both owners: the environment
-	// takes TOD/fog/cloud metadata; the core reconstructs the exact scalar
-	// targets and fog acceleration units while retaining the local smoothed
-	// currents. Publishes immediately (zero-tick) even when this render frame
-	// contains no 62 Hz quantum.
-	void apply_network_sample(EnvironmentState *env, const NetEnvSample &sample);
-
-	void trigger_lightning_short() { core_.lightning.trigger_short(); }
-	void trigger_lightning_long() { core_.lightning.trigger_long(); }
+	// The WAC `flash` / `farflash` hooks [orig: Env_TriggerLightningFlashA
+	// @ 0x4ed500 / B @ 0x4ed510] on the attached state.
+	void trigger_lightning_short() { state_->command_flash(); }
+	void trigger_lightning_long() { state_->command_far_flash(); }
 
 	// The OpenNova authoring extension's unit conversion (6*seconds ticks;
 	// arming auto-installs intensity 256 on a becalmed oscillator).
@@ -174,6 +167,9 @@ public:
 	// The modulator's render color / 64 — ColorSrcGlobalGain
 	// [orig: Render_UnpackModulatorToLightScale @ 0x58db30].
 	Rgb color_src_gain() const;
+	// Env_TerrainLightCombined packed 0x00RRGGBB — light x 0xB5/256 + sky,
+	// saturating [orig: @ 0x57f0b3..0x57f0d5]; the precipitation drops' color.
+	uint32_t terrain_light_combined_rgb() const;
 
 	// The witnessed cloud-scroll UV translations for a camera at
 	// (cam_x, cam_z) world units [orig: render_skybox @ 0x5791de..0x579260]
@@ -185,8 +181,8 @@ public:
 			float fog_distance) const;
 
 	// The boxed witnessed state cluster (read-only for consumers).
-	const WeatherCore &core() const { return core_; }
-	WeatherCore &core() { return core_; }
+	const WeatherCore &core() const { return state_->core; }
+	WeatherCore &core() { return state_->core; }
 
 	// One embedding tick batch (0 = publish-only). Public for the shell's
 	// zero-tick refresh paths; the accumulator entries above call it.
@@ -199,11 +195,16 @@ private:
 	// @ 0x57e512..0x57e538].
 	void feed_exposure_target(EnvironmentState *env);
 	void write_weather_state(EnvironmentState &env);
+	uint32_t lightning_packed(const EnvironmentState *env) const;
 
-	WeatherCore core_;
+	// Never null: a detached runtime points at its own idle home so the
+	// smoothed reads stay valid before an env binds.
+	world::WeatherState idle_state_;
+	world::WeatherState *state_ = &idle_state_;
+	bool standalone_ = true;
 	int configured_wind_intensity_ = 256;
 	bool colors_synced_ = false;
-	// 64-bit like the shell accumulator it replaces: at exactly 1/62 s per
+	// 64-bit like the shell accumulator it replaces: at exactly 1/62.5 s per
 	// frame the credit must land on 1.0, not a float ULP below it.
 	double tick_credit_ = 0.0;
 	bool world_tick_driven_ = false;

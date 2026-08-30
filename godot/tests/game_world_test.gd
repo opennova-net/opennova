@@ -1569,13 +1569,14 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	assert_almost_eq(env.time_of_day, expected_clock.time_of_day, 0.000001,
 		"the BMS start time plus retail's 255-tick prewarm initializes the shared clock")
 
-	# 0.128 seconds advances eight 62.5 Hz simulation ticks but only seven
-	# recovered 62 Hz weather/TOD ticks. Those clocks must remain distinct.
+	# 0.128 seconds advances eight 62.5 Hz simulation ticks and the weather
+	# clock rides every one of them (retail Environment_UpdateWeatherTick runs
+	# once per drained quantum, Game_ProcessMainFrame @ 0x52674b).
 	world.tick(Vector3.ZERO, Transform3D(), 0.128)
 	var advanced := env.time_of_day
-	expected_clock.advance_mission_clock(7)
+	expected_clock.advance_mission_clock(8)
 	assert_almost_eq(advanced, expected_clock.time_of_day, 0.000001,
-			"the mission clock advances on the separate 62 Hz weather cadence")
+			"the mission clock advances once per simulation tick")
 	assert_eq(int(world.get_runtime().get_perf_counters().get("ticks", 0)), 8,
 			"mission simulation retains its 62.5 Hz cadence")
 	expected_clock.free()
@@ -1648,27 +1649,23 @@ func test_world_driven_weather_is_invariant_to_render_batching() -> void:
 		0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016,
 	])
 	assert_eq(slow, split,
-			"each 62 Hz clock advance refreshes TOD targets before one weather tick")
+			"each simulation tick refreshes TOD targets before one weather tick")
 	assert_eq(int(slow[0]), 8, "0.128 seconds still contains eight simulation ticks")
 
-	var expected_seven := MissionEnvironment.new()
-	expected_seven.configure_mission_clock(0x0540, 60)
-	expected_seven.advance_mission_clock(
-			Weather.MISSION_START_PREWARM_TICKS + 7)
-	assert_almost_eq(float(slow[1]), expected_seven.time_of_day, 0.000001,
-			"0.128 seconds contains seven weather/TOD ticks")
-	expected_seven.free()
-
-	var eighth_delta := 8.0 / float(Weather.WEATHER_TICK_HZ) - 0.128 + 0.000001
-	var boundary: Array = await _world_driven_weather_state_after([0.128, eighth_delta])
+	# ONE clock: the weather rides the 62.5 Hz simulation tick, so 0.128 s is
+	# exactly eight weather/TOD ticks (retail Game_ProcessMainFrame @ 0x526774).
 	var expected_eight := MissionEnvironment.new()
 	expected_eight.configure_mission_clock(0x0540, 60)
 	expected_eight.advance_mission_clock(
 			Weather.MISSION_START_PREWARM_TICKS + 8)
+	assert_almost_eq(float(slow[1]), expected_eight.time_of_day, 0.000001,
+			"0.128 seconds contains eight weather/TOD ticks")
+
+	var boundary: Array = await _world_driven_weather_state_after([0.128, 0.000001])
 	assert_eq(int(boundary[0]), 8,
-			"the extra weather quantum is shorter than one simulation tick")
+			"a sub-tick residual delta runs no extra weather quantum")
 	assert_almost_eq(float(boundary[1]), expected_eight.time_of_day, 0.000001,
-			"the residual weather credit consumes the eighth TOD tick")
+			"no separate weather credit exists to consume a ninth TOD tick")
 	expected_eight.free()
 
 

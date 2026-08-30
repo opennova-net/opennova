@@ -63,7 +63,7 @@ hardening, and project health. Divergences from the original engine belong in
       (play/pause/step; the MCP
       `game_debug` control plane still drives these), script vars, net, particles,
       occlusion, rounds, terrain, rendering/world-view toggles (`GameWorld`'s
-      typed API), environment, audio, animation, player (with the pose dump the
+      typed API), audio, animation, player (with the pose dump the
       retired `DebugSnapshotWriter` produced for `pose_replay_probe` /
       `terrain_seam_probe`), and the `PerfTimeline` ring. Data the shell alone
       has crosses as VALUE slots or typed records, never Godot objects.

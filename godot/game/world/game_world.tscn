@@ -33,6 +33,9 @@ environment_capture_layer_mask = 1024
 process_priority = -10
 environment_path = NodePath("../MissionEnvironment")
 
+[node name="Precipitation" type="Precipitation" parent="."]
+weather_path = NodePath("../Weather")
+
 [node name="Water" type="Water" parent="."]
 environment_path = NodePath("../MissionEnvironment")
 weather_path = NodePath("../Weather")

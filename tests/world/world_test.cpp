@@ -20,19 +20,20 @@ static int failures = 0;
 
 int main() {
     World w;
-    // The network environment starts unauthored, with retail's native clear-
-    // weather reset values.  Values remain in engine units until the 0x0A
-    // encoder projects them onto the narrower phase-2 fields.
-    CHECK(!w.network_env.valid);
-    CHECK(w.network_env.fog_target_q16 == 0);
-    CHECK(w.network_env.fog_accel_clamp == 0x00FF0000u);
-    CHECK(w.network_env.tod_fixed24 == 0);
-    CHECK(w.network_env.quake_ticks == 0);
-    CHECK(w.network_env.cloud_scroll_rate_target == 0);
-    CHECK(w.network_env.rain_pct_current_q16 == 0);
-    CHECK(w.network_env.overcast_blend_q16 == 0);
-    CHECK(w.network_env.precipitation_kind == 0);
-    CHECK(w.network_env.generation == 0);
+    // The weather home starts unseeded, with retail's boot BSS: a 1024 m fog
+    // reference/target, the 255.0 acceleration clamp, noon, clear weather.
+    // Values stay in engine units until the 0x0A encoder narrows them.
+    CHECK(!w.weather.valid);
+    CHECK(w.weather.fog_target_q16() == (1024 << 16));
+    CHECK(w.weather.fog_accel_clamp() == 0x00FF0000u);
+    CHECK(w.weather.tod_fixed24 == (12u << 24));
+    CHECK(w.weather.quake_ticks == 0);
+    CHECK(w.weather.cloud_scroll_rate_target == 0);
+    CHECK(w.weather.rain_pct_current_q16() == 0);
+    CHECK(w.weather.overcast_blend_q16() == 0);
+    CHECK(w.weather.precipitation_kind == 0);
+    CHECK(w.weather.generation == 0);
+    CHECK(w.weather.command_generation == 0);
 
     w.registry.configure_pool(0, 16); // actor pool
     w.registry.configure_pool(1, 16); // actor pool
@@ -225,16 +226,17 @@ int main() {
     w.cached.local_health = 100;
     w.cached.humans = 1;
     w.wac_values.accuracy_spread = 3;
-    w.network_env.valid = true;
-    w.network_env.fog_target_q16 = 380 << 16;
-    w.network_env.fog_accel_clamp = 0x00123456u;
-    w.network_env.tod_fixed24 = 0x01234567u;
-    w.network_env.quake_ticks = 17;
-    w.network_env.cloud_scroll_rate_target = 15u << 10;
-    w.network_env.rain_pct_current_q16 = 0x00008000u;
-    w.network_env.overcast_blend_q16 = 0x00004000u;
-    w.network_env.precipitation_kind = 0x89ABCDEFu;
-    w.network_env.generation = 9;
+    w.weather.valid = true;
+    w.weather.core.scalar_channels.fog_dist_target_fp = 380 << 16;
+    w.weather.core.scalar_channels.fog_step_fp = 0x00123456;
+    w.weather.tod_fixed24 = 0x01234567u;
+    w.weather.quake_ticks = 17;
+    w.weather.cloud_scroll_rate_target = 15u << 10;
+    w.weather.core.scalar_channels.rain_pct_fp = 0x00008000;
+    w.weather.core.scalar_channels.overcast_fp = 0x00004000;
+    w.weather.precipitation_kind = 0x89ABCDEFu;
+    w.weather.generation = 9;
+    w.weather.precipitation.slots[5].z = 0x12340000;
     MatchRules baseline_match_rules;
     baseline_match_rules.game_type = 0x10020u;
     baseline_match_rules.score_limit = 7;
@@ -280,22 +282,23 @@ int main() {
     w.cached.local_health = 77;
     w.cached.humans = 2;
     w.wac_values.accuracy_spread = 9;
-    w.network_env = EnvNetworkState{};
+    w.weather = WeatherState{};
     w.match.remove_player(w, blast_victim);
     w.process_round_end(2);
     w.restore(snap);
     CHECK(w.vars.get_mission(1) == 7);
     CHECK(w.wac_values.accuracy_spread == 3);
-    CHECK(w.network_env.valid);
-    CHECK(w.network_env.fog_target_q16 == (380 << 16));
-    CHECK(w.network_env.fog_accel_clamp == 0x00123456u);
-    CHECK(w.network_env.tod_fixed24 == 0x01234567u);
-    CHECK(w.network_env.quake_ticks == 17);
-    CHECK(w.network_env.cloud_scroll_rate_target == (15u << 10));
-    CHECK(w.network_env.rain_pct_current_q16 == 0x00008000u);
-    CHECK(w.network_env.overcast_blend_q16 == 0x00004000u);
-    CHECK(w.network_env.precipitation_kind == 0x89ABCDEFu);
-    CHECK(w.network_env.generation == 9);
+    CHECK(w.weather.valid);
+    CHECK(w.weather.fog_target_q16() == (380 << 16));
+    CHECK(w.weather.fog_accel_clamp() == 0x00123456u);
+    CHECK(w.weather.tod_fixed24 == 0x01234567u);
+    CHECK(w.weather.quake_ticks == 17);
+    CHECK(w.weather.cloud_scroll_rate_target == (15u << 10));
+    CHECK(w.weather.rain_pct_current_q16() == 0x00008000u);
+    CHECK(w.weather.overcast_blend_q16() == 0x00004000u);
+    CHECK(w.weather.precipitation_kind == 0x89ABCDEFu);
+    CHECK(w.weather.generation == 9);
+    CHECK(w.weather.precipitation.slots[5].z == 0x12340000);
     CHECK(w.match.rules().game_type == 0x10020u);
     CHECK(w.match.rules().score_limit == 7);
     CHECK(w.match.player(blast_victim) != nullptr);
