@@ -43,6 +43,16 @@ public:
     bool remove_ssn(uint16_t ssn);
     bool set_ssn_hp(uint16_t ssn, int32_t hp);
     bool add_ssn_hp(uint16_t ssn, int32_t delta);
+    // WAC accuracy writes the controller-slot error pair as max(0, 100-value).
+    // [orig: WacCmd_SetAccuracy @0x4F2070]
+    bool set_ssn_accuracy(uint16_t ssn, int32_t primary, int32_t secondary);
+    // WAC guard toggles entity Flags bit 0x40 even when the row has no AI brain.
+    // [orig: WacCmd_SsnGuard @0x4F71C0]
+    bool set_ssn_guard(uint16_t ssn, bool guard);
+    // Structural BMS single-entity actions.
+    bool set_ssn_team(uint16_t ssn, int32_t team);
+    bool set_ssn_group(uint16_t ssn, int32_t group);
+    bool teleport_ssn_to_marker(uint16_t ssn, int32_t marker_wp_number);
     // `node < 0` selects the nearest node on the list (the two-argument WAC form);
     // BMS RedirectSingleTo carries an explicit node in param3.
     bool set_ssn_waypoint(uint16_t ssn, int32_t wp, int32_t node = -1);
@@ -102,6 +112,9 @@ public:
     bool ssn_exists(uint16_t ssn) const;
     bool ssn_alive(uint16_t ssn) const;
     bool ssn_dead(uint16_t ssn) const;
+    // [orig: WacCmd_SsnWounded @0x4F1B80] Unsigned health <=
+    // the signed max-health half reinterpreted as u16.
+    bool ssn_wounded(uint16_t ssn) const;
     bool ssn_in_area(uint16_t ssn, int area_id) const;
     // True only when the mission has at least one ACTIVE area trigger and the
     // local player's X/Y sits inside none of them — Z is ignored, and a world
@@ -163,6 +176,14 @@ public:
     int set_group_engage_min(int group, int32_t v);
     int set_group_engage_max(int group, int32_t v);
     int set_group_attack_max(int group, int32_t v);
+    // WAC/BMS structural group actions. Pool coverage and dead-row rules are
+    // kept inside these primitives so both script runtimes share one behavior.
+    int remove_group(int group);
+    int set_group_accuracy(int group, int32_t primary, int32_t secondary);
+    bool set_group_move_speed_kph(int group, int32_t kph);
+    int set_group_team(int group, int32_t team);
+    int change_group(int old_group, int new_group);
+    int teleport_group_to_marker(int group, int32_t marker_wp_number);
     bool group_dead(int group) const;   // true if all members dead/absent
     bool group_alive(int group) const;  // true if any member alive
 

@@ -357,6 +357,47 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
     // [orig: EventAction_Dispatch @0x4542e0 switch(action_type).]
     auto &cmds = w.commands;
     switch (a.action_type) {
+        case bms::ActionType::Null:
+            break;
+        case bms::ActionType::VaporizeGroup:
+            // [orig: EventAction_Dispatch case 4 @0x4542E0 ->
+            // Entity_TeleportAllByNetId @0x43D5D0] Misnamed retail callee:
+            // this removes the group.
+            cmds.remove_group(a.param1);
+            break;
+        case bms::ActionType::GroupVelocity:
+            // [orig: Entity_SetMoveSpeedKPH @0x43A960]
+            cmds.set_group_move_speed_kph(a.param1, a.param2);
+            break;
+        case bms::ActionType::ChangeGTeamAction:
+            // [orig: Entity_SetTeamByNetId @0x43C680]
+            cmds.set_group_team(a.param1, a.param2);
+            break;
+        case bms::ActionType::ChangeGroupAction:
+            // [orig: Entity_UpdateNetIdReferences @0x43C5B0]
+            cmds.change_group(a.param1, a.param2);
+            break;
+        case bms::ActionType::GroupTeleportAction:
+            // [orig: Entity_TeleportTeamToSpawn @0x43D390]
+            cmds.teleport_group_to_marker(a.param1, a.param2);
+            break;
+        case bms::ActionType::SingleVelocity:
+            // [orig: EventAction_Dispatch case 23 @0x4542E0 -> sub_43DEA0]
+            // Retail scans pool 1 and performs no mutation.
+            break;
+        case bms::ActionType::ChangeSteamAction:
+            // [orig: Entity_FindByDCBAndSetFlag @0x43DB30]
+            cmds.set_ssn_team(static_cast<uint16_t>(a.param1), a.param2);
+            break;
+        case bms::ActionType::SingleChangeGroup:
+            // [orig: Entity_SetNetIdByParentRef @0x43D6C0]
+            cmds.set_ssn_group(static_cast<uint16_t>(a.param1), a.param2);
+            break;
+        case bms::ActionType::SingleTeleportAction:
+            // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0]
+            cmds.teleport_ssn_to_marker(static_cast<uint16_t>(a.param1),
+                                        a.param2);
+            break;
         case bms::ActionType::MisvarChange: {
             // [orig: case 5 — writes dword_C6B240[param1]; the shared var store.]
             int32_t cur = w.vars.get_mission(a.param1);

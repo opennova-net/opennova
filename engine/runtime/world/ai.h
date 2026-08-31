@@ -126,6 +126,7 @@ struct AiBrain {
         kFireDelay = 41,   // fire-delay countdown set on engagement [byte +164]
         kRetargetTimer = 42, // += 16 per processed state-17 tick; >248 rescans [byte +168]
         kAccuracy = 43,    // scatter accuracy 0..5 (modulus 6 - acc) [byte +172]
+        kDriveSkill = 44,  // commanded drive skill, clamped 0..4 [byte +176]
         kAlert = 46,       // alert level [byte +184]
         kPrevAlert = 47,   // previous alert level (edge) [byte +188]
         kNoTargetIdle = 48,// set 1 when no target + profile not combat [byte +192]
@@ -143,6 +144,7 @@ struct AiBrain {
         kLastWeapon = 106, // 1/2 = which weapon the continuation branches re-fire [byte +424]
         kBoneRoundRobin = 107, // seed<=0 muzzle-bone rotation counter; 0 -> -1 reseed,
                                // slot = ctr % count, then -- [orig: brain+0x1AC @0x4569F1]
+        kUseWaypointZones = 108, // AIUSEWPZ/AICLEARWPZ command latch [byte +432]
         // ---- the turret solve blocks (Entity_ComputeWeaponFireTransform_0 @0x456980) ----
         // Active = the live turret pose the slew legs advance; staging = the fresh
         // solve. Layout (both): {hdist, ?, dist, yaw, pitch, ?} — yaw at +12/pitch
@@ -210,10 +212,14 @@ struct AiSlot {
     int32_t f[43] = {};
     uint8_t *bytes() { return reinterpret_cast<uint8_t *>(f); }
     const uint8_t *bytes() const { return reinterpret_cast<const uint8_t *>(f); }
-    // Named dword indices (the perception/attack ranges the target scan reads,
-    // 16.16 world units) plus the movement flag byte the reset helpers clear.
+    // Named dword indices (the behavior/accuracy controls and the
+    // perception/attack ranges the infantry motor reads) plus the alert byte.
     enum Idx : int {
+        kBehaviorFlags = 1, // BLIND 1 / COWARD 8 / BERSERK 0x200 [byte +4]
+        kAimErrorPrimary = 10,   // 100 - authored accuracy 2 [byte +40]
+        kAimErrorSecondary = 11, // 100 - authored accuracy 1 [byte +44]
         kAttackRange = 15, // max attack range [byte +60]
+        kEngageMin = 16,   // minimum engagement range [byte +64]
         kSightRange = 17,  // perception/sight range [byte +68]
     };
     // The per-entity ALERT byte at controller+0x88 (0 green / 1 yellow / 2
@@ -522,18 +528,12 @@ struct StateRow {
 // be resolved (channel 0, missing count) or the type is unknown.
 int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTable &nav);
 
-// [orig: Entity_ApplyCommand @0x43ab60] Apply a BMS AI-change command sub-type to an AI
-// component in-engine (the original mutates entity[25]; we mutate the brain directly). Only
-// PLAYPARTANIM (sub-type 0x22) is ported: it writes the part-anim channel's sweep direction
-// (comp+436) and rate (comp+444), computed from ANIMTIME via the verified FPU constants
-// (1/65536, 0.016, 65536). p2=channel(1/2), p3=play_type(-1/0/+1), p4=time(16.16 seconds).
-// The alert subs (5/22/6) run in two ported halves: the controller alert byte
-// at the EntityCommands seam (bms-event-runtime-re §3b item 1) plus the
-// queued brain AIEvent {6, level} the state-machine dispatch applies
-// (ai_handle_command case 6 — the forced-2 store + combat-state push
-// [orig: AI_HandleCommand case 6 @0x4657a6..0x465816]); the remaining
-// sub-types (accuracy/state/speed/...) stay tracked-TODO no-ops
-// (docs/world/world-wac-ai-re.md §21 / the D-AI rows).
+// [orig: Entity_ApplyCommand @0x43ab60] Apply the command arms which write the
+// 812-byte brain directly: AIUSEWPZ/AICLEARWPZ (subs 0x20/0x21) and
+// PLAYPARTANIM (sub 0x22). Controller-slot/entity-flag mutations and commands
+// which queue AIEvent 6..11/21/22 live at the EntityCommands seam so they retain
+// the original two-stage dispatcher. PLAYPARTANIM slots are
+// p2=channel(1/2), p3=play_type(-1/0/+1), p4=time(16.16 seconds).
 void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4);
 
 // The PLAYPARTANIM rate from ANIMTIME seconds: (0.016 / seconds) * 65536

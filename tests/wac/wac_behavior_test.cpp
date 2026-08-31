@@ -6,6 +6,7 @@
 
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/wac_system.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::wac;
@@ -409,6 +410,132 @@ static void test_04tr_outcome_block_blue_priority() {
     CHECK(w.effects.count("lose") == 1); // the green branch never also fires
 }
 
+static void test_wac_spatial_wounded_and_mount_predicates() {
+    BehaviorWorld w;
+
+    Entity source{};
+    source.net_id = 100;
+    source.item_id = 1001;
+    source.alive = true;
+    source.health = 40;
+    source.health_max = 100;
+    source.position = {0.0f, 0.0f, 0.0f};
+    source.yaw = 90; // mission 90 = engine heading 0 = +X
+    w.registry.spawn(0, source);
+
+    Entity target = source;
+    target.net_id = 200;
+    target.health = 100;
+    target.position = {10.0f, 0.0f, 0.0f};
+    w.registry.spawn(0, target);
+
+    Entity mount = source;
+    mount.net_id = 300;
+    mount.position = {20.0f, 0.0f, 0.0f};
+    const EntityHandle mount_h = w.registry.spawn(0, mount);
+
+    Entity local = source;
+    local.net_id = 400;
+    local.mounted = true;
+    local.mount_target = mount_h;
+    local.mount_type = SeatType::Driver;
+    const EntityHandle local_h = w.registry.spawn(0, local);
+    w.cached.local_player = local_h;
+
+    WacSystem sys;
+    CompileEnv env;
+    Program program = compile_source(
+            "if SSNwounded(100) then set(v1,1) endif\n"
+            "if SSNnearSSN(100,200,10) then set(v2,1) endif\n"
+            "if SSNlosSSN(100,200,10) then set(v3,1) endif\n"
+            "if SSNseesSSN(100,200,10) then set(v4,1) endif\n"
+            "if meattached(300) then set(v5,1) endif\n"
+            "if medrive(300) then set(v6,1) endif\n"
+            "if meongun(300) then set(v7,1) endif\n",
+            env);
+    CHECK(program.ok());
+    sys.set_program(std::move(program));
+    w.add_system(&sys);
+    w.load_systems();
+
+    run(w, sys, 1);
+    CHECK(w.vars.get_mission(1) == 1);
+    CHECK(w.vars.get_mission(2) == 1); // inclusive distance boundary
+    CHECK(w.vars.get_mission(3) == 1);
+    CHECK(w.vars.get_mission(4) == 1);
+    CHECK(w.vars.get_mission(5) == 1);
+    CHECK(w.vars.get_mission(6) == 1);
+    CHECK(w.vars.get_mission(7) == 0);
+
+    w.registry.get(local_h)->mount_type = SeatType::Gunner;
+    run(w, sys, 1);
+    CHECK(w.vars.get_mission(7) == 1);
+}
+
+static void test_wac_accuracy_guard_speed_and_group_remove() {
+    BehaviorWorld w;
+    AiSystem ai;
+    w.ai = &ai;
+
+    Entity single{};
+    single.net_id = 42;
+    single.item_id = 1001;
+    single.group_id = 4;
+    single.alive = true;
+    const EntityHandle single_h = w.registry.spawn(0, single);
+
+    Entity group_member = single;
+    group_member.net_id = 43;
+    group_member.group_id = 3;
+    const EntityHandle group_h = w.registry.spawn(0, group_member);
+
+    Entity removable = single;
+    removable.net_id = 44;
+    removable.group_id = 9;
+    w.registry.spawn(0, removable);
+
+    ai.attach(single_h);
+    ai.attach(group_h);
+    AiEntity &single_ai = *ai.for_handle(single_h);
+    AiEntity &group_ai = *ai.for_handle(group_h);
+    single_ai.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
+    single_ai.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
+    group_ai.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
+    group_ai.brain.f[AiBrain::kPendState] = kAiGroundFollowWp;
+
+    WacSystem sys;
+    CompileEnv env;
+    Program program = compile_source(
+            "if never() then "
+            "setaccuracy(42,70,80) "
+            "Gsetaccuracy(3,60,50) "
+            "ssnguard(42,1) "
+            "ssncspd(42,36) "
+            "ssnpspd(42,18) "
+            "Gremove(9) "
+            "endif\n",
+            env);
+    CHECK(program.ok());
+    sys.set_program(std::move(program));
+    w.add_system(&sys);
+    w.load_systems();
+
+    run(w, sys, 1);
+    CHECK(single_ai.slot.f[AiSlot::kAimErrorSecondary] == 30);
+    CHECK(single_ai.slot.f[AiSlot::kAimErrorPrimary] == 20);
+    CHECK(group_ai.slot.f[AiSlot::kAimErrorSecondary] == 40);
+    CHECK(group_ai.slot.f[AiSlot::kAimErrorPrimary] == 50);
+    CHECK((w.registry.get(single_h)->flags & 0x40u) != 0);
+    CHECK(!w.commands.ssn_exists(44));
+    CHECK(single_ai.brain.f[AiBrain::kSpeedA] == 0);
+    CHECK(single_ai.brain.f[AiBrain::kSpeedB] == 0);
+    CHECK(ai.events.count() == 2);
+
+    ai.events.process_timed(ai, w);
+    CHECK(single_ai.brain.f[AiBrain::kSpeedA] == 10485);
+    CHECK(single_ai.brain.f[AiBrain::kSpeedB] == 5242);
+}
+
 int main() {
     test_execution_cadence();
 	test_initial_execution_and_runtime_state();
@@ -426,6 +553,8 @@ int main() {
     test_lose_other_team_noop();
     test_win_and_outcome_builtins();
     test_04tr_outcome_block_greenkills();
+    test_wac_spatial_wounded_and_mount_predicates();
+    test_wac_accuracy_guard_speed_and_group_remove();
     test_04tr_outcome_block_blue_priority();
     std::printf(failures ? "BEHAVIOR TESTS FAILED (%d)\n" : "behavior tests passed\n", failures);
     return failures ? 1 : 0;
