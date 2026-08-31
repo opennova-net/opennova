@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
@@ -74,6 +75,14 @@ public:
 	void select_entity(int p_handle);
 	int selected_entity_handle() const;
 
+	// The AI window's overlay-state readback: a shell-installed Callable
+	// (() -> Dictionary {available, overlay, labels, routes, targets, rings})
+	// polled into each AI snapshot so the F3 toggle strip shows the world
+	// view's pushed truth (MCP flips the same debug-control rows). An invalid
+	// Callable reads as unavailable. The toggles themselves leave through the
+	// "ai_view_request" signal the shell session applies to the world.
+	void set_ai_view_state_provider(const Callable &p_provider);
+
 	// Every tool window back inside the main viewport on the next layout pass
 	// (ImGui's ini remembers a window dragged out to another monitor); the
 	// "Reset layout" menu item's seam, and what a probe asks for before it
@@ -130,6 +139,8 @@ private:
 	void push_entity_detail(bool p_directory_pushed);
 	void apply_environment_requests();
 	void push_environment_snapshot();
+	void apply_ai_view_requests();
+	void push_ai_debug();
 	void set_game_playing_internal(bool p_playing);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
@@ -141,6 +152,8 @@ private:
 	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
 	int last_detail_handle_ = -1;      // the handle the last detail push carried; -1 = none
 	int64_t last_environment_push_ms_ = -1;
+	int64_t last_ai_push_ms_ = -1;
+	Callable ai_view_state_provider_;
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

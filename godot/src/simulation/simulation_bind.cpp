@@ -471,6 +471,7 @@ void Simulation::_bind_methods() {
 	                     &Simulation::occlusion_water_visible);
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &Simulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &Simulation::get_round_debug);
+	ClassDB::bind_method(D_METHOD("get_ai_debug"), &Simulation::get_ai_debug);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);

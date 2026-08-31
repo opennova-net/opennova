@@ -97,6 +97,7 @@ class EndRoundState;  // the typed end-of-round session facts (simulation_end_ro
 #include <net/npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
 #include "simulation/inmatch_session_values.h"
+#include "simulation/simulation_present_types.h"
 #include "devtools/frame_stats.h"
 
 namespace opennova::hud {
@@ -420,21 +421,7 @@ private:
 	int64_t frame_net_us_ = 0;
 	int64_t frame_sim_us_ = 0;
 	int64_t frame_sink_us_ = 0;
-	// Capture-window-only attribution summed across every fixed tick consumed by
-	// one render frame: the engine's own per-pump records accumulate as-is
-	// (np::HostSessionPerf carries the ServerTickPerf world/replication split,
-	// np::ClientFramePerf the local ClientRuntime frame) plus the shell-side
-	// legs measured here. get_session_perf flattens them onto the F3 keys.
-	// Ordinary play leaves runtime_profiling_enabled_ false, so producers
-	// neither read clocks nor write these fields.
-	struct SessionPhasePerf {
-		opennova::np::HostSessionPerf host_session;
-		opennova::np::ClientFramePerf client;
-		int64_t host_prep_us = 0; // viewport/input/request setup before host_session_pump
-		int64_t host_player_us = 0; // the host's local view/weapon/medic pumps
-		int64_t client_decode_us = 0; // the local ClientState fold (host) / joiner wire leg
-		int64_t adm_resolve_us = 0;
-	};
+	// Capture-window session phase attribution (simulation_present_types.h).
 	SessionPhasePerf frame_phase_perf_;
 	// The dev tools' frame-stats board (ADR 0039): fold_frame_stats() lands the
 	// phase attribution above on it natively at the end of a session frame.
@@ -506,24 +493,8 @@ private:
 	bool runtime_profiling_enabled_ = false;
 	mutable uint64_t last_present_snapshot_us_ = 0;
 	mutable int last_present_entity_count_ = 0;
-	// Exact identity/order of the most recently returned PF_* buffer. Dynamic
-	// values (pose, animation, visibility) deliberately do not participate:
-	// GDScript row plans may keep their offsets while reading fresh values.
-	struct PresentRowIdentity {
-		int32_t wire_handle = 0;
-		int32_t type_id = 0;
-		int32_t bms_id = 0;
-		int32_t kind = -1;
-		int32_t index = -1;
-
-		bool operator==(const PresentRowIdentity &p_other) const {
-			return wire_handle == p_other.wire_handle &&
-			       type_id == p_other.type_id &&
-			       bms_id == p_other.bms_id &&
-			       kind == p_other.kind &&
-			       index == p_other.index;
-		}
-	};
+	// Exact identity/order of the most recently returned PF_* buffer
+	// (simulation_present_types.h).
 	mutable std::vector<PresentRowIdentity> present_layout_;
 	mutable uint64_t present_layout_revision_ = 0;
 
@@ -531,10 +502,6 @@ private:
 	// does so once per fixed tick inside a catch-up batch. Keep the identity index
 	// native and generation-bound so GDScript does not rebuild the full PF_* buffer
 	// plus four Dictionary indexes for every catch-up tick.
-	struct PresentEffectPose {
-		Vector3 position;
-		Vector3 rotation_deg;
-	};
 	mutable bool present_effect_pose_cache_valid_ = false;
 	mutable uint32_t present_effect_pose_cache_logic_tick_ = 0;
 	mutable uint32_t present_effect_pose_cache_client_frame_ = 0;
@@ -606,14 +573,7 @@ private:
 	// entity records [orig: serialize_entity_states_to_packet @0x50f07e;
 	// collect_visible_entities_for_terrain @0x5c8c60; D-NET-140 closed].
 	PackedFloat32Array present_snapshot_from_world() const;
-	// The decoded fold's dead->alive respawn revision, mirrored per pool row so
-	// WirePresentPass sees the same PF_RESPAWN_REVISION edges on every role.
-	struct PoolPresentLifecycle {
-		uint64_t registry_spawn_id = 0;
-		uint32_t respawn_revision = 0;
-		bool dead_known = false;
-		bool dead = false;
-	};
+	// The per-pool respawn-lifecycle mirror (simulation_present_types.h).
 	mutable std::unordered_map<uint16_t, PoolPresentLifecycle> pool_present_lifecycle_;
 
 	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
@@ -2292,6 +2252,20 @@ public:
 	// resolves against. Output is capped: instances within 150u of the local
 	// player (or the first 128 instances when no player is spawned).
 	Dictionary get_collision_debug() const;
+
+	// The AI overlay's per-frame payload (godot-space, the collision-debug
+	// shape family): { valid, logic_tick, rows: [ per-brain state/alert/
+	// target/aim_dir/muzzle/ranges/timers ], channels: [ nav routes as
+	// PackedVector3Array node runs + radii + followers ], groups, counters }.
+	// {"valid": false} without a kernel and on a joiner (the tooling AI pool
+	// never joins the decoded view); an unloaded kernel reports valid with no
+	// rows (the collision-debug contract). Aim directions are Godot-space
+	// unit vectors computed natively — GDScript does no BAM math.
+	Dictionary get_ai_debug() const;
+	// Native (unbound) form for the F3 AI window's pushed record: the same
+	// engine join as the engine struct, no Variant round-trip. False without a
+	// kernel or on a joiner.
+	bool native_ai_debug(opennova::world::inspect::AiDebugReport &r_out) const;
 
 	// Read-only snapshot of the RoundSim debug ring for the F3 "Rounds" tab:
 	// { tick, events: [ { tick, kind, kind_name, material, section, face,
