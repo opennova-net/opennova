@@ -13,6 +13,7 @@
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/world.h>
 
 using namespace opennova;
@@ -1450,7 +1451,229 @@ static void test_empty_host_holds_the_script() {
     CHECK(w2.script_may_advance());
 }
 
+static void test_change_ai_command_family() {
+    World w;
+    w.registry.configure_pool(0, 8);
+
+    world::Entity entity{};
+    entity.net_id = 42;
+    entity.item_id = 1001;
+    entity.alive = true;
+    const world::EntityHandle handle = w.registry.spawn(0, entity);
+
+    world::AiSystem ai;
+    w.ai = &ai;
+    world::AiEntity &ae = *ai.at(ai.attach(handle));
+    ae.profile.type = 2; // GROUND
+    ae.brain.f[world::AiBrain::kCurState] = world::kAiGroundFollowWp;
+    ae.brain.f[world::AiBrain::kPendState] = world::kAiGroundFollowWp;
+
+    mission::BmsEventSystem events;
+    auto dispatch = [&](int subtype, int32_t p2 = 0, int32_t p3 = 0,
+                        int32_t p4 = 0) {
+        bms::Action action{};
+        action.action_type = bms::ActionType::ChangeSingleAI;
+        action.action_sub_type = subtype;
+        action.param1 = 42;
+        action.param2 = p2;
+        action.param3 = p3;
+        action.param4 = p4;
+        events.dispatch_action_for_test(w, action);
+    };
+
+    dispatch(2, 1);
+    CHECK((w.registry.get(handle)->flags & 0x40u) != 0);
+    dispatch(8, 70);
+    CHECK(ae.slot.f[world::AiSlot::kAimErrorPrimary] == 30);
+    dispatch(15, 1);
+    dispatch(16, 1);
+    CHECK((static_cast<uint32_t>(
+                   ae.slot.f[world::AiSlot::kBehaviorFlags]) &
+           0x201u) == 0x201u);
+    dispatch(17, 1);
+    CHECK((w.registry.get(handle)->flags & 0x80u) != 0);
+    ae.slot.f[world::AiSlot::kBehaviorFlags] |= 0x20000;
+    dispatch(21, 1);
+    CHECK((static_cast<uint32_t>(
+                   ae.slot.f[world::AiSlot::kBehaviorFlags]) &
+           0x20000u) == 0);
+    CHECK((static_cast<uint32_t>(
+                   ae.slot.f[world::AiSlot::kBehaviorFlags]) &
+           0x8u) != 0);
+    dispatch(41, 12);
+    CHECK(ae.slot.f[world::AiSlot::kAttackRange] == (12 << 16));
+    dispatch(42, 3, 9);
+    CHECK(ae.slot.f[world::AiSlot::kEngageMin] == (3 << 16));
+    CHECK(ae.slot.f[world::AiSlot::kSightRange] == (9 << 16));
+    dispatch(43, 1);
+    CHECK((w.registry.get(handle)->flags &
+           world::kEntityFlagIndestructible) != 0);
+    dispatch(32);
+    CHECK(ae.brain.f[world::AiBrain::kUseWaypointZones] == 1);
+    dispatch(33);
+    CHECK(ae.brain.f[world::AiBrain::kUseWaypointZones] == 0);
+
+    auto dispatch_queued = [&](int subtype, int32_t argument) {
+        ae.brain.f[world::AiBrain::kCurState] =
+                world::kAiGroundFollowWp;
+        ae.brain.f[world::AiBrain::kPendState] =
+                world::kAiGroundFollowWp;
+        dispatch(subtype, argument);
+        CHECK(ai.events.count() == 1);
+        ai.events.process_timed(ai, w);
+        CHECK(ai.events.count() == 0);
+    };
+
+    dispatch_queued(27, 3);
+    CHECK(ae.brain.f[world::AiBrain::kAccuracy] == 3);
+    dispatch_queued(26, 9);
+    CHECK(ae.brain.f[world::AiBrain::kDriveSkill] == 4);
+    dispatch_queued(29, 36);
+    CHECK(ae.brain.f[world::AiBrain::kSpeedA] == 10485);
+    dispatch_queued(30, 18);
+    CHECK(ae.brain.f[world::AiBrain::kSpeedB] == 5242);
+    dispatch_queued(28, 1);
+    CHECK(ae.brain.f[world::AiBrain::kFallback] ==
+          world::kAiGroundFormation);
+    CHECK(ae.brain.f[world::AiBrain::kCurState] ==
+          world::kAiGroundFormation);
+    dispatch_queued(45, 1);
+    CHECK(ae.brain.bytes()[world::AiBrain::kGuardFireByte] == 1);
+    CHECK(ae.brain.f[world::AiBrain::kCurState] ==
+          world::kAiGroundCombat);
+    dispatch_queued(46, 15);
+    CHECK(ae.brain.f[world::AiBrain::kElevationBias] ==
+          15 * 11930464);
+}
+
+static void test_structural_bms_actions() {
+    World w;
+    for (int pool = 0; pool < 4; ++pool)
+        w.registry.configure_pool(pool, 8);
+
+    world::Entity marker{};
+    marker.item_id = world::kParticleEffectMarkerTypeId;
+    marker.has_item_def = true;
+    marker.wp_number = 9;
+    marker.position = {10.0f, 20.0f, 30.0f};
+    marker.yaw = 45;
+    marker.pitch = 5;
+    marker.roll = -3;
+    marker.flags = 0x20u;
+    w.registry.spawn_from(3, 0, marker);
+
+    auto member = [](uint16_t ssn) {
+        world::Entity entity{};
+        entity.net_id = ssn;
+        entity.item_id = 1001;
+        entity.has_item_def = true;
+        entity.group_id = 2;
+        entity.team = 1;
+        entity.alive = true;
+        entity.flags = 0x20000u;
+        entity.position = {-1.0f, -2.0f, -3.0f};
+        return entity;
+    };
+
+    const world::EntityHandle pool0_h =
+            w.registry.spawn_from(0, 0, member(100));
+    const world::EntityHandle pool1_h =
+            w.registry.spawn_from(1, 0, member(200));
+    const world::EntityHandle pool2_h =
+            w.registry.spawn_from(2, 0, member(300));
+
+    world::Entity dead = member(101);
+    dead.flags |= world::kEntityFlagDead;
+    dead.alive = false;
+    const world::EntityHandle dead_h =
+            w.registry.spawn_from(0, 1, dead);
+
+    world::Entity removable = member(400);
+    removable.group_id = 4;
+    const world::EntityHandle pool3_h =
+            w.registry.spawn_from(3, 1, removable);
+
+    world::AiSystem ai;
+    w.ai = &ai;
+    world::AiEntity &pool1_ai = *ai.at(ai.attach(pool1_h));
+
+    mission::BmsEventSystem events;
+    auto dispatch = [&](bms::ActionType type, int32_t p1 = 0,
+                        int32_t p2 = 0) {
+        bms::Action action{};
+        action.action_type = type;
+        action.param1 = p1;
+        action.param2 = p2;
+        events.dispatch_action_for_test(w, action);
+    };
+
+    dispatch(bms::ActionType::Null);
+    dispatch(bms::ActionType::SingleVelocity, 200, 99);
+    CHECK(w.registry.get(pool1_h)->move_speed_kph == 0);
+    CHECK(w.effects.count("unported_action") == 0);
+
+    dispatch(bms::ActionType::GroupVelocity, 2, 36);
+    CHECK(w.relations.group(2).move_speed_q16_per_tick == 655360);
+
+    dispatch(bms::ActionType::ChangeGTeamAction, 2, 3);
+    CHECK(w.registry.get(pool0_h)->team == 3);
+    CHECK(w.registry.get(pool1_h)->team == 3);
+    CHECK(w.registry.get(pool2_h)->team == 3);
+    CHECK(w.registry.get(dead_h)->team == 3);
+    CHECK(pool1_ai.team == 3);
+
+    dispatch(bms::ActionType::ChangeGroupAction, 2, 4);
+    CHECK(w.registry.get(pool0_h)->group_id == 4);
+    CHECK(w.registry.get(pool1_h)->group_id == 4);
+    CHECK(w.registry.get(pool2_h)->group_id == 4);
+    CHECK(w.registry.get(dead_h)->group_id == 2);
+    CHECK(pool1_ai.relmat_id == 4);
+
+    dispatch(bms::ActionType::GroupTeleportAction, 4, 9);
+    for (world::EntityHandle handle : {pool0_h, pool1_h, pool2_h}) {
+        const world::Entity *entity = w.registry.get(handle);
+        CHECK(entity->position.x == 10.0f);
+        CHECK(entity->position.y == 20.0f);
+        CHECK(entity->position.z == 30.0f);
+        CHECK(entity->yaw == 45);
+        CHECK(entity->pitch == 5);
+        CHECK(entity->roll == -3);
+    }
+    CHECK(w.registry.get(pool0_h)->spawn_position.x == 10.0f);
+    CHECK((w.registry.get(pool0_h)->flags & 0x20000u) != 0);
+    CHECK((w.registry.get(pool1_h)->flags & 0x20000u) == 0);
+    CHECK((w.registry.get(pool2_h)->flags & 0x20000u) == 0);
+    CHECK(pool1_ai.pos[0] == (10 << 16));
+    CHECK(pool1_ai.pos[1] == (20 << 16));
+    CHECK(pool1_ai.pos[2] == (30 << 16));
+    CHECK(pool1_ai.heading ==
+          world::bam_heading_from_mission_yaw_deg(45.0));
+
+    dispatch(bms::ActionType::ChangeSteamAction, 100, 5);
+    CHECK(w.registry.get(pool0_h)->team == 5);
+    dispatch(bms::ActionType::SingleChangeGroup, 100, 7);
+    CHECK(w.registry.get(pool0_h)->group_id == 7);
+
+    w.registry.get(pool0_h)->position = {};
+    w.registry.get(pool0_h)->flags |= 0x20000u;
+    dispatch(bms::ActionType::SingleTeleportAction, 100, 9);
+    CHECK(w.registry.get(pool0_h)->position.x == 10.0f);
+    CHECK(w.registry.get(pool0_h)->spawn_position.z == 30.0f);
+    CHECK((w.registry.get(pool0_h)->flags & 0x20000u) == 0);
+    CHECK((w.registry.get(pool0_h)->flags & 0x20u) != 0);
+
+    dispatch(bms::ActionType::VaporizeGroup, 4);
+    CHECK(w.registry.get(pool1_h) == nullptr);
+    CHECK(w.registry.get(pool2_h) == nullptr);
+    CHECK(w.registry.get(pool3_h) == nullptr);
+    CHECK(w.registry.get(pool0_h) != nullptr);
+    CHECK(w.registry.get(dead_h) != nullptr);
+    CHECK(w.effects.count("unported_action") == 0);
+}
+
 int main() {
+    test_change_ai_command_family();
+    test_structural_bms_actions();
     test_empty_host_holds_the_script();
     test_bms_to_wac_shared_var();
     test_wac_to_bms_shared_var();
