@@ -151,6 +151,10 @@ var _device_frame: WorldDeviceFrame
 # apply/clear and spawn-loadout projection, and the typed local-player view
 # decodes, on the same pattern. Delegates below keep the names on GameWorld.
 var _player_visuals: WorldPlayerVisuals
+# The mission-effect/fixed-tick presentation router
+# (world_effect_router.gd): the WAC/BMS effect fan-out, the impact/scorch
+# drains, and the runtime signal handler bodies, on the same pattern.
+var _effect_router: WorldEffectRouter
 # The mission attribute that forces the indoors accum bit every frame. Stays
 # on the world (mission state, test-pinned by name); handed to the pass's
 # entries as an argument. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
@@ -270,6 +274,8 @@ func _init() -> void:
 	_device_frame.setup(self)
 	_player_visuals = WorldPlayerVisuals.new()
 	_player_visuals.setup(self)
+	_effect_router = WorldEffectRouter.new()
+	_effect_router.setup(self)
 	# The item-effect director, wired like the debug-view set: its two lent
 	# privates are the placer's static item-effect sources and its item
 	# database, null-guarded here. The db seam stays duck-typed on purpose —
@@ -1745,97 +1751,12 @@ func is_foliage_hidden() -> bool:
 	return _foliage_hidden
 
 
-# Fire mission audio + particle effects for presentation. PlayWavList actions surface as "dialog"
-# effects carrying the dialog/wav id in `a`; route them to the mission audio (which resolves the id
-# through the co-named .DBF and plays the LWF set). WAC fx commands surface with the effect name in
-# `str`; route them to the effect world. Other kinds are still emitted via mission_effects for downstream
-# consumers (HUD, etc.).
+# Mission-effect routing — the WAC/BMS effect fan-out (dialog audio, fx2ssn
+# emitters) and the per-source-tick impact/scorch drains — lives in
+# WorldEffectRouter (world_effect_router.gd); this delegate keeps the routing
+# name on GameWorld for the runtime handlers and the tests that drive it.
 func route_mission_effects(effects: Array) -> void:
-	for e in effects:
-		var eff: Dictionary = e
-		var kind := String(eff.get("kind", ""))
-		if kind == "dialog":
-			# BMS PlayWavList: dialog id resolved through the co-named .DBF (queued).
-			if _mission_audio != null:
-				_mission_audio.play_dialog(int(eff.get("a", 0)))
-		elif kind == "dialog_wav":
-			# WAC wave/pwave: a scripted voice .wav by filename on its own channel.
-			if _mission_audio != null:
-				_mission_audio.play_wac_wave(String(eff.get("str", "")))
-		elif kind == "fx2ssn":
-			# WAC fx2ssn: spawn the named effect at the SSN entity's position with
-			# the emitter handle owned per entity — a scripted re-trigger detaches
-			# the previous group (spawn_effect_owned), so loops/respawns never stack
-			# emitters and FOREVEREMIT effects never accumulate
-			# [orig: WacScript_SpawnEffectAtSsnEntity @ 0x4f23a0 — renamed from the
-			# kong "sound" misnomer, it spawns a particle emitter]. The original
-			# orients the emitter to the terrain surface normal at the entity's
-			# grid cell, using the same recovered normal-map kernel as terrain.
-			# [orig: WacScript_SpawnEffectAtSsnEntity @0x4f23a0 reads
-			# outMillis/off_849934 after resolving the entity grid cell.]
-			if _effect_world != null and _runtime != null:
-				var ssn := int(eff.get("b", 0))
-				var pos: Variant = _runtime.entity_position_for_ssn(ssn)
-				if pos != null:
-					var orientation := Vector3.UP
-					if _terrain_data != null:
-						orientation = _terrain_data.get_surface_normal_world(pos)
-					_effect_world.spawn_effect_owned(
-							ssn, String(eff.get("str", "")), pos, orientation)
-		# fx2tgt (spawn at a placed type-6088 target marker
-		# [orig: WacScript_SpawnEffectAtTargetMarker @ 0x4f7fd0 — same misnomer
-		# family]) stays unrouted: which .bms record field carries the 1..99
-		# target number is unwitnessed — ptl-format-re.md §8.
-
-
-# Drain the flight sim's resolved round impacts and present both descriptor legs.
-# Impact particles are generic Always transients in the world domain; their
-# production tick/order and catch-up age survive a multi-tick render frame.
-# [orig: Projectile_UpdatePhysics @ 0x4e9d70 -> the type-specific impact
-#  handler -> Projectile_SpawnImpactEffect @ 0x4e9b80]
-func _route_round_impacts() -> void:
-	var sim := get_sim()
-	if sim == null:
-		return
-	for row_v in sim.drain_round_impacts():
-		var row: Dictionary = row_v
-		var pos := Vector3(row.get("position", Vector3.ZERO))
-		var effect := String(row.get("effect", ""))
-		if _effect_world != null and not effect.is_empty():
-			_effect_world.spawn_effect_transient(effect, pos,
-					Vector3(row.get("direction", Vector3.ZERO)),
-					maxi(int(row.get("age_ticks", 0)), 0),
-					EffectScene.RENDER_DOMAIN_WORLD,
-					int(row.get("source_tick", 0)),
-					int(row.get("source_order", 0)))
-		var sound := String(row.get("sound", ""))
-		if _mission_audio != null and not sound.is_empty():
-			_mission_audio.fire_soundset(sound, pos)
-		# The light_impact flash rides the effect leg's own gate (the row only
-		# carries light fields when the ammo authors it and the effect presents)
-		# [orig: AmmoDef_ProcessImpactEffect @ 0x40a2b3].
-		if _light_director != null and row.has("light_radius"):
-			_light_director.on_impact_light(pos,
-					float(row.get("light_radius", 0.0)),
-					row.get("light_color", Color.WHITE),
-					int(row.get("light_ticks", 10)))
-
-
-# Install simulation-resolved permanent scorch records into the terrain page
-# compiler before this source tick's ordinary impact presentation. Bounds are
-# exact 16.16 terrain x/z; Terrain owns selective page invalidation.
-func _route_terrain_scorches() -> void:
-	var sim := get_sim()
-	if sim == null or _terrain == null:
-		return
-	for row_v in sim.drain_terrain_scorches():
-		var row: Dictionary = row_v
-		_terrain.append_terrain_scorch(
-				int(row.get("texture_index", -1)),
-				int(row.get("minimum_x_q16", 0)),
-				int(row.get("minimum_z_q16", 0)),
-				int(row.get("maximum_x_q16", 0)),
-				int(row.get("maximum_z_q16", 0)))
+	_effect_router.route_mission_effects(effects)
 
 
 # Start the shared mission runtime driver: it promotes the mission, builds the present index over the
@@ -1989,83 +1910,19 @@ func _load_player_weapon_profile() -> void:
 				% [path, err])
 
 
-# Consume render-internal lifecycle effects first, route "dialog" actions to
-# mission audio (resolved through the co-named .DBF + LWF set), then expose only
-# the remaining downstream effects to HUD consumers.
+# _start_runtime's signal connects bind these GameWorld methods (a future
+# harness can override them here); the handler bodies live in
+# WorldEffectRouter (world_effect_router.gd).
 func _on_runtime_effects(effects: Array) -> void:
-	var routed: Array = []
-	for effect_v in effects:
-		if effect_v is Dictionary:
-			var effect: Dictionary = effect_v
-			if _item_fx.consume_control_effect(effect):
-				continue
-		routed.append(effect_v)
-	if routed.is_empty():
-		return
-	route_mission_effects(routed)
-	mission_effects.emit(routed)
+	_effect_router._on_runtime_effects(effects)
 
 
-func _on_runtime_fixed_tick(_logic_tick: int) -> void:
-	var probe_enabled := _perf_probe_enabled
-	var skip_fixed_handlers := probe_enabled and _perf_probe_skip_fixed_handlers
-	if skip_fixed_handlers:
-		return
-	# Retail executes local weapon actions and physical impacts before the same
-	# frame's global particle update. Consume each source tick synchronously so
-	# admission slots, first emission, and catch-up chronology are exact; only
-	# mission render Nodes remain batched until the session frame returns.
-	if _local_player_weapon_tick_consumer.is_valid():
-		_local_player_weapon_tick_consumer.call(drain_local_player_weapon_events())
-	_route_terrain_scorches()
-	_route_round_impacts()
-	# The light-pool lifecycle decay + the light_move round-glow follow, on
-	# the witnessed 62 Hz cadence [orig: EffectWorld_TickInstancesAndLightScale
-	# @ 0x5aa170 from Game_ProcessMainFrame; the round follow @ 0x4eaa9f].
-	if _light_director != null:
-		_light_director.advance_fixed_tick()
-		var glow_sim := get_sim()
-		if glow_sim != null:
-			_light_director.sync_round_glows(glow_sim.get_round_glow_rows())
-	var skip_effect_tick := probe_enabled and _perf_probe_skip_effect_tick
-	if _effect_world != null and not skip_effect_tick:
-		if _frame_stats != null and _frame_stats.is_capture_active():
-			var fx_start := Time.get_ticks_usec()
-			_effect_world.advance_fixed_tick(Simulation.tick_dt())
-			_frame_stats.add(FrameStats.EFFECTS_TICK,
-					Time.get_ticks_usec() - fx_start)
-		else:
-			_effect_world.advance_fixed_tick(Simulation.tick_dt())
+func _on_runtime_fixed_tick(logic_tick: int) -> void:
+	_effect_router._on_runtime_fixed_tick(logic_tick)
 
 
 func _on_runtime_simulation_restarted() -> void:
-	# A Stop/restart can restore the saved personal slot while the presenter still
-	# owns an emplaced model. Consume that control event synchronously; no fixed
-	# tick runs while stopped.
-	if _local_player_weapon_tick_consumer.is_valid():
-		_local_player_weapon_tick_consumer.call(
-				drain_local_player_weapon_events())
-	if _terrain != null:
-		_terrain.clear_terrain_scorches()
-	if _effect_world == null:
-		_resync_weather_after_restore()
-		return
-	_effect_world.reset_runtime_state()
-	# Persistent item effects belong to the restored entity set, not the scene
-	# that was just discarded. Re-register their admission and owner identities;
-	# restore emits fresh controller-start lifecycle events for occupied baselines.
-	_item_fx.reattach()
-	if _light_director != null:
-		_light_director.reattach()
-	_resync_weather_after_restore()
-
-
-# The restored baseline rewound the World's weather home; the render owner
-# snaps its color blocks back onto the restored targets.
-func _resync_weather_after_restore() -> void:
-	var weather: Weather = _weather
-	if weather != null:
-		weather.resync_colors_now()
+	_effect_router._on_runtime_simulation_restarted()
 
 
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF
