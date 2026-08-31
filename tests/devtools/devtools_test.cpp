@@ -3,6 +3,9 @@
 // produces draw data, the Stats window arms and disarms the board's capture
 // on its visibility edges and formats a drained window, and the ImGui ABI
 // fingerprint is the pinned one (the imgui-godot addon rejects any other).
+#include <runtime/devtools/ai_debug_snapshot.h>
+#include <runtime/devtools/ai_view_request.h>
+#include <runtime/devtools/ai_window.h>
 #include <runtime/devtools/debug_request.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/environment_request.h>
@@ -24,6 +27,9 @@
 #include <cstring>
 #include <utility>
 
+using opennova::devtools::AiDebugSnapshot;
+using opennova::devtools::AiViewRequest;
+using opennova::devtools::AiWindow;
 using opennova::devtools::CaptureWindow;
 using opennova::devtools::DebugRequest;
 using opennova::devtools::EntitiesWindow;
@@ -138,8 +144,8 @@ void test_attach_sets_docking_and_viewport_policy() {
 
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 6,
-			"Game + Stats + Entities + Entity Properties + Environment + demo registered");
+	CHECK(tools.pass().window_count() == 7,
+			"Game + Stats + Entities + Entity Properties + Environment + AI + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -161,7 +167,12 @@ void test_game_window_is_mandatory_and_detachable() {
 	CHECK(std::strcmp(tools.pass().window(4).title(), "Environment") == 0,
 			"Environment registers after Entity Properties");
 	CHECK(!tools.pass().window(4).open, "the Environment window starts closed");
-	CHECK(!tools.pass().window(5).open, "the demo window starts closed");
+	CHECK(std::strcmp(tools.pass().window(5).title(), "AI") == 0,
+			"AI registers after Environment (it reads the Entities selection)");
+	CHECK(!tools.pass().window(5).open, "the AI window starts closed");
+	CHECK(tools.pass().window(5).initial_dock_placement() == InitialDockPlacement::RightBottom,
+			"AI starts under the right column beside the card");
+	CHECK(!tools.pass().window(6).open, "the demo window starts closed");
 }
 
 void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
@@ -306,10 +317,10 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 6,
-			"Game + Stats + Entities + Entity Properties + Environment + demo registered");
+	CHECK(tools.pass().window_count() == 7,
+			"Game + Stats + Entities + Entity Properties + Environment + AI + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
-	CHECK(!tools.pass().window(5).open, "the demo window starts closed");
+	CHECK(!tools.pass().window(6).open, "the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
 
 	ImGui::NewFrame();
@@ -1019,6 +1030,202 @@ void test_environment_request_queue() {
 
 }  // namespace
 
+AiDebugSnapshot ai_snapshot() {
+	AiDebugSnapshot snapshot;
+	snapshot.valid = true;
+	snapshot.logic_tick = 62;
+	snapshot.overlay.available = true;
+	snapshot.overlay.master = true;
+	snapshot.overlay.routes = false;
+	opennova::world::inspect::AiGroupRow group;
+	group.id = 5;
+	group.alert = 2;
+	group.initial_count = 4;
+	group.live_count = 3;
+	snapshot.report.groups.push_back(group);
+	opennova::world::inspect::AiNavChannelRow channel;
+	channel.index = 1;
+	channel.loopflag = 1;
+	channel.nodes.resize(3);
+	channel.followers = 2;
+	snapshot.report.channels.push_back(channel);
+	snapshot.report.counters.brain_count = 7;
+	snapshot.report.counters.scheduler_budget = 128;
+	snapshot.report.counters.unported_calls = 2;
+	return snapshot;
+}
+
+EntityDetailSnapshot ai_detail_for(uint16_t handle) {
+	EntityDetailSnapshot detail;
+	detail.card.valid = true;
+	detail.card.handle = handle;
+	detail.card.ai_index = 3;
+	detail.card.has_ai = true;
+	detail.card.ai.name = "ALPHA";
+	detail.card.ai.state = 17;
+	detail.card.ai.state_name = "GROUND_COMBAT";
+	detail.card.ai.alert = 2;
+	detail.card.ai.target_valid = true;
+	detail.card.ai.target_handle = 0x1002;
+	detail.card.ai.target_name = "BRAVO";
+	detail.card.ai.fire_delay = 9;
+	detail.card.ai.infantry = true;
+	detail.card.ai.aim_valid = true;
+	detail.card.ai.profile_type = 3;
+	detail.card.ai.slot_control_bits = 0x200;
+	detail.logic_tick = 70;
+	return detail;
+}
+
+// The AI window: the pushed snapshot formats the counters/groups/routes rows,
+// an invalid push clears, needs_ai_debug gates on (pass open && window open),
+// and the visibility close drops the records.
+void test_ai_window_formats_the_pushed_snapshot() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	AiWindow &ai = tools.ai_window();
+
+	CHECK(!tools.needs_ai_debug(), "a closed pass wants no AI snapshot");
+	tools.pass().set_open(true);
+	CHECK(!tools.needs_ai_debug(), "a closed AI window wants no snapshot");
+	ai.open = true;
+	CHECK(tools.needs_ai_debug(), "pass open && window open wants the snapshot");
+
+	CHECK(!ai.snapshot_valid(), "no snapshot before a push");
+	tools.set_ai_debug(ai_snapshot());
+	CHECK(ai.snapshot_valid(), "the push lands");
+	CHECK(std::strstr(ai.counters_text(), "brains 7") != nullptr &&
+					std::strstr(ai.counters_text(), "budget 128") != nullptr &&
+					std::strstr(ai.counters_text(), "unported 2") != nullptr,
+			"the counters line carries the system readings");
+	CHECK(ai.group_count() == 1, "one group row");
+	CHECK(std::strstr(ai.group_text(0), "G05") != nullptr &&
+					std::strstr(ai.group_text(0), "RED") != nullptr &&
+					std::strstr(ai.group_text(0), "3/4") != nullptr,
+			"the group row names id, alert and live/initial counts");
+	CHECK(ai.channel_count() == 1, "one channel row");
+	CHECK(std::strstr(ai.channel_text(0), "ch 1") != nullptr &&
+					std::strstr(ai.channel_text(0), "once") != nullptr &&
+					std::strstr(ai.channel_text(0), "nodes 3") != nullptr &&
+					std::strstr(ai.channel_text(0), "followers 2") != nullptr,
+			"the channel row names index, loop mode, nodes and followers");
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with the AI window open");
+	ImGui::Render();
+
+	tools.set_ai_debug(AiDebugSnapshot{});
+	CHECK(!ai.snapshot_valid(), "an invalid push clears (the world unloaded)");
+	CHECK(ai.group_count() == 0 && ai.channel_count() == 0, "...and the rows with it");
+	CHECK(std::strcmp(ai.counters_text(), "No world.") == 0, "the counters line says so");
+
+	tools.set_ai_debug(ai_snapshot());
+	tools.pass().set_open(false);
+	CHECK(!ai.snapshot_valid(), "the visibility close drops the snapshot");
+	CHECK(!tools.needs_ai_debug(), "...and the pushes stop on the same edge");
+}
+
+// The overlay toggle strip: requests-out / pushed-truth. A toggle queues one
+// typed request and flips no local state; the checkbox state reads the pushed
+// overlay block; availability follows the snapshot.
+void test_ai_window_toggle_requests() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	AiWindow &ai = tools.ai_window();
+	ai.open = true;
+
+	CHECK(!ai.overlay_available(), "no snapshot: the strip is unavailable");
+	tools.set_ai_debug(ai_snapshot());
+	CHECK(ai.overlay_available(), "the pushed overlay state arms the strip");
+	CHECK(ai.element_enabled(AiViewRequest::Element::Master), "master reads pushed truth");
+	CHECK(!ai.element_enabled(AiViewRequest::Element::Routes), "routes reads pushed truth (off)");
+	CHECK(ai.element_enabled(AiViewRequest::Element::Labels), "labels default on");
+
+	AiViewRequest request;
+	CHECK(!tools.take_ai_view_request(request), "no request before a toggle");
+	ai.toggle_element(AiViewRequest::Element::Routes, true);
+	ai.toggle_element(AiViewRequest::Element::Master, false);
+	CHECK(!ai.element_enabled(AiViewRequest::Element::Routes),
+			"a toggle changes no local state (the next push carries the truth)");
+	CHECK(tools.take_ai_view_request(request) &&
+					request.element == AiViewRequest::Element::Routes && request.enabled,
+			"the first toggle drains first");
+	CHECK(tools.take_ai_view_request(request) &&
+					request.element == AiViewRequest::Element::Master && !request.enabled,
+			"the second follows in order");
+	CHECK(!tools.take_ai_view_request(request), "the queue drains exactly once");
+
+	// Requests queued before a close still drain (the drain is unconditional).
+	ai.toggle_element(AiViewRequest::Element::Rings, false);
+	tools.pass().set_open(false);
+	CHECK(tools.take_ai_view_request(request) &&
+					request.element == AiViewRequest::Element::Rings,
+			"a queued toggle survives the visibility close");
+}
+
+// The deep pane rides the Entities selection and the same detail push the
+// Entity Properties window receives; the widened needs_entity_detail keeps
+// the card flowing for the AI window alone.
+void test_ai_window_detail_pane_follows_the_selection() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	AiWindow &ai = tools.ai_window();
+	ai.open = true;
+	tools.set_entity_directory(two_row_directory());
+
+	tools.set_entity_detail(ai_detail_for(0x3001));
+	CHECK(!ai.detail_valid(), "a card for an unselected handle is dropped");
+
+	tools.select_entity(0x3001);
+	tools.set_entity_detail(ai_detail_for(0x1002));
+	CHECK(!ai.detail_valid(), "a card for another handle is dropped");
+	tools.set_entity_detail(ai_detail_for(0x3001));
+	CHECK(ai.detail_valid(), "the selected card lands");
+	CHECK(ai.detail_line_count() > 0, "the pane formats lines");
+	bool saw_state = false;
+	bool saw_target = false;
+	bool saw_berserk = false;
+	for (int i = 0; i < ai.detail_line_count(); ++i) {
+		if (std::strstr(ai.detail_line(i), "GROUND_COMBAT") != nullptr) saw_state = true;
+		if (std::strstr(ai.detail_line(i), "BRAVO") != nullptr) saw_target = true;
+		if (std::strstr(ai.detail_line(i), "BERSERK") != nullptr) saw_berserk = true;
+	}
+	CHECK(saw_state, "the pane names the state");
+	CHECK(saw_target, "the pane names the target");
+	CHECK(saw_berserk, "the pane decodes the control bits");
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with the pane");
+	ImGui::Render();
+
+	// The widened gate: with the Properties window closed (the pick opened
+	// it), the AI window alone keeps the detail flowing.
+	tools.entity_properties_window().open = false;
+	CHECK(tools.needs_entity_detail(), "an open AI window alone wants the detail card");
+	ai.open = false;
+	tools.entity_properties_window().open = false;
+	CHECK(!tools.needs_entity_detail(), "both panes closed wants none");
+	ai.open = true;
+
+	// A world-half-only card (no AI) formats no brain pane.
+	tools.select_entity(0x1002);
+	tools.set_entity_detail(detail_for(0x1002, 0, 0));
+	CHECK(!ai.detail_valid(), "a card without the AI half is not a brain pane");
+	CHECK(ai.detail_line_count() == 0, "...and formats nothing");
+
+	tools.select_entity(0x3001);
+	tools.set_entity_detail(ai_detail_for(0x3001));
+	CHECK(ai.detail_valid(), "the brain card lands again");
+	tools.clear_entity_selection();
+	CHECK(!ai.detail_valid() && ai.detail_line_count() == 0,
+			"clearing the selection clears the pane");
+}
+
 int main() {
 	test_abi_fingerprint_is_the_pinned_one();
 	test_attach_sets_docking_and_viewport_policy();
@@ -1036,6 +1243,9 @@ int main() {
 	test_entity_edits_gate_on_the_pushed_authority();
 	test_environment_window_formats_the_pushed_record();
 	test_environment_request_queue();
+	test_ai_window_formats_the_pushed_snapshot();
+	test_ai_window_toggle_requests();
+	test_ai_window_detail_pane_follows_the_selection();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

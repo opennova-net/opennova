@@ -1,8 +1,9 @@
 // The game's dev tools (ADR 0039): the ImGui pass behind F3 with its mandatory
 // Game surface, the Stats window (both open by default), the Entities and
 // Entity Properties windows (closed by default, opened by a world pick; the
-// pushed-record/typed-request channel, ADR 0042 d6), and ImGui's demo window
-// (the docking/multi-viewport smoke test). Debug builds only
+// pushed-record/typed-request channel, ADR 0042 d6), the Environment and AI
+// windows (closed by default, opened from the "Windows" menu), and ImGui's
+// demo window (the docking/multi-viewport smoke test). Debug builds only
 // (OPENNOVA_DEVTOOLS); the release GDExtension flavour compiles this out and
 // its DevTools node is inert.
 #pragma once
@@ -18,6 +19,7 @@ class GameViewport;
 class EntitiesWindow;
 class EntityPropertiesWindow;
 class EnvironmentWindow;
+class AiWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct DebugRequest;
@@ -25,6 +27,8 @@ struct EntityDirectorySnapshot;
 struct EntityDetailSnapshot;
 struct EnvironmentRequest;
 struct EnvironmentSnapshot;
+struct AiDebugSnapshot;
+struct AiViewRequest;
 
 class GameDevTools {
 public:
@@ -40,6 +44,8 @@ public:
 	const EntityPropertiesWindow &entity_properties_window() const { return *entity_properties_window_; }
 	EnvironmentWindow &environment_window() { return *environment_window_; }
 	const EnvironmentWindow &environment_window() const { return *environment_window_; }
+	AiWindow &ai_window() { return *ai_window_; }
+	const AiWindow &ai_window() const { return *ai_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_spectator_state(bool available, bool active);
@@ -80,6 +86,13 @@ public:
 	bool needs_environment_snapshot() const;
 	bool take_environment_request(EnvironmentRequest &request);
 
+	// The AI window's record/request channel (the same shape): the AI debug
+	// join pushed by value on its cadence while shown, and the typed overlay
+	// toggles drained into the shell's world-view seam (the one request family
+	// whose target is a device, not the engine command layer).
+	void set_ai_debug(AiDebugSnapshot snapshot);
+	bool needs_ai_debug() const;
+	bool take_ai_view_request(AiViewRequest &request);
 
 private:
 	ImGuiPass pass_;
@@ -88,6 +101,7 @@ private:
 	EntitiesWindow *entities_window_ = nullptr;
 	EntityPropertiesWindow *entity_properties_window_ = nullptr;
 	EnvironmentWindow *environment_window_ = nullptr;
+	AiWindow *ai_window_ = nullptr;
 };
 
 }  // namespace opennova::devtools

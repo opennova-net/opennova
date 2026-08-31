@@ -2446,6 +2446,22 @@ func is_occlusion_debug() -> bool:
 	return _debug_views.is_occlusion_debug()
 
 
+func set_ai_debug_option(id: StringName, enabled: bool) -> void:
+	_debug_views.set_ai_debug_option(id, enabled)
+
+
+func is_ai_debug() -> bool:
+	return _debug_views.is_ai_debug()
+
+
+func get_ai_view_state() -> Dictionary:
+	return _debug_views.get_ai_view_state()
+
+
+func set_ai_debug_selection_provider(provider: Callable) -> void:
+	_debug_views.set_ai_debug_selection_provider(provider)
+
+
 func get_debug_view_statuses() -> Array[DebugViewStatus]:
 	return _debug_views.get_debug_view_statuses()
 

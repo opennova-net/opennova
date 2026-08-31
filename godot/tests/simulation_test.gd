@@ -512,6 +512,36 @@ func test_demo_mission_promotes() -> void:
 	sim.free()
 
 
+func test_ai_debug_payload_reports_brains_headless() -> void:
+	# The AI overlay's bulk accessor (godot/game/debug/ai_debug_view.gd's
+	# feed): {"valid": false} without a kernel; over the demo mission it
+	# reports every brain in Godot space with the engine join's shape.
+	var empty := Simulation.new()
+	var empty_debug: Dictionary = empty.get_ai_debug()
+	assert_true(bool(empty_debug.get("valid", false)),
+			"a fresh sim has a kernel (the collision-debug contract)")
+	assert_eq((empty_debug.get("rows", []) as Array).size(), 0,
+			"...but no brains before a load")
+	empty.free()
+
+	var sim := Simulation.new()
+	sim.build_demo_mission()
+	var debug: Dictionary = sim.get_ai_debug()
+	assert_true(bool(debug.get("valid", false)), "a loaded world reports")
+	var rows: Array = debug.get("rows", [])
+	assert_eq(rows.size(), 2, "one overlay row per brain")
+	var row: Dictionary = rows[0]
+	assert_eq(int(row.get("state", -1)), 16, "the routed organic's state rides along")
+	assert_eq(String(row.get("state_name", "")), "GROUND_FOLLOWWP")
+	assert_true(row.get("pos", null) is Vector3, "positions land as Godot vectors")
+	assert_true(row.get("aim_dir", null) is Vector3, "aim_dir is precomputed natively")
+	var counters: Dictionary = debug.get("counters", {})
+	assert_eq(int(counters.get("brain_count", 0)), 2)
+	assert_true(debug.get("channels", null) is Array, "route channels ride along")
+	assert_true(debug.get("groups", null) is Array, "group rows ride along")
+	sim.free()
+
+
 func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> void:
 	var sim := Simulation.new()
 	assert_false(sim.is_runtime_profiling_enabled(),
