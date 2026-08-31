@@ -754,6 +754,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Game log text can carry non-cp1252 characters (e.g. U+FFFD from the
+    # engine's byte-to-text replacement). A Windows console defaults stdout to
+    # cp1252 and the print then raises UnicodeEncodeError mid-listing, which
+    # reads as "the game is gone" to any caller polling `logs`. Never let the
+    # transport encoding kill the observation channel.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="replace")
     args = build_parser().parse_args(argv)
     try:
         return int(args.func(args))

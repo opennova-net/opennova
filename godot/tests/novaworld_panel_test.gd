@@ -122,6 +122,24 @@ func test_expansion_advisory_warns_once_then_defers_to_the_join() -> void:
 			"the override is one-shot — a later press warns again")
 
 
+# On NovaWorld the account handle IS the callsign: the host rosters the player
+# under the service identity, and a stock client's ClientAuth NA is the handle
+# (wire-witnessed live: stock na="ljim" = the 0x7B/0x46 roster name). A local
+# callsign would leave the joiner's name-match waiting forever (pre-spawn
+# free-cam). Signed out, the local callsign stands.
+func test_nw_join_callsign_is_the_signed_in_handle() -> void:
+	var panel := _make_panel(PackedStringArray())
+	panel.player_name = "Player"
+	assert_eq(panel.join_callsign(), "Player",
+			"signed out, the local callsign stands")
+	panel.set_signed_in_handle("ljim")
+	assert_eq(panel.join_callsign(), "ljim",
+			"signed in, the NW handle is the join callsign")
+	panel.set_signed_in_handle("  ")
+	assert_eq(panel.join_callsign(), "ljim",
+			"a blank handle cannot clobber the retained one")
+
+
 func test_expansion_advisory_ignores_rows_without_an_expansion() -> void:
 	var panel := _make_panel(PackedStringArray())
 	assert_false(panel.expansion_advisory_blocks_first_press(

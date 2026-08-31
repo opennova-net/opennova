@@ -45,6 +45,9 @@ var _logged_in := false
 # (the joiner must know the host's mission to load it) and pair them when the join resolves.
 var _pending_mission := ""
 var _pending_player := ""
+# The signed-in NovaWorld handle — the callsign every NW join uses (retail
+# parity: the service identity names the player, not the local profile).
+var _nw_callsign := ""
 # The rid whose first Join press drew the expansion warning; a second press on
 # the same row proceeds (the in-match 0x7B reconcile stays authoritative).
 var _exp_warning_armed_rid := -1
@@ -345,7 +348,24 @@ func _on_login_pressed() -> void:
 func _on_login_succeeded(nwhandle: String) -> void:
 	_logged_in = true
 	_login_button.disabled = true
+	set_signed_in_handle(nwhandle)
 	_set_status("Signed in as %s. Choose a server to join." % nwhandle)
+
+
+# On NovaWorld the account handle IS the in-game callsign: the host rosters
+# the player under the service identity (the NAMEINFO cookie name), and a
+# stock client sends that handle as its ClientAuth NA. Wire-witnessed live
+# 2026-08-31 (stock `na="ljim"` = the host's 0x7B/0x46 roster name); a local
+# callsign would leave the joiner's name-match waiting for a roster row that
+# never exists, parked in the pre-spawn free-cam forever.
+func set_signed_in_handle(nwhandle: String) -> void:
+	if not nwhandle.strip_edges().is_empty():
+		_nw_callsign = nwhandle.strip_edges()
+
+
+# The callsign a join uses: the signed-in NW handle, else the local callsign.
+func join_callsign() -> String:
+	return _nw_callsign if not _nw_callsign.is_empty() else player_name
 
 
 func _on_login_failed(reason: String) -> void:
@@ -376,7 +396,9 @@ func _on_join_pressed() -> void:
 		return
 	# Remember what we need for the in-match join — joined_game only carries the resolved address.
 	_pending_mission = String(row.get("mission_name", ""))
-	_pending_player = player_name
+	# The NW handle when signed in (retail: your account name is your callsign
+	# in NovaWorld games — see set_signed_in_handle); the local callsign otherwise.
+	_pending_player = join_callsign()
 	_set_status("Joining %s..." % String(row.get("name", "server")))
 	if _client != null:
 		_client.join(rid)
