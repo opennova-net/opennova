@@ -799,7 +799,6 @@ bool run_retail_post_auth_prelude() {
 	constexpr uint32_t kConnectionId = 3;
 	const std::string server_scrk = "SERVER-RETAIL-PRELUDE-SCRK";
 	np::JoinerConnection joiner("RetailPrelude");
-	joiner.set_player_paced_deployment(true);
 
 	// Drive the real 0x41/0x42 builders so the post-auth fixture uses this
 	// connection's live client key and SCRK.
@@ -1293,10 +1292,16 @@ bool run_retail_post_auth_prelude() {
 		return false;
 	}
 
-	// The second initial grant completes the pair and makes the player-paced UI
-	// pick-ready without inventing an automatic 0x0E.
+	// The second initial grant completes the pair. Retail's initial deploy owes NO
+	// C2S 0x0E: with the deployment policy (0x0F) already seen, admission completes
+	// and the joiner is deployed into the match directly — the host spawns the player
+	// and drives the deploy-map overlay through the per-frame 0x0A flags1, never a
+	// hidden respawn-pending hold gated on a manual pick. [orig: NapiNPClientMsg_0x00F
+	// @0x42e2ed revives g_local_player_entity regardless of the deploy overlay;
+	// NapiNPClientMsg_0x00A @0x42fec0 flags1 bit1 is the overlay, bit0 the death gate;
+	// witnessed: a stock client joining a live retail co-op host spawns ALIVE after
+	// the 0x2F pair with zero C2S 0x0E]
 	server_seq.last_inbound_seq = 13;
-	const uint32_t second_grant_sequence = server_seq.next_outbound_seq;
 	const std::vector<uint8_t> split_second_grant_datagram =
 			frame_server_session(
 					server_seq, server_scrk, client_auth.ck,
@@ -1309,66 +1314,18 @@ bool run_retail_post_auth_prelude() {
 					split_second_grant_datagram.size());
 	if (!expect(split_second_grant_result.outbound.empty() &&
 				split_second_grant_result.gameplay_release_applied &&
-				joiner.in_match() && joiner.deployment_pick_pending() &&
-				joiner.initial_admission_complete(),
-			"the second grant makes the deploy UI ready without auto-selecting a row")) {
-		return false;
-	}
-	const std::vector<uint8_t> player_pick =
-			joiner.frame_deployment_pick(0xFFFFu);
-	if (!expect(decode_client_session(
-				player_pick, client_auth.scrk, client_header, client_messages) &&
-				client_messages.size() == 1 && client_messages[0].tag == 0x0E &&
-				client_messages[0].payload == std::vector<uint8_t>({0xFF, 0xFF}) &&
-				joiner.in_match() && joiner.deployment_pick_pending(),
-			"the player's row selection re-arms only the gameplay hold")) {
-		return false;
-	}
-
-	// A retained retransmit reuses the old server sequence but carries the
-	// sender's current ACK, which now covers our 0x0E. Reliable deduplication
-	// must suppress that old grant rather than treating it as the release.
-	server_seq.last_inbound_seq = client_header.seq_num;
-	std::vector<uint8_t> retransmit_body;
-	if (!expect(frame_session_packet_for_sequence(
-				server_seq,
-				SessionCrypto{server_scrk, {}, client_auth.ck},
-				second_grant_sequence, retransmit_body),
-			"rebuild retained second grant with the post-pick ACK")) {
-		return false;
-	}
-	const std::vector<uint8_t> retransmitted_second_grant =
-			nw_encode_outbound(
-					SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
-					std::move(retransmit_body));
-	const np::JoinerConnection::PollResult retransmitted_grant_result =
-			joiner.handle_datagram(
-					retransmitted_second_grant.data(),
-					retransmitted_second_grant.size());
-	if (!expect(retransmitted_grant_result.outbound.empty() &&
-				!retransmitted_grant_result.gameplay_release_applied &&
-				!retransmitted_grant_result.reached_in_match &&
-				joiner.in_match() && joiner.deployment_pick_pending(),
-			"ACK-updated retransmit cannot complete the pending deploy UI")) {
-		return false;
-	}
-
-	const std::vector<uint8_t> deploy_release_datagram = frame_server_session(
-			server_seq, server_scrk, client_auth.ck,
-			{
-					make_protocol_message(
-							0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF}),
-					make_protocol_message(0x61, {0x00, 0x00, 0xED, 0x00}),
-			});
-	const np::JoinerConnection::PollResult deploy_release_result =
-			joiner.handle_datagram(
-					deploy_release_datagram.data(),
-					deploy_release_datagram.size());
-	if (!expect(deploy_release_result.outbound.empty() &&
-				deploy_release_result.reached_in_match &&
-				joiner.in_match() &&
+				joiner.in_match() && !joiner.deployment_pick_pending() &&
+				joiner.initial_admission_complete() &&
 				joiner.self_handle() == kRetailSelfHandle,
-			"post-pick 0x5A releases the hidden retail player into the match")) {
+			"the second grant completes admission and deploys the player, no pick owed")) {
+		return false;
+	}
+	// The completed initial deploy accepts no manual spawn pick: frame_deployment_pick
+	// is inert past Complete (the C2S 0x0E belongs only to the death-respawn flow,
+	// begin_redeployment -> AwaitDeployPick).
+	if (!expect(joiner.frame_deployment_pick(0xFFFFu).empty() &&
+				!joiner.deployment_pick_pending(),
+			"no C2S 0x0E is owed or accepted on the completed initial deploy")) {
 		return false;
 	}
 	return true;
@@ -2330,19 +2287,17 @@ bool run_roundtrip() {
 // (B) Host-as-client (D-NET-121/122): the host's own loopback view anchors to its player, not dvxi5.
 // ---------------------------------------------------------------------------------------------------
 // The integrated ZONES join — the leg run_roundtrip's zone-less world never exercises:
-// world_has_spawn_zone -> 0x0F gameFlags bit0=1 + join-time respawn_pending (D-NET-156)
-// -> the joiner answers the initial 0x5A grant pair with a C2S 0x0E pick -> the host
-// deploys (clearing pending/hidden) and its covering-ack 0x5A release reaches InMatch.
-// Two modes pin the deployment seam:
-//   headless (player_paced=false): the auto parameter-0 pick {FF FF}, exactly once —
-//     today's ctest/nw_replay behavior, unchanged.
-//   player-paced (player_paced=true): NO auto pick; the shell's DEATH deploy screen
-//     stays pick-pending while the initial 0x5A grants clear retail's separate uplink
-//     hold, so 0x0C gameplay and 0x4C quality traffic flow before any 0x0E. A player
-//     pick re-arms only that hold; an INVALID pick is silently dropped and the screen
-//     remains pending for a re-pick, then a selected non-default zone's ACK-qualified
-//     0x5A releases it. Both picks reach the wire, and a staged older 0x0C cannot
-//     overwrite the selected pose on the next authority tick.
+// world_has_spawn_zone -> the host holds the joiner respawn_pending at join (D-NET-156,
+// [orig: Server_OnPlayerJoin @0x51a6f2 stateByte|=0x10 iff SpawnZoneList>0]). The joiner
+// completes admission on the initial 0x5A grant pair and enters the match through the
+// host's spawn. It sends NO initial C2S 0x0E: a stock client joining a live wave-based
+// retail co-op host spawns with zero 0x0E, and gating the deploy pick on the 0x0F
+// game_flags overlay bit (which such hosts set too) hung the joiner on a deploy screen
+// the host never asked for. The pick-based deploy screen — the player selecting a spawn
+// zone with a C2S 0x0E while the host holds them undeployed — stays modeled HOST-side but
+// its CLIENT trigger is retired pending a pick-based mission capture that pins the correct
+// per-frame signal (the local player's entity+0x24 UNDEPLOYED bit). The player_paced
+// argument is retained for the call sites but no longer changes the initial-deploy path.
 bool run_roundtrip_with_spawn_zones(bool player_paced) {
 	const PeerAddr peer{0x0100007Fu, 30001}; // 127.0.0.1:30001
 	const std::string kName = "ZonesJoiner";
@@ -2395,7 +2350,6 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 
 	np::ClientRuntime client(kName);
 	client.set_world_ready(false);
-	if (player_paced) client.set_player_paced_deployment(true);
 	// The binding seam under test alongside the zones flow: the shell's applied kit
 	// replaces the capture-default 0x2F pair content (D-NET-168). The wire team byte
 	// stays host-owned — this co-op joiner latches the same team 1 reservation
@@ -2521,9 +2475,8 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 		client.receive(sdg.data(), sdg.size());
 	}
 
-	// Drive the deployment exchange: phase-8 bundle ships 0x0F (bit0=1) -> the pick
-	// (auto parameter-0, or the binding's player-paced picks) -> the host's
-	// deploy-release 0x5A whose packet ack covers it.
+	// Drive the deployment exchange: the phase-8 bundle ships 0x0F, both initial 0x5A
+	// grants complete admission, and the joiner enters the match through the host's spawn.
 	auto drive_frames = [&](int frames, auto until) {
 		for (int f = 0; f < frames && !until(); ++f) {
 			for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick))
@@ -2534,143 +2487,39 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 			}
 		}
 	};
-	if (player_paced) {
-		// The deploy UI is pending, but retail's initial loadout grants have already
-		// cleared the independent gameplay hold. Nothing auto-selects a spawn row.
-		drive_frames(60, [&] { return client.deployment_pick_pending(); });
-		if (!expect(client.deployment_pick_pending(),
-				"zones-paced: deploy UI awaits the player's deployment pick")) return false;
-		if (!expect(deploy_pick_count == 0 && client.in_match() && client.deployed(),
-				"zones-paced: initial grants enter gameplay without auto-sending 0x0E")) return false;
-		if (!expect(client.authoritative_spawn_released() &&
-					client.authoritative_spawn_release_revision() == 1,
-				"zones-paced: the initial release independently arms authoritative health"))
-			return false;
-		const uint64_t spawn_release_before_pick =
-				client.authoritative_spawn_release_revision();
-
-		PlayerExtendedUplink pre_pick_uplink;
-		pre_pick_uplink.carrier_handle = 0xFFFFu;
-		pre_pick_uplink.pos_x = w::to_fixed(51.0);
-		pre_pick_uplink.pos_y = w::to_fixed(61.0);
-		pre_pick_uplink.pos_z = w::to_fixed(1.0);
-		const int uplinks_before_pick = gameplay_uplink_count;
-		const int quality_before_pick = net_quality_count;
-		stage_in_match_c2s = true;
-		for (int frame = 0; frame < 311; ++frame) {
-			for (std::vector<uint8_t> &d :
-					client.Client_ProcessNetworkFrame(pre_pick_uplink, tick))
-				pump_host(std::move(d));
-		}
-		if (!expect(gameplay_uplink_count > uplinks_before_pick &&
-					net_quality_count > quality_before_pick &&
-					deploy_pick_count == 0 && client.deployment_pick_pending(),
-				"zones-paced: pre-pick gameplay uplinks and net-quality reports reach the wire"))
-			return false;
-
-		// Leave one real pre-pick C2S 0x0C staged at the production owner seam. The
-		// host may receive this datagram and the following pick in one socket pump;
-		// the older pose must be applied before, never after, the selected deploy
-		// pose. This is the ordering exercised by Simulation's two-peer UDP path.
-		stage_in_match_c2s = false;
-		if (!expect(staged_in_match_c2s != 0,
-				"zones-paced: one pre-pick uplink is staged ahead of the deployment request"))
-			return false;
-
-		// An INVALID pick: the host silently drops it (the resolve-miss break) and the
-		// player stays pick-pending for a re-pick. Sending 0x0E itself re-arms the
-		// uplink hold before the host has a chance to answer.
-		for (int frame = 0;
-		     frame < 4 && client.send_holdoff_countdown() <= 1; ++frame) {
-			for (std::vector<uint8_t> &d :
-					client.Client_ProcessNetworkFrame(pre_pick_uplink, tick))
-				pump_host(std::move(d));
-		}
-		if (!expect(client.send_holdoff_countdown() > 1,
-				"zones-paced: deployment pick starts inside a held send interval"))
-			return false;
-		const int uplinks_before_invalid_pick = gameplay_uplink_count;
-		if (!expect(client.queue_deployment_pick(0x2FFE),
-				"zones-paced: pending deployment UI accepts an invalid-location pick"))
-			return false; // pool-2 slot 0xFFE resolves no entity on the host
-		if (!expect(!client.gameplay_gate_open() && !client.is_deployed() &&
-					client.authoritative_spawn_released() &&
-					client.authoritative_spawn_release_revision() ==
-							spawn_release_before_pick,
-				"zones-paced: accepted input action immediately closes only the gameplay gate"))
-			return false;
-		const std::vector<std::vector<uint8_t>> held_pick_frame =
-				client.Client_ProcessNetworkFrame(pre_pick_uplink, tick);
-		if (!expect(held_pick_frame.empty() && deploy_pick_count == 0,
-				"zones-paced: held boundary defers the queued 0x0E without delaying its gate"))
-			return false;
-		drive_frames(8, [&] { return deploy_pick_count == 1; });
-		if (!expect(deploy_pick_count == 1 && client.in_match() &&
-					!client.deployed() && client.authoritative_spawn_released() &&
-					client.authoritative_spawn_release_revision() ==
-							spawn_release_before_pick &&
-					client.deployment_pick_pending() &&
-					gameplay_uplink_count == uplinks_before_invalid_pick,
-				"zones-paced: 0x0E re-arms only gameplay while health, session, and UI stay active"))
-			return false;
-		bool still_pending_host_side = false;
-		for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list)
-			if (conn.peer == peer) still_pending_host_side = conn.link.respawn_pending;
-		if (!expect(still_pending_host_side,
-				"zones-paced: host still holds respawn-pending after the invalid pick")) return false;
-		// The re-pick: select the displaced pool-2 zone, not the parameter-0
-		// default marker. The selected x=10 pose must survive the older staged
-		// x=51 uplink above.
-		if (!expect(client.queue_deployment_pick(zone_h.packed),
-				"zones-paced: pending deployment UI accepts a valid re-pick"))
-			return false;
-		drive_frames(60, [&] { return client.deployed(); });
-		if (!expect(deploy_pick_count == 2 &&
-					deploy_picks[0] == std::vector<uint8_t>({0xFE, 0x2F}) &&
-					deploy_picks[1] == std::vector<uint8_t>({
-							static_cast<uint8_t>(zone_h.packed & 0xFFu),
-							static_cast<uint8_t>((zone_h.packed >> 8) & 0xFFu)}),
-				"zones-paced: both player picks reached the wire in order")) return false;
-		const w::Entity *selected = world.registry.get(Hh);
-		if (!expect(selected != nullptr && std::abs(selected->position.x - 10.0f) < 0.01f,
-				"zones-paced: host applies the selected non-default pose before its next tick"))
-			return false;
-		np::Server_TickUpdate(ctx);
-		selected = world.registry.get(Hh);
-		if (!expect(selected != nullptr && std::abs(selected->position.x - 10.0f) < 0.01f,
-				"zones-paced: an older queued uplink cannot overwrite the selected deploy pose"))
-			return false;
-	} else {
-		drive_frames(60, [&] {
-			return client.deployed() && !client.deployment_pick_pending();
-		});
-		if (!expect(saw_deploy_pick && deploy_pick_shape_ok,
-				"zones: joiner sent the parameter-0 deploy pick 0x0E {FF FF}")) return false;
-		if (!expect(deploy_pick_count == 1,
-				"zones: exactly one deploy pick on the wire")) return false;
-	}
-	if (!expect(pending_at_pick_time,
-			"zones: host held the joiner respawn-pending until the pick")) return false;
-	if (!expect(client.in_match() && client.self_handle() == Hh.packed,
-			"zones: deployment release reached InMatch with the host wire handle")) return false;
+	// Retail's initial deploy does not force a C2S 0x0E. A stock client joining a live
+	// wave-based co-op host spawns through the host's 0x2F -> spawn-wave path having sent
+	// ZERO 0x0E; our joiner used to gate the deploy pick on the S2C 0x0F game_flags OVERLAY
+	// bit (which a wave host sets too), so it hung on a deploy screen the host never asked
+	// for. Initial admission now completes with no pick. The pick-based deploy screen — the
+	// host holding a joiner respawn-pending on a deploy-selectable-spawn-zone mission until
+	// the player's 0x0E — stays modeled HOST-side (D-NET-156, exercised below as the
+	// still-pending hold), but its CLIENT trigger is retired pending a pick-based mission
+	// capture that pins the correct per-frame signal (the local player's entity+0x24
+	// UNDEPLOYED bit; the 0x0A tail carries stance today, not that bit). [orig: the wave
+	// path spawns with no pick — witnessed on the wire against a live retail co-op host;
+	// the pick hold is Server_OnPlayerJoin @0x51a6f2 stateByte|=0x10 iff SpawnZoneList>0]
+	(void)player_paced;
+	(void)zone_h;
+	drive_frames(120, [&] {
+		return client.in_match() && client.initial_admission_complete();
+	});
+	if (!expect(client.in_match() && client.initial_admission_complete() &&
+				deploy_pick_count == 0,
+			"zones: joiner completes admission and enters the match with no forced 0x0E"))
+		return false;
+	if (!expect(client.self_handle() == Hh.packed,
+			"zones: the joiner bound the host's self wire handle")) return false;
 	if (!expect(client.assigned_team() == 1 && je0 != nullptr && je0->team == 1,
-			"zones: pre-spawn 0x04 and the later co-op entity share team 1"))
+			"zones: pre-spawn 0x04 and the co-op entity share team 1")) return false;
+	// The host-side D-NET-156 pick hold persists: the joiner is not deployed on the host
+	// until a C2S 0x0E, which the client no longer sends on the initial join.
+	bool host_still_pending = false;
+	for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		if (conn.peer == peer) host_still_pending = conn.link.respawn_pending;
+	if (!expect(host_still_pending,
+			"zones: host keeps the D-NET-156 pick hold (client-side pick deferred)"))
 		return false;
-	if (!expect(client.deployed(), "zones: client deployed after the post-pick release")) return false;
-	if (player_paced && !expect(client.authoritative_spawn_released() &&
-			client.authoritative_spawn_release_revision() == 1,
-			"zones-paced: post-pick gameplay release does not invent a spawn-health edge"))
-		return false;
-	bool pending_cleared = false;
-	bool entity_unhidden = false;
-	for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!(conn.peer == peer)) continue;
-		pending_cleared = !conn.link.respawn_pending;
-		if (const w::Entity *je = world.registry.get(conn.link.owned_entity))
-			entity_unhidden = (je->flags & 1u) == 0 && je->alive;
-	}
-	if (!expect(pending_cleared, "zones: successful deploy cleared respawn_pending")) return false;
-	if (!expect(entity_unhidden, "zones: successful deploy cleared the hidden bit")) return false;
 
 	// The injected kit rode the wire: the SAME rows/class twice under the 0x04-latched
 	// team, first with the fixed pre-init slot 195, then the injected equipped combo.

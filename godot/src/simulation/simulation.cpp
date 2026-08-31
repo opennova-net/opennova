@@ -571,11 +571,6 @@ std::function<void()> Simulation::role_bringup_hook() {
 				install_expansion_version_root();
 			}
 			runtime_->set_world_ready(true);
-			// The shell owns the deploy-map screen: a pick-required join parks at
-			// the player's pick instead of auto-answering parameter-0 (headless
-			// ClientRuntime callers keep the auto default). [orig: the DEATH
-			// screen; net-re §5.61]
-			runtime_->set_player_paced_deployment(true);
 			joiner_bridge_.reset_for_load(runtime_->deployment_release_revision());
 			joiner_applied_loadout_revision_ = 0;
 			kernel_->loadout.pending_player_class = -1; // the shell re-applies the kit after each load
