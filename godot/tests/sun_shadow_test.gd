@@ -84,9 +84,13 @@ func test_the_sun_is_a_real_casting_light() -> void:
 	assert_eq(light.shadow_caster_mask, 0xFFFFFFFF,
 			"per-instance cast settings gate casting, not the mask")
 	var values: EnvLightValues = environment.get_light_state().get_values()
-	assert_true(Vector3(light.light_color.r, light.light_color.g,
-			light.light_color.b).is_equal_approx(values.get_dir_color()),
-			"the env light block's active dir color is the sun color")
+	# The block's dir_color is a gamma-domain scene value; the node carries it
+	# PRE-ENCODED (linear_to_srgb) so the renderer's Light3D srgb_to_linear
+	# decode lands back on the witnessed value (the 03TR dawn-bias fix).
+	var d := values.get_dir_color()
+	var conditioned := Color(d.x, d.y, d.z).linear_to_srgb()
+	assert_true(light.light_color.is_equal_approx(conditioned),
+			"the sun carries the env dir color pre-encoded against the renderer's decode")
 
 
 func test_game_world_composes_one_live_sun_during_ready() -> void:

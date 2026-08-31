@@ -1,9 +1,18 @@
 shader_type spatial;
 // ADR 0043 (modern presentation): the terrain is LIT — Godot's
-// DirectionalLight3D sun + hemisphere-sky ambient + clustered omni lights
-// (+ CSM shadows at stage 4) replace the fixed-function light fold, the
-// projected light-pool pass and the hand fog. Environment fog applies.
-render_mode blend_mix, depth_draw_opaque, cull_back;
+// DirectionalLight3D sun (CSM shadows via ATTENUATION), clustered omni
+// lights and Environment fog. The RESPONSE is the witnessed terrain fold —
+// `sun_mask * sun_light + sky_ambient` per channel, flat sun with no N.L
+// (the DOT3 normal term already rides the tile-cache albedo) and no
+// MODULATE2X ("the halving and doubling cancel") [orig:
+// compile_terrain_pixel_shaders @ 0x605260 shape; c0/c1 push @ 0x604420] —
+// expressed through the canonical hooks: a custom light() flattens the sun
+// and halves its MODULATE2X energy, EMISSION carries the flat sky term, and
+// the pipeline ambient (the object family's outdoor average) is disabled.
+render_mode blend_mix, depth_draw_opaque, cull_back, ambient_light_disabled;
+
+// The env sky ambient (TOD-updated by MissionEnvironment).
+global uniform vec3 opennova_sky_ambient;
 
 // Shared terrain surface composition (uniforms u_colormap/u_detail*/
 // u_blendmap/u_detailmap*: terrain_surface_albedo()).
@@ -103,6 +112,9 @@ void fragment() {
 	ALBEDO = scene_output(albedo);
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.0;
+	// The witnessed flat sky term (ambient_light_disabled above): retail adds
+	// sky_ambient unconditionally — never shadow-masked, never N-dependent.
+	EMISSION = scene_output(albedo) * opennova_sky_ambient;
 
 	// Debug overlays — replace output with the diagnostic color (self-lit so
 	// the sun/TOD cannot tint diagnostics).
@@ -120,5 +132,27 @@ void fragment() {
 		}
 		ALBEDO = vec3(0.0);
 		EMISSION = scene_output(tint);
+	}
+}
+
+void light() {
+	// The witnessed response: the sun contributes mask * sun_light — flat (no
+	// N.L: the DOT3 normal term rides the tile-cache albedo) with ATTENUATION
+	// as the CSM mask, and no MODULATE2X (LIGHT_COLOR arrives as
+	// color * energy(2) * PI, so 0.5/PI restores sun_light * mask). Omni
+	// lights keep the canonical Lambert response (MP-1's clustered pool).
+	if (LIGHT_IS_DIRECTIONAL) {
+		// Retail terrain takes NO hemisphere term — skip the scene's
+		// hemisphere delta pair, which is axis-vertical by construction while
+		// the sun's witnessed celestial arc never is
+		// [orig: the fold @ 0x605260 has only mask*sun + sky].
+		// ('return' is illegal in light(), so gate the add instead.)
+		vec3 up_view = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+		if (abs(dot(LIGHT, up_view)) <= 0.9999) {
+			DIFFUSE_LIGHT += LIGHT_COLOR * (0.5 / PI) * ATTENUATION * ALBEDO;
+		}
+	} else {
+		DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) *
+				LIGHT_COLOR * (1.0 / PI) * ATTENUATION * ALBEDO;
 	}
 }

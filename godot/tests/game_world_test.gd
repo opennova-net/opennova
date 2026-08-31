@@ -1123,11 +1123,14 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 		return
 	assert_eq(clear.environment.background_mode, Environment.BG_COLOR,
 		"BG_COLOR renders background_color; BG_SKY with a null sky renders BLACK and silently swallows the witnessed frame clear [orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]")
-	# ADR 0043: the environment binds a gradient hemisphere Sky as the ambient
-	# and reflection source for the lit scene; the visible background stays
-	# BG_COLOR above, so the witnessed frame clear still renders.
-	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_SKY,
-		"the hemisphere-sky gradient is the lit scene's ambient source (ADR 0043)")
+	# ADR 0043: the ambient is the witnessed flat outdoor term as
+	# AMBIENT_SOURCE_COLOR (the sky-irradiance path lost energy at the dark
+	# TOD registers — the 03TR dawn bias); the gradient hemisphere Sky stays
+	# as the reflection source, and the visible background stays BG_COLOR
+	# above, so the witnessed frame clear still renders.
+	assert_eq(clear.environment.ambient_light_source,
+		Environment.AMBIENT_SOURCE_COLOR,
+		"the witnessed outdoor ambient average is the lit scene's ambient source (ADR 0043)")
 	assert_not_null(clear.environment.sky,
 		"MissionEnvironment.set_scene_environment installs the hemisphere Sky")
 

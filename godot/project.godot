@@ -89,6 +89,14 @@ opennova_light_block_gain={
 "type": "vec3",
 "value": Vector3(1, 1, 1)
 }
+opennova_outdoor_ambient={
+"type": "vec3",
+"value": Vector3(0.289706, 0.287549, 0.27451)
+}
+opennova_indoor_ambient={
+"type": "vec3",
+"value": Vector3(0.289706, 0.287549, 0.27451)
+}
 opennova_fog_enabled={
 "type": "bool",
 "value": false

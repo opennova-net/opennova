@@ -56,6 +56,11 @@ global uniform int opennova_fog_type;
 // effectScale) is superseded by per-pixel shadow reception.
 // [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
 instance uniform vec4 u_entity_light = vec4(1.0, 0.0, 1.0, 0.0);
+// The witnessed ambient averages the interior daylight lerp runs between:
+// indoor = (ceiling+floor)/2, outdoor = (sky+ground)/2 [orig:
+// RenderBatchCtx_StoreLightingConstants @ 0x5d89e0 — ctx+208 / ctx+224].
+global uniform vec3 opennova_outdoor_ambient;
+global uniform vec3 opennova_indoor_ambient;
 uniform vec4 u_reflect_color = vec4(0.7, 0.8, 0.9, 0.35);
 
 // MATCHTERRAIN is a skinned crouch/prone pre-pass in retail. The reimpl folds
@@ -110,11 +115,23 @@ ObjSurface obj_surface_defaults(vec4 base, vec3 normal_ws) {
 	return s;
 }
 
-// The interior ambient island: an interior-parented draw scales its ambient
-// by the parent interior's daylight openness — retail's indoor/outdoor block
-// lerp folded onto the sky-ambient the lit pipeline applies (ADR 0043).
+// The interior ambient island: an interior-parented draw's ambient is
+// retail's indoor/outdoor lerp — lerp(indoor, outdoor, daylight openness),
+// which bottoms out at the INDOOR (ceiling+floor)/2 ambience, never black
+// [orig: setup_entity_lighting_and_shader_constants @ 0x5d9a6a..0x5d9c71].
+// The lit pipeline applies the outdoor term (Environment ambient color), so
+// the AO scalar is the lerped-to-outdoor luminance ratio (the indoor/outdoor
+// hue shift is the accepted ADR 0043 residual of a scalar hook).
 float obj_interior_ambient_factor() {
-	return u_entity_light.y > 0.5 ? clamp(u_entity_light.z, 0.0, 1.0) : 1.0;
+	if (u_entity_light.y <= 0.5) {
+		return 1.0;
+	}
+	float t = clamp(u_entity_light.z, 0.0, 1.0);
+	vec3 lum = vec3(0.299, 0.587, 0.114);
+	float outdoor = max(dot(opennova_outdoor_ambient, lum), 0.0001);
+	float lerped = dot(mix(opennova_indoor_ambient, opennova_outdoor_ambient,
+			t), lum);
+	return clamp(lerped / outdoor, 0.0, 1.0);
 }
 
 // The CLIP-class discard must stay in the one material Godot gives a mesh

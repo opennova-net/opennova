@@ -58,8 +58,30 @@ void SunShadow::_ready() {
 	set_param(Light3D::PARAM_VOLUMETRIC_FOG_ENERGY, 0.0f);
 	set_cull_mask(0xFFFFFFFFu);
 	set_shadow_caster_mask(0xFFFFFFFFu);
+	// The hemisphere DELTA pair (see the member note): down-shining +delta
+	// and up-shining negative delta, world-fixed.
+	hemi_down_ = _make_hemi_light("HemiSkyDelta", -Math_PI * 0.5f, false);
+	hemi_up_ = _make_hemi_light("HemiGroundDelta", Math_PI * 0.5f, true);
 	set_process(true);
 	_update_direction();
+}
+
+DirectionalLight3D *SunShadow::_make_hemi_light(const StringName &p_name,
+		float p_pitch, bool p_negative) {
+	DirectionalLight3D *light = memnew(DirectionalLight3D);
+	light->set_name(p_name);
+	light->set_layer_mask(Water::VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
+	light->set_shadow(false);
+	light->set_param(Light3D::PARAM_ENERGY, 2.0f);
+	light->set_param(Light3D::PARAM_SPECULAR, 0.0f);
+	light->set_param(Light3D::PARAM_INDIRECT_ENERGY, 0.0f);
+	light->set_param(Light3D::PARAM_VOLUMETRIC_FOG_ENERGY, 0.0f);
+	light->set_cull_mask(0xFFFFFFFFu);
+	light->set_negative(p_negative);
+	add_child(light);
+	light->set_as_top_level(true);
+	light->set_rotation(Vector3(p_pitch, 0.0f, 0.0f));
+	return light;
 }
 
 void SunShadow::_process(double p_delta) {
@@ -85,8 +107,26 @@ void SunShadow::_update_light_color() {
 	if (light_state.is_null() || light_state->get_values().is_null()) {
 		return;
 	}
-	const Vector3 c = light_state->get_values()->get_dir_color();
-	set_color(Color(c.x, c.y, c.z));
+	const Ref<EnvLightValues> values = light_state->get_values();
+	const Vector3 c = values->get_dir_color();
+	// The block's dir_color is a gamma-domain scene value; the renderer
+	// srgb_to_linear-decodes every Light3D color before use, so pre-encode to
+	// make its decode land back on the witnessed value (color.gdshaderinc
+	// contract — the 03TR dawn bias was this double decode crushing the dark
+	// TOD registers).
+	set_color(Color(c.x, c.y, c.z).linear_to_srgb());
+	// The hemisphere delta: hemi - ambient = (sky - ground) / 2 per channel;
+	// negative channels drop (sky >= ground across the shipped .env corpus)
+	// (the witnessed fold and its cites live in
+	// runtime/renderer/light_runtime.cpp ff_vertex_light).
+	if (hemi_down_ != nullptr && hemi_up_ != nullptr) {
+		const Vector3 delta =
+				(values->get_hemi_sky() - values->get_hemi_ground()) * 0.5f;
+		const Color conditioned = Color(MAX(delta.x, 0.0f), MAX(delta.y, 0.0f),
+				MAX(delta.z, 0.0f)).linear_to_srgb();
+		hemi_down_->set_color(conditioned);
+		hemi_up_->set_color(conditioned);
+	}
 }
 
 void SunShadow::_update_direction() {

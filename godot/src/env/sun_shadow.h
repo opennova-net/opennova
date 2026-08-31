@@ -36,9 +36,19 @@ protected:
 private:
 	void _update_direction();
 	void _update_light_color();
+	DirectionalLight3D *_make_hemi_light(const StringName &p_name,
+			float p_pitch, bool p_negative);
 
 	ObjectID environment_node_id_;
 	Vector3 last_emission_direction_ = Vector3(INFINITY, INFINITY, INFINITY);
+	// The witnessed hemisphere DELTA lights (colors hemi - ambient): a
+	// down-shining +delta for up-facing normals and an up-shining NEGATIVE
+	// delta for down-facing ones — retail's own D3D lights 2/3 (the witnessed
+	// fold and cites live in runtime/renderer/light_runtime.cpp
+	// ff_vertex_light). Shadowless,
+	// specular-free, top-level so the sun's TOD rotation never tilts them.
+	DirectionalLight3D *hemi_down_ = nullptr;
+	DirectionalLight3D *hemi_up_ = nullptr;
 };
 
 } // namespace godot

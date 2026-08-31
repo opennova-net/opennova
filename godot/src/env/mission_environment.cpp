@@ -395,8 +395,15 @@ void MissionEnvironment::_write_lighting_block_globals(
 	const EnvLightValues &v = **p_values;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	// ADR 0043: the scene sun/ambient/omnis carry the block's light values;
-	// the object family reads only the modulator gain and the fog enable.
+	// the object family reads the modulator gain, the fog enable, and the two
+	// witnessed ambient averages — the interior daylight lerp's endpoints
+	// (runtime/renderer/light_runtime.h WorldLightingBlock's ctx+208 indoor /
+	// ctx+224 outdoor derivations carry the cites).
 	rs->global_shader_parameter_set("opennova_light_block_gain", v.gain);
+	rs->global_shader_parameter_set("opennova_outdoor_ambient",
+			(v.hemi_sky + v.hemi_ground) * 0.5f);
+	rs->global_shader_parameter_set("opennova_indoor_ambient",
+			(v.ceiling + v.floor_color) * 0.5f);
 	// The scene fog block itself (color/start/end/type) is the pass state
 	// write_shader_globals / the weather tick / the pass switch already
 	// publish for every fogged consumer; the object family only needs the
@@ -413,10 +420,16 @@ void MissionEnvironment::set_scene_environment(
 		sky_material_.unref();
 		return;
 	}
-	// ADR 0043: the hemisphere ambient source. The .env sky/ground colors feed
-	// a gradient Sky that only the ambient and reflected light sample — the
-	// visible background stays BG_COLOR (the witnessed frame clear) plus the
-	// authored sky dome.
+	// ADR 0043: the ambient is the witnessed flat term — the outdoor
+	// (sky+ground)/2 average retail loaded into the AmbientColor slot
+	// (runtime/renderer/light_runtime.cpp build_world_lighting carries the
+	// cite) — as
+	// AMBIENT_SOURCE_COLOR at the MODULATE2X energy, so the lit pipeline's
+	// ambient product is numerically retail's gamma-domain fold. The .env
+	// sky/ground colors still feed the gradient Sky, but only reflected
+	// light samples it (the sky-irradiance ambient path lost energy at the
+	// dark TOD registers — the 03TR dawn bias); the visible background stays
+	// BG_COLOR (the witnessed frame clear) plus the authored sky dome.
 	Ref<Shader> sky_shader = ResourceLoader::get_singleton()->load(
 			"res://shaders/hemisphere_sky.gdshader");
 	sky_material_.instantiate();
@@ -426,7 +439,7 @@ void MissionEnvironment::set_scene_environment(
 	sky->set_material(sky_material_);
 	sky->set_radiance_size(Sky::RADIANCE_SIZE_64);
 	scene_environment_->set_sky(sky);
-	scene_environment_->set_ambient_source(Environment::AMBIENT_SOURCE_SKY);
+	scene_environment_->set_ambient_source(Environment::AMBIENT_SOURCE_COLOR);
 	scene_environment_->set_ambient_light_energy(kModulate2xAmbientEnergy);
 	scene_environment_->set_reflection_source(
 			Environment::REFLECTION_SOURCE_SKY);
@@ -489,6 +502,11 @@ void MissionEnvironment::_write_scene_environment(
 		sky_material_->set_shader_parameter("u_hemi_sky", v.hemi_sky);
 		sky_material_->set_shader_parameter("u_hemi_ground", v.hemi_ground);
 	}
+	const Vector3 outdoor_ambient = (v.hemi_sky + v.hemi_ground) * 0.5f;
+	// Gamma-domain scene value pre-encoded against the renderer's
+	// COLOR-source-ambient srgb_to_linear decode (color.gdshaderinc contract).
+	scene_environment_->set_ambient_light_color(Color(outdoor_ambient.x,
+			outdoor_ambient.y, outdoor_ambient.z).linear_to_srgb());
 	scene_environment_->set_fog_enabled(v.fog_enabled);
 	apply_scene_fog(v.fog_color, v.fog_start, v.fog_end, v.fog_type);
 }
