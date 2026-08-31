@@ -58,6 +58,30 @@ void scr_decrypt(uint8_t *data, size_t size, uint32_t key) {
     xor_with_keystream(data, size, key);
 }
 
+void scr_encrypt(uint8_t *data, size_t size, uint32_t key) {
+    /* Inverse of scr_decrypt: undo the XOR first (the keystream is position-
+       keyed over the stored order), then undo the reverse. */
+    xor_with_keystream(data, size, key);
+    reverse_bytes(data, size);
+}
+
+int scr_encrypt_buf(const uint8_t *data, size_t size,
+                    uint8_t *out, size_t *out_size, uint32_t key,
+                    uint8_t version) {
+    if (*out_size < size + SCR_HEADER_SIZE) {
+        *out_size = size + SCR_HEADER_SIZE;
+        return -2;
+    }
+    out[0] = 'S';
+    out[1] = 'C';
+    out[2] = 'R';
+    out[3] = version;
+    memcpy(out + SCR_HEADER_SIZE, data, size);
+    scr_encrypt(out + SCR_HEADER_SIZE, size, key);
+    *out_size = size + SCR_HEADER_SIZE;
+    return 0;
+}
+
 int scr_decrypt_buf(const uint8_t *data, size_t size,
                     uint8_t *out, size_t *out_size, uint32_t key) {
     size_t payload;

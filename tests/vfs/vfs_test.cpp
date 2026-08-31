@@ -27,6 +27,7 @@ using opennova::vfs_version_crc;
 // SCR keys (mirror engine/formats/scr/scr.h; vfs_test doesn't link opennova_scr).
 static const uint32_t SCR_KEY_DEFAULT_C = 0xABEEFACEu; // JO Demo
 static const uint32_t SCR_KEY_JO_DFX2_C = 0x2A5A8EADu; // retail JO/DFX2
+static const uint32_t SCR_KEY_SHADERS_C = 0xA55B1EEDu; // .fx effect loader
 
 // Produce the stored SCR form of `plaintext` under `key`: encryption is the inverse of
 // scr_decrypt (which reverses then XORs), i.e. XOR with the keystream then reverse the bytes.
@@ -472,6 +473,36 @@ static int test_vfs_scr_policy() {
     return 1;
 }
 
+// An .fx read keys with the SHADER key regardless of the configured policy: the
+// original keys per call site and the effect loader hardcodes 0xA55B1EED
+// [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060] while the version byte is 1 in
+// both .def and .fx data — version-detect (JO_DFX2 for v1) would silently
+// yield garbage for shaders (D-SCR-2).
+static int test_vfs_scr_fx_extension_key() {
+    const std::string plaintext = "technique T0 { pass P0 {} }\r\n";
+    std::string stored = "SCR";
+    stored.push_back('\x01');
+    stored += scr_encrypt(plaintext, SCR_KEY_SHADERS_C);
+
+    fs::path d = fresh_dir("vfs_scr_fx_key");
+    write_pff1(d / "data.pff", "skbasic.fx", stored);
+
+    // Default (version-detect) policy: the .fx name overrides to the shader key.
+    {
+        Vfs v;
+        v.add_secondary_archive((d / "data.pff").string());
+        CHECK(read_vfs(v, "skbasic.fx") == plaintext, ".fx decodes with the shader key by name");
+    }
+    // Even an explicit FORCE_JO_DFX2 policy does not mis-key a shader read.
+    {
+        Vfs v;
+        v.add_secondary_archive((d / "data.pff").string());
+        v.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
+        CHECK(read_vfs(v, "skbasic.fx") == plaintext, ".fx keying wins over the configured policy");
+    }
+    return 1;
+}
+
 // Enumeration reports each logical name with its winning source.
 static int test_list_files() {
     fs::path d = fresh_dir("listing");
@@ -588,6 +619,7 @@ int main() {
     RUN_TEST(test_scr_decode_on_read);
     RUN_TEST(test_scr_decode_policy);
     RUN_TEST(test_vfs_scr_policy);
+    RUN_TEST(test_vfs_scr_fx_extension_key);
     RUN_TEST(test_list_files);
     RUN_TEST(test_expansion_version_checksum);
     RUN_TEST(test_expansion_info);

@@ -601,9 +601,30 @@ bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out,
     return true;
 }
 
+namespace {
+
+// The original keys SCR per CALL SITE, not per version byte: every .def-style
+// text read passes 0x2A5A8EAD while the HLSL effect loader hardcodes
+// 0xA55B1EED [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060, key at 0x5AE0C0;
+// File_ParseASCIIFile @ 0x53D810] — the version byte is 1 in both. In a
+// by-name VFS the extension is that call site: an .fx read must never key off
+// the version byte or the game-profile policy (D-SCR-2; a version-detect .fx
+// decode silently yields garbage that still looks random).
+int effective_scr_policy(const std::string &name, int configured) {
+    const size_t n = name.size();
+    if (n >= 3 && name[n - 3] == '.' &&
+        (name[n - 2] == 'f' || name[n - 2] == 'F') &&
+        (name[n - 1] == 'x' || name[n - 1] == 'X')) {
+        return VFS_SCR_FORCE_SHADERS;
+    }
+    return configured;
+}
+
+} // namespace
+
 bool Vfs::read_file(const std::string &name, std::vector<uint8_t> &out) const {
     if (!read_file_raw(name, out)) return false;
-    if (!vfs_decode_payload(out, impl_->scr_policy)) {
+    if (!vfs_decode_payload(out, effective_scr_policy(name, impl_->scr_policy))) {
         impl_->last_error = "Failed to decode payload (SCR/BFC1): " + name;
         return false;
     }
@@ -613,7 +634,7 @@ bool Vfs::read_file(const std::string &name, std::vector<uint8_t> &out) const {
 bool Vfs::read_file(const std::string &name, std::vector<uint8_t> &out,
                     VfsLookupPolicy policy) const {
     if (!read_file_raw(name, out, policy)) return false;
-    if (!vfs_decode_payload(out, impl_->scr_policy)) {
+    if (!vfs_decode_payload(out, effective_scr_policy(name, impl_->scr_policy))) {
         impl_->last_error = "Failed to decode payload (SCR/BFC1): " + name;
         return false;
     }

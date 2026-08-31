@@ -33,6 +33,21 @@ uint8_t scr_get_version(const uint8_t *data, size_t size);
    Reverses bytes, then XORs with keystream derived from key. */
 void scr_decrypt(uint8_t *data, size_t size, uint32_t key);
 
+/* Encrypt payload in-place: the exact inverse of scr_decrypt (XOR with the
+   keystream, then reverse). Write side of the container — from scratch per
+   ADR 0003; the codec itself is the witnessed Scr_DecryptBuffer inverse. */
+void scr_encrypt(uint8_t *data, size_t size, uint32_t key);
+
+/* Wrap plaintext into a full SCR container ("SCR" + version byte + encrypted
+   payload) in a caller-provided buffer.
+   On entry, *out_size is the buffer capacity.
+   On success, *out_size is set to size + SCR_HEADER_SIZE.
+   Returns  0 on success,
+           -2 if output buffer is too small. */
+int scr_encrypt_buf(const uint8_t *data, size_t size,
+                    uint8_t *out, size_t *out_size, uint32_t key,
+                    uint8_t version);
+
 /* Strip SCR header and decrypt into caller-provided buffer.
    On entry, *out_size is the buffer capacity.
    On success, *out_size is set to the actual decrypted size.

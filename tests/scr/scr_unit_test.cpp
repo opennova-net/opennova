@@ -42,5 +42,31 @@ int main() {
     out_size = sizeof(out);
     TEST_EXPECT(scr_decrypt_buf(scr0_plain, sizeof(scr0_plain), out, &out_size, SCR_KEY_DEFAULT) == -1);
 
+    /* Write side: wrap plaintext, then read it back through the decrypt path
+       with each retail key (the container is key-agnostic; the pair must
+       round-trip byte-exactly). */
+    static const uint8_t plain[] = "technique T0 { pass P0 {} }\r\n";
+    const uint32_t keys[] = {SCR_KEY_DEFAULT, SCR_KEY_JO_DFX2, SCR_KEY_SHADERS};
+    for (size_t k = 0; k < 3; ++k) {
+        uint8_t wrapped[64] = {};
+        size_t wrapped_size = sizeof(wrapped);
+        TEST_EXPECT(scr_encrypt_buf(plain, sizeof(plain) - 1, wrapped, &wrapped_size, keys[k], 1) == 0);
+        TEST_EXPECT(wrapped_size == sizeof(plain) - 1 + SCR_HEADER_SIZE);
+        TEST_EXPECT(scr_is_scr(wrapped, wrapped_size) == 1);
+        TEST_EXPECT(scr_get_version(wrapped, wrapped_size) == 1);
+
+        uint8_t round[64] = {};
+        size_t round_size = sizeof(round);
+        TEST_EXPECT(scr_decrypt_buf(wrapped, wrapped_size, round, &round_size, keys[k]) == 0);
+        TEST_EXPECT(round_size == sizeof(plain) - 1);
+        TEST_EXPECT(std::memcmp(round, plain, round_size) == 0);
+    }
+
+    /* Capacity probe mirrors the decrypt side: too-small reports the need. */
+    uint8_t small_out[4] = {};
+    size_t small_size = sizeof(small_out);
+    TEST_EXPECT(scr_encrypt_buf(plain, sizeof(plain) - 1, small_out, &small_size, SCR_KEY_SHADERS, 1) == -2);
+    TEST_EXPECT(small_size == sizeof(plain) - 1 + SCR_HEADER_SIZE);
+
     return 0;
 }
