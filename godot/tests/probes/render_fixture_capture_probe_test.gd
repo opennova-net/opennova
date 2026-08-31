@@ -23,20 +23,6 @@ class RecordingWorld:
 		return weather
 
 
-class RecordingStaticShadowTerrain:
-	extends RefCounted
-	var static_shadow_enabled := true
-	var static_shadow_writes: Array[bool] = []
-	var live_startup_frames := 132
-
-	func is_static_terrain_shadow_enabled() -> bool:
-		return static_shadow_enabled
-
-	func set_static_terrain_shadow_enabled(enabled: bool) -> void:
-		static_shadow_enabled = enabled
-		static_shadow_writes.append(enabled)
-
-
 class ComparisonSim:
 	extends RefCounted
 	var loadout_calls: Array = []
@@ -1390,58 +1376,6 @@ func test_fixture_lookup_and_capture_variants_are_bounded() -> void:
 	])
 
 
-func test_live_warmup_suspends_only_static_projection_until_exact_refresh() -> void:
-	var terrain := RecordingStaticShadowTerrain.new()
-	var suspension = Probe.StaticTerrainShadowWarmupSuspension.new()
-	assert_eq(suspension.begin(terrain), OK)
-	assert_false(terrain.static_shadow_enabled)
-	assert_eq(terrain.static_shadow_writes, [false])
-	assert_eq(terrain.live_startup_frames, 132,
-			"the transaction must not pause or consume unrelated startup work")
-	suspension.finish()
-	assert_true(terrain.static_shadow_enabled)
-	assert_eq(terrain.static_shadow_writes, [false, true])
-	suspension.finish()
-	assert_eq(terrain.static_shadow_writes, [false, true],
-			"failure cleanup may finish the transaction more than once")
-
-	var already_disabled := RecordingStaticShadowTerrain.new()
-	already_disabled.static_shadow_enabled = false
-	var disabled_suspension = Probe.StaticTerrainShadowWarmupSuspension.new()
-	assert_eq(disabled_suspension.begin(already_disabled), OK)
-	disabled_suspension.finish()
-	assert_false(already_disabled.static_shadow_enabled)
-	assert_true(already_disabled.static_shadow_writes.is_empty(),
-			"an originally disabled provider must be restored without spurious invalidation")
-
-	var source := FileAccess.get_file_as_string(
-			"res://probes/render/render_fixture_capture_probe.gd")
-	var boot := source.find("ctx.load_saved_mission(")
-	var begin := source.find("_static_shadow_warmup_suspension.begin(", boot)
-	var load_settle := source.find("\"load_settle_frames\"", boot)
-	assert_gt(boot, -1)
-	assert_gt(begin, boot)
-	assert_gt(load_settle, begin,
-			"static page projection must be off only during the live load warmup")
-	var prepare := source.find("func _prepare_pose(")
-	var freeze := source.find(
-			"_world.process_mode = Node.PROCESS_MODE_DISABLED", prepare)
-	var exact_camera := source.find("camera.make_current()", freeze)
-	var restore := source.find(
-			"_finish_static_shadow_warmup_suspension()", exact_camera)
-	var refresh := source.find("_world.debug_refresh_render_pose(camera)", restore)
-	assert_gt(freeze, prepare)
-	assert_gt(exact_camera, freeze)
-	assert_gt(restore, exact_camera)
-	assert_gt(refresh, restore,
-			"restore must precede the exact non-time-owning terrain refresh")
-	var shutdown := source.find("func _teardown(")
-	assert_gt(shutdown, restore)
-	assert_true(source.substr(shutdown).contains(
-			"_finish_static_shadow_warmup_suspension()"),
-			"every deferred failure teardown must restore the provider")
-
-
 func test_frozen_capture_realizes_each_shadow_variant_before_state_capture() -> void:
 	var source := FileAccess.get_file_as_string(
 			"res://probes/render/render_fixture_capture_probe.gd")
@@ -1454,35 +1388,15 @@ func test_frozen_capture_realizes_each_shadow_variant_before_state_capture() -> 
 			"The frozen GameWorld must await exact async terrain pages after every " \
 			+ "shadow control change and before the adapter snapshots state.")
 
-	var shadows_off: Variant = RenderFixtureContract.capture_variants()[1]
-	var stale_beauty := {
-		"shadow_provider_enabled": false,
-		"shadow_provider_frame_plan_count": 49,
-		"shadow_provider_frame_plan_failures": 0,
-		"shadow_provider_frame_raster_count": 48,
-		"frame_requests": 49,
-		"frame_compose_jobs": 48,
-		"frame_ready_hits": 1,
-		"frame_selected_ready_pages": 48,
-		"frame_capacity_fallbacks": 0,
-		"frame_shadow_alpha_changed_bytes": 73602,
-		"frame_shadow_rgb_changed_bytes": 0,
-		"ready_pages": 0,
-	}
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
-			shadows_off, stale_beauty),
-			"Disabled controls plus beauty-frame counters are not a realized shadows_off frame.")
-	var realized_off := {
+	# ADR 0043: the tile cache composes colormap/overlay only — realization is
+	# every current request a ready hit with no pending compiler work, for any
+	# variant (shadow toggles live on the scene sun and the caster instances).
+	var beauty: Variant = RenderFixtureContract.capture_variants()[0]
+	var realized := {
 		"available": true,
 		"tile_overlay_required": true,
 		"tile_overlay_available": true,
-		"shadow_raster_available": true,
 		"upload_failures": 0,
-		"shadow_raster_failures": 0,
-		"shadow_provider_enabled": false,
-		"shadow_provider_frame_plan_count": 0,
-		"shadow_provider_frame_plan_failures": 0,
-		"shadow_provider_frame_raster_count": 0,
 		"frame_requests": 49,
 		"frame_compose_jobs": 0,
 		"frame_output_pages": 0,
@@ -1490,127 +1404,67 @@ func test_frozen_capture_realizes_each_shadow_variant_before_state_capture() -> 
 		"pending_jobs": 0,
 		"frame_selected_ready_pages": 48,
 		"frame_capacity_fallbacks": 0,
-		"frame_shadow_alpha_changed_bytes": 0,
-		"frame_shadow_rgb_changed_bytes": 0,
 		"ready_pages": 48,
-		"shadow_epoch_raster_jobs": 0,
 	}
 	assert_true(RenderFixtureContract.capture_variant_tile_cache_is_realized(
-			shadows_off, realized_off))
-	var no_overlay_required := realized_off.duplicate()
+			beauty, realized))
+	var shadows_off: Variant = RenderFixtureContract.capture_variants()[1]
+	assert_true(RenderFixtureContract.capture_variant_tile_cache_is_realized(
+			shadows_off, realized),
+			"The cache contract is variant-independent: no bake rides the pages.")
+	var no_overlay_required := realized.duplicate()
 	no_overlay_required.tile_overlay_required = false
 	no_overlay_required.tile_overlay_available = false
 	assert_true(RenderFixtureContract.capture_variant_tile_cache_is_realized(
-			shadows_off, no_overlay_required),
+			beauty, no_overlay_required),
 			"A terrain that does not require .til data remains valid without an overlay.")
 
-	var beauty: Variant = RenderFixtureContract.capture_variants()[0]
-	var realized_on := {
-		"available": true,
-		"tile_overlay_required": true,
-		"tile_overlay_available": true,
-		"shadow_raster_available": true,
-		"upload_failures": 0,
-		"shadow_raster_failures": 0,
-		"shadow_provider_enabled": true,
-		"shadow_provider_snapshot_exact": true,
-		"shadow_provider_admitted_count": 17,
-		"shadow_provider_resolved_casters": 17,
-		"shadow_provider_frame_plan_count": 0,
-		"shadow_provider_frame_plan_failures": 0,
-		"shadow_provider_frame_raster_count": 0,
-		"shadow_provider_frame_unsupported_draw_count": 0,
-		"shadow_provider_frame_unsupported_attribution_truncated": 0,
-		"shadow_provider_frame_pages_with_draws": 0,
-		"shadow_provider_frame_projection_draws": 0,
-		"frame_requests": 49,
-		"frame_compose_jobs": 0,
-		"frame_output_pages": 0,
-		"frame_ready_hits": 49,
-		"pending_jobs": 0,
-		"frame_selected_ready_pages": 48,
-		"frame_capacity_fallbacks": 0,
-		"frame_shadow_alpha_changed_bytes": 73602,
-		"frame_shadow_rgb_changed_bytes": 0,
-		"ready_pages": 48,
-		"shadow_epoch_raster_jobs": 48,
-		"shadow_epoch_pages_with_draws": 15,
-		"shadow_epoch_projection_draws": 145,
-		"shadow_epoch_plan_failures": 0,
-		"shadow_epoch_unsupported_draw_count": 0,
-		"shadow_epoch_unsupported_attribution_truncated": 0,
-	}
-	assert_true(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on))
-	var cache_hit_beauty := realized_on.duplicate()
-	assert_true(RenderFixtureContract.capture_variant_tile_cache_is_realized(
-			beauty, cache_hit_beauty),
-			"A fully cached frame is exact after its shadow epoch was compiled.")
-	cache_hit_beauty.frame_ready_hits = 48
+	var stale := realized.duplicate()
+	stale.frame_compose_jobs = 48
+	stale.frame_ready_hits = 1
 	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
-			beauty, cache_hit_beauty),
-			"Every current request must resolve through composition or a ready hit.")
-	cache_hit_beauty.frame_ready_hits = 49
-	cache_hit_beauty.frame_selected_ready_pages = 0
+			beauty, stale),
+			"A frame that still composes pages is not a realized capture frame.")
+	stale = realized.duplicate()
+	stale.frame_ready_hits = 48
 	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
-			beauty, cache_hit_beauty),
+			beauty, stale),
+			"Every current request must resolve through a ready hit.")
+	stale = realized.duplicate()
+	stale.frame_selected_ready_pages = 0
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
+			beauty, stale),
 			"Retained global pages are not proof of a current-frame selection.")
-	cache_hit_beauty.frame_selected_ready_pages = 48
-	cache_hit_beauty.frame_capacity_fallbacks = 1
+	stale = realized.duplicate()
+	stale.frame_capacity_fallbacks = 1
 	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
-			beauty, cache_hit_beauty),
+			beauty, stale),
 			"A capacity fallback makes the evidence frame incomplete.")
-	cache_hit_beauty.frame_capacity_fallbacks = 0
-	realized_on.pending_jobs = 1
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	stale = realized.duplicate()
+	stale.pending_jobs = 1
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
+			beauty, stale),
 			"Capture must wait until every requested compile/upload is drained.")
-	realized_on.pending_jobs = 0
-	realized_on.tile_overlay_available = false
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	stale = realized.duplicate()
+	stale.tile_overlay_available = false
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
+			beauty, stale),
 			"A mission that requires .til data must prove that its overlay is available.")
-	realized_on.tile_overlay_available = true
-	realized_on.upload_failures = 1
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
+	stale = realized.duplicate()
+	stale.upload_failures = 1
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
+			beauty, stale),
 			"Cumulative upload failures make the evidence run inexact.")
-	realized_on.upload_failures = 0
-	realized_on.shadow_raster_failures = 1
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
-			"Cumulative static-raster failures make the evidence run inexact.")
-	realized_on.shadow_raster_failures = 0
-	realized_on.shadow_epoch_pages_with_draws = 0
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
-			"Enabled static shadows require at least one projected page witness.")
-	realized_on.shadow_epoch_pages_with_draws = 15
-	realized_on.shadow_epoch_projection_draws = 0
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
-			"Enabled static shadows require realized projection draws.")
-	realized_on.shadow_epoch_projection_draws = 145
-	realized_on.shadow_provider_snapshot_exact = false
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
-			"An incomplete static-caster snapshot must fail closed.")
-	realized_on.shadow_provider_snapshot_exact = true
-	realized_on.shadow_provider_admitted_count = 0
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
-			"Enabled static evidence requires an admitted-caster inventory witness.")
-	realized_on.shadow_provider_admitted_count = 17
-	realized_on.shadow_provider_resolved_casters = 0
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
-			"Enabled static evidence requires resolved caster geometry.")
-	realized_on.shadow_provider_resolved_casters = 17
-	realized_on.ready_pages = 0
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
-			"An enabled provider without a resident current cache cannot back the capture.")
-	realized_on.ready_pages = 48
-	realized_on.shadow_epoch_plan_failures = 1
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
-			"A rejected current page must stop evidence publication instead of hiding in a screenshot.")
-	realized_on.shadow_epoch_plan_failures = 0
-	realized_on.shadow_epoch_unsupported_draw_count = 1
-	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(beauty, realized_on),
-			"A skipped unsupported draw preserves gameplay but is not exact capture evidence.")
+	stale = realized.duplicate()
+	stale.ready_pages = 0
+	assert_false(RenderFixtureContract.capture_variant_tile_cache_is_realized(
+			beauty, stale),
+			"A drained cache without resident pages cannot back the capture.")
 
 
 func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> void:
 	for variant in RenderFixtureContract.capture_variants():
+		var static_on := bool(variant.static_terrain_shadow_enabled)
 		var diagnostics := {
 			"world": {
 				"loaded": true,
@@ -1630,10 +1484,10 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 					"processing": true,
 					"shadow_enabled": bool(variant.dynamic_shadow_enabled),
 				},
-				"static_terrain": {
-					"available": true,
-					"enabled": bool(variant.static_terrain_shadow_enabled),
-					"suppressed_bms_ids": [],
+				"static_casters": {
+					"implementation": "scene_sun_csm",
+					"caster_instances": 17,
+					"casting_instances": 17 if static_on else 0,
 				},
 			},
 		}
@@ -1641,10 +1495,7 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 			"id": String(variant.id),
 			"debug_draw": int(variant.debug_draw),
 			"dynamic_shadow_enabled": bool(variant.dynamic_shadow_enabled),
-			"static_terrain_shadow_enabled": bool(
-					variant.static_terrain_shadow_enabled),
-			"suppressed_dynamic_caster_bms_ids": [],
-			"suppressed_static_caster_bms_ids": [],
+			"static_terrain_shadow_enabled": static_on,
 		}
 		assert_true(RenderFixtureContract.capture_variant_matches_diagnostics(
 				variant, diagnostics, realized_variant),
@@ -1656,11 +1507,11 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 				variant, stale_dynamic, realized_variant),
 				"variant %s must reject stale dynamic-shadow state" % variant.id)
 		var stale_static: Dictionary = diagnostics.duplicate(true)
-		stale_static.shadows.static_terrain.enabled = \
-				not bool(variant.static_terrain_shadow_enabled)
+		stale_static.shadows.static_casters.casting_instances = \
+				0 if static_on else 17
 		assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
 				variant, stale_static, realized_variant),
-				"variant %s must reject stale static-shadow state" % variant.id)
+				"variant %s must reject a stale static-caster population" % variant.id)
 		var stale_debug: Dictionary = diagnostics.duplicate(true)
 		stale_debug.renderer.debug_draw = int(variant.debug_draw) + 1
 		assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(

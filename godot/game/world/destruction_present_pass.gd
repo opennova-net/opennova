@@ -123,8 +123,6 @@ func reset_runtime_state() -> void:
 			continue
 		var restore: Dictionary = restore_v
 		var restored_bms_id := int(restore.get('bms_id', 0))
-		if _placer != null and restored_bms_id != 0:
-			_placer.clear_static_terrain_shadow_replacement(restored_bms_id)
 		if String(restore.get('kind', '')) == 'static':
 			if _placer != null:
 				_placer.show_static_instance(restored_bms_id)
@@ -291,10 +289,6 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 			'children': child_visibility,
 		}
 		_husked[husk_key] = model
-		if bms_id != 0:
-			_placer.set_static_terrain_shadow_replacement(bms_id,
-					husk_graphic, node.transform,
-					individual_casts_static_shadow)
 		return
 	if _uses_dynamic_husk_identity(bms_id, spawn_origin_v, wire_handle):
 		# The dynamic row may already have retired or failed model resolution.
@@ -345,8 +339,6 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 	if batched_mirror_reflected:
 		graft.set_mirror_reflected(true)
 		graft.rebuild()
-	_placer.set_static_terrain_shadow_replacement(bms_id, husk_graphic,
-			graft.transform, batched_casts_static_shadow)
 	_husked[husk_key] = graft
 
 
@@ -361,6 +353,8 @@ func _node_has_static_shadow_caster(root: Node) -> bool:
 	return false
 
 
+# ADR 0043: marking the husk a static caster is the whole transfer — the
+# scene sun's CSM picks the mesh up; no bake registry to re-publish.
 func _set_husk_static_shadow(model: ObjectModel, enabled: bool) -> void:
 	if enabled and model != null:
 		model.set_static_shadow_caster_enabled(true)
@@ -413,17 +407,11 @@ func _sync_static_husks() -> void:
 		if live_v is Transform3D:
 			var graft := graft_v as Node3D
 			var live := live_v as Transform3D
-			# The husk registration set the replacement once; this per-frame
-			# sync only re-pushes on an actual transform change.
 			if graft.transform.is_equal_approx(live):
 				continue
+			# ADR 0043: moving the graft node is the whole update — its
+			# caster mesh follows into the CSM automatically.
 			graft.transform = live
-			if _placer != null:
-				_placer.set_static_terrain_shadow_replacement(
-						int(restore.get('bms_id', 0)),
-						String(restore.get('husk_graphic', '')),
-						live,
-						bool(restore.get('casts_static_shadow', false)))
 
 
 func _apply_effect(eff: Dictionary) -> void:

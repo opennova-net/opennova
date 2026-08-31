@@ -82,21 +82,16 @@ func test_game_world_exposes_an_exact_json_safe_render_snapshot() -> void:
 	assert_true(value["environment"].has("loaded"))
 	assert_true(value["water"].has("render_active"))
 	assert_true(value["shadows"].has("dynamic"))
-	assert_true(value["shadows"].has("static_terrain"))
-	var static_terrain_shadow := value["shadows"]["static_terrain"] as Dictionary
-	assert_eq(static_terrain_shadow["implementation"], "terrain_page_alpha")
+	assert_true(value["shadows"].has("static_casters"))
+	var static_casters := value["shadows"]["static_casters"] as Dictionary
+	assert_eq(static_casters["implementation"], "scene_sun_csm")
 	assert_false(world.has_node("StaticSunShadow"),
 		"Diagnostics must not preserve a stale static DirectionalLight witness.")
-	assert_true(static_terrain_shadow.has("enabled"))
-	assert_true(static_terrain_shadow.has("active"))
-	assert_true(static_terrain_shadow.has("raster_jobs"))
-	assert_true(static_terrain_shadow.has("raster_failures"))
-	assert_true(static_terrain_shadow.has("alpha_changed_bytes"))
-	assert_true(static_terrain_shadow.has("rgb_changed_bytes"))
-	assert_true(static_terrain_shadow.has("frame_pages_with_draws"))
-	assert_true(static_terrain_shadow.has("frame_triangles"))
-	assert_true((value["terrain"]["tile_cache"] as Dictionary).has(
-			"shadow_provider_frame_triangles"))
+	assert_true(static_casters.has("caster_instances"))
+	assert_true(static_casters.has("casting_instances"))
+	assert_false((value["terrain"]["tile_cache"] as Dictionary).has(
+			"shadow_provider_frame_triangles"),
+		"ADR 0043: the tile cache composes colormap/overlay only — no bake keys.")
 	assert_true(value["passes"].has("root"))
 	assert_true(value["passes"].has("water_reflection"))
 	assert_true(value["renderer"].has("method"))

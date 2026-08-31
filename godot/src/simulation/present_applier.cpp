@@ -687,13 +687,6 @@ void PresentApplier::present_snapshot_impl(const PackedFloat32Array &snap,
 					model->set_transform(next);
 					++stat_moved_;
 				}
-				if (placer_.is_valid()) {
-					// The render node and terrain projection registry consume the
-					// same present pose. The placer owns admission and exact-value
-					// gating, so rejected rows and repeated snapshots remain free.
-					placer_->update_static_terrain_shadow_source_transform(
-							row.entity_kind, row.entity_index, next);
-				}
 				row.transform_stamp = next_stamp;
 				row.transform_stamp_valid = true;
 			}

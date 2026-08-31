@@ -184,10 +184,6 @@ struct TerrainTileCacheDevice::AsyncState {
 		std::array<float, 3> tint{};
 		opennova::terrain::TerrainTileLightEpoch light{};
 		opennova::terrain::TerrainScorchPagePlan scorch;
-		std::shared_ptr<const TerrainStaticShadowCompilationSnapshot> shadow;
-		// The requesting frame's Render_ShaderTickMs: the shared snapshot
-		// never carries time, the job does.
-		uint32_t shadow_material_time_ms = 0;
 		bool capture_diagnostics = false;
 	};
 
@@ -199,12 +195,6 @@ struct TerrainTileCacheDevice::AsyncState {
 		opennova::terrain::Rgba8Image pixels;
 		uint64_t compose_us = 0;
 		bool success = false;
-		bool shadow_attempted = false;
-		uint64_t shadow_alpha_changed_bytes = 0;
-		uint64_t shadow_rgb_changed_bytes = 0;
-		uint64_t shadow_base_nonzero_alpha_bytes = 0;
-		opennova::terrain::TerrainStaticShadowPlannerDiagnostics
-				shadow_diagnostics;
 	};
 
 	AsyncState() {
@@ -255,9 +245,6 @@ struct TerrainTileCacheDevice::AsyncState {
 			const opennova::terrain::TerrainTileLightEpoch &light,
 			opennova::terrain::TerrainScorchPagePlan scorch,
 			uint64_t demand_frame,
-			const std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
-					&shadow,
-			uint32_t shadow_material_time_ms,
 			bool capture_diagnostics) {
 		if (sources == nullptr) return false;
 		{
@@ -291,8 +278,7 @@ struct TerrainTileCacheDevice::AsyncState {
 			}
 			if (!scheduled.accepted) return false;
 			work.push_back(WorkItem{epoch, demand_frame, sequence, job, sources,
-					tint, light, std::move(scorch),
-					shadow, shadow_material_time_ms, capture_diagnostics});
+					tint, light, std::move(scorch), capture_diagnostics});
 		}
 		wake.notify_one();
 		return true;
@@ -348,9 +334,6 @@ struct TerrainTileCacheDevice::AsyncState {
 
 private:
 	void worker_loop() {
-		std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
-				active_shadow;
-		opennova::terrain::TerrainStaticShadowPlanner shadow_planner;
 		for (;;) {
 			WorkItem item;
 			{
@@ -387,62 +370,6 @@ private:
 				completion.pixels = opennova::terrain::compose_terrain_tile_page(
 						item.job, view);
 				completion.success = completion.pixels.is_valid();
-				if (completion.success && item.shadow != nullptr) {
-					completion.shadow_attempted = true;
-					if (active_shadow != item.shadow) {
-						// Cheap: the planner shares its immutable caster set
-						// by pointer and copies only the per-page memo caches.
-						shadow_planner = item.shadow->planner;
-						active_shadow = item.shadow;
-					}
-					// Material animation samples the requesting frame's tick,
-					// as retail's tile render does for each model it submits.
-					shadow_planner.set_material_time(
-							item.shadow_material_time_ms);
-					shadow_planner.reset_frame_diagnostics();
-					const opennova::terrain::TerrainStaticShadowPagePlanResult
-							shadow_plan = shadow_planner.plan(
-									item.job.target.page);
-					std::vector<uint8_t> composed_before_shadow;
-					if (item.capture_diagnostics) {
-						composed_before_shadow = completion.pixels.pixels;
-					}
-					if (!shadow_plan.valid || !shadow_plan.raster_required) {
-						completion.success = false;
-					} else {
-						opennova::terrain::TerrainStaticShadowAlphaPage shadow_page =
-								opennova::terrain::
-										begin_terrain_static_shadow_alpha_page(
-												item.job, completion.pixels,
-												shadow_plan.content);
-						completion.success = shadow_page.is_valid() &&
-								shadow_planner.rasterize(
-										item.job.target.page, shadow_page) &&
-								opennova::terrain::
-										apply_terrain_static_shadow_alpha_page(
-												item.job, shadow_page,
-												completion.pixels);
-					}
-					completion.shadow_diagnostics =
-							shadow_planner.diagnostics();
-					if (completion.success && item.capture_diagnostics) {
-						for (std::size_t byte = 0;
-								byte < completion.pixels.pixels.size(); ++byte) {
-							if ((byte & 3u) == 3u) {
-								if (composed_before_shadow[byte] != 0) {
-									++completion.shadow_base_nonzero_alpha_bytes;
-								}
-								if (completion.pixels.pixels[byte] !=
-										composed_before_shadow[byte]) {
-									++completion.shadow_alpha_changed_bytes;
-								}
-							} else if (completion.pixels.pixels[byte] !=
-									composed_before_shadow[byte]) {
-								++completion.shadow_rgb_changed_bytes;
-							}
-						}
-					}
-				}
 			} catch (...) {
 				completion.success = false;
 			}
@@ -502,42 +429,6 @@ TerrainTileCacheDevice::TerrainTileCacheDevice() :
 		async_(std::make_unique<AsyncState>()) {}
 
 TerrainTileCacheDevice::~TerrainTileCacheDevice() = default;
-
-void TerrainTileCacheDevice::_reset_shadow_epoch_diagnostics() {
-	shadow_epoch_raster_jobs_ = 0;
-	shadow_epoch_pages_with_draws_ = 0;
-	shadow_epoch_projection_draws_ = 0;
-	shadow_epoch_plan_failures_ = 0;
-	shadow_epoch_unsupported_draw_count_ = 0;
-	shadow_epoch_unsupported_attribution_truncated_ = 0;
-	shadow_epoch_alpha_changed_bytes_ = 0;
-	shadow_epoch_rgb_changed_bytes_ = 0;
-	shadow_epoch_base_nonzero_alpha_bytes_ = 0;
-}
-
-bool TerrainTileCacheDevice::_refresh_shadow_snapshot() {
-	if (static_shadow_rasterizer_ == nullptr) {
-		shadow_snapshot_.reset();
-		return true;
-	}
-	std::shared_ptr<const TerrainStaticShadowCompilationSnapshot> snapshot =
-			static_shadow_rasterizer_->compilation_snapshot();
-	if (snapshot == nullptr) {
-		async_->cancel(false);
-		cache_.invalidate_all();
-		ready_generations_.fill(0);
-		ready_page_output_hashes_.fill(0);
-		shadow_snapshot_.reset();
-		_reset_shadow_epoch_diagnostics();
-		return false;
-	}
-	// A planner state change is NOT a global invalidation: every page's cache
-	// identity mixes its own plan_page() stamp, so only pages an actually
-	// changed caster (or light quantum) touches re-target, and in-flight jobs
-	// for unaffected pages still publish under their unchanged stamps.
-	shadow_snapshot_ = std::move(snapshot);
-	return true;
-}
 
 bool TerrainTileCacheDevice::rebuild(
 		const Ref<TerrainData> &p_data,
@@ -648,13 +539,6 @@ void TerrainTileCacheDevice::clear() {
 	scorch_textures_ready_ = false;
 	scorch_records_rejected_ = 0;
 	scorch_page_invalidations_ = 0;
-	shadow_snapshot_.reset();
-	shadow_raster_jobs_ = 0;
-	shadow_raster_failures_ = 0;
-	shadow_alpha_changed_bytes_ = 0;
-	shadow_rgb_changed_bytes_ = 0;
-	shadow_base_nonzero_alpha_bytes_ = 0;
-	_reset_shadow_epoch_diagnostics();
 	diagnostic_frame_active_ = false;
 	diagnostic_frame_id_ = 0;
 	frame_requests_ = 0;
@@ -666,9 +550,6 @@ void TerrainTileCacheDevice::clear() {
 	frame_compose_us_ = 0;
 	frame_uploads_ = 0;
 	frame_capacity_fallbacks_ = 0;
-	frame_shadow_alpha_changed_bytes_ = 0;
-	frame_shadow_rgb_changed_bytes_ = 0;
-	frame_shadow_base_nonzero_alpha_bytes_ = 0;
 	frame_output_pages_ = 0;
 	frame_output_hash_ = 0;
 }
@@ -686,46 +567,13 @@ void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id) {
 		frame_compose_us_ = 0;
 		frame_uploads_ = 0;
 		frame_capacity_fallbacks_ = 0;
-		frame_shadow_alpha_changed_bytes_ = 0;
-		frame_shadow_rgb_changed_bytes_ = 0;
-		frame_shadow_base_nonzero_alpha_bytes_ = 0;
 		frame_output_pages_ = 0;
 		frame_output_hash_ = UINT64_C(1469598103934665603);
-		_refresh_shadow_snapshot();
 		cache_.begin_frame(p_frame_id);
 		_drain_completed();
 		return;
 	}
 	cache_.begin_frame(p_frame_id);
-}
-
-void TerrainTileCacheDevice::set_static_shadow_rasterizer(
-		TerrainStaticShadowPageRasterizer *p_rasterizer) {
-	if (static_shadow_rasterizer_ == p_rasterizer) {
-		return;
-	}
-	static_shadow_rasterizer_ = p_rasterizer;
-	shadow_snapshot_.reset();
-	// Existing layers were published under a different alpha producer (or no
-	// producer). Keep the allocated array but make every binding cold.
-	async_->cancel(false);
-	cache_.invalidate_all();
-	ready_generations_.fill(0);
-	ready_page_output_hashes_.fill(0);
-	_reset_shadow_epoch_diagnostics();
-}
-
-void TerrainTileCacheDevice::invalidate_static_shadow_pages() {
-	// Provider control changes alter the final page-alpha result independently
-	// of the terrain source images. Retire every ready binding immediately so
-	// foliage cannot observe a prior enabled/suppression state before terrain
-	// requests and publishes the replacement pages.
-	async_->cancel(false);
-	cache_.invalidate_all();
-	ready_generations_.fill(0);
-	ready_page_output_hashes_.fill(0);
-	shadow_snapshot_.reset();
-	_reset_shadow_epoch_diagnostics();
 }
 
 void TerrainTileCacheDevice::_invalidate_page(
@@ -837,45 +685,7 @@ void TerrainTileCacheDevice::_drain_completed() {
 		// is render-thread-owned, so it cannot become stale between this check
 		// and publish() below.
 		if (!cache_.can_publish(job)) continue;
-		if (completion.shadow_attempted) {
-			++shadow_raster_jobs_;
-			++shadow_epoch_raster_jobs_;
-			shadow_epoch_pages_with_draws_ +=
-					completion.shadow_diagnostics.frame_pages_with_draws;
-			shadow_epoch_projection_draws_ +=
-					completion.shadow_diagnostics.frame_projection_draws;
-			shadow_epoch_plan_failures_ +=
-					completion.shadow_diagnostics.frame_plan_failures;
-			shadow_epoch_unsupported_draw_count_ +=
-					completion.shadow_diagnostics.frame_unsupported_draw_count;
-			shadow_epoch_unsupported_attribution_truncated_ +=
-					completion.shadow_diagnostics.
-							frame_unsupported_attribution_truncated;
-			shadow_epoch_alpha_changed_bytes_ +=
-					completion.shadow_alpha_changed_bytes;
-			shadow_epoch_rgb_changed_bytes_ +=
-					completion.shadow_rgb_changed_bytes;
-			shadow_epoch_base_nonzero_alpha_bytes_ +=
-					completion.shadow_base_nonzero_alpha_bytes;
-			if (static_shadow_rasterizer_ != nullptr) {
-				static_shadow_rasterizer_->merge_async_diagnostics(
-						completion.shadow_diagnostics);
-			}
-			shadow_alpha_changed_bytes_ +=
-					completion.shadow_alpha_changed_bytes;
-			shadow_rgb_changed_bytes_ +=
-					completion.shadow_rgb_changed_bytes;
-			shadow_base_nonzero_alpha_bytes_ +=
-					completion.shadow_base_nonzero_alpha_bytes;
-			frame_shadow_alpha_changed_bytes_ +=
-					completion.shadow_alpha_changed_bytes;
-			frame_shadow_rgb_changed_bytes_ +=
-					completion.shadow_rgb_changed_bytes;
-			frame_shadow_base_nonzero_alpha_bytes_ +=
-					completion.shadow_base_nonzero_alpha_bytes;
-		}
 		if (!completion.success) {
-			if (completion.shadow_attempted) ++shadow_raster_failures_;
 			++upload_failures_;
 			cache_.invalidate(job.target.page);
 			continue;
@@ -986,35 +796,8 @@ opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
 			request.page.page_lod_level) == 0) {
 		return unavailable;
 	}
-	std::shared_ptr<const TerrainStaticShadowCompilationSnapshot>
-			shadow_snapshot = shadow_snapshot_;
-	if (static_shadow_rasterizer_ != nullptr) {
-		if (shadow_snapshot == nullptr && !_refresh_shadow_snapshot()) {
-			++shadow_raster_failures_;
-			_invalidate_page(request.page);
-			return unavailable;
-		}
-		shadow_snapshot = shadow_snapshot_;
-		if (!shadow_snapshot->planner.is_enabled()) shadow_snapshot.reset();
-	}
-	opennova::terrain::TerrainStaticShadowPagePlanResult shadow_plan;
-	if (shadow_snapshot != nullptr) {
-		shadow_plan = static_shadow_rasterizer_->plan_page(request.page);
-		if (!shadow_plan.valid) {
-			// Planning failed before we can identify a trustworthy shadow
-			// content stamp. Retire only this spatial page; unrelated ready
-			// terrain remains usable.
-			++shadow_raster_failures_;
-			_invalidate_page(request.page);
-			return unavailable;
-		}
-	}
 	opennova::TerrainTileContentStamp content{
 			_content_stamp(p_tile_tint, p_light_direction, sources)};
-	if (shadow_plan.raster_required) {
-		content = opennova::terrain::mix_terrain_static_shadow_content_stamp(
-				content, shadow_plan.content);
-	}
 	request.content = content;
 	// Permanent scorch identity: the page's insertion-ordered overlap stamp,
 	// walked from the registry's sector buckets with no entry list built.
@@ -1067,13 +850,9 @@ opennova::TerrainTilePageBinding TerrainTileCacheDevice::request(
 	}
 	opennova::terrain::TerrainScorchPagePlan scorch_plan;
 	if (scorch_stamp.valid) scorch_plan = scorch_registry_.plan(request.page);
-	const uint32_t shadow_material_time = shadow_snapshot != nullptr
-			? static_shadow_rasterizer_->material_time_ms()
-			: 0u;
 	if (!async_->enqueue(job, source_snapshot, sources.tile_overlay_tint,
 			sources.light_bytes, std::move(scorch_plan),
-			diagnostic_frame_id_, shadow_snapshot, shadow_material_time,
-			capture_diagnostics_)) {
+			diagnostic_frame_id_, capture_diagnostics_)) {
 		cache_.invalidate(job.target.page);
 		++frame_capacity_fallbacks_;
 		return unavailable;
@@ -1144,37 +923,6 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 			static_cast<int64_t>(scorch_records_rejected_);
 	diagnostics["scorch_page_invalidations"] =
 			static_cast<int64_t>(scorch_page_invalidations_);
-	diagnostics["shadow_raster_available"] =
-			static_shadow_rasterizer_ != nullptr;
-	diagnostics["shadow_raster_jobs"] =
-			static_cast<int64_t>(shadow_raster_jobs_);
-	diagnostics["shadow_raster_failures"] =
-			static_cast<int64_t>(shadow_raster_failures_);
-	diagnostics["shadow_alpha_changed_bytes"] =
-			static_cast<int64_t>(shadow_alpha_changed_bytes_);
-	diagnostics["shadow_rgb_changed_bytes"] =
-			static_cast<int64_t>(shadow_rgb_changed_bytes_);
-	diagnostics["shadow_base_nonzero_alpha_bytes"] =
-			static_cast<int64_t>(shadow_base_nonzero_alpha_bytes_);
-	diagnostics["shadow_epoch_raster_jobs"] =
-			static_cast<int64_t>(shadow_epoch_raster_jobs_);
-	diagnostics["shadow_epoch_pages_with_draws"] =
-			static_cast<int64_t>(shadow_epoch_pages_with_draws_);
-	diagnostics["shadow_epoch_projection_draws"] =
-			static_cast<int64_t>(shadow_epoch_projection_draws_);
-	diagnostics["shadow_epoch_plan_failures"] =
-			static_cast<int64_t>(shadow_epoch_plan_failures_);
-	diagnostics["shadow_epoch_unsupported_draw_count"] =
-			static_cast<int64_t>(shadow_epoch_unsupported_draw_count_);
-	diagnostics["shadow_epoch_unsupported_attribution_truncated"] =
-			static_cast<int64_t>(
-					shadow_epoch_unsupported_attribution_truncated_);
-	diagnostics["shadow_epoch_alpha_changed_bytes"] =
-			static_cast<int64_t>(shadow_epoch_alpha_changed_bytes_);
-	diagnostics["shadow_epoch_rgb_changed_bytes"] =
-			static_cast<int64_t>(shadow_epoch_rgb_changed_bytes_);
-	diagnostics["shadow_epoch_base_nonzero_alpha_bytes"] =
-			static_cast<int64_t>(shadow_epoch_base_nonzero_alpha_bytes_);
 	diagnostics["frame_requests"] = static_cast<int64_t>(frame_requests_);
 	diagnostics["frame_ready_hits"] = static_cast<int64_t>(frame_ready_hits_);
 	diagnostics["frame_stale_hits"] = static_cast<int64_t>(frame_stale_hits_);
@@ -1195,12 +943,6 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 			AsyncState::kUploadBudgetPerFrame);
 	diagnostics["frame_capacity_fallbacks"] =
 			static_cast<int64_t>(frame_capacity_fallbacks_);
-	diagnostics["frame_shadow_alpha_changed_bytes"] =
-			static_cast<int64_t>(frame_shadow_alpha_changed_bytes_);
-	diagnostics["frame_shadow_rgb_changed_bytes"] =
-			static_cast<int64_t>(frame_shadow_rgb_changed_bytes_);
-	diagnostics["frame_shadow_base_nonzero_alpha_bytes"] =
-			static_cast<int64_t>(frame_shadow_base_nonzero_alpha_bytes_);
 	diagnostics["frame_output_pages"] =
 			static_cast<int64_t>(frame_output_pages_);
 	diagnostics["frame_output_hash"] =

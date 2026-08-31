@@ -678,24 +678,6 @@ const std::vector<Recipe> &recipes() {
 			l.atten_end = 1000.0f;
 			l.flags = static_cast<uint8_t>(l.flags & ~THREEDI_LIGHT_FLAG_DISABLE_OBJECTS);
 		}},
-		// --- terrain static shadow (terrain_static_shadow_runtime_test.gd) ---
-		{"house_lod0_sine_rotx", make_house, [](Model &m) { m.lods[0].panm.push_back(sine_rotation_row(0, 0)); }},
-		{"house_lod0_sine_rotx_uv1", make_house, [](Model &m) {
-			m.lods[0].panm.push_back(sine_rotation_row(0, 0));
-			m.materials[0].u_params.style = 1;
-		}},
-		{"house_mtrl0_uvscroll16_alphatest", make_house, [](Model &m) {
-			m.materials[0].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
-			m.materials[0].u_params.style = 16;
-			m.materials[0].u_params.gen_rate = 1.0f;
-		}},
-		// --- render_swatch projshadow (render_swatch_pass_modes.gd): the _MT
-		// post alpha-tested so the slot capture's Diffuse2.a coverage is
-		// observable at the discard boundary ---
-		{"pump_mtrl1_mt_alphatest", make_pump, [](Model &m) {
-			m.materials[1].material_flags |= THREEDI_MATERIAL_FLAG_ALPHA_TEST;
-			m.materials[1].alpha_test_value_byte = 32;
-		}},
 		// --- simulation_test.gd ---
 		{"mount_heat_glow_slide_part1", make_mount, [](Model &m) {
 			rename_register(m, 0, "HEAT_GLOW");
@@ -862,10 +844,6 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 	if (name == "pump_lod0_inert_lod1_sine_rotz") expect(p.rows(0) == 1 && !p.live(0) && p.rows(1) == 1 && p.live(1), name + ": LOD liveness");
 	if (name == "shed_lght0_sub2_origin_atten100") expect(p.model.lights[0].subobj_index == 2 && p.model.lights[0].atten_end == 100.0f, name + ": light");
 	if (name == "house") expect(!p.live(0), name + ": inert");
-	if (name == "house_lod0_sine_rotx") expect(p.live(0) && p.model.materials[0].u_params.style == 0, name + ": live, uv 0");
-	if (name == "house_lod0_sine_rotx_uv1") expect(p.live(0) && p.model.materials[0].u_params.style == 1, name + ": live, uv 1");
-	if (name == "house_mtrl0_uvscroll16_alphatest")
-		expect((p.model.materials[0].material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0 && p.model.materials[0].u_params.style == 16 && p.model.materials[0].u_params.gen_rate == 1.0f, name + ": material");
 	if (base == "panm") {
 		const bool expected_live = name.rfind("panm_live", 0) == 0;
 		expect(p.rows(0) == 1 && p.live(0) == expected_live, name + ": liveness");

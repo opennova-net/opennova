@@ -681,35 +681,3 @@ func glow_mode(out_dir: String, prefix: String) -> void:
 		for failure in failures:
 			_sink.error("render_swatch_probe glow: " + failure)
 		_sink.quit(1)
-
-
-# Raster proof for the render-slot PROJSHAD capture: SlotShadow's typed
-# requests drawn by the SlotCaptureAdapter RenderingDevice pass over the
-# engine's per-technique coverage and blend tables (which ctest
-# renderer_material_classify pins per technique). The synthetic 3DI fixtures
-# stand in for the technique matrix, each caster alone in its own slot: the
-# opaque FFP crate (black replace), the mount's alpha-tested FFP sight
-# (Diffuse1.a x AlphaGen at the discard boundary), the pump's alpha-tested
-# _MT post (x Diffuse2.a), the shed's alpha-blend FFP bulb (black blended by
-# its coverage), and the two no-pass surfaces (the mount's additive LUM slab,
-# the armory's glass). Every capture is read back from its resolve target
-# under paired texture-alpha / detail-alpha / AlphaGen states, and the stage's
-# beauty frame proves the NORMAL technique stays where the capture is black.
-# Run without a mission: the caster group is scene-tree wide.
-const PROJSHADOW_CASTERS: Array[Dictionary] = [
-	{"name": "crate_ffp_opaque", "fixture": "crate", "surfaces": "", "kind": "opaque"},
-	{"name": "mount_ffp_alpha_test", "fixture": "mount", "surfaces": "/fixed/cutout",
-		"kind": "alpha_test", "detail": false},
-	{"name": "pump_mt_alpha_test", "fixture": "pump_mtrl1_mt_alphatest",
-		"surfaces": "/fixed/cutout", "kind": "alpha_test", "detail": true},
-	{"name": "shed_ffp_alpha_blend", "fixture": "shed", "surfaces": "/fixed/alpha",
-		"kind": "blend"},
-	{"name": "mount_additive_lum", "fixture": "mount", "surfaces": "/self_lit/additive",
-		"kind": "no_pass"},
-	{"name": "armory_glass", "fixture": "armory", "surfaces": "/glass/", "kind": "no_pass"},
-]
-const PROJSHADOW_STATES: Array[String] = ["diffuse_low", "diffuse_high",
-		"detail_low", "detail_high", "alpha_gen_low", "alpha_gen_high"]
-# The alpha test ref of the cutout fixtures is byte 32 (0.125): the "high"
-# texture alpha 192 (0.753) passes, the "low" alpha 16 (0.063) fails, and
-# AlphaGen 0.1 pulls the high alpha (0.075) under the ref while 1.0 keeps it.

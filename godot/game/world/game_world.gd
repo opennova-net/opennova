@@ -671,11 +671,6 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 			MissionData.load_progress_percent(MissionData.LOAD_STAGE_OBJECTS))
 	_mission_stats = _placer.place(mission, self, options)
 	_apply_occlusion_culling_policy()
-	# Static tile shadows are composed from the placer's resolved ObjectData and
-	# exact entity transforms. Attach only after place() has finished building
-	# that immutable mission snapshot; Terrain invalidates any pre-placement
-	# cache pages when the producer becomes live.
-	_terrain.set_static_shadow_placer(_placer)
 	print_verbose("GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.placed),
 		int(_mission_stats.batched),
@@ -809,10 +804,6 @@ func unload() -> void:
 	# whole-world reset or leak a prior mission's pool into the menu frame.
 	if _light_director != null:
 		_light_director.reset()
-	# Release Terrain's Ref before the MissionObjects nodes and owning placer.
-	# This also invalidates pages composed with the departing caster snapshot.
-	if _terrain != null:
-		_terrain.set_static_shadow_placer(null)
 	_apply_occlusion_culling_policy()
 	var container := get_node_or_null(NodePath("MissionObjects"))
 	if container != null:

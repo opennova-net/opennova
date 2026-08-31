@@ -16,13 +16,13 @@
     "net/npwire/replay/wire_capture.cpp"
   ],
   "counters": {
-    "adapter_cpp_orig_cites": 568,
+    "adapter_cpp_orig_cites": 566,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 0,
     "gd_orig_cites": 735,
     "gd_prints_outside_debug": 0,
-    "has_method_guards": 22,
+    "has_method_guards": 18,
     "oversize_cpp_files": 1,
     "oversize_cpp_headers": 0,
     "oversize_gd_files": 1,

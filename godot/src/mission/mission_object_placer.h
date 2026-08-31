@@ -66,20 +66,6 @@ public:
 	// admission and ordering.
 	// [orig: Terrain_CollectAndRenderTileModels pool scans/admission
 	// @0x60D421..0x60D450; see docs/terrain/terrain-re.md]
-	struct StaticTerrainShadowSource {
-		int bms_id = 0;
-		int item_id = 0;
-		int entity_kind = -1;
-		int entity_index = -1;
-		int team = 0;
-		uint32_t entity_attrib = 0;
-		uint32_t item_attrib = 0;
-		uint32_t item_attrib2 = 0;
-		String graphic;
-		Transform3D world_transform;
-		Ref<ObjectData> object_data;
-		bool active = true;
-	};
 
 	enum {
 		RENDER_LOD = 0,
@@ -211,11 +197,8 @@ public:
 	// changes any row's `active` state: consumers rebuild their packed row
 	// arrays only on a change instead of re-reading the rows every frame.
 	uint64_t get_static_light_draw_source_revision() const;
-	Vector<StaticTerrainShadowSource> get_static_terrain_shadow_sources();
-	uint64_t get_static_terrain_shadow_source_revision();
 	// Dictionary mirror for focused shell/asset diagnostics. Production
 	// consumers use the typed snapshot above.
-	Array get_static_terrain_shadow_source_diagnostics();
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
 
@@ -232,6 +215,9 @@ public:
 	// never the reflect flag the mirror collectors filter on (witnesses in
 	// engine/runtime/mission/placement_traits.h).
 	bool static_instance_is_mirror_reflected(int p_bms_id) const;
+	// The carved instance's authored static-caster eligibility (the husk
+	// swap transfers the caster role under ADR 0043's CSM).
+	bool static_instance_casts_terrain_shadow(int p_bms_id) const;
 	// Register one carveable batched-static record directly (the
 	// construction seam matching register_resolved_static_graphic: callers
 	// that own their placement — including asset-free tests — feed the same
@@ -242,15 +228,8 @@ public:
 	bool is_static_instance_hidden(int p_bms_id) const {
 		return hidden_destruction_instances_.has(p_bms_id);
 	}
-	bool static_instance_casts_terrain_shadow(int p_bms_id) const;
 	Variant hide_static_instance(int p_bms_id);
 	bool show_static_instance(int p_bms_id);
-	bool update_static_terrain_shadow_source_transform(int p_kind,
-			int p_index, const Transform3D &p_xform);
-	bool set_static_terrain_shadow_replacement(int p_bms_id,
-			const String &p_graphic, const Transform3D &p_xform,
-			bool p_active);
-	bool clear_static_terrain_shadow_replacement(int p_bms_id);
 
 	// Register an already-resolved object plus its static render batches —
 	// the construction seam for callers that already own parsed geometry
@@ -397,11 +376,6 @@ private:
 	int _append_static_light_draw_source(int p_source_index, int p_kind,
 			int p_entity_index, int p_bms_id, int p_item_id,
 			int p_robj_index, const AABB &p_world_bounds);
-	void _record_static_terrain_shadow_source(int p_kind, int p_index,
-			int p_bms_id, int p_team, uint32_t p_entity_attrib, int p_item_id,
-			const String &p_graphic, const Transform3D &p_xform,
-			const Ref<ObjectData> &p_data);
-	void _bump_static_terrain_shadow_source_revision();
 
 	Ref<ResourceRoot> resource_root_;
 	Ref<ItemDatabase> item_db_;
@@ -413,17 +387,7 @@ private:
 	Array static_item_effect_sources_;
 	Array static_light_draw_sources_;
 	uint64_t static_light_draw_source_revision_ = 1;
-	Vector<StaticTerrainShadowSource> static_terrain_shadow_sources_;
-	HashMap<uint64_t, Vector<int>> static_terrain_shadow_source_rows_;
-	HashMap<int, Vector<int>> static_terrain_shadow_rows_by_bms_;
-	uint64_t static_terrain_shadow_source_revision_ = 0;
 
-	// One indexed pass over this bms id's source rows: whether any row
-	// represents it, whether policy admits any row, and whether an admitted
-	// row is base-active (unhidden). Replaces the former full-vector scans in
-	// the replacement set/clear paths.
-	void _static_shadow_bms_policy(int p_bms_id, bool &r_represented,
-			bool &r_policy_admitted, bool &r_base_active) const;
 
 	HashMap<String, Ref<ObjectData>> object_data_cache_;
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
@@ -462,8 +426,6 @@ private:
 	};
 	HashMap<int64_t, DestructionInstance> destruction_instances_;
 	HashSet<int64_t> hidden_destruction_instances_;
-	HashMap<int64_t, StaticTerrainShadowSource>
-			static_terrain_shadow_replacements_;
 };
 
 } // namespace godot

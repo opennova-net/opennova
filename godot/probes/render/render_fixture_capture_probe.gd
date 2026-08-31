@@ -21,53 +21,12 @@ const DEFAULT_OUTPUT_ROOT := "res://../.scratch/golden/render/fixtures"
 const VIEWMODEL_HOLD_MAX_FRAMES := 240
 
 
-class StaticTerrainShadowWarmupSuspension:
-	extends RefCounted
-
-	var _terrain: Object = null
-	var _original_enabled := false
-	var _active := false
-
-
-	func begin(terrain: Object) -> Error:
-		if _active:
-			return ERR_ALREADY_IN_USE
-		if terrain == null or not is_instance_valid(terrain) \
-				or not terrain.has_method("is_static_terrain_shadow_enabled") \
-				or not terrain.has_method("set_static_terrain_shadow_enabled"):
-			return ERR_UNCONFIGURED
-		_terrain = terrain
-		_original_enabled = bool(terrain.call(
-				"is_static_terrain_shadow_enabled"))
-		_active = true
-		if _original_enabled:
-			terrain.call("set_static_terrain_shadow_enabled", false)
-		return OK
-
-
-	func finish() -> void:
-		if not _active:
-			return
-		var terrain := _terrain
-		var original_enabled := _original_enabled
-		_terrain = null
-		_original_enabled = false
-		_active = false
-		if terrain != null and is_instance_valid(terrain) \
-				and terrain.has_method("is_static_terrain_shadow_enabled") \
-				and terrain.has_method("set_static_terrain_shadow_enabled") \
-				and bool(terrain.call("is_static_terrain_shadow_enabled")) \
-				!= original_enabled:
-			terrain.call("set_static_terrain_shadow_enabled", original_enabled)
-
-
 var _game: MainGame
 var _world: GameWorld
 var _capture_size := RenderFixtureContract.DEFAULT_CAPTURE_SIZE
 var _expected_mission_time_fixed24 := -1
 var _failed := false
 var _shadow_capture_session
-var _static_shadow_warmup_suspension: StaticTerrainShadowWarmupSuspension
 var _fixture_publication_staging_abs := ""
 var _ctx: ProbeContext
 var _failure := ""
@@ -101,8 +60,7 @@ func _capture(ctx: ProbeContext) -> void:
 		_fail("catalog diagnostic_variants does not exactly match the capture driver")
 		return
 	var capture_profile := RenderFixtureContract.select_capture_profile(
-			String(ctx.args.get("profile", "")),
-			String(ctx.args.get("suppress_static_bms_ids", "")))
+			String(ctx.args.get("profile", "")))
 	if capture_profile.has("error"):
 		_fail(String(capture_profile.error))
 		return
@@ -215,14 +173,6 @@ func _capture(ctx: ProbeContext) -> void:
 		# Captures assert on the byte-level page hash/diff diagnostics that
 		# steady-state play leaves off.
 		probe_terrain.set_tile_cache_capture_diagnostics(true)
-	_static_shadow_warmup_suspension = \
-			StaticTerrainShadowWarmupSuspension.new()
-	var warmup_shadow_error: Error = \
-			_static_shadow_warmup_suspension.begin(probe_terrain)
-	if warmup_shadow_error != OK:
-		_fail("could not suspend static terrain shadow projection during live " \
-				+ "capture warmup: %s" % error_string(warmup_shadow_error))
-		return
 	var capture_settings: Dictionary = catalog.get("capture", {})
 	await ctx.wait_frames(int(capture_settings.get("load_settle_frames", 132)))
 	if Vector2i(viewport.get_visible_rect().size) != _capture_size:
@@ -520,7 +470,6 @@ func _prepare_pose(
 	# frozen nothing re-places it at the moved camera, so the shell does that
 	# here (the hud_hidden variants capture WITH the gun).
 	_game.mcp_restamp_viewmodel_for_capture()
-	_finish_static_shadow_warmup_suspension()
 	var refresh_error := _world.debug_refresh_render_pose(camera)
 	if refresh_error != OK:
 		_fail("could not refresh production state at the exact fixture pose: %s" \
@@ -728,13 +677,6 @@ func _realize_capture_variant_cache(variant, camera: Camera3D) -> Dictionary:
 			JSON.stringify(diagnostics)}
 
 
-func _finish_static_shadow_warmup_suspension() -> void:
-	if _static_shadow_warmup_suspension == null:
-		return
-	_static_shadow_warmup_suspension.finish()
-	_static_shadow_warmup_suspension = null
-
-
 func _fail(reason: String) -> void:
 	if _failed:
 		return
@@ -743,10 +685,9 @@ func _fail(reason: String) -> void:
 	_ctx.log("FAIL: " + reason)
 
 
-## Every exit path: the warmup provider back, an unfinished publication
-## aborted, the shadow session closed, the shell and world processing again.
+## Every exit path: an unfinished publication aborted, the shadow controls
+## restored, the shell and world processing again.
 func _teardown() -> void:
-	_finish_static_shadow_warmup_suspension()
 	if not _fixture_publication_staging_abs.is_empty():
 		var abort_error := FixturePublication.abort_fixture_publication(
 				_fixture_publication_staging_abs)

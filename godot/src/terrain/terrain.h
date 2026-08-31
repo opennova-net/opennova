@@ -14,7 +14,6 @@
 #include "env/mission_environment.h"
 #include "env/weather.h"
 #include "terrain/terrain_data.h"
-#include "terrain/terrain_static_shadow_rasterizer.h"
 #include "terrain/terrain_tile_cache_device.h"
 #include <runtime/terrain/terrain_frame.h>
 
@@ -77,9 +76,6 @@ private:
 	Ref<Shader> terrain_shader;
 	Ref<ShaderMaterial> terrain_material;
 	Ref<TerrainSurfaceInputs> surface_inputs;
-	// Declared before the device so its non-owning callback target outlives the
-	// device during reverse-order member destruction.
-	TerrainStaticShadowRasterizer static_shadow_rasterizer;
 	TerrainTileCacheDevice tile_cache_device;
 	Vector3 tile_overlay_tint = Vector3(1.0f, 1.0f, 1.0f);
 
@@ -129,14 +125,7 @@ public:
 
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	Ref<TerrainData> get_terrain_data() const;
-	void set_static_shadow_placer(
-			const Ref<MissionObjectPlacer> &p_placer);
-	void set_static_terrain_shadow_enabled(bool p_enabled);
-	bool is_static_terrain_shadow_enabled() const;
 	void set_tile_cache_capture_diagnostics(bool p_enabled);
-	void set_suppressed_static_shadow_bms_ids(
-			const PackedInt32Array &p_bms_ids);
-	PackedInt32Array get_suppressed_static_shadow_bms_ids() const;
 	Ref<TerrainSurfaceInputs> get_surface_inputs() const;
 	Ref<Texture2D> get_heightfield_normal_texture() const;
 	Ref<Texture2D> get_tile_overlay_texture() const;

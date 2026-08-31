@@ -80,60 +80,19 @@ static func capture_variants() -> Array:
 
 static func capture_variant_tile_cache_is_realized(
 		variant, diagnostics: Dictionary) -> bool:
+	# ADR 0043: shadows are the scene sun's CSM, not page content — the tile
+	# cache is realized when every visible page is a ready hit with no pending
+	# compiler work (the variant's shadow toggles live outside the cache).
 	if variant == null or not (variant is CaptureVariant):
 		return false
-	var static_enabled := bool(variant.static_terrain_shadow_enabled)
-	if not diagnostics.has("available") \
-			or not bool(diagnostics.available) \
-			or not diagnostics.has("tile_overlay_required") \
-			or (bool(diagnostics.tile_overlay_required) \
-					and (not diagnostics.has("tile_overlay_available") \
-							or not bool(diagnostics.tile_overlay_available))) \
-			or not diagnostics.has("shadow_raster_available") \
-			or not bool(diagnostics.shadow_raster_available) \
-			or int(diagnostics.get("upload_failures", -1)) != 0 \
-			or int(diagnostics.get("shadow_raster_failures", -1)) != 0:
-		return false
-	if bool(diagnostics.get("shadow_provider_enabled", not static_enabled)) \
-			!= static_enabled:
+	if not diagnostics.has("available") 			or not bool(diagnostics.available) 			or not diagnostics.has("tile_overlay_required") 			or (bool(diagnostics.tile_overlay_required) 					and (not diagnostics.has("tile_overlay_available") 							or not bool(diagnostics.tile_overlay_available))) 			or int(diagnostics.get("upload_failures", -1)) != 0:
 		return false
 	var frame_requests := int(diagnostics.get("frame_requests", 0))
 	var frame_compose_jobs := int(diagnostics.get("frame_compose_jobs", -1))
 	var frame_ready_hits := int(diagnostics.get("frame_ready_hits", -1))
-	if frame_requests <= 0 \
-			or int(diagnostics.get("frame_capacity_fallbacks", -1)) != 0 \
-			or int(diagnostics.get("pending_jobs", -1)) != 0 \
-			or frame_compose_jobs != 0 \
-			or frame_ready_hits != frame_requests \
-			or int(diagnostics.get("frame_selected_ready_pages", 0)) <= 0 \
-			or int(diagnostics.get("ready_pages", 0)) <= 0 \
-			or int(diagnostics.get(
-					"shadow_provider_frame_plan_failures", -1)) != 0 \
-			or int(diagnostics.get("frame_shadow_rgb_changed_bytes", -1)) != 0:
+	if frame_requests <= 0 			or int(diagnostics.get("frame_capacity_fallbacks", -1)) != 0 			or int(diagnostics.get("pending_jobs", -1)) != 0 			or frame_compose_jobs != 0 			or frame_ready_hits != frame_requests 			or int(diagnostics.get("frame_selected_ready_pages", 0)) <= 0 			or int(diagnostics.get("ready_pages", 0)) <= 0:
 		return false
-	if static_enabled:
-		# Worker evidence is cumulative only for the current invalidation epoch.
-		# The final refresh above is an all-ready hit frame with no compiler work.
-		return bool(diagnostics.get("shadow_provider_snapshot_exact", false)) \
-				and int(diagnostics.get(
-						"shadow_provider_admitted_count", 0)) > 0 \
-				and int(diagnostics.get(
-						"shadow_provider_resolved_casters", 0)) > 0 \
-				and int(diagnostics.get("shadow_epoch_raster_jobs", 0)) > 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_pages_with_draws", 0)) > 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_projection_draws", 0)) > 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_plan_failures", -1)) == 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_unsupported_draw_count", -1)) == 0 \
-				and int(diagnostics.get(
-						"shadow_epoch_unsupported_attribution_truncated", -1)) == 0
-	# The disabled epoch must contain no static-raster publication.
-	return int(diagnostics.get("shadow_epoch_raster_jobs", -1)) == 0 \
-			and int(diagnostics.get(
-					"frame_shadow_alpha_changed_bytes", -1)) == 0
+	return true
 
 
 static func capture_variant_matches_diagnostics(
@@ -156,11 +115,11 @@ static func capture_variant_matches_diagnostics(
 	var renderer := renderer_value as Dictionary
 	var shadows := shadows_value as Dictionary
 	var dynamic_value: Variant = shadows.get("dynamic")
-	var static_value: Variant = shadows.get("static_terrain")
+	var static_value: Variant = shadows.get("static_casters")
 	if not (dynamic_value is Dictionary) or not (static_value is Dictionary):
 		return false
 	var dynamic := dynamic_value as Dictionary
-	var static_terrain := static_value as Dictionary
+	var static_casters := static_value as Dictionary
 	if not world.has("loaded") or not world.has("visible") \
 			or not terrain.has("available") \
 			or not terrain.has("visible") \
@@ -171,33 +130,16 @@ static func capture_variant_matches_diagnostics(
 			or not dynamic.has("visible_in_tree") \
 			or not dynamic.has("processing") \
 			or not dynamic.has("shadow_enabled") \
-			or not static_terrain.has("available") \
-			or not static_terrain.has("enabled") \
-			or not static_terrain.has("suppressed_bms_ids"):
+			or not static_casters.has("caster_instances") \
+			or not static_casters.has("casting_instances"):
 		return false
 	for key in [
 		"id",
 		"debug_draw",
 		"dynamic_shadow_enabled",
 		"static_terrain_shadow_enabled",
-		"suppressed_dynamic_caster_bms_ids",
-		"suppressed_static_caster_bms_ids",
 	]:
 		if not realized_variant.has(key):
-			return false
-	var expected_dynamic := _normalized_suppressed_bms_ids(
-			variant.suppressed_dynamic_caster_bms_ids)
-	var expected_static := _normalized_suppressed_bms_ids(
-			variant.suppressed_static_caster_bms_ids)
-	var realized_dynamic := _normalized_suppressed_bms_ids(
-			realized_variant.suppressed_dynamic_caster_bms_ids)
-	var realized_static := _normalized_suppressed_bms_ids(
-			realized_variant.suppressed_static_caster_bms_ids)
-	var diagnostic_static := _normalized_suppressed_bms_ids(
-			static_terrain.suppressed_bms_ids)
-	for normalized in [expected_dynamic, expected_static, realized_dynamic,
-			realized_static, diagnostic_static]:
-		if not bool((normalized as Dictionary).get("valid", false)):
 			return false
 	if not bool(world.loaded) or not bool(world.visible) \
 			or not bool(terrain.available) \
@@ -206,61 +148,29 @@ static func capture_variant_matches_diagnostics(
 			or not bool(dynamic.available) \
 			or not bool(dynamic.visible) \
 			or not bool(dynamic.visible_in_tree) \
-			or not bool(dynamic.processing) \
-			or not bool(static_terrain.available):
+			or not bool(dynamic.processing):
 		return false
-	return bool(dynamic.available) \
-			and bool(static_terrain.available) \
-			and int(renderer.debug_draw) == int(variant.debug_draw) \
+	# ADR 0043: the static half of the variant is the caster population — with
+	# the toggle off no static-layer instance may cast; with it on every one
+	# does (the placer stamps casters ON at placement).
+	var static_matches: bool = (
+			int(static_casters.casting_instances)
+					== int(static_casters.caster_instances)
+			if bool(variant.static_terrain_shadow_enabled)
+			else int(static_casters.casting_instances) == 0)
+	return int(renderer.debug_draw) == int(variant.debug_draw) \
 			and bool(dynamic.shadow_enabled) \
 					== bool(variant.dynamic_shadow_enabled) \
-			and bool(static_terrain.enabled) \
-					== bool(variant.static_terrain_shadow_enabled) \
+			and static_matches \
 			and String(realized_variant.id) == String(variant.id) \
 			and int(realized_variant.debug_draw) == int(variant.debug_draw) \
 			and bool(realized_variant.dynamic_shadow_enabled) \
 					== bool(variant.dynamic_shadow_enabled) \
 			and bool(realized_variant.static_terrain_shadow_enabled) \
-					== bool(variant.static_terrain_shadow_enabled) \
-			and (realized_dynamic as Dictionary).ids \
-					== (expected_dynamic as Dictionary).ids \
-			and (realized_static as Dictionary).ids \
-					== (expected_static as Dictionary).ids \
-			and (diagnostic_static as Dictionary).ids \
-					== (expected_static as Dictionary).ids
+					== bool(variant.static_terrain_shadow_enabled)
 
 
-static func _normalized_suppressed_bms_ids(value: Variant) -> Dictionary:
-	if not (value is Array) and not (value is PackedInt32Array):
-		return {"valid": false, "ids": []}
-	var seen: Dictionary = {}
-	var ids: Array = []
-	for raw_id: Variant in value:
-		if not (raw_id is int) or int(raw_id) <= 0 or seen.has(int(raw_id)):
-			return {"valid": false, "ids": []}
-		seen[int(raw_id)] = true
-		ids.append(int(raw_id))
-	ids.sort()
-	return {"valid": true, "ids": ids}
-
-
-static func parse_static_shadow_suppression(value: String) -> Dictionary:
-	var selected: Dictionary = {}
-	for token_value: String in value.split(",", false):
-		var token := token_value.strip_edges()
-		if token.is_empty() or not token.is_valid_int():
-			return {"error": "invalid static-shadow BMS id '%s'" % token}
-		var bms_id := token.to_int()
-		if bms_id <= 0:
-			return {"error": "static-shadow BMS ids must be positive"}
-		selected[bms_id] = true
-	var ids: Array = selected.keys()
-	ids.sort()
-	return {"ids": PackedInt32Array(ids)}
-
-
-static func select_capture_profile(
-		value: String, suppressed_static_value: String = "") -> Dictionary:
+static func select_capture_profile(value: String) -> Dictionary:
 	var requested := value.strip_edges().to_lower()
 	if requested.is_empty() or requested == CAPTURE_PROFILE_CANONICAL:
 		return {

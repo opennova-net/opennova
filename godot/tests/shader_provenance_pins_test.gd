@@ -565,22 +565,6 @@ func test_retail_tile_set_atlas_is_carried_not_misclassified_as_a_lightmap() -> 
 	assert_false((contract["exceptions"] as Array).has("D-RLIT-6"))
 
 
-func test_terrain_static_shadow_final_composite_is_explicit_and_cited() -> void:
-	_contains_all(_read_repo("engine/runtime/terrain/terrain_static_shadow_alpha.h"),
-			["RGBA writes and additive", "ONE/ONE", "PSDepthAlpha",
-			"composite_terrain_static_shadow_pixel", "temporary_blue"],
-			"terrain_static_shadow_alpha.h")
-	_contains_all(_read_repo("engine/runtime/terrain/terrain_static_shadow_alpha.cpp"),
-			["destination_rgba[0]", "destination_rgba[1]", "destination_rgba[2]",
-			"static_cast<int>(destination_rgba[3])", "composite_terrain_static_shadow_pixel("],
-			"terrain_static_shadow_alpha.cpp")
-	_contains_all(_read_repo("tests/terrain/terrain_static_shadow_alpha_test.cpp"),
-			["test_retail_additive_composite_contract", "zero-RGB ONE/ONE source preserves RGB",
-			"saturates like RGBA8 retail"], "terrain_static_shadow_alpha_test.cpp")
-	var contract := _contract(_load_json(PROVENANCE_PATH), "terrain-surface")
-	assert_true(_citation_addresses(contract).has("0x60e0c6"))
-
-
 func test_max_quality_tile_page_projection_is_one_c7_c8_cutover() -> void:
 	_contains_all(_read_repo("engine/runtime/terrain/terrain_tile_composition_cache.h"), [
 		"TerrainTilePageProjection", "Foliage_RenderFarPatches @0x60A1DE..0x60A34F",
@@ -589,9 +573,6 @@ func test_max_quality_tile_page_projection_is_one_c7_c8_cutover() -> void:
 	_contains_all(_read_repo("engine/runtime/terrain/terrain_tile_composition_cache.cpp"), [
 		"world_x - world_origin_x", "world_z - world_origin_z", "1.0f / static_cast<float>(span)",
 	], "terrain_tile_composition_cache.cpp")
-	assert_true(_read_repo("engine/runtime/terrain/terrain_static_shadow_raster.cpp").contains(
-			"TerrainTileCompositionCache::page_projection(input.page)"))
-
 	var terrain := _read(SHADER_ROOT.path_join("terrain.gdshader"))
 	var foliage := _read(SHADER_ROOT.path_join("foliage_detail.gdshaderinc"))
 	var match_terrain := _read(OBJECT_ROOT.path_join("match_terrain.gdshaderinc"))

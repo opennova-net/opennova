@@ -34,7 +34,6 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 	var sky: SkyDome = world.get_sky_dome_node()
 	var celestial: Celestial = world.get_celestial_node()
 	var dynamic_shadow: SunShadow = world.get_sun_shadow_node()
-	var terrain: Terrain = world.get_terrain_node()
 	var clear: WorldEnvironment = world.get_clear_color_node()
 	_value = {
 		"schema": SCHEMA,
@@ -61,7 +60,7 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 		"terrain": _terrain_state(world),
 		"shadows": {
 			"dynamic": _shadow_state(dynamic_shadow, world.drives_environment_presenters()),
-			"static_terrain": _terrain_page_shadow_state(terrain),
+			"static_casters": _static_caster_state(world),
 		},
 		"lights": _lights_state(world),
 		"passes": {
@@ -363,46 +362,28 @@ static func _shadow_state(shadow: SunShadow, world_driven: bool) -> Dictionary:
 	}
 
 
-static func _terrain_page_shadow_state(terrain: Terrain) -> Dictionary:
-	if terrain == null:
-		return {
-			"available": false,
-			"implementation": "terrain_page_alpha",
-			"enabled": false,
-			"active": false,
-			"suppressed_bms_ids": [],
-			"raster_jobs": 0,
-			"raster_failures": 0,
-			"alpha_changed_bytes": 0,
-			"rgb_changed_bytes": 0,
-			"frame_alpha_changed_bytes": 0,
-			"frame_rgb_changed_bytes": 0,
-			"frame_pages_with_draws": 0,
-			"frame_triangles": 0,
-		}
-	var cache := terrain.get_tile_cache_diagnostics()
-	var available := bool(cache.get("shadow_raster_available", false))
-	var enabled := terrain.is_static_terrain_shadow_enabled()
+static func _static_caster_state(root: Node) -> Dictionary:
+	# ADR 0043: static models shadow through the scene sun's CSM — the
+	# SHADOWS_ONLY twins and marked instances on the static-caster layer are
+	# the casters; there is no page bake to report.
+	var total := 0
+	var casting := 0
+	var pending: Array[Node] = [root]
+	while not pending.is_empty():
+		var node: Node = pending.pop_back()
+		if node is GeometryInstance3D:
+			var instance := node as GeometryInstance3D
+			if (instance.layers & Water.VISUAL_LAYER_STATIC_SHADOW_CASTER) != 0:
+				total += 1
+				if instance.cast_shadow \
+						!= GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+					casting += 1
+		for child in node.get_children():
+			pending.append(child)
 	return {
-		"available": available,
-		"implementation": "terrain_page_alpha",
-		"enabled": enabled,
-		"active": available and enabled,
-		"suppressed_bms_ids": Array(
-				terrain.get_suppressed_static_shadow_bms_ids()),
-		"raster_jobs": int(cache.get("shadow_raster_jobs", 0)),
-		"raster_failures": int(cache.get("shadow_raster_failures", 0)),
-		"alpha_changed_bytes": int(cache.get(
-				"shadow_alpha_changed_bytes", 0)),
-		"rgb_changed_bytes": int(cache.get("shadow_rgb_changed_bytes", 0)),
-		"frame_alpha_changed_bytes": int(cache.get(
-				"frame_shadow_alpha_changed_bytes", 0)),
-		"frame_rgb_changed_bytes": int(cache.get(
-				"frame_shadow_rgb_changed_bytes", 0)),
-		"frame_pages_with_draws": int(cache.get(
-				"shadow_provider_frame_pages_with_draws", 0)),
-		"frame_triangles": int(cache.get(
-				"shadow_provider_frame_triangles", 0)),
+		"implementation": "scene_sun_csm",
+		"caster_instances": total,
+		"casting_instances": casting,
 	}
 
 

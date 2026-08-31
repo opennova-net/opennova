@@ -151,12 +151,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::get_static_light_draw_source_revision);
 	ClassDB::bind_method(D_METHOD("get_static_instance_binding_count", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_binding_count);
-	ClassDB::bind_method(
-			D_METHOD("get_static_terrain_shadow_source_diagnostics"),
-			&MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics);
-	ClassDB::bind_method(
-			D_METHOD("get_static_terrain_shadow_source_revision"),
-			&MissionObjectPlacer::get_static_terrain_shadow_source_revision);
 	ClassDB::bind_method(D_METHOD("graphic_for", "item_id"),
 			&MissionObjectPlacer::graphic_for);
 	ClassDB::bind_method(D_METHOD("object_data_for", "graphic"),
@@ -168,29 +162,18 @@ void MissionObjectPlacer::_bind_methods() {
 			D_METHOD("static_instance_is_mirror_reflected", "bms_id"),
 			&MissionObjectPlacer::static_instance_is_mirror_reflected);
 	ClassDB::bind_method(
+			D_METHOD("static_instance_casts_terrain_shadow", "bms_id"),
+			&MissionObjectPlacer::static_instance_casts_terrain_shadow);
+	ClassDB::bind_method(
 			D_METHOD("register_static_instance", "bms_id", "graphic", "index",
 					"xform", "casts_static_shadow", "mirror_reflected"),
 			&MissionObjectPlacer::register_static_instance, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("is_static_instance_hidden", "bms_id"),
 			&MissionObjectPlacer::is_static_instance_hidden);
-	ClassDB::bind_method(
-			D_METHOD("static_instance_casts_terrain_shadow", "bms_id"),
-			&MissionObjectPlacer::static_instance_casts_terrain_shadow);
 	ClassDB::bind_method(D_METHOD("hide_static_instance", "bms_id"),
 			&MissionObjectPlacer::hide_static_instance);
 	ClassDB::bind_method(D_METHOD("show_static_instance", "bms_id"),
 			&MissionObjectPlacer::show_static_instance);
-	ClassDB::bind_method(
-			D_METHOD("update_static_terrain_shadow_source_transform", "kind",
-					"index", "xform"),
-			&MissionObjectPlacer::update_static_terrain_shadow_source_transform);
-	ClassDB::bind_method(
-			D_METHOD("set_static_terrain_shadow_replacement", "bms_id",
-					"graphic", "xform", "active"),
-			&MissionObjectPlacer::set_static_terrain_shadow_replacement);
-	ClassDB::bind_method(
-			D_METHOD("clear_static_terrain_shadow_replacement", "bms_id"),
-			&MissionObjectPlacer::clear_static_terrain_shadow_replacement);
 	ClassDB::bind_method(
 			D_METHOD("register_resolved_static_graphic", "graphic", "data",
 					"batches", "lod_profile"),
@@ -275,11 +258,6 @@ void MissionObjectPlacer::_check_epoch() {
 	static_lod_profile_cache_.clear();
 	graphic_panm_cache_.clear();
 	occlusion_cache_.clear();
-	for (int i = 0; i < static_terrain_shadow_sources_.size(); ++i) {
-		static_terrain_shadow_sources_.write[i].object_data.unref();
-	}
-	static_terrain_shadow_replacements_.clear();
-	_bump_static_terrain_shadow_source_revision();
 }
 
 // --- coordinate conversion ---------------------------------------------------
@@ -398,15 +376,10 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	static_populations_.clear();
 	static_population_by_node_.clear();
 	static_lod_switches_ = 0;
-	static_terrain_shadow_replacements_.clear();
 	static_user_point_sources_ = Array();
 	static_item_effect_sources_ = Array();
 	static_light_draw_sources_ = Array();
 	++static_light_draw_source_revision_;
-	static_terrain_shadow_sources_.clear();
-	static_terrain_shadow_source_rows_.clear();
-	static_terrain_shadow_rows_by_bms_.clear();
-	_bump_static_terrain_shadow_source_revision();
 	placed_entity_records_ = Array();
 	if (p_mission.is_null() || p_parent == nullptr || resource_root_.is_null()) {
 		return stats;
@@ -605,19 +578,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			shadow_data = *resolved;
 		}
 		for (int i = 0; i < group.xforms.size(); ++i) {
-			_record_static_terrain_shadow_source(
-					i < group.kinds.size() ? group.kinds[i] : -1,
-					i < group.entity_indices.size()
-							? group.entity_indices[i]
-							: -1,
-					i < group.bms_ids.size() ? group.bms_ids[i] : 0,
-					i < group.teams.size() ? group.teams[i] : 0,
-					i < group.entity_attribs.size()
-							? group.entity_attribs[i]
-							: 0,
-					i < group.item_ids.size() ? group.item_ids[i] : 0,
-					graphic, group.xforms[i], shadow_data);
-		}
+			}
 		Array xform_array;
 		for (const Transform3D &xform : group.xforms) {
 			xform_array.push_back(xform);
@@ -1055,11 +1016,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		record["model"] = model;
 		record["ref"] = ref;
 		placed_entity_records_.push_back(record);
-		_record_static_terrain_shadow_source(kind,
-				int(a.get("index", -1)), int(a.get("bms_id", 0)),
-				int(a.get("team", 0)),
-				uint32_t(a.get("ai_flags", 0)), item_id, graphic,
-				a.get("xform", Transform3D()), data);
 		++animated_count;
 		++placed;
 	}

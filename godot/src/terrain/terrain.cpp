@@ -80,16 +80,6 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(
 		D_METHOD("set_tile_cache_capture_diagnostics", "enabled"),
 		&Terrain::set_tile_cache_capture_diagnostics);
-	ClassDB::bind_method(D_METHOD("set_static_shadow_placer", "placer"),
-		&Terrain::set_static_shadow_placer);
-	ClassDB::bind_method(D_METHOD("set_static_terrain_shadow_enabled", "enabled"),
-		&Terrain::set_static_terrain_shadow_enabled);
-	ClassDB::bind_method(D_METHOD("is_static_terrain_shadow_enabled"),
-		&Terrain::is_static_terrain_shadow_enabled);
-	ClassDB::bind_method(D_METHOD("set_suppressed_static_shadow_bms_ids", "bms_ids"),
-		&Terrain::set_suppressed_static_shadow_bms_ids);
-	ClassDB::bind_method(D_METHOD("get_suppressed_static_shadow_bms_ids"),
-		&Terrain::get_suppressed_static_shadow_bms_ids);
 
 	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
@@ -137,8 +127,6 @@ Terrain::Terrain() {
 }
 
 Terrain::~Terrain() {
-	tile_cache_device.set_static_shadow_rasterizer(nullptr);
-	static_shadow_rasterizer.set_mission_object_placer({});
 	if (tile_info_override.is_valid()) {
 		const Callable changed = callable_mp(this, &Terrain::_on_tile_info_changed);
 		if (tile_info_override->is_connected("changed", changed)) {
@@ -153,48 +141,10 @@ void Terrain::set_terrain_data(const Ref<TerrainData> &p_data) {
 		terrain_data->disconnect("terrain_changed", callable_mp(this, &Terrain::_on_terrain_changed));
 	}
 	terrain_data = p_data;
-	static_shadow_rasterizer.set_terrain_data(p_data);
 	surface_inputs->set_terrain_data(p_data);
 	if (terrain_data.is_valid()) {
 		terrain_data->connect("terrain_changed", callable_mp(this, &Terrain::_on_terrain_changed));
 	}
-}
-
-void Terrain::set_static_shadow_placer(
-		const Ref<MissionObjectPlacer> &p_placer) {
-	static_shadow_rasterizer.set_mission_object_placer(p_placer);
-	tile_cache_device.set_static_shadow_rasterizer(
-			p_placer.is_valid() ? &static_shadow_rasterizer : nullptr);
-	tile_cache_device.invalidate_static_shadow_pages();
-}
-
-void Terrain::set_static_terrain_shadow_enabled(bool p_enabled) {
-	if (static_shadow_rasterizer.is_enabled() == p_enabled) return;
-	static_shadow_rasterizer.set_enabled(p_enabled);
-	tile_cache_device.invalidate_static_shadow_pages();
-}
-
-bool Terrain::is_static_terrain_shadow_enabled() const {
-	return static_shadow_rasterizer.is_enabled();
-}
-
-void Terrain::set_suppressed_static_shadow_bms_ids(
-		const PackedInt32Array &p_bms_ids) {
-	PackedInt32Array normalized = p_bms_ids;
-	normalized.sort();
-	PackedInt32Array unique;
-	for (int index = 0; index < normalized.size(); ++index) {
-		if (index == 0 || normalized[index] != normalized[index - 1]) {
-			unique.push_back(normalized[index]);
-		}
-	}
-	if (static_shadow_rasterizer.get_suppressed_bms_ids() == unique) return;
-	static_shadow_rasterizer.set_suppressed_bms_ids(unique);
-	tile_cache_device.invalidate_static_shadow_pages();
-}
-
-PackedInt32Array Terrain::get_suppressed_static_shadow_bms_ids() const {
-	return static_shadow_rasterizer.get_suppressed_bms_ids();
 }
 
 Ref<TerrainData> Terrain::get_terrain_data() const {
@@ -225,12 +175,6 @@ Dictionary Terrain::get_tile_cache_diagnostics() const {
 	Dictionary diagnostics = tile_cache_device.get_diagnostics();
 	diagnostics["capture_diagnostics"] =
 			tile_cache_device.is_capture_diagnostics_enabled();
-	const Dictionary provider = static_shadow_rasterizer.get_diagnostics();
-	const Array keys = provider.keys();
-	for (int index = 0; index < keys.size(); ++index) {
-		const Variant key = keys[index];
-		diagnostics[String("shadow_provider_") + String(key)] = provider[key];
-	}
 	return diagnostics;
 }
 
@@ -476,8 +420,6 @@ void Terrain::render_frame() {
 		page_light_direction =
 				cached_env_node->get_light_direction_render_tuple();
 	}
-	static_shadow_rasterizer.begin_frame(page_light_direction,
-			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()));
 	tile_cache_device.begin_frame(draw_list.frame_id);
 
 	// Apply the draw list onto the instance pool: draw-list index == pool slot.
