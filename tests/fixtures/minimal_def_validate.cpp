@@ -46,14 +46,22 @@ int main() {
 		DefItemsFile items{};
 		CHECK(def_parse_items(path("items.def").c_str(), &items) == 0, "items.def parses");
 		bool has_person = false;
+		bool has_mp_player = false;
 		for (size_t i = 0; i < items.count; ++i) {
 			// type 8 == person in the witnessed mapping (D-ITEMDEF-1); check by
 			// the presence of a spawnable person via its id range instead of the
 			// raw enum to stay robust to the FFI field name.
 			if (items.entries[i].id == 105310 || items.entries[i].id == 105311) has_person = true;
+			// retail declares BOTH player rows and hosts spawn the MP one: the
+			// runtime's player template is wire type 0x14B9 = items.def id 105305
+			// (engine/net/npwire/entity_class.h kPlayerPersonTypeId), so a set
+			// without this row leaves every hosted/joined player with no graphic
+			// and no anim_def.
+			if (items.entries[i].id == 105305) has_mp_player = true;
 		}
 		CHECK(items.count >= 1, "items.def has at least one item");
 		CHECK(has_person, "items.def carries a spawnable person (player/soldier)");
+		CHECK(has_mp_player, "items.def carries the MP player row (105305 = wire 0x14B9)");
 		def_free_items(&items);
 	}
 
