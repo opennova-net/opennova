@@ -567,6 +567,34 @@ int main() {
 		TEST_EXPECT(doc.info().terrain == "short");
 	}
 
+	// --- Wire S2C 0x0B header: retail's g_BmsHeaderBlock has its first 4 bytes
+	// ZEROED (not "BMS"+version), and the joiner memcpy's it verbatim + reads by
+	// offset with no magic/version gate. parse_header_blob must accept that and
+	// still recover terrain @+0x44 / env @+0xDC / tile-set @+0x118. Witnessed live
+	// 2026-08-31: a genuine .204 host's 0x0B for "ndakotabasestormy.npz.bms" began
+	// 00 00 00 00. [orig: NapiNPClientMsg_HandleBMSHeader @0x422660 vs the file
+	// gate Mission_LoadBMSFile @0x40f5aa]. ---
+	{
+		std::vector<uint8_t> blob(opennova::bms::kHeaderSize, 0);
+		std::memcpy(blob.data() + 0x04, "North Dakota Stormy", 19);
+		std::memcpy(blob.data() + 0x44, "G11.trn", 7);
+		std::memcpy(blob.data() + 0xDC, "FULL_07.env", 11);
+		std::memcpy(blob.data() + 0x118, "TRNTILEA1.TGA", 13);
+		opennova::bms::Header h;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse_header_blob(blob.data(), blob.size(), h, err));
+		TEST_EXPECT(std::string(h.mission_name) == "North Dakota Stormy");
+		TEST_EXPECT(std::string(h.terrain) == "G11.trn");
+		TEST_EXPECT(std::string(h.environment) == "FULL_07.env");
+		TEST_EXPECT(std::string(h.terrain_tile) == "TRNTILEA1.TGA");
+		// Our own host's "BMS"+version form still parses through the same path.
+		blob[0] = 'B'; blob[1] = 'M'; blob[2] = 'S'; blob[3] = 25;
+		opennova::bms::Header h2;
+		std::string err2;
+		TEST_EXPECT(opennova::bms::parse_header_blob(blob.data(), blob.size(), h2, err2));
+		TEST_EXPECT(std::string(h2.terrain) == "G11.trn");
+	}
+
 	// --- Phase 1: hidden entity fields (name1/name2/no_less_than/map_symbol) round-trip,
 	// and the names use the format's full 8-byte slot (a name longer than 8 is cut to 8). ---
 	{
