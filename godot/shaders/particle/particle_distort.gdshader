@@ -4,13 +4,24 @@ shader_type spatial;
 // gradient at 1/32 scale with blue forced to 255 — applied when the flipbook
 // strip is composed, engine/runtime/particle/height_to_normal), combines it
 // with a rotating 1/51.2 perturbation scaled by the particle alpha, and
-// samples the captured pre-particle scene at that offset; the sample replaces
-// the destination weighted by particle x texture alpha. SCREEN_UV is the
-// Godot projective-position equivalent; Godot's screen texture is the
-// opaque-pass copy, matching retail's one pre-particle scene copy.
+// samples its captured scene copy at that offset; the sample replaces the
+// destination weighted by particle x texture alpha. Retail captured AFTER the
+// world render, but Godot's screen texture is the OPAQUE-pass copy — a
+// replacement here erases the transparent geometry (water, foliage cards)
+// already blended under the quad. The witnessed UV equation stays; the
+// composition becomes a screen-space DELTA over the live destination:
+//   out = dst + w * (screen(scene_uv) - screen(SCREEN_UV))
+// via blend_premul_alpha (out = ALBEDO + dst * (1 - ALPHA); ALPHA = 0 — the
+// water.gdshader premul identity), with the witnessed weight
+// w = particle alpha * texel alpha folded into ALBEDO because the premul
+// blender applies no SRC_ALPHA factor. Where dst is the opaque backdrop this
+// reproduces the replacement (dst ~= screen(SCREEN_UV)); over transparents it
+// adds only the perturbation. Negative delta components ride the RGBA16F
+// scene target (the terminal encode clamps, so a below-black sum clips —
+// bounded residual D-PTL-5).
 // [orig: CParticleTexture_InitTextureAndChannels @ 0x5e8527/0x5e856b;
 // CParticleManager_BuildTextureAtlases @ 0x5e8db0]
-render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, fog_disabled;
+render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never, fog_disabled;
 
 uniform sampler2D distort_tex : filter_linear, repeat_disable;
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear, repeat_disable;
@@ -61,6 +72,8 @@ void fragment() {
 			+ normal.z * SCREEN_UV.x;
 	scene_uv.y = normal.x * (alpha * wave_y) + normal.y * (alpha * wave_z)
 			+ normal.z * SCREEN_UV.y;
-	ALBEDO = texture(screen_tex, scene_uv).rgb;
-	ALPHA = alpha * texel.a;
+	vec3 delta = texture(screen_tex, scene_uv).rgb
+			- texture(screen_tex, SCREEN_UV).rgb;
+	ALBEDO = delta * (alpha * texel.a);
+	ALPHA = 0.0;
 }

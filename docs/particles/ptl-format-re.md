@@ -703,9 +703,16 @@ u = n.x*(a*w.x) + n.y*(a*w.y) + n.z*p.x
 v = n.x*(a*w.y) + n.y*(a*w.z) + n.z*p.y
 ```
 
-The RD backend copies scene color once before the ordered particle draws and samples that
-immutable copy for Distort. Godot's render-buffer UV is the reimpl projective-coordinate map;
-that API mapping, rather than the decoded particle equation, remains a bounded reimpl detail.
+Retail copies scene color once AFTER the world render (before the ordered particle draws)
+and samples that immutable copy for Distort, replacing the destination under the
+particle x texel alpha weight. The reimpl (2026-08-31) has only Godot's OPAQUE-pass screen
+copy at that slot — a replacement there erases the transparent geometry (water, foliage
+cards) already blended under the quad — so it keeps the witnessed UV equation verbatim and
+composes the result as a screen-space delta over the live destination
+(`out = dst + w·(sample(scene_uv) − sample(SCREEN_UV))`, a pure add via the premul blend):
+identical to the replacement over opaque backdrops, perturbation-only over transparents.
+Godot's render-buffer UV is the reimpl projective-coordinate map. Both the copy-source
+difference and the delta composition are the bounded reimpl mapping (D-PTL-5).
 
 ### 5.5 Kong-rename corrections (durable warnings)
 
@@ -814,9 +821,12 @@ Renderer alignment against the RE render chain (verdicts per §3/§4 tables):
   frame-name and atlas work.
 - **Curve-ref modifier syntax** (D-PTL-20): the reimpl composes both trailing modifiers; retail
   consumes one. Shipped content uses no combined modifier.
-- **Distort scene coordinates** (§5.4): the decoded normal/wave/projective equation and
-  immutable pre-particle scene copy match; Godot's render-buffer UV convention supplies the
-  reimpl mapping for retail's D3D projective coordinate.
+- **Distort scene coordinates + composition** (§5.4): the decoded normal/wave/projective
+  equation matches; the reimpl's copy source is Godot's opaque-pass screen texture (retail
+  captured post-world), so the result composes as a screen-space delta over the live
+  destination rather than a replacement (2026-08-31; erasure-free over transparents,
+  identical over opaque backdrops), and Godot's render-buffer UV convention supplies the
+  mapping for retail's D3D projective coordinate.
 - **Global-pass placement**: the shared compositor submits far particles at
   PRE_TRANSPARENT (before every transparent, water included); water, far- and camera-side
   object alpha follow in Godot's transparent pass, and camera-side particles submit at
@@ -1029,7 +1039,7 @@ witnessed behavior gap stay in §8.
 | D-PTL-2 | The former reimpl path created one independently sorted/uploaded mesh surface per draw list command, allowing material/surface limits and reimpl transparent sorting to violate the engine-wide particle order under transient churn | **FIXED 2026-07-14** — one immutable four-vertex quad draw list, renderer-side `0/1/2/1/3/2` triangle expansion, one persistent growable RD vertex buffer, and sequential command draws preserve the compiler's deterministic order without per-emitter Nodes. [orig: CParticleManager_RenderBatch @ 0x5e9890] |
 | D-PTL-3 | `mod2x` formerly approximated `DESTCOLOR`/`SRCCOLOR` with a doubled `blend_mul` shader | **FIXED 2026-07-14** — the RD pipeline uses the witnessed `SRC=DESTCOLOR, DST=SRCCOLOR` factors directly; the reimpl render target owns only the platform color-space convention |
 | D-PTL-4 | `bump`/`bumpadd` formerly rotated the light around view-Z and saturated its byte encoding | **FIXED 2026-07-14** — the Godot scene-to-quad adapter evaluates `transpose(Rx(roll) × view)`, transforms `bump_scale × (+k,+k,+k)`, and retains the original truncating conversion's low byte before the DOT3 pipelines; the portable compiler owns ordering and batching of the authored quads (§5.3) |
-| D-PTL-5 | `distort` formerly used an arbitrary fixed-strength `SCREEN_UV` offset | **FIXED 2026-07-14** — the exact decoded normal/wave/projective equation samples one immutable pre-particle scene-color copy; Godot render-buffer UV remains the bounded reimpl mapping (§5.4) |
+| D-PTL-5 | `distort` formerly used an arbitrary fixed-strength `SCREEN_UV` offset | **FIXED 2026-07-14; composition amended 2026-08-31** — the exact decoded normal/wave/projective equation stays; the sample source is Godot's opaque-pass screen copy (retail captured post-world), composed as a screen-space delta over the destination instead of a replacement so transparents under the quad survive; Godot render-buffer UV remains the bounded reimpl mapping (§5.4) |
 | D-PTL-6 | Atlas registration, page allocation, preprocessing, and inset were formerly approximated by a per-emitter horizontal shelf | **FIXED 2026-07-14** — the portable shared builder implements the witnessed name identity, 1024/256 type families, type-1/2 sharing, stable width sort, skyline allocator quirks, exact rect, 2.5-pixel inset, alpha clear, and type-3/6/7 conversions [orig: BuildTextureAtlases @ 0x5e8db0] |
 | D-PTL-7 | Scripted-spawn initial orientation (§4 runtime chain): the WAC fx handlers pass the terrain surface normal at the entity's grid cell | **FIXED 2026-08-12** — one portable, quadrant-lock-aware query shares `Terrain_GenerateNormalMap`'s centered raw16 differences, 1/256 scale, literal unit-up component, and normalization; `TerrainData` maps `{x,z,up}` to Godot and `fx2ssn` passes it to the owned emitter. Portable flat/slope/empty/seam vectors and a real non-flat Dvxi5 GameWorld route pin the result. [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0; Terrain_GenerateNormalMap @0x603210; scale @0x7C6950] |
 | D-PTL-8 | Unknown effect name at intern (§4 runtime chain): the engine clones `stockeffect` under the requested name | **CLOSED 2026-07-12** — `EffectWorld.intern_effect` clones the mounted `stockeffect` entry under the requested name (0 only when no stockeffect is mounted). [orig: CEffectWorld_InternEffectHandle @ 0x5f7310] |

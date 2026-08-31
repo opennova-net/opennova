@@ -541,8 +541,10 @@ public:
 		return material;
 	}
 
-	// The distort class carries the witnessed screen-replacement equation in
-	// its own shader — Godot's StandardMaterial3D refraction is an opaque
+	// The distort class carries the witnessed distort UV equation in its own
+	// shader, composed as a screen-space delta over the destination (D-PTL-5:
+	// Godot's screen copy is opaque-only, so a replacement would erase
+	// transparents) — Godot's StandardMaterial3D refraction is an opaque
 	// whole-quad screen rewrite and cannot express the alpha-masked sample.
 	Ref<Material> distort_material_for(std::size_t key,
 			const LayerVisual &layer,

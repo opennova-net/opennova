@@ -403,7 +403,7 @@
       "patterns": [
         "particle/particle_distort.gdshader"
       ],
-      "light_behavior": "unlit_screen_replacement",
+      "light_behavior": "unlit_screen_delta_refraction",
       "parity_status": "matching_with_bounded_residuals",
       "docs": [
         "docs/particles/ptl-format-re.md"
