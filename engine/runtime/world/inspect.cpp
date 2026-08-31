@@ -255,10 +255,13 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 			: static_cast<int32_t>(spawn_origin_index(ent.spawn_origin));
 	d.item_id = ent.item_id;
 	d.name = ent.name;
+	if (const std::string *item_name = world.item_names.get(ent.item_id))
+		d.item_name = *item_name;
 	d.team = static_cast<int32_t>(ent.team);
 	d.alive = ent.alive;
 	d.hidden = ent.hidden;
 	d.health = ent.health;
+	d.health_max = ent.health_max;
 	d.has_item_def = ent.has_item_def;
 	d.handle = static_cast<int32_t>(h.packed);
 	d.item_type = static_cast<int32_t>(ent.item_type);
@@ -338,6 +341,8 @@ std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) 
 		row.item_id = e.item_id;
 		row.wire_handle = e.handle.packed;
 		row.name = e.name;
+		if (const std::string *item_name = world.item_names.get(e.item_id))
+			row.item_name = *item_name;
 		row.health = e.health;
 		row.alive = e.alive;
 		row.hidden = e.hidden;
@@ -375,6 +380,9 @@ std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) 
 			row.item_id = ent ? ent->item_id : 0;
 			row.wire_handle = e->handle.packed;
 			row.name = ent ? ent->name : std::string();
+			if (const std::string *item_name =
+							ent ? world.item_names.get(ent->item_id) : nullptr)
+				row.item_name = *item_name;
 			row.state_name = ai_state_name(e->brain.f[AiBrain::kCurState]);
 			row.health = ent ? ent->health : 0;
 			row.team = static_cast<int32_t>(e->team);

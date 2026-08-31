@@ -538,6 +538,13 @@ bool EntityCommands::set_entity_weapon_ammo(EntityHandle h, int32_t clip, int32_
     return true;
 }
 
+bool EntityCommands::set_entity_item_attrib(EntityHandle h, uint32_t attrib, uint32_t attrib2) {
+    Entity *e = world_.registry.get(h);
+    if (e == nullptr) return false;
+    stamp_item_attrib(*e, attrib, attrib2);
+    return true;
+}
+
 bool EntityCommands::set_ssn_hp(uint16_t ssn, int32_t hp) {
     Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;

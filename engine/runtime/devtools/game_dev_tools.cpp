@@ -2,6 +2,8 @@
 
 #include <runtime/devtools/demo_window.h>
 #include <runtime/devtools/entities_window.h>
+#include <runtime/devtools/entity_detail_snapshot.h>
+#include <runtime/devtools/entity_properties_window.h>
 #include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/stats_window.h>
@@ -30,10 +32,15 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	stats_window_ = stats.get();
 	stats->open = true;
 	pass_.register_window(std::move(stats));
-	// Closed by default; opens from the "Windows" menu.
+	// Closed by default; a world pick or the "Windows" menu opens them. The
+	// Properties window reads the Entities window's selection, so the list
+	// registers first and outlives it (the pass owns both).
 	auto entities = std::make_unique<EntitiesWindow>();
 	entities_window_ = entities.get();
 	pass_.register_window(std::move(entities));
+	auto properties = std::make_unique<EntityPropertiesWindow>(*entities_window_);
+	entity_properties_window_ = properties.get();
+	pass_.register_window(std::move(properties));
 	auto environment = std::make_unique<EnvironmentWindow>();
 	environment_window_ = environment.get();
 	pass_.register_window(std::move(environment));
@@ -77,11 +84,41 @@ void GameDevTools::set_entity_directory(EntityDirectorySnapshot snapshot) {
 }
 
 bool GameDevTools::needs_entity_directory() const {
-	return pass_.is_open() && entities_window_->open;
+	// The Properties window reads the list's selected row, so the directory
+	// keeps flowing while either entity window shows (the list holds its
+	// selection pending across its own close and re-applies it per push).
+	return pass_.is_open() && (entities_window_->open || entity_properties_window_->open);
 }
 
 bool GameDevTools::take_debug_request(DebugRequest &request) {
 	return entities_window_->take_request(request);
+}
+
+void GameDevTools::select_entity(uint16_t handle) {
+	entities_window_->select_handle(handle);
+	if (handle != world::EntityHandle::kInvalid) {
+		// The pick is "show me this": the card comes up beside the row.
+		entity_properties_window_->open = true;
+		entity_properties_window_->request_focus();
+	}
+}
+
+void GameDevTools::clear_entity_selection() {
+	entities_window_->clear_selection();
+	entity_properties_window_->clear();
+}
+
+uint16_t GameDevTools::selected_entity_handle() const {
+	return entities_window_->selected_handle();
+}
+
+void GameDevTools::set_entity_detail(EntityDetailSnapshot detail) {
+	entity_properties_window_->set_detail(std::move(detail));
+}
+
+bool GameDevTools::needs_entity_detail() const {
+	return pass_.is_open() && entity_properties_window_->open &&
+			entities_window_->selected_handle() != world::EntityHandle::kInvalid;
 }
 
 void GameDevTools::set_environment_snapshot(const EnvironmentSnapshot &snapshot) {

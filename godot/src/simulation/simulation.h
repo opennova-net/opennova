@@ -2016,42 +2016,38 @@ public:
 	// mixes into the decoded view), and its cards ride the decoded replica
 	// section (np::client_replica_card).
 	TypedArray<EntityRow> entity_directory() const;
-	// Native (unbound) form for the in-process C++ dev tools (ADR 0042 d6):
-	// the same engine join, returned as the engine vector — no
-	// TypedArray/Variant round-trip. Empty without a kernel.
+	// Native (unbound) form for the in-process C++ dev tools (ADR 0042 d6): the same engine
+	// join, returned as the engine vector — no TypedArray/Variant round-trip. Empty without a kernel.
 	std::vector<opennova::world::inspect::EntityRow> native_entity_directory() const;
-	// Native (unbound): the AI pool index behind a packed wire handle
-	// (-1 = no brain / no kernel) — the dev-tools drain resolves a queued
-	// request's handle onto the ai_index the debug delegates key on.
+	// Native (unbound): the AI pool index behind a packed wire handle (-1 = no brain / no kernel) —
+	// the dev-tools drain resolves a queued request's handle onto the ai_index the delegates key on.
 	int native_ai_index_for_handle(int p_handle) const;
-	// The engine's tool/probe mutation seam by entity handle (ADR 0042 d5),
-	// for the C++ embedders (DevTools) that already hold a handle; null
-	// without a kernel.
+	// The engine's tool/probe mutation seam by entity handle (ADR 0042 d5), for the C++
+	// embedders (DevTools) that already hold a handle; null without a kernel.
 	opennova::world::EntityCommands *entity_commands();
-	// The full card by packed wire handle; null when nothing resolves. The
-	// AI-index and SSN forms wrap the same builder (edit seams key on
-	// ai_index; pool-1 vehicles carry no brain and resolve by SSN).
+	// Native (unbound): the engine card by value for the C++ dev tools; invalid without a kernel
+	// or a resolving handle.
+	opennova::world::inspect::EntityCard native_entity_card(int p_handle) const;
+	// The full card by packed wire handle; null when nothing resolves. The AI-index and SSN forms
+	// wrap the same builder (edit seams key on ai_index; pool-1 vehicles have no brain, resolve by SSN).
 	Ref<EntityCard> entity_card(int p_handle) const;
 	Ref<EntityCard> entity_card_by_ai_index(int p_index) const;
 	Ref<EntityCard> entity_card_by_net_id(int p_net_id) const;
-	// Probe seam: write an AI entity's health via the scripted-SETHP stores
-	// (registry + motor copy) so in-game probes can shorten a fight. Returns
-	// ERR_UNAVAILABLE without a live sim, ERR_INVALID_PARAMETER for a missing
-	// AI index, and OK only after both authoritative mirrors are mutated.
+	// Probe seam: write an AI entity's health via the scripted-SETHP stores (registry + motor
+	// copy) so in-game probes can shorten a fight. Returns ERR_UNAVAILABLE without a live sim,
+	// ERR_INVALID_PARAMETER for a missing AI index, and OK only after both mirrors are mutated.
 	Error debug_set_entity_health(int p_index, int p_hp);
 	Error debug_crew_vehicle(int p_occupant_ssn, int p_vehicle_ssn);
 	void set_local_player_eye_offset(const Vector3 &p_offset_godot, bool p_valid);
 	bool local_player_fp_weapon_hidden() const;
 	Error debug_crew_local_player(int p_vehicle_ssn);
-	// Authority test seam: queue a RoundDeath for the player entity at `handle`
-	// (killer = the local player) so the next host tick runs the witnessed
-	// death transaction (route_round_deaths: 0x13 fan, 0x52 camera, 0x54 medic
-	// state, the dead flag on the 0x0A record). Not the health setter above:
-	// remote players are not AI rows.
+	// Authority test seam: queue a RoundDeath for the player entity at `handle` (killer = the
+	// local player) so the next host tick runs the witnessed death transaction
+	// (route_round_deaths: 0x13 fan, 0x52 camera, 0x54 medic state, the dead flag on the 0x0A
+	// record). Not the health setter above: remote players are not AI rows.
 	Error debug_kill_player_entity(int p_handle);
-	// Probe seam: teleport an AI entity (mission-space coords) through both
-	// position stores, for probes defeated by mission geography. Uses the same
-	// truthful Error contract as debug_set_entity_health.
+	// Probe seam: teleport an AI entity (mission-space coords) through both position stores, for
+	// probes defeated by mission geography. Same truthful Error contract as debug_set_entity_health.
 	Error debug_set_entity_position(int p_index, const Vector3 &p_mission_pos);
 	// World-registry probe seam by SSN: mission-space teleport (the by-SSN
 	// entity card is entity_card_by_net_id above).
@@ -2060,6 +2056,10 @@ public:
 	// world entity so a real UDP phase-8 sample can prove receiver application.
 	Error debug_set_world_entity_weapon_ammo(int p_net_id, int p_clip,
 	                                         int p_reserve);
+	// Per-entity items.def attrib override by packed wire handle (brainless rows included):
+	// EntityCommands::set_entity_item_attrib. ERR_UNAVAILABLE without a kernel,
+	// ERR_INVALID_PARAMETER for a handle/word out of range, ERR_DOES_NOT_EXIST when nothing resolves.
+	Error debug_set_entity_item_attrib(int p_handle, int64_t p_attrib, int64_t p_attrib2);
 	// Land the local player at an exact F3-dumped pose (probe seam). Returns
 	// ERR_UNAVAILABLE until the complete local-player subject exists.
 	// TEST SCAFFOLDING (host authority): kill a BMS command group outright so an

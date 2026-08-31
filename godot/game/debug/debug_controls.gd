@@ -756,6 +756,20 @@ func _register_edit_actions() -> void:
 		return _action_error(sim.debug_set_entity_position(
 				int(args[0]), args[1]))
 
+	var item_attrib := _action(&"set_entity_item_attrib", &"Entities", "Set item attribs",
+			"Write both items.def attrib words on one entity by its wire_handle (brainless "
+			+ "rows included); a per-entity override the next item-traits sweep re-stamps.",
+			TARGET_SIM, OWNER_ENGINE)
+	_authoritative(item_attrib)
+	item_attrib.invoke = func(args: Array) -> Dictionary:
+		var sim := _sim()
+		if sim == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if not DebugControlArgs.item_attrib(args):
+			return _action_error(ERR_INVALID_PARAMETER)
+		return _action_error(sim.debug_set_entity_item_attrib(
+				int(args[0]), int(args[1]), int(args[2])))
+
 
 func _register_audio_actions() -> void:
 	var volume := _action(&"set_audio_bus_volume", &"Audio", "Set bus volume",

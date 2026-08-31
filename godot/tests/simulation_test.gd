@@ -3984,6 +3984,35 @@ func test_debug_entity_mutations_report_missing_invalid_and_success() -> void:
 	assert_eq(card.get_health(), 37)
 	assert_eq(card.get_ai_health(), 37)
 
+	# The per-entity items.def attrib override by wire handle (the F3 checkbox
+	# and game_debug seam): range checks first, then both words land on the
+	# registry row and read back through the card and its inspect JSON.
+	var handle := card.get_wire_handle()
+	assert_eq(int(sim.debug_set_entity_item_attrib(0xFFFF, 0, 0)), ERR_INVALID_PARAMETER,
+			"the invalid handle sentinel is refused")
+	assert_eq(int(sim.debug_set_entity_item_attrib(handle, 0x100000000, 0)),
+			ERR_INVALID_PARAMETER, "a word above 32 bits is refused")
+	assert_eq(int(sim.debug_set_entity_item_attrib(handle, 0, -1)), ERR_INVALID_PARAMETER,
+			"a negative word is refused")
+	assert_eq(int(sim.debug_set_entity_item_attrib(0x0FFE, 0, 0)), ERR_DOES_NOT_EXIST,
+			"an empty slot resolves no row")
+	assert_eq(int(sim.debug_set_entity_item_attrib(handle, 0x800100, 0x2000)), OK)
+	var overridden: EntityCard = sim.entity_card(handle)
+	assert_eq(int(overridden.get_item_attrib()), 0x800100, "the attrib word landed")
+	assert_eq(int(overridden.get_item_attrib2()), 0x2000, "the attrib2 word landed")
+	var json: Dictionary = overridden.to_json_value()
+	assert_eq(int(json.get("item_attrib", -1)), 0x800100,
+			"the AI card's inspect JSON carries the registry row's attrib word")
+	assert_true(json.has("item_attrib2") and json.has("item_name") and json.has("health_max"),
+			"...and the other item facts")
+	var rows: Array = sim.entity_directory()
+	assert_gt(rows.size(), 0)
+	var row := rows[0] as EntityRow
+	assert_eq(row.get_world_position(), row.get_mission_position().x * Vector3.RIGHT
+			+ row.get_mission_position().z * Vector3.UP - row.get_mission_position().y * Vector3.BACK,
+			"the row's world position is the one engine axis map of its mission position")
+	assert_eq(typeof(row.get_item_name()), TYPE_STRING, "the row carries the item name")
+
 	var entity_mission_position := Vector3(6.0, 5.0, 7.0)
 	assert_eq(int(sim.debug_set_entity_position(0, entity_mission_position)), OK)
 	assert_lt(sim.get_entity_position(0).distance_to(Vector3(6.0, 7.0, -5.0)),

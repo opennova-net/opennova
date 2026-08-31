@@ -293,6 +293,11 @@ int main() {
     CHECK(tank_e->health == -25536);
     CHECK(tank_e->item_unit_type == 7);
     CHECK(tank_e->uniform_scale_q16 == 0x18000);
+    // The display-name table: once per distinct id, the def row's name; an
+    // unknown id has no row.
+    CHECK(w.item_names.get(500) != nullptr && *w.item_names.get(500) == "S5 Tank");
+    CHECK(w.item_names.get(510) != nullptr && *w.item_names.get(510) == "S5 Rifleman");
+    CHECK(w.item_names.get(999) == nullptr);
 
     const Entity *rifle_e = w.registry.get(rifle_h);
     CHECK(rifle_e != nullptr);
@@ -494,6 +499,28 @@ int main() {
     if (player_op != nullptr) {
         CHECK(player_op->primary == -1);
         CHECK(player_op->female == -1);
+    }
+
+    // A per-entity attrib override (the F3 / MCP debug seam) is the sweep's to
+    // erase: the next resolve_item_traits re-stamps the def's words and the
+    // derived stamps, and the per-item death traits never followed the
+    // override in the first place.
+    {
+        Entity *rifle_override = w.registry.get(rifle_h);
+        CHECK(rifle_override != nullptr);
+        if (rifle_override != nullptr) {
+            const uint32_t authored = rifle_override->item_attrib;
+            CHECK(w.commands.set_entity_item_attrib(
+                    rifle_h, authored | DEF_ITEM_ATTRIB_NODIE | DEF_ITEM_ATTRIB_SPAWNPOINT, 0x2000u));
+            CHECK(rifle_override->is_spawn_point);
+            CHECK(w.item_death_traits.get(510) == nullptr || !w.item_death_traits.get(510)->no_die);
+            simassets::resolve_item_traits(w, file, wire_class);
+            rifle_override = w.registry.get(rifle_h);
+            CHECK(rifle_override != nullptr && rifle_override->item_attrib == authored);
+            CHECK(rifle_override != nullptr && rifle_override->item_attrib2 == 0u);
+            CHECK(rifle_override != nullptr && !rifle_override->is_spawn_point);
+            CHECK(rifle_override != nullptr && rifle_override->leave_corpse);
+        }
     }
 
     def_free_items(&file);

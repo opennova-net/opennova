@@ -384,6 +384,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_position", "net_id", "mission_pos"), &Simulation::debug_set_world_entity_position);
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_weapon_ammo", "net_id", "clip", "reserve"),
 	                     &Simulation::debug_set_world_entity_weapon_ammo);
+	ClassDB::bind_method(D_METHOD("debug_set_entity_item_attrib", "handle", "attrib", "attrib2"),
+	                     &Simulation::debug_set_entity_item_attrib);
 	ClassDB::bind_method(D_METHOD("debug_kill_group", "group"), &Simulation::debug_kill_group);
 	ClassDB::bind_method(D_METHOD("debug_teleport_local_player", "mission_pos", "yaw_deg", "pitch_deg"),
 	                     &Simulation::debug_teleport_local_player);

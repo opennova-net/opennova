@@ -325,6 +325,26 @@ struct MissionKillStats {
 class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer so the
                  // shared command layer can reach an entity's AI component in-engine)
 
+// items.def display names keyed by Entity::item_id (the wire type id), the
+// ItemDeathTraitsTable shape: filled once per distinct id by the item-traits
+// sweep, read by the inspection records (world/inspect.h). Small missions:
+// linear is fine.
+struct ItemNameTable {
+    std::vector<std::pair<int32_t, std::string>> rows;
+
+    const std::string *get(int32_t item_id) const {
+        for (const auto &r : rows)
+            if (r.first == item_id) return &r.second;
+        return nullptr;
+    }
+    void set(int32_t item_id, std::string name) {
+        for (auto &r : rows)
+            if (r.first == item_id) { r.second = std::move(name); return; }
+        rows.emplace_back(item_id, std::move(name));
+    }
+    void clear() { rows.clear(); }
+};
+
 // ----------------------------------------------------------------------------
 // World.
 // ----------------------------------------------------------------------------
@@ -581,6 +601,10 @@ public:
     // selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870 fields consumed by
     // Entity_UpdateVehiclePhysics @0x48af00; vehicle_motor.h]
     VehicleTraitsTable vehicle_traits;
+    // items.def display names per item type (the def row's `name`), filled by
+    // the item-traits sweep once per distinct id so the inspection records can
+    // name an entity by its item, not only by its BMS label. Tooling only.
+    ItemNameTable item_names;
     // items.def sound profiles per ORGANIC item type — the wire body channel's
     // equivalent of AiProfile.sound_profile (audio/sound_profile.h).
     audio::OrganicSoundProfileTable organic_sound_profiles;

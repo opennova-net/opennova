@@ -8,6 +8,7 @@
 #include <formats/def/def.h>
 
 #include <cstdio>
+#include <cstring>
 
 // --- weapon.def flags (dword 1) ---
 static_assert(DEF_WEAPON_FLAG_SCOPED == 0x00000001u);
@@ -132,7 +133,69 @@ static_assert(DEF_AMMO_FLAG_LAWR == 0x08000000u);
 static_assert(DEF_AMMO_FLAG_FGRENADE == 0x10000000u);
 static_assert(DEF_AMMO_FLAG_CLIPWATERFX == 0x20000000u);
 
+static int failures = 0;
+#define CHECK(c) \
+	do { if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } } while (0)
+
+// The keyword-table accessor (def.h) projects the parser's own tables: one
+// entry per macro, single-bit, lowercase, and nothing beyond the last row.
+static bool lowercase_token(const char *s) {
+	if (s == NULL || s[0] == '\0') return false;
+	for (; *s != '\0'; ++s) {
+		if (*s >= 'A' && *s <= 'Z') return false;
+	}
+	return true;
+}
+
 int main() {
-	std::printf("def flag/attrib macros pinned to witnessed values\n");
-	return 0;
+	const uint32_t attrib_all = DEF_ITEM_ATTRIB_MOVECB | DEF_ITEM_ATTRIB_POWERUP |
+			DEF_ITEM_ATTRIB_NOMOVESHOOT | DEF_ITEM_ATTRIB_NOTOOL | DEF_ITEM_ATTRIB_SNAP |
+			DEF_ITEM_ATTRIB_EWEAP | DEF_ITEM_ATTRIB_PLAYERCONTROL | DEF_ITEM_ATTRIB_DOOR |
+			DEF_ITEM_ATTRIB_NOTARGET | DEF_ITEM_ATTRIB_LANDABLE | DEF_ITEM_ATTRIB_MISSILE |
+			DEF_ITEM_ATTRIB_TIRE | DEF_ITEM_ATTRIB_FASTROPE | DEF_ITEM_ATTRIB_TAKEABLE |
+			DEF_ITEM_ATTRIB_EASY | DEF_ITEM_ATTRIB_4TEAM | DEF_ITEM_ATTRIB_CHANGETEAM |
+			DEF_ITEM_ATTRIB_SPAWNPOINT | DEF_ITEM_ATTRIB_ARMORY | DEF_ITEM_ATTRIB_AIDATA |
+			DEF_ITEM_ATTRIB_LEAVECORPSE | DEF_ITEM_ATTRIB_NODISMEMBER | DEF_ITEM_ATTRIB_NOWEAPON |
+			DEF_ITEM_ATTRIB_REFLECT | DEF_ITEM_ATTRIB_NOSHADOW | DEF_ITEM_ATTRIB_CONCAVE |
+			DEF_ITEM_ATTRIB_NOSCAR | DEF_ITEM_ATTRIB_NOHUD | DEF_ITEM_ATTRIB_NODIE;
+	const uint32_t attrib2_all = DEF_ITEM_ATTRIB2_VEHICLEBAY | DEF_ITEM_ATTRIB2_AUTOINHERITTEAM |
+			DEF_ITEM_ATTRIB2_VEHICLESPAWN | DEF_ITEM_ATTRIB2_DYNAMICSHADOW |
+			DEF_ITEM_ATTRIB2_STATICSHADOW | DEF_ITEM_ATTRIB2_TUNNELPIECE | DEF_ITEM_ATTRIB2_USEVK |
+			DEF_ITEM_ATTRIB2_STATICDEATH | DEF_ITEM_ATTRIB2_ONTURRET | DEF_ITEM_ATTRIB2_HASTURRET |
+			DEF_ITEM_ATTRIB2_ISTURRET | DEF_ITEM_ATTRIB2_FARP | DEF_ITEM_ATTRIB2_LANDMINE;
+
+	CHECK(def_item_attrib_keyword_count() == 29);
+	CHECK(def_item_attrib2_keyword_count() == 13);
+	uint32_t seen = 0;
+	for (int i = 0; i < def_item_attrib_keyword_count(); ++i) {
+		const uint32_t bit = def_item_attrib_keyword_bit(i);
+		CHECK(bit != 0 && (bit & (bit - 1)) == 0);
+		CHECK((seen & bit) == 0);
+		seen |= bit;
+		CHECK(lowercase_token(def_item_attrib_keyword(i)));
+	}
+	CHECK(seen == attrib_all);
+	seen = 0;
+	for (int i = 0; i < def_item_attrib2_keyword_count(); ++i) {
+		const uint32_t bit = def_item_attrib2_keyword_bit(i);
+		CHECK(bit != 0 && (bit & (bit - 1)) == 0);
+		CHECK((seen & bit) == 0);
+		seen |= bit;
+		CHECK(lowercase_token(def_item_attrib2_keyword(i)));
+	}
+	CHECK(seen == attrib2_all);
+	CHECK(def_item_attrib_keyword(-1) == NULL && def_item_attrib_keyword_bit(-1) == 0);
+	CHECK(def_item_attrib_keyword(29) == NULL && def_item_attrib_keyword_bit(29) == 0);
+	CHECK(def_item_attrib2_keyword(13) == NULL && def_item_attrib2_keyword_bit(13) == 0);
+	// The parser's spelling is what the accessor hands out.
+	bool nodismember_named = false;
+	for (int i = 0; i < def_item_attrib_keyword_count(); ++i) {
+		if (def_item_attrib_keyword_bit(i) == DEF_ITEM_ATTRIB_NODISMEMBER)
+			nodismember_named = std::strcmp(def_item_attrib_keyword(i), "nodismember") == 0;
+	}
+	CHECK(nodismember_named);
+
+	std::printf("def flag/attrib macros pinned to witnessed values: %s\n",
+			failures == 0 ? "OK" : "FAILED");
+	return failures == 0 ? 0 : 1;
 }

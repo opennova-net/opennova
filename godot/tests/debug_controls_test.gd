@@ -34,6 +34,7 @@ const EXPECTED_IDS: Array[StringName] = [
 	&"cycle_map_mode",
 	&"set_entity_health",
 	&"set_entity_position",
+	&"set_entity_item_attrib",
 	&"set_audio_bus_volume",
 	&"set_audio_bus_mute",
 	&"set_audio_bus_solo",
@@ -134,7 +135,7 @@ func test_the_table_registers_the_wire_catalog() -> void:
 		var json: Dictionary = row.to_json_value()
 		assert_eq(json.keys(), WIRE_ROW_KEYS,
 				"'%s' keeps the legacy wire row keys" % id)
-	assert_eq(owner_counts[DebugControls.OWNER_ENGINE], 35,
+	assert_eq(owner_counts[DebugControls.OWNER_ENGINE], 36,
 			"engine rows end in a Simulation/Terrain/Weather/environment call")
 	assert_eq(owner_counts[DebugControls.OWNER_DEVICE], 21,
 			"device rows are viewport/overlay/audio/shell state")
@@ -226,6 +227,10 @@ func test_actions_validate_typed_arguments_before_the_engine() -> void:
 		[&"crew_local_player", ["11"]],
 		[&"local_player_look", ["3", 1.0]],
 		[&"runtime_transport", ["warp"]],
+		[&"set_entity_item_attrib", [0xFFFF, 0, 0]],
+		[&"set_entity_item_attrib", [7, 0x100000000, 0]],
+		[&"set_entity_item_attrib", [7, 0, -1]],
+		[&"set_entity_item_attrib", [7, 0]],
 	]
 	for case in refused:
 		assert_eq(int(_controls.invoke_control(case[0], case[1], true)["error"]),

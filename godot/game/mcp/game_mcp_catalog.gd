@@ -32,8 +32,9 @@ static func definitions() -> Array[McpToolDef]:
 			"Discover the game's current rendered entity view. op=list returns a bounded page in "
 			+ "discovery order; op=inspect returns the full public debug card for one discovery "
 			+ "index. `index` and `view_index` describe that transient view, not an edit target. "
-			+ "Only rows with editable=true can be mutated; pass their returned `ai_index` to "
-			+ "set_entity_health or set_entity_position. Non-AI and joiner rows are read-only.",
+			+ "Rows with editable=true take set_entity_health / set_entity_position by their "
+			+ "returned `ai_index`; every row with a world card takes set_entity_item_attrib by "
+			+ "its `wire_handle`. Joiner rows are read-only.",
 			{
 				"op": {"type": "string", "enum": ["list", "inspect"]},
 				"offset": {
@@ -77,6 +78,8 @@ static func definitions() -> Array[McpToolDef]:
 			+ "set_entity_health {entity,health}; set_entity_position {entity,position:[x,y,z]}, "
 			+ "where entity is the editable row's game_entities `ai_index` (never its discovery "
 			+ "`index` or `view_index`; non-AI and joiner rows are read-only); "
+			+ "set_entity_item_attrib {entity,attrib,attrib2} writes both items.def attrib words "
+			+ "on one entity, where entity is the row's `wire_handle` (brainless rows included); "
 			+ "runtime_transport {action}; set_mission_variable {index,value}."
 			+ " Audio actions: set_audio_bus_volume {bus,volume_db}; "
 			+ "set_audio_bus_mute {bus,muted}; set_audio_bus_solo {bus,soloed}; "

@@ -253,6 +253,14 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "size, a window resize reaches the viewport, and F3 through the Game texture "
 				+ "closes the workspace; refuses a direct-runtime fallback.",
 				RUNTIME + "runtime_root_window_probe.gd", {}, [], true, false, 120_000),
+		ProbeDef.make("entity_pick",
+				"The debug pick -> F3 Entities selection path on the live process: the "
+				+ "crosshair pick and a synthetic click at the nearest AI row's projected "
+				+ "viewport-local point both make DevTools.selected_entity_handle that row; "
+				+ "then the per-entity items.def attrib override (nodismember) round-trips "
+				+ "through the seam the window's checkbox and game_debug share; captures the "
+				+ "workspace.",
+				RUNTIME + "entity_pick_probe.gd", {}, [], true, true, 120_000),
 		ProbeDef.make("window_fullscreen",
 				"The F11 policy (WindowState) on the live process: windowed -> fullscreen -> "
 				+ "windowed through the key handler's static, proving each state presents a "

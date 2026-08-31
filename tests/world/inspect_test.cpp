@@ -192,6 +192,48 @@ int main() {
         CHECK(!world.commands.set_entity_position(h, Vec3{1, 1, 1}));
     }
 
+    // --- the per-entity ItemDefAttrib override + the item name / health_max
+    //     inspection fields -------------------------------------------------
+    {
+        World world;
+        world.registry.configure_pool(0, 4);
+        AiSystem ai;
+        world.ai = &ai;
+        world.item_names.set(5311, "Rifleman");
+        const EntityHandle h =
+                spawn_entity(world, 0, 5311, 45, "rifle", Vec3{0, 0, 0});
+        world.registry.get(h)->health_max = 120;
+        ai.attach(h);
+
+        // The override lands both words and re-derives the per-entity stamps.
+        CHECK(world.commands.set_entity_item_attrib(
+                h, kItemAttribNoDismember | kItemAttribChangeTeam, 0x2000u));
+        const Entity *e = world.registry.get(h);
+        CHECK(e->item_attrib == (kItemAttribNoDismember | kItemAttribChangeTeam));
+        CHECK(e->item_attrib2 == 0x2000u);
+        CHECK(e->is_capture_trigger);
+        CHECK(!e->is_spawn_point && !e->leave_corpse && !e->is_ai_capable);
+        CHECK(world.commands.set_entity_item_attrib(
+                h, kItemAttribAIData | kItemAttribSpawnPoint | kItemAttribLeaveCorpse, 0u));
+        e = world.registry.get(h);
+        CHECK(e->is_ai_capable && e->is_spawn_point && e->leave_corpse);
+        CHECK(!e->is_capture_trigger && e->item_attrib2 == 0u);
+
+        // The card and the directory row carry the new fields.
+        const inspect::EntityCard card = inspect::build_entity_card(world, &ai, h);
+        CHECK(card.has_world);
+        CHECK(card.world.item_attrib ==
+                static_cast<int64_t>(kItemAttribAIData | kItemAttribSpawnPoint | kItemAttribLeaveCorpse));
+        CHECK(card.world.health_max == 120);
+        CHECK(card.world.item_name == "Rifleman");
+        const auto rows = inspect::entity_directory(world, &ai);
+        CHECK(rows.size() == 1 && rows[0].item_name == "Rifleman");
+
+        // No registry slot -> refused.
+        world.registry.despawn(h);
+        CHECK(!world.commands.set_entity_item_attrib(h, 0u, 0u));
+    }
+
     std::printf("inspect: %s\n", failures == 0 ? "OK" : "FAILED");
     return failures == 0 ? 0 : 1;
 }

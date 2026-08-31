@@ -59,7 +59,7 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
       recipe): the retired F3 pages return as engine ImGui windows as they are
       wanted (the Entities window landed as the ADR 0042 d6 template, PR #587);
-      still open: the pick-list feed into it, sim transport
+      still open: sim transport
       (play/pause/step; the MCP
       `game_debug` control plane still drives these), script vars, net, particles,
       occlusion, rounds, terrain, rendering/world-view toggles (`GameWorld`'s

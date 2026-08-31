@@ -783,11 +783,24 @@ int Simulation::native_ai_index_for_handle(int p_handle) const {
 			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)});
 }
 
+opennova::world::inspect::EntityCard Simulation::native_entity_card(int p_handle) const {
+	if (!kernel_ || p_handle < 0 || p_handle > 0xFFFF) return {};
+	// The directory's rule: a joiner's non-authoritative tooling AI pool never
+	// joins the decoded view, so the F3 card shows no AI half for a row the
+	// list beside it calls brainless.
+	return opennova::world::inspect::build_entity_card(
+			kernel_->world, joiner_ ? nullptr : &kernel_->ai,
+			opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)},
+			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); });
+}
+
 Ref<EntityCard> Simulation::entity_card(int p_handle) const {
 	if (!kernel_ || p_handle < 0 || p_handle > 0xFFFF) return Ref<EntityCard>();
 	const opennova::world::EntityHandle handle{static_cast<uint16_t>(p_handle)};
 	Ref<EntityCard> card;
 	card.instantiate();
+	// The MCP/test card keeps both halves on every role (its joiner readers
+	// diff the tooling pool against the replica section).
 	card->assign(opennova::world::inspect::build_entity_card(
 			kernel_->world, &kernel_->ai, handle,
 			[this](int32_t adm_id) { return kernel_->root_motion.adm_name(adm_id); }));
