@@ -249,6 +249,7 @@
     "godot/game/debug/debug_controls.gd|authority",
     "godot/game/debug/debug_controls.gd|session host",
     "godot/game/world/game_world.gd|host sent an incomplete",
+    "godot/game/world/world_device_frame.gd|host sent an incomplete",
     "godot/game/world/game_world.gd|parse host S2C 0x45",
     "loading_screen_stage_probe.gd|OPENNOVA HOST",
     "main_game_test.gd|SP/host/join",
