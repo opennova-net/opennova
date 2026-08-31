@@ -515,14 +515,17 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	const uint16_t carrier_handle = self
 			? (self->mount_handle != 0xFFFF ? self->mount_handle : self->ground_handle)
 			: 0xFFFF;
-	// The dead-or-spectator flag: the recipient entity's DEAD bit (flags & 2 —
-	// the everyday between-death-and-respawn state) OR retail's deploy-hold
-	// storage slot+89912 & 0x10 [orig: @0x50e677..0x50e693] — which a
-	// never-deploying spectator holds. Modeled off the canonical spectator
-	// bit; the pre-deploy ordinary-player leg of the same predicate remains a
-	// D-NET-139 residual.
+	// The dead-or-spectator flag, per the witnessed storage: the recipient
+	// entity's DEAD bit (flags & 2 — the everyday between-death-and-respawn
+	// state) OR the deploy-hold bit slot+89912 & 0x10 [orig: @0x50e677..
+	// 0x50e693]. The hold is set ONCE at join whenever the mission has spawn
+	// zones [orig: Server_OnPlayerJoin @0x51a6f2] and cleared only by the
+	// deploy leg of Server_ProcessPlayerDeath [orig: @0x517791], so it covers
+	// BOTH a never-deploying spectator and an ordinary joiner still on the
+	// deploy screen; a runtime-converted (permadeath) spectator rides the dead
+	// bit instead, exactly like retail.
 	const bool self_dead_or_spectator =
-			conn.spectator ||
+			conn.respawn_pending ||
 			(self != nullptr && (self->state_flags & 0x02) != 0);
 	if (perf != nullptr) {
 		const uint64_t now = io::perf_now_us();
@@ -532,6 +535,14 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 
 	for (const GameEntitySnapshot &e : entities) {
 		if (record_wire_size(e) == 0) continue; // no compact form
+		// Owner-hidden admission: an entity whose owning slot hides it (the
+		// spectator latch — replication_model.h owner_hidden) never enters
+		// another recipient's list; the recipient's OWN entity is always
+		// admitted [orig: @0x50e6fd — `validated == recipient ||
+		// (!slot[97537] && !slot[97536])`]. The original's tracked-slot walk
+		// also despawns a tracked hidden row with a reliable 0x12; that sweep
+		// stays a D-NET-139 residual.
+		if (e.owner_hidden && e.wire_handle != conn.owned_entity.packed) continue;
 		const uint8_t age = conn.s2c_entity_age[age_index(e)];
 
 		// distanceTiles = (sqrt(dx^2 + dy^2 + (dz/2)^2) - boundRadius) >> 16 against the

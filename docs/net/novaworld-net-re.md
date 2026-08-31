@@ -1096,9 +1096,11 @@ tooling described in §5.25. The complete contract is:
   flags1` bit 0 (`@0x4ff795`). The 0x0A priority build's flat dead-or-spectator
   branch reads a DIFFERENT storage — `slot+89912 & 0x10`, the deploy-hold bit
   (`@0x50e67c`); a never-deploying spectator holds it, which is how the flat
-  branch covers spectating (OpenNova keys the branch off the canonical
-  spectator bit; the pre-deploy ordinary-player leg of the same predicate stays
-  a D-NET-139 residual). S2C `0x16` marks
+  branch covers spectating (OpenNova stores it the same way since the
+  2026-08-30 tidy round: `Connection::respawn_pending` is held by join-time
+  spectators, the predicate reads it, and the pre-deploy ordinary-player leg
+  rides the same bit — see "The slot hide bytes and the deploy hold" above).
+  S2C `0x16` marks
   the row's low flag bit and increments the spectator trailer count, which moves
   it into the retail scoreboard's spectator column.
 - `Entity_UpdateInfantryPlayerBody @0x4b40e0` diverts a spectator/death-screen
@@ -1119,6 +1121,35 @@ reject vehicles, spawn, scoreboard, priority, and F3 mutation; the Godot suite
 adds a real loopback-UDP spectator join (including the DPC 16 password punt),
 prompt-before-auth, world-tick continuity, and first-free-look camera
 continuity.
+
+**The slot hide bytes and the deploy hold (2026-08-30 tidy-round grill).** The
+"unmodeled `slot+97536/97537`" residual is resolved by an image-wide xref
+sweep: byte **97536** tracks the spectator latch (`slot+100567`) exactly —
+writers `Server_PlayerAdd @0x51d0ce`, `Server_OnPlayerJoin @0x51a79c`, the
+permadeath conversion in `Server_KillPlayerAndNotify @0x519e76` (which also
+SETS the latch: saved team → `+100568`, team byte zeroed), and the
+`NetPacket_WritePlayerState` restamp `@0x4ff70f`; both hide bytes clear at the
+leave-spectator block `@0x519fb4..0x519fba` (which then deploys through
+`Server_ProcessPlayerDeath`). Byte **97537** and the paired gate byte
+**96481** are read-but-never-set anywhere in JO 1.7.5.7 (a vestigial second
+hide mode), so every read-side gate reduces: the priority-build admission
+`validated == recipient || (!97537 && !97536)` `@0x50e6fd` = "hide a
+spectator's entity from every other recipient" (ported as the
+`GameEntitySnapshot::owner_hidden` stamp + fan admission), the killer-credit
+clear `@0x516fd1`, the healer-scoring gate `@0x50de88`, and
+`serialize_visible_players_snapshot`'s skip `@0x506399..0x506412` all key off
+the latch alone, and the `96481 && 97536` arms (`Server_CountActivePlayers
+@0x4fd92e`, the `WritePlayerState` dead-bit clear `@0x4ff6dc`) are dead in JO.
+The deploy-hold bit `slot+89912 & 0x10` is set ONCE at join whenever
+`SpawnZoneList_GetCount() > 0` — **unconditional on the spectator latch**
+(`@0x51a6f2`) — and cleared only by the deploy leg (`@0x517791`), so a
+join-time spectator holds it forever and its 0x0A flags1 reads `0x03`; the
+priority build's dead-or-spectator predicate reads exactly this storage
+(`@0x50e68c`), the t35 deploy-idle punt explicitly exempts spectators
+(`@0x51e11f`), and the 0x0E dead-or-pending gate (`@0x519cc7`) carries no
+spectator check at that layer. The reimpl stores it the same way
+(`netsim::Connection::respawn_pending` held by join-time spectators; the
+former `conn.spectator ||` predicate inference is deleted).
 
 ### 5.1 Loading-progress counter — `dword_A82370`
 
