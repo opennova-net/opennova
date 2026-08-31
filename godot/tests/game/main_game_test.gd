@@ -506,7 +506,7 @@ func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> vo
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.set_crosshair_style(13)
-	assert_eq(presenter._crosshair_style, 13,
+	assert_eq(presenter.crosshair_style(), 13,
 			"a pre-HUD choice is cached for the lazy build")
 
 	var hud := FakeGameHud.new()
@@ -515,7 +515,7 @@ func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> vo
 	assert_eq(hud.crosshair_style, 17,
 			"a paused game's existing HUD adopts the menu selection immediately")
 	presenter.set_crosshair_style(99)
-	assert_eq(presenter._crosshair_style, HudOverlay.MAX_CROSSHAIR_STYLE,
+	assert_eq(presenter.crosshair_style(), HudOverlay.MAX_CROSSHAIR_STYLE,
 			"the presenter keeps its lazy-build cache in the native art range")
 
 func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
