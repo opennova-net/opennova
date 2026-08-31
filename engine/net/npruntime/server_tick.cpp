@@ -1082,8 +1082,10 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 		// A remote player held in the join-time state-byte 0x10 deployment
 		// state for strictly more than six minutes receives t35. This is based
 		// on the state-6 entry timestamp, not world ticks or entity damage time,
-		// and remains eligible before the initial burst reaches InMatch.
-		// [orig: Server_TickUpdate @0x51E109, compare 0x57E40]
+		// and remains eligible before the initial burst reaches InMatch. A
+		// spectator holds the deploy bit forever and is explicitly EXEMPT
+		// [orig: Server_TickUpdate @0x51E109, compare 0x57E40; the spectator
+		// bail `cmp slot+100567, 0` @0x51e11f].
 		const bool join_deploy_idle_gate = ctx.is_in_session &&
 				!conn.host_disconnect_sent && conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.phase >= ConnectionPhase::PlayerAdded &&
@@ -1092,6 +1094,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 				conn.link.owned_entity.valid() &&
 				world.registry.get(conn.link.owned_entity) != nullptr &&
 				conn.link.respawn_pending &&
+				!conn.link.spectator &&
 				reply.state6_entry_host_ms_valid;
 		if (join_deploy_idle_gate &&
 				static_cast<uint32_t>(ctx.np_protocol.host_run_duration_ms -
@@ -1693,6 +1696,19 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, ServerTickPerf *perf) {
 			}
 			const uint64_t snapshot_start = perf != nullptr ? io::perf_now_us() : 0;
 			ents = netsim::snapshot_world(world);
+			// Stamp owner-hidden rows: a spectator connection's own player entity
+			// is admitted only to its owner's list (the JO reduction of the
+			// slot+97536 hide byte — see replication_model.h owner_hidden)
+			// [orig: Server_BuildEntityPriorityList @0x50e6fd].
+			for (const NapiNPConnection &oc : ctx.np_protocol.connection_list) {
+				if (!oc.link.spectator || !oc.link.owned_entity.valid()) continue;
+				for (GameEntitySnapshot &es : ents) {
+					if (es.wire_handle == oc.link.owned_entity.packed) {
+						es.owner_hidden = true;
+						break;
+					}
+				}
+			}
 			if (perf != nullptr)
 				perf->replication_snapshot_us += io::perf_now_us() - snapshot_start;
 		}

@@ -108,22 +108,27 @@ struct Connection {
 	bool round_watermark_armed = false;
 
 	// RESPAWN-PENDING / undeployed — the reimpl of the player slot's stateByte bit4
-	// (slot+89912 & 0x10). Set at join iff the mission offers deploy-selectable spawn zones
+	// (slot+89912 & 0x10). Set at join iff the mission offers deploy-selectable spawn zones,
+	// UNCONDITIONAL on the spectator latch — a join-time spectator holds the bit forever
 	// [orig: Server_OnPlayerJoin @0x51a6f2 `|= 0x10 iff SpawnZoneList_GetCount() > 0`];
-	// cleared by a successful 0x0E deploy [orig: Server_ProcessPlayerDeath @0x517791
+	// cleared only by the deploy leg [orig: Server_ProcessPlayerDeath @0x517791
 	// `and 0xEF`]. While set: the connection's 0x0A header flags1 carries bit1 EVERY frame
 	// (the client's deploy screen is held open by it — one flags1 bit1=0 frame closes it
 	// [orig: NetPacket_WritePlayerState @0x4ff7bd; client g_deploy_screen_active = (flags1 & 2) != 0
-	// @0x42ff82]), the player entity carries the hidden bit0, and the 0x0E handler accepts
-	// a deploy from an alive-but-undeployed player (the dead-or-pending gate @0x519cc7).
-	// Death does NOT set it — the death screen is client-local (D-NET-156).
+	// @0x42ff82]; a spectator client's free-fly ignores the held bit), the pre-deploy
+	// player entity carries the hidden bit0, the 0x0E handler accepts a deploy from an
+	// alive-but-undeployed player (the dead-or-pending gate @0x519cc7 — retail places no
+	// spectator check at that layer either), and the priority build's flat branch reads
+	// this bit for its dead-or-spectator recipient predicate [orig: @0x50e68c]. The t35
+	// deploy-idle punt explicitly EXEMPTS spectators [orig: @0x51e11f]. Death does NOT
+	// set it — the death screen is client-local (D-NET-156).
 	// The live player-slot spectator mode. Admission and F3 both land here;
 	// 0x75, 0x16, and 0x0A flags1 bit0 read this one canonical bit
 	// [orig: playerSlot+100567; NetPacket_WritePlayerState @0x4ff795]. The
-	// priority build's flat branch also keys off it here, standing in for
-	// retail's deploy-hold storage read (slot+89912 & 0x10 @0x50e67c) that a
-	// never-deploying spectator holds (D-NET-217; pre-deploy players stay a
-	// D-NET-139 residual).
+	// slot hide byte 97536 tracks this latch exactly in JO (writers PlayerAdd
+	// @0x51d0ce / OnPlayerJoin @0x51a79c / the permadeath conversion @0x519e76;
+	// 97537 and the paired gate 96481 are read-but-never-set), so the
+	// owner-hidden replication stamp reduces to this bit (D-NET-217).
 	bool spectator = false;
 	bool respawn_pending = false;
 

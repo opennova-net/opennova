@@ -304,16 +304,20 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// RESPAWN-PENDING at join, iff the mission offers deploy-selectable spawn zones — the
 	// joiner enters UNDEPLOYED and its per-frame 0x0A flags1 bit1 holds the deploy screen
 	// open until a successful C2S 0x0E pick clears it [orig: Server_OnPlayerJoin @0x51a6f2
-	// stateByte |= 0x10 iff SpawnZoneList_GetCount() > 0; the pre-placed entity is the
-	// deploy-camera anchor]. The pending entity is HIDDEN (state_flags bit0 — the golden
-	// pre-deploy record byte13 = 0x01) [orig: NetPacket_WritePlayerState @0x4ff7dd ORs
-	// entity+36 bit0 each frame while pending]. The host's OWN loopback player skips the
-	// hold — it deploys through the local flow, not the wire. (D-NET-156)
-	if (!conn.link.spectator && !is_host_own && world::world_has_spawn_zone(world)) {
+	// stateByte |= 0x10 iff SpawnZoneList_GetCount() > 0 — UNCONDITIONAL on the spectator
+	// latch, so a join-time spectator holds the bit forever (nothing ever deploys it);
+	// the sole clear is the deploy leg of Server_ProcessPlayerDeath @0x517791]. The
+	// pending entity is HIDDEN (state_flags bit0 — the golden pre-deploy record
+	// byte13 = 0x01) [orig: NetPacket_WritePlayerState @0x4ff7dd ORs entity+36 bit0
+	// each frame while pending]. The host's OWN loopback player skips the hold — it
+	// deploys through the local flow, not the wire. (D-NET-156)
+	if (!is_host_own && world::world_has_spawn_zone(world)) {
 		conn.link.respawn_pending = true;
-		if (world::Entity *pe = world.registry.get(h)) {
-			pe->flags |= 1u;
-			pe->damage_state = 620;
+		if (!conn.link.spectator) {
+			if (world::Entity *pe = world.registry.get(h)) {
+				pe->flags |= 1u;
+				pe->damage_state = 620;
+			}
 		}
 		// The join-time respawn countdown (entity+292 = 620 ticks) is display/wave state the
 		// 0x6E status reports; with default host wave options the deploy is pick-driven, so
@@ -324,9 +328,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		// hidden and permanently damage-disabled while S2C 0x75 drives the
 		// client's free-fly camera: the spectator leg stores entity+36 |= 1
 		// and entity+292 = -1 (no 620-tick countdown — the dead/disabled
-		// sentinel). [orig: Server_PlayerAdd @0x51cbc0 — the slot+100567
-		// branch; Entity_UpdateInfantryPlayerBody @0x4b40e0]
-		conn.link.respawn_pending = false;
+		// sentinel). The deploy-hold bit set above stays held, so the
+		// spectator's 0x0A flags1 reads 0x03 (spectator | deploy-hold) exactly
+		// like a retail join-time spectator's slot state. [orig:
+		// Server_PlayerAdd @0x51cbc0 — the slot+100567 branch;
+		// Entity_UpdateInfantryPlayerBody @0x4b40e0]
 		if (world::Entity *pe = world.registry.get(h)) {
 			pe->team = 0;
 			pe->flags |= 1u;
@@ -408,7 +414,11 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	world::AiEntity *ai =
 			world.ai != nullptr ? world.ai->for_handle(player->handle) : nullptr;
 	world::entity_detach_from_vehicle(world, player->handle);
-	conn.link.respawn_pending = false;
+	// The deploy-hold bit is untouched on ENTERING spectator mode (retail's
+	// runtime conversion @0x519e76 leaves slot+89912 alone — a deployed
+	// convert has it clear, an undeployed one keeps holding it); LEAVING runs
+	// the deploy below, which clears it like the witnessed deploy leg
+	// [orig: Server_ProcessPlayerDeath @0x517791 `and 0xEF`].
 
 	if (spectator) {
 		const uint8_t current_team =
@@ -434,6 +444,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	}
 
 	conn.link.spectator = false;
+	conn.link.respawn_pending = false;
 	uint8_t team = conn.spectator_restore_team;
 	if (team == 0) team = 1;
 	conn.assigned_team = team;
