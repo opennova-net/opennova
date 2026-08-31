@@ -11,6 +11,7 @@
 #include <runtime/devtools/environment_request.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
+#include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/imgui_abi.h>
@@ -37,6 +38,9 @@ using opennova::devtools::EntityDetailSnapshot;
 using opennova::devtools::EnvironmentRequest;
 using opennova::devtools::EnvironmentSnapshot;
 using opennova::devtools::EnvironmentWindow;
+using opennova::devtools::RaysRequest;
+using opennova::devtools::RaysSnapshot;
+using opennova::devtools::RaysWindow;
 using opennova::devtools::EntityDirectorySnapshot;
 using opennova::devtools::EntityPropertiesWindow;
 using opennova::devtools::GameViewport;
@@ -144,8 +148,8 @@ void test_attach_sets_docking_and_viewport_policy() {
 
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 7,
-			"Game + Stats + Entities + Entity Properties + Environment + AI + demo registered");
+	CHECK(tools.pass().window_count() == 8,
+			"Game + Stats + Entities + Entity Properties + Environment + AI + Rays + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -172,7 +176,10 @@ void test_game_window_is_mandatory_and_detachable() {
 	CHECK(!tools.pass().window(5).open, "the AI window starts closed");
 	CHECK(tools.pass().window(5).initial_dock_placement() == InitialDockPlacement::RightBottom,
 			"AI starts under the right column beside the card");
-	CHECK(!tools.pass().window(6).open, "the demo window starts closed");
+	CHECK(std::strcmp(tools.pass().window(6).title(), "Rays") == 0,
+			"Rays registers after AI");
+	CHECK(!tools.pass().window(6).open, "the Rays window starts closed");
+	CHECK(!tools.pass().window(7).open, "the demo window starts closed");
 }
 
 void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
@@ -317,10 +324,10 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 7,
-			"Game + Stats + Entities + Entity Properties + Environment + AI + demo registered");
+	CHECK(tools.pass().window_count() == 8,
+			"Game + Stats + Entities + Entity Properties + Environment + AI + Rays + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
-	CHECK(!tools.pass().window(6).open, "the demo window starts closed");
+	CHECK(!tools.pass().window(7).open, "the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
 
 	ImGui::NewFrame();
@@ -1028,6 +1035,83 @@ void test_environment_request_queue() {
 	CHECK(!tools.take_environment_request(request), "the queue drains exactly once");
 }
 
+// The Rays window formats per-category count rows from the pushed record,
+// mirrors the filter state into its edit controls, and drops everything on
+// the visibility close.
+void test_rays_window_formats_the_pushed_record() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	CHECK(!tools.needs_rays_snapshot(), "a closed Rays window needs no snapshot");
+	tools.rays_window().open = true;
+	CHECK(tools.needs_rays_snapshot(), "pass open && window open arms the feed");
+
+	RaysSnapshot snapshot;
+	snapshot.valid = true;
+	snapshot.logic_tick = 620;
+	snapshot.recording = true;
+	snapshot.view_shown = true;
+	snapshot.category_mask = 0x7FFF;
+	snapshot.ttl_ticks = 93;
+	snapshot.categories[0].name = "Uncategorized";
+	snapshot.categories[1].name = "Projectile";
+	snapshot.categories[1].held = 12;
+	snapshot.categories[1].total = 340;
+	for (int i = 2; i < opennova::devtools::kRayCategoryCount; ++i) {
+		snapshot.categories[i].name = "x";
+	}
+	tools.set_rays_snapshot(snapshot);
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with the Rays window open");
+	ImGui::Render();
+	CHECK(ImGui::FindWindowByName("Rays") != nullptr, "the Rays window exists after a pass");
+
+	const RaysWindow &window = tools.rays_window();
+	CHECK(window.snapshot_valid(), "the pushed snapshot is the reading");
+	CHECK(window.row_count() == opennova::devtools::kRayCategoryCount,
+			"every category formats a row");
+	CHECK(std::strcmp(window.row_text(0), "Uncategorized: held 0 / total 0") == 0,
+			"an idle category row");
+	CHECK(std::strcmp(window.row_text(1), "Projectile: held 12 / total 340") == 0,
+			"held rides the ring, total is the lifetime counter");
+
+	tools.set_rays_snapshot(RaysSnapshot{});
+	CHECK(!window.snapshot_valid() && window.row_count() == 0,
+			"an invalid snapshot clears the page (the world unloaded)");
+	tools.set_rays_snapshot(snapshot);
+	CHECK(window.row_count() == opennova::devtools::kRayCategoryCount,
+			"a re-push restores the page");
+	tools.pass().set_open(false);
+	CHECK(!tools.needs_rays_snapshot(), "closing the pass drops the need");
+	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
+}
+
+// The RaysRequest channel: enqueue/take round-trips the typed filter, TTL,
+// clear and view-toggle requests in order and drains exactly once.
+void test_rays_request_queue() {
+	GameDevTools tools;
+	RaysRequest request;
+	CHECK(!tools.take_rays_request(request), "fresh tools hold no rays request");
+	tools.rays_window().enqueue_request({RaysRequest::Kind::SetCategoryMask, 0x0003});
+	tools.rays_window().enqueue_request({RaysRequest::Kind::SetTtlTicks, 310});
+	tools.rays_window().enqueue_request({RaysRequest::Kind::Clear, 0});
+	tools.rays_window().enqueue_request({RaysRequest::Kind::SetViewShown, 1});
+	CHECK(tools.take_rays_request(request) &&
+					request.kind == RaysRequest::Kind::SetCategoryMask && request.a == 0x0003,
+			"the mask request round-trips first");
+	CHECK(tools.take_rays_request(request) &&
+					request.kind == RaysRequest::Kind::SetTtlTicks && request.a == 310,
+			"the TTL request follows");
+	CHECK(tools.take_rays_request(request) && request.kind == RaysRequest::Kind::Clear,
+			"the clear request follows");
+	CHECK(tools.take_rays_request(request) &&
+					request.kind == RaysRequest::Kind::SetViewShown && request.a == 1,
+			"the view toggle carries its state for the shell");
+	CHECK(!tools.take_rays_request(request), "the queue drains exactly once");
+}
+
 }  // namespace
 
 AiDebugSnapshot ai_snapshot() {
@@ -1246,6 +1330,8 @@ int main() {
 	test_ai_window_formats_the_pushed_snapshot();
 	test_ai_window_toggle_requests();
 	test_ai_window_detail_pane_follows_the_selection();
+	test_rays_window_formats_the_pushed_record();
+	test_rays_request_queue();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

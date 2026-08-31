@@ -1,8 +1,8 @@
 // The game's dev tools (ADR 0039): the ImGui pass behind F3 with its mandatory
 // Game surface, the Stats window (both open by default), the Entities and
 // Entity Properties windows (closed by default, opened by a world pick; the
-// pushed-record/typed-request channel, ADR 0042 d6), the Environment and AI
-// windows (closed by default, opened from the "Windows" menu), and ImGui's
+// pushed-record/typed-request channel, ADR 0042 d6), the Environment, AI and
+// Rays windows (closed by default, opened from the "Windows" menu), and ImGui's
 // demo window (the docking/multi-viewport smoke test). Debug builds only
 // (OPENNOVA_DEVTOOLS); the release GDExtension flavour compiles this out and
 // its DevTools node is inert.
@@ -20,6 +20,7 @@ class EntitiesWindow;
 class EntityPropertiesWindow;
 class EnvironmentWindow;
 class AiWindow;
+class RaysWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct DebugRequest;
@@ -29,6 +30,8 @@ struct EnvironmentRequest;
 struct EnvironmentSnapshot;
 struct AiDebugSnapshot;
 struct AiViewRequest;
+struct RaysRequest;
+struct RaysSnapshot;
 
 class GameDevTools {
 public:
@@ -46,6 +49,8 @@ public:
 	const EnvironmentWindow &environment_window() const { return *environment_window_; }
 	AiWindow &ai_window() { return *ai_window_; }
 	const AiWindow &ai_window() const { return *ai_window_; }
+	RaysWindow &rays_window() { return *rays_window_; }
+	const RaysWindow &rays_window() const { return *rays_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_spectator_state(bool available, bool active);
@@ -88,11 +93,21 @@ public:
 
 	// The AI window's record/request channel (the same shape): the AI debug
 	// join pushed by value on its cadence while shown, and the typed overlay
-	// toggles drained into the shell's world-view seam (the one request family
+	// toggles drained into the shell's world-view seam (a request family
 	// whose target is a device, not the engine command layer).
 	void set_ai_debug(AiDebugSnapshot snapshot);
 	bool needs_ai_debug() const;
 	bool take_ai_view_request(AiViewRequest &request);
+
+	// The Rays window's record/request channel (the same shape): the ray
+	// capture's counts + filter state pushed by value on its cadence while
+	// shown, and the typed filter/clear/view-toggle requests drained by the
+	// embedder (filter and clear into the Simulation ray-debug seam; the view
+	// toggle out to the shell that owns the 3D view).
+	void set_rays_snapshot(const RaysSnapshot &snapshot);
+	bool needs_rays_snapshot() const;
+	bool take_rays_request(RaysRequest &request);
+
 
 private:
 	ImGuiPass pass_;
@@ -102,6 +117,7 @@ private:
 	EntityPropertiesWindow *entity_properties_window_ = nullptr;
 	EnvironmentWindow *environment_window_ = nullptr;
 	AiWindow *ai_window_ = nullptr;
+	RaysWindow *rays_window_ = nullptr;
 };
 
 }  // namespace opennova::devtools

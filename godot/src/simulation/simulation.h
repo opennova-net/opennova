@@ -78,6 +78,7 @@ class EndRoundState;  // the typed end-of-round session facts (simulation_end_ro
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/renderer/precipitation_frame.h>
 #include <runtime/devtools/environment_snapshot.h> // the ONE mission boot + state + no-net tick (ADR 0042 d3)
+#include <runtime/devtools/rays_snapshot.h>
 #include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
 #include <net/inmatch/listen_host.h>              // ListenHostState + the listen bring-up/frame (ADR 0042 d3)
@@ -118,17 +119,17 @@ class ResourceRoot;
 // lifecycle, input retention, fixed cadence, and terminal outcomes. One target
 // advance is the original's 62 Hz engine tick (current_tick in
 // Game_ProcessMainFrame @0x5263f0), while advance_session_frame runs 0..N of
-// those, faithful to Game_MainLoop @0x52b630. The per-system
-// cadences live INSIDE the systems, as in the original: the WAC VM self-gates to every
-// 62nd tick (WacScript_AdvanceTick @0x4f81b1) and the BMS evaluator quarter-passes every 16th
-// (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live owner for
-// this path; focused tests and non-gameplay tools may instantiate it directly:
-// promote a parsed BMS mission into the world
-// (mission/promote.h), register the systems in the faithful order
-// (mission/mission_systems.h), run a pre-mission pass, then tick. Entity transforms
-// (mission space -> Godot space) and the part-anim phase are exposed for a scene/renderer
-// to draw; presentation side effects (text/dialog/win) drain out of the World
-// EffectLog each tick. Runtime transport and fixture teardown use the same
+// those, faithful to Game_MainLoop @0x52b630. Per-system cadences live INSIDE
+// the systems, as in the original: the WAC VM self-gates to every 62nd tick
+// (WacScript_AdvanceTick @0x4f81b1) and the BMS evaluator quarter-passes every
+// 16th (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live
+// owner for this path; focused tests and non-gameplay tools may instantiate it
+// directly: promote a parsed BMS mission into the world (mission/promote.h),
+// register the systems in the faithful order (mission/mission_systems.h), run
+// a pre-mission pass, then tick. Entity transforms (mission -> Godot space)
+// and the part-anim phase are exposed for a scene/renderer to draw;
+// presentation side effects (text/dialog/win) drain out of the World EffectLog
+// each tick. Runtime transport and fixture teardown share the
 // play/pause/step/restart surface.
 class Simulation : public Node3D,
                        private opennova::inmatch::TickTarget {
@@ -788,9 +789,6 @@ private:
 	// the npruntime owner loop = Server_TickUpdate + tick_connections + handle_server_datagram);
 	// the joiner is a non-authority np::ClientRuntime. The Godot net bindings stay PURE socket
 	// pumps — all protocol/crypto/framing lives in libs (ADR 0009-0012, .agents/network.md).
-	// host_loop_ MUST be declared before runtime_: the HostClient ClientRuntime holds a
-	// non-owning reference into host_loop_, so the loopback has to outlive (and not move under)
-	// the runtime.
 	// The SP/LAN listen session's net state (inmatch::ListenHostState): the
 	// loopback + the np host owner the ONE listen frame
 	// (inmatch::listen_host::frame) drives — ctx + per-peer transports +
@@ -2240,17 +2238,16 @@ public:
 	bool occlusion_water_visible() const;
 
 	// Read-only collision-world geometry for the F3 "Show collision" debug view:
-	// { instances: [ { entity_handle, pos (Godot space), heading (mission yaw deg),
-	//   volumes: [ { type, min_x..max_z (section-local units), corners:
-	//   PackedVector3Array[8] (Godot world space, index bit0=max x / bit1=max y /
-	//   bit2=max z in mission axes) } ] } ],
-	//   player: { valid, position, points (PackedVector3Array[3]), radii
-	//   (PackedFloat32Array[3]), capsule_bottom, capsule_top, foot_clearance } }.
-	// Volumes are transformed through the SAME fixed-point path the resolver
-	// queries use (CollisionWorld::debug_instances -> target_view ->
-	// collision_matrix_from_heading), so the drawn boxes ARE what movement
-	// resolves against. Output is capped: instances within 150u of the local
-	// player (or the first 128 instances when no player is spawned).
+	// { instances: [ { entity_handle, pos (Godot space), heading (mission yaw
+	//   deg), volumes: [ { type, min_x..max_z (section-local units), corners:
+	//   PackedVector3Array[8] (Godot world; index bit0/1/2 = max x/y/z in
+	//   mission axes) } ] } ], player: { valid, position, points
+	//   (PackedVector3Array[3]), radii (PackedFloat32Array[3]), capsule_bottom,
+	//   capsule_top, foot_clearance } }. Volumes use the SAME fixed-point path
+	// the resolver queries (CollisionWorld::debug_instances -> target_view ->
+	// collision_matrix_from_heading): the drawn boxes ARE what movement
+	// resolves against. Capped to instances within 150u of the local player
+	// (first 128 with no player spawned).
 	Dictionary get_collision_debug() const;
 
 	// The AI overlay's per-frame payload (godot-space, the collision-debug
@@ -2266,26 +2263,33 @@ public:
 	// engine join as the engine struct, no Variant round-trip. False without a
 	// kernel or on a joiner.
 	bool native_ai_debug(opennova::world::inspect::AiDebugReport &r_out) const;
-
 	// Read-only snapshot of the RoundSim debug ring for the F3 "Rounds" tab:
 	// { tick, events: [ { tick, kind, kind_name, material, section, face,
 	//   secondary_section, fallback, effect_tag, effect_tag_name, entity_handle,
-	//   shooter_handle, ammo_index,
-	//   husk, t, p0, p1, hit (Godot-space Vector3), entity_name } ] } — oldest
-	// first, capped at RoundSim::kDebugTrailCap. Covers every resolved outcome
-	// including face-miss fly-ons (the "why didn't that register" case).
+	//   shooter_handle, ammo_index, husk, t, p0, p1, hit (Godot-space Vector3),
+	//   entity_name } ] } — oldest first, capped at RoundSim::kDebugTrailCap;
+	// every resolved outcome, face-miss fly-ons included.
 	Dictionary get_round_debug() const;
+	// Engine ray-debug capture (CollisionWorld rings + engine-owned mask/TTL
+	// draw filter) behind the F3 "Show rays" view and Rays window; counts ride
+	// native_rays_snapshot (ADR 0042 d6). Filter setter: -1 keeps a value.
+	Dictionary get_ray_debug() const;
+	void set_ray_debug_recording(bool p_enabled);
+	bool is_ray_debug_recording() const;
+	void set_ray_debug_filter(int64_t p_mask, int64_t p_ttl_ticks);
+	void clear_ray_debug();
+	bool native_rays_snapshot(opennova::devtools::RaysSnapshot &out) const;
 	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
-	// rounds with a TrcrID model plus placed devices. Entries: {key, item_id, pos (godot),
-	// rotation_deg (pitch, yaw, roll — placer convention)}; the enemy-team item
-	// swap follows the viewer team [orig: the S2C 0x59 dual TrcrID words +
-	// the spawner's team pick @ 0x4ec79b; world-wac-ai-re §27].
+	// rounds with a TrcrID model plus placed devices. Entries: {key, item_id,
+	// pos (godot), rotation_deg (pitch, yaw, roll — placer convention)}; the
+	// enemy-team item swap follows the viewer team [orig: the S2C 0x59 dual
+	// TrcrID words + the spawner's team pick @ 0x4ec79b; world-wac-ai-re §27].
 	Array get_throwable_visuals() const;
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's
-	// camera (Godot space), fog distance and the combined terrain light colour
-	// (Env_TerrainLightCombined — EnvFile.combine_terrain_light(sun, sky)).
+	// camera (Godot space), fog distance and Env_TerrainLightCombined
+	// (EnvFile.combine_terrain_light(sun, sky) — the sun+sky combine).
 	// { vertices (PackedVector3Array, Godot axes; world space for shared-ring
 	//   batches, SECTION-LOCAL for entity-ring batches), uvs, colors,
 	//   batch_owner/texture/section/flags(bit0 entity_local, bit1 building)/
@@ -2303,29 +2307,27 @@ public:
 	//   materials (PackedByteArray per tri), flags (PackedInt32Array per tri) } ],
 	//   organics: [ { entity_handle, section, pos (sphere center, Godot),
 	//   radius, authored_radius, masked, fallback } ] }.
-	// Triangles are transformed in C++ through the SAME husk-aware
-	// target_view + full-euler matrices the projectile raycast uses — the
-	// drawn mesh IS the tested mesh. The payload is capped at 96 entities /
-	// 24000 item faces within 80 u of the local player (face_total exposes
-	// per-entity truncation). Organic posed/fallback spheres use the same range
-	// and actor cap, omit the local avatar, and use the exact CollisionWorld
-	// target matrices consumed by RoundSim.
+	// Triangles use the SAME husk-aware target_view + full-euler matrices the
+	// projectile raycast uses — the drawn mesh IS the tested mesh; capped at 96
+	// entities / 24000 item faces within 80 u of the local player (face_total
+	// exposes truncation). Organic posed/fallback spheres share the range/actor
+	// cap, omit the local avatar, and use the exact CollisionWorld target
+	// matrices consumed by RoundSim.
 	Dictionary get_hitbox_debug();
 
-	// Diagnostic round injector: spawns one live round through the REAL
-	// RoundSim::spawn (production velocity/tracer/trail path; owner = the local
-	// player) from a Godot-space origin along a Godot-space direction, firing
-	// the named ammo ("AMMO_556", "AMMO_M203_40MM_NADE", ...). The world tick
 	// The F3 entity picker: one plain geometric trace_projectile segment
 	// (terrain / water / static + dynamic CFAC / person bone spheres, nearest
-	// wins) along a camera or crosshair ray. Read-only — never affects the
-	// sim. Stable-shape Dictionary; hit=false with blocked =
-	// "terrain"/"water"/"proxy" names why the ray stopped without a pickable
-	// entity (proxies = wire-decoded geometry on joined visual-only clients).
+	// wins) along a camera or crosshair ray. Read-only. Stable-shape
+	// Dictionary; hit=false with blocked = "terrain"/"water"/"proxy" naming
+	// why the ray stopped without a pickable entity (proxies = wire geometry).
 	Dictionary debug_pick_entity(const Vector3 &p_from_godot,
 			const Vector3 &p_dir_godot, float p_max_range_units);
-	// flies it and the F3 Rounds ring records the outcome — the pose-replay
-	// probe's seam. Returns the round slot, -1 on bad ammo/full pool.
+	// Diagnostic round injector: spawns one live round through the REAL
+	// RoundSim::spawn (production velocity/tracer/trail path; owner = the
+	// local player) from a Godot-space origin along a Godot-space direction,
+	// firing the named ammo ("AMMO_556", ...). The world tick flies it and the
+	// F3 Rounds ring records the outcome — the pose-replay probe's seam.
+	// Returns the round slot, -1 on bad ammo/full pool.
 	int debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
 	                      const String &p_ammo_name);
 
@@ -2404,8 +2406,7 @@ public:
 	// proximity-candidate slice for blink classification, the nonzero-count sun
 	// gate, and both pool-1/pool-2 sun blockers.
 	// [orig: compute_ambient_light_along_direction @ 0x5c7a00;
-	//  terrain_sector_compute_lighting @ 0x5c7550;
-	//  raycast_entity_collision @ 0x413760]
+	//  terrain_sector_compute_lighting @ 0x5c7550; raycast_entity_collision @ 0x413760]
 	PackedInt32Array compute_iris_samples(const Vector3 &cam_pos, const Vector3 &cam_forward,
 	                                      const Vector3 &light_dir);
 

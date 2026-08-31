@@ -600,6 +600,10 @@ func _register_option_rows() -> void:
 			"Draw the recent round outcomes over the world — flight segments and hit markers colored by result (green = face hit, amber = sphere stand-in, red ring = a graze whose face test missed and flew on).",
 			func(world: GameWorld) -> bool: return world.is_round_debug(),
 			func(world: GameWorld, on: bool) -> void: world.set_round_debug(on))
+	_world_check(&"show_rays", &"Rounds", "Show rays",
+			"Record every engine raycast and draw it over the world, colored by category and fading over ~1.5 s: bullets and knife swings, throwable sweeps, AI / script / replication / explosion LOS, ground probes, camera iris, render occlusion, sun visibility, sound occlusion, precipitation floor and F3 picks. A cross marks a resolved hit point; the clipped remainder past it draws faint; boolean blocked rays draw darkened. The F3 Rays window filters categories and shows per-category counts.",
+			func(world: GameWorld) -> bool: return world.is_ray_debug(),
+			func(world: GameWorld, on: bool) -> void: world.set_ray_debug(on))
 	_world_check(&"show_ai_overlay", &"AI", "Show AI overlay",
 			"Draw the AI debug overlay over the world: state/alert labels above every brain, nav-channel routes, target/aim lines, and perception rings (the F3 AI window's world view; the master toggle for the element rows below).",
 			func(world: GameWorld) -> bool: return world.is_ai_debug(),

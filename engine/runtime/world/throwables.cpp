@@ -233,6 +233,8 @@ bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &
                       const MotorFrame &from_to, int32_t speed,
                       ProjectileHit &out) {
     if (collision == nullptr || speed <= 0) return false;
+    const CollisionWorld::RayDebugScope ray_scope(
+            collision, CollisionWorld::RayDebugCategory::kThrowable);
     ProjectileTrace trace;
     trace.start = FixedVec3{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
     trace.end = FixedVec3{from_to.px, from_to.py, from_to.pz};
@@ -1041,6 +1043,8 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
         const int32_t b[3] = {to_fixed(e->position.x), to_fixed(e->position.y),
                               to_fixed(e->position.z) + 19660};
         if (queries != nullptr) {
+            const CollisionWorld::RayDebugScope ray_scope(
+                    queries, CollisionWorld::RayDebugCategory::kThrowable);
             if (!queries->raycast_clear(world, eye, b, device.entity, h)) continue;
         } else if (terrain != nullptr && los_terrain_blocked(*terrain, eye, b)) {
             continue;

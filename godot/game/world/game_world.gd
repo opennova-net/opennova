@@ -2422,6 +2422,14 @@ func is_round_debug() -> bool:
 	return _debug_views.is_round_debug()
 
 
+func set_ray_debug(enabled: bool) -> void:
+	_debug_views.set_ray_debug(enabled)
+
+
+func is_ray_debug() -> bool:
+	return _debug_views.is_ray_debug()
+
+
 func set_hitbox_debug(enabled: bool) -> void:
 	_debug_views.set_hitbox_debug(enabled)
 

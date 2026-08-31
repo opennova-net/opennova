@@ -946,6 +946,9 @@ Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
 	trace.owner = kernel_->world.cached.local_player;
 	trace.radius_q16 = 0;
 	trace.ammo_flags = 0;
+	const opennova::world::CollisionWorld::RayDebugScope ray_scope(
+	    kernel_->collision,
+	    opennova::world::CollisionWorld::RayDebugCategory::kPick);
 	const opennova::world::ProjectileHit hit =
 	    kernel_->collision.trace_projectile(kernel_->world, trace);
 	if (!hit.hit()) return out;
@@ -1055,6 +1058,130 @@ Dictionary Simulation::get_round_debug() const {
 	}
 	out["tick"] = static_cast<int64_t>(kernel_->world.logic_tick);
 	return out;
+}
+
+// The report behind RayDebugView (godot/game/debug/ray_debug_view.gd) and the
+// probes: { tick, stride: 12, events: PackedFloat32Array — per event
+// [category, age_ticks, result, sx,sy,sz, ex,ey,ez, hx,hy,hz] (Godot space;
+// result 0 clear / 1 hit at h / 2 blocked with h == e), filtered by the
+// engine-held category mask and TTL, oldest first per category; counts:
+// [ { name, held, total } ] (all categories, unfiltered); mask, ttl,
+// recording }. Empty-but-shaped without a world.
+Dictionary Simulation::get_ray_debug() const {
+	using CW = opennova::world::CollisionWorld;
+	Dictionary out;
+	out["stride"] = 12;
+	out["events"] = PackedFloat32Array();
+	out["counts"] = Array();
+	out["mask"] = static_cast<int64_t>(CW::kRayDebugMaskAll);
+	out["ttl"] = 93;
+	out["recording"] = false;
+	out["tick"] = 0;
+	if (!kernel_) return out;
+	const CW &collision = kernel_->collision;
+	const uint32_t now = kernel_->world.logic_tick;
+	const uint32_t mask = collision.ray_debug_mask();
+	const int32_t ttl = collision.ray_debug_ttl_ticks();
+	out["tick"] = static_cast<int64_t>(now);
+	out["mask"] = static_cast<int64_t>(mask);
+	out["ttl"] = static_cast<int64_t>(ttl);
+	out["recording"] = collision.ray_debug_enabled();
+
+	Array counts;
+	PackedFloat32Array events;
+	const auto &rings = collision.ray_debug_rings();
+	for (size_t c = 0; c < rings.size(); ++c) {
+		const CW::RayDebugRing &ring = rings[c];
+		Dictionary count;
+		count["name"] = String(CW::ray_debug_category_name(
+				static_cast<CW::RayDebugCategory>(c)));
+		count["held"] = static_cast<int64_t>(ring.count);
+		count["total"] = static_cast<int64_t>(ring.total);
+		counts.push_back(count);
+		if ((mask & (1u << c)) == 0) continue;
+		if (ring.count <= 0) continue;
+		// Oldest -> newest so the view draws newest-last (brightest).
+		int idx = (ring.next - ring.count + 2 * CW::kRayDebugCapPerCategory) %
+		          CW::kRayDebugCapPerCategory;
+		for (int i = 0; i < ring.count;
+				++i, idx = (idx + 1) % CW::kRayDebugCapPerCategory) {
+			const CW::RayDebugEvent &ev = ring.events[static_cast<size_t>(idx)];
+			const uint32_t age = now - ev.tick; // unsigned: a wrapped stamp ages out
+			if (age > static_cast<uint32_t>(ttl)) continue;
+			const int32_t s[3] = {ev.start.x, ev.start.y, ev.start.z};
+			const int32_t e[3] = {ev.end.x, ev.end.y, ev.end.z};
+			const int32_t h[3] = {ev.hit.x, ev.hit.y, ev.hit.z};
+			const Vector3 sg = godot_from_fixed3(s);
+			const Vector3 eg = godot_from_fixed3(e);
+			const Vector3 hg = godot_from_fixed3(h);
+			events.push_back(static_cast<float>(c));
+			events.push_back(static_cast<float>(age));
+			events.push_back(static_cast<float>(ev.result));
+			events.push_back(sg.x);
+			events.push_back(sg.y);
+			events.push_back(sg.z);
+			events.push_back(eg.x);
+			events.push_back(eg.y);
+			events.push_back(eg.z);
+			events.push_back(hg.x);
+			events.push_back(hg.y);
+			events.push_back(hg.z);
+		}
+	}
+	out["events"] = events;
+	out["counts"] = counts;
+	return out;
+}
+
+void Simulation::set_ray_debug_recording(bool p_enabled) {
+	if (!kernel_) return;
+	kernel_->collision.set_ray_debug_enabled(p_enabled);
+}
+
+bool Simulation::is_ray_debug_recording() const {
+	return kernel_ && kernel_->collision.ray_debug_enabled();
+}
+
+void Simulation::set_ray_debug_filter(int64_t p_mask, int64_t p_ttl_ticks) {
+	if (!kernel_) return;
+	if (p_mask >= 0) {
+		kernel_->collision.set_ray_debug_mask(static_cast<uint32_t>(p_mask));
+	}
+	if (p_ttl_ticks >= 0) {
+		kernel_->collision.set_ray_debug_ttl_ticks(
+				static_cast<int32_t>(p_ttl_ticks));
+	}
+}
+
+void Simulation::clear_ray_debug() {
+	if (!kernel_) return;
+	// The enable edge clears; bounce the flag to reuse that one clear path.
+	const bool was = kernel_->collision.ray_debug_enabled();
+	kernel_->collision.set_ray_debug_enabled(false);
+	kernel_->collision.set_ray_debug_enabled(was);
+}
+
+bool Simulation::native_rays_snapshot(opennova::devtools::RaysSnapshot &out) const {
+	using CW = opennova::world::CollisionWorld;
+	out = opennova::devtools::RaysSnapshot{};
+	static_assert(opennova::devtools::kRayCategoryCount ==
+	              static_cast<int>(CW::RayDebugCategory::kCount));
+	for (int c = 0; c < opennova::devtools::kRayCategoryCount; ++c) {
+		out.categories[c].name =
+				CW::ray_debug_category_name(static_cast<CW::RayDebugCategory>(c));
+	}
+	if (!kernel_) return false;
+	out.valid = true;
+	out.logic_tick = kernel_->world.logic_tick;
+	out.recording = kernel_->collision.ray_debug_enabled();
+	out.category_mask = kernel_->collision.ray_debug_mask();
+	out.ttl_ticks = kernel_->collision.ray_debug_ttl_ticks();
+	const auto &rings = kernel_->collision.ray_debug_rings();
+	for (size_t c = 0; c < rings.size(); ++c) {
+		out.categories[c].held = rings[c].count;
+		out.categories[c].total = rings[c].total;
+	}
+	return true;
 }
 
 Dictionary Simulation::get_occlusion_portal_debug(const Vector3 &p_anchor,

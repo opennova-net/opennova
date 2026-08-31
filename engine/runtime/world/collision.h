@@ -39,6 +39,7 @@
 #ifndef OPENNOVA_WORLD_COLLISION_H
 #define OPENNOVA_WORLD_COLLISION_H
 
+#include <array>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -794,6 +795,103 @@ public:
         uint64_t repulsion_us = 0;
         uint64_t ground_us = 0;
     };
+    // Opt-in ray-debug capture: every segment query records one event into a
+    // per-category ring while enabled (dev tooling — the F3 ray view/window
+    // feed, not a ported surface). Per-category rings keep recurring per-frame
+    // categories (replication LOS, sun visibility) from evicting one-shot rays
+    // (a bullet, a pick) inside the view's fade window; `total` counts every
+    // recorded event so ring overwrite never hides true throughput.
+    enum class RayDebugCategory : uint8_t {
+        kUncategorized = 0,
+        kProjectile,
+        kKnife,
+        kThrowable,
+        kAiLos,
+        kReplicationLos,
+        kScriptLos,
+        kExplosionLos,
+        kGroundProbe,
+        kCameraIris,
+        kRenderOcclusion,
+        kSunVisibility,
+        kSoundOcclusion,
+        kPrecipitation,
+        kPick,
+        kCount,
+    };
+    static const char *ray_debug_category_name(RayDebugCategory category);
+    // result: 0 = clear/miss (ray ran its full length), 1 = hit with a resolved
+    // point in `hit`, 2 = blocked (boolean query, no hit point resolved).
+    enum : uint8_t {
+        kRayDebugClear = 0,
+        kRayDebugHit = 1,
+        kRayDebugBlocked = 2,
+    };
+    struct RayDebugEvent {
+        FixedVec3 start;
+        FixedVec3 end; // the requested endpoint
+        FixedVec3 hit; // the resolved stop/clip point (== end when none)
+        uint32_t tick = 0;
+        uint8_t category = 0; // RayDebugCategory
+        uint8_t result = kRayDebugClear;
+        uint16_t reserved = 0;
+    };
+    struct RayDebugRing {
+        std::vector<RayDebugEvent> events; // cap once enabled, empty when off
+        int32_t next = 0;
+        int32_t count = 0;   // saturates at the cap
+        uint64_t total = 0;  // lifetime recorded (the drop-honesty counter)
+    };
+    static constexpr int32_t kRayDebugCapPerCategory = 256;
+    // The presentation filter the ray view/window share: bit i of the mask
+    // draws category i; TTL is the fade window in 62 Hz ticks. Recording is
+    // never filtered — rings capture everything, the mask gates drawing only.
+    static constexpr uint32_t kRayDebugMaskAll = 0x7FFF;
+    uint32_t ray_debug_mask() const { return ray_debug_mask_; }
+    void set_ray_debug_mask(uint32_t mask) { ray_debug_mask_ = mask & kRayDebugMaskAll; }
+    int32_t ray_debug_ttl_ticks() const { return ray_debug_ttl_ticks_; }
+    void set_ray_debug_ttl_ticks(int32_t ticks) {
+        ray_debug_ttl_ticks_ = ticks < 1 ? 1 : (ticks > 620 ? 620 : ticks);
+    }
+    bool ray_debug_enabled() const { return ray_debug_enabled_; }
+    // Disabled by default; each enable/disable edge clears the rings (disable
+    // also frees them — hosts/tests stack-allocate Worlds, keep pools off that
+    // footprint) so a new consumer never inherits another capture's events.
+    void set_ray_debug_enabled(bool enabled);
+    const std::array<RayDebugRing,
+                     static_cast<size_t>(RayDebugCategory::kCount)> &
+    ray_debug_rings() const { return ray_debug_rings_; }
+    // Hot-path recorder: a single cold branch when disabled. The category is
+    // the active RayDebugScope override when set, else `fallback`.
+    void ray_debug_record(RayDebugCategory fallback, uint32_t tick,
+                          const int32_t a[3], const int32_t b[3],
+                          const int32_t *hit_or_null, uint8_t result) const;
+    // Outermost-wins RAII category tag: a scope takes effect only while no
+    // outer scope is active, so a script-LOS caller keeps its tag through the
+    // AI LOS leg it routes through. Cheap either way (one member write).
+    class RayDebugScope {
+    public:
+        RayDebugScope(const CollisionWorld *cw, RayDebugCategory category)
+                : cw_(cw) {
+            if (cw_ != nullptr &&
+                cw_->ray_debug_scope_ == RayDebugCategory::kUncategorized &&
+                category != RayDebugCategory::kUncategorized) {
+                cw_->ray_debug_scope_ = category;
+                owns_ = true;
+            }
+        }
+        RayDebugScope(const CollisionWorld &cw, RayDebugCategory category)
+                : RayDebugScope(&cw, category) {}
+        ~RayDebugScope() {
+            if (owns_) cw_->ray_debug_scope_ = RayDebugCategory::kUncategorized;
+        }
+        RayDebugScope(const RayDebugScope &) = delete;
+        RayDebugScope &operator=(const RayDebugScope &) = delete;
+
+    private:
+        const CollisionWorld *cw_;
+        bool owns_ = false;
+    };
     const TraceProfile &trace_profile() const { return trace_profile_; }
     bool trace_profile_enabled() const { return trace_profile_enabled_; }
     // Profiling is disabled by default. Each enable/disable edge clears the
@@ -1459,6 +1557,13 @@ private:
 
     bool trace_profile_enabled_ = false;
     mutable TraceProfile trace_profile_;
+    bool ray_debug_enabled_ = false;
+    uint32_t ray_debug_mask_ = kRayDebugMaskAll;
+    int32_t ray_debug_ttl_ticks_ = 93; // ~1.5 s at 62 Hz
+    mutable RayDebugCategory ray_debug_scope_ = RayDebugCategory::kUncategorized;
+    mutable std::array<RayDebugRing,
+                       static_cast<size_t>(RayDebugCategory::kCount)>
+            ray_debug_rings_;
     // target_view's model selection without the section-matrix build: fills the
     // entity position and bound radius for the witnessed gate-before-view order.
     // False exactly when target_view would return null; solid_only also

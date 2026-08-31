@@ -20,6 +20,9 @@
 #include <runtime/devtools/environment_request.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
+#include <runtime/devtools/rays_request.h>
+#include <runtime/devtools/rays_snapshot.h>
+#include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/stats_window.h>
 
 #include <algorithm>
@@ -45,6 +48,8 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_game_playing"), &DevTools::is_game_playing);
 	ClassDB::bind_method(D_METHOD("handle_tools_toggle"), &DevTools::handle_tools_toggle);
 	ClassDB::bind_method(D_METHOD("handle_game_escape"), &DevTools::handle_game_escape);
+	ClassDB::bind_method(D_METHOD("take_ray_view_toggle"), &DevTools::take_ray_view_toggle);
+	ClassDB::bind_method(D_METHOD("set_ray_view_shown", "shown"), &DevTools::set_ray_view_shown);
 	ClassDB::bind_method(D_METHOD("get_rendered_game_viewport_size"), &DevTools::get_rendered_game_viewport_size);
 	ClassDB::bind_method(D_METHOD("feed_stats_window", "frames", "sums", "peaks", "sample_frames"),
 			&DevTools::feed_stats_window);
@@ -127,9 +132,11 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 	apply_debug_requests();
 	apply_environment_requests();
 	apply_ai_view_requests();
+	apply_rays_requests();
 	push_entity_detail(push_entity_directory());
 	push_environment_snapshot();
 	push_ai_debug();
+	push_rays_snapshot();
 	if (open_ && !tools_->pass().is_open()) {
 		// Closed from inside (Escape, the menu).
 		set_game_playing_internal(false);
@@ -306,6 +313,7 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 	last_detail_handle_ = -1;
 	last_environment_push_ms_ = -1;
 	last_ai_push_ms_ = -1;
+	last_rays_push_ms_ = -1;
 	// A packed handle names a slot, not an entity: the selection never crosses
 	// from one world to the next.
 	tools_->clear_entity_selection();
@@ -316,6 +324,7 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 		tools_->set_entity_detail(opennova::devtools::EntityDetailSnapshot{});
 		tools_->set_environment_snapshot(opennova::devtools::EnvironmentSnapshot{});
 		tools_->set_ai_debug(opennova::devtools::AiDebugSnapshot{});
+		tools_->set_rays_snapshot(opennova::devtools::RaysSnapshot{});
 	}
 	sync_game_spectator_state();
 }
@@ -583,6 +592,71 @@ void DevTools::push_ai_debug() {
 	tools_->set_ai_debug(std::move(snapshot));
 }
 
+// Drain the Rays window's typed requests: the filter/TTL/clear land on the
+// Simulation's ray-debug seam (the same state the GDScript view reads); the
+// view toggle is a SHELL concern (the debug-view set owns building the view)
+// and parks in pending_ray_view_toggle_ for the shell's per-frame poll.
+void DevTools::apply_rays_requests() {
+	opennova::devtools::RaysRequest request;
+	Simulation *simulation_ = simulation();
+	while (tools_->take_rays_request(request)) {
+		using Kind = opennova::devtools::RaysRequest::Kind;
+		if (request.kind == Kind::SetViewShown) {
+			pending_ray_view_toggle_ = request.a != 0 ? 1 : 0;
+			continue;
+		}
+		if (simulation_ == nullptr) {
+			continue;
+		}
+		switch (request.kind) {
+			case Kind::SetCategoryMask:
+				simulation_->set_ray_debug_filter(request.a, -1);
+				break;
+			case Kind::SetTtlTicks:
+				simulation_->set_ray_debug_filter(-1, request.a);
+				break;
+			case Kind::Clear:
+				simulation_->clear_ray_debug();
+				break;
+			case Kind::SetViewShown:
+				break;
+		}
+	}
+}
+
+// Push the ray-capture record while the Rays window shows, on its 0.25 s
+// cadence: counts + filter state through Simulation::native_rays_snapshot —
+// no Variant round-trip (ADR 0042 d6). The shell-mirrored view state rides
+// along so the window's checkbox reflects the live toggle.
+void DevTools::push_rays_snapshot() {
+	Simulation *simulation_ = simulation();
+	if (simulation_ == nullptr || !tools_->needs_rays_snapshot()) {
+		last_rays_push_ms_ = -1;
+		return;
+	}
+	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	const int64_t cadence_ms = static_cast<int64_t>(
+			opennova::devtools::RaysWindow::kRefreshSeconds * 1000.0);
+	if (last_rays_push_ms_ >= 0 && now_ms - last_rays_push_ms_ < cadence_ms) {
+		return;
+	}
+	last_rays_push_ms_ = now_ms;
+	opennova::devtools::RaysSnapshot snapshot;
+	simulation_->native_rays_snapshot(snapshot);
+	snapshot.view_shown = ray_view_shown_;
+	tools_->set_rays_snapshot(snapshot);
+}
+
+int DevTools::take_ray_view_toggle() {
+	const int pending = pending_ray_view_toggle_;
+	pending_ray_view_toggle_ = -1;
+	return pending;
+}
+
+void DevTools::set_ray_view_shown(bool p_shown) {
+	ray_view_shown_ = p_shown;
+}
+
 void DevTools::reset_layout() {
 	tools_->pass().request_layout_reset();
 }
@@ -710,6 +784,14 @@ bool DevTools::handle_tools_toggle() {
 
 bool DevTools::handle_game_escape() {
 	return false;
+}
+
+int DevTools::take_ray_view_toggle() {
+	return -1;
+}
+
+void DevTools::set_ray_view_shown(bool p_shown) {
+	(void)p_shown;
 }
 
 Vector2i DevTools::get_rendered_game_viewport_size() const {

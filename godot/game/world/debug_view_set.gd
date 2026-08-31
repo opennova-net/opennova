@@ -23,6 +23,7 @@ const CollisionDebugView := preload("res://game/debug/collision_debug_view.gd")
 const OcclusionDebugView := preload("res://game/debug/occlusion_debug_view.gd")
 const ParticleDebugView := preload("res://game/debug/particle_debug_view.gd")
 const RoundDebugView := preload("res://game/debug/round_debug_view.gd")
+const RayDebugView := preload("res://game/debug/ray_debug_view.gd")
 const HitboxDebugView := preload("res://game/debug/hitbox_debug_view.gd")
 const AiDebugView := preload("res://game/debug/ai_debug_view.gd")
 const DebugViewStatus := preload(
@@ -33,6 +34,7 @@ const COLLISION_DEBUG_NAME := "CollisionDebug"
 const PARTICLE_DEBUG_NAME := "ParticleDebug"
 const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
 const ROUND_DEBUG_NAME := "RoundDebug"
+const RAY_DEBUG_NAME := "RayDebug"
 const HITBOX_DEBUG_NAME := "HitboxDebug"
 const AI_DEBUG_NAME := "AiDebug"
 const PICK_DEBUG_NAME := "PickDebug"
@@ -53,6 +55,7 @@ var _collision_view: CollisionDebugView = null
 var _particle_view: ParticleDebugView = null
 var _occlusion_view: OcclusionDebugView = null
 var _round_view: RoundDebugView = null
+var _ray_view: RayDebugView = null
 var _hitbox_view: HitboxDebugView = null
 var _ai_view: AiDebugView = null
 
@@ -66,6 +69,9 @@ var _occlusion_debug := false
 # Debug: draw live emitter bounds + effect names (the dev tools' "Show effect boxes").
 var _particle_debug := false
 var _round_debug := false
+# Debug: draw every engine raycast, color-coded by category (the dev tools'
+# "Show rays"). The toggle also arms/disarms the engine's opt-in recording.
+var _ray_debug := false
 var _hitbox_debug := false
 # The AI overlay's master + element toggles (all retained across reloads; the
 # elements only matter while the master has a view built).
@@ -130,6 +136,11 @@ func get_debug_view_statuses() -> Array[DebugViewStatus]:
 					if _view_live(_round_view) else 0,
 			"No recent rounds to draw", "round trail", "round trails"))
 	statuses.append(_view_status(
+			&"show_rays", _ray_debug, _view_live(_ray_view),
+			_ray_view.get_debug_drawable_count() \
+					if _view_live(_ray_view) else 0,
+			"No recent rays to draw", "ray", "rays"))
+	statuses.append(_view_status(
 			&"show_hit_meshes", _hitbox_debug, _view_live(_hitbox_view),
 			_hitbox_view.get_debug_drawable_count() \
 					if _view_live(_hitbox_view) else 0,
@@ -172,6 +183,8 @@ func on_loaded() -> void:
 		set_occlusion_debug(true)
 	if _round_debug:
 		set_round_debug(true)
+	if _ray_debug:
+		set_ray_debug(true)  # also re-arms recording on the fresh sim
 	if _hitbox_debug:
 		set_hitbox_debug(true)
 	if _ai_debug:
@@ -192,6 +205,7 @@ func on_unload() -> void:
 		COLLISION_DEBUG_NAME,
 		OCCLUSION_DEBUG_NAME,
 		ROUND_DEBUG_NAME,
+		RAY_DEBUG_NAME,
 		HITBOX_DEBUG_NAME,
 		AI_DEBUG_NAME,
 	]:
@@ -325,6 +339,32 @@ func set_round_debug(enabled: bool) -> void:
 
 func is_round_debug() -> bool:
 	return _round_debug
+
+
+# --- Ray debug view (the dev tools' "Show rays") -----------------------------
+# Build / free a child RayDebugView drawing the engine's ray-debug capture
+# (every collision-world raycast, color-coded by category, fading with age) —
+# the collision-view contract. The toggle also arms/disarms the CollisionWorld
+# recording so the capture costs nothing while hidden; on_loaded re-applies it
+# to the fresh sim.
+
+func set_ray_debug(enabled: bool) -> void:
+	_ray_debug = enabled
+	_remove_debug_view(RAY_DEBUG_NAME)
+	var sim: Simulation = _world.get_sim() if is_instance_valid(_world) else null
+	if sim != null and is_instance_valid(sim):
+		sim.set_ray_debug_recording(enabled)
+	if not enabled:
+		return
+	var view := RayDebugView.new()
+	_ray_view = view
+	view.name = RAY_DEBUG_NAME
+	_world.add_child(view)
+	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
+
+
+func is_ray_debug() -> bool:
+	return _ray_debug
 
 
 # Build / free a child HitboxDebugView drawing the round hit-detection reality

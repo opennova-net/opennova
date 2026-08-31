@@ -710,6 +710,9 @@ bool precipitation_entity_hit(void *ctx, int32_t x, int32_t y, int32_t z_top,
 	// raycast_proximity_entities @ 0x538350 — the end clips to the first hit].
 	const int32_t start[3] = {x, y, z_top};
 	int32_t end[3] = {x, y, z_bottom};
+	const w::CollisionWorld::RayDebugScope ray_scope(
+			kernel->world.collision,
+			w::CollisionWorld::RayDebugCategory::kPrecipitation);
 	const w::EntityHandle hit = kernel->world.collision->clip_segment_to_nearest_collision(
 			kernel->world, kernel->world.cached.local_player, start, end);
 	if (!hit.valid()) return false;

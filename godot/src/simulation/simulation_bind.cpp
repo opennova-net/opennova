@@ -472,6 +472,14 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &Simulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &Simulation::get_round_debug);
 	ClassDB::bind_method(D_METHOD("get_ai_debug"), &Simulation::get_ai_debug);
+	ClassDB::bind_method(D_METHOD("get_ray_debug"), &Simulation::get_ray_debug);
+	ClassDB::bind_method(D_METHOD("set_ray_debug_recording", "enabled"),
+	                     &Simulation::set_ray_debug_recording);
+	ClassDB::bind_method(D_METHOD("is_ray_debug_recording"),
+	                     &Simulation::is_ray_debug_recording);
+	ClassDB::bind_method(D_METHOD("set_ray_debug_filter", "mask", "ttl_ticks"),
+	                     &Simulation::set_ray_debug_filter);
+	ClassDB::bind_method(D_METHOD("clear_ray_debug"), &Simulation::clear_ray_debug);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);

@@ -336,12 +336,32 @@ const CollisionTargetView *CollisionWorld::trace_target_view(const World &world,
 
 ProjectileHit CollisionWorld::trace_projectile(const World &world,
                                                const ProjectileTrace &trace) const {
-    return trace_projectile_impl(world, trace, false);
+    const ProjectileHit hit = trace_projectile_impl(world, trace, false);
+    if (ray_debug_enabled_) {
+        const int32_t a[3] = {trace.start.x, trace.start.y, trace.start.z};
+        const int32_t b[3] = {trace.end.x, trace.end.y, trace.end.z};
+        const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
+                              hit.position_q16.z};
+        ray_debug_record(RayDebugCategory::kProjectile, world.logic_tick, a, b,
+                         hit.hit() ? h : nullptr,
+                         hit.hit() ? kRayDebugHit : kRayDebugClear);
+    }
+    return hit;
 }
 
 ProjectileHit CollisionWorld::trace_knife_impact(
         const World &world, const ProjectileTrace &trace) const {
-    return trace_projectile_impl(world, trace, true);
+    const ProjectileHit hit = trace_projectile_impl(world, trace, true);
+    if (ray_debug_enabled_) {
+        const int32_t a[3] = {trace.start.x, trace.start.y, trace.start.z};
+        const int32_t b[3] = {trace.end.x, trace.end.y, trace.end.z};
+        const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
+                              hit.position_q16.z};
+        ray_debug_record(RayDebugCategory::kKnife, world.logic_tick, a, b,
+                         hit.hit() ? h : nullptr,
+                         hit.hit() ? kRayDebugHit : kRayDebugClear);
+    }
+    return hit;
 }
 
 ProjectileHit CollisionWorld::trace_projectile_impl(
