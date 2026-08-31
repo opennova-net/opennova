@@ -1,0 +1,1166 @@
+////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Avatars.def
+//
+//
+////////////////////////////////////////////////////////////////////////////////////////////////
+// voice (attached to heads)
+//		1   BM1	=	US Male
+//		2	BM2	=	UK Male
+//		3	BM3	=	German Male
+//		4	BM4	=	Russian Male
+//		5	BM5	=	French Male
+//		6	BM6	=	Indonesian Male
+//		7	BF1	=	US Female
+//		8	BF2	=	UK Female
+//		9	BM6	=	Indonesian Male	// DO NOT USE - Duplicate of 6, so use 6 instead
+//		10	RM2	=	Indonesian Male 2
+//		11	RF1	=	Indonesian Female
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+////		Joint Ops Heads & Bodies
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////
+////////        JO HEADS        ////////
+////////////////////////////////////////
+define head		JO_HEAD_SEAL
+{
+	name		AV_BOONIEHAT
+	graphic		Boonie.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_SEAL_CAMO_1
+{
+	name		AV_CAMOFACE
+	graphic		Boonie.3di
+	camo		3 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_GREENBERET
+{
+	name		AV_BERET
+	graphic		Beret.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_DELTA_1
+{
+	name		AV_CQBHELMET_BLACK
+	graphic		CQBHelmt.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_DELTA_2
+{
+	name		AV_CQBHELMET_OLIVE
+	graphic		CQBHelmt.3di
+	camo		0 0 1
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_FORCERECON_1
+{
+	name		AV_CQBHELMET_BLACKMASK
+	graphic		CQBHelmt.3di
+	camo		0 1 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_FORCERECON_2
+{
+	name		AV_CQBHELMET_GREENMASK
+	graphic		CQBHelmt.3di
+	camo		0 1 1
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_FORCERECON_3
+{
+	name		AV_CQBHELMET_BROWNMASK
+	graphic		CQBHelmt.3di
+	camo		0 1 2
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_RANGER
+{
+	name		AV_RANGERCAP
+	graphic		RngrCap.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_USMC
+{
+	name		AV_STDHELMET
+	graphic		StdHelmt.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_SCOUT
+{
+	name		AV_GHILLIEHOOD
+	graphic		Ghillie.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_Pilot
+{
+	name		AV_PILOTHELMET
+	graphic		PHelmet.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_USAFCO
+{
+	name		AV_USAFCO
+	graphic		PHelmet.3di
+	camo		1 1 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_SPETSNAZ_1
+{
+	name		AV_SKULLCAP_GREEN
+	graphic		SkullCap.3di
+	camo		1 1 0
+	voice		4
+	sex			m
+}
+
+define head		JO_HEAD_SPETSNAZ_2
+{
+	name		AV_SKULLCAP_BLACK
+	graphic		SkullCap.3di
+	camo		0 0 0
+	voice		4
+	sex			m
+}
+
+define head		JO_HEAD_ROYALMARINE_1
+{
+	name		AV_BERETMIC_GREEN
+	graphic		BeretMic.3di
+	camo		0 0 0
+	voice		2
+	sex			m
+}
+
+define head		JO_HEAD_ROYALMARINE_2
+{
+	name		AV_BERETMIC_BLACK
+	graphic		BeretMic.3di
+	camo		0 1 1
+	voice		2
+	sex			m
+}
+
+define head		JO_HEAD_KOPASSUS_1
+{
+	name		AV_BERET_GREEN
+	graphic		Beret.3di
+	camo		1 0 0
+	voice		6
+	sex			m
+}
+
+define head		JO_HEAD_KOPASSUS_2
+{
+	name		AV_BERET_BLACK
+	graphic		Beret.3di
+	camo		1 1 0
+	voice		6
+	sex			m
+}
+
+define head		JO_HEAD_KOPASSUS_3
+{
+	name		AV_BERET_RED
+	graphic		Beret.3di
+	camo		1 2 0
+	voice		6
+	sex			m
+}
+
+define head		JO_HEAD_SASR_1
+{
+	name		AV_BUSHHAT
+	graphic		BushHat.3di
+	camo		0 0 0
+	voice		2
+	sex			m
+}
+
+define head		JO_HEAD_SASR_2
+{
+	name		AV_JUNGLECAP
+	graphic		Boonie.3di
+	camo		2 2 0
+	voice		2
+	sex			m
+}
+
+define head		JO_HEAD_SAS_1
+{
+	name		AV_HEADWRAP_JUNGLE
+	graphic		Turban.3di
+	camo		0 0 0
+	voice		2
+	sex			m
+}
+
+define head		JO_HEAD_SAS_2
+{
+	name		AV_HEADWRAP_DESERT
+	graphic		Turban.3di
+	camo		0 1 0
+	voice		2
+	sex			m
+}
+
+define head		JO_HEAD_RANGER_2
+{
+	name		AV_RANGERCAP_CAMO
+	graphic		RngrCap.3di
+	camo		1 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_DELTA_3
+{
+	name		AV_DELTAHELMET
+	graphic		DeltaH.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_KSK
+{
+	name		AV_KSKHELMET
+	graphic		StdHelmt.3di
+	camo		1 1 0
+	voice		3
+	sex			m
+}
+
+define head		JO_HEAD_GIGN_1
+{
+	name		AV_FACESHIELD	//Black Mask
+	graphic		HlmtShld.3di
+	camo		0 0 0
+	voice		5
+	sex			m
+}
+
+define head		JO_HEAD_GIGN_2
+{
+	name		AV_FACESHIELD	//Green Mask
+	graphic		HlmtShld.3di
+	camo		0 0 1
+	voice		5
+	sex			m
+}
+
+define head		JO_HEAD_SEAL_CAMO_2
+{
+	name		AV_SEALHELMET //Green Mask
+	graphic		SealHlmt.3di
+	camo		0 0 0
+	voice		1
+	sex			m
+}
+
+define head		JO_HEAD_COMBAT //German
+{
+	name		AV_COMBATHELMET
+	graphic		CmbtHlmt.3di
+	camo		0 0 0
+	voice		3
+	sex			m
+}
+
+////////////////////////////////////////
+////////        FEMALE HEADS    ////////
+////////////////////////////////////////
+
+define head		JO_HEAD_FEMALE_HELMET
+{
+	name		AV_FEMALEHELMET
+	graphic		US_F_Hd1.3di
+	camo		0 0 0
+	voice		7
+	sex			f
+}
+
+define head		JO_HEAD_FEMALE_BERET	// UK Female
+{
+	name		AV_FEMALEBERET
+	graphic		US_F_Hd2.3di
+	camo		0 0 0
+	voice		8
+	sex			f
+}
+
+define head		JO_HEAD_FEMALE_CAP
+{
+	name		AV_FEMALECAP
+	graphic		US_F_Hd3.3di
+	camo		0 0 0
+	voice		7
+	sex			f
+}
+
+////////////////////////////////////////
+////////        JO BODIES       ////////
+////////////////////////////////////////
+
+//JntOpsB1	Camo1 | (Body) 0-2 (Woodland)| 3 (British SAS) | 4 (Spetsnaz)
+//			Camo2 | (Gear) 
+define body		JO_BODY_SEAL_1
+{
+	name		AV_WOODLANDBDU
+	graphic		JntOpsB1.3di
+	camo		0 0 1
+}
+
+define body		JO_BODY_RANGER
+{
+	name		AV_WOODLANDBDU
+	graphic		JntOpsB1.3di
+	camo		1 1 1
+}
+
+define body		JO_BODY_GREENBERET
+{
+	name		AV_WOODLANDBDU
+	graphic		JntOpsB1.3di
+	camo		1 2 1
+}
+
+define body		JO_BODY_USMC_1
+{
+	name		AV_WOODLANDBDU
+	graphic		JntOpsB1.3di
+	camo		2 2 1
+}
+
+define body		JO_BODY_SAS_1
+{
+	name		AV_JUNGLEBDU
+	graphic		JntOpsB1.3di
+	camo		3 3 2
+}
+
+define body		JO_BODY_ROYALMARINE
+{
+	name		AV_JUNGLEBDU
+	graphic		JntOpsB1.3di
+	camo		3 1 2
+}
+
+define body		JO_BODY_SPETSNAZ
+{
+	name		AV_JUNGLEBDU
+	graphic		JntOpsB1.3di
+	camo		4 1 5
+}
+
+/////// //////// ///////// //////// /////////
+
+//JntOpsB2 Camo1 (body) | 0 (Woodland) | 1 (Black) | 2 (Olive) | 3 (Sniper Woodland) | 4 (British SAS) | 5 (Germany)
+
+define body		JO_BODY_SEAL_2
+{
+	name		AV_WOODLANDBDU_VEST
+	graphic		JntOpsB2.3di
+	camo		0 0 1
+}
+
+define body		JO_BODY_DELTA_1
+{
+	name		AV_BLACKBDU_VEST
+	graphic		JntOpsB2.3di
+	camo		1 0 0
+}
+
+define body		JO_BODY_DELTA_2
+{
+	name		AV_WOODLANDBDU_VEST
+	graphic		JntOpsB2.3di
+	camo		0 1 1
+}
+
+define body		JO_BODY_DELTA_3
+{
+	name		AV_OLIVEBDU_VEST
+	graphic		JntOpsB2.3di
+	camo		2 0 0
+}
+
+define body		JO_BODY_FORCERECON_1
+{
+	name		AV_OLIVEBDU_VEST
+	graphic		JntOpsB2.3di
+	camo		2 0 0
+}
+
+define body		JO_BODY_FORCERECON_2
+{
+	name		AV_OLIVEBDU_VEST
+	graphic		JntOpsB2.3di
+	camo		2 2 0
+}
+
+define body		JO_BODY_SCOUT
+{
+	name		AV_WOODLANDBDU_VEST
+	graphic		JntOpsB2.3di
+	camo		3 3 6
+}
+
+define body		JO_BODY_SAS_3
+{
+	name		AV_JUNGLEBDU
+	graphic		JntOpsB2.3di
+	camo		4 1 2
+}
+
+define body		JO_BODY_KSK
+{
+	name		AV_JUNGLEBDU
+	graphic		JntOpsB2.3di
+	camo		5 0 4
+}
+
+/////// //////// ///////// //////// /////////
+
+//JntOpsB3 Camo1 (body) | 0 (Olive w/Olive gear) | 1 (Olive w/Black gear)
+
+define body		JO_BODY_PILOT
+{
+	name		AV_OLIVEFLIGHTSUIT
+	graphic		JntOpsB3.3di
+	camo		0 0 0
+}
+
+define body		JO_BODY_USAFCO
+{
+	name		AV_FLIGHTSUIT
+	graphic		JntOpsB3.3di
+	camo		1 0 0
+}
+
+
+define body		JO_BODY_GIGN_1
+{
+	name		AV_TACSUIT_BLUE
+	graphic		RebelB4.3di
+	camo		0 0 0
+}
+
+define body		JO_BODY_GIGN_2
+{
+	name		AV_TACSUIT_CAMO
+	graphic		RebelB4.3di
+	camo		1 0 0
+}
+
+/////// //////// ///////// //////// /////////
+
+//no sleeves
+//RebelB1 Camo1 (body) | 0-1 (British SAS) | 2 (Australian) | 3 (Tiger stripe) | 4 (Olive) | 5 (Gray) | 6 (Tiger v2)
+
+define body		JO_BODY_SAS_2
+{
+	name		AV_JUNGLEBDU
+	graphic		RebelB1.3di
+	camo		1 1 7
+}
+
+define body		JO_BODY_SASR
+{
+	name		AV_JUNGLEBDU
+	graphic		RebelB1.3di
+	camo		2 3 7
+}
+
+define body		JO_BODY_KOPASSUS
+{
+	name		AV_JUNGLEBDU
+	graphic		RebelB1.3di
+	camo		0 0 7
+}
+
+/////// //////// ///////// //////// /////////
+
+define body		JO_BODY_FEMALE_US
+{
+	name		AV_WOODLANDBDU
+	graphic		JntOpsB4.3di
+	camo		0 0 1
+}
+
+define body		JO_BODY_FEMALE_UK
+{
+	name		AV_JUNGLEBDU
+	graphic		JntOpsB4.3di
+	camo		1 0 2
+}
+
+
+////////////////////////////////////////
+////////        JO ARMS         ////////
+////////////////////////////////////////
+
+define arms		JO_ARMS_US_1
+{
+	name		"US Camo -Black Gloves"
+	graphic		ArmsG.3di
+	camo		0 0 0
+}
+
+define arms		JO_ARMS_US_2
+{
+	name		"US Camo -Olive Flight Gloves"
+	graphic		ArmsG.3di
+	camo		0 1 0
+}
+
+define arms		JO_ARMS_US_3
+{
+	name		"US Camo -Black Flight Gloves"
+	graphic		ArmsG.3di
+	camo		0 2 0
+}
+
+define arms		JO_ARMS_BLACK
+{
+	name		"Black Camo -Black Gloves"
+	graphic		ArmGlove.3di
+	camo		0 0 0
+}
+
+define arms		JO_ARMS_BLUE
+{
+	name		"Blue Camo -Black Gloves"
+	graphic		ArmGlove.3di
+	camo		2 0 0 //<Sleeve/Arm> <Glove> 
+}
+
+define arms		JO_ARMS_GREEN_1
+{
+	name		"Green Camo -Black Gloves"
+	graphic		ArmGlove.3di
+	camo		2 0 0
+}
+
+define arms		JO_ARMS_GREEN_2
+{
+	name		"Green Camo -Green Flight Gloves"
+	graphic		ArmGlove.3di
+	camo		2 1 0
+}
+
+define arms		JO_ARMS_OLIVE_1
+{
+	name		"Olive Camo -Black Gloves"
+	graphic		ArmGlove.3di
+	camo		3 0 0
+}
+
+define arms		JO_ARMS_OLIVE_2
+{
+	name		"Olive Camo -Green Flight Gloves"
+	graphic		ArmGlove.3di
+	camo		3 1 0
+}
+
+define arms		JO_ARMS_SAS
+{
+	name		"Jungle Camo -Green Flight Gloves"
+	graphic		ArmGlove.3di
+	camo		4 1 0
+}
+
+define arms		JO_ARMS_ROYALMARINE
+{
+	name		"Jungle Camo -Black Flight Gloves"
+	graphic		ArmGlove.3di
+	camo		4 2 0
+}
+
+define arms		JO_ARMS_SPETNAZ
+{
+	name		"Russian Camo -Black Gloves"
+	graphic		ArmGlove.3di
+	camo		5 0 0
+}
+
+define arms		JO_ARMS_KSK
+{
+	name		"German Camo -Black Gloves"
+	graphic		ArmGlove.3di
+	camo		6 0 0
+}
+
+define arms		JO_ARMS_GGN
+{
+	name		"French Camo -Green Flight Gloves"
+	graphic		ArmGlove.3di
+	camo		7 1 0
+}
+
+define arms		JO_ARMS_BARE
+{
+	name		"Bare Arms"
+	graphic		IndoArms.3di
+	camo		1 0 0
+}
+
+define arms		JO_ARMS_US_4 //JOTAC Sniper arms
+{
+	name		"US Camo -Olive Flight Gloves"
+	graphic		ArmsG.3di
+	camo		1 1 0
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+////		Joint Ops Characters
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+nationality  N00  AV_NAT_UNITEDSTATES
+{
+	alignment	good
+
+	division  D00  AV_DIV_SEAL skipdemo
+	{
+		combo   001     JO_HEAD_SEAL            JO_BODY_SEAL_1      JO_ARMS_US_1
+		combo   002     JO_HEAD_SEAL_CAMO_1     JO_BODY_SEAL_1      JO_ARMS_US_1
+		combo   003     JO_HEAD_SEAL_CAMO_2     JO_BODY_SEAL_2      JO_ARMS_US_1
+		combo   004     JO_HEAD_SEAL_CAMO_2     JO_BODY_DELTA_3     JO_ARMS_GREEN_1
+	}
+
+	division  D01  AV_DIV_DELTAFORCE skipdemo
+	{
+		combo   001     JO_HEAD_DELTA_3         JO_BODY_DELTA_1     JO_ARMS_BLACK
+		combo   002     JO_HEAD_DELTA_3         JO_BODY_SEAL_2      JO_ARMS_US_1
+		combo   003     JO_HEAD_DELTA_3         JO_BODY_DELTA_3     JO_ARMS_GREEN_1
+		combo   004     JO_HEAD_DELTA_1         JO_BODY_DELTA_1     JO_ARMS_BLACK
+		combo   005     JO_HEAD_DELTA_2         JO_BODY_DELTA_2     JO_ARMS_US_2
+	}
+	
+	division  D02  AV_DIV_FORCERECON
+	{
+		combo   001     JO_HEAD_FORCERECON_1    JO_BODY_USAFCO		JO_ARMS_OLIVE_2
+		combo   002     JO_HEAD_FORCERECON_2    JO_BODY_USAFCO		JO_ARMS_OLIVE_2
+		combo   003     JO_HEAD_DELTA_2         JO_BODY_PILOT		JO_ARMS_GREEN_2
+	}
+	
+	division  D03  AV_DIV_RANGER
+	{
+		combo   001     JO_HEAD_RANGER          JO_BODY_RANGER		JO_ARMS_US_3
+		combo   002     JO_HEAD_RANGER_2        JO_BODY_RANGER		JO_ARMS_US_3
+		combo   003     JO_HEAD_FEMALE_CAP      JO_BODY_FEMALE_US	JO_ARMS_US_3
+	}
+	
+	division  D04  AV_DIV_GREENBERET skipdemo
+	{
+		combo   001     JO_HEAD_GREENBERET      JO_BODY_GREENBERET	JO_ARMS_US_2
+	}
+	
+	division  D05  AV_DIV_USMC skipdemo
+	{
+		combo   001     JO_HEAD_USMC            JO_BODY_DELTA_2		JO_ARMS_US_2
+		combo   002     JO_HEAD_FEMALE_HELMET   JO_BODY_FEMALE_US	JO_ARMS_US_3
+	}
+	
+	division  D06  AV_DIV_SCOUTSNIPER
+	{
+		combo   001     JO_HEAD_SCOUT           JO_BODY_SCOUT		JO_ARMS_US_2
+	}
+	
+	division  D07  AV_DIV_PILOT skipdemo
+	{
+		combo   001     JO_HEAD_PILOT           JO_BODY_PILOT		JO_ARMS_GREEN_2
+	}
+	
+	division  D08  AV_DIV_USAFCOMBATOP skipdemo
+	{
+		combo   001     JO_HEAD_USAFCO          JO_BODY_USAFCO		JO_ARMS_OLIVE_2
+		combo   002     JO_HEAD_USAFCO          JO_BODY_SEAL_1		JO_ARMS_US_3
+		combo   003     JO_HEAD_USAFCO          JO_BODY_SEAL_2		JO_ARMS_US_3
+	}
+}
+
+nationality  N01  AV_NAT_GREATBRITAIN  skipdemo
+{
+	alignment	good
+
+	division  D00  AV_DIV_ROYALMARINE
+	{
+		combo   001     JO_HEAD_ROYALMARINE_1   JO_BODY_ROYALMARINE		JO_ARMS_ROYALMARINE
+		combo   002     JO_HEAD_ROYALMARINE_2   JO_BODY_ROYALMARINE		JO_ARMS_ROYALMARINE
+		combo   003     JO_HEAD_FEMALE_BERET    JO_BODY_FEMALE_UK		JO_ARMS_ROYALMARINE
+	}
+	
+	division  D01  AV_DIV_SAS
+	{
+		combo   001     JO_HEAD_SAS_1           JO_BODY_SAS_1		JO_ARMS_SAS
+		combo   002     JO_HEAD_SAS_1           JO_BODY_SAS_3		JO_ARMS_SAS
+		combo   003     JO_HEAD_SAS_2           JO_BODY_SAS_2		JO_ARMS_BARE
+		combo   004     JO_HEAD_SAS_2           JO_BODY_SAS_3		JO_ARMS_SAS
+	}
+}
+
+nationality  N02  AV_NAT_AUSTRALIA  skipdemo
+{
+	alignment	good
+
+	division  D00  AV_DIV_SASR
+	{
+		combo   001     JO_HEAD_SASR_1          JO_BODY_SASR	JO_ARMS_BARE
+		combo   002     JO_HEAD_SASR_2          JO_BODY_SASR	JO_ARMS_BARE
+	}
+}
+
+nationality  N03  AV_NAT_INDONESIA  skipdemo
+{
+	alignment	good
+
+	division  D00  AV_DIV_KOPASSUS
+	{
+		combo   001     JO_HEAD_KOPASSUS_1      JO_BODY_KOPASSUS	JO_ARMS_BARE
+		combo   002     JO_HEAD_KOPASSUS_2      JO_BODY_KOPASSUS	JO_ARMS_BARE
+		combo   003     JO_HEAD_KOPASSUS_3      JO_BODY_KOPASSUS	JO_ARMS_BARE
+	}
+}
+
+nationality  N04  AV_NAT_RUSSIA  skipdemo
+{
+	alignment	good
+
+	division  D00  AV_DIV_SPETSNAZ
+	{
+		combo   001     JO_HEAD_SPETSNAZ_1      JO_BODY_SPETSNAZ	JO_ARMS_SPETNAZ
+		combo   002     JO_HEAD_SPETSNAZ_2      JO_BODY_SPETSNAZ	JO_ARMS_SPETNAZ
+	}
+}
+
+
+nationality  N05  AV_NAT_GERMANY  skipdemo
+{
+	alignment	good
+
+	division  D00  AV_DIV_KSK
+	{
+		combo   001     JO_HEAD_KSK             JO_BODY_KSK		JO_ARMS_KSK
+		combo   002     JO_HEAD_COMBAT          JO_BODY_KSK		JO_ARMS_KSK
+	}
+}
+
+nationality  N06  AV_NAT_FRANCE  skipdemo
+{
+	alignment	good
+
+	division  D00  AV_DIV_GIGN
+	{
+		combo   001     JO_HEAD_GIGN_1          JO_BODY_GIGN_1		JO_ARMS_BLUE
+		combo   002     JO_HEAD_GIGN_2          JO_BODY_GIGN_2		JO_ARMS_GGN
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+////		Rebel Heads & Bodies
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////
+////////	   REBEL HEADS		////////
+////////////////////////////////////////
+
+
+define head		RB_HEAD_BOONIE
+{
+	name		AV_BOONIE_JUNGLE
+	graphic		Boonie.3di
+	camo		1 1 0
+	voice		7
+	sex			m
+}
+
+define head		RB_HEAD_BERET_1
+{
+	name		AV_BERET_GREEN
+	graphic		Beret.3di
+	camo		2 0 0
+	voice		7
+	sex			m
+}
+
+define head		RB_HEAD_BERET_2
+{
+	name		AV_BERET_BLACK
+	graphic		Beret.3di
+	camo		3 1 0
+	voice		7
+	sex			m
+}
+
+define head		RB_HEAD_BERET_2A
+{
+	name		AV_BERET_BLACK
+	graphic		Beret.3di
+	camo		2 1 0
+	voice		7
+	sex			m
+}
+
+define head		RB_HEAD_BERET_3
+{
+	name		AV_BERET_RED
+	graphic		Beret.3di
+	camo		3 2 0
+	voice		7
+	sex			m
+}
+
+define head		RB_HEAD_BANDANNA
+{
+	name		AV_BANDANA
+	graphic		In_M_Hd3.3di
+	camo		0 0 0
+	voice		10
+	sex			m
+}
+
+define head		RB_HEAD_SKIMASK
+{
+	name		AV_SKIMASK
+	graphic		In_M_Hd4.3di
+	camo		0 0 0
+	voice		10
+	sex			m
+}
+
+define head		RB_HEAD_HEADWRAP_1
+{
+	name		AV_HEADWRAP_BLACK
+	graphic		Turban.3di
+	camo		1 2 0
+	voice		10
+	sex			m
+}
+
+define head		RB_HEAD_HEADWRAP_2
+{
+	name		AV_HEADWRAP_TAN
+	graphic		Turban.3di
+	camo		1 3 0
+	voice		10
+	sex			m
+}
+
+define head		RB_HEAD_HEADWRAP_3
+{
+	name		AV_HEADWRAP_RED
+	graphic		Turban.3di
+	camo		1 4 0
+	voice		10
+	sex			m
+}
+
+define head		RB_HEAD_BERET
+{
+	name		AV_MASKED_BERET
+	graphic		In_M_Hd7.3di
+	camo		0 0 0
+	voice		10
+	sex			m
+}
+
+define head		RB_HEAD_WOOLCAP_1
+{
+	name		AV_WOOLCAP_BLACK
+	graphic		In_M_Hd8.3di
+	camo		0 1 0
+	voice		10
+	sex			m
+}
+
+define head		RB_HEAD_WOOLCAP_2
+{
+	name		AV_WOOLCAP_OLIVE
+	graphic		In_M_Hd8.3di
+	camo		0 2 0
+	voice		10
+	sex			m
+}
+
+define head		RB_HEAD_PILOT
+{
+	name		AV_PILOTHELMET
+	graphic		In_M_Hd6.3di
+	camo		0 0 0
+	voice		6
+	sex			m
+}
+
+define head		RB_HEAD_FEMALE_1
+{
+	name		AV_BANDANA
+	graphic		In_F_Hd1.3di
+	camo		0 0 0
+	voice		11
+	sex			f
+}
+
+define head		RB_HEAD_FEMALE_2
+{
+	name		AV_HEADWRAP
+	graphic		In_F_Hd2.3di
+	camo		0 0 0
+	voice		11
+	sex			f
+}
+
+define head		RB_HEAD_FEMALE_3
+{
+	name		AV_BERET_EXMIL
+	graphic		In_F_Hd3.3di
+	camo		0 0 0
+	voice		11
+	sex			f
+}
+
+
+////////////////////////////////////////
+////////	   REBEL BODIES		////////
+////////////////////////////////////////
+//camo	= X torso	
+
+//no sleeves
+//RebelB1 Camo1 (body) | 0-1 (British SAS) | 2 (Australian) | 3 (Tiger stripe) | 4 (Olive) | 5 (Gray) | 6 (Tiger v2)
+define body		RB_BODY_CAMO_1
+{
+	name		AV_TIGERSTRIPE
+	graphic		RebelB1.3di
+	camo		3 0 7
+}
+
+define body		RB_BODY_CAMO_2
+{
+	name		AV_OLIVE
+	graphic		RebelB1.3di
+	camo		4 2 0
+}
+
+define body		RB_BODY_CAMO_3
+{
+	name		AV_OLIVEBLACK
+	graphic		RebelB1.3di
+	camo		5 0 6
+}
+
+define body		RB_BODY_CAMO_4
+{
+	name		AV_WOODLANDSTRIPE
+	graphic		RebelB1.3di
+	camo		6 1 7
+}
+
+////////////////////////////////////////
+//RebelB2 Camo1 (body) | 0 (Tan sleevless w/wood camo pants) | 1 (Gray sleeveless w/black pants)
+define body		RB_BODY_TSHIRT
+{
+	name		AV_TSHIRT
+	graphic		RebelB2.3di
+	camo		0 0 5
+}
+
+define body		RB_BODY_VEST
+{
+	name		AV_VEST
+	graphic		RebelB2.3di
+	camo		1 0 0
+}
+
+define body		RB_BODY_PILOT
+{
+	name		AV_OLIVE
+	graphic		RebelB4.3di
+	camo		2 0 6
+}
+
+define body		RB_BODY_FEMALE_1
+{
+	name		AV_FEMALE_EXMILITARY
+	graphic		JntOpsB4.3di
+	camo		2 0 7
+}
+
+define body		RB_BODY_FEMALE_2
+{
+	name		AV_FEMALE_MERC
+	graphic		JntOpsB4.3di
+	camo		3 1 0
+}
+
+define body		RB_BODY_FEMALE_3
+{
+	name		AV_FEMALE_MILITIA
+	graphic		JntOpsB4.3di
+	camo		4 1 0
+}
+
+define body		RB_BODY_CAMO_5
+{
+	name		AV_WOODLANDSTRIPE
+	graphic		RebelB5.3di
+	camo		0 0 7
+}
+
+
+////////////////////////////////////////
+////////       REBEL ARMS       ////////
+////////////////////////////////////////
+
+define arms		INDO_ARMS
+{
+	name		"Tatooed Arms"
+	graphic		IndoArms.3di
+	camo		0 0 0
+}
+
+define arms		INDO_ARMS_BARE
+{
+	name		"Bare Arms"		
+	graphic		IndoArms.3di
+	camo		1 0 0
+}
+
+define arms		INDO_ARMS_GREEN
+{
+	name		"Green Camo -Black Gloves"
+	graphic		ArmGlove.3di
+	camo		2 0 0
+}
+
+define arms		INDO_ARMS_OLIVE
+{
+	name		"Olive Camo -Green Flight Gloves"
+	graphic		ArmGlove.3di
+	camo		3 1 0
+}
+
+define arms		INDO_ARMS_BLACK
+{
+	name		"Black Camo -Black Gloves"
+	graphic		ArmGlove.3di
+	camo		0 0 0
+}
+
+define arms		INDO_ARMS_JUNGLE
+{
+	name		"Jungle Camo -Black Flight Gloves"
+	graphic		ArmGlove.3di
+	camo		4 2 0
+}
+
+define arms		INDO_ARMS_JUNGLE_2
+{
+	name		"Jungle Camo -Black Flight Gloves"
+	graphic		ArmsR.3di
+	camo		0 0 0
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+//		Rebel Characters
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+nationality  N07  AV_NAT_INDONESIANREBEL
+{
+	alignment	evil
+
+	division  D00  AV_DIV_REBELMILITIA
+	{
+		combo   001     RB_HEAD_BANDANNA        RB_BODY_TSHIRT		INDO_ARMS
+		combo   002     RB_HEAD_SKIMASK         RB_BODY_TSHIRT		INDO_ARMS
+		combo   003     RB_HEAD_SKIMASK         RB_BODY_VEST		INDO_ARMS
+		combo   004     RB_HEAD_HEADWRAP_1      RB_BODY_VEST		INDO_ARMS
+		combo   005     RB_HEAD_HEADWRAP_3      RB_BODY_VEST		INDO_ARMS
+		combo   006     RB_HEAD_HEADWRAP_2      RB_BODY_TSHIRT		INDO_ARMS
+		combo   007     RB_HEAD_HEADWRAP_2      RB_BODY_CAMO_1		INDO_ARMS
+		combo   008     RB_HEAD_BERET           RB_BODY_CAMO_3		INDO_ARMS
+		combo   009     RB_HEAD_FEMALE_2        RB_BODY_FEMALE_3	INDO_ARMS_BLACK
+	}
+	
+	division  D01  AV_DIV_EXMILITARY  skipdemo
+	{
+		combo   001     RB_HEAD_BOONIE          RB_BODY_CAMO_1		INDO_ARMS
+		combo   002     RB_HEAD_BOONIE          RB_BODY_CAMO_2		INDO_ARMS
+		combo   003     RB_HEAD_BOONIE          RB_BODY_CAMO_3		INDO_ARMS
+		combo   004     RB_HEAD_BOONIE          RB_BODY_CAMO_4		INDO_ARMS
+		combo   005     RB_HEAD_BERET_1         RB_BODY_CAMO_4		INDO_ARMS
+		combo   006     RB_HEAD_BERET_2         RB_BODY_CAMO_1		INDO_ARMS
+		combo   007     RB_HEAD_BERET_2A        RB_BODY_CAMO_3		INDO_ARMS
+		combo   008     RB_HEAD_BERET_3         RB_BODY_CAMO_1		INDO_ARMS
+		combo   009     RB_HEAD_FEMALE_3        RB_BODY_FEMALE_1	INDO_ARMS_JUNGLE
+	}
+	division  D02  AV_DIV_MERCENARY  skipdemo
+	{
+		combo   001     RB_HEAD_WOOLCAP_1       RB_BODY_CAMO_1		INDO_ARMS
+		combo   002     RB_HEAD_WOOLCAP_1       RB_BODY_CAMO_3		INDO_ARMS
+		combo   003     RB_HEAD_WOOLCAP_2       RB_BODY_CAMO_2		INDO_ARMS
+		combo   004     RB_HEAD_BANDANNA        RB_BODY_CAMO_1		INDO_ARMS
+		combo   005     RB_HEAD_BANDANNA        RB_BODY_CAMO_3		INDO_ARMS
+		combo   006     RB_HEAD_BANDANNA        RB_BODY_CAMO_4		INDO_ARMS
+		combo   007     RB_HEAD_FEMALE_1        RB_BODY_FEMALE_2	INDO_ARMS_GREEN
+	}
+	
+	division  D03  AV_DIV_REBELPILOT skipdemo
+	{
+		combo   001     RB_HEAD_PILOT           RB_BODY_PILOT		INDO_ARMS_OLIVE
+	}
+	
+	division  D04  AV_DIV_SCOUTSNIPER
+	{
+		combo   001     JO_HEAD_SCOUT           RB_BODY_CAMO_5		INDO_ARMS_JUNGLE_2
+		combo   002     RB_HEAD_HEADWRAP_2      RB_BODY_CAMO_5		INDO_ARMS_JUNGLE_2
+	}
+}
+
+
+

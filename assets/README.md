@@ -27,6 +27,14 @@ like the existing per-format `fixtures/<fmt>/` sets. The retail install is
 needed only to *validate* the set (launch JO), which is the asset-gated
 acceptance step, never a committed input.
 
+**One deliberate, temporary exception (2026-08-31):** the bring-up model +
+anim + texture set below IS retail data, committed by explicit decision so the
+minimal set runs from a fresh checkout while our own model and clip writers
+catch up. Every such file is allowlisted **by name** under the TEMPORARY banner
+in `.gitignore`, ships in both zip flavors until replaced, and is tracked as
+debt in [`../TODO.md`](../TODO.md). Everything else in this tree keeps the
+rule: authored from scratch by our own writers.
+
 ## Layout
 
 - **this root, flat** — the committed authored assets (text ones as plain files
@@ -174,16 +182,16 @@ the R8 manifest with its graceful failure; adding any is a deliberate step up
 from minimal, not a requirement. `Avatars.def` left this list with the
 first-person arms — see the bring-up section below.
 
-### Bring-up: the retail model + anim set (staged locally, never committed)
+### Bring-up: the retail model + anim set (retail bytes, committed temporarily)
 
 The set has no models of its own yet, so the player body, its animations and the
 first-person viewmodel are brought up by **copying the retail files into this
-directory**, exactly like `Jointops.exe` and its runtime writes. They are covered
-by the blanket `/*` ignore and carry no allowlist line, so they cannot be
-committed — that is the whole point of the allowlist shape. The dev zip stages
-`git ls-files assets`, so they never ship either.
+directory**. Since 2026-08-31 they are **committed** — allowlisted by name under
+`.gitignore`'s TEMPORARY banner (the policy exception above) — so the minimal
+set runs from a fresh checkout, and `git ls-files assets` now stages them into
+both zip flavors. Deleting a line from that banner is how a replacement lands.
 
-What gets staged, from an extracted retail resource tree (~212 files):
+What is committed, from an extracted retail resource tree (239 files):
 
 | Group | Files |
 |---|---|
@@ -274,7 +282,7 @@ Records the run under the asset-gated protocol (never commit the capture); the
 recipe is the acceptance test for "the minimal set hosts + joins."
 
 Known gaps: no model here is ours yet — the player body, its animations and
-the viewmodel are the staged retail bring-up set described above, and the
+the viewmodel are the committed retail bring-up set described above, and the
 committed tree still declares graphics it does not carry. The terrain has
 relief and a full-size colormap but no tile overlay, and there is no `.ptl`
 catalogue, so the weapon authors no muzzle-flash or casing effect.
