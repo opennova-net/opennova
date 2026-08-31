@@ -63,7 +63,7 @@
           "path": "godot/src/env/mission_environment.cpp",
           "tokens": [
             "REFLECTION_SOURCE_SKY",
-            "AMBIENT_SOURCE_SKY",
+            "AMBIENT_SOURCE_COLOR",
             "hemisphere_sky.gdshader"
           ]
         }

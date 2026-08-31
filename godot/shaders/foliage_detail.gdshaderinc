@@ -44,33 +44,11 @@ global uniform vec3 opennova_sun_direction;
 // fallback, which is outside the locked highest-quality profile.
 // [orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630;
 // Foliage_RenderFarPatches @ 0x609de0]
-global uniform vec3 opennova_fog_color;
-global uniform float opennova_fog_start;
-global uniform float opennova_fog_end;
-global uniform int opennova_fog_type;
 
 varying vec2 v_tile_uv;
 varying vec2 v_overlay_uv;
 varying vec2 v_tile_cache_uv;
 varying vec3 v_heightfield_normal;
-varying float v_fog_distance;
-
-float foliage_fog_factor(float fog_distance) {
-	if (opennova_fog_start == opennova_fog_end) {
-		return 1.0;
-	}
-	if (opennova_fog_end <= 0.0) {
-		return 1.0;
-	}
-	if (opennova_fog_type == 0) {
-		return clamp(exp(-max(fog_distance, 0.0) *
-			(4.1588830833596715 / opennova_fog_end)), 0.0, 1.0);
-	}
-
-	float start = opennova_fog_start;
-	return clamp((opennova_fog_end - fog_distance) /
-		(opennova_fog_end - start), 0.0, 1.0);
-}
 
 vec2 foliage_quadrant_clamped_uv(vec2 uv, ivec2 dimensions) {
 	vec2 quadrant = floor(clamp(uv * 2.0, vec2(0.0), vec2(1.999999)));
@@ -105,10 +83,6 @@ void vertex() {
 		(pre_wind_world_pos.xz - u_instance_tile_cache_projection.xy) *
 		u_instance_tile_cache_projection.z;
 	v_heightfield_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
-	float eye_depth = max(-(VIEW_MATRIX * vec4(world_pos, 1.0)).z, 0.0);
-	v_fog_distance = opennova_fog_type == 0
-		? eye_depth
-		: length(world_pos - CAMERA_POSITION_WORLD);
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
 }
 
@@ -179,9 +153,10 @@ void fragment() {
 	// [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0].
 	vec3 lit = tile.rgb * (tile.a * opennova_sun_light + opennova_sky_ambient);
 	vec3 color = clamp(fd.rgb * lit * u_emitter_color * 8.0, vec3(0.0), vec3(1.0));
-	color = mix(opennova_fog_color, color, foliage_fog_factor(v_fog_distance));
 	ALBEDO = scene_output(color);
-	// D3D fog folds into the source color before blending, so the blended
-	// weight is exactly the retail SRCALPHA term.
+	// Environment depth fog (ADR 0043, MissionEnvironment::apply_scene_fog
+	// carries the witnessed .env law) folds into the source color before the
+	// blend, like D3D's fold, so the blended weight stays the retail SRCALPHA
+	// term.
 	ALPHA = clamp(retail_alpha, 0.0, 1.0);
 }

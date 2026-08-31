@@ -122,21 +122,25 @@ func test_detail_light_packs_world_sun_in_heightfield_texture_basis() -> void:
 	assert_almost_eq(_light_alpha(Vector3(127, 217, 217) / 255.0, morning),
 		0.0794002, 0.000001, "08:00 Y-ramp normal must receive the witnessed dark DOT3 response.")
 
-func test_detail_fog_consumes_supplied_start_and_honors_disable() -> void:
+func test_detail_fog_is_environment_fog_not_hand_fog() -> void:
+	# ADR 0043: foliage rides the scene's Environment depth fog
+	# (MissionEnvironment::apply_scene_fog carries the witnessed .env law) —
+	# no hand fog uniforms, no fog_disabled escape on either detail wrapper.
 	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
-	assert_true(
-		detail.contains("if (opennova_fog_start == opennova_fog_end)"),
-		"The device fog policy disables linear fog when start equals end."
-	)
-	assert_true(
-		detail.contains("float start = opennova_fog_start;"),
-		"The environment already supplies the authored per-type/per-overcast fog start."
+	assert_false(
+		detail.contains("opennova_fog_"),
+		"Detail foliage must not re-roll fog beside the Environment."
 	)
 	assert_false(
-		detail.contains("start = safe_end * 0.5") or
-			detail.contains("start = safe_end * 0.25"),
-		"The foliage shader must not overwrite the supplied type 2/3 fog start."
+		detail.contains("fog_factor") or detail.contains("v_fog_distance"),
+		"The hand fog fold is retired with the device fog policy."
 	)
+	for wrapper in ["res://shaders/foliage_detail_high.gdshader",
+			"res://shaders/foliage_detail_low.gdshader"]:
+		assert_false(
+			_source(wrapper).contains("fog_disabled"),
+			"%s must receive the scene's Environment fog." % wrapper
+		)
 
 
 func test_runtime_detail_foliage_consumes_terrains_resident_tile_page() -> void:

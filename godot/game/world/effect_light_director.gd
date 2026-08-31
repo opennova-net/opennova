@@ -452,9 +452,25 @@ func _ensure_corona_instance() -> MultiMeshInstance3D:
 	mesh.use_colors = true
 	var quad := QuadMesh.new()
 	quad.size = Vector2(2.0, 2.0)  # VERTEX.xy in [-1, 1] x half_size
-	var material := ShaderMaterial.new()
-	material.shader = load("res://shaders/light_corona.gdshader")
-	material.set_shader_parameter("u_corona_tex", _corona_texture())
+	# Canonical Godot billboard (ADR 0043): BILLBOARD_ENABLED with keep-scale
+	# is the per-view camera-facing rebuild (main and mirror passes alike), and
+	# BLEND_MODE_ADD over the raw gamma-domain instance COLOR is retail's
+	# depth-tested, no-depth-write additive accumulation. The segment fade, the
+	# owner visible-section gate, and the fog-to-black fold are already folded
+	# into the instance COLOR by renderer::LightScene::collect_corona_quads
+	# (the witness map lives there), so scene fog stays off.
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	material.billboard_keep_scale = true
+	material.vertex_color_use_as_albedo = true
+	material.disable_fog = true
+	material.disable_receive_shadows = true
+	material.texture_repeat = false
+	material.albedo_texture = _corona_texture()
 	quad.material = material
 	mesh.mesh = quad
 	mmi.multimesh = mesh
