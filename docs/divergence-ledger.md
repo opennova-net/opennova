@@ -87,7 +87,7 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-NET-64 | Guided-weapon record ADVANCED 2026-08-18: the S2C 0x44 dispatch is wired (`ClientReplicaPipeline::apply_entity_routed` folds §5.36 sub-header + §5.15 groups 1/2/3/4/5 into typed `ClientGuidedMissile` state — 5 clears the lock like 2, the witnessed read semantic; 6 dropped, no presented surface) and the flight integrator is hosted (`world::GuidedFlight` `[orig: Entity_UpdateGuidedMissile_0 @0x446060]`: 31-tick ignition hold, integer-truncated boost ramp, per-axis BAM turn clamp; the overshoot/steer-guard detonation + proximity AI-notify leg is AUTHORITY-only `[orig: gate @0x4463cb]` — the non-authority client flies until the wire's group 1 ends it), ticked per client pump. Wire validation runs against the local Karo reference capture (`nw_karo_guided_test`, gated on `<OPENNOVA_CAPTURES>/karo-guided.pcapng`; our pinned slice: 649 records, 0 undecodable, 12 missiles, 3 shooters — the fork measured a different slice of the same match: 709 records, 100% stng, 4 shooters). JOINER ROUTING landed 2026-08-19 (the post-merge review): `joiner_connection` forwards 0x44 into the reducer stream — before that a joiner on a retail server dropped the whole lane before the fold (the loopback-masked gap's fourth strike, after 0x59/0x12, 0x16/0x46 and 0x1E), pinned in the APPLIED-stream order test. Residuals: flight velocity/turn clamps use the integrator defaults until the missile's ammo identity resolves through its entity class (`turnrate_maxpit/maxyaw` parsed + carried already); missile presentation (model + trail) unhosted; the authority seeker branch (target acquisition, flare preference, the 0x44 write side) unported; C2S command-map 0x44 overload shape-guard only | B | OPEN (partial — dispatch + flight + capture validation ported; presentation/ammo-resolve/authority-seeker residuals remain) | PAR-NET |
+| D-NET-64 | Guided-weapon record ADVANCED 2026-08-18: the S2C 0x44 dispatch is wired (`ClientReplicaPipeline::apply_entity_routed` folds §5.36 sub-header + §5.15 groups 1/2/3/4/5 into typed `ClientGuidedMissile` state — 5 clears the lock like 2, the witnessed read semantic; 6 dropped, no presented surface) and the flight integrator is hosted (`world::GuidedFlight` `[orig: Entity_UpdateGuidedMissile_0 @0x446060]`: 31-tick ignition hold, integer-truncated boost ramp, per-axis BAM turn clamp; the overshoot/steer-guard detonation + proximity AI-notify leg is AUTHORITY-only `[orig: gate @0x4463cb]` — the non-authority client flies until the wire's group 1 ends it), ticked per client pump. Wire validation was capture-proven against the local Karo reference capture before the capture root retired (ca1cef465, 2026-08-29; the pinned slice: 649 records, 0 undecodable, 12 missiles, 3 shooters — the fork measured a different slice of the same match: 709 records, 100% stng, 4 shooters); the live CI gates are `nw_ingame_guided` (the §5.15 per-(mode, field-group) codec round-trip), `guided_missile_flight` (the integrator), and `npruntime_client_runtime`'s guided lane (the 0x44 fold + the joiner APPLIED-stream order). JOINER ROUTING landed 2026-08-19 (the post-merge review): `joiner_connection` forwards 0x44 into the reducer stream — before that a joiner on a retail server dropped the whole lane before the fold (the loopback-masked gap's fourth strike, after 0x59/0x12, 0x16/0x46 and 0x1E), pinned in the APPLIED-stream order test. Residuals: flight velocity/turn clamps use the integrator defaults until the missile's ammo identity resolves through its entity class (`turnrate_maxpit/maxyaw` parsed + carried already); missile presentation (model + trail) unhosted; the authority seeker branch (target acquisition, flare preference, the 0x44 write side) unported; C2S command-map 0x44 overload shape-guard only | B | OPEN (partial — dispatch + flight + capture validation ported; presentation/ammo-resolve/authority-seeker residuals remain) | PAR-NET |
 | D-NET-97 | Host pool routing still follows BMS `EntityKind`; retail's `Pool_Alloc` caller and exact item-definition allocation predicate remain unwitnessed. `ItemReplicationCatalog` now keeps raw type/attrib/attrib2/capability inputs on an independent `StoragePool::Unresolved` axis, so wire codec, motion family, and BMS kind can no longer silently masquerade as allocation evidence. The pool-1 trailer crash remains fixed; allocation parity remains open. | A | OPEN + NEEDS-RE | PAR-NET |
 | D-NET-116 | Pending-spawn load-complete gate (`dword_24D1DE0`) not modeled; latent for a driver that wires `ctx.world` during load | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
 | D-NET-123 | `Server_TickUpdate` owns the logic tick; the double-tick guardrail is comment-only | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
@@ -208,6 +208,16 @@ Closed 2026-08-20: **D-NET-215** -> `FIXED` - the S2C 0x14 header is `[channel][
 Closed 2026-08-30: **D-NET-217** -> `FIXED` — spectator discovery, Player/Spectator choice, ClientAuth JSR/JSPP, the two witnessed reject vehicles (0x42 CR=0 `JFC=14/JFP=4|5` shared-capacity; game-layer DPC 14/15/16 description punts with a case-insensitive JSPP compare), team-0 hidden spawn, 0x75/0x0A/0x16 state, joiner free-flight, and real F3/MCP authority mutation now share one portable player-slot bit across both wire directions (full entry: net-re §5.0e/§8).
 
 ### Environment — [env/env-tod-re.md](env/env-tod-re.md) (#-catalog) + [env/env-honored-matrix.md](env/env-honored-matrix.md)
+
+Ratified 2026-08-30 (the post-merge tidy round; ratification = this PR's
+merge): **env #8** -> `PERMANENT` (envscale at interpolation vs retail's
+positional parse-time bake — register, class C) and **env #9** -> `PERMANENT`
+(the fog→skyfog per-keyframe flag vs the `0xC0C0FF` leftover-slot sentinel —
+register, class C). The same sweep normalized the catalog's residual
+"Tracked decision"/"Documented" dialect onto the canonical vocabulary:
+**env #12** and **env #13** read `FIXED` (faithful — the default mirrors the
+raw-200 quirk; `vertex_rgb` is unconsumed in retail too), and **env #35**'s
+record cell now opens `FIXED` to match its 2026-07-10 committed-LUT closure.
 
 Implemented **libs/env-first** so the ENG-2 port inherits the closures. The
 honored-matrix PARTIAL rows (iris, ceiling/floor, lightning, glare_3di)
@@ -1152,6 +1162,37 @@ Reopened 2026-08-23: **D-RLIT-3** — The 2026-08-19 close covered the local/aut
 
 Closed again 2026-08-23: **D-RLIT-3** -> `FIXED` — decoded pool-0 and eligible pool-1 draw sources now receive their own separately wire-keyed candidate slices on retail's 17-tick cadence and cast the same three rays from the exact scaled bbox midpoint. The identity-aware `get_draw_lighting_changes` cutover emits `[wire,bms,quality]`; `WirePresentPass` caches and applies the factor to both the body and any late-built held weapon. Explicit registry-twin identity is the only self-exclusion, so equal packed H/L values cannot alias `[orig: Entity_BuildProximityListsFromPools @0x4b8eb0; Entity_ComputeSunVisibility @0x5c6800; setup_terrain_effect_for_entity @0x5c74a0]` (full detail: render-lighting-re.md + git history).
 
+### Render — occlusion — [render/render-occlusion-re.md](render/render-occlusion-re.md) (D-OCC catalog)
+
+The blink-box/section-mask/portal engine landed 2026-07-17
+(engine/runtime/world/occlusion.cpp). Its port pass minted D-OCC-9..15 as
+record-only PORT DIVERGENCE rows; the 2026-08-30 post-merge tidy tabled and
+registered them (standing rule 2 — the record-only carve-out below covers only
+the D-OCC-1..8 witness details, which are open research notes, not port
+divergences, and stay out of these tables deliberately).
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-OCC-9 | Forced-visible def bytes (`itemDef+2193/+2194`, the destruction bone-map bases) are wired through `OcclusionWorld::EntityDefBits` but default 0 — latent until the destruction system (D-COL-2); their load-time source is unwitnessed. Identical behavior for buildings without destruction bones | B | WITNESSED-READY-DEFERRED (latent — awaiting D-COL-2) + NEEDS-RE (the load-time source) | PAR-REN |
+| D-OCC-12 | View culling stands in for `Viewport_TransformAndClipPoint @0x4115e0`: 5 frustum planes (near + 4 sides) + a Q22 forward-row depth cull vs the fog distance — same culling intent; the retail projector's screen-space epsilon behavior is not replicated | C | OPEN (bounded stand-in; PERMANENT candidate on ratification) | PAR-REN |
+| D-OCC-13 | The window-glow facet: the slot glow value is computed and banked but no renderer consumes it — retail draws window glows (the renderer-replaced legs of this id are registered class C below) | A | OPEN (awaiting-consumer facet) | PAR-REN |
+| D-OCC-14 | Entity-gate coverage: pooled opaque/alpha-tested MultiMesh rows have no per-instance retail section gate (terrain-aligned 512-unit bins give exact population AABBs; blended rows stay global to preserve ordering); wire avatars ride their own present path ungated; organics without collision instances use a position-centered 1 u bound-sphere stand-in for the graphic bounds | A | OPEN (bounded coverage) | PAR-REN |
+| D-OCC-15 | The staggered-refresh facet: retail refreshes pool-2 static `blink_hits` in staggered batches; the port has no placement or staggered static refresh, so static objects inside rooms can remain unstamped (the re-arm PRNG stream facet is registered class C below) | A | OPEN (coverage facet) | PAR-REN |
+
+Closed 2026-08-30 (the post-merge tidy round; ratification = this PR's merge,
+each entry falls back to an OPEN row if declined): **D-OCC-10** -> `PERMANENT`
+— `Terrain_SortSectorCacheByDistance @0x5c4410` orders retail draw calls/slot
+iteration only; results are order-independent per candidate and Godot owns
+draw order (register below; precedent D-RORD-2). **D-OCC-11** -> `PERMANENT`
+(class D) — the port clamps/guards where retail's wedge builder and viewthru
+bank write past their arrays into adjacent memory (register below).
+**D-OCC-13 (renderer-replaced legs)** -> `PERMANENT` — two-pass open-building
+draw order, per-light interior section scoping, the water-mirror clip matrix
+leg, and the reflection-pass collector variant (register below; the
+window-glow facet stays OPEN above). **D-OCC-15 (re-arm PRNG stream facet)**
+-> `PERMANENT` — an owned re-arm stream with identical distribution (register
+below; precedent D-NET-115; the staggered-refresh facet stays OPEN above).
+
 ## Count-to-zero scoreboard
 
 Open counts by domain (the target is zero in every cell). The table below is
@@ -1175,9 +1216,10 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Terrain | 1 | 0 | 0 | 1 | 0 |
 | Foliage | 3 | 0 | 0 | 3 | 0 |
 | Render — draw order | 1 | 0 | 0 | 1 | 0 |
-| **Total** | **96** | **7** | **13** | **116** | 0 |
+| Render — occlusion | 4 | 0 | 1 | 5 | 0 |
+| **Total** | **100** | **7** | **14** | **121** | 0 |
 
-Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-97.
+Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-97, D-OCC-9.
 
 <!-- scoreboard:generated:end -->
 
@@ -1185,8 +1227,9 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (as PAR-R1..R7 did for their six new domains).
 
-Permanent register size: **25 IDs across 24 rows** (below; counting rule: one row per
-register entry, `D-SCR-1`/`D-SCR-2` share a row, `env #11` counts as one ID). `UNAUDITED` systems: **0** — the
+Permanent register (below; counting rule: one row per register entry —
+`D-SCR-1`/`D-SCR-2` share a row, `env #11` counts as one ID, and a facet entry
+registers the facet while its parent id may stay tabled). `UNAUDITED` systems: **0** — the
 runtime-render systems reopened the set on 2026-07-05 (the REN audit track
 below, [ADR 0023](adr/0023-render-visual-parity.md)); REN-2 converted the
 materials/state system, REN-3 the draw-order system, and REN-5 the lighting
@@ -1240,6 +1283,11 @@ one-line rationale for why porting it would be *wrong*.
 | D-LOADSCR-1 | Load progress pumps 8 stage-boundary values + per-model pulses; retail has ~30 call sites with per-subsystem slot++ ticks | The value set and the constant-plus-creep pump mechanism match; the granularity follows how each load pipeline decomposes and is cosmetic-only (interface/loading-screen-re.md) |
 | D-LOADSCR-6 | The loading background draws unmodulated; retail draws it through the MODULATE2X-neutral `0xFF7F7F7F` effect modulate | Net-identical color — recorded so nobody "fixes" a half-bright that is not there (interface/loading-screen-re.md) |
 | D-LOADSCR-7 | ESC/disconnect cannot abort the synchronous SP/host map load; retail polls `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` at four asset points | The load has no reachable interruption window (one synchronous call the SceneTree cannot pre-empt) while both joiner waits are coroutines and honour ESC; scope-corrected 2026-07-25 (interface/loading-screen-re.md) |
+| env #8 | envscale applies at interpolation/byte quantization to the engine view's targets; retail bakes it at parse into every `*_rgb` positionally, leaking a stale scale across files in one load | Equivalence holds whenever envscale precedes the colors (corpus-validated); reproducing the positional parse-time bake would re-manufacture the cross-file stale-scale bleed and break the round-trip-preserving raw getters (env/env-tod-re.md #8) |
+| env #9 | The fog→skyfog mirror rides a per-keyframe flag; retail overwrites leftover keyframe slots with the `0xC0C0FF` sentinel value | Equivalent for well-formed files; the sentinel's only extra behavior is accidental leftover-slot bleed — stale-state bytes the flag model cannot manufacture (env/env-tod-re.md #9) |
+| D-OCC-10 | `Terrain_SortSectorCacheByDistance @0x5c4410` is not ported | It orders retail draw calls/slot iteration only; every mask/TOC result is order-independent per candidate and Godot owns draw order (precedent D-RORD-2; render/render-occlusion-re.md D-OCC-10) |
+| D-OCC-13 (renderer-replaced legs) | The two-pass open-building draw order, per-light interior section scoping (`Lighting_SetInteriorLightGroup @0x5a90e0`), the water-mirror clip matrix leg (`@0x5c5e75`), and the reflection-pass collector variant (def-flag 0x2000000) are not ported | Each replaces a D3D-pipeline mechanism Godot's depth buffer, light model, and water reflections already provide; the visibility UNION and admission semantics are ported (render/render-occlusion-re.md D-OCC-13) |
+| D-OCC-15 (re-arm PRNG stream facet) | The three-ray latch re-arm jitter draws from an owned `PRNG_Next16_C`-form stream seeded from the BSS-zero boot state; retail shares one process stream with unrelated consumers | Per-frame re-arm values are irreproducible against any given retail run by construction; the distribution is identical and no coupled value is observable (precedent D-NET-115; render/render-occlusion-re.md D-OCC-15) |
 
 ### Original-bug / garbage class (class D; basis: [ADR 0003](adr/0003-no-raw-passthrough-create-from-scratch.md))
 
@@ -1256,6 +1304,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-SCR-1 / D-SCR-2 | The SCR container codec accepts version bytes 0–2 and selects the key from the version byte + policy, where each original call site fixes the key | A deliberate multi-title superset so one codec serves JO-demo-era and shader containers; load-bearing equivalence holds for everything retail JO ships. |
 | D-RORD-6 | The original's two sort-key defects: opaque key bits 15+ OR in an uninitialized stack slot (`@ 0x5d92b9`), and a transparent strip's key reads the depth slot BEFORE its own store, lagging one strip within a render object (`@ 0x5d9326`) | Both are stale/uninitialized-memory reads whose effect is accidental (constant-per-call garbage; a one-strip-stale depth); reproducing them would manufacture the bugs rather than the intent (back-to-front by depth), against ADR 0003. |
 | D-INF-15 | FP bone builder: model rows past the anim's bone count sum an uninitialized `bone_translations` stack slot into their world position on flag-2 (translated) clips (`BoneAnim_BuildWorldMatrices @0x40c6e9..0x40c71d`; the buffer is only written for anim rows `@0x40c4bc..0x40c57c`); the reimpl adds zero | An uninitialized-stack read whose value is accidental per call; reproducing it would manufacture garbage against ADR 0003 — the witnessed intent (rows ride bone 0's matrix + their model pivot) is what the reimpl ports. |
+| D-OCC-11 | The port clamps the wedge builder at 64 planes and guards the viewthru bank like the window bank; retail writes past both (printing "too many planes" after already corrupting adjacent stack, and erroring on the viewthru bank only after 512/2048 unguarded writes) | Divergence exists only in the overflow regime where retail corrupts its own memory — reproducing it would manufacture memory corruption against ADR 0003; scratch caps are sized above any witnessed record (render/render-occlusion-re.md D-OCC-11). |
 
 `PERMANENT` is not a resting place for hard work: each entry above is a decision that the
 *faithful* behavior is to diverge. If a future need arises (e.g. exact reimpl-internal-state
@@ -1339,7 +1388,7 @@ new ones.
 
 ## Normalized prose-only catalogs (this train)
 
-Four records originally tracked divergences in prose only; PAR-0 minted stable IDs from their
+Five records originally tracked divergences in prose only; PAR-0 minted stable IDs from their
 then-existing text. Later evidence passes have extended the particle catalog through D-PTL-23:
 
 - [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) →
@@ -1354,10 +1403,13 @@ then-existing text. Later evidence passes have extended the particle catalog thr
 - [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..5** (the
   writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row;
   D-MIS-4/-5 minted-and-FIXED at the 2026-07-07 Nile parity pass).
-- [render/render-occlusion-re.md](render/render-occlusion-re.md) → **D-OCC-1..8**
-  (the blink-box visibility consumer witness, 2026-07-16 — open witness details,
-  not port divergences: the record's own §8 catalog; the section-mask/portal
-  engine port LANDED 2026-07-17 (engine/runtime/world/occlusion.cpp); D-OCC-1..8 stay deliberately record-only per the Normalized prose-only catalogs note below. The slice's ported halves: sound
-  occlusion closed **D-SND-7** and minted **D-SND-9** in the audio record's
-  catalog; the indoor frame gates ride `GameWorld` with their deferred override
-  legs pointed at the record).
+- [render/render-occlusion-re.md](render/render-occlusion-re.md) → **D-OCC-1..15**
+  (D-OCC-1..8: the blink-box visibility consumer witness, 2026-07-16 — open
+  WITNESS details, not port divergences; they stay deliberately record-only.
+  The port pass's divergences D-OCC-9..15 were record-only until 2026-08-30,
+  when the post-merge tidy tabled them in the "Render — occlusion" section
+  above and registered the four deliberate ones; the section-mask/portal
+  engine port LANDED 2026-07-17 (engine/runtime/world/occlusion.cpp). The
+  slice's ported halves: sound occlusion closed **D-SND-7** and minted
+  **D-SND-9** in the audio record's catalog; the indoor frame gates ride
+  `GameWorld` with their deferred override legs pointed at the record).

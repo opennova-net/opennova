@@ -65,6 +65,7 @@ DOMAIN_ORDER: list[tuple[str, str]] = [
     ("RMAT", "Render — materials/state"),
     ("RORD", "Render — draw order"),
     ("RLIT", "Render — lighting"),
+    ("OCC", "Render — occlusion"),
     ("MUS", "Music VM"),
     ("SCR", "SCR container"),
 ]
