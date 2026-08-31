@@ -62,7 +62,6 @@
     X(MODEL_RENDERABLE_MODELS, "VALUE: visited models currently camera-submitted") \
     X(WORLD_PARTICLES, "EffectWorld render-frame publication") \
     X(WORLD_CLEAR, "viewport clear-color publication") \
-    X(WORLD_ENV_CUBE, "environment-cube update submission") \
     /* The render-occlusion frame, split native collection from shell publication. */ \
     X(OCCL_BUILD, "native OcclusionWorld::build_frame (portal walk)") \
     X(OCCL_PROBE, "native per-entity render-gate loop") \

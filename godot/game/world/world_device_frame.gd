@@ -319,20 +319,6 @@ func render_sun_veil_frame() -> void:
 ## [orig: render_shadow_pass @ 0x5d7b70 once per main scene frame].
 
 
-## Retail refreshes TexCubeEnvironment during the offscreen preparation leg:
-## all six 256-square faces together initially/when forced and every 128 render
-## frames, centered on the simulation player and clamped above terrain.
-## [orig: update_environment_cubemap @ 0x6106a0].
-func render_environment_cube_frame() -> void:
-	if not _world._world_ready or _world._environment_cube == null:
-		return
-	var capture_position := _render_camera_xform().origin
-	var capture_sim := _world.get_sim()
-	if capture_sim != null:
-		capture_position = capture_sim.get_local_player_position()
-	_world._environment_cube.advance_frame(capture_position)
-
-
 func mix_audio_frame(ticks_run: int) -> void:
 	var audio_start := Time.get_ticks_usec()
 	if _world._world_ready and _world._mission_audio != null:

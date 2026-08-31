@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 184,
+  "resource_count": 185,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",

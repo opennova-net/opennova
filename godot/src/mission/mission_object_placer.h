@@ -192,11 +192,9 @@ public:
 	// state. The EffectWorld device selects this row's <=4 lights into the
 	// shared RGBAF atlas [orig: collect_render_objects_for_batch @0x5d8ff7,
 	// see docs/render/render-lighting-re.md].
-	Array get_static_light_draw_sources();
 	// Advances whenever a row is appended, the table is reset, or a carve
 	// changes any row's `active` state: consumers rebuild their packed row
 	// arrays only on a change instead of re-reading the rows every frame.
-	uint64_t get_static_light_draw_source_revision() const;
 	// Dictionary mirror for focused shell/asset diagnostics. Production
 	// consumers use the typed snapshot above.
 	String graphic_for(int p_item_id);
@@ -280,7 +278,6 @@ private:
 		uint64_t instance_node = 0; // MultiMeshInstance3D ObjectID
 		int lod_index = 0;
 		bool shadow_only = false; // the filtered shadow twin
-		bool custom_data = false; // rows carry the light-atlas custom data
 		bool shadow_tagged = false; // carries the static_shadow_* metas
 		int live = 0;
 		Vector<int> row_instance;
@@ -296,7 +293,6 @@ private:
 		int row = -1;
 		int lod_index = 0;
 		Transform3D live_xform; // the row's transform while the level is live
-		Color custom_data; // the light-atlas row (visible populations)
 		bool shadow_only = false; // the filtered shadow twin
 		bool casts = true; // whether the slot is ever live in a shadow twin
 	};
@@ -373,9 +369,6 @@ private:
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,
 			int p_bms_id, int p_item_id, const String &p_graphic,
 			const Transform3D &p_xform);
-	int _append_static_light_draw_source(int p_source_index, int p_kind,
-			int p_entity_index, int p_bms_id, int p_item_id,
-			int p_robj_index, const AABB &p_world_bounds);
 
 	Ref<ResourceRoot> resource_root_;
 	Ref<ItemDatabase> item_db_;
@@ -385,8 +378,6 @@ private:
 	Array placed_entity_records_;
 	Array static_user_point_sources_;
 	Array static_item_effect_sources_;
-	Array static_light_draw_sources_;
-	uint64_t static_light_draw_source_revision_ = 1;
 
 
 	HashMap<String, Ref<ObjectData>> object_data_cache_;

@@ -129,8 +129,5 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	leg_start = _begin_leg()
 	_world.update_clear_frame()
 	_end_leg(FrameStats.WORLD_CLEAR, leg_start)
-	leg_start = _begin_leg()
-	_world.render_environment_cube_frame()
-	_end_leg(FrameStats.WORLD_ENV_CUBE, leg_start)
 	_world.finish_device_frame()
 	return outcome

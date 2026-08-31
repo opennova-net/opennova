@@ -71,7 +71,6 @@ class FakeWorld:
 	func mix_audio_frame(ticks_run: int) -> void:
 		trace.append("audio:%d" % ticks_run)
 	func update_clear_frame() -> void: trace.append("clear")
-	func render_environment_cube_frame() -> void: trace.append("environment_cube")
 	func finish_device_frame() -> void: trace.append("finish")
 	func session_frame_failed(_reason: String) -> void: trace.append("failed")
 
@@ -94,7 +93,7 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 		"begin", "session", "local_view", "scene_environment",
 		"environment_nodes", "terrain", "water", "foliage", "network",
 		"occlusion", "iris", "sun_veil", "lights", "materials", "framefx",
-		"particles", "precipitation", "audio:0", "clear", "environment_cube", "finish",
+		"particles", "precipitation", "audio:0", "clear", "finish",
 	])
 	assert_eq(world.terrain_camera_generation, 1,
 			"terrain samples the post-present camera generation")

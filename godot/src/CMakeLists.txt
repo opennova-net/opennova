@@ -55,7 +55,6 @@ add_library(${TARGET_NAME} SHARED
     mission/mission_object_placer.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
-    env/environment_cube_capture.cpp
     env/sky_dome.cpp
     env/sun_shadow.cpp
     env/water.cpp
@@ -75,7 +74,6 @@ add_library(${TARGET_NAME} SHARED
     lights/light_scene.cpp
     particle/effect_scene.cpp
     particle/particle_renderer.cpp
-    render/environment_cube_blit.cpp
     render/frame_fx.cpp
     render/object_lod_frame.cpp
     render/q3_frame_adapter.cpp

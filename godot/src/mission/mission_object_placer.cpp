@@ -145,10 +145,6 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::get_static_user_point_sources);
 	ClassDB::bind_method(D_METHOD("get_static_item_effect_sources"),
 			&MissionObjectPlacer::get_static_item_effect_sources);
-	ClassDB::bind_method(D_METHOD("get_static_light_draw_sources"),
-			&MissionObjectPlacer::get_static_light_draw_sources);
-	ClassDB::bind_method(D_METHOD("get_static_light_draw_source_revision"),
-			&MissionObjectPlacer::get_static_light_draw_source_revision);
 	ClassDB::bind_method(D_METHOD("get_static_instance_binding_count", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_binding_count);
 	ClassDB::bind_method(D_METHOD("graphic_for", "item_id"),
@@ -378,8 +374,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	static_lod_switches_ = 0;
 	static_user_point_sources_ = Array();
 	static_item_effect_sources_ = Array();
-	static_light_draw_sources_ = Array();
-	++static_light_draw_source_revision_;
 	placed_entity_records_ = Array();
 	if (p_mission.is_null() || p_parent == nullptr || resource_root_.is_null()) {
 		return stats;
@@ -584,56 +578,14 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			xform_array.push_back(xform);
 		}
 		_record_static_user_point_group(graphic, xform_array);
-		Vector<int> effect_source_rows;
-		effect_source_rows.resize(instance_count);
-		for (int i = 0; i < effect_source_rows.size(); ++i) {
-			effect_source_rows.write[i] = -1;
-		}
 		for (int i = 0; i < group.effect_sources.size(); ++i) {
 			Dictionary source = group.effect_sources[i];
-			effect_source_rows.write[i] = _append_static_item_effect_source(
+			_append_static_item_effect_source(
 					int(source.get("kind", -1)),
 					int(source.get("entity_index", -1)),
 					int(source.get("bms_id", 0)),
 					int(source.get("item_id", 0)), graphic,
 					source.get("world_transform", Transform3D()));
-		}
-		// One atlas row per retained entity/ROBJ. Multiple material surfaces
-		// under that ROBJ share the row, while its query AABB is the exact merge
-		// of those surfaces (every level's) in model-rest space transformed by
-		// the entity.
-		HashMap<int, AABB> local_robj_bounds;
-		Vector<int> robj_order;
-		for (const StaticBatch &batch : batches) {
-			if (batch.mesh.is_null()) {
-				continue;
-			}
-			const AABB surface_bounds = batch.offset.xform(batch.mesh->get_aabb());
-			AABB *merged = local_robj_bounds.getptr(batch.robj_index);
-			if (merged == nullptr) {
-				local_robj_bounds[batch.robj_index] = surface_bounds;
-				robj_order.push_back(batch.robj_index);
-			} else {
-				*merged = merged->merge(surface_bounds);
-			}
-		}
-		HashMap<uint64_t, int> light_draw_rows;
-		for (int i = 0; i < instance_count; ++i) {
-			for (const int robj_index : robj_order) {
-				const AABB *local_bounds = local_robj_bounds.getptr(robj_index);
-				if (local_bounds == nullptr) {
-					continue;
-				}
-				const int row = _append_static_light_draw_source(
-						i < effect_source_rows.size() ? effect_source_rows[i] : -1,
-						i < group.kinds.size() ? group.kinds[i] : -1,
-						i < group.entity_indices.size()
-								? group.entity_indices[i] : -1,
-						i < group.bms_ids.size() ? group.bms_ids[i] : 0,
-						i < group.item_ids.size() ? group.item_ids[i] : 0,
-						robj_index, group.xforms[i].xform(*local_bounds));
-				light_draw_rows[static_light_draw_key(i, robj_index)] = row;
-			}
 		}
 		// One retained instance per slot: the world bound sphere the projector
 		// consumes (the profile's model sphere under the entity's uniform
@@ -732,7 +684,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			population.multimesh = p_mm;
 			population.lod_index = p_batch.lod_index;
 			population.shadow_only = p_shadow_only;
-			population.custom_data = !p_shadow_only;
 			population.row_instance.resize(p_slots.size());
 			population.row_binding.resize(p_slots.size());
 			population.row_slot.resize(p_slots.size());
@@ -748,11 +699,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				binding.slot = local_index;
 				binding.lod_index = p_batch.lod_index;
 				binding.live_xform = group.xforms[slot] * p_batch.offset;
-				const int *row = light_draw_rows.getptr(
-						static_light_draw_key(slot, p_batch.robj_index));
-				binding.custom_data = Color(
-						row != nullptr ? static_cast<float>(*row + 1) : 0.0f, 0.0f,
-						0.0f, 0.0f);
 				binding.shadow_only = p_shadow_only;
 				binding.casts =
 						slot < group.shadow_slots.size() && group.shadow_slots[slot];
@@ -799,7 +745,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			Ref<MultiMesh> mm;
 			mm.instantiate();
 			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-			mm->set_use_custom_data(true);
 			mm->set_mesh(p_batch.mesh);
 			mm->set_instance_count(p_slots.size());
 			mm->set_visible_instance_count(0);
@@ -1748,9 +1693,6 @@ void MissionObjectPlacer::_static_population_append(int p_population,
 	}
 	const int row = population.live;
 	population.multimesh->set_instance_transform(row, binding.live_xform);
-	if (population.custom_data) {
-		population.multimesh->set_instance_custom_data(row, binding.custom_data);
-	}
 	population.row_instance.write[row] = p_instance_row;
 	population.row_binding.write[row] = p_binding;
 	population.row_slot.write[row] = binding.slot;
@@ -1779,9 +1721,6 @@ void MissionObjectPlacer::_static_population_remove(int p_population,
 		StaticLodBinding &moved = static_lod_instances_.write[moved_instance]
 										  .bindings.write[moved_binding_index];
 		population.multimesh->set_instance_transform(row, moved.live_xform);
-		if (population.custom_data) {
-			population.multimesh->set_instance_custom_data(row, moved.custom_data);
-		}
 		population.row_instance.write[row] = moved_instance;
 		population.row_binding.write[row] = moved_binding_index;
 		population.row_slot.write[row] = moved.slot;

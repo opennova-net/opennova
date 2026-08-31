@@ -191,6 +191,14 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::set_scene_environment);
 	ClassDB::bind_method(D_METHOD("get_scene_environment"),
 			&MissionEnvironment::get_scene_environment);
+	ClassDB::bind_method(D_METHOD("set_glow_enabled", "enabled"),
+			&MissionEnvironment::set_glow_enabled);
+	ClassDB::bind_method(D_METHOD("get_glow_enabled"),
+			&MissionEnvironment::get_glow_enabled);
+	ClassDB::bind_method(D_METHOD("set_volumetric_fog_enabled", "enabled"),
+			&MissionEnvironment::set_volumetric_fog_enabled);
+	ClassDB::bind_method(D_METHOD("get_volumetric_fog_enabled"),
+			&MissionEnvironment::get_volumetric_fog_enabled);
 	ClassDB::bind_method(D_METHOD("get_water_color"),
 			&MissionEnvironment::get_water_color);
 	ClassDB::bind_method(D_METHOD("has_water_height"),
@@ -386,16 +394,8 @@ void MissionEnvironment::_write_lighting_block_globals(
 	}
 	const EnvLightValues &v = **p_values;
 	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_light_block_dir", v.dir);
-	rs->global_shader_parameter_set("opennova_light_block_dir_color",
-			v.dir_color);
-	rs->global_shader_parameter_set("opennova_light_block_hemi_sky",
-			v.hemi_sky);
-	rs->global_shader_parameter_set("opennova_light_block_hemi_ground",
-			v.hemi_ground);
-	rs->global_shader_parameter_set("opennova_light_block_ceiling", v.ceiling);
-	rs->global_shader_parameter_set("opennova_light_block_floor",
-			v.floor_color);
+	// ADR 0043: the scene sun/ambient/omnis carry the block's light values;
+	// the object family reads only the modulator gain and the fog enable.
 	rs->global_shader_parameter_set("opennova_light_block_gain", v.gain);
 	// The scene fog block itself (color/start/end/type) is the pass state
 	// write_shader_globals / the weather tick / the pass switch already
@@ -436,6 +436,7 @@ void MissionEnvironment::set_scene_environment(
 	// perspective — the retail law is a plain fog blend.
 	scene_environment_->set_fog_sky_affect(0.0f);
 	scene_environment_->set_fog_aerial_perspective(0.0f);
+	_apply_presentation_toggles();
 	if (state_.is_loaded()) {
 		_write_scene_environment(_build_light_values());
 		const opennova::env::SceneFogValues fog =
@@ -444,6 +445,38 @@ void MissionEnvironment::set_scene_environment(
 	} else {
 		_write_scene_environment(EnvLightValues::retail_noon_defaults());
 	}
+}
+
+void MissionEnvironment::_apply_presentation_toggles() {
+	if (scene_environment_.is_null()) {
+		return;
+	}
+	// Glow reads the gamma-domain scene target; only over-unity pixels (the
+	// energy-2.0 additive stacks and EMISSION self-lit surfaces) bloom, so
+	// the authored diffuse palette stays untouched.
+	scene_environment_->set_glow_enabled(glow_enabled_);
+	scene_environment_->set_glow_hdr_bleed_threshold(1.0f);
+	scene_environment_->set_glow_bloom(0.0f);
+	// Volumetric fog samples the sun's CSM into shadowed light shafts. It is
+	// a taste knob (default off): density follows the retail fog color only
+	// loosely, and the exact retail blend already rides the depth fog.
+	scene_environment_->set_volumetric_fog_enabled(volumetric_fog_enabled_);
+}
+
+void MissionEnvironment::set_glow_enabled(bool p_enabled) {
+	if (glow_enabled_ == p_enabled) {
+		return;
+	}
+	glow_enabled_ = p_enabled;
+	_apply_presentation_toggles();
+}
+
+void MissionEnvironment::set_volumetric_fog_enabled(bool p_enabled) {
+	if (volumetric_fog_enabled_ == p_enabled) {
+		return;
+	}
+	volumetric_fog_enabled_ = p_enabled;
+	_apply_presentation_toggles();
 }
 
 void MissionEnvironment::_write_scene_environment(

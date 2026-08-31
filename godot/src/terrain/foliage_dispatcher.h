@@ -106,6 +106,11 @@ public:
   // simulation's stance query. Callers without entity data leave this empty.
   // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded, see docs/foliage/foliage-re.md].
   void set_silhouette_anchors(const PackedVector3Array &p_anchors);
+
+  // The scene sun's foliage casters (the SHADOWS_ONLY detail twins). ON by
+  // default; the settings seam may disable them wholesale.
+  void set_foliage_shadows_enabled(bool p_enabled);
+  bool get_foliage_shadows_enabled() const;
   PackedVector3Array get_silhouette_anchors() const;
 
   // Runtime frame. Reads exact detail patch keys/distances from the wired
@@ -250,18 +255,26 @@ private:
   Ref<Shader> detail_high_shader_;
   Ref<Shader> detail_low_shader_;
   Ref<Shader> silhouette_shader_;
+  Ref<Shader> foliage_shadow_shader_;
   std::array<Ref<ShaderMaterial>, opennova::FOLIAGE_MAX_DEFS>
       detail_high_materials_{};
   std::array<Ref<ShaderMaterial>, opennova::FOLIAGE_MAX_DEFS>
       detail_low_materials_{};
   std::array<Ref<ShaderMaterial>, opennova::FOLIAGE_MAX_DEFS>
       silhouette_materials_{};
+  std::array<Ref<ShaderMaterial>, opennova::FOLIAGE_MAX_DEFS>
+      shadow_materials_{};
   std::unordered_map<MeshCacheKey, CachedMesh, MeshCacheKeyHash>
       detail_mesh_cache_;
   std::unordered_map<MeshCacheKey, CachedMesh, MeshCacheKeyHash>
       model_mesh_cache_;
   std::vector<RID> detail_draw_pool_;
   std::vector<RID> model_draw_pool_;
+  // ADR 0043: each near-detail draw carries a SHADOWS_ONLY twin running the
+  // opaque alpha-scissor variant — Godot's shadow pass skips the transparent
+  // detail materials, so the twin is what the scene sun's CSM rasterizes.
+  std::vector<RID> detail_shadow_pool_;
+  bool foliage_shadows_enabled_ = true;
   RID draw_scenario_;
   // What each pool instance currently holds on the RenderingServer. The draw
   // list is diff-applied per slot (mesh, material, instance uniforms), so a
@@ -283,6 +296,7 @@ private:
     float alpha_reference = 0.0f;
     float high_pass_cutoff = 0.0f;
     float wind_phase = 0.0f;
+    bool shadow_visible = false;
     bool tile_cache_ready = false;
     float tile_cache_layer = 0.0f;
     Vector4 tile_cache_projection;
@@ -317,6 +331,7 @@ private:
                             std::vector<RID> &r_pool,
                             std::vector<DrawInstanceStamp> &r_stamps,
                             size_t p_index);
+  RID _ensure_shadow_instance(RenderingServer *p_server, size_t p_index);
   bool _bind_current_scenario();
   void _set_draw_pool_visibility(bool p_visible);
   void _release_draw_pools();

@@ -42,23 +42,6 @@ Array MissionObjectPlacer::get_static_item_effect_sources() {
 	return static_item_effect_sources_.duplicate(true);
 }
 
-uint64_t MissionObjectPlacer::get_static_light_draw_source_revision() const {
-	return static_light_draw_source_revision_;
-}
-
-Array MissionObjectPlacer::get_static_light_draw_sources() {
-	_check_epoch();
-	Array out = static_light_draw_sources_.duplicate(true);
-	for (int i = 0; i < out.size(); ++i) {
-		Dictionary row = out[i];
-		const int bms_id = int(row.get("bms_id", 0));
-		row["active"] = bms_id == 0 ||
-				!hidden_destruction_instances_.has(bms_id);
-		out[i] = row;
-	}
-	return out;
-}
-
 void MissionObjectPlacer::_record_static_user_point_group(
 		const String &p_graphic, const Array &p_transforms) {
 	const Ref<ObjectData> data = _load_object_data(p_graphic);
@@ -91,24 +74,6 @@ int MissionObjectPlacer::_append_static_item_effect_source(int p_kind,
 	row["source_index"] = source_index;
 	static_item_effect_sources_.push_back(row);
 	return source_index;
-}
-
-int MissionObjectPlacer::_append_static_light_draw_source(int p_source_index,
-		int p_kind, int p_entity_index, int p_bms_id, int p_item_id,
-		int p_robj_index, const AABB &p_world_bounds) {
-	Dictionary row;
-	const int atlas_row = static_light_draw_sources_.size();
-	row["atlas_row"] = atlas_row;
-	row["source_index"] = p_source_index;
-	row["kind"] = p_kind;
-	row["entity_index"] = p_entity_index;
-	row["bms_id"] = p_bms_id;
-	row["item_id"] = p_item_id;
-	row["robj_index"] = p_robj_index;
-	row["world_bounds"] = p_world_bounds;
-	static_light_draw_sources_.push_back(row);
-	++static_light_draw_source_revision_;
-	return atlas_row;
 }
 
 // --- destruction support (world-wac-ai-re §24.6) -----------------------------
@@ -175,7 +140,6 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 		_flush_static_population_changes(touched);
 	}
 	hidden_destruction_instances_.insert(p_bms_id);
-	++static_light_draw_source_revision_;
 	return rec->xform;
 }
 
@@ -199,7 +163,6 @@ bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
 		_flush_static_population_changes(touched);
 	}
 	hidden_destruction_instances_.erase(p_bms_id);
-	++static_light_draw_source_revision_;
 	return true;
 }
 bool MissionObjectPlacer::register_object_data(const String &p_graphic,

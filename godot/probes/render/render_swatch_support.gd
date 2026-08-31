@@ -268,19 +268,6 @@ static func make_matchterrain_array(alpha: int) -> Texture2DArray:
 	return texture
 
 
-static func make_static_point_light_atlas(entries: Array[Dictionary]) -> ImageTexture:
-	var image := Image.create(9, entries.size(), false, Image.FORMAT_RGBAF)
-	image.fill(Color(0.0, 0.0, 0.0, 0.0))
-	for row in range(entries.size()):
-		var mesh: MeshInstance3D = entries[row]["mesh"]
-		var point_position := mesh.global_position + Vector3(0.0, 0.0, 2.0)
-		image.set_pixel(0, row, Color(1.0, 0.0, 0.0, 0.0))
-		image.set_pixel(1, row, Color(point_position.x, point_position.y,
-				point_position.z, 15.0 / 36.0))
-		image.set_pixel(2, row, Color(0.8, 0.55, 0.3, 6.0))
-	return ImageTexture.create_from_image(image)
-
-
 static func lighting_clip_rect(image: Image, rect: Rect2i) -> Rect2i:
 	return rect.intersection(Rect2i(Vector2i.ZERO, image.get_size()))
 
@@ -296,20 +283,6 @@ static func lighting_mean_delta(a: Image, b: Image, rect: Rect2i) -> float:
 			var cb := b.get_pixel(x, y)
 			total += (absf(ca.r - cb.r) + absf(ca.g - cb.g) + absf(ca.b - cb.b)) / 3.0
 	return total / float(clipped.get_area())
-
-
-static func lighting_max_byte_delta(a: Image, b: Image, rect: Rect2i) -> int:
-	var clipped := lighting_clip_rect(a, rect)
-	var maximum := 0
-	for y in range(clipped.position.y, clipped.end.y):
-		for x in range(clipped.position.x, clipped.end.x):
-			var ca := a.get_pixel(x, y)
-			var cb := b.get_pixel(x, y)
-			maximum = maxi(maximum, absi(ca.r8 - cb.r8))
-			maximum = maxi(maximum, absi(ca.g8 - cb.g8))
-			maximum = maxi(maximum, absi(ca.b8 - cb.b8))
-			maximum = maxi(maximum, absi(ca.a8 - cb.a8))
-	return maximum
 
 
 static func lighting_mean_luminance(image: Image, rect: Rect2i) -> float:

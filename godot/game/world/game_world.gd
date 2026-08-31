@@ -82,8 +82,6 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _terrain: Terrain = $Terrain
 @onready var _env: MissionEnvironment = get_node_or_null("MissionEnvironment")
 @onready var _water: Water = get_node_or_null("Water")
-@onready var _environment_cube: EnvironmentCubeCapture = \
-		get_node_or_null("EnvironmentCubeCapture")
 @onready var _framefx: FrameFx = \
 		get_node_or_null("FrameFx")
 @onready var _weather: Weather = get_node_or_null("Weather")
@@ -897,8 +895,6 @@ func _load_environment(env_path: String) -> bool:
 		_celestial.set_resource_root(_resource_root)
 	if _precipitation != null:
 		_precipitation.set_resource_root(_resource_root)
-	if _environment_cube != null:
-		_environment_cube.force_capture()
 	return true
 
 
@@ -1138,8 +1134,6 @@ func _load_terrain(trn_path: String) -> bool:
 	_terrain.build()
 	if _water != null:
 		_water.terrain_data = data
-	if _environment_cube != null:
-		_environment_cube.terrain_data = data
 	if _celestial != null:
 		# The glare occlusion rays march this terrain (env #14).
 		_celestial.terrain_data = data
@@ -1382,10 +1376,6 @@ func sample_iris_frame() -> void:
 
 func render_sun_veil_frame() -> void:
 	_device_frame.render_sun_veil_frame()
-
-
-func render_environment_cube_frame() -> void:
-	_device_frame.render_environment_cube_frame()
 
 
 func mix_audio_frame(ticks_run: int) -> void:

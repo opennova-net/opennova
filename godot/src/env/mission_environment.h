@@ -198,6 +198,13 @@ public:
 	// from the retail fog block. Null detaches.
 	void set_scene_environment(const Ref<Environment> &p_environment);
 	Ref<Environment> get_scene_environment() const { return scene_environment_; }
+	// Modern-presentation taste knobs (ADR 0043): HDR glow (threshold 1.0 —
+	// only over-unity emission and additive stacks bloom) and shadowed
+	// volumetric light shafts through the scene sun's CSM.
+	void set_glow_enabled(bool p_enabled);
+	bool get_glow_enabled() const { return glow_enabled_; }
+	void set_volumetric_fog_enabled(bool p_enabled);
+	bool get_volumetric_fog_enabled() const { return volumetric_fog_enabled_; }
 	// The fog leg alone, for the per-frame weather writeback (C++ seam):
 	// maps the retail fog law onto Environment fog (type 0 -> exponential
 	// density, linear types -> depth fog with the type-derived begin).
@@ -255,6 +262,9 @@ private:
 	bool underwater_view_ = false;
 	bool underwater_overlay_view_ = false;
 	Ref<Environment> scene_environment_;
+	bool glow_enabled_ = true;
+	bool volumetric_fog_enabled_ = false;
+	void _apply_presentation_toggles();
 	Ref<ShaderMaterial> sky_material_;
 };
 

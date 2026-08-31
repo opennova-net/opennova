@@ -40,8 +40,6 @@ weather_path = NodePath("../Weather")
 environment_path = NodePath("../MissionEnvironment")
 weather_path = NodePath("../Weather")
 
-[node name="EnvironmentCubeCapture" type="EnvironmentCubeCapture" parent="."]
-
 [node name="Celestial" type="Celestial" parent="."]
 environment_path = NodePath("../MissionEnvironment")
 environment_capture_layer_mask = 1024

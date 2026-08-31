@@ -104,7 +104,7 @@ func reattach() -> void:
 		if data == null:
 			continue
 		# Batched statics are entities too: a subobject record binds to this
-		# tagged owner and the atlas draw row declares the same identity.
+		# tagged owner identity.
 		# [orig: Entity_SpawnGlowEffects @ 0x56c8ae; SetOwnerGroup(entity,bone)]
 		var xform: Transform3D = source.get("world_transform", Transform3D.IDENTITY)
 		var is_building := int(source.get("kind", -1)) == \

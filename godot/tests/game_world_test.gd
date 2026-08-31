@@ -205,13 +205,10 @@ class ItemFxPlacerStub:
 	extends RefCounted
 	var item_db: ItemDatabase
 	var static_sources: Array = []
-	var static_light_draw_sources: Array = []
 	func get_item_db() -> ItemDatabase:
 		return item_db
 	func get_static_item_effect_sources() -> Array:
 		return static_sources.duplicate(true)
-	func get_static_light_draw_sources() -> Array:
-		return static_light_draw_sources.duplicate(true)
 
 
 # --- Real item-fx fixtures (ADR 0034): the item database is an authored

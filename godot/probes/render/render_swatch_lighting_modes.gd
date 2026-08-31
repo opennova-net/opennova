@@ -20,14 +20,13 @@ func _capture_lighting_image() -> Image:
 	return await _stage.capture_image(_ctx.tree, RenderSwatchSupport.SETTLE_FRAMES)
 
 
-# Raster proof for the D-RMAT-5 / D-RLIT object-lighting contract. One sphere
-# per static technique is rendered through nine witnessed input states. This
-# tests pixels rather than uniform delivery. The per-technique validation
-# ledger says which authored NORMAL passes consume directional, oriented
-# hemisphere, flat ambient, and gameplay point light; the probe rejects both
-# missing and invented responses. The final state renders the same geometry
-# through a production MultiMesh atlas row and requires exact RGBA8 parity with
-# the live per-instance point-light route.
+# Raster proof for the object-lighting contract under ADR 0043: one sphere per
+# static technique rendered through eight scene-lighting states — the real
+# DirectionalLight3D sun reversed, hemisphere sky ambient reversed through the
+# gradient Sky, flat ambient on/off, and a real OmniLight3D per sphere on/off
+# (the production delivery for every route). The per-technique validation
+# ledger says which techniques are lit and which stay unshaded islands; the
+# probe rejects both missing and invented responses.
 func lighting_mode(out_dir: String, prefix: String) -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	_stage.set_stage_size(Vector2i(1280, 720))
@@ -63,9 +62,28 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.015, 0.015, 0.02)
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.04, 0.04, 0.04)
+	env.ambient_light_energy = 2.0
 	world_env.environment = env
 	scene.add_child(world_env)
 	RenderSwatchSupport.add_framefx(scene, false)
+
+	# The scene's light delivery IS production delivery (ADR 0043): one
+	# casting-off sun for the directional states, the gradient hemisphere Sky
+	# for the sky-ambient states, and one OmniLight3D per sphere for the
+	# gameplay point states — all at the MODULATE2X energy 2.0 convention.
+	var sun := DirectionalLight3D.new()
+	sun.light_energy = 2.0
+	sun.shadow_enabled = false
+	sun.visible = false
+	scene.add_child(sun)
+	var hemi_material := ShaderMaterial.new()
+	hemi_material.shader = load("res://shaders/hemisphere_sky.gdshader") as Shader
+	var hemi_sky_resource := Sky.new()
+	hemi_sky_resource.sky_material = hemi_material
+	hemi_sky_resource.radiance_size = Sky.RADIANCE_SIZE_64
+	env.sky = hemi_sky_resource
 
 	var diffuse := RenderSwatchSupport.make_lighting_diffuse_texture()
 	var detail := RenderSwatchSupport.make_lighting_detail_texture()
@@ -75,10 +93,9 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 	var techniques: Array = parsed.get("techniques", [])
 	const COLS := 6
 	const SPACING := 2.2
-	# The world lighting block is pass-global (opennova_light_block_*), not
-	# material state: publish this probe's own register before the first
-	# capture so no other writer's values leak into it. The response states
-	# rewrite the direction and hemisphere pair per capture.
+	# The modulator gain and fog enable are the two surviving pass globals the
+	# object family reads (ADR 0043): publish this probe's own values before
+	# the first capture so no other writer's leak into it.
 	RenderingServer.global_shader_parameter_set("opennova_light_block_gain",
 			Vector3(0.5, 0.5, 0.5))
 	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
@@ -109,7 +126,6 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 		material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 		material.set_shader_parameter("u_alpha_mod", 1.0)
 		material.set_shader_parameter("u_reflect_color", Color(0.7, 0.8, 0.9, 0.25))
-		material.set_shader_parameter("u_local_light_count", 0)
 
 		var sphere := MeshInstance3D.new()
 		var mesh := SphereMesh.new()
@@ -121,24 +137,16 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 				-(i / COLS) * SPACING, 0.0)
 		scene.add_child(sphere)
 
-		# Static mission ROBJ draws share this exact compiled material, but carry
-		# their selected light row through INSTANCE_CUSTOM.x. Keep the twin at
-		# the same world transform and switch visibility between captures so the
-		# comparison isolates only the light-delivery route.
-		var static_instances := MultiMesh.new()
-		static_instances.transform_format = MultiMesh.TRANSFORM_3D
-		static_instances.use_custom_data = true
-		static_instances.mesh = mesh
-		static_instances.instance_count = 1
-		static_instances.set_instance_transform(0,
-				Transform3D(Basis.IDENTITY, sphere.position))
-		static_instances.set_instance_custom_data(0,
-				Color(float(i + 1), 0.0, 0.0, 0.0))
-		var static_sphere := MultiMeshInstance3D.new()
-		static_sphere.multimesh = static_instances
-		static_sphere.material_override = material
-		static_sphere.visible = false
-		scene.add_child(static_sphere)
+		# One tight-range production omni per sphere for the point states —
+		# the same OmniLight3D delivery every gameplay point light uses.
+		var point_light := OmniLight3D.new()
+		point_light.position = sphere.position + Vector3(0.0, 0.0, 1.2)
+		point_light.omni_range = 2.0
+		point_light.light_color = Color(0.8, 0.55, 0.3)
+		point_light.light_energy = 2.0
+		point_light.shadow_enabled = false
+		point_light.visible = false
+		scene.add_child(point_light)
 		var implementation := str(technique["implementation"])
 		var engine_enum := str(technique["engine_enum"])
 		var responses = response_by_enum.get(engine_enum, {})
@@ -154,16 +162,8 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 			"raster_checks": raster_checks_by_enum.get(engine_enum, {}),
 			"material": material,
 			"mesh": sphere,
-			"static_mesh": static_sphere,
+			"point_light": point_light,
 		})
-
-	# The runtime LightScene owns and publishes this RGBAF layout. Constructing
-	# the same payload here keeps the raster proof focused on the shader and
-	# MultiMesh transport; LightScene selection/scatter has separate native and
-	# director integration tests.
-	var static_point_atlas := RenderSwatchSupport.make_static_point_light_atlas(entries)
-	RenderingServer.global_shader_parameter_set(
-			"opennova_static_point_light_rows", static_point_atlas)
 
 	var rows := int(ceil(float(entries.size()) / float(COLS)))
 	var grid_w := COLS * SPACING
@@ -179,8 +179,8 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 
 	var captures := {}
 	for state in ["direction_a", "direction_b", "hemi_sky", "hemi_ground",
-			"ambient_off", "ambient_on", "point_off", "point_on", "point_static"]:
-		_apply_lighting_probe_state(entries, state)
+			"ambient_off", "ambient_on", "point_off", "point_on"]:
+		_apply_lighting_probe_state(entries, state, env, sun, hemi_material)
 		var frame: Image = await _capture_lighting_image()
 		if frame == null:
 			_sink.error("render_swatch_probe lighting: no viewport image for %s" % state)
@@ -211,8 +211,6 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 				captures["ambient_on"], rect)
 		var point_delta := RenderSwatchSupport.lighting_mean_delta(captures["point_off"],
 				captures["point_on"], rect)
-		var static_point_max_byte_delta := RenderSwatchSupport.lighting_max_byte_delta(
-				captures["point_on"], captures["point_static"], rect)
 		var dir_a_contrast := RenderSwatchSupport.lighting_axis_contrast(captures["direction_a"], rect, true)
 		var dir_b_contrast := RenderSwatchSupport.lighting_axis_contrast(captures["direction_b"], rect, true)
 		var sky_contrast := RenderSwatchSupport.lighting_axis_contrast(captures["hemi_sky"], rect, false)
@@ -226,7 +224,6 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 			"hemisphere_delta": hemi_delta,
 			"ambient_delta": ambient_delta,
 			"point_delta": point_delta,
-			"static_point_max_byte_delta": static_point_max_byte_delta,
 			"direction_contrast": [dir_a_contrast, dir_b_contrast],
 			"hemisphere_contrast": [sky_contrast, ground_contrast],
 		}
@@ -259,8 +256,6 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 				failures.append("%s did not react to gameplay point light (%f)" % [entry["name"], point_delta])
 		elif point_delta > 0.001:
 			failures.append("%s invented a gameplay point-light response (%f)" % [entry["name"], point_delta])
-		if static_point_max_byte_delta != 0:
-			failures.append("%s static atlas point-light route was not pixel-identical (max byte delta %d)" % [entry["name"], static_point_max_byte_delta])
 
 	var manifest := {
 		"version": 2,
@@ -274,7 +269,6 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 			"lit_ambient_delta_min": 0.006,
 			"lit_point_delta_min": 0.001,
 			"unexpected_response_delta_max": 0.001,
-			"static_point_max_byte_delta": 0,
 		},
 		"techniques": reports,
 		"failures": failures,
@@ -323,9 +317,21 @@ func channel_mode(out_dir: String, prefix: String) -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.012, 0.012, 0.016)
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.18, 0.18, 0.18)
+	env.ambient_light_energy = 2.0
 	world_env.environment = env
 	scene.add_child(world_env)
 	RenderSwatchSupport.add_framefx(scene, false)
+	# ADR 0043: the specular states light the authored Phong lobes through the
+	# production delivery — one real camera-axis sun.
+	var channel_sun := DirectionalLight3D.new()
+	channel_sun.basis = Basis.looking_at(Vector3(0.0, 0.0, -1.0), Vector3.UP)
+	channel_sun.light_color = Color(0.55, 0.55, 0.55)
+	channel_sun.light_energy = 2.0
+	channel_sun.shadow_enabled = false
+	channel_sun.visible = false
+	scene.add_child(channel_sun)
 
 	var textures := {
 		"diffuse_low": RenderSwatchSupport.make_channel_diffuse_texture(64),
@@ -422,7 +428,7 @@ func channel_mode(out_dir: String, prefix: String) -> void:
 			"specular_alpha_high", "coverage_low", "coverage_high",
 			"alpha_gen_low", "alpha_gen_high"]
 	for state in states:
-		_apply_channel_probe_state(entries, state, textures)
+		_apply_channel_probe_state(entries, state, textures, channel_sun)
 		var frame: Image = await _capture_lighting_image()
 		if frame == null:
 			_sink.error("render_swatch_probe channels: no viewport image for %s" % state)
@@ -498,78 +504,57 @@ func channel_mode(out_dir: String, prefix: String) -> void:
 		_sink.quit(1)
 
 
-func _apply_lighting_probe_state(entries: Array[Dictionary], state: String) -> void:
-	var hemi_sky := Vector3(0.04, 0.04, 0.04)
-	var hemi_ground := hemi_sky
-	var direction := Vector3(0.8, 0.0, -0.6)
-	var direction_color := Vector3(0.42, 0.42, 0.42)
+func _apply_lighting_probe_state(entries: Array[Dictionary], state: String,
+		env: Environment, sun: DirectionalLight3D,
+		hemi_material: ShaderMaterial) -> void:
+	var ambient := 0.04
+	var ambient_from_sky := false
+	var sun_on := false
 	var point_on := false
-	if state == "direction_b":
-		direction = Vector3(-0.8, 0.0, -0.6)
+	var sun_direction := Vector3(0.8, 0.0, -0.6)
+	var hemi_sky := Vector3(0.025, 0.025, 0.025)
+	var hemi_ground := hemi_sky
+	if state == "direction_a":
+		sun_on = true
+	elif state == "direction_b":
+		sun_on = true
+		sun_direction = Vector3(-0.8, 0.0, -0.6)
 	elif state == "hemi_sky":
+		ambient_from_sky = true
 		hemi_sky = Vector3(0.34, 0.34, 0.34)
-		hemi_ground = Vector3(0.025, 0.025, 0.025)
-		direction_color = Vector3.ZERO
 	elif state == "hemi_ground":
-		hemi_sky = Vector3(0.025, 0.025, 0.025)
+		ambient_from_sky = true
 		hemi_ground = Vector3(0.34, 0.34, 0.34)
-		direction_color = Vector3.ZERO
-	elif state == "ambient_off" or state == "ambient_on":
-		var ambient := 0.34 if state == "ambient_on" else 0.025
-		hemi_sky = Vector3(ambient, ambient, ambient)
-		hemi_ground = hemi_sky
-		direction_color = Vector3.ZERO
-	elif state == "point_off" or state == "point_on" or state == "point_static":
-		hemi_sky = Vector3(0.025, 0.025, 0.025)
-		hemi_ground = hemi_sky
-		direction_color = Vector3.ZERO
+	elif state == "ambient_on":
+		ambient = 0.34
+	elif state == "ambient_off":
+		ambient = 0.025
+	elif state == "point_off" or state == "point_on":
+		ambient = 0.025
 		point_on = state == "point_on"
 
-	# One pass-global lighting block per capture, shared by the sphere and its
-	# MultiMesh twin exactly as a live world shares it across every draw.
-	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky", hemi_sky)
-	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_ground",
-			hemi_ground)
-	RenderingServer.global_shader_parameter_set("opennova_light_block_dir", direction)
-	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
-			direction_color)
+	sun.visible = sun_on
+	if sun_on:
+		sun.basis = Basis.looking_at(sun_direction.normalized(), Vector3.UP)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY \
+			if ambient_from_sky else Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(ambient, ambient, ambient)
+	hemi_material.set_shader_parameter("u_hemi_sky", hemi_sky)
+	hemi_material.set_shader_parameter("u_hemi_ground", hemi_ground)
 	for entry in entries:
-		var mesh: MeshInstance3D = entry["mesh"]
-		var static_mesh: MultiMeshInstance3D = entry["static_mesh"]
-		mesh.visible = state != "point_static"
-		static_mesh.visible = state == "point_static"
-		mesh.set_instance_shader_parameter("u_point_light_count", 1.0 if point_on else 0.0)
-		var point_position := mesh.global_position + Vector3(0.0, 0.0, 2.0)
-		mesh.set_instance_shader_parameter("u_point_light_posr_0",
-				Vector4(point_position.x, point_position.y, point_position.z, 15.0 / 36.0))
-		mesh.set_instance_shader_parameter("u_point_light_color_0",
-				Vector4(0.8, 0.55, 0.3, 6.0))
+		(entry["point_light"] as OmniLight3D).visible = point_on
 
 
 func _apply_channel_probe_state(entries: Array[Dictionary], state: String,
-		textures: Dictionary) -> void:
+		textures: Dictionary, sun: DirectionalLight3D) -> void:
 	var color_phase := state.begins_with("rgb_") or \
 			state.begins_with("specular_alpha_")
 	var high := state.ends_with("_high")
-	# The lighting block is pass-global, so one direction serves every swatch
-	# of a capture. The coverage states swing it for the vertex_diffuse_alpha
-	# source (its coverage is the directional self-shadow, direction only);
-	# with a zero direction color no other technique's lit result can follow
-	# the swing, so the flip reaches exactly the swatches it did per material.
-	var direction := Vector3(0.0, 0.0, -1.0)
-	var direction_color := Vector3.ZERO
-	if state.begins_with("specular_alpha_"):
-		direction_color = Vector3(0.55, 0.55, 0.55)
-	elif state.begins_with("coverage_"):
-		direction = Vector3(0.0, 0.0, -1.0) if high else Vector3(0.0, 0.0, 1.0)
+	# The scene sun lights only the specular states: the alpha-controlled
+	# highlight must be independently observable over the flat ambient every
+	# other channel state keeps.
+	sun.visible = state.begins_with("specular_alpha_")
 	RenderingServer.global_shader_parameter_set("opennova_light_block_gain", Vector3.ONE)
-	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky",
-			Vector3(0.18, 0.18, 0.18))
-	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_ground",
-			Vector3(0.18, 0.18, 0.18))
-	RenderingServer.global_shader_parameter_set("opennova_light_block_dir", direction)
-	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
-			direction_color)
 	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
 	for entry in entries:
 		var color_mesh: MeshInstance3D = entry["color_mesh"]
@@ -617,6 +602,3 @@ func _apply_channel_probe_state(entries: Array[Dictionary], state: String,
 					Color(0.7, 0.8, 0.9, reflect_alpha))
 			shader_material.set_shader_parameter("u_alpha_test_threshold", 0.5)
 			shader_material.set_shader_parameter("u_alpha_test_invert", 0.0)
-			shader_material.set_shader_parameter("u_local_light_count", 0)
-		color_mesh.set_instance_shader_parameter("u_point_light_count", 0.0)
-		coverage_mesh.set_instance_shader_parameter("u_point_light_count", 0.0)

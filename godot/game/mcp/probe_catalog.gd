@@ -116,11 +116,6 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"flicker": { "type": "boolean", "default": false },
 					"model_lighting_trace": { "type": "boolean", "default": false },
 				}, ["mission_path"], true, false, 900_000),
-		ProbeDef.make("environment_cube_capture",
-				"The highest-quality environment-cube proof on Forward+ D3D12: six rendered "
-				+ "faces, the X/Z axis map, Cubemap sampling orientation and the 0x60 "
-				+ "gamma-byte dim, on the probe's own stage.",
-				RENDER + "environment_cube_capture_probe.gd", {}, [], true, false, 120_000),
 		ProbeDef.make("loading_screen_render",
 				"The menu -> mission loading handoff: from the main menu, start the mission "
 				+ "and accept only a loading frame that carries both the loading art and the "

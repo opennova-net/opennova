@@ -311,25 +311,19 @@ func test_environment_publishes_the_world_lighting_block_as_shader_globals() -> 
 
 	assert_true(world_values.floor_color.is_equal_approx(env_node.get_floor_color()))
 	assert_true(world_values.ceiling.is_equal_approx(env_node.get_ceiling_color()))
-	var expected := {
-		"opennova_light_block_dir": world_values.dir,
-		"opennova_light_block_dir_color": world_values.dir_color,
-		"opennova_light_block_hemi_sky": world_values.hemi_sky,
-		"opennova_light_block_hemi_ground": world_values.hemi_ground,
-		"opennova_light_block_ceiling": world_values.ceiling,
-		"opennova_light_block_floor": world_values.floor_color,
-		"opennova_light_block_gain": world_values.gain,
-	}
+	# ADR 0043: the scene sun/ambient/omnis deliver the light values — the
+	# object family's surviving pass globals are the modulator gain and the
+	# fog enable.
 	# The headless Dummy RenderingServer does not retain global shader
 	# parameters (get returns null); a rendering run verifies the writes.
 	if RenderingServer.global_shader_parameter_get(
-			"opennova_light_block_dir_color") == null:
+			"opennova_light_block_gain") == null:
 		pending("the headless RenderingServer retains no global shader parameters")
 		return
-	for name in expected:
-		var published: Vector3 = RenderingServer.global_shader_parameter_get(name)
-		assert_true(published.is_equal_approx(expected[name]),
-				"%s carries the published block value" % name)
+	var published: Vector3 = RenderingServer.global_shader_parameter_get(
+			"opennova_light_block_gain")
+	assert_true(published.is_equal_approx(world_values.gain),
+			"opennova_light_block_gain carries the published block value")
 	assert_true(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
 			"a loaded world fogs the object family")
 
@@ -338,15 +332,15 @@ func test_environment_publishes_the_world_lighting_block_as_shader_globals() -> 
 	remove_child(env_node)
 	var noon := EnvLightValues.retail_noon_defaults()
 	assert_true(Vector3(RenderingServer.global_shader_parameter_get(
-			"opennova_light_block_dir_color")).is_equal_approx(noon.dir_color),
-			"the exiting writer leaves the noon directional color behind")
+			"opennova_light_block_gain")).is_equal_approx(noon.gain),
+			"the exiting writer leaves the noon gain behind")
 	assert_false(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
 			"and clears the object fog enable")
 	# Re-entering republishes the live block even though its generation did
 	# not move (the exit forgot the published generation).
 	add_child(env_node)
 	assert_true(Vector3(RenderingServer.global_shader_parameter_get(
-			"opennova_light_block_dir_color")).is_equal_approx(world_values.dir_color),
+			"opennova_light_block_gain")).is_equal_approx(world_values.gain),
 			"a re-entered environment writes its block again")
 	assert_true(bool(RenderingServer.global_shader_parameter_get("opennova_fog_enabled")),
 			"and re-enables the object fog")

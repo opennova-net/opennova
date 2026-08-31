@@ -155,6 +155,10 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::set_weather);
   ClassDB::bind_method(D_METHOD("set_wind_clock_override_ms", "ms"),
                        &FoliageDispatcher::set_wind_clock_override_ms);
+  ClassDB::bind_method(D_METHOD("set_foliage_shadows_enabled", "enabled"),
+                       &FoliageDispatcher::set_foliage_shadows_enabled);
+  ClassDB::bind_method(D_METHOD("get_foliage_shadows_enabled"),
+                       &FoliageDispatcher::get_foliage_shadows_enabled);
   ClassDB::bind_method(D_METHOD("set_terrain_data", "data"),
                        &FoliageDispatcher::set_terrain_data);
   ClassDB::bind_method(D_METHOD("get_terrain_data"),
@@ -606,6 +610,10 @@ void FoliageDispatcher::_ensure_visuals() {
     silhouette_shader_ =
         loader->load("res://shaders/foliage_silhouette.gdshader", "Shader");
   }
+  if (foliage_shadow_shader_.is_null() && loader != nullptr) {
+    foliage_shadow_shader_ =
+        loader->load("res://shaders/foliage_shadow.gdshader", "Shader");
+  }
   auto ensure_material = [](Ref<ShaderMaterial> &r_material,
                             const Ref<Shader> &p_shader) {
     if (r_material.is_null()) {
@@ -619,10 +627,12 @@ void FoliageDispatcher::_ensure_visuals() {
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
     const bool fresh = detail_high_materials_[slot].is_null() ||
                        detail_low_materials_[slot].is_null() ||
-                       silhouette_materials_[slot].is_null();
+                       silhouette_materials_[slot].is_null() ||
+                       shadow_materials_[slot].is_null();
     ensure_material(detail_high_materials_[slot], detail_high_shader_);
     ensure_material(detail_low_materials_[slot], detail_low_shader_);
     ensure_material(silhouette_materials_[slot], silhouette_shader_);
+    ensure_material(shadow_materials_[slot], foliage_shadow_shader_);
     if (fresh) {
       // A new material holds no parameters yet: force the next write.
       material_inputs_written_ = false;
@@ -723,6 +733,12 @@ void FoliageDispatcher::_update_materials() {
       silhouette->set_shader_parameter("u_has_fd_texture", has_fd_texture);
       frame_stats_.backend_material_parameter_writes += 2;
     }
+    const Ref<ShaderMaterial> shadow = shadow_materials_[slot];
+    if (shadow.is_valid()) {
+      shadow->set_shader_parameter("u_fd_texture", fd_texture);
+      shadow->set_shader_parameter("u_has_fd_texture", has_fd_texture);
+      frame_stats_.backend_material_parameter_writes += 2;
+    }
   }
 }
 
@@ -745,12 +761,11 @@ RID FoliageDispatcher::_ensure_draw_instance(
     ++frame_stats_.backend_scenario_writes;
     server->instance_set_transform(instance, Transform3D());
     // ADR 0043 (retail had no foliage shadows at all): foliage casts into
-    // the scene sun's CSM. The card materials are transparent-class today,
-    // which Godot's shadow pass skips — an opaque alpha-scissor shadow
-    // variant lands with the polish stage; the ON setting is the declared
-    // intent and costs nothing until then.
+    // the scene sun's CSM through the SHADOWS_ONLY twins running the opaque
+    // alpha-scissor variant; the transparent-class card draws themselves
+    // never enter the shadow pass.
     server->instance_geometry_set_cast_shadows_setting(
-        instance, RenderingServer::SHADOW_CASTING_SETTING_ON);
+        instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
     server->instance_set_layer_mask(instance, 1u << 0);
     server->instance_set_extra_visibility_margin(instance, 8.0f);
     frame_stats_.backend_configuration_writes += 4;
@@ -759,6 +774,56 @@ RID FoliageDispatcher::_ensure_draw_instance(
     r_pool.push_back(instance);
   }
   return r_pool[p_index];
+}
+
+RID FoliageDispatcher::_ensure_shadow_instance(RenderingServer *p_server,
+                                               size_t p_index) {
+  if (p_server == nullptr || !draw_scenario_.is_valid()) {
+    return RID();
+  }
+  while (detail_shadow_pool_.size() <= p_index) {
+    const RID instance = p_server->instance_create();
+    ++frame_stats_.backend_instance_creates;
+    p_server->instance_set_scenario(instance, draw_scenario_);
+    ++frame_stats_.backend_scenario_writes;
+    p_server->instance_set_transform(instance, Transform3D());
+    p_server->instance_geometry_set_cast_shadows_setting(
+        instance, RenderingServer::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
+    p_server->instance_set_layer_mask(instance, 1u << 0);
+    p_server->instance_set_extra_visibility_margin(instance, 8.0f);
+    frame_stats_.backend_configuration_writes += 4;
+    p_server->instance_set_visible(instance, false);
+    ++frame_stats_.backend_visibility_writes;
+    detail_shadow_pool_.push_back(instance);
+  }
+  return detail_shadow_pool_[p_index];
+}
+
+void FoliageDispatcher::set_foliage_shadows_enabled(bool p_enabled) {
+  if (foliage_shadows_enabled_ == p_enabled) {
+    return;
+  }
+  foliage_shadows_enabled_ = p_enabled;
+  RenderingServer *server = RenderingServer::get_singleton();
+  if (server == nullptr) {
+    return;
+  }
+  for (size_t index = 0; index < detail_shadow_pool_.size(); ++index) {
+    if (!detail_shadow_pool_[index].is_valid()) {
+      continue;
+    }
+    const bool visible = p_enabled && index < detail_draw_stamps_.size() &&
+                         detail_draw_stamps_[index].visible;
+    server->instance_set_visible(detail_shadow_pool_[index], visible);
+    ++frame_stats_.backend_visibility_writes;
+    if (index < detail_draw_stamps_.size()) {
+      detail_draw_stamps_[index].shadow_visible = visible;
+    }
+  }
+}
+
+bool FoliageDispatcher::get_foliage_shadows_enabled() const {
+  return foliage_shadows_enabled_;
 }
 
 bool FoliageDispatcher::_bind_current_scenario() {
@@ -788,6 +853,7 @@ bool FoliageDispatcher::_bind_current_scenario() {
   };
   rebind(detail_draw_pool_);
   rebind(model_draw_pool_);
+  rebind(detail_shadow_pool_);
   draw_scenario_ = scenario;
   return scenario.is_valid();
 }
@@ -813,6 +879,21 @@ void FoliageDispatcher::_set_draw_pool_visibility(bool p_visible) {
   };
   update(detail_draw_pool_, detail_draw_stamps_);
   update(model_draw_pool_, model_draw_stamps_);
+  for (size_t index = 0; index < detail_shadow_pool_.size(); ++index) {
+    if (!detail_shadow_pool_[index].is_valid() ||
+        index >= detail_draw_stamps_.size()) {
+      continue;
+    }
+    DrawInstanceStamp &stamp = detail_draw_stamps_[index];
+    const bool visible = p_visible && stamp.bound && stamp.visible &&
+                         foliage_shadows_enabled_;
+    if (stamp.shadow_visible == visible) {
+      continue;
+    }
+    server->instance_set_visible(detail_shadow_pool_[index], visible);
+    ++frame_stats_.backend_visibility_writes;
+    stamp.shadow_visible = visible;
+  }
 }
 
 void FoliageDispatcher::_release_draw_pools() {
@@ -829,9 +910,11 @@ void FoliageDispatcher::_release_draw_pools() {
     };
     release(detail_draw_pool_);
     release(model_draw_pool_);
+    release(detail_shadow_pool_);
   } else {
     detail_draw_pool_.clear();
     model_draw_pool_.clear();
+    detail_shadow_pool_.clear();
   }
   detail_draw_stamps_.clear();
   model_draw_stamps_.clear();
@@ -856,10 +939,20 @@ void FoliageDispatcher::_hide_pool_tail(
       server->instance_set_visible(instance, false);
       ++frame_stats_.backend_visibility_writes;
     }
+    if (stamp->shadow_visible && &r_pool == &detail_draw_pool_ &&
+        i < detail_shadow_pool_.size() && detail_shadow_pool_[i].is_valid()) {
+      server->instance_set_visible(detail_shadow_pool_[i], false);
+      ++frame_stats_.backend_visibility_writes;
+    }
     // Drop the draw's mesh ownership: resident meshes stay owned by the
     // caches, an evicted identity frees with its last binding.
     server->instance_set_base(instance, RID());
     ++frame_stats_.backend_base_writes;
+    if (&r_pool == &detail_draw_pool_ && i < detail_shadow_pool_.size() &&
+        detail_shadow_pool_[i].is_valid()) {
+      server->instance_set_base(detail_shadow_pool_[i], RID());
+      ++frame_stats_.backend_base_writes;
+    }
     *stamp = DrawInstanceStamp{};
   }
 }
@@ -1538,6 +1631,8 @@ void FoliageDispatcher::_apply_draw_list(
     if (!draw.is_valid()) {
       continue;
     }
+    const RID shadow_draw =
+        detail ? _ensure_shadow_instance(server, draw_index) : RID();
     // Diff-apply against what the server instance already holds. A stable
     // draw list avoids every base/material/visibility write; only values whose
     // portable compiler clock advanced reach the server as uniform writes.
@@ -1547,6 +1642,10 @@ void FoliageDispatcher::_apply_draw_list(
     if (fresh || stamp.mesh != mesh) {
       server->instance_set_base(draw, mesh->get_rid());
       ++frame_stats_.backend_base_writes;
+      if (shadow_draw.is_valid()) {
+        server->instance_set_base(shadow_draw, mesh->get_rid());
+        ++frame_stats_.backend_base_writes;
+      }
       stamp.mesh = mesh;
     }
     Ref<Material> material;
@@ -1562,18 +1661,35 @@ void FoliageDispatcher::_apply_draw_list(
       server->instance_geometry_set_material_override(
           draw, material.is_valid() ? material->get_rid() : RID());
       ++frame_stats_.backend_material_writes;
+      if (shadow_draw.is_valid()) {
+        const Ref<ShaderMaterial> shadow_material = shadow_materials_[slot];
+        server->instance_geometry_set_material_override(
+            shadow_draw,
+            shadow_material.is_valid() ? shadow_material->get_rid() : RID());
+        ++frame_stats_.backend_material_writes;
+      }
       stamp.material = material;
     }
     if (detail && (fresh || stamp.fade != command.fade)) {
       server->instance_geometry_set_shader_parameter(
           draw, uniform.fade, command.fade);
       ++frame_stats_.backend_uniform_writes;
+      if (shadow_draw.is_valid()) {
+        server->instance_geometry_set_shader_parameter(
+            shadow_draw, uniform.fade, command.fade);
+        ++frame_stats_.backend_uniform_writes;
+      }
       stamp.fade = command.fade;
     }
     if (fresh || stamp.alpha_reference != command.alpha_reference) {
       server->instance_geometry_set_shader_parameter(
           draw, uniform.alpha_reference, command.alpha_reference);
       ++frame_stats_.backend_uniform_writes;
+      if (shadow_draw.is_valid()) {
+        server->instance_geometry_set_shader_parameter(
+            shadow_draw, uniform.alpha_reference, command.alpha_reference);
+        ++frame_stats_.backend_uniform_writes;
+      }
       stamp.alpha_reference = command.alpha_reference;
     }
     if (detail && (fresh || stamp.high_pass_cutoff != command.high_pass_cutoff)) {
@@ -1583,12 +1699,22 @@ void FoliageDispatcher::_apply_draw_list(
       server->instance_geometry_set_shader_parameter(
           draw, uniform.high_pass_cutoff, command.high_pass_cutoff);
       ++frame_stats_.backend_uniform_writes;
+      if (shadow_draw.is_valid()) {
+        server->instance_geometry_set_shader_parameter(
+            shadow_draw, uniform.high_pass_cutoff, command.high_pass_cutoff);
+        ++frame_stats_.backend_uniform_writes;
+      }
       stamp.high_pass_cutoff = command.high_pass_cutoff;
     }
     if (fresh || stamp.wind_phase != command.wind_phase) {
       server->instance_geometry_set_shader_parameter(
           draw, uniform.wind_phase, command.wind_phase);
       ++frame_stats_.backend_uniform_writes;
+      if (shadow_draw.is_valid()) {
+        server->instance_geometry_set_shader_parameter(
+            shadow_draw, uniform.wind_phase, command.wind_phase);
+        ++frame_stats_.backend_uniform_writes;
+      }
       stamp.wind_phase = command.wind_phase;
     }
     if (detail) {
@@ -1645,6 +1771,13 @@ void FoliageDispatcher::_apply_draw_list(
       server->instance_set_visible(draw, visible);
       ++frame_stats_.backend_visibility_writes;
       stamp.visible = visible;
+    }
+    const bool shadow_visible =
+        visible && shadow_draw.is_valid() && foliage_shadows_enabled_;
+    if (stamp.shadow_visible != shadow_visible && shadow_draw.is_valid()) {
+      server->instance_set_visible(shadow_draw, shadow_visible);
+      ++frame_stats_.backend_visibility_writes;
+      stamp.shadow_visible = shadow_visible;
     }
   }
   // Pool instances past this frame's command count held the previous frame's
