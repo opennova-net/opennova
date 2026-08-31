@@ -1214,8 +1214,9 @@ Death presentation (engine-research 2026-07-16 session 5; world-wac-ai-re §19; 
 
 The client counterpart of `Server_TickUpdate`. Witnessed + ported into `engine/net/npruntime`
 (`np::ClientRuntime`) / `engine/net/netsim`. Verified by `npruntime_client_runtime` (always-on in-process
-round-trip + host-as-client) and `npruntime_golden_client` (C2S 0x0C inner + framing byte-parity vs the
-gameplay capture; S2C anchor cross-check). Findings landed in [net/novaworld-net-re.md §5.44](net/novaworld-net-re.md).
+round-trip + host-as-client) and, until the capture root retired (ca1cef465, 2026-08-29),
+`npruntime_golden_client` (C2S 0x0C inner + framing byte-parity vs the
+gameplay capture; S2C anchor cross-check — findings stand as history). Findings landed in [net/novaworld-net-re.md §5.44](net/novaworld-net-re.md).
 
 | original | addr | role | evidence | status |
 |---|---|---|---|---|
