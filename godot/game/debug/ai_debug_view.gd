@@ -159,7 +159,12 @@ static func _label_text(row: Dictionary) -> String:
 			else "ai %d" % int(row.get("ai_index", -1))
 	if not bool(row.get("alive", false)):
 		return text + "\nDEAD"
-	text += "\n%s" % String(row.get("state_name", "?"))
+	# ai_state_name is "?" for the unnamed gaps (state 0 = the infantry
+	# motor's SM default); the number reads better than a bare "?".
+	var state_name := String(row.get("state_name", ""))
+	if state_name.is_empty() or state_name == "?":
+		state_name = "state %d" % int(row.get("state", 0))
+	text += "\n%s" % state_name
 	if bool(row.get("infantry", false)):
 		text += "  m%d" % int(row.get("move_mode", 0))
 	var speed := int(row.get("out_speed", 0))
@@ -187,6 +192,10 @@ func _render_routes(rows: Array, channels: Array) -> void:
 		var nodes: PackedVector3Array = channel.get("nodes", PackedVector3Array())
 		nodes_by_channel[index] = nodes
 		if nodes.size() == 0:
+			continue
+		# Only routes something is walking: a mission authors far more
+		# channels than its brains use (the F3 AI window's table lists all).
+		if int(channel.get("followers", 0)) <= 0:
 			continue
 		var color := Color.from_hsv(IndexHue.hue_for_index(index), 0.75, 1.0)
 		var line_color := Color(color, SEGMENT_DIM)

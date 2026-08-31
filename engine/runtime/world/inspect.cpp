@@ -499,7 +499,13 @@ AiDebugReport ai_debug_report(World &world, const AiSystem &ai) {
 		AiOverlayRow row;
 		row.ai_index = i;
 		row.handle = e->handle.packed;
+		// Most BMS organics carry no authored name; the items.def display name
+		// keeps the overlay label meaningful.
 		row.name = ent ? ent->name : std::string();
+		if (row.name.empty() && ent != nullptr) {
+			if (const std::string *item_name = world.item_names.get(ent->item_id))
+				row.name = *item_name;
+		}
 		row.group_id = ent ? static_cast<int32_t>(ent->group_id) : 0;
 		row.alive = ent ? ent->alive : e->health > 0;
 		row.infantry = e->inf.active;
