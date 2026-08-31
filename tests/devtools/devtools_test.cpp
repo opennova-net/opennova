@@ -8,6 +8,7 @@
 #include <runtime/devtools/environment_request.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
+#include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/imgui_abi.h>
@@ -26,6 +27,9 @@ using opennova::devtools::EntitiesWindow;
 using opennova::devtools::EnvironmentRequest;
 using opennova::devtools::EnvironmentSnapshot;
 using opennova::devtools::EnvironmentWindow;
+using opennova::devtools::RaysRequest;
+using opennova::devtools::RaysSnapshot;
+using opennova::devtools::RaysWindow;
 using opennova::devtools::EntityDirectorySnapshot;
 using opennova::devtools::GameViewport;
 using opennova::devtools::GameWindow;
@@ -132,7 +136,7 @@ void test_attach_sets_docking_and_viewport_policy() {
 
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 5, "Game + Stats + Entities + Environment + demo registered");
+	CHECK(tools.pass().window_count() == 6, "Game + Stats + Entities + Environment + Rays + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -291,7 +295,7 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 5, "Game + Stats + Entities + Environment + demo registered");
+	CHECK(tools.pass().window_count() == 6, "Game + Stats + Entities + Environment + Rays + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
 	CHECK(!tools.pass().window(3).open, "the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
@@ -651,6 +655,83 @@ void test_environment_request_queue() {
 	CHECK(!tools.take_environment_request(request), "the queue drains exactly once");
 }
 
+// The Rays window formats per-category count rows from the pushed record,
+// mirrors the filter state into its edit controls, and drops everything on
+// the visibility close.
+void test_rays_window_formats_the_pushed_record() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	CHECK(!tools.needs_rays_snapshot(), "a closed Rays window needs no snapshot");
+	tools.rays_window().open = true;
+	CHECK(tools.needs_rays_snapshot(), "pass open && window open arms the feed");
+
+	RaysSnapshot snapshot;
+	snapshot.valid = true;
+	snapshot.logic_tick = 620;
+	snapshot.recording = true;
+	snapshot.view_shown = true;
+	snapshot.category_mask = 0x7FFF;
+	snapshot.ttl_ticks = 93;
+	snapshot.categories[0].name = "Uncategorized";
+	snapshot.categories[1].name = "Projectile";
+	snapshot.categories[1].held = 12;
+	snapshot.categories[1].total = 340;
+	for (int i = 2; i < opennova::devtools::kRayCategoryCount; ++i) {
+		snapshot.categories[i].name = "x";
+	}
+	tools.set_rays_snapshot(snapshot);
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with the Rays window open");
+	ImGui::Render();
+	CHECK(ImGui::FindWindowByName("Rays") != nullptr, "the Rays window exists after a pass");
+
+	const RaysWindow &window = tools.rays_window();
+	CHECK(window.snapshot_valid(), "the pushed snapshot is the reading");
+	CHECK(window.row_count() == opennova::devtools::kRayCategoryCount,
+			"every category formats a row");
+	CHECK(std::strcmp(window.row_text(0), "Uncategorized: held 0 / total 0") == 0,
+			"an idle category row");
+	CHECK(std::strcmp(window.row_text(1), "Projectile: held 12 / total 340") == 0,
+			"held rides the ring, total is the lifetime counter");
+
+	tools.set_rays_snapshot(RaysSnapshot{});
+	CHECK(!window.snapshot_valid() && window.row_count() == 0,
+			"an invalid snapshot clears the page (the world unloaded)");
+	tools.set_rays_snapshot(snapshot);
+	CHECK(window.row_count() == opennova::devtools::kRayCategoryCount,
+			"a re-push restores the page");
+	tools.pass().set_open(false);
+	CHECK(!tools.needs_rays_snapshot(), "closing the pass drops the need");
+	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
+}
+
+// The RaysRequest channel: enqueue/take round-trips the typed filter, TTL,
+// clear and view-toggle requests in order and drains exactly once.
+void test_rays_request_queue() {
+	GameDevTools tools;
+	RaysRequest request;
+	CHECK(!tools.take_rays_request(request), "fresh tools hold no rays request");
+	tools.rays_window().enqueue_request({RaysRequest::Kind::SetCategoryMask, 0x0003});
+	tools.rays_window().enqueue_request({RaysRequest::Kind::SetTtlTicks, 310});
+	tools.rays_window().enqueue_request({RaysRequest::Kind::Clear, 0});
+	tools.rays_window().enqueue_request({RaysRequest::Kind::SetViewShown, 1});
+	CHECK(tools.take_rays_request(request) &&
+					request.kind == RaysRequest::Kind::SetCategoryMask && request.a == 0x0003,
+			"the mask request round-trips first");
+	CHECK(tools.take_rays_request(request) &&
+					request.kind == RaysRequest::Kind::SetTtlTicks && request.a == 310,
+			"the TTL request follows");
+	CHECK(tools.take_rays_request(request) && request.kind == RaysRequest::Kind::Clear,
+			"the clear request follows");
+	CHECK(tools.take_rays_request(request) &&
+					request.kind == RaysRequest::Kind::SetViewShown && request.a == 1,
+			"the view toggle carries its state for the shell");
+	CHECK(!tools.take_rays_request(request), "the queue drains exactly once");
+}
+
 }  // namespace
 
 int main() {
@@ -667,6 +748,8 @@ int main() {
 	test_entities_debug_request_queue_and_gating();
 	test_environment_window_formats_the_pushed_record();
 	test_environment_request_queue();
+	test_rays_window_formats_the_pushed_record();
+	test_rays_request_queue();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

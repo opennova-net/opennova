@@ -16,6 +16,7 @@ const EXPECTED_IDS: Array[StringName] = [
 	&"show_effect_boxes",
 	&"show_portal_faces",
 	&"show_round_trails",
+	&"show_rays",
 	&"show_hit_meshes",
 	&"force_fp_arms",
 	&"body_in_first_person",
@@ -136,7 +137,7 @@ func test_the_table_registers_the_wire_catalog() -> void:
 				"'%s' keeps the legacy wire row keys" % id)
 	assert_eq(owner_counts[DebugControls.OWNER_ENGINE], 35,
 			"engine rows end in a Simulation/Terrain/Weather/environment call")
-	assert_eq(owner_counts[DebugControls.OWNER_DEVICE], 21,
+	assert_eq(owner_counts[DebugControls.OWNER_DEVICE], 22,
 			"device rows are viewport/overlay/audio/shell state")
 	assert_ne(JSON.stringify(_controls.capture_snapshot()), "",
 			"the entire MCP snapshot is JSON-safe")

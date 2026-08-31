@@ -600,6 +600,10 @@ func _register_option_rows() -> void:
 			"Draw the recent round outcomes over the world — flight segments and hit markers colored by result (green = face hit, amber = sphere stand-in, red ring = a graze whose face test missed and flew on).",
 			func(world: GameWorld) -> bool: return world.is_round_debug(),
 			func(world: GameWorld, on: bool) -> void: world.set_round_debug(on))
+	_world_check(&"show_rays", &"Rounds", "Show rays",
+			"Record every engine raycast and draw it over the world, colored by category and fading over ~1.5 s: bullets and knife swings, throwable sweeps, AI / script / replication / explosion LOS, ground probes, camera iris, render occlusion, sun visibility, sound occlusion, precipitation floor and F3 picks. A cross marks a resolved hit point; the clipped remainder past it draws faint; boolean blocked rays draw darkened. The F3 Rays window filters categories and shows per-category counts.",
+			func(world: GameWorld) -> bool: return world.is_ray_debug(),
+			func(world: GameWorld, on: bool) -> void: world.set_ray_debug(on))
 	_world_check(&"show_hit_meshes", &"Rounds", "Show hit meshes",
 			"Hit geometry is sampled at 6 Hz. Draw nearby hit geometry within 80 mission units of the local player: object bullet meshes and broad-phase spheres, plus posed person bone spheres (local player omitted; up to 96 targets). Person colors show normal-infantry damage zones: orange = x1.25 (0-4), cyan = x1.0 (5-8), lime = x0.5 (9-12/15-18), magenta = x3.0 head (13-14), dark red = masked, amber = unresolved fallback.",
 			func(world: GameWorld) -> bool: return world.is_hitbox_debug(),

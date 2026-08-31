@@ -16,12 +16,15 @@ class GameWindow;
 class GameViewport;
 class EntitiesWindow;
 class EnvironmentWindow;
+class RaysWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct DebugRequest;
 struct EntityDirectorySnapshot;
 struct EnvironmentRequest;
 struct EnvironmentSnapshot;
+struct RaysRequest;
+struct RaysSnapshot;
 
 class GameDevTools {
 public:
@@ -35,6 +38,8 @@ public:
 	const EntitiesWindow &entities_window() const { return *entities_window_; }
 	EnvironmentWindow &environment_window() { return *environment_window_; }
 	const EnvironmentWindow &environment_window() const { return *environment_window_; }
+	RaysWindow &rays_window() { return *rays_window_; }
+	const RaysWindow &rays_window() const { return *rays_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_spectator_state(bool available, bool active);
@@ -62,12 +67,22 @@ public:
 	bool needs_environment_snapshot() const;
 	bool take_environment_request(EnvironmentRequest &request);
 
+	// The Rays window's record/request channel (the same shape): the ray
+	// capture's counts + filter state pushed by value on its cadence while
+	// shown, and the typed filter/clear/view-toggle requests drained by the
+	// embedder (filter and clear into the Simulation ray-debug seam; the view
+	// toggle out to the shell that owns the 3D view).
+	void set_rays_snapshot(const RaysSnapshot &snapshot);
+	bool needs_rays_snapshot() const;
+	bool take_rays_request(RaysRequest &request);
+
 private:
 	ImGuiPass pass_;
 	GameWindow *game_window_ = nullptr;
 	StatsWindow *stats_window_ = nullptr;
 	EntitiesWindow *entities_window_ = nullptr;
 	EnvironmentWindow *environment_window_ = nullptr;
+	RaysWindow *rays_window_ = nullptr;
 };
 
 }  // namespace opennova::devtools

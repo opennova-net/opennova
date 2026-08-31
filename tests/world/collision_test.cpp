@@ -3894,6 +3894,121 @@ void test_projectile_trace_profile_is_opt_in_and_parity_neutral() {
     CHECK(profile_is_empty(collision.trace_profile()));
 }
 
+void test_ray_debug_capture_is_opt_in_with_scoped_categories() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+    world.registry.configure_pool(2, 8);
+    world.logic_tick = 77;
+
+    Entity owner_seed;
+    owner_seed.kind = EntityKind::Organic;
+    owner_seed.position = Vec3{0.0f, 100.0f, 0.0f};
+    const EntityHandle owner = world.registry.spawn(0, owner_seed);
+    Entity static_seed;
+    static_seed.kind = EntityKind::Building;
+    static_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    static_seed.yaw = 90;
+    static_seed.alive = true;
+    const EntityHandle statik = world.registry.spawn(2, static_seed);
+    // A type-1 solid on its own lane for the boolean LOS leg (the CFAC wall
+    // above has no solid volume, so raycast_clear never sees it).
+    Entity blocker_seed = static_seed;
+    blocker_seed.position = Vec3{5.0f, -20.0f, 0.0f};
+    const EntityHandle blocker = world.registry.spawn(2, blocker_seed);
+    CHECK(owner.valid() && statik.valid() && blocker.valid());
+
+    CollisionWorld collision;
+    collision.assign_entity(statik, collision.add_model(wall_triangle_model()));
+    collision.assign_entity(blocker,
+                            collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
+    collision.build_tick_tables(world);
+
+    using Cat = CollisionWorld::RayDebugCategory;
+    const auto ring = [&](Cat c) -> const CollisionWorld::RayDebugRing & {
+        return collision.ray_debug_rings()[static_cast<size_t>(c)];
+    };
+
+    ProjectileTrace trace;
+    trace.owner = owner;
+    trace.start = FixedVec3{0, 0, fx(0.9)};
+    trace.end = FixedVec3{fx(12.0), 0, fx(0.9)};
+
+    // Off by default: queries record nothing, the rings hold no storage.
+    CHECK(!collision.ray_debug_enabled());
+    const ProjectileHit unrecorded = collision.trace_projectile(world, trace);
+    CHECK(unrecorded.hit_class == ProjectileHitClass::StaticEntity);
+    for (const CollisionWorld::RayDebugRing &r : collision.ray_debug_rings()) {
+        CHECK(r.count == 0 && r.total == 0 && r.events.empty());
+    }
+
+    // Enabled: the projectile wrapper records the exact segment + hit, and
+    // the query result is untouched (parity-neutral instrumentation).
+    collision.set_ray_debug_enabled(true);
+    const ProjectileHit recorded = collision.trace_projectile(world, trace);
+    CHECK(recorded.hit_class == unrecorded.hit_class);
+    CHECK(recorded.position_q16.x == unrecorded.position_q16.x);
+    CHECK(ring(Cat::kProjectile).count == 1);
+    CHECK(ring(Cat::kProjectile).total == 1);
+    const CollisionWorld::RayDebugEvent &ev = ring(Cat::kProjectile).events[0];
+    CHECK(ev.tick == 77);
+    CHECK(ev.category == static_cast<uint8_t>(Cat::kProjectile));
+    CHECK(ev.result == CollisionWorld::kRayDebugHit);
+    CHECK(ev.start.x == trace.start.x && ev.start.y == trace.start.y &&
+          ev.start.z == trace.start.z);
+    CHECK(ev.end.x == trace.end.x && ev.end.y == trace.end.y &&
+          ev.end.z == trace.end.z);
+    CHECK(ev.hit.x == recorded.position_q16.x &&
+          ev.hit.y == recorded.position_q16.y &&
+          ev.hit.z == recorded.position_q16.z);
+
+    // raycast_clear records the boolean verdict under kUncategorized.
+    const int32_t a[3] = {0, fx(-20.0), fx(0.9)};
+    const int32_t b[3] = {fx(12.0), fx(-20.0), fx(0.9)};
+    CHECK(!collision.raycast_clear(world, a, b, owner, EntityHandle{}));
+    CHECK(ring(Cat::kUncategorized).count == 1);
+    CHECK(ring(Cat::kUncategorized).events[0].result ==
+          CollisionWorld::kRayDebugBlocked);
+
+    // RayDebugScope tags the fallback; nesting keeps the OUTERMOST tag and
+    // the tag restores on scope exit.
+    {
+        const CollisionWorld::RayDebugScope outer(collision, Cat::kThrowable);
+        {
+            const CollisionWorld::RayDebugScope inner(collision, Cat::kAiLos);
+            (void)collision.trace_projectile(world, trace);
+        }
+        (void)collision.trace_projectile(world, trace);
+    }
+    CHECK(ring(Cat::kThrowable).total == 2);
+    CHECK(ring(Cat::kAiLos).total == 0);
+    (void)collision.trace_projectile(world, trace);
+    CHECK(ring(Cat::kProjectile).total == 2);
+
+    // raycast_ground self-tags its internal clip as kGroundProbe.
+    const int32_t probe_pos[3] = {fx(5.0), 0, fx(2.0)};
+    (void)collision.raycast_ground(world, owner, probe_pos, 0, 0, fx(1.0),
+                                   fx(10.0), nullptr);
+    CHECK(ring(Cat::kGroundProbe).total == 1);
+
+    // The engine-held draw filter: full mask default, clamped TTL, mask
+    // clipped to the defined categories.
+    CHECK(collision.ray_debug_mask() == CollisionWorld::kRayDebugMaskAll);
+    collision.set_ray_debug_mask(~0u);
+    CHECK(collision.ray_debug_mask() == CollisionWorld::kRayDebugMaskAll);
+    collision.set_ray_debug_ttl_ticks(0);
+    CHECK(collision.ray_debug_ttl_ticks() == 1);
+    collision.set_ray_debug_ttl_ticks(100000);
+    CHECK(collision.ray_debug_ttl_ticks() == 620);
+
+    // Disable is an edge: rings clear, free their storage, and stay silent.
+    collision.set_ray_debug_enabled(false);
+    (void)collision.trace_projectile(world, trace);
+    for (const CollisionWorld::RayDebugRing &r : collision.ray_debug_rings()) {
+        CHECK(r.count == 0 && r.total == 0 && r.events.empty());
+    }
+}
+
 void test_projectile_dynamic_fallback_encloses_scaled_diagonal() {
     // Headless callers can attach a model without stamping entity+0's retail
     // header bound. This CFAC sits near the YZ AABB corner: max(|axis|) is 2u,
@@ -5146,6 +5261,7 @@ int main() {
     test_round_inside_bound_sphere_hits_wall();
     test_projectile_static_slot_signed_coordinates();
     test_projectile_trace_profile_is_opt_in_and_parity_neutral();
+    test_ray_debug_capture_is_opt_in_with_scoped_categories();
     test_projectile_dynamic_fallback_encloses_scaled_diagonal();
     test_round_equal_distance_uses_retail_pool_order();
     test_round_item_skip_mask();

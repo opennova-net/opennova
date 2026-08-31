@@ -285,6 +285,77 @@ void CollisionWorld::set_trace_profile_enabled(bool enabled) {
     trace_profile_ = TraceProfile{};
 }
 
+// --- ray-debug capture (the F3 ray view/window feed) ------------------------
+// Dev tooling, not a ported surface: the segment-query seams record their
+// inputs and results into these per-category rings while enabled; the queries
+// themselves stay byte-identical.
+
+const char *CollisionWorld::ray_debug_category_name(RayDebugCategory category) {
+    switch (category) {
+    case RayDebugCategory::kUncategorized: return "Uncategorized";
+    case RayDebugCategory::kProjectile: return "Projectile";
+    case RayDebugCategory::kKnife: return "Knife";
+    case RayDebugCategory::kThrowable: return "Throwable";
+    case RayDebugCategory::kAiLos: return "AI LOS";
+    case RayDebugCategory::kReplicationLos: return "Replication LOS";
+    case RayDebugCategory::kScriptLos: return "Script LOS";
+    case RayDebugCategory::kExplosionLos: return "Explosion LOS";
+    case RayDebugCategory::kGroundProbe: return "Ground probe";
+    case RayDebugCategory::kCameraIris: return "Camera iris";
+    case RayDebugCategory::kRenderOcclusion: return "Render occlusion";
+    case RayDebugCategory::kSunVisibility: return "Sun visibility";
+    case RayDebugCategory::kSoundOcclusion: return "Sound occlusion";
+    case RayDebugCategory::kPrecipitation: return "Precipitation";
+    case RayDebugCategory::kPick: return "Pick";
+    case RayDebugCategory::kCount: break;
+    }
+    return "?";
+}
+
+void CollisionWorld::set_ray_debug_enabled(bool enabled) {
+    if (ray_debug_enabled_ == enabled) return;
+    ray_debug_enabled_ = enabled;
+    for (RayDebugRing &ring : ray_debug_rings_) {
+        ring.next = 0;
+        ring.count = 0;
+        ring.total = 0;
+        if (enabled) {
+            ring.events.assign(kRayDebugCapPerCategory, RayDebugEvent{});
+        } else {
+            // Free on disable: hosts/tests stack-allocate Worlds, keep the
+            // ~165 KB of rings off that footprint (the RoundSim rationale).
+            ring.events.clear();
+            ring.events.shrink_to_fit();
+        }
+    }
+}
+
+void CollisionWorld::ray_debug_record(RayDebugCategory fallback, uint32_t tick,
+                                      const int32_t a[3], const int32_t b[3],
+                                      const int32_t *hit_or_null,
+                                      uint8_t result) const {
+    if (!ray_debug_enabled_) return;
+    const RayDebugCategory category =
+            ray_debug_scope_ != RayDebugCategory::kUncategorized ? ray_debug_scope_
+                                                                 : fallback;
+    RayDebugRing &ring = ray_debug_rings_[static_cast<size_t>(category)];
+    if (ring.events.empty()) return; // enable raced a mid-flight query
+    RayDebugEvent &event = ring.events[static_cast<size_t>(ring.next)];
+    event.start = FixedVec3{a[0], a[1], a[2]};
+    event.end = FixedVec3{b[0], b[1], b[2]};
+    if (hit_or_null != nullptr) {
+        event.hit = FixedVec3{hit_or_null[0], hit_or_null[1], hit_or_null[2]};
+    } else {
+        event.hit = event.end;
+    }
+    event.tick = tick;
+    event.category = static_cast<uint8_t>(category);
+    event.result = result;
+    ring.next = (ring.next + 1) % kRayDebugCapPerCategory;
+    if (ring.count < kRayDebugCapPerCategory) ++ring.count;
+    ++ring.total;
+}
+
 void CollisionWorld::invalidate_trace_view(EntityHandle h) {
     if (h.valid()) trace_view_cache_.erase(h.packed);
     invalidate_stable_los_index();

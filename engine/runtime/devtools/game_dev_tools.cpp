@@ -4,6 +4,7 @@
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/game_window.h>
+#include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/stats_window.h>
 
 #include <utility>
@@ -37,6 +38,9 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	auto environment = std::make_unique<EnvironmentWindow>();
 	environment_window_ = environment.get();
 	pass_.register_window(std::move(environment));
+	auto rays = std::make_unique<RaysWindow>();
+	rays_window_ = rays.get();
+	pass_.register_window(std::move(rays));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -94,6 +98,18 @@ bool GameDevTools::needs_environment_snapshot() const {
 
 bool GameDevTools::take_environment_request(EnvironmentRequest &request) {
 	return environment_window_->take_request(request);
+}
+
+void GameDevTools::set_rays_snapshot(const RaysSnapshot &snapshot) {
+	rays_window_->set_snapshot(snapshot);
+}
+
+bool GameDevTools::needs_rays_snapshot() const {
+	return pass_.is_open() && rays_window_->open;
+}
+
+bool GameDevTools::take_rays_request(RaysRequest &request) {
+	return rays_window_->take_request(request);
 }
 
 }  // namespace opennova::devtools

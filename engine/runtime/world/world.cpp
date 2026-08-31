@@ -862,6 +862,8 @@ bool EntityCommands::ssn_los_clear_within(uint16_t ssn, uint16_t target_ssn,
     los_offset_point(*a, pa);
     int32_t pb[3];
     los_offset_point(*b, pb);
+    const CollisionWorld::RayDebugScope ray_scope(
+            world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
     return world_.ai->line_of_sight_clear(world_, pa, pb,
                                           resolve_ssn(ssn), resolve_ssn(target_ssn));
 }
@@ -895,6 +897,8 @@ bool EntityCommands::ssn_sees_within(uint16_t ssn, uint16_t target_ssn,
         los_offset_point(*a, pa);
         int32_t pb[3];
         los_offset_point(*b_ent, pb);
+        const CollisionWorld::RayDebugScope ray_scope(
+                world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
         if (!world_.ai->line_of_sight_clear(world_, pa, pb, resolve_ssn(ssn),
                                             resolve_ssn(target_ssn)))
             return false;

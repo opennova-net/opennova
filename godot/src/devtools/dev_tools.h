@@ -65,6 +65,13 @@ public:
 	// DebugRequests into the same debug delegates the MCP control plane uses.
 	void set_simulation(Simulation *p_simulation);
 
+	// The Rays window's shell seam: the window's "Show rays" checkbox queues a
+	// view toggle the SHELL drains per frame (the GDScript debug-view set owns
+	// building the 3D ray view) — -1 none pending, else 0/1 — and the shell
+	// mirrors the live toggle state back so the checkbox stays honest.
+	int take_ray_view_toggle();
+	void set_ray_view_shown(bool p_shown);
+
 	// Every tool window back inside the main viewport on the next layout pass
 	// (ImGui's ini remembers a window dragged out to another monitor); the
 	// "Reset layout" menu item's seam, and what a probe asks for before it
@@ -120,6 +127,8 @@ private:
 	void push_entity_directory();
 	void apply_environment_requests();
 	void push_environment_snapshot();
+	void apply_rays_requests();
+	void push_rays_snapshot();
 	void set_game_playing_internal(bool p_playing);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
@@ -130,6 +139,9 @@ private:
 	Simulation *simulation() const;
 	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
 	int64_t last_environment_push_ms_ = -1;
+	int64_t last_rays_push_ms_ = -1;
+	bool ray_view_shown_ = false;      // the shell-mirrored show_rays state
+	int pending_ray_view_toggle_ = -1; // -1 none, else 0/1 for the shell
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;
