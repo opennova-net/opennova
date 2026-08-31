@@ -75,6 +75,29 @@
 !/mnml_m.pcx
 !/mnml_f.pcx
 
+# --- Shaders: the authored .fx set (SCR-wrapped; sources in tests/fixtures/fx/) ---
+# The boot shader precompile enumerates .fx through PFF directory walks and the
+# effect loader accepts only the 'SCR',0x01 container (key 0xA55B1EED)
+# [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060] -- without these the FP viewmodel
+# and every skinned draw silently fall back to fixed-function. minimal_fx_gen
+# guards that each artifact byte-equals wrap(source) and that no stray .fx
+# rides beside them.
+!/_baseinc.fx
+!/_vsshared.fx
+!/_vsskshared.fx
+!/_psshared.fx
+!/_tdepth.fx
+!/_tskin.fx
+!/_ffp.fx
+!/phongt.fx
+!/skbasic.fx
+!/skbdifft2.fx
+!/skbdiffo.fx
+!/skbdiffo2.fx
+!/skbphongt.fx
+!/skbphongo.fx
+
+
 # --- TEMPORARY: the retail bring-up set (committed 2026-08-31, to be replaced) ---
 # These are RETAIL Joint Operations bytes: the player body + anims, the avatar
 # combo, the first-person rifle, the default infantry clip set and their
@@ -105,20 +128,13 @@
 !/BINOC.bad
 !/BugSit.bad
 !/BugSitP.bad
-!/C4DIVEE.BAD
-!/C4RTR01F.BAD
-!/C4RTR02F.BAD
-!/C4RTR03F.BAD
 !/C4SWIMID.BAD
 !/C4SWMDTF.BAD
-!/C4SWMIDA.BAD
 !/C4SwimfB.bad
 !/C4SwimfG.bad
 !/C4SwimfL.bad
 !/C4SwimfR.bad
 !/C4_RUNLW.BAD
-!/CCLELEB.BAD
-!/CFLASHW2.BAD
 !/CLIMTOP.BAD
 !/CWavObje.bad
 !/CycDr23.bad
@@ -144,15 +160,11 @@
 !/DT1CrFR.bad
 !/DT1CrL.bad
 !/DT1CrR.bad
-!/DT1DEAHF.BAD
-!/DT1DEALT.BAD
 !/DT1DEATB.BAD
 !/DT1DEATF.BAD
 !/DT1DEATH.BAD
-!/DT1DEATL.BAD
 !/DT1DEATR.BAD
 !/DT1DELSD.BAD
-!/DT1DELSZ.BAD
 !/DT1DELTD.BAD
 !/DT1DERCF.BAD
 !/DT1DERSD.BAD
@@ -172,10 +184,7 @@
 !/DT1ROLLR.BAD
 !/DT1RST.BAD
 !/DT1runF.bad
-!/DT2DEHPB.BAD
 !/DT2DETFC.BAD
-!/DV_BURN.BAD
-!/D_FLSHBG.BAD
 !/DeadKnee.bad
 !/Dhead1.bad
 !/Dhead2.bad
@@ -200,18 +209,12 @@
 !/Dt1idlA3.bad
 !/Dt1idleA.bad
 !/DthFall.bad
-!/E_CRWL1.bad
-!/E_RUNF.bad
-!/E_SHOT3a.bad
-!/E_SHOT8a.bad
 !/Emo_aff.bad
 !/Emo_cvr.bad
 !/Emo_fbk.bad
 !/Emote01.bad
 !/Emote13.bad
-!/ErunWpn.bad
 !/FAILSAFE.BAD
-!/FLEEC04.BAD
 !/FRFLSHBG.BAD
 !/HomSDri.bad
 !/HomSitPa.bad
@@ -233,10 +236,6 @@
 !/IDL_STG.bad
 !/IDL_stnd.bad
 !/I_ReloKn.bad
-!/I_S_ALRT.bad
-!/I_idle1.bad
-!/I_search.bad
-!/I_walkf.bad
 !/Idl_rld.bad
 !/KNIFE_ID.bad
 !/LBirdSCP.bad
@@ -269,7 +268,6 @@
 !/datvDr.bad
 !/dt1prf.bad
 !/dt1zM60.bad
-!/e3idla06.bad
 !/lbirdsit.bad
 !/lcacdr.bad
 !/qd50_024.bad
@@ -283,7 +281,6 @@
 !/z3sitR.bad
 # textures + sidecars
 !/ACAMINDO.dds
-!/ACM2INDO.MDT
 !/ACM2INDO.dds
 !/AHand_B.dds
 !/AHand_B1.dds
@@ -293,7 +290,6 @@
 !/AUS1_CMW.MDT
 !/AUS1_CmW.dds
 !/AUS1_Gr1.dds
-!/AUS1_HD1.MDT
 !/AUS1_HG1.MDT
 !/AUS1_HG1.dds
 !/AUS1_Hd1.dds
@@ -329,51 +325,3 @@
 !/Bullet2.dds
 !/flat_N.tga
 !/rpk74_6.dds
-# shaders -- the FP/skinned render pass dies without these (see README bring-up)
-!/bdifft2.fx
-!/bmtxmirrt.fx
-!/bumpmirrt.fx
-!/dot3diffo.fx
-!/dot3difft.fx
-!/envphongt.fx
-!/flag.fx
-!/fulbrite.fx
-!/glass.fx
-!/leaves.fx
-!/phongo.fx
-!/phongt.fx
-!/portal.fx
-!/skbasic.fx
-!/skbdiffo.fx
-!/skbdiffo2.fx
-!/skbdifft.fx
-!/skbdifft2.fx
-!/skbphongo.fx
-!/skbphongt.fx
-!/skglass.fx
-!/tracer.fx
-!/_baseinc.fx
-!/_ffp.fx
-!/_psbmenv.fx
-!/_psdiff.fx
-!/_psphong.fx
-!/_psphong2.fx
-!/_tdepth.fx
-!/_tskdepth.fx
-!/_tskfolg.fx
-!/_vsbmenv.fx
-!/_vsdepth.fx
-!/_vsdiffo.fx
-!/_vsdifft.fx
-!/_vsflat.fx
-!/_vsphongo.fx
-!/_vsphongt.fx
-!/_vspost.fx
-!/_vsskdep.fx
-!/_vsskdfo.fx
-!/_vsskdft.fx
-!/_vsskflat.fx
-!/_vsskfolg.fx
-!/_vsskpho.fx
-!/_vsskpht.fx
-!/_vsskpost.fx

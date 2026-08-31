@@ -74,6 +74,7 @@ assets/**/*.md  text eol=lf filter= diff= merge=
 # The allowlist protecting the game dir is ours, not a game file: it must be a
 # real text blob on every checkout, LFS smudge or not (a pointer file ignores nothing).
 assets/**/.gitignore text eol=lf filter= diff= merge=
-# Retail .fx shader sources are text the packer archives byte-exact; plain blobs
-# so they diff, never normalised (same rationale as the defs above).
+# The authored .fx artifacts are SCR-wrapped binaries (minimal_fx_gen wraps the
+# plaintext sources under tests/fixtures/fx/); plain blobs, never normalised —
+# a CRLF fold would corrupt the container.
 assets/**/*.fx -text -eol filter= diff= merge=

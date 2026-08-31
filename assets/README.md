@@ -196,17 +196,31 @@ directory**. Since 2026-08-31 they are **committed** — allowlisted by name und
 set runs from a fresh checkout, and `git ls-files assets` now stages them into
 both zip flavors. Deleting a line from that banner is how a replacement lands.
 
-What is committed, from an extracted retail resource tree (287 files):
+What is committed, from an extracted retail resource tree (213 files, trimmed
+2026-08-31 to what the validated retail run actually loads — see the trim note
+below):
 
 | Group | Files |
 |---|---|
 | player body + anims | `US01.3di`, `US01.ADM`, the **150** `.bad` clips its keys name, and `failsafe.bad` (the every-mission-start fallback, `../docs/required-resources.md`) |
 | avatar combo | `Avatars.def` plus the first combo's three models — `Boonie.3di` (head), `JntOpsB1.3di` (body), `ArmsG.3di` (arms) |
 | sound profiles | `SndProf.def` — the 49-profile retail table; a miss AVs the first footstep (see the omitted list) |
-| shaders | the 47 `.fx` files — the FP viewmodel and every skinned draw silently die in fixed-function fallback without them. They only work ARCHIVED: the shader precompile enumerates PFF directories (never loose files) and skips zero-stamped archives, so the packager writes them into `resource.pff` with nonzero stamps (witnessed 2026-08-31) |
 | weapon | `AKM_1st.3di`, `AKM_1ST.adm`, its six `rAKM_*.bad` clips |
-| the default infantry clip set | `E_STAND.adm` and the 87 `.bad` clips it names — **required for the player to walk at all**, see below |
-| textures | the stems the five models name, resolved to whatever extension ships them — 33 `.dds`, one `.tga`, plus the `.MDT` sidecars |
+| the default infantry clip set | `E_STAND.adm` and the shared subset of the `.bad` clips it names — the file itself is **required for the player to walk at all**, see below |
+| textures | the stems the five models name, resolved to whatever extension ships them — 33 `.dds`, one `.tga`, plus the seven `.MDT` normal-map fills the materials actually request |
+
+The `.fx` shaders are **no longer retail bytes**: since 2026-08-31 the set
+ships our own authored effects (see "Shaders" below), so they moved out of
+this banner entirely.
+
+**The 2026-08-31 trim.** The validated retail run's `/FRISK` load log is the
+witness for what this set needs: every committed retail file was diffed
+against it, and the 27 files nothing loaded were deleted — the 25 `.bad`
+clips only `E_STAND.adm` names (AI behavior clips; `mnml` fields no AI, and a
+clip missing from a ring resolves to the RESET ring on both engines) and two
+`.MDT` fills no material requests (`ACM2INDO.MDT`, `AUS1_HD1.MDT`).
+`E_STAND.adm` itself stays: retail never loads it in this flow, but OUR
+kernel's default-set gate does (the coupling below).
 
 Three things about this set are worth knowing. **`E_STAND.adm` is load-bearing far
 beyond the AI bodies it names.** Infantry locomotion is entirely root-motion driven —
@@ -237,6 +251,30 @@ has a path — `tests/fixtures/minimal_3di_builder.h` mints a nineteen-part skin
 `person` rig in the retail bone order through `threedi_3di3_write`. The clip side
 needs a `.bad` **writer** first: `engine/formats/bad/bad.h` is parse-only today.
 
+## Shaders: the authored `.fx` set
+
+The 14 committed `.fx` files are **ours** — authored HLSL implementing the
+witnessed effect contract (tags, technique/pass annotations, parameter names,
+the fixed-function variant matrix), replacing the 47 retail files the bring-up
+first carried. The plaintext sources live in `tests/fixtures/fx/`; the
+committed artifacts are those sources wrapped in the SCR container retail's
+effect loader requires — `'SCR',0x01` + the shader keystream, 0xA55B1EED
+`[orig: ScriptFile_LoadAndDecrypt @ 0x5AE060]`; a bare-text `.fx` is rejected
+(NULL) by that sniff, which is why the wrapped form is what ships. Eight are
+effects (`_ffp.fx` — the 24-variant fixed-function matrix, loaded by literal
+name; `phongt.fx` for the rifle's `VS_PHONGT`; the six skinned tags the
+body/arms/head models carry) and six are shared includes (underscore-prefixed
+like retail's, so the loose override walk skips them). The set covers exactly
+the seven effect tags the committed models reference — the other retail
+effects (glass, mirrors, tracer, flag, foliage, ...) return when models that
+name them do.
+
+`minimal_fx_gen` regenerates and guards the pair (`--write` after editing a
+source); `fx_compile_validate` compiles every source through
+`D3DXCreateEffect` under the loader's define sets — the loud version of
+retail's silent boot drop (skips where D3DX9 or a D3D9 device is missing).
+Validated on retail 2026-08-31: all 14 PFF-loaded, FP viewmodel drawn.
+
 ## Guards (ctest, run in CI)
 
 The tracked files here are the canonical source-owned outputs, not packaging
@@ -252,6 +290,8 @@ rather than asserting byte-equality against a throwaway generator:
 | `minimal_trn_gen` | `mnml.trn` round-trips, keeps the 8-wide sector grid + quadrant block, names exactly the shipped `mnml_*` art (`minimal_trn_gen_test --write` re-emits the config) |
 | `minimal_art_validate` | every image `mnml.trn` names decodes; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |
 | `minimal_eol_guard` | every hand-authored text file is CRLF |
+| `minimal_fx_gen` | each committed `.fx` byte-equals wrap(its `tests/fixtures/fx/` source) and no stray `.fx` rides in assets/ |
+| `fx_compile_validate` | every authored effect compiles through `D3DXCreateEffect` under the loader's define sets (Skipped without D3DX9/D3D9) |
 
 ## Packaging
 
@@ -294,9 +334,9 @@ Validated on retail 2026-08-31: boot → menu → `mnml` → an armed player tha
 walks with a drawn first-person viewmodel, all from this set loose + the
 shader-bearing `resource.pff`.
 
-Known gaps: no model or shader here is ours yet — the player body, its
-animations, the viewmodel and the `.fx` set are the committed retail bring-up
-set described above, and the
+Known gaps: the shaders are ours (the authored `.fx` set above), but no model
+or clip here is ours yet — the player body, its animations and the viewmodel
+are the committed retail bring-up set described above, and the
 committed tree still declares graphics it does not carry. The terrain has
 relief and a full-size colormap but no tile overlay, and there is no `.ptl`
 catalogue, so the weapon authors no muzzle-flash or casing effect.

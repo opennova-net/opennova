@@ -8,14 +8,16 @@ hardening, and project health. Divergences from the original engine belong in
 ## Cleanup & verification backlog
 
 - [ ] Replace the committed retail bring-up set with authored assets. `assets/` carries
-      287 retail files (models, anim defs, clips, textures, the 47 `.fx` shaders, `Avatars.def`/`charattr.def`/`SndProf.def`)
+      213 retail files (models, anim defs, clips, textures, `Avatars.def`/`charattr.def`/`SndProf.def`)
       by explicit 2026-08-31 decision, allowlisted by name under the TEMPORARY banner in
       `assets/.gitignore`, so the minimal set runs from a fresh checkout — and they ship
-      in both zip flavors until replaced. The model side has a path
-      (`tests/fixtures/minimal_3di_builder.h` through `threedi_3di3_write`); the clip side
-      needs a `.bad` writer (`engine/formats/bad` is parse-only). Land a replacement by
-      swapping the file and deleting its allowlist line; the `minimal_*` guards and the
-      retail A/B loop stay the acceptance.
+      in both zip flavors until replaced. The 47 retail `.fx` are already replaced (the
+      authored set under `tests/fixtures/fx/`, retail-validated 2026-08-31) and the
+      never-loaded files trimmed against the validated run's `/FRISK` log. The model side
+      has a path (`tests/fixtures/minimal_3di_builder.h` through `threedi_3di3_write`);
+      the clip side needs a `.bad` writer (`engine/formats/bad` is parse-only). Land a
+      replacement by swapping the file and deleting its allowlist line; the `minimal_*`
+      guards and the retail A/B loop stay the acceptance.
 
 - [ ] `TerrainFieldStore` publishes a sector layout with no extent.
       `TerrainFieldStore::build` (`engine/runtime/terrain_query/terrain_field_store.cpp:21-63`)

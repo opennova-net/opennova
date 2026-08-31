@@ -670,6 +670,29 @@ add_executable(minimal_mus_gen_test fixtures/minimal_mus_gen.cpp)
 target_link_libraries(minimal_mus_gen_test PRIVATE opennova_formats)
 add_test(NAME minimal_mus_gen COMMAND minimal_mus_gen_test)
 
+# The authored .fx shader set: wrap(tests/fixtures/fx/*.fx) must byte-equal
+# the committed SCR artifacts (assets/*.fx), and assets/ must hold exactly the
+# authored set. `--write` regenerates. (docs/required-resources.md shader row)
+add_executable(minimal_fx_gen_test fixtures/minimal_fx_gen.cpp)
+target_link_libraries(minimal_fx_gen_test PRIVATE opennova_formats)
+target_compile_features(minimal_fx_gen_test PRIVATE cxx_std_17)
+target_compile_definitions(minimal_fx_gen_test PRIVATE
+    FX_SOURCE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/fx"
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_fx_gen COMMAND minimal_fx_gen_test)
+
+# Compile-validates the authored .fx sources through D3DXCreateEffect with the
+# loader's define sets (the loud version of retail's silent boot drop). Skips
+# without d3dx9_36.dll or a creatable D3D9 device (CI, headless).
+add_executable(fx_compile_validate_test fx/fx_compile_validate.cpp)
+target_compile_features(fx_compile_validate_test PRIVATE cxx_std_17)
+target_compile_definitions(fx_compile_validate_test PRIVATE
+    FX_SOURCE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/fx")
+if(WIN32)
+    target_link_libraries(fx_compile_validate_test PRIVATE d3d9 user32)
+endif()
+opennova_add_gated_test(fx_compile_validate COMMAND fx_compile_validate_test)
+
 # Minimal set's packaging tool: PFF-bundle the committed assets/ tree or
 # assemble a loose install. A TOOL, not a test: it only acts on
 # `minimal_pff_package_test --write-pff` / `--install <dir>` (assets/README.md),
