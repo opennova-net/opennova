@@ -72,6 +72,16 @@ struct FoliageViewInput {
 	int32_t wind_osc_ring0 = 0;
 };
 
+// The detail tier's c24.x sway phase: the ms clock x 0.003 plus the weather
+// oscillator's ring slot 0 / 65536 (`fild` the GetTickCount word, `fmul`
+// flt_7DE9D4 = 0.003; `fild Env_WaveOscRing`, `fmul` flt_7DE9D0 = 1/65536;
+// `faddp`), uploaded as c24 = (phase, 1, 0, 0.03) for Foliage_WindSwayVS'
+// sin(world.x + c24.x) * bend * c24.w
+// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d]. The clock
+// term folds modulo 2 pi so a long session keeps the sine's float precision —
+// the sine is periodic, nothing observable moves.
+float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0);
+
 enum class FoliageTier : uint8_t {
 	Detail = 0,
 	Silhouette = 1,

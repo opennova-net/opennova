@@ -755,7 +755,7 @@ target_include_directories(simassets_seat_spec_extract_test PRIVATE ${CMAKE_CURR
 add_test(NAME simassets_seat_spec_extract COMMAND simassets_seat_spec_extract_test)
 
 # Object renderer/shader tests
-foreach(test device_fog environment_cube light_runtime light_scene light_terrain_pass material_classify material_eval
+foreach(test device_fog environment_cube foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval
         particle_atlas_contract particle_frame_compiler_contract render_order
         q3_frame render_slot_shadow
         state_vectors tracer_frame precipitation_frame)
