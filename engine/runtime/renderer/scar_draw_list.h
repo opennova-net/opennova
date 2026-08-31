@@ -2,9 +2,8 @@
 
 // The impact-scar draw list: the portable compile of the world's scar rings
 // into textured quads, per owner ring / section / texture strip, for an
-// embedding renderer to upload. Mirrors the particle frame seam
-// (renderer/particle_frame.h): no Godot, no simulation dependencies beyond the
-// ring cache.
+// embedding renderer to upload — a snapshot-in, typed-draw-list-out seam with
+// no Godot and no simulation dependencies beyond the ring cache.
 // [orig: Scar_RenderAllCaches @0x5CDF70 (from Terrain_CollectVisibleEntities
 //  @0x5c91b7: the shared ring first, then every live entity ring) ->
 //  Scar_RenderCache @0x5CD830; the 32 per-texture CDynList24 batches at

@@ -61,6 +61,7 @@ add_library(opennova_runtime STATIC
     # particle — the emitter/effect-scene sim (.ptl model+parse+write: engine/formats/particle)
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/emitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_scene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/particle/graphic_frames.cpp
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
@@ -85,8 +86,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_lod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/foliage_frame.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_order.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/precipitation_frame.cpp

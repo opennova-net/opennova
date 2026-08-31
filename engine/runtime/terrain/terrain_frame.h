@@ -2,8 +2,8 @@
 
 // The terrain render frame as engine data (ADR 0033 R2). One compile turns the
 // built terrain scene plus a camera into the ordered patch-draw list an
-// embedding renderer uploads — the snapshot-and-view-in, typed-draw list-out seam
-// renderer::ParticleFrameCompiler proved. The compiler owns every per-frame
+// embedding renderer uploads — a snapshot-and-view-in, typed-draw-list-out
+// seam. The compiler owns every per-frame
 // DECISION the shell binding used to make in its self-driven walk: the
 // 512-unit sector window over the .trn sector grid, the quadtree traversal,
 // the foliage detail-cell handoff, the front-to-back order, the patch budget,

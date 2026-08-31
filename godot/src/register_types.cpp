@@ -42,7 +42,6 @@
 #include "particle/particle_file.h"
 #include "lights/light_scene.h"
 #include "particle/effect_scene.h"
-#include "particle/particle_compositor.h"
 #include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
 #include "render/q3_source_registry.h"
@@ -203,7 +202,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ParticleFile);
 	GDREGISTER_CLASS(EffectScene);
 	GDREGISTER_CLASS(LightScene);
-	GDREGISTER_CLASS(ParticleCompositorEffect);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(FrameFxCompositorEffect);
 	GDREGISTER_CLASS(FrameFx);

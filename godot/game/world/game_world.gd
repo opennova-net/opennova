@@ -2041,13 +2041,11 @@ func _start_effect_world() -> void:
 	_effect_world = EffectWorld.new()
 	_effect_world.name = "EffectWorld"
 	add_child(_effect_world)
-	_effect_world.set_environment_source(_env)
 	if _item_fx.particles_hidden():
 		_effect_world.set_particles_hidden(true)
 	var count := _effect_world.load_from_resource_root(_resource_root)
 	if _water != null:
-		_effect_world.set_water_plane(float(_water.water_height),
-				_water.get_reflection_camera())
+		_effect_world.set_water_height(float(_water.water_height))
 		# The sim-side water plane (env.water_z): the footstep water pick, the
 		# landing legs, AND the destruction paths (submerged wrecks skip pieces,
 		# the wreck fire steams out) all gate on it [orig: Env_WaterHeightFixed

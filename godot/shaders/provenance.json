@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 192,
+  "resource_count": 184,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
@@ -322,33 +322,6 @@
         }
       ],
       "exceptions": []
-    },
-    {
-      "id": "particles",
-      "patterns": [
-        "particle/*.gdshader"
-      ],
-      "light_behavior": "unshaded_vertex_color_or_dot3_input",
-      "parity_status": "matching_with_bounded_residuals",
-      "docs": [
-        "docs/particles/ptl-format-re.md",
-        "docs/world/world-wac-ai-re.md"
-      ],
-      "retail_citations": [
-        {
-          "address": "0x5e29f0",
-          "function": "CParticleDefEntry_ParseBlendMode",
-          "function_start": "0x5e29f0"
-        },
-        {
-          "address": "0x5e8380",
-          "function": "CParticleTexture_InitTextureAndChannels",
-          "function_start": "0x5e8210"
-        }
-      ],
-      "exceptions": [
-        "D-RORD-7"
-      ]
     },
     {
       "id": "nvg-post",

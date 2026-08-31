@@ -1197,12 +1197,6 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	var dry_object_fog_color := dry_object_values.get_fog_color()
 	var dry_object_fog_end := dry_object_values.get_fog_end()
 	var dry_object_fog_type := dry_object_values.get_fog_type()
-	var particle_renderer := world.get_effect_world().get_node(
-			"ParticleRenderer") as ParticleRenderer
-	assert_not_null(particle_renderer,
-			"the runtime particle compositor is wired to MissionEnvironment")
-	var dry_particle_fog: Dictionary = particle_renderer.get_debug_draw_list_report().get(
-			"environment_fog", {})
 
 	# Camera offsets move the rendered eye independently of global_position.
 	# Cross the waterline with v_offset alone and pin the clear-color branch to
@@ -1252,15 +1246,6 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 			"below-water ObjectModel/viewmodel visibility follows water murk")
 	assert_eq(object_values.get_fog_type(), 1,
 			"below-water ObjectModel/viewmodel uses the witnessed linear fog mode")
-	var particle_fog: Dictionary = particle_renderer.get_debug_draw_list_report().get(
-			"environment_fog", {})
-	assert_true(Vector3(particle_fog.get("color", Vector3.ZERO))
-			.is_equal_approx(underwater_color),
-			"below-water particle submissions fog toward Env_WaterColorLit")
-	assert_almost_eq(float(particle_fog.get("end", 0.0)), underwater_end, 0.001,
-			"below-water particle visibility follows water murk")
-	assert_eq(int(particle_fog.get("type", -1)), 1,
-			"below-water particle submissions use linear fog")
 	# Weather writes shader globals from its GameFramePipeline leg (the env
 	# nodes advance after the scene-environment classify, before terrain) in a
 	# live frame. Drive that leg explicitly in this paused harness and prove it
@@ -1318,20 +1303,6 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 			"ObjectModel/viewmodel restores the dry pass fog end after surfacing")
 	assert_eq(object_values.get_fog_type(), dry_object_fog_type,
 			"ObjectModel/viewmodel restores the dry pass fog type after surfacing")
-	particle_fog = particle_renderer.get_debug_draw_list_report().get(
-			"environment_fog", {})
-	assert_eq(Vector3(particle_fog.get("color", Vector3.ZERO)),
-			dry_particle_fog.get("color", Vector3.ZERO),
-			"particle submissions restore the dry pass fog color after surfacing")
-	assert_almost_eq(float(particle_fog.get("start", 0.0)),
-			float(dry_particle_fog.get("start", 0.0)), 0.001,
-			"particle submissions restore the dry pass fog start after surfacing")
-	assert_almost_eq(float(particle_fog.get("end", 0.0)),
-			float(dry_particle_fog.get("end", 0.0)), 0.001,
-			"particle submissions restore the dry pass fog end after surfacing")
-	assert_eq(int(particle_fog.get("type", -1)),
-			int(dry_particle_fog.get("type", -1)),
-			"particle submissions restore the dry pass fog type after surfacing")
 
 	world.visible = false
 	await get_tree().process_frame
@@ -1501,25 +1472,22 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 	camera.global_position = Vector3(2.0, 1.5, 12.0)
 	camera.look_at(Vector3(2.0, 1.0, 3.0))
 	world.render_particle_frame()
-	var before: Dictionary = effect_world.get_debug_draw_list_report().get(
-			"world_camera_side", {})
+	var before: Dictionary = effect_world.get_debug_draw_list_report()
 	assert_gt(int(before.get("rendered_quad_count", 0)), 0,
-			"the live emitter renders quads before the freeze")
+			"the live emitter presents quads before the freeze")
 
 	world.process_mode = Node.PROCESS_MODE_DISABLED
 	camera.global_position = Vector3(6.0, 3.0, 14.0)
 	camera.look_at(Vector3(2.0, 1.0, 3.0))
 	camera.make_current()
-	var stale: Dictionary = effect_world.get_debug_draw_list_report().get(
-			"world_camera_side", {})
-	assert_eq(stale.get("compile_index"), before.get("compile_index"),
-			"a frozen world leaves the particle draw list stale at the old pose")
+	var stale: Dictionary = effect_world.get_debug_draw_list_report()
+	assert_eq(stale.get("present_index"), before.get("present_index"),
+			"a frozen world leaves the particle presentation stale at the old pose")
 
 	assert_eq(world.debug_refresh_render_pose(camera), OK)
-	var after: Dictionary = effect_world.get_debug_draw_list_report().get(
-			"world_camera_side", {})
-	assert_ne(after.get("compile_index"), before.get("compile_index"),
-			"the evidence seam rebuilds the particle draw list for the capture camera")
+	var after: Dictionary = effect_world.get_debug_draw_list_report()
+	assert_ne(after.get("present_index"), before.get("present_index"),
+			"the evidence seam re-presents the particles for the capture camera")
 	assert_gt(int(after.get("rendered_quad_count", 0)), 0,
 			"frozen-phase particles stay visible after the camera retarget")
 

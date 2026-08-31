@@ -74,7 +74,6 @@ add_library(${TARGET_NAME} SHARED
     particle/particle_file.cpp
     lights/light_scene.cpp
     particle/effect_scene.cpp
-    particle/particle_compositor.cpp
     particle/particle_renderer.cpp
     render/environment_cube_blit.cpp
     render/frame_fx.cpp

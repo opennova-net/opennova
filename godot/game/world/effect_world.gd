@@ -1,9 +1,10 @@
 class_name EffectWorld
 extends Node3D
 
-## World-facing owner for the portable effect scene and draw-list renderer.
-## Effects, emitters, and particles are values owned by EffectScene; this
-## node owns one ParticleRenderer for both render domains.
+## World-facing owner for the portable effect scene and its scene-graph
+## presenter (ADR 0043). Effects, emitters, and particles are values owned by
+## EffectScene; this node owns one ParticleRenderer presenting them as pooled
+## MultiMesh billboard batches for both render domains.
 
 const PARTICLE_FLAG_FOREVER_EMIT := ParticleDef.FLAG_FOREVER_EMIT
 # Aliases of the EffectScene bound enums — the portable effect scene owns the
@@ -25,10 +26,10 @@ var _renderer: ParticleRenderer
 var _root: ResourceRoot
 var _texture_provider := Callable()
 var _texture_dir := ""
-var _environment_source: Node
 var _owner_position_provider := Callable()
+# The sim-side water plane consumed by authored BELOWH20/ABOVEH20 kill planes;
+# presentation no longer partitions on it (ADR 0043).
 var _water_height := 0.0
-var _reflection_camera: Camera3D
 var _particles_disabled := false
 
 # Keys never become native tokens by hashing. A shared monotonic allocator and
@@ -60,24 +61,14 @@ func _ensure_renderer() -> void:
 	_renderer.set_scene(_scene)
 	_renderer.set_texture_provider(_texture_provider)
 	_renderer.set_texture_dir(_texture_dir)
-	_renderer.set_environment_source(_environment_source)
-	_renderer.set_water_plane(_water_height, _reflection_camera)
 	_renderer.set_hidden(_particles_disabled)
 
 
-## Retire compositor callbacks and their RenderingDevice resources while the
-## mission viewport and RenderingServer targets they reference are still live.
-## ParticleRenderer's EXIT_TREE hook is only an idempotent fallback: queued
-## mission teardown can otherwise reach it after those target RIDs are gone.
+## Hide the presenter pool on mission teardown; the scene-graph batches are
+## ordinary child nodes and are freed with this node.
 func release_runtime_renderer_resources() -> void:
 	if is_instance_valid(_renderer):
 		_renderer.shutdown()
-
-
-func set_environment_source(source: Node) -> void:
-	_environment_source = source
-	_ensure_renderer()
-	_renderer.set_environment_source(source)
 
 
 func file_count() -> int:
@@ -125,11 +116,8 @@ func set_owner_position_provider(provider: Callable) -> void:
 	_owner_position_provider = provider
 
 
-func set_water_plane(value: float, reflection_camera: Camera3D) -> void:
+func set_water_height(value: float) -> void:
 	_water_height = value
-	_reflection_camera = reflection_camera
-	_ensure_renderer()
-	_renderer.set_water_plane(value, reflection_camera)
 
 
 ## Loads every mounted .ptl AND the active gore set in VFS order, then opens the
@@ -205,9 +193,6 @@ func clear_world() -> void:
 	_texture_dir = ""
 	_owner_position_provider = Callable()
 	_water_height = 0.0
-	_reflection_camera = null
-	if is_instance_valid(_renderer):
-		_renderer.set_water_plane(0.0, null)
 	_scene = EffectScene.new()
 	var empty_files: Array[ParticleFile] = []
 	_load_report = _scene.open(empty_files)
@@ -227,8 +212,6 @@ func reset_runtime_state() -> void:
 	_owner_keys_by_token.clear()
 	_owner_pose_cache.clear()
 	_next_token = 1
-	if is_instance_valid(_renderer):
-		_renderer.clear_warm_pipelines()
 	_scene.reset_runtime_state()
 
 
@@ -360,9 +343,9 @@ func spawn_effect_request(name: String, transform: Transform3D,
 ## (advancing the fixed tick so fresh emitters actually emit and draw), then
 ## clears the warm spawns via reset_runtime_state(). Returns spawn count.
 func warm_all_effects(position: Vector3) -> int:
-	# Deterministic half first: one quad per FirstPerson blend shader plus a
-	# compositor request for all eight World RD pipelines, independent of
-	# emitter timing (delayed emitters emit nothing during the warm frames).
+	# Deterministic half first: build the texture catalog and the full
+	# material set so pipeline compilation lands here, independent of emitter
+	# timing (delayed emitters emit nothing during the warm frames).
 	_ensure_renderer()
 	_renderer.warm_pipelines(position)
 	var seen := {}
@@ -375,16 +358,8 @@ func warm_all_effects(position: Vector3) -> int:
 			if effect_id.is_empty() or seen.has(effect_id):
 				continue
 			seen[effect_id] = true
-			# Catalog values warm through the uncapped World draw list. The
-			# deterministic helpers above already compile all eight
-			# FirstPerson shaders; cloning a large catalog into that ArrayMesh
-			# domain can exceed Godot's per-mesh surface limit.
 			if spawn_effect_transient(effect_id, position) != 0:
 				spawned += 1
-	# GameWorld skips its draw/reset leg when there was nothing to warm. Do not
-	# strand the deterministic shader helper quads in that empty-catalog path.
-	if spawned == 0:
-		_renderer.clear_warm_pipelines()
 	return spawned
 
 
@@ -398,8 +373,8 @@ func render_now() -> int:
 	return int(_renderer.get_draw_command_count())
 
 
-## The renderer's full draw-list diagnostics (world + first-person lists,
-## backends, atlas pages/entries) for the F3 Particles page.
+## The presenter's frame diagnostics (quad/batch counts, pool and material
+## census, unresolved textures) for the F3 Particles page.
 func get_debug_draw_list_report() -> Dictionary:
 	_ensure_renderer()
 	return _renderer.get_debug_draw_list_report()

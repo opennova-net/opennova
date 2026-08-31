@@ -756,7 +756,7 @@ add_test(NAME simassets_seat_spec_extract COMMAND simassets_seat_spec_extract_te
 
 # Object renderer/shader tests
 foreach(test device_fog environment_cube foliage_frame_wind light_runtime light_scene material_classify material_eval
-        particle_atlas_contract particle_frame_compiler_contract render_order
+        render_order
         q3_frame
         state_vectors tracer_frame precipitation_frame)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)

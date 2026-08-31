@@ -74,15 +74,12 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		var candidate := await _stage.capture_after_render(_ctx.tree, _fx)
 		var score := ProbeCapture.changed_pixels(_before, candidate, 100)
 		var draw_report := _fx.get_debug_draw_list_report()
-		var far_draw: Dictionary = draw_report.get("world_far_side", {})
-		var camera_draw: Dictionary = draw_report.get("world_camera_side", {})
 		var row := {
 			"tick": capture_tick,
 			"changed_pixels": score,
 			"groups": _fx.get_debug_group_report().size(),
-			"particles": int(far_draw.get("input_particles", 0)),
-			"draws": int(far_draw.get("draw_command_count", 0))
-					+ int(camera_draw.get("draw_command_count", 0)),
+			"particles": int(draw_report.get("rendered_quad_count", 0)),
+			"draws": int(draw_report.get("draw_command_count", 0)),
 		}
 		ticks.append(row)
 		ctx.log("[bridge-shock] tick=%d changed_pixels=%d groups=%d particles=%d draws=%d" % [

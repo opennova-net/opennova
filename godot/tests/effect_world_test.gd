@@ -108,12 +108,6 @@ func _make_renderable_effect_file() -> ParticleFile:
 	return file
 
 
-func _warm_helper_count(world: EffectWorld) -> int:
-	var count := 0
-	for child in world.find_children("*", "MeshInstance3D", true, false):
-		if String(child.name) != "ParticleFirstPersonBatch":
-			count += 1
-	return count
 
 
 func test_load_from_resource_root_scans_every_ptl() -> void:
@@ -454,7 +448,7 @@ func test_authored_water_flags_bind_to_the_mission_water_plane() -> void:
 	]
 	for entry in cases:
 		var world := _make_world()
-		world.set_water_plane(12.5, null)
+		world.set_water_height(12.5)
 		var file := _make_short_effect_file()
 		file.find_particle("puff dots").flags = entry.flag
 		world.load_particle_file(file)
@@ -553,22 +547,24 @@ func test_runtime_renderer_release_is_explicit_and_idempotent() -> void:
 	world.release_runtime_renderer_resources()
 	world.release_runtime_renderer_resources()
 	var report := world.get_debug_draw_list_report()
-	for key in [
-		"world_far_backend", "world_camera_backend",
-		"reflection_far_backend", "reflection_camera_backend",
-	]:
-		assert_true(bool((report.get(key, {}) as Dictionary).get("shutdown", false)),
-				"%s is retired before EffectWorld leaves the tree" % key)
+	assert_eq(int(report.get("rendered_quad_count", -1)), 0,
+			"release hides the presenter pool")
+	assert_eq(int(report.get("pool_used", -1)), 0)
 	assert_engine_error_count(0,
 			"explicit particle renderer release remains clean and idempotent")
 
 
-func test_empty_catalog_warm_cleans_pipeline_helpers() -> void:
+func test_warm_builds_the_material_set_without_stranding_geometry() -> void:
 	var world := _make_world()
-	assert_eq(_warm_helper_count(world), 0)
-	assert_eq(world.warm_all_effects(Vector3.ZERO), 0)
-	assert_gt(_warm_helper_count(world), 0,
-			"an empty catalog still exercises the deterministic shader helpers")
-	await get_tree().process_frame
-	assert_eq(_warm_helper_count(world), 0,
-			"the empty-catalog early return does not strand helper geometry")
+	assert_eq(world.warm_all_effects(Vector3.ZERO), 0,
+			"an empty catalog warms nothing")
+	world.load_particle_file(_make_renderable_effect_file())
+	assert_gt(world.warm_all_effects(Vector3.ZERO), 0)
+	var report := world.get_debug_draw_list_report()
+	assert_gt(int(report.get("material_count", 0)), 0,
+			"warming builds the presenter material set behind the load screen")
+	world.reset_runtime_state()
+	world.render_now()
+	assert_eq(int(world.get_debug_draw_list_report().get(
+			"rendered_quad_count", -1)), 0,
+			"resetting the warm spawns leaves no presented quads behind")

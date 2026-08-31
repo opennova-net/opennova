@@ -725,18 +725,6 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 		assert_false(source.contains("gamma_to_linear"), name)
 		assert_false(source.contains("linear_to_gamma"), name)
 
-	for name in ["particle/particle_blend_additive.gdshader", "particle/particle_blend_blend.gdshader",
-			"particle/particle_blend_bump.gdshader", "particle/particle_blend_bumpadd.gdshader",
-			"particle/particle_blend_mod.gdshader", "particle/particle_blend_mod2x.gdshader",
-			"particle/particle_blend_premult.gdshader"]:
-		var source: String = sources.get(name, "")
-		assert_true(source.contains("#include \"res://shaders/color.gdshaderinc\""), name)
-		assert_true(source.contains("scene_output"), name)
-
-	var distort: String = sources.get("particle/particle_blend_distort.gdshader", "")
-	assert_false(distort.contains("scene_output"))
-	assert_false(distort.contains("display_decode_gamma"))
-
 	var nvg: String = sources.get("nvg_view.gdshader", "")
 	assert_true(nvg.contains("display_encode_gamma"))
 	assert_true(nvg.contains("display_decode_gamma"))
