@@ -1,6 +1,12 @@
 # ADR 0023 - Render visual parity (the REN track)
 
-Status: accepted (maintainer, 2026-07-05). Establishes the REN (render visual parity)
+Status: accepted (maintainer, 2026-07-05). *Superseded in part 2026-08-31 by
+[ADR 0043](0043-modern-presentation-witnessed-intent.md): decision 1 (the
+fixed-function look as target) is superseded for presentation technique; decision 2
+survives re-scoped (the D3D layer is the witness source for decoding intent);
+decision 4's instrument survives re-purposed (T1 pins the kept math; T2/T3
+re-baseline to attested acceptance scenes). The diagnosis, witness maps, and
+evidence tiers below remain the historical record.* Establishes the REN (render visual parity)
 track of the maturity program — grill and reimplement the original renderer's
 materials, batching/draw order, fixed-function shaders, and lighting so our output
 looks identical to retail. The program that schedules the slices is

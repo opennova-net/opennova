@@ -1289,6 +1289,18 @@ one-line rationale for why porting it would be *wrong*.
 | D-OCC-13 (renderer-replaced legs) | The two-pass open-building draw order, per-light interior section scoping (`Lighting_SetInteriorLightGroup @0x5a90e0`), the water-mirror clip matrix leg (`@0x5c5e75`), and the reflection-pass collector variant (def-flag 0x2000000) are not ported | Each replaces a D3D-pipeline mechanism Godot's depth buffer, light model, and water reflections already provide; the visibility UNION and admission semantics are ported (render/render-occlusion-re.md D-OCC-13) |
 | D-OCC-15 (re-arm PRNG stream facet) | The three-ray latch re-arm jitter draws from an owned `PRNG_Next16_C`-form stream seeded from the BSS-zero boot state; retail shares one process stream with unrelated consumers | Per-frame re-arm values are irreproducible against any given retail run by construction; the distribution is identical and no coupled value is observable (precedent D-NET-115; render/render-occlusion-re.md D-OCC-15) |
 
+### Modern presentation (ADR 0043)
+
+Deliberate technique replacements under [ADR 0043](adr/0043-modern-presentation-witnessed-intent.md)'s
+intent contract: the engine keeps the witnessed decode of the authored data; the
+listed rendering technique is replaced by canonical Godot machinery, accepting the
+visual change as a modern improvement. One row per replaced subsystem — historical
+defects of a deleted system close as moot with it. Rows land with the commit that
+deletes their system, never ahead of it.
+
+| ID | Replaced technique | Modern equivalent / intent preserved |
+|---|---|---|
+
 ### Original-bug / garbage class (class D; basis: [ADR 0003](adr/0003-no-raw-passthrough-create-from-scratch.md))
 
 | ID | Divergence | Why porting it would be wrong |
