@@ -1,5 +1,6 @@
 #include <runtime/devtools/game_dev_tools.h>
 
+#include <runtime/devtools/ai_window.h>
 #include <runtime/devtools/demo_window.h>
 #include <runtime/devtools/entities_window.h>
 #include <runtime/devtools/entity_detail_snapshot.h>
@@ -44,6 +45,11 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	auto environment = std::make_unique<EnvironmentWindow>();
 	environment_window_ = environment.get();
 	pass_.register_window(std::move(environment));
+	// The AI window reads the Entities window's selection too (its deep pane
+	// rides the same detail push).
+	auto ai = std::make_unique<AiWindow>(*entities_window_);
+	ai_window_ = ai.get();
+	pass_.register_window(std::move(ai));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -106,6 +112,7 @@ void GameDevTools::select_entity(uint16_t handle) {
 void GameDevTools::clear_entity_selection() {
 	entities_window_->clear_selection();
 	entity_properties_window_->clear();
+	ai_window_->clear_detail();
 }
 
 uint16_t GameDevTools::selected_entity_handle() const {
@@ -113,11 +120,15 @@ uint16_t GameDevTools::selected_entity_handle() const {
 }
 
 void GameDevTools::set_entity_detail(EntityDetailSnapshot detail) {
+	// Both selection-following panes accept the same card (each drops a card
+	// that no longer names the selection).
+	ai_window_->set_detail(detail);
 	entity_properties_window_->set_detail(std::move(detail));
 }
 
 bool GameDevTools::needs_entity_detail() const {
-	return pass_.is_open() && entity_properties_window_->open &&
+	return pass_.is_open() &&
+			(entity_properties_window_->open || ai_window_->open) &&
 			entities_window_->selected_handle() != world::EntityHandle::kInvalid;
 }
 
@@ -131,6 +142,18 @@ bool GameDevTools::needs_environment_snapshot() const {
 
 bool GameDevTools::take_environment_request(EnvironmentRequest &request) {
 	return environment_window_->take_request(request);
+}
+
+void GameDevTools::set_ai_debug(AiDebugSnapshot snapshot) {
+	ai_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_ai_debug() const {
+	return pass_.is_open() && ai_window_->open;
+}
+
+bool GameDevTools::take_ai_view_request(AiViewRequest &request) {
+	return ai_window_->take_request(request);
 }
 
 }  // namespace opennova::devtools
