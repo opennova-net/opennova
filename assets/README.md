@@ -224,10 +224,12 @@ lookup**: with it present the local player's body is the avatar combo's head +
 body pair, not `items.def`'s `graphic`; `US01` stays the fallback body and, as
 `anim_def`, the clip map that drives the rig either way. And **every model names
 its textures `.tga` while retail ships them `.dds`** — retail relies on its own
-`.dds` substitution probe `[orig: Texture_LoadByNameWithChannel @ 0x58b52c]` for
-its stock content, and whether that probe still runs for a LOOSE file under `/d`
-is not witnessed (`../docs/vfs/vfs-pff-mount-re.md` records only that a loose
-`.tga` skips it). The retail validation run below settles it from `_filelog.txt`.
+`.dds` substitution probe `[orig: Texture_LoadByNameWithChannel @ 0x58b52c]`,
+and **the probe runs for loose files under `/d` too** (witnessed 2026-08-31 on
+this set: the models ask `<stem>.tga`, miss loose, and all 37 staged loose
+`<stem>.dds` load — `/FRISK` capture), so the loose layout needs no texture
+archive. The 2026-08-18 "ship `.dds` archived" trap applies to a loose file
+matching the request's *truncated literal* name, not to substitution.
 
 This set is replaced by our own once that run is green. The model side already
 has a path — `tests/fixtures/minimal_3di_builder.h` mints a nineteen-part skinned

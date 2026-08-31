@@ -74,7 +74,11 @@ stands confirmed.
    **forced 0** — Mission_LoadBMSFromPFF @ 0x40d43c,
    FileSystem_ValidateBMSFile @ 0x40d39c. Texture_LoadByNameWithChannel
    @ 0x58b52c reads the flag directly (a loose TGA under /d skips the .dds
-   substitution probe).
+   substitution probe). The probe itself still RUNS under /d when the named
+   .tga misses everywhere: witnessed 2026-08-31 on the minimal set (retail
+   /w /d /FRISK) — every model asked `<stem>.tga` and all 37 loose
+   `<stem>.dds` beside them loaded, so loose-only texture sets work as long
+   as no same-stem `.tga` shadows them.
 5. **Entry lookup** (`PFF_FindEntry @ 0x7685d0`): query strncpy'd to 32
    (truncates at 31 chars) and uppercased. The apparent trailing-space trim is
    dead as compiled: it begins at `upper_name[strlen]`, tests the terminating
