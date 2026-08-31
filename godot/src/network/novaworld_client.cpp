@@ -664,7 +664,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 		trace(String("join resolved host ") + String(r.host_ip.c_str()) + ":"
 			+ String::num_int64(static_cast<int64_t>(r.host_port)));
 		resolve_join_target(String(r.host_ip.c_str()), r.host_port,
-			String(r.bt.c_str()));
+			String(r.app_id.c_str()));
 		break;
 	case opennova::JoinResult::Kind::Failed:
 		// D-1: any async join failure falls back to the lobby (CONNECTED) — consolidates
