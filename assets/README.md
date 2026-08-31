@@ -175,12 +175,17 @@ way. One LF-normalizing save silently breaks the boot again, so
 
 ### Deliberately omitted (graceful-on-miss — keeps the set minimal)
 
-Videos (`BIK` — see above), `SndProf.def`, `charattr.def`
-(soft error, continues), `powerup.def` (soft), `hudfx/hudpos.def` (default
+Videos (`BIK` — see above), `powerup.def` (soft), `hudfx/hudpos.def` (default
 positions), `game.bin` (fallback literals), `nw_cdata.coo`. Each is listed in
 the R8 manifest with its graceful failure; adding any is a deliberate step up
 from minimal, not a requirement. `Avatars.def` left this list with the
-first-person arms — see the bring-up section below.
+first-person arms, `charattr.def` rode the same bring-up, and `SndProf.def`
+left it 2026-08-31: its "soft miss" survives boot but not a moving player —
+the empty profile table's find-miss path hands the first footstep a garbage
+sound-set pointer and retail AVs in `Sound_Play3DPositional` reading set+72
+(`[orig: @ 0x527cd1]`; witnessed via SYSDUMP against this exact set). All
+three are retail files under the TEMPORARY banner — see the bring-up section
+below.
 
 ### Bring-up: the retail model + anim set (retail bytes, committed temporarily)
 
@@ -191,12 +196,13 @@ directory**. Since 2026-08-31 they are **committed** — allowlisted by name und
 set runs from a fresh checkout, and `git ls-files assets` now stages them into
 both zip flavors. Deleting a line from that banner is how a replacement lands.
 
-What is committed, from an extracted retail resource tree (239 files):
+What is committed, from an extracted retail resource tree (240 files):
 
 | Group | Files |
 |---|---|
 | player body + anims | `US01.3di`, `US01.ADM`, the **150** `.bad` clips its keys name, and `failsafe.bad` (the every-mission-start fallback, `../docs/required-resources.md`) |
 | avatar combo | `Avatars.def` plus the first combo's three models — `Boonie.3di` (head), `JntOpsB1.3di` (body), `ArmsG.3di` (arms) |
+| sound profiles | `SndProf.def` — the 49-profile retail table; a miss AVs the first footstep (see the omitted list) |
 | weapon | `AKM_1st.3di`, `AKM_1ST.adm`, its six `rAKM_*.bad` clips |
 | the default infantry clip set | `E_STAND.adm` and the 87 `.bad` clips it names — **required for the player to walk at all**, see below |
 | textures | the stems the five models name, resolved to whatever extension ships them — 33 `.dds`, one `.tga`, plus the `.MDT` sidecars |

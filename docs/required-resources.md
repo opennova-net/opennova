@@ -66,7 +66,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | PFF set + `gameerr.bin`/`gametext.bin`/`vmacros.bin`/`keyhelp.bin` | **fatal set** | see table above | see table above |
 | `weapon.def` | boot + mission | [orig: WeaponDef_LoadAll @ 0x54dd10; mission slots @ 0x5254b8] | missing → silent; table left with one "None" entry. SCR-encrypted supported, key 0x2A5A8EAD |
 | `Avatars.def` | optional-fallback | [orig: CAvatarDefs_Init @ 0x57b180] | silent skip |
-| `SndProf.def` | boot (mission-facing) | [orig: @ 0x4a7141 → SoundProfile_LoadAll @ 0x527490] | silent skip (empty 128-slot profile table) |
+| `SndProf.def` | boot (mission-facing) | [orig: @ 0x4a7141 → SoundProfile_LoadAll @ 0x527490] | silent skip at boot (empty 128-slot profile table) — but NOT survivable in play: `SoundProfile_FindSlotByName`'s miss returns the array base [orig: @ 0x526e30], so a moving player's first footstep dereferences the unfilled id slots and AVs in `Sound_Play3DPositional` reading set+72 [orig: @ 0x527cd1] (witnessed 2026-08-31: SYSDUMP EIP 0x527cd1 reading 0x2f2f2f77, the set pointer stale `"////"` text from earlier def parses). A set whose player can move must ship it. |
 | `gt.ssc` | optional-fallback | [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0] | silent skip (gate-tag override, key "jop:2:oyez") |
 | `items.def` | **fatal (wired)** | [orig: @ 0x4a71a3 → ItemDefs_LoadAndValidate @ 0x4a1da0 → ItemDef_ParseProperty @ 0x49eb00] | dup-ID/name checks log to `_errlog.txt`; see Not-witnessed |
 | `charattr.def` | boot (soft) | [orig: Game_Run @ 0x4a7fe3 → CharAttr_LoadFromDef @ 0x412140] | missing → `_errlog.txt` "Server ERROR! Could not load charattr definitions.", continues |

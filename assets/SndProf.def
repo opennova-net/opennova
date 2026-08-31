@@ -1,0 +1,1133 @@
+
+
+
+begin "default"		 default
+
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+
+	medlooppitchstart   	20 	
+	medlooppitchstartp  	20	
+	medlooppitchend     	80 	
+	medlooppitchendp    	150	
+
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100
+
+end 
+
+
+
+begin "SP_Apache1"		 Flyable APACHE
+	enginestart			V_APACHE_START
+	
+	soundloop_2			V_APACHE_ILP		.8 1.2 
+	soundloop_3			V_APACHE_DLP		.8 1.2 
+	sounddeath			EXPLO_APACHE 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	ssaudio3			IMP_V_HELO		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+  
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+	medlooppitchstart   	20 	
+	medlooppitchstartp  	20	
+	medlooppitchend     	80 	
+	medlooppitchendp    	150	
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100  
+	warning	V_CRITICAL_ALARM_APA
+end 
+
+
+begin "SP_AH6"		 Flyable LITTLE BIRD with benches 
+	enginestart			V_AH6_START
+	
+	soundloop_2			V_AH61_ILP		.8 1.2 
+	soundloop_3			V_AH61_DLP		.8 1.2 
+	sounddeath			EXPLO_AH6 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	ssaudio3			IMP_V_HELO		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+	medlooppitchstart   	20 	
+	medlooppitchstartp  	20	
+	medlooppitchend     	80 	
+	medlooppitchendp    	150	
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100  
+	warning	V_CRITICAL_ALARM4
+end
+ 
+
+begin "SP_AH6_2"		 Flyable LITTLE BIRD with miniguns
+	enginestart			V_AH6_START
+	
+	soundloop_2			V_AH62_ILP		.8 1.2 
+	soundloop_3			V_AH62_DLP		.8 1.2 
+	sounddeath			EXPLO_AH6 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	ssaudio3			IMP_V_HELO		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+  
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+	medlooppitchstart   	20 	
+	medlooppitchstartp  	20 
+	medlooppitchend     	80 	
+	medlooppitchendp    	150
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100 
+	warning	V_CRITICAL_ALARM4
+end 
+
+
+begin "SP_Blackhawk1"		 "Flyable Blackhawk" 
+	enginestart			V_BHAWK_START
+	soundloop_2			V_BHAWK1_DLP		.8 1.2 
+	soundloop_3			V_BHAWK1_DLP		.8 1.2 
+	sounddeath			EXPLO_HELICOPTER 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	ssaudio3			IMP_V_HELOLG		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+  
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+	medlooppitchstart   	20 	
+	medlooppitchstartp  	20 
+	medlooppitchend     	80 	
+	medlooppitchendp    	150
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100  
+	warning	V_CRITICAL_ALARM22a
+end 
+
+
+begin "SP_Blackhawk2"		 "Flyable Blackhawk2" 
+	enginestart			V_BHAWK_START
+	soundloop_2			V_BHAWK2_DLP		.8 1.2 
+	soundloop_3			V_BHAWK2_DLP		.8 1.2 
+	sounddeath			EXPLO_HELICOPTER 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	ssaudio3			IMP_V_HELOLG		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+  
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+	medlooppitchstart   	20 	
+	medlooppitchstartp  	20 
+	medlooppitchend     	80 	
+	medlooppitchendp    	150
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100 
+	warning	V_CRITICAL_ALARM22a
+end 
+
+
+begin "SP_Chinook"		 Flyable Chinook
+	enginestart			V_CHINOOK_START
+	soundloop_2			V_CHINOOK1_ILP		.9 1.2 
+	soundloop_3			V_CHINOOK1_DLP				
+	sounddeath			EXPLO_HELICOPTER
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	SSAudio3			IMP_V_HELOLG		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+  
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+
+	medlooppitchstart   	20 	
+	medlooppitchstartp  	20	
+	medlooppitchend     	80 	
+	medlooppitchendp    	150 
+
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100
+	warning	V_CRITICAL_ALARM3
+end
+
+
+begin "SP_KA52"		Drivable KA52 (Alligator), Indonesian helo 
+	enginestart			V_KA52_START
+	soundloop_2			V_KA52_ILP		.8 1.2 
+	soundloop_3			V_KA52_DLP	.8 1.2 
+	sounddeath			EXPLO_KA52
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	SSAudio3			IMP_V_HELOLG		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+  
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+	
+	medlooppitchstart   	20	
+	medlooppitchstartp  	20	
+	medlooppitchend     	80	
+	medlooppitchendp    	150	
+	
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100 
+	warning					V_CRITICAL_ALARM_KA52
+end 
+
+
+begin "SP_NB0105"		 Flyable Nb0-105, Indonesian helo, like AH6 
+	enginestart			V_NBO105_START
+	soundloop_2			V_AH62_ILP		.8 1.2 
+	soundloop_3			V_NBO105_DLP		.8 1.2 
+	sounddeath			EXPLO_AH6 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	SSAudio3			IMP_V_HELO		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+  
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+	
+	medlooppitchstart   	20 	
+	medlooppitchstartp  	20 
+	medlooppitchend     	80 	
+	medlooppitchendp    	150
+	
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100  
+	warning	V_CRITICAL_ALARM7
+end 
+
+
+begin "SP_SPuma"		Drivable Super Puma, Indonesian helo 
+	enginestart			V_PUMA_START
+	soundloop_2			V_PUMA_IDLE		.8 1.2 
+	soundloop_3			V_PUMA_DRIVE	.8 1.2 
+	sounddeath			EXPLO_HELICOPTER
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	SSAudio3			IMP_V_HELOLG		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+  
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+	
+	medlooppitchstart   	20	
+	medlooppitchstartp  	20	
+	medlooppitchend     	80	
+	medlooppitchendp    	150	
+	
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100 
+	warning	V_CRITICAL_ALARM8
+end 
+
+
+begin "SP_Mil26"		"Flyable Mil-26" 
+	enginestart			V_BHAWK_START
+	soundloop_2			V_BHAWK2_DLP		.8 1.2 
+	soundloop_3			V_MI26_DLP		.8 1.2 
+	sounddeath			EXPLO_HELICOPTER 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	SSAudio3			IMP_V_HELOLG		
+	sound_land			IMP_V_HELOSKID
+	sound_impactorganic	IMP_V_ORGANIC
+
+	medloopfadeinstart   	20 	
+	medloopfadeinend    	30 	
+	medloopfadeoutstart  	60 	
+	medloopfadeoutend    	90 	
+	
+	medlooppitchstart   	20 	
+	medlooppitchstartp  	20 
+	medlooppitchend     	80 	
+	medlooppitchendp    	150
+	
+	crsloopfadeinstart   	60 
+	crsloopfadeinend     	80 
+	crslooppitchstartp   	78 
+	crslooppitchendp     	100
+	warning	V_CRITICAL_ALARM6
+end 
+
+
+
+begin "SP_M1A1"		Drivable M1A1 Tank
+	enginestart			V_M1A1_START
+	soundloop_1			V_M1A1_ILP	.8 1.2
+	soundloop_2			V_M1A1_DLP	.8 1.1 
+	soundloop_3			V_M1A1_REVSE	.7 1.3
+	soundloop_4			V_M1A1_ROTATELP		
+	enginereverse		V_M1A1_SHIFT	
+	enginehighrev		V_M1A1_HIREV 
+	enginestop			V_M1A1_STOP
+	sounddeath			EXPLO_M1A1 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	
+	SSAudio2			V_TANK_SKID			
+	SSAudio3			IMP_V_TANK		
+	warning				V_CRITICAL_ALARM_M1A1
+	sound_impactorganic	IMP_V_TANK_ORGNC
+	sound_rollover		IMP_V_TANK
+	sound_land			IMP_V_TANK_LAND
+	drive_repeat		V_M1A1_TREADS 
+	swivel_shift		V_M1A1_ROTSHIFT 
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_MED
+	tumble_skid			IMP_TMBL_DSKID
+end
+
+begin "SP_T80"		Drivable T80 Tank, Indonesian
+	enginestart			V_T80_START
+	soundloop_1			V_T80_ILP		.8 1.2
+	soundloop_2			V_T80_DLP		.8 1.1
+	soundloop_3			V_T80_REVSE		.7 1.3
+	soundloop_4			V_M1A1_ROTATELP		
+	enginereverse		V_T80_SHIFT	
+	enginehighrev 		V_M1A1_HIREV 
+	enginestop			V_T80_STOP
+	sounddeath			EXPLO_T80 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	
+	SSAudio2			V_TANK_SKID	
+	SSAudio3			IMP_V_TANK		
+	warning				V_CRITICAL_ALARM_T80
+	sound_impactorganic	IMP_V_TANK_ORGNC
+	sound_rollover		IMP_V_TANK
+	sound_land			IMP_V_TANK_LAND
+	drive_repeat		V_M1A1_TREADS 
+	swivel_shift		V_M1A1_ROTSHIFT 
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_MED
+	tumble_skid			IMP_TMBL_DSKID
+end
+
+
+
+begin "SP_FuelTruck"	Drivable Fuel Truck
+	enginestart			V_HEMTT_START
+	soundloop_1			V_HEMTT_ILP		.8 1.2
+	soundloop_2			V_HEMTT_DLP		.7 1.1
+	soundloop_3			V_HEMTT_REVSE	.8 1.2
+	enginereverse		V_HEMTT_SHIFT	
+	enginehighrev 
+	enginestop			V_HEMTT_STOP
+	sounddeath			EXPLO_HEMTT
+	sound_impact		IMP_HUSK_H_GRND		
+	sound_impactwater	IMP_DEBLRG_WATER	
+	
+	SSAudio2			TIRE_SKID	
+	SSAudio3			IMP_V_TRUCK		
+	warning				V_CRITICAL_ALARM
+	sound_impactorganic	IMP_V_ORGANIC
+	sound_rollover		IMP_V_SUV_ROLL
+	sound_land			IMP_V_SUV_LAND
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_SM
+	tumble_skid			IMP_TMBL_DSKID
+end
+
+begin "SP_DirtBike"		Drivable JO Motorcycle
+	enginestart			V_KX500_START
+	soundloop_1			V_KX500_ILP			1 1.2		
+	soundloop_2			V_KX500_DLP			0.75 1.25 0	
+	enginereverse		V_KX500_SHIFT 	
+	enginehighrev		V_KX500_HIREV 
+	enginestop			V_KX500_STOP
+	sounddeath			EXPLO_KX500 
+	sound_impact		IMP_HUSK_CYL_GRND		
+	sound_impactwater	IMP_HUSK_CYL_WATER	
+	
+	SSAudio1			V_KX500_REV
+	SSAudio2			TIRE_SKID		
+	SSAudio3			IMP_V_CYCLE		
+	sound_impactorganic	IMP_V_KX500_ORG
+	sound_rollover		IMP_V_CYCLE_ROLL
+	sound_land			IMP_V_CYCLE_LAND
+	tumble_skid			IMP_TMBL_DSKID
+end 
+ 
+begin "SP_TaxiCart"		Drivable Civlian Taxi Cart
+	enginestart			V_TAXI_START
+	soundloop_1			V_TAXI_ILP	.8 1.2	
+	soundloop_2			V_TAXI_DLP		.8 1.2	
+	soundloop_3			V_TAXI_REVSE	.8 1.6	
+	enginereverse		V_TAXI_SHIFT
+	enginehighrev 
+	enginestop			V_TAXI_STOP
+	sounddeath			EXPLO_VEHCL_SM 
+	sound_impact		IMP_HUSK_TXI_GND		
+	sound_impactwater	IMP_DEBMED_WATER	
+	SSAudio1			V_TAXI_HORN		
+	SSAudio2			TIRE_SKID		
+	SSAudio3			IMP_V_ATV		
+	sound_impactorganic	IMP_V_ORGANIC
+	sound_rollover		IMP_V_ATV_ROLL
+	sound_land			IMP_V_ATV_LAND
+	tumble_hithard      IMP_TMBL_MED	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_SM
+	tumble_skid			IMP_TMBL_DSKID
+end 
+
+begin "SP_ATV"			Drivable ATV
+	enginestart			V_ATV_START
+	soundloop_1			V_ATV_IDLE		.8 1.2	
+	soundloop_2			V_ATV_DRIVE		.8 1.4	
+	soundloop_3			V_BUGGY_REVSE	.8 1.6	
+	enginestop			V_ATV_STOP
+	enginehighrev 
+	sounddeath			EXPLO_VEHCL_SM 
+	sound_impact		IMP_HUSK_H_GRND		
+	sound_impactwater	IMP_DEBLRG_WATER	
+	SSAudio1			V_ATV_HORN		
+	SSAudio2			TIRE_SKID		
+	SSAudio3			IMP_V_ATV		
+	warning				V_CRITICAL_ALARM
+	sound_impactorganic	IMP_V_ORGANIC
+	sound_rollover		IMP_V_ATV_ROLL
+	sound_land			IMP_V_ATV_LAND
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_SM
+	tumble_skid			IMP_TMBL_DSKID
+end 
+
+begin "SP_DuneBuggy"	Drivable Dune Buggy
+	enginestart			V_BUGGY_START 
+	soundloop_1			V_BUGGY_ILP		.5 1.5
+	soundloop_2			V_BUGGY_DLP		.7 1 3
+	soundloop_3			V_BUGGY_REVSE	.7 1.1
+	enginereverse						
+	enginehighrev 
+	enginestop			V_BUGGY_STOP
+	sounddeath 			EXPLO_VEHCL_SM
+	sound_impact		IMP_HUSK_H_GRND		
+	sound_impactwater	IMP_DEBLRG_WATER	
+	SSAudio1			V_BUGGY_HORN 
+	SSAudio2			TIRE_SKID	
+	SSAudio3			IMP_V_ATV		
+	warning				V_CRITICAL_ALARM
+	sound_impactorganic	IMP_V_ORGANIC
+	sound_rollover		IMP_V_ATV_ROLL
+	sound_land			IMP_V_ATV_LAND
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_SM
+	tumble_skid			IMP_TMBL_DSKID
+end 
+
+begin "SP_Transport"	Drivable Transport
+	enginestart			V_TRUCK_START
+	soundloop_1			V_TRUCK_ILP		.8 1.2
+	soundloop_2			V_TRUCK_DLP		.7 1.1
+	soundloop_3			V_TRUCK_REVSE	.8 1.2
+	enginereverse		V_TRUCK_SHIFT	
+	enginehighrev 
+	enginestop			V_TRUCK_STOP
+	sounddeath			EXPLO_VEH_TRKLG
+	sound_impact		IMP_HUSK_H_GRND		
+	sound_impactwater	IMP_DEBLRG_WATER	
+	SSAudio1			V_TRUCK_HORN 
+	SSAudio2			TIRE_SKID	
+	SSAudio3			IMP_V_TRUCK		
+	warning				V_CRITICAL_ALARM
+	sound_impactorganic	IMP_V_ORGANIC
+	sound_rollover		IMP_V_SUV_ROLL
+	sound_land			IMP_V_SUV_LAND
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_SM
+	tumble_skid			IMP_TMBL_DSKID
+end 
+
+begin "SP_Hummer"		 Drivable HMMWV
+	enginestart			V_HUMVEE_START
+	soundloop_1			V_HUMMER_ILP	.6 1.2
+	soundloop_2			V_HUMMER_DLP	.7 1.1
+	soundloop_3			V_HUMMER_REVSE	.7 1.2
+	enginereverse		V_HUMMER_SHIFT	
+	enginehighrev 
+	enginestop			V_HUMMER_STOP
+	sounddeath			EXPLO_HUMMER 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	SSAudio1			V_HUMMER_HORN 
+	SSAudio2			TIRE_SKID	
+	SSAudio3			IMP_V_TRUCK			
+	warning				V_CRITICAL_ALARM
+	sound_impactorganic	IMP_V_ORGANIC
+	sound_rollover		IMP_V_SUV_ROLL
+	sound_land			IMP_V_SUV_LAND
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_SM
+	tumble_skid			IMP_TMBL_DSKID
+end 
+
+begin "SP_SUV"			Drivable SUV
+	enginestart			V_SUV_START
+	soundloop_1			V_SUV_ILP	.6 1.2
+	soundloop_2			V_SUV_DLP	.8 1.1
+	soundloop_3			V_HUMMER_REVSE	.8 1.3
+	enginereverse		V_HUMMER_SHIFT	
+	enginehighrev 
+	enginestop			V_SUV_STOP
+	sounddeath			EXPLO_HUMMER 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	SSAudio1			V_SUV_HORN 
+	SSAudio2			TIRE_SKID	
+	SSAudio3			IMP_V_TRUCK		
+	warning				V_CRITICAL_ALARM
+	sound_impactorganic	IMP_V_ORGANIC
+	sound_rollover		IMP_V_SUV_ROLL
+	sound_land			IMP_V_SUV_LAND
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_SM
+	tumble_skid			IMP_TMBL_DSKID
+end 
+
+begin "SP_Stryker"		Drivable Stryker
+	enginestart			V_STRYKER_START
+	soundloop_1			V_STRYKER_ILP	.8 1.2
+	soundloop_2			V_STRYKER_DLP	.7 1.1
+	soundloop_3			V_STRYKER_REVSE	.7 1.3
+	enginereverse		V_STRYKER_SHIFT	
+	enginehighrev 
+	enginestop			V_STRYKER_STOP
+	sounddeath			EXPLO_ARMORED 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	
+	SSAudio2						
+	SSAudio3			IMP_V_APC		
+	warning				V_CRITICAL_ALARM9
+	sound_impactorganic	IMP_V_ORGANIC
+	sound_rollover		IMP_V_APC
+	sound_land			IMP_V_APC_LAND
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_MED
+	tumble_skid			IMP_TMBL_DSKID
+end 
+
+begin "SP_BTR80"		Drivable BTR-80, Indonesian
+	enginestart			V_BTR80_START
+	soundloop_1			V_BTR80_ILP		.8 1.2
+	soundloop_2			V_BTR80_DLP		.8 1.1
+	soundloop_3			V_BTR80_REVSE	.7 1.3
+	enginereverse		V_STRYKER_SHIFT	
+	enginehighrev 
+	enginestop			V_BTR80_STOP
+	sounddeath			EXPLO_ARMORED 
+	sound_impact		IMP_HUSK_H_GRND
+	sound_impactwater	IMP_DEBLRG_WATER
+	
+	SSAudio2				
+	SSAudio3			IMP_V_APC		
+	warning				V_CRITICAL_ALARM5a
+	sound_impactorganic	IMP_V_ORGANIC
+	sound_rollover		IMP_V_APC
+	sound_land			IMP_V_APC_LAND
+	tumble_hithard      IMP_TMBL_LG	
+	tumble_hitmed       IMP_TMBL_MED
+	tumble_hitsoft      IMP_TMBL_SM
+	tumble_skid			IMP_TMBL_DSKID
+end 
+
+
+begin "SP_Zodiac"		 Drivable Zodiac
+  enginestart	V_ZODIAC_START
+  soundloop_1	V_ZODIAC_ILP	.5 1.5
+  soundloop_2	V_ZODIAC_DLP	.9 1.3
+  soundloop_3	V_ZODIAC_ILP	.9 1.3	
+  enginestop	V_ZODIAC_STOP
+  SSAudio3			IMP_V_ZODIAC		
+  sounddeath	EXPLO_ZODIAC
+  
+  sound_impactorganic	IMP_V_ZODIAC
+end 
+
+begin "SP_LCAC"		 Drivable LCAC
+  enginestart	V_LCAC_START    
+  soundloop_1	V_LCAC_ILP		.8 1.2	
+  soundloop_2	V_LCAC_DLP		 1 1.4 	
+  soundloop_3	V_LCAC_DLP		.8 1.4	
+  enginestop	V_LCAC_STOP 			
+  sounddeath	EXPLO_BOAT_LG 
+  SSAudio1		V_LCAC_HORN		
+  SSAudio3		IMP_V_APC		
+  warning		V_CRITICAL_ALARM
+  sound_impactorganic	IMP_V_ORGANIC
+end 
+
+begin "SP_MKV"		 Drivable Mark V Assault boat
+  enginestart	V_MARKV_START
+  soundloop_1	V_MARKV_ILP		.8 1.3	
+  soundloop_2	V_MARKV_DLP		.8 1.2	
+  soundloop_3	V_MARKV_ILP		.7 1.2 	
+  enginereverse	V_MARKV_SHIFT
+  enginestop	V_MARKV_STOP
+  sounddeath	EXPLO_BOAT_ASSLT 
+  SSAudio1		V_MARKV_HORN	
+  SSAudio3		IMP_V_MTBOAT		
+  warning		V_CRITICAL_ALARM
+  sound_impactorganic	IMP_V_MBT_ORG
+end 
+
+begin "SP_IndoAssaultBoat"	Drivable Indonesian Assault Boat-Indo version of Mark V
+  enginestart	V_INDOBOAT_START
+  soundloop_1	V_INDOBOAT_ILP	.8 1.3	
+  soundloop_2	V_INDOBOAT_DLP	.9 1.2	
+  soundloop_3	V_INDOBOAT_ILP	.7 1.2 	
+  enginereverse	V_MARKV_SHIFT
+  enginestop	V_INDOBOAT_STOP3
+  sounddeath	EXPLO_BOAT_ASSLT 
+  SSAudio1		V_INDOBOAT_HORN		 
+  SSAudio3			IMP_V_MTBOAT		
+  warning		V_CRITICAL_ALARM1
+  sound_impactorganic	IMP_V_MBT_ORG
+end 
+
+begin "SP_IndoLandingCraft"	Drivable Indo landing craft
+  enginestart	V_INDOCRAFT_START
+  soundloop_1	V_INDOCRAFT_ILP	.8 1.3	
+  soundloop_2	V_INDOCRAFT_DLP	.8 1.2	
+  soundloop_3	V_INDOCRAFT_RLP	.7 1.2 	
+  enginereverse	V_INDOCRAFT_SHIFT
+  enginestop	V_INDOCRAFT_STOP
+  sounddeath	EXPLO_BOAT_LG 
+  SSAudio1		V_INDOCRAFT_HORN		
+  SSAudio3		IMP_V_MTBOAT		
+  warning		V_CRITICAL_ALARM1
+  sound_impactorganic	IMP_V_MBT_ORG
+end 
+
+begin "SP_IndoJunk1"	Drivable civilian boat #1 - 9.25 meter
+  enginestart	V_INDOJUNK1_START
+  soundloop_1	V_INDOJUNK1_ILP	.8 1.3	
+  soundloop_2	V_INDOJUNK1_DLP	.8 1.1	
+  soundloop_3	V_INDOJUNK1_ILP	.7 1.2 	
+  enginereverse	V_MARKV_SHIFT
+  enginestop	V_INDOJUNK1_STOP
+  sounddeath	EXPLO_WBOAT_SM
+  SSAudio3			IMP_V_WDBOAT_LG		
+  
+  sound_impactorganic	IMP_V_MBT_ORG
+end 
+
+begin "SP_IndoJunk2"	Drivable civilian boat #2 - 23 meter
+  enginestart	V_INDOJUNK2_START
+  soundloop_1	V_INDOJUNK2_ILP	.8 1.3	
+  soundloop_2	V_INDOJUNK2_DLP	.8 1.1	
+  soundloop_3	V_INDOJUNK2_ILP	.7 1.2 	
+  enginereverse	V_MARKV_SHIFT
+  enginestop	V_INDOJUNK2_STOP
+  sounddeath	EXPLO_WBOAT_LG 
+  SSAudio1		V_INDOJUNK2_HORN		
+  SSAudio3		IMP_V_WDBOAT_LG			
+  
+  sound_impactorganic	IMP_V_MBT_ORG
+end 
+
+begin "SP_IndoJunk3"	Drivable civilian boat #3 - 8 meter wooden dinghy
+  enginestart	V_INDOJUNK3_START
+  soundloop_1	V_INDOJUNK3_ILP	.8 1.3	
+  soundloop_2	V_INDOJUNK3_DLP	.8 1.1	
+  soundloop_3	V_INDOJUNK3_ILP	.7 1.2 	
+  enginereverse	V_INDOJUNK3_SHIFT
+  enginestop	V_INDOJUNK3_STOP
+  sounddeath	EXPLO_WBOAT_SM 
+  SSAudio3			IMP_V_WDBOAT_SM		
+  
+  sound_impactorganic	IMP_V_MBT_ORG
+end 
+
+begin "SP_IndoJunk4"	Drivable civilian boat #4 - 13 meter
+  enginestart	V_INDOJUNK4_START
+  soundloop_1	V_INDOJUNK4_ILP		1.3 1.5	
+  soundloop_2	V_INDOJUNK4_DLP		1.1 1.4	
+  soundloop_3	V_INDOJUNK4_ILP		.5 1.1 	
+  enginereverse	V_MARKV_SHIFT
+  enginestop	V_INDOJUNK4_STOP
+  sounddeath	EXPLO_WBOAT_LG 
+  SSAudio3			IMP_V_WDBOAT_LG		
+  
+  sound_impactorganic	IMP_V_MBT_ORG
+end 
+
+
+
+
+
+begin "SP_JO_SP_PlayerM1"	Joint Ops Soldier #1, player-MALE Single PLayer
+     sounddeath     BM1_DEATH
+     SSNightDead    BM1_DEATH_K
+     SSFallDead     FALLDEAD2
+     SSFallAlive    JUMPLAND_DIRT
+     SSLFootGND     FSP_DIRT_L
+     SSRFootGND     FSP_DIRT_R
+     SSLFootOBJ     FSP_OBJ_L
+     SSRFootOBJ     FSP_OBJ_R
+     SSFootWater    FS_WATER
+     SSAudio1		FSP_DIRT_R
+     SSAudio2		FSP_DIRT_R
+     SSAudio3		FSP_OBJ_L
+     SSAudio4		FS_SWIM
+     SSAudio5		FSP_PRONE
+     SSAudio6		FSP_PRONE_ROLL
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+	 rotor_impact	IMP_ROTOR_FLESH .1      
+end 
+
+begin "SP_JO_SP_PlayerF1"	Joint Ops Soldier #1, player-FEMALE Single Player
+     sounddeath     DEATH_BF1
+     SSNightDead     DEATH_BF1_K
+     SSFallDead     FALLDEAD2
+     SSFallAlive     JUMPLAND_DIRT
+     SSLFootGND     FSP_DIRT_L
+     SSRFootGND     FSP_DIRT_R
+     SSLFootOBJ     FSP_OBJ_L
+     SSRFootOBJ     FSP_OBJ_R
+     SSFootWater     FS_WATER
+     SSAudio1     FSP_DIRT_R
+     SSAudio2     FSP_DIRT_R
+     SSAudio3     FSP_OBJ_L
+     SSAudio4     FS_SWIM
+     SSAudio5     FSP_PRONE
+     SSAudio6     FSP_PRONE_ROLL    
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+     rotor_impact	IMP_ROTOR_FLESH .1       
+end 
+
+begin "SP_JO_MP_PlayerM1"	Joint Ops Soldier #1, player-MALE Multiplayer
+     sounddeath     BM2_DEATH
+     SSNightDead     BM4_DEATH_K
+     SSFallDead     FALLDEAD2
+     SSFallAlive     JUMPLAND_DIRT
+     SSLFootGND     FSP_DIRT_L
+     SSRFootGND     FSP_DIRT_R
+     SSLFootOBJ     FSP_OBJ_L
+     SSRFootOBJ     FSP_OBJ_R
+     SSFootWater     FS_WATER
+     SSAudio1     FSP_DIRT_R
+     SSAudio2     FSP_DIRT_R
+     SSAudio3     FSP_OBJ_L
+     SSAudio4     FS_SWIM
+     SSAudio5     FSP_PRONE
+     SSAudio6     FSP_PRONE_ROLL  
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+     rotor_impact	IMP_ROTOR_FLESH .1       
+end
+
+begin "SP_JO_MP_PlayerF1"	Joint Ops Soldier #1, player-FEMALE Multiplayer
+     sounddeath     DEATH_BF1
+     SSNightDead     DEATH_BF1_K
+     SSFallDead     FALLDEAD2
+     SSFallAlive     JUMPLAND_DIRT
+     SSLFootGND     FSP_DIRT_L
+     SSRFootGND     FSP_DIRT_R
+     SSLFootOBJ     FSP_OBJ_L
+     SSRFootOBJ     FSP_OBJ_R
+     SSFootWater     FS_WATER
+     SSAudio1     FSP_DIRT_R
+     SSAudio2     FSP_DIRT_R
+     SSAudio3     FSP_OBJ_L
+     SSAudio4     FS_SWIM
+     SSAudio5     FSP_PRONE
+     SSAudio6     FSP_PRONE_ROLL    
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+     rotor_impact	IMP_ROTOR_FLESH .1   
+end 
+
+begin "AI_JO_M1"	Friendly Soldier #1, MALE
+     sounddeath     BM1_DEATH
+     SSNightDead    BM1_DEATH_K
+     SSFallDead     FALLDEAD2
+     SSFallAlive    JUMPLAND_DIRT
+     SSLFootGND     FSP_DIRT_L
+     SSRFootGND     FSP_DIRT_R
+     SSLFootOBJ     FSP_OBJ_L
+     SSRFootOBJ     FSP_OBJ_R
+     SSFootWater    FS_WATER
+     SSAudio1		FSP_DIRT_R
+     SSAudio2		FSP_DIRT_R
+     SSAudio3		FSP_OBJ_L
+     SSAudio4		FS_SWIM
+     SSAudio5		FSP_PRONE
+     SSAudio6		FSP_PRONE_ROLL    
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+     rotor_impact	IMP_ROTOR_FLESH .1      
+end 
+
+begin "AI_JO_M4"	Friendly Soldier #2, MALE Russian
+     sounddeath     BM4_DEATH
+     SSNightDead    BM4_DEATH_K
+     SSFallDead     FALLDEAD2
+     SSFallAlive    JUMPLAND_DIRT
+     SSLFootGND     FSP_DIRT_L
+     SSRFootGND     FSP_DIRT_R
+     SSLFootOBJ     FSP_OBJ_L
+     SSRFootOBJ     FSP_OBJ_R
+     SSFootWater    FS_WATER
+     SSAudio1		FSP_DIRT_R
+     SSAudio2		FSP_DIRT_R
+     SSAudio3		FSP_OBJ_L
+     SSAudio4		FS_SWIM
+     SSAudio5		FSP_PRONE
+     SSAudio6		FSP_PRONE_ROLL     
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+     rotor_impact	IMP_ROTOR_FLESH .1      
+end 
+
+begin "AI_JO_M5"	Friendly Soldier #4, MALE French
+     sounddeath     BM5_DEATH
+     SSNightDead    BM5_DEATH_K
+     SSFallDead     FALLDEAD2
+     SSFallAlive    JUMPLAND_DIRT
+     SSLFootGND     FSP_DIRT_L
+     SSRFootGND     FSP_DIRT_R
+     SSLFootOBJ     FSP_OBJ_L
+     SSRFootOBJ     FSP_OBJ_R
+     SSFootWater    FS_WATER
+     SSAudio1		FSP_DIRT_R
+     SSAudio2		FSP_DIRT_R
+     SSAudio3		FSP_OBJ_L
+     SSAudio4		FS_SWIM
+     SSAudio5		FSP_PRONE
+     SSAudio6		FSP_PRONE_ROLL
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+     rotor_impact	IMP_ROTOR_FLESH .1      
+end 
+
+begin "SP_indoSoldier1"		 Indonesian Soldier #1 with AK47
+	sounddeath		DEATH_INDO_1
+	SSNightDead		DEATH_K_INDO_1
+	SSFallDead		FALLDEAD1
+	SSFallAlive		JUMPLAND_DIRT
+	SSLFootGND		FSP_DIRT_L
+	SSRFootGND		FSP_DIRT_R
+	SSLFootOBJ		FSP_OBJ_L
+	SSRFootOBJ		FSP_OBJ_R
+	SSFootWater		FS_WATER
+	SSAudio1		FSP_DIRT_R
+	SSAudio2		FSP_DIRT_R
+	SSAudio3		FSP_OBJ_L
+	SSAudio4		FS_SWIM
+	SSAudio5		GF_AK_RL
+	SSAudio6 
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+end 
+
+
+begin "SP_indoSoldier2"		 Indonesian Soldier #2 with AK47
+     sounddeath   DEATH_INDO_2
+     SSNightDead  DEATH_K_INDO_2
+     SSFallDead   FALLDEAD1
+     SSFallAlive  JUMPLAND_DIRT
+     SSLFootGND   FSP_DIRT_L
+     SSRFootGND   FSP_DIRT_R
+     SSLFootOBJ   FSP_OBJ_L
+     SSRFootOBJ   FSP_OBJ_R
+     SSFootWater  FS_WATER
+     SSAudio1     FSP_DIRT_R
+     SSAudio2     FSP_DIRT_R
+     SSAudio3     FSP_OBJ_L
+     SSAudio4     FS_SWIM
+     SSAudio5     GF_AK_RL
+     SSAudio6 
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+end 
+
+begin "SP_indoSoldier3"		 Indonesian Soldier #3 with crawl
+     sounddeath   DEATH_INDO_3
+     SSNightDead  DEATH_K_INDO_3
+     SSFallDead   FALLDEAD1
+     SSFallAlive  JUMPLAND_DIRT
+     SSLFootGND   FSP_DIRT_L
+     SSRFootGND   FSP_DIRT_R
+     SSLFootOBJ   FSP_OBJ_L
+     SSRFootOBJ   FSP_OBJ_R
+     SSFootWater  FS_WATER
+     SSAudio1     FSP_DIRT_R
+     SSAudio2     FSP_DIRT_R
+     SSAudio3     FSP_OBJ_L
+     SSAudio4     FS_SWIM
+     SSAudio5     GF_AK_RL
+     SSAudio6     
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+end 
+
+
+begin "SP_indoSoldierF1"		 Indonesian Soldier #5 Female 
+     sounddeath   RF1_DEATH
+     SSNightDead  RF1_DEATH_K
+     SSFallDead   FALLDEAD1
+     SSFallAlive  JUMPLAND_DIRT
+     SSLFootGND   FSP_DIRT_L
+     SSRFootGND   FSP_DIRT_R
+     SSLFootOBJ   FSP_OBJ_L
+     SSRFootOBJ   FSP_OBJ_R
+     SSFootWater  FS_WATER
+     SSAudio1     FSP_DIRT_R
+     SSAudio2     FSP_DIRT_R
+     SSAudio3     FSP_OBJ_L
+     SSAudio4     FS_SWIM
+     SSAudio5     GF_AK_RL
+     SSAudio6     
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+end 
+
+
+
+begin "SP_AI_Medic01"		 Combat Medic01 Soldier w
+     sounddeath     AI_DEATH_1
+     SSNightDead     BM2_DEATH_K
+     SSFallDead     FALLDEAD2
+     SSFallAlive     JUMPLAND_DIRT
+     SSLFootGND     FSP_DIRT_L
+     SSRFootGND     FSP_DIRT_R
+     SSLFootOBJ     FSP_OBJ_L
+     SSRFootOBJ     FSP_OBJ_R
+     SSFootWater     FS_WATER
+     SSAudio1     FSP_DIRT_R
+     SSAudio2     FSP_DIRT_R
+     SSAudio3     FSP_OBJ_L
+     SSAudio4     FS_SWIM
+     SSAudio5     GF_M4_RL
+     SSAudio6     FSP_OBJ_R
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+end  
+
+
+begin "SP_AI_Medic02"		 Combat Medic02 Soldier no gun
+     sounddeath     AI_DEATH_1
+     SSNightDead     BM3_DEATH_K
+     SSFallDead     FALLDEAD2
+     SSFallAlive     JUMPLAND_DIRT
+     SSLFootGND     FSP_DIRT_L
+     SSRFootGND     FSP_DIRT_R
+     SSLFootOBJ     FSP_OBJ_L
+     SSRFootOBJ     FSP_OBJ_R
+     SSFootWater     FS_WATER
+     SSAudio1     FSP_DIRT_R
+     SSAudio2     FSP_DIRT_R
+     SSAudio3     FSP_OBJ_L
+     SSAudio4     FS_SWIM
+     SSAudio5     GF_M4_RL
+     SSAudio6     FSP_OBJ_R
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+end  
+
+begin "SP_indoCivilianF1"		 Indonesian Civilian Female #1
+     sounddeath   RF1_DEATH
+     SSNightDead  RF1_DEATH_K
+     SSFallDead   FALLDEAD1
+     SSFallAlive  JUMPLAND_DIRT
+     SSLFootGND   FSP_DIRT_L
+     SSRFootGND   FSP_DIRT_R
+     SSLFootOBJ   FSP_OBJ_L
+     SSRFootOBJ   FSP_OBJ_R
+     SSFootWater  FS_WATER
+     SSAudio1     FSP_DIRT_R
+     SSAudio2     FSP_DIRT_R
+     SSAudio3     FSP_OBJ_L
+     SSAudio4     FS_SWIM 
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+end 
+
+begin "SP_indoCivilianM1"		 Indonesian Civilian Male #1
+	sounddeath		DEATH_INDO_1
+	SSNightDead		DEATH_K_INDO_1
+	SSFallDead		FALLDEAD1
+	SSFallAlive		JUMPLAND_DIRT
+	SSLFootGND		FSP_DIRT_L
+	SSRFootGND		FSP_DIRT_R
+	SSLFootOBJ		FSP_OBJ_L
+	SSRFootOBJ		FSP_OBJ_R
+	SSFootWater		FS_WATER
+	SSAudio1		FSP_DIRT_R
+	SSAudio2		FSP_DIRT_R
+	SSAudio3		FSP_OBJ_L
+	SSAudio4		FS_SWIM
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+end 
+
+begin "SP_indoCivilianM2"		 Indonesian Civilian Male #2
+	sounddeath		DEATH_INDO_2
+	SSNightDead		DEATH_K_INDO_2
+	SSFallDead		FALLDEAD1
+	SSFallAlive		JUMPLAND_DIRT
+	SSLFootGND		FSP_DIRT_L
+	SSRFootGND		FSP_DIRT_R
+	SSLFootOBJ		FSP_OBJ_L
+	SSRFootOBJ		FSP_OBJ_R
+	SSFootWater		FS_WATER
+	SSAudio1		FSP_DIRT_R
+	SSAudio2		FSP_DIRT_R
+	SSAudio3		FSP_OBJ_L
+	SSAudio4		FS_SWIM
+	 ChuteOpen		PARACHUTE_OPEN
+     ChuteClose		PARACHUTE_LAND
+     ChuteFlap		PARACHUTE_GLIDE
+  	 FreeFall 		FREEFALL
+end 
+
+
+
+
+begin "SP_Bird1"		 Jungle Bird 1
+	 SSAudio2	FLAP_DEATH		
+     SSAudio6	ENV_SPARROWHAWK	
+	 SSFallDead FALLDEAD_BIRD	
+	 sounddeath DEATH_SHAWK		
+end 
+
+begin "Zombie_Male_1_Slow1"	
+	sounddeath		Z_ATTACK_1
+	SSNightDead		Z_ATTACK_1
+	SSFallDead		Z_ATTACK_1
+	SSFallAlive		JUMPLAND_DIRT
+	SSLFootGND		FSP_DIRT_L
+	SSRFootGND		FSP_DIRT_R
+	SSLFootOBJ		FSP_OBJ_L
+	SSRFootOBJ		FSP_OBJ_R
+	SSFootWater		FS_WATER
+	SSAudio1		Z_idle_1 //zombie idle sound
+	SSAudio2		Z_move_1 //zombie move sound
+	SSAudio3		FSP_OBJ_L
+	SSAudio4		FS_SWIM
+	SSAudio5		FS_SWIM
+	SSAudio6		FS_SWIM	
+
+  	FreeFall 		FREEFALL
+end 
+
+
+begin "SP_Tiger"	
+	sounddeath		Tiger_Attack
+	SSNightDead		Tiger_Attack
+	SSFallDead		Tiger_Attack
+	SSFallAlive		JUMPLAND_DIRT
+	SSLFootGND		FSP_DIRT_L
+	SSRFootGND		FSP_DIRT_R
+	SSLFootOBJ		FSP_OBJ_L
+	SSRFootOBJ		FSP_OBJ_R
+	SSFootWater		FS_WATER
+	SSAudio1		Tiger_Walk //zombie idle sound
+	SSAudio2		Tiger_Run //zombie move sound
+	SSAudio3		Tiger_Attack
+	SSAudio4		Tiger_Roar
+	SSAudio5		FS_SWIM
+	SSAudio6		FS_SWIM	
+
+  	FreeFall 		FREEFALL
+end 
+
+ 

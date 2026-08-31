@@ -98,6 +98,7 @@
 # retail defs
 !/AVATARS.DEF
 !/charattr.def
+!/SndProf.def
 # clips
 !/ATT_GND.bad
 !/ATT_KNF.bad
