@@ -317,9 +317,6 @@ func render_sun_veil_frame() -> void:
 ## have rebuilt the model subtrees the capture channels are stamped on, and
 ## slot priority plus the capture poses are camera-relative)
 ## [orig: render_shadow_pass @ 0x5d7b70 once per main scene frame].
-func render_slot_shadow_frame() -> void:
-	if _world._slot_shadow != null:
-		_world._slot_shadow.advance_frame()
 
 
 ## Retail refreshes TexCubeEnvironment during the offscreen preparation leg:
@@ -416,23 +413,6 @@ func render_light_frame() -> void:
 	var sim: Simulation = _world.get_sim()
 	_world._light_director.render_frame(
 			viewport.get_camera_3d() if viewport != null else null)
-	# Feed the render-slot shadow device the same point-light context (its
-	# per-slot dominant-light pick reads the shared pool) plus the local
-	# player state for the retail priority/drape gates.
-	if _world._slot_shadow != null:
-		_world._slot_shadow.set_light_scene(_world._light_director.scene())
-		_world._slot_shadow.set_light_context(_world._light_director.light_gain(),
-				Time.get_ticks_msec(), _world._weather)
-		if _world._resource_root != null:
-			_world._slot_shadow.set_resource_root(_world._resource_root)
-		if _world._local_view_presenter != null:
-			_world._slot_shadow.set_local_player_model(
-					_world._local_view_presenter.avatar())
-			_world._slot_shadow.set_local_player_first_person(
-					not _world._local_view_presenter.is_third_person())
-		if sim != null:
-			_world._slot_shadow.set_local_player_prone(
-					sim.get_local_player_stance_latch() == 2)
 
 
 func update_clear_frame() -> void:
@@ -442,12 +422,9 @@ func update_clear_frame() -> void:
 		_update_frame_clear_color()
 
 
-# The two compositor passes the root-viewport rows cannot split out: the
-# focused Q3 draw list and the slot-shadow captures. Both report typed
-# per-frame counts (the compile of this frame, the draw of the previous one).
-# Focused Q3 and the slot-shadow captures both draw inside the root
-# compositor (POST_TRANSPARENT and PRE_OPAQUE); their per-pass counts come off
-# the effects' typed reports, their time rides the root viewport rows.
+# The compositor pass the root-viewport rows cannot split out: the focused Q3
+# draw list. It reports typed per-frame counts (the compile of this frame, the
+# draw of the previous one) inside the root compositor (POST_TRANSPARENT).
 func _sample_auxiliary_render_stats(stats_on: bool) -> void:
 	if not stats_on:
 		return
@@ -457,18 +434,6 @@ func _sample_auxiliary_render_stats(stats_on: bool) -> void:
 				int(q3_report.get("q3_drawn_commands", 0)))
 		_world._frame_stats.add(FrameStats.RENDER_Q3_DRAWS,
 				int(q3_report.get("q3_gpu_draw_calls", 0)))
-	if _world._slot_shadow != null:
-		var slot_report := _world._slot_shadow.get_report()
-		_world._frame_stats.add(FrameStats.RENDER_SLOT_OBJECTS,
-				int(slot_report.get("slot_surfaces_compiled", 0)))
-		_world._frame_stats.add(FrameStats.RENDER_SLOT_DRAWS,
-				int(slot_report.get("slot_draw_calls", 0)))
-		_world._frame_stats.add(FrameStats.RENDER_SLOT_CAPTURES,
-				int(slot_report.get("slot_captures_drawn", 0)))
-		_world._frame_stats.add(FrameStats.RENDER_SLOT_PACKED_VERTICES,
-				int(slot_report.get("slot_packed_vertices", 0)))
-		_world._frame_stats.add(FrameStats.RENDER_SLOT_SKINNED,
-				int(slot_report.get("slot_skinned_commands", 0)))
 
 
 func is_water_render_stats_measured() -> bool:
@@ -598,7 +563,6 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	_world.render_light_frame()
 	# Re-plan the render-slot ground shadows for the moved capture camera
 	# (slot priority and the capture poses are camera-relative).
-	_world.render_slot_shadow_frame()
 	_world.update_clear_frame()
 	return OK
 

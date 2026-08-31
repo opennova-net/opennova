@@ -113,51 +113,6 @@ enum class ObjectShaderTechnique : uint8_t {
 	GlassSkinned,
 };
 
-// The PROJSHAD pass is not a copy of NORMAL's blend policy. The four _FFP
-// techniques compile material blend variants (BLEND_NONE ONE/ZERO;
-// BLEND_ALPHA SRCALPHA/INVSRCALPHA, the black source blended by
-// Diffuse1.a x AlphaGenValue (x Diffuse2.a for the _MT blocks) through
-// TSSAlpha(0, Modulate, Texture, Diffuse) with MaterialDiffuse =
-// (ColorSrcZero, AlphaGenValue); BLEND_ADD ONE/ONE, a no-op for black;
-// BLEND_MULT DESTCOLOR/SRCCOLOR, black again), the live file-effect passes
-// force opaque ONE/ZERO state, and effects without a PROJSHAD declaration do
-// not submit a fallback pass.
-// [orig: _FFP.fx TBoringFFPProjShad (decoded, SCR key 0xA55B1EED); the 15
-// shipped shader PROJSHAD declarations; HLSLEffect_LoadFromFile @ 0x5AE690]
-enum class ObjectProjectedShadowPolicy : uint8_t {
-	NoPass,
-	MaterialBlend,
-	Opaque,
-};
-
-ObjectProjectedShadowPolicy object_projected_shadow_policy(
-		ObjectShaderTechnique technique) noexcept;
-
-// The PROJSHAD coverage source per technique: the alpha the black pass tests
-// (alpha-test materials) or blends (MaterialBlend). _FFP's TBoringFFPProjShad
-// keeps Diffuse1.a times the AlphaGenValue register (the FFP families'
-// u_alpha_mod), its _MT variants also multiply Diffuse2.a over UV2; every file
-// effect's PROJSHAD pass takes Diffuse1.a alone (vscPostBlackT1 /
-// vscSkinPostBlackT1 write the black diffuse, the texture stage keeps the
-// texture alpha); tracer/flag/glass declare no pass.
-// [orig: _FFP.fx TBoringFFPProjShad (Diffuse1 x AlphaGenValue, _MT Diffuse2);
-// _vsPost.fx vscPostBlackT1; _vsSkPost.fx vscSkinPostBlackT1; the 15 shipped
-// PROJSHAD declarations]
-enum class ObjectProjectedShadowCoverage : uint8_t {
-	NoPass,
-	DiffuseAlpha,
-	DiffuseAlphaFfp,
-	DiffuseDetailAlphaFfp,
-};
-
-ObjectProjectedShadowCoverage object_projected_shadow_coverage(
-		ObjectShaderTechnique technique) noexcept;
-// The manifest token of a coverage source ("no_pass", "diffuse_alpha",
-// "diffuse_alpha_ffp", "diffuse_detail_alpha_ffp"): the object pipeline
-// manifest's projected_shadow_contracts names the same table per technique.
-const char *object_projected_shadow_coverage_name(
-		ObjectProjectedShadowCoverage coverage) noexcept;
-
 struct ObjectShaderPipelineDescriptor {
 	ObjectShaderKey key = 0;
 	ObjectShaderFamily family = ObjectShaderFamily::Unknown;

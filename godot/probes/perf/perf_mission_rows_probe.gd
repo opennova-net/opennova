@@ -77,11 +77,6 @@ const ENGINE_COUNT_SAMPLES := {
 	"render_water_objects": FrameStats.RENDER_WATER_OBJECTS,
 	"render_q3_objects": FrameStats.RENDER_Q3_OBJECTS,
 	"render_q3_draws": FrameStats.RENDER_Q3_DRAWS,
-	"render_slot_objects": FrameStats.RENDER_SLOT_OBJECTS,
-	"render_slot_draws": FrameStats.RENDER_SLOT_DRAWS,
-	"render_slot_captures": FrameStats.RENDER_SLOT_CAPTURES,
-	"render_slot_packed_vertices": FrameStats.RENDER_SLOT_PACKED_VERTICES,
-	"render_slot_skinned": FrameStats.RENDER_SLOT_SKINNED,
 }
 const COUNTER_KEYS := [
 	"plan_rebuilds",

@@ -210,15 +210,6 @@ void StatsWindow::format_info() {
 			set_info(pass.row, buf);
 		}
 	}
-	if (slot_samples(w, Slot::RENDER_SLOT_CAPTURES) > 0) {
-		std::snprintf(buf, sizeof(buf), "%d objs | %d draws | %.1f captures/f | %d verts | %d skinned",
-				static_cast<int>(mean_count(w, Slot::RENDER_SLOT_OBJECTS)),
-				static_cast<int>(mean_count(w, Slot::RENDER_SLOT_DRAWS)),
-				mean_count(w, Slot::RENDER_SLOT_CAPTURES),
-				static_cast<int>(mean_count(w, Slot::RENDER_SLOT_PACKED_VERTICES)),
-				static_cast<int>(mean_count(w, Slot::RENDER_SLOT_SKINNED)));
-		set_info("render_slot", buf);
-	}
 	if (slot_samples(w, Slot::MODEL_AWAKE_MODELS) > 0) {
 		const double samples = static_cast<double>(slot_samples(w, Slot::MODEL_AWAKE_MODELS));
 		std::snprintf(buf, sizeof(buf), "%d awake | %d renderable",

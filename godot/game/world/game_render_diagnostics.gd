@@ -342,7 +342,6 @@ static func _shadow_state(shadow: SunShadow, world_driven: bool) -> Dictionary:
 		return {"available": false}
 	return {
 		"available": true,
-		"projection_mode": shadow.get_projection_mode(),
 		"visible": shadow.visible,
 		"visible_in_tree": shadow.is_visible_in_tree(),
 		# Live = following the sun each frame: through its own _process when it

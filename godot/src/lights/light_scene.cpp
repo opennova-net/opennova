@@ -343,55 +343,6 @@ PackedByteArray LightScene::corona_texture_rgba8() {
 	return bytes;
 }
 
-void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
-		float p_radius, const Vector3 &p_ambient_scale, int p_time_ms,
-		Weather *p_weather, std::vector<opennova::renderer::SlotPointLight> &r_out) {
-	// The render-slot dominant-light query: the witnessed per-entity collect
-	// over entity position +- bound radius, group-gated params, no D3D-fill
-	// boost [orig: RenderSlot_UpdateEntityLight @0x5d6a30 collects via
-	// collect_nearby_zones_by_aabb @0x5aa250 and reads
-	// Light_GetPointLightParams @0x5a9180 directly — the pick itself lives
-	// portable in opennova::renderer::pick_dominant_light, see
-	// docs/render/render-lighting-re.md].
-	r_out.clear();
-	const std::array<int32_t, 3> center = mission_fixed_from_godot(p_world_pos);
-	const int64_t half =
-			static_cast<int64_t>(clamp_fixed(MAX(p_radius, 0.0f) * 65536.0));
-	std::array<int32_t, 3> qmin{};
-	std::array<int32_t, 3> qmax{};
-	for (int axis = 0; axis < 3; ++axis) {
-		qmin[axis] = clamp_int64(static_cast<int64_t>(center[axis]) - half);
-		qmax[axis] = clamp_int64(static_cast<int64_t>(center[axis]) + half);
-	}
-	std::array<opennova::renderer::LightHandle, opennova::renderer::LightScene::kQueryLimit>
-			handles{};
-	const size_t found = scene_.query(qmin, qmax, handles);
-	// The shared objects-target select inputs (object_select_inputs).
-	const ObjectSelectInputs sel = object_select_inputs(p_time_ms, p_weather, p_ambient_scale);
-	const opennova::renderer::LightFlickerInputs &flicker = sel.flicker;
-	const std::array<float, 3> &ambient = sel.ambient;
-	const opennova::renderer::LightSelectionOptions &options = sel.options;
-	std::array<opennova::renderer::SelectedLight, opennova::renderer::LightScene::kSelectLimit>
-			selected{};
-	const size_t count = scene_.select(handles.data(), found,
-			opennova::renderer::LightActiveGroups{}, options, ambient, flicker,
-			/*d3d_light_path=*/false, selected);
-	r_out.reserve(count);
-	for (size_t i = 0; i < count; ++i) {
-		const opennova::renderer::SelectedLight &light = selected[i];
-		opennova::renderer::SlotPointLight point;
-		const Vector3 position = godot_from_mission_float(light.position);
-		point.position = { float(position.x), float(position.y),
-			float(position.z) };
-		point.color = { light.color[0], light.color[1], light.color[2] };
-		point.attenuation = { light.attenuation[0], light.attenuation[1],
-			light.attenuation[2], light.attenuation[3] };
-		point.handle = static_cast<uint32_t>(light.handle.retail_value) |
-				(static_cast<uint32_t>(light.handle.generation) << 16);
-		r_out.push_back(point);
-	}
-}
-
 TypedArray<Dictionary> LightScene::collect_corona_rows(
 		const Vector3 &p_camera_pos, const Vector3 &p_camera_forward,
 		const Vector3 &p_ambient_scale, int p_time_ms, int p_frame_index,

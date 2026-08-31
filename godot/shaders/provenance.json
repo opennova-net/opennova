@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 193,
+  "resource_count": 192,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
@@ -290,7 +290,6 @@
         "light_corona.gdshader",
         "scar_quad.gdshader",
         "scar_quad_hole.gdshader",
-        "slot_shadow_drape.gdshader",
         "sun_veil_overlay.gdshader"
       ],
       "light_behavior": "prelit_or_light_derived_effect",

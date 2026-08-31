@@ -259,4 +259,12 @@ std::array<float, 3> terrain_surface_light(float sun_mask,
 	};
 }
 
+std::array<float, 3> sun_shadow_direction(
+		const std::array<float, 3> &sun_surface_to_light) {
+	// [orig: render_shadow_pass @ 0x5d7bdc..0x5d7c30 — `if (y < 0.25)
+	// y = 0.25`, then negate x/y/z into RenderSlot_DefaultLightDir*].
+	const float y = std::max(sun_surface_to_light[1], 0.25f);
+	return {-sun_surface_to_light[0], -y, -sun_surface_to_light[2]};
+}
+
 }  // namespace opennova::renderer

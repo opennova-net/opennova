@@ -58,7 +58,6 @@ add_library(${TARGET_NAME} SHARED
     env/celestial.cpp
     env/environment_cube_capture.cpp
     env/sky_dome.cpp
-    env/slot_shadow.cpp
     env/sun_shadow.cpp
     env/water.cpp
     env/weather.cpp
@@ -84,7 +83,6 @@ add_library(${TARGET_NAME} SHARED
     render/q3_frame_adapter.cpp
     render/q3_geometry_cache.cpp
     render/q3_source_registry.cpp
-    render/slot_capture_adapter.cpp
     object/entity_index.cpp
     object/object_model.cpp
     object/object_model_anim.cpp

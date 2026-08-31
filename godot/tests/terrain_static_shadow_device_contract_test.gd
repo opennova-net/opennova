@@ -198,16 +198,10 @@ func test_page_shadow_alpha_preserves_sky_and_fog_without_a_black_overlay() -> v
 	var device := _source("res://src/terrain/terrain.cpp")
 	assert_false(runtime.contains("cm.a"),
 		"The lit terrain must not multiply the page shadow alpha into its albedo.")
-	# The render-slot DRAPE next-pass on the terrain material serves the
-	# separate DYNAMIC entity ground shadows (retail drapes live silhouettes
-	# over terrain-following patches: RenderSlot_DrawAllDrapes @0x5d6e20 /
-	# render_sector_model @0x5d5ca0); it must be tied to that witness, and the
-	# static rasterizer must never route through it.
-	assert_true(device.contains("SlotShadow::get_drape_material()"),
-		"Dynamic render-slot ground shadows need the terrain drape pass.")
-	assert_true(device.contains("RenderSlot_DrawAllDrapes"),
-		"The terrain drape pass must carry the render-slot witness, not the"
-		+ " retired static overlay rationale.")
+	# ADR 0043: the drape next-pass is retired with the render-slot system —
+	# the scene sun's CSM shadows the lit terrain directly.
+	assert_false(device.contains("set_next_pass("),
+		"The lit terrain carries no shadow next-pass (CSM shadows it).")
 	var rasterizer_source := _source(
 			"res://src/terrain/terrain_static_shadow_rasterizer.cpp")
 	assert_false(rasterizer_source.contains("slot_shadow_drape"),
@@ -220,8 +214,8 @@ func test_capture_variants_control_page_shadows_without_a_static_shadow_map() ->
 	var device_header := _source(
 		"res://src/terrain/terrain_tile_cache_device.h")
 	var world := _source("res://game/world/game_world.gd")
-	var session := _source(
-		"res://probes/render/shadow_attribution_capture_session.gd")
+	var controls := _source(
+		"res://probes/render/render_capture_shadow_controls.gd")
 	assert_true(terrain_header.contains("set_static_terrain_shadow_enabled("))
 	assert_true(terrain_header.contains(
 			"set_suppressed_static_shadow_bms_ids("))
@@ -232,14 +226,12 @@ func test_capture_variants_control_page_shadows_without_a_static_shadow_map() ->
 		"Attach, enable, and suppression changes must retire stale page bindings.")
 	assert_false(world.contains("StaticSunShadow"),
 		"The page provider makes the old static DirectionalLight shadow map obsolete.")
-	assert_true(session.contains(
-			"_terrain.set_static_terrain_shadow_enabled("),
+	assert_true(controls.contains(
+			"terrain.set_static_terrain_shadow_enabled("),
 		"Canonical shadows_off must disable page-composed silhouettes too.")
-	assert_true(session.contains(
-			"_terrain.set_suppressed_static_shadow_bms_ids("),
-		"Attribution suppression must filter the provider's typed BMS sources.")
-	assert_false(session.contains('get_node_or_null(\n\t\t\t"StaticSunShadow")'),
-		"Capture state must not depend on the retired static shadow-map node.")
+	assert_true(controls.contains(
+			"terrain.set_suppressed_static_shadow_bms_ids("),
+		"Variant suppression must filter the provider's typed BMS sources.")
 
 
 func test_device_frame_diagnostics_are_bounded_and_capacity_is_explicit() -> void:

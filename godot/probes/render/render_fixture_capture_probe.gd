@@ -11,13 +11,11 @@ extends GameProbe
 ## (the capture resolution is the window's).
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const ShadowAttributionCaptureSession := preload(
-		"res://probes/render/shadow_attribution_capture_session.gd")
+const RenderCaptureShadowControls := preload(
+		"res://probes/render/render_capture_shadow_controls.gd")
 
 const DEFAULT_CATALOG := "res://../docs/render/render-fixtures-v1.json"
 const DEFAULT_OUTPUT_ROOT := "res://../.scratch/golden/render/fixtures"
-const DEFAULT_SHADOW_ATTRIBUTION_OUTPUT_ROOT := \
-		"res://../.scratch/golden/render/shadow-attribution"
 # Upper bound on the frames spent waiting for the first-person weapon's idle
 # clip to reach its hold before the pose is frozen (see _settle_viewmodel_hold).
 const VIEWMODEL_HOLD_MAX_FRAMES := 240
@@ -162,10 +160,7 @@ func _capture(ctx: ProbeContext) -> void:
 
 	var output_root := String(ctx.args.get("output_dir", "")).strip_edges()
 	if output_root.is_empty():
-		output_root = (DEFAULT_SHADOW_ATTRIBUTION_OUTPUT_ROOT \
-				if String(capture_profile.id) \
-						== RenderFixtureContract.CAPTURE_PROFILE_SHADOW_ATTRIBUTION \
-				else DEFAULT_OUTPUT_ROOT).path_join(fixture_id)
+		output_root = DEFAULT_OUTPUT_ROOT.path_join(fixture_id)
 	var output_abs := ProjectSettings.globalize_path(output_root).simplify_path()
 	var scratch_abs := ProjectSettings.globalize_path(
 			"res://../.scratch").simplify_path()
@@ -348,7 +343,7 @@ func _capture(ctx: ProbeContext) -> void:
 					float(minute_value), int(capture_settings.get(
 							"visibility_settle_frames", 3)), comparison_contract):
 			return
-		_shadow_capture_session = ShadowAttributionCaptureSession.new()
+		_shadow_capture_session = RenderCaptureShadowControls.new()
 		var shadow_session_error: Error = _shadow_capture_session.begin(
 				_world, viewport)
 		if shadow_session_error != OK:
@@ -356,20 +351,6 @@ func _capture(ctx: ProbeContext) -> void:
 					fixture_id, error_string(shadow_session_error)])
 			return
 		var presentation_mode := String(capture_mode.mode)
-		if bool(capture_profile.scratch_only) \
-				and not (manifest["capture"] as Dictionary).has(
-						"shadow_attribution"):
-			var dynamic_caster_inventory: Array = []
-			for caster in _shadow_capture_session.get_dynamic_caster_inventory():
-				dynamic_caster_inventory.append(caster.to_json_value())
-			var static_caster_inventory: Array = []
-			for caster in _shadow_capture_session.get_static_caster_inventory():
-				static_caster_inventory.append(caster.to_json_value())
-			(manifest["capture"] as Dictionary)["shadow_attribution"] = {
-				"scratch_only": true,
-				"dynamic_caster_inventory": dynamic_caster_inventory,
-				"static_caster_inventory": static_caster_inventory,
-			}
 		var capture_rows: Array = manifest["artifacts"]
 		for variant in capture_profile.variants:
 			var variant_error: Error = _shadow_capture_session.apply_variant(variant)
@@ -438,8 +419,6 @@ func _capture(ctx: ProbeContext) -> void:
 				_fail(String(row.error))
 				return
 			row["variant"] = String(variant.id)
-			if bool(capture_profile.scratch_only):
-				row["shadow_attribution"] = realized_variant
 			capture_rows.append(row)
 		_shadow_capture_session.finish()
 		_shadow_capture_session = null

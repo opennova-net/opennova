@@ -60,7 +60,6 @@
     X(MODEL_ORDER_BOUNDS, "alpha-strip ordering + changed model bounds") \
     X(MODEL_AWAKE_MODELS, "VALUE: models visited by the shared awake walk") \
     X(MODEL_RENDERABLE_MODELS, "VALUE: visited models currently camera-submitted") \
-    X(WORLD_SLOT_SHADOW, "render-slot ground-shadow planning/publication") \
     X(WORLD_PARTICLES, "EffectWorld render-frame publication") \
     X(WORLD_CLEAR, "viewport clear-color publication") \
     X(WORLD_ENV_CUBE, "environment-cube update submission") \
@@ -210,11 +209,6 @@
     X(RENDER_WATER_DRAWS, "VALUE: water mirror visible-pass draw calls") \
     X(RENDER_Q3_OBJECTS, "VALUE: focused Q3 compiler draw commands") \
     X(RENDER_Q3_DRAWS, "VALUE: focused Q3 RenderingDevice draw calls") \
-    X(RENDER_SLOT_OBJECTS, "VALUE: slot capture surfaces compiled (the RD pass's draw commands)") \
-    X(RENDER_SLOT_DRAWS, "VALUE: slot capture RenderingDevice draw calls") \
-    X(RENDER_SLOT_CAPTURES, "VALUE: slot captures drawn this frame (armed by the retail cadence)") \
-    X(RENDER_SLOT_PACKED_VERTICES, "VALUE: vertices packed for the slot captures this frame (a stable frame packs 0)") \
-    X(RENDER_SLOT_SKINNED, "VALUE: skinned slot capture commands (GPU bone palette)") \
     /* end */
 
 namespace opennova::devtools {

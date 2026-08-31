@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <limits>
 
-#include "env/slot_shadow.h"
 #include "terrain/terrain.h"
 
 #include <godot_cpp/classes/engine.hpp>
@@ -232,32 +231,14 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 
 void ObjectModel::set_shadow_caster_enabled(bool p_enabled) {
 	set_shadow_caster_layer_enabled(LAYER_DYNAMIC_SHADOW_CASTER, p_enabled);
-	// Dynamic casters join the render-slot ground-shadow group the SlotShadow
-	// device plans over [orig: slot registration at entity init —
-	// Entity_InitFromModel, see docs/render/render-lighting-re.md].
-	update_slot_shadow_group();
 }
 
-void ObjectModel::update_slot_shadow_group() {
-	if (!is_inside_tree()) {
-		return;
-	}
-	const StringName &group = SlotShadow::caster_group();
-	if (is_shadow_caster_enabled()) {
-		if (!is_in_group(group)) {
-			add_to_group(group);
-		}
-	} else if (is_in_group(group)) {
-		remove_from_group(group);
-	}
+void ObjectModel::set_model_sphere_radius(float p_radius) {
+	model_sphere_radius_ = p_radius > 0.0f ? p_radius : 0.0f;
 }
 
-void ObjectModel::set_slot_shadow_person(bool p_person) {
-	slot_shadow_person_ = p_person;
-}
-
-bool ObjectModel::is_slot_shadow_person() const {
-	return slot_shadow_person_;
+float ObjectModel::get_model_sphere_radius() const {
+	return model_sphere_radius_;
 }
 
 void ObjectModel::set_entity_uniform_scale_q16(int64_t p_scale_q16) {
@@ -276,44 +257,6 @@ Transform3D ObjectModel::compose_entity_transform(const Basis &p_basis,
 	}
 	const float scale = static_cast<float>(entity_uniform_scale_q16_) / 65536.0f;
 	return Transform3D(p_basis.scaled(Vector3(scale, scale, scale)), p_origin);
-}
-
-void ObjectModel::set_shadow_bound_radii(float p_model_sphere, float p_entity_bound) {
-	model_sphere_radius_ = p_model_sphere > 0.0f ? p_model_sphere : 0.0f;
-	entity_bound_radius_ = p_entity_bound > 0.0f ? p_entity_bound : 0.0f;
-}
-
-float ObjectModel::get_model_sphere_radius() const {
-	return model_sphere_radius_;
-}
-
-float ObjectModel::get_entity_bound_radius() const {
-	return entity_bound_radius_;
-}
-
-void ObjectModel::set_slot_shadow_capture_with(ObjectModel *p_owner) {
-	slot_shadow_capture_with_ = p_owner != nullptr
-			? ObjectID(p_owner->get_instance_id())
-			: ObjectID();
-}
-
-ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
-	return Object::cast_to<ObjectModel>(
-			ObjectDB::get_instance(slot_shadow_capture_with_));
-}
-
-void ObjectModel::set_slot_shadow_decal(const String &p_texture,
-		const Vector4 &p_dims) {
-	slot_shadow_decal_texture_ = p_texture;
-	slot_shadow_decal_dims_ = p_dims;
-}
-
-String ObjectModel::get_slot_shadow_decal_texture() const {
-	return slot_shadow_decal_texture_;
-}
-
-Vector4 ObjectModel::get_slot_shadow_decal_dims() const {
-	return slot_shadow_decal_dims_;
 }
 
 bool ObjectModel::is_shadow_caster_enabled() const {
@@ -392,9 +335,7 @@ GeometryInstance3D::ShadowCastingSetting ObjectModel::presentation_cast_setting(
 }
 
 void ObjectModel::apply_presentation_layer_below(Node *p_root) {
-	// The render-slot captures walk this subtree's geometry directly
-	// (SlotShadow's RenderingDevice pass); no capture channel rides the
-	// layer mask, so a policy write is the whole mask.
+	// A policy write is the whole mask (no side channel rides the layers).
 	for (int i = 0; i < p_root->get_child_count(); ++i) {
 		Node *child = p_root->get_child(i);
 		VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(child);
@@ -1141,7 +1082,6 @@ void ObjectModel::_notification(int p_what) {
 		if (object_data_.is_valid()) {
 			rebuild();
 		}
-		update_slot_shadow_group();
 	} else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
 		// Becoming visible re-derives the render-side state (PANM pose, light
 		// draw parts, order) that stayed stale while hidden.
@@ -1570,10 +1510,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_entity_uniform_scale_q16);
 	ClassDB::bind_method(D_METHOD("compose_entity_transform", "basis", "origin"),
 			&ObjectModel::compose_entity_transform);
-	ClassDB::bind_method(D_METHOD("set_shadow_bound_radii", "model_sphere", "entity_bound"),
-			&ObjectModel::set_shadow_bound_radii);
-	ClassDB::bind_method(D_METHOD("set_slot_shadow_capture_with", "owner"),
-			&ObjectModel::set_slot_shadow_capture_with);
 	ClassDB::bind_method(
 			D_METHOD("set_entity_lighting_context", "effect_scale", "interior_lerp",
 					"interior_daylight"),

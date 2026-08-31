@@ -309,13 +309,24 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 		const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
 				opennova::renderer::describe_object_shader_pipeline(
 						opennova::renderer::build_object_shader_key(classification));
-		const opennova::renderer::ObjectProjectedShadowPolicy projected_policy =
-				opennova::renderer::object_projected_shadow_policy(pipeline.technique);
+		// The retired renderer PROJSHAD policy table, inlined for this bake's
+		// material decode until the static system's own retirement (ADR 0043):
+		// no pass for tracer/flag/glass, material-blend for the _FFP families,
+		// opaque for every file effect
+		// [orig: _FFP.fx TBoringFFPProjShad; the 15 shipped declarations].
+		using Technique = opennova::renderer::ObjectShaderTechnique;
+		const Technique technique = pipeline.technique;
+		const bool no_pass = technique == Technique::Unsupported ||
+				technique == Technique::Tracer || technique == Technique::Flag ||
+				technique == Technique::GlassFixed ||
+				technique == Technique::GlassSkinned;
+		const bool material_blend = technique == Technique::Fixed ||
+				technique == Technique::FixedDetail ||
+				technique == Technique::SelfLit ||
+				technique == Technique::SelfLitDetail;
 		TerrainStaticShadowResolvedMaterial material;
-		material.casts_projected_shadow = projected_policy !=
-				opennova::renderer::ObjectProjectedShadowPolicy::NoPass;
-		material.blend = projected_policy ==
-				opennova::renderer::ObjectProjectedShadowPolicy::MaterialBlend
+		material.casts_projected_shadow = !no_pass;
+		material.blend = material_blend
 				? map_blend(classification.blend)
 				: TerrainStaticShadowBlend::Opaque;
 		material.alpha_test_enabled =
@@ -331,8 +342,7 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 		const bool needs_alpha = material.alpha_test_enabled ||
 				material.blend == TerrainStaticShadowBlend::Alpha;
 		material.samples_diffuse_alpha = needs_alpha;
-		material.uses_material_alpha = needs_alpha && projected_policy ==
-				opennova::renderer::ObjectProjectedShadowPolicy::MaterialBlend;
+		material.uses_material_alpha = needs_alpha && material_blend;
 		material.runtime_material = mat;
 		const int anim_frames = static_cast<int>(mat.animation.num_frames);
 		const int anim_type = static_cast<int>(mat.animation.animation_type);

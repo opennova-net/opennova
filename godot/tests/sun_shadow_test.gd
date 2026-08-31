@@ -15,9 +15,9 @@ func _environment_at(time_of_day: int, node_name: String) -> MissionEnvironment:
 func _expected_emission(environment: MissionEnvironment) -> Vector3:
 	# get_light_direction already serves the Godot-axes surface->light vector
 	# (the env_axes x/z swap of the raw getter tuple IS the (g2, g1, g0)
-	# reduction); the entity shadow projection then clamps the vertical
-	# component to 0.25 and negates — renderer::slot_projection_direction,
-	# which SunShadow applies in every projection mode
+	# reduction); the shadow projection then clamps the vertical component to
+	# 0.25 and negates — renderer::sun_shadow_direction, which SunShadow
+	# applies (ADR 0043 keeps this one law from the retired slot system)
 	# [orig: Environment_GetLightDirectionFloat @ 0x57d870;
 	#  render_shadow_pass @ 0x5d7b70].
 	var g := environment.get_light_direction()
@@ -37,12 +37,12 @@ func test_ready_applies_preassigned_environment_direction_synchronously() -> voi
 	light.set_environment_node(environment)
 	add_child_autofree(light)
 
-	assert_true(light.visible, "a loaded environment enables the shadow light during ready")
+	assert_true(light.visible, "a loaded environment enables the sun during ready")
 	_assert_tracks_environment(light, environment,
-			"ready publishes the first shadow direction before a process frame")
+			"ready publishes the first sun direction before a process frame")
 
 
-func test_environment_assignment_reorients_a_warm_shadow_synchronously() -> void:
+func test_environment_assignment_reorients_a_warm_sun_synchronously() -> void:
 	var day_environment := _environment_at(1200, "DayEnvironment")
 	var night_environment := _environment_at(2200, "NightEnvironment")
 	var light := SunShadow.new()
@@ -62,7 +62,34 @@ func test_environment_assignment_reorients_a_warm_shadow_synchronously() -> void
 			"a warm environment rebind takes effect before another process frame")
 
 
-func test_game_world_composes_only_the_live_shadow_map_during_ready() -> void:
+func test_the_sun_is_a_real_casting_light() -> void:
+	# ADR 0043: one scene sun — real color at MODULATE2X energy, one CSM every
+	# lit receiver takes, caster/cull masks wide open (per-instance cast
+	# settings gate casting).
+	var environment := _environment_at(1200, "CastingEnvironment")
+	var light := SunShadow.new()
+	light.set_environment_node(environment)
+	add_child_autofree(light)
+	light.advance_frame(0.0)
+
+	assert_true(light.shadow_enabled, "the sun casts the scene's one CSM")
+	assert_eq(light.directional_shadow_mode,
+			DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS)
+	assert_almost_eq(light.light_energy, 2.0, 0.001,
+			"MODULATE2X carried as light energy")
+	assert_almost_eq(light.light_specular, 0.0, 0.001,
+			"fixed-function materials had no sun specular")
+	assert_eq(light.light_cull_mask, 0xFFFFFFFF,
+			"every lit receiver takes the sun")
+	assert_eq(light.shadow_caster_mask, 0xFFFFFFFF,
+			"per-instance cast settings gate casting, not the mask")
+	var values: EnvLightValues = environment.get_light_state().get_values()
+	assert_true(Vector3(light.light_color.r, light.light_color.g,
+			light.light_color.b).is_equal_approx(values.get_dir_color()),
+			"the env light block's active dir color is the sun color")
+
+
+func test_game_world_composes_one_live_sun_during_ready() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	var data := EnvFile.new()
@@ -72,36 +99,19 @@ func test_game_world_composes_only_the_live_shadow_map_during_ready() -> void:
 	environment.environment_data = data
 	add_child_autofree(world)
 
-	var live_shadow := world.get_node("SunShadow") as SunShadow
-	_assert_tracks_environment(live_shadow, world.get_environment_node(),
-			"GameWorld's live shadow is aligned when production composition returns")
-	assert_false(world.has_node("StaticSunShadow"),
-		"Static terrain silhouettes are page alpha; no second shadow map remains live.")
-
-
-
-func test_dynamic_projection_separates_live_casters_from_world_receivers() -> void:
-	var light: SunShadow = SunShadow.new()
-	light.projection_mode = SunShadow.PROJECTION_DYNAMIC
-	add_child_autofree(light)
-
-	# ADR 0043: the sun carries real color/energy for the lit scene, so every
-	# lit receiver takes it.
-	assert_eq(light.light_cull_mask, 0xFFFFFFFF,
-			"the real sun lights every lit receiver (ADR 0043)")
-	assert_eq(light.shadow_caster_mask,
-			Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER)
-	assert_false(light.shadow_enabled,
-			"the SlotShadow capture pipeline owns the entity ground shadows;"
-			+ " the dynamic light keeps the direction law without a shadow map")
+	var live_sun := world.get_node("SunShadow") as SunShadow
+	_assert_tracks_environment(live_sun, world.get_environment_node(),
+			"GameWorld's sun is aligned when production composition returns")
+	assert_false(world.has_node("SlotShadow"),
+		"the render-slot capture device is retired (ADR 0043)")
 
 
 func test_low_sun_projection_clamps_the_vertical_component() -> void:
 	# 06:30 sunrise: the getter tuple's vertical is ~0.1227, well under the
-	# witnessed 0.25 slot-projection clamp, so retail projects entity shadows
-	# as if the sun sat at ~14.5 deg — silhouettes never stretch past 4x
-	# height [orig: render_shadow_pass @ 0x5d7b70 clamp; same constant as the
-	# static collector @ 0x60d33f..0x60d341].
+	# witnessed 0.25 projection clamp, so shadows project as if the sun sat at
+	# ~14.5 deg — silhouettes never stretch past 4x height [orig:
+	# render_shadow_pass @ 0x5d7b70 clamp; same constant as the static
+	# collector @ 0x60d33f..0x60d341].
 	var environment := _environment_at(630, "SunriseEnvironment")
 	var light := SunShadow.new()
 	light.set_environment_node(environment)
@@ -126,16 +136,3 @@ func test_high_sun_projection_uses_the_unclamped_tuple() -> void:
 	var emission := -light.global_basis.z.normalized()
 	assert_true(emission.is_equal_approx(-Vector3(g.x, g.y, g.z).normalized()),
 			"above the clamp the presentation reduction (g2,g1,g0) passes through")
-
-
-func test_static_projection_only_reaches_the_reimpl_terrain_receiver() -> void:
-	var light: SunShadow = SunShadow.new()
-	light.projection_mode = SunShadow.PROJECTION_STATIC_TERRAIN
-	add_child_autofree(light)
-
-	assert_eq(light.light_cull_mask,
-			Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER)
-	assert_eq(light.shadow_caster_mask,
-			Water.VISUAL_LAYER_STATIC_SHADOW_CASTER)
-	assert_true(light.shadow_enabled,
-			"the static-terrain bake device still renders a shadow map")

@@ -744,16 +744,13 @@ RID FoliageDispatcher::_ensure_draw_instance(
     server->instance_set_scenario(instance, draw_scenario_);
     ++frame_stats_.backend_scenario_writes;
     server->instance_set_transform(instance, Transform3D());
-    // Fresh audit: attrib shadow (0x02) is parsed but never read, and both
-    // foliage tiers are excluded from retail shadow-caster passes. They still
-    // receive static model projection through retail's composed tile cache.
+    // ADR 0043 (retail had no foliage shadows at all): foliage casts into
+    // the scene sun's CSM. The card materials are transparent-class today,
+    // which Godot's shadow pass skips — an opaque alpha-scissor shadow
+    // variant lands with the polish stage; the ON setting is the declared
+    // intent and costs nothing until then.
     server->instance_geometry_set_cast_shadows_setting(
-        instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
-    // The generic attenuation catcher cannot reproduce foliage-card alpha,
-    // two-sided rasterization, and wind deformation without dark rectangles.
-    // Keep foliage on the ordinary world layer until the retail tile-cache
-    // compositor (which supplies the alpha-lighting term before this pass) is
-    // ported.
+        instance, RenderingServer::SHADOW_CASTING_SETTING_ON);
     server->instance_set_layer_mask(instance, 1u << 0);
     server->instance_set_extra_visibility_margin(instance, 8.0f);
     frame_stats_.backend_configuration_writes += 4;

@@ -65,9 +65,7 @@ public:
 		VISUAL_LAYER_SHADOW_CASTER_MASK = VISUAL_LAYER_STATIC_SHADOW_CASTER |
 				VISUAL_LAYER_DYNAMIC_SHADOW_CASTER,
 		// The mirror camera's above-water mask; a below-water view adds
-		// WORLD_NO_MIRROR back (retail collects unfiltered there). The
-		// render-slot captures draw through SlotShadow's RenderingDevice pass
-		// and reserve no visual layer.
+		// WORLD_NO_MIRROR back (retail collects unfiltered there).
 		REFLECTION_CULL_MASK = 0xFFFFF &
 				~(VISUAL_LAYER_WATER | VISUAL_LAYER_VIEWMODEL |
 						VISUAL_LAYER_FP_BODY_SHADOW_ONLY |

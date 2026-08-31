@@ -207,8 +207,8 @@ func test_provenance_contract_covers_every_shader_resource_once() -> void:
 	var provenance: Dictionary = _load_json(PROVENANCE_PATH)
 	var sources := _shader_sources()
 	assert_eq(int(provenance["schema"]), 2)
-	assert_eq(sources.size(), 193, "the runtime inventory must stay closed")
-	assert_eq(int(provenance["resource_count"]), 193)
+	assert_eq(sources.size(), 192, "the runtime inventory must stay closed")
+	assert_eq(int(provenance["resource_count"]), 192)
 	var ids := {}
 	for contract in provenance["contracts"]:
 		ids[contract["id"]] = true
@@ -458,61 +458,6 @@ func test_every_wrapper_matches_manifest_topology() -> void:
 				var unshaded_island: bool = String(policy["blend"]) == "add" and not is_glass
 				assert_eq(source.contains("unshaded"), unshaded_island,
 						"%s unshaded island state (ADR 0043)" % label)
-
-
-# --- slot capture / projected shadow ------------------------------------
-
-
-func test_projshadow_lives_in_the_slot_capture_pass_not_the_wrappers() -> void:
-	# The PROJSHAD pass is SlotShadow's RenderingDevice pass over the engine's
-	# per-technique coverage and blend tables: the object wrappers carry no
-	# capture branch, no camera-mask signature and no per-technique PROJSHAD
-	# define any more, Water reserves no capture layers, and the pass keeps
-	# the retail clear, the 4x resolve, the PRE_OPAQUE ordering and the
-	# blended alpha-blend variant.
-	var shared := _normalized(OBJECT_ROOT.path_join("shared.gdshaderinc"))
-	assert_false(shared.contains("NOVA_SLOT_CAPTURE_LAYER_MASK"),
-			"the twelve-layer capture signature is retired")
-	assert_false(shared.contains("obj_is_slot_shadow_capture"),
-			"no wrapper predicate selects a capture camera")
-	var includes: Array = []
-	_collect(OBJECT_ROOT, PackedStringArray([".gdshaderinc"]), includes)
-	for path in includes:
-		var source := _normalized(path)
-		var label := String(path).get_file()
-		assert_false(source.contains("obj_proj_shadow_coverage"),
-				"%s carries no PROJSHAD coverage sampler" % label)
-		assert_false(source.contains("OBJ_PROJSHAD_"),
-				"%s carries no PROJSHAD define" % label)
-		assert_false(source.contains("opennova_slot_shadow_capture"),
-				"%s reintroduced the per-fragment capture-eye gate" % label)
-	var wrappers: Array = []
-	_collect(OBJECT_ROOT, PackedStringArray([".gdshader"]), wrappers)
-	assert_gt(wrappers.size(), 100)
-	for path in wrappers:
-		assert_false(_read(path).contains("OBJ_PROJSHAD_"),
-				"%s carries no PROJSHAD define" % String(path).get_file())
-	var water_header := _read(_repo_path("godot/src/env/water.h"))
-	assert_false(water_header.contains("VISUAL_LAYER_SLOT_CAPTURE_MASK"),
-			"Water reserves no capture layers")
-
-	var slot_shadow := _read(_repo_path("godot/src/env/slot_shadow.cpp"))
-	assert_false(slot_shadow.contains("set_cull_mask("),
-			"SlotShadow aims no camera at capture layers")
-	assert_false(slot_shadow.contains("SubViewport"),
-			"SlotShadow owns no capture viewport chain")
-	assert_true(slot_shadow.contains("SlotCaptureRequest"),
-			"SlotShadow publishes typed capture requests")
-	var adapter := _read(_repo_path("godot/src/render/slot_capture_adapter.cpp"))
-	for token in ["kSlotCaptureClearArgb",
-			"RenderingDevice::TEXTURE_SAMPLES_4",
-			"texture_resolve_multisample(",
-			"EFFECT_CALLBACK_TYPE_PRE_OPAQUE",
-			"object_projected_shadow_coverage(",
-			"object_projected_shadow_policy(",
-			"frag_color = vec4(0.0, 0.0, 0.0, alpha);",
-			"BLEND_FACTOR_SRC_ALPHA", "BLEND_FACTOR_ONE_MINUS_SRC_ALPHA"]:
-		assert_true(adapter.contains(token), token)
 
 
 # The transitive-source hash golden retired with ADR 0043: shader sources are

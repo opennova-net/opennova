@@ -94,11 +94,11 @@ static func _build_definitions() -> Array[ProbeDef]:
 				}, ["id", "source_commit", "gdextension_binary"], true, false, 1_800_000),
 		ProbeDef.make("render_swatch",
 				"The render material swatch A/B driver (ADR 0023) on an off-screen stage: "
-				+ "capture, composite, lighting, channels, clip, projshadow, matchterrain, "
+				+ "capture, composite, lighting, channels, clip, matchterrain, "
 				+ "glow, calibrate, or compare two grid captures (a, b; headless is fine).",
 				RENDER + "render_swatch_probe.gd", {
 					"mode": { "type": "string", "enum": ["capture", "composite", "lighting", "channels",
-							"clip", "projshadow", "matchterrain", "glow", "compare", "calibrate"] },
+							"clip", "matchterrain", "glow", "compare", "calibrate"] },
 					"output_dir": { "type": "string", "default": "" },
 					"prefix": { "type": "string", "default": "" },
 					"a": { "type": "string", "default": "" },

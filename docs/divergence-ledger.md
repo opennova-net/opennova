@@ -1073,17 +1073,13 @@ terrain/corona legs, and the refuted max-quality foliage premise close
 D-RLIT-4 as of 2026-08-23.
 
 Minted 2026-08-30 (the PR #595 slot RenderingDevice pass review):
-**D-RLIT-10** -> `PERMANENT` (class C, register below) — the slot silhouette
-capture's eye and depth band. Retail renders the entity at the origin of
-its rotation-only look-at view under an ortho band 0.2..5000.2
-`[orig: setup_shadow_cascade_matrices @ 0x58d300; Entity_RenderWithLODCallback
-@ 0x5d6ef0]`, a band that as read starts in front of the entity's own
-origin; the shell's RD pass backs its eye off along −forward so the whole
-model sphere lies inside its clip band. The orthographic silhouette is the
-same image either way (render-lighting-re.md D-RLIT-10). The capture view
-basis itself is witnessed and shared: `renderer::direction_look_at`
-(`build_direction_look_at_matrix @ 0x612c90`) serves the slot view and the
-addeweap attachment frame from one engine home.
+**D-RLIT-10** — the slot silhouette capture's eye and depth band. CLOSED AS
+MOOT 2026-08-31: its subject system (the render-slot silhouette capture) is
+deleted under [ADR 0043](adr/0043-modern-presentation-witnessed-intent.md)
+(register row MP-3); the scene sun's CSM replaced the capture pipeline. The
+capture view basis it shared stays witnessed and engine-owned:
+`renderer::direction_look_at` (`build_direction_look_at_matrix @ 0x612c90`)
+still serves the addeweap attachment frame.
 
 Corrected 2026-08-22 by the exhaustive highest-quality technique audit: the
 earlier D-RLIT-4 statement that all object point lighting is vertex-rate was
@@ -1265,7 +1261,6 @@ one-line rationale for why porting it would be *wrong*.
 | D-VFS-9 | `<exp>L.pff` mounted as our persistent primary vs retail's secondary slot 0 | Effective lookup precedence is identical; the slot bookkeeping is reimpl-internal. |
 | D-VFS-10 | Mounted loose lookups reject rooted/drive-qualified/ADS/`..` queries and symlink escapes, unlike retail's unchecked path construction [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] | A resource name must stay inside the explicitly mounted root. Preserving legitimate relative, case-insensitive lookup while refusing arbitrary local-file access is a reimpl safety boundary, not a gameplay fidelity loss. |
 | D-VFS-11 | Under `--loose-root` (ONED's Run OpenNova loose action) the game shell falls back to the selected loose directory when the fixed boot table opens zero archives, where retail aborts subsystem initialization [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check @ 0x4a6f44] | Running the exact selected loose file set is the managed launch's purpose ([ADR 0037](adr/0037-oned-runs-game-data.md)); every unflagged standalone run keeps the retail fatal, so shipped-game behavior is unchanged. |
-| D-RLIT-10 | The render-slot silhouette capture's RenderingDevice eye backs off the caster center along −forward (two model-sphere diameters plus 2 u) with a 0.05..(2·eye + r) ortho depth band, where retail renders the entity at the origin of its rotation-only look-at view under the 0.2..5000.2 band `[orig: setup_shadow_cascade_matrices @ 0x58d300; Entity_RenderWithLODCallback @ 0x5d6ef0]` | An orthographic silhouette is invariant under a translation along the view axis, so the shell's eye reproduces the witnessed image exactly; the literal band's near plane sits 0.2 u in front of the entity's origin and the retail render state that admits the entity's near half is unwitnessed, so porting it as read would clip half of every caster ([render/render-lighting-re.md](render/render-lighting-re.md) D-RLIT-10). |
 | D-RORD-2 | Retail's per-frame CPU quicksort of opaque batch entries (alpha-test bit → 256-unit depth slabs → effect index → fine depth) vs the reimpl renderer's internal opaque ordering | The sort is a device-era draw-call-batching strategy, not observable behavior for z-buffered opaques; reproducing it would fight the Godot pipeline for zero visual difference. The key semantics survive as T1-pinned functions (`renderer::opaque_sort_key`) so any future implementation that CAN consume them has the witnessed spec ([render/render-order-re.md](render/render-order-re.md)). |
 | D-CTRL-4 | The `hudcolor` action (catalog row 76, dispatch code 10) stays reachable by rebinding, while on the stock keymap the default F6 cycles `huddetail` exactly as retail's first-match shadowing does (`Input_HandleActionBinding_0 @0x4e0420`) | Retail leaves `hudcolor` dormant only as a keymap accident of two rows sharing F6; both rows are live dispatcher arms, so hiding the row would reproduce the accident rather than the mechanism, and the default-key behavior already matches |
 | D-MNU-18 | Menu wheel scrolling — a reimpl addition; retail menus never wheel-scroll (the witnessed pipeline dead-ends: `Menu_ShellMouseCallback @ 0x54b8c6` collapses both tick masks into event 0x100000B that no handler consumes, `Menu_InGameMouseCallback @ 0x568760` drops ticks) | Parity here means discarding wheel input a modern player expects at a witnessed dead end. The addition stays inside the witnessed dispatch shape (one notch = one CScrollWnd arrow step; open popup exclusive, else the front-most row owner under the point) and the CONTROLS remap capture keeps first claim, so the wheel stays bindable. Ratified 2026-08-12 (maintainer). |
@@ -1300,6 +1295,7 @@ deletes their system, never ahead of it.
 
 | ID | Replaced technique | Modern equivalent / intent preserved |
 |---|---|---|
+| MP-3 | The render-slot entity ground-shadow system: the 256-slot table, per-entity silhouette render-to-texture (12 RD captures, 24 terrain drape patches, priority scoring, anchor march, refresh cadence, person clip steepening, authored blob-decal fallback, the PROJSHAD black-silhouette pass tables) (`render_shadow_pass @ 0x5d7b70` family) | The scene sun's one 4-split CSM: every caster (entities, vehicles, items, the FP body, foliage when its opaque shadow variant lands) into one atlas, every lit surface receives — including surfaces retail could never shadow. The witnessed 0.25-vertical-clamp projection law survives as `renderer::sun_shadow_direction`; the caster-admission `.def` flags keep gating who casts. Closes the open 03TR low-sun drape defect and D-RLIT-10 as moot |
 | MP-2 | The hand-written fixed-function object surface lighting: the per-vertex `clamp01(ambient + dir·N.L + hemisphere deltas)` MODULATE2X fold (`Lighting_SetHemisphereD3DLights @ 0x5d8cb0`), the DOT3/Phong pixel families with the `gsys_phong` lookup and `SelfShadowMult=10` horizon term, the environment-cube approximation, the per-shader device fog, and the vertex-diffuse coverage source | The 25 technique families are LIT materials: the authored facts (textures, normal maps, Phong lobes, ReflectColor, SELFLUM gain, alpha tests, UV transforms) fill an `ObjSurface` (albedo/normal/roughness/specular/emission) and Godot's pipeline lights it — sun + hemisphere-sky ambient + clustered omnis + Environment fog; self-lit is EMISSION, glass/mirrors are metals on the scene reflection source; additive wrappers and postmultiply stay unshaded emissive islands with the retail fade-to-black fog; the interior daylight lerp survives as an ambient factor |
 | MP-1 | The EffectWorld per-draw light delivery: the 64-cap collect, the owner/interior group gate, the 3-per-strip select (`collect_render_objects_for_batch @ 0x5d9226`), instance-uniform + static RGBAF-atlas shader delivery, and the terrain projected-texture pass (`Light_SetupTerrainProjectedPass @ 0x5AA830`) | Real `OmniLight3D` nodes under Forward+ clustering, synced per frame from the witnessed pool (spawn lifecycle, LGHT owner policy, flicker ring, color/blend/gain folds all intact in `renderer::LightScene`); light range bounds the owned/interior bleed the group gate used to scope |
 

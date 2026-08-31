@@ -97,7 +97,6 @@ var _sun_shadow: SunShadow
 # True once the env presenters' own _process is off and this world advances
 # them from render_environment_nodes_frame (the render diagnostics report it).
 var _env_presenters_world_driven := false
-var _slot_shadow: SlotShadow
 var _terrain_data: TerrainData
 var _resource_root: ResourceRoot
 var _mission_tile_info: TerrainTileInfo
@@ -312,23 +311,12 @@ func _ready() -> void:
 			# The detail sway phase reads the weather oscillator's ring slot 0
 			# (retail Env_WaveOscRing[0] in Foliage_SetupVertexShaderConstants).
 			_dispatcher.set_weather(_weather)
+	# ADR 0043: the one scene sun — real color/energy and the CSM every lit
+	# receiver takes (the render-slot capture/drape system is retired).
 	_sun_shadow = SunShadow.new()
 	_sun_shadow.name = "SunShadow"
-	_sun_shadow.projection_mode = SunShadow.PROJECTION_DYNAMIC
 	add_child(_sun_shadow)
 	_sun_shadow.set_environment_node(_env)
-	# The render-slot entity ground shadows: the per-slot silhouette capture
-	# device + the terrain drape publisher (retail's per-entity RT pipeline —
-	# engine/runtime/renderer/render_slot_shadow.h carries the witness map).
-	_slot_shadow = SlotShadow.new()
-	_slot_shadow.name = "SlotShadow"
-	# The highest selectable retail profile is SHADOWQUALITY=3. Detail 4 is an
-	# internal oversample tier (1024px slot 0 and all slots every frame), not the
-	# shipped maximum; profile 3 uses 512px captures and retail's half-rate
-	# stagger for non-player slots.
-	_slot_shadow.set_shadow_detail(3)
-	add_child(_slot_shadow)
-	_slot_shadow.set_environment_node(_env)
 	# The retained water renderer starts dormant until a successful load chooses
 	# its runtime mode. In particular, do not let an authored scene height make
 	# initial/menu frames look underwater.
@@ -1156,11 +1144,6 @@ func _load_terrain(trn_path: String) -> bool:
 	_terrain.tile_info_override = _mission_tile_info
 	_terrain_data = data
 	_terrain.terrain_data = data
-	if _slot_shadow != null:
-		# The shadow anchor march probes this terrain through the engine's
-		# Terrain_GetHeightAtPosition port (the cite lives with the native
-		# SlotShadow planner, godot/src/env/slot_shadow.cpp).
-		_slot_shadow.set_terrain_data(data)
 	_terrain.build()
 	if _water != null:
 		_water.terrain_data = data
@@ -1408,10 +1391,6 @@ func sample_iris_frame() -> void:
 
 func render_sun_veil_frame() -> void:
 	_device_frame.render_sun_veil_frame()
-
-
-func render_slot_shadow_frame() -> void:
-	_device_frame.render_slot_shadow_frame()
 
 
 func render_environment_cube_frame() -> void:

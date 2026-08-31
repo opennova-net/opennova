@@ -118,12 +118,6 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	leg_start = _begin_leg()
 	_world.sync_framefx_frame()
 	_end_leg(FrameStats.WORLD_FRAMEFX, leg_start)
-	# The render-slot ground shadows plan against the light select published
-	# above and stamp the model subtrees the material frame just rebuilt
-	# (ex-self-clocked SlotShadow _process, which ran after the whole frame).
-	leg_start = _begin_leg()
-	_world.render_slot_shadow_frame()
-	_end_leg(FrameStats.WORLD_SLOT_SHADOW, leg_start)
 	leg_start = _begin_leg()
 	_world.render_particle_frame()
 	_end_leg(FrameStats.WORLD_PARTICLES, leg_start)

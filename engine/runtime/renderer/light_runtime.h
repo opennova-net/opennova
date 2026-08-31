@@ -131,6 +131,17 @@ std::array<float, 3> ff_vertex_light(const EntityLightingUniforms &u,
 // 1x (MODULATE, unlit — the OSCAP_VIEW_FADE path).
 inline constexpr float kFFModulate2x = 2.0f;
 
+// The sun shadow-projection direction (ADR 0043: the one law kept from the
+// retired render-slot shadow system — the scene sun's CSM projects along it):
+// vertical component clamped to >= 0.25, then all three components negated
+// into the light->surface form, so a grazing sun never stretches a shadow
+// past 4x height [orig: render_shadow_pass @ 0x5d7bdc..0x5d7c30 — `if
+// (y < 0.25) y = 0.25`, then negate x/y/z into RenderSlot_DefaultLightDir*].
+// Input is the surface->light sun tuple with y vertical; the result is NOT
+// normalized (retail stores the clamped-negated tuple raw).
+std::array<float, 3> sun_shadow_direction(
+		const std::array<float, 3> &sun_surface_to_light);
+
 // The per-entity sun-visibility factor: 3 raycasts toward the light, each
 // blocked ray steps 4 -> 3 -> 2 -> 1, result * 0.25 (so 1.0 fully sunlit,
 // floor 0.25 under full cover). Multiplies DirLightColor via the render-state

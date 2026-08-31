@@ -8,7 +8,7 @@ extends GameProbe
 ##   composite   the DRAW-ORDER scenes (water bracket, sky ladder)
 ##   lighting    the object light-response matrix (RenderSwatchLightingModes)
 ##   channels    material-channel ownership (RenderSwatchLightingModes)
-##   clip / projshadow / matchterrain / glow   the auxiliary passes (RenderSwatchPassModes)
+##   clip / matchterrain / glow   the auxiliary passes (RenderSwatchPassModes)
 ##   compare     diff two grid captures exactly (headless is fine)
 ##   calibrate   the gamma-framebuffer proof: 256/256 terminal bytes, the blend domain
 ## POLICY (ADR 0023): baselines live under .scratch/golden/render/ (machine-
@@ -22,7 +22,7 @@ const WINDOW_SIZE := Vector2i(1280, 1024)
 const CELL_WORLD := 2.4
 const GRID_COLS := 10
 const RENDER_MODES := ["capture", "composite", "lighting", "channels", "clip",
-		"projshadow", "matchterrain", "glow", "calibrate"]
+		"matchterrain", "glow", "calibrate"]
 
 # Curated variants per tag: name, material_flags, emissive_type, glass, alpha byte.
 const VARIANTS: Array = [
@@ -70,8 +70,6 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			await RenderSwatchLightingModes.new(ctx, _stage, _sink).channel_mode(out_dir, prefix)
 		"clip":
 			await RenderSwatchPassModes.new(ctx, _stage, _sink).clip_mode(out_dir, prefix)
-		"projshadow":
-			await RenderSwatchPassModes.new(ctx, _stage, _sink).projshadow_mode(out_dir, prefix)
 		"matchterrain":
 			await RenderSwatchPassModes.new(ctx, _stage, _sink).matchterrain_mode(out_dir, prefix)
 		"glow":

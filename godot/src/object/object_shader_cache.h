@@ -39,9 +39,6 @@ public:
 			int32_t is_glass_flag,
 			int32_t alpha_test_byte);
 	// The PROJSHAD coverage source of a classified key's technique, as the
-	// pipeline manifest token (engine object_projected_shadow_coverage): what
-	// the render-slot capture samples for that material.
-	String projected_shadow_coverage_for_key(int32_t key) const;
 
 	// Every shader tag in the canonical runtime renderer descriptor table, in table
 	// order. Lets tooling (the render swatch probe, material pickers) iterate

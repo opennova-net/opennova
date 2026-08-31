@@ -285,32 +285,6 @@ func test_retail_effect_inventory_is_internally_consistent() -> void:
 			"the selected NORMAL declarations project onto exactly the runtime techniques")
 
 
-func test_projected_shadow_state_contracts_cover_every_technique() -> void:
-	var pipeline: Dictionary = _load_json(MANIFEST_PATH)
-	var techniques := _technique_enums(pipeline)
-	var states: Dictionary = pipeline["projected_shadow_state_contracts"]
-	assert_eq(_sorted_keys(states), techniques)
-	var material_blend := {}
-	var no_pass := {}
-	var opaque := 0
-	for name in states:
-		match String(states[name]):
-			"material_blend":
-				material_blend[name] = true
-			"no_pass":
-				no_pass[name] = true
-			"opaque":
-				opaque += 1
-	assert_eq(_sorted_keys(material_blend), ["Fixed", "FixedDetail", "SelfLit", "SelfLitDetail"])
-	assert_eq(_sorted_keys(no_pass), ["Flag", "GlassFixed", "GlassSkinned", "Tracer"])
-	assert_eq(opaque, 16)
-	# The decoded-pass half (sixteen PROJSHAD bodies, the _FFP RSAlphaMode
-	# quartet, the fifteen hard-opaque files, the skinned post/base pins) needed
-	# the retail corpus; the material record keeps the one textual witness.
-	var material_re := _read_repo("docs/render/render-material-re.md")
-	assert_true(material_re.contains("Tracer.fx exposes only TECHNIQUE_NORMAL"))
-
-
 func test_every_reachable_object_technique_is_audited_and_its_wrapper_keeps_the_contract() -> void:
 	var provenance: Dictionary = _load_json(PROVENANCE_PATH)
 	var validation: Dictionary = _load_json(_repo_path(
@@ -441,7 +415,7 @@ func test_every_retail_pass_class_has_a_runtime_or_exclusion_disposition() -> vo
 
 	var expected_scopes := {
 		"TECHNIQUE_NORMAL": "live",
-		"TECHNIQUE_PROJSHAD": "live",
+		"TECHNIQUE_PROJSHAD": "superseded_adr_0043",
 		"TECHNIQUE_DEPTHMASK": "unreachable",
 		"TECHNIQUE_CLIP": "live",
 		"TECHNIQUE_GLOW": "live",
@@ -450,7 +424,7 @@ func test_every_retail_pass_class_has_a_runtime_or_exclusion_disposition() -> vo
 	}
 	var expected_probes := {
 		"TECHNIQUE_NORMAL": ["lighting", "channels"],
-		"TECHNIQUE_PROJSHAD": ["projshadow"],
+		"TECHNIQUE_PROJSHAD": [],
 		"TECHNIQUE_DEPTHMASK": [],
 		"TECHNIQUE_CLIP": ["clip"],
 		"TECHNIQUE_GLOW": ["glow"],
@@ -498,8 +472,7 @@ func test_every_retail_pass_class_has_a_runtime_or_exclusion_disposition() -> vo
 
 	var techniques := _technique_enums(pipeline)
 	assert_eq(techniques.size(), 24)
-	for contract_name in ["projected_shadow_contracts", "projected_shadow_state_contracts",
-			"match_terrain_contracts", "glow_contracts"]:
+	for contract_name in ["match_terrain_contracts", "glow_contracts"]:
 		assert_eq(_sorted_keys(pipeline[contract_name]), techniques, contract_name)
 	var with_clip := {}
 	for entry in pipeline["techniques"]:
@@ -786,13 +759,6 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 	var nvg: String = sources.get("nvg_view.gdshader", "")
 	assert_true(nvg.contains("display_encode_gamma"))
 	assert_true(nvg.contains("display_decode_gamma"))
-
-	var drape: String = sources.get("slot_shadow_drape.gdshader", "")
-	assert_true(drape.contains("scene_output(factor)"))
-	assert_false(drape.contains("pow(factor"))
-	assert_true(drape.contains("vec3 ambient = vec3(1.0) - (1.0 - fade) * u_slot_term[i].rgb;"))
-	assert_true(drape.contains("vec3 shadowed = s.rgb + ambient;"))
-	assert_false(drape.contains("u_slot_term[i].rgb * s.a"))
 
 	var color_contract: String = sources.get("color.gdshaderinc", "")
 	_contains_all(color_contract, ["scene_output", "scene_input",

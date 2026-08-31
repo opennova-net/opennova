@@ -17,7 +17,6 @@ const CaptureVariant := preload(
 		"res://probes/render/render_capture_variant.gd")
 
 const CAPTURE_PROFILE_CANONICAL := "canonical"
-const CAPTURE_PROFILE_SHADOW_ATTRIBUTION := "shadow_attribution"
 const DEFAULT_CAPTURE_SIZE := Vector2i(1600, 900)
 const MIN_CAPTURE_AXIS := 320
 const MAX_CAPTURE_AXIS := 4096
@@ -245,23 +244,6 @@ static func _normalized_suppressed_bms_ids(value: Variant) -> Dictionary:
 	return {"valid": true, "ids": ids}
 
 
-static func shadow_attribution_variants(
-		suppressed_static_ids: PackedInt32Array = PackedInt32Array()) -> Array:
-	var variants: Array = [
-		CaptureVariant.new("both_shadow_systems", 0, true, true),
-		CaptureVariant.new("dynamic_shadow_only", 0, true, false),
-		CaptureVariant.new("static_terrain_shadow_only", 0, false, true),
-	]
-	if not suppressed_static_ids.is_empty():
-		variants.append(CaptureVariant.new(
-				"static_without_selected", 0, false, true,
-				PackedInt32Array(), suppressed_static_ids))
-	variants.append(CaptureVariant.new("dynamic_without_bms58", 0, true, false,
-			PackedInt32Array([58])))
-	variants.append(CaptureVariant.new("shadows_off", 0, false, false))
-	return variants
-
-
 static func parse_static_shadow_suppression(value: String) -> Dictionary:
 	var selected: Dictionary = {}
 	for token_value: String in value.split(",", false):
@@ -285,16 +267,6 @@ static func select_capture_profile(
 			"id": CAPTURE_PROFILE_CANONICAL,
 			"scratch_only": false,
 			"variants": capture_variants(),
-		}
-	if requested == CAPTURE_PROFILE_SHADOW_ATTRIBUTION:
-		var suppression := parse_static_shadow_suppression(
-				suppressed_static_value)
-		if suppression.has("error"):
-			return suppression
-		return {
-			"id": CAPTURE_PROFILE_SHADOW_ATTRIBUTION,
-			"scratch_only": true,
-			"variants": shadow_attribution_variants(suppression.ids),
 		}
 	return {"error": "unknown NOVA_RENDER_CAPTURE_PROFILE '%s'" % requested}
 

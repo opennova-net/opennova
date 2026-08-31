@@ -20,7 +20,6 @@
 #include <godot_cpp/variant/color.hpp>
 
 #include <runtime/renderer/light_scene.h>
-#include <runtime/renderer/render_slot_shadow.h>
 
 namespace godot {
 
@@ -93,15 +92,6 @@ public:
 	// the law; this only unpacks the words for Image::create_from_data.
 	static int corona_texture_size();
 	static PackedByteArray corona_texture_rgba8();
-
-	// The render-slot dominant-light query (SlotShadow's per-slot pick):
-	// entity-centered collect + group-gated params, no D3D-fill boost
-	// [orig: RenderSlot_UpdateEntityLight @0x5d6a30, see
-	// docs/render/render-lighting-re.md]. A C++ seam (not script-bound):
-	// fills r_out with the planner's typed inputs (positions in Godot world).
-	void slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
-			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
-			std::vector<opennova::renderer::SlotPointLight> &r_out);
 
 	// The corona billboard rows for this frame [orig:
 	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on

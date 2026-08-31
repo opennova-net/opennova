@@ -93,8 +93,8 @@
       "bounded_residuals": []
     },
     "TECHNIQUE_PROJSHAD": {
-      "scope": "live",
-      "parity_status": "matching",
+      "scope": "superseded_adr_0043",
+      "parity_status": "matching_with_bounded_residuals",
       "disposition": "ported_d3d12_raster_validated",
       "declaration_count": 16,
       "pass_declaration_count": 16,
@@ -125,80 +125,17 @@
       ],
       "runtime_evidence": [
         {
-          "path": "engine/runtime/renderer/object_shader_template.cpp",
+          "path": "engine/runtime/renderer/light_runtime.cpp",
           "tokens": [
-            "object_projected_shadow_policy",
-            "ObjectProjectedShadowPolicy::MaterialBlend",
-            "ObjectProjectedShadowPolicy::Opaque",
-            "ObjectProjectedShadowPolicy::NoPass"
-          ]
-        },
-        {
-          "path": "engine/runtime/terrain/terrain_static_shadow_geometry.cpp",
-          "tokens": [
-            "casts_projected_shadow",
-            "vsSkinPostBlackT1",
-            "CalcSkinWorldPosAndNormal"
-          ]
-        },
-        {
-          "path": "engine/runtime/terrain/terrain_static_shadow_raster.cpp",
-          "tokens": [
-            "depth_buffer",
-            "triangle.two_sided",
-            "CULLMODE CCW"
-          ]
-        },
-        {
-          "path": "godot/src/render/q3_geometry_cache.cpp",
-          "tokens": [
-            "skin_channels",
-            "transform_uv(uv2)"
-          ]
-        },
-        {
-          "path": "engine/runtime/renderer/object_shader_template.cpp",
-          "tokens": [
-            "object_projected_shadow_coverage",
-            "ObjectProjectedShadowCoverage::DiffuseAlphaFfp",
-            "ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp",
-            "ObjectProjectedShadowCoverage::DiffuseAlpha"
-          ]
-        },
-        {
-          "path": "godot/src/render/slot_capture_adapter.cpp",
-          "tokens": [
-            "EFFECT_CALLBACK_TYPE_PRE_OPAQUE",
-            "kSlotCaptureClearArgb",
-            "RenderingDevice::TEXTURE_SAMPLES_4",
-            "texture_resolve_multisample(",
-            "frag_color = vec4(0.0, 0.0, 0.0, alpha);",
-            "BLEND_FACTOR_SRC_ALPHA"
-          ]
-        },
-        {
-          "path": "godot/src/env/slot_shadow.cpp",
-          "tokens": [
-            "silhouette_capture_basis",
-            "kSilhouetteCaptureNear",
-            "SlotCaptureRequest"
-          ]
-        },
-        {
-          "path": "godot/probes/render/render_swatch_pass_modes.gd",
-          "tokens": [
-            "SlotShadow.new()",
-            "get_capture_image(",
-            "slot_no_pass_surfaces",
-            "slot_blended_commands",
-            "invented a PROJSHAD pass"
+            "sun_shadow_direction",
+            "y = 0.25"
           ]
         }
       ],
-      "raster_probes": [
-        "projshadow"
-      ],
-      "bounded_residuals": []
+      "raster_probes": [],
+      "bounded_residuals": [
+        "ADR-0043"
+      ]
     },
     "TECHNIQUE_DEPTHMASK": {
       "scope": "unreachable",

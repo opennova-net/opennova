@@ -25,7 +25,6 @@
 #include "env/environment_cube_capture.h"
 #include "mission/mission_object_placer.h"
 #include "env/sky_dome.h"
-#include "env/slot_shadow.h"
 #include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
@@ -144,8 +143,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);
-	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
-	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);
 	GDREGISTER_CLASS(Precipitation);
 	GDREGISTER_CLASS(WeatherCore);
@@ -248,7 +245,6 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	}
 
 	ObjectShaderCache::destroy_singleton();
-	SlotShadow::cleanup_statics();
 	Q3SourceRegistry::cleanup_statics();
 }
 

@@ -159,7 +159,6 @@ void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("configure_material_for_key", "material", "key"), &ObjectShaderCache::configure_material_for_key);
 	ClassDB::bind_method(D_METHOD("classify", "shader_tag", "material_flags", "emissive_type", "is_glass_flag", "alpha_test_byte"), &ObjectShaderCache::classify);
 	ClassDB::bind_method(D_METHOD("get_known_shader_tags"), &ObjectShaderCache::get_known_shader_tags);
-	ClassDB::bind_method(D_METHOD("projected_shadow_coverage_for_key", "key"), &ObjectShaderCache::projected_shadow_coverage_for_key);
 	ClassDB::bind_method(D_METHOD("clear"), &ObjectShaderCache::clear);
 	ClassDB::bind_method(D_METHOD("set_water_plane", "height", "camera_above"), &ObjectShaderCache::set_water_plane);
 	ClassDB::bind_method(D_METHOD("clear_water_plane"), &ObjectShaderCache::clear_water_plane);
@@ -243,14 +242,6 @@ int32_t ObjectShaderCache::classify(const String &shader_tag,
 			static_cast<uint8_t>(is_glass_flag),
 			static_cast<uint8_t>(alpha_test_byte));
 	return static_cast<int32_t>(opennova::renderer::build_object_shader_key(cls));
-}
-
-String ObjectShaderCache::projected_shadow_coverage_for_key(int32_t key) const {
-	const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
-			opennova::renderer::describe_object_shader_pipeline(
-					static_cast<opennova::renderer::ObjectShaderKey>(key));
-	return String(opennova::renderer::object_projected_shadow_coverage_name(
-			opennova::renderer::object_projected_shadow_coverage(pipeline.technique)));
 }
 
 void ObjectShaderCache::set_water_plane(float height, bool camera_above) {

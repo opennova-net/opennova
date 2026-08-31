@@ -293,6 +293,7 @@ private:
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
 	bool od_has_doc_ = false;
+	float model_sphere_radius_ = 0.0f;  // gpm[5]; 0 = unstamped
 	// Dense part-index -> Node3D array + the PANM revision this model last
 	// applied (stays a Godot Array: ObjectData::apply_panm_to_nodes takes
 	// it directly).
@@ -341,16 +342,10 @@ private:
 	bool interior_section_lighting_ = false;
 	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
-	bool slot_shadow_person_ = false;
 	// Effective entity/model scale in signed Q16.16. Zero is retail's sentinel
 	// for an ordinary 1.0 matrix; kept on the model so every present writer
 	// composes the same scale instead of overwriting it with a pose transform.
 	int32_t entity_uniform_scale_q16_ = 0;
-	float model_sphere_radius_ = 0.0f;  // gpm[5]; 0 = unstamped
-	float entity_bound_radius_ = 0.0f;  // entity+0; 0 = none (no collision block)
-	ObjectID slot_shadow_capture_with_;
-	String slot_shadow_decal_texture_;
-	Vector4 slot_shadow_decal_dims_;
 	bool mirror_reflected_ = false;
 	PresentationLayer presentation_layer_ = PRESENTATION_LAYER_WORLD;
 	bool on_screen_ = true;
@@ -478,8 +473,7 @@ private:
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
 	// The stored layer/cast decision for one surface instance (auxiliary
 	// postmultiply draws never cast under the world policy) and the walk that
-	// re-applies it to every instance below `p_root`, preserving the
-	// render-slot capture bits SlotShadow stamps beside it.
+	// re-applies it to every instance below `p_root`.
 	uint32_t presentation_layer_mask(bool p_auxiliary) const;
 	GeometryInstance3D::ShadowCastingSetting presentation_cast_setting(
 			bool p_auxiliary) const;
@@ -569,7 +563,7 @@ private:
 	void rebuild_scene();
 	void build_skeleton();
 	// Bumped by every rebuild_scene(): a device that stamps this subtree's
-	// instances (SlotShadow's capture layers) re-stamps when it moves.
+	// instances re-stamps when it moves.
 	uint32_t scene_build_serial_ = 0;
 
 public:
@@ -614,42 +608,18 @@ public:
 	bool is_shadow_caster_enabled() const;
 	void set_static_shadow_caster_enabled(bool p_enabled);
 	bool is_static_shadow_caster_enabled() const;
-	// Render-slot ground-shadow profile (SlotShadow consumes): person-type
-	// casters are the depth-clip stage's steepened class (that stage owns the
-	// 4x, not the drape — render_slot_shadow.h); vehicles may author an
-	// items.def `shadow` blob decal fallback [orig: itemdef type 3 / the
-	// +0xA0 decal, see docs/render/render-lighting-re.md]. dims = (w, l, ox, oy).
-	void set_slot_shadow_person(bool p_person);
-	bool is_slot_shadow_person() const;
+	// The .3di header's origin sphere (gpm[5]), stamped by the placer: the
+	// authored-LOD projection radius [orig: Entity_InitFromModel @0x40dc30
+	// reads gpm[5]]. 0 = unstamped (falls back to the render bounds).
+	void set_model_sphere_radius(float p_radius);
+	float get_model_sphere_radius() const;
 	void set_entity_uniform_scale_q16(int64_t p_scale_q16);
 	int64_t get_entity_uniform_scale_q16() const;
 	// Compose a renderer-owned entity pose with the effective authored scale.
 	// All native and GDScript presentation owners use this one operation.
 	Transform3D compose_entity_transform(const Basis &p_basis,
 			const Vector3 &p_origin) const;
-	// The two radii retail's shadow slot reads, world units, stamped by the
-	// placer from the .3di: the MODEL SPHERE (the header's origin sphere,
-	// gpm[5] — simassets model_bound_radius_from_3di) sizes the silhouette
-	// capture extent and the depth clip; the ENTITY BOUND (entity+0: that
-	// sphere raised to the husk model's, + the 0x1000 pad, written only for a
-	// model with a collision block) sizes the slot lod/patch and the light
-	// query [orig: Entity_InitFromModel @0x40dc30; RenderSlot_AllocSlot
-	// @0x5d5773 reads entity+0; RenderSlot_RenderEntityAndChildren
-	// @0x5d7835 reads gpm[5]; see docs/render/render-lighting-re.md]. A model
-	// sphere of 0 = unstamped (SlotShadow falls back to the render bounds).
-	void set_shadow_bound_radii(float p_model_sphere, float p_entity_bound);
-	float get_model_sphere_radius() const;
-	float get_entity_bound_radius() const;
-	// Capture-with link: this model renders into ANOTHER caster's slot
-	// (retail renders held weapons and mounted/standing children inside the
-	// parent entity's slot RT — the RenderSlot_RenderEntityAndChildren
 	// child walk); it never takes a slot of its own.
-	void set_slot_shadow_capture_with(ObjectModel *p_owner);
-	ObjectModel *get_slot_shadow_capture_with() const;
-	void set_slot_shadow_decal(const String &p_texture, const Vector4 &p_dims);
-	String get_slot_shadow_decal_texture() const;
-	Vector4 get_slot_shadow_decal_dims() const;
-	void update_slot_shadow_group();
 	void set_entity_lighting_context(float p_effect_scale, bool p_interior_lerp,
 			float p_interior_daylight);
 	void set_interior_section_light_transfer(float p_daylight);
