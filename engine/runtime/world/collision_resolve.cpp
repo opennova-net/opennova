@@ -106,6 +106,9 @@ int32_t CollisionWorld::resolve_vehicle_hull(World &world, EntityHandle source,
         out_force[0] -= res.force[0];
         out_force[1] -= res.force[1];
         severity = 3;
+        if (contact_debug_enabled_)
+            contact_debug_record(ContactDebugKind::kVehicleHull, world.logic_tick,
+                                 ch, pos, 0xFF);
     }
     return severity;
 }
@@ -373,6 +376,11 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     dbg_last_contact = ch; // debug-card tap
                     if (const Entity *ce = world.registry.get(ch))
                         dbg_last_contact_item = ce->item_id;
+                    // Dev capture, pass 0 only so the relaxation passes never
+                    // double-count one contact.
+                    if (contact_debug_enabled_ && pass == 0)
+                        contact_debug_record(ContactDebugKind::kMoveContact, tick,
+                                             ch, pos, 0xFF);
                     int32_t f[3] = {res.force[0], res.force[1], res.force[2]};
                     if (f[2] < 0) {
                         if (abs32(f[0]) + abs32(f[1]) < abs32(f[2])) {

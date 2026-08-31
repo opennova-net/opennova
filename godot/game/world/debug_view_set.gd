@@ -310,6 +310,12 @@ func is_particle_debug() -> bool:
 
 func _refresh_collision_debug() -> void:
 	_remove_debug_view(COLLISION_DEBUG_NAME)
+	# The contact ring that flashes the drawn boxes arms with the view (and on
+	# the on_loaded re-apply: a fresh sim starts disarmed), the ray-recording
+	# contract; the F3 Physics window can flip capture independently after.
+	var sim: Simulation = _world.get_sim() if is_instance_valid(_world) else null
+	if sim != null and is_instance_valid(sim):
+		sim.set_contact_debug_capture(_collision_debug)
 	if not _collision_debug:
 		return
 	var view := CollisionDebugView.new()
@@ -317,6 +323,12 @@ func _refresh_collision_debug() -> void:
 	view.name = COLLISION_DEBUG_NAME
 	_world.add_child(view)
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
+
+
+## The collision overlay's live drawable count (0 while the view is down) --
+## the F3 Physics window's "boxes drawn" line, mirrored through the bridge.
+func collision_debug_drawable_count() -> int:
+	return _collision_view.get_debug_drawable_count() if _view_live(_collision_view) else 0
 
 
 # --- Round debug view (the dev tools' "Show round trails") -------------------

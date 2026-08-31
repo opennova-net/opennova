@@ -3,11 +3,10 @@
 // Entity Properties windows (closed by default, opened by a world pick; the
 // pushed-record/typed-request channel, ADR 0042 d6), the Weapon window (the
 // DCC-style ACTION editor over the equipped weapon's FSM), the Environment,
-// AI and Rays windows (all closed by default, opened from the "Windows"
-// menu), and ImGui's demo window (the docking/multi-viewport smoke test).
-// Debug builds only
-// (OPENNOVA_DEVTOOLS); the release GDExtension flavour compiles this out and
-// its DevTools node is inert.
+// AI, Rays and Physics windows (all closed by default, opened from the
+// "Windows" menu), and ImGui's demo window (the docking/multi-viewport smoke
+// test). Debug builds only (OPENNOVA_DEVTOOLS); the release GDExtension
+// flavour compiles this out and its DevTools node is inert.
 #pragma once
 
 #include <runtime/devtools/frame_stats_board.h>
@@ -26,6 +25,7 @@ class WeaponWindow;
 class EnvironmentWindow;
 class AiWindow;
 class RaysWindow;
+class PhysicsWindow;
 enum class GameInputMode;
 enum class GameWindowRequest;
 struct DebugRequest;
@@ -40,6 +40,8 @@ struct AiDebugSnapshot;
 struct AiViewRequest;
 struct RaysRequest;
 struct RaysSnapshot;
+struct PhysicsRequest;
+struct PhysicsSnapshot;
 
 class GameDevTools {
 public:
@@ -61,6 +63,8 @@ public:
 	const AiWindow &ai_window() const { return *ai_window_; }
 	RaysWindow &rays_window() { return *rays_window_; }
 	const RaysWindow &rays_window() const { return *rays_window_; }
+	PhysicsWindow &physics_window() { return *physics_window_; }
+	const PhysicsWindow &physics_window() const { return *physics_window_; }
 	void set_game_viewport(GameViewport *viewport);
 	void set_game_play_available(bool available);
 	void set_game_spectator_state(bool available, bool active);
@@ -129,6 +133,15 @@ public:
 	bool needs_rays_snapshot() const;
 	bool take_rays_request(RaysRequest &request);
 
+	// The Physics window's record/request channel (the same shape): the
+	// contact capture's counts + the shell's collision-view state pushed by
+	// value on its cadence while shown, and the typed mask/clear/capture
+	// requests drained into the Simulation contact-debug seam (the view
+	// toggle out to the shell that owns the 3D view).
+	void set_physics_snapshot(const PhysicsSnapshot &snapshot);
+	bool needs_physics_snapshot() const;
+	bool take_physics_request(PhysicsRequest &request);
+
 private:
 	ImGuiPass pass_;
 	GameWindow *game_window_ = nullptr;
@@ -139,6 +152,7 @@ private:
 	EnvironmentWindow *environment_window_ = nullptr;
 	AiWindow *ai_window_ = nullptr;
 	RaysWindow *rays_window_ = nullptr;
+	PhysicsWindow *physics_window_ = nullptr;
 };
 
 }  // namespace opennova::devtools

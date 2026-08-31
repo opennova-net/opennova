@@ -577,7 +577,7 @@ func _register_option_rows() -> void:
 			func(world: GameWorld) -> bool: return world.is_user_point_debug(),
 			func(world: GameWorld, on: bool) -> void: world.set_user_point_debug(on))
 	_world_check(&"show_collision", &"Rounds", "Show collision",
-			"Draw object collision volumes (type-colored boxes) and the player's capsule test points over the world.",
+			"Draw object collision volumes (type-colored boxes) and the player's capsule test points over the world. The toggle also arms the engine contact capture, so recent hits and contacts flash their boxes; the F3 Physics window filters the flash kinds and shows per-kind counts.",
 			func(world: GameWorld) -> bool: return world.is_collision_debug(),
 			func(world: GameWorld, on: bool) -> void: world.set_collision_debug(on))
 	_world_check(&"hide_foliage", &"Terrain", "Hide foliage",

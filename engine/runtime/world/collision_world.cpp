@@ -356,6 +356,53 @@ void CollisionWorld::ray_debug_record(RayDebugCategory fallback, uint32_t tick,
     ++ring.total;
 }
 
+const char *CollisionWorld::contact_debug_kind_name(ContactDebugKind kind) {
+    switch (kind) {
+    case ContactDebugKind::kProjectileHit: return "Projectile hit";
+    case ContactDebugKind::kKnifeHit: return "Knife hit";
+    case ContactDebugKind::kMoveContact: return "Move contact";
+    case ContactDebugKind::kVehicleHull: return "Vehicle hull";
+    case ContactDebugKind::kTerrainHit: return "Terrain hit";
+    case ContactDebugKind::kWaterHit: return "Water hit";
+    case ContactDebugKind::kCount: break;
+    }
+    return "?";
+}
+
+void CollisionWorld::set_contact_debug_enabled(bool enabled) {
+    if (contact_debug_enabled_ == enabled) return;
+    contact_debug_enabled_ = enabled;
+    contact_debug_ring_.next = 0;
+    contact_debug_ring_.count = 0;
+    contact_debug_ring_.total = 0;
+    for (uint64_t &total : contact_debug_ring_.kind_totals) total = 0;
+    if (enabled) {
+        contact_debug_ring_.events.assign(kContactDebugCap, ContactDebugEvent{});
+    } else {
+        // Free on disable: the ray-capture footprint rationale.
+        contact_debug_ring_.events.clear();
+        contact_debug_ring_.events.shrink_to_fit();
+    }
+}
+
+void CollisionWorld::contact_debug_record(ContactDebugKind kind, uint32_t tick,
+                                          EntityHandle target, const int32_t pos[3],
+                                          uint8_t hit_class) const {
+    if (!contact_debug_enabled_) return;
+    ContactDebugRing &ring = contact_debug_ring_;
+    if (ring.events.empty()) return; // enable raced a mid-flight query
+    ContactDebugEvent &event = ring.events[static_cast<size_t>(ring.next)];
+    event.pos = FixedVec3{pos[0], pos[1], pos[2]};
+    event.tick = tick;
+    event.target = target.valid() ? target.packed : 0xFFFF;
+    event.kind = static_cast<uint8_t>(kind);
+    event.hit_class = hit_class;
+    ring.next = (ring.next + 1) % kContactDebugCap;
+    if (ring.count < kContactDebugCap) ++ring.count;
+    ++ring.total;
+    ++ring.kind_totals[static_cast<size_t>(kind)];
+}
+
 void CollisionWorld::invalidate_trace_view(EntityHandle h) {
     if (h.valid()) trace_view_cache_.erase(h.packed);
     invalidate_stable_los_index();

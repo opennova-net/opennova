@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" path="res://game/world/game_world.tscn" id="10_world"]
 [ext_resource type="Script" path="res://game/menu_shell.gd" id="11_menu"]
 [ext_resource type="Script" path="res://game/debug/ray_view_bridge.gd" id="12_raybridge"]
+[ext_resource type="Script" path="res://game/debug/physics_view_bridge.gd" id="13_physbridge"]
 
 [node name="MainGame" type="Node3D" unique_id=1969900999]
 script = ExtResource("4_main")
@@ -13,6 +14,9 @@ script = ExtResource("4_main")
 
 [node name="RayViewBridge" type="Node" parent="."]
 script = ExtResource("12_raybridge")
+
+[node name="PhysicsViewBridge" type="Node" parent="."]
+script = ExtResource("13_physbridge")
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=1908144657]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 71.472435, 0)

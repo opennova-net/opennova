@@ -7,6 +7,7 @@
 #include <runtime/devtools/entity_properties_window.h>
 #include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/game_window.h>
+#include <runtime/devtools/physics_window.h>
 #include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/stats_window.h>
 #include <runtime/devtools/weapon_window.h>
@@ -58,6 +59,9 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	auto rays = std::make_unique<RaysWindow>();
 	rays_window_ = rays.get();
 	pass_.register_window(std::move(rays));
+	auto physics = std::make_unique<PhysicsWindow>();
+	physics_window_ = physics.get();
+	pass_.register_window(std::move(physics));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -194,6 +198,18 @@ bool GameDevTools::needs_rays_snapshot() const {
 
 bool GameDevTools::take_rays_request(RaysRequest &request) {
 	return rays_window_->take_request(request);
+}
+
+void GameDevTools::set_physics_snapshot(const PhysicsSnapshot &snapshot) {
+	physics_window_->set_snapshot(snapshot);
+}
+
+bool GameDevTools::needs_physics_snapshot() const {
+	return pass_.is_open() && physics_window_->open;
+}
+
+bool GameDevTools::take_physics_request(PhysicsRequest &request) {
+	return physics_window_->take_request(request);
 }
 
 }  // namespace opennova::devtools

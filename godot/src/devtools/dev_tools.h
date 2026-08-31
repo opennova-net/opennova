@@ -93,6 +93,13 @@ public:
 	int take_ray_view_toggle();
 	void set_ray_view_shown(bool p_shown);
 
+	// The Physics window's shell seam (the same shape): the window's "Show
+	// collision" checkbox queues a view toggle the shell drains per frame,
+	// and the shell mirrors the live toggle plus the overlay's drawable count
+	// back so the checkbox and the "boxes drawn" line stay honest.
+	int take_physics_view_toggle();
+	void set_physics_view_state(bool p_shown, int p_boxes_drawn);
+
 	// Every tool window back inside the main viewport on the next layout pass
 	// (ImGui's ini remembers a window dragged out to another monitor); the
 	// "Reset layout" menu item's seam, and what a probe asks for before it
@@ -155,6 +162,8 @@ private:
 	void push_ai_debug();
 	void apply_rays_requests();
 	void push_rays_snapshot();
+	void apply_physics_requests();
+	void push_physics_snapshot();
 	void set_game_playing_internal(bool p_playing);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
@@ -183,6 +192,10 @@ private:
 	int64_t last_rays_push_ms_ = -1;
 	bool ray_view_shown_ = false;      // the shell-mirrored show_rays state
 	int pending_ray_view_toggle_ = -1; // -1 none, else 0/1 for the shell
+	int64_t last_physics_push_ms_ = -1;
+	bool physics_view_shown_ = false;      // the shell-mirrored show_collision state
+	int physics_boxes_drawn_ = 0;          // the overlay's live drawable count
+	int pending_physics_view_toggle_ = -1; // -1 none, else 0/1 for the shell
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

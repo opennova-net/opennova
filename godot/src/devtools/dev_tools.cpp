@@ -21,6 +21,9 @@
 #include <runtime/devtools/environment_request.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
+#include <runtime/devtools/physics_request.h>
+#include <runtime/devtools/physics_snapshot.h>
+#include <runtime/devtools/physics_window.h>
 #include <runtime/devtools/rays_request.h>
 #include <runtime/devtools/rays_snapshot.h>
 #include <runtime/devtools/rays_window.h>
@@ -56,6 +59,9 @@ void DevTools::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("handle_game_escape"), &DevTools::handle_game_escape);
 	ClassDB::bind_method(D_METHOD("take_ray_view_toggle"), &DevTools::take_ray_view_toggle);
 	ClassDB::bind_method(D_METHOD("set_ray_view_shown", "shown"), &DevTools::set_ray_view_shown);
+	ClassDB::bind_method(D_METHOD("take_physics_view_toggle"), &DevTools::take_physics_view_toggle);
+	ClassDB::bind_method(D_METHOD("set_physics_view_state", "shown", "boxes_drawn"),
+			&DevTools::set_physics_view_state);
 	ClassDB::bind_method(D_METHOD("get_rendered_game_viewport_size"), &DevTools::get_rendered_game_viewport_size);
 	ClassDB::bind_method(D_METHOD("feed_stats_window", "frames", "sums", "peaks", "sample_frames"),
 			&DevTools::feed_stats_window);
@@ -144,11 +150,13 @@ void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layou
 	apply_environment_requests();
 	apply_ai_view_requests();
 	apply_rays_requests();
+	apply_physics_requests();
 	push_entity_detail(push_entity_directory());
 	push_weapon_records();
 	push_environment_snapshot();
 	push_ai_debug();
 	push_rays_snapshot();
+	push_physics_snapshot();
 	if (open_ && !tools_->pass().is_open()) {
 		// Closed from inside (Escape, the menu).
 		set_game_playing_internal(false);
@@ -337,6 +345,7 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 	last_environment_push_ms_ = -1;
 	last_ai_push_ms_ = -1;
 	last_rays_push_ms_ = -1;
+	last_physics_push_ms_ = -1;
 	// A packed handle names a slot, not an entity: the selection never crosses
 	// from one world to the next.
 	tools_->clear_entity_selection();
@@ -348,6 +357,7 @@ void DevTools::set_simulation(Simulation *p_simulation) {
 		tools_->set_environment_snapshot(opennova::devtools::EnvironmentSnapshot{});
 		tools_->set_ai_debug(opennova::devtools::AiDebugSnapshot{});
 		tools_->set_rays_snapshot(opennova::devtools::RaysSnapshot{});
+		tools_->set_physics_snapshot(opennova::devtools::PhysicsSnapshot{});
 	}
 	sync_game_spectator_state();
 }
@@ -892,6 +902,73 @@ void DevTools::set_ray_view_shown(bool p_shown) {
 	ray_view_shown_ = p_shown;
 }
 
+// Drain the Physics window's typed requests: the view toggle parks for the
+// shell (the GDScript debug-view set owns building the collision view), the
+// mask/clear/capture legs land in the Simulation contact-debug seam.
+void DevTools::apply_physics_requests() {
+	opennova::devtools::PhysicsRequest request;
+	Simulation *simulation_ = simulation();
+	while (tools_->take_physics_request(request)) {
+		using Kind = opennova::devtools::PhysicsRequest::Kind;
+		if (request.kind == Kind::SetViewShown) {
+			pending_physics_view_toggle_ = request.a != 0 ? 1 : 0;
+			continue;
+		}
+		if (simulation_ == nullptr) {
+			continue;
+		}
+		switch (request.kind) {
+			case Kind::SetKindMask:
+				simulation_->set_contact_debug_kind_mask(request.a);
+				break;
+			case Kind::Clear:
+				simulation_->clear_contact_debug();
+				break;
+			case Kind::SetCaptureEnabled:
+				simulation_->set_contact_debug_capture(request.a != 0);
+				break;
+			case Kind::SetViewShown:
+				break;
+		}
+	}
+}
+
+// Push the contact-capture record while the Physics window shows, on its
+// 0.25 s cadence: counts + capture state through
+// Simulation::native_physics_snapshot — no Variant round-trip (ADR 0042 d6).
+// The shell-mirrored view state and drawable count ride along so the
+// window's checkbox and "boxes drawn" line reflect the live overlay.
+void DevTools::push_physics_snapshot() {
+	Simulation *simulation_ = simulation();
+	if (simulation_ == nullptr || !tools_->needs_physics_snapshot()) {
+		last_physics_push_ms_ = -1;
+		return;
+	}
+	const int64_t now_ms = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+	const int64_t cadence_ms = static_cast<int64_t>(
+			opennova::devtools::PhysicsWindow::kRefreshSeconds * 1000.0);
+	if (last_physics_push_ms_ >= 0 && now_ms - last_physics_push_ms_ < cadence_ms) {
+		return;
+	}
+	last_physics_push_ms_ = now_ms;
+	opennova::devtools::PhysicsSnapshot snapshot;
+	simulation_->native_physics_snapshot(snapshot);
+	snapshot.view_shown = physics_view_shown_;
+	snapshot.boxes_drawn = physics_boxes_drawn_;
+	tools_->set_physics_snapshot(snapshot);
+}
+
+int DevTools::take_physics_view_toggle() {
+	const int pending = pending_physics_view_toggle_;
+	pending_physics_view_toggle_ = -1;
+	return pending;
+}
+
+void DevTools::set_physics_view_state(bool p_shown, int p_boxes_drawn) {
+	physics_view_shown_ = p_shown;
+	physics_boxes_drawn_ = p_boxes_drawn;
+}
+
 void DevTools::reset_layout() {
 	tools_->pass().request_layout_reset();
 }
@@ -1023,6 +1100,15 @@ bool DevTools::handle_game_escape() {
 
 int DevTools::take_ray_view_toggle() {
 	return -1;
+}
+
+int DevTools::take_physics_view_toggle() {
+	return -1;
+}
+
+void DevTools::set_physics_view_state(bool p_shown, int p_boxes_drawn) {
+	(void)p_shown;
+	(void)p_boxes_drawn;
 }
 
 void DevTools::set_ray_view_shown(bool p_shown) {

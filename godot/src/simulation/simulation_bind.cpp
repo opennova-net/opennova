@@ -480,6 +480,13 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_ray_debug_filter", "mask", "ttl_ticks"),
 	                     &Simulation::set_ray_debug_filter);
 	ClassDB::bind_method(D_METHOD("clear_ray_debug"), &Simulation::clear_ray_debug);
+	ClassDB::bind_method(D_METHOD("set_contact_debug_capture", "enabled"),
+	                     &Simulation::set_contact_debug_capture);
+	ClassDB::bind_method(D_METHOD("is_contact_debug_capture"),
+	                     &Simulation::is_contact_debug_capture);
+	ClassDB::bind_method(D_METHOD("set_contact_debug_kind_mask", "mask"),
+	                     &Simulation::set_contact_debug_kind_mask);
+	ClassDB::bind_method(D_METHOD("clear_contact_debug"), &Simulation::clear_contact_debug);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);

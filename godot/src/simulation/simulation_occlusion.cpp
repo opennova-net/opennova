@@ -733,6 +733,42 @@ Dictionary Simulation::get_collision_debug() const {
 		player["capsule_top"] = static_cast<float>(lrd.capsule_top / kFixed16);
 		player["foot_clearance"] = static_cast<float>(lrd.foot_clearance / kFixed16);
 	}
+
+	// The contact-debug hits channel the overlay flashes boxes from: stride-6
+	// [target_packed (-1 none), age_ticks, kind, x, y, z] per event, oldest ->
+	// newest, mask+TTL filtered the way the ray report walks its rings.
+	{
+		using CW = opennova::world::CollisionWorld;
+		const CW &collision = kernel_->collision;
+		const uint32_t now = kernel_->world.logic_tick;
+		out["tick"] = static_cast<int64_t>(now);
+		out["hit_stride"] = 6;
+		out["hit_ttl"] = static_cast<int64_t>(CW::kContactDebugTtlTicks);
+		PackedFloat32Array hits;
+		const CW::ContactDebugRing &ring = collision.contact_debug_ring();
+		if (ring.count > 0) {
+			const uint32_t mask = collision.contact_debug_mask();
+			int idx = (ring.next - ring.count + 2 * CW::kContactDebugCap) %
+			          CW::kContactDebugCap;
+			for (int i = 0; i < ring.count;
+					++i, idx = (idx + 1) % CW::kContactDebugCap) {
+				const CW::ContactDebugEvent &ev = ring.events[static_cast<size_t>(idx)];
+				if ((mask & (1u << ev.kind)) == 0) continue;
+				const uint32_t age = now - ev.tick; // unsigned: a wrapped stamp ages out
+				if (age > static_cast<uint32_t>(CW::kContactDebugTtlTicks)) continue;
+				const int32_t p[3] = {ev.pos.x, ev.pos.y, ev.pos.z};
+				const Vector3 pg = godot_from_fixed3(p);
+				hits.push_back(ev.target == 0xFFFF ? -1.0f
+				                                   : static_cast<float>(ev.target));
+				hits.push_back(static_cast<float>(age));
+				hits.push_back(static_cast<float>(ev.kind));
+				hits.push_back(pg.x);
+				hits.push_back(pg.y);
+				hits.push_back(pg.z);
+			}
+		}
+		out["hits"] = hits;
+	}
 	return out;
 }
 
@@ -1180,6 +1216,64 @@ bool Simulation::native_rays_snapshot(opennova::devtools::RaysSnapshot &out) con
 	for (size_t c = 0; c < rings.size(); ++c) {
 		out.categories[c].held = rings[c].count;
 		out.categories[c].total = rings[c].total;
+	}
+	return true;
+}
+
+void Simulation::set_contact_debug_capture(bool p_enabled) {
+	if (!kernel_) return;
+	kernel_->collision.set_contact_debug_enabled(p_enabled);
+}
+
+bool Simulation::is_contact_debug_capture() const {
+	return kernel_ && kernel_->collision.contact_debug_enabled();
+}
+
+void Simulation::set_contact_debug_kind_mask(int64_t p_mask) {
+	if (!kernel_ || p_mask < 0) return;
+	kernel_->collision.set_contact_debug_mask(static_cast<uint32_t>(p_mask));
+}
+
+void Simulation::clear_contact_debug() {
+	if (!kernel_) return;
+	// The enable edge clears; bounce the flag to reuse that one clear path.
+	const bool was = kernel_->collision.contact_debug_enabled();
+	kernel_->collision.set_contact_debug_enabled(false);
+	kernel_->collision.set_contact_debug_enabled(was);
+}
+
+bool Simulation::native_physics_snapshot(opennova::devtools::PhysicsSnapshot &out) const {
+	using CW = opennova::world::CollisionWorld;
+	out = opennova::devtools::PhysicsSnapshot{};
+	static_assert(opennova::devtools::kContactKindCount ==
+	              static_cast<int>(CW::ContactDebugKind::kCount));
+	for (int k = 0; k < opennova::devtools::kContactKindCount; ++k) {
+		out.kinds[k].name =
+				CW::contact_debug_kind_name(static_cast<CW::ContactDebugKind>(k));
+	}
+	if (!kernel_) return false;
+	out.valid = true;
+	out.logic_tick = kernel_->world.logic_tick;
+	out.capturing = kernel_->collision.contact_debug_enabled();
+	out.kind_mask = kernel_->collision.contact_debug_mask();
+	const CW::ContactDebugRing &ring = kernel_->collision.contact_debug_ring();
+	for (int k = 0; k < opennova::devtools::kContactKindCount; ++k) {
+		out.kinds[k].total = ring.kind_totals[static_cast<size_t>(k)];
+	}
+	// Held-per-kind and the TTL-recent count come from one walk of the ring
+	// (256 events at the 0.25 s window cadence).
+	const uint32_t now = kernel_->world.logic_tick;
+	if (ring.count > 0) {
+		int idx = (ring.next - ring.count + 2 * CW::kContactDebugCap) %
+		          CW::kContactDebugCap;
+		for (int i = 0; i < ring.count;
+				++i, idx = (idx + 1) % CW::kContactDebugCap) {
+			const CW::ContactDebugEvent &ev = ring.events[static_cast<size_t>(idx)];
+			if (ev.kind < opennova::devtools::kContactKindCount)
+				++out.kinds[ev.kind].held;
+			const uint32_t age = now - ev.tick;
+			if (age <= static_cast<uint32_t>(CW::kContactDebugTtlTicks)) ++out.recent;
+		}
 	}
 	return true;
 }

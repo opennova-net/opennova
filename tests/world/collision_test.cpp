@@ -4009,6 +4009,78 @@ void test_ray_debug_capture_is_opt_in_with_scoped_categories() {
     }
 }
 
+void test_contact_debug_capture_is_opt_in() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+    world.registry.configure_pool(2, 8);
+    world.logic_tick = 41;
+
+    Entity owner_seed;
+    owner_seed.kind = EntityKind::Organic;
+    owner_seed.position = Vec3{0.0f, 100.0f, 0.0f};
+    const EntityHandle owner = world.registry.spawn(0, owner_seed);
+    Entity static_seed;
+    static_seed.kind = EntityKind::Building;
+    static_seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    static_seed.yaw = 90;
+    static_seed.alive = true;
+    const EntityHandle statik = world.registry.spawn(2, static_seed);
+    CHECK(owner.valid() && statik.valid());
+
+    CollisionWorld collision;
+    collision.assign_entity(statik, collision.add_model(wall_triangle_model()));
+    collision.build_tick_tables(world);
+
+    using Kind = CollisionWorld::ContactDebugKind;
+    const CollisionWorld::ContactDebugRing &ring = collision.contact_debug_ring();
+
+    ProjectileTrace trace;
+    trace.owner = owner;
+    trace.start = FixedVec3{0, 0, fx(0.9)};
+    trace.end = FixedVec3{fx(12.0), 0, fx(0.9)};
+
+    // Off by default: hits record nothing, the ring holds no storage.
+    CHECK(!collision.contact_debug_enabled());
+    const ProjectileHit unrecorded = collision.trace_projectile(world, trace);
+    CHECK(unrecorded.hit_class == ProjectileHitClass::StaticEntity);
+    CHECK(ring.count == 0 && ring.total == 0 && ring.events.empty());
+
+    // Enabled: the projectile wrapper stamps the resolved outcome -- kind,
+    // tick, the hit body's handle, the hit point, its class -- and the query
+    // result is untouched (parity-neutral instrumentation).
+    collision.set_contact_debug_enabled(true);
+    const ProjectileHit recorded = collision.trace_projectile(world, trace);
+    CHECK(recorded.hit_class == unrecorded.hit_class);
+    CHECK(recorded.position_q16.x == unrecorded.position_q16.x);
+    CHECK(ring.count == 1 && ring.total == 1);
+    CHECK(ring.kind_totals[static_cast<size_t>(Kind::kProjectileHit)] == 1);
+    const CollisionWorld::ContactDebugEvent &ev = ring.events[0];
+    CHECK(ev.kind == static_cast<uint8_t>(Kind::kProjectileHit));
+    CHECK(ev.tick == 41);
+    CHECK(ev.target == statik.packed);
+    CHECK(ev.pos.x == recorded.position_q16.x &&
+          ev.pos.y == recorded.position_q16.y &&
+          ev.pos.z == recorded.position_q16.z);
+    CHECK(ev.hit_class == static_cast<uint8_t>(ProjectileHitClass::StaticEntity));
+
+    // The knife wrapper stamps its own kind.
+    (void)collision.trace_knife_impact(world, trace);
+    CHECK(ring.total == 2);
+    CHECK(ring.kind_totals[static_cast<size_t>(Kind::kKnifeHit)] == 1);
+
+    // The mask clamps to the defined kinds.
+    CHECK(collision.contact_debug_mask() == CollisionWorld::kContactDebugMaskAll);
+    collision.set_contact_debug_mask(~0u);
+    CHECK(collision.contact_debug_mask() == CollisionWorld::kContactDebugMaskAll);
+
+    // Disable is an edge: the ring clears, frees its storage, and stays silent.
+    collision.set_contact_debug_enabled(false);
+    (void)collision.trace_projectile(world, trace);
+    CHECK(ring.count == 0 && ring.total == 0 && ring.events.empty());
+    CHECK(ring.kind_totals[static_cast<size_t>(Kind::kProjectileHit)] == 0);
+}
+
 void test_projectile_dynamic_fallback_encloses_scaled_diagonal() {
     // Headless callers can attach a model without stamping entity+0's retail
     // header bound. This CFAC sits near the YZ AABB corner: max(|axis|) is 2u,
@@ -5262,6 +5334,7 @@ int main() {
     test_projectile_static_slot_signed_coordinates();
     test_projectile_trace_profile_is_opt_in_and_parity_neutral();
     test_ray_debug_capture_is_opt_in_with_scoped_categories();
+    test_contact_debug_capture_is_opt_in();
     test_projectile_dynamic_fallback_encloses_scaled_diagonal();
     test_round_equal_distance_uses_retail_pool_order();
     test_round_item_skip_mask();

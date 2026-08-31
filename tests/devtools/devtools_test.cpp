@@ -20,6 +20,8 @@
 #include <runtime/devtools/entity_properties_window.h>
 #include <runtime/devtools/stats_window.h>
 #include <formats/def/def.h>
+#include <runtime/devtools/physics_request.h>
+#include <runtime/devtools/physics_window.h>
 #include <runtime/devtools/weapon_request.h>
 #include <runtime/devtools/weapon_window.h>
 
@@ -40,6 +42,9 @@ using opennova::devtools::EntityDetailSnapshot;
 using opennova::devtools::EnvironmentRequest;
 using opennova::devtools::EnvironmentSnapshot;
 using opennova::devtools::EnvironmentWindow;
+using opennova::devtools::PhysicsRequest;
+using opennova::devtools::PhysicsSnapshot;
+using opennova::devtools::PhysicsWindow;
 using opennova::devtools::RaysRequest;
 using opennova::devtools::RaysSnapshot;
 using opennova::devtools::RaysWindow;
@@ -151,8 +156,8 @@ void test_attach_sets_docking_and_viewport_policy() {
 
 void test_game_window_is_mandatory_and_detachable() {
 	GameDevTools tools;
-	CHECK(tools.pass().window_count() == 9,
-			"Game + Stats + Entities + Entity Properties + Weapon + Environment + AI + Rays + demo registered");
+	CHECK(tools.pass().window_count() == 10,
+			"Game + Stats + Entities + Entity Properties + Weapon + Environment + AI + Rays + Physics + demo registered");
 	const opennova::devtools::Window &game = tools.pass().window(0);
 	const opennova::devtools::Window &stats = tools.pass().window(1);
 	CHECK(std::strcmp(game.title(), "Game") == 0, "Game is the first workspace window");
@@ -189,7 +194,10 @@ void test_game_window_is_mandatory_and_detachable() {
 	CHECK(std::strcmp(tools.pass().window(7).title(), "Rays") == 0,
 			"Rays registers after AI");
 	CHECK(!tools.pass().window(7).open, "the Rays window starts closed");
-	CHECK(!tools.pass().window(8).open, "the demo window starts closed");
+	CHECK(std::strcmp(tools.pass().window(8).title(), "Physics") == 0,
+			"Physics registers after Rays");
+	CHECK(!tools.pass().window(8).open, "the Physics window starts closed");
+	CHECK(!tools.pass().window(9).open, "the demo window starts closed");
 }
 
 void test_game_window_sends_responsive_integer_content_size_to_its_adapter() {
@@ -334,10 +342,10 @@ void test_layout_pass_draws_the_stats_window_and_gates_capture() {
 	FrameStatsBoard board;
 	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	tools.set_frame_stats(&board);
-	CHECK(tools.pass().window_count() == 9,
-			"Game + Stats + Entities + Entity Properties + Weapon + Environment + AI + Rays + demo registered");
+	CHECK(tools.pass().window_count() == 10,
+			"Game + Stats + Entities + Entity Properties + Weapon + Environment + AI + Rays + Physics + demo registered");
 	CHECK(tools.stats_window().open, "the Stats window opens by default");
-	CHECK(!tools.pass().window(8).open, "the demo window starts closed");
+	CHECK(!tools.pass().window(9).open, "the demo window starts closed");
 	CHECK(!board.is_capture_active(), "closed tools capture nothing");
 
 	ImGui::NewFrame();
@@ -1443,6 +1451,84 @@ void test_rays_request_queue() {
 	CHECK(!tools.take_rays_request(request), "the queue drains exactly once");
 }
 
+// The Physics window formats per-kind contact rows from the pushed record,
+// mirrors the capture/view state into its edit controls, and drops everything
+// on the visibility close.
+void test_physics_window_formats_the_pushed_record() {
+	NullBackend backend;
+	GameDevTools tools;
+	tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	tools.pass().set_open(true);
+	CHECK(!tools.needs_physics_snapshot(), "a closed Physics window needs no snapshot");
+	tools.physics_window().open = true;
+	CHECK(tools.needs_physics_snapshot(), "pass open && window open arms the feed");
+
+	PhysicsSnapshot snapshot;
+	snapshot.valid = true;
+	snapshot.logic_tick = 620;
+	snapshot.capturing = true;
+	snapshot.view_shown = true;
+	snapshot.kind_mask = 0x3F;
+	snapshot.boxes_drawn = 42;
+	snapshot.recent = 3;
+	snapshot.kinds[0].name = "Projectile hit";
+	snapshot.kinds[0].held = 12;
+	snapshot.kinds[0].total = 340;
+	snapshot.kinds[1].name = "Knife hit";
+	for (int i = 2; i < opennova::devtools::kContactKindCount; ++i) {
+		snapshot.kinds[i].name = "x";
+	}
+	tools.set_physics_snapshot(snapshot);
+
+	ImGui::NewFrame();
+	CHECK(tools.pass().draw_frame(1), "the workspace frame draws with the Physics window open");
+	ImGui::Render();
+	CHECK(ImGui::FindWindowByName("Physics") != nullptr, "the Physics window exists after a pass");
+
+	const PhysicsWindow &window = tools.physics_window();
+	CHECK(window.snapshot_valid(), "the pushed snapshot is the reading");
+	CHECK(window.row_count() == opennova::devtools::kContactKindCount,
+			"every contact kind formats a row");
+	CHECK(std::strcmp(window.row_text(0), "Projectile hit: held 12 / total 340") == 0,
+			"held rides the ring, total is the lifetime counter");
+	CHECK(std::strcmp(window.row_text(1), "Knife hit: held 0 / total 0") == 0,
+			"an idle kind row");
+
+	tools.set_physics_snapshot(PhysicsSnapshot{});
+	CHECK(!window.snapshot_valid() && window.row_count() == 0,
+			"an invalid snapshot clears the page (the world unloaded)");
+	tools.set_physics_snapshot(snapshot);
+	CHECK(window.row_count() == opennova::devtools::kContactKindCount,
+			"a re-push restores the page");
+	tools.pass().set_open(false);
+	CHECK(!tools.needs_physics_snapshot(), "closing the pass drops the need");
+	CHECK(!window.snapshot_valid(), "the visibility close drops the held snapshot");
+}
+
+// The PhysicsRequest channel: enqueue/take round-trips the typed mask, clear,
+// capture and view-toggle requests in order and drains exactly once.
+void test_physics_request_queue() {
+	GameDevTools tools;
+	PhysicsRequest request;
+	CHECK(!tools.take_physics_request(request), "fresh tools hold no physics request");
+	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetKindMask, 0x0005});
+	tools.physics_window().enqueue_request({PhysicsRequest::Kind::Clear, 0});
+	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetCaptureEnabled, 1});
+	tools.physics_window().enqueue_request({PhysicsRequest::Kind::SetViewShown, 1});
+	CHECK(tools.take_physics_request(request) &&
+					request.kind == PhysicsRequest::Kind::SetKindMask && request.a == 0x0005,
+			"the mask request round-trips first");
+	CHECK(tools.take_physics_request(request) && request.kind == PhysicsRequest::Kind::Clear,
+			"the clear request follows");
+	CHECK(tools.take_physics_request(request) &&
+					request.kind == PhysicsRequest::Kind::SetCaptureEnabled && request.a == 1,
+			"the capture arm carries its state");
+	CHECK(tools.take_physics_request(request) &&
+					request.kind == PhysicsRequest::Kind::SetViewShown && request.a == 1,
+			"the view toggle carries its state for the shell");
+	CHECK(!tools.take_physics_request(request), "the queue drains exactly once");
+}
+
 }  // namespace
 
 AiDebugSnapshot ai_snapshot() {
@@ -1668,6 +1754,8 @@ int main() {
 	test_ai_window_detail_pane_follows_the_selection();
 	test_rays_window_formats_the_pushed_record();
 	test_rays_request_queue();
+	test_physics_window_formats_the_pushed_record();
+	test_physics_request_queue();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

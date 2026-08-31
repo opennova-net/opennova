@@ -892,6 +892,53 @@ public:
         const CollisionWorld *cw_;
         bool owns_ = false;
     };
+    // Opt-in contact/hit capture (dev tooling — the F3 collision view's hit
+    // flashes and the Physics window's counts, not a ported surface): resolved
+    // per-body outcomes keyed by the touched entity, so the overlay can light
+    // the box it already draws. One ring, not per-category — hits are sparse
+    // next to rays — with per-kind lifetime totals for drop-honesty. The same
+    // cold-branch/enable-edge contract as the ray capture.
+    enum class ContactDebugKind : uint8_t {
+        kProjectileHit = 0, // trace_projectile resolved on an entity/person
+        kKnifeHit,          // trace_knife_impact resolved
+        kMoveContact,       // resolve_entity solid push-out (pass 0)
+        kVehicleHull,       // resolve_vehicle_hull wall-like push
+        kTerrainHit,        // a trace resolved on terrain (marker only)
+        kWaterHit,
+        kCount,
+    };
+    static const char *contact_debug_kind_name(ContactDebugKind kind);
+    struct ContactDebugEvent {
+        FixedVec3 pos;            // world 16.16 hit/contact point
+        uint32_t tick = 0;
+        uint16_t target = 0xFFFF; // EntityHandle.packed of the flashed body (0xFFFF none)
+        uint8_t kind = 0;         // ContactDebugKind
+        uint8_t hit_class = 0xFF; // ProjectileHitClass for the trace kinds
+    };
+    struct ContactDebugRing {
+        std::vector<ContactDebugEvent> events; // cap once enabled, empty when off
+        int32_t next = 0;
+        int32_t count = 0;   // saturates at the cap
+        uint64_t total = 0;  // lifetime recorded (the drop-honesty counter)
+        uint64_t kind_totals[static_cast<size_t>(ContactDebugKind::kCount)] = {};
+    };
+    static constexpr int32_t kContactDebugCap = 256;
+    // The presentation filter (bit i of the mask flashes kind i) and the flash
+    // window; recording is never filtered — the ring captures everything.
+    static constexpr uint32_t kContactDebugMaskAll = 0x3F;
+    static constexpr int32_t kContactDebugTtlTicks = 62; // ~1 s flash window
+    uint32_t contact_debug_mask() const { return contact_debug_mask_; }
+    void set_contact_debug_mask(uint32_t mask) {
+        contact_debug_mask_ = mask & kContactDebugMaskAll;
+    }
+    bool contact_debug_enabled() const { return contact_debug_enabled_; }
+    // Disabled by default; each enable/disable edge clears the ring (disable
+    // also frees it — the ray-capture footprint rationale).
+    void set_contact_debug_enabled(bool enabled);
+    const ContactDebugRing &contact_debug_ring() const { return contact_debug_ring_; }
+    // Hot-path recorder: a single cold branch when disabled.
+    void contact_debug_record(ContactDebugKind kind, uint32_t tick, EntityHandle target,
+                              const int32_t pos[3], uint8_t hit_class) const;
     const TraceProfile &trace_profile() const { return trace_profile_; }
     bool trace_profile_enabled() const { return trace_profile_enabled_; }
     // Profiling is disabled by default. Each enable/disable edge clears the
@@ -1564,6 +1611,9 @@ private:
     mutable std::array<RayDebugRing,
                        static_cast<size_t>(RayDebugCategory::kCount)>
             ray_debug_rings_;
+    bool contact_debug_enabled_ = false;
+    uint32_t contact_debug_mask_ = kContactDebugMaskAll;
+    mutable ContactDebugRing contact_debug_ring_;
     // target_view's model selection without the section-matrix build: fills the
     // entity position and bound radius for the witnessed gate-before-view order.
     // False exactly when target_view would return null; solid_only also

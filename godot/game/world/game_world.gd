@@ -2406,6 +2406,10 @@ func is_collision_debug() -> bool:
 	return _debug_views.is_collision_debug()
 
 
+func collision_debug_drawable_count() -> int:
+	return _debug_views.collision_debug_drawable_count()
+
+
 func set_particle_debug(enabled: bool) -> void:
 	_debug_views.set_particle_debug(enabled)
 

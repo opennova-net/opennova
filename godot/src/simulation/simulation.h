@@ -78,6 +78,7 @@ class EndRoundState;  // the typed end-of-round session facts (simulation_end_ro
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/renderer/precipitation_frame.h>
 #include <runtime/devtools/environment_snapshot.h> // the ONE mission boot + state + no-net tick (ADR 0042 d3)
+#include <runtime/devtools/physics_snapshot.h>
 #include <runtime/devtools/rays_snapshot.h>
 #include <runtime/simassets/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
@@ -2254,7 +2255,9 @@ public:
 	// the resolver queries (CollisionWorld::debug_instances -> target_view ->
 	// collision_matrix_from_heading): the drawn boxes ARE what movement
 	// resolves against. Capped to instances within 150u of the local player
-	// (first 128 with no player spawned).
+	// (first 128 with no player spawned). While the contact capture is armed
+	// the report adds "hits" (stride-6 [target, age, kind, x, y, z], mask+TTL
+	// filtered) + "hit_stride"/"hit_ttl"/"tick" — the overlay's flash channel.
 	Dictionary get_collision_debug() const;
 
 	// The AI overlay's per-frame payload (godot-space, the collision-debug
@@ -2286,6 +2289,15 @@ public:
 	void set_ray_debug_filter(int64_t p_mask, int64_t p_ttl_ticks);
 	void clear_ray_debug();
 	bool native_rays_snapshot(opennova::devtools::RaysSnapshot &out) const;
+	// Engine contact-debug capture (the CollisionWorld hit/contact ring) behind
+	// the collision view's hit flashes and the F3 Physics window; the flashes
+	// ride get_collision_debug's "hits" channel, counts ride
+	// native_physics_snapshot (ADR 0042 d6). Mask setter clamps to the kinds.
+	void set_contact_debug_capture(bool p_enabled);
+	bool is_contact_debug_capture() const;
+	void set_contact_debug_kind_mask(int64_t p_mask);
+	void clear_contact_debug();
+	bool native_physics_snapshot(opennova::devtools::PhysicsSnapshot &out) const;
 	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
 	// rounds with a TrcrID model plus placed devices. Entries: {key, item_id,
 	// pos (godot), rotation_deg (pitch, yaw, roll — placer convention)}; the
