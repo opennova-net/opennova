@@ -1147,6 +1147,52 @@ bool check_join_rejection_retains_the_raw_reject_record() {
 			"the raw JFC/JFP reject record is retained past the mapping");
 }
 
+// The PV2 identity gate (JFC=7): a live retail server on a different JO patch
+// pins proto+364 to a different token than our byte-correct "16", and rejects
+// the join at auth. The reason must name the incompatibility, not print "code 7"
+// [orig: HandleClientJoin @0x62b750 PV2 gate @0x62be40]. Witnessed live against
+// the NovaWorld server "THOR THUNDER" 2026-08-31.
+bool check_pv2_mismatch_reports_an_incompatible_version() {
+	np::JoinerConnection joiner("VersionMismatch");
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello client_hello;
+	const std::vector<uint8_t> hello = joiner.start();
+	if (!expect(nw_decode_inbound(hello.data(), hello.size(), opcode, body) &&
+					parse_client_hello(body.data(), body.size(), client_hello),
+			"decode the version-mismatch joiner's ClientHello"))
+		return false;
+	ServerHello server_hello = build_server_hello(client_hello, 0x7F000001u, 32769);
+	server_hello.hk = 0x55667788u;
+	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
+	const np::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+			server_hello_datagram.data(), server_hello_datagram.size());
+	ClientAuth client_auth;
+	body.clear();
+	if (!expect(hello_result.outbound.size() == 1 &&
+					nw_decode_inbound(hello_result.outbound[0].data(),
+							hello_result.outbound[0].size(), opcode, body) &&
+					parse_client_auth(body.data(), body.size(), client_auth),
+			"decode the version-mismatch joiner's ClientAuth"))
+		return false;
+	// The joiner sends the retail JO game-session PV2 constant.
+	if (!expect(client_auth.pv2 == "16",
+			"the joiner sends the byte-correct 1.7.5.7 game-session PV2"))
+		return false;
+	ServerAuth rejection;
+	rejection.ci = client_auth.ci;
+	rejection.ck = client_auth.ck;
+	rejection.cr = 0;
+	rejection.jfc = 7;
+	const std::vector<uint8_t> rejection_datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(rejection));
+	joiner.handle_datagram(rejection_datagram.data(), rejection_datagram.size());
+	return expect(joiner.phase() == np::JoinerConnection::Phase::Error &&
+					joiner.last_error().find("incompatible protocol version") != std::string::npos,
+			"JFC=7 reports an incompatible protocol version, not a bare code");
+}
+
 // A named, independently witnessed retail-corpus profile may answer only the
 // checksum sources it proves. These values were reproduced from all 102 live
 // ammo-definition rows in one revx02 process, independently of packet captures:
@@ -1279,6 +1325,7 @@ int main() {
 	ok = check_dead_player_punt_uses_a_consecutive_state6_counter() && ok;
 	ok = check_crc_challenges_are_not_answered() && ok;
 	ok = check_join_rejection_retains_the_raw_reject_record() && ok;
+	ok = check_pv2_mismatch_reports_an_incompatible_version() && ok;
 	ok = check_verified_revx02_profile_answers_exact_crc_challenges() && ok;
 	return ok ? 0 : 1;
 }

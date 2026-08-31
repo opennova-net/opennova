@@ -642,6 +642,15 @@ void JoinerConnection::on_server_auth(
 				"np joiner: join rejected: jfc=%u jfp=%u jfs='%s'",
 				static_cast<unsigned>(sa.jfc), static_cast<unsigned>(sa.jfp),
 				sa.jfs.c_str());
+		// The witnessed JFC families map to player-facing reasons. The validate
+		// callback (14) carries its own JFP sub-reason; the rest are the NP-layer
+		// identity/capacity gates. PV2 (7) is a protocol-version token the host
+		// pins per build (proto+364 = "16" on retail 1.7.5.7): a mismatch means
+		// the server runs a different JO patch, and a stock client of THIS build
+		// is rejected the same way — our PV2 is byte-correct for the install
+		// [orig: HandleClientJoin @0x62b750 gate — 3 HK @0x62bdd5 / 4 PW @0x62be18 /
+		//  7 PV2 @0x62be40 / 5 empty-NA @0x62be7d / 6 disabled @0x62be8f; the
+		//  9/10/15 CU-overflow arms; CNapiNetwork_Init @0x4ca4a0 pins proto+364].
 		if (sa.jfc == 14) {
 			switch (sa.jfp) {
 			case 2: fail("The server is locked"); break;
@@ -653,8 +662,20 @@ void JoinerConnection::on_server_auth(
 						std::to_string(sa.jfp) + ")");
 				break;
 			}
+		} else if (sa.jfc == 3) {
+			fail("The host rejected the connection key");
 		} else if (sa.jfc == 4) {
 			fail("The server password is incorrect");
+		} else if (sa.jfc == 5) {
+			fail("The server did not receive a player name");
+		} else if (sa.jfc == 6) {
+			fail("The server is not accepting new players");
+		} else if (sa.jfc == 7) {
+			fail("The server runs an incompatible protocol version (different game patch)");
+		} else if (sa.jfc == 9 || sa.jfc == 10 || sa.jfc == 15) {
+			fail("The join request carried too much connection data");
+		} else if (sa.jfc == 11) {
+			fail("The host could not process the join request");
 		} else if (!sa.jfs.empty()) {
 			fail(sa.jfs);
 		} else {

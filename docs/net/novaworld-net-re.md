@@ -1075,6 +1075,24 @@ tooling described in §5.25. The complete contract is:
   **JFC=14** with **JFP** 2 locked / 3 banned / **4 full** (**5** full with
   positive spectator-only slots). The client stores JFC/JFP verbatim
   (`NapiNP_HandleServerJoinResponse @0x629840`).
+- The OTHER JFC families are the NP-layer identity/capacity gates inside
+  `HandleClientJoin @0x62b750` itself, each an immediate `SendJoinRejection`:
+  **3** HK mismatch (`reported_addr != proto+1332` @0x62bdd5), **4** server
+  password (`proto+768 != PW` @0x62be18), **7** PV2 mismatch (`proto+364 != PV2`
+  @0x62be40), **5** empty NA (@0x62be7d), **6** server not accepting
+  (`proto[503]` @0x62be8f), **9/10/15** the CU-block overflow arms. The `NVS`/
+  `PN`/`PG`/`PV1` identity checks ABOVE these `return 0` with NO 0x82 (a silent
+  drop), so a client that receives a CR=0 JFC at all has already passed them.
+  **PV2 (JFC=7) is witnessed live** (server "THOR THUNDER", 2026-08-31): the
+  joiner sent the byte-correct `PV2="16"` (`CNapiNetwork_Init @0x4ca4a0` pins
+  `proto+364="16"` on retail 1.7.5.7, and the join path never rewrites it —
+  `UI_JoinSelectedSession @0x5699d0` builds only the NapiNetConfig CU block), and
+  the host still rejected it. PV2 is a per-build protocol token: a server on a
+  different JO patch pins a different `proto+364`, so a stock 1.7.5.7 client is
+  rejected the same way. This is a genuine version incompatibility, not an
+  OpenNova encode divergence. The reimpl maps the families to player-facing
+  reasons in `on_server_auth` (engine/net/npruntime/joiner_connection.cpp) and
+  retains the raw `{jfc,jfp,jfs}` for diagnostics.
 - The spectator-specific legs run LATER, at the game-layer 0x00 join message
   (`NapiNPServer_HandlePlayerJoinMessage @0x512aa0` latches the player entry's
   spectator flag `+55` from the stored JSR, then calls
