@@ -1681,6 +1681,10 @@ func is_collision_debug() -> bool:
 	return _debug_views.is_collision_debug()
 
 
+func collision_debug_drawable_count() -> int:
+	return _debug_views.collision_debug_drawable_count()
+
+
 func set_particle_debug(enabled: bool) -> void:
 	_debug_views.set_particle_debug(enabled)
 
@@ -1695,6 +1699,14 @@ func set_round_debug(enabled: bool) -> void:
 
 func is_round_debug() -> bool:
 	return _debug_views.is_round_debug()
+
+
+func set_ray_debug(enabled: bool) -> void:
+	_debug_views.set_ray_debug(enabled)
+
+
+func is_ray_debug() -> bool:
+	return _debug_views.is_ray_debug()
 
 
 func set_hitbox_debug(enabled: bool) -> void:
@@ -1719,6 +1731,22 @@ func set_occlusion_debug(enabled: bool) -> void:
 
 func is_occlusion_debug() -> bool:
 	return _debug_views.is_occlusion_debug()
+
+
+func set_ai_debug_option(id: StringName, enabled: bool) -> void:
+	_debug_views.set_ai_debug_option(id, enabled)
+
+
+func is_ai_debug() -> bool:
+	return _debug_views.is_ai_debug()
+
+
+func get_ai_view_state() -> Dictionary:
+	return _debug_views.get_ai_view_state()
+
+
+func set_ai_debug_selection_provider(provider: Callable) -> void:
+	_debug_views.set_ai_debug_selection_provider(provider)
 
 
 func get_debug_view_statuses() -> Array[DebugViewStatus]:

@@ -242,6 +242,8 @@ private:
 	// the per-frame S2C->ClientState fold + the C2S 0x0C uplink over a dialed UdpPump; its own player L
 	// runs run_logic_tick(false), remotes render wire-direct. [orig: NapiNPClientMsg_0x00C @0x42E730]
 	bool joiner_ = false;
+	// The F3 Weapon window's held-trigger latch (OR'd into per-tick weapon input).
+	bool debug_weapon_fire_held_ = false;
 	bool joiner_net_diagnostics_ = false;
 	opennova::np::JoinRole join_role_ = opennova::np::JoinRole::Player;
 	std::string join_spectator_password_;

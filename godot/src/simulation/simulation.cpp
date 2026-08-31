@@ -1192,6 +1192,24 @@ Error Simulation::debug_set_world_entity_weapon_ammo(
 			: ERR_DOES_NOT_EXIST;
 }
 
+Error Simulation::debug_set_entity_item_attrib(int p_handle, int64_t p_attrib,
+                                                   int64_t p_attrib2) {
+	if (!kernel_) return ERR_UNAVAILABLE;
+	// The one non-authoritative role: a joiner's rows are replicas the wire
+	// re-writes, so the seam refuses here as well as in the debug-control
+	// table (the ai_index addressability rule does not cover a handle-keyed
+	// write).
+	if (session_role() == ROLE_JOINER) return ERR_UNAUTHORIZED;
+	if (p_handle < 0 || p_handle >= 0xFFFF || p_attrib < 0 || p_attrib > 0xFFFFFFFFLL ||
+			p_attrib2 < 0 || p_attrib2 > 0xFFFFFFFFLL)
+		return ERR_INVALID_PARAMETER;
+	return kernel_->world.commands.set_entity_item_attrib(
+				   opennova::world::EntityHandle{static_cast<uint16_t>(p_handle)},
+				   static_cast<uint32_t>(p_attrib), static_cast<uint32_t>(p_attrib2))
+			? OK
+			: ERR_DOES_NOT_EXIST;
+}
+
 opennova::world::EntityCommands *Simulation::entity_commands() {
 	return kernel_ ? &kernel_->world.commands : nullptr;
 }

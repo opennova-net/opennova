@@ -577,7 +577,7 @@ func _register_option_rows() -> void:
 			func(world: GameWorld) -> bool: return world.is_user_point_debug(),
 			func(world: GameWorld, on: bool) -> void: world.set_user_point_debug(on))
 	_world_check(&"show_collision", &"Rounds", "Show collision",
-			"Draw object collision volumes (type-colored boxes) and the player's capsule test points over the world.",
+			"Draw object collision volumes (type-colored boxes) and the player's capsule test points over the world. The toggle also arms the engine contact capture, so recent hits and contacts flash their boxes; the F3 Physics window filters the flash kinds and shows per-kind counts.",
 			func(world: GameWorld) -> bool: return world.is_collision_debug(),
 			func(world: GameWorld, on: bool) -> void: world.set_collision_debug(on))
 	_world_check(&"hide_foliage", &"Terrain", "Hide foliage",
@@ -600,6 +600,39 @@ func _register_option_rows() -> void:
 			"Draw the recent round outcomes over the world — flight segments and hit markers colored by result (green = face hit, amber = sphere stand-in, red ring = a graze whose face test missed and flew on).",
 			func(world: GameWorld) -> bool: return world.is_round_debug(),
 			func(world: GameWorld, on: bool) -> void: world.set_round_debug(on))
+	_world_check(&"show_rays", &"Rounds", "Show rays",
+			"Record every engine raycast and draw it over the world, colored by category and fading over ~1.5 s: bullets and knife swings, throwable sweeps, AI / script / replication / explosion LOS, ground probes, camera iris, render occlusion, sun visibility, sound occlusion, precipitation floor and F3 picks. A cross marks a resolved hit point; the clipped remainder past it draws faint; boolean blocked rays draw darkened. The F3 Rays window filters categories and shows per-category counts.",
+			func(world: GameWorld) -> bool: return world.is_ray_debug(),
+			func(world: GameWorld, on: bool) -> void: world.set_ray_debug(on))
+	_world_check(&"show_ai_overlay", &"AI", "Show AI overlay",
+			"Draw the AI debug overlay over the world: state/alert labels above every brain, nav-channel routes, target/aim lines, and perception rings (the F3 AI window's world view; the master toggle for the element rows below).",
+			func(world: GameWorld) -> bool: return world.is_ai_debug(),
+			func(world: GameWorld, on: bool) -> void:
+				world.set_ai_debug_option(&"show_ai_overlay", on))
+	_world_check(&"show_ai_labels", &"AI", "AI labels",
+			"State/alert labels above each brain (name, state, move mode, current route node, target and fire delay), colored green/yellow/red by the alert byte.",
+			func(world: GameWorld) -> bool:
+				return bool(world.get_ai_view_state().get("labels", false)),
+			func(world: GameWorld, on: bool) -> void:
+				world.set_ai_debug_option(&"show_ai_labels", on))
+	_world_check(&"show_ai_routes", &"AI", "AI routes",
+			"Nav-channel polylines with node markers sized by arrival radius, one hue per channel; each follower's current node gets a bright cross and a line from the brain.",
+			func(world: GameWorld) -> bool:
+				return bool(world.get_ai_view_state().get("routes", false)),
+			func(world: GameWorld, on: bool) -> void:
+				world.set_ai_debug_option(&"show_ai_routes", on))
+	_world_check(&"show_ai_targets", &"AI", "AI target lines",
+			"A red line from each engaged brain to its combat target, the cyan aim-direction ray while an aim solution is live, and a cyan cross on the resolved muzzle point.",
+			func(world: GameWorld) -> bool:
+				return bool(world.get_ai_view_state().get("targets", false)),
+			func(world: GameWorld, on: bool) -> void:
+				world.set_ai_debug_option(&"show_ai_targets", on))
+	_world_check(&"show_ai_rings", &"AI", "AI perception rings",
+			"Sight-range (dim) and attack-range (bright) circles, alert-colored, around the F3-selected brain and engaged brains near the camera.",
+			func(world: GameWorld) -> bool:
+				return bool(world.get_ai_view_state().get("rings", false)),
+			func(world: GameWorld, on: bool) -> void:
+				world.set_ai_debug_option(&"show_ai_rings", on))
 	_world_check(&"show_hit_meshes", &"Rounds", "Show hit meshes",
 			"Hit geometry is sampled at 6 Hz. Draw nearby hit geometry within 80 mission units of the local player: object bullet meshes and broad-phase spheres, plus posed person bone spheres (local player omitted; up to 96 targets). Person colors show normal-infantry damage zones: orange = x1.25 (0-4), cyan = x1.0 (5-8), lime = x0.5 (9-12/15-18), magenta = x3.0 head (13-14), dark red = masked, amber = unresolved fallback.",
 			func(world: GameWorld) -> bool: return world.is_hitbox_debug(),
@@ -755,6 +788,20 @@ func _register_edit_actions() -> void:
 			return _action_error(ERR_INVALID_PARAMETER)
 		return _action_error(sim.debug_set_entity_position(
 				int(args[0]), args[1]))
+
+	var item_attrib := _action(&"set_entity_item_attrib", &"Entities", "Set item attribs",
+			"Write both items.def attrib words on one entity by its wire_handle (brainless "
+			+ "rows included); a per-entity override the next item-traits sweep re-stamps.",
+			TARGET_SIM, OWNER_ENGINE)
+	_authoritative(item_attrib)
+	item_attrib.invoke = func(args: Array) -> Dictionary:
+		var sim := _sim()
+		if sim == null:
+			return _action_error(ERR_UNAVAILABLE)
+		if not DebugControlArgs.item_attrib(args):
+			return _action_error(ERR_INVALID_PARAMETER)
+		return _action_error(sim.debug_set_entity_item_attrib(
+				int(args[0]), int(args[1]), int(args[2])))
 
 
 func _register_audio_actions() -> void:

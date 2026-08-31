@@ -11,6 +11,8 @@ void compute_iris_march(World &world, CollisionWorld &collision,
 	out = IrisMarch{};
 	const EntityHandle local_player = world.cached.local_player;
 	if (world.registry.get(local_player) == nullptr) return;
+	const CollisionWorld::RayDebugScope ray_scope(
+			collision, CollisionWorld::RayDebugCategory::kCameraIris);
 
 	// The full retail clip: terrain first unless the local player is indoors,
 	// then every eligible solid in that player's candidate slice. The mutable

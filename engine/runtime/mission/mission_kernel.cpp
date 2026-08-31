@@ -710,6 +710,9 @@ bool precipitation_entity_hit(void *ctx, int32_t x, int32_t y, int32_t z_top,
 	// raycast_proximity_entities @ 0x538350 — the end clips to the first hit].
 	const int32_t start[3] = {x, y, z_top};
 	int32_t end[3] = {x, y, z_bottom};
+	const w::CollisionWorld::RayDebugScope ray_scope(
+			kernel->world.collision,
+			w::CollisionWorld::RayDebugCategory::kPrecipitation);
 	const w::EntityHandle hit = kernel->world.collision->clip_segment_to_nearest_collision(
 			kernel->world, kernel->world.cached.local_player, start, end);
 	if (!hit.valid()) return false;
@@ -898,7 +901,8 @@ void MissionKernel::set_weapon_input(bool fire_held, bool fire_pressed, bool rel
 	w::local_weapon_set_input(weapon, view, fire_held, fire_pressed, reload_pressed);
 }
 
-bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve_slot_state) {
+bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve_slot_state,
+		bool allow_same_weapon_rebake) {
 	if (!weapon_defs_ok || weapon_name.empty()) return false;
 	const DefWeaponDef *row = nullptr;
 	for (size_t i = 0; i < weapon_defs.count; ++i) {
@@ -949,7 +953,7 @@ bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve
 	add_key("anim_wpn_empty_idle");
 	for (size_t a = 0; a < row->actions_count; ++a) add_key(row->actions[a].anim);
 	w::local_weapon_install(world, weapon, data, preserve_slot_state,
-			/*allow_same_weapon_rebake=*/false, inventory_valid ? &inventory : nullptr, view);
+			allow_same_weapon_rebake, inventory_valid ? &inventory : nullptr, view);
 	return true;
 }
 

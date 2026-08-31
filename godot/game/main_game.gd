@@ -34,7 +34,7 @@ const ARMORY_KEY := KEY_SHIFT
 # F3: the in-engine dev tools (the DevTools node's ImGui windows, ADR 0039).
 const DEV_TOOLS_KEY := KEY_F3
 # Shift+F6: pick the entity under the crosshair into the debug pick list
-# (DebugPickFlow). Works while playing, no dev tools needed. Unmodified F6 stays
+# (DebugPickSession). Works while playing or with F3 in Interact. Unmodified F6 stays
 # with the retail-configurable binding rows (huddetail's default, shadowing
 # hudcolor's — the retail first-match order, D-CTRL-4).
 const PICK_KEY := KEY_F6
@@ -62,12 +62,10 @@ var _state: int = State.MENU
 var _shell_wired := false
 # The in-engine dev tools' seam: F3 opens them, the mouse policy follows them.
 var _dev_tools: DevTools
-var _dev_tools_pick_active := false
 var _debug_adapter: GameDebugAdapter
-# The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
-# the set survives dev-tools toggles; cleared on every world load.
-var _pick_list := DebugPickList.new()
-var _pick_flow := DebugPickFlow.new()
+# The debug pick state (list, toast flow, click-catcher latch): SHELL-owned so
+# F6 picks work before F3 ever opens; every landed pick selects its Entities row.
+var _pick_session := DebugPickSession.new()
 var _net: NetSessionController  # every net-session entry (LAN/NovaWorld + env hooks)
 # The in-game HUD rides GameHudPresenter. It owns the lazy GameHud build, the
 # per-frame info rebuild, and the
@@ -119,6 +117,7 @@ func _init() -> void:
 	_dev_tools.open_changed.connect(_on_dev_tools_open_changed)
 	_dev_tools.game_input_mode_changed.connect(_on_dev_tools_game_input_mode_changed)
 	add_child(_dev_tools)
+	_pick_session.setup(_dev_tools)
 	_world_load.load_failed.connect(_on_world_load_failed)
 
 
@@ -347,8 +346,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if _dev_tools.handle_tools_toggle():
 			get_viewport().set_input_as_handled()
 		return
-	if key.keycode == PICK_KEY and key.shift_pressed and is_gameplay_input_active() \
-			and _world != null and _world.is_loaded():
+	if key.keycode == PICK_KEY and key.shift_pressed and _world != null \
+			and _world.is_loaded() and (is_gameplay_input_active() \
+			or (is_dev_tools_open() and not _dev_tools.is_game_playing())):
+		_use_latched = false  # the chord consumed the Shift press: no mount toggle on release
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
@@ -407,12 +408,8 @@ func _refresh_dev_tools_game_state() -> void:
 
 
 func _sync_dev_tools_pick_policy() -> void:
-	var enabled := is_dev_tools_open() and not _dev_tools.is_game_playing() \
-			and _is_game_play_available()
-	if _world == null or enabled == _dev_tools_pick_active:
-		return
-	_dev_tools_pick_active = enabled
-	_world.set_pick_click_enabled(enabled)
+	_pick_session.sync_click_policy(_world, is_dev_tools_open()
+			and not _dev_tools.is_game_playing() and _is_game_play_available())
 
 
 func is_dev_tools_open() -> bool:
@@ -420,11 +417,10 @@ func is_dev_tools_open() -> bool:
 
 
 ## Shift+F6 (and the probe/test seam): pick whatever the crosshair is on into the
-## debug pick list, with a brief on-screen confirmation (DebugPickFlow).
+## debug pick list (selecting it in the F3 Entities window), with a brief toast.
 func pick_at_crosshair() -> void:
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	_pick_flow.pick_at_crosshair(sim, _camera, _pick_list,
-			_hud if _hud != null else self)
+	_pick_session.pick_at_crosshair(_world.get_sim() if _world != null else null,
+			_camera, _hud if _hud != null else self)
 
 
 ## F11. ImGui multi-viewport must already be off at the NewFrame that first
@@ -719,8 +715,7 @@ func _on_world_loaded() -> void:
 	# under the loading presentation until the separate authoritative edge.
 	# A fresh mission gets a fresh pick set (stale handles never cross
 	# sessions); the world renders/curates the shell-owned list from here on.
-	_pick_list.clear()
-	_world.set_pick_debug(_pick_list)
+	_pick_session.begin_world(_world)
 	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
 	# The F3 engine-fact windows read and mutate through this Simulation from

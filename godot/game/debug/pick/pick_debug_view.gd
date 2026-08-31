@@ -3,8 +3,8 @@ extends SimDebugView
 
 # Highlights the debug pick list over the world: per pick a bound-radius
 # diamond + axis cross at the entity origin, a small cross at the exact hit
-# point, and a name label, each row in its own hue (matching the overlay's
-# picks section). Built / freed by the host like every SimDebugView.
+# point, and a name label, each row in its own hue. Built / freed by the
+# shell like every SimDebugView.
 #
 # One deliberate deviation from the base contract: the row DATA comes from
 # the injected host-owned DebugPickList, not a sim accessor — the sim's

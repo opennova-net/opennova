@@ -429,6 +429,10 @@ bool AiSystem::line_of_sight_clear_impl(World &world, const int32_t a[3],
         // then the +0x16C carrier overriding) before the model walk.
         const EntityHandle from_h = los_exclude_handle(world, from);
         const EntityHandle to_h = los_exclude_handle(world, to);
+        const CollisionWorld::RayDebugScope ray_scope(
+                collision, cached
+                        ? CollisionWorld::RayDebugCategory::kReplicationLos
+                        : CollisionWorld::RayDebugCategory::kAiLos);
         return cached ? collision->raycast_clear_cached(world, a, b, from_h, to_h, perf)
                       : collision->raycast_clear(world, a, b, from_h, to_h);
     }

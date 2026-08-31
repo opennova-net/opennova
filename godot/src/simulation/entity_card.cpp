@@ -158,10 +158,12 @@ Dictionary world_json(const WorldDetail &d) {
 	out["index"] = d.source_index;
 	out["item_id"] = d.item_id;
 	out["name"] = String(d.name.c_str());
+	out["item_name"] = String(d.item_name.c_str());
 	out["team"] = d.team;
 	out["alive"] = d.alive;
 	out["hidden"] = d.hidden;
 	out["health"] = d.health;
+	out["health_max"] = d.health_max;
 	out["has_item_def"] = d.has_item_def;
 	out["handle"] = d.handle;
 	out["item_type"] = d.item_type;
@@ -267,6 +269,10 @@ String EntityCard::get_name() const {
 	return String((value_.has_ai ? value_.ai.name : value_.world.name).c_str());
 }
 
+String EntityCard::get_item_name() const {
+	return String(value_.world.item_name.c_str());
+}
+
 int EntityCard::get_team() const {
 	return value_.has_ai ? value_.ai.team : value_.world.team;
 }
@@ -350,6 +356,16 @@ Dictionary EntityCard::to_json_value() const {
 	Dictionary out;
 	if (value_.has_ai) {
 		out = ai_json(value_.ai);
+		if (value_.has_world) {
+			// The registry row's items.def facts ride the AI card too: the
+			// per-entity attrib words a set_entity_item_attrib override
+			// rewrites are only readable here, and an AI row is the usual
+			// target of that override.
+			out["item_attrib"] = static_cast<int64_t>(value_.world.item_attrib);
+			out["item_attrib2"] = static_cast<int64_t>(value_.world.item_attrib2);
+			out["item_name"] = String(value_.world.item_name.c_str());
+			out["health_max"] = value_.world.health_max;
+		}
 	} else if (value_.has_world) {
 		out = world_json(value_.world);
 	}
@@ -408,6 +424,10 @@ void EntityCard::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_primary_weapon_clip"), &EntityCard::get_primary_weapon_clip);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon_reserve"), &EntityCard::get_primary_weapon_reserve);
 	ClassDB::bind_method(D_METHOD("get_seats"), &EntityCard::get_seats);
+	ClassDB::bind_method(D_METHOD("get_item_attrib"), &EntityCard::get_item_attrib);
+	ClassDB::bind_method(D_METHOD("get_item_attrib2"), &EntityCard::get_item_attrib2);
+	ClassDB::bind_method(D_METHOD("get_item_name"), &EntityCard::get_item_name);
+	ClassDB::bind_method(D_METHOD("get_health_max"), &EntityCard::get_health_max);
 	ClassDB::bind_method(D_METHOD("to_json_value"), &EntityCard::to_json_value);
 }
 

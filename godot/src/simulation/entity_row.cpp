@@ -8,6 +8,10 @@ String EntityRow::get_name() const {
 	return String(value_.name.c_str());
 }
 
+String EntityRow::get_item_name() const {
+	return String(value_.item_name.c_str());
+}
+
 String EntityRow::get_state_name() const {
 	return String(value_.state_name.c_str());
 }
@@ -39,6 +43,7 @@ Dictionary EntityRow::to_json_value() const {
 	out["type_id"] = value_.item_id;
 	out["wire_handle"] = static_cast<int>(value_.wire_handle);
 	out["name"] = get_name();
+	out["item_name"] = get_item_name();
 	out["state"] = get_state_name();
 	out["health"] = value_.health;
 	out["team"] = value_.team;
@@ -59,12 +64,14 @@ void EntityRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_net_id"), &EntityRow::get_net_id);
 	ClassDB::bind_method(D_METHOD("get_wire_handle"), &EntityRow::get_wire_handle);
 	ClassDB::bind_method(D_METHOD("get_name"), &EntityRow::get_name);
+	ClassDB::bind_method(D_METHOD("get_item_name"), &EntityRow::get_item_name);
 	ClassDB::bind_method(D_METHOD("get_state_name"), &EntityRow::get_state_name);
 	ClassDB::bind_method(D_METHOD("get_health"), &EntityRow::get_health);
 	ClassDB::bind_method(D_METHOD("get_team"), &EntityRow::get_team);
 	ClassDB::bind_method(D_METHOD("is_alive"), &EntityRow::is_alive);
 	ClassDB::bind_method(D_METHOD("is_hidden"), &EntityRow::is_hidden);
 	ClassDB::bind_method(D_METHOD("get_mission_position"), &EntityRow::get_mission_position);
+	ClassDB::bind_method(D_METHOD("get_world_position"), &EntityRow::get_world_position);
 	ClassDB::bind_method(D_METHOD("to_json_value"), &EntityRow::to_json_value);
 }
 

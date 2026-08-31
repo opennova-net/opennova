@@ -423,12 +423,22 @@ uint16_t OcclusionWorld::latch_rand16() {
 // view row 2).]
 bool OcclusionWorld::three_rays_clear(const CollisionWorld &collision,
                                       const OcclusionFrameCamera &cam,
-                                      const int32_t target[3], int32_t radius) const {
+                                      const int32_t target[3], int32_t radius,
+                                      uint32_t debug_tick) const {
     if (collision.terrain == nullptr) return true;
     const int32_t start[3] = {cam.pos_fixed[0], cam.pos_fixed[1], cam.pos_fixed[2] + 0x4000};
+    const auto record = [&](const int32_t ray_end[3], bool blocked) {
+        collision.ray_debug_record(
+                CollisionWorld::RayDebugCategory::kRenderOcclusion, debug_tick,
+                start, ray_end, nullptr,
+                blocked ? CollisionWorld::kRayDebugBlocked
+                        : CollisionWorld::kRayDebugClear);
+    };
 
     int32_t end[3] = {target[0], target[1], target[2] + radius};
-    if (!los_terrain_blocked(*collision.terrain, start, end)) return true;
+    bool blocked = los_terrain_blocked(*collision.terrain, start, end);
+    if (collision.ray_debug_enabled()) record(end, blocked);
+    if (!blocked) return true;
 
     auto scaled = [](int32_t range, const int32_t row[3], int32_t out[3]) {
         for (int i = 0; i < 3; ++i)
@@ -442,12 +452,16 @@ bool OcclusionWorld::three_rays_clear(const CollisionWorld &collision,
     end[0] = target[0] + right[0] - fwd[0];
     end[1] = target[1] + right[1] - fwd[1];
     end[2] = target[2] + right[2] - fwd[2];
-    if (!los_terrain_blocked(*collision.terrain, start, end)) return true;
+    blocked = los_terrain_blocked(*collision.terrain, start, end);
+    if (collision.ray_debug_enabled()) record(end, blocked);
+    if (!blocked) return true;
 
     end[0] += 2 * fwd[0];
     end[1] += 2 * fwd[1];
     end[2] += 2 * fwd[2];
-    return !los_terrain_blocked(*collision.terrain, start, end);
+    blocked = los_terrain_blocked(*collision.terrain, start, end);
+    if (collision.ray_debug_enabled()) record(end, blocked);
+    return !blocked;
 }
 
 // ----------------------------------------------------------------------------
@@ -499,7 +513,8 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         if (e->occlusion_latch != 0) {
             --e->occlusion_latch;
         } else {
-            if (outdoors && !three_rays_clear(collision, cam, center_world, radius))
+            if (outdoors && !three_rays_clear(collision, cam, center_world, radius,
+                                              world.logic_tick))
                 continue; // culled this frame; re-probed next
             e->occlusion_latch = static_cast<uint8_t>((latch_rand16() & 7) + 16);
         }
@@ -1407,7 +1422,9 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
         --ent.occlusion_latch;
         return true;
     }
-    if (outdoors && !three_rays_clear(collision, cam, center_world, radius)) return false;
+    if (outdoors && !three_rays_clear(collision, cam, center_world, radius,
+                                      world.logic_tick))
+        return false;
     ent.occlusion_latch = static_cast<uint8_t>((latch_rand16() & 7) + 16);
     return true;
 }

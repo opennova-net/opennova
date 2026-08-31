@@ -2231,19 +2231,19 @@ func test_unload_forgets_the_viewmodel_def_memo() -> void:
 	world.set_resource_root(root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 	# The debug viewmodel rig (the `set_viewmodel_weapon` control's seam).
-	assert_true(world.set_local_player_weapon_by_name("WPN_M4"))
+	assert_true(world.set_local_player_weapon_by_name("WPN_AK47AUTO"))
 	assert_not_null(world.local_player_viewmodel_def())
-	assert_eq(world.local_player_weapon_name(), "WPN_M4",
+	assert_eq(world.local_player_weapon_name(), "WPN_AK47AUTO",
 			"the first decode installs the weapon dict")
 	world.unload()
 	# The same resolved name in the next mission must re-decode from that
 	# mission's weapon.def instead of returning the memo over an empty dict
 	# (unload drops the previous entity's selection, so it is re-rigged).
 	assert_eq(world.load_mission("mnml.bms"), OK)
-	assert_true(world.set_local_player_weapon_by_name("WPN_M4"))
+	assert_true(world.set_local_player_weapon_by_name("WPN_AK47AUTO"))
 	var again: PlayerViewmodelDef = world.local_player_viewmodel_def()
 	assert_not_null(again)
-	assert_eq(world.local_player_weapon_name(), "WPN_M4",
+	assert_eq(world.local_player_weapon_name(), "WPN_AK47AUTO",
 			"a reload with the same weapon name repopulates the weapon dict")
 	world.unload()
 
@@ -2263,11 +2263,11 @@ func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 
 	# The root stays mounted across unload, so the next entity's rig resolves
 	# against its weapon.def even before the next mission loads.
-	assert_true(world.set_local_player_weapon_by_name("WPN_M4"))
+	assert_true(world.set_local_player_weapon_by_name("WPN_AK47AUTO"))
 	var restored: PlayerViewmodelDef = world.local_player_viewmodel_def()
 	assert_not_null(restored, "a new mission is not stuck with the previous entity's NONE state")
 	if restored != null:
-		assert_eq(restored.weapon_name, "WPN_M4",
+		assert_eq(restored.weapon_name, "WPN_AK47AUTO",
 			"the next mission can resolve a weapon after the previous entity selected NONE")
 
 

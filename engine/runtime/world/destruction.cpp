@@ -276,8 +276,11 @@ bool blast_los_clear(World &world, CollisionWorld *collision,
                      EntityHandle endpoint, EntityHandle source, float z_bias) {
     const int32_t a[3] = {to_fixed(from.x), to_fixed(from.y), to_fixed(from.z + z_bias)};
     const int32_t b[3] = {to_fixed(to.x), to_fixed(to.y), to_fixed(to.z + z_bias)};
-    if (collision != nullptr)
+    if (collision != nullptr) {
+        const CollisionWorld::RayDebugScope ray_scope(
+                collision, CollisionWorld::RayDebugCategory::kExplosionLos);
         return collision->raycast_clear(world, a, b, endpoint, source);
+    }
     if (terrain != nullptr && terrain->valid())
         return !los_terrain_blocked(*terrain, a, b);
     return true;

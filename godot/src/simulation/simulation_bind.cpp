@@ -384,6 +384,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_position", "net_id", "mission_pos"), &Simulation::debug_set_world_entity_position);
 	ClassDB::bind_method(D_METHOD("debug_set_world_entity_weapon_ammo", "net_id", "clip", "reserve"),
 	                     &Simulation::debug_set_world_entity_weapon_ammo);
+	ClassDB::bind_method(D_METHOD("debug_set_entity_item_attrib", "handle", "attrib", "attrib2"),
+	                     &Simulation::debug_set_entity_item_attrib);
 	ClassDB::bind_method(D_METHOD("debug_kill_group", "group"), &Simulation::debug_kill_group);
 	ClassDB::bind_method(D_METHOD("debug_teleport_local_player", "mission_pos", "yaw_deg", "pitch_deg"),
 	                     &Simulation::debug_teleport_local_player);
@@ -469,6 +471,22 @@ void Simulation::_bind_methods() {
 	                     &Simulation::occlusion_water_visible);
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &Simulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &Simulation::get_round_debug);
+	ClassDB::bind_method(D_METHOD("get_ai_debug"), &Simulation::get_ai_debug);
+	ClassDB::bind_method(D_METHOD("get_ray_debug"), &Simulation::get_ray_debug);
+	ClassDB::bind_method(D_METHOD("set_ray_debug_recording", "enabled"),
+	                     &Simulation::set_ray_debug_recording);
+	ClassDB::bind_method(D_METHOD("is_ray_debug_recording"),
+	                     &Simulation::is_ray_debug_recording);
+	ClassDB::bind_method(D_METHOD("set_ray_debug_filter", "mask", "ttl_ticks"),
+	                     &Simulation::set_ray_debug_filter);
+	ClassDB::bind_method(D_METHOD("clear_ray_debug"), &Simulation::clear_ray_debug);
+	ClassDB::bind_method(D_METHOD("set_contact_debug_capture", "enabled"),
+	                     &Simulation::set_contact_debug_capture);
+	ClassDB::bind_method(D_METHOD("is_contact_debug_capture"),
+	                     &Simulation::is_contact_debug_capture);
+	ClassDB::bind_method(D_METHOD("set_contact_debug_kind_mask", "mask"),
+	                     &Simulation::set_contact_debug_kind_mask);
+	ClassDB::bind_method(D_METHOD("clear_contact_debug"), &Simulation::clear_contact_debug);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);

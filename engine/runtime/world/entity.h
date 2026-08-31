@@ -172,7 +172,7 @@ enum class DeathMotionMode : uint8_t {
 // Named mirrors of the DEF_ITEM_ATTRIB_* bits world/netsim code reads off the
 // entity's ItemDefAttrib dword (Entity::item_attrib, and the same dword on
 // ai.h's def_attrib profile mirror). engine/runtime/world stays def-parser-free; parity
-// static_asserts against def.h live in npruntime/src/weapon_table_build.cpp.
+// static_asserts against def.h live in runtime/world/weapon_table_build.cpp.
 // [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md:147-155]
 inline constexpr uint32_t kItemAttribMoveCallback = 0x1u;
 inline constexpr uint32_t kItemAttribPowerup = 0x2u;
@@ -184,6 +184,7 @@ inline constexpr uint32_t kItemAttribChangeTeam = 0x20000u;
 inline constexpr uint32_t kItemAttribSpawnPoint = 0x40000u;
 inline constexpr uint32_t kItemAttribArmory = 0x80000u;
 inline constexpr uint32_t kItemAttribAIData = 0x100000u; // §5.6 AI class — gates the 0x0D AI-trailer
+inline constexpr uint32_t kItemAttribLeaveCorpse = 0x400000u;
 inline constexpr uint32_t kItemAttribNoDismember = 0x800000u;
 inline constexpr uint32_t kItemAttribNoHud = 0x20000000u;
 inline constexpr uint32_t kItemAttribNoDie = 0x40000000u;
@@ -886,6 +887,23 @@ struct Entity {
     };
     VehicleMotorState veh;
 };
+
+// The ONE home of the ItemDefAttrib stamp: both raw dwords plus the per-entity
+// facts the engine derives from them at spawn (the items.def trait sweep,
+// simassets/item_traits.cpp) and again when a tool overrides one entity's words
+// (EntityCommands::set_entity_item_attrib). Per-item caches keyed by item id
+// (world.item_death_traits, vehicle_traits) are the sweep's alone.
+// [orig: Entity_InitFromItemDef @0x49e550 — the def+84/+88 copies; the AS zone
+//  gates @0x4a2de0 / @0x4fe110 (ChangeTeam / SpawnPoint); the AIData gate
+//  @0x433327; LeaveCorpse @0x4b9e54]
+inline void stamp_item_attrib(Entity &e, uint32_t attrib, uint32_t attrib2) {
+    e.item_attrib = attrib;
+    e.item_attrib2 = attrib2;
+    e.is_ai_capable = (attrib & kItemAttribAIData) != 0;
+    e.is_capture_trigger = (attrib & kItemAttribChangeTeam) != 0;
+    e.is_spawn_point = (attrib & kItemAttribSpawnPoint) != 0;
+    e.leave_corpse = (attrib & kItemAttribLeaveCorpse) != 0;
+}
 
 // Entity_GetWeaponSlotByte: the resolved userpoint byte for one weapon slot and
 // field (0 b/fire, 1 m/flash, 2 c/casing); 0 unless the def has weapon slots

@@ -334,14 +334,64 @@ const CollisionTargetView *CollisionWorld::trace_target_view(const World &world,
     return entry.valid ? &entry.view : nullptr;
 }
 
+namespace {
+
+// The contact-capture kind for a resolved trace: terrain and water flash as
+// point markers (no box to light), everything else flashes the hit body.
+CollisionWorld::ContactDebugKind contact_kind_for_trace(ProjectileHitClass hit_class,
+                                                        bool knife) {
+    if (hit_class == ProjectileHitClass::Terrain)
+        return CollisionWorld::ContactDebugKind::kTerrainHit;
+    if (hit_class == ProjectileHitClass::Water)
+        return CollisionWorld::ContactDebugKind::kWaterHit;
+    return knife ? CollisionWorld::ContactDebugKind::kKnifeHit
+                 : CollisionWorld::ContactDebugKind::kProjectileHit;
+}
+
+}  // namespace
+
 ProjectileHit CollisionWorld::trace_projectile(const World &world,
                                                const ProjectileTrace &trace) const {
-    return trace_projectile_impl(world, trace, false);
+    const ProjectileHit hit = trace_projectile_impl(world, trace, false);
+    if (ray_debug_enabled_) {
+        const int32_t a[3] = {trace.start.x, trace.start.y, trace.start.z};
+        const int32_t b[3] = {trace.end.x, trace.end.y, trace.end.z};
+        const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
+                              hit.position_q16.z};
+        ray_debug_record(RayDebugCategory::kProjectile, world.logic_tick, a, b,
+                         hit.hit() ? h : nullptr,
+                         hit.hit() ? kRayDebugHit : kRayDebugClear);
+    }
+    if (contact_debug_enabled_ && hit.hit()) {
+        const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
+                              hit.position_q16.z};
+        contact_debug_record(contact_kind_for_trace(hit.hit_class, false),
+                             world.logic_tick, hit.geometry_entity, h,
+                             static_cast<uint8_t>(hit.hit_class));
+    }
+    return hit;
 }
 
 ProjectileHit CollisionWorld::trace_knife_impact(
         const World &world, const ProjectileTrace &trace) const {
-    return trace_projectile_impl(world, trace, true);
+    const ProjectileHit hit = trace_projectile_impl(world, trace, true);
+    if (ray_debug_enabled_) {
+        const int32_t a[3] = {trace.start.x, trace.start.y, trace.start.z};
+        const int32_t b[3] = {trace.end.x, trace.end.y, trace.end.z};
+        const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
+                              hit.position_q16.z};
+        ray_debug_record(RayDebugCategory::kKnife, world.logic_tick, a, b,
+                         hit.hit() ? h : nullptr,
+                         hit.hit() ? kRayDebugHit : kRayDebugClear);
+    }
+    if (contact_debug_enabled_ && hit.hit()) {
+        const int32_t h[3] = {hit.position_q16.x, hit.position_q16.y,
+                              hit.position_q16.z};
+        contact_debug_record(contact_kind_for_trace(hit.hit_class, true),
+                             world.logic_tick, hit.geometry_entity, h,
+                             static_cast<uint8_t>(hit.hit_class));
+    }
+    return hit;
 }
 
 ProjectileHit CollisionWorld::trace_projectile_impl(
