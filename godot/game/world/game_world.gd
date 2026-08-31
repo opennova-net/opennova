@@ -517,6 +517,16 @@ func load_mission_data(mission: MissionData, bms_name: String, dir: String = "")
 	return _load_mission_internal(mission, bms_name, resource_root)
 
 
+# Resolve a mission asset filename: the wire S2C 0x0B header (g_BmsHeaderBlock)
+# stores terrain/env WITH the extension ("G11.trn", "FULL_07.env"), while a file
+# .bms stores the bare base ("G11"). Append the extension only when it is not
+# already present, so both header sources resolve to the one on-disk name.
+func _mission_asset_filename(ref: String, ext: String) -> String:
+	if ref.to_lower().ends_with(ext.to_lower()):
+		return ref
+	return ref + ext
+
+
 # The missing-terrain/env reason, join-aware: a wire-header join has no local
 # .bms — the host streamed the mission identity — so the reason names the
 # stream and what is mounted/installed, making a live punt read as "your
@@ -550,12 +560,12 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	# missions reference stock assets). Only the REPORT is join-aware: a wire
 	# join names the host's stream and the mounted expansion so a live punt
 	# reads as "your install lacks X", not as a bad local file.
-	var trn := mission.get_terrain_ref() + ".trn"
+	var trn := _mission_asset_filename(mission.get_terrain_ref(), ".trn")
 	if not resource_root.has_file(trn):
 		load_failed.emit(missing_mission_asset_reason(
-				mission.get_terrain_ref() + ".trn", bms_name, resource_root, wire_header_join))
+				trn, bms_name, resource_root, wire_header_join))
 		return ERR_FILE_NOT_FOUND
-	var env_name := mission.get_environment_ref() + ".env"
+	var env_name := _mission_asset_filename(mission.get_environment_ref(), ".env")
 	if not resource_root.has_file(env_name):
 		load_failed.emit(missing_mission_asset_reason(
 				env_name, bms_name, resource_root, wire_header_join))
