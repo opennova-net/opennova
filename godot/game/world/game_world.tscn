@@ -27,7 +27,6 @@ process_priority = -20
 [node name="SkyDome" type="SkyDome" parent="."]
 environment_path = NodePath("../MissionEnvironment")
 weather_path = NodePath("../Weather")
-environment_capture_layer_mask = 1024
 
 [node name="Weather" type="Weather" parent="."]
 process_priority = -10
@@ -42,4 +41,3 @@ weather_path = NodePath("../Weather")
 
 [node name="Celestial" type="Celestial" parent="."]
 environment_path = NodePath("../MissionEnvironment")
-environment_capture_layer_mask = 1024

@@ -52,14 +52,6 @@ void Celestial::_bind_methods() {
 			"set_terrain_data", "get_terrain_data");
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"),
 			&Celestial::set_resource_root);
-	ClassDB::bind_method(D_METHOD("set_environment_capture_layer_mask", "mask"),
-			&Celestial::set_environment_capture_layer_mask);
-	ClassDB::bind_method(D_METHOD("get_environment_capture_layer_mask"),
-			&Celestial::get_environment_capture_layer_mask);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "environment_capture_layer_mask",
-			PROPERTY_HINT_LAYERS_3D_RENDER),
-			"set_environment_capture_layer_mask",
-			"get_environment_capture_layer_mask");
 	ClassDB::bind_static_method("Celestial",
 			D_METHOD("source_material_uses_additive", "source"),
 			&Celestial::source_material_uses_additive);
@@ -92,16 +84,6 @@ void Celestial::set_resource_root(const Ref<ResourceRoot> &p_root) {
 	resource_root_ = p_root;
 	loaded_names_.clear();
 	_rebuild_if_needed();
-}
-
-void Celestial::set_environment_capture_layer_mask(uint32_t p_mask) {
-	environment_capture_layer_mask_ = p_mask;
-	for (const String &key : { String("sun"), String("moon") }) {
-		Body *body = bodies_.getptr(key);
-		if (body != nullptr) {
-			_stamp_environment_capture_layer(body->model);
-		}
-	}
 }
 
 MissionEnvironment *Celestial::_env_node() {
@@ -238,7 +220,6 @@ void Celestial::_rebuild_if_needed() {
 		body.materials = installed.materials;
 		body.tint = spec.tint;
 		if (spec.key == "sun" || spec.key == "moon") {
-			_stamp_environment_capture_layer(model);
 			// The disc bodies far-pin in BOTH shaders: the authored sun/moon
 			// materials are additive, so their surfaces render through
 			// celestial_additive (the shader carries the witness note).
@@ -366,18 +347,6 @@ void Celestial::_collect_meshes(Node *p_node,
 	}
 	for (int i = 0; i < p_node->get_child_count(); ++i) {
 		_collect_meshes(p_node->get_child(i), r_out);
-	}
-}
-
-void Celestial::_stamp_environment_capture_layer(Node3D *p_model) {
-	if (p_model == nullptr || environment_capture_layer_mask_ == 0) {
-		return;
-	}
-	Vector<MeshInstance3D *> meshes;
-	_collect_meshes(p_model, meshes);
-	for (MeshInstance3D *mesh : meshes) {
-		mesh->set_layer_mask(mesh->get_layer_mask() |
-				environment_capture_layer_mask_);
 	}
 }
 

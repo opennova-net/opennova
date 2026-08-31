@@ -40,14 +40,6 @@ void SkyDome::_bind_methods() {
 			&SkyDome::get_weather_path);
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "weather_path"),
 			"set_weather_path", "get_weather_path");
-	ClassDB::bind_method(D_METHOD("set_environment_capture_layer_mask", "mask"),
-			&SkyDome::set_environment_capture_layer_mask);
-	ClassDB::bind_method(D_METHOD("get_environment_capture_layer_mask"),
-			&SkyDome::get_environment_capture_layer_mask);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "environment_capture_layer_mask",
-			PROPERTY_HINT_LAYERS_3D_RENDER),
-			"set_environment_capture_layer_mask",
-			"get_environment_capture_layer_mask");
 	ClassDB::bind_method(D_METHOD("set_frame_clear_environment", "environment"),
 			&SkyDome::set_frame_clear_environment);
 	ClassDB::bind_method(D_METHOD("get_frame_clear_environment"),
@@ -75,14 +67,6 @@ void SkyDome::set_environment_path(const NodePath &p_path) {
 void SkyDome::set_weather_path(const NodePath &p_path) {
 	weather_path_ = p_path;
 	weather_node_id_ = ObjectID();
-}
-
-void SkyDome::set_environment_capture_layer_mask(uint32_t p_mask) {
-	environment_capture_layer_mask_ = p_mask;
-	if (mesh_instance_ != nullptr) {
-		mesh_instance_->set_layer_mask(
-				mesh_instance_->get_layer_mask() | p_mask);
-	}
 }
 
 void SkyDome::set_frame_clear_environment(const Ref<Environment> &p_environment) {
@@ -167,8 +151,6 @@ void SkyDome::build() {
 	mesh_instance_->set_cast_shadows_setting(
 			GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 	mesh_instance_->set_gi_mode(GeometryInstance3D::GI_MODE_DISABLED);
-	mesh_instance_->set_layer_mask(mesh_instance_->get_layer_mask() |
-			environment_capture_layer_mask_);
 	mesh_instance_->set_mesh(mesh);
 	add_child(mesh_instance_);
 	built_ = true;

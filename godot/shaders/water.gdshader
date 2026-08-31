@@ -84,13 +84,6 @@ uniform vec4 u_water_uv = vec4(1.0, 0.2, 0.0, 0.0);
 uniform sampler2D u_noise_color : filter_linear, repeat_enable;
 uniform sampler2D u_noise_normal : filter_linear, repeat_enable;
 uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
-// EnvironmentCubeCapture aliases water's otherwise exclusive visual layer so
-// the six cameras can admit only sky + sun/moon without consuming a 21st Godot
-// layer. Reject those six pass eyes by their exact camera mask — the capture
-// cameras cull to the aliased layer ALONE (EnvironmentCubeCapture
-// set_cull_mask), while the beauty/mirror masks are wider. IN_SHADOW_PASS guards the read:
-// shadow passes leave CAMERA_VISIBLE_LAYERS unset.
-const uint NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u; // 0x00000400
 // The underwater pass swaps to the OPAQUE material — blend OFF, flags 0x20000
 // [orig: Water_ShaderOpaque @ 0x28ee8c8; selection @ 0x5c33e6..0x5c34ea]. Under
 // the premul pass, ALPHA = 1.0 expresses blend-off exactly (out = src + dst*0);
@@ -148,10 +141,6 @@ void vertex() {
 }
 
 void fragment() {
-	if (!IN_SHADOW_PASS &&
-			CAMERA_VISIBLE_LAYERS == NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK) {
-		discard;
-	}
 	// The witnessed UV model: strip vertices are camera-relative, so the base
 	// term is (world - camera)/128 through the fog-derived scale - bias, and
 	// the offset carries camera/128 + the scroll accumulators
