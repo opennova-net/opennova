@@ -780,9 +780,12 @@ void Terrain::build() {
 		RID inst = rs->instance_create();
 		rs->instance_set_scenario(inst, scenario);
 		rs->instance_geometry_set_material_override(inst, mat_rid);
-		// Static terrain silhouettes are already carried in the composed page A;
-		// the terrain participates only in the ordinary world-visible layer.
-		rs->instance_set_layer_mask(inst, 1u << 0);
+		// Static terrain silhouettes are already carried in the composed page A.
+		// The dedicated layer keeps every camera rendering the terrain (bit 17
+		// sits inside the 20-bit default mask) while the hemisphere delta
+		// lights' cull mask excludes it — retail terrain takes NO hemisphere
+		// term (env/water.h; SunShadow::_make_hemi_light).
+		rs->instance_set_layer_mask(inst, Water::VISUAL_LAYER_TERRAIN_FOLIAGE);
 		rs->instance_set_visible(inst, false);
 		patch_instances[i] = inst;
 		patch_visible[i] = false;

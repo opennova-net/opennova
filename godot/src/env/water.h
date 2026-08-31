@@ -54,6 +54,11 @@ public:
 		VISUAL_LAYER_DYNAMIC_SHADOW_CASTER = 1 << 14,
 		VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER = 1 << 15,
 		VISUAL_LAYER_WORLD_NO_MIRROR = 1 << 16,
+		// Terrain + foliage instances: inside the 20-bit default camera mask
+		// (every view renders them) but excluded from the hemisphere delta
+		// lights' cull mask — retail terrain/foliage take NO hemisphere term
+		// (SunShadow::_make_hemi_light carries the witness).
+		VISUAL_LAYER_TERRAIN_FOLIAGE = 1 << 17,
 		VISUAL_LAYER_SHADOW_CASTER_MASK = VISUAL_LAYER_STATIC_SHADOW_CASTER |
 				VISUAL_LAYER_DYNAMIC_SHADOW_CASTER,
 		// The mirror camera's above-water mask; a below-water view adds

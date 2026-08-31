@@ -173,17 +173,16 @@ void light() {
 	// The sun leg of the retail combine through the scene light: LIGHT_COLOR
 	// arrives color * energy(2) * PI, so 0.5/PI restores sun_light, and
 	// ATTENUATION lands the CSM mask on foliage exactly as on the terrain
-	// under it. The hemisphere delta pair (axis-vertical by construction) and
-	// every omni contribute nothing — the witnessed highest-quality path binds
-	// Foliage_WindSwayVS, whose complete vs_1_1 source declares no light
-	// inputs, so the blend PS sees only the emitter/fade vertex color
+	// under it. The hemisphere delta pair excludes this layer via
+	// light_cull_mask (SunShadow::_make_hemi_light) and every omni must
+	// contribute nothing (the LIGHT_IS_DIRECTIONAL gate below) — the
+	// witnessed highest-quality path binds Foliage_WindSwayVS, whose complete
+	// vs_1_1 source declares no light inputs and writes oD0 = c6, so the
+	// blend PS sees only the emitter/fade vertex color; D3D SetLight state
+	// could reach only the failed-VS fixed-function fallback
 	// [orig: Foliage_RenderFarPatches @ 0x60a5dc;
 	// Terrain_CreateFoliageVertexShaders @ 0x5ff630].
-	// ('return' is illegal in light(), so gate the add instead.)
 	if (LIGHT_IS_DIRECTIONAL) {
-		vec3 up_view = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
-		if (abs(dot(LIGHT, up_view)) <= 0.9999) {
-			DIFFUSE_LIGHT += LIGHT_COLOR * (0.5 / PI) * ATTENUATION * ALBEDO;
-		}
+		DIFFUSE_LIGHT += LIGHT_COLOR * (0.5 / PI) * ATTENUATION * ALBEDO;
 	}
 }

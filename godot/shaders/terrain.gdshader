@@ -139,18 +139,14 @@ void light() {
 	// The witnessed response: the sun contributes mask * sun_light — flat (no
 	// N.L: the DOT3 normal term rides the tile-cache albedo) with ATTENUATION
 	// as the CSM mask, and no MODULATE2X (LIGHT_COLOR arrives as
-	// color * energy(2) * PI, so 0.5/PI restores sun_light * mask). Omni
-	// lights keep the canonical Lambert response (MP-1's clustered pool).
+	// color * energy(2) * PI, so 0.5/PI restores sun_light * mask). Retail
+	// terrain takes NO hemisphere term [orig: the fold @ 0x605260 has only
+	// mask*sun + sky] — the scene's hemisphere delta pair excludes this
+	// layer via light_cull_mask (SunShadow::_make_hemi_light), so every
+	// directional reaching this fragment is the sun. Omni lights keep the
+	// canonical Lambert response (MP-1's clustered pool).
 	if (LIGHT_IS_DIRECTIONAL) {
-		// Retail terrain takes NO hemisphere term — skip the scene's
-		// hemisphere delta pair, which is axis-vertical by construction while
-		// the sun's witnessed celestial arc never is
-		// [orig: the fold @ 0x605260 has only mask*sun + sky].
-		// ('return' is illegal in light(), so gate the add instead.)
-		vec3 up_view = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
-		if (abs(dot(LIGHT, up_view)) <= 0.9999) {
-			DIFFUSE_LIGHT += LIGHT_COLOR * (0.5 / PI) * ATTENUATION * ALBEDO;
-		}
+		DIFFUSE_LIGHT += LIGHT_COLOR * (0.5 / PI) * ATTENUATION * ALBEDO;
 	} else {
 		DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) *
 				LIGHT_COLOR * (1.0 / PI) * ATTENUATION * ALBEDO;

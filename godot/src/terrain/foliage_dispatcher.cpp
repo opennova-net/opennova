@@ -1,5 +1,6 @@
 #include "terrain/foliage_dispatcher.h"
 
+#include "env/water.h"
 #include "env/weather.h"
 
 #include <godot_cpp/classes/time.hpp>
@@ -768,7 +769,12 @@ RID FoliageDispatcher::_ensure_draw_instance(
     // never enter the shadow pass.
     server->instance_geometry_set_cast_shadows_setting(
         instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
-    server->instance_set_layer_mask(instance, 1u << 0);
+    // The dedicated terrain/foliage layer: every camera renders it; the
+    // hemisphere delta lights' cull mask excludes it (the witnessed
+    // highest-quality foliage VS declares no light inputs — the sun leg is
+    // the shader's own light() fold; see SunShadow::_make_hemi_light).
+    server->instance_set_layer_mask(instance,
+                                    Water::VISUAL_LAYER_TERRAIN_FOLIAGE);
     server->instance_set_extra_visibility_margin(instance, 8.0f);
     frame_stats_.backend_configuration_writes += 4;
     server->instance_set_visible(instance, false);
@@ -1105,7 +1111,8 @@ Dictionary FoliageDispatcher::get_backend_report() const {
       row["tile_cache_layer"] = stamp.tile_cache_layer;
       row["tile_cache_projection"] = stamp.tile_cache_projection;
       row["casts_shadows"] = false;
-      row["layer_mask"] = static_cast<int64_t>(1u << 0);
+      row["layer_mask"] =
+          static_cast<int64_t>(Water::VISUAL_LAYER_TERRAIN_FOLIAGE);
       draws.append(row);
       ++active_draws;
       if (stamp.visible) {

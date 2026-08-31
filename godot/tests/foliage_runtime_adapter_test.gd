@@ -254,8 +254,10 @@ func test_detail_preview_uses_foliage_map() -> void:
 		)
 		assert_false(bool(draw.casts_shadows),
 			"Fresh retail audit confirms both foliage tiers are absent from shadow passes.")
-		assert_eq(int(draw.layer_mask) & Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
-			"an alpha-blind catcher must not darken whole foliage cards")
+		assert_eq(int(draw.layer_mask), Water.VISUAL_LAYER_TERRAIN_FOLIAGE,
+			"foliage draws ride the dedicated terrain/foliage layer: every "
+			+ "camera renders it, the hemi delta lights' cull mask excludes "
+			+ "it, and the bit-15 alpha-blind catcher stays off the cards")
 		var material := draw.material as ShaderMaterial
 		assert_not_null(material)
 		if material != null:

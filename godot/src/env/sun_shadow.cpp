@@ -29,12 +29,10 @@ void SunShadow::set_environment_node(MissionEnvironment *p_environment) {
 
 void SunShadow::_ready() {
 	// The light's OWN visual layer decides which views render it - and
-	// therefore which views re-render the directional shadow
-	// atlas. The beauty camera (0x18C01) and the water mirror (0x8001) need
-	// it. Focused Q3 attaches resolved beauty depth and renders only typed
-	// self-lit draws, so it never submits this Light3D or pays another shadow
-	// atlas render. TERRAIN_SHADOW_RECEIVER (bit 15) is in exactly the beauty
-	// and mirror camera masks, so the light lives there.
+	// therefore which views re-render the directional shadow atlas.
+	// TERRAIN_SHADOW_RECEIVER (bit 15) sits in both the beauty camera's mask
+	// and the water mirror's REFLECTION_CULL_MASK, so exactly those two views
+	// carry the light (and the one CSM render).
 	set_layer_mask(Water::VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
 	// ADR 0043: one cascaded shadow map for the whole scene. Distance/splits
 	// are device tuning (settings knobs later); everything with a cast-shadow
@@ -76,7 +74,15 @@ DirectionalLight3D *SunShadow::_make_hemi_light(const StringName &p_name,
 	light->set_param(Light3D::PARAM_SPECULAR, 0.0f);
 	light->set_param(Light3D::PARAM_INDIRECT_ENERGY, 0.0f);
 	light->set_param(Light3D::PARAM_VOLUMETRIC_FOG_ENERGY, 0.0f);
-	light->set_cull_mask(0xFFFFFFFFu);
+	// The delta pair never reaches terrain or foliage: the retail terrain
+	// fold has only mask*sun + sky (compile_terrain_pixel_shaders @ 0x605260
+	// carries the cite in terrain.gdshader) and the witnessed max-quality
+	// foliage VS declares no light inputs (Terrain_CreateFoliageVertexShaders
+	// @ 0x5ff630, cited in foliage_detail.gdshaderinc) — the cull mask
+	// excludes their dedicated layer instead of a per-fragment direction
+	// sniff in both shader families.
+	light->set_cull_mask(0xFFFFFFFFu &
+			~uint32_t(Water::VISUAL_LAYER_TERRAIN_FOLIAGE));
 	light->set_negative(p_negative);
 	add_child(light);
 	light->set_as_top_level(true);

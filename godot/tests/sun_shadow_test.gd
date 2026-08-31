@@ -92,6 +92,35 @@ func test_the_sun_is_a_real_casting_light() -> void:
 			"the sun carries the env dir color raw for the canonical decode")
 
 
+func test_hemisphere_delta_pair_excludes_terrain_and_foliage_by_cull_mask() -> void:
+	# Retail terrain takes only mask*sun + sky and the witnessed max-quality
+	# foliage VS declares no light inputs — the delta pair therefore never
+	# reaches the dedicated terrain/foliage layer. light_cull_mask replaces
+	# the former per-fragment up-vector sniff (which would also have dropped
+	# a genuinely vertical noon sun).
+	var environment := _environment_at(1200, "HemiCullEnvironment")
+	var light := SunShadow.new()
+	light.set_environment_node(environment)
+	add_child_autofree(light)
+	light.advance_frame(0.0)
+
+	var expected_mask := 0xFFFFFFFF & ~Water.VISUAL_LAYER_TERRAIN_FOLIAGE
+	for hemi_name in ["HemiSkyDelta", "HemiGroundDelta"]:
+		var hemi := light.get_node(hemi_name) as DirectionalLight3D
+		assert_not_null(hemi, "%s exists" % hemi_name)
+		if hemi == null:
+			continue
+		assert_eq(hemi.light_cull_mask, expected_mask,
+				"%s skips the terrain/foliage layer, lights everything else"
+				% hemi_name)
+		assert_false(hemi.shadow_enabled,
+				"the delta pair never renders a shadow atlas")
+	var ground := light.get_node("HemiGroundDelta") as DirectionalLight3D
+	if ground != null:
+		assert_true(ground.light_negative,
+				"the up-shining ground delta subtracts")
+
+
 func test_game_world_composes_one_live_sun_during_ready() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
