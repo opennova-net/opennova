@@ -20,8 +20,8 @@ extends Control
 # different game's menu set can be pointed at the same shell.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const MenuOptionScrollPolicy := preload("res://game/menu_option_scroll_policy.gd")
-const RetailVideoQualityPolicy := preload("res://game/retail_video_quality_policy.gd")
+const PlayerOptionsScript := preload("res://game/player_options.gd")
+const OptionsMenuControllerScript := preload("res://game/options_menu_controller.gd")
 
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
@@ -118,18 +118,7 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 @export var mod_desc_names := PackedStringArray([
 	"MOD_DESC", "MOD_DESCRIPTION",
 ])
-# The Options -> Controls key-binding table, and the device radios that switch it
-# (Keyboard/Mouse/Joystick). The shell fills the table from the engine/runtime/controls catalog.
-@export var control_table_names := PackedStringArray([
-	"CONTROL_MAPPING",
-])
-@export var control_device_names := PackedStringArray([
-	"KEYBOARD", "MOUSE", "JOYSTICK",
-])
-# Spin lists that select the retail crosshair art (cross01.tga through cross25.tga).
-@export var crosshair_style_control_names := PackedStringArray([
-	"XHAIR_APPEARANCE",
-])
+
 # Controls that open NovaWorld (online multiplayer). The shipped JO main menu
 # carries an NW_MULTI_PLAYER button and jo_mp.mnu a NOVAWORLD window/screen.
 @export var novaworld_control_names := PackedStringArray([
@@ -145,8 +134,7 @@ signal resume_requested()
 # The player chose NovaWorld (online multiplayer) from the menu. main_game
 # opens the NovaWorld panel; the shell stays out of the networking itself.
 signal novaworld_requested()
-# Emitted after the Options spin list changes so an active HUD can reload its art.
-signal crosshair_style_changed(style: int)
+
 
 var _driver: MenuDriver
 var _frame: MenuFrame
@@ -157,6 +145,8 @@ var _text: RtxtStringFile
 var _style: MnsStyleSheet
 var _sound_profile: LwfData
 var _frame_stats: FrameStats = null
+var _player_options: PlayerOptions = null
+var _options_controller: OptionsMenuController = null
 
 var _menu_cache: Dictionary = {}            # filename -> MnuDocument
 var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back stack
@@ -175,13 +165,7 @@ var _named_handlers: Dictionary = {}
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
 # claims a loaded menu drives it; otherwise the shell's generic wiring runs.
 var _companions: Array = []
-# The armed remap capture (Options -> Controls): -1 = idle. Retail arms on the
-# table activation, clears the Control cell, and consumes the next key/button
-# [orig: the arm handler UI_ControlsRemapArmHandler @ 0x55d560; the capture pump @ 0x55c67c].
-var _remap_table_id := -1
-var _remap_row := -1
-var _remap_action := -1
-var _control_device := ControlsModel.DEVICE_KEYBOARD
+
 
 
 func _ready() -> void:
@@ -203,6 +187,13 @@ func _process(delta: float) -> void:
 	if stats_on:
 		_frame_stats.add(FrameStats.FRAME_MENU_SHELL,
 				Time.get_ticks_usec() - started)
+
+
+## MainGame installs its process-lifetime owner before setup; standalone shells
+## receive a private owner during asset assembly.
+func set_player_options(options: PlayerOptions) -> void:
+	if options != null and _driver == null:
+		_player_options = options
 
 
 func set_frame_stats(board: FrameStats) -> void:
@@ -327,6 +318,10 @@ func _assemble_assets() -> void:
 	_driver.url_requested.connect(_on_url_requested)
 	_driver.widget_activated.connect(_on_widget_activated)
 	_driver.list_activated.connect(_on_list_activated)
+	if _player_options == null:
+		_player_options = PlayerOptionsScript.new()
+	_options_controller = OptionsMenuControllerScript.new()
+	_options_controller.setup(_driver, _player_options)
 	set_process(true)
 
 
@@ -335,17 +330,15 @@ func _assemble_assets() -> void:
 func _gui_input(event: InputEvent) -> void:
 	if _driver == null or not visible:
 		return
+	if _options_controller != null and _options_controller.consume_input(event):
+		accept_event()
+		return
 	if event is InputEventMouseMotion:
 		var motion := event as InputEventMouseMotion
 		_driver.process_mouse(motion.position,
 				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
 	elif event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
-		if _remap_action >= 0 and button.pressed \
-				and _control_device == ControlsModel.DEVICE_MOUSE:
-			_consume_remap_mouse(button.button_index)
-			accept_event()
-			return
 		if button.button_index == MOUSE_BUTTON_LEFT:
 			_driver.process_mouse(button.position, button.pressed)
 			accept_event()
@@ -361,9 +354,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# A backgrounded menu must not steal Esc from the world.
 	if _driver == null or not is_visible_in_tree():
 		return
-	if event is InputEventKey and _remap_action >= 0:
-		if _consume_remap_key(event as InputEventKey):
-			get_viewport().set_input_as_handled()
+	if _options_controller != null and _options_controller.consume_input(event):
+		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and _driver.handle_key_input(event as InputEventKey):
 		get_viewport().set_input_as_handled()
@@ -388,6 +380,8 @@ func open_menu(file: String, target_screen: String) -> bool:
 			target_screen):
 		push_warning("MenuShell: menu '%s' has no screens" % file)
 		return false
+	if _options_controller != null:
+		_options_controller.prepare_document()
 	_wire_named_controls()
 	return true
 
@@ -439,12 +433,6 @@ func _refresh_underlay() -> void:
 
 
 func _on_screen_changed(screen_name: String) -> void:
-	# Leaving the screen tears down an armed remap capture like retail's
-	# per-screen pump state — otherwise a later keypress on ANY screen would
-	# assign to the stale action. The refill restores the blanked Control
-	# cell in the persisted table rows [orig: the pump state lives with the
-	# Options screen, UI_ControlsRemapArmHandler @ 0x55d560].
-	_end_remap(true)
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
 
@@ -465,9 +453,7 @@ func _on_screen_changed(screen_name: String) -> void:
 func _wire_named_controls() -> void:
 	_named_handlers.clear()
 	_mission_rows.clear()
-	MenuOptionScrollPolicy.apply(_driver)
-	RetailVideoQualityPolicy.apply(_driver)
-	_seed_crosshair_style_controls()
+
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
 	# skip the generic launch/mission wiring, so e.g. START_GAME means "host a game" rather
@@ -489,10 +475,7 @@ func _wire_named_controls() -> void:
 		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
 			has_mod_list = true
 			_seed_mod_list(id)
-	for table_name in control_table_names:
-		var id := _driver.widget_id(table_name)
-		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_TABLE:
-			_seed_control_mapping(id)
+
 	if has_mission_list:
 		_connect_named(start_control_names, _on_start_control)
 	elif has_mod_list:
@@ -505,14 +488,6 @@ func _wire_named_controls() -> void:
 
 const _LIST_KINDS := [MnuDocument.TYPE_LIST, MnuDocument.TYPE_MULTI,
 	MnuDocument.TYPE_LAN_LIST]
-
-
-func _seed_crosshair_style_controls() -> void:
-	var persisted := ResourceDirSettings.get_crosshair_style()
-	for control_name in crosshair_style_control_names:
-		var id := _driver.widget_id(control_name)
-		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_SPINLIST:
-			_driver.select_row(id, persisted, false)
 
 
 func _connect_named(names: PackedStringArray, handler: Callable) -> void:
@@ -596,114 +571,6 @@ func _on_list_activated(id: int, row: int) -> void:
 	elif _is_mod_list(widget_name):
 		if row >= 0 and row < _driver.item_count(id):
 			_apply_expansion(_driver.item_text(id, row))
-	elif widget_name in control_table_names:
-		_arm_remap(id, row)
-
-
-# --- Controls remap table (Options -> Controls) -------------------------------
-
-# Fill the CONTROL_MAPPING table with the LIVE key-binding records and wire the
-# Keyboard/Mouse/Joystick device radios, the remap capture, and the DEFAULTS /
-# CLEAR_KEY buttons [orig: UI_PopulateControlMappingList @ 0x55c0c0; the
-# OPTIONS callback registrations @ 0x55d737..0x55d809].
-func _seed_control_mapping(table_id: int) -> void:
-	_control_device = ControlsModel.DEVICE_KEYBOARD
-	_fill_control_mapping(table_id, _control_device)
-	for i in control_device_names.size():
-		var device := i  # 0=keyboard, 1=mouse, 2=joystick (ControlsModel.Device)
-		_named_handlers[control_device_names[i].to_upper()] = func() -> void:
-			_end_remap(false)
-			_control_device = device
-			_fill_control_mapping(table_id, device)
-	# DEFAULTS re-copies every record's defaults; CLEAR_KEY empties the
-	# selected row's slots for the active device
-	# [orig: @ 0x55bd90 / @ 0x55bfd0].
-	_named_handlers["DEFAULTS"] = func() -> void:
-		_end_remap(false)
-		ControlsBindings.model().restore_defaults()
-		ControlsBindings.persist()
-		_fill_control_mapping(table_id, _control_device)
-	_named_handlers["CLEAR_KEY"] = func() -> void:
-		_end_remap(false)
-		var selected := _driver.table_selected_rows(table_id)
-		var row := selected[0] if selected.size() > 0 else -1
-		var action := ControlsBindings.model().action_index_for_row(row)
-		if action >= 0:
-			ControlsBindings.model().clear_binding(action, _control_device)
-			ControlsBindings.persist()
-			_fill_control_mapping(table_id, _control_device)
-			_driver.table_select_row(table_id, row)
-
-
-func _fill_control_mapping(table_id: int, device: int, blank_row := -1) -> void:
-	_driver.table_clear_rows(table_id)
-	var rows := ControlsBindings.model().get_rows(device)
-	for i in rows.size():
-		var cells: PackedStringArray = rows[i]
-		if i == blank_row:
-			cells[2] = ""
-		_driver.table_add_row(table_id, cells)
-
-
-# Double-click on a mapping row arms the capture: the Control cell clears and
-# the next key (or mouse button, on the Mouse page) binds; Esc cancels
-# [orig: UI_ControlsRemapArmHandler @ 0x55d560 — pump state 1, row stored, cell cleared,
-#  focus taken; the joystick page's poll capture is not wired (D-CTRL-1)].
-func _arm_remap(table_id: int, row: int) -> void:
-	if _control_device == ControlsModel.DEVICE_JOYSTICK:
-		return
-	var action := ControlsBindings.model().action_index_for_row(row)
-	if action < 0:
-		return
-	_remap_table_id = table_id
-	_remap_row = row
-	_remap_action = action
-	_fill_control_mapping(table_id, _control_device, row)
-	_driver.table_select_row(table_id, row)
-
-
-# The armed keyboard capture: Esc cancels, anything mappable assigns. The
-# modifier flags feed the original event flag word (a key pressed with Ctrl
-# held alone records the Ctrl- combo)
-# [orig: the capture pump's Esc/assign split @ 0x55c68c/0x55c743;
-#  Input_QueueKeyEvent @ 0x760c10].
-func _consume_remap_key(event: InputEventKey) -> bool:
-	if not event.pressed:
-		return true
-	if event.physical_keycode == KEY_ESCAPE:
-		_end_remap(true)
-		return true
-	if ControlsBindings.model().assign_godot_key(_remap_action,
-			event.physical_keycode, event.ctrl_pressed, event.shift_pressed,
-			event.echo):
-		ControlsBindings.persist()
-		_end_remap(true)
-	return true
-
-
-# The armed mouse capture: the witnessed button->mask translation lives at
-# the seam [orig: the capture callback @ 0x55c780].
-func _consume_remap_mouse(button_index: int) -> void:
-	var mask := ControlsModel.mouse_mask_from_godot_button(button_index)
-	if mask != 0:
-		ControlsBindings.model().assign_mouse_mask(_remap_action, mask)
-		ControlsBindings.persist()
-	_end_remap(true)
-
-
-# Restore the live rows and drop the capture state [orig:
-# update_control_mapping_display @ 0x55b700 — cell restored, globals reset].
-func _end_remap(refill: bool) -> void:
-	if _remap_action < 0:
-		return
-	var table_id := _remap_table_id
-	var row := _remap_row
-	_remap_table_id = -1
-	_remap_row = -1
-	_remap_action = -1
-	if refill and table_id >= 0:
-		_fill_control_mapping(table_id, _control_device)
-		_driver.table_select_row(table_id, row)
 
 
 # --- Expansion / mod selection (Options -> Mods) ------------------------------
@@ -831,10 +698,7 @@ func _on_quit_requested() -> void:
 
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
-	if kind == "spinlist" and _is_crosshair_style_control(widget_name):
-		ResourceDirSettings.set_crosshair_style(index)
-		crosshair_style_changed.emit(ResourceDirSettings.get_crosshair_style())
-	elif kind == "list" and _is_mission_list(widget_name):
+	if kind == "list" and _is_mission_list(widget_name):
 		var mission_row := _mission_row_at(_driver.widget_id(widget_name), index)
 		_selected_mission = mission_row.get_file() if mission_row != null else value
 		# A selection on the SP screen fills the briefing pane and arms ACCEPT
@@ -996,13 +860,6 @@ func _is_mod_list(widget_name: String) -> bool:
 	return false
 
 
-func _is_crosshair_style_control(widget_name: String) -> bool:
-	for n in crosshair_style_control_names:
-		if n.nocasecmp_to(widget_name) == 0:
-			return true
-	return false
-
-
 func _find_mod_list() -> int:
 	for n in mod_list_names:
 		var id := _driver.widget_id(n)
@@ -1054,7 +911,12 @@ func get_selected_expansion() -> String:
 
 
 func get_crosshair_style() -> int:
-	return ResourceDirSettings.get_crosshair_style()
+	return _player_options.current().crosshair_style \
+			if _player_options != null else PlayerOptions.DEFAULT_CROSSHAIR_STYLE
+
+
+func get_player_options() -> PlayerOptions:
+	return _player_options
 
 
 func get_menu_stack_depth() -> int:
@@ -1166,8 +1028,8 @@ func menu_key(keycode: int, unicode: int = 0) -> bool:
 	ev.unicode = unicode
 	ev.pressed = true
 	# Same order as the real path: an armed remap capture consumes keys first.
-	if _remap_action >= 0:
-		return _consume_remap_key(ev)
+	if _options_controller != null and _options_controller.consume_input(ev):
+		return true
 	return _driver.handle_key_input(ev)
 
 

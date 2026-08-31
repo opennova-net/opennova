@@ -13,7 +13,7 @@ extends Node
 
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
 const ScoreboardPresenterScript := preload("res://game/world/scoreboard_presenter.gd")
@@ -26,6 +26,9 @@ const LfpPanelPresenterScript := preload("res://game/world/lfp_panel_presenter.g
 var _world: GameWorld = null
 var _player_presenter: LocalPlayerPresenter = null  # reserved for the weapon-round anchors
 var _ui_parent: Node = null
+# PlayerOptions seeds this before the lazy native HUD exists; it survives
+# teardown so the next mission build uses the same process-lifetime choice.
+var _crosshair_style := HudOverlay.MIN_CROSSHAIR_STYLE
 
 # The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
 # than it can ever present (net spectators may never acquire a local-player HUD).
@@ -186,11 +189,13 @@ func _on_minimap_water_changed(mask: ImageTexture) -> void:
 			_world.get_terrain_data() if _world != null else null, mask)
 
 
-## The USER crosshair style (Options); applied to a built HUD immediately, else
-## picked up from settings on the next build.
+## The USER crosshair style (Options); cache it even before the lazy HUD exists,
+## then apply it immediately to an existing HUD.
 func set_crosshair_style(style: int) -> void:
+	_crosshair_style = clampi(style, HudOverlay.MIN_CROSSHAIR_STYLE,
+			HudOverlay.MAX_CROSSHAIR_STYLE)
 	if _game_hud != null:
-		_game_hud.set_crosshair_style(style)
+		_game_hud.set_crosshair_style(_crosshair_style)
 
 
 # The in-game HUD over the live runtime: built lazily the first frame a mission has a
@@ -235,7 +240,7 @@ func _ensure_game_hud() -> void:
 		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
-	_game_hud.set_crosshair_style(ResourceDirSettings.get_crosshair_style())
+	_game_hud.set_crosshair_style(_crosshair_style)
 	_game_hud.configure(hudpos, root)
 	_hud_pos = hudpos
 	# TerrainData owns the TRN 16x16 sector routing table and the colormap

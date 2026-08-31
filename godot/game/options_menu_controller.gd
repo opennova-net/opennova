@@ -1,0 +1,300 @@
+class_name OptionsMenuController
+extends RefCounted
+
+## Binds the shared PlayerOptions model to either retail options surface:
+## options.mnu from the front end or game.mnu's inline OPTIONS_WRAPPER. It also
+## owns the one keyboard/mouse remap interaction, keeping MenuShell focused on
+## cross-document navigation and game launch policy.
+
+const MenuOptionScrollPolicy := preload("res://game/menu_option_scroll_policy.gd")
+const RetailVideoQualityPolicy := preload("res://game/retail_video_quality_policy.gd")
+
+const CONTROL_TABLE_NAMES := ["CONTROL_MAPPING"]
+const CROSSHAIR_STYLE_CONTROL_NAMES := ["XHAIR_APPEARANCE"]
+const KEYBOARD_CONTROL := "KEYBOARD"
+const MOUSE_CONTROL := "MOUSE"
+
+const UNSUPPORTED_CONTROLS := [
+	"DIFFICULTY", "UPDATE",
+	"WDM_AUDIO_2", "WDM_AUDIO_4", "WDM_AUDIO_6", "WDM_AUDIO_7",
+	"WDM_AUDIO_8", "WDM_RATE",
+	"JOYSTICK", "ENABLE_JOYSTICK", "INVERT_JOYSTICK",
+	"ENABLE_FORCE_FEEDBACK",
+	"MR_CLIPPY_KEYBOARD", "MR_CLIPPY_HINTS", "CLIENT_PUNKBUSTER",
+	"OPTIONS_AUTORELOAD", "OPTIONS_AUTOMEDIC",
+]
+
+var _driver: MenuDriver
+var _options: PlayerOptions
+var _remap_table_id := -1
+var _remap_row := -1
+var _remap_action := -1
+var _control_device := ControlsModel.DEVICE_KEYBOARD
+
+
+func setup(driver: MenuDriver, options: PlayerOptions) -> void:
+	_driver = driver
+	_options = options
+	_driver.screen_changed.connect(_on_screen_changed)
+	_driver.widget_value_changed.connect(_on_widget_value_changed)
+	_driver.widget_activated.connect(_on_widget_activated)
+	_driver.list_activated.connect(_on_list_activated)
+
+
+## Rebuild every options-owned widget after MenuDriver opens a document. All
+## helpers are presence-gated, so non-options menu files are a cheap no-op.
+func prepare_document() -> void:
+	_end_remap(false)
+	MenuOptionScrollPolicy.apply(_driver)
+	RetailVideoQualityPolicy.apply(_driver)
+	_seed_player_options()
+	_lock_unsupported_controls()
+	var table_id := _find_control_table()
+	if table_id >= 0:
+		_control_device = ControlsModel.DEVICE_KEYBOARD
+		_fill_control_mapping(table_id, _control_device)
+		_set_checked(KEYBOARD_CONTROL, true)
+		_set_checked(MOUSE_CONTROL, false)
+
+
+## Capture gets first refusal over shell input. False means the ordinary menu
+## pump should continue processing the event.
+func consume_input(event: InputEvent) -> bool:
+	if _remap_action < 0:
+		return false
+	if event is InputEventKey:
+		return _consume_remap_key(event as InputEventKey)
+	if event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.pressed and _control_device == ControlsModel.DEVICE_MOUSE:
+			_consume_remap_mouse(button.button_index)
+			return true
+	return false
+
+
+func _seed_player_options() -> void:
+	if _options == null:
+		return
+	var state := _options.current()
+	_seed_scroll("SOUNDFXVOLUME", state.sound_fx_volume)
+	_seed_scroll("DIALOGVOLUME", state.dialog_volume)
+	_seed_scroll("MUSICVOLUME", state.music_volume)
+	_seed_scroll("MOUSE_SENSITIVITY", state.mouse_sensitivity)
+	_set_checked("INVERT_MOUSE", state.invert_mouse)
+	for control_name in CROSSHAIR_STYLE_CONTROL_NAMES:
+		var id := _driver.widget_id(control_name)
+		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_SPINLIST:
+			_driver.select_row(id, state.crosshair_style, false)
+
+
+func _seed_scroll(control_name: String, value: int) -> void:
+	var id := _driver.widget_id(control_name)
+	if id < 0 or _driver.widget_kind_of(id) != MnuDocument.TYPE_SCROLL:
+		return
+	var scroll := _driver.get_widget_scroll_range(id)
+	if scroll != null:
+		_driver.set_widget_scroll_range(id, scroll.minimum, scroll.maximum,
+				scroll.page, value)
+
+
+func _lock_unsupported_controls() -> void:
+	_select_row("XHAIR_COLOR", 0)
+	_set_checked("XHAIR_SPREAD", true)
+	_set_checked("OPTIONS_AUTORELOAD", true)
+	_set_checked("OPTIONS_AUTOMEDIC", true)
+	_set_checked("WDM_AUDIO_2", true)
+	for channel_name in ["WDM_AUDIO_4", "WDM_AUDIO_6", "WDM_AUDIO_7",
+			"WDM_AUDIO_8"]:
+		_set_checked(channel_name, false)
+	for control_name in UNSUPPORTED_CONTROLS:
+		var id := _driver.widget_id(control_name)
+		if id >= 0:
+			_driver.set_widget_disabled(id, true)
+	for control_name in ["XHAIR_COLOR", "XHAIR_SPREAD"]:
+		var id := _driver.widget_id(control_name)
+		if id >= 0:
+			_driver.set_widget_disabled(id, true)
+
+
+func _select_row(control_name: String, row: int) -> void:
+	var id := _driver.widget_id(control_name)
+	if id >= 0 and _driver.item_count(id) > 0:
+		_driver.select_row(id, clampi(row, 0, _driver.item_count(id) - 1), false)
+
+
+func _set_checked(control_name: String, checked: bool) -> void:
+	var id := _driver.widget_id(control_name)
+	if id >= 0:
+		_driver.set_widget_checked(id, checked)
+
+
+func _on_screen_changed(_screen_name: String) -> void:
+	# Screen/document switches invalidate an armed table selection.
+	_end_remap(true)
+
+
+func _on_widget_value_changed(widget_name: String, kind: String,
+		index: int, _value: String) -> void:
+	if _options == null:
+		return
+	var state := _options.current()
+	match widget_name.to_upper():
+		"SOUNDFXVOLUME":
+			if kind != "scroll": return
+			state.sound_fx_volume = index
+		"DIALOGVOLUME":
+			if kind != "scroll": return
+			state.dialog_volume = index
+		"MUSICVOLUME":
+			if kind != "scroll": return
+			state.music_volume = index
+		"MOUSE_SENSITIVITY":
+			if kind != "scroll": return
+			state.mouse_sensitivity = index
+		"XHAIR_APPEARANCE":
+			if kind != "spinlist": return
+			state.crosshair_style = index
+		_:
+			return
+	_options.update(state)
+
+
+func _on_widget_activated(id: int, widget_name: String) -> void:
+	match widget_name.to_upper():
+		"INVERT_MOUSE":
+			var state := _options.current()
+			state.invert_mouse = _driver.is_widget_checked(id)
+			_options.update(state)
+		"KEYBOARD":
+			_switch_control_device(ControlsModel.DEVICE_KEYBOARD)
+		"MOUSE":
+			_switch_control_device(ControlsModel.DEVICE_MOUSE)
+		"DEFAULTS":
+			_restore_control_defaults()
+		"CLEAR_KEY":
+			_clear_selected_binding()
+		"ACCEPT":
+			# options.mnu authors an actionless Accept. pop_screen emits the
+			# driver's quit seam, which MenuShell resolves through its file stack.
+			_driver.pop_screen()
+		"OPT_ACCEPT", "OPT_CANCEL":
+			_show_ingame_main_wrapper()
+
+
+func _show_ingame_main_wrapper() -> void:
+	var main_id := _driver.widget_id("MAIN_WRAPPER")
+	var options_id := _driver.widget_id("OPTIONS_WRAPPER")
+	if main_id >= 0 and options_id >= 0:
+		_driver.set_widget_shown(main_id, true)
+		_driver.set_widget_shown(options_id, false)
+
+
+func _on_list_activated(id: int, row: int) -> void:
+	if _is_control_table(_driver.widget_name_of(id)):
+		_arm_remap(id, row)
+
+
+func _switch_control_device(device: int) -> void:
+	_end_remap(false)
+	_control_device = device
+	var table_id := _find_control_table()
+	if table_id >= 0:
+		_fill_control_mapping(table_id, device)
+
+
+func _restore_control_defaults() -> void:
+	_end_remap(false)
+	ControlsBindings.model().restore_defaults()
+	ControlsBindings.persist()
+	var table_id := _find_control_table()
+	if table_id >= 0:
+		_fill_control_mapping(table_id, _control_device)
+
+
+func _clear_selected_binding() -> void:
+	_end_remap(false)
+	var table_id := _find_control_table()
+	if table_id < 0:
+		return
+	var selected := _driver.table_selected_rows(table_id)
+	var row := selected[0] if selected.size() > 0 else -1
+	var action := ControlsBindings.model().action_index_for_row(row)
+	if action >= 0:
+		ControlsBindings.model().clear_binding(action, _control_device)
+		ControlsBindings.persist()
+		_fill_control_mapping(table_id, _control_device)
+		_driver.table_select_row(table_id, row)
+
+
+func _fill_control_mapping(table_id: int, device: int, blank_row := -1) -> void:
+	_driver.table_clear_rows(table_id)
+	var rows := ControlsBindings.model().get_rows(device)
+	for i in rows.size():
+		var cells: PackedStringArray = rows[i]
+		if i == blank_row:
+			cells[2] = ""
+		_driver.table_add_row(table_id, cells)
+
+
+func _arm_remap(table_id: int, row: int) -> void:
+	if _control_device == ControlsModel.DEVICE_JOYSTICK:
+		return
+	var action := ControlsBindings.model().action_index_for_row(row)
+	if action < 0:
+		return
+	_remap_table_id = table_id
+	_remap_row = row
+	_remap_action = action
+	_fill_control_mapping(table_id, _control_device, row)
+	_driver.table_select_row(table_id, row)
+
+
+func _consume_remap_key(event: InputEventKey) -> bool:
+	if not event.pressed:
+		return true
+	if event.physical_keycode == KEY_ESCAPE:
+		_end_remap(true)
+		return true
+	if ControlsBindings.model().assign_godot_key(_remap_action,
+			event.physical_keycode, event.ctrl_pressed, event.shift_pressed,
+			event.echo):
+		ControlsBindings.persist()
+		_end_remap(true)
+	return true
+
+
+func _consume_remap_mouse(button_index: int) -> void:
+	var mask := ControlsModel.mouse_mask_from_godot_button(button_index)
+	if mask != 0:
+		ControlsBindings.model().assign_mouse_mask(_remap_action, mask)
+		ControlsBindings.persist()
+	_end_remap(true)
+
+
+func _end_remap(refill: bool) -> void:
+	if _remap_action < 0:
+		return
+	var table_id := _remap_table_id
+	var row := _remap_row
+	_remap_table_id = -1
+	_remap_row = -1
+	_remap_action = -1
+	if refill and table_id >= 0 \
+			and _driver.widget_kind_of(table_id) == MnuDocument.TYPE_TABLE:
+		_fill_control_mapping(table_id, _control_device)
+		_driver.table_select_row(table_id, row)
+
+
+func _find_control_table() -> int:
+	for name in CONTROL_TABLE_NAMES:
+		var id := _driver.widget_id(name)
+		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_TABLE:
+			return id
+	return -1
+
+
+func _is_control_table(widget_name: String) -> bool:
+	for name in CONTROL_TABLE_NAMES:
+		if widget_name.nocasecmp_to(name) == 0:
+			return true
+	return false

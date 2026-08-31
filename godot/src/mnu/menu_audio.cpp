@@ -41,6 +41,7 @@ void MenuAudio::ensure_sound_pool_() {
 	for (int i = 0; i < opennova::menu::kMenuSoundChannels; ++i) {
 		AudioStreamPlayer *player = memnew(AudioStreamPlayer);
 		player->set_name(String("_MenuSound") + String::num_int64(i));
+		player->set_bus(StringName("SFX"));
 		add_child(player);
 		sound_players_.push_back(player);
 	}

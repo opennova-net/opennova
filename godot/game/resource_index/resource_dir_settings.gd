@@ -9,8 +9,6 @@ const SECTION := "resources"
 const DIR_KEY := "resource_dir"
 const EXPANSION_KEY := "expansion"
 const GAME_KEY := "game"
-const PLAYER_SECTION := "player"
-const CROSSHAIR_STYLE_KEY := "crosshair_style"
 
 
 ## The persisted resource directory, or "" when unset / no longer a valid dir.
@@ -45,23 +43,6 @@ static func get_game() -> String:
 ## Persist the game code, preserving any other sections in the config.
 static func set_game(code: String) -> void:
 	ConfigStore.write(CONFIG_PATH, SECTION, GAME_KEY, code.strip_edges().to_lower())
-
-
-## The player's retail crosshair index (MIN = cross01.tga, MAX = cross25.tga;
-## the range lives on the engine binding, HudOverlay.MIN/MAX_CROSSHAIR_STYLE).
-## Clamp corrupt or out-of-range values so HUD asset lookup always stays inside
-## the authored XHAIR_APPEARANCE table.
-static func get_crosshair_style() -> int:
-	return clampi(int(ConfigStore.read(
-			CONFIG_PATH, PLAYER_SECTION, CROSSHAIR_STYLE_KEY,
-			HudOverlay.MIN_CROSSHAIR_STYLE)),
-		HudOverlay.MIN_CROSSHAIR_STYLE, HudOverlay.MAX_CROSSHAIR_STYLE)
-
-
-## Persist the selected retail crosshair index, preserving every other setting.
-static func set_crosshair_style(style: int) -> void:
-	ConfigStore.write(CONFIG_PATH, PLAYER_SECTION, CROSSHAIR_STYLE_KEY,
-		clampi(style, HudOverlay.MIN_CROSSHAIR_STYLE, HudOverlay.MAX_CROSSHAIR_STYLE))
 
 
 ## A resource library is a real asset directory on disk, never inside the app's
