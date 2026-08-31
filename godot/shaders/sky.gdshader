@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, cull_front;
+render_mode unshaded, cull_front, fog_disabled;
 
 // Sky-dome shader: structural port of the original two-pass dome combine
 // [orig: render_skybox @ 0x579080], folded into one Godot pass:

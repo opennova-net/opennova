@@ -17,7 +17,6 @@ const SHADER_ROOT := "res://shaders"
 const OBJECT_ROOT := "res://shaders/object"
 const PROVENANCE_PATH := "res://shaders/provenance.json"
 const MANIFEST_PATH := "res://shaders/object/pipeline_manifest.json"
-const HASH_GOLDEN_PATH := "res://tests/object_shader_resource_hashes.golden.json"
 const VERTEX_POINT_LIGHT_VARYINGS := {
 	"v_point_light_diffuse": "ffp_diffuse",
 	"v_pixel_point_factor": "self_shadowed_attenuation",
@@ -207,16 +206,6 @@ func _transitive_sources(wrapper: String) -> Array:
 	return closure
 
 
-func _transitive_source_hash(wrapper: String) -> String:
-	var parts := PackedStringArray()
-	for pair in _transitive_sources(wrapper):
-		parts.append("@@ %s\n%s" % ["godot/" + String(pair[0]).trim_prefix("res://"), pair[1]])
-	var context := HashingContext.new()
-	context.start(HashingContext.HASH_SHA256)
-	context.update("\n".join(parts).to_utf8_buffer())
-	return context.finish().hex_encode()
-
-
 # --- provenance / include graph -----------------------------------------
 
 
@@ -224,8 +213,8 @@ func test_provenance_contract_covers_every_shader_resource_once() -> void:
 	var provenance: Dictionary = _load_json(PROVENANCE_PATH)
 	var sources := _shader_sources()
 	assert_eq(int(provenance["schema"]), 2)
-	assert_eq(sources.size(), 194, "the runtime inventory must stay closed")
-	assert_eq(int(provenance["resource_count"]), 194)
+	assert_eq(sources.size(), 195, "the runtime inventory must stay closed")
+	assert_eq(int(provenance["resource_count"]), 195)
 	var ids := {}
 	for contract in provenance["contracts"]:
 		ids[contract["id"]] = true
@@ -620,39 +609,6 @@ func test_projshadow_lives_in_the_slot_capture_pass_not_the_wrappers() -> void:
 		assert_true(adapter.contains(token), token)
 
 
-# --- transitive-source golden -------------------------------------------
-
-
-# The golden's payload: one transitive-source hash per manifest wrapper.
-# tests/tools/shader_hashes_regen.gd writes it back after a witnessed change.
-func _hash_payload() -> Dictionary:
-	var manifest := _manifest()
-	var hashes := {}
-	for path in _expected_shader_paths(manifest):
-		hashes["godot/" + String(path).trim_prefix("res://")] = _transitive_source_hash(path)
-	return {
-		"schema": 1,
-		"algorithm": "sha256-normalized-transitive-include-closure-v1",
-		"resource_count": hashes.size(),
-		"resources": hashes,
-	}
-
-
-func test_transitive_shader_sources_match_golden() -> void:
-	# Keep the old composed-source regression sensitivity after static
-	# splitting. Deliberate witnessed shader changes regenerate the golden with
-	# tests/tools/shader_hashes_regen.gd (run alone; it is deliberately red so
-	# a regen run is never mistaken for a green validation) and must review the
-	# resulting diff.
-	var payload := _hash_payload()
-	var hashes: Dictionary = payload["resources"]
-
-	var golden: Dictionary = _load_json(HASH_GOLDEN_PATH)
-	assert_eq(int(golden["schema"]), 1)
-	assert_eq(String(golden["algorithm"]), String(payload["algorithm"]))
-	assert_eq(int(golden["resource_count"]), hashes.size())
-	var golden_resources: Dictionary = golden["resources"]
-	assert_eq(_sorted_keys(golden_resources), _sorted_keys(hashes), "the golden covers exactly the manifest wrappers")
-	for key in hashes:
-		assert_eq(String(golden_resources.get(key, "")), String(hashes[key]),
-				"%s transitive source hash (regenerate with tests/tools/shader_hashes_regen.gd after a witnessed change)" % key)
+# The transitive-source hash golden retired with ADR 0043: shader sources are
+# no longer a byte-pinned parity surface; the structural contracts above and
+# the provenance scope carry the regression sensitivity.

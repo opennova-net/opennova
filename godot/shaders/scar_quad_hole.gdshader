@@ -9,7 +9,7 @@ shader_type spatial;
 //       latch is LIVE here — ALPHAFUNC GREATER, ALPHAREF 128  -> the discard
 //   z-write ON (no 0x100000)                      -> depth_draw_always
 //   CULLMODE NONE (0x400000)                      -> cull_disabled
-render_mode unshaded, blend_mix, depth_draw_always, cull_disabled;
+render_mode unshaded, blend_mix, depth_draw_always, cull_disabled, fog_disabled;
 
 // Gamma-space pipeline (D-RMAT-7): raw texel sampling, gamma-space combine,
 // the exact inverse of the blit's transfer curve on the way out.

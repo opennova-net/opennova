@@ -5,7 +5,7 @@ shader_type spatial;
 // (no write) like the plain bodies. Brightness scales by u_opacity - the
 // glare's is the witnessed dot^4/2 x occlusion chain
 // [orig: render_skybox_sun_glow @ 0x5acd00]. docs/env/env-tod-re.md.
-render_mode unshaded, depth_draw_never, cull_disabled, blend_add;
+render_mode unshaded, depth_draw_never, cull_disabled, blend_add, fog_disabled;
 
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"

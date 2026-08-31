@@ -3,7 +3,7 @@ shader_type spatial;
 // Retail decodes the atlas texel as a normal and combines it with a rotating
 // 1/51.2 perturbation and the particle's projective position before sampling
 // the captured scene. SCREEN_UV is the Godot projective-position equivalent.
-render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
+render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, fog_disabled;
 
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 uniform sampler2D albedo_tex : filter_linear, repeat_disable;

@@ -62,7 +62,11 @@ void SunShadow::_ready() {
 	set_param(Light3D::PARAM_SHADOW_BIAS, 0.02f);
 	set_param(Light3D::PARAM_SHADOW_NORMAL_BIAS, 0.2f);
 	set_param(Light3D::PARAM_SIZE, 0.0f);
-	set_param(Light3D::PARAM_ENERGY, 1.0f);
+	// ADR 0043: the sun is a REAL light — the env light block's dir_color
+	// (sun by day, moon by night, NVG-rewritten) at the fixed-function
+	// MODULATE2X fold carried as energy, so the lit pipeline reproduces the
+	// gamma-domain x2 the retired shader fold applied.
+	set_param(Light3D::PARAM_ENERGY, 2.0f);
 	set_param(Light3D::PARAM_SPECULAR, 0.0f);
 	set_param(Light3D::PARAM_INDIRECT_ENERGY, 0.0f);
 	set_param(Light3D::PARAM_VOLUMETRIC_FOG_ENERGY, 0.0f);
@@ -82,11 +86,9 @@ void SunShadow::_apply_projection_masks() {
 		set_shadow_caster_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
 		set_shadow(true);
 	} else {
-		// Receivers: both world-entity layers plus the hidden FP body (its
-		// silhouette must land on the world the player sees).
-		set_cull_mask(Water::VISUAL_LAYER_WORLD |
-				Water::VISUAL_LAYER_WORLD_NO_MIRROR |
-				Water::VISUAL_LAYER_FP_BODY_SHADOW_ONLY);
+		// ADR 0043: the sun carries real color/energy, so every lit receiver
+		// (terrain today, the object families as they convert) takes it.
+		set_cull_mask(0xFFFFFFFFu);
 		set_shadow_caster_mask(Water::VISUAL_LAYER_DYNAMIC_SHADOW_CASTER);
 		// The SlotShadow capture pipeline renders the live entity ground
 		// shadows (retail's per-slot RT + terrain drape, see
@@ -102,7 +104,25 @@ void SunShadow::_process(double p_delta) {
 
 void SunShadow::advance_frame(double p_delta) {
 	_update_direction();
+	_update_light_color();
 	(void)p_delta;
+}
+
+// ADR 0043: the env light block's active dir color (sun by day, moon by
+// night, post-modulator, NVG-rewritten — the same value the retired
+// fixed-function block carried in slot 227) becomes the light's color.
+void SunShadow::_update_light_color() {
+	MissionEnvironment *env = Object::cast_to<MissionEnvironment>(
+			ObjectDB::get_instance(environment_node_id_));
+	if (env == nullptr) {
+		return;
+	}
+	const Ref<EnvLightState> light_state = env->get_light_state();
+	if (light_state.is_null() || light_state->get_values().is_null()) {
+		return;
+	}
+	const Vector3 c = light_state->get_values()->get_dir_color();
+	set_color(Color(c.x, c.y, c.z));
 }
 
 void SunShadow::_update_direction() {

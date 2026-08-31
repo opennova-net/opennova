@@ -5,11 +5,24 @@
 #include <runtime/environment/water_frame.h>
 
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/sky.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
 
 namespace {
+
+// ADR 0043: the fixed-function MODULATE2X fold (pixel = texture * light * 2)
+// carried as light energy — the hemisphere-sky ambient runs at this energy,
+// matching SunShadow's directional energy, so the lit pipeline reproduces the
+// gamma-domain x2 the retired shader fold applied.
+constexpr float kModulate2xAmbientEnergy = 2.0f;
+// The retail exponential fog law's constant: factor = exp(-dist * k / end)
+// (the retired jointops_fog_factor type-0 arm), mapped onto Environment
+// exponential fog density = k / end.
+constexpr float kRetailExpFogConstant = 4.1588830833596715f;
 
 Vector3 to_vector3(const opennova::env::Rgb &rgb) {
 	return Vector3(rgb.r, rgb.g, rgb.b);
@@ -174,6 +187,10 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_tile_overlay_tint);
 	ClassDB::bind_method(D_METHOD("apply_terrain_uniforms", "material"),
 			&MissionEnvironment::apply_terrain_uniforms);
+	ClassDB::bind_method(D_METHOD("set_scene_environment", "environment"),
+			&MissionEnvironment::set_scene_environment);
+	ClassDB::bind_method(D_METHOD("get_scene_environment"),
+			&MissionEnvironment::get_scene_environment);
 	ClassDB::bind_method(D_METHOD("get_water_color"),
 			&MissionEnvironment::get_water_color);
 	ClassDB::bind_method(D_METHOD("has_water_height"),
@@ -386,6 +403,95 @@ void MissionEnvironment::_write_lighting_block_globals(
 	// enable, which a loaded world always carries.
 	rs->global_shader_parameter_set("opennova_fog_enabled", v.fog_enabled);
 	lighting_block_writer_ = this;
+	_write_scene_environment(p_values);
+}
+
+void MissionEnvironment::set_scene_environment(
+		const Ref<Environment> &p_environment) {
+	scene_environment_ = p_environment;
+	if (scene_environment_.is_null()) {
+		sky_material_.unref();
+		return;
+	}
+	// ADR 0043: the hemisphere ambient source. The .env sky/ground colors feed
+	// a gradient Sky that only the ambient and reflected light sample — the
+	// visible background stays BG_COLOR (the witnessed frame clear) plus the
+	// authored sky dome.
+	Ref<Shader> sky_shader = ResourceLoader::get_singleton()->load(
+			"res://shaders/hemisphere_sky.gdshader");
+	sky_material_.instantiate();
+	sky_material_->set_shader(sky_shader);
+	Ref<Sky> sky;
+	sky.instantiate();
+	sky->set_material(sky_material_);
+	sky->set_radiance_size(Sky::RADIANCE_SIZE_64);
+	scene_environment_->set_sky(sky);
+	scene_environment_->set_ambient_source(Environment::AMBIENT_SOURCE_SKY);
+	scene_environment_->set_ambient_light_energy(kModulate2xAmbientEnergy);
+	scene_environment_->set_reflection_source(
+			Environment::REFLECTION_SOURCE_SKY);
+	scene_environment_->set_fog_light_energy(1.0f);
+	// The frame clear (BG_COLOR) already carries the witnessed horizon color;
+	// fog must not tint the background a second time, and no aerial
+	// perspective — the retail law is a plain fog blend.
+	scene_environment_->set_fog_sky_affect(0.0f);
+	scene_environment_->set_fog_aerial_perspective(0.0f);
+	if (state_.is_loaded()) {
+		_write_scene_environment(_build_light_values());
+		const opennova::env::SceneFogValues fog =
+				state_.build_scene_fog(underwater_view_);
+		apply_scene_fog(to_vector3(fog.color), fog.start, fog.end, fog.type);
+	} else {
+		_write_scene_environment(EnvLightValues::retail_noon_defaults());
+	}
+}
+
+void MissionEnvironment::_write_scene_environment(
+		const Ref<EnvLightValues> &p_values) {
+	if (scene_environment_.is_null() || p_values.is_null()) {
+		return;
+	}
+	const EnvLightValues &v = **p_values;
+	if (sky_material_.is_valid()) {
+		sky_material_->set_shader_parameter("u_hemi_sky", v.hemi_sky);
+		sky_material_->set_shader_parameter("u_hemi_ground", v.hemi_ground);
+	}
+	scene_environment_->set_fog_enabled(v.fog_enabled);
+	apply_scene_fog(v.fog_color, v.fog_start, v.fog_end, v.fog_type);
+}
+
+void MissionEnvironment::apply_scene_fog(const Vector3 &p_color, float p_start,
+		float p_end, int p_type) {
+	if (scene_environment_.is_null()) {
+		return;
+	}
+	Environment *env = scene_environment_.ptr();
+	env->set_fog_light_color(Color(p_color.x, p_color.y, p_color.z));
+	const float safe_end = MAX(p_end, 1.0f);
+	if (p_type == 0) {
+		// Retail type 0: factor = exp(-eye_depth * k / end) on eye depth —
+		// Environment exponential fog is the same law on depth. The depth
+		// range is kept coherent so a later mode switch never reads stale
+		// bounds.
+		env->set_fog_mode(Environment::FOG_MODE_EXPONENTIAL);
+		env->set_fog_density(kRetailExpFogConstant / safe_end);
+		env->set_fog_depth_begin(0.0f);
+		env->set_fog_depth_end(safe_end);
+	} else {
+		// Retail linear types on radial distance: type 2 starts at end/2,
+		// type 3 at end/4, other types at the authored start. Environment
+		// depth fog is the same ramp on depth (the radial-vs-depth curvature
+		// at screen edges is the accepted ADR 0043 divergence).
+		float begin = p_start;
+		if (p_type == 2) {
+			begin = safe_end * 0.5f;
+		} else if (p_type == 3) {
+			begin = safe_end * 0.25f;
+		}
+		env->set_fog_mode(Environment::FOG_MODE_DEPTH);
+		env->set_fog_depth_begin(begin);
+		env->set_fog_depth_end(safe_end);
+	}
 }
 
 void MissionEnvironment::_release_lighting_block() {
@@ -464,6 +570,8 @@ void MissionEnvironment::write_shader_globals() {
 	rs->global_shader_parameter_set("opennova_fog_end", globals.fog_end);
 	rs->global_shader_parameter_set("opennova_fog_start", globals.fog_start);
 	rs->global_shader_parameter_set("opennova_fog_type", globals.fog_type);
+	apply_scene_fog(to_vector3(globals.fog_color), globals.fog_start,
+			globals.fog_end, globals.fog_type);
 }
 
 void MissionEnvironment::_write_scene_fog_globals() {
@@ -475,6 +583,7 @@ void MissionEnvironment::_write_scene_fog_globals() {
 	rs->global_shader_parameter_set("opennova_fog_end", fog.end);
 	rs->global_shader_parameter_set("opennova_fog_start", fog.start);
 	rs->global_shader_parameter_set("opennova_fog_type", fog.type);
+	apply_scene_fog(to_vector3(fog.color), fog.start, fog.end, fog.type);
 }
 
 // --- mission clock ----------------------------------------------------------
@@ -766,22 +875,14 @@ void MissionEnvironment::apply_terrain_uniforms(
 	if (p_material.is_null()) {
 		return;
 	}
+	// ADR 0043: lighting and fog reach the terrain through the Godot scene
+	// (SunShadow / the hemisphere sky / Environment fog); the material keeps
+	// only the authored surface inputs.
 	const opennova::env::TerrainEnvUniforms uniforms =
 			state_.build_terrain_uniforms(underwater_view_);
 	Ref<ShaderMaterial> material = p_material;
-	material->set_shader_parameter("u_sun_light",
-			to_vector3(uniforms.sun_light));
-	material->set_shader_parameter("u_sky_ambient",
-			to_vector3(uniforms.sky_ambient));
-	material->set_shader_parameter("u_sun_direction",
-			to_vector3(uniforms.sun_direction));
 	material->set_shader_parameter("u_tile_overlay_tint",
 			to_vector3(uniforms.tile_overlay_tint));
-	material->set_shader_parameter("u_fog_color",
-			to_vector3(uniforms.fog_color));
-	material->set_shader_parameter("u_fog_end", uniforms.fog_end);
-	material->set_shader_parameter("u_fog_start", uniforms.fog_start);
-	material->set_shader_parameter("u_fog_type", uniforms.fog_type);
 }
 
 Vector3 MissionEnvironment::get_water_color() const {

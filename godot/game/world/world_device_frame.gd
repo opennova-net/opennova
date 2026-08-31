@@ -423,9 +423,9 @@ func render_light_frame() -> void:
 	_world._light_director.render_frame(
 			viewport.get_camera_3d() if viewport != null else null,
 			viewmodel_parts, viewmodel_owner)
-	# The terrain leg of the same pool: the next terrain frame re-draws its
-	# patches with the pool lights they overlap (terrain_light_leg.gd).
-	TerrainLightLeg.render_frame(_world._terrain, _world._light_director)
+	# ADR 0043: the terrain leg of the pool is retired — the lit terrain takes
+	# scene lights (OmniLight3D at stage 6) instead of the projected-texture
+	# re-draw rows.
 	# Feed the render-slot shadow device the same point-light context (its
 	# per-slot dominant-light pick reads the shared pool) plus the local
 	# player state for the retail priority/drape gates.

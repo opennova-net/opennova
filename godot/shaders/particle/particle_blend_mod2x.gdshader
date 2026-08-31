@@ -4,7 +4,7 @@ shader_type spatial;
 // SRC=DESTCOLOR, DST=SRCCOLOR, producing 2 * source * framebuffer. Godot has
 // no separate-factor equivalent, so blend_mul with a doubled source preserves
 // the same color equation (subject to the target framebuffer's normal clamp).
-render_mode unshaded, cull_disabled, blend_mul, depth_draw_never;
+render_mode unshaded, cull_disabled, blend_mul, depth_draw_never, fog_disabled;
 
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 #include "res://shaders/color.gdshaderinc"

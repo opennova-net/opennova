@@ -1,29 +1,25 @@
-// Shared NovaLogic terrain lighting + fog math, included by both terrain.gdshader
-// (runtime, baked-CPT mesh) and terrain_editor.gdshader (editor live-sculpt
-// heightmap mesh). Both render the SAME surface; only their geometry source and
-// overlays differ, so the surface-shading and fog math live here once.
+// Shared NovaLogic terrain SURFACE math, included by terrain.gdshader.
 //
-// The surface chain is the witnessed TOP-TIER ps.1.4 splat shader
+// ADR 0043 (modern presentation): the terrain shader is lit by Godot — the
+// DirectionalLight3D sun, the hemisphere-sky ambient, clustered omni lights,
+// Environment fog and (stage 4) CSM shadows replaced the fixed-function light
+// fold `(cm.a*sun + sky)*0.5 * 2 cm * 2 dp3 * 4 splat`, the projected
+// light-pool pass and the hand fog that lived here. What remains witnessed is
+// the authored GROUND LOOK — the ps.1.4 splat chain's texture composition
 // [orig: PolyTrn_PS14SplatNormalMap source text @ 0x7dece0, assembled by
 // compile_terrain_pixel_shaders @ 0x605260]:
 //   splat = c1*blend.r + c2*blend.g + c3*blend.b        (3-way detail splat)
 //   dp3   = dot(detail2(t3), blendmap)  — only in the SplatNormalMap variant,
 //           selected when polytrn_detailmap2 exists (PS14Splat otherwise)
-//   light = (tile.a*c1 + c0) / 2                        (c1 = LIGHT, c0 = SKY)
-//   out   = light *2 cm *2 dp3 *4 splat
-// EXACTLY ONE normal term: the dual-normal product belonged to the separate
-// ps.1.1 non-splat tier (PolyTrn_PSDualNormalMap) and was wrongly STACKED on
-// the splat here for years (the gobj-era "v23 dual-normal" chimera) — under
-// the gamma-faithful pipeline (D-RMAT-7) that squared bump contrast and
-// clipped whole regions to white. Corrected 2026-07-06 (D-TRN row in the
-// ledger). Fog: [orig: Render_SetFogState @ 0x58a950 ->
-// CD3DDevice_SetFogParameters @ 0x677960]. Keep byte-for-byte authoritative.
+// composed here as the lit material's ALBEDO. The x8 of retail's combined
+// modulate ladder splits into ALBEDO x4 and the MODULATE2X light energy the
+// sun/ambient carry (SunShadow / MissionEnvironment).
 
-// --- Shared uniforms: terrain surface inputs + lighting + fog -----------------
+// --- Shared uniforms: terrain surface inputs ---------------------------------
 // Textures sample RAW (no source_color): retail never enables sRGB sampling -
-// texel bytes enter the ps.1.4 math as-is. The gamma-space convention
-// (D-RMAT-7) lives in color.gdshaderinc; consumers encode the final
-// color once at their ALBEDO write.
+// texel bytes enter the math as-is. The gamma-space convention (D-RMAT-7)
+// lives in color.gdshaderinc; consumers encode the final color once at their
+// ALBEDO write.
 // The device-global texfilter mode applies to EVERY active stage
 // [orig: CGfxDevice_ApplyRenderStates per-stage loop @ 0x67e3b5..0x67e50e],
 // and the reference machine runs the anisotropic mode, so every mipped
@@ -54,21 +50,15 @@ uniform float u_detail2_density = 8.0;
 // CONTENT (the 128x128 pair regenerates every frame), not a UV scroll. The
 // selector keeps PS14SplatNormalMap on full-splat+detail2 maps (the noise
 // rides its dp3), and detail2-less splat maps faithfully render NO underwater
-// modulation; the PSShadowBasic/NormalMap light-scale pair serves only the
-// partially-authored stage sets our top-tier chain does not model
-// (docs/terrain/terrain-re.md, underwater section).
+// modulation (docs/terrain/terrain-re.md, underwater section).
 // [orig: below-water flag @ 0x60FEE0 -> dword_319FB3C @ 0x60915F; live t3
 //  slot swap @ 0x6043f2 (dword_3266E98 <- Water_NoiseColorTexture, authored
 //  dword_319F998 otherwise); shader select @ 0x6044b1..0x604556; 8/density
 //  texcoord @ 0x609786..0x6097D6]
 uniform sampler2D u_water_noise : filter_linear, repeat_enable;
 uniform bool u_below_water = false;
-// Retail creates a mip chain but the TileBakeDot3 pass explicitly uses
-// base-level bilinear sampling with quadrant CLAMP.
-uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
-uniform bool u_has_heightfield_normal = false;
 // PolyTrn_RenderTile composes the mission .til base layer into the terrain
-// tile before the same ps.1.4 lighting chain used by runtime and ONED.
+// tile before the shared surface chain used by runtime and ONED.
 uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
 uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
@@ -76,75 +66,11 @@ uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
 // not consume it (the generated coefficient map belongs to the unported
 // ps.1.1 tiers at stage 7).
 uniform sampler2D u_detailmap : filter_nearest_mipmap, repeat_disable;
-// Un-enved defaults = the retail noon register (full_00.env tod 1200:
-// sun_rgb 170,170,167; sky_rgb 84,88,89 — bytes /255), one register with the
-// object-model/global defaults.
-uniform vec3 u_sun_light = vec3(0.666667, 0.666667, 0.654902);
-uniform vec3 u_sky_ambient = vec3(0.329412, 0.345098, 0.349020);
-uniform vec3 u_sun_direction = vec3(0.0, 0.70710678, 0.70710678);
 uniform float u_detail_density = 128.0;
-uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
-uniform float u_fog_start = 0.0;
-uniform float u_fog_end = 1024.0;
-uniform int u_fog_type = 0;
 
-// --- The terrain leg of the EffectWorld light pool --------------------------
-// Retail re-draws each terrain batch once more PER pool light, additively,
-// through a two-stage projected-texture shader: stage 0 samples the 64x64
-// "texlight2d" disc projected on the ground plane around the light, stage 1
-// the 64x8 "texlightspot1d" strip by height above/below it, both MODULATE2X
-// over the pixel constants c4..c6 the pass uploads (the light colour already
-// folded by 0.5 so stage 0's 2x restores it; stage 1's 2x stays).
-// (retail: the per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
-//  Light_SetupTerrainProjectedPass @0x5AA830; the collect, the 16-per-batch
-//  cap, the authored terrain-disable gate and the constants are portable in
-//  renderer::LightScene::collect_terrain_pass_rows; the two textures are
-//  renderer::falloff_texture_light2d_argb / _spot1d_argb; the projection
-//  contract terrain_light_uv_disc / _height — see
-//  docs/render/render-lighting-re.md.)
-// Device fold: Godot instance uniforms take neither arrays nor samplers, so
-// the <= 16 rows per patch ride one RGBAF texture row per pool slot (two
-// texels per light: position.xyz + inv_scale, then c4..c6 + the patch's
-// count) and each patch instance carries its slot. The 0x600 shader retail
-// binds addresses CLAMP (sub_680720(this, clamp=1, 0, 0, 0)
-// @0x5a98eb..0x5a98f4) and both textures are created without mips, hence
-// filter_linear + repeat_disable here.
-uniform sampler2D u_terrain_light_rows : filter_nearest, repeat_disable, hint_default_black;
-uniform sampler2D u_terrain_light_disc : filter_linear, repeat_disable, hint_default_black;
-uniform sampler2D u_terrain_light_strip : filter_linear, repeat_disable, hint_default_black;
-uniform bool u_terrain_light_enabled = false;
-const int TERRAIN_LIGHT_ROWS_PER_PATCH = 16;
-
-vec3 terrain_point_light_pool(vec3 world_pos, float slot) {
-	vec3 sum = vec3(0.0);
-	if (!u_terrain_light_enabled) {
-		return sum;
-	}
-	int row = int(slot + 0.5);
-	int count = int(texelFetch(u_terrain_light_rows, ivec2(1, row), 0).a + 0.5);
-	for (int k = 0; k < TERRAIN_LIGHT_ROWS_PER_PATCH; k++) {
-		if (k >= count) {
-			break;
-		}
-		vec4 posr = texelFetch(u_terrain_light_rows, ivec2(2 * k, row), 0);
-		vec4 pixel = texelFetch(u_terrain_light_rows, ivec2(2 * k + 1, row), 0);
-		vec3 d = world_pos - posr.xyz;
-		// The mission-space contract (d3d.x = -mission.y, d3d.y = mission.z,
-		// d3d.z = mission.x): disc u = (light.y - p.y) * inv + 0.5,
-		// v = (p.x - light.x) * inv + 0.5; strip u = (p.z - light.z) * inv +
-		// 0.5, v = 0.5. In the Godot frame (x, y-up, z = -mission.y) that is
-		// disc (p.z - light.z, p.x - light.x) and strip (p.y - light.y).
-		vec2 disc_uv = vec2(d.z, d.x) * posr.w + 0.5;
-		vec2 strip_uv = vec2(d.y * posr.w + 0.5, 0.5);
-		vec3 disc = texture(u_terrain_light_disc, disc_uv).rgb;
-		vec3 strip = texture(u_terrain_light_strip, strip_uv).rgb;
-		// Stage 0 MODULATE2X (c * disc) x2, stage 1 MODULATE2X (prev * strip)
-		// x2: the explicit 2 * 2 is the witnessed fold, with the 0.5 already
-		// inside pixel.rgb.
-		sum += 2.0 * 2.0 * pixel.rgb * disc * strip;
-	}
-	return sum;
-}
+// Retail's combined modulate ladder is x8 total; the light legs carry the
+// MODULATE2X x2 as light energy, leaving x4 with the texture product.
+const float TERRAIN_ALBEDO_SCALE = 4.0;
 
 vec2 retail_detail_uv_from_atlas(vec2 atlas_uv, float density) {
 	// Retail writes UV1 as source_position * (polytrn_detaildensity / 512).
@@ -182,59 +108,32 @@ vec2 clamp_retail_quadrant_uv(vec2 uv, vec2 quadrant, ivec2 dimensions) {
 	return clamp(uv, minimum_uv, maximum_uv);
 }
 
-vec3 quantize_retail_signed_vector(vec3 value) {
-	// Both Terrain_GenerateNormalMap and PolyTrn_RenderTile truncate
-	// (component+1)*127.5 to bytes before D3DTA_TEXTURE/D3DTA_DIFFUSE DOT3.
-	ivec3 encoded = ivec3(clamp((value + 1.0) * 127.5,
-		vec3(0.0), vec3(255.0)));
-	return vec3(encoded) / 255.0;
-}
-
-float retail_tile_light_alpha(vec3 heightfield_normal, vec2 terrain_uv,
-		vec2 quadrant) {
-	vec3 normal_byte = u_has_heightfield_normal
-		? texture(u_heightfield_normal, clamp_retail_quadrant_uv(
-			terrain_uv, quadrant, textureSize(u_heightfield_normal, 0))).rgb
-		: quantize_retail_signed_vector(normalize(vec3(
-			heightfield_normal.x, heightfield_normal.z, heightfield_normal.y)));
-	// Env exposes the direct retail getter tuple. PolyTrn packs that tuple into
-	// D3DCOLOR RGB as (Z, X, Y) before the heightfield-normal DOT3.
-	// [orig: Environment_GetLightDirectionFloat @ 0x57d870;
-	//  Terrain_GenerateNormalMap @ 0x603210;
-	//  PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e].
-	vec3 texture_basis_light = vec3(u_sun_direction.z, u_sun_direction.x, u_sun_direction.y);
-	vec3 light_byte = quantize_retail_signed_vector(texture_basis_light);
-	return clamp(4.0 * dot(normal_byte - 0.5, light_byte - 0.5), 0.0, 1.0);
-}
-
-vec4 retail_bare_terrain_tile(vec3 raw_colormap_rgb, vec3 heightfield_normal,
-		vec2 terrain_uv, vec2 quadrant) {
+vec3 retail_bare_terrain_tile(vec3 raw_colormap_rgb) {
 	// The base tile bake uses diffuse 0x00808080: RGB MODULATE2X gives
-	// raw*256/255 while its zero diffuse alpha discards authored colormap A.
-	// The following additive DOT3 pass writes the heightfield light term to A.
-	return vec4(
-		clamp(raw_colormap_rgb * (256.0 / 255.0), vec3(0.0), vec3(1.0)),
-		retail_tile_light_alpha(heightfield_normal, terrain_uv, quadrant));
+	// raw*256/255 [orig: PolyTrn_RenderTile @ 0x60da70]. The DOT3 sun-mask
+	// alpha the retail bake added is retired (ADR 0043): Godot's per-pixel
+	// N.L and CSM carry the terrain light shape.
+	return clamp(raw_colormap_rgb * (256.0 / 255.0), vec3(0.0), vec3(1.0));
 }
 
-vec4 compose_retail_tile_overlay(vec4 colormap, vec3 world_pos) {
+vec3 compose_retail_tile_overlay(vec3 colormap_rgb, vec3 world_pos) {
 	if (u_has_tile_overlay) {
 		vec2 tile_uv = fract(vec2(world_pos.x, -world_pos.z) * (1.0 / 1024.0));
 		vec4 tile = texture(u_tile_overlay, tile_uv);
 		// Analytic/editor fallback: the legacy full-atlas surrogate retains
 		// standard coverage but not retail's ordered render-target alpha. The
-		// canonical runtime page cache composes exact overlay RGBA before DOT3;
-		// this cold path therefore applies the overlay to RGB only.
-		colormap.rgb = mix(colormap.rgb, tile.rgb * u_tile_overlay_tint, tile.a);
+		// canonical runtime page cache composes exact overlay RGBA; this cold
+		// path therefore applies the overlay to RGB only.
+		colormap_rgb = mix(colormap_rgb, tile.rgb * u_tile_overlay_tint, tile.a);
 	}
-	return colormap;
+	return colormap_rgb;
 }
 
-// NovaLogic terrain surface shading — the witnessed ps.1.4 splat chain
-// [orig: PolyTrn_PS14SplatNormalMap source text @ 0x7dece0]. No fog/overlays — callers
-// layer those on top. Colormap/detail UVs come from the caller's geometry
-// (runtime: baked patch mesh; editor: sculpted heightmap mesh).
-vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
+// The authored ground texture composition — the witnessed ps.1.4 splat chain's
+// texture half [orig: PolyTrn_PS14SplatNormalMap source text @ 0x7dece0],
+// serving as the lit material's ALBEDO. Colormap/detail UVs come from the
+// caller's geometry.
+vec3 terrain_surface_albedo(vec3 cm_rgb, vec2 colormap_uv,
 		vec2 detail_uv, vec2 quadrant) {
 	vec2 blend_uv = clamp_retail_quadrant_uv(
 		colormap_uv, quadrant, textureSize(u_blendmap, 0));
@@ -268,46 +167,5 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 		normal_factor = dot(modulator, blend) * 2.0;
 	}
 
-	// mad_d2: light = (tile.a * c1 + c0) / 2 with the WITNESSED constants.
-	// tile.a is the ordered overlay render-target alpha plus the additive,
-	// byte-quantized heightfield-normal DOT3 bake on canonical cache pages; raw
-	// authored colormap alpha is cleared by the base pass and never reaches t0.
-	// [orig: PolyTrn_RenderTile @ 0x60da70; Terrain_GenerateNormalMap
-	// @ 0x603210; terrain_setup_lighting_and_shader @ 0x604420 pushes
-	//  c0 <- PolyTrn_PSConstC0_SkyColorR @ 0x31a183c, c1 <- PolyTrn_PSConstC1_Light
-	//  @ 0x31a182c; values from init_terrain_lighting_color_ramps @ 0x604ee0
-	//  <- Render_TerrainScene @ 0x610c80 (Env_LightBlock / Env_SkyBlock)]
-	vec3 ambient = (cm.a * u_sun_light + u_sky_ambient) * 0.5;
-
-	// mul_x2 twice, then mul_x4 [orig: @ 0x7dece0 tail]:
-	// out = light *2 colormap *2 dp3 *4 splat.
-	vec3 lit = ambient * cm.rgb * 2.0;
-	lit *= normal_factor;
-	return lit * detail * 4.0;
-}
-
-float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {
-	float safe_end = max(fog_end, 1.0);
-	if (fog_type == 0) {
-		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
-	}
-
-	float start = fog_start;
-	if (fog_type == 2) {
-		start = safe_end * 0.5;
-	} else if (fog_type == 3) {
-		start = safe_end * 0.25;
-	}
-	float fog_range = max(safe_end - start, 1.0);
-	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
-}
-
-// Type 0 consumes eye-space depth/Z. Linear modes consume radial camera
-// distance. [orig: Render_SetFogState @ 0x58a950 ->
-// CD3DDevice_SetFogParameters @ 0x677960]
-vec3 apply_terrain_fog(vec3 color, vec3 world_pos, vec3 camera_pos, float eye_depth) {
-	float radial_distance = length(world_pos - camera_pos);
-	float dist = u_fog_type == 0 ? max(eye_depth, 0.0) : radial_distance;
-	float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);
-	return mix(u_fog_color, color, fog_factor);
+	return cm_rgb * detail * normal_factor * TERRAIN_ALBEDO_SCALE;
 }

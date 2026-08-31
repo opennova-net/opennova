@@ -5,7 +5,7 @@ shader_type spatial;
 // MODULATE(TEXTURE, DIFFUSE) on color AND alpha. DIFFUSE alpha lands only in
 // the fragment alpha (the destination attenuation) — retail does NOT scale the
 // source RGB by it. `blend_premul_alpha` is Godot's ONE/INVSRCALPHA pair.
-render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never;
+render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never, fog_disabled;
 
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 #include "res://shaders/color.gdshaderinc"

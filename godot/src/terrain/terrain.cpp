@@ -18,6 +18,7 @@
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include "object/object_model.h"
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -31,12 +32,6 @@
 using namespace godot;
 
 void Terrain::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_light_context", "scene", "time_ms"),
-		&Terrain::set_light_context);
-	ClassDB::bind_method(D_METHOD("get_light_patches_lit"),
-		&Terrain::get_light_patches_lit);
-	ClassDB::bind_method(D_METHOD("get_light_rows_total"),
-		&Terrain::get_light_rows_total);
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &Terrain::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &Terrain::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_surface_inputs"), &Terrain::get_surface_inputs);
@@ -483,7 +478,7 @@ void Terrain::render_frame() {
 				cached_env_node->get_light_direction_render_tuple();
 	}
 	static_shadow_rasterizer.begin_frame(page_light_direction,
-			light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
+			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()));
 	tile_cache_device.begin_frame(draw_list.frame_id);
 
 	// Apply the draw list onto the instance pool: draw-list index == pool slot.
@@ -587,9 +582,6 @@ void Terrain::render_frame() {
 	}
 	patches_active = count;
 
-	// The light-pool re-draw rows for exactly this draw list's patches.
-	_render_light_rows(draw_list);
-
 	// Update shader parameters on the single shared material
 	if (terrain_material.is_valid()) {
 		terrain_material->set_shader_parameter("u_debug_mode", debug_mode);
@@ -613,26 +605,13 @@ void Terrain::render_frame() {
 		}
 	}
 
-	// Update lighting from MissionEnvironment, prefer smoothed colors from
-	// Weather — both native now, direct typed calls (ADR 0034 d6).
+	// Environment-derived surface uniforms (ADR 0043: lighting and fog come
+	// from the Godot scene — the sun light, hemisphere-sky ambient and
+	// Environment fog MissionEnvironment/SunShadow feed; the terrain material
+	// keeps only the authored surface inputs).
 	if (terrain_material.is_valid()) {
 		if (cached_env_node && cached_env_node->is_loaded()) {
-			// Base env -> terrain-uniform push, shared with the editor preview
-			// (MissionEnvironment.apply_terrain_uniforms drives both shaders' uniforms).
 			cached_env_node->apply_terrain_uniforms(terrain_material);
-			// Runtime-only: prefer Weather-smoothed colors when a weather node
-			// is present (overriding the ones it smooths). The terrain surface
-			// consumes only c1 = light + c0 = sky [orig: @ 0x604420, see docs/terrain/terrain-re.md].
-			if (cached_weather_node) {
-				terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->get_smooth_sun());
-				terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->get_smooth_sky());
-				// The underwater pass replaces the weather fog block with
-				// Env_WaterColorLit. Above water, retain Weather's direct smoothed
-				// color override exactly as before.
-				if (!cached_env_node->is_underwater_view()) {
-					terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->get_smooth_fog());
-				}
-			}
 			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
 			// one multiply; the shared runtime/ONED tile path consumes this uniform.
 			// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md].
@@ -640,164 +619,6 @@ void Terrain::render_frame() {
 			terrain_material->set_shader_parameter(
 				"u_tile_overlay_tint", tile_overlay_tint);
 		}
-	}
-}
-
-void Terrain::set_light_context(const Ref<LightScene> &p_scene, int p_time_ms) {
-	light_scene = p_scene;
-	light_time_ms = p_time_ms;
-	if (light_scene.is_valid()) {
-		_bind_light_textures();
-	} else if (terrain_material.is_valid()) {
-		terrain_material->set_shader_parameter("u_terrain_light_enabled", false);
-		// The direct write IS the latched value: a later re-arm must push the
-		// enable again, not compare against the stale 1.
-		light_rows_enabled_written = 0;
-		light_patches_lit = 0;
-		light_rows_total = 0;
-	}
-}
-
-void Terrain::_bind_light_textures() {
-	if (light_textures_bound || terrain_material.is_null()) {
-		return;
-	}
-	// The two procedural textures, built once per process like the corona
-	// texture [orig: Lighting_InitTextures @0x5a94f0 creates "texlight2d"
-	// 64x64 and "texlightspot1d" 64x8, both without mips, and the 0x600 shader
-	// they bind addresses CLAMP — CGfxTexture_SetSamplerAddressing (ex sub_680720)(this, clamp=1, 0, 0, 0)
-	// @0x5a98eb..0x5a98f4; the shader samplers carry the matching
-	// filter_linear, repeat_disable hints].
-	const int size = LightScene::terrain_light_texture_size();
-	const int rows = LightScene::terrain_light_strip_rows();
-	if (light_disc_texture.is_null()) {
-		light_disc_texture = ImageTexture::create_from_image(
-				Image::create_from_data(size, size, false, Image::FORMAT_RGBA8,
-						LightScene::terrain_light_disc_rgba8()));
-	}
-	if (light_strip_texture.is_null()) {
-		light_strip_texture = ImageTexture::create_from_image(
-				Image::create_from_data(size, rows, false, Image::FORMAT_RGBA8,
-						LightScene::terrain_light_strip_rgba8()));
-	}
-	// The rows texture: one row per pool slot, two RGBAF texels per light —
-	// (position.xyz Godot world, inv_scale) then (c4..c6, the patch's count).
-	light_rows_bytes.resize(
-			static_cast<int64_t>(LIGHT_ROWS_TEXELS) * PATCH_POOL_SIZE * 16);
-	light_rows_bytes.fill(0);
-	light_rows_image = Image::create_from_data(LIGHT_ROWS_TEXELS,
-			PATCH_POOL_SIZE, false, Image::FORMAT_RGBAF, light_rows_bytes);
-	light_rows_texture = ImageTexture::create_from_image(light_rows_image);
-	light_rows_uploaded = light_rows_bytes.duplicate();
-	light_rows_enabled_written = -1;
-	terrain_material->set_shader_parameter("u_terrain_light_disc",
-			light_disc_texture);
-	terrain_material->set_shader_parameter("u_terrain_light_strip",
-			light_strip_texture);
-	terrain_material->set_shader_parameter("u_terrain_light_rows",
-			light_rows_texture);
-	light_textures_bound = true;
-}
-
-void Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list) {
-	light_patches_lit = 0;
-	light_rows_total = 0;
-	if (light_scene.is_null() || terrain_material.is_null()) {
-		return;
-	}
-	_bind_light_textures();
-	const int count = static_cast<int>(draw_list.patches.size());
-	light_patch_bounds.resize(static_cast<size_t>(count));
-	light_patch_rows.resize(static_cast<size_t>(count));
-	for (int i = 0; i < count; i++) {
-		const opennova::TerrainPatchDraw &draw = draw_list.patches[i];
-		// The patch mesh's sector-local AABB at the family the draw resolved,
-		// offset by its sector origin — the traverse_quadtree world AABB the
-		// object pass's LightDrawContext shape takes.
-		AABB local;
-		if (draw.tile_index >= 0 &&
-				static_cast<size_t>(draw.tile_index) < tile_infos.size()) {
-			const Ref<ArrayMesh> &mesh =
-					tile_infos[draw.tile_index].lod_meshes[draw.lod_family];
-			if (mesh.is_valid()) {
-				local = mesh->get_aabb();
-			}
-		}
-		const Vector3 lo = local.position;
-		const Vector3 hi = local.position + local.size;
-		const float aabb_min[3] = {
-			static_cast<float>(lo.x), static_cast<float>(lo.y),
-			static_cast<float>(lo.z)
-		};
-		const float aabb_max[3] = {
-			static_cast<float>(hi.x), static_cast<float>(hi.y),
-			static_cast<float>(hi.z)
-		};
-		light_patch_bounds[i] = opennova::renderer::terrain_patch_light_bounds(
-				aabb_min, aabb_max, draw.sector_ox, draw.sector_oz);
-	}
-	// EffectWorld_AmbientScale = the env light-state gain (the modulator
-	// unpack the object pass feeds too); the recip factor unpacks the loaded
-	// Env_TerrainColorRecip [orig: @0x5aa1ef..0x5aa23f].
-	Vector3 gain(1.0f, 1.0f, 1.0f);
-	uint32_t recip_packed = opennova::renderer::kTerrainFactorDefaultPacked;
-	if (cached_env_node != nullptr) {
-		const Ref<EnvLightState> light_state = cached_env_node->get_light_state();
-		if (light_state.is_valid() && light_state->get_values().is_valid()) {
-			gain = light_state->get_values()->get_gain();
-		}
-		if (cached_env_node->is_loaded()) {
-			recip_packed = cached_env_node->state().terrain_color_recip_packed();
-		}
-	}
-	const size_t total = light_scene->collect_terrain_light_rows(
-			light_patch_bounds.data(), light_patch_bounds.size(), gain,
-			light_time_ms, cached_weather_node, recip_packed,
-			light_patch_rows.data());
-	light_rows_total = static_cast<int>(total);
-	// Rewrite the whole rows image: a slot that lost its lights reads count 0.
-	light_rows_bytes.fill(0);
-	float *texels = reinterpret_cast<float *>(light_rows_bytes.ptrw());
-	for (int i = 0; i < count; i++) {
-		const opennova::renderer::TerrainLightPatchRows &rows = light_patch_rows[i];
-		if (rows.count > 0) {
-			++light_patches_lit;
-		}
-		float *row = texels + static_cast<size_t>(i) * LIGHT_ROWS_TEXELS * 4;
-		for (size_t k = 0; k < rows.count; ++k) {
-			const opennova::renderer::TerrainLightRow &light = rows.rows[k];
-			float *posr = row + k * 8;
-			float *color = posr + 4;
-			// mission (x, y, z) -> Godot (x, z, -y): the same fold the pool's
-			// object leg applies to its selected positions.
-			posr[0] = light.position[0];
-			posr[1] = light.position[2];
-			posr[2] = -light.position[1];
-			posr[3] = light.inv_scale;
-			color[0] = light.pixel_rgb[0];
-			color[1] = light.pixel_rgb[1];
-			color[2] = light.pixel_rgb[2];
-			color[3] = static_cast<float>(rows.count);
-		}
-	}
-	// Upload only when the rows moved: a still camera under steady lights
-	// rebuilds identical bytes every frame.
-	const int64_t byte_count = light_rows_bytes.size();
-	if (light_rows_uploaded.size() != byte_count ||
-			std::memcmp(light_rows_uploaded.ptr(), light_rows_bytes.ptr(),
-					static_cast<size_t>(byte_count)) != 0) {
-		light_rows_image->set_data(LIGHT_ROWS_TEXELS, PATCH_POOL_SIZE, false,
-				Image::FORMAT_RGBAF, light_rows_bytes);
-		light_rows_texture->update(light_rows_image);
-		light_rows_uploaded.resize(byte_count);
-		std::memcpy(light_rows_uploaded.ptrw(), light_rows_bytes.ptr(),
-				static_cast<size_t>(byte_count));
-	}
-	const int enabled = light_rows_total > 0 ? 1 : 0;
-	if (enabled != light_rows_enabled_written) {
-		terrain_material->set_shader_parameter("u_terrain_light_enabled",
-				enabled != 0);
-		light_rows_enabled_written = enabled;
 	}
 }
 
@@ -975,10 +796,7 @@ void Terrain::_clear_terrain() {
 	if (terrain_material.is_valid()) {
 		terrain_material->set_shader_parameter("u_tile_cache", Variant());
 		terrain_material->set_shader_parameter("u_has_tile_cache", false);
-		terrain_material->set_shader_parameter("u_terrain_light_enabled", false);
 	}
-	light_patches_lit = 0;
-	light_rows_total = 0;
 	_clear_tile_overlay_texture();
 	_clear_derived_textures();
 
@@ -1022,20 +840,12 @@ void Terrain::build() {
 		// the terrain participates only in the ordinary world-visible layer.
 		rs->instance_set_layer_mask(inst, 1u << 0);
 		rs->instance_set_visible(inst, false);
-		// Draw-list index == pool slot == the light rows texture row this
-		// instance reads; fixed for the instance's lifetime.
-		rs->instance_geometry_set_shader_parameter(inst,
-				"u_instance_light_slot", static_cast<float>(i));
 		patch_instances[i] = inst;
 		patch_visible[i] = false;
 		patch_uniforms_stamped[i] = false;
 	}
 
 	_load_textures();
-	light_textures_bound = false;
-	if (light_scene.is_valid()) {
-		_bind_light_textures();
-	}
 
 	built = true;
 

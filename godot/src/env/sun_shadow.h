@@ -48,6 +48,7 @@ protected:
 private:
 	void _apply_projection_masks();
 	void _update_direction();
+	void _update_light_color();
 
 	int projection_mode_ = PROJECTION_DYNAMIC;
 	ObjectID environment_node_id_;

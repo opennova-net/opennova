@@ -85,11 +85,10 @@ func test_dynamic_projection_separates_live_casters_from_world_receivers() -> vo
 	light.projection_mode = SunShadow.PROJECTION_DYNAMIC
 	add_child_autofree(light)
 
-	assert_eq(light.light_cull_mask,
-			Water.VISUAL_LAYER_WORLD
-			| Water.VISUAL_LAYER_WORLD_NO_MIRROR
-			| Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
-			"live shadows reach both world-entity layers and the hidden FP body")
+	# ADR 0043: the sun carries real color/energy for the lit scene, so every
+	# lit receiver takes it.
+	assert_eq(light.light_cull_mask, 0xFFFFFFFF,
+			"the real sun lights every lit receiver (ADR 0043)")
 	assert_eq(light.shadow_caster_mask,
 			Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER)
 	assert_false(light.shadow_enabled,

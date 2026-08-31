@@ -2,7 +2,7 @@ shader_type spatial;
 // CParticleDefEntry_ParseBlendMode @ 0x5e29f0 → BlendMode::Blend (0).
 // Engine D3D state: SrcBlend = SRCALPHA, DestBlend = INVSRCALPHA — standard
 // alpha blending.
-render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
+render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, fog_disabled;
 
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 #include "res://shaders/color.gdshaderinc"

@@ -13,7 +13,6 @@
 
 #include "env/mission_environment.h"
 #include "env/weather.h"
-#include "lights/light_scene.h"
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_static_shadow_rasterizer.h"
 #include "terrain/terrain_tile_cache_device.h"
@@ -85,43 +84,6 @@ private:
 	Vector3 tile_overlay_tint = Vector3(1.0f, 1.0f, 1.0f);
 
 	bool built = false;
-
-	// The terrain leg of the EffectWorld light pool: the shell hands this node
-	// the shared LightScene + the frame time each light frame (the SlotShadow
-	// precedent), and render_frame re-draws every patch with the <= 16 pool
-	// lights its own draw list overlaps — packed into one RGBAF rows texture
-	// indexed by the pool slot each patch instance carries [orig: the
-	// per-light else-arm of render_terrain_sector_batch @0x6092A0 ->
-	// Light_SetupTerrainProjectedPass @0x5AA830; the collect/gates/constants
-	// are portable in opennova::renderer::LightScene::collect_terrain_pass_rows, see
-	// docs/render/render-lighting-re.md]. Godot instance uniforms carry
-	// neither arrays nor samplers and this shader already spends seven of the
-	// sixteen instance slots, so the rows ride a texture rather than the object
-	// pass's four scalar pairs — retail draws each of the sixteen, not four.
-	static constexpr int LIGHT_ROWS_PER_PATCH =
-			opennova::renderer::kTerrainLightQueryLimit;
-	static constexpr int LIGHT_ROWS_TEXELS = LIGHT_ROWS_PER_PATCH * 2;
-	Ref<LightScene> light_scene;
-	int light_time_ms = 0;
-	Ref<Image> light_rows_image;
-	Ref<ImageTexture> light_rows_texture;
-	PackedByteArray light_rows_bytes;
-	// The bytes the rows texture currently holds: the per-frame rebuild
-	// uploads only when they differ (a full RGBAF texture update otherwise).
-	PackedByteArray light_rows_uploaded;
-	int light_rows_enabled_written = -1; // -1 unset, else the bool last pushed
-	bool light_textures_bound = false;
-	int light_patches_lit = 0;
-	int light_rows_total = 0;
-	std::vector<opennova::renderer::TerrainLightPatchBounds> light_patch_bounds;
-	std::vector<opennova::renderer::TerrainLightPatchRows> light_patch_rows;
-	// Per node rather than process-static: a static Ref would destruct at DLL
-	// teardown after Godot's servers are gone.
-	Ref<ImageTexture> light_disc_texture;
-	Ref<ImageTexture> light_strip_texture;
-
-	void _bind_light_textures();
-	void _render_light_rows(const opennova::TerrainDrawList &draw_list);
 
 	// Cached typed node pointers — avoids per-frame get_node_or_null()
 	MissionEnvironment *cached_env_node = nullptr;
@@ -211,18 +173,6 @@ public:
 	// The single shared surface material (GUT seam; precedent
 	// Water::get_water_material).
 	Ref<ShaderMaterial> get_terrain_material() const { return terrain_material; }
-
-	// The light-pool context for the NEXT terrain frame: the shared pool (null
-	// retires the terrain leg) and the frame time the flicker reads. The
-	// pipeline publishes it from render_light_frame, which runs after this
-	// frame's terrain draw, so the pool state each patch re-draws with is one
-	// frame old at 62 Hz — the device fold; the patch <-> slot match is exact
-	// because the rows are collected against this node's own draw list.
-	void set_light_context(const Ref<LightScene> &p_scene, int p_time_ms);
-	// Diagnostics: patches that received at least one light row / the row
-	// total in the last render_frame.
-	int get_light_patches_lit() const { return light_patches_lit; }
-	int get_light_rows_total() const { return light_rows_total; }
 
 	void build();
 

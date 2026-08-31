@@ -588,8 +588,13 @@ func test_lighting_contracts_reach_the_shader_math() -> void:
 		"obj_phong_map_specular", "obj_environment_cube_approx", "obj_apply_additive_fog",
 		"v_dir_self_shadow", "v_pixel_point_factor", "obj_pixel_point_vertex_factors",
 	], "object/shared.gdshaderinc")
+	# ADR 0043: the terrain is lit by the Godot scene — the include carries
+	# only the authored surface (splat/albedo) composition.
 	_contains_all(_read(SHADER_ROOT.path_join("terrain_lighting.gdshaderinc")),
-			["u_sun_light", "u_sky_ambient", "terrain_point_light_pool"], "terrain_lighting.gdshaderinc")
+			["terrain_surface_albedo", "TERRAIN_ALBEDO_SCALE"], "terrain_lighting.gdshaderinc")
+	_contains_none(_read(SHADER_ROOT.path_join("terrain_lighting.gdshaderinc")),
+			["u_sun_light", "terrain_point_light_pool", "apply_terrain_fog"],
+			"terrain_lighting.gdshaderinc")
 	_contains_all(_read(SHADER_ROOT.path_join("foliage_detail.gdshaderinc")),
 			["opennova_sky_ambient", "opennova_sun_light", "opennova_sun_direction"], "foliage_detail.gdshaderinc")
 	var sky := _read(SHADER_ROOT.path_join("sky.gdshader"))
@@ -631,7 +636,7 @@ func test_retail_tile_set_atlas_is_carried_not_misclassified_as_a_lightmap() -> 
 	for shader in [terrain, foliage]:
 		assert_true(shader.contains("uniform sampler2DArray u_tile_cache"))
 		assert_true(shader.contains("texture(u_tile_cache"))
-	assert_true(terrain.contains("terrain_surface_color_from_colormap"))
+	assert_true(terrain.contains("terrain_surface_albedo"))
 	assert_true(foliage.contains("tile.a * opennova_sun_light + opennova_sky_ambient"))
 
 	var contract := _contract(_load_json(PROVENANCE_PATH), "terrain-surface")

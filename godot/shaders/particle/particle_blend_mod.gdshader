@@ -2,7 +2,7 @@ shader_type spatial;
 // CParticleDefEntry_ParseBlendMode @ 0x5e29f0 -> BlendMode::Mod (4).
 // Retail computes source = TEXTURE * DIFFUSE and blends it with
 // SRC=DESTCOLOR, DST=ZERO, producing source * framebuffer.
-render_mode unshaded, cull_disabled, blend_mul, depth_draw_never;
+render_mode unshaded, cull_disabled, blend_mul, depth_draw_never, fog_disabled;
 
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 #include "res://shaders/color.gdshaderinc"

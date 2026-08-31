@@ -11,50 +11,22 @@ func _compact(source: String) -> String:
 	return source.replace(" ", "").replace("\t", "").replace("\n", "").replace("\r", "")
 
 
-func _light_alpha(normal_byte: Vector3, retail_getter_direction: Vector3) -> float:
-	var light_byte := ShaderLightFixture.gpu_light_byte(retail_getter_direction)
-	return clampf(4.0 * (normal_byte - Vector3(0.5, 0.5, 0.5)).dot(
-		light_byte - Vector3(0.5, 0.5, 0.5)), 0.0, 1.0)
-
-
-func _flat_ground_light_alpha(retail_getter_direction: Vector3) -> float:
-	var normal_byte := ShaderLightFixture.quantize_retail_signed_vector(Vector3(0.0, 0.0, 1.0))
-	return _light_alpha(normal_byte, retail_getter_direction)
-
-
-func test_terrain_tile_light_uses_heightfield_texture_basis() -> void:
-	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
-	var compact := _compact(terrain)
-	assert_true(
-		compact.contains(
-			"vec3texture_basis_light=vec3(u_sun_direction.z,u_sun_direction.x,u_sun_direction.y);"
-		),
-		"Terrain must pack the retail getter tuple into GPU diffuse RGB order."
-	)
-	assert_true(
-		compact.contains("quantize_retail_signed_vector(texture_basis_light)"),
-		"Terrain DOT3 must byte-pack the converted GPU diffuse light vector."
-	)
-	assert_false(
-		compact.contains("quantize_retail_signed_vector(u_sun_direction)"),
-		"Terrain must not byte-pack the getter tuple without the D3DCOLOR permutation."
-	)
-
-	var env := EnvFile.new()
-	var dawn := _flat_ground_light_alpha(env.compute_sun_direction(600.0))
-	var noon := _flat_ground_light_alpha(env.compute_sun_direction(1200.0))
-	var dusk := _flat_ground_light_alpha(env.compute_sun_direction(1800.0))
-	assert_lt(dawn, 0.01, "Flat ground must not receive overhead DOT3 light at dawn.")
-	assert_gt(noon, 0.9, "Flat ground must receive overhead DOT3 light at noon.")
-	assert_lt(dusk, 0.01, "Flat ground must not receive overhead DOT3 light at dusk.")
-
-	var morning := env.compute_sun_direction(800.0)
-	assert_eq(ShaderLightFixture.gpu_light_byte(morning), Vector3(231, 83, 187) / 255.0,
-		"08:00 D3DCOLOR diffuse RGB must be the witnessed getter permutation (z, x, y).")
-	assert_almost_eq(_light_alpha(Vector3(217, 127, 217) / 255.0, morning),
-		0.8987774, 0.000001, "08:00 X-ramp normal must receive the witnessed bright DOT3 response.")
-	assert_almost_eq(_light_alpha(Vector3(127, 217, 217) / 255.0, morning),
-		0.0794002, 0.000001, "08:00 Y-ramp normal must receive the witnessed dark DOT3 response.")
+func test_terrain_is_lit_by_the_godot_scene() -> void:
+	# ADR 0043: the terrain shader is a LIT material — Godot's sun, hemisphere
+	# ambient and (stage 4) CSM own the light shape; the shader composes only
+	# the authored surface as ALBEDO. No hand lighting, pool or fog remains.
+	var runtime := _source("res://shaders/terrain.gdshader")
+	assert_false(runtime.contains("unshaded"),
+		"The lit terrain must not opt out of the scene lighting (ADR 0043).")
+	assert_false(runtime.contains("fog_disabled"),
+		"The lit terrain takes Environment fog (ADR 0043).")
+	assert_true(_compact(runtime).contains("ALBEDO=scene_output(albedo);"),
+		"The composed surface is the lit material's albedo in the gamma-domain scene contract.")
+	var shared := _source("res://shaders/terrain_lighting.gdshaderinc")
+	for retired in ["u_sun_light", "u_sky_ambient", "terrain_point_light_pool",
+			"apply_terrain_fog", "jointops_fog_factor", "retail_tile_light_alpha"]:
+		assert_false(shared.contains(retired),
+			"%s is retired by ADR 0043 (the scene owns lighting and fog)" % retired)
 
 
 func test_detail_mips_sample_anisotropically_with_conservative_terminal_guard() -> void:
@@ -146,57 +118,13 @@ func test_below_water_swaps_the_stage3_input_to_the_water_noise() -> void:
 	assert_gt(swap, gate, "The noise swap must sit inside the detail2 gate.")
 
 
-func test_terrain_point_light_pool_is_the_two_stage_modulate2x_fold() -> void:
-	# The pool's terrain leg: per patch the <= 16 rows ride one RGBAF texture
-	# row per pool slot, each patch instance carries its slot, and the shader
-	# sums stage 0 (the ground disc) x2 and stage 1 (the height strip) x2 over
-	# the pixel constants that already carry the 0.5 — the explicit 2 * 2.
-	# [orig: render_terrain_sector_batch @0x6092A0 per-light else-arm ->
-	# Light_SetupTerrainProjectedPass @0x5AA830; textures Lighting_InitTextures
-	# @0x5a94f0; the 0x600 shader's CLAMP address mode @0x5a98eb..0x5a98f4]
-	var shared := _source("res://shaders/terrain_lighting.gdshaderinc")
-	var compact := _compact(shared)
-	assert_true(compact.contains(
-		"uniformsampler2Du_terrain_light_rows:filter_nearest,repeat_disable,hint_default_black;"),
-		"The rows texture must be fetched as texels (nearest, clamped, black when unbound).")
-	assert_true(compact.contains(
-		"uniformsampler2Du_terrain_light_disc:filter_linear,repeat_disable,hint_default_black;"),
-		"The ground disc must sample bilinear + CLAMP, no mips (the 0x600 shader's address mode).")
-	assert_true(compact.contains(
-		"uniformsampler2Du_terrain_light_strip:filter_linear,repeat_disable,hint_default_black;"),
-		"The height strip must sample bilinear + CLAMP, no mips.")
-	assert_true(compact.contains("uniformboolu_terrain_light_enabled=false;"),
-		"The pool leg must default off until the terrain binds its rows.")
-	assert_true(compact.contains("constintTERRAIN_LIGHT_ROWS_PER_PATCH=16;"),
-		"The per-patch cap is retail's 16-per-batch collect, not the object pass's 4.")
-	assert_true(compact.contains("vec3terrain_point_light_pool(vec3world_pos,floatslot)"),
-		"The pool sum must be the shared-include function both terrain shaders can call.")
-	assert_true(compact.contains("vec2disc_uv=vec2(d.z,d.x)*posr.w+0.5;"),
-		"The disc projection must be the mission (light.y - p.y, p.x - light.x) * inv + 0.5 contract in the Godot frame.")
-	assert_true(compact.contains("vec2strip_uv=vec2(d.y*posr.w+0.5,0.5);"),
-		"The strip projection must be the mission (p.z - light.z) * inv + 0.5 at v = 0.5.")
-	assert_true(compact.contains("sum+=2.0*2.0*pixel.rgb*disc*strip;"),
-		"Both stages are MODULATE2X: the explicit 2 * 2 over the 0.5-folded constants.")
-
-	var runtime := _compact(_source("res://shaders/terrain.gdshader"))
-	assert_true(runtime.contains("instanceuniformfloatu_instance_light_slot=0.0;"),
-		"Each patch instance must carry the pool slot its rows live in.")
-	assert_true(runtime.contains(
-		"result+=terrain_point_light_pool(v_world_pos,u_instance_light_slot);"),
-		"Runtime terrain must add the pool sum over the composed surface colour.")
-	var pool := runtime.find("terrain_point_light_pool(v_world_pos")
-	var fog := runtime.find("apply_terrain_fog(result")
-	assert_gt(pool, 0, "The pool sum must be present in the runtime terrain shader.")
-	assert_gt(fog, pool, "The pool sum is added before the fog mix so it fades with the batch.")
-
-
 func test_runtime_uses_shared_tile_overlay_composition() -> void:
 	var shared := _compact(_source("res://shaders/terrain_lighting.gdshaderinc"))
 	var runtime := _compact(_source("res://shaders/terrain.gdshader"))
 
 	assert_true(shared.contains("uniformsampler2Du_tile_overlay"),
 		"The tile composite input must live in the shared surface include.")
-	assert_true(shared.contains("vec4compose_retail_tile_overlay"),
+	assert_true(shared.contains("vec3compose_retail_tile_overlay"),
 		"Runtime must use the shared tile-composition implementation.")
 	assert_true(runtime.contains("compose_retail_tile_overlay("),
 		"Runtime terrain must use the shared tile-composition implementation.")

@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, blend_add, depth_draw_never, cull_back;
+render_mode unshaded, blend_add, depth_draw_never, cull_back, fog_disabled;
 
 #define OBJ_RGB_MOD_NONE
 #define OBJ_ALPHA_MOD_FFP

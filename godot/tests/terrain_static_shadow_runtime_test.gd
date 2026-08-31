@@ -472,7 +472,6 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), origin), true)
 	terrain.set_static_shadow_placer(placer)
 	var clock_ms := 1000
-	terrain.set_light_context(null, clock_ms)
 	var settled := await _settle_tile_cache(terrain)
 	assert_eq(int(settled["shadow_raster_failures"]), 0)
 	assert_eq(int(settled["shadow_provider_epoch_plan_failures"]), 0)
@@ -482,7 +481,6 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 
 	for _frame in 3:
 		clock_ms += 16
-		terrain.set_light_context(null, clock_ms)
 		terrain.render_frame()
 		await get_tree().process_frame
 		var still := terrain.get_tile_cache_diagnostics()

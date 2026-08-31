@@ -204,6 +204,11 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 	rs->global_shader_parameter_set("opennova_fog_start",
 			globals.base.fog_start);
 	rs->global_shader_parameter_set("opennova_fog_type", globals.base.fog_type);
+	// ADR 0043: the weather-smoothed fog block also drives the scene
+	// Environment fog (the lit path's fog).
+	p_env->apply_scene_fog(to_vector3(globals.base.fog_color),
+			globals.base.fog_start, globals.base.fog_end,
+			globals.base.fog_type);
 	// The HUD cache's per-frame CTRL publication: the local player's position
 	// hashed into the wave rings lands in the global FLICKER (amp ring) and
 	// SWING (osc ring) registers every model's CTRL tracks read (retail

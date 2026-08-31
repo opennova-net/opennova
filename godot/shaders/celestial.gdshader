@@ -5,7 +5,7 @@ shader_type spatial;
 // so the world overdraws them - DEPTH-TESTED (no write) is the structural
 // equivalent here. We keep the 3DI diffuse texture and modulate by the TOD
 // sun/moon color. See docs/env/env-tod-re.md.
-render_mode unshaded, depth_draw_never, cull_disabled, blend_mix;
+render_mode unshaded, depth_draw_never, cull_disabled, blend_mix, fog_disabled;
 
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"

@@ -304,6 +304,10 @@ func _ready() -> void:
 	_frame_pipeline.setup(self)
 	if _clear_color != null and _clear_color.environment != null:
 		_idle_frame_clear_color = _clear_color.environment.background_color
+		# ADR 0043: the environment feeds the lit scene through this
+		# Environment — the hemisphere-sky ambient (background stays BG_COLOR,
+		# the witnessed frame clear) and the Environment fog.
+		_env.set_scene_environment(_clear_color.environment)
 	if _terrain != null:
 		_dispatcher = _terrain.get_node_or_null("FoliageDispatcher")
 		if _dispatcher != null:

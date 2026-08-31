@@ -4,7 +4,7 @@ shader_type spatial;
 // restores alpha as TEXTURE.a * DIFFUSE.a. The renderer puts the encoded bump
 // light in COLOR/DIFFUSE and the original modulated color in CUSTOM0/SPECULAR;
 // SPECULAR is intentionally not consumed by this fixed-function program.
-render_mode unshaded, cull_disabled, blend_mix, depth_draw_never;
+render_mode unshaded, cull_disabled, blend_mix, depth_draw_never, fog_disabled;
 
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 #include "res://shaders/color.gdshaderinc"

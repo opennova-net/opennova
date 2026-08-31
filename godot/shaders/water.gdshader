@@ -9,7 +9,7 @@ shader_type spatial;
 // leave bit 0x100000 (zwrite-off) clear [orig: CGfxShader_ApplyPass @ 0x683232;
 // RS14 commit @ 0x67e265], so retail water writes depth and later passes test
 // against it.
-render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
+render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always, fog_disabled;
 
 // Water surface: structural port of the witnessed render_water_surface pass
 // [orig: @ 0x5c32c0, docs/env/env-tod-re.md "Water surface"]. The look is the

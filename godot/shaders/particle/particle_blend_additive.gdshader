@@ -7,7 +7,7 @@ shader_type spatial;
 // adds at full strength and DIFFUSE alpha never affects an additive layer.
 // blend_premul_alpha is Godot's ONE/INVSRCALPHA pair; ALPHA = 0 reproduces the
 // cleared-page fragment against this loose (un-cleared) texture.
-render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never;
+render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never, fog_disabled;
 
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 #include "res://shaders/color.gdshaderinc"

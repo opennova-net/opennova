@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, blend_add, depth_draw_never, cull_disabled;
+render_mode unshaded, blend_add, depth_draw_never, cull_disabled, fog_disabled;
 
 #define OBJ_RGB_MOD_SELF_LUM
 #define OBJ_ALPHA_MOD_NONE

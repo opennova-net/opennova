@@ -9,7 +9,7 @@ shader_type spatial;
 // premultiplied additive color — the segment fade, the owner
 // visible-section gate, and the fog-to-black fold (mode 2 forces FOGCOLOR
 // black [orig: @ 0x677740 case 2]) are already folded in by the collect.
-render_mode unshaded, depth_draw_never, cull_disabled, blend_add;
+render_mode unshaded, depth_draw_never, cull_disabled, blend_add, fog_disabled;
 
 // Gamma-domain scene-target contract.
 #include "res://shaders/color.gdshaderinc"

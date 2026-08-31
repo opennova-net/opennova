@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -189,6 +190,20 @@ public:
 	Ref<Texture2D> get_sky_map1_tex() const;
 	Ref<Texture2D> get_sky_map2_tex() const;
 
+	// --- the scene Environment (ADR 0043) -----------------------------------
+	// The lit scene's Environment resource (the game world's ClearColor
+	// Environment): this node feeds it the hemisphere-sky ambient (a gradient
+	// Sky the ambient/reflected light sample; the visible background stays
+	// BG_COLOR — the witnessed frame clear) and the Environment fog mapped
+	// from the retail fog block. Null detaches.
+	void set_scene_environment(const Ref<Environment> &p_environment);
+	Ref<Environment> get_scene_environment() const { return scene_environment_; }
+	// The fog leg alone, for the per-frame weather writeback (C++ seam):
+	// maps the retail fog law onto Environment fog (type 0 -> exponential
+	// density, linear types -> depth fog with the type-derived begin).
+	void apply_scene_fog(const Vector3 &p_color, float p_start, float p_end,
+			int p_type);
+
 	// C++-only seams for the sibling native appliers (the weather node, the
 	// terrain uniform pusher): the engine state and the publish flush the
 	// engine-side writeback path cannot perform itself.
@@ -228,6 +243,9 @@ private:
 	// forgets its publication generation, so re-entering republishes.
 	void _release_lighting_block();
 	static MissionEnvironment *lighting_block_writer_;
+	// The scene-Environment tail of a lighting-block write: the hemisphere
+	// sky colors and the fog block land on the attached Environment.
+	void _write_scene_environment(const Ref<EnvLightValues> &p_values);
 
 	Ref<EnvFile> environment_data_;
 	Ref<EnvFile> overcast_data_;
@@ -236,6 +254,8 @@ private:
 	int64_t last_published_generation_ = 0;
 	bool underwater_view_ = false;
 	bool underwater_overlay_view_ = false;
+	Ref<Environment> scene_environment_;
+	Ref<ShaderMaterial> sky_material_;
 };
 
 } // namespace godot

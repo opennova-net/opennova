@@ -1126,8 +1126,13 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 		return
 	assert_eq(clear.environment.background_mode, Environment.BG_COLOR,
 		"BG_COLOR renders background_color; BG_SKY with a null sky renders BLACK and silently swallows the witnessed frame clear [orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]")
-	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_DISABLED,
-		"Godot ambient must never inject into the witnessed lighting model - all OpenNova materials light themselves; AMBIENT_SOURCE_BG would derive ambient from the clear color")
+	# ADR 0043: the environment binds a gradient hemisphere Sky as the ambient
+	# and reflection source for the lit scene; the visible background stays
+	# BG_COLOR above, so the witnessed frame clear still renders.
+	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_SKY,
+		"the hemisphere-sky gradient is the lit scene's ambient source (ADR 0043)")
+	assert_not_null(clear.environment.sky,
+		"MissionEnvironment.set_scene_environment installs the hemisphere Sky")
 
 
 func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear() -> void:
@@ -1180,10 +1185,14 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	var mission_clear := world.get_current_frame_clear_color()
 	assert_ne(mission_clear, idle_clear,
 			"the loaded mission replaces the scene-authored frame clear")
-	var terrain_material: ShaderMaterial = terrain.get_terrain_material()
-	var dry_terrain_fog_color: Vector3 = terrain_material.get_shader_parameter("u_fog_color")
-	var dry_terrain_fog_end := float(terrain_material.get_shader_parameter("u_fog_end"))
-	var dry_terrain_fog_type := int(terrain_material.get_shader_parameter("u_fog_type"))
+	# ADR 0043: the terrain takes Environment fog — the scene Environment the
+	# env node feeds is the fog consumer to pin, not terrain uniforms.
+	var scene_env: Environment = env.get_scene_environment()
+	assert_not_null(scene_env,
+			"the world binds its ClearColor Environment to the env node (ADR 0043)")
+	var dry_scene_fog_color := scene_env.fog_light_color
+	var dry_scene_fog_mode := scene_env.fog_mode
+	var dry_scene_fog_end := scene_env.fog_depth_end
 	var dry_object_values: EnvLightValues = env.get_light_state().get_values()
 	var dry_object_fog_color := dry_object_values.get_fog_color()
 	var dry_object_fog_end := dry_object_values.get_fog_end()
@@ -1229,14 +1238,13 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	# already-correct clear color.
 	var underwater_color := Vector3(lit.r, lit.g, lit.b)
 	var underwater_end := env.get_environment_data().get_fog_end_underwater()
-	assert_true(Vector3(terrain_material.get_shader_parameter("u_fog_color"))
-			.is_equal_approx(underwater_color),
-			"below-water terrain fogs toward Env_WaterColorLit")
-	assert_almost_eq(float(terrain_material.get_shader_parameter("u_fog_end")),
-			underwater_end, 0.001,
-			"below-water terrain visibility follows the water-murk curve")
-	assert_eq(int(terrain_material.get_shader_parameter("u_fog_type")), 1,
-			"below-water terrain uses the witnessed linear fog mode")
+	assert_true(Vector3(scene_env.fog_light_color.r, scene_env.fog_light_color.g,
+			scene_env.fog_light_color.b).is_equal_approx(underwater_color),
+			"below-water Environment fog is Env_WaterColorLit (ADR 0043)")
+	assert_eq(scene_env.fog_mode, Environment.FOG_MODE_DEPTH,
+			"the witnessed linear fog modes map to Environment depth fog")
+	assert_almost_eq(scene_env.fog_depth_end, underwater_end, 0.001,
+			"below-water Environment fog end follows the water-murk curve")
 	var object_values: EnvLightValues = env.get_light_state().get_values()
 	assert_true(object_values.get_fog_color().is_equal_approx(underwater_color),
 			"below-water ObjectModel/viewmodel fogs toward Env_WaterColorLit")
@@ -1297,15 +1305,12 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	assert_eq(world.get_current_frame_clear_color(), mission_clear)
 	assert_false(env.is_underwater_overlay_view(),
 			"surfacing retires the independently gated murk overlay")
-	assert_eq(Vector3(terrain_material.get_shader_parameter("u_fog_color")),
-			dry_terrain_fog_color,
-			"terrain restores the dry pass fog color after surfacing")
-	assert_almost_eq(float(terrain_material.get_shader_parameter("u_fog_end")),
-			dry_terrain_fog_end, 0.001,
-			"terrain restores the dry pass fog end after surfacing")
-	assert_eq(int(terrain_material.get_shader_parameter("u_fog_type")),
-			dry_terrain_fog_type,
-			"terrain restores the dry pass fog type after surfacing")
+	assert_eq(scene_env.fog_light_color, dry_scene_fog_color,
+			"the Environment restores the dry pass fog color after surfacing")
+	assert_eq(scene_env.fog_mode, dry_scene_fog_mode,
+			"the Environment restores the dry pass fog mode after surfacing")
+	assert_almost_eq(scene_env.fog_depth_end, dry_scene_fog_end, 0.001,
+			"the Environment restores the dry pass fog end after surfacing")
 	object_values = env.get_light_state().get_values()
 	assert_eq(object_values.get_fog_color(), dry_object_fog_color,
 			"ObjectModel/viewmodel restores the dry pass fog color after surfacing")

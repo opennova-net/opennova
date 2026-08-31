@@ -166,8 +166,10 @@ func test_terrain_owns_and_frames_the_concrete_shadow_rasterizer() -> void:
 		"The Godot-axes light vector must never feed the page path.")
 	assert_gt(frame_raster, light_sample,
 		"The producer must consume the same direct environment tuple as the page composer.")
-	assert_true(source.contains("static_cast<uint32_t>(light_time_ms)"),
-		"Projected-shadow material animation must share Terrain's retail millisecond clock.")
+	assert_true(source.contains(
+			"static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec())"),
+		"Projected-shadow material animation runs on the process millisecond clock"
+		+ " (the retired light-pool context clock died with ADR 0043).")
 	assert_gt(frame_cache, frame_raster,
 		"The caster/light snapshot must be final before any page plan is requested.")
 
@@ -187,21 +189,20 @@ func test_game_world_attaches_and_detaches_the_mission_shadow_source() -> void:
 
 
 func test_page_shadow_alpha_preserves_sky_and_fog_without_a_black_overlay() -> void:
-	var shared := _source("res://shaders/terrain_lighting.gdshaderinc")
+	# ADR 0043 transition: the terrain shader is lit by the Godot scene and no
+	# longer consumes the page light alpha (CSM takes over static shadowing at
+	# the shadow stages); the page composer still bakes the alpha until the
+	# static system's deletion, and the shader must not reintroduce a black
+	# overlay on top of the lit result.
 	var runtime := _source("res://shaders/terrain.gdshader")
 	var device := _source("res://src/terrain/terrain.cpp")
-	assert_true(shared.contains("cm.a * u_sun_light + u_sky_ambient"),
-		"A zeroed page light term must remove only direct sun while retaining sky ambient.")
-	var surface := runtime.find("terrain_surface_color_from_colormap(")
-	var fog := runtime.find("result = apply_terrain_fog(")
-	assert_gt(fog, surface,
-		"Fog must still composite after the shadowed terrain light result.")
-	# STATIC silhouettes stay page-alpha only. The render-slot DRAPE next-pass
-	# on the terrain material serves the separate DYNAMIC entity ground
-	# shadows (retail drapes live silhouettes over terrain-following patches:
-	# RenderSlot_DrawAllDrapes @0x5d6e20 / render_sector_model @0x5d5ca0);
-	# it must be tied to that witness, and the static rasterizer must never
-	# route through it.
+	assert_false(runtime.contains("cm.a"),
+		"The lit terrain must not multiply the page shadow alpha into its albedo.")
+	# The render-slot DRAPE next-pass on the terrain material serves the
+	# separate DYNAMIC entity ground shadows (retail drapes live silhouettes
+	# over terrain-following patches: RenderSlot_DrawAllDrapes @0x5d6e20 /
+	# render_sector_model @0x5d5ca0); it must be tied to that witness, and the
+	# static rasterizer must never route through it.
 	assert_true(device.contains("SlotShadow::get_drape_material()"),
 		"Dynamic render-slot ground shadows need the terrain drape pass.")
 	assert_true(device.contains("RenderSlot_DrawAllDrapes"),
