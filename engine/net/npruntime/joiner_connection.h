@@ -432,16 +432,6 @@ public:
 	void complete_send_flush() { complete_session_send_flush(conn_.seq); }
 	uint32_t send_flush_counter() const { return conn_.seq.send_flush_counter; }
 
-	// Player-paced deployment (the deploy-map screen). When enabled BEFORE the grants
-	// complete, a pick-required join leaves the UI in AwaitDeployPick instead of auto-answering
-	// C2S 0x0E {FF FF}; the initial grants still open gameplay, matching retail's independent
-	// dword_81474C hold. The binding then sends the player's pick — repeatedly, if the host
-	// silently drops an invalid/contested one (retail re-picks: Input case 12 has no
-	// re-entry gate, the screen stays up on the still-set 0x0A flags1 bit1, and each list
-	// click queues a fresh 0x0E). Headless callers keep the auto parameter-0 default.
-	// [orig: the DEATH screen SPAWNPOINTS_LIST select -> Input_QueueEvent(12, node)
-	//  @0x55364d -> Input_HandleActionBinding case 12 @0x49b0c5-0x49b17b]
-	void set_player_paced_deployment(bool paced) { player_paced_deployment_ = paced; }
 	// A deployment pick is owed by the player (AwaitDeployPick), or sent and awaiting the
 	// host's release (AwaitDeployRelease). The shell's deploy screen shows while true;
 	// this UI state is independent from in_match() and the runtime's gameplay/uplink gate.
@@ -713,12 +703,10 @@ private:
 	// Frozen renderer-definition snapshot for S2C 0x68 -> C2S 0x3D. Configuration
 	// survives start(): bindings may finish loading models before the first net pump.
 	std::vector<uint32_t> loaded_model_challenge_snapshot_;
-	bool player_paced_deployment_ = false; // binding mode: the deploy pick waits for the player
 	bool preload_ready_ = false; // terminal pre-world S2C 0x11 received and ACK boundary reached
 	bool sync_tail_seen_ = false; // the host emits 0x11 exactly once; latch an early arrival
 	bool player_list_seen_ = false; // valid S2C 0x16 may arrive before the 0x64 transfer completes
-	bool deployment_policy_seen_ = false; // a valid S2C 0x0F supplied gameFlags
-	bool deployment_pick_required_ = false; // S2C 0x0F gameFlags bit0: host has spawn zones
+	bool deployment_policy_seen_ = false; // a valid S2C 0x0F supplied gameFlags (completes admission)
 	uint8_t initial_loadout_grant_count_ = 0; // both profile-side 0x5A grants precede the pick
 	bool initial_admission_complete_ = false;
 	bool deployment_pick_sent_ = false;

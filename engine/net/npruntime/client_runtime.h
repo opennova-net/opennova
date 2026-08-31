@@ -316,10 +316,6 @@ public:
 		if (joiner_) pending_loadout_resubmit_ = true;
 	}
 
-	// Player-paced deployment (the deploy-map screen; see JoinerConnection).
-	void set_player_paced_deployment(bool paced) {
-		if (joiner_) joiner_->set_player_paced_deployment(paced);
-	}
 	bool deployment_pick_pending() const {
 		return joiner_ && joiner_->deployment_pick_pending();
 	}
