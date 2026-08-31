@@ -135,6 +135,15 @@ is retired under decision 1 (Godot is the sole authority for **how** it renders)
   the accepted divergence of this amendment, judged by the acceptance-scene
   eyeball pass; the sanctioned taste knobs are the glow threshold and, if
   re-judged, the MODULATE2X energy constant — never a re-encode.
+- **The linear-gain conversion.** A witnessed BYTE-domain constant gain `k`
+  inside a multi-texture combine acts on decoded linear texels as `~k^2.2`
+  (`decode(k·x) ≈ k^2.2·decode(x)`, the pure-power sRGB approximation) — left
+  unconverted, the terrain splat's ×4 and the foliage fold's ×8 collapse the
+  decoded product and noon ground renders near-black. Where the eyeball gate
+  demands it, the gain converts ONCE at the shader with the exponent named
+  and this rule cited; the combine text and its witnessed constants stay.
+  Neutral modulators (mid-gray ×2 dp3 terms) stay unconverted — they are
+  domain-free by construction.
 - D-RMAT-7/-8 (the gamma pipeline rows) close as superseded by this amendment.
 
 ## Consequences

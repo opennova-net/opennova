@@ -65,8 +65,9 @@ func test_fd_sampling_is_anisotropic_with_conservative_terminal_guard() -> void:
 			"The conservative shader guard must keep requests out of the synthetic terminal tail.")
 	assert_true(sampling.contains("textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale)"),
 		":fd sampling must stay implicit/anisotropic within the retail chain.")
-	assert_true(detail.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic"),
-		"Expanded detail must sample :fd anisotropically like the reference device.")
+	assert_true(detail.contains("uniform sampler2D u_fd_texture : source_color, filter_linear_mipmap_anisotropic"),
+		"Expanded detail must sample :fd anisotropically like the reference device"
+		+ " (the card art decodes via source_color — linear scene, ADR 0043 amendment).")
 	assert_true(silhouette.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic"),
 		"MODEL foliage must sample :fd anisotropically like the reference device.")
 	assert_true(detail.contains("sample_retail_foliage_fd(u_fd_texture, UV)"),

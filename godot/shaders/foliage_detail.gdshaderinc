@@ -3,9 +3,9 @@
 // Expanded detail foliage. Retail emits the source model once per accepted
 // candidate and bends every transformed vertex onto the terrain before this
 // shader runs [orig: generate_foliage_instances_0 @ 0x5ffdd0].
-// u_fd_texture stays RAW: its rgb rides the witnessed x8 fold whose
-// mid-gray emitter constant (c6) is byte-neutral by construction.
-uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic, repeat_enable;
+// The card art decodes via source_color like the ground it blankets (the
+// sRGB view leaves the alpha the discards test untouched).
+uniform sampler2D u_fd_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_fd_texture = false;
 uniform sampler2D u_colormap : source_color, filter_linear, repeat_disable;
 uniform bool u_has_colormap = false;
@@ -157,6 +157,12 @@ void fragment() {
 	// becomes per-leg clamps, the terrain fold's precedent.
 	// [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0].
 	vec3 fold_rgb = fd.rgb * u_emitter_color * 8.0;
+	// The linear-gain conversion (ADR 0043 linear-scene amendment; the
+	// terrain include's LINEAR_GAIN_EXPONENT rationale): the witnessed
+	// byte-domain fold gain g = c6 * 8 acts on decoded linear texels as
+	// ~g^2.2, so lift the already-applied g by g^1.2 — without it the
+	// detail blanket renders near-black over the corrected terrain.
+	fold_rgb *= pow(u_emitter_color * 8.0, vec3(1.2));
 	vec3 lit = tile.rgb;
 	ALBEDO = clamp(fold_rgb * lit * tile.a, vec3(0.0), vec3(1.0));
 	EMISSION = clamp(fold_rgb * lit, vec3(0.0), vec3(1.0)) * opennova_sky_ambient;

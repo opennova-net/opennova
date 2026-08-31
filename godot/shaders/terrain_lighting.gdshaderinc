@@ -71,6 +71,13 @@ uniform float u_detail_density = 128.0;
 // Retail's combined modulate ladder is x8 total; the light legs carry the
 // MODULATE2X x2 as light energy, leaving x4 with the texture product.
 const float TERRAIN_ALBEDO_SCALE = 4.0;
+// The linear-gain conversion (ADR 0043 linear-scene amendment): a witnessed
+// BYTE-domain constant gain k acts on the linear scene as ~k^2.2
+// (decode(k*x) ~= k^2.2 * decode(x), the pure-power sRGB approximation) —
+// without it the decoded-texel splat product collapses and noon terrain
+// renders near-black. The witnessed combine text and its constants stay;
+// the exponent is the one seam conversion.
+const float LINEAR_GAIN_EXPONENT = 2.2;
 
 vec2 retail_detail_uv_from_atlas(vec2 atlas_uv, float density) {
 	// Retail writes UV1 as source_position * (polytrn_detaildensity / 512).
@@ -167,5 +174,9 @@ vec3 terrain_surface_albedo(vec3 cm_rgb, vec2 colormap_uv,
 		normal_factor = dot(modulator, blend) * 2.0;
 	}
 
-	return cm_rgb * detail * normal_factor * TERRAIN_ALBEDO_SCALE;
+	// The x4 byte-domain gain converts to its linear equivalent (see
+	// LINEAR_GAIN_EXPONENT); the dp3 modulator term stays as authored — its
+	// raw mid-gray x2 is neutral at 1 in either domain.
+	return cm_rgb * detail * normal_factor *
+		pow(TERRAIN_ALBEDO_SCALE, LINEAR_GAIN_EXPONENT);
 }
