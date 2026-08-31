@@ -164,8 +164,6 @@ struct GameConfig {
 	// CNapiServerConfig_BuildFlags @0x4c4dc0 inputs beyond game_settings (the g_rules_flags bitfield
 	// sources): the trailing flags dword of the 0x08 block. `MaxScore` is retained
 	// above for gameplay/session-status, but retail does not put it in this 0x08 block.
-	bool squad_enforced = false;       // [orig g_squad_max_players @0x2550924 != 0] -> |0x2000
-	std::string squad_required_tag;    // [orig g_squad_required_tag @0x2550928]      -> |0x4000
 	bool permanent_death = false;      // [orig g_MpPermanentDeath @0x2550C9C]        -> |0x8000
 	// dword_2550A04 is already represented once by mp_attributes above. In
 	// particular SET `TeamChoose` writes bit 0x4 directly; there is no parallel

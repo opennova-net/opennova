@@ -47,6 +47,11 @@ const DEFAULT_GATE_PORT := NetProtocol.DEFAULT_GATE_PORT
 ## cap control). The mp.mnu host screen always sets its own read-back value; the
 ## host-side clamp to the witnessed 1..65 applies either way.
 const DEFAULT_MAX_PLAYERS := 32
+## Width of the retail host dialog's SPECTATOR_PW edit buffer (17 chars, read by
+## HostDialog_ReadSettings @ 0x555940 into the buffer at 0x555ecc). Both password
+## entry surfaces clamp to it so a typed password never exceeds what a retail
+## host could have configured.
+const SPECTATOR_PASSWORD_MAX_LENGTH := 17
 ## Which browser/lobby the session was requested from. The LAN channel never reads or
 ## manufactures NovaWorld service configuration; the NovaWorld channel supplies the gate.
 const CHANNEL_LAN := "LAN"

@@ -301,7 +301,7 @@ func _show_join_role_prompt(target: JoinTarget) -> void:
 		_join_role_password.name = "SpectatorPassword"
 		_join_role_password.placeholder_text = "Spectator password"
 		_join_role_password.secret = true
-		_join_role_password.max_length = 17
+		_join_role_password.max_length = HostSessionConfig.SPECTATOR_PASSWORD_MAX_LENGTH
 		box.add_child(_join_role_password)
 
 	var choices := HBoxContainer.new()

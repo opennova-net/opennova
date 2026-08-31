@@ -323,7 +323,8 @@ func _read_host_config() -> HostSessionConfig:
 	# The witnessed reader lives engine-side (GameConfig.spectator_slots,
 	# docs/net/novaworld-net-re.md section 5.0e).
 	config.spectator_slots = -1 if _is_checked("ALLOW_SPECTATORS") else 0
-	config.spectator_password = _edit_text("SPECTATOR_PW", "").substr(0, 17)
+	config.spectator_password = _edit_text("SPECTATOR_PW", "").substr(
+			0, HostSessionConfig.SPECTATOR_PASSWORD_MAX_LENGTH)
 	config.missions = _selected_missions()
 	if config.missions.size() > 0:
 		config.mission = config.missions[0]
