@@ -91,10 +91,6 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 		if (!gs.side_a_password.empty()) flags |= 0x20u;
 		if (!gs.side_b_password.empty()) flags |= 0x10u;
 	}
-	if (r.squad_enforced) {
-		flags |= 0x2000u;
-		if (!r.squad_required_tag.empty()) flags |= 0x4000u;
-	}
 	if (r.permanent_death) flags |= 0x8000u;
 	if (r.allow_sniper_scope_zoom) flags |= 0x10000u; // [orig g_mp_allowsniperscopezoom @0x2550CA4]
 	return flags;
