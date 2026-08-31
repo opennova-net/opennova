@@ -615,11 +615,35 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(reached, "joiner reached in-match (handshake -> spawn gate -> 0x0C name-match)")
 	assert_eq(host.get_host_peer_count(), before_peers + 1, "host registered exactly one joiner peer")
 	assert_true(joiner.has_local_player(), "joiner spawned its local player L at the H-learned pose")
+	# Retail's initial join sends no C2S 0x0E: the initial 0x5A grant pair
+	# completes admission and the joiner deploys directly (witnessed on the wire
+	# against a live retail co-op host). The 0x0E spawn pick belongs to the DEATH
+	# flow — drive it there through the authority's real death transaction.
+	assert_false(joiner.is_join_deploy_pick_pending(),
+			"the initial join deploys with no forced C2S 0x0E")
+	var health_before_death := joiner.get_local_player_health()
+	assert_gt(health_before_death, 0,
+			"the initial authoritative spawn latch keeps local L alive")
+	assert_true(_kill_joiner_from_host(host, joiner),
+			"the authority's death transaction killed the joiner")
+	var death_pick_pending := false
+	for _i in range(240):
+		host.step()
+		joiner.step()
+		if joiner.is_join_deploy_pick_pending():
+			death_pick_pending = true
+			break
+		OS.delay_msec(2)
+	assert_true(death_pick_pending,
+			"the death edge re-arms the deploy pick (begin_redeployment)")
+	# A death within 620 ticks of the deployment arms the host's 3-second pick
+	# penalty (silently dropped picks); settle past it so the single zone pick
+	# below is accepted.
+	for _i in range(260):
+		host.step()
+		joiner.step()
 	assert_true(joiner.is_join_deploy_pick_pending(),
-			"spawn-zone join enters gameplay while the player-paced deploy UI remains pending")
-	var health_before_initial_pick := joiner.get_local_player_health()
-	assert_gt(health_before_initial_pick, 0,
-			"the initial authoritative spawn latch keeps local L alive before the pick")
+			"nothing auto-picks while the death pick stays owed")
 	var initial_position := joiner.get_local_player_position()
 	var deploy_rows := joiner.get_deploy_spawn_zones()
 	assert_eq(deploy_rows.size(), 1,
@@ -631,11 +655,8 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			"the displaced non-default spawn-zone pick was queued")
 	# Deliberately do not step the host. Input case 12 has now queued C2S 0x0E
 	# and re-armed dword_81474C, but that gameplay hold is not a death signal.
-	# The old single-latch fold forced L to zero on this exact joiner-only step.
 	joiner.step()
 	joiner.step()
-	assert_eq(joiner.get_local_player_health(), health_before_initial_pick,
-			"waiting for the post-pick 0x5A release cannot kill local L")
 	assert_true(joiner.is_join_deploy_pick_pending(),
 			"the deploy UI remains pending while the host has not handled the pick")
 	var debug_host_own := host.get_local_player_wire_handle()
@@ -664,25 +685,36 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			"the host applies the selected non-default zone before releasing the joiner")
 	assert_true(joiner.is_join_deploy_pick_pending(),
 			"the host pose is observable before the joiner folds the release")
-	var initial_pick_released := false
-	var initial_pick_pose_snapped := false
+	var death_pick_released := false
+	var death_pick_pose_snapped := false
 	for _i in range(160):
 		host.step()
 		joiner.step()
-		initial_pick_released = not joiner.is_join_deploy_pick_pending()
-		initial_pick_pose_snapped = \
+		death_pick_released = not joiner.is_join_deploy_pick_pending()
+		death_pick_pose_snapped = \
 				joiner.get_local_player_position().distance_to(initial_position) > 5.0
-		if initial_pick_released and initial_pick_pose_snapped:
+		if death_pick_released and death_pick_pose_snapped:
 			break
 		OS.delay_msec(2)
-	assert_true(initial_pick_released,
-			"the ACK-qualified initial-pick 0x5A retires the deploy-screen wait")
-	assert_true(initial_pick_pose_snapped,
+	assert_true(death_pick_released,
+			"the ACK-qualified death-pick 0x5A retires the deploy-screen wait")
+	assert_true(death_pick_pose_snapped,
 			"the post-pick release snaps L to the host's displaced zone pose")
 	assert_lt(absf(joiner.get_local_player_position().x - 40.0), 1.0,
 			"the joiner adopts the selected host spawn-zone x coordinate")
-	assert_eq(joiner.get_local_player_health(), health_before_initial_pick,
-			"the gameplay release preserves the already-live local identity")
+	# The release reuses L; the following fresh positive recipient-health tail
+	# revives it (the same revive mechanics the later default-pick leg pins).
+	var revived_after_zone_pick := false
+	for _i in range(240):
+		host.step()
+		joiner.step()
+		if not joiner.is_local_player_dead() \
+				and joiner.get_local_player_health() > 0:
+			revived_after_zone_pick = true
+			break
+		OS.delay_msec(2)
+	assert_true(revived_after_zone_pick,
+			"the zone deploy revives local L for the gameplay legs below")
 	var h: int = joiner.get_joiner_self_handle()
 	assert_gt(h, 0, "joiner learned its wire handle H")
 
@@ -1400,8 +1432,18 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 
 # Kill the joiner's player entity on the AUTHORITY through the real death
 # transaction (route_round_deaths) and pump until the joiner's recipient-local
-# 0x0A tail reads dead.
+# 0x0A tail reads dead. The kill targets the joiner's wire handle, so first
+# pump until the 0x0C name-match binds it.
 func _kill_joiner_from_host(host: Simulation, joiner: Simulation) -> bool:
+	var self_bound := joiner.get_joiner_self_handle() > 0
+	for _tick in range(400):
+		if self_bound:
+			break
+		host.step()
+		joiner.step()
+		self_bound = joiner.get_joiner_self_handle() > 0
+		OS.delay_msec(2)
+	assert_true(self_bound, "the joiner bound its wire handle before the kill")
 	assert_eq(host.debug_kill_player_entity(joiner.get_joiner_self_handle()), OK,
 			"the host queued the joiner's death")
 	for _tick in range(120):

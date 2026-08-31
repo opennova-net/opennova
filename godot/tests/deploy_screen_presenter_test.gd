@@ -2,10 +2,12 @@ extends GutTest
 
 # DeployScreenPresenter on the typed surfaces (ADR 0034): the joiner state is a
 # REAL loopback join — host + joiner Simulations over real UDP, the
-# coop_two_sim recipe — whose spawn-zone admission genuinely holds
-# is_join_deploy_pick_pending, and the world seam is a GameWorld subclass
-# harness. The deployment RELEASE is the real thing too: the picked C2S 0x0E
-# reaches the host and the falling pending bit closes the screen.
+# coop_two_sim recipe — driven to the DEATH edge: the initial join deploys with
+# no pick (retail sends no initial C2S 0x0E), then the authority kills the
+# joiner and begin_redeployment genuinely holds is_join_deploy_pick_pending.
+# The world seam is a GameWorld subclass harness. The deployment RELEASE is the
+# real thing too: the picked C2S 0x0E reaches the host and the falling pending
+# bit closes the screen.
 #
 # (The old value-double's host-side zone-mutation refresh leg — a zone turning
 # contested between refreshes — has no typed equivalent without host-side zone
@@ -146,9 +148,11 @@ func _spawn_zone_mission() -> MissionData:
 	return md
 
 
-# A REAL loopback join held at the deploy pick: host + joiner free-run until
-# the joiner is in-match with the pick pending (the coop_two_sim recipe).
-# Returns {host, joiner}; both are autofreed Nodes.
+# A REAL loopback join held at the DEATH deploy pick: host + joiner free-run
+# until the joiner is in-match (the initial deploy completes with no pick —
+# retail's initial join sends no C2S 0x0E), then the authority kills the joiner
+# and the death edge re-arms the pick (begin_redeployment). Returns
+# {host, joiner}; both are autofreed Nodes.
 func _join_pair_with_pending_pick() -> Dictionary:
 	var mission := _spawn_zone_mission()
 	var item_db := _spawn_zone_item_db()
@@ -185,8 +189,40 @@ func _join_pair_with_pending_pick() -> Dictionary:
 			break
 		OS.delay_msec(2)
 	assert_true(reached, "the joiner reached in-match over real loopback UDP")
+	assert_false(joiner.is_join_deploy_pick_pending(),
+			"the initial join deploys with no forced C2S 0x0E")
+	# The kill targets the joiner's wire handle: wait for the 0x0C name-match to
+	# bind it, then the authority's real death transaction re-arms the pick (the
+	# DEATH screen).
+	var self_bound := false
+	for _i in range(400):
+		host.step()
+		joiner.step()
+		if joiner.get_joiner_self_handle() > 0:
+			self_bound = true
+			break
+		OS.delay_msec(2)
+	assert_true(self_bound, "the joiner bound its wire handle before the kill")
+	assert_eq(host.debug_kill_player_entity(joiner.get_joiner_self_handle()), OK,
+			"the host queued the joiner's death")
+	var pick_pending := false
+	for _i in range(240):
+		host.step()
+		joiner.step()
+		if joiner.is_join_deploy_pick_pending():
+			pick_pending = true
+			break
+		OS.delay_msec(2)
+	assert_true(pick_pending,
+			"the death edge holds the deploy pick (begin_redeployment)")
+	# A death within 620 ticks of the deployment arms the host's 3-second pick
+	# penalty (silently dropped picks). Settle past it so each test's single
+	# pick/release leg operates in the clean accepting window.
+	for _i in range(260):
+		host.step()
+		joiner.step()
 	assert_true(joiner.is_join_deploy_pick_pending(),
-			"the spawn-zone join holds the player-paced deploy pick")
+			"nothing auto-picks while the death pick stays owed")
 	return {"host": host, "joiner": joiner}
 
 
@@ -265,20 +301,23 @@ func test_open_refuses_when_no_pick_is_owed() -> void:
 	assert_false(presenter.is_open())
 
 
-# Retail enters the active session and resumes uplinks after its initial 0x5A grants,
-# before the player chooses a spawn row. The deploy UI is driven by the independent
-# authoritative pending bit and must survive that in-match edge.
-func test_in_match_does_not_close_a_still_pending_deploy_screen() -> void:
+# The active session keeps running under the death screen — per-frame S2C 0x0A
+# traffic continues while the pick is owed. The deploy UI is driven by the
+# independent authoritative pending bit and must survive live session frames.
+func test_live_session_frames_do_not_close_a_still_pending_deploy_screen() -> void:
 	var pair := _join_pair_with_pending_pick()
-	assert_true(pair.joiner.is_joined_in_match(),
-			"the real join is in-match while the pick stays pending")
 	var presenter := _make_presenter(pair.joiner)
 	watch_signals(presenter)
 
 	assert_true(presenter.open(), "the pending deploy UI opens in an active session")
+	# Live traffic with no pick sent: the authority keeps the hold.
+	for _i in range(30):
+		pair.host.step()
+		pair.joiner.step()
+		OS.delay_msec(2)
 	await get_tree().process_frame
 
-	assert_true(presenter.is_open(), "in-match gameplay does not dismiss a pending deploy UI")
+	assert_true(presenter.is_open(), "live session frames do not dismiss a pending deploy UI")
 	assert_signal_emit_count(presenter, "closed", 0,
 			"only authority clearing deployment-pending closes a healthy screen")
 
@@ -290,7 +329,7 @@ func test_refresh_preserves_selected_spawn_identity_by_param() -> void:
 	var pair := _join_pair_with_pending_pick()
 	var presenter := _make_presenter(pair.joiner)
 
-	assert_true(presenter.open(), "the player-paced join opens death.mnu")
+	assert_true(presenter.open(), "the pending death pick opens death.mnu")
 	var driver: MenuDriver = presenter.get_menu_driver()
 	assert_not_null(driver)
 	if driver == null:
@@ -359,18 +398,22 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 		OS.delay_msec(2)
 	assert_true(pair.joiner.is_join_deploy_pick_pending(),
 			"a node -1 row never sends the deploy pick")
-	# The statics follow the witnessed gates: no penalty/wave line, no hold,
-	# no revive window -> STATIC_RESPAWN_MSG1 / PSPRESPAWN / MEDIC pair hidden,
-	# the list title shown.
+	# The statics follow the witnessed gates: the pick penalty lapsed and no wave
+	# lists the player (no status line, no hold), while the other-player kill
+	# opened the 120-second revive window -> the MEDIC pair shows, the
+	# RESPAWN/PSPRESPAWN pair stays hidden, the list title shows.
 	var status: Dictionary = pair.joiner.get_deploy_status()
 	assert_eq(int(status.get("queued_kind", -1)), 0, "no penalty or wave line")
-	assert_false(bool(status.get("show_medic", true)),
-			"no revive window -> the medic pair stays hidden")
-	for control_name in ["STATIC_RESPAWN_MSG1", "STATIC_PSPRESPAWN_MSG1",
-			"STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG"]:
+	assert_true(bool(status.get("show_medic", false)),
+			"the open revive window shows the medic pair")
+	for control_name in ["STATIC_RESPAWN_MSG1", "STATIC_PSPRESPAWN_MSG1"]:
 		var id := driver.widget_id(control_name)
 		if id >= 0:
 			assert_false(driver.is_widget_shown(id), control_name + " hidden")
+	for control_name in ["STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG"]:
+		var id := driver.widget_id(control_name)
+		if id >= 0:
+			assert_true(driver.is_widget_shown(id), control_name + " shown")
 	var title_id := driver.widget_id("STATIC_LIST_TITLE")
 	if title_id >= 0:
 		assert_true(driver.is_widget_shown(title_id), "the list title shows with the list")
