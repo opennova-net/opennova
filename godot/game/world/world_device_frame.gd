@@ -413,19 +413,9 @@ func render_light_frame() -> void:
 	if _world._light_director == null or not _world.is_inside_tree():
 		return
 	var viewport := _world.get_viewport()
-	var viewmodel_parts: Array[ObjectModel] = []
-	if _world._local_view_presenter != null:
-		viewmodel_parts = _world._local_view_presenter.vm_parts()
-	var viewmodel_owner := -1
 	var sim: Simulation = _world.get_sim()
-	if sim != null and sim.has_local_player():
-		viewmodel_owner = sim.get_local_player_wire_handle()
 	_world._light_director.render_frame(
-			viewport.get_camera_3d() if viewport != null else null,
-			viewmodel_parts, viewmodel_owner)
-	# ADR 0043: the terrain leg of the pool is retired — the lit terrain takes
-	# scene lights (OmniLight3D at stage 6) instead of the projected-texture
-	# re-draw rows.
+			viewport.get_camera_3d() if viewport != null else null)
 	# Feed the render-slot shadow device the same point-light context (its
 	# per-slot dominant-light pick reads the shared pool) plus the local
 	# player state for the retail priority/drape gates.

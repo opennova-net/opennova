@@ -290,12 +290,7 @@ func _init() -> void:
 	_light_director = EffectLightDirector.new()
 	_light_director.setup(self,
 			func() -> Array:
-				return _placer.get_static_item_effect_sources() if _placer != null else [],
-			func() -> Array:
-				return _placer.get_static_light_draw_sources() if _placer != null else [],
-			func() -> int:
-				return int(_placer.get_static_light_draw_source_revision()) \
-						if _placer != null else 0)
+				return _placer.get_static_item_effect_sources() if _placer != null else [])
 
 
 func _ready() -> void:

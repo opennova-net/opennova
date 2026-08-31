@@ -165,10 +165,8 @@
 // caller Environment_ApplyFogAndAmbient @ 0x57e464] — the env light-state
 // gain the presenter feeds. The same per-frame tick that decays the pool
 // ALSO unpacks Env_TerrainColorRecip bytes x 1/128 into flt_2732DA{C,8,4}
-// (@ 0x5aa21d..0x5aa23f), but that triple is a SEPARATE factor consumed only
-// by the terrain projected pass (light_terrain_pass.h
-// terrain_per_channel_factor; env::terrain_color_recip_packed is the producer)
-// — an earlier note here had conflated the two.
+// (@ 0x5aa21d..0x5aa23f), but that triple was a SEPARATE factor consumed only
+// by the terrain projected pass, retired with it under ADR 0043.
 //
 // Reimpl shape: positions stay in mission space (the retail Y-negation is the
 // world->D3D fold the presenter replaces); the gen block is stored by value
@@ -183,12 +181,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
-
-namespace opennova::renderer {
-struct TerrainLightPatchBounds;
-struct TerrainLightPassInputs;
-struct TerrainLightPatchRows;
-} // namespace opennova::renderer
 
 namespace opennova::renderer {
 
@@ -292,6 +284,18 @@ struct LightFlickerInputs {
 	size_t amp_ring_size = 0;
 	uint8_t ring_index = 0;
 	uint32_t time_ms = 0;  // waveform styles' clock (eval_light_runtime)
+};
+
+// One pool instance as a scene omni light (ADR 0043 — collect_scene_lights):
+// mission-space float position, the retail range fold, and the live color
+// with blend/gain/RgbGen applied.
+struct SceneOmniLight {
+	std::array<float, 3> position{};  // mission-space float world units
+	float range = 0.0f;               // radius_fixed * 1.25 / 65536
+	std::array<float, 3> color{};
+	bool lights_terrain = true;
+	bool lights_objects = true;
+	LightHandle handle{};
 };
 
 struct LightSceneReport {
@@ -501,20 +505,20 @@ public:
 	size_t collect_corona_quads(const LightCoronaFrameInputs &inputs,
 			std::vector<LightCoronaQuad> &out) const;
 
-	// The terrain projected pass's per-patch collect + gate + constant build
-	// (light_terrain_pass.h carries the contract; defined in
-	// light_terrain_pass.cpp) [orig: render_terrain_sector_batch
-	// @0x6095f9..0x6098bc + Light_SetupTerrainProjectedPass @0x5aa830]. Per
-	// patch: the slot-order collect capped at SIXTEEN then nearest-first
-	// (collect_nearby_zones_by_aabb @0x5aa250 with the 16 cap @0x609658), the
-	// group gate with BOTH groups cleared (@0x60967c/@0x609685 — so every
-	// owned light fails), the alive + !terrain-disabled gate, and one row per
-	// survivor with NO three-light cap. Returns the total row count.
-	size_t collect_terrain_pass_rows(
-			const opennova::renderer::TerrainLightPatchBounds *patches,
-			size_t patch_count,
-			const opennova::renderer::TerrainLightPassInputs &inputs,
-			opennova::renderer::TerrainLightPatchRows *out) const;
+	// ADR 0043 (modern presentation): enumerate every alive, un-hidden pool
+	// instance with its CURRENT render parameters (record color x blend x
+	// ambient gain x RgbGen flicker — the same fold the retired per-draw
+	// select applied) so the shell can present each as a real scene omni
+	// light. The retail per-draw machinery this replaces — the 64-cap
+	// collect, the owner/interior group gate, and the three-per-strip cap —
+	// were D3D fixed-function light-slot workarounds; a clustered scene
+	// renderer takes the whole pool, and owned/interior lights fall back to
+	// range-bounded scene lights. Instances disabled for BOTH targets are
+	// skipped (authored intent); a single-target disable is carried on the
+	// row for the shell to honor where it can. Returns the row count.
+	size_t collect_scene_lights(const std::array<float, 3> &ambient_scale,
+			const LightFlickerInputs &flicker,
+			SceneOmniLight *out, size_t out_capacity) const;
 
 	LightSceneReport inspect() const;
 

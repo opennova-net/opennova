@@ -374,6 +374,51 @@ size_t LightScene::select(const LightHandle *handles, size_t handle_count,
 	return selected;
 }
 
+size_t LightScene::collect_scene_lights(
+		const std::array<float, 3> &ambient_scale,
+		const LightFlickerInputs &flicker,
+		SceneOmniLight *out, size_t out_capacity) const {
+	if (out == nullptr || out_capacity == 0) {
+		return 0;
+	}
+	size_t count = 0;
+	for (size_t i = 0; i < slots_.size() && count < out_capacity; ++i) {
+		const Slot &slot = slots_[i];
+		if (!slot.live || slot.hidden) {
+			continue;
+		}
+		const LightSpawnParams &params = slot.params;
+		// Authored full disable: the record lights nothing anywhere.
+		if (params.disable_objects && params.disable_terrain) {
+			continue;
+		}
+		SceneOmniLight &light = out[count];
+		for (int axis = 0; axis < 3; ++axis) {
+			light.position[axis] =
+					static_cast<float>(params.position_fixed[axis]) / 65536.0f;
+		}
+		// The same color fold the retired per-draw select applied (record
+		// bytes /256 at spawn, the RgbGen flicker, blend x gain), on the
+		// shader-constant path (no D3D 1.5x boost — the scene light's energy
+		// carries the presentation scale).
+		std::array<float, 3> rgb = {
+			static_cast<float>(params.rgb[0]) / 256.0f,
+			static_cast<float>(params.rgb[1]) / 256.0f,
+			static_cast<float>(params.rgb[2]) / 256.0f,
+		};
+		apply_rgb_gen(params, flicker, rgb);
+		light.color = point_light_color(rgb, slot.blend, ambient_scale,
+				/*d3d_light_path=*/false);
+		light.range = static_cast<float>(params.radius_fixed) * 1.25f / 65536.0f;
+		light.lights_terrain = !params.disable_terrain;
+		light.lights_objects = !params.disable_objects;
+		light.handle = LightHandle{
+			static_cast<uint16_t>(i | detail::kHandleFlag), slot.generation};
+		++count;
+	}
+	return count;
+}
+
 void LightScene::select_for_draws(const LightDrawContext *draws,
 		size_t draw_count,
 		const LightSelectionOptions &options,

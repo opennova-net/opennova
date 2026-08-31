@@ -1300,6 +1300,7 @@ deletes their system, never ahead of it.
 
 | ID | Replaced technique | Modern equivalent / intent preserved |
 |---|---|---|
+| MP-1 | The EffectWorld per-draw light delivery: the 64-cap collect, the owner/interior group gate, the 3-per-strip select (`collect_render_objects_for_batch @ 0x5d9226`), instance-uniform + static RGBAF-atlas shader delivery, and the terrain projected-texture pass (`Light_SetupTerrainProjectedPass @ 0x5AA830`) | Real `OmniLight3D` nodes under Forward+ clustering, synced per frame from the witnessed pool (spawn lifecycle, LGHT owner policy, flicker ring, color/blend/gain folds all intact in `renderer::LightScene`); light range bounds the owned/interior bleed the group gate used to scope |
 
 ### Original-bug / garbage class (class D; basis: [ADR 0003](adr/0003-no-raw-passthrough-create-from-scratch.md))
 

@@ -2,27 +2,19 @@ class_name EffectLightDirector
 extends RefCounted
 
 ## The EffectWorld dynamic point-light director: spawns one pool light per
-## authored model light record for every placed entity, and drives the
-## per-frame select that feeds the technique shaders' global parameters.
-## The witness map lives on engine/runtime/renderer/light_scene.h — mission
-## start walks the placed pools spawning per-record instances
-## [orig: Game_StartMission @ 0x525d19 -> Game_SpawnAllEntityGlowEffects @0x5227b0 ->
-## Entity_SpawnGlowEffects @ 0x56c7c0], and each draw selects the nearest
-## group-passing four [orig: collect_nearby_zones_by_aabb @ 0x5aa250;
-## update_light_slots @ 0x5abc50]. The object pass runs per rendered model:
-## one draw context per visible ObjectModel carrying BOTH witnessed groups —
-## its entity as the owner group, and the building it stands inside plus that
-## blink volume's section as the interior group — so owned lights (muzzle
-## glow, subobject records, interior room lights) light only what retail's
-## update_light_slots admits. Corona billboards draw per frame from the
-## portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40].
-## The remaining D-RLIT-4 residual is foliage sampling. Authored LGHT
-## positions/lifetimes are spawn-fixed; powerup respawn is routed, and a husk
-## swap neither moves nor rescans lights (retail call graph cited below).
+## authored model light record for every placed entity, and presents the pool
+## as real scene OmniLight3D nodes (ADR 0043 — LightScene.sync_scene_lights;
+## Godot's clustered lighting replaced the retired per-draw select and its
+## instance-uniform / static-atlas delivery). The spawn lifecycle stays the
+## witnessed one — mission start walks the placed pools spawning per-record
+## instances [orig: Game_StartMission @ 0x525d19 ->
+## Game_SpawnAllEntityGlowEffects @0x5227b0 -> Entity_SpawnGlowEffects
+## @ 0x56c7c0]; authored LGHT positions/lifetimes are spawn-fixed; powerup
+## respawn is routed, and a husk swap neither moves nor rescans lights.
+## Corona billboards draw per frame from the portable corona walk
+## [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40].
 
-## Model gather half-extent around the camera. Light ranges are authored
-## small (atten_end 8 on the fire barrels), so any model a pool light could
-## touch sits well inside this radius.
+## Model gather half-extent around the camera for the corona owner walk.
 const QUERY_RADIUS := 512.0
 
 # Light owner zero is retail's unowned/world sentinel. A decoded wire handle
@@ -33,20 +25,10 @@ const STATIC_OWNER_TAG := 2 << 48
 
 var _world: GameWorld
 var _static_sources := Callable()
-var _static_draw_sources := Callable()
-var _static_draw_source_revision := Callable()
-# The packed static atlas rows, rebuilt only when the placer's draw-source
-# revision (rows appended, table reset, carve state) or the static source
-# snapshot changes. Rows are immutable identities; only the light SELECTION
-# over them runs per frame, as retail's per-batch select does.
-var _static_rows_revision := -1
-var _static_rows_bounds := PackedVector3Array()
-var _static_rows_owner_entities := PackedInt64Array()
-var _static_rows_owner_sections := PackedInt32Array()
-var _static_rows_interior_owners := PackedInt64Array()
-var _static_rows_interior_sections := PackedInt32Array()
-var _static_rows_active := PackedByteArray()
 var _scene: LightScene = LightScene.new()
+# The scene-light parent node the pooled OmniLight3D presentation lives under
+# (ADR 0043).
+var _light_parent: Node3D
 var _spawned_static: Dictionary = {}
 var _static_sources_snapshot: Array = []
 var _static_owner_by_bms: Dictionary = {}
@@ -72,14 +54,9 @@ var _corona_frame := 0
 var _blink_owner_cache: Dictionary = {}
 
 
-func setup(world: GameWorld, static_sources: Callable,
-		static_draw_sources: Callable,
-		static_draw_source_revision := Callable()) -> void:
+func setup(world: GameWorld, static_sources: Callable) -> void:
 	_world = world
 	_static_sources = static_sources
-	_static_draw_sources = static_draw_sources
-	_static_draw_source_revision = static_draw_source_revision
-	_static_rows_revision = -1
 
 
 ## Mission teardown: disconnect live node retirement hooks, retire every pool
@@ -90,7 +67,6 @@ func reset() -> void:
 	_scene.clear()
 	_spawned_static.clear()
 	_static_sources_snapshot.clear()
-	_static_rows_revision = -1
 	_static_owner_by_bms.clear()
 	_spawned_nodes.clear()
 	_entity_effect_handles.clear()
@@ -112,7 +88,6 @@ func reattach() -> void:
 			on_wire_node_spawned(node, -1, 0)
 	_static_sources_snapshot = _static_sources.call() \
 			if _static_sources.is_valid() else []
-	_static_rows_revision = -1
 	# Build every BMS identity before resolving any blink containment. A static
 	# item can spawn inside a batched building that appears later in the source
 	# walk, and retail still binds it to that building's owner group.
@@ -369,89 +344,12 @@ func light_gain() -> Vector3:
 	return gain
 
 
-## Build the immutable-index static atlas rows. The placer owns row identity
-## and exact ROBJ bounds; this device supplies the same owner/interior groups
-## as the live-model pass, selects the witnessed nearest four, and publishes
-## the RGBAF payload consumed through INSTANCE_CUSTOM.x.
-func _render_static_light_rows(gain: Vector3, weather: Weather,
-		time_ms: int) -> void:
-	var revision := int(_static_draw_source_revision.call()) \
-			if _static_draw_source_revision.is_valid() else 0
-	if revision != _static_rows_revision:
-		_rebuild_static_light_rows()
-		_static_rows_revision = revision
-	_scene.render_static_frame(_static_rows_bounds,
-			_static_rows_owner_entities, _static_rows_owner_sections,
-			_static_rows_interior_owners, _static_rows_interior_sections,
-			_static_rows_active, gain, time_ms, weather, _static_rows_revision)
-
-
-func _rebuild_static_light_rows() -> void:
-	var descriptors: Array = _static_draw_sources.call() \
-			if _static_draw_sources.is_valid() else []
-	var row_count := 0
-	for descriptor_v in descriptors:
-		var descriptor: Dictionary = descriptor_v
-		row_count = max(row_count, int(descriptor.get("atlas_row", -1)) + 1)
-	var bounds_position_size := PackedVector3Array()
-	var owner_entities := PackedInt64Array()
-	var owner_sections := PackedInt32Array()
-	var interior_owners := PackedInt64Array()
-	var interior_sections := PackedInt32Array()
-	var active := PackedByteArray()
-	bounds_position_size.resize(row_count * 2)
-	owner_entities.resize(row_count)
-	owner_sections.resize(row_count)
-	interior_owners.resize(row_count)
-	interior_sections.resize(row_count)
-	active.resize(row_count)
-	for descriptor_v in descriptors:
-		var descriptor: Dictionary = descriptor_v
-		var atlas_row := int(descriptor.get("atlas_row", -1))
-		var source_index := int(descriptor.get("source_index", -1))
-		if atlas_row < 0 or atlas_row >= row_count or source_index < 0 or \
-				source_index >= _static_sources_snapshot.size():
-			continue
-		var source: Dictionary = _static_sources_snapshot[source_index]
-		var world_bounds: AABB = descriptor.get("world_bounds", AABB())
-		bounds_position_size[atlas_row * 2] = world_bounds.position
-		bounds_position_size[atlas_row * 2 + 1] = world_bounds.size
-		active[atlas_row] = 1 if bool(descriptor.get("active", false)) else 0
-		var static_owner := owner_id_for_static_source(source_index)
-		var is_building := int(descriptor.get("kind",
-				source.get("kind", -1))) == MissionData.KIND_BUILDING
-		if is_building:
-			# A building declares itself as interior section zero and re-scopes
-			# the owner section to this exact ROBJ.
-			owner_entities[atlas_row] = 0
-			owner_sections[atlas_row] = int(descriptor.get("robj_index", 0))
-			interior_owners[atlas_row] = static_owner
-			interior_sections[atlas_row] = 0
-		else:
-			owner_entities[atlas_row] = static_owner
-			owner_sections[atlas_row] = 0
-			var xform: Transform3D = source.get(
-					"world_transform", Transform3D.IDENTITY)
-			var interior := _blink_owner_at(xform.origin)
-			if interior.size() >= 2:
-				interior_owners[atlas_row] = int(interior[0])
-				interior_sections[atlas_row] = int(interior[1])
-	_static_rows_bounds = bounds_position_size
-	_static_rows_owner_entities = owner_entities
-	_static_rows_owner_sections = owner_sections
-	_static_rows_interior_owners = interior_owners
-	_static_rows_interior_sections = interior_sections
-	_static_rows_active = active
-
-
 ## The per-frame device leg (GameFramePipeline, after iris, before the
-## material frame): one draw context per visible ObjectModel near the camera
-## (owner group = that model's entity id) plus the first-person viewmodel
-## parts (owner = the local player, so its own muzzle glow reaches the arms).
-## The FLICKER phase reads the live weather wave ring; the ambient scale is
-## the env light-state gain (the ported EffectWorld_AmbientScale channel).
-func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
-		viewmodel_wire_handle: int = -1) -> void:
+## material frame): present the pool as scene omni lights (ADR 0043) and
+## rebuild the corona billboards. The FLICKER phase reads the live weather
+## wave ring; the ambient scale is the env light-state gain (the ported
+## EffectWorld_AmbientScale channel).
+func render_frame(camera: Camera3D) -> void:
 	if camera == null:
 		_scene.clear_render_output()
 		_clear_coronas()
@@ -461,18 +359,11 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 	var weather: Weather = _world.get_weather_node()
 	var cam_pos := camera.get_camera_transform().origin
 	var time_ms := Time.get_ticks_msec()
+	# The corona owner walk: models near the camera, so owned coronas gate on
+	# their owner's visible-section bits.
 	var models: Array[Node3D] = []
 	var owners := PackedInt64Array()
-	# The second witnessed group: the building each draw currently stands
-	# inside, plus that blink volume's section [orig:
-	# setup_terrain_effect_for_entity @ 0x5c74a0 ->
-	# Lighting_SetInteriorLightGroup @ 0x5a90e0].
-	var interior_owners := PackedInt64Array()
-	var interior_sections := PackedInt32Array()
-	var robj_scoped := PackedByteArray()
 	_blink_owner_cache.clear()
-	_render_static_light_rows(gain, weather, time_ms)
-	var groups := _entity_interior_groups()
 	var container: Node = _world.get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		for child in container.get_children():
@@ -483,74 +374,20 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 				continue
 			models.append(model)
 			owners.append(owner_id_for_node(model))
-			var ref: Dictionary = model.get_meta("entity_ref", {})
-			robj_scoped.append(1 if int(ref.get("kind", -1)) == \
-					MissionData.KIND_BUILDING else 0)
-			var group := _interior_group_for_node(model, groups)
-			interior_owners.append(int(group[0]))
-			interior_sections.append(int(group[1]))
-	# The first-person parts inherit the LOCAL PLAYER's interior group, so the
-	# room's lights reach the arms and weapon the same way they reach the
-	# third-person body standing there.
-	var viewmodel_interior := _local_player_interior_group()
-	for part in viewmodel_parts:
-		if part == null or not part.is_visible_in_tree():
-			continue
-		models.append(part)
-		owners.append(owner_id_for_wire(viewmodel_wire_handle)
-				if viewmodel_wire_handle >= 0 else part.get_instance_id())
-		robj_scoped.append(0)
-		interior_owners.append(int(viewmodel_interior[0]))
-		interior_sections.append(int(viewmodel_interior[1]))
-	# Census select first (report rows for F3 and the seam tests), then the
-	# gameplay per-model pass — its mode/isolation stamp is what the report
-	# ends the frame with.
+	# Census select (report rows for F3 and the seam tests), then the scene
+	# omni sync — the presentation the lit pipeline consumes.
 	_scene.render_frame(cam_pos, QUERY_RADIUS, gain, time_ms, weather)
-	_scene.render_model_frame(models, owners, interior_owners,
-			interior_sections, robj_scoped, gain, time_ms, weather)
+	_scene.sync_scene_lights(_ensure_light_parent(), gain, time_ms, weather)
 	_render_coronas(camera, gain, weather, models, owners, env)
 
 
-## bms_id -> [containing bms_id, section] for every entity currently standing
-## inside a blink volume. Entities outside every volume are absent (group 0).
-func _entity_interior_groups() -> Dictionary:
-	var out: Dictionary = {}
-	var sim: Simulation = _sim()
-	if sim == null:
-		return out
-	var rows: PackedInt64Array = sim.get_entity_interior_groups()
-	var i := 0
-	while i + 2 < rows.size():
-		out[int(rows[i])] = [int(rows[i + 1]), int(rows[i + 2])]
-		i += 3
-	return out
-
-
-## One drawn model's interior group as [owner id, section]; [0, 0] outdoors.
-func _interior_group_for_node(model: ObjectModel, groups: Dictionary) -> Array:
-	var ref: Dictionary = model.get_meta("entity_ref", {})
-	var bms_id := int(ref.get("bms_id", 0))
-	if bms_id == 0:
-		return [0, 0]
-	var row: Variant = groups.get(bms_id)
-	if row == null:
-		return [0, 0]
-	var owner := _owner_id_for_bms(int(row[0]))
-	return [owner, int(row[1])] if owner != 0 else [0, 0]
-
-
-## The local player's interior group as [owner id, section]; [0, 0] outdoors.
-## The player is a spawned entity with no bms_id, so it never appears in
-## _entity_interior_groups.
-func _local_player_interior_group() -> Array:
-	var sim: Simulation = _sim()
-	if sim == null:
-		return [0, 0]
-	var hit: PackedInt64Array = sim.local_player_interior_group()
-	if hit.size() < 2:
-		return [0, 0]
-	var owner := _owner_id_for_bms(int(hit[0]))
-	return [owner, int(hit[1])] if owner != 0 else [0, 0]
+func _ensure_light_parent() -> Node3D:
+	if _light_parent != null and is_instance_valid(_light_parent):
+		return _light_parent
+	_light_parent = Node3D.new()
+	_light_parent.name = "EffectLights"
+	_world.add_child(_light_parent)
+	return _light_parent
 
 
 ## The corona device leg: fetch this frame's additive quads from the portable
@@ -660,9 +497,8 @@ func advance_fixed_tick() -> void:
 
 ## One weapon fire with the ammo MF_Light flag [orig: Entity_UpdateMuzzleGlow-
 ## Effect @ 0x56c960, called per shot from both fire arms]. Owner = the
-## shooter, so the per-draw owner select (render_model_frame) admits the glow
-## only on draws declaring that owner — the shooter's body, and the
-## first-person parts the world tags with the local player's id (D-AI-8d).
+## shooter (under ADR 0043 the glow is a scene light; the owner id still
+## keys the shared entity+0x1B4 lease cache below).
 ## The cache is deliberately shared with model LGHT: if mission-start spawn
 ## left entity+0x1B4 nonzero, retail re-arms and moves that final authored
 ## lease instead of allocating the 1.5-unit muzzle-color light.

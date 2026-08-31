@@ -752,37 +752,19 @@ func test_object_point_lights_preserve_the_retail_stage_split() -> void:
 		assert_false(bool(audited[name]["responses"]["point"]), name)
 
 
-func test_static_multimeshes_share_the_per_robj_point_light_contract() -> void:
-	var shared := _read(OBJECT_ROOT.path_join("shared.gdshaderinc"))
-	var vertex_standard := _read(OBJECT_ROOT.path_join("vertex_standard.gdshaderinc"))
-	var vertex_flag := _read(OBJECT_ROOT.path_join("vertex_flag.gdshaderinc"))
-	var project := _read("res://project.godot")
-	var placer := _read_repo("godot/src/mission/mission_object_placer.cpp")
+func test_point_lights_present_as_scene_omni_lights() -> void:
+	# ADR 0043: the pool's presentation is real OmniLight3D nodes (clustered
+	# Forward+ replaces the retired per-draw select, instance uniforms and the
+	# static RGBAF atlas). The engine keeps the intent fold; the binding syncs
+	# nodes.
 	var light_scene := _read_repo("godot/src/lights/light_scene.cpp")
-
-	_contains_all(shared, [
-		"global uniform sampler2D opennova_static_point_light_rows",
-		"varying float v_static_point_light_row", "float obj_point_light_count()",
-		"vec4 obj_point_light_posr(int light_index)", "vec4 obj_point_light_color(int light_index)",
-		"texelFetch(opennova_static_point_light_rows",
-	], "object/shared.gdshaderinc")
-	# Direct instance-uniform reads belong only to the live-model fallback in
-	# the accessors. Every fixed/DOT3/Phong/environment helper calls those
-	# accessors, so static rows cannot silently skip one technique family.
-	assert_eq(shared.count("u_point_light_count"), 2)
-	for index in range(4):
-		assert_eq(shared.count("u_point_light_posr_%d" % index), 2)
-		assert_eq(shared.count("u_point_light_color_%d" % index), 2)
-	for vertex in [vertex_standard, vertex_flag]:
-		assert_true(vertex.contains("v_static_point_light_row = INSTANCE_CUSTOM.x"))
-
-	assert_true(project.contains("opennova_static_point_light_rows={"))
-	assert_true(project.contains("\"type\": \"sampler2D\""))
-	_contains_all(placer, ["mm->set_use_custom_data(true)", "batch.robj_index", "static_light_draw_key",
-			"_append_static_light_draw_source", "static_cast<float>(*row + 1)"], "the placer")
-	_contains_all(light_scene, ["STATIC_LIGHT_ROW_TEXELS", "Image::FORMAT_RGBAF", "scene_.select_for_draws",
-			"global_shader_parameter_set(\"opennova_static_point_light_rows\"",
-			"atlas[0] = static_cast<float>(selection.count)", "1 + light * 2"], "the light scene")
+	_contains_all(light_scene, ["collect_scene_lights", "sync_scene_lights",
+			"PARAM_ENERGY, 2.0f", "PARAM_SPECULAR, 0.0f",
+			"godot_from_mission_float(row.position)"], "the light scene")
+	var engine_scene := _read_repo("engine/runtime/renderer/light_scene.cpp")
+	_contains_all(engine_scene, ["collect_scene_lights", "apply_rgb_gen",
+			"point_light_color(rgb, slot.blend, ambient_scale"],
+			"the engine pool")
 
 
 func test_material_rgb_alpha_and_coverage_channels_are_technique_specific() -> void:
