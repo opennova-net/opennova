@@ -29,7 +29,6 @@ class FakeWorld:
 	var camera_generation := 0
 	var terrain_camera_generation := -1
 	var foliage_camera_generation := -1
-	var framefx_camera_generation := -1
 
 	func begin_device_frame(_camera_pos: Vector3, _camera_xform: Transform3D,
 			_delta: float) -> void:
@@ -48,9 +47,6 @@ class FakeWorld:
 	func present_local_view_frame() -> void:
 		camera_generation += 1
 		trace.append("local_view")
-	func sync_framefx_frame() -> void:
-		framefx_camera_generation = camera_generation
-		trace.append("framefx")
 	func apply_scene_environment_frame() -> void:
 		trace.append("scene_environment")
 	func render_environment_nodes_frame() -> void:
@@ -92,17 +88,13 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 	assert_eq(world.trace, [
 		"begin", "session", "local_view", "scene_environment",
 		"environment_nodes", "terrain", "water", "foliage", "network",
-		"occlusion", "iris", "sun_veil", "lights", "materials", "framefx",
+		"occlusion", "iris", "sun_veil", "lights", "materials",
 		"particles", "precipitation", "audio:0", "clear", "finish",
 	])
 	assert_eq(world.terrain_camera_generation, 1,
 			"terrain samples the post-present camera generation")
 	assert_eq(world.foliage_camera_generation, 1,
 			"foliage samples the post-present camera generation")
-	# The terminal compositor's typed Q3 snapshot must carry the same current
-	# camera generation as beauty after all current-frame producers update.
-	assert_eq(world.framefx_camera_generation, 1,
-			"typed Q3 samples the post-present camera generation")
 
 
 func test_network_install_failure_suppresses_every_later_device_phase() -> void:

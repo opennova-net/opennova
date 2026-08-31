@@ -74,11 +74,8 @@ add_library(${TARGET_NAME} SHARED
     lights/light_scene.cpp
     particle/effect_scene.cpp
     particle/particle_renderer.cpp
-    render/frame_fx.cpp
+    render/display_decode.cpp
     render/object_lod_frame.cpp
-    render/q3_frame_adapter.cpp
-    render/q3_geometry_cache.cpp
-    render/q3_source_registry.cpp
     object/entity_index.cpp
     object/object_model.cpp
     object/object_model_anim.cpp

@@ -6,7 +6,6 @@
 // never as hidden nodes) dates from 2026-08-30.
 
 #include "object/object_model.h"
-#include "render/frame_fx.h"
 
 #include <runtime/renderer/authored_occluder.h>
 #include <runtime/simassets/model_builders.h>
@@ -117,10 +116,6 @@ void ObjectModel::rebuild_scene() {
 		authored_lod_available_[lod_index] = !submeshes.is_empty();
 		std::vector<LevelSurface> &level = level_surfaces_[lod_index];
 		level.reserve(static_cast<std::size_t>(submeshes.size()));
-		// A per-vertex skinned model rides retail's bone path, which never
-		// collects a Q3 copy (renderer::q3_object_source_admitted).
-		const bool q3_admitted = opennova::renderer::q3_object_source_admitted(
-				object_data_->is_skinned(static_cast<int>(lod_index)));
 		for (int64_t entry = 0; entry < submeshes.size(); ++entry) {
 			const Dictionary submesh = submeshes[entry];
 			const Ref<ArrayMesh> mesh = submesh.get("mesh", Variant());
@@ -138,7 +133,6 @@ void ObjectModel::rebuild_scene() {
 			// PANM part transforms keep working.
 			surface.is_skinned = skeletal_scene_ && skeleton_ != nullptr &&
 					bool(submesh.get("is_skinned", false));
-			surface.q3_admitted = q3_admitted;
 			surface.local_center = mesh->get_aabb().get_center();
 			Ref<ShaderMaterial> material = material_for_index(surface.material_index);
 			// One source submesh is one retail strip. Transparent strips must own
@@ -148,9 +142,7 @@ void ObjectModel::rebuild_scene() {
 			// Opaque strips may keep sharing their retained
 			// material cache entry.
 			if (surface.is_alpha && material.is_valid()) {
-				const Ref<ShaderMaterial> shared_material = material;
 				material = material->duplicate();
-				FrameFx::clone_q3_object_material(shared_material, material);
 			}
 			surface.material = material;
 			// Retail multi-pass effects retain one logical material but submit the
@@ -287,9 +279,9 @@ int ObjectModel::get_level_surface_count(int p_lod_index) const {
 // Swap the active level onto the retained slots. Each slot keeps its node
 // (and with it the per-instance uniforms, the layer/cast policy and the
 // capture stamps other devices hold); only what the level decides moves:
-// the mesh, the material, the part/skeleton parent, the skin binding, the
-// Q3 source registration and the auxiliary pair. Nothing is created here
-// except a first-seen auxiliary instance, and nothing is freed.
+// the mesh, the material, the part/skeleton parent, the skin binding and
+// the auxiliary pair. Nothing is created here except a first-seen auxiliary
+// instance, and nothing is freed.
 void ObjectModel::apply_level_surfaces() {
 	if (applied_lod_ == active_lod_) {
 		return;
@@ -333,7 +325,6 @@ void ObjectModel::apply_level_surfaces() {
 			// The active level has no submesh for this slot: parked, still
 			// stamped, never drawn.
 			instance->set_visible(false);
-			FrameFx::unregister_q3_source(instance);
 			if (slot.auxiliary != nullptr) {
 				slot.auxiliary->set_visible(false);
 			}
@@ -350,14 +341,6 @@ void ObjectModel::apply_level_surfaces() {
 		}
 		bind_skin(instance, surface.is_skinned);
 		instance->set_visible(true);
-		// The level's collector decides the Q3 copy (never a per-vertex
-		// skinned level); the registration follows the material's glow
-		// capability and re-reads the swapped mesh once.
-		if (surface.q3_admitted) {
-			FrameFx::register_q3_object_source(instance, surface.material);
-		} else {
-			FrameFx::unregister_q3_source(instance);
-		}
 		if (surface.auxiliary_material.is_valid()) {
 			MeshInstance3D *auxiliary = slot.auxiliary;
 			if (auxiliary == nullptr) {

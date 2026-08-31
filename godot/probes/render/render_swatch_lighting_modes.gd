@@ -67,7 +67,7 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 	env.ambient_light_energy = 2.0
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_framefx(scene, false)
+	RenderSwatchSupport.add_display_decode(scene)
 
 	# The scene's light delivery IS production delivery (ADR 0043): one
 	# casting-off sun for the directional states, the gradient hemisphere Sky
@@ -322,7 +322,7 @@ func channel_mode(out_dir: String, prefix: String) -> void:
 	env.ambient_light_energy = 2.0
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_framefx(scene, false)
+	RenderSwatchSupport.add_display_decode(scene)
 	# ADR 0043: the specular states light the authored Phong lobes through the
 	# production delivery — one real camera-axis sun.
 	var channel_sun := DirectionalLight3D.new()

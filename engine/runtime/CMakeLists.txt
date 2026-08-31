@@ -87,7 +87,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_lod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/foliage_frame.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_order.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/precipitation_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp

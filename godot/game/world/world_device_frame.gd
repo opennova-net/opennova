@@ -79,7 +79,6 @@ func finish_device_frame() -> void:
 		_world._frame_stats.add(FrameStats.WORLD_FOLIAGE, _world._perf_foliage_us)
 		_world._frame_stats.add(FrameStats.WORLD_AUDIO, _world._perf_audio_us)
 	_sample_water_render_stats(_frame_stats_on)
-	_sample_auxiliary_render_stats(_frame_stats_on)
 
 
 func render_terrain_frame() -> void:
@@ -176,15 +175,6 @@ func apply_blink_frame() -> void:
 func present_local_view_frame() -> void:
 	if _world._local_view_presenter != null:
 		_world._local_view_presenter.after_world_tick()
-
-
-## Compile the typed focused-Q3 snapshot after the camera and every live
-## celestial/water/object producer has published this frame's final state. The
-## immutable draw list is consumed by the terminal compositor against resolved
-## beauty depth; there is no shared-world auxiliary camera or Q3 viewport.
-func sync_framefx_frame() -> void:
-	if _world._framefx != null:
-		_world._framefx.advance_frame()
 
 
 ## The environment presenters' per-frame advance (ex-self-clocked _process
@@ -406,20 +396,6 @@ func update_clear_frame() -> void:
 		_restore_idle_frame_clear_color()
 	else:
 		_update_frame_clear_color()
-
-
-# The compositor pass the root-viewport rows cannot split out: the focused Q3
-# draw list. It reports typed per-frame counts (the compile of this frame, the
-# draw of the previous one) inside the root compositor (POST_TRANSPARENT).
-func _sample_auxiliary_render_stats(stats_on: bool) -> void:
-	if not stats_on:
-		return
-	if _world._framefx != null:
-		var q3_report := _world._framefx.get_backend_report()
-		_world._frame_stats.add(FrameStats.RENDER_Q3_OBJECTS,
-				int(q3_report.get("q3_drawn_commands", 0)))
-		_world._frame_stats.add(FrameStats.RENDER_Q3_DRAWS,
-				int(q3_report.get("q3_gpu_draw_calls", 0)))
 
 
 func is_water_render_stats_measured() -> bool:

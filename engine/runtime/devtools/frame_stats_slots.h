@@ -45,7 +45,6 @@
     X(WORLD_IRIS, "") \
     X(WORLD_AUDIO, "") \
     X(WORLD_LOCAL_VIEW, "local-player camera/viewmodel publication") \
-    X(WORLD_FRAMEFX, "focused Q3 compile (typed draw list for the terminal compositor)") \
     X(WORLD_SCENE_ENV, "render-eye fog/ambient + water classifier") \
     X(WORLD_ENV_NODES, "weather smoothing, sun direction, sky dome, celestial bodies") \
     X(WORLD_WATER, "water strip march + mirror camera") \
@@ -193,9 +192,6 @@
     X(RENDER_ROOT_GPU, "") \
     X(RENDER_WATER_CPU, "") \
     X(RENDER_WATER_GPU, "") \
-    /* The focused Q3 pass (the FrameFX compositor) and the slot captures (the */ \
-    /* PRE_OPAQUE compositor pass) render inside the root viewport, so their */ \
-    /* time is inside RENDER_ROOT_*; only their submission counts below remain. */ \
     /* Per-pass render counts (RenderingServer per-viewport render info for the */ \
     /* previous frame). VALUE slots: what each pass actually submitted, so pass */ \
     /* cost attribution (main view vs shadow maps vs the water mirror) is read */ \
@@ -206,8 +202,6 @@
     X(RENDER_SHADOW_DRAWS, "VALUE: root viewport shadow-pass draw calls") \
     X(RENDER_WATER_OBJECTS, "VALUE: water mirror visible-pass objects") \
     X(RENDER_WATER_DRAWS, "VALUE: water mirror visible-pass draw calls") \
-    X(RENDER_Q3_OBJECTS, "VALUE: focused Q3 compiler draw commands") \
-    X(RENDER_Q3_DRAWS, "VALUE: focused Q3 RenderingDevice draw calls") \
     /* end */
 
 namespace opennova::devtools {

@@ -52,7 +52,7 @@ inline constexpr Slot k_occl[] = {Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL
 inline constexpr Slot k_occl_apply_remainder[] = {Slot::OCCL_BUILDING_QUERY, Slot::OCCL_BUILDING_APPLY, Slot::OCCL_CULL_QUERY, Slot::OCCL_CULL_APPLY, Slot::OCCL_LIGHT_QUERY, Slot::OCCL_LIGHT_APPLY, Slot::OCCL_WATER_APPLY};
 inline constexpr Slot k_env[] = {Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::WORLD_IRIS};
 inline constexpr Slot k_model_runtime_remainder[] = {Slot::MODEL_CLOCK_ANIMATION, Slot::MODEL_PANM, Slot::MODEL_MATERIAL, Slot::MODEL_ORDER_BOUNDS};
-inline constexpr Slot k_world_remainder[] = {Slot::WORLD_RUNTIME, Slot::WORLD_LOCAL_VIEW, Slot::WORLD_FRAMEFX, Slot::WORLD_SCENE_ENV, Slot::WORLD_ENV_NODES, Slot::WORLD_WATER, Slot::WORLD_TERRAIN, Slot::WORLD_FOLIAGE, Slot::WORLD_NETWORK_FRAME, Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE, Slot::WORLD_IRIS, Slot::WORLD_SUN_VEIL, Slot::WORLD_LIGHT, Slot::WORLD_MATERIAL, Slot::WORLD_PARTICLES, Slot::WORLD_AUDIO, Slot::WORLD_CLEAR};
+inline constexpr Slot k_world_remainder[] = {Slot::WORLD_RUNTIME, Slot::WORLD_LOCAL_VIEW, Slot::WORLD_SCENE_ENV, Slot::WORLD_ENV_NODES, Slot::WORLD_WATER, Slot::WORLD_TERRAIN, Slot::WORLD_FOLIAGE, Slot::WORLD_NETWORK_FRAME, Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE, Slot::WORLD_IRIS, Slot::WORLD_SUN_VEIL, Slot::WORLD_LIGHT, Slot::WORLD_MATERIAL, Slot::WORLD_PARTICLES, Slot::WORLD_AUDIO, Slot::WORLD_CLEAR};
 inline constexpr Slot k_other_process[] = {Slot::FRAME_PLAYER_BEFORE, Slot::FRAME_WORLD, Slot::FRAME_PLAYER_AFTER, Slot::FRAME_HUD, Slot::FRAME_STATS_SAMPLE, Slot::FRAME_SHELL_CONTROL, Slot::FRAME_ROUND_FLOW, Slot::FRAME_MENU_SHELL, Slot::FRAME_MENU_VIDEO, Slot::FRAME_DEBUG_REFRESH};
 inline constexpr Slot k_engine_frame[] = {Slot::FRAME_PROCESS_CALLBACKS, Slot::FRAME_PHYSICS_CALLBACKS, Slot::FRAME_DEFERRED_FLUSH, Slot::FRAME_DRAW, Slot::FRAME_PACING_INPUT};
 
@@ -173,7 +173,6 @@ inline constexpr StatsRow kRows[] = {
 	{"scars", "Scars", 4, RowKind::SPAN, Slot::PRESENT_SCARS, nullptr, 0},
 	{"runtime_overhead", "Session/presentation overhead", 3, RowKind::RESIDUAL, Slot::WORLD_RUNTIME, k_runtime_overhead, 9},
 	{"local_view", "Local view publication", 2, RowKind::SPAN, Slot::WORLD_LOCAL_VIEW, nullptr, 0},
-	{"framefx", "Q3 compile", 2, RowKind::SPAN, Slot::WORLD_FRAMEFX, nullptr, 0},
 	{"scene_env", "Scene fog/ambient publication", 2, RowKind::SPAN, Slot::WORLD_SCENE_ENV, nullptr, 0},
 	{"env_nodes", "Sky/celestial/sun/weather smoothing", 2, RowKind::SPAN, Slot::WORLD_ENV_NODES, nullptr, 0},
 	{"terrain", "Terrain frame publication", 2, RowKind::SPAN, Slot::WORLD_TERRAIN, nullptr, 0},
@@ -238,7 +237,6 @@ inline constexpr StatsRow kRows[] = {
 	{"render_water", "Water mirror", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
 	{"render_water_cpu", "Water RTT CPU", 2, RowKind::SPAN, Slot::RENDER_WATER_CPU, nullptr, 0},
 	{"render_water_gpu", "Water RTT GPU", 2, RowKind::SPAN, Slot::RENDER_WATER_GPU, nullptr, 0},
-	{"render_q3", "FrameFX focused Q3", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
 };
 
 inline constexpr int kRowCount = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));

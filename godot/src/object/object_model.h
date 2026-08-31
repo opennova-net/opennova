@@ -256,9 +256,6 @@ private:
 		Vector3 local_center;
 		bool is_alpha = false;
 		bool is_skinned = false;
-		// The level's collector admits a Q3 copy (never a per-vertex skinned
-		// level: renderer::q3_object_source_admitted).
-		bool q3_admitted = false;
 	};
 	// One retained surface instance: slot k draws submesh k of the active
 	// level (mesh, material, part/skeleton parent and skin binding swapped
@@ -496,10 +493,10 @@ private:
 	void refresh_live_panm_classification();
 	int clamp_lod_index(int p_lod_index) const;
 	// Swap the active level's submeshes onto the retained surface slots:
-	// mesh, material, part/skeleton parent, skin binding, the Q3 source
-	// registration, the auxiliary pair, the alpha-strip ladder rows, the
-	// dynamic-material slot tables, the level-bound visuals and the
-	// per-instance lighting stamps. Never creates or frees a slot instance.
+	// mesh, material, part/skeleton parent, skin binding, the auxiliary
+	// pair, the alpha-strip ladder rows, the dynamic-material slot tables,
+	// the level-bound visuals and the per-instance lighting stamps. Never
+	// creates or frees a slot instance.
 	void apply_level_surfaces();
 	// The Node3D a level surface hangs under: the shared Skeleton3D for a
 	// skinned strip, else its ROBJ part node.

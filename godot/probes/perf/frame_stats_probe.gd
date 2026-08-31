@@ -21,7 +21,7 @@ const DUMP_ROWS := ["frame", "before", "world", "foliage", "runtime", "sim", "ne
 		"engine_frame",
 		"render", "render_main", "render_shadow", "render_root_cpu",
 		"render_root_gpu", "render_water", "render_water_cpu",
-		"render_water_gpu", "render_q3", "render_slot"]
+		"render_water_gpu"]
 
 
 func run(ctx: ProbeContext) -> ProbeVerdict:

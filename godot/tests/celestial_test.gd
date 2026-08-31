@@ -301,52 +301,6 @@ func test_celestial_shaders_anchor_and_billboard_from_the_active_pass() -> void:
 			"the recovered positive dot^4 glare factor runs per pass")
 
 
-func test_discs_publish_the_bloom_pass_opacity_beside_the_beauty_one() -> void:
-	# The bloom pass redraws the discs through render_celestial_bodies(1), the
-	# fog-shader path: the moon takes fogDistInt x 0.0002 x (1 - overcast)
-	# there instead of the (fogDistInt - 400)/600 ramp of the direct draw,
-	# the sun has no fog-shader variant (engine celestial_frame.h). Both
-	# publish that Q3 opacity as u_q3_opacity for the typed producer read.
-	var fixture := _make_fixture(MODEL_NAME)
-	var env: MissionEnvironment = fixture.environment
-	var celestial: Celestial = fixture.celestial
-	var moon := celestial.get_node_or_null("Celestial_moon") as Node3D
-	assert_not_null(moon, "the moon loads through the same resource-root seam")
-	if moon == null:
-		return
-	var moon_meshes: Array[MeshInstance3D] = []
-	_collect_meshes(moon, moon_meshes)
-	assert_gt(moon_meshes.size(), 0)
-	var fog_int := floorf(env.get_fog_level())
-	var expected_moon_q3 := clampf(fog_int * 0.0002, 0.0, 1.0) 			* (1.0 - env.get_overcast_blend())
-	for mesh in moon_meshes:
-		for surface in mesh.mesh.get_surface_count():
-			var material := mesh.get_surface_override_material(surface) as ShaderMaterial
-			assert_not_null(material)
-			if material == null:
-				continue
-			assert_almost_eq(float(material.get_shader_parameter("u_q3_opacity")),
-					expected_moon_q3, 0.001,
-					"the moon's Q3 opacity is the fog-shader leg")
-			assert_ne(float(material.get_shader_parameter("u_q3_opacity")),
-					float(material.get_shader_parameter("u_opacity")),
-					"the fog-shader leg differs from the direct-draw ramp")
-	var sun := celestial.get_node_or_null("Celestial_sun") as Node3D
-	assert_not_null(sun)
-	if sun == null:
-		return
-	var sun_meshes: Array[MeshInstance3D] = []
-	_collect_meshes(sun, sun_meshes)
-	for mesh in sun_meshes:
-		for surface in mesh.mesh.get_surface_count():
-			var material := mesh.get_surface_override_material(surface) as ShaderMaterial
-			if material == null:
-				continue
-			assert_eq(float(material.get_shader_parameter("u_q3_opacity")),
-					float(material.get_shader_parameter("u_opacity")),
-					"the sun has no fog-shader alpha variant")
-
-
 static func _collect_meshes(node: Node, out: Array[MeshInstance3D]) -> void:
 	if node is MeshInstance3D:
 		out.append(node)

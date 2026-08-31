@@ -1,5 +1,4 @@
 #include "mission/mission_object_placer.h"
-#include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
 
 #include <cmath>
@@ -800,9 +799,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			}
 			attach_population(population_index, mmi, !p_batch.auxiliary_draw);
 			populations_parent()->add_child(mmi);
-			if (!p_batch.auxiliary_draw) {
-				FrameFx::register_q3_object_source(mmi, p_batch.material);
-			}
 			++batch_count;
 			if (p_batch.lod_index > 0) {
 				++lod_population_count;
@@ -1757,9 +1753,6 @@ void MissionObjectPlacer::_flush_static_population_changes(
 		if (population.shadow_tagged) {
 			node->set_meta("static_shadow_rows",
 					_static_population_row_slots(population));
-		}
-		if (!population.shadow_only) {
-			FrameFx::invalidate_q3_instances(node);
 		}
 	}
 }

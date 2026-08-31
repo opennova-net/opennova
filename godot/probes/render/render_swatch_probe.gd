@@ -8,7 +8,7 @@ extends GameProbe
 ##   composite   the DRAW-ORDER scenes (water bracket, sky ladder)
 ##   lighting    the object light-response matrix (RenderSwatchLightingModes)
 ##   channels    material-channel ownership (RenderSwatchLightingModes)
-##   clip / matchterrain / glow   the auxiliary passes (RenderSwatchPassModes)
+##   clip / matchterrain   the auxiliary passes (RenderSwatchPassModes)
 ##   compare     diff two grid captures exactly (headless is fine)
 ##   calibrate   the gamma-framebuffer proof: 256/256 terminal bytes, the blend domain
 ## POLICY (ADR 0023): baselines live under .scratch/golden/render/ (machine-
@@ -22,7 +22,7 @@ const WINDOW_SIZE := Vector2i(1280, 1024)
 const CELL_WORLD := 2.4
 const GRID_COLS := 10
 const RENDER_MODES := ["capture", "composite", "lighting", "channels", "clip",
-		"matchterrain", "glow", "calibrate"]
+		"matchterrain", "calibrate"]
 
 # Curated variants per tag: name, material_flags, emissive_type, glass, alpha byte.
 const VARIANTS: Array = [
@@ -72,8 +72,6 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			await RenderSwatchPassModes.new(ctx, _stage, _sink).clip_mode(out_dir, prefix)
 		"matchterrain":
 			await RenderSwatchPassModes.new(ctx, _stage, _sink).matchterrain_mode(out_dir, prefix)
-		"glow":
-			await RenderSwatchPassModes.new(ctx, _stage, _sink).glow_mode(out_dir, prefix)
 	return _sink.verdict(mode)
 
 
@@ -112,7 +110,7 @@ func _capture_mode(out_dir: String, prefix: String) -> void:
 	env.background_color = Color(0.12, 0.12, 0.14)
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_framefx(scene, false)
+	RenderSwatchSupport.add_display_decode(scene)
 
 	var diffuse := RenderSwatchSupport.make_diffuse_texture()
 	var detail := RenderSwatchSupport.make_detail_texture()
@@ -195,7 +193,7 @@ func _composite_mode(out_dir: String, prefix: String) -> void:
 	env.background_color = Color(0.12, 0.12, 0.14)
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_framefx(scene, false)
+	RenderSwatchSupport.add_display_decode(scene)
 
 	# Each layer: [label, color(rgba), rung, z]. Z runs TOWARD the camera
 	# (+z nearer): every scene places its ladder-EARLIEST layer NEAREST, so
@@ -291,7 +289,7 @@ func _calibrate_mode() -> void:
 	env.background_color = Color(0.0, 0.0, 0.0)
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_framefx(scene, false)
+	RenderSwatchSupport.add_display_decode(scene)
 
 	var quad := MeshInstance3D.new()
 	var quad_mesh := QuadMesh.new()

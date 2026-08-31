@@ -215,7 +215,7 @@ func test_process_exit_releases_the_reflection_decode_before_its_viewport() -> v
 	assert_not_null(compositor)
 	var effects := compositor.get_compositor_effects()
 	assert_eq(effects.size(), 1)
-	var decode := effects[0] as FrameFxCompositorEffect
+	var decode := effects[0] as DisplayDecodeEffect
 	assert_not_null(decode)
 	if decode == null:
 		return
@@ -237,7 +237,7 @@ func test_process_exit_releases_the_reflection_decode_before_its_viewport() -> v
 func test_leaving_the_tree_releases_the_reflection_decode_and_reentry_rearms_it() -> void:
 	# A Water freed or detached outside release_runtime_renderer_resources()
 	# (GUT fixtures, embedder previews) must not leak its RenderingDevice
-	# chain: EXIT_TREE runs the same idempotent release leg FrameFx has, and
+	# chain: EXIT_TREE runs the same idempotent release leg DisplayDecode has, and
 	# ENTER_TREE re-arms a fresh decode on the retained mirror camera.
 	var fixture := _make_water_fixture()
 	var water := fixture["water"] as Water
@@ -247,7 +247,7 @@ func test_leaving_the_tree_releases_the_reflection_decode_and_reentry_rearms_it(
 	assert_not_null(mirror_camera)
 	var first_compositor := mirror_camera.compositor
 	assert_not_null(first_compositor)
-	var first_decode := first_compositor.get_compositor_effects()[0] 			as FrameFxCompositorEffect
+	var first_decode := first_compositor.get_compositor_effects()[0] 			as DisplayDecodeEffect
 	assert_not_null(first_decode)
 	if first_decode == null:
 		return
@@ -265,7 +265,7 @@ func test_leaving_the_tree_releases_the_reflection_decode_and_reentry_rearms_it(
 	assert_not_null(second_compositor, "re-entry re-arms the mirror decode")
 	if second_compositor == null:
 		return
-	var second_decode := second_compositor.get_compositor_effects()[0] 			as FrameFxCompositorEffect
+	var second_decode := second_compositor.get_compositor_effects()[0] 			as DisplayDecodeEffect
 	assert_not_null(second_decode)
 	if second_decode == null:
 		return

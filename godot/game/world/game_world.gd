@@ -82,8 +82,8 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _terrain: Terrain = $Terrain
 @onready var _env: MissionEnvironment = get_node_or_null("MissionEnvironment")
 @onready var _water: Water = get_node_or_null("Water")
-@onready var _framefx: FrameFx = \
-		get_node_or_null("FrameFx")
+@onready var _display_decode: DisplayDecode = \
+		get_node_or_null("DisplayDecode")
 @onready var _weather: Weather = get_node_or_null("Weather")
 @onready var _precipitation: Precipitation = get_node_or_null("Precipitation")
 @onready var _celestial: Celestial = get_node_or_null("Celestial")
@@ -859,10 +859,10 @@ func unload() -> void:
 ## Process-exit-only release for renderer resources intentionally retained by
 ## unload() so world-to-menu and mission-to-mission transitions stay warm.
 func release_runtime_renderer_resources() -> void:
-	# FrameFx publishes Q3 frames that retain sampled producer resources. Drain
-	# its compositor callback before Water releases those source textures.
-	if _framefx != null:
-		_framefx.shutdown()
+	# Drain the terminal decode's compositor callback before Water releases
+	# the source textures the frame may still sample.
+	if _display_decode != null:
+		_display_decode.shutdown()
 	var runtime_water := _water as Water
 	if runtime_water != null:
 		runtime_water.release_runtime_renderer_resources()
@@ -1345,10 +1345,6 @@ func present_local_view_frame() -> void:
 	_device_frame.present_local_view_frame()
 
 
-func sync_framefx_frame() -> void:
-	_device_frame.sync_framefx_frame()
-
-
 func render_environment_nodes_frame() -> void:
 	_device_frame.render_environment_nodes_frame()
 
@@ -1433,7 +1429,8 @@ func get_runtime_perf_counters() -> Dictionary:
 		"runtime": _runtime.get_perf_counters() if _runtime != null else {},
 		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
 		"foliage_backend": foliage_backend,
-		"framefx": _framefx.get_backend_report() if _framefx != null else {},
+		"display_decode": _display_decode.get_backend_report() \
+				if _display_decode != null else {},
 		"mission_placement": _mission_stats.duplicate(true),
 		"static_live_populations": get_static_live_population_count(),
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},

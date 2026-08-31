@@ -61,8 +61,7 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Simulation.viewmodel_fallback_rot_bias_deg(
 # Render_SetViewAndProjectionMatrices @0x58d900, depth remap Render_SetViewportDepth01 @0x58a7b0;
 # default 80.0 = flt_7D1898 stored by AdmDef_InitEntryDefaults @0x53ff31; parser key 'renderfov'
 # @0x54482a]. Ported as a fold into the beauty pass: the viewmodel parts ride their own visual
-# layer (the beauty camera admits it; the mirror/capture cameras and the focused Q3 adapter's
-# world-layer test exclude it, there is no Q3 camera) and every
+# layer (the beauty camera admits it; the mirror/capture cameras exclude it) and every
 # flagged instance applies the renderfov focal ratio plus the near depth band in the object
 # shaders (shaders/viewmodel_pass.gdshaderinc, fed by _update_viewmodel_projection) - the
 # depth-remap's visible equivalent, drawn into the same frame as the world.
@@ -251,7 +250,7 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# The FP overlay rides its own visual layer: the beauty camera admits it and
 	# every mesh instance applies the renderfov projection + depth band
 	# (retail's "viewmodel first" draw into the same backbuffer [orig:
-	# Player_RenderFirstPersonViewModel @ 0x4ded60]); the mirror, Q3, and
+	# Player_RenderFirstPersonViewModel @ 0x4ded60]); the mirror and
 	# capture cameras exclude the layer. The gameplay camera admits the world
 	# shadow-caster marker layers; the viewmodel policy strips those markers
 	# so the gun never leaks into world shadows. Both stamps are edge-gated

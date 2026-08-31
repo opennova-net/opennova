@@ -243,10 +243,9 @@ func test_the_drawer_states_blend_and_never_alpha_scissor() -> void:
 				"%s: raw texel sampling (D-RMAT-7)" % shader.resource_path)
 	assert_true(scorch.code.contains("depth_draw_never"), "scorch: z-write off (0x100000)")
 	assert_true(scorch.code.contains("cull_back"), "scorch: the CCW back-face cull")
-	# Focused Q3 is a typed draw list, so the beauty scar shader needs no pass
-	# gate and has no alpha test on its texel.
+	# The beauty scar shader needs no pass gate and has no alpha test on its
+	# texel.
 	assert_eq(scorch.code.count("discard"), 0, "scorch: no camera-pass gate")
-	assert_false(scorch.code.contains("is_q3_pass"))
 	assert_false(scorch.code.contains("tex.a <") or scorch.code.contains("alpha <"),
 			"scorch: no alpha test")
 	assert_true(hole.code.contains("depth_draw_always"), "bhole: z-write on")

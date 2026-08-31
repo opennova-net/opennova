@@ -119,17 +119,8 @@ private:
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
 	Ref<ShaderMaterial> _make_celestial_material(bool p_additive,
 			int p_priority);
-	// One mesh of a body and the blend each installed surface material was
-	// given: bit i set = surface i renders through celestial_additive. The
-	// mask rides the Q3 registration so the adapter blends the disc the way
-	// its material was installed.
-	struct InstalledMesh {
-		MeshInstance3D *mesh = nullptr;
-		uint32_t additive_surfaces = 0;
-	};
 	struct InstalledMaterials {
 		Vector<Ref<ShaderMaterial>> materials;
-		Vector<InstalledMesh> meshes;
 	};
 	InstalledMaterials _apply_material_override(Node3D *p_model,
 			const Ref<ShaderMaterial> &p_base_material);

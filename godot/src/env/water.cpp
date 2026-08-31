@@ -1,5 +1,5 @@
 #include "env/water.h"
-#include "render/frame_fx.h"
+#include "render/display_decode.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/canvas_item_material.hpp>
@@ -321,7 +321,7 @@ void Water::_notification(int p_what) {
 	}
 }
 
-// The mirror camera's decode-only terminal effect: one FrameFxCompositorEffect
+// The mirror camera's decode-only terminal effect: one DisplayDecodeEffect
 // on a compositor the camera owns (never the beauty WorldEnvironment's chain).
 void Water::_install_reflection_decode() {
 	if (reflection_camera_ == nullptr) {
@@ -337,13 +337,13 @@ void Water::_install_reflection_decode() {
 }
 
 // Idempotent release of the mirror decode chain, the same EXIT_TREE leg
-// FrameFx runs: disable the effect, detach the mirror camera's compositor,
-// drain a callback already queued for the mirror while RenderingDevice is
-// live, then free the effect-owned device resources. A Water freed outside
-// release_runtime_renderer_resources() (GUT fixtures, embedder previews)
-// otherwise leaks its RD chain.
+// DisplayDecode runs: disable the effect, detach the mirror camera's
+// compositor, drain a callback already queued for the mirror while
+// RenderingDevice is live, then free the effect-owned device resources. A
+// Water freed outside release_runtime_renderer_resources() (GUT fixtures,
+// embedder previews) otherwise leaks its RD chain.
 void Water::_release_reflection_decode() {
-	Ref<FrameFxCompositorEffect> decode_effect = reflection_decode_effect_;
+	Ref<DisplayDecodeEffect> decode_effect = reflection_decode_effect_;
 	if (decode_effect.is_valid())
 		decode_effect->set_enabled(false);
 	if (reflection_camera_ != nullptr &&
@@ -469,8 +469,6 @@ void Water::build() {
 	// prerender never draws the water surface itself (water_mirror.h).
 	mesh_instance_->set_layer_mask(VISUAL_LAYER_WATER);
 	add_child(mesh_instance_);
-	FrameFx::register_q3_source(mesh_instance_,
-			opennova::renderer::Q3Source::Water);
 	built_ = true;
 
 	// The witnessed per-frame noise texture pair (created once, updated per
@@ -829,10 +827,6 @@ void Water::_rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
 					(Mesh::ARRAY_CUSTOM_RGBA_FLOAT
 							<< Mesh::ARRAY_FORMAT_CUSTOM2_SHIFT));
 	mesh->surface_set_material(0, water_material_);
-	// The NV Q3 redraw shares this strip: hand the arrays over so the focused
-	// Q3 cache re-packs them from memory instead of reading the freshly
-	// uploaded surface back through the server in the same frame.
-	FrameFx::publish_q3_geometry(mesh_instance_, 0, arrays);
 	// The witnessed per-side material swap: camera-above -> the blend
 	// material, underwater -> the opaque one — ported as the shader's
 	// u_underwater_view branch.
@@ -847,10 +841,6 @@ void Water::_clear_strip_surfaces() {
 	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
 	if (mesh.is_valid() && mesh->get_surface_count() > 0) {
 		mesh->clear_surfaces();
-		// The focused Q3 record lists this strip's surface: the clear is a
-		// rebuild too, so its surface list is re-read (to none) before the
-		// next compile instead of drawing the last published strip.
-		FrameFx::invalidate_q3_source(mesh_instance_);
 	}
 }
 

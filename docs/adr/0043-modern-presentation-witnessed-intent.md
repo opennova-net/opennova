@@ -58,9 +58,12 @@ hardest-to-host pipelines defend content that does not exist).
    hemisphere ambient, and clustered `OmniLight3D` nodes); the per-shader hand fog
    (replaced by Environment depth fog, with the additive fade-to-black island);
    the sun-visibility raycast system (replaced by per-pixel shadow reception);
-   the environment cube capture (replaced by a `ReflectionProbe`); and the particle
+   the environment cube capture (replaced by a `ReflectionProbe`); the particle
    frame compiler, skyline atlas, and RenderingDevice compositor (replaced by
-   MultiMesh presentation of the retained CPU `.ptl` simulation). Settings toggles
+   MultiMesh presentation of the retained CPU `.ptl` simulation); and the FrameFX
+   bloom bracket — the focused Q3 re-render, its typed compiler/registry/cache,
+   and the capture/blur/composite kernel (replaced by `Environment` glow; the
+   terminal compositor keeps only the display decode). Settings toggles
    are reserved for one-property taste knobs (shadow distance, foliage casters,
    glow, volumetric fog, soft-particle fade); a toggle never selects between two
    implementations.

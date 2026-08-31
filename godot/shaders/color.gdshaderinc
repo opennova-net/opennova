@@ -8,7 +8,7 @@
 // GLib_SetGammaRamp @ 0x677be0; default gamma @ 0x84f354].
 //
 // Spatial retail passes therefore write gamma-domain numeric values directly
-// into Godot's floating-point scene target. FrameFxCompositorEffect runs
+// into Godot's floating-point scene target. DisplayDecodeEffect runs
 // after the final 3D/particle blend and performs the sole display decode.
 // Offscreen retail devices intentionally bypass that compositor and retain
 // gamma-domain values. Canvas post effects use the explicit display helpers.

@@ -227,8 +227,8 @@
       "bounded_residuals": []
     },
     "TECHNIQUE_GLOW": {
-      "scope": "live",
-      "parity_status": "matching",
+      "scope": "superseded_adr_0043",
+      "parity_status": "matching_with_bounded_residuals",
       "disposition": "ported_typed_q3_framefx_rd_draw_list",
       "declaration_count": 1,
       "pass_declaration_count": 1,
@@ -255,44 +255,17 @@
           ]
         },
         {
-          "path": "godot/src/render/q3_frame_adapter.cpp",
+          "path": "godot/src/env/mission_environment.cpp",
           "tokens": [
-            "kQ3GlassWhiteLobePower",
-            "kQ3GlassWarmLobePower",
-            "Q3Technique::RotatedSpecularGlass",
-            "Q3Technique::NormalCopy",
-            "self_lum_color",
-            "vec3 lit = base * pc.draw_color.rgb;"
-          ]
-        },
-        {
-          "path": "godot/src/render/frame_fx.cpp",
-          "tokens": [
-            "FramePass::AverageFour",
-            "FramePass::WeightedFour",
-            "FramePass::FinalAverage",
-            "BlendMode::SourceAlphaAdd"
-          ]
-        },
-        {
-          "path": "godot/game/world/game_world.tscn",
-          "tokens": [
-            "type=\"FrameFx\""
-          ]
-        },
-        {
-          "path": "godot/probes/render/render_swatch_pass_modes.gd",
-          "tokens": [
-            "glow_off_away",
-            "sun glint",
-            "no-pass contracts"
+            "set_glow_enabled",
+            "set_glow_hdr_bleed_threshold"
           ]
         }
       ],
-      "raster_probes": [
-        "glow"
-      ],
-      "bounded_residuals": []
+      "raster_probes": [],
+      "bounded_residuals": [
+        "ADR-0043"
+      ]
     },
     "TECHNIQUE_MATCHTERRAIN": {
       "scope": "live",

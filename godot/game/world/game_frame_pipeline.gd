@@ -111,13 +111,6 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	leg_start = _begin_leg()
 	_world.render_material_frame()
 	_end_leg(FrameStats.WORLD_MATERIAL, leg_start)
-	# Compile focused Q3 only after this frame's celestial, water, occlusion,
-	# and object-material producers have published their final transforms and
-	# parameters. The typed snapshot is consumed by the terminal compositor;
-	# it is never self-clocked from a stale process callback.
-	leg_start = _begin_leg()
-	_world.sync_framefx_frame()
-	_end_leg(FrameStats.WORLD_FRAMEFX, leg_start)
 	leg_start = _begin_leg()
 	_world.render_particle_frame()
 	_end_leg(FrameStats.WORLD_PARTICLES, leg_start)

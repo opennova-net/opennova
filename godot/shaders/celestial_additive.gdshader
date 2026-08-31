@@ -26,9 +26,6 @@ uniform bool u_billboard = false;
 uniform bool u_depth_far_pin = false;
 uniform bool u_glare_view_fade = false;
 uniform vec3 u_glare_direction = vec3(0.0, 1.0, 0.0);
-// The typed Q3 producer reads this occlusion-independent fog-based opacity;
-// the beauty shader itself always uses u_opacity.
-uniform float u_q3_opacity = 0.0;
 
 varying float v_glare_view_fade;
 
@@ -62,16 +59,13 @@ void vertex() {
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
 	if (u_depth_far_pin) {
 		// Exact far plane (reverse-Z depth 0); an epsilon fails because
-		// distant terrain's depth near/dist drops below any epsilon. The
-		// BEAUTY view only: retail's bloom pass redraws the discs through
-		// Render_SetViewportFarDepth's far-band viewport (MinZ 0.98 / MaxZ
-		// 0.99996948) and the ordinary z-tested flush, so in the bloom
-		// source every nearer surface occludes the disc: a sun behind a
-		// ridge does not bloom over it. The focused Q3 adapter applies that
-		// band (runtime/renderer/q3_frame.h kQ3FarBandMinZ/MaxZ)
+		// distant terrain's depth near/dist drops below any epsilon. Every
+		// nearer surface occludes the pinned disc, so a sun behind a ridge
+		// neither draws nor feeds Environment glow over it (retail's bloom
+		// source kept the same z-tested posture through its far-band viewport
 		// [orig: FrameFX_RenderBloomPass @ 0x582940: Render_SetViewportFarDepth
 		// @ 0x582a70 -> render_celestial_bodies(1) @ 0x582a77;
-		// Render_SetViewportFarDepth @ 0x58a840].
+		// Render_SetViewportFarDepth @ 0x58a840]).
 		POSITION.z = 0.0;
 	}
 }

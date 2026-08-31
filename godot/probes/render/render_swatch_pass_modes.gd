@@ -1,9 +1,8 @@
 class_name RenderSwatchPassModes
 extends RefCounted
 
-## The render_swatch auxiliary-pass raster proofs (modes clip, matchterrain,
-## glow): the reflection CLIP gate, the skinned MATCHTERRAIN
-## pass, the selective Q3 GLOW and the slot PROJSHAD coverage, each technique
+## The render_swatch auxiliary-pass raster proofs (modes clip, matchterrain):
+## the reflection CLIP gate and the skinned MATCHTERRAIN pass, each technique
 ## on the probe stage through its witnessed states.
 
 var _ctx: ProbeContext
@@ -48,7 +47,7 @@ func clip_mode(out_dir: String, prefix: String) -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_framefx(scene, false)
+	RenderSwatchSupport.add_display_decode(scene)
 
 	var diffuse := RenderSwatchSupport.make_lighting_diffuse_texture()
 	var detail := RenderSwatchSupport.make_lighting_detail_texture()
@@ -268,7 +267,7 @@ func matchterrain_mode(out_dir: String, prefix: String) -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_framefx(scene, false)
+	RenderSwatchSupport.add_display_decode(scene)
 
 	var tile_low := RenderSwatchSupport.make_matchterrain_array(32)
 	var tile_high := RenderSwatchSupport.make_matchterrain_array(224)
@@ -479,205 +478,3 @@ func _apply_matchterrain_probe_state(entries: Array[Dictionary], state: String,
 		mesh.set_instance_shader_parameter("u_match_terrain_page_projection",
 				Vector4(mesh.position.x - 1.0, mesh.position.z - 1.0, 0.5, 2.0))
 
-
-# Highest-quality GLOW proof. _FFP LUM copies NORMAL, fixed Glass uses the
-# sun-rotated specular cube, and every other live runtime technique has no
-# GLOW pass. Ring pixels exercise the compositor-owned typed Q3 target and exact
-# FrameFX kernel; the away-sun capture proves Glass tracks MatRotSpecular.
-func glow_mode(out_dir: String, prefix: String) -> void:
-	DirAccess.make_dir_recursive_absolute(out_dir)
-	_stage.set_stage_size(Vector2i(1280, 720))
-	_ctx.set_time_scale(0.0)
-	var parsed = JSON.parse_string(FileAccess.get_file_as_string(
-			"res://shaders/object/pipeline_manifest.json"))
-	if not parsed is Dictionary:
-		_sink.error("render_swatch_probe glow: object pipeline manifest did not parse")
-		_sink.quit(1)
-		return
-	var contracts = parsed.get("glow_contracts", {})
-	if not contracts is Dictionary:
-		_sink.error("render_swatch_probe glow: contracts did not parse")
-		_sink.quit(1)
-		return
-
-	var scene := Node3D.new()
-	_stage.add_scene(scene)
-	var world_env := WorldEnvironment.new()
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.006, 0.006, 0.009)
-	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
-	world_env.environment = env
-	scene.add_child(world_env)
-	var frame_renderer := RenderSwatchSupport.add_framefx(scene, true)
-
-	var diffuse := RenderSwatchSupport.make_channel_diffuse_texture(255)
-	var detail := RenderSwatchSupport.make_lighting_detail_texture()
-	var normal := RenderSwatchSupport.make_lighting_normal_texture()
-	var entries: Array[Dictionary] = []
-	var techniques: Array = parsed.get("techniques", [])
-	const COLS := 6
-	const SPACING := 2.5
-	const QUAD_SIZE := Vector2(1.30, 1.30)
-	# The lighting block is pass-global. A zero direction color keeps every
-	# NORMAL technique flat so only the glow cube can follow the direction,
-	# which each capture aims below.
-	RenderingServer.global_shader_parameter_set("opennova_light_block_gain", Vector3.ONE)
-	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_sky",
-			Vector3(0.04, 0.04, 0.04))
-	RenderingServer.global_shader_parameter_set("opennova_light_block_hemi_ground",
-			Vector3(0.04, 0.04, 0.04))
-	RenderingServer.global_shader_parameter_set("opennova_light_block_dir_color",
-			Vector3.ZERO)
-	RenderingServer.global_shader_parameter_set("opennova_fog_enabled", false)
-	for i in range(techniques.size()):
-		var technique: Dictionary = techniques[i]
-		var name := str(technique["engine_enum"])
-		var policies: Array = technique.get("policies", [])
-		var policy := "opaque" if policies.has("opaque") else str(policies[0])
-		var path := "res://shaders/object/%s/%s.gdshader" % [
-				technique["directory"], policy]
-		var shader := load(path) as Shader
-		if shader == null:
-			_sink.error("render_swatch_probe glow: could not load %s" % path)
-			_sink.quit(1)
-			return
-		var material := ShaderMaterial.new()
-		material.shader = shader
-		if not RenderSwatchSupport.bind_production_object_resources(material,
-				str(technique["implementation"])):
-			_sink.error("render_swatch_probe glow: production resources unavailable for %s" % path)
-			_sink.quit(1)
-			return
-		material.set_shader_parameter("u_diffuse", diffuse)
-		material.set_shader_parameter("u_detail", detail)
-		material.set_shader_parameter("u_normal_map", normal)
-		material.set_shader_parameter("u_uv_transform_u", Vector3(1.0, 0.0, 0.0))
-		material.set_shader_parameter("u_uv_transform_v", Vector3(0.0, 1.0, 0.0))
-		material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
-		material.set_shader_parameter("u_alpha_mod", 1.0)
-		material.set_shader_parameter("u_reflect_color", Color(1.0, 1.0, 1.0, 1.0))
-		material.set_shader_parameter("u_local_light_count", 0)
-		var quad := QuadMesh.new()
-		quad.size = QUAD_SIZE
-		var mesh := MeshInstance3D.new()
-		mesh.mesh = quad
-		mesh.material_override = material
-		mesh.position = Vector3((i % COLS) * SPACING,
-				-(i / COLS) * SPACING, 0.0)
-		mesh.set_instance_shader_parameter("u_point_light_count", 0.0)
-		scene.add_child(mesh)
-		entries.append({"name": name,
-			"contract": str(contracts.get(name, "missing")),
-			"material": material, "mesh": mesh})
-
-	var rows := int(ceil(float(entries.size()) / float(COLS)))
-	var grid_w := COLS * SPACING
-	var grid_h := rows * SPACING
-	var aspect := 1280.0 / 720.0
-	var camera := Camera3D.new()
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = maxf(grid_h, grid_w / aspect) + 0.6
-	camera.position = Vector3((COLS - 1) * SPACING * 0.5,
-			-(rows - 1) * SPACING * 0.5, 18.0)
-	camera.current = true
-	scene.add_child(camera)
-
-	var captures := {}
-	var states := ["nopass_off", "nopass_on", "glow_off_aligned",
-			"glow_on_aligned", "glow_off_away", "glow_on_away"]
-	for state in states:
-		frame_renderer.visible = state in ["nopass_on", "glow_on_aligned", "glow_on_away"]
-		# In play GameFramePipeline compiles focused Q3 from the final beauty
-		# camera every frame; this stage drives that leg explicitly.
-		frame_renderer.advance_frame()
-		var aligned: bool = not state.ends_with("_away")
-		var show_glow_contracts: bool = state.begins_with("glow_")
-		var reflection := Vector3(0.0, 0.0, 1.0)
-		for entry in entries:
-			var mesh: MeshInstance3D = entry["mesh"]
-			mesh.visible = (str(entry["contract"]) != "no_pass") == show_glow_contracts
-			if str(entry["contract"]) != "rotated_specular":
-				continue
-			# D3D's camera-space reflection coordinate changes across this
-			# orthographic grid because CameraPos remains a single world point.
-			# The block direction is one value per pass, so aim the very narrow
-			# retail cube lobes at the rotated_specular swatch's actual center
-			# reflection instead of assuming its coordinate is +/-Z; every other
-			# visible swatch draws with a zero direction color and cannot follow.
-			var incident := (mesh.global_position - camera.global_position).normalized()
-			reflection = (incident - 2.0 * Vector3(0.0, 0.0, 1.0) *
-					incident.dot(Vector3(0.0, 0.0, 1.0))).normalized()
-		RenderingServer.global_shader_parameter_set("opennova_light_block_dir",
-				reflection if aligned else -reflection)
-		var frame: Image = await _capture_lighting_image()
-		if frame == null:
-			_sink.error("render_swatch_probe glow: no viewport image for %s" % state)
-			_sink.quit(1)
-			return
-		frame.convert(Image.FORMAT_RGBA8)
-		captures[state] = frame
-		if frame.save_png(out_dir.path_join("%s_%s.png" % [prefix, state])) != OK:
-			_sink.error("render_swatch_probe glow: could not save %s" % state)
-			_sink.quit(1)
-			return
-
-	var pixel_scale := float((captures["glow_on_aligned"] as Image).get_height()) / camera.size
-	var inner_radius := maxi(4, int(QUAD_SIZE.x * pixel_scale * 0.55))
-	var outer_radius := maxi(inner_radius + 3, int(QUAD_SIZE.x * pixel_scale * 0.92))
-	var core_radius := maxi(5, int(QUAD_SIZE.x * pixel_scale * 0.34))
-	var reports: Array[Dictionary] = []
-	var failures: Array[String] = []
-	for entry in entries:
-		var mesh: MeshInstance3D = entry["mesh"]
-		var center := camera.unproject_position(mesh.global_position)
-		var contract := str(entry["contract"])
-		var bloom_delta := RenderSwatchSupport.lighting_mean_ring_delta(
-				captures["glow_off_aligned"], captures["glow_on_aligned"], center,
-				inner_radius, outer_radius) if contract != "no_pass" else \
-				RenderSwatchSupport.lighting_mean_ring_delta(captures["nopass_off"],
-						captures["nopass_on"], center, inner_radius, outer_radius)
-		var away_bloom_delta := RenderSwatchSupport.lighting_mean_ring_delta(
-				captures["glow_off_away"], captures["glow_on_away"], center,
-				inner_radius, outer_radius)
-		var core_rect := Rect2i(int(center.x) - core_radius,
-				int(center.y) - core_radius, core_radius * 2, core_radius * 2)
-		var sun_delta := RenderSwatchSupport.lighting_mean_delta(
-				captures["glow_on_aligned"], captures["glow_on_away"], core_rect)
-		reports.append({"technique": entry["name"], "contract": contract,
-			"aligned_bloom_ring_delta": bloom_delta,
-			"away_bloom_ring_delta": away_bloom_delta,
-			"sun_rotation_core_delta": sun_delta})
-		if contract == "missing":
-			failures.append("%s has no GLOW contract" % entry["name"])
-		RenderSwatchSupport.channel_expect_delta(failures, entry["name"], "GLOW bloom",
-				bloom_delta, contract != "no_pass", 0.0015, 0.0007)
-		if contract == "rotated_specular":
-			if sun_delta < 0.02:
-				failures.append("%s GLOW did not track MatRotSpecular (%f)" % [
-						entry["name"], sun_delta])
-			if away_bloom_delta > 0.001:
-				failures.append("%s kept a glass bloom away from the sun (%f)" % [
-						entry["name"], away_bloom_delta])
-		elif contract == "normal_copy" and away_bloom_delta < 0.0015:
-			failures.append("%s LUM GLOW changed with the sun (%f)" % [
-					entry["name"], away_bloom_delta])
-
-	var manifest := {"version": 2,
-		"probe": "object-selective-q3-framefx", "window": [1280, 720],
-		"technique_count": entries.size(), "states": states,
-		"backend": frame_renderer.get_backend_report(),
-		"techniques": reports, "failures": failures}
-	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
-	if mf != null:
-		mf.store_string(JSON.stringify(manifest, "\t"))
-		mf.close()
-	_sink.artifact("%s_manifest" % prefix, out_dir.path_join("%s_manifest.json" % prefix))
-	if failures.is_empty():
-		_sink.logv(["render_swatch_probe glow: PASS - ", entries.size(),
-				" techniques honor LUM copy, glass sun glint, and no-pass contracts"])
-		_sink.quit(0)
-	else:
-		for failure in failures:
-			_sink.error("render_swatch_probe glow: " + failure)
-		_sink.quit(1)

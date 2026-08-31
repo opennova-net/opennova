@@ -32,8 +32,6 @@ void vertex() {
 	// (reverse-Z depth 0). An epsilon is NOT safe here: distant terrain
 	// writes depth near/dist (a 560 u ridge is ~1e-4 at near 0.05), and any
 	// epsilon puts the disc IN FRONT of everything past near/epsilon.
-	// Focused Q3 uses its typed source transform and resolved beauty depth;
-	// this shader serves beauty only.
 	POSITION.z = 0.0;
 }
 

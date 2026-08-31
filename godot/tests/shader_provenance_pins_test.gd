@@ -418,7 +418,7 @@ func test_every_retail_pass_class_has_a_runtime_or_exclusion_disposition() -> vo
 		"TECHNIQUE_PROJSHAD": "superseded_adr_0043",
 		"TECHNIQUE_DEPTHMASK": "unreachable",
 		"TECHNIQUE_CLIP": "live",
-		"TECHNIQUE_GLOW": "live",
+		"TECHNIQUE_GLOW": "superseded_adr_0043",
 		"TECHNIQUE_MATCHTERRAIN": "live",
 		"UNSPECIFIED": "excluded_lower_quality",
 	}
@@ -427,7 +427,7 @@ func test_every_retail_pass_class_has_a_runtime_or_exclusion_disposition() -> vo
 		"TECHNIQUE_PROJSHAD": [],
 		"TECHNIQUE_DEPTHMASK": [],
 		"TECHNIQUE_CLIP": ["clip"],
-		"TECHNIQUE_GLOW": ["glow"],
+		"TECHNIQUE_GLOW": [],
 		"TECHNIQUE_MATCHTERRAIN": ["matchterrain"],
 		"UNSPECIFIED": [],
 	}
@@ -735,87 +735,15 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 	assert_false(color_contract.contains("gamma_to_linear"))
 	assert_false(color_contract.contains("linear_to_gamma"))
 
-	var frame_renderer := _read_repo("godot/src/render/frame_fx.cpp")
+	# The terminal decode is the ONE device-side gamma->linear bridge (ADR
+	# 0043: the FrameFX/Q3 bloom bracket is retired; Environment glow is the
+	# canonical bloom, so the compositor keeps only the display transfer).
+	var frame_renderer := _read_repo("godot/src/render/display_decode.cpp")
 	_contains_all(frame_renderer, [
-		"FramePass::GammaDecode", "EFFECT_CALLBACK_TYPE_POST_TRANSPARENT",
+		"DecodePass::GammaDecode", "EFFECT_CALLBACK_TYPE_POST_TRANSPARENT",
 		"framebuffer_blend_domain\"] = \"gamma\"",
-		"kBeautyCameraMask = 0x00018C01u",
-		"DATA_FORMAT_R8G8B8A8_UNORM", "direction_for_degrees(30.0f, 1.0f / 1024.0f)",
-		"1.0f / 2048.0f", "* 0.50", "* 0.46", "* 0.35", "* 0.19",
-		"Vector2i(kFrameFxSide, kFrameFxSide), 90.0f", "Vector2i(kFrameFxSide, kFrameFxSide), 0.0f",
-		"direction_for_degrees(45.0f, 0.0027621093f)",
-		"BlendMode::SourceAlphaAdd, FramePass::FinalAverage",
-		"result[\"capture_filter\"] = \"linear_rgba8_highest_quality\"",
-	], "frame_fx.cpp")
-	assert_false(frame_renderer.contains("kQ3CameraMask"),
-			"the typed Q3 adapter is the sole focused renderer")
-	var q3_adapter := _read_repo("godot/src/render/q3_frame_adapter.cpp")
-	_contains_all(q3_adapter, [
-		"glsl_float(kQ3GlassWhiteLobeGain)",
-		"glsl_float(kQ3GlassWhiteLobePower)",
-		"glsl_float(kQ3GlassWarmLobeColor[1])",
-		"glsl_float(kQ3GlassWarmLobePower)",
-		"glsl_float(kQ3WaterNvLumaWeights[0])",
-		"glsl_float(kQ3WaterNvBrightBias)",
-		"pow(aligned, @GLASS_WHITE_POWER@)",
-		"pow(aligned, @GLASS_WARM_POWER@)",
-		"const Vector3 light_gain = frame->light_gain",
-		"runtime/renderer/device_fog.h",
-		"float q3_fog_visibility(float dist, float fog_start, float fog_end,",
-		"4.1588830833596715 / safe_end",
-		"const float fog_start = frame->fog_start;",
-		"fog_visibility",
-		"coverage > pc.params.z",
-		"pc.draw_color.rgb * lobe * fog_visibility",
-		"texture(secondary_texture, detail_uv).rgb * 2.0",
-		"vec3 lit = base * pc.draw_color.rgb;",
-		"frag_color = vec4(clamp(fogged, 0.0, 1.0), 0.0);",
-		"draw.object.self_lum_color.x * std::min(light_gain.x, 1.0f) * 2.0f",
-		"view_dot_sq * view_dot_sq",
-		"model_uniform_scale",
-		"glsl_float(1.0f - kQ3FarBandMaxZ)",
-		"glsl_float(kQ3FarBandMaxZ - kQ3FarBandMinZ)",
-		"(@FAR_BAND_REV_MIN@ + z_rev * @FAR_BAND_REV_SPAN@)",
-		"depth->set_enable_depth_test(true)",
-		"classification.is_two_sided",
-		"fallback_pixel.ptrw()[0] = 255",
-		"(in_position - pc.camera_local.xyz) * (1.0 - 3.0e-4)",
-		"case ObjectBlendMode::Additive:",
-		"Q3DeviceBlend::Add",
-		"result[\"q3_sun_depth_test\"] = true",
-		"result[\"q3_far_band\"] = Vector2(kQ3FarBandMinZ, kQ3FarBandMaxZ)",
-		"cache.acquire(request",
-		"result[\"q3_readbacks_this_frame\"]",
-		"result[\"q3_instance_row_reads_this_frame\"]",
-		"result[\"q3_records_touched_this_frame\"]",
-		"request.geometry_generation = record.geometry_generation",
-		"Q3SourceRegistry::live_records()",
-		"frustum.outside(row.world_bounds)",
-	], "q3_frame_adapter.cpp")
-	# The per-source records: the material block is read through the
-	# material only when its parameter version moved, the MultiMesh rows
-	# once per instance generation, and the producer-published arrays ride
-	# the record.
-	var q3_registry := _read_repo("godot/src/render/q3_source_registry.cpp")
-	_contains_all(q3_registry, [
-		"\"u_rgb_mod\"",
-		"object.self_lum_color = {self_lum.x, self_lum.y, self_lum.z, 1.0f}",
-		"object.detail_texture = lease_for(detail)",
-		"glare_view_fade = bool_parameter",
-		"r_surface.parameter_version == version",
-		"rows_generation != r_record.instance_generation",
-		"++r_counters.instance_row_reads",
-		"callable_mp_static(&Q3SourceRegistry::on_visibility_changed)",
-	], "q3_source_registry.cpp")
-	# The interleaved Q3 stream (with the detail UV2 row) is packed once per
-	# cache entry generation, never re-read through the server per frame.
-	var q3_cache := _read_repo("godot/src/render/q3_geometry_cache.cpp")
-	_contains_all(q3_cache, [
-		"Mesh::ARRAY_TEX_UV2",
-		"++counters_.readbacks",
-		"++counters_.instance_row_reads",
-		"kQ3VertexStride",
-	], "q3_geometry_cache.cpp")
+		"result[\"terminal_transfer\"] = \"srgb_inverse_then_display_encode\"",
+	], "display_decode.cpp")
 
 	# The first-person viewmodel draws inside the beauty pass through the
 	# shader-side renderfov projection + depth band; no composite shader.

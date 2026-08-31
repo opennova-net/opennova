@@ -75,8 +75,6 @@ const ENGINE_COUNT_SAMPLES := {
 	"render_main_objects": FrameStats.RENDER_MAIN_OBJECTS,
 	"render_main_draws": FrameStats.RENDER_MAIN_DRAWS,
 	"render_water_objects": FrameStats.RENDER_WATER_OBJECTS,
-	"render_q3_objects": FrameStats.RENDER_Q3_OBJECTS,
-	"render_q3_draws": FrameStats.RENDER_Q3_DRAWS,
 }
 const COUNTER_KEYS := [
 	"plan_rebuilds",

@@ -10,7 +10,6 @@
 #include <godot_cpp/core/math.hpp>
 
 #include "object/object_shader_cache.h"
-#include "render/frame_fx.h"
 
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/object_shader_template.h>
@@ -209,7 +208,12 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));
 	material->set_shader_parameter("u_rgb_mod", Vector3(1, 1, 1));
 	material->set_shader_parameter("u_alpha_mod", 1.0f);
-	FrameFx::register_q3_object_material(material, q3_classification);
+	// The classification's blend fact rides the material as metadata (it
+	// survives duplicate()) for consumers that harvest ObjectModel materials —
+	// Celestial pairs its replacement shader with the source surface's blend.
+	material->set_meta("_opennova_blend_additive",
+			q3_classification.blend ==
+					opennova::renderer::ObjectBlendMode::Additive);
 	return material;
 }
 

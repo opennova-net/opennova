@@ -199,7 +199,6 @@ void StatsWindow::format_info() {
 		{"render_main", Slot::RENDER_MAIN_OBJECTS, Slot::RENDER_MAIN_DRAWS},
 		{"render_shadow", Slot::RENDER_SHADOW_OBJECTS, Slot::RENDER_SHADOW_DRAWS},
 		{"render_water", Slot::RENDER_WATER_OBJECTS, Slot::RENDER_WATER_DRAWS},
-		{"render_q3", Slot::RENDER_Q3_OBJECTS, Slot::RENDER_Q3_DRAWS},
 	};
 	for (const PassCounts &pass : kPasses) {
 		// A pass that never sampled (no water, capture just opened) keeps its

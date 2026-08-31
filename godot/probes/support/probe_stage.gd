@@ -18,9 +18,8 @@ static func create(ctx: ProbeContext, size: Vector2i, mirror: Viewport = null,
 	stage.name = "ProbeStage"
 	stage.size = size
 	# A fresh World3D assigned directly: get_world_3d() then names the world
-	# the stage renders. Focused Q3 snapshots typed producers separately.
-	# own_world_3d would render a private duplicate and leave get_world_3d()
-	# pointing at an empty original.
+	# the stage renders. own_world_3d would render a private duplicate and
+	# leave get_world_3d() pointing at an empty original.
 	stage.world_3d = World3D.new()
 	stage.transparent_bg = false
 	stage.render_target_update_mode = SubViewport.UPDATE_ALWAYS

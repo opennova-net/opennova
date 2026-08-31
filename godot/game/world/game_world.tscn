@@ -12,7 +12,7 @@ script = ExtResource("1_world")
 [node name="ClearColor" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_clear")
 
-[node name="FrameFx" type="FrameFx" parent="."]
+[node name="DisplayDecode" type="DisplayDecode" parent="."]
 
 [node name="Terrain" type="Terrain" parent="."]
 environment_path = NodePath("../MissionEnvironment")

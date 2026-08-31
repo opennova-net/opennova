@@ -50,11 +50,10 @@ class Sink:
 				("%s (exit %d)" % [summary_fallback, exit_code]), data)
 
 
-static func add_framefx(scene: Node3D, q3_enabled: bool) -> FrameFx:
-	var renderer := FrameFx.new()
-	renderer.visible = q3_enabled
-	scene.add_child(renderer)
-	return renderer
+static func add_display_decode(scene: Node3D) -> DisplayDecode:
+	var decode := DisplayDecode.new()
+	scene.add_child(decode)
+	return decode
 
 
 static func bind_production_object_resources(material: ShaderMaterial,
