@@ -201,6 +201,26 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		}
 		if (reset_layout) {
 			ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always);
+			if (window.initial_dock_placement() == InitialDockPlacement::None) {
+				// The dockspace rebuild re-homes every docked window; an
+				// undocked window comes home to the work-area cascade at its
+				// preferred size (dragged off to a dead monitor it would
+				// otherwise survive the reset out of reach).
+				const ImGuiViewport *main = ImGui::GetMainViewport();
+				const float step = 32.0f * static_cast<float>(i);
+				const WindowSizeHint hint = window.preferred_size();
+				const float width = hint.width > 0.0f ? hint.width : 640.0f;
+				const float height = hint.height > 0.0f ? hint.height : 720.0f;
+				ImGui::SetNextWindowViewport(main->ID);
+				ImGui::SetNextWindowDockID(0, ImGuiCond_Always);
+				ImGui::SetNextWindowPos(
+						ImVec2(main->WorkPos.x + 24.0f + step, main->WorkPos.y + 24.0f + step),
+						ImGuiCond_Always);
+				ImGui::SetNextWindowSize(
+						ImVec2(std::min(main->WorkSize.x - 48.0f - step, width),
+								std::min(main->WorkSize.y - 48.0f - step, height)),
+						ImGuiCond_Always);
+			}
 		}
 		ImGuiWindowFlags flags = ImGuiWindowFlags_None;
 		if (!window.is_collapsible()) {
@@ -213,6 +233,10 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		if (!window.is_undockable()) {
 			window_class.DockNodeFlagsOverrideSet |= ImGuiDockNodeFlags_NoUndocking;
 			ImGui::SetNextWindowClass(&window_class);
+		}
+		const WindowSizeHint hint = window.preferred_size();
+		if (!reset_layout && hint.width > 0.0f && hint.height > 0.0f) {
+			ImGui::SetNextWindowSize(ImVec2(hint.width, hint.height), ImGuiCond_FirstUseEver);
 		}
 		bool *open = window.is_closeable() ? &window.open : nullptr;
 		if (window.focus_requested()) {

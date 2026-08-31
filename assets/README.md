@@ -80,7 +80,7 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 | `mnml.env` | `engine/formats/env` writer | one time-of-day; defaults elsewhere. The mission header's Q8.8 start hour overrides the `.env`'s own `curtime`, so the mission starts at noon rather than rendering under the midnight ramp. |
 | `mp.mnu` | project-authored MNU | the host/join menu `[orig: @ 0x5588fa]`. |
 | `sp.mnu` | project-authored MNU | the single-player mission screen `[orig: SinglePlayer_PopulateMissionList @ 0x561840]` — where the packed mission has to appear. |
-| `weapon.def`, `ammo.def` | authored text | minimal: one spawn weapon + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. |
+| `weapon.def`, `ammo.def` | authored text | minimal: one spawn weapon + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. Two entries for ONE rifle, because the engine addresses two weapon names by LITERAL and a set that wants an armed player with a visible viewmodel has to answer both: `WPN_M4AUTO` is the spawn/equip default resolved by name at player spawn `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` (without it the player spawns unarmed), and `WPN_AK47AUTO` is the name the first-person viewmodel bring-up resolves. Both carry the viewmodel slice — `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
 | `game.wac` / `server.wac` | — | optional (silent skip) — add only if the join needs mission logic to progress. |
 
 ### Where the mission list looks (witnessed against retail)
@@ -167,11 +167,58 @@ way. One LF-normalizing save silently breaks the boot again, so
 
 ### Deliberately omitted (graceful-on-miss — keeps the set minimal)
 
-Videos (`BIK` — see above), `Avatars.def`, `SndProf.def`, `charattr.def`
+Videos (`BIK` — see above), `SndProf.def`, `charattr.def`
 (soft error, continues), `powerup.def` (soft), `hudfx/hudpos.def` (default
 positions), `game.bin` (fallback literals), `nw_cdata.coo`. Each is listed in
 the R8 manifest with its graceful failure; adding any is a deliberate step up
-from minimal, not a requirement.
+from minimal, not a requirement. `Avatars.def` left this list with the
+first-person arms — see the bring-up section below.
+
+### Bring-up: the retail model + anim set (staged locally, never committed)
+
+The set has no models of its own yet, so the player body, its animations and the
+first-person viewmodel are brought up by **copying the retail files into this
+directory**, exactly like `Jointops.exe` and its runtime writes. They are covered
+by the blanket `/*` ignore and carry no allowlist line, so they cannot be
+committed — that is the whole point of the allowlist shape. The dev zip stages
+`git ls-files assets`, so they never ship either.
+
+What gets staged, from an extracted retail resource tree (~212 files):
+
+| Group | Files |
+|---|---|
+| player body + anims | `US01.3di`, `US01.ADM`, the **150** `.bad` clips its keys name, and `failsafe.bad` (the every-mission-start fallback, `../docs/required-resources.md`) |
+| avatar combo | `Avatars.def` plus the first combo's three models — `Boonie.3di` (head), `JntOpsB1.3di` (body), `ArmsG.3di` (arms) |
+| weapon | `AKM_1st.3di`, `AKM_1ST.adm`, its six `rAKM_*.bad` clips |
+| the default infantry clip set | `E_STAND.adm` and the 87 `.bad` clips it names — **required for the player to walk at all**, see below |
+| textures | the stems the five models name, resolved to whatever extension ships them — 33 `.dds`, one `.tga`, plus the `.MDT` sidecars |
+
+Three things about this set are worth knowing. **`E_STAND.adm` is load-bearing far
+beyond the AI bodies it names.** Infantry locomotion is entirely root-motion driven —
+the playing clip's translation track moves the entity, and there is no non-clip fallback
+(`engine/runtime/world/infantry.cpp` header) — and the kernel resolves each entity's own
+`items.def` `anim_def` only once the DEFAULT set
+(`engine/runtime/mission/runtime_boot.h:35`, `"E_STAND.adm"`) has registered
+(`engine/runtime/mission/mission_kernel.cpp:253`/`:299`). Without it `ai.root_motion` is
+null, the local player never picks up `US01.adm`, and it spawns, renders and plays
+`anim_idle` forever while refusing to walk — with the only symptom a single
+`no infantry clips from 'E_STAND.adm'` warning. The coupling itself is tracked in
+[`../TODO.md`](../TODO.md); until it is undone, this file is part of the minimal set.
+
+Two further things. **`Avatars.def` moves the body
+lookup**: with it present the local player's body is the avatar combo's head +
+body pair, not `items.def`'s `graphic`; `US01` stays the fallback body and, as
+`anim_def`, the clip map that drives the rig either way. And **every model names
+its textures `.tga` while retail ships them `.dds`** — retail relies on its own
+`.dds` substitution probe `[orig: Texture_LoadByNameWithChannel @ 0x58b52c]` for
+its stock content, and whether that probe still runs for a LOOSE file under `/d`
+is not witnessed (`../docs/vfs/vfs-pff-mount-re.md` records only that a loose
+`.tga` skips it). The retail validation run below settles it from `_filelog.txt`.
+
+This set is replaced by our own once that run is green. The model side already
+has a path — `tests/fixtures/minimal_3di_builder.h` mints a nineteen-part skinned
+`person` rig in the retail bone order through `threedi_3di3_write`. The clip side
+needs a `.bad` **writer** first: `engine/formats/bad/bad.h` is parse-only today.
 
 ## Guards (ctest, run in CI)
 
@@ -226,8 +273,11 @@ command instead builds the packed `localres.pff` layout used by releases.
 Records the run under the asset-gated protocol (never commit the capture); the
 recipe is the acceptance test for "the minimal set hosts + joins."
 
-Known gaps: nothing `items.def` declares has a model yet; the terrain has
-relief and a full-size colormap but no tile overlay.
+Known gaps: no model here is ours yet — the player body, its animations and
+the viewmodel are the staged retail bring-up set described above, and the
+committed tree still declares graphics it does not carry. The terrain has
+relief and a full-size colormap but no tile overlay, and there is no `.ptl`
+catalogue, so the weapon authors no muzzle-flash or casing effect.
 
 ## MVP convergence
 

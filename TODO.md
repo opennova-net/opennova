@@ -7,6 +7,41 @@ hardening, and project health. Divergences from the original engine belong in
 
 ## Cleanup & verification backlog
 
+- [ ] `TerrainFieldStore` publishes a sector layout with no extent.
+      `TerrainFieldStore::build` (`engine/runtime/terrain_query/terrain_field_store.cpp:21-63`)
+      fills `layout.sector_grid`, `origin_x`, `origin_y` and `locks` but never
+      `layout.sector_count` / `layout.sector_rows`, and nothing else in
+      `engine/runtime/terrain_query/` assigns them either — they keep the `= 0` defaults
+      from `coords.h:41-42`, which is precisely the extent the bounds-reject guard reads
+      (`coords_sector_id_at_cell` `coords.h:169-170`, `coords_world_to_cell_source`
+      `coords.h:200`). Inert today only because the sim exclusively passes
+      `coords_runtime_options()` (`bounds_reject = false`, so the grid index wraps `& 0xF`
+      instead); the first sim-side consumer to adopt the bounds-checked path would find
+      EVERY cell rejected, with terrain silently reading as absent. Set both from the
+      `.trn` (`sector_count` is the grid WIDTH, `trn.h:36-40`) when building the store,
+      before anything depends on them. Found 2026-08-30 while clearing the minimal set's
+      movement failure — not the cause of it, but on the same path.
+
+- [ ] The player's own clip set is hostage to the DEFAULT infantry `.adm`. Infantry
+      locomotion is entirely root-motion driven, and `MissionKernel::install_infantry_anim`
+      (`engine/runtime/mission/mission_kernel.cpp:285-301`) resolves per-entity `anim_def`
+      rows only when the default set registered as id 0 (`:299`), while
+      `resolve_new_infantry_adm_ids` itself short-circuits on `root_motion.empty()`
+      (`:253`). So when `kDefaultInfantryAdm` (`engine/runtime/mission/runtime_boot.h:35`,
+      `"E_STAND.adm"`) is absent from the mounted root, `ai.root_motion` is null (`:298`)
+      and the LOCAL PLAYER never picks up its own `items.def` `anim_def` even though the
+      model, the `.adm` and every `.bad` are present — it spawns, renders and plays
+      `anim_idle` (presentation loads the `.adm` down a separate path,
+      `godot/src/mission/mission_object_placer.cpp:1213`) but cannot walk. Cost a session
+      to diagnose on the minimal set (2026-08-30); staging `E_STAND.adm` fixed it. A game
+      whose only body is the player should not need an AI body's clip map to move: decouple
+      the per-entity resolve from the default set, and give `resolve_new_infantry_adm_ids`
+      a path to publish `ai.root_motion` (today only `install_infantry_anim` sets it).
+      The one useful diagnostic already exists — `root_dx`/`root_dy` vs `res_dx`/`res_dy`
+      on the entity card (`engine/runtime/world/inspect.cpp:181-184`); note `cmd_fwd` is
+      `veh.cmd_speed` (`inspect.cpp:160`) and is structurally always 0 for infantry, so it
+      is not an instrument for this.
+
 - [ ] Retail-LAN parity four-topology verdict: the tracked 24-cell matrix harness
       (`run_parity_matrix.ps1`/`generate_parity_manifest.ps1`/`verify_parity_matrix.ps1`
       over `export_parity_corpus.py`) was retired with the Python FFI (ADR 0038; last
@@ -58,7 +93,9 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
 - [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
       recipe): the retired F3 pages return as engine ImGui windows as they are
-      wanted (the Entities window landed as the ADR 0042 d6 template, PR #587);
+      wanted (the Entities window landed as the ADR 0042 d6 template, PR #587;
+      the Weapon window landed as the dope-sheet ACTION editor over the equipped
+      weapon's FSM, which also covers the FP-weapon half of "animation");
       still open: sim transport
       (play/pause/step; the MCP
       `game_debug` control plane still drives these), script vars, net, particles,

@@ -228,9 +228,12 @@ public:
 	void teleport_local_player(const world::Vec3 &mission_pos, double yaw_deg,
 			double pitch_deg);
 	void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
-	// The by-name weapon install from the retained weapon.def rows.
+	// The by-name weapon install from the retained weapon.def rows. A
+	// same-name install is the MOUNT path unless `allow_same_weapon_rebake`
+	// asks for the re-bake that keeps the live slot, serials, latches and
+	// scope state (the F3 Weapon window's `auto`/ANIM edits).
 	bool install_weapon(const std::string &weapon_name,
-			bool preserve_slot_state = false);
+			bool preserve_slot_state = false, bool allow_same_weapon_rebake = false);
 	// The armory table (weapon.def -> world.weapons + the retained rows), the
 	// mission loadout-chunk promotion and the spawn-kit rebuild — the boot's
 	// load_weapon_table step over an explicit source so the embedder's

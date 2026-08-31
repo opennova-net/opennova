@@ -30,6 +30,15 @@ enum class InitialDockPlacement {
 	RightBottom, // the lower split of the right column
 };
 
+// A window's preferred first-open size in pixels, applied with
+// ImGuiCond_FirstUseEver so the user's own sizing (and ImGui's ini) always
+// wins afterwards. Zero means no preference. Two floats rather than an ImVec2:
+// this header deliberately carries no ImGui include.
+struct WindowSizeHint {
+	float width = 0.0f;
+	float height = 0.0f;
+};
+
 // One tool window. draw() runs inside ImGui::Begin/End for the window each
 // frame the window is visible; on_visibility() fires on the edges of
 // (pass open && window open) so a window can arm and disarm its data
@@ -48,6 +57,9 @@ public:
 	virtual InitialDockPlacement initial_dock_placement() const {
 		return InitialDockPlacement::None;
 	}
+	// Only consulted for an undocked window on its first appearance; a wide
+	// surface (a timeline) asks for more than the cascade default.
+	virtual WindowSizeHint preferred_size() const { return WindowSizeHint{}; }
 	// A window that issues its own ImGui::Begin/End (ImGui's demo, a
 	// full-viewport surface) is drawn without the pass's wrapping Begin/End.
 	virtual bool owns_frame() const { return false; }

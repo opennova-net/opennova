@@ -9,6 +9,7 @@
 #include <runtime/devtools/game_window.h>
 #include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/stats_window.h>
+#include <runtime/devtools/weapon_window.h>
 
 #include <utility>
 
@@ -43,6 +44,9 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	auto properties = std::make_unique<EntityPropertiesWindow>(*entities_window_);
 	entity_properties_window_ = properties.get();
 	pass_.register_window(std::move(properties));
+	auto weapon = std::make_unique<WeaponWindow>();
+	weapon_window_ = weapon.get();
+	pass_.register_window(std::move(weapon));
 	auto environment = std::make_unique<EnvironmentWindow>();
 	environment_window_ = environment.get();
 	pass_.register_window(std::move(environment));
@@ -136,6 +140,26 @@ bool GameDevTools::needs_entity_detail() const {
 			entities_window_->selected_handle() != world::EntityHandle::kInvalid;
 }
 
+void GameDevTools::set_weapon_definition(WeaponDefinitionSnapshot definition) {
+	weapon_window_->set_definition(std::move(definition));
+}
+
+void GameDevTools::set_weapon_live(WeaponLiveSnapshot live) {
+	weapon_window_->set_live(std::move(live));
+}
+
+bool GameDevTools::needs_weapon_records() const {
+	return pass_.is_open() && weapon_window_->open;
+}
+
+uint64_t GameDevTools::weapon_definition_serial() const {
+	return weapon_window_->definition_serial();
+}
+
+bool GameDevTools::take_weapon_request(WeaponRequest &request) {
+	return weapon_window_->take_request(request);
+}
+
 void GameDevTools::set_environment_snapshot(const EnvironmentSnapshot &snapshot) {
 	environment_window_->set_snapshot(snapshot);
 }
@@ -171,6 +195,5 @@ bool GameDevTools::needs_rays_snapshot() const {
 bool GameDevTools::take_rays_request(RaysRequest &request) {
 	return rays_window_->take_request(request);
 }
-
 
 }  // namespace opennova::devtools

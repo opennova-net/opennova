@@ -653,6 +653,111 @@ void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
 // world tick owns the parallel NPC UseGun parent-slot pump; this remains the
 // first-person player's input/presentation seam.
 // [orig: WeaponAction_ProcessAllEntities @0x542690 pumps every pooled entity]
+void weapon_trace_arm(LocalPlayerWeapon &w, bool armed) {
+	if (armed == w.trace_armed) return;
+	w.trace_armed = armed;
+	if (armed) {
+		w.trace.assign(kWeaponTraceCapacity, WeaponTraceSample{});
+	} else {
+		w.trace.clear();
+		w.trace.shrink_to_fit();
+	}
+	w.trace_head = 0;
+	w.trace_wrapped = false;
+}
+
+void weapon_trace_clear(LocalPlayerWeapon &w) {
+	w.trace_head = 0;
+	w.trace_wrapped = false;
+}
+
+uint32_t weapon_trace_samples_since(const LocalPlayerWeapon &w, uint32_t after_tick,
+		bool take_all, std::vector<WeaponTraceSample> &out) {
+	if (!w.trace_armed || w.trace.empty()) return 0;
+	const size_t cap = w.trace.size();
+	const size_t count = w.trace_wrapped ? cap : w.trace_head;
+	if (count == 0) return 0;
+	// Newest first from just behind the head; stop at the first sample the
+	// caller already holds.
+	const size_t first_out = out.size();
+	for (size_t i = 0; i < count; ++i) {
+		const size_t idx = (w.trace_head + cap - 1 - i) % cap;
+		const WeaponTraceSample &s = w.trace[idx];
+		if (!take_all && s.tick <= after_tick) break;
+		out.push_back(s);
+	}
+	std::reverse(out.begin() + static_cast<std::ptrdiff_t>(first_out), out.end());
+	return w.trace[(w.trace_head + cap - 1) % cap].tick;
+}
+
+std::vector<WeaponTraceSample> weapon_trace_samples(const LocalPlayerWeapon &w) {
+	std::vector<WeaponTraceSample> out;
+	if (!w.trace_armed || w.trace.empty()) return out;
+	const size_t count = w.trace_wrapped ? w.trace.size() : w.trace_head;
+	out.reserve(count);
+	const size_t first = w.trace_wrapped ? w.trace_head : 0;
+	for (size_t i = 0; i < count; ++i) {
+		out.push_back(w.trace[(first + i) % w.trace.size()]);
+	}
+	return out;
+}
+
+LocalWeaponInputBlock local_weapon_input_block(const World &world,
+		const LocalPlayerWeapon &w) {
+	if (!w.active) return LocalWeaponInputBlock::kInactive;
+	const Entity *player = world.registry.get(world.cached.local_player);
+	const bool alive = player != nullptr && player->alive && player->health > 0;
+	if (!alive) return LocalWeaponInputBlock::kDead;
+	if (w.usegun_switch != LocalUseGunSwitch::kNone) return LocalWeaponInputBlock::kUseGunSwitch;
+	if (mount_blocks_firing(*player)) return LocalWeaponInputBlock::kSeat;
+	return LocalWeaponInputBlock::kNone;
+}
+
+const char *local_weapon_input_block_name(LocalWeaponInputBlock block) {
+	switch (block) {
+		case LocalWeaponInputBlock::kNone: return "";
+		case LocalWeaponInputBlock::kInactive: return "no weapon is installed";
+		case LocalWeaponInputBlock::kDead: return "the local player is not alive";
+		case LocalWeaponInputBlock::kUseGunSwitch: return "a UseGun switch is in flight";
+		case LocalWeaponInputBlock::kSeat: return "the occupied seat blocks firing (controller/driver)";
+	}
+	return "";
+}
+
+namespace {
+
+// One recorded tick. Reads the slot AFTER the pump's ammo mirroring so clip and
+// reserve are the values the frame actually ends on.
+void weapon_trace_record(LocalPlayerWeapon &w, const WeaponSlotState &slot,
+		const WeaponFsmEvents &ev, uint32_t tick) {
+	if (!w.trace_armed || w.trace.empty()) return;
+	WeaponTraceSample &out = w.trace[w.trace_head];
+	out = WeaponTraceSample{};
+	out.tick = tick;
+	out.current = slot.current;
+	out.next = slot.next;
+	out.prev = slot.prev;
+	out.phase = slot.phase;
+	out.counter = slot.counter;
+	out.clip = slot.clip;
+	out.reserve = slot.reserve;
+	out.heat = weapon_slot_accumulated_heat(w.def, slot, static_cast<int32_t>(tick));
+	out.action_started = ev.action_started;
+	out.action_finished = ev.action_finished;
+	out.action_effect = ev.action_effect;
+	out.fired = ev.fired;
+	out.dry_fired = ev.dry_fired;
+	out.reload_requested = ev.reload_requested;
+	out.reload_applied = ev.reload_applied;
+	out.advance_anim = ev.advance_anim;
+	std::snprintf(out.anim_key, sizeof(out.anim_key), "%s", w.anim_key.c_str());
+	out.anim_variant = w.anim_variant;
+	w.trace_head = (w.trace_head + 1) % w.trace.size();
+	if (w.trace_head == 0) w.trace_wrapped = true;
+}
+
+} // namespace
+
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
 	io.fired = LocalWeaponFiredWire{};
@@ -683,8 +788,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// The pilot's trigger is dead: retail's fire gate rejects a Controller or
 	// Driver seat before any slot work [orig: Player_CanFireWeapon @0x5cf780].
 	// A gunner seat is deliberately NOT in this set.
-	const bool accept_weapon_input = player_alive && !usegun_switch_pending &&
-			!(player != nullptr && mount_blocks_firing(*player));
+	const bool accept_weapon_input =
+			local_weapon_input_block(world, w) == LocalWeaponInputBlock::kNone;
 	in.fire_held = accept_weapon_input && w.fire_held;
 	in.fire_pressed = accept_weapon_input && w.fire_pressed;
 	// PowerThrow: the press never fires — it starts the windup; the release
@@ -1106,6 +1211,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		player_view_set_engaged(view, true,
 				(w.def.flags2 & weapon_flag2::kInset) != 0);
 	}
+	// Devtools instrumentation, last: the slot has finished mirroring, so the
+	// sample is the state this tick actually ends on.
+	weapon_trace_record(w, active_slot, ev, world.logic_tick);
 }
 
 } // namespace opennova::world

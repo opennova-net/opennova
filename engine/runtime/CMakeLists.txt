@@ -238,6 +238,7 @@ if(OPENNOVA_DEVTOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/environment_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/rays_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/stats_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/weapon_window.cpp
     )
     target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_DEVTOOLS=1)
 else()

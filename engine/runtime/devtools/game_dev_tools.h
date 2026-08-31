@@ -1,15 +1,19 @@
 // The game's dev tools (ADR 0039): the ImGui pass behind F3 with its mandatory
 // Game surface, the Stats window (both open by default), the Entities and
 // Entity Properties windows (closed by default, opened by a world pick; the
-// pushed-record/typed-request channel, ADR 0042 d6), the Environment, AI and
-// Rays windows (closed by default, opened from the "Windows" menu), and ImGui's
-// demo window (the docking/multi-viewport smoke test). Debug builds only
+// pushed-record/typed-request channel, ADR 0042 d6), the Weapon window (the
+// DCC-style ACTION editor over the equipped weapon's FSM), the Environment,
+// AI and Rays windows (all closed by default, opened from the "Windows"
+// menu), and ImGui's demo window (the docking/multi-viewport smoke test).
+// Debug builds only
 // (OPENNOVA_DEVTOOLS); the release GDExtension flavour compiles this out and
 // its DevTools node is inert.
 #pragma once
 
 #include <runtime/devtools/frame_stats_board.h>
 #include <runtime/devtools/imgui_pass.h>
+
+#include <cstdint>
 
 namespace opennova::devtools {
 
@@ -18,6 +22,7 @@ class GameWindow;
 class GameViewport;
 class EntitiesWindow;
 class EntityPropertiesWindow;
+class WeaponWindow;
 class EnvironmentWindow;
 class AiWindow;
 class RaysWindow;
@@ -26,6 +31,9 @@ enum class GameWindowRequest;
 struct DebugRequest;
 struct EntityDirectorySnapshot;
 struct EntityDetailSnapshot;
+struct WeaponDefinitionSnapshot;
+struct WeaponLiveSnapshot;
+struct WeaponRequest;
 struct EnvironmentRequest;
 struct EnvironmentSnapshot;
 struct AiDebugSnapshot;
@@ -45,6 +53,8 @@ public:
 	const EntitiesWindow &entities_window() const { return *entities_window_; }
 	EntityPropertiesWindow &entity_properties_window() { return *entity_properties_window_; }
 	const EntityPropertiesWindow &entity_properties_window() const { return *entity_properties_window_; }
+	WeaponWindow &weapon_window() { return *weapon_window_; }
+	const WeaponWindow &weapon_window() const { return *weapon_window_; }
 	EnvironmentWindow &environment_window() { return *environment_window_; }
 	const EnvironmentWindow &environment_window() const { return *environment_window_; }
 	AiWindow &ai_window() { return *ai_window_; }
@@ -84,6 +94,17 @@ public:
 	void set_entity_detail(EntityDetailSnapshot detail);
 	bool needs_entity_detail() const;
 
+	// The Weapon window's record/request channel. The definition (the rows
+	// the dope sheet draws) is pushed on a serial bump — an install, an
+	// applied edit — while the live record is pushed EVERY frame rather than
+	// on the Entities window's 0.5 s cadence: the trace pane is a scope on a
+	// 62.5 Hz signal.
+	void set_weapon_definition(WeaponDefinitionSnapshot definition);
+	void set_weapon_live(WeaponLiveSnapshot live);
+	bool needs_weapon_records() const;
+	uint64_t weapon_definition_serial() const;
+	bool take_weapon_request(WeaponRequest &request);
+
 	// The Environment window's record/request channel (the same shape): the
 	// weather page record pushed by value on its cadence while shown, and
 	// the typed weather commands drained into the engine command layer.
@@ -108,13 +129,13 @@ public:
 	bool needs_rays_snapshot() const;
 	bool take_rays_request(RaysRequest &request);
 
-
 private:
 	ImGuiPass pass_;
 	GameWindow *game_window_ = nullptr;
 	StatsWindow *stats_window_ = nullptr;
 	EntitiesWindow *entities_window_ = nullptr;
 	EntityPropertiesWindow *entity_properties_window_ = nullptr;
+	WeaponWindow *weapon_window_ = nullptr;
 	EnvironmentWindow *environment_window_ = nullptr;
 	AiWindow *ai_window_ = nullptr;
 	RaysWindow *rays_window_ = nullptr;

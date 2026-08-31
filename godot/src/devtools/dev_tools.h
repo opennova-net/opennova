@@ -16,8 +16,11 @@
 #if OPENNOVA_DEVTOOLS
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
+#include <runtime/devtools/weapon_action_snapshot.h>
 
 #include <memory>
+#include <string>
+#include <vector>
 #endif
 
 namespace godot {
@@ -144,6 +147,8 @@ private:
 	void apply_debug_requests();
 	bool push_entity_directory();
 	void push_entity_detail(bool p_directory_pushed);
+	void push_weapon_records();
+	void apply_weapon_requests();
 	void apply_environment_requests();
 	void push_environment_snapshot();
 	void apply_ai_view_requests();
@@ -160,6 +165,18 @@ private:
 	Simulation *simulation() const;
 	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
 	int last_detail_handle_ = -1;      // the handle the last detail push carried; -1 = none
+	// The Weapon window's trace is drained incrementally: only samples newer
+	// than this reach the window, so a per-frame push stays small; a newest
+	// tick below it is a restarted logic clock and re-primes the cursor.
+	uint32_t last_weapon_trace_tick_ = 0;
+	bool weapon_trace_primed_ = false;
+	// The definition is rebuilt only when something moved it: an applied
+	// request, a different weapon, or the clip rings resolving.
+	bool weapon_def_dirty_ = true;
+	uint64_t weapon_def_serial_ = 0;
+	std::string weapon_def_name_;
+	size_t weapon_def_rings_ = 0;
+	bool weapon_records_live_ = false;
 	int64_t last_environment_push_ms_ = -1;
 	int64_t last_ai_push_ms_ = -1;
 	Callable ai_view_state_provider_;
