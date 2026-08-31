@@ -483,10 +483,10 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   @ 0x640790]`.
 
   Standalone min/max/page/value now crosses `MenuWidgetState` -> `MenuFrame` ->
-  `MenuDriver`; `MenuShell` seeds the five named Options controls with their
+  `MenuDriver`; `OptionsMenuController` seeds the five named Options controls
   witnessed ranges/pages `[orig: options_screen_init @ 0x554800;
-  UI_PopulateRenderAndAudioSettings @ 0x55c830]`. Persisted setting values are
-  not modeled yet, so current=min is the explicit temporary fallback.
+  UI_PopulateRenderAndAudioSettings @ 0x55c830]`. `PlayerOptions` supplies the
+  persisted current values for volume and mouse-sensitivity controls.
   Arrow clicks, track paging, and the shuttle drag/capture are PORTED into
   the compiler's mouse pump (2026-08-11 — the pump claims the pressed part
   until release, standalone sliders change their range value, embedded
@@ -1215,11 +1215,12 @@ CUIScrollbar_CalcThumbRect @ 0x64cba0; CScrollWnd_SetPageSize @ 0x64ce10;
 CScrollWnd_SetRangeAndClamp @ 0x64d490; CListWnd_CreateScrollChild @ 0x6444c0;
 CMEditWnd_CreateScrollChild @ 0x661260; CTableWnd_Init @ 0x640790]`.
 Standalone min/max/page/value now crosses `MenuWidgetState`, `MenuFrame`, and
-`MenuDriver`; `MenuShell` seeds GAMMA 5..20/page 2, the three volume controls
+`MenuDriver`; `OptionsMenuController` seeds GAMMA 5..20/page 2, the three
+volume controls
 0..255/page 10, and MOUSE_SENSITIVITY 4..511/page 10 `[orig:
 options_screen_init @ 0x554800; UI_PopulateRenderAndAudioSettings @ 0x55c830]`.
-Persisted setting values remain unmodeled, so current=min is explicitly
-temporary. Per-part state remains D-MNU-13 residue.
+`PlayerOptions` supplies each modeled control's persisted current value;
+GAMMA remains pinned read-only. Per-part state remains D-MNU-13 residue.
 
 **matching** (2026-08-11 review round, same slice): the CScrollWnd
 INTERACTION joined the compiler's mouse pump — arrows step -/+1, a track
@@ -1638,7 +1639,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CListWnd_DrawItems @ 0x643f30` (rows inside `this+13`; row height = font "W" or `this+201`; per-row text truncation) | `MenuFrameCompiler::emit_combo_popup` (`engine/runtime/menu/menu_frame_scrollbar.cpp`) + `row_height_` (`menu_frame.cpp`) (D-MNU-7/8) |
 | `CScrollWnd_Render @ 0x64c5c0` (COLOR sink `@ 0x64ce70`, IMAGE sink `@ 0x64cf70`, outline via `CUIElement_DrawOutlineRect @ 0x647fc0`) + `CUIScrollbar_CreateChildWindows @ 0x64d330` | `MenuFrameCompiler::emit_scrollbar` (`engine/runtime/menu/menu_frame_scrollbar.cpp`) — COLOR/OUTLINE full rect, IMAGE middle inset, then SHUTTLE/SCROLLUP/SCROLLDOWN painter order |
 | `CUIScrollbar_CalcThumbRect @ 0x64cba0` + `CScrollWnd_SetPageSize @ 0x64ce10` + `CScrollWnd_SetRangeAndClamp @ 0x64d490` + `CScrollWnd_SetScrollPos @ 0x64ce20` | proportional thumb with 20px minimum and clamped min/max/page/value; embedded owners hide-on-fit, while standalone state crosses `MenuWidgetState` -> `MenuFrame::set_widget_scroll_range` -> `MenuDriver.set_widget_scroll_range`; direct input/per-part state remains D-MNU-13 |
-| `options_screen_init @ 0x554800` + `UI_PopulateRenderAndAudioSettings @ 0x55c830` | `MenuOptionScrollPolicy.apply` (`godot/game/menu_option_scroll_policy.gd`, invoked by `MenuShell`) — GAMMA 5..20/page 2; SOUNDFXVOLUME/DIALOGVOLUME/MUSICVOLUME 0..255/page 10; MOUSE_SENSITIVITY 4..511/page 10; current=min only until persisted setting values are modeled |
+| `options_screen_init @ 0x554800` + `UI_PopulateRenderAndAudioSettings @ 0x55c830` | `MenuOptionScrollPolicy.apply` (`godot/game/menu_option_scroll_policy.gd`, invoked by `OptionsMenuController`) — GAMMA 5..20/page 2; SOUNDFXVOLUME/DIALOGVOLUME/MUSICVOLUME 0..255/page 10; MOUSE_SENSITIVITY 4..511/page 10; `PlayerOptions` supplies modeled controls' persisted current values while GAMMA remains pinned read-only |
 | `CListWnd_CreateScrollChild @ 0x6444c0` / `CMEditWnd_CreateScrollChild @ 0x661260` / `CTableWnd_Init @ 0x640790` | an absent/zero-width embedded scrollbar POSITION falls back to the rightmost 22px of the owner's full height |
 | `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `mnu::parse_window`'s LIST_BOX + `MenuFrameCompiler::combo_popup_rect` (authored combo-relative POSITION; `SB_EDGE_PAD` narrows content only, not scrollbar geometry) (D-MNU-7) |
 | `CUIElement_DrawFrame @ 0x64a210` + `init_border_materials @ 0x646f70` | `MenuFrameCompiler::emit_frame` — 8 border quads + tiled fill; retail-neutral 0x7F modulate-2x becomes effective white for Godot ordinary multiply; draws nothing when textures are absent; no monogram |
