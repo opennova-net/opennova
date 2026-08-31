@@ -483,7 +483,7 @@ void local_player_view_frame(World *world, const LocalPlayerWeapon &w, const Pla
     // [orig: the mode>=1 block @ 0x438939..0x4389e5 — the mode-4 lerp then
     //  overwrites the rotation wholesale, so only mode 1 renders it]. The
     // radar-compass overlay's extra call (@ 0x5c9841, when it draws) is not
-    // mirrored (env #38).
+    // mirrored — the whole flag-0x200 scope overlay is unported (D-HUD-26).
     if (world != nullptr) {
         int32_t d_yaw = 0;
         int32_t d_pitch = 0;
