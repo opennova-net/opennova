@@ -355,15 +355,20 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// exe resource and COUNTRYCODE/TZB from the OS locale — deriving ours is a fidelity follow-up.
 	// [wire: retail-lan-host-join-session ClientAuth; orig: NapiNetConfig_LoadFromConnTags
 	// @0x4c7260 -> Server_ValidatePlayerJoinRequest @0x512100]
+	// BT is the game-session join token. For a NovaWorld join it is the decimal
+	// the client recovers from the .joi CK; the host validates it and punts a
+	// mismatch with code 9 [orig: Server_ValidatePlayerJoinRequest @0x512100
+	// `bt != ctx+4500` @0x5122c5]. LAN keeps "0" (the check runs only for a
+	// NovaWorld-transport host).
 	for (const auto &field : {
-			std::pair{"BT", "0"},
-			std::pair{"VN", "2"},
-			std::pair{"BN", "1"},
-			std::pair{"DB", "0"},
-			std::pair{"MBN", "20042002"},
-			std::pair{"SOPD", "180"},
-			std::pair{"VERSIONSTRING", "V1.7.5.7"},
-			std::pair{"COUNTRYCODE", "us"},
+			std::pair<const char *, std::string>{"BT", join_token_},
+			std::pair<const char *, std::string>{"VN", "2"},
+			std::pair<const char *, std::string>{"BN", "1"},
+			std::pair<const char *, std::string>{"DB", "0"},
+			std::pair<const char *, std::string>{"MBN", "20042002"},
+			std::pair<const char *, std::string>{"SOPD", "180"},
+			std::pair<const char *, std::string>{"VERSIONSTRING", "V1.7.5.7"},
+			std::pair<const char *, std::string>{"COUNTRYCODE", "us"},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
 	}

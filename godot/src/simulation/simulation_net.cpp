@@ -936,6 +936,15 @@ bool Simulation::set_join_integrity_profile(const String &p_profile_id) {
 	return true;
 }
 
+void Simulation::set_join_token(const String &p_token) {
+	// The .joi-recovered game-session BT join token a NovaWorld host validates
+	// (reject code 9). Empty/"0" is the LAN default. Applied to the live joiner
+	// runtime immediately and re-applied on each (re)load via install_join_token.
+	join_token_ = std::string(p_token.strip_edges().utf8().get_data());
+	if (join_token_.empty()) join_token_ = "0";
+	install_join_token();
+}
+
 void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 	// D-NET-166: the JOIN VERSIONCRCSTRING checksum source. The runtime CRCs
 	// the loose expansion/<SUS2>/version.txt under this root at JOIN-build
@@ -982,6 +991,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_character_join_vars();
 	install_join_integrity_profile();
 	install_expansion_version_root();
+	install_join_token();
 	install_item_class_resolver();
 	joiner_ = true;
 	if (kernel_) {

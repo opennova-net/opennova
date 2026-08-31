@@ -143,7 +143,8 @@ private:
 	// The NWJoin handshake resolved the in-match host:port — hand it off to the game
 	// layer via joined_game(host, port). Does NOT send an in-match hello; Simulation's
 	// joiner owns the single ClientHello (see the .cpp for why).
-	void resolve_join_target(const String &host, uint16_t port);
+	void resolve_join_target(const String &host, uint16_t port,
+	                         const String &join_token);
 
 	// Snapshot the gate/session outputs into the flow's LobbyHttpContext. Called at
 	// each leg-initiation point (login / GSB / join) — never inside a leg callback,

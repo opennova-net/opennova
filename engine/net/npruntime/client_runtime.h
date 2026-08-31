@@ -279,6 +279,11 @@ public:
 	void set_expansion_version_root(std::string game_root) {
 		if (joiner_) joiner_->set_expansion_version_root(std::move(game_root));
 	}
+	// The .joi-recovered game-session BT join token (JoinerConnection::set_join_token).
+	// Joiner only; "0" is the LAN default.
+	void set_join_token(std::string token) {
+		if (joiner_) joiner_->set_join_token(std::move(token));
+	}
 	void set_charattr_challenge_table(CharAttrChallengeTable table) {
 		if (joiner_) joiner_->set_charattr_challenge_table(std::move(table));
 	}

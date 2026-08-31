@@ -1093,6 +1093,24 @@ tooling described in §5.25. The complete contract is:
   OpenNova encode divergence. The reimpl maps the families to player-facing
   reasons in `on_server_auth` (engine/net/npruntime/joiner_connection.cpp) and
   retains the raw `{jfc,jfp,jfs}` for diagnostics.
+- **The game-layer join gate `Server_ValidatePlayerJoinRequest @0x512100` reject
+  codes** (sent as the connection-description punt DC=2, reason in DPC): the
+  NapiNetConfig CU fields it validates, in order — **2** BN!=1, **3** VN!=2, **4**
+  MBN!=0x131D112, **6/7** ban type 1/2, **8** SOPD!=180, **9** BT mismatch
+  (NovaWorld only: `player->net_cfg.bt != sub_4C4DB0(ctx)` = ctx+4500 @0x5122c5),
+  **47** expansion-name mismatch, **48** expansion-checksum mismatch, **14/15/16**
+  spectator disabled/full/bad-password, **21** squad password, **18/19/20/22**
+  side/team password, **23/24/25** NAMEINFO missing/decrypt/PCID-decrypt, **28**
+  join ticket, **29/30** PCID duplicate, **31** banned name, **32** PunkBuster.
+  **Code 9 (BT) witnessed live** (server "Billy", joinable on stock JO, 2026-08-31):
+  a NovaWorld host requires the game-session `BT` join field to equal its stored
+  session token. The retail client sources it from the NWJoin `.joi`: `net_config.bt
+  = atol(decoded CK)` [orig: parse_connection_query_string @0x54dfb0 CK arm (key
+  "cfhdcegjigecjehcgjdhe"); UI_JoinSelectedSession @0x5699d0 @0x569b8e]. The reimpl
+  now decodes CK → BT in `parse_joi_connection_string` and threads it JoinTarget →
+  Simulation.set_join_token → JoinerConnection ClientAuth `BT` CU (was hardcoded
+  "0", the LAN default the check ignores). This is the real fix behind the
+  retail-server join punt for version-compatible NovaWorld hosts.
 - The spectator-specific legs run LATER, at the game-layer 0x00 join message
   (`NapiNPServer_HandlePlayerJoinMessage @0x512aa0` latches the player entry's
   spectator flag `+55` from the stored JSR, then calls

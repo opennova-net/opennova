@@ -141,6 +141,11 @@ void Simulation::install_expansion_version_root() {
 	runtime_->set_expansion_version_root(join_expansion_version_root_);
 }
 
+void Simulation::install_join_token() {
+	if (!runtime_) return;
+	runtime_->set_join_token(join_token_);
+}
+
 // The D-AI-5 host weapon seed + per-body sound-profile bind, folded into the
 // engine (simassets::resolve_ai_weapons, ADR 0028) over the retained items.def
 // rows — the seed semantics and [orig] witnesses live there now. Ammo names

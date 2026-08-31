@@ -129,6 +129,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_local_character_profile);
 	ClassDB::bind_method(D_METHOD("set_join_integrity_profile", "profile_id"),
 	                     &Simulation::set_join_integrity_profile);
+	ClassDB::bind_method(D_METHOD("set_join_token", "token"),
+	                     &Simulation::set_join_token);
 	ClassDB::bind_method(D_METHOD("load_charattr_challenge", "resource_root"),
 	                     &Simulation::load_charattr_challenge);
 	ClassDB::bind_method(D_METHOD("set_join_world_ready", "ready"), &Simulation::set_join_world_ready);

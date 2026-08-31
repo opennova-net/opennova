@@ -356,6 +356,7 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			r.kind = JoinResult::Kind::Resolved;
 			r.host_ip = conn.host_ip;
 			r.host_port = static_cast<uint16_t>(port);
+			r.bt = conn.bt;  // the game-session BT join token (decoded CK)
 			return r;
 		}
 		case JoinStep::Idle:
