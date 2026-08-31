@@ -198,6 +198,10 @@ func set_crosshair_style(style: int) -> void:
 		_game_hud.set_crosshair_style(_crosshair_style)
 
 
+func crosshair_style() -> int:
+	return _crosshair_style
+
+
 # The in-game HUD over the live runtime: built lazily the first frame a mission has a
 # local player (so net spectators, which have none, never get it). Reads the witnessed
 # hudpos.def layout from the world's mounted VFS. The SIGHTS card and the
