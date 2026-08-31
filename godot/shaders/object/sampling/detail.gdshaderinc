@@ -1,6 +1,6 @@
-uniform sampler2D u_diffuse : filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detail : filter_linear_mipmap, repeat_enable;
-uniform vec3 u_rgb_mod = vec3(1.0);
+uniform sampler2D u_diffuse : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D u_detail : source_color, filter_linear_mipmap, repeat_enable;
+uniform vec3 u_rgb_mod : source_color = vec3(1.0);
 uniform float u_alpha_mod = 1.0;
 
 vec4 obj_sample_base() {

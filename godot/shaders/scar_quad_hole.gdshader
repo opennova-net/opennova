@@ -11,11 +11,11 @@ shader_type spatial;
 //   CULLMODE NONE (0x400000)                      -> cull_disabled
 render_mode unshaded, blend_mix, depth_draw_always, cull_disabled;
 
-// Gamma-space pipeline (D-RMAT-7): raw texel sampling, gamma-space combine,
-// the exact inverse of the blit's transfer curve on the way out.
-#include "res://shaders/color.gdshaderinc"
-
-uniform sampler2D albedo_tex : repeat_disable, filter_linear_mipmap;
+// The bhole TGA decodes via source_color; COLOR arrives linear (the
+// presenter converts the witnessed diffuse bytes at mesh build). The
+// witnessed MODULATE2X combine runs over linear inputs (ADR 0043
+// linear-scene amendment).
+uniform sampler2D albedo_tex : source_color, repeat_disable, filter_linear_mipmap;
 
 // The same view-space pull as the scorch quad (see scar_quad.gdshader).
 const float SCAR_VIEW_PULL = 0.998;
@@ -37,6 +37,6 @@ void fragment() {
 		discard;
 	}
 	// MODULATE2X(TEXTURE, DIFFUSE), saturating.
-	ALBEDO = scene_output(min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0)));
+	ALBEDO = min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0));
 	ALPHA = alpha;
 }

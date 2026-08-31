@@ -74,7 +74,6 @@ add_library(${TARGET_NAME} SHARED
     lights/light_scene.cpp
     particle/effect_scene.cpp
     particle/particle_renderer.cpp
-    render/display_decode.cpp
     render/object_lod_frame.cpp
     object/entity_index.cpp
     object/object_model.cpp

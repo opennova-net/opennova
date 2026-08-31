@@ -1331,7 +1331,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 						runtime.rgb_g != previous.rgb_g ||
 						runtime.rgb_b != previous.rgb_b) {
 					material->set_shader_parameter("u_rgb_mod",
-							Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b));
+							Color(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b));
 				}
 				if (!stamp.runtime_valid || runtime.alpha != previous.alpha) {
 					material->set_shader_parameter("u_alpha_mod", runtime.alpha);

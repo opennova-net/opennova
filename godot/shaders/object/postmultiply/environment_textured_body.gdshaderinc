@@ -2,13 +2,14 @@
 // no-depth-write geometry pass after P0/P1, not a factor inside their shader.
 // vscPostMultiplyT1(false,false) uses raw Tex0 and Diffuse=(.5,.5,.5,1);
 // fixed TSS MODULATE2X therefore makes the blend source exactly Diffuse1.
-// DESTCOLOR/SRCCOLOR then writes 2 * source * destination in gamma space.
+// DESTCOLOR/SRCCOLOR then writes 2 * source * destination — now over the
+// linear scene copy (ADR 0043 linear-scene amendment).
 // [orig: BmTxMirrT.fx P3; _vsPost.fx vsPostMultiplyT1].
 
 #include "res://shaders/object/shared.gdshaderinc"
 
 uniform sampler2D u_post_screen : hint_screen_texture, filter_nearest, repeat_disable;
-uniform sampler2D u_diffuse : filter_linear_mipmap, repeat_enable;
+uniform sampler2D u_diffuse : source_color, filter_linear_mipmap, repeat_enable;
 uniform float u_alpha_test_threshold = 0.5;
 uniform float u_alpha_test_invert = 0.0;
 
@@ -34,14 +35,12 @@ void fragment() {
 	}
 	#endif
 
-	vec3 source_gamma = source.rgb;
+	vec3 source_lin = source.rgb;
 	if (opennova_fog_enabled) {
-		source_gamma = mix(opennova_fog_color, source_gamma,
+		source_lin = mix(opennova_fog_color, source_lin,
 				obj_scene_fog_visibility(CAMERA_POSITION_WORLD));
 	}
-	vec3 destination_gamma = scene_input(
-			textureLod(u_post_screen, SCREEN_UV, 0.0).rgb);
-	ALBEDO = scene_output(
-			2.0 * source_gamma * destination_gamma);
+	vec3 destination_lin = textureLod(u_post_screen, SCREEN_UV, 0.0).rgb;
+	ALBEDO = clamp(2.0 * source_lin * destination_lin, vec3(0.0), vec3(1.0));
 	ALPHA = 1.0;
 }

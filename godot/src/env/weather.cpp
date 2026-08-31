@@ -19,6 +19,13 @@ Vector3 to_vector3(const opennova::env::Rgb &rgb) {
 	return Vector3(rgb.r, rgb.g, rgb.b);
 }
 
+// The color seam (ADR 0043 linear-scene amendment): witnessed gamma bytes
+// convert to the linear scene domain once, at the global write.
+Vector3 to_linear(const Vector3 &srgb) {
+	const Color c = Color(srgb.x, srgb.y, srgb.z).srgb_to_linear();
+	return Vector3(c.r, c.g, c.b);
+}
+
 } // namespace
 
 void Weather::_bind_methods() {
@@ -191,12 +198,10 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 			opennova::env::build_weather_shader_globals(p_env->state(),
 					runtime_, p_env->is_underwater_view());
 	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_sun_light",
-			to_vector3(globals.base.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
-			to_vector3(globals.base.sky_ambient));
+			to_linear(to_vector3(globals.base.sky_ambient)));
 	rs->global_shader_parameter_set("opennova_fog_color",
-			to_vector3(globals.base.fog_color));
+			to_linear(to_vector3(globals.base.fog_color)));
 	rs->global_shader_parameter_set("opennova_sun_direction",
 			Vector3(globals.base.sun_direction.x, globals.base.sun_direction.y,
 					globals.base.sun_direction.z));

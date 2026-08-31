@@ -360,28 +360,28 @@ func test_auxiliary_shader_resources_match_their_manifest_contracts() -> void:
 		"postmultiply/environment_textured.gdshader": {
 			"path": "postmultiply/environment_textured.gdshader",
 			"pass_class": "TECHNIQUE_NORMAL_P3",
-			"contract": "diffuse1_gamma_postmultiply",
+			"contract": "diffuse1_x2_postmultiply",
 			"coverage": "full",
 			"cull": "back",
 		},
 		"postmultiply/environment_textured_double_sided.gdshader": {
 			"path": "postmultiply/environment_textured_double_sided.gdshader",
 			"pass_class": "TECHNIQUE_NORMAL_P3",
-			"contract": "diffuse1_gamma_postmultiply",
+			"contract": "diffuse1_x2_postmultiply",
 			"coverage": "full",
 			"cull": "disabled",
 		},
 		"postmultiply/environment_textured_cutout.gdshader": {
 			"path": "postmultiply/environment_textured_cutout.gdshader",
 			"pass_class": "TECHNIQUE_NORMAL_P3",
-			"contract": "diffuse1_gamma_postmultiply",
+			"contract": "diffuse1_x2_postmultiply",
 			"coverage": "diffuse_alpha",
 			"cull": "back",
 		},
 		"postmultiply/environment_textured_cutout_double_sided.gdshader": {
 			"path": "postmultiply/environment_textured_cutout_double_sided.gdshader",
 			"pass_class": "TECHNIQUE_NORMAL_P3",
-			"contract": "diffuse1_gamma_postmultiply",
+			"contract": "diffuse1_x2_postmultiply",
 			"coverage": "diffuse_alpha",
 			"cull": "disabled",
 		},
@@ -411,7 +411,7 @@ func test_auxiliary_shader_resources_match_their_manifest_contracts() -> void:
 
 	var body := _read(OBJECT_ROOT.path_join("postmultiply/environment_textured_body.gdshaderinc"))
 	for token in ["texture(u_diffuse, v_raw_uv)", "textureLod(u_post_screen, SCREEN_UV, 0.0)",
-			"2.0 * source_gamma * destination_gamma", "u_alpha_test_invert"]:
+			"2.0 * source_lin * destination_lin", "u_alpha_test_invert"]:
 		assert_true(body.contains(token), token)
 
 

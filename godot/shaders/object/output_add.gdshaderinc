@@ -8,6 +8,7 @@ void fragment() {
 	if (lit == vec3(0.0)) {
 		lit = obj_self_lit(s.albedo);
 	}
-	ALBEDO = scene_output(obj_apply_additive_fog(lit, CAMERA_POSITION_WORLD));
+	ALBEDO = clamp(obj_apply_additive_fog(lit, CAMERA_POSITION_WORLD),
+			vec3(0.0), vec3(1.0));
 	ALPHA = clamp(s.alpha, 0.0, 1.0);
 }

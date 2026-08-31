@@ -720,8 +720,10 @@ void FoliageDispatcher::_update_materials() {
                                      has_heightfield_normal);
       material->set_shader_parameter("u_tile_overlay", tile_overlay);
       material->set_shader_parameter("u_has_tile_overlay", has_tile_overlay);
-      material->set_shader_parameter("u_tile_overlay_tint",
-                                     tile_overlay_tint);
+      material->set_shader_parameter(
+          "u_tile_overlay_tint",
+          Color(tile_overlay_tint.x, tile_overlay_tint.y,
+                tile_overlay_tint.z));
       material->set_shader_parameter("u_tile_cache", tile_cache);
       material->set_shader_parameter("u_has_tile_cache", has_tile_cache);
       frame_stats_.backend_material_parameter_writes += 11;

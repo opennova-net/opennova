@@ -32,6 +32,18 @@ Vector3 to_vector3(const opennova::env::Vec3 &v) {
 	return Vector3(v.x, v.y, v.z);
 }
 
+// The ONE color seam (ADR 0043 linear-scene amendment): the engine keeps the
+// witnessed gamma bytes; every global that carries a COLOR converts to the
+// linear scene domain exactly once, here. Weights/gains/directions stay raw.
+Vector3 to_linear(const Vector3 &srgb) {
+	const Color c = Color(srgb.x, srgb.y, srgb.z).srgb_to_linear();
+	return Vector3(c.r, c.g, c.b);
+}
+
+Color to_color(const Vector3 &v) {
+	return Color(v.x, v.y, v.z);
+}
+
 opennova::env::Rgb to_rgb(const Vector3 &v) {
 	return opennova::env::Rgb{
 		static_cast<float>(v.x), static_cast<float>(v.y),
@@ -401,9 +413,9 @@ void MissionEnvironment::_write_lighting_block_globals(
 	// ctx+224 outdoor derivations carry the cites).
 	rs->global_shader_parameter_set("opennova_light_block_gain", v.gain);
 	rs->global_shader_parameter_set("opennova_outdoor_ambient",
-			(v.hemi_sky + v.hemi_ground) * 0.5f);
+			to_linear((v.hemi_sky + v.hemi_ground) * 0.5f));
 	rs->global_shader_parameter_set("opennova_indoor_ambient",
-			(v.ceiling + v.floor_color) * 0.5f);
+			to_linear((v.ceiling + v.floor_color) * 0.5f));
 	// The scene fog block itself (color/start/end/type) is the pass state
 	// write_shader_globals / the weather tick / the pass switch already
 	// publish for every fogged consumer; the object family only needs the
@@ -423,13 +435,13 @@ void MissionEnvironment::set_scene_environment(
 	// ADR 0043: the ambient is the witnessed flat term — the outdoor
 	// (sky+ground)/2 average retail loaded into the AmbientColor slot
 	// (runtime/renderer/light_runtime.cpp build_world_lighting carries the
-	// cite) — as
-	// AMBIENT_SOURCE_COLOR at the MODULATE2X energy, so the lit pipeline's
-	// ambient product is numerically retail's gamma-domain fold. The .env
-	// sky/ground colors still feed the gradient Sky, but only reflected
-	// light samples it (the sky-irradiance ambient path lost energy at the
-	// dark TOD registers — the 03TR dawn bias); the visible background stays
-	// BG_COLOR (the witnessed frame clear) plus the authored sky dome.
+	// cite) — as AMBIENT_SOURCE_COLOR at the MODULATE2X energy. The witnessed
+	// bytes are set raw and decode canonically to the linear scene (ADR 0043
+	// linear-scene amendment). The .env sky/ground colors still feed the
+	// gradient Sky, but only reflected light samples it (the sky-irradiance
+	// ambient path lost energy at the dark TOD registers — the 03TR dawn
+	// bias); the visible background stays BG_COLOR (the witnessed frame
+	// clear) plus the authored sky dome.
 	Ref<Shader> sky_shader = ResourceLoader::get_singleton()->load(
 			"res://shaders/hemisphere_sky.gdshader");
 	sky_material_.instantiate();
@@ -464,9 +476,11 @@ void MissionEnvironment::_apply_presentation_toggles() {
 	if (scene_environment_.is_null()) {
 		return;
 	}
-	// Glow reads the gamma-domain scene target; only over-unity pixels (the
-	// energy-2.0 additive stacks and EMISSION self-lit surfaces) bloom, so
-	// the authored diffuse palette stays untouched.
+	// Glow thresholds the linear scene: only over-unity pixels (the
+	// energy-2.0 lit products, EMISSION self-lit surfaces, additive stacks
+	// past white) bloom, so the authored diffuse palette stays untouched.
+	// The threshold is the sanctioned taste knob of the linear-scene
+	// calibration gate (ADR 0043 amendment).
 	scene_environment_->set_glow_enabled(glow_enabled_);
 	scene_environment_->set_glow_hdr_bleed_threshold(1.0f);
 	scene_environment_->set_glow_bloom(0.0f);
@@ -499,14 +513,16 @@ void MissionEnvironment::_write_scene_environment(
 	}
 	const EnvLightValues &v = **p_values;
 	if (sky_material_.is_valid()) {
-		sky_material_->set_shader_parameter("u_hemi_sky", v.hemi_sky);
-		sky_material_->set_shader_parameter("u_hemi_ground", v.hemi_ground);
+		// source_color uniforms: set as Colors so the witnessed bytes decode
+		// canonically to the linear scene.
+		sky_material_->set_shader_parameter("u_hemi_sky", to_color(v.hemi_sky));
+		sky_material_->set_shader_parameter("u_hemi_ground",
+				to_color(v.hemi_ground));
 	}
 	const Vector3 outdoor_ambient = (v.hemi_sky + v.hemi_ground) * 0.5f;
-	// Gamma-domain scene value pre-encoded against the renderer's
-	// COLOR-source-ambient srgb_to_linear decode (color.gdshaderinc contract).
-	scene_environment_->set_ambient_light_color(Color(outdoor_ambient.x,
-			outdoor_ambient.y, outdoor_ambient.z).linear_to_srgb());
+	// The witnessed bytes set raw; Godot's canonical Color decode carries them
+	// to the linear scene (ADR 0043 linear-scene amendment).
+	scene_environment_->set_ambient_light_color(to_color(outdoor_ambient));
 	scene_environment_->set_fog_enabled(v.fog_enabled);
 	apply_scene_fog(v.fog_color, v.fog_start, v.fog_end, v.fog_type);
 }
@@ -610,14 +626,12 @@ void MissionEnvironment::write_shader_globals() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const opennova::env::EnvShaderGlobals globals =
 			state_.build_shader_globals(underwater_view_);
-	rs->global_shader_parameter_set("opennova_sun_light",
-			to_vector3(globals.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
-			to_vector3(globals.sky_ambient));
+			to_linear(to_vector3(globals.sky_ambient)));
 	rs->global_shader_parameter_set("opennova_sun_direction",
 			to_vector3(globals.sun_direction));
 	rs->global_shader_parameter_set("opennova_fog_color",
-			to_vector3(globals.fog_color));
+			to_linear(to_vector3(globals.fog_color)));
 	rs->global_shader_parameter_set("opennova_fog_end", globals.fog_end);
 	rs->global_shader_parameter_set("opennova_fog_start", globals.fog_start);
 	rs->global_shader_parameter_set("opennova_fog_type", globals.fog_type);
@@ -630,7 +644,7 @@ void MissionEnvironment::_write_scene_fog_globals() {
 			state_.build_scene_fog(underwater_view_);
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->global_shader_parameter_set("opennova_fog_color",
-			to_vector3(fog.color));
+			to_linear(to_vector3(fog.color)));
 	rs->global_shader_parameter_set("opennova_fog_end", fog.end);
 	rs->global_shader_parameter_set("opennova_fog_start", fog.start);
 	rs->global_shader_parameter_set("opennova_fog_type", fog.type);
@@ -739,7 +753,7 @@ void MissionEnvironment::set_nvg_view(bool p_active, int p_gain) {
 	// wind/fog state.
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->global_shader_parameter_set("opennova_sky_ambient",
-			to_vector3(state_.sky_ambient()));
+			to_linear(to_vector3(state_.sky_ambient())));
 }
 
 void MissionEnvironment::set_underwater_view(bool p_underwater) {
@@ -933,7 +947,7 @@ void MissionEnvironment::apply_terrain_uniforms(
 			state_.build_terrain_uniforms(underwater_view_);
 	Ref<ShaderMaterial> material = p_material;
 	material->set_shader_parameter("u_tile_overlay_tint",
-			to_vector3(uniforms.tile_overlay_tint));
+			to_color(to_vector3(uniforms.tile_overlay_tint)));
 }
 
 Vector3 MissionEnvironment::get_water_color() const {

@@ -28,10 +28,12 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 	ctx.sky.advance_frame(0.016)
 	var mat: ShaderMaterial = ctx.sky.get_sky_material()
 	assert_eq(mat.get_shader_parameter("u_flat_pass"), false, "advanced clouds take the keyframed path")
-	assert_eq(mat.get_shader_parameter("u_sky_base"), ctx.env_node.get_sky_base() * 2.0, "c11 skybase")
-	assert_eq(mat.get_shader_parameter("u_cloud_base"), ctx.env_node.get_cloud_base() * 2.0, "c24 cloudbase")
-	assert_eq(mat.get_shader_parameter("u_cloud_highlight"), ctx.env_node.get_cloud_highlight() * 2.0, "c27 cloudhighlight")
-	assert_eq(mat.get_shader_parameter("u_cloud_edge"), ctx.env_node.get_cloud_edge() * 2.0, "c26 cloudedge")
+	# The palette uniforms are source_color Colors now (the witnessed doubled
+	# bytes ride Color components >1 unchanged; the hint decodes at bind).
+	assert_eq(mat.get_shader_parameter("u_sky_base"), _as_color(ctx.env_node.get_sky_base() * 2.0), "c11 skybase")
+	assert_eq(mat.get_shader_parameter("u_cloud_base"), _as_color(ctx.env_node.get_cloud_base() * 2.0), "c24 cloudbase")
+	assert_eq(mat.get_shader_parameter("u_cloud_highlight"), _as_color(ctx.env_node.get_cloud_highlight() * 2.0), "c27 cloudhighlight")
+	assert_eq(mat.get_shader_parameter("u_cloud_edge"), _as_color(ctx.env_node.get_cloud_edge() * 2.0), "c26 cloudedge")
 	# The dome shader and the getters both serve GODOT-world vectors (the
 	# env_axes.h swap applies once at each device seam — 2026-08-20
 	# celestial-axis correction).
@@ -41,9 +43,13 @@ func test_keyframed_path_pushes_spec_uniforms() -> void:
 	assert_eq(mat.get_shader_parameter("u_light_dir"),
 		ctx.env_node.get_light_direction(),
 		"pass 2 follows the active light [orig: render_skybox @ 0x579291]")
-	assert_eq(mat.get_shader_parameter("u_fog_color"), ctx.env_node.get_skyfog_color(),
+	assert_eq(mat.get_shader_parameter("u_fog_color"), _as_color(ctx.env_node.get_skyfog_color()),
 		"the dome fogs with the dedicated skyfog block [orig: sky fog wrapper @ 0x579cb0]")
 	assert_eq(float(mat.get_shader_parameter("u_fog_end")), ctx.env_node.get_fog_level(), "dome fog end distance")
+
+
+func _as_color(v: Vector3) -> Color:
+	return Color(v.x, v.y, v.z)
 
 
 func test_keyframed_colors_use_retail_upload_scale_without_redoubling_fog() -> void:
@@ -134,9 +140,11 @@ func test_dome_fog_uses_skyfog_instead_of_world_fog() -> void:
 	ctx.env.set_fog_level(1024.0)
 	ctx.sky.advance_frame(TICK)
 
-	var dome_fog: Vector3 = ctx.sky.get_sky_material().get_shader_parameter("u_fog_color")
-	assert_eq(dome_fog, ctx.env_node.get_skyfog_color())
-	assert_ne(dome_fog, ctx.env_node.get_fog_color(),
+	var dome_fog: Color = ctx.sky.get_sky_material().get_shader_parameter("u_fog_color")
+	var skyfog: Vector3 = ctx.env_node.get_skyfog_color()
+	var world_fog: Vector3 = ctx.env_node.get_fog_color()
+	assert_eq(dome_fog, Color(skyfog.x, skyfog.y, skyfog.z))
+	assert_ne(dome_fog, Color(world_fog.x, world_fog.y, world_fog.z),
 		"the sky wrapper swaps to skyfog while the world keeps ordinary fog")
 
 
@@ -148,27 +156,28 @@ func test_underwater_dome_keeps_the_smoothed_fog_end_without_rewriting_sky_wrapp
 	var ctx := _make()
 	ctx.sky.advance_frame(TICK)
 	var mat: ShaderMaterial = ctx.sky.get_sky_material()
-	var dry_sky_base: Vector3 = mat.get_shader_parameter("u_sky_base")
+	var dry_sky_base: Color = mat.get_shader_parameter("u_sky_base")
 	var dry_fog_end := float(mat.get_shader_parameter("u_fog_end"))
 	assert_almost_eq(dry_fog_end, ctx.env_node.get_fog_level(), 0.001,
 			"the dome fog end is the raw smoothed distance above water")
 	ctx.env_node.set_underwater_view(true)
 	ctx.sky.advance_frame(TICK)
 
-	assert_eq(Vector3(mat.get_shader_parameter("u_fog_color")),
-			ctx.env_node.get_skyfog_color(),
+	var underwater_skyfog: Vector3 = ctx.env_node.get_skyfog_color()
+	assert_eq(mat.get_shader_parameter("u_fog_color"),
+			Color(underwater_skyfog.x, underwater_skyfog.y, underwater_skyfog.z),
 			"the dome keeps the witnessed skyfog wrapper underwater")
 	assert_almost_eq(float(mat.get_shader_parameter("u_fog_end")), dry_fog_end, 0.001,
 			"the dome keeps the unscaled smoothed fog end underwater")
 	assert_true(absf(ctx.env_node.get_scene_fog_end() - dry_fog_end) > 1.0,
 			"the world's murk end differs from the dome's, so the pin is live")
-	assert_eq(Vector3(mat.get_shader_parameter("u_sky_base")), dry_sky_base,
+	assert_eq(mat.get_shader_parameter("u_sky_base"), dry_sky_base,
 			"pass fog selection does not rewrite authored sky/TOD colors")
 
 
 func _shader_color_units(material: ShaderMaterial, parameter: StringName) -> Array[int]:
-	var value: Vector3 = material.get_shader_parameter(parameter)
-	return [roundi(value.x * 255.0), roundi(value.y * 255.0), roundi(value.z * 255.0)]
+	var value: Color = material.get_shader_parameter(parameter)
+	return [roundi(value.r * 255.0), roundi(value.g * 255.0), roundi(value.b * 255.0)]
 
 
 func _color_units(value: Color) -> Array[int]:
@@ -178,12 +187,14 @@ func _color_units(value: Color) -> Array[int]:
 func test_flat_pass_does_not_stuff_keyframed_uniforms() -> void:
 	var ctx := _make()
 	ctx.sky.advance_frame(0.016)
-	var keyframed_base: Vector3 = ctx.sky.get_sky_material().get_shader_parameter("u_sky_base")
+	var keyframed_base: Color = ctx.sky.get_sky_material().get_shader_parameter("u_sky_base")
 	ctx.env.set_advanced_clouds(0)
 	ctx.sky.advance_frame(0.016)
 	var mat: ShaderMaterial = ctx.sky.get_sky_material()
 	assert_eq(mat.get_shader_parameter("u_flat_pass"), true, "advanced_clouds 0 takes the flat pass")
-	assert_eq(mat.get_shader_parameter("u_flat_color"), ctx.env_node.get_cloud_tint(),
+	var cloud_tint: Vector3 = ctx.env_node.get_cloud_tint()
+	assert_eq(mat.get_shader_parameter("u_flat_color"),
+		Color(cloud_tint.x, cloud_tint.y, cloud_tint.z),
 		"the flat dome color is cloud_rgb [orig: render_skybox @ 0x579b42]")
 	assert_eq(mat.get_shader_parameter("u_sky_base"), keyframed_base,
 		"the flat pass no longer overwrites the keyframed uniforms")

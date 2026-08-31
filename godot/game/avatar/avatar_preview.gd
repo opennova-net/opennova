@@ -182,11 +182,6 @@ func _build_viewport() -> void:
 
 	_root = Node3D.new()
 	_viewport.add_child(_root)
-	# Retail shaders write gamma-domain values and rely on one terminal display
-	# decode per 3D view.
-	var display_decode := DisplayDecode.new()
-	display_decode.name = "AvatarPreviewDisplayDecode"
-	_root.add_child(display_decode)
 
 	_environment = MissionEnvironment.new()
 	_environment.name = "AvatarPreviewEnvironment"

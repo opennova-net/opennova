@@ -557,8 +557,11 @@ void Terrain::render_frame() {
 			// one multiply; the shared runtime/ONED tile path consumes this uniform.
 			// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/terrain/terrain-re.md].
 			tile_overlay_tint = cached_env_node->get_tile_overlay_tint();
-			terrain_material->set_shader_parameter(
-				"u_tile_overlay_tint", tile_overlay_tint);
+			// source_color uniform: set as a Color so the witnessed tint
+			// bytes decode to the linear scene.
+			terrain_material->set_shader_parameter("u_tile_overlay_tint",
+				Color(tile_overlay_tint.x, tile_overlay_tint.y,
+						tile_overlay_tint.z));
 		}
 	}
 }

@@ -495,10 +495,9 @@ int LightScene::sync_scene_lights(Node3D *p_parent,
 		}
 		const opennova::renderer::SceneOmniLight &row = rows[i];
 		light->set_position(godot_from_mission_float(row.position));
-		// Gamma-domain scene value pre-encoded against the renderer's
-		// Light3D srgb_to_linear decode (color.gdshaderinc contract).
-		light->set_color(
-				Color(row.color[0], row.color[1], row.color[2]).linear_to_srgb());
+		// The witnessed bytes set raw; Godot's canonical Light3D color decode
+		// carries them to the linear scene (ADR 0043 linear-scene amendment).
+		light->set_color(Color(row.color[0], row.color[1], row.color[2]));
 		light->set_param(Light3D::PARAM_RANGE, MAX(row.range, 0.01f));
 		light->set_visible(true);
 		++visible;

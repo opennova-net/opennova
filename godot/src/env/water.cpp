@@ -1,5 +1,4 @@
 #include "env/water.h"
-#include "render/display_decode.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/canvas_item_material.hpp>
@@ -199,7 +198,6 @@ void Water::release_runtime_renderer_resources() {
 	if (reflection_camera_ != nullptr) {
 		reflection_camera_->clear_current();
 	}
-	_release_reflection_decode();
 	if (water_material_.is_valid()) {
 		water_material_->set_shader_parameter("u_has_reflection", false);
 		water_material_->set_shader_parameter("u_reflection", Variant());
@@ -307,55 +305,7 @@ void Water::_sync_render_activity() {
 void Water::_notification(int p_what) {
 	if (p_what == NOTIFICATION_VISIBILITY_CHANGED && built_) {
 		_sync_render_activity();
-	} else if (p_what == NOTIFICATION_ENTER_TREE && built_ &&
-			reflection_camera_ != nullptr &&
-			reflection_decode_effect_.is_null()) {
-		// Re-entry after an EXIT_TREE release: the retained mirror camera needs
-		// a fresh decode effect (the released one stays shut down).
-		_install_reflection_decode();
 	}
-}
-
-// The mirror camera's decode-only terminal effect: one DisplayDecodeEffect
-// on a compositor the camera owns (never the beauty WorldEnvironment's chain).
-void Water::_install_reflection_decode() {
-	if (reflection_camera_ == nullptr) {
-		return;
-	}
-	reflection_decode_effect_.instantiate();
-	reflection_compositor_.instantiate();
-	TypedArray<Ref<CompositorEffect>> capture_effects;
-	Ref<CompositorEffect> generic_decode = reflection_decode_effect_;
-	capture_effects.push_back(generic_decode);
-	reflection_compositor_->set_compositor_effects(capture_effects);
-	reflection_camera_->set_compositor(reflection_compositor_);
-}
-
-// Idempotent release of the mirror decode chain, the same EXIT_TREE leg
-// DisplayDecode runs: disable the effect, detach the mirror camera's
-// compositor, drain a callback already queued for the mirror while
-// RenderingDevice is live, then free the effect-owned device resources. A
-// Water freed outside release_runtime_renderer_resources() (GUT fixtures,
-// embedder previews) otherwise leaks its RD chain.
-void Water::_release_reflection_decode() {
-	Ref<DisplayDecodeEffect> decode_effect = reflection_decode_effect_;
-	if (decode_effect.is_valid())
-		decode_effect->set_enabled(false);
-	if (reflection_camera_ != nullptr &&
-			reflection_camera_->get_compositor() == reflection_compositor_)
-		reflection_camera_->set_compositor(Ref<Compositor>());
-	if (reflection_compositor_.is_valid())
-		reflection_compositor_->set_compositor_effects(
-				TypedArray<Ref<CompositorEffect>>());
-	RenderingServer *server = RenderingServer::get_singleton();
-	if (decode_effect.is_valid() && server != nullptr &&
-			server->get_rendering_device() != nullptr)
-		server->force_sync();
-	if (decode_effect.is_valid())
-		decode_effect->release_device_resources();
-	reflection_decode_effect_.unref();
-	reflection_compositor_.unref();
-	decode_effect.unref();
 }
 
 void Water::_exit_tree() {
@@ -380,9 +330,6 @@ void Water::_exit_tree() {
 		water_material_->set_shader_parameter("u_has_reflection", false);
 		water_material_->set_shader_parameter("u_reflection", Variant());
 	}
-	// The mirror decode chain never outlives the node's time in the tree;
-	// ENTER_TREE re-installs it on the retained camera.
-	_release_reflection_decode();
 }
 
 void Water::_ready() {
@@ -498,20 +445,13 @@ void Water::build() {
 		add_child(reflection_viewport_);
 		reflection_camera_ = memnew(Camera3D);
 		reflection_camera_->set_name("WaterReflectionCamera");
-		// Every retail pass writes gamma-domain numeric values (no D3DSAMP_SRGBTEXTURE /
-		// D3DRS_SRGBWRITEENABLE in the device sweeps; the mirror scene renders through
-		// Water_RenderReflectedWorldScene @0x5c8510 into the Water_CreateReflectionRenderTarget
-		// @0x5c08b0 RTT - docs/render/render-material-re.md Color pipeline, docs/env/env-tod-re.md
-		// #30), so this RTT
-		// needs exactly one display decode before Godot's sRGB output encode
-		// for its stored bytes to be the retail gamma texels the water shader
-		// samples raw - and the witnessed dim quad below multiplies those
-		// BYTES. A decode-only terminal effect on the mirror camera (no Q3
-		// source, so no FrameFX composite) provides it; the camera must not
-		// inherit the beauty WorldEnvironment's chain. An HDR 2D target would
-		// skip the encode but run the canvas dim in linear space (0x40/255
-		// becomes ~0.05), which is the wrong domain for that multiply.
-		_install_reflection_decode();
+		// The linear mirror scene tonemaps and sRGB-encodes into this RTT
+		// (stock viewport output — ADR 0043 linear-scene amendment; the former
+		// gamma-contract decode compositor is retired). The witnessed dim quad
+		// below multiplies the stored BYTES, which is retail's own byte-domain
+		// 64/255 multiply (Water_RenderReflectedWorldScene @0x5c8510 into the
+		// Water_CreateReflectionRenderTarget @0x5c08b0 RTT); the water shader's
+		// source_color sample then returns the dimmed scene to linear.
 		// The witnessed mirror scene: sky/terrain/celestials/foliage plus the
 		// flag-0x400 world population — vehicles by item type and records
 		// whose BMS attribute authors Reflective. It has no water surface, FP
@@ -620,8 +560,10 @@ void Water::advance_frame(double p_delta) {
 	Ref<EnvFile> env_data;
 	if (inputs.env_loaded && env != nullptr) {
 		env_data = env->get_environment_data();
+		// source_color uniform: the witnessed bytes set as a Color decode
+		// canonically to the linear scene (ADR 0043 linear-scene amendment).
 		water_material_->set_shader_parameter("u_water_color",
-				Vector3(inputs.lit.r, inputs.lit.g, inputs.lit.b));
+				Color(inputs.lit.r, inputs.lit.g, inputs.lit.b));
 		// The witnessed UV transform (scale/bias from the fog-distance INT
 		// part, offsets from the layer-1 cloud accumulators + 32x camera).
 		// The weather node owns the shared accumulators; standalone owners
@@ -641,8 +583,9 @@ void Water::advance_frame(double p_delta) {
 					state.offset_v);
 		}
 		water_material_->set_shader_parameter("u_water_uv", uv_state);
+		const Vector3 fog_rgb = env->get_scene_fog_color();
 		water_material_->set_shader_parameter("u_fog_color",
-				env->get_scene_fog_color());
+				Color(fog_rgb.x, fog_rgb.y, fog_rgb.z));
 		water_material_->set_shader_parameter("u_water_murk", murk);
 	}
 

@@ -239,8 +239,8 @@ func test_the_drawer_states_blend_and_never_alpha_scissor() -> void:
 		assert_true(code.contains("blend_mix"), "%s: the SRCALPHA/INVSRCALPHA blend" % shader.resource_path)
 		assert_true(code.contains("unshaded"), "%s: LIGHTING off" % shader.resource_path)
 		assert_false(code.contains("fog_disabled"), "%s: FOGENABLE" % shader.resource_path)
-		assert_false(code.contains("source_color"),
-				"%s: raw texel sampling (D-RMAT-7)" % shader.resource_path)
+		assert_true(code.contains("source_color"),
+				"%s: the scorch art decodes to the linear scene (ADR 0043 linear-scene amendment)" % shader.resource_path)
 	assert_true(scorch.code.contains("depth_draw_never"), "scorch: z-write off (0x100000)")
 	assert_true(scorch.code.contains("cull_back"), "scorch: the CCW back-face cull")
 	# The beauty scar shader needs no pass gate and has no alpha test on its

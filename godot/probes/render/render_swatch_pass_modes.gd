@@ -47,7 +47,6 @@ func clip_mode(out_dir: String, prefix: String) -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_display_decode(scene)
 
 	var diffuse := RenderSwatchSupport.make_lighting_diffuse_texture()
 	var detail := RenderSwatchSupport.make_lighting_detail_texture()
@@ -267,7 +266,6 @@ func matchterrain_mode(out_dir: String, prefix: String) -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_display_decode(scene)
 
 	var tile_low := RenderSwatchSupport.make_matchterrain_array(32)
 	var tile_high := RenderSwatchSupport.make_matchterrain_array(224)

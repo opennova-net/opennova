@@ -14,26 +14,25 @@ render_mode unshaded, cull_front, fog_disabled;
 // D3DRS_AMBIENT 0xFFFFFF [orig: render_skybox @ 0x579b42..0x579bb6].
 // Full spec: docs/env/env-tod-re.md "Sky dome".
 
-// Gamma-domain scene-target contract.
-#include "res://shaders/color.gdshaderinc"
-
-uniform vec3 u_sky_base = vec3(0.3, 0.4, 0.7); // c11 skybase
-uniform vec3 u_sky_bright = vec3(0.5, 0.6, 0.9); // c11 + c12
-uniform vec3 u_sky_highlight = vec3(1.0, 0.95, 0.8); // c15
-uniform vec3 u_cloud_base = vec3(0.7, 0.75, 0.8); // c24
-uniform vec3 u_cloud_highlight = vec3(0.6, 0.65, 0.7); // c27
-uniform vec3 u_cloud_edge = vec3(0.3, 0.35, 0.4); // c26
+uniform vec3 u_sky_base : source_color = vec3(0.3, 0.4, 0.7); // c11 skybase
+uniform vec3 u_sky_bright : source_color = vec3(0.5, 0.6, 0.9); // c11 + c12
+uniform vec3 u_sky_highlight : source_color = vec3(1.0, 0.95, 0.8); // c15
+uniform vec3 u_cloud_base : source_color = vec3(0.7, 0.75, 0.8); // c24
+uniform vec3 u_cloud_highlight : source_color = vec3(0.6, 0.65, 0.7); // c27
+uniform vec3 u_cloud_edge : source_color = vec3(0.3, 0.35, 0.4); // c26
 uniform vec3 u_sun_dir = vec3(0.0, 1.0, 0.0); // pass-1 c13/c14 direction
 uniform vec3 u_light_dir = vec3(0.0, 1.0, 0.0); // pass-2 c13/c14 direction
-uniform vec3 u_fog_color = vec3(0.5, 0.7, 0.9); // sky-pass D3DRS_FOGCOLOR (skyfog)
+uniform vec3 u_fog_color : source_color = vec3(0.5, 0.7, 0.9); // sky-pass D3DRS_FOGCOLOR (skyfog)
 uniform float u_fog_end = 1000.0; // world-unit fog end distance
 uniform bool u_flat_pass = false; // advanced_clouds == 0
-uniform vec3 u_flat_color = vec3(0.5, 0.5, 0.5); // cloud_rgb, flat path only
+uniform vec3 u_flat_color : source_color = vec3(0.5, 0.5, 0.5); // cloud_rgb, flat path only
 
 // The reference device applies anisotropic minification to active texture
-// stages; this matters most at the dome's grazing-angle horizon.
-uniform sampler2D u_cloud_tex1 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D u_cloud_tex2 : filter_linear_mipmap_anisotropic, repeat_enable;
+// stages; this matters most at the dome's grazing-angle horizon. The cloud
+// art decodes via source_color (linear scene, ADR 0043 amendment); the TSS
+// alpha math is unaffected (the sRGB view leaves A linear).
+uniform sampler2D u_cloud_tex1 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_cloud_tex2 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_clouds = false;
 uniform vec2 u_scroll_offset1 = vec2(0.0);
 uniform vec2 u_scroll_offset2 = vec2(0.0);
@@ -148,8 +147,7 @@ void fragment() {
 	if (u_fog_end > 0.0) {
 		col = mix(u_fog_color, col, clamp(v_fog, 0.0, 1.0));
 	}
-	// Gamma-space output (D-RMAT-7): the gradient/cloud/fog combine above ran
-	// on raw byte values (colors and cloud texels alike); encode once so the
-	// displayed dome bytes equal the computed ones.
-	ALBEDO = scene_output(col);
+	// The witnessed combine over linear inputs (palette uniforms arrive
+	// linear from the driver); the clamp is retail's saturate-on-write.
+	ALBEDO = clamp(col, vec3(0.0), vec3(1.0));
 }

@@ -206,7 +206,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	// The PANM evaluator supplies the complete two-row affine transform.
 	material->set_shader_parameter("u_uv_transform_u", Vector3(1.0f, 0.0f, 0.0f));
 	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));
-	material->set_shader_parameter("u_rgb_mod", Vector3(1, 1, 1));
+	material->set_shader_parameter("u_rgb_mod", Color(1, 1, 1));
 	material->set_shader_parameter("u_alpha_mod", 1.0f);
 	// The classification's blend fact rides the material as metadata (it
 	// survives duplicate()) for consumers that harvest ObjectModel materials —

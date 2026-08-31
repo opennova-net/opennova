@@ -21,8 +21,6 @@
 
 namespace godot {
 
-class Compositor;
-class DisplayDecodeEffect;
 class EnvFile;
 class MissionEnvironment;
 class Weather;
@@ -136,8 +134,6 @@ private:
 	void _push_water_split_height();
 	void _sync_render_activity();
 	void _update_reflection_camera(Camera3D *p_cam);
-	void _install_reflection_decode();
-	void _release_reflection_decode();
 	void _rebuild_strip_mesh(Camera3D *p_cam, const Vector3 &p_cam_pos,
 			float p_murk, float p_fog_end, const Vector4 &p_uv_state,
 			const Color &p_lit, const Ref<EnvFile> &p_env_data);
@@ -162,11 +158,6 @@ private:
 	Ref<ShaderMaterial> water_material_;
 	SubViewport *reflection_viewport_ = nullptr;
 	Camera3D *reflection_camera_ = nullptr;
-	// The reflection camera owns a decode-only DisplayDecodeEffect. Keep both
-	// resources here so process-exit teardown can detach and drain the render
-	// callback while RenderingServer is still alive, before deleting the view.
-	Ref<DisplayDecodeEffect> reflection_decode_effect_;
-	Ref<Compositor> reflection_compositor_;
 	bool built_ = false;
 	bool has_drawable_surface_ = false;
 	ObjectID env_node_id_;

@@ -109,12 +109,10 @@ void SunShadow::_update_light_color() {
 	}
 	const Ref<EnvLightValues> values = light_state->get_values();
 	const Vector3 c = values->get_dir_color();
-	// The block's dir_color is a gamma-domain scene value; the renderer
-	// srgb_to_linear-decodes every Light3D color before use, so pre-encode to
-	// make its decode land back on the witnessed value (color.gdshaderinc
-	// contract — the 03TR dawn bias was this double decode crushing the dark
-	// TOD registers).
-	set_color(Color(c.x, c.y, c.z).linear_to_srgb());
+	// The witnessed dir_color bytes set raw: Godot's canonical Light3D color
+	// decode carries them to the linear scene (ADR 0043 linear-scene
+	// amendment; the former gamma-contract pre-encode is retired).
+	set_color(Color(c.x, c.y, c.z));
 	// The hemisphere delta: hemi - ambient = (sky - ground) / 2 per channel;
 	// negative channels drop (sky >= ground across the shipped .env corpus)
 	// (the witnessed fold and its cites live in
@@ -123,7 +121,7 @@ void SunShadow::_update_light_color() {
 		const Vector3 delta =
 				(values->get_hemi_sky() - values->get_hemi_ground()) * 0.5f;
 		const Color conditioned = Color(MAX(delta.x, 0.0f), MAX(delta.y, 0.0f),
-				MAX(delta.z, 0.0f)).linear_to_srgb();
+				MAX(delta.z, 0.0f));
 		hemi_down_->set_color(conditioned);
 		hemi_up_->set_color(conditioned);
 	}

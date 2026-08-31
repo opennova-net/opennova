@@ -10,7 +10,8 @@ extends GameProbe
 ##   channels    material-channel ownership (RenderSwatchLightingModes)
 ##   clip / matchterrain   the auxiliary passes (RenderSwatchPassModes)
 ##   compare     diff two grid captures exactly (headless is fine)
-##   calibrate   the gamma-framebuffer proof: 256/256 terminal bytes, the blend domain
+## (The former calibrate mode's byte-identity/blend proofs proved the retired
+## gamma scene contract and died with it — ADR 0043 linear-scene amendment.)
 ## POLICY (ADR 0023): baselines live under .scratch/golden/render/ (machine-
 ## local, never committed); the default comparison is EXACT; any tolerance
 ## is an investigation aid, never a gate. The composite ladder: scene 1 is the
@@ -22,7 +23,7 @@ const WINDOW_SIZE := Vector2i(1280, 1024)
 const CELL_WORLD := 2.4
 const GRID_COLS := 10
 const RENDER_MODES := ["capture", "composite", "lighting", "channels", "clip",
-		"matchterrain", "calibrate"]
+		"matchterrain"]
 
 # Curated variants per tag: name, material_flags, emissive_type, glass, alpha byte.
 const VARIANTS: Array = [
@@ -62,8 +63,6 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			await _capture_mode(out_dir, prefix)
 		"composite":
 			await _composite_mode(out_dir, prefix)
-		"calibrate":
-			await _calibrate_mode()
 		"lighting":
 			await RenderSwatchLightingModes.new(ctx, _stage, _sink).lighting_mode(out_dir, prefix)
 		"channels":
@@ -110,7 +109,6 @@ func _capture_mode(out_dir: String, prefix: String) -> void:
 	env.background_color = Color(0.12, 0.12, 0.14)
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_display_decode(scene)
 
 	var diffuse := RenderSwatchSupport.make_diffuse_texture()
 	var detail := RenderSwatchSupport.make_detail_texture()
@@ -193,7 +191,6 @@ func _composite_mode(out_dir: String, prefix: String) -> void:
 	env.background_color = Color(0.12, 0.12, 0.14)
 	world_env.environment = env
 	scene.add_child(world_env)
-	RenderSwatchSupport.add_display_decode(scene)
 
 	# Each layer: [label, color(rgba), rung, z]. Z runs TOWARD the camera
 	# (+z nearer): every scene places its ladder-EARLIEST layer NEAREST, so
@@ -269,129 +266,6 @@ func _composite_mode(out_dir: String, prefix: String) -> void:
 
 	_sink.logv(["render_swatch_probe composite: scenes=", scenes.size(), " png=", png_path, " ok=", err == OK])
 	_sink.quit(0 if err == OK else 1)
-
-
-# Gamma-framebuffer proof (see the header). Renders 256 byte columns into the
-# raw retail scene target, applies the production terminal transfer, and reads
-# the display bytes back with zero tolerance. It then exercises the live
-# Forward+ SRCALPHA/INVSRCALPHA and ONE/ONE paths before that transfer. The
-# latter intentionally uses blend_add without writing ALPHA: every selected
-# retail ONE/ONE object wrapper does the same, while the other blend_add users
-# explicitly write ALPHA = 1.0.
-func _calibrate_mode() -> void:
-	_stage.set_stage_size(WINDOW_SIZE)
-
-	var scene := Node3D.new()
-	_stage.add_scene(scene)
-	var world_env := WorldEnvironment.new()
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.0, 0.0, 0.0)
-	world_env.environment = env
-	scene.add_child(world_env)
-	RenderSwatchSupport.add_display_decode(scene)
-
-	var quad := MeshInstance3D.new()
-	var quad_mesh := QuadMesh.new()
-	quad_mesh.size = Vector2(1.0, 1.0)
-	quad.mesh = quad_mesh
-	var material := ShaderMaterial.new()
-	var shader := Shader.new()
-	shader.set_code("""
-shader_type spatial;
-render_mode unshaded;
-#include "res://shaders/color.gdshaderinc"
-void fragment() {
-	float b = floor(clamp(UV.x, 0.0, 0.999999) * 256.0) / 255.0;
-	ALBEDO = scene_output(vec3(b));
-}
-""")
-	material.shader = shader
-	quad.material_override = material
-	scene.add_child(quad)
-
-	var camera := Camera3D.new()
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 1.0
-	camera.position = Vector3(0.0, 0.0, 10.0)
-	camera.current = true
-	scene.add_child(camera)
-
-	for _i in range(RenderSwatchSupport.SETTLE_FRAMES):
-		await _ctx.tree.process_frame
-
-	var image := await _stage.capture_image(_ctx.tree)
-	if image == null:
-		_sink.error("render_swatch_probe calibrate: no viewport image (run windowed, not --headless)")
-		_sink.quit(1)
-		return
-	image.convert(Image.FORMAT_RGBA8)
-
-	# Ortho size is the VERTICAL extent; the 1x1 quad spans world x [-0.5, 0.5]
-	# inside a horizontal extent of size * aspect.
-	var w := image.get_width()
-	var h := image.get_height()
-	var aspect := float(w) / float(h)
-	var half_extent_x := 0.5 * aspect
-	var mid_y := h / 2
-	var worst := 0
-	var mismatches := 0
-	var first_rows: Array[String] = []
-	for b in range(256):
-		var u := (float(b) + 0.5) / 256.0
-		var world_x := -0.5 + u
-		var px := int(round((world_x + half_extent_x) / (2.0 * half_extent_x) * float(w) - 0.5))
-		var got := int(round(image.get_pixel(px, mid_y).r * 255.0))
-		var dev := absi(got - b)
-		if dev > 0:
-			mismatches += 1
-			if first_rows.size() < 16:
-				first_rows.append("byte %d -> %d (dev %d)" % [b, got, dev])
-			worst = maxi(worst, dev)
-	if mismatches != 0:
-		_sink.error("render_swatch_probe calibrate: FAIL - %d/256 bytes deviate (worst %d): %s" % [mismatches, worst, ", ".join(first_rows)])
-		_sink.quit(1)
-		return
-
-	quad.visible = false
-	RenderSwatchSupport.add_calibration_stack(scene, -0.3,
-			RenderSwatchSupport.make_calibration_material("", 64, 1.0, false),
-			RenderSwatchSupport.make_calibration_material("blend_mix, depth_draw_never", 192,
-					128.0 / 255.0, true))
-	RenderSwatchSupport.add_calibration_stack(scene, 0.3,
-			RenderSwatchSupport.make_calibration_material("", 32, 1.0, false),
-			RenderSwatchSupport.make_calibration_material("blend_add, depth_draw_never", 64,
-					1.0, false))
-
-	for _i in range(RenderSwatchSupport.SETTLE_FRAMES):
-		await _ctx.tree.process_frame
-	var blend_image := await _stage.capture_image(_ctx.tree)
-	if blend_image == null:
-		_sink.error("render_swatch_probe calibrate: no blend image")
-		_sink.quit(1)
-		return
-	blend_image.convert(Image.FORMAT_RGBA8)
-	var blend_rows: Array[String] = []
-	var cases := [
-		["SRCALPHA/INVSRCALPHA", -0.3, 128],
-		["ONE/ONE", 0.3, 96],
-	]
-	for test_case in cases:
-		var world_x: float = test_case[1]
-		var px := int(round((world_x + half_extent_x) /
-				(2.0 * half_extent_x) * float(w) - 0.5))
-		var got := int(round(blend_image.get_pixel(px, mid_y).r * 255.0))
-		var expected: int = test_case[2]
-		if got != expected:
-			blend_rows.append("%s expected %d, got %d" % [
-					test_case[0], expected, got])
-	if not blend_rows.is_empty():
-		_sink.error("render_swatch_probe calibrate: FAIL - gamma framebuffer blend mismatch: %s" % "; ".join(blend_rows))
-		_sink.quit(1)
-		return
-
-	_sink.logv(["render_swatch_probe calibrate: PASS - 256/256 terminal bytes; gamma framebuffer blends SRCALPHA/INVSRCALPHA=128 and ONE/ONE=96"])
-	_sink.quit(0)
 
 
 func _compare_mode(path_a: String, path_b: String) -> void:

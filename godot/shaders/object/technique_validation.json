@@ -920,7 +920,7 @@
           }
         ]
       },
-      "channels": "P0 writes the mapped reflection with gray shader fog; P1 adds point-light pow-16 specular with black additive fog. Independent P3 samples raw Tex0, applies its own Diffuse1.a coverage test, and performs the retail DESTCOLOR/SRCCOLOR 2x postmultiply in gamma space.",
+      "channels": "P0 writes the mapped reflection with gray shader fog; P1 adds point-light pow-16 specular with black additive fog. Independent P3 samples Tex0, applies its own Diffuse1.a coverage test, and performs the retail DESTCOLOR/SRCCOLOR 2x postmultiply (over the linear scene copy since the ADR 0043 linear-scene amendment).",
       "light_response": "No diffuse lighting; point lights add pow-16 specular before the independent Diffuse1 postmultiply.",
       "state": "P0 is opaque with optional reflect-alpha cutout; P1 is additive ONE/ONE; P3 is an independent depth-tested/no-write geometry pass with optional diffuse-alpha cutout and regular fog.",
       "shader_tokens": [
@@ -934,7 +934,7 @@
       ],
       "auxiliary_shader_tokens": [
         "texture(u_diffuse, v_raw_uv)",
-        "2.0 * source_gamma * destination_gamma",
+        "2.0 * source_lin * destination_lin",
         "u_alpha_test_invert"
       ],
       "parity_status": "matching",

@@ -205,9 +205,11 @@ func test_dynamic_material_typed_runtime_matches_public_evaluator() -> void:
 				expected.get("uv_transform_u"))
 		assert_eq(material.get_shader_parameter("u_uv_transform_v"),
 				expected.get("uv_transform_v"))
+		var expected_rgb: Vector3 = expected.get("rgb_mod")
 		assert_eq(material.get_shader_parameter("u_rgb_mod"),
-				expected.get("rgb_mod"),
-				"typed hot path preserves the controlled RGB result")
+				Color(expected_rgb.x, expected_rgb.y, expected_rgb.z),
+				"typed hot path preserves the controlled RGB result "
+				+ "(set as a Color for the source_color decode)")
 		assert_eq(material.get_shader_parameter("u_alpha_mod"),
 				expected.get("alpha_mod"))
 

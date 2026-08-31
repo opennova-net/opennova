@@ -526,8 +526,8 @@ func test_lighting_contracts_reach_the_shader_math() -> void:
 
 func test_highest_quality_foliage_rejects_the_inert_d3d_light_premise() -> void:
 	var foliage := _read(SHADER_ROOT.path_join("foliage_detail.gdshaderinc"))
-	assert_true(foliage.contains("ALBEDO = scene_output(fold_rgb * lit * tile.a)"))
-	assert_true(foliage.contains("EMISSION = scene_output(fold_rgb * lit) * opennova_sky_ambient"))
+	assert_true(foliage.contains("ALBEDO = clamp(fold_rgb * lit * tile.a, vec3(0.0), vec3(1.0))"))
+	assert_true(foliage.contains("EMISSION = clamp(fold_rgb * lit, vec3(0.0), vec3(1.0)) * opennova_sky_ambient"))
 	assert_true(foliage.contains("fd.rgb * u_emitter_color * 8.0"))
 	assert_true(foliage.contains("LIGHT_COLOR * (0.5 / PI) * ATTENUATION * ALBEDO"))
 	_contains_none(foliage, ["u_point_light_count", "u_point_light_posr_0",
@@ -561,7 +561,7 @@ func test_retail_tile_set_atlas_is_carried_not_misclassified_as_a_lightmap() -> 
 		assert_true(shader.contains("uniform sampler2DArray u_tile_cache"))
 		assert_true(shader.contains("texture(u_tile_cache"))
 	assert_true(terrain.contains("terrain_surface_albedo"))
-	assert_true(foliage.contains("ALBEDO = scene_output(fold_rgb * lit * tile.a)"))
+	assert_true(foliage.contains("ALBEDO = clamp(fold_rgb * lit * tile.a, vec3(0.0), vec3(1.0))"))
 
 	var contract := _contract(_load_json(PROVENANCE_PATH), "terrain-surface")
 	var citations := _citation_addresses(contract)
@@ -722,33 +722,50 @@ func test_water_reflection_clip_class_matches_every_reachable_retail_effect() ->
 	], "water.cpp")
 
 
-func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() -> void:
+func test_the_scene_is_linear_and_color_decodes_exactly_once() -> void:
+	# ADR 0043 linear-scene amendment: color art decodes via source_color,
+	# the witnessed combines run over linear inputs, and the retired
+	# gamma-domain contract (scene_output/scene_input + the terminal
+	# DisplayDecodeEffect) is gone without residue.
 	var sources := _shader_sources()
 	for name in sources:
 		var source: String = sources[name]
-		assert_false(source.contains(": source_color"), name)
-		assert_false(source.contains("gamma_to_linear"), name)
-		assert_false(source.contains("linear_to_gamma"), name)
+		assert_false(source.contains("scene_output"), name)
+		assert_false(source.contains("scene_input"), name)
+		assert_false(source.contains("display_decode_gamma"), name)
+		assert_false(source.contains("display_encode_gamma"), name)
 
+	# The color-art samplers carry the hint; data textures stay raw.
+	for name in ["terrain_lighting.gdshaderinc", "foliage_detail.gdshaderinc",
+			"sky.gdshader", "celestial.gdshader", "celestial_additive.gdshader",
+			"scar_quad.gdshader", "scar_quad_hole.gdshader",
+			"precipitation.gdshader", "water.gdshader"]:
+		assert_true(String(sources.get(name, "")).contains(": source_color") or
+				String(sources.get(name, "")).contains(" source_color,"),
+				"%s decodes its color inputs" % name)
+	for name in ["foliage_shadow.gdshader", "foliage_silhouette.gdshader",
+			"particle/particle_distort.gdshader"]:
+		assert_false(String(sources.get(name, "")).contains("source_color"),
+				"%s samples data/screen textures raw" % name)
+
+	# The two byte-domain helpers survive for the passes that still evaluate
+	# witnessed math on gamma bytes (nvg canvas post, water vertex streams).
 	var nvg: String = sources.get("nvg_view.gdshader", "")
-	assert_true(nvg.contains("display_encode_gamma"))
-	assert_true(nvg.contains("display_decode_gamma"))
-
+	assert_true(nvg.contains("srgb_encode"))
+	assert_true(nvg.contains("srgb_decode"))
 	var color_contract: String = sources.get("color.gdshaderinc", "")
-	_contains_all(color_contract, ["scene_output", "scene_input",
+	_contains_all(color_contract, ["srgb_decode", "srgb_encode"],
+			"color.gdshaderinc")
+	_contains_none(color_contract, ["scene_output", "scene_input",
 			"display_decode_gamma", "display_encode_gamma"], "color.gdshaderinc")
-	assert_false(color_contract.contains("gamma_to_linear"))
-	assert_false(color_contract.contains("linear_to_gamma"))
+	assert_true(String(sources.get("water.gdshader", "")).contains(
+			"srgb_decode(COLOR.rgb)"))
 
-	# The terminal decode is the ONE device-side gamma->linear bridge (ADR
-	# 0043: the FrameFX/Q3 bloom bracket is retired; Environment glow is the
-	# canonical bloom, so the compositor keeps only the display transfer).
-	var frame_renderer := _read_repo("godot/src/render/display_decode.cpp")
-	_contains_all(frame_renderer, [
-		"DecodePass::GammaDecode", "EFFECT_CALLBACK_TYPE_POST_TRANSPARENT",
-		"framebuffer_blend_domain\"] = \"gamma\"",
-		"result[\"terminal_transfer\"] = \"srgb_inverse_then_display_encode\"",
-	], "display_decode.cpp")
+	# The terminal compositor is gone: no DisplayDecode survives anywhere.
+	assert_false(FileAccess.file_exists(
+			_repo_path("godot/src/render/display_decode.cpp")))
+	var world_scene := _read("res://game/world/game_world.tscn")
+	assert_false(world_scene.contains("DisplayDecode"))
 
 	# The first-person viewmodel draws inside the beauty pass through the
 	# shader-side renderfov projection + depth band; no composite shader.
@@ -757,13 +774,6 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 	_contains_all(viewmodel_pass, ["global uniform vec4 opennova_viewmodel_projection",
 			"instance uniform bool u_viewmodel_pass", "NOVA_VIEWMODEL_DEPTH_WINDOW = 0.1"],
 			"viewmodel_pass.gdshaderinc")
-
-	var probe := _read("res://probes/render/render_swatch_probe.gd") \
-			+ _read("res://probes/render/render_swatch_support.gd") \
-			+ _read("res://probes/render/render_swatch_lighting_modes.gd") \
-			+ _read("res://probes/render/render_swatch_pass_modes.gd")
-	assert_true(probe.contains("[\"SRCALPHA/INVSRCALPHA\", -0.3, 128]"))
-	assert_true(probe.contains("[\"ONE/ONE\", 0.3, 96]"))
 
 
 func test_environment_techniques_do_not_invent_fresnel_or_diffuse_terms() -> void:

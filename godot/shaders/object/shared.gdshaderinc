@@ -12,7 +12,6 @@
 // pipeline. Additive wrappers and postmultiply remain unshaded emissive
 // islands with the retail fade-to-black fog.
 
-#include "res://shaders/color.gdshaderinc"
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 
 uniform vec3 u_uv_transform_u = vec3(1.0, 0.0, 0.0);
@@ -61,7 +60,7 @@ instance uniform vec4 u_entity_light = vec4(1.0, 0.0, 1.0, 0.0);
 // RenderBatchCtx_StoreLightingConstants @ 0x5d89e0 — ctx+208 / ctx+224].
 global uniform vec3 opennova_outdoor_ambient;
 global uniform vec3 opennova_indoor_ambient;
-uniform vec4 u_reflect_color = vec4(0.7, 0.8, 0.9, 0.35);
+uniform vec4 u_reflect_color : source_color = vec4(0.7, 0.8, 0.9, 0.35);
 
 // MATCHTERRAIN is a skinned crouch/prone pre-pass in retail. The reimpl folds
 // that pass into the object's NORMAL draw: only pixels rejected by NORMAL's
@@ -72,7 +71,7 @@ uniform vec4 u_reflect_color = vec4(0.7, 0.8, 0.9, 0.35);
 // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50, entity+300 & 0x300;
 // _tSkFolg.fx Simple_MatchTerrain_PS; _vsSkFolg.fx vscSkMatchTerrain;
 // terrain_tile_cache_lookup @ 0x604140].
-uniform sampler2DArray u_match_terrain_cache : filter_linear, repeat_disable;
+uniform sampler2DArray u_match_terrain_cache : source_color, filter_linear, repeat_disable;
 uniform bool u_has_match_terrain_cache = false;
 instance uniform bool u_match_terrain_enabled = false;
 instance uniform bool u_match_terrain_page_ready = false;

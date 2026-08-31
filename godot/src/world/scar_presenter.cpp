@@ -55,6 +55,15 @@ bool append_surface(const Ref<ArrayMesh> &p_mesh, const PackedVector3Array &p_ve
 	PackedVector3Array vertices = p_vertices.slice(p_row.first, p_row.first + p_row.count);
 	PackedVector2Array uvs = p_uvs.slice(p_row.first, p_row.first + p_row.count);
 	PackedColorArray colors = p_colors.slice(p_row.first, p_row.first + p_row.count);
+	// The draw list carries the witnessed diffuse bytes
+	// (Env_TerrainLightCombined | FF); the scar shaders read vertex COLOR raw,
+	// so convert to the linear scene domain once at mesh build (ADR 0043
+	// linear-scene amendment; alpha is a weight and stays raw).
+	for (int64_t i = 0; i < colors.size(); ++i) {
+		const Color c = colors[i];
+		const Color lin = c.srgb_to_linear();
+		colors.set(i, Color(lin.r, lin.g, lin.b, c.a));
+	}
 	Array arrays;
 	arrays.resize(Mesh::ARRAY_MAX);
 	arrays[Mesh::ARRAY_VERTEX] = vertices;

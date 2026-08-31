@@ -7,12 +7,10 @@ shader_type spatial;
 // [orig: render_skybox_sun_glow @ 0x5acd00]. docs/env/env-tod-re.md.
 render_mode unshaded, depth_draw_never, cull_disabled, blend_add, fog_disabled;
 
-// Gamma-domain scene-target contract.
-#include "res://shaders/color.gdshaderinc"
-
-// Raw sampling per the gamma-space convention (color.gdshaderinc).
-uniform sampler2D u_diffuse : filter_linear_mipmap;
-uniform vec3 u_tint = vec3(1.0, 1.0, 1.0);
+// The 3DI art decodes via source_color; u_tint arrives linear (the driver
+// converts the witnessed TOD bytes once at the Godot seam).
+uniform sampler2D u_diffuse : source_color, filter_linear_mipmap;
+uniform vec3 u_tint : source_color = vec3(1.0, 1.0, 1.0);
 uniform float u_opacity = 1.0;
 uniform vec3 u_anchor_camera_world = vec3(0.0);
 uniform bool u_billboard = false;
@@ -73,10 +71,11 @@ void vertex() {
 void fragment() {
 	vec4 tex = texture(u_diffuse, UV);
 	float opacity = u_opacity * (u_glare_view_fade ? v_glare_view_fade : 1.0);
-	// Gamma-space modulate; additive accumulation precedes the terminal
-	// display transfer and therefore remains in the retail gamma domain.
-	// COLOR = per-instance brightness for the star field's twinkle (env #33;
-	// plain meshes default to white).
-	ALBEDO = scene_output(tex.rgb * u_tint * COLOR.rgb * tex.a * opacity);
+	// The witnessed modulate over linear inputs (additive accumulation is now
+	// linear — accepted, ADR 0043 linear-scene amendment). COLOR = per-instance
+	// brightness for the star field's twinkle (env #33; plain meshes default
+	// to white; the driver converts star bytes to linear at build).
+	ALBEDO = clamp(tex.rgb * u_tint * COLOR.rgb * tex.a * opacity,
+			vec3(0.0), vec3(1.0));
 	ALPHA = 1.0;
 }

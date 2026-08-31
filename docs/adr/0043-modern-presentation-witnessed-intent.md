@@ -62,11 +62,11 @@ hardest-to-host pipelines defend content that does not exist).
    frame compiler, skyline atlas, and RenderingDevice compositor (replaced by
    MultiMesh presentation of the retained CPU `.ptl` simulation); and the FrameFX
    bloom bracket — the focused Q3 re-render, its typed compiler/registry/cache,
-   and the capture/blur/composite kernel (replaced by `Environment` glow; the
-   terminal compositor keeps only the display decode). Settings toggles
-   are reserved for one-property taste knobs (shadow distance, foliage casters,
-   glow, volumetric fog, soft-particle fade); a toggle never selects between two
-   implementations.
+   and the capture/blur/composite kernel (replaced by `Environment` glow; since
+   the linear-scene amendment below, no terminal compositor remains). Settings
+   toggles are reserved for one-property taste knobs (shadow distance, foliage
+   casters, glow, volumetric fog, soft-particle fade); a toggle never selects
+   between two implementations.
 
 3. **What does not change.** Everything a headless ctest reproduces without a
    renderer keeps full parity: simulation, networking (wire bytes), formats
@@ -98,6 +98,33 @@ hardest-to-host pipelines defend content that does not exist).
    never ahead of it. The RE records stay untouched as knowledge; each affected
    record gains a header note that the witnessed presentation technique is retired
    in OpenNova by this ADR.
+
+## Amendment (2026-08-31): the linear scene
+
+The gamma-domain scene contract — spatial shaders writing retail gamma-byte
+values into the float scene target, framebuffer blending in gamma space, and one
+terminal `DisplayDecodeEffect` compositor per 3D view performing the sole display
+decode — was the last retail *device semantic* constraining the Godot scene. It
+is retired under decision 1 (Godot is the sole authority for **how** it renders):
+
+- The scene holds linear light. Color textures decode through `source_color`;
+  every witnessed palette byte (Light3D colors, ambient, material color
+  uniforms, vertex color streams) is set raw or converted exactly once at the
+  Godot seam — the engine keeps the witnessed bytes; nothing pre-encodes against
+  a downstream decode. Framebuffer blending, tonemap (LINEAR) and the output
+  transfer are stock Godot.
+- The terminal compositor, its water-mirror decode copy, the Light3D/ambient
+  pre-encodes, and the calibrate-mode byte proofs are deleted (register row
+  MP-7). `color.gdshaderinc` keeps only the two byte-domain helpers for passes
+  that still evaluate witnessed math on gamma bytes (the NVG canvas post, the
+  water strip's byte-encoded vertex colors).
+- Witnessed shader arithmetic (the terrain splat chain, MODULATE2X folds, the
+  water ps.1.1 chain, the sky TSS cloud combine) keeps its text and constants,
+  now over linear inputs. The appearance shift on blends and combine chains is
+  the accepted divergence of this amendment, judged by the acceptance-scene
+  eyeball pass; the sanctioned taste knobs are the glow threshold and, if
+  re-judged, the MODULATE2X energy constant — never a re-encode.
+- D-RMAT-7/-8 (the gamma pipeline rows) close as superseded by this amendment.
 
 ## Consequences
 

@@ -17,8 +17,6 @@ global uniform vec3 opennova_sky_ambient;
 // Shared terrain surface composition (uniforms u_colormap/u_detail*/
 // u_blendmap/u_detailmap*: terrain_surface_albedo()).
 #include "res://shaders/terrain_lighting.gdshaderinc"
-// Gamma-domain scene-target contract.
-#include "res://shaders/color.gdshaderinc"
 
 // Debug: 0=off, 1=LOD colors, 2=sector colors, 3=normals, 4=heightmap
 uniform int u_debug_mode = 0;
@@ -26,8 +24,10 @@ uniform int u_debug_mode = 0;
 // Runtime tile-composition cache: one shared 128-layer, single-level array.
 // Page identity/LRU/pixels come from engine/runtime/terrain; this shader only
 // selects the layer bound to the current terrain instance. The analytic path
-// below remains the fail-closed editor/cold-cache fallback.
-uniform sampler2DArray u_tile_cache : filter_linear, repeat_disable;
+// below remains the fail-closed editor/cold-cache fallback. source_color:
+// the CPU-composed pages hold retail gamma art — the sRGB view decodes RGB
+// only, so the DOT3 alpha mask stays linear.
+uniform sampler2DArray u_tile_cache : source_color, filter_linear, repeat_disable;
 uniform bool u_has_tile_cache = false;
 
 // Per-instance debug data (set via instance_geometry_set_shader_parameter)
@@ -106,15 +106,15 @@ void fragment() {
 	vec3 albedo = terrain_surface_albedo(
 		colormap_rgb, v_colormap_uv, v_detail_uv, u_instance_source_quadrant);
 
-	// The witnessed texture math above ran in gamma space; the scene target is
-	// gamma-domain end to end (color.gdshaderinc), so the lit products stay
-	// retail's gamma-space multiplies (D-RMAT-7).
-	ALBEDO = scene_output(albedo);
+	// The witnessed splat combine keeps its text and constants over linear
+	// inputs (source_color decodes the art; the scene is linear, ADR 0043
+	// linear-scene amendment); the clamp is retail's ps.1.x saturate-on-write.
+	ALBEDO = clamp(albedo, vec3(0.0), vec3(1.0));
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.0;
 	// The witnessed flat sky term (ambient_light_disabled above): retail adds
 	// sky_ambient unconditionally — never shadow-masked, never N-dependent.
-	EMISSION = scene_output(albedo) * opennova_sky_ambient;
+	EMISSION = clamp(albedo, vec3(0.0), vec3(1.0)) * opennova_sky_ambient;
 
 	// Debug overlays — replace output with the diagnostic color (self-lit so
 	// the sun/TOD cannot tint diagnostics).
@@ -131,7 +131,7 @@ void fragment() {
 			tint = vec3(clamp(v_world_pos.y / 16.0, 0.0, 1.0));
 		}
 		ALBEDO = vec3(0.0);
-		EMISSION = scene_output(tint);
+		EMISSION = clamp(tint, vec3(0.0), vec3(1.0));
 	}
 }
 

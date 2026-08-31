@@ -59,12 +59,12 @@
       "exceptions": []
     },
     {
-      "id": "gamma-transfer",
+      "id": "srgb-transfer",
       "patterns": [
         "color.gdshaderinc"
       ],
-      "light_behavior": "gamma_framebuffer_transfer",
-      "parity_status": "matching",
+      "light_behavior": "byte_domain_transfer_helpers",
+      "parity_status": "modern_presentation",
       "docs": [
         "docs/render/render-material-re.md",
         "docs/render/render-order-re.md"
@@ -79,14 +79,11 @@
           "address": "0x677be0",
           "function": "GLib_SetGammaRamp",
           "function_start": "0x677be0"
-        },
-        {
-          "address": "0x582940",
-          "function": "FrameFX_RenderBloomPass",
-          "function_start": "0x582940"
         }
       ],
-      "exceptions": []
+      "exceptions": [
+        "ADR-0043"
+      ]
     },
     {
       "id": "terrain-surface",

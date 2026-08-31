@@ -7,12 +7,10 @@ shader_type spatial;
 // sun/moon color. See docs/env/env-tod-re.md.
 render_mode unshaded, depth_draw_never, cull_disabled, blend_mix, fog_disabled;
 
-// Gamma-domain scene-target contract.
-#include "res://shaders/color.gdshaderinc"
-
-// Raw sampling per the gamma-space convention (color.gdshaderinc).
-uniform sampler2D u_diffuse : filter_linear_mipmap;
-uniform vec3 u_tint = vec3(1.0, 1.0, 1.0);
+// The 3DI disc art decodes via source_color; u_tint arrives linear (the
+// driver converts the witnessed TOD bytes once at the Godot seam).
+uniform sampler2D u_diffuse : source_color, filter_linear_mipmap;
+uniform vec3 u_tint : source_color = vec3(1.0, 1.0, 1.0);
 uniform float u_opacity = 1.0;
 // CPU placement is anchored to the main camera. Each viewport supplies its
 // own eye through INV_VIEW_MATRIX; the delta reproduces retail re-submission
@@ -38,8 +36,8 @@ void vertex() {
 void fragment() {
 	// Sky bodies draw in the beauty transparent list at the sky rung.
 	vec4 tex = texture(u_diffuse, UV);
-	// Gamma-space modulate; the terminal compositor runs only after this
-	// alpha blend has completed in the retail gamma domain.
-	ALBEDO = scene_output(tex.rgb * u_tint);
+	// The witnessed modulate over linear inputs; the clamp is retail's
+	// saturate-on-write.
+	ALBEDO = clamp(tex.rgb * u_tint, vec3(0.0), vec3(1.0));
 	ALPHA = tex.a * u_opacity;
 }

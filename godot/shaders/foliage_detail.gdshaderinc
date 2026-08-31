@@ -1,19 +1,20 @@
-#include "res://shaders/color.gdshaderinc"
 #include "res://shaders/foliage_fd_sampling.gdshaderinc"
 
 // Expanded detail foliage. Retail emits the source model once per accepted
 // candidate and bends every transformed vertex onto the terrain before this
 // shader runs [orig: generate_foliage_instances_0 @ 0x5ffdd0].
+// u_fd_texture stays RAW: its rgb rides the witnessed x8 fold whose
+// mid-gray emitter constant (c6) is byte-neutral by construction.
 uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_fd_texture = false;
-uniform sampler2D u_colormap : filter_linear, repeat_disable;
+uniform sampler2D u_colormap : source_color, filter_linear, repeat_disable;
 uniform bool u_has_colormap = false;
 uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
 uniform bool u_has_heightfield_normal = false;
-uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
+uniform sampler2D u_tile_overlay : source_color, filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
-uniform vec3 u_tile_overlay_tint = vec3(1.0);
-uniform sampler2DArray u_tile_cache : filter_linear, repeat_disable;
+uniform vec3 u_tile_overlay_tint : source_color = vec3(1.0);
+uniform sampler2DArray u_tile_cache : source_color, filter_linear, repeat_disable;
 uniform bool u_has_tile_cache = false;
 uniform vec3 u_emitter_color = vec3(0.5019608);
 instance uniform float u_wind_phase = 0.0;
@@ -157,8 +158,8 @@ void fragment() {
 	// [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0].
 	vec3 fold_rgb = fd.rgb * u_emitter_color * 8.0;
 	vec3 lit = tile.rgb;
-	ALBEDO = scene_output(fold_rgb * lit * tile.a);
-	EMISSION = scene_output(fold_rgb * lit) * opennova_sky_ambient;
+	ALBEDO = clamp(fold_rgb * lit * tile.a, vec3(0.0), vec3(1.0));
+	EMISSION = clamp(fold_rgb * lit, vec3(0.0), vec3(1.0)) * opennova_sky_ambient;
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.0;
 	// Environment depth fog (ADR 0043, MissionEnvironment::apply_scene_fog

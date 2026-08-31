@@ -42,7 +42,6 @@
 #include "lights/light_scene.h"
 #include "particle/effect_scene.h"
 #include "particle/particle_renderer.h"
-#include "render/display_decode.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
 #include "object/object_data.h"
@@ -200,8 +199,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EffectScene);
 	GDREGISTER_CLASS(LightScene);
 	GDREGISTER_CLASS(ParticleRenderer);
-	GDREGISTER_CLASS(DisplayDecodeEffect);
-	GDREGISTER_CLASS(DisplayDecode);
 	GDREGISTER_CLASS(ScarPresenter);
 	GDREGISTER_CLASS(ResourceRoot);
 	GDREGISTER_CLASS(LaunchFlags);

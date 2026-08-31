@@ -448,6 +448,11 @@ public:
 		material->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
 		material->set_cull_mode(BaseMaterial3D::CULL_DISABLED);
 		material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+		// The instance buffer keeps the witnessed byte-domain spawn-color x
+		// tint fold; the GPU decodes it to the linear scene (ADR 0043
+		// linear-scene amendment; the albedo strip's source_color decode is
+		// the canonical pairing).
+		material->set_flag(BaseMaterial3D::FLAG_SRGB_VERTEX_COLOR, true);
 		material->set_flag(BaseMaterial3D::FLAG_DONT_RECEIVE_SHADOWS, true);
 		material->set_specular(0.0f);
 		material->set_roughness(1.0f);

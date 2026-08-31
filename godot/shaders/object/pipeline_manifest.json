@@ -8,28 +8,28 @@
     {
       "path": "postmultiply/environment_textured.gdshader",
       "pass_class": "TECHNIQUE_NORMAL_P3",
-      "contract": "diffuse1_gamma_postmultiply",
+      "contract": "diffuse1_x2_postmultiply",
       "coverage": "full",
       "cull": "back"
     },
     {
       "path": "postmultiply/environment_textured_double_sided.gdshader",
       "pass_class": "TECHNIQUE_NORMAL_P3",
-      "contract": "diffuse1_gamma_postmultiply",
+      "contract": "diffuse1_x2_postmultiply",
       "coverage": "full",
       "cull": "disabled"
     },
     {
       "path": "postmultiply/environment_textured_cutout.gdshader",
       "pass_class": "TECHNIQUE_NORMAL_P3",
-      "contract": "diffuse1_gamma_postmultiply",
+      "contract": "diffuse1_x2_postmultiply",
       "coverage": "diffuse_alpha",
       "cull": "back"
     },
     {
       "path": "postmultiply/environment_textured_cutout_double_sided.gdshader",
       "pass_class": "TECHNIQUE_NORMAL_P3",
-      "contract": "diffuse1_gamma_postmultiply",
+      "contract": "diffuse1_x2_postmultiply",
       "coverage": "diffuse_alpha",
       "cull": "disabled"
     }

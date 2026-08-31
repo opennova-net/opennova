@@ -27,7 +27,6 @@ const MODEL_ALPHA_REF := 128.0 / 255.0
 # expected wind or time-of-day motion.
 const PINNED_GLOBALS := {
 	&"opennova_sky_ambient": Vector3(0.35, 0.35, 0.35),
-	&"opennova_sun_light": Vector3(0.65, 0.60, 0.55),
 	&"opennova_sun_direction": Vector3(0.0, 0.0, 1.0),
 	&"opennova_fog_color": Vector3(0.07, 0.09, 0.13),
 	&"opennova_fog_start": 1000.0,

@@ -16,10 +16,10 @@
 // sun/ambient carry (SunShadow / MissionEnvironment).
 
 // --- Shared uniforms: terrain surface inputs ---------------------------------
-// Textures sample RAW (no source_color): retail never enables sRGB sampling -
-// texel bytes enter the math as-is. The gamma-space convention (D-RMAT-7)
-// lives in color.gdshaderinc; consumers encode the final color once at their
-// ALBEDO write.
+// Color art decodes via source_color (the scene is linear — ADR 0043
+// linear-scene amendment); the witnessed splat arithmetic keeps its text and
+// constants over the decoded inputs. Data textures (blend weights, the dp3
+// modulator, water noise) stay raw — they are weights, not color.
 // The device-global texfilter mode applies to EVERY active stage
 // [orig: CGfxDevice_ApplyRenderStates per-stage loop @ 0x67e3b5..0x67e50e],
 // and the reference machine runs the anisotropic mode, so every mipped
@@ -27,10 +27,10 @@
 // surrogate for the per-LOD tile-cache RT (D-TERRAIN-7); the DBlendmap
 // quadrants are box-mipped in retail (created with flags 0x100001
 // [orig: PolyTrn_InitTextures @ 0x60b2c9]).
-uniform sampler2D u_colormap : filter_linear_mipmap_anisotropic, repeat_disable;
-uniform sampler2D u_detail_c1 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D u_detail_c2 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D u_detail_c3 : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_colormap : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D u_detail_c1 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_detail_c2 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_detail_c3 : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_blendmap : filter_linear_mipmap_anisotropic, repeat_disable;
 // The ps.1.4 splat's stage-3 dp3 input: the authored SECOND detail pair at
 // its own density, dp3'd with the normalized blend — a blend-weighted
@@ -59,9 +59,9 @@ uniform sampler2D u_water_noise : filter_linear, repeat_enable;
 uniform bool u_below_water = false;
 // PolyTrn_RenderTile composes the mission .til base layer into the terrain
 // tile before the shared surface chain used by runtime and ONED.
-uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
+uniform sampler2D u_tile_overlay : source_color, filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
-uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
+uniform vec3 u_tile_overlay_tint : source_color = vec3(1.0, 1.0, 1.0);
 // Declared for the ONED authored-slot binding only; the top-tier chain does
 // not consume it (the generated coefficient map belongs to the unported
 // ps.1.1 tiers at stage 7).

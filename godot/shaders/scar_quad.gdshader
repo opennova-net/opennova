@@ -22,11 +22,11 @@ shader_type spatial;
 // blend and painted an opaque black blob.
 render_mode unshaded, blend_mix, depth_draw_never, cull_back;
 
-// Gamma-space pipeline (D-RMAT-7): raw texel sampling, gamma-space combine,
-// the exact inverse of the blit's transfer curve on the way out.
-#include "res://shaders/color.gdshaderinc"
-
-uniform sampler2D albedo_tex : repeat_disable, filter_linear_mipmap;
+// The scorch TGA decodes via source_color; COLOR arrives linear (the
+// presenter converts the witnessed diffuse bytes at mesh build). The
+// witnessed MODULATE2X combine runs over linear inputs (ADR 0043
+// linear-scene amendment).
+uniform sampler2D albedo_tex : source_color, repeat_disable, filter_linear_mipmap;
 
 // The presenter's ONE device fold: retail writes no depth bias — the scar quad
 // is coplanar with the struck face and the D3D rasteriser's own bias keeps it
@@ -45,7 +45,7 @@ void fragment() {
 	vec4 tex = texture(albedo_tex, UV);
 	// MODULATE2X(TEXTURE, DIFFUSE), saturating [orig: decode_mode_color_stage
 	// @0x681080 family 0x600 under GfxDevice_Modulate2XEnabled].
-	ALBEDO = scene_output(min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0)));
+	ALBEDO = min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0));
 	// MODULATE(TEXTURE, DIFFUSE) alpha [orig: decode_mode_alpha_stage @0x680B00
 	// nibble 0x50]; DIFFUSE alpha is the vertex's FF.
 	ALPHA = tex.a * COLOR.a;

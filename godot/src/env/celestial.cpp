@@ -29,6 +29,12 @@ Vector3 to_vector3(const opennova::env::Rgb &rgb) {
 	return Vector3(rgb.r, rgb.g, rgb.b);
 }
 
+// source_color uniforms take Colors: the witnessed TOD bytes decode
+// canonically to the linear scene (ADR 0043 linear-scene amendment).
+Color to_color(const opennova::env::Rgb &rgb) {
+	return Color(rgb.r, rgb.g, rgb.b);
+}
+
 opennova::env::Vec3 to_vec3(const Vector3 &v) {
 	return opennova::env::Vec3{static_cast<float>(v.x),
 			static_cast<float>(v.y), static_cast<float>(v.z)};
@@ -403,7 +409,7 @@ void Celestial::advance_frame(double p_delta) {
 		Ref<ShaderMaterial> star_material = star_mmi_->get_material_override();
 		if (star_material.is_valid()) {
 			star_material->set_shader_parameter("u_tint",
-					to_vector3(state.sky_ambient()));
+					to_color(state.sky_ambient()));
 			star_material->set_shader_parameter("u_anchor_camera_world",
 					cam_pos);
 			// Keep every instance local to a camera-anchored MMI. Absolute
@@ -474,8 +480,8 @@ void Celestial::advance_frame(double p_delta) {
 		body.model->set_global_position(render_float_to_godot(frame.position));
 		_set_body_parameter(body, "u_anchor_camera_world", cam_pos);
 		_set_body_parameter(body, "u_tint",
-				body.tint == "moon" ? to_vector3(state.moon_color())
-									: to_vector3(state.sun_color()));
+				body.tint == "moon" ? to_color(state.moon_color())
+									: to_color(state.sun_color()));
 		_set_body_parameter(body, "u_opacity", frame.opacity);
 		body.last_opacity = frame.opacity;
 	}
@@ -636,8 +642,11 @@ void Celestial::_update_star_field(const Vector3 &p_light_dir) {
 		mm->set_instance_transform(i,
 				Transform3D(Basis().scaled(Vector3(scale, scale, scale)),
 						offset));
+		// The twinkle byte converts to linear on the CPU: the additive hand
+		// shader reads instance COLOR raw and has no vertex_color_is_srgb
+		// (ADR 0043 linear-scene amendment).
 		mm->set_instance_color(i,
-				Color(brightness, brightness, brightness));
+				Color(brightness, brightness, brightness).srgb_to_linear());
 	}
 }
 
@@ -776,7 +785,7 @@ float Celestial::_advance_water_glint(
 	const Vector3 mirrored(p_sun_dir.x, -p_sun_dir.y, p_sun_dir.z);
 	p_body.model->set_global_position(p_cam_pos + mirrored * 128.0f);
 	_set_body_parameter(p_body, "u_anchor_camera_world", p_cam_pos);
-	_set_body_parameter(p_body, "u_tint", to_vector3(p_state.sun_color()));
+	_set_body_parameter(p_body, "u_tint", to_color(p_state.sun_color()));
 	// Alpha: the view dot of the MIRRORED sun direction [orig: @ 0x5ad384
 	// negates the height term before the view transform, see docs/env/env-tod-re.md] through the
 	// witnessed (dot^4 - 28672/65536) x brightness chain.

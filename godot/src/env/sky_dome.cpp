@@ -25,6 +25,12 @@ Vector3 to_vector3(const opennova::env::Vec3 &v) {
 	return Vector3(v.x, v.y, v.z);
 }
 
+// source_color uniforms take Colors: the witnessed palette bytes decode
+// canonically to the linear scene (ADR 0043 linear-scene amendment).
+Color to_color(const opennova::env::Rgb &rgb) {
+	return Color(rgb.r, rgb.g, rgb.b);
+}
+
 } // namespace
 
 void SkyDome::_bind_methods() {
@@ -192,21 +198,21 @@ void SkyDome::advance_frame(double p_delta) {
 		if (frame.flat_pass) {
 			sky_material_->set_shader_parameter("u_flat_pass", true);
 			sky_material_->set_shader_parameter("u_flat_color",
-					to_vector3(frame.flat_color));
+					to_color(frame.flat_color));
 		} else {
 			sky_material_->set_shader_parameter("u_flat_pass", false);
 			sky_material_->set_shader_parameter("u_sky_base",
-					to_vector3(frame.sky_base));
+					to_color(frame.sky_base));
 			sky_material_->set_shader_parameter("u_sky_bright",
-					to_vector3(frame.sky_bright));
+					to_color(frame.sky_bright));
 			sky_material_->set_shader_parameter("u_sky_highlight",
-					to_vector3(frame.sky_highlight));
+					to_color(frame.sky_highlight));
 			sky_material_->set_shader_parameter("u_cloud_base",
-					to_vector3(frame.cloud_base));
+					to_color(frame.cloud_base));
 			sky_material_->set_shader_parameter("u_cloud_highlight",
-					to_vector3(frame.cloud_highlight));
+					to_color(frame.cloud_highlight));
 			sky_material_->set_shader_parameter("u_cloud_edge",
-					to_vector3(frame.cloud_edge));
+					to_color(frame.cloud_edge));
 		}
 		// The dome mesh is the engine layout drawn identity into the Godot
 		// world, so its shader dots GODOT-world sun/light vectors: route the
@@ -218,7 +224,7 @@ void SkyDome::advance_frame(double p_delta) {
 		sky_material_->set_shader_parameter("u_light_dir",
 				render_float_to_godot(frame.light_dir));
 		sky_material_->set_shader_parameter("u_fog_color",
-				to_vector3(frame.skyfog_color));
+				to_color(frame.skyfog_color));
 		// The sky wrapper keeps its dedicated skyfog color and its own fog end
 		// on both sides of the water plane: the engine frame's fog_end is the
 		// raw smoothed distance the dome VS constant c9.x carries unconditionally

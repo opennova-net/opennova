@@ -204,82 +204,24 @@ func test_reflection_rtt_carries_the_witnessed_post_scene_dim() -> void:
 			"out = dst x 64/255 — SRCBLEND=DESTCOLOR/DESTBLEND=ZERO's multiply")
 
 
-func test_process_exit_releases_the_reflection_decode_before_its_viewport() -> void:
+func test_process_exit_releases_the_reflection_viewport() -> void:
+	# The stock mirror viewport (no compositor — the linear scene needs no
+	# terminal decode, ADR 0043 linear-scene amendment) still releases cleanly
+	# and idempotently at process exit.
 	var fixture := _make_water_fixture()
 	var water := fixture["water"] as Water
 	water.advance_frame(TICK)
 
 	var mirror_camera := water.get_reflection_camera()
 	assert_not_null(mirror_camera)
-	var compositor := mirror_camera.compositor
-	assert_not_null(compositor)
-	var effects := compositor.get_compositor_effects()
-	assert_eq(effects.size(), 1)
-	var decode := effects[0] as DisplayDecodeEffect
-	assert_not_null(decode)
-	if decode == null:
-		return
-	assert_false(bool(decode.get_backend_report().get("shutdown", false)))
+	assert_null(mirror_camera.compositor,
+			"the mirror camera carries no compositor — stock viewport output")
 
 	water.release_runtime_renderer_resources()
-	assert_true(bool(decode.get_backend_report().get("shutdown", false)),
-			"Water drains the reflection decode while RenderingDevice is live")
-	assert_eq(compositor.get_compositor_effects().size(), 0,
-			"the retained mirror compositor no longer owns the decode effect")
 	assert_null(water.get_reflection_viewport())
 	assert_null(water.get_reflection_camera())
 
 	# MainGame's explicit release and SceneTree fallback may converge here.
-	water.release_runtime_renderer_resources()
-	assert_true(bool(decode.get_backend_report().get("shutdown", false)))
-
-
-func test_leaving_the_tree_releases_the_reflection_decode_and_reentry_rearms_it() -> void:
-	# A Water freed or detached outside release_runtime_renderer_resources()
-	# (GUT fixtures, embedder previews) must not leak its RenderingDevice
-	# chain: EXIT_TREE runs the same idempotent release leg DisplayDecode has, and
-	# ENTER_TREE re-arms a fresh decode on the retained mirror camera.
-	var fixture := _make_water_fixture()
-	var water := fixture["water"] as Water
-	var strip_vp: SubViewport = fixture["viewport"]
-	water.advance_frame(TICK)
-	var mirror_camera := water.get_reflection_camera()
-	assert_not_null(mirror_camera)
-	var first_compositor := mirror_camera.compositor
-	assert_not_null(first_compositor)
-	var first_decode := first_compositor.get_compositor_effects()[0] 			as DisplayDecodeEffect
-	assert_not_null(first_decode)
-	if first_decode == null:
-		return
-
-	strip_vp.remove_child(water)
-	assert_true(bool(first_decode.get_backend_report().get("shutdown", false)),
-			"leaving the tree drains and releases the mirror decode")
-	assert_false(first_decode.enabled)
-	assert_null(mirror_camera.compositor,
-			"the mirror camera no longer carries the released compositor")
-	assert_eq(first_compositor.get_compositor_effects().size(), 0)
-
-	strip_vp.add_child(water)
-	var second_compositor := mirror_camera.compositor
-	assert_not_null(second_compositor, "re-entry re-arms the mirror decode")
-	if second_compositor == null:
-		return
-	var second_decode := second_compositor.get_compositor_effects()[0] 			as DisplayDecodeEffect
-	assert_not_null(second_decode)
-	if second_decode == null:
-		return
-	assert_ne(second_decode.get_instance_id(), first_decode.get_instance_id(),
-			"the released effect stays shut down; re-entry uses a fresh one")
-	assert_false(bool(second_decode.get_backend_report().get("shutdown", true)))
-	water.advance_frame(TICK)
-	assert_eq(water.get_reflection_viewport().render_target_update_mode,
-			SubViewport.UPDATE_ALWAYS, "the strip and mirror resume after re-entry")
-
-	# The explicit process-exit release converges with the EXIT_TREE leg.
-	water.release_runtime_renderer_resources()
-	assert_true(bool(second_decode.get_backend_report().get("shutdown", false)))
-	assert_null(water.get_reflection_camera())
 	water.release_runtime_renderer_resources()
 
 
@@ -503,9 +445,11 @@ func test_underwater_swaps_to_opaque_side() -> void:
 	water.advance_frame(TICK)
 	assert_eq(water.get_water_material().get_shader_parameter("u_underwater_view"), true,
 			"camera below -> the OPAQUE material side")
-	assert_true(Vector3(water.get_water_material().get_shader_parameter("u_fog_color"))
-			.is_equal_approx(env.get_scene_fog_color()),
-			"the underwater surface strip fogs toward the selected lit-water color")
+	var fog_rgb: Vector3 = env.get_scene_fog_color()
+	var fog_param: Color = water.get_water_material().get_shader_parameter("u_fog_color")
+	assert_true(fog_param.is_equal_approx(Color(fog_rgb.x, fog_rgb.y, fog_rgb.z)),
+			"the underwater surface strip fogs toward the selected lit-water color"
+			+ " (set as a Color for the source_color decode)")
 
 
 func test_water_material_has_no_far_discard_uniforms() -> void:

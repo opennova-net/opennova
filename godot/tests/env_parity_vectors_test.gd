@@ -503,7 +503,11 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 			# Node-level lit water color for the cell (delegates the EnvFile
 			# statics; pinned at the Water output).
 			water.advance_frame(TICK)
-			var lit: Vector3 = water.get_water_material().get_shader_parameter("u_water_color")
+			# The source_color uniform stores a Color; the pinned bytes are the
+			# witnessed values (set raw, decoded by the hint), so the vector is
+			# unchanged.
+			var lit_color: Color = water.get_water_material().get_shader_parameter("u_water_color")
+			var lit := Vector3(lit_color.r, lit_color.g, lit_color.b)
 			# u_water_murk (REN-4 rename from u_water_alpha; the same env murk
 			# value flows through, so the pinned byte is unchanged).
 			var alpha: float = water.get_water_material().get_shader_parameter("u_water_murk")
@@ -643,7 +647,8 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 	add_child_autofree(sky_flat)
 	sky_flat.advance_frame(TICK)
 	var flat_pass: bool = sky_flat.get_sky_material().get_shader_parameter("u_flat_pass")
-	var flat_color: Vector3 = sky_flat.get_sky_material().get_shader_parameter("u_flat_color")
+	var flat_c: Color = sky_flat.get_sky_material().get_shader_parameter("u_flat_color")
+	var flat_color := Vector3(flat_c.r, flat_c.g, flat_c.b)
 	bytes["sky/flat"] = "%s %s" % ["01" if flat_pass else "00", _hex_color(flat_color)]
 	var flat_height: float = sky_flat.get_sky_material().get_shader_parameter("u_sky_height")
 	floats["sky/flat"] = [flat_height]

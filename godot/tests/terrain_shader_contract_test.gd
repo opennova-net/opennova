@@ -20,8 +20,8 @@ func test_terrain_is_lit_by_the_godot_scene() -> void:
 		"The lit terrain must not opt out of the scene lighting (ADR 0043).")
 	assert_false(runtime.contains("fog_disabled"),
 		"The lit terrain takes Environment fog (ADR 0043).")
-	assert_true(_compact(runtime).contains("ALBEDO=scene_output(albedo);"),
-		"The composed surface is the lit material's albedo in the gamma-domain scene contract.")
+	assert_true(_compact(runtime).contains("ALBEDO=clamp(albedo,vec3(0.0),vec3(1.0));"),
+		"The composed surface is the lit material's albedo; the clamp is the witnessed ps.1.x saturate (linear scene, ADR 0043 amendment).")
 	var shared := _source("res://shaders/terrain_lighting.gdshaderinc")
 	for retired in ["u_sun_light", "u_sky_ambient", "terrain_point_light_pool",
 			"apply_terrain_fog", "jointops_fog_factor", "retail_tile_light_alpha"]:
@@ -38,13 +38,14 @@ func test_detail_mips_sample_anisotropically_with_conservative_terminal_guard() 
 	# [orig: per-stage filter select @ 0x67e38a..0x67e45b]
 	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
 	assert_true(
-		terrain.contains("u_detail_c1 : filter_linear_mipmap_anisotropic") and
-			terrain.contains("u_detail_c2 : filter_linear_mipmap_anisotropic") and
-			terrain.contains("u_detail_c3 : filter_linear_mipmap_anisotropic") and
+		terrain.contains("u_detail_c1 : source_color, filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_detail_c2 : source_color, filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_detail_c3 : source_color, filter_linear_mipmap_anisotropic") and
 			terrain.contains("u_detail2 : filter_linear_mipmap_anisotropic") and
-			terrain.contains("u_colormap : filter_linear_mipmap_anisotropic") and
+			terrain.contains("u_colormap : source_color, filter_linear_mipmap_anisotropic") and
 			terrain.contains("u_blendmap : filter_linear_mipmap_anisotropic"),
-		"Every mipped terrain input must sample anisotropically like the retail reference.")
+		"Every mipped terrain input must sample anisotropically like the retail reference"
+		+ " (color art decodes via source_color; the dp3 modulator and blend weights stay raw).")
 	assert_true(terrain.contains("float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));"),
 			"The conservative shader guard must keep requests out of the synthetic terminal tail.")
 	assert_true(terrain.contains("textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale)"),
@@ -134,6 +135,8 @@ func test_runtime_uses_shared_tile_overlay_composition() -> void:
 	add_child_autofree(environment)
 	var material := ShaderMaterial.new()
 	environment.apply_terrain_uniforms(material)
+	var tint: Vector3 = environment.get_tile_overlay_tint()
 	assert_eq(material.get_shader_parameter("u_tile_overlay_tint"),
-		environment.get_tile_overlay_tint(),
-		"The environment binding must apply the retail tile tint in runtime.")
+		Color(tint.x, tint.y, tint.z),
+		"The environment binding must apply the retail tile tint as a Color "
+		+ "(the source_color uniform decodes it to the linear scene).")

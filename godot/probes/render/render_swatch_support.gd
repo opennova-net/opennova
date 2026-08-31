@@ -50,12 +50,6 @@ class Sink:
 				("%s (exit %d)" % [summary_fallback, exit_code]), data)
 
 
-static func add_display_decode(scene: Node3D) -> DisplayDecode:
-	var decode := DisplayDecode.new()
-	scene.add_child(decode)
-	return decode
-
-
 static func bind_production_object_resources(material: ShaderMaterial,
 		implementation: String) -> bool:
 	if implementation != "phong_map":
@@ -194,40 +188,6 @@ static func make_normal_texture() -> ImageTexture:
 				n = Vector3(dx, dy, sqrt(1.0 - r2)).normalized()
 			image.set_pixel(x, y, Color(n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, n.z * 0.5 + 0.5, 1.0))
 	return ImageTexture.create_from_image(image)
-
-
-static func make_calibration_material(render_modes: String, byte_value: int,
-		alpha: float, writes_alpha: bool) -> ShaderMaterial:
-	var material := ShaderMaterial.new()
-	var shader := Shader.new()
-	var mode_suffix := ", " + render_modes if not render_modes.is_empty() else ""
-	var alpha_line := "\n\tALPHA = u_alpha;" if writes_alpha else ""
-	shader.set_code("""
-shader_type spatial;
-render_mode unshaded, cull_disabled%s;
-#include "res://shaders/color.gdshaderinc"
-uniform float u_byte;
-uniform float u_alpha;
-void fragment() {
-	ALBEDO = scene_output(vec3(u_byte));%s
-}
-""" % [mode_suffix, alpha_line])
-	material.shader = shader
-	material.set_shader_parameter("u_byte", float(byte_value) / 255.0)
-	material.set_shader_parameter("u_alpha", alpha)
-	return material
-
-
-static func add_calibration_stack(scene: Node3D, world_x: float,
-		background: ShaderMaterial, foreground: ShaderMaterial) -> void:
-	for layer in [[background, 0.0], [foreground, 1.0]]:
-		var mesh := MeshInstance3D.new()
-		var quad := QuadMesh.new()
-		quad.size = Vector2(0.45, 0.45)
-		mesh.mesh = quad
-		mesh.material_override = layer[0]
-		mesh.position = Vector3(world_x, 0.0, layer[1])
-		scene.add_child(mesh)
 
 
 static func make_layer_material(color: Color, rung: int) -> ShaderMaterial:

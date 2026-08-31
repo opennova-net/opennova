@@ -55,18 +55,20 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always, fog_
 //   only on reflection-less owners). FF fallback: s0 MOD2X(reflection,
 //   diffuse), s1 MOD2X(noise, current), alpha MOD(noise.a, diffuse.a).
 
-// Gamma-domain scene-target contract.
+// srgb_decode for the witnessed byte-encoded vertex color streams.
 #include "res://shaders/color.gdshaderinc"
 // Env_WaterColorLit — since env #30 this is only the reflection-LESS
 // stand-in for the t2 sample (headless owners/tests, u_has_reflection false).
-uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
+// source_color: the driver sets the witnessed bytes as a Color and the hint
+// decodes them to the linear scene domain.
+uniform vec3 u_water_color : source_color = vec3(0.408, 0.314, 0.224);
 // The reflection RTT (env #30): Water's mirror-camera SubViewport
 // texture, the chain's t2 [orig: texm3x2pad/texm3x2tex t2 —
 // Water_InitSurfaceShaders @ 0x5c19b0; the mirror scene RTT
-// render_main_scene @ 0x5c1240]. Sampled WITHOUT source_color on purpose:
-// under the gamma-space convention (D-RMAT-7) the RTT's stored bytes are
-// the display-encoded scene, consumed raw exactly like retail's t2 texels.
-uniform sampler2D u_reflection : filter_linear;
+// render_main_scene @ 0x5c1240]. source_color: the SubViewport's 3D output
+// is the tonemapped sRGB mirror scene; the hint returns it to the linear
+// domain the chain now runs in (ADR 0043 linear-scene amendment).
+uniform sampler2D u_reflection : source_color, filter_linear;
 uniform bool u_has_reflection = false;
 // The witnessed texm3x2 rows are normalized against the MAIN viewport, while
 // Godot derives the mirror camera's vertical projection from its square RTT.
@@ -83,7 +85,7 @@ uniform vec2 u_reflection_uv_scale = vec2(1.0);
 uniform vec4 u_water_uv = vec4(1.0, 0.2, 0.0, 0.0);
 uniform sampler2D u_noise_color : filter_linear, repeat_enable;
 uniform sampler2D u_noise_normal : filter_linear, repeat_enable;
-uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
+uniform vec3 u_fog_color : source_color = vec3(0.5, 0.6, 0.8);
 // The underwater pass swaps to the OPAQUE material — blend OFF, flags 0x20000
 // [orig: Water_ShaderOpaque @ 0x28ee8c8; selection @ 0x5c33e6..0x5c34ea]. Under
 // the premul pass, ALPHA = 1.0 expresses blend-off exactly (out = src + dst*0);
@@ -92,11 +94,15 @@ uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 uniform bool u_underwater_view = false;
 
 varying vec3 v_world_pos;
+// The witnessed row diffuse, decoded to linear in vertex() (the strip mesh
+// carries retail bytes/255; the scene is linear). COLOR.a stays raw — it is
+// the murk/distance WEIGHT, not color.
+varying vec3 v_diffuse;
 // The ps.1.1 v1 specular register: WaterColorLit RGB under the row's
-// distance alpha, raw bytes/255 like COLOR (no color-space transform),
-// carried on the mesh as CUSTOM1 [orig: rows @ 0x5c2eb5..0x5c2ef4; consumed
-// by add r0.rgb, r0, v1 in the detail>=2 pixel shader assembled in
-// Water_InitSurfaceShaders @ 0x5c19b0].
+// distance alpha, carried on the mesh as CUSTOM1 (bytes/255, decoded to
+// linear in vertex(); CUSTOM1.a stays the raw fog weight) [orig: rows
+// @ 0x5c2eb5..0x5c2ef4; consumed by add r0.rgb, r0, v1 in the detail>=2
+// pixel shader assembled in Water_InitSurfaceShaders @ 0x5c19b0].
 varying vec3 v_specular;
 // The texm3x2 row registers, reassembled per vertex from CUSTOM2 (the
 // perturbation basis t1.xy / t2.xy — camera right/forward xz under the
@@ -111,7 +117,8 @@ varying float v_fog;
 
 void vertex() {
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	v_specular = CUSTOM1.rgb;
+	v_diffuse = srgb_decode(COLOR.rgb);
+	v_specular = srgb_decode(CUSTOM1.rgb);
 	v_refl_row_u = vec3(CUSTOM2.xy, CUSTOM0.z);
 	v_refl_row_v = vec3(CUSTOM2.zw, CUSTOM0.w);
 	// The witnessed water fog factor: D3D8 fogs pre-transformed (XYZRHW) verts by
@@ -188,7 +195,7 @@ void fragment() {
 	//   add r0.rgb, r0, v1    ; + specular
 	// staged below with per-write saturation like ps.1.1 register writes
 	// (every input here is [0,1], so each write clamps at 1).
-	vec3 color = clamp(t2_sample * COLOR.rgb * 2.0, 0.0, 1.0);
+	vec3 color = clamp(t2_sample * v_diffuse * 2.0, 0.0, 1.0);
 	color = clamp(color * noise.rgb * 4.0, 0.0, 1.0);
 	color = clamp(color + v_specular, 0.0, 1.0);
 
@@ -216,9 +223,8 @@ void fragment() {
 		// The witnessed blend is out = src + dst * a (ONE + dst*SRCALPHA): under
 		// Godot's premul pass (out = src.rgb + dst * (1 - ALPHA)) that is
 		// src.rgb = color * 1 with ALPHA = 1 - a. The source term itself is NOT
-		// multiplied by a — retail's SrcBlend is ONE.
-		// Both source and destination remain gamma-domain numeric values until the
-		// terminal compositor, so this blend matches the retail framebuffer.
-	ALBEDO = scene_output(color);
+		// multiplied by a — retail's SrcBlend is ONE. The accumulation is
+		// linear (ADR 0043 linear-scene amendment).
+	ALBEDO = clamp(color, vec3(0.0), vec3(1.0));
 	ALPHA = u_underwater_view ? 1.0 : (1.0 - alpha);
 }
