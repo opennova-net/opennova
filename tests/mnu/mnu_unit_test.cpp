@@ -763,7 +763,7 @@ bool test_color_variable() {
 // Test hotkey marker stripping.
 bool test_strip_hotkey() {
   std::string hotkey;
-  int pos;
+  int pos = -1;
 
   std::string result = opennova::mnu::strip_hotkey_marker("{hot}Exit", &hotkey, &pos);
   CHECK(result == "Exit", "result should be Exit");
@@ -775,8 +775,24 @@ bool test_strip_hotkey() {
   CHECK(hotkey == "x", "hotkey should be x");
   CHECK(pos == 1, "pos should be 1");
 
-  result = opennova::mnu::strip_hotkey_marker("No hotkey here");
+  result = opennova::mnu::strip_hotkey_marker(
+      "A{HOT}b{hot}c", &hotkey, &pos);
+  CHECK(result == "Ab{hot}c", "only the first marker should be removed");
+  CHECK(hotkey == "b", "first marker should supply the hotkey");
+  CHECK(pos == 1, "first marker position should be retained");
+
+  result = opennova::mnu::strip_hotkey_marker("Tail{hot}", &hotkey, &pos);
+  CHECK(result == "Tail", "a trailing marker should still be removed");
+  CHECK(hotkey.empty(), "a trailing marker has no hotkey byte");
+  CHECK(pos == 4, "a trailing marker still reports its position");
+
+  hotkey = "stale";
+  pos = 99;
+  result = opennova::mnu::strip_hotkey_marker(
+      "No hotkey here", &hotkey, &pos);
   CHECK(result == "No hotkey here", "no change expected");
+  CHECK(hotkey.empty(), "a missing marker clears the hotkey output");
+  CHECK(pos == -1, "a missing marker resets the position output");
 
   return true;
 }

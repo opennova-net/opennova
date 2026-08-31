@@ -412,9 +412,9 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error);
 // Parse MNU file from disk.
 bool parse_file(const std::string &path, Document &out, std::string &error);
 
-// Strip {hot} marker from text for display.
-// Returns the display text with {hot} removed.
-// Optionally returns the hotkey character and its position.
+// Strip the first {hot} marker from text for display; later markers remain
+// literal. Optionally returns the following hotkey byte and the marker's byte
+// position (-1 when absent). A trailing marker has a position but no hotkey.
 std::string strip_hotkey_marker(const std::string &text,
                                 std::string *out_hotkey = nullptr,
                                 int *out_hotkey_pos = nullptr);
