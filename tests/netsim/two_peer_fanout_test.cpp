@@ -521,15 +521,15 @@ bool run_0a_subblock_phase_cycle() {
 
 
 	// Nontrivial engine-native values prove phase 2 is data-driven rather than a fixed map table.
-	world.network_env.valid = true;
-	world.network_env.fog_target_q16 = 0x01230000u;
-	world.network_env.fog_accel_clamp = 0x00123456u;
-	world.network_env.tod_fixed24 = (0x1234u << 13) - 0x1000u;
-	world.network_env.quake_ticks = 0x012Cu;
-	world.network_env.cloud_scroll_rate_target = 0x0002ABCDu;
-	world.network_env.rain_pct_current_q16 = 0x000056FFu;
-	world.network_env.overcast_blend_q16 = 0x000078AAu;
-	world.network_env.precipitation_kind = 0x1234569Au;
+	world.weather.valid = true;
+	world.weather.core.scalar_channels.fog_dist_target_fp = 0x01230000;
+	world.weather.core.scalar_channels.fog_step_fp = 0x00123456;
+	world.weather.tod_fixed24 = (0x1234u << 13) - 0x1000u;
+	world.weather.quake_ticks = 0x012Cu;
+	world.weather.cloud_scroll_rate_target = 0x0002ABCDu;
+	world.weather.core.scalar_channels.rain_pct_fp = 0x000056FF;
+	world.weather.core.scalar_channels.overcast_fp = 0x000078AA;
+	world.weather.precipitation_kind = 0x1234569Au;
 	// The phase-0 writer truncates the seconds dword to its low wire byte.
 	// [orig: NetPacket_WritePlayerState @0x4FF82D..0x4FF837]
 	world.preround_delay_seconds = 0x123u;
@@ -1076,8 +1076,77 @@ bool run_0a_priority_dead_recipient_social_score() {
 	const int id2 = record_index(f2, d_h.packed);
 	ok = ok && expect(ic2 >= 0 && id2 >= 0 && ic2 < id2,
 	                  "a dead recipient orders the same-team occupied C first (300+100 vs 0)");
+	// Clearing the entity death bit while holding the deploy bit takes the
+	// identical retail social-score branch: the witnessed predicate reads the
+	// deploy-hold storage slot+89912 & 0x10, which a join-time spectator holds
+	// forever [orig: @0x50e68c; Server_OnPlayerJoin @0x51a6f2] — a spectator
+	// slot with NEITHER the hold nor the dead bit cannot arise in retail (a
+	// runtime-converted spectator is dead).
+	world.registry.get(host_h)->flags &= ~w::kEntityFlagDead;
+	conns[0].spectator = true;
+	conns[0].respawn_pending = true;
+	nw::FrameUpdate f3;
+	if (!pump(f3)) return false;
+	const int ic3 = record_index(f3, c_h.packed);
+	const int id3 = record_index(f3, d_h.packed);
+	ok = ok && expect(ic3 >= 0 && id3 >= 0 && ic3 < id3,
+	                  "a spectator recipient takes the same flat social-score branch");
 	if (!ok) return false;
 	std::printf("PASS 0a_priority_dead_recipient_social_score\n");
+	return true;
+}
+
+// The owner-hidden admission [orig: Server_BuildEntityPriorityList @0x50e6fd —
+// `validated == recipient || (!slot[97537] && !slot[97536])`]: an entity whose
+// owning slot hides it (in JO the spectator latch) never enters another
+// recipient's list, while the owner's own list keeps it (the self-exception).
+bool run_0a_owner_hidden_admission() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle a_h =
+			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
+	const w::EntityHandle b_h =
+			w::spawn_remote_player(world, player_spawn({110.0f, 100.0f, 10.0f}, 90, 0xFFF1));
+	if (!expect(a_h.valid() && b_h.valid(), "both players spawned")) return false;
+
+	std::vector<nw::GameEntitySnapshot> ents = ns::snapshot_world(world);
+	for (nw::GameEntitySnapshot &e : ents)
+		if (e.wire_handle == a_h.packed) e.owner_hidden = true;
+
+	const auto has_record = [](const nw::FrameUpdate &fu, uint16_t handle) {
+		for (const auto &r : fu.records)
+			if (r.handle == handle) return true;
+		return false;
+	};
+	const auto resolver = [](uint16_t) { return nw::EntityClass::Player; };
+	const auto pump_one = [&](ns::Connection &c, nw::FrameUpdate &fu) -> bool {
+		ns::LoopbackChannel &ch = *static_cast<ns::LoopbackChannel *>(c.transport);
+		ns::emit_connection_s2c(world, c, ents, 0);
+		ns::Datagram dg;
+		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+		return expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), resolver, fu),
+		              "0x0A frame decodes");
+	};
+
+	ns::LoopbackChannel ch_a, ch_b;
+	ns::Connection conn_a{&ch_a, ns::TransportMode::Loopback, a_h, 0};
+	ns::Connection conn_b{&ch_b, ns::TransportMode::Loopback, b_h, 0};
+	conn_a.spectator = true;
+
+	nw::FrameUpdate to_b;
+	if (!pump_one(conn_b, to_b)) return false;
+	bool ok = expect(!has_record(to_b, a_h.packed),
+	                 "the hidden owner's entity is dropped from another recipient's list");
+	ok = ok && expect(has_record(to_b, b_h.packed), "the recipient's own entity still streams");
+
+	nw::FrameUpdate to_a;
+	if (!pump_one(conn_a, to_a)) return false;
+	ok = ok && expect(has_record(to_a, a_h.packed),
+	                  "the self-exception admits the owner's own hidden entity");
+	if (!ok) return false;
+	std::printf("PASS 0a_owner_hidden_admission\n");
 	return true;
 }
 
@@ -1204,6 +1273,16 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	if (!expect(fu.flags1 == 0x00, "flags1 drops after the deploy clears pending")) return false;
 	if (!expect(fu.state_flag_byte == 0x00, "tail stance echo cleared")) return false;
 	if (!expect(fu.health > 0, "tail carries the live (alive) health")) return false;
+
+	// Spectator mode is the adjacent live player-slot bit and composes with
+	// the deploy bit in this same flags1 byte.
+	conns[0].spectator = true;
+	ns::test::emit_all(world, conns);
+	if (!expect(ch.client_recv(dg), "spectator-state 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "spectator-state 0x0A decodes")) return false;
+	if (!expect(fu.flags1 == 0x01, "flags1 bit0 carries spectator mode")) return false;
+	conns[0].spectator = false;
 
 	// The victim's own death signal (v33 "killee never knows"): a dead recipient's frame
 	// carries tail health 0 [orig: stored as the client's own Health @0x4305df] and its
@@ -1926,6 +2005,7 @@ int main() {
 	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
 	                run_0a_vehicle_budget_round_robin() && run_0a_priority_view_terms() &&
 	                run_0a_priority_dead_recipient_social_score() &&
+	                run_0a_owner_hidden_admission() &&
 	                run_0a_player_record_field_sources() &&
 	                run_0a_deploy_hold_and_tail_stance() && run_0x26_attach_mounted_echo() &&
 	                run_mounted_g_slot_route_echo() &&

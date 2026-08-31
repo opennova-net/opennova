@@ -1,9 +1,16 @@
 #include <runtime/devtools/game_dev_tools.h>
 
+#include <runtime/devtools/ai_window.h>
 #include <runtime/devtools/demo_window.h>
 #include <runtime/devtools/entities_window.h>
+#include <runtime/devtools/entity_detail_snapshot.h>
+#include <runtime/devtools/entity_properties_window.h>
+#include <runtime/devtools/environment_window.h>
 #include <runtime/devtools/game_window.h>
+#include <runtime/devtools/physics_window.h>
+#include <runtime/devtools/rays_window.h>
 #include <runtime/devtools/stats_window.h>
+#include <runtime/devtools/weapon_window.h>
 
 #include <utility>
 
@@ -29,10 +36,32 @@ GameDevTools::GameDevTools() : pass_(game_pass_options()) {
 	stats_window_ = stats.get();
 	stats->open = true;
 	pass_.register_window(std::move(stats));
-	// Closed by default; opens from the "Windows" menu.
+	// Closed by default; a world pick or the "Windows" menu opens them. The
+	// Properties window reads the Entities window's selection, so the list
+	// registers first and outlives it (the pass owns both).
 	auto entities = std::make_unique<EntitiesWindow>();
 	entities_window_ = entities.get();
 	pass_.register_window(std::move(entities));
+	auto properties = std::make_unique<EntityPropertiesWindow>(*entities_window_);
+	entity_properties_window_ = properties.get();
+	pass_.register_window(std::move(properties));
+	auto weapon = std::make_unique<WeaponWindow>();
+	weapon_window_ = weapon.get();
+	pass_.register_window(std::move(weapon));
+	auto environment = std::make_unique<EnvironmentWindow>();
+	environment_window_ = environment.get();
+	pass_.register_window(std::move(environment));
+	// The AI window reads the Entities window's selection too (its deep pane
+	// rides the same detail push).
+	auto ai = std::make_unique<AiWindow>(*entities_window_);
+	ai_window_ = ai.get();
+	pass_.register_window(std::move(ai));
+	auto rays = std::make_unique<RaysWindow>();
+	rays_window_ = rays.get();
+	pass_.register_window(std::move(rays));
+	auto physics = std::make_unique<PhysicsWindow>();
+	physics_window_ = physics.get();
+	pass_.register_window(std::move(physics));
 	pass_.register_window(std::make_unique<DemoWindow>());
 }
 
@@ -42,6 +71,10 @@ void GameDevTools::set_game_viewport(GameViewport *viewport) {
 
 void GameDevTools::set_game_play_available(bool available) {
 	game_window_->set_play_available(available);
+}
+
+void GameDevTools::set_game_spectator_state(bool available, bool active) {
+	game_window_->set_spectator_state(available, active);
 }
 
 void GameDevTools::set_game_input_mode(GameInputMode mode) {
@@ -69,11 +102,114 @@ void GameDevTools::set_entity_directory(EntityDirectorySnapshot snapshot) {
 }
 
 bool GameDevTools::needs_entity_directory() const {
-	return pass_.is_open() && entities_window_->open;
+	// The Properties window reads the list's selected row, so the directory
+	// keeps flowing while either entity window shows (the list holds its
+	// selection pending across its own close and re-applies it per push).
+	return pass_.is_open() && (entities_window_->open || entity_properties_window_->open);
 }
 
 bool GameDevTools::take_debug_request(DebugRequest &request) {
 	return entities_window_->take_request(request);
+}
+
+void GameDevTools::select_entity(uint16_t handle) {
+	entities_window_->select_handle(handle);
+	if (handle != world::EntityHandle::kInvalid) {
+		// The pick is "show me this": the card comes up beside the row.
+		entity_properties_window_->open = true;
+		entity_properties_window_->request_focus();
+	}
+}
+
+void GameDevTools::clear_entity_selection() {
+	entities_window_->clear_selection();
+	entity_properties_window_->clear();
+	ai_window_->clear_detail();
+}
+
+uint16_t GameDevTools::selected_entity_handle() const {
+	return entities_window_->selected_handle();
+}
+
+void GameDevTools::set_entity_detail(EntityDetailSnapshot detail) {
+	// Both selection-following panes accept the same card (each drops a card
+	// that no longer names the selection).
+	ai_window_->set_detail(detail);
+	entity_properties_window_->set_detail(std::move(detail));
+}
+
+bool GameDevTools::needs_entity_detail() const {
+	return pass_.is_open() &&
+			(entity_properties_window_->open || ai_window_->open) &&
+			entities_window_->selected_handle() != world::EntityHandle::kInvalid;
+}
+
+void GameDevTools::set_weapon_definition(WeaponDefinitionSnapshot definition) {
+	weapon_window_->set_definition(std::move(definition));
+}
+
+void GameDevTools::set_weapon_live(WeaponLiveSnapshot live) {
+	weapon_window_->set_live(std::move(live));
+}
+
+bool GameDevTools::needs_weapon_records() const {
+	return pass_.is_open() && weapon_window_->open;
+}
+
+uint64_t GameDevTools::weapon_definition_serial() const {
+	return weapon_window_->definition_serial();
+}
+
+bool GameDevTools::take_weapon_request(WeaponRequest &request) {
+	return weapon_window_->take_request(request);
+}
+
+void GameDevTools::set_environment_snapshot(const EnvironmentSnapshot &snapshot) {
+	environment_window_->set_snapshot(snapshot);
+}
+
+bool GameDevTools::needs_environment_snapshot() const {
+	return pass_.is_open() && environment_window_->open;
+}
+
+bool GameDevTools::take_environment_request(EnvironmentRequest &request) {
+	return environment_window_->take_request(request);
+}
+
+void GameDevTools::set_ai_debug(AiDebugSnapshot snapshot) {
+	ai_window_->set_snapshot(std::move(snapshot));
+}
+
+bool GameDevTools::needs_ai_debug() const {
+	return pass_.is_open() && ai_window_->open;
+}
+
+bool GameDevTools::take_ai_view_request(AiViewRequest &request) {
+	return ai_window_->take_request(request);
+}
+
+void GameDevTools::set_rays_snapshot(const RaysSnapshot &snapshot) {
+	rays_window_->set_snapshot(snapshot);
+}
+
+bool GameDevTools::needs_rays_snapshot() const {
+	return pass_.is_open() && rays_window_->open;
+}
+
+bool GameDevTools::take_rays_request(RaysRequest &request) {
+	return rays_window_->take_request(request);
+}
+
+void GameDevTools::set_physics_snapshot(const PhysicsSnapshot &snapshot) {
+	physics_window_->set_snapshot(snapshot);
+}
+
+bool GameDevTools::needs_physics_snapshot() const {
+	return pass_.is_open() && physics_window_->open;
+}
+
+bool GameDevTools::take_physics_request(PhysicsRequest &request) {
+	return physics_window_->take_request(request);
 }
 
 }  // namespace opennova::devtools

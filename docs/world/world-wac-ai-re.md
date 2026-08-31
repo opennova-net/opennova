@@ -4845,8 +4845,10 @@ Ported same session (the second wave, after the 00TRa probe forced them out):
   `relmat_calls` vector is now a diagnostic trace of applied side effects
   [orig: AI_UpdateWaypointMovement @ 0x457c6d..0x457c88].
 - **The speed commands**: BMS ChangeGroup/SingleAI subs 29 COMBATSPEED /
-  30 PATROLSPEED land in `ai_apply_command` as the kSpeedA/kSpeedB writes with
-  the exact scale — km/h x 1000 x (1/225000) x 65536 = x65536/225 (~291.27; the
+  30 PATROLSPEED queue AIEvent types 10/11 through the shared
+  `EntityCommands` producer; `AI_HandleCommand` later writes kSpeedA/kSpeedB.
+  There is no immediate `ai_apply_command` speed write. The exact scale is
+  km/h x 1000 x (1/225000) x 65536 = x65536/225 (~291.27; the
   items.def x293 is its integer approximation)
   [orig: Entity_ApplyCommand @ 0x43ab60 cases 0x1D/0x1E -> AIEvent types 10/11 ->
   AI_HandleCommand @ 0x465770 cases 0xA/0xB].
@@ -7202,3 +7204,86 @@ each vehicle depending on where that vehicle is.
   control is the two vehicles that share item 1294.
 - **Put a positive control on a counter before believing a zero.** A bare
   "0 disagreements" is indistinguishable from "the probe never ran".
+
+## 32. WAC command rows and the queued ChangeAI brain path (grill-ida + port, 2026-08-30)
+
+This slice audited runtime commands that were present in the 165-row WAC
+registry or the BMS AI subtype table but still fell through a VM/default arm.
+The port keeps one `EntityCommands` implementation beneath WAC and BMS so an
+SSN, group, or area fan reaches the same entity/controller/brain mutations.
+
+### 32.1 WAC rows now live
+
+| WAC row | Retail behavior | OpenNova landing |
+|---|---|---|
+| `SSNwounded` | resolves the SSN, reads health as u16, arithmetically halves signed i16 max-health, reinterprets that half as u16, and tests `health <= half` [orig: WacCmd_SsnWounded @ 0x4F1B80] | `EntityCommands::ssn_wounded` |
+| `SSNnearSSN` | inclusive Euclidean range over entity centers [orig: Entity_CheckProximity @ 0x4F14C0] | `ssn_within_distance` |
+| `SSNlosSSN` | the same inclusive range gate plus a clear radius-zero LOS ray [orig: Entity_CheckLineOfSightInRange @ 0x4F15E0] | `ssn_los_clear_within` through the shared collision/LOS seam |
+| `SSNseesSSN` | range + LOS + the signed-wrap 30-degree facing test [orig: Entity_CheckLineOfSight @ 0x4F17C0] | `ssn_sees_within` |
+| `meattached`, `medrive`, `meongun` | the local-player carrier chain, then any-seat / ctrlx-or-drvrx / UseGun filtering [orig: Entity_IsLocalPlayerSeatedOnSsn @ 0x4F10D0; Entity_IsLocalPlayerDrivingSsn @ 0x4F1150; Entity_IsLocalPlayerOnGunOfSsn @ 0x4F11E0] | the existing canonical mount predicates are now dispatched by the WAC VM |
+| `setaccuracy` | writes `max(0, 100-a)` and `max(0, 100-b)` into the two controller error slots in reversed argument order [orig: WacCmd_SetAccuracy @ 0x4F2070] | `set_ssn_accuracy` |
+| `Gsetaccuracy` | the same pair over matching pool-0 AI rows only [orig: WacCmd_GroupSetAccuracy @ 0x4F7BE0] | `set_group_accuracy` |
+| `ssnguard` | toggles entity Flags `0x40` for a resolved row, independent of whether it owns a brain [orig: WacCmd_SsnGuard @ 0x4F71C0] | `set_ssn_guard` |
+| `ssncspd`, `ssnpspd` | a resolved entity reports success; an AI-bearing row queues brain event 10/11 [orig: WacScript_SendAIEvent10ToEntity @ 0x4F74B0; WacScript_SendAIEvent11ToEntity @ 0x4F7570] | the VM enters the shared ChangeAI queue; no immediate speed write |
+| `Gremove` | removes matching rows through the same group-removal primitive as BMS action 4 [orig: WacCmd_GroupRemove @ 0x4F1F80; Entity_TeleportAllByNetId @ 0x43D5D0] | `remove_group`, including group recount and collision refresh |
+
+`wac_behavior` compiles and executes these names through the public VM seam; it
+pins the inclusive-distance boundary, wounded threshold, driver/gunner switch,
+reversed accuracy slots, guard flag, queued speed timing, and group removal.
+
+### 32.2 `Entity_ApplyCommand` is a two-stage dispatcher
+
+Retail does not reduce ChangeAI to one immediate brain mutation. The per-target
+dispatcher first applies synchronous entity/controller writes and, for selected
+commands, queues an `AIEvent` which `AI_HandleCommand` consumes later
+[orig: Entity_ApplyCommand @ 0x43AB60; AIEvent_QueueEntry @ 0x455DA0;
+AI_HandleCommand @ 0x465770]. OpenNova now preserves that boundary for single,
+group, and area targets.
+
+The synchronous arms now carried are:
+
+- sub 2 guard (`Entity::flags 0x40`); 5/6/22 controller alert red/green/yellow;
+  8 controller aim error; 15 BLIND; 16 BERSERK; 17 CLIMBER; 21 COWARD (including
+  the unconditional controller-bit `0x20000` clear); 41 attack distance; 42
+  engagement min/max; and 43 indestructible [orig: Entity_ApplyCommand @
+  0x43AB60].
+- subs 32/33 set/clear the brain's use-waypoint-zones latch, and sub 34 retains
+  the already-ported PLAYPARTANIM channel/rate write [orig: Entity_ApplyCommand
+  @ 0x43AB60].
+
+The queued arms now carried are:
+
+| authored subtype | queued event | brain result |
+|---|---:|---|
+| 5 / 6 / 22 alert | 6 | retail's forced-red-on-change quirk plus the profile-type combat transition |
+| 26 `DRIVESKILL` | 9 | clamp to 0..4 in brain dword 44 |
+| 27 `AIMSKILL` | 8 | clamp to 0..4 in brain dword 43 |
+| 28 `AISETSTATE` | 7 | type-specific state mapping through `AIState_SetByEntityType` [orig: AIState_SetByEntityType @ 0x457570] |
+| 29 / 30 combat/patrol speed | 10 / 11 | unsigned-dword reinterpret, then `km/h * 65536 / 225`; overflow takes x87 integer-indefinite `INT_MIN` |
+| 45 `AISTARTFIRING` | 21 | guard-fire byte plus pending GROUND combat 17 or HELO combat 8 |
+| 46 `AIFIRINGANGLE` | 22 | degrees to BAM via `arg * 11930464` |
+
+`AISETSTATE` selectors 1..5 map HELO to formation 11, return 12, pretty 14,
+land 6, follow-waypoint 7; GROUND maps to formation 19, return 20, pretty 22,
+no-op for selector 4, and follow-waypoint 16. Both fallback and pending state
+receive a valid result.
+
+The old direct `ai_apply_command` speed store was therefore a structural
+divergence: it made a command visible before the AI event boundary. It is
+removed. `event_runtime_bms`, `wac_behavior`, and `vehicle_mount` pin the queue
+count, pre-dispatch unchanged state, post-dispatch values, state mapping, and
+the entity/controller side effects.
+
+### 32.3 Divergence disposition and remaining boundary
+
+**D-AI-2 update:** the former residual “WAC `ai` command queue parsed, no
+producer” is fixed by the shared `EntityCommands` queue producer and the
+`AI_HandleCommand` cases above. D-AI-2 remains OPEN for its existing turret,
+HELO-profile, suspension-fire-point, CTRL, and mount-frame residuals. The
+command-specific remainder is bounded: `AI_HandleCommand` event cases 12..20
+and the authored FIND_AND_USE / HUD / teammate / node-path / TARGETSSN family
+still need their owning task, HUD, teammate, navigation, and target-reference
+models. They remain explicit no-ops rather than speculative state writes.
+
+The structural BMS action half of this same parity round is recorded in
+[`bms-event-runtime-re.md` §10](../mission/bms-event-runtime-re.md).

@@ -69,6 +69,7 @@ const BOARD_XML := """
     </WINDOW>
     <WINDOW type="button" name="BACK">
       <POSITION><LEFT>600</LEFT><TOP>500</TOP><RIGHT>700</RIGHT><BOTTOM>530</BOTTOM></POSITION>
+      <STRING>B{hot}ack</STRING>
       <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
       <HOTKEY>V</HOTKEY>
     </WINDOW>
@@ -405,6 +406,18 @@ func test_character_hotkey_fires_case_insensitively() -> void:
 			"lowercase character hotkey consumed")
 	assert_signal_emitted_with_parameters(driver, "widget_activated",
 			[driver.widget_id("BACK"), "BACK"])
+
+
+func test_label_marker_hotkey_fires_and_stays_out_of_display_text() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	var back := driver.widget_id("BACK")
+	assert_eq(driver.get_widget_text(back), "Back",
+			"the {hot} marker is not part of the displayed label")
+	watch_signals(driver)
+	assert_true(driver.handle_key_input(_key(KEY_A, "a".unicode_at(0))),
+			"a lowercase label mnemonic is consumed")
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[back, "BACK"])
 
 
 # --- (d) widget_value_changed relay kinds ---------------------------------------

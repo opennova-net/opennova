@@ -66,6 +66,24 @@ func _profile_with_set(set_name: String, wav: String) -> LwfData:
 	return d
 
 
+func test_menu_audio_routes_its_pooled_players_to_sfx() -> void:
+	var samples := PackedByteArray()
+	samples.resize(32)
+	var root := _real_root({"click.wav": _build_wav(samples, 1, 22050, 16)})
+	var audio := MenuAudio.new()
+	add_child_autofree(audio)
+	audio.set_resource_root(root)
+	audio.set_sound_profile(_profile_with_set("CLICK_SELECT", "click.wav"))
+
+	assert_true(audio.play_widget_sound("CLICK_SELECT", ""),
+			"the synthetic menu trigger creates a pooled voice")
+	var player := audio.get_node_or_null("_MenuSound0") as AudioStreamPlayer
+	assert_not_null(player)
+	if player != null:
+		assert_eq(player.bus, StringName("SFX"),
+				"menu hover/click voices obey the shared sound-FX option")
+
+
 func test_bank_indexing_case_insensitive() -> void:
 	var bank = SoundBank.new(null)
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))

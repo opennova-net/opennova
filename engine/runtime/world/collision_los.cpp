@@ -25,6 +25,7 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
         int32_t inout_end[3]) {
     // [orig: raycast_entity_collision @ 0x413760]
     EntityHandle nearest;
+    const int32_t requested_end[3] = {inout_end[0], inout_end[1], inout_end[2]};
 
     // Terrain clips the endpoint before the collision ray is built. An indoors
     // source skips the heightfield because it has no representation of room
@@ -96,6 +97,15 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
     }
 
     for (int axis = 0; axis < 3; ++axis) inout_end[axis] = ray.end[axis];
+    if (ray_debug_enabled_) {
+        const bool clipped = nearest.valid() ||
+                             inout_end[0] != requested_end[0] ||
+                             inout_end[1] != requested_end[1] ||
+                             inout_end[2] != requested_end[2];
+        ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick,
+                         start, requested_end, clipped ? inout_end : nullptr,
+                         clipped ? kRayDebugHit : kRayDebugClear);
+    }
     return nearest;
 }
 
@@ -106,6 +116,7 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
     // raycast_entity_collision @ 0x413760]
     const int32_t start[3] = {pos[0] + dx, pos[1] + dy, pos[2] + z_up};
     int32_t end[3] = {start[0], start[1], start[2] - z_drop};
+    const RayDebugScope ray_scope(*this, RayDebugCategory::kGroundProbe);
     const EntityHandle hit =
             clip_segment_to_nearest_collision(world, source, start, end);
     if (out_hit_entity != nullptr) *out_hit_entity = hit;
@@ -333,13 +344,23 @@ bool sound_segment_blocked(const CollisionTargetView &target, const CollisionRay
 
 bool CollisionWorld::raycast_clear(World &world, const int32_t a[3], const int32_t b[3],
                                    EntityHandle exclude_a, EntityHandle exclude_b) {
-    return raycast_clear_impl(world, a, b, exclude_a, exclude_b, false, nullptr);
+    const bool clear = raycast_clear_impl(world, a, b, exclude_a, exclude_b, false, nullptr);
+    if (ray_debug_enabled_) {
+        ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick, a, b,
+                         nullptr, clear ? kRayDebugClear : kRayDebugBlocked);
+    }
+    return clear;
 }
 
 bool CollisionWorld::raycast_clear_cached(World &world, const int32_t a[3],
                                           const int32_t b[3], EntityHandle exclude_a,
                                           EntityHandle exclude_b, RaycastPerf *perf) {
-    return raycast_clear_impl(world, a, b, exclude_a, exclude_b, true, perf);
+    const bool clear = raycast_clear_impl(world, a, b, exclude_a, exclude_b, true, perf);
+    if (ray_debug_enabled_) {
+        ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick, a, b,
+                         nullptr, clear ? kRayDebugClear : kRayDebugBlocked);
+    }
+    return clear;
 }
 
 bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
@@ -569,8 +590,13 @@ bool CollisionWorld::candidate_segment_hits_solid(
     // +0x1BC/+0x1C0 slice in stored order.]
     int32_t slice_count = 0;
     const EntityHandle *slice = candidate_slice(source, slice_count);
-    return candidate_slice_segment_hits_solid(
+    const bool hits = candidate_slice_segment_hits_solid(
             world, slice, slice_count, source, a, b, radius);
+    if (ray_debug_enabled_) {
+        ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick, a, b,
+                         nullptr, hits ? kRayDebugBlocked : kRayDebugClear);
+    }
+    return hits;
 }
 
 // The candidate-walk skip gate shared by the sound and sun ray walkers:
@@ -739,8 +765,16 @@ int CollisionWorld::sun_visibility_blocked_rays(World &world, const Entity &e,
                             origin[1] + sun_step_q16[1],
                             origin[2] + sun_step_q16[2]};
 
-    return candidate_slice_sun_blocked_rays(
+    const int blocked = candidate_slice_sun_blocked_rays(
             world, slice, slice_count, e.handle, origin, end);
+    if (ray_debug_enabled_) {
+        // One event for the retail ray triple: the three casts share the
+        // segment and differ only in clip radius.
+        ray_debug_record(RayDebugCategory::kSunVisibility, world.logic_tick,
+                         origin, end, nullptr,
+                         blocked > 0 ? kRayDebugBlocked : kRayDebugClear);
+    }
+    return blocked;
 }
 
 int CollisionWorld::wire_sun_visibility_blocked_rays(
@@ -771,8 +805,14 @@ int CollisionWorld::wire_sun_visibility_blocked_rays(
         if (dynamic.wire_handle > wire_handle) break;
     }
 
-    return candidate_slice_sun_blocked_rays(
+    const int blocked = candidate_slice_sun_blocked_rays(
             world, slice, slice_count, registry_twin, origin, end);
+    if (ray_debug_enabled_) {
+        ray_debug_record(RayDebugCategory::kSunVisibility, world.logic_tick,
+                         origin, end, nullptr,
+                         blocked > 0 ? kRayDebugBlocked : kRayDebugClear);
+    }
+    return blocked;
 }
 
 int32_t CollisionWorld::sound_occlusion_inflate(World &world, EntityHandle listener,
@@ -785,9 +825,18 @@ int32_t CollisionWorld::sound_occlusion_inflate(World &world, EntityHandle liste
     if (base > 0xA0000) base = 0xA0000; // min(d/8, 10u) [orig: @ 0x529982]
     // Source z lifted +0x2000 for BOTH rays. [orig: @ 0x52998d / restore @ 0x5299d7]
     const int32_t end[3] = {source_pos[0], source_pos[1], source_pos[2] + 0x2000};
-    if (!sound_los_clear(world, listener, source, listener_pos, end, 0))
+    const bool ray1_clear = sound_los_clear(world, listener, source, listener_pos, end, 0);
+    if (!ray1_clear)
         base = 2 * base + 0x50000; // ray 1 blocked compounds [orig: @ 0x5299b6]
     const bool ray2_clear = sound_los_clear(world, listener, source, listener_pos, end, -0x8000);
+    if (ray_debug_enabled_) {
+        ray_debug_record(RayDebugCategory::kSoundOcclusion, world.logic_tick,
+                         listener_pos, end, nullptr,
+                         ray1_clear ? kRayDebugClear : kRayDebugBlocked);
+        ray_debug_record(RayDebugCategory::kSoundOcclusion, world.logic_tick,
+                         listener_pos, end, nullptr,
+                         ray2_clear ? kRayDebugClear : kRayDebugBlocked);
+    }
     // The single final add. [orig: @ 0x5299e6-0x5299f3]
     return distance_q16 + (ray2_clear ? base : 2 * base + 0x50000);
 }

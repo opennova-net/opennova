@@ -43,6 +43,19 @@ static func type_color(volume_type: int) -> Color:
 		_:
 			return COLOR_OTHER
 const COLOR_OTHER := Color(1.0, 0.55, 0.15)   # any other type - orange
+
+# Contact-kind -> flash color (engine ContactDebugKind order; the F3 Physics
+# window's kKindColors is the same table and doubles as the legend).
+const HIT_KIND_COLORS: Array[Color] = [
+	Color(1.0, 0.35, 0.15), # Projectile hit - red-orange
+	Color(1.0, 0.4, 0.7),   # Knife hit - pink
+	Color(1.0, 0.7, 0.2),   # Move contact - amber
+	Color(0.9, 0.3, 1.0),   # Vehicle hull - magenta
+	Color(0.75, 0.6, 0.4),  # Terrain hit - tan
+	Color(0.3, 0.9, 1.0),   # Water hit - cyan
+]
+const HIT_MIN_ALPHA := 0.25   # the oldest in-window flash still reads
+const HIT_STRIDE := 6         # [target, age, kind, x, y, z] per event
 const COLOR_PROBE_BOX := Color(1.0, 0.4, 0.9)       # vehicle platform probe box
 const COLOR_PROBE_FOOTPRINT := Color(0.6, 0.25, 0.55) # its ground footprint
 const COLOR_CAPSULE := Color(0.2, 1.0, 1.0)   # player test points / capsule span
@@ -59,9 +72,11 @@ const BOX_EDGES := [
 
 var _hull_mesh: ImmediateMesh
 var _player_mesh: ImmediateMesh
+var _hit_mesh: ImmediateMesh
 var _gap_label: Label3D
 var _hull_signature := 0        # hash of instance pose + emitted geometry
 var _hull_has_surface := false
+var _hit_signature := 0         # hash of the hits channel (ages shift per tick)
 var _drawable_count := 0        # valid volumes plus the local-player capsule
 
 
@@ -70,6 +85,8 @@ func _build_view() -> void:
 	add_child(_make_lines_node("CollisionHullLines", _hull_mesh))
 	_player_mesh = ImmediateMesh.new()
 	add_child(_make_lines_node("CollisionPlayerLines", _player_mesh))
+	_hit_mesh = ImmediateMesh.new()
+	add_child(_make_lines_node("CollisionHitLines", _hit_mesh))
 	_gap_label = _make_overlay_label("CollisionGapLabel", 0.006, 48, 12)
 	_gap_label.modulate = COLOR_CAPSULE
 	add_child(_gap_label)
@@ -89,6 +106,9 @@ func render_report(debug: Dictionary) -> void:
 	_drawable_count = _count_drawables(instances, player) + probe_boxes.size()
 	_update_hulls(instances, probe_boxes)
 	_update_player(player)
+	_update_hits(instances,
+			debug.get("hits", PackedFloat32Array()),
+			maxi(1, int(debug.get("hit_ttl", 62))))
 
 
 func _clear_all() -> void:
@@ -98,6 +118,8 @@ func _clear_all() -> void:
 		_hull_has_surface = false
 		_hull_signature = 0
 	_player_mesh.clear_surfaces()
+	_hit_mesh.clear_surfaces()
+	_hit_signature = 0
 	if _gap_label != null:
 		_gap_label.visible = false
 
@@ -164,6 +186,53 @@ func _update_hulls(instances: Array, probe_boxes: Array = []) -> void:
 		return
 	MissionOverlayUtil.emit_line_segments(_hull_mesh, segments)
 	_hull_has_surface = true
+
+
+# --- Hit / contact flashes ----------------------------------------------------
+
+## The contact-debug hits channel: stride-6 [target_handle, age_ticks, kind,
+## x, y, z] events inside the flash TTL. Each draws a cross at its point; a
+## hit whose target box is in the same report re-emits that box in the kind
+## color, fading with age -- the classic "body lights up on contact" view.
+## Pure overdraw: the signature-cached hull mesh and the drawable count stay
+## untouched (hits are decoration, not shapes).
+func _update_hits(instances: Array, hits: PackedFloat32Array, ttl: int) -> void:
+	var sig := hash(hits)
+	if sig == _hit_signature:
+		return
+	_hit_signature = sig
+	_hit_mesh.clear_surfaces()
+	if hits.is_empty():
+		return
+	# Box corners by target handle, from the same report the hulls drew.
+	var boxes_by_handle := {}
+	for inst_v in instances:
+		var inst: Dictionary = inst_v
+		var handle := int(inst.get("entity_handle", -1))
+		if handle >= 0:
+			boxes_by_handle[handle] = inst.get("volumes", [])
+	var segments: Array = []
+	var count := hits.size() / HIT_STRIDE
+	for i in range(count):
+		var base := i * HIT_STRIDE
+		var target := int(hits[base])
+		var age := hits[base + 1]
+		var kind := int(hits[base + 2])
+		var at := Vector3(hits[base + 3], hits[base + 4], hits[base + 5])
+		var color: Color = HIT_KIND_COLORS[kind] \
+				if kind >= 0 and kind < HIT_KIND_COLORS.size() else COLOR_OTHER
+		var alpha := maxf(HIT_MIN_ALPHA, 1.0 - age / float(ttl))
+		var faded := Color(color, alpha)
+		_cross(segments, at, 0.25, faded)
+		for vol_v in boxes_by_handle.get(target, []):
+			var vol: Dictionary = vol_v
+			var corners: PackedVector3Array = vol.get("corners", PackedVector3Array())
+			if corners.size() != 8:
+				continue
+			for edge in BOX_EDGES:
+				segments.append({ "a": corners[edge[0]], "b": corners[edge[1]], "color": faded })
+	if not segments.is_empty():
+		MissionOverlayUtil.emit_line_segments(_hit_mesh, segments)
 
 
 # --- The local player's capsule ------------------------------------------------

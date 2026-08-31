@@ -63,6 +63,12 @@ struct GameConfig {
 	std::string server_password;               // [orig game_settings +0x20] BuildFlags |0x8
 	std::string side_a_password;               // [orig game_settings +0x40] BuildFlags |0x20; join-reject 19
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20
+	// Signed spectator limit: 0 disables spectating, -1 shares max_players,
+	// and a positive value adds that many spectator-only capacity slots.
+	// [orig: HostDialog_ReadSettings @0x555940; CNapiNetwork_ValidateJoinRequest
+	// @0x4c61b0]
+	int32_t spectator_slots = 0;
+	std::string spectator_password;             // [orig SPECTATOR_PW; BuildFlags |0x4000]
 	// (retail game_settings +0x80 internet_address, +0xC4 use_lineup_queue and
 	//  +0xC8 lineup_queue_size have no reader here and are not modelled.)
 	uint32_t max_players = 1;                   // [orig game_settings +0xC0] clamped 1..kMaxPlayersCap
@@ -158,8 +164,6 @@ struct GameConfig {
 	// CNapiServerConfig_BuildFlags @0x4c4dc0 inputs beyond game_settings (the g_rules_flags bitfield
 	// sources): the trailing flags dword of the 0x08 block. `MaxScore` is retained
 	// above for gameplay/session-status, but retail does not put it in this 0x08 block.
-	bool squad_enforced = false;       // [orig g_squad_max_players @0x2550924 != 0] -> |0x2000
-	std::string squad_required_tag;    // [orig g_squad_required_tag @0x2550928]      -> |0x4000
 	bool permanent_death = false;      // [orig g_MpPermanentDeath @0x2550C9C]        -> |0x8000
 	// dword_2550A04 is already represented once by mp_attributes above. In
 	// particular SET `TeamChoose` writes bit 0x4 directly; there is no parallel
@@ -219,6 +223,16 @@ struct GameConfig {
 	GameSessionChannel session_channel = GameSessionChannel::Automatic;
 	uint32_t lan_mode = 1;
 	std::optional<uint32_t> send_holdoff_ticks;
+
+	// The fixed player-slot table grows only for a positive spectator limit.
+	// -1 enables spectators inside max_players; 0 disables them. Retail's
+	// network validation performs the same signed add before its 251-row slot
+	// table clamp. [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0]
+	uint32_t total_player_slot_capacity() const {
+		const uint64_t total = static_cast<uint64_t>(max_players) +
+				(spectator_slots > 0 ? static_cast<uint32_t>(spectator_slots) : 0u);
+		return static_cast<uint32_t>(total < 251u ? total : 251u);
+	}
 
 	uint32_t effective_send_holdoff_ticks(
 			GameSessionChannel automatic_fallback = GameSessionChannel::SinglePlayer) const {

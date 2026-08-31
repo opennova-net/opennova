@@ -44,6 +44,8 @@ public:
 	static int lan_gametype();
 	static int lan_mode(int fallback);
 	static int lan_max_players(int fallback);
+	static bool spectator();
+	static String spectator_password();
 	static String callsign();
 	static String integrity_profile();
 	static String capture_pcap();

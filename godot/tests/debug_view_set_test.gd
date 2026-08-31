@@ -49,7 +49,9 @@ func test_every_installed_overlay_reports_when_it_has_no_drawable_data() -> void
 	world.set_particle_debug(true)
 	world.set_occlusion_debug(true)
 	world.set_round_debug(true)
+	world.set_ray_debug(true)
 	world.set_hitbox_debug(true)
+	world.set_ai_debug_option(&"show_ai_overlay", true)
 
 	var expected_empty_reasons := {
 		"show_skeletons": "No skeletons to draw",
@@ -58,7 +60,9 @@ func test_every_installed_overlay_reports_when_it_has_no_drawable_data() -> void
 		"show_effect_boxes": "No live effect bounds to draw",
 		"show_portal_faces": "No portal faces in range",
 		"show_round_trails": "No recent rounds to draw",
+		"show_rays": "No recent rays to draw",
 		"show_hit_meshes": "No hit meshes in range",
+		"show_ai_overlay": "No AI brains to draw",
 	}
 	var status := _status_by_id(world.get_debug_view_statuses())
 	assert_eq(status.size(), expected_empty_reasons.size(),
@@ -77,7 +81,9 @@ func test_every_installed_overlay_reports_when_it_has_no_drawable_data() -> void
 	world.set_particle_debug(false)
 	world.set_occlusion_debug(false)
 	world.set_round_debug(false)
+	world.set_ray_debug(false)
 	world.set_hitbox_debug(false)
+	world.set_ai_debug_option(&"show_ai_overlay", false)
 	await get_tree().process_frame
 
 

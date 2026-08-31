@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Orphan engine headers (docs/maturity-program.md, STD-1): an `engine/**`
-header that no source outside `tests/` (and outside its own translation unit)
-includes is dead policy code with a passing test — the pattern the #554 and
-#576 post-merge rounds found in eleven and four headers respectively. Such a
+"""Orphan engine/binding headers (docs/maturity-program.md, STD-1): an
+`engine/**` or `godot/src/**` header that no source outside `tests/` (and
+outside its own translation unit) includes is dead policy code with a passing
+test — the pattern the #554 and #576 post-merge rounds found in eleven and
+four headers respectively (`godot/src` joined the scanned roots at the
+2026-08-30 tidy after #595 reworked that tree blind to this gate). Such a
 header may exist only while it is explicitly STAGED: its leading comment must
 carry the literal `STAGED, NOT WIRED` marker naming the live owner that will
 consume it.
@@ -40,7 +42,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "orphan_header_allowlist.json"
 
-HEADER_ROOTS = ("engine",)
+HEADER_ROOTS = ("engine", "godot/src")
 CONSUMER_ROOTS = ("engine", "godot/src", "apps")
 SOURCE_SUFFIXES = (".h", ".hpp", ".c", ".cc", ".cpp", ".inl")
 HEADER_SUFFIXES = (".h", ".hpp")

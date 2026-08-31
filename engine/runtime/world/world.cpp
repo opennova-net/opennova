@@ -8,6 +8,7 @@
 
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_sound.h>
 
@@ -418,6 +419,105 @@ bool EntityCommands::set_entity_position(EntityHandle h, const Vec3 &mission_pos
     return true;
 }
 
+// --- the WAC weather handlers (the observable EnvState mirror + the weather
+// home; every command bumps the mirror's generation the way the VM did) ------
+
+void EntityCommands::set_fog_type(int32_t type) {
+    world_.env.fog_type = type;
+    ++world_.env.generation;
+    world_.weather.command_fog_type(type);
+}
+
+void EntityCommands::set_fog_distance(int32_t metres) {
+    world_.env.fog_dist = metres;
+    ++world_.env.generation;
+    world_.weather.command_fog_distance(metres);
+}
+
+void EntityCommands::move_fog(int32_t metres, int32_t seconds) {
+    world_.env.fog_dist = metres;
+    ++world_.env.generation;
+    world_.weather.command_move_fog(metres, seconds);
+}
+
+void EntityCommands::set_rain(int32_t percent, int32_t seconds) {
+    world_.env.rain = percent;
+    ++world_.env.generation;
+    world_.weather.command_rain(percent, seconds);
+}
+
+void EntityCommands::set_snow(int32_t percent, int32_t seconds) {
+    world_.env.snow = percent;
+    ++world_.env.generation;
+    world_.weather.command_snow(percent, seconds);
+}
+
+void EntityCommands::set_overcast(int32_t percent, int32_t seconds) {
+    world_.env.overcast = percent;
+    ++world_.env.generation;
+    world_.weather.command_overcast(percent, seconds);
+}
+
+void EntityCommands::set_sky_speed(int32_t rate) {
+    world_.env.sky_speed = rate;
+    ++world_.env.generation;
+    world_.weather.command_sky_speed(rate);
+}
+
+void EntityCommands::set_sky_height(int32_t height_raw) {
+    world_.weather.command_sky_height(height_raw);
+}
+
+void EntityCommands::quake(int32_t seconds) {
+    world_.weather.command_quake(seconds);
+}
+
+void EntityCommands::set_time_of_day_minutes(int32_t minute_of_day) {
+    world_.env.time_of_day = minute_of_day;
+    ++world_.env.generation;
+    world_.weather.command_time_of_day_minutes(minute_of_day);
+}
+
+void EntityCommands::debug_set_time_of_day_minutes(double minute_of_day) {
+    world_.env.time_of_day = static_cast<int32_t>(minute_of_day);
+    ++world_.env.generation;
+    world_.weather.debug_set_time_of_day_minutes(minute_of_day);
+}
+
+void EntityCommands::sun_fade(int32_t percent, int32_t seconds) {
+    world_.weather.command_sun_fade(percent, seconds);
+}
+
+void EntityCommands::set_color_fade(int32_t seconds) {
+    world_.weather.command_color_fade(seconds);
+}
+
+void EntityCommands::set_lightning_color(uint32_t rgb) {
+    world_.weather.command_lightning_color(rgb);
+}
+
+void EntityCommands::lightning_flash() {
+    world_.weather.command_flash();
+}
+
+void EntityCommands::lightning_far_flash() {
+    world_.weather.command_far_flash();
+}
+
+void EntityCommands::set_weather_color(WeatherColorTarget target, uint32_t rgb) {
+    switch (target) {
+        case WeatherColorTarget::Sun: world_.env.sun_rgb = rgb; ++world_.env.generation; break;
+        case WeatherColorTarget::Sky: world_.env.sky_rgb = rgb; ++world_.env.generation; break;
+        case WeatherColorTarget::Fog: world_.env.fog_rgb = rgb; ++world_.env.generation; break;
+        default: break;
+    }
+    world_.weather.command_block_color(target, rgb);
+}
+
+void EntityCommands::set_wind_scale(int32_t value) {
+    world_.weather.set_wind_scale(value);
+}
+
 bool EntityCommands::kill_player(EntityHandle victim, EntityHandle killer) {
     Entity *e = world_.registry.get(victim);
     if (e == nullptr || (e->flags & kEntityFlagPlayer) == 0) return false;
@@ -439,6 +539,13 @@ bool EntityCommands::set_entity_weapon_ammo(EntityHandle h, int32_t clip, int32_
     return true;
 }
 
+bool EntityCommands::set_entity_item_attrib(EntityHandle h, uint32_t attrib, uint32_t attrib2) {
+    Entity *e = world_.registry.get(h);
+    if (e == nullptr) return false;
+    stamp_item_attrib(*e, attrib, attrib2);
+    return true;
+}
+
 bool EntityCommands::set_ssn_hp(uint16_t ssn, int32_t hp) {
     Entity *e = world_.registry.get(resolve_ssn(ssn));
     if (!e) return false;
@@ -456,6 +563,27 @@ bool EntityCommands::add_ssn_hp(uint16_t ssn, int32_t delta) {
     return true;
 }
 
+bool EntityCommands::set_ssn_accuracy(uint16_t ssn, int32_t primary,
+                                      int32_t secondary) {
+    if (world_.ai == nullptr) return false;
+    AiEntity *ae = world_.ai->for_handle(resolve_ssn(ssn));
+    if (ae == nullptr) return false;
+    // The two authored values land in reverse slot order.
+    // [orig: WacCmd_SetAccuracy @0x4F2070]
+    ae->slot.f[AiSlot::kAimErrorSecondary] = std::max(0, 100 - primary);
+    ae->slot.f[AiSlot::kAimErrorPrimary] = std::max(0, 100 - secondary);
+    return true;
+}
+
+bool EntityCommands::set_ssn_guard(uint16_t ssn, bool guard) {
+    Entity *entity = world_.registry.get(resolve_ssn(ssn));
+    if (entity == nullptr) return false;
+    // [orig: WacCmd_SsnGuard @0x4F71C0]
+    if (guard) entity->flags |= kEntityFlagMounted;
+    else entity->flags &= ~kEntityFlagMounted;
+
+    return true;
+}
 namespace {
 
 // The per-entity leg of a waypoint REDIRECT [orig: Entity_SetWaypointByTeam @0x43cdb4]:
@@ -554,6 +682,19 @@ bool EntityCommands::ssn_dead(uint16_t ssn) const {
     return e != nullptr && !e->alive;
 }
 
+bool EntityCommands::ssn_wounded(uint16_t ssn) const {
+    const Entity *entity = world_.registry.get(resolve_ssn(ssn));
+    if (entity == nullptr || entity->item_id == 0) return false;
+    // [orig: WacCmd_SsnWounded @0x4F1B80] Health is read unsigned,
+    // while healthMax is arithmetically halved as signed i16 and then compared
+    // in the same unsigned 16-bit domain.
+    const uint16_t health = static_cast<uint16_t>(entity->health);
+    const int16_t health_max = static_cast<int16_t>(entity->health_max);
+    const uint16_t half = static_cast<uint16_t>(
+            static_cast<int16_t>(health_max >> 1));
+    return health <= half;
+
+}
 bool EntityCommands::ssn_in_area(uint16_t ssn, int area_id) const {
     const Entity *e = world_.registry.get(resolve_ssn(ssn));
     const Area *a = world_.registry.area(area_id);
@@ -763,6 +904,8 @@ bool EntityCommands::ssn_los_clear_within(uint16_t ssn, uint16_t target_ssn,
     los_offset_point(*a, pa);
     int32_t pb[3];
     los_offset_point(*b, pb);
+    const CollisionWorld::RayDebugScope ray_scope(
+            world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
     return world_.ai->line_of_sight_clear(world_, pa, pb,
                                           resolve_ssn(ssn), resolve_ssn(target_ssn));
 }
@@ -796,6 +939,8 @@ bool EntityCommands::ssn_sees_within(uint16_t ssn, uint16_t target_ssn,
         los_offset_point(*a, pa);
         int32_t pb[3];
         los_offset_point(*b_ent, pb);
+        const CollisionWorld::RayDebugScope ray_scope(
+                world_.collision, CollisionWorld::RayDebugCategory::kScriptLos);
         if (!world_.ai->line_of_sight_clear(world_, pa, pb, resolve_ssn(ssn),
                                             resolve_ssn(target_ssn)))
             return false;
@@ -932,6 +1077,240 @@ int EntityCommands::set_group_attack_max(int group, int32_t v) {
     return n;
 }
 
+namespace {
+
+const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
+    const size_t capacity = world.registry.pool_capacity(3);
+    for (size_t slot = 0; slot < capacity; ++slot) {
+        const Entity *marker =
+                world.registry.get(EntityHandle::make(3, static_cast<int>(slot)));
+        if (marker != nullptr && marker->item_id == kParticleEffectMarkerTypeId &&
+            marker->wp_number == wp_number)
+            return marker;
+    }
+    return nullptr;
+}
+
+void sync_teleported_ai(World &world, const Entity &entity) {
+    if (world.ai == nullptr) return;
+    AiEntity *ae = world.ai->for_handle(entity.handle);
+    if (ae == nullptr) return;
+    ae->pos[0] = to_fixed(entity.position.x);
+    ae->pos[1] = to_fixed(entity.position.y);
+    ae->pos[2] = to_fixed(entity.position.z);
+    ae->heading = bam_heading_from_mission_yaw_deg(
+            static_cast<double>(entity.yaw));
+    ae->pitch = bam_from_degrees_wrapped(static_cast<double>(entity.pitch));
+    ae->roll = bam_from_degrees_wrapped(static_cast<double>(entity.roll));
+    ae->net_saved_live_pose[0] = ae->pos[0];
+    ae->net_saved_live_pose[1] = ae->pos[1];
+    ae->net_saved_live_pose[2] = ae->pos[2];
+}
+
+void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
+                      bool single_action) {
+    entity.position = marker.position;
+    entity.yaw = marker.yaw;
+    entity.pitch = marker.pitch;
+    entity.roll = marker.roll;
+    if (single_action || entity.handle.pool() != 0)
+        entity.flags &= ~0x20000u;
+    if (single_action && entity.handle.pool() == 0 &&
+        (marker.flags & 0x20u) != 0)
+        entity.flags |= 0x20u;
+    if (entity.handle.pool() == 0)
+        entity_reset_to_spawn_state(entity);
+    sync_teleported_ai(world, entity);
+}
+
+} // namespace
+
+int EntityCommands::remove_group(int group) {
+    // [orig: Entity_TeleportAllByNetId @0x43D5D0] Despite the shipped
+    // symbol name, action 4 removes every matching row in pools 2,0,1,3.
+    static constexpr int pools[] = {2, 0, 1, 3};
+    int removed = 0;
+    for (int pool : pools) {
+        const size_t capacity = world_.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle =
+                    EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world_.registry.get(handle);
+            if (entity == nullptr || entity->item_id == 0 ||
+                static_cast<int>(entity->group_id) != group)
+                continue;
+            world_.registry.despawn(handle);
+            ++removed;
+        }
+    }
+    if (removed != 0) {
+        world_.recount_group_live();
+        if (world_.collision != nullptr)
+            world_.collision->refresh_after_registry_change(world_);
+    }
+    return removed;
+}
+
+int EntityCommands::set_group_accuracy(int group, int32_t primary,
+                                       int32_t secondary) {
+    // [orig: WacCmd_GroupSetAccuracy @0x4F7BE0] Pool 0 only.
+    if (world_.ai == nullptr) return 0;
+    int changed = 0;
+    const size_t capacity = world_.registry.pool_capacity(0);
+    for (size_t slot = 0; slot < capacity; ++slot) {
+        const EntityHandle handle =
+                EntityHandle::make(0, static_cast<int>(slot));
+        const Entity *entity = world_.registry.get(handle);
+        if (entity == nullptr || entity->item_id == 0 ||
+            static_cast<int>(entity->group_id) != group)
+            continue;
+        AiEntity *ae = world_.ai->for_handle(handle);
+        if (ae == nullptr) continue;
+        ae->slot.f[AiSlot::kAimErrorSecondary] =
+                std::max(0, 100 - primary);
+        ae->slot.f[AiSlot::kAimErrorPrimary] =
+                std::max(0, 100 - secondary);
+        ++changed;
+    }
+    return changed;
+}
+
+bool EntityCommands::set_group_move_speed_kph(int group, int32_t kph) {
+    if (group < 0 || group >= TriggerRelations::kGroups) return false;
+    // [orig: Entity_SetMoveSpeedKPH @0x43A960] The two integer divisions
+    // preserve retail's authored km/h -> 16.16 units/tick truncation.
+    int64_t scaled = (static_cast<int64_t>(256000) * kph) / 60;
+    scaled = (scaled * 256) / 60;
+    world_.relations.group(group).move_speed_q16_per_tick =
+            static_cast<int32_t>(scaled);
+    return true;
+}
+
+int EntityCommands::set_group_team(int group, int32_t team) {
+    // [orig: Entity_SetTeamByNetId @0x43C680] Pools 2,0,1.
+    static constexpr int pools[] = {2, 0, 1};
+    int changed = 0;
+    for (int pool : pools) {
+        const size_t capacity = world_.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle =
+                    EntityHandle::make(pool, static_cast<int>(slot));
+            Entity *entity = world_.registry.get(handle);
+            if (entity == nullptr || entity->item_id == 0 ||
+                static_cast<int>(entity->group_id) != group)
+                continue;
+            entity->team = static_cast<uint8_t>(team);
+            if (world_.ai != nullptr) {
+                if (AiEntity *ae = world_.ai->for_handle(handle))
+                    ae->team = static_cast<uint8_t>(team);
+            }
+            ++changed;
+        }
+    }
+    return changed;
+}
+
+int EntityCommands::change_group(int old_group, int new_group) {
+    // [orig: Entity_UpdateNetIdReferences @0x43C5B0] Pool 0 skips dead rows;
+    // pools 2 and 1 update all resolved rows, then live counts are rebuilt.
+    static constexpr int pools[] = {2, 0, 1};
+    int changed = 0;
+    for (int pool : pools) {
+        const size_t capacity = world_.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle =
+                    EntityHandle::make(pool, static_cast<int>(slot));
+            Entity *entity = world_.registry.get(handle);
+            if (entity == nullptr || entity->item_id == 0 ||
+                static_cast<int>(entity->group_id) != old_group)
+                continue;
+            if (pool == 0 && (entity->flags & kEntityFlagDead) != 0)
+                continue;
+            entity->group_id = static_cast<uint8_t>(new_group);
+            if (world_.ai != nullptr) {
+                if (AiEntity *ae = world_.ai->for_handle(handle))
+                    ae->relmat_id = static_cast<uint16_t>(new_group);
+            }
+            ++changed;
+        }
+    }
+    world_.recount_group_live();
+    return changed;
+}
+
+int EntityCommands::teleport_group_to_marker(int group,
+                                             int32_t marker_wp_number) {
+    // [orig: Entity_TeleportTeamToSpawn @0x43D390] The name says team,
+    // but the member filter is commandGroup and the marker key is WP_NUMBER.
+    const Entity *marker = find_teleport_marker(world_, marker_wp_number);
+    if (marker == nullptr) return 0;
+    const Entity marker_copy = *marker;
+    int changed = 0;
+    static constexpr int pools[] = {0, 1, 2};
+    for (int pool : pools) {
+        const size_t capacity = world_.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            Entity *entity = world_.registry.get(
+                    EntityHandle::make(pool, static_cast<int>(slot)));
+            if (entity == nullptr || entity->item_id == 0 ||
+                static_cast<int>(entity->group_id) != group)
+                continue;
+            copy_marker_pose(world_, *entity, marker_copy, false);
+            ++changed;
+        }
+    }
+    if (changed != 0 && world_.collision != nullptr)
+        world_.collision->refresh_after_registry_change(world_);
+    return changed;
+}
+
+bool EntityCommands::set_ssn_team(uint16_t ssn, int32_t team) {
+    // [orig: Entity_FindByDCBAndSetFlag @0x43DB30] First resolved match in
+    // pools 0,1,2.
+    const EntityHandle handle = resolve_ssn(ssn);
+    if (!handle.valid() || handle.pool() > 2) return false;
+    Entity *entity = world_.registry.get(handle);
+    if (entity == nullptr || entity->item_id == 0) return false;
+    entity->team = static_cast<uint8_t>(team);
+    if (world_.ai != nullptr) {
+        if (AiEntity *ae = world_.ai->for_handle(handle))
+            ae->team = static_cast<uint8_t>(team);
+    }
+    return true;
+}
+
+bool EntityCommands::set_ssn_group(uint16_t ssn, int32_t group) {
+    // [orig: Entity_SetNetIdByParentRef @0x43D6C0] First resolved match in
+    // pools 0,1,2.
+    const EntityHandle handle = resolve_ssn(ssn);
+    if (!handle.valid() || handle.pool() > 2) return false;
+    Entity *entity = world_.registry.get(handle);
+    if (entity == nullptr || entity->item_id == 0) return false;
+    entity->group_id = static_cast<uint8_t>(group);
+    if (world_.ai != nullptr) {
+        if (AiEntity *ae = world_.ai->for_handle(handle))
+            ae->relmat_id = static_cast<uint16_t>(group);
+    }
+    world_.recount_group_live();
+    return true;
+}
+
+bool EntityCommands::teleport_ssn_to_marker(uint16_t ssn,
+                                            int32_t marker_wp_number) {
+    // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0] Marker lookup is
+    // pool 3/type 6088/WP_NUMBER; the target is the first SSN row in 0,1,2.
+    const Entity *marker = find_teleport_marker(world_, marker_wp_number);
+    if (marker == nullptr) return false;
+    const Entity marker_copy = *marker;
+    const EntityHandle handle = resolve_ssn(ssn);
+    if (!handle.valid() || handle.pool() > 2) return false;
+    Entity *entity = world_.registry.get(handle);
+    if (entity == nullptr || entity->item_id == 0) return false;
+    copy_marker_pose(world_, *entity, marker_copy, true);
+    if (world_.collision != nullptr)
+        world_.collision->refresh_after_registry_change(world_);
+    return true;
+}
 bool EntityCommands::group_alive(int group) const {
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);
@@ -1192,41 +1571,90 @@ bool EntityCommands::local_player_on_gun_of_ssn(uint16_t ssn) const {
 
 namespace {
 
-// The ChangeAI command family's per-entity alert-byte arms: sub 5 -> red(2),
-// 22 -> yellow(1), 6 -> green(0) on the controller alert byte the
-// SingleAtRed/YellowAlert triggers read. Reached per-SSN from ChangeSingleAI
-// and per-member from the group/area fans, exactly like the original's
-// per-entity dispatch. [orig: Entity_ApplyCommand @0x43ab60 cases 5/22/6
-// @0x43ac2d/0x43ac8d/0x43acfd]
-void apply_alert_command_byte(AiEntity &ae, int sub_type) {
+// Entity_ApplyCommand has a synchronous controller/entity half and a queued
+// brain half. Single, group, and area targets converge here so both halves see
+// the same member set. [orig: Entity_ApplyCommand @0x43ab60]
+void set_mask(uint32_t &word, uint32_t mask, bool enabled) {
+    if (enabled) word |= mask;
+    else word &= ~mask;
+}
+
+void set_slot_mask(int32_t &word, uint32_t mask, bool enabled) {
+    uint32_t bits = static_cast<uint32_t>(word);
+    set_mask(bits, mask, enabled);
+    word = static_cast<int32_t>(bits);
+}
+
+// The synchronous controller/entity arms of Entity_ApplyCommand.
+// [orig: Entity_ApplyCommand @0x43ab60]
+void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
+                                 int32_t p2, int32_t p3) {
     switch (sub_type) {
+        case 2:
+            set_mask(entity.flags, kEntityFlagMounted, p2 != 0); break;
         case 5: ae.slot.bytes()[AiSlot::kAlertByte] = 2; break;
-        case 22: ae.slot.bytes()[AiSlot::kAlertByte] = 1; break;
         case 6: ae.slot.bytes()[AiSlot::kAlertByte] = 0; break;
+        case 8:
+            if (p2 != 0)
+                ae.slot.f[AiSlot::kAimErrorPrimary] = std::max(0, 100 - p2);
+            break;
+        case 15:
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x1u, p2 != 0);
+            break;
+        case 16:
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x200u, p2 != 0);
+            break;
+        case 17: set_mask(entity.flags, kEntityFlagAiClimb, p2 != 0); break;
+        case 21:
+            ae.slot.f[AiSlot::kBehaviorFlags] =
+                    static_cast<int32_t>(
+                            static_cast<uint32_t>(ae.slot.f[AiSlot::kBehaviorFlags]) &
+                            ~0x20000u);
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x8u, p2 != 0);
+            break;
+        case 22: ae.slot.bytes()[AiSlot::kAlertByte] = 1; break;
+        case 41:
+            ae.slot.f[AiSlot::kAttackRange] =
+                    static_cast<int32_t>(static_cast<uint32_t>(p2) << 16);
+            break;
+        case 42:
+            ae.slot.f[AiSlot::kEngageMin] =
+                    static_cast<int32_t>(static_cast<uint32_t>(p2) << 16);
+            ae.slot.f[AiSlot::kSightRange] =
+                    static_cast<int32_t>(static_cast<uint32_t>(p3) << 16);
+            break;
+        case 43:
+            set_mask(entity.flags, kEntityFlagIndestructible, p2 != 0);
+            break;
         default: break;
     }
 }
 
-// The BRAIN half of the alert subs: retail queues AIEvent {type 6, level}
-// beside the controller-byte write whenever the entity carries an AI
-// component; the brain applies it at dispatch (ai_handle_command case 6 —
-// the forced-2-on-change store + the combat-state push).
-// [orig: Entity_ApplyCommand case 5 @0x43ac59..0x43ac77 / case 0x16
-//  @0x43acc4..0x43ace2 / case 6 @0x43ad34..0x43ad4e -> AIEvent_QueueEntry
-//  @0x455da0 -> AI_HandleCommand case 6 @0x4657a6..0x465816]
-void queue_alert_brain_event(AiSystem &sys, AiEntity &ae, int sub_type) {
-    int level = 0;
+// Queue-backed brain arms. Alert commands remap to event 6 levels 2/0/1;
+// authored state, skill, speed, weapons-free, and elevation preserve p2 as the
+// event argument. [orig: Entity_ApplyCommand @0x43ab60 -> AIEvent_QueueEntry
+// @0x455da0 -> AI_HandleCommand @0x465770]
+void queue_ai_brain_event(AiSystem &sys, AiEntity &ae, int sub_type, int32_t p2) {
+    int event_type = -1;
+    int32_t argument = p2;
     switch (sub_type) {
-        case 5: level = 2; break;
-        case 22: level = 1; break;
-        case 6: level = 0; break;
+        case 5: event_type = 6; argument = 2; break;
+        case 6: event_type = 6; argument = 0; break;
+        case 22: event_type = 6; argument = 1; break;
+        case 26: event_type = 9; break;  // DRIVESKILL
+        case 27: event_type = 8; break;  // AIMSKILL
+        case 28: event_type = 7; break;  // AISETSTATE
+        case 29: event_type = 10; break; // COMBATSPEED
+        case 30: event_type = 11; break; // PATROLSPEED
+        case 45: event_type = 21; break; // AISTARTFIRING
+        case 46: event_type = 22; break; // AIFIRINGANGLE
         default: return;
     }
     AiEventEntry ev{};
-    ev.f[0] = 6;
-    ev.f[1] = 9 | (static_cast<int>(&ae - sys.at(0)) << 16);
+    ev.f[0] = event_type;
+    ev.f[1] = 9 | (sys.index_of(ae) << 16);
     ev.set_timer(0.0f);
-    ev.f[3] = level;
+    ev.f[3] = argument;
     sys.events.queue(ev);
 }
 
@@ -1234,10 +1662,12 @@ void queue_alert_brain_event(AiSystem &sys, AiEntity &ae, int sub_type) {
 
 bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
     if (!world_.ai) return false;
-    AiEntity *ae = world_.ai->for_handle(resolve_ssn(ssn));
-    if (!ae) return false;
-    apply_alert_command_byte(*ae, sub_type);
-    queue_alert_brain_event(*world_.ai, *ae, sub_type);
+    const EntityHandle handle = resolve_ssn(ssn);
+    Entity *entity = world_.registry.get(handle);
+    AiEntity *ae = world_.ai->for_handle(handle);
+    if (entity == nullptr || ae == nullptr) return false;
+    apply_ai_controller_command(*entity, *ae, sub_type, p2, p3);
+    queue_ai_brain_event(*world_.ai, *ae, sub_type, p2);
     ai_apply_command(ae->brain, sub_type, p2, p3, p4);
     return true;
 }
@@ -1288,10 +1718,11 @@ int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, 
     world_.registry.by_group(static_cast<uint8_t>(group), members);
     int n = 0;
     for (EntityHandle h : members) {
+        Entity *entity = world_.registry.get(h);
         AiEntity *ae = world_.ai->for_handle(h);
-        if (ae) {
-            apply_alert_command_byte(*ae, sub_type);
-            queue_alert_brain_event(*world_.ai, *ae, sub_type);
+        if (entity != nullptr && ae != nullptr) {
+            apply_ai_controller_command(*entity, *ae, sub_type, p2, p3);
+            queue_ai_brain_event(*world_.ai, *ae, sub_type, p2);
             ai_apply_command(ae->brain, sub_type, p2, p3, p4);
             ++n;
         }
@@ -1310,12 +1741,12 @@ int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_ty
     world_.registry.in_area(a->bounds, in);
     int n = 0;
     for (EntityHandle h : in) {
-        const Entity *e = world_.registry.get(h);
-        if (!e || e->team != static_cast<uint8_t>(team)) continue;
+        Entity *entity = world_.registry.get(h);
+        if (entity == nullptr || entity->team != static_cast<uint8_t>(team)) continue;
         AiEntity *ae = world_.ai->for_handle(h);
-        if (ae) {
-            apply_alert_command_byte(*ae, sub_type);
-            queue_alert_brain_event(*world_.ai, *ae, sub_type);
+        if (ae != nullptr) {
+            apply_ai_controller_command(*entity, *ae, sub_type, p2, p3);
+            queue_ai_brain_event(*world_.ai, *ae, sub_type, p2);
             ai_apply_command(ae->brain, sub_type, p2, p3, p4);
             ++n;
         }
@@ -1326,188 +1757,6 @@ int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_ty
 // ----------------------------------------------------------------------------
 // World
 // ----------------------------------------------------------------------------
-
-namespace {
-
-constexpr int32_t kFogMinimumQ16 = 2 << 16;
-constexpr int32_t kFogReferenceQ16 = 1024 << 16;
-constexpr uint32_t kTodDayFixed24 = 24u << 24;
-
-int32_t authored_distance_q16(int32_t distance) noexcept {
-    const int64_t fixed = static_cast<int64_t>(distance) << 16;
-    return static_cast<int32_t>(std::clamp<int64_t>(
-            fixed, kFogMinimumQ16, kFogReferenceQ16));
-}
-
-uint32_t transition_step(int32_t current, int32_t target, int32_t seconds) noexcept {
-    // Rounded per-tick step over seconds*62 ticks — the same rounding the
-    // witnessed weather scalar transition uses on the render side
-    // [orig: Environment_UpdateWeatherTick @ 0x57ede2 family; engine/formats/env mirror].
-    int64_t ticks = static_cast<int64_t>(seconds) * 62;
-    if (ticks == 0) ticks = 1;
-    if (ticks < 0) ticks = -ticks;
-    int64_t centered = static_cast<int64_t>(target) - current + ticks / 2;
-    if (centered < 0) centered = -centered;
-    return static_cast<uint32_t>(std::min<int64_t>(centered / ticks, 0xFFFFFFFFll));
-}
-
-int32_t authored_percent_q16(int32_t percent) noexcept {
-    const int64_t fixed = (static_cast<int64_t>(percent) << 16) / 100;
-    return static_cast<int32_t>(std::min<int64_t>(fixed, 0x10000));
-}
-
-int32_t spring_tick(int32_t current, int32_t target, uint32_t step,
-                    int32_t max_abs) noexcept {
-    // 1/32 spring toward target with a per-tick step clamp — the witnessed
-    // weather spring [orig: Environment_UpdateWeatherTick @ 0x57ede2].
-    int64_t delta = (static_cast<int64_t>(target) - current + 31) >> 5;
-    const int64_t clamp = std::min<uint64_t>(step, 0x7FFFFFFFu);
-    delta = std::clamp<int64_t>(delta, -clamp, clamp);
-    return static_cast<int32_t>(std::clamp<int64_t>(
-            static_cast<int64_t>(current) + delta, -max_abs, max_abs));
-}
-
-} // namespace
-
-void EnvNetworkState::publish_complete(const EnvNetworkSample &sample) noexcept {
-    const bool first = !valid;
-    if (first || (scripted_channels_ & kScriptedFog) == 0) {
-        fog_target_q16 = sample.fog_target_q16;
-        fog_current_q16_ = sample.fog_current_q16;
-        fog_accel_clamp = sample.fog_accel_clamp;
-    }
-    if (first) {
-        tod_fixed24 = sample.tod_fixed24;
-        tod_advance_per_tick_ = sample.tod_advance_per_tick;
-    } else if ((scripted_channels_ & kScriptedTod) == 0) {
-        tod_fixed24 = sample.tod_fixed24;
-    } else if (tod_advance_per_tick_ == 0) {
-        // An external 62-Hz owner (Godot) advances the resource clock. Retain
-        // the scripted absolute time while applying only that base clock delta.
-        const uint32_t previous = last_external_tod_fixed24_ % kTodDayFixed24;
-        const uint32_t current = sample.tod_fixed24 % kTodDayFixed24;
-        const uint32_t delta = (current + kTodDayFixed24 - previous) % kTodDayFixed24;
-        tod_fixed24 = (tod_fixed24 + delta) % kTodDayFixed24;
-    }
-    last_external_tod_fixed24_ = sample.tod_fixed24;
-    if (first || (scripted_channels_ & kScriptedQuake) == 0)
-        quake_ticks = sample.quake_ticks;
-    if (first || (scripted_channels_ & kScriptedCloud) == 0)
-        cloud_scroll_rate_target = sample.cloud_scroll_rate_target;
-    if (first || (scripted_channels_ & kScriptedPrecipitation) == 0) {
-        rain_pct_current_q16 = sample.rain_pct_current_q16;
-        rain_target_q16_ = static_cast<int32_t>(sample.rain_pct_current_q16);
-        precipitation_kind = sample.precipitation_kind;
-    }
-    if (first || (scripted_channels_ & kScriptedOvercast) == 0) {
-        overcast_blend_q16 = sample.overcast_blend_q16;
-        overcast_target_q16_ = static_cast<int32_t>(sample.overcast_blend_q16);
-    }
-    valid = true;
-    ++generation;
-}
-
-void EnvNetworkState::initialize_mission_start() noexcept {
-    if (!valid) return;
-    fog_current_q16_ = fog_target_q16;
-    fog_accel_clamp = 0x00FF0000u;
-    fog_reference_q16_ = 1000 << 16;
-    rain_pct_current_q16 = static_cast<uint32_t>(rain_target_q16_);
-    rain_step_q16_ = 0x1000u;
-    overcast_blend_q16 = static_cast<uint32_t>(overcast_target_q16_);
-    overcast_step_q16_ = 0x1000u;
-    ++generation;
-}
-
-void EnvNetworkState::command_fog_distance(int32_t authored_distance) noexcept {
-    const int32_t target = authored_distance_q16(authored_distance);
-    const int64_t delta = static_cast<int64_t>(target) - fog_current_q16_;
-    fog_target_q16 = target;
-    fog_accel_clamp = static_cast<uint32_t>(delta < 0 ? -delta : delta);
-    scripted_channels_ |= kScriptedFog;
-    ++generation;
-}
-
-void EnvNetworkState::command_move_fog(int32_t authored_distance, int32_t seconds) noexcept {
-    const int32_t target = authored_distance_q16(authored_distance);
-    fog_target_q16 = target;
-    fog_accel_clamp = transition_step(fog_current_q16_, target, seconds);
-    scripted_channels_ |= kScriptedFog;
-    ++generation;
-}
-
-void EnvNetworkState::command_sky_speed(int32_t authored_rate) noexcept {
-    cloud_scroll_rate_target = static_cast<uint32_t>(authored_rate) << 10;
-    scripted_channels_ |= kScriptedCloud;
-    ++generation;
-}
-
-void EnvNetworkState::command_precipitation(int32_t authored_percent, int32_t seconds,
-                                            PrecipitationKind kind) noexcept {
-    rain_target_q16_ = authored_percent_q16(authored_percent);
-    rain_step_q16_ = transition_step(
-            static_cast<int32_t>(rain_pct_current_q16), rain_target_q16_, seconds);
-    precipitation_kind = static_cast<uint32_t>(kind);
-    scripted_channels_ |= kScriptedPrecipitation;
-    ++generation;
-}
-
-void EnvNetworkState::command_overcast(int32_t authored_percent, int32_t seconds) noexcept {
-    overcast_target_q16_ = authored_percent_q16(authored_percent);
-    overcast_step_q16_ = transition_step(
-            static_cast<int32_t>(overcast_blend_q16), overcast_target_q16_, seconds);
-    scripted_channels_ |= kScriptedOvercast;
-    ++generation;
-}
-
-void EnvNetworkState::command_quake(int32_t authored_duration) noexcept {
-    // [orig: WacCmd_Quake (ex sub_4ED4C0) — Env_QuakeTicks = 6 * value]
-    quake_ticks = authored_duration <= 0
-            ? 0u
-            : static_cast<uint32_t>(static_cast<uint64_t>(authored_duration) * 6u);
-    scripted_channels_ |= kScriptedQuake;
-    ++generation;
-}
-
-void EnvNetworkState::command_time_of_day_minutes(int32_t minute_of_day) noexcept {
-    // [orig: TOD handler @0x4EDC70] ParamType::Hour resolves to minutes;
-    // the handler multiplies directly by 0x44444 into the 8.24 accumulator.
-    tod_fixed24 = static_cast<uint32_t>(minute_of_day) * 0x44444u;
-    scripted_channels_ |= kScriptedTod;
-    ++generation;
-}
-
-void EnvNetworkState::advance_tick() noexcept {
-    bool changed = false;
-    if (tod_advance_per_tick_ != 0) {
-        tod_fixed24 = (tod_fixed24 + tod_advance_per_tick_) % kTodDayFixed24;
-        changed = true;
-    }
-    if ((scripted_channels_ & kScriptedQuake) != 0 && quake_ticks != 0) {
-        --quake_ticks;
-        changed = true;
-    }
-    if ((scripted_channels_ & kScriptedFog) != 0) {
-        const int32_t next = spring_tick(fog_current_q16_, fog_target_q16,
-                                        fog_accel_clamp, fog_reference_q16_);
-        changed |= next != fog_current_q16_;
-        fog_current_q16_ = next;
-    }
-    if ((scripted_channels_ & kScriptedPrecipitation) != 0) {
-        const int32_t current = static_cast<int32_t>(rain_pct_current_q16);
-        const int32_t next = spring_tick(current, rain_target_q16_, rain_step_q16_, 0x10000);
-        changed |= next != current;
-        rain_pct_current_q16 = static_cast<uint32_t>(next);
-    }
-    if ((scripted_channels_ & kScriptedOvercast) != 0) {
-        const int32_t current = static_cast<int32_t>(overcast_blend_q16);
-        const int32_t next = spring_tick(
-                current, overcast_target_q16_, overcast_step_q16_, 0x10000);
-        changed |= next != current;
-        overcast_blend_q16 = static_cast<uint32_t>(next);
-    }
-    if (changed) ++generation;
-}
 
 uint16_t World::next_prng16() noexcept {
     // [orig: PRNG_Next16 @0x6130a0 / @0x613140, both over
@@ -1629,6 +1878,19 @@ void World::run_logic_tick(bool is_authority, TickPhase phase,
         throwables.events.clear();
         throwables.tick(*this, ai != nullptr ? ai->collision : nullptr, terrain);
     }
+    // The precipitation fall: while it rains every drop slot lowers by the
+    // kind's per-tick amount, once per ENTITY update — retail runs it inside
+    // Entity_UpdateAllEntities after the pool-1 walk and before
+    // DeathPiece_TickAll, so it rides the entity update's frame gate (never
+    // the 255-tick weather settle, never the pre-mission pass) and every peer
+    // falls its own drops from the rain current the previous weather tick left
+    // Entity_UpdateAllEntities itself returns before it without a local
+    // player entity (@ 0x4c2110); its epilog-screen path skips it as well.
+    // [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
+    //  @ 0x4c2214].
+    if (gameplay && cached.local_player.valid())
+        weather.precipitation.fall_tick(weather.core.scalar_channels.rain_pct_fp,
+                                        weather.precipitation_kind);
     if (perf != nullptr) {
         const uint64_t now = io::perf_now_us();
         perf->throwables_us = now - phase_start;
@@ -1799,7 +2061,7 @@ World::Snapshot World::snapshot() const {
     s.vars = vars;
     s.wac_values = wac_values;
     s.env = env;
-    s.network_env = network_env;
+    s.weather = weather;
     s.match = match;
     s.spawn_waves = spawn_waves;
     s.zone_capture_state = zone_capture_state;
@@ -1817,7 +2079,7 @@ void World::restore(const Snapshot &s) {
     vars = s.vars;
     wac_values = s.wac_values;
     env = s.env;
-    network_env = s.network_env;
+    weather = s.weather;
     match = s.match;
     spawn_waves = s.spawn_waves;
     zone_capture_state = s.zone_capture_state;

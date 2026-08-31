@@ -15,12 +15,14 @@ struct LanDiscoveryServer {
 	std::string session_id;
 	std::string expansion;
 	uint32_t gametype = 0;
+	uint32_t server_flags = 0;
 	uint32_t current_players = 0;
 	uint32_t max_players = 0;
 
 	bool operator==(const LanDiscoveryServer &o) const {
 		return server_name == o.server_name && session_id == o.session_id &&
 		       expansion == o.expansion && gametype == o.gametype &&
+		       server_flags == o.server_flags &&
 		       current_players == o.current_players && max_players == o.max_players;
 	}
 	bool operator!=(const LanDiscoveryServer &o) const { return !(*this == o); }

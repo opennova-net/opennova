@@ -171,10 +171,19 @@ typedef struct DefAmmoFile {
 /* Weapon Definitions                                                        */
 /* ========================================================================= */
 
+typedef enum DefSightBlendMode {
+    DEF_SIGHT_BLEND_BLEND = 0,
+    DEF_SIGHT_BLEND_ADD = 1,
+    DEF_SIGHT_BLEND_BLEND_AT = 2,
+    DEF_SIGHT_BLEND_MULTIPLY = 3,
+    DEF_SIGHT_BLEND_ADD_AT = 4,
+    DEF_SIGHT_BLEND_MULTIPLY_AT = 5
+} DefSightBlendMode;
+
 typedef struct DefSightEntry {
     char texture[128];
     int x1, y1, x2, y2;
-    int blend;        /* 0=Blend, 1=Add, 2=BlendAt */
+    int blend;        /* DefSightBlendMode */
     int scale;        /* boolean */
     int slide;        /* boolean */
     int slide_frames;
@@ -983,6 +992,22 @@ int def_parse_items(const char *path, DefItemsFile *out);
    call; free with def_free_items as usual. Returns 0 on success, -1 on bad input. */
 int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out);
 void def_free_items(DefItemsFile *f);
+
+/* The items.def `attrib:` keyword tables, read-only by index: the SAME tables the
+   parser matches tokens against (def_scan.cpp item_attrib_table / item_attrib2_table),
+   so a tool that names an ItemDefAttrib bit shares the parser's vocabulary rather
+   than carrying a second list. Lowercase token + its bit; NULL / 0 out of range.
+   [orig: ItemDef_ParseProperty @0x49eb00] */
+int def_item_attrib_keyword_count(void);
+const char *def_item_attrib_keyword(int index);
+uint32_t def_item_attrib_keyword_bit(int index);
+int def_item_attrib2_keyword_count(void);
+const char *def_item_attrib2_keyword(int index);
+uint32_t def_item_attrib2_keyword_bit(int index);
+/* The DefItemType vocabulary by value ("vehicle", "decoration/foliage", ...,
+   "unset"; "?" for a value the table never produces) — one home for the
+   type names a tool prints. */
+const char *def_item_type_name(int type);
 
 int def_parse_hudpos(const char *path, DefHudPosFile *out);
 /* Parse hudpos.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the

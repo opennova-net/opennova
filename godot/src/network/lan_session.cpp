@@ -43,6 +43,7 @@ Dictionary row_dictionary(const opennova::np::LanDiscoveryRow &row) {
 	out["players"] = static_cast<int64_t>(row.server.current_players);
 	out["max_players"] = static_cast<int64_t>(row.server.max_players);
 	out["gametype"] = static_cast<int64_t>(row.server.gametype);
+	out["server_flags"] = static_cast<int64_t>(row.server.server_flags);
 	out["session_id"] = String::utf8(row.server.session_id.c_str());
 	out["expansion"] = String::utf8(row.server.expansion.c_str());
 	return out;

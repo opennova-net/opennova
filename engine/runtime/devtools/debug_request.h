@@ -20,6 +20,9 @@ struct DebugRequest {
 		// The engine's full local-player teleport transaction: mission-space
 		// `pos` plus mission `yaw`/`pitch` degrees; `target` unused.
 		TeleportLocalPlayer,
+		// Both ItemDefAttrib words behind `target`, the full edited values
+		// (EntityCommands::set_entity_item_attrib: the per-entity override).
+		SetEntityItemAttrib,
 	};
 
 	Kind kind = Kind::SetEntityHealth;
@@ -28,6 +31,8 @@ struct DebugRequest {
 	float pos[3] = {0.0f, 0.0f, 0.0f};  // mission space (Z-up)
 	float yaw = 0.0f;                   // TeleportLocalPlayer, mission degrees
 	float pitch = 0.0f;                 // TeleportLocalPlayer, mission degrees
+	uint32_t attrib = 0;                // SetEntityItemAttrib: items.def attrib word
+	uint32_t attrib2 = 0;               // SetEntityItemAttrib: items.def attrib2 word
 };
 
 }  // namespace opennova::devtools

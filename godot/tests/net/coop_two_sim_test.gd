@@ -533,17 +533,18 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	host.free()
 
 
-func test_joiner_drains_phase2_environment_once_per_received_revision() -> void:
+func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	var mission := _two_organics()
 	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
-	# Native retail units, deliberately unlike every stock fixture. No map or
-	# game-type branch can accidentally manufacture this sample.
-	host.set_network_environment(
-			0x01230000, 0x01010000, 0x00123456, (0x3456 << 13) - 0x1000,
-			0, 0x012C, 0x0002ABCD, 0x000056FF, 0x000078AA, 0x1234569A)
+	# WAC-equivalent commands on the host's weather home, deliberately unlike
+	# every stock fixture. No map or game-type branch can manufacture these.
+	assert_true(host.command_fog_distance(291))
+	assert_true(host.command_sky_speed(170))
+	assert_true(host.command_snow(0, 1))
+	assert_true(host.command_quake(60))
 
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
@@ -553,23 +554,17 @@ func test_joiner_drains_phase2_environment_once_per_received_revision() -> void:
 	for _i in range(1200):
 		host.step()
 		joiner.step()
-		received = joiner.take_join_environment_update()
-		if not received.is_empty():
+		received = joiner.get_weather_state()
+		if int(received.get("fog_target_q16", 0)) == 291 << 16:
 			break
 		OS.delay_msec(2)
 
-	assert_false(received.is_empty(),
-			"the OpenNova joiner receives the host's scheduled phase-2 sample")
-	assert_eq(int(received.get("fog_dist", -1)), 0x0123)
-	assert_eq(int(received.get("fog_accel", -1)), 0x1235)
-	assert_eq(int(received.get("tod_fixed", -1)), 0x3456)
-	assert_eq(int(received.get("quake_ticks", -1)), 0xFF)
-	assert_eq(int(received.get("cloud_scroll", -1)), 0xAA)
-	assert_eq(int(received.get("rain_pct", -1)), 0x56)
-	assert_eq(int(received.get("overcast", -1)), 0x78)
-	assert_eq(int(received.get("precipitation_kind", -1)), 0x9A)
-	assert_true(joiner.take_join_environment_update().is_empty(),
-			"the live-owner adapter consumes each receive revision exactly once")
+	assert_eq(int(received.get("fog_target_q16", -1)), 291 << 16,
+			"the OpenNova joiner folds the host's scheduled phase-2 sample into its weather home")
+	assert_eq(int(received.get("cloud_scroll_rate_target", -1)), 170 << 10)
+	assert_eq(int(received.get("precipitation_kind", -1)), 1)
+	assert_gt(int(received.get("quake_ticks", -1)), 0,
+			"the host's quake countdown reaches the joiner")
 	joiner.free()
 	host.free()
 
@@ -719,6 +714,16 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			host_joiner_kind = int(hsnap[base + Simulation.PF_KIND])
 			host_joiner_index = int(hsnap[base + Simulation.PF_INDEX])
 	assert_true(host_sees_joiner, "host's present includes the admitted joiner (a player row that isn't the host's own)")
+	# The per-entity attrib override is the authority's alone: the joiner's rows
+	# are replicas the wire re-writes, so its seam refuses outright while the
+	# host's accepts the same call on its own row.
+	assert_eq(int(joiner.debug_set_entity_item_attrib(host_own, 0, 0)), ERR_UNAUTHORIZED,
+			"a joiner never overrides an item attrib")
+	var host_card: EntityCard = host.entity_card(host_own)
+	assert_not_null(host_card)
+	assert_eq(int(host.debug_set_entity_item_attrib(host_own,
+			int(host_card.get_item_attrib()), int(host_card.get_item_attrib2()))), OK,
+			"the host's seam accepts the override on its own player row")
 	assert_eq(host_joiner_type, 0x14B9,
 			"the host's joiner row resolves the player runtime type so the wire pass builds its avatar")
 	# An admitted player has NO authored .bms identity: its row must carry the

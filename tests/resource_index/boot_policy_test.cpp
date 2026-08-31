@@ -52,8 +52,8 @@ void test_runtime_launch_flags_parse() {
         {"game.exe", "--", "--Mission", " 00TRa.bms ", "--lan-host", "ASH_I5A.BMS",
          "--lan-join", "192.168.10.120:32770", "--lan-port", "32768", "--LAN-GAMETYPE",
          "0x10020", "--lan-mode", "3", "--lan-max-players", "16", "--callsign", "Host",
-         "--integrity-profile", "retail", "--capture-pcap", "C:/cap/s.pcapng", "--mcp-port",
-         "8975"});
+         "--spectator", "--spectator-password", " watch me ", "--integrity-profile",
+         "retail", "--capture-pcap", "C:/cap/s.pcapng", "--mcp-port", "8975"});
     CHECK(f.mission == "00TRa.bms");
     CHECK(f.lan_host == "ASH_I5A.BMS");
     CHECK(f.lan_join == "192.168.10.120:32770");
@@ -61,6 +61,8 @@ void test_runtime_launch_flags_parse() {
     CHECK(f.lan_gametype == 0x10020);
     CHECK(f.lan_mode == 3);
     CHECK(f.lan_max_players == 16);
+    CHECK(f.spectator);
+    CHECK(f.spectator_password == "watch me");
     CHECK(f.callsign == "Host");
     CHECK(f.integrity_profile == "retail");
     CHECK(f.capture_pcap == "C:/cap/s.pcapng");
@@ -70,6 +72,7 @@ void test_runtime_launch_flags_parse() {
     CHECK(none.mission.empty() && none.lan_host.empty() && none.lan_join.empty());
     CHECK(none.lan_port == 0 && none.lan_gametype == -1 && none.lan_mode == 0);
     CHECK(none.lan_max_players == 0 && none.mcp_port == 0);
+    CHECK(!none.spectator && none.spectator_password.empty());
     CHECK(none.callsign.empty() && none.integrity_profile.empty() && none.capture_pcap.empty());
     // Malformed or out-of-range integers read the sentinel, never a clamp.
     const LaunchFlags bad = parse_launch_flags(

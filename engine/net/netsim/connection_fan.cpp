@@ -27,7 +27,7 @@ namespace {
 // flags1 signal byte and the 7-byte local-player tail's stance/mount fields.
 struct FrameHeaderState {
 	// flags1 [orig: NetPacket_WritePlayerState @0x4ff793-0x4ff7dd]: bit0 = spectator
-	// (slot+100567 — unmodeled 0), bit1 = RESPAWN-PENDING (slot+89912 & 0x10) — re-asserted
+	// (slot+100567), bit1 = RESPAWN-PENDING (slot+89912 & 0x10) — re-asserted
 	// EVERY frame; the client's deploy screen is g_deploy_screen_active = (flags1 & 2) != 0 each frame,
 	// so one bit1=0 frame closes it [orig: NapiNPClientMsg_0x00A @0x42ff82]. bit2 = the
 	// one-shot load hint (entity+44 & 0x1000 — unmodeled). (D-NET-156)
@@ -515,12 +515,18 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	const uint16_t carrier_handle = self
 			? (self->mount_handle != 0xFFFF ? self->mount_handle : self->ground_handle)
 			: 0xFFFF;
-	// The dead-or-spectator flag: the recipient entity's DEAD bit (flags & 2 —
-	// the everyday between-death-and-respawn state) OR the slot spectator flag
-	// playerState[89912] & 0x10 (that MODE is unmodeled and stays a D-NET-139
-	// residual) [orig: @0x50e677..0x50e693].
+	// The dead-or-spectator flag, per the witnessed storage: the recipient
+	// entity's DEAD bit (flags & 2 — the everyday between-death-and-respawn
+	// state) OR the deploy-hold bit slot+89912 & 0x10 [orig: @0x50e677..
+	// 0x50e693]. The hold is set ONCE at join whenever the mission has spawn
+	// zones [orig: Server_OnPlayerJoin @0x51a6f2] and cleared only by the
+	// deploy leg of Server_ProcessPlayerDeath [orig: @0x517791], so it covers
+	// BOTH a never-deploying spectator and an ordinary joiner still on the
+	// deploy screen; a runtime-converted (permadeath) spectator rides the dead
+	// bit instead, exactly like retail.
 	const bool self_dead_or_spectator =
-			self != nullptr && (self->state_flags & 0x02) != 0;
+			conn.respawn_pending ||
+			(self != nullptr && (self->state_flags & 0x02) != 0);
 	if (perf != nullptr) {
 		const uint64_t now = io::perf_now_us();
 		perf->entity_setup_us = now - phase_start;
@@ -529,6 +535,14 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 
 	for (const GameEntitySnapshot &e : entities) {
 		if (record_wire_size(e) == 0) continue; // no compact form
+		// Owner-hidden admission: an entity whose owning slot hides it (the
+		// spectator latch — replication_model.h owner_hidden) never enters
+		// another recipient's list; the recipient's OWN entity is always
+		// admitted [orig: @0x50e6fd — `validated == recipient ||
+		// (!slot[97537] && !slot[97536])`]. The original's tracked-slot walk
+		// also despawns a tracked hidden row with a reliable 0x12; that sweep
+		// stays a D-NET-139 residual.
+		if (e.owner_hidden && e.wire_handle != conn.owned_entity.packed) continue;
 		const uint8_t age = conn.s2c_entity_age[age_index(e)];
 
 		// distanceTiles = (sqrt(dx^2 + dy^2 + (dz/2)^2) - boundRadius) >> 16 against the
@@ -1014,24 +1028,31 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 	// divided. Retail keeps these environment values in native fixed-point globals
 	// and quantizes only while writing the frame.
 	FrameHeaderState hs;
-	hs.flags1 = conn.respawn_pending ? 0x02 : 0x00;
+	hs.flags1 = static_cast<uint8_t>(
+			(conn.spectator ? 0x01u : 0x00u) |
+			(conn.respawn_pending ? 0x02u : 0x00u));
 	hs.preround_delay_seconds =
 			static_cast<uint8_t>(w.preround_delay_seconds);
 	hs.fallmps = static_cast<uint8_t>(std::clamp(w.wac_values.fallmps, 0, 255));
 	hs.round_time_remaining_ticks = w.match.remaining_ticks();
-	const world::EnvNetworkState &env = w.network_env;
+	// The weather home's native globals narrowed exactly once here
+	// [orig: NetPacket_WritePlayerState @0x4ff6b0 — Env_FogDistTarget hi word,
+	// (Env_FogDistAccelClamp capped 0xFF0000 + 0xFF) >> 8, (Env_CurTimeFixed24
+	// + 0x1000) >> 13, Env_QuakeTicks byte, Env_CloudScrollRateTarget >> 10,
+	// Env_RainPctCurrent >> 8, Env_OvercastBlend >> 8, the kind byte].
+	const world::WeatherState &env = w.weather;
 	hs.env.present = true;
-	hs.env.fog_dist = static_cast<uint16_t>(env.fog_target_q16 >> 16);
-	const uint32_t fog_accel = std::min<uint32_t>(env.fog_accel_clamp, 0x00FF0000u);
+	hs.env.fog_dist = static_cast<uint16_t>(env.fog_target_q16() >> 16);
+	const uint32_t fog_accel = std::min<uint32_t>(env.fog_accel_clamp(), 0x00FF0000u);
 	hs.env.fog_accel = static_cast<uint16_t>((fog_accel + 0xFFu) >> 8);
 	hs.env.tod_fixed = static_cast<uint16_t>((env.tod_fixed24 + 0x1000u) >> 13);
 	hs.env.quake_ticks = static_cast<uint8_t>(std::min<uint32_t>(env.quake_ticks, 0xFFu));
 	hs.env.cloud_scroll = static_cast<uint8_t>(
 			std::min<uint32_t>(env.cloud_scroll_rate_target >> 10, 0xFFu));
 	hs.env.rain_pct = static_cast<uint8_t>(
-			std::min<uint32_t>(env.rain_pct_current_q16 >> 8, 0xFFu));
+			std::min<uint32_t>(env.rain_pct_current_q16() >> 8, 0xFFu));
 	hs.env.overcast = static_cast<uint8_t>(
-			std::min<uint32_t>(env.overcast_blend_q16 >> 8, 0xFFu));
+			std::min<uint32_t>(env.overcast_blend_q16() >> 8, 0xFFu));
 	hs.env.env_param = static_cast<uint8_t>(env.precipitation_kind);
 	hs.mount_ammo.present = (flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute;
 	if (conn.owned_entity.valid()) {

@@ -15,6 +15,19 @@ var _world: GameWorld
 var _menu_shell: MenuShell
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
 var _novaworld_panel: NovaWorldPanel
+var _join_role_prompt: Control
+var _join_role_password: LineEdit
+var _join_role_target: JoinTarget
+var _spectator_probe: LanSession
+var _spectator_probe_target: JoinTarget
+var _spectator_probe_serial := 0
+
+const SPECTATOR_PREFLIGHT_SECONDS := 1.0
+
+
+func _exit_tree() -> void:
+	_cancel_spectator_probe()
+	_dismiss_join_role_prompt()
 
 
 func setup(shell: MainGame, world: GameWorld, menu_shell: MenuShell, panel_layer: Node) -> void:
@@ -69,6 +82,10 @@ func maybe_launch_lan_from_flags() -> bool:
 		demo_target.host_ip = lan_join_ip
 		demo_target.port = LaunchFlags.lan_join_port(demo_target.port)
 		demo_target.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
+		if LaunchFlags.spectator():
+			demo_target.join_role = JoinTarget.ROLE_SPECTATOR
+			demo_target.spectator_password = LaunchFlags.spectator_password()
+			demo_target.role_explicit = true
 		join_lan_server(demo_target)
 		return true
 	return false
@@ -110,6 +127,24 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 func join_lan_server(target: JoinTarget) -> void:
 	if target == null:
 		return
+	_cancel_spectator_probe()
+	_dismiss_join_role_prompt()
+	if target.role_explicit:
+		_start_lan_join(target)
+		return
+	if target.server_flags < 0:
+		_begin_spectator_preflight(target)
+		return
+	if target.allows_spectators():
+		_show_join_role_prompt(target)
+		return
+	_start_lan_join(target)
+
+
+# Complete the join only after the retail Player/Spectator decision has been
+# made. Keeping the load below this seam prevents a speculative player ClientAuth
+# from racing the prompt.
+func _start_lan_join(target: JoinTarget) -> void:
 	# Joiner: the retail client obtains the full session-variable set from the
 	# connect stream before wire-header world load [orig: parse_server_session_variables
 	# @ 0x5202f0]. Browse-time values are display hints only; GameWorld replaces
@@ -130,6 +165,196 @@ func join_lan_server(target: JoinTarget) -> void:
 	_shell.start_world_load(
 		load_info,
 		_world.load_mission_as_joiner.bind(target))
+
+
+# NovaWorld rows and direct --lan-join targets do not carry ServerHello.P2.
+# Query the resolved game endpoint itself before authentication, using the same
+# 0x7F/0x81 enumerator exchange as the LAN browser. A silent/non-enumerating
+# endpoint falls back to the ordinary player join after a short bounded wait.
+func _begin_spectator_preflight(target: JoinTarget) -> void:
+	_spectator_probe_serial += 1
+	var serial := _spectator_probe_serial
+	_spectator_probe_target = target
+	_spectator_probe = LanSession.new()
+	_spectator_probe.name = "SpectatorPreflight"
+	add_child(_spectator_probe)
+	_spectator_probe.servers_changed.connect(
+			_on_spectator_preflight_rows.bind(_spectator_probe, target, serial))
+	var err := int(_spectator_probe.start_browsing(
+			target.host_ip, target.port, target.port))
+	if err != OK:
+		_finish_spectator_preflight(_spectator_probe, target, serial, {})
+		return
+	get_tree().create_timer(SPECTATOR_PREFLIGHT_SECONDS).timeout.connect(
+			_on_spectator_preflight_timeout.bind(serial))
+
+
+func _on_spectator_preflight_rows(rows: Array, probe: LanSession,
+		target: JoinTarget, serial: int) -> void:
+	if (
+			probe != _spectator_probe
+			or target != _spectator_probe_target
+			or serial != _spectator_probe_serial
+			or rows.is_empty()
+	):
+		return
+	var row: Dictionary = rows[0]
+	for candidate in rows:
+		var typed := candidate as Dictionary
+		if int(typed.get("port", -1)) == target.port:
+			row = typed
+			break
+	_finish_spectator_preflight(probe, target, serial, row)
+
+
+func _on_spectator_preflight_timeout(serial: int) -> void:
+	# The enumerator can finish and queue_free itself long before this timer.
+	# Bind only the value serial: retaining a typed Node argument would make
+	# Godot attempt to convert a previously freed Object when timeout fires.
+	if serial != _spectator_probe_serial:
+		return
+	var probe := _spectator_probe
+	var target := _spectator_probe_target
+	if probe == null or target == null:
+		return
+	_finish_spectator_preflight(probe, target, serial, {})
+
+
+func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
+		serial: int, row: Dictionary) -> void:
+	if (
+			probe != _spectator_probe
+			or target != _spectator_probe_target
+			or serial != _spectator_probe_serial
+	):
+		return
+	if not row.is_empty():
+		target.server_flags = int(row.get("server_flags", 0))
+		if target.server_name.is_empty():
+			target.server_name = String(row.get("server_name", row.get("name", "")))
+		if target.game_type < 0:
+			target.game_type = int(row.get("gametype", -1))
+	_cancel_spectator_probe()
+	if target.allows_spectators():
+		_show_join_role_prompt(target)
+	else:
+		_start_lan_join(target)
+
+
+func _cancel_spectator_probe() -> void:
+	_spectator_probe_serial += 1
+	if _spectator_probe != null:
+		_spectator_probe.stop()
+		_spectator_probe.queue_free()
+	_spectator_probe = null
+	_spectator_probe_target = null
+
+
+# Retail exposes this decision after enumeration whenever P2 bit 0x2000 is
+# set. The password control appears only with P2 bit 0x4000; Player never sends
+# JSPP. The witnessed BuildFlags bits live engine-side
+# (engine/net/npruntime/server_initial_state.cpp; docs/net/novaworld-net-re.md
+# section 5.0e).
+func _show_join_role_prompt(target: JoinTarget) -> void:
+	_dismiss_join_role_prompt()
+	_join_role_target = target
+	var overlay := Control.new()
+	overlay.name = "JoinRolePrompt"
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_join_role_prompt = overlay
+
+	var shade := ColorRect.new()
+	shade.color = Color(0.0, 0.0, 0.0, 0.72)
+	shade.mouse_filter = Control.MOUSE_FILTER_STOP
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(shade)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(center)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(420.0, 0.0)
+	center.add_child(panel)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	panel.add_child(margin)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 12)
+	margin.add_child(box)
+
+	var title := Label.new()
+	title.text = "Join %s" % (
+			target.server_name if not target.server_name.is_empty() else "game")
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+	var question := Label.new()
+	question.text = "Would you like to join as a player or spectator?"
+	question.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(question)
+
+	if target.spectator_password_required():
+		_join_role_password = LineEdit.new()
+		_join_role_password.name = "SpectatorPassword"
+		_join_role_password.placeholder_text = "Spectator password"
+		_join_role_password.secret = true
+		_join_role_password.max_length = HostSessionConfig.SPECTATOR_PASSWORD_MAX_LENGTH
+		box.add_child(_join_role_password)
+
+	var choices := HBoxContainer.new()
+	choices.alignment = BoxContainer.ALIGNMENT_CENTER
+	choices.add_theme_constant_override("separation", 10)
+	box.add_child(choices)
+	var player_button := Button.new()
+	player_button.name = "JoinAsPlayer"
+	player_button.text = "Player"
+	player_button.pressed.connect(_choose_join_role.bind(JoinTarget.ROLE_PLAYER))
+	choices.add_child(player_button)
+	var spectator_button := Button.new()
+	spectator_button.name = "JoinAsSpectator"
+	spectator_button.text = "Spectator"
+	spectator_button.pressed.connect(_choose_join_role.bind(JoinTarget.ROLE_SPECTATOR))
+	choices.add_child(spectator_button)
+	var cancel_button := Button.new()
+	cancel_button.name = "CancelJoin"
+	cancel_button.text = "Cancel"
+	cancel_button.pressed.connect(_cancel_join_role_choice)
+	choices.add_child(cancel_button)
+
+	var mount := _panel_layer if _panel_layer != null else self
+	mount.add_child(overlay)
+	player_button.grab_focus()
+
+
+func _choose_join_role(role: int) -> void:
+	var target := _join_role_target
+	if target == null:
+		return
+	target.join_role = role
+	target.role_explicit = true
+	target.spectator_password = (
+			_join_role_password.text
+			if role == JoinTarget.ROLE_SPECTATOR and _join_role_password != null
+			else "")
+	_dismiss_join_role_prompt()
+	_start_lan_join(target)
+
+
+func _cancel_join_role_choice() -> void:
+	_dismiss_join_role_prompt()
+	if _menu_shell != null:
+		_menu_shell.show_menu()
+
+
+func _dismiss_join_role_prompt() -> void:
+	if _join_role_prompt != null:
+		_join_role_prompt.queue_free()
+	_join_role_prompt = null
+	_join_role_password = null
+	_join_role_target = null
 
 
 ## The local player's callsign — rides the game ClientAuth.NA (the host echoes it back so we

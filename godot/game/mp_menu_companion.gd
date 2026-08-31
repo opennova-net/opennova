@@ -14,9 +14,9 @@ extends MenuCompanion
 # @0x558d20; UI_HandleHostSessionStart @0x556d00 — LAN host = SetConnectionMode(3) +
 # SetTransportMode(3)]. We are LAN-only here (channel = LAN).
 #
-# Scope this pass is CO-OP-MINIMAL: the host reads GAME_NAME, the selected missions, the
-# player cap, and forces COOP; the rest of the host-settings controls render but are not
-# read. LAN search/join call the production LanSession discovery seam.
+# The host reads the session identity, mission rotation, player cap, and the
+# retail spectator controls. LAN search/join call the production LanSession
+# discovery seam.
 
 # The mp.mnu screens this companion owns. The shell skips its generic start/mission
 # wiring on a menu containing these so START_GAME is not double-bound to a SP launch.
@@ -317,6 +317,14 @@ func _read_host_config() -> HostSessionConfig:
 		config.server_name = server_name
 	var max_text := _edit_text("MAX_PLAYERS", "")
 	config.max_players = clampi(int(max_text) if max_text.is_valid_int() else 4, 1, 99)
+	# Retail's host dialog stores ALLOW_SPECTATORS as -1 when checked and 0
+	# when unchecked. A separate positive limit remains available to typed/CLI
+	# producers, but the retail menu itself exposes the shared-capacity mode.
+	# The witnessed reader lives engine-side (GameConfig.spectator_slots,
+	# docs/net/novaworld-net-re.md section 5.0e).
+	config.spectator_slots = -1 if _is_checked("ALLOW_SPECTATORS") else 0
+	config.spectator_password = _edit_text("SPECTATOR_PW", "").substr(
+			0, HostSessionConfig.SPECTATOR_PASSWORD_MAX_LENGTH)
 	config.missions = _selected_missions()
 	if config.missions.size() > 0:
 		config.mission = config.missions[0]

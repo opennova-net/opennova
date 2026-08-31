@@ -235,6 +235,103 @@ bool matches_client_header(const ProtocolPacketHeader &header,
 			header.connection_flags == 0;
 }
 
+bool build_joiner_client_auth(np::JoinRole role,
+		std::string password, ClientAuth &out) {
+	np::JoinerConnection joiner("SpectatorWire");
+	joiner.set_join_request(role, std::move(password));
+	const std::vector<uint8_t> hello_datagram = joiner.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello hello;
+	if (!nw_decode_inbound(
+				hello_datagram.data(), hello_datagram.size(), opcode, body) ||
+			opcode != SESSION_OPCODE_CLIENT_HELLO ||
+			!parse_client_hello(body.data(), body.size(), hello)) {
+		return false;
+	}
+	ServerHello server_hello =
+			build_server_hello(hello, 0x7F000001u, 32768);
+	server_hello.hk = 0xAABBCCDDu;
+	const std::vector<uint8_t> reply = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO,
+			server_hello_to_bytes(server_hello));
+	const np::JoinerConnection::PollResult result =
+			joiner.handle_datagram(reply.data(), reply.size());
+	return result.outbound.size() == 1 &&
+			nw_decode_inbound(
+					result.outbound[0].data(), result.outbound[0].size(),
+					opcode, body) &&
+			opcode == SESSION_OPCODE_CLIENT_AUTH &&
+			parse_client_auth(body.data(), body.size(), out);
+}
+
+bool auth_has_cu(const ClientAuth &auth,
+		std::string_view wanted_name, std::string_view wanted_value) {
+	for (const std::vector<uint8_t> &blob : auth.cu) {
+		uint8_t type = 0;
+		std::string name;
+		std::string value;
+		if (parse_client_cu_chunk(
+					blob.data(), blob.size(), type, name, value) &&
+				type == 2 && name == wanted_name && value == wanted_value) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool run_spectator_clientauth_and_state_latch() {
+	ClientAuth player;
+	if (!expect(build_joiner_client_auth(
+				np::JoinRole::Player, "", player),
+			"ordinary player ClientAuth builds")) {
+		return false;
+	}
+	if (!expect(!auth_has_cu(player, "JSR", "1") &&
+				!auth_has_cu(player, "JSPP", "watch"),
+			"ordinary player ClientAuth remains byte-shape compatible: no spectator CUs")) {
+		return false;
+	}
+
+	ClientAuth spectator;
+	if (!expect(build_joiner_client_auth(
+				np::JoinRole::Spectator, "watch", spectator),
+			"spectator ClientAuth builds")) {
+		return false;
+	}
+	if (!expect(auth_has_cu(spectator, "JSR", "1") &&
+				auth_has_cu(spectator, "JSPP", "watch"),
+			"spectator ClientAuth carries retail JSR=1 and JSPP")) {
+		return false;
+	}
+
+	const std::string client_scrk = "CLIENT-SPECTATOR-STATE-SCRK";
+	const std::string server_scrk = "SERVER-SPECTATOR-STATE-SCRK";
+	constexpr uint32_t kSession = 0x10203040u;
+	constexpr uint32_t kClientKey = 0x50607080u;
+	np::ClientRuntime runtime("SpectatorState");
+	runtime.seed_session(
+			kSession, kClientKey, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	std::vector<uint8_t> state = frame_server_session(
+			server_seq, server_scrk, kClientKey,
+			{make_protocol_message(0x75, {0x01, 0x00})});
+	runtime.receive(state.data(), state.size());
+	(void)runtime.Client_ProcessNetworkFrame(1);
+	if (!expect(runtime.is_spectator(),
+			"S2C 0x75 bit 0 latches spectator mode")) {
+		return false;
+	}
+	state = frame_server_session(
+			server_seq, server_scrk, kClientKey,
+			{make_protocol_message(0x75, {0x00, 0x02})});
+	runtime.receive(state.data(), state.size());
+	(void)runtime.Client_ProcessNetworkFrame(2);
+	return expect(!runtime.is_spectator(),
+			"cleared S2C 0x75 bit returns the client to player mode");
+}
+
 bool run_seeded_objective_layout_hint() {
 	np::ClientRuntime client("Replay");
 	client.seed_session(0x1234u, 0u, "client-key", "server-key",
@@ -5197,6 +5294,7 @@ bool run_joiner_admits_exact_retail_message_prefix() {
 
 int main() {
 	const bool ok = run_charattr_challenge_table_matches_retail() &&
+	                run_spectator_clientauth_and_state_latch() &&
 	                run_seeded_objective_layout_hint() &&
 	                run_fire_queue_stamps_runtime_tick() &&
 	                run_retail_post_auth_prelude() &&

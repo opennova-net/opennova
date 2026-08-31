@@ -1120,31 +1120,28 @@ bool parse_file(const std::string &path, Document &out, std::string &error) {
 std::string strip_hotkey_marker(const std::string &text,
                                 std::string *out_hotkey,
                                 int *out_hotkey_pos) {
-  std::string result;
-  result.reserve(text.size());
+  if (out_hotkey) out_hotkey->clear();
+  if (out_hotkey_pos) *out_hotkey_pos = -1;
 
-  size_t i = 0;
-  while (i < text.size()) {
-    if (i + 4 < text.size() && text[i] == '{' &&
-        (text[i + 1] == 'h' || text[i + 1] == 'H') &&
+  // CButtonWnd_SetLabel removes only the FIRST marker, records its byte
+  // offset, and registers the byte that follows it. Later markers remain
+  // literal [orig: CButtonWnd_SetLabel @ 0x6572F0].
+  size_t marker = std::string::npos;
+  for (size_t i = 0; i + 5 <= text.size(); ++i) {
+    if (text[i] == '{' && (text[i + 1] == 'h' || text[i + 1] == 'H') &&
         (text[i + 2] == 'o' || text[i + 2] == 'O') &&
         (text[i + 3] == 't' || text[i + 3] == 'T') && text[i + 4] == '}') {
-      // Found {hot} marker.
-      if (out_hotkey_pos) {
-        *out_hotkey_pos = static_cast<int>(result.size());
-      }
-      i += 5;  // Skip "{hot}".
-
-      // The next character is the hotkey.
-      if (i < text.size() && out_hotkey) {
-        *out_hotkey = std::string(1, text[i]);
-      }
-    }
-    if (i < text.size()) {
-      result += text[i++];
+      marker = i;
+      break;
     }
   }
+  if (marker == std::string::npos) return text;
 
+  std::string result = text.substr(0, marker) + text.substr(marker + 5);
+  if (out_hotkey_pos) *out_hotkey_pos = static_cast<int>(marker);
+  if (out_hotkey && marker < result.size()) {
+    *out_hotkey = std::string(1, result[marker]);
+  }
   return result;
 }
 

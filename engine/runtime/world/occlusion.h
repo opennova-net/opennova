@@ -346,7 +346,8 @@ private:
                                 const PlaneGroup *groups, int32_t group_count) const;
     // [orig: terrain_occlusion_check_three_rays @ 0x610ed0; TRUE = some ray clear]
     bool three_rays_clear(const CollisionWorld &collision, const OcclusionFrameCamera &cam,
-                          const int32_t target[3], int32_t radius) const;
+                          const int32_t target[3], int32_t radius,
+                          uint32_t debug_tick) const;
     // Bound-sphere derivation from the collision model bounds.
     // [orig: Entity_ComputeBoundingSphere @ 0x5c69a0 — center = AABB mid,
     // radius = min(|half|, 0x7FFF0000 as float); the def scale leg is unported

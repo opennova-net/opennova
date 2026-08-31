@@ -109,6 +109,13 @@ public:
 	int get_primary_weapon_clip() const { return value_.world.primary_weapon_clip; }
 	int get_primary_weapon_reserve() const { return value_.world.primary_weapon_reserve; }
 	TypedArray<EntityCardSeat> get_seats() const;
+	// The registry row's items.def facts (the per-entity ItemDefAttrib words a
+	// debug override rewrites, the def display name, healthMax); zero/empty
+	// without a world half.
+	int64_t get_item_attrib() const { return value_.world.item_attrib; }
+	int64_t get_item_attrib2() const { return value_.world.item_attrib2; }
+	String get_item_name() const;
+	int get_health_max() const { return value_.world.health_max; }
 
 	// The MCP boundary conversion only: the legacy get_entity_debug /
 	// get_world_entity_debug key set for this card's shape, with the joiner's

@@ -47,6 +47,11 @@ const DEFAULT_GATE_PORT := NetProtocol.DEFAULT_GATE_PORT
 ## cap control). The mp.mnu host screen always sets its own read-back value; the
 ## host-side clamp to the witnessed 1..65 applies either way.
 const DEFAULT_MAX_PLAYERS := 32
+## Width of the retail host dialog's SPECTATOR_PW edit buffer (17 chars, read by
+## HostDialog_ReadSettings @ 0x555940 into the buffer at 0x555ecc). Both password
+## entry surfaces clamp to it so a typed password never exceeds what a retail
+## host could have configured.
+const SPECTATOR_PASSWORD_MAX_LENGTH := 17
 ## Which browser/lobby the session was requested from. The LAN channel never reads or
 ## manufactures NovaWorld service configuration; the NovaWorld channel supplies the gate.
 const CHANNEL_LAN := "LAN"
@@ -60,6 +65,10 @@ var player_name := "Player"  ## the host's own callsign (rides ClientAuth like a
 var expansion := ""     ## g_ExpansionName: what the process actually mounted; "" for base JO
 var integrity_profile := ""  ## explicit registered retail corpus; empty = no host-side CRC validation
 var max_players := DEFAULT_MAX_PLAYERS  ## lobby-advertised player cap
+## Retail's signed spectator setting: 0 disables, -1 shares max_players, and a
+## positive value adds that many spectator-only slots.
+var spectator_slots := 0
+var spectator_password := ""
 var game_type := GAME_TYPE_COOP  ## the numeric session g_GameType [orig: @ 0x24D2128]
 ## Enabled Soldier Class ids; the no-restriction mask's engine home is
 ## engine/runtime/world player_loadout.h [orig: g_hostClassAllowMask @ 0x24D59FC].
@@ -134,6 +143,8 @@ func to_session_options() -> Dictionary:
 		"lan_mode": lan_mode,
 		"bind_port": bind_port,
 		"max_players": max_players,
+		"spectator_slots": spectator_slots,
+		"spectator_password": spectator_password,
 		"serve_and_play": not dedicated,
 		"respawn_time": respawn_time,
 		"time_limit_minutes": time_limit_minutes,

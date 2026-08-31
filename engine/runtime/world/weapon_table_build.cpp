@@ -44,6 +44,9 @@ static_assert(world::kAmmoFlagIgnorFoilage == DEF_AMMO_FLAG_IGNORFOILAGE);
 static_assert(world::kItemAttribEweap == DEF_ITEM_ATTRIB_EWEAP);
 static_assert(world::kItemAttribLandable == DEF_ITEM_ATTRIB_LANDABLE);
 static_assert(world::kItemAttribAIData == DEF_ITEM_ATTRIB_AIDATA);
+static_assert(world::kItemAttribChangeTeam == DEF_ITEM_ATTRIB_CHANGETEAM);
+static_assert(world::kItemAttribSpawnPoint == DEF_ITEM_ATTRIB_SPAWNPOINT);
+static_assert(world::kItemAttribLeaveCorpse == DEF_ITEM_ATTRIB_LEAVECORPSE);
 static_assert(world::kItemAttribNoDismember == DEF_ITEM_ATTRIB_NODISMEMBER);
 static_assert(world::kItemAttribNoDie == DEF_ITEM_ATTRIB_NODIE);
 

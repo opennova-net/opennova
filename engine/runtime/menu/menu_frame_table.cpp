@@ -123,7 +123,7 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 		if (width <= 0) {
 			continue;
 		}
-		const std::string label = resolve_text_value(h.type, h.text);
+		const std::string label = resolve_text_value(h.type, h.text).text;
 		int text_w = 0;
 		int text_h = 0;
 		measure_text(node, label, &text_w, &text_h);

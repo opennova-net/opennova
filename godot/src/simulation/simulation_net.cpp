@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include <net/npruntime/server_initial_state.h> // install_mission_location_names
+#include <net/npruntime/server_spawn.h> // Server_SetPlayerSpectator
 #include <net/npruntime/session_status.h>
 #include <runtime/terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
@@ -446,6 +447,7 @@ void Simulation::joiner_pump() {
 		tick_local_player_weapon();
 		kernel_->tick_medic_cooldown(local_player_dead());
 	};
+	hooks.tick_weather = [this] { kernel_->tick_weather(); };
 	joiner_bridge_.pump(ctx, hooks);
 	// An S2C 0x41 applied inside the pump mutated the live charattr table; the
 	// World's per-class ATTRIBUTES words follow it the same frame [orig: the
@@ -709,6 +711,13 @@ void Simulation::configure_host_session(Dictionary p_options) {
 	apply_dictionary_string(p_options, "custom_text", config.custom_text);
 	apply_dictionary_string(p_options, "player_name", config.player_name);
 	apply_dictionary_string(p_options, "expansion", config.expansion);
+	apply_dictionary_string(
+			p_options, "spectator_password", config.spectator_password);
+	if (p_options.has("spectator_slots")) {
+		config.spectator_slots = dictionary_i32(
+				p_options, "spectator_slots", config.spectator_slots);
+		if (config.spectator_slots < -1) config.spectator_slots = -1;
+	}
 	// D-NET-166: the host's g_expansion_checksum analog. When the caller names
 	// its install root, compute the CRC of the loose
 	// expansion/<name>/version.txt so the join gate can run retail's compare
@@ -849,6 +858,8 @@ Dictionary Simulation::get_host_session_config() const {
 	out["player_name"] = String(session.player_name.c_str());
 	out["expansion"] = String(session.expansion.c_str());
 	out["integrity_profile"] = String(session.integrity_profile.c_str());
+	out["spectator_slots"] = static_cast<int64_t>(session.spectator_slots);
+	out["spectator_password"] = String(session.spectator_password.c_str());
 	out["gametype"] = static_cast<int64_t>(session.game_type);
 	out["mpattrib"] = static_cast<int64_t>(session.mp_attributes);
 	out["class_allow_mask"] = static_cast<int64_t>(session.class_allow_mask);
@@ -935,7 +946,9 @@ void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 
 // ---- co-op LAN joiner (D.2) -------------------------------------------------
 
-bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &p_player_name) {
+bool Simulation::enable_join(const String &p_host_ip, int p_port,
+		const String &p_player_name, int p_join_role,
+		const String &p_spectator_password) {
 	// P7: the joiner is a non-authority np::ClientRuntime (Joiner role) built per-load by the boot's role hook;
 	// it owns the connect-leg state machine + the S2C->ClientState fold internally. Here we only dial
 	// the socket + store the player name (the ClientAuth.NA the host echoes for the name-match). Leave
@@ -955,9 +968,16 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 		return false;
 	}
 	joiner_player_name_ = std::string(p_player_name.utf8().get_data());
+	join_role_ = p_join_role == static_cast<int>(
+			opennova::np::JoinRole::Spectator)
+			? opennova::np::JoinRole::Spectator
+			: opennova::np::JoinRole::Player;
+	join_spectator_password_ =
+			std::string(p_spectator_password.utf8().get_data());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); each (re)load's role hook rebuilds it fresh.
 	runtime_ = std::make_unique<opennova::np::ClientRuntime>(joiner_player_name_);
+	runtime_->set_join_request(join_role_, join_spectator_password_);
 	install_charattr_challenge_table();
 	install_character_join_vars();
 	install_join_integrity_profile();
@@ -969,13 +989,46 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 		kernel_->world.mp_session = true;
 	}
 	joiner_bridge_.reset_for_join();
-	joiner_environment_revision_seen_ = 0;
 	joiner_applied_loadout_revision_ = 0;
 	if (!session_.begin_connect().applied()) {
 		joiner_ = false;
 		return false;
 	}
 	return true;
+}
+
+bool Simulation::is_local_spectator() const {
+	if (joiner_) return runtime_ != nullptr && runtime_->is_spectator();
+	for (const opennova::np::NapiNPConnection &connection :
+			ctx_.np_protocol.connection_list) {
+		if (connection.type ==
+				opennova::np::NapiNPConnection::kTypeClientSide) {
+			return connection.link.spectator;
+		}
+	}
+	return false;
+}
+
+bool Simulation::set_local_spectator(bool p_spectator) {
+	// A joiner is non-authoritative: its S2C 0x75 state is intentionally
+	// read-only. F3 mutates only the in-process SP/listen-host player.
+	if (joiner_ || kernel_ == nullptr || !ctx_.is_authority) return false;
+	for (opennova::np::NapiNPConnection &connection :
+			ctx_.np_protocol.connection_list) {
+		if (connection.type !=
+				opennova::np::NapiNPConnection::kTypeClientSide) {
+			continue;
+		}
+		if (!opennova::np::Server_SetPlayerSpectator(
+					ctx_, connection, kernel_->world, p_spectator)) {
+			return false;
+		}
+		kernel_->reset_local_player_input_to_player_facing();
+		set_local_player_weapon_input(false, false, false);
+		if (!p_spectator) respawn_local_player_loadout();
+		return true;
+	}
+	return false;
 }
 
 bool Simulation::load_charattr_challenge(
@@ -1298,27 +1351,6 @@ int Simulation::get_joiner_phase() const {
 
 int Simulation::get_joiner_self_handle() const {
 	return joiner_ ? static_cast<int>(joiner_bridge_.self_wire_handle()) : 0;
-}
-
-Dictionary Simulation::take_join_environment_update() {
-	Dictionary out;
-	if (!joiner_ || runtime_ == nullptr) return out;
-	const opennova::netsim::ClientEnvironmentState &environment =
-			runtime_->state().environment;
-	if (!environment.present ||
-			environment.revision == joiner_environment_revision_seen_)
-		return out;
-	joiner_environment_revision_seen_ = environment.revision;
-	out["revision"] = static_cast<int64_t>(environment.revision);
-	out["fog_dist"] = static_cast<int64_t>(environment.fog_dist);
-	out["fog_accel"] = static_cast<int64_t>(environment.fog_accel);
-	out["tod_fixed"] = static_cast<int64_t>(environment.tod_fixed);
-	out["quake_ticks"] = static_cast<int64_t>(environment.quake_ticks);
-	out["cloud_scroll"] = static_cast<int64_t>(environment.cloud_scroll);
-	out["rain_pct"] = static_cast<int64_t>(environment.rain_pct);
-	out["overcast"] = static_cast<int64_t>(environment.overcast);
-	out["precipitation_kind"] = static_cast<int64_t>(environment.env_param);
-	return out;
 }
 
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 — the leave sends a burst of

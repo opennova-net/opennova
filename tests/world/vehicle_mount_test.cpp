@@ -1305,10 +1305,19 @@ void test_redirect_and_speed_commands() {
     CHECK(b.f[AiBrain::kWpNode] == 0);
     CHECK(r.veh().wp_number == 0);
 
-    // PatrolSpeed 40 -> kSpeedB = trunc(40 * 65536/225) = 11650. CombatSpeed -> kSpeedA.
+    // Speed commands retain retail's two-stage path: Entity_ApplyCommand queues
+    // event 10/11 and AI_HandleCommand performs the conversion at dispatch.
+    b.f[AiBrain::kCurState] = kAiGroundFollowWp;
+    b.f[AiBrain::kPendState] = kAiGroundFollowWp;
     CHECK(r.w.commands.apply_group_ai_command(3, 30, 40, 0, 0) == 1);
+    CHECK(b.f[AiBrain::kSpeedB] == 0);
+    CHECK(r.sys.events.count() == 1);
+    r.sys.events.process_timed(r.sys, r.w);
     CHECK(b.f[AiBrain::kSpeedB] == 11650);
     CHECK(r.w.commands.apply_group_ai_command(3, 29, 55, 0, 0) == 1);
+    CHECK(b.f[AiBrain::kSpeedA] == 0);
+    CHECK(r.sys.events.count() == 1);
+    r.sys.events.process_timed(r.sys, r.w);
     CHECK(b.f[AiBrain::kSpeedA] == 16019); // trunc(55 * 1000 * 4.4444446e-6 * 65536)
 
     // A mounted NON-player in the group auto-detaches on redirect [orig: @0x43cdb4].

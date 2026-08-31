@@ -1716,7 +1716,8 @@ void test_hotkey_widget(const fnt_font_t *font) {
       </WINDOW>
     </WINDOW>
     <WINDOW type="button" name="BACK">
-      <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>10</RIGHT><BOTTOM>30</BOTTOM></POSITION>
+      <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>40</BOTTOM></POSITION>
+      <STRING type="id" justify="LEFT">BACK_TEXT</STRING>
       <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
       <HOTKEY>V</HOTKEY>
     </WINDOW>
@@ -1729,19 +1730,46 @@ void test_hotkey_widget(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
+	c.set_text_lookup({ { "BACK_TEXT", "B{hot}ack" } });
 	c.configure(doc.first_screen(), font);
 	MenuFrameState st;
+	CHECK(c.widget_authored_text(3) == "Back",
+			"the localized marker is absent from the display label");
 	// The hidden subtree's ESC never matches; the shown BACK does.
 	CHECK(c.hotkey_widget("VK_ESCAPE", true, st) == 3,
 			"a hidden subtree prunes; the shown widget matches");
-	// Character rows are a separate namespace, case-insensitive.
+	// Explicit character rows and label mnemonics coexist in their namespace.
 	CHECK(c.hotkey_widget("v", false, st) == 3,
 			"character hotkeys match case-insensitively");
+	CHECK(c.hotkey_widget("a", false, st) == 3,
+			"a localized {hot} marker supplies a case-insensitive mnemonic");
 	CHECK(c.hotkey_widget("VK_ESCAPE", false, st) == -1,
 			"a virtual name never matches as a character");
+	const MenuDrawList &draw = c.compile(st, 1.0f, 1.0f);
+	CHECK(draw.underlines.size() == 1,
+			"the label mnemonic emits one underline segment");
+	if (draw.underlines.size() == 1) {
+		CHECK(draw.underlines[0].x0 == 8.5f &&
+				draw.underlines[0].x1 == 16.5f &&
+				draw.underlines[0].y == 34.5f,
+				"the underline lands under the marked label byte");
+	}
 	// VK_RETURN and VK_ENTER are interchangeable.
 	CHECK(c.hotkey_widget("VK_RETURN", true, st) == 4,
 			"VK_RETURN matches an authored VK_ENTER");
+	// Runtime relabeling replaces the derived mnemonic without disturbing
+	// authored HOTKEY rows.
+	MenuWidgetState relabel;
+	relabel.index = 3;
+	relabel.has_text = true;
+	relabel.text = "E{hot}xit";
+	st.widgets.push_back(relabel);
+	CHECK(c.hotkey_widget("a", false, st) == -1,
+			"a runtime label removes the prior derived mnemonic");
+	CHECK(c.hotkey_widget("x", false, st) == 3,
+			"a runtime label supplies its replacement mnemonic");
+	CHECK(c.hotkey_widget("v", false, st) == 3,
+			"runtime relabeling preserves explicit character hotkeys");
 	// A runtime show override un-prunes the subtree; pre-order then prefers it.
 	MenuWidgetState shown;
 	shown.index = 1;

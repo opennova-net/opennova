@@ -527,6 +527,22 @@ void append_cu_field(std::vector<uint8_t> &buf, const std::string &name, const s
 
 } // namespace
 
+std::vector<uint8_t> server_auth_rejection_to_bytes(const ServerAuth &msg) {
+	// The rejection 0x82 is a different, smaller builder than the accept form:
+	// exactly CI, CK, CR (=0), JFC, JFP, and JFS only when non-empty — no MI,
+	// SK, CS run, CU, SCRK, NA, or reflected address. [orig:
+	// NapiNPProtocol_SendJoinRejection @0x620cd0 (ex "SendDrawOverlay")]
+	std::vector<uint8_t> buf;
+	buf.reserve(96);
+	append_u32_field(buf, "CI", msg.ci);
+	append_u32_field(buf, "CK", msg.ck);
+	append_u32_field(buf, "CR", msg.cr);
+	append_u32_field(buf, "JFC", msg.jfc);
+	append_u32_field(buf, "JFP", msg.jfp);
+	if (!msg.jfs.empty()) append_string_field(buf, "JFS", msg.jfs);
+	return buf;
+}
+
 std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg) {
 	std::vector<uint8_t> buf;
 	buf.reserve(512);

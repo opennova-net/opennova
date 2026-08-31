@@ -9,11 +9,13 @@ extends Node3D
 # (runtime-only); headless probes set the dir explicitly and never block on it.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+const PlayerOptionsScript := preload("res://game/player_options.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
 const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.gd")
 const ShellPresentationSessionScript := preload("res://game/shell_presentation_session.gd")
+const ShellMenuFrontendScript := preload("res://game/shell_menu_frontend.gd")
 const HudHiddenCaptureWitness := preload("res://game/world/hud_hidden_capture_witness.gd")
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
@@ -33,7 +35,7 @@ const ARMORY_KEY := KEY_SHIFT
 # F3: the in-engine dev tools (the DevTools node's ImGui windows, ADR 0039).
 const DEV_TOOLS_KEY := KEY_F3
 # Shift+F6: pick the entity under the crosshair into the debug pick list
-# (DebugPickFlow). Works while playing, no dev tools needed. Unmodified F6 stays
+# (DebugPickSession). Works while playing or with F3 in Interact. Unmodified F6 stays
 # with the retail-configurable binding rows (huddetail's default, shadowing
 # hudcolor's — the retail first-match order, D-CTRL-4).
 const PICK_KEY := KEY_F6
@@ -61,12 +63,10 @@ var _state: int = State.MENU
 var _shell_wired := false
 # The in-engine dev tools' seam: F3 opens them, the mouse policy follows them.
 var _dev_tools: DevTools
-var _dev_tools_pick_active := false
 var _debug_adapter: GameDebugAdapter
-# The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
-# the set survives dev-tools toggles; cleared on every world load.
-var _pick_list := DebugPickList.new()
-var _pick_flow := DebugPickFlow.new()
+# The debug pick state (list, toast flow, click-catcher latch): SHELL-owned so
+# F6 picks work before F3 ever opens; every landed pick selects its Entities row.
+var _pick_session := DebugPickSession.new()
 var _net: NetSessionController  # every net-session entry (LAN/NovaWorld + env hooks)
 # The in-game HUD rides GameHudPresenter. It owns the lazy GameHud build, the
 # per-frame info rebuild, and the
@@ -100,9 +100,17 @@ var _quit_requested := false
 var _quit_policy_installed := false
 var _previous_auto_accept_quit := true
 var _shell_presentation := ShellPresentationSessionScript.new()
+# The menu front-end + resource-dir mount flow (a method annex over THIS
+# shell's state — shell_menu_frontend.gd; split for the size ratchet).
+var _frontend: RefCounted
+# One process-lifetime settings owner feeds both menu surfaces and every world
+# or HUD instance constructed during this shell session.
+var _player_options: PlayerOptions = PlayerOptionsScript.new()
 
 
 func _init() -> void:
+	_frontend = ShellMenuFrontendScript.new(self)
+	_player_options.changed.connect(_on_player_options_changed)
 	# The sampler observes the board's capture close edge directly (render-time
 	# measurement is RenderingServer state, not Node-owned state).
 	_render_stats.setup(_frame_stats)
@@ -114,7 +122,19 @@ func _init() -> void:
 	_dev_tools.open_changed.connect(_on_dev_tools_open_changed)
 	_dev_tools.game_input_mode_changed.connect(_on_dev_tools_game_input_mode_changed)
 	add_child(_dev_tools)
+	_pick_session.setup(_dev_tools)
 	_world_load.load_failed.connect(_on_world_load_failed)
+
+
+func get_player_options() -> PlayerOptions:
+	return _player_options
+
+
+func _on_player_options_changed(state: PlayerOptions.State) -> void:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	_player_options.apply(sim)
+	if _hud_presenter != null:
+		_hud_presenter.set_crosshair_style(state.crosshair_style)
 
 
 func _notification(what: int) -> void:
@@ -206,8 +226,10 @@ func _ready() -> void:
 	_previous_auto_accept_quit = get_tree().auto_accept_quit
 	get_tree().auto_accept_quit = false
 	_quit_policy_installed = true
+	_player_options.apply()
 	if _world == null or _camera == null or _menu_shell == null:
 		return
+	_menu_shell.set_player_options(_player_options)
 	var debug_adapter := get_game_debug_adapter()
 	add_child(debug_adapter)
 	debug_adapter.start_runtime_endpoint()
@@ -221,8 +243,8 @@ func _ready() -> void:
 	_player_presenter.setup(_world, _camera, _camera)
 	_world.set_local_view_presenter(_player_presenter)  # D-RORD-8 view leg
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
-	# not in _wire_shell, so menu-less entries (the env launch hooks) still get
-	# them; the HUD presenter's
+	# not in the annex's wire_shell, so menu-less entries (the env launch hooks)
+	# still get them; the HUD presenter's
 	# setup connects mission_effects before any world can tick (PreMission/WAC
 	# effects may drain on the first runtime tick, and it queues them until the
 	# lazy HUD exists).
@@ -243,6 +265,7 @@ func _ready() -> void:
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
 	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
+	_on_player_options_changed(_player_options.current())
 	# The MP end-of-round flow (net-re 5.68; HUD_DrawOverlayPanels @0x5c0072): STAT owns the cursor.
 	_end_round_presenter = EndRoundPresenter.install(self, _world,
 			_hud if _hud != null else self, _hud_presenter, _deploy_presenter,
@@ -342,8 +365,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if _dev_tools.handle_tools_toggle():
 			get_viewport().set_input_as_handled()
 		return
-	if key.keycode == PICK_KEY and key.shift_pressed and is_gameplay_input_active() \
-			and _world != null and _world.is_loaded():
+	if key.keycode == PICK_KEY and key.shift_pressed and _world != null \
+			and _world.is_loaded() and (is_gameplay_input_active() \
+			or (is_dev_tools_open() and not _dev_tools.is_game_playing())):
+		_use_latched = false  # the chord consumed the Shift press: no mount toggle on release
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
@@ -402,12 +427,8 @@ func _refresh_dev_tools_game_state() -> void:
 
 
 func _sync_dev_tools_pick_policy() -> void:
-	var enabled := is_dev_tools_open() and not _dev_tools.is_game_playing() \
-			and _is_game_play_available()
-	if _world == null or enabled == _dev_tools_pick_active:
-		return
-	_dev_tools_pick_active = enabled
-	_world.set_pick_click_enabled(enabled)
+	_pick_session.sync_click_policy(_world, is_dev_tools_open()
+			and not _dev_tools.is_game_playing() and _is_game_play_available())
 
 
 func is_dev_tools_open() -> bool:
@@ -415,11 +436,10 @@ func is_dev_tools_open() -> bool:
 
 
 ## Shift+F6 (and the probe/test seam): pick whatever the crosshair is on into the
-## debug pick list, with a brief on-screen confirmation (DebugPickFlow).
+## debug pick list (selecting it in the F3 Entities window), with a brief toast.
 func pick_at_crosshair() -> void:
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	_pick_flow.pick_at_crosshair(sim, _camera, _pick_list,
-			_hud if _hud != null else self)
+	_pick_session.pick_at_crosshair(_world.get_sim() if _world != null else null,
+			_camera, _hud if _hud != null else self)
 
 
 ## F11. ImGui multi-viewport must already be off at the NewFrame that first
@@ -534,58 +554,12 @@ static func can_summon_dir_picker_in(state: int, picker_open: bool) -> bool:
 	return state == State.MENU and not picker_open
 
 
-# --- Menu state ---------------------------------------------------------------
+# --- Menu state (bodies: shell_menu_frontend.gd, the method annex) ------------
 
 # Returns false when the directory would not mount (the picker is raised and
 # the shell holds no root) so boot continuations can gate on it.
 func _enter_menu(dir: String) -> bool:
-	if _root == null or _root.get_root_dir() != dir:
-		var root := BootRootMount.mount(dir, LaunchFlags.boot_loose_allowed(dir))
-		if root == null:
-			_request_resource_dir()
-			return false
-		_root = root
-	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
-			String(_root.get_expansion()).to_lower()]
-	if profile_root_key != _profile_root_key:
-		_chosen_avatar = PlayerProfile.load_character_profile(_root)
-		_profile_root_key = profile_root_key
-	# The menu, loading screen, and world are one runtime resource session.
-	# GameWorld must not remount from mutable persisted settings after boot.
-	_world.set_resource_root(_root)
-	_state = State.MENU
-	_shell_presentation.enter_menu(_world, _hud)
-	_wire_shell()
-	if _player_info_companion != null:
-		_player_info_companion.set_persisted_profile(_chosen_avatar)
-	if not _menu_shell.setup(_root):
-		push_warning("MainGame: no menu found in resource dir (looked for %s)" % _menu_shell.main_menu_file)
-	_menu_shell.show_menu()
-	return true
-
-
-func _wire_shell() -> void:
-	if _shell_wired:
-		return
-	_shell_wired = true
-	_menu_shell.start_requested.connect(_on_start_requested)
-	_menu_shell.exit_to_desktop_requested.connect(_on_exit_to_desktop)
-	_menu_shell.return_to_menu_requested.connect(_on_return_to_menu)
-	_menu_shell.resume_requested.connect(_on_resume)
-	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
-	_menu_shell.crosshair_style_changed.connect(_on_crosshair_style_changed)
-	# Delegate mp.mnu and player.mnu to their respective companions.
-	_mp_companion = MpMenuCompanion.new()
-	_player_info_companion = PlayerInfoMenuCompanion.new()
-	_lan_session = LanSession.new()
-	_lan_session.name = "LanSession"
-	add_child(_lan_session)
-	_mp_companion.set_lan_session(_lan_session)
-	_menu_shell.add_companion(_mp_companion)
-	_menu_shell.add_companion(_player_info_companion)
-	_net.wire_menu_companions(_mp_companion)
-	_player_info_companion.set_persisted_profile(_chosen_avatar)
-	_player_info_companion.avatar_chosen.connect(_on_avatar_chosen)
+	return _frontend.enter_menu(dir)
 
 
 # Install the in-memory local-player profile used by the next mission spawn.
@@ -593,24 +567,6 @@ func set_local_player_profile(profile: Dictionary) -> void:
 	_chosen_avatar = profile.duplicate(true)
 	if _player_info_companion != null:
 		_player_info_companion.set_persisted_profile(_chosen_avatar)
-
-
-# PLAYER_INFO ACCEPT persists both side records and the shared callsign, while
-# the selected loadout continues through the existing spawn-kit seam.
-func _on_avatar_chosen(profile: Dictionary) -> void:
-	set_local_player_profile(profile)
-	var typed_name := String(profile.get("name", "")).strip_edges()
-	if not typed_name.is_empty():
-		PlayerProfile.save_callsign(typed_name)
-	if _root != null:
-		var save_error := PlayerProfile.save_character_profile(_root, profile)
-		if save_error != OK:
-			push_warning("MainGame: could not save PLAYER_INFO profile (error %d)" % save_error)
-
-
-func _on_crosshair_style_changed(style: int) -> void:
-	if _hud_presenter != null:
-		_hud_presenter.set_crosshair_style(style)
 
 
 # The armory key while in-world: the shared ArmoryPresenter opens weapon.mnu's
@@ -641,54 +597,20 @@ func _try_toggle_mount() -> bool:
 	return sim.local_player_toggle_mount()
 
 
-# --- Resource dir picker (first launch) ---------------------------------------
+# --- Resource dir picker (first launch; bodies: shell_menu_frontend.gd) -------
 
 func _request_resource_dir() -> void:
-	if DisplayServer.get_name() == "headless" or _picker != null:
-		return
-	_picker = FileDialog.new()
-	_picker.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-	_picker.access = FileDialog.ACCESS_FILESYSTEM
-	_picker.use_native_dialog = true
-	_picker.title = "Select your OpenNova asset directory"
-	_picker.dir_selected.connect(_on_dir_selected)
-	_picker.canceled.connect(_on_dir_canceled)
-	add_child(_picker)
-	_picker.popup_centered_ratio(0.6)
+	_frontend.request_resource_dir()
 
 
-func _on_dir_selected(dir: String) -> void:
-	_cleanup_picker()
-	apply_picked_resource_dir(dir, not LaunchFlags.resource_dir().is_empty())
-
-
-## The picker's accept leg. `process_local` is resolved from --resource-dir at
-## the signal callback above: an ONED-selected directory is process-local,
-## so persisting a picker escape would overwrite the game's saved preference.
-## Parameterized for
-## the same ADR-0018 reason as BootRootMount.mount; returns false when the pick
-## would not mount (the picker is re-raised).
+## The picker's accept leg (the annex carries the doc + body; kept public and
+## name-stable for the lifecycle tests and the ADR-0018 seam).
 func apply_picked_resource_dir(dir: String, process_local: bool) -> bool:
-	var root := BootRootMount.mount(dir, LaunchFlags.boot_loose_allowed(dir))
-	if root == null:
-		_request_resource_dir()
-		return false
-	_root = root
-	if not process_local:
-		ResourceDirSettings.set_resource_dir(dir)
-	_enter_menu(dir)
-	return true
-
-
-func _on_dir_canceled() -> void:
-	_cleanup_picker()
-	_request_resource_dir()
+	return _frontend.apply_picked_resource_dir(dir, process_local)
 
 
 func _cleanup_picker() -> void:
-	if _picker != null:
-		_picker.queue_free()
-		_picker = null
+	_frontend.cleanup_picker()
 
 
 # --- Menu <-> world transitions ----------------------------------------------
@@ -812,10 +734,10 @@ func _on_world_loaded() -> void:
 	# under the loading presentation until the separate authoritative edge.
 	# A fresh mission gets a fresh pick set (stale handles never cross
 	# sessions); the world renders/curates the shell-owned list from here on.
-	_pick_list.clear()
-	_world.set_pick_debug(_pick_list)
+	_pick_session.begin_world(_world)
 	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
+	_player_options.apply(sim)
 	# The F3 engine-fact windows read and mutate through this Simulation from
 	# here until unload (ADR 0042 d6): DevTools holds it in C++ (the stats-board
 	# pattern) and does the record push / request drain with no GDScript relay.

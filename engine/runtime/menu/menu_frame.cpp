@@ -120,8 +120,11 @@ uint32_t MenuFrameCompiler::resolve_text_color(const std::string &value) const {
 
 // String content resolution: type=="id" looks the value up in the registered
 // text table [orig: CUIStringTable_LookupString @ 0x6527c0]; a miss or a
-// literal type keeps the raw text. The {hot} marker never draws.
-std::string MenuFrameCompiler::resolve_text_value(const std::string &type,
+// literal type keeps the raw text. The first {hot} marker never draws and its
+// following byte identifies the button accelerator [orig:
+// CButtonWnd_SetLabel @ 0x6572F0].
+MenuFrameCompiler::ResolvedText MenuFrameCompiler::resolve_text_value(
+		const std::string &type,
 		const std::string &raw) const {
 	std::string value = resolve_var(raw);
 	if (iequals(type, "id")) {
@@ -130,7 +133,10 @@ std::string MenuFrameCompiler::resolve_text_value(const std::string &type,
 			value = it->second;
 		}
 	}
-	return mnu::strip_hotkey_marker(value);
+	ResolvedText resolved;
+	resolved.text = mnu::strip_hotkey_marker(value, &resolved.hotkey,
+			&resolved.hotkey_pos);
+	return resolved;
 }
 
 int32_t MenuFrameCompiler::intern_texture(const std::string &name) {
@@ -384,7 +390,7 @@ int MenuFrameCompiler::build_node(const mnu::Window &w, int parent) {
 					visual.color = mnu::item_color_argb(resolve_var(item.text));
 				} else {
 					visual.kind = WidgetNode::ItemVisual::kText;
-					visual.text = resolve_text_value(item.type, item.text);
+					visual.text = resolve_text_value(item.type, item.text).text;
 				}
 				out.push_back(visual);
 			}
@@ -475,16 +481,27 @@ mnu::RectEdges MenuFrameCompiler::solve_rect(const WidgetNode &node,
 	return rect;
 }
 
-std::string MenuFrameCompiler::widget_text(const WidgetNode &node,
+MenuFrameCompiler::ResolvedText MenuFrameCompiler::resolved_widget_text(
+		const WidgetNode &node,
 		const MenuWidgetState *ws) const {
 	if (ws != nullptr && ws->has_text) {
-		return ws->text;
+		if (node.window->type == mnu::WindowType::Button) {
+			return resolve_text_value("literal", ws->text);
+		}
+		ResolvedText resolved;
+		resolved.text = ws->text;
+		return resolved;
 	}
 	const mnu::Window &w = *node.window;
 	if (w.string_data.present) {
 		return resolve_text_value(w.string_data.type, w.string_data.value);
 	}
-	return std::string();
+	return ResolvedText();
+}
+
+std::string MenuFrameCompiler::widget_text(const WidgetNode &node,
+		const MenuWidgetState *ws) const {
+	return resolved_widget_text(node, ws).text;
 }
 
 const fnt_font_t *MenuFrameCompiler::font_for(const WidgetNode &node) const {
@@ -804,8 +821,13 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		const MenuWidgetState *ws, int caret,
 		const std::string *override_text) {
 	const mnu::Window &w = *node.window;
-	const std::string text =
-			override_text != nullptr ? *override_text : widget_text(node, ws);
+	ResolvedText resolved;
+	if (override_text != nullptr) {
+		resolved.text = *override_text;
+	} else {
+		resolved = resolved_widget_text(node, ws);
+	}
+	const std::string &text = resolved.text;
 	if (text.empty()) {
 		return;
 	}
@@ -852,6 +874,14 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 	}
 	x += edge; // [orig: the edge term added into the draw x]
 	const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
+	// Feed the witnessed button mnemonic to GameFont's existing underline
+	// markup. Insert only when the marked byte survived prefix truncation.
+	if (w.type == mnu::WindowType::Button && resolved.hotkey_pos >= 0 &&
+			resolved.hotkey_pos < static_cast<int>(drawn.size())) {
+		const size_t pos = static_cast<size_t>(resolved.hotkey_pos);
+		drawn.insert(pos, "<U>");
+		drawn.insert(pos + 4, "<-U>");
+	}
 	emit_glyph_run(node, drawn, x, y, s, node.colors[state], caret);
 }
 
@@ -1979,6 +2009,13 @@ int MenuFrameCompiler::hotkey_widget(const std::string &key, bool virtual_key,
 					? normalize_vk(hk.value)
 					: opennova::strutil::to_lower(hk.value);
 			if (have == want) {
+				return idx;
+			}
+		}
+		if (!virtual_key && w.type == mnu::WindowType::Button) {
+			const ResolvedText label = resolved_widget_text(node, ws);
+			if (!label.hotkey.empty() &&
+					opennova::strutil::to_lower(label.hotkey) == want) {
 				return idx;
 			}
 		}

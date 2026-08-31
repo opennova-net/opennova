@@ -43,6 +43,7 @@ class DebugControlsStub:
 			&"teleport_local_player",
 			&"set_entity_health",
 			&"set_entity_position",
+			&"set_entity_item_attrib",
 			&"runtime_transport",
 			&"set_mission_variable",
 		]:

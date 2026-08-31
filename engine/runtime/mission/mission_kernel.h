@@ -144,6 +144,28 @@ public:
 	// optional world-phase attribution for the embedder's stats board.
 	void tick_no_net(world::LogicTickPerf *perf = nullptr);
 
+	// --- the weather tick (ADR 0042 d2: ONE engine function) ------------------
+	// The retail weather tick after the logic tick [orig:
+	// Environment_UpdateWeatherTick @ 0x57e9b0 from Game_ProcessMainFrame
+	// @ 0x526774, after Entity_UpdateAllEntities @ 0x52674b]: the world's sim
+	// legs, the thunder one-shots into world.weather_sounds, the local quake
+	// shake arm, then the installed render owner's color legs. Every embedder
+	// tick (the no-net tick, the listen frame, the joiner frame, the dedicated
+	// host) runs this once per 62.5 Hz quantum.
+	void tick_weather();
+	// The render owner (the shell's Weather node); null on a headless host.
+	world::IWeatherRenderTick *weather_render = nullptr;
+	// The mission-start boundary after the eager WAC execution [orig:
+	// Environment_MissionStartInit @ 0x57f1e0 then the 255 complete weather
+	// ticks @ 0x57f878..0x57f880]: the currents snap to the just-authored
+	// targets, the recovered clamps install, and 255 full ticks settle.
+	void settle_weather_mission_start();
+	// The precipitation pool's per-render update for a camera at (x, y, z)
+	// mission 16.16: the wrap into the camera volume and the re-floor of every
+	// wrapped drop on terrain / water / the first entity under it
+	// [orig: update_weather_particle_positions @ 0x5dec40 from the drawer].
+	void update_precipitation(int32_t cam_x, int32_t cam_y, int32_t cam_z);
+
 	// --- the per-tick legs a session frame orders around its pump -----------
 	// Pack the frame input onto the local player's body before the logic tick
 	// (the view-flag stamps ride along); no local player = no-op.
@@ -206,9 +228,12 @@ public:
 	void teleport_local_player(const world::Vec3 &mission_pos, double yaw_deg,
 			double pitch_deg);
 	void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
-	// The by-name weapon install from the retained weapon.def rows.
+	// The by-name weapon install from the retained weapon.def rows. A
+	// same-name install is the MOUNT path unless `allow_same_weapon_rebake`
+	// asks for the re-bake that keeps the live slot, serials, latches and
+	// scope state (the F3 Weapon window's `auto`/ANIM edits).
 	bool install_weapon(const std::string &weapon_name,
-			bool preserve_slot_state = false);
+			bool preserve_slot_state = false, bool allow_same_weapon_rebake = false);
 	// The armory table (weapon.def -> world.weapons + the retained rows), the
 	// mission loadout-chunk promotion and the spawn-kit rebuild — the boot's
 	// load_weapon_table step over an explicit source so the embedder's

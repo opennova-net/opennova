@@ -12,6 +12,8 @@ namespace opennova::devtools {
 
 namespace {
 
+constexpr uint16_t kNoHandle = world::EntityHandle::kInvalid;
+
 template <size_t N>
 void set_text(std::array<char, N> &dst, const char *fmt, ...) {
 	va_list args;
@@ -46,19 +48,28 @@ bool contains_ci(const char *haystack, const char *needle) {
 void EntitiesWindow::on_visibility(bool visible) {
 	shown_ = visible;
 	if (!visible) {
-		// Drop the snapshot so a closed window holds nothing; the embedder's
-		// needs_entity_directory gate stops the pushes on the same edge.
+		// Drop the snapshot so a closed window holds nothing (the directory
+		// keeps flowing only while the Properties window still shows). The
+		// selection survives as a pending handle so the next push, or the
+		// reopened window, re-selects the same entity.
+		const uint16_t keep = selected_handle();
 		snapshot_ = EntityDirectorySnapshot{};
-		format_rows();
+		format_rows(kNoHandle);
+		pending_select_handle_ = keep;
+		scroll_to_selected_ = false;
 	}
 }
 
 void EntitiesWindow::set_directory(EntityDirectorySnapshot snapshot) {
+	// The selection is re-keyed by wire handle, read BEFORE the rows move (the
+	// old index into the new rows names a different entity).
+	const uint16_t keep = selected_handle();
 	snapshot_ = std::move(snapshot);
 	if (!snapshot_.valid) {
 		snapshot_.rows.clear();
 	}
-	format_rows();
+	format_rows(keep);
+	apply_pending_selection();
 }
 
 void EntitiesWindow::enqueue_request(const DebugRequest &request) {
@@ -79,19 +90,26 @@ void EntitiesWindow::set_filter(const char *text) {
 	apply_filter();
 }
 
-void EntitiesWindow::format_rows() {
+int EntitiesWindow::row_index_for_handle(uint16_t handle) const {
+	if (handle == kNoHandle) {
+		return -1;
+	}
+	for (size_t i = 0; i < snapshot_.rows.size(); ++i) {
+		if (snapshot_.rows[i].wire_handle == handle) {
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
+}
+
+void EntitiesWindow::format_rows(uint16_t keep_handle) {
 	texts_.clear();
 	texts_.reserve(snapshot_.rows.size());
-	// Keep the selection across pushes by wire handle (the directory reorders
-	// as entities die and spawn).
-	const uint16_t selected_handle = selected_row() != nullptr
-			? selected_row()->wire_handle
-			: 0;
-	int reselected = -1;
 	for (size_t i = 0; i < snapshot_.rows.size(); ++i) {
 		const world::inspect::EntityRow &row = snapshot_.rows[i];
 		RowText text;
 		text.name = row.name.empty() ? "(unnamed)" : row.name;
+		text.item = row.item_name.empty() ? "-" : row.item_name;
 		if (row.ai_index >= 0) {
 			set_text(text.ai, "%d", row.ai_index);
 		} else {
@@ -104,11 +122,12 @@ void EntitiesWindow::format_rows() {
 		set_text(text.pos, "%.1f %.1f %.1f", row.mission_position.x,
 				row.mission_position.y, row.mission_position.z);
 		texts_.push_back(std::move(text));
-		if (selected_handle != 0 && row.wire_handle == selected_handle && reselected < 0) {
-			reselected = static_cast<int>(i);
-		}
 	}
-	selected_ = reselected;
+	// Keep the selection across pushes by wire handle (the directory reorders
+	// as entities die and spawn); a selection the push no longer carries is
+	// gone with its entity. A pending pick is not touched here: the push
+	// that carries it applies it.
+	selected_ = row_index_for_handle(keep_handle);
 	apply_filter();
 }
 
@@ -117,24 +136,67 @@ void EntitiesWindow::apply_filter() {
 	for (size_t i = 0; i < snapshot_.rows.size(); ++i) {
 		const RowText &text = texts_[i];
 		if (contains_ci(text.name.c_str(), filter_.data()) ||
+				contains_ci(text.item.c_str(), filter_.data()) ||
 				contains_ci(text.net_id.data(), filter_.data())) {
 			filtered_.push_back(static_cast<int>(i));
 		}
 	}
 }
 
-void EntitiesWindow::select_row(int snapshot_index) {
-	selected_ = snapshot_index;
-	const world::inspect::EntityRow *row = selected_row();
-	if (row == nullptr) {
+void EntitiesWindow::apply_pending_selection() {
+	if (pending_select_handle_ == kNoHandle || !snapshot_.valid) {
 		return;
 	}
-	// Seed the action edits from the row so "apply" without a touch is a
-	// no-op-shaped write, not a zero.
-	health_edit_ = row->health;
-	pos_edit_[0] = row->mission_position.x;
-	pos_edit_[1] = row->mission_position.y;
-	pos_edit_[2] = row->mission_position.z;
+	const int index = row_index_for_handle(pending_select_handle_);
+	// A push without the handle drops it: the entity is not in the directory.
+	pending_select_handle_ = kNoHandle;
+	if (index >= 0) {
+		// The pick's intent is "show me this": a filter typed meanwhile must
+		// not hide the row it lands on.
+		set_filter("");
+		select_row(index);
+		scroll_to_selected_ = true;
+	}
+}
+
+void EntitiesWindow::select_row(int snapshot_index) {
+	selected_ = snapshot_index;
+	pending_select_handle_ = kNoHandle;
+}
+
+void EntitiesWindow::select_handle(uint16_t handle) {
+	if (handle == kNoHandle) {
+		clear_selection();
+		return;
+	}
+	open = true;
+	request_focus();
+	const int index = row_index_for_handle(handle);
+	if (index >= 0) {
+		// The row is here: clear the filter so it can show, select, scroll.
+		set_filter("");
+		select_row(index);
+		scroll_to_selected_ = true;
+		return;
+	}
+	// Not in the held directory (none pushed yet, or a fresh pick the next
+	// push will carry): deselect and wait for the push; the filter stays
+	// until a row actually resolves.
+	selected_ = -1;
+	pending_select_handle_ = handle;
+}
+
+void EntitiesWindow::clear_selection() {
+	selected_ = -1;
+	pending_select_handle_ = kNoHandle;
+	scroll_to_selected_ = false;
+}
+
+uint16_t EntitiesWindow::selected_handle() const {
+	if (const world::inspect::EntityRow *row = selected_row()) {
+		return row->wire_handle;
+	}
+	return pending_select_handle_;
 }
 
 const world::inspect::EntityRow *EntitiesWindow::selected_row() const {
@@ -150,6 +212,10 @@ int EntitiesWindow::row_count() const {
 
 const char *EntitiesWindow::row_name(int row) const {
 	return (row >= 0 && row < row_count()) ? texts_[static_cast<size_t>(filtered_[static_cast<size_t>(row)])].name.c_str() : "";
+}
+
+const char *EntitiesWindow::row_item(int row) const {
+	return (row >= 0 && row < row_count()) ? texts_[static_cast<size_t>(filtered_[static_cast<size_t>(row)])].item.c_str() : "";
 }
 
 const char *EntitiesWindow::row_ai(int row) const {
@@ -176,81 +242,33 @@ const char *EntitiesWindow::row_pos(int row) const {
 	return (row >= 0 && row < row_count()) ? texts_[static_cast<size_t>(filtered_[static_cast<size_t>(row)])].pos.data() : "";
 }
 
-void EntitiesWindow::draw_selected_actions() {
-	ImGui::Separator();
-	const world::inspect::EntityRow *row = selected_row();
-	if (row == nullptr) {
-		ImGui::TextUnformatted("Select a row to edit it.");
-		return;
-	}
-	ImGui::Text("Selected: %s (ssn %d)",
-			row->name.empty() ? "(unnamed)" : row->name.c_str(), row->net_id);
-	// The edit seams key on the AI brain (editable = brain + live registry
-	// slot); a brainless row still offers the local-player teleport below.
-	ImGui::BeginDisabled(!row->editable);
-	ImGui::SetNextItemWidth(96.0f);
-	ImGui::InputInt("##entity_health", &health_edit_);
-	ImGui::SameLine();
-	if (ImGui::Button("Set health")) {
-		DebugRequest request;
-		request.kind = DebugRequest::Kind::SetEntityHealth;
-		request.target.packed = row->wire_handle;
-		request.health = health_edit_;
-		enqueue_request(request);
-	}
-	ImGui::SetNextItemWidth(240.0f);
-	ImGui::InputFloat3("##entity_pos", pos_edit_, "%.1f");
-	ImGui::SameLine();
-	if (ImGui::Button("Set position")) {
-		DebugRequest request;
-		request.kind = DebugRequest::Kind::SetEntityPosition;
-		request.target.packed = row->wire_handle;
-		request.pos[0] = pos_edit_[0];
-		request.pos[1] = pos_edit_[1];
-		request.pos[2] = pos_edit_[2];
-		enqueue_request(request);
-	}
-	ImGui::EndDisabled();
-	ImGui::SetNextItemWidth(64.0f);
-	ImGui::InputFloat("yaw", &yaw_edit_, 0.0f, 0.0f, "%.0f");
-	ImGui::SameLine();
-	ImGui::SetNextItemWidth(64.0f);
-	ImGui::InputFloat("pitch", &pitch_edit_, 0.0f, 0.0f, "%.0f");
-	ImGui::SameLine();
-	if (ImGui::Button("Teleport player here")) {
-		DebugRequest request;
-		request.kind = DebugRequest::Kind::TeleportLocalPlayer;
-		request.pos[0] = pos_edit_[0];
-		request.pos[1] = pos_edit_[1];
-		request.pos[2] = pos_edit_[2];
-		request.yaw = yaw_edit_;
-		request.pitch = pitch_edit_;
-		enqueue_request(request);
-	}
-}
-
 void EntitiesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
 	if (!snapshot_.valid) {
 		ImGui::TextUnformatted("No entity directory pushed (load a mission).");
+		if (pending_select_handle_ != kNoHandle) {
+			const world::EntityHandle pending{pending_select_handle_};
+			ImGui::Text("Selected entity %d:%d awaits the next directory push.",
+					pending.pool(), pending.slot());
+		}
 		return;
 	}
-	ImGui::Text("%d of %d entities | logic tick %llu (%.1f s readings)",
+	ImGui::Text("%d of %d entities | logic tick %llu (%.1f s readings)%s",
 			row_count(), static_cast<int>(snapshot_.rows.size()),
-			static_cast<unsigned long long>(snapshot_.logic_tick), kRefreshSeconds);
+			static_cast<unsigned long long>(snapshot_.logic_tick), kRefreshSeconds,
+			snapshot_.authority ? "" : " | read-only (joiner)");
 	ImGui::SetNextItemWidth(-64.0f);
 	if (ImGui::InputText("Filter", filter_.data(), filter_.size())) {
 		apply_filter();
 	}
 
-	// Leave room under the table for the selected-row action strip.
-	const float actions_height = ImGui::GetFrameHeightWithSpacing() * 4.0f;
 	const ImGuiTableFlags table_flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
 			ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
-	if (ImGui::BeginTable("entity_rows", 7, table_flags, ImVec2(0.0f, -actions_height))) {
+	if (ImGui::BeginTable("entity_rows", 8, table_flags, ImVec2(0.0f, 0.0f))) {
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+		ImGui::TableSetupColumn("Item", ImGuiTableColumnFlags_WidthStretch, 2.5f);
 		ImGui::TableSetupColumn("AI", ImGuiTableColumnFlags_WidthFixed, 36.0f);
 		ImGui::TableSetupColumn("SSN", ImGuiTableColumnFlags_WidthFixed, 48.0f);
 		ImGui::TableSetupColumn("Team", ImGuiTableColumnFlags_WidthFixed, 40.0f);
@@ -268,6 +286,14 @@ void EntitiesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				select_row(index);
 			}
 			ImGui::PopID();
+			if (index == selected_ && scroll_to_selected_) {
+				// Consumed only when the row is emitted, so a frame that draws
+				// no table (the window collapsed) keeps the request.
+				ImGui::SetScrollHereY(0.5f);
+				scroll_to_selected_ = false;
+			}
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted(text.item.c_str());
 			ImGui::TableNextColumn();
 			ImGui::TextUnformatted(text.ai.data());
 			ImGui::TableNextColumn();
@@ -283,7 +309,6 @@ void EntitiesWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		}
 		ImGui::EndTable();
 	}
-	draw_selected_actions();
 }
 
 }  // namespace opennova::devtools

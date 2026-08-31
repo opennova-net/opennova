@@ -79,7 +79,7 @@ from the in-process ring as source `engine`. A headless launch reports
 | `game_state` | the shell, the in-match session (`session.state`/`session.role` from the portable inmatch session), mission, runtime (entity/brain counts, the network role: `host` with its port and peers, `joiner` with its phase and admission, or `local`) and player state |
 | `game_entities` | `op=list` a bounded page of the rendered entity view; `op=inspect` one entity's public debug card (its `ai_index` is the edit target for `game_debug`) |
 | `game_control` | `quit`, pause/step/resume, `open_ingame_menu`, `open_armory`, ...; `quit` cancels a running probe first |
-| `game_debug` | the typed debug-control table (`DebugControls`, ADR 0042 d5) over MCP: `op=list/get/set/invoke/snapshot`; the automation actions `teleport_local_player`, `set_entity_health/position`, `deploy_pick`, `set_viewmodel_weapon`/`clear_viewmodel_weapon`, `kill_group`, `crew_vehicle`, `crew_local_player`, `local_player_look`, the audio bus actions, `runtime_transport`, `set_mission_variable`; the `net_joiner_diagnostics` check |
+| `game_debug` | the typed debug-control table (`DebugControls`, ADR 0042 d5) over MCP: `op=list/get/set/invoke/snapshot`; the automation actions `teleport_local_player`, `set_entity_health/position` (by `ai_index`), `set_entity_item_attrib` (both items.def attrib words on one entity by `wire_handle`), `deploy_pick`, `set_viewmodel_weapon`/`clear_viewmodel_weapon`, `kill_group`, `crew_vehicle`, `crew_local_player`, `local_player_look`, `local_spectator` (confirmation-gated, #601), `third_person_on_foot`, the audio bus actions, `runtime_transport`, `set_mission_variable`, the `environment_*` weather actions + `environment_weather_snapshot` (below); the `net_joiner_diagnostics` check |
 | `game_render_diagnostics` | one frame-correlated render snapshot (camera/projection, environment, lights, shadow config, pass counts) |
 | `game_capture_bundle` | the next completed frame as a lossless PNG + diagnostics JSON under `user://render-captures` (`world_only` hides the canvas UI) |
 | `game_menu` | drive the compiled menu: `state`, `press`, `press_at`, `click_at`, `key`, `screen`, `open` |
@@ -186,6 +186,9 @@ each schema; the table above is the map, the catalog is the truth.
 - Looking around from a pose: `game_debug invoke teleport_local_player
   {position, yaw_deg, pitch_deg}` then `local_player_look {dx_px, dy_px}`, then
   `game_capture_bundle` (formerly the bend-capture and render-align probes).
+- Weather: the `environment_rain` / `environment_snow` / `environment_overcast` / `environment_fog_distance` / `environment_move_fog` / `environment_sky_speed` / `environment_quake` / `environment_fog_type` actions take the WAC arguments (`rain 100 5` = `rain(100, 5)`); the F3 Environment window drives the same command layer.
+  `environment_weather_snapshot` reads the weather home (the clock, springs,
+  sequencers, the smoothed color blocks and the combined terrain light).
 - A time-of-day visual baseline: `game_debug set environment_time_of_day`
   four times with a `game_capture_bundle` each, compared with `render_swatch
   {mode: compare}` (formerly `env_visual_baseline_probe`).

@@ -368,6 +368,7 @@ static func _debug_action_args(id: StringName, raw: Variant) -> Variant:
 			&"teleport_local_player",
 			&"set_entity_health",
 			&"set_entity_position",
+			&"set_entity_item_attrib",
 			&"runtime_transport",
 			&"set_mission_variable",
 			&"set_audio_bus_volume",
@@ -415,6 +416,17 @@ static func _debug_action_args(id: StringName, raw: Variant) -> Variant:
 				return McpToolResult.error(
 						"set_entity_position requires an integer entity and numeric position=[x,y,z].")
 			return [entity, position]
+		&"set_entity_item_attrib":
+			if not args.has("entity") or not args.has("attrib") or not args.has("attrib2"):
+				return McpToolResult.error(
+						"set_entity_item_attrib requires args.entity (the row's wire_handle), args.attrib and args.attrib2.")
+			var entity: Variant = _integer_number(args["entity"])
+			var attrib: Variant = _integer_number(args["attrib"])
+			var attrib2: Variant = _integer_number(args["attrib2"])
+			if entity == null or attrib == null or attrib2 == null:
+				return McpToolResult.error(
+						"set_entity_item_attrib requires integer entity, attrib and attrib2 values.")
+			return [entity, attrib, attrib2]
 		&"runtime_transport":
 			var action: Variant = args.get("action")
 			if typeof(action) != TYPE_STRING or String(action).is_empty():

@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
@@ -15,8 +16,11 @@
 #if OPENNOVA_DEVTOOLS
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
+#include <runtime/devtools/weapon_action_snapshot.h>
 
 #include <memory>
+#include <string>
+#include <vector>
 #endif
 
 namespace godot {
@@ -64,6 +68,37 @@ public:
 	// and only while the window shows) and drains the windows' typed
 	// DebugRequests into the same debug delegates the MCP control plane uses.
 	void set_simulation(Simulation *p_simulation);
+
+	// The shell's world pick lands here as a typed request into the Entities
+	// window carrying only the engine handle: the window opens, focuses, and
+	// selects that row (pending until the next directory push carries it).
+	// A negative or out-of-range handle clears the selection; the handle also
+	// clears when the Simulation changes (stale handles never cross missions).
+	// selected_entity_handle reads it back for probes/tests (-1 = none).
+	void select_entity(int p_handle);
+	int selected_entity_handle() const;
+
+	// The AI window's overlay-state readback: a shell-installed Callable
+	// (() -> Dictionary {available, overlay, labels, routes, targets, rings})
+	// polled into each AI snapshot so the F3 toggle strip shows the world
+	// view's pushed truth (MCP flips the same debug-control rows). An invalid
+	// Callable reads as unavailable. The toggles themselves leave through the
+	// "ai_view_request" signal the shell session applies to the world.
+	void set_ai_view_state_provider(const Callable &p_provider);
+
+	// The Rays window's shell seam: the window's "Show rays" checkbox queues a
+	// view toggle the SHELL drains per frame (the GDScript debug-view set owns
+	// building the 3D ray view) — -1 none pending, else 0/1 — and the shell
+	// mirrors the live toggle state back so the checkbox stays honest.
+	int take_ray_view_toggle();
+	void set_ray_view_shown(bool p_shown);
+
+	// The Physics window's shell seam (the same shape): the window's "Show
+	// collision" checkbox queues a view toggle the shell drains per frame,
+	// and the shell mirrors the live toggle plus the overlay's drawable count
+	// back so the checkbox and the "boxes drawn" line stay honest.
+	int take_physics_view_toggle();
+	void set_physics_view_state(bool p_shown, int p_boxes_drawn);
 
 	// Every tool window back inside the main viewport on the next layout pass
 	// (ImGui's ini remembers a window dragged out to another monitor); the
@@ -115,8 +150,20 @@ private:
 #if OPENNOVA_DEVTOOLS
 	void draw(int p_requested_width, int p_requested_height) override;
 	void apply_game_requests();
+	void sync_game_spectator_state();
 	void apply_debug_requests();
-	void push_entity_directory();
+	bool push_entity_directory();
+	void push_entity_detail(bool p_directory_pushed);
+	void push_weapon_records();
+	void apply_weapon_requests();
+	void apply_environment_requests();
+	void push_environment_snapshot();
+	void apply_ai_view_requests();
+	void push_ai_debug();
+	void apply_rays_requests();
+	void push_rays_snapshot();
+	void apply_physics_requests();
+	void push_physics_snapshot();
 	void set_game_playing_internal(bool p_playing);
 
 	std::unique_ptr<opennova::devtools::GameDevTools> tools_;
@@ -126,6 +173,29 @@ private:
 	ObjectID simulation_id_;
 	Simulation *simulation() const;
 	int64_t last_entity_push_ms_ = -1; // -1 = push on the next needy frame
+	int last_detail_handle_ = -1;      // the handle the last detail push carried; -1 = none
+	// The Weapon window's trace is drained incrementally: only samples newer
+	// than this reach the window, so a per-frame push stays small; a newest
+	// tick below it is a restarted logic clock and re-primes the cursor.
+	uint32_t last_weapon_trace_tick_ = 0;
+	bool weapon_trace_primed_ = false;
+	// The definition is rebuilt only when something moved it: an applied
+	// request, a different weapon, or the clip rings resolving.
+	bool weapon_def_dirty_ = true;
+	uint64_t weapon_def_serial_ = 0;
+	std::string weapon_def_name_;
+	size_t weapon_def_rings_ = 0;
+	bool weapon_records_live_ = false;
+	int64_t last_environment_push_ms_ = -1;
+	int64_t last_ai_push_ms_ = -1;
+	Callable ai_view_state_provider_;
+	int64_t last_rays_push_ms_ = -1;
+	bool ray_view_shown_ = false;      // the shell-mirrored show_rays state
+	int pending_ray_view_toggle_ = -1; // -1 none, else 0/1 for the shell
+	int64_t last_physics_push_ms_ = -1;
+	bool physics_view_shown_ = false;      // the shell-mirrored show_collision state
+	int physics_boxes_drawn_ = 0;          // the overlay's live drawable count
+	int pending_physics_view_toggle_ = -1; // -1 none, else 0/1 for the shell
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

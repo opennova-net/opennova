@@ -38,6 +38,8 @@ public:
         int32_t alert = kAlertGreen;  // [orig: 0xA33FA4 + 48*g]
         int32_t initial_count = 0;    // [orig: 0xA33FA8] set once at mission start
         int32_t live_count = 0;       // [orig: 0xA33FAC] 62-tick rescan
+        // Authored group velocity. [orig: group row +24 @0xA33FBC]
+        int32_t move_speed_q16_per_tick = 0;
     };
 
     // [orig: EventSystem_FreeAll @ 0x453210] — one memset per mission load.

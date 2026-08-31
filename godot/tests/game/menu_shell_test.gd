@@ -13,6 +13,7 @@ const MenuShellScript := preload("res://game/menu_shell.gd")
 const MAIN_FIXTURE := "mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "mnu/jo_loadout.mnu"  # the cross-.mnu target
 const OPTIONS_FIXTURE := "mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
+const GAME_FIXTURE := "mnu/jo_game.mnu"  # pause menu with inline OPTIONS_WRAPPER
 const SP_PLAY_FIXTURE := "mnu/jo_sp.mnu"  # play screen: mission list IA_LIST + ACCEPT
 const MISSION_BIN_FIXTURE := "rtxt/00tra.bin"  # real per-mission bin: info/Title + briefing
 const MUS_FIXTURE := "mus/jo_gamemus.bin"  # decrypted SCR0 MUS program
@@ -47,6 +48,8 @@ var _had_controls_cfg := false
 func before_each() -> void:
 	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
+	if _had_state_config:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 	_had_controls_cfg = FileAccess.file_exists(ControlsBindings.CONFIG_PATH)
 	_saved_controls_cfg = FileAccess.get_file_as_bytes(ControlsBindings.CONFIG_PATH) \
 			if _had_controls_cfg else PackedByteArray()
@@ -76,11 +79,13 @@ func _restore_config(path: String, existed: bool, bytes: PackedByteArray) -> voi
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
 # stub mission), and a shell pointed at it. Returns null when a real temp root is
 # unavailable in this environment (the caller pass_test-skips, as mnu_menu_test does).
-func _make_shell(dir: String):
+func _make_shell(dir: String, options: PlayerOptions = null):
 	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		return null
 	var shell = MenuShellScript.new()
+	if options != null:
+		shell.set_player_options(options)
 	shell.size = Vector2(800, 600)
 	add_child_autofree(shell)  # in-tree so the built menu's widgets are not orphans
 	shell.setup(root)
@@ -115,8 +120,8 @@ func _fixture_bytes(source: String) -> PackedByteArray:
 
 
 func should_skip_script():
-	for rel in [MAIN_FIXTURE, SP_FIXTURE, OPTIONS_FIXTURE, SP_PLAY_FIXTURE,
-			MISSION_BIN_FIXTURE, MUS_FIXTURE]:
+	for rel in [MAIN_FIXTURE, SP_FIXTURE, OPTIONS_FIXTURE, GAME_FIXTURE,
+			SP_PLAY_FIXTURE, MISSION_BIN_FIXTURE, MUS_FIXTURE]:
 		if RetailData.fixture(rel).is_empty():
 			return RetailData.fixture_pending_text(rel)
 	return false
@@ -164,7 +169,7 @@ func _write_bms(path: String, mission_name: String, attribs: int) -> void:
 
 
 func _cleanup(dir: String) -> void:
-	for f in ["main.mnu", "sp.mnu", "options.mnu", "test.bms"]:
+	for f in ["main.mnu", "sp.mnu", "options.mnu", "game.mnu", "test.bms"]:
 		DirAccess.remove_absolute(dir.path_join(f))
 	DirAccess.remove_absolute(dir)
 
@@ -189,10 +194,18 @@ func test_boots_into_main_menu_startup() -> void:
 # pinned to the registered high-quality retail comparison profile and locked.
 # [orig: options_screen_init @ 0x554800;
 # UI_PopulateRenderAndAudioSettings @ 0x55c830]
-func test_options_scrolls_seed_original_ranges() -> void:
+func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
+	var config := ConfigFile.new()
+	config.set_value("audio", "sound_fx_volume", 31)
+	config.set_value("audio", "dialog_volume", 93)
+	config.set_value("audio", "music_volume", 159)
+	config.set_value("controls", "mouse_sensitivity", 287)
+	config.set_value("controls", "invert_mouse", true)
+	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
+	var options := PlayerOptions.new()
 	var dir := _make_dir()
 	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
-	var shell = _make_shell(dir)
+	var shell = _make_shell(dir, options)
 	if shell == null:
 		pass_test("temp resource root unavailable")
 		_cleanup(dir)
@@ -201,10 +214,10 @@ func test_options_scrolls_seed_original_ranges() -> void:
 	var driver: MenuDriver = shell.get_driver()
 	var expected := [
 		["GAMMA", 5, 20, 2, 8],
-		["SOUNDFXVOLUME", 0, 255, 10, 0],
-		["DIALOGVOLUME", 0, 255, 10, 0],
-		["MUSICVOLUME", 0, 255, 10, 0],
-		["MOUSE_SENSITIVITY", 4, 511, 10, 4],
+		["SOUNDFXVOLUME", 0, 255, 10, 31],
+		["DIALOGVOLUME", 0, 255, 10, 93],
+		["MUSICVOLUME", 0, 255, 10, 159],
+		["MOUSE_SENSITIVITY", 4, 511, 10, 287],
 	]
 	for row in expected:
 		var control_name := String(row[0])
@@ -214,15 +227,28 @@ func test_options_scrolls_seed_original_ranges() -> void:
 		assert_not_null(scroll, "%s receives scroll state" % control_name)
 		assert_eq([scroll.minimum, scroll.maximum, scroll.page, scroll.value],
 				row.slice(1),
-				"%s receives its original range/page and min fallback" % control_name)
+				"%s receives its original range/page and persisted value" \
+						% control_name)
+	assert_true(driver.is_widget_checked(driver.widget_id("INVERT_MOUSE")),
+			"the persisted mouse inversion seeds the checkbox")
 	assert_true(driver.is_widget_disabled(driver.widget_id("GAMMA")),
 			"gamma is visible but locked to the comparison profile")
 	for unlocked_name in ["SOUNDFXVOLUME", "DIALOGVOLUME", "MUSICVOLUME",
-			"MOUSE_SENSITIVITY"]:
+			"MOUSE_SENSITIVITY", "INVERT_MOUSE"]:
 		assert_false(driver.is_widget_disabled(driver.widget_id(unlocked_name)),
-				"%s remains an interactive non-video setting" % unlocked_name)
+				"%s remains an interactive core setting" % unlocked_name)
+	for unsupported_name in OptionsMenuController.UNSUPPORTED_CONTROLS:
+		var id := driver.widget_id(unsupported_name)
+		if id >= 0:
+			assert_true(driver.is_widget_disabled(id),
+					"%s is visible but read-only until supported" % unsupported_name)
+	assert_true(driver.is_widget_disabled(driver.widget_id("XHAIR_COLOR")))
+	assert_true(driver.is_widget_disabled(driver.widget_id("XHAIR_SPREAD")))
+	assert_eq(driver.selected_row(driver.widget_id("XHAIR_COLOR")), 0,
+			"unsupported crosshair tint stays on white")
+	assert_true(driver.is_widget_checked(driver.widget_id("XHAIR_SPREAD")),
+			"the runtime-supported spread stays enabled")
 	_cleanup(dir)
-
 
 func test_video_options_are_highest_quality_and_read_only() -> void:
 	var dir := _make_dir()
@@ -421,31 +447,127 @@ func test_start_without_selection_falls_back_to_first_mission() -> void:
 	_cleanup(dir)
 
 
-func test_crosshair_spinlist_seeds_persists_and_notifies() -> void:
-	var saved := ResourceDirSettings.get_crosshair_style()
-	ResourceDirSettings.set_crosshair_style(11)
+func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> void:
+	var config := ConfigFile.new()
+	config.set_value("player", "crosshair_style", 11)
+	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
+	var options := PlayerOptions.new()
 	var dir := _make_runtime_dir()
-	var shell = _make_runtime_shell(dir)
+	var shell = _make_runtime_shell(dir, options)
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
-		ResourceDirSettings.set_crosshair_style(saved)
 		_rm_runtime_dir(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
 	var spin: int = driver.widget_id("XHAIR_APPEARANCE")
 	assert_gte(spin, 0, "Options authors the crosshair spin list.")
 	assert_eq(driver.widget_kind_of(spin), MnuDocument.TYPE_SPINLIST,
-		"XHAIR_APPEARANCE is a spin list.")
+			"XHAIR_APPEARANCE is a spin list.")
 	assert_eq(driver.selected_row(spin), 11,
-		"The spin list starts on the persisted crosshair.")
-	watch_signals(shell)
+			"The spin list starts on the persisted crosshair.")
+	watch_signals(options)
 	driver.select_row(spin, 18)  # emits the "spinlist" value change
-	assert_eq(ResourceDirSettings.get_crosshair_style(), 18, "Selection persists.")
-	assert_signal_emitted_with_parameters(shell, "crosshair_style_changed", [18])
+	assert_eq(options.current().crosshair_style, 18,
+			"the shared owner changes immediately")
+	assert_eq(PlayerOptions.new().current().crosshair_style, 18,
+			"the selection persists through the shared owner")
+	assert_signal_emit_count(options, "changed", 1)
 	shell.get_resource_root().clear()
-	ResourceDirSettings.set_crosshair_style(saved)
 	_rm_runtime_dir(dir)
 
+
+func test_front_options_accept_keeps_immediate_changes_and_returns_to_main() -> void:
+	var options := PlayerOptions.new()
+	var dir := _make_dir()
+	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	driver.menu_requested.emit("options.mnu", "")
+	assert_eq(shell.get_current_menu_file(), "options.mnu")
+	assert_eq(shell.get_menu_stack_depth(), 1)
+	driver.widget_value_changed.emit("MUSICVOLUME", "scroll", 88, "88")
+	assert_eq(options.current().music_volume, 88,
+			"the front surface writes the process-lifetime owner immediately")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	assert_eq(shell.get_current_menu_file(), "main.mnu",
+			"the actionless front-menu Accept pops through the shell file stack")
+	assert_eq(shell.get_menu_stack_depth(), 0)
+	assert_eq(PlayerOptions.new().current().music_volume, 88,
+			"Accept navigation retains the already-saved value")
+	_cleanup(dir)
+
+
+func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> void:
+	var options := PlayerOptions.new()
+	var initial := options.current()
+	initial.sound_fx_volume = 45
+	initial.music_volume = 67
+	initial.mouse_sensitivity = 301
+	initial.invert_mouse = true
+	initial.crosshair_style = 7
+	options.update(initial)
+
+	var dir := _make_dir()
+	_copy(GAME_FIXTURE, dir.path_join("game.mnu"))
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_ingame_menu(), "the retail pause document opens")
+	var driver: MenuDriver = shell.get_driver()
+	for pair in [
+		["SOUNDFXVOLUME", 45],
+		["MUSICVOLUME", 67],
+		["MOUSE_SENSITIVITY", 301],
+	]:
+		var scroll = driver.get_widget_scroll_range(driver.widget_id(String(pair[0])))
+		assert_not_null(scroll)
+		assert_eq(scroll.value, int(pair[1]),
+				"%s reads the same shared state as the front surface" % pair[0])
+	assert_true(driver.is_widget_checked(driver.widget_id("INVERT_MOUSE")))
+	assert_eq(driver.selected_row(driver.widget_id("XHAIR_APPEARANCE")), 7)
+	assert_gt(driver.table_row_count(driver.widget_id("CONTROL_MAPPING")), 40,
+			"the same remap controller seeds the pause table")
+
+	var object_detail := driver.widget_id("OBJECTDETAIL")
+	assert_gte(object_detail, 0)
+	assert_eq(driver.item_value(object_detail, driver.selected_row(object_detail)), "3")
+	assert_true(driver.is_widget_disabled(object_detail),
+			"the in-game object-detail alias is pinned to the supported renderer")
+	for unsupported_name in OptionsMenuController.UNSUPPORTED_CONTROLS:
+		var id := driver.widget_id(unsupported_name)
+		if id >= 0:
+			assert_true(driver.is_widget_disabled(id),
+					"%s is read-only in the pause surface too" % unsupported_name)
+
+	var main_wrapper := driver.widget_id("MAIN_WRAPPER")
+	var options_wrapper := driver.widget_id("OPTIONS_WRAPPER")
+	driver.set_widget_shown(main_wrapper, false)
+	driver.set_widget_shown(options_wrapper, true)
+	driver.widget_value_changed.emit("SOUNDFXVOLUME", "scroll", 72, "72")
+	driver.widget_activated.emit(driver.widget_id("OPT_ACCEPT"), "OPT_ACCEPT")
+	assert_true(driver.is_widget_shown(main_wrapper))
+	assert_false(driver.is_widget_shown(options_wrapper),
+			"the formerly actionless pause Accept returns to the pause menu")
+	assert_eq(options.current().sound_fx_volume, 72)
+
+	driver.set_widget_shown(main_wrapper, false)
+	driver.set_widget_shown(options_wrapper, true)
+	driver.widget_value_changed.emit("MUSICVOLUME", "scroll", 84, "84")
+	driver.widget_activated.emit(driver.widget_id("OPT_CANCEL"), "OPT_CANCEL")
+	assert_true(driver.is_widget_shown(main_wrapper))
+	assert_false(driver.is_widget_shown(options_wrapper))
+	assert_eq(options.current().music_volume, 84,
+			"Cancel only navigates because pause-menu edits save immediately")
+	var reloaded := PlayerOptions.new().current()
+	assert_eq(reloaded.sound_fx_volume, 72)
+	assert_eq(reloaded.music_volume, 84)
+	_cleanup(dir)
 
 # Options -> Mods: the shell lists discoverable expansions in AVAIL_LIST by name, and
 # activating one mounts it over the base game, fills MOD_DESC, persists the choice
@@ -953,11 +1075,13 @@ func _make_runtime_dir() -> String:
 	return dir
 
 
-func _make_runtime_shell(dir: String):
+func _make_runtime_shell(dir: String, options: PlayerOptions = null):
 	var root := ResourceRoot.new()
 	if root.mount_runtime(dir) != OK:
 		return null
 	var shell = MenuShellScript.new()
+	if options != null:
+		shell.set_player_options(options)
 	shell.main_menu_file = "options.mnu"  # open the menu that carries the Mods tab
 	shell.size = Vector2(800, 600)
 	add_child_autofree(shell)

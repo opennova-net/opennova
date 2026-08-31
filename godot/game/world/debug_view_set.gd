@@ -23,7 +23,9 @@ const CollisionDebugView := preload("res://game/debug/collision_debug_view.gd")
 const OcclusionDebugView := preload("res://game/debug/occlusion_debug_view.gd")
 const ParticleDebugView := preload("res://game/debug/particle_debug_view.gd")
 const RoundDebugView := preload("res://game/debug/round_debug_view.gd")
+const RayDebugView := preload("res://game/debug/ray_debug_view.gd")
 const HitboxDebugView := preload("res://game/debug/hitbox_debug_view.gd")
+const AiDebugView := preload("res://game/debug/ai_debug_view.gd")
 const DebugViewStatus := preload(
 		"res://game/debug/debug_view_status.gd")
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
@@ -32,7 +34,9 @@ const COLLISION_DEBUG_NAME := "CollisionDebug"
 const PARTICLE_DEBUG_NAME := "ParticleDebug"
 const OCCLUSION_DEBUG_NAME := "OcclusionDebug"
 const ROUND_DEBUG_NAME := "RoundDebug"
+const RAY_DEBUG_NAME := "RayDebug"
 const HITBOX_DEBUG_NAME := "HitboxDebug"
+const AI_DEBUG_NAME := "AiDebug"
 const PICK_DEBUG_NAME := "PickDebug"
 const PICK_CATCHER_NAME := "PickClickCatcher"
 
@@ -51,7 +55,9 @@ var _collision_view: CollisionDebugView = null
 var _particle_view: ParticleDebugView = null
 var _occlusion_view: OcclusionDebugView = null
 var _round_view: RoundDebugView = null
+var _ray_view: RayDebugView = null
 var _hitbox_view: HitboxDebugView = null
+var _ai_view: AiDebugView = null
 
 # Debug: draw character bones over the world (the dev tools' "Show skeletons"). Off by default.
 var _skeleton_debug := false
@@ -63,7 +69,18 @@ var _occlusion_debug := false
 # Debug: draw live emitter bounds + effect names (the dev tools' "Show effect boxes").
 var _particle_debug := false
 var _round_debug := false
+# Debug: draw every engine raycast, color-coded by category (the dev tools'
+# "Show rays"). The toggle also arms/disarms the engine's opt-in recording.
+var _ray_debug := false
 var _hitbox_debug := false
+# The AI overlay's master + element toggles (all retained across reloads; the
+# elements only matter while the master has a view built).
+var _ai_debug := false
+var _ai_labels := true
+var _ai_routes := true
+var _ai_targets := true
+var _ai_rings := true
+var _ai_selection_provider := Callable()  # () -> packed handle; -1 = none
 
 
 ## One-time wiring from the owning GameWorld: the world node the views attach
@@ -119,10 +136,20 @@ func get_debug_view_statuses() -> Array[DebugViewStatus]:
 					if _view_live(_round_view) else 0,
 			"No recent rounds to draw", "round trail", "round trails"))
 	statuses.append(_view_status(
+			&"show_rays", _ray_debug, _view_live(_ray_view),
+			_ray_view.get_debug_drawable_count() \
+					if _view_live(_ray_view) else 0,
+			"No recent rays to draw", "ray", "rays"))
+	statuses.append(_view_status(
 			&"show_hit_meshes", _hitbox_debug, _view_live(_hitbox_view),
 			_hitbox_view.get_debug_drawable_count() \
 					if _view_live(_hitbox_view) else 0,
 			"No hit meshes in range", "hit mesh", "hit meshes"))
+	statuses.append(_view_status(
+			&"show_ai_overlay", _ai_debug, _view_live(_ai_view),
+			_ai_view.get_debug_drawable_count() \
+					if _view_live(_ai_view) else 0,
+			"No AI brains to draw", "AI brain/route", "AI brains/routes"))
 	return statuses
 
 
@@ -156,8 +183,12 @@ func on_loaded() -> void:
 		set_occlusion_debug(true)
 	if _round_debug:
 		set_round_debug(true)
+	if _ray_debug:
+		set_ray_debug(true)  # also re-arms recording on the fresh sim
 	if _hitbox_debug:
 		set_hitbox_debug(true)
+	if _ai_debug:
+		set_ai_debug_option(&"show_ai_overlay", true)
 
 
 ## Mission teardown — preserves the exact retain/free split the world's unload
@@ -174,7 +205,9 @@ func on_unload() -> void:
 		COLLISION_DEBUG_NAME,
 		OCCLUSION_DEBUG_NAME,
 		ROUND_DEBUG_NAME,
+		RAY_DEBUG_NAME,
 		HITBOX_DEBUG_NAME,
+		AI_DEBUG_NAME,
 	]:
 		_remove_debug_view(debug_name)
 
@@ -277,6 +310,12 @@ func is_particle_debug() -> bool:
 
 func _refresh_collision_debug() -> void:
 	_remove_debug_view(COLLISION_DEBUG_NAME)
+	# The contact ring that flashes the drawn boxes arms with the view (and on
+	# the on_loaded re-apply: a fresh sim starts disarmed), the ray-recording
+	# contract; the F3 Physics window can flip capture independently after.
+	var sim: Simulation = _world.get_sim() if is_instance_valid(_world) else null
+	if sim != null and is_instance_valid(sim):
+		sim.set_contact_debug_capture(_collision_debug)
 	if not _collision_debug:
 		return
 	var view := CollisionDebugView.new()
@@ -284,6 +323,12 @@ func _refresh_collision_debug() -> void:
 	view.name = COLLISION_DEBUG_NAME
 	_world.add_child(view)
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
+
+
+## The collision overlay's live drawable count (0 while the view is down) --
+## the F3 Physics window's "boxes drawn" line, mirrored through the bridge.
+func collision_debug_drawable_count() -> int:
+	return _collision_view.get_debug_drawable_count() if _view_live(_collision_view) else 0
 
 
 # --- Round debug view (the dev tools' "Show round trails") -------------------
@@ -306,6 +351,32 @@ func set_round_debug(enabled: bool) -> void:
 
 func is_round_debug() -> bool:
 	return _round_debug
+
+
+# --- Ray debug view (the dev tools' "Show rays") -----------------------------
+# Build / free a child RayDebugView drawing the engine's ray-debug capture
+# (every collision-world raycast, color-coded by category, fading with age) —
+# the collision-view contract. The toggle also arms/disarms the CollisionWorld
+# recording so the capture costs nothing while hidden; on_loaded re-applies it
+# to the fresh sim.
+
+func set_ray_debug(enabled: bool) -> void:
+	_ray_debug = enabled
+	_remove_debug_view(RAY_DEBUG_NAME)
+	var sim: Simulation = _world.get_sim() if is_instance_valid(_world) else null
+	if sim != null and is_instance_valid(sim):
+		sim.set_ray_debug_recording(enabled)
+	if not enabled:
+		return
+	var view := RayDebugView.new()
+	_ray_view = view
+	view.name = RAY_DEBUG_NAME
+	_world.add_child(view)
+	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
+
+
+func is_ray_debug() -> bool:
+	return _ray_debug
 
 
 # Build / free a child HitboxDebugView drawing the round hit-detection reality
@@ -382,3 +453,71 @@ func set_occlusion_debug(enabled: bool) -> void:
 
 func is_occlusion_debug() -> bool:
 	return _occlusion_debug
+
+
+# --- AI debug view (the F3 AI window's "World overlay" / the dev tools'
+# "Show AI overlay") ----------------------------------------------------------
+# One view, four elements: state labels, nav routes, target/aim lines and
+# perception rings share one payload fetch (Simulation.get_ai_debug). The
+# master builds / frees the view (the collision-view contract); the element
+# flags forward into the live view and retain alongside the master.
+
+## Flip one AI overlay option by id: &"show_ai_overlay" (the master) or
+## &"show_ai_labels" / &"show_ai_routes" / &"show_ai_targets" /
+## &"show_ai_rings". Unknown ids are ignored.
+func set_ai_debug_option(id: StringName, enabled: bool) -> void:
+	match id:
+		&"show_ai_overlay":
+			_ai_debug = enabled
+			_remove_debug_view(AI_DEBUG_NAME)
+			if not enabled:
+				return
+			var view := AiDebugView.new()
+			_ai_view = view
+			view.name = AI_DEBUG_NAME
+			_world.add_child(view)
+			view.set_elements(_ai_labels, _ai_routes, _ai_targets, _ai_rings)
+			view.set_selection_provider(_ai_selection_provider)
+			view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
+		&"show_ai_labels":
+			_ai_labels = enabled
+			_forward_ai_elements()
+		&"show_ai_routes":
+			_ai_routes = enabled
+			_forward_ai_elements()
+		&"show_ai_targets":
+			_ai_targets = enabled
+			_forward_ai_elements()
+		&"show_ai_rings":
+			_ai_rings = enabled
+			_forward_ai_elements()
+
+
+## One state Dictionary for the F3 toggle strip's readback and the
+## debug-control rows: { available, overlay, labels, routes, targets, rings }.
+func get_ai_view_state() -> Dictionary:
+	return {
+		"available": true,
+		"overlay": _ai_debug,
+		"labels": _ai_labels,
+		"routes": _ai_routes,
+		"targets": _ai_targets,
+		"rings": _ai_rings,
+	}
+
+
+func is_ai_debug() -> bool:
+	return _ai_debug
+
+
+## The F3 selection, lent as a Callable the view polls per refresh (installed
+## by the shell's AiDebugSession; survives view rebuilds).
+func set_ai_debug_selection_provider(provider: Callable) -> void:
+	_ai_selection_provider = provider
+	if _view_live(_ai_view):
+		_ai_view.set_selection_provider(provider)
+
+
+func _forward_ai_elements() -> void:
+	if _view_live(_ai_view):
+		_ai_view.set_elements(_ai_labels, _ai_routes, _ai_targets, _ai_rings)

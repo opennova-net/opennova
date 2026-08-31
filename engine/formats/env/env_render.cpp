@@ -16,6 +16,31 @@ int clamp_int(int value, int min_value, int max_value) {
 	return std::max(min_value, std::min(max_value, value));
 }
 
+// The 32-bit wrapping negate every `neg` clamp in the weather tick performs.
+int32_t wrap_neg(int32_t v) {
+	return static_cast<int32_t>(0u - static_cast<uint32_t>(v));
+}
+
+// The witnessed two-compare clamp: `if (v > limit) v = limit; limit = -limit;
+// if (v < limit) v = limit` — a NEGATIVE limit therefore pins v to +|limit|
+// instead of bounding it, and the negate wraps at INT32_MIN
+// [orig: interpolate_weather_color @ 0x57da2c..0x57da6b; the springs
+//  @ 0x57ede5..0x57ee12].
+int32_t neg_clamp(int32_t v, int32_t limit) {
+	if (v > limit) v = limit;
+	const int32_t low = wrap_neg(limit);
+	if (v < low) v = low;
+	return v;
+}
+
+int32_t wrap_add(int32_t a, int32_t b) {
+	return static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b));
+}
+
+int32_t wrap_sub(int32_t a, int32_t b) {
+	return static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b));
+}
+
 int rgb_byte(float normalized) {
 	return clamp_int(static_cast<int>(normalized * 255.0f + 0.5f), 0, 255);
 }
@@ -118,8 +143,8 @@ DayPhase compute_day_phase(float hhmm_time) {
 int smooth_eighth(int current, int target) {
 	// [orig: Environment_UpdateWeatherTick @ 0x57ee78] — eighth step with
 	// overshoot snap.
-	const int step = (target - current + 7) >> 3;
-	const int next = current + step;
+	const int step = wrap_add(wrap_sub(target, current), 7) >> 3;
+	const int next = wrap_add(current, step);
 	if ((current < target && next > target) || (current > target && next < target)) {
 		return target;
 	}
@@ -127,13 +152,11 @@ int smooth_eighth(int current, int target) {
 }
 
 int spring_step(int current, int target, int step_clamp, int max_abs) {
-	// [orig: Environment_UpdateWeatherTick @ 0x57ede2] — 1/32 step with step
-	// and absolute clamps.
-	int step = (target - current + 31) >> 5;
-	step = clamp_int(step, -step_clamp, step_clamp);
-	int next = current + step;
-	next = clamp_int(next, -max_abs, max_abs);
-	return next;
+	// [orig: Environment_UpdateWeatherTick @ 0x57ede2..0x57ee12] — 1/32 step
+	// under the two-compare step clamp, the sum under the same clamp against
+	// the absolute max; every add wraps like the original's.
+	const int step = neg_clamp(wrap_add(wrap_sub(target, current), 31) >> 5, step_clamp);
+	return neg_clamp(wrap_add(current, step), max_abs);
 }
 
 void EnvScalarChannels::tick() {
@@ -148,16 +171,19 @@ void EnvScalarChannels::tick() {
 	overcast_fp = spring_step(overcast_fp, overcast_target_fp, overcast_step_fp, overcast_max_fp);
 }
 
-void EnvScalarChannels::snap_currents_to_targets() {
-	fog_dist_fp = fog_dist_target_fp;
-	fog_step_fp = 0x00FF0000;
-	fog_max_fp = 1000 << 16;
+void EnvScalarChannels::mission_start_init() {
+	// [orig: Environment_MissionStartInit (ex sub_57F1E0) @ 0x57f7d8..0x57f873]
 	sun_dim_fp = sun_dim_target_fp;
 	sky_height_fp = sky_height_target_fp;
 	rain_pct_fp = rain_pct_target_fp;
-	rain_step_fp = 0x1000;
+	rain_max_fp = kMissionRainMax;
+	overcast_max_fp = kMissionRainMax;
+	fog_dist_fp = fog_dist_target_fp;
+	rain_step_fp = kMissionRainStep;
 	overcast_fp = overcast_target_fp;
-	overcast_step_fp = 0x1000;
+	overcast_step_fp = kMissionRainStep;
+	fog_step_fp = kMissionFogAccel;
+	fog_max_fp = kMissionFogMax;
 }
 
 void EnvScalarChannels::apply_network_sample(uint16_t fog_dist,
@@ -179,16 +205,18 @@ uint32_t ColorChannelState::step(uint32_t target_packed, int max_step_fp) {
 	// [orig: interpolate_weather_color @ 0x57d9e0] — per-channel (delta >> 3)
 	// clamped, accumulate in 12.20, repack with +0x80000 rounding.
 	const auto step_channel = [max_step_fp](int32_t &channel_fp, int target_byte) {
-		int32_t delta = ((target_byte << 20) - channel_fp) >> 3;
-		delta = clamp_int(delta, -max_step_fp, max_step_fp);
-		channel_fp += delta;
+		const int32_t delta = neg_clamp(wrap_sub(target_byte << 20, channel_fp) >> 3, max_step_fp);
+		channel_fp = wrap_add(channel_fp, delta);
 	};
 	step_channel(b_fp, static_cast<int>(target_packed & 0xFF));
 	step_channel(g_fp, static_cast<int>((target_packed >> 8) & 0xFF));
 	step_channel(r_fp, static_cast<int>((target_packed >> 16) & 0xFF));
 	step_channel(a_fp, static_cast<int>((target_packed >> 24) & 0xFF));
+	// The repack takes the LOW BYTE of (channel + 0x80000) >> 20 — no saturate,
+	// an accumulator past 255 wraps around [orig: @ 0x57da85..0x57da8e `lea
+	// ebx, [esi+80000h]; sar ebx, 14h; mov byte ptr [..], bl`].
 	const auto repack = [](int32_t channel_fp) -> uint32_t {
-		return static_cast<uint32_t>(clamp_int((channel_fp + 0x80000) >> 20, 0, 255));
+		return static_cast<uint32_t>(wrap_add(channel_fp, 0x80000) >> 20) & 0xFFu;
 	};
 	return repack(b_fp) | (repack(g_fp) << 8) | (repack(r_fp) << 16) | (repack(a_fp) << 24);
 }
@@ -247,6 +275,8 @@ bool LightningSequencers::tick() {
 	// overwrites, never maxes). A processes before B, so a same-tick collision
 	// resolves to B's level, as in the original's statement order.
 	bool set = false;
+	thunder_a = false;
+	thunder_b = false;
 	if (timer_a) {
 		--timer_a;
 		const int lvl = lightning_flash_level(
@@ -255,6 +285,8 @@ bool LightningSequencers::tick() {
 			level = lvl;
 			set = true;
 		}
+		// Epoch 0 plays the thunder set [orig: @ 0x57ecfb].
+		thunder_a = timer_a == 0;
 	}
 	if (timer_b) {
 		--timer_b;
@@ -264,12 +296,21 @@ bool LightningSequencers::tick() {
 			level = lvl;
 			set = true;
 		}
+		// The second thunder [orig: @ 0x57edc4].
+		thunder_b = timer_b == 0;
 	}
 	return set;
 }
 
 // ---------------------------------------------------------------------------
 // Weather oscillator
+
+uint8_t WeatherOscillator::ring_slot(int32_t x_q16, int32_t y_q16, int32_t z_q16) const {
+	// [orig: HUD_CacheEntityDisplayInfo @ 0x4a3d9e..0x4a3db5 — y >> 14 +
+	//  Env_WaveRingIndex + z >> 15 + x >> 14, `and eax, 0FFh`; the same hash
+	//  in Light_TickGenBlock @ 0x5a8ae0]
+	return static_cast<uint8_t>((z_q16 >> 15) + (y_q16 >> 14) + (x_q16 >> 14) + ring_index);
+}
 
 uint32_t WeatherOscillator::reroll() {
 	// [orig: Environment_UpdateWeatherTick @ 0x57e9fc..0x57ea16] — rol 9, then
@@ -298,13 +339,13 @@ int WeatherOscillator::tick() {
 // ---------------------------------------------------------------------------
 // Rain + weather color blocks
 
-int rain_blend_factor(int rain_intensity) {
+int hit_dim_factor(int hit_dim_intensity) {
 	// [orig: interpolate_weather_color @ 0x57d9e0] — the unsigned over-range
 	// check zeroes the factor, otherwise 0x8000 - intensity.
-	if (static_cast<uint32_t>(rain_intensity) > 0x8000u) {
+	if (static_cast<uint32_t>(hit_dim_intensity) > 0x8000u) {
 		return 0;
 	}
-	return 0x8000 - rain_intensity;
+	return 0x8000 - hit_dim_intensity;
 }
 
 namespace {
@@ -327,6 +368,14 @@ void WeatherColorBlock::snap(uint32_t packed) {
 	target = packed;
 }
 
+void WeatherColorBlock::snap_keyframe(uint32_t packed) {
+	// [orig: Environment_ComputeTimeOfDayColors @ 0x57e078..0x57e0b3 for the
+	//  light block: [4], [3], [2], [5] = byte << 20, then [0], [11], [10]]
+	channels.snap_to(packed);
+	render_color = packed;
+	target = packed;
+}
+
 void WeatherColorBlock::set_step_deltas(int frames) {
 	// [orig: ColorBlock_SetStepDeltas @ 0x57d940] — per channel:
 	// |target_byte << 20 + frames/2 - current| / frames (the +frames/2 rounds
@@ -334,10 +383,12 @@ void WeatherColorBlock::set_step_deltas(int frames) {
 	if (frames == 0) {
 		frames = 1;
 	}
+	// Wrapping adds, the abs32 negate wrapping too, then the SIGNED idiv: a
+	// negative frame count installs a negative rate [orig: @ 0x57d97b..0x57d9cc].
 	const auto rate_for = [frames](int target_byte, int32_t channel_fp) -> int32_t {
-		const int32_t delta = (target_byte << 20) + (frames >> 1) - channel_fp;
-		const int32_t magnitude = delta < 0 ? -delta : delta;
-		return magnitude / frames;
+		const int32_t delta = wrap_sub(wrap_add(target_byte << 20, frames >> 1), channel_fp);
+		const int32_t magnitude = delta < 0 ? wrap_neg(delta) : delta;
+		return static_cast<int32_t>(static_cast<int64_t>(magnitude) / frames);
 	};
 	max_rate[0] = rate_for(static_cast<int>(target & 0xFF), channels.b_fp);
 	max_rate[1] = rate_for(static_cast<int>((target >> 8) & 0xFF), channels.g_fp);
@@ -345,21 +396,26 @@ void WeatherColorBlock::set_step_deltas(int frames) {
 	max_rate[3] = rate_for(static_cast<int>((target >> 24) & 0xFF), channels.a_fp);
 }
 
-void WeatherColorBlock::tick(uint32_t modulator_packed, int rain_intensity) {
+void WeatherColorBlock::tick(uint32_t modulator_packed, int hit_dim_intensity) {
 	// [orig: interpolate_weather_color @ 0x57d9e0] — the full block pipeline.
 	// Step: per-channel (delta >> 3) clamped to that channel's max rate,
 	// accumulate in 12.20, repack with +0x80000 rounding.
+	// The delta is the wrapping subtract shifted, the clamp the two-compare
+	// idiom (a negative rate — a negative colorfade — pins every channel to
+	// +|rate| per tick), the accumulate wraps [orig: @ 0x57da08..0x57da7c].
 	const auto step_channel = [](int32_t &channel_fp, int target_byte, int32_t rate) {
-		int32_t delta = ((target_byte << 20) - channel_fp) >> 3;
-		delta = clamp_int(delta, -rate, rate);
-		channel_fp += delta;
+		const int32_t delta = neg_clamp(wrap_sub(target_byte << 20, channel_fp) >> 3, rate);
+		channel_fp = wrap_add(channel_fp, delta);
 	};
 	step_channel(channels.b_fp, static_cast<int>(target & 0xFF), max_rate[0]);
 	step_channel(channels.g_fp, static_cast<int>((target >> 8) & 0xFF), max_rate[1]);
 	step_channel(channels.r_fp, static_cast<int>((target >> 16) & 0xFF), max_rate[2]);
 	step_channel(channels.a_fp, static_cast<int>((target >> 24) & 0xFF), max_rate[3]);
+	// The repack takes the LOW BYTE of (channel + 0x80000) >> 20 — no saturate,
+	// an accumulator past 255 wraps around [orig: @ 0x57da85..0x57da8e `lea
+	// ebx, [esi+80000h]; sar ebx, 14h; mov byte ptr [..], bl`].
 	const auto repack = [](int32_t channel_fp) -> uint32_t {
-		return static_cast<uint32_t>(clamp_int((channel_fp + 0x80000) >> 20, 0, 255));
+		return static_cast<uint32_t>(wrap_add(channel_fp, 0x80000) >> 20) & 0xFFu;
 	};
 	const uint32_t stepped = repack(channels.b_fp) | (repack(channels.g_fp) << 8) |
 			(repack(channels.r_fp) << 16) | (repack(channels.a_fp) << 24);
@@ -368,10 +424,11 @@ void WeatherColorBlock::tick(uint32_t modulator_packed, int rain_intensity) {
 	// (paddusb into state[1]).
 	pre_mod_color = paddusb(stepped, additive);
 
-	// Modulator x rain: out_c = ((c * m) >> 1) * (factor >> 4) >> 16, packed
+	// Modulator x hit dim: out_c = ((c * m) >> 1) * (factor >> 4) >> 16, packed
 	// with unsigned saturation (pmullw / psrlw 1 / pmulhw / packuswb). The
-	// identity modulator byte is 64 (with rain 0 the chain is exact identity).
-	const uint32_t factor = static_cast<uint32_t>(rain_blend_factor(rain_intensity)) >> 4;
+	// identity modulator byte is 64 (with the dim at 0 the chain is exact
+	// identity).
+	const uint32_t factor = static_cast<uint32_t>(hit_dim_factor(hit_dim_intensity)) >> 4;
 	uint32_t modulated = 0;
 	for (int shift = 0; shift < 32; shift += 8) {
 		const uint32_t c = (pre_mod_color >> shift) & 0xFF;
@@ -412,33 +469,36 @@ void SkyWeatherColorBlocks::set_skyfog_additive(uint32_t packed_additive) {
 	skyfog.additive = packed_additive;
 }
 
-void SkyWeatherColorBlocks::tick_skyfog(uint32_t modulator_packed, int rain_intensity) {
-	skyfog.tick(modulator_packed, rain_intensity);
+void SkyWeatherColorBlocks::tick_skyfog(uint32_t modulator_packed, int hit_dim_intensity) {
+	skyfog.tick(modulator_packed, hit_dim_intensity);
 }
 
-void SkyWeatherColorBlocks::tick_statics(uint32_t modulator_packed, int rain_intensity) {
-	ceiling.tick(modulator_packed, rain_intensity);
-	cloud.tick(modulator_packed, rain_intensity);
-	floor.tick(modulator_packed, rain_intensity);
+void SkyWeatherColorBlocks::tick_statics(uint32_t modulator_packed, int hit_dim_intensity) {
+	ceiling.tick(modulator_packed, hit_dim_intensity);
+	cloud.tick(modulator_packed, hit_dim_intensity);
+	floor.tick(modulator_packed, hit_dim_intensity);
 }
 
-void SkyWeatherColorBlocks::tick_dome(uint32_t modulator_packed, int rain_intensity) {
-	skybase.tick(modulator_packed, rain_intensity);
-	skybright.tick(modulator_packed, rain_intensity);
-	skyhighlight.tick(modulator_packed, rain_intensity);
-	cloudbase.tick(modulator_packed, rain_intensity);
-	cloudhighlight.tick(modulator_packed, rain_intensity);
-	cloudedge.tick(modulator_packed, rain_intensity);
+void SkyWeatherColorBlocks::tick_dome(uint32_t modulator_packed, int hit_dim_intensity) {
+	skybase.tick(modulator_packed, hit_dim_intensity);
+	skybright.tick(modulator_packed, hit_dim_intensity);
+	skyhighlight.tick(modulator_packed, hit_dim_intensity);
+	cloudbase.tick(modulator_packed, hit_dim_intensity);
+	cloudhighlight.tick(modulator_packed, hit_dim_intensity);
+	cloudedge.tick(modulator_packed, hit_dim_intensity);
 }
 
 // ---------------------------------------------------------------------------
 // Cloud scroll
 
-void CloudScrollState::tick(int rate_target) {
-	// [orig: Environment_UpdateWeatherTick — rate ramp @ 0x57eecc,
-	//  accumulators @ 0x57f1a5..0x57f1d1]. rate/3 is the original's idiv:
-	//  truncation toward zero.
+void CloudScrollState::tick_rate(int rate_target) {
+	// [orig: Environment_UpdateWeatherTick — rate ramp @ 0x57eecc]
 	rate = smooth_eighth(rate, rate_target);
+}
+
+void CloudScrollState::tick_accumulators() {
+	// [orig: Environment_UpdateWeatherTick — accumulators @ 0x57f1a5..0x57f1d1].
+	// rate/3 is the original's idiv: truncation toward zero.
 	acc_l1_v += rate;
 	acc_l1_u += rate;
 	acc_l2_v += rate - rate / 3;

@@ -20,6 +20,19 @@ void GameWindow::request_enter_play() {
 	}
 }
 
+void GameWindow::set_spectator_state(bool available, bool active) {
+	spectator_available_ = available;
+	spectator_active_ = active;
+}
+
+void GameWindow::request_spectator(bool active) {
+	if (!spectator_available_ || active == spectator_active_) {
+		return;
+	}
+	requests_.push_back(active ? GameWindowRequest::EnableSpectator
+	                           : GameWindowRequest::DisableSpectator);
+}
+
 void GameWindow::request_escape() {
 	escape_already_handled_ = true;
 	requests_.push_back(input_mode_ == GameInputMode::Play
@@ -53,6 +66,18 @@ void GameWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	ImGui::EndDisabled();
 	ImGui::SameLine();
 	ImGui::TextUnformatted(input_mode_ == GameInputMode::Play ? "Play" : "Interact");
+	ImGui::SameLine();
+	bool spectator = spectator_active_;
+	ImGui::BeginDisabled(!spectator_available_);
+	if (ImGui::Checkbox("Spectator", &spectator)) {
+		request_spectator(spectator);
+	}
+	ImGui::EndDisabled();
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+		ImGui::SetTooltip(spectator_available_
+				? "Detach the local player and unlock the free camera. Enter Play, then hold right mouse and use WASD/Q/E to fly."
+				: "Spectator switching requires a local authority player.");
+	}
 	ImGui::Separator();
 	if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::GetIO().WantTextInput &&
 			!escape_already_handled_) {

@@ -62,6 +62,7 @@ add_library(${TARGET_NAME} SHARED
     env/sun_shadow.cpp
     env/water.cpp
     env/weather.cpp
+    env/precipitation.cpp
     env/weather_core.cpp
     env/water_core.cpp
     env/star_field.cpp
@@ -121,6 +122,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_bind.cpp
     simulation/simulation_frame.cpp
     simulation/simulation_frame_stats.cpp
+    simulation/simulation_ai_debug.cpp
     simulation/simulation_net.cpp
     simulation/simulation_occlusion.cpp
     simulation/simulation_player.cpp

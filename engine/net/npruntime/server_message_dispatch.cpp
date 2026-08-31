@@ -40,6 +40,7 @@
 #include <base/io/le.h>
 #include <cstddef>
 #include <cstdint>
+#include <cctype>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -76,6 +77,63 @@ bool stage_integrity_crc_punt(
 	event.dpc = 46;
 	event.ddstr = std::string(detail);
 	return Server_StageHostDisconnect(conn, event);
+}
+
+// A game-layer join-gate rejection: the empty-string description record with
+// only the DPC reason set (DS=1 role, DC=2 class, DP1/DP2 0, DSTR/DDSTR "").
+// [orig: Server_ValidatePlayerJoinRequest @0x512100 failures ride
+// CNapiNPConnection_SendChatMessage @0x4c7ef0 with both strings g_empty_str ->
+// NapiNPDataTransfer_SendDescription @0x628c80]
+bool stage_join_gate_reject(NapiNPConnection &conn, uint32_t reason_dpc) {
+	DisconnectEvent event;
+	event.ds = 1;
+	event.dc = 2;
+	event.dpc = reason_dpc;
+	return Server_StageHostDisconnect(conn, event);
+}
+
+bool ascii_case_equal(const std::string &a, const std::string &b) {
+	if (a.size() != b.size()) return false;
+	for (size_t i = 0; i < a.size(); ++i) {
+		if (std::tolower(static_cast<unsigned char>(a[i])) !=
+		    std::tolower(static_cast<unsigned char>(b[i])))
+			return false;
+	}
+	return true;
+}
+
+// The game-layer spectator gate, run at the 0x00 join message AFTER the
+// NP-level 0x42 admitted the connection. Order and codes are the witnessed
+// legs: 14 spectating disabled, 15 positive slot count exceeded, 16 password
+// mismatch (case-insensitive, like the side passwords). The candidate's flag
+// is latched BEFORE the count, so the count includes it and rejects on
+// strictly-greater — retail's exact shape. A -1 (shared-capacity) setting has
+// no spectator-count leg; the shared 0x42 gate already bounded the total.
+// [orig: the entry+55 latch from the stored JSR in
+// NapiNPServer_HandlePlayerJoinMessage @0x512aa0; the disabled leg @0x512364
+// (code 14), the `> g_spectator_slots` count @0x5123ca (code 15, type-1 rows
+// with entry+55), the Napi_StrCaseEqual JSPP compare @0x512405..0x512425
+// (code 16); Server_ValidatePlayerJoinRequest @0x512100]
+uint32_t validate_spectator_join(const GameConfig &config,
+		NapiNPConnection &conn, const std::vector<NapiNPConnection> &roster) {
+	conn.link.spectator = conn.join_spectator_request != 0;
+	if (!conn.link.spectator) return 0;
+	if (config.spectator_slots == 0) return 14;
+	if (config.spectator_slots > 0) {
+		uint32_t spectators = 0;
+		for (const NapiNPConnection &row : roster) {
+			if (row.type == NapiNPConnection::kTypeServerSide &&
+			    row.phase >= ConnectionPhase::Joined && row.link.spectator)
+				++spectators;
+		}
+		if (spectators > static_cast<uint32_t>(config.spectator_slots))
+			return 15;
+	}
+	if (!config.spectator_password.empty() &&
+	    !ascii_case_equal(
+				conn.join_spectator_password, config.spectator_password))
+		return 16;
+	return 0;
 }
 
 } // namespace
@@ -412,6 +470,7 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		int32_t computed_score = 0;
 		row.slot = c.reply.player_slot;
 		row.team = team;
+		row.spectator = c.link.spectator;
 		if (world != nullptr) {
 			if (const world::MatchPlayer *player =
 					world->match.player(c.link.owned_entity)) {
@@ -477,6 +536,12 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	}
 	frame.in_game_count = static_cast<uint8_t>(
 			std::min<size_t>(frame.players.size(), 0xFFu));
+	frame.spectator_count = static_cast<uint8_t>(std::min<size_t>(
+			std::count_if(rows.begin(), rows.end(),
+					[](const ScoredPlayerListEntry &entry) {
+						return entry.row.spectator;
+					}),
+			0xFFu));
 	return encode_player_list(frame);
 }
 
@@ -786,7 +851,7 @@ std::vector<uint8_t> build_tag75_player_state(
 		if (const world::Entity *entity = world->registry.get(conn.link.owned_entity))
 			team = entity->team;
 	}
-	return {0x00, team}; // spectator slots are not modeled yet
+	return {static_cast<uint8_t>(conn.link.spectator ? 0x01u : 0x00u), team};
 }
 
 // tag=0x02 GLB_JOIN admission boundary. [orig: NapiNPServerMsg_0x002 @0x512FD0 emits
@@ -823,7 +888,7 @@ bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
                              std::vector<NapiNPConnection> &roster,
                              world::World *world, std::vector<ProtocolMessage> &out) {
 	const uint8_t capacity =
-			static_cast<uint8_t>(cfg.max_players < 251 ? cfg.max_players : 251); // [orig @0x24c0ca4]
+			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig @0x24c0ca4]
 	const std::optional<uint8_t> player_slot =
 			Server_ReservePlayerSlot(roster, conn, capacity);
 	if (!player_slot.has_value()) return false;
@@ -900,7 +965,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const std::vector<NapiNPConnection> &roster, world::World *world) {
 	std::vector<ProtocolMessage> messages;
 	const uint8_t capacity = static_cast<uint8_t>(
-			config.max_players < 251 ? config.max_players : 251);
+			config.total_player_slot_capacity());
 	const std::optional<uint8_t> player_slot =
 			Server_ReservePlayerSlot(roster, conn, capacity);
 	if (!player_slot.has_value()) return messages;
@@ -1131,15 +1196,27 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 		if (admission_message == nullptr) return {};
 
 		switch (conn.admission_stage) {
-			case GameAdmissionStage::AwaitJoinRequest:
+			case GameAdmissionStage::AwaitJoinRequest: {
 				if (admission_message->tag != 0x00 ||
 				    !validates_join_request(config, admission_message->payload)) {
+					conn.admission_stage = GameAdmissionStage::Rejected;
+					return {};
+				}
+				// The spectator legs run here, at the game-layer join gate,
+				// after the expansion/CRC checks — the same position they hold
+				// inside Server_ValidatePlayerJoinRequest. A failure answers
+				// the witnessed DPC 14/15/16 description punt, not a 0x82.
+				if (const uint32_t reject_dpc =
+							validate_spectator_join(config, conn, roster);
+				    reject_dpc != 0) {
+					(void)stage_join_gate_reject(conn, reject_dpc);
 					conn.admission_stage = GameAdmissionStage::Rejected;
 					return {};
 				}
 				replies.push_back(make_protocol_message(s2c::INIT, {}));
 				conn.admission_stage = GameAdmissionStage::AwaitFormPost;
 				return replies;
+			}
 
 			case GameAdmissionStage::AwaitFormPost: {
 				if (admission_message->tag != 0x01 ||
@@ -1527,15 +1604,17 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// slot list and NO state write — no class stamp, no damage-class table, no
 				// phase-8 gate, no retained body [orig: @0x5158a9 / @0x515fa5, both
 				// `return Server_SendWeaponSlotListToPlayer(player)`].
-				if (!loadout_envelope_accepted(req, config.game_type)) {
+				if (!conn.link.spectator &&
+				    !loadout_envelope_accepted(req, config.game_type)) {
 					replies.push_back(make_protocol_message(
 							0x5A, build_current_loadout_reply(
 										  st.last_loadout_reply,
 										  current_player_class(conn, world), armory)));
 					break;
 				}
-				const GrantedWeaponLoadout grant =
-						grant_weapon_loadout(req, config.class_allow_mask, armory);
+				const GrantedWeaponLoadout grant = conn.link.spectator
+						? GrantedWeaponLoadout{}
+						: grant_weapon_loadout(req, config.class_allow_mask, armory);
 				// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
 				// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
 				st.last_loadout_reply = encode_weapon_loadout(grant.reply);

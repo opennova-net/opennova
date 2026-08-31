@@ -502,16 +502,21 @@ func _screen_has_label_containing(node: Node, text: String) -> bool:
 	return false
 
 
-func test_crosshair_option_updates_an_existing_hud() -> void:
-	# The Options signal reaches the built HUD through the shared presenter's public
-	# set_crosshair_style (main_game delegates its _on_crosshair_style_changed there).
+func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
+	presenter.set_crosshair_style(13)
+	assert_eq(presenter.crosshair_style(), 13,
+			"a pre-HUD choice is cached for the lazy build")
+
 	var hud := FakeGameHud.new()
 	presenter._game_hud = hud
-	presenter.set_crosshair_style(13)
-	assert_eq(hud.crosshair_style, 13, "A paused game's HUD adopts the menu selection immediately.")
-
+	presenter.set_crosshair_style(17)
+	assert_eq(hud.crosshair_style, 17,
+			"a paused game's existing HUD adopts the menu selection immediately")
+	presenter.set_crosshair_style(99)
+	assert_eq(presenter.crosshair_style(), HudOverlay.MAX_CROSSHAIR_STYLE,
+			"the presenter keeps its lazy-build cache in the native art range")
 
 func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	var root := ResourceRoot.new()

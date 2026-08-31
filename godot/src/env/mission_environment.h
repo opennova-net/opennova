@@ -45,7 +45,11 @@ public:
 	// values as global shader parameters (write_lighting_block_globals).
 	Ref<EnvLightState> get_light_state() const { return light_state_; }
 
-	// --- mission clock -----------------------------------------------------
+	// --- the mission clock (owned by the weather home) ------------------------
+	// The clock lives in world::WeatherState: the Simulation's on a mission
+	// (the TOD WAC / the debug row move it through Simulation.
+	// command_time_of_day_minutes), this state's standalone home otherwise
+	// (previews, fixtures) — configure/advance act on the standalone home.
 	void configure_mission_clock(int p_start_time_q8_8, int p_minutes_per_day);
 	static double mission_start_time_hhmm(int p_start_time_q8_8);
 	void advance_mission_clock(int p_ticks);
@@ -56,14 +60,19 @@ public:
 	static double minute_of_day_to_hhmm(double p_minute_of_day);
 	static double hhmm_to_minute_of_day(double p_hhmm);
 
-	// --- network phase-2 ---------------------------------------------------
-	// The dictionary is deliberately the wire view: reconstructing native
-	// units happens in the engine state exactly once, and a later replacement
-	// .env clears every remote override.
-	void apply_network_environment_sample(const Dictionary &p_sample);
-	int get_network_quake_ticks() const;
-	float get_network_rain_current() const;
+	// --- the weather-home reads --------------------------------------------
+	// Env_QuakeTicks, Env_RainPctCurrent / 65536, Env_OvercastBlend / 65536,
+	// Env_PrecipitationKind (0 rain, 1 snow), and the > 48 drop gate — read
+	// through the bound weather (0 / clear without one).
+	int get_quake_ticks() const;
+	float get_rain_current() const;
 	float get_overcast_blend() const;
+	int get_precipitation_kind() const;
+	bool is_raining() const;
+	// The overcast table (.trn + overcast.def keyframes) the overcast blend
+	// cross-fades the .env colors against; null clears it.
+	void set_overcast_data(const Ref<EnvFile> &p_data);
+	Ref<EnvFile> get_overcast_data() const { return overcast_data_; }
 
 	// --- the weather-driven split -------------------------------------------
 	void set_weather_driven(bool p_driven);
@@ -176,9 +185,6 @@ public:
 	float get_sky_speed() const;
 	float get_sky_height() const;
 	float get_sky_height_target() const;
-	void set_smoothed_scalars(float p_fog_distance, float p_sky_height,
-			float p_sun_dim_pct = 0.0f, float p_rain_current = 0.0f,
-			float p_overcast_blend = 0.0f);
 
 	Ref<Texture2D> get_sky_map1_tex() const;
 	Ref<Texture2D> get_sky_map2_tex() const;
@@ -224,6 +230,7 @@ private:
 	static MissionEnvironment *lighting_block_writer_;
 
 	Ref<EnvFile> environment_data_;
+	Ref<EnvFile> overcast_data_;
 	opennova::env::EnvironmentState state_;
 	Ref<EnvLightState> light_state_;
 	int64_t last_published_generation_ = 0;

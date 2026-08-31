@@ -352,6 +352,13 @@ ServerAuth build_server_auth(const ClientAuth &client,
 // NWU-encrypt + CRC-envelope).
 std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg);
 
+// The 0x42-time join-REJECTION form of the 0x82: exactly CI, CK, CR(=0), JFC
+// (failure family), JFP (sub-reason), and JFS only when non-empty. The
+// validate-callback family is JFC=14 with JFP 2 locked / 3 banned / 4 full /
+// 5 full-with-positive-spectator-slots. [orig: NapiNPProtocol_SendJoinRejection
+// @0x620cd0; reasons CNapiNetwork_ValidateJoinRequest @0x4c61b0]
+std::vector<uint8_t> server_auth_rejection_to_bytes(const ServerAuth &msg);
+
 // Parse a ServerAuth TLV payload (the bytes AFTER the 0x82 opcode and
 // AFTER NWU-decryption). The client uses this to recover the connection
 // result `cr` (1 = accepted), the server key `sk` (which becomes the

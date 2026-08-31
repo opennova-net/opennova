@@ -158,3 +158,46 @@ func test_same_pose_replacement_refreshes_hull_geometry() -> void:
 		"same-pose replacement geometry invalidates the hull cache")
 	assert_eq(replacement_bounds.position, Vector3(2.0, 0.0, 0.0),
 		"the redraw uses the replacement model's corners")
+
+
+static func _hits(target: int, kind: int, at: Vector3, age := 0.0) -> PackedFloat32Array:
+	# The contact-debug hits channel's stride-6 shape:
+	# [target_handle, age_ticks, kind, x, y, z] per event.
+	return PackedFloat32Array([float(target), age, float(kind), at.x, at.y, at.z])
+
+
+func test_hits_flash_the_target_box_on_their_own_mesh() -> void:
+	var view := _make_view()
+	var payload := _debug_payload()
+	payload["hits"] = _hits(7, 0, Vector3(0.5, 0.5, 0.5))
+	payload["hit_ttl"] = 62
+	view.render_report(payload)
+
+	var hits := view.get_node("CollisionHitLines") as MeshInstance3D
+	assert_gt((hits.mesh as ImmediateMesh).get_surface_count(), 0,
+			"a hit on a drawn box overdraws it on the hit mesh")
+	assert_eq(view.get_debug_drawable_count(), 2,
+			"hits are decoration: the drawable count still counts shapes only")
+
+
+func test_hit_with_unknown_target_still_marks_its_point() -> void:
+	var view := _make_view()
+	var payload := _debug_payload()
+	payload["hits"] = _hits(-1, 4, Vector3(3.0, 0.0, 3.0))
+	view.render_report(payload)
+
+	var hits := view.get_node("CollisionHitLines") as MeshInstance3D
+	assert_gt((hits.mesh as ImmediateMesh).get_surface_count(), 0,
+			"a terrain/no-box hit still draws its cross marker")
+
+
+func test_hits_clear_with_the_view() -> void:
+	var view := _make_view()
+	var payload := _debug_payload()
+	payload["hits"] = _hits(7, 2, Vector3(0.5, 0.5, 0.5))
+	view.render_report(payload)
+
+	# The sim goes away: the real refresh clears the hit mesh with the rest.
+	view.refresh_now()
+	var hits := view.get_node("CollisionHitLines") as MeshInstance3D
+	assert_eq((hits.mesh as ImmediateMesh).get_surface_count(), 0, "hit flashes cleared")

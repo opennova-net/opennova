@@ -4,6 +4,7 @@
 
 #include <runtime/world/entity.h>
 #include <runtime/world/vehicle_mount.h> // SeatSelectionMode default args
+#include <runtime/world/weather_state.h>  // WeatherColorTarget
 
 // EntityCommands: the shared host-authoritative command layer. Split from
 // the world.h umbrella (W3-7); World holds it by value and world.h
@@ -42,6 +43,16 @@ public:
     bool remove_ssn(uint16_t ssn);
     bool set_ssn_hp(uint16_t ssn, int32_t hp);
     bool add_ssn_hp(uint16_t ssn, int32_t delta);
+    // WAC accuracy writes the controller-slot error pair as max(0, 100-value).
+    // [orig: WacCmd_SetAccuracy @0x4F2070]
+    bool set_ssn_accuracy(uint16_t ssn, int32_t primary, int32_t secondary);
+    // WAC guard toggles entity Flags bit 0x40 even when the row has no AI brain.
+    // [orig: WacCmd_SsnGuard @0x4F71C0]
+    bool set_ssn_guard(uint16_t ssn, bool guard);
+    // Structural BMS single-entity actions.
+    bool set_ssn_team(uint16_t ssn, int32_t team);
+    bool set_ssn_group(uint16_t ssn, int32_t group);
+    bool teleport_ssn_to_marker(uint16_t ssn, int32_t marker_wp_number);
     // `node < 0` selects the nearest node on the list (the two-argument WAC form);
     // BMS RedirectSingleTo carries an explicit node in param3.
     bool set_ssn_waypoint(uint16_t ssn, int32_t wp, int32_t node = -1);
@@ -72,11 +83,49 @@ public:
     // Write the primary weapon slot's clip/reserve counts (retail's signed
     // i16 words). False when the handle resolves no registry row.
     bool set_entity_weapon_ammo(EntityHandle h, int32_t clip, int32_t reserve);
+    // Override ONE entity's ItemDefAttrib words (items.def `attrib:` bits) in
+    // place: both raw dwords plus the per-entity facts derived from them go
+    // through the same stamp the trait sweep uses (world::stamp_item_attrib),
+    // so live readers (NoDismember, NoDie, the AS zone gates, ...) see the
+    // new value on their next read. Per-item caches keyed by item id
+    // (item_death_traits, vehicle_traits) and the AI profile mirror stay as
+    // the sweep left them; the override is not replicated (joiners re-stamp
+    // from their own items.def) and the next resolve_item_traits sweep
+    // (mission load, net topology sync) re-stamps it from the def. False when
+    // the handle resolves no registry row.
+    bool set_entity_item_attrib(EntityHandle h, uint32_t attrib, uint32_t attrib2);
+
+    // --- the WAC weather handlers (world::WeatherState carries the cites) ---
+    // Every environment command lands here: the VM's handlers, the BMS
+    // actions, the F3 window and the MCP rows all mutate the ONE weather home
+    // through these (ADR 0042 d5), which also keep the observable EnvState
+    // mirror the behavior tests read.
+    void set_fog_type(int32_t type);                       // fogtype
+    void set_fog_distance(int32_t metres);                 // fogdist
+    void move_fog(int32_t metres, int32_t seconds);        // movefog
+    void set_rain(int32_t percent, int32_t seconds);       // rain
+    void set_snow(int32_t percent, int32_t seconds);       // snow
+    void set_overcast(int32_t percent, int32_t seconds);   // overcast
+    void set_sky_speed(int32_t rate);                      // skyspeed
+    void set_sky_height(int32_t height_raw);               // skyheight
+    void quake(int32_t seconds);                           // quake
+    void set_time_of_day_minutes(int32_t minute_of_day);   // TOD
+    void debug_set_time_of_day_minutes(double minute_of_day);
+    void sun_fade(int32_t percent, int32_t seconds);       // sunfade
+    void set_color_fade(int32_t seconds);                  // colorfade
+    void set_lightning_color(uint32_t rgb);                // lightning
+    void lightning_flash();                                // flash
+    void lightning_far_flash();                            // farflash
+    void set_weather_color(WeatherColorTarget target, uint32_t rgb); // sun/sky/ground/floor/ceiling/cloud/fog/skyfog/gain
+    void set_wind_scale(int32_t value);                    // the `wind` named value
 
     // --- queries ---
     bool ssn_exists(uint16_t ssn) const;
     bool ssn_alive(uint16_t ssn) const;
     bool ssn_dead(uint16_t ssn) const;
+    // [orig: WacCmd_SsnWounded @0x4F1B80] Unsigned health <=
+    // the signed max-health half reinterpreted as u16.
+    bool ssn_wounded(uint16_t ssn) const;
     bool ssn_in_area(uint16_t ssn, int area_id) const;
     // True only when the mission has at least one ACTIVE area trigger and the
     // local player's X/Y sits inside none of them — Z is ignored, and a world
@@ -138,6 +187,14 @@ public:
     int set_group_engage_min(int group, int32_t v);
     int set_group_engage_max(int group, int32_t v);
     int set_group_attack_max(int group, int32_t v);
+    // WAC/BMS structural group actions. Pool coverage and dead-row rules are
+    // kept inside these primitives so both script runtimes share one behavior.
+    int remove_group(int group);
+    int set_group_accuracy(int group, int32_t primary, int32_t secondary);
+    bool set_group_move_speed_kph(int group, int32_t kph);
+    int set_group_team(int group, int32_t team);
+    int change_group(int old_group, int new_group);
+    int teleport_group_to_marker(int group, int32_t marker_wp_number);
     bool group_dead(int group) const;   // true if all members dead/absent
     bool group_alive(int group) const;  // true if any member alive
 

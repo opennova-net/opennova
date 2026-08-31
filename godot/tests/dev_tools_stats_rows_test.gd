@@ -28,6 +28,22 @@ func test_engine_log_ring_drain_contract() -> void:
 			"a drain after the newest sequence returns nothing")
 
 
+func test_select_entity_seam_reads_back_headless() -> void:
+	var dev_tools: DevTools = add_child_autofree(DevTools.new())
+	if dev_tools.stats_row_ids().is_empty():
+		pending("release flavour: the dev tools are compiled out")
+		return
+	assert_eq(dev_tools.selected_entity_handle(), -1, "nothing selected at first")
+	dev_tools.select_entity(0x3001)
+	assert_eq(dev_tools.selected_entity_handle(), 0x3001,
+			"a pick's handle is the selection (pending until a directory push carries it)")
+	dev_tools.select_entity(-1)
+	assert_eq(dev_tools.selected_entity_handle(), -1, "a negative handle clears")
+	dev_tools.select_entity(0x3001)
+	dev_tools.select_entity(0xFFFF)
+	assert_eq(dev_tools.selected_entity_handle(), -1, "the invalid handle clears too")
+
+
 func test_fed_reading_is_readable_by_row_id() -> void:
 	var dev_tools: DevTools = add_child_autofree(DevTools.new())
 	var ids := dev_tools.stats_row_ids()
@@ -73,3 +89,15 @@ func test_fed_reading_is_readable_by_row_id() -> void:
 	dev_tools.feed_stats_window(10, sums, peaks, samples)
 	assert_eq(dev_tools.stats_row_info("sim"), "1.0 t/f | 12 entities | host")
 	assert_eq(dev_tools.stats_row_info("net"), "3 peers")
+
+
+func test_ai_view_seam_exists_headless() -> void:
+	# The AI window's shell seams: the overlay-state provider setter and the
+	# toggle-request signal exist headless (no ImGui context needed); the
+	# release flavour keeps the setter as a no-op and never emits.
+	var dev_tools: DevTools = add_child_autofree(DevTools.new())
+	assert_true(dev_tools.has_signal("ai_view_request"),
+			"the toggle drain crosses as one bound signal")
+	dev_tools.set_ai_view_state_provider(func() -> Dictionary: return {})
+	dev_tools.set_ai_view_state_provider(Callable())
+	pass_test("the provider setter accepts and clears a Callable")

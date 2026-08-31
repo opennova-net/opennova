@@ -48,8 +48,9 @@ files-on-disk IPC.
    returns its verdict as data.
 3. **Launch behaviour is a launch flag.** `LaunchFlags`
    (`engine/base/resource_index/boot_policy.*`) parses `--mission`,
-   `--lan-host`, `--lan-join`, `--lan-port`, `--lan-gametype`, `--lan-mode`,
-   `--lan-max-players`, `--callsign`, `--integrity-profile`, `--capture-pcap`
+   `--lan-host`, `--lan-join`, `--spectator`, `--spectator-password`,
+   `--lan-port`, `--lan-gametype`, `--lan-mode`, `--lan-max-players`,
+   `--callsign`, `--integrity-profile`, `--capture-pcap`
    and `--mcp-port`; every post-boot environment hook became a debug-catalog
    action (`deploy_pick`, `set_viewmodel_weapon`, `kill_group`, `crew_vehicle`,
    `crew_local_player`, `local_player_look`, `net_joiner_diagnostics`) or was

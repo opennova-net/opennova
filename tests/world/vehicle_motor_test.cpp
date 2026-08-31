@@ -268,10 +268,11 @@ void test_ctrl_register_projection() {
 // @0x43c155 -> Scar_ClearEntriesByEntity @0x5ccec0].
 void test_boarding_clears_the_scar_ring() {
     Rig r;
-    CHECK(r.w.scars.ring_for(r.drv_h, 1) != nullptr, "a scar ring leases before the mount");
-    CHECK(r.w.scars.find(r.drv_h) != nullptr, "and is found");
+    // A scar ring leases before the mount and is found; boarding releases it.
+    CHECK(r.w.scars.ring_for(r.drv_h, 1) != nullptr);
+    CHECK(r.w.scars.find(r.drv_h) != nullptr);
     r.mount();
-    CHECK(r.w.scars.find(r.drv_h) == nullptr, "boarding released the player's scar ring");
+    CHECK(r.w.scars.find(r.drv_h) == nullptr);
 }
 
 void test_drive_forward() {

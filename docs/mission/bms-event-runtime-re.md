@@ -82,6 +82,9 @@ family (`Entity_HandleAlertCommand`/`Entity_HandleAlertStateEvent @0x43dee0`);
 ticking; case 0x25 AttachToEmplaced = `EntityPool_FindByNetId(param1)` →
 `WacScript_TryMountEntityToVehicle @0x4f70f0`.
 
+The structural cases 0, 4, 11, 16..18, and 23..26 are now live with their
+pool/flag distinctions; §10 is the implementation and regression map.
+
 On every dispatch the original also activates linked spawn points:
 `EventTrigger_MarkLinkedSpawnPoints @0x452ce0` (renamed 2026-08-15, ex the kong
 misnomer "EventTrigger_NotifyEntityDeath") computes the FIRED EVENT's
@@ -784,7 +787,7 @@ display as raw values and round-trip.
 | 20 | KillSingle | `Entity_KillByNetId(p1)` | ENTITY | — | — | — |
 | 21 | ChangeSingleAI | `Entity_HandleAlertStateEvent(block)` | ENTITY | value | — | AI sub-type |
 | 22 | VaporizeSingle | `find_entity_by_parent_and_dispatch(p1)` | ENTITY | — | — | — |
-| 23 | SingleVelocity | `sub_43DEA0(p1)` | ENTITY | SPEED_KPH | — | — |
+| 23 | SingleVelocity | `sub_43DEA0(p1)` — witnessed retail no-op | ENTITY | SPEED_KPH | — | — |
 | 24 | ChangeSteamAction | `Entity_FindByDCBAndSetFlag(p1)` | ENTITY | TEAM {0,1,2} | — | — |
 | 25 | SingleChangeGroup | `Entity_SetNetIdByParentRef(p1,p2)` | ENTITY | GROUP | — | — |
 | 26 | SingleTeleportAction | `EventAction_TeleportEntityToSpawn(p1)` | ENTITY | teleport-target | — | — |
@@ -1000,3 +1003,63 @@ correspondence made explicit.
 | `Mission_LoadBMSFile @0x40f4e0` | `engine/runtime/mission/promote.cpp` |
 | `Entity_SpawnFromBMSRecord @0x40e9f0` | `engine/runtime/mission/promote.cpp` |
 | `EntityPool_FindByNetId @0x4f0a20` | engine/runtime/world entity registry (`EntityRegistry::find_by_net_id`) |
+
+## 10. Structural action closure (grill-ida + port, 2026-08-30)
+
+The action dispatcher previously emitted `unported_action` for several
+world-structural cases whose retail callees and pool walks are now fully
+witnessed. They now execute through `EntityCommands`, shared with the matching
+WAC operations, and the default diagnostic is reserved for genuinely deferred
+actions.
+
+| action | Witnessed retail behavior | OpenNova landing |
+|---|---|---|
+| 0 `Null` | no-op switch arm [orig: EventAction_Dispatch @ 0x4542E0] | explicit no-op; no diagnostic |
+| 4 `VaporizeGroup` | despite its curated callee name, removes matching nonempty rows while walking pools 2, 0, 1, 3 [orig: Entity_TeleportAllByNetId @ 0x43D5D0] | `EntityCommands::remove_group`; then live-count recount + collision refresh |
+| 11 `GroupVelocity` | stores group speed at group-row +24 using the two truncating integer divisions `(256000*kph/60 << 8)/60` [orig: Entity_SetMoveSpeedKPH @ 0x43A960] | `TriggerRelations::GroupState::move_speed_q16_per_tick` |
+| 16 `ChangeGTeamAction` | scans pools 2, 0, 1 and rewrites team on every matching group row [orig: Entity_SetTeamByNetId @ 0x43C680] | `set_group_team`, including the live `AiEntity::team` mirror |
+| 17 `ChangeGroupAction` | scans pools 2, 0, 1; pool 0 skips dead rows, pools 2/1 do not; rebuilds group counts [orig: Entity_UpdateNetIdReferences @ 0x43C5B0] | `change_group`, including the AI relation-matrix id mirror |
+| 18 `GroupTeleportAction` | finds the first pool-3 type-6088 marker whose `WP_NUMBER` equals param2, then teleports group members in pools 0, 1, 2 [orig: Entity_TeleportTeamToSpawn @ 0x43D390] | `teleport_group_to_marker` |
+| 23 `SingleVelocity` | walks its pool-1 lookup path and returns without a state write [orig: sub_43DEA0 @ 0x43DEA0] | explicit retail no-op; no diagnostic |
+| 24 `ChangeSteamAction` | resolves the first SSN/DCB row in pools 0..2 and writes team [orig: Entity_FindByDCBAndSetFlag @ 0x43DB30] | `set_ssn_team` |
+| 25 `SingleChangeGroup` | resolves the first SSN/DCB row in pools 0..2 and rewrites group [orig: Entity_SetNetIdByParentRef @ 0x43D6C0] | `set_ssn_group`, AI mirror, group recount |
+| 26 `SingleTeleportAction` | marker lookup is pool 3 / type 6088 / `WP_NUMBER`; target lookup is the first SSN row in pools 0..2 [orig: EventAction_TeleportEntityToSpawn @ 0x43DFC0] | `teleport_ssn_to_marker` |
+
+The two teleport forms deliberately differ:
+
+- Group teleport copies marker position/yaw/pitch/roll. Pool 0 runs
+  `Entity_ResetToSpawnState` but does not pre-clear Flags `0x20000`; pools 1/2
+  clear it before rebuilding proximity [orig: Entity_TeleportTeamToSpawn @
+  0x43D390].
+- Single teleport clears Flags `0x20000` for every target pool. A pool-0 target
+  also inherits marker Flags `0x20` when set and runs the reset path [orig:
+  EventAction_TeleportEntityToSpawn @ 0x43DFC0].
+
+Both ports copy the resolved pose into a resident `AiEntity` (including its
+saved-live position) so the next organic/vehicle motor does not snap back to a
+stale fixed-point pose. Registry-shape changes refresh collision/proximity once
+after the complete fan, not once per member.
+
+`event_runtime_bms` pins pool coverage, the pool-0 dead-row exception, both
+teleport flag rules, marker selection, AI mirrors, group speed conversion, the
+Null/SingleVelocity no-op arms, and absence of `unported_action` for this set.
+
+### 10.1 Remaining explicit action boundary
+
+This slice does not claim every BMS action is complete. The default diagnostic
+still owns actions 30/31 (group door open/close), 39 (teammate order), and 42..49
+(the primary/exclusive single/group target writers). Action 41 `ExecuteWac`
+still crosses the presenter/embedder effect seam rather than invoking a
+`WacSystem` directly. Those actions need their door, teammate-command,
+target-reference, or runtime-composition owners; they are not modeled as
+generic flag writes.
+
+**D-EVT-1 is unchanged.** `BmsEventSystem::fire` already publishes the fired
+event index to the waypoint completion hook, but retail's linked deploy/POI
+spawn-point table (`0xB76570`) and its blocked-selection walk remain a separate
+subsystem [orig: EventTrigger_MarkLinkedSpawnPoints @ 0x452CE0;
+SpawnPoint_SkipBlocked @ 0x4DE310]. The structural teleport markers above are
+pool-3 type-6088 entities and do not stand in for that deploy/POI table.
+
+The queued ChangeAI half of the same parity round is recorded in
+[`world-wac-ai-re.md` §32](../world/world-wac-ai-re.md).

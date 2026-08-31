@@ -439,6 +439,14 @@ private:
 		uint32_t last_ms = 0;
 		bool valid = false;
 	};
+	// Label text after string-table resolution, plus the accelerator metadata
+	// removed from its first {hot} marker [orig: CButtonWnd_SetLabel @
+	// 0x6572F0]. The position is a byte offset in text, or -1 when unmarked.
+	struct ResolvedText {
+		std::string text;
+		std::string hotkey;
+		int hotkey_pos = -1;
+	};
 
 	// configure-time build
 	int build_node(const mnu::Window &w, int parent);
@@ -447,7 +455,7 @@ private:
 	std::pair<int, int> state_texture_size(const StatePass &pass) const;
 	std::string resolve_var(const std::string &value) const;
 	uint32_t resolve_text_color(const std::string &value) const;
-	std::string resolve_text_value(const std::string &type,
+	ResolvedText resolve_text_value(const std::string &type,
 			const std::string &raw) const;
 	int32_t intern_texture(const std::string &name);
 	int32_t intern_font(const std::string &name);
@@ -478,6 +486,8 @@ private:
 	// (D-MNU-16) [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0].
 	int spin_arrow_hit_(const WidgetNode &node, const mnu::RectEdges &rect,
 			float mx, float my, float sx, float sy) const;
+	ResolvedText resolved_widget_text(const WidgetNode &node,
+			const MenuWidgetState *ws) const;
 	std::string widget_text(const WidgetNode &node,
 			const MenuWidgetState *ws) const;
 	const fnt_font_t *font_for(const WidgetNode &node) const;

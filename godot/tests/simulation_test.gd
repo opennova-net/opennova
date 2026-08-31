@@ -328,6 +328,42 @@ func test_host_projectile_options_roundtrip() -> void:
 	sim.free()
 
 
+func test_host_spectator_options_and_live_f3_transition() -> void:
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var sim := Simulation.new()
+	sim.configure_host_session({
+		"max_players": 4,
+		"spectator_slots": -1,
+		"spectator_password": "watch",
+	})
+	var options: Dictionary = sim.get_host_session_config()
+	assert_eq(int(options.get("spectator_slots", 0)), -1)
+	assert_eq(String(options.get("spectator_password", "")), "watch")
+	assert_true(sim.enable_host_listen(0))
+	assert_true(sim.load_from_mission_data(mission))
+	assert_true(sim.has_local_player(),
+			"the listen host owns the player F3 will transition")
+
+	var start_tick := sim.get_logic_tick()
+	var body_position := sim.get_local_player_position()
+	assert_true(sim.set_local_spectator(true))
+	assert_true(sim.is_local_spectator())
+	sim.set_player_input(true, false, false, false, false, false, false)
+	for _i in range(3):
+		assert_true(sim.step())
+	assert_eq(sim.get_logic_tick(), start_tick + 3,
+			"spectator free flight does not pause the authoritative game")
+	assert_eq(sim.get_local_player_position(), body_position,
+			"spectator input is detached from the hidden player body")
+
+	assert_true(sim.set_local_spectator(false))
+	assert_false(sim.is_local_spectator())
+	assert_true(sim.has_local_player(),
+			"leaving spectator mode respawns the same playable slot")
+	sim.free()
+
+
 func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
 	var sim := Simulation.new()
 	assert_eq(sim.get_class_allow_mask(), 0x03FF,
@@ -473,6 +509,36 @@ func test_demo_mission_promotes() -> void:
 	assert_eq(sim.get_brain_count(), 2, "two AI brains attached")
 	assert_eq(sim.get_spawned_count(), 6, "one building + three markers + two organics spawned into pools")
 	assert_eq(sim.get_entity_state(0), 16, "a routed organic starts in GROUND_FOLLOWWP (16)")
+	sim.free()
+
+
+func test_ai_debug_payload_reports_brains_headless() -> void:
+	# The AI overlay's bulk accessor (godot/game/debug/ai_debug_view.gd's
+	# feed): {"valid": false} without a kernel; over the demo mission it
+	# reports every brain in Godot space with the engine join's shape.
+	var empty := Simulation.new()
+	var empty_debug: Dictionary = empty.get_ai_debug()
+	assert_true(bool(empty_debug.get("valid", false)),
+			"a fresh sim has a kernel (the collision-debug contract)")
+	assert_eq((empty_debug.get("rows", []) as Array).size(), 0,
+			"...but no brains before a load")
+	empty.free()
+
+	var sim := Simulation.new()
+	sim.build_demo_mission()
+	var debug: Dictionary = sim.get_ai_debug()
+	assert_true(bool(debug.get("valid", false)), "a loaded world reports")
+	var rows: Array = debug.get("rows", [])
+	assert_eq(rows.size(), 2, "one overlay row per brain")
+	var row: Dictionary = rows[0]
+	assert_eq(int(row.get("state", -1)), 16, "the routed organic's state rides along")
+	assert_eq(String(row.get("state_name", "")), "GROUND_FOLLOWWP")
+	assert_true(row.get("pos", null) is Vector3, "positions land as Godot vectors")
+	assert_true(row.get("aim_dir", null) is Vector3, "aim_dir is precomputed natively")
+	var counters: Dictionary = debug.get("counters", {})
+	assert_eq(int(counters.get("brain_count", 0)), 2)
+	assert_true(debug.get("channels", null) is Array, "route channels ride along")
+	assert_true(debug.get("groups", null) is Array, "group rows ride along")
 	sim.free()
 
 
@@ -3947,6 +4013,35 @@ func test_debug_entity_mutations_report_missing_invalid_and_success() -> void:
 	var card: EntityCard = sim.entity_card_by_ai_index(0)
 	assert_eq(card.get_health(), 37)
 	assert_eq(card.get_ai_health(), 37)
+
+	# The per-entity items.def attrib override by wire handle (the F3 checkbox
+	# and game_debug seam): range checks first, then both words land on the
+	# registry row and read back through the card and its inspect JSON.
+	var handle := card.get_wire_handle()
+	assert_eq(int(sim.debug_set_entity_item_attrib(0xFFFF, 0, 0)), ERR_INVALID_PARAMETER,
+			"the invalid handle sentinel is refused")
+	assert_eq(int(sim.debug_set_entity_item_attrib(handle, 0x100000000, 0)),
+			ERR_INVALID_PARAMETER, "a word above 32 bits is refused")
+	assert_eq(int(sim.debug_set_entity_item_attrib(handle, 0, -1)), ERR_INVALID_PARAMETER,
+			"a negative word is refused")
+	assert_eq(int(sim.debug_set_entity_item_attrib(0x0FFE, 0, 0)), ERR_DOES_NOT_EXIST,
+			"an empty slot resolves no row")
+	assert_eq(int(sim.debug_set_entity_item_attrib(handle, 0x800100, 0x2000)), OK)
+	var overridden: EntityCard = sim.entity_card(handle)
+	assert_eq(int(overridden.get_item_attrib()), 0x800100, "the attrib word landed")
+	assert_eq(int(overridden.get_item_attrib2()), 0x2000, "the attrib2 word landed")
+	var json: Dictionary = overridden.to_json_value()
+	assert_eq(int(json.get("item_attrib", -1)), 0x800100,
+			"the AI card's inspect JSON carries the registry row's attrib word")
+	assert_true(json.has("item_attrib2") and json.has("item_name") and json.has("health_max"),
+			"...and the other item facts")
+	var rows: Array = sim.entity_directory()
+	assert_gt(rows.size(), 0)
+	var row := rows[0] as EntityRow
+	assert_eq(row.get_world_position(), row.get_mission_position().x * Vector3.RIGHT
+			+ row.get_mission_position().z * Vector3.UP - row.get_mission_position().y * Vector3.BACK,
+			"the row's world position is the one engine axis map of its mission position")
+	assert_eq(typeof(row.get_item_name()), TYPE_STRING, "the row carries the item name")
 
 	var entity_mission_position := Vector3(6.0, 5.0, 7.0)
 	assert_eq(int(sim.debug_set_entity_position(0, entity_mission_position)), OK)

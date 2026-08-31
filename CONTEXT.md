@@ -187,6 +187,20 @@ _Avoid_: infantry, player entity, soldier (when the physical body is meant)
 A human participant in a match. A Player controls a Person and may control a separate Vehicle through a seat relationship.
 _Avoid_: infantry, avatar, client (when the human participant is meant)
 
+**Spectator**:
+The third session role (#601, D-NET-217): a human admitted into a live match who
+controls no Person. Signed capacity and an optional password live on
+`GameConfig` (`spectator_slots` 0 disabled / −1 shared / positive dedicated);
+the join decides Player vs Spectator before ClientAuth; the authority still
+allocates a roster slot and a hidden, damage-disabled team-0 body while S2C
+0x75 drives the client's free-fly camera, the 0x16 row rides the spectator
+trailer, and the canonical bit is `netsim::Connection::spectator`
+(`slot+100567`). The retail deploy-hold bit covers spectators in the priority
+build; the record is `docs/net/novaworld-net-re.md` §5.0e.
+_Avoid_: observer, ghost, "dead player" (a spectator never deployed);
+squad-mode vocabulary for the 0x2000/0x4000 BuildFlags bits (D-NET-217 refuted
+the `g_squad_*` reading)
+
 **Vehicle**:
 A carrier Entity with its own physical state. Its driver, controller, gunner, or passenger remains a separate Person.
 _Avoid_: player vehicle, mounted player (when the carrier Entity is meant)
@@ -355,3 +369,15 @@ The per-frame apply step that projects simulation state onto scene nodes
 (the native `PresentApplier`). It runs once in the standalone game runtime (ADRs
 0006 and 0025).
 _Avoid_: render pass, sync pass
+
+**Weather home**:
+`world::WeatherState` on the simulation tick — the ONE home for weather
+authority state (#597): `MissionKernel::tick_weather` runs the sim legs after
+every logic tick and calls the `IWeatherRenderTick` render owner; the tick
+model is `env::WeatherRuntime`, the file/core math `engine/formats/env`, and
+`env::weather_seed_from_config` the one seed derivation. Standalone owners
+(previews, GUT fixtures) tick `EnvironmentState::standalone_weather()` through
+the same runtime. Record: `docs/env/env-tod-re.md`.
+_Avoid_: a second weather clock or state copy anywhere (the pre-#597
+`EnvNetworkState` / render-side accumulator shapes); "environment system" for
+the weather authority (the `.env` document model is `formats/env`)

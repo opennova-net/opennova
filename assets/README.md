@@ -305,7 +305,9 @@ rather than asserting byte-equality against a throwaway generator:
   defs, mission, fonts and music scripts, `resource.pff` = the map and terrain
   (`.env`/`.trn`/`.cpt`/source art).
 - `minimal_pff_package_test --install <dir>` assembles a runnable **loose**
-  install: everything flat plus a zero-entry `resource.pff` boot token, run with `/d`.
+  install: everything flat plus the shader-bearing `resource.pff` (it clears the
+  boot gate AND carries the `.fx` set the PFF-walk-only precompile needs), run
+  with `/d`.
   With `OPENNOVA_JO_DIR` set it also stages `Jointops.exe` + `binkw32.dll` +
   `game.cfg` from your own install (never committed).
 

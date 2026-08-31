@@ -9,6 +9,7 @@
 #include <runtime/world/muzzle_pose.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <unordered_map>
 
 namespace opennova::world::inspect {
@@ -21,6 +22,10 @@ Vec3 mission_from_fixed3(const int32_t pos[3]) {
 	return Vec3{static_cast<float>(pos[0]) / kFixed16,
 			static_cast<float>(pos[1]) / kFixed16,
 			static_cast<float>(pos[2]) / kFixed16};
+}
+
+int32_t fixed_from_mission(float v) {
+	return static_cast<int32_t>(v * kFixed16);
 }
 
 SeatRow seat_row(const Seat &seat, int32_t index) {
@@ -124,6 +129,49 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.wp_node = e.brain.f[AiBrain::kWpNode];
 	d.wp_distance = e.brain.f[AiBrain::kWpDistance];
 	d.out_speed = e.brain.f[AiBrain::kOutSpeed];
+	// Brain combat/movement registers. The target slots store the packed wire
+	// handle + 1, 0 = null [orig: Entity_SetAITarget @0x45d760 — the container
+	// rebase of the original's entity pointer].
+	const int32_t target_packed = e.brain.f[AiBrain::kTargetSlot];
+	d.target_valid = target_packed != 0;
+	d.target_handle = target_packed != 0 ? target_packed - 1 : -1;
+	if (target_packed != 0) {
+		EntityHandle th;
+		th.packed = static_cast<uint16_t>(target_packed - 1);
+		if (const Entity *te = world.registry.get(th)) d.target_name = te->name;
+	}
+	const int32_t prio_packed = e.brain.f[AiBrain::kPriorityTarget];
+	d.priority_target_valid = prio_packed != 0;
+	d.priority_target_handle = prio_packed != 0 ? prio_packed - 1 : -1;
+	d.combat_timer = e.brain.f[AiBrain::kCombatTimer];
+	d.fire_delay = e.brain.f[AiBrain::kFireDelay];
+	d.retarget_timer = e.brain.f[AiBrain::kRetargetTimer];
+	const uint32_t cooldowns =
+			static_cast<uint32_t>(e.brain.f[AiBrain::kCooldownPair]);
+	d.cooldown_a = static_cast<int32_t>(cooldowns & 0xFFFF);
+	d.cooldown_b = static_cast<int32_t>(cooldowns >> 16);
+	d.speed_a = e.brain.f[AiBrain::kSpeedA];
+	d.speed_b = e.brain.f[AiBrain::kSpeedB];
+	{
+		const int32_t wp[3] = {e.brain.f[AiBrain::kWorkPosX],
+				e.brain.f[AiBrain::kWorkPosY], e.brain.f[AiBrain::kWorkPosZ]};
+		d.work_pos = mission_from_fixed3(wp);
+	}
+	d.work_heading = e.brain.f[AiBrain::kWorkHeading];
+	d.turret_yaw = e.brain.f[AiBrain::kActiveYaw];
+	d.turret_pitch = e.brain.f[AiBrain::kActivePitch];
+	// Profile summary (the read-only .aip definition) + the slot control word
+	// the combat gates read (0x1 blind, 0x8, 0x200 berserk — infantry_combat's
+	// scan entry tests).
+	for (int ci = 0; ci < 4; ++ci)
+		d.profile_class_priority[ci] = e.profile.class_priority[ci];
+	d.profile_fov_primary = e.profile.fov_primary;
+	d.profile_fov_secondary = e.profile.fov_secondary;
+	d.profile_range_primary = e.profile.range_primary;
+	d.profile_range_secondary = e.profile.range_secondary;
+	d.profile_approach_cap = e.profile.approach_cap;
+	d.profile_type = e.profile.type;
+	d.slot_control_bits = e.slot.f[1];
 	// Rotor spin, so a live round can show the blades actually turning rather
 	// than only the code that says they should.
 	if (const Entity *ve = world.registry.get(e.handle)) {
@@ -220,6 +268,14 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.clip_size = e.profile.clip_size;
 	d.magazine = static_cast<int32_t>(e.inf.magazine);
 	d.combat_target_valid = e.inf.combat_target.valid();
+	// The infantry pass's live aim/reaction state (§17); the SM/vehicle chain's
+	// equivalents are the brain registers above.
+	d.aim_heading = e.inf.aim_heading;
+	d.aim_pitch = e.inf.aim_pitch;
+	d.aim_valid = e.inf.aim_valid;
+	d.damage_timer = e.inf.damage_timer;
+	d.same_target_ticks = e.inf.same_target_ticks;
+	d.combat_move_timer = e.inf.combat_move_timer;
 	// The fire-origin readback (probe surface): the launch userpoint on this
 	// body's posed skeleton, resolved now by the sim's own provider — the same
 	// point the fire pass, LOS rays, and aim eye read (world/muzzle_pose.h).
@@ -255,10 +311,13 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 			: static_cast<int32_t>(spawn_origin_index(ent.spawn_origin));
 	d.item_id = ent.item_id;
 	d.name = ent.name;
+	if (const std::string *item_name = world.item_names.get(ent.item_id))
+		d.item_name = *item_name;
 	d.team = static_cast<int32_t>(ent.team);
 	d.alive = ent.alive;
 	d.hidden = ent.hidden;
 	d.health = ent.health;
+	d.health_max = ent.health_max;
 	d.has_item_def = ent.has_item_def;
 	d.handle = static_cast<int32_t>(h.packed);
 	d.item_type = static_cast<int32_t>(ent.item_type);
@@ -338,6 +397,8 @@ std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) 
 		row.item_id = e.item_id;
 		row.wire_handle = e.handle.packed;
 		row.name = e.name;
+		if (const std::string *item_name = world.item_names.get(e.item_id))
+			row.item_name = *item_name;
 		row.health = e.health;
 		row.alive = e.alive;
 		row.hidden = e.hidden;
@@ -375,6 +436,9 @@ std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai) 
 			row.item_id = ent ? ent->item_id : 0;
 			row.wire_handle = e->handle.packed;
 			row.name = ent ? ent->name : std::string();
+			if (const std::string *item_name =
+							ent ? world.item_names.get(ent->item_id) : nullptr)
+				row.item_name = *item_name;
 			row.state_name = ai_state_name(e->brain.f[AiBrain::kCurState]);
 			row.health = ent ? ent->health : 0;
 			row.team = static_cast<int32_t>(e->team);
@@ -408,6 +472,139 @@ EntityCard build_entity_card(World &world, const AiSystem *ai, EntityHandle hand
 	}
 	card.valid = card.has_world || card.has_ai;
 	return card;
+}
+
+AiDebugReport ai_debug_report(World &world, const AiSystem &ai) {
+	AiDebugReport report;
+
+	// Follower counts over the WHOLE pool (the row cap below never hides a
+	// route's traffic). Channel 0 is "no channel" (ai_waypoint_update_target's
+	// unresolved leg), so it never counts.
+	std::unordered_map<int32_t, int32_t> followers;
+	for (int i = 0; i < ai.count(); ++i) {
+		const AiEntity *e = ai.at(i);
+		if (e == nullptr) continue;
+		const int32_t channel = e->brain.f[AiBrain::kWpChannel];
+		if (channel > 0) ++followers[channel];
+	}
+
+	report.rows.reserve(static_cast<size_t>(
+			std::min(ai.count(), AiDebugReport::kMaxRows)));
+	for (int i = 0; i < ai.count(); ++i) {
+		if (static_cast<int>(report.rows.size()) >= AiDebugReport::kMaxRows)
+			break;
+		const AiEntity *e = ai.at(i);
+		if (e == nullptr) continue;
+		const Entity *ent = world.registry.get(e->handle);
+		AiOverlayRow row;
+		row.ai_index = i;
+		row.handle = e->handle.packed;
+		// Most BMS organics carry no authored name; the items.def display name
+		// keeps the overlay label meaningful.
+		row.name = ent ? ent->name : std::string();
+		if (row.name.empty() && ent != nullptr) {
+			if (const std::string *item_name = world.item_names.get(ent->item_id))
+				row.name = *item_name;
+		}
+		row.group_id = ent ? static_cast<int32_t>(ent->group_id) : 0;
+		row.alive = ent ? ent->alive : e->health > 0;
+		row.infantry = e->inf.active;
+		for (int c = 0; c < 3; ++c) row.pos[c] = e->pos[c];
+		row.state = e->brain.f[AiBrain::kCurState];
+		row.state_name = ai_state_name(row.state);
+		row.alert = e->slot.bytes()[AiSlot::kAlertByte];
+		row.move_mode = e->inf.move_mode;
+		row.out_speed = e->brain.f[AiBrain::kOutSpeed];
+		row.wp_channel = e->brain.f[AiBrain::kWpChannel];
+		row.wp_node = e->brain.f[AiBrain::kWpNode];
+		row.wp_distance = e->brain.f[AiBrain::kWpDistance];
+		// The current target: the infantry pass reads its combat_target mirror,
+		// the SM chain the brain slot (packed+1 rebase, 0 = null
+		// [orig: Entity_SetAITarget @0x45d760]).
+		EntityHandle target;
+		if (e->inf.active) {
+			target = e->inf.combat_target;
+		} else if (e->brain.f[AiBrain::kTargetSlot] != 0) {
+			target.packed = static_cast<uint16_t>(
+					e->brain.f[AiBrain::kTargetSlot] - 1);
+		}
+		if (target.valid()) {
+			row.target_valid = true;
+			row.target_handle = target.packed;
+			if (const AiEntity *te = ai.for_handle(target)) {
+				for (int c = 0; c < 3; ++c) row.target_pos[c] = te->pos[c];
+			} else if (const Entity *tw = world.registry.get(target)) {
+				row.target_pos[0] = fixed_from_mission(tw->position.x);
+				row.target_pos[1] = fixed_from_mission(tw->position.y);
+				row.target_pos[2] = fixed_from_mission(tw->position.z);
+			}
+			if (const Entity *tw = world.registry.get(target))
+				row.target_name = tw->name;
+		}
+		row.aim_valid = e->inf.active && e->inf.aim_valid;
+		row.aim_heading = e->inf.aim_heading;
+		row.aim_pitch = e->inf.aim_pitch;
+		// The muzzle resolve walks the posed skeleton — engaged brains only.
+		if (row.target_valid && world.muzzle_pose_provider != nullptr) {
+			int32_t muzzle[3] = {};
+			row.muzzle_valid = world.muzzle_pose_provider->resolve_muzzle_pose(
+					world, e->handle, muzzle);
+			if (row.muzzle_valid)
+				for (int c = 0; c < 3; ++c) row.muzzle[c] = muzzle[c];
+		}
+		row.sight_range_q16 = e->slot.f[AiSlot::kSightRange];
+		row.attack_range_q16 = e->slot.f[AiSlot::kAttackRange];
+		row.combat_timer = e->brain.f[AiBrain::kCombatTimer];
+		row.fire_delay = e->brain.f[AiBrain::kFireDelay];
+		row.damage_timer = e->inf.damage_timer;
+		row.combat_move_timer = e->inf.combat_move_timer;
+		report.rows.push_back(std::move(row));
+	}
+
+	for (size_t ch = 0; ch < ai.nav.channels.size(); ++ch) {
+		const NavChannel &channel = ai.nav.channels[ch];
+		if (channel.count <= 0) continue;
+		AiNavChannelRow crow;
+		crow.index = static_cast<int32_t>(ch);
+		crow.loopflag = channel.loopflag;
+		const int count = std::min(channel.count,
+				static_cast<int32_t>(std::size(channel.entries)));
+		crow.nodes.reserve(static_cast<size_t>(count));
+		for (int k = 0; k < count; ++k) {
+			const NavEntry *node = ai.nav.entry(channel.entries[k]);
+			if (node == nullptr) continue;
+			AiNavNodeRow nrow;
+			nrow.pos[0] = node->f[1];
+			nrow.pos[1] = node->f[2];
+			nrow.pos[2] = node->f[3];
+			nrow.radius_q16 = node->f[0];
+			nrow.wait_ticks = node->wait_ticks;
+			crow.nodes.push_back(nrow);
+		}
+		auto it = followers.find(crow.index);
+		crow.followers = it != followers.end() ? it->second : 0;
+		report.channels.push_back(std::move(crow));
+	}
+
+	for (int g = 0; g < TriggerRelations::kGroups; ++g) {
+		const TriggerRelations::GroupState *state =
+				world.relations.group_or_null(g);
+		if (state == nullptr || state->initial_count <= 0) continue;
+		AiGroupRow grow;
+		grow.id = g;
+		grow.alert = state->alert;
+		grow.initial_count = state->initial_count;
+		grow.live_count = state->live_count;
+		report.groups.push_back(grow);
+	}
+
+	report.counters.brain_count = ai.count();
+	report.counters.scheduler_budget = ai.scheduler.budget;
+	report.counters.event_count = ai.events.count();
+	report.counters.unported_calls = ai.unported_calls;
+	report.counters.rel_ops = static_cast<int32_t>(ai.rel_ops.size());
+	report.counters.find_target_calls = ai.find_target_calls;
+	return report;
 }
 
 } // namespace opennova::world::inspect

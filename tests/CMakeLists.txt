@@ -778,10 +778,10 @@ target_include_directories(simassets_seat_spec_extract_test PRIVATE ${CMAKE_CURR
 add_test(NAME simassets_seat_spec_extract COMMAND simassets_seat_spec_extract_test)
 
 # Object renderer/shader tests
-foreach(test device_fog environment_cube light_runtime light_scene light_terrain_pass material_classify material_eval
+foreach(test device_fog environment_cube foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval
         particle_atlas_contract particle_frame_compiler_contract render_order
         q3_frame render_slot_shadow
-        state_vectors tracer_frame)
+        state_vectors tracer_frame precipitation_frame)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -885,14 +885,29 @@ target_link_libraries(environment_state_test PRIVATE opennova_runtime)
 target_include_directories(environment_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME environment_state COMMAND environment_state_test)
 
-# The mission-start network environment sample (runtime/environment/
-# env_network_sample): the mission-selected ENV/BMS derivation and retail's
-# 255-tick weather prewarm must reach clients through the same real phase-2
-# projection every host embeds. opennova_net supplies that wire projection.
-add_executable(env_network_sample_test environment/env_network_sample_test.cpp)
-target_link_libraries(env_network_sample_test PRIVATE opennova_runtime opennova_net)
-target_include_directories(env_network_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME env_network_sample COMMAND env_network_sample_test)
+# The mission-start weather seed (runtime/environment/weather_seed): the
+# mission-selected ENV/BMS derivation and retail's 255-tick weather settle must
+# reach clients through the same real phase-2 projection every host embeds.
+# opennova_net supplies that wire projection.
+add_executable(weather_seed_test environment/weather_seed_test.cpp)
+target_link_libraries(weather_seed_test PRIVATE opennova_runtime opennova_net)
+target_include_directories(weather_seed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME weather_seed COMMAND weather_seed_test)
+
+# The weather home (runtime/world/weather_state): the WAC handler math, the
+# mission-start initializer, the wire sample apply, and the sim tick against a
+# scripted world.
+add_executable(weather_state_test world/weather_state_test.cpp)
+target_link_libraries(weather_state_test PRIVATE opennova_runtime)
+target_include_directories(weather_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME weather_state COMMAND weather_state_test)
+
+# The precipitation pool (runtime/environment/precipitation): seed, fall, wrap,
+# floor, and the drawer compile.
+add_executable(precipitation_test environment/precipitation_test.cpp)
+target_link_libraries(precipitation_test PRIVATE opennova_runtime)
+target_include_directories(precipitation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME precipitation COMMAND precipitation_test)
 
 # The HUD view-helper math cluster (engine/runtime/hud, S15): design-space
 # scaling, ALPHAFADE decay + quirk, stance Q16 scale/centering, health bands,

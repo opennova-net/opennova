@@ -20,7 +20,7 @@
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 0,
-    "gd_orig_cites": 740,
+    "gd_orig_cites": 738,
     "gd_prints_outside_debug": 0,
     "has_method_guards": 22,
     "oversize_cpp_files": 1,
@@ -65,6 +65,8 @@
     "probe_runner.gd|func status(",
     "probe_runner.gd|func cancel(",
     "game_world.gd|func get_perf_probe_spans(",
+    "debug_view_set.gd|func get_ai_view_state()",
+    "game_world.gd|func get_ai_view_state()",
     "perf_probe_switches.gd|var spans: Dictionary",
     "mission_audio.gd|func to_dict()"
   ]

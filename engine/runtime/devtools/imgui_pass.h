@@ -27,6 +27,16 @@ enum class InitialDockPlacement {
 	None,
 	Center,
 	Right,
+	RightBottom, // the lower split of the right column
+};
+
+// A window's preferred first-open size in pixels, applied with
+// ImGuiCond_FirstUseEver so the user's own sizing (and ImGui's ini) always
+// wins afterwards. Zero means no preference. Two floats rather than an ImVec2:
+// this header deliberately carries no ImGui include.
+struct WindowSizeHint {
+	float width = 0.0f;
+	float height = 0.0f;
 };
 
 // One tool window. draw() runs inside ImGui::Begin/End for the window each
@@ -47,15 +57,32 @@ public:
 	virtual InitialDockPlacement initial_dock_placement() const {
 		return InitialDockPlacement::None;
 	}
+	// Only consulted for an undocked window on its first appearance; a wide
+	// surface (a timeline) asks for more than the cascade default.
+	virtual WindowSizeHint preferred_size() const { return WindowSizeHint{}; }
 	// A window that issues its own ImGui::Begin/End (ImGui's demo, a
 	// full-viewport surface) is drawn without the pass's wrapping Begin/End.
 	virtual bool owns_frame() const { return false; }
+
+	// Focus this window (and select its tab in its dock node) on the pass's
+	// next layout in which the window exists: a window sharing a dock node
+	// with another (Entities beside Stats) is otherwise an inactive tab when
+	// something opens it from outside the menu. One-shot; a request made the
+	// frame the window first opens lands on the frame after.
+	void request_focus() { focus_requested_ = true; }
+	bool focus_requested() const { return focus_requested_; }
 
 	bool open = false;
 
 private:
 	friend class ImGuiPass;
+	bool take_focus_request() {
+		const bool requested = focus_requested_;
+		focus_requested_ = false;
+		return requested;
+	}
 	bool visible_ = false;
+	bool focus_requested_ = false;
 };
 
 // ImGui's allocator hooks (ImGui::SetAllocatorFunctions), typed without an
@@ -118,17 +145,18 @@ public:
 	// after the call (Escape and the menu close from inside).
 	bool draw_frame(uint64_t frame_index);
 
-	// Bring every window home on the next layout pass: undocked, uncollapsed,
-	// cascaded inside the main viewport. ImGui persists window placement in
-	// its ini (a window dragged out to a second monitor stays in its own OS
-	// viewport across runs), so a probe or a reader on a different desktop
-	// asks for this before reading. Also the "Reset layout" menu item.
+	// Restore the default docked layout on the next layout pass: the
+	// persisted dockspace is rebuilt from every window's declared placement
+	// and every window is expanded. ImGui persists window placement in its
+	// ini (a window dragged out to a second monitor stays in its own OS
+	// viewport across runs; a window that did not exist when the ini was
+	// written floats), so a probe or a reader on a different desktop asks
+	// for this before reading. Also the "Reset layout" menu item.
 	void request_layout_reset() { layout_reset_pending_ = true; }
 	bool is_layout_reset_pending() const { return layout_reset_pending_; }
 
 private:
 	void sync_visibility();
-	void place_window_home(int index);
 
 	ImGuiPassOptions options_;
 	std::vector<std::unique_ptr<Window>> windows_;

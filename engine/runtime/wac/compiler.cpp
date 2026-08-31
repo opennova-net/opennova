@@ -57,6 +57,7 @@ int builtin_id(const std::string &name) {
     if (ieq(name, "LoseVar")) return static_cast<int>(Builtin::LoseVar);
     if (ieq(name, "accuracyspread")) return static_cast<int>(Builtin::AccuracySpread);
     if (ieq(name, "fallmps")) return static_cast<int>(Builtin::Fallmps);
+    if (ieq(name, "night")) return static_cast<int>(Builtin::Night);
     return -1;
 }
 
@@ -144,7 +145,8 @@ private:
             // are lvalues. [orig: WacScript_ResolveParameter @0x4f2940; named table
             // @0x82EEF0]
             if (named_value == static_cast<int>(Builtin::AccuracySpread) ||
-                named_value == static_cast<int>(Builtin::Fallmps)) {
+                named_value == static_cast<int>(Builtin::Fallmps) ||
+                named_value == static_cast<int>(Builtin::Wind)) {
                 return encode_operand(OperandKind::Builtin,
                                       static_cast<uint32_t>(named_value));
             }

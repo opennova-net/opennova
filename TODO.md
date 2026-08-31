@@ -87,6 +87,12 @@ hardening, and project health. Divergences from the original engine belong in
       the registry's successor) still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
       `docs/runtime-architecture.md` + `docs/correspondence.md`
+- [ ] Precipitation floor-sampler cost (owner: `engine/runtime/environment/precipitation.*`
+      + the `godot/src/env/precipitation.cpp` shell sampler): the witnessed per-wrap drop
+      raycast (the retail floor probe from +200 m) measured ~0.4 ms/frame at rain 100 on
+      03TR (frame_stats "env" row = WORLD_WEATHER, 2026-08-30) — batch or cache the
+      entity-raycast half (the terrain/water half is cheap) without changing the
+      witnessed floor semantics; re-measure via `perf_mission_rows`
 - [ ] Env/water/sky/weather singleton `_process` set: re-measure at the ASH_I5A
       vantage before slicing — the #403 present-side rework (parked idle models,
       `env_generation_changed`, the staggered per-model light restamp) invalidated
@@ -105,12 +111,15 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
 - [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
       recipe): the retired F3 pages return as engine ImGui windows as they are
-      wanted (the Entities window landed as the ADR 0042 d6 template, PR #587);
-      still open: the pick-list feed into it, sim transport
+      wanted (the Entities window landed as the ADR 0042 d6 template, PR #587;
+      the Environment window with the weather command layer, PR #597; the
+      Weapon window landed as the dope-sheet ACTION editor over the equipped
+      weapon's FSM, which also covers the FP-weapon half of "animation");
+      still open: sim transport
       (play/pause/step; the MCP
       `game_debug` control plane still drives these), script vars, net, particles,
       occlusion, rounds, terrain, rendering/world-view toggles (`GameWorld`'s
-      typed API), environment, audio, animation, player (with the pose dump the
+      typed API), audio, animation, player (with the pose dump the
       retired `DebugSnapshotWriter` produced for `pose_replay_probe` /
       `terrain_seam_probe`), and the `PerfTimeline` ring. Data the shell alone
       has crosses as VALUE slots or typed records, never Godot objects.
