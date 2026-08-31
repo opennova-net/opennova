@@ -328,6 +328,15 @@ public:
 	}
 	const std::string &join_token() const { return join_token_; }
 
+	// The CD identity cookie (packed PUB* blob) the C2S 0x00 JOIN relays: the
+	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
+	// (codes 23/24/25/28). Empty for LAN / an unauthenticated join.
+	// [orig: the "CD" TLV in NapiNP_WriteClientAuthPayload @0x42a180]
+	void set_cd_cookie(std::vector<uint8_t> cookie) {
+		cd_cookie_ = std::move(cookie);
+	}
+	const std::vector<uint8_t> &cd_cookie() const { return cd_cookie_; }
+
 	// Anti-cheat character-attribute challenge source. This is the exact
 	// sixteen-row table loaded from charattr.def at boot, not AnimMap/.adm data.
 	// S2C 0x41 mutates the retained table in receive order.
@@ -651,7 +660,8 @@ private:
 	ProtocolReassemblyState s2c_reassembly_;
 	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
 	std::string expansion_version_root_; // install root for the JOIN checksum (D-NET-166)
-	std::string join_token_ = "0"; // ClientAuth BT (decoded .joi CK); "0" = LAN default
+	std::string join_token_ = "0"; // ClientAuth APPID (decoded .joi CK); "0" = LAN default
+	std::vector<uint8_t> cd_cookie_; // 0x00 JOIN CD identity cookie (packed PUB* blob)
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
 	// Pre-session UDP legs are reliable-by-retransmit in retail. Cache the already-framed bytes so

@@ -163,9 +163,11 @@ func load_as_joiner(target: JoinTarget) -> int:
 		_world.load_failed.emit("join: unknown integrity profile '%s'" % \
 				target.integrity_profile)
 		return ERR_INVALID_PARAMETER
-	# The BT join token (decoded .joi CK) a NovaWorld host validates in ClientAuth
-	# (reject code 9). "0"/empty is the LAN default the check ignores.
+	# The APPID join token (decoded .joi CK) a NovaWorld host validates in ClientAuth
+	# (reject code 9), and the CD identity cookie (packed PUB* blob) it validates in
+	# the 0x00 JOIN (codes 23/24/25). Both empty/"0" for LAN.
 	_join_preload_sim.set_join_token(target.join_token)
+	_join_preload_sim.set_join_cd_cookie(target.cd_cookie)
 	if not _join_preload_sim.enable_join(
 			target.host_ip, target.port, target.player_name,
 			target.join_role, target.spectator_password):

@@ -134,6 +134,14 @@ public:
 	std::vector<std::string> cookie_header_lines() const;
 	bool empty() const { return order_.empty(); }
 	const std::vector<std::string> &names() const { return order_; }
+	// Concatenate every cookie whose name starts with `prefix` as [name\0][value\0]
+	// pairs, in insertion order — the retail CD-cookie blob the game-session join
+	// relays (the NovaWorld-issued PUB* identity: PUBPCID/PUBNAMEINFO/PUBSQUADINFO/
+	// PUBJOINTICKET). Empty when nothing matches.
+	// [orig: config_query_matching_entries @0x64eb70 gather-by-prefix ("PUB*") ->
+	//  NetPacket_BuildAnnouncePayload @0x4c4bf0 -> the C2S 0x00 JOIN "CD" TLV
+	//  (NapiNP_WriteClientAuthPayload @0x42a180)]
+	std::vector<uint8_t> build_prefixed_blob(const std::string &prefix) const;
 
 private:
 	std::map<std::string, std::string> values_;

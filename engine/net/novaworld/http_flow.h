@@ -67,6 +67,10 @@ struct JoinResult {
 	// The game-session APPID join token (decimal) recovered from the .joi CK —
 	// the value the NovaWorld host validates (code 9). "0" for LAN / a bare .joi.
 	std::string app_id = "0"; // when Resolved
+	// The CD identity cookie: every PUB* cookie the login/NWJoin Set-Cookie'd,
+	// packed [name\0][value\0], relayed in the C2S 0x00 JOIN. Empty when the jar
+	// carries no PUB* cookie (a bare .joi / unauthenticated). Host code 23/24/25.
+	std::vector<uint8_t> cd_cookie; // when Resolved
 	std::string reason;       // when Failed
 };
 

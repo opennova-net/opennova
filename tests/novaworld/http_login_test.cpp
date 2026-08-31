@@ -180,6 +180,30 @@ int main() {
 			      "each line is a single trailing-';' cookie, never merged");
 		}
 
+		// The CD identity blob the game-session 0x00 JOIN relays is every PUB*
+		// cookie packed [name\0][value\0] in insertion order (host codes 23/24/25).
+		// [orig: config_query_matching_entries @0x64eb70 gather("PUB*") ->
+		//  NapiNP_WriteClientAuthPayload @0x42a180 "CD" TLV]
+		{
+			CookieJar pub_jar;
+			pub_jar.set("NWHANDLE", "TestPlayer");            // non-PUB, excluded
+			pub_jar.set("PUBPCID", "HCMNFLPAOCOFBNLF");
+			pub_jar.set("PUBJOINTICKET", "JT:0a00");
+			const std::vector<uint8_t> blob = pub_jar.build_prefixed_blob("PUB");
+			const std::string s(blob.begin(), blob.end());
+			const std::string expected =
+					std::string("PUBPCID\0HCMNFLPAOCOFBNLF\0", 25) +
+					std::string("PUBJOINTICKET\0JT:0a00\0", 22);
+			check(s == expected,
+			      "CD blob packs PUB* cookies [name\\0][value\\0], excludes non-PUB");
+			check(pub_jar.build_prefixed_blob("PUB").size() == 47,
+			      "CD blob length is the packed byte total");
+			CookieJar empty_jar;
+			empty_jar.set("NWHANDLE", "x");
+			check(empty_jar.build_prefixed_blob("PUB").empty(),
+			      "no PUB* cookie -> empty CD blob (LAN / unauthenticated)");
+		}
+
 		// Re-setting a cookie updates in place without duplicating it.
 		jar.set("NWHANDLE", "OtherPlayer");
 		check(*jar.find("NWHANDLE") == "OtherPlayer", "jar updates a cookie in place");

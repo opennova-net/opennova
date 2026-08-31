@@ -19,9 +19,12 @@ var player_name := ""  ## the joiner's callsign; the shell fills its profile def
 var mission := ""      ## non-authoritative display hint; wire 0x7B/0x0B always owns the load
 var dir := ""          ## resource-dir override (dev/tests); empty = the persisted directory
 var integrity_profile := ""  ## explicit registered retail corpus; empty = safe CRC silence
-## The game-session BT join token the client recovers from the NWJoin .joi CK; a
+## The game-session APPID join token the client recovers from the NWJoin .joi CK; a
 ## NovaWorld host validates it in ClientAuth (reject code 9). "0" = the LAN default.
 var join_token := "0"
+## The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the NovaWorld
+## NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates (codes 23/24/25/28). Empty = LAN.
+var cd_cookie := PackedByteArray()
 # Browse-time DISPLAY HINTS for the loading screen only — never session state. The
 # authoritative values arrive post-auth in the 0x7B record (join_session_identified).
 var server_name := ""

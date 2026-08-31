@@ -381,10 +381,14 @@ public:
 	// Select a registered retail resource-corpus profile for S2C 0x30/0x31.
 	// Empty clears it; an unknown id also clears it and returns false.
 	bool set_join_integrity_profile(const String &p_profile_id);
-	// The game-session BT join token the client recovers from the NWJoin .joi CK;
-	// a NovaWorld host validates it (reject code 9). Empty/"0" is the LAN default.
-	// Retained across runtime rebuilds like the character/integrity data.
+	// The game-session APPID join token the client recovers from the NWJoin .joi
+	// CK; a NovaWorld host validates it (reject code 9). Empty/"0" is the LAN
+	// default. Retained across runtime rebuilds like the character/integrity data.
 	void set_join_token(const String &p_token);
+	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the
+	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
+	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.
+	void set_join_cd_cookie(const PackedByteArray &p_cookie);
 	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
 	// Retained across runtime rebuilds like the character/integrity data.

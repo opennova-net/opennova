@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdlib> // std::atoi
 
+#include <base/io/log.h>
 #include <base/io/strutil.h>
 
 namespace opennova {
@@ -357,6 +358,18 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			r.host_ip = conn.host_ip;
 			r.host_port = static_cast<uint16_t>(port);
 			r.app_id = conn.app_id;  // the game-session APPID join token (decoded CK)
+			// The PUB* identity cookies the authenticated login/NWJoin set, packed
+			// as the CD blob the 0x00 JOIN relays (host code 23).
+			r.cd_cookie = jar_.build_prefixed_blob("PUB");
+			opennova::io::logf(opennova::io::LogLevel::kInfo,
+					"joi: CD identity cookie = %zu bytes from %zu PUB* cookie(s)",
+					r.cd_cookie.size(),
+					[&] {
+						size_t n = 0;
+						for (const std::string &nm : jar_.names())
+							if (nm.rfind("PUB", 0) == 0) ++n;
+						return n;
+					}());
 			return r;
 		}
 		case JoinStep::Idle:

@@ -144,7 +144,8 @@ private:
 	// layer via joined_game(host, port). Does NOT send an in-match hello; Simulation's
 	// joiner owns the single ClientHello (see the .cpp for why).
 	void resolve_join_target(const String &host, uint16_t port,
-	                         const String &join_token);
+	                         const String &join_token,
+	                         const PackedByteArray &cd_cookie);
 
 	// Snapshot the gate/session outputs into the flow's LobbyHttpContext. Called at
 	// each leg-initiation point (login / GSB / join) — never inside a leg callback,

@@ -103,7 +103,8 @@ std::vector<uint8_t> build_join_padding_echo(
 // is active, followed by VERSIONCRCSTRING. Base-game captures therefore contain
 // only the latter; expansion hosts require both.
 std::vector<uint8_t> build_join_request(
-		std::string_view expansion, int32_t expansion_version_checksum) {
+		std::string_view expansion, int32_t expansion_version_checksum,
+		const std::vector<uint8_t> &cd_cookie) {
 	std::vector<uint8_t> body;
 	auto append_string_tlv = [&](std::string_view name, std::string_view value) {
 		body.insert(body.end(), name.begin(), name.end());
@@ -122,6 +123,22 @@ std::vector<uint8_t> build_join_request(
 	// keeps the golden "0" byte-for-byte (D-NET-166).
 	append_string_tlv("VERSIONCRCSTRING",
 			std::to_string(expansion_version_checksum));
+	// The CD identity cookie (the packed PUB* blob) rides after VERSIONCRCSTRING,
+	// as a BINARY TLV: it carries embedded NULs between the [name\0][value\0]
+	// pairs and is already self-terminated, so the length is the raw blob size
+	// (no appended NUL). Absent when the jar carried no PUB* cookie — the host
+	// then punts code 23. [orig: NapiNP_WriteClientAuthPayload @0x42a180 "CD" TLV
+	// = NapiNP_WriteTLV(&unk_24CFDB8, size); the host reads it at
+	// NapiNPServer_HandlePlayerJoinMessage @0x512aa0 "CD" -> the cookie buffer].
+	if (!cd_cookie.empty()) {
+		const char *cd = "CD";
+		body.insert(body.end(), cd, cd + 2);
+		body.push_back(0);
+		const uint16_t size = static_cast<uint16_t>(cd_cookie.size());
+		body.push_back(static_cast<uint8_t>(size));
+		body.push_back(static_cast<uint8_t>(size >> 8));
+		body.insert(body.end(), cd_cookie.begin(), cd_cookie.end());
+	}
 	return body;
 }
 
@@ -1018,7 +1035,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				0x00, build_join_request(advertised_expansion_,
 						vfs_expansion_version_checksum(
 								expansion_version_root_,
-								advertised_expansion_))));
+								advertised_expansion_),
+						cd_cookie_)));
+		io::logf(io::LogLevel::kInfo,
+				"np joiner: 0x00 JOIN CD identity cookie = %zu bytes",
+				cd_cookie_.size());
 		post_auth_stage_ = PostAuthStage::AwaitJoinAck;
 	}
 	std::size_t message_index = 0;
