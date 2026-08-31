@@ -3,6 +3,8 @@
 #include <net/novacrypto/epask.h>
 #include <net/novacrypto/url_cipher.h>
 
+#include <base/io/log.h>
+
 #include <cstdio>
 #include <cstdlib>
 
@@ -138,7 +140,12 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 	//  atol(decoded CK) @0x569b8e]
 	if (!out.ck.empty()) {
 		const std::string decoded_ck = url_cipher_decode(out.ck, URL_CIPHER_KEY_CK);
-		out.bt = std::to_string(std::atol(decoded_ck.c_str()));
+		out.app_id = std::to_string(std::atol(decoded_ck.c_str()));
+		// Lifecycle trace (kInfo -> MCP log ring): the CK -> APPID derivation.
+		opennova::io::logf(opennova::io::LogLevel::kInfo,
+				"joi: CK='%s' decoded='%s' APPID='%s' host=%s:%s",
+				out.ck.c_str(), decoded_ck.c_str(), out.app_id.c_str(),
+				out.host_ip.c_str(), out.host_port.c_str());
 	}
 	if (out.host_ip.empty()) out.host_ip = out.ni;
 	if (out.host_port.empty()) out.host_port = out.np;

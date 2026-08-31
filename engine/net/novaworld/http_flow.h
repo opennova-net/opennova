@@ -64,9 +64,9 @@ struct JoinResult {
 	HttpRequestSpec request;  // when NeedRequest
 	std::string host_ip;      // when Resolved
 	uint16_t host_port = 0;   // when Resolved
-	// The game-session BT join token (decimal) recovered from the .joi CK — the
-	// value the NovaWorld host validates (code 9). "0" for LAN / a bare .joi.
-	std::string bt = "0";     // when Resolved
+	// The game-session APPID join token (decimal) recovered from the .joi CK —
+	// the value the NovaWorld host validates (code 9). "0" for LAN / a bare .joi.
+	std::string app_id = "0"; // when Resolved
 	std::string reason;       // when Failed
 };
 

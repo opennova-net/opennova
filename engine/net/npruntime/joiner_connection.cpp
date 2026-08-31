@@ -340,6 +340,10 @@ std::vector<uint8_t> JoinerConnection::build_client_hello() {
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	ClientAuth auth = make_jointoperations_client_auth(
 			client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
+	// Lifecycle trace (kInfo -> MCP log ring): the APPID join token (decoded .joi
+	// CK) on this ClientAuth. "0" on a NovaWorld join means the CK never arrived.
+	io::logf(io::LogLevel::kInfo,
+			"np joiner: ClientAuth APPID = '%s'", join_token_.c_str());
 	// The GAME-session 0x42's NA TLV is the player CALLSIGN — the retail host's display-name
 	// source (the golden joiner's 0x0C record name equals its NA). The "jop:cus2" gate tag is
 	// the NOVAWORLD-gate connect's NA, not the game join's. [wire: retail-ashi5a f=199140
@@ -355,22 +359,30 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// exe resource and COUNTRYCODE/TZB from the OS locale — deriving ours is a fidelity follow-up.
 	// [wire: retail-lan-host-join-session ClientAuth; orig: NapiNetConfig_LoadFromConnTags
 	// @0x4c7260 -> Server_ValidatePlayerJoinRequest @0x512100]
-	// BT is the game-session join token. For a NovaWorld join it is the decimal
-	// the client recovers from the .joi CK; the host validates it and punts a
-	// mismatch with code 9 [orig: Server_ValidatePlayerJoinRequest @0x512100
-	// `bt != ctx+4500` @0x5122c5]. LAN keeps "0" (the check runs only for a
-	// NovaWorld-transport host).
+	// BT stays "0" (retail's LAN default; the host's code-6/7 ban-type gate).
+	// The decimal recovered from the .joi CK is the APPID CU, which is what the
+	// NovaWorld host validates: a mismatch (or an absent APPID, our old bug) is
+	// the code-9 punt. Witnessed live 2026-08-31 in a stock client's successful
+	// join to a genuine .204 host: `CU BT="0"`, `CU APPID="3225"` (= atol(decoded
+	// CK)). [orig: net_config.bt = atol(decoded CK) @0x569b8e serialized as the
+	// APPID conn-tag -> Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5]
 	for (const auto &field : {
-			std::pair<const char *, std::string>{"BT", join_token_},
-			std::pair<const char *, std::string>{"VN", "2"},
-			std::pair<const char *, std::string>{"BN", "1"},
-			std::pair<const char *, std::string>{"DB", "0"},
-			std::pair<const char *, std::string>{"MBN", "20042002"},
-			std::pair<const char *, std::string>{"SOPD", "180"},
-			std::pair<const char *, std::string>{"VERSIONSTRING", "V1.7.5.7"},
-			std::pair<const char *, std::string>{"COUNTRYCODE", "us"},
+			std::pair<const char *, const char *>{"BT", "0"},
+			std::pair<const char *, const char *>{"VN", "2"},
+			std::pair<const char *, const char *>{"BN", "1"},
+			std::pair<const char *, const char *>{"DB", "0"},
+			std::pair<const char *, const char *>{"MBN", "20042002"},
+			std::pair<const char *, const char *>{"SOPD", "180"},
+			std::pair<const char *, const char *>{"VERSIONSTRING", "V1.7.5.7"},
+			std::pair<const char *, const char *>{"COUNTRYCODE", "us"},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
+	}
+	// APPID (the .joi CK decimal) rides only a NovaWorld join, in retail's wire
+	// order right after COUNTRYCODE. LAN sends no APPID (join_token_ == "0"), the
+	// host's code-9 gate being NovaWorld-transport only.
+	if (join_token_ != "0" && !join_token_.empty()) {
+		auth.cu.push_back(make_client_cu_chunk(2, "APPID", join_token_));
 	}
 	// Retail serializes the live profile's per-side character block between the
 	// environment strings and the trailing locale/packet scalars. A zero value is

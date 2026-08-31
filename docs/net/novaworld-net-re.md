@@ -1102,15 +1102,22 @@ tooling described in §5.25. The complete contract is:
   spectator disabled/full/bad-password, **21** squad password, **18/19/20/22**
   side/team password, **23/24/25** NAMEINFO missing/decrypt/PCID-decrypt, **28**
   join ticket, **29/30** PCID duplicate, **31** banned name, **32** PunkBuster.
-  **Code 9 (BT) witnessed live** (server "Billy", joinable on stock JO, 2026-08-31):
-  a NovaWorld host requires the game-session `BT` join field to equal its stored
-  session token. The retail client sources it from the NWJoin `.joi`: `net_config.bt
-  = atol(decoded CK)` [orig: parse_connection_query_string @0x54dfb0 CK arm (key
-  "cfhdcegjigecjehcgjdhe"); UI_JoinSelectedSession @0x5699d0 @0x569b8e]. The reimpl
-  now decodes CK → BT in `parse_joi_connection_string` and threads it JoinTarget →
-  Simulation.set_join_token → JoinerConnection ClientAuth `BT` CU (was hardcoded
-  "0", the LAN default the check ignores). This is the real fix behind the
-  retail-server join punt for version-compatible NovaWorld hosts.
+  **Code 9 witnessed live + wire-corrected** (server "Billy" @45.61.165.59:32768,
+  joinable on stock JO, 2026-08-31): the game-layer field IDA labels `net_cfg.bt`
+  at the code-9 site is fed by the **`APPID`** conn-tag, NOT the `BT` conn-tag. A
+  successful stock-client ClientAuth to a genuine .204 host sends `CU BT="0"` and
+  `CU APPID="3225"`, where 3225 = `atol(url_cipher_decode(CK))` from the NWJoin
+  `.joi` [orig: parse_connection_query_string @0x54dfb0 CK arm (key
+  "cfhdcegjigecjehcgjdhe"); UI_JoinSelectedSession @0x5699d0 `net_config.bt =
+  atol(decoded CK)` @0x569b8e, serialized on the wire as the APPID conn-tag]. The
+  host punts code 9 when APPID is absent or mismatched (`Server_ValidatePlayerJoin
+  Request @0x512100` @0x5122c5). The reimpl decodes CK in
+  `parse_joi_connection_string` and threads it JoinTarget → Simulation.set_join_token
+  → the JoinerConnection ClientAuth **`APPID`** CU (NovaWorld joins only; BT stays
+  "0"; LAN sends no APPID). Our old bug was omitting APPID entirely. This is the real
+  fix behind the retail-server join punt for version-compatible NovaWorld hosts.
+  Non-admission CU tail the stock join also carries (read-not-validated, not ported):
+  TZB (OS timezone bias), MPS (max packet size).
 - The spectator-specific legs run LATER, at the game-layer 0x00 join message
   (`NapiNPServer_HandlePlayerJoinMessage @0x512aa0` latches the player entry's
   spectator flag `+55` from the stored JSR, then calls
