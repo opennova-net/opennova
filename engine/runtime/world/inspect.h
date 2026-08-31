@@ -146,8 +146,41 @@ struct AiDetail {
 	int32_t wp_distance = 0;
 	int32_t out_speed = 0;
 
+	// --- brain combat/movement registers (the F3 AI window's deep pane; raw
+	//     brain dwords named in ai.h AiBrain::Idx, BAMs left as BAM32 like
+	//     vp/vr) ---
+	bool target_valid = false;       // brain kTargetSlot != 0 (packed+1 rebase)
+	int32_t target_handle = -1;      // rebased packed wire handle (-1 = null)
+	std::string target_name;         // registry name of the target, when live
+	bool priority_target_valid = false; // brain kPriorityTarget != 0
+	int32_t priority_target_handle = -1;
+	int32_t combat_timer = 0;        // kCombatTimer (>620 re-acquire)
+	int32_t fire_delay = 0;          // kFireDelay countdown
+	int32_t retarget_timer = 0;      // kRetargetTimer (>248 rescans)
+	int32_t cooldown_a = 0;          // kCooldownPair low u16 (weapon A)
+	int32_t cooldown_b = 0;          // kCooldownPair high u16 (weapon B)
+	int32_t speed_a = 0;             // kSpeedA
+	int32_t speed_b = 0;             // kSpeedB (state 16 GROUND_FOLLOWWP)
+	Vec3 work_pos{};                 // kWorkPos* — the mover's goal, world units
+	int32_t work_heading = 0;        // kWorkHeading (BAM32)
+	int32_t turret_yaw = 0;          // kActiveYaw — slewed live turret yaw (BAM32)
+	int32_t turret_pitch = 0;        // kActivePitch (BAM32)
+
+	// --- profile summary (AiProfile, the read-only .aip definition) ---
+	int32_t profile_class_priority[4] = {}; // air/ground/organics/decorations
+	int32_t profile_fov_primary = 0;        // arc byte (pre OR-1)
+	int32_t profile_fov_secondary = 0;
+	int32_t profile_range_primary = 0;      // engage-range caps (world units)
+	int32_t profile_range_secondary = 0;
+	int32_t profile_approach_cap = 0;       // chase range cap (16.16)
+
+	// --- slot control word (AiSlot f[1]; the gates infantry_combat reads:
+	//     0x1 blind/no-scan, 0x8 teamless default, 0x200 berserk) ---
+	int32_t slot_control_bits = 0;
+
 	// --- vehicle/motor diagnostics (emitted only for a live registry row,
-	//     matching the old card's key set) ---
+	//     matching the old card's key set; profile_type is filled for EVERY
+	//     brain — the HELO/GROUND/ORGANIC class is not a vehicle fact) ---
 	bool has_vehicle_block = false;
 	int32_t rotor_speed = 0;
 	int32_t rotor_phase = 0;
@@ -197,6 +230,14 @@ struct AiDetail {
 	int32_t clip_size = 0;
 	int32_t magazine = 0;
 	bool combat_target_valid = false;
+	// The infantry combat pass's live aim/reaction state (InfantryState §17;
+	// infantry-only — the SM/vehicle chain's timers are the brain block above).
+	int32_t aim_heading = 0;      // the aim solution (BAM32)
+	int32_t aim_pitch = 0;        // (BAM32)
+	bool aim_valid = false;
+	int32_t damage_timer = 0;     // alert countdown (+12 on sight)
+	int32_t same_target_ticks = 0;
+	int32_t combat_move_timer = 0;
 	bool muzzle_valid = false;
 	Vec3 muzzle{}; // mission space, world units
 	int32_t death_anim_state = 0;
@@ -253,6 +294,95 @@ std::vector<EntityRow> entity_directory(const World &world, const AiSystem *ai);
 // because the muzzle readback resolves through the live pose provider.
 EntityCard build_entity_card(World &world, const AiSystem *ai, EntityHandle handle,
 		const std::function<std::string(int32_t)> &adm_name_resolver = {});
+
+// --- The AI debug join (the F3 AI window's pushed record + the Godot AI
+// overlay's per-frame payload). One walk over the AI pool; positions stay
+// 16.16 mission fixed so the binding converts once with its own axis map. ---
+
+// One brain's overlay facts: enough to draw a state label, its route join,
+// the target/aim lines, and the perception rings — not the deep card.
+struct AiOverlayRow {
+	int32_t ai_index = -1;
+	uint16_t handle = EntityHandle::kInvalid;
+	std::string name;
+	int32_t group_id = 0;
+	bool alive = false;
+	bool infantry = false; // inf.active — move_mode/aim/damage_timer apply
+	int32_t pos[3] = {};   // 16.16 mission fixed
+	int32_t state = 0;
+	std::string state_name;
+	int32_t alert = 0; // AiSlot byte 136 (authoritative; see fill_ai_detail)
+	int32_t move_mode = 0;
+	int32_t out_speed = 0;
+	int32_t wp_channel = 0;
+	int32_t wp_node = 0;
+	int32_t wp_distance = 0;
+	bool target_valid = false;
+	uint16_t target_handle = EntityHandle::kInvalid;
+	int32_t target_pos[3] = {}; // 16.16; valid only with target_valid
+	std::string target_name;
+	bool aim_valid = false;
+	int32_t aim_heading = 0; // BAM32
+	int32_t aim_pitch = 0;   // BAM32
+	bool muzzle_valid = false;   // resolved only for engaged brains (cost)
+	int32_t muzzle[3] = {};      // 16.16
+	int32_t sight_range_q16 = 0;  // AiSlot kSightRange
+	int32_t attack_range_q16 = 0; // AiSlot kAttackRange
+	int32_t combat_timer = 0;
+	int32_t fire_delay = 0;
+	int32_t damage_timer = 0;      // infantry only
+	int32_t combat_move_timer = 0; // infantry only
+};
+
+// One resolved nav node of a channel (NavEntry through the pool-3 indices).
+struct AiNavNodeRow {
+	int32_t pos[3] = {};    // 16.16
+	int32_t radius_q16 = 0; // arrival radius
+	int32_t wait_ticks = 0;
+};
+
+// One nav channel with its resolved node run and the count of brains whose
+// waypoint sub-struct currently walks it (kWpChannel join).
+struct AiNavChannelRow {
+	int32_t index = 0;
+	int32_t loopflag = 0; // bit0 = one-shot (terminate at path end)
+	std::vector<AiNavNodeRow> nodes;
+	int32_t followers = 0;
+};
+
+// One TriggerRelations group record (only groups with members at mission
+// start are emitted).
+struct AiGroupRow {
+	int32_t id = 0;
+	int32_t alert = 0; // TriggerRelations::Alert
+	int32_t initial_count = 0;
+	int32_t live_count = 0;
+};
+
+// System-level AI counters worth one line in the window.
+struct AiSystemCounters {
+	int32_t brain_count = 0;
+	int32_t scheduler_budget = 0;
+	int32_t event_count = 0;
+	int32_t unported_calls = 0;
+	int32_t rel_ops = 0;
+	int32_t find_target_calls = 0;
+};
+
+struct AiDebugReport {
+	// Row cap: a debug overlay never needs more than the AI pool holds, and a
+	// runaway pool must not turn the per-frame payload into a hitch.
+	static constexpr int kMaxRows = 256;
+	std::vector<AiOverlayRow> rows;
+	std::vector<AiNavChannelRow> channels;
+	std::vector<AiGroupRow> groups;
+	AiSystemCounters counters;
+};
+
+// The AI-pool walk behind both debug surfaces. Non-const World: the muzzle
+// readback resolves through the live pose provider (build_entity_card's
+// precedent).
+AiDebugReport ai_debug_report(World &world, const AiSystem &ai);
 
 } // namespace inspect
 } // namespace opennova::world
