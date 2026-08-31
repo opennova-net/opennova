@@ -5,8 +5,7 @@ extends GutTest
 ## Python suite was retired (ADR 0038). Provenance one-to-one coverage, the
 ## include graph (no cycles, no orphans, nothing leaving res://shaders), one
 ## UID sidecar per resource, one shader_type per wrapper, the object pipeline
-## manifest topology, the vertex point-light products each technique consumes,
-## the slot-capture camera signature, and the transitive-source golden.
+## manifest topology, and the slot-capture camera signature.
 ## Dropped with their inputs: the retail .fx decode legs (the
 ## third_party/modsuperoed corpus) and the wrapper-generator idempotence check
 ## (scripts/generate_object_shaders.py); the checked-in wrappers are the
@@ -17,11 +16,6 @@ const SHADER_ROOT := "res://shaders"
 const OBJECT_ROOT := "res://shaders/object"
 const PROVENANCE_PATH := "res://shaders/provenance.json"
 const MANIFEST_PATH := "res://shaders/object/pipeline_manifest.json"
-const VERTEX_POINT_LIGHT_VARYINGS := {
-	"v_point_light_diffuse": "ffp_diffuse",
-	"v_pixel_point_factor": "self_shadowed_attenuation",
-	"v_pixel_point_attenuation": "attenuation",
-}
 
 var _include_re := RegEx.new()
 var _shader_type_re := RegEx.new()
@@ -213,8 +207,8 @@ func test_provenance_contract_covers_every_shader_resource_once() -> void:
 	var provenance: Dictionary = _load_json(PROVENANCE_PATH)
 	var sources := _shader_sources()
 	assert_eq(int(provenance["schema"]), 2)
-	assert_eq(sources.size(), 195, "the runtime inventory must stay closed")
-	assert_eq(int(provenance["resource_count"]), 195)
+	assert_eq(sources.size(), 193, "the runtime inventory must stay closed")
+	assert_eq(int(provenance["resource_count"]), 193)
 	var ids := {}
 	for contract in provenance["contracts"]:
 		ids[contract["id"]] = true
@@ -433,125 +427,37 @@ func test_every_wrapper_matches_manifest_topology() -> void:
 						"%s%s.gdshader" % [policy_name, suffix])
 				var source := _read(path)
 				var label := "%s/%s%s" % [technique["directory"], policy_name, suffix]
+				# ADR 0043: additive wrappers are unshaded emissive islands on
+				# output_add (glass stays lit-metal on the standard outputs);
+				# the fog policy includes and the vertex point-light defines
+				# retired with the hand lighting.
+				var is_glass: bool = String(technique["directory"]).begins_with("glass")
+				var output := "output_alpha" if policy["writes_alpha"] else "output_opaque"
+				if String(policy["blend"]) == "add" and not is_glass:
+					output = "output_add"
 				for expected in [
 					"#define OBJ_RGB_MOD_%s" % String(technique["rgb_modulation"]).to_upper(),
 					"#define OBJ_ALPHA_MOD_%s" % String(technique["alpha_modulation"]).to_upper(),
 					"#define OBJ_COVERAGE_%s" % String(technique["coverage_source"]).to_upper(),
 					"#define OBJ_CLIP_%s" % String(technique["clip_class"]).to_upper(),
-					"#define OBJ_VERTEX_POINT_LIGHTS_%s" % String(technique["vertex_point_lights"]).to_upper(),
 					"#define OBJ_MATCHTERRAIN_%s" % String(manifest["match_terrain_contracts"][engine_enum]).to_upper(),
 					"#include \"res://shaders/object/shared.gdshaderinc\"",
 					"#include \"res://shaders/object/sampling/%s.gdshaderinc\"" % technique["sampling"],
-					"#include \"res://shaders/object/coverage/%s.gdshaderinc\"" % policy["coverage"],
+					"#include \"res://shaders/object/coverage/%s.gdshaderinc\"" % technique.get("coverage", policy["coverage"]),
 					"#include \"res://shaders/object/normal/%s.gdshaderinc\"" % technique["normal"],
 					"#include \"res://shaders/object/match_terrain.gdshaderinc\"",
-					"#include \"res://shaders/object/fog/%s.gdshaderinc\"" % technique.get("fog", policy["fog"]),
 					"#include \"res://shaders/object/technique/%s.gdshaderinc\"" % technique["implementation"],
 					"/object/%s.gdshaderinc\"" % ("vertex_flag" if technique["vertex"] == "flag" else "vertex_standard"),
-					"/object/%s.gdshaderinc\"" % ("output_alpha" if policy["writes_alpha"] else "output_opaque"),
+					"/object/%s.gdshaderinc\"" % output,
 					"depth_draw_opaque" if policy["depth"] == "opaque" else "depth_draw_never",
 				]:
 					assert_true(source.contains(String(expected)), "%s carries %s" % [label, expected])
 				assert_false(source.contains("depth_prepass_alpha"), label)
-
-
-# --- vertex point-light products ----------------------------------------
-
-
-# Map every top-level GLSL function name to its brace-delimited body text.
-func _glsl_function_bodies(source: String) -> Dictionary:
-	source = _line_comment_re.sub(source, "", true)
-	var bodies := {}
-	for head in _function_head_re.search_all(source):
-		var open_brace := source.find("{", head.get_end())
-		if open_brace < 0:
-			continue
-		var depth := 0
-		for index in range(open_brace, source.length()):
-			var ch := source[index]
-			if ch == "{":
-				depth += 1
-			elif ch == "}":
-				depth -= 1
-				if depth == 0:
-					bodies[head.get_string(1)] = source.substr(open_brace, index + 1 - open_brace)
-					break
-	return bodies
-
-
-func _varyings_reachable_from(bodies: Dictionary, root: String, varyings: Array) -> Array:
-	var reached := {}
-	var pending: Array = [root]
-	var visited := {}
-	while not pending.is_empty():
-		var name: String = pending.pop_back()
-		if visited.has(name) or not bodies.has(name):
-			continue
-		visited[name] = true
-		var identifiers := {}
-		for m in _identifier_re.search_all(bodies[name]):
-			identifiers[m.get_string()] = true
-		for identifier in identifiers:
-			if varyings.has(identifier):
-				reached[identifier] = true
-			if bodies.has(identifier):
-				pending.append(identifier)
-	return _sorted_keys(reached)
-
-
-func test_vertex_point_light_products_match_technique_consumption() -> void:
-	# The vertex stage evaluates only the point-light product its technique
-	# reads. Every retail vertex program publishes one EffectWorld point-light
-	# product (D3D vertex diffuse, oD0 attenuation x self-shadow, or attenuation
-	# alone); the manifest names it per technique so vertex_standard skips the
-	# other <=4-light loops. This proves the named product is exactly the
-	# varying the technique's fragment math can observe, so gating never zeroes
-	# a live term.
-	var manifest := _manifest()
-	var shared := _normalized(OBJECT_ROOT.path_join("shared.gdshaderinc"))
-	var vertex_standard := _normalized(OBJECT_ROOT.path_join("vertex_standard.gdshaderinc"))
-	var vertex_flag := _normalized(OBJECT_ROOT.path_join("vertex_flag.gdshaderinc"))
-	var varyings: Array = VERTEX_POINT_LIGHT_VARYINGS.keys()
-
-	for varying in VERTEX_POINT_LIGHT_VARYINGS:
-		var product := String(VERTEX_POINT_LIGHT_VARYINGS[varying])
-		var define := "#ifdef OBJ_VERTEX_POINT_LIGHTS_%s" % product.to_upper()
-		var define_at := vertex_standard.find(define)
-		assert_gte(define_at, 0, "vertex_standard must gate %s on %s" % [varying, define])
-		if define_at < 0:
-			continue
-		var after_define := vertex_standard.substr(define_at + define.length())
-		var gated := after_define.substr(0, after_define.find("#endif"))
-		var else_at := gated.find("#else")
-		assert_gte(else_at, 0, "%s gate has an #else" % varying)
-		if else_at < 0:
-			continue
-		assert_true(gated.substr(0, else_at).contains("%s = obj_" % varying), varying)
-		var zero := "vec3(0.0)" if varying == "v_point_light_diffuse" else "vec4(0.0)"
-		assert_true(gated.substr(else_at).contains("%s = %s;" % [varying, zero]), varying)
-		assert_true(vertex_flag.contains("%s = %s;" % [varying, zero]), varying)
-
-	var products := VERTEX_POINT_LIGHT_VARYINGS.values()
-	products.append("none")
-	for technique in manifest["techniques"]:
-		var product := String(technique["vertex_point_lights"])
-		assert_true(products.has(product), "%s names a known product" % technique["engine_enum"])
-		if technique["vertex"] == "flag":
-			assert_eq(product, "none", "vertex_flag publishes no point-light product")
-			continue
-		var implementation := _normalized(OBJECT_ROOT.path_join("technique").path_join(
-				"%s.gdshaderinc" % technique["implementation"]))
-		var bodies := _glsl_function_bodies(shared + "\n" + implementation)
-		assert_true(bodies.has("obj_evaluate_surface"), "%s defines obj_evaluate_surface" % technique["engine_enum"])
-		var consumed := _varyings_reachable_from(bodies, "obj_evaluate_surface", varyings)
-		var expected := {}
-		for varying in consumed:
-			expected[VERTEX_POINT_LIGHT_VARYINGS[varying]] = true
-		if expected.is_empty():
-			expected["none"] = true
-		assert_eq(_sorted_keys(expected), [product],
-				"%s declares vertex_point_lights=%s but its technique math reads %s" % [
-					technique["engine_enum"], product, consumed])
+				# Lit families never opt out of the scene lighting; the
+				# additive/postmultiply islands stay unshaded.
+				var unshaded_island: bool = String(policy["blend"]) == "add" and not is_glass
+				assert_eq(source.contains("unshaded"), unshaded_island,
+						"%s unshaded island state (ADR 0043)" % label)
 
 
 # --- slot capture / projected shadow ------------------------------------

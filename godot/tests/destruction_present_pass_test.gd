@@ -337,7 +337,7 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 		"kind": MissionData.KIND_ITEM,
 	})
 	var director := EffectLightDirector.new()
-	director.setup(world, Callable(), Callable())
+	director.setup(world, Callable())
 	director.on_wire_node_spawned(intact, MissionData.KIND_ITEM, BUGGY_ITEM_ID)
 	assert_eq(director.get_report().live, 1,
 			"the intact graphic contributes its one authored LGHT")

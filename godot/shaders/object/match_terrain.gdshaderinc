@@ -3,6 +3,8 @@
 // overwrites the pre-pass. For alpha-tested NORMAL, rejected pixels preserve
 // the pre-pass terrain sample. This is algebraically the same two-pass result
 // without duplicating/skinning the geometry through a second Godot material.
+// ADR 0043: the page color returns as LIT ALBEDO (the terrain albedo scale),
+// so the ground showing through a prone soldier shades like the ground.
 bool obj_match_terrain_replaces_normal(out vec3 terrain_color) {
 	terrain_color = vec3(0.0);
 	#ifdef OBJ_MATCHTERRAIN_SKINNED_STANCE
@@ -20,10 +22,9 @@ bool obj_match_terrain_replaces_normal(out vec3 terrain_color) {
 	page_uv = clamp(page_uv, half_texel, vec2(1.0) - half_texel);
 	vec4 tile = texture(u_match_terrain_cache,
 			vec3(page_uv, u_match_terrain_page_layer));
-	// ps_1_1: mad_d2 r0.rgb,t0.a,c1,c0; mul_x4 r0.rgb,r0,t0.
-	// D3D's _d2 then _x4 modifiers reduce to a net x2.
-	terrain_color = tile.rgb *
-			(obj_hemi_sky_color() + tile.a * obj_dir_light_color()) * 2.0;
+	// The terrain shader's albedo fold minus the detail splat this page does
+	// not carry (terrain_lighting.gdshaderinc TERRAIN_ALBEDO_SCALE).
+	terrain_color = tile.rgb * 4.0;
 	return true;
 	#else
 	return false;

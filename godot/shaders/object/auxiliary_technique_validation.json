@@ -22,19 +22,74 @@
       "disposition": "ported_to_24_runtime_techniques_d3d12_raster_validated",
       "declaration_count": 30,
       "pass_declaration_count": 101,
-      "manifest_contracts": ["techniques", "specular_alpha_contracts"],
+      "manifest_contracts": [
+        "techniques",
+        "specular_alpha_contracts"
+      ],
       "source_evidence": [
-        {"file": "_FFP.fx", "symbols": ["technique TBoringFFP", "TECHNIQUE_NORMAL"]},
-        {"file": "_psPhong.fx", "symbols": ["shared PIXELSHADER ps11Phong", "mul_x2"]}
+        {
+          "file": "_FFP.fx",
+          "symbols": [
+            "technique TBoringFFP",
+            "TECHNIQUE_NORMAL"
+          ]
+        },
+        {
+          "file": "_psPhong.fx",
+          "symbols": [
+            "shared PIXELSHADER ps11Phong",
+            "mul_x2"
+          ]
+        }
       ],
       "runtime_evidence": [
-        {"path": "godot/shaders/object/technique_validation.json", "tokens": ["\"engine_enum\": \"Fixed\"", "\"engine_enum\": \"GlassSkinned\"", "\"specular_alpha\""]},
-        {"path": "godot/probes/render/render_swatch_lighting_modes.gd", "tokens": ["directional_axis_reversal", "specular_alpha_low", "coverage_high"]},
-        {"path": "godot/src/env/environment_cube_capture.cpp", "tokens": ["kCaptureSize", "kRefreshFrames", "set_use_hdr_2d(true)", "SubViewport::UPDATE_ONCE", "kCubeLayerToCapture", "call_on_render_thread"]},
-        {"path": "godot/src/render/environment_cube_blit.cpp", "tokens": ["RenderingDevice::TEXTURE_TYPE_CUBE", "(bytes * pc.dim_byte + 127u) / 255u"]},
-        {"path": "godot/probes/render/environment_cube_capture_probe.gd", "tokens": ["Forward+ RenderingDevice", "publish on the following advance", "0x60 gamma-byte dim"]}
+        {
+          "path": "godot/shaders/object/technique_validation.json",
+          "tokens": [
+            "\"engine_enum\": \"Fixed\"",
+            "\"engine_enum\": \"GlassSkinned\"",
+            "\"specular_alpha\""
+          ]
+        },
+        {
+          "path": "godot/probes/render/render_swatch_lighting_modes.gd",
+          "tokens": [
+            "directional_axis_reversal",
+            "specular_alpha_low",
+            "coverage_high"
+          ]
+        },
+        {
+          "path": "godot/src/env/environment_cube_capture.cpp",
+          "tokens": [
+            "kCaptureSize",
+            "kRefreshFrames",
+            "set_use_hdr_2d(true)",
+            "SubViewport::UPDATE_ONCE",
+            "kCubeLayerToCapture",
+            "call_on_render_thread"
+          ]
+        },
+        {
+          "path": "godot/src/render/environment_cube_blit.cpp",
+          "tokens": [
+            "RenderingDevice::TEXTURE_TYPE_CUBE",
+            "(bytes * pc.dim_byte + 127u) / 255u"
+          ]
+        },
+        {
+          "path": "godot/probes/render/environment_cube_capture_probe.gd",
+          "tokens": [
+            "Forward+ RenderingDevice",
+            "publish on the following advance",
+            "0x60 gamma-byte dim"
+          ]
+        }
       ],
-      "raster_probes": ["lighting", "channels"],
+      "raster_probes": [
+        "lighting",
+        "channels"
+      ],
       "bounded_residuals": []
     },
     "TECHNIQUE_PROJSHAD": {
@@ -43,23 +98,106 @@
       "disposition": "ported_d3d12_raster_validated",
       "declaration_count": 16,
       "pass_declaration_count": 16,
-      "manifest_contracts": ["projected_shadow_contracts", "projected_shadow_state_contracts"],
+      "manifest_contracts": [
+        "projected_shadow_contracts",
+        "projected_shadow_state_contracts"
+      ],
       "source_evidence": [
-        {"file": "_FFP.fx", "symbols": ["technique TBoringFFPProjShad", "TECHNIQUE_PROJSHAD"]},
-        {"file": "_vsPost.fx", "symbols": ["vscPostBlackT1"]},
-        {"file": "_vsSkPost.fx", "symbols": ["vscSkinPostBlackT1"]}
+        {
+          "file": "_FFP.fx",
+          "symbols": [
+            "technique TBoringFFPProjShad",
+            "TECHNIQUE_PROJSHAD"
+          ]
+        },
+        {
+          "file": "_vsPost.fx",
+          "symbols": [
+            "vscPostBlackT1"
+          ]
+        },
+        {
+          "file": "_vsSkPost.fx",
+          "symbols": [
+            "vscSkinPostBlackT1"
+          ]
+        }
       ],
       "runtime_evidence": [
-        {"path": "engine/runtime/renderer/object_shader_template.cpp", "tokens": ["object_projected_shadow_policy", "ObjectProjectedShadowPolicy::MaterialBlend", "ObjectProjectedShadowPolicy::Opaque", "ObjectProjectedShadowPolicy::NoPass"]},
-        {"path": "engine/runtime/terrain/terrain_static_shadow_geometry.cpp", "tokens": ["casts_projected_shadow", "vsSkinPostBlackT1", "CalcSkinWorldPosAndNormal"]},
-        {"path": "engine/runtime/terrain/terrain_static_shadow_raster.cpp", "tokens": ["depth_buffer", "triangle.two_sided", "CULLMODE CCW"]},
-        {"path": "godot/src/render/q3_geometry_cache.cpp", "tokens": ["skin_channels", "transform_uv(uv2)"]},
-        {"path": "engine/runtime/renderer/object_shader_template.cpp", "tokens": ["object_projected_shadow_coverage", "ObjectProjectedShadowCoverage::DiffuseAlphaFfp", "ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp", "ObjectProjectedShadowCoverage::DiffuseAlpha"]},
-        {"path": "godot/src/render/slot_capture_adapter.cpp", "tokens": ["EFFECT_CALLBACK_TYPE_PRE_OPAQUE", "kSlotCaptureClearArgb", "RenderingDevice::TEXTURE_SAMPLES_4", "texture_resolve_multisample(", "frag_color = vec4(0.0, 0.0, 0.0, alpha);", "BLEND_FACTOR_SRC_ALPHA"]},
-        {"path": "godot/src/env/slot_shadow.cpp", "tokens": ["silhouette_capture_basis", "kSilhouetteCaptureNear", "SlotCaptureRequest"]},
-        {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["SlotShadow.new()", "get_capture_image(", "slot_no_pass_surfaces", "slot_blended_commands", "invented a PROJSHAD pass"]}
+        {
+          "path": "engine/runtime/renderer/object_shader_template.cpp",
+          "tokens": [
+            "object_projected_shadow_policy",
+            "ObjectProjectedShadowPolicy::MaterialBlend",
+            "ObjectProjectedShadowPolicy::Opaque",
+            "ObjectProjectedShadowPolicy::NoPass"
+          ]
+        },
+        {
+          "path": "engine/runtime/terrain/terrain_static_shadow_geometry.cpp",
+          "tokens": [
+            "casts_projected_shadow",
+            "vsSkinPostBlackT1",
+            "CalcSkinWorldPosAndNormal"
+          ]
+        },
+        {
+          "path": "engine/runtime/terrain/terrain_static_shadow_raster.cpp",
+          "tokens": [
+            "depth_buffer",
+            "triangle.two_sided",
+            "CULLMODE CCW"
+          ]
+        },
+        {
+          "path": "godot/src/render/q3_geometry_cache.cpp",
+          "tokens": [
+            "skin_channels",
+            "transform_uv(uv2)"
+          ]
+        },
+        {
+          "path": "engine/runtime/renderer/object_shader_template.cpp",
+          "tokens": [
+            "object_projected_shadow_coverage",
+            "ObjectProjectedShadowCoverage::DiffuseAlphaFfp",
+            "ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp",
+            "ObjectProjectedShadowCoverage::DiffuseAlpha"
+          ]
+        },
+        {
+          "path": "godot/src/render/slot_capture_adapter.cpp",
+          "tokens": [
+            "EFFECT_CALLBACK_TYPE_PRE_OPAQUE",
+            "kSlotCaptureClearArgb",
+            "RenderingDevice::TEXTURE_SAMPLES_4",
+            "texture_resolve_multisample(",
+            "frag_color = vec4(0.0, 0.0, 0.0, alpha);",
+            "BLEND_FACTOR_SRC_ALPHA"
+          ]
+        },
+        {
+          "path": "godot/src/env/slot_shadow.cpp",
+          "tokens": [
+            "silhouette_capture_basis",
+            "kSilhouetteCaptureNear",
+            "SlotCaptureRequest"
+          ]
+        },
+        {
+          "path": "godot/probes/render/render_swatch_pass_modes.gd",
+          "tokens": [
+            "SlotShadow.new()",
+            "get_capture_image(",
+            "slot_no_pass_surfaces",
+            "slot_blended_commands",
+            "invented a PROJSHAD pass"
+          ]
+        }
       ],
-      "raster_probes": ["projshadow"],
+      "raster_probes": [
+        "projshadow"
+      ],
       "bounded_residuals": []
     },
     "TECHNIQUE_DEPTHMASK": {
@@ -70,12 +208,38 @@
       "pass_declaration_count": 2,
       "manifest_contracts": [],
       "source_evidence": [
-        {"file": "_tDepth.fx", "symbols": ["technique Simple_DepthMask", "TexDepthGradWrite", "vscDepth"]},
-        {"file": "_tSkDepth.fx", "symbols": ["technique Simple_DepthMask", "TexDepthGradWrite", "vscSkDepth"]}
+        {
+          "file": "_tDepth.fx",
+          "symbols": [
+            "technique Simple_DepthMask",
+            "TexDepthGradWrite",
+            "vscDepth"
+          ]
+        },
+        {
+          "file": "_tSkDepth.fx",
+          "symbols": [
+            "technique Simple_DepthMask",
+            "TexDepthGradWrite",
+            "vscSkDepth"
+          ]
+        }
       ],
       "runtime_evidence": [
-        {"path": "engine/runtime/renderer/light_scene.h", "tokens": ["LightPool_SpawnSpotProjectorEffect", "zero xrefs and zero data refs"]},
-        {"path": "docs/render/render-lighting-re.md", "tokens": ["LightPool_SpawnSpotProjectorEffect @ 0x5a9fd0", "CALLER-LESS dead code"]}
+        {
+          "path": "engine/runtime/renderer/light_scene.h",
+          "tokens": [
+            "LightPool_SpawnSpotProjectorEffect",
+            "zero xrefs and zero data refs"
+          ]
+        },
+        {
+          "path": "docs/render/render-lighting-re.md",
+          "tokens": [
+            "LightPool_SpawnSpotProjectorEffect @ 0x5a9fd0",
+            "CALLER-LESS dead code"
+          ]
+        }
       ],
       "raster_probes": [],
       "unreachable_reason": "The only witnessed producer is caller-less in Jointops.exe, and model LGHT spot falloff, rotation, and projection fields never enter the live pool; creating a Godot DEPTHMASK draw would invent behavior in the selected retail path.",
@@ -87,18 +251,60 @@
       "disposition": "ported_d3d12_raster_validated",
       "declaration_count": 6,
       "pass_declaration_count": 14,
-      "manifest_contracts": ["techniques[].clip_class"],
+      "manifest_contracts": [
+        "techniques[].clip_class"
+      ],
       "source_evidence": [
-        {"file": "_FFP.fx", "symbols": ["technique TBoringFFPClip", "TexClip1D", "MatTexClipPlane"]},
-        {"file": "Glass.fx", "symbols": ["technique TGlassFFP_clip", "TECHNIQUE_CLIP"]}
+        {
+          "file": "_FFP.fx",
+          "symbols": [
+            "technique TBoringFFPClip",
+            "TexClip1D",
+            "MatTexClipPlane"
+          ]
+        },
+        {
+          "file": "Glass.fx",
+          "symbols": [
+            "technique TGlassFFP_clip",
+            "TECHNIQUE_CLIP"
+          ]
+        }
       ],
       "runtime_evidence": [
-        {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["OBJ_CLIP_EXPLICIT", "OBJ_CLIP_EXPLICIT_UNSKINNED_OR_SUBMIT_SKIP_SKINNED", "opennova_water_height - 0.1"]},
-        {"path": "godot/shaders/object/pipeline_manifest.json", "tokens": ["\"clip_class\": \"normal_fallback\"", "\"clip_class\": \"skinned_submit_skip\""]},
-        {"path": "godot/src/env/water.cpp", "tokens": ["opennova_water_reflection_eye", "opennova_water_reflection_clip_active"]},
-        {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["object-water-reflection-clip", "reflection CLIP"]}
+        {
+          "path": "godot/shaders/object/shared.gdshaderinc",
+          "tokens": [
+            "OBJ_CLIP_EXPLICIT",
+            "OBJ_CLIP_EXPLICIT_UNSKINNED_OR_SUBMIT_SKIP_SKINNED",
+            "opennova_water_height - 0.1"
+          ]
+        },
+        {
+          "path": "godot/shaders/object/pipeline_manifest.json",
+          "tokens": [
+            "\"clip_class\": \"normal_fallback\"",
+            "\"clip_class\": \"skinned_submit_skip\""
+          ]
+        },
+        {
+          "path": "godot/src/env/water.cpp",
+          "tokens": [
+            "opennova_water_reflection_eye",
+            "opennova_water_reflection_clip_active"
+          ]
+        },
+        {
+          "path": "godot/probes/render/render_swatch_pass_modes.gd",
+          "tokens": [
+            "object-water-reflection-clip",
+            "reflection CLIP"
+          ]
+        }
       ],
-      "raster_probes": ["clip"],
+      "raster_probes": [
+        "clip"
+      ],
       "bounded_residuals": []
     },
     "TECHNIQUE_GLOW": {
@@ -107,18 +313,66 @@
       "disposition": "ported_typed_q3_framefx_rd_draw_list",
       "declaration_count": 1,
       "pass_declaration_count": 1,
-      "manifest_contracts": ["glow_contracts"],
+      "manifest_contracts": [
+        "glow_contracts"
+      ],
       "source_evidence": [
-        {"file": "Glass.fx", "symbols": ["TECHNIQUE_GLOW", "TexCubeRotSpecular", "MatRotSpecular", "RSAlphaMode(TRUE, ONE, ONE)", "ZMODE_NOWRITE"]}
+        {
+          "file": "Glass.fx",
+          "symbols": [
+            "TECHNIQUE_GLOW",
+            "TexCubeRotSpecular",
+            "MatRotSpecular",
+            "RSAlphaMode(TRUE, ONE, ONE)",
+            "ZMODE_NOWRITE"
+          ]
+        }
       ],
       "runtime_evidence": [
-        {"path": "docs/render/render-material-re.md", "tokens": ["LUM effects copy their NORMAL pass block into the GLOW slot"]},
-        {"path": "godot/src/render/q3_frame_adapter.cpp", "tokens": ["kQ3GlassWhiteLobePower", "kQ3GlassWarmLobePower", "Q3Technique::RotatedSpecularGlass", "Q3Technique::NormalCopy", "self_lum_color", "vec3 lit = base * pc.draw_color.rgb;"]},
-        {"path": "godot/src/render/frame_fx.cpp", "tokens": ["FramePass::AverageFour", "FramePass::WeightedFour", "FramePass::FinalAverage", "BlendMode::SourceAlphaAdd"]},
-        {"path": "godot/game/world/game_world.tscn", "tokens": ["type=\"FrameFx\""]},
-        {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["glow_off_away", "sun glint", "no-pass contracts"]}
+        {
+          "path": "docs/render/render-material-re.md",
+          "tokens": [
+            "LUM effects copy their NORMAL pass block into the GLOW slot"
+          ]
+        },
+        {
+          "path": "godot/src/render/q3_frame_adapter.cpp",
+          "tokens": [
+            "kQ3GlassWhiteLobePower",
+            "kQ3GlassWarmLobePower",
+            "Q3Technique::RotatedSpecularGlass",
+            "Q3Technique::NormalCopy",
+            "self_lum_color",
+            "vec3 lit = base * pc.draw_color.rgb;"
+          ]
+        },
+        {
+          "path": "godot/src/render/frame_fx.cpp",
+          "tokens": [
+            "FramePass::AverageFour",
+            "FramePass::WeightedFour",
+            "FramePass::FinalAverage",
+            "BlendMode::SourceAlphaAdd"
+          ]
+        },
+        {
+          "path": "godot/game/world/game_world.tscn",
+          "tokens": [
+            "type=\"FrameFx\""
+          ]
+        },
+        {
+          "path": "godot/probes/render/render_swatch_pass_modes.gd",
+          "tokens": [
+            "glow_off_away",
+            "sun glint",
+            "no-pass contracts"
+          ]
+        }
       ],
-      "raster_probes": ["glow"],
+      "raster_probes": [
+        "glow"
+      ],
       "bounded_residuals": []
     },
     "TECHNIQUE_MATCHTERRAIN": {
@@ -127,16 +381,48 @@
       "disposition": "ported_d3d12_raster_validated",
       "declaration_count": 2,
       "pass_declaration_count": 2,
-      "manifest_contracts": ["match_terrain_contracts"],
+      "manifest_contracts": [
+        "match_terrain_contracts"
+      ],
       "source_evidence": [
-        {"file": "_tSkFolg.fx", "symbols": ["technique Simple_MatchTerrain_PS", "vscSkMatchTerrain", "mad_d2", "mul_x4", "TexCurProj"]}
+        {
+          "file": "_tSkFolg.fx",
+          "symbols": [
+            "technique Simple_MatchTerrain_PS",
+            "vscSkMatchTerrain",
+            "mad_d2",
+            "mul_x4",
+            "TexCurProj"
+          ]
+        }
       ],
       "runtime_evidence": [
-        {"path": "godot/shaders/object/match_terrain.gdshaderinc", "tokens": ["u_match_terrain_enabled", "u_match_terrain_page_ready", "(obj_hemi_sky_color() + tile.a * obj_dir_light_color()) * 2.0"]},
-        {"path": "godot/src/object/object_model.cpp", "tokens": ["u_match_terrain_enabled", "u_match_terrain_page_ready"]},
-        {"path": "godot/probes/render/render_swatch_pass_modes.gd", "tokens": ["MATCHTERRAIN stance/page gate", "has no MATCHTERRAIN contract"]}
+        {
+          "path": "godot/shaders/object/match_terrain.gdshaderinc",
+          "tokens": [
+            "u_match_terrain_enabled",
+            "u_match_terrain_page_ready",
+            "terrain_color = tile.rgb * 4.0"
+          ]
+        },
+        {
+          "path": "godot/src/object/object_model.cpp",
+          "tokens": [
+            "u_match_terrain_enabled",
+            "u_match_terrain_page_ready"
+          ]
+        },
+        {
+          "path": "godot/probes/render/render_swatch_pass_modes.gd",
+          "tokens": [
+            "MATCHTERRAIN stance/page gate",
+            "has no MATCHTERRAIN contract"
+          ]
+        }
       ],
-      "raster_probes": ["matchterrain"],
+      "raster_probes": [
+        "matchterrain"
+      ],
       "bounded_residuals": []
     },
     "UNSPECIFIED": {
@@ -147,12 +433,34 @@
       "pass_declaration_count": 2,
       "manifest_contracts": [],
       "source_evidence": [
-        {"file": "BumpMirrT.fx", "symbols": ["technique TSegMirrorFFP", "bool useps=false"]},
-        {"file": "BmTxMirrT.fx", "symbols": ["technique TSegTexMirrorFFP", "bool useps=false"]}
+        {
+          "file": "BumpMirrT.fx",
+          "symbols": [
+            "technique TSegMirrorFFP",
+            "bool useps=false"
+          ]
+        },
+        {
+          "file": "BmTxMirrT.fx",
+          "symbols": [
+            "technique TSegTexMirrorFFP",
+            "bool useps=false"
+          ]
+        }
       ],
       "runtime_evidence": [
-        {"path": "engine/runtime/menu/options_policy.h", "tokens": ["{\"SHADERUSAGE\", \"2\"}"]},
-        {"path": "godot/game/retail_video_quality_policy.gd", "tokens": ["driver.set_widget_disabled(id, true)"]}
+        {
+          "path": "engine/runtime/menu/options_policy.h",
+          "tokens": [
+            "{\"SHADERUSAGE\", \"2\"}"
+          ]
+        },
+        {
+          "path": "godot/game/retail_video_quality_policy.gd",
+          "tokens": [
+            "driver.set_widget_disabled(id, true)"
+          ]
+        }
       ],
       "raster_probes": [],
       "bounded_residuals": []

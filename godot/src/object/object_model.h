@@ -293,11 +293,6 @@ private:
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
 	bool od_has_doc_ = false;
-	// Last applied point-light selections (FNV over count + packed vectors).
-	// Per-render-object selection hashes. Retail re-scopes a building's owner
-	// group for every ROBJ draw; a single model-wide hash cannot represent that
-	// state and also incorrectly survives a retained-scene rebuild.
-	HashMap<int32_t, uint64_t> point_light_selection_hashes_;
 	// Dense part-index -> Node3D array + the PANM revision this model last
 	// applied (stays a Godot Array: ObjectData::apply_panm_to_nodes takes
 	// it directly).
@@ -659,33 +654,8 @@ public:
 			float p_interior_daylight);
 	void set_interior_section_light_transfer(float p_daylight);
 	AABB get_model_bounds() const { return model_bounds_; }
-	// The model bounds in world space — the per-draw light query box
-	// (retail queries per draw context, see docs/render/render-lighting-re.md).
+	// The model bounds in world space.
 	AABB get_world_bounds() const;
-	struct PointLightDrawPart {
-		int32_t robj_index = 0;
-		AABB world_bounds;
-	};
-	// Visible rigid ROBJ draws and their exact world bounds. The EffectWorld
-	// device leg uses these only for a building's per-ROBJ owner-section scope
-	// [orig: collect_render_objects_for_batch @0x5d8ff7, see
-	// docs/render/render-lighting-re.md].
-	void collect_point_light_draw_parts(
-			std::vector<PointLightDrawPart> &r_parts) const;
-	// The per-ROBJ world bounds are rebuilt only when a part/robj transform,
-	// the section mask, a rebuild, or the model transform changed; the
-	// EffectWorld device asks for them every frame per visible building.
-	mutable std::vector<PointLightDrawPart> point_light_draw_parts_cache_;
-	mutable Transform3D point_light_draw_parts_transform_;
-	mutable bool point_light_draw_parts_dirty_ = true;
-	// Write one frame's selected point lights (packed posr = xyz world +
-	// atten2, color = premultiplied rgb + range) as per-instance shader
-	// parameters on every surface instance. A selection hash gates redundant
-	// RenderingServer writes; count 0 clears.
-	void apply_point_light_selection(int p_count, const Vector4 *p_posr,
-			const Vector4 *p_color);
-	void apply_point_light_selection_to_robj(int p_robj_index, int p_count,
-			const Vector4 *p_posr, const Vector4 *p_color);
 	// One authored LGHT record's live world position. Record offsets are model
 	// space; a nonzero attach subobject follows the same rest-to-live transform
 	// as user points [orig: Entity_SpawnGlowEffects @0x56c836 plus the

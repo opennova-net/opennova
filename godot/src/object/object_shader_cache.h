@@ -69,7 +69,6 @@ protected:
 private:
 	static ObjectShaderCache *singleton;
 	std::unordered_map<uint32_t, Ref<Shader>> cache;
-	Ref<ImageTexture> phong_map_texture;
 	float water_split_height = 0.0f;
 	bool water_camera_above = true;
 	bool water_split_set = false;

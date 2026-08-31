@@ -120,33 +120,6 @@ String shader_resource_path(
 			cull_suffix + ".gdshader";
 }
 
-// Render_CreateSystemTextures @0x58aca0 builds gsys_phong as a 256x256 RGBA8 lookup
-// (docs/render/render-lighting-re.md).
-// X is N.L (also copied verbatim to alpha); Y is N.H; RGB are the truncated
-// 255*x^(4,16,64) curves. The source multiplier is the exact binary32
-// 0x3b808081 value loaded by retail rather than an idealized 1/255.
-// renderer/object_shader_template owns the byte-exact cited contract.
-Ref<ImageTexture> create_retail_phong_map_texture() {
-	constexpr int kSize = 256;
-	PackedByteArray pixels;
-	pixels.resize(kSize * kSize * 4);
-	for (int y = 0; y < kSize; ++y) {
-		for (int x_coord = 0; x_coord < kSize; ++x_coord) {
-			const opennova::renderer::ObjectPhongMapTexel texel =
-					opennova::renderer::object_phong_map_texel(
-							static_cast<uint8_t>(x_coord), static_cast<uint8_t>(y));
-			const int offset = (y * kSize + x_coord) * 4;
-			pixels.set(offset + 0, texel.red_pow4);
-			pixels.set(offset + 1, texel.green_pow16);
-			pixels.set(offset + 2, texel.blue_pow64);
-			pixels.set(offset + 3, texel.alpha_ndotl);
-		}
-	}
-	const Ref<Image> image = Image::create_from_data(
-			kSize, kSize, false, Image::FORMAT_RGBA8, pixels);
-	return ImageTexture::create_from_image(image);
-}
-
 } // namespace
 
 ObjectShaderCache *ObjectShaderCache::singleton = nullptr;
@@ -178,7 +151,6 @@ ObjectShaderCache::~ObjectShaderCache() {
 
 void ObjectShaderCache::clear() {
 	cache.clear();
-	phong_map_texture.unref();
 }
 
 void ObjectShaderCache::_bind_methods() {
@@ -252,17 +224,10 @@ void ObjectShaderCache::configure_material_for_key(
 	const Ref<Shader> shader = get_shader_for_key(key);
 	ERR_FAIL_COND_MSG(shader.is_null(), "Object shader resource is unavailable");
 	material->set_shader(shader);
-	const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
-			opennova::renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
-	if (pipeline.technique ==
-			opennova::renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap) {
-		if (phong_map_texture.is_null()) {
-			phong_map_texture = create_retail_phong_map_texture();
-		}
-		ERR_FAIL_COND_MSG(phong_map_texture.is_null(),
-				"Retail PhongMap texture could not be created");
-		material->set_shader_parameter("u_phong_map", phong_map_texture);
-	}
+	// ADR 0043: the PhongMap technique's lobe blend maps onto roughness in
+	// the lit pipeline; the gsys_phong lookup texture is no longer bound
+	// (the byte-exact texel contract stays engine-side as the intent
+	// witness, pinned by the T1 vectors).
 }
 
 int32_t ObjectShaderCache::classify(const String &shader_tag,

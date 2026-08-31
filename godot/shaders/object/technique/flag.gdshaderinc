@@ -1,10 +1,9 @@
-void obj_evaluate_surface(vec3 camera_position_world, mat4 model_matrix,
-		out vec3 output_lit, out float output_alpha) {
+// Flag.fx: vertex_flag reconstructed and camera-oriented the exact
+// animated normal; the lit pipeline shades it.
+ObjSurface obj_evaluate_surface(vec3 camera_position_world, mat4 model_matrix) {
 	vec4 base; vec3 view_dir; vec3 normal; vec3 geom_normal;
 	obj_prepare_surface(camera_position_world, model_matrix,
 			base, view_dir, normal, geom_normal);
-	// vertex_flag reconstructed and camera-oriented the exact Flag.fx normal.
-	// v_point_light_diffuse is zero because the effect has no point-light pass.
-	output_lit = obj_ff_lighting(base.rgb, normal);
-	output_alpha = base.a;
+	ObjSurface s = obj_surface_defaults(base, normal);
+	return s;
 }

@@ -215,64 +215,6 @@ func test_provenance_contracts_are_reviewable_and_citations_resolve_to_docs() ->
 # --- environment capture ------------------------------------------------
 
 
-func test_environment_cube_capture_is_live_and_highest_quality() -> void:
-	var shared := _read(OBJECT_ROOT.path_join("shared.gdshaderinc"))
-	var engine_header := _read_repo("engine/runtime/renderer/environment_cube.h")
-	var capture_header := _read_repo("godot/src/env/environment_cube_capture.h")
-	var capture_source := _read_repo("godot/src/env/environment_cube_capture.cpp")
-	var blit_source := _read_repo("godot/src/render/environment_cube_blit.cpp")
-	var water := _read(SHADER_ROOT.path_join("water.gdshader"))
-	var project := _read("res://project.godot")
-
-	# The witnessed facts live in the engine header (ADR 0042); the capture
-	# node consumes them and never re-derives a number.
-	_contains_all(engine_header, [
-		"kEnvironmentCubeFaceSize = 256", "kEnvironmentCubeRefreshFrames = 128",
-		"kEnvironmentCubeDimByte = 0x60", "kEnvironmentCubeFaceFovDegrees = 90.0f",
-		"kEnvironmentCubeFaceNear = 0.5f", "kEnvironmentCubeFaceFar = 1000.0f",
-		"kEnvironmentCubeEyeRaise = 1.0f", "kEnvironmentCubeTerrainClearance = 10.0f",
-		"update_environment_cubemap @ 0x6106a0", "GTexture_RenderCubeMapFace @ 0x6864d0",
-	], "the engine environment-cube header")
-	_contains_all(capture_header, [
-		"kCaptureSize =", "opennova::renderer::kEnvironmentCubeFaceSize",
-		"kRefreshFrames =", "opennova::renderer::kEnvironmentCubeRefreshFrames",
-		"kSkyDimByte =", "opennova::renderer::kEnvironmentCubeDimByte",
-	], "the capture header")
-	_contains_all(capture_source, [
-		"camera->set_fov(opennova::renderer::kEnvironmentCubeFaceFovDegrees)",
-		"camera->set_near(opennova::renderer::kEnvironmentCubeFaceNear)",
-		"camera->set_far(opennova::renderer::kEnvironmentCubeFaceFar)",
-		"opennova::renderer::environment_cube_eye_height(",
-		"opennova::renderer::environment_cube_refresh_due(",
-		"Water::VISUAL_LAYER_ENVIRONMENT_CAPTURE", "camera->set_compositor(capture_compositor)",
-		"call_on_render_thread", "set_texture_rd_rid(cube)",
-	], "the capture source")
-	# No CPU readback, Image or Cubemap resource: the faces reach the
-	# published RD cubemap through the RenderingDevice copy leg, which
-	# applies the engine's dim-byte product in integer shader math.
-	assert_false(capture_source.contains("get_image("))
-	assert_false(capture_source.contains("linear_to_srgb"))
-	_contains_all(blit_source, [
-		"RenderingDevice::TEXTURE_TYPE_CUBE", "DATA_FORMAT_R8G8B8A8_UNORM",
-		"(bytes * pc.dim_byte + 127u) / 255u",
-	], "the environment cube blit")
-	_contains_all(shared, [
-		"global uniform samplerCube opennova_environment_cube",
-		"texture(opennova_environment_cube, direction)",
-		"pow(aligned, 800.0)", "pow(aligned, 40.0)", "static_lobe * opennova_sun_light * 2.0",
-	], "object/shared.gdshaderinc")
-	# The six capture cameras cull to the aliased water layer ALONE, so water
-	# rejects them by exact camera mask, never by a
-	# stale capture-origin distance.
-	assert_true(water.contains("NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK = 1024u"))
-	assert_true(water.contains("CAMERA_VISIBLE_LAYERS == NOVA_ENVIRONMENT_CAPTURE_CAMERA_MASK"))
-	assert_false(water.contains("opennova_environment_capture_origin"))
-	assert_true(project.contains("\"type\": \"samplerCube\""))
-
-
-# --- retail effect audit (JSON invariants; the .fx decode legs are gone) --
-
-
 func test_retail_effect_inventory_is_internally_consistent() -> void:
 	var inventory: Dictionary = _load_json(RETAIL_EFFECT_INVENTORY_PATH)
 	assert_eq(int(inventory["schema"]), 1)
@@ -402,7 +344,7 @@ func test_every_reachable_object_technique_is_audited_and_its_wrapper_keeps_the_
 		assert_eq(entry["policies"], selected_entry["policies"], engine_enum)
 		assert_true(["none", "self_lum"].has(selected_entry["rgb_modulation"]), engine_enum)
 		assert_true(["none", "ffp"].has(selected_entry["alpha_modulation"]), engine_enum)
-		assert_true(["diffuse_alpha", "normal_alpha", "vertex_diffuse_alpha", "reflect_alpha", "zero"]
+		assert_true(["diffuse_alpha", "normal_alpha", "reflect_alpha", "zero", "full"]
 				.has(selected_entry["coverage_source"]), engine_enum)
 		assert_true(["explicit", "explicit_unskinned_or_submit_skip_skinned", "normal_fallback",
 				"skinned_submit_skip"].has(selected_entry["clip_class"]), engine_enum)
@@ -580,13 +522,17 @@ func test_every_retail_pass_class_has_a_runtime_or_exclusion_disposition() -> vo
 
 
 func test_lighting_contracts_reach_the_shader_math() -> void:
+	# ADR 0043: the object families are lit materials — shared carries the
+	# ObjSurface contract and the intent islands (gain, interior ambient,
+	# additive fog), never hand lighting.
 	_contains_all(_read(OBJECT_ROOT.path_join("shared.gdshaderinc")), [
-		"opennova_light_block_hemi_sky", "opennova_light_block_hemi_ground",
-		"opennova_light_block_dir", "opennova_light_block_dir_color", "opennova_fog_enabled",
-		"u_entity_light", "obj_dir_light_color", "u_point_light_count", "obj_ff_lighting",
-		"obj_point_light_sum", "obj_bump_diffuse_lighting", "obj_phong_lighting",
-		"obj_phong_map_specular", "obj_environment_cube_approx", "obj_apply_additive_fog",
-		"v_dir_self_shadow", "v_pixel_point_factor", "obj_pixel_point_vertex_factors",
+		"struct ObjSurface", "obj_surface_defaults", "obj_interior_ambient_factor",
+		"opennova_light_block_gain", "opennova_fog_enabled", "u_entity_light",
+		"obj_self_lit", "obj_apply_additive_fog",
+	], "object/shared.gdshaderinc")
+	_contains_none(_read(OBJECT_ROOT.path_join("shared.gdshaderinc")), [
+		"obj_ff_lighting", "obj_point_light_sum", "obj_phong_lighting",
+		"obj_environment_cube_approx", "u_point_light_count",
 	], "object/shared.gdshaderinc")
 	# ADR 0043: the terrain is lit by the Godot scene — the include carries
 	# only the authored surface (splat/albedo) composition.
@@ -710,48 +656,6 @@ func _between(source: String, start_token: String, end_token: String) -> String:
 	return after.substr(0, stop) if stop >= 0 else after
 
 
-func test_object_point_lights_preserve_the_retail_stage_split() -> void:
-	var shared := _read(OBJECT_ROOT.path_join("shared.gdshaderinc"))
-	var fixed_point := _between(shared, "vec3 obj_point_light_one", "vec3 obj_point_light_sum")
-	var pixel_vertex_factor := _between(shared, "float obj_pixel_point_vertex_factor_one",
-			"vec4 obj_pixel_point_vertex_factors")
-	var pixel_vertex_attenuation := _between(shared, "float obj_pixel_point_vertex_attenuation_one",
-			"vec4 obj_pixel_point_vertex_factors")
-	var pixel_fragment_points := _between(shared, "vec3 obj_bump_diffuse_point_one",
-			"vec3 obj_environment_cube_approx")
-
-	# Fixed-function lights are D3D vertex lights and keep the D3D range gate.
-	assert_true(fixed_point.contains("if (dist >= col.w)"))
-	assert_true(fixed_point.contains("ndotl"))
-	# DOT3/Phong authored effects interpolate attenuation+self-shadow from
-	# their vertex programs; only mapped-normal N.L/N.H remains per fragment.
-	assert_true(pixel_vertex_factor.contains("obj_self_shadow(geom_normal_ws, to_light)"))
-	assert_true(pixel_vertex_factor.contains("1.0 + posr.w * distance_to_light * distance_to_light"))
-	assert_false(pixel_vertex_factor.contains("col.w"))
-	assert_false(pixel_vertex_attenuation.contains("obj_self_shadow"))
-	assert_true(pixel_vertex_attenuation.contains("1.0 + posr.w * distance_to_light * distance_to_light"))
-	assert_false(pixel_fragment_points.contains("obj_self_shadow"))
-	assert_false(pixel_fragment_points.contains("dist >="))
-	_contains_all(pixel_fragment_points, ["vertex_factor", "v_pixel_point_factor", "v_pixel_point_attenuation"],
-			"the per-fragment point helpers")
-
-	var vertex_standard := _read(OBJECT_ROOT.path_join("vertex_standard.gdshaderinc"))
-	var vertex_flag := _read(OBJECT_ROOT.path_join("vertex_flag.gdshaderinc"))
-	assert_true(vertex_standard.contains("obj_pixel_point_vertex_factors"))
-	assert_true(vertex_standard.contains("obj_pixel_point_vertex_attenuations"))
-	assert_true(vertex_flag.contains("v_pixel_point_factor = vec4(0.0)"))
-	assert_true(vertex_flag.contains("v_pixel_point_attenuation = vec4(0.0)"))
-
-	var validation: Dictionary = _load_json(TECHNIQUE_VALIDATION_PATH)
-	var audited := {}
-	for entry in validation["techniques"]:
-		audited[entry["engine_enum"]] = entry
-	assert_eq(audited["PhongObjectSpecularPhongMap"]["responses"],
-			{"directional": true, "hemisphere": false, "ambient": true, "point": true})
-	for name in ["Flag", "GlassFixed", "GlassSkinned"]:
-		assert_false(bool(audited[name]["responses"]["point"]), name)
-
-
 func test_point_lights_present_as_scene_omni_lights() -> void:
 	# ADR 0043: the pool's presentation is real OmniLight3D nodes (clustered
 	# Forward+ replaces the retired per-draw select, instance uniforms and the
@@ -785,12 +689,11 @@ func test_material_rgb_alpha_and_coverage_channels_are_technique_specific() -> v
 		_contains_all(sampling, ["#ifdef OBJ_RGB_MOD_SELF_LUM", "base.rgb *= u_rgb_mod",
 				"#ifdef OBJ_ALPHA_MOD_FFP", "base.a *= u_alpha_mod"], "the sampling include")
 	_contains_all(surface, [
-		"OBJ_COVERAGE_VERTEX_DIFFUSE_ALPHA", "coverage_alpha = v_dir_self_shadow",
 		"OBJ_COVERAGE_NORMAL_ALPHA", "coverage_alpha = obj_normal_alpha()",
 		"OBJ_COVERAGE_REFLECT_ALPHA", "coverage_alpha = u_reflect_color.a",
 		"OBJ_COVERAGE_ZERO", "coverage_alpha = 0.0",
 	], "surface.gdshaderinc")
-	assert_true(self_lit.contains("output_alpha = 0.0"))
+	assert_true(self_lit.contains("s.alpha = 0.0"))
 
 	var wrapper_macros := {
 		"Fixed": ["fixed", "OBJ_ALPHA_MOD_FFP", "OBJ_RGB_MOD_NONE"],

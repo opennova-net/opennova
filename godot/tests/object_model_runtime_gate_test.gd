@@ -168,11 +168,13 @@ func test_gameplay_keeps_the_editor_local_lght_uniforms_disabled() -> void:
 		pass_test("fixture built no surface materials under this renderer")
 		return
 	var material := materials[0] as ShaderMaterial
-	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 0,
+	# ADR 0043: the LGHT preview uniform route is gone — authored lights reach
+	# the scene only as EffectWorld pool spawns (scene omni lights).
+	assert_null(material.get_shader_parameter("u_local_light_count"),
 			"gameplay does not duplicate EffectWorld LGHT through preview uniforms")
 	model.advance_runtime_frame(0.0)
-	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 0,
-			"runtime frames keep the local duplicate-light route disabled")
+	assert_null(material.get_shader_parameter("u_local_light_count"),
+			"runtime frames keep the local duplicate-light route retired")
 
 
 func test_dynamic_material_typed_runtime_matches_public_evaluator() -> void:

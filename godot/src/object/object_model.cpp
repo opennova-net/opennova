@@ -496,7 +496,6 @@ void ObjectModel::set_section_visibility_mask(int64_t p_mask) {
 		return;
 	}
 	section_visibility_mask_ = p_mask;
-	point_light_draw_parts_dirty_ = true;
 	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
 		if (kv.value != nullptr) {
 			kv.value->set_visible(p_mask == -1 || ((p_mask >> kv.key) & 1) == 1);
@@ -553,7 +552,6 @@ void ObjectModel::set_active_lod(int p_lod_index) {
 	refresh_active_lod_rest_transforms();
 	panm_applied_revision_ = 0;
 	refresh_live_panm_classification();
-	point_light_draw_parts_dirty_ = true;
 	render_order_dirty_ = true;
 	bounds_dirty_ = true;
 	wake_runtime_frame();
@@ -1147,7 +1145,6 @@ void ObjectModel::_notification(int p_what) {
 	} else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
 		// Becoming visible re-derives the render-side state (PANM pose, light
 		// draw parts, order) that stayed stale while hidden.
-		point_light_draw_parts_dirty_ = true;
 		wake_runtime_frame();
 	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
 		// Only models with blended strips enable this notification: a moved
@@ -1432,7 +1429,6 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 			: 0;
 	if (part_changed || robj_changed) {
 		render_order_dirty_ = true;
-		point_light_draw_parts_dirty_ = true;
 	}
 	refresh_render_order();
 	if (bounds_dirty_ || part_changed || robj_changed) {
@@ -1493,49 +1489,6 @@ AABB ObjectModel::get_world_bounds() const {
 	return get_global_transform().xform(model_bounds_);
 }
 
-void ObjectModel::collect_point_light_draw_parts(
-		std::vector<PointLightDrawPart> &r_parts) const {
-	const Transform3D current = is_inside_tree() ? get_global_transform()
-												: Transform3D();
-	if (!point_light_draw_parts_dirty_ &&
-			current == point_light_draw_parts_transform_) {
-		r_parts = point_light_draw_parts_cache_;
-		return;
-	}
-	point_light_draw_parts_dirty_ = false;
-	point_light_draw_parts_transform_ = current;
-	r_parts.clear();
-	r_parts.reserve(robj_nodes_.size());
-	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
-		Node3D *part = kv.value;
-		if (part == nullptr || !part->is_visible_in_tree()) {
-			continue;
-		}
-		bool has_bounds = false;
-		AABB world_bounds;
-		for (int child = 0; child < part->get_child_count(); ++child) {
-			MeshInstance3D *instance = Object::cast_to<MeshInstance3D>(
-					part->get_child(child));
-			if (instance == nullptr || !instance->is_visible_in_tree()) {
-				continue;
-			}
-			const AABB child_bounds = instance->get_global_transform().xform(
-					instance->get_aabb());
-			world_bounds = has_bounds ? world_bounds.merge(child_bounds)
-					: child_bounds;
-			has_bounds = true;
-		}
-		if (has_bounds) {
-			r_parts.push_back(PointLightDrawPart{kv.key, world_bounds});
-		}
-	}
-	std::stable_sort(r_parts.begin(), r_parts.end(),
-			[](const PointLightDrawPart &a, const PointLightDrawPart &b) {
-				return a.robj_index < b.robj_index;
-			});
-	point_light_draw_parts_cache_ = r_parts;
-}
-
 Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
 	if (object_data_.is_null() || p_index < 0 ||
 			p_index >= object_data_->get_light_count()) {
@@ -1562,81 +1515,6 @@ Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
 		}
 	}
 	return position;
-}
-
-void ObjectModel::apply_point_light_selection_to_robj(int p_robj_index,
-		int p_count, const Vector4 *p_posr, const Vector4 *p_color) {
-	const int count = CLAMP(p_count, 0, 4);
-	uint64_t hash = 0xcbf29ce484222325ull;
-	const auto mix = [&hash](const void *data, size_t size) {
-		const uint8_t *bytes = static_cast<const uint8_t *>(data);
-		for (size_t i = 0; i < size; ++i) {
-			hash = (hash ^ bytes[i]) * 0x100000001b3ull;
-		}
-	};
-	mix(&count, sizeof(count));
-	for (int i = 0; i < count; ++i) {
-		mix(&p_posr[i], sizeof(Vector4));
-		mix(&p_color[i], sizeof(Vector4));
-	}
-	const uint64_t *last = point_light_selection_hashes_.getptr(p_robj_index);
-	if (last != nullptr && hash == *last) {
-		return;
-	}
-	point_light_selection_hashes_[p_robj_index] = hash;
-	// Applies are hash-gated and infrequent; per-call StringName construction
-	// avoids a DLL-teardown-ordered static against Godot's name table.
-	const StringName count_name("u_point_light_count");
-	const StringName posr_names[4] = {
-		StringName("u_point_light_posr_0"), StringName("u_point_light_posr_1"),
-		StringName("u_point_light_posr_2"), StringName("u_point_light_posr_3")
-	};
-	const StringName color_names[4] = {
-		StringName("u_point_light_color_0"),
-		StringName("u_point_light_color_1"),
-		StringName("u_point_light_color_2"),
-		StringName("u_point_light_color_3")
-	};
-	const auto apply_to = [&](Node *p_parent) {
-		if (p_parent == nullptr) {
-			return;
-		}
-		const int children = p_parent->get_child_count();
-		for (int child = 0; child < children; ++child) {
-			GeometryInstance3D *instance = Object::cast_to<GeometryInstance3D>(
-					p_parent->get_child(child));
-			if (instance == nullptr) {
-				continue;
-			}
-			instance->set_instance_shader_parameter(count_name,
-					static_cast<float>(count));
-			for (int i = 0; i < 4; ++i) {
-				const Vector4 posr = i < count ? p_posr[i] : Vector4();
-				const Vector4 color = i < count ? p_color[i] : Vector4();
-				instance->set_instance_shader_parameter(posr_names[i], posr);
-				instance->set_instance_shader_parameter(color_names[i], color);
-			}
-		}
-	};
-	Node *target = p_robj_index < 0 ? static_cast<Node *>(skeleton_) : nullptr;
-	if (p_robj_index >= 0) {
-		Node3D *const *part = robj_nodes_.getptr(p_robj_index);
-		target = part != nullptr ? static_cast<Node *>(*part) : nullptr;
-	}
-	apply_to(target);
-}
-
-void ObjectModel::apply_point_light_selection(int p_count,
-		const Vector4 *p_posr, const Vector4 *p_color) {
-	// Surface instances are direct children of their Robj part node or the
-	// shared skeleton (object_model_scene.cpp attach split).
-	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
-		apply_point_light_selection_to_robj(
-				kv.key, p_count, p_posr, p_color);
-	}
-	if (skeleton_ != nullptr) {
-		apply_point_light_selection_to_robj(-1, p_count, p_posr, p_color);
-	}
 }
 
 void ObjectModel::_bind_methods() {

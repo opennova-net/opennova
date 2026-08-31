@@ -1,5 +1,5 @@
 void vertex() {
-	v_static_point_light_row = INSTANCE_CUSTOM.x;
+	v_raw_uv = UV;
 	v_uv = obj_transform_uv(UV);
 	v_uv2 = obj_transform_uv(UV2);
 	vec3 local_pos = VERTEX;
@@ -20,12 +20,6 @@ void vertex() {
 	v_geom_normal = animated_world_normal;
 	v_world_tangent = normalize((MODEL_MATRIX * vec4(TANGENT, 0.0)).xyz);
 	v_world_binormal = normalize((MODEL_MATRIX * vec4(BINORMAL, 0.0)).xyz);
-	// Flag.fx has only its hemisphere + directional pass; EffectWorld point
-	// lights do not participate in this effect.
-	v_point_light_diffuse = vec3(0.0);
-	v_dir_self_shadow = 1.0;
-	v_pixel_point_factor = vec4(0.0);
-	v_pixel_point_attenuation = vec4(0.0);
 	// The first-person viewmodel takes retail's renderfov projection + depth
 	// band (viewmodel_pass.gdshaderinc); everything else takes the plain
 	// projection. Writing POSITION anywhere makes Godot override the clip

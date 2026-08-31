@@ -209,12 +209,6 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));
 	material->set_shader_parameter("u_rgb_mod", Vector3(1, 1, 1));
 	material->set_shader_parameter("u_alpha_mod", 1.0f);
-	material->set_shader_parameter("u_local_light_count", 0);
-	material->set_shader_parameter("u_local_light_position", Vector3());
-	material->set_shader_parameter("u_local_light_color", Vector3(1, 1, 1));
-	material->set_shader_parameter("u_local_light_intensity", 1.0f);
-	material->set_shader_parameter("u_local_light_atten_start", 0.0f);
-	material->set_shader_parameter("u_local_light_atten_end", 5.0f);
 	FrameFx::register_q3_object_material(material, q3_classification);
 	// No shadow-receiver next pass on world models: retail's render-slot
 	// entity ground shadows drape TERRAIN-FOLLOWING patches only — a live

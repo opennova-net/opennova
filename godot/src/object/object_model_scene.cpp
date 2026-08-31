@@ -56,7 +56,6 @@ void ObjectModel::rebuild_scene() {
 	alpha_strip_draws_.clear();
 	alpha_strip_models_.erase(this);
 	render_order_dirty_ = true;
-	point_light_draw_parts_dirty_ = true;
 	set_notify_transform(false);
 	anim_frames_by_mat_.clear();
 	material_cache_.clear();
@@ -67,7 +66,6 @@ void ObjectModel::rebuild_scene() {
 	material_needs_eval_.clear();
 	dynamic_material_slots_ = PackedInt32Array();
 	material_runtime_stamps_.clear();
-	point_light_selection_hashes_.clear();
 	robj_dense_ = Array();
 	panm_applied_revision_ = 0;
 	if (object_data_.is_null() || !object_data_->has_document()) {
@@ -417,7 +415,6 @@ void ObjectModel::apply_level_surfaces() {
 	// its previous part: the lighting factors are re-stamped now and the
 	// point-light hash gate reopened so the next selection lands.
 	stamp_entity_lighting_instances();
-	point_light_selection_hashes_.clear();
 }
 
 void ObjectModel::add_level_bound_visual(int p_lod_index,

@@ -1,6 +1,16 @@
-// Values and witnessed math shared by object techniques. Execution topology
-// (coverage, texture stages, normal source, self-lighting, family) lives in
-// statically selected includes; this file contains no capability switches.
+// Values shared by object techniques. Execution topology (coverage, texture
+// stages, normal source, family) lives in statically selected includes; this
+// file contains no capability switches.
+//
+// ADR 0043 (modern presentation): the object families are LIT materials —
+// Godot's sun (SunShadow at MODULATE2X energy), the hemisphere-sky ambient
+// and the clustered scene omni lights replaced the hand-written
+// fixed-function lighting, the per-draw point-light delivery and the
+// environment-cube approximation that lived here. Each technique include
+// fills an ObjSurface (albedo/normal/roughness/specular/emission) from the
+// witnessed material facts; the output include maps it onto the lit
+// pipeline. Additive wrappers and postmultiply remain unshaded emissive
+// islands with the retail fade-to-black fog.
 
 #include "res://shaders/color.gdshaderinc"
 #include "res://shaders/viewmodel_pass.gdshaderinc"
@@ -25,95 +35,35 @@ global uniform float opennova_water_height;
 global uniform bool opennova_water_reflection_clip_active;
 global uniform vec3 opennova_water_reflection_eye;
 
-// Highest-quality TexCubeEnvironment host. The captured texture contains the
-// six gamma-byte sky + sun/moon faces after retail's 0x60 framebuffer multiply;
-// the callback's final CubeRotSpecular sphere is analytic below so it follows
-// the active light without baking an approximation into the resource.
-global uniform samplerCube opennova_environment_cube;
-global uniform bool opennova_environment_cube_ready;
-global uniform vec3 opennova_sun_light;
-global uniform vec3 opennova_sun_direction;
-
-// The PROJSHAD pass (the render-slot black silhouette whose alpha is
-// Diffuse1.a, plus _FFP's optional Diffuse2.a and AlphaGenValue) is not a
-// branch of these wrappers: SlotShadow's RenderingDevice pass
-// (godot/src/render/slot_capture_adapter.cpp) draws it from the engine's
-// per-technique coverage and blend tables, so every camera that renders an
-// object wrapper renders its NORMAL technique.
-
-// The pass-global world lighting block. Retail builds ONE 32-float constant
-// block per scene pass from the five environment color blocks and stores it
-// on the batch context; every drawn strip then reads that block at flush,
-// scaled by the two per-entity factors below. Godot's global shader
-// parameters are that per-pass constant block: MissionEnvironment writes
-// them once per env change and no material is ever touched. Defaults
-// (project.godot) are the shipped full_00.env noon register. The direction
-// is -normalize(light dir) in Godot world axes (ctx+132), the negation of
-// the diffuse "to light" vector.
-// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 ->
-// RenderBatchCtx_StoreLightingConstants @ 0x5d89e0 (ctx+116 light,
-// +144 sky, +160 ground, +176 floor, +192 ceiling); the gain is
-// Render_LightScaleRGB bound per draw by apply_shader_parameters @ 0x58db80]
-global uniform vec3 opennova_light_block_dir;
-global uniform vec3 opennova_light_block_dir_color;
-global uniform vec3 opennova_light_block_hemi_sky;
-global uniform vec3 opennova_light_block_hemi_ground;
-global uniform vec3 opennova_light_block_ceiling;
-global uniform vec3 opennova_light_block_floor;
+// The self-lit/additive gain: the modulator block's ColorSrcGlobalGain (the
+// iris auto-exposure chain), the one lighting register the emissive
+// islands still consume. [orig: Render_UnpackModulatorToLightScale
+// @ 0x58db30 -> handle slot 232]
 global uniform vec3 opennova_light_block_gain;
-// The device fog state of the scene pass, shared with terrain, foliage and
-// water: one Render_SetFogState per pass fogs every draw of that pass.
-// [orig: Environment_ApplyFogAndAmbient @ 0x57e440 -> Render_SetFogState
-// @ 0x58a950]
+// The device fog state of the scene pass. The lit families take Environment
+// fog; these globals feed the additive fade-to-black island and the
+// postmultiply source fold. [orig: Environment_ApplyFogAndAmbient @ 0x57e440
+// -> Render_SetFogState @ 0x58a950]
 global uniform bool opennova_fog_enabled;
 global uniform vec3 opennova_fog_color;
 global uniform float opennova_fog_start;
 global uniform float opennova_fog_end;
 global uniform int opennova_fog_type;
-// The per-entity lighting factors retail pushes per batch entry on top of the
-// pass block: x = effectScale (entry[9], the sun-visibility factor),
-// y = the interior-parented flag (entry flag bit 1), z = the parent
-// interior's daylight openness t (entry[10]). Instance state stamped by the
-// presenters on change; a MultiMesh batch carries one value for all of its
-// instances (pool-2 statics have no proximity slice, so effectScale 1).
-// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0 (lerp branch
-// @ 0x5d9a6a.., direct branch @ 0x5d9db5..)]
+// The per-entity lighting factors: y = the interior-parented flag (entry
+// flag bit 1), z = the parent interior's daylight openness t (entry[10]).
+// Under ADR 0043 they scale the AMBIENT the lit pipeline applies (an
+// interior must not receive full sky ambient); x (the retired sun-visibility
+// effectScale) is superseded by per-pixel shadow reception.
+// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
 instance uniform vec4 u_entity_light = vec4(1.0, 0.0, 1.0, 0.0);
 uniform vec4 u_reflect_color = vec4(0.7, 0.8, 0.9, 0.35);
-// Runtime-generated byte-for-byte from retail's gsys_phong constructor.
-// X=N.L, Y=N.H; RGBA=pow4,pow16,pow64,N.L with linear clamp sampling.
-uniform sampler2D u_phong_map : filter_linear, repeat_disable;
-// EffectWorld dynamic point lights: the <=4 nearest group-passing pool
-// instances for THIS model's draw context (the witness map lives on
-// engine/runtime/renderer/light_scene.h — spawn/query/select and the D3D FF
-// participation these uniforms stand in for). atten2 = 15/range^2; the
-// premultiplied rgb is record x ambient x gen x 1.5; range is the
-// D3DLIGHT9.Range hard cutoff.
-// Per-instance: each rendered model carries its own draw context's selected
-// four (retail selects per draw, owner-gated — update_light_slots @0x5abc50;
-// docs/render/render-lighting-re.md). Count rides as float (instance uniforms
-// exclude int); posr_N = xyz world + atten2, color_N = premultiplied rgb +
-// range.
-// Static MultiMeshes cannot vary instance uniforms. INSTANCE_CUSTOM.x carries
-// atlasRow+1 and selects the equivalent RGBAF payload; zero remains the live
-// ObjectModel route. Both paths feed every technique helper below.
-global uniform sampler2D opennova_static_point_light_rows;
-instance uniform float u_point_light_count = 0.0;
-instance uniform vec4 u_point_light_posr_0 = vec4(0.0);
-instance uniform vec4 u_point_light_posr_1 = vec4(0.0);
-instance uniform vec4 u_point_light_posr_2 = vec4(0.0);
-instance uniform vec4 u_point_light_posr_3 = vec4(0.0);
-instance uniform vec4 u_point_light_color_0 = vec4(0.0);
-instance uniform vec4 u_point_light_color_1 = vec4(0.0);
-instance uniform vec4 u_point_light_color_2 = vec4(0.0);
-instance uniform vec4 u_point_light_color_3 = vec4(0.0);
 
 // MATCHTERRAIN is a skinned crouch/prone pre-pass in retail. The reimpl folds
 // that pass into the object's NORMAL draw: only pixels rejected by NORMAL's
-// alpha test retain the terrain color, so accepted pixels are byte-equivalent
-// to the retail NORMAL overwrite. The composed terrain page is the same cache
-// sampled by Terrain and foliage. Per-model material ownership makes the array
-// binding safe; per-instance state carries the live stance and resident page.
+// alpha test retain the terrain color, so accepted pixels match the retail
+// NORMAL overwrite. The composed terrain page is the same cache sampled by
+// Terrain and foliage. Per-model material ownership makes the array binding
+// safe; per-instance state carries the live stance and resident page.
 // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50, entity+300 & 0x300;
 // _tSkFolg.fx Simple_MatchTerrain_PS; _vsSkFolg.fx vscSkMatchTerrain;
 // terrain_tile_cache_lookup @ 0x604140].
@@ -124,15 +74,6 @@ instance uniform bool u_match_terrain_page_ready = false;
 instance uniform float u_match_terrain_page_layer = 0.0;
 // xy = page world origin, z = reciprocal world span, w = world span.
 instance uniform vec4 u_match_terrain_page_projection = vec4(0.0);
-// LGHT preview is explicit editor-only state; gameplay binds count zero. The
-// GAMEPLAY consumption of model lights is the EffectWorld pool above (spawned
-// per placed entity at mission start), not these per-material uniforms.
-uniform int u_local_light_count = 0;
-uniform vec3 u_local_light_position = vec3(0.0);
-uniform vec3 u_local_light_color = vec3(1.0);
-uniform float u_local_light_intensity = 1.0;
-uniform float u_local_light_atten_start = 0.0;
-uniform float u_local_light_atten_end = 5.0;
 
 varying vec2 v_uv;
 varying vec2 v_uv2;
@@ -144,22 +85,37 @@ varying vec3 v_world_normal;
 varying vec3 v_geom_normal;
 varying vec3 v_world_tangent;
 varying vec3 v_world_binormal;
-// Fixed-function EffectWorld point-light diffuse, evaluated at VERTEX rate:
-// the enabled <=4 pool lights join the D3D vertex diffuse and Gouraud-
-// interpolate across the triangle. Pixel-shader DOT3/Phong effects instead
-// consume the same pool below in their authored mapped-normal point passes.
-// [orig: update_light_slots @ 0x5abc50; Light_ApplyAsD3DLight @ 0x5abd50;
-// Dot3DiffT/PhongT NORMAL P1 PASSRULE_ONCE_PER_POINTLIGHT].
-varying vec3 v_point_light_diffuse;
-// Pixel-shader effect programs put their geometric self-shadow and point
-// attenuation in oD0 in the vertex shader, then interpolate it into the
-// mapped-normal pixel pass. Keep those factors separate from the FFP sum.
-varying float v_dir_self_shadow;
-varying vec4 v_pixel_point_factor;
-varying vec4 v_pixel_point_attenuation;
-// Identical for every vertex of a MultiMesh instance, so ordinary varying
-// interpolation remains constant across each primitive.
-varying float v_static_point_light_row;
+
+// The surface a technique include computes from the witnessed material facts
+// and the output include maps onto the lit pipeline.
+struct ObjSurface {
+	vec3 albedo;
+	float alpha;
+	vec3 emission;
+	vec3 normal_ws;
+	float roughness;
+	float specular;
+	float metallic;
+};
+
+ObjSurface obj_surface_defaults(vec4 base, vec3 normal_ws) {
+	ObjSurface s;
+	s.albedo = base.rgb;
+	s.alpha = base.a;
+	s.emission = vec3(0.0);
+	s.normal_ws = normal_ws;
+	s.roughness = 1.0;
+	s.specular = 0.0;
+	s.metallic = 0.0;
+	return s;
+}
+
+// The interior ambient island: an interior-parented draw scales its ambient
+// by the parent interior's daylight openness — retail's indoor/outdoor block
+// lerp folded onto the sky-ambient the lit pipeline applies (ADR 0043).
+float obj_interior_ambient_factor() {
+	return u_entity_light.y > 0.5 ? clamp(u_entity_light.z, 0.0, 1.0) : 1.0;
+}
 
 // The CLIP-class discard must stay in the one material Godot gives a mesh
 // (no per-camera material variant exists), so the depth prepass of every
@@ -196,508 +152,14 @@ vec2 obj_transform_uv(vec2 uv) {
 	return vec2(dot(uv1, u_uv_transform_u), dot(uv1, u_uv_transform_v));
 }
 
-// The per-entry constants: the pass block scaled by effectScale, and under
-// the interior flag additionally by t with the hemisphere pair lerped from
-// the indoor (floor/ceiling) to the outdoor (ground/sky) block by t. This is
-// renderer::compute_entity_lighting evaluated at draw time.
-// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
-bool obj_entity_interior() {
-	return u_entity_light.y > 0.5;
-}
-
-vec3 obj_dir_light_color() {
-	vec3 scaled = opennova_light_block_dir_color * u_entity_light.x;
-	return obj_entity_interior() ? scaled * u_entity_light.z : scaled;
-}
-
-vec3 obj_hemi_sky_color() {
-	return obj_entity_interior()
-			? mix(opennova_light_block_ceiling, opennova_light_block_hemi_sky,
-					u_entity_light.z)
-			: opennova_light_block_hemi_sky;
-}
-
-vec3 obj_hemi_ground_color() {
-	return obj_entity_interior()
-			? mix(opennova_light_block_floor, opennova_light_block_hemi_ground,
-					u_entity_light.z)
-			: opennova_light_block_hemi_ground;
-}
-
-// Ambient average plus the opposing sky/ground delta lights reduces to this
-// hemisphere mix. [orig: RenderBatchCtx_StoreLightingConstants @ 0x5D89E0;
-// Lighting_SetHemisphereD3DLights @ 0x5D8CB0]
-vec3 obj_hemi(vec3 normal_ws) {
-	float up = clamp(normal_ws.y * 0.5 + 0.5, 0.0, 1.0);
-	return mix(obj_hemi_ground_color(), obj_hemi_sky_color(), up);
-}
-
-bool obj_uses_static_point_light_row() {
-	return v_static_point_light_row > 0.5;
-}
-
-int obj_static_point_light_row() {
-	return max(int(floor(v_static_point_light_row + 0.5)) - 1, 0);
-}
-
-float obj_point_light_count() {
-	if (obj_uses_static_point_light_row()) {
-		return texelFetch(opennova_static_point_light_rows,
-				ivec2(0, obj_static_point_light_row()), 0).x;
-	}
-	return u_point_light_count;
-}
-
-vec4 obj_point_light_posr(int light_index) {
-	if (obj_uses_static_point_light_row()) {
-		return texelFetch(opennova_static_point_light_rows,
-				ivec2(1 + light_index * 2, obj_static_point_light_row()), 0);
-	}
-	if (light_index == 0) {
-		return u_point_light_posr_0;
-	}
-	if (light_index == 1) {
-		return u_point_light_posr_1;
-	}
-	if (light_index == 2) {
-		return u_point_light_posr_2;
-	}
-	return u_point_light_posr_3;
-}
-
-vec4 obj_point_light_color(int light_index) {
-	if (obj_uses_static_point_light_row()) {
-		return texelFetch(opennova_static_point_light_rows,
-				ivec2(2 + light_index * 2, obj_static_point_light_row()), 0);
-	}
-	if (light_index == 0) {
-		return u_point_light_color_0;
-	}
-	if (light_index == 1) {
-		return u_point_light_color_1;
-	}
-	if (light_index == 2) {
-		return u_point_light_color_2;
-	}
-	return u_point_light_color_3;
-}
-
-// The fixed-function contribution: per selected light, color * ndotl /
-// (1 + atten2 * d^2) inside the range cutoff. vertex_*.gdshaderinc fills
-// v_point_light_diffuse for Fixed/Flag; the pixel-shader helpers below bypass
-// it and evaluate their NORMAL-pass mapped N.L/N.H explicitly.
-// [orig: enable <=4 @ update_light_slots 0x5abc50 / Light_ApplyAsD3DLight
-// @ 0x5abd50; params @ Light_GetPointLightParams 0x5a9180 /
-// Light_FillD3DPointLight 0x5aa450]
-vec3 obj_point_light_one(vec3 world_pos, vec3 normal_ws, vec4 posr, vec4 col) {
-	vec3 to_light = posr.xyz - world_pos;
-	float dist = length(to_light);
-	if (dist >= col.w) {
-		return vec3(0.0);
-	}
-	float ndotl = max(dot(normal_ws, to_light / max(dist, 0.001)), 0.0);
-	return col.rgb * (ndotl / (1.0 + posr.w * dist * dist));
-}
-
-vec3 obj_point_light_sum(vec3 world_pos, vec3 normal_ws) {
-	vec3 sum = vec3(0.0);
-	float count = obj_point_light_count();
-	if (count > 0.5) {
-		sum += obj_point_light_one(world_pos, normal_ws,
-				obj_point_light_posr(0), obj_point_light_color(0));
-	}
-	if (count > 1.5) {
-		sum += obj_point_light_one(world_pos, normal_ws,
-				obj_point_light_posr(1), obj_point_light_color(1));
-	}
-	if (count > 2.5) {
-		sum += obj_point_light_one(world_pos, normal_ws,
-				obj_point_light_posr(2), obj_point_light_color(2));
-	}
-	if (count > 3.5) {
-		sum += obj_point_light_one(world_pos, normal_ws,
-				obj_point_light_posr(3), obj_point_light_color(3));
-	}
-	return sum;
-}
-
-// Pixel-shader object effects keep the normal-map N.L/N.H evaluation in the
-// pixel stage. Their vertex shaders multiply each directional/point pass by
-// this sharp geometric-normal horizon term. SelfShadowMult=10 and
-// SelfShadowAdd=.5 are literal retail constants. [orig: _BaseInc.fx
-// CalcSelfShadowTerm; _vsDiffT/O, _vsPhongT/O, _vsSkDfT/O, _vsSkPhT/O].
-float obj_self_shadow(vec3 geom_normal_ws, vec3 to_light_ws) {
-	return clamp(dot(normalize(geom_normal_ws), normalize(to_light_ws)) * 10.0 + 0.5,
-			0.0, 1.0);
-}
-
-float obj_pixel_point_vertex_factor_one(vec3 world_pos, vec3 geom_normal_ws,
-		vec4 posr) {
-	vec3 to_light = posr.xyz - world_pos;
-	float distance_to_light = length(to_light);
-	float attenuation = 1.0 /
-			(1.0 + posr.w * distance_to_light * distance_to_light);
-	return attenuation * obj_self_shadow(geom_normal_ws, to_light);
-}
-
-float obj_pixel_point_vertex_attenuation_one(vec3 world_pos, vec4 posr) {
-	vec3 to_light = posr.xyz - world_pos;
-	float distance_to_light = length(to_light);
-	return 1.0 / (1.0 + posr.w * distance_to_light * distance_to_light);
-}
-
-vec4 obj_pixel_point_vertex_factors(vec3 world_pos, vec3 geom_normal_ws) {
-	vec4 factors = vec4(0.0);
-	float count = obj_point_light_count();
-	if (count > 0.5) {
-		factors.x = obj_pixel_point_vertex_factor_one(
-				world_pos, geom_normal_ws, obj_point_light_posr(0));
-	}
-	if (count > 1.5) {
-		factors.y = obj_pixel_point_vertex_factor_one(
-				world_pos, geom_normal_ws, obj_point_light_posr(1));
-	}
-	if (count > 2.5) {
-		factors.z = obj_pixel_point_vertex_factor_one(
-				world_pos, geom_normal_ws, obj_point_light_posr(2));
-	}
-	if (count > 3.5) {
-		factors.w = obj_pixel_point_vertex_factor_one(
-				world_pos, geom_normal_ws, obj_point_light_posr(3));
-	}
-	return factors;
-}
-
-vec4 obj_pixel_point_vertex_attenuations(vec3 world_pos) {
-	vec4 factors = vec4(0.0);
-	float count = obj_point_light_count();
-	if (count > 0.5) {
-		factors.x = obj_pixel_point_vertex_attenuation_one(
-				world_pos, obj_point_light_posr(0));
-	}
-	if (count > 1.5) {
-		factors.y = obj_pixel_point_vertex_attenuation_one(
-				world_pos, obj_point_light_posr(1));
-	}
-	if (count > 2.5) {
-		factors.z = obj_pixel_point_vertex_attenuation_one(
-				world_pos, obj_point_light_posr(2));
-	}
-	if (count > 3.5) {
-		factors.w = obj_pixel_point_vertex_attenuation_one(
-				world_pos, obj_point_light_posr(3));
-	}
-	return factors;
-}
-
-vec3 obj_bump_diffuse_point_one(vec3 base_rgb, vec3 normal_ws,
-		vec4 posr, vec4 col, float vertex_factor) {
-	if (vertex_factor <= 0.0) {
-		return vec3(0.0);
-	}
-	vec3 to_light = posr.xyz - v_world_pos;
-	float dist = length(to_light);
-	vec3 light_dir = to_light / max(dist, 0.001);
-	float ndotl = max(dot(normalize(normal_ws), light_dir), 0.0);
-	return base_rgb * col.rgb * (2.0 * ndotl * vertex_factor);
-}
-
-vec3 obj_bump_diffuse_points_with_factors(vec3 base_rgb, vec3 normal_ws,
-		vec4 point_factors) {
-	vec3 sum = vec3(0.0);
-	float count = obj_point_light_count();
-	if (count > 0.5) {
-		sum += obj_bump_diffuse_point_one(base_rgb, normal_ws,
-				obj_point_light_posr(0), obj_point_light_color(0), point_factors.x);
-	}
-	if (count > 1.5) {
-		sum += obj_bump_diffuse_point_one(base_rgb, normal_ws,
-				obj_point_light_posr(1), obj_point_light_color(1), point_factors.y);
-	}
-	if (count > 2.5) {
-		sum += obj_bump_diffuse_point_one(base_rgb, normal_ws,
-				obj_point_light_posr(2), obj_point_light_color(2), point_factors.z);
-	}
-	if (count > 3.5) {
-		sum += obj_bump_diffuse_point_one(base_rgb, normal_ws,
-				obj_point_light_posr(3), obj_point_light_color(3), point_factors.w);
-	}
-	return sum;
-}
-
-vec3 obj_bump_diffuse_points(vec3 base_rgb, vec3 normal_ws) {
-	return obj_bump_diffuse_points_with_factors(
-			base_rgb, normal_ws, v_pixel_point_factor);
-}
-
-vec3 obj_dot3_points(vec3 base_rgb, vec3 normal_ws) {
-	return obj_bump_diffuse_points_with_factors(
-			base_rgb, normal_ws, v_pixel_point_attenuation);
-}
-
-vec3 obj_bump_diffuse_lighting(vec3 base_rgb, vec3 normal_ws,
-		vec3 geom_normal_ws) {
-	vec3 normal = normalize(normal_ws);
-	vec3 to_light = normalize(-opennova_light_block_dir);
-	float ndotl = max(dot(normal, to_light), 0.0);
-	vec3 lit = base_rgb * (obj_hemi(normal) +
-			obj_dir_light_color() * (ndotl * v_dir_self_shadow)) * 2.0;
-	return lit + obj_bump_diffuse_points(base_rgb, normal);
-}
-
-// BDiffT2's shader-usage-2 path keeps mapped hemisphere lighting and the
-// directional self-shadow in its pixel pass. Its point-light pass is the
-// fixed-function encoded-vector path, so attenuation is interpolated without
-// a geometric self-shadow multiplier.
-vec3 obj_dot3_lighting(vec3 base_rgb, vec3 normal_ws) {
-	vec3 normal = normalize(normal_ws);
-	vec3 to_light = normalize(-opennova_light_block_dir);
-	float ndotl = max(dot(normal, to_light), 0.0);
-	vec3 lit = base_rgb * (obj_hemi(normal) +
-			obj_dir_light_color() * (ndotl * v_dir_self_shadow)) * 2.0;
-	return lit + obj_dot3_points(base_rgb, normal);
-}
-
-// SkBDiffT2/SkBDiffO2 have no pixel-shader NORMAL alternative: hemisphere
-// is Gouraud geometric-normal light, and their encoded directional/point
-// vectors carry no CalcSelfShadowTerm multiplier.
-vec3 obj_dot3_skinned_lighting(vec3 base_rgb, vec3 normal_ws,
-		vec3 geom_normal_ws) {
-	vec3 normal = normalize(normal_ws);
-	vec3 to_light = normalize(-opennova_light_block_dir);
-	float ndotl = max(dot(normal, to_light), 0.0);
-	vec3 lit = base_rgb * (obj_hemi(normalize(geom_normal_ws)) +
-			obj_dir_light_color() * ndotl) * 2.0;
-	return lit + obj_dot3_points(base_rgb, normal);
-}
-
-float obj_pow8(float value) {
-	float p2 = value * value;
-	float p4 = p2 * p2;
-	return p4 * p4;
-}
-
-float obj_pow16(float value) {
-	float p8 = obj_pow8(value);
-	return p8 * p8;
-}
-
-float obj_pow64(float value) {
-	float p16 = obj_pow16(value);
-	float p32 = p16 * p16;
-	return p32 * p32;
-}
-
-vec3 obj_phong_point_one(vec3 base_rgb, float specular_brightness,
-		vec3 normal_ws, vec3 view_dir, vec4 posr, vec4 col, float vertex_factor) {
-	if (vertex_factor <= 0.0) {
-		return vec3(0.0);
-	}
-	vec3 to_light = posr.xyz - v_world_pos;
-	float dist = length(to_light);
-	vec3 light_dir = to_light / max(dist, 0.001);
-	float ndotl = max(dot(normal_ws, light_dir), 0.0);
-	float specular = 0.0;
-	if (ndotl > 0.0) {
-		specular = obj_pow8(max(dot(normal_ws,
-				normalize(light_dir + view_dir)), 0.0)) * specular_brightness;
-	}
-	return (base_rgb * ndotl + vec3(specular)) * col.rgb *
-			(2.0 * vertex_factor);
-}
-
-vec3 obj_phong_points(vec3 base_rgb, float specular_brightness,
-		vec3 normal_ws, vec3 view_dir) {
-	vec3 sum = vec3(0.0);
-	float count = obj_point_light_count();
-	if (count > 0.5) {
-		sum += obj_phong_point_one(base_rgb, specular_brightness, normal_ws,
-				view_dir, obj_point_light_posr(0), obj_point_light_color(0),
-				v_pixel_point_factor.x);
-	}
-	if (count > 1.5) {
-		sum += obj_phong_point_one(base_rgb, specular_brightness, normal_ws,
-				view_dir, obj_point_light_posr(1), obj_point_light_color(1),
-				v_pixel_point_factor.y);
-	}
-	if (count > 2.5) {
-		sum += obj_phong_point_one(base_rgb, specular_brightness, normal_ws,
-				view_dir, obj_point_light_posr(2), obj_point_light_color(2),
-				v_pixel_point_factor.z);
-	}
-	if (count > 3.5) {
-		sum += obj_phong_point_one(base_rgb, specular_brightness, normal_ws,
-				view_dir, obj_point_light_posr(3), obj_point_light_color(3),
-				v_pixel_point_factor.w);
-	}
-	return sum;
-}
-
-vec3 obj_phong_lighting(vec3 base_rgb, float specular_brightness,
-		vec3 normal_ws, vec3 geom_normal_ws, vec3 view_dir,
-		float directional_self_shadow) {
-	vec3 normal = normalize(normal_ws);
-	vec3 to_light = normalize(-opennova_light_block_dir);
-	float ndotl = max(dot(normal, to_light), 0.0);
-	float specular = 0.0;
-	if (ndotl > 0.0) {
-		specular = obj_pow8(max(dot(normal, normalize(to_light + view_dir)), 0.0)) *
-				specular_brightness;
-	}
-	float shadow = mix(1.0, v_dir_self_shadow,
-			directional_self_shadow);
-	// ps11Phong's hemisphere value comes from the geometric normal in oD1;
-	// Diffuse1.a scales only the pow-8 specular lobe.
-	vec3 lit = (base_rgb * obj_hemi(geom_normal_ws) +
-			(base_rgb * ndotl + vec3(specular)) * obj_dir_light_color() * shadow) * 2.0;
-	return lit + obj_phong_points(base_rgb, specular_brightness,
-			normal, view_dir);
-}
-
-vec4 obj_phong_map_lookup(float ndotl, float ndoth) {
-	return texture(u_phong_map, clamp(vec2(ndotl, ndoth), vec2(0.0), vec2(1.0)));
-}
-
-float obj_phong_map_specular(vec4 lookup, float control) {
-	float alpha = clamp(control, 0.0, 1.0);
-	return alpha * mix(lookup.r, lookup.b, alpha);
-}
-
-vec3 obj_phong_map_point_one(vec3 base_rgb, float control, vec3 normal_ws,
-		vec3 view_dir, vec4 posr, vec4 col, float vertex_factor) {
-	if (vertex_factor <= 0.0) {
-		return vec3(0.0);
-	}
-	vec3 to_light = posr.xyz - v_world_pos;
-	float dist = length(to_light);
-	vec3 light_dir = to_light / max(dist, 0.001);
-	float ndotl = max(dot(normal_ws, light_dir), 0.0);
-	float ndoth = max(dot(normal_ws, normalize(light_dir + view_dir)), 0.0);
-	vec4 lookup = obj_phong_map_lookup(ndotl, ndoth);
-	float specular = ndotl > 0.0 ? obj_phong_map_specular(lookup, control) : 0.0;
-	return (base_rgb * lookup.a + vec3(specular)) * col.rgb *
-			(2.0 * vertex_factor);
-}
-
-vec3 obj_phong_map_points(vec3 base_rgb, float control, vec3 normal_ws,
-		vec3 view_dir) {
-	vec3 sum = vec3(0.0);
-	float count = obj_point_light_count();
-	if (count > 0.5) {
-		sum += obj_phong_map_point_one(base_rgb, control, normal_ws,
-				view_dir, obj_point_light_posr(0), obj_point_light_color(0),
-				v_pixel_point_factor.x);
-	}
-	if (count > 1.5) {
-		sum += obj_phong_map_point_one(base_rgb, control, normal_ws,
-				view_dir, obj_point_light_posr(1), obj_point_light_color(1),
-				v_pixel_point_factor.y);
-	}
-	if (count > 2.5) {
-		sum += obj_phong_map_point_one(base_rgb, control, normal_ws,
-				view_dir, obj_point_light_posr(2), obj_point_light_color(2),
-				v_pixel_point_factor.z);
-	}
-	if (count > 3.5) {
-		sum += obj_phong_map_point_one(base_rgb, control, normal_ws,
-				view_dir, obj_point_light_posr(3), obj_point_light_color(3),
-				v_pixel_point_factor.w);
-	}
-	return sum;
-}
-
-vec3 obj_environment_cube_approx(vec3 reflection_ws) {
-	vec3 direction = normalize(reflection_ws);
-	if (!opennova_environment_cube_ready) {
-		// Dummy/headless renderers cannot produce the six GPU faces. The live
-		// Forward+ path publishes synchronously before its visible main draw;
-		// this only keeps editor/resource-validation contexts defined.
-		return obj_hemi(direction);
-	}
-	vec3 dimmed_sky = texture(opennova_environment_cube, direction).rgb;
-	// Environment_GetLightDirectionFloat is the incoming-light tuple;
-	// MatRotSpecular aligns the static cube's -Z lobe to its negation.
-	float aligned = max(dot(direction,
-			normalize(-opennova_sun_direction)), 0.0);
-	vec3 static_lobe = clamp(
-			vec3(1.4) * pow(aligned, 800.0) +
-			vec3(1.0, 248.0 / 255.0, 240.0 / 255.0) *
-					pow(aligned, 40.0),
-			vec3(0.0), vec3(1.0));
-	// render_sky_mesh binds Env_LightBlock and the fixed-function MODULATE2X
-	// descriptor, then submits the rotated CubeRotSpecular sphere additively.
-	// [orig: render_sky_mesh @ 0x5ac680; sub_5AC600 (the sky-mesh descriptor)].
-	return clamp(dimmed_sky + static_lobe * opennova_sun_light * 2.0,
-			vec3(0.0), vec3(1.0));
-}
-
-vec3 obj_mirror_point_one(vec3 normal_ws, vec3 view_dir,
-		vec4 posr, vec4 col, float vertex_factor) {
-	if (vertex_factor <= 0.0) {
-		return vec3(0.0);
-	}
-	vec3 to_light = posr.xyz - v_world_pos;
-	float dist = length(to_light);
-	vec3 light_dir = to_light / max(dist, 0.001);
-	float ndoth = max(dot(normal_ws, normalize(light_dir + view_dir)), 0.0);
-	return col.rgb * (2.0 * obj_pow16(ndoth) * vertex_factor);
-}
-
-vec3 obj_mirror_points(vec3 normal_ws, vec3 view_dir) {
-	vec3 sum = vec3(0.0);
-	float count = obj_point_light_count();
-	if (count > 0.5) {
-		sum += obj_mirror_point_one(normal_ws, view_dir,
-				obj_point_light_posr(0), obj_point_light_color(0), v_pixel_point_factor.x);
-	}
-	if (count > 1.5) {
-		sum += obj_mirror_point_one(normal_ws, view_dir,
-				obj_point_light_posr(1), obj_point_light_color(1), v_pixel_point_factor.y);
-	}
-	if (count > 2.5) {
-		sum += obj_mirror_point_one(normal_ws, view_dir,
-				obj_point_light_posr(2), obj_point_light_color(2), v_pixel_point_factor.z);
-	}
-	if (count > 3.5) {
-		sum += obj_mirror_point_one(normal_ws, view_dir,
-				obj_point_light_posr(3), obj_point_light_color(3), v_pixel_point_factor.w);
-	}
-	return sum;
-}
-
-// D3D vertex diffuse saturates hemi + directional + the enabled point
-// lights, then MODULATE2X combines texture and diffuse. [orig: _FFP.fx
-// TBoringFFP; D3D light 0 setup @ 0x5D9CE2..0x5D9D76]
-vec3 obj_ff_lighting(vec3 base_rgb, vec3 normal_ws) {
-	vec3 normal = normalize(normal_ws);
-	vec3 to_light = normalize(-opennova_light_block_dir);
-	float ndotl = max(dot(normal, to_light), 0.0);
-	return base_rgb * min(obj_hemi(normal) + obj_dir_light_color() * ndotl
-			+ v_point_light_diffuse, vec3(1.0)) * 2.0;
-}
-
+// The self-lit law: base x the modulator gain under MODULATE2X.
+// [orig: _FFP.fx SELFLUM; Render_UnpackModulatorToLightScale @ 0x58db30]
 vec3 obj_self_lit(vec3 base_rgb) {
 	return base_rgb * min(opennova_light_block_gain, vec3(1.0)) * 2.0;
 }
 
-vec3 obj_add_local_light(vec3 lit, vec3 base_rgb, vec3 normal_ws) {
-	if (u_local_light_count <= 0) {
-		return lit;
-	}
-	vec3 to_light = u_local_light_position - v_world_pos;
-	float dist = length(to_light);
-	if (dist >= u_local_light_atten_end) {
-		return lit;
-	}
-	float range = max(u_local_light_atten_end - u_local_light_atten_start, 0.001);
-	float atten = 1.0 - clamp((dist - u_local_light_atten_start) / range, 0.0, 1.0);
-	vec3 light_dir = to_light / max(dist, 0.001);
-	float ndotl = max(dot(normalize(normal_ws), light_dir), 0.0);
-	return lit + base_rgb * u_local_light_color *
-			(u_local_light_intensity * ndotl * atten);
-}
-
-// Witnessed device fog policy shared with terrain and water.
+// Witnessed device fog policy, kept for the additive island and the
+// postmultiply source fold (the lit families take Environment fog).
 // [orig: Render_SetFogState @ 0x58A950; CD3DDevice_SetFogParameters @ 0x677960]
 float obj_fog_visibility(float dist, float fog_start, float fog_end, int fog_type) {
 	float safe_end = max(fog_end, 1.0);
@@ -726,14 +188,8 @@ float obj_scene_fog_visibility(vec3 camera_position_world) {
 	);
 }
 
-vec3 obj_apply_fog(vec3 lit, vec3 camera_position_world) {
-	if (!opennova_fog_enabled) {
-		return lit;
-	}
-	return mix(opennova_fog_color, lit,
-			obj_scene_fog_visibility(camera_position_world));
-}
-
+// Additive fades toward BLACK with distance, never toward the fog color —
+// the intent behind retail's additive fog state (ADR 0043 island).
 vec3 obj_apply_additive_fog(vec3 lit, vec3 camera_position_world) {
 	return lit * obj_scene_fog_visibility(camera_position_world);
 }

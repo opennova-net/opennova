@@ -5,7 +5,6 @@ render_mode unshaded, blend_add, depth_draw_never, cull_back, fog_disabled;
 #define OBJ_ALPHA_MOD_FFP
 #define OBJ_COVERAGE_DIFFUSE_ALPHA
 #define OBJ_CLIP_EXPLICIT
-#define OBJ_VERTEX_POINT_LIGHTS_FFP_DIFFUSE
 #define OBJ_MATCHTERRAIN_NO_PASS
 
 #include "res://shaders/object/shared.gdshaderinc"
@@ -15,6 +14,5 @@ render_mode unshaded, blend_add, depth_draw_never, cull_back, fog_disabled;
 #include "res://shaders/object/surface.gdshaderinc"
 #include "res://shaders/object/match_terrain.gdshaderinc"
 #include "res://shaders/object/vertex_standard.gdshaderinc"
-#include "res://shaders/object/fog/additive.gdshaderinc"
 #include "res://shaders/object/technique/fixed.gdshaderinc"
-#include "res://shaders/object/output_opaque.gdshaderinc"
+#include "res://shaders/object/output_add.gdshaderinc"

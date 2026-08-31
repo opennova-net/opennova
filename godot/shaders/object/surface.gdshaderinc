@@ -1,8 +1,5 @@
 float obj_surface_coverage(vec4 base) {
 	float coverage_alpha = base.a;
-	#ifdef OBJ_COVERAGE_VERTEX_DIFFUSE_ALPHA
-	coverage_alpha = v_dir_self_shadow;
-	#endif
 	#ifdef OBJ_COVERAGE_NORMAL_ALPHA
 	coverage_alpha = obj_normal_alpha();
 	#endif

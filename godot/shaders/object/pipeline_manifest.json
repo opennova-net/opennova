@@ -428,8 +428,9 @@
       "implementation": "phong_map",
       "rgb_modulation": "none",
       "alpha_modulation": "none",
-      "coverage_source": "vertex_diffuse_alpha",
-      "clip_class": "skinned_submit_skip"
+      "coverage_source": "full",
+      "clip_class": "skinned_submit_skip",
+      "coverage": "full"
     },
     {
       "engine_enum": "Dot3Tangent",

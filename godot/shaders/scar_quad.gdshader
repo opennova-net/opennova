@@ -20,7 +20,7 @@ shader_type spatial;
 // The scorch TGAs are black RGB under an alpha falloff (max ~0.75): the mark
 // IS the blend. An alpha scissor here (the 2026-08-21 first cut) dropped the
 // blend and painted an opaque black blob.
-render_mode unshaded, blend_mix, depth_draw_never, cull_back, fog_disabled;
+render_mode unshaded, blend_mix, depth_draw_never, cull_back;
 
 // Gamma-space pipeline (D-RMAT-7): raw texel sampling, gamma-space combine,
 // the exact inverse of the blit's transfer curve on the way out.
