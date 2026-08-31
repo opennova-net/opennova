@@ -842,7 +842,12 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			if (has_shadow_bounds) {
 				shadow_mmi->set_custom_aabb(shadow_bounds);
 			}
-			shadow_mmi->set_layer_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
+			// The twin rides the batch's camera-visible world layer: Godot culls
+			// directional shadow casters per camera by visible_layers &
+			// layer_mask, so a marker-only layer never enters the atlas.
+			// SHADOWS_ONLY keeps the twin out of every color pass.
+			shadow_mmi->set_layer_mask(batch_world_layer |
+					Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
 			shadow_mmi->set_cast_shadows_setting(
 					GeometryInstance3D::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
 			if (p_batch.material.is_valid()) {
@@ -1800,7 +1805,14 @@ void MissionObjectPlacer::_add_individual_static_shadow_siblings(
 		mm->set_instance_transform(0, p_local_xform * row.offset);
 		MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
 		mmi->set_multimesh(mm);
-		mmi->set_layer_mask(Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
+		// Same caster-cull rule as the batched twins: the sibling needs the
+		// owner's camera-visible world layer (mirror policy included) or no
+		// camera admits it into the sun's atlas; SHADOWS_ONLY hides it.
+		const uint32_t world_layer = p_model->get_mirror_reflected()
+				? uint32_t(Water::VISUAL_LAYER_WORLD)
+				: uint32_t(Water::VISUAL_LAYER_WORLD_NO_MIRROR);
+		mmi->set_layer_mask(world_layer |
+				Water::VISUAL_LAYER_STATIC_SHADOW_CASTER);
 		mmi->set_cast_shadows_setting(
 				GeometryInstance3D::SHADOW_CASTING_SETTING_SHADOWS_ONLY);
 		if (row.material.is_valid()) {

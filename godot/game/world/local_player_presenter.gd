@@ -122,23 +122,24 @@ func setup(world: GameWorld, camera: Camera3D,
 	_input_router.setup(world, self)
 	_camera_saved_fov = camera.fov if camera != null else -1.0
 	_camera_saved_cull_mask = camera.cull_mask if camera != null else -1
-	# The player camera never draws the FP body layer: retail renders no local
-	# body in first person, and the water mirror never draws persons either
-	# (its reflected entity waves collect only vehicles above water and it has
-	# no player-render leg [orig: Terrain_CollectVisibleEntitiesForReflection
-	# @ 0x5c90a0]) — the body stays a silhouette source only. The viewmodel
-	# layer stays ADMITTED: the FP arms/weapon draw inside the beauty pass
-	# through their shader-side renderfov projection + depth band (retail's
-	# "viewmodel first" step; PlayerViewmodelRig feeds the projection). The
-	# camera excludes the caster marker layers (they are layer-only markers)
-	# and the FP body layer; the body still casts into the scene sun's CSM
-	# (ADR 0043 — the shadow pass gates on the light's caster mask, not this
-	# camera's cull mask), so the local player keeps a ground shadow.
+	# Retail renders no local body in first person, and the water mirror never
+	# draws persons either (its reflected entity waves collect only vehicles
+	# above water and it has no player-render leg
+	# [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]). The FP
+	# body therefore hides via SHADOWS_ONLY on the world layer — NOT via a
+	# camera-excluded layer: Godot culls a directional light's casters per
+	# camera by visible_layers & layer_mask, so a layer-hidden body would lose
+	# its sun shadow too. The viewmodel layer stays ADMITTED: the FP
+	# arms/weapon draw inside the beauty pass through their shader-side
+	# renderfov projection + depth band (retail's "viewmodel first" step;
+	# PlayerViewmodelRig feeds the projection). The caster marker layers
+	# (13/14) stay excluded as belt-and-suspenders: every real caster also
+	# carries a camera-visible world bit, so the strip only ever hides
+	# marker-ONLY instances if one reappears.
 	if _camera != null:
 		_camera.cull_mask = (
 				(_camera.cull_mask | Water.VISUAL_LAYER_VIEWMODEL)
-				& ~(Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
-						| Water.VISUAL_LAYER_SHADOW_CASTER_MASK))
+				& ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK)
 	_viewmodel_rig.setup(world, self, camera)
 	_reset_state()
 	# Attachment is the adoption boundary: discard presentation history produced

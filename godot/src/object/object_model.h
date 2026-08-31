@@ -165,13 +165,12 @@ public:
 	static Vector3 default_hemi_ground_color() { return Vector3(49.0f / 255.0f, 55.0f / 255.0f, 46.0f / 255.0f); }
 
 
-	// Visual-layer bits, mirrored from the authoritative GDScript table in
-	// adapter/environment/water.gd (the water/mirror pass owns the layer
-	// scheme; keep the two in lockstep).
+	// Visual-layer bits, mirrored from the authoritative table in
+	// env/water.h (the water/mirror pass owns the layer scheme; keep the
+	// two in lockstep).
 	enum {
 		LAYER_WORLD = 1 << 0,
 		LAYER_VIEWMODEL = 1 << 11,
-		LAYER_FP_BODY_SHADOW_ONLY = 1 << 12,
 		LAYER_STATIC_SHADOW_CASTER = 1 << 13,
 		LAYER_DYNAMIC_SHADOW_CASTER = 1 << 14,
 		LAYER_WORLD_NO_MIRROR = 1 << 16,

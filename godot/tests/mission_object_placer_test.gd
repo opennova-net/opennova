@@ -460,7 +460,11 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 				GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
 	if shadow_batch != null:
 		assert_eq(shadow_batch.layers,
-				Water.VISUAL_LAYER_STATIC_SHADOW_CASTER)
+				Water.VISUAL_LAYER_WORLD_NO_MIRROR
+						| Water.VISUAL_LAYER_STATIC_SHADOW_CASTER,
+				"the filtered twin rides the batch world layer so the beauty "
+				+ "camera's caster cull admits it; SHADOWS_ONLY keeps it "
+				+ "invisible")
 		assert_eq(shadow_batch.cast_shadow,
 				GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
 		if visible_batch != null:
@@ -640,7 +644,10 @@ func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 		assert_eq(static_shadow.cast_shadow,
 				GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
 		assert_eq(static_shadow.layers,
-				Water.VISUAL_LAYER_STATIC_SHADOW_CASTER)
+				Water.VISUAL_LAYER_WORLD
+						| Water.VISUAL_LAYER_STATIC_SHADOW_CASTER,
+				"the sibling rides its owner's mirror-policy world layer "
+				+ "(GuardTwr authors Reflective) so cameras admit the caster")
 		assert_same(static_shadow.get_parent(), visible_model,
 				"the unmasked caster follows editor moves and husk visibility lifecycle")
 		var before := static_shadow.global_position

@@ -499,13 +499,12 @@ func test_camera_stamps_the_sim_composed_pose_and_policy_fov() -> void:
 func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_models() -> void:
 	# Retail draws the local body/held weapon separately from the near-Z first-person
 	# overlay [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. The hidden
-	# body and held weapon are camera-renderable (cast ON) but hidden by LAYER
-	# alone, so the render-slot capture cameras can photograph the posed body
-	# (SHADOWS_ONLY geometry is invisible to every camera); the beauty camera
-	# excludes the FP layer, the capture channels, AND the caster marker
-	# layers (the entity-shadow shadow map is retired — nothing needs the
-	# markers beauty-admitted). The dedicated viewmodel pass stays
-	# non-casting.
+	# body and held weapon hide via SHADOWS_ONLY on the world layer — Godot
+	# culls a directional light's casters per camera by visible_layers &
+	# layer_mask, so a camera-excluded layer would erase the body's sun shadow
+	# with it. The beauty camera excludes only the caster marker layers
+	# (belt-and-suspenders against marker-only instances). The dedicated
+	# viewmodel pass stays non-casting.
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
@@ -513,9 +512,6 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	var presenter := _attach_presenter(world, camera)
 	await get_tree().process_frame  # setup() mounts the FP pass deferred
 	_frame(world, presenter, camera, 2)
-
-	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
-			"setup() masks the FP body layer off the player camera")
 	# The FP viewmodel renders through the dedicated renderfov pass, never the
 	# player camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own
 	# projection + flush].

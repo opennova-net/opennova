@@ -1353,8 +1353,6 @@ func test_water_mirror_camera_filters_entity_waves_and_never_draws_the_body() ->
 		"the FP arms/weapon overlay never enters the mirrored scene")
 	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 		"caster-only helper instances never enter the color reflection")
-	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
-		"no person enters the mirror — the FP body layer stays out")
 	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
 		"plain (unflagged) world entities stay out of the above-water mirror")
 	assert_ne(mirror.cull_mask & Water.VISUAL_LAYER_WORLD, 0,

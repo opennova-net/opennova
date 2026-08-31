@@ -94,8 +94,6 @@ void Water::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_VIEWMODEL", VISUAL_LAYER_VIEWMODEL);
 	ClassDB::bind_integer_constant(get_class_static(), "",
-			"VISUAL_LAYER_FP_BODY_SHADOW_ONLY", VISUAL_LAYER_FP_BODY_SHADOW_ONLY);
-	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_STATIC_SHADOW_CASTER", VISUAL_LAYER_STATIC_SHADOW_CASTER);
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_DYNAMIC_SHADOW_CASTER", VISUAL_LAYER_DYNAMIC_SHADOW_CASTER);
