@@ -625,4 +625,59 @@ void camera_shake_sample(CameraShakeState &st, uint32_t weather_prng,
 	d_yaw_bam = delta(clamped, st.yaw);
 }
 
+// The five chase-shake frequencies, bit-exact to the retail float pool
+// (flt_7C56A0..flt_7C5690). The counter terms scan 0.4 / 2/7 / 2/11 rad per
+// count; the tick terms are 25/34 and 0.862069 rad per tick (the latter is
+// one ULP off 25/29 — retail's pool holds the typed decimal, not the ratio).
+namespace {
+inline constexpr float kChaseYawFreq = 0.4f;              // flt_7C56A0 (0x3ECCCCCD)
+inline constexpr float kChasePitchFreq = 2.0f / 7.0f;     // flt_7C569C (0x3E924925)
+inline constexpr float kChaseRollFreq = 2.0f / 11.0f;     // flt_7C5698 (0x3E3A2E8C)
+inline constexpr float kChasePitchTickFreq = 25.0f / 34.0f; // flt_7C5694 (0x3F3C3C3C)
+inline constexpr float kChaseRollTickFreq = 0.862069f;    // flt_7C5690 (0x3F5CB08E)
+} // namespace
+
+// [orig: Camera_ComputeThirdPersonView @0x437d10, the mode>=1 shake block
+//  @0x438939..0x4389e5 — see the header note for the per-term map]
+void camera_shake_sample_chase(const CameraShakeState &st, uint32_t weather_prng,
+                               uint32_t tick, int32_t &d_yaw_bam,
+                               int32_t &d_pitch_bam, int32_t &d_roll_bam) {
+	d_yaw_bam = 0;
+	d_pitch_bam = 0;
+	d_roll_bam = 0;
+	// The same whole-block counter gate as the mode-0 leg [orig: @0x43892b].
+	if (st.counter == 0) return;
+
+	// amp = (min(4*counter, 255) * ((prng & 0xFF) + 64)) >> 8
+	// [orig: @0x43893f..0x438967 — the two add eax,eax, the 0xFF clamp, the
+	//  low-byte mask, +64, imul, sar 8]. The SAMPLE clamp here is the STORE cap
+	//  255, not the mode-0 leg's 64.
+	int32_t quad = st.counter * 4;
+	if (quad > kShakeStoreMax) quad = kShakeStoreMax;
+	const int32_t amp =
+			(quad * ((static_cast<int32_t>(weather_prng) & 0xFF) + 64)) >> 8;
+
+	// x87 evaluates each product in double from the float constants; every
+	// term truncates toward zero (ftol) before its integer add/subtract, and
+	// the tick terms are quartered by an arithmetic shift AFTER truncation.
+	const double c = static_cast<double>(st.counter);
+	const double a = static_cast<double>(amp);
+	// fild loads the tick dword SIGNED [orig: fild current_tick @0x4389ad].
+	const double t = static_cast<double>(static_cast<int32_t>(tick));
+	d_yaw_bam = static_cast<int32_t>(
+			std::sin(c * static_cast<double>(kChaseYawFreq)) * a);
+	d_pitch_bam =
+			static_cast<int32_t>(
+					std::sin(c * static_cast<double>(kChasePitchFreq)) * a) -
+			(static_cast<int32_t>(
+					std::sin(t * static_cast<double>(kChasePitchTickFreq)) * a) >> 2);
+	// Roll REPLACES a zero base on this path (the look-at composes roll 0), so
+	// the delta IS the retail roll.
+	d_roll_bam =
+			static_cast<int32_t>(
+					std::sin(c * static_cast<double>(kChaseRollFreq)) * a) -
+			(static_cast<int32_t>(
+					std::cos(t * static_cast<double>(kChaseRollTickFreq)) * a) >> 2);
+}
+
 } // namespace opennova::world

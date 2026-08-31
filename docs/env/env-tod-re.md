@@ -304,7 +304,15 @@ the weather keeps advancing while the entities are held (the reimpl's
   the compass overlay draws), each call re-deriving the view so the frame's
   own sample renders: ported 2026-08-30 as the pre-tick decay, the post-tick
   advance in `local_player_view_tick`, and the per-frame sample in
-  `local_player_view_frame` (the overlay's extra call is not mirrored));
+  `local_player_view_frame`. The compose's mode>=1 leg applies a SECOND,
+  stateless shake instead of the IIR filters — `amp = (min(4*counter, 255) *
+  ((prng & 0xFF) + 64)) >> 8`, `yaw += trunc(sin(C*0.4)*amp)`, `pitch +=
+  trunc(sin(C*2/7)*amp) - (trunc(sin(T*25/34)*amp) >> 2)`, `roll =
+  trunc(sin(C*2/11)*amp) - (trunc(cos(T*0.862069)*amp) >> 2)` over the
+  look-at's zero roll (`@ 0x438939..0x4389e5`; the mode-4 lerp then overwrites
+  the rotation, so only the chase renders it) — ported 2026-08-30 (tidy round)
+  as `camera_shake_sample_chase`, applied in `local_player_view_frame`'s
+  third-person branch; the overlay's extra call is not mirrored (env #38));
   pool-1 entities whose def carries
   `attrib & 0x40` likewise (`@ 0x57ebde..0x57ec29`, the shake when the player's
   parent is displaced); `--Env_QuakeTicks` (`@ 0x57ec61`). Then the HIT BLACKOUT
