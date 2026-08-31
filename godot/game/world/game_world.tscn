@@ -22,7 +22,7 @@ water_path = NodePath("../Water")
 [node name="MissionEnvironment" type="MissionEnvironment" parent="."]
 process_priority = -20
 
-[node name="SkyDome" type="SkyDome" parent="."]
+[node name="SkyPass" type="SkyPass" parent="."]
 environment_path = NodePath("../MissionEnvironment")
 weather_path = NodePath("../Weather")
 

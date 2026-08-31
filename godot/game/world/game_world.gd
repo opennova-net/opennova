@@ -85,7 +85,7 @@ signal minimap_water_changed(mask: ImageTexture)
 @onready var _weather: Weather = get_node_or_null("Weather")
 @onready var _precipitation: Precipitation = get_node_or_null("Precipitation")
 @onready var _celestial: Celestial = get_node_or_null("Celestial")
-@onready var _sky_dome: SkyDome = get_node_or_null("SkyDome")
+@onready var _sky_pass: SkyPass = get_node_or_null("SkyPass")
 @onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
 
 var _dispatcher: FoliageDispatcher
@@ -294,10 +294,17 @@ func _ready() -> void:
 	_frame_pipeline.setup(self)
 	if _clear_color != null and _clear_color.environment != null:
 		_idle_frame_clear_color = _clear_color.environment.background_color
-		# ADR 0043: the environment feeds the lit scene through this
-		# Environment — the hemisphere-sky ambient (background stays BG_COLOR,
-		# the witnessed frame clear) and the Environment fog.
+		# ADR 0043 (d3 amendment): the environment feeds the lit scene through
+		# this Environment — the merged sky.gdshader becomes the real BG_SKY
+		# background (the witnessed frame clear rides the sky material's
+		# u_frame_clear), plus the ambient and Environment fog.
 		_env.set_scene_environment(_clear_color.environment)
+		# Seed the idle clear (the sky boots suppressed; the device frame
+		# takes over once a world runs).
+		var sky_material: ShaderMaterial = _env.get_sky_material()
+		if sky_material != null:
+			sky_material.set_shader_parameter("u_frame_clear",
+					_idle_frame_clear_color)
 	if _terrain != null:
 		_dispatcher = _terrain.get_node_or_null("FoliageDispatcher")
 		if _dispatcher != null:
@@ -325,7 +332,7 @@ func _ready() -> void:
 	# their advance_frame at a defined ladder slot (render_environment_nodes_frame
 	# and render_water_frame), so their idle callbacks stay off here: a process
 	# callback races the camera placement and the legs that consume them.
-	for presenter in [_weather, _sun_shadow, _sky_dome, _celestial, _water]:
+	for presenter in [_weather, _sun_shadow, _sky_pass, _celestial, _water]:
 		if presenter != null:
 			(presenter as Node).set_process(false)
 	_env_presenters_world_driven = true
@@ -1185,9 +1192,14 @@ func is_loaded() -> bool:
 
 
 func get_current_frame_clear_color() -> Color:
-	if _clear_color == null or _clear_color.environment == null:
+	# The 3-state clear rides the sky material now (BG_SKY background).
+	if _env == null:
 		return Color.BLACK
-	return _clear_color.environment.background_color
+	var sky_material: ShaderMaterial = _env.get_sky_material()
+	if sky_material == null:
+		return Color.BLACK
+	var clear = sky_material.get_shader_parameter("u_frame_clear")
+	return clear if clear is Color else Color.BLACK
 
 
 func _sample_panm_clock() -> void:
@@ -2120,8 +2132,8 @@ func get_celestial_node() -> Celestial:
 	return _celestial
 
 
-func get_sky_dome_node() -> SkyDome:
-	return _sky_dome
+func get_sky_pass_node() -> SkyPass:
+	return _sky_pass
 
 
 func get_sun_shadow_node() -> SunShadow:

@@ -600,7 +600,7 @@ func _print_runtime_metadata(world: GameWorld, environment: MissionEnvironment) 
 		"sky_height_target": environment.get_sky_height_target(),
 	}])
 
-	var sky: SkyDome = world.get_node_or_null("SkyDome")
+	var sky: SkyPass = world.get_node_or_null("SkyPass")
 	var sky_material: ShaderMaterial = sky.get_sky_material() if sky != null else null
 	var cloud1: Texture2D = environment.get_sky_map1_tex()
 	var cloud2: Texture2D = environment.get_sky_map2_tex()

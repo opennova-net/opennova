@@ -23,9 +23,9 @@ func _advance_one_second(node: Node, hz: int) -> void:
 	if node is Weather:
 		for _i in hz:
 			(node as Weather).advance_frame(delta)
-	elif node is SkyDome:
+	elif node is SkyPass:
 		for _i in hz:
-			(node as SkyDome).advance_frame(delta)
+			(node as SkyPass).advance_frame(delta)
 	elif node is Water:
 		for _i in hz:
 			(node as Water).advance_frame(delta)
@@ -281,7 +281,7 @@ func _sky_fallback_state_after_one_second(hz: int) -> Array:
 	env.name = "Env"
 	env.environment_data = _loaded_env()
 	mount.add_child(env)
-	var sky := SkyDome.new()
+	var sky := SkyPass.new()
 	sky.environment_path = NodePath("../Env")
 	mount.add_child(sky)
 	_advance_one_second(sky, hz)

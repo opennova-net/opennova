@@ -204,17 +204,10 @@ public:
 	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d, see docs/env/env-tod-re.md]
 	static Color tile_overlay_tint_factor(const Color &p_terrain_tint);
 
-	// The witnessed 21x21 sky dome mesh in Mesh.ARRAY_* layout (VERTEX /
-	// NORMAL / TEX_UV / TEX_UV2 / INDEX populated), built at p_sky_height
-	// [orig: build_sky_dome_mesh @ 0x578db0, see docs/env/env-tod-re.md]. The reimpl builds ONCE at
-	// dome_reference_height() and folds the Y-only height scale into the
-	// vertex shader (env #20's ratified structure; retail re-bakes on
-	// smoothed-height change via SkyDome_SetHeightAndRebuild @ 0x579070).
-	static Array build_sky_dome_arrays(float p_sky_height);
-
-	// 3072 - sqrt(2^23) ~= 175.6906 — the exact apex reference height behind
-	// the shaders' rounded "175.69" divisor [orig: @ 0x578ed4, see docs/env/env-tod-re.md].
-	static float dome_reference_height();
+	// (The dome-mesh array binding retired with the mesh — ADR 0043 d3
+	// amendment: the sky renders as the scene Sky background, evaluating the
+	// witnessed dome surface analytically; env::build_sky_dome_mesh stays in
+	// engine/formats/env as the decode and the intersection oracle.)
 
 	// Celestial bodies place at camera + direction * this distance (world
 	// units, full camera height, identity rotation)

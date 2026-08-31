@@ -54,6 +54,14 @@ opennova::env::Rgb to_rgb(const Vector3 &v) {
 
 MissionEnvironment::MissionEnvironment() {
 	light_state_.instantiate();
+	// The merged sky material lives on the environment node (not the scene
+	// Environment) so standalone fixtures — sky tests without a scene
+	// Environment — still reach a live material; set_scene_environment
+	// attaches it to the real Sky background.
+	Ref<Shader> sky_shader = ResourceLoader::get_singleton()->load(
+			"res://shaders/sky.gdshader");
+	sky_material_.instantiate();
+	sky_material_->set_shader(sky_shader);
 }
 
 void MissionEnvironment::_bind_methods() {
@@ -203,6 +211,8 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::set_scene_environment);
 	ClassDB::bind_method(D_METHOD("get_scene_environment"),
 			&MissionEnvironment::get_scene_environment);
+	ClassDB::bind_method(D_METHOD("get_sky_material"),
+			&MissionEnvironment::get_sky_material);
 	ClassDB::bind_method(D_METHOD("set_glow_enabled", "enabled"),
 			&MissionEnvironment::set_glow_enabled);
 	ClassDB::bind_method(D_METHOD("get_glow_enabled"),
@@ -429,36 +439,36 @@ void MissionEnvironment::set_scene_environment(
 		const Ref<Environment> &p_environment) {
 	scene_environment_ = p_environment;
 	if (scene_environment_.is_null()) {
-		sky_material_.unref();
 		return;
 	}
-	// ADR 0043: the ambient is the witnessed flat term — the outdoor
-	// (sky+ground)/2 average retail loaded into the AmbientColor slot
-	// (runtime/renderer/light_runtime.cpp build_world_lighting carries the
-	// cite) — as AMBIENT_SOURCE_COLOR at the MODULATE2X energy. The witnessed
-	// bytes are set raw and decode canonically to the linear scene (ADR 0043
-	// linear-scene amendment). The .env sky/ground colors still feed the
-	// gradient Sky, but only reflected light samples it (the sky-irradiance
-	// ambient path lost energy at the dark TOD registers — the 03TR dawn
-	// bias); the visible background stays BG_COLOR (the witnessed frame
-	// clear) plus the authored sky dome.
-	Ref<Shader> sky_shader = ResourceLoader::get_singleton()->load(
-			"res://shaders/hemisphere_sky.gdshader");
-	sky_material_.instantiate();
-	sky_material_->set_shader(sky_shader);
+	// ADR 0043 (d3 amendment): the merged sky.gdshader IS the scene's Sky
+	// background — the authored dome renders per pixel as BG_SKY, the water
+	// mirror reanchors it for free through its own camera POSITION, and
+	// REFLECTION_SOURCE_SKY gives chrome the real sky (upper hemisphere) over
+	// the .env hemi ground (lower). The ambient stays the witnessed flat term
+	// — the outdoor (sky+ground)/2 average retail loaded into the
+	// AmbientColor slot (runtime/renderer/light_runtime.cpp
+	// build_world_lighting carries the cite) — as AMBIENT_SOURCE_COLOR at the
+	// MODULATE2X energy (the sky-irradiance ambient path lost energy at the
+	// dark TOD registers — the 03TR dawn bias; re-opening AMBIENT_SOURCE_SKY
+	// is a separate calibration decision).
 	Ref<Sky> sky;
 	sky.instantiate();
 	sky->set_material(sky_material_);
 	sky->set_radiance_size(Sky::RADIANCE_SIZE_64);
+	// TOD palette + cloud scroll change every frame; realtime radiance keeps
+	// chrome tracking them at the small 64 map.
+	sky->set_process_mode(Sky::PROCESS_MODE_REALTIME);
+	scene_environment_->set_background(Environment::BG_SKY);
 	scene_environment_->set_sky(sky);
 	scene_environment_->set_ambient_source(Environment::AMBIENT_SOURCE_COLOR);
 	scene_environment_->set_ambient_light_energy(kModulate2xAmbientEnergy);
 	scene_environment_->set_reflection_source(
 			Environment::REFLECTION_SOURCE_SKY);
 	scene_environment_->set_fog_light_energy(1.0f);
-	// The frame clear (BG_COLOR) already carries the witnessed horizon color;
-	// fog must not tint the background a second time, and no aerial
-	// perspective — the retail law is a plain fog blend.
+	// The sky shader applies its own witnessed skyfog fold; Environment fog
+	// must not tint the background a second time, and no aerial perspective —
+	// the retail law is a plain fog blend.
 	scene_environment_->set_fog_sky_affect(0.0f);
 	scene_environment_->set_fog_aerial_perspective(0.0f);
 	_apply_presentation_toggles();
@@ -513,9 +523,9 @@ void MissionEnvironment::_write_scene_environment(
 	}
 	const EnvLightValues &v = **p_values;
 	if (sky_material_.is_valid()) {
-		// source_color uniforms: set as Colors so the witnessed bytes decode
-		// canonically to the linear scene.
-		sky_material_->set_shader_parameter("u_hemi_sky", to_color(v.hemi_sky));
+		// The radiance map's lower hemisphere: the witnessed .env ground
+		// color (a source_color uniform — set as a Color so the bytes decode
+		// canonically to the linear scene).
 		sky_material_->set_shader_parameter("u_hemi_ground",
 				to_color(v.hemi_ground));
 	}

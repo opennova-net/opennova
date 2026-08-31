@@ -285,4 +285,25 @@ struct SkyDomeMesh {
 
 SkyDomeMesh build_sky_dome_mesh(float sky_height);
 
+// Analytic eye-ray intersection with the same dome surface the mesh builder
+// rasterizes — the oracle behind the sky shader's per-pixel evaluation
+// (godot/shaders/sky.gdshader; ADR 0043 d3 amendment: the dome mesh retired
+// into a real Sky background). Dome-local space: the eye sits at
+// (0, eye_y, 0) with eye_y = camera_y * 0.5 (sky_dome_anchor), the surface
+// is x^2 + z^2 + (y / s + sqrt(2^23))^2 = 3072^2 with y >= 0 and
+// s = sky_height / kSkyDomeReferenceHeight. The far quadratic root is taken
+// (from inside the cap the single positive hit; from above it the far inner
+// wall the mesh's front-culled rasterization showed); a ray landing below
+// the open 1024-unit rim misses.
+struct SkyDomeHit {
+	bool hit = false;
+	float t = 0.0f; // ray distance to the surface (unit direction)
+	float x = 0.0f; // dome-local hit point
+	float y = 0.0f;
+	float z = 0.0f;
+};
+
+SkyDomeHit sky_dome_intersect(float eye_y, float dir_x, float dir_y,
+		float dir_z, float sky_height);
+
 } // namespace opennova::env

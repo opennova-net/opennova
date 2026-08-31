@@ -1,5 +1,7 @@
 # .env environments, time-of-day, and the atmosphere stack
 
+> **ADR 0043 (modern presentation):** the witnessed presentation technique this record describes is retired in OpenNova by [ADR 0043](../adr/0043-modern-presentation-witnessed-intent.md) (divergence-ledger register rows MP-8); the authored-data decode it witnesses stays ported and cited. This record remains the witness authority for the original engine.
+
 How Joint Operations loads `.env` environment files, drives its time-of-day pipeline, and
 renders fog, sky, weather, and celestial bodies, as witnessed in the original engine. This is
 the reverse-engineering record behind `engine/formats/env` (format + TOD math), the `EnvFile` /
@@ -653,6 +655,15 @@ redraws sun glow above it. See render-order divergence D-RORD-9.
 
 ## Sky dome (`render_skybox @ 0x579080`) — full combine recovered (C6)
 
+> **Presentation technique retired in OpenNova by ADR 0043 (d3 amendment,
+> register row MP-8, 2026-08-31).** This section remains the witness
+> authority: the reimpl renders the same dome surface, combine, scroll and
+> skyfog fold as the scene's `shader_type sky` background, intersecting the
+> eye ray analytically per pixel (`env::sky_dome_intersect` in
+> engine/formats/env is the oracle; the mesh builder stays as the decode).
+> Tracked divergences: world-space proximity in place of the clip-space dp3,
+> per-pixel in place of the 21×21 Gouraud interpolation.
+
 Dome = 441 vertices / 800 triangles (21×21 grid, FVF `0x212` = XYZ|NORMAL|TEX2, stride 40,
 `build_sky_dome_mesh @ 0x578db0`). C7 pre-port reads pinned the builder's remaining
 unknowns: the height scale `v14 = skyHeight/175.69` stretches **Y only** (x/z stay at the
@@ -814,10 +825,12 @@ Terrain and other world passes continue to consume the active ordinary fog block
   (1 − overcast)` without the fog shader (`× fogDistInt × 0.0002` with)
   (`@ 0x5acc40..0x5acccd`). The bloom-pass redraw `render_celestial_bodies(1)
   @ 0x582a77` is the fog-shader call (`CD3DDevice_SetFogAndBlendMode(&dword_3262260,
-  2) @ 0x5acb80`), so the typed Q3 disc opacity takes that leg for the moon
-  (`celestial_moon_q3_opacity`, published as `u_q3_opacity`; the sun has no
-  fog-shader variant and publishes its body alpha) and the Q3 blend follows the
-  authored material (the sun/moon `FF_ST_AD_LUM` discs add). There is NO `dir.y` visibility gate and NO
+  2) @ 0x5acb80`) — the witnessed focused-Q3 moon leg (`celestial_moon_q3_opacity`,
+  formerly published as `u_q3_opacity`; the sun has no fog-shader variant). The
+  focused-Q3 presentation retired under ADR 0043 (register MP-6: Environment glow is
+  the canonical bloom, sourced from the depth-tested visible discs — a fully
+  occluded sun therefore no longer feeds bloom, the register row's accepted
+  change); the witness stands. There is NO `dir.y` visibility gate and NO
   `sky_height/175.69` distance scaling — the world overdraws the bodies (draw order:
   dome → bodies → world), which depth-tested no-write materials reproduce in the reimpl.
 - `render_skybox_sun_glow @ 0x5acd00` (live: `render_main_scene @ 0x5c1904` +
@@ -882,11 +895,12 @@ so the disc and the glare survive only where the beauty depth is at or near
 the far plane (cleared sky): EVERY nearer surface, terrain past 64 u included,
 occludes them in the bloom source (the earlier "terrain past 64 u does not
 occlude the disc" reading was wrong). Ported 2026-08-23, source replaced
-2026-08-29, far band ported 2026-08-29: `glare_q3_alpha_fixed` +
-`glare_q3_peak_opacity` + the typed Celestial `SunGlow` producer read of
-`u_q3_opacity`; the beauty-only shader keeps the far-plane disc pin while the
-focused draw remaps its clip depth into `kQ3FarBandMinZ..MaxZ`
-(`renderer/q3_frame.h`) and z-tests it against resolved beauty depth.
+2026-08-29, far band ported 2026-08-29 — then the whole focused-Q3
+presentation retired under ADR 0043 (register MP-6): Environment glow is the
+canonical bloom, sourced from the depth-tested visible discs and glare (the
+far-band z-posture's intent), and the `glare_q3_alpha_fixed` /
+`glare_q3_peak_opacity` engine folds stay live for the direct draws while the
+`u_q3_opacity` / `kQ3FarBandMinZ..MaxZ` delivery is history this record keeps.
 Ported: `env::GlareOcclusionState`/
 `glare_ray_jitter`/`glare_occlusion_tick`/`glare_glow_alpha_fixed` +
 `celestial_sun/moon_alpha_fixed` + `kCelestialBodyDistance` (ctest landmark-pinned;

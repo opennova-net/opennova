@@ -159,9 +159,9 @@ func test_spawn_capture_uses_standalone_game_aspect_not_editor_dock_aspect() -> 
 func test_spawn_capture_reads_native_sky_through_its_public_interface() -> void:
 	var source := FileAccess.get_file_as_string(PROBE_PATH)
 	assert_true(source.contains("sky.get_sky_material()"),
-		"The capture must use SkyDome's native public material interface.")
+		"The capture must use SkyPass's native public material interface.")
 	assert_false(source.contains("sky.sky_material"),
-		"The removed scripted SkyDome field must not break parity captures.")
+		"The removed scripted SkyPass-era field must not break parity captures.")
 	assert_true(source.contains("EXPECTED_VERTICAL_FOV_DEG"),
 		"A loading-screen camera must not be accepted as a gameplay capture.")
 	assert_true(source.contains("transform.origin.distance_to(position)"),

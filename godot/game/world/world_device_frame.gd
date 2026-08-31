@@ -187,8 +187,8 @@ func render_environment_nodes_frame() -> void:
 		_world._weather.advance_frame(_frame_delta)
 	if _world._sun_shadow != null:
 		_world._sun_shadow.advance_frame(_frame_delta)
-	if _world._sky_dome != null:
-		_world._sky_dome.advance_frame(_frame_delta)
+	if _world._sky_pass != null:
+		_world._sky_pass.advance_frame(_frame_delta)
 	if _world._celestial != null:
 		_world._celestial.advance_frame(_frame_delta)
 
@@ -299,14 +299,6 @@ func render_sun_veil_frame() -> void:
 	if veil_weather == null or _world._celestial == null:
 		return
 	veil_weather.set_sun_veil_stopdown(_world._celestial.get_sun_veil_stopdown())
-
-
-## The render-slot ground-shadow plan for this camera (GameFramePipeline,
-## after the material frame: render_light_frame pushed this frame's
-## LightScene and light context into the device, the material frame may
-## have rebuilt the model subtrees the capture channels are stamped on, and
-## slot priority plus the capture poses are camera-relative)
-## [orig: render_shadow_pass @ 0x5d7b70 once per main scene frame].
 
 
 func mix_audio_frame(ticks_run: int) -> void:
@@ -505,8 +497,8 @@ func debug_refresh_render_pose(camera: Camera3D) -> Error:
 	# before terrain, water between terrain and foliage). A fixture freezes
 	# their parent before moving the capture camera, so drive their public
 	# zero-delta frame seams explicitly after that move.
-	if _world._sky_dome != null:
-		_world._sky_dome.advance_frame(0.0)
+	if _world._sky_pass != null:
+		_world._sky_pass.advance_frame(0.0)
 	if _world._water != null:
 		# Water's public frame seam retargets the mirror/strip and advances its
 		# render-noise counter exactly once. The fixture freezes immediately after
@@ -554,25 +546,31 @@ func _stamp_iris_samples(camera_xform: Transform3D) -> void:
 
 func _restore_idle_frame_clear_color() -> void:
 	_world._clear_env_generation = -1
-	if _world._clear_color == null or _world._clear_color.environment == null:
+	if _world._env == null:
 		return
-	_world._clear_color.environment.background_color = _world._idle_frame_clear_color
+	var sky_material: ShaderMaterial = _world._env.get_sky_material()
+	if sky_material == null:
+		return
+	# Idle/unloaded: suppress the sky background and paint the idle clear
+	# (the shader defaults cover first frames before any write).
+	sky_material.set_shader_parameter("u_sky_suppressed", true)
+	sky_material.set_shader_parameter("u_frame_clear",
+			_world._idle_frame_clear_color)
 
 
 # The witnessed frame clear: the horizon-blended skyfog above water, the lit
 # water color underwater [orig: Render_ProcessMainSceneFrame @ 0x5ca776..
 # 0x5ca792 - clear color = alternate_fog ? 0x808080 : cam above water ?
 # skyfog[0] : Env_WaterColorLit; the vehicle alternate-fog view is not modeled
-# yet]. Both branches serve RENDER-SPACE (x2-gained) colors, consumed VERBATIM
-# by the modulate2x-path Clear this renderer reproduces (D-RMAT-7): above water the
-# post-blend DOUBLED skyfog, underwater Env_WaterColorLit = water x light >> 7;
-# the halving branch [orig: @ 0x67715d] is the non-modulate2x fallback with no
-# Godot analog. The ClearColor Environment must stay BG_COLOR with ambient
-# disabled - BG_SKY with no sky renders black and swallows these writes
-# (GUT-pinned).
+# yet]. The scene background is the real Sky (ADR 0043 d3 amendment): the
+# 3-state selection feeds the sky shader's u_frame_clear — painted for the
+# open below-rim region and, with u_sky_suppressed (the blink 0x2 indoors
+# gate — this routine is the ONE writer), for the whole background.
 func _update_frame_clear_color() -> void:
-	if _world._clear_color == null or _world._clear_color.environment == null \
-			or _world._env == null:
+	if _world._env == null:
+		return
+	var sky_material: ShaderMaterial = _world._env.get_sky_material()
+	if sky_material == null:
 		return
 	# The clear SELECTION (black indoors / skyfog above water / lit water
 	# underwater) is the engine's (environment_state.h carries the witness);
@@ -581,7 +579,8 @@ func _update_frame_clear_color() -> void:
 	if _world._occlusion.blink_indoors:
 		if _world._clear_env_generation != -2:
 			_world._clear_env_generation = -2
-			_world._clear_color.environment.background_color = (
+			sky_material.set_shader_parameter("u_sky_suppressed", true)
+			sky_material.set_shader_parameter("u_frame_clear",
 					_world._env.frame_clear_color_for(true, true))
 		return
 	var above := not _world._env.is_underwater_view()
@@ -590,5 +589,6 @@ func _update_frame_clear_color() -> void:
 		return
 	_world._clear_env_generation = gen
 	_world._clear_above_water = above
-	_world._clear_color.environment.background_color = (
+	sky_material.set_shader_parameter("u_sky_suppressed", false)
+	sky_material.set_shader_parameter("u_frame_clear",
 			_world._env.frame_clear_color_for(false, above))

@@ -76,6 +76,17 @@ hardest-to-host pipelines defend content that does not exist).
    the water planar mirror, weather/precipitation, coronas, MatchTerrain, NVG
    post, underwater murk, the terrain splat chain.
 
+   *Amended 2026-08-31 (register row MP-8):* the sky-dome island is re-scoped.
+   The authored data (.env sky/cloud palette, cloud textures, the scroll law,
+   the skyfog fold, sky height) stays witnessed and engine-decoded, but the
+   dome-MESH rendering technique retires into the scene's real
+   `shader_type sky` background, which evaluates the same witnessed dome
+   surface analytically per pixel (`env::sky_dome_intersect` is the engine
+   oracle). `REFLECTION_SOURCE_SKY` therefore reflects the authored sky —
+   closing the never-built ReflectionProbe gap — and the water mirror
+   reanchors the sky for free through its own camera. The celestial `.3di`
+   ladder stays as authored-content geometry.
+
 4. **ADR 0023 re-scoped.** Decision 1 (the fixed-function look as target) is
    superseded for presentation by decision 1 above. Decision 2 survives re-scoped:
    the D3D device layer remains the **witness source for decoding intent** — what a

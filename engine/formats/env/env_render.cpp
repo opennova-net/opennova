@@ -606,6 +606,44 @@ SkyDomeMesh build_sky_dome_mesh(float sky_height) {
 	return mesh;
 }
 
+SkyDomeHit sky_dome_intersect(float eye_y, float dir_x, float dir_y,
+		float dir_z, float sky_height) {
+	// The continuous surface behind build_sky_dome_mesh's vertices (the
+	// header carries the derivation): substitute o + t*d into
+	// x^2 + z^2 + (y/s + C)^2 = R^2 with o = (0, eye_y, 0).
+	SkyDomeHit result{};
+	const double sqrt_base = std::sqrt(8388608.0); // C = sqrt(2^23)
+	const double radius_sq = static_cast<double>(9437184.0f); // R^2 = 3072^2
+	const double s = std::max(static_cast<double>(sky_height), 0.01) /
+			(3072.0 - sqrt_base);
+	const double a = static_cast<double>(eye_y) / s + sqrt_base;
+	const double b = static_cast<double>(dir_y) / s;
+	const double dx = static_cast<double>(dir_x);
+	const double dy = static_cast<double>(dir_y);
+	const double dz = static_cast<double>(dir_z);
+	const double a_q = dx * dx + dz * dz + b * b;
+	const double b_q = 2.0 * a * b;
+	const double k_q = a * a - radius_sq;
+	const double disc = b_q * b_q - 4.0 * a_q * k_q;
+	if (disc < 0.0 || a_q <= 0.0) {
+		return result;
+	}
+	const double t = (-b_q + std::sqrt(disc)) / (2.0 * a_q);
+	if (t <= 0.0) {
+		return result;
+	}
+	const double hy = static_cast<double>(eye_y) + t * dy;
+	if (hy < -1.0e-3) {
+		return result; // below the open rim
+	}
+	result.hit = true;
+	result.t = static_cast<float>(t);
+	result.x = static_cast<float>(t * dx);
+	result.y = static_cast<float>(hy);
+	result.z = static_cast<float>(t * dz);
+	return result;
+}
+
 // ---------------------------------------------------------------------------
 // Water surface
 

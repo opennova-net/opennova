@@ -82,7 +82,6 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("tod_advance_per_tick", "minutes_per_day"), &EnvFile::tod_advance_per_tick);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("tile_overlay_tint_factor", "terrain_tint"), &EnvFile::tile_overlay_tint_factor);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("dome_reference_height"), &EnvFile::dome_reference_height);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("cloud_uv_rate_per_second", "sky_speed"), &EnvFile::cloud_uv_rate_per_second);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_body_distance"), &EnvFile::celestial_body_distance);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_sun_alpha", "overcast_blend", "sun_dim_pct"), &EnvFile::celestial_sun_alpha);
@@ -575,46 +574,6 @@ Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
 	const opennova::env::TerrainTint tint =
 			opennova::env::terrain_tint_from_rgb(to_rgb(p_terrain_tint));
 	return to_color(opennova::env::tile_overlay_tint_factor(tint));
-}
-
-Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
-	// [orig: build_sky_dome_mesh @ 0x578db0, see docs/env/env-tod-re.md] — engine/formats/env owns the math; this
-	// repacks the plain vectors into Mesh.ARRAY_* surface arrays.
-	const opennova::env::SkyDomeMesh mesh = opennova::env::build_sky_dome_mesh(p_sky_height);
-	const int vertex_count = static_cast<int>(mesh.positions.size() / 3);
-
-	PackedVector3Array vertices;
-	PackedVector3Array normals;
-	PackedVector2Array uv1;
-	PackedVector2Array uv2;
-	vertices.resize(vertex_count);
-	normals.resize(vertex_count);
-	uv1.resize(vertex_count);
-	uv2.resize(vertex_count);
-	for (int i = 0; i < vertex_count; ++i) {
-		vertices[i] = Vector3(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]);
-		normals[i] = Vector3(mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]);
-		uv1[i] = Vector2(mesh.uv1[i * 2], mesh.uv1[i * 2 + 1]);
-		uv2[i] = Vector2(mesh.uv2[i * 2], mesh.uv2[i * 2 + 1]);
-	}
-	PackedInt32Array indices;
-	indices.resize(static_cast<int>(mesh.indices.size()));
-	for (int i = 0; i < static_cast<int>(mesh.indices.size()); ++i) {
-		indices[i] = mesh.indices[i];
-	}
-
-	Array arrays;
-	arrays.resize(Mesh::ARRAY_MAX);
-	arrays[Mesh::ARRAY_VERTEX] = vertices;
-	arrays[Mesh::ARRAY_NORMAL] = normals;
-	arrays[Mesh::ARRAY_TEX_UV] = uv1;
-	arrays[Mesh::ARRAY_TEX_UV2] = uv2;
-	arrays[Mesh::ARRAY_INDEX] = indices;
-	return arrays;
-}
-
-float EnvFile::dome_reference_height() {
-	return static_cast<float>(opennova::env::kSkyDomeReferenceHeight);
 }
 
 float EnvFile::celestial_body_distance() {

@@ -120,9 +120,10 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 		var terrain: Terrain = _world.get_terrain_node()
 		if terrain != null:
 			terrain.visible = not indoors
-		var sky: SkyDome = _world.get_sky_dome_node()
-		if sky != null:
-			sky.visible = not indoors
+		# The sky is the scene's Sky background now (no node to hide): the
+		# per-frame clear routine writes u_sky_suppressed on the sky material
+		# from this blink_indoors state — one writer, world_device_frame's
+		# _update_frame_clear_color.
 		var celestial: Celestial = _world.get_celestial_node()
 		if celestial != null:
 			celestial.visible = not indoors
@@ -424,9 +425,8 @@ func _reset_blink_frame_gates() -> void:
 		var terrain: Terrain = _world.get_terrain_node()
 		if terrain != null:
 			terrain.visible = true
-		var sky: SkyDome = _world.get_sky_dome_node()
-		if sky != null:
-			sky.visible = true
+		# (The sky background un-suppresses through the clear routine once
+		# blink_indoors drops below.)
 		var celestial: Celestial = _world.get_celestial_node()
 		if celestial != null:
 			celestial.visible = true

@@ -55,7 +55,7 @@ add_library(${TARGET_NAME} SHARED
     mission/mission_object_placer.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
-    env/sky_dome.cpp
+    env/sky_pass.cpp
     env/sun_shadow.cpp
     env/water.cpp
     env/weather.cpp

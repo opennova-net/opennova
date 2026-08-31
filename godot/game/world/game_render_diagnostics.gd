@@ -31,7 +31,7 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 	var env: MissionEnvironment = world.get_environment_node()
 	var weather: Weather = world.get_weather_node()
 	var water: Water = world.get_water_node()
-	var sky: SkyDome = world.get_sky_dome_node()
+	var sky: SkyPass = world.get_sky_pass_node()
 	var celestial: Celestial = world.get_celestial_node()
 	var dynamic_shadow: SunShadow = world.get_sun_shadow_node()
 	var clear: WorldEnvironment = world.get_clear_color_node()
@@ -251,23 +251,20 @@ static func _celestial_state(celestial: Celestial) -> Dictionary:
 	return state
 
 
-static func _sky_state(sky: SkyDome) -> Dictionary:
+static func _sky_state(sky: SkyPass) -> Dictionary:
 	if sky == null:
-		return {"available": false, "built": false}
+		return {"available": false}
 	var material: ShaderMaterial = sky.get_sky_material()
-	var mesh: MeshInstance3D = sky.get_mesh_instance()
 	return {
 		"available": true,
-		"built": sky.is_built(),
-		"visible": sky.is_visible_in_tree(),
-		"mesh_visible": mesh.is_visible_in_tree() if mesh != null else false,
 		"shader": _shader_parameters(material, [
 			"u_flat_pass", "u_flat_color", "u_sky_base", "u_sky_bright",
 			"u_sky_highlight", "u_cloud_base", "u_cloud_highlight",
 			"u_cloud_edge", "u_sun_dir", "u_light_dir", "u_fog_color",
 			"u_fog_end", "u_sky_height", "u_has_clouds",
 			"u_scroll_offset1", "u_scroll_offset2", "u_cloud_tex1",
-			"u_cloud_tex2",
+			"u_cloud_tex2", "u_frame_clear", "u_sky_suppressed",
+			"u_hemi_ground",
 		]),
 	}
 

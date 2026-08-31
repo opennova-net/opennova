@@ -777,6 +777,47 @@ int main() {
 		if (!expect(near(tall.normals[22 * 3 + 1], 0.9233970f, 1e-5f), "dome pin: tall.normals[22 * 3 + 1], 0.9233970f, 1e-5f")) return 1;
 		if (!expect(near(tall.normals[22 * 3 + 2], 0.3650595f, 1e-5f), "dome pin: tall.normals[22 * 3 + 2], 0.3650595f, 1e-5f")) return 1;
 		if (!expect(tall.indices == ref.indices, "indices are height-independent")) return 1;
+
+		// --- Analytic intersection oracle (ADR 0043 d3 amendment) -----------
+		// A ray shot from a sample dome-local eye toward every mesh vertex
+		// must land back on that vertex: the shader's per-pixel evaluation and
+		// the rasterized mesh describe ONE surface. (Skip the apex-adjacent
+		// column where the ray from below grazes tangentially.)
+		for (const SkyDomeMesh *m : {&ref, &tall}) {
+			const float height = (m == &ref)
+					? static_cast<float>(kSkyDomeReferenceHeight)
+					: 250.0f;
+			const float eye_y = 3.7f; // an arbitrary in-cap camera_y * 0.5
+			int checked = 0;
+			for (int v = 0; v < kSkyDomeVertices; ++v) {
+				const float vx = m->positions[v * 3 + 0];
+				const float vy = m->positions[v * 3 + 1];
+				const float vz = m->positions[v * 3 + 2];
+				const float dxr = vx;
+				const float dyr = vy - eye_y;
+				const float dzr = vz;
+				const float len =
+						std::sqrt(dxr * dxr + dyr * dyr + dzr * dzr);
+				if (len < 1.0f || vy <= eye_y) {
+					continue; // rim-row vertices below the eye graze
+				}
+				const SkyDomeHit hit = sky_dome_intersect(eye_y, dxr / len,
+						dyr / len, dzr / len, height);
+				if (!expect(hit.hit, "oracle: every upward vertex ray hits")) return 1;
+				if (!expect(std::fabs(hit.x - vx) < 0.05f &&
+								std::fabs(hit.y - vy) < 0.05f &&
+								std::fabs(hit.z - vz) < 0.05f,
+							"oracle: the analytic hit lands on the mesh vertex")) return 1;
+				++checked;
+			}
+			if (!expect(checked > 350, "oracle: the sweep covered the dome")) return 1;
+		}
+		// Below-rim and downward rays miss (the open region the frame clear
+		// paints).
+		if (!expect(!sky_dome_intersect(3.7f, 0.0f, -1.0f, 0.0f,
+							static_cast<float>(kSkyDomeReferenceHeight))
+							 .hit,
+					"oracle: straight down misses the open dome")) return 1;
 	}
 
 	// --- Water noise textures + UV state [orig: Water_GenerateNoiseTextures

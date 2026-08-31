@@ -4,7 +4,7 @@ extends GutTest
 # ENG-1 — environment parity vectors (docs/maturity-program.md, ENG track).
 #
 # Pins the GDScript-visible outputs of the environment stack —
-# MissionEnvironment / Weather / SkyDome / Water (+ the reachable
+# MissionEnvironment / Weather / SkyPass / Water (+ the reachable
 # Celestial math via EnvFile statics), godot/src/environment/*.gd —
 # against committed vectors over a deterministic in-code corpus, so ENG-2 can
 # port the math into engine/formats/env and delete the GDScript with these staying green
@@ -102,7 +102,7 @@ extends GutTest
 #   sky/cloud ramps now run through their retail WeatherColorBlock pipelines
 #   and per-tick writeback. Fog and skyfog chase the undoubled authored bytes;
 #   the horizon blend precedes the saturating render-space double
-#   [orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f1b1], and SkyDome
+#   [orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f1b1], and SkyPass
 #   consumes that same final skyfog as the frame clear [orig: sub_579CB0
 #   @ 0x579cb0]. The 12 listed weather rows moved only in their fog tokens;
 #   ten low-fog grid rows moved only the skyfog token to the already-pinned
@@ -225,7 +225,6 @@ const EXPECTED_BYTES := {
 	"celestial/glare_sweep": "0000 0000 0000 0000 0000 0000 0600 2500 5501 8B0B C028",
 	"envfile/derived": "9AFFFF 9A9A9A 7A5F43",
 	"sky/flat": "01 2D3C4B",
-	"sky/mesh": "441 2400 0 22 21 0 1 22 1 23 22 1 2 23",
 	"smoother/clamped": "FE0000 FD0000 FC0000 FB0000",
 	"smoother/decay": "DF7038 C36231 AB562B 954B26 834221 72391D 643219 582C16",
 	"smoother/rise": "201810 3C2D1E 543F2A 6A4F35 7C5D3E 8D6947 9B744E A77D54",
@@ -296,11 +295,9 @@ const EXPECTED_FLOATS := {
 	"dir/t1900": [-0.342010498, -0.243207574, -0.907663107, -0.500000000, 0.224140391, 0.836503923],
 	"dir/t2200": [-0.342010498, -0.813788652, -0.469840765, -0.500000000, 0.749988914, 0.433006197],
 	"envfile/fog_type0": [0.000000000, 0.004158883, 1000.000000000],
-	"sky/anchor": [512.000000000, 32.000000000, -256.000000000, 175.000000000, 64.000000000],
 	"sky/flat": [250.000000000],
 	"sky/k001": [0.124992847, -0.062492847, 0.062495232, -0.031247616],
 	"sky/k064": [0.121737681, -0.059237681, 0.060325161, -0.030162523],
-	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
 	"water/mission_override": [42.500000000, 7.000000000],
 	"water/strip": [-2521.397949219, 7.000000000, -2033.695800781, 134.420776367, 7.000000000, -59.729457855],
 	"water/uv_state": [1.000164866, 0.200032964, 1.562694907, 0.781444907],
@@ -590,32 +587,20 @@ func _collect_weather(bytes: Dictionary, floats: Dictionary) -> void:
 	bytes["wc/long_seq"] = " ".join(long_seq)
 
 func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
-	var cam := _add_camera(Vector3(512.0, 64.0, -256.0))
+	var _cam := _add_camera(Vector3(512.0, 64.0, -256.0))
 	var env_node := _add_env_node(_make_cfg(0), "EnvSky0")
 	env_node.time_of_day = 1200.0
 
-	var sky: Node = SkyDome.new()
+	var sky: Node = SkyPass.new()
 	sky.name = "Sky0"
 	sky.environment_path = NodePath("../EnvSky0")
 	add_child_autofree(sky)
 
-	# Dome mesh invariants [orig: build_sky_dome_mesh @ 0x578db0]: 21x21 =
-	# 441 vertices, 20*20*2 = 800 triangles (2400 indices).
-	var mesh: ArrayMesh = sky.get_mesh_instance().mesh
-	var arrays := mesh.surface_get_arrays(0)
-	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-	var index_head := PackedStringArray()
-	for i in 12:
-		index_head.append(str(indices[i]))
-	bytes["sky/mesh"] = "%d %d %s" % [positions.size(), indices.size(), " ".join(index_head)]
-	# Sampled dome vertices (apex row, first ring, mid dome, outer corner).
-	var samples: Array[int] = [0, 22, 220, 440]
-	var vertex_floats: Array = []
-	for sample_index in samples:
-		var v := positions[sample_index]
-		vertex_floats.append_array([v.x, v.y, v.z])
-	floats["sky/verts"] = vertex_floats
+	# (The sky/mesh, sky/verts and sky/anchor vectors retired with the dome
+	# mesh — ADR 0043 d3 amendment, register MP-8: the surface formulas are
+	# engine-oracled by env::sky_dome_intersect + the env_render ctest sweep,
+	# and the anchor law survives as the shader's dome-space eye height.
+	# ADR 0043 d4: vector families pinning deleted technique retire with it.)
 
 	# Scroll UV offsets after fixed ticks at sky_speed 15: the weather core's
 	# RAMPING rate (the snap refreshes only the target — the rate climbs by
@@ -632,16 +617,12 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 		var off1: Vector2 = sky.get_sky_material().get_shader_parameter("u_scroll_offset1")
 		var off2: Vector2 = sky.get_sky_material().get_shader_parameter("u_scroll_offset2")
 		floats["sky/k%03d" % checkpoint] = [off1.x, off1.y, off2.x, off2.y]
-	# Dome anchor rides at half camera height [orig: render_skybox @ 0x5790d0].
-	var dome_pos: Vector3 = sky.get_mesh_instance().global_position
-	var sky_height: float = sky.get_sky_material().get_shader_parameter("u_sky_height")
-	floats["sky/anchor"] = [dome_pos.x, dome_pos.y, dome_pos.z, sky_height, cam.global_position.y]
 
 	# advanced_clouds 0 flat pass [orig: render_skybox @ 0x579b42]: the dome
 	# flat-shades with cloud_tint (cfg1).
 	var env_flat := _add_env_node(_make_cfg(1), "EnvSkyFlat")
 	env_flat.time_of_day = 1200.0
-	var sky_flat: Node = SkyDome.new()
+	var sky_flat: Node = SkyPass.new()
 	sky_flat.name = "SkyFlat"
 	sky_flat.environment_path = NodePath("../EnvSkyFlat")
 	add_child_autofree(sky_flat)

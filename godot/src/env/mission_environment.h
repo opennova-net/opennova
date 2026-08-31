@@ -198,6 +198,10 @@ public:
 	// from the retail fog block. Null detaches.
 	void set_scene_environment(const Ref<Environment> &p_environment);
 	Ref<Environment> get_scene_environment() const { return scene_environment_; }
+	// The scene Sky's material (the merged sky.gdshader): owned here so
+	// standalone fixtures reach a live material before any scene Environment
+	// exists; SkyPass pushes the per-frame uniforms into it.
+	Ref<ShaderMaterial> get_sky_material() const { return sky_material_; }
 	// Modern-presentation taste knobs (ADR 0043): HDR glow (threshold 1.0 —
 	// only over-unity emission and additive stacks bloom) and shadowed
 	// volumetric light shafts through the scene sun's CSM.

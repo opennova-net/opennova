@@ -927,7 +927,7 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	var world := packed.instantiate()
 	add_child_autofree(world)
 	assert_true(world is GameWorld, "the root carries the GameWorld script")
-	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial"]:
+	for child_name in ["Terrain", "MissionEnvironment", "SkyPass", "Weather", "Water", "Celestial"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
 	assert_not_null(world.get_node_or_null("Terrain/FoliageDispatcher"))
 	assert_null(world.get_node_or_null("Terrain/TileOverlay"),
@@ -1104,12 +1104,12 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 
 
 func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
-	# _update_frame_clear_color() writes the witnessed frame clear into the
-	# ClearColor Environment's background_color every frame - but the scene
-	# resource decides whether that color ever renders. The Wave-1 scene shipped
-	# background_mode = 2 (BG_SKY) with no Sky resource, which renders BLACK and
-	# silently swallows the env-#21 clear consumer: a 1px black dome-rim seam in
-	# ground views, a black band in aerial views. Pin the mode so it can't drift.
+	# ADR 0043 d3 amendment: the merged sky.gdshader IS the scene background
+	# (BG_SKY with a REAL Sky resource — the Wave-1 null-sky black trap cannot
+	# recur because set_scene_environment installs the Sky in the same call
+	# that selects the mode), and the witnessed 3-state frame clear rides the
+	# sky material's u_frame_clear (painted for below-rim misses and the
+	# suppressed sky) [orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792].
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
@@ -1121,18 +1121,25 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 	assert_not_null(clear.environment, "ClearColor carries an Environment resource")
 	if clear.environment == null:
 		return
-	assert_eq(clear.environment.background_mode, Environment.BG_COLOR,
-		"BG_COLOR renders background_color; BG_SKY with a null sky renders BLACK and silently swallows the witnessed frame clear [orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]")
+	assert_eq(clear.environment.background_mode, Environment.BG_SKY,
+		"the merged sky.gdshader is the scene's Sky background (ADR 0043 d3 amendment)")
+	assert_not_null(clear.environment.sky,
+		"MissionEnvironment.set_scene_environment installs the real Sky")
+	if clear.environment.sky != null:
+		assert_eq(clear.environment.sky.sky_material,
+			(world.get_node("MissionEnvironment") as MissionEnvironment).get_sky_material(),
+			"the Sky renders the environment node's merged sky material")
+		assert_eq(clear.environment.sky.process_mode, Sky.PROCESS_MODE_REALTIME,
+			"per-frame TOD/scroll changes reach the radiance map")
 	# ADR 0043: the ambient is the witnessed flat outdoor term as
 	# AMBIENT_SOURCE_COLOR (the sky-irradiance path lost energy at the dark
-	# TOD registers — the 03TR dawn bias); the gradient hemisphere Sky stays
-	# as the reflection source, and the visible background stays BG_COLOR
-	# above, so the witnessed frame clear still renders.
+	# TOD registers — the 03TR dawn bias); the REAL sky serves reflections.
 	assert_eq(clear.environment.ambient_light_source,
 		Environment.AMBIENT_SOURCE_COLOR,
 		"the witnessed outdoor ambient average is the lit scene's ambient source (ADR 0043)")
-	assert_not_null(clear.environment.sky,
-		"MissionEnvironment.set_scene_environment installs the hemisphere Sky")
+	assert_eq(clear.environment.reflected_light_source,
+		Environment.REFLECTION_SOURCE_SKY,
+		"chrome reflects the real sky (the ReflectionProbe gap closes)")
 
 
 func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear() -> void:
@@ -3089,13 +3096,15 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	add_child_autofree(world)
 	_load_minimal_mission(world, "", func(mission: MissionData) -> void:
 		assert_true(mission.set_header_flag(MissionData.ATTRIB_FORCE_INDOORS, true)))
-	var sky := world.get_node("SkyDome") as Node3D
+	var env := world.get_node("MissionEnvironment") as MissionEnvironment
+	var sky_material: ShaderMaterial = env.get_sky_material()
 	var water := world.get_node("Water") as Node3D
 	var terrain := world.get_node("Terrain") as Node3D
 
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_false(terrain.visible, "indoors hides the terrain render")
-	assert_false(sky.visible, "indoors skips the skybox pass")
+	assert_eq(sky_material.get_shader_parameter("u_sky_suppressed"), true,
+			"indoors suppresses the sky background (the skybox-pass skip)")
 	assert_true(water.visible, "the indoors bit alone leaves water on")
 
 	# The outdoors edge: clear the mission attribute the load latched (the same
@@ -3103,16 +3112,17 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	world.set("_mission_forces_indoors", false)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_true(terrain.visible, "outdoors restores the terrain")
-	assert_true(sky.visible, "outdoors restores the sky")
+	assert_eq(sky_material.get_shader_parameter("u_sky_suppressed"), false,
+			"outdoors restores the sky background")
 	assert_true(water.visible, "outdoors leaves the water on")
 
 	# An unload while indoors must not leach into the next mission.
 	world.set("_mission_forces_indoors", true)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
-	assert_false(sky.visible, "back indoors before the unload")
+	assert_eq(sky_material.get_shader_parameter("u_sky_suppressed"), true,
+			"back indoors before the unload")
 	world.unload()
 	assert_true(terrain.visible, "unload restores the terrain gate")
-	assert_true(sky.visible, "unload restores the sky gate")
 
 
 func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:

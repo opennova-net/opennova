@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 185,
+  "resource_count": 184,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
@@ -131,27 +131,6 @@
       ]
     },
     {
-      "id": "terrain-editor-preview",
-      "patterns": [
-        "terrain_editor.gdshader"
-      ],
-      "light_behavior": "editor_visualization_only",
-      "parity_status": "editor_derived",
-      "docs": [
-        "docs/terrain/terrain-re.md"
-      ],
-      "retail_citations": [
-        {
-          "address": "0x605260",
-          "function": "compile_terrain_pixel_shaders",
-          "function_start": "0x605260"
-        }
-      ],
-      "exceptions": [
-        "Editor-only authored preview; excluded from the retail gameplay/highest-quality capture path"
-      ]
-    },
-    {
       "id": "foliage",
       "patterns": [
         "foliage_*.gdshader",
@@ -234,9 +213,41 @@
       ]
     },
     {
-      "id": "sky-and-celestial",
+      "id": "sky-background",
       "patterns": [
-        "sky.gdshader",
+        "sky.gdshader"
+      ],
+      "light_behavior": "active_sun_or_moon_direction_and_tod_color",
+      "parity_status": "modern_presentation",
+      "docs": [
+        "docs/env/env-tod-re.md",
+        "docs/render/render-order-re.md",
+        "docs/adr/0043-modern-presentation-witnessed-intent.md"
+      ],
+      "retail_citations": [
+        {
+          "address": "0x579080",
+          "function": "render_skybox",
+          "function_start": "0x579080"
+        },
+        {
+          "address": "0x578db0",
+          "function": "build_sky_dome_mesh",
+          "function_start": "0x578db0"
+        },
+        {
+          "address": "0x5c8090",
+          "function": "CTerrainRenderer_BuildLightingShaderConstants",
+          "function_start": "0x5c8090"
+        }
+      ],
+      "exceptions": [
+        "ADR-0043"
+      ]
+    },
+    {
+      "id": "celestial",
+      "patterns": [
         "celestial.gdshader",
         "celestial_additive.gdshader"
       ],
@@ -370,33 +381,6 @@
         }
       ],
       "exceptions": []
-    },
-    {
-      "id": "hemisphere-ambient-sky",
-      "patterns": [
-        "hemisphere_sky.gdshader"
-      ],
-      "light_behavior": "ambient_and_reflection_source_gradient",
-      "parity_status": "modern_presentation",
-      "docs": [
-        "docs/render/render-lighting-re.md",
-        "docs/adr/0043-modern-presentation-witnessed-intent.md"
-      ],
-      "retail_citations": [
-        {
-          "address": "0x5c8090",
-          "function": "CTerrainRenderer_BuildLightingShaderConstants",
-          "function_start": "0x5c8090"
-        },
-        {
-          "address": "0x5d89e0",
-          "function": "RenderBatchCtx_StoreLightingConstants",
-          "function_start": "0x5d89e0"
-        }
-      ],
-      "exceptions": [
-        "ADR-0043"
-      ]
     },
     {
       "id": "particle-distort",

@@ -798,7 +798,7 @@ func test_windowed_probe_exercises_direction_hemisphere_and_gameplay_points() ->
 		"\"direction_a\"", "\"direction_b\"", "\"hemi_sky\"", "\"hemi_ground\"", "\"ambient_off\"",
 		"\"ambient_on\"", "\"point_off\"", "\"point_on\"",
 		"DirectionalLight3D.new()", "OmniLight3D.new()",
-		"hemisphere_sky.gdshader", "AMBIENT_SOURCE_SKY",
+		"res://shaders/sky.gdshader", "u_hemi_ground", "AMBIENT_SOURCE_SKY",
 		"\"res://shaders/object/technique_validation.json\"",
 		"did not reverse its directional lobe", "did not reverse sky/ground response",
 		"invented a directional response", "invented a hemisphere response",

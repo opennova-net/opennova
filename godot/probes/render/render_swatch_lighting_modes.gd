@@ -77,8 +77,22 @@ func lighting_mode(out_dir: String, prefix: String) -> void:
 	sun.shadow_enabled = false
 	sun.visible = false
 	scene.add_child(sun)
+	# The merged sky.gdshader serves the two-lobe radiance stimulus: the flat
+	# pass paints the upper hemisphere u_flat_color and the radiance's lower
+	# hemisphere is u_hemi_ground (u_sky_suppressed only gates the VISIBLE
+	# pass, never AT_CUBEMAP_PASS).
 	var hemi_material := ShaderMaterial.new()
-	hemi_material.shader = load("res://shaders/hemisphere_sky.gdshader") as Shader
+	hemi_material.shader = load("res://shaders/sky.gdshader") as Shader
+	hemi_material.set_shader_parameter("u_flat_pass", true)
+	hemi_material.set_shader_parameter("u_flat_color",
+			Color(0.329412, 0.345098, 0.349020))
+	hemi_material.set_shader_parameter("u_hemi_ground",
+			Color(0.25, 0.23, 0.20))
+	hemi_material.set_shader_parameter("u_fog_end", 0.0)
+	# Near-horizon rays miss the open dome rim; matching the miss fallback to
+	# the flat color keeps the upper radiance lobe uniform.
+	hemi_material.set_shader_parameter("u_fog_color",
+			Color(0.329412, 0.345098, 0.349020))
 	var hemi_sky_resource := Sky.new()
 	hemi_sky_resource.sky_material = hemi_material
 	hemi_sky_resource.radiance_size = Sky.RADIANCE_SIZE_64
@@ -537,8 +551,15 @@ func _apply_lighting_probe_state(entries: Array[Dictionary], state: String,
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY \
 			if ambient_from_sky else Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(ambient, ambient, ambient)
-	hemi_material.set_shader_parameter("u_hemi_sky", hemi_sky)
-	hemi_material.set_shader_parameter("u_hemi_ground", hemi_ground)
+	# The merged sky.gdshader's two-lobe stimulus: the flat pass paints the
+	# upper hemisphere (u_flat_color + the matching miss fallback), the
+	# radiance's lower hemisphere is u_hemi_ground.
+	hemi_material.set_shader_parameter("u_flat_color",
+			Color(hemi_sky.x, hemi_sky.y, hemi_sky.z))
+	hemi_material.set_shader_parameter("u_fog_color",
+			Color(hemi_sky.x, hemi_sky.y, hemi_sky.z))
+	hemi_material.set_shader_parameter("u_hemi_ground",
+			Color(hemi_ground.x, hemi_ground.y, hemi_ground.z))
 	for entry in entries:
 		(entry["point_light"] as OmniLight3D).visible = point_on
 

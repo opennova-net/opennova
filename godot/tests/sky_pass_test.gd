@@ -2,7 +2,7 @@ extends GutTest
 
 # C7 driver-contract pins for the recovered two-pass dome spec
 # [orig: render_skybox @ 0x579080]. The per-fragment combine itself is shader
-# code (verified by visual A/B); these pin what SkyDome pushes into it.
+# code (verified by visual A/B); these pin what SkyPass pushes into it.
 
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/synth_full.env"
 const SKY_SHADER := "res://shaders/sky.gdshader"
@@ -17,7 +17,7 @@ func _make() -> Dictionary:
 	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
 	env.load()
 	env_node.environment_data = env
-	var sky: Node3D = SkyDome.new()
+	var sky: Node = SkyPass.new()
 	sky.environment_path = NodePath("../SkyTestEnv")
 	add_child_autofree(sky)
 	return {"sky": sky, "env_node": env_node, "env": env}
@@ -219,32 +219,57 @@ func test_cloud_textures_rebind_and_clear_after_environment_edits() -> void:
 			"removing both maps disables stale cloud sampling")
 
 
-func test_dome_shader_anchors_to_each_render_pass_camera() -> void:
+func test_sky_background_evaluates_the_witnessed_dome_analytically() -> void:
+	# ADR 0043 d3 amendment: the dome mesh retired into a real Sky background.
+	# The shader must carry the builder's exact surface constants (the engine
+	# oracle env::sky_dome_intersect + its ctest sweep prove the equivalence)
+	# and the witnessed anchor law as the dome-space eye height.
 	var shader := load(SKY_SHADER) as Shader
 	var code := shader.code
-	assert_true(code.contains("vec3 world_pos = vec3(eye.x, eye.y * 0.5, eye.z) + scaled;"),
-			"the dome anchor comes from the active render pass camera")
-	assert_true(code.contains("POSITION = clip;"),
-			"the pass-relative world point overrides the final clip position")
-	assert_false(code.contains("MODEL_MATRIX * vec4(scaled"),
-			"the reflection pass must not reuse the main-camera model anchor")
+	assert_true(code.contains("shader_type sky;"),
+			"the sky is the scene's Sky background, not a mesh")
+	assert_true(code.contains("float o_y = eye_world_y * 0.5;"),
+			"the anchor law survives as the dome-space eye height "
+			+ "[orig: render_skybox @ 0x5790d0]")
+	assert_true(code.contains("sqrt(8388608.0)"),
+			"the cap-sphere C = sqrt(2^23) [orig: @ 0x7d75e0]")
+	assert_true(code.contains("9437184.0"),
+			"R^2 = 3072^2 [orig: @ 0x7d75c8]")
+	assert_true(code.contains("h.xz * 0.003125"),
+			"layer-1 planar cloud UVs at 1/320 [orig: kUv1Scale @ 0x7d75d0]")
+	assert_true(code.contains("h.xz * 0.00146484375"),
+			"layer-2 planar cloud UVs at 3/2048 [orig: kUv2Scale @ 0x7d75cc]")
+	assert_true(code.contains("normalize(vec3(h.x, h.y / (s * s), h.z))"),
+			"the builder's anisotropic dome normal [orig: @ 0x578fbb]")
 
 
-func test_proximity_uses_d3d_depth_without_changing_godot_position() -> void:
+func test_proximity_is_the_tracked_world_space_approximation() -> void:
+	# The original dp3'd normalized CLIP-space vectors [orig: c14 upload
+	# @ 0x57960e..0x579641]; sky shaders expose no projection, so the
+	# world-space dot stands in — a tracked divergence (register MP-8).
 	var shader := load(SKY_SHADER) as Shader
 	var code := shader.code
-	assert_true(code.contains("return vec3(clip.xy, clip.w - clip.z);"),
-			"proximity converts Godot reverse-Z to the original D3D depth convention")
-	assert_true(code.contains("POSITION = clip;"),
-			"the render position stays in Godot's native clip convention")
+	assert_true(code.contains("max(dot(eyedir, normalize(dir)), 0.0)"),
+			"proximity is the world-space dot approximation")
+	assert_false(code.contains("clip.w - clip.z"),
+			"the clip-space depth conversion died with the mesh")
 
 
-func test_dome_cannot_be_culled_before_reflection_pass_reanchor() -> void:
-	var ctx := _make()
-	assert_true(ctx.sky.get_mesh_instance().extra_cull_margin >= 1.0e5,
-			"the CPU AABB stays conservative while the shader moves the dome per pass")
-	assert_true(ctx.sky.get_mesh_instance().ignore_occlusion_culling,
-			"reflection-pass sky must reach the vertex shader even when the main view occludes it")
+func test_frame_clear_and_suppression_states_live_in_the_sky() -> void:
+	# The witnessed 3-state clear fills the open below-rim region; the blink
+	# 0x2 indoors gate suppresses the whole visible pass; the radiance keeps
+	# the sky and serves the hemi ground below the horizon.
+	var shader := load(SKY_SHADER) as Shader
+	var code := shader.code
+	assert_true(code.contains("u_frame_clear"),
+			"the 3-state clear paints misses and the suppressed sky")
+	assert_true(code.contains("u_sky_suppressed"), "the blink 0x2 gate")
+	assert_true(code.contains("AT_CUBEMAP_PASS"),
+			"the radiance branch ignores suppression")
+	assert_true(code.contains("COLOR = u_hemi_ground;"),
+			"the radiance lower hemisphere is the .env ground color")
+	assert_true(code.contains("uniform bool u_sky_suppressed = true;"),
+			"boot default: suppressed (idle black) until the world writes")
 
 
 func test_cloud_tint_uniform_is_gone_from_the_shader() -> void:
@@ -259,33 +284,6 @@ func test_cloud_layers_keep_the_recovered_anisotropic_stage_filter() -> void:
 	var shader := load(SKY_SHADER) as Shader
 	assert_eq(shader.code.count("filter_linear_mipmap_anisotropic"), 2,
 		"both active cloud stages use the reference device's anisotropic minification")
-
-
-func test_dome_rides_at_half_camera_height() -> void:
-	var ctx := _make()
-	var cam := Camera3D.new()
-	add_child_autofree(cam)
-	cam.global_position = Vector3(10.0, 8.0, 6.0)
-	cam.make_current()
-	ctx.sky.advance_frame(0.016)
-	assert_eq(ctx.sky.get_mesh_instance().global_position, Vector3(10.0, 4.0, 6.0),
-		"dome anchor = camera xz at HALF the camera height [orig: render_skybox @ 0x5790d0]")
-
-
-func test_dome_mesh_comes_from_the_libs_builder() -> void:
-	var ctx := _make()
-	var mesh: ArrayMesh = ctx.sky.get_mesh_instance().mesh
-	var arrays := mesh.surface_get_arrays(0)
-	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
-	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-	assert_eq(positions.size(), 441, "441 dome vertices [orig: build_sky_dome_mesh @ 0x578db0]")
-	assert_eq(indices.size(), 2400, "800 triangles")
-	assert_eq(normals.size(), 441, "the witnessed FVF 0x212 normals ride along")
-	# The witnessed winding head (i, i+22, i+21), (i, i+1, i+22).
-	assert_eq(Array(indices.slice(0, 6)), [0, 22, 21, 0, 1, 22], "witnessed quad winding")
-	assert_almost_eq(positions[0].y, EnvFile.dome_reference_height(), 0.001,
-		"built at the reference height - the Y scale lives in the vertex shader (env #20)")
 
 
 func test_scroll_offsets_come_from_the_weather_core() -> void:
