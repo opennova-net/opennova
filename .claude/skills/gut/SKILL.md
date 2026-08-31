@@ -77,7 +77,7 @@ are collected). Repo fixtures are reached one level above `res://`:
 `ProjectSettings.globalize_path("res://").path_join("../fixtures/...")`, with a
 skip-and-pass (`pending`/`pass_test`) when the fixture or asset env var is
 absent — so a green count does not prove coverage; check for "skipping"/pending
-lines when you expected assets present. Retail data comes from the four roots
+lines when you expected assets present. Retail data comes from the two roots
 through `RetailData` (`godot/tests/support/retail_data.gd`), never a bespoke env var.
 Runtime probes are not GUT scripts: they live under `godot/probes/` as `game_probe`
 tools (`docs/mcp.md`); only their contract tests live here. Never bulk-edit `.gd` files with

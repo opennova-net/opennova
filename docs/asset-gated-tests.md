@@ -40,7 +40,7 @@ asset-gated test permanently red without changing the renderer.
 Runtime probes (`game_probe` tools under `godot/probes/`, `docs/mcp.md`) take
 their retail roots as typed arguments (`mission_path`, `mission_resource_dir`,
 `output_dir`, ...) or from the launch's `--resource-dir`; they read no environment
-variable. The scripts that drive them default those arguments to the three roots.
+variable. The scripts that drive them default those arguments to the two roots.
 
 ## Local setup
 
@@ -128,9 +128,11 @@ in gitignored `.scratch/`, full stop.
 
 ## The two-tier wire-compat gate (maturity program NET-0)
 
-The retail golden diff is root-gated and therefore Skipped in CI — a
-net-touching change can look green while silently altering wire bytes. The
-maturity program (docs/maturity-program.md) closes that with two tiers:
+CI can never run a live retail session, so a net-touching change could look
+green while silently altering wire bytes. The maturity program
+(docs/maturity-program.md) closed that with two tiers (the original tier-2
+retail golden diff retired with the capture root, 2026-08-29 — the live
+harness below replaced it):
 
 - **Tier 1 — default CI, cannot skip.** `nw_codec_identity` pins the EXACT bytes
   of every in-match encoder against committed FNV-1a64 vectors over a synthetic

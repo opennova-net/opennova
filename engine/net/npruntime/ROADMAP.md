@@ -20,12 +20,15 @@ golden pcaps. **Server-first.**
 > lifecycle/cadence owner and `npwire` is the retail compatibility boundary.
 > This document retains the original phase names only as a build record.
 >
-> **Env-gate note (2026-08-28):** the `NW_GOLDEN_*` / `NW_PROFILE_SPH_DIR` environment
-> variables the phase text below names were replaced by fixed names under the
-> `OPENNOVA_CAPTURES` root (`golden/retail-gameplay-session.pcapng`,
-> `golden/retail-lan-host-join.pcapng`, `sph/`; `tests/CMakeLists.txt` gates them through
-> `opennova_add_gated_test`, see `docs/dev-env-vars.md` and `docs/asset-gated-tests.md`).
-> The phase paragraphs keep the names they shipped with.
+> **Env-gate note (2026-08-28, superseded 2026-08-29):** the `NW_GOLDEN_*` /
+> `NW_PROFILE_SPH_DIR` environment variables the phase text below names were
+> first folded into a capture root, and that root and its capture-gated ctests
+> were then retired outright (ca1cef465 — two documented roots remain,
+> `docs/dev-env-vars.md`). The capture-proven findings stand as history in
+> `docs/net/novaworld-net-re.md`; the live gates are the inline-pcap unit
+> tests, `nw_codec_identity`, and `nw_self_capture`
+> (`docs/asset-gated-tests.md`). The phase paragraphs keep the names they
+> shipped with.
 
 The witness record is `docs/net/novaworld-net-re.md`; governing decisions are ADRs 0009–0013 and
 0019. The original approved design lived in a session plan that was never tracked in this repo;
