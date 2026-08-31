@@ -13,10 +13,9 @@
 namespace opennova::menu {
 
 // The named Options CScrollWnd setup: {min, max, page}, page being the
-// original inclusive-page field. The reimplementation does not yet own
-// persisted render/audio/input settings, so current = min is the
-// deterministic seed; a settings owner replaces it through the driver's
-// range setter. [orig: options_screen_init @0x554800;
+// original inclusive-page field. PlayerOptions supplies the persisted current
+// values after these ranges are installed through the driver's range setter.
+// [orig: options_screen_init @0x554800;
 // UI_PopulateRenderAndAudioSettings @0x55c830; the untouched page=10 default
 // in CScrollWnd_Construct @0x64c450]
 struct OptionsScrollRange {
@@ -52,6 +51,8 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
     {"TERRAINPOLY", "3"},
     {"TERRAINTEX", "3"},
     {"OBJECTPOLY", "3"},
+    // game.mnu uses this older alias for the same highest object-detail rung.
+    {"OBJECTDETAIL", "3"},
     {"OBJECTTEX", "3"},
     // The authored 3..16 rows are placeholders; mode 2 is the highest
     // multisample mode supported by the retail device contract.

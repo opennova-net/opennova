@@ -9,6 +9,7 @@ extends Node3D
 # (runtime-only); headless probes set the dir explicitly and never block on it.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+const PlayerOptionsScript := preload("res://game/player_options.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
 const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
@@ -102,10 +103,14 @@ var _shell_presentation := ShellPresentationSessionScript.new()
 # The menu front-end + resource-dir mount flow (a method annex over THIS
 # shell's state — shell_menu_frontend.gd; split for the size ratchet).
 var _frontend: RefCounted
+# One process-lifetime settings owner feeds both menu surfaces and every world
+# or HUD instance constructed during this shell session.
+var _player_options: PlayerOptions = PlayerOptionsScript.new()
 
 
 func _init() -> void:
 	_frontend = ShellMenuFrontendScript.new(self)
+	_player_options.changed.connect(_on_player_options_changed)
 	# The sampler observes the board's capture close edge directly (render-time
 	# measurement is RenderingServer state, not Node-owned state).
 	_render_stats.setup(_frame_stats)
@@ -119,6 +124,17 @@ func _init() -> void:
 	add_child(_dev_tools)
 	_pick_session.setup(_dev_tools)
 	_world_load.load_failed.connect(_on_world_load_failed)
+
+
+func get_player_options() -> PlayerOptions:
+	return _player_options
+
+
+func _on_player_options_changed(state: PlayerOptions.State) -> void:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	_player_options.apply(sim)
+	if _hud_presenter != null:
+		_hud_presenter.set_crosshair_style(state.crosshair_style)
 
 
 func _notification(what: int) -> void:
@@ -210,8 +226,10 @@ func _ready() -> void:
 	_previous_auto_accept_quit = get_tree().auto_accept_quit
 	get_tree().auto_accept_quit = false
 	_quit_policy_installed = true
+	_player_options.apply()
 	if _world == null or _camera == null or _menu_shell == null:
 		return
+	_menu_shell.set_player_options(_player_options)
 	var debug_adapter := get_game_debug_adapter()
 	add_child(debug_adapter)
 	debug_adapter.start_runtime_endpoint()
@@ -247,6 +265,7 @@ func _ready() -> void:
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
 	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
+	_on_player_options_changed(_player_options.current())
 	# The MP end-of-round flow (net-re 5.68; HUD_DrawOverlayPanels @0x5c0072): STAT owns the cursor.
 	_end_round_presenter = EndRoundPresenter.install(self, _world,
 			_hud if _hud != null else self, _hud_presenter, _deploy_presenter,
@@ -718,6 +737,7 @@ func _on_world_loaded() -> void:
 	_pick_session.begin_world(_world)
 	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
+	_player_options.apply(sim)
 	# The F3 engine-fact windows read and mutate through this Simulation from
 	# here until unload (ADR 0042 d6): DevTools holds it in C++ (the stats-board
 	# pattern) and does the record push / request drain with no GDScript relay.

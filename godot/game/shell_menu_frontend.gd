@@ -57,7 +57,6 @@ func wire_shell() -> void:
 	_shell._menu_shell.return_to_menu_requested.connect(_shell._on_return_to_menu)
 	_shell._menu_shell.resume_requested.connect(_shell._on_resume)
 	_shell._menu_shell.novaworld_requested.connect(_shell._net.open_novaworld_panel)
-	_shell._menu_shell.crosshair_style_changed.connect(_on_crosshair_style_changed)
 	# Delegate mp.mnu and player.mnu to their respective companions.
 	_shell._mp_companion = MpMenuCompanion.new()
 	_shell._player_info_companion = PlayerInfoMenuCompanion.new()
@@ -84,11 +83,6 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 		if save_error != OK:
 			push_warning("MainGame: could not save PLAYER_INFO profile (error %d)"
 					% save_error)
-
-
-func _on_crosshair_style_changed(style: int) -> void:
-	if _shell._hud_presenter != null:
-		_shell._hud_presenter.set_crosshair_style(style)
 
 
 func request_resource_dir() -> void:
