@@ -33,7 +33,6 @@ instance uniform vec4 u_instance_tile_cache_projection = vec4(0.0);
 instance uniform float u_high_pass_cutoff = 0.0;
 
 global uniform vec3 opennova_sky_ambient;
-global uniform vec3 opennova_sun_light;
 global uniform vec3 opennova_sun_direction;
 // Do not add EffectWorld point-light uniforms here. Retail does call
 // Light_SelectAndEnableForDraw for each patch @ 0x60a5dc, but the selected
@@ -145,18 +144,45 @@ void fragment() {
 			clamp(4.0 * dot(normal_byte - 0.5, light_byte - 0.5), 0.0, 1.0));
 	}
 
-	// Exact ps.1.4 combine: t0 * (t1 * (t1.a*c1 + c0)) * v0 * 8.
-	// The analytic bare-ground sample reproduces the byte-quantized heightfield
-	// DOT3 stored in composed tile alpha. The hosted .til overlay is composed
-	// into RGB before this lighting chain; ordered tile-model/depth-alpha
-	// contributions still require the terrain tile-composition cache.
+	// Exact ps.1.4 combine: t0 * (t1 * (t1.a*c1 + c0)) * v0 * 8, re-expressed
+	// through the lit pipeline so the sun leg receives the scene CSM
+	// (ATTENUATION in light()) exactly like the terrain beneath it — the
+	// unshaded form painted full-sun foliage over every dynamic shadow near
+	// the camera (retail had no dynamic ground shadows to receive; ADR 0043's
+	// sun does). The analytic bare-ground sample reproduces the byte-quantized
+	// heightfield DOT3 stored in composed tile alpha; that DOT3 rides tile.a
+	// into the sun leg as before. The sky leg stays the flat unconditional add
+	// (EMISSION, ambient_light_disabled on the wrappers); the retail sum-clamp
+	// becomes per-leg clamps, the terrain fold's precedent.
 	// [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0].
-	vec3 lit = tile.rgb * (tile.a * opennova_sun_light + opennova_sky_ambient);
-	vec3 color = clamp(fd.rgb * lit * u_emitter_color * 8.0, vec3(0.0), vec3(1.0));
-	ALBEDO = scene_output(color);
+	vec3 fold_rgb = fd.rgb * u_emitter_color * 8.0;
+	vec3 lit = tile.rgb;
+	ALBEDO = scene_output(fold_rgb * lit * tile.a);
+	EMISSION = scene_output(fold_rgb * lit) * opennova_sky_ambient;
+	ROUGHNESS = 1.0;
+	SPECULAR = 0.0;
 	// Environment depth fog (ADR 0043, MissionEnvironment::apply_scene_fog
 	// carries the witnessed .env law) folds into the source color before the
 	// blend, like D3D's fold, so the blended weight stays the retail SRCALPHA
 	// term.
 	ALPHA = clamp(retail_alpha, 0.0, 1.0);
+}
+
+void light() {
+	// The sun leg of the retail combine through the scene light: LIGHT_COLOR
+	// arrives color * energy(2) * PI, so 0.5/PI restores sun_light, and
+	// ATTENUATION lands the CSM mask on foliage exactly as on the terrain
+	// under it. The hemisphere delta pair (axis-vertical by construction) and
+	// every omni contribute nothing — the witnessed highest-quality path binds
+	// Foliage_WindSwayVS, whose complete vs_1_1 source declares no light
+	// inputs, so the blend PS sees only the emitter/fade vertex color
+	// [orig: Foliage_RenderFarPatches @ 0x60a5dc;
+	// Terrain_CreateFoliageVertexShaders @ 0x5ff630].
+	// ('return' is illegal in light(), so gate the add instead.)
+	if (LIGHT_IS_DIRECTIONAL) {
+		vec3 up_view = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+		if (abs(dot(LIGHT, up_view)) <= 0.9999) {
+			DIFFUSE_LIGHT += LIGHT_COLOR * (0.5 / PI) * ATTENUATION * ALBEDO;
+		}
+	}
 }

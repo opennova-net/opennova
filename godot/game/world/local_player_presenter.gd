@@ -599,9 +599,11 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 	if _held_weapon.global_transform != attach_transform:
 		_held_weapon.global_transform = attach_transform
 	_held_weapon.visible = true
-	# Same layer rule as the body: first person hides it from every camera by
-	# LAYER while keeping it a shadow source (the witnessed mirror never draws
-	# persons or their held weapons — the reflection collects vehicles only
+	# Same rule as the body: first person hides it via SHADOWS_ONLY so it
+	# stays a shadow source (a layer-hidden caster loses its sun shadow —
+	# Godot's caster cull intersects the camera's visible layers; SHADOWS_ONLY
+	# is also invisible to the mirror, matching the witnessed
+	# vehicles-only reflection
 	# [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]). The
 	# model stores the decision and rewrites its instances on the edge only.
 	var draw_held_weapon := _third_person or debug_body_in_first_person
@@ -742,9 +744,10 @@ func _update_avatar(pos: Vector3) -> void:
 			Vector3(0.0, sim_yaw.get_local_player_yaw_deg() if sim_yaw != null else 0.0, 0.0))
 		_set_avatar_transform(_avatar.compose_entity_transform(body_basis, pos))
 		_avatar.set_aim_overlay([])
-	# The body renders only in third person; first person hides it from every
-	# camera by LAYER, not by visible = false, so it stays a live shadow
-	# source. The 2026-08-05 witness corrected the earlier mirror-visible
+	# The body renders only in third person; first person hides it via
+	# SHADOWS_ONLY, not by visible = false or a hidden layer, so it stays a
+	# live shadow source (Godot's directional caster cull drops layer-hidden
+	# instances). The 2026-08-05 witness corrected the earlier mirror-visible
 	# reading: retail's reflected entity waves collect only vehicles above
 	# water, and the reflected world has no player-render leg, so no person —
 	# the local body included — ever

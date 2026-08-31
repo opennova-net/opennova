@@ -514,8 +514,11 @@ func test_lighting_contracts_reach_the_shader_math() -> void:
 	_contains_none(_read(SHADER_ROOT.path_join("terrain_lighting.gdshaderinc")),
 			["u_sun_light", "terrain_point_light_pool", "apply_terrain_fog"],
 			"terrain_lighting.gdshaderinc")
+	# ADR 0043: the sun leg rides the scene light (LIGHT_COLOR/ATTENUATION in
+	# light(), so foliage receives the CSM like the terrain under it); only the
+	# sky term and the DOT3 packing direction stay globals.
 	_contains_all(_read(SHADER_ROOT.path_join("foliage_detail.gdshaderinc")),
-			["opennova_sky_ambient", "opennova_sun_light", "opennova_sun_direction"], "foliage_detail.gdshaderinc")
+			["opennova_sky_ambient", "opennova_sun_direction"], "foliage_detail.gdshaderinc")
 	var sky := _read(SHADER_ROOT.path_join("sky.gdshader"))
 	assert_true(sky.contains("dot(dome_normal, u_sun_dir)"))
 	assert_true(sky.contains("dot(dome_normal, u_light_dir)"))
@@ -523,8 +526,10 @@ func test_lighting_contracts_reach_the_shader_math() -> void:
 
 func test_highest_quality_foliage_rejects_the_inert_d3d_light_premise() -> void:
 	var foliage := _read(SHADER_ROOT.path_join("foliage_detail.gdshaderinc"))
-	assert_true(foliage.contains("tile.a * opennova_sun_light + opennova_sky_ambient"))
-	assert_true(foliage.contains("lit * u_emitter_color * 8.0"))
+	assert_true(foliage.contains("ALBEDO = scene_output(fold_rgb * lit * tile.a)"))
+	assert_true(foliage.contains("EMISSION = scene_output(fold_rgb * lit) * opennova_sky_ambient"))
+	assert_true(foliage.contains("fd.rgb * u_emitter_color * 8.0"))
+	assert_true(foliage.contains("LIGHT_COLOR * (0.5 / PI) * ATTENUATION * ALBEDO"))
 	_contains_none(foliage, ["u_point_light_count", "u_point_light_posr_0",
 			"opennova_static_point_light_rows", "terrain_point_light_pool"], "foliage_detail.gdshaderinc")
 	_contains_all(foliage, [
@@ -556,7 +561,7 @@ func test_retail_tile_set_atlas_is_carried_not_misclassified_as_a_lightmap() -> 
 		assert_true(shader.contains("uniform sampler2DArray u_tile_cache"))
 		assert_true(shader.contains("texture(u_tile_cache"))
 	assert_true(terrain.contains("terrain_surface_albedo"))
-	assert_true(foliage.contains("tile.a * opennova_sun_light + opennova_sky_ambient"))
+	assert_true(foliage.contains("ALBEDO = scene_output(fold_rgb * lit * tile.a)"))
 
 	var contract := _contract(_load_json(PROVENANCE_PATH), "terrain-surface")
 	var citations := _citation_addresses(contract)

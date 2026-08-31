@@ -192,11 +192,12 @@ public:
 		// shadow-caster markers; casts when it carries a marker.
 		PRESENTATION_LAYER_WORLD = 0,
 		// The local player's body/held gun as a drawn entity (third person,
-		// the debug body): the world layer, markers kept, always casting so
-		// the render-slot capture cameras photograph it.
+		// the debug body): the world layer, markers kept, always casting.
 		PRESENTATION_LAYER_LOCAL_BODY = 1,
-		// The same models while first person hides them from every camera by
-		// LAYER (the hidden FP layer), still casting for the slot capture.
+		// The same models while first person hides them via SHADOWS_ONLY on
+		// the world layer: Godot's directional-shadow caster cull intersects
+		// each camera's visible_layers with the instance layer, so a
+		// layer-hidden body would lose its sun shadow too.
 		PRESENTATION_LAYER_LOCAL_BODY_HIDDEN = 2,
 		// The FP arms/gun: the viewmodel layer alone (every caster marker
 		// stripped so the gun never leaks into world shadows), never casting.

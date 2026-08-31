@@ -303,7 +303,13 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 			base = LAYER_WORLD;
 			break;
 		case PRESENTATION_LAYER_LOCAL_BODY_HIDDEN:
-			base = LAYER_FP_BODY_SHADOW_ONLY;
+			// Godot culls a directional light's shadow casters per camera by
+			// visible_layers & layer_mask (renderer_scene_cull LAYER_CHECK), so
+			// an instance hidden from the camera by LAYER never casts either.
+			// First person therefore keeps the body on the world layer and
+			// hides it via SHADOWS_ONLY below — the render-slot capture cameras
+			// that once needed a camera-renderable silhouette are gone (MP-4).
+			base = LAYER_WORLD;
 			break;
 		case PRESENTATION_LAYER_VIEWMODEL:
 			base = LAYER_VIEWMODEL;
@@ -321,12 +327,12 @@ GeometryInstance3D::ShadowCastingSetting ObjectModel::presentation_cast_setting(
 					? GeometryInstance3D::SHADOW_CASTING_SETTING_ON
 					: GeometryInstance3D::SHADOW_CASTING_SETTING_OFF;
 		case PRESENTATION_LAYER_LOCAL_BODY:
-		case PRESENTATION_LAYER_LOCAL_BODY_HIDDEN:
-			// Camera-renderable and hidden by LAYER alone, so the render-slot
-			// capture cameras can photograph the silhouette (SHADOWS_ONLY
-			// geometry is invisible to every camera, capture viewports
-			// included).
 			return GeometryInstance3D::SHADOW_CASTING_SETTING_ON;
+		case PRESENTATION_LAYER_LOCAL_BODY_HIDDEN:
+			// The FP hide: SHADOWS_ONLY keeps the body out of every camera
+			// while it stays in the sun's caster cull (which requires a
+			// camera-visible layer — see presentation_layer_mask).
+			return GeometryInstance3D::SHADOW_CASTING_SETTING_SHADOWS_ONLY;
 		case PRESENTATION_LAYER_VIEWMODEL:
 			return GeometryInstance3D::SHADOW_CASTING_SETTING_OFF;
 	}

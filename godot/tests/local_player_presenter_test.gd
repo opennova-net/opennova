@@ -553,28 +553,33 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	assert_gt(body_instances.size(), 0, "the real body carries visual instances")
 	assert_gt(vm_instances.size(), 0, "the real viewmodel carries visual instances")
 	assert_gt(held_instances.size(), 0, "the real held weapon carries visual instances")
+	# Godot culls a directional light's shadow casters per camera by
+	# visible_layers & layer_mask, so a layer-hidden instance never casts.
+	# First person therefore hides the body/held gun via SHADOWS_ONLY on the
+	# camera-visible world layer (the slot capture cameras that once needed a
+	# camera-renderable silhouette are retired).
 	for vi in body_instances:
 		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
-				"first person: the body's visual instances ride the hidden FP layer")
+				Water.VISUAL_LAYER_WORLD,
+				"first person: the body's visual instances stay on the world layer")
 		if vi is GeometryInstance3D:
 			assert_ne(vi.layers & Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
 					"first person: body geometry keeps its dynamic-caster marker")
 			assert_eq(vi.cast_shadow,
-					GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
-					"first person: body geometry stays camera-renderable so the"
-					+ " slot capture cameras can photograph it (hidden by layer)")
+					GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY,
+					"first person: body geometry is hidden by SHADOWS_ONLY while"
+					+ " staying in the sun's caster cull")
 	for vi in held_instances:
 		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
-				"first person: the held weapon rides the hidden FP layer")
+				Water.VISUAL_LAYER_WORLD,
+				"first person: the held weapon stays on the world layer")
 		if vi is GeometryInstance3D:
 			assert_ne(vi.layers & Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
 					"first person: held-weapon geometry keeps its dynamic-caster marker")
 			assert_eq(vi.cast_shadow,
-					GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
-					"first person: held-weapon geometry stays camera-renderable"
-					+ " for the slot capture (hidden by layer)")
+					GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY,
+					"first person: held-weapon geometry is hidden by SHADOWS_ONLY"
+					+ " while staying in the sun's caster cull")
 	for vi in vm_instances:
 		assert_eq(vi.layers, Water.VISUAL_LAYER_VIEWMODEL,
 				"the viewmodel layer clears every shadow-caster marker")
