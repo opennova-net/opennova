@@ -1,5 +1,7 @@
 # Foliage — fresh reverse-engineering record
 
+> **ADR 0043 (modern presentation):** the witnessed presentation technique this record describes is retired in OpenNova by [ADR 0043](../adr/0043-modern-presentation-witnessed-intent.md) (divergence-ledger register rows MP-4); the authored-data decode it witnesses stays ported and cited. This record remains the witness authority for the original engine.
+
 **Status:** re-grilled and reimplemented 2026-07-13, with the MODEL blend/depth
 state corrected 2026-07-14 after a renderer capture exposed the missing
 combiner. The same-day follow-up also ported the mission-tile exclusion, near

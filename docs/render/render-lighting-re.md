@@ -1,5 +1,7 @@
 # World lighting / modulator chain — reverse-engineering record
 
+> **ADR 0043 (modern presentation):** the witnessed presentation technique this record describes is retired in OpenNova by [ADR 0043](../adr/0043-modern-presentation-witnessed-intent.md) (divergence-ledger register rows MP-1/MP-3/MP-7); the authored-data decode it witnesses stays ported and cited. This record remains the witness authority for the original engine.
+
 The runtime lighting chain: the iris auto-exposure modulator, the per-pass
 world lighting block, the per-entity shader uniforms and D3D light set, the
 dynamic point-light path, the terrain/foliage lighting constants, and the
@@ -933,8 +935,10 @@ weapons ride their owner's slot via the capture-with link
 `RenderSlot_RenderEntityAndChildren` child walk) while tree-parented
 riders fold into the ancestor exclusion; the attached-light drape folds
 the light's attenuation at the entity into the per-slot term (retail
-varies it per patch vertex); and `scene_output` leaves the factor in
-the retail gamma-byte domain for the shared FrameFx display decode. The
+varies it per patch vertex); and `scene_output` left the factor in
+the retail gamma-byte domain for the shared display decode (both since
+retired — the slot system under MP-3 and the gamma contract under the
+ADR 0043 linear-scene amendment). The
 object wrappers carry no PROJSHAD branch (the twelve-layer capture-camera
 signature, its `OBJ_PROJSHAD_*` defines and the reserved `Water` layers
 were retired 2026-08-30 with the shader hash golden regenerated); the

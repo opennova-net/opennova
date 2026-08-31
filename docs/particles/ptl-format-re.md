@@ -1,5 +1,7 @@
 # Particles (.ptl) - format + system RE record
 
+> **ADR 0043 (modern presentation):** the witnessed presentation technique this record describes is retired in OpenNova by [ADR 0043](../adr/0043-modern-presentation-witnessed-intent.md) (divergence-ledger register rows MP-5); the authored-data decode it witnesses stays ported and cited. This record remains the witness authority for the original engine.
+
 > **Status**: the blueprint-graph workspace + curve tables redesign landed with the runtime
 > effect world (`EffectWorld`) on the 2026-07-10 particles train. **Re-grilled
 > 2026-07-12 for the extraction-train slice (branch `particles-ida-parity`)**: the SIZE

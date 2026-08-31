@@ -1,5 +1,7 @@
 # Terrain — reverse-engineering record (PARTIAL)
 
+> **ADR 0043 (modern presentation):** the witnessed presentation technique this record describes is retired in OpenNova by [ADR 0043](../adr/0043-modern-presentation-witnessed-intent.md) (divergence-ledger register rows MP-4); the authored-data decode it witnesses stays ported and cited. This record remains the witness authority for the original engine.
+
 Structure-mapping record for the original engine's **terrain** pipeline — the
 heightmap/mesh build, the quadtree LOD, CDEP, lighting/modulation, mesh
 simplification, byte packing, and (REN-4) the runtime surface-shading resource

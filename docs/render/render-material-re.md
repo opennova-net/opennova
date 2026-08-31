@@ -1,5 +1,7 @@
 # Object materials / render state — reverse-engineering record
 
+> **ADR 0043 (modern presentation):** the witnessed presentation technique this record describes is retired in OpenNova by [ADR 0043](../adr/0043-modern-presentation-witnessed-intent.md) (divergence-ledger register rows MP-2/MP-7); the authored-data decode it witnesses stays ported and cited. This record remains the witness authority for the original engine.
+
 The runtime path from a `.3di` material (shader tag string + per-material flag
 byte) to device render state, witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`). Implementing code:

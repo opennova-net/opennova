@@ -1,5 +1,7 @@
 # Draw order / batching — reverse-engineering record
 
+> **ADR 0043 (modern presentation):** the witnessed presentation technique this record describes is retired in OpenNova by [ADR 0043](../adr/0043-modern-presentation-witnessed-intent.md) (divergence-ledger register rows MP-5/MP-6); the authored-data decode it witnesses stays ported and cited. This record remains the witness authority for the original engine.
+
 The runtime path from `Render_SubmitEntity` to sorted, ordered draws: the four
 batch queues, the sort keys, the render-state stack, the technique-class
 selection, and the frame's pass sequence, witnessed in retail `Jointops.exe`
@@ -558,7 +560,7 @@ pure functions in `engine/runtime/renderer/render_order.{h,cpp}`:
 | 0x5c7d50 (locals) | dualLodData / lodLevel1 / lodLevel2 | characterBlip / bodyModel / headModel | the "dual LOD" was the two-part avatar; block comments @0x5c7fea / @0x5c7ffc / @0x5c8020 |
 | 0x5c4190 (locals) | view_distance / fade_progress | projected_radius_q16 / rlod_model | the projected radius and the RLOD table model; comment @0x5c41b6 (the forced table) |
 | 0x4e3940 (comments) | — | — | @0x4e3c87: 0x10000000 = the avatar's second part, not a repeat-draw marker; @0x4e39c4: the attachment RLOD rule |
-| 0x582120 (reimpl link) | godot/src/render/frame_fx.cpp | engine/runtime/renderer/q3_frame.h | the altbuffer knowledge moved with the typed Q3 draw list (cite_sweep reimpl-orphan closed) |
+| 0x582120 (reimpl link) | godot/src/render/frame_fx.cpp | (retired) | the altbuffer knowledge rode the typed Q3 draw list until the FrameFX/Q3 stack retired (ADR 0043, register MP-6); this row is history — the witness stays in this record |
 | 0x843580 / 0x843780 | dword_843580 / dword_843780 | g_RenderStateStack / g_RenderStateStackTop | the 16-byte-entry state stack + top index |
 | 0x8437C4 / 0x843784 | flt_8437C4 / unk_843784 | g_WaterSplitHeightFloat / g_ActiveMirrorClipMatrix | queue-split threshold; active mirror matrix |
 | 0x2980514 / 0x2980518 | dword_2980514 / flt_2980518 | g_WaterMirrorActive / g_WaterMirrorMatrix | reflection-pass machinery (env #30) |
