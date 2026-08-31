@@ -913,6 +913,65 @@ void test_camera_shake() {
     }
 }
 
+void test_camera_shake_chase() {
+    using namespace opennova::world;
+
+    // The same whole-block counter gate as the mode-0 leg: zero counter,
+    // zero output [orig: @0x43892b].
+    {
+        CameraShakeState st;
+        int32_t y = 1, pch = 1, r = 1;
+        camera_shake_sample_chase(st, 0xDEADBEEFu, 12345u, y, pch, r);
+        CHECK(y == 0 && pch == 0 && r == 0);
+    }
+
+    // Hand-computed pins (float32 constants, double trig, ftol truncation,
+    // arithmetic >> 2 on the tick terms AFTER truncation). counter=10,
+    // prng byte 0xFF, tick 0: amp = (40 * 319) >> 8 = 49;
+    //   yaw   = trunc(sin(10*0.4)*49)                       = -37
+    //   pitch = trunc(sin(10*2/7)*49) - (trunc(sin(0)*49)>>2)   = 13
+    //   roll  = trunc(sin(10*2/11)*49) - (trunc(cos(0)*49)>>2)  = 47 - 12 = 35
+    // A different constant, truncation rule, or shift moves these.
+    {
+        CameraShakeState st; st.counter = 10;
+        int32_t y, pch, r;
+        camera_shake_sample_chase(st, 0xFFu, 0u, y, pch, r);
+        CHECK(y == -37 && pch == 13 && r == 35);
+    }
+
+    // A nonzero tick drives the two quartered terms; prng byte 0 still
+    // yields amp = (min(4*64,255) * 64) >> 8 = 63.
+    {
+        CameraShakeState st; st.counter = 64;
+        int32_t y, pch, r;
+        camera_shake_sample_chase(st, 0x00u, 100u, y, pch, r);
+        CHECK(y == 28 && pch == -18 && r == -47);
+    }
+
+    // The amp clamp is the 255 STORE cap (not the mode-0 sample clamp 64):
+    // counter 255 with prng byte 0x80 gives amp (255 * 192) >> 8 = 191, and
+    // the raw counter still drives the sin arguments.
+    {
+        CameraShakeState st; st.counter = 255;
+        int32_t y, pch, r;
+        camera_shake_sample_chase(st, 0x80u, 1000u, y, pch, r);
+        CHECK(y == 190 && pch == -114 && r == 117);
+    }
+
+    // Stateless: a second identical call returns identical deltas and the
+    // mode-0 IIR filters are never touched -- a mode flip resumes them where
+    // they stopped.
+    {
+        CameraShakeState st; st.counter = 40;
+        st.roll = 111; st.pitch = 222; st.yaw = 333;
+        int32_t y1, p1, r1, y2, p2, r2;
+        camera_shake_sample_chase(st, 0x5Au, 77u, y1, p1, r1);
+        camera_shake_sample_chase(st, 0x5Au, 77u, y2, p2, r2);
+        CHECK(y1 == y2 && p1 == p2 && r1 == r2);
+        CHECK(st.roll == 111 && st.pitch == 222 && st.yaw == 333);
+    }
+}
+
 int main() {
     test_scope_ease_is_fifteen_ticks_exactly();
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
@@ -930,6 +989,7 @@ int main() {
     test_compose_camera_first_person();
     test_compose_camera_terrain_floor();
     test_camera_shake();
+    test_camera_shake_chase();
     test_compose_camera_third_person();
     test_compose_camera_mounted();
     test_compose_camera_mounted_terrain();

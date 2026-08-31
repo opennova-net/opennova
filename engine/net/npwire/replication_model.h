@@ -181,6 +181,19 @@ struct GameEntitySnapshot {
 	// pool-0: mounted at all (the entity+0x16C carrier pointer is non-null) — the
 	// dead-recipient score's 600-point term [orig: hasTarget @0x50eb28..0x50eb3f].
 	bool mounted = false;
+	// The owning player slot hides this entity from replication: the priority
+	// build admits an entity only when its validated owner slot has BOTH hide
+	// bytes clear or the entity is the recipient's own (the self-exception)
+	// [orig: Server_BuildEntityPriorityList @0x50e6fd — `validated == recipient
+	// || (!slot[97537] && !slot[97536])`]. In JO 1.7.5.7 byte 97537 (and the
+	// paired gate 96481) is read-but-never-set, and 97536 tracks the spectator
+	// latch (slot+100567) exactly — writers Server_PlayerAdd @0x51d0ce,
+	// Server_OnPlayerJoin @0x51a79c, the permadeath conversion in
+	// Server_KillPlayerAndNotify @0x519e76, the WritePlayerState restamp
+	// @0x4ff70f; both cleared at the leave-spectator block @0x519fb4 — so the
+	// builder-side stamp reduces to "owned by a spectator connection". Not a
+	// wire field; stamped by the host caller that knows the connection list.
+	bool owner_hidden = false;
 };
 
 } // namespace opennova

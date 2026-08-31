@@ -705,10 +705,11 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t) {
     rel_ops.push_back({kRelSpotted, e.net_id, t.net_id});
 }
 
-// [orig: AI_HandleCommand @0x465770] command dispatcher (cases 6..0x16). The two
-// SM-weapon commands are ported; the rest stay deferred to the AI-command phase.
-// The combat event types (1/3/4) are not commands, so the original returns 0 for
-// them and the event switch proceeds; this faithfully returns false.
+// [orig: AI_HandleCommand @0x465770] Queued ChangeAI dispatcher. Alert, authored
+// state, aim/drive skill, speed, weapons-free, and elevation commands are live;
+// cases 0x0C..0x14 remain explicit deferred arms. Combat event types (1/3/4)
+// are not commands, so the original returns 0 and the event switch proceeds;
+// this faithfully returns false.
 bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
     int32_t t = ev.type();
     switch (t) {
@@ -742,12 +743,65 @@ bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
         e.brain.f[AiBrain::kAlert] = level;     // [orig: @0x465809]
         return true;
     }
+    case 7: { // AISETSTATE [orig: AI_HandleCommand @0x465770 case 7]
+        int32_t next = -1;
+        const int32_t authored = ev.f[3];
+        // [orig: AIState_SetByEntityType @0x457570] The authored 1..5
+        // selector maps through a different state table for HELO and GROUND.
+        if (e.profile.type == 1) {
+            switch (authored) {
+                case 1: next = kAiHeloFormation; break;
+                case 2: next = kAiHeloReturnToBase; break;
+                case 3: next = kAiHeloPretty; break;
+                case 4: next = kAiHeloLand; break;
+                case 5: next = kAiHeloFollowWp; break;
+                default: break;
+            }
+        } else if (e.profile.type == 2) {
+            switch (authored) {
+                case 1: next = kAiGroundFormation; break;
+                case 2: next = kAiGroundReturnToBase; break;
+                case 3: next = kAiGroundPretty; break;
+                case 5: next = kAiGroundFollowWp; break;
+                default: break; // selector 4 has no GROUND state arm
+            }
+        }
+        if (next >= 0) {
+            e.brain.f[AiBrain::kFallback] = next;
+            e.brain.set_pend(next);
+        }
+        return true;
+    }
+    case 8: // AIMSKILL [orig: AI_HandleCommand @0x465770 case 8]
+        e.brain.f[AiBrain::kAccuracy] = std::clamp(ev.f[3], 0, 4);
+        return true;
+    case 9: // DRIVESKILL [orig: AI_HandleCommand @0x465770 case 9]
+        e.brain.f[AiBrain::kDriveSkill] = std::clamp(ev.f[3], 0, 4);
+        return true;
+    case 10:
+    case 11: { // COMBATSPEED / PATROLSPEED [orig: AI_HandleCommand @0x465770 cases 10/11]
+        // Retail treats a negative signed dword as its unsigned value before
+        // converting authored km/h to 16.16 world-units/tick.
+        double value = static_cast<double>(ev.f[3]);
+        if (value < 0.0) value += 4294967296.0;
+        const double scaled = value * 1000.0 * 4.444444584805751e-06 * 65536.0;
+        const int32_t fixed =
+                (scaled >= 2147483648.0 || scaled < -2147483648.0)
+                        ? static_cast<int32_t>(0x80000000u)
+                        : static_cast<int32_t>(scaled);
+        e.brain.f[t == 10 ? AiBrain::kSpeedA : AiBrain::kSpeedB] = fixed;
+        return true;
+    }
     case 0x15: // stationary weapons-free [orig: @0x4659A7 — arg 0 clears byte
                // +785; nonzero pushes the type's combat state (GROUND -> 17,
                // HELO -> 8) into pending when different, then sets it 1]
         if (ev.f[3] != 0) {
-            if (e.brain.f[AiBrain::kCurState] != kAiGroundCombat)
-                e.brain.set_pend(kAiGroundCombat); // the HELO(8) leg rides the HELO SM port
+            int32_t combat_state = -1;
+            if (e.profile.type == 1) combat_state = kAiHeloCombat;
+            else if (e.profile.type == 2) combat_state = kAiGroundCombat;
+            if (combat_state >= 0 &&
+                e.brain.f[AiBrain::kCurState] != combat_state)
+                e.brain.set_pend(combat_state);
             e.brain.bytes()[AiBrain::kGuardFireByte] = 1;
         } else {
             e.brain.bytes()[AiBrain::kGuardFireByte] = 0;
@@ -759,7 +813,7 @@ bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
                 static_cast<int32_t>(ev.f[3] * kBamPerDegreeInt);
         return true;
     default:
-        if (t >= 7 && t <= 0x14) ++unported_calls; // the still-unported command arms
+        if (t >= 0x0C && t <= 0x14) ++unported_calls; // deferred command arms
         return false;
     }
 }

@@ -173,6 +173,17 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "SSNarea") || ieq(n, "SSNarea3D") || ieq(n, "SSNloc")) {
         return cmds.ssn_in_area(static_cast<uint16_t>(A(0)), A(1)) ? 1 : 0;
     }
+    if (ieq(n, "SSNwounded"))
+        return cmds.ssn_wounded(static_cast<uint16_t>(A(0))) ? 1 : 0;
+    if (ieq(n, "SSNnearSSN"))
+        return cmds.ssn_within_distance(static_cast<uint16_t>(A(0)),
+                                        static_cast<uint16_t>(A(1)), A(2)) ? 1 : 0;
+    if (ieq(n, "SSNlosSSN"))
+        return cmds.ssn_los_clear_within(static_cast<uint16_t>(A(0)),
+                                         static_cast<uint16_t>(A(1)), A(2)) ? 1 : 0;
+    if (ieq(n, "SSNseesSSN"))
+        return cmds.ssn_sees_within(static_cast<uint16_t>(A(0)),
+                                    static_cast<uint16_t>(A(1)), A(2)) ? 1 : 0;
 
     // ---- comparison / value functions ----
     // ---- the local-player condition family (the co-op choreography gates:
@@ -198,6 +209,12 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         // permutation flagged for a grill, behavior is the witnessed one.]
         return cmds.local_player_attached_to_ssn(static_cast<uint16_t>(A(0))) ? 1 : 0;
     }
+    if (ieq(n, "meattached"))
+        return cmds.local_player_attached_to_ssn(static_cast<uint16_t>(A(0))) ? 1 : 0;
+    if (ieq(n, "medrive"))
+        return cmds.local_player_driving_ssn(static_cast<uint16_t>(A(0))) ? 1 : 0;
+    if (ieq(n, "meongun"))
+        return cmds.local_player_on_gun_of_ssn(static_cast<uint16_t>(A(0))) ? 1 : 0;
     if (ieq(n, "SSNonSSN")) {
         // [orig: Entity_IsOnTopOfChain @0x4F19A0 — B reachable from A's
         // groundEntity chain within 3 hops]
@@ -248,6 +265,19 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "unholdSSN")) return cmds.set_ssn_held(static_cast<uint16_t>(A(0)), false) ? 1 : 0;
     if (ieq(n, "disableSSN")) return cmds.set_ssn_disabled(static_cast<uint16_t>(A(0)), true) ? 1 : 0;
     if (ieq(n, "enableSSN")) return cmds.set_ssn_disabled(static_cast<uint16_t>(A(0)), false) ? 1 : 0;
+    if (ieq(n, "setaccuracy"))
+        return cmds.set_ssn_accuracy(static_cast<uint16_t>(A(0)), A(1), A(2)) ? 1 : 0;
+    if (ieq(n, "ssnguard"))
+        return cmds.set_ssn_guard(static_cast<uint16_t>(A(0)), A(1) != 0) ? 1 : 0;
+    if (ieq(n, "ssncspd") || ieq(n, "ssnpspd")) {
+        const uint16_t ssn = static_cast<uint16_t>(A(0));
+        if (!cmds.ssn_exists(ssn)) return 0;
+        cmds.apply_ai_command(ssn, ieq(n, "ssncspd") ? 29 : 30,
+                              A(1), 0, 0);
+        // Retail reports success for a resolved entity even without an AI
+        // component; the queue call itself is conditional.
+        return 1;
+    }
 
     // ---- group actions ----
     if (ieq(n, "kill") || ieq(n, "Gkill")) return cmds.kill_group(A(0));
@@ -256,6 +286,9 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "GroupMin")) return cmds.set_group_engage_min(A(0), A(1));
     if (ieq(n, "GroupMax")) return cmds.set_group_engage_max(A(0), A(1));
     if (ieq(n, "GroupAtt")) return cmds.set_group_attack_max(A(0), A(1));
+    if (ieq(n, "Gremove")) return cmds.remove_group(A(0));
+    if (ieq(n, "Gsetaccuracy"))
+        return cmds.set_group_accuracy(A(0), A(1), A(2));
 
     // ---- environment ---- (world::WeatherState carries the handler cites)
     if (ieq(n, "fogtype")) { cmds.set_fog_type(A(0)); return 0; }

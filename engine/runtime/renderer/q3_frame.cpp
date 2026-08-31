@@ -10,8 +10,6 @@
 namespace opennova::renderer {
 namespace {
 
-// [orig: Q3 object flush and fixed follow-up draw bracket @ 0x582a54..0x582a80]
-
 bool range_valid(std::size_t first, std::size_t count, std::size_t size) {
 	return first <= size && count <= size - first;
 }
@@ -107,6 +105,13 @@ bool resource_leases_valid(const Q3SubmissionSnapshot &submission) {
 	return false;
 }
 
+// Object admission mirrors the retail Q3 copy leg: only the rigid opaque
+// walk collects a glow-capable duplicate, Glass rows re-shade through the
+// rotated-specular technique, and the FFP LUM rows re-shade as the SELFLUM
+// NORMAL block; a multiplicative LUM row never glows.
+// [orig: collect_render_objects_for_batch @ 0x5d8f20 (the Q3 copy
+// @ 0x5d93b5..0x5d9447); Glass.fx TGlassFFP TECHNIQUE_GLOW; _FFP.fx LUM
+// GLOW copy @ 0x5afc7f]
 std::optional<Q3Technique> technique_for(
 		const Q3SubmissionSnapshot &submission, Q3RejectReason &reason) {
 	switch (submission.source) {
@@ -145,6 +150,13 @@ std::optional<Q3Technique> technique_for(
 	return std::nullopt;
 }
 
+// Stage order is the witnessed FrameFX bloom-source bracket: the sorted Q3
+// object flush, then the fixed follow-up draws — NV water redraw, celestial
+// discs, sun glow — in call order.
+// [orig: FrameFX_RenderBloomPass @ 0x582940 —
+// CRenderBatchQueue_SortAndFlush(4) @ 0x582a54;
+// render_water_surface(view, 1) @ 0x582a62; render_celestial_bodies(1) /
+// render_skybox_sun_glow(0, 0) @ 0x582a77..0x582a80]
 int technique_stage(Q3Technique technique) {
 	switch (technique) {
 		case Q3Technique::NormalCopy:
@@ -242,6 +254,10 @@ const Q3DrawList &Q3FrameCompiler::compile(const Q3FrameSnapshot &snapshot) {
 			continue;
 		}
 
+		// Only the Q3 object queue carries the back-to-front key; the fixed
+		// follow-up draws keep call order. [orig: the queue-4 flush sorts by
+		// the alpha view-depth key, CRenderBatchQueue_SortAndFlush(4)
+		// @ 0x582a54]
 		const std::uint32_t sort_key =
 				technique_stage(*technique) == 0 ?
 						transparent_sort_key(submission.view_depth) : 0;

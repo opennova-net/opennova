@@ -75,6 +75,12 @@ hardening, and project health. Divergences from the original engine belong in
       the registry's successor) still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
       `docs/runtime-architecture.md` + `docs/correspondence.md`
+- [ ] Precipitation floor-sampler cost (owner: `engine/runtime/environment/precipitation.*`
+      + the `godot/src/env/precipitation.cpp` shell sampler): the witnessed per-wrap drop
+      raycast (the retail floor probe from +200 m) measured ~0.4 ms/frame at rain 100 on
+      03TR (frame_stats "env" row = WORLD_WEATHER, 2026-08-30) — batch or cache the
+      entity-raycast half (the terrain/water half is cheap) without changing the
+      witnessed floor semantics; re-measure via `perf_mission_rows`
 - [ ] Env/water/sky/weather singleton `_process` set: re-measure at the ASH_I5A
       vantage before slicing — the #403 present-side rework (parked idle models,
       `env_generation_changed`, the staggered per-model light restamp) invalidated
@@ -94,7 +100,8 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
       recipe): the retired F3 pages return as engine ImGui windows as they are
       wanted (the Entities window landed as the ADR 0042 d6 template, PR #587;
-      the Weapon window landed as the dope-sheet ACTION editor over the equipped
+      the Environment window with the weather command layer, PR #597; the
+      Weapon window landed as the dope-sheet ACTION editor over the equipped
       weapon's FSM, which also covers the FP-weapon half of "animation");
       still open: sim transport
       (play/pause/step; the MCP

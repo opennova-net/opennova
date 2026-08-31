@@ -1096,9 +1096,11 @@ tooling described in §5.25. The complete contract is:
   flags1` bit 0 (`@0x4ff795`). The 0x0A priority build's flat dead-or-spectator
   branch reads a DIFFERENT storage — `slot+89912 & 0x10`, the deploy-hold bit
   (`@0x50e67c`); a never-deploying spectator holds it, which is how the flat
-  branch covers spectating (OpenNova keys the branch off the canonical
-  spectator bit; the pre-deploy ordinary-player leg of the same predicate stays
-  a D-NET-139 residual). S2C `0x16` marks
+  branch covers spectating (OpenNova stores it the same way since the
+  2026-08-30 tidy round: `Connection::respawn_pending` is held by join-time
+  spectators, the predicate reads it, and the pre-deploy ordinary-player leg
+  rides the same bit — see "The slot hide bytes and the deploy hold" above).
+  S2C `0x16` marks
   the row's low flag bit and increments the spectator trailer count, which moves
   it into the retail scoreboard's spectator column.
 - `Entity_UpdateInfantryPlayerBody @0x4b40e0` diverts a spectator/death-screen
@@ -1119,6 +1121,35 @@ reject vehicles, spawn, scoreboard, priority, and F3 mutation; the Godot suite
 adds a real loopback-UDP spectator join (including the DPC 16 password punt),
 prompt-before-auth, world-tick continuity, and first-free-look camera
 continuity.
+
+**The slot hide bytes and the deploy hold (2026-08-30 tidy-round grill).** The
+"unmodeled `slot+97536/97537`" residual is resolved by an image-wide xref
+sweep: byte **97536** tracks the spectator latch (`slot+100567`) exactly —
+writers `Server_PlayerAdd @0x51d0ce`, `Server_OnPlayerJoin @0x51a79c`, the
+permadeath conversion in `Server_KillPlayerAndNotify @0x519e76` (which also
+SETS the latch: saved team → `+100568`, team byte zeroed), and the
+`NetPacket_WritePlayerState` restamp `@0x4ff70f`; both hide bytes clear at the
+leave-spectator block `@0x519fb4..0x519fba` (which then deploys through
+`Server_ProcessPlayerDeath`). Byte **97537** and the paired gate byte
+**96481** are read-but-never-set anywhere in JO 1.7.5.7 (a vestigial second
+hide mode), so every read-side gate reduces: the priority-build admission
+`validated == recipient || (!97537 && !97536)` `@0x50e6fd` = "hide a
+spectator's entity from every other recipient" (ported as the
+`GameEntitySnapshot::owner_hidden` stamp + fan admission), the killer-credit
+clear `@0x516fd1`, the healer-scoring gate `@0x50de88`, and
+`serialize_visible_players_snapshot`'s skip `@0x506399..0x506412` all key off
+the latch alone, and the `96481 && 97536` arms (`Server_CountActivePlayers
+@0x4fd92e`, the `WritePlayerState` dead-bit clear `@0x4ff6dc`) are dead in JO.
+The deploy-hold bit `slot+89912 & 0x10` is set ONCE at join whenever
+`SpawnZoneList_GetCount() > 0` — **unconditional on the spectator latch**
+(`@0x51a6f2`) — and cleared only by the deploy leg (`@0x517791`), so a
+join-time spectator holds it forever and its 0x0A flags1 reads `0x03`; the
+priority build's dead-or-spectator predicate reads exactly this storage
+(`@0x50e68c`), the t35 deploy-idle punt explicitly exempts spectators
+(`@0x51e11f`), and the 0x0E dead-or-pending gate (`@0x519cc7`) carries no
+spectator check at that layer. The reimpl stores it the same way
+(`netsim::Connection::respawn_pending` held by join-time spectators; the
+former `conn.spectator ||` predicate inference is deleted).
 
 ### 5.1 Loading-progress counter — `dword_A82370`
 
@@ -2809,9 +2840,12 @@ typed `ClientGuidedMissile` state and the flight is hosted
 the overshoot/steer-guard detonation and the proximity AI-notify are
 AUTHORITY-only `[orig: the role gate @0x4463cb]` — a non-authority client
 flies until the wire's group 1 sets the dead bit) — and
-the per-group field semantics are validated against a local retail Karo Stinger
-capture (`nw_karo_guided_test`, gated on `<OPENNOVA_CAPTURES>/karo-guided.pcapng`; the earlier
-"no capture in hand" blocker is closed by that capture). Still deferred: the
+the per-group field semantics were capture-validated against a local retail
+Karo Stinger capture before the capture root retired (ca1cef465, 2026-08-29;
+the earlier "no capture in hand" blocker was closed by that capture, and the
+findings stand as recorded history). The live CI gates are `nw_ingame_guided`
+(the per-(mode, field-group) codec round-trip) and `guided_missile_flight`
+(the integrator). Still deferred: the
 authority seeker branch (the 0x44 write side), missile presentation, and the
 per-missile ammo resolve for velocity/turn clamps. Verdict: **ported**
 (dispatch + flight + capture-validated; residuals in the ledger row).
@@ -3268,9 +3302,12 @@ a labeled death/join/disconnect timeline.
 Only pool-0 (the two human players) is recorded — the AI/mission entities (pool-1/3, the §5.11/5.12
 spawn batches) are not; the authored-mission cross-validation (§5.24,
 `fixtures/novaworld/dvxi5_manifest.txt` + `nw_pool_groundtruth_test`) covers those. Sampling is 8-tick
-(~7.75 Hz). Tooling: `apps/nw_pp` reads `.sph` natively (suffix-dispatched); the decoder is
-`engine/net/npwire/serverlog_decode.{h,cpp}`; `tests/novaworld/nw_serverlog_decode_test` witnesses the
-controlled knowns (gated on the two `.sph` recordings under `<OPENNOVA_CAPTURES>/sph/`).
+(~7.75 Hz). Tooling: `apps/nw_pp` remains the live `.sph` reader
+(suffix-dispatched); the decoder is `engine/net/npwire/serverlog_decode.h` +
+`engine/net/npwire/replay/serverlog_decode.cpp`. Its controlled-knowns ctest
+(`nw_serverlog_decode`) was capture-gated and retired with the capture root
+(ca1cef465, 2026-08-29) — the two-recording validation stands as recorded
+history.
 
 ### 5.23 Tag 0x0C — pool-0 organic spawn batch (field map; D-NET-62)
 
@@ -3795,7 +3832,8 @@ entity. The exact server-side selection inside `NapiNPServerMsg_0x023 @ 0x514D50
 witness (undecompiled). The `0x4E` reply to the join-burst `0x28` is the 2-byte sentinel `FF FF`
 (count `0xFFFF`, no slots) in all three retail goldens — real kill batches ride the event-driven
 despawn stream (D-NET-66), and a non-sentinel reply form on this path is unwitnessed. Both replies
-are hard-required steady state in `nw_golden_diff` (no longer `kStateConditionedGaps`).
+were hard-required steady state in `nw_golden_diff` (no longer `kStateConditionedGaps`)
+until that capture-gated harness retired with the capture root (ca1cef465, 2026-08-29).
 
 ### 5.34 Session/transport control pings — RTT 0x57/0x2C + request quartet 0x39/0x42/0x43/0x68
 
@@ -6072,8 +6110,9 @@ default 600), `g_entity_action_queue` (`0xC86FDC`). Rules/config:
 `g_capture_duration` (`0x24D2248`), `g_round_wins_team1..4` (`0xC8FF0C/10/14/18`), `g_total_rounds_played`
 (`0xC8FF1C`), `g_round_winning_team` (`0x24C1924`), `g_mission_time_ticks` (`0x24C1944`). Join/moderation:
 `g_expansion_checksum` (`0xB4C5A4`), `g_banned_name_count`/`g_banned_name_list`/`g_banned_id_list`
-(`0xC8FF20`/`0xC90728`/`0xC8FF28`), `g_squad_max_players`/`_password_required`/`_required_tag`
-(`0x2550924`/`0xC9478C`/`0x2550928`), `g_pcid_dupe_reject` (`0x25509E8`), `g_weapon_violation_limit`
+(`0xC8FF20`/`0xC90728`/`0xC8FF28`), `g_spectator_slots`/`g_spectator_password`
+(`0x2550924`/`0x2550928` — renamed 2026-08-30 from the stale `g_squad_*` names, §5.0e/D-NET-217),
+`g_squad_password_required` (`0xC9478C`), `g_pcid_dupe_reject` (`0x25509E8`), `g_weapon_violation_limit`
 (`0x24D2178`), `g_votekick_enabled`/`_min_players`/`_percent` (`0x24D226C/70/74`), `g_network_delay_ticks`
 (`0xB4C29C`), `g_punt_log_enabled`/`g_cheat_log_enabled` (`0xC86FBC`/`0xC86FC0`), `g_gate_address`/
 `g_server_label` (`0xB5F4DC`/`0xB5F4BC`).
@@ -6566,12 +6605,15 @@ of `npruntime_client_runtime` plus `netsim_two_peer_fanout`'s no-owner and packe
 **Evidence.** `npruntime_client_runtime` (always-on): the full in-process round-trip — `ClientRuntime`
 ↔ the real np server legs ↔ `Server_TickUpdate` + `apply_in_match_c2s` + the `ClientReplicaPipeline` fold
 (handshake → spawn-gate burst → name-match → per-frame `0x0C` → drain/SNAP → `0x0A` → `ClientState`),
-plus the host-as-client D-NET-121/122 anchor path. `npruntime_golden_client` (root-gated on
-`<OPENNOVA_CAPTURES>/golden/retail-gameplay-session.pcapng`, skip-clean): against that capture, the real client emission
-path (`frame_c2s_uplink`) reproduces the captured `0x0C` **inner message byte-for-byte** (flags +
-sub-header + 43-B body), our framing re-frames the captured 9-message bundle into a **byte-identical**
-datagram (`0x43` header + SCRK + NWU/CRC), and the first S2C `0x0A` anchor lands **0.87 world units**
-from the nearest world-stream spawn (a non-circular cross-decoder oracle). No IDB renames this session
+plus the host-as-client D-NET-121/122 anchor path. `npruntime_golden_client` (retired with the
+capture root at ca1cef465, 2026-08-29) had proven, against the golden retail capture, that the real
+client emission path (`frame_c2s_uplink`) reproduces the captured `0x0C` **inner message
+byte-for-byte** (flags + sub-header + 43-B body), that our framing re-frames the captured 9-message
+bundle into a **byte-identical** datagram (`0x43` header + SCRK + NWU/CRC), and that the first S2C
+`0x0A` anchor lands **0.87 world units** from the nearest world-stream spawn (a non-circular
+cross-decoder oracle) — findings that stand as session history; the always-on evidence today is
+`npruntime_client_runtime` plus the committed-fixture `nw_self_capture` exact-coverage gate and the
+inline-pcap unit tests. No IDB renames this session
 (symbols already named); a summary witness comment was added at `Client_ProcessNetworkFrame @0x42c180`
 and `@0x42c482`.
 
@@ -11868,8 +11910,9 @@ builders (`build_reply_tag_16`/`rep_for_slot`/`make_rep_state`) now read the wir
 ORDER) + the echoed `player_name` stay on `conn.reply`. The pre-World reactive path
 (`bind_session_reply_player`, a World-less session-responder / `handshake_server_test`) stamps the bare wire
 handle onto `owned_entity` so it resolves the same way (team defaults when no live entity backs it). All 21
-net ctests + the byte-parity goldens (`npruntime_golden_lan_join`, `npruntime_golden_gameplay`,
-`nw_golden_diff`, `nw_message_coverage`, `nw_capture_decoder`) stay green. [orig: ServerConfig_SerializeToPacket
+net ctests + the then-live byte-parity goldens (`npruntime_golden_lan_join`, `npruntime_golden_gameplay`,
+`nw_golden_diff` — the capture-gated trio retired with the capture root at ca1cef465, 2026-08-29 —
+`nw_message_coverage`, `nw_capture_decoder`) stayed green at the change. [orig: ServerConfig_SerializeToPacket
 @0x505bd0 / NapiNPMsg_0x7B_BuildPayload @0x507740 / CNapiServerConfig_BuildFlags @0x4c4dc0 /
 NetPacket_WriteServerNameAndMapFile @0x505780 / CAdminServer_HandleStatus @0x402e30 /
 CAdminServer_HandleSetCommand @0x405a60]

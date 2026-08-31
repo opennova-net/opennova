@@ -283,6 +283,49 @@ void test_frame_reads_the_state_and_the_card_selector() {
     CHECK(f.fov_h_deg == kBinocularCameraFovHDeg);
 }
 
+// The frame leg's shake branch selection [orig: Render_ProcessMainSceneFrame
+//  @0x5ca34d -> Camera_ComputeThirdPersonView; the mode-0 IIR block
+//  @0x43803c..0x4380df vs the stateless mode>=1 chain @0x438939..0x4389e5]:
+// the chase (mode 1) consumes the engine tick, first person never does.
+void test_frame_chase_shake_consumes_the_tick() {
+    LocalWorld lw;
+    lw.ai.attach(lw.local);
+    LocalPlayerWeapon w = scoped_weapon(0);
+    LocalPlayerViewTracker t;
+    PlayerViewState v;
+    v.shake.counter = 32;
+    v.camera_mode = 1;
+    v.third_person = true;
+    lw.w.weather.core.oscillator.prng = 0x1234;
+    // Same view state, two ticks: the chase pitch/roll terms move with the
+    // tick (hand-check: deltas (13, 30, -23) at 100 vs (13, 14, -30) at 137).
+    PlayerViewState va = v;
+    PlayerViewState vb = v;
+    LocalPlayerViewFrame fa, fb;
+    lw.w.logic_tick = 100;
+    local_player_view_frame(&lw.w, w, va, t, fa);
+    CHECK(fa.camera_pose_valid);
+    lw.w.logic_tick = 137;
+    local_player_view_frame(&lw.w, w, vb, t, fb);
+    CHECK(fa.camera.yaw_deg == fb.camera.yaw_deg);
+    CHECK(fa.camera.pitch_deg != fb.camera.pitch_deg);
+    CHECK(fa.camera.roll_deg != fb.camera.roll_deg);
+    // First person from the same state ignores the tick entirely: the IIR
+    // sample reads only the counter, the filters and the PRNG word.
+    v.camera_mode = 0;
+    v.third_person = false;
+    PlayerViewState vc = v;
+    PlayerViewState vd = v;
+    LocalPlayerViewFrame fc, fd;
+    lw.w.logic_tick = 100;
+    local_player_view_frame(&lw.w, w, vc, t, fc);
+    lw.w.logic_tick = 137;
+    local_player_view_frame(&lw.w, w, vd, t, fd);
+    CHECK(fc.camera.yaw_deg == fd.camera.yaw_deg);
+    CHECK(fc.camera.pitch_deg == fd.camera.pitch_deg);
+    CHECK(fc.camera.roll_deg == fd.camera.roll_deg);
+}
+
 void test_set_eye_mirrors_the_head_into_the_world() {
     LocalWorld lw;
     LocalPlayerWeapon w = scoped_weapon(0);
@@ -479,6 +522,7 @@ int main() {
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
+    test_frame_chase_shake_consumes_the_tick();
     test_set_eye_mirrors_the_head_into_the_world();
     test_pump_feeds_the_heat_window_water_gate_from_the_body_z();
     test_weapon_trace_records_one_sample_per_pump_tick();

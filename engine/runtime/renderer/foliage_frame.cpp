@@ -39,6 +39,16 @@ bool point_in_frustum(const opennova::Frustum &frustum, float x, float y,
 
 } // namespace
 
+// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d — see the
+// header note for the constant map and the 2-pi fold rationale]
+float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0) {
+	constexpr double kTwoPi = 6.283185307179586;
+	const double clock_term =
+			std::fmod(static_cast<double>(time_ms) * 0.003, kTwoPi);
+	return static_cast<float>(
+			clock_term + static_cast<double>(wind_osc_ring0) / 65536.0);
+}
+
 void FoliageFrameCompiler::configure_slots(
 		const std::array<opennova::foliage::RuntimeSlot,
 				opennova::FOLIAGE_MAX_DEFS> &slots,
@@ -268,19 +278,10 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 	draw_list_.debug.runtime_silhouette_intents =
 			static_cast<int64_t>(output.silhouettes.size());
 
-	// The detail tier's c24.x: the ms clock x 0.003 plus the weather
-	// oscillator's ring slot 0 / 65536 (`fild` the GetTickCount word, `fmul`
-	// flt_7DE9D4 = 0.003; `fild Env_WaveOscRing`, `fmul` flt_7DE9D0 =
-	// 1/65536; `faddp`), uploaded as c24 = (phase, 1, 0, 0.03) for
-	// Foliage_WindSwayVS' sin(world.x + c24.x) * bend * c24.w
-	// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d]. The
-	// clock term folds modulo 2 pi so a long session keeps the sine's float
-	// precision — the sine is periodic, nothing observable moves.
-	constexpr double kTwoPi = 6.283185307179586;
-	const double clock_term =
-			std::fmod(static_cast<double>(view.time_ms) * 0.003, kTwoPi);
-	const float detail_wind_phase = static_cast<float>(
-			clock_term + static_cast<double>(view.wind_osc_ring0) / 65536.0);
+	// The detail tier's c24.x (foliage_detail_wind_phase in the header —
+	// [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d]).
+	const float detail_wind_phase =
+			foliage_detail_wind_phase(view.time_ms, view.wind_osc_ring0);
 
 	// --- Detail submissions ------------------------------------------------
 	for (size_t begin = 0; begin < output.detail.size();) {

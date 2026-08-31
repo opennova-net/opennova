@@ -430,7 +430,14 @@ one-third density** (linear: end x3; exp: density/3). FOGMODE bit 2
 (FOGMODE_SHADER 8..11) zeroes table/vertex fog so the VS `oFog` drives. The
 shipped corpus never uses fogmode 4..7 — LITE is dormant in JO (the
 "underwater set" hypothesis is refuted; underwater fog color is the separate
-`CD3DDevice_SetActiveFogColor` path).
+`CD3DDevice_SetActiveFogColor` path). The #595 renderer merge homed the
+device fog evaluation in the engine as
+`engine/runtime/renderer/device_fog.h` (`[orig: Render_SetFogState
+@ 0x58a950; CD3DDevice_SetFogParameters @ 0x677960]`, ctest
+`renderer_device_fog`) — the one function every Q3/beauty consumer
+evaluates through; `godot/src/render/q3_frame_adapter.cpp`'s shader
+hand-mirrors it and must never re-derive its own curve (the comment there
+pins the mirror to this header).
 
 **The color pipeline (gamma space; witnessed 2026-07-06, the model-parity
 slice).** The retail pipeline is **gamma-space end to end** — texture bytes

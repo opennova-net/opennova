@@ -1057,9 +1057,17 @@ int32_t part_anim_rate_from_seconds(double seconds) {
     return rate;
 }
 
-// [orig: Entity_ApplyCommand @0x43ab60] See the header. Only case 0x22 (PLAYPARTANIM) is ported.
+// [orig: Entity_ApplyCommand @0x43ab60] See the header. These are the arms
+// which mutate the AI brain synchronously; queued command events are consumed
+// by AiSystem::ai_handle_command.
 void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
     switch (sub_type) {
+        case 0x20: // AIUSEWPZ [orig: @0x43B0E5]
+            comp.f[AiBrain::kUseWaypointZones] = 1;
+            break;
+        case 0x21: // AICLEARWPZ [orig: @0x43B0F7]
+            comp.f[AiBrain::kUseWaypointZones] = 0;
+            break;
         case 0x22: { // PLAYPARTANIM: p2=ANIMNUM(channel), p3=ANIMPLAYTYPE, p4=ANIMTIME(16.16 s)
             const int channel = p2;
             if (channel != 1 && channel != 2) return;              // only channels 1,2 act
@@ -1075,26 +1083,10 @@ void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32
                     part_anim_rate_from_seconds(seconds);
             break;
         }
-        case 29:   // COMBATSPEED -> kSpeedA (brain +196)
-        case 30: { // PATROLSPEED -> kSpeedB (brain +200)
-            // [orig: Entity_ApplyCommand @0x43ab60 cases 0x1D/0x1E queue AIEvent types
-            // 10/11 -> AI_HandleCommand @0x465770 cases 0xA/0xB — km/h to 16.16 u/tick:
-            // fild(value) (+2^32 when negative = the unsigned reinterpret) * 1000
-            // * (1/225000) * 65536 = x65536/225 (the exact 62.5 Hz conversion; the
-            // items.def parse's x293 is its integer approximation).]
-            double v = static_cast<double>(p2);
-            if (v < 0.0) v += 4294967296.0; // flt_7C3288 add on negative [orig: @0x465974]
-            const int32_t scaled =
-                    static_cast<int32_t>(v * 1000.0 * 4.444444584805751e-06 * 65536.0);
-            comp.f[sub_type == 29 ? AiBrain::kSpeedA : AiBrain::kSpeedB] = scaled;
-            break;
-        }
         default:
-            // Tracked-TODO: accuracy(8), AISETSTATE(0x1C), etc. (the D-AI
-            // rows in docs/world/world-wac-ai-re.md; the alert subs 5/6/0x16
-            // are ported — controller byte + queued brain event at the
-            // EntityCommands seam). No-op so an unported sub-type
-            // can't corrupt the AI component.
+            // Controller/entity arms are applied at EntityCommands; queued
+            // state, skill, speed, alert, and fire commands are consumed by
+            // AiSystem::ai_handle_command. Unknown sub-types remain no-ops.
             break;
     }
 }

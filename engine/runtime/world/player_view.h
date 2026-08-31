@@ -427,6 +427,24 @@ void camera_shake_sample(CameraShakeState &st, uint32_t weather_prng,
                          int32_t &d_yaw_bam, int32_t &d_pitch_bam,
                          int32_t &d_roll_bam);
 
+// The CHASE (mode-1) shake leg: a stateless sin/cos chain over the RAW counter
+// and the engine tick, scaled by an amplitude built from the weather PRNG's
+// low byte — it never touches the mode-0 IIR filters, so a mode flip resumes
+// them exactly where they stopped. Retail applies it to any non-zero camera
+// mode after the look-at compose (the mode-4 lerp then overwrites the
+// rotation wholesale, so only the chase renders it).
+// amp = (min(4*counter, 255) * ((prng & 0xFF) + 64)) >> 8, each term
+// truncated to int (ftol) before its add/subtract; the two tick terms are
+// quartered by an ARITHMETIC >> 2 after truncation.
+// [orig: Camera_ComputeThirdPersonView @0x437d10, the mode>=1 block
+//  @0x438939..0x4389e5 — amp @0x43893f..0x438967; yaw += sin(C*0.4)*amp
+//  @0x438974..0x43898b; pitch += sin(C*2/7)*amp - (sin(T*25/34)*amp >> 2)
+//  @0x438985..0x4389cf; roll = sin(C*2/11)*amp - (cos(T*0.862069)*amp >> 2)
+//  over a zero base @0x43899c..0x4389e5]
+void camera_shake_sample_chase(const CameraShakeState &st, uint32_t weather_prng,
+                               uint32_t tick, int32_t &d_yaw_bam,
+                               int32_t &d_pitch_bam, int32_t &d_roll_bam);
+
 // The head-bone eye's FIVE-SAMPLE terrain floor [orig:
 // Entity_UpdateInfantryPlayerBody @ 0x4b6c08..0x4b6ca4]: the eye Z is floored
 // at the MAX of the bilinear terrain height at the eye column and at
