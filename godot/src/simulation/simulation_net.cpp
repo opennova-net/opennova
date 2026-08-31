@@ -945,6 +945,13 @@ void Simulation::set_join_token(const String &p_token) {
 	install_join_token();
 }
 
+void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
+	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN. Retained
+	// and re-applied to the joiner runtime on each (re)load via install_join_cd_cookie.
+	join_cd_cookie_.assign(p_cookie.ptr(), p_cookie.ptr() + p_cookie.size());
+	install_join_cd_cookie();
+}
+
 void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 	// D-NET-166: the JOIN VERSIONCRCSTRING checksum source. The runtime CRCs
 	// the loose expansion/<SUS2>/version.txt under this root at JOIN-build
@@ -992,6 +999,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_join_integrity_profile();
 	install_expansion_version_root();
 	install_join_token();
+	install_join_cd_cookie();
 	install_item_class_resolver();
 	joiner_ = true;
 	if (kernel_) {

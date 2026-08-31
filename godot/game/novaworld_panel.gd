@@ -409,15 +409,17 @@ func expansion_advisory_blocks_first_press(row: Dictionary, rid: int) -> bool:
 # stashed browse-time mission hint + callsign) to MainGame. The in-match runtime
 # authenticates again, then S2C 0x7B/0x0B owns the actual mission load exactly as
 # for LAN; the lobby hint is never a local-BMS requirement (D-NET-194).
-func _on_joined_game(host: String, port: int, join_token: String) -> void:
+func _on_joined_game(host: String, port: int, join_token: String, cd_cookie: PackedByteArray) -> void:
 	_set_status("Entering %s:%d as %s..." % [host, port, _pending_player])
 	var target := JoinTarget.new()
 	target.host_ip = host
 	target.port = port
 	target.mission = _pending_mission
 	target.player_name = _pending_player
-	# The BT join token (decoded .joi CK) the NovaWorld host validates (code 9).
+	# The APPID join token (decoded .joi CK) the host validates (code 9), and the
+	# CD identity cookie (packed PUB* blob) it validates in the 0x00 JOIN (code 23).
 	target.join_token = join_token
+	target.cd_cookie = cd_cookie
 	join_in_match_requested.emit(target)
 
 

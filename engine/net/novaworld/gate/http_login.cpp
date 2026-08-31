@@ -173,6 +173,23 @@ const std::string *CookieJar::find(const std::string &name) const {
 	return it == values_.end() ? nullptr : &it->second;
 }
 
+std::vector<uint8_t> CookieJar::build_prefixed_blob(const std::string &prefix) const {
+	std::vector<uint8_t> blob;
+	for (const std::string &name : order_) {
+		if (name.size() < prefix.size() ||
+		    name.compare(0, prefix.size(), prefix) != 0) {
+			continue;
+		}
+		const auto it = values_.find(name);
+		const std::string &value = it == values_.end() ? name : it->second;
+		blob.insert(blob.end(), name.begin(), name.end());
+		blob.push_back(0);
+		blob.insert(blob.end(), value.begin(), value.end());
+		blob.push_back(0);
+	}
+	return blob;
+}
+
 std::vector<std::string> CookieJar::cookie_header_lines() const {
 	// Retail emits one "Cookie: name=value;" header per cookie (trailing ';'),
 	// not a single merged line [orig: CUIBrowser_SendHTTPRequest @ 0x658840,

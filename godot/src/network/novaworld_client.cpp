@@ -113,7 +113,8 @@ void NovaWorldClient::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("login_failed", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("joined_game", PropertyInfo(Variant::STRING, "host"),
 	                      PropertyInfo(Variant::INT, "port"),
-	                      PropertyInfo(Variant::STRING, "join_token")));
+	                      PropertyInfo(Variant::STRING, "join_token"),
+	                      PropertyInfo(Variant::PACKED_BYTE_ARRAY, "cd_cookie")));
 
 	BIND_ENUM_CONSTANT(STATE_IDLE);
 	BIND_ENUM_CONSTANT(STATE_GATE_PROBING);
@@ -660,12 +661,18 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 			emit_signal("error_occurred", String("join resolve failed to start"));
 		}
 		break;
-	case opennova::JoinResult::Kind::Resolved:
+	case opennova::JoinResult::Kind::Resolved: {
 		trace(String("join resolved host ") + String(r.host_ip.c_str()) + ":"
 			+ String::num_int64(static_cast<int64_t>(r.host_port)));
+		PackedByteArray cd;
+		if (!r.cd_cookie.empty()) {
+			cd.resize(static_cast<int64_t>(r.cd_cookie.size()));
+			std::memcpy(cd.ptrw(), r.cd_cookie.data(), r.cd_cookie.size());
+		}
 		resolve_join_target(String(r.host_ip.c_str()), r.host_port,
-			String(r.app_id.c_str()));
+			String(r.app_id.c_str()), cd);
 		break;
+	}
 	case opennova::JoinResult::Kind::Failed:
 		// D-1: any async join failure falls back to the lobby (CONNECTED) — consolidates
 		// the old non-200 (formerly stuck JOINING) and bad-.joi (CONNECTED) into one path.
@@ -683,14 +690,16 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 // hello and stop" dead-end that never reached gameplay). LAN, NW-routed, and env joins now converge
 // on the one joiner seam (ADR 0009; .agents/README.md "do not create a second gameplay network path").
 void NovaWorldClient::resolve_join_target(const String &host, uint16_t port,
-                                          const String &join_token) {
+                                          const String &join_token,
+                                          const PackedByteArray &cd_cookie) {
 	trace(String("join target resolved ") + host + ":"
 		+ String::num_int64(static_cast<int64_t>(port))
 		+ " — handing off to the in-match joiner (Simulation owns the ClientHello)");
 	enter_state(STATE_IN_GAME_HELLO);
-	// The BT join token (decoded .joi CK) travels with the address: a NovaWorld
-	// host validates it in the game-session ClientAuth (reject code 9).
-	emit_signal("joined_game", host, static_cast<int>(port), join_token);
+	// The APPID join token (decoded .joi CK) and the CD identity cookie (packed
+	// PUB* blob) travel with the address: a NovaWorld host validates the APPID in
+	// the ClientAuth (code 9) and the CD cookie in the 0x00 JOIN (codes 23/24/25).
+	emit_signal("joined_game", host, static_cast<int>(port), join_token, cd_cookie);
 }
 
 void NovaWorldClient::enter_state(State next, const String &reason) {

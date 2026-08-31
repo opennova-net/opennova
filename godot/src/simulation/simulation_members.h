@@ -277,9 +277,12 @@ private:
 	// loose expansion/<name>/version.txt from (D-NET-166). Empty keeps the
 	// golden "0". Retained across direct-load runtime rebuilds.
 	std::string join_expansion_version_root_;
-	// The game-session BT join token (decoded .joi CK) a NovaWorld host validates
-	// (reject code 9). "0" is the LAN default. Retained across runtime rebuilds.
+	// The game-session APPID join token (decoded .joi CK) a NovaWorld host
+	// validates (reject code 9). "0" is the LAN default. Retained across rebuilds.
 	std::string join_token_ = "0";
+	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN (codes 23/24/25).
+	// Empty for LAN. Retained across direct-load runtime rebuilds.
+	std::vector<uint8_t> join_cd_cookie_;
 	// The live environment owner consumes each decoded phase-2 edge once. The
 	// ClientState revision is monotonic for one ClientRuntime; fresh runtimes
 	// reset this cursor with their other receive-side cursors.
@@ -506,8 +509,10 @@ private:
 	void install_join_integrity_profile();
 	// Install the retained JOIN-checksum install root (D-NET-166).
 	void install_expansion_version_root();
-	// Install the retained BT join token (decoded .joi CK) on the current runtime.
+	// Install the retained APPID join token (decoded .joi CK) on the current runtime.
 	void install_join_token();
+	// Install the retained CD identity cookie (packed PUB* blob) on the runtime.
+	void install_join_cd_cookie();
 	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
 	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn, over the kernel's
 	// world/mission. Mirrors apps/nw_server; the Godot-fed context installs (mission text,
