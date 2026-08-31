@@ -65,6 +65,8 @@
     "probe_runner.gd|func status(",
     "probe_runner.gd|func cancel(",
     "game_world.gd|func get_perf_probe_spans(",
+    "debug_view_set.gd|func get_ai_view_state()",
+    "game_world.gd|func get_ai_view_state()",
     "perf_probe_switches.gd|var spans: Dictionary",
     "mission_audio.gd|func to_dict()"
   ]
