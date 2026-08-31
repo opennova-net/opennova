@@ -163,6 +163,28 @@ public:
 				: 0;
 	}
 
+	// Anti-cheat challenge counters and the last structured reject/disconnect
+	// records (defaults for HostClient) — the live-join punt diagnostics.
+	JoinerConnection::ChallengeDiagnostics challenge_diagnostics() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr)
+				? joiner_->challenge_diagnostics()
+				: JoinerConnection::ChallengeDiagnostics{};
+	}
+	JoinerConnection::JoinRejectRecord last_join_reject() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr)
+				? joiner_->last_join_reject()
+				: JoinerConnection::JoinRejectRecord{};
+	}
+	bool has_disconnect_event() const {
+		return role_ == Role::Joiner && joiner_ != nullptr &&
+				joiner_->has_disconnect_event();
+	}
+	DisconnectEvent last_disconnect_event() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr)
+				? joiner_->last_disconnect_event()
+				: DisconnectEvent{};
+	}
+
 	// The per-frame client net role [orig: Client_ProcessNetworkFrame @0x42c180], in witnessed order:
 	//   (1) recv pump: Joiner drains the recv FIFO -> JoinerConnection decodes -> drive the connect
 	//       legs + fold inner S2C bodies into ClientState [orig: PumpClientProtocolRecv @0x42c228];

@@ -517,6 +517,22 @@ func load_mission_data(mission: MissionData, bms_name: String, dir: String = "")
 	return _load_mission_internal(mission, bms_name, resource_root)
 
 
+# The missing-terrain/env reason, join-aware: a wire-header join has no local
+# .bms — the host streamed the mission identity — so the reason names the
+# stream and what is mounted/installed, making a live punt read as "your
+# install lacks X" rather than a bad local file.
+func missing_mission_asset_reason(asset: String, bms_name: String,
+		resource_root: ResourceRoot, wire_header_join: bool) -> String:
+	if not wire_header_join:
+		return "%s (from %s) not found in %s" % [asset, bms_name, resource_root.get_root_dir()]
+	var mounted := String(resource_root.get_expansion())
+	var mounted_text := ("'%s'" % mounted) if not mounted.is_empty() else "base game"
+	return "%s (named by the host's streamed mission %s) not found in %s (mounted: %s, installed: %s)" % [
+		asset, bms_name, resource_root.get_root_dir(), mounted_text,
+		NetSessionPolicy.describe_installed(
+			resource_root.list_expansions(resource_root.get_root_dir()))]
+
+
 # The ONE mission path — the file entry (load_mission) and the in-memory
 # entry (load_mission_data) converge here: resolve the header's terrain +
 # environment from `resource_root`, apply the mission's env overrides, build the
@@ -528,13 +544,21 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	_join_wire_til_applied = false
 	_join_wire_assets_failed = false
 	_join_wire_asset_failure_emitted = false
+	# The local-asset gate holds for wire-header joins too — there is no world
+	# without terrain/env, and retail joiners also resolve both from the local
+	# install by the names the wire supplies (net-re section 5.28: custom
+	# missions reference stock assets). Only the REPORT is join-aware: a wire
+	# join names the host's stream and the mounted expansion so a live punt
+	# reads as "your install lacks X", not as a bad local file.
 	var trn := mission.get_terrain_ref() + ".trn"
 	if not resource_root.has_file(trn):
-		load_failed.emit("%s.trn (from %s) not found in %s" % [mission.get_terrain_ref(), bms_name, resource_root.get_root_dir()])
+		load_failed.emit(missing_mission_asset_reason(
+				mission.get_terrain_ref() + ".trn", bms_name, resource_root, wire_header_join))
 		return ERR_FILE_NOT_FOUND
 	var env_name := mission.get_environment_ref() + ".env"
 	if not resource_root.has_file(env_name):
-		load_failed.emit("%s.env (from %s) not found in %s" % [mission.get_environment_ref(), bms_name, resource_root.get_root_dir()])
+		load_failed.emit(missing_mission_asset_reason(
+				env_name, bms_name, resource_root, wire_header_join))
 		return ERR_FILE_NOT_FOUND
 
 	_set_weather_world_tick_driven(true)

@@ -608,6 +608,28 @@ func _stage_building_terrain_fixture(name: String) -> String:
 	return root_dir
 
 
+# The missing-terrain/env reason is join-aware: a wire-header join (no local
+# .bms — the host streamed the identity) names the stream and the mounted/
+# installed expansions so a live retail-server punt reads as an install gap.
+func test_wire_header_missing_asset_reason_names_the_install() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../assets")), OK)
+	assert_eq(world.missing_mission_asset_reason("dvi.trn", "x.bms", root, false),
+			"dvi.trn (from x.bms) not found in %s" % root.get_root_dir(),
+			"a local-file load keeps the historical reason text")
+	var wire_reason := String(
+			world.missing_mission_asset_reason("dvi.trn", "HOSTMAP.BMS", root, true))
+	assert_string_contains(wire_reason, "host's streamed mission HOSTMAP.BMS",
+			"a wire-header join names the host's stream, not a bad local file")
+	assert_string_contains(wire_reason, "mounted: base game",
+			"the reason names the mounted data set")
+	assert_string_contains(wire_reason, "installed:",
+			"the reason names the installed expansion set")
+
+
 func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 	var world := _make_world()
 	add_child_autofree(world)

@@ -8,6 +8,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/novacrypto/crc32.h>
+#include <base/io/log.h>
 #include <base/vfs/vfs.h>
 
 #include <algorithm>
@@ -516,7 +517,45 @@ std::vector<uint8_t> JoinerConnection::frame_retained_session(uint32_t sequence)
 	return nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body));
 }
 
+namespace {
+const char *joiner_phase_name(JoinerConnection::Phase phase) {
+	switch (phase) {
+	case JoinerConnection::Phase::Idle: return "idle";
+	case JoinerConnection::Phase::Hello: return "hello";
+	case JoinerConnection::Phase::Auth: return "auth";
+	case JoinerConnection::Phase::Driving: return "driving";
+	case JoinerConnection::Phase::InMatch: return "in-match";
+	case JoinerConnection::Phase::Error: return "error";
+	}
+	return "unknown";
+}
+} // namespace
+
 JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *raw, std::size_t len) {
+	// Diagnostic transition trace, emitted on every exit path: one kInfo line
+	// per phase/admission-stage change per datagram, plus the authoritative
+	// 0x7B mission identity the moment it is learned. The sink is silent unless
+	// an embedder installed one (io/log.h), so live joins pay one branch here.
+	struct TransitionTrace {
+		JoinerConnection &c;
+		Phase phase_before;
+		PostAuthStage stage_before;
+		bool mission_before;
+		~TransitionTrace() {
+			if (c.phase_ != phase_before || c.post_auth_stage_ != stage_before) {
+				io::logf(io::LogLevel::kInfo,
+						"np joiner: phase %s, stage: %s",
+						joiner_phase_name(c.phase_), c.post_auth_stage_name());
+			}
+			if (c.mission_known_ && !mission_before) {
+				io::logf(io::LogLevel::kInfo,
+						"np joiner: host mission identity: server='%s' map='%s' expansion='%s'",
+						c.server_name_.c_str(), c.map_file_.c_str(),
+						c.expansion_.c_str());
+			}
+		}
+	} transition_trace{*this, phase_, post_auth_stage_, mission_known_};
+
 	PollResult out;
 	if (poll_session_loss() || phase_ == Phase::Error) return out;
 	uint8_t opcode = 0;
@@ -595,6 +634,14 @@ void JoinerConnection::on_server_auth(
 		// CNapiNetwork_ValidateJoinRequest @0x4c61b0 (2 locked / 3 banned /
 		// 4 full / 5 full with spectator-only slots); client store
 		// NapiNP_HandleServerJoinResponse @0x629840]
+		last_join_reject_.set = true;
+		last_join_reject_.jfc = sa.jfc;
+		last_join_reject_.jfp = sa.jfp;
+		last_join_reject_.jfs = sa.jfs;
+		io::logf(io::LogLevel::kWarn,
+				"np joiner: join rejected: jfc=%u jfp=%u jfs='%s'",
+				static_cast<unsigned>(sa.jfc), static_cast<unsigned>(sa.jfp),
+				sa.jfs.c_str());
 		if (sa.jfc == 14) {
 			switch (sa.jfp) {
 			case 2: fail("The server is locked"); break;
@@ -1422,6 +1469,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.empty() ? uint8_t{0} : m.payload[0];
 			clear_charattr_challenge_property(
 					charattr_challenge_table_, property_id);
+			++challenge_diagnostics_.property_clears;
 		} else if (m.tag == s2c::CHARATTR_CRC_CHALLENGE) {
 			// Anti-cheat character-attribute CRC challenge. The reply is one
 			// 4-byte C2S 0x1C, and
@@ -1444,12 +1492,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			decode_u32_scalar(m.payload.data(), m.payload.size(), challenge_seed,
 					seed_consumed);
 			uint32_t checksum = 0;
+			++challenge_diagnostics_.charattr_seen;
 			if (const CharAttrChallengeRow *row =
 					    find_charattr_challenge_row(
 							    charattr_challenge_table_,
 							    current_player_class_)) {
 				checksum = challenge_seed ^
 						crc32_napi(row->data(), row->size());
+			} else {
+				++challenge_diagnostics_.charattr_row_missing;
 			}
 			periodic_replies.push_back(
 					make_protocol_message(c2s::CHARATTR_CRC_REPLY, le32_value(checksum)));
@@ -1476,6 +1527,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// (D-NET-181; net-re section 5.65).
 			EntityChecksumRequest request;
 			std::size_t consumed = 0;
+			++challenge_diagnostics_.entity_checksum_seen;
 			if (integrity_challenge_profile_ != nullptr &&
 			    decode_entity_checksum_request(m.payload.data(), m.payload.size(),
 					request, consumed) &&
@@ -1501,6 +1553,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					body.insert(body.end(), value.begin(), value.end());
 					periodic_replies.push_back(make_protocol_message(
 							c2s::ENTITY_CHECKSUM_REPLY, std::move(body)));
+					++challenge_diagnostics_.entity_checksum_answered;
 				}
 			}
 		} else if (m.tag == s2c::LOADOUT_CRC_REQ) {
@@ -1517,6 +1570,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//  out-of-range arm @0x42b114, the key echo @0x42b14d]
 			LoadoutCrcRequest crc_request;
 			std::size_t crc_consumed = 0;
+			++challenge_diagnostics_.loadout_crc_seen;
 			// As above, no profile means silence and an uncovered in-range record stays
 			// silent. A selected profile may answer only CRCs reproduced from retail's
 			// sanitized 276-byte record image. The independently witnessed table count also
@@ -1551,6 +1605,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					body.insert(body.end(), key_bytes.begin(), key_bytes.end());
 					periodic_replies.push_back(make_protocol_message(
 							c2s::CHECKSUM_REPLY, std::move(body)));
+					++challenge_diagnostics_.loadout_crc_answered;
 				}
 			}
 		} else if (m.tag == s2c::LOADED_MODEL_PAGE_REQUEST) {
@@ -2166,6 +2221,12 @@ uint64_t JoinerConnection::milliseconds_since_last_receive() const {
 //  CNapiNPConnection_TeardownActiveConnection @0x6253c0]
 void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 	if (!host_disconnect_reason_.empty()) return;
+	last_disconnect_event_ = event;
+	disconnect_event_set_ = true;
+	io::logf(io::LogLevel::kWarn,
+			"np joiner: host description punt: dc=%u dpc=%u ddstr='%s' dstr='%s' (stage: %s)",
+			static_cast<unsigned>(event.dc), static_cast<unsigned>(event.dpc),
+			event.ddstr.c_str(), event.dstr.c_str(), post_auth_stage_name());
 	// The client's exit-reason switch keys on DPC and only runs for the DC == 2 family; both
 	// therefore belong in the reason, alongside the sender's own tag and text (for the
 	// witnessed deploy-screen idle punt: DPC 33, DC 2, "LogPuntEvent", "t35").
@@ -2272,6 +2333,8 @@ std::vector<std::vector<uint8_t>> JoinerConnection::disconnect() {
 }
 
 void JoinerConnection::fail(std::string reason) {
+	io::logf(io::LogLevel::kWarn, "np joiner: session failed (stage: %s): %s",
+			post_auth_stage_name(), reason.c_str());
 	last_error_ = std::move(reason);
 	handshake_retry_datagram_.clear();
 	handshake_retry_clock_armed_ = false;

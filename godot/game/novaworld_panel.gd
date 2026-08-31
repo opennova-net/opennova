@@ -45,6 +45,9 @@ var _logged_in := false
 # load it) and pair them when the join resolves.
 var _pending_mission := ""
 var _pending_player := ""
+# The rid whose first Join press drew the expansion warning; a second press on
+# the same row proceeds (the in-match 0x7B reconcile stays authoritative).
+var _exp_warning_armed_rid := -1
 # The mounted resource root, set by MainGame BEFORE _ready so the host Map picker can list the
 # install's .bms missions (the panel owns no mission list; the world's root is null until a load).
 var resource_root: ResourceRoot
@@ -252,6 +255,7 @@ func _on_error(message: String) -> void:
 func _refresh_servers() -> void:
 	_server_list.clear()
 	_rows = []
+	_exp_warning_armed_rid = -1
 	if _client != null:
 		for row in _client.get_server_rows():
 			_rows.append(row)
@@ -296,6 +300,9 @@ func server_row_tooltip(row: Dictionary) -> String:
 	var country := String(row.get("country", ""))
 	if not country.is_empty():
 		parts.append("Country: %s" % country)
+	var exp := String(row.get("exp", ""))
+	if not exp.is_empty():
+		parts.append("Expansion: %s" % exp)
 	var ip := String(row.get("ip", ""))
 	if not ip.is_empty() and ip != "0.0.0.0":
 		parts.append("Address: %s" % ip)
@@ -360,12 +367,42 @@ func _on_join_pressed() -> void:
 		return
 	var row: Dictionary = _rows[index]
 	var rid := int(row.get("rid", 0))
+	# Browse-time expansion advisory: warn BEFORE the join when the row's
+	# advertised expansion cannot be honored locally, instead of letting the
+	# in-match 0x7B reconcile abort the load minutes later (D-NET-178 stays the
+	# authoritative gate — a stale/absent GSB `exp` never blocks; pressing Join
+	# again proceeds anyway so the authoritative check has the last word).
+	if expansion_advisory_blocks_first_press(row, rid):
+		return
 	# Remember what we need for the in-match join — joined_game only carries the resolved address.
 	_pending_mission = String(row.get("mission_name", ""))
 	_pending_player = player_name
 	_set_status("Joining %s..." % String(row.get("name", "server")))
 	if _client != null:
 		_client.join(rid)
+
+
+# True only on the FIRST Join press for a row whose advertised expansion the
+# local install cannot supply (the policy's FAIL decision); sets the warning
+# status and arms the second-press override.
+func expansion_advisory_blocks_first_press(row: Dictionary, rid: int) -> bool:
+	var host_exp := String(row.get("exp", "")).strip_edges()
+	if host_exp.is_empty() or resource_root == null:
+		return false
+	if _exp_warning_armed_rid == rid:
+		_exp_warning_armed_rid = -1
+		return false
+	var action: int = NetSessionPolicy.new().decide_expansion(
+		host_exp, String(resource_root.get_expansion()),
+		resource_root.list_expansions(resource_root.get_root_dir()))
+	if action != NetSessionPolicy.ACTION_FAIL:
+		return false
+	_exp_warning_armed_rid = rid
+	_set_status("This server runs expansion '%s' which is not installed (installed: %s). Press Join again to try anyway." % [
+		host_exp,
+		NetSessionPolicy.describe_installed(
+			resource_root.list_expansions(resource_root.get_root_dir()))])
+	return true
 
 
 # The NWJoin handshake resolved the host's in-match address. Hand it (with the

@@ -1224,6 +1224,39 @@ Dictionary Simulation::get_joiner_network_diagnostics() const {
 	out["freeze_suspected"] = joiner_bridge_.freeze_suspected();
 	out["in_match"] = runtime_ && runtime_->in_match();
 	out["deployed"] = runtime_ && runtime_->is_deployed();
+	if (runtime_) {
+		out["stage"] = String(runtime_->admission_stage_name());
+		const opennova::np::JoinerConnection::ChallengeDiagnostics challenges =
+				runtime_->challenge_diagnostics();
+		Dictionary crc;
+		crc["entity_checksum_seen"] = static_cast<int64_t>(challenges.entity_checksum_seen);
+		crc["entity_checksum_answered"] =
+				static_cast<int64_t>(challenges.entity_checksum_answered);
+		crc["loadout_crc_seen"] = static_cast<int64_t>(challenges.loadout_crc_seen);
+		crc["loadout_crc_answered"] = static_cast<int64_t>(challenges.loadout_crc_answered);
+		crc["charattr_seen"] = static_cast<int64_t>(challenges.charattr_seen);
+		crc["charattr_row_missing"] = static_cast<int64_t>(challenges.charattr_row_missing);
+		crc["property_clears"] = static_cast<int64_t>(challenges.property_clears);
+		out["challenges"] = crc;
+		const opennova::np::JoinerConnection::JoinRejectRecord reject =
+				runtime_->last_join_reject();
+		if (reject.set) {
+			Dictionary r;
+			r["jfc"] = static_cast<int64_t>(reject.jfc);
+			r["jfp"] = static_cast<int64_t>(reject.jfp);
+			r["jfs"] = String::utf8(reject.jfs.c_str());
+			out["last_reject"] = r;
+		}
+		if (runtime_->has_disconnect_event()) {
+			const opennova::DisconnectEvent event = runtime_->last_disconnect_event();
+			Dictionary d;
+			d["dc"] = static_cast<int64_t>(event.dc);
+			d["dpc"] = static_cast<int64_t>(event.dpc);
+			d["ddstr"] = String::utf8(event.ddstr.c_str());
+			d["dstr"] = String::utf8(event.dstr.c_str());
+			out["last_disconnect"] = d;
+		}
+	}
 	return out;
 }
 
