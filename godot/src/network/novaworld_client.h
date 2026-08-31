@@ -102,9 +102,10 @@ public:
 
 	// Join a hosted game (ADR 0010 Phase 5). Runs the NWJoin.dll HTTP handshake for
 	// the GSB row's `rid`, resolves the in-match host address, and emits
-	// joined_game(host, port). The game layer (NovaWorldPanel -> MainGame) then drives
-	// the in-match join through Simulation's joiner — this client does not send the
-	// in-match ClientHello itself (one joiner seam for LAN / NW / env joins).
+	// joined_game(host, port, join_token, cd_cookie). The game layer (NovaWorldPanel ->
+	// MainGame) then drives the in-match join through Simulation's joiner — this client
+	// does not send the in-match ClientHello itself (one joiner seam for LAN / NW / env
+	// joins).
 	void join(int rid);
 
 	// Engine hooks.
@@ -141,8 +142,8 @@ private:
 	                               const PackedStringArray &headers,
 	                               const PackedByteArray &body);
 	// The NWJoin handshake resolved the in-match host:port — hand it off to the game
-	// layer via joined_game(host, port). Does NOT send an in-match hello; Simulation's
-	// joiner owns the single ClientHello (see the .cpp for why).
+	// layer via joined_game(host, port, join_token, cd_cookie). Does NOT send an
+	// in-match hello; Simulation's joiner owns the single ClientHello (see the .cpp).
 	void resolve_join_target(const String &host, uint16_t port,
 	                         const String &join_token,
 	                         const PackedByteArray &cd_cookie);

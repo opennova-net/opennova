@@ -187,8 +187,11 @@ end
 	return result
 
 
-# A REAL loopback join held at the deploy pick (the deploy_screen_presenter_test
-# recipe). Returns {host, joiner}; both autofreed Nodes.
+# A REAL loopback join held at the DEATH deploy pick (the
+# deploy_screen_presenter_test recipe): the initial join deploys with no pick —
+# retail's initial join sends no C2S 0x0E — then the authority kills the joiner
+# and the death edge re-arms the pick. Returns {host, joiner}; both autofreed
+# Nodes.
 func _join_pair_with_pending_pick() -> Dictionary:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
@@ -232,8 +235,32 @@ func _join_pair_with_pending_pick() -> Dictionary:
 			break
 		OS.delay_msec(2)
 	assert_true(reached, "the joiner reached in-match over real loopback UDP")
-	assert_true(joiner.is_join_deploy_pick_pending(),
-			"the spawn-zone join holds the player-paced deploy pick")
+	assert_false(joiner.is_join_deploy_pick_pending(),
+			"the initial join deploys with no forced C2S 0x0E")
+	# The kill targets the joiner's wire handle: wait for the 0x0C name-match to
+	# bind it, then the authority's real death transaction re-arms the pick (the
+	# DEATH screen).
+	var self_bound := false
+	for _i in range(400):
+		host.step()
+		joiner.step()
+		if joiner.get_joiner_self_handle() > 0:
+			self_bound = true
+			break
+		OS.delay_msec(2)
+	assert_true(self_bound, "the joiner bound its wire handle before the kill")
+	assert_eq(host.debug_kill_player_entity(joiner.get_joiner_self_handle()), OK,
+			"the host queued the joiner's death")
+	var pick_pending := false
+	for _i in range(240):
+		host.step()
+		joiner.step()
+		if joiner.is_join_deploy_pick_pending():
+			pick_pending = true
+			break
+		OS.delay_msec(2)
+	assert_true(pick_pending,
+			"the death edge holds the deploy pick (begin_redeployment)")
 	return {"host": host, "joiner": joiner}
 
 

@@ -40,9 +40,9 @@ var _target: int = NovaWorldSettings.Target.OPENNOVA
 var _rows: Array = []          # GSB rows, parallel to _server_list items (index -> row)
 var _can_login := false        # true once the gate reply gives us a startup_url
 var _logged_in := false
-# Stashed at join time: the selected row's mission + our callsign. joined_game(host, port) carries
-# only the resolved address, so we remember the mission (the joiner must know the host's mission to
-# load it) and pair them when the join resolves.
+# Stashed at join time: the selected row's mission + our callsign. joined_game carries the
+# resolved address plus the APPID join token and CD identity cookie, so we remember the mission
+# (the joiner must know the host's mission to load it) and pair them when the join resolves.
 var _pending_mission := ""
 var _pending_player := ""
 # The rid whose first Join press drew the expansion warning; a second press on
