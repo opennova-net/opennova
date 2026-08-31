@@ -3832,7 +3832,8 @@ entity. The exact server-side selection inside `NapiNPServerMsg_0x023 @ 0x514D50
 witness (undecompiled). The `0x4E` reply to the join-burst `0x28` is the 2-byte sentinel `FF FF`
 (count `0xFFFF`, no slots) in all three retail goldens — real kill batches ride the event-driven
 despawn stream (D-NET-66), and a non-sentinel reply form on this path is unwitnessed. Both replies
-are hard-required steady state in `nw_golden_diff` (no longer `kStateConditionedGaps`).
+were hard-required steady state in `nw_golden_diff` (no longer `kStateConditionedGaps`)
+until that capture-gated harness retired with the capture root (ca1cef465, 2026-08-29).
 
 ### 5.34 Session/transport control pings — RTT 0x57/0x2C + request quartet 0x39/0x42/0x43/0x68
 
@@ -11909,8 +11910,9 @@ builders (`build_reply_tag_16`/`rep_for_slot`/`make_rep_state`) now read the wir
 ORDER) + the echoed `player_name` stay on `conn.reply`. The pre-World reactive path
 (`bind_session_reply_player`, a World-less session-responder / `handshake_server_test`) stamps the bare wire
 handle onto `owned_entity` so it resolves the same way (team defaults when no live entity backs it). All 21
-net ctests + the byte-parity goldens (`npruntime_golden_lan_join`, `npruntime_golden_gameplay`,
-`nw_golden_diff`, `nw_message_coverage`, `nw_capture_decoder`) stay green. [orig: ServerConfig_SerializeToPacket
+net ctests + the then-live byte-parity goldens (`npruntime_golden_lan_join`, `npruntime_golden_gameplay`,
+`nw_golden_diff` — the capture-gated trio retired with the capture root at ca1cef465, 2026-08-29 —
+`nw_message_coverage`, `nw_capture_decoder`) stayed green at the change. [orig: ServerConfig_SerializeToPacket
 @0x505bd0 / NapiNPMsg_0x7B_BuildPayload @0x507740 / CNapiServerConfig_BuildFlags @0x4c4dc0 /
 NetPacket_WriteServerNameAndMapFile @0x505780 / CAdminServer_HandleStatus @0x402e30 /
 CAdminServer_HandleSetCommand @0x405a60]
