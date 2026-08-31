@@ -68,6 +68,7 @@
     "debug_view_set.gd|func get_ai_view_state()",
     "game_world.gd|func get_ai_view_state()",
     "perf_probe_switches.gd|var spans: Dictionary",
-    "mission_audio.gd|func to_dict()"
+    "mission_audio.gd|func to_dict()",
+    "render_fixture_contract.gd|static func select_capture_profile("
   ]
 }

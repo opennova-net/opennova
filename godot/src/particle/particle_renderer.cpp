@@ -18,9 +18,13 @@
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/multi_mesh.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/quad_mesh.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -32,6 +36,7 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <runtime/particle/channel_convert.h>
 #include <runtime/particle/emitter.h>
 #include <runtime/particle/graphic_frames.h>
 
@@ -49,9 +54,6 @@ constexpr int kFloatsPerInstance = 20;
 // Soft-particle fade span in world units (proximity fade replaces retail's
 // hard depth intersection).
 constexpr float kSoftParticleFadeDistance = 0.75f;
-// Modern stand-in for the distort pipeline: screen-space refraction driven by
-// the authored distortion texture as a normal map.
-constexpr float kDistortRefractionScale = 0.05f;
 
 using opennova::particle::BlendMode;
 using opennova::particle::CurveRef;
@@ -96,15 +98,12 @@ Ref<Image> make_fallback_image() {
 			const float dy = (static_cast<float>(y) - center) / center;
 			const float alpha = std::clamp(1.0f - std::sqrt(dx * dx + dy * dy),
 					0.0f, 1.0f);
-			image->set_pixel(x, y, Color(1.0f, 1.0f, 1.0f, alpha));
+			// The disc rides RGB as well as alpha so the additive class (which
+			// ships its strip alpha cleared, riding RGB alone) still shows it.
+			image->set_pixel(x, y, Color(alpha, alpha, alpha, alpha));
 		}
 	}
 	return image;
-}
-
-bool blend_is_normal_mapped(BlendMode mode) {
-	return mode == BlendMode::Bump || mode == BlendMode::Bumpadd ||
-			mode == BlendMode::Distort;
 }
 
 // One presentable graphic layer: the flipbook composed as a horizontal strip
@@ -153,7 +152,8 @@ public:
 	std::shared_ptr<const std::vector<opennova::particle::ParticleDef>> catalog_definitions;
 	std::vector<DefinitionVisual> definition_visuals;
 	// Keyed by definition_index * kGraphicLayerCount + layer_index.
-	std::map<std::size_t, Ref<StandardMaterial3D>> materials;
+	std::map<std::size_t, Ref<Material>> materials;
+	Ref<Shader> distort_shader;
 	std::vector<std::string> unresolved_names;
 	bool catalog_dirty = true;
 
@@ -220,10 +220,10 @@ public:
 		return pool[pool_used++];
 	}
 
-	// Composes a flipbook strip: every frame image blitted into one row, each
-	// scaled to the first resolved frame's cell size. Returns null when no
-	// frame resolves (the caller falls back or hides the layer).
-	Ref<ImageTexture> build_strip(const std::vector<Ref<Image>> &frames) {
+	// Composes a flipbook strip image: every frame image blitted into one
+	// row, each scaled to the first resolved frame's cell size. Returns null
+	// when no frame resolves (the caller falls back or hides the layer).
+	Ref<Image> compose_strip(const std::vector<Ref<Image>> &frames) {
 		Ref<Image> first;
 		for (const Ref<Image> &frame : frames) {
 			if (frame.is_valid()) {
@@ -232,7 +232,7 @@ public:
 			}
 		}
 		if (first.is_null())
-			return Ref<ImageTexture>();
+			return Ref<Image>();
 		int cell_width = first->get_width();
 		int cell_height = first->get_height();
 		const int frame_count = static_cast<int>(frames.size());
@@ -248,7 +248,7 @@ public:
 		Ref<Image> strip = Image::create(cell_width * frame_count, cell_height,
 				false, Image::FORMAT_RGBA8);
 		if (strip.is_null())
-			return Ref<ImageTexture>();
+			return Ref<Image>();
 		for (int frame_index = 0; frame_index < frame_count; ++frame_index) {
 			Ref<Image> frame = frames[static_cast<std::size_t>(frame_index)];
 			if (frame.is_null())
@@ -262,8 +262,40 @@ public:
 					Rect2i(0, 0, cell_width, cell_height),
 					Vector2i(frame_index * cell_width, 0));
 		}
+		return strip;
+	}
+
+	static Ref<ImageTexture> strip_texture(const Ref<Image> &strip) {
+		if (strip.is_null())
+			return Ref<ImageTexture>();
 		strip->generate_mipmaps();
 		return ImageTexture::create_from_image(strip);
+	}
+
+	// The witnessed atlas-time height->normal conversion, applied to the
+	// composed strip in place of the deleted atlas pages.
+	static Ref<Image> strip_height_to_normal(const Ref<Image> &strip,
+			float scale, bool force_blue) {
+		if (strip.is_null())
+			return strip;
+		PackedByteArray data = strip->get_data();
+		opennova::particle::convert_height_to_normal_map(data.ptrw(),
+				strip->get_width(), strip->get_height(), scale, force_blue);
+		return Image::create_from_data(strip->get_width(),
+				strip->get_height(), false, Image::FORMAT_RGBA8, data);
+	}
+
+	// The witnessed type-1 additive alpha clear (see
+	// runtime/particle/channel_convert.h): additive fades ride the color
+	// curves, never alpha.
+	static Ref<Image> strip_clear_alpha(const Ref<Image> &strip) {
+		if (strip.is_null())
+			return strip;
+		PackedByteArray data = strip->get_data();
+		opennova::particle::clear_alpha_channel(data.ptrw(),
+				strip->get_width(), strip->get_height());
+		return Image::create_from_data(strip->get_width(),
+				strip->get_height(), false, Image::FORMAT_RGBA8, data);
 	}
 
 	static Ref<Image> white_albedo_from(const Ref<Image> &source) {
@@ -347,14 +379,38 @@ public:
 							opennova::particle::retail_particle_frame_name(
 									graphic.texture, layer.flip_frames, frame)));
 				}
-				if (blend_is_normal_mapped(layer.blend)) {
-					layer.normal_strip = build_strip(frames);
-					albedo_frames.clear();
-					for (const Ref<Image> &frame : frames)
-						albedo_frames.push_back(white_albedo_from(frame));
-					layer.albedo_strip = build_strip(albedo_frames);
-				} else {
-					layer.albedo_strip = build_strip(frames);
+				switch (layer.blend) {
+					case BlendMode::Additive:
+						layer.albedo_strip = strip_texture(
+								strip_clear_alpha(compose_strip(frames)));
+						break;
+					case BlendMode::Bump:
+					case BlendMode::Bumpadd:
+						// The authored texture is a height map; the witnessed
+						// conversion turns it into the DOT3-era normal map.
+						layer.normal_strip = strip_texture(
+								strip_height_to_normal(compose_strip(frames),
+										opennova::particle::
+												kBumpHeightToNormalScale,
+										false));
+						albedo_frames.clear();
+						for (const Ref<Image> &frame : frames)
+							albedo_frames.push_back(white_albedo_from(frame));
+						layer.albedo_strip =
+								strip_texture(compose_strip(albedo_frames));
+						break;
+					case BlendMode::Distort:
+						// The distort shader's texel: the type-7 conversion
+						// (1/32 scale, blue forced) with the source alpha.
+						layer.albedo_strip = strip_texture(
+								strip_height_to_normal(compose_strip(frames),
+										opennova::particle::
+												kDistortHeightToNormalScale,
+										true));
+						break;
+					default:
+						layer.albedo_strip = strip_texture(compose_strip(frames));
+						break;
 				}
 				layer.resolved = layer.albedo_strip.is_valid();
 			}
@@ -363,13 +419,13 @@ public:
 				layer.present = true;
 				frames.clear();
 				frames.push_back(frame_image(std::string()));
-				layer.albedo_strip = build_strip(frames);
+				layer.albedo_strip = strip_texture(compose_strip(frames));
 				layer.resolved = layer.albedo_strip.is_valid();
 			}
 		}
 	}
 
-	Ref<StandardMaterial3D> material_for(std::size_t definition_index,
+	Ref<Material> material_for(std::size_t definition_index,
 			int layer_index) {
 		const std::size_t key = definition_index *
 				static_cast<std::size_t>(kGraphicLayerCount) +
@@ -378,11 +434,14 @@ public:
 		if (found != materials.end())
 			return found->second;
 		if (definition_index >= definition_visuals.size() || !catalog_definitions)
-			return Ref<StandardMaterial3D>();
+			return Ref<Material>();
 		const LayerVisual &layer = definition_visuals[definition_index]
 				.layers[static_cast<std::size_t>(layer_index)];
 		const opennova::particle::ParticleDef &definition =
 				(*catalog_definitions)[definition_index];
+
+		if (layer.blend == BlendMode::Distort)
+			return distort_material_for(key, layer, definition);
 
 		Ref<StandardMaterial3D> material;
 		material.instantiate();
@@ -419,8 +478,13 @@ public:
 				material->set_blend_mode(BaseMaterial3D::BLEND_MODE_MIX);
 				break;
 			case BlendMode::Additive:
-				material->set_blend_mode(BaseMaterial3D::BLEND_MODE_ADD);
+				// The witnessed ONE/INVSRCALPHA pair with the strip alpha
+				// cleared: a pure add whose fade rides the color curves,
+				// never alpha (runtime/particle/channel_convert.h).
+				material->set_blend_mode(
+						BaseMaterial3D::BLEND_MODE_PREMULT_ALPHA);
 				fog_disabled = true;
+				soft = false;
 				break;
 			case BlendMode::Premult:
 				material->set_blend_mode(
@@ -444,21 +508,7 @@ public:
 				fog_disabled = true;
 				break;
 			case BlendMode::Distort:
-				// The authored distortion texture perturbs the screen behind
-				// the quad through Godot's refraction path.
-				material->set_blend_mode(BaseMaterial3D::BLEND_MODE_MIX);
-				material->set_albedo(Color(1.0f, 1.0f, 1.0f, 0.0f));
-				if (layer.normal_strip.is_valid()) {
-					material->set_feature(BaseMaterial3D::FEATURE_NORMAL_MAPPING,
-							true);
-					material->set_texture(BaseMaterial3D::TEXTURE_NORMAL,
-							layer.normal_strip);
-				}
-				material->set_feature(BaseMaterial3D::FEATURE_REFRACTION, true);
-				material->set_refraction(kDistortRefractionScale);
-				fog_disabled = true;
-				soft = false;
-				break;
+				break; // Handled above.
 		}
 		if (lit) {
 			// The lit-smoke classes: scene lighting replaces the packed
@@ -473,7 +523,7 @@ public:
 				material->set_normal_scale(
 						std::clamp(definition.bump_scale, -16.0f, 16.0f));
 			}
-		} else if (layer.blend != BlendMode::Distort) {
+		} else {
 			material->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
 		}
 		if (fog_disabled)
@@ -482,6 +532,30 @@ public:
 			material->set_proximity_fade_enabled(true);
 			material->set_proximity_fade_distance(kSoftParticleFadeDistance);
 		}
+		materials.emplace(key, material);
+		return material;
+	}
+
+	// The distort class carries the witnessed screen-replacement equation in
+	// its own shader — Godot's StandardMaterial3D refraction is an opaque
+	// whole-quad screen rewrite and cannot express the alpha-masked sample.
+	Ref<Material> distort_material_for(std::size_t key,
+			const LayerVisual &layer,
+			const opennova::particle::ParticleDef &definition) {
+		if (distort_shader.is_null()) {
+			distort_shader = ResourceLoader::get_singleton()->load(
+					"res://shaders/particle/particle_distort.gdshader");
+		}
+		Ref<ShaderMaterial> material;
+		material.instantiate();
+		material->set_shader(distort_shader);
+		if (layer.albedo_strip.is_valid()) {
+			material->set_shader_parameter("distort_tex", layer.albedo_strip);
+			material->set_shader_parameter("has_texture", true);
+		}
+		const bool world_oriented = (definition.flags &
+				opennova::particle::particle_flag::YawAndPitch) != 0;
+		material->set_shader_parameter("billboard", !world_oriented);
 		materials.emplace(key, material);
 		return material;
 	}
@@ -596,7 +670,7 @@ public:
 						visual.layers[static_cast<std::size_t>(layer_index)];
 				const GraphicLayer &graphic =
 						definition.graphics[static_cast<std::size_t>(layer_index)];
-				Ref<StandardMaterial3D> material = material_for(
+				Ref<Material> material = material_for(
 						source_emitter.definition_index, layer_index);
 				if (material.is_null())
 					continue;

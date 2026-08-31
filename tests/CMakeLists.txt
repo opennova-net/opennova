@@ -1178,7 +1178,7 @@ foreach(name smallest minimal_effect multi_section multi_layer table_handles
     target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME particle_${name} COMMAND particle_${name}_test)
 endforeach()
-foreach(name emitter emit_shape translate effect_scene_contract)
+foreach(name emitter emit_shape translate effect_scene_contract channel_convert)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_runtime)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

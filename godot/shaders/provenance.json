@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "resource_count": 185,
+  "resource_count": 186,
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "fixture_catalog": "docs/render/render-fixtures-retail-v5.json",
@@ -400,6 +400,37 @@
       ],
       "exceptions": [
         "ADR-0043"
+      ]
+    },
+    {
+      "id": "particle-distort",
+      "patterns": [
+        "particle/particle_distort.gdshader"
+      ],
+      "light_behavior": "unlit_screen_replacement",
+      "parity_status": "matching_with_bounded_residuals",
+      "docs": [
+        "docs/particles/ptl-format-re.md"
+      ],
+      "retail_citations": [
+        {
+          "address": "0x5e8527",
+          "function": "CParticleTexture_InitTextureAndChannels",
+          "function_start": "0x5e8210"
+        },
+        {
+          "address": "0x5e2df0",
+          "function": "Texture_GenerateNormalMapFromHeight",
+          "function_start": "0x5e2df0"
+        },
+        {
+          "address": "0x5e8db0",
+          "function": "CParticleManager_BuildTextureAtlases",
+          "function_start": "0x5e8db0"
+        }
+      ],
+      "exceptions": [
+        "D-PTL-5"
       ]
     }
   ]
