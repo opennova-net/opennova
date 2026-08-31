@@ -5,7 +5,8 @@
 // arbitrary-named .pff never mounts (D-VFS-2), so a single mnml.pff dies with
 // ShowEarlyError(3) "missing CD?" (validated on retail 2026-07-05). Each file lands in the
 // archive retail uses for its kind (witnessed against the JOTAC JO install): text bins →
-// language, menus/defs/missions/fonts/music scripts → localres, terrain/env/art → resource.
+// language, menus/defs/missions/fonts/music scripts → localres, terrain/env/art + the
+// .fx shader set → resource.
 //
 // Nothing is generated here any more: every byte, the baked mnml.cpt included, is authored
 // in ONED and committed. The tool READS assets/ and never writes into it — it once wrote its
@@ -26,7 +27,9 @@
 #include <vector>
 #include "common/retail_paths.h"
 
+#include <cctype>
 #include <cstring>
+#include <ctime>
 
 namespace fs = std::filesystem;
 
@@ -106,8 +109,20 @@ bool sources_present(const fs::path &root, std::initializer_list<const char *con
 	return ok;
 }
 
+uint32_t crc32_ieee(const uint8_t *p, size_t n) {
+	uint32_t c = 0xFFFFFFFFu;
+	for (size_t i = 0; i < n; ++i) {
+		c ^= p[i];
+		for (int k = 0; k < 8; ++k) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
+	}
+	return ~c;
+}
+
 // Bundle (pff_name, filepath) pairs into <root>/<archive>, then re-open it and require every
-// `expect` entry to resolve.
+// `expect` entry to resolve. Every entry is STAMPED: the boot shader-precompile PFF walk
+// SKIPS archives whose entries carry zero timestamp/checksum (witnessed 2026-08-31 on this
+// set: a zero-stamped resource.pff left retail in fixed-function fallback with no FP
+// viewmodel; generic nonzero stamps -- pack-time time() + CRC32 -- drew it on the same day).
 bool write_and_verify(const fs::path &root, const char *archive,
                       const std::vector<std::pair<std::string, fs::path>> &files,
                       std::initializer_list<const char *> expect) {
@@ -127,6 +142,9 @@ bool write_and_verify(const fs::path &root, const char *archive,
 		e.name = files[i].first.c_str();
 		e.data = storage[i].data();
 		e.size = static_cast<uint32_t>(storage[i].size());
+		e.timestamp = static_cast<uint32_t>(time(nullptr));
+		e.checksum = crc32_ieee(storage[i].data(), storage[i].size());
+		if (e.checksum == 0) e.checksum = 1;
 		entries.push_back(e);
 	}
 
@@ -156,7 +174,7 @@ bool write_and_verify(const fs::path &root, const char *archive,
 }
 
 // Assemble a complete runnable install at `out`: every authored file flat next to the exe,
-// plus a ZERO-ENTRY resource.pff. Retail is archive-only by default, so the install runs
+// plus a resource.pff carrying the committed .fx shader set (see below). Retail is archive-only by default, so the install runs
 // with `/d` (loose-first); the token archive exists only to clear the boot gate, which counts
 // archives OPENED rather than entries [orig: PFF_OpenAllArchives @ 0x4a4310; fatal check
 // @ 0x4a6f44 — witnessed with a 20-byte archive on retail 2026-08-23,
@@ -172,7 +190,8 @@ bool write_and_verify(const fs::path &root, const char *archive,
 bool emit_loose_install(const fs::path &out, const fs::path &root,
                         const std::vector<std::pair<std::string, fs::path>> &language,
                         const std::vector<std::pair<std::string, fs::path>> &localres,
-                        const std::vector<std::pair<std::string, fs::path>> &resource) {
+                        const std::vector<std::pair<std::string, fs::path>> &resource,
+                        const std::vector<std::pair<std::string, fs::path>> &shaders) {
 	std::error_code ec;
 	fs::create_directories(out, ec);
 
@@ -204,13 +223,13 @@ bool emit_loose_install(const fs::path &out, const fs::path &root,
 		++n;
 	}
 
-	// The boot token: zero entries, 20 bytes, under a name the fixed table probes.
-	const std::string token = (out / "resource.pff").string();
-	const int rc = pff_write_archive(token.c_str(), PFF_FORMAT_PFF3, nullptr, 0);
-	if (rc != PFF_WRITE_OK) {
-		std::fprintf(stderr, "FAIL: zero-entry resource.pff rc=%d\n", rc);
+	// resource.pff clears the boot gate (an OPENED archive counts, D-VFS-2) and CARRIES
+	// the committed .fx shader set: the shader precompile only ENUMERATES shaders through
+	// PFF directory walks, so loose .fx are invisible to it -- 47 of them staged flat left
+	// retail probing only _ffp.fx by name and falling back to fixed-function, which
+	// silently kills the FP viewmodel and every skinned draw (witnessed 2026-08-31).
+	if (!write_and_verify(out, "resource.pff", shaders, {"_ffp.fx", "_baseinc.fx"}))
 		return false;
-	}
 
 	// The retail runtime the authored set is validated against. NOT part of the
 	// authored set and never committed - OPENNOVA_JO_DIR points at the user's own
@@ -239,7 +258,7 @@ bool emit_loose_install(const fs::path &out, const fs::path &root,
 		std::printf("  (set OPENNOVA_JO_DIR to also stage Jointops.exe + binkw32.dll + game.cfg)\n");
 	}
 
-	std::printf("wrote loose install: %zu files + zero-entry resource.pff -> %s\n",
+	std::printf("wrote loose install: %zu files + the shader resource.pff -> %s\n",
 	            n, out.string().c_str());
 	std::printf("  run: Jointops.exe /w /d   (add /FRISK to log loads)\n");
 	return true;
@@ -277,9 +296,26 @@ int main(int argc, char **argv) {
 	for (const char *n : kLocalres) localres.emplace_back(n, root / n);
 	for (const char *n : kResource) resource.emplace_back(n, root / n);
 
-	// The loose layout: everything flat plus the zero-entry boot token.
+	// The committed .fx shader set rides resource.pff in BOTH layouts (retail's own
+	// placement). Globbed from assets/ so the committed set stays the source of truth:
+	// the .gitignore allowlist governs what lives there.
+	std::vector<std::pair<std::string, fs::path>> shaders;
+	for (const auto &de : fs::directory_iterator(root)) {
+		if (!de.is_regular_file()) continue;
+		std::string ext = de.path().extension().string();
+		for (char &ch : ext) ch = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
+		if (ext == ".fx") shaders.emplace_back(de.path().filename().string(), de.path());
+	}
+	std::sort(shaders.begin(), shaders.end());
+	if (shaders.empty()) {
+		std::fprintf(stderr, "FAIL: no .fx shaders in %s - the FP/skinned pass dies without them\n",
+		             root.string().c_str());
+		return 1;
+	}
+
+	// The loose layout: everything flat plus the shader-bearing resource.pff.
 	if (install_env != nullptr &&
-	    !emit_loose_install(fs::path(install_env), root, language, localres, resource))
+	    !emit_loose_install(fs::path(install_env), root, language, localres, resource, shaders))
 		return 1;
 
 	if (!want_pff) {
@@ -299,9 +335,11 @@ int main(int argc, char **argv) {
 	                       "Arial16n.fnt", "Impac38b.fnt", "menumus.bin", "gamemus.bin",
 	                       "newarow1.tga", "mnml.dbf"}))
 		return 1;
-	if (!write_and_verify(root, "resource.pff", resource,
+	std::vector<std::pair<std::string, fs::path>> resource_all = resource;
+	resource_all.insert(resource_all.end(), shaders.begin(), shaders.end());
+	if (!write_and_verify(root, "resource.pff", resource_all,
 	                      {"mnml.env", "mnml.trn", "mnml.cpt", "mnml_c.tga", "mnml_dc2.tga",
-	                       "mnml_dc3.tga", "mnml_dmd.tga", "mnml_d1.tga"}))
+	                       "mnml_dc3.tga", "mnml_dmd.tga", "mnml_d1.tga", "_ffp.fx"}))
 		return 1;
 
 	std::printf("OK: language/localres/resource.pff bundle the committed minimal set "

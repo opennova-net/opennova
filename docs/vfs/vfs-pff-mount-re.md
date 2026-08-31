@@ -127,7 +127,11 @@ stands confirmed.
 entry · +168 read cursor · +172 open flag · +176 last whole-load size ·
 +180 last-lookup-failed (the loop tie-break) · +184 report-errors gate
 (never set). **Entry (36 B):** +0 flags (bit0 = XOR-encrypted) · +4 offset ·
-+8 size · +12 timestamp (unread) · +16 name[16] (uppercased in place) ·
++8 size · +12 timestamp (unread by the by-name lookup; the boot shader-precompile
+directory WALK does read it and skips archives whose entries are zero-stamped —
+witnessed 2026-08-31 on the minimal set: a zero-stamped `resource.pff` behaves
+like no shaders at all (fixed-function fallback, no FP viewmodel), while generic
+nonzero stamps — pack-time `time()` + a CRC32 checksum — are accepted) · +16 name[16] (uppercased in place) ·
 +32 extra (unread).
 
 **Globals:** `0x33417F8` shared raw handle · `0x3341800` primary ptr

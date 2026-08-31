@@ -196,13 +196,14 @@ directory**. Since 2026-08-31 they are **committed** — allowlisted by name und
 set runs from a fresh checkout, and `git ls-files assets` now stages them into
 both zip flavors. Deleting a line from that banner is how a replacement lands.
 
-What is committed, from an extracted retail resource tree (240 files):
+What is committed, from an extracted retail resource tree (287 files):
 
 | Group | Files |
 |---|---|
 | player body + anims | `US01.3di`, `US01.ADM`, the **150** `.bad` clips its keys name, and `failsafe.bad` (the every-mission-start fallback, `../docs/required-resources.md`) |
 | avatar combo | `Avatars.def` plus the first combo's three models — `Boonie.3di` (head), `JntOpsB1.3di` (body), `ArmsG.3di` (arms) |
 | sound profiles | `SndProf.def` — the 49-profile retail table; a miss AVs the first footstep (see the omitted list) |
+| shaders | the 47 `.fx` files — the FP viewmodel and every skinned draw silently die in fixed-function fallback without them. They only work ARCHIVED: the shader precompile enumerates PFF directories (never loose files) and skips zero-stamped archives, so the packager writes them into `resource.pff` with nonzero stamps (witnessed 2026-08-31) |
 | weapon | `AKM_1st.3di`, `AKM_1ST.adm`, its six `rAKM_*.bad` clips |
 | the default infantry clip set | `E_STAND.adm` and the 87 `.bad` clips it names — **required for the player to walk at all**, see below |
 | textures | the stems the five models name, resolved to whatever extension ships them — 33 `.dds`, one `.tga`, plus the `.MDT` sidecars |
@@ -289,8 +290,13 @@ command instead builds the packed `localres.pff` layout used by releases.
 Records the run under the asset-gated protocol (never commit the capture); the
 recipe is the acceptance test for "the minimal set hosts + joins."
 
-Known gaps: no model here is ours yet — the player body, its animations and
-the viewmodel are the committed retail bring-up set described above, and the
+Validated on retail 2026-08-31: boot → menu → `mnml` → an armed player that
+walks with a drawn first-person viewmodel, all from this set loose + the
+shader-bearing `resource.pff`.
+
+Known gaps: no model or shader here is ours yet — the player body, its
+animations, the viewmodel and the `.fx` set are the committed retail bring-up
+set described above, and the
 committed tree still declares graphics it does not carry. The terrain has
 relief and a full-size colormap but no tile overlay, and there is no `.ptl`
 catalogue, so the weapon authors no muzzle-flash or casing effect.
