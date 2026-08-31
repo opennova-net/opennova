@@ -525,6 +525,31 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 		row["password"] = String(s.password.c_str());
 		row["country"] = String(s.country.c_str());
 		row["region"] = String(s.region.c_str());
+		row["time_left"] = String(s.time_left.c_str());
+		row["msg"] = opennova::cp1252_to_gd(s.msg);
+		row["age"] = String(s.age.c_str());
+		row["time_of_day"] = String(s.time_of_day.c_str());
+		row["stat"] = String(s.stat.c_str());
+		row["level_range"] = String(s.level_range.c_str());
+		row["locked"] = String(s.locked.c_str());
+		row["tracers"] = String(s.tracers.c_str());
+		row["skins"] = String(s.skins.c_str());
+		row["bb_mode"] = String(s.bb_mode.c_str());
+		row["mod"] = opennova::cp1252_to_gd(s.mod);
+		row["pix"] = String(s.pix.c_str());
+		row["pb_server"] = String(s.pb_server.c_str());
+		row["ver1"] = String(s.ver1.c_str());
+		// The host's expansion tag ("" = base game). The authoritative check
+		// stays the in-match 0x7B reconcile (D-NET-178); this is the browse-time
+		// advisory the panel warns from before a join is attempted.
+		row["exp"] = String(s.exp.c_str());
+		row["exp_bits"] = String(s.exp_bits.c_str());
+		row["joicon2"] = String(s.joicon2.c_str());
+		PackedStringArray roster;
+		for (const std::string &player : s.player_names) {
+			roster.push_back(opennova::cp1252_to_gd(player));
+		}
+		row["player_names"] = roster;
 		// Row dword1 is the host's IPv4 — retail's browser pings it on the XXXX
 		// finalize [orig: NapiGameList_StartPingSweep @ 0x63BCF0, see docs/net/novaworld-net-re.md]. The connect
 		// address is still resolved on join via the NK token (/NWJoin.dll?rid=).

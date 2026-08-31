@@ -98,6 +98,38 @@ func test_server_row_tooltip_lists_details() -> void:
 	assert_eq(panel.server_row_tooltip(row),
 			"Mission: ASH_G11A\nRegion: Jungle\nCountry: US\nAddress: 203.0.113.7",
 			"the tooltip lists mission, locale, and address")
+	row["exp"] = "JOE"
+	assert_string_contains(panel.server_row_tooltip(row), "Expansion: JOE",
+			"an advertised expansion shows in the row details")
+
+
+func test_expansion_advisory_warns_once_then_defers_to_the_join() -> void:
+	# The temp-dir root has no expansions installed, so a row advertising one
+	# takes the policy's FAIL decision: the FIRST Join press warns instead of
+	# joining, the SECOND proceeds (the in-match 0x7B reconcile stays the
+	# authoritative gate, D-NET-178).
+	var panel := _make_panel(PackedStringArray())
+	var row := {"name": "EscalationHost", "exp": "JOE", "rid": 42}
+	assert_true(panel.expansion_advisory_blocks_first_press(row, 42),
+			"the first press on a not-installed expansion row is blocked")
+	assert_string_contains(panel.status_text(), "expansion 'JOE'",
+			"the warning names the host's expansion")
+	assert_string_contains(panel.status_text(), "Press Join again",
+			"the warning explains the second-press override")
+	assert_false(panel.expansion_advisory_blocks_first_press(row, 42),
+			"the second press on the same row proceeds")
+	assert_true(panel.expansion_advisory_blocks_first_press(row, 42),
+			"the override is one-shot — a later press warns again")
+
+
+func test_expansion_advisory_ignores_rows_without_an_expansion() -> void:
+	var panel := _make_panel(PackedStringArray())
+	assert_false(panel.expansion_advisory_blocks_first_press(
+			{"name": "BaseGameHost", "exp": "", "rid": 7}, 7),
+			"a base-game row (empty exp) never warns")
+	assert_false(panel.expansion_advisory_blocks_first_press(
+			{"name": "NoExpField", "rid": 8}, 8),
+			"a row with no exp field never warns (stale/absent GSB data)")
 
 
 func test_host_failed_reports_and_reenables() -> void:

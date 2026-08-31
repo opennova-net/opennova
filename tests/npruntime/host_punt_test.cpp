@@ -333,6 +333,13 @@ bool check_captured_punt_closes_a_joiner_parked_at_the_deploy_screen() {
 	                    reason.find("t35") != std::string::npos,
 	            "session loss is raised carrying the decoded reason code and strings"))
 		return false;
+	if (!expect(joiner.has_disconnect_event() &&
+	                    joiner.last_disconnect_event().dc == 2 &&
+	                    joiner.last_disconnect_event().dpc == 33 &&
+	                    joiner.last_disconnect_event().ddstr == "LogPuntEvent" &&
+	                    joiner.last_disconnect_event().dstr == "t35",
+	            "the raw disconnect record is retained field for field for diagnostics"))
+		return false;
 	if (!expect(joiner.phase() == np::JoinerConnection::Phase::Error &&
 	                    !joiner.deployment_pick_pending() &&
 	                    joiner.frame_deployment_pick(0xFFFF).empty(),
@@ -1077,7 +1084,67 @@ bool check_crc_challenges_are_not_answered() {
 		            "and the unanswered challenge does not itself end the session"))
 			return false;
 	}
-	return true;
+	// The diagnostics counters record the silent traffic: what a live-join
+	// punt investigation reads back to distinguish "challenges never arrived"
+	// from "challenges arrived and the deliberate-silence policy held".
+	const np::JoinerConnection::ChallengeDiagnostics &challenges =
+			joiner.challenge_diagnostics();
+	return expect(challenges.entity_checksum_seen == 3 &&
+	                      challenges.entity_checksum_answered == 0 &&
+	                      challenges.loadout_crc_seen == 1 &&
+	                      challenges.loadout_crc_answered == 0,
+	              "the challenge counters record the seen-but-unanswered traffic");
+}
+
+// A CR=0 ServerSessionInit carries the NP-layer reject family (JFC) and the
+// validate-callback sub-reason (JFP). The joiner maps the witnessed families to
+// player-facing text AND retains the raw fields so a live-join investigation
+// can name the family after the mapped string replaced it.
+// [orig: NapiNPProtocol_SendJoinRejection @0x620cd0; client store
+//  NapiNP_HandleServerJoinResponse @0x629840]
+bool check_join_rejection_retains_the_raw_reject_record() {
+	np::JoinerConnection joiner("RejectedPlayer");
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello client_hello;
+	const std::vector<uint8_t> hello = joiner.start();
+	if (!expect(nw_decode_inbound(hello.data(), hello.size(), opcode, body) &&
+					parse_client_hello(body.data(), body.size(), client_hello),
+			"decode the rejected joiner's ClientHello"))
+		return false;
+	ServerHello server_hello = build_server_hello(client_hello, 0x7F000001u, 32769);
+	server_hello.hk = 0x55667788u;
+	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
+	const np::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+			server_hello_datagram.data(), server_hello_datagram.size());
+	ClientAuth client_auth;
+	body.clear();
+	if (!expect(hello_result.outbound.size() == 1 &&
+					nw_decode_inbound(hello_result.outbound[0].data(),
+							hello_result.outbound[0].size(), opcode, body) &&
+					parse_client_auth(body.data(), body.size(), client_auth),
+			"decode the rejected joiner's ClientAuth"))
+		return false;
+
+	ServerAuth rejection;
+	rejection.ci = client_auth.ci;
+	rejection.ck = client_auth.ck;
+	rejection.cr = 0;
+	rejection.jfc = 14;
+	rejection.jfp = 2;
+	const std::vector<uint8_t> rejection_datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(rejection));
+	joiner.handle_datagram(rejection_datagram.data(), rejection_datagram.size());
+	if (!expect(joiner.phase() == np::JoinerConnection::Phase::Error &&
+					joiner.last_error() == "The server is locked",
+			"the witnessed JFC=14/JFP=2 family maps to the locked-server text"))
+		return false;
+	return expect(joiner.last_join_reject().set &&
+					joiner.last_join_reject().jfc == 14 &&
+					joiner.last_join_reject().jfp == 2 &&
+					joiner.last_join_reject().jfs.empty(),
+			"the raw JFC/JFP reject record is retained past the mapping");
 }
 
 // A named, independently witnessed retail-corpus profile may answer only the
@@ -1172,6 +1239,18 @@ bool check_verified_revx02_profile_answers_exact_crc_challenges() {
 			"a checksum request with trailing bytes is not answered"))
 		return false;
 
+	// Answered traffic shows up in the diagnostics counters: 3 x 0x30 (two
+	// answered by the profile, the trailing-bytes form not), and 4 + 102
+	// 0x31s all answered.
+	const np::JoinerConnection::ChallengeDiagnostics &challenges =
+			joiner.challenge_diagnostics();
+	if (!expect(challenges.entity_checksum_seen == 3 &&
+	                    challenges.entity_checksum_answered == 2 &&
+	                    challenges.loadout_crc_seen == 106 &&
+	                    challenges.loadout_crc_answered == 106,
+	            "the challenge counters record the profile-answered traffic"))
+		return false;
+
 	if (!expect(!joiner.set_integrity_challenge_profile("not-a-profile"),
 			"an unknown integrity profile is rejected"))
 		return false;
@@ -1199,6 +1278,7 @@ int main() {
 	ok = check_join_deploy_idle_punt_uses_state6_elapsed_time() && ok;
 	ok = check_dead_player_punt_uses_a_consecutive_state6_counter() && ok;
 	ok = check_crc_challenges_are_not_answered() && ok;
+	ok = check_join_rejection_retains_the_raw_reject_record() && ok;
 	ok = check_verified_revx02_profile_answers_exact_crc_challenges() && ok;
 	return ok ? 0 : 1;
 }

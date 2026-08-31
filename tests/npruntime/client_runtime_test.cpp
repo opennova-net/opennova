@@ -355,6 +355,40 @@ bool run_seeded_objective_layout_hint() {
 	              "seeded replay folds objective body before recipient tail");
 }
 
+// The runtime surfaces the joiner's anti-cheat challenge counters for the live
+// join diagnostics: a 0x30 with no integrity profile counts as seen-not-answered
+// (the deliberate-silence policy, D-NET-181), and a non-joiner runtime reports
+// zeroed defaults.
+bool run_challenge_diagnostics_pass_through_the_runtime() {
+	const std::string client_scrk = "CLIENT-CHALLENGE-DIAG-SCRK";
+	const std::string server_scrk = "SERVER-CHALLENGE-DIAG-SCRK";
+	constexpr uint32_t kChallengeClientKey = 0x0BADCAFEu;
+	np::ClientRuntime runtime("ChallengeDiag");
+	runtime.seed_session(
+			0x11223344u, kChallengeClientKey, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId);
+	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> challenge = frame_server_session(
+			server_seq, server_scrk, kChallengeClientKey,
+			{make_protocol_message(0x30, {0xFF, 0x00, 0x00})});
+	runtime.receive(challenge.data(), challenge.size());
+	(void)runtime.Client_ProcessNetworkFrame(1);
+	const np::JoinerConnection::ChallengeDiagnostics challenges =
+			runtime.challenge_diagnostics();
+	if (!expect(challenges.entity_checksum_seen == 1 &&
+	                    challenges.entity_checksum_answered == 0,
+	            "the runtime surfaces the joiner's seen-but-silent 0x30 counter"))
+		return false;
+	if (!expect(!runtime.last_join_reject().set && !runtime.has_disconnect_event(),
+	            "a healthy session carries no reject or disconnect record"))
+		return false;
+	np::ClientRuntime unseeded("ChallengeDiagDefaults");
+	return expect(unseeded.challenge_diagnostics().entity_checksum_seen == 0 &&
+	                      !unseeded.last_join_reject().set &&
+	                      !unseeded.has_disconnect_event(),
+	              "a runtime without a joiner session reports zeroed diagnostics");
+}
+
 bool run_fire_queue_stamps_runtime_tick() {
 	const std::string client_scrk = "CLIENT-FIRE-TICK-SCRK";
 	const std::string server_scrk = "SERVER-FIRE-TICK-SCRK";
@@ -5296,6 +5330,7 @@ int main() {
 	const bool ok = run_charattr_challenge_table_matches_retail() &&
 	                run_spectator_clientauth_and_state_latch() &&
 	                run_seeded_objective_layout_hint() &&
+	                run_challenge_diagnostics_pass_through_the_runtime() &&
 	                run_fire_queue_stamps_runtime_tick() &&
 	                run_retail_post_auth_prelude() &&
 	                run_early_sync_tail_latch() &&

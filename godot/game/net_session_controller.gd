@@ -127,6 +127,13 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 func join_lan_server(target: JoinTarget) -> void:
 	if target == null:
 		return
+	# `--integrity-profile` is the operator opt-in for EVERY joiner entry (the
+	# NovaWorld browser included), not just the --lan-join launch. The default
+	# stays empty: silence is the parity-safe anti-cheat posture — a canned
+	# profile answering a different host corpus is the one reply that punts
+	# (D-NET-181).
+	if target.integrity_profile.strip_edges().is_empty():
+		target.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
 	_cancel_spectator_probe()
 	_dismiss_join_role_prompt()
 	if target.role_explicit:

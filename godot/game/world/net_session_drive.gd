@@ -285,6 +285,15 @@ func _reconcile_join_expansion() -> bool:
 		String(_join_preload_sim.get_join_expansion()),
 		String(resource_root.get_expansion()),
 		resource_root.list_expansions(resource_root.get_root_dir()))
+	var decision_name := "keep"
+	match action:
+		NetSessionPolicy.ACTION_REMOUNT:
+			decision_name = "remount"
+		NetSessionPolicy.ACTION_FAIL:
+			decision_name = "fail"
+	print_verbose("NetSessionDrive: join expansion: host='%s' mounted='%s' decision=%s" % [
+		String(_join_preload_sim.get_join_expansion()),
+		String(resource_root.get_expansion()), decision_name])
 	if action == NetSessionPolicy.ACTION_KEEP:
 		return true
 	# Only a runtime mount layers expansion archives at all. A loose authoring root

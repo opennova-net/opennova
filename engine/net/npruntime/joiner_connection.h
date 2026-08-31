@@ -368,6 +368,37 @@ public:
 	// [orig: @0x4e0d77/@0x4e0df3/@0x4e0e3e -> NapiNPServerMsg_HandleStanceChange @0x501c60]
 	std::vector<uint8_t> frame_stance_change(uint16_t action_id);
 
+	// Anti-cheat challenge traffic counters. Every field is bookkeeping around
+	// the existing handlers (no wire effect): a live join that punts can be
+	// read back — did challenges arrive, and did the deliberate-silence policy
+	// (no integrity profile) leave 0x30/0x31 unanswered.
+	struct ChallengeDiagnostics {
+		uint32_t entity_checksum_seen = 0;     // S2C 0x30 received
+		uint32_t entity_checksum_answered = 0; // C2S 0x20 replies queued
+		uint32_t loadout_crc_seen = 0;         // S2C 0x31 received
+		uint32_t loadout_crc_answered = 0;     // C2S 0x21 replies queued
+		uint32_t charattr_seen = 0;            // S2C 0x39 received (always answered)
+		uint32_t charattr_row_missing = 0;     // 0x39 answered via the zero no-row arm
+		uint32_t property_clears = 0;          // S2C 0x41 table mutations applied
+	};
+	const ChallengeDiagnostics &challenge_diagnostics() const {
+		return challenge_diagnostics_;
+	}
+	// The last CR=0 ServerAuth rejection's raw fields, retained past fail() so
+	// diagnostics can name the reject family after the mapped string is gone.
+	struct JoinRejectRecord {
+		bool set = false;
+		uint32_t jfc = 0;
+		uint32_t jfp = 0;
+		std::string jfs;
+	};
+	const JoinRejectRecord &last_join_reject() const { return last_join_reject_; }
+	// The first host connection-description record (the explicit close), raw.
+	bool has_disconnect_event() const { return disconnect_event_set_; }
+	const DisconnectEvent &last_disconnect_event() const {
+		return last_disconnect_event_;
+	}
+
 	// Inbound-gap diagnostics: how many future S2C packets are queued behind an
 	// unresolved sequence gap, and how many reliable outbound records remain
 	// retained (unACKed). A queue that never drains or retention that only grows
@@ -708,6 +739,10 @@ private:
 	// never overwritten [orig: the store-if-!valid event slot @0x621d3c]. Non-empty is the
 	// terminal session-loss state, independent of the receive-silence clock.
 	std::string host_disconnect_reason_;
+	ChallengeDiagnostics challenge_diagnostics_{};
+	JoinRejectRecord last_join_reject_{};
+	DisconnectEvent last_disconnect_event_{};
+	bool disconnect_event_set_ = false;
 };
 
 } // namespace opennova::np
