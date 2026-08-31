@@ -58,6 +58,11 @@ int main() {
 	check(conn.bk == "986119", "BK is the literal 986119");
 	check(conn.nk == nk, "NK token captured verbatim");
 	check(conn.ck == ck, "CK token captured verbatim");
+	// CK decodes to the decimal the retail client atol()s into the ClientAuth BT
+	// join field; a NovaWorld host validates it (reject code 9). app_id "20"
+	// decodes cleanly, so bt == "20". [orig: net_config.bt = atol(decoded CK)
+	// @0x569b8e -> Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5]
+	check(conn.bt == "20", "BT is atol(decoded CK) — the game-session join token");
 
 	// The encoded NK decodes back to host:port (cross-check / real-NW path).
 	check(url_cipher_decode(conn.nk, URL_CIPHER_KEY_NK) == nk_plain,

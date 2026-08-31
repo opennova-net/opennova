@@ -4,6 +4,7 @@
 #include <net/novacrypto/url_cipher.h>
 
 #include <cstdio>
+#include <cstdlib>
 
 namespace opennova {
 
@@ -128,6 +129,16 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 		} else {
 			out.host_ip = decoded;
 		}
+	}
+	// CK decodes (its own url_cipher key) to a decimal the retail client atol()s
+	// into the game-session BT join field; a NovaWorld host rejects a wrong BT
+	// with code 9. Re-serialize through atol like retail so leading zeros / stray
+	// bytes normalize; a missing/garbage CK keeps the "0" LAN default.
+	// [orig: parse_connection_query_string @0x54dfb0 CK arm; net_config.bt =
+	//  atol(decoded CK) @0x569b8e]
+	if (!out.ck.empty()) {
+		const std::string decoded_ck = url_cipher_decode(out.ck, URL_CIPHER_KEY_CK);
+		out.bt = std::to_string(std::atol(decoded_ck.c_str()));
 	}
 	if (out.host_ip.empty()) out.host_ip = out.ni;
 	if (out.host_port.empty()) out.host_port = out.np;

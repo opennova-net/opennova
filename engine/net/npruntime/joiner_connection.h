@@ -317,6 +317,17 @@ public:
 		expansion_version_root_ = std::move(game_root);
 	}
 
+	// The game-session BT join token — the decimal the retail client recovers
+	// from the NWJoin .joi CK and uploads in ClientAuth; a NovaWorld host
+	// validates it (reject code 9). Configure before start(); unset keeps "0"
+	// (the LAN default, unchecked on a non-NovaWorld host).
+	// [orig: net_config.bt = atol(decoded CK) @0x569b8e ->
+	//  Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5]
+	void set_join_token(std::string token) {
+		join_token_ = token.empty() ? std::string("0") : std::move(token);
+	}
+	const std::string &join_token() const { return join_token_; }
+
 	// Anti-cheat character-attribute challenge source. This is the exact
 	// sixteen-row table loaded from charattr.def at boot, not AnimMap/.adm data.
 	// S2C 0x41 mutates the retained table in receive order.
@@ -640,6 +651,7 @@ private:
 	ProtocolReassemblyState s2c_reassembly_;
 	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
 	std::string expansion_version_root_; // install root for the JOIN checksum (D-NET-166)
+	std::string join_token_ = "0"; // ClientAuth BT (decoded .joi CK); "0" = LAN default
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
 	// Pre-session UDP legs are reliable-by-retransmit in retail. Cache the already-framed bytes so

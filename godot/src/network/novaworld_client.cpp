@@ -112,7 +112,8 @@ void NovaWorldClient::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("login_succeeded", PropertyInfo(Variant::STRING, "nwhandle")));
 	ADD_SIGNAL(MethodInfo("login_failed", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("joined_game", PropertyInfo(Variant::STRING, "host"),
-	                      PropertyInfo(Variant::INT, "port")));
+	                      PropertyInfo(Variant::INT, "port"),
+	                      PropertyInfo(Variant::STRING, "join_token")));
 
 	BIND_ENUM_CONSTANT(STATE_IDLE);
 	BIND_ENUM_CONSTANT(STATE_GATE_PROBING);
@@ -662,7 +663,8 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 	case opennova::JoinResult::Kind::Resolved:
 		trace(String("join resolved host ") + String(r.host_ip.c_str()) + ":"
 			+ String::num_int64(static_cast<int64_t>(r.host_port)));
-		resolve_join_target(String(r.host_ip.c_str()), r.host_port);
+		resolve_join_target(String(r.host_ip.c_str()), r.host_port,
+			String(r.bt.c_str()));
 		break;
 	case opennova::JoinResult::Kind::Failed:
 		// D-1: any async join failure falls back to the lobby (CONNECTED) — consolidates
@@ -680,12 +682,15 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 // hello here: that would be a second, conflicting handshake on a third socket (the old "send one
 // hello and stop" dead-end that never reached gameplay). LAN, NW-routed, and env joins now converge
 // on the one joiner seam (ADR 0009; .agents/README.md "do not create a second gameplay network path").
-void NovaWorldClient::resolve_join_target(const String &host, uint16_t port) {
+void NovaWorldClient::resolve_join_target(const String &host, uint16_t port,
+                                          const String &join_token) {
 	trace(String("join target resolved ") + host + ":"
 		+ String::num_int64(static_cast<int64_t>(port))
 		+ " — handing off to the in-match joiner (Simulation owns the ClientHello)");
 	enter_state(STATE_IN_GAME_HELLO);
-	emit_signal("joined_game", host, static_cast<int>(port));
+	// The BT join token (decoded .joi CK) travels with the address: a NovaWorld
+	// host validates it in the game-session ClientAuth (reject code 9).
+	emit_signal("joined_game", host, static_cast<int>(port), join_token);
 }
 
 void NovaWorldClient::enter_state(State next, const String &reason) {

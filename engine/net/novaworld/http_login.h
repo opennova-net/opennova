@@ -74,9 +74,14 @@ std::vector<std::pair<std::string, std::string>>
 parse_set_cookie_values(const std::vector<std::string> &set_cookie_values);
 
 // The connection tokens NWJoin.dll hands back in the `.joi` response, used to
-// reach the hosted game. NK/CK are url_cipher-encoded (NK = host "ip:port",
-// CK = the host app id); NI/NP are plaintext proxy/display slots; BK is the
-// literal "986119".
+// reach the hosted game. NK is url_cipher-encoded (host "ip:port"); CK is
+// url_cipher-encoded and, decoded, is a DECIMAL the retail client atol()s into
+// the game-session join field BT (`net_config.bt = atol(decoded CK)`); NI/NP
+// are the plaintext game-node ip/port; BK is the plaintext relay tunnel cookie.
+// [orig: parse_connection_query_string @0x54dfb0 (CK key "cfhdcegjigecjehcgjdhe")
+//  -> UI_JoinSelectedSession @0x5699d0 (`net_config.bt = atol(&nk_extra_buf[64])`
+//  = atol(decoded CK)); the NovaWorld host requires it at
+//  Server_ValidatePlayerJoinRequest @0x512100 reject code 9 (`bt != ctx+4500`)].
 struct JoiConnection {
 	std::string nk;
 	std::string ck;
@@ -85,6 +90,10 @@ struct JoiConnection {
 	std::string bk;
 	std::string host_ip;   // decoded NK head, fallback NI
 	std::string host_port; // decoded NK tail, fallback NP
+	// The game-session BT join token: atol(decoded CK), re-serialized as retail
+	// does (an int field). "0" when no CK is present — the LAN default, which a
+	// NovaWorld host rejects with code 9.
+	std::string bt = "0";
 	bool ok = false; // true when a dial endpoint was recovered
 };
 
