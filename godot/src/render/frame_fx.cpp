@@ -281,6 +281,10 @@ public:
 	bool q3_sampled = false;
 	std::uint64_t gpu_span_us = 0;
 	bool gpu_span_valid = false;
+	std::uint64_t gpu_composite_us = 0;
+	bool gpu_composite_valid = false;
+	std::uint64_t gpu_decode_us = 0;
+	bool gpu_decode_valid = false;
 	std::atomic<bool> shutdown_requested{false};
 	// F3-only GPU timing (rd_timestamp_span.h carries the barrier contract).
 	std::atomic<bool> gpu_timing_enabled{false};
@@ -852,10 +856,24 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		std::uint64_t span_us = 0;
 		const bool span_valid = rd_timestamp_span_us(rd,
 				"opennova_framefx_begin", "opennova_framefx_end", span_us);
+		// The two sub-spans attribute the pass: the Q3 composite (source
+		// draw + capture + blur + additive composite) versus the terminal
+		// display decode's two full-screen draws.
+		std::uint64_t composite_us = 0;
+		const bool composite_valid = rd_timestamp_span_us(rd,
+				"opennova_q3_composite_begin", "opennova_q3_composite_end",
+				composite_us);
+		std::uint64_t decode_us = 0;
+		const bool decode_valid = rd_timestamp_span_us(rd,
+				"opennova_decode_begin", "opennova_decode_end", decode_us);
 		{
 			std::lock_guard<std::mutex> lock(diagnostics_mutex);
 			gpu_span_valid = span_valid;
 			gpu_span_us = span_us;
+			gpu_composite_valid = composite_valid;
+			gpu_composite_us = composite_us;
+			gpu_decode_valid = decode_valid;
+			gpu_decode_us = decode_us;
 		}
 		rd->capture_timestamp("opennova_framefx_begin");
 	}
@@ -870,6 +888,8 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	for (std::uint32_t view = 0; view < count; ++view) {
 		ViewTarget &target = targets[view];
 		if (q3_adapter.has_commands() && !q3_failed) {
+			if (gpu_timing && view == 0)
+				rd->capture_timestamp("opennova_q3_composite_begin");
 			// A focused-Q3 device failure keeps its diagnostic and skips the
 			// capture/blur/composite for this frame, but must never skip the
 			// terminal display decode below: a frame presented without it is
@@ -878,11 +898,15 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 				sampled_q3 = true;
 			else
 				q3_failed = true;
+			if (gpu_timing && view == 0)
+				rd->capture_timestamp("opennova_q3_composite_end");
 		}
 
 		// All 3D retail draws have blended as gamma-domain numeric values. Copy
 		// once, then apply the display-backend transfer immediately before Godot's
 		// sRGB output encoding. Canvas/viewmodel/HUD passes run afterward.
+		if (gpu_timing && view == 0)
+			rd->capture_timestamp("opennova_decode_begin");
 		if (!draw_one(target.scene_scratch_framebuffer, target.color_uniform,
 				BlendMode::Replace, FramePass::Snapshot, target.size,
 				target.size, 0, 0, 0, 0, false, true))
@@ -893,6 +917,8 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 				target.size, 0, 0, 0, 0, false, true))
 			return false;
 		++draws;
+		if (gpu_timing && view == 0)
+			rd->capture_timestamp("opennova_decode_end");
 	}
 	if (gpu_timing)
 		rd->capture_timestamp("opennova_framefx_end");
@@ -950,6 +976,10 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["q3_sampled"] = q3_sampled;
 	result["q3_gpu_us"] = static_cast<int64_t>(gpu_span_us);
 	result["q3_gpu_valid"] = gpu_span_valid;
+	result["q3_gpu_composite_us"] = static_cast<int64_t>(gpu_composite_us);
+	result["q3_gpu_composite_valid"] = gpu_composite_valid;
+	result["q3_gpu_decode_us"] = static_cast<int64_t>(gpu_decode_us);
+	result["q3_gpu_decode_valid"] = gpu_decode_valid;
 	result["shutdown"] = shutdown_requested.load(std::memory_order_acquire);
 	const Dictionary q3_report = q3_adapter.get_report();
 	const Array q3_keys = q3_report.keys();
