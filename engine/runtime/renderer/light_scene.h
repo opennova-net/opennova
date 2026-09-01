@@ -467,6 +467,15 @@ public:
 	// the group-gated first-3 select with that draw's groups. The snapshot
 	// carries only the collection inputs (retail's flag-bit-2 skip); target
 	// disables stay a select-stage gate exactly as retail applies them.
+	// Broadphase toggle for select_for_draws: the cell index gathers a
+	// superset of each draw's overlap candidates, re-sorts them into slot
+	// order, and runs the identical exact test — the accepted ordered list
+	// (and so the witnessed first-64 truncation) is bit-identical to the
+	// linear scan the toggle falls back to. The linear path stays as the
+	// equivalence-test reference.
+	void set_select_index_enabled(bool enabled) {
+		select_index_enabled_ = enabled;
+	}
 	void select_for_draws(const LightDrawContext *draws, size_t draw_count,
 			const LightSelectionOptions &options,
 			const std::array<float, 3> &ambient_scale,
@@ -481,6 +490,19 @@ public:
 	// already-selected handle set. This lets retained render devices cache the
 	// expensive static-draw broadphase without freezing animated light color.
 	uint64_t selection_revision() const { return selection_revision_; }
+
+	// Companion revision for retained COLOR payloads: bumped when any slot's
+	// blend actually changes (SetBlendAmount value writes and the tick's
+	// mode-2/5 fade ramps) — the mutations that alter select() color output
+	// without moving the selection topology or bumping selection_revision.
+	// A retained device may skip re-evaluating a cached selection whose
+	// slots carry no RgbGen style on frames where neither revision moved and
+	// its own ambient input held.
+	uint64_t color_revision() const { return color_revision_; }
+	// Whether the slot behind a handle carries an active RgbGen style
+	// (style != 0): its select() color varies with time/weather every frame,
+	// so a retained row holding it must re-evaluate per frame.
+	bool slot_gen_active(LightHandle handle) const;
 
 	// The corona billboard walk [orig: EffectWorld_RenderLightCoronas
 	// @ 0x5aaf40, called per world scene @ 0x5c96ad and per mirror scene
@@ -542,11 +564,41 @@ private:
 			bool collect_all_before_cap,
 			std::array<LightHandle, kQueryLimit> &out_handles) const;
 
+	// The slot-order collection snapshot select_for_draws scans (live,
+	// un-hidden slots), plus the 2D cell index over it. Both rebuild lazily
+	// when selection_revision_ moved; mutable because select_for_draws is
+	// const (they cache derived state only).
+	struct CompactSlot {
+		LightHandle handle;
+		std::array<int32_t, 3> aabb_min;
+		std::array<int32_t, 3> aabb_max;
+		std::array<int32_t, 3> position;
+	};
+	void refresh_compact_cache() const;
+
 	std::vector<Slot> slots_;
 	// Never reset by clear(): a handle issued before clear must not alias the
 	// first occupant of the rebuilt slot vector.
 	uint32_t next_generation_ = 1;
 	uint64_t selection_revision_ = 1;
+	uint64_t color_revision_ = 1;
+	bool select_index_enabled_ = true;
+	mutable std::vector<CompactSlot> compact_cache_;
+	mutable uint64_t compact_cache_revision_ = 0;
+	mutable bool compact_cache_valid_ = false;
+	// Cell index: counting-sorted (cell, compact-index) refs over the
+	// horizontal mission plane, oversize spans in their own bucket.
+	mutable std::vector<int32_t> grid_starts_;
+	mutable std::vector<uint32_t> grid_refs_;
+	mutable std::vector<uint32_t> grid_oversize_;
+	mutable int64_t grid_min_x_ = 0;
+	mutable int64_t grid_min_y_ = 0;
+	mutable int32_t grid_cols_ = 0;
+	mutable int32_t grid_rows_ = 0;
+	// Per-draw gather scratch: stamped dedup + the candidate index list.
+	mutable std::vector<uint32_t> gather_stamps_;
+	mutable uint32_t gather_stamp_value_ = 0;
+	mutable std::vector<uint32_t> gather_scratch_;
 	mutable LightSceneReport report_{};
 };
 
