@@ -194,7 +194,7 @@ static bool test_login_failures() {
 				"</IB3_SUBST>";
 		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
 		expect(r.reason == "This account is restricted & can't log in.",
-		       "legacy message markup and HTML entities are normalized");
+		       "message markup and HTML entities are normalized");
 	}
 	// Poll exhaustion (10 polls, no NWHANDLE).
 	{

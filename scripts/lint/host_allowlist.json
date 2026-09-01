@@ -15,6 +15,7 @@
     "godot/game/world/net_session_drive.gd",
     "godot/export_presets.cfg",
     "godot/game/novaworld_panel.gd",
+    "godot/game/novaworld_panel.tscn",
     "godot/game/novaworld_settings.gd",
     "godot/tests/armory_presenter_test.gd",
     "godot/tests/deploy_screen_presenter_test.gd",
