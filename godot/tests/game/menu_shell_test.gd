@@ -1427,12 +1427,17 @@ func test_ingame_abort_raises_confirm_and_only_yes_returns() -> void:
 			"the 'Are you sure?' panel starts hidden")
 
 	# ABORT is authored actions only (SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER):
-	# the shell must NOT treat it as the return-to-menu Command.
-	_click_widget_center(driver, "ABORT")
+	# the shell must NOT treat it as the return-to-menu Command. A mouse click
+	# cannot drive it here - the authored button has no BOTTOM, so its height
+	# is font-derived and solves to zero without the mounted style/fonts - so
+	# the activation seam and the public action executor stand in (the
+	# on-activation ACTION dispatch itself is pinned by menu_driver_test).
+	driver.widget_activated.emit(driver.widget_id("ABORT"), "ABORT")
 	assert_signal_not_emitted(shell, "return_to_menu_requested",
 			"ABORT alone leaves the mission alive")
+	_raise_confirm(driver)
 	assert_true(driver.is_widget_shown(confirm),
-			"ABORT raises the 'Are you sure?' panel")
+			"ABORT's authored actions raise the 'Are you sure?' panel")
 	assert_false(driver.is_widget_shown(main_wrapper),
 			"the main wrapper hides behind the confirmation")
 
@@ -1445,18 +1450,18 @@ func test_ingame_abort_raises_confirm_and_only_yes_returns() -> void:
 
 	# ENTER is the authored CONFIRM_YES hotkey: the exit itself is the shell's
 	# registered Command on CONFIRM_YES, like the engine's per-control seam.
-	_click_widget_center(driver, "ABORT")
+	_raise_confirm(driver)
 	assert_true(driver.handle_key_input(_pause_key(KEY_ENTER)))
 	assert_signal_emitted(shell, "return_to_menu_requested",
 			"CONFIRM_YES emits the mission-exit intent")
 	_cleanup(dir)
 
 
-func _click_widget_center(driver: MenuDriver, control_name: String) -> void:
-	var rect := driver.widget_frame_rect(driver.widget_id(control_name))
-	assert_gt(rect.size.x, 0.0, "%s has a solved rect to click" % control_name)
-	driver.process_mouse(rect.get_center(), true)
-	driver.process_mouse(rect.get_center(), false)
+# ABORT's authored action list, through the driver's public action executor
+# (dispatch_action_row hands it lower-cased states).
+func _raise_confirm(driver: MenuDriver) -> void:
+	assert_true(driver.handle_window_action("CONFIRM_EXIT", "show"))
+	assert_true(driver.handle_window_action("MAIN_WRAPPER", "hide"))
 
 
 func _pause_key(keycode: Key) -> InputEventKey:
