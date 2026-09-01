@@ -68,14 +68,20 @@ std::vector<uint8_t> nwu_outer_encode(uint8_t opcode, std::vector<uint8_t> body)
 }
 
 // SCRK-encrypted 0x43/0x83 protocol packet -> nwu_outer_encode, for a given key.
+// `session_id` follows the witnessed stamping (session/protocol_message.cpp:
+// hdr.session_id = crypto.session_id — the PEER's local key): S2C carries the
+// client's ClientAuth.ck, C2S carries that connection's ServerAuth.sk. The
+// wire_capture demux keys sessions on it (measured on the Kutu gateway capture,
+// 28/28 S2C ids == ck), so a crafted capture must stamp it the same way.
 std::vector<uint8_t> make_proto_payload(uint8_t opcode, uint8_t tag,
                                         const std::vector<uint8_t> &inner,
                                         const std::string &scrk,
+                                        uint32_t session_id = 0x1234,
                                         uint32_t sequence = 0,
                                         uint32_t acknowledgement = 0) {
 	ProtocolMessage msg = make_protocol_message(tag, inner);
 	ProtocolPacketHeader hdr{};
-	hdr.session_id = 0x1234;
+	hdr.session_id = session_id;
 	hdr.seq_num = sequence;
 	hdr.ack_count = acknowledgement;
 	std::vector<uint8_t> proto;
@@ -85,10 +91,11 @@ std::vector<uint8_t> make_proto_payload(uint8_t opcode, uint8_t tag,
 
 std::vector<uint8_t> make_proto_payload(
 		uint8_t opcode, const std::vector<ProtocolMessage> &messages,
-		const std::string &scrk, uint32_t sequence = 0,
+		const std::string &scrk, uint32_t session_id = 0x1234,
+		uint32_t sequence = 0,
 		uint32_t acknowledgement = 0) {
 	ProtocolPacketHeader hdr{};
-	hdr.session_id = 0x1234;
+	hdr.session_id = session_id;
 	hdr.seq_num = sequence;
 	hdr.ack_count = acknowledgement;
 	std::vector<uint8_t> proto;
@@ -164,12 +171,55 @@ std::vector<CaptureDatagram> craft_two_session_capture() {
 	add(32769, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_a)));
 	add(32768, 32770, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_b)));
 	add(32770, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_b)));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0D, inner(0xA1, 24), scrk_a, 7, 5));
-	add(32770, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C, inner(0xB2, 48), scrk_b, 11, 9));
-	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x16, inner(0xB3, 12), scrk_b, 10, 11));
-	add(32769, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x06, inner(0xA2, 45), scrk_a, 6, 7));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xA3, 64), scrk_a, 8, 6));
-	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xB4, 80), scrk_b, 11, 11));
+	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0D, inner(0xA1, 24), scrk_a, ca_a.ck, 7, 5));
+	add(32770, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C, inner(0xB2, 48), scrk_b, 0x56, 11, 9));
+	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x16, inner(0xB3, 12), scrk_b, ca_b.ck, 10, 11));
+	add(32769, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x06, inner(0xA2, 45), scrk_a, 0x55, 6, 7));
+	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xA3, 64), scrk_a, ca_a.ck, 8, 6));
+	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xB4, 80), scrk_b, ca_b.ck, 11, 11));
+	return caps;
+}
+
+// The server-side gateway shape that motivated the session_id demux: TWO
+// clients whose datagrams all ride ONE client-side port (measured on a real
+// gateway capture, where 42 clients' ClientAuths arrived on port 32768). A
+// port-keyed session table overwrites the first client's SCRK when the second
+// authenticates, so the first client's later traffic decrypts with the wrong
+// key — and the tolerant plaintext parser emits garbage messages rather than
+// failing. Keyed by the pre-SCRK header session_id (S2C = that client's
+// ClientAuth.ck, C2S = the connection's ServerAuth.sk), both streams decode.
+std::vector<CaptureDatagram> craft_shared_port_capture() {
+	const std::string scrk_a = "UNIT_TEST_SCRK_A";
+	const std::string scrk_b = "UNIT_TEST_SCRK_B";
+
+	ClientAuth ca_a; ca_a.na = "alpha"; ca_a.ci = 1; ca_a.ck = 2; ca_a.scrk = scrk_a;
+	ClientAuth ca_b; ca_b.na = "bravo"; ca_b.ci = 3; ca_b.ck = 4; ca_b.scrk = scrk_b;
+	ServerAuth sa_a = build_server_auth(ca_a, 0x7F000001u, 32768, 0x55, scrk_a);
+	ServerAuth sa_b = build_server_auth(ca_b, 0x7F000001u, 32768, 0x56, scrk_b);
+
+	auto inner = [](uint8_t fill, size_t n) {
+		return std::vector<uint8_t>(n, fill);
+	};
+
+	std::vector<CaptureDatagram> caps;
+	int f = 1;
+	auto add = [&](int sp, int dp, std::vector<uint8_t> payload) {
+		caps.push_back({f++, sp, dp, std::move(payload)});
+	};
+
+	// Both clients on client-side port 32769. Client A authenticates first;
+	// client B's auth lands BEFORE A's remaining traffic, which is exactly the
+	// ordering that made the port-keyed table decrypt A with B's key.
+	add(32768, 32769, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_a)));
+	add(32769, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_a)));
+	add(32768, 32769, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_b)));
+	add(32769, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_b)));
+	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0D, inner(0xA1, 24), scrk_a, ca_a.ck, 7, 5));
+	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x16, inner(0xB3, 12), scrk_b, ca_b.ck, 10, 11));
+	add(32769, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x06, inner(0xA2, 45), scrk_a, 0x55, 6, 7));
+	add(32769, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C, inner(0xB2, 48), scrk_b, 0x56, 11, 9));
+	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xA3, 64), scrk_a, ca_a.ck, 8, 6));
+	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xB4, 80), scrk_b, ca_b.ck, 11, 11));
 	return caps;
 }
 
@@ -189,6 +239,25 @@ int main() {
 	}
 	EXPECT(sess_a == 3 && sess_b == 3);
 	EXPECT(streaming_equals_batch(crafted, "inline-2-session"));
+
+	// --- shared client-side port (the demux regression) ----------------------
+	// Both sessions ride port 32769; only the header session_id separates them.
+	// All 6 payloads must decode with their exact sizes — under port keying,
+	// client B's auth overwrote A's SCRK and A's later traffic garbled.
+	{
+		const std::vector<CaptureDatagram> shared = craft_shared_port_capture();
+		const std::vector<InGameMessage> shared_batch = decode_capture_to_messages(shared);
+		EXPECT(shared_batch.size() == 6);
+		size_t sizes_seen[6] = {0, 0, 0, 0, 0, 0};
+		const size_t expected_sizes[6] = {24, 12, 45, 48, 64, 80};
+		for (const auto &m : shared_batch) {
+			for (int i = 0; i < 6; ++i) {
+				if (m.payload.size() == expected_sizes[i]) sizes_seen[i]++;
+			}
+		}
+		for (int i = 0; i < 6; ++i) EXPECT(sizes_seen[i] == 1);
+		EXPECT(streaming_equals_batch(shared, "shared-port-2-session"));
+	}
 
 	// The detailed capture seam reports every decrypted 0x43/0x83 datagram,
 	// including its session header, independently of message reassembly. This is
@@ -225,7 +294,7 @@ int main() {
 			EXPECT(packets[0].frame_index == 5);
 			EXPECT(packets[0].dir == 'S');
 			EXPECT(packets[0].session == 32769);
-			EXPECT(packets[0].header.session_id == 0x1234);
+			EXPECT(packets[0].header.session_id == 2); // ca_a.ck, the witnessed S2C stamp
 			EXPECT(packets[0].header.seq_num == 7);
 			EXPECT(packets[0].header.ack_count == 5);
 			EXPECT(packets[0].header.connection_flags == 0);
@@ -319,7 +388,7 @@ int main() {
 				99, 32768, 32769,
 				make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
 				                   std::vector<ProtocolMessage>{fragment},
-				                   "UNIT_TEST_SCRK_A", 12, 10)};
+				                   "UNIT_TEST_SCRK_A", 2, 12, 10)};
 		const CaptureDecodeResult decoded = decoder.push_detailed(datagram);
 		EXPECT(decoded.messages.empty());
 		EXPECT(decoded.session_packets.size() == 1);
