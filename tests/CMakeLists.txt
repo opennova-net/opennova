@@ -610,6 +610,15 @@ target_compile_definitions(minimal_map_validate_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 add_test(NAME minimal_map_validate COMMAND minimal_map_validate_test)
 
+# Minimal mission boot through the production kernel: its offline BMS kit
+# overrides the WPN_M4AUTO engine fallback and equips the real AK identity.
+add_executable(minimal_runtime_loadout_test fixtures/minimal_runtime_loadout.cpp)
+target_link_libraries(minimal_runtime_loadout_test PRIVATE opennova_runtime)
+target_compile_features(minimal_runtime_loadout_test PRIVATE cxx_std_17)
+target_compile_definitions(minimal_runtime_loadout_test PRIVATE
+    GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_runtime_loadout COMMAND minimal_runtime_loadout_test)
+
 # Minimal map's terrain config (.trn) — round-trip guarded; the heavy .cpt/tiles
 # are generate-at-package (not committed).
 add_executable(minimal_trn_gen_test fixtures/minimal_trn_gen.cpp)
@@ -694,14 +703,14 @@ endif()
 opennova_add_gated_test(fx_compile_validate COMMAND fx_compile_validate_test)
 
 # Minimal set's packaging tool: PFF-bundle the committed assets/ tree or
-# assemble a loose install. A TOOL, not a test: it only acts on
-# `minimal_pff_package_test --write-pff` / `--install <dir>` (assets/README.md),
-# so it is built here beside the generators but never registered with ctest.
+# assemble a loose install. Its read-only manifest check runs in ctest; writes
+# remain opt-in through `--write-pff` / `--install <dir>` (assets/README.md).
 add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
 target_include_directories(minimal_pff_package_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(minimal_pff_package_test PRIVATE opennova_runtime opennova_formats)
 target_compile_definitions(minimal_pff_package_test PRIVATE
     GAME_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+add_test(NAME minimal_pff_manifest COMMAND minimal_pff_package_test --check)
 
 # RTXT parity over the minted synthetic string tables (format invariants + byte
 # roundtrip); the same checks over the retail bins are the gated install sweep.

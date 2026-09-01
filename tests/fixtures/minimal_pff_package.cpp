@@ -9,10 +9,9 @@
 // .fx shader set → resource.
 //
 // Nothing is generated here any more: every byte, the baked mnml.cpt included, is authored
-// in ONED and committed. The tool READS assets/ and never writes into it — it once wrote its
-// generated music banks over the committed ones. It SKIPS clean unless asked, because it
-// writes files: `--write-pff` or `--install <dir>` on the test binary. See
-// assets/README.md.
+// in ONED and committed. The tool reads assets/ and only writes for `--write-pff` or
+// `--install <dir>`; `--check` validates the shared manifest read-only in CTest. It once
+// wrote generated music banks over the committed ones. See assets/README.md.
 #include <formats/pff/pff.h>
 
 #include <algorithm>
@@ -83,31 +82,103 @@ const char *const kResource[] = {"mnml.env",     "mnml.trn",     "mnml.cpt",    
 // pre-archive error text, read before any mount [orig: Game_ShowEarlyError @ 0x4a68a0].
 const char *const kLoose[] = {"menumus.sbf", "gamemus.sbf", "earlyerr.txt"};
 
-// Every source must be a real committed file, not an unpulled LFS pointer: packing pointers
-// produces archives retail opens and then fails inside, which reads as an authoring bug.
-bool sources_present(const fs::path &root, std::initializer_list<const char *const *> lists,
-                     std::initializer_list<size_t> counts) {
+using FileList = std::vector<std::pair<std::string, fs::path>>;
+
+// assets/.gitignore is deliberately an explicit allowlist: assets/ also doubles as a retail
+// run directory, so enumerating the directory would package logs, saves, generated PFFs, or
+// other ignored retail bytes. Read the authored names from that allowlist, keep shaders in
+// resource.pff, and stage every other authored file loose. This is the single manifest used
+// by both --check and --install.
+bool collect_authored_files(const fs::path &root, FileList &loose, FileList &shaders) {
+	std::ifstream manifest(root / ".gitignore");
+	if (!manifest) {
+		std::fprintf(stderr, "FAIL: cannot read authored asset allowlist: %s\n",
+		             (root / ".gitignore").string().c_str());
+		return false;
+	}
+
+	std::vector<std::string> seen;
+	std::string line;
+	while (std::getline(manifest, line)) {
+		if (!line.empty() && line.back() == '\r') line.pop_back();
+		if (line.rfind("!/", 0) != 0) continue;
+
+		const std::string name = line.substr(2);
+		if (name == ".gitignore" || name == "README.md") continue;
+		const fs::path relative(name);
+		if (name.empty() || relative.is_absolute() || relative.has_parent_path()) {
+			std::fprintf(stderr, "FAIL: unsupported authored asset allowlist entry: %s\n",
+			             line.c_str());
+			return false;
+		}
+		if (std::find(seen.begin(), seen.end(), name) != seen.end()) {
+			std::fprintf(stderr, "FAIL: duplicate authored asset allowlist entry: %s\n",
+			             name.c_str());
+			return false;
+		}
+
+		std::vector<uint8_t> bytes;
+		if (!read_bytes(root / relative, bytes)) {
+			std::fprintf(stderr, "FAIL: committed source missing: %s\n", name.c_str());
+			return false;
+		}
+		if (bytes.empty()) {
+			std::fprintf(stderr, "FAIL: committed source is empty: %s\n", name.c_str());
+			return false;
+		}
+		if (is_lfs_pointer(bytes)) {
+			std::fprintf(stderr, "FAIL: %s is an unpulled LFS pointer (git lfs pull)\n",
+			             name.c_str());
+			return false;
+		}
+
+		std::string ext = relative.extension().string();
+		for (char &ch : ext)
+			ch = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
+		(ext == ".fx" ? shaders : loose).emplace_back(name, root / relative);
+		seen.push_back(name);
+	}
+
+	std::sort(loose.begin(), loose.end());
+	std::sort(shaders.begin(), shaders.end());
+	return true;
+}
+
+bool manifest_has(const FileList &files, const char *name) {
+	return std::any_of(files.begin(), files.end(), [&](const auto &entry) {
+		return entry.first == name;
+	});
+}
+
+bool manifest_has_all(const FileList &files, std::initializer_list<const char *const *> lists,
+                      std::initializer_list<size_t> counts) {
 	bool ok = true;
 	auto list_it = lists.begin();
 	auto count_it = counts.begin();
 	for (; list_it != lists.end(); ++list_it, ++count_it) {
 		for (size_t i = 0; i < *count_it; ++i) {
-			const char *n = (*list_it)[i];
-			std::vector<uint8_t> b;
-			if (!read_bytes(root / n, b)) {
-				std::fprintf(stderr, "FAIL: committed source missing: %s\n", n);
-				ok = false;
-			} else if (b.empty()) {
-				std::fprintf(stderr, "FAIL: committed source is empty: %s\n", n);
-				ok = false;
-			} else if (is_lfs_pointer(b)) {
-				std::fprintf(stderr, "FAIL: %s is an unpulled LFS pointer (git lfs pull)\n", n);
+			const char *name = (*list_it)[i];
+			if (!manifest_has(files, name)) {
+				std::fprintf(stderr, "FAIL: required source is not in assets/.gitignore: %s\n",
+				             name);
 				ok = false;
 			}
 		}
 	}
 	return ok;
 }
+
+// Sentinels for the retail bring-up path the minimal set currently promises. The complete
+// allowlist is staged, while these make an accidental removal of the AK viewmodel or the
+// player locomotion chain fail the read-only package check with a useful message.
+const char *const kRequiredBringup[] = {
+    "AKM_1st.3di", "AKM_1ST.adm", "ArmsG.3di",     "RAKM_1f.bad",
+    "RAKM_1f2.bad", "RAKM_1i.bad", "RAKM_1i2.bad", "RAKM_1r.bad",
+    "rAKM_RST.bad", "rpk74_6.dds", "E_STAND.adm",  "US01.3di",
+    "US01.ADM",     "DT1runF.bad",  "FAILSAFE.BAD", "AVATARS.DEF",
+    "SndProf.def"};
+const char *const kRequiredShaders[] = {"_ffp.fx", "_baseinc.fx", "phongt.fx",
+                                        "skbasic.fx"};
 
 uint32_t crc32_ieee(const uint8_t *p, size_t n) {
 	uint32_t c = 0xFFFFFFFFu;
@@ -182,42 +253,21 @@ bool write_and_verify(const fs::path &root, const char *archive,
 // mission in this layout, so the token's name does not matter to the mission list the way
 // the packed archive's does (ONED's packer: localres.pff).
 //
-// The hard rule for this layout is NO .dds anywhere: under /d,
-// Texture_LoadByNameWithChannel @ 0x58b470 truncates a model's texture name at the first
-// extension and probes it loose, and a loose hit routes to the TGA/MDT/PCX branch, which
-// returns 0 for a .dds name (checkerboard). Every authored texture here is .tga/.pcx, so the
-// archive stays empty.
-bool emit_loose_install(const fs::path &out, const fs::path &root,
-                        const std::vector<std::pair<std::string, fs::path>> &language,
-                        const std::vector<std::pair<std::string, fs::path>> &localres,
-                        const std::vector<std::pair<std::string, fs::path>> &resource,
-                        const std::vector<std::pair<std::string, fs::path>> &shaders) {
+// The retail models name .tga textures while the bring-up set carries their witnessed .dds
+// substitutes. Under /d, Texture_LoadByNameWithChannel @ 0x58b52c performs that substitution
+// for loose files, so those .dds files must be copied too. Only shaders stay archived because
+// the boot precompiler discovers .fx exclusively through PFF directory walks.
+bool emit_loose_install(const fs::path &out, const fs::path &root, const FileList &loose,
+                        const FileList &shaders) {
 	std::error_code ec;
 	fs::create_directories(out, ec);
 
 	size_t n = 0;
-	for (const auto *list : {&language, &localres, &resource}) {
-		for (const auto &entry : *list) {
-			const std::string &name = entry.first;
-			const std::string ext = fs::path(name).extension().string();
-			if (ext == ".dds" || ext == ".DDS") {
-				std::fprintf(stderr, "FAIL: %s is .dds - unloadable loose under /d\n", name.c_str());
-				return false;
-			}
-			fs::copy_file(entry.second, out / name, fs::copy_options::overwrite_existing, ec);
-			if (ec) {
-				std::fprintf(stderr, "FAIL: copy %s -> %s: %s\n", entry.second.string().c_str(),
-				             name.c_str(), ec.message().c_str());
-				return false;
-			}
-			++n;
-		}
-	}
-
-	for (const char *b : kLoose) {
-		fs::copy_file(root / b, out / b, fs::copy_options::overwrite_existing, ec);
+	for (const auto &entry : loose) {
+		fs::copy_file(entry.second, out / entry.first, fs::copy_options::overwrite_existing, ec);
 		if (ec) {
-			std::fprintf(stderr, "FAIL: copy %s: %s\n", b, ec.message().c_str());
+			std::fprintf(stderr, "FAIL: copy %s -> %s: %s\n", entry.second.string().c_str(),
+			             entry.first.c_str(), ec.message().c_str());
 			return false;
 		}
 		++n;
@@ -273,40 +323,38 @@ int main(int argc, char **argv) {
 	// Two layouts over one committed tree: `--write-pff` writes the three
 	// boot-table archives into assets/ (the retail-validated packed shape; the
 	// .pffs are gitignored there); `--install <dir>` assembles a runnable loose
-	// install. Both write files, so they are opt-in: the ctest registration
-	// passes neither and the run reports Skipped.
+	// install. Both write modes remain opt-in; CTest passes --check to exercise
+	// the same authored manifest without mutating the tree.
 	const char *install_env = nullptr;
 	bool want_pff = false;
+	bool want_check = false;
 	for (int i = 1; i < argc; ++i) {
 		if (std::strcmp(argv[i], "--write-pff") == 0) want_pff = true;
+		else if (std::strcmp(argv[i], "--check") == 0) want_check = true;
 		else if (std::strcmp(argv[i], "--install") == 0 && i + 1 < argc) install_env = argv[++i];
 	}
-	if (!want_pff && install_env == nullptr)
-		return retail::skip("--write-pff (boot-table archives into assets/) or --install <dir> (a runnable loose install)");
+	if (!want_pff && !want_check && install_env == nullptr)
+		return retail::skip("--check, --write-pff (boot-table archives into assets/), or --install <dir> (a runnable loose install)");
 
 	const fs::path root(dir());
-	if (!sources_present(root, {kLanguage, kLocalres, kResource, kLoose},
-	                     {count_of(kLanguage), count_of(kLocalres), count_of(kResource),
-	                      count_of(kLoose)}))
+	FileList authored_loose, shaders;
+	if (!collect_authored_files(root, authored_loose, shaders))
+		return 1;
+	if (!manifest_has_all(authored_loose,
+	                      {kLanguage, kLocalres, kResource, kLoose, kRequiredBringup},
+	                      {count_of(kLanguage), count_of(kLocalres), count_of(kResource),
+	                       count_of(kLoose), count_of(kRequiredBringup)}) ||
+	    !manifest_has_all(shaders, {kRequiredShaders}, {count_of(kRequiredShaders)}))
 		return 1;
 
 	// Per-archive file lists: committed sources by retail placement.
-	std::vector<std::pair<std::string, fs::path>> language, localres, resource;
+	FileList language, localres, resource;
 	for (const char *n : kLanguage) language.emplace_back(n, root / n);
 	for (const char *n : kLocalres) localres.emplace_back(n, root / n);
 	for (const char *n : kResource) resource.emplace_back(n, root / n);
 
 	// The committed .fx shader set rides resource.pff in BOTH layouts (retail's own
-	// placement). Globbed from assets/ so the committed set stays the source of truth:
-	// the .gitignore allowlist governs what lives there.
-	std::vector<std::pair<std::string, fs::path>> shaders;
-	for (const auto &de : fs::directory_iterator(root)) {
-		if (!de.is_regular_file()) continue;
-		std::string ext = de.path().extension().string();
-		for (char &ch : ext) ch = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
-		if (ext == ".fx") shaders.emplace_back(de.path().filename().string(), de.path());
-	}
-	std::sort(shaders.begin(), shaders.end());
+	// placement). It comes from the same explicit authored allowlist as the loose files.
 	if (shaders.empty()) {
 		std::fprintf(stderr, "FAIL: no .fx shaders in %s - the FP/skinned pass dies without them\n",
 		             root.string().c_str());
@@ -315,12 +363,18 @@ int main(int argc, char **argv) {
 
 	// The loose layout: everything flat plus the shader-bearing resource.pff.
 	if (install_env != nullptr &&
-	    !emit_loose_install(fs::path(install_env), root, language, localres, resource, shaders))
+	    !emit_loose_install(fs::path(install_env), root, authored_loose, shaders))
 		return 1;
 
-	if (!want_pff) {
+	if (!want_pff && install_env != nullptr) {
 		std::printf("OK: loose install assembled (add --write-pff to also write the "
 		            "boot-table archives)\n");
+		return 0;
+	}
+	if (!want_pff) {
+		std::printf("OK: authored package manifest has %zu loose files and %zu shaders; "
+		            "AK viewmodel + player locomotion sentinels are present\n",
+		            authored_loose.size(), shaders.size());
 		return 0;
 	}
 
@@ -335,7 +389,7 @@ int main(int argc, char **argv) {
 	                       "Arial16n.fnt", "Impac38b.fnt", "menumus.bin", "gamemus.bin",
 	                       "newarow1.tga", "mnml.dbf"}))
 		return 1;
-	std::vector<std::pair<std::string, fs::path>> resource_all = resource;
+	FileList resource_all = resource;
 	resource_all.insert(resource_all.end(), shaders.begin(), shaders.end());
 	if (!write_and_verify(root, "resource.pff", resource_all,
 	                      {"mnml.env", "mnml.trn", "mnml.cpt", "mnml_c.tga", "mnml_dc2.tga",

@@ -83,12 +83,12 @@ gracefully on miss is deliberately omitted to keep "minimal" honest.
 
 | File | Origin | Notes |
 |---|---|---|
-| `mnml.bms` | project-authored BMS | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, minimal item set. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity; the two ids are observed from the shipped data and the spawn behaviour — neither appears as an immediate in `Jointops.exe`, so the binary site that carries them is unwitnessed). |
+| `mnml.bms` | project-authored BMS | the mission: the `106001` player start, both team starts (`106003`/`106004`), one objective, minimal item set. Its first single-player kit entry is `WPN_AK47AUTO`: offline mission promotion overrides the hardcoded M4 fallback, while a live session skips the BMS kit and uses the player's profile. Retail does not spawn the player from a placed entity — it spawns item `105310` by its own id and reads the placed `106001` marker to learn where (confirmed against retail's `00TRa.bms`: 1331 entities, exactly one `106001`, no player entity; the two ids are observed from the shipped data and the spawn behaviour — neither appears as an immediate in `Jointops.exe`, so the binary site that carries them is unwitnessed). |
 | `mnml.trn` + `mnml.cpt` | terrain writers (`save_trn` + the CDEP builder) | the terrain config and its baked polydata. JO reads the compressed CDEP depth `[orig: Terrain_LoadLodStorage @ 0x603550 — the 'CDEP' fourcc compare @ 0x603620 and the 'DPTH' compare @ 0x6037b3]`; the BHD-era DPTH the builder defaults to is a `.cpt` retail cannot decode. `sector_count` is the grid WIDTH, not a count of active sectors. |
 | `mnml.env` | `engine/formats/env` writer | one time-of-day; defaults elsewhere. The mission header's Q8.8 start hour overrides the `.env`'s own `curtime`, so the mission starts at noon rather than rendering under the midnight ramp. |
 | `mp.mnu` | project-authored MNU | the host/join menu `[orig: @ 0x5588fa]`. |
 | `sp.mnu` | project-authored MNU | the single-player mission screen `[orig: SinglePlayer_PopulateMissionList @ 0x561840]` — where the packed mission has to appear. |
-| `weapon.def`, `ammo.def` | authored text | minimal: one spawn weapon + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. Two entries for ONE rifle, because the engine addresses two weapon names by LITERAL and a set that wants an armed player with a visible viewmodel has to answer both: `WPN_M4AUTO` is the spawn/equip default resolved by name at player spawn `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` (without it the player spawns unarmed), and `WPN_AK47AUTO` is the name the first-person viewmodel bring-up resolves. Both carry the viewmodel slice — `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
+| `weapon.def`, `ammo.def` | authored text | minimal: one rifle shape + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. Two entries answer the two names the engine addresses by LITERAL: `WPN_M4AUTO` remains the hardcoded spawn fallback resolved by name `[orig: PlayerClass_InitEntity @ 0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")]` (without it the player can spawn unarmed), while `mnml.bms` promotes `WPN_AK47AUTO` as the actual offline equipped identity and first-person viewmodel name. Both carry the same viewmodel slice — `ANIMADM`/`GFX1`/`GFX1A` plus the `pos`/`TPOS` hip and ADS offsets `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`. `GFX1A` is parse-and-discard in the original — the arms come from the CHARACTER's arms model `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]` — and is carried for retail-shape fidelity. No `PARTICLE` rows: the set ships no `.ptl` catalogue yet. |
 | `game.wac` / `server.wac` | — | optional (silent skip) — add only if the join needs mission logic to progress. |
 
 ### Where the mission list looks (witnessed against retail)
@@ -286,12 +286,19 @@ rather than asserting byte-equality against a throwaway generator:
 | `minimal_rtxt_gen` | the string tables emit + round-trip |
 | `minimal_def_validate` | `items.def` / `weapon.def` / `ammo.def` parse through `engine/formats/def` |
 | `minimal_mnu_validate` | `main.mnu` (Startup), `mp.mnu` (LAN host/join), `sp.mnu` (single player) parse and carry their screens |
-| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight |
+| `minimal_map_validate` | `mnml.env` loads; `mnml.bms` parses, places exactly one `106001` and both team starts, names the terrain, starts in daylight, and starts its offline kit with `WPN_AK47AUTO` (`minimal_map_validate_test --write` performs that surgical edit) |
+| `minimal_runtime_loadout` | the production mission kernel boots the real minimal tree and the promoted kit, equipped inventory slot, and player entity all resolve to `WPN_AK47AUTO` |
 | `minimal_trn_gen` | `mnml.trn` round-trips, keeps the 8-wide sector grid + quadrant block, names exactly the shipped `mnml_*` art (`minimal_trn_gen_test --write` re-emits the config) |
 | `minimal_art_validate` | every image `mnml.trn` names decodes; the colormap is big enough to quadrant-split; the cursor is a 32×32 type-2 32 bpp alpha TGA |
 | `minimal_eol_guard` | every hand-authored text file is CRLF |
 | `minimal_fx_gen` | each committed `.fx` byte-equals wrap(its `tests/fixtures/fx/` source) and no stray `.fx` rides in assets/ |
 | `fx_compile_validate` | every authored effect compiles through `D3DXCreateEffect` under the loader's define sets (Skipped without D3DX9/D3D9) |
+| `minimal_pff_manifest` | the explicit `assets/.gitignore` authored manifest is complete and its loose set retains the AK viewmodel + player locomotion chain |
+
+The BMS remains ONED-authored; `minimal_map_validate_test --write` is the
+repeatable command for applying this edit. It adds the singleton AK row when no
+kit exists, or changes only the first row's identity while preserving its
+fields and every remaining row, then emits through `MissionDocument`.
 
 ## Packaging
 
@@ -305,9 +312,11 @@ rather than asserting byte-equality against a throwaway generator:
   defs, mission, fonts and music scripts, `resource.pff` = the map and terrain
   (`.env`/`.trn`/`.cpt`/source art).
 - `minimal_pff_package_test --install <dir>` assembles a runnable **loose**
-  install: everything flat plus the shader-bearing `resource.pff` (it clears the
-  boot gate AND carries the `.fx` set the PFF-walk-only precompile needs), run
-  with `/d`.
+  install: every explicitly allowlisted authored file flat, including the
+  temporary retail model/animation/texture bring-up set, plus the shader-bearing
+  `resource.pff` (it clears the boot gate AND carries the `.fx` set the
+  PFF-walk-only precompile needs), run with `/d`. `--check` validates that same
+  manifest without writing.
   With `OPENNOVA_JO_DIR` set it also stages `Jointops.exe` + `binkw32.dll` +
   `game.cfg` from your own install (never committed).
 
@@ -335,6 +344,11 @@ recipe is the acceptance test for "the minimal set hosts + joins."
 Validated on retail 2026-08-31: boot → menu → `mnml` → an armed player that
 walks with a drawn first-person viewmodel, all from this set loose + the
 shader-bearing `resource.pff`.
+
+Revalidated on retail 2026-09-01 after the loose-package manifest fix: onHook
+0.6.0 captured the drawn AK viewmodel before its overlay, and real player input
+moved the reported BMS pose from `(0, 0, 0)` to
+`(-12.835, -12.958, 0.869)`.
 
 Known gaps: the shaders are ours (the authored `.fx` set above), but no model
 or clip here is ours yet — the player body, its animations and the viewmodel

@@ -6,7 +6,13 @@
 // went red the moment the editor authored the mission, which is the wrong signal entirely.
 //
 // What is worth guarding is what the ENGINE needs, checked against the committed file:
-// it parses, it places the player, it points at the minimal terrain, and it starts in daylight.
+// it parses, it places the player, it points at the minimal terrain, it starts in daylight,
+// and its offline kit equips the AK-47 by its real weapon identity.
+//
+// `--write` is deliberately a surgical editor rather than a generator: it loads the committed
+// ONED-authored mission through MissionDocument, adds the AK kit row when the mission has no kit
+// (the PR #610 starting state) or changes only the first row's name, and emits it through the
+// production BMS writer. Existing rows and fields are otherwise preserved.
 //
 // The .env leg was already a load-check rather than a byte compare (text EOLs differ), so it is
 // unchanged in substance.
@@ -15,9 +21,11 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -33,6 +41,7 @@ int fail = 0;
 	} while (0)
 
 const char *kMapBase = "mnml";
+const char *kFirstPlayerWeapon = "WPN_AK47AUTO";
 // Only ids the engine addresses BY NUMBER are reserved; 106001 is the player start marker the
 // engine reads to place the hardcoded player item. The team starts are the MP spawn markers
 // the host/join acceptance step depends on -- a map without both loads completely and leaves
@@ -66,7 +75,17 @@ bool is_lfs_pointer(const std::vector<uint8_t> &b) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	bool write_mode = false;
+	for (int i = 1; i < argc; ++i) {
+		if (std::strcmp(argv[i], "--write") == 0) {
+			write_mode = true;
+		} else {
+			std::fprintf(stderr, "usage: minimal_map_validate_test [--write]\n");
+			return 2;
+		}
+	}
+
 	// ---- .env: it loads ----
 	{
 		std::vector<uint8_t> committed;
@@ -83,18 +102,50 @@ int main() {
 
 	// ---- .bms: it parses and carries what the engine needs ----
 	{
+		const std::string bms_path = path(std::string(kMapBase) + ".bms");
 		std::vector<uint8_t> committed;
-		CHECK(read_file(path(std::string(kMapBase) + ".bms"), committed), "committed .bms missing");
+		CHECK(read_file(bms_path, committed), "committed .bms missing");
 		// An empty file is not a mission; it must not pass by having nothing to check.
 		CHECK(!committed.empty(), "committed .bms is empty");
 		if (committed.empty()) return fail == 0 ? 0 : 1;
 		if (is_lfs_pointer(committed)) {
+			if (write_mode) {
+				CHECK(false, "mnml.bms is an unpulled LFS pointer; pull LFS before --write");
+				return 1;
+			}
 			std::printf("[skip] mnml.bms is an unpulled LFS pointer\n");
 			return fail == 0 ? 0 : 1;
 		}
 
 		opennova::mission::MissionDocument doc;
-		CHECK(doc.load_bms_bytes(committed.data(), committed.size()), "committed .bms parses");
+		if (!doc.load_bms_bytes(committed.data(), committed.size())) {
+			CHECK(false, doc.last_error().c_str());
+			return 1;
+		}
+
+		std::vector<opennova::mission::WeaponLoadoutEntry> loadout = doc.weapon_loadout();
+		std::string previous_weapon;
+		bool weapon_changed = false;
+		if (write_mode && (loadout.empty() || loadout.front().name != kFirstPlayerWeapon)) {
+			if (loadout.empty()) {
+				previous_weapon = "<none>";
+				opennova::mission::WeaponLoadoutEntry first;
+				first.name = kFirstPlayerWeapon;
+				first.ammo_primary = "6";
+				first.ammo_secondary = "-1";
+				first.flags = "-1";
+				loadout.push_back(std::move(first));
+			} else {
+				previous_weapon = loadout.front().name;
+				loadout.front().name = kFirstPlayerWeapon;
+			}
+			CHECK(doc.set_weapon_loadout(loadout), doc.last_error().c_str());
+			weapon_changed = fail == 0;
+		}
+		CHECK(!loadout.empty(), "the mission carries an offline weapon kit");
+		if (!loadout.empty())
+			CHECK(loadout.front().name == kFirstPlayerWeapon,
+			      "the first offline weapon is WPN_AK47AUTO (the actual AK identity)");
 
 		const size_t markers = doc.entity_count(opennova::mission::EntityKind::Marker);
 		int player_starts = 0;
@@ -118,8 +169,39 @@ int main() {
 		CHECK(start_hour >= kDaylightFirstHour && start_hour <= kDaylightLastHour,
 		      "the mission starts in daylight (start_time is Q8.8 HOURS; 0 means midnight, and "
 		      "the header overrides the .env's own curtime)");
+
+		if (write_mode && weapon_changed && fail == 0) {
+			std::vector<uint8_t> generated;
+			CHECK(doc.write_bms_bytes(generated), doc.last_error().c_str());
+
+			// Never replace the committed mission until the produced bytes parse and carry the edit.
+			opennova::mission::MissionDocument verify;
+			if (fail == 0)
+				CHECK(verify.load_bms_bytes(generated.data(), generated.size()),
+				      "rewritten mnml.bms parses");
+			if (fail == 0) {
+				const std::vector<opennova::mission::WeaponLoadoutEntry> written_loadout =
+						verify.weapon_loadout();
+				CHECK(!written_loadout.empty() && written_loadout.front().name == kFirstPlayerWeapon,
+				      "rewritten mnml.bms keeps WPN_AK47AUTO first");
+			}
+
+			if (fail == 0) {
+				std::ofstream output(bms_path, std::ios::binary | std::ios::trunc);
+				CHECK(output.good(), "cannot open mnml.bms for writing");
+				if (output.good() && !generated.empty())
+					output.write(reinterpret_cast<const char *>(generated.data()),
+					             static_cast<std::streamsize>(generated.size()));
+				CHECK(output.good(), "cannot write mnml.bms");
+				if (output.good())
+					std::printf("wrote %s (%s -> %s, %zu bytes)\n", bms_path.c_str(),
+					            previous_weapon.c_str(), kFirstPlayerWeapon, generated.size());
+			}
+		} else if (write_mode && fail == 0) {
+			std::printf("%s already starts with %s\n", bms_path.c_str(), kFirstPlayerWeapon);
+		}
 	}
 
-	if (fail == 0) std::printf("OK: minimal map .env + .bms valid\n");
+	if (fail == 0) std::printf("OK: minimal map .env + .bms valid; offline kit starts with AK-47\n");
 	return fail == 0 ? 0 : 1;
 }

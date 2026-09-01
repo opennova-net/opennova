@@ -1012,8 +1012,42 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 			"closing removes the click picker again")
 
 
-func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:
+func test_minimal_mission_ak_loadout_outranks_player_info_selection() -> void:
 	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	_shell.set_local_player_profile({
+		"player_class": 5,
+		"primary": "WPN_M4",
+		"primary_clips": -1,
+		"secondary": "",
+		"secondary_clips": -1,
+		"accessory": "",
+		"accessory_clips": -1,
+	})
+
+	menu_shell.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await get_tree().process_frame
+
+	assert_true(bool(world.get_sim().has_explicit_spawn_loadout()),
+		"the committed minimal mission promotes an authored offline kit")
+	assert_eq(world.local_player_weapon_name(), "WPN_AK47AUTO",
+		"the mission-authored AK outranks the PLAYER_INFO selection")
+	var viewmodel_def: PlayerViewmodelDef = world.local_player_viewmodel_def()
+	assert_not_null(viewmodel_def)
+	assert_eq(viewmodel_def.weapon_name, "WPN_AK47AUTO")
+	assert_eq(viewmodel_def.gfx1, "AK_TEST_FIRST",
+		"the first viewmodel resolves through the actual AK identity")
+	var inventory: Dictionary = world.get_sim().get_local_player_inventory()
+	assert_eq(String(inventory.get("equipped_name", "")), "WPN_AK47AUTO",
+		"the spawned simulation equips the same mission-authored AK")
+
+
+func test_player_info_loadout_is_equipped_when_mission_has_no_kit() -> void:
+	_shell = await _make_shell(true)
 	if _shell == null:
 		return
 	var world = _shell.get_node("World")
@@ -1150,14 +1184,14 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 			"the world rows read unavailable again once the world is gone")
 
 
-func _make_shell():
+func _make_shell(without_mission_loadout := false):
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
 	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 31,
 			"the retail-shaped archives contain every minimal fixture resource")
 	var language_entries := _fixture_entries(LANGUAGE_FILES)
-	var localres_entries := _fixture_entries(LOCALRES_FILES)
+	var localres_entries := _fixture_entries(LOCALRES_FILES, without_mission_loadout)
 	var resource_entries := _fixture_entries(RESOURCE_FILES)
 	# The minimal TRN is intentionally CPT-less and cannot create render RIDs.
 	# Pack the substituted TRN's baked payload + textures so this regression
@@ -1185,7 +1219,7 @@ func _make_shell():
 	return shell
 
 
-func _fixture_entries(filenames: Array) -> Array:
+func _fixture_entries(filenames: Array, without_mission_loadout := false) -> Array:
 	var entries: Array = []
 	for filename in filenames:
 		var source := FIXTURE_DIR.path_join(filename)
@@ -1206,6 +1240,16 @@ func _fixture_entries(filenames: Array) -> Array:
 			if source.is_empty():
 				source = FIXTURE_DIR.path_join("main.mnu")
 		var bytes := FileAccess.get_file_as_bytes(source)
+		if filename == "mnml.bms" and without_mission_loadout:
+			var mission := MissionData.new()
+			assert_eq(mission.open_file(ProjectSettings.globalize_path(source)), OK,
+					"the committed minimal mission opens for the no-kit fixture")
+			assert_true(mission.set_weapon_loadout([]),
+					"the profile-over-fallback fixture can clear the authored kit")
+			var no_kit_path := _temp_dir.path_join("mnml_no_kit.bms")
+			assert_eq(mission.save_as(no_kit_path), OK,
+					"the no-kit lifecycle mission serializes")
+			bytes = FileAccess.get_file_as_bytes(no_kit_path)
 		if filename == "weapon.def":
 			bytes = LIFECYCLE_WEAPON_DEF.to_utf8_buffer()
 		assert_false(bytes.is_empty(), "%s is available in the committed fixture" % filename)
