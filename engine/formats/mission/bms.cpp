@@ -193,17 +193,18 @@ private:
     std::vector<uint8_t> data_;
 };
 
-bool parse_header(Reader& r, Header& h, std::string& error, bool require_magic = true) {
+bool parse_header(Reader& r, Header& h, std::string& error, bool wire_header = false) {
     size_t start = r.position();
 
     r.read_bytes(reinterpret_cast<uint8_t*>(h.magic), 4);
     // The wire S2C 0x0B header is the retail g_BmsHeaderBlock runtime struct, NOT
     // a .bms file: its first 4 bytes are zeroed, not "BMS"+version, and retail's
-    // joiner memcpy's it verbatim and reads offsets without a magic/version gate
-    // [orig: NapiNPClientMsg_HandleBMSHeader @0x422660 vs the file gate
-    // Mission_LoadBMSFile @0x40f5aa]. The field layout after byte 4 is identical,
-    // so only the file loader (require_magic) enforces the magic + version.
-    if (require_magic) {
+    // joiner memcpy's it verbatim and reads offsets with NEITHER the magic nor
+    // the version gate [orig: NapiNPClientMsg_HandleBMSHeader @0x422660 vs the
+    // file gate Mission_LoadBMSFile @0x40f5aa]. The field layout after byte 4 is
+    // identical, so the file loader alone enforces both; `wire_header` drops
+    // both together, as retail does.
+    if (!wire_header) {
         if (h.magic[0] != 'B' || h.magic[1] != 'M' || h.magic[2] != 'S') {
             error = "Invalid BMS magic";
             return false;
@@ -1149,7 +1150,7 @@ bool parse_header_blob(const uint8_t* data, size_t size, Header& out, std::strin
     Reader r(data, size);
     // The wire 0x0B blob carries the retail g_BmsHeaderBlock (zeroed magic); do
     // not enforce the file-only "BMS"+version gate on it.
-    return parse_header(r, out, error, /*require_magic=*/false);
+    return parse_header(r, out, error, /*wire_header=*/true);
 }
 
 bool parse_file(const std::string& path, File& out, std::string& error) {

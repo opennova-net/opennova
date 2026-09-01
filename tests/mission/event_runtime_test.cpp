@@ -1522,6 +1522,36 @@ static void test_change_ai_command_family() {
     // read engine_flags — the retail Flags dword home.
     CHECK((w.registry.get(handle)->engine_flags &
            world::kEntityFlagIndestructible) != 0);
+    // Sub 43 is the one arm with no aiRuntime gate: a brainless row (a
+    // building, a parked vehicle) takes it too [orig: case 0x2B @0x43b20a].
+    {
+        world::Entity building{};
+        building.net_id = 43;
+        building.item_id = 2002;
+        building.alive = true;
+        const world::EntityHandle bh = w.registry.spawn(0, building);
+        CHECK(ai.for_handle(bh) == nullptr);
+        bms::Action action{};
+        action.action_type = bms::ActionType::ChangeSingleAI;
+        action.action_sub_type = 43;
+        action.param1 = 43;
+        action.param2 = 1;
+        events.dispatch_action_for_test(w, action);
+        CHECK((w.registry.get(bh)->engine_flags &
+               world::kEntityFlagIndestructible) != 0);
+        action.param2 = 0;
+        events.dispatch_action_for_test(w, action);
+        CHECK((w.registry.get(bh)->engine_flags &
+               world::kEntityFlagIndestructible) == 0);
+    }
+    // Authored-but-unported subs are counted, never silently swallowed.
+    {
+        const int before = ai.unported_calls;
+        dispatch(44, 7); // TARGETSSN
+        CHECK(ai.unported_calls == before + 1);
+        dispatch(41, 12); // a ported sub leaves the counter alone
+        CHECK(ai.unported_calls == before + 1);
+    }
     dispatch(32);
     CHECK(ae.brain.f[world::AiBrain::kUseWaypointZones] == 1);
     dispatch(33);
@@ -1534,6 +1564,9 @@ static void test_change_ai_command_family() {
                 world::kAiGroundFollowWp;
         dispatch(subtype, argument);
         CHECK(ai.events.count() == 1);
+        // The command-queued family stamps channel 0, not the combat sites'
+        // 9 [orig: event_source = 0 @0x43b30e].
+        CHECK(ai.events.at(0).channel() == 0);
         ai.events.process_timed(ai, w);
         CHECK(ai.events.count() == 0);
     };
@@ -1661,7 +1694,6 @@ static void test_structural_bms_actions() {
            world::kEntityFlagBuilding) != 0);
     CHECK((w.registry.get(pool1_h)->engine_flags &
            world::kEntityFlagBuilding) == 0);
-    CHECK((w.registry.get(pool1_h)->flags & world::kEntityFlagBuilding) == 0);
     CHECK((w.registry.get(pool2_h)->engine_flags &
            world::kEntityFlagBuilding) == 0);
     CHECK(pool1_ai.pos[0] == (10 << 16));
@@ -1676,14 +1708,12 @@ static void test_structural_bms_actions() {
     CHECK(w.registry.get(pool0_h)->group_id == 7);
 
     w.registry.get(pool0_h)->position = {};
-    w.registry.get(pool0_h)->flags |= world::kEntityFlagBuilding;
     w.registry.get(pool0_h)->engine_flags |= world::kEntityFlagBuilding;
     dispatch(bms::ActionType::SingleTeleportAction, 100, 9);
     CHECK(w.registry.get(pool0_h)->position.x == 10.0f);
     CHECK(w.registry.get(pool0_h)->spawn_position.z == 30.0f);
     CHECK((w.registry.get(pool0_h)->engine_flags &
            world::kEntityFlagBuilding) == 0);
-    CHECK((w.registry.get(pool0_h)->flags & world::kEntityFlagBuilding) == 0);
     CHECK((w.registry.get(pool0_h)->flags & world::kEntityFlagParachute) != 0);
     CHECK((w.registry.get(pool0_h)->engine_flags &
            world::kEntityFlagParachute) != 0);

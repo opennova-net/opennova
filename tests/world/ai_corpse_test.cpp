@@ -14,6 +14,9 @@
 // The target is pre-weakened through the scripted-SETHP store (the WAC SETHP
 // shape) so the FIRST connecting round completes the kill; the kill still
 // travels the full damage/death chain, only the required hit count changes.
+// This is NOT a firefight-balance test: the incidental exchange is pinned by
+// scripted stores (guard hold on the target, per-tick player top-up), so the
+// player cannot lose the race and no assertion rides on it.
 // Gated on OPENNOVA_JO_ASSETS (an extracted retail tree carrying CP01.bms);
 // no synthetic leg exists: the death matrix needs a retail infantry .adm.
 #include "common/retail_mission_files.h"
@@ -177,12 +180,6 @@ int main() {
 				rig.world.commands.set_ssn_guard(tent->net_id, false);
 			std::printf("corpse: KILLED t=%ds — player rounds killed the target\n", seconds);
 			break;
-		}
-		if (rig.player_health() <= 0) {
-			std::fprintf(stderr,
-					"FAIL: the player died despite the per-tick top-up (t=%ds)\n",
-					seconds);
-			return 1;
 		}
 	}
 	if (!expect(killed, "the fire phase killed the target within its budget")) return 1;

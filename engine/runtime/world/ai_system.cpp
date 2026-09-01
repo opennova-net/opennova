@@ -1063,6 +1063,8 @@ int32_t part_anim_rate_from_seconds(double seconds) {
 void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
     switch (sub_type) {
         case 0x20: // AIUSEWPZ [orig: @0x43B0E5]
+            // Declared residual: brain+432 has no reader here yet (the
+            // waypoint-zone routing consumer is unported).
             comp.f[AiBrain::kUseWaypointZones] = 1;
             break;
         case 0x21: // AICLEARWPZ [orig: @0x43B0F7]

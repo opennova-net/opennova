@@ -1707,10 +1707,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
         // (movsx word entity+0x12 @0x4b78c5 — the +0x10 heading dword, not
         // the +0x8C body heading org2 elsewhere prefers). The two
         // doubles are retail's STORED approximations (2*pi/65536 and pi/4,
-        // read from the image at 0x7C9BC0/0x7C9BB0) and are ported verbatim;
-        // the form is the subtract of the ftol-truncated (value * -64.0f)
-        // products [orig: flt_7C9BD8 = -64.0f; ftol2_sse @0x76bc00], exactly
-        // as retail computes it. The DOUBLED arm (Flags&0x20 chute deployed,
+        // read from the image: 0x7C9BC0 = 3F1921F9F01B866E, 0x7C9BB0 =
+        // 3FE921F9F01B866E) and are ported verbatim; the form is the subtract
+        // of the ftol-truncated products of the x87 DOUBLE cos/sin and the
+        // float -64.0 (fcos/fsin, fmul flt_7C9BD8, _ftol2_sse — no narrowing
+        // before the multiply) [orig: @0x4b78e5..0x4b790f; flt_7C9BD8 =
+        // C2800000]. The DOUBLED arm (Flags&0x20 chute deployed,
         // vertical vel <= -0x3800, dir == 0 [orig: @0x4b7920..0x4b793d]) is
         // unreachable until the parachute state lands (D-INF-20) and stays
         // unported -- declared, not bridged.
@@ -1718,11 +1720,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
             const double angle =
                     static_cast<double>(static_cast<int16_t>(e.heading >> 16)) *
                             9.587371826171875e-05 +
-                    static_cast<double>(inf.player_move_dir_index & 7) * 0.7853975;
-            const int32_t cx = static_cast<int32_t>(
-                    static_cast<float>(std::cos(angle)) * -64.0f);
-            const int32_t sy = static_cast<int32_t>(
-                    static_cast<float>(std::sin(angle)) * -64.0f);
+                    static_cast<double>(inf.player_move_dir_index) * 0.7853975;
+            const int32_t cx = static_cast<int32_t>(std::cos(angle) * -64.0);
+            const int32_t sy = static_cast<int32_t>(std::sin(angle) * -64.0);
             inf.vel[0] -= cx;
             inf.vel[1] -= sy;
         }

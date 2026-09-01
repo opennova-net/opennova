@@ -374,6 +374,10 @@ static void pose_emplacement_attachments(World &world, LogicTickPerf *perf) {
 EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
     if (ssn == kLocalPlayerSsn && world_.cached.local_player.valid())
         return world_.cached.local_player;
+    // No SSN-0 guard and pools 0..3, like the retail lookup this mirrors;
+    // resolve_ssn_in_pools012 below is the OTHER retail walk (dcb != 0 gate,
+    // pools 0..2) and the two differ on purpose. [orig: EntityPool_FindByNetId
+    // @0x4f0a20 — mask 0xF, no netId gate]
     return world_.registry.find_by_net_id(ssn);
 }
 
@@ -1095,6 +1099,8 @@ namespace {
 // net_id 0 (the wire is handle-based), so the resolve_ssn sentinel mapping
 // runs first.
 EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
+    // The dcb != 0 gate and the 0..2 pool set are this walk's own; the
+    // net-id lookup EntityCommands::resolve_ssn wraps has neither.
     if (ssn == 0) return EntityHandle{};
     if (ssn == EntityCommands::kLocalPlayerSsn &&
         world.cached.local_player.valid())
@@ -1152,18 +1158,17 @@ void sync_teleported_ai(World &world, const Entity &entity) {
 // (pool 0), @0x43e13c/@0x43e1df (pools 1/2)]; the group action clears
 // 0x20000 on pools 1/2 only [orig: @0x43d47f/@0x43d4e3 — the pool-0 arm
 // @0x43d404..0x43d426 goes straight to the spawn reset]. Our split homes the
-// bits: Building lives on engine_flags, the chute bit is legacy-mirrored, so
-// both views are written and the read is merged.
+// bits: Building (0x20000) lives on engine_flags alone — it is outside the
+// organic low byte `flags` mirrors — while the chute bit is legacy-mirrored,
+// so that one is written on both views and read merged.
 void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
                       bool single_action) {
     entity.position = marker.position;
     entity.yaw = marker.yaw;
     entity.pitch = marker.pitch;
     entity.roll = marker.roll;
-    if (single_action || entity.handle.pool() != 0) {
-        entity.flags &= ~kEntityFlagBuilding;
+    if (single_action || entity.handle.pool() != 0)
         entity.engine_flags &= ~kEntityFlagBuilding;
-    }
     if (single_action && entity.handle.pool() == 0 &&
         ((marker.flags | marker.engine_flags) & kEntityFlagParachute) != 0) {
         entity.flags |= kEntityFlagParachute;
@@ -1233,6 +1238,8 @@ bool EntityCommands::set_group_move_speed_kph(int group, int32_t kph) {
     // (kph x 1000/3600; the store @0x43a9a5).
     int64_t scaled = (static_cast<int64_t>(256000) * kph) / 60;
     scaled = (scaled * 256) / 60;
+    // Declared residual: the group-record consumer (the AI motor's group
+    // speed override) is unported, so this store has no reader yet.
     world_.relations.group(group).move_speed_q16_per_sec =
             static_cast<int32_t>(scaled);
     return true;
@@ -1667,7 +1674,7 @@ void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
             set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x200u, p2 != 0);
             break;
         case 17: // CLIMBER_BIT [orig: case 0x11 @0x43af25 — bit 0x400 @0x43af36/0x43af43]
-            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x400u, p2 != 0);
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], AiSlot::kClimber, p2 != 0);
             break;
         case 21:
             // COWARD_BIT: 0x20000 always clears first
@@ -1700,13 +1707,30 @@ void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
             ae.slot.f[AiSlot::kSightRange] =
                     static_cast<int32_t>(static_cast<uint32_t>(p3) << 16);
             break;
-        case 43:
-            // INDESTRUCTABLE_BIT [orig: case 0x2B @0x43b20a — Flags
-            //  0x4000000 @0x43b210/0x43b21d; the one arm with NO aiRuntime
-            //  gate]. Every consumer (destruction, collision_resolve,
-            //  round_sim) reads engine_flags — the retail Flags dword home.
-            set_mask(entity.engine_flags, kEntityFlagIndestructible, p2 != 0);
-            break;
+        default: break;
+    }
+}
+
+// The one arm with NO aiRuntime gate: retail writes the entity Flags dword
+// for any pool-0/1 row the alert walk hands it, brain or not
+// [orig: case 0x2B @0x43b20a — Flags 0x4000000 @0x43b210/0x43b21d;
+//  Entity_HandleAlertCommand @0x43cf10 walks pools 0/1 without the +104
+//  gate]. Every consumer (destruction, collision_resolve, round_sim) reads
+// engine_flags — the retail Flags dword home. Returns true when the sub was
+// this arm (the brain halves have nothing to do).
+bool apply_brainless_ai_command(Entity &entity, int sub_type, int32_t p2) {
+    if (sub_type != 43) return false;
+    set_mask(entity.engine_flags, kEntityFlagIndestructible, p2 != 0); // INDESTRUCTABLE_BIT
+    return true;
+}
+
+// Authored ChangeAI subs the port does not carry: 31 FIND_AND_USE, 37
+// HUDITEM, 39 TMATESTATUS, 40 AINODEPATH, 44 TARGETSSN. Counted on the AI
+// system's coverage counter so a supported mission can assert zero, the way
+// event_runtime's unported_action marker does for action types.
+void note_unported_ai_sub(AiSystem &sys, int sub_type) {
+    switch (sub_type) {
+        case 31: case 37: case 39: case 40: case 44: ++sys.unported_calls; break;
         default: break;
     }
 }
@@ -1746,11 +1770,14 @@ void queue_ai_brain_event(AiSystem &sys, AiEntity &ae, int sub_type, int32_t p2)
 } // namespace
 
 bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
-    if (!world_.ai) return false;
     const EntityHandle handle = resolve_ssn(ssn);
     Entity *entity = world_.registry.get(handle);
+    if (entity == nullptr) return false;
+    if (apply_brainless_ai_command(*entity, sub_type, p2)) return true;
+    if (!world_.ai) return false;
     AiEntity *ae = world_.ai->for_handle(handle);
-    if (entity == nullptr || ae == nullptr) return false;
+    if (ae == nullptr) return false;
+    note_unported_ai_sub(*world_.ai, sub_type);
     apply_ai_controller_command(*entity, *ae, sub_type, p2, p3);
     queue_ai_brain_event(*world_.ai, *ae, sub_type, p2);
     ai_apply_command(ae->brain, sub_type, p2, p3, p4);
@@ -1798,14 +1825,17 @@ int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, 
         else if (sub_type == 6) world_.relations.group(group).alert = TriggerRelations::kAlertGreen;
         else if (sub_type == 22) world_.relations.group(group).alert = TriggerRelations::kAlertYellow;
     }
-    if (!world_.ai) return 0;
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);
     int n = 0;
     for (EntityHandle h : members) {
         Entity *entity = world_.registry.get(h);
+        if (entity == nullptr) continue;
+        if (apply_brainless_ai_command(*entity, sub_type, p2)) { ++n; continue; }
+        if (!world_.ai) continue;
         AiEntity *ae = world_.ai->for_handle(h);
-        if (entity != nullptr && ae != nullptr) {
+        if (ae != nullptr) {
+            note_unported_ai_sub(*world_.ai, sub_type);
             apply_ai_controller_command(*entity, *ae, sub_type, p2, p3);
             queue_ai_brain_event(*world_.ai, *ae, sub_type, p2);
             ai_apply_command(ae->brain, sub_type, p2, p3, p4);
@@ -1819,7 +1849,6 @@ int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_ty
                                           int32_t p2, int32_t p3, int32_t p4) {
     // AREA_AI_RED/BLUE: apply to the team's units inside a zone. [target = zone area id,
     // team filter: blue=1/red=2; the exact BMS zone->area mapping is grill-gated (P5).]
-    if (!world_.ai) return 0;
     const Area *a = world_.registry.area(zone_area_id);
     if (!a) return 0;
     std::vector<EntityHandle> in;
@@ -1828,8 +1857,11 @@ int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_ty
     for (EntityHandle h : in) {
         Entity *entity = world_.registry.get(h);
         if (entity == nullptr || entity->team != static_cast<uint8_t>(team)) continue;
+        if (apply_brainless_ai_command(*entity, sub_type, p2)) { ++n; continue; }
+        if (!world_.ai) continue;
         AiEntity *ae = world_.ai->for_handle(h);
         if (ae != nullptr) {
+            note_unported_ai_sub(*world_.ai, sub_type);
             apply_ai_controller_command(*entity, *ae, sub_type, p2, p3);
             queue_ai_brain_event(*world_.ai, *ae, sub_type, p2);
             ai_apply_command(ae->brain, sub_type, p2, p3, p4);

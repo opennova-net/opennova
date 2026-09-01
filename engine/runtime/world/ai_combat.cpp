@@ -776,6 +776,8 @@ bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
         e.brain.f[AiBrain::kAccuracy] = std::clamp(ev.f[3], 0, 4);
         return true;
     case 9: // DRIVESKILL [orig: AI_HandleCommand @0x465770 case 9]
+        // Declared residual: brain+176 has no reader here yet (the vehicle
+        // driver skill consumer is unported).
         e.brain.f[AiBrain::kDriveSkill] = std::clamp(ev.f[3], 0, 4);
         return true;
     case 10:

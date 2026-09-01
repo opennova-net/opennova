@@ -7278,9 +7278,15 @@ The synchronous arms now carried are (per-case addresses re-witnessed
   @ 0x43B088); 41 attack distance (ai+60 = p2<<16 @ 0x43B263); 42 engagement
   min/max (ai+64/ai+68 @ 0x43B27C/0x43B289); and 43 INDESTRUCTABLE_BIT — the
   entity Flags dword 0x4000000, the ONE arm with no aiRuntime gate
-  [orig: case 0x2B @ 0x43B20A, writes @ 0x43B210/0x43B21D]. Our dispatcher
-  still requires a resident AI row for every arm — a 43 on a non-AI entity is
-  dropped where retail applies it (bounded residual, noted here).
+  [orig: case 0x2B @ 0x43B20A, writes @ 0x43B210/0x43B21D] — carried ahead of
+  the brain gate for single, group, and area targets since 2026-09-01
+  (`apply_brainless_ai_command`), so a building or parked vehicle takes it as
+  retail does. The CLIMBER bit's one retail reader is the ladder entry gate
+  [orig: aiRuntime+4 & 0x400 @ 0x4B326A, Entity_MovementCollisionResolver];
+  `make_ladder_resolve_io` feeds `LadderResolveIO::ai_wants_climb` from it
+  (the AI move-order arm of that test, var_60 @ 0x4B3257, stays unported).
+  Authored subs the port omits (31, 37, 39, 40, 44) bump
+  `AiSystem::unported_calls` rather than vanish.
 - subs 32/33 set/clear the brain's use-waypoint-zones latch, and sub 34 retains
   the already-ported PLAYPARTANIM channel/rate write [orig: Entity_ApplyCommand
   @ 0x43AB60].
