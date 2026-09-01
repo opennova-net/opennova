@@ -74,8 +74,21 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 @export var exit_control_names := PackedStringArray([
 	"EXIT", "QUIT", "QUIT_GAME", "QUIT_TO_DESKTOP",
 ])
+# The mission-exit Command seam. Retail's in-game ABORT button does NOT leave
+# the mission: its authored actions raise the CONFIRM_EXIT "Are you sure?"
+# panel (SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER in the shipped game.mnu), and
+# the exit itself is the engine Command registered on CONFIRM_YES — the same
+# per-(screen,control) seam as the other named controls (docs/mnu/menu-re.md,
+# "The in-game exit confirmation"). Retail's ABORT command arms a
+# confirm-pending latch that CONFIRM_YES checks; here the latch is modeled by
+# reachability — the panel is only shown by ABORT's authored actions, hidden
+# widgets are unclickable, and the engine hotkey scan skips hidden subtrees —
+# so a CONFIRM_YES activation implies an armed ABORT. CONFIRM_NO needs no
+# binding: its authored actions restore MAIN_WRAPPER. Binding ABORT here was
+# the bug that skipped the confirmation (the teardown swapped the document
+# under the emit, so the authored SHOW never dispatched).
 @export var return_control_names := PackedStringArray([
-	"QUIT_TO_MENU", "MAIN_MENU", "ABORT", "ABORT_MISSION",
+	"CONFIRM_YES",
 ])
 # The generic BACK command seam: the actionless named button the original
 # engine's shell binds by name (game.mnu's ESC-hotkeyed HIDDEN_BACK is the ONLY

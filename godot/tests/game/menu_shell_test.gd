@@ -1407,3 +1407,61 @@ func test_control_mapping_capture_dies_on_screen_change() -> void:
 			"the Forward record still holds its defaults")
 	DirAccess.remove_absolute(dir.path_join("options.mnu"))
 	DirAccess.remove_absolute(dir)
+
+
+func test_ingame_abort_raises_confirm_and_only_yes_returns() -> void:
+	var dir := _make_dir()
+	_copy(GAME_FIXTURE, dir.path_join("game.mnu"))
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_ingame_menu(), "the retail pause document opens")
+	var driver: MenuDriver = shell.get_driver()
+	watch_signals(shell)
+	var confirm := driver.widget_id("CONFIRM_EXIT")
+	var main_wrapper := driver.widget_id("MAIN_WRAPPER")
+	assert_gte(confirm, 0, "game.mnu authors the confirm panel")
+	assert_false(driver.is_widget_shown(confirm),
+			"the 'Are you sure?' panel starts hidden")
+
+	# ABORT is authored actions only (SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER):
+	# the shell must NOT treat it as the return-to-menu Command.
+	_click_widget_center(driver, "ABORT")
+	assert_signal_not_emitted(shell, "return_to_menu_requested",
+			"ABORT alone leaves the mission alive")
+	assert_true(driver.is_widget_shown(confirm),
+			"ABORT raises the 'Are you sure?' panel")
+	assert_false(driver.is_widget_shown(main_wrapper),
+			"the main wrapper hides behind the confirmation")
+
+	# ESC is the authored CONFIRM_NO hotkey (the hidden MAIN_WRAPPER's
+	# HIDDEN_BACK cannot eat it): cancel restores the wrapper.
+	assert_true(driver.handle_key_input(_pause_key(KEY_ESCAPE)))
+	assert_false(driver.is_widget_shown(confirm), "No cancels the exit")
+	assert_true(driver.is_widget_shown(main_wrapper))
+	assert_signal_not_emitted(shell, "return_to_menu_requested")
+
+	# ENTER is the authored CONFIRM_YES hotkey: the exit itself is the shell's
+	# registered Command on CONFIRM_YES, like the engine's per-control seam.
+	_click_widget_center(driver, "ABORT")
+	assert_true(driver.handle_key_input(_pause_key(KEY_ENTER)))
+	assert_signal_emitted(shell, "return_to_menu_requested",
+			"CONFIRM_YES emits the mission-exit intent")
+	_cleanup(dir)
+
+
+func _click_widget_center(driver: MenuDriver, control_name: String) -> void:
+	var rect := driver.widget_frame_rect(driver.widget_id(control_name))
+	assert_gt(rect.size.x, 0.0, "%s has a solved rect to click" % control_name)
+	driver.process_mouse(rect.get_center(), true)
+	driver.process_mouse(rect.get_center(), false)
+
+
+func _pause_key(keycode: Key) -> InputEventKey:
+	var key := InputEventKey.new()
+	key.keycode = keycode
+	key.physical_keycode = keycode
+	key.pressed = true
+	return key

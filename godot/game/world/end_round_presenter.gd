@@ -38,6 +38,11 @@ const TAB_WIDGETS: Array[String] = ["RADIO_TAB_OVERALL", "RADIO_TAB_REDTEAM", "R
 
 signal opened
 signal closed
+# The witnessed CONFIRM_YES command exits the mission (the same close-screens
+# + action-3 pair as the pause menu's CONFIRM_YES; docs/mnu/menu-re.md "The
+# in-game exit confirmation"); the shell routes it to the return-to-menu
+# teardown.
+signal exit_to_menu_requested
 
 var _world: GameWorld = null
 var _ui_parent: Node = null
@@ -267,19 +272,24 @@ func teardown() -> void:
 	_stat_opened = false
 
 
-# The stat.mnu exits: HIDDEN_BACK and the CONFIRM_YES/CONFIRM_NO pair close the
-# screen (the round cycle itself is the host's).
-func _on_widget_value_changed(widget_name: String, kind: String, index: int,
-		_value: String) -> void:
-	if kind == "button" and (widget_name.nocasecmp_to("HIDDEN_BACK") == 0
-			or widget_name.nocasecmp_to("CONFIRM_YES") == 0
-			or widget_name.nocasecmp_to("CONFIRM_NO") == 0
-			or widget_name.nocasecmp_to("CONFIRM_EXIT") == 0):
+# Buttons and radios arrive on the driver's widget_activated (value_changed
+# never fires for them). The stat.mnu exit is confirmed, like the shipped
+# screen: HIDDEN_BACK's authored actions raise the CONFIRM_EXIT "Are you
+# sure?" panel (SHOW CONFIRM_EXIT + HIDE STATS), CONFIRM_NO's restore STATS,
+# and the CONFIRM_YES Command EXITS THE MISSION — the witnessed handler is the
+# same close-screens + action-3 pair as the pause menu's (docs/mnu/menu-re.md
+# "The in-game exit confirmation"), not a board hide. Closing on the other
+# names swallowed the confirmation.
+func _on_widget_activated(_id: int, widget_name: String) -> void:
+	if widget_name.nocasecmp_to("CONFIRM_YES") == 0:
 		close()
+		exit_to_menu_requested.emit()
 		return
 	# The tab radios map onto the engine's tab index [orig:
-	# stat_filter_tab_handler @0x562140]; the filter itself is the sim feed's.
-	if kind == "radio" and widget_name.begins_with("RADIO_TAB_"):
+	# stat_filter_tab_handler @0x562140, registered with params 0/1/2 by
+	# HUD_CacheStatPanelValues @0x5627a8..0x5627f5]; the filter itself is the
+	# sim feed's.
+	if widget_name.begins_with("RADIO_TAB_"):
 		var tab := 0
 		for i in TAB_WIDGETS.size():
 			if widget_name.nocasecmp_to(TAB_WIDGETS[i]) == 0:
@@ -319,7 +329,7 @@ func _ensure_menu() -> bool:
 	_driver.attach(_frame, _audio)
 	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MUSIC_VAR_INDEX)
-	_driver.widget_value_changed.connect(_on_widget_value_changed)
+	_driver.widget_activated.connect(_on_widget_activated)
 	var style := _load_style(root)
 	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
 	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
