@@ -70,6 +70,11 @@ public:
 	void present_snapshot(const PackedFloat32Array &p_snap, int p_stride,
 			int64_t p_layout_revision);
 
+	// The occlusion frame's render-gate verdict for one wire row (the
+	// collector gate the placed rows get by bms id). A culled row's node
+	// hides and skips its presentation legs until the gate releases it.
+	void set_render_culled(int p_handle, bool p_culled);
+
 	// Cold rows the budget deferred on the last presented frame.
 	int pending_spawn_count() const { return pending_spawn_count_; }
 	Ref<WirePresentStats> get_stats_record() const;
