@@ -1456,18 +1456,27 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
         center_world[1] = epos[1];
         center_world[2] = epos[2];
     }
+    return sphere_render_visible(collision, cam, center_world, radius,
+                                 ent.occlusion_latch, world.logic_tick);
+}
+
+bool OcclusionWorld::sphere_render_visible(const CollisionWorld &collision,
+                                           const OcclusionFrameCamera &cam,
+                                           const int32_t center_world[3],
+                                           int32_t radius, uint8_t &latch,
+                                           uint32_t logic_tick) {
     if (!sphere_in_view(cam, center_world, radius)) return false;
 
     // Three-ray latch, outdoors only. [orig: @ 0x5c7125-0x5c7162]
     const bool outdoors = (~cam.local_blink_flags & 0x2u) != 0;
-    if (ent.occlusion_latch != 0) {
-        --ent.occlusion_latch;
+    if (latch != 0) {
+        --latch;
         return true;
     }
     if (outdoors && !three_rays_clear(collision, cam, center_world, radius,
-                                      world.logic_tick))
+                                      logic_tick))
         return false;
-    ent.occlusion_latch = static_cast<uint8_t>((latch_rand16() & 7) + 16);
+    latch = static_cast<uint8_t>((latch_rand16() & 7) + 16);
     return true;
 }
 

@@ -195,6 +195,22 @@ public:
     // @ 0x5c7022-0x5c708a and the latch @ 0x5c7125-0x5c7162]
     bool entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
                                const OcclusionFrameCamera &cam);
+    // The same collector gate's view-cull + outdoors three-ray latch over a
+    // bound sphere the caller derived (a decoded wire row: the client-built
+    // pool entities retail's collector walks exactly like the host's own).
+    // `latch` is that row's persistent latch counter. TRUE = render.
+    // [orig: collect_visible_entities_for_terrain @ 0x5c8c60 — the sphere
+    // view test and the latch @ 0x5c7125-0x5c7162]
+    bool sphere_render_visible(const CollisionWorld &collision,
+                               const OcclusionFrameCamera &cam,
+                               const int32_t center_world[3], int32_t radius,
+                               uint8_t &latch, uint32_t logic_tick);
+    // Bound-sphere derivation from the collision model bounds.
+    // [orig: Entity_ComputeBoundingSphere @ 0x5c69a0 — center = AABB mid,
+    // radius = min(|half|, 0x7FFF0000 as float); the def scale leg is unported
+    // (statics carry no live scale)]
+    static void bound_sphere_fixed(const CollisionModel &m, int32_t center_local[3],
+                                   int32_t &radius);
 
     // --- frame results ---
     // Whether the building entered the visible batch this frame (distance +
@@ -352,12 +368,6 @@ private:
     bool three_rays_clear(const CollisionWorld &collision, const OcclusionFrameCamera &cam,
                           const int32_t target[3], int32_t radius,
                           uint32_t debug_tick) const;
-    // Bound-sphere derivation from the collision model bounds.
-    // [orig: Entity_ComputeBoundingSphere @ 0x5c69a0 — center = AABB mid,
-    // radius = min(|half|, 0x7FFF0000 as float); the def scale leg is unported
-    // (statics carry no live scale)]
-    static void bound_sphere_fixed(const CollisionModel &m, int32_t center_local[3],
-                                   int32_t &radius);
     // Batch view cull: forward-depth + sphere-vs-frustum stand-in for the
     // original viewport projector (D-OCC-12).
     bool sphere_in_view(const OcclusionFrameCamera &cam, const int32_t center_fixed[3],

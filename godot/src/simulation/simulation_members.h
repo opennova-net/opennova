@@ -81,6 +81,13 @@ private:
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
 	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
 	std::vector<int32_t> occlusion_culled_bms_;
+	// The same render gate over the decoded rows WirePresentPass draws (no
+	// placed identity): culled wire handles this frame, the applied baseline,
+	// and each row's persistent three-ray latch.
+	std::vector<int32_t> occlusion_culled_wire_;
+	std::vector<int32_t> occl_apply_culled_wire_last_;
+	std::unordered_map<uint16_t, uint8_t> wire_occlusion_latch_;
+	PackedInt32Array get_wire_render_culled_changes();
 	// Reused probe scratch (cleared per frame, capacity retained).
 	std::vector<opennova::world::EntityHandle> occlusion_probe_handles_;
 	// Delta baselines for the render-occlusion apply path: what the shell last

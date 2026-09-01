@@ -122,6 +122,8 @@ public:
 			int tick_delta);
 	// A freed/swapped wire node invalidates the plan and its per-handle caches.
 	void release_wire_handle(int handle);
+	// The occlusion frame's render-gate verdict for a wire row.
+	void set_wire_render_culled(int handle, bool culled);
 	void reset_wire_runtime_state();
 
 	// Third-person held-weapon placement — the ONE home (the witnessed
@@ -299,6 +301,8 @@ private:
 	std::vector<ObjectID> wire_deferred_ids_;
 	HashMap<int32_t, RemoteBodyCache> wire_remote_body_;
 	HashMap<int32_t, int32_t> wire_respawn_revisions_;
+	HashMap<int32_t, bool> wire_render_culled_;
+	void present_wire_row_body_sounds(WireRow &row, const PackedFloat32Array &snap);
 	HashMap<int32_t, int32_t> wire_held_weapon_adm_;
 	HashMap<int32_t, ObjectID> wire_held_weapon_ids_;
 	int64_t wire_plan_revision_ = -1;

@@ -90,6 +90,60 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 		if (!kernel_->occlusion.entity_render_visible(kernel_->world, kernel_->collision, *e, cam))
 			occlusion_culled_bms_.push_back(e->bms_id);
 	}
+	// The decoded rows the wire pass draws — remote organics and runtime
+	// spawns with no placed identity — pass the SAME collector gate: retail's
+	// client walks the pool entities it built from the wire exactly as the
+	// host walks its own [orig: collect_visible_entities_for_terrain
+	// @ 0x5c8c60 pools 0/1]. A row with a registry twin uses that twin's
+	// collision bound sphere (the host's runtime spawns); a bare row is the
+	// position-centred unit sphere the organics leg above falls back to.
+	occlusion_culled_wire_.clear();
+	if (runtime_ != nullptr) {
+		const uint16_t self_handle = runtime_->has_self_handle()
+				? runtime_->self_handle()
+				: opennova::world::EntityHandle::kInvalid;
+		for (const opennova::netsim::ClientEntityState &es :
+				runtime_->state().entities) {
+			const uint16_t handle = es.handle;
+			if (handle == opennova::world::EntityHandle::kInvalid ||
+					es.type_id == 0 || handle == self_handle)
+				continue;
+			// A hidden row is never collected; the present pass hides it
+			// itself, and its latch does not tick [orig: @ 0x5c6fec].
+			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
+			const opennova::world::EntityHandle h{handle};
+			const opennova::world::Entity *twin = nullptr;
+			if (!joiner_ || h.pool() != 0) {
+				const opennova::world::Entity *candidate =
+						kernel_->world.registry.get(h);
+				if (candidate != nullptr &&
+						static_cast<uint16_t>(candidate->item_id) == es.type_id)
+					twin = candidate;
+			}
+			if (twin != nullptr && (twin->bms_id != 0 ||
+					twin->spawn_origin != opennova::world::kSpawnOriginNone))
+				continue; // a placed row: the registry walk above gated it
+			if (h == kernel_->world.cached.local_player) continue;
+			int32_t center_world[3] = {es.x, es.y, es.z};
+			int32_t radius = 0x10000;
+			const opennova::world::CollisionModel *cm = twin != nullptr
+					? kernel_->collision.model_for(kernel_->world, h)
+					: nullptr;
+			if (cm != nullptr && cm->valid()) {
+				int32_t center_local[3];
+				opennova::world::OcclusionWorld::bound_sphere_fixed(
+						*cm, center_local, radius);
+				const opennova::world::CollisionMatrix pose =
+						opennova::world::collision_matrix_from_heading(
+								es.heading_bam, center_world);
+				pose.transform_point(center_local, center_world);
+			}
+			uint8_t &latch = wire_occlusion_latch_[handle];
+			if (!kernel_->occlusion.sphere_render_visible(kernel_->collision, cam,
+						center_world, radius, latch, kernel_->world.logic_tick))
+				occlusion_culled_wire_.push_back(static_cast<int32_t>(handle));
+		}
+	}
 	if (runtime_profiling_enabled_)
 		last_occlusion_probe_us_ = opennova::io::perf_now_us() - occl_probe_start;
 }
@@ -148,6 +202,26 @@ PackedInt64Array Simulation::get_building_visibility_changes() {
 		out.push_back(e.bms_id);
 		out.push_back(packed);
 	});
+	return out;
+}
+
+PackedInt32Array Simulation::get_wire_render_culled_changes() {
+	std::vector<int32_t> current = occlusion_culled_wire_;
+	std::sort(current.begin(), current.end());
+	std::vector<int32_t> added;
+	std::vector<int32_t> removed;
+	std::set_difference(current.begin(), current.end(),
+			occl_apply_culled_wire_last_.begin(), occl_apply_culled_wire_last_.end(),
+			std::back_inserter(added));
+	std::set_difference(occl_apply_culled_wire_last_.begin(),
+			occl_apply_culled_wire_last_.end(), current.begin(), current.end(),
+			std::back_inserter(removed));
+	occl_apply_culled_wire_last_ = std::move(current);
+	PackedInt32Array out;
+	out.push_back(static_cast<int32_t>(added.size()));
+	for (const int32_t id : added) out.push_back(id);
+	out.push_back(static_cast<int32_t>(removed.size()));
+	for (const int32_t id : removed) out.push_back(id);
 	return out;
 }
 
@@ -305,6 +379,8 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 			});
 		}
 	} else if (runtime_) {
+		const std::unordered_set<int32_t> wire_culled(
+				occlusion_culled_wire_.begin(), occlusion_culled_wire_.end());
 		for (const opennova::netsim::ClientEntityState &es :
 				runtime_->state().entities) {
 			const uint16_t handle = es.handle;
@@ -315,6 +391,9 @@ PackedInt64Array Simulation::get_draw_lighting_changes(
 				sun_quality_last_by_wire_.erase(handle);
 				continue;
 			}
+			// Retail only rays a drawn entity; a culled one keeps its last
+			// factor until it renders again (see the registry walk above).
+			if (wire_culled.count(static_cast<int32_t>(handle)) != 0) continue;
 			// A hidden row is not drawn, so retail does not push a new stack
 			// value. Preserve the last emitted quality: if it moves while hidden,
 			// the first visible frame must compare against that retained material
@@ -407,6 +486,7 @@ bool Simulation::entity_present_visible(int p_bms_id) const {
 void Simulation::reset_occlusion_apply_baseline() {
 	occl_apply_building_last_.clear();
 	occl_apply_culled_last_.clear();
+	occl_apply_culled_wire_last_.clear();
 	sun_quality_last_by_bms_.clear();
 	sun_quality_last_by_wire_.clear();
 	sun_quality_present_layout_revision_ = -1;

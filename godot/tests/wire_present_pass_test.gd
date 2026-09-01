@@ -563,6 +563,35 @@ func test_admitted_player_row_with_synthetic_origin_builds_on_the_host() -> void
 			"the runtime type resolves through the placer's visual mapping")
 
 
+func test_render_culled_row_hides_and_skips_legs_until_released() -> void:
+	# The occlusion frame's collector gate over a wire row: a culled row is not
+	# drawn, so no presentation leg runs for it (the node hides, its transform
+	# stays where it was), and the compare-gated legs re-assert exactly what
+	# changed once the gate releases it.
+	var container := _container()
+	var p := _wire_pass(_sim(), _placer(), container)
+	var snap := Snapshot.new()
+	snap.entities = [{ "type_id": TYPE_RIFLEMAN, "handle": 2, "x": 7.0 }]
+	_present(p, snap)
+	var avatar: ObjectModel = p.resolve_wire_handle(2)
+	assert_not_null(avatar)
+	assert_true(avatar.visible)
+	assert_almost_eq(avatar.position.x, 7.0, 0.001)
+
+	p.set_render_culled(2, true)
+	snap.entities[0]["x"] = 9.0
+	_present(p, snap)
+	assert_false(avatar.visible, "a culled row's node hides")
+	assert_almost_eq(avatar.position.x, 7.0, 0.001,
+			"no presentation leg runs for a culled row")
+
+	p.set_render_culled(2, false)
+	_present(p, snap)
+	assert_true(avatar.visible, "the released row draws again")
+	assert_almost_eq(avatar.position.x, 9.0, 0.001,
+			"the transform leg re-asserts the current wire pose on release")
+
+
 func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> void:
 	var container := _container()
 	var p := _wire_pass(_sim(), _placer(), container)

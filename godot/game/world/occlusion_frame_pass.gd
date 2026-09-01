@@ -230,6 +230,19 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 			var node := _occlusion_node(registry, int(culled_changes[i]))
 			if node != null:
 				_set_occlusion_hidden(sim, node, int(culled_changes[i]), false)
+	# The same collector gate over the rows WirePresentPass draws (remote
+	# organics and runtime spawns with no placed identity), keyed by wire
+	# handle: retail's client walks its wire-built pools exactly like the host
+	# walks its own [orig: collect_visible_entities_for_terrain @ 0x5c8c60].
+	var wire_culled_changes: PackedInt32Array = sim.get_wire_render_culled_changes()
+	if wire_culled_changes.size() >= 2:
+		var wire_present_for_cull := runtime.get_wire_presenter()
+		if wire_present_for_cull != null:
+			var wire_added := int(wire_culled_changes[0])
+			for i in range(1, 1 + wire_added):
+				wire_present_for_cull.set_render_culled(int(wire_culled_changes[i]), true)
+			for i in range(2 + wire_added, wire_culled_changes.size()):
+				wire_present_for_cull.set_render_culled(int(wire_culled_changes[i]), false)
 	if timing:
 		cull_apply_us = Time.get_ticks_usec() - cull_apply_start
 

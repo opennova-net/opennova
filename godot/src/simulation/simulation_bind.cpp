@@ -467,6 +467,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_building_visibility_changes);
 	ClassDB::bind_method(D_METHOD("get_render_culled_changes"),
 	                     &Simulation::get_render_culled_changes);
+	ClassDB::bind_method(D_METHOD("get_wire_render_culled_changes"),
+	                     &Simulation::get_wire_render_culled_changes);
 	ClassDB::bind_method(D_METHOD("get_draw_lighting_changes", "light_dir"),
 	                     &Simulation::get_draw_lighting_changes);
 	ClassDB::bind_method(D_METHOD("get_local_player_sun_quality"),
