@@ -137,6 +137,12 @@ public:
 	// authored_occluder_models + per-stage "spans" usec timings).
 	// "batched" and "animated" are the honest individual/batched split:
 	// a multi-RLOD graphic never leaves the batched count on its own.
+	// Place from entity dictionaries in MissionData.get_all_entities() shape
+	// (kind, index, bms_id, item_id, position, rotation_deg, team, group,
+	// ai_flags): the joiner's streamed statics take this entry with the
+	// records the sim stamped at the world-stream fence.
+	Dictionary place_entities(const Array &p_entities, Node3D *p_parent,
+			const Dictionary &p_options = Dictionary());
 	Dictionary place(const Ref<MissionData> &p_mission, Node3D *p_parent,
 			const Dictionary &p_options = Dictionary());
 

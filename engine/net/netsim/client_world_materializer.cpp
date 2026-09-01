@@ -4,6 +4,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cmath>
 #include <unordered_map>
 
@@ -101,6 +102,90 @@ bool update_live_row_state(
 }
 
 } // namespace
+
+// The retail client renders the pools it built from the 0x10/0x0D/0x20 load
+// batches through the same sector collectors the host uses [orig:
+// collect_visible_entities_for_terrain @0x5c8c60; Terrain_RenderSectorModels
+// @0x5c5d30] — there is no per-role render path. The placed identity stamped
+// here is the shell's key into its one placed/batched presenter, so a joiner's
+// statics draw exactly as the host's do. Kind follows the streamed Flags
+// dword's Building bit (retail's itemDef-type test [orig: Entity_InitFromModel
+// @0x40e105]), pool 3 rows are markers; the order (pool 2, pool 1, pool 3,
+// slot ascending) is the witnessed initial-state order.
+int ClientWorldMaterializer::assign_placement_origins(world::World &world) {
+	std::vector<uint16_t> handles;
+	handles.reserve(materialized_rows_.size());
+	for (const auto &row : materialized_rows_) handles.push_back(row.first);
+	const auto pool_rank = [](uint16_t packed) {
+		switch (world::EntityHandle{packed}.pool()) {
+		case 2: return 0;
+		case 1: return 1;
+		default: return 2;
+		}
+	};
+	std::sort(handles.begin(), handles.end(), [&](uint16_t a, uint16_t b) {
+		const int ra = pool_rank(a);
+		const int rb = pool_rank(b);
+		if (ra != rb) return ra < rb;
+		return world::EntityHandle{a}.slot() < world::EntityHandle{b}.slot();
+	});
+	int stamped = 0;
+	for (const uint16_t packed : handles) {
+		const world::EntityHandle handle{packed};
+		if (handle.pool() < 1 || handle.pool() > 3) continue;
+		world::Entity *entity = owned(world, handle);
+		if (entity == nullptr || entity->spawn_origin != world::kSpawnOriginNone)
+			continue;
+		world::EntityKind kind = world::EntityKind::Item;
+		if (handle.pool() == 3)
+			kind = world::EntityKind::Marker;
+		else if ((entity->engine_flags & world::kEntityFlagBuilding) != 0)
+			kind = world::EntityKind::Building;
+		int &next = placement_index_next_[static_cast<int>(kind)];
+		entity->spawn_origin = world::spawn_origin_pack(
+				static_cast<uint32_t>(kind), static_cast<uint32_t>(next));
+		++next;
+		// Nonzero and unique per packed handle; a joiner has no file ids to
+		// collide with (its pool-0 organics and runtime spawns keep 0).
+		entity->bms_id = static_cast<int32_t>(packed) + 1;
+		++stamped;
+	}
+	return stamped;
+}
+
+std::vector<StreamedPlacementRecord> ClientWorldMaterializer::placement_records(
+		const world::World &world) const {
+	std::vector<StreamedPlacementRecord> out;
+	out.reserve(materialized_rows_.size());
+	for (const auto &row : materialized_rows_) {
+		const world::EntityHandle handle{row.first};
+		const world::Entity *entity = owned(world, handle);
+		if (entity == nullptr || entity->spawn_origin == world::kSpawnOriginNone)
+			continue;
+		StreamedPlacementRecord rec;
+		rec.kind = world::spawn_origin_kind(entity->spawn_origin);
+		rec.index = world::spawn_origin_index(entity->spawn_origin);
+		rec.bms_id = entity->bms_id;
+		rec.item_id = entity->item_id;
+		rec.x = entity->position.x;
+		rec.y = entity->position.y;
+		rec.z = entity->position.z;
+		rec.pitch = entity->pitch;
+		rec.yaw = entity->yaw;
+		rec.roll = entity->roll;
+		rec.team = entity->team;
+		rec.group = entity->group_id;
+		rec.bms_attributes =
+				world::bms_attributes_from_entity_flags(entity->engine_flags);
+		out.push_back(rec);
+	}
+	std::sort(out.begin(), out.end(),
+			[](const StreamedPlacementRecord &a, const StreamedPlacementRecord &b) {
+				if (a.kind != b.kind) return a.kind < b.kind;
+				return a.index < b.index;
+			});
+	return out;
+}
 
 world::Entity *ClientWorldMaterializer::owned(
 		world::World &world, world::EntityHandle handle) const {

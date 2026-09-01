@@ -1140,10 +1140,40 @@ func settle_join_wire_assets() -> bool:
 				Simulation.JOIN_TERRAIN_TIL_COMPLETE]:
 		_join_wire_assets_failed = true
 		return false
+	_place_streamed_mission_objects(sim)
 	_prewarm_loaded_model_challenge_definitions()
 	sim.finalize_loaded_model_challenge_snapshot()
 	_join_wire_assets_pending = false
 	return true
+
+
+## A header-only joiner owns no authored body records, so its pools 1-3 arrive
+## as the host's S2C 0x10/0x0D/0x20 world stream and are materialized into the
+## native World at their exact wire handles. Once that stream's static pools
+## are complete the sim stamps each row with a placed identity; this places
+## them through the SAME MissionObjectPlacer path single player and the host
+## use (batched static populations, terrain static shadows, occlusion keying,
+## the per-entity sun query) and re-keys the presenters' index so the wire
+## pass stops drawing them as individual animated nodes. Retail's client draws
+## its streamed pools through the same sector renderer as the host; there is
+## no per-role render path.
+func _place_streamed_mission_objects(sim: Simulation) -> void:
+	if _placer == null or sim == null:
+		return
+	var records: Array = sim.get_streamed_placement_records()
+	if records.is_empty():
+		return
+	var options := {"skip_kinds": [MissionData.KIND_ORGANIC]}
+	_mission_stats = _placer.place_entities(records, self, options)
+	if _runtime != null:
+		_runtime.rebind_placed_entities(_placer)
+	print_verbose("GameWorld: placed %d streamed mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
+		int(_mission_stats.placed),
+		int(_mission_stats.batched),
+		int(_mission_stats.animated),
+		int(_mission_stats.unresolved),
+		int(_mission_stats.markers),
+	])
 
 
 ## The revealed world must never race the budgeted cold wire materialization:

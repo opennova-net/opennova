@@ -103,6 +103,9 @@ void MissionObjectPlacer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("place", "mission", "parent", "options"),
 			&MissionObjectPlacer::place, DEFVAL(Dictionary()));
 	ClassDB::bind_method(
+			D_METHOD("place_entities", "entities", "parent", "options"),
+			&MissionObjectPlacer::place_entities, DEFVAL(Dictionary()));
+	ClassDB::bind_method(
 			D_METHOD("update_static_lods", "camera_transform",
 					"vertical_fov_degrees", "viewport_width", "viewport_height"),
 			&MissionObjectPlacer::update_static_lods);
@@ -374,6 +377,14 @@ bool MissionObjectPlacer::_placement_is_mirror_reflected(
 
 Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		Node3D *p_parent, const Dictionary &p_options) {
+	if (p_mission.is_null()) {
+		return place_entities(Array(), nullptr, p_options);
+	}
+	return place_entities(p_mission->get_all_entities(), p_parent, p_options);
+}
+
+Dictionary MissionObjectPlacer::place_entities(const Array &p_entities,
+		Node3D *p_parent, const Dictionary &p_options) {
 	_check_epoch();
 	Dictionary stats;
 	stats["placed"] = 0;
@@ -408,7 +419,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	static_terrain_shadow_rows_by_bms_.clear();
 	_bump_static_terrain_shadow_source_revision();
 	placed_entity_records_ = Array();
-	if (p_mission.is_null() || p_parent == nullptr || resource_root_.is_null()) {
+	if (p_parent == nullptr || resource_root_.is_null()) {
 		return stats;
 	}
 	_ensure_item_db();
@@ -475,7 +486,7 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	Array animated;
 	int markers = 0;
 	int unresolved = 0;
-	const Array entities = p_mission->get_all_entities();
+	const Array &entities = p_entities;
 	for (int i = 0; i < entities.size(); ++i) {
 		const Dictionary entity = entities[i];
 		const int kind = int(entity.get("kind", -1));

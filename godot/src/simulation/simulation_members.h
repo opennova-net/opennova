@@ -258,6 +258,11 @@ private:
 	opennova::np::JoinerWorldBridge joiner_bridge_;
 	// The shell-asset leg of the bridge's materialize phase: rebuild the
 	// collision/occlusion/trait/seat caches for the changed streamed rows.
+	// The joiner's streamed pool-1..3 rows with a placed identity, as the
+	// entity dictionaries MissionObjectPlacer.place_entities consumes (kind,
+	// index, bms_id, item_id, position, rotation_deg, team, group, ai_flags).
+	// Empty on a host or before the world stream's static pools completed.
+	Array get_streamed_placement_records() const;
 	void on_replica_world_changed(
 			const opennova::netsim::ClientWorldSyncResult &p_sync);
 	// The env-gated ~1 Hz tripwire print (the bridge owns the sampled state).

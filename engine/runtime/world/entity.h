@@ -229,6 +229,22 @@ inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;   // type-6 volume t
 inline constexpr uint32_t kEntityFlagIndoors = 0x800000;      // [orig: accum bit 2 -> Flags @0x4b39xx; render gates §4]
 inline constexpr uint32_t kEntityFlagNoShadow = 0x1000000;    // BMS NoShadow(1<<24) [orig: @0x40e9f0]
 inline constexpr uint32_t kEntityFlagIndestructible = 0x4000000; // BMS Indestructible(1<<21) or hp==0
+
+// The BMS-attribute part of a streamed Flags dword, mapped back onto the
+// record attribute bits the placement traits read (Reflective 1<<23,
+// NoShadow 1<<24, Indestructible 1<<21): the exact inverse of the spawn
+// mapping [orig: Entity_SpawnFromBMSRecord @0x40e9f0, the three attrib tests
+// @0x40ed14 / @0x40ed29 / @0x40ed36: 0x200000 -> 0x4000000, 0x800000 ->
+// 0x400, 0x1000000 -> 0x1000000]. A joiner's 0x10
+// static record streams the dword raw, so this is how its placed statics
+// recover the mirror/shadow attributes the host reads off the file.
+constexpr uint32_t bms_attributes_from_entity_flags(uint32_t flags) {
+    uint32_t attrib = 0;
+    if (flags & kEntityFlagReflective) attrib |= 0x00800000u;
+    if (flags & kEntityFlagNoShadow) attrib |= 0x01000000u;
+    if (flags & kEntityFlagIndestructible) attrib |= 0x00200000u;
+    return attrib;
+}
                                                                  // [orig: @0x40e9f0; @0x40dc8e]
 
 struct Entity {
