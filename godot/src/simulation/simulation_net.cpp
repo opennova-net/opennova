@@ -10,6 +10,7 @@
 #include <net/npruntime/server_spawn.h> // Server_SetPlayerSpectator
 #include <net/npruntime/session_status.h>
 #include <runtime/terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
+#include <runtime/mission/placement_traits.h> // visual_item_id_for_runtime_type
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 #include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <net/npwire/ingame_message_id.h>
@@ -392,7 +393,10 @@ Array Simulation::get_streamed_placement_records() const {
 		d["kind"] = rec.kind;
 		d["index"] = rec.index;
 		d["bms_id"] = rec.bms_id;
-		d["item_id"] = rec.item_id;
+		// The placer resolves graphics by items.def id: the wire type plus the
+		// catalog offset (pools 1..3 never carry the runtime player type).
+		d["item_id"] = opennova::mission::visual_item_id_for_runtime_type(
+				rec.item_id, false);
 		d["position"] = Vector3(rec.x, rec.y, rec.z);
 		d["rotation_deg"] = Vector3(static_cast<float>(rec.pitch),
 				static_cast<float>(rec.yaw), static_cast<float>(rec.roll));

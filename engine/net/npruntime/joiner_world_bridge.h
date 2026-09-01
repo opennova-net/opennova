@@ -108,6 +108,7 @@ struct JoinerPumpPerf {
 	uint64_t attach_us = 0;      // remote attachment recompose + local re-pose
 	uint64_t player_us = 0;      // weather/heading/view/weapon device pumps
 	world::LogicTickPerf world;  // the tick's own phase breakdown (summed)
+	ClientFramePerf client;      // the wire leg's own phases (summed)
 };
 
 class JoinerWorldBridge {

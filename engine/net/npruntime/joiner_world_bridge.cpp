@@ -369,12 +369,14 @@ JoinerWorldBridge::FrameSignals JoinerWorldBridge::run_client_net_frame(
 			ctx.runtime.is_deployed() && e != nullptr && ae != nullptr &&
 			e->alive && e->health > 0 && (e->flags & 2u) == 0u &&
 			!redeploy_release_pending_;
+	ClientFramePerf *client_perf =
+			ctx.perf != nullptr ? &ctx.perf->client : nullptr;
 	if (can_offer_uplink) {
 		const PlayerExtendedUplink up =
 				netsim::build_player_uplink(ctx.world, *e, *ae);
-		outs = ctx.runtime.Client_ProcessNetworkFrame(up, now);
+		outs = ctx.runtime.Client_ProcessNetworkFrame(up, now, client_perf);
 	} else {
-		outs = ctx.runtime.Client_ProcessNetworkFrame(now);
+		outs = ctx.runtime.Client_ProcessNetworkFrame(now, client_perf);
 	}
 	for (const std::vector<uint8_t> &dg : outs) hooks.send(dg);
 	if (hooks.on_wire_leg_complete) hooks.on_wire_leg_complete();

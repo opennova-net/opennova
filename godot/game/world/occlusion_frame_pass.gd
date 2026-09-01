@@ -390,6 +390,16 @@ func release_overrides(_reset_semantics: bool) -> void:
 	_reset_apply_baseline()
 
 
+## Placed nodes arrived after the occlusion frames started (a joiner's
+## streamed statics, placed once the host's world stream settles): forget the
+## node lookups that missed and the sim's applied-state baseline, so the next
+## frame re-emits every building/cull/sun verdict onto the new nodes instead
+## of only the transitions since the mission began.
+func rebind_placed_nodes() -> void:
+	_occlusion_node_cache.clear()
+	_reset_apply_baseline()
+
+
 # The cache holds only ObjectModels; entries revalidate for LIVENESS on use.
 func _occlusion_hidden_release_node(bms_id: int) -> ObjectModel:
 	var cached: Variant = _occlusion_node_cache.get(bms_id)

@@ -1175,6 +1175,8 @@ func _place_streamed_mission_objects(sim: Simulation) -> void:
 	_mission_stats = _placer.place_entities(records, self, options)
 	if _runtime != null:
 		_runtime.rebind_placed_entities(_placer)
+	if _occlusion != null:
+		_occlusion.rebind_placed_nodes()
 	print_verbose("GameWorld: placed %d streamed mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.placed),
 		int(_mission_stats.batched),
