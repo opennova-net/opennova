@@ -578,12 +578,20 @@ bool EntityCommands::set_ssn_accuracy(uint16_t ssn, int32_t primary,
 bool EntityCommands::set_ssn_guard(uint16_t ssn, bool guard) {
     Entity *entity = world_.registry.get(resolve_ssn(ssn));
     if (entity == nullptr) return false;
-    // [orig: WacCmd_SsnGuard @0x4F71C0]
-    if (guard) entity->flags |= kEntityFlagMounted;
-    else entity->flags &= ~kEntityFlagMounted;
-
+    // [orig: WacCmd_SsnGuard @0x4F71C0] Retail writes the one Flags dword;
+    // 0x40 is legacy-mirrored, so both views stay coherent here (the
+    // vehicle_attach precedent — engine_flags is what the 0x10 static record
+    // streams).
+    if (guard) {
+        entity->flags |= kEntityFlagMounted;
+        entity->engine_flags |= kEntityFlagMounted;
+    } else {
+        entity->flags &= ~kEntityFlagMounted;
+        entity->engine_flags &= ~kEntityFlagMounted;
+    }
     return true;
 }
+
 namespace {
 
 // The per-entity leg of a waypoint REDIRECT [orig: Entity_SetWaypointByTeam @0x43cdb4]:
@@ -1113,11 +1121,18 @@ void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
     entity.yaw = marker.yaw;
     entity.pitch = marker.pitch;
     entity.roll = marker.roll;
-    if (single_action || entity.handle.pool() != 0)
-        entity.flags &= ~0x20000u;
+    // Retail clears/copies bits of the one Flags dword; our split homes them —
+    // Building lives on engine_flags, the chute bit is legacy-mirrored, so
+    // both views are kept coherent on the write and merged on the read.
+    if (single_action || entity.handle.pool() != 0) {
+        entity.flags &= ~kEntityFlagBuilding;
+        entity.engine_flags &= ~kEntityFlagBuilding;
+    }
     if (single_action && entity.handle.pool() == 0 &&
-        (marker.flags & 0x20u) != 0)
-        entity.flags |= 0x20u;
+        ((marker.flags | marker.engine_flags) & kEntityFlagParachute) != 0) {
+        entity.flags |= kEntityFlagParachute;
+        entity.engine_flags |= kEntityFlagParachute;
+    }
     if (entity.handle.pool() == 0)
         entity_reset_to_spawn_state(entity);
     sync_teleported_ai(world, entity);
@@ -1591,7 +1606,11 @@ void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
                                  int32_t p2, int32_t p3) {
     switch (sub_type) {
         case 2:
-            set_mask(entity.flags, kEntityFlagMounted, p2 != 0); break;
+            // 0x40 is legacy-mirrored: both views stay coherent (the
+            // vehicle_attach precedent).
+            set_mask(entity.flags, kEntityFlagMounted, p2 != 0);
+            set_mask(entity.engine_flags, kEntityFlagMounted, p2 != 0);
+            break;
         case 5: ae.slot.bytes()[AiSlot::kAlertByte] = 2; break;
         case 6: ae.slot.bytes()[AiSlot::kAlertByte] = 0; break;
         case 8:
@@ -1624,7 +1643,9 @@ void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
                     static_cast<int32_t>(static_cast<uint32_t>(p3) << 16);
             break;
         case 43:
-            set_mask(entity.flags, kEntityFlagIndestructible, p2 != 0);
+            // Every 0x4000000 consumer (destruction, collision_resolve,
+            // round_sim) reads engine_flags — the retail Flags dword home.
+            set_mask(entity.engine_flags, kEntityFlagIndestructible, p2 != 0);
             break;
         default: break;
     }
