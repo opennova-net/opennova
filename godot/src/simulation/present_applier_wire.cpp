@@ -263,8 +263,8 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 	const float *p = snap.ptr();
 	const int base = row.base;
 	// A row the occlusion frame's collector gate culled is not drawn: no
-	// presentation leg runs for it [orig: the sector walk only visits collected
-	// entities, collect_visible_entities_for_terrain @ 0x5c8c60]. Its body
+	// presentation leg runs for it (the sector walk only visits collected
+	// entities; OcclusionWorld::sphere_render_visible carries the witness). Its body
 	// sounds still walk the wire playhead (retail triggers them from the entity
 	// update, not the draw), and the respawn revision stays unconsumed so the
 	// reset lands on the first drawn frame. The compare-gated legs re-assert

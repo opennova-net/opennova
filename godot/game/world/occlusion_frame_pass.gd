@@ -233,7 +233,7 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 	# The same collector gate over the rows WirePresentPass draws (remote
 	# organics and runtime spawns with no placed identity), keyed by wire
 	# handle: retail's client walks its wire-built pools exactly like the host
-	# walks its own [orig: collect_visible_entities_for_terrain @ 0x5c8c60].
+	# walks its own (the native gate carries the witness).
 	var wire_culled_changes: PackedInt32Array = sim.get_wire_render_culled_changes()
 	if wire_culled_changes.size() >= 2:
 		var wire_present_for_cull := runtime.get_wire_presenter()

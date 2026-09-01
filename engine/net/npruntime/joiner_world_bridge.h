@@ -334,6 +334,11 @@ private:
 	// valid handle; runtime.has_self_handle() carries validity independently.
 	uint16_t self_wire_handle_ = 0;
 	uint32_t now_tick_ = 0;
+	// The staged replica-peer table's identity (source pointer, count, pump
+	// tick): the resolver lambda re-copies it only when one of them changes.
+	const void *replica_peer_scratch_src_ = nullptr;
+	int32_t replica_peer_scratch_count_ = 0;
+	uint32_t replica_peer_scratch_tick_ = 0;
 	// The last S2C 0x0A phase-2 ENV revision folded into the weather home.
 	uint32_t weather_revision_seen_ = 0;
 

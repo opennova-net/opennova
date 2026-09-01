@@ -257,21 +257,29 @@ void JoinerWorldBridge::wire_frame_providers(
 					CollisionWorld::ResolveState &st =
 							replica_resolve_states_[q.row_handle];
 					// Bridge-member scratch: this resolver runs per armed
-					// replica row per 62.5 Hz pump — a fresh heap vector per
-					// call was pure allocator churn for a field-order copy
-					// between the two mirrored peer PODs.
+					// replica row per 62.5 Hz pump, and every row of one pump
+					// shares the same staged peer table (q.tick is the pump
+					// key), so the field-order copy between the two mirrored
+					// peer PODs happens once per tick, not once per row.
 					std::vector<CollisionWorld::ReplicaPeer> &peers =
 							replica_peer_scratch_;
-					peers.clear();
-					peers.reserve(static_cast<size_t>(q.peer_count));
-					for (int32_t i = 0; i < q.peer_count; ++i) {
-						CollisionWorld::ReplicaPeer p;
-						p.handle = q.peers[i].handle;
-						p.x = q.peers[i].x;
-						p.y = q.peers[i].y;
-						p.z = q.peers[i].z;
-						p.radius = q.peers[i].radius;
-						peers.push_back(p);
+					if (replica_peer_scratch_src_ != q.peers ||
+							replica_peer_scratch_count_ != q.peer_count ||
+							replica_peer_scratch_tick_ != q.tick) {
+						peers.clear();
+						peers.reserve(static_cast<size_t>(q.peer_count));
+						for (int32_t i = 0; i < q.peer_count; ++i) {
+							CollisionWorld::ReplicaPeer p;
+							p.handle = q.peers[i].handle;
+							p.x = q.peers[i].x;
+							p.y = q.peers[i].y;
+							p.z = q.peers[i].z;
+							p.radius = q.peers[i].radius;
+							peers.push_back(p);
+						}
+						replica_peer_scratch_src_ = q.peers;
+						replica_peer_scratch_count_ = q.peer_count;
+						replica_peer_scratch_tick_ = q.tick;
 					}
 					world::EntityHandle ground;
 					const int32_t clearance = col->resolve_replica(
