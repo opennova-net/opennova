@@ -104,7 +104,7 @@ void PhysicsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	ImGui::Text("recent hits %d (inside the flash window)", snapshot_.recent);
 
 	if (ImGui::SmallButton("All")) {
-		mask_edit_ = 0x3F;
+		mask_edit_ = kContactKindMaskAll;
 		enqueue_request({PhysicsRequest::Kind::SetKindMask,
 				static_cast<int32_t>(mask_edit_)});
 	}

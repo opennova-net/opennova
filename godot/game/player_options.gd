@@ -25,8 +25,10 @@ const DEFAULT_VOLUME := 255
 const MIN_MOUSE_SENSITIVITY := 4
 const MAX_MOUSE_SENSITIVITY := 511
 const DEFAULT_MOUSE_SENSITIVITY := 128
-const MIN_CROSSHAIR_STYLE := 0
-const MAX_CROSSHAIR_STYLE := 24
+# One home for the crosshair art range: the native HudOverlay binding
+# (game_hud_presenter clamps with the same constants).
+const MIN_CROSSHAIR_STYLE := HudOverlay.MIN_CROSSHAIR_STYLE
+const MAX_CROSSHAIR_STYLE := HudOverlay.MAX_CROSSHAIR_STYLE
 const DEFAULT_CROSSHAIR_STYLE := 0
 
 const SOUND_FX_BUSES := [&"SFX", &"Ambient"]

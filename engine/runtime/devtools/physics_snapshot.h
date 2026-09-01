@@ -14,6 +14,8 @@ namespace opennova::devtools {
 // static_asserts the two stay equal). The embedder fills `name` from
 // contact_debug_kind_name (static storage).
 inline constexpr int kContactKindCount = 6;
+inline constexpr uint32_t kContactKindMaskAll =
+		(1u << kContactKindCount) - 1;
 
 struct PhysicsKindCount {
 	const char *name = "";
@@ -26,7 +28,7 @@ struct PhysicsSnapshot {
 	uint64_t logic_tick = 0;
 	bool capturing = false;   // CollisionWorld contact capture armed
 	bool view_shown = false;  // the shell's collision view is built (show_collision)
-	uint32_t kind_mask = 0x3F; // bit i = draw kind i
+	uint32_t kind_mask = kContactKindMaskAll; // bit i = draw kind i
 	int32_t boxes_drawn = 0;   // the shell overlay's live drawable count
 	int32_t recent = 0;        // ring events inside the flash TTL
 	PhysicsKindCount kinds[kContactKindCount];

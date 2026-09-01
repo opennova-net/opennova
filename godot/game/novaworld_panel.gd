@@ -455,7 +455,7 @@ func _on_column_title_clicked(column: int, _mouse_button_index: int) -> void:
 func _on_refresh_pressed() -> void:
 	if _client == null:
 		return
-	_set_status("Refreshing the server list...")
+	_set_status("Refreshing the browser...")
 	_client.refresh_servers()
 
 

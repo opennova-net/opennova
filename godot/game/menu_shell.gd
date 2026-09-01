@@ -192,8 +192,13 @@ func _process(delta: float) -> void:
 ## MainGame installs its process-lifetime owner before setup; standalone shells
 ## receive a private owner during asset assembly.
 func set_player_options(options: PlayerOptions) -> void:
-	if options != null and _driver == null:
-		_player_options = options
+	if options == null:
+		return
+	if _driver != null:
+		push_warning("set_player_options after setup is ignored; the shell " +
+				"already assembled around its owner")
+		return
+	_player_options = options
 
 
 func set_frame_stats(board: FrameStats) -> void:

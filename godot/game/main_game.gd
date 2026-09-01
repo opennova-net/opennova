@@ -812,9 +812,12 @@ func _on_join_deploy_pick_required() -> void:
 # latched until the next mission start; the open is suppressed while any other
 # screen is up. Closing is the presenter's own affair (both triggers gone, or
 # the player's dismiss) — the latch only stops a re-open, exactly why a wave
-# host keeping the bit set all session shows the screen once. The frame-loop
-# open/latch witnesses live in hud-re D-HUD-19 and on
-# ClientState.deploy_overlay_active (engine/net/netsim/client_state.h).
+# host keeping the bit set all session shows the screen once. NOT yet modeled
+# (hud-re D-HUD-19 residuals): retail's SECOND open trigger — the local
+# entity's undeployed bit — and the spawn-success suppression gate; this leg
+# opens off the host-driven flag alone. The frame-loop open/latch witnesses
+# live in hud-re D-HUD-19 and on ClientState.deploy_overlay_active
+# (engine/net/netsim/client_state.h).
 func _maybe_open_deploy_overlay() -> void:
 	if _deploy_overlay_latched or _state != State.WORLD or _world_load_pending:
 		return
