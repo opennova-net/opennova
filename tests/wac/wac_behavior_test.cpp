@@ -525,7 +525,8 @@ static void test_wac_accuracy_guard_speed_and_group_remove() {
     CHECK(single_ai.slot.f[AiSlot::kAimErrorPrimary] == 20);
     CHECK(group_ai.slot.f[AiSlot::kAimErrorSecondary] == 40);
     CHECK(group_ai.slot.f[AiSlot::kAimErrorPrimary] == 50);
-    CHECK((w.registry.get(single_h)->flags & 0x40u) != 0);
+    CHECK((w.registry.get(single_h)->flags & kEntityFlagMounted) != 0);
+    CHECK((w.registry.get(single_h)->engine_flags & kEntityFlagMounted) != 0);
     CHECK(!w.commands.ssn_exists(44));
     CHECK(single_ai.brain.f[AiBrain::kSpeedA] == 0);
     CHECK(single_ai.brain.f[AiBrain::kSpeedB] == 0);

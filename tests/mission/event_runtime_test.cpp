@@ -1482,7 +1482,9 @@ static void test_change_ai_command_family() {
     };
 
     dispatch(2, 1);
-    CHECK((w.registry.get(handle)->flags & 0x40u) != 0);
+    CHECK((w.registry.get(handle)->flags & world::kEntityFlagMounted) != 0);
+    CHECK((w.registry.get(handle)->engine_flags &
+           world::kEntityFlagMounted) != 0);
     dispatch(8, 70);
     CHECK(ae.slot.f[world::AiSlot::kAimErrorPrimary] == 30);
     dispatch(15, 1);
@@ -1506,7 +1508,9 @@ static void test_change_ai_command_family() {
     CHECK(ae.slot.f[world::AiSlot::kEngageMin] == (3 << 16));
     CHECK(ae.slot.f[world::AiSlot::kSightRange] == (9 << 16));
     dispatch(43, 1);
-    CHECK((w.registry.get(handle)->flags &
+    // The Indestructible consumers (destruction, collision_resolve, round_sim)
+    // read engine_flags — the retail Flags dword home.
+    CHECK((w.registry.get(handle)->engine_flags &
            world::kEntityFlagIndestructible) != 0);
     dispatch(32);
     CHECK(ae.brain.f[world::AiBrain::kUseWaypointZones] == 1);
@@ -1559,7 +1563,9 @@ static void test_structural_bms_actions() {
     marker.yaw = 45;
     marker.pitch = 5;
     marker.roll = -3;
-    marker.flags = 0x20u;
+    // The BMS spawn stamps the chute bit on engine_flags; the teleport read
+    // merges both views.
+    marker.engine_flags = world::kEntityFlagParachute;
     w.registry.spawn_from(3, 0, marker);
 
     auto member = [](uint16_t ssn) {
@@ -1570,7 +1576,8 @@ static void test_structural_bms_actions() {
         entity.group_id = 2;
         entity.team = 1;
         entity.alive = true;
-        entity.flags = 0x20000u;
+        entity.flags = world::kEntityFlagBuilding;
+        entity.engine_flags = world::kEntityFlagBuilding;
         entity.position = {-1.0f, -2.0f, -3.0f};
         return entity;
     };
@@ -1640,9 +1647,13 @@ static void test_structural_bms_actions() {
         CHECK(entity->roll == -3);
     }
     CHECK(w.registry.get(pool0_h)->spawn_position.x == 10.0f);
-    CHECK((w.registry.get(pool0_h)->flags & 0x20000u) != 0);
-    CHECK((w.registry.get(pool1_h)->flags & 0x20000u) == 0);
-    CHECK((w.registry.get(pool2_h)->flags & 0x20000u) == 0);
+    CHECK((w.registry.get(pool0_h)->engine_flags &
+           world::kEntityFlagBuilding) != 0);
+    CHECK((w.registry.get(pool1_h)->engine_flags &
+           world::kEntityFlagBuilding) == 0);
+    CHECK((w.registry.get(pool1_h)->flags & world::kEntityFlagBuilding) == 0);
+    CHECK((w.registry.get(pool2_h)->engine_flags &
+           world::kEntityFlagBuilding) == 0);
     CHECK(pool1_ai.pos[0] == (10 << 16));
     CHECK(pool1_ai.pos[1] == (20 << 16));
     CHECK(pool1_ai.pos[2] == (30 << 16));
@@ -1655,12 +1666,17 @@ static void test_structural_bms_actions() {
     CHECK(w.registry.get(pool0_h)->group_id == 7);
 
     w.registry.get(pool0_h)->position = {};
-    w.registry.get(pool0_h)->flags |= 0x20000u;
+    w.registry.get(pool0_h)->flags |= world::kEntityFlagBuilding;
+    w.registry.get(pool0_h)->engine_flags |= world::kEntityFlagBuilding;
     dispatch(bms::ActionType::SingleTeleportAction, 100, 9);
     CHECK(w.registry.get(pool0_h)->position.x == 10.0f);
     CHECK(w.registry.get(pool0_h)->spawn_position.z == 30.0f);
-    CHECK((w.registry.get(pool0_h)->flags & 0x20000u) == 0);
-    CHECK((w.registry.get(pool0_h)->flags & 0x20u) != 0);
+    CHECK((w.registry.get(pool0_h)->engine_flags &
+           world::kEntityFlagBuilding) == 0);
+    CHECK((w.registry.get(pool0_h)->flags & world::kEntityFlagBuilding) == 0);
+    CHECK((w.registry.get(pool0_h)->flags & world::kEntityFlagParachute) != 0);
+    CHECK((w.registry.get(pool0_h)->engine_flags &
+           world::kEntityFlagParachute) != 0);
 
     dispatch(bms::ActionType::VaporizeGroup, 4);
     CHECK(w.registry.get(pool1_h) == nullptr);
