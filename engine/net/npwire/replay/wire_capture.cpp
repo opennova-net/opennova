@@ -58,8 +58,9 @@ struct DirState {
 //
 // The protocol packet header's session_id is readable WITHOUT the key (it sits
 // ahead of the SCRK-encrypted inner region) and carries the PEER's local key
-// [protocol_message.h: "the peer local_key stamped into the outbound header";
-// stamped at session/protocol_message.cpp: hdr.session_id = crypto.session_id]:
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 — bytes 0..3 compared to
+// conn->session_keys.local_key; the outbound stamp is modeled at
+// session/protocol_message.cpp hdr.session_id = crypto.session_id]:
 //   S2C header session_id == that client's ClientAuth.ck
 //   C2S header session_id == that connection's ServerAuth.sk
 // Verified on the Kutu capture: all 28 distinct S2C session_ids seen on the

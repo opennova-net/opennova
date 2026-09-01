@@ -3896,6 +3896,59 @@ int main() {
         CHECK(e->inf.vel[1] == 0);
     }
 
+    // ---- airborne STEER, before the decay [orig: @0x4b78b7..0x4b790f]: while
+    //      the moving bit is held, the slide pair takes -ftol(cos/sin(angle)
+    //      * -64.0f), angle = (heading high word) * dbl_7C9BC0 + dir *
+    //      dbl_7C9BB0, THEN the (63*v)>>6 decay runs over the steered value.
+    {
+        Field low([](int) { return static_cast<uint16_t>(0); });
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1);
+        World w;
+        AiSystem ai;
+        ai.terrain = &low.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->pos[0] = fx(100); e->pos[1] = fx(100);
+        e->pos[2] = fx(200); // far above the field: stays airborne
+        e->inf.airborne = true;
+        e->inf.player_moving = true;
+        e->inf.player_move_dir_index = 0;
+        e->heading = 0; // high word 0 -> angle 0 -> (cos,sin) = (1,0)
+        e->inf.vel[0] = 0;
+        e->inf.vel[1] = 0;
+
+        run_ticks(ai, w, 1, 2);
+        // Steer first: v = 0 - ftol(1.0f * -64.0f) = 64; decay then yields
+        // (63*64)>>6 = 63. Decay-before-steer would leave 64.
+        CHECK(e->inf.vel[0] == 63);
+        CHECK(e->inf.vel[1] == 0); // sin(0) truncates to zero
+
+        // The heading term is the SIGNED HIGH WORD of the look heading
+        // [orig: movsx word entity+0x12 @0x4b78c5]: 0x4000 lands the push on
+        // the sin axis (angle ~ pi/2 -> cos truncates to 0). The local-player
+        // look yaw is mouse-instant off target_heading, so drive that.
+        e->inf.airborne = true;
+        e->inf.target_heading = 0x40000000;
+        e->inf.vel[0] = 0;
+        e->inf.vel[1] = 0;
+        run_ticks(ai, w, 2, 3);
+        CHECK(e->inf.vel[0] == 0);
+        CHECK(e->inf.vel[1] == 63);
+
+        // Without the moving bit only the momentum decay runs.
+        e->inf.airborne = true;
+        e->inf.player_moving = false;
+        e->inf.vel[0] = 6400;
+        e->inf.vel[1] = 0;
+        run_ticks(ai, w, 3, 4);
+        CHECK(e->inf.vel[0] == (63 * 6400) >> 6); // 6300 — no steer, no deadzone
+    }
+
     // ---- stance: crouch/prone select the stance gait + idle clips (player). The
     //      selection runs every 4th tick, so each stance flip advances a full 4-tick
     //      window. [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 — moving base
