@@ -93,8 +93,8 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// The decoded rows the wire pass draws — remote organics and runtime
 	// spawns with no placed identity — pass the SAME collector gate: retail's
 	// client walks the pool entities it built from the wire exactly as the
-	// host walks its own [orig: collect_visible_entities_for_terrain
-	// @ 0x5c8c60 pools 0/1]. A row with a registry twin uses that twin's
+	// host walks its own (the witness lives on OcclusionWorld::
+	// sphere_render_visible). A row with a registry twin uses that twin's
 	// collision bound sphere (the host's runtime spawns); a bare row is the
 	// position-centred unit sphere the organics leg above falls back to.
 	occlusion_culled_wire_.clear();
@@ -109,7 +109,8 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 					es.type_id == 0 || handle == self_handle)
 				continue;
 			// A hidden row is never collected; the present pass hides it
-			// itself, and its latch does not tick [orig: @ 0x5c6fec].
+			// itself, and its latch does not tick (the gate's bit0 test in
+			// OcclusionWorld::entity_render_visible).
 			if (es.state_flags_known && (es.state_flags & 0x01u) != 0) continue;
 			const opennova::world::EntityHandle h{handle};
 			const opennova::world::Entity *twin = nullptr;

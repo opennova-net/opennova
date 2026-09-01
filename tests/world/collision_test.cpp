@@ -1980,6 +1980,89 @@ void test_ladder_class_bit_climber_remote_and_local() {
 }
 
 // ---------------------------------------------------------------------------
+// The replica peer cell index is pure acceleration: over a random peer cloud
+// (with dense clusters that trip the exactness guard) every resolve lands on
+// the same pose, velocity, clearance and ground as the full table walk.
+void test_replica_peer_index_matches_full_walk() {
+    Rig rig(box_model(1, 0, 3.0, 3.0, 1.0));
+    uint32_t seed = 0x2F6E1D3Bu;
+    const auto rnd = [&]() {
+        seed = seed * 1664525u + 1013904223u;
+        return seed >> 8;
+    };
+    const auto rnd_units = [&](double lo, double hi) {
+        return fx(lo + (hi - lo) * static_cast<double>(rnd() % 10000) / 10000.0);
+    };
+    std::vector<CollisionWorld::ReplicaPeer> peers;
+    for (int i = 0; i < 400; ++i) {
+        CollisionWorld::ReplicaPeer p;
+        p.handle = static_cast<uint16_t>(0x0100 + i);
+        // Three dense clusters plus a sparse field: clusters put many peers
+        // inside one another's 30% threshold so the walk moves rows.
+        if (i < 150) {
+            const int cluster = i % 3;
+            p.x = fx(30.0 + 12.0 * cluster) + rnd_units(-0.6, 0.6);
+            p.y = fx(30.0 + 6.0 * cluster) + rnd_units(-0.6, 0.6);
+        } else {
+            p.x = rnd_units(20.0, 80.0);
+            p.y = rnd_units(20.0, 80.0);
+        }
+        p.z = fx(1.0) + rnd_units(-0.2, 0.2);
+        p.radius = rnd_units(0.6, 1.4);
+        peers.push_back(p);
+    }
+    int compared = 0;
+    int moved = 0;
+    for (int row = 0; row < 120; ++row) {
+        int32_t start[3];
+        if (row < 60) {
+            const int cluster = row % 3;
+            start[0] = fx(30.0 + 12.0 * cluster) + rnd_units(-0.8, 0.8);
+            start[1] = fx(30.0 + 6.0 * cluster) + rnd_units(-0.8, 0.8);
+        } else {
+            start[0] = rnd_units(20.0, 80.0);
+            start[1] = rnd_units(20.0, 80.0);
+        }
+        start[2] = fx(1.0);
+        const uint16_t self = static_cast<uint16_t>(0x0100 + (rnd() % 400));
+        const uint32_t tick = 100u + static_cast<uint32_t>(row);
+
+        CollisionWorld::ResolveState state_a;
+        int32_t pos_a[3] = {start[0], start[1], start[2]};
+        int32_t vel_a[2] = {1, 0};
+        int32_t vel_z_a = 0;
+        uint32_t flags_a = 0;
+        EntityHandle ground_a;
+        rig.cw.set_replica_peer_index_enabled(true);
+        const int32_t clearance_a = rig.cw.resolve_replica(
+            rig.world, state_a, pos_a, vel_a, vel_z_a, fx(0.4), fx(1.8), fx(1.0),
+            true, tick, 43, 0u, peers.data(), static_cast<int32_t>(peers.size()),
+            self, &flags_a, &ground_a);
+
+        CollisionWorld::ResolveState state_b;
+        int32_t pos_b[3] = {start[0], start[1], start[2]};
+        int32_t vel_b[2] = {1, 0};
+        int32_t vel_z_b = 0;
+        uint32_t flags_b = 0;
+        EntityHandle ground_b;
+        rig.cw.set_replica_peer_index_enabled(false);
+        const int32_t clearance_b = rig.cw.resolve_replica(
+            rig.world, state_b, pos_b, vel_b, vel_z_b, fx(0.4), fx(1.8), fx(1.0),
+            true, tick, 43, 0u, peers.data(), static_cast<int32_t>(peers.size()),
+            self, &flags_b, &ground_b);
+        rig.cw.set_replica_peer_index_enabled(true);
+
+        CHECK(pos_a[0] == pos_b[0] && pos_a[1] == pos_b[1] && pos_a[2] == pos_b[2]);
+        CHECK(vel_a[0] == vel_b[0] && vel_a[1] == vel_b[1] && vel_z_a == vel_z_b);
+        CHECK(clearance_a == clearance_b && ground_a == ground_b && flags_a == flags_b);
+        ++compared;
+        if (pos_a[0] != start[0] || pos_a[1] != start[1]) ++moved;
+    }
+    CHECK(compared == 120);
+    CHECK(moved > 20); // the clusters exercised the push path, not just the reject
+}
+
+// ---------------------------------------------------------------------------
 void test_replica_resolve_candidates_ground_and_peers() {
     // The replica seam (net-re §5.38e, D-NET-196): a decoded remote row with
     // NO world entity resolves through the SAME movement collision resolver —
@@ -5297,6 +5380,7 @@ int main() {
     test_ladder_exit_push_and_pitch_restore();
     test_ladder_class_bit_climber_remote_and_local();
     test_replica_resolve_candidates_ground_and_peers();
+    test_replica_peer_index_matches_full_walk();
     test_debug_seams();
     test_raycast_clear_los();
     test_raycast_clear_table_readiness();

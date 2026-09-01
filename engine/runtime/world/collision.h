@@ -1669,6 +1669,33 @@ private:
     const ReplicaPeer *replica_peers_ = nullptr;
     int32_t replica_peer_count_ = 0;
     uint16_t replica_exclude_handle_ = 0xFFFF;
+    // A cell index over the staged peer table, rebuilt once per (table, pump
+    // tick): the repulsion loop only ever moves a row for peers within 30% of
+    // the summed radii, so each resolve gathers the peers of the cells that
+    // reach can touch and walks them in table order — the same peers, the
+    // same order, the same pushes as the full walk (see the exactness guard
+    // beside the walk). Pure acceleration; no witnessed rule lives here.
+    struct ReplicaPeerIndex {
+        const ReplicaPeer *src = nullptr;
+        int32_t count = 0;
+        uint32_t tick = 0;
+        int32_t max_radius = 0;
+        std::unordered_map<uint64_t, std::vector<int32_t>> cells;
+        std::vector<int32_t> gathered;
+    };
+    ReplicaPeerIndex replica_peer_index_;
+    bool replica_peer_index_enabled_ = true;
+    void stage_replica_peer_index(const ReplicaPeer *peers, int32_t count,
+                                  uint32_t tick);
+
+public:
+    // Test seam: the full table walk stays reachable so the cell gather can
+    // be proven equivalent against it.
+    void set_replica_peer_index_enabled(bool enabled) {
+        replica_peer_index_enabled_ = enabled;
+    }
+
+private:
     int32_t replica_source_bound_radius_q16_ = 0;
     // Staged like replica_peers_: the calling row's retail-Flags mirror. The
     // resolver's flag latch sites and the ground probe's indoors gate read and
