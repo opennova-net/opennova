@@ -282,6 +282,14 @@ struct HudLayout {
 	uint32_t stance_good = 0xFF05FA0Du;
 	uint32_t stance_middle = 0xFFFAA608u;
 	uint32_t stance_bad = 0xFFB00A0Au;
+	// The user crosshair config pair — player options, not hudpos.def. The
+	// colour is the persisted RGB forced opaque (the colour-item parse forces
+	// the top byte [orig: item colour wcstoul + forced opaque @ 0x64bd10 /
+	// 0x64b220]); the spread flag gates only the offset, never the draw.
+	// Defaults are the retail config defaults [orig: Config_SetDefaults —
+	// colour 0xFFFFFF @ 0x54d461, spread on @ 0x54d472].
+	uint32_t crosshair_color = 0xFFFFFFFFu;
+	bool crosshair_spread_enabled = true;
 	// ALPHAFADE (percent, percent, seconds) [orig: parse @ 0x5a086c].
 	float alpha_fade_base = 0.0f;
 	float alpha_fade_max = 0.0f;

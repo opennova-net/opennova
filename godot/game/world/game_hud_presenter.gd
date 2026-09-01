@@ -29,6 +29,8 @@ var _ui_parent: Node = null
 # PlayerOptions seeds this before the lazy native HUD exists; it survives
 # teardown so the next mission build uses the same process-lifetime choice.
 var _crosshair_style := HudOverlay.MIN_CROSSHAIR_STYLE
+var _crosshair_color: int = PlayerOptions.DEFAULT_CROSSHAIR_COLOR
+var _crosshair_spread: bool = PlayerOptions.DEFAULT_CROSSHAIR_SPREAD
 
 # The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
 # than it can ever present (net spectators may never acquire a local-player HUD).
@@ -189,7 +191,7 @@ func _on_minimap_water_changed(mask: ImageTexture) -> void:
 			_world.get_terrain_data() if _world != null else null, mask)
 
 
-## The USER crosshair style (Options); cache it even before the lazy HUD exists,
+## The USER crosshair options; cache each even before the lazy HUD exists,
 ## then apply it immediately to an existing HUD.
 func set_crosshair_style(style: int) -> void:
 	_crosshair_style = clampi(style, HudOverlay.MIN_CROSSHAIR_STYLE,
@@ -200,6 +202,18 @@ func set_crosshair_style(style: int) -> void:
 
 func crosshair_style() -> int:
 	return _crosshair_style
+
+
+func set_crosshair_color(rgb: int) -> void:
+	_crosshair_color = rgb & PlayerOptions.CROSSHAIR_COLOR_MASK
+	if _game_hud != null:
+		_game_hud.set_crosshair_color(_crosshair_color)
+
+
+func set_crosshair_spread_enabled(enabled: bool) -> void:
+	_crosshair_spread = enabled
+	if _game_hud != null:
+		_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
 
 
 # The in-game HUD over the live runtime: built lazily the first frame a mission has a
@@ -245,6 +259,8 @@ func _ensure_game_hud() -> void:
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
 	_game_hud.set_crosshair_style(_crosshair_style)
+	_game_hud.set_crosshair_color(_crosshair_color)
+	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
 	_game_hud.configure(hudpos, root)
 	_hud_pos = hudpos
 	# TerrainData owns the TRN 16x16 sector routing table and the colormap

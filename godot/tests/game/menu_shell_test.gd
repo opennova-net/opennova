@@ -242,12 +242,16 @@ func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 		if id >= 0:
 			assert_true(driver.is_widget_disabled(id),
 					"%s is visible but read-only until supported" % unsupported_name)
-	assert_true(driver.is_widget_disabled(driver.widget_id("XHAIR_COLOR")))
-	assert_true(driver.is_widget_disabled(driver.widget_id("XHAIR_SPREAD")))
-	assert_eq(driver.selected_row(driver.widget_id("XHAIR_COLOR")), 0,
-			"unsupported crosshair tint stays on white")
+	for crosshair_name in ["XHAIR_COLOR", "XHAIR_SPREAD"]:
+		assert_false(driver.is_widget_disabled(driver.widget_id(crosshair_name)),
+				"%s is a supported interactive setting" % crosshair_name)
+	var xhair_color := driver.widget_id("XHAIR_COLOR")
+	assert_eq(int(driver.item_value(xhair_color,
+			driver.selected_row(xhair_color))),
+			PlayerOptions.DEFAULT_CROSSHAIR_COLOR,
+			"the colour list seeds by value onto the default white row")
 	assert_true(driver.is_widget_checked(driver.widget_id("XHAIR_SPREAD")),
-			"the runtime-supported spread stays enabled")
+			"the default spread toggle seeds enabled")
 	_cleanup(dir)
 
 func test_video_options_are_highest_quality_and_read_only() -> void:
@@ -472,6 +476,54 @@ func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> v
 	assert_eq(PlayerOptions.new().current().crosshair_style, 18,
 			"the selection persists through the shared owner")
 	assert_signal_emit_count(options, "changed", 1)
+	shell.get_resource_root().clear()
+	_rm_runtime_dir(dir)
+
+
+func test_crosshair_color_and_spread_use_shared_options_and_persist() -> void:
+	var config := ConfigFile.new()
+	config.set_value("player", "crosshair_spread", false)
+	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
+	var options := PlayerOptions.new()
+	var dir := _make_runtime_dir()
+	var shell = _make_runtime_shell(dir, options)
+	if shell == null:
+		pass_test("runtime resource root unavailable in this environment")
+		_rm_runtime_dir(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	var color: int = driver.widget_id("XHAIR_COLOR")
+	assert_gte(color, 0, "Options authors the crosshair colour spin list.")
+	assert_false(driver.is_widget_disabled(color),
+			"the colour list is interactive")
+	assert_eq(int(driver.item_value(color, driver.selected_row(color))),
+			PlayerOptions.DEFAULT_CROSSHAIR_COLOR,
+			"the default colour seeds by value onto the white row")
+	var spread: int = driver.widget_id("XHAIR_SPREAD")
+	assert_gte(spread, 0, "Options authors the spread checkbox.")
+	assert_false(driver.is_widget_disabled(spread))
+	assert_false(driver.is_widget_checked(spread),
+			"the persisted spread toggle seeds the checkbox")
+
+	var target_row := driver.selected_row(color)
+	for row in driver.item_count(color):
+		if int(driver.item_value(color, row)) \
+				!= PlayerOptions.DEFAULT_CROSSHAIR_COLOR:
+			target_row = row
+			break
+	driver.select_row(color, target_row)  # emits the "spinlist" value change
+	assert_eq(options.current().crosshair_color,
+			int(driver.item_value(color, target_row)),
+			"the picked row's authored value reaches the shared owner")
+	assert_eq(PlayerOptions.new().current().crosshair_color,
+			options.current().crosshair_color,
+			"the colour persists through the shared owner")
+	driver.set_widget_checked(spread, true)
+	driver.widget_activated.emit(spread, "XHAIR_SPREAD")
+	assert_true(options.current().crosshair_spread,
+			"the checkbox activation writes the shared owner")
+	assert_true(PlayerOptions.new().current().crosshair_spread,
+			"the spread toggle persists")
 	shell.get_resource_root().clear()
 	_rm_runtime_dir(dir)
 

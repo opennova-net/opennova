@@ -141,6 +141,8 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 	_player_options.apply(sim)
 	if _hud_presenter != null:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
+		_hud_presenter.set_crosshair_color(state.crosshair_color)
+		_hud_presenter.set_crosshair_spread_enabled(state.crosshair_spread)
 
 
 func _notification(what: int) -> void:

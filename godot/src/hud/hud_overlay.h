@@ -68,6 +68,14 @@ public:
 	void set_crosshair_style(int p_style);
 	int get_crosshair_style() const;
 
+	// The user crosshair colour (0xRRGGBB, forced opaque) and the spread
+	// enable — the other two retail crosshair options; defaults and witness
+	// live on the engine layout fields (hud_frame.h).
+	void set_crosshair_color(int p_rgb);
+	int get_crosshair_color() const;
+	void set_crosshair_spread_enabled(bool p_enabled);
+	bool is_crosshair_spread_enabled() const;
+
 	// Install the equipped weapon's HUD slice (PlayerHudWeaponDef's fields,
 	// passed typed) plus its resolved display name; loads the per-weapon
 	// HUDCLIPGFX/HUDRNDGFX art.
@@ -263,6 +271,8 @@ private:
 	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
+	uint32_t crosshair_color_ = 0xFFFFFFu;
+	bool crosshair_spread_enabled_ = true;
 	bool draw_timing_enabled_ = false;
 	int64_t draw_compile_us_ = 0;
 	int64_t draw_emit_us_ = 0;
@@ -307,6 +317,8 @@ private:
 	// saturated, alpha unchanged (the compass ring's pipeline).
 	Ref<Texture2D> double_saturate_texture_(const Ref<Texture2D> &p_texture) const;
 	void load_crosshair_texture_();
+	// Stamp the cached colour/spread options into layout_.
+	void apply_crosshair_options_();
 	void clear_font_();
 	// Parse one .fnt through the VFS and upload its pages into the slot's
 	// page-texture namespace; returns parse success.

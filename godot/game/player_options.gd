@@ -18,6 +18,8 @@ const INVERT_MOUSE_KEY := "invert_mouse"
 
 const PLAYER_SECTION := "player"
 const CROSSHAIR_STYLE_KEY := "crosshair_style"
+const CROSSHAIR_COLOR_KEY := "crosshair_color"
+const CROSSHAIR_SPREAD_KEY := "crosshair_spread"
 
 const MIN_VOLUME := 0
 const MAX_VOLUME := 255
@@ -30,6 +32,11 @@ const DEFAULT_MOUSE_SENSITIVITY := 128
 const MIN_CROSSHAIR_STYLE := HudOverlay.MIN_CROSSHAIR_STYLE
 const MAX_CROSSHAIR_STYLE := HudOverlay.MAX_CROSSHAIR_STYLE
 const DEFAULT_CROSSHAIR_STYLE := 0
+# The retail config defaults: white, spread on (docs/interface/hud-re.md,
+# Config_SetDefaults). The colour persists as 0xRRGGBB like retail's global.
+const CROSSHAIR_COLOR_MASK := 0xFFFFFF
+const DEFAULT_CROSSHAIR_COLOR := 0xFFFFFF
+const DEFAULT_CROSSHAIR_SPREAD := true
 
 const SOUND_FX_BUSES := [&"SFX", &"Ambient"]
 const DIALOG_BUS := &"Voice"
@@ -43,23 +50,30 @@ class State extends RefCounted:
 	var mouse_sensitivity: int
 	var invert_mouse: bool
 	var crosshair_style: int
+	var crosshair_color: int
+	var crosshair_spread: bool
 
 	func _init(p_sound_fx_volume := DEFAULT_VOLUME,
 			p_dialog_volume := DEFAULT_VOLUME,
 			p_music_volume := DEFAULT_VOLUME,
 			p_mouse_sensitivity := DEFAULT_MOUSE_SENSITIVITY,
 			p_invert_mouse := false,
-			p_crosshair_style := DEFAULT_CROSSHAIR_STYLE) -> void:
+			p_crosshair_style := DEFAULT_CROSSHAIR_STYLE,
+			p_crosshair_color := DEFAULT_CROSSHAIR_COLOR,
+			p_crosshair_spread := DEFAULT_CROSSHAIR_SPREAD) -> void:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
 		mouse_sensitivity = p_mouse_sensitivity
 		invert_mouse = p_invert_mouse
 		crosshair_style = p_crosshair_style
+		crosshair_color = p_crosshair_color
+		crosshair_spread = p_crosshair_spread
 
 	func copy() -> State:
 		return State.new(sound_fx_volume, dialog_volume, music_volume,
-				mouse_sensitivity, invert_mouse, crosshair_style)
+				mouse_sensitivity, invert_mouse, crosshair_style,
+				crosshair_color, crosshair_spread)
 
 
 signal changed(state: State)
@@ -98,6 +112,10 @@ func update(state: State) -> void:
 				_state.invert_mouse)
 		config.set_value(PLAYER_SECTION, CROSSHAIR_STYLE_KEY,
 				_state.crosshair_style)
+		config.set_value(PLAYER_SECTION, CROSSHAIR_COLOR_KEY,
+				_state.crosshair_color)
+		config.set_value(PLAYER_SECTION, CROSSHAIR_SPREAD_KEY,
+				_state.crosshair_spread)
 	)
 	apply()
 	changed.emit(current())
@@ -128,7 +146,11 @@ func _load_state() -> State:
 			bool(ConfigStore.read(CONFIG_PATH, CONTROLS_SECTION,
 					INVERT_MOUSE_KEY, false)),
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
-					CROSSHAIR_STYLE_KEY, DEFAULT_CROSSHAIR_STYLE))))
+					CROSSHAIR_STYLE_KEY, DEFAULT_CROSSHAIR_STYLE)),
+			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
+					CROSSHAIR_COLOR_KEY, DEFAULT_CROSSHAIR_COLOR)),
+			bool(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
+					CROSSHAIR_SPREAD_KEY, DEFAULT_CROSSHAIR_SPREAD))))
 
 
 static func _normalized(state: State) -> State:
@@ -140,7 +162,9 @@ static func _normalized(state: State) -> State:
 					MIN_MOUSE_SENSITIVITY, MAX_MOUSE_SENSITIVITY),
 			state.invert_mouse,
 			clampi(state.crosshair_style,
-					MIN_CROSSHAIR_STYLE, MAX_CROSSHAIR_STYLE))
+					MIN_CROSSHAIR_STYLE, MAX_CROSSHAIR_STYLE),
+			state.crosshair_color & CROSSHAIR_COLOR_MASK,
+			state.crosshair_spread)
 
 
 static func _set_bus_volume(bus_name: StringName, volume: int) -> void:
