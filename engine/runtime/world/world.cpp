@@ -1087,6 +1087,32 @@ int EntityCommands::set_group_attack_max(int group, int32_t v) {
 
 namespace {
 
+// The single-target SSN walk the team/group/teleport commands share: first
+// matching row in pool order 0,1,2; SSN 0 never matches [orig: the dcb gate
+// + pools-0,1,2 walks — Entity_FindByDCBAndSetFlag @0x43db30,
+// Entity_SetNetIdByParentRef @0x43d6c0, EventAction_TeleportEntityToSpawn
+// @0x43e005/0x43e0bb/0x43e161]. Our local-player rows deliberately carry
+// net_id 0 (the wire is handle-based), so the resolve_ssn sentinel mapping
+// runs first.
+EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
+    if (ssn == 0) return EntityHandle{};
+    if (ssn == EntityCommands::kLocalPlayerSsn &&
+        world.cached.local_player.valid())
+        return world.cached.local_player;
+    for (int pool : {0, 1, 2}) {
+        const size_t capacity = world.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle =
+                    EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world.registry.get(handle);
+            if (entity != nullptr && entity->net_id == ssn) return handle;
+        }
+    }
+    return EntityHandle{};
+}
+
+// Marker lookup: pool 3, def type 6088, WP_NUMBER match
+// [orig: the pool-3 scans @0x43dfe0..0x43e003 / @0x43d3b0..0x43d3cf].
 const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
     const size_t capacity = world.registry.pool_capacity(3);
     for (size_t slot = 0; slot < capacity; ++slot) {
@@ -1099,6 +1125,11 @@ const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
     return nullptr;
 }
 
+// The split-pose translation of retail's teleport stores: retail writes the
+// ONE entity pose the motor reads (Position/Yaw + savedLivePose + the body
+// pose [orig: @0x43e05f..0x43e096]); our AI row carries its own fixed-point
+// mirror of that pose, so a teleport must land there too or the next motor
+// tick snaps back. net_saved_live_pose is retail's savedLivePose.
 void sync_teleported_ai(World &world, const Entity &entity) {
     if (world.ai == nullptr) return;
     AiEntity *ae = world.ai->for_handle(entity.handle);
@@ -1115,15 +1146,20 @@ void sync_teleported_ai(World &world, const Entity &entity) {
     ae->net_saved_live_pose[2] = ae->pos[2];
 }
 
+// The per-member pose copy the two teleport actions share. Flag tree per
+// retail: the single action clears 0x20000 on every pool and copies the
+// marker's chute bit onto a pool-0 target [orig: @0x43e08c/@0x43e0a0
+// (pool 0), @0x43e13c/@0x43e1df (pools 1/2)]; the group action clears
+// 0x20000 on pools 1/2 only [orig: @0x43d47f/@0x43d4e3 — the pool-0 arm
+// @0x43d404..0x43d426 goes straight to the spawn reset]. Our split homes the
+// bits: Building lives on engine_flags, the chute bit is legacy-mirrored, so
+// both views are written and the read is merged.
 void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
                       bool single_action) {
     entity.position = marker.position;
     entity.yaw = marker.yaw;
     entity.pitch = marker.pitch;
     entity.roll = marker.roll;
-    // Retail clears/copies bits of the one Flags dword; our split homes them —
-    // Building lives on engine_flags, the chute bit is legacy-mirrored, so
-    // both views are kept coherent on the write and merged on the read.
     if (single_action || entity.handle.pool() != 0) {
         entity.flags &= ~kEntityFlagBuilding;
         entity.engine_flags &= ~kEntityFlagBuilding;
@@ -1193,10 +1229,11 @@ int EntityCommands::set_group_accuracy(int group, int32_t primary,
 bool EntityCommands::set_group_move_speed_kph(int group, int32_t kph) {
     if (group < 0 || group >= TriggerRelations::kGroups) return false;
     // [orig: Entity_SetMoveSpeedKPH @0x43A960] The two integer divisions
-    // preserve retail's authored km/h -> 16.16 units/tick truncation.
+    // preserve retail's authored km/h -> 16.16 units/SECOND truncation
+    // (kph x 1000/3600; the store @0x43a9a5).
     int64_t scaled = (static_cast<int64_t>(256000) * kph) / 60;
     scaled = (scaled * 256) / 60;
-    world_.relations.group(group).move_speed_q16_per_tick =
+    world_.relations.group(group).move_speed_q16_per_sec =
             static_cast<int32_t>(scaled);
     return true;
 }
@@ -1280,12 +1317,13 @@ int EntityCommands::teleport_group_to_marker(int group,
 }
 
 bool EntityCommands::set_ssn_team(uint16_t ssn, int32_t team) {
-    // [orig: Entity_FindByDCBAndSetFlag @0x43DB30] First resolved match in
-    // pools 0,1,2.
-    const EntityHandle handle = resolve_ssn(ssn);
-    if (!handle.valid() || handle.pool() > 2) return false;
+    // [orig: Entity_FindByDCBAndSetFlag @0x43DB30] First DcbId match walking
+    // pools 0,1,2 in order (no item gate; the team byte is entity+354
+    // @0x43db63). The AI-row team mirror is our split-structure copy of the
+    // field retail's AI reads off the entity.
+    const EntityHandle handle = resolve_ssn_in_pools012(world_, ssn);
     Entity *entity = world_.registry.get(handle);
-    if (entity == nullptr || entity->item_id == 0) return false;
+    if (entity == nullptr) return false;
     entity->team = static_cast<uint8_t>(team);
     if (world_.ai != nullptr) {
         if (AiEntity *ae = world_.ai->for_handle(handle))
@@ -1295,12 +1333,12 @@ bool EntityCommands::set_ssn_team(uint16_t ssn, int32_t team) {
 }
 
 bool EntityCommands::set_ssn_group(uint16_t ssn, int32_t group) {
-    // [orig: Entity_SetNetIdByParentRef @0x43D6C0] First resolved match in
-    // pools 0,1,2.
-    const EntityHandle handle = resolve_ssn(ssn);
-    if (!handle.valid() || handle.pool() > 2) return false;
+    // [orig: Entity_SetNetIdByParentRef @0x43D6C0] First DcbId match walking
+    // pools 0,1,2 in order (no item gate; the commandGroup word is entity+284
+    // @0x43d6f4). The relmat mirror + recount are our derived-cache upkeep.
+    const EntityHandle handle = resolve_ssn_in_pools012(world_, ssn);
     Entity *entity = world_.registry.get(handle);
-    if (entity == nullptr || entity->item_id == 0) return false;
+    if (entity == nullptr) return false;
     entity->group_id = static_cast<uint8_t>(group);
     if (world_.ai != nullptr) {
         if (AiEntity *ae = world_.ai->for_handle(handle))
@@ -1313,12 +1351,12 @@ bool EntityCommands::set_ssn_group(uint16_t ssn, int32_t group) {
 bool EntityCommands::teleport_ssn_to_marker(uint16_t ssn,
                                             int32_t marker_wp_number) {
     // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0] Marker lookup is
-    // pool 3/type 6088/WP_NUMBER; the target is the first SSN row in 0,1,2.
+    // pool 3/type 6088/WP_NUMBER; the target is the first SSN row walking
+    // pools 0,1,2 in order (this walk keeps the item gate @0x43e036).
     const Entity *marker = find_teleport_marker(world_, marker_wp_number);
     if (marker == nullptr) return false;
     const Entity marker_copy = *marker;
-    const EntityHandle handle = resolve_ssn(ssn);
-    if (!handle.valid() || handle.pool() > 2) return false;
+    const EntityHandle handle = resolve_ssn_in_pools012(world_, ssn);
     Entity *entity = world_.registry.get(handle);
     if (entity == nullptr || entity->item_id == 0) return false;
     copy_marker_pose(world_, *entity, marker_copy, true);
@@ -1605,46 +1643,68 @@ void set_slot_mask(int32_t &word, uint32_t mask, bool enabled) {
 void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
                                  int32_t p2, int32_t p3) {
     switch (sub_type) {
-        case 2:
-            // 0x40 is legacy-mirrored: both views stay coherent (the
-            // vehicle_attach precedent).
+        case 2: // GUARD_BIT [orig: case 2 @0x43ab9a — Flags 0x40 @0x43abae/0x43abb8]
+            // Retail writes the one Flags dword; 0x40 is legacy-mirrored,
+            // so both views stay coherent (the vehicle_attach precedent).
             set_mask(entity.flags, kEntityFlagMounted, p2 != 0);
             set_mask(entity.engine_flags, kEntityFlagMounted, p2 != 0);
             break;
-        case 5: ae.slot.bytes()[AiSlot::kAlertByte] = 2; break;
-        case 6: ae.slot.bytes()[AiSlot::kAlertByte] = 0; break;
+        case 5: // RED_ALERT [orig: case 5 @0x43ac24 — ai+136 = 2 @0x43ac2d]
+            ae.slot.bytes()[AiSlot::kAlertByte] = 2; break;
+        case 6: // GREEN_ALERT [orig: case 6 @0x43acf4 — ai+136 = 0 @0x43acfd]
+            ae.slot.bytes()[AiSlot::kAlertByte] = 0; break;
         case 8:
+            // ACCURACY_100: p2 == 0 is a no-op, the store clamps at zero
+            // [orig: case 8 @0x43ad94 — gate @0x43ada4, 100-p2 @0x43adb1,
+            //  clamp @0x43adbb].
             if (p2 != 0)
                 ae.slot.f[AiSlot::kAimErrorPrimary] = std::max(0, 100 - p2);
             break;
-        case 15:
+        case 15: // BLIND_BIT [orig: case 0xF @0x43aecd — bit 0x1 @0x43aede/0x43aee8]
             set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x1u, p2 != 0);
             break;
-        case 16:
+        case 16: // BERSERK_BIT [orig: case 0x10 @0x43aef6 — bit 0x200 @0x43af07/0x43af14]
             set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x200u, p2 != 0);
             break;
-        case 17: set_mask(entity.flags, kEntityFlagAiClimb, p2 != 0); break;
+        case 17: // CLIMBER_BIT [orig: case 0x11 @0x43af25 — bit 0x400 @0x43af36/0x43af43]
+            set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x400u, p2 != 0);
+            break;
         case 21:
+            // COWARD_BIT: 0x20000 always clears first
+            // [orig: case 0x15 @0x43b06d — clear @0x43b078, bit 0x8
+            //  @0x43b088/0x43b092].
             ae.slot.f[AiSlot::kBehaviorFlags] =
                     static_cast<int32_t>(
                             static_cast<uint32_t>(ae.slot.f[AiSlot::kBehaviorFlags]) &
                             ~0x20000u);
             set_slot_mask(ae.slot.f[AiSlot::kBehaviorFlags], 0x8u, p2 != 0);
             break;
-        case 22: ae.slot.bytes()[AiSlot::kAlertByte] = 1; break;
-        case 41:
+        case 22: // YELLOW_ALERT [orig: case 0x16 @0x43ac80 — ai+136 = 1 @0x43ac8d]
+            ae.slot.bytes()[AiSlot::kAlertByte] = 1; break;
+        case 23:
+            // The org1 climb-chase mode flag (entity.h kEntityFlagAiClimb;
+            // no dfx2med token — runtime-only sub). Legacy-mirrored like 0x40.
+            // [orig: case 0x17 @0x43afae — Flags 0x80 @0x43afc2/0x43afcf]
+            set_mask(entity.flags, kEntityFlagAiClimb, p2 != 0);
+            set_mask(entity.engine_flags, kEntityFlagAiClimb, p2 != 0);
+            break;
+        case 41: // ATTACKDISTANCE_VALUE [orig: case 0x29 @0x43b263 — ai+60 = p2<<16]
             ae.slot.f[AiSlot::kAttackRange] =
                     static_cast<int32_t>(static_cast<uint32_t>(p2) << 16);
             break;
         case 42:
+            // ENGAGEDISTANCE MIN/MAX [orig: case 0x2A — ai+64 = p2<<16
+            //  @0x43b27c, ai+68 = p3<<16 @0x43b289].
             ae.slot.f[AiSlot::kEngageMin] =
                     static_cast<int32_t>(static_cast<uint32_t>(p2) << 16);
             ae.slot.f[AiSlot::kSightRange] =
                     static_cast<int32_t>(static_cast<uint32_t>(p3) << 16);
             break;
         case 43:
-            // Every 0x4000000 consumer (destruction, collision_resolve,
-            // round_sim) reads engine_flags — the retail Flags dword home.
+            // INDESTRUCTABLE_BIT [orig: case 0x2B @0x43b20a — Flags
+            //  0x4000000 @0x43b210/0x43b21d; the one arm with NO aiRuntime
+            //  gate]. Every consumer (destruction, collision_resolve,
+            //  round_sim) reads engine_flags — the retail Flags dword home.
             set_mask(entity.engine_flags, kEntityFlagIndestructible, p2 != 0);
             break;
         default: break;
@@ -1653,27 +1713,31 @@ void apply_ai_controller_command(Entity &entity, AiEntity &ae, int sub_type,
 
 // Queue-backed brain arms. Alert commands remap to event 6 levels 2/0/1;
 // authored state, skill, speed, weapons-free, and elevation preserve p2 as the
-// event argument. [orig: Entity_ApplyCommand @0x43ab60 -> AIEvent_QueueEntry
-// @0x455da0 -> AI_HandleCommand @0x465770]
+// event argument (the shared tail @0x43b2ec..0x43b326).
+// [orig: Entity_ApplyCommand @0x43ab60 -> AIEvent_QueueEntry @0x455da0 ->
+//  AI_HandleCommand @0x465770]
 void queue_ai_brain_event(AiSystem &sys, AiEntity &ae, int sub_type, int32_t p2) {
     int event_type = -1;
     int32_t argument = p2;
     switch (sub_type) {
-        case 5: event_type = 6; argument = 2; break;
-        case 6: event_type = 6; argument = 0; break;
-        case 22: event_type = 6; argument = 1; break;
-        case 26: event_type = 9; break;  // DRIVESKILL
-        case 27: event_type = 8; break;  // AIMSKILL
-        case 28: event_type = 7; break;  // AISETSTATE
-        case 29: event_type = 10; break; // COMBATSPEED
-        case 30: event_type = 11; break; // PATROLSPEED
-        case 45: event_type = 21; break; // AISTARTFIRING
-        case 46: event_type = 22; break; // AIFIRINGANGLE
+        case 5: event_type = 6; argument = 2; break;  // [orig: @0x43ac59..0x43ac77]
+        case 6: event_type = 6; argument = 0; break;  // [orig: @0x43ad34..0x43ad4e]
+        case 22: event_type = 6; argument = 1; break; // [orig: @0x43acc4..0x43ace2]
+        case 26: event_type = 9; break;  // DRIVESKILL   [orig: case 0x1A @0x43b0ad]
+        case 27: event_type = 8; break;  // AIMSKILL     [orig: case 0x1B @0x43b0cb]
+        case 28: event_type = 7; break;  // AISETSTATE   [orig: case 0x1C @0x43b0e9]
+        case 29: event_type = 10; break; // COMBATSPEED  [orig: case 0x1D @0x43b107]
+        case 30: event_type = 11; break; // PATROLSPEED  [orig: case 0x1E @0x43b125]
+        case 45: event_type = 21; break; // AISTARTFIRING [orig: case 0x2D @0x43b2cd]
+        case 46: event_type = 22; break; // AIFIRINGANGLE [orig: case 0x2E @0x43b2e4]
         default: return;
     }
     AiEventEntry ev{};
     ev.f[0] = event_type;
-    ev.f[1] = 9 | (sys.index_of(ae) << 16);
+    // Channel 0 for the command-queued events (the combat spawn/death queue
+    // sites stamp 9; this site stamps 0) [orig: event_source = 0 @0x43ac66/
+    // @0x43acd1/@0x43ad41/@0x43b30e].
+    ev.f[1] = sys.index_of(ae) << 16;
     ev.set_timer(0.0f);
     ev.f[3] = argument;
     sys.events.queue(ev);

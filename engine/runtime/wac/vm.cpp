@@ -274,8 +274,10 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         if (!cmds.ssn_exists(ssn)) return 0;
         cmds.apply_ai_command(ssn, ieq(n, "ssncspd") ? 29 : 30,
                               A(1), 0, 0);
-        // Retail reports success for a resolved entity even without an AI
-        // component; the queue call itself is conditional.
+        // Retail reports success for any resolved live entity; only the
+        // AI-event queue is gated on the brain being present
+        // [orig: WacScript_SendAIEvent10ToEntity @0x4F74B0 — return 1
+        //  @0x4f74f9, queue gate @0x4f7508; event-11 twin @0x4F7570].
         return 1;
     }
 

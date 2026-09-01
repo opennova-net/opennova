@@ -1016,7 +1016,7 @@ actions.
 |---|---|---|
 | 0 `Null` | no-op switch arm [orig: EventAction_Dispatch @ 0x4542E0] | explicit no-op; no diagnostic |
 | 4 `VaporizeGroup` | despite its curated callee name, removes matching nonempty rows while walking pools 2, 0, 1, 3 [orig: Entity_TeleportAllByNetId @ 0x43D5D0] | `EntityCommands::remove_group`; then live-count recount + collision refresh |
-| 11 `GroupVelocity` | stores group speed at group-row +24 using the two truncating integer divisions `(256000*kph/60 << 8)/60` [orig: Entity_SetMoveSpeedKPH @ 0x43A960] | `TriggerRelations::GroupState::move_speed_q16_per_tick` |
+| 11 `GroupVelocity` | stores group speed at group-row +24 using the two truncating integer divisions `(256000*kph/60 << 8)/60` — 16.16 units per SECOND (kph × 1000/3600) [orig: Entity_SetMoveSpeedKPH @ 0x43A960] | `TriggerRelations::GroupState::move_speed_q16_per_sec` |
 | 16 `ChangeGTeamAction` | scans pools 2, 0, 1 and rewrites team on every matching group row [orig: Entity_SetTeamByNetId @ 0x43C680] | `set_group_team`, including the live `AiEntity::team` mirror |
 | 17 `ChangeGroupAction` | scans pools 2, 0, 1; pool 0 skips dead rows, pools 2/1 do not; rebuilds group counts [orig: Entity_UpdateNetIdReferences @ 0x43C5B0] | `change_group`, including the AI relation-matrix id mirror |
 | 18 `GroupTeleportAction` | finds the first pool-3 type-6088 marker whose `WP_NUMBER` equals param2, then teleports group members in pools 0, 1, 2 [orig: Entity_TeleportTeamToSpawn @ 0x43D390] | `teleport_group_to_marker` |

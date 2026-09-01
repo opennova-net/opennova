@@ -215,7 +215,7 @@ struct AiSlot {
     // Named dword indices (the behavior/accuracy controls and the
     // perception/attack ranges the infantry motor reads) plus the alert byte.
     enum Idx : int {
-        kBehaviorFlags = 1, // BLIND 1 / COWARD 8 / BERSERK 0x200 [byte +4]
+        kBehaviorFlags = 1, // BLIND 1 / COWARD 8 / BERSERK 0x200 / CLIMBER 0x400 [byte +4]
         kAimErrorPrimary = 10,   // 100 - authored accuracy 2 [byte +40]
         kAimErrorSecondary = 11, // 100 - authored accuracy 1 [byte +44]
         kAttackRange = 15, // max attack range [byte +60]
