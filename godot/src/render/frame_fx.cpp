@@ -49,13 +49,15 @@ namespace {
 // A normal gameplay camera keeps precisely the beauty layers left after the
 // player/fly camera removes the FP body, shadow-only, and the twelve
 // slot-capture bits: world, water, the terrain-shadow receiver plumbing bit,
-// the no-mirror world layer, and the first-person viewmodel (bit 11 — the gun
-// draws inside the beauty pass through its shader-side renderfov projection
-// and depth band, retail's "viewmodel first" step). Q3 omits the plumbing bit
-// and the viewmodel (retail's Q3 copies of gun strips against the depth band
-// are unwitnessed, D-RORD-10). That gives shaders a collision-free exact-mask
-// signature without admitting caster or slot-capture geometry anywhere.
-constexpr std::uint32_t kBeautyCameraMask = 0x00018C01u;
+// the no-mirror world layer, the foliage blanket bit (mirror-excluded — the
+// witnessed reflection context collects no foliage, env-tod-re.md #30), and
+// the first-person viewmodel (bit 11 — the gun draws inside the beauty pass
+// through its shader-side renderfov projection and depth band, retail's
+// "viewmodel first" step). Q3 omits the plumbing bit and the viewmodel
+// (retail's Q3 copies of gun strips against the depth band are unwitnessed,
+// D-RORD-10). That gives shaders a collision-free exact-mask signature
+// without admitting caster or slot-capture geometry anywhere.
+constexpr std::uint32_t kBeautyCameraMask = 0x00038C01u;
 // FrameFX's 256-square blur target size. Focused Q3 is rendered at beauty
 // resolution into the compositor's color attachment with resolved beauty
 // depth attached; this constant applies only after the capture stretch.
