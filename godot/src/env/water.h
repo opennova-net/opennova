@@ -62,6 +62,13 @@ public:
 		VISUAL_LAYER_DYNAMIC_SHADOW_CASTER = 1 << 14,
 		VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER = 1 << 15,
 		VISUAL_LAYER_WORLD_NO_MIRROR = 1 << 16,
+		// The foliage detail blanket rides its own bit (alone, inside the
+		// 20-bit default mask): retail's reflection prerender hands PolyTrn a
+		// context with foliage collection OFF, so the mirror draws no
+		// near-foliage patches while every beauty camera admits the bit
+		// (retail: the reflection context's foliage-collect field is 0 where
+		// the live beauty scene passes 1 — see docs/env/env-tod-re.md #30).
+		VISUAL_LAYER_TERRAIN_FOLIAGE = 1 << 17,
 		VISUAL_LAYER_SHADOW_CASTER_MASK = VISUAL_LAYER_STATIC_SHADOW_CASTER |
 				VISUAL_LAYER_DYNAMIC_SHADOW_CASTER,
 		// The mirror camera's above-water mask; a below-water view adds
@@ -72,7 +79,8 @@ public:
 				~(VISUAL_LAYER_WATER | VISUAL_LAYER_VIEWMODEL |
 						VISUAL_LAYER_FP_BODY_SHADOW_ONLY |
 						VISUAL_LAYER_SHADOW_CASTER_MASK |
-						VISUAL_LAYER_WORLD_NO_MIRROR),
+						VISUAL_LAYER_WORLD_NO_MIRROR |
+						VISUAL_LAYER_TERRAIN_FOLIAGE),
 	};
 
 	void set_environment_path(const NodePath &p_path);

@@ -1,5 +1,6 @@
 #include "terrain/foliage_dispatcher.h"
 
+#include "env/water.h"
 #include "env/weather.h"
 
 #include <godot_cpp/classes/time.hpp>
@@ -751,10 +752,12 @@ RID FoliageDispatcher::_ensure_draw_instance(
         instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
     // The generic attenuation catcher cannot reproduce foliage-card alpha,
     // two-sided rasterization, and wind deformation without dark rectangles.
-    // Keep foliage on the ordinary world layer until the retail tile-cache
-    // compositor (which supplies the alpha-lighting term before this pass) is
-    // ported.
-    server->instance_set_layer_mask(instance, 1u << 0);
+    // Foliage rides its own visual layer, admitted by every beauty camera and
+    // excluded from the water mirror: retail's reflection prerender hands
+    // PolyTrn a context with foliage collection OFF, so its mirror draws no
+    // near-foliage patches (see docs/env/env-tod-re.md #30 and
+    // Water::VISUAL_LAYER_TERRAIN_FOLIAGE).
+    server->instance_set_layer_mask(instance, Water::VISUAL_LAYER_TERRAIN_FOLIAGE);
     server->instance_set_extra_visibility_margin(instance, 8.0f);
     frame_stats_.backend_configuration_writes += 4;
     server->instance_set_visible(instance, false);
@@ -1013,7 +1016,8 @@ Dictionary FoliageDispatcher::get_backend_report() const {
       row["tile_cache_layer"] = stamp.tile_cache_layer;
       row["tile_cache_projection"] = stamp.tile_cache_projection;
       row["casts_shadows"] = false;
-      row["layer_mask"] = static_cast<int64_t>(1u << 0);
+      row["layer_mask"] =
+          static_cast<int64_t>(Water::VISUAL_LAYER_TERRAIN_FOLIAGE);
       draws.append(row);
       ++active_draws;
       if (stamp.visible) {
