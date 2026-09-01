@@ -19,6 +19,7 @@
 #ifndef OPENNOVA_WORLD_OCCLUSION_H
 #define OPENNOVA_WORLD_OCCLUSION_H
 
+#include <array>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -367,6 +368,27 @@ private:
 
     std::vector<RegistryEntry> registry_; // mission-init scratch
     std::vector<WeldRecord> welds_;       // [orig: g_PortalWeldRecords @ 0x2967250]
+
+    // Steady-state memo for the pure per-static derivations the building walk
+    // recomputed per candidate per frame: the placed bound sphere and the
+    // portal-record world positions are pure functions of the slot's collision
+    // model and pose. Every entry is guarded by value keys (pose bits plus the
+    // model pointer, wholesale-cleared at mission portal init so a reloaded
+    // model can never alias), so a husk swap or any future mover recomputes on
+    // its own. The camera tests, the latch, the rays, and the witnessed PRNG
+    // stream run every frame untouched — caching any of those would desync
+    // the rand stream.
+    struct StaticPoseMemo {
+        const CollisionModel *cm = nullptr;
+        float yaw = 0.0f, pitch = 0.0f, roll = 0.0f;
+        int32_t pos[3] = {0, 0, 0};
+        int32_t center_world[3] = {0, 0, 0};
+        int32_t radius = 0;
+        int32_t model_id = -1;
+        bool records_valid = false;
+        std::vector<std::array<float, 3>> record_world;
+    };
+    std::unordered_map<uint16_t, StaticPoseMemo> static_pose_memo_;
 
     // Frame state
     std::vector<BatchEntry> batch_;
