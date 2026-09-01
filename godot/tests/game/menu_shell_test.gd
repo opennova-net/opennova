@@ -237,7 +237,7 @@ func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 			"MOUSE_SENSITIVITY", "INVERT_MOUSE"]:
 		assert_false(driver.is_widget_disabled(driver.widget_id(unlocked_name)),
 				"%s remains an interactive core setting" % unlocked_name)
-	for unsupported_name in OptionsMenuController.UNSUPPORTED_CONTROLS:
+	for unsupported_name: String in MenuFrame.options_unsupported_controls():
 		var id := driver.widget_id(unsupported_name)
 		if id >= 0:
 			assert_true(driver.is_widget_disabled(id),
@@ -632,7 +632,7 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 	assert_eq(driver.item_value(object_detail, driver.selected_row(object_detail)), "3")
 	assert_true(driver.is_widget_disabled(object_detail),
 			"the in-game object-detail alias is pinned to the supported renderer")
-	for unsupported_name in OptionsMenuController.UNSUPPORTED_CONTROLS:
+	for unsupported_name: String in MenuFrame.options_unsupported_controls():
 		var id := driver.widget_id(unsupported_name)
 		if id >= 0:
 			assert_true(driver.is_widget_disabled(id),

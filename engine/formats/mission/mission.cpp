@@ -10,6 +10,7 @@
 #include "mission_records.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <fstream>
@@ -245,6 +246,24 @@ const std::string &MissionDocument::last_error() const {
 	return impl_->last_error;
 }
 
+namespace {
+
+// "G11.trn" -> "G11" (case-insensitive on the extension); a bare base passes through.
+std::string strip_reference_extension(std::string ref, const char *ext) {
+	const size_t ext_len = std::strlen(ext);
+	if (ref.size() <= ext_len) return ref;
+	const size_t at = ref.size() - ext_len;
+	for (size_t i = 0; i < ext_len; ++i) {
+		const unsigned char a = static_cast<unsigned char>(ref[at + i]);
+		const unsigned char b = static_cast<unsigned char>(ext[i]);
+		if (std::tolower(a) != std::tolower(b)) return ref;
+	}
+	ref.resize(at);
+	return ref;
+}
+
+} // namespace
+
 MissionInfo MissionDocument::info() const {
 	MissionInfo out;
 	if (!impl_->loaded) {
@@ -256,8 +275,13 @@ MissionInfo MissionDocument::info() const {
 	out.briefing = fixed_string(header.mission_briefing, sizeof(header.mission_briefing));
 	// terrain[48] packs three 16-byte slots (terrain / cnv_file / tt_file); bound the read to the
 	// first slot so a full 16-char terrain name does not bleed into cnv_file.
-	out.terrain = fixed_string(header.terrain, 16);
-	out.environment = fixed_string(header.environment, sizeof(header.environment));
+	// MissionInfo carries the references as basenames: a file .bms authors the bare
+	// base ("G11") while the wire S2C 0x0B header (retail's g_BmsHeaderBlock) carries
+	// the extension ("G11.trn", "FULL_07.env"), so the extension is dropped here and
+	// every consumer appends its own.
+	out.terrain = strip_reference_extension(fixed_string(header.terrain, 16), ".trn");
+	out.environment = strip_reference_extension(
+			fixed_string(header.environment, sizeof(header.environment)), ".env");
 	out.climate = static_cast<int>(header.climate);
 	out.weather = static_cast<int>(header.weather_type);
 	out.mission_type = static_cast<int>(header.mission_type);

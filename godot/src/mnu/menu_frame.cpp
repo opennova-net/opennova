@@ -1070,6 +1070,23 @@ PackedStringArray MenuFrame::video_preset_buttons() {
 	return out;
 }
 
+PackedStringArray MenuFrame::options_unsupported_controls() {
+	PackedStringArray out;
+	for (const char *name : opennova::menu::kOptionsUnsupportedControls) out.push_back(String(name));
+	return out;
+}
+
+Array MenuFrame::options_forced_checks() {
+	Array out;
+	for (const opennova::menu::OptionsForcedCheck &c : opennova::menu::kOptionsForcedChecks) {
+		Dictionary row;
+		row["control"] = String(c.control);
+		row["checked"] = c.checked;
+		out.push_back(row);
+	}
+	return out;
+}
+
 void MenuFrame::_bind_methods() {
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_scroll_ranges"),
 			&MenuFrame::options_scroll_ranges);
@@ -1077,6 +1094,10 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::video_quality_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_gamma_reference"),
 			&MenuFrame::video_gamma_reference);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_unsupported_controls"),
+			&MenuFrame::options_unsupported_controls);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_forced_checks"),
+			&MenuFrame::options_forced_checks);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_preset_buttons"),
 			&MenuFrame::video_preset_buttons);
 	ClassDB::bind_method(

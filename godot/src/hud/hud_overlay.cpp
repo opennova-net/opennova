@@ -281,6 +281,9 @@ void HudOverlay::_bind_methods() {
 
 	BIND_CONSTANT(MIN_CROSSHAIR_STYLE);
 	BIND_CONSTANT(MAX_CROSSHAIR_STYLE);
+	BIND_CONSTANT(DEFAULT_CROSSHAIR_COLOR);
+	BIND_CONSTANT(CROSSHAIR_COLOR_MASK);
+	BIND_CONSTANT(DEFAULT_CROSSHAIR_SPREAD);
 }
 
 HudOverlay::HudOverlay() {
@@ -761,7 +764,7 @@ int HudOverlay::get_crosshair_style() const {
 }
 
 void HudOverlay::set_crosshair_color(int p_rgb) {
-	crosshair_color_ = static_cast<uint32_t>(p_rgb) & 0xFFFFFFu;
+	crosshair_color_ = static_cast<uint32_t>(p_rgb) & opennova::hud::HudLayout::kCrosshairColorMask;
 	if (!configured_) {
 		return; // picked up by configure()
 	}

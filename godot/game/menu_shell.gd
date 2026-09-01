@@ -941,15 +941,6 @@ func get_selected_expansion() -> String:
 	return _selected_expansion
 
 
-func get_crosshair_style() -> int:
-	return _player_options.current().crosshair_style \
-			if _player_options != null else PlayerOptions.DEFAULT_CROSSHAIR_STYLE
-
-
-func get_player_options() -> PlayerOptions:
-	return _player_options
-
-
 func get_menu_stack_depth() -> int:
 	return _menu_stack.size()
 

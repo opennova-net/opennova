@@ -240,6 +240,10 @@ public:
 	// rows there; everything else uses the window's own <ITEMS>. Mutators no-op on
 	// a widget that has no item list. Indices out of range are clamped / ignored.
 	int get_item_count(int p_id) const;
+	// Retail's select-by-value seed: the row whose authored `value=` equals
+	// p_value, row 0 on a miss; -1 only when the widget has no item list
+	// (engine/runtime/menu/options_policy.h spinlist_row_for_value).
+	int find_item_row_by_value(int p_id, const String &p_value) const;
 	Dictionary get_item(int p_id, int p_index) const;
 	TypedArray<Dictionary> get_items(int p_id) const;
 	void set_item(int p_id, int p_index, const Dictionary &p_row);

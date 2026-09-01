@@ -21,22 +21,26 @@ const CROSSHAIR_STYLE_KEY := "crosshair_style"
 const CROSSHAIR_COLOR_KEY := "crosshair_color"
 const CROSSHAIR_SPREAD_KEY := "crosshair_spread"
 
-const MIN_VOLUME := 0
-const MAX_VOLUME := 255
+# The slider ranges are the engine's witnessed Options ranges
+# (options_policy.h kOptionsScrollRanges through MenuFrame), read by control
+# name so the clamp can never drift from what the sliders seed.
+const SOUND_FX_VOLUME_CONTROL := "SOUNDFXVOLUME"
+const DIALOG_VOLUME_CONTROL := "DIALOGVOLUME"
+const MUSIC_VOLUME_CONTROL := "MUSICVOLUME"
+const MOUSE_SENSITIVITY_CONTROL := "MOUSE_SENSITIVITY"
+# The starting values are not witnessed profile defaults (retail's live in
+# the player profile, not game.cfg): full volume and mid sensitivity.
 const DEFAULT_VOLUME := 255
-const MIN_MOUSE_SENSITIVITY := 4
-const MAX_MOUSE_SENSITIVITY := 511
 const DEFAULT_MOUSE_SENSITIVITY := 128
-# One home for the crosshair art range: the native HudOverlay binding
-# (game_hud_presenter clamps with the same constants).
+# One home for the crosshair art range, colour default / mask and spread
+# default: the native HudOverlay binding over the engine's HudLayout
+# (Config_SetDefaults @0x54d461 / @0x54d472 via hud_frame.h).
 const MIN_CROSSHAIR_STYLE := HudOverlay.MIN_CROSSHAIR_STYLE
 const MAX_CROSSHAIR_STYLE := HudOverlay.MAX_CROSSHAIR_STYLE
 const DEFAULT_CROSSHAIR_STYLE := 0
-# The retail config defaults: white, spread on (docs/interface/hud-re.md,
-# Config_SetDefaults). The colour persists as 0xRRGGBB like retail's global.
-const CROSSHAIR_COLOR_MASK := 0xFFFFFF
-const DEFAULT_CROSSHAIR_COLOR := 0xFFFFFF
-const DEFAULT_CROSSHAIR_SPREAD := true
+const CROSSHAIR_COLOR_MASK := HudOverlay.CROSSHAIR_COLOR_MASK
+const DEFAULT_CROSSHAIR_COLOR := HudOverlay.DEFAULT_CROSSHAIR_COLOR
+const DEFAULT_CROSSHAIR_SPREAD := HudOverlay.DEFAULT_CROSSHAIR_SPREAD != 0
 
 const SOUND_FX_BUSES := [&"SFX", &"Ambient"]
 const DIALOG_BUS := &"Voice"
@@ -128,6 +132,12 @@ func apply(simulation: Simulation = null) -> void:
 		_set_bus_volume(bus_name, _state.sound_fx_volume)
 	_set_bus_volume(DIALOG_BUS, _state.dialog_volume)
 	_set_bus_volume(MUSIC_BUS, _state.music_volume)
+	apply_mouse(simulation)
+
+
+## The live local-player mouse settings alone — what a `changed` listener
+## with a running Simulation pushes (update() already applied the audio).
+func apply_mouse(simulation: Simulation) -> void:
 	if simulation != null:
 		simulation.set_local_player_mouse(
 				_state.mouse_sensitivity, _state.invert_mouse)
@@ -155,16 +165,30 @@ func _load_state() -> State:
 
 static func _normalized(state: State) -> State:
 	return State.new(
-			clampi(state.sound_fx_volume, MIN_VOLUME, MAX_VOLUME),
-			clampi(state.dialog_volume, MIN_VOLUME, MAX_VOLUME),
-			clampi(state.music_volume, MIN_VOLUME, MAX_VOLUME),
-			clampi(state.mouse_sensitivity,
-					MIN_MOUSE_SENSITIVITY, MAX_MOUSE_SENSITIVITY),
+			_clamp_to_control(state.sound_fx_volume, SOUND_FX_VOLUME_CONTROL),
+			_clamp_to_control(state.dialog_volume, DIALOG_VOLUME_CONTROL),
+			_clamp_to_control(state.music_volume, MUSIC_VOLUME_CONTROL),
+			_clamp_to_control(state.mouse_sensitivity, MOUSE_SENSITIVITY_CONTROL),
 			state.invert_mouse,
 			clampi(state.crosshair_style,
 					MIN_CROSSHAIR_STYLE, MAX_CROSSHAIR_STYLE),
 			state.crosshair_color & CROSSHAIR_COLOR_MASK,
 			state.crosshair_spread)
+
+
+## The engine's witnessed range for an Options slider, by control name.
+static func scroll_range_of(control: String) -> Dictionary:
+	for range: Dictionary in MenuFrame.options_scroll_ranges():
+		if String(range["control"]) == control:
+			return range
+	return {}
+
+
+static func _clamp_to_control(value: int, control: String) -> int:
+	var range := scroll_range_of(control)
+	if range.is_empty():
+		return value
+	return clampi(value, int(range["minimum"]), int(range["maximum"]))
 
 
 static func _set_bus_volume(bus_name: StringName, volume: int) -> void:

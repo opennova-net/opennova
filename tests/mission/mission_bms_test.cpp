@@ -593,6 +593,14 @@ int main() {
 		std::string err2;
 		TEST_EXPECT(opennova::bms::parse_header_blob(blob.data(), blob.size(), h2, err2));
 		TEST_EXPECT(std::string(h2.terrain) == "G11.trn");
+		// The document's info() hands consumers the BASENAME either way: the
+		// wire header's extension is dropped, so "G11.trn" and a file's "G11"
+		// resolve to the one on-disk name when the consumer appends ".trn".
+		blob[0] = 0; blob[1] = 0; blob[2] = 0; blob[3] = 0;
+		opennova::mission::MissionDocument wire_doc;
+		TEST_EXPECT(wire_doc.load_bms_header_bytes(blob.data(), blob.size()));
+		TEST_EXPECT(wire_doc.info().terrain == "G11");
+		TEST_EXPECT(wire_doc.info().environment == "FULL_07");
 	}
 
 	// --- Phase 1: hidden entity fields (name1/name2/no_less_than/map_symbol) round-trip,

@@ -166,15 +166,16 @@ func test_validation_scope_is_the_locked_highest_quality_retail_profile() -> voi
 	assert_eq(String(retail_profile["id"]), String(scope["fixture_contract"]))
 	assert_eq(int(retail_profile["required_values"]["shader_usage_level"]), 2)
 
-	# The pinned values are the engine's (runtime/menu/options_policy.h);
-	# the shell script only selects and locks the authored widgets.
-	var policy := _read_repo(String(scope["locked_menu_policy"]))
-	_contains_all(policy, [
-		"{\"SHADERUSAGE\", \"2\"}",
-		"{\"TERRAINPOLY\", \"3\"}",
-		"{\"OBJECTTEX\", \"3\"}",
-		"{\"SHADOWQUALITY\", \"3\"}",
-	], "the locked menu policy")
+	# The pinned values are the engine's (runtime/menu/options_policy.h, the
+	# file the provenance contract names) and are asserted as the values the
+	# binding exports, not as source text, so the header can be reformatted.
+	var exported: Dictionary = {}
+	for row: Dictionary in MenuFrame.video_quality_controls():
+		exported[String(row["control"])] = String(row["value"])
+	assert_eq(exported.get("SHADERUSAGE", ""), "2", "the locked menu policy pins SHADERUSAGE")
+	assert_eq(exported.get("TERRAINPOLY", ""), "3", "the locked menu policy pins TERRAINPOLY")
+	assert_eq(exported.get("OBJECTTEX", ""), "3", "the locked menu policy pins OBJECTTEX")
+	assert_eq(exported.get("SHADOWQUALITY", ""), "3", "the locked menu policy pins SHADOWQUALITY")
 	var shell := _read_repo(String(scope["locked_menu_shell"]))
 	_contains_all(shell, [
 		"MenuFrame.video_quality_controls()",
