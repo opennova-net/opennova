@@ -146,9 +146,10 @@ private:
 		// @0x5d7835 reads the model's +0x14, not entity+0].
 		float capture_radius = 1.0f;
 		// Cached facts carried over from the caster record (rebuilt on the
-		// group revision, not per frame).
+		// group revision, not per frame). The name is copied (a refcounted
+		// String), never a pointer into the rebuildable record vector.
 		bool has_blob_texture = false;
-		const String *decal_texture = nullptr;
+		String decal_texture;
 	};
 	// The registry row behind CasterInfo: identity plus the derived values a
 	// frame used to re-read from the node every frame. An unstamped model
@@ -173,6 +174,7 @@ private:
 	bool _ensure_capture_target(int p_order, int p_size);
 	void _flush_deferred_frees(bool p_all);
 	void _clear_all_terms();
+	void _invalidate_uniform_stamps();
 	Ref<Texture2D> _blob_texture(const String &p_name);
 	Projection _drape_projection(const Transform3D &p_pose, float p_half_u,
 			float p_half_v, float p_far) const;
@@ -209,9 +211,14 @@ private:
 	HashMap<uint64_t, size_t> caster_index_scratch_;
 	// Last-pushed uniform payloads: identical-value pushes are elided (the
 	// materials retain them), the T1 material-gating precedent. The drape
-	// material is process-shared, so these stamps assume one live SlotShadow
-	// writes it — true of the game world; a second instance would only cause
-	// re-pushes, never a wrong value, because stamps start invalid.
+	// material is process-shared, so a stamp is only trustworthy while this
+	// is the ONE live SlotShadow writing it (a second writer's push would
+	// leave a stale stamp here and an elided frame would keep ITS value) and
+	// while the material object the stamp was taken against still exists:
+	// advance_frame invalidates every stamp when either condition fails
+	// (live_instances_ above one, or the drape material's RID changed).
+	RID stamped_drape_rid_;
+	static int live_instances_;
 	PackedVector4Array last_silhouette_terms_;
 	PackedVector4Array last_silhouette_patches_;
 	PackedVector4Array last_clip_u_;

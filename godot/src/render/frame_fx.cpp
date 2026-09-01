@@ -976,6 +976,8 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["q3_sampled"] = q3_sampled;
 	result["q3_gpu_us"] = static_cast<int64_t>(gpu_span_us);
 	result["q3_gpu_valid"] = gpu_span_valid;
+	// The composite/decode halves of q3_gpu_us are raw-report diagnostics
+	// (probe dumps, MCP reads); q3_gpu_us alone feeds a FrameStats slot.
 	result["q3_gpu_composite_us"] = static_cast<int64_t>(gpu_composite_us);
 	result["q3_gpu_composite_valid"] = gpu_composite_valid;
 	result["q3_gpu_decode_us"] = static_cast<int64_t>(gpu_decode_us);

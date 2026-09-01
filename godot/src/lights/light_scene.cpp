@@ -281,6 +281,27 @@ void LightScene::clear_render_output() {
 int LightScene::render_frame(const Vector3 &p_camera_world,
 		float p_query_radius, const Vector3 &p_ambient_scale, int p_time_ms,
 		Weather *p_weather) {
+	const int selected = camera_global_select(p_camera_world, p_query_radius,
+			p_ambient_scale, p_time_ms, p_weather);
+	selection_mode_ = "camera_global_objects";
+	owner_isolation_ = "unavailable";
+	return selected;
+}
+
+int LightScene::census_frame(const Vector3 &p_camera_world,
+		float p_query_radius, const Vector3 &p_ambient_scale, int p_time_ms,
+		Weather *p_weather) {
+	// The same camera-global select, run to refresh the census rows on
+	// demand (a report read with F3 stats off) WITHOUT restamping the mode
+	// the gameplay pass reported: render_model_frame's "per_model_objects"
+	// stays what the report says.
+	return camera_global_select(p_camera_world, p_query_radius, p_ambient_scale,
+			p_time_ms, p_weather);
+}
+
+int LightScene::camera_global_select(const Vector3 &p_camera_world,
+		float p_query_radius, const Vector3 &p_ambient_scale, int p_time_ms,
+		Weather *p_weather) {
 	// Report/debug: ONE camera-global select. The gameplay object pass is
 	// render_model_frame (per-draw contexts, the witnessed shape); this path
 	// keeps the owned-light-unscoped approximation for census only and
@@ -322,8 +343,6 @@ int LightScene::render_frame(const Vector3 &p_camera_world,
 	selected_count_ = scene_.select(handles.data(), found,
 			opennova::renderer::LightActiveGroups{}, options, ambient, flicker,
 			/*d3d_light_path=*/true, selected_);
-	selection_mode_ = "camera_global_objects";
-	owner_isolation_ = "unavailable";
 	return static_cast<int>(selected_count_);
 }
 
@@ -910,9 +929,17 @@ int LightScene::fill_corona_multimesh(const Vector3 &p_camera_pos,
 		p_mesh->set_visible_instance_count(0);
 		return 0;
 	}
-	// The RenderingServer TRANSFORM_3D + color instance layout: three 4-float
-	// transform rows (basis row, origin component), then RGBA.
-	constexpr int64_t kFloatsPerInstance = 16;
+	// The RenderingServer instance layout: three 4-float TRANSFORM_3D rows
+	// (basis row, origin component), then RGBA when the mesh carries colors,
+	// then custom data when it does. The mesh is configured by the shell, so
+	// the stride is read off it rather than assumed.
+	if (p_mesh->get_transform_format() != MultiMesh::TRANSFORM_3D) {
+		ERR_FAIL_V_MSG(0, "corona MultiMesh must use TRANSFORM_3D");
+	}
+	const int64_t kFloatsPerInstance = 12 + (p_mesh->is_using_colors() ? 4 : 0) +
+			(p_mesh->is_using_custom_data() ? 4 : 0);
+	ERR_FAIL_COND_V_MSG(!p_mesh->is_using_colors(), 0,
+			"corona MultiMesh must carry per-instance colors");
 	corona_buffer_.resize(capacity * kFloatsPerInstance);
 	float *w = corona_buffer_.ptrw();
 	std::memset(w + rows * kFloatsPerInstance, 0,
@@ -1152,6 +1179,9 @@ void LightScene::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("render_frame", "camera_world",
 			"query_radius", "ambient_scale", "time_ms", "weather"),
 			&LightScene::render_frame);
+	ClassDB::bind_method(D_METHOD("census_frame", "camera_world",
+			"query_radius", "ambient_scale", "time_ms", "weather"),
+			&LightScene::census_frame);
 	ClassDB::bind_method(D_METHOD("render_model_frame", "models",
 			"owner_entities", "interior_owners", "interior_sections",
 			"robj_scoped", "ambient_scale", "time_ms", "weather"),

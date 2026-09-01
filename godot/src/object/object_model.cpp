@@ -1174,10 +1174,10 @@ void ObjectModel::_notification(int p_what) {
 			rebuild();
 		}
 		update_slot_shadow_group();
-	} else if (p_what == NOTIFICATION_PARENTED) {
+	} else if (p_what == NOTIFICATION_PARENTED || p_what == NOTIFICATION_UNPARENTED) {
 		// Reparenting can change the caster registry's ancestor-derived
-		// seat_parented fact (a caster moved under another caster) without
-		// touching group membership.
+		// seat_parented fact (a caster moved under, or out from under, another
+		// caster) without touching group membership; both edges bump.
 		if (is_in_group(SlotShadow::caster_group())) {
 			SlotShadow::bump_caster_group_revision();
 		}

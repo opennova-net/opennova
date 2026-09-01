@@ -629,6 +629,61 @@ void test_static_pose_memo_recomputes_on_pose_change() {
 }
 
 // ---------------------------------------------------------------------------
+// The results-identical pin for the pose memo: two identical scenes, one
+// with the memo off (every derivation recomputed), driven through the same
+// frames — moves, a return, a steady hold — must batch the same buildings.
+// The latch is held high so the PRNG stream is not the oracle.
+void test_static_pose_memo_matches_the_unmemoized_walk() {
+    Rig memo_rig;
+    Rig plain_rig;
+    plain_rig.ow.set_static_pose_memo_enabled(false);
+    std::vector<EntityHandle> memo_buildings, plain_buildings;
+    const double xs[] = {20.0, 26.0, 33.0, 40.0};
+    const double ys[] = {10.0, 14.0, 6.0, 10.0};
+    for (int k = 0; k < 4; ++k) {
+        memo_buildings.push_back(memo_rig.add_building(
+            xs[k], ys[k], building_collision(2, 2, 3), OcclusionModel{}));
+        plain_buildings.push_back(plain_rig.add_building(
+            xs[k], ys[k], building_collision(2, 2, 3), OcclusionModel{}));
+    }
+    memo_rig.rebuild();
+    plain_rig.rebuild();
+    memo_rig.ow.init_mission(memo_rig.world, memo_rig.cw);
+    plain_rig.ow.init_mission(plain_rig.world, plain_rig.cw);
+    const OcclusionFrameCamera cam = memo_rig.camera(15.0, 10.0, 1.5);
+    auto hold_latches = [&](Rig &rig, const std::vector<EntityHandle> &hs) {
+        for (EntityHandle h : hs) {
+            Entity *entity = rig.world.registry.get(h);
+            if (entity != nullptr) entity->occlusion_latch = 200;
+        }
+    };
+    auto move = [&](Rig &rig, const std::vector<EntityHandle> &hs, int k, float x) {
+        Entity *entity = rig.world.registry.get(hs[static_cast<size_t>(k)]);
+        if (entity != nullptr) entity->position = {x, entity->position.y, 0.0f};
+    };
+    int agreements = 0;
+    for (int frame = 0; frame < 8; ++frame) {
+        if (frame == 2) { move(memo_rig, memo_buildings, 1, 5.0f); move(plain_rig, plain_buildings, 1, 5.0f); }
+        if (frame == 4) { move(memo_rig, memo_buildings, 1, 26.0f); move(plain_rig, plain_buildings, 1, 26.0f); }
+        if (frame == 5) { move(memo_rig, memo_buildings, 3, 4.0f); move(plain_rig, plain_buildings, 3, 4.0f); }
+        hold_latches(memo_rig, memo_buildings);
+        hold_latches(plain_rig, plain_buildings);
+        memo_rig.ow.build_frame(memo_rig.world, memo_rig.cw, cam);
+        plain_rig.ow.build_frame(plain_rig.world, plain_rig.cw, cam);
+        for (int k = 0; k < 4; ++k) {
+            const bool a = memo_rig.ow.building_batched(memo_buildings[static_cast<size_t>(k)]);
+            const bool b = plain_rig.ow.building_batched(plain_buildings[static_cast<size_t>(k)]);
+            CHECK(a == b);
+            agreements += (a == b) ? 1 : 0;
+        }
+    }
+    CHECK(agreements == 32);
+    // The scripted moves did change the answer, so the agreement is not vacuous.
+    CHECK(!memo_rig.ow.building_batched(memo_buildings[3]));
+    CHECK(memo_rig.ow.building_batched(memo_buildings[0]));
+}
+
+// ---------------------------------------------------------------------------
 void test_indoor_masks_and_gate() {
     Rig rig;
     const EntityHandle building =
@@ -890,6 +945,7 @@ int main() {
     test_outdoor_masks();
     test_negative_static_slot_fog_collection();
     test_static_pose_memo_recomputes_on_pose_change();
+    test_static_pose_memo_matches_the_unmemoized_walk();
     test_indoor_masks_and_gate();
     test_outside_in_viewthru();
     test_toc_occlusion();

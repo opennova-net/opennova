@@ -193,6 +193,9 @@ public:
 	Dictionary get_material_info(int p_index) const;
 	PackedStringArray get_material_anim_frames(int p_index, int p_slot) const;
 	static String canonical_control_register_name(const String &p_name);
+	// Drops the register-name memo; the module terminator calls it so no
+	// godot::String outlives the extension.
+	static void clear_static_caches();
 	Array get_control_registers() const;
 	String resolve_material_texture_path(int p_material_index, int p_texture_index) const;
 	Ref<Texture2D> load_material_texture(int p_material_index, int p_texture_index) const;

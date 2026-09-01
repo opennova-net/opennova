@@ -250,6 +250,7 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	ObjectShaderCache::destroy_singleton();
 	SlotShadow::cleanup_statics();
 	Q3SourceRegistry::cleanup_statics();
+	ObjectData::clear_static_caches();
 }
 
 extern "C" {
