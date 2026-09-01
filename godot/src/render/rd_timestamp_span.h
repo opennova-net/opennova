@@ -39,7 +39,9 @@ inline bool rd_timestamp_span_us(RenderingDevice *p_rd,
 	}
 	if (!have_begin || !have_end || end_gpu < begin_gpu)
 		return false;
-	r_span_us = end_gpu - begin_gpu;
+	// get_captured_timestamp_gpu_time reports nanoseconds (measured against
+	// the known ~1.6 ms Q3 pass on the dev box); the stats slots carry µs.
+	r_span_us = (end_gpu - begin_gpu) / 1000u;
 	return true;
 }
 
