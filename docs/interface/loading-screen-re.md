@@ -215,7 +215,7 @@ after the optional SP splash. Every case:
 | Load success | release effect at end, reveal game | `_on_world_loaded` drops the screen immediately for SP/host; a joiner waits for the authoritative edge above — MATCHING |
 | Load failure / abort | `reason = 1`, nav-push `Post Menu` | `_on_world_load_failed` → `_teardown_world_to_menu` — MATCHING |
 | ESC / disconnect DURING load | `Client_CheckDisconnectOrEscDuringLoad` → abort to menu | our SP/host load is a single synchronous call the SceneTree cannot interrupt; ESC is swallowed while `_world_load_pending` — **D-LOADSCR-7** (unreachable window, not a behavioral loss on the synchronous path) |
-| Return to menu (pause → abort) | nav-push `Post Menu` | `_on_return_to_menu` → `_teardown_world_to_menu` — MATCHING |
+| Return to menu (pause → abort) | ABORT's authored actions raise the CONFIRM_EXIT "Are you sure?" panel (shipped game.mnu: `SHOW CONFIRM_EXIT` + `HIDE MAIN_WRAPPER`); the exit is the Command on CONFIRM_YES, then nav-push `Post Menu` | `MenuShell` binds CONFIRM_YES (not ABORT) as the return Command → `_on_return_to_menu` → `_teardown_world_to_menu`; CONFIRM_NO/ESC cancel through the authored actions — MATCHING (the pre-2026-09 port bound ABORT directly and skipped the confirmation) |
 
 ### SP start-mission splash — show_start_mission_splash @ 0x520820 (ported 2026-08-15)
 

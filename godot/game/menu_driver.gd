@@ -726,7 +726,8 @@ func _on_frame_widget_clicked(index: int) -> void:
 # widget[63]->vtable+32] but keeps every screen alive; this shell replaces the
 # document on a cross-.mnu jump, so observers (PLAYER_INFO ACCEPT) read their
 # still-live controls first, and the dispatch is skipped when an observer
-# swapped the document under the emit (game.mnu ABORT -> main.mnu; menu-re.md).
+# swapped the document under the emit (game.mnu CONFIRM_YES -> main.mnu;
+# menu-re.md).
 func _emit_activated_then_dispatch(id: int) -> void:
 	var doc_at_emit := _doc
 	widget_activated.emit(id, widget_name_of(id))

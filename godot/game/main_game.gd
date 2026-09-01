@@ -279,6 +279,9 @@ func _ready() -> void:
 			_hud if _hud != null else self, _hud_presenter, _deploy_presenter,
 			_armory_presenter, func() -> void: _state = State.END_ROUND,
 			_leave_screen.bind(State.END_ROUND))
+	# The STAT confirm's Yes exits the mission (the pause menu's same
+	# CONFIRM_YES command), riding the guarded return-to-menu teardown.
+	_end_round_presenter.exit_to_menu_requested.connect(_on_return_to_menu)
 	# Every net-session ENTRY (LAN browser/host, NovaWorld panel + env hooks)
 	# lives on the NetSessionController component; the shell keeps the state
 	# machine, the load pipeline, and the session-presentation states.

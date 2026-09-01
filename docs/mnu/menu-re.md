@@ -1638,10 +1638,77 @@ navigates" was a divergence, fixed 2026-09-01. Residuals: our persist runs
 per edit (retail persists on Accept — invisible except crash timing); the
 front-end BACK's narrower gamma/volume-only revert is not modeled (our
 front surface re-seeds per document open); `UNSUPPORTED_CONTROLS`
-(`options_menu_controller.gd`) force-disables 18 authored controls retail
+(`options_menu_controller.gd`) force-disables the authored controls retail
 services (UPDATE → `UI_LaunchUpdateProcess @ 0x55b0b0`, ENABLE_JOYSTICK,
 the WDM family, Mr-Clippy, PunkBuster) — a deliberate stand-in until each
-device leg lands, recorded here rather than invented.
+device leg lands, recorded here rather than invented. The XHAIR_COLOR /
+XHAIR_SPREAD pair left the locked set 2026-09-01: both are live user options
+now (persisted RGB selected BY VALUE like retail `[orig: options_screen_init
+@ 0x554cec/@ 0x554d15]`; defaults `[orig: Config_SetDefaults @ 0x54d461/
+@ 0x54d472]`; the draw side is hud-re.md's crosshair section and D-HUD-8).
+
+## The in-game exit confirmation (witnessed 2026-09-01, shipped game.mnu + `[orig: UI_RegisterIngameCallbacks @ 0x555510]`)
+
+Retail's INGAME screen (game.mnu, MUSICVAR 4) never exits a mission from the
+ABORT button itself. The shipped document authors:
+
+- `MAIN_WRAPPER` — buttons OPTIONS / RESTART / ABORT / HIDDEN_BACK (ESC).
+- `ABORT` (label id EXIT_MISSION) — authored actions:
+  `SHOW CONFIRM_EXIT` + `HIDE MAIN_WRAPPER`.
+- `CONFIRM_EXIT` — a HIDDEN framed panel at (206,225)-(562,345):
+  `STATIC_CONFIRM` (string id ARE_YOU_SURE, "Are you sure?"),
+  `CONFIRM_YES` (VK_RETURN) and `CONFIRM_NO` (VK_ESCAPE). BOTH confirm
+  buttons carry identical authored actions (`SHOW MAIN_WRAPPER` +
+  `HIDE CONFIRM_EXIT`); the exits are the engine's per-(screen,control)
+  Commands (the ADR-0001 seam, `CUIScene_RegisterControlCallback @ 0x63c060`).
+  With `MAIN_WRAPPER` hidden, the hidden-subtree hotkey rule keeps
+  `HIDDEN_BACK` from eating ESC, which therefore lands on `CONFIRM_NO`.
+
+The INGAME command registrations `[orig: UI_RegisterIngameCallbacks
+@ 0x555510]`:
+
+| Control | Handler | Behavior |
+|---|---|---|
+| ABORT | `UI_IngameAbortArmConfirm @ 0x555450` | arms the confirm-pending latch only (`dword_25A39C8 = 2`); the panel itself is the authored actions' |
+| CONFIRM_YES | `UI_IngameConfirmExitCommand @ 0x555460` | `if (latch == 2) { Game_CloseInGameScreens(); Input_HandleActionBinding(3); }` — the mission exit |
+| HIDDEN_BACK | `UI_IngameBackResumeCommand @ 0x555490` | close screens (resume); out-of-session also clears the pause flag |
+| RESTART | `UI_IngameRestartCommand @ 0x555410` | SP-only immediate restart (`g_mission_exit_reason = 4`); MP disables the button `[orig: options_screen_init @ 0x5548a6]`; its authored confirm actions ship commented out |
+| OPT_ACCEPT / OPT_CANCEL | `ingame_options_dialog_event_handler @ 0x554e40` | the options dialog section above |
+
+The same CONFIRM_EXIT idiom ships on stat.mnu STAT and death.mnu DEATH, both
+raised by their screens' HIDDEN_BACK authored actions:
+
+- STAT `[orig: HUD_CacheStatPanelValues @ 0x5627a8..0x562809]`: the
+  RADIO_TAB_OVERALL/REDTEAM/BLUETEAM trio registers
+  `stat_filter_tab_handler @ 0x562140` with params 0/1/2, and CONFIRM_YES
+  registers `UI_StatConfirmExitCommand @ 0x562210` — byte-identical to the
+  INGAME exit pair (close screens + action 3): the stat board's Yes LEAVES
+  THE MISSION, it does not merely hide the board.
+- DEATH: CONFIRM_YES registers inside `UI_RegisterDeathScreenCallbacks
+  @ 0x554610` (`@ 0x55463d`); its panel is authored MODAL — the flag is
+  parsed but not yet honored by the reimpl frame (recorded follow-up).
+
+The select-by-value contract the options seeds ride
+(`SpinList_SelectItemByValue @ 0x64ba50`): the match key is the item record's
+authored `value=` attribute (item+4, stride 56), and a miss selects row 0
+`[orig: @ 0x64ba82]`; the write-back reads the same field
+(`CSpinListWnd_GetSelectedValue @ 0x64baf0` = item+4, stored `[orig:
+@ 0x555226]`, the spread checkbox `[orig: @ 0x555248]`). The shipped
+XHAIR_COLOR rows author `value=` as the decimal RGB equal to their hex text
+(8 rows, 16777215 down to 0).
+
+Reimpl: `MenuShell.return_control_names` binds CONFIRM_YES (not ABORT) as the
+return-to-menu Command, so ABORT's authored actions raise the panel and only
+a confirmed Yes tears the world down (the retail latch is modeled by
+reachability: the panel is shown only by ABORT's actions and hidden widgets
+take neither clicks nor hotkeys); `end_round_presenter.gd` exits the mission
+on CONFIRM_YES (`exit_to_menu_requested` → the shell teardown). The earlier
+port bound ABORT directly: the teardown swapped the document under the
+activation emit, the authored `SHOW CONFIRM_EXIT` was skipped by design, and
+no confirmation ever appeared
+(`menu_shell_test.gd::test_ingame_abort_raises_confirm_and_only_yes_returns`
+pins the flow). The DEATH deploy screen's ESC→CONFIRM_EXIT leg (with MODAL)
+remains unported.
 
 ## Button label mnemonics — dispatch and draw (grilled 2026-09-01) `[orig: dispatch_keyboard_event_to_children @ 0x63ad10; draw_text_with_cursor @ 0x6533b0]`
 

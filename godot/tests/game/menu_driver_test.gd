@@ -329,8 +329,8 @@ func test_widget_activated_precedes_action_dispatch() -> void:
 
 
 # The inversion's guard: an observer that synchronously swaps the document
-# (the game.mnu ABORT -> teardown -> main.mnu chain) must not have the OLD
-# widget id's ACTION list dispatched against the NEW document.
+# (the game.mnu CONFIRM_YES -> teardown -> main.mnu chain) must not have the
+# OLD widget id's ACTION list dispatched against the NEW document.
 func test_document_swap_during_activation_blocks_stale_dispatch() -> void:
 	var driver := _framed_driver(ACTION_BUTTON_XML)
 	driver.widget_activated.connect(

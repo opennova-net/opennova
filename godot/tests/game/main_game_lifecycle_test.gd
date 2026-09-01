@@ -552,7 +552,8 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	assert_false(world.get_current_frame_clear_color().is_equal_approx(boot_clear),
 			"the loaded mission exercised a distinct frame clear")
 
-	# The pause menu's ABORT command emits this public intent.
+	# The pause menu's CONFIRM_YES command (ABORT's "Are you sure?" panel)
+	# emits this public intent.
 	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
