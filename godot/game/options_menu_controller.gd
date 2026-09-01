@@ -25,8 +25,8 @@ var _control_device := ControlsModel.DEVICE_KEYBOARD
 # controls only on an options surface — a document that authors the control
 # table (options.mnu) or any of the engine's witnessed Options sliders
 # (game.mnu's OPTIONS_WRAPPER). Widgets that happen to share those names on
-# any other document — jo_sp.mnu's start ACCEPT, a DIFFICULTY on a host
-# screen — stay the shell's.
+# any other document — jo_sp.mnu's start ACCEPT, a DIFFICULTY on a
+# session-setup screen — stay the shell's.
 var _has_control_table := false
 var _is_options_surface := false
 # The options state at surface entry. Retail stages edits as live previews and

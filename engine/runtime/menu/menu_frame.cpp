@@ -485,10 +485,15 @@ MenuFrameCompiler::ResolvedText MenuFrameCompiler::resolved_widget_text(
 		const WidgetNode &node,
 		const MenuWidgetState *ws) const {
 	if (ws != nullptr && ws->has_text) {
-		if (node.window->type == mnu::WindowType::Button) {
-			return resolve_text_value("literal", ws->text);
-		}
 		ResolvedText resolved;
+		if (node.window->type == mnu::WindowType::Button) {
+			// A runtime relabel is raw text: retail's SetLabel strips the
+			// mnemonic marker but runs no %VAR% pass (that pass is parse-time,
+			// D-MNU-1) [orig: CButtonWnd_SetLabel @ 0x6572F0].
+			resolved.text = mnu::strip_hotkey_marker(ws->text, &resolved.hotkey,
+					&resolved.hotkey_pos);
+			return resolved;
+		}
 		resolved.text = ws->text;
 		return resolved;
 	}

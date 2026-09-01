@@ -487,6 +487,12 @@ func item_value(id: int, row: int) -> String:
 	return String(_doc.get_item(id, row).get("value", ""))
 
 
+## A widget's authored ACTION rows, as the document parsed them (each a
+## Dictionary dispatch_action_row accepts).
+func widget_actions(id: int) -> Array:
+	return _doc.get_widget_actions(id)
+
+
 ## Retail's select-by-value seed (SpinList_SelectItemByValue; the lookup is
 ## the engine's through MnuDocument.find_item_row_by_value): the row whose
 ## authored `value=` equals `value`, row 0 on a miss.

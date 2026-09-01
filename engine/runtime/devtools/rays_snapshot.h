@@ -14,6 +14,8 @@ namespace opennova::devtools {
 // its own count so ImGui code never includes the collision header. The
 // embedder fills `name` from ray_debug_category_name (static storage).
 inline constexpr int kRayCategoryCount = 15;
+// Every category bit set (the "All" filter and the snapshot's default mask).
+inline constexpr uint32_t kRayCategoryMaskAll = (1u << kRayCategoryCount) - 1;
 
 struct RaysCategoryCount {
 	const char *name = "";
@@ -26,7 +28,7 @@ struct RaysSnapshot {
 	uint64_t logic_tick = 0;
 	bool recording = false;   // CollisionWorld ray capture enabled
 	bool view_shown = false;  // the shell's 3D ray view is built (show_rays)
-	uint32_t category_mask = 0x7FFF; // bit i = draw category i
+	uint32_t category_mask = kRayCategoryMaskAll; // bit i = draw category i
 	int32_t ttl_ticks = 0;           // the view's fade window
 	RaysCategoryCount categories[kRayCategoryCount];
 };

@@ -1,5 +1,5 @@
 class_name ArmoryMenuCompanion
-extends RefCounted
+extends MenuCompanion
 
 const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 
@@ -33,8 +33,6 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # g_armoryLoadoutBufferByClass @0x25DD740 -> populate_ammo_type_combo_boxes
 # @0x564930], the *_AMMO2 controls, and the *_AMMO1_TYPE round-type cascade.
 
-var _driver: MenuDriver
-var _root: ResourceRoot
 var _weapons: WeaponDatabase
 var _team := 0                       # 0 = blue/good, 1 = red/evil (host stamps before open)
 # The local player's class + the host's class-allow mask feeding the witnessed
@@ -74,8 +72,6 @@ var _grenade_rows: Array = []
 # arms it [orig: g_weaponScreenOpenDebounce = 1 at the open @0x4e0b21; cleared by
 # Input_HandleMenuKeyRelease @0x4de2d0].
 var _accept_hotkey_armed := false
-# NAME (upper) -> Callable activation routing off the driver.
-var _activation_handlers := {}
 # PRIMARY/SECONDARY/ACCESSORY -> TextureRect mounted over the blank authored
 # *_ICON window. The compiled frame owns no per-widget Control nodes.
 var _icon_mounts := {}
@@ -150,20 +146,16 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 
 # The presenter's close() releases the companion: every open rebuilds via
 # on_menu_built, so the hidden frame keeps no icon mounts between shows.
-# (This class is companion-SHAPED but extends RefCounted, not MenuCompanion —
-# the release hook mirrors MenuCompanion.on_menu_released by name.)
 func on_menu_released() -> void:
-	_activation_handlers.clear()
+	super()
 	_clear_icon_mounts()
 
 
-func on_menu_built(driver: MenuDriver, _file: String, _screen: String, root: ResourceRoot) -> void:
-	_driver = driver
-	_root = root
-	_activation_handlers.clear()
+func on_menu_built(driver: MenuDriver, file: String, screen: String, root: ResourceRoot) -> void:
+	# The base wires _driver/_root, the by-name handler table (dispatched
+	# with the stale-document guard) and the widget_activated relay.
+	super(driver, file, screen, root)
 	_clear_icon_mounts()
-	if not driver.widget_activated.is_connected(_on_widget_activated):
-		driver.widget_activated.connect(_on_widget_activated)
 	if not driver.widget_value_changed.is_connected(_on_widget_value_changed):
 		driver.widget_value_changed.connect(_on_widget_value_changed)
 	if not driver.screen_changed.is_connected(_on_screen_changed):
@@ -615,12 +607,6 @@ func _on_cancel() -> void:
 
 
 # --- Driver relays -----------------------------------------------------------------
-
-func _on_widget_activated(_id: int, widget_name: String) -> void:
-	var handler: Callable = _activation_handlers.get(widget_name.to_upper(), Callable())
-	if handler.is_valid():
-		handler.call()
-
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, _value: String) -> void:
 	if _populating:

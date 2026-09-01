@@ -20,8 +20,6 @@ extends Control
 # different game's menu set can be pointed at the same shell.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const PlayerOptionsScript := preload("res://game/player_options.gd")
-const OptionsMenuControllerScript := preload("res://game/options_menu_controller.gd")
 
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
@@ -340,8 +338,8 @@ func _assemble_assets() -> void:
 	_driver.widget_activated.connect(_on_widget_activated)
 	_driver.list_activated.connect(_on_list_activated)
 	if _player_options == null:
-		_player_options = PlayerOptionsScript.new()
-	_options_controller = OptionsMenuControllerScript.new()
+		_player_options = PlayerOptions.new()
+	_options_controller = OptionsMenuController.new()
 	_options_controller.setup(_driver, _player_options)
 	set_process(true)
 
@@ -400,6 +398,11 @@ func open_menu(file: String, target_screen: String) -> bool:
 	if not _driver.open_document(doc, _root, _style, _text, file.get_file(),
 			target_screen):
 		push_warning("MenuShell: menu '%s' has no screens" % file)
+		# The driver may already have swapped its document: nothing parked on
+		# the shared frame by the previous companion can be rebuilt now.
+		if _wired_companion != null:
+			_wired_companion.on_menu_released()
+			_wired_companion = null
 		return false
 	if _options_controller != null:
 		_options_controller.prepare_document()
@@ -774,6 +777,14 @@ func _on_exit_control() -> void:
 
 
 func _on_return_control() -> void:
+	# CONFIRM_YES is registered per (screen, control) in retail — the INGAME,
+	# STAT and DEATH screens each bind their own exit handler
+	# (docs/mnu/menu-re.md "The in-game exit confirmation"). The shell binds
+	# the name, so it answers only while a mission is running; a front-end
+	# document that happened to author the name never leaves a mission that
+	# is not there.
+	if not _in_game:
+		return
 	return_to_menu_requested.emit()
 
 
