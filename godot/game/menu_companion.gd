@@ -38,6 +38,15 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 	_wire(file, screen)
 
 
+## Called by MenuShell when a freshly opened document is NOT this companion's
+## while it was the wired one: the companion must drop anything it parked on
+## the shared frame (mounts, previews), because no later on_menu_built is
+## coming. Subclasses override and call super.
+func on_menu_released() -> void:
+	_activation_handlers.clear()
+	_wired_file = ""
+
+
 ## Subclass hook: wire the owned screens' controls (by name) off _driver/_root.
 func _wire(_file: String, _screen: String) -> void:
 	pass

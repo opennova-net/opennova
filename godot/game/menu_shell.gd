@@ -165,6 +165,9 @@ var _named_handlers: Dictionary = {}
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
 # claims a loaded menu drives it; otherwise the shell's generic wiring runs.
 var _companions: Array = []
+# The companion wired to the current document (null when the shell's generic
+# wiring runs); the next document swap releases it if it loses ownership.
+var _wired_companion: MenuCompanion = null
 
 
 
@@ -462,12 +465,22 @@ func _wire_named_controls() -> void:
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
 	# skip the generic launch/mission wiring, so e.g. START_GAME means "host a game" rather
-	# than "launch the first mission". The first claimant wins.
+	# than "launch the first mission". The first claimant wins. The previously
+	# wired companion is RELEASED when it loses the document: mounts it parked
+	# on the persistent frame (the PLAYER_INFO avatar preview) would otherwise
+	# outlive their screen, since no later on_menu_built reaches it.
+	var claimant: MenuCompanion = null
 	for companion in _companions:
 		if companion != null and companion.owns_menu(_driver):
-			companion.on_menu_built(_driver, _current_file,
-					_driver.get_current_screen(), _root)
-			return
+			claimant = companion
+			break
+	if _wired_companion != null and _wired_companion != claimant:
+		_wired_companion.on_menu_released()
+	_wired_companion = claimant
+	if claimant != null:
+		claimant.on_menu_built(_driver, _current_file,
+				_driver.get_current_screen(), _root)
+		return
 	var has_mission_list := false
 	for list_name in mission_list_names:
 		var id := _driver.widget_id(list_name)

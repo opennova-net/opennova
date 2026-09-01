@@ -148,6 +148,13 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_weapons = weapons
 
 
+# The presenter's close() releases the companion: every open rebuilds via
+# on_menu_built, so the hidden frame keeps no icon mounts between shows.
+func on_menu_released() -> void:
+	super()
+	_clear_icon_mounts()
+
+
 func on_menu_built(driver: MenuDriver, _file: String, _screen: String, root: ResourceRoot) -> void:
 	_driver = driver
 	_root = root

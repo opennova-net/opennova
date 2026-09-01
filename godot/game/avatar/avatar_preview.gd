@@ -153,6 +153,19 @@ func _notification(what: int) -> void:
 	# assigns it -- the moment to (re)apply the on-screen render resolution.
 	if what == NOTIFICATION_RESIZED:
 		_apply_menu_viewport_resolution()
+	elif what == NOTIFICATION_VISIBILITY_CHANGED:
+		_sync_render_activity()
+
+
+# Render activity follows visibility (the water reflection-viewport rule): a
+# hidden portrait must not keep paying for a full 3D pass or its input-driven
+# animation. UPDATE_ALWAYS returns with visibility.
+func _sync_render_activity() -> void:
+	var active := is_visible_in_tree()
+	if _viewport != null:
+		_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS \
+				if active else SubViewport.UPDATE_DISABLED
+	set_process(active)
 
 
 func _build_viewport() -> void:
@@ -210,6 +223,7 @@ func _build_viewport() -> void:
 			and not get_viewport().size_changed.is_connected(_apply_menu_viewport_resolution):
 		get_viewport().size_changed.connect(_apply_menu_viewport_resolution)
 	_apply_menu_viewport_resolution()
+	_sync_render_activity()
 	_refresh_portrait()
 
 
