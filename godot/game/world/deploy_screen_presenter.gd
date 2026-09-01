@@ -117,7 +117,7 @@ func select_spawn_row(row: int) -> void:
 ## Open over the live world when the join owes a deployment pick, or when the
 ## host drives the deploy-map OVERLAY (0x0F game_flags bit0 / per-frame 0x0A
 ## flags1 bit1) — retail opens this same death.mnu DEATH screen for both, and
-## the once-per-mission open latch belongs to the shell (MainGame), like
+## the once-per-arming open latch belongs to the engine's ClientState, like
 ## retail's frame loop. The witnesses live on ClientState.deploy_overlay_active
 ## (engine/net/netsim/client_state.h) and hud-re D-HUD-19.
 func open() -> bool:

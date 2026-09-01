@@ -148,10 +148,43 @@ void test_deploy_overlay_follows_the_host() {
 	CHECK(!view.state().deploy_overlay_active);
 }
 
+// The death.mnu open latch: one open per arming, stamped result-blind, and
+// cleared only by the host dropping the bit — never by a dismiss.
+// [orig: Render_ProcessMainSceneFrame latch @0x5cab70/@0x5cab8b;
+//  Game_CloseInGameScreens @0x54b954 on the close-on-clear leg]
+void test_deploy_overlay_open_latch() {
+	auto owned = std::make_unique<ClientReplicaPipeline>();
+	ClientReplicaPipeline &view = *owned;
+	CHECK(!view.state().take_deploy_overlay_open()); // nothing armed
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(view.state().take_deploy_overlay_open());  // the one open
+	CHECK(!view.state().take_deploy_overlay_open()); // latched (a dismiss
+	                                                 // does not re-arm)
+	FrameUpdate fu;
+	fu.mount_handle = 0xFFFF;
+	fu.health = 150;
+	fu.local_tail_present = true;
+	fu.flags1 = 0x02; // the host keeps the bit set: still latched
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(!view.state().take_deploy_overlay_open());
+	fu.flags1 = 0x00; // the trigger falls: the latch clears
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(!view.state().deploy_overlay_open_latch);
+	CHECK(!view.state().take_deploy_overlay_open()); // nothing armed again
+	fu.flags1 = 0x02; // re-armed: the screen opens again
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(view.state().take_deploy_overlay_open());
+	CHECK(!view.state().take_deploy_overlay_open());
+	// The 0x0F zero clears it the same way [orig: @0x42e2d8].
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x00));
+	CHECK(!view.state().deploy_overlay_open_latch);
+}
+
 int main() {
 	test_sub_block_0_timers_fold_and_retain();
 	test_self_wave_zone();
 	test_deploy_overlay_follows_the_host();
+	test_deploy_overlay_open_latch();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

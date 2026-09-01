@@ -1285,10 +1285,15 @@ bool Simulation::is_join_deploy_pick_pending() const {
 bool Simulation::is_join_deploy_overlay_active() const {
 	// The deploy-map overlay (retail g_deploy_screen_active): armed by the S2C
 	// 0x0F game_flags bit0, then host-maintained per frame from the 0x0A flags1
-	// bit1. A UI signal only — the shell opens death.mnu's DEATH screen once off
-	// it (latched per load) and it never gates the spawn. [orig: the folds
-	// @0x42e2f8/@0x42ff82; the open latch Render_ProcessMainSceneFrame @0x5cab5e]
+	// bit1. A UI signal only — it never gates the spawn. [orig: the folds
+	// @0x42e2f8/@0x42ff82]
 	return joiner_ && runtime_ && runtime_->state().deploy_overlay_active;
+}
+
+bool Simulation::take_join_deploy_overlay_open() {
+	// The open latch and its clear are ClientState's (client_state.h
+	// deploy_overlay_open_latch); this is the typed seam for the shell's frame.
+	return joiner_ && runtime_ && runtime_->state().take_deploy_overlay_open();
 }
 
 int Simulation::get_join_assigned_team() const {
