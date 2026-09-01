@@ -15,6 +15,7 @@
 #include <net/novaworld/lobby_vars.h>
 
 #include "network/nwu_lobby_session.h"
+#include "network/ping_sweep_worker.h"
 
 #include <cstdint>
 #include <memory>
@@ -205,9 +206,13 @@ private:
 	// The browse-time ping sweep (retail pings every row's IPv4 on the list
 	// finalize; the semantics live in engine/net/novaworld/ping_sweep.h and
 	// the device leg in network/ping_sweep_worker.cpp). The generation stamps
-	// each sweep so a late pass from a superseded list is dropped.
+	// each sweep so a late pass from a superseded list is dropped; one worker
+	// runs at a time, and a list refreshed underneath it re-sweeps when its
+	// stale results land.
 	Dictionary server_pings_;               // rid (int) -> ping ms / -2 / -3
 	int64_t ping_generation_ = 0;
+	PingSweepWorker ping_worker_;
+	bool ping_resweep_pending_ = false;
 	void start_ping_sweep();
 	void apply_ping_results(const Dictionary &results, int64_t generation);
 
