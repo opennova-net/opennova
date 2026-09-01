@@ -770,6 +770,51 @@ func test_play_screen_accept_still_launches() -> void:
 	DirAccess.remove_absolute(dir)
 
 
+# The options controller listens on the same driver for every document. On a
+# play screen (no CONTROL_MAPPING) its named controls must stay inert: ACCEPT
+# belongs to the shell's launch path (no pop underneath the launch), and a
+# stray DEFAULTS activation must not wipe the persisted bindings.
+func test_options_controls_inert_without_control_table() -> void:
+	var dir := OS.get_temp_dir().path_join("menu_shell_sp_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	_copy(SP_PLAY_FIXTURE, dir.path_join("main.mnu"))  # jo_sp: ACCEPT, no control table
+	var f := FileAccess.open(dir.path_join("alpha.bms"), FileAccess.WRITE)
+	if f != null:
+		f.store_buffer(PackedByteArray([0]))
+		f.close()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		DirAccess.remove_absolute(dir.path_join("main.mnu"))
+		DirAccess.remove_absolute(dir.path_join("alpha.bms"))
+		DirAccess.remove_absolute(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	assert_lt(driver.widget_id("CONTROL_MAPPING"), 0, "jo_sp authors no control table")
+	watch_signals(shell)
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	assert_signal_emitted(shell, "start_requested", "the shell launch path still owns ACCEPT")
+	assert_eq(shell.get_current_menu_file(), "main.mnu",
+			"no options pop underneath the launch")
+	assert_eq(shell.get_menu_stack_depth(), 0)
+	# Re-bind an action, then fire the name the options surface would own; a
+	# stray DEFAULTS must not restore (rows already at defaults would make a
+	# no-op restore pass vacuously, hence the edit first).
+	var model: ControlsModel = ControlsBindings.model()
+	var saved: Dictionary = model.save_blob()
+	var action: int = model.action_index_for_row(0)
+	model.assign_godot_key(action, KEY_G, false)
+	var edited := model.control_text(action, ControlsModel.DEVICE_KEYBOARD)
+	driver.widget_activated.emit(-1, "DEFAULTS")
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD), edited,
+			"a stray DEFAULTS on a non-options document leaves the bindings alone")
+	model.load_blob(saved)
+	ControlsBindings.persist()
+	DirAccess.remove_absolute(dir.path_join("main.mnu"))
+	DirAccess.remove_absolute(dir.path_join("alpha.bms"))
+	DirAccess.remove_absolute(dir)
+
+
 # The menu stylesheet (menu_style.mns) ships PFF-archived. It is indexed as the
 # "menu_style" kind (so list_files surfaces it for editor browsing), but the shell
 # still loads it by its canonical name through the VFS -- the engine contract is the

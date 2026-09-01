@@ -30,6 +30,11 @@ var _remap_table_id := -1
 var _remap_row := -1
 var _remap_action := -1
 var _control_device := ControlsModel.DEVICE_KEYBOARD
+# Presence gate, refreshed per document: the controller answers the named
+# controls below only on a document that authors the control table (the
+# options surface). Widgets that happen to share those names on any other
+# document — jo_sp.mnu's start ACCEPT above all — stay the shell's.
+var _has_control_table := false
 
 
 func setup(driver: MenuDriver, options: PlayerOptions) -> void:
@@ -50,7 +55,8 @@ func prepare_document() -> void:
 	_seed_player_options()
 	_lock_unsupported_controls()
 	var table_id := _find_control_table()
-	if table_id >= 0:
+	_has_control_table = table_id >= 0
+	if _has_control_table:
 		_control_device = ControlsModel.DEVICE_KEYBOARD
 		_fill_control_mapping(table_id, _control_device)
 		_set_checked(KEYBOARD_CONTROL, true)
@@ -166,17 +172,26 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 			state.invert_mouse = _driver.is_widget_checked(id)
 			_options.update(state)
 		"KEYBOARD":
-			_switch_control_device(ControlsModel.DEVICE_KEYBOARD)
+			if _has_control_table:
+				_switch_control_device(ControlsModel.DEVICE_KEYBOARD)
 		"MOUSE":
-			_switch_control_device(ControlsModel.DEVICE_MOUSE)
+			if _has_control_table:
+				_switch_control_device(ControlsModel.DEVICE_MOUSE)
 		"DEFAULTS":
-			_restore_control_defaults()
+			# The table gate keeps a same-named widget on any other document
+			# from wiping the persisted bindings.
+			if _has_control_table:
+				_restore_control_defaults()
 		"CLEAR_KEY":
-			_clear_selected_binding()
+			if _has_control_table:
+				_clear_selected_binding()
 		"ACCEPT":
-			# options.mnu authors an actionless Accept. pop_screen emits the
-			# driver's quit seam, which MenuShell resolves through its file stack.
-			_driver.pop_screen()
+			# options.mnu authors an actionless Accept beside the control
+			# table. pop_screen emits the driver's quit seam, which MenuShell
+			# resolves through its file stack. On documents without the table
+			# (jo_sp.mnu's start control) the name is the shell's, not ours.
+			if _has_control_table:
+				_driver.pop_screen()
 		"OPT_ACCEPT", "OPT_CANCEL":
 			_show_ingame_main_wrapper()
 
