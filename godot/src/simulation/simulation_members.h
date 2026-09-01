@@ -78,6 +78,8 @@ private:
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by
 	// run_occlusion_frame; consumed via get_render_culled_bms_ids.
 	std::vector<int32_t> occlusion_culled_bms_;
+	// Reused probe scratch (cleared per frame, capacity retained).
+	std::vector<opennova::world::EntityHandle> occlusion_probe_handles_;
 	// Delta baselines for the render-occlusion apply path: what the shell last
 	// applied, so steady frames emit nothing. Cleared on world reset and via
 	// reset_occlusion_apply_baseline() (the occlusion A/B seam re-arms a full

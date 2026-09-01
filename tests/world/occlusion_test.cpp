@@ -591,6 +591,44 @@ void test_negative_static_slot_fog_collection() {
 }
 
 // ---------------------------------------------------------------------------
+// The static pose memo behind collect_buildings caches only pure derivations
+// (the placed bound sphere, the record world positions) behind value keys:
+// a steady frame reproduces the identical admission, and a changed pose (the
+// guard for a husk swap or any future mover) recomputes rather than reading
+// a stale center. The latch is held high so the PRNG stream stays untouched.
+void test_static_pose_memo_recomputes_on_pose_change() {
+    Rig rig;
+    const EntityHandle building =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), OcclusionModel{});
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    Entity *entity = rig.world.registry.get(building);
+    CHECK(entity != nullptr);
+    if (entity == nullptr) return;
+    entity->occlusion_latch = 200;
+    const OcclusionFrameCamera cam = rig.camera(15.0, 10.0, 1.5);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.building_batched(building));
+    // Steady frame: the memo hit reproduces the same admission.
+    entity->occlusion_latch = 200;
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.building_batched(building));
+    // The static proximity slot keeps its load-time coords, so only the
+    // memoized placed sphere sees the move: a stale memo (center still ahead
+    // at x=20) would keep the building batched, the recompute must drop it
+    // behind the camera's near plane (camera x=15 looking +X).
+    entity->position = {5.0f, 10.0f, 0.0f};
+    entity->occlusion_latch = 200;
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(!rig.ow.building_batched(building));
+    // And back: the guard re-admits at the original pose.
+    entity->position = {20.0f, 10.0f, 0.0f};
+    entity->occlusion_latch = 200;
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.building_batched(building));
+}
+
+// ---------------------------------------------------------------------------
 void test_indoor_masks_and_gate() {
     Rig rig;
     const EntityHandle building =
@@ -851,6 +889,7 @@ int main() {
     test_tilted_pose_weld();
     test_outdoor_masks();
     test_negative_static_slot_fog_collection();
+    test_static_pose_memo_recomputes_on_pose_change();
     test_indoor_masks_and_gate();
     test_outside_in_viewthru();
     test_toc_occlusion();

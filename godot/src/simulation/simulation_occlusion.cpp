@@ -74,7 +74,9 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// host draws. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
 	// collect_visible_entities_for_terrain @ 0x5c8c60]
 	occlusion_culled_bms_.clear();
-	std::vector<opennova::world::EntityHandle> handles;
+	std::vector<opennova::world::EntityHandle> &handles =
+			occlusion_probe_handles_;
+	handles.clear();
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &e) {
 		if (e.kind == opennova::world::EntityKind::Building ||
 		    e.kind == opennova::world::EntityKind::Marker)
