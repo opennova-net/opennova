@@ -36,6 +36,8 @@ var _frame_skip_occlusion := false
 var _device_frame_start_us := 0
 # Weakref edge latch for measured render time on the water reflection RTT.
 var _stats_water_vp_ref: WeakRef = null
+# Edge latch for the compositor passes' RD GPU timestamps (F3 capture only).
+var _stats_aux_gpu_timing := false
 
 
 ## One-time wiring from the owning GameWorld (constructed in the world's
@@ -457,17 +459,33 @@ func update_clear_frame() -> void:
 # per-frame counts (the compile of this frame, the draw of the previous one).
 # Focused Q3 and the slot-shadow captures both draw inside the root
 # compositor (POST_TRANSPARENT and PRE_OPAQUE); their per-pass counts come off
-# the effects' typed reports, their time rides the root viewport rows.
+# the effects' typed reports. Their GPU spans are carved back out of the root
+# rows by RD timestamps the effects capture only while the Stats tab does —
+# capture_timestamp barriers the RD graph, so the toggle rides stats_on
+# (re-applied every captured frame so a late-built effect still hears it,
+# switched off on the capture's falling edge).
 func _sample_auxiliary_render_stats(stats_on: bool) -> void:
 	if not stats_on:
+		if _stats_aux_gpu_timing:
+			_stats_aux_gpu_timing = false
+			if _world._framefx != null:
+				_world._framefx.set_gpu_timing_enabled(false)
+			if _world._slot_shadow != null:
+				_world._slot_shadow.set_gpu_timing_enabled(false)
 		return
+	_stats_aux_gpu_timing = true
 	if _world._framefx != null:
+		_world._framefx.set_gpu_timing_enabled(true)
 		var q3_report := _world._framefx.get_backend_report()
 		_world._frame_stats.add(FrameStats.RENDER_Q3_OBJECTS,
 				int(q3_report.get("q3_drawn_commands", 0)))
 		_world._frame_stats.add(FrameStats.RENDER_Q3_DRAWS,
 				int(q3_report.get("q3_gpu_draw_calls", 0)))
+		if bool(q3_report.get("q3_gpu_valid", false)):
+			_world._frame_stats.add(FrameStats.RENDER_Q3_GPU,
+					int(q3_report.get("q3_gpu_us", 0)))
 	if _world._slot_shadow != null:
+		_world._slot_shadow.set_gpu_timing_enabled(true)
 		var slot_report := _world._slot_shadow.get_report()
 		_world._frame_stats.add(FrameStats.RENDER_SLOT_OBJECTS,
 				int(slot_report.get("slot_surfaces_compiled", 0)))
@@ -479,6 +497,9 @@ func _sample_auxiliary_render_stats(stats_on: bool) -> void:
 				int(slot_report.get("slot_packed_vertices", 0)))
 		_world._frame_stats.add(FrameStats.RENDER_SLOT_SKINNED,
 				int(slot_report.get("slot_skinned_commands", 0)))
+		if bool(slot_report.get("slot_gpu_valid", false)):
+			_world._frame_stats.add(FrameStats.RENDER_SLOT_GPU,
+					int(slot_report.get("slot_gpu_us", 0)))
 
 
 func is_water_render_stats_measured() -> bool:

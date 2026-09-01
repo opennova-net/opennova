@@ -119,6 +119,11 @@ class SlotCaptureCompositorEffect : public CompositorEffect {
 private:
 	std::unique_ptr<SlotCaptureAdapter> adapter_;
 	std::atomic<bool> shutdown_requested_{false};
+	// F3-only GPU timing (rd_timestamp_span.h carries the barrier contract);
+	// the harvested span is atomics so the render callback takes no new lock.
+	std::atomic<bool> gpu_timing_enabled_{false};
+	std::atomic<std::uint64_t> gpu_span_us_{0};
+	std::atomic<bool> gpu_span_valid_{false};
 
 protected:
 	static void _bind_methods();
@@ -134,6 +139,11 @@ public:
 	void release_device_resources();
 	bool is_shutdown() const {
 		return shutdown_requested_.load(std::memory_order_acquire);
+	}
+	// F3 Stats capture toggle for the pass's RD GPU span (carved out of the
+	// root viewport's GPU row while the Stats tab captures).
+	void set_gpu_timing_enabled(bool p_enabled) {
+		gpu_timing_enabled_.store(p_enabled, std::memory_order_relaxed);
 	}
 	Dictionary get_backend_report() const;
 

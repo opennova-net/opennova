@@ -2,6 +2,7 @@
 #include "render/q3_frame_adapter.h"
 #include "render/q3_source_registry.h"
 #include "render/rd_fullscreen.h"
+#include "render/rd_timestamp_span.h"
 
 #include <algorithm>
 #include <array>
@@ -276,7 +277,11 @@ public:
 	Vector2i last_size;
 	Vector2i last_capture_size;
 	bool q3_sampled = false;
+	std::uint64_t gpu_span_us = 0;
+	bool gpu_span_valid = false;
 	std::atomic<bool> shutdown_requested{false};
+	// F3-only GPU timing (rd_timestamp_span.h carries the barrier contract).
+	std::atomic<bool> gpu_timing_enabled{false};
 
 	RenderingDevice *rd = nullptr;
 	RID shader;
@@ -839,6 +844,19 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	const Vector2i size = buffers->get_internal_size();
 	if (!ensure_targets(buffers, count, size))
 		return false;
+	const bool gpu_timing =
+			gpu_timing_enabled.load(std::memory_order_relaxed);
+	if (gpu_timing) {
+		std::uint64_t span_us = 0;
+		const bool span_valid = rd_timestamp_span_us(rd,
+				"opennova_framefx_begin", "opennova_framefx_end", span_us);
+		{
+			std::lock_guard<std::mutex> lock(diagnostics_mutex);
+			gpu_span_valid = span_valid;
+			gpu_span_us = span_us;
+		}
+		rd->capture_timestamp("opennova_framefx_begin");
+	}
 	std::size_t draws = 0;
 	bool sampled_q3 = false;
 	bool q3_failed = false;
@@ -874,6 +892,8 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 			return false;
 		++draws;
 	}
+	if (gpu_timing)
+		rd->capture_timestamp("opennova_framefx_end");
 	{
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
 		if (q3_failed)
@@ -926,6 +946,8 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["frame_size"] = last_size;
 	result["capture_size"] = last_capture_size;
 	result["q3_sampled"] = q3_sampled;
+	result["q3_gpu_us"] = static_cast<int64_t>(gpu_span_us);
+	result["q3_gpu_valid"] = gpu_span_valid;
 	result["shutdown"] = shutdown_requested.load(std::memory_order_acquire);
 	const Dictionary q3_report = q3_adapter.get_report();
 	const Array q3_keys = q3_report.keys();
@@ -971,6 +993,11 @@ void FrameFxCompositorEffect::release_device_resources() {
 	impl_->rd_available = false;
 	impl_->status = "shutdown";
 	impl_->failure.clear();
+}
+
+void FrameFxCompositorEffect::set_gpu_timing_enabled(bool p_enabled) {
+	if (impl_)
+		impl_->gpu_timing_enabled.store(p_enabled, std::memory_order_relaxed);
 }
 
 Dictionary FrameFxCompositorEffect::get_backend_report() const {
@@ -1054,6 +1081,8 @@ void FrameFx::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_frame"),
 			&FrameFx::advance_frame);
 	ClassDB::bind_method(D_METHOD("shutdown"), &FrameFx::shutdown);
+	ClassDB::bind_method(D_METHOD("set_gpu_timing_enabled", "enabled"),
+			&FrameFx::set_gpu_timing_enabled);
 	ClassDB::bind_method(D_METHOD("get_q3_target_image"),
 			&FrameFx::get_q3_target_image);
 	ClassDB::bind_static_method("FrameFx",
@@ -1078,6 +1107,13 @@ void FrameFx::build_compositor() {
 		return;
 	if (terminal_effect_.is_null())
 		terminal_effect_.instantiate();
+	terminal_effect_->set_gpu_timing_enabled(gpu_timing_enabled_);
+}
+
+void FrameFx::set_gpu_timing_enabled(bool p_enabled) {
+	gpu_timing_enabled_ = p_enabled;
+	if (terminal_effect_.is_valid())
+		terminal_effect_->set_gpu_timing_enabled(p_enabled);
 }
 
 void FrameFx::install_compositor() {

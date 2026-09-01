@@ -201,6 +201,8 @@ void SlotShadow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_local_player_prone", "prone"),
 			&SlotShadow::set_local_player_prone);
 	ClassDB::bind_method(D_METHOD("advance_frame"), &SlotShadow::advance_frame);
+	ClassDB::bind_method(D_METHOD("set_gpu_timing_enabled", "enabled"),
+			&SlotShadow::set_gpu_timing_enabled);
 	ClassDB::bind_method(D_METHOD("get_report"), &SlotShadow::get_report);
 	ClassDB::bind_static_method("SlotShadow", D_METHOD("get_capture_count"),
 			&SlotShadow::get_capture_count);
@@ -370,6 +372,7 @@ void SlotShadow::_ensure_captures() {
 	if (effect_.is_null()) {
 		effect_.instantiate();
 	}
+	effect_->set_gpu_timing_enabled(gpu_timing_enabled_);
 	// Follow the live compositor: FrameFx::install_compositor and
 	// DisplayDecode::install replace the scope WorldEnvironment's compositor
 	// with a fresh one (carrying the previous effects) after their own READY,
@@ -1016,6 +1019,12 @@ void SlotShadow::advance_frame() {
 	if (effect_.is_valid()) {
 		effect_->adapter().compile_frame(requests_);
 	}
+}
+
+void SlotShadow::set_gpu_timing_enabled(bool p_enabled) {
+	gpu_timing_enabled_ = p_enabled;
+	if (effect_.is_valid())
+		effect_->set_gpu_timing_enabled(p_enabled);
 }
 
 Dictionary SlotShadow::get_report() const {

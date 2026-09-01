@@ -104,6 +104,9 @@ public:
 	// One display frame: plan, publish the armed capture requests, publish
 	// the drape terms.
 	void advance_frame();
+	// F3 Stats capture toggle for the capture pass's RD GPU span (see
+	// SlotCaptureCompositorEffect::set_gpu_timing_enabled).
+	void set_gpu_timing_enabled(bool p_enabled);
 	Dictionary get_report() const;
 
 	// Inspection seams (the F3 sampler and the GUT pins): the bitmask of
@@ -191,6 +194,8 @@ private:
 	int report_blobs_ = 0;
 	int report_bound_ = 0;
 	bool shutdown_ = false;
+	// Latched so a lazily (re)instantiated effect re-applies the F3 timing flag.
+	bool gpu_timing_enabled_ = false;
 
 	static Ref<ShaderMaterial> drape_material_;
 	static Ref<ShaderMaterial> blob_material_;

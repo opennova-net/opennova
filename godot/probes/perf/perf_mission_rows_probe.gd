@@ -47,6 +47,8 @@ const ENGINE_SLOT_SAMPLES := {
 	"render_root_gpu": FrameStats.RENDER_ROOT_GPU,
 	"render_water_cpu": FrameStats.RENDER_WATER_CPU,
 	"render_water_gpu": FrameStats.RENDER_WATER_GPU,
+	"render_q3_gpu": FrameStats.RENDER_Q3_GPU,
+	"render_slot_gpu": FrameStats.RENDER_SLOT_GPU,
 }
 # Every FrameStats slot under the World tick (GameWorld.tick legs, the
 # awake-model walk, the occlusion frame, the sim step tree, traces, effects,
@@ -75,6 +77,7 @@ const ENGINE_COUNT_SAMPLES := {
 	"render_main_objects": FrameStats.RENDER_MAIN_OBJECTS,
 	"render_main_draws": FrameStats.RENDER_MAIN_DRAWS,
 	"render_water_objects": FrameStats.RENDER_WATER_OBJECTS,
+	"render_water_draws": FrameStats.RENDER_WATER_DRAWS,
 	"render_q3_objects": FrameStats.RENDER_Q3_OBJECTS,
 	"render_q3_draws": FrameStats.RENDER_Q3_DRAWS,
 	"render_slot_objects": FrameStats.RENDER_SLOT_OBJECTS,
