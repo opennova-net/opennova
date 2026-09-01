@@ -379,6 +379,7 @@ private:
     // stream run every frame untouched — caching any of those would desync
     // the rand stream.
     struct StaticPoseMemo {
+        uint16_t handle_packed = 0; // guards the slot-index addressing
         const CollisionModel *cm = nullptr;
         float yaw = 0.0f, pitch = 0.0f, roll = 0.0f;
         int32_t pos[3] = {0, 0, 0};
@@ -388,7 +389,10 @@ private:
         bool records_valid = false;
         std::vector<std::array<float, 3>> record_world;
     };
-    std::unordered_map<uint16_t, StaticPoseMemo> static_pose_memo_;
+    // Indexed by the static building slot index (the walk's own loop
+    // variable) — the load-time table is stable, and the handle guard inside
+    // each entry re-keys it if a slot is ever repopulated.
+    std::vector<StaticPoseMemo> static_pose_memo_;
 
     // Frame state
     std::vector<BatchEntry> batch_;
