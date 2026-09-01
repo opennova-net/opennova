@@ -112,6 +112,41 @@ Transform3D panm_matrix_to_transform(const ThreediMatrix4x4 &m) {
 
 } // namespace
 
+GlobalCtrlValues ObjectData::runtime_control_values_dict_only(
+		const Dictionary &p_ctrl_values, bool &r_has_flicker,
+		bool &r_has_swing) {
+	GlobalCtrlValues values = {};
+	r_has_flicker = false;
+	r_has_swing = false;
+	const Array keys = p_ctrl_values.keys();
+	for (int i = 0; i < keys.size(); ++i) {
+		const String key = keys[i];
+		const CharString utf8 = key.utf8();
+		const int ordinal = threedi_ctrl_register_ordinal(utf8.get_data());
+		if (ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND) {
+			continue;
+		}
+		values[static_cast<size_t>(ordinal)] =
+				control_value_from_variant(p_ctrl_values[keys[i]]);
+		r_has_flicker = r_has_flicker || ordinal == THREEDI_CTRL_FLICKER;
+		r_has_swing = r_has_swing || ordinal == THREEDI_CTRL_SWING;
+	}
+	return values;
+}
+
+void ObjectData::stamp_weather_ctrl_registers(GlobalCtrlValues &r_values,
+		bool p_dict_has_flicker, bool p_dict_has_swing) {
+	// The one-shot conversion writes the weather globals first and lets dict
+	// entries override; stamping only the slots the dict left absent lands
+	// the identical table from the cached dict-only half.
+	if (!p_dict_has_flicker) {
+		r_values[THREEDI_CTRL_FLICKER] = g_weather_ctrl_flicker;
+	}
+	if (!p_dict_has_swing) {
+		r_values[THREEDI_CTRL_SWING] = g_weather_ctrl_swing;
+	}
+}
+
 bool ObjectData::_effective_panm_for_lod(int p_lod_index,
 		std::vector<ThreediPartAnimation> &r_nodes) const {
 	r_nodes.clear();
@@ -401,14 +436,21 @@ ObjectData::PanmEvalCache *ObjectData::_panm_cache_prepare(
 int64_t ObjectData::apply_panm_to_nodes(int p_lod_index, int64_t p_time_ms,
 		const Dictionary &p_ctrl_values, const Array &p_nodes,
 		int64_t p_applied_revision) const {
+	return apply_panm_to_nodes_table(p_lod_index, p_time_ms,
+			global_control_values_from_dict(p_ctrl_values), p_nodes,
+			p_applied_revision);
+}
+
+int64_t ObjectData::apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms,
+		const opennova::renderer::ControlRegisterValues &p_ctrl_table,
+		const Array &p_nodes, int64_t p_applied_revision) const {
 	PanmEvalCache *cache = _panm_cache_prepare(p_lod_index);
 	if (cache == nullptr) {
 		return 0;
 	}
 	PanmEvalCache &c = *cache;
 	const ThreediLod &lod = source_model.lods[p_lod_index];
-	const GlobalCtrlValues ctrl_table =
-			global_control_values_from_dict(p_ctrl_values);
+	const GlobalCtrlValues &ctrl_table = p_ctrl_table;
 	const uint64_t ctrl_hash = panm_ctrl_hash(ctrl_table);
 	const bool first_eval = c.time_ms == INT64_MIN;
 	if (first_eval || c.has_noise ||
