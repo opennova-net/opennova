@@ -813,13 +813,17 @@ bool Simulation::advance_world_tick() {
 		// The pump adds its phases onto frame_phase_perf_.joiner; the local
 		// world tick's breakdown lands on the same World update rows the
 		// host/no-net ticks fill, once per tick.
-		if (runtime_profiling_enabled_) frame_phase_perf_.joiner.world = {};
+		if (runtime_profiling_enabled_) {
+			frame_phase_perf_.joiner.world = {};
+			frame_phase_perf_.joiner.client = {};
+		}
 		joiner_pump();
 		if (runtime_profiling_enabled_) {
 			frame_phase_perf_.client_decode_us +=
 					static_cast<int64_t>(last_net_tick_us_);
 			frame_phase_perf_.host_session.server.add_logic_tick(
 					frame_phase_perf_.joiner.world);
+			frame_phase_perf_.client += frame_phase_perf_.joiner.client;
 		}
 		const uint64_t adm_start =
 				runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
