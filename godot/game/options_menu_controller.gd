@@ -9,20 +9,11 @@ extends RefCounted
 const MenuOptionScrollPolicy := preload("res://game/menu_option_scroll_policy.gd")
 const RetailVideoQualityPolicy := preload("res://game/retail_video_quality_policy.gd")
 
-const CONTROL_TABLE_NAMES := ["CONTROL_MAPPING"]
-const CROSSHAIR_STYLE_CONTROL_NAMES := ["XHAIR_APPEARANCE"]
+const CONTROL_TABLE := "CONTROL_MAPPING"
+const CROSSHAIR_STYLE_CONTROL := "XHAIR_APPEARANCE"
 const KEYBOARD_CONTROL := "KEYBOARD"
 const MOUSE_CONTROL := "MOUSE"
-
-const UNSUPPORTED_CONTROLS := [
-	"DIFFICULTY", "UPDATE",
-	"WDM_AUDIO_2", "WDM_AUDIO_4", "WDM_AUDIO_6", "WDM_AUDIO_7",
-	"WDM_AUDIO_8", "WDM_RATE",
-	"JOYSTICK", "ENABLE_JOYSTICK", "INVERT_JOYSTICK",
-	"ENABLE_FORCE_FEEDBACK",
-	"MR_CLIPPY_KEYBOARD", "MR_CLIPPY_HINTS", "CLIENT_PUNKBUSTER",
-	"OPTIONS_AUTORELOAD", "OPTIONS_AUTOMEDIC",
-]
+const JOYSTICK_CONTROL := "JOYSTICK"
 
 var _driver: MenuDriver
 var _options: PlayerOptions
@@ -30,11 +21,14 @@ var _remap_table_id := -1
 var _remap_row := -1
 var _remap_action := -1
 var _control_device := ControlsModel.DEVICE_KEYBOARD
-# Presence gate, refreshed per document: the controller answers the named
-# controls below only on a document that authors the control table (the
-# options surface). Widgets that happen to share those names on any other
-# document — jo_sp.mnu's start ACCEPT above all — stay the shell's.
+# Presence gates, refreshed per document. The controller answers its named
+# controls only on an options surface — a document that authors the control
+# table (options.mnu) or any of the engine's witnessed Options sliders
+# (game.mnu's OPTIONS_WRAPPER). Widgets that happen to share those names on
+# any other document — jo_sp.mnu's start ACCEPT, a DIFFICULTY on a host
+# screen — stay the shell's.
 var _has_control_table := false
+var _is_options_surface := false
 # The options state at surface entry. Retail stages edits as live previews and
 # the in-game dialog's Cancel re-seeds the screen from the saved settings while
 # Accept commits them (docs/mnu/menu-re.md "The in-game options dialog"), so
@@ -55,14 +49,17 @@ func setup(driver: MenuDriver, options: PlayerOptions) -> void:
 ## helpers are presence-gated, so non-options menu files are a cheap no-op.
 func prepare_document() -> void:
 	_end_remap(false)
+	var table_id := _find_control_table()
+	_has_control_table = table_id >= 0
+	_is_options_surface = _has_control_table or _authors_options_scroll()
+	if not _is_options_surface:
+		return
 	MenuOptionScrollPolicy.apply(_driver)
 	RetailVideoQualityPolicy.apply(_driver)
 	if _options != null:
 		_entry_state = _options.current()
 	_seed_player_options()
 	_lock_unsupported_controls()
-	var table_id := _find_control_table()
-	_has_control_table = table_id >= 0
 	if _has_control_table:
 		_control_device = ControlsModel.DEVICE_KEYBOARD
 		_fill_control_mapping(table_id, _control_device)
@@ -94,11 +91,14 @@ func _seed_player_options() -> void:
 	_seed_scroll("MUSICVOLUME", state.music_volume)
 	_seed_scroll("MOUSE_SENSITIVITY", state.mouse_sensitivity)
 	_set_checked("INVERT_MOUSE", state.invert_mouse)
-	for control_name in CROSSHAIR_STYLE_CONTROL_NAMES:
-		var id := _driver.widget_id(control_name)
-		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_SPINLIST:
-			_driver.select_row(id, state.crosshair_style, false)
-	_select_color_row("XHAIR_COLOR", state.crosshair_color)
+	var style_id := _driver.widget_id(CROSSHAIR_STYLE_CONTROL)
+	if style_id >= 0 and _driver.widget_kind_of(style_id) == MnuDocument.TYPE_SPINLIST:
+		_driver.select_row(style_id, state.crosshair_style, false)
+	# The colour spinlist seeds BY VALUE (the engine's select-by-value seed
+	# through the driver): the persisted RGB against the authored item values.
+	var color_id := _driver.widget_id("XHAIR_COLOR")
+	if color_id >= 0 and _driver.widget_kind_of(color_id) == MnuDocument.TYPE_SPINLIST:
+		_driver.select_row_by_value(color_id, str(state.crosshair_color), false)
 	_set_checked("XHAIR_SPREAD", state.crosshair_spread)
 
 
@@ -112,40 +112,25 @@ func _seed_scroll(control_name: String, value: int) -> void:
 				scroll.page, value)
 
 
+# The not-yet-serviced controls and the checked state their rows show are the
+# engine's tables (options_policy.h, re-exported by MenuFrame; D-MNU-21).
 func _lock_unsupported_controls() -> void:
-	_set_checked("OPTIONS_AUTORELOAD", true)
-	_set_checked("OPTIONS_AUTOMEDIC", true)
-	_set_checked("WDM_AUDIO_2", true)
-	for channel_name in ["WDM_AUDIO_4", "WDM_AUDIO_6", "WDM_AUDIO_7",
-			"WDM_AUDIO_8"]:
-		_set_checked(channel_name, false)
-	for control_name in UNSUPPORTED_CONTROLS:
+	for forced: Dictionary in MenuFrame.options_forced_checks():
+		_set_checked(String(forced["control"]), bool(forced["checked"]))
+	for control_name: String in MenuFrame.options_unsupported_controls():
 		var id := _driver.widget_id(control_name)
 		if id >= 0:
 			_driver.set_widget_disabled(id, true)
 
 
-func _select_row(control_name: String, row: int) -> void:
-	var id := _driver.widget_id(control_name)
-	if id >= 0 and _driver.item_count(id) > 0:
-		_driver.select_row(id, clampi(row, 0, _driver.item_count(id) - 1), false)
-
-
-# Retail seeds the colour spinlist BY VALUE: the selected row is the one whose
-# authored item `value=` attribute equals the persisted RGB (the shipped rows
-# author the decimal RGB there), and a miss selects row 0 — the
-# SpinList_SelectItemByValue contract (docs/mnu/menu-re.md, "The in-game
-# options dialog").
-func _select_color_row(control_name: String, rgb: int) -> void:
-	var id := _driver.widget_id(control_name)
-	if id < 0 or _driver.widget_kind_of(id) != MnuDocument.TYPE_SPINLIST \
-			or _driver.item_count(id) <= 0:
-		return
-	for row in _driver.item_count(id):
-		if int(_driver.item_value(id, row)) == rgb:
-			_driver.select_row(id, row, false)
-			return
-	_driver.select_row(id, 0, false)
+# True when the document authors any of the engine's witnessed Options
+# sliders — game.mnu's inline OPTIONS_WRAPPER has no control table.
+func _authors_options_scroll() -> bool:
+	for range: Dictionary in MenuFrame.options_scroll_ranges():
+		var id := _driver.widget_id(String(range["control"]))
+		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_SCROLL:
+			return true
+	return false
 
 
 func _set_checked(control_name: String, checked: bool) -> void:
@@ -161,7 +146,7 @@ func _on_screen_changed(_screen_name: String) -> void:
 
 func _on_widget_value_changed(widget_name: String, kind: String,
 		index: int, _value: String) -> void:
-	if _options == null:
+	if _options == null or not _is_options_surface:
 		return
 	var state := _options.current()
 	match widget_name.to_upper():
@@ -194,12 +179,18 @@ func _on_widget_value_changed(widget_name: String, kind: String,
 
 
 func _on_widget_activated(id: int, widget_name: String) -> void:
+	if not _is_options_surface:
+		return
 	match widget_name.to_upper():
 		"INVERT_MOUSE":
+			if _options == null:
+				return
 			var state := _options.current()
 			state.invert_mouse = _driver.is_widget_checked(id)
 			_options.update(state)
 		"XHAIR_SPREAD":
+			if _options == null:
+				return
 			var state := _options.current()
 			state.crosshair_spread = _driver.is_widget_checked(id)
 			_options.update(state)
@@ -209,6 +200,11 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 		"MOUSE":
 			if _has_control_table:
 				_switch_control_device(ControlsModel.DEVICE_MOUSE)
+		"JOYSTICK":
+			# The device page is served (the table shows the D-CTRL-1 blank
+			# column); only arming a joystick capture is refused.
+			if _has_control_table:
+				_switch_control_device(ControlsModel.DEVICE_JOYSTICK)
 		"DEFAULTS":
 			# The table gate keeps a same-named widget on any other document
 			# from wiping the persisted bindings.
@@ -298,7 +294,7 @@ func _clear_selected_binding() -> void:
 func _fill_control_mapping(table_id: int, device: int, blank_row := -1) -> void:
 	_driver.table_clear_rows(table_id)
 	var rows := ControlsBindings.model().get_rows(device)
-	for i in rows.size():
+	for i: int in rows.size():
 		var cells: PackedStringArray = rows[i]
 		if i == blank_row:
 			cells[2] = ""
@@ -360,15 +356,11 @@ func _end_remap(refill: bool) -> void:
 
 
 func _find_control_table() -> int:
-	for name in CONTROL_TABLE_NAMES:
-		var id := _driver.widget_id(name)
-		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_TABLE:
-			return id
+	var id := _driver.widget_id(CONTROL_TABLE)
+	if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_TABLE:
+		return id
 	return -1
 
 
 func _is_control_table(widget_name: String) -> bool:
-	for name in CONTROL_TABLE_NAMES:
-		if widget_name.nocasecmp_to(name) == 0:
-			return true
-	return false
+	return widget_name.nocasecmp_to(CONTROL_TABLE) == 0

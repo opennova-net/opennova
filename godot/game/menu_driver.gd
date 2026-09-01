@@ -487,6 +487,15 @@ func item_value(id: int, row: int) -> String:
 	return String(_doc.get_item(id, row).get("value", ""))
 
 
+## Retail's select-by-value seed (SpinList_SelectItemByValue; the lookup is
+## the engine's through MnuDocument.find_item_row_by_value): the row whose
+## authored `value=` equals `value`, row 0 on a miss.
+func select_row_by_value(id: int, value: String, emit := true) -> void:
+	var row := _doc.find_item_row_by_value(id, value)
+	if row >= 0:
+		select_row(id, row, emit)
+
+
 func select_row(id: int, row: int, emit := true) -> void:
 	var state := _state_of(id)
 	state["selected_item"] = row

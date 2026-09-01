@@ -126,13 +126,11 @@ func _init() -> void:
 	_world_load.load_failed.connect(_on_world_load_failed)
 
 
-func get_player_options() -> PlayerOptions:
-	return _player_options
-
-
 func _on_player_options_changed(state: PlayerOptions.State) -> void:
+	# update() applied the device-global audio once already; only the running
+	# Simulation's mouse settings are this listener's to push.
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	_player_options.apply(sim)
+	_player_options.apply_mouse(sim)
 	if _hud_presenter != null:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
 		_hud_presenter.set_crosshair_color(state.crosshair_color)

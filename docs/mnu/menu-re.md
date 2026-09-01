@@ -1634,14 +1634,21 @@ Reimpl: `player_options.gd` applies edits live (retail's preview) and
 `options_menu_controller.gd` snapshots the state at surface entry —
 OPT_ACCEPT re-baselines the snapshot, OPT_CANCEL restores it and re-seeds
 (`menu_shell_test.gd` pins commit-vs-revert). PR #611's "Cancel only
-navigates" was a divergence, fixed 2026-09-01. Residuals: our persist runs
-per edit (retail persists on Accept — invisible except crash timing); the
-front-end BACK's narrower gamma/volume-only revert is not modeled (our
-front surface re-seeds per document open); `UNSUPPORTED_CONTROLS`
-(`options_menu_controller.gd`) force-disables the authored controls retail
-services (UPDATE → `UI_LaunchUpdateProcess @ 0x55b0b0`, ENABLE_JOYSTICK,
-the WDM family, Mr-Clippy, PunkBuster) — a deliberate stand-in until each
-device leg lands, recorded here rather than invented. The XHAIR_COLOR /
+navigates" was a divergence, fixed 2026-09-01. Residuals, each a ledger row:
+our persist runs per edit (retail persists on Accept — invisible except
+crash timing; D-MNU-19); the front-end BACK's narrower gamma/volume-only
+revert is not modeled (our front surface re-seeds per document open;
+D-MNU-20); the engine's `kOptionsUnsupportedControls`
+(`engine/runtime/menu/options_policy.h`, re-exported by `MenuFrame` for the
+shell to lock, the checked states from `kOptionsForcedChecks`)
+force-disables the authored controls retail services (UPDATE →
+`UI_LaunchUpdateProcess @ 0x55b0b0`, ENABLE_JOYSTICK, the WDM family,
+Mr-Clippy, PunkBuster) — a deliberate stand-in until each device leg lands
+(D-MNU-21); the JOYSTICK device page itself is served (its column blank per
+D-CTRL-1). The select-by-value seed and the slider ranges are the engine's
+too (`spinlist_row_for_value`, `kOptionsScrollRanges`; the options model
+clamps by control name through `MenuFrame.options_scroll_ranges`). The
+XHAIR_COLOR /
 XHAIR_SPREAD pair left the locked set 2026-09-01: both are live user options
 now (persisted RGB selected BY VALUE like retail `[orig: options_screen_init
 @ 0x554cec/@ 0x554d15]`; defaults `[orig: Config_SetDefaults @ 0x54d461/

@@ -47,10 +47,17 @@ class HudOverlay : public Control {
 
 public:
 	// The user crosshair-style range; retail loads "cross%02d.tga" (style + 1)
-	// from the player config.
+	// from the player config. The colour default / mask and the spread default
+	// are the engine's (HudLayout, Config_SetDefaults), re-exported so the
+	// options model has one home for them.
 	enum {
 		MIN_CROSSHAIR_STYLE = 0,
 		MAX_CROSSHAIR_STYLE = 24,
+		DEFAULT_CROSSHAIR_COLOR =
+				static_cast<int>(opennova::hud::HudLayout::kCrosshairColorDefault),
+		CROSSHAIR_COLOR_MASK =
+				static_cast<int>(opennova::hud::HudLayout::kCrosshairColorMask),
+		DEFAULT_CROSSHAIR_SPREAD = opennova::hud::HudLayout::kCrosshairSpreadDefault ? 1 : 0,
 	};
 
 	HudOverlay();
@@ -271,7 +278,7 @@ private:
 	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
-	uint32_t crosshair_color_ = 0xFFFFFFu;
+	uint32_t crosshair_color_ = opennova::hud::HudLayout::kCrosshairColorDefault;
 	bool crosshair_spread_enabled_ = true;
 	bool draw_timing_enabled_ = false;
 	int64_t draw_compile_us_ = 0;

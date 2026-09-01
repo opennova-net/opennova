@@ -2,6 +2,8 @@
 
 #include "util/string_convert.h"
 
+#include <runtime/menu/options_policy.h>
+
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -1553,6 +1555,13 @@ int MnuDocument::get_item_count(int p_id) const {
 	return items ? static_cast<int>(items->items.size()) : 0;
 }
 
+int MnuDocument::find_item_row_by_value(int p_id, const String &p_value) const {
+	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
+	if (items == nullptr) return -1;
+	return opennova::menu::spinlist_row_for_value(
+			*items, std::string(p_value.utf8().get_data()));
+}
+
 Dictionary MnuDocument::get_item(int p_id, int p_index) const {
 	const opennova::mnu::Items *items = items_container(window_at(locate(p_id)));
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
@@ -1942,6 +1951,8 @@ void MnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("apply_widget_patch", "id", "patch"), &MnuDocument::apply_widget_patch);
 
 	ClassDB::bind_method(D_METHOD("get_item_count", "id"), &MnuDocument::get_item_count);
+	ClassDB::bind_method(D_METHOD("find_item_row_by_value", "id", "value"),
+			&MnuDocument::find_item_row_by_value);
 	ClassDB::bind_method(D_METHOD("get_widget_sounds", "id"), &MnuDocument::get_widget_sounds);
 	ClassDB::bind_method(D_METHOD("set_widget_sounds", "id", "sounds"), &MnuDocument::set_widget_sounds);
 	ClassDB::bind_method(D_METHOD("get_widget_actions", "id"), &MnuDocument::get_widget_actions);
