@@ -794,6 +794,142 @@ std::vector<uint8_t> canned_loadout_body(uint8_t team, uint8_t slot_low_byte) {
 	return body;
 }
 
+// The two NovaWorld-only join tokens on the wire, decoded back off the framed
+// packets: the ClientAuth carries the .joi CK decimal as the APPID CU right
+// after COUNTRYCODE (a stock host reads the APPID tag into net_cfg.bt and punts
+// code 9 on a mismatch), and the 0x00 JOIN carries the CD identity cookie as a
+// binary TLV after VERSIONCRCSTRING (codes 23/24/25/28). A LAN joiner (no
+// APPID, no cookie) emits neither. [orig: NapiNetConfig_LoadFromConnTags
+// @0x4c7260; NapiNP_WriteClientAuthPayload @0x42a180;
+// Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5]
+bool run_novaworld_join_tokens_ride_the_wire() {
+	constexpr uint32_t kServerKey = 0x11223344u;
+	const std::string server_scrk = "SERVER-JOIN-TOKENS-SCRK";
+	const std::vector<uint8_t> cookie = {'P', 'U', 'B', '1', 0, 'v', 'a', 'l', 0};
+
+	auto hello_to_client_auth = [&](np::JoinerConnection &joiner,
+	                                ServerHello &server_hello,
+	                                ClientAuth &client_auth) -> bool {
+		const std::vector<uint8_t> hello_datagram = joiner.start();
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ClientHello hello;
+		if (!expect(nw_decode_inbound(hello_datagram.data(), hello_datagram.size(),
+		                              opcode, body) &&
+		                    opcode == SESSION_OPCODE_CLIENT_HELLO &&
+		                    parse_client_hello(body.data(), body.size(), hello),
+		            "join-tokens: decode ClientHello")) {
+			return false;
+		}
+		server_hello = build_server_hello(hello, 0x7F000001u, 32769);
+		server_hello.hk = 0x55667788u;
+		server_hello.sus2 = "revx02";
+		const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
+				SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
+		const np::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+				server_hello_datagram.data(), server_hello_datagram.size());
+		if (!expect(hello_result.outbound.size() == 1,
+		            "join-tokens: ServerHello emits one ClientAuth")) {
+			return false;
+		}
+		return expect(nw_decode_inbound(hello_result.outbound[0].data(),
+		                                hello_result.outbound[0].size(), opcode, body) &&
+		                      opcode == SESSION_OPCODE_CLIENT_AUTH &&
+		                      parse_client_auth(body.data(), body.size(), client_auth),
+		              "join-tokens: decode ClientAuth");
+	};
+	// The CU chunks as (name, value) in wire order.
+	auto cu_fields = [](const ClientAuth &auth) {
+		std::vector<std::pair<std::string, std::string>> out;
+		for (const std::vector<uint8_t> &chunk : auth.cu) {
+			uint8_t type = 0;
+			std::string name, value;
+			if (parse_client_cu_chunk(chunk.data(), chunk.size(), type, name, value))
+				out.emplace_back(name, value);
+		}
+		return out;
+	};
+	auto index_of = [](const std::vector<std::pair<std::string, std::string>> &cu,
+	                   const char *name) -> int {
+		for (size_t i = 0; i < cu.size(); ++i)
+			if (cu[i].first == name) return static_cast<int>(i);
+		return -1;
+	};
+
+	// --- the NovaWorld joiner: APPID after COUNTRYCODE, CD after VERSIONCRCSTRING
+	np::JoinerConnection joiner("JoinTokens");
+	joiner.set_app_id("3225");
+	joiner.set_cd_cookie(cookie);
+	ServerHello server_hello;
+	ClientAuth client_auth;
+	if (!hello_to_client_auth(joiner, server_hello, client_auth)) return false;
+	const auto cu = cu_fields(client_auth);
+	const int appid_at = index_of(cu, "APPID");
+	const int country_at = index_of(cu, "COUNTRYCODE");
+	const int bt_at = index_of(cu, "BT");
+	if (!expect(appid_at >= 0 && cu[appid_at].second == "3225",
+	            "the ClientAuth carries CU APPID = the .joi CK decimal")) {
+		return false;
+	}
+	if (!expect(country_at >= 0 && appid_at == country_at + 1,
+	            "APPID rides right after COUNTRYCODE")) {
+		return false;
+	}
+	if (!expect(bt_at >= 0 && cu[bt_at].second == "0",
+	            "BT stays the LAN default 0 (the ban-type gate, not the token)")) {
+		return false;
+	}
+
+	ServerAuth server_auth = build_server_auth(
+			client_auth, 0x7F000001u, 32769, kServerKey, server_scrk, "", "", "", false);
+	server_auth.mi = 3;
+	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
+	(void)joiner.handle_datagram(server_auth_datagram.data(), server_auth_datagram.size());
+	SessionSequencing server_seq = np::make_jo_game_session_sequencing();
+	const std::vector<ProtocolMessage> initial_settings = {
+			make_protocol_message(
+					0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00}, 0xA0),
+			make_protocol_message(
+					0x00, {0x01, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00}, 0xA0),
+	};
+	const std::vector<uint8_t> settings_datagram = frame_server_session(
+			server_seq, server_scrk, client_auth.ck, initial_settings);
+	const np::JoinerConnection::PollResult settings_result =
+			joiner.handle_datagram(settings_datagram.data(), settings_datagram.size());
+	if (!expect(settings_result.outbound.size() == 2,
+	            "join-tokens: initial settings emit ACK then JOIN")) {
+		return false;
+	}
+	ProtocolPacketHeader client_header;
+	std::vector<ProtocolMessage> client_messages;
+	if (!expect(decode_client_session(settings_result.outbound[1], client_auth.scrk,
+	                                  client_header, client_messages) &&
+	                    client_messages.size() == 1 && client_messages[0].tag == 0x00,
+	            "join-tokens: decode the JOIN")) {
+		return false;
+	}
+	std::vector<uint8_t> expected_join = retail_expansion_join_request(server_hello.sus2);
+	const uint8_t cd_tlv_head[] = {'C', 'D', 0x00, static_cast<uint8_t>(cookie.size()), 0x00};
+	expected_join.insert(expected_join.end(), std::begin(cd_tlv_head), std::end(cd_tlv_head));
+	expected_join.insert(expected_join.end(), cookie.begin(), cookie.end());
+	if (!expect(client_messages[0].payload == expected_join,
+	            "the JOIN carries EXP, VERSIONCRCSTRING, then the CD cookie as a binary "
+	            "TLV (raw size, no appended NUL)")) {
+		return false;
+	}
+
+	// --- the LAN joiner: no APPID chunk
+	np::JoinerConnection lan("JoinTokensLan");
+	ServerHello lan_hello;
+	ClientAuth lan_auth;
+	if (!hello_to_client_auth(lan, lan_hello, lan_auth)) return false;
+	const auto lan_cu = cu_fields(lan_auth);
+	if (!expect(index_of(lan_cu, "APPID") < 0, "a LAN joiner sends no APPID")) return false;
+	return expect(index_of(lan_cu, "COUNTRYCODE") >= 0,
+	              "the LAN ClientAuth keeps its fixed fields through COUNTRYCODE");
+}
+
 bool run_retail_post_auth_prelude() {
 	constexpr uint32_t kServerKey = 0x11223344u;
 	constexpr uint32_t kConnectionId = 3;
@@ -2296,9 +2432,10 @@ bool run_roundtrip() {
 // the host never asked for. The pick-based deploy screen — the player selecting a spawn
 // zone with a C2S 0x0E while the host holds them undeployed — stays modeled HOST-side but
 // its CLIENT trigger is retired pending a pick-based mission capture that pins the correct
-// per-frame signal (the local player's entity+0x24 UNDEPLOYED bit). The player_paced
-// argument is retained for the call sites but no longer changes the initial-deploy path.
-bool run_roundtrip_with_spawn_zones(bool player_paced) {
+// per-frame signal (the local player's entity+0x24 UNDEPLOYED bit). The one knob left
+// is the host's dictated send boundary: `under_send_holdoff` closes it so the
+// framing of the joiner's uplinks waits for the next period-four boundary.
+bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	const PeerAddr peer{0x0100007Fu, 30001}; // 127.0.0.1:30001
 	const std::string kName = "ZonesJoiner";
 
@@ -2308,10 +2445,9 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 	host_config.server_name = "Zones Host";
 	host_config.mission_name = "Zones Test Mission";
 	host_config.mission_file = "ZONES_TEST.BMS";
-	// Exercise the player-paced input action while the dictated send boundary is
-	// closed. Input case 12 changes the gameplay dword immediately; only framing
-	// the resulting 0x0E waits for the next period-four boundary.
-	if (player_paced) host_config.send_holdoff_ticks = 4;
+	// With the dictated send boundary closed, framing the joiner's uplinks waits
+	// for the next period-four boundary.
+	if (under_send_holdoff) host_config.send_holdoff_ticks = 4;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
 	                        0x0FE0E112u, nullptr, host_config);
 
@@ -2499,7 +2635,6 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 	// UNDEPLOYED bit; the 0x0A tail carries stance today, not that bit). [orig: the wave
 	// path spawns with no pick — witnessed on the wire against a live retail co-op host;
 	// the pick hold is Server_OnPlayerJoin @0x51a6f2 stateByte|=0x10 iff SpawnZoneList>0]
-	(void)player_paced;
 	(void)zone_h;
 	drive_frames(120, [&] {
 		return client.in_match() && client.initial_admission_complete();
@@ -5182,12 +5317,13 @@ int main() {
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
 	                run_fire_queue_stamps_runtime_tick() &&
 	                run_retail_post_auth_prelude() &&
+	                run_novaworld_join_tokens_ride_the_wire() &&
 	                run_early_sync_tail_latch() &&
 	                run_client_reducer_preserves_packet_message_order() &&
 	                run_duplicate_s2c_session_one_shot_is_not_replayed() &&
 	                run_roundtrip() &&
-	                run_roundtrip_with_spawn_zones(/*player_paced=*/false) &&
-	                run_roundtrip_with_spawn_zones(/*player_paced=*/true) &&
+	                run_roundtrip_with_spawn_zones(/*under_send_holdoff=*/false) &&
+	                run_roundtrip_with_spawn_zones(/*under_send_holdoff=*/true) &&
 	                run_joiner_remote_reload_stamps_before_same_frame_body_tick() &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&

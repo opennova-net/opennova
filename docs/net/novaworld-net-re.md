@@ -1144,7 +1144,7 @@ tooling described in §5.25. The complete contract is:
   atol(decoded CK)` @0x569b8e, serialized on the wire as the APPID conn-tag]. The
   host punts code 9 when APPID is absent or mismatched (`Server_ValidatePlayerJoin
   Request @0x512100` @0x5122c5). The reimpl decodes CK in
-  `parse_joi_connection_string` and threads it JoinTarget → Simulation.set_join_token
+  `parse_joi_connection_string` and threads it JoinTarget → Simulation.set_app_id
   → the JoinerConnection ClientAuth **`APPID`** CU (NovaWorld joins only; BT stays
   "0"; LAN sends no APPID). Our old bug was omitting APPID entirely. This is the real
   fix behind the retail-server join punt for version-compatible NovaWorld hosts.
@@ -8252,13 +8252,16 @@ queues a fresh 0x0E.
 Reimpl correction (2026-08-02, retail↔reimpl objective-Co-op matrix): the joiner's active
 session phase, deploy-screen stage, `ClientRuntime` gameplay gate, and authoritative spawn/health
 latch are independent. The **first valid initial grant** opens gameplay as soon as H is known,
-while the second grant plus policy only make `AwaitDeployPick` UI-ready. Queueing `0x0E` closes
+while the second grant plus policy only mark the deploy UI ready (since 2026-08-31,
+f76e7000c, the initial admission owes NO pick: the C2S `0x0E` is the death re-pick
+only, and the pick-based initial deploy's client trigger — the local entity's
+entity+0x24 UNDEPLOYED bit — is the open residual). Queueing `0x0E` closes
 only the gameplay gate, and the ACK-qualified post-pick `0x5A` opens it again; it cannot force
 local health to zero. A real death closes the authoritative spawn/health latch. The local pose
 protection/snap edge uses `deployment_release_revision()`—not the gameplay revision or a stale
 positive `0x0A` tail—and accepts revival only with a later positive authoritative-health tail.
-`npruntime_client_runtime::run_roundtrip_with_spawn_zones(paced)` pins actual framed pre-pick
-C2S `0x0C` and `0x4C`, absence of an automatic `0x0E`, the pick-time stop, and the later release.
+`npruntime_client_runtime::run_roundtrip_with_spawn_zones` pins actual framed pre-pick
+C2S `0x0C` and `0x4C` and the absence of any `0x0E` on the initial admission.
 It also stages an older `0x0C` ahead of a non-default `0x0E` and proves the next host tick cannot
 overwrite the selected pose; successful deploy dispatch fences all pre-release staged uplinks.
 `coop_two_sim_test.gd` pins both the live initial-pick hold and the death/stale-positive boundary
@@ -8269,16 +8272,15 @@ Reimpl (2026-07-24, the deploy-screen slice; address tie completed 2026-08-22):
 (engine/runtime/world/spawn_select — the sorted registry + true-min/max AABB; the
 both-zero-key address tie uses retail's fixed contiguous pool offsets from
 `EntityPool_Allocate @0x442130`: pool 1 precedes pool 2);
-`JoinerConnection::set_player_paced_deployment` + `frame_deployment_pick`
-(the AwaitDeployPick stage — the shell paces the pick, re-picks allowed, headless
-callers keep the auto parameter-0 default) + `frame_loadout_resubmit` (the armory
+`JoinerConnection::frame_deployment_pick` (the death re-pick only — the initial
+admission owes no pick since f76e7000c) + `frame_loadout_resubmit` (the armory
 ACCEPT re-send) with `ClientRuntime` queueing; `Simulation.get_deploy_spawn_zones`
 / `send_deployment_pick` / `get_join_assigned_team`; `DeployScreenPresenter`
 (godot/game/world/deploy_screen_presenter.gd — death.mnu DEATH over the live world, the
 witnessed populate/colors/row-0, self-closing on the release); the game_world join
-watchdog now ENDS at the player-paced pick. Pinned by `npruntime_client_runtime`
-`run_roundtrip_with_spawn_zones(paced)` (park → invalid pick silently dropped →
-re-pick → release; the auto mode unchanged) and `zone_chain_test`
+watchdog now ENDS at initial admission. Pinned by `npruntime_client_runtime`
+`run_roundtrip_with_spawn_zones` (no initial pick; the death re-pick keeps
+invalid-pick-silently-dropped → re-pick → release) and `zone_chain_test`
 `test_spawn_zone_registry`. Residuals: the MAP window ships chrome-only until the
 `MapOverlay_DrawView`/`@ 0x5a5f40` draw witness lands (D-HUD-19). The client-side
 0x5A grant apply and live 0x6F team/value/limit fold landed 2026-07-24 (D-NET-170);

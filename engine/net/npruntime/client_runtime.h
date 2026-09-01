@@ -279,10 +279,10 @@ public:
 	void set_expansion_version_root(std::string game_root) {
 		if (joiner_) joiner_->set_expansion_version_root(std::move(game_root));
 	}
-	// The .joi-recovered game-session APPID join token (JoinerConnection::set_join_token).
+	// The .joi-recovered game-session APPID join token (JoinerConnection::set_app_id).
 	// Joiner only; "0" is the LAN default.
-	void set_join_token(std::string token) {
-		if (joiner_) joiner_->set_join_token(std::move(token));
+	void set_app_id(std::string token) {
+		if (joiner_) joiner_->set_app_id(std::move(token));
 	}
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {

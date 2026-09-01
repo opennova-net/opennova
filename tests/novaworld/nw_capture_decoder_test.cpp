@@ -106,7 +106,7 @@ std::vector<uint8_t> make_proto_payload(
 bool msg_equal(const InGameMessage &a, const InGameMessage &b) {
 	return a.frame_index == b.frame_index && a.dir == b.dir && a.tag == b.tag &&
 	       a.settings_update == b.settings_update && a.session == b.session &&
-	       a.payload == b.payload;
+	       a.participant == b.participant && a.payload == b.payload;
 }
 
 // The core assertion: pushing the datagrams one at a time through CaptureDecoder,
@@ -142,42 +142,62 @@ bool streaming_equals_batch(const std::vector<CaptureDatagram> &caps,
 	return true;
 }
 
-// A crafted two-session capture: two clients (32769, 32770) talking to the host
-// (32768), each with its OWN SCRK pair, interleaved in wire order so the
-// streaming decoder must keep per-session state separate exactly as the batch
-// loop does. Inner payloads are opaque to wire_capture (it reassembles + emits
-// them), so arbitrary bytes suffice.
-std::vector<CaptureDatagram> craft_two_session_capture() {
-	const std::string scrk_a = "UNIT_TEST_SCRK_A";
-	const std::string scrk_b = "UNIT_TEST_SCRK_B";
-
-	ClientAuth ca_a; ca_a.na = "alpha"; ca_a.ci = 1; ca_a.ck = 2; ca_a.scrk = scrk_a;
-	ClientAuth ca_b; ca_b.na = "bravo"; ca_b.ci = 3; ca_b.ck = 4; ca_b.scrk = scrk_b;
-	ServerAuth sa_a = build_server_auth(ca_a, 0x7F000001u, 32768, 0x55, scrk_a);
-	ServerAuth sa_b = build_server_auth(ca_b, 0x7F000001u, 32768, 0x56, scrk_b);
-
-	auto inner = [](uint8_t fill, size_t n) {
-		return std::vector<uint8_t>(n, fill);
-	};
-
+// Two clients A and B (their own SCRK pairs, server keys 0x55/0x56) talking
+// to the host on 32768. Inner payloads are opaque to wire_capture (it
+// reassembles + emits them), so arbitrary bytes suffice. The three crafters
+// below differ only in the client ports, the client keys, and the wire order.
+struct TwoClientCapture {
+	const std::string scrk[2] = {"UNIT_TEST_SCRK_A", "UNIT_TEST_SCRK_B"};
+	const uint32_t server_key[2] = {0x55, 0x56};
+	ClientAuth ca[2];
+	ServerAuth sa[2];
+	int port[2];
 	std::vector<CaptureDatagram> caps;
 	int f = 1;
-	auto add = [&](int sp, int dp, std::vector<uint8_t> payload) {
-		caps.push_back({f++, sp, dp, std::move(payload)});
-	};
 
-	// Interleave the two sessions' handshakes and traffic.
-	add(32768, 32769, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_a)));
-	add(32769, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_a)));
-	add(32768, 32770, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_b)));
-	add(32770, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_b)));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0D, inner(0xA1, 24), scrk_a, ca_a.ck, 7, 5));
-	add(32770, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C, inner(0xB2, 48), scrk_b, 0x56, 11, 9));
-	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x16, inner(0xB3, 12), scrk_b, ca_b.ck, 10, 11));
-	add(32769, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x06, inner(0xA2, 45), scrk_a, 0x55, 6, 7));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xA3, 64), scrk_a, ca_a.ck, 8, 6));
-	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xB4, 80), scrk_b, ca_b.ck, 11, 11));
-	return caps;
+	TwoClientCapture(int port_a, int port_b, uint32_t ck_a, uint32_t ck_b)
+			: port{port_a, port_b} {
+		ca[0].na = "alpha"; ca[0].ci = 1; ca[0].ck = ck_a; ca[0].scrk = scrk[0];
+		ca[1].na = "bravo"; ca[1].ci = 3; ca[1].ck = ck_b; ca[1].scrk = scrk[1];
+		for (int c = 0; c < 2; ++c)
+			sa[c] = build_server_auth(ca[c], 0x7F000001u, 32768, server_key[c], scrk[c]);
+	}
+	void add(int sp, int dp, std::vector<uint8_t> payload) {
+		caps.push_back({f++, sp, dp, std::move(payload)});
+	}
+	void server_auth(int c) {
+		add(32768, port[c], nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa[c])));
+	}
+	void client_auth(int c) {
+		add(port[c], 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca[c])));
+	}
+	// S2C: the header session_id is the client's own key (ClientAuth.ck).
+	void s2c(int c, uint8_t tag, uint8_t fill, size_t n, uint32_t seq, uint32_t ack) {
+		add(32768, port[c], make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, tag,
+		                                       std::vector<uint8_t>(n, fill), scrk[c],
+		                                       ca[c].ck, seq, ack));
+	}
+	// C2S: the header session_id is the connection's server key (ServerAuth.sk).
+	void c2s(int c, uint8_t tag, uint8_t fill, size_t n, uint32_t seq, uint32_t ack) {
+		add(port[c], 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, tag,
+		                                       std::vector<uint8_t>(n, fill), scrk[c],
+		                                       server_key[c], seq, ack));
+	}
+};
+
+// A crafted two-session capture: two clients (32769, 32770) interleaved in
+// wire order so the streaming decoder must keep per-session state separate
+// exactly as the batch loop does.
+std::vector<CaptureDatagram> craft_two_session_capture() {
+	TwoClientCapture t(32769, 32770, /*ck_a=*/2, /*ck_b=*/4);
+	t.server_auth(0); t.client_auth(0); t.server_auth(1); t.client_auth(1);
+	t.s2c(0, 0x0D, 0xA1, 24, 7, 5);
+	t.c2s(1, 0x0C, 0xB2, 48, 11, 9);
+	t.s2c(1, 0x16, 0xB3, 12, 10, 11);
+	t.c2s(0, 0x06, 0xA2, 45, 6, 7);
+	t.s2c(0, 0x0A, 0xA3, 64, 8, 6);
+	t.s2c(1, 0x0A, 0xB4, 80, 11, 11);
+	return t.caps;
 }
 
 // The server-side gateway shape that motivated the session_id demux: TWO
@@ -188,39 +208,18 @@ std::vector<CaptureDatagram> craft_two_session_capture() {
 // key — and the tolerant plaintext parser emits garbage messages rather than
 // failing. Keyed by the pre-SCRK header session_id (S2C = that client's
 // ClientAuth.ck, C2S = the connection's ServerAuth.sk), both streams decode.
+// Client B's auth lands BEFORE A's remaining traffic, which is exactly the
+// ordering that made the port-keyed table decrypt A with B's key.
 std::vector<CaptureDatagram> craft_shared_port_capture() {
-	const std::string scrk_a = "UNIT_TEST_SCRK_A";
-	const std::string scrk_b = "UNIT_TEST_SCRK_B";
-
-	ClientAuth ca_a; ca_a.na = "alpha"; ca_a.ci = 1; ca_a.ck = 2; ca_a.scrk = scrk_a;
-	ClientAuth ca_b; ca_b.na = "bravo"; ca_b.ci = 3; ca_b.ck = 4; ca_b.scrk = scrk_b;
-	ServerAuth sa_a = build_server_auth(ca_a, 0x7F000001u, 32768, 0x55, scrk_a);
-	ServerAuth sa_b = build_server_auth(ca_b, 0x7F000001u, 32768, 0x56, scrk_b);
-
-	auto inner = [](uint8_t fill, size_t n) {
-		return std::vector<uint8_t>(n, fill);
-	};
-
-	std::vector<CaptureDatagram> caps;
-	int f = 1;
-	auto add = [&](int sp, int dp, std::vector<uint8_t> payload) {
-		caps.push_back({f++, sp, dp, std::move(payload)});
-	};
-
-	// Both clients on client-side port 32769. Client A authenticates first;
-	// client B's auth lands BEFORE A's remaining traffic, which is exactly the
-	// ordering that made the port-keyed table decrypt A with B's key.
-	add(32768, 32769, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_a)));
-	add(32769, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_a)));
-	add(32768, 32769, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_b)));
-	add(32769, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_b)));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0D, inner(0xA1, 24), scrk_a, ca_a.ck, 7, 5));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x16, inner(0xB3, 12), scrk_b, ca_b.ck, 10, 11));
-	add(32769, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x06, inner(0xA2, 45), scrk_a, 0x55, 6, 7));
-	add(32769, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C, inner(0xB2, 48), scrk_b, 0x56, 11, 9));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xA3, 64), scrk_a, ca_a.ck, 8, 6));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xB4, 80), scrk_b, ca_b.ck, 11, 11));
-	return caps;
+	TwoClientCapture t(32769, 32769, /*ck_a=*/2, /*ck_b=*/4);
+	t.server_auth(0); t.client_auth(0); t.server_auth(1); t.client_auth(1);
+	t.s2c(0, 0x0D, 0xA1, 24, 7, 5);
+	t.s2c(1, 0x16, 0xB3, 12, 10, 11);
+	t.c2s(0, 0x06, 0xA2, 45, 6, 7);
+	t.c2s(1, 0x0C, 0xB2, 48, 11, 9);
+	t.s2c(0, 0x0A, 0xA3, 64, 8, 6);
+	t.s2c(1, 0x0A, 0xB4, 80, 11, 11);
+	return t.caps;
 }
 
 // The other half of the demux identity: session identity is (client port,
@@ -229,35 +228,15 @@ std::vector<CaptureDatagram> craft_shared_port_capture() {
 // session, truncating one client's stream. Each keeps its own SCRK here, so
 // a merged table decrypts one of them with the wrong key.
 std::vector<CaptureDatagram> craft_key_reuse_capture() {
-	const std::string scrk_a = "UNIT_TEST_SCRK_A";
-	const std::string scrk_b = "UNIT_TEST_SCRK_B";
-
-	ClientAuth ca_a; ca_a.na = "alpha"; ca_a.ci = 1; ca_a.ck = 2; ca_a.scrk = scrk_a;
-	ClientAuth ca_b; ca_b.na = "bravo"; ca_b.ci = 3; ca_b.ck = 2; ca_b.scrk = scrk_b;
-	ServerAuth sa_a = build_server_auth(ca_a, 0x7F000001u, 32768, 0x55, scrk_a);
-	ServerAuth sa_b = build_server_auth(ca_b, 0x7F000001u, 32768, 0x56, scrk_b);
-
-	auto inner = [](uint8_t fill, size_t n) {
-		return std::vector<uint8_t>(n, fill);
-	};
-
-	std::vector<CaptureDatagram> caps;
-	int f = 1;
-	auto add = [&](int sp, int dp, std::vector<uint8_t> payload) {
-		caps.push_back({f++, sp, dp, std::move(payload)});
-	};
-
-	add(32768, 32769, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_a)));
-	add(32769, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_a)));
-	add(32768, 32770, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_b)));
-	add(32770, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_b)));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0D, inner(0xA1, 24), scrk_a, ca_a.ck, 7, 5));
-	add(32770, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C, inner(0xB2, 48), scrk_b, 0x56, 11, 9));
-	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x16, inner(0xB3, 12), scrk_b, ca_b.ck, 10, 11));
-	add(32769, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x06, inner(0xA2, 45), scrk_a, 0x55, 6, 7));
-	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xA3, 64), scrk_a, ca_a.ck, 8, 6));
-	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xB4, 80), scrk_b, ca_b.ck, 11, 11));
-	return caps;
+	TwoClientCapture t(32769, 32770, /*ck_a=*/2, /*ck_b=*/2);
+	t.server_auth(0); t.client_auth(0); t.server_auth(1); t.client_auth(1);
+	t.s2c(0, 0x0D, 0xA1, 24, 7, 5);
+	t.c2s(1, 0x0C, 0xB2, 48, 11, 9);
+	t.s2c(1, 0x16, 0xB3, 12, 10, 11);
+	t.c2s(0, 0x06, 0xA2, 45, 6, 7);
+	t.s2c(0, 0x0A, 0xA3, 64, 8, 6);
+	t.s2c(1, 0x0A, 0xB4, 80, 11, 11);
+	return t.caps;
 }
 
 } // namespace
@@ -293,6 +272,21 @@ int main() {
 			}
 		}
 		for (int i = 0; i < 6; ++i) EXPECT(sizes_seen[i] == 1);
+		// The port cannot tell the two apart (both 32769); the participant key
+		// can: A is participant 1, B is 2, three messages each, and B's are
+		// exactly the 12/48/80-byte bodies.
+		int by_participant[3] = {0, 0, 0};
+		bool b_bodies_only = true;
+		for (const auto &m : shared_batch) {
+			EXPECT(m.session == 32769);
+			if (m.participant >= 1 && m.participant <= 2) by_participant[m.participant]++;
+			else by_participant[0]++;
+			if (m.participant == 2 &&
+			    !(m.payload.size() == 12 || m.payload.size() == 48 || m.payload.size() == 80))
+				b_bodies_only = false;
+		}
+		EXPECT(by_participant[0] == 0 && by_participant[1] == 3 && by_participant[2] == 3);
+		EXPECT(b_bodies_only);
 		EXPECT(streaming_equals_batch(shared, "shared-port-2-session"));
 	}
 

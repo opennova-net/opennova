@@ -21,7 +21,7 @@ var dir := ""          ## resource-dir override (dev/tests); empty = the persist
 var integrity_profile := ""  ## explicit registered retail corpus; empty = safe CRC silence
 ## The game-session APPID join token the client recovers from the NWJoin .joi CK; a
 ## NovaWorld host validates it in ClientAuth (reject code 9). "0" = the LAN default.
-var join_token := "0"
+var app_id := "0"
 ## The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the NovaWorld
 ## NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates (codes 23/24/25/28). Empty = LAN.
 var cd_cookie := PackedByteArray()

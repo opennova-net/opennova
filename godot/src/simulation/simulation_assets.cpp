@@ -141,9 +141,9 @@ void Simulation::install_expansion_version_root() {
 	runtime_->set_expansion_version_root(join_expansion_version_root_);
 }
 
-void Simulation::install_join_token() {
+void Simulation::install_app_id() {
 	if (!runtime_) return;
-	runtime_->set_join_token(join_token_);
+	runtime_->set_app_id(app_id_);
 }
 
 void Simulation::install_join_cd_cookie() {

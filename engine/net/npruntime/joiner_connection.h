@@ -317,16 +317,17 @@ public:
 		expansion_version_root_ = std::move(game_root);
 	}
 
-	// The game-session BT join token — the decimal the retail client recovers
-	// from the NWJoin .joi CK and uploads in ClientAuth; a NovaWorld host
-	// validates it (reject code 9). Configure before start(); unset keeps "0"
-	// (the LAN default, unchecked on a non-NovaWorld host).
-	// [orig: net_config.bt = atol(decoded CK) @0x569b8e ->
+	// The game-session APPID — the decimal the retail client recovers from the
+	// NWJoin .joi CK and uploads as the ClientAuth APPID conn-tag; a NovaWorld
+	// host validates it (reject code 9). Configure before start(); unset keeps
+	// "0" (the LAN default; LAN sends no APPID and no host checks one).
+	// [orig: net_config.bt = atol(decoded CK) @0x569b8e; the host reads the
+	//  APPID tag into that field, NapiNetConfig_LoadFromConnTags @0x4c7260 ->
 	//  Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5]
-	void set_join_token(std::string token) {
-		join_token_ = token.empty() ? std::string("0") : std::move(token);
+	void set_app_id(std::string token) {
+		app_id_ = token.empty() ? std::string("0") : std::move(token);
 	}
-	const std::string &join_token() const { return join_token_; }
+	const std::string &app_id() const { return app_id_; }
 
 	// The CD identity cookie (packed PUB* blob) the C2S 0x00 JOIN relays: the
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
@@ -650,7 +651,7 @@ private:
 	ProtocolReassemblyState s2c_reassembly_;
 	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
 	std::string expansion_version_root_; // install root for the JOIN checksum (D-NET-166)
-	std::string join_token_ = "0"; // ClientAuth APPID (decoded .joi CK); "0" = LAN default
+	std::string app_id_ = "0"; // ClientAuth APPID (decoded .joi CK); "0" = LAN default
 	std::vector<uint8_t> cd_cookie_; // 0x00 JOIN CD identity cookie (packed PUB* blob)
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
