@@ -124,6 +124,20 @@ int main() {
 	// tick while the trigger is held (the FSM sustains the volley and reloads).
 	// Rounds leave the muzzle (the +0.9 u chest stand-in) parallel to the look,
 	// so aim the muzzle at the chest.
+	//
+	// The ambient firefight is incidental to this test (the subject is the
+	// corpse chain), and since the 2026-09-01 guard-bit fix landed the authored
+	// group guard-clear on engine_flags, the formerly frozen guards patrol
+	// faithfully — the target evades and the pack can win the incidental race.
+	// Two scripted (WAC-shaped) stores pin the scenario without touching the
+	// kill chain: ssnguard holds the target on its post (the guard bit routes
+	// it into the stationary mounted-fire tail), and the player is topped up
+	// through the same SETHP store each tick.
+	{
+		const w::Entity *tent0 = rig.world.registry.get(target);
+		if (tent0 != nullptr && tent0->net_id != 0)
+			rig.world.commands.set_ssn_guard(tent0->net_id, true);
+	}
 	rig.set_entity_health(target, 10);
 	int hp_prev = 10;
 	int fire_seconds = 0;
@@ -142,6 +156,8 @@ int main() {
 			}
 			rig.set_weapon_input(true, pressed, false);
 			pressed = false;
+			if (rig.world.cached.local_player.valid())
+				rig.set_entity_health(rig.world.cached.local_player, 150);
 			rig.tick();
 		}
 		++seconds;
@@ -155,15 +171,42 @@ int main() {
 			killed = true;
 			rig.input.forward = false;
 			rig.set_weapon_input(false, false, false);
+			// Release the scripted guard hold: the corpse watch is about an
+			// ordinary body, and the mounted-bit tail must not keep owning it.
+			if (tent != nullptr && tent->net_id != 0)
+				rig.world.commands.set_ssn_guard(tent->net_id, false);
 			std::printf("corpse: KILLED t=%ds — player rounds killed the target\n", seconds);
 			break;
 		}
 		if (rig.player_health() <= 0) {
-			std::fprintf(stderr, "FAIL: the NPC killed the PLAYER first (t=%ds) — rerun\n", seconds);
+			std::fprintf(stderr,
+					"FAIL: the player died despite the per-tick top-up (t=%ds)\n",
+					seconds);
 			return 1;
 		}
 	}
 	if (!expect(killed, "the fire phase killed the target within its budget")) return 1;
+
+	// Walk up to the body before the watch: the guard died on its authored
+	// post, which can keep hard cover between the watcher and the 0.9 u watch
+	// ray. The §19.4 rule is about a SEEN corpse — stand where it is seen.
+	{
+		int walk_seconds = 0;
+		while (walk_seconds < 20) {
+			const w::Entity *c = rig.world.registry.get(target);
+			if (c == nullptr) break;
+			const w::Vec3 me = rig.player_position();
+			if (testrig::planar_distance(me, c->position) <= 3.0f) break;
+			w::Vec3 to = c->position;
+			to.z = me.z;
+			rig.aim_at(me, to);
+			rig.input.forward = true;
+			rig.tick(62);
+			++seconds;
+			++walk_seconds;
+		}
+		rig.input.forward = false;
+	}
 
 	// --- Corpse: dead but NOT hidden; a death-family anim; the timer seeded and
 	// draining; still visible after the timer would have expired (the watch rule).
