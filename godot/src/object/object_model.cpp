@@ -246,13 +246,18 @@ void ObjectModel::update_slot_shadow_group() {
 	if (is_shadow_caster_enabled()) {
 		if (!is_in_group(group)) {
 			add_to_group(group);
+			SlotShadow::bump_caster_group_revision();
 		}
 	} else if (is_in_group(group)) {
 		remove_from_group(group);
+		SlotShadow::bump_caster_group_revision();
 	}
 }
 
 void ObjectModel::set_slot_shadow_person(bool p_person) {
+	if (slot_shadow_person_ != p_person) {
+		SlotShadow::bump_caster_group_revision();
+	}
 	slot_shadow_person_ = p_person;
 }
 
@@ -279,8 +284,13 @@ Transform3D ObjectModel::compose_entity_transform(const Basis &p_basis,
 }
 
 void ObjectModel::set_shadow_bound_radii(float p_model_sphere, float p_entity_bound) {
-	model_sphere_radius_ = p_model_sphere > 0.0f ? p_model_sphere : 0.0f;
-	entity_bound_radius_ = p_entity_bound > 0.0f ? p_entity_bound : 0.0f;
+	const float sphere = p_model_sphere > 0.0f ? p_model_sphere : 0.0f;
+	const float bound = p_entity_bound > 0.0f ? p_entity_bound : 0.0f;
+	if (model_sphere_radius_ != sphere || entity_bound_radius_ != bound) {
+		SlotShadow::bump_caster_group_revision();
+	}
+	model_sphere_radius_ = sphere;
+	entity_bound_radius_ = bound;
 }
 
 float ObjectModel::get_model_sphere_radius() const {
@@ -292,9 +302,13 @@ float ObjectModel::get_entity_bound_radius() const {
 }
 
 void ObjectModel::set_slot_shadow_capture_with(ObjectModel *p_owner) {
-	slot_shadow_capture_with_ = p_owner != nullptr
+	const ObjectID next = p_owner != nullptr
 			? ObjectID(p_owner->get_instance_id())
 			: ObjectID();
+	if (slot_shadow_capture_with_ != next) {
+		SlotShadow::bump_caster_group_revision();
+	}
+	slot_shadow_capture_with_ = next;
 }
 
 ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
@@ -304,6 +318,9 @@ ObjectModel *ObjectModel::get_slot_shadow_capture_with() const {
 
 void ObjectModel::set_slot_shadow_decal(const String &p_texture,
 		const Vector4 &p_dims) {
+	if (slot_shadow_decal_texture_ != p_texture) {
+		SlotShadow::bump_caster_group_revision();
+	}
 	slot_shadow_decal_texture_ = p_texture;
 	slot_shadow_decal_dims_ = p_dims;
 }
@@ -1157,6 +1174,13 @@ void ObjectModel::_notification(int p_what) {
 			rebuild();
 		}
 		update_slot_shadow_group();
+	} else if (p_what == NOTIFICATION_PARENTED) {
+		// Reparenting can change the caster registry's ancestor-derived
+		// seat_parented fact (a caster moved under another caster) without
+		// touching group membership.
+		if (is_in_group(SlotShadow::caster_group())) {
+			SlotShadow::bump_caster_group_revision();
+		}
 	} else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
 		// Becoming visible re-derives the render-side state (PANM pose, light
 		// draw parts, order) that stayed stale while hidden.
