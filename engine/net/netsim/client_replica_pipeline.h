@@ -357,6 +357,8 @@ private:
 	uint32_t rm_tick_counter_ = 0; // the leg re-plant window clock [orig: tick&63]
 	bool remote_motion_mode_ = false;
 	ReplicaContactResolver replica_contact_resolver_;
+	// tick_remote_motion's per-tick replica-peer sphere table (reused capacity).
+	std::vector<ReplicaPeerSphere> contact_peer_scratch_;
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
 	int32_t water_z_ = 0;

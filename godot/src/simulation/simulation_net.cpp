@@ -482,9 +482,11 @@ void Simulation::joiner_pump() {
 void Simulation::joiner_deposit_inbound() {
 	if (pump_.is_valid()) {
 		pump_->poll();
-		while (pump_->has_inbound()) {
-			const Dictionary d = pump_->take_inbound();
-			const PackedByteArray bytes = d.get("bytes", PackedByteArray());
+		// The native drain: no per-datagram Dictionary/String marshalling on
+		// the 62.5 Hz tick (the Dictionary form is the script-facing seam).
+		opennova::PeerAddr from;
+		PackedByteArray bytes;
+		while (pump_->take_inbound_native(from, bytes)) {
 			runtime_->receive(bytes.ptr(), static_cast<std::size_t>(bytes.size()));
 		}
 	}
