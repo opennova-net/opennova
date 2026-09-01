@@ -84,6 +84,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 				game_type::is_waypoint_family(game_type_))) {
 			state_.deploy_overlay_active =
 					(wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active;
+			// The trigger falling is what clears the open latch
+			// [orig: the close-on-clear leg @0x5cac8e -> @0x54b954].
+			if (!state_.deploy_overlay_active) state_.deploy_overlay_open_latch = false;
 			state_.mark_changed();
 		} else {
 			++malformed_bodies_;
@@ -1970,6 +1973,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	// by assignment, not edges [orig: NapiNPClientMsg_0x00A @0x42ff82 —
 	// g_deploy_screen_active = (flags1 >> 1) & 1].
 	state_.deploy_overlay_active = (fu.flags1 & 0x02u) != 0;
+	if (!state_.deploy_overlay_active) state_.deploy_overlay_open_latch = false;
 	// The death-screen edges on flags1 bit 0 [orig: @0x42ff88..0x43002b].
 	{
 		const bool bit = (fu.flags1 & 0x01u) != 0;
