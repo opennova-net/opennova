@@ -57,7 +57,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		if (decode_session_config(body.data(), body.size(), config))
 			game_type_ = static_cast<uint32_t>(config.fields[3]);
 		else
-			++unknown_tags_;
+			++malformed_bodies_;
 		break;
 	}
 	case s2c::FULL_PLAYER_INFO: { // extra = shared g_GameType
@@ -65,7 +65,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		if (decode_full_player_info(body.data(), body.size(), info))
 			game_type_ = info.extra;
 		else
-			++unknown_tags_;
+			++malformed_bodies_;
 		break;
 	}
 	case s2c::PER_FRAME_UPDATE:
@@ -86,7 +86,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 					(wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active;
 			state_.mark_changed();
 		} else {
-			++unknown_tags_;
+			++malformed_bodies_;
 		}
 		break;
 	}
@@ -97,7 +97,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		    consumed == body.size())
 			pending_weapon_reloads_.push_back(reload);
 		else
-			++unknown_tags_;
+			++malformed_bodies_;
 		break;
 	}
 	case s2c::TEAM_ASSIGN: {
@@ -106,7 +106,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		if (decode_team_assign(body.data(), body.size(), assign, consumed))
 			apply_team_assign(assign.entity_handle, assign.team);
 		else
-			++unknown_tags_;
+			++malformed_bodies_;
 		break;
 	}
 	case s2c::EMPTY_SLOT_SWEEP: {
@@ -115,7 +115,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			for (uint16_t index : destroyed.pool0_indices)
 				destroy_pool0_slot(index);
 		} else {
-			++unknown_tags_;
+			++malformed_bodies_;
 		}
 		break;
 	}
@@ -134,7 +134,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		EntityDeathRecord death;
 		size_t consumed = 0;
 		if (!decode_entity_death(body.data(), body.size(), death, consumed)) {
-			++unknown_tags_;
+			++malformed_bodies_;
 			break;
 		}
 		apply_entity_death(death.entity_handle, death.killer_source);
@@ -159,7 +159,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		KillRecord kill;
 		size_t consumed = 0;
 		if (!decode_kill_record(body.data(), body.size(), kill, consumed)) {
-			++unknown_tags_;
+			++malformed_bodies_;
 			break;
 		}
 		apply_entity_death(kill.victim_slot,
@@ -221,7 +221,8 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		apply_score_delta_sound(body);
 		break;
 	default:
-		// Game-start scalars / world-state-load and other non-entity tags.
+		// Game-start scalars and other non-entity tags this reducer
+		// does not model.
 		++unknown_tags_;
 		break;
 	}
@@ -286,7 +287,7 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		// malformed tail loses only the unread remainder [orig: NapiNPClientMsg_0x0E family].
 		// Count the malformed page, drop the half-read record the decoder
 		// staged at the failure point, and apply the complete prefix.
-		++unknown_tags_;
+		++malformed_bodies_;
 		if (batch.last_record_partial && !batch.records.empty())
 			batch.records.pop_back();
 		if (batch.records.empty()) return;
@@ -1473,7 +1474,7 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		// malformed tail loses only the unread remainder [orig: NapiNPClientMsg_0x00D @ 0x432C40].
 		// Count the malformed page, drop the half-read record the decoder
 		// staged at the failure point, and apply the complete prefix.
-		++unknown_tags_;
+		++malformed_bodies_;
 		if (batch.last_record_partial && !batch.records.empty())
 			batch.records.pop_back();
 		if (batch.records.empty()) return;
@@ -1801,7 +1802,7 @@ void ClientReplicaPipeline::apply_static_batch(const std::vector<uint8_t> &body)
 		// malformed tail loses only the unread remainder [orig: the 0x10 static handler].
 		// Count the malformed page, drop the half-read record the decoder
 		// staged at the failure point, and apply the complete prefix.
-		++unknown_tags_;
+		++malformed_bodies_;
 		if (batch.last_record_partial && !batch.records.empty())
 			batch.records.pop_back();
 		if (batch.records.empty()) return;
@@ -1881,7 +1882,7 @@ void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) 
 		// malformed tail loses only the unread remainder [orig: the 0x20 pool-3 handler].
 		// Count the malformed page, drop the half-read record the decoder
 		// staged at the failure point, and apply the complete prefix.
-		++unknown_tags_;
+		++malformed_bodies_;
 		if (batch.last_record_partial && !batch.records.empty())
 			batch.records.pop_back();
 		if (batch.records.empty()) return;

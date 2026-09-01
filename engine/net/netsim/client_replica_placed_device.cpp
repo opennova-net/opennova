@@ -28,7 +28,7 @@ void ClientReplicaPipeline::apply_deployed_item(
 	if (!decode_deployed_item_spawn(
 			body.data(), body.size(), spawn, consumed) ||
 			consumed != body.size()) {
-		++unknown_tags_;
+		++malformed_bodies_;
 		return;
 	}
 
@@ -142,7 +142,7 @@ void ClientReplicaPipeline::apply_entity_remove(
 	size_t consumed = 0;
 	if (!decode_entity_remove(body.data(), body.size(), removal, consumed) ||
 			consumed != body.size()) {
-		++unknown_tags_;
+		++malformed_bodies_;
 		return;
 	}
 	const std::size_t before = state_.entities.size();
