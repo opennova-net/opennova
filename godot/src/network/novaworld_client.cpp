@@ -122,7 +122,7 @@ void NovaWorldClient::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("login_failed", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("joined_game", PropertyInfo(Variant::STRING, "host"),
 	                      PropertyInfo(Variant::INT, "port"),
-	                      PropertyInfo(Variant::STRING, "join_token"),
+	                      PropertyInfo(Variant::STRING, "app_id"),
 	                      PropertyInfo(Variant::PACKED_BYTE_ARRAY, "cd_cookie")));
 
 	BIND_ENUM_CONSTANT(STATE_IDLE);
@@ -754,7 +754,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 // hello and stop" dead-end that never reached gameplay). LAN, NW-routed, and env joins now converge
 // on the one joiner seam (ADR 0009; .agents/README.md "do not create a second gameplay network path").
 void NovaWorldClient::resolve_join_target(const String &host, uint16_t port,
-                                          const String &join_token,
+                                          const String &app_id,
                                           const PackedByteArray &cd_cookie) {
 	trace(String("join target resolved ") + host + ":"
 		+ String::num_int64(static_cast<int64_t>(port))
@@ -763,7 +763,7 @@ void NovaWorldClient::resolve_join_target(const String &host, uint16_t port,
 	// The APPID join token (decoded .joi CK) and the CD identity cookie (packed
 	// PUB* blob) travel with the address: a NovaWorld host validates the APPID in
 	// the ClientAuth (code 9) and the CD cookie in the 0x00 JOIN (codes 23/24/25).
-	emit_signal("joined_game", host, static_cast<int>(port), join_token, cd_cookie);
+	emit_signal("joined_game", host, static_cast<int>(port), app_id, cd_cookie);
 }
 
 void NovaWorldClient::enter_state(State next, const String &reason) {

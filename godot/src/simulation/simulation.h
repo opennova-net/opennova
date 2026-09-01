@@ -384,7 +384,7 @@ public:
 	// The game-session APPID join token the client recovers from the NWJoin .joi
 	// CK; a NovaWorld host validates it (reject code 9). Empty/"0" is the LAN
 	// default. Retained across runtime rebuilds like the character/integrity data.
-	void set_join_token(const String &p_token);
+	void set_app_id(const String &p_token);
 	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
 	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.

@@ -71,8 +71,14 @@ struct InGameMessage {
 	char dir = '?';               // 'C' = client->server, 'S' = server->client
 	uint16_t tag = 0;             // protocol full_tag; the low byte is the dispatch tag
 	bool settings_update = false; // ProtocolMessage.flags.settings_update
-	int session = 0;              // per-session id = the client-side UDP port (the
-	                              // distinct-participant key); 0 = single/unknown session
+	int session = 0;              // the client-side UDP port the datagram rode; 0 =
+	                              // single/unknown session. NOT a participant key: a
+	                              // server-side gateway capture funnels many clients
+	                              // through one port (42 on 32768, Kutu 2026-08-24).
+	int participant = 0;          // the distinct-participant key: a dense 1-based
+	                              // index per resolved session identity ((client
+	                              // port, client key) once the auth is seen, else the
+	                              // port), in first-seen order; 0 = unknown
 	std::vector<uint8_t> payload; // reassembled inner body
 };
 
@@ -94,7 +100,8 @@ struct CapturedProtocolRecord {
 struct CapturedSessionPacket {
 	int frame_index = 0;
 	char dir = '?';
-	int session = 0;
+	int session = 0;     // the client-side UDP port (see InGameMessage::session)
+	int participant = 0; // the distinct-participant key (see InGameMessage)
 	ProtocolPacketHeader header{};
 	// Full 9-bit protocol tags in their encoded packet order. Fragment records
 	// remain separate here; semantic reassembly only affects `messages` below.

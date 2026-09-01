@@ -106,14 +106,21 @@ std::vector<uint8_t> build_join_request(
 		std::string_view expansion, int32_t expansion_version_checksum,
 		const std::vector<uint8_t> &cd_cookie) {
 	std::vector<uint8_t> body;
-	auto append_string_tlv = [&](std::string_view name, std::string_view value) {
+	// One flat TLV: [name\0][LE16 size][size bytes]. A string value carries
+	// its NUL inside the size; a binary value is emitted as-is.
+	auto append_binary_tlv = [&](std::string_view name, const uint8_t *data,
+	                             size_t size) {
 		body.insert(body.end(), name.begin(), name.end());
 		body.push_back(0);
-		const uint16_t size = static_cast<uint16_t>(value.size() + 1);
 		body.push_back(static_cast<uint8_t>(size));
 		body.push_back(static_cast<uint8_t>(size >> 8));
-		body.insert(body.end(), value.begin(), value.end());
-		body.push_back(0);
+		body.insert(body.end(), data, data + size);
+	};
+	auto append_string_tlv = [&](std::string_view name, std::string_view value) {
+		std::string with_nul(value);
+		with_nul.push_back('\0');
+		append_binary_tlv(name, reinterpret_cast<const uint8_t *>(with_nul.data()),
+		                  with_nul.size());
 	};
 	if (!expansion.empty()) append_string_tlv("EXP", expansion);
 	// The checksum rides as SIGNED decimal — retail formats its
@@ -127,19 +134,66 @@ std::vector<uint8_t> build_join_request(
 	// as a BINARY TLV: it carries embedded NULs between the [name\0][value\0]
 	// pairs and is already self-terminated, so the length is the raw blob size
 	// (no appended NUL). Absent when the jar carried no PUB* cookie — the host
-	// then punts code 23. [orig: NapiNP_WriteClientAuthPayload @0x42a180 "CD" TLV
-	// = NapiNP_WriteTLV(&unk_24CFDB8, size); the host reads it at
-	// NapiNPServer_HandlePlayerJoinMessage @0x512aa0 "CD" -> the cookie buffer].
+	// then punts code 23. The emit and the host's read are binary-witnessed;
+	// the [name\0][value\0] packing of the blob itself is capture-witnessed
+	// (an unnamed global feeds the writer). [orig: the "CD" TLV emit in
+	// NapiNP_WriteClientAuthPayload @0x42a180 = NapiNP_WriteTLV(&unk_24CFDB8,
+	// size); the gather config_query_matching_entries @0x64eb70; the host read
+	// NapiNPServer_HandlePlayerJoinMessage @0x512aa0 "CD" -> the cookie buffer]
+	// [wire: the stock .204 join capture 2026-08-31 — the blob's packing]
 	if (!cd_cookie.empty()) {
-		const char *cd = "CD";
-		body.insert(body.end(), cd, cd + 2);
-		body.push_back(0);
-		const uint16_t size = static_cast<uint16_t>(cd_cookie.size());
-		body.push_back(static_cast<uint8_t>(size));
-		body.push_back(static_cast<uint8_t>(size >> 8));
-		body.insert(body.end(), cd_cookie.begin(), cd_cookie.end());
+		if (cd_cookie.size() > 0xFFFFu) {
+			// A 16-bit size field cannot describe the blob; a truncated length
+			// would put a malformed record on the wire, so the cookie is
+			// dropped and the host's code-23 punt names the problem.
+			io::logf(io::LogLevel::kWarn,
+					"np joiner: CD cookie of %zu bytes exceeds the TLV size field; not sent",
+					cd_cookie.size());
+		} else {
+			append_binary_tlv("CD", cd_cookie.data(), cd_cookie.size());
+		}
 	}
 	return body;
+}
+
+// The witnessed join-failure families -> player-facing reasons. The NP-layer
+// identity/capacity gates carry a JFC alone; the validate callback (14)
+// carries its own JFP sub-reason. PV2 (7) is a protocol-version token the
+// host pins per build (proto+364 = "16" on retail 1.7.5.7): a mismatch means
+// the server runs a different JO patch, and a stock client of THIS build is
+// rejected the same way — our PV2 is byte-correct for the install.
+// [orig: HandleClientJoin @0x62b750 gate — 3 HK @0x62bdd5 / 4 PW @0x62be18 /
+//  7 PV2 @0x62be40 / 5 empty-NA @0x62be7d / 6 disabled @0x62be8f; the
+//  9/10/15 CU-overflow arms; 11 = a CU chunk NapiNPChunk_Create refused
+//  ("NP.C:PCCR:CCH[1]" @0x62c14e); CNapiNetwork_Init @0x4ca4a0 pins
+//  proto+364; the JFP sub-reasons of the validate callback
+//  Server_ValidatePlayerJoinRequest @0x512100]
+struct JoinFailReason {
+	unsigned code;
+	const char *reason;
+};
+constexpr JoinFailReason kJoinFailFamilies[] = {
+		{3, "The host rejected the connection key"},
+		{4, "The server password is incorrect"},
+		{5, "The server did not receive a player name"},
+		{6, "The server is not accepting new players"},
+		{7, "The server runs an incompatible protocol version (different game patch)"},
+		{9, "The join request carried too much connection data"},
+		{10, "The join request carried too much connection data"},
+		{15, "The join request carried too much connection data"},
+		{11, "The host could not process the join request"},
+};
+constexpr JoinFailReason kJoinValidateReasons[] = {
+		{2, "The server is locked"},
+		{3, "You are banned from this server"},
+		{4, "The server is full"},
+		{5, "The server is full"},
+};
+template <size_t N>
+const char *join_fail_reason(const JoinFailReason (&table)[N], unsigned code) {
+	for (const JoinFailReason &row : table)
+		if (row.code == code) return row.reason;
+	return nullptr;
 }
 
 std::vector<uint8_t> le32_pair(uint32_t first, uint32_t second) {
@@ -359,7 +413,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// Lifecycle trace (kInfo -> MCP log ring): the APPID join token (decoded .joi
 	// CK) on this ClientAuth. "0" on a NovaWorld join means the CK never arrived.
 	io::logf(io::LogLevel::kInfo,
-			"np joiner: ClientAuth APPID = '%s'", join_token_.c_str());
+			"np joiner: ClientAuth APPID = '%s'", app_id_.c_str());
 	// The GAME-session 0x42's NA TLV is the player CALLSIGN — the retail host's display-name
 	// source (the golden joiner's 0x0C record name equals its NA). The "jop:cus2" gate tag is
 	// the NOVAWORLD-gate connect's NA, not the game join's. [wire: retail-ashi5a f=199140
@@ -380,8 +434,10 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// NovaWorld host validates: a mismatch (or an absent APPID, our old bug) is
 	// the code-9 punt. Witnessed live 2026-08-31 in a stock client's successful
 	// join to a genuine .204 host: `CU BT="0"`, `CU APPID="3225"` (= atol(decoded
-	// CK)). [orig: net_config.bt = atol(decoded CK) @0x569b8e serialized as the
-	// APPID conn-tag -> Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5]
+	// CK)). [orig: net_config.bt = atol(decoded CK) @0x569b8e; the host reads
+	// the APPID tag into that same field and the BT tag into char_name —
+	// NapiNetConfig_LoadFromConnTags @0x4c7260 — then
+	// Server_ValidatePlayerJoinRequest @0x512100 compares it @0x5122c5]
 	for (const auto &field : {
 			std::pair<const char *, const char *>{"BT", "0"},
 			std::pair<const char *, const char *>{"VN", "2"},
@@ -395,10 +451,10 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
 	}
 	// APPID (the .joi CK decimal) rides only a NovaWorld join, in retail's wire
-	// order right after COUNTRYCODE. LAN sends no APPID (join_token_ == "0"), the
+	// order right after COUNTRYCODE. LAN sends no APPID (app_id_ == "0"), the
 	// host's code-9 gate being NovaWorld-transport only.
-	if (join_token_ != "0" && !join_token_.empty()) {
-		auth.cu.push_back(make_client_cu_chunk(2, "APPID", join_token_));
+	if (app_id_ != "0" && !app_id_.empty()) {
+		auth.cu.push_back(make_client_cu_chunk(2, "APPID", app_id_));
 	}
 	// Retail serializes the live profile's per-side character block between the
 	// environment strings and the trailing locale/packet scalars. A zero value is
@@ -675,42 +731,17 @@ void JoinerConnection::on_server_auth(
 				"np joiner: join rejected: jfc=%u jfp=%u jfs='%s'",
 				static_cast<unsigned>(sa.jfc), static_cast<unsigned>(sa.jfp),
 				sa.jfs.c_str());
-		// The witnessed JFC families map to player-facing reasons. The validate
-		// callback (14) carries its own JFP sub-reason; the rest are the NP-layer
-		// identity/capacity gates. PV2 (7) is a protocol-version token the host
-		// pins per build (proto+364 = "16" on retail 1.7.5.7): a mismatch means
-		// the server runs a different JO patch, and a stock client of THIS build
-		// is rejected the same way — our PV2 is byte-correct for the install
-		// [orig: HandleClientJoin @0x62b750 gate — 3 HK @0x62bdd5 / 4 PW @0x62be18 /
-		//  7 PV2 @0x62be40 / 5 empty-NA @0x62be7d / 6 disabled @0x62be8f; the
-		//  9/10/15 CU-overflow arms; 11 = a CU chunk NapiNPChunk_Create refused
-		//  ("NP.C:PCCR:CCH[1]" @0x62c14e); CNapiNetwork_Init @0x4ca4a0 pins
-		//  proto+364].
+		// The witnessed families (kJoinFailFamilies / kJoinValidateReasons above)
+		// map to player-facing reasons; an unmapped code keeps the host's own
+		// text when it sent one.
 		if (sa.jfc == 14) {
-			switch (sa.jfp) {
-			case 2: fail("The server is locked"); break;
-			case 3: fail("You are banned from this server"); break;
-			case 4:
-			case 5: fail("The server is full"); break;
-			default:
+			if (const char *reason = join_fail_reason(kJoinValidateReasons, sa.jfp))
+				fail(reason);
+			else
 				fail("The server refused the join (reason " +
 						std::to_string(sa.jfp) + ")");
-				break;
-			}
-		} else if (sa.jfc == 3) {
-			fail("The host rejected the connection key");
-		} else if (sa.jfc == 4) {
-			fail("The server password is incorrect");
-		} else if (sa.jfc == 5) {
-			fail("The server did not receive a player name");
-		} else if (sa.jfc == 6) {
-			fail("The server is not accepting new players");
-		} else if (sa.jfc == 7) {
-			fail("The server runs an incompatible protocol version (different game patch)");
-		} else if (sa.jfc == 9 || sa.jfc == 10 || sa.jfc == 15) {
-			fail("The join request carried too much connection data");
-		} else if (sa.jfc == 11) {
-			fail("The host could not process the join request");
+		} else if (const char *reason = join_fail_reason(kJoinFailFamilies, sa.jfc)) {
+			fail(reason);
 		} else if (!sa.jfs.empty()) {
 			fail(sa.jfs);
 		} else {

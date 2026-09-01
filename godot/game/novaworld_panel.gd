@@ -71,8 +71,11 @@ var _pending_player := ""
 # parity: the service identity names the player, not the local profile).
 var _nw_callsign := ""
 # The rid whose first Join press drew the expansion warning; a second press on
-# the same row proceeds (the in-match 0x7B reconcile stays authoritative).
-var _exp_warning_armed_rid := -1
+# the same row proceeds (the in-match 0x7B reconcile stays authoritative). The
+# rid is retail's signed %d splice and can legitimately be negative, so the
+# armed state is its own flag rather than a sentinel value.
+var _exp_warning_armed := false
+var _exp_warning_armed_rid := 0
 # The mounted resource root, set by MainGame BEFORE _ready so the host Map picker can list the
 # install's .bms missions (the panel owns no mission list; the world's root is null until a load).
 var resource_root: ResourceRoot
@@ -347,7 +350,7 @@ func _on_error(message: String) -> void:
 func _refresh_servers() -> void:
 	_rows = []
 	_pings = {}
-	_exp_warning_armed_rid = -1
+	_exp_warning_armed = false
 	if _client != null:
 		for row in _client.get_server_rows():
 			_rows.append(row)
@@ -759,14 +762,15 @@ func expansion_advisory_blocks_first_press(row: Dictionary, rid: int) -> bool:
 	var host_exp := String(row.get("exp", "")).strip_edges()
 	if host_exp.is_empty() or resource_root == null:
 		return false
-	if _exp_warning_armed_rid == rid:
-		_exp_warning_armed_rid = -1
+	if _exp_warning_armed and _exp_warning_armed_rid == rid:
+		_exp_warning_armed = false
 		return false
 	var action: int = NetSessionPolicy.new().decide_expansion(
 		host_exp, String(resource_root.get_expansion()),
 		resource_root.list_expansions(resource_root.get_root_dir()))
 	if action != NetSessionPolicy.ACTION_FAIL:
 		return false
+	_exp_warning_armed = true
 	_exp_warning_armed_rid = rid
 	_set_status("This server runs expansion '%s' which is not installed (installed: %s). Press Join again to try anyway." % [
 		host_exp,
@@ -779,7 +783,7 @@ func expansion_advisory_blocks_first_press(row: Dictionary, rid: int) -> bool:
 # stashed browse-time mission hint + callsign) to MainGame. The in-match runtime
 # authenticates again, then S2C 0x7B/0x0B owns the actual mission load exactly as
 # for LAN; the lobby hint is never a local-BMS requirement (D-NET-194).
-func _on_joined_game(host: String, port: int, join_token: String, cd_cookie: PackedByteArray) -> void:
+func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedByteArray) -> void:
 	_set_status("Entering %s:%d as %s..." % [host, port, _pending_player])
 	var target := JoinTarget.new()
 	target.host_ip = host
@@ -788,7 +792,7 @@ func _on_joined_game(host: String, port: int, join_token: String, cd_cookie: Pac
 	target.player_name = _pending_player
 	# The APPID join token (decoded .joi CK) the host validates (code 9), and the
 	# CD identity cookie (packed PUB* blob) it validates in the 0x00 JOIN (code 23).
-	target.join_token = join_token
+	target.app_id = app_id
 	target.cd_cookie = cd_cookie
 	join_in_match_requested.emit(target)
 

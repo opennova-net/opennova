@@ -180,11 +180,27 @@ void test_deploy_overlay_open_latch() {
 	CHECK(!view.state().deploy_overlay_open_latch);
 }
 
+// A KNOWN tag whose body fails its decoder counts as a malformed body, not
+// an unknown tag — the arm that once bumped the wrong counter.
+void test_truncated_known_body_counts_as_malformed() {
+	auto owned = std::make_unique<ClientReplicaPipeline>();
+	ClientReplicaPipeline &view = *owned;
+	const std::size_t malformed_before = view.malformed_bodies();
+	const std::size_t unknown_before = view.unknown_tags();
+	std::vector<uint8_t> truncated = world_state_load_body(0x01);
+	truncated.resize(10);
+	view.apply(s2c::WORLD_STATE_LOAD, truncated);
+	CHECK(view.malformed_bodies() == malformed_before + 1);
+	CHECK(view.unknown_tags() == unknown_before);
+	CHECK(!view.state().deploy_overlay_active); // nothing folded
+}
+
 int main() {
 	test_sub_block_0_timers_fold_and_retain();
 	test_self_wave_zone();
 	test_deploy_overlay_follows_the_host();
 	test_deploy_overlay_open_latch();
+	test_truncated_known_body_counts_as_malformed();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

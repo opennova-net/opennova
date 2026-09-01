@@ -72,6 +72,7 @@ struct DirState {
 struct Session {
 	std::string client_scrk, server_scrk;
 	DirState cstate, sstate;
+	int participant = 0; // dense 1-based index in first-seen order
 };
 
 // Identity = (client UDP port, client key). Neither half is sufficient alone,
@@ -95,7 +96,17 @@ struct SessionTable {
 	std::unordered_map<uint64_t, Session> by_id;
 	// (client port, ServerAuth.sk) -> identity, for routing the C2S direction.
 	std::map<std::pair<int, uint32_t>, uint64_t> id_by_server_key;
+	int next_participant = 1;
 };
+
+// The one creation path: a session first seen here takes the next
+// participant index, so every packet and message it decodes carries the same
+// distinct key whatever port it rode.
+Session &session_at(SessionTable &table, uint64_t id) {
+	auto [it, inserted] = table.by_id.try_emplace(id);
+	if (inserted) it->second.participant = table.next_participant++;
+	return it->second;
+}
 
 // Drive one datagram through the outer-decode pipeline, appending any completed
 // in-game messages to `out`. Shared by the live CaptureDecoder and the batch
@@ -105,7 +116,8 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
                       CaptureDecodeResult &out);
 
 bool process(const std::vector<uint8_t> &body, const std::string &scrk, char dir,
-             DirState &st, int frame, int session, CaptureDecodeResult &out) {
+             DirState &st, int frame, int session, int participant,
+             CaptureDecodeResult &out) {
 	if (scrk.empty()) return false;
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> msgs;
@@ -115,6 +127,7 @@ bool process(const std::vector<uint8_t> &body, const std::string &scrk, char dir
 	packet.frame_index = frame;
 	packet.dir = dir;
 	packet.session = session;
+	packet.participant = participant;
 	packet.header = hdr;
 	packet.tags.reserve(msgs.size());
 	packet.records.reserve(msgs.size());
@@ -143,6 +156,7 @@ bool process(const std::vector<uint8_t> &body, const std::string &scrk, char dir
 		m.tag = st.pending_tag;
 		m.settings_update = st.pending_settings;
 		m.session = session;
+		m.participant = participant;
 		m.payload = std::move(assembled);
 		out.messages.push_back(std::move(m));
 		st.have_pending = false;
@@ -226,7 +240,7 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 			// historical behaviour for captures without one.
 			const uint64_t id = a.ck ? auth_identity(session_key, a.ck)
 			                         : uint64_t(session_key);
-			sessions.by_id[id].client_scrk = a.scrk;
+			session_at(sessions, id).client_scrk = a.scrk;
 		}
 		break;
 	}
@@ -243,21 +257,21 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 			// this is where both directions' routing is bound.
 			const uint64_t id = a.ck ? auth_identity(session_key, a.ck)
 			                         : uint64_t(session_key);
-			sessions.by_id[id].server_scrk = a.scrk;
+			session_at(sessions, id).server_scrk = a.scrk;
 			if (a.sk) sessions.id_by_server_key[{session_key, a.sk}] = id;
 		}
 		break;
 	}
 	case SESSION_OPCODE_PROTOCOL_MESSAGE: {
-		Session &s = sessions.by_id[protocol_identity(false)];
+		Session &s = session_at(sessions, protocol_identity(false));
 		result.decoded = process(body, s.client_scrk, 'C', s.cstate,
-		                         d.frame_index, session_key, out);
+		                         d.frame_index, session_key, s.participant, out);
 		break;
 	}
 	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE: {
-		Session &s = sessions.by_id[protocol_identity(true)];
+		Session &s = session_at(sessions, protocol_identity(true));
 		result.decoded = process(body, s.server_scrk, 'S', s.sstate,
-		                         d.frame_index, session_key, out);
+		                         d.frame_index, session_key, s.participant, out);
 		break;
 	}
 	default:

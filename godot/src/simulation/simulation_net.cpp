@@ -936,13 +936,13 @@ bool Simulation::set_join_integrity_profile(const String &p_profile_id) {
 	return true;
 }
 
-void Simulation::set_join_token(const String &p_token) {
+void Simulation::set_app_id(const String &p_token) {
 	// The .joi-recovered game-session BT join token a NovaWorld host validates
 	// (reject code 9). Empty/"0" is the LAN default. Applied to the live joiner
-	// runtime immediately and re-applied on each (re)load via install_join_token.
-	join_token_ = std::string(p_token.strip_edges().utf8().get_data());
-	if (join_token_.empty()) join_token_ = "0";
-	install_join_token();
+	// runtime immediately and re-applied on each (re)load via install_app_id.
+	app_id_ = std::string(p_token.strip_edges().utf8().get_data());
+	if (app_id_.empty()) app_id_ = "0";
+	install_app_id();
 }
 
 void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
@@ -998,7 +998,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_character_join_vars();
 	install_join_integrity_profile();
 	install_expansion_version_root();
-	install_join_token();
+	install_app_id();
 	install_join_cd_cookie();
 	install_item_class_resolver();
 	joiner_ = true;
