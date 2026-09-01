@@ -1702,7 +1702,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick,
     } else if (inf.airborne) {
         // Airborne STEER, before the decay [orig: @0x4b78b7..0x4b790f]: while
         // the moving bit is held, push the slide pair 64/tick along
-        // (cos,sin)(lookYawBam16 * dbl_7C9BC0 + dir * dbl_7C9BB0). The two
+        // (cos,sin)(lookYawBam16 * dbl_7C9BC0 + dir * dbl_7C9BB0). The yaw
+        // term loads the signed HIGH WORD of the entity's LOOK heading
+        // (movsx word entity+0x12 @0x4b78c5 — the +0x10 heading dword, not
+        // the +0x8C body heading org2 elsewhere prefers). The two
         // doubles are retail's STORED approximations (2*pi/65536 and pi/4,
         // read from the image at 0x7C9BC0/0x7C9BB0) and are ported verbatim;
         // the form is the subtract of the ftol-truncated (value * -64.0f)
