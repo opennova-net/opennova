@@ -461,6 +461,18 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     player-slide case in `tests/world/infantry_test.cpp`. (Our `inf.airborne` here reads last tick's
     value — the vertical resolve updates it after — a negligible 1-tick lag vs the original reading
     the flag set in the same physics pass.)
+    **The airborne STEER leg landed 2026-08-26 (PR #612) and its witness row + pin arrived
+    2026-09-01**: while the moving bit is held the slide pair takes
+    `-ftol((cos,sin)(angle) * -64.0f)` BEFORE the momentum decay, with
+    `angle = yawHigh16 * dbl_7C9BC0 + dir * dbl_7C9BB0` — `yawHigh16` is the SIGNED HIGH WORD of
+    the +0x10 LOOK heading (`movsx word entity+0x12` [orig: `@0x4b78c5`]), not the +0x8C body
+    heading; the doubles are the image's stored approximations of 2π/65536 and π/4 at
+    0x7C9BC0/0x7C9BB0, the multiplier is `flt_7C9BD8 = -64.0f`, truncation via `ftol2_sse
+    @0x76bc00` [orig: the leg `@0x4b78b7..0x4b790f`]. The DOUBLED chute arm (`Flags & 0x20`,
+    vertical vel ≤ −0x3800, dir 0 [orig: `@0x4b7920..0x4b793d`]) is unreachable until the
+    parachute system lands and stays unported under **D-INF-20** (which now counts this second
+    waiting consumer). Pinned by the airborne-steer case in `tests/world/infantry_test.cpp`
+    (steer-before-decay ordering, the axis split off the heading high word, the no-input arm).
   - **D-INF-10** per-tick gravity, asymmetric by motor — **CLOSED for both legs 2026-07-16
     (§22)**. Neither infantry mover gates the vertical step on tick parity. The NPC (org1)
     falls `vel_z -= 416` EVERY tick then `pos.z += 2·vel_z` [orig:
@@ -577,8 +589,12 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `@0x4bf8d4-0x4bf8f7`]; the org2 heading model
     sixteenth-chases the yaw + snaps the leg targets while set [orig: `@0x4b494d-0x4b496c`];
     gravity skips while drowning/platform but NOT while parachuting — the descent physics
-    live in the `@0x4b7b18+` swim/parachute block (unread). Ours never sets the flag; the
-    player's jump and fall stamp 31 (NPC falls keep the clip, as witnessed).
+    live in the `@0x4b7b18+` swim/parachute block (unread). A second waiting consumer since
+    2026-08-26: the airborne steer's DOUBLED chute arm [orig: `@0x4b7920..0x4b793d`]
+    (D-INF-9 entry). Ours never sets the flag; the player's jump and fall stamp 31
+    (NPC falls keep the clip, as witnessed). The 2026-09-01 teleport re-grill confirmed the
+    single-teleport marker copy is a genuine flag PRODUCER once modeled: a pool-0 target
+    inherits the marker's 0x20 [orig: `@0x43e0a0`].
   - **D-INF-21** the "!Poof!" ghost mode is deliberately unported: `g_localPlayerPoofMode
     @ 0xA82298` (renamed this session, ex `dword_A82298`) is toggled by a net-message
     handler that debug-prints `!Poof!` [orig: `@0x42d450` — the IDB's
@@ -6631,7 +6647,7 @@ items.def hp==0 `-> 0x4000000` `[orig: @ 0x40dc8e]`.
 | 0x10 | `kEntityFlagScopeRaised` | weapon scope raised (`g_weaponScopeActive` refresh) | `[orig: test @ 0x4b5deb]`; §13.2 |
 | 0x20 | `kEntityFlagParachute` | parachute deployed (system unmodeled, D-INF-20) | `[orig: repulsion radius leg @ 0x4b3aac]`; §15.4 |
 | 0x40 | `kEntityFlagMounted` | carried / vehicle-mounted; the AI guard family also reads it | `[orig: Entity_AttachToVehicleSlot @ 0x494752-0x494775]`; §1, §15, §17, D-COL-9 |
-| 0x80 | `kEntityFlagAiClimb` | org1 ladder-CLIMB order mode (named 2026-08-15): the capped sixteenth-step Z chase to +0x304 replacing gravity (floor −16384) — PORTED §30 — plus the eighth-step x/y chase to +0x2FC/+0x300 gated on `attachParent == self` (the AI direct-move mover; rides the AI-order slice with the bit's WRITER) | `[orig: test @ 0x4bf6c1; z chase @ 0x4bf6d2-0x4bf6e5; x/y chase @ 0x4bf651-0x4bf664]`; §30 |
+| 0x80 | `kEntityFlagAiClimb` | org1 ladder-CLIMB order mode (named 2026-08-15): the capped sixteenth-step Z chase to +0x304 replacing gravity (floor −16384) — PORTED §30 — plus the eighth-step x/y chase to +0x2FC/+0x300 gated on `attachParent == self` (the AI direct-move mover; rides the AI-order slice with the bit's WRITER). The COMMAND writer is ChangeAI sub 23 (runtime-only, no dfx2med token) — NOT sub 17, which is the AI-slot CLIMBER bit 0x400 (§32.2, corrected 2026-09-01) | `[orig: test @ 0x4bf6c1; z chase @ 0x4bf6d2-0x4bf6e5; x/y chase @ 0x4bf651-0x4bf664; command case 0x17 @ 0x43afae]`; §30 |
 | 0x100 | `kEntityFlagPlayer` | player — the wire Player dispatch class; gates held-weapon draws and the death-event leg | §5.10b (net-re); §13.2; §16.2 |
 | 0x400 | `kEntityFlagReflective` | BMS Reflective trait | `[orig: @ 0x40e9f0]` |
 | 0x800 | `kEntityFlagVehicleLoadoutZone` | type-11 volume touch — gates vehicle.mnu | `[orig: @ 0x4aeb92, @ 0x49b858]`; §15.4. NOTE: the damage path also writes an entity `Flags \|= 0x800` critical-hit latch (`round_sim.cpp` seat/head branches) — same value, distinct unnamed meaning; that site stays raw |
@@ -7228,7 +7244,7 @@ SSN, group, or area fan reaches the same entity/controller/brain mutations.
 | `setaccuracy` | writes `max(0, 100-a)` and `max(0, 100-b)` into the two controller error slots in reversed argument order [orig: WacCmd_SetAccuracy @ 0x4F2070] | `set_ssn_accuracy` |
 | `Gsetaccuracy` | the same pair over matching pool-0 AI rows only [orig: WacCmd_GroupSetAccuracy @ 0x4F7BE0] | `set_group_accuracy` |
 | `ssnguard` | toggles entity Flags `0x40` for a resolved row, independent of whether it owns a brain [orig: WacCmd_SsnGuard @ 0x4F71C0] | `set_ssn_guard` |
-| `ssncspd`, `ssnpspd` | a resolved entity reports success; an AI-bearing row queues brain event 10/11 [orig: WacScript_SendAIEvent10ToEntity @ 0x4F74B0; WacScript_SendAIEvent11ToEntity @ 0x4F7570] | the VM enters the shared ChangeAI queue; no immediate speed write |
+| `ssncspd`, `ssnpspd` | any resolved LIVE row reports success (return 1 @ 0x4F74F9); only the brain queue is gated on the AI component (@ 0x4F7508). The handler receives the pool<<12\|slot handle (pools 0..4 pass the `>= 0x5000` gate) and stamps event channel 0 [orig: WacScript_SendAIEvent10ToEntity @ 0x4F74B0; WacScript_SendAIEvent11ToEntity @ 0x4F7570] | the VM enters the shared ChangeAI queue; no immediate speed write |
 | `Gremove` | removes matching rows through the same group-removal primitive as BMS action 4 [orig: WacCmd_GroupRemove @ 0x4F1F80; Entity_TeleportAllByNetId @ 0x43D5D0] | `remove_group`, including group recount and collision refresh |
 
 `wac_behavior` compiles and executes these names through the public VM seam; it
@@ -7244,16 +7260,33 @@ commands, queues an `AIEvent` which `AI_HandleCommand` consumes later
 AI_HandleCommand @ 0x465770]. OpenNova now preserves that boundary for single,
 group, and area targets.
 
-The synchronous arms now carried are:
+The synchronous arms now carried are (per-case addresses re-witnessed
+2026-09-01):
 
-- sub 2 guard (`Entity::flags 0x40`); 5/6/22 controller alert red/green/yellow;
-  8 controller aim error; 15 BLIND; 16 BERSERK; 17 CLIMBER; 21 COWARD (including
-  the unconditional controller-bit `0x20000` clear); 41 attack distance; 42
-  engagement min/max; and 43 indestructible [orig: Entity_ApplyCommand @
-  0x43AB60].
+- sub 2 GUARD_BIT — the entity Flags dword `0x40`, both split views kept
+  coherent [orig: case 2 @ 0x43AB9A, writes @ 0x43ABAE/0x43ABB8]; 5/6/22
+  controller alert red/green/yellow — the alert byte ai+136 = 2/0/1
+  [orig: @ 0x43AC2D / @ 0x43ACFD / @ 0x43AC8D]; 8 ACCURACY_100 — `p2 == 0`
+  no-op, `ai+40 = 100 − p2` clamped at zero [orig: case 8 @ 0x43AD94, gate
+  @ 0x43ADA4, clamp @ 0x43ADBB]; 15 BLIND (slot bit 0x1 @ 0x43AEDE); 16
+  BERSERK (0x200 @ 0x43AF07); **17 CLIMBER — the AI-slot behavior bit 0x400
+  [orig: case 0x11 @ 0x43AF25, writes @ 0x43AF36/0x43AF43] — NOT the entity
+  Flags 0x80 write the 2026-08-30 port had filed under 17; that write is
+  runtime-only sub 23** [orig: case 0x17 @ 0x43AFAE, Flags 0x80
+  @ 0x43AFC2/0x43AFCF — the org1 climb-chase mode flag, §30], corrected
+  2026-09-01; 21 COWARD (the unconditional 0x20000 clear @ 0x43B078, bit 0x8
+  @ 0x43B088); 41 attack distance (ai+60 = p2<<16 @ 0x43B263); 42 engagement
+  min/max (ai+64/ai+68 @ 0x43B27C/0x43B289); and 43 INDESTRUCTABLE_BIT — the
+  entity Flags dword 0x4000000, the ONE arm with no aiRuntime gate
+  [orig: case 0x2B @ 0x43B20A, writes @ 0x43B210/0x43B21D]. Our dispatcher
+  still requires a resident AI row for every arm — a 43 on a non-AI entity is
+  dropped where retail applies it (bounded residual, noted here).
 - subs 32/33 set/clear the brain's use-waypoint-zones latch, and sub 34 retains
   the already-ported PLAYPARTANIM channel/rate write [orig: Entity_ApplyCommand
   @ 0x43AB60].
+- The command-queued events stamp channel 0 (retail's `event_source = 0`
+  [orig: @ 0x43AC66/@ 0x43ACD1/@ 0x43AD41/@ 0x43B30E]); the combat spawn/death
+  queue sites stamp 9 — the two families differ on purpose.
 
 The queued arms now carried are:
 

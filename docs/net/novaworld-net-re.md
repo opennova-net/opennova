@@ -88,7 +88,22 @@ millisecond round-trip [orig: NapiGameList_OnPingResult @0x63bc60]. The reimpl k
 the constants and the fold in `engine/net/novaworld/ping_sweep.h` and sends the echo
 through the OS ICMP facility (`IcmpSendEcho2`, `godot/src/network/ping_sweep_worker.cpp`)
 — the unprivileged platform equivalent of retail's raw socket, which needs
-administrator rights on modern Windows.
+administrator rights on modern Windows. Since 2026-09-01, rows the sweep never
+attempts (unreported/unparseable address, no ICMP handle, the non-Windows stub)
+pre-stamp the never-attempted fold so the browser's pending state terminates
+(ctest `ping_sweep_fold`). Sweep-shape residuals, recorded not modeled: retail
+gates the sweep on the ctx+68 flags `NapiGameList_StartFetch @ 0x63dd10`
+stores (D-NET-193) while the reimpl sweeps on every GSB finalize, and retail
+paces one raw socket from a worker where the reimpl fires event-completion
+echoes in chunks of 60.
+
+**The browser UI is a stand-in, not a port** (recorded 2026-09-01): the
+`NovaWorldPanel` browser (columns/sorting/filters/details, PR #607) is an
+ADR-0010-era artist-facing front end. Retail's browser is the markup
+`SERVER_LIST` surface (`jop_2_main.mnx:818`, GLB_JOIN source="SERVER_LIST")
+driven by `CLanServerBrowser_UpdateServerList_0 @ 0x660200` — that markup
+browser is the eventual port target; only the ping column's semantics
+(the fold above) are witnessed engine behavior.
 
 Field names:
 `ServerName`, `GameType`, `MissionName`, `Region`, `Players`, `MaxPlayers`, `Dedicated`,
@@ -3706,6 +3721,13 @@ player+88664][u16 pool3Count + {u16 id, u16 val, u8}× when player+354 == 1][u16
 were allocated from S2C `0x10`/`0x0D`, not a local BMS body; the client derives
 zones/names/radii from the streamed rows plus shared item definitions. The 0x0F
 body re-binds/refreshes labels but never carries or gates the picker rows themselves.
+
+Reimpl note (2026-09-01): the 0x0F body is decoded TWICE on a joiner — the
+`JoinerConnection::on_server_session` leg (spawn pose / burst / waypoints) and
+the `ClientReplicaPipeline` reducer's `WORLD_STATE_LOAD` arm (the retained
+`deploy_overlay_active` client-global fold). The two decodes must stay in
+lockstep: a strictness mismatch surfaces only as a `malformed_bodies()`
+counter bump on the reducer side, never as a visible failure.
 
 Because the waypoint gate is off-wire, an off-wire decoder takes an `is_waypoint_gametype` hint
 (default false); for TDM/DM the host sends `waypointCount = 0` / no records, so the default is
