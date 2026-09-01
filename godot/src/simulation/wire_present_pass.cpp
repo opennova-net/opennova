@@ -265,13 +265,18 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 		// instance (deliberately node-less) — owns the rendering. The node
 		// resolve is bookkeeping for row-plan validity, not the defer
 		// condition; a batched static resolves to null and still defers.
-		if (defer_index_.is_valid()) {
+		// A row whose index is not installed yet (a joiner's streamed statics
+		// between the world-stream fence and the settle that places them)
+		// defers the same way: no wire node, ever.
+		{
 			const int d_kind = int(snap[base + PF_KIND]);
 			const int d_index = int(snap[base + PF_INDEX]);
 			if (d_kind >= 0 && d_kind <= 3 && d_index >= 0 &&
 					d_index != opennova::world::kSpawnOriginIndexNone) {
-				ObjectModel *placed = defer_index_->resolve(
-						int(snap[base + PF_BMS_ID]), d_kind, d_index);
+				ObjectModel *placed = defer_index_.is_valid()
+						? defer_index_->resolve(
+								int(snap[base + PF_BMS_ID]), d_kind, d_index)
+						: nullptr;
 				if (placed != nullptr) {
 					applier_->append_wire_deferred(placed);
 				}

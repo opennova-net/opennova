@@ -258,16 +258,13 @@ func setup(mission: MissionData, container: Node,
 			not full_wire_present and options.placer != null)
 	if full_wire_present or sp_attachment_present:
 		_wire_present = WirePresentPass.new()
-		# A retail network join has no local BMS identity table. Pools 1-3 are
-		# materialized separately into the native World at their exact wire handles,
-		# but presentation remains wire-direct because there are no authored nodes to
-		# drive. Passing the empty index here would incorrectly hide valid decoded
-		# buildings/items. Complete/debug missions retain placed-node defer.
-		var wire_defer_index: EntityIndex = _index
-		if mission != null and mission.is_wire_header_only():
-			wire_defer_index = null
-		_wire_present.setup(_sim, options.placer, container,
-				wire_defer_index)
+		# A retail network join has no local BMS identity table at load: the
+		# index is empty until the host's world stream settles, when GameWorld
+		# places the streamed statics through the same placer and
+		# rebind_placed_entities() fills this SAME index. Rows carrying a placed
+		# identity defer with or without a resolvable node, so the wire pass
+		# keeps only organics and runtime spawns on every role.
+		_wire_present.setup(_sim, options.placer, container, _index)
 		_wire_present.set_synthetic_origin_only(sp_attachment_present)
 		simulation_restarted.connect(_wire_present.reset_runtime_state)
 	# The viewing client's fire-presentation pass: AI/remote fire sound + muzzle
@@ -564,6 +561,16 @@ func set_wire_node_spawned_callback(callback: Callable) -> void:
 ## diagnostics. Null when this mission has no replicated/synthetic rows.
 func get_wire_presenter() -> WirePresentPass:
 	return _wire_present
+
+
+## Re-key the placed-node index after a late placement (a joiner's streamed
+## statics, placed once the host's world stream settles). The mission and wire
+## presenters share this one index: the rebuild bumps its generation, so the
+## wire pass re-plans and releases any node a now-placed row had claimed.
+func rebind_placed_entities(placer: MissionObjectPlacer) -> void:
+	if _index == null or placer == null:
+		return
+	_index.build(placer.placed_entity_records, [])
 
 
 ## The placed-node present applier (the perf probes toggle its output channels

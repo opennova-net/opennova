@@ -521,6 +521,10 @@ void JoinerWorldBridge::materialize_replica_world(
 			}
 		}
 		if (saw_pool0) {
+			// Pools 2 and 1 are complete here: give every streamed static its
+			// placed identity so the shell presents it through the same
+			// batched placer path as the host (never as a wire-direct node).
+			materializer_.assign_placement_origins(ctx.world);
 			hooks.on_replica_world_static_ready();
 			wire_world_static_initialized_ = true;
 		}

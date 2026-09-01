@@ -251,6 +251,9 @@ public:
 	void set_wire_header_world(bool v) { wire_header_world_ = v; }
 	bool wire_header_world() const { return wire_header_world_; }
 	netsim::ClientWorldMaterializer &materializer() { return materializer_; }
+	const netsim::ClientWorldMaterializer &materializer() const {
+		return materializer_;
+	}
 
 	// enable_join: a fresh join resets every per-session latch (the runtime is
 	// rebuilt beside it).

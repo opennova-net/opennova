@@ -383,6 +383,27 @@ void Simulation::on_replica_world_changed(
 		resolve_collision_instances(collision_item_db_);
 }
 
+Array Simulation::get_streamed_placement_records() const {
+	Array out;
+	if (!joiner_ || !kernel_) return out;
+	for (const opennova::netsim::StreamedPlacementRecord &rec :
+			joiner_bridge_.materializer().placement_records(kernel_->world)) {
+		Dictionary d;
+		d["kind"] = rec.kind;
+		d["index"] = rec.index;
+		d["bms_id"] = rec.bms_id;
+		d["item_id"] = rec.item_id;
+		d["position"] = Vector3(rec.x, rec.y, rec.z);
+		d["rotation_deg"] = Vector3(static_cast<float>(rec.pitch),
+				static_cast<float>(rec.yaw), static_cast<float>(rec.roll));
+		d["team"] = rec.team;
+		d["group"] = rec.group;
+		d["ai_flags"] = static_cast<int64_t>(rec.bms_attributes);
+		out.push_back(d);
+	}
+	return out;
+}
+
 void Simulation::joiner_pump() {
 	if (!runtime_) {
 		if (runtime_profiling_enabled_) last_net_tick_us_ = 0;

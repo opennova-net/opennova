@@ -913,6 +913,120 @@ bool objective_state_attaches_and_detaches_flag() {
 			"a detached 0x2F clears both carry links and ignores an unresolved ground row");
 }
 
+// The world-stream fence hands every materialized static a placed identity so
+// the shell presents it through the same batched placer path as the host's
+// own statics (retail draws the client-built pools through the one sector
+// renderer [orig: collect_visible_entities_for_terrain @0x5c8c60]). Kind
+// follows the streamed Flags Building bit, pool 3 is markers, the index is a
+// per-kind ordinal in the witnessed pool order, and the BMS-attribute bits map
+// back off the Flags dword exactly [orig: Entity_SpawnFromBMSRecord @0x40ed14].
+bool streamed_rows_take_a_placed_identity_at_the_fence() {
+	ns::ClientReplicaPipeline pipeline;
+
+	nw::StaticEntityRecord static_row;
+	static_row.item_type_id = 0x0600;
+	static_row.pos_x = 11 * 65536;
+	static_row.pos_y = -3 * 65536;
+	static_row.pos_z = 2 * 65536;
+	static_row.euler_z = w::bam_heading_from_mission_yaw_deg(37.0);
+	static_row.team_byte = 2;
+	static_row.entity_flags = 0x04020400u; // Indestructible | Building | Reflective
+	nw::StaticEntityBatch statics;
+	statics.start_index = 37;
+	statics.records.push_back(static_row);
+	nw::StaticEntityRecord crate = static_row;
+	crate.item_type_id = 0x0601;
+	crate.entity_flags = 0x01000000u; // NoShadow, no Building bit: an Item
+	statics.records.push_back(crate);
+	pipeline.apply(0x10, nw::encode_static_entity_batch(statics));
+
+	nw::PoolSpawnRecord vehicle;
+	vehicle.slot_id = 0x1042;
+	vehicle.item_type_id = 5008;
+	vehicle.pos_x = 2 * 65536;
+	vehicle.team_byte = 1;
+	vehicle.entity_flags = 0x00004020u;
+	nw::PoolSpawnBatch vehicles;
+	vehicles.records.push_back(vehicle);
+	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(vehicles));
+
+	nw::Pool3SyncRecord marker;
+	marker.item_type_id = 6006;
+	marker.net_handle = 0x0777;
+	nw::Pool3SyncBatch markers;
+	markers.start_index = 11;
+	markers.records.push_back(marker);
+	pipeline.apply(0x20, nw::encode_pool3_sync_batch(markers));
+
+	w::World world;
+	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
+		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
+	ns::ClientWorldMaterializer materializer;
+	materializer.sync(pipeline.state(), world);
+	if (!expect(materializer.placement_records(world).empty() &&
+			world.registry.get(w::EntityHandle{0x2025})->spawn_origin ==
+					w::kSpawnOriginNone &&
+			world.registry.get(w::EntityHandle{0x2025})->bms_id == 0,
+			"materialization alone stamps no placed identity"))
+		return false;
+
+	if (!expect(materializer.assign_placement_origins(world) == 4,
+			"the fence stamps every materialized pool-1..3 row once"))
+		return false;
+	const w::Entity *building = world.registry.get(w::EntityHandle{0x2025});
+	const w::Entity *item = world.registry.get(w::EntityHandle{0x2026});
+	const w::Entity *boat = world.registry.get(w::EntityHandle{0x1042});
+	const w::Entity *mark = world.registry.get(w::EntityHandle{0x300B});
+	if (!expect(building->spawn_origin == w::spawn_origin_pack(2, 0) &&
+			building->bms_id == 0x2026 &&
+			item->spawn_origin == w::spawn_origin_pack(1, 0) &&
+			item->bms_id == 0x2027 &&
+			boat->spawn_origin == w::spawn_origin_pack(1, 1) &&
+			boat->bms_id == 0x1043 &&
+			mark->spawn_origin == w::spawn_origin_pack(0, 0) &&
+			mark->bms_id == 0x300C,
+			"kind follows the Building flag, indices are per-kind ordinals in pool 2/1/3 slot order, bms ids are the packed handle + 1"))
+		return false;
+	if (!expect(materializer.assign_placement_origins(world) == 0,
+			"a second fence pass stamps nothing"))
+		return false;
+
+	const std::vector<ns::StreamedPlacementRecord> records =
+			materializer.placement_records(world);
+	if (!expect(records.size() == 4 && records[0].kind == 0 &&
+			records[1].kind == 1 && records[1].index == 0 &&
+			records[1].item_id == 0x0601 && records[1].bms_id == 0x2027 &&
+			records[1].bms_attributes == 0x01000000u &&
+			records[2].kind == 1 && records[2].index == 1 &&
+			records[2].item_id == 5008 && records[2].team == 1 &&
+			records[2].bms_attributes == 0 &&
+			records[3].kind == 2 && records[3].bms_id == 0x2026 &&
+			records[3].item_id == 0x0600 && records[3].team == 2 &&
+			records[3].yaw == 37 &&
+			std::fabs(records[3].x - 11.0f) < 0.0001f &&
+			records[3].bms_attributes == 0x00A00000u,
+			"records are (kind, index)-ordered and carry the record-space attributes"))
+		return false;
+
+	// A row streamed after the fence stays wire-direct until the next stamp,
+	// which appends behind the existing ordinals.
+	nw::PoolSpawnRecord late = vehicle;
+	late.slot_id = 0x1043;
+	nw::PoolSpawnBatch late_batch;
+	late_batch.records.push_back(late);
+	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(late_batch));
+	materializer.sync(pipeline.state(), world);
+	const w::Entity *late_row = world.registry.get(w::EntityHandle{0x1043});
+	if (!expect(late_row != nullptr && late_row->spawn_origin == w::kSpawnOriginNone,
+			"a later spawn carries no placed identity"))
+		return false;
+	if (!expect(materializer.assign_placement_origins(world) == 1 &&
+			late_row->spawn_origin == w::spawn_origin_pack(1, 2),
+			"a later stamp appends behind the existing per-kind ordinal"))
+		return false;
+	return true;
+}
+
 int main() {
 	if (!exact_registry_slot_contract()) return 1;
 	if (!registry_lifetime_rejects_handle_reuse()) return 1;
@@ -925,6 +1039,7 @@ int main() {
 	if (!objective_state_attaches_and_detaches_flag()) return 1;
 	if (!decoded_world_stream_materializes_exact_rows()) return 1;
 	if (!pool2_tail_beyond_1024_materializes()) return 1;
+	if (!streamed_rows_take_a_placed_identity_at_the_fence()) return 1;
 	std::puts("client_world_materializer_test: PASS");
 	return 0;
 }
