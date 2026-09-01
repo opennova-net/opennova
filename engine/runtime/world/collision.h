@@ -548,9 +548,11 @@ struct LadderResolveIO {
     int32_t tick_start_z = 0;
     bool prone = false;  // MoveOrder 0x100 [orig: entry-bump pick @ 0x4b3330]
     bool crouch = false; // MoveOrder 0x200 [orig: @ 0x4b3340]
-    // The AI climb order — the third fresh-entry qualifier besides previous
-    // contact and the player class bit. No reimpl writer yet (the AI move-order
-    // layer rides its own slice). [orig: aiRuntime word1 & 0x400 @ 0x4b325d]
+    // The AI climb qualifier — the third fresh-entry arm besides previous
+    // contact and the player class bit. make_ladder_resolve_io feeds it from
+    // the slot's CLIMBER bit (ChangeAI sub 17); the AI move-order half of the
+    // retail test is unported. [orig: var_60 @ 0x4b3257 || Flags & 0x100
+    // @ 0x4b325f || aiRuntime+4 & 0x400 @ 0x4b326a]
     bool ai_wants_climb = false;
     bool is_local_player = false;
     // View + body pose channels (BAM32). view_yaw/view_pitch are entity

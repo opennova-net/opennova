@@ -222,6 +222,10 @@ struct AiSlot {
         kEngageMin = 16,   // minimum engagement range [byte +64]
         kSightRange = 17,  // perception/sight range [byte +68]
     };
+    // Behavior-word bits the motor reads back. CLIMBER is ChangeAI sub 17's
+    // write [orig: case 0x11 @0x43af36] and the ladder gate's third fresh-entry
+    // qualifier [orig: aiRuntime+4 & 0x400 @0x4b326a] — its one retail reader.
+    static constexpr uint32_t kClimber = 0x400;
     // The per-entity ALERT byte at controller+0x88 (0 green / 1 yellow / 2
     // red) — the state the SingleAtRed/YellowAlert triggers read and the
     // ChangeAI command family writes; the AI reset/patrol enters clear it

@@ -30,6 +30,7 @@
 
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/infantry_ladder.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/world.h>
 #include "common/retail_mission_files.h"
@@ -3262,6 +3263,20 @@ static void test_retail_weapon_channel_holds() {
             pa->inf.wpn_state, pa->inf.anim_state);
 }
 
+// ChangeAI sub 17's CLIMBER slot bit reaches the ladder entry gate through
+// LadderResolveIO::ai_wants_climb — the bit's one retail reader
+// [orig: aiRuntime+4 & 0x400 @0x4b326a, Entity_MovementCollisionResolver].
+static void test_climber_bit_feeds_the_ladder_gate() {
+    AiEntity e{};
+    const LadderResolveIO off = make_ladder_resolve_io(e, 0);
+    CHECK(!off.ai_wants_climb);
+    e.slot.f[AiSlot::kBehaviorFlags] |= static_cast<int32_t>(AiSlot::kClimber);
+    const LadderResolveIO on = make_ladder_resolve_io(e, 0);
+    CHECK(on.ai_wants_climb);
+    e.slot.f[AiSlot::kBehaviorFlags] &= ~static_cast<int32_t>(AiSlot::kClimber);
+    CHECK(!make_ladder_resolve_io(e, 0).ai_wants_climb);
+}
+
 int main() {
     test_gait_stance_transition_insert();
     test_player_ladder_climb_cycle();
@@ -3932,13 +3947,17 @@ int main() {
         // [orig: movsx word entity+0x12 @0x4b78c5]: 0x4000 lands the push on
         // the sin axis (angle ~ pi/2 -> cos truncates to 0). The local-player
         // look yaw is mouse-instant off target_heading, so drive that.
+        // 0x4000 * dbl_7C9BC0 = 1.5707954 (just short of pi/2), so the x87
+        // double sin is 0.99999999... and ftol(sin * -64.0) truncates to -63,
+        // not -64 — narrowing the sin to float first would round it to 1.0
+        // and push 64. Steer 63, then the decay: (63*63)>>6 = 62.
         e->inf.airborne = true;
         e->inf.target_heading = 0x40000000;
         e->inf.vel[0] = 0;
         e->inf.vel[1] = 0;
         run_ticks(ai, w, 2, 3);
         CHECK(e->inf.vel[0] == 0);
-        CHECK(e->inf.vel[1] == 63);
+        CHECK(e->inf.vel[1] == 62);
 
         // Without the moving bit only the momentum decay runs.
         e->inf.airborne = true;
@@ -4398,6 +4417,7 @@ int main() {
     test_player_weapon_attack_stamp();
     test_player_arms_dip();
     test_player_weapon_channel_ticks_while_dead();
+    test_climber_bit_feeds_the_ladder_gate();
     test_ai_weapon_channel_advances_without_selection();
     test_weapon_channel_consumer_gate_and_switch_identity();
     test_death_presentation();

@@ -550,13 +550,14 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         case bms::ActionType::ExecuteWac:
             // One front-end invoking the other: the BMS action installs/runs a
             // WAC program. Recorded as an effect here; the embedder wires the actual
-            // WAC invocation (the WacSystem) at runtime.
+            // WAC invocation (the WacSystem) at runtime. [D-EVT-6]
             w.effects.push({"execute_wac", a.param1, 0, 0, 0, std::string()});
             break;
         default:
             // No faithful in-engine handler yet: record as an UNPORTED marker (coverage /
             // diagnostic only — never a presentation effect). Supported missions should
-            // emit zero of these; a test asserts that. [tracked-TODO, not a command stream.]
+            // emit zero of these; a test asserts that. The remaining owners are
+            // ledgered as D-EVT-6 (bms-event-runtime-re §10.1).
             w.effects.push({"unported_action", static_cast<int32_t>(a.action_type), a.action_sub_type,
                             a.param1, a.param2, std::string()});
             break;
