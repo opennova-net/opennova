@@ -18,154 +18,111 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
-#include <algorithm>
-#include <cstdio>
-#include <thread>
-
 namespace godot {
 
 namespace {
 
 #ifdef _WIN32
 
-// One dotted quad -> network-order IPAddr. Returns false for anything that is
-// not a plain a.b.c.d (the unreported "0.0.0.0" rows are filtered by the
-// caller).
-bool parse_ipv4(const std::string &dotted, unsigned long &out) {
-	unsigned a = 0, b = 0, c = 0, d = 0;
-	if (std::sscanf(dotted.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) return false;
-	if (a > 255 || b > 255 || c > 255 || d > 255) return false;
-	out = static_cast<unsigned long>(a) | (static_cast<unsigned long>(b) << 8) |
-	      (static_cast<unsigned long>(c) << 16) | (static_cast<unsigned long>(d) << 24);
-	return true;
-}
-
-struct EchoSlot {
-	int64_t rid = 0;
-	unsigned long addr = 0;
+struct EchoHandles {
 	HANDLE event = nullptr;
 	std::vector<unsigned char> reply;
-	bool answered = false;
-	int ms = 0;
 };
 
-// Fire every slot's echo concurrently (event-completion form) and harvest.
-// The per-echo timeout is the witnessed 3000 ms; a completed request signals
-// its event whether it succeeded or timed out.
-void run_echo_pass(HANDLE icmp, std::vector<EchoSlot *> &slots) {
-	static unsigned char payload[8] = {'o', 'p', 'e', 'n', 'n', 'o', 'v', 'a'};
+// One device echo pass over a chunk of slots (event-completion form): fire
+// every echo, wait for the chunk, and harvest the replies. The per-echo
+// timeout is the witnessed 3000 ms; a completed request signals its event
+// whether it succeeded or timed out, so the wait only adds scheduling slack.
+void run_echo_pass(HANDLE icmp, std::vector<opennova::PingEcho *> &chunk) {
+	unsigned char payload[8] = {'o', 'p', 'e', 'n', 'n', 'o', 'v', 'a'};
+	std::vector<EchoHandles> handles(chunk.size());
 	std::vector<HANDLE> events;
-	std::vector<EchoSlot *> in_flight;
-	for (EchoSlot *slot : slots) {
-		slot->reply.assign(sizeof(ICMP_ECHO_REPLY) + sizeof(payload) + 8, 0);
-		slot->event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-		if (slot->event == nullptr) continue;
+	std::vector<size_t> in_flight;
+	for (size_t i = 0; i < chunk.size(); ++i) {
+		EchoHandles &h = handles[i];
+		h.reply.assign(sizeof(ICMP_ECHO_REPLY) + sizeof(payload) + 8, 0);
+		h.event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+		if (h.event == nullptr) continue;
 		const DWORD rc = IcmpSendEcho2(
-				icmp, slot->event, nullptr, nullptr, slot->addr, payload,
-				sizeof(payload), nullptr, slot->reply.data(),
-				static_cast<DWORD>(slot->reply.size()), opennova::kPingTimeoutMs);
+				icmp, h.event, nullptr, nullptr, chunk[i]->addr_be, payload,
+				sizeof(payload), nullptr, h.reply.data(),
+				static_cast<DWORD>(h.reply.size()), opennova::kPingTimeoutMs);
 		if (rc == 0 && GetLastError() != ERROR_IO_PENDING) {
-			CloseHandle(slot->event);
-			slot->event = nullptr;
+			CloseHandle(h.event);
+			h.event = nullptr;
 			continue;
 		}
-		events.push_back(slot->event);
-		in_flight.push_back(slot);
+		events.push_back(h.event);
+		in_flight.push_back(i);
 	}
 	if (!events.empty()) {
-		// Every request self-completes at its timeout; the extra headroom only
-		// covers scheduling. WaitForMultipleObjects caps at 64 handles — the
-		// caller chunks the slots accordingly.
-		WaitForMultipleObjects(static_cast<DWORD>(events.size()), events.data(),
-		                       TRUE, opennova::kPingTimeoutMs + 1000);
+		WaitForMultipleObjects(static_cast<DWORD>(events.size()), events.data(), TRUE,
+		                       opennova::kPingTimeoutMs + opennova::kPingWaitSlackMs);
 	}
-	for (EchoSlot *slot : in_flight) {
-		const DWORD n = IcmpParseReplies(slot->reply.data(),
-		                                 static_cast<DWORD>(slot->reply.size()));
+	for (size_t i : in_flight) {
+		EchoHandles &h = handles[i];
+		const DWORD n = IcmpParseReplies(h.reply.data(), static_cast<DWORD>(h.reply.size()));
 		if (n > 0) {
 			const ICMP_ECHO_REPLY *reply =
-					reinterpret_cast<const ICMP_ECHO_REPLY *>(slot->reply.data());
+					reinterpret_cast<const ICMP_ECHO_REPLY *>(h.reply.data());
 			if (reply->Status == IP_SUCCESS) {
-				slot->answered = true;
-				slot->ms = static_cast<int>(reply->RoundTripTime);
+				chunk[i]->answered = true;
+				chunk[i]->ms = static_cast<int>(reply->RoundTripTime);
 			}
 		}
 	}
-	for (EchoSlot *slot : slots) {
-		if (slot->event != nullptr) {
-			CloseHandle(slot->event);
-			slot->event = nullptr;
-		}
+	for (EchoHandles &h : handles) {
+		if (h.event != nullptr) CloseHandle(h.event);
 	}
-}
-
-void sweep_thread(std::vector<std::pair<int64_t, std::string>> targets,
-                  Callable sink, int64_t generation) {
-	Dictionary results;
-	// Every row starts as retail's never-attempted fold (-4 -> -3); the echo
-	// passes overwrite the rows they actually drive, so a row the sweep cannot
-	// reach (unparseable address, no ICMP handle) still terminates in the UI.
-	for (const auto &[rid, dotted] : targets) {
-		(void)dotted;
-		results[rid] = opennova::fold_ping_result(-4, 0);
-	}
-	const HANDLE icmp = IcmpCreateFile();
-	std::vector<EchoSlot> slots;
-	if (icmp != INVALID_HANDLE_VALUE) {
-		slots.reserve(targets.size());
-		for (const auto &[rid, dotted] : targets) {
-			unsigned long addr = 0;
-			if (!parse_ipv4(dotted, addr)) continue;
-			EchoSlot slot;
-			slot.rid = rid;
-			slot.addr = addr;
-			slots.push_back(std::move(slot));
-		}
-		// The initial pass plus the witnessed retries over whatever stayed
-		// unanswered, in wait-capped chunks of 60.
-		for (int pass = 0; pass <= opennova::kPingRetries; ++pass) {
-			std::vector<EchoSlot *> pending;
-			for (EchoSlot &slot : slots)
-				if (!slot.answered) pending.push_back(&slot);
-			if (pending.empty()) break;
-			for (size_t start = 0; start < pending.size(); start += 60) {
-				std::vector<EchoSlot *> chunk(
-						pending.begin() + start,
-						pending.begin() +
-								std::min(start + 60, pending.size()));
-				run_echo_pass(icmp, chunk);
-			}
-		}
-		IcmpCloseHandle(icmp);
-	}
-	for (const EchoSlot &slot : slots) {
-		results[slot.rid] = slot.answered
-				? opennova::fold_ping_result(0, slot.ms)
-				: opennova::fold_ping_result(-1, 0);
-	}
-	sink.call_deferred(results, generation);
 }
 
 #endif // _WIN32
 
+Dictionary fold_to_dictionary(const std::vector<opennova::PingEcho> &echoes) {
+	Dictionary results;
+	for (const auto &[rid, ping] : opennova::fold_ping_sweep(echoes)) results[rid] = ping;
+	return results;
+}
+
 } // namespace
 
-void run_ping_sweep(std::vector<std::pair<int64_t, std::string>> targets,
-                    Callable sink, int64_t generation) {
+PingSweepWorker::~PingSweepWorker() { cancel(); }
+
+void PingSweepWorker::cancel() {
+	cancel_.store(true);
+	if (thread_.joinable()) thread_.join();
+	cancel_.store(false);
+}
+
+bool PingSweepWorker::start(std::vector<std::pair<int64_t, std::string>> targets,
+                            Callable sink, int64_t generation) {
+	if (running_.load()) return false;
+	if (thread_.joinable()) thread_.join(); // the previous sweep finished; reap it
+	running_.store(true);
+	cancel_.store(false);
+	thread_ = std::thread([this, targets = std::move(targets), sink = std::move(sink),
+	                       generation]() mutable {
+		std::vector<opennova::PingEcho> echoes = opennova::make_ping_echoes(targets);
 #ifdef _WIN32
-	std::thread(sweep_thread, std::move(targets), std::move(sink), generation)
-			.detach();
+		const HANDLE icmp = IcmpCreateFile();
+		if (icmp != INVALID_HANDLE_VALUE) {
+			opennova::run_ping_passes(
+					echoes, [icmp](std::vector<opennova::PingEcho *> &chunk) { run_echo_pass(icmp, chunk); },
+					[this]() { return cancel_.load(); });
+			IcmpCloseHandle(icmp);
+		} else {
+			for (opennova::PingEcho &e : echoes) e.attempted = false; // no facility: never attempted
+		}
 #else
-	// No unprivileged ICMP facility modeled off Windows: every row settles as
-	// retail's never-attempted fold (-4 -> -3) so the browser's pending "..."
-	// terminates.
-	Dictionary results;
-	for (const auto &[rid, dotted] : targets) {
-		(void)dotted;
-		results[rid] = opennova::fold_ping_result(-4, 0);
-	}
-	sink.call_deferred(results, generation);
+		// No unprivileged ICMP facility modeled off Windows: every row settles
+		// as retail's never-attempted fold so the browser's pending "..."
+		// terminates.
+		for (opennova::PingEcho &e : echoes) e.attempted = false;
 #endif
+		if (!cancel_.load()) sink.call_deferred(fold_to_dictionary(echoes), generation);
+		running_.store(false);
+	});
+	return true;
 }
 
 } // namespace godot

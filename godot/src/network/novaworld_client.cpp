@@ -1,7 +1,6 @@
 #include "network/novaworld_client.h"
 
 #include "network/novaworld_identity.h"
-#include "network/ping_sweep_worker.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/http_client.hpp>
@@ -596,17 +595,12 @@ Dictionary NovaWorldClient::get_server_pings() const {
 void NovaWorldClient::start_ping_sweep() {
 	++ping_generation_;
 	server_pings_ = Dictionary();
+	// Every row goes to the sweep; the engine decides which it can drive (an
+	// unreported 0.0.0.0 host address folds to never-attempted there).
 	std::vector<std::pair<int64_t, std::string>> targets;
 	for (int i = 0; i < server_rows_.size(); ++i) {
 		const Dictionary row = server_rows_[i];
 		const String ip = row.get("ip", "");
-		if (ip.is_empty() || ip == "0.0.0.0") {
-			// Unreported host address: the row is never attempted, and retail's
-			// fold surfaces exactly that (-4 -> -3) instead of leaving the
-			// browser's pending "..." forever.
-			server_pings_[row.get("rid", 0)] = opennova::kPingNeverAttempted;
-			continue;
-		}
 		targets.emplace_back(static_cast<int64_t>(int64_t(row.get("rid", 0))),
 		                     std::string(ip.utf8().get_data()));
 	}
@@ -614,17 +608,27 @@ void NovaWorldClient::start_ping_sweep() {
 		emit_signal("server_pings_updated");
 		return;
 	}
-	run_ping_sweep(std::move(targets), Callable(this, "_apply_ping_results"),
-	               ping_generation_);
+	if (!ping_worker_.start(std::move(targets), Callable(this, "_apply_ping_results"),
+	                        ping_generation_)) {
+		// One sweep at a time: the in-flight one is now stale (its generation
+		// no longer matches), and its landing re-issues this one.
+		ping_resweep_pending_ = true;
+	}
 }
 
 void NovaWorldClient::apply_ping_results(const Dictionary &results, int64_t generation) {
-	// A pass from a superseded sweep (the list refreshed underneath it) is stale.
-	if (generation != ping_generation_) return;
-	const Array rids = results.keys();
-	for (int i = 0; i < rids.size(); ++i)
-		server_pings_[rids[i]] = results[rids[i]];
-	emit_signal("server_pings_updated");
+	if (generation == ping_generation_) {
+		const Array rids = results.keys();
+		for (int i = 0; i < rids.size(); ++i)
+			server_pings_[rids[i]] = results[rids[i]];
+		emit_signal("server_pings_updated");
+	}
+	// A pass from a superseded sweep (the list refreshed underneath it) is
+	// stale; if that refresh asked for a sweep while this one ran, run it now.
+	if (ping_resweep_pending_) {
+		ping_resweep_pending_ = false;
+		start_ping_sweep();
+	}
 }
 
 // ---- Account login (EPASK) — ADR 0010 Phase 3 --------------------------
