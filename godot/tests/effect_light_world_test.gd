@@ -492,6 +492,125 @@ func test_corona_rows_surface_the_witnessed_segments() -> void:
 				"a corona past the fog end fades fully to black")
 
 
+## The hot corona path packs the same rows as ONE MultiMesh buffer write.
+## Pin the interleaved TRANSFORM_3D + color float layout against the
+## Dictionary seam row by row through the headless-safe buffer seam (the
+## dummy RenderingServer stores no MultiMesh instance data).
+func test_fill_corona_multimesh_matches_the_row_seam() -> void:
+	var scene := LightScene.new()
+	assert_gt(scene.spawn_model_light({
+		"position": Vector3(0.0, 1.0, 0.0),
+		"atten_end": 4.0,
+	}), 0)
+	assert_gt(scene.spawn_model_light({
+		"position": Vector3(3.0, 2.0, -1.0),
+		"atten_end": 6.0,
+	}), 0)
+	var no_models: Array[Node3D] = []
+	var fog := {"enabled": true, "type": 1, "start": 2.0, "end": 40.0}
+	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
+			PackedInt64Array(), fog)
+	assert_gt(rows.size(), 0, "the seam produced comparison rows")
+	var mesh := MultiMesh.new()
+	mesh.transform_format = MultiMesh.TRANSFORM_3D
+	mesh.use_colors = true
+	var count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 10.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
+			PackedInt64Array(), fog, mesh)
+	assert_eq(count, rows.size(), "both seams walk the same quads")
+	var buffer := scene.get_last_corona_buffer()
+	assert_true(buffer.size() >= count * 16, "one 16-float record per row")
+	for i in range(count):
+		var row: Dictionary = rows[i]
+		var half := float(row.get("half_size"))
+		var center: Vector3 = row.get("position")
+		var color: Color = row.get("color")
+		var base := i * 16
+		assert_almost_eq(buffer[base + 0], half, 0.000001)
+		assert_almost_eq(buffer[base + 5], half, 0.000001)
+		assert_almost_eq(buffer[base + 10], half, 0.000001)
+		assert_almost_eq(buffer[base + 3], center.x, 0.000001)
+		assert_almost_eq(buffer[base + 7], center.y, 0.000001)
+		assert_almost_eq(buffer[base + 11], center.z, 0.000001)
+		assert_almost_eq(buffer[base + 12], color.r, 0.000001)
+		assert_almost_eq(buffer[base + 13], color.g, 0.000001)
+		assert_almost_eq(buffer[base + 14], color.b, 0.000001)
+		assert_almost_eq(buffer[base + 15], 1.0, 0.000001)
+	# A camera past the 100-wu cull empties the frame; the mesh keeps its
+	# high-water capacity and hides every instance instead of reallocating.
+	var far_count := scene.fill_corona_multimesh(Vector3(0.0, 1.0, 500.0),
+			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 12345, 2, null, no_models,
+			PackedInt64Array(), fog, mesh)
+	assert_eq(far_count, 0)
+	assert_eq(mesh.visible_instance_count, 0)
+	assert_eq(mesh.instance_count, count,
+			"capacity persists at the high-water mark")
+
+
+## Static-row dirty maintenance: steady frames rewrite only gen-animated rows
+## (plus every row when a blend or the gain moved) in the resident payload.
+## Equivalence: a mirror scene forced down the full-rebuild path every frame
+## (fresh rows_revision per call) must produce identical atlas bytes across
+## flicker time, a blend write, a fade ramp, and a gain change.
+func test_static_rows_dirty_maintenance_matches_full_rebuild() -> void:
+	var fast := LightScene.new()
+	var ref := LightScene.new()
+	var handles_fast: Array[int] = []
+	var handles_ref: Array[int] = []
+	for config: Dictionary in [
+		{"position": Vector3(1.0, 0.0, 1.0), "atten_end": 8.0},
+		{"position": Vector3(4.0, 1.0, -2.0), "atten_end": 8.0,
+				"style": 113, "color_start": Color(1.0, 0.8, 0.4),
+				"color_end": Color(0.3, 0.15, 0.05)},
+		{"position": Vector3(-3.0, 0.5, 2.0), "atten_end": 6.0},
+	]:
+		handles_fast.append(int(fast.spawn_model_light(config)))
+		handles_ref.append(int(ref.spawn_model_light(config)))
+	var bounds := PackedVector3Array([
+		Vector3(-2.0, -2.0, -2.0), Vector3(6.0, 6.0, 6.0),
+		Vector3(2.0, -1.0, -4.0), Vector3(5.0, 5.0, 5.0),
+		Vector3(-5.0, -1.0, 0.0), Vector3(4.0, 4.0, 4.0),
+	])
+	var owners := PackedInt64Array([0, 0, 0])
+	var sections := PackedInt32Array([0, 0, 0])
+	var active := PackedByteArray([1, 1, 1])
+	var ref_revision := 100
+	var compare := func(gain: Vector3, time_ms: int, label: String) -> void:
+		fast.render_static_frame(bounds, owners, sections,
+				PackedInt64Array([0, 0, 0]), PackedInt32Array([0, 0, 0]),
+				active, gain, time_ms, null, 1)
+		ref_revision += 1
+		ref.render_static_frame(bounds, owners, sections,
+				PackedInt64Array([0, 0, 0]), PackedInt32Array([0, 0, 0]),
+				active, gain, time_ms, null, ref_revision)
+		var img_fast: Image = fast.get_static_light_rows_image()
+		var img_ref: Image = ref.get_static_light_rows_image()
+		assert_not_null(img_fast)
+		assert_not_null(img_ref)
+		if img_fast == null or img_ref == null:
+			return
+		assert_eq(img_fast.get_data(), img_ref.get_data(), label)
+	compare.call(Vector3.ONE, 1000, "first frame builds identical atlases")
+	compare.call(Vector3.ONE, 1000, "a quiet steady frame holds identical bytes")
+	compare.call(Vector3.ONE, 1250, "flicker time moves only the gen-animated row")
+	fast.set_light_blend(handles_fast[0], 0.5)
+	ref.set_light_blend(handles_ref[0], 0.5)
+	compare.call(Vector3.ONE, 1250, "a blend write recomputes every row identically")
+	compare.call(Vector3.ONE, 1300, "the frame after the blend settles back to dirty rows")
+	fast.set_light_fade(handles_fast[2], 2, 8)
+	ref.set_light_fade(handles_ref[2], 2, 8)
+	for i in range(3):
+		fast.advance_fixed_tick()
+		ref.advance_fixed_tick()
+		compare.call(Vector3.ONE, 1300 + i,
+				"each fade-ramp tick matches the full rebuild")
+	compare.call(Vector3(0.7, 0.8, 0.9), 1400,
+			"a gain change recomputes every row identically")
+	compare.call(Vector3(0.7, 0.8, 0.9), 1400,
+			"the frame after the gain change settles again")
+
+
 func test_director_null_camera_clears_output_without_destroying_the_pool() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld

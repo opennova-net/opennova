@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
@@ -25,6 +26,7 @@
 
 namespace godot {
 
+class MultiMesh;
 class Weather;
 
 // Godot adapter for the portable EffectWorld dynamic light pool
@@ -145,6 +147,26 @@ public:
 			const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
 			const Dictionary &p_fog);
+	// The same corona walk landed as ONE MultiMesh buffer write: the identical
+	// collect_corona_quads rows packed as interleaved TRANSFORM_3D + color
+	// instance floats (scale-only basis = half_size, origin = segment center,
+	// color = the premultiplied additive fold). The mesh grows to the row
+	// high-water only; rows beyond this frame's count are hidden through
+	// visible_instance_count, never re-uploaded. Returns the row count. The
+	// hot presenter calls this; collect_corona_rows stays the inspection seam
+	// (the GUT equivalence test compares the two).
+	int fill_corona_multimesh(const Vector3 &p_camera_pos,
+			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
+			int p_time_ms, int p_frame_index, Weather *p_weather,
+			const TypedArray<Node3D> &p_models,
+			const PackedInt64Array &p_owner_entities, const Dictionary &p_fog,
+			const Ref<MultiMesh> &p_mesh);
+	// Test seam: the interleaved instance floats the last fill packed
+	// (capacity x 16; rows beyond the fill's return are zero). Readable
+	// headless, where the dummy RenderingServer stores no MultiMesh data.
+	PackedFloat32Array get_last_corona_buffer() const {
+		return corona_buffer_;
+	}
 
 	// The terrain leg of the pool: per terrain patch, the <= 16 world lights
 	// whose AABB overlaps the patch and which the authored terrain flag admits,
@@ -209,8 +231,28 @@ private:
 		std::array<opennova::renderer::LightHandle,
 				opennova::renderer::LightScene::kSelectLimit> handles{};
 		size_t count = 0;
+		// Any cached handle carries an RgbGen style: the row's color varies
+		// per frame and must re-select even on quiet frames.
+		bool animated = false;
+		// The re-select count of the last frame that evaluated this row (a
+		// skipped row's inputs are unchanged, so its count carries over).
+		size_t last_count = 0;
 	};
+	// The corona frame-input build shared by the Dictionary seam and the
+	// MultiMesh fill (owner masks live in the caller's vector for the call).
+	void build_corona_inputs(const Vector3 &p_camera_pos,
+			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
+			int p_time_ms, int p_frame_index, Weather *p_weather,
+			const TypedArray<Node3D> &p_models,
+			const PackedInt64Array &p_owner_entities, const Dictionary &p_fog,
+			std::vector<opennova::renderer::LightCoronaOwnerMask> &r_owner_masks,
+			opennova::renderer::LightCoronaFrameInputs &r_inputs) const;
+
 	opennova::renderer::LightScene scene_;
+	// Reused per-frame corona scratch (the fill path runs every frame).
+	std::vector<opennova::renderer::LightCoronaOwnerMask> corona_masks_scratch_;
+	std::vector<opennova::renderer::LightCoronaQuad> corona_quads_scratch_;
+	PackedFloat32Array corona_buffer_;
 	std::array<opennova::renderer::SelectedLight, opennova::renderer::LightScene::kSelectLimit>
 			selected_{};
 	size_t selected_count_ = 0;
@@ -224,6 +266,13 @@ private:
 	PackedByteArray static_light_rows_scratch_;
 	std::vector<StaticCachedSelection> static_cached_selections_;
 	uint64_t static_cached_scene_revision_ = 0;
+	// Steady-frame dirty-row inputs: rows re-evaluate only when the pool's
+	// color revision or the ambient gain moved, or the row is gen-animated.
+	uint64_t static_cached_color_revision_ = 0;
+	std::array<float, 3> static_cached_ambient_{};
+	// static_light_rows_bytes_ holds the resident texture payload for the
+	// cached row set (the in-place steady path's precondition).
+	bool static_bytes_resident_ = false;
 	int64_t static_cached_rows_revision_ = -1;
 	int static_cached_row_count_ = -1;
 	int static_cached_active_draws_ = 0;

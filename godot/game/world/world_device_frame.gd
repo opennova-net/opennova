@@ -424,7 +424,7 @@ func render_light_frame() -> void:
 		viewmodel_owner = sim.get_local_player_wire_handle()
 	_world._light_director.render_frame(
 			viewport.get_camera_3d() if viewport != null else null,
-			viewmodel_parts, viewmodel_owner)
+			viewmodel_parts, viewmodel_owner, _frame_stats_on)
 	# The terrain leg of the same pool: the next terrain frame re-draws its
 	# patches with the pool lights they overlap (terrain_light_leg.gd).
 	TerrainLightLeg.render_frame(_world._terrain, _world._light_director)

@@ -67,9 +67,37 @@ var _round_handles: Dictionary = {}
 # renderer::LightScene::collect_corona_quads].
 var _corona_instance: MultiMeshInstance3D
 var _corona_frame := 0
-# Containing-building bms_id -> owner id, rebuilt per spawn pass and per render
-# frame (nodes are recreated across reloads, so nothing survives a pass).
+# Containing-building bms_id -> owner id. Owner identity is fixed for a
+# node's tree lifetime (entity_ref meta is stamped once at creation), so the
+# cache survives across frames and clears on container membership change,
+# reset, and reattach.
 var _blink_owner_cache: Dictionary = {}
+# The report-only census skipped this frame (F3 capture off); run_census_now
+# refreshes it on demand with the last frame's camera.
+var _census_stale := false
+var _census_cam_pos := Vector3.ZERO
+# Per-frame walk registry: MissionObjects children that are ObjectModels with
+# their meta-derived identity read once at (re)build. Membership changes mark
+# it dirty (child_entered_tree/child_exiting_tree on the container); a husk
+# swap neither exits the node nor rewrites entity_ref, so rows stay valid.
+var _reg_models: Array[ObjectModel] = []
+var _reg_owners := PackedInt64Array()
+var _reg_robj_scoped := PackedByteArray()
+var _reg_bms_ids := PackedInt64Array()
+var _reg_dirty := true
+var _reg_container_id := 0
+# Reused per-frame draw-context arrays (the native call reads them whole, so
+# they are cleared, not tail-truncated).
+var _frame_models: Array[Node3D] = []
+var _frame_owners := PackedInt64Array()
+var _frame_interior_owners := PackedInt64Array()
+var _frame_interior_sections := PackedInt32Array()
+var _frame_robj_scoped := PackedByteArray()
+# Interior-group rows latched per logic tick (they are tick products): the
+# flat sim rows plus a bms_id -> base-index lookup, no per-row allocations.
+var _interior_rows := PackedInt64Array()
+var _interior_index: Dictionary = {}
+var _interior_tick := -1
 
 
 func setup(world: GameWorld, static_sources: Callable,
@@ -96,6 +124,14 @@ func reset() -> void:
 	_entity_effect_handles.clear()
 	_round_handles.clear()
 	_blink_owner_cache.clear()
+	_reg_models.clear()
+	_reg_owners.clear()
+	_reg_robj_scoped.clear()
+	_reg_bms_ids.clear()
+	_reg_dirty = true
+	_interior_rows = PackedInt64Array()
+	_interior_index.clear()
+	_interior_tick = -1
 	_clear_coronas()
 
 
@@ -451,7 +487,7 @@ func _rebuild_static_light_rows() -> void:
 ## The FLICKER phase reads the live weather wave ring; the ambient scale is
 ## the env light-state gain (the ported EffectWorld_AmbientScale channel).
 func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
-		viewmodel_wire_handle: int = -1) -> void:
+		viewmodel_wire_handle: int = -1, run_census: bool = true) -> void:
 	if camera == null:
 		_scene.clear_render_output()
 		_clear_coronas()
@@ -461,34 +497,45 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 	var weather: Weather = _world.get_weather_node()
 	var cam_pos := camera.get_camera_transform().origin
 	var time_ms := Time.get_ticks_msec()
-	var models: Array[Node3D] = []
-	var owners := PackedInt64Array()
-	# The second witnessed group: the building each draw currently stands
-	# inside, plus that blink volume's section [orig:
+	# The reused frame arrays are appended through the members directly: a
+	# local alias of a packed array shares its CoW buffer, so the first append
+	# through the alias would copy it away from the member.
+	_frame_models.clear()
+	_frame_owners.clear()
+	# interior_*: the second witnessed group — the building each draw currently
+	# stands inside, plus that blink volume's section [orig:
 	# setup_terrain_effect_for_entity @ 0x5c74a0 ->
 	# Lighting_SetInteriorLightGroup @ 0x5a90e0].
-	var interior_owners := PackedInt64Array()
-	var interior_sections := PackedInt32Array()
-	var robj_scoped := PackedByteArray()
-	_blink_owner_cache.clear()
+	_frame_interior_owners.clear()
+	_frame_interior_sections.clear()
+	_frame_robj_scoped.clear()
 	_render_static_light_rows(gain, weather, time_ms)
-	var groups := _entity_interior_groups()
+	_refresh_interior_groups()
 	var container: Node = _world.get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
-		for child in container.get_children():
-			var model := child as ObjectModel
-			if model == null or not model.is_visible_in_tree():
+		_ensure_model_registry(container)
+		for i in range(_reg_models.size()):
+			var model := _reg_models[i]
+			if not is_instance_valid(model) or not model.is_visible_in_tree():
 				continue
 			if model.global_position.distance_to(cam_pos) > QUERY_RADIUS:
 				continue
-			models.append(model)
-			owners.append(owner_id_for_node(model))
-			var ref: Dictionary = model.get_meta("entity_ref", {})
-			robj_scoped.append(1 if int(ref.get("kind", -1)) == \
-					MissionData.KIND_BUILDING else 0)
-			var group := _interior_group_for_node(model, groups)
-			interior_owners.append(int(group[0]))
-			interior_sections.append(int(group[1]))
+			_frame_models.append(model)
+			_frame_owners.append(_reg_owners[i])
+			_frame_robj_scoped.append(_reg_robj_scoped[i])
+			var interior_owner := 0
+			var interior_section := 0
+			var bms_id := int(_reg_bms_ids[i])
+			if bms_id != 0:
+				var base: Variant = _interior_index.get(bms_id)
+				if base != null:
+					var owner := _owner_id_for_bms(
+							int(_interior_rows[int(base) + 1]))
+					if owner != 0:
+						interior_owner = owner
+						interior_section = int(_interior_rows[int(base) + 2])
+			_frame_interior_owners.append(interior_owner)
+			_frame_interior_sections.append(interior_section)
 	# The first-person parts inherit the LOCAL PLAYER's interior group, so the
 	# room's lights reach the arms and weapon the same way they reach the
 	# third-person body standing there.
@@ -496,52 +543,112 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 	for part in viewmodel_parts:
 		if part == null or not part.is_visible_in_tree():
 			continue
-		models.append(part)
-		owners.append(owner_id_for_wire(viewmodel_wire_handle)
+		_frame_models.append(part)
+		_frame_owners.append(owner_id_for_wire(viewmodel_wire_handle)
 				if viewmodel_wire_handle >= 0 else part.get_instance_id())
-		robj_scoped.append(0)
-		interior_owners.append(int(viewmodel_interior[0]))
-		interior_sections.append(int(viewmodel_interior[1]))
+		_frame_robj_scoped.append(0)
+		_frame_interior_owners.append(int(viewmodel_interior[0]))
+		_frame_interior_sections.append(int(viewmodel_interior[1]))
 	# Census select first (report rows for F3 and the seam tests), then the
 	# gameplay per-model pass — its mode/isolation stamp is what the report
-	# ends the frame with.
-	_scene.render_frame(cam_pos, QUERY_RADIUS, gain, time_ms, weather)
-	_scene.render_model_frame(models, owners, interior_owners,
-			interior_sections, robj_scoped, gain, time_ms, weather)
-	_render_coronas(camera, gain, weather, models, owners, env)
+	# ends the frame with. The census publishes nothing to materials, so the
+	# hot caller skips it while the F3 Stats capture is off; a diagnostics
+	# read refreshes it on demand (run_census_now).
+	_census_cam_pos = cam_pos
+	if run_census:
+		_scene.render_frame(cam_pos, QUERY_RADIUS, gain, time_ms, weather)
+		_census_stale = false
+	else:
+		_census_stale = true
+	_scene.render_model_frame(_frame_models, _frame_owners,
+			_frame_interior_owners, _frame_interior_sections,
+			_frame_robj_scoped, gain, time_ms, weather)
+	_render_coronas(camera, gain, weather, _frame_models, _frame_owners, env)
 
 
-## bms_id -> [containing bms_id, section] for every entity currently standing
-## inside a blink volume. Entities outside every volume are absent (group 0).
-func _entity_interior_groups() -> Dictionary:
-	var out: Dictionary = {}
+## On-demand census refresh for report readers while the capture is off: the
+## skipped select re-runs with the last frame's camera, so an MCP/diagnostics
+## read stays exact without the per-frame report cost.
+func run_census_now() -> void:
+	if not _census_stale:
+		return
+	_scene.render_frame(_census_cam_pos, QUERY_RADIUS, light_gain(),
+			Time.get_ticks_msec(), _world.get_weather_node())
+	_census_stale = false
+
+
+## The interior-group rows (bms_id -> containing bms_id + section for every
+## entity standing inside a blink volume) are sim tick products: fetch them
+## once per logic tick into the flat rows plus a bms_id -> base-index lookup,
+## so the per-frame walk reads them without allocating a row per entity.
+func _refresh_interior_groups() -> void:
 	var sim: Simulation = _sim()
 	if sim == null:
-		return out
-	var rows: PackedInt64Array = sim.get_entity_interior_groups()
+		if not _interior_index.is_empty():
+			_interior_index.clear()
+			_interior_rows = PackedInt64Array()
+		_interior_tick = -1
+		return
+	var tick := int(sim.get_logic_tick())
+	if tick == _interior_tick:
+		return
+	_interior_tick = tick
+	_interior_rows = sim.get_entity_interior_groups()
+	_interior_index.clear()
 	var i := 0
-	while i + 2 < rows.size():
-		out[int(rows[i])] = [int(rows[i + 1]), int(rows[i + 2])]
+	while i + 2 < _interior_rows.size():
+		_interior_index[int(_interior_rows[i])] = i
 		i += 3
-	return out
 
 
-## One drawn model's interior group as [owner id, section]; [0, 0] outdoors.
-func _interior_group_for_node(model: ObjectModel, groups: Dictionary) -> Array:
-	var ref: Dictionary = model.get_meta("entity_ref", {})
-	var bms_id := int(ref.get("bms_id", 0))
-	if bms_id == 0:
-		return [0, 0]
-	var row: Variant = groups.get(bms_id)
-	if row == null:
-		return [0, 0]
-	var owner := _owner_id_for_bms(int(row[0]))
-	return [owner, int(row[1])] if owner != 0 else [0, 0]
+## Rebuild the MissionObjects walk registry only when membership changed.
+## Owner identity and kind come off entity_ref, stamped once before a node's
+## first light frame, so registration-time reads hold for its tree lifetime.
+func _ensure_model_registry(container: Node) -> void:
+	var container_id := container.get_instance_id()
+	if container_id != _reg_container_id:
+		_reg_container_id = container_id
+		_reg_dirty = true
+		if not container.child_entered_tree.is_connected(
+				_on_container_membership_changed):
+			container.child_entered_tree.connect(
+					_on_container_membership_changed)
+		if not container.child_exiting_tree.is_connected(
+				_on_container_membership_changed):
+			container.child_exiting_tree.connect(
+					_on_container_membership_changed)
+	if _reg_dirty:
+		_rebuild_model_registry(container)
+
+
+func _on_container_membership_changed(_node: Node) -> void:
+	_reg_dirty = true
+	# A bms id's resolved owner can change with membership (despawn/respawn),
+	# so the blink-owner cache follows the registry.
+	_blink_owner_cache.clear()
+
+
+func _rebuild_model_registry(container: Node) -> void:
+	_reg_models.clear()
+	_reg_owners.clear()
+	_reg_robj_scoped.clear()
+	_reg_bms_ids.clear()
+	for child in container.get_children():
+		var model := child as ObjectModel
+		if model == null:
+			continue
+		var ref: Dictionary = model.get_meta("entity_ref", {})
+		_reg_models.append(model)
+		_reg_owners.append(owner_id_for_node(model))
+		_reg_robj_scoped.append(1 if int(ref.get("kind", -1)) == \
+				MissionData.KIND_BUILDING else 0)
+		_reg_bms_ids.append(int(ref.get("bms_id", 0)))
+	_reg_dirty = false
 
 
 ## The local player's interior group as [owner id, section]; [0, 0] outdoors.
-## The player is a spawned entity with no bms_id, so it never appears in
-## _entity_interior_groups.
+## The player is a spawned entity with no bms_id, so it never appears in the
+## interior-group rows.
 func _local_player_interior_group() -> Array:
 	var sim: Simulation = _sim()
 	if sim == null:
@@ -576,25 +683,19 @@ func _render_coronas(camera: Camera3D, gain: Vector3, weather: Weather,
 				"start": values.get_fog_start(),
 				"end": values.get_fog_end(),
 			}
-	var rows: Array = _scene.collect_corona_rows(
-			camera.get_camera_transform().origin,
-			-camera.get_camera_transform().basis.z, gain,
-			Time.get_ticks_msec(), _corona_frame, weather, models, owners,
-			fog)
 	var instance := _ensure_corona_instance()
 	if instance == null:
 		return
-	var mesh: MultiMesh = instance.multimesh
-	mesh.instance_count = rows.size()
-	instance.visible = not rows.is_empty()
-	for i in range(rows.size()):
-		var row: Dictionary = rows[i]
-		var half := float(row.get("half_size", 0.0))
-		var center: Vector3 = row.get("position", Vector3.ZERO)
-		var color: Color = row.get("color", Color.BLACK)
-		mesh.set_instance_transform(i, Transform3D(
-				Basis.IDENTITY.scaled(Vector3(half, half, half)), center))
-		mesh.set_instance_color(i, color)
+	# One native buffer write instead of two RenderingServer commands per row
+	# (the witnessed jitter re-centers every corona every frame, so there is
+	# no change to gate on); rows past this frame's count stay hidden through
+	# visible_instance_count.
+	var rows := _scene.fill_corona_multimesh(
+			camera.get_camera_transform().origin,
+			-camera.get_camera_transform().basis.z, gain,
+			Time.get_ticks_msec(), _corona_frame, weather, models, owners,
+			fog, instance.multimesh)
+	instance.visible = rows > 0
 
 
 func _clear_coronas() -> void:
@@ -759,4 +860,5 @@ func sync_round_glows(rows: Array) -> void:
 
 
 func get_report() -> EffectLightReport:
+	run_census_now()
 	return EffectLightReport.from_ffi_dictionary(_scene.get_report())
