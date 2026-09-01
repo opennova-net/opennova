@@ -354,6 +354,47 @@ func test_overlay_opens_with_no_pick_and_a_row_click_dismisses() -> void:
 			"no 0x0E was sent — nothing armed a pick or release wait")
 
 
+# Retail's deploy keys 'X' and SPACE (input case 12) dismiss the OVERLAY-only
+# screen locally; while a pick is owed they stay inert (the pick flow keeps its
+# list-select). The witnesses live in hud-re D-HUD-19.
+func test_overlay_x_and_space_dismiss_only_without_a_pending_pick() -> void:
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	watch_signals(presenter)
+	assert_true(presenter.open(), "the pending deploy UI opens")
+	assert_true(pair.joiner.is_join_deploy_pick_pending(), "a pick is owed")
+	var key := InputEventKey.new()
+	key.keycode = KEY_X
+	key.pressed = true
+	presenter.get_viewport().push_input(key)
+	await get_tree().process_frame
+	assert_true(presenter.is_open(),
+			"X stays inert while the pick flow owns the screen")
+
+	var pair2 := _join_pair_in_match()
+	var overlay := false
+	for _i in range(240):
+		pair2.host.step()
+		pair2.joiner.step()
+		if pair2.joiner.is_join_deploy_overlay_active():
+			overlay = true
+			break
+		OS.delay_msec(2)
+	assert_true(overlay, "the held joiner's overlay arms")
+	assert_false(pair2.joiner.is_join_deploy_pick_pending(), "no pick is owed")
+	var overlay_presenter := _make_presenter(pair2.joiner)
+	watch_signals(overlay_presenter)
+	assert_true(overlay_presenter.open(), "the overlay opens without a pick")
+	var space := InputEventKey.new()
+	space.keycode = KEY_SPACE
+	space.pressed = true
+	overlay_presenter.get_viewport().push_input(space)
+	await get_tree().process_frame
+	assert_false(overlay_presenter.is_open(),
+			"SPACE dismisses the overlay-only screen locally")
+	assert_signal_emitted(overlay_presenter, "closed")
+
+
 # The active session keeps running under the death screen — per-frame S2C 0x0A
 # traffic continues while the pick is owed. The deploy UI is driven by the
 # independent authoritative pending bit and must survive live session frames.

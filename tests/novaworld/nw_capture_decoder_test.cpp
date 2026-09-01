@@ -223,6 +223,43 @@ std::vector<CaptureDatagram> craft_shared_port_capture() {
 	return caps;
 }
 
+// The other half of the demux identity: session identity is (client port,
+// client key), not the key alone. TWO different clients on DIFFERENT ports
+// can reuse one ck value — key-alone keying merged them into a single
+// session, truncating one client's stream. Each keeps its own SCRK here, so
+// a merged table decrypts one of them with the wrong key.
+std::vector<CaptureDatagram> craft_key_reuse_capture() {
+	const std::string scrk_a = "UNIT_TEST_SCRK_A";
+	const std::string scrk_b = "UNIT_TEST_SCRK_B";
+
+	ClientAuth ca_a; ca_a.na = "alpha"; ca_a.ci = 1; ca_a.ck = 2; ca_a.scrk = scrk_a;
+	ClientAuth ca_b; ca_b.na = "bravo"; ca_b.ci = 3; ca_b.ck = 2; ca_b.scrk = scrk_b;
+	ServerAuth sa_a = build_server_auth(ca_a, 0x7F000001u, 32768, 0x55, scrk_a);
+	ServerAuth sa_b = build_server_auth(ca_b, 0x7F000001u, 32768, 0x56, scrk_b);
+
+	auto inner = [](uint8_t fill, size_t n) {
+		return std::vector<uint8_t>(n, fill);
+	};
+
+	std::vector<CaptureDatagram> caps;
+	int f = 1;
+	auto add = [&](int sp, int dp, std::vector<uint8_t> payload) {
+		caps.push_back({f++, sp, dp, std::move(payload)});
+	};
+
+	add(32768, 32769, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_a)));
+	add(32769, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_a)));
+	add(32768, 32770, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa_b)));
+	add(32770, 32768, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca_b)));
+	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0D, inner(0xA1, 24), scrk_a, ca_a.ck, 7, 5));
+	add(32770, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C, inner(0xB2, 48), scrk_b, 0x56, 11, 9));
+	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x16, inner(0xB3, 12), scrk_b, ca_b.ck, 10, 11));
+	add(32769, 32768, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x06, inner(0xA2, 45), scrk_a, 0x55, 6, 7));
+	add(32768, 32769, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xA3, 64), scrk_a, ca_a.ck, 8, 6));
+	add(32768, 32770, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, inner(0xB4, 80), scrk_b, ca_b.ck, 11, 11));
+	return caps;
+}
+
 } // namespace
 
 int main() {
@@ -257,6 +294,22 @@ int main() {
 		}
 		for (int i = 0; i < 6; ++i) EXPECT(sizes_seen[i] == 1);
 		EXPECT(streaming_equals_batch(shared, "shared-port-2-session"));
+	}
+
+	// --- one client key reused across DIFFERENT client ports -----------------
+	// Identity is (client port, client key): key-alone keying merged these two
+	// sessions and decrypted one with the other's SCRK.
+	{
+		const std::vector<CaptureDatagram> reuse = craft_key_reuse_capture();
+		const std::vector<InGameMessage> reuse_batch = decode_capture_to_messages(reuse);
+		EXPECT(reuse_batch.size() == 6);
+		int port_a = 0, port_b = 0;
+		for (const auto &m : reuse_batch) {
+			if (m.session == 32769) port_a++;
+			if (m.session == 32770) port_b++;
+		}
+		EXPECT(port_a == 3 && port_b == 3);
+		EXPECT(streaming_equals_batch(reuse, "key-reuse-2-port"));
 	}
 
 	// The detailed capture seam reports every decrypted 0x43/0x83 datagram,
