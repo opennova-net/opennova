@@ -1,6 +1,7 @@
 #include "network/novaworld_client.h"
 
 #include "network/novaworld_identity.h"
+#include "network/ping_sweep_worker.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/http_client.hpp>
@@ -86,6 +87,11 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_session_active"), &NovaWorldClient::is_session_active);
 	ClassDB::bind_method(D_METHOD("get_server_info"), &NovaWorldClient::get_server_info);
 	ClassDB::bind_method(D_METHOD("get_server_rows"), &NovaWorldClient::get_server_rows);
+	ClassDB::bind_method(D_METHOD("refresh_servers"), &NovaWorldClient::refresh_servers);
+	ClassDB::bind_method(D_METHOD("get_server_totals"), &NovaWorldClient::get_server_totals);
+	ClassDB::bind_method(D_METHOD("get_server_pings"), &NovaWorldClient::get_server_pings);
+	ClassDB::bind_method(D_METHOD("_apply_ping_results", "results", "generation"),
+	                     &NovaWorldClient::apply_ping_results);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);
 	// Bound so the HTTPRequest.request_completed signals can target them.
@@ -105,6 +111,8 @@ void NovaWorldClient::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("server_info_received", PropertyInfo(Variant::DICTIONARY, "info")));
 	ADD_SIGNAL(MethodInfo("server_list_updated", PropertyInfo(Variant::ARRAY, "rows")));
+	// One ping-sweep pass landed; read get_server_pings() for the rid -> ping map.
+	ADD_SIGNAL(MethodInfo("server_pings_updated"));
 	ADD_SIGNAL(MethodInfo("connected"));
 	ADD_SIGNAL(MethodInfo("disconnected", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("error_occurred", PropertyInfo(Variant::STRING, "message")));
@@ -559,8 +567,57 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 		rows.push_back(row);
 	}
 	server_rows_ = rows;
+	total_servers_ = parsed.total_servers;
+	total_players_ = parsed.total_players;
 	trace(String("server browser: ") + String::num_int64(rows.size()) + " server(s)");
 	emit_signal("server_list_updated", server_rows_);
+	// Retail pings every accumulated row's IPv4 on the list finalize
+	// (docs/net/novaworld-net-re.md; the semantics live in
+	// engine/net/novaworld/ping_sweep.h).
+	start_ping_sweep();
+}
+
+void NovaWorldClient::refresh_servers() {
+	trigger_gsb();
+}
+
+Dictionary NovaWorldClient::get_server_totals() const {
+	Dictionary totals;
+	totals["total_servers"] = total_servers_;
+	totals["total_players"] = total_players_;
+	return totals;
+}
+
+Dictionary NovaWorldClient::get_server_pings() const {
+	return server_pings_;
+}
+
+void NovaWorldClient::start_ping_sweep() {
+	++ping_generation_;
+	server_pings_ = Dictionary();
+	std::vector<std::pair<int64_t, std::string>> targets;
+	for (int i = 0; i < server_rows_.size(); ++i) {
+		const Dictionary row = server_rows_[i];
+		const String ip = row.get("ip", "");
+		if (ip.is_empty() || ip == "0.0.0.0") continue; // unreported host address
+		targets.emplace_back(static_cast<int64_t>(int64_t(row.get("rid", 0))),
+		                     std::string(ip.utf8().get_data()));
+	}
+	if (targets.empty()) {
+		emit_signal("server_pings_updated");
+		return;
+	}
+	run_ping_sweep(std::move(targets), Callable(this, "_apply_ping_results"),
+	               ping_generation_);
+}
+
+void NovaWorldClient::apply_ping_results(const Dictionary &results, int64_t generation) {
+	// A pass from a superseded sweep (the list refreshed underneath it) is stale.
+	if (generation != ping_generation_) return;
+	const Array rids = results.keys();
+	for (int i = 0; i < rids.size(); ++i)
+		server_pings_[rids[i]] = results[rids[i]];
+	emit_signal("server_pings_updated");
 }
 
 // ---- Account login (EPASK) — ADR 0010 Phase 3 --------------------------

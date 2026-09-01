@@ -116,10 +116,10 @@ func select_spawn_row(row: int) -> void:
 
 ## Open over the live world when the join owes a deployment pick, or when the
 ## host drives the deploy-map OVERLAY (0x0F game_flags bit0 / per-frame 0x0A
-## flags1 bit1) — retail opens this same death.mnu DEATH screen for both
-## [orig: Render_ProcessMainSceneFrame @0x5cab5e opens on g_deploy_screen_active
-##  OR the local entity's undeployed bit; the once-per-mission latch @0x5cab8b
-##  belongs to the shell (MainGame), like retail's frame loop].
+## flags1 bit1) — retail opens this same death.mnu DEATH screen for both, and
+## the once-per-mission open latch belongs to the shell (MainGame), like
+## retail's frame loop. The witnesses live on ClientState.deploy_overlay_active
+## (engine/net/netsim/client_state.h) and hud-re D-HUD-19.
 func open() -> bool:
 	if is_open() or _world == null or _ui_parent == null:
 		return false
@@ -150,10 +150,9 @@ func close() -> void:
 # Retail's deploy-screen keys 'X' and SPACE route input case 12 (dialogs reset
 # + a 0x0E). On the OVERLAY-only screen (no pick owed) they act as the local
 # dismiss; the DEATH pick flow keeps its list-select picks, so the keys stay
-# inert there rather than inventing an unpicked default send.
-# [orig: Input_HandleSpecialKeys 'X' @0x49c9fd -> case 12 param 0, SPACE
-#  @0x49ca06 -> case 12 param 0xFFFE, both gated on the deploy/undeployed state;
-#  the case-12 0x0E half is unported — see _on_widget_value_changed]
+# inert there rather than inventing an unpicked default send. (The key and
+# case-12 witnesses live in hud-re D-HUD-19; the 0x0E half is unported — see
+# _on_widget_value_changed.)
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_open():
 		return
@@ -207,10 +206,9 @@ func _process(delta: float) -> void:
 	# The screen's lifetime: a pending DEATH pick holds it, and so does the
 	# host-driven overlay bit (which follows the per-frame 0x0A flags1 bit1,
 	# set AND cleared). Only both falling closes it — retail's frame loop
-	# closes the latched screen exactly when its two open triggers are gone.
-	# [orig: g_deploy_screen_active per-frame @0x42ff82; the close-on-clear leg
-	#  Render_ProcessMainSceneFrame @0x5cac8e -> the latch clear + screen close
-	#  @0x54b954]
+	# closes the latched screen exactly when its two open triggers are gone
+	# (the per-frame fold and close-on-clear witnesses live on
+	# ClientState.deploy_overlay_active and hud-re D-HUD-19).
 	if not bool(sim.is_join_deploy_pick_pending()) \
 			and not bool(sim.is_join_deploy_overlay_active()):
 		close()
@@ -255,8 +253,7 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 		# hold, and how a host releases that hold for an already-deployed
 		# player is unwitnessed (the stock wave-join capture carries zero
 		# 0x0E) — silence is the wire-safe posture until a capture pins it.
-		# [orig: Input_HandleActionBinding case 12 @0x49b0c5 — dialogs reset +
-		#  the 0x0E send @0x49b153]
+		# (The case-12 witnesses live in hud-re D-HUD-19.)
 		close()
 		return
 	sim.send_deployment_pick(param)

@@ -28,6 +28,7 @@ set(TARGET_NAME "opennova")
 add_library(${TARGET_NAME} SHARED
     register_types.cpp
     network/novaworld_client.cpp
+    network/ping_sweep_worker.cpp
     network/novaworld_host.cpp
     network/novaworld_identity.cpp
     network/nwu_lobby_session.cpp

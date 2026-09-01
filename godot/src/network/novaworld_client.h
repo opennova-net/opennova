@@ -94,6 +94,24 @@ public:
 	// (watch the `server_list_updated` signal, then read get_server_rows()).
 	Array get_server_rows() const;
 
+	// Re-fetch the server list on demand (the browser's Refresh button). A
+	// no-op before the session/base URL exists; the fresh rows arrive through
+	// the usual `server_list_updated` signal.
+	void refresh_servers();
+
+	// The GSB response's list-wide totals (`total_servers` / `total_players`
+	// ints; the service-wide population line the retail browser shows). Zeros
+	// until the first list lands.
+	Dictionary get_server_totals() const;
+
+	// The ping sweep's per-row results so far: rid (int) -> ping. A
+	// non-negative value is the echo round-trip in ms; -2 = failed/timed out,
+	// -3 = never attempted (engine/net/novaworld/ping_sweep.h carries the
+	// witnessed fold + timeout/retry constants). Rows still in flight are
+	// absent. Repopulated per list refresh; `server_pings_updated` fires when
+	// a pass lands.
+	Dictionary get_server_pings() const;
+
 	// Account login (ADR 0010 Phase 3). Runs the EPASK HTTP login chain
 	// (prepare GET -> login POST -> relay GET) and fills the cookie jar the
 	// client carries onto every later request. Emits login_succeeded /
@@ -182,6 +200,16 @@ private:
 	HTTPRequest *browser_http_ = nullptr;   // child node, created in start()
 	Array server_rows_;                     // cached GSB rows (Array of Dictionary)
 	bool gsb_request_in_flight_ = false;    // transport bookkeeping (cancel before re-issue)
+	int total_servers_ = 0;                 // GSB TS — list-wide server count
+	int total_players_ = 0;                 // GSB TP — service-wide player count
+	// The browse-time ping sweep (retail pings every row's IPv4 on the list
+	// finalize; the semantics live in engine/net/novaworld/ping_sweep.h and
+	// the device leg in network/ping_sweep_worker.cpp). The generation stamps
+	// each sweep so a late pass from a superseded list is dropped.
+	Dictionary server_pings_;               // rid (int) -> ping ms / -2 / -3
+	int64_t ping_generation_ = 0;
+	void start_ping_sweep();
+	void apply_ping_results(const Dictionary &results, int64_t generation);
 
 	// Account login + join (ADR 0010 Phase 3/5). Separate child HTTPRequests so
 	// the multi-leg login/join sequences don't race the GSB fetch. The protocol/

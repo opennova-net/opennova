@@ -75,6 +75,21 @@ substitution in the markup NWJoin URL, printed `%d` [orig: CLanServerBrowser_Upd
 on the XXXX finalize [orig: NapiGameList_StartPingSweep @ 0x63bcf0]. Full semantics:
 D-NET-32..36 + D-NET-190..193, §7 Wave 9.
 
+The ping MECHANISM (witnessed 2026-08-31): the sweep is a plain **ICMP echo**, not a
+NovaLogic UDP probe — the ping manager is a NapiConnection initialized with socket
+creation, whose socket is `WSASocketA(AF_INET, SOCK_RAW, IPPROTO_ICMP)` set
+non-blocking [orig: NapiGameList_StartPingSweep @0x63bcf0 -> NapiPingEntry_Create
+@0x62ffb0 (one entry per row, hostname + userData=row index) -> NapiPingManager_Start
+@0x62fe50 (activates every entry, spawns the worker thread); NapiPingManager_Create
+@0x6303d0 -> NapiConnection_Init @0x6302f0 (3000 ms per-echo timeout at conn+20, 2
+retries at conn+24) -> Network_CreateRawSocket @0x62f690]. Result codes fold at
+display time: raw -4 (never attempted) -> -3, other negatives -> -2, 0 -> the entry's
+millisecond round-trip [orig: NapiGameList_OnPingResult @0x63bc60]. The reimpl keeps
+the constants and the fold in `engine/net/novaworld/ping_sweep.h` and sends the echo
+through the OS ICMP facility (`IcmpSendEcho2`, `godot/src/network/ping_sweep_worker.cpp`)
+— the unprivileged platform equivalent of retail's raw socket, which needs
+administrator rights on modern Windows.
+
 Field names:
 `ServerName`, `GameType`, `MissionName`, `Region`, `Players`, `MaxPlayers`, `Dedicated`,
 `TimeLeft`, `Password`, `Country`, `Msg`, `Age`, `TimeOfDay`, `Stat`, `LevelRange`, `Locked`,
