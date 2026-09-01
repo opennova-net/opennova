@@ -644,6 +644,8 @@ func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
 		if presenter != null:
 			assert_false(presenter.is_processing(),
 					"%s must be pipeline-clocked, never self-clocked" % presenter_name)
+			assert_false(presenter.is_physics_processing(),
+					"%s must not self-clock on the physics tick either" % presenter_name)
 
 
 func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:

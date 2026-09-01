@@ -1,6 +1,6 @@
 #include "terrain/foliage_dispatcher.h"
 
-#include "env/water.h"
+#include "render/visual_layers.h"
 #include "env/weather.h"
 
 #include <godot_cpp/classes/time.hpp>
@@ -756,8 +756,8 @@ RID FoliageDispatcher::_ensure_draw_instance(
     // excluded from the water mirror: retail's reflection prerender hands
     // PolyTrn a context with foliage collection OFF, so its mirror draws no
     // near-foliage patches (see docs/env/env-tod-re.md #30 and
-    // Water::VISUAL_LAYER_TERRAIN_FOLIAGE).
-    server->instance_set_layer_mask(instance, Water::VISUAL_LAYER_TERRAIN_FOLIAGE);
+    // visual_layers::TERRAIN_FOLIAGE).
+    server->instance_set_layer_mask(instance, visual_layers::TERRAIN_FOLIAGE);
     server->instance_set_extra_visibility_margin(instance, 8.0f);
     frame_stats_.backend_configuration_writes += 4;
     server->instance_set_visible(instance, false);
@@ -1017,7 +1017,7 @@ Dictionary FoliageDispatcher::get_backend_report() const {
       row["tile_cache_projection"] = stamp.tile_cache_projection;
       row["casts_shadows"] = false;
       row["layer_mask"] =
-          static_cast<int64_t>(Water::VISUAL_LAYER_TERRAIN_FOLIAGE);
+          static_cast<int64_t>(visual_layers::TERRAIN_FOLIAGE);
       draws.append(row);
       ++active_draws;
       if (stamp.visible) {

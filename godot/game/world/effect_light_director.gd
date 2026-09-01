@@ -572,7 +572,10 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 func run_census_now() -> void:
 	if not _census_stale:
 		return
-	_scene.render_frame(_census_cam_pos, QUERY_RADIUS, light_gain(),
+	# census_frame refreshes the rows without restamping the report's mode:
+	# a report read with the F3 stats off keeps saying what the gameplay
+	# pass (render_model_frame) reported.
+	_scene.census_frame(_census_cam_pos, QUERY_RADIUS, light_gain(),
 			Time.get_ticks_msec(), _world.get_weather_node())
 	_census_stale = false
 

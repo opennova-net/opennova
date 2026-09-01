@@ -510,8 +510,11 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
             static_pose_memo_.resize(static_cast<size_t>(buildings));
         }
         StaticPoseMemo &memo = static_pose_memo_[static_cast<size_t>(i)];
-        const bool pose_hit = memo.handle_packed == slot.h.packed &&
-                              memo.cm == cm && memo.yaw == e->yaw &&
+        const int32_t inst_model_id = instance_model_id(slot.h);
+        const bool pose_hit = static_pose_memo_enabled_ &&
+                              memo.handle_packed == slot.h.packed &&
+                              memo.cm == cm && memo.model_id == inst_model_id &&
+                              memo.yaw == e->yaw &&
                               memo.pitch == e->pitch && memo.roll == e->roll &&
                               memo.pos[0] == epos[0] && memo.pos[1] == epos[1] &&
                               memo.pos[2] == epos[2];
@@ -523,6 +526,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
             pose.transform_point(center_local, memo.center_world);
             memo.handle_packed = slot.h.packed;
             memo.cm = cm;
+            memo.model_id = inst_model_id;
             memo.yaw = e->yaw;
             memo.pitch = e->pitch;
             memo.roll = e->roll;

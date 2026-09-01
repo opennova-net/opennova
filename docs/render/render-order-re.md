@@ -375,7 +375,8 @@ flush, so they survive only over cleared sky (`kQ3FarBandMinZ..MaxZ` in
 `renderer/q3_frame.h`; depth-tested, no depth writes). No Q3
 viewport, camera mask, depth-occluder rerasterization, proxy geometry, or
 compatibility renderer remains. The beauty camera is standardized to mask
-`0x18C01` (the viewmodel layer folded in, 2026-08-26).
+`0x38C01` (the viewmodel layer folded in 2026-08-26, the terrain foliage
+bit 17 admitted 2026-09-01 — the mirror camera drops it, env #30).
 
 The POST_TRANSPARENT `FrameFxCompositorEffect` performs the witnessed
 RenderingDevice sequence: RGBA8 capture of the full-resolution focused source

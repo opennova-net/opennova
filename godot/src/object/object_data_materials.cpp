@@ -270,23 +270,43 @@ PackedStringArray ObjectData::get_material_anim_frames(int p_index, int p_slot) 
 	return out;
 }
 
+namespace {
+// The register-name memo. Bounded: only names that resolve to a CTRL
+// register are inserted (the register table is finite; a miss is looked up
+// again, never cached, so mission/mod-fed strings cannot grow the map).
+// Heap-owned so no godot::String outlives the extension: cleared from the
+// module terminator (uninitialize_opennova_module -> clear_static_caches)
+// before Godot's memory subsystem goes away. Main-thread callers only.
+using RegisterNameCache = HashMap<String, String>;
+RegisterNameCache *g_register_name_cache = nullptr;
+} // namespace
+
+void ObjectData::clear_static_caches() {
+	if (g_register_name_cache != nullptr) {
+		memdelete(g_register_name_cache);
+		g_register_name_cache = nullptr;
+	}
+}
+
 String ObjectData::canonical_control_register_name(const String &p_name) {
 	// Memoized: the present pass resolves the same few names per row per
 	// frame, and the utf8 round trip + canonical String rebuild are the
 	// measured cost, not the ordinal lookup (the memoized infantry_keys_ in
-	// present_applier.cpp is the precedent). Function-local so the map builds
-	// lazily after extension init; main-thread callers only.
-	static HashMap<String, String> cache;
-	if (const String *hit = cache.getptr(p_name)) {
+	// present_applier.cpp is the precedent).
+	if (g_register_name_cache == nullptr) {
+		g_register_name_cache = memnew(RegisterNameCache);
+	}
+	if (const String *hit = g_register_name_cache->getptr(p_name)) {
 		return *hit;
 	}
 	const CharString utf8 = p_name.utf8();
 	const int ordinal = threedi_ctrl_register_ordinal(utf8.get_data());
-	const String canonical = ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND
-			? String()
-			: from_native(threedi_ctrl_register_name(
-					  static_cast<size_t>(ordinal)));
-	cache.insert(p_name, canonical);
+	if (ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND) {
+		return String();
+	}
+	const String canonical =
+			from_native(threedi_ctrl_register_name(static_cast<size_t>(ordinal)));
+	g_register_name_cache->insert(p_name, canonical);
 	return canonical;
 }
 

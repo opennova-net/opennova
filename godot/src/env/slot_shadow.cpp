@@ -31,6 +31,7 @@ namespace godot {
 
 Ref<ShaderMaterial> SlotShadow::drape_material_;
 Ref<ShaderMaterial> SlotShadow::blob_material_;
+int SlotShadow::live_instances_ = 0;
 Ref<ImageTexture> SlotShadow::shadowztex_;
 Ref<Texture2DRD> SlotShadow::capture_textures_[opennova::renderer::kSlotCaptureCount];
 
@@ -177,7 +178,7 @@ void SlotShadow::cleanup_statics() {
 	}
 }
 
-SlotShadow::SlotShadow() {}
+SlotShadow::SlotShadow() { ++live_instances_; }
 
 void SlotShadow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_environment_node", "environment"),
@@ -501,6 +502,10 @@ void SlotShadow::_clear_all_terms() {
 	blob_material_->set_shader_parameter("u_slot_term", zero);
 	// This direct write bypasses the frame's identical-value elision, so the
 	// stamps must forget what they think is resident.
+	_invalidate_uniform_stamps();
+}
+
+void SlotShadow::_invalidate_uniform_stamps() {
 	last_silhouette_terms_ = PackedVector4Array();
 	last_silhouette_patches_ = PackedVector4Array();
 	last_clip_u_ = PackedVector4Array();
@@ -600,6 +605,13 @@ void SlotShadow::advance_frame() {
 	requests_.clear();
 	capture_orders_.clear();
 	const Ref<ShaderMaterial> drape = get_drape_material();
+	// The elision stamps describe what THIS instance last pushed into THIS
+	// material object; a second live writer or a recreated material makes
+	// them lies, so every frame under either condition pushes everything.
+	if (live_instances_ != 1 || drape->get_rid() != stamped_drape_rid_) {
+		_invalidate_uniform_stamps();
+		stamped_drape_rid_ = drape->get_rid();
+	}
 	MissionEnvironment *env = Object::cast_to<MissionEnvironment>(
 			ObjectDB::get_instance(environment_node_id_));
 	Viewport *viewport = get_viewport();
@@ -646,7 +658,7 @@ void SlotShadow::advance_frame() {
 			}
 			info.state.is_person = record.is_person;
 			info.has_blob_texture = record.has_blob_texture;
-			info.decal_texture = &record.decal_texture;
+			info.decal_texture = record.decal_texture;
 			info.state.seat_parented = record.seat_parented_ancestor;
 			casters.push_back(info);
 			caster_index[uint64_t(record.id)] = casters.size() - 1;
@@ -877,7 +889,7 @@ void SlotShadow::advance_frame() {
 				// w x l with the authored UV offset [orig: the blob drape
 				// @0x5d59d0 — 1/w 1/l UV scale, offset + 0.5 UV center].
 				const Ref<Texture2D> texture = _blob_texture(
-						*info.decal_texture);
+						info.decal_texture);
 				if (texture.is_valid()) {
 					const Vector4 dims = model->get_slot_shadow_decal_dims();
 					const float w = MAX(dims.x, 0.25f);

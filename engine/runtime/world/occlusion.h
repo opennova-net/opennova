@@ -236,6 +236,9 @@ public:
     // TOC-culled. Debug-host reads (the F3 occlusion view); no engine consumer.
     int32_t instance_model_id(EntityHandle h) const;
     bool building_batched(EntityHandle h) const;
+    // The results-identical oracle for the static pose memo (tests): off, the
+    // walk recomputes every placed sphere and record position each frame.
+    void set_static_pose_memo_enabled(bool enabled) { static_pose_memo_enabled_ = enabled; }
     int32_t instance_count() const { return static_cast<int32_t>(instances_.size()); }
     int32_t batch_count() const { return static_cast<int32_t>(batch_.size()); }
     int32_t slot_count() const { return static_cast<int32_t>(slots_.size()); }
@@ -373,11 +376,15 @@ private:
     // recomputed per candidate per frame: the placed bound sphere and the
     // portal-record world positions are pure functions of the slot's collision
     // model and pose. Every entry is guarded by value keys (pose bits plus the
-    // model pointer, wholesale-cleared at mission portal init so a reloaded
-    // model can never alias), so a husk swap or any future mover recomputes on
-    // its own. The camera tests, the latch, the rays, and the witnessed PRNG
-    // stream run every frame untouched — caching any of those would desync
-    // the rand stream.
+    // model pointer AND the instance's occlusion model id — a collision
+    // model freed and re-allocated at the same address for a different model
+    // cannot alias with an unchanged pose — wholesale-cleared at mission
+    // portal init so a reloaded model can never alias), so a husk swap or any
+    // future mover recomputes on its own. The camera tests, the latch, the
+    // rays, and the witnessed PRNG stream run every frame untouched — caching
+    // any of those would desync the rand stream. set_static_pose_memo_enabled
+    // (false) is the test oracle: the walk recomputes every derivation and
+    // must batch identically.
     struct StaticPoseMemo {
         uint16_t handle_packed = 0; // guards the slot-index addressing
         const CollisionModel *cm = nullptr;
@@ -393,6 +400,7 @@ private:
     // variable) — the load-time table is stable, and the handle guard inside
     // each entry re-keys it if a slot is ever repopulated.
     std::vector<StaticPoseMemo> static_pose_memo_;
+    bool static_pose_memo_enabled_ = true;
 
     // Frame state
     std::vector<BatchEntry> batch_;

@@ -79,6 +79,10 @@ public:
 	// render_model_frame below; this camera-global path publishes nothing.
 	int render_frame(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
+	// The same census select for an on-demand report refresh; leaves the
+	// report's selection_mode / owner_isolation as the gameplay pass set them.
+	int census_frame(const Vector3 &p_camera_world, float p_query_radius,
+			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
 
 	// The per-draw gameplay pass [orig: update_light_slots @0x5abc50 per
 	// draw context, see docs/render/render-lighting-re.md]: one draw context
@@ -224,6 +228,9 @@ protected:
 	static void _bind_methods();
 
 private:
+	// The camera-global select behind render_frame and census_frame.
+	int camera_global_select(const Vector3 &p_camera_world, float p_query_radius,
+			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
 	static constexpr int STATIC_LIGHT_ROW_TEXELS = 9;
 	struct StaticCachedSelection {
 		int atlas_row = 0;
@@ -256,6 +263,9 @@ private:
 	std::array<opennova::renderer::SelectedLight, opennova::renderer::LightScene::kSelectLimit>
 			selected_{};
 	size_t selected_count_ = 0;
+	// select_for_draws is const for its callers but refreshes the mutable
+	// compact cache / cell grid / gather scratch: single-threaded by contract
+	// (the main thread's frame), never called concurrently on one scene.
 	String selection_mode_ = "none";
 	String owner_isolation_ = "none";
 	int last_models_ = 0;
