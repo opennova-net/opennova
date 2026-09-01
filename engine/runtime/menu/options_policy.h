@@ -51,7 +51,10 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
     {"TERRAINPOLY", "3"},
     {"TERRAINTEX", "3"},
     {"OBJECTPOLY", "3"},
-    // game.mnu uses this older alias for the same highest object-detail rung.
+    // game.mnu's older alias for the same highest object-detail rung; the
+    // in-game options Accept reads the control by this name
+    // [orig: ingame_options_dialog_event_handler @0x554e40 — "OBJECTDETAIL"
+    //  read @0x554efb].
     {"OBJECTDETAIL", "3"},
     {"OBJECTTEX", "3"},
     // The authored 3..16 rows are placeholders; mode 2 is the highest

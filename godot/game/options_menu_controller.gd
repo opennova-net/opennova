@@ -35,6 +35,11 @@ var _control_device := ControlsModel.DEVICE_KEYBOARD
 # options surface). Widgets that happen to share those names on any other
 # document — jo_sp.mnu's start ACCEPT above all — stay the shell's.
 var _has_control_table := false
+# The options state at surface entry. Retail stages edits as live previews and
+# the in-game dialog's Cancel re-seeds the screen from the saved settings while
+# Accept commits them (docs/mnu/menu-re.md "The in-game options dialog"), so
+# OPT_CANCEL rolls the shared model back to this snapshot.
+var _entry_state: PlayerOptions.State
 
 
 func setup(driver: MenuDriver, options: PlayerOptions) -> void:
@@ -52,6 +57,8 @@ func prepare_document() -> void:
 	_end_remap(false)
 	MenuOptionScrollPolicy.apply(_driver)
 	RetailVideoQualityPolicy.apply(_driver)
+	if _options != null:
+		_entry_state = _options.current()
 	_seed_player_options()
 	_lock_unsupported_controls()
 	var table_id := _find_control_table()
@@ -192,7 +199,19 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 			# (jo_sp.mnu's start control) the name is the shell's, not ours.
 			if _has_control_table:
 				_driver.pop_screen()
-		"OPT_ACCEPT", "OPT_CANCEL":
+		"OPT_ACCEPT":
+			# The in-game dialog's Accept commits the staged edits: the live
+			# state becomes the new baseline for a later Cancel.
+			if _options != null:
+				_entry_state = _options.current()
+			_show_ingame_main_wrapper()
+		"OPT_CANCEL":
+			# Cancel reverts to the surface-entry snapshot — retail re-seeds
+			# the whole screen from the saved settings and rolls the live
+			# preview back (docs/mnu/menu-re.md "The in-game options dialog").
+			if _options != null and _entry_state != null:
+				_options.update(_entry_state.copy())
+				_seed_player_options()
 			_show_ingame_main_wrapper()
 
 
@@ -209,6 +228,9 @@ func _on_list_activated(id: int, row: int) -> void:
 		_arm_remap(id, row)
 
 
+# The KEYBOARD/MOUSE/JOYSTICK device radios re-fill the table for the picked
+# device (docs/mnu/menu-re.md — UI_SelectControlsInputDevice, registered per
+# device by the OPTIONS scene).
 func _switch_control_device(device: int) -> void:
 	_end_remap(false)
 	_control_device = device
@@ -217,6 +239,8 @@ func _switch_control_device(device: int) -> void:
 		_fill_control_mapping(table_id, device)
 
 
+# DEFAULTS restores the catalog bindings and re-fills the table
+# (docs/mnu/menu-re.md — the OPTIONS DEFAULTS callback).
 func _restore_control_defaults() -> void:
 	_end_remap(false)
 	ControlsBindings.model().restore_defaults()
@@ -226,6 +250,8 @@ func _restore_control_defaults() -> void:
 		_fill_control_mapping(table_id, _control_device)
 
 
+# CLEAR_KEY empties the selected row's binding for the active device
+# (docs/mnu/menu-re.md — the OPTIONS CLEAR_KEY callback).
 func _clear_selected_binding() -> void:
 	_end_remap(false)
 	var table_id := _find_control_table()
@@ -241,6 +267,9 @@ func _clear_selected_binding() -> void:
 		_driver.table_select_row(table_id, row)
 
 
+# The table fill mirrors retail's populate/display pair; the armed row keeps
+# its cell blank while a capture is live (docs/mnu/menu-re.md —
+# UI_PopulateControlMappingList / update_control_mapping_display).
 func _fill_control_mapping(table_id: int, device: int, blank_row := -1) -> void:
 	_driver.table_clear_rows(table_id)
 	var rows := ControlsBindings.model().get_rows(device)
@@ -251,6 +280,9 @@ func _fill_control_mapping(table_id: int, device: int, blank_row := -1) -> void:
 		_driver.table_add_row(table_id, cells)
 
 
+# Arming a row: pump state set, row stored, its cell cleared, focus taken
+# (docs/mnu/menu-re.md — UI_ControlsRemapArmHandler; the joystick refusal is
+# D-CTRL-1).
 func _arm_remap(table_id: int, row: int) -> void:
 	if _control_device == ControlsModel.DEVICE_JOYSTICK:
 		return
@@ -264,6 +296,8 @@ func _arm_remap(table_id: int, row: int) -> void:
 	_driver.table_select_row(table_id, row)
 
 
+# The capture pump's Esc/assign split; the assignment goes through the
+# bindings model (docs/mnu/menu-re.md — the capture pump and its callback).
 func _consume_remap_key(event: InputEventKey) -> bool:
 	if not event.pressed:
 		return true
