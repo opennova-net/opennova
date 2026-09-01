@@ -50,6 +50,10 @@ public:
 			Camera3D *p_camera);
 	void clear_q3_frame();
 	void release_device_resources();
+	// F3-only GPU timing: RD timestamps around the pass carve its span out of
+	// the root viewport's GPU row. capture_timestamp barriers the RD graph, so
+	// this stays off unless the Stats capture is live.
+	void set_gpu_timing_enabled(bool p_enabled);
 	Dictionary get_backend_report() const;
 	// Inspection seam for the GUT pins: the first view's focused Q3 colour
 	// target as drawn by the last completed frame. Call only after
@@ -78,6 +82,8 @@ private:
 	uint32_t synced_camera_original_mask_ = 0;
 	bool has_synced_camera_mask_ = false;
 	bool shutdown_ = false;
+	// Latched so a compositor rebuild mid-capture re-applies the F3 timing flag.
+	bool gpu_timing_enabled_ = false;
 
 	void build_compositor();
 	void install_compositor();
@@ -148,6 +154,9 @@ public:
 	// Process-exit boundary: stop render callbacks and release compositor-owned
 	// device resources while RenderingServer and RenderingDevice are still live.
 	void shutdown();
+	// F3 Stats capture toggle for the terminal pass's RD GPU span (see
+	// FrameFxCompositorEffect::set_gpu_timing_enabled).
+	void set_gpu_timing_enabled(bool p_enabled);
 
 	Dictionary get_backend_report() const;
 	// The terminal effect's focused Q3 target (see

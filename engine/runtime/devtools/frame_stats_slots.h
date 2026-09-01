@@ -197,7 +197,12 @@
     X(RENDER_WATER_GPU, "") \
     /* The focused Q3 pass (the FrameFX compositor) and the slot captures (the */ \
     /* PRE_OPAQUE compositor pass) render inside the root viewport, so their */ \
-    /* time is inside RENDER_ROOT_*; only their submission counts below remain. */ \
+    /* time also rides RENDER_ROOT_*. The two slots below carve their own GPU */ \
+    /* spans back out via RenderingDevice timestamps captured inside each */ \
+    /* pass; results surface with Godot's frame delay, so they describe the */ \
+    /* previous completed frame. */ \
+    X(RENDER_Q3_GPU, "focused Q3 pass GPU span (RD timestamps, previous completed frame)") \
+    X(RENDER_SLOT_GPU, "slot-capture pass GPU span (RD timestamps, previous completed frame)") \
     /* Per-pass render counts (RenderingServer per-viewport render info for the */ \
     /* previous frame). VALUE slots: what each pass actually submitted, so pass */ \
     /* cost attribution (main view vs shadow maps vs the water mirror) is read */ \

@@ -241,7 +241,9 @@ inline constexpr StatsRow kRows[] = {
 	{"render_water_cpu", "Water RTT CPU", 2, RowKind::SPAN, Slot::RENDER_WATER_CPU, nullptr, 0},
 	{"render_water_gpu", "Water RTT GPU", 2, RowKind::SPAN, Slot::RENDER_WATER_GPU, nullptr, 0},
 	{"render_q3", "FrameFX focused Q3", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
+	{"render_q3_gpu", "Q3 pass GPU", 2, RowKind::SPAN, Slot::RENDER_Q3_GPU, nullptr, 0},
 	{"render_slot", "Slot-shadow captures", 1, RowKind::HEADER, Slot::COUNT, nullptr, 0},
+	{"render_slot_gpu", "Slot captures GPU", 2, RowKind::SPAN, Slot::RENDER_SLOT_GPU, nullptr, 0},
 };
 
 inline constexpr int kRowCount = static_cast<int>(sizeof(kRows) / sizeof(kRows[0]));
