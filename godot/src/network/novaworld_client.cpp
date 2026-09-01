@@ -21,6 +21,7 @@
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
+#include <net/novaworld/ping_sweep.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -599,7 +600,13 @@ void NovaWorldClient::start_ping_sweep() {
 	for (int i = 0; i < server_rows_.size(); ++i) {
 		const Dictionary row = server_rows_[i];
 		const String ip = row.get("ip", "");
-		if (ip.is_empty() || ip == "0.0.0.0") continue; // unreported host address
+		if (ip.is_empty() || ip == "0.0.0.0") {
+			// Unreported host address: the row is never attempted, and retail's
+			// fold surfaces exactly that (-4 -> -3) instead of leaving the
+			// browser's pending "..." forever.
+			server_pings_[row.get("rid", 0)] = opennova::kPingNeverAttempted;
+			continue;
+		}
 		targets.emplace_back(static_cast<int64_t>(int64_t(row.get("rid", 0))),
 		                     std::string(ip.utf8().get_data()));
 	}

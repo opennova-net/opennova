@@ -102,6 +102,13 @@ void run_echo_pass(HANDLE icmp, std::vector<EchoSlot *> &slots) {
 void sweep_thread(std::vector<std::pair<int64_t, std::string>> targets,
                   Callable sink, int64_t generation) {
 	Dictionary results;
+	// Every row starts as retail's never-attempted fold (-4 -> -3); the echo
+	// passes overwrite the rows they actually drive, so a row the sweep cannot
+	// reach (unparseable address, no ICMP handle) still terminates in the UI.
+	for (const auto &[rid, dotted] : targets) {
+		(void)dotted;
+		results[rid] = opennova::fold_ping_result(-4, 0);
+	}
 	const HANDLE icmp = IcmpCreateFile();
 	std::vector<EchoSlot> slots;
 	if (icmp != INVALID_HANDLE_VALUE) {
@@ -149,10 +156,15 @@ void run_ping_sweep(std::vector<std::pair<int64_t, std::string>> targets,
 	std::thread(sweep_thread, std::move(targets), std::move(sink), generation)
 			.detach();
 #else
-	// No unprivileged ICMP facility modeled off Windows: one empty pass so the
-	// browser settles its pending state.
-	(void)targets;
-	sink.call_deferred(Dictionary(), generation);
+	// No unprivileged ICMP facility modeled off Windows: every row settles as
+	// retail's never-attempted fold (-4 -> -3) so the browser's pending "..."
+	// terminates.
+	Dictionary results;
+	for (const auto &[rid, dotted] : targets) {
+		(void)dotted;
+		results[rid] = opennova::fold_ping_result(-4, 0);
+	}
+	sink.call_deferred(results, generation);
 #endif
 }
 
