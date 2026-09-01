@@ -233,6 +233,12 @@ void StatsWindow::format_info() {
 				static_cast<int>(std::lround(mean_count(w, Slot::PRESENT_MISSION_BODY_ROWS))));
 		set_info("mission_rows", buf);
 	}
+	if (slot_samples(w, Slot::PRESENT_WIRE_LIVE) > 0) {
+		std::snprintf(buf, sizeof(buf), "%d nodes | %d pending",
+				static_cast<int>(std::lround(mean_count(w, Slot::PRESENT_WIRE_LIVE))),
+				static_cast<int>(std::lround(mean_count(w, Slot::PRESENT_WIRE_PENDING))));
+		set_info("wire_rows", buf);
+	}
 	if (slot_samples(w, Slot::SIM_TICKS) > 0) {
 		int n = std::snprintf(buf, sizeof(buf), "%.1f t/f", mean_count(w, Slot::SIM_TICKS));
 		if (n > 0 && slot_samples(w, Slot::SIM_ENTITY_COUNT) > 0) {

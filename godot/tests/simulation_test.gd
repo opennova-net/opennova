@@ -38,6 +38,8 @@ const SESSION_PHASE_TIMING_KEYS := [
 	"replication_entity_budget_us", "replication_encode_us", "replication_enqueue_us",
 	"host_send_us", "host_player_us", "client_decode_us", "client_setup_us",
 	"client_receive_us", "client_maintenance_us", "client_send_us",
+	"client_materialize_us", "client_mirror_us", "client_proxies_us",
+	"client_world_us", "client_attach_us", "client_player_us",
 	"adm_resolve_us", "sink_us",
 ]
 

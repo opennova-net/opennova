@@ -55,6 +55,9 @@ private:
 		int64_t host_player_us = 0; // the host's local view/weapon/medic pumps
 		int64_t client_decode_us = 0; // the local ClientState fold (host) / joiner wire leg
 		int64_t adm_resolve_us = 0;
+		// The joiner pump's phases after its wire leg (the world tick's own
+		// breakdown is folded onto host_session.server.world_* as well).
+		opennova::np::JoinerPumpPerf joiner;
 	};
 	SessionPhasePerf frame_phase_perf_;
 	// The dev tools' frame-stats board (ADR 0039): fold_frame_stats() lands the

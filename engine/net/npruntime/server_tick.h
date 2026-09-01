@@ -9,6 +9,10 @@
 
 #include <net/npruntime/napi_np_server_ctx.h> // NapiNPServerCtx
 
+namespace opennova::world {
+struct LogicTickPerf;
+}
+
 namespace opennova::np {
 
 // One explicit global countdown: reset 0 emits at the next boundary, reload
@@ -81,6 +85,11 @@ struct ServerTickPerf {
 
 	// Sum another record into this one (a render frame consumes 0..N ticks;
 	// the shell keeps one summed record per frame).
+	// Add one World::run_logic_tick attribution onto the world_* rows. The
+	// server tick assigns its own per-tick record; the direct (no-net) and
+	// joiner ticks accumulate 0..N ticks per frame through this.
+	void add_logic_tick(const world::LogicTickPerf &p);
+
 	ServerTickPerf &operator+=(const ServerTickPerf &o) {
 		input_us += o.input_us;
 		world_us += o.world_us;

@@ -9,6 +9,8 @@
 #include <net/npwire/ingame_decode.h>    // kRoundEventFlag* (the fire-mode byte)
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 
+#include <base/io/perf_clock.h>          // perf_now_us (the pump's phase clocks)
+
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/destruction.h>   // destruction_notify_item_damage (S2C 0x13 net kill)
@@ -68,6 +70,16 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// The provider closures below persist on the pipeline across frames; they
 	// read this latched pointer at call time, never a per-call reference.
 	world_ = &ctx.world;
+	// The phase clocks (F3 Stats): each span below adds onto the embedder's
+	// per-frame record; a null record reads no clock at all.
+	JoinerPumpPerf *perf = ctx.perf;
+	uint64_t phase_start = perf != nullptr ? io::perf_now_us() : 0;
+	const auto lap = [&](uint64_t &slot) {
+		if (perf == nullptr) return;
+		const uint64_t now = io::perf_now_us();
+		slot += now - phase_start;
+		phase_start = now;
+	};
 	wire_frame_providers(ctx, hooks);
 	hooks.resolve_row_adm_ids();
 	send_hello_once(ctx.runtime, hooks.send);
@@ -77,35 +89,82 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// predicate. Mirror it onto World before any local entity/system work.
 	ctx.world.preround_delay_seconds =
 			ctx.runtime.state().preround_delay_seconds;
+	if (perf != nullptr) phase_start = io::perf_now_us(); // the wire leg has its own rows
 	materialize_replica_world(ctx, hooks);
 	spawn_and_arm_local_player(ctx, hooks);
 	if (decoded.health) apply_authoritative_health(ctx, hooks);
 	sync_authoritative_mount(ctx, hooks);
 	apply_mounted_ammo_update(ctx);
+	lap(perf != nullptr ? perf->materialize_us : phase_start);
 	mirror_mission_entities(ctx);
+	lap(perf != nullptr ? perf->mirror_us : phase_start);
 
 	// Received projectile/reload gameplay and the decoded remote collision
 	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
 	// them here is the retail recv-before-actions boundary, not presentation work.
 	refresh_wire_collision_proxies(ctx, hooks);
+	lap(perf != nullptr ? perf->proxies_us : phase_start);
 	apply_gameplay_events(ctx);
 	apply_weather_sample(ctx);
+	lap(perf != nullptr ? perf->materialize_us : phase_start);
 
 	const bool preround_active = ctx.world.preround_delay_seconds != 0;
 	hooks.apply_input_pre_tick(); // input latches stay live through the phase
+	lap(perf != nullptr ? perf->player_us : phase_start);
+	world::LogicTickPerf tick_perf;
 	ctx.world.run_logic_tick(
 			/*is_authority=*/false,
 			preround_active ? world::TickPhase::PreRound
-			                : world::TickPhase::Gameplay);
+			                : world::TickPhase::Gameplay,
+			perf != nullptr ? &tick_perf : nullptr);
+	if (perf != nullptr) {
+		perf->world.setup_us += tick_perf.setup_us;
+		perf->world.scripts_us += tick_perf.scripts_us;
+		perf->world.ai_us += tick_perf.ai_us;
+		perf->world.ai_reactions_us += tick_perf.ai_reactions_us;
+		perf->world.ai_collision_tables_us += tick_perf.ai_collision_tables_us;
+		perf->world.ai_entities_us += tick_perf.ai_entities_us;
+		perf->world.ai_infantry_entities_us += tick_perf.ai_infantry_entities_us;
+		perf->world.ai_infantry_remote_us += tick_perf.ai_infantry_remote_us;
+		perf->world.ai_infantry_combat_us += tick_perf.ai_infantry_combat_us;
+		perf->world.ai_infantry_animation_us += tick_perf.ai_infantry_animation_us;
+		perf->world.ai_infantry_collision_us += tick_perf.ai_infantry_collision_us;
+		perf->world.ai_infantry_collision_contacts_us +=
+				tick_perf.ai_infantry_collision_contacts_us;
+		perf->world.ai_infantry_collision_repulsion_us +=
+				tick_perf.ai_infantry_collision_repulsion_us;
+		perf->world.ai_infantry_collision_ground_us +=
+				tick_perf.ai_infantry_collision_ground_us;
+		perf->world.ai_other_entities_us += tick_perf.ai_other_entities_us;
+		perf->world.ai_authority_vehicles_us += tick_perf.ai_authority_vehicles_us;
+		perf->world.ai_vehicle_scan_us += tick_perf.ai_vehicle_scan_us;
+		perf->world.ai_vehicle_motors_us += tick_perf.ai_vehicle_motors_us;
+		perf->world.ai_vehicle_riders_us += tick_perf.ai_vehicle_riders_us;
+		perf->world.ai_client_vehicles_us += tick_perf.ai_client_vehicles_us;
+		perf->world.ai_events_us += tick_perf.ai_events_us;
+		perf->world.attachments_us += tick_perf.attachments_us;
+		perf->world.attachment_orphans_us += tick_perf.attachment_orphans_us;
+		perf->world.attachment_child_pose_us += tick_perf.attachment_child_pose_us;
+		perf->world.attachment_riders_us += tick_perf.attachment_riders_us;
+		perf->world.throwables_us += tick_perf.throwables_us;
+		perf->world.weapons_us += tick_perf.weapons_us;
+		perf->world.projectiles_us += tick_perf.projectiles_us;
+		perf->world.destruction_us += tick_perf.destruction_us;
+		perf->world.housekeeping_us += tick_perf.housekeeping_us;
+	}
+	lap(perf != nullptr ? perf->world_us : phase_start);
 	if (!preround_active)
 		mirror_predicted_vehicles(ctx); // predicted boat poses -> presented rows
+	lap(perf != nullptr ? perf->mirror_us : phase_start);
 	// Vehicle prediction is the final carrier mover on a joiner. Recompose every
 	// seat/deck/object attachment from that final pose in this same frame, then
 	// publish the refreshed rows back to the local registry consumers. This is
 	// the retail second carrier-follow phase; doing it before the world mover
 	// leaves children one tick behind their vehicle.
 	if (!preround_active) ctx.runtime.refresh_remote_attachments();
+	lap(perf != nullptr ? perf->attach_us : phase_start);
 	mirror_mission_entities(ctx);
+	lap(perf != nullptr ? perf->mirror_us : phase_start);
 	// The local mounted body was seat-posed earlier in AiSystem::tick, before
 	// the joiner-only vehicle prediction pass. Re-pose L against the vehicle's
 	// final same-frame transform so the camera/view never trails its seat by one
@@ -117,6 +176,7 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 			ctx.world.ai->refresh_mounted_pose(*local_ai, ctx.world);
 		}
 	}
+	lap(perf != nullptr ? perf->attach_us : phase_start);
 	// The weather tick follows the entity update on a client exactly as on
 	// the host [orig: Game_ProcessMainFrame @ 0x52674b -> @ 0x526774].
 	if (hooks.tick_weather) hooks.tick_weather();
@@ -129,6 +189,7 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	// round short.
 	// [orig: WeaponAction_ProcessAllEntities @ 0x526786]
 	if (local_spawned_) hooks.tick_weapon();
+	lap(perf != nullptr ? perf->player_us : phase_start);
 	++now_tick_;
 }
 

@@ -15,6 +15,7 @@
 #include <net/netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <net/netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
 #include <runtime/world/ai.h>                  // AiEntity::see_all (the team-kill exemption)
+#include <runtime/world/world.h>               // LogicTickPerf (ServerTickPerf::add_logic_tick)
 #include <runtime/world/collision.h>           // stable replication LOS view epoch
 #include <runtime/world/geom.h>                // to_fixed
 #include <runtime/world/infantry.h>            // drown death animation selection
@@ -28,6 +29,42 @@
 #include <string>
 
 namespace opennova::np {
+
+void ServerTickPerf::add_logic_tick(const world::LogicTickPerf &p) {
+	world_us += p.setup_us + p.scripts_us + p.ai_us + p.attachments_us +
+			p.throwables_us + p.weapons_us + p.projectiles_us + p.destruction_us +
+			p.housekeeping_us;
+	world_setup_us += p.setup_us;
+	world_scripts_us += p.scripts_us;
+	world_ai_us += p.ai_us;
+	world_ai_reactions_us += p.ai_reactions_us;
+	world_ai_collision_tables_us += p.ai_collision_tables_us;
+	world_ai_entities_us += p.ai_entities_us;
+	world_ai_infantry_entities_us += p.ai_infantry_entities_us;
+	world_ai_infantry_remote_us += p.ai_infantry_remote_us;
+	world_ai_infantry_combat_us += p.ai_infantry_combat_us;
+	world_ai_infantry_animation_us += p.ai_infantry_animation_us;
+	world_ai_infantry_collision_us += p.ai_infantry_collision_us;
+	world_ai_infantry_collision_contacts_us += p.ai_infantry_collision_contacts_us;
+	world_ai_infantry_collision_repulsion_us += p.ai_infantry_collision_repulsion_us;
+	world_ai_infantry_collision_ground_us += p.ai_infantry_collision_ground_us;
+	world_ai_other_entities_us += p.ai_other_entities_us;
+	world_ai_authority_vehicles_us += p.ai_authority_vehicles_us;
+	world_ai_vehicle_scan_us += p.ai_vehicle_scan_us;
+	world_ai_vehicle_motors_us += p.ai_vehicle_motors_us;
+	world_ai_vehicle_riders_us += p.ai_vehicle_riders_us;
+	world_ai_client_vehicles_us += p.ai_client_vehicles_us;
+	world_ai_events_us += p.ai_events_us;
+	world_attachments_us += p.attachments_us;
+	world_attachment_orphans_us += p.attachment_orphans_us;
+	world_attachment_child_pose_us += p.attachment_child_pose_us;
+	world_attachment_riders_us += p.attachment_riders_us;
+	world_throwables_us += p.throwables_us;
+	world_weapons_us += p.weapons_us;
+	world_projectiles_us += p.projectiles_us;
+	world_destruction_us += p.destruction_us;
+	world_housekeeping_us += p.housekeeping_us;
+}
 
 namespace {
 

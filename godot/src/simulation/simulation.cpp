@@ -810,10 +810,17 @@ bool Simulation::advance_world_tick() {
 		return true;
 	}
 	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
+		// The pump adds its phases onto frame_phase_perf_.joiner; the local
+		// world tick's breakdown lands on the same World update rows the
+		// host/no-net ticks fill, once per tick.
+		if (runtime_profiling_enabled_) frame_phase_perf_.joiner.world = {};
 		joiner_pump();
-		if (runtime_profiling_enabled_)
+		if (runtime_profiling_enabled_) {
 			frame_phase_perf_.client_decode_us +=
 					static_cast<int64_t>(last_net_tick_us_);
+			frame_phase_perf_.host_session.server.add_logic_tick(
+					frame_phase_perf_.joiner.world);
+		}
 		const uint64_t adm_start =
 				runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
 		kernel_->resolve_new_infantry_adm_ids();
@@ -836,16 +843,7 @@ bool Simulation::advance_world_tick() {
 	if (runtime_profiling_enabled_) {
 		// The direct tick attributes its world phases onto the same F3 keys
 		// the listen frame's server pump fills.
-		opennova::np::ServerTickPerf &server = frame_phase_perf_.host_session.server;
-		server.world_setup_us += world_perf.setup_us;
-		server.world_scripts_us += world_perf.scripts_us;
-		server.world_ai_us += world_perf.ai_us;
-		server.world_attachments_us += world_perf.attachments_us;
-		server.world_throwables_us += world_perf.throwables_us;
-		server.world_weapons_us += world_perf.weapons_us;
-		server.world_projectiles_us += world_perf.projectiles_us;
-		server.world_destruction_us += world_perf.destruction_us;
-		server.world_housekeeping_us += world_perf.housekeeping_us;
+		frame_phase_perf_.host_session.server.add_logic_tick(world_perf);
 		last_sim_tick_us_ = opennova::io::perf_now_us() - sim_start;
 	}
 	return true;
