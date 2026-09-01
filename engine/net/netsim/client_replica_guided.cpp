@@ -49,7 +49,7 @@ constexpr int32_t kLaunchLiftQ16 = 78643;
 void ClientReplicaPipeline::apply_entity_routed(const std::vector<uint8_t> &body) {
 	EntityRoutedPacket pkt;
 	if (!decode_entity_routed_packet(body.data(), body.size(), pkt)) {
-		++unknown_tags_;
+		++malformed_bodies_;
 		return;
 	}
 	const auto group = static_cast<GuidedFieldGroup>(pkt.subtype);
