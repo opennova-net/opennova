@@ -1943,6 +1943,13 @@ target_link_libraries(gsb_parse_roundtrip_test PRIVATE opennova_net)
 target_include_directories(gsb_parse_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gsb_parse_roundtrip COMMAND gsb_parse_roundtrip_test)
 
+# The browser's per-row ping display fold (-4 -> -3, negative -> -2, 0 -> ms)
+# and the witnessed sweep constants.
+add_executable(ping_sweep_fold_test novaworld/ping_sweep_fold_test.cpp)
+target_link_libraries(ping_sweep_fold_test PRIVATE opennova_net)
+target_include_directories(ping_sweep_fold_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ping_sweep_fold COMMAND ping_sweep_fold_test)
+
 # Retail dispatcher semantics (D-NET-190..193): SVRS accumulation, the gated
 # "GSB " reset, undersized-record skips, and the XXXX-terminator hardening.
 add_executable(gsb_retail_semantics_test novaworld/gsb_retail_semantics_test.cpp)
