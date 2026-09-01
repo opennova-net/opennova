@@ -914,7 +914,7 @@ func test_gamma_encoded_retail_effect_math_crosses_godot_linear_boundary_once() 
 	_contains_all(frame_renderer, [
 		"FramePass::GammaDecode", "EFFECT_CALLBACK_TYPE_POST_TRANSPARENT",
 		"framebuffer_blend_domain\"] = \"gamma\"",
-		"kBeautyCameraMask = 0x00018C01u",
+		"kBeautyCameraMask = 0x00038C01u",
 		"DATA_FORMAT_R8G8B8A8_UNORM", "direction_for_degrees(30.0f, 1.0f / 1024.0f)",
 		"1.0f / 2048.0f", "* 0.50", "* 0.46", "* 0.35", "* 0.19",
 		"Vector2i(kFrameFxSide, kFrameFxSide), 90.0f", "Vector2i(kFrameFxSide, kFrameFxSide), 0.0f",
