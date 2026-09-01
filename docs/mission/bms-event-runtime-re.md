@@ -1035,16 +1035,32 @@ The two teleport forms deliberately differ:
   also inherits marker Flags `0x20` when set and runs the reset path [orig:
   EventAction_TeleportEntityToSpawn @ 0x43DFC0].
 
-Both ports copy the resolved pose into a resident `AiEntity` (including its
-saved-live position) so the next organic/vehicle motor does not snap back to a
-stale fixed-point pose. Registry-shape changes refresh collision/proximity once
-after the complete fan, not once per member.
+Both ports copy the resolved pose into a resident `AiEntity`. This is the
+split-pose translation of witnessed stores, not compensation: retail's single
+teleport writes the ONE entity pose the motor reads plus `savedLivePose` and
+the body pose per target [orig: EventAction_TeleportEntityToSpawn @ 0x43DFC0 —
+savedLivePose @ 0x43E05F..0x43E071, bodyHeading/Pitch/Roll @ 0x43E07A..0x43E096];
+our AI row carries the fixed-point mirror of exactly those fields
+(`net_saved_live_pose` = `savedLivePose`). The group form writes only
+position/yaw/pitch/roll (pool 0's body pose comes via the reset), so the group
+arm's AI heading sync is slightly ahead of retail's chase-converging body
+heading — a translation note, not a divergence row. Registry-shape changes
+refresh collision/proximity once after the complete fan, not once per member.
+
+The single-target SSN commands (24/25/26) resolve by walking pools 0, 1, 2 in
+order — retail's own sequential DcbId scans, first match wins, `dcb_id != 0`
+gated, with NO item gate on the team/group writers (the teleport walk keeps
+its item gate @ 0x43E036) [orig: Entity_FindByDCBAndSetFlag @ 0x43DB30 —
+team byte entity+354 @ 0x43DB63; Entity_SetNetIdByParentRef @ 0x43D6C0 —
+commandGroup word entity+284 @ 0x43D6F4]. The 2026-09-01 re-grill replaced the
+earlier resolve-then-reject shape, which could miss when a pool-3 row shadowed
+the SSN.
 
 `event_runtime_bms` pins pool coverage, the pool-0 dead-row exception, both
 teleport flag rules, marker selection, AI mirrors, group speed conversion, the
 Null/SingleVelocity no-op arms, and absence of `unported_action` for this set.
 
-### 10.1 Remaining explicit action boundary
+### 10.1 Remaining explicit action boundary (D-EVT-6)
 
 This slice does not claim every BMS action is complete. The default diagnostic
 still owns actions 30/31 (group door open/close), 39 (teammate order), and 42..49
@@ -1052,7 +1068,9 @@ still owns actions 30/31 (group door open/close), 39 (teammate order), and 42..4
 still crosses the presenter/embedder effect seam rather than invoking a
 `WacSystem` directly. Those actions need their door, teammate-command,
 target-reference, or runtime-composition owners; they are not modeled as
-generic flag writes.
+generic flag writes. Tracked as **D-EVT-6** in the divergence ledger
+(minted 2026-09-01 — a declared residual with no row is exactly what the
+ledger exists to prevent).
 
 **D-EVT-1 is unchanged.** `BmsEventSystem::fire` already publishes the fired
 event index to the waypoint completion hook, but retail's linked deploy/POI
