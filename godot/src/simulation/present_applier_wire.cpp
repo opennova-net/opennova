@@ -283,8 +283,12 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 		update_wire_held_weapon(row, model, snap, false);
 		// A pending remote body blend is entity-update work, not draw work
 		// (retail advances it in AnimMap_UpdateEntity): keep consuming the
-		// tick delta so the blend finishes on schedule while occluded.
-		apply_wire_body_anim(row, model, snap, tick_delta);
+		// tick delta so the blend finishes on schedule while occluded. Only a
+		// row with a blend in flight pays this; clip dispatch itself is draw
+		// work and re-asserts on the first drawn frame.
+		if (row.remote_body_tick != 0) {
+			apply_wire_body_anim(row, model, snap, tick_delta);
+		}
 		present_wire_row_body_sounds(row, snap);
 		return;
 	}
