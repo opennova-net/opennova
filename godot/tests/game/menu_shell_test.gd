@@ -558,15 +558,24 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 
 	driver.set_widget_shown(main_wrapper, false)
 	driver.set_widget_shown(options_wrapper, true)
+	var music_before: int = options.current().music_volume
 	driver.widget_value_changed.emit("MUSICVOLUME", "scroll", 84, "84")
+	assert_eq(options.current().music_volume, 84,
+			"edits apply live as the preview")
 	driver.widget_activated.emit(driver.widget_id("OPT_CANCEL"), "OPT_CANCEL")
 	assert_true(driver.is_widget_shown(main_wrapper))
 	assert_false(driver.is_widget_shown(options_wrapper))
-	assert_eq(options.current().music_volume, 84,
-			"Cancel only navigates because pause-menu edits save immediately")
+	# Retail's pause Cancel re-seeds the screen from the saved settings and
+	# rolls the live preview back; Accept committed sound_fx as the baseline
+	# (docs/mnu/menu-re.md "The in-game options dialog").
+	assert_eq(options.current().music_volume, music_before,
+			"Cancel reverts the staged music edit")
+	assert_eq(options.current().sound_fx_volume, 72,
+			"the accepted edit survives a later Cancel")
 	var reloaded := PlayerOptions.new().current()
 	assert_eq(reloaded.sound_fx_volume, 72)
-	assert_eq(reloaded.music_volume, 84)
+	assert_eq(reloaded.music_volume, music_before,
+			"the reverted edit never reaches the config")
 	_cleanup(dir)
 
 # Options -> Mods: the shell lists discoverable expansions in AVAIL_LIST by name, and
