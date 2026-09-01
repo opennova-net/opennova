@@ -408,6 +408,14 @@ Array Simulation::get_streamed_placement_records() const {
 	return out;
 }
 
+PackedInt32Array Simulation::take_retired_placement_ids() {
+	PackedInt32Array out;
+	if (!joiner_) return out;
+	for (const int32_t id : joiner_bridge_.materializer().take_retired_placement_ids())
+		out.push_back(id);
+	return out;
+}
+
 void Simulation::joiner_pump() {
 	if (!runtime_) {
 		if (runtime_profiling_enabled_) last_net_tick_us_ = 0;

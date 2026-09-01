@@ -1024,6 +1024,40 @@ bool streamed_rows_take_a_placed_identity_at_the_fence() {
 			late_row->spawn_origin == w::spawn_origin_pack(1, 2),
 			"a later stamp appends behind the existing per-kind ordinal"))
 		return false;
+
+	// A same-type re-spawn of a stamped slot (a new wire generation at the
+	// same handle) keeps its placed identity on the fresh lifetime; the shell
+	// hears nothing. A re-typed slot retires the identity for the shell to
+	// hide, and its new occupant is wire-direct.
+	nw::PoolSpawnRecord respawn = vehicle; // slot 0x1042, same type
+	respawn.pos_x = 9 * 65536;
+	nw::PoolSpawnBatch respawn_batch;
+	respawn_batch.records.push_back(respawn);
+	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(respawn_batch));
+	const ns::ClientWorldSyncResult respawned = materializer.sync(pipeline.state(), world);
+	const w::Entity *boat_again = world.registry.get(w::EntityHandle{0x1042});
+	if (!expect(respawned.retired.size() == 1 && respawned.spawned.size() == 1 &&
+			boat_again != nullptr && boat_again != nullptr &&
+			boat_again->spawn_origin == w::spawn_origin_pack(1, 1) &&
+			boat_again->bms_id == 0x1043 &&
+			materializer.take_retired_placement_ids().empty(),
+			"a same-type re-spawn carries the placed identity and retires nothing"))
+		return false;
+	nw::PoolSpawnRecord retyped = vehicle;
+	retyped.item_type_id = 5009;
+	nw::PoolSpawnBatch retyped_batch;
+	retyped_batch.records.push_back(retyped);
+	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(retyped_batch));
+	materializer.sync(pipeline.state(), world);
+	const std::vector<int32_t> retired_ids = materializer.take_retired_placement_ids();
+	const w::Entity *retyped_row = world.registry.get(w::EntityHandle{0x1042});
+	if (!expect(retired_ids.size() == 1 && retired_ids[0] == 0x1043 &&
+			retyped_row != nullptr && retyped_row->item_id == 5009 &&
+			retyped_row->spawn_origin == w::kSpawnOriginNone &&
+			retyped_row->bms_id == 0 &&
+			materializer.take_retired_placement_ids().empty(),
+			"a re-typed slot retires its placed identity once and its occupant is wire-direct"))
+		return false;
 	return true;
 }
 

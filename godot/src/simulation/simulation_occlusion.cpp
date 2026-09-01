@@ -99,6 +99,20 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 	// position-centred unit sphere the organics leg above falls back to.
 	occlusion_culled_wire_.clear();
 	if (runtime_ != nullptr) {
+		// A latch belongs to one row lifetime: drop the counters of handles
+		// that left the state so a reused handle starts fresh (retail memsets
+		// the destroyed entity, latch included).
+		std::unordered_set<uint16_t> live_handles;
+		for (const opennova::netsim::ClientEntityState &es :
+				runtime_->state().entities)
+			live_handles.insert(es.handle);
+		for (auto it = wire_occlusion_latch_.begin();
+				it != wire_occlusion_latch_.end();) {
+			if (live_handles.count(it->first) == 0)
+				it = wire_occlusion_latch_.erase(it);
+			else
+				++it;
+		}
 		const uint16_t self_handle = runtime_->has_self_handle()
 				? runtime_->self_handle()
 				: opennova::world::EntityHandle::kInvalid;
@@ -206,18 +220,19 @@ PackedInt64Array Simulation::get_building_visibility_changes() {
 	return out;
 }
 
-PackedInt32Array Simulation::get_wire_render_culled_changes() {
-	std::vector<int32_t> current = occlusion_culled_wire_;
+// [added..., removed...] as [count, ids..., count, ids...] against the applied
+// baseline, which becomes the current set.
+static PackedInt32Array culled_changes_since(const std::vector<int32_t> &p_now,
+		std::vector<int32_t> &r_applied) {
+	std::vector<int32_t> current = p_now;
 	std::sort(current.begin(), current.end());
 	std::vector<int32_t> added;
 	std::vector<int32_t> removed;
 	std::set_difference(current.begin(), current.end(),
-			occl_apply_culled_wire_last_.begin(), occl_apply_culled_wire_last_.end(),
-			std::back_inserter(added));
-	std::set_difference(occl_apply_culled_wire_last_.begin(),
-			occl_apply_culled_wire_last_.end(), current.begin(), current.end(),
-			std::back_inserter(removed));
-	occl_apply_culled_wire_last_ = std::move(current);
+			r_applied.begin(), r_applied.end(), std::back_inserter(added));
+	std::set_difference(r_applied.begin(), r_applied.end(),
+			current.begin(), current.end(), std::back_inserter(removed));
+	r_applied = std::move(current);
 	PackedInt32Array out;
 	out.push_back(static_cast<int32_t>(added.size()));
 	for (const int32_t id : added) out.push_back(id);
@@ -226,24 +241,12 @@ PackedInt32Array Simulation::get_wire_render_culled_changes() {
 	return out;
 }
 
+PackedInt32Array Simulation::get_wire_render_culled_changes() {
+	return culled_changes_since(occlusion_culled_wire_, occl_apply_culled_wire_last_);
+}
+
 PackedInt32Array Simulation::get_render_culled_changes() {
-	std::vector<int32_t> current = occlusion_culled_bms_;
-	std::sort(current.begin(), current.end());
-	std::vector<int32_t> added;
-	std::vector<int32_t> removed;
-	std::set_difference(current.begin(), current.end(),
-			occl_apply_culled_last_.begin(), occl_apply_culled_last_.end(),
-			std::back_inserter(added));
-	std::set_difference(occl_apply_culled_last_.begin(),
-			occl_apply_culled_last_.end(), current.begin(), current.end(),
-			std::back_inserter(removed));
-	occl_apply_culled_last_ = std::move(current);
-	PackedInt32Array out;
-	out.push_back(static_cast<int32_t>(added.size()));
-	for (const int32_t id : added) out.push_back(id);
-	out.push_back(static_cast<int32_t>(removed.size()));
-	for (const int32_t id : removed) out.push_back(id);
-	return out;
+	return culled_changes_since(occlusion_culled_bms_, occl_apply_culled_last_);
 }
 
 float Simulation::sun_quality_factor(int p_quality) const {

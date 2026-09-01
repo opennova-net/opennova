@@ -74,6 +74,9 @@ public:
 	// collector gate the placed rows get by bms id). A culled row's node
 	// hides and skips its presentation legs until the gate releases it.
 	void set_render_culled(int p_handle, bool p_culled);
+	// Forget every render-gate verdict (paired with the sim's applied-state
+	// baseline reset: the next frame re-emits the full set).
+	void clear_render_culled();
 
 	// Cold rows the budget deferred on the last presented frame.
 	int pending_spawn_count() const { return pending_spawn_count_; }

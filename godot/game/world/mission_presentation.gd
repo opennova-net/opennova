@@ -45,6 +45,7 @@ var _destruction_present: DestructionPresentPass  # husk swap + debris + wreck e
 var _throwable_present: ThrowablePresentPass      # flying/placed throwable models
 var _scar_present: ScarPresentPass                # impact-scar rings as textured quads (every viewing peer)
 var _index: EntityIndex
+var _registry_placer: MissionObjectPlacer = null
 var _orig_transforms: Dictionary = {} # node -> Transform3D captured at setup, for restore-on-stop
 var _perf_tick_us: int = 0
 var _perf_sim_us: int = 0
@@ -234,6 +235,7 @@ func setup(mission: MissionData, container: Node,
 	# drives advance_session_frame() explicitly (ADR 0025: the game shell is the only live runtime owner).
 	_index = EntityIndex.new()
 	var registry_placer: MissionObjectPlacer = options.placer
+	_registry_placer = registry_placer
 	_index.build(registry_placer.placed_entity_records if registry_placer != null else [],
 			mission.get_area_triggers() if mission != null else [])
 	# The registry present drives whichever authored mission nodes actually exist. A
@@ -570,7 +572,24 @@ func get_wire_presenter() -> WirePresentPass:
 func rebind_placed_entities(placer: MissionObjectPlacer) -> void:
 	if _index == null or placer == null:
 		return
+	_registry_placer = placer
 	_index.build(placer.placed_entity_records, [])
+
+
+## A joiner's stamped slot vanished or was re-typed: its placed representation
+## (an individual node or a batched static instance) must stop drawing, since
+## the wire pass now owns whatever occupies that slot.
+func _retire_placed_rows() -> void:
+	if _sim == null or not _sim.is_joiner():
+		return
+	var retired: PackedInt32Array = _sim.take_retired_placement_ids()
+	for bms_id in retired:
+		if _index != null:
+			var node: ObjectModel = _index.resolve_single(int(bms_id))
+			if node != null:
+				node.visible = false
+		if _registry_placer != null:
+			_registry_placer.hide_static_instance(int(bms_id))
 
 
 ## The placed-node present applier (the perf probes toggle its output channels
@@ -643,6 +662,7 @@ func _present_entity_rows(stats_on := false) -> void:
 # bundled _perf_present_us the probe scripts read.
 func _present_frame(stats_on: bool) -> void:
 	var present_start := Time.get_ticks_usec()
+	_retire_placed_rows()
 	_present_entity_rows(stats_on)
 	if _fire_present != null:
 		var fire_start := Time.get_ticks_usec() if stats_on else 0

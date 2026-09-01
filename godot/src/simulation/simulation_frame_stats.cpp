@@ -33,13 +33,20 @@ void Simulation::fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outco
 	add(FrameStats::SIM_STEP, frame_sim_us_);
 	add(FrameStats::SIM_SINK, frame_sink_us_);
 	add(FrameStats::SIM_NET, phase.client_decode_us);
-	add(FrameStats::SIM_HOST_PREP, phase.host_prep_us);
-	add(FrameStats::SIM_HOST_PUMP, static_cast<int64_t>(host_session.total_us));
-	add(FrameStats::SIM_HOST_RECEIVE, static_cast<int64_t>(host_session.receive_us));
-	add(FrameStats::SIM_HOST_CONNECTIONS, static_cast<int64_t>(host_session.connections_us));
-	add(FrameStats::SIM_HOST_ADAPTER, static_cast<int64_t>(host_session.adapter_us));
-	add(FrameStats::SIM_SERVER_TICK, static_cast<int64_t>(host_session.server_us));
-	add(FrameStats::SIM_SERVER_INPUT, static_cast<int64_t>(server.input_us));
+	// The host pump and server tick rows exist only where that pump ran; a
+	// joiner or a direct (no-net) tick fills the World update rows alone, so
+	// the residuals under Authoritative server tick never subtract a world
+	// the server tick never contained.
+	const bool authority_pump = listen_server_ || host_listen_;
+	if (authority_pump) {
+		add(FrameStats::SIM_HOST_PREP, phase.host_prep_us);
+		add(FrameStats::SIM_HOST_PUMP, static_cast<int64_t>(host_session.total_us));
+		add(FrameStats::SIM_HOST_RECEIVE, static_cast<int64_t>(host_session.receive_us));
+		add(FrameStats::SIM_HOST_CONNECTIONS, static_cast<int64_t>(host_session.connections_us));
+		add(FrameStats::SIM_HOST_ADAPTER, static_cast<int64_t>(host_session.adapter_us));
+		add(FrameStats::SIM_SERVER_TICK, static_cast<int64_t>(host_session.server_us));
+		add(FrameStats::SIM_SERVER_INPUT, static_cast<int64_t>(server.input_us));
+	}
 	add(FrameStats::SIM_SERVER_WORLD, static_cast<int64_t>(server.world_us));
 	add(FrameStats::SIM_WORLD_SETUP, static_cast<int64_t>(server.world_setup_us));
 	add(FrameStats::SIM_WORLD_SCRIPTS, static_cast<int64_t>(server.world_scripts_us));
@@ -74,6 +81,20 @@ void Simulation::fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outco
 	add(FrameStats::SIM_WORLD_PROJECTILES, static_cast<int64_t>(server.world_projectiles_us));
 	add(FrameStats::SIM_WORLD_DESTRUCTION, static_cast<int64_t>(server.world_destruction_us));
 	add(FrameStats::SIM_WORLD_HOUSEKEEPING, static_cast<int64_t>(server.world_housekeeping_us));
+	if (!authority_pump) {
+		add(FrameStats::SIM_CLIENT_SETUP, static_cast<int64_t>(phase.client.setup_us));
+		add(FrameStats::SIM_CLIENT_RECEIVE, static_cast<int64_t>(phase.client.receive_us));
+		add(FrameStats::SIM_CLIENT_MAINTENANCE, static_cast<int64_t>(phase.client.maintenance_us));
+		add(FrameStats::SIM_CLIENT_SEND, static_cast<int64_t>(phase.client.send_us));
+		add(FrameStats::SIM_CLIENT_MATERIALIZE, static_cast<int64_t>(phase.joiner.materialize_us));
+		add(FrameStats::SIM_CLIENT_MIRROR, static_cast<int64_t>(phase.joiner.mirror_us));
+		add(FrameStats::SIM_CLIENT_PROXIES, static_cast<int64_t>(phase.joiner.proxies_us));
+		add(FrameStats::SIM_CLIENT_WORLD, static_cast<int64_t>(phase.joiner.world_us));
+		add(FrameStats::SIM_CLIENT_ATTACH, static_cast<int64_t>(phase.joiner.attach_us));
+		add(FrameStats::SIM_CLIENT_PLAYER, static_cast<int64_t>(phase.joiner.player_us));
+		add(FrameStats::SIM_ADM_RESOLVE, phase.adm_resolve_us);
+		return;
+	}
 	add(FrameStats::SIM_MATCH, static_cast<int64_t>(server.match_us));
 	add(FrameStats::SIM_SERVER_RULES, static_cast<int64_t>(server.rules_us));
 	add(FrameStats::SIM_SERVER_REPLICATION, static_cast<int64_t>(server.replication_us));

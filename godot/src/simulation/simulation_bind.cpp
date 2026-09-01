@@ -125,6 +125,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_joiner"), &Simulation::is_joiner);
 	ClassDB::bind_method(D_METHOD("get_streamed_placement_records"),
 			&Simulation::get_streamed_placement_records);
+	ClassDB::bind_method(D_METHOD("take_retired_placement_ids"),
+			&Simulation::take_retired_placement_ids);
 	ClassDB::bind_method(D_METHOD("set_join_character_profile", "profile"),
 	                     &Simulation::set_join_character_profile);
 	ClassDB::bind_method(D_METHOD("set_local_character_profile", "profile"),

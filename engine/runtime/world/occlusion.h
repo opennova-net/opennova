@@ -199,8 +199,11 @@ public:
     // bound sphere the caller derived (a decoded wire row: the client-built
     // pool entities retail's collector walks exactly like the host's own).
     // `latch` is that row's persistent latch counter. TRUE = render.
-    // [orig: collect_visible_entities_for_terrain @ 0x5c8c60 — the sphere
-    // view test and the latch @ 0x5c7125-0x5c7162]
+    // [orig: collect_visible_entities_for_terrain @ 0x5c8c60 — the person
+    // leg's view clip @ 0x5c8e21..0x5c8e68 and latch @ 0x5c8e7b..0x5c8eab,
+    // the model leg's @ 0x5c8f86..0x5c8fd6; the statics collector
+    // Terrain_CollectVisibleEntities_0 @ 0x5c6f20 runs the same latch
+    // @ 0x5c7125-0x5c7162]
     bool sphere_render_visible(const CollisionWorld &collision,
                                const OcclusionFrameCamera &cam,
                                const int32_t center_world[3], int32_t radius,

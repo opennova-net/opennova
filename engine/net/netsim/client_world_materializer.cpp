@@ -109,8 +109,9 @@ bool update_live_row_state(
 // @0x5c5d30] — there is no per-role render path. The placed identity stamped
 // here is the shell's key into its one placed/batched presenter, so a joiner's
 // statics draw exactly as the host's do. Kind follows the streamed Flags
-// dword's Building bit (retail's itemDef-type test [orig: Entity_InitFromModel
-// @0x40e105]), pool 3 rows are markers; the order (pool 2, pool 1, pool 3,
+// dword's Building bit (retail sets it for itemDef types 2/5/6 or a
+// model-less entity [orig: Entity_InitFromModel @0x40e0d4..0x40e105]), pool 3
+// rows are markers; the order (pool 2, pool 1, pool 3,
 // slot ascending) is the witnessed initial-state order.
 int ClientWorldMaterializer::assign_placement_origins(world::World &world) {
 	std::vector<uint16_t> handles;
@@ -148,9 +149,18 @@ int ClientWorldMaterializer::assign_placement_origins(world::World &world) {
 		// Nonzero and unique per packed handle; a joiner has no file ids to
 		// collide with (its pool-0 organics and runtime spawns keep 0).
 		entity->bms_id = static_cast<int32_t>(packed) + 1;
+		MaterializedRow &tracked = materialized_rows_[packed];
+		tracked.spawn_origin = entity->spawn_origin;
+		tracked.bms_id = entity->bms_id;
 		++stamped;
 	}
 	return stamped;
+}
+
+std::vector<int32_t> ClientWorldMaterializer::take_retired_placement_ids() {
+	std::vector<int32_t> out;
+	out.swap(retired_placement_ids_);
+	return out;
 }
 
 std::vector<StreamedPlacementRecord> ClientWorldMaterializer::placement_records(
@@ -231,6 +241,8 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 			world.registry.despawn(lifetime);
 			result.retired.push_back(lifetime);
 		}
+		if (it->second.bms_id != 0)
+			retired_placement_ids_.push_back(it->second.bms_id);
 		it = materialized_rows_.erase(it);
 	}
 
@@ -279,10 +291,23 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 		}
 
 		if (world.registry.spawn_at(handle, seed_from(*row)) != handle) continue;
-		const world::Entity *spawned = world.registry.get(handle);
+		world::Entity *spawned = world.registry.get(handle);
 		MaterializedRow &claimed = materialized_rows_[packed];
+		// A same-type re-spawn of a stamped slot (a new wire generation at
+		// the same handle) is the same placed object to the shell: carry the
+		// identity onto the fresh lifetime so its placed node keeps drawing it.
+		const bool keep_identity = claimed.type_id == row->type_id &&
+				claimed.bms_id != 0;
+		const uint32_t keep_origin = claimed.spawn_origin;
+		const int32_t keep_bms = claimed.bms_id;
 		claimed = {row->type_id, row->spawn_revision,
 				spawned != nullptr ? spawned->registry_spawn_id : 0};
+		if (keep_identity && spawned != nullptr) {
+			spawned->spawn_origin = keep_origin;
+			spawned->bms_id = keep_bms;
+			claimed.spawn_origin = keep_origin;
+			claimed.bms_id = keep_bms;
+		}
 		result.spawned.push_back(world::EntityLifetime{
 				handle, claimed.registry_spawn_id});
 	}

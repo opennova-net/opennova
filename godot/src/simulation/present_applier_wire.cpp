@@ -212,8 +212,11 @@ void PresentApplier::set_wire_render_culled(int handle, bool culled) {
 	}
 }
 
+// The render-gate verdict is keyed by the sim's wire handle, not by the
+// node: a node swap (release + rebuild) keeps it, so the replacement body
+// draws gated exactly like the one it replaced. Only the baseline reset
+// (clear_wire_render_culled) forgets verdicts.
 void PresentApplier::release_wire_handle(int handle) {
-	wire_render_culled_.erase(handle);
 	wire_remote_body_.erase(handle);
 	wire_respawn_revisions_.erase(handle);
 	wire_held_weapon_adm_.erase(handle);
@@ -273,6 +276,15 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 		if (model->is_visible()) {
 			model->set_visible(false);
 		}
+		// The held weapon is a sibling node under the pass container, so it
+		// hides through its own leg (retail draws the third-person gun inside
+		// the body's submit; a culled body never draws its gun
+		// [see RenderSlot_RenderEntityAndChildren in the engine's witness map]).
+		update_wire_held_weapon(row, model, snap, false);
+		// A pending remote body blend is entity-update work, not draw work
+		// (retail advances it in AnimMap_UpdateEntity): keep consuming the
+		// tick delta so the blend finishes on schedule while occluded.
+		apply_wire_body_anim(row, model, snap, tick_delta);
 		present_wire_row_body_sounds(row, snap);
 		return;
 	}

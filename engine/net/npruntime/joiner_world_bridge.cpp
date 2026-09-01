@@ -111,47 +111,13 @@ void JoinerWorldBridge::pump(const PumpContext &ctx, const PumpHooks &hooks) {
 	const bool preround_active = ctx.world.preround_delay_seconds != 0;
 	hooks.apply_input_pre_tick(); // input latches stay live through the phase
 	lap(perf != nullptr ? perf->player_us : phase_start);
-	world::LogicTickPerf tick_perf;
+	// run_logic_tick assigns the record it is handed (one tick's phases); the
+	// embedder folds it per tick, so the world record is per tick, not summed.
 	ctx.world.run_logic_tick(
 			/*is_authority=*/false,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay,
-			perf != nullptr ? &tick_perf : nullptr);
-	if (perf != nullptr) {
-		perf->world.setup_us += tick_perf.setup_us;
-		perf->world.scripts_us += tick_perf.scripts_us;
-		perf->world.ai_us += tick_perf.ai_us;
-		perf->world.ai_reactions_us += tick_perf.ai_reactions_us;
-		perf->world.ai_collision_tables_us += tick_perf.ai_collision_tables_us;
-		perf->world.ai_entities_us += tick_perf.ai_entities_us;
-		perf->world.ai_infantry_entities_us += tick_perf.ai_infantry_entities_us;
-		perf->world.ai_infantry_remote_us += tick_perf.ai_infantry_remote_us;
-		perf->world.ai_infantry_combat_us += tick_perf.ai_infantry_combat_us;
-		perf->world.ai_infantry_animation_us += tick_perf.ai_infantry_animation_us;
-		perf->world.ai_infantry_collision_us += tick_perf.ai_infantry_collision_us;
-		perf->world.ai_infantry_collision_contacts_us +=
-				tick_perf.ai_infantry_collision_contacts_us;
-		perf->world.ai_infantry_collision_repulsion_us +=
-				tick_perf.ai_infantry_collision_repulsion_us;
-		perf->world.ai_infantry_collision_ground_us +=
-				tick_perf.ai_infantry_collision_ground_us;
-		perf->world.ai_other_entities_us += tick_perf.ai_other_entities_us;
-		perf->world.ai_authority_vehicles_us += tick_perf.ai_authority_vehicles_us;
-		perf->world.ai_vehicle_scan_us += tick_perf.ai_vehicle_scan_us;
-		perf->world.ai_vehicle_motors_us += tick_perf.ai_vehicle_motors_us;
-		perf->world.ai_vehicle_riders_us += tick_perf.ai_vehicle_riders_us;
-		perf->world.ai_client_vehicles_us += tick_perf.ai_client_vehicles_us;
-		perf->world.ai_events_us += tick_perf.ai_events_us;
-		perf->world.attachments_us += tick_perf.attachments_us;
-		perf->world.attachment_orphans_us += tick_perf.attachment_orphans_us;
-		perf->world.attachment_child_pose_us += tick_perf.attachment_child_pose_us;
-		perf->world.attachment_riders_us += tick_perf.attachment_riders_us;
-		perf->world.throwables_us += tick_perf.throwables_us;
-		perf->world.weapons_us += tick_perf.weapons_us;
-		perf->world.projectiles_us += tick_perf.projectiles_us;
-		perf->world.destruction_us += tick_perf.destruction_us;
-		perf->world.housekeeping_us += tick_perf.housekeeping_us;
-	}
+			perf != nullptr ? &perf->world : nullptr);
 	lap(perf != nullptr ? perf->world_us : phase_start);
 	if (!preround_active)
 		mirror_predicted_vehicles(ctx); // predicted boat poses -> presented rows
@@ -1339,6 +1305,9 @@ void JoinerWorldBridge::reset_for_join() {
 	diagnostic_sampled_ = false;
 	flat_seconds_ = 0;
 	freeze_suspected_ = false;
+	replica_peer_scratch_src_ = nullptr;
+	replica_peer_scratch_count_ = 0;
+	replica_peer_scratch_tick_ = 0;
 }
 
 void JoinerWorldBridge::reset_materialization() {

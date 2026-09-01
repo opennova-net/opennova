@@ -1510,6 +1510,9 @@ private:
     struct CandidateSlice {
         int32_t start = 0;
         int32_t count = 0;
+        // The source position the slice was built at (wire slices only): a
+        // row that has moved past its pad since then needs a fresh build.
+        int32_t built_pos[3] = {0, 0, 0};
     };
     struct StableLosCandidate {
         EntityHandle h;
