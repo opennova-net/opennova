@@ -98,6 +98,8 @@ func _seed_player_options() -> void:
 		var id := _driver.widget_id(control_name)
 		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_SPINLIST:
 			_driver.select_row(id, state.crosshair_style, false)
+	_select_color_row("XHAIR_COLOR", state.crosshair_color)
+	_set_checked("XHAIR_SPREAD", state.crosshair_spread)
 
 
 func _seed_scroll(control_name: String, value: int) -> void:
@@ -111,8 +113,6 @@ func _seed_scroll(control_name: String, value: int) -> void:
 
 
 func _lock_unsupported_controls() -> void:
-	_select_row("XHAIR_COLOR", 0)
-	_set_checked("XHAIR_SPREAD", true)
 	_set_checked("OPTIONS_AUTORELOAD", true)
 	_set_checked("OPTIONS_AUTOMEDIC", true)
 	_set_checked("WDM_AUDIO_2", true)
@@ -123,16 +123,29 @@ func _lock_unsupported_controls() -> void:
 		var id := _driver.widget_id(control_name)
 		if id >= 0:
 			_driver.set_widget_disabled(id, true)
-	for control_name in ["XHAIR_COLOR", "XHAIR_SPREAD"]:
-		var id := _driver.widget_id(control_name)
-		if id >= 0:
-			_driver.set_widget_disabled(id, true)
 
 
 func _select_row(control_name: String, row: int) -> void:
 	var id := _driver.widget_id(control_name)
 	if id >= 0 and _driver.item_count(id) > 0:
 		_driver.select_row(id, clampi(row, 0, _driver.item_count(id) - 1), false)
+
+
+# Retail seeds the colour spinlist BY VALUE: the selected row is the one whose
+# authored item `value=` attribute equals the persisted RGB (the shipped rows
+# author the decimal RGB there), and a miss selects row 0 — the
+# SpinList_SelectItemByValue contract (docs/mnu/menu-re.md, "The in-game
+# options dialog").
+func _select_color_row(control_name: String, rgb: int) -> void:
+	var id := _driver.widget_id(control_name)
+	if id < 0 or _driver.widget_kind_of(id) != MnuDocument.TYPE_SPINLIST \
+			or _driver.item_count(id) <= 0:
+		return
+	for row in _driver.item_count(id):
+		if int(_driver.item_value(id, row)) == rgb:
+			_driver.select_row(id, row, false)
+			return
+	_driver.select_row(id, 0, false)
 
 
 func _set_checked(control_name: String, checked: bool) -> void:
@@ -167,6 +180,14 @@ func _on_widget_value_changed(widget_name: String, kind: String,
 		"XHAIR_APPEARANCE":
 			if kind != "spinlist": return
 			state.crosshair_style = index
+		"XHAIR_COLOR":
+			# Retail persists the selected item's `value=` attribute (the
+			# decimal RGB the shipped rows author), not the row index or the
+			# display text.
+			if kind != "spinlist": return
+			var color_id := _driver.widget_id("XHAIR_COLOR")
+			if color_id < 0: return
+			state.crosshair_color = int(_driver.item_value(color_id, index))
 		_:
 			return
 	_options.update(state)
@@ -177,6 +198,10 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 		"INVERT_MOUSE":
 			var state := _options.current()
 			state.invert_mouse = _driver.is_widget_checked(id)
+			_options.update(state)
+		"XHAIR_SPREAD":
+			var state := _options.current()
+			state.crosshair_spread = _driver.is_widget_checked(id)
 			_options.update(state)
 		"KEYBOARD":
 			if _has_control_table:

@@ -518,6 +518,26 @@ func test_crosshair_style_clamps_and_reloads_live() -> void:
 		"Changing style live-reloads the differently sized selected texture.")
 
 
+func test_crosshair_color_and_spread_survive_configure() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), PackedStringArray(["cross01.tga"]))
+	var hud := _make_overlay()
+	# Set before configure(): both are picked up like the style.
+	hud.set_crosshair_color(0x123456)
+	hud.set_crosshair_spread_enabled(false)
+	hud.configure(fixture["layout"], fixture["root"])
+	assert_eq(hud.get_crosshair_color(), 0x123456,
+			"the pre-configure colour survives the layout rebuild")
+	assert_false(hud.is_crosshair_spread_enabled(),
+			"the pre-configure spread toggle survives the layout rebuild")
+	# Live sets: the colour masks to its 24-bit RGB (retail persists RGB).
+	hud.set_crosshair_color(0x7F00FF00)
+	assert_eq(hud.get_crosshair_color(), 0x00FF00)
+	hud.set_crosshair_spread_enabled(true)
+	assert_true(hud.is_crosshair_spread_enabled())
+
+
 func test_message_feed_draws_and_expires() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"fonthud1_hi Gunpl22b.fnt",

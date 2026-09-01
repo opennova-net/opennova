@@ -194,6 +194,12 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_configured"), &HudOverlay::is_configured);
 	ClassDB::bind_method(D_METHOD("set_crosshair_style", "style"), &HudOverlay::set_crosshair_style);
 	ClassDB::bind_method(D_METHOD("get_crosshair_style"), &HudOverlay::get_crosshair_style);
+	ClassDB::bind_method(D_METHOD("set_crosshair_color", "rgb"), &HudOverlay::set_crosshair_color);
+	ClassDB::bind_method(D_METHOD("get_crosshair_color"), &HudOverlay::get_crosshair_color);
+	ClassDB::bind_method(D_METHOD("set_crosshair_spread_enabled", "enabled"),
+			&HudOverlay::set_crosshair_spread_enabled);
+	ClassDB::bind_method(D_METHOD("is_crosshair_spread_enabled"),
+			&HudOverlay::is_crosshair_spread_enabled);
 	ClassDB::bind_method(D_METHOD("set_weapon", "weapon_name", "display_name", "round_type",
 								  "clipsize", "rounds_per_icon", "clipgfx_texture", "clipgfx_offset",
 								  "rndgfx_texture", "rndgfx_offset", "rndgfx_step"),
@@ -691,6 +697,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.stance_frame0_h = frame0.is_valid() ? frame0->get_height() : 0;
 
 	load_crosshair_texture_();
+	apply_crosshair_options_();
 	// Retail uploads the strip at its authored resolution with its full
 	// box-filtered mip chain; the default spinmap badges then sample near the
 	// 16px level. A mipless upload aliases the source into a visibly broken
@@ -751,6 +758,41 @@ void HudOverlay::set_crosshair_style(int p_style) {
 
 int HudOverlay::get_crosshair_style() const {
 	return crosshair_style_;
+}
+
+void HudOverlay::set_crosshair_color(int p_rgb) {
+	crosshair_color_ = static_cast<uint32_t>(p_rgb) & 0xFFFFFFu;
+	if (!configured_) {
+		return; // picked up by configure()
+	}
+	apply_crosshair_options_();
+	compiler_.update_layout(layout_);
+	queue_redraw();
+}
+
+int HudOverlay::get_crosshair_color() const {
+	return static_cast<int>(crosshair_color_);
+}
+
+void HudOverlay::set_crosshair_spread_enabled(bool p_enabled) {
+	crosshair_spread_enabled_ = p_enabled;
+	if (!configured_) {
+		return; // picked up by configure()
+	}
+	apply_crosshair_options_();
+	compiler_.update_layout(layout_);
+	queue_redraw();
+}
+
+bool HudOverlay::is_crosshair_spread_enabled() const {
+	return crosshair_spread_enabled_;
+}
+
+void HudOverlay::apply_crosshair_options_() {
+	// The stored RGB forced opaque; the semantics and defaults live on the
+	// engine layout fields (hud_frame.h).
+	layout_.crosshair_color = 0xFF000000u | crosshair_color_;
+	layout_.crosshair_spread_enabled = crosshair_spread_enabled_;
 }
 
 void HudOverlay::set_weapon(const String &p_weapon_name, const String &p_display_name,

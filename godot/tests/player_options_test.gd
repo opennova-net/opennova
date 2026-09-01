@@ -49,6 +49,9 @@ func test_defaults_and_current_snapshot_are_detached() -> void:
 	assert_eq(state.mouse_sensitivity, 128)
 	assert_false(state.invert_mouse)
 	assert_eq(state.crosshair_style, 0)
+	assert_eq(state.crosshair_color, 0xFFFFFF,
+			"the retail default crosshair colour is white")
+	assert_true(state.crosshair_spread, "the retail default spread is on")
 
 	state.sound_fx_volume = 12
 	state.crosshair_style = 9
@@ -73,6 +76,8 @@ func test_update_clamps_persists_together_and_preserves_other_sections() -> void
 	state.mouse_sensitivity = 0
 	state.invert_mouse = true
 	state.crosshair_style = 99
+	state.crosshair_color = 0x1FF8040
+	state.crosshair_spread = false
 	options.update(state)
 
 	var current := options.current()
@@ -82,6 +87,9 @@ func test_update_clamps_persists_together_and_preserves_other_sections() -> void
 	assert_eq(current.mouse_sensitivity, 4)
 	assert_true(current.invert_mouse)
 	assert_eq(current.crosshair_style, 24)
+	assert_eq(current.crosshair_color, 0xFF8040,
+			"the colour normalizes to its 24-bit RGB")
+	assert_false(current.crosshair_spread)
 	assert_eq(emitted.size(), 1, "one atomic update publishes one state")
 	assert_eq(emitted[0].crosshair_style, 24)
 
@@ -93,6 +101,8 @@ func test_update_clamps_persists_together_and_preserves_other_sections() -> void
 	assert_eq(int(config.get_value("controls", "mouse_sensitivity", -1)), 4)
 	assert_true(bool(config.get_value("controls", "invert_mouse", false)))
 	assert_eq(int(config.get_value("player", "crosshair_style", -1)), 24)
+	assert_eq(int(config.get_value("player", "crosshair_color", -1)), 0xFF8040)
+	assert_false(bool(config.get_value("player", "crosshair_spread", true)))
 	assert_eq(String(config.get_value("resources", "resource_dir", "")),
 			"C:/Games/Joint Operations",
 			"the options transaction preserves unrelated runtime settings")
@@ -106,6 +116,7 @@ func test_load_normalizes_corrupt_persisted_values() -> void:
 	config.set_value("controls", "mouse_sensitivity", 900)
 	config.set_value("controls", "invert_mouse", true)
 	config.set_value("player", "crosshair_style", -7)
+	config.set_value("player", "crosshair_color", 0x7F123456)
 	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
 
 	var state := PlayerOptions.new().current()
@@ -115,6 +126,8 @@ func test_load_normalizes_corrupt_persisted_values() -> void:
 	assert_eq(state.mouse_sensitivity, 511)
 	assert_true(state.invert_mouse)
 	assert_eq(state.crosshair_style, 0)
+	assert_eq(state.crosshair_color, 0x123456,
+			"an out-of-range colour masks down to its RGB")
 
 
 func test_update_maps_each_audio_option_to_its_runtime_buses() -> void:
