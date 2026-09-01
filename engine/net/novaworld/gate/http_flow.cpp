@@ -27,8 +27,8 @@ std::string to_string_body(const std::vector<uint8_t> &body) {
 	return body.empty() ? std::string() : std::string(reinterpret_cast<const char *>(body.data()), body.size());
 }
 
-// Retail failures are rendered as jop_2_msg.htm rather than as HTTP errors.
-std::string extract_legacy_message(const std::vector<uint8_t> &body) {
+// Extract the message rendered in NovaWorld's message template.
+std::string extract_message(const std::vector<uint8_t> &body) {
 	const std::string html = to_string_body(body);
 	if (html.empty()) return std::string();
 	const std::string lower = to_lower(html);
@@ -259,7 +259,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 	const LoginStep step = login_step_;
 	if (!transport_ok || code != 200) {
 		login_step_ = LoginStep::Idle;
-		const std::string message = extract_legacy_message(body);
+		const std::string message = extract_message(body);
 		if (!message.empty()) return login_fail(message);
 		return login_fail("login HTTP failed (code " + std::to_string(code) + ")");
 	}
@@ -301,7 +301,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 			const std::string *tag = jar_.find("LOGINSESSIONTAG");
 			if (tag == nullptr || tag->empty()) {
 				login_step_ = LoginStep::Idle;
-				const std::string message = extract_legacy_message(body);
+				const std::string message = extract_message(body);
 				if (!message.empty()) return login_fail(message);
 				return login_fail("login rejected (no session tag)");
 			}
@@ -325,7 +325,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				r.pcid = (pc && !pc->empty()) ? *pc : std::string();
 				return r;
 			}
-			const std::string message = extract_legacy_message(body);
+			const std::string message = extract_message(body);
 			if (!message.empty()) {
 				login_step_ = LoginStep::Idle;
 				return login_fail(message);
@@ -402,7 +402,7 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 	const JoinStep step = join_step_;
 	if (!transport_ok || code != 200) {
 		join_step_ = JoinStep::Idle;
-		const std::string message = extract_legacy_message(body);
+		const std::string message = extract_message(body);
 		if (!message.empty()) return join_fail(message);
 		return join_fail("join HTTP failed (code " + std::to_string(code) + ")");
 	}
@@ -424,7 +424,7 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			join_step_ = JoinStep::Idle;
 			const JoiConnection conn = parse_joi_connection_string(to_string_body(body));
 			if (!conn.ok) {
-				const std::string message = extract_legacy_message(body);
+				const std::string message = extract_message(body);
 				if (!message.empty()) return join_fail(message);
 				return join_fail("join: no connection string in .joi");
 			}

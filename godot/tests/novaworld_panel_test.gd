@@ -3,7 +3,7 @@ extends GutTest
 # Guards the NovaWorld panel's host Map picker + the host_failed feedback inlet — the fix for the
 # "stuck on Starting a NovaWorld host..." bug (the host request used to carry no map and the panel
 # had no failure channel). The authored scene is instantiated with client startup disabled, and the
-# NovaWorldClient is disabled on the authored scene — no gate/HTTP side effects in the unit.
+# NovaWorldClient remains unstarted on the authored scene — no gate/HTTP side effects in the unit.
 
 const NovaWorldPanel := preload("res://game/novaworld_panel.gd")
 const PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
@@ -62,17 +62,18 @@ func test_server_browser_is_gated_until_login_succeeds() -> void:
 	var panel := _make_panel(PackedStringArray())
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.CONNECTING)
 	assert_false(panel.browser_visible(), "games are hidden while the service connects")
-	panel._on_connected()
+	panel.client_for_test().emit_signal("connected")
 	assert_true(panel.login_visible(), "a verified session advances to Sign In")
 	assert_false(panel.browser_visible(), "connecting is not enough to reveal games")
-	panel._on_login_succeeded("ljim")
+	panel.client_for_test().emit_signal("login_succeeded", "ljim")
 	assert_true(panel.browser_visible(), "only a successful account login reveals games")
 
 
 func test_login_failure_uses_novaworld_message_screen() -> void:
 	var panel := _make_panel(PackedStringArray())
-	panel._on_connected()
-	panel._on_login_failed("The account name or password is incorrect.")
+	panel.client_for_test().emit_signal("connected")
+	panel.client_for_test().emit_signal(
+			"login_failed", "The account name or password is incorrect.")
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
 	assert_eq(panel.message_text(), "The account name or password is incorrect.")
 	assert_false(panel.browser_visible(), "an authentication error cannot leak the browser")
@@ -80,8 +81,8 @@ func test_login_failure_uses_novaworld_message_screen() -> void:
 
 func test_empty_and_filtered_states_are_not_fake_server_rows() -> void:
 	var panel := _make_panel(PackedStringArray())
-	panel._on_connected()
-	panel._on_login_succeeded("ljim")
+	panel.client_for_test().emit_signal("connected")
+	panel.client_for_test().emit_signal("login_succeeded", "ljim")
 	panel.set_rows_for_test([])
 	assert_eq(panel.server_item_count(), 0, "empty state adds no selectable server")
 	panel.set_rows_for_test(_browser_rows())

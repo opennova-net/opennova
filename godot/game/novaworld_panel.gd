@@ -111,8 +111,7 @@ func _ready() -> void:
 		# Kept for compatibility with any code constructing the script directly.
 		_build_ui()
 	_set_screen(Screen.CONNECTING)
-	if start_client_on_ready:
-		_create_client()
+	_create_client(start_client_on_ready)
 
 
 func _bind_scene_ui() -> void:
@@ -414,7 +413,7 @@ func _update_column_titles() -> void:
 		_server_tree.set_column_title(column, COLUMN_TITLES[column] + suffix)
 
 
-func _create_client() -> void:
+func _create_client(start_now: bool = true) -> void:
 	_client = NovaWorldClient.new()
 	add_child(_client)
 	_client.host = _resolved_host()
@@ -431,7 +430,8 @@ func _create_client() -> void:
 	_client.login_failed.connect(_on_login_failed)
 	_client.join_failed.connect(_on_join_failed)
 	_client.joined_game.connect(_on_joined_game)
-	_client.start()
+	if start_now:
+		_client.start()
 
 
 # OpenNova uses the configured/injected server_host (dev: localhost). "Original
@@ -1060,6 +1060,12 @@ func _populate_missions() -> void:
 
 
 # --- Typed seams (tests drive the panel off-tree through these) -------------
+
+## The wired client event source. Tests leave it unstarted and emit signals
+## through the same boundary used by the live client.
+func client_for_test() -> NovaWorldClient:
+	return _client
+
 
 ## Build the panel's UI for `target` without entering the tree (no client).
 func build_ui_for_target(target: int) -> void:
