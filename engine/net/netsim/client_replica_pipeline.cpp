@@ -1161,7 +1161,10 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	// tables cannot see ClientState rows). The dead-peer skip is the
 	// witnessed +36&2 gate [orig: @0x4b3b8d]; bit-0 rows are frozen
 	// carried-object/not-ready placeholders and sit out as our analogue.
-	std::vector<ReplicaPeerSphere> contact_peers;
+	// Pipeline-owned scratch: this table is rebuilt every 62.5 Hz tick, so a
+	// fresh heap vector per tick was pure allocator churn.
+	std::vector<ReplicaPeerSphere> &contact_peers = contact_peer_scratch_;
+	contact_peers.clear();
 	if (replica_contact_resolver_) {
 		contact_peers.reserve(state_.entities.size());
 		for (const ClientEntityState &pe : state_.entities) {
