@@ -1459,9 +1459,21 @@ func test_ingame_abort_raises_confirm_and_only_yes_returns() -> void:
 
 # ABORT's authored action list, through the driver's public action executor
 # (dispatch_action_row hands it lower-cased states).
+# ABORT's AUTHORED action rows raise the panel: read off the document and
+# dispatched through the driver's own executor, so the pin is on game.mnu's
+# SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER, never on literals a test typed.
 func _raise_confirm(driver: MenuDriver) -> void:
-	assert_true(driver.handle_window_action("CONFIRM_EXIT", "show"))
-	assert_true(driver.handle_window_action("MAIN_WRAPPER", "hide"))
+	var rows: Array = driver.widget_actions(driver.widget_id("ABORT"))
+	var shape: Array[String] = []
+	for row: Dictionary in rows:
+		shape.append("%s %s %s" % [String(row.get("type", "")).to_lower(),
+				String(row.get("target", "")).to_upper(),
+				String(row.get("state", "")).to_lower()])
+	assert_eq(shape, ["window CONFIRM_EXIT show", "window MAIN_WRAPPER hide"],
+			"game.mnu's ABORT authors SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER")
+	for row: Dictionary in rows:
+		assert_true(driver.dispatch_action_row(row),
+				"the authored %s row dispatches" % String(row.get("target", "")))
 
 
 func _pause_key(keycode: Key) -> InputEventKey:

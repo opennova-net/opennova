@@ -176,19 +176,13 @@ static func _normalized(state: State) -> State:
 			state.crosshair_spread)
 
 
-## The engine's witnessed range for an Options slider, by control name.
-static func scroll_range_of(control: String) -> Dictionary:
+# Clamp to the engine's witnessed range for an Options slider, by control
+# name (a control the engine does not range passes through).
+static func _clamp_to_control(value: int, control: String) -> int:
 	for range: Dictionary in MenuFrame.options_scroll_ranges():
 		if String(range["control"]) == control:
-			return range
-	return {}
-
-
-static func _clamp_to_control(value: int, control: String) -> int:
-	var range := scroll_range_of(control)
-	if range.is_empty():
-		return value
-	return clampi(value, int(range["minimum"]), int(range["maximum"]))
+			return clampi(value, int(range["minimum"]), int(range["maximum"]))
+	return value
 
 
 static func _set_bus_volume(bus_name: StringName, volume: int) -> void:

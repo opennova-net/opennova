@@ -117,7 +117,7 @@ void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	ImGui::Text("(%.2f s)", static_cast<float>(ttl_edit_) / 62.0f);
 
 	if (ImGui::SmallButton("All")) {
-		mask_edit_ = 0x7FFF;
+		mask_edit_ = kRayCategoryMaskAll;
 		enqueue_request({RaysRequest::Kind::SetCategoryMask,
 				static_cast<int32_t>(mask_edit_)});
 	}

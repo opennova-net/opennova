@@ -59,8 +59,10 @@ std::string to_upper(const std::string &s) {
   return result;
 }
 
-// The '&' hotkey marker strip a button label goes through when it is set
-// [orig: CButtonWnd_SetLabel @ 0x6572F0].
+// The "{hot}" marker strip a button label goes through when it is set: the
+// FIRST marker only, found case-sensitively (strstr — "{HOT}" stays literal),
+// its byte offset reported so the byte that followed it becomes the button's
+// accelerator [orig: CButtonWnd_SetLabel @ 0x6572F0, strstr @ 0x657451].
 std::string strip_hotkey(const std::string &text, int &hotkey_index) {
   size_t pos = text.find(HOTKEY_MARKER);
   if (pos == std::string::npos) {
