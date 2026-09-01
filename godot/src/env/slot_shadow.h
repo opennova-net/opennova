@@ -11,9 +11,11 @@
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_vector4_array.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/rid.hpp>
 
+#include <array>
 #include <vector>
 
 #include <runtime/renderer/render_slot_shadow.h>
@@ -107,6 +109,14 @@ public:
 	// F3 Stats capture toggle for the capture pass's RD GPU span (see
 	// SlotCaptureCompositorEffect::set_gpu_timing_enabled).
 	void set_gpu_timing_enabled(bool p_enabled);
+	// Membership/derived-fact revision for the caster registry: ObjectModel
+	// bumps it from every site that can change the group population or a
+	// cached per-caster fact (group add/remove incl. husk swap, capture-with,
+	// person, decal, radius stamps, reparenting). The frame rebuilds its
+	// records only when this moved; a freed node self-heals through its null
+	// ObjectDB resolve. Main-thread only.
+	static uint64_t caster_group_revision();
+	static void bump_caster_group_revision();
 	Dictionary get_report() const;
 
 	// Inspection seams (the F3 sampler and the GUT pins): the bitmask of
@@ -135,7 +145,26 @@ private:
 		// depth clip size from [orig: RenderSlot_RenderEntityAndChildren
 		// @0x5d7835 reads the model's +0x14, not entity+0].
 		float capture_radius = 1.0f;
+		// Cached facts carried over from the caster record (rebuilt on the
+		// group revision, not per frame).
+		bool has_blob_texture = false;
+		const String *decal_texture = nullptr;
 	};
+	// The registry row behind CasterInfo: identity plus the derived values a
+	// frame used to re-read from the node every frame. An unstamped model
+	// (radius_fallback) keeps reading its live render bounds per frame — the
+	// preview/test path — so only stamped facts cache.
+	struct CasterRecord {
+		ObjectID id;
+		float capture_radius = 0.0f;
+		float slot_radius = 0.0f;
+		bool radius_fallback = false;
+		bool is_person = false;
+		bool has_blob_texture = false;
+		bool seat_parented_ancestor = false;
+		String decal_texture;
+	};
+	void _rebuild_caster_records();
 
 	void _ensure_captures();
 	void _release_captures();
@@ -172,6 +201,32 @@ private:
 	uint32_t armed_capture_mask_ = 0;
 	// The casters registered with the plan (released on churn).
 	HashSet<uint64_t> registered_ids_;
+	std::vector<CasterRecord> caster_records_;
+	uint64_t caster_records_revision_ = 0;
+	bool caster_records_valid_ = false;
+	// Reused frame scratch (cleared, capacity retained).
+	std::vector<CasterInfo> casters_scratch_;
+	HashMap<uint64_t, size_t> caster_index_scratch_;
+	// Last-pushed uniform payloads: identical-value pushes are elided (the
+	// materials retain them), the T1 material-gating precedent. The drape
+	// material is process-shared, so these stamps assume one live SlotShadow
+	// writes it — true of the game world; a second instance would only cause
+	// re-pushes, never a wrong value, because stamps start invalid.
+	PackedVector4Array last_silhouette_terms_;
+	PackedVector4Array last_silhouette_patches_;
+	PackedVector4Array last_clip_u_;
+	PackedVector4Array last_clip_v_;
+	PackedVector4Array last_blob_terms_;
+	PackedVector4Array last_blob_patches_;
+	struct SlotParamStamp {
+		bool valid = false;
+		Projection mat;
+		uint64_t tex_id = 0;
+	};
+	std::array<SlotParamStamp, opennova::renderer::kSlotCaptureCount>
+			drape_mat_stamps_{};
+	std::array<SlotParamStamp, opennova::renderer::kSlotCaptureCount>
+			blob_stamps_{};
 	HashMap<String, Ref<Texture2D>> blob_textures_;
 	// The per-slot dominant-light query buffer (reused across frames).
 	std::vector<opennova::renderer::SlotPointLight> slot_lights_;

@@ -499,6 +499,16 @@ void SlotShadow::_clear_all_terms() {
 	}();
 	get_drape_material()->set_shader_parameter("u_slot_term", zero);
 	blob_material_->set_shader_parameter("u_slot_term", zero);
+	// This direct write bypasses the frame's identical-value elision, so the
+	// stamps must forget what they think is resident.
+	last_silhouette_terms_ = PackedVector4Array();
+	last_silhouette_patches_ = PackedVector4Array();
+	last_clip_u_ = PackedVector4Array();
+	last_clip_v_ = PackedVector4Array();
+	last_blob_terms_ = PackedVector4Array();
+	last_blob_patches_ = PackedVector4Array();
+	drape_mat_stamps_.fill(SlotParamStamp{});
+	blob_stamps_.fill(SlotParamStamp{});
 }
 
 Ref<Texture2D> SlotShadow::_blob_texture(const String &p_name) {
@@ -597,24 +607,52 @@ void SlotShadow::advance_frame() {
 			viewport != nullptr ? viewport->get_camera_3d() : nullptr;
 	const bool live = env != nullptr && env->is_loaded() &&
 			camera != nullptr && shadow_detail_ > 0;
-	// Gather the caster group.
-	std::vector<CasterInfo> casters;
-	HashMap<uint64_t, size_t> caster_index;
+	// The caster registry replaces the per-frame get_nodes_in_group walk:
+	// records rebuild only when the group revision moved (every membership or
+	// cached-fact mutation site bumps it), and a freed node self-heals here
+	// through its null ObjectDB resolve.
+	std::vector<CasterInfo> &casters = casters_scratch_;
+	HashMap<uint64_t, size_t> &caster_index = caster_index_scratch_;
+	casters.clear();
+	caster_index.clear();
 	if (live) {
-		TypedArray<Node> nodes =
-				get_tree()->get_nodes_in_group(caster_group());
-		casters.reserve(static_cast<size_t>(nodes.size()));
-		for (int64_t i = 0; i < nodes.size(); ++i) {
+		if (!caster_records_valid_ ||
+				caster_records_revision_ != caster_group_revision()) {
+			_rebuild_caster_records();
+		}
+		casters.reserve(caster_records_.size());
+		bool pruned = false;
+		for (const CasterRecord &record : caster_records_) {
 			ObjectModel *model = Object::cast_to<ObjectModel>(
-					static_cast<Object *>(nodes[i]));
-			if (model == nullptr || !model->is_inside_tree()) {
+					ObjectDB::get_instance(record.id));
+			if (model == nullptr) {
+				pruned = true;
+				continue;
+			}
+			if (!model->is_inside_tree()) {
 				continue;
 			}
 			CasterInfo info;
 			info.model = model;
+			info.capture_radius = record.capture_radius;
+			info.state.bound_radius = record.slot_radius;
+			if (record.radius_fallback) {
+				// Unstamped models (previews/tests) keep the live-bounds
+				// derivation the per-frame walk used.
+				const AABB bounds = model->get_world_bounds();
+				info.capture_radius =
+						MAX(0.5f, float(bounds.size.length()) * 0.5f);
+				info.state.bound_radius = info.capture_radius;
+			}
+			info.state.is_person = record.is_person;
+			info.has_blob_texture = record.has_blob_texture;
+			info.decal_texture = &record.decal_texture;
+			info.state.seat_parented = record.seat_parented_ancestor;
 			casters.push_back(info);
-			caster_index[uint64_t(model->get_instance_id())] =
-					casters.size() - 1;
+			caster_index[uint64_t(record.id)] = casters.size() - 1;
+		}
+		if (pruned) {
+			caster_records_valid_ = false;
 		}
 	}
 
@@ -654,7 +692,11 @@ void SlotShadow::advance_frame() {
 	const Vector3 sky_rgb = env->get_sky_ambient();
 
 	// Build per-caster planner state. capture_links collects (child, parent)
-	// for models linked capture-with another caster.
+	// for models linked capture-with another caster. The stamped radii, the
+	// person flag, the decal fact, and the ancestor half of seat_parented
+	// come off the registry record (their mutation sites bump the group
+	// revision); only the live per-frame facts — position, visibility, the
+	// capture-with link — read the node here.
 	std::vector<std::pair<uint64_t, uint64_t>> capture_links;
 	for (CasterInfo &info : casters) {
 		ObjectModel *model = info.model;
@@ -662,52 +704,23 @@ void SlotShadow::advance_frame() {
 		plan_.register_entity(id);
 		registered_ids_.insert(id);
 		const Vector3 pos = model->get_global_position();
-		// The two radii the slot reads: the model sphere (gpm[5]) sizes the
-		// capture extent and the depth clip; the entity bound (entity+0 —
-		// the sphere raised to the husk's, + 0x1000, and 0 without a
-		// collision block) sizes the lod/patch and the light query [orig:
-		// RenderSlot_RenderEntityAndChildren @0x5d7835 reads the model's
-		// +0x14; RenderSlot_AllocSlot @0x5d5773 and the light query read
-		// entity+0, Entity_InitFromModel @0x40dc30]. A model the placer did
-		// not stamp falls back to half its render-bounds diagonal for both.
-		float capture_radius = model->get_model_sphere_radius();
-		float slot_radius = model->get_entity_bound_radius();
-		if (capture_radius <= 0.0f) {
-			const AABB bounds = model->get_world_bounds();
-			capture_radius = MAX(0.5f, float(bounds.size.length()) * 0.5f);
-			slot_radius = capture_radius;
-		}
-		info.capture_radius = capture_radius;
 		opennova::renderer::SlotCandidateState &state = info.state;
 		state.pos2d = {float(pos.x), float(pos.z)};
-		state.bound_radius = slot_radius;
 		state.dead = !model->is_visible_in_tree();
 		// A caster parented under another caster renders with its parent in
 		// retail (the seat/standing child walk of the parent's slot RT);
 		// its own slot is excluded.
 		ObjectModel *capture_with = model->get_slot_shadow_capture_with();
-		state.seat_parented = capture_with != nullptr;
 		if (capture_with != nullptr) {
+			state.seat_parented = true;
 			capture_links.push_back(
 					{ id, uint64_t(capture_with->get_instance_id()) });
-		}
-		for (Node *ancestor = model->get_parent();
-				!state.seat_parented && ancestor != nullptr;
-				ancestor = ancestor->get_parent()) {
-			ObjectModel *parent_model = Object::cast_to<ObjectModel>(ancestor);
-			if (parent_model != nullptr &&
-					parent_model->is_in_group(caster_group())) {
-				state.seat_parented = true;
-				break;
-			}
 		}
 		state.on_vehicle = false;
 		state.is_local_player_or_parent = id == local_id;
 		state.interior = false;
 		state.dynamic = true;
-		state.is_person = model->is_slot_shadow_person();
-		state.has_blob_texture =
-				!model->get_slot_shadow_decal_texture().is_empty();
+		state.has_blob_texture = info.has_blob_texture;
 	}
 
 	const Vector3 cam_pos = camera->get_global_position();
@@ -864,7 +877,7 @@ void SlotShadow::advance_frame() {
 				// w x l with the authored UV offset [orig: the blob drape
 				// @0x5d59d0 — 1/w 1/l UV scale, offset + 0.5 UV center].
 				const Ref<Texture2D> texture = _blob_texture(
-						model->get_slot_shadow_decal_texture());
+						*info.decal_texture);
 				if (texture.is_valid()) {
 					const Vector4 dims = model->get_slot_shadow_decal_dims();
 					const float w = MAX(dims.x, 0.25f);
@@ -882,12 +895,21 @@ void SlotShadow::advance_frame() {
 							yaw.xform(Vector3(dims.z * w, 0.0f, dims.w * l)) +
 							Vector3(0.0f, 100.0f, 0.0f);
 					const int slot = blob_cursor++;
-					blob_material_->set_shader_parameter(
-							slot_uniforms().tex[slot], texture);
-					blob_material_->set_shader_parameter(
-							slot_uniforms().mat[slot],
-							_drape_projection(projector, w * 0.5f, l * 0.5f,
-									200.0f));
+					const Projection blob_mat = _drape_projection(projector,
+							w * 0.5f, l * 0.5f, 200.0f);
+					SlotParamStamp &blob_stamp = blob_stamps_[slot];
+					const uint64_t tex_id = texture->get_instance_id();
+					if (!blob_stamp.valid || blob_stamp.tex_id != tex_id) {
+						blob_material_->set_shader_parameter(
+								slot_uniforms().tex[slot], texture);
+					}
+					if (!blob_stamp.valid || blob_stamp.mat != blob_mat) {
+						blob_material_->set_shader_parameter(
+								slot_uniforms().mat[slot], blob_mat);
+					}
+					blob_stamp.valid = true;
+					blob_stamp.tex_id = tex_id;
+					blob_stamp.mat = blob_mat;
 					blob_terms[slot] = Vector4(0, 0, 0, 2.0f);
 					blob_patches[slot] = slot_patch(pos, dir,
 							info.state.bound_radius, dir_y_raw);
@@ -989,8 +1011,14 @@ void SlotShadow::advance_frame() {
 					dir.y);
 			q = Vector3(term[0], term[1], term[2]);
 		}
-		drape->set_shader_parameter(slot_uniforms().mat[order],
-				_drape_projection(pose, half_extent, half_extent, eye_far));
+		const Projection drape_mat =
+				_drape_projection(pose, half_extent, half_extent, eye_far);
+		SlotParamStamp &mat_stamp = drape_mat_stamps_[order];
+		if (!mat_stamp.valid || mat_stamp.mat != drape_mat) {
+			drape->set_shader_parameter(slot_uniforms().mat[order], drape_mat);
+			mat_stamp.valid = true;
+			mat_stamp.mat = drape_mat;
+		}
 		silhouette_terms[order] = Vector4(q.x, q.y, q.z, 1.0f);
 		// The patch around the marched anchor, from the stored direction.
 		const Vector3 entity_pos = model->get_global_position();
@@ -1008,12 +1036,33 @@ void SlotShadow::advance_frame() {
 		++report_captures_;
 	}
 
-	drape->set_shader_parameter("u_slot_term", silhouette_terms);
-	drape->set_shader_parameter("u_slot_patch", silhouette_patches);
-	drape->set_shader_parameter("u_slot_clip_u", clip_u);
-	drape->set_shader_parameter("u_slot_clip_v", clip_v);
-	blob_material_->set_shader_parameter("u_slot_term", blob_terms);
-	blob_material_->set_shader_parameter("u_slot_patch", blob_patches);
+	// Identical-value pushes elided: the materials retain what was last set
+	// (the T1 material-gating precedent); a static camera over a settled
+	// scene pushes nothing.
+	if (silhouette_terms != last_silhouette_terms_) {
+		drape->set_shader_parameter("u_slot_term", silhouette_terms);
+		last_silhouette_terms_ = silhouette_terms;
+	}
+	if (silhouette_patches != last_silhouette_patches_) {
+		drape->set_shader_parameter("u_slot_patch", silhouette_patches);
+		last_silhouette_patches_ = silhouette_patches;
+	}
+	if (clip_u != last_clip_u_) {
+		drape->set_shader_parameter("u_slot_clip_u", clip_u);
+		last_clip_u_ = clip_u;
+	}
+	if (clip_v != last_clip_v_) {
+		drape->set_shader_parameter("u_slot_clip_v", clip_v);
+		last_clip_v_ = clip_v;
+	}
+	if (blob_terms != last_blob_terms_) {
+		blob_material_->set_shader_parameter("u_slot_term", blob_terms);
+		last_blob_terms_ = blob_terms;
+	}
+	if (blob_patches != last_blob_patches_) {
+		blob_material_->set_shader_parameter("u_slot_patch", blob_patches);
+		last_blob_patches_ = blob_patches;
+	}
 	// The armed requests compile into this frame's device draw list; an
 	// unarmed order keeps its previous capture (retail's sticky RT).
 	if (effect_.is_valid()) {
@@ -1025,6 +1074,63 @@ void SlotShadow::set_gpu_timing_enabled(bool p_enabled) {
 	gpu_timing_enabled_ = p_enabled;
 	if (effect_.is_valid())
 		effect_->set_gpu_timing_enabled(p_enabled);
+}
+
+// Main-thread only (every bump site is a device/present leg).
+static uint64_t g_caster_group_revision = 1;
+
+uint64_t SlotShadow::caster_group_revision() {
+	return g_caster_group_revision;
+}
+
+void SlotShadow::bump_caster_group_revision() {
+	++g_caster_group_revision;
+}
+
+void SlotShadow::_rebuild_caster_records() {
+	caster_records_.clear();
+	if (!is_inside_tree()) {
+		caster_records_valid_ = false;
+		return;
+	}
+	TypedArray<Node> nodes = get_tree()->get_nodes_in_group(caster_group());
+	caster_records_.reserve(static_cast<size_t>(nodes.size()));
+	for (int64_t i = 0; i < nodes.size(); ++i) {
+		ObjectModel *model = Object::cast_to<ObjectModel>(
+				static_cast<Object *>(nodes[i]));
+		if (model == nullptr) {
+			continue;
+		}
+		CasterRecord record;
+		record.id = ObjectID(model->get_instance_id());
+		// The two radii the slot reads: the model sphere (gpm[5]) sizes the
+		// capture extent and the depth clip; the entity bound (entity+0 —
+		// the sphere raised to the husk's, + 0x1000, and 0 without a
+		// collision block) sizes the lod/patch and the light query [orig:
+		// RenderSlot_RenderEntityAndChildren @0x5d7835 reads the model's
+		// +0x14; RenderSlot_AllocSlot @0x5d5773 and the light query read
+		// entity+0, Entity_InitFromModel @0x40dc30]. A model the placer did
+		// not stamp falls back to half its render-bounds diagonal for both,
+		// re-read live each frame.
+		record.capture_radius = model->get_model_sphere_radius();
+		record.slot_radius = model->get_entity_bound_radius();
+		record.radius_fallback = record.capture_radius <= 0.0f;
+		record.is_person = model->is_slot_shadow_person();
+		record.decal_texture = model->get_slot_shadow_decal_texture();
+		record.has_blob_texture = !record.decal_texture.is_empty();
+		for (Node *ancestor = model->get_parent(); ancestor != nullptr;
+				ancestor = ancestor->get_parent()) {
+			ObjectModel *parent_model = Object::cast_to<ObjectModel>(ancestor);
+			if (parent_model != nullptr &&
+					parent_model->is_in_group(caster_group())) {
+				record.seat_parented_ancestor = true;
+				break;
+			}
+		}
+		caster_records_.push_back(record);
+	}
+	caster_records_revision_ = caster_group_revision();
+	caster_records_valid_ = true;
 }
 
 Dictionary SlotShadow::get_report() const {
