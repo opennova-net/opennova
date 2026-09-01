@@ -17,6 +17,7 @@ func test_defaults_and_property_roundtrip() -> void:
 	var client := NovaWorldClient.new()
 	assert_eq(client.get_state(), NovaWorldClient.STATE_IDLE, "starts Idle")
 	assert_false(client.is_session_active(), "no session before start()")
+	assert_false(client.is_authenticated(), "a transport session is not an account login")
 	assert_eq(client.host, "127.0.0.1")
 	assert_eq(client.gate_port, 7597, "gate probe port matches the retail gate")
 
@@ -27,6 +28,21 @@ func test_defaults_and_property_roundtrip() -> void:
 	assert_eq(client.gate_port, 17597)
 	assert_eq(client.player_name, "GutPlayer")
 	client.free()
+
+
+func test_browser_and_join_are_rejected_before_authentication() -> void:
+	var client := NovaWorldClient.new()
+	add_child_autofree(client)
+	watch_signals(client)
+	client.refresh_servers()
+	assert_signal_emitted(client, "server_list_failed")
+	assert_eq(get_signal_parameters(client, "server_list_failed")[0],
+			"Sign in to NovaWorld before loading games.")
+	client.join(77)
+	assert_signal_emitted(client, "join_failed")
+	assert_eq(get_signal_parameters(client, "join_failed")[0],
+			"Sign in to NovaWorld before joining a game.")
+	assert_eq(client.get_server_rows().size(), 0, "no pre-login list is exposed")
 
 
 func test_start_probes_gate_and_stop_is_idempotent() -> void:

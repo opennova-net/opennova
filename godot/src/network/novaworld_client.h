@@ -82,6 +82,7 @@ public:
 
 	State get_state() const { return state_; }
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }
+	bool is_authenticated() const { return authenticated_; }
 	Dictionary get_server_info() const;
 
 	// Structured session diagnostics: the state snapshot plus a bounded wire/
@@ -187,6 +188,7 @@ private:
 
 	// State.
 	State state_ = STATE_IDLE;
+	bool authenticated_ = false; // true only after the EPASK login returns NWHANDLE
 	Dictionary server_info_;
 	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
 	// endpoint, and the handshake timeout all live in here.

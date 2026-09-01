@@ -27,6 +27,69 @@ std::string to_string_body(const std::vector<uint8_t> &body) {
 	return body.empty() ? std::string() : std::string(reinterpret_cast<const char *>(body.data()), body.size());
 }
 
+// Retail failures are rendered as jop_2_msg.htm rather than as HTTP errors.
+std::string extract_legacy_message(const std::vector<uint8_t> &body) {
+	const std::string html = to_string_body(body);
+	if (html.empty()) return std::string();
+	const std::string lower = to_lower(html);
+	std::size_t begin = std::string::npos;
+	std::size_t end = std::string::npos;
+	std::size_t at = 0;
+	while ((at = lower.find("<ib3_subst", at)) != std::string::npos) {
+		const std::size_t tag_end = lower.find('>', at);
+		if (tag_end == std::string::npos) break;
+		const std::string tag = lower.substr(at, tag_end - at + 1);
+		if (tag.find("@generic@") != std::string::npos || tag.find("@message@") != std::string::npos) {
+			begin = tag_end + 1;
+			end = lower.find("</ib3_subst", begin);
+			break;
+		}
+		at = tag_end + 1;
+	}
+	if (begin == std::string::npos || end == std::string::npos) return std::string();
+
+	const std::string fragment = html.substr(begin, end - begin);
+	const std::string fragment_lower = to_lower(fragment);
+	std::string plain;
+	for (std::size_t i = 0; i < fragment.size();) {
+		if (fragment[i] != '<') {
+			plain.push_back(fragment[i++]);
+			continue;
+		}
+		const std::size_t close = fragment.find('>', i + 1);
+		if (close == std::string::npos) break;
+		const std::string tag = fragment_lower.substr(i, close - i + 1);
+		if (begins_with(tag, "<br") || begins_with(tag, "</p") || begins_with(tag, "</div")) plain.push_back('\n');
+		i = close + 1;
+	}
+	plain = replace_all(plain, "&amp;", "&");
+	plain = replace_all(plain, "&lt;", "<");
+	plain = replace_all(plain, "&gt;", ">");
+	plain = replace_all(plain, "&quot;", "\"");
+	plain = replace_all(plain, "&#39;", "'");
+	plain = replace_all(plain, "&#x27;", "'");
+	plain = replace_all(plain, "&nbsp;", " ");
+
+	std::string normalized;
+	bool space = false;
+	bool newline = false;
+	for (const unsigned char ch : plain) {
+		if (ch == '\r' || ch == '\n') {
+			newline = !normalized.empty();
+			space = false;
+		} else if (std::isspace(ch)) {
+			space = !normalized.empty();
+		} else {
+			if (newline && normalized.back() != '\n') normalized.push_back('\n');
+			else if (space && normalized.back() != '\n' && normalized.back() != ' ') normalized.push_back(' ');
+			newline = false;
+			space = false;
+			normalized.push_back(static_cast<char>(ch));
+		}
+	}
+	return strip_edges(normalized);
+}
+
 LoginResult login_need(HttpRequestSpec req) {
 	LoginResult r;
 	r.kind = LoginResult::Kind::NeedRequest;
@@ -193,10 +256,11 @@ std::string LobbyHttpFlow::nwlogin_poll_url() const {
 LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
                                              const std::vector<std::string> &response_headers,
                                              const std::vector<uint8_t> &body) {
-	(void)body;
 	const LoginStep step = login_step_;
 	if (!transport_ok || code != 200) {
 		login_step_ = LoginStep::Idle;
+		const std::string message = extract_legacy_message(body);
+		if (!message.empty()) return login_fail(message);
 		return login_fail("login HTTP failed (code " + std::to_string(code) + ")");
 	}
 	merge_response_cookies(response_headers); // store Set-Cookie BEFORE branching
@@ -237,6 +301,8 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 			const std::string *tag = jar_.find("LOGINSESSIONTAG");
 			if (tag == nullptr || tag->empty()) {
 				login_step_ = LoginStep::Idle;
+				const std::string message = extract_legacy_message(body);
+				if (!message.empty()) return login_fail(message);
 				return login_fail("login rejected (no session tag)");
 			}
 			login_step_ = LoginStep::Poll;
@@ -258,6 +324,11 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				r.nwhandle = *nh;
 				r.pcid = (pc && !pc->empty()) ? *pc : std::string();
 				return r;
+			}
+			const std::string message = extract_legacy_message(body);
+			if (!message.empty()) {
+				login_step_ = LoginStep::Idle;
+				return login_fail(message);
 			}
 			constexpr int kMaxLoginPolls = 10;
 			if (++login_poll_count_ >= kMaxLoginPolls) {
@@ -331,6 +402,8 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 	const JoinStep step = join_step_;
 	if (!transport_ok || code != 200) {
 		join_step_ = JoinStep::Idle;
+		const std::string message = extract_legacy_message(body);
+		if (!message.empty()) return join_fail(message);
 		return join_fail("join HTTP failed (code " + std::to_string(code) + ")");
 	}
 	merge_response_cookies(response_headers);
@@ -350,7 +423,11 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 		case JoinStep::Second: {
 			join_step_ = JoinStep::Idle;
 			const JoiConnection conn = parse_joi_connection_string(to_string_body(body));
-			if (!conn.ok) return join_fail("join: no connection string in .joi");
+			if (!conn.ok) {
+				const std::string message = extract_legacy_message(body);
+				if (!message.empty()) return join_fail(message);
+				return join_fail("join: no connection string in .joi");
+			}
 			const int port = std::atoi(conn.host_port.c_str());
 			if (port <= 0 || port > 65535) return join_fail("join: bad host port");
 			JoinResult r;
