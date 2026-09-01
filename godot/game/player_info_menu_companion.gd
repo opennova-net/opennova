@@ -93,6 +93,14 @@ func owns_menu(driver: MenuDriver) -> bool:
 	return driver.has_widget("NATIONALITY") and driver.has_widget("COMBO_LIST")
 
 
+# Losing the document to another (or no) companion is the only teardown edge
+# for the frame mounts — the preview is a child of the PERSISTENT MenuFrame and
+# would otherwise keep rendering over the next document's widgets.
+func on_menu_released() -> void:
+	super()
+	_clear_mounts()
+
+
 # Wire and populate from scratch for each document build.
 func _wire(_file: String, _screen: String) -> void:
 	_combo_handlers.clear()
@@ -829,7 +837,11 @@ func _place_mount(mount: Control, id: int) -> void:
 
 
 func _reposition_mounts() -> void:
-	if _driver == null:
+	# The shared driver serves every document, and the persistent frame's
+	# resized signal can fire between a foreign open_document and the shell's
+	# release call: stale ids from this document must never place mounts
+	# against the new one (the sibling handlers carry the same guard).
+	if _driver == null or _driver.get_menu_file() != _wired_file:
 		return
 	for control in _icon_mounts:
 		var icon_rect: TextureRect = _icon_mounts[control]
@@ -843,7 +855,7 @@ func _reposition_mounts() -> void:
 
 
 func _on_screen_changed(_screen_name: String) -> void:
-	_reposition_mounts()
+	_reposition_mounts()  # carries the stale-document guard
 
 
 # --- Selection handlers (cascade edges) ---------------------------------------

@@ -451,6 +451,47 @@ func test_start_without_selection_falls_back_to_first_mission() -> void:
 	_cleanup(dir)
 
 
+class _RecordingCompanion extends MenuCompanion:
+	var built := 0
+	var released := 0
+
+	func owns_menu(driver: MenuDriver) -> bool:
+		return driver != null and driver.get_menu_file() == "main.mnu"
+
+	func on_menu_built(driver: MenuDriver, file: String, screen: String,
+			root: ResourceRoot) -> void:
+		super(driver, file, screen, root)
+		built += 1
+
+	func on_menu_released() -> void:
+		super()
+		released += 1
+
+
+func test_companion_released_when_document_changes_hands() -> void:
+	var dir := _make_dir()
+	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	var stub := _RecordingCompanion.new()
+	shell.add_companion(stub)
+	assert_true(shell.open_menu("main.mnu", ""), "the claimed document opens")
+	assert_eq(stub.built, 1, "the claiming companion is handed the wiring")
+	assert_eq(stub.released, 0)
+	assert_true(shell.open_menu("options.mnu", ""), "an unclaimed document opens")
+	assert_eq(stub.released, 1,
+			"losing the document releases the previously wired companion")
+	assert_eq(stub.built, 1, "no rebuild for a document it does not own")
+	assert_true(shell.open_menu("main.mnu", ""))
+	assert_eq(stub.built, 2, "re-claiming wires the companion again")
+	assert_eq(stub.released, 1, "a re-claim is not a release")
+	_cleanup(dir)
+
+
+
 func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> void:
 	var config := ConfigFile.new()
 	config.set_value("player", "crosshair_style", 11)

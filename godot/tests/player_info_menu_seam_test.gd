@@ -337,6 +337,63 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 				"%s under the portrait is mouse-transparent too" % child.name)
 
 
+func test_preview_render_activity_follows_visibility() -> void:
+	# A hidden portrait must not keep paying for a 3D pass or its animation
+	# (the reflection-viewport rule): UPDATE_ALWAYS and _process follow
+	# is_visible_in_tree(), covering both a hidden widget rect and the whole
+	# shell hiding for a mission.
+	var frame := MenuFrame.new()
+	frame.size = Vector2(800, 600)
+	add_child_autofree(frame)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(_doc_from_xml(_avatar_screen_xml(true)),
+			null, null, null, "player.mnu"), "the preview document opens on the driver")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var preview := frame.find_child("PlayerInfoAvatarPreview", true, false) as AvatarPreview
+	assert_not_null(preview, "the preview is mounted")
+	if preview == null:
+		return
+	assert_eq(preview.preview_viewport().render_target_update_mode,
+			SubViewport.UPDATE_ALWAYS, "a visible portrait renders every frame")
+	assert_true(preview.is_processing())
+	frame.hide()
+	assert_eq(preview.preview_viewport().render_target_update_mode,
+			SubViewport.UPDATE_DISABLED,
+			"hiding the frame stops the portrait's render and animation")
+	assert_false(preview.is_processing())
+	frame.show()
+	assert_eq(preview.preview_viewport().render_target_update_mode,
+			SubViewport.UPDATE_ALWAYS, "showing the frame restores rendering")
+	assert_true(preview.is_processing())
+
+
+func test_release_frees_the_preview_mount() -> void:
+	# The mount survives document swaps by construction (it is a child of the
+	# persistent MenuFrame); the shell's release call is its ONLY teardown when
+	# another document takes the driver. Without it the portrait keeps
+	# rendering, and a stale reposition can park it over the next document's
+	# widgets (the options-menu leak).
+	var frame := MenuFrame.new()
+	frame.size = Vector2(800, 600)
+	add_child_autofree(frame)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(_doc_from_xml(_avatar_screen_xml(true)),
+			null, null, null, "player.mnu"), "the preview document opens on the driver")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	assert_not_null(frame.find_child("PlayerInfoAvatarPreview", true, false),
+			"the preview is mounted while the companion owns the document")
+	companion.on_menu_released()
+	await get_tree().process_frame  # queue_free drains
+	assert_null(frame.find_child("PlayerInfoAvatarPreview", true, false),
+			"releasing the companion frees the frame-child preview mount")
+
+
 func test_snapshot_reports_current_selection() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())

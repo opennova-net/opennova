@@ -202,6 +202,7 @@ func close() -> void:
 	# A dropdown left open would come back mid-popup on the next open (the frame
 	# only hides; the driver's per-widget state persists across shows).
 	_driver.close_active_combo_popup()
+	_armory.on_menu_released()
 	_frame.visible = false
 	set_process(false)
 	closed.emit()
