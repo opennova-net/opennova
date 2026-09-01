@@ -803,6 +803,9 @@ bool ObjectModel::advance_part_anims(double p_delta) {
 			part_anims_.erase(reg);
 		}
 	}
+	if (changed) {
+		ctrl_native_cache_valid_ = false;
+	}
 	bounds_dirty_ = bounds_dirty_ || changed;
 	return changed;
 }

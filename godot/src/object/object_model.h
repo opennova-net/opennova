@@ -314,6 +314,16 @@ private:
 	// (Dictionary: ObjectData's PANM/material evaluators consume it).
 	Dictionary ctrl_values_;
 	HashMap<String, String> ctrl_value_owners_;
+	// ctrl_values_ converted to the renderer table once per change (the
+	// PANM/material evaluators consume it per frame); the weather FLICKER/
+	// SWING globals are stamped at use because they advance per weather tick,
+	// not per dict change. Every dict mutation path invalidates
+	// (finish_ctrl_change plus the two direct-writer loops).
+	opennova::renderer::ControlRegisterValues ctrl_native_cache_{};
+	bool ctrl_native_cache_valid_ = false;
+	bool ctrl_native_has_flicker_ = false;
+	bool ctrl_native_has_swing_ = false;
+	opennova::renderer::ControlRegisterValues runtime_ctrl_values();
 	// Optional visual parts (a player body's selected head) driven by this
 	// model's presentation calls: every animation/body/part call and every CTRL
 	// register store is forwarded, EXCEPT the registers the composer declared

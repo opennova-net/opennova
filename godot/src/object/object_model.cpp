@@ -607,7 +607,20 @@ int64_t ObjectModel::ctrl_dword(int64_t p_value) {
 	return next_value;
 }
 
+opennova::renderer::ControlRegisterValues ObjectModel::runtime_ctrl_values() {
+	if (!ctrl_native_cache_valid_) {
+		ctrl_native_cache_ = ObjectData::runtime_control_values_dict_only(
+				ctrl_values_, ctrl_native_has_flicker_, ctrl_native_has_swing_);
+		ctrl_native_cache_valid_ = true;
+	}
+	opennova::renderer::ControlRegisterValues values = ctrl_native_cache_;
+	ObjectData::stamp_weather_ctrl_registers(values, ctrl_native_has_flicker_,
+			ctrl_native_has_swing_);
+	return values;
+}
+
 void ObjectModel::finish_ctrl_change(bool p_apply_now) {
+	ctrl_native_cache_valid_ = false;
 	wake_runtime_frame();
 	bounds_dirty_ = true;
 	if (p_apply_now) {
@@ -1332,6 +1345,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 					ObjectData::canonical_control_register_name("SWING");
 			ctrl_values_[flicker_register] = static_cast<int64_t>(flicker);
 			ctrl_values_[swing_register] = static_cast<int64_t>(swing);
+			ctrl_native_cache_valid_ = false;
 		}
 	}
 	// Retail poses PANM during entity submission before the later render-batch
@@ -1358,7 +1372,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	const opennova::renderer::ControlRegisterValues material_ctrl_values =
 			dynamic_material_slots_.is_empty()
 			? opennova::renderer::ControlRegisterValues{}
-			: ObjectData::runtime_control_values(ctrl_values_);
+			: runtime_ctrl_values();
 	for (int64_t s = 0; s < dynamic_material_slots_.size(); ++s) {
 		const int i = dynamic_material_slots_[s];
 		const Ref<ShaderMaterial> material = surface_materials_[i];
@@ -1452,8 +1466,8 @@ bool ObjectModel::apply_robj_transforms() {
 	// One native call evaluates PANM at most once per graphic per frame (the
 	// placer shares one ObjectData across every instance of a graphic) and
 	// writes only the parts whose transforms changed since this model applied.
-	const int64_t revision = object_data_->apply_panm_to_nodes(
-			active_lod_, anim_time_ms_, ctrl_values_, robj_dense_,
+	const int64_t revision = object_data_->apply_panm_to_nodes_table(
+			active_lod_, anim_time_ms_, runtime_ctrl_values(), robj_dense_,
 			panm_applied_revision_);
 	const bool changed = revision != panm_applied_revision_;
 	panm_applied_revision_ = revision;

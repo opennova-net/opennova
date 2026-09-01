@@ -271,12 +271,23 @@ PackedStringArray ObjectData::get_material_anim_frames(int p_index, int p_slot) 
 }
 
 String ObjectData::canonical_control_register_name(const String &p_name) {
+	// Memoized: the present pass resolves the same few names per row per
+	// frame, and the utf8 round trip + canonical String rebuild are the
+	// measured cost, not the ordinal lookup (the memoized infantry_keys_ in
+	// present_applier.cpp is the precedent). Function-local so the map builds
+	// lazily after extension init; main-thread callers only.
+	static HashMap<String, String> cache;
+	if (const String *hit = cache.getptr(p_name)) {
+		return *hit;
+	}
 	const CharString utf8 = p_name.utf8();
 	const int ordinal = threedi_ctrl_register_ordinal(utf8.get_data());
-	return ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND
+	const String canonical = ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND
 			? String()
 			: from_native(threedi_ctrl_register_name(
 					  static_cast<size_t>(ordinal)));
+	cache.insert(p_name, canonical);
+	return canonical;
 }
 
 Array ObjectData::get_control_registers() const {
