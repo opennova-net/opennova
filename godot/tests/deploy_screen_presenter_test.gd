@@ -148,12 +148,10 @@ func _spawn_zone_mission() -> MissionData:
 	return md
 
 
-# A REAL loopback join held at the DEATH deploy pick: host + joiner free-run
-# until the joiner is in-match (the initial deploy completes with no pick —
-# retail's initial join sends no C2S 0x0E), then the authority kills the joiner
-# and the death edge re-arms the pick (begin_redeployment). Returns
-# {host, joiner}; both are autofreed Nodes.
-func _join_pair_with_pending_pick() -> Dictionary:
+# A REAL loopback join driven to in-match with NO pick owed (retail's initial
+# join sends no C2S 0x0E) over the spawn-zone host, which keeps the D-NET-156
+# respawn-pending hold. Returns {host, joiner}; both are autofreed Nodes.
+func _join_pair_in_match() -> Dictionary:
 	var mission := _spawn_zone_mission()
 	var item_db := _spawn_zone_item_db()
 	assert_not_null(item_db)
@@ -191,6 +189,16 @@ func _join_pair_with_pending_pick() -> Dictionary:
 	assert_true(reached, "the joiner reached in-match over real loopback UDP")
 	assert_false(joiner.is_join_deploy_pick_pending(),
 			"the initial join deploys with no forced C2S 0x0E")
+	return {"host": host, "joiner": joiner}
+
+
+# The in-match pair driven onward to the DEATH deploy pick: the authority kills
+# the joiner and the death edge re-arms the pick (begin_redeployment). Returns
+# {host, joiner}; both are autofreed Nodes.
+func _join_pair_with_pending_pick() -> Dictionary:
+	var pair := _join_pair_in_match()
+	var host: Simulation = pair.host
+	var joiner: Simulation = pair.joiner
 	# The kill targets the joiner's wire handle: wait for the 0x0C name-match to
 	# bind it, then the authority's real death transaction re-arms the pick (the
 	# DEATH screen).
@@ -299,6 +307,51 @@ func test_open_refuses_when_no_pick_is_owed() -> void:
 	assert_false(presenter.open(), "no pending pick means no screen")
 	assert_signal_emit_count(presenter, "opened", 0, "a refused open must not move the shell state")
 	assert_false(presenter.is_open())
+
+
+# The host-driven deploy-map OVERLAY: the spawn-zone host keeps the D-NET-156
+# respawn-pending hold, whose per-frame 0x0A flags1 bit1 arms
+# is_join_deploy_overlay_active while NO pick is owed. The same death.mnu
+# screen opens off it, live frames keep it open while the host keeps the bit
+# set, and a spawn-row click dismisses it LOCALLY with no 0x0E (retail input
+# case 12's dialogs-reset half; the send half is unported pending a
+# deployed-dismiss capture — the presenter documents why).
+# [orig: the open Render_ProcessMainSceneFrame @0x5cab5e; the per-frame fold
+#  NapiNPClientMsg_0x00A @0x42ff82]
+func test_overlay_opens_with_no_pick_and_a_row_click_dismisses() -> void:
+	var pair := _join_pair_in_match()
+	var overlay := false
+	for _i in range(240):
+		pair.host.step()
+		pair.joiner.step()
+		if pair.joiner.is_join_deploy_overlay_active():
+			overlay = true
+			break
+		OS.delay_msec(2)
+	assert_true(overlay, "the held joiner's per-frame flags1 bit1 arms the overlay")
+	assert_false(pair.joiner.is_join_deploy_pick_pending(), "no pick is owed")
+	var presenter := _make_presenter(pair.joiner)
+	watch_signals(presenter)
+	assert_true(presenter.open(), "the overlay opens the deploy screen without a pick")
+	assert_signal_emitted(presenter, "opened")
+	for _i in range(20):
+		pair.host.step()
+		pair.joiner.step()
+		OS.delay_msec(2)
+	await get_tree().process_frame
+	assert_true(presenter.is_open(), "the host-held overlay keeps the screen open")
+	var rows: Array = presenter.get_spawn_rows()
+	var row := -1
+	for i in rows.size():
+		if int((rows[i] as Dictionary).get("param", -1)) != -1:
+			row = i
+			break
+	assert_gte(row, 0, "the spawn list carries a selectable row")
+	presenter.select_spawn_row(row)
+	assert_false(presenter.is_open(), "the overlay row click closes the screen locally")
+	assert_signal_emitted(presenter, "closed")
+	assert_false(pair.joiner.is_join_deploy_pick_pending(),
+			"no 0x0E was sent — nothing armed a pick or release wait")
 
 
 # The active session keeps running under the death screen — per-frame S2C 0x0A

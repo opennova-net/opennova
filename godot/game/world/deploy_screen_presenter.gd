@@ -114,12 +114,18 @@ func select_spawn_row(row: int) -> void:
 	_on_widget_value_changed(SPAWN_LIST, "list", row, "")
 
 
-## Open over the live world when the join owes a deployment pick.
+## Open over the live world when the join owes a deployment pick, or when the
+## host drives the deploy-map OVERLAY (0x0F game_flags bit0 / per-frame 0x0A
+## flags1 bit1) — retail opens this same death.mnu DEATH screen for both
+## [orig: Render_ProcessMainSceneFrame @0x5cab5e opens on g_deploy_screen_active
+##  OR the local entity's undeployed bit; the once-per-mission latch @0x5cab8b
+##  belongs to the shell (MainGame), like retail's frame loop].
 func open() -> bool:
 	if is_open() or _world == null or _ui_parent == null:
 		return false
 	var sim: Simulation = _world.get_sim()
-	if sim == null or not bool(sim.is_join_deploy_pick_pending()):
+	if sim == null or not (bool(sim.is_join_deploy_pick_pending())
+			or bool(sim.is_join_deploy_overlay_active())):
 		return false
 	if not _ensure_menu():
 		return false
@@ -139,6 +145,28 @@ func close() -> void:
 		return
 	_frame.visible = false
 	closed.emit()
+
+
+# Retail's deploy-screen keys 'X' and SPACE route input case 12 (dialogs reset
+# + a 0x0E). On the OVERLAY-only screen (no pick owed) they act as the local
+# dismiss; the DEATH pick flow keeps its list-select picks, so the keys stay
+# inert there rather than inventing an unpicked default send.
+# [orig: Input_HandleSpecialKeys 'X' @0x49c9fd -> case 12 param 0, SPACE
+#  @0x49ca06 -> case 12 param 0xFFFE, both gated on the deploy/undeployed state;
+#  the case-12 0x0E half is unported — see _on_widget_value_changed]
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not is_open():
+		return
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode != KEY_X and key.keycode != KEY_SPACE:
+		return
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim == null or bool(sim.is_join_deploy_pick_pending()):
+		return
+	close()
+	get_viewport().set_input_as_handled()
 
 
 func teardown() -> void:
@@ -176,12 +204,15 @@ func _process(delta: float) -> void:
 	if bool(sim.is_session_lost()):
 		teardown()
 		return
-	# The screen's lifetime is the server-driven deployment-pending bit, independent
-	# from the active-session/gameplay state. Retail's initial 0x5A grants resume
-	# uplinks before the player picks, while flags1 bit1 keeps this screen visible;
-	# only the host clearing that bit closes it.
-	# [orig: the §5.61 hold chain — g_deploy_screen_active follows the bit every frame].
-	if not bool(sim.is_join_deploy_pick_pending()):
+	# The screen's lifetime: a pending DEATH pick holds it, and so does the
+	# host-driven overlay bit (which follows the per-frame 0x0A flags1 bit1,
+	# set AND cleared). Only both falling closes it — retail's frame loop
+	# closes the latched screen exactly when its two open triggers are gone.
+	# [orig: g_deploy_screen_active per-frame @0x42ff82; the close-on-clear leg
+	#  Render_ProcessMainSceneFrame @0x5cac8e -> the latch clear + screen close
+	#  @0x54b954]
+	if not bool(sim.is_join_deploy_pick_pending()) \
+			and not bool(sim.is_join_deploy_overlay_active()):
 		close()
 		return
 	# Periodic content refresh: zone security/ownership can change while picking
@@ -215,6 +246,18 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 	#  occupant/blank rows carry node -1 and the callback guards node != -1]
 	var param := int((_spawn_rows[index] as Dictionary).get("param", 0))
 	if param == -1:
+		return
+	if not bool(sim.is_join_deploy_pick_pending()):
+		# The OVERLAY-only screen (the player is already deployed — a wave
+		# host): retail's input case 12 resets the dialogs (closing this
+		# screen) and still sends one C2S 0x0E the host is free to drop. The
+		# send half is NOT ported yet: case 12 also re-arms the client uplink
+		# hold, and how a host releases that hold for an already-deployed
+		# player is unwitnessed (the stock wave-join capture carries zero
+		# 0x0E) — silence is the wire-safe posture until a capture pins it.
+		# [orig: Input_HandleActionBinding case 12 @0x49b0c5 — dialogs reset +
+		#  the 0x0E send @0x49b153]
+		close()
 		return
 	sim.send_deployment_pick(param)
 

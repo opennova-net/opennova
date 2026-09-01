@@ -683,7 +683,9 @@ void JoinerConnection::on_server_auth(
 		// is rejected the same way — our PV2 is byte-correct for the install
 		// [orig: HandleClientJoin @0x62b750 gate — 3 HK @0x62bdd5 / 4 PW @0x62be18 /
 		//  7 PV2 @0x62be40 / 5 empty-NA @0x62be7d / 6 disabled @0x62be8f; the
-		//  9/10/15 CU-overflow arms; CNapiNetwork_Init @0x4ca4a0 pins proto+364].
+		//  9/10/15 CU-overflow arms; 11 = a CU chunk NapiNPChunk_Create refused
+		//  ("NP.C:PCCR:CCH[1]" @0x62c14e); CNapiNetwork_Init @0x4ca4a0 pins
+		//  proto+364].
 		if (sa.jfc == 14) {
 			switch (sa.jfp) {
 			case 2: fail("The server is locked"); break;
@@ -1461,6 +1463,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// the newly admitted local player.
 			// [orig: NapiNPClientMsg_0x00F @0x42e5af..0x42e6ab; queues exact order
 			//  0x28,0x29,0x2D,0x32,0x22,0x23]
+			// The reducer folds the 0x0F's retained client globals (the
+			// deploy-map overlay arm) in this same wire position
+			// [orig: g_deploy_screen_active @0x42e2d8/@0x42e2f8].
+			out.inbound_reducer.emplace_back(m.tag, m.payload);
 			uint32_t world_state_tick = 0;
 			std::size_t consumed = 0;
 			decode_u32_scalar(m.payload.data(), m.payload.size(),

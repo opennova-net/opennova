@@ -107,9 +107,51 @@ void test_self_wave_zone() {
 
 } // namespace
 
+// A minimal complete S2C 0x0F body: the 23-byte fixed header (game_flags at
+// byte 22), the 128-entry zero score table, then zero waypoint/team-name
+// counts — the exact end the strict decoder requires.
+std::vector<uint8_t> world_state_load_body(uint8_t game_flags) {
+	std::vector<uint8_t> b(23 + kWorldStateScoreCount * 4 + 4, 0);
+	b[22] = game_flags;
+	return b;
+}
+
+// The deploy-map OVERLAY global (retail g_deploy_screen_active): armed by the
+// 0x0F game_flags bit0 UNLESS the death screen is already up, then host-
+// ASSIGNED every per-frame 0x0A from flags1 bit1 — set and cleared, no edge
+// latch. [orig: NapiNPClientMsg_0x00F zero @0x42e2d8 + arm @0x42e2f8;
+//  NapiNPClientMsg_0x00A @0x42ff82 g_deploy_screen_active = (flags1 >> 1) & 1]
+void test_deploy_overlay_follows_the_host() {
+	auto owned = std::make_unique<ClientReplicaPipeline>();
+	ClientReplicaPipeline &view = *owned;
+	CHECK(!view.state().deploy_overlay_active);
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(view.state().deploy_overlay_active);
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x00));
+	CHECK(!view.state().deploy_overlay_active);
+	FrameUpdate fu;
+	fu.mount_handle = 0xFFFF;
+	fu.health = 150;
+	fu.local_tail_present = true;
+	fu.flags1 = 0x02;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(view.state().deploy_overlay_active);
+	fu.flags1 = 0x00;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(!view.state().deploy_overlay_active);
+	// With the death screen up (flags1 bit0), the 0x0F bit0 arm is suppressed.
+	fu.flags1 = 0x01;
+	fu.health = 0;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(view.state().death_screen_active);
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(!view.state().deploy_overlay_active);
+}
+
 int main() {
 	test_sub_block_0_timers_fold_and_retain();
 	test_self_wave_zone();
+	test_deploy_overlay_follows_the_host();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

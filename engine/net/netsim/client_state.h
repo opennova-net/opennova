@@ -713,6 +713,15 @@ struct ClientState {
 	bool death_screen_active = false;
 	std::uint8_t death_screen_submode = 0;
 	bool enemy_tags_visible = false;
+	// The deploy-map OVERLAY (retail g_deploy_screen_active @0xA860DC): armed by
+	// the S2C 0x0F game_flags bit0 unless the death screen is already up, then
+	// host-maintained — set AND cleared — every per-frame 0x0A from flags1 bit1.
+	// It is a UI signal only (the frame loop opens death.mnu's DEATH screen once
+	// off it, latched); it never gates the spawn. [orig: NapiNPClientMsg_0x00F
+	// zero @0x42e2d8 + arm @0x42e2f8; NapiNPClientMsg_0x00A per-frame assign
+	// @0x42ff82; the death.mnu open latch Render_ProcessMainSceneFrame
+	// @0x5cab5e..0x5cab8b]
+	bool deploy_overlay_active = false;
 	std::uint8_t respawn_penalty_seconds = 0;
 	std::uint8_t local_revive_seconds = 0;
 	std::uint8_t spawn_hold_seconds = 0;

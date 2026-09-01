@@ -472,6 +472,9 @@ public:
 	// the shell shows the DEATH deploy screen and the join watchdog stops (the
 	// remaining transitions are player-paced).
 	bool is_join_deploy_pick_pending() const;
+	// The deploy-map overlay signal (retail g_deploy_screen_active): the shell
+	// opens death.mnu's DEATH screen once off it, latched per load. UI only.
+	bool is_join_deploy_overlay_active() const;
 	// The DEATH screen's SPAWNPOINTS_LIST rows: {param:int, letter:String,
 	// name_key:String} per team-owned secured deploy zone, letters/names keyed by the
 	// spawn-zone registry index. Row 0 (the Default Spawn, param 0) is the shell's.
