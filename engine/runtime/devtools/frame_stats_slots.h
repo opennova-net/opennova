@@ -147,6 +147,13 @@
     X(SIM_CLIENT_RECEIVE, "loopback/wire receive + state fold") \
     X(SIM_CLIENT_MAINTENANCE, "decoded-state timers and movers") \
     X(SIM_CLIENT_SEND, "joiner-only C2S build/frame") \
+    /* The joiner pump after its wire leg (JoinerWorldBridge::pump phases). */ \
+    X(SIM_CLIENT_MATERIALIZE, "joiner: stream materialize + decoded-state folds (spawn/health/mount/ammo/events/weather)") \
+    X(SIM_CLIENT_MIRROR, "joiner: wire pose mirror into the registry (both passes + predicted vehicles)") \
+    X(SIM_CLIENT_PROXIES, "joiner: wire collision proxy rebuild") \
+    X(SIM_CLIENT_WORLD, "joiner: local World::run_logic_tick (its phases land on the World update rows)") \
+    X(SIM_CLIENT_ATTACH, "joiner: remote attachment recompose + local seat re-pose") \
+    X(SIM_CLIENT_PLAYER, "joiner: input/weather/heading/view/weapon device pumps") \
     X(SIM_ADM_RESOLVE, "late animation-registry resolution after the tick") \
     X(SIM_SINK, "typed per-tick Godot presentation/effects callback") \
     X(SIM_TICKS, "VALUE: logic ticks run this frame") \
@@ -176,6 +183,8 @@
     X(PRESENT_MISSION_SUBMITTED_ROWS, "VALUE: camera-submitted rows") \
     X(PRESENT_MISSION_BODY_ROWS, "VALUE: rows eligible for a body pose") \
     X(PRESENT_WIRE, "WirePresentPass.present_snapshot") \
+    X(PRESENT_WIRE_LIVE, "VALUE: wire-direct nodes alive (WirePresentPass)") \
+    X(PRESENT_WIRE_PENDING, "VALUE: wire rows still owed a cold spawn") \
     X(PRESENT_FIRE, "") \
     X(PRESENT_DESTRUCTION, "") \
     X(PRESENT_THROWABLE, "") \

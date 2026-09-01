@@ -107,6 +107,12 @@ void Simulation::fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outco
 	add(FrameStats::SIM_CLIENT_RECEIVE, static_cast<int64_t>(phase.client.receive_us));
 	add(FrameStats::SIM_CLIENT_MAINTENANCE, static_cast<int64_t>(phase.client.maintenance_us));
 	add(FrameStats::SIM_CLIENT_SEND, static_cast<int64_t>(phase.client.send_us));
+	add(FrameStats::SIM_CLIENT_MATERIALIZE, static_cast<int64_t>(phase.joiner.materialize_us));
+	add(FrameStats::SIM_CLIENT_MIRROR, static_cast<int64_t>(phase.joiner.mirror_us));
+	add(FrameStats::SIM_CLIENT_PROXIES, static_cast<int64_t>(phase.joiner.proxies_us));
+	add(FrameStats::SIM_CLIENT_WORLD, static_cast<int64_t>(phase.joiner.world_us));
+	add(FrameStats::SIM_CLIENT_ATTACH, static_cast<int64_t>(phase.joiner.attach_us));
+	add(FrameStats::SIM_CLIENT_PLAYER, static_cast<int64_t>(phase.joiner.player_us));
 	add(FrameStats::SIM_ADM_RESOLVE, phase.adm_resolve_us);
 }
 

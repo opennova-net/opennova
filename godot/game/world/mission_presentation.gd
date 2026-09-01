@@ -626,6 +626,9 @@ func _present_entity_rows(stats_on := false) -> void:
 		if stats_on:
 			_frame_stats.add(FrameStats.PRESENT_WIRE,
 					Time.get_ticks_usec() - wire_start)
+			var wire_stats: WirePresentStats = _wire_present.get_stats_record()
+			_frame_stats.add(FrameStats.PRESENT_WIRE_LIVE, wire_stats.live)
+			_frame_stats.add(FrameStats.PRESENT_WIRE_PENDING, wire_stats.pending)
 
 
 # One whole present frame: the entity rows plus the tick-driven passes, each

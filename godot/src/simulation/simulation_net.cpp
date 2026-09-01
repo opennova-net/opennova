@@ -402,7 +402,8 @@ void Simulation::joiner_pump() {
 	opennova::np::JoinerWorldBridge::PumpContext ctx{
 			kernel_->world, *runtime_, kernel_->weapon, kernel_->loadout,
 			kernel_->inventory, kernel_->inventory_valid, kernel_->seat_specs,
-			kernel_->root_motion.empty() ? nullptr : &kernel_->root_motion};
+			kernel_->root_motion.empty() ? nullptr : &kernel_->root_motion,
+			runtime_profiling_enabled_ ? &frame_phase_perf_.joiner : nullptr};
 	opennova::np::JoinerWorldBridge::PumpHooks hooks;
 	hooks.send = [this](const std::vector<uint8_t> &dg) { ship_to_host(dg); };
 	hooks.deposit_inbound = [this] { joiner_deposit_inbound(); };

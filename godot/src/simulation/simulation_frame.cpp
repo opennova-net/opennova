@@ -320,6 +320,12 @@ Dictionary Simulation::get_session_perf() const {
 	out["client_receive_us"] = static_cast<int64_t>(phase.client.receive_us);
 	out["client_maintenance_us"] = static_cast<int64_t>(phase.client.maintenance_us);
 	out["client_send_us"] = static_cast<int64_t>(phase.client.send_us);
+	out["client_materialize_us"] = static_cast<int64_t>(phase.joiner.materialize_us);
+	out["client_mirror_us"] = static_cast<int64_t>(phase.joiner.mirror_us);
+	out["client_proxies_us"] = static_cast<int64_t>(phase.joiner.proxies_us);
+	out["client_world_us"] = static_cast<int64_t>(phase.joiner.world_us);
+	out["client_attach_us"] = static_cast<int64_t>(phase.joiner.attach_us);
+	out["client_player_us"] = static_cast<int64_t>(phase.joiner.player_us);
 	out["adm_resolve_us"] = phase.adm_resolve_us;
 	return out;
 }
