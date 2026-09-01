@@ -775,8 +775,17 @@ bool test_strip_hotkey() {
   CHECK(hotkey == "x", "hotkey should be x");
   CHECK(pos == 1, "pos should be 1");
 
+  // Retail's marker scan is strstr — case-sensitive — so "{HOT}" stays
+  // literal and the lowercase marker is the first (and only) hit
+  // [orig: CButtonWnd_SetLabel strstr("{hot}") @0x657451].
   result = opennova::mnu::strip_hotkey_marker(
       "A{HOT}b{hot}c", &hotkey, &pos);
+  CHECK(result == "A{HOT}bc", "the uppercase pseudo-marker stays literal");
+  CHECK(hotkey == "c", "the lowercase marker supplies the hotkey");
+  CHECK(pos == 7, "the recorded offset follows the literal {HOT}");
+
+  result = opennova::mnu::strip_hotkey_marker(
+      "A{hot}b{hot}c", &hotkey, &pos);
   CHECK(result == "Ab{hot}c", "only the first marker should be removed");
   CHECK(hotkey == "b", "first marker should supply the hotkey");
   CHECK(pos == 1, "first marker position should be retained");

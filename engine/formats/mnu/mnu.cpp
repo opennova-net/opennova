@@ -3,6 +3,7 @@
 #include <formats/mnu/mnu.h>
 
 #include <formats/mnu/mnu_xml.h>
+#include <formats/rtxt/rtxt.h>
 
 #include <algorithm>
 #include <cctype>
@@ -1123,24 +1124,17 @@ std::string strip_hotkey_marker(const std::string &text,
   if (out_hotkey) out_hotkey->clear();
   if (out_hotkey_pos) *out_hotkey_pos = -1;
 
-  // CButtonWnd_SetLabel removes only the FIRST marker, records its byte
-  // offset, and registers the byte that follows it. Later markers remain
-  // literal [orig: CButtonWnd_SetLabel @ 0x6572F0].
-  size_t marker = std::string::npos;
-  for (size_t i = 0; i + 5 <= text.size(); ++i) {
-    if (text[i] == '{' && (text[i + 1] == 'h' || text[i + 1] == 'H') &&
-        (text[i + 2] == 'o' || text[i + 2] == 'O') &&
-        (text[i + 3] == 't' || text[i + 3] == 'T') && text[i + 4] == '}') {
-      marker = i;
-      break;
-    }
-  }
-  if (marker == std::string::npos) return text;
-
-  std::string result = text.substr(0, marker) + text.substr(marker + 5);
-  if (out_hotkey_pos) *out_hotkey_pos = static_cast<int>(marker);
-  if (out_hotkey && marker < result.size()) {
-    *out_hotkey = std::string(1, result[marker]);
+  // CButtonWnd_SetLabel removes only the FIRST marker via strstr — CASE
+  // SENSITIVE, so "{HOT}" stays literal — records its byte offset, and
+  // registers the byte that follows it; later markers remain literal. The
+  // shared strip is rtxt's (docs/interface/rtxt-strings-re.md)
+  // [orig: CButtonWnd_SetLabel @ 0x6572F0 — strstr @0x657451].
+  int marker = -1;
+  std::string result = rtxt::strip_hotkey(text, marker);
+  if (marker < 0) return result;
+  if (out_hotkey_pos) *out_hotkey_pos = marker;
+  if (out_hotkey && static_cast<size_t>(marker) < result.size()) {
+    *out_hotkey = std::string(1, result[static_cast<size_t>(marker)]);
   }
   return result;
 }
