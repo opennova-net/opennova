@@ -779,9 +779,15 @@ bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
         e.brain.f[AiBrain::kDriveSkill] = std::clamp(ev.f[3], 0, 4);
         return true;
     case 10:
-    case 11: { // COMBATSPEED / PATROLSPEED [orig: AI_HandleCommand @0x465770 cases 10/11]
+    case 11: { // COMBATSPEED / PATROLSPEED [orig: AI_HandleCommand @0x465770
+               //  cases 0xA @0x46589a / 0xB @0x4658d3]
         // Retail treats a negative signed dword as its unsigned value before
-        // converting authored km/h to 16.16 world-units/tick.
+        // converting authored km/h to 16.16 world-units/tick: fild, then
+        // fadd 2^32 when negative [orig: flt_7C3288 @0x4658a4/@0x4658da],
+        // fmul 1000.0 [orig: flt_7C6EC0], fmul the stored float32 of
+        // 1/225000 [orig: flt_7C6EBC = 4.444444584805751e-06], fmul 65536
+        // [orig: flt_7C32BC], ftol2_sse @0x76bc00 (out-of-range converts to
+        // the x87 indefinite 0x80000000 — the branch below).
         double value = static_cast<double>(ev.f[3]);
         if (value < 0.0) value += 4294967296.0;
         const double scaled = value * 1000.0 * 4.444444584805751e-06 * 65536.0;

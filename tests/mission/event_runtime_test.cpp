@@ -1492,8 +1492,18 @@ static void test_change_ai_command_family() {
     CHECK((static_cast<uint32_t>(
                    ae.slot.f[world::AiSlot::kBehaviorFlags]) &
            0x201u) == 0x201u);
+    // Sub 17 is CLIMBER_BIT on the AI slot (behavior 0x400); the entity
+    // Flags 0x80 climb-chase write is sub 23 [orig: Entity_ApplyCommand
+    // cases 0x11 @0x43af25 / 0x17 @0x43afae].
     dispatch(17, 1);
-    CHECK((w.registry.get(handle)->flags & 0x80u) != 0);
+    CHECK((static_cast<uint32_t>(
+                   ae.slot.f[world::AiSlot::kBehaviorFlags]) &
+           0x400u) != 0);
+    CHECK((w.registry.get(handle)->flags & world::kEntityFlagAiClimb) == 0);
+    dispatch(23, 1);
+    CHECK((w.registry.get(handle)->flags & world::kEntityFlagAiClimb) != 0);
+    CHECK((w.registry.get(handle)->engine_flags &
+           world::kEntityFlagAiClimb) != 0);
     ae.slot.f[world::AiSlot::kBehaviorFlags] |= 0x20000;
     dispatch(21, 1);
     CHECK((static_cast<uint32_t>(
@@ -1620,7 +1630,7 @@ static void test_structural_bms_actions() {
     CHECK(w.effects.count("unported_action") == 0);
 
     dispatch(bms::ActionType::GroupVelocity, 2, 36);
-    CHECK(w.relations.group(2).move_speed_q16_per_tick == 655360);
+    CHECK(w.relations.group(2).move_speed_q16_per_sec == 655360);
 
     dispatch(bms::ActionType::ChangeGTeamAction, 2, 3);
     CHECK(w.registry.get(pool0_h)->team == 3);
