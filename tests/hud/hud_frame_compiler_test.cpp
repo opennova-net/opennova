@@ -23,6 +23,7 @@ using opennova::hud::HudFrameState;
 using opennova::hud::HudLayout;
 using opennova::hud::HudMinimapCompiler;
 using opennova::hud::HudMinimapInput;
+using opennova::hud::HudTri;
 
 namespace {
 

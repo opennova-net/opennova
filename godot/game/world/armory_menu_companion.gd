@@ -150,8 +150,10 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 
 # The presenter's close() releases the companion: every open rebuilds via
 # on_menu_built, so the hidden frame keeps no icon mounts between shows.
+# (This class is companion-SHAPED but extends RefCounted, not MenuCompanion —
+# the release hook mirrors MenuCompanion.on_menu_released by name.)
 func on_menu_released() -> void:
-	super()
+	_activation_handlers.clear()
 	_clear_icon_mounts()
 
 
