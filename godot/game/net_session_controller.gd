@@ -23,6 +23,7 @@ var _spectator_probe_target: JoinTarget
 var _spectator_probe_serial := 0
 
 const SPECTATOR_PREFLIGHT_SECONDS := 1.0
+const NOVAWORLD_PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
 
 func _exit_tree() -> void:
@@ -378,11 +379,11 @@ func resolve_player_callsign() -> String:
 func open_novaworld_panel() -> void:
 	if _novaworld_panel != null:
 		return
-	_novaworld_panel = NovaWorldPanel.new()
+	_novaworld_panel = NOVAWORLD_PANEL_SCENE.instantiate() as NovaWorldPanel
 	# Dev default: localhost. A prod build sets the server host from the
 	# resolved server IP before showing the panel.
 	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
-	# own root is null until a mission loads). Set BEFORE add_child so the panel's _build_ui sees it.
+	# own root is null until a mission loads). Set BEFORE add_child so _ready can populate the scene.
 	_novaworld_panel.resource_root = _resource_root()
 	_menu_shell.hide_menu()
 	_panel_layer.add_child(_novaworld_panel)

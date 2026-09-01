@@ -175,8 +175,26 @@ static bool test_login_failures() {
 		f.set_context(concrete_ctx());
 		f.login("p", "s");
 		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
-		nw::LoginResult r = f.on_login_response(true, 200, {}, {});
+		const std::string page =
+				"<HTML><IB3_SUBST name=\"@GENERIC@\">The account name or password is incorrect."
+				"<BR>Please try again.</IB3_SUBST></HTML>";
+		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
 		expect(r.kind == nw::LoginResult::Kind::Failed, "POST without session tag -> Failed");
+		expect(r.reason == "The account name or password is incorrect.\nPlease try again.",
+		       "login failure preserves the rendered NovaWorld message");
+	}
+	// Message extraction strips markup and decodes entities emitted by the template renderer.
+	{
+		nw::LobbyHttpFlow f;
+		f.set_context(concrete_ctx());
+		f.login("p", "s");
+		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		const std::string page =
+				"<IB3_SUBST NAME='@MESSAGE@'><B>This account is restricted</B> &amp; can't log in."
+				"</IB3_SUBST>";
+		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
+		expect(r.reason == "This account is restricted & can't log in.",
+		       "legacy message markup and HTML entities are normalized");
 	}
 	// Poll exhaustion (10 polls, no NWHANDLE).
 	{
@@ -250,6 +268,20 @@ static bool test_join_resolves() {
 	f2.on_join_response(true, 200, {}, {});
 	nw::JoinResult bad = f2.on_join_response(true, 200, {}, bytes("no brackets here"));
 	expect(bad.kind == nw::JoinResult::Kind::Failed, "join with no .joi connection -> Failed");
+	expect(bad.reason == "join: no connection string in .joi", "malformed .joi keeps its fallback reason");
+
+	// Expansion and account restrictions arrive as a retail-style message page.
+	nw::LobbyHttpFlow f3;
+	f3.set_context(concrete_ctx());
+	f3.join(2);
+	f3.on_join_response(true, 200, {}, {});
+	const std::string rejection =
+			"<IB3_SUBST name=\"@GENERIC@\">This game requires the Team Sabre expansion."
+			"<BR><I>Choose another game.</I></IB3_SUBST>";
+	nw::JoinResult rejected = f3.on_join_response(true, 200, {}, bytes(rejection));
+	expect(rejected.kind == nw::JoinResult::Kind::Failed, "message response rejects the join");
+	expect(rejected.reason == "This game requires the Team Sabre expansion.\nChoose another game.",
+	       "join failure preserves the rendered NovaWorld message");
 	return g_fail == 0;
 }
 

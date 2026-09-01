@@ -2,10 +2,11 @@ extends GutTest
 
 # Guards the NovaWorld panel's host Map picker + the host_failed feedback inlet — the fix for the
 # "stuck on Starting a NovaWorld host..." bug (the host request used to carry no map and the panel
-# had no failure channel). We drive _build_ui() directly (NOT via _ready / add_child) so the panel's
-# NovaWorldClient is never created — no gate/HTTP side effects in the unit.
+# had no failure channel). The authored scene is instantiated with client startup disabled, and the
+# NovaWorldClient is disabled on the authored scene — no gate/HTTP side effects in the unit.
 
 const NovaWorldPanel := preload("res://game/novaworld_panel.gd")
+const PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
 
 # A REAL ResourceRoot (ADR 0034 typed seam) over a per-test temp dir: the
@@ -39,10 +40,11 @@ func _real_root(missions: PackedStringArray) -> ResourceRoot:
 
 
 func _make_panel(missions: PackedStringArray) -> NovaWorldPanel:
-	var panel = NovaWorldPanel.new()
-	autofree(panel)  # freed at teardown WITHOUT entering the tree, so _ready/_create_client never run
+	var panel = PANEL_SCENE.instantiate()
+	panel.start_client_on_ready = false
+	panel.target_override = NovaWorldSettings.Target.OPENNOVA
 	panel.resource_root = _real_root(missions)
-	panel.build_ui_for_target(NovaWorldSettings.Target.OPENNOVA)  # builds the UI + populates the Map picker off-tree
+	add_child_autofree(panel)
 	return panel
 
 
@@ -54,6 +56,38 @@ func test_map_picker_populates_from_root() -> void:
 	assert_eq(panel.mission_count(), 2, "Map picker lists the root's .bms missions")
 	assert_eq(panel.mission_name_at(0), "alpha.bms", "items are basenames")
 	assert_eq(panel.selected_mission(), "alpha.bms", "first mission selected by default")
+
+
+func test_server_browser_is_gated_until_login_succeeds() -> void:
+	var panel := _make_panel(PackedStringArray())
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.CONNECTING)
+	assert_false(panel.browser_visible(), "games are hidden while the service connects")
+	panel._on_connected()
+	assert_true(panel.login_visible(), "a verified session advances to Sign In")
+	assert_false(panel.browser_visible(), "connecting is not enough to reveal games")
+	panel._on_login_succeeded("ljim")
+	assert_true(panel.browser_visible(), "only a successful account login reveals games")
+
+
+func test_login_failure_uses_novaworld_message_screen() -> void:
+	var panel := _make_panel(PackedStringArray())
+	panel._on_connected()
+	panel._on_login_failed("The account name or password is incorrect.")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
+	assert_eq(panel.message_text(), "The account name or password is incorrect.")
+	assert_false(panel.browser_visible(), "an authentication error cannot leak the browser")
+
+
+func test_empty_and_filtered_states_are_not_fake_server_rows() -> void:
+	var panel := _make_panel(PackedStringArray())
+	panel._on_connected()
+	panel._on_login_succeeded("ljim")
+	panel.set_rows_for_test([])
+	assert_eq(panel.server_item_count(), 0, "empty state adds no selectable server")
+	panel.set_rows_for_test(_browser_rows())
+	assert_eq(panel.server_item_count(), 3)
+	assert_string_contains(panel.details_text(), "Server: alpha",
+			"the first sorted server is selected when no prior rid exists")
 
 
 func test_host_pressed_emits_selected_mission() -> void:
@@ -79,8 +113,7 @@ func test_host_pressed_reports_when_no_missions() -> void:
 	assert_string_contains(panel.status_text(), "No missions", "the empty case is reported, not hung")
 
 
-# The browser table's row cells (Column order: Server, Map, Players, Type,
-# Ping, Exp, lock), driven as a pure function on literal dictionaries.
+# The browser table's row cells (Server, Mission, Mode, Players, Ping, Access).
 func test_row_cells_cover_the_table_columns() -> void:
 	var row := {"name": "Alpha", "mission_name": "ASH_G11A", "players": 3,
 			"max_players": 16, "game_type": "COOP", "exp": "jox01",
@@ -88,14 +121,13 @@ func test_row_cells_cover_the_table_columns() -> void:
 	var cells := NovaWorldPanel.row_cells(row, 42)
 	assert_eq(cells[NovaWorldPanel.Column.NAME], "Alpha")
 	assert_eq(cells[NovaWorldPanel.Column.MISSION], "ASH_G11A")
-	assert_eq(cells[NovaWorldPanel.Column.PLAYERS], "3/16")
 	assert_eq(cells[NovaWorldPanel.Column.TYPE], "COOP")
+	assert_eq(cells[NovaWorldPanel.Column.PLAYERS], "3/16")
 	assert_eq(cells[NovaWorldPanel.Column.PING], "42")
-	assert_eq(cells[NovaWorldPanel.Column.EXP], "jox01")
-	assert_eq(cells[NovaWorldPanel.Column.LOCK], "", "an open server shows no lock marker")
+	assert_eq(cells[NovaWorldPanel.Column.ACCESS], "Open")
 	row["password"] = "Y"
-	assert_eq(NovaWorldPanel.row_cells(row, null)[NovaWorldPanel.Column.LOCK], "[L]",
-			"a passworded server carries the lock marker")
+	assert_eq(NovaWorldPanel.row_cells(row, null)[NovaWorldPanel.Column.ACCESS], "Password",
+			"a passworded server is labeled plainly")
 
 
 # The ping cell's three states (engine/net/novaworld/ping_sweep.h's fold):

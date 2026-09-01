@@ -21,6 +21,8 @@ extends Control
 @export var server_host := "127.0.0.1"
 @export var gate_port := NovaWorldSettings.GATE_PORT
 @export var player_name := "Player"
+@export var start_client_on_ready := true
+@export var target_override := -1
 
 signal closed()
 # The NWJoin handshake resolved the in-match host:port — enter the match as a JOINER. The arg is
@@ -32,9 +34,11 @@ signal join_in_match_requested(target: JoinTarget)
 signal host_requested(config: HostSessionConfig)
 
 # The table's column order. PLAYERS and PING sort numerically; the rest by text.
-enum Column { NAME, MISSION, PLAYERS, TYPE, PING, EXP, LOCK }
+enum Column { NAME, MISSION, TYPE, PLAYERS, PING, ACCESS }
 const COLUMN_TITLES: PackedStringArray = [
-	"Server", "Map", "Players", "Type", "Ping", "Exp", ""]
+	"Server", "Mission", "Mode", "Players", "Ping", "Access"]
+
+enum Screen { CONNECTING, LOGIN, LOBBY, HOST, MESSAGE }
 
 var _client: NovaWorldClient  # created when the panel opens; torn down on close
 var _status_label: Label
@@ -80,12 +84,107 @@ var _exp_warning_armed_rid := 0
 # install's .bms missions (the panel owns no mission list; the world's root is null until a load).
 var resource_root: ResourceRoot
 var _mission_option: OptionButton
+var _connecting_view: Control
+var _login_view: Control
+var _lobby_view: Control
+var _host_view: Control
+var _message_view: Control
+var _message_label: Label
+var _message_button: Button
+var _population_label: Label
+var _empty_label: Label
+var _host_start_button: Button
+var _host_cancel_button: Button
+var _screen := Screen.CONNECTING
+var _message_return_screen := Screen.LOGIN
+var _message_action: Callable
+var _browser_loading := false
+var _closing := false
+var _suppress_client_messages := false
 
 
 func _ready() -> void:
-	_target = NovaWorldSettings.load_target()
-	_build_ui()
-	_create_client()
+	_target = target_override if target_override >= 0 else NovaWorldSettings.load_target()
+	if has_node("Center/Shell"):
+		_bind_scene_ui()
+	else:
+		# Kept for compatibility with any code constructing the script directly.
+		_build_ui()
+	_set_screen(Screen.CONNECTING)
+	if start_client_on_ready:
+		_create_client()
+
+
+func _bind_scene_ui() -> void:
+	var base := "Center/Shell/Margin/RootVBox/"
+	_target_option = get_node(base + "Header/TargetOption")
+	_close_button = get_node(base + "Header/BackButton")
+	_status_label = get_node(base + "StatusLabel")
+	var pages := base + "Pages/"
+	_connecting_view = get_node(pages + "ConnectingView")
+	_login_view = get_node(pages + "LoginView")
+	_lobby_view = get_node(pages + "LobbyView")
+	_host_view = get_node(pages + "HostView")
+	_message_view = get_node(pages + "MessageView")
+	_username_edit = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/UsernameEdit")
+	_password_edit = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/PasswordEdit")
+	_login_button = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/LoginButton")
+	_filter_edit = get_node(pages + "LobbyView/Toolbar/SearchEdit")
+	_type_filter = get_node(pages + "LobbyView/Toolbar/TypeFilter")
+	_refresh_button = get_node(pages + "LobbyView/Toolbar/RefreshButton")
+	_hide_full_check = get_node(pages + "LobbyView/QuickFilters/NotFullCheck")
+	_hide_empty_check = get_node(pages + "LobbyView/QuickFilters/HasPlayersCheck")
+	_hide_locked_check = get_node(pages + "LobbyView/QuickFilters/OpenOnlyCheck")
+	_population_label = get_node(pages + "LobbyView/PopulationLabel")
+	_empty_label = get_node(pages + "LobbyView/BrowserStack/EmptyLabel")
+	_server_tree = get_node(pages + "LobbyView/BrowserStack/BrowserSplit/ServerTree")
+	_details_label = get_node(pages + "LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsVBox/DetailsLabel")
+	_roster_list = get_node(pages + "LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsVBox/RosterList")
+	_host_button = get_node(pages + "LobbyView/Actions/HostButton")
+	_join_button = get_node(pages + "LobbyView/Actions/JoinButton")
+	_mission_option = get_node(pages + "HostView/HostCard/HostMargin/HostForm/MissionOption")
+	_host_start_button = get_node(pages + "HostView/HostCard/HostMargin/HostForm/HostActions/StartButton")
+	_host_cancel_button = get_node(pages + "HostView/HostCard/HostMargin/HostForm/HostActions/CancelButton")
+	_message_label = get_node(pages + "MessageView/MessageCard/MessageMargin/MessageForm/MessageLabel")
+	_message_button = get_node(pages + "MessageView/MessageCard/MessageMargin/MessageForm/MessageButton")
+
+	_target_option.clear()
+	_target_option.add_item("OpenNova", NovaWorldSettings.Target.OPENNOVA)
+	_target_option.add_item("Original NovaWorld", NovaWorldSettings.Target.REAL)
+	_target_option.select(_target_option.get_item_index(_target))
+	_target_option.item_selected.connect(_on_target_selected)
+	_close_button.pressed.connect(_on_close_pressed)
+	_login_button.pressed.connect(_on_login_pressed)
+	_password_edit.text_submitted.connect(func(_text: String) -> void: _on_login_pressed())
+	_filter_edit.text_changed.connect(func(_text: String) -> void: _rebuild_view())
+	_type_filter.clear()
+	_type_filter.add_item("All modes")
+	_type_filter.item_selected.connect(func(_index: int) -> void: _rebuild_view())
+	_hide_full_check.toggled.connect(func(_on: bool) -> void: _rebuild_view())
+	_hide_empty_check.toggled.connect(func(_on: bool) -> void: _rebuild_view())
+	_hide_locked_check.toggled.connect(func(_on: bool) -> void: _rebuild_view())
+	_refresh_button.pressed.connect(_on_refresh_pressed)
+	_host_button.pressed.connect(_on_host_screen_pressed)
+	_join_button.pressed.connect(_on_join_pressed)
+	_host_start_button.pressed.connect(_on_host_pressed)
+	_host_cancel_button.pressed.connect(_on_host_cancel_pressed)
+	_message_button.pressed.connect(_on_message_action_pressed)
+
+	_server_tree.hide_root = true
+	_server_tree.select_mode = Tree.SELECT_ROW
+	_server_tree.columns = COLUMN_TITLES.size()
+	_server_tree.column_titles_visible = true
+	for column in COLUMN_TITLES.size():
+		_server_tree.set_column_expand(column, column == Column.NAME or column == Column.MISSION)
+	_server_tree.set_column_custom_minimum_width(Column.TYPE, 90)
+	_server_tree.set_column_custom_minimum_width(Column.PLAYERS, 76)
+	_server_tree.set_column_custom_minimum_width(Column.PING, 62)
+	_server_tree.set_column_custom_minimum_width(Column.ACCESS, 86)
+	_server_tree.column_title_clicked.connect(_on_column_title_clicked)
+	_server_tree.item_selected.connect(_on_server_selected)
+	_server_tree.item_activated.connect(_on_join_pressed)
+	_update_column_titles()
+	_populate_missions()
 
 
 func _build_ui() -> void:
@@ -147,7 +246,7 @@ func _build_ui() -> void:
 	_filter_edit.text_changed.connect(func(_t: String) -> void: _rebuild_view())
 	filter_row.add_child(_filter_edit)
 	_type_filter = OptionButton.new()
-	_type_filter.add_item("All types")
+	_type_filter.add_item("All modes")
 	_type_filter.item_selected.connect(func(_i: int) -> void: _rebuild_view())
 	filter_row.add_child(_type_filter)
 	_hide_full_check = CheckBox.new()
@@ -183,11 +282,10 @@ func _build_ui() -> void:
 	for c in COLUMN_TITLES.size():
 		_server_tree.set_column_title(c, COLUMN_TITLES[c])
 		_server_tree.set_column_expand(c, c == Column.NAME or c == Column.MISSION)
-	_server_tree.set_column_custom_minimum_width(Column.PLAYERS, 64)
 	_server_tree.set_column_custom_minimum_width(Column.TYPE, 56)
+	_server_tree.set_column_custom_minimum_width(Column.PLAYERS, 64)
 	_server_tree.set_column_custom_minimum_width(Column.PING, 56)
-	_server_tree.set_column_custom_minimum_width(Column.EXP, 56)
-	_server_tree.set_column_custom_minimum_width(Column.LOCK, 28)
+	_server_tree.set_column_custom_minimum_width(Column.ACCESS, 76)
 	_server_tree.column_title_clicked.connect(_on_column_title_clicked)
 	_server_tree.item_selected.connect(_on_server_selected)
 	_server_tree.item_activated.connect(_on_join_pressed)
@@ -243,6 +341,79 @@ func _build_ui() -> void:
 	buttons.add_child(_close_button)
 
 
+func _set_screen(next: int) -> void:
+	if next == Screen.LOBBY and not _logged_in:
+		next = Screen.LOGIN
+	_screen = next
+	if _connecting_view != null:
+		_connecting_view.visible = next == Screen.CONNECTING
+		_login_view.visible = next == Screen.LOGIN
+		_lobby_view.visible = next == Screen.LOBBY
+		_host_view.visible = next == Screen.HOST
+		_message_view.visible = next == Screen.MESSAGE
+
+
+func _show_message(text: String, button_text: String, action: Callable,
+		return_screen: int) -> void:
+	_message_return_screen = return_screen
+	_message_action = action
+	if _message_label != null:
+		_message_label.text = text.strip_edges() if not text.strip_edges().is_empty() \
+				else "NovaWorld could not complete the request."
+	if _message_button != null:
+		_message_button.text = button_text
+	_set_screen(Screen.MESSAGE)
+
+
+func _on_message_action_pressed() -> void:
+	var action := _message_action
+	_message_action = Callable()
+	if action.is_valid():
+		action.call()
+	else:
+		_set_screen(_message_return_screen)
+
+
+func _return_to_login() -> void:
+	_set_screen(Screen.LOGIN)
+	if _username_edit != null:
+		_username_edit.grab_focus()
+
+
+func _return_to_lobby() -> void:
+	_set_screen(Screen.LOBBY)
+
+
+func _return_to_host() -> void:
+	_set_screen(Screen.HOST)
+
+
+func _retry_server_list() -> void:
+	_set_screen(Screen.LOBBY)
+	_on_refresh_pressed()
+
+
+func _on_host_screen_pressed() -> void:
+	if not _logged_in:
+		return
+	_populate_missions()
+	_set_screen(Screen.HOST)
+
+
+func _on_host_cancel_pressed() -> void:
+	_set_screen(Screen.LOBBY)
+
+
+func _update_column_titles() -> void:
+	if _server_tree == null:
+		return
+	for column in COLUMN_TITLES.size():
+		var suffix := ""
+		if column == _sort_column:
+			suffix = "  ^" if _sort_ascending else "  v"
+		_server_tree.set_column_title(column, COLUMN_TITLES[column] + suffix)
+
+
 func _create_client() -> void:
 	_client = NovaWorldClient.new()
 	add_child(_client)
@@ -254,10 +425,11 @@ func _create_client() -> void:
 	_client.disconnected.connect(_on_disconnected)
 	_client.error_occurred.connect(_on_error)
 	_client.server_list_updated.connect(_on_server_list_updated)
+	_client.server_list_failed.connect(_on_server_list_failed)
 	_client.server_pings_updated.connect(_on_server_pings_updated)
-	_client.server_info_received.connect(_on_server_info_received)
 	_client.login_succeeded.connect(_on_login_succeeded)
 	_client.login_failed.connect(_on_login_failed)
+	_client.join_failed.connect(_on_join_failed)
 	_client.joined_game.connect(_on_joined_game)
 	_client.start()
 
@@ -277,10 +449,12 @@ func _on_target_selected(index: int) -> void:
 
 
 func _reconnect() -> void:
+	_suppress_client_messages = true
 	if _client != null:
 		_client.stop()
 		_client.queue_free()
 		_client = null
+	_suppress_client_messages = false
 	if _host_button != null:
 		_host_button.disabled = true
 	if _join_button != null:
@@ -289,7 +463,15 @@ func _reconnect() -> void:
 		_login_button.disabled = true
 	_can_login = false
 	_logged_in = false
-	_set_status("Connecting...")
+	_nw_callsign = ""
+	_rows.clear()
+	_view.clear()
+	_pings.clear()
+	_browser_loading = false
+	if _password_edit != null:
+		_password_edit.clear()
+	_set_status("Contacting NovaWorld...")
+	_set_screen(Screen.CONNECTING)
 	_create_client()
 
 
@@ -322,26 +504,31 @@ func _on_state_changed(state: int) -> void:
 
 
 func _on_connected() -> void:
-	# Hosting registers a game on the gate — allowed only on OpenNova servers, never on NovaLogic's
-	# live service. Disable (don't just block-on-click) the Host button when "Original NovaWorld" is the
-	# target so it reads as unavailable rather than broken.
-	var can_host := _target != NovaWorldSettings.Target.REAL
-	_host_button.disabled = not can_host
-	if can_host:
-		_set_status("Connected. Choose a server or host your own.")
-	else:
-		_set_status("Connected to NovaWorld. Choose a server to join — hosting is OpenNova-only.")
-	_refresh_servers()
+	if _logged_in:
+		return # returning from a failed join; the typed failure owns the next screen
+	_can_login = true
+	_login_button.disabled = false
+	_set_status("Connected. Sign in to continue.")
+	_set_screen(Screen.LOGIN)
+	_username_edit.grab_focus()
 
 
 func _on_disconnected(reason: String) -> void:
-	_set_status("Disconnected (%s)." % reason)
+	if _suppress_client_messages or _closing:
+		return
 	_host_button.disabled = true
+	_logged_in = false
+	_show_message("The connection to NovaWorld was closed.\n\n%s" % reason,
+			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
 
 func _on_error(message: String) -> void:
-	_set_status("Could not connect: %s" % message)
+	if _suppress_client_messages or _closing:
+		return
 	_host_button.disabled = true
+	_logged_in = false
+	_show_message("NovaWorld could not be reached.\n\n%s" % message,
+			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
 
 # Fill the browser from the GSB server list. Rows arrive asynchronously over
@@ -367,10 +554,11 @@ func _show_population_status() -> void:
 		return
 	var totals: Dictionary = _client.get_server_totals()
 	var servers := int(totals.get("total_servers", 0))
-	if servers <= 0:
-		return
-	_set_status("%d server(s), %d player(s) online." % [
-		servers, int(totals.get("total_players", 0))])
+	var players := int(totals.get("total_players", 0))
+	if _population_label != null:
+		_population_label.text = "%d game%s • %d player%s online" % [
+			servers, "" if servers == 1 else "s",
+			players, "" if players == 1 else "s"]
 
 
 # The Type picker offers the game types present in the list (plus All).
@@ -381,7 +569,7 @@ func _rebuild_type_filter() -> void:
 	if _type_filter.selected > 0:
 		previous = _type_filter.get_item_text(_type_filter.selected)
 	_type_filter.clear()
-	_type_filter.add_item("All types")
+	_type_filter.add_item("All modes")
 	var seen := {}
 	for row in _rows:
 		var t := String((row as Dictionary).get("game_type", "")).strip_edges()
@@ -421,8 +609,11 @@ func _rebuild_view() -> void:
 	_server_tree.clear()
 	var root := _server_tree.create_item()
 	var reselected := false
+	var first_item: TreeItem
 	for row in _view:
 		var item := _server_tree.create_item(root)
+		if first_item == null:
+			first_item = item
 		var cells := row_cells(row, _ping_for(row))
 		for c in cells.size():
 			item.set_text(c, cells[c])
@@ -431,15 +622,20 @@ func _rebuild_view() -> void:
 		if int((row as Dictionary).get("rid", -2)) == selected_rid:
 			item.select(Column.NAME)
 			reselected = true
-	if _view.is_empty():
-		var placeholder := _server_tree.create_item(root)
-		placeholder.set_text(Column.NAME, "No games are being hosted yet." \
-				if _rows.is_empty() else "No servers match the filters.")
-		for c in COLUMN_TITLES.size():
-			placeholder.set_selectable(c, false)
-	if not reselected:
+	if _empty_label != null:
+		_empty_label.visible = _view.is_empty()
+		_empty_label.text = "Retrieving games..." if _browser_loading else (
+				"No games are being hosted right now." if _rows.is_empty()
+				else "No games match these filters.")
+	_server_tree.visible = not _view.is_empty()
+	if not reselected and first_item != null:
+		first_item.select(Column.NAME)
+		_join_button.disabled = false
+		_show_details(first_item.get_metadata(0))
+	elif not reselected:
 		_join_button.disabled = true
 		_show_details({})
+	_update_column_titles()
 
 
 func _ping_for(row: Dictionary):
@@ -456,9 +652,11 @@ func _on_column_title_clicked(column: int, _mouse_button_index: int) -> void:
 
 
 func _on_refresh_pressed() -> void:
-	if _client == null:
+	if _client == null or not _logged_in:
 		return
-	_set_status("Refreshing the browser...")
+	_browser_loading = true
+	_set_status("Refreshing games...")
+	_rebuild_view()
 	_client.refresh_servers()
 
 
@@ -505,11 +703,10 @@ static func row_cells(row: Dictionary, ping) -> PackedStringArray:
 	return PackedStringArray([
 		String(row.get("name", "server")),
 		String(row.get("mission_name", "")),
-		"%d/%d" % [int(row.get("players", 0)), int(row.get("max_players", 0))],
 		String(row.get("game_type", "")),
+		"%d/%d" % [int(row.get("players", 0)), int(row.get("max_players", 0))],
 		ping_text(ping),
-		String(row.get("exp", "")),
-		"[L]" if row_is_locked(row) else "",
+		"Password" if row_is_locked(row) else "Open",
 	])
 
 
@@ -570,14 +767,13 @@ static func sort_rows(rows: Array, column: int, ascending: bool,
 					return vb == 0x7FFFFFFF
 				else:
 					cmp = signi(va - vb)
-			Column.LOCK:
+			Column.ACCESS:
 				cmp = signi(int(row_is_locked(ra)) - int(row_is_locked(rb)))
 			_:
 				var key := "name"
 				match column:
 					Column.MISSION: key = "mission_name"
 					Column.TYPE: key = "game_type"
-					Column.EXP: key = "exp"
 				cmp = String(ra.get(key, "")).nocasecmp_to(String(rb.get(key, "")))
 		if cmp == 0:
 			cmp = String(ra.get("name", "")).nocasecmp_to(String(rb.get("name", "")))
@@ -639,11 +835,22 @@ func server_row_tooltip(row: Dictionary) -> String:
 
 
 func _on_server_list_updated(_updated: Array) -> void:
+	if not _logged_in:
+		return
+	_browser_loading = false
 	_refresh_servers()
+	_set_screen(Screen.LOBBY)
 
 
-# The table's selected row's backing dictionary, or {} when nothing real is
-# selected (the placeholder row carries no metadata).
+func _on_server_list_failed(reason: String) -> void:
+	if not _logged_in or _suppress_client_messages:
+		return
+	_browser_loading = false
+	_rebuild_view()
+	_show_message(reason, "Retry", Callable(self, "_retry_server_list"), Screen.LOBBY)
+
+
+# The table's selected row's backing dictionary, or {} when none is selected.
 func _selected_row() -> Dictionary:
 	if _server_tree == null:
 		return {}
@@ -679,21 +886,16 @@ func _show_details(row: Dictionary) -> void:
 
 # --- Login (ADR 0010 Phase 3) -------------------------------------------
 
-func _on_server_info_received(_info: Dictionary) -> void:
-	# The gate reply gives us the startup_url the login chain needs.
-	_can_login = true
-	if _login_button != null and not _logged_in:
-		_login_button.disabled = false
-
-
 func _on_login_pressed() -> void:
 	if _client == null:
-		_set_status("Login is not available in this build.")
+		_show_message("Login is not available in this build.", "Back to Sign In",
+				Callable(self, "_return_to_login"), Screen.LOGIN)
 		return
 	var user := _username_edit.text.strip_edges()
 	var pwd := _password_edit.text
 	if user.is_empty() or pwd.is_empty():
-		_set_status("Enter a username and password.")
+		_show_message("Enter both your account name and password.", "Back to Sign In",
+				Callable(self, "_return_to_login"), Screen.LOGIN)
 		return
 	_login_button.disabled = true
 	_set_status("Signing in as %s..." % user)
@@ -703,8 +905,18 @@ func _on_login_pressed() -> void:
 func _on_login_succeeded(nwhandle: String) -> void:
 	_logged_in = true
 	_login_button.disabled = true
+	_password_edit.clear()
 	set_signed_in_handle(nwhandle)
-	_set_status("Signed in as %s. Choose a server to join." % nwhandle)
+	_host_button.disabled = _target == NovaWorldSettings.Target.REAL
+	_rows.clear()
+	_pings.clear()
+	_browser_loading = true
+	_rebuild_type_filter()
+	_rebuild_view()
+	if _population_label != null:
+		_population_label.text = "Retrieving NovaWorld games..."
+	_set_status("Signed in as %s." % nwhandle)
+	_set_screen(Screen.LOBBY)
 
 
 # On NovaWorld the account handle IS the in-game callsign: the host rosters
@@ -725,17 +937,21 @@ func join_callsign() -> String:
 
 func _on_login_failed(reason: String) -> void:
 	_logged_in = false
+	_password_edit.clear()
 	if _can_login:
 		_login_button.disabled = false
-	_set_status("Login failed: %s" % reason)
+	_show_message(reason, "Back to Sign In", Callable(self, "_return_to_login"), Screen.LOGIN)
 
 
 # --- Join (ADR 0010 Phase 5) --------------------------------------------
 
 func _on_join_pressed() -> void:
+	if not _logged_in:
+		return
 	var row := _selected_row()
 	if row.is_empty():
-		_set_status("Select a server to join.")
+		_show_message("Select a game before joining.", "Back to Games",
+				Callable(self, "_return_to_lobby"), Screen.LOBBY)
 		return
 	var rid := int(row.get("rid", 0))
 	# Browse-time expansion advisory: warn BEFORE the join when the row's
@@ -751,8 +967,16 @@ func _on_join_pressed() -> void:
 	# in NovaWorld games — see set_signed_in_handle); the local callsign otherwise.
 	_pending_player = join_callsign()
 	_set_status("Joining %s..." % String(row.get("name", "server")))
+	_join_button.disabled = true
 	if _client != null:
 		_client.join(rid)
+
+
+func _on_join_failed(reason: String) -> void:
+	if not _logged_in or _suppress_client_messages:
+		return
+	_join_button.disabled = _selected_row().is_empty()
+	_show_message(reason, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
 
 
 # True only on the FIRST Join press for a row whose advertised expansion the
@@ -801,12 +1025,17 @@ func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedB
 # the mission + callsign and stands up a browsable listen host (net_session_drive._maybe_start_nw_host). We
 # register on the OpenNova gate only — never advertise a host on NovaLogic's live service.
 func _on_host_pressed() -> void:
+	if not _logged_in and start_client_on_ready:
+		return
 	if _target == NovaWorldSettings.Target.REAL:
-		_set_status("Hosting is available on OpenNova servers only.")
+		_show_message("Hosting is available on OpenNova servers only.", "Back to Games",
+				Callable(self, "_return_to_lobby"), Screen.LOBBY)
 		return
 	var mission := _selected_mission()
 	if mission.is_empty():
-		_set_status("No missions are available to host (check the game folder).")
+		_set_status("No missions are available to host.")
+		_show_message("No missions are available to host. Check the game folder.",
+				"Back to Host Game", Callable(self, "_return_to_host"), Screen.HOST)
 		return
 	_set_status("Starting a NovaWorld host...")
 	var config := HostSessionConfig.new()
@@ -911,6 +1140,26 @@ func status_text() -> String:
 	return _status_label.text if _status_label != null else ""
 
 
+func current_screen() -> int:
+	return _screen
+
+
+func browser_visible() -> bool:
+	return _lobby_view != null and _lobby_view.visible
+
+
+func login_visible() -> bool:
+	return _login_view != null and _login_view.visible
+
+
+func message_text() -> String:
+	return _message_label.text if _message_label != null else ""
+
+
+func server_item_count() -> int:
+	return _view.size()
+
+
 func host_enabled() -> bool:
 	return _host_button != null and not _host_button.disabled
 
@@ -927,11 +1176,13 @@ func _selected_mission() -> String:
 # the panel instead of leaving the stale "Starting..." status, and re-enables Host (REAL stays off).
 func host_failed(reason: String) -> void:
 	_set_status(reason)
+	_show_message(reason, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
 	if _host_button != null:
 		_host_button.disabled = (_target == NovaWorldSettings.Target.REAL)
 
 
 func _on_close_pressed() -> void:
+	_closing = true
 	if _client != null:
 		_client.stop()
 	closed.emit()
