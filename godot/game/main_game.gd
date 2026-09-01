@@ -706,7 +706,7 @@ func _begin_world_load() -> void:
 	_shell_presentation.begin_world_load(
 			_menu_shell, _world, _hud, _on_world_loaded, _on_world_load_failed)
 	_state = State.WORLD
-	_deploy_overlay_latched = false  # [orig: Game_StartMission @0x525b31]
+	_deploy_overlay_latched = false  # retail resets it at mission start (hud-re D-HUD-19)
 	_refresh_dev_tools_game_state()
 
 
@@ -792,9 +792,9 @@ func _on_join_deploy_pick_required() -> void:
 # latched until the next mission start; the open is suppressed while any other
 # screen is up. Closing is the presenter's own affair (both triggers gone, or
 # the player's dismiss) — the latch only stops a re-open, exactly why a wave
-# host keeping the bit set all session shows the screen once.
-# [orig: Render_ProcessMainSceneFrame open @0x5cab5e (gated on no active menu
-#  @0x5cab67 and the spawn-success gate @0x24C1928) + the latch @0x5cab8b]
+# host keeping the bit set all session shows the screen once. The frame-loop
+# open/latch witnesses live in hud-re D-HUD-19 and on
+# ClientState.deploy_overlay_active (engine/net/netsim/client_state.h).
 func _maybe_open_deploy_overlay() -> void:
 	if _deploy_overlay_latched or _state != State.WORLD or _world_load_pending:
 		return

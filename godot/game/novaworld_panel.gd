@@ -7,6 +7,11 @@ extends Control
 # a server browser, and a Host-a-Game action. The panel never touches the wire
 # itself; the client does.
 #
+# The browser is a sortable multi-column table over the full GSB row set with a
+# filter bar, a selected-server details pane (message, mod, version, locale,
+# the live player roster), and the browse-time ping column (the client's sweep
+# mirrors retail's list-finalize ping; engine/net/novaworld/ping_sweep.h).
+#
 # Milestone flow: open -> the client probes the gate and runs the session
 # handshake against our server -> on a verified session the browser fills from
 # the server list -> Host a Game registers a row other clients can see.
@@ -26,18 +31,35 @@ signal join_in_match_requested(target: JoinTarget)
 # the mission + callsign and stands up a browsable listen host (net_session_drive._maybe_start_nw_host).
 signal host_requested(config: HostSessionConfig)
 
+# The table's column order. PLAYERS and PING sort numerically; the rest by text.
+enum Column { NAME, MISSION, PLAYERS, TYPE, PING, EXP, LOCK }
+const COLUMN_TITLES: PackedStringArray = [
+	"Server", "Map", "Players", "Type", "Ping", "Exp", ""]
+
 var _client: NovaWorldClient  # created when the panel opens; torn down on close
 var _status_label: Label
-var _server_list: ItemList
+var _server_tree: Tree
 var _host_button: Button
 var _join_button: Button
 var _close_button: Button
+var _refresh_button: Button
 var _target_option: OptionButton
 var _username_edit: LineEdit
 var _password_edit: LineEdit
 var _login_button: Button
+var _filter_edit: LineEdit
+var _type_filter: OptionButton
+var _hide_full_check: CheckBox
+var _hide_empty_check: CheckBox
+var _hide_locked_check: CheckBox
+var _details_label: Label
+var _roster_list: ItemList
 var _target: int = NovaWorldSettings.Target.OPENNOVA
-var _rows: Array = []          # GSB rows, parallel to _server_list items (index -> row)
+var _rows: Array = []          # the full GSB row set (Array of Dictionary)
+var _view: Array = []          # the filtered + sorted rows the table shows
+var _pings: Dictionary = {}    # rid -> ping ms / -2 failed / -3 never (absent = in flight)
+var _sort_column: int = Column.NAME
+var _sort_ascending := true
 var _can_login := false        # true once the gate reply gives us a startup_url
 var _logged_in := false
 # Stashed at join time: the selected row's mission + our callsign. joined_game carries the
@@ -67,11 +89,11 @@ func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	var panel := PanelContainer.new()
 	panel.set_anchors_preset(Control.PRESET_CENTER)
-	panel.custom_minimum_size = Vector2(480, 360)
+	panel.custom_minimum_size = Vector2(960, 600)
 	add_child(panel)
 
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 12)
+	box.add_theme_constant_override("separation", 8)
 	panel.add_child(box)
 
 	var title := Label.new()
@@ -112,11 +134,77 @@ func _build_ui() -> void:
 	_login_button.pressed.connect(_on_login_pressed)
 	login_row.add_child(_login_button)
 
-	_server_list = ItemList.new()
-	_server_list.custom_minimum_size = Vector2(440, 220)
-	_server_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_server_list.item_selected.connect(_on_server_selected)
-	box.add_child(_server_list)
+	# The filter bar: a text search over name/map/mod, a game-type picker built
+	# from the rows in hand, the three quick filters, and Refresh.
+	var filter_row := HBoxContainer.new()
+	box.add_child(filter_row)
+	_filter_edit = LineEdit.new()
+	_filter_edit.placeholder_text = "Find a server..."
+	_filter_edit.custom_minimum_size = Vector2(180, 0)
+	_filter_edit.text_changed.connect(func(_t: String) -> void: _rebuild_view())
+	filter_row.add_child(_filter_edit)
+	_type_filter = OptionButton.new()
+	_type_filter.add_item("All types")
+	_type_filter.item_selected.connect(func(_i: int) -> void: _rebuild_view())
+	filter_row.add_child(_type_filter)
+	_hide_full_check = CheckBox.new()
+	_hide_full_check.text = "Not full"
+	_hide_full_check.toggled.connect(func(_on: bool) -> void: _rebuild_view())
+	filter_row.add_child(_hide_full_check)
+	_hide_empty_check = CheckBox.new()
+	_hide_empty_check.text = "Has players"
+	_hide_empty_check.toggled.connect(func(_on: bool) -> void: _rebuild_view())
+	filter_row.add_child(_hide_empty_check)
+	_hide_locked_check = CheckBox.new()
+	_hide_locked_check.text = "No password"
+	_hide_locked_check.toggled.connect(func(_on: bool) -> void: _rebuild_view())
+	filter_row.add_child(_hide_locked_check)
+	_refresh_button = Button.new()
+	_refresh_button.text = "Refresh"
+	_refresh_button.pressed.connect(_on_refresh_pressed)
+	filter_row.add_child(_refresh_button)
+
+	# The browser split: the sortable table left, the selected server's details
+	# and player roster right.
+	var split := HSplitContainer.new()
+	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(split)
+
+	_server_tree = Tree.new()
+	_server_tree.custom_minimum_size = Vector2(600, 300)
+	_server_tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_server_tree.hide_root = true
+	_server_tree.select_mode = Tree.SELECT_ROW
+	_server_tree.columns = COLUMN_TITLES.size()
+	_server_tree.column_titles_visible = true
+	for c in COLUMN_TITLES.size():
+		_server_tree.set_column_title(c, COLUMN_TITLES[c])
+		_server_tree.set_column_expand(c, c == Column.NAME or c == Column.MISSION)
+	_server_tree.set_column_custom_minimum_width(Column.PLAYERS, 64)
+	_server_tree.set_column_custom_minimum_width(Column.TYPE, 56)
+	_server_tree.set_column_custom_minimum_width(Column.PING, 56)
+	_server_tree.set_column_custom_minimum_width(Column.EXP, 56)
+	_server_tree.set_column_custom_minimum_width(Column.LOCK, 28)
+	_server_tree.column_title_clicked.connect(_on_column_title_clicked)
+	_server_tree.item_selected.connect(_on_server_selected)
+	_server_tree.item_activated.connect(_on_join_pressed)
+	split.add_child(_server_tree)
+
+	var details_box := VBoxContainer.new()
+	details_box.custom_minimum_size = Vector2(280, 0)
+	split.add_child(details_box)
+	_details_label = Label.new()
+	_details_label.text = "Select a server for details."
+	_details_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_details_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_details_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	details_box.add_child(_details_label)
+	var roster_title := Label.new()
+	roster_title.text = "Players"
+	details_box.add_child(roster_title)
+	_roster_list = ItemList.new()
+	_roster_list.custom_minimum_size = Vector2(0, 140)
+	details_box.add_child(_roster_list)
 
 	# Map to host: the install's .bms missions (from the mounted root MainGame injects). Empty when
 	# no root/missions — Host then reports it via host_failed instead of hanging.
@@ -163,6 +251,7 @@ func _create_client() -> void:
 	_client.disconnected.connect(_on_disconnected)
 	_client.error_occurred.connect(_on_error)
 	_client.server_list_updated.connect(_on_server_list_updated)
+	_client.server_pings_updated.connect(_on_server_pings_updated)
 	_client.server_info_received.connect(_on_server_info_received)
 	_client.login_succeeded.connect(_on_login_succeeded)
 	_client.login_failed.connect(_on_login_failed)
@@ -256,42 +345,276 @@ func _on_error(message: String) -> void:
 # HTTP once the session is verified; the client re-emits server_list_updated
 # whenever it refetches, and connecting/refreshing both call through here.
 func _refresh_servers() -> void:
-	_server_list.clear()
 	_rows = []
+	_pings = {}
 	_exp_warning_armed_rid = -1
 	if _client != null:
 		for row in _client.get_server_rows():
 			_rows.append(row)
-			var idx := _server_list.add_item(format_server_row(row))
-			_server_list.set_item_tooltip(idx, server_row_tooltip(row))
-	if _server_list.item_count == 0:
-		_server_list.add_item("No games are being hosted yet.")
-	# A fresh list clears any prior selection.
-	_join_button.disabled = true
+		_pings = _client.get_server_pings()
+	_rebuild_type_filter()
+	_rebuild_view()
+	_show_population_status()
 
 
-# "ServerName  (3/16)  AAS  198.51.100.23  [locked]" — name, occupancy, game
-# type, the server's address, and a lock marker when passworded or locked.
-func format_server_row(row: Dictionary) -> String:
-	var name := String(row.get("name", "server"))
-	var players := int(row.get("players", 0))
-	var max_players := int(row.get("max_players", 0))
-	var label := "%s  (%d/%d)" % [name, players, max_players]
-	var game_type := String(row.get("game_type", ""))
-	if not game_type.is_empty():
-		label += "  " + game_type
-	# The GSB row's host address (the one the browser pings). 0.0.0.0 means the
-	# server did not report one — show nothing rather than a bogus address.
-	var ip := String(row.get("ip", ""))
-	if not ip.is_empty() and ip != "0.0.0.0":
-		label += "  " + ip
-	if String(row.get("password", "N")) == "Y" or String(row.get("locked", "N")) == "Y":
-		label += "  [locked]"
-	return label
+# The service-wide population line ("58 servers, 214 players online") once the
+# list carries totals.
+func _show_population_status() -> void:
+	if _client == null:
+		return
+	var totals: Dictionary = _client.get_server_totals()
+	var servers := int(totals.get("total_servers", 0))
+	if servers <= 0:
+		return
+	_set_status("%d server(s), %d player(s) online." % [
+		servers, int(totals.get("total_players", 0))])
 
 
-# Hover details for a browser row: the mission and locale fields that don't fit
-# the one-line label.
+# The Type picker offers the game types present in the list (plus All).
+func _rebuild_type_filter() -> void:
+	if _type_filter == null:
+		return
+	var previous := ""
+	if _type_filter.selected > 0:
+		previous = _type_filter.get_item_text(_type_filter.selected)
+	_type_filter.clear()
+	_type_filter.add_item("All types")
+	var seen := {}
+	for row in _rows:
+		var t := String((row as Dictionary).get("game_type", "")).strip_edges()
+		if t.is_empty() or seen.has(t.to_lower()):
+			continue
+		seen[t.to_lower()] = true
+		_type_filter.add_item(t)
+		if t == previous:
+			_type_filter.select(_type_filter.item_count - 1)
+
+
+# The filter bar's current state as the filter_rows() dictionary.
+func _filter_state() -> Dictionary:
+	var type_text := ""
+	if _type_filter != null and _type_filter.selected > 0:
+		type_text = _type_filter.get_item_text(_type_filter.selected)
+	return {
+		"text": _filter_edit.text if _filter_edit != null else "",
+		"game_type": type_text,
+		"hide_full": _hide_full_check != null and _hide_full_check.button_pressed,
+		"hide_empty": _hide_empty_check != null and _hide_empty_check.button_pressed,
+		"hide_locked": _hide_locked_check != null and _hide_locked_check.button_pressed,
+	}
+
+
+# Re-derive the visible table from the full row set: filter, sort, repopulate,
+# and keep the selection on the same rid when it survives the rebuild.
+func _rebuild_view() -> void:
+	if _server_tree == null:
+		return
+	var selected_rid := -1
+	var selected_row := _selected_row()
+	if not selected_row.is_empty():
+		selected_rid = int(selected_row.get("rid", -1))
+	_view = sort_rows(filter_rows(_rows, _filter_state()),
+			_sort_column, _sort_ascending, _pings)
+	_server_tree.clear()
+	var root := _server_tree.create_item()
+	var reselected := false
+	for row in _view:
+		var item := _server_tree.create_item(root)
+		var cells := row_cells(row, _ping_for(row))
+		for c in cells.size():
+			item.set_text(c, cells[c])
+		item.set_tooltip_text(Column.NAME, server_row_tooltip(row))
+		item.set_metadata(0, row)
+		if int((row as Dictionary).get("rid", -2)) == selected_rid:
+			item.select(Column.NAME)
+			reselected = true
+	if _view.is_empty():
+		var placeholder := _server_tree.create_item(root)
+		placeholder.set_text(Column.NAME, "No games are being hosted yet." \
+				if _rows.is_empty() else "No servers match the filters.")
+		for c in COLUMN_TITLES.size():
+			placeholder.set_selectable(c, false)
+	if not reselected:
+		_join_button.disabled = true
+		_show_details({})
+
+
+func _ping_for(row: Dictionary):
+	return _pings.get(int(row.get("rid", -1)))
+
+
+func _on_column_title_clicked(column: int, _mouse_button_index: int) -> void:
+	if column == _sort_column:
+		_sort_ascending = not _sort_ascending
+	else:
+		_sort_column = column
+		_sort_ascending = true
+	_rebuild_view()
+
+
+func _on_refresh_pressed() -> void:
+	if _client == null:
+		return
+	_set_status("Refreshing the server list...")
+	_client.refresh_servers()
+
+
+# A ping pass landed: refresh the ping cells in place (a ping-sorted view
+# re-sorts instead).
+func _on_server_pings_updated() -> void:
+	if _client == null:
+		return
+	_pings = _client.get_server_pings()
+	if _sort_column == Column.PING:
+		_rebuild_view()
+		return
+	if _server_tree == null or _server_tree.get_root() == null:
+		return
+	var item := _server_tree.get_root().get_first_child()
+	while item != null:
+		var row = item.get_metadata(0)
+		if row is Dictionary:
+			item.set_text(Column.PING, ping_text(_ping_for(row)))
+		item = item.get_next()
+
+
+# --- The pure row helpers (tests drive these on literal dictionaries) --------
+
+## True when the row advertises a password or a lock.
+static func row_is_locked(row: Dictionary) -> bool:
+	return String(row.get("password", "N")) == "Y" \
+			or String(row.get("locked", "N")) == "Y"
+
+
+## The ping cell's text: in flight (null) shows "...", the sweep's failed (-2)
+## and never-attempted (-3) codes show "N/A", a round-trip shows milliseconds.
+static func ping_text(ping) -> String:
+	if ping == null:
+		return "..."
+	var value := int(ping)
+	if value < 0:
+		return "N/A"
+	return str(value)
+
+
+## One table row's cells, in Column order.
+static func row_cells(row: Dictionary, ping) -> PackedStringArray:
+	return PackedStringArray([
+		String(row.get("name", "server")),
+		String(row.get("mission_name", "")),
+		"%d/%d" % [int(row.get("players", 0)), int(row.get("max_players", 0))],
+		String(row.get("game_type", "")),
+		ping_text(ping),
+		String(row.get("exp", "")),
+		"[L]" if row_is_locked(row) else "",
+	])
+
+
+## The filter pass. `filters` keys (all optional): `text` — case-insensitive
+## substring over name/map/mod; `game_type` — exact type ("" = all);
+## `hide_full` / `hide_empty` / `hide_locked` — the quick filters.
+static func filter_rows(rows: Array, filters: Dictionary) -> Array:
+	var text := String(filters.get("text", "")).strip_edges().to_lower()
+	var game_type := String(filters.get("game_type", "")).strip_edges()
+	var hide_full := bool(filters.get("hide_full", false))
+	var hide_empty := bool(filters.get("hide_empty", false))
+	var hide_locked := bool(filters.get("hide_locked", false))
+	var out: Array = []
+	for entry in rows:
+		var row := entry as Dictionary
+		if not text.is_empty():
+			var haystack := "%s\n%s\n%s" % [String(row.get("name", "")),
+					String(row.get("mission_name", "")), String(row.get("mod", ""))]
+			if not haystack.to_lower().contains(text):
+				continue
+		if not game_type.is_empty() \
+				and String(row.get("game_type", "")).nocasecmp_to(game_type) != 0:
+			continue
+		var players := int(row.get("players", 0))
+		if hide_full and players >= int(row.get("max_players", 0)):
+			continue
+		if hide_empty and players <= 0:
+			continue
+		if hide_locked and row_is_locked(row):
+			continue
+		out.append(row)
+	return out
+
+
+## The sort pass: PLAYERS and PING compare numerically (an unmeasured/failed
+## ping always sorts last, either direction), everything else compares
+## case-insensitively with the server name as the tiebreak.
+static func sort_rows(rows: Array, column: int, ascending: bool,
+		pings: Dictionary) -> Array:
+	var out := rows.duplicate()
+	var direction := 1 if ascending else -1
+	out.sort_custom(func(a, b) -> bool:
+		var ra := a as Dictionary
+		var rb := b as Dictionary
+		var cmp := 0
+		match column:
+			Column.PLAYERS:
+				cmp = signi(int(ra.get("players", 0)) - int(rb.get("players", 0)))
+			Column.PING:
+				var pa = pings.get(int(ra.get("rid", -1)))
+				var pb = pings.get(int(rb.get("rid", -1)))
+				var va := int(pa) if pa != null and int(pa) >= 0 else 0x7FFFFFFF
+				var vb := int(pb) if pb != null and int(pb) >= 0 else 0x7FFFFFFF
+				if va == 0x7FFFFFFF and vb == 0x7FFFFFFF:
+					cmp = 0
+				elif va == 0x7FFFFFFF or vb == 0x7FFFFFFF:
+					# Unmeasured sorts last regardless of direction.
+					return vb == 0x7FFFFFFF
+				else:
+					cmp = signi(va - vb)
+			Column.LOCK:
+				cmp = signi(int(row_is_locked(ra)) - int(row_is_locked(rb)))
+			_:
+				var key := "name"
+				match column:
+					Column.MISSION: key = "mission_name"
+					Column.TYPE: key = "game_type"
+					Column.EXP: key = "exp"
+				cmp = String(ra.get(key, "")).nocasecmp_to(String(rb.get(key, "")))
+		if cmp == 0:
+			cmp = String(ra.get("name", "")).nocasecmp_to(String(rb.get("name", "")))
+		return cmp * direction < 0)
+	return out
+
+
+## The details pane's labeled lines for one row (empty fields are skipped).
+static func server_details_lines(row: Dictionary) -> PackedStringArray:
+	# A plain Array so the lambda appends through the captured reference
+	# (PackedStringArray is a value type and would capture as a copy).
+	var lines: Array = []
+	var push := func(label: String, value: String) -> void:
+		if not value.strip_edges().is_empty():
+			lines.append("%s: %s" % [label, value])
+	push.call("Server", String(row.get("name", "")))
+	push.call("Message", String(row.get("msg", "")))
+	push.call("Map", String(row.get("mission_name", "")))
+	push.call("Type", String(row.get("game_type", "")))
+	lines.append("Players: %d/%d" % [
+		int(row.get("players", 0)), int(row.get("max_players", 0))])
+	push.call("Mod", String(row.get("mod", "")))
+	push.call("Version", String(row.get("ver1", "")))
+	push.call("Expansion", String(row.get("exp", "")))
+	push.call("Region", String(row.get("region", "")))
+	push.call("Country", String(row.get("country", "")))
+	push.call("Time of day", String(row.get("time_of_day", "")))
+	push.call("Time left", String(row.get("time_left", "")))
+	push.call("Level range", String(row.get("level_range", "")))
+	if String(row.get("dedicated", "N")) == "Y":
+		lines.append("Dedicated server")
+	if String(row.get("pb_server", "")) == "Y":
+		lines.append("PunkBuster on")
+	if row_is_locked(row):
+		lines.append("Password protected")
+	return PackedStringArray(lines)
+
+
+# Hover details for a browser row: the locale/address fields that don't fit
+# the table cells.
 func server_row_tooltip(row: Dictionary) -> String:
 	var parts := PackedStringArray()
 	var mission := String(row.get("mission_name", ""))
@@ -316,10 +639,39 @@ func _on_server_list_updated(_updated: Array) -> void:
 	_refresh_servers()
 
 
-# Enable Join only for a real server row (the placeholder "No games..." item has
-# no backing row).
-func _on_server_selected(index: int) -> void:
-	_join_button.disabled = index < 0 or index >= _rows.size()
+# The table's selected row's backing dictionary, or {} when nothing real is
+# selected (the placeholder row carries no metadata).
+func _selected_row() -> Dictionary:
+	if _server_tree == null:
+		return {}
+	var item := _server_tree.get_selected()
+	if item == null:
+		return {}
+	var row = item.get_metadata(0)
+	return row if row is Dictionary else {}
+
+
+func _on_server_selected() -> void:
+	var row := _selected_row()
+	_join_button.disabled = row.is_empty()
+	_show_details(row)
+
+
+# The details pane: the labeled facts plus the live player roster.
+func _show_details(row: Dictionary) -> void:
+	if _details_label == null:
+		return
+	if row.is_empty():
+		_details_label.text = "Select a server for details."
+		_roster_list.clear()
+		return
+	_details_label.text = "\n".join(server_details_lines(row))
+	_roster_list.clear()
+	var roster: PackedStringArray = row.get("player_names", PackedStringArray())
+	for player in roster:
+		_roster_list.add_item(player)
+	if roster.is_empty():
+		_roster_list.add_item("(no players reported)")
 
 
 # --- Login (ADR 0010 Phase 3) -------------------------------------------
@@ -378,14 +730,10 @@ func _on_login_failed(reason: String) -> void:
 # --- Join (ADR 0010 Phase 5) --------------------------------------------
 
 func _on_join_pressed() -> void:
-	var selected := _server_list.get_selected_items()
-	if selected.is_empty():
+	var row := _selected_row()
+	if row.is_empty():
 		_set_status("Select a server to join.")
 		return
-	var index := int(selected[0])
-	if index < 0 or index >= _rows.size():
-		return
-	var row: Dictionary = _rows[index]
 	var rid := int(row.get("rid", 0))
 	# Browse-time expansion advisory: warn BEFORE the join when the row's
 	# advertised expansion cannot be honored locally, instead of letting the
@@ -484,6 +832,52 @@ func _populate_missions() -> void:
 func build_ui_for_target(target: int) -> void:
 	_target = target
 	_build_ui()
+
+
+## Install a literal row set (no client) and derive the view — the browser-table
+## test seam.
+func set_rows_for_test(rows: Array) -> void:
+	_rows = rows
+	_rebuild_type_filter()
+	_rebuild_view()
+
+
+## Install ping results (rid -> ping) — the ping-column test seam.
+func set_pings_for_test(pings: Dictionary) -> void:
+	_pings = pings
+	_rebuild_view()
+
+
+## The visible (filtered + sorted) rows, in table order.
+func visible_rows() -> Array:
+	return _view
+
+
+## One visible table cell's text.
+func visible_cell(row: int, column: int) -> String:
+	if row < 0 or row >= _view.size():
+		return ""
+	return row_cells(_view[row], _ping_for(_view[row]))[column]
+
+
+## Drive the filter bar (the controls, so the real signal path rebuilds).
+func apply_filter_for_test(text: String, hide_full: bool, hide_empty: bool,
+		hide_locked: bool) -> void:
+	_filter_edit.text = text
+	_hide_full_check.button_pressed = hide_full
+	_hide_empty_check.button_pressed = hide_empty
+	_hide_locked_check.button_pressed = hide_locked
+	_rebuild_view()
+
+
+## Drive a column-header click (sort toggle).
+func click_column_for_test(column: int) -> void:
+	_on_column_title_clicked(column, MOUSE_BUTTON_LEFT)
+
+
+## The details pane's current text.
+func details_text() -> String:
+	return _details_label.text if _details_label != null else ""
 
 
 func mission_count() -> int:
