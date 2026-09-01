@@ -972,6 +972,9 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         CandidateSlice slice;
         slice.start = static_cast<int32_t>(wire_arena_.size());
         slice.count = 0;
+        slice.built_pos[0] = position_q16.x;
+        slice.built_pos[1] = position_q16.y;
+        slice.built_pos[2] = position_q16.z;
         for (const DynSlot &d : dynamics_) {
             if (registry_twin.valid() && d.h == registry_twin) continue;
             const int32_t total = range + d.radius;

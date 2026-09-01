@@ -65,6 +65,10 @@ void WirePresentPass::set_render_culled(int p_handle, bool p_culled) {
 	if (applier_.is_valid()) applier_->set_wire_render_culled(p_handle, p_culled);
 }
 
+void WirePresentPass::clear_render_culled() {
+	if (applier_.is_valid()) applier_->clear_wire_render_culled();
+}
+
 void WirePresentPass::set_cold_spawn_budget(int p_budget) {
 	cold_spawn_budget_ = MAX(1, p_budget);
 }
@@ -528,6 +532,8 @@ void WirePresentPass::_bind_methods() {
 			&WirePresentPass::set_synthetic_origin_only);
 	ClassDB::bind_method(D_METHOD("set_render_culled", "wire_handle", "culled"),
 			&WirePresentPass::set_render_culled);
+	ClassDB::bind_method(D_METHOD("clear_render_culled"),
+			&WirePresentPass::clear_render_culled);
 	ClassDB::bind_method(D_METHOD("set_cold_spawn_budget", "budget"),
 			&WirePresentPass::set_cold_spawn_budget);
 	ClassDB::bind_method(D_METHOD("set_spectator_camera", "camera"),

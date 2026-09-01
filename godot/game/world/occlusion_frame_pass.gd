@@ -413,6 +413,16 @@ func rebind_placed_nodes() -> void:
 	_reset_apply_baseline()
 
 
+# The wire pass's applied render-gate verdicts pair with the sim's baseline:
+# both forget together, so the next frame's full re-emit lands on a clean set.
+func _clear_wire_render_culled() -> void:
+	var runtime: MissionPresentation = _world.get_runtime()
+	var wire_present: WirePresentPass = runtime.get_wire_presenter() \
+			if runtime != null else null
+	if wire_present != null:
+		wire_present.clear_render_culled()
+
+
 # The cache holds only ObjectModels; entries revalidate for LIVENESS on use.
 func _occlusion_hidden_release_node(bms_id: int) -> ObjectModel:
 	var cached: Variant = _occlusion_node_cache.get(bms_id)
@@ -425,6 +435,7 @@ func _reset_apply_baseline() -> void:
 	var sim := _occlusion_sim()
 	if sim != null:
 		sim.reset_occlusion_apply_baseline()
+	_clear_wire_render_culled()
 
 
 ## Unload teardown. The ordering replicates the pre-extraction unload EXACTLY:

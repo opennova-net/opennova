@@ -98,8 +98,10 @@ inline uint16_t wire_carrier_exclusion_for(
 }
 
 // The joiner pump's phase attribution (microseconds; the F3 Stats board's
-// joiner rows). Filled only when the embedder hands pump() a record; each
-// pump ADDS onto it so the shell keeps one record per render frame.
+// joiner rows). Filled only when the embedder hands pump() a record: the
+// span fields ADD per pump (the shell keeps one record per render frame);
+// `world` and `client` are assigned per tick by the passes they time, so the
+// embedder folds them after every pump.
 struct JoinerPumpPerf {
 	uint64_t materialize_us = 0; // stream materialize + decoded-state folds
 	uint64_t mirror_us = 0;      // wire pose -> registry mirror (both passes)
@@ -275,6 +277,9 @@ public:
 		started_ = false;
 		weather_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
+		replica_peer_scratch_src_ = nullptr;
+		replica_peer_scratch_count_ = 0;
+		replica_peer_scratch_tick_ = 0;
 	}
 	// Stop/Start restart with a live wire-header world: force one exact
 	// rematerialization fold; the portal tables persist by design (their

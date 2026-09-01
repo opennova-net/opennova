@@ -856,7 +856,7 @@ void CollisionWorld::stage_replica_peer_index(const ReplicaPeer *peers,
     index.count = count;
     index.tick = tick;
     index.max_radius = 0;
-    for (auto &cell : index.cells) cell.second.clear();
+    index.cells.clear(); // keys follow the rows; retaining them would grow with every cell ever visited
     for (int32_t i = 0; i < count; ++i) {
         const ReplicaPeer &p = peers[i];
         if (p.radius > index.max_radius) index.max_radius = p.radius;
@@ -882,19 +882,32 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     // on the 17-tick edge — the client's wire-built persons included — and the
     // movement resolver walks that slice, up to 16 ticks stale by design
     // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0 behind the
-    // g_ProxSliceRefreshCounter >= 0x10 gate @ 0x4c240f]. build_tables keeps
+    // g_ProxSliceRefreshCounter >= 0x10 gate in Entity_UpdateAllEntities
+    // @ 0x4c240f]. build_tables keeps
     // exactly that slice per wire person proxy (wire_candidates_, the pool-0
     // rule: source bound + 4.0 u pad), so a resolved row reads it here. A row
     // no edge has seen yet (it arrived between edges) builds the same slice
-    // ad hoc at the query position.
+    // ad hoc at the query position, and so does a row that has moved past
+    // the pad since its slice was built: retail rebuilds every list on the
+    // spawn/teleport edges that make such a jump [orig: the
+    // Entity_BuildProximityListsFromPools callers Entity_ResetToSpawnState
+    // @ 0x4b98eb, Entity_RespawnVehicle @ 0x460133, WacCmd_Tele @ 0x4f2384,
+    // WacCmd_TeleSsn @ 0x4f7f48, EventAction_TeleportEntityToSpawn @ 0x43e14f].
     const size_t arena_mark = arena_.size();
     const int32_t range = source_bound_radius_q16 + 0x40000;
     CandidateSlice slice;
     slice.start = static_cast<int32_t>(arena_.size());
     slice.count = 0;
-    const auto wire_slice = candidate_slices_built_
+    auto wire_slice = candidate_slices_built_
             ? wire_candidates_.find(exclude_handle)
             : wire_candidates_.end();
+    if (wire_slice != wire_candidates_.end()) {
+        const CandidateSlice &w = wire_slice->second;
+        if (abs32(pos[0] - w.built_pos[0]) > 0x40000 ||
+            abs32(pos[1] - w.built_pos[1]) > 0x40000 ||
+            abs32(pos[2] - w.built_pos[2]) > 0x40000)
+            wire_slice = wire_candidates_.end();
+    }
     if (wire_slice != wire_candidates_.end()) {
         const CandidateSlice &w = wire_slice->second;
         for (int32_t i = 0; i < w.count; ++i)

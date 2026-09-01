@@ -124,6 +124,7 @@ public:
 	void release_wire_handle(int handle);
 	// The occlusion frame's render-gate verdict for a wire row.
 	void set_wire_render_culled(int handle, bool culled);
+	void clear_wire_render_culled() { wire_render_culled_.clear(); }
 	void reset_wire_runtime_state();
 
 	// Third-person held-weapon placement — the ONE home (the witnessed

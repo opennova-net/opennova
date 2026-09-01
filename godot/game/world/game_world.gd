@@ -1177,6 +1177,13 @@ func _place_streamed_mission_objects(sim: Simulation) -> void:
 		_runtime.rebind_placed_entities(_placer)
 	if _occlusion != null:
 		_occlusion.rebind_placed_nodes()
+	# The authored .def item effects and effect lights attached at load against
+	# an empty placer; re-attach against the placed sources (the same pair the
+	# effect-catalog warm-up re-runs).
+	if _item_fx != null:
+		_item_fx.reattach()
+	if _light_director != null:
+		_light_director.reattach()
 	print_verbose("GameWorld: placed %d streamed mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.placed),
 		int(_mission_stats.batched),

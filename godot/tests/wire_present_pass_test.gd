@@ -591,6 +591,15 @@ func test_render_culled_row_hides_and_skips_legs_until_released() -> void:
 	assert_almost_eq(avatar.position.x, 9.0, 0.001,
 			"the transform leg re-asserts the current wire pose on release")
 
+	# The verdict pairs with the sim's applied baseline: a baseline reset
+	# forgets every verdict at once, and the next frame re-emits the full set.
+	p.set_render_culled(2, true)
+	_present(p, snap)
+	assert_false(avatar.visible)
+	p.clear_render_culled()
+	_present(p, snap)
+	assert_true(avatar.visible, "clearing the verdicts releases the row")
+
 
 func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> void:
 	var container := _container()

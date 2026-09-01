@@ -56,11 +56,17 @@ public:
 	// through its mission placer.
 	std::vector<StreamedPlacementRecord> placement_records(
 			const world::World &world) const;
+	// Placed identities whose slot was retired or re-typed since the last
+	// take: the shell hides their placed representation (a re-typed slot's
+	// new occupant is wire-direct). A same-type re-spawn of a stamped slot
+	// keeps its identity instead, so its placed node keeps drawing it.
+	std::vector<int32_t> take_retired_placement_ids();
 	world::Entity *owned(world::World &world, world::EntityHandle handle) const;
 	const world::Entity *owned(
 			const world::World &world, world::EntityHandle handle) const;
 	void clear() {
 		materialized_rows_.clear();
+		retired_placement_ids_.clear();
 		for (int &next : placement_index_next_) next = 0;
 	}
 
@@ -73,7 +79,12 @@ private:
 		// retail slot once per native lifetime. Live mount updates own it after
 		// that point; unset bits allow definitions that arrive later to catch up.
 		uint16_t projected_mount_slots = 0;
+		// The placed identity stamped at the fence (kSpawnOriginNone / 0 =
+		// none), carried across same-type re-spawns of this slot.
+		uint32_t spawn_origin = 0xFFFFFFFFu;
+		int32_t bms_id = 0;
 	};
+	std::vector<int32_t> retired_placement_ids_;
 	std::unordered_map<uint16_t, MaterializedRow> materialized_rows_;
 	// The next spawn_origin index per kind (Marker/Item/Building/Organic).
 	int placement_index_next_[4] = {0, 0, 0, 0};
