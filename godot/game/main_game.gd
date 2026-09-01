@@ -86,6 +86,12 @@ var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion: PlayerInfoMenuCompanion  # drives the PLAYER_INFO (player.mnu) character screen
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
+# The deploy-map OVERLAY's once-per-mission open latch (retail dword_24C1894):
+# the frame loop opens death.mnu once off the host-driven overlay bit; a wave
+# host keeps the bit set all session, and only this latch stops a re-open after
+# the player dismisses. Reset at mission start. [orig: the latch
+# Render_ProcessMainSceneFrame @0x5cab8b; reset Game_StartMission @0x525b31]
+var _deploy_overlay_latched := false
 var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
 var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
@@ -700,6 +706,7 @@ func _begin_world_load() -> void:
 	_shell_presentation.begin_world_load(
 			_menu_shell, _world, _hud, _on_world_loaded, _on_world_load_failed)
 	_state = State.WORLD
+	_deploy_overlay_latched = false  # [orig: Game_StartMission @0x525b31]
 	_refresh_dev_tools_game_state()
 
 
@@ -780,6 +787,27 @@ func _on_join_deploy_pick_required() -> void:
 ## [orig: Server_TickUpdate linger drain @0x51da04..; g_mission_exit_reason = 3
 ##  @0x51db63; every exit reason lands on the same teardown + nav push
 ##  @0x568654. SP mission end runs the epilog flow instead.]
+# Retail's frame loop opens death.mnu's DEATH screen ONCE when the host drives
+# the deploy-map overlay (0x0F game_flags bit0 / per-frame 0x0A flags1 bit1),
+# latched until the next mission start; the open is suppressed while any other
+# screen is up. Closing is the presenter's own affair (both triggers gone, or
+# the player's dismiss) — the latch only stops a re-open, exactly why a wave
+# host keeping the bit set all session shows the screen once.
+# [orig: Render_ProcessMainSceneFrame open @0x5cab5e (gated on no active menu
+#  @0x5cab67 and the spawn-success gate @0x24C1928) + the latch @0x5cab8b]
+func _maybe_open_deploy_overlay() -> void:
+	if _deploy_overlay_latched or _state != State.WORLD or _world_load_pending:
+		return
+	var sim: Simulation = _world.get_sim()
+	if sim == null or not bool(sim.is_join_deploy_overlay_active()):
+		return
+	# Latch even on a failed open (retail stamps the latch right after the
+	# UI_OpenMenuScreen call, result-blind @0x5cab8b) — a missing death.mnu must
+	# not retry-warn every frame.
+	_deploy_overlay_latched = true
+	_deploy_presenter.open()
+
+
 func _maybe_exit_round_cycle() -> void:
 	if _state == State.MENU or _world_load_pending or _world == null:
 		return
@@ -1084,6 +1112,7 @@ func _process(delta: float) -> void:
 		_hud_presenter.tick(is_gameplay_input_active())
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
+	_maybe_open_deploy_overlay()
 	_maybe_exit_round_cycle()
 	if timing:
 		_frame_phase_sampler.record_shell_spans(

@@ -1080,7 +1080,9 @@ tooling described in §5.25. The complete contract is:
   **3** HK mismatch (`reported_addr != proto+1332` @0x62bdd5), **4** server
   password (`proto+768 != PW` @0x62be18), **7** PV2 mismatch (`proto+364 != PV2`
   @0x62be40), **5** empty NA (@0x62be7d), **6** server not accepting
-  (`proto[503]` @0x62be8f), **9/10/15** the CU-block overflow arms. The `NVS`/
+  (`proto[503]` @0x62be8f), **9/10/15** the CU-block overflow arms (a CU value
+  past 2048 bytes / past 64 chunks), **11** a CU chunk `NapiNPChunk_Create`
+  refused ("NP.C:PCCR:CCH[1]" @0x62c14e). The `NVS`/
   `PN`/`PG`/`PV1` identity checks ABOVE these `return 0` with NO 0x82 (a silent
   drop), so a client that receives a CR=0 JFC at all has already passed them.
   **PV2 (JFC=7) is witnessed live** (server "THOR THUNDER", 2026-08-31): the

@@ -71,6 +71,25 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::PER_FRAME_UPDATE:
 		apply_frame_update(body);
 		break;
+	case s2c::WORLD_STATE_LOAD: {
+		// The 0x0F's client-global fold modeled here: the deploy-map overlay is
+		// zeroed, then armed from game_flags bit0 UNLESS the death screen is
+		// already up. (The spawn pose / completion burst / waypoint legs live on
+		// JoinerConnection; this reducer owns only the retained client globals.)
+		// [orig: NapiNPClientMsg_0x00F — g_deploy_screen_active = 0 @0x42e2d8;
+		//  `if (game_flags & 1) g_deploy_screen_active = !g_death_screen_active`
+		//  @0x42e2f8]
+		WorldStateLoad wsl;
+		if (decode_world_state_load(body.data(), body.size(), wsl,
+				game_type::is_waypoint_family(game_type_))) {
+			state_.deploy_overlay_active =
+					(wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active;
+			state_.mark_changed();
+		} else {
+			++unknown_tags_;
+		}
+		break;
+	}
 	case s2c::WEAPON_RELOAD: { // reload echo (same four-byte body as c2s::WEAPON_RELOAD_REQUEST)
 		WeaponReload reload;
 		size_t consumed = 0;
@@ -1946,6 +1965,10 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;
 	state_.anchor_z = fu.anchor_z;
+	// The deploy-map overlay follows the host every frame — set AND cleared
+	// by assignment, not edges [orig: NapiNPClientMsg_0x00A @0x42ff82 —
+	// g_deploy_screen_active = (flags1 >> 1) & 1].
+	state_.deploy_overlay_active = (fu.flags1 & 0x02u) != 0;
 	// The death-screen edges on flags1 bit 0 [orig: @0x42ff88..0x43002b].
 	{
 		const bool bit = (fu.flags1 & 0x01u) != 0;
