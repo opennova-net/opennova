@@ -630,6 +630,22 @@ func test_wire_header_missing_asset_reason_names_the_install() -> void:
 			"the reason names the installed expansion set")
 
 
+# The env presenters hand their clocks to GameFramePipeline at _ready: their
+# idle callbacks stay off under a live world, or their cost leaves the
+# measured WORLD_ENV_NODES/WORLD_WATER legs for the unmeasured
+# process-callbacks window and the advance races the camera placement
+# (game_world.gd's _env_presenters_world_driven handoff; D-RORD-8's ordering).
+func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	for presenter_name in ["Weather", "SkyDome", "Celestial", "Water", "SunShadow"]:
+		var presenter := world.get_node_or_null(NodePath(presenter_name)) as Node
+		assert_not_null(presenter, "%s exists under the world" % presenter_name)
+		if presenter != null:
+			assert_false(presenter.is_processing(),
+					"%s must be pipeline-clocked, never self-clocked" % presenter_name)
+
+
 func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
