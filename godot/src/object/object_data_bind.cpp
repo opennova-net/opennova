@@ -2,6 +2,7 @@
 // and evaluation plus the whole-content replacement signal.
 #include "object/object_data_internal.h"
 #include "object/model_light.h"
+#include "object/model_inspection_records.h"
 #include "object/model_user_point.h"
 
 using namespace novaobj;
@@ -22,7 +23,7 @@ void ObjectData::_bind_methods() {
 			&ObjectData::network_challenge_model_count);
 	ClassDB::bind_method(D_METHOD("get_source_path"), &ObjectData::get_source_path);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &ObjectData::get_last_error);
-	ClassDB::bind_method(D_METHOD("get_summary"), &ObjectData::get_summary);
+	ClassDB::bind_method(D_METHOD("get_lod_count"), &ObjectData::get_lod_count);
 	ClassDB::bind_method(D_METHOD("get_materials"), &ObjectData::get_materials);
 	ClassDB::bind_method(D_METHOD("get_material_info", "index"), &ObjectData::get_material_info);
 	ClassDB::bind_method(D_METHOD("get_control_registers"), &ObjectData::get_control_registers);

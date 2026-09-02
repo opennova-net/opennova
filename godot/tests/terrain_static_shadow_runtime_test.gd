@@ -302,7 +302,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	# same house rows with that one authored change, reloaded into the
 	# registered ObjectData so the projector sees a document change.
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE_UV1)), OK)
-	assert_eq(int(object_data.get_material_info(0).get("uv_u_style", -1)), 1,
+	assert_eq(object_data.get_material_info(0).uv_u_style, 1,
 		"the fixture must expose a time/control-driven UV mutation")
 	var animated_uv := await _settle_tile_cache(terrain)
 	assert_eq(int(animated_uv["shadow_provider_epoch_plan_failures"]), 0,
@@ -317,7 +317,7 @@ func test_resolved_static_caster_changes_only_resident_page_alpha() -> void:
 	assert_gt(int(animated_uv["shadow_provider_epoch_triangles"]), 0,
 		"the dynamically transformed material must still submit its silhouettes")
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_SINE)), OK)
-	assert_eq(int(object_data.get_material_info(0).get("uv_u_style", -1)), 0)
+	assert_eq(object_data.get_material_info(0).uv_u_style, 0)
 	var restored_material := await _settle_tile_cache(terrain)
 	assert_eq(int(restored_material["shadow_provider_epoch_plan_failures"]), 0,
 		"restoring a supported static material must make every page plan exact again")
@@ -460,10 +460,10 @@ func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames
 	# alpha-sampled material: the evaluated UV translation moves every 1/256 s.
 	var object_data := ObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(SYN_HOUSE_UVSCROLL)), OK)
-	var material: Dictionary = object_data.get_material_info(0)
-	assert_true(bool(material.get("alpha_test_enabled", false)))
-	assert_eq(int(material.get("uv_u_style", -1)), 16)
-	assert_almost_eq(float(material.get("uv_u_rate", 0.0)), 1.0, 0.0001)
+	var material := object_data.get_material_info(0)
+	assert_true(material.alpha_test_enabled)
+	assert_eq(material.uv_u_style, 16)
+	assert_almost_eq(material.uv_u_rate, 1.0, 0.0001)
 	var placer := MissionObjectPlacer.create(null, null)
 	assert_true(placer.register_object_data("house", object_data))
 	var origin := Vector3(64.0, 0.0, 64.0)
@@ -512,12 +512,12 @@ func test_retail_scrate1_constant_alpha_does_not_reject_opaque_projshad() -> voi
 			resource_root, "Scrate1.3di", false), OK,
 		"Scrate1 must resolve from the mounted retail archives")
 	var material := object_data.get_material_info(0)
-	assert_eq(String(material.get("shader_tag", "")), "FF_ST_OP")
-	assert_eq(int(material.get("alpha_gen_style", 0)), 24,
+	assert_eq(material.shader_tag, "FF_ST_OP")
+	assert_eq(material.alpha_gen_style, 24,
 		"Scrate1 authors retail's constant AlphaGen style")
-	assert_eq(int(material.get("alpha_gen_start", -1)), 128,
+	assert_eq(material.alpha_gen_start, 128,
 		"the constant generator supplies 128/255 material alpha")
-	assert_false(bool(material.get("alpha_test_enabled", true)))
+	assert_false(material.alpha_test_enabled)
 
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(320, 180)

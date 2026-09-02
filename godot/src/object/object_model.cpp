@@ -3,6 +3,7 @@
 // Ported verbatim from object_model.gd (2026-08-09 de-scripting).
 
 #include "object/object_model.h"
+#include "object/model_inspection_records.h"
 #include "object/model_light.h"
 
 #include <cmath>
@@ -1267,8 +1268,7 @@ int ObjectModel::clamp_lod_index(int p_lod_index) const {
 	if (object_data_.is_null() || !object_data_->has_document()) {
 		return 0;
 	}
-	const Dictionary summary = object_data_->get_summary();
-	const int lod_count = int(summary.get("lod_count", 1));
+	const int lod_count = object_data_->get_lod_count();
 	return CLAMP(p_lod_index, 0, MAX(lod_count - 1, 0));
 }
 
@@ -1839,6 +1839,8 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_part_anims"), &ObjectModel::clear_part_anims);
 	ClassDB::bind_method(D_METHOD("get_active_part_anims"),
 			&ObjectModel::get_active_part_anims);
+	ClassDB::bind_method(D_METHOD("get_active_part_anim", "register"),
+			&ObjectModel::get_active_part_anim);
 	ClassDB::bind_method(D_METHOD("set_weapon_channel", "key", "phase_ticks",
 								 "prev_key", "prev_phase_ticks", "blend_weight",
 								 "variant", "prev_variant"),

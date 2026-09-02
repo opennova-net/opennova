@@ -66,16 +66,16 @@ func test_same_time_noise_calls_sample_each_graphic_instance_independently() -> 
 	assert_gt(data.get_part_anim_count(0), 0,
 			"the fixture carries the LOD0 row turned into a noise probe")
 	var anim := 0
-	var info: Dictionary = data.get_part_anim_info(0, anim)
-	var target_part := int(info.get("transform_as", -1))
-	var part_count := int(data.get_render_lod_info(0).get("part_count", 0))
+	var info := data.get_part_anim_info(0, anim)
+	var target_part := info.transform_as
+	var part_count := data.get_render_lod_info(0).part_count
 	assert_between(target_part, 0, part_count - 1)
 	if target_part < 0 or target_part >= part_count:
 		return
-	var translation: Dictionary = info.get("translation", {})
-	assert_eq(int(translation.get("control", 0)), 0x36,
+	var translation := info.translation
+	assert_eq(translation.control, 0x36,
 			"the fixture authors the translation track as the rand()-backed wave")
-	assert_eq(int(translation.get("end", 0)), 32767)
+	assert_eq(translation.end, 32767)
 
 	var first_nodes := _nodes(part_count)
 	var second_nodes := _nodes(part_count)

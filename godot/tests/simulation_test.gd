@@ -3103,9 +3103,9 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_eq(String((object_data.get_control_registers()[0] as Dictionary).get("name", "")),
 			"HEAT_GLOW")
 	assert_eq(object_data.get_part_anim_count(0), 1)
-	var slide: Dictionary = object_data.get_part_anim_info(0, 0)
-	assert_eq(int(slide.get("transform_as", -1)), 1)
-	assert_eq(int((slide.get("translation", {}) as Dictionary).get("control", 0)), 113,
+	var slide := object_data.get_part_anim_info(0, 0)
+	assert_eq(slide.transform_as, 1)
+	assert_eq(slide.translation.control, 113,
 			"the fixture authors a register-driven translation track on part 1")
 
 	var md := MissionData.new()
@@ -4464,7 +4464,7 @@ func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
 		SYN_PMP_LOD0_INERT_LOD1_LIVE)), OK)
-	var lod_count := int(data.get_summary().get("lod_count", 0))
+	var lod_count := data.get_lod_count()
 	assert_gt(lod_count, 1, "fixture needs a second visual LOD")
 	if lod_count <= 1:
 		return
@@ -4657,7 +4657,7 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	if anchor_part < 0:
 		return
 	assert_eq(data.get_part_anim_count(0), 1)
-	assert_eq(int(data.get_part_anim_info(0, 0).get("transform_as", -1)), anchor_part,
+	assert_eq(data.get_part_anim_info(0, 0).transform_as, anchor_part,
 			"the fixture slides exactly the part that owns ewep01")
 
 	var md := MissionData.new()
@@ -4808,7 +4808,7 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	assert_eq(data.open_file(ProjectSettings.globalize_path(fixture_res_path)), OK)
 	assert_eq(data.get_part_anim_count(0), 1,
 			"the fixture carries one register-driven slide of part 1")
-	assert_eq(int(data.get_part_anim_info(0, 0).get("transform_as", -1)), 1)
+	assert_eq(data.get_part_anim_info(0, 0).transform_as, 1)
 
 	var sim := Simulation.new()
 	# One fixture carries both the register-driven PANM row (CTRL 0 named
@@ -4880,7 +4880,7 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 			"VEHICLE_SPECIAL1", "the fixture authors the semantic local CTRL name")
 	assert_true(data.has_collision())
 	assert_eq(data.get_part_anim_count(0), 1)
-	assert_eq(int(data.get_part_anim_info(0, 0).get("transform_as", -1)), 1,
+	assert_eq(data.get_part_anim_info(0, 0).transform_as, 1,
 			"the fixture slides ordinal 1")
 
 	var sim := Simulation.new()
