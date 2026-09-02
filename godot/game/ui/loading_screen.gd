@@ -179,7 +179,7 @@ func present(force := false) -> void:
 	# + force_draw are the shell-side equivalents so the OS window stays live
 	# and the screen refreshes while the load blocks the main loop
 	# [orig: Game_PumpWindowMessages @ 0x586be6 + Present @ 0x586d53].
-	if is_inside_tree() and DisplayServer.get_name() != "headless":
+	if is_inside_tree() and not GameRuntimeRoot.is_headless():
 		DisplayServer.process_events()
 		RenderingServer.force_draw(true, 0.0)
 
@@ -359,7 +359,7 @@ func _splash_exit_edge() -> void:
 	# the caller's effect release @ 0x525d45].
 	_splash_frames_until_emit = 1
 	queue_redraw()
-	if not is_inside_tree() or DisplayServer.get_name() == "headless":
+	if not is_inside_tree() or GameRuntimeRoot.is_headless():
 		# No live renderer to wait on: finish on the next process tick.
 		_splash_frames_until_emit = 0
 

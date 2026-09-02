@@ -35,7 +35,7 @@ const STAGE_SIZE := Vector2i(256, 256)
 
 
 func run(ctx: ProbeContext) -> ProbeVerdict:
-	if DisplayServer.get_name() == "headless":
+	if GameRuntimeRoot.is_headless():
 		return ProbeVerdict.failed("requires a real Forward+ RenderingDevice display driver")
 	if RenderingServer.get_current_rendering_method() != "forward_plus" or \
 			RenderingServer.get_rendering_device() == null:

@@ -20,6 +20,12 @@ static func should_embed_game_view(
 	return debug_build and display_name != "headless" and imgui_available
 
 
+## The headless display server (--headless): no window, no capture, no
+## splash; the one place the display-server name is compared.
+static func is_headless() -> bool:
+	return DisplayServer.get_name() == "headless"
+
+
 func _ready() -> void:
 	if _can_embed_game_view():
 		_start_embedded_game()

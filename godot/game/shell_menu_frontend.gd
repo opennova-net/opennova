@@ -82,7 +82,7 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 
 
 func request_resource_dir() -> void:
-	if DisplayServer.get_name() == "headless" or _shell._picker != null:
+	if GameRuntimeRoot.is_headless() or _shell._picker != null:
 		return
 	var picker := FileDialog.new()
 	picker.file_mode = FileDialog.FILE_MODE_OPEN_DIR
