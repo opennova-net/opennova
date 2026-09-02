@@ -127,28 +127,26 @@ opennova::renderer::LightHandle decode_handle(int64_t token) {
 
 } // namespace
 
-int64_t LightScene::spawn_model_light(const Dictionary &p_config) {
+int64_t LightScene::spawn_model_light(const Ref<ModelLightSpawn> &p_config) {
+	if (p_config.is_null()) return 0;
 	opennova::renderer::LightSpawnParams params;
-	params.position_fixed = mission_fixed_from_godot(
-			p_config.get("position", Vector3()));
+	params.position_fixed = mission_fixed_from_godot(p_config->get_position());
 	// radius = atten_end * 65536 (the spawner scale; witness map in
 	// engine/runtime/renderer/light_scene.h).
 	params.radius_fixed = static_cast<int32_t>(Math::round(
-			static_cast<float>(p_config.get("atten_end", 0.0f)) * opennova::io::kFp16One));
+			p_config->get_atten_end() * opennova::io::kFp16One));
 	// The model-light spawn passes a white record color; the authored colors
 	// live in the gen block (light_scene.h witness map).
 	params.rgb = {255, 255, 255};
-	params.intensity = static_cast<float>(p_config.get("intensity", 1.0f));
-	const int style = static_cast<int>(p_config.get("style", 0));
+	params.intensity = p_config->get_intensity();
+	const int style = p_config->get_style();
 	if (style > 0) {
 		params.has_gen = true;
 		params.gen.style = static_cast<uint8_t>(style);
-		params.gen.phase = static_cast<uint8_t>(
-				static_cast<int>(p_config.get("phase", 0)));
-		params.gen.rate = static_cast<uint16_t>(
-				static_cast<int>(p_config.get("rate", 0)));
-		const Color start = p_config.get("color_start", Color(1, 1, 1));
-		const Color end = p_config.get("color_end", Color(1, 1, 1));
+		params.gen.phase = static_cast<uint8_t>(p_config->get_phase());
+		params.gen.rate = static_cast<uint16_t>(p_config->get_rate());
+		const Color start = p_config->get_color_start();
+		const Color end = p_config->get_color_end();
 		params.gen.color_start = {color_byte(start.b), color_byte(start.g),
 				color_byte(start.r), 255};
 		params.gen.color_end = {color_byte(end.b), color_byte(end.g),
@@ -160,50 +158,42 @@ int64_t LightScene::spawn_model_light(const Dictionary &p_config) {
 	// only — the record's attach bone, the spawning entity and whether it is a
 	// building, and the blink owner its position resolved to.
 	opennova::renderer::ModelLightOwnerInputs owner_inputs;
-	owner_inputs.attach_bone = static_cast<uint8_t>(
-			static_cast<int>(p_config.get("attach_bone", 0)) & 0xFF);
-	owner_inputs.spawning_entity = static_cast<uint64_t>(
-			static_cast<int64_t>(p_config.get("spawning_entity", 0)));
-	owner_inputs.spawner_is_building =
-			p_config.get("spawner_is_building", false);
-	owner_inputs.blink_owner_entity = static_cast<uint64_t>(
-			static_cast<int64_t>(p_config.get("blink_owner_entity", 0)));
-	owner_inputs.blink_section = static_cast<int32_t>(
-			static_cast<int>(p_config.get("blink_section", 0)));
+	owner_inputs.attach_bone = static_cast<uint8_t>(p_config->get_attach_bone() & 0xFF);
+	owner_inputs.spawning_entity = static_cast<uint64_t>(p_config->get_spawning_entity());
+	owner_inputs.spawner_is_building = p_config->get_spawner_is_building();
+	owner_inputs.blink_owner_entity = static_cast<uint64_t>(p_config->get_blink_owner_entity());
+	owner_inputs.blink_section = static_cast<int32_t>(p_config->get_blink_section());
 	owner_inputs.blink_hit = owner_inputs.blink_owner_entity != 0;
 	const opennova::renderer::ModelLightOwner owner =
 			opennova::renderer::resolve_model_light_owner(owner_inputs);
 	params.owner_entity = owner.entity;
 	params.owner_section = owner.section;
-	params.disable_corona = p_config.get("disable_corona", false);
-	params.disable_terrain = p_config.get("disable_terrain", false);
-	params.disable_objects = p_config.get("disable_objects", false);
+	params.disable_corona = p_config->get_disable_corona();
+	params.disable_terrain = p_config->get_disable_terrain();
+	params.disable_objects = p_config->get_disable_objects();
 	return encode_handle(scene_.spawn(params));
 }
 
-int64_t LightScene::spawn_glow(const Dictionary &p_config) {
+int64_t LightScene::spawn_glow(const Ref<GlowSpawn> &p_config) {
+	if (p_config.is_null()) return 0;
 	opennova::renderer::LightSpawnParams params;
-	params.position_fixed = mission_fixed_from_godot(
-			p_config.get("position", Vector3()));
+	params.position_fixed = mission_fixed_from_godot(p_config->get_position());
 	params.radius_fixed = static_cast<int32_t>(Math::round(
-			static_cast<float>(p_config.get("radius", 0.0f)) * opennova::io::kFp16One));
-	const Color color = p_config.get("color", Color(1, 1, 1));
+			p_config->get_radius() * opennova::io::kFp16One));
+	const Color color = p_config->get_color();
 	params.rgb = {color_byte(color.r), color_byte(color.g), color_byte(color.b)};
-	params.fade_mode = static_cast<int>(p_config.get("fade_mode", 1));
-	params.fade_duration = static_cast<int>(p_config.get("fade_duration", -1));
-	params.owner_entity = static_cast<uint64_t>(
-			static_cast<int64_t>(p_config.get("owner_entity", 0)));
-	params.owner_section = static_cast<int32_t>(
-			static_cast<int>(p_config.get("owner_section", 0)));
-	params.disable_corona = p_config.get("disable_corona", false);
-	params.disable_terrain = p_config.get("disable_terrain", false);
-	params.disable_objects = p_config.get("disable_objects", false);
+	params.fade_mode = p_config->get_fade_mode();
+	params.fade_duration = p_config->get_fade_duration();
+	params.owner_entity = static_cast<uint64_t>(p_config->get_owner_entity());
+	params.owner_section = static_cast<int32_t>(p_config->get_owner_section());
+	params.disable_corona = p_config->get_disable_corona();
+	params.disable_terrain = p_config->get_disable_terrain();
+	params.disable_objects = p_config->get_disable_objects();
 	// Retail render flag 0x100 (the impact flash): the corona re-centers
 	// radius/2 below the light [orig: AmmoDef_ProcessImpactEffect @0x40a2b3
 	// sets it; EffectWorld_RenderLightCoronas @0x5ab037 reads it, see
 	// docs/render/render-lighting-re.md].
-	params.corona_lower_half_radius =
-			p_config.get("corona_lower_half_radius", false);
+	params.corona_lower_half_radius = p_config->get_corona_lower_half_radius();
 	return encode_handle(scene_.spawn(params));
 }
 

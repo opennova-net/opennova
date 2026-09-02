@@ -54,10 +54,7 @@ func _barrel_light_info() -> ModelLight:
 
 func test_spawn_select_and_global_push_round_trip() -> void:
 	var scene := LightScene.new()
-	var handle := scene.spawn_model_light({
-		"position": Vector3(4.0, 1.0, -2.0),
-		"atten_end": 8.0,
-	})
+	var handle := scene.spawn_model_light(ModelLightSpawn.make(Vector3(4.0, 1.0, -2.0), 8.0))
 	assert_gt(handle, 0, "a spawned light returns an opaque positive lease")
 	assert_true(scene.is_alive(handle))
 	var selected := scene.render_frame(Vector3(4.0, 1.0, -6.0), 512.0,
@@ -89,12 +86,8 @@ func test_spawn_select_and_global_push_round_trip() -> void:
 
 func test_camera_global_object_select_admits_an_owned_muzzle_light() -> void:
 	var scene := LightScene.new()
-	var handle := scene.spawn_glow({
-		"position": Vector3(4.0, 1.0, -2.0),
-		"radius": 8.0,
-		"color": Color.WHITE,
-		"owner_entity": 77,
-	})
+	var handle := scene.spawn_glow(GlowSpawn.make(Vector3(4.0, 1.0, -2.0), 8.0, Color.WHITE)
+			.owned_by(77))
 	assert_gt(handle, 0)
 	assert_eq(scene.render_frame(Vector3(4.0, 1.0, -6.0), 512.0,
 			Vector3.ONE, 0, null), 1,
@@ -107,29 +100,17 @@ func test_camera_global_object_select_admits_an_owned_muzzle_light() -> void:
 func test_camera_global_object_select_filters_disabled_lights_before_the_cap() -> void:
 	var scene := LightScene.new()
 	for i in range(4):
-		scene.spawn_glow({
-			"position": Vector3(float(i), 0.0, 0.0),
-			"radius": 8.0,
-			"color": Color.WHITE,
-			"disable_objects": true,
-		})
+		scene.spawn_glow(GlowSpawn.make(Vector3(float(i), 0.0, 0.0), 8.0, Color.WHITE)
+				.masking(false, false, true))
 	for i in range(4):
-		scene.spawn_glow({
-			"position": Vector3(10.0 + float(i), 0.0, 0.0),
-			"radius": 8.0,
-			"color": Color.WHITE,
-		})
+		scene.spawn_glow(GlowSpawn.make(Vector3(10.0 + float(i), 0.0, 0.0), 8.0, Color.WHITE))
 	assert_eq(scene.render_frame(Vector3.ZERO, 512.0, Vector3.ONE, 0, null), 3,
 			"four nearer object-disabled lights cannot starve the three eligible slots")
 
 
 func test_camera_query_bounds_saturate_at_the_mission_fixed_limit() -> void:
 	var scene := LightScene.new()
-	scene.spawn_glow({
-		"position": Vector3(32767.0, 0.0, 0.0),
-		"radius": 8.0,
-		"color": Color.WHITE,
-	})
+	scene.spawn_glow(GlowSpawn.make(Vector3(32767.0, 0.0, 0.0), 8.0, Color.WHITE))
 	assert_eq(scene.render_frame(Vector3(32767.0, 0.0, 0.0), 512.0,
 			Vector3.ONE, 0, null), 1,
 			"center plus half-extent saturates instead of wrapping the AABB")
@@ -138,10 +119,7 @@ func test_camera_query_bounds_saturate_at_the_mission_fixed_limit() -> void:
 func test_select_caps_at_the_witnessed_three() -> void:
 	var scene := LightScene.new()
 	for i in range(6):
-		scene.spawn_model_light({
-			"position": Vector3(float(i), 0.0, 0.0),
-			"atten_end": 8.0,
-		})
+		scene.spawn_model_light(ModelLightSpawn.make(Vector3(float(i), 0.0, 0.0), 8.0))
 	var selected := scene.render_frame(Vector3.ZERO, 512.0, Vector3.ONE, 0, null)
 	# The batch entry stores three handles and breaks the visible walk there;
 	# the 4 of Light_SelectAndEnableForDraw is the transient D3D enable count
@@ -156,11 +134,7 @@ func test_select_caps_at_the_witnessed_three() -> void:
 
 func test_clear_render_output_preserves_the_live_pool() -> void:
 	var scene := LightScene.new()
-	scene.spawn_glow({
-		"position": Vector3.ZERO,
-		"radius": 8.0,
-		"color": Color.WHITE,
-	})
+	scene.spawn_glow(GlowSpawn.make(Vector3.ZERO, 8.0, Color.WHITE))
 	assert_eq(scene.render_frame(Vector3.ZERO, 512.0, Vector3.ONE, 0, null), 1)
 	scene.clear_render_output()
 	var report := scene.get_report()
@@ -176,13 +150,8 @@ func test_transient_glow_fades_and_dies_through_the_tick() -> void:
 	var scene := LightScene.new()
 	# The impact-flash shape [orig: AmmoDef_ProcessImpactEffect -> mode 2]:
 	# blend fades counter/initial per tick, the slot dies at zero.
-	var impact := scene.spawn_glow({
-		"position": Vector3(1.0, 2.0, 3.0),
-		"radius": 10.0,
-		"color": Color(1.0, 0.75, 0.375),
-		"fade_mode": 2,
-		"fade_duration": 3,
-	})
+	var impact := scene.spawn_glow(GlowSpawn.make(Vector3(1.0, 2.0, 3.0), 10.0, Color(1.0, 0.75, 0.375))
+			.fading(2, 3))
 	assert_gt(impact, 0, "a transient glow spawns an opaque positive lease")
 	scene.advance_fixed_tick()
 	scene.advance_fixed_tick()
@@ -194,17 +163,9 @@ func test_transient_glow_fades_and_dies_through_the_tick() -> void:
 
 func test_reused_pool_slot_rejects_the_retired_handle() -> void:
 	var scene := LightScene.new()
-	var retired := scene.spawn_glow({
-		"position": Vector3.ZERO,
-		"radius": 2.0,
-		"color": Color.WHITE,
-	})
+	var retired := scene.spawn_glow(GlowSpawn.make(Vector3.ZERO, 2.0, Color.WHITE))
 	scene.despawn(retired)
-	var replacement := scene.spawn_glow({
-		"position": Vector3.ONE,
-		"radius": 2.0,
-		"color": Color.WHITE,
-	})
+	var replacement := scene.spawn_glow(GlowSpawn.make(Vector3.ONE, 2.0, Color.WHITE))
 	assert_ne(replacement, retired,
 			"a reused retail slot receives a distinct opaque lease")
 	assert_false(scene.is_alive(retired), "the retired lease stays dead")
@@ -463,10 +424,7 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 ## 100-wu cull; semantics pinned by ctest renderer_light_scene].
 func test_corona_rows_surface_the_witnessed_segments() -> void:
 	var scene := LightScene.new()
-	assert_gt(scene.spawn_model_light({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"atten_end": 4.0,
-	}), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 1.0, 0.0), 4.0)), 0)
 	var no_models: Array[Node3D] = []
 	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
@@ -482,11 +440,8 @@ func test_corona_rows_surface_the_witnessed_segments() -> void:
 		var color := first.color
 		# White record color x 1/16 at full fade.
 		assert_almost_eq(color.r, 255.0 / 256.0 / 16.0, 0.002)
-	assert_gt(scene.spawn_model_light({
-		"position": Vector3(2.0, 1.0, 0.0),
-		"atten_end": 4.0,
-		"disable_corona": true,
-	}), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(2.0, 1.0, 0.0), 4.0)
+			.masking(true, false, false)), 0)
 	rows = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
 			Vector3(0.0, 0.0, -1.0), Vector3.ONE, 0, 0, null, no_models,
 			PackedInt64Array(), null)
@@ -510,14 +465,8 @@ func test_corona_rows_surface_the_witnessed_segments() -> void:
 ## dummy RenderingServer stores no MultiMesh instance data).
 func test_fill_corona_multimesh_matches_the_row_seam() -> void:
 	var scene := LightScene.new()
-	assert_gt(scene.spawn_model_light({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"atten_end": 4.0,
-	}), 0)
-	assert_gt(scene.spawn_model_light({
-		"position": Vector3(3.0, 2.0, -1.0),
-		"atten_end": 6.0,
-	}), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 1.0, 0.0), 4.0)), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(3.0, 2.0, -1.0), 6.0)), 0)
 	var no_models: Array[Node3D] = []
 	var fog := _fog_values(true, 1, 2.0, 40.0)
 	var rows: Array = scene.collect_corona_rows(Vector3(0.0, 1.0, 10.0),
@@ -570,13 +519,16 @@ func test_static_rows_dirty_maintenance_matches_full_rebuild() -> void:
 	var ref := LightScene.new()
 	var handles_fast: Array[int] = []
 	var handles_ref: Array[int] = []
-	for config: Dictionary in [
-		{"position": Vector3(1.0, 0.0, 1.0), "atten_end": 8.0},
-		{"position": Vector3(4.0, 1.0, -2.0), "atten_end": 8.0,
-				"style": 113, "color_start": Color(1.0, 0.8, 0.4),
-				"color_end": Color(0.3, 0.15, 0.05)},
-		{"position": Vector3(-3.0, 0.5, 2.0), "atten_end": 6.0},
-	]:
+	var flickering := ModelLightSpawn.make(Vector3(4.0, 1.0, -2.0), 8.0)
+	flickering.style = 113
+	flickering.color_start = Color(1.0, 0.8, 0.4)
+	flickering.color_end = Color(0.3, 0.15, 0.05)
+	var configs: Array[ModelLightSpawn] = [
+		ModelLightSpawn.make(Vector3(1.0, 0.0, 1.0), 8.0),
+		flickering,
+		ModelLightSpawn.make(Vector3(-3.0, 0.5, 2.0), 6.0),
+	]
+	for config in configs:
 		handles_fast.append(int(fast.spawn_model_light(config)))
 		handles_ref.append(int(ref.spawn_model_light(config)))
 	var bounds := PackedVector3Array([

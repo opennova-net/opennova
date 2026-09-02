@@ -88,6 +88,9 @@ add_library(${TARGET_NAME} SHARED
     particle/particle_file.cpp
     lights/effect_light_report.cpp
     lights/light_scene.cpp
+    lights/light_spawn.cpp
+    lights/light_spawn.cpp
+    lights/light_spawn.cpp
     particle/effect_load_report.cpp
     particle/effect_scene.cpp
     particle/effect_spawn_records.cpp

@@ -132,10 +132,7 @@ func test_unchanged_selection_is_reapplied_after_model_rebuild() -> void:
 		return
 	var first_id := first_surface.get_instance_id()
 	var scene := LightScene.new()
-	assert_gt(scene.spawn_model_light({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"atten_end": 8.0,
-	}), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 1.0, 0.0), 8.0)), 0)
 	var models: Array[Node3D] = [model]
 	var owners := PackedInt64Array([model.get_instance_id()])
 	assert_eq(scene.render_model_frame(models, owners,
@@ -268,12 +265,8 @@ func test_owned_corona_gates_on_owner_section_visibility() -> void:
 	add_child_autofree(container)
 	var owner_model := _placed_model(container, Vector3.ZERO)
 	var scene := LightScene.new()
-	assert_gt(scene.spawn_model_light({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"atten_end": 4.0,
-		"attach_bone": 2,
-		"spawning_entity": owner_model.get_instance_id(),
-	}), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 1.0, 0.0), 4.0)
+			.attached(2, owner_model.get_instance_id())), 0)
 	var models: Array[Node3D] = [owner_model]
 	var owners := PackedInt64Array([owner_model.get_instance_id()])
 	# No occlusion verdict yet (mask -1): the owner is not in the table and
@@ -304,11 +297,7 @@ func test_render_model_frame_returns_lit_model_count_and_clears() -> void:
 	add_child_autofree(container)
 	var near_model := _placed_model(container, Vector3.ZERO)
 	var far_model := _placed_model(container, Vector3(4096.0, 0.0, 0.0))
-	assert_gt(scene.spawn_glow({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"radius": 8.0,
-		"color": Color.WHITE,
-	}), 0)
+	assert_gt(scene.spawn_glow(GlowSpawn.make(Vector3(0.0, 1.0, 0.0), 8.0, Color.WHITE)), 0)
 	var models: Array[Node3D] = [near_model, far_model]
 	var owners := PackedInt64Array([0, 0])
 	var no_interior := PackedInt64Array([0, 0])
@@ -343,17 +332,9 @@ func test_render_model_frame_returns_lit_model_count_and_clears() -> void:
 
 func test_static_rows_pack_owner_isolated_selections_and_clear_in_place() -> void:
 	var scene := LightScene.new()
-	assert_gt(scene.spawn_glow({
-		"position": Vector3(0.0, 1.0, 0.0),
-		"radius": 8.0,
-		"color": Color.WHITE,
-	}), 0)
-	assert_gt(scene.spawn_model_light({
-		"position": Vector3(0.25, 1.0, 0.0),
-		"atten_end": 8.0,
-		"attach_bone": 2,
-		"spawning_entity": 101,
-	}), 0)
+	assert_gt(scene.spawn_glow(GlowSpawn.make(Vector3(0.0, 1.0, 0.0), 8.0, Color.WHITE)), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.25, 1.0, 0.0), 8.0)
+			.attached(2, 101)), 0)
 	var bounds := PackedVector3Array([
 		Vector3(-1.0, 0.0, -1.0), Vector3(2.0, 2.0, 2.0),
 		Vector3(-1.0, 0.0, -1.0), Vector3(2.0, 2.0, 2.0),
@@ -410,12 +391,8 @@ func test_static_building_rows_rescope_owned_lights_per_robj() -> void:
 	var scene := LightScene.new()
 	var owner := 0x2000000000042
 	for section in [2, 4]:
-		assert_gt(scene.spawn_model_light({
-			"position": Vector3(float(section), 1.0, 0.0),
-			"atten_end": 100.0,
-			"attach_bone": section,
-			"spawning_entity": owner,
-		}), 0)
+		assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(float(section), 1.0, 0.0), 100.0)
+				.attached(section, owner)), 0)
 	var bounds := PackedVector3Array([
 		Vector3(-10.0, -10.0, -10.0), Vector3(20.0, 20.0, 20.0),
 		Vector3(-10.0, -10.0, -10.0), Vector3(20.0, 20.0, 20.0),
@@ -455,15 +432,9 @@ func test_blink_owned_light_reaches_only_its_own_interior_section() -> void:
 	var scene := LightScene.new()
 	# An unattached record (attach bone 0) spawned by a NON-building entity
 	# standing inside building/section 2: the containing building owns it.
-	assert_gt(scene.spawn_model_light({
-		"position": Vector3(1.0, 1.0, 0.0),
-		"atten_end": 8.0,
-		"attach_bone": 0,
-		"spawning_entity": in_room.get_instance_id(),
-		"spawner_is_building": false,
-		"blink_owner_entity": building_id,
-		"blink_section": 2,
-	}), 0)
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(1.0, 1.0, 0.0), 8.0)
+			.attached(0, in_room.get_instance_id(), false)
+			.in_blink_box(building_id, 2)), 0)
 
 	var models: Array[Node3D] = [in_room, other_room, building]
 	var owners := PackedInt64Array([in_room.get_instance_id(),
@@ -504,16 +475,10 @@ func test_a_buildings_own_unattached_record_stays_a_world_light() -> void:
 	var building := _placed_model(container, Vector3.ZERO)
 	var bystander := _placed_model(container, Vector3(2.0, 0.0, 0.0))
 	var scene := LightScene.new()
-	assert_gt(scene.spawn_model_light({
-		"position": Vector3(1.0, 1.0, 0.0),
-		"atten_end": 8.0,
-		"attach_bone": 0,
-		"spawning_entity": building.get_instance_id(),
-		"spawner_is_building": true,
-		# Even with a blink hit reported, the building gate suppresses it.
-		"blink_owner_entity": building.get_instance_id(),
-		"blink_section": 3,
-	}), 0)
+	# Even with a blink hit reported, the building gate suppresses it.
+	assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(1.0, 1.0, 0.0), 8.0)
+			.attached(0, building.get_instance_id(), true)
+			.in_blink_box(building.get_instance_id(), 3)), 0)
 	var models: Array[Node3D] = [building, bystander]
 	var owners := PackedInt64Array([building.get_instance_id(),
 			bystander.get_instance_id()])
@@ -537,12 +502,8 @@ func test_building_owned_lights_are_selected_per_robj() -> void:
 	var owner := EffectLightDirector.owner_id_for_node(building)
 	var scene := LightScene.new()
 	for section in [2, 4]:
-		assert_gt(scene.spawn_model_light({
-			"position": Vector3(0.0, 2.0, 0.0),
-			"atten_end": 1000.0,
-			"attach_bone": section,
-			"spawning_entity": owner,
-		}), 0)
+		assert_gt(scene.spawn_model_light(ModelLightSpawn.make(Vector3(0.0, 2.0, 0.0), 1000.0)
+				.attached(section, owner)), 0)
 	var models: Array[Node3D] = [building]
 	assert_eq(scene.render_model_frame(models, PackedInt64Array([owner]),
 			PackedInt64Array([0]), PackedInt32Array([0]),
