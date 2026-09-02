@@ -39,6 +39,11 @@ class DebugControlsStub:
 		row.page = &"Test"
 		row.label = String(id)
 		row.kind = DebugControls.Kind.ACTION
+		# The real table's arg schema, so the transport marshals the JSON the
+		# way the shipping row would; the stub keeps its own confirm policy.
+		var real := super.control(id)
+		if real != null:
+			row.args = real.args
 		if id in [
 			&"teleport_local_player",
 			&"set_entity_health",
@@ -283,7 +288,7 @@ func test_debug_actions_decode_json_arguments_for_public_engine_methods() -> voi
 		"args": {"action": "pause"},
 		"confirm_authority": true,
 	})
-	assert_eq(adapter.debug.invoked_args, "pause")
+	assert_eq(adapter.debug.invoked_args, ["pause"])
 
 	await _call("game_debug", {
 		"op": "invoke",

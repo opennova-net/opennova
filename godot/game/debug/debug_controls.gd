@@ -122,12 +122,16 @@ class Row:
 	var read := Callable()
 	## func(value: Variant) -> Error: apply one normalized value.
 	var write := Callable()
-	## func(args: Array) -> Dictionary {"error": int, "result": Variant}.
+	## func(args: Array) -> Dictionary {"error": int, "result": Variant};
+	## `args` arrives already marshalled against `args` below.
 	var invoke := Callable()
+	## ACTION rows: the positional argument schema DebugArgSpec.marshal
+	## validates against (the invoke closure reads typed values).
+	var args: Array[DebugArgSpec] = []
 
 	## JSON-facing representation used by MCP catalog responses. The key set
 	## is the legacy wire contract ("description" carries the tooltip,
-	## "requires_unlock" the confirm gate).
+	## "requires_unlock" the confirm gate) plus the action's `args` schema.
 	func to_json_value() -> Variant:
 		return {
 			"id": String(id),
@@ -143,6 +147,8 @@ class Row:
 			"requires_unlock": requires_confirm,
 			"authority": "host" \
 					if authority == DebugControls.Authority.HOST_ONLY else "any",
+			"args": args.map(func(spec: DebugArgSpec) -> Dictionary:
+				return spec.to_json_value()),
 		}
 
 	func kind_name() -> String:
@@ -165,13 +171,13 @@ var _order: Array[StringName] = []
 
 
 ## The shipping table is built over the shell's seams record and its debug
-## adapter (audio buses, transport, viewport, authority). A test stub subclass
-## may construct with neither and override the public surface.
+## adapter (audio buses, transport, viewport, authority). The rows register
+## regardless (nothing reads an owner until a row is read or invoked), so a
+## test stub subclass constructed with neither still carries the real rows
+## and their arg schemas while overriding the public surface.
 func _init(seams: GameShellSeams = null, shell: GameDebugAdapter = null) -> void:
 	_seams = seams
 	_shell = shell
-	if seams == null or shell == null:
-		return
 	_register_option_rows()
 	_register_terrain_rows()
 	_register_rendering_rows()
@@ -293,11 +299,9 @@ func invoke_control(
 		return _invoke_result(error, null, id, allow_authority)
 	if not _write_allowed(row, allow_authority):
 		return _invoke_result(ERR_UNAUTHORIZED, null, id, allow_authority)
-	var call_args: Array = []
-	if args is Array:
-		call_args = args
-	elif args != null:
-		call_args = [args]
+	var call_args: Variant = DebugArgSpec.marshal(row.args, args)
+	if call_args is String:
+		return _invoke_result(ERR_INVALID_PARAMETER, null, id, allow_authority)
 	var outcome: Dictionary = row.invoke.call(call_args)
 	var action_error: Error = int(outcome["error"])
 	return _invoke_result(
@@ -305,6 +309,22 @@ func invoke_control(
 			outcome.get("result"),
 			id,
 			allow_authority)
+
+
+## The one argument marshaller for op=invoke: the action's declared arg specs
+## turn null, a positional Array, a by-name Dictionary or one scalar into the
+## typed positional Array its `invoke` closure reads. Returns a String naming
+## the refusal instead; a non-action row passes its value through untouched.
+func marshal_invoke_args(id: StringName, raw: Variant) -> Variant:
+	var row := control(id)
+	if row == null:
+		return "Unknown debug control '%s'." % id
+	if row.kind != Kind.ACTION:
+		return raw
+	var marshalled: Variant = DebugArgSpec.marshal(row.args, raw)
+	if marshalled is String:
+		return "Debug action '%s' %s." % [id, marshalled]
+	return marshalled
 
 
 ## JSON-facing snapshot; typed controls are serialized only at this boundary.
@@ -483,7 +503,8 @@ func _action(
 		label: String,
 		tooltip: String,
 		target: String,
-		owner_kind: String) -> Row:
+		owner_kind: String,
+		args: Array[DebugArgSpec] = []) -> Row:
 	var row := Row.new()
 	row.id = id
 	row.page = page
@@ -492,9 +513,20 @@ func _action(
 	row.kind = Kind.ACTION
 	row.target = target
 	row.owner = owner_kind
+	row.args = args
 	row.availability = _availability_for(target)
 	_register(row)
 	return row
+
+
+## A Vector3 argument inside the mission coordinate box.
+static func _mission_position_arg(arg_name: String) -> DebugArgSpec:
+	return DebugArgSpec.vector3(arg_name).between(MISSION_COORD_MIN, MISSION_COORD_MAX)
+
+
+## A positive entity SSN / mission group argument.
+static func _positive_int_arg(arg_name: String) -> DebugArgSpec:
+	return DebugArgSpec.integer(arg_name).at_least(1)
 
 
 func _authoritative(row: Row) -> void:
@@ -742,16 +774,17 @@ func _register_rendering_rows() -> void:
 func _register_edit_actions() -> void:
 	var teleport := _action(&"teleport_local_player", &"Player", "Teleport player",
 			"Move the local player to a mission-space position.",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE, [
+				_mission_position_arg("position"),
+				DebugArgSpec.number("yaw_deg").between(-360.0, 360.0).optional(0.0),
+				DebugArgSpec.number("pitch_deg").between(-90.0, 90.0).optional(0.0),
+			])
 	_authoritative(teleport)
 	teleport.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.teleport(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(sim.debug_teleport_local_player(
-				args[0], float(args[1]), float(args[2])))
+		return _action_error(sim.debug_teleport_local_player(args[0], args[1], args[2]))
 
 	var map_cycle := _action(&"cycle_map_mode", &"Player", "Cycle map mode",
 			"Step the M-key map cycle: off -> window -> fullscreen -> off.",
@@ -765,102 +798,99 @@ func _register_edit_actions() -> void:
 
 	var health := _action(&"set_entity_health", &"Entities", "Set health",
 			"Set the selected simulation entity's health.",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE, [
+				DebugArgSpec.integer("entity").at_least(0),
+				DebugArgSpec.integer("health").between(ENTITY_HEALTH_MIN, ENTITY_HEALTH_MAX),
+			])
 	_authoritative(health)
 	health.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.health(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(sim.debug_set_entity_health(
-				int(args[0]), int(args[1])))
+		return _action_error(sim.debug_set_entity_health(args[0], args[1]))
 
 	var position := _action(&"set_entity_position", &"Entities", "Move entity",
 			"Move the selected simulation entity to a mission-space position.",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE, [
+				DebugArgSpec.integer("entity").at_least(0),
+				_mission_position_arg("position"),
+			])
 	_authoritative(position)
 	position.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.entity_position(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(sim.debug_set_entity_position(
-				int(args[0]), args[1]))
+		return _action_error(sim.debug_set_entity_position(args[0], args[1]))
 
+	# [wire_handle, attrib, attrib2]: a packed engine handle below the invalid
+	# sentinel and two unsigned 32-bit words.
 	var item_attrib := _action(&"set_entity_item_attrib", &"Entities", "Set item attribs",
 			"Write both items.def attrib words on one entity by its wire_handle (brainless "
 			+ "rows included); a per-entity override the next item-traits sweep re-stamps.",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE, [
+				DebugArgSpec.integer("entity").between(0, 0xFFFE),
+				DebugArgSpec.integer("attrib").between(0, 0xFFFFFFFF),
+				DebugArgSpec.integer("attrib2").between(0, 0xFFFFFFFF),
+			])
 	_authoritative(item_attrib)
 	item_attrib.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.item_attrib(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(sim.debug_set_entity_item_attrib(
-				int(args[0]), int(args[1]), int(args[2])))
+		return _action_error(sim.debug_set_entity_item_attrib(args[0], args[1], args[2]))
 
 
 func _register_audio_actions() -> void:
 	var volume := _action(&"set_audio_bus_volume", &"Audio", "Set bus volume",
 			"Set one named audio bus volume in decibels.",
-			TARGET_GAME_SHELL, OWNER_DEVICE)
+			TARGET_GAME_SHELL, OWNER_DEVICE, [
+				DebugArgSpec.text("bus"),
+				DebugArgSpec.number("volume_db").between(
+						AUDIO_BUS_VOLUME_MIN_DB, AUDIO_BUS_VOLUME_MAX_DB),
+			])
 	volume.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.audio_bus_volume(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(_shell.debug_set_audio_bus_volume(
-				String(args[0]), float(args[1])))
+		return _action_error(_shell.debug_set_audio_bus_volume(args[0], args[1]))
 
 	var mute := _action(&"set_audio_bus_mute", &"Audio", "Set bus mute",
 			"Set one named audio bus mute state.",
-			TARGET_GAME_SHELL, OWNER_DEVICE)
+			TARGET_GAME_SHELL, OWNER_DEVICE,
+			[DebugArgSpec.text("bus"), DebugArgSpec.boolean("muted")])
 	mute.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.audio_bus_switch(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(_shell.debug_set_audio_bus_mute(
-				String(args[0]), bool(args[1])))
+		return _action_error(_shell.debug_set_audio_bus_mute(args[0], args[1]))
 
 	var solo := _action(&"set_audio_bus_solo", &"Audio", "Set bus solo",
 			"Set one named audio bus solo state.",
-			TARGET_GAME_SHELL, OWNER_DEVICE)
+			TARGET_GAME_SHELL, OWNER_DEVICE,
+			[DebugArgSpec.text("bus"), DebugArgSpec.boolean("soloed")])
 	solo.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.audio_bus_switch(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(_shell.debug_set_audio_bus_solo(
-				String(args[0]), bool(args[1])))
+		return _action_error(_shell.debug_set_audio_bus_solo(args[0], args[1]))
 
 	var bypass := _action(&"set_audio_bus_bypass", &"Audio", "Set bus effect bypass",
 			"Set one named audio bus effect bypass state.",
-			TARGET_GAME_SHELL, OWNER_DEVICE)
+			TARGET_GAME_SHELL, OWNER_DEVICE,
+			[DebugArgSpec.text("bus"), DebugArgSpec.boolean("bypassed")])
 	bypass.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.audio_bus_switch(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(_shell.debug_set_audio_bus_bypass(
-				String(args[0]), bool(args[1])))
+		return _action_error(_shell.debug_set_audio_bus_bypass(args[0], args[1]))
 
 
 func _register_runtime_rows() -> void:
 	var transport := _action(&"runtime_transport", &"Sim", "Runtime transport",
 			"Resume, pause, or single-step the real game runtime.",
-			TARGET_GAME_SHELL, OWNER_ENGINE)
+			TARGET_GAME_SHELL, OWNER_ENGINE,
+			[DebugArgSpec.text("action").one_of(["resume", "pause", "step"])])
 	_authoritative(transport)
 	transport.invoke = func(args: Array) -> Dictionary:
 		if _shell == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.transport(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(_shell.mcp_game_control(String(args[0])))
+		return _action_error(_shell.mcp_game_control(args[0]))
 
 	var return_to_menu := _action(&"runtime_return_to_menu", &"Sim", "Return to menu",
 			"Leave the current world locally and return to the game menu.",
@@ -886,15 +916,16 @@ func _register_runtime_rows() -> void:
 
 	var mission_variable := _action(&"set_mission_variable", &"Vars", "Set mission variable",
 			"Set one live V0..V511 mission-script variable.",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE, [
+				DebugArgSpec.integer("index").between(0, MISSION_VAR_COUNT - 1),
+				DebugArgSpec.integer("value").between(-2147483648, 2147483647),
+			])
 	_authoritative(mission_variable)
 	mission_variable.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.mission_variable(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		sim.set_mission_variable(int(args[0]), int(args[1]))
+		sim.set_mission_variable(args[0], args[1])
 		return _action_result(null)
 
 	var time_of_day := _slider(&"environment_time_of_day", &"Environment", "Time of day",
@@ -960,27 +991,24 @@ func _register_runtime_rows() -> void:
 func _register_automation_actions() -> void:
 	var deploy_pick := _action(&"deploy_pick", &"Sim", "Deploy pick",
 			"Send one deployment pick (0 = the Default Spawn) while the deploy screen is owed; the host silently drops invalid or contested picks.",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE,
+			[DebugArgSpec.integer("zone").at_least(0).optional(0)])
 	deploy_pick.requires_confirm = true
 	deploy_pick.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.deploy_pick(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_result(sim.send_deployment_pick(int(args[0])))
+		return _action_result(sim.send_deployment_pick(args[0]))
 
 	var viewmodel := _action(&"set_viewmodel_weapon", &"Player", "Set viewmodel weapon",
 			"Rig the first-person viewmodel and action FSM to a weapon.def name (A/B against another SKU's def).",
-			TARGET_WORLD, OWNER_DEVICE)
+			TARGET_WORLD, OWNER_DEVICE, [DebugArgSpec.text("weapon")])
 	viewmodel.requires_confirm = true
 	viewmodel.invoke = func(args: Array) -> Dictionary:
 		var world := _world()
 		if world == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.weapon_name(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_result(world.set_local_player_weapon_by_name(String(args[0])))
+		return _action_result(world.set_local_player_weapon_by_name(args[0]))
 
 	var clear_viewmodel := _action(&"clear_viewmodel_weapon", &"Player", "Clear viewmodel weapon",
 			"Drop the equipped viewmodel (the armory NONE row).",
@@ -1008,51 +1036,45 @@ func _register_automation_actions() -> void:
 
 	var kill_group := _action(&"kill_group", &"Entities", "Kill group",
 			"Kill every live entity of a mission group; returns the count killed.",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE, [_positive_int_arg("group")])
 	_authoritative(kill_group)
 	kill_group.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.kill_group(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_result(sim.debug_kill_group(int(args[0])))
+		return _action_result(sim.debug_kill_group(args[0]))
 
 	var crew_vehicle := _action(&"crew_vehicle", &"Entities", "Crew vehicle",
 			"Seat an AI occupant (by SSN) into a vehicle (by SSN) as its pilot.",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE,
+			[_positive_int_arg("occupant_ssn"), _positive_int_arg("vehicle_ssn")])
 	_authoritative(crew_vehicle)
 	crew_vehicle.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.crew_vehicle(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(sim.debug_crew_vehicle(int(args[0]), int(args[1])))
+		return _action_error(sim.debug_crew_vehicle(args[0], args[1]))
 
 	var crew_local := _action(&"crew_local_player", &"Entities", "Crew local player",
 			"Seat the local player into a vehicle (by SSN).",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE, [_positive_int_arg("vehicle_ssn")])
 	_authoritative(crew_local)
 	crew_local.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.crew_local_player(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		return _action_error(sim.debug_crew_local_player(int(args[0])))
+		return _action_error(sim.debug_crew_local_player(args[0]))
 
 	var look := _action(&"local_player_look", &"Player", "Local player look",
 			"Feed one mouse-look delta (dx_px, dy_px screen pixels) through the local player's look path.",
-			TARGET_SIM, OWNER_ENGINE)
+			TARGET_SIM, OWNER_ENGINE,
+			[DebugArgSpec.number("dx_px"), DebugArgSpec.number("dy_px")])
 	look.requires_confirm = true
 	look.invoke = func(args: Array) -> Dictionary:
 		var sim := _sim()
 		if sim == null:
 			return _action_error(ERR_UNAVAILABLE)
-		if not DebugControlArgs.look(args):
-			return _action_error(ERR_INVALID_PARAMETER)
-		sim.add_local_player_look(float(args[0]), float(args[1]))
+		sim.add_local_player_look(args[0], args[1])
 		return _action_result(null)
 
 

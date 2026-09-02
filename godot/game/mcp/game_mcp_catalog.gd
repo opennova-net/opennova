@@ -98,7 +98,8 @@ static func definitions() -> Array[McpToolDef]:
 				"value": {},
 				"args": {
 					"description": "Action arguments; use the action-specific object documented "
-					+ "above. Entity mutations require game_entities.ai_index from a row whose "
+					+ "above (op=list publishes every action's args schema: name, kind, range, "
+					+ "default). Entity mutations require game_entities.ai_index from a row whose "
 					+ "editable field is true.",
 				},
 				"page": {"type": "string"},

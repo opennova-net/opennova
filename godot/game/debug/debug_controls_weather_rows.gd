@@ -12,109 +12,46 @@ static func register(controls: DebugControls) -> void:
 	# each on the Weather node's command seam: the bound Simulation's command
 	# layer on a mission, the standalone home otherwise. Args mirror the WAC
 	# signatures.
-	var rain_row := controls._action(&"environment_rain", &"Environment", "Rain",
+	_weather_command(controls, &"environment_rain", "Rain",
 			"rain(percent, seconds): rain percent over a transition.",
-			DebugControls.TARGET_WEATHER, DebugControls.OWNER_ENGINE)
-	controls._authoritative(rain_row)
-	rain_row.invoke = func(args: Array) -> Dictionary:
-		var weather := controls._weather()
-		if weather == null:
-			return DebugControls._action_error(ERR_UNAVAILABLE)
-		if args.size() < 2:
-			return DebugControls._action_error(ERR_INVALID_PARAMETER)
-		weather.command_rain(int(args[0]), int(args[1]))
-		return DebugControls._action_result(null)
-
-	var snow_row := controls._action(&"environment_snow", &"Environment", "Snow",
+			[DebugArgSpec.integer("percent"), DebugArgSpec.integer("seconds")],
+			func(weather: Weather, args: Array) -> void:
+				weather.command_rain(args[0], args[1]))
+	_weather_command(controls, &"environment_snow", "Snow",
 			"snow(percent, seconds): snow percent over a transition.",
-			DebugControls.TARGET_WEATHER, DebugControls.OWNER_ENGINE)
-	controls._authoritative(snow_row)
-	snow_row.invoke = func(args: Array) -> Dictionary:
-		var weather := controls._weather()
-		if weather == null:
-			return DebugControls._action_error(ERR_UNAVAILABLE)
-		if args.size() < 2:
-			return DebugControls._action_error(ERR_INVALID_PARAMETER)
-		weather.command_snow(int(args[0]), int(args[1]))
-		return DebugControls._action_result(null)
-
-	var overcast_row := controls._action(&"environment_overcast", &"Environment", "Overcast",
+			[DebugArgSpec.integer("percent"), DebugArgSpec.integer("seconds")],
+			func(weather: Weather, args: Array) -> void:
+				weather.command_snow(args[0], args[1]))
+	_weather_command(controls, &"environment_overcast", "Overcast",
 			"overcast(percent, seconds): overcast blend over a transition.",
-			DebugControls.TARGET_WEATHER, DebugControls.OWNER_ENGINE)
-	controls._authoritative(overcast_row)
-	overcast_row.invoke = func(args: Array) -> Dictionary:
-		var weather := controls._weather()
-		if weather == null:
-			return DebugControls._action_error(ERR_UNAVAILABLE)
-		if args.size() < 2:
-			return DebugControls._action_error(ERR_INVALID_PARAMETER)
-		weather.command_overcast(int(args[0]), int(args[1]))
-		return DebugControls._action_result(null)
-
-	var fog_distance_row := controls._action(&"environment_fog_distance", &"Environment", "Fog distance",
+			[DebugArgSpec.integer("percent"), DebugArgSpec.integer("seconds")],
+			func(weather: Weather, args: Array) -> void:
+				weather.command_overcast(args[0], args[1]))
+	_weather_command(controls, &"environment_fog_distance", "Fog distance",
 			"fogdist(metres): the fog distance target (2 m .. the 1024 m reference).",
-			DebugControls.TARGET_WEATHER, DebugControls.OWNER_ENGINE)
-	controls._authoritative(fog_distance_row)
-	fog_distance_row.invoke = func(args: Array) -> Dictionary:
-		var weather := controls._weather()
-		if weather == null:
-			return DebugControls._action_error(ERR_UNAVAILABLE)
-		if args.size() < 1:
-			return DebugControls._action_error(ERR_INVALID_PARAMETER)
-		weather.command_fog_distance(int(args[0]))
-		return DebugControls._action_result(null)
-
-	var move_fog_row := controls._action(&"environment_move_fog", &"Environment", "Move fog",
+			[DebugArgSpec.integer("metres")],
+			func(weather: Weather, args: Array) -> void:
+				weather.command_fog_distance(args[0]))
+	_weather_command(controls, &"environment_move_fog", "Move fog",
 			"movefog(metres, seconds): the fog distance target over a transition.",
-			DebugControls.TARGET_WEATHER, DebugControls.OWNER_ENGINE)
-	controls._authoritative(move_fog_row)
-	move_fog_row.invoke = func(args: Array) -> Dictionary:
-		var weather := controls._weather()
-		if weather == null:
-			return DebugControls._action_error(ERR_UNAVAILABLE)
-		if args.size() < 2:
-			return DebugControls._action_error(ERR_INVALID_PARAMETER)
-		weather.command_move_fog(int(args[0]), int(args[1]))
-		return DebugControls._action_result(null)
-
-	var sky_speed_row := controls._action(&"environment_sky_speed", &"Environment", "Sky speed",
+			[DebugArgSpec.integer("metres"), DebugArgSpec.integer("seconds")],
+			func(weather: Weather, args: Array) -> void:
+				weather.command_move_fog(args[0], args[1]))
+	_weather_command(controls, &"environment_sky_speed", "Sky speed",
 			"skyspeed(rate): the cloud scroll rate target.",
-			DebugControls.TARGET_WEATHER, DebugControls.OWNER_ENGINE)
-	controls._authoritative(sky_speed_row)
-	sky_speed_row.invoke = func(args: Array) -> Dictionary:
-		var weather := controls._weather()
-		if weather == null:
-			return DebugControls._action_error(ERR_UNAVAILABLE)
-		if args.size() < 1:
-			return DebugControls._action_error(ERR_INVALID_PARAMETER)
-		weather.command_sky_speed(int(args[0]))
-		return DebugControls._action_result(null)
-
-	var quake_row := controls._action(&"environment_quake", &"Environment", "Quake",
+			[DebugArgSpec.integer("rate")],
+			func(weather: Weather, args: Array) -> void:
+				weather.command_sky_speed(args[0]))
+	_weather_command(controls, &"environment_quake", "Quake",
 			"quake(seconds): the earthquake jitter duration.",
-			DebugControls.TARGET_WEATHER, DebugControls.OWNER_ENGINE)
-	controls._authoritative(quake_row)
-	quake_row.invoke = func(args: Array) -> Dictionary:
-		var weather := controls._weather()
-		if weather == null:
-			return DebugControls._action_error(ERR_UNAVAILABLE)
-		if args.size() < 1:
-			return DebugControls._action_error(ERR_INVALID_PARAMETER)
-		weather.command_quake(int(args[0]))
-		return DebugControls._action_result(null)
-
-	var fog_type_row := controls._action(&"environment_fog_type", &"Environment", "Fog type",
+			[DebugArgSpec.integer("seconds")],
+			func(weather: Weather, args: Array) -> void:
+				weather.command_quake(args[0]))
+	_weather_command(controls, &"environment_fog_type", "Fog type",
 			"fogtype(type): the fog model 0..3.",
-			DebugControls.TARGET_WEATHER, DebugControls.OWNER_ENGINE)
-	controls._authoritative(fog_type_row)
-	fog_type_row.invoke = func(args: Array) -> Dictionary:
-		var weather := controls._weather()
-		if weather == null:
-			return DebugControls._action_error(ERR_UNAVAILABLE)
-		if args.size() < 1:
-			return DebugControls._action_error(ERR_INVALID_PARAMETER)
-		weather.command_fog_type(int(args[0]))
-		return DebugControls._action_result(null)
+			[DebugArgSpec.integer("type")],
+			func(weather: Weather, args: Array) -> void:
+				weather.command_fog_type(args[0]))
 
 	# The weather home as the render owner sees it: the WeatherState snapshot
 	# plus the smoothed color blocks and the combined terrain light (the
@@ -134,3 +71,23 @@ static func register(controls: DebugControls) -> void:
 		snapshot["smooth_sky"] = weather.get_smooth_sky()
 		snapshot["terrain_light_combined_rgb"] = weather.get_terrain_light_combined_rgb()
 		return DebugControls._action_result(snapshot)
+
+
+## One authoritative WAC weather command row: `command` runs over the resolved
+## Weather owner with the marshalled args.
+static func _weather_command(
+		controls: DebugControls,
+		id: StringName,
+		label: String,
+		tooltip: String,
+		args: Array[DebugArgSpec],
+		command: Callable) -> void:
+	var row := controls._action(id, &"Environment", label, tooltip,
+			DebugControls.TARGET_WEATHER, DebugControls.OWNER_ENGINE, args)
+	controls._authoritative(row)
+	row.invoke = func(call_args: Array) -> Dictionary:
+		var weather := controls._weather()
+		if weather == null:
+			return DebugControls._action_error(ERR_UNAVAILABLE)
+		command.call(weather, call_args)
+		return DebugControls._action_result(null)

@@ -74,7 +74,7 @@ const EXPECTED_IDS: Array[StringName] = [
 ]
 
 const WIRE_ROW_KEYS := ["id", "page", "label", "description", "kind", "target",
-		"minimum", "maximum", "step", "choices", "requires_unlock", "authority"]
+		"minimum", "maximum", "step", "choices", "requires_unlock", "authority", "args"]
 const WIRE_STATE_KEYS := ["id", "kind", "value", "desired_value", "available",
 		"writable", "authoritative", "reason"]
 
@@ -257,6 +257,44 @@ func test_actions_validate_typed_arguments_before_the_engine() -> void:
 	var seat := _controls.invoke_control(&"crew_local_player", [11], true)
 	assert_eq(int(seat["error"]), int(ERR_UNAVAILABLE),
 			"the engine's seat refusal propagates as the action result")
+
+
+func test_action_args_marshal_by_name_and_publish_their_schema() -> void:
+	assert_eq(_controls.marshal_invoke_args(&"teleport_local_player",
+			{"position": [1.0, 2.0, 3.0]}), [Vector3(1.0, 2.0, 3.0), 0.0, 0.0],
+			"a by-name object marshals; optional yaw/pitch default to 0")
+	assert_eq(_controls.marshal_invoke_args(&"set_entity_position",
+			{"entity": 2, "position": {"x": 1, "y": 2, "z": 3}}), [2, Vector3(1.0, 2.0, 3.0)],
+			"an {x, y, z} position marshals")
+	assert_eq(_controls.marshal_invoke_args(&"runtime_transport", "pause"), ["pause"],
+			"one scalar is the single positional argument")
+	assert_eq(_controls.marshal_invoke_args(&"environment_rain",
+			{"percent": 50, "seconds": 10}), [50, 10],
+			"the weather rows marshal by their WAC argument names")
+	assert_eq(_controls.marshal_invoke_args(&"runtime_wac_paused", true), true,
+			"a check row passes its value through to op=set")
+
+	var missing: Variant = _controls.marshal_invoke_args(&"set_entity_position", {"entity": 2})
+	assert_true(missing is String and String(missing).contains("position"),
+			"a refusal names the missing argument: %s" % [missing])
+	var wrong: Variant = _controls.marshal_invoke_args(&"set_entity_health",
+			{"entity": 7, "health": "banana"})
+	assert_true(wrong is String and String(wrong).contains("health"),
+			"a refusal names the argument outside its domain: %s" % [wrong])
+	var extra: Variant = _controls.marshal_invoke_args(&"kill_group", [14, 15])
+	assert_true(extra is String, "surplus positional arguments are refused: %s" % [extra])
+	assert_true(_controls.marshal_invoke_args(&"nonexistent_action", null) is String)
+
+	var published: Array = _controls.control(&"crew_vehicle").to_json_value()["args"]
+	assert_eq(published.map(func(spec: Dictionary) -> String: return spec["name"]),
+			["occupant_ssn", "vehicle_ssn"], "op=list publishes the arg names in order")
+	assert_eq(published[0]["kind"], "int")
+	assert_eq(published[0]["minimum"], 1.0)
+	assert_false(published[0].has("maximum"), "an open upper bound is not published")
+	var zone: Dictionary = _controls.control(&"deploy_pick").to_json_value()["args"][0]
+	assert_eq([zone["required"], zone["default"]], [false, 0])
+	var transport: Dictionary = _controls.control(&"runtime_transport").to_json_value()["args"][0]
+	assert_eq(transport["choices"], ["resume", "pause", "step"])
 
 
 func test_confirmation_and_authority_are_distinct_gates() -> void:
