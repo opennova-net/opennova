@@ -133,14 +133,10 @@ add_library(${TARGET_NAME} SHARED
     simulation/player_aim_overlay.cpp
     simulation/player_local_view.cpp
     simulation/player_weapon_event.cpp
-    simulation/ai_debug_report.cpp
     simulation/destruction_events.cpp
-    simulation/collision_debug_report.cpp
     simulation/debug_cards.cpp
     simulation/debug_pick_card.cpp
     simulation/hitbox_debug_report.cpp
-    simulation/occlusion_portal_report.cpp
-    simulation/ray_debug_report.cpp
     simulation/round_debug_report.cpp
     simulation/hud_view_records.cpp
     simulation/deploy_rows.cpp

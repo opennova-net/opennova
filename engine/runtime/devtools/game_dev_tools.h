@@ -37,7 +37,6 @@ struct WeaponRequest;
 struct EnvironmentRequest;
 struct EnvironmentSnapshot;
 struct AiDebugSnapshot;
-struct AiViewRequest;
 struct RaysRequest;
 struct RaysSnapshot;
 struct PhysicsRequest;
@@ -115,28 +114,23 @@ public:
 	bool needs_environment_snapshot() const;
 	bool take_environment_request(EnvironmentRequest &request);
 
-	// The AI window's record/request channel (the same shape): the AI debug
-	// join pushed by value on its cadence while shown, and the typed overlay
-	// toggles drained into the shell's world-view seam (a request family
-	// whose target is a device, not the engine command layer).
+	// The AI window's record channel (the same shape, records-in only): the
+	// AI debug join pushed by value on its cadence while shown.
 	void set_ai_debug(AiDebugSnapshot snapshot);
 	bool needs_ai_debug() const;
-	bool take_ai_view_request(AiViewRequest &request);
 
 	// The Rays window's record/request channel (the same shape): the ray
 	// capture's counts + filter state pushed by value on its cadence while
-	// shown, and the typed filter/clear/view-toggle requests drained by the
-	// embedder (filter and clear into the Simulation ray-debug seam; the view
-	// toggle out to the shell that owns the 3D view).
+	// shown, and the typed filter/clear requests drained by the embedder into
+	// the Simulation ray-debug seam.
 	void set_rays_snapshot(const RaysSnapshot &snapshot);
 	bool needs_rays_snapshot() const;
 	bool take_rays_request(RaysRequest &request);
 
 	// The Physics window's record/request channel (the same shape): the
-	// contact capture's counts + the shell's collision-view state pushed by
-	// value on its cadence while shown, and the typed mask/clear/capture
-	// requests drained into the Simulation contact-debug seam (the view
-	// toggle out to the shell that owns the 3D view).
+	// contact capture's counts + capture state pushed by value on its cadence
+	// while shown, and the typed mask/clear/capture requests drained into the
+	// Simulation contact-debug seam.
 	void set_physics_snapshot(const PhysicsSnapshot &snapshot);
 	bool needs_physics_snapshot() const;
 	bool take_physics_request(PhysicsRequest &request);

@@ -9,13 +9,9 @@
 #include "simulation/weather_home_state.h" // the weather home's probe view
 #include "simulation/present_event_records.h" // the per-tick present drain records
 #include "simulation/destruction_events.h" // the destruction drain record
-#include "simulation/ai_debug_report.h" // the F3 AI overlay payload
-#include "simulation/collision_debug_report.h" // the F3 collision overlay payload
 #include "simulation/debug_pick_card.h" // the F3 entity picker card
 #include "simulation/debug_cards.h" // the WAC / pose-health / destruction cards
 #include "simulation/hitbox_debug_report.h" // the F3 hitbox view payload
-#include "simulation/occlusion_portal_report.h" // the F3 occlusion view payload
-#include "simulation/ray_debug_report.h" // the F3 rays view channel
 #include "simulation/round_debug_report.h" // the F3 rounds view trail
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
 #include "simulation/entity_row.h"
@@ -502,10 +498,7 @@ void Simulation::_bind_methods() {
 	                     &Simulation::reset_occlusion_apply_baseline);
 	ClassDB::bind_method(D_METHOD("occlusion_water_visible"),
 	                     &Simulation::occlusion_water_visible);
-	ClassDB::bind_method(D_METHOD("get_collision_debug"), &Simulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &Simulation::get_round_debug);
-	ClassDB::bind_method(D_METHOD("get_ai_debug"), &Simulation::get_ai_debug);
-	ClassDB::bind_method(D_METHOD("get_ray_debug"), &Simulation::get_ray_debug);
 	ClassDB::bind_method(D_METHOD("set_ray_debug_recording", "enabled"),
 	                     &Simulation::set_ray_debug_recording);
 	ClassDB::bind_method(D_METHOD("set_contact_debug_capture", "enabled"),
@@ -518,8 +511,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("debug_pick_entity", "from_godot", "dir_godot", "max_range_units"),
 	                     &Simulation::debug_pick_entity);
 	ClassDB::bind_method(D_METHOD("get_hitbox_debug"), &Simulation::get_hitbox_debug);
-	ClassDB::bind_method(D_METHOD("get_occlusion_portal_debug", "anchor", "range_units"),
-	                     &Simulation::get_occlusion_portal_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &Simulation::local_player_indoors);
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &Simulation::local_player_blink_flags);
 	ClassDB::bind_method(D_METHOD("local_player_interior_item_id"),

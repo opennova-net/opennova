@@ -2523,7 +2523,9 @@ Tooling landed with the grill (developer window, not witnessed behavior): the
 F3 **Rounds** tab + "Show round trails" world view over a new persistent
 `RoundSim` debug ring (`RoundDebugEvent`, cap 48) recording every resolved
 outcome — including face-miss fly-ons — exposed via
-`Simulation.get_round_debug()`.
+`Simulation.get_round_debug()`. (The Rounds tab went with ADR 0039's hard cut
+and the "Show round trails" world view with the GDScript F3 views on
+2026-09-02; the ring and `Simulation.get_round_debug()` survive.)
 
 Session 2 (same day, after an in-play "shoot through a building wall" report):
 the item-leg broad phase was still our segment-vs-sphere — a boundary-crossing
@@ -2642,7 +2644,9 @@ radius, color-coded by the damage table (0-4 orange, 5-8 cyan, 9-12/15-18 lime,
 entity/bone/radii/multiplier. The Rounds event list names the independent
 reaction bone and damage zone. Both views consume
 `CollisionWorld::debug_person_sections` / `Simulation.get_hitbox_debug()`
-and the same matrix provider used by live bullets. Between reads the view
+and the same matrix provider used by live bullets (the hit-mesh world view
+was retired with the GDScript F3 views on 2026-09-02; the native report and
+its caps survive). Between reads the view
 retains that snapshot, one shared unit-sphere mesh, and its packed MultiMesh
 batch; unchanged input causes no geometry, visibility, or label churn. The
 native object leg rejects organic and out-of-range candidates before invoking
