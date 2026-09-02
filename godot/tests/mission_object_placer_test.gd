@@ -97,21 +97,20 @@ func test_place_handles_unresolvable_models_without_error() -> void:
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 
 	assert_not_null(parent.get_node_or_null("MissionObjects"), "MissionObjects container is created")
-	assert_true(stats.has("placed"), "stats expose placed")
-	assert_true(stats.has("unresolved"), "stats expose unresolved")
-	assert_eq(int(stats.get("placed", -1)), 0, "no .3di in fixtures -> nothing placed")
-	assert_gt(int(stats.get("unresolved", 0)), 0, "real entities recorded as unresolved")
+	assert_not_null(stats, "place returns the placement census")
+	assert_eq(stats.placed, 0, "no .3di in fixtures -> nothing placed")
+	assert_gt(stats.unresolved, 0, "real entities recorded as unresolved")
 
 
 func test_place_is_a_noop_on_null_inputs() -> void:
 	var placer := MissionObjectPlacer.new()
 	var parent := Node3D.new()
 	add_child_autofree(parent)
-	var stats: Dictionary = placer.place(null, parent)
-	assert_eq(int(stats.get("placed", -1)), 0, "null mission places nothing")
+	var stats := placer.place(null, parent)
+	assert_eq(stats.placed, 0, "null mission places nothing")
 	assert_null(parent.get_node_or_null("MissionObjects"), "no container without a mission")
 
 
@@ -144,10 +143,10 @@ func test_runtime_static_batch_publishes_effect_source() -> void:
 			MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
 	assert_false(record.is_empty())
 	var index := int(record.get("index", -1))
-	var stats: Dictionary = placer.place(mission, parent)
-	assert_eq(int(stats.get("placed", -1)), 1, "the static entity is placed")
-	assert_eq(int(stats.get("batched", -1)), 1, "via the static-batch branch")
-	assert_eq(int(stats.get("batches", -1)), 1, "one draw group for its single submesh")
+	var stats := placer.place(mission, parent)
+	assert_eq(stats.placed, 1, "the static entity is placed")
+	assert_eq(stats.batched, 1, "via the static-batch branch")
+	assert_eq(stats.batches, 1, "one draw group for its single submesh")
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	assert_not_null(container)
 	var mmi := container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0") \
@@ -244,14 +243,14 @@ func test_static_batches_partition_opaque_geometry_but_keep_blended_global() -> 
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 
-	assert_eq(int(stats.get("static_bins", -1)), 2,
+	assert_eq(stats.static_bins, 2,
 			"opaque populations follow the terrain's 512-unit sector cells")
-	assert_eq(int(stats.get("static_binned_batches", -1)), 2)
-	assert_eq(int(stats.get("static_global_batches", -1)), 1,
+	assert_eq(stats.static_binned_batches, 2)
+	assert_eq(stats.static_global_batches, 1,
 			"the blended strip remains one explicitly global population")
-	assert_eq(int(stats.get("batches", -1)), 3)
+	assert_eq(stats.batches, 3)
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	assert_not_null(container)
 	if container == null:
@@ -330,8 +329,8 @@ func test_runtime_static_vehicle_rides_the_mirror_visible_layer() -> void:
 	assert_false(mission.add_entity(
 			MissionData.KIND_ITEM, 106002, Vector3(1, 2, 3),
 			Vector3.ZERO).is_empty())
-	var stats: Dictionary = placer.place(mission, parent)
-	assert_eq(int(stats.get("placed", -1)), 1, "the static vehicle places")
+	var stats := placer.place(mission, parent)
+	assert_eq(stats.placed, 1, "the static vehicle places")
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	var mmi := container.get_node_or_null("StaticPopulations/Batch_StaticVehicle1_0") \
 			as MultiMeshInstance3D
@@ -407,9 +406,9 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 
-	assert_eq(int(stats.get("batched", -1)), 2)
+	assert_eq(stats.batched, 2)
 	var container := parent.get_node_or_null("MissionObjects")
 	var visible_batch := container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0") \
 			as MultiMeshInstance3D
@@ -812,9 +811,9 @@ func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 
-	assert_eq(int(stats.get("animated", -1)), 1,
+	assert_eq(stats.animated, 1,
 			"the anim_def building remains an individual visible model")
 	var container := parent.get_node_or_null("MissionObjects")
 	var visible_model := container.get_node_or_null("Anim_GuardTwr1_0")
@@ -864,11 +863,11 @@ func test_runtime_vehicle_without_anim_def_stays_in_static_batch() -> void:
 	assert_false(mission.add_entity(
 			MissionData.KIND_ITEM, 106002, Vector3.ZERO,
 			Vector3.ZERO).is_empty())
-	var stats: Dictionary = placer.place(mission, parent)
-	assert_eq(int(stats.get("placed", -1)), 1, "the vehicle is placed")
-	assert_eq(int(stats.get("batched", -1)), 1,
+	var stats := placer.place(mission, parent)
+	assert_eq(stats.placed, 1, "the vehicle is placed")
+	assert_eq(stats.batched, 1,
 			"a vehicle without anim_def uses static batching")
-	assert_eq(int(stats.get("animated", -1)), 0,
+	assert_eq(stats.animated, 0,
 			"the vehicle does not enter runtime presentation")
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	assert_not_null(container.get_node_or_null("StaticPopulations/Batch_StaticVehicle1_0"))
@@ -929,11 +928,11 @@ func test_place_routes_live_panm_graphic_to_a_live_model() -> void:
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 
-	assert_eq(int(stats.get("animated", -1)), 1,
+	assert_eq(stats.animated, 1,
 		"a live-PANM graphic places as an individual animated model")
-	assert_eq(int(stats.get("batched", -1)), 0,
+	assert_eq(stats.batched, 0,
 		"and never enters a static MultiMesh batch")
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	assert_not_null(container)
@@ -967,11 +966,11 @@ func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 
-	assert_eq(int(stats.get("batched", -1)), 1,
+	assert_eq(stats.batched, 1,
 		"inert PANM keeps the static MultiMesh batching")
-	assert_eq(int(stats.get("animated", -1)), 0,
+	assert_eq(stats.animated, 0,
 		"and does not force a live model")
 
 
@@ -990,11 +989,11 @@ func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 
-	assert_eq(int(stats.get("animated", -1)), 1,
+	assert_eq(stats.animated, 1,
 		"portal sections require an individual model even when PANM is inert")
-	assert_eq(int(stats.get("batched", -1)), 0,
+	assert_eq(stats.batched, 0,
 		"the per-instance section mask cannot be represented by a MultiMesh batch")
 
 
@@ -1147,15 +1146,15 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 
-	assert_eq(int(stats.get("animated", -1)), 0,
+	assert_eq(stats.animated, 0,
 			"a multi-RLOD graphic never becomes an individual model on its own")
-	assert_eq(int(stats.get("batched", -1)), 2)
-	assert_eq(int(stats.get("static_instances_retained", -1)), 2)
-	assert_eq(int(stats.get("static_lod_populations", -1)), 1,
+	assert_eq(stats.batched, 2)
+	assert_eq(stats.static_instances_retained, 2)
+	assert_eq(stats.static_lod_populations, 1,
 			"one extra population carries the coarser level")
-	assert_eq(int(stats.get("batches", -1)), 2)
+	assert_eq(stats.batches, 2)
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	assert_not_null(container)
 	if container == null:
@@ -1254,12 +1253,12 @@ func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 
-	assert_eq(int(stats.get("animated", -1)), 0,
+	assert_eq(stats.animated, 0,
 			"authored RLODs alone never force an individual model")
-	assert_eq(int(stats.get("batched", -1)), 1)
-	assert_eq(int(stats.get("static_instances_retained", -1)), 1)
+	assert_eq(stats.batched, 1)
+	assert_eq(stats.static_instances_retained, 1)
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	assert_not_null(container)
 	if container == null:
@@ -1272,9 +1271,9 @@ func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
 	assert_true(levels.has(0), "level 0 populations are emitted")
 	if lod_count > 1:
 		assert_true(levels.has(1), "the coarser authored level is emitted too")
-		assert_gt(int(stats.get("static_lod_populations", 0)), 0)
+		assert_gt(stats.static_lod_populations, 0)
 	else:
-		assert_eq(int(stats.get("static_lod_populations", -1)), 0)
+		assert_eq(stats.static_lod_populations, 0)
 
 
 # --- Dense populations: only live rows reach the GPU and the cull -------------
@@ -1331,7 +1330,7 @@ func _dense_fixture(parent: Node3D, no_shadow_second: bool) -> Dictionary:
 				"thresholds_q16": PackedInt32Array([0, 20 << 16]),
 				"sphere_radius": 2.0,
 			}))
-	var stats: Dictionary = placer.place(mission, parent)
+	var stats := placer.place(mission, parent)
 	return {
 		"placer": placer,
 		"mission": mission,
@@ -1370,7 +1369,7 @@ func test_dense_population_packs_only_live_rows_and_hides_empty_levels() -> void
 	assert_true(level0.visible)
 	assert_false(level1.visible,
 			"a population with no live row is hidden from the cull")
-	assert_eq(int(fixture.stats.get("static_live_populations", -1)), 1)
+	assert_eq(fixture.stats.static_live_populations, 1)
 	assert_eq(placer.get_static_live_population_count(), 1)
 
 	# 640x480 at 70 deg vertical: the z = 10 and z = 100 entities project to
@@ -1486,7 +1485,7 @@ func test_dense_shadow_twin_and_shadow_row_map_follow_the_compaction() -> void:
 			"the twin's rows name the casting slots")
 	assert_eq(level0.get_meta("static_shadow_bms_ids"), [bms[0], bms[1], bms[2]],
 			"the slot identity arrays stay slot-ordered")
-	assert_eq(int(fixture.stats.get("static_live_populations", -1)), 2)
+	assert_eq(fixture.stats.static_live_populations, 2)
 
 	assert_eq(_dense_lod_switches(placer, DENSE_NEAR_CAMERA), 2)
 	assert_eq(_live_bms(placer, level0), [bms[2]])

@@ -717,7 +717,8 @@ func get_runtime_perf_counters() -> Dictionary:
 				if _world._dispatcher != null else {}),
 		"foliage_backend": foliage_backend,
 		"framefx": _world._framefx.get_backend_report() if _world._framefx != null else {},
-		"mission_placement": _world._mission_stats.duplicate(true),
+		"mission_placement": (_world._mission_stats.to_json_value()
+				if _world._mission_stats != null else {}),
 		"static_live_populations": _world.get_static_live_population_count(),
 		"audio": _world._mission_audio.get_perf_counters() if _world._mission_audio != null else {},
 		"instance_uniform_geometry_estimate":
@@ -739,8 +740,10 @@ func get_runtime_perf_counters() -> Dictionary:
 # counted: read the total as a floor on the allocation, not the exact figure.
 func _instance_uniform_geometry_estimate(foliage_backend: Dictionary) -> Dictionary:
 	var foliage_pool := int(foliage_backend.get("pool_size", 0))
-	var static_populations := (int(_world._mission_stats.get("batches", 0))
-			+ int(_world._mission_stats.get("static_shadow_batches", 0)))
+	var static_populations := 0
+	if _world._mission_stats != null:
+		static_populations = (_world._mission_stats.batches
+				+ _world._mission_stats.static_shadow_batches)
 	var object_geometry := int(ObjectModel.get_live_geometry_instance_count())
 	var buffer_size := int(ProjectSettings.get_setting(
 			"rendering/limits/global_shader_variables/buffer_size", 0))

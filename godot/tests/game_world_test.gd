@@ -2025,7 +2025,7 @@ func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
 	assert_true(world.cancel_join_preload())
 	await get_tree().process_frame
 	assert_eq(world.load_mission("mnml.bms"), OK)
-	assert_gt(int(world.get_mission_stats().get("markers", 0)), 0,
+	assert_gt(world.get_mission_stats().markers, 0,
 		"a rejected join request cannot make a later ordinary mission wire-only")
 	world.unload()
 	blocker.close()
@@ -3459,11 +3459,11 @@ func test_world_owns_the_occlusion_culling_switch() -> void:
 	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
 		mission.add_entity(
 				MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))
-	var stats: Dictionary = world.get_mission_stats()
-	assert_gt(int(stats.get("authored_occluder_models", 0)), 0,
+	var stats := world.get_mission_stats()
+	assert_gt(stats.authored_occluder_models, 0,
 			"the armory building placed authored occluders")
 	assert_eq(world.get_authored_occluder_model_count(),
-			int(stats.get("authored_occluder_models", 0)),
+			stats.authored_occluder_models,
 			"the debug row reads the placed occluder count from the world")
 	assert_false(viewport.use_occlusion_culling,
 			"a load re-applies the default: the consumer stays off")

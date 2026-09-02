@@ -1,4 +1,5 @@
 #include "particle/effect_scene.h"
+#include "particle/effect_load_report.h"
 #include "util/string_convert.h"
 
 #include <algorithm>
@@ -23,7 +24,6 @@ namespace {
 using opennova::particle::Color3;
 using opennova::particle::CurveRef;
 using opennova::particle::EffectBounds;
-using opennova::particle::EffectLoadReport;
 using opennova::particle::EffectPose;
 using opennova::particle::EffectSpawnReceipt;
 using opennova::particle::EffectSpawnStatus;
@@ -98,23 +98,6 @@ std::size_t capacity_from_option(const Dictionary &options,
 		const char *key, int64_t fallback) {
 	const int64_t value = options.get(key, fallback);
 	return value > 0 ? static_cast<std::size_t>(value) : 0;
-}
-
-Dictionary load_report_dictionary(const EffectLoadReport &report) {
-	Dictionary result;
-	result["document_count"] = static_cast<int64_t>(report.document_count);
-	result["effect_count"] = static_cast<int64_t>(report.effect_count);
-	result["particle_definition_count"] =
-			static_cast<int64_t>(report.particle_definition_count);
-	result["table_definition_count"] =
-			static_cast<int64_t>(report.table_definition_count);
-	result["duplicate_effect_count"] =
-			static_cast<int64_t>(report.duplicate_effect_count);
-	result["duplicate_particle_count"] =
-			static_cast<int64_t>(report.duplicate_particle_count);
-	result["unresolved_particle_reference_count"] =
-			static_cast<int64_t>(report.unresolved_particle_reference_count);
-	return result;
 }
 
 Dictionary bounds_dictionary(const EffectBounds &bounds) {
@@ -209,6 +192,24 @@ std::vector<opennova::particle::EffectOwnerPoseUpdate> owner_pose_updates(
 		updates.push_back(update);
 	}
 	return updates;
+}
+
+// The inspect() diagnostic embed of the scene's retained load counters.
+Dictionary load_report_dictionary(const opennova::particle::EffectLoadReport &report) {
+	Dictionary result;
+	result["document_count"] = static_cast<int64_t>(report.document_count);
+	result["effect_count"] = static_cast<int64_t>(report.effect_count);
+	result["particle_definition_count"] =
+			static_cast<int64_t>(report.particle_definition_count);
+	result["table_definition_count"] =
+			static_cast<int64_t>(report.table_definition_count);
+	result["duplicate_effect_count"] =
+			static_cast<int64_t>(report.duplicate_effect_count);
+	result["duplicate_particle_count"] =
+			static_cast<int64_t>(report.duplicate_particle_count);
+	result["unresolved_particle_reference_count"] =
+			static_cast<int64_t>(report.unresolved_particle_reference_count);
+	return result;
 }
 
 Dictionary debug_dictionary(
@@ -339,7 +340,7 @@ void EffectScene::_bind_methods() {
 	BIND_ENUM_CONSTANT(SPAWN_STATUS_SPAWNED);
 }
 
-Dictionary EffectScene::open(
+Ref<EffectLoadReport> EffectScene::open(
 		const TypedArray<ParticleFile> &p_files,
 		const Dictionary &p_options) {
 	opennova::particle::EffectSceneConfig config;
@@ -367,11 +368,12 @@ Dictionary EffectScene::open(
 		config.documents.push_back(std::move(document));
 	}
 
-	const EffectLoadReport report = scene_.open(config);
+	const opennova::particle::EffectLoadReport report = scene_.open(config);
 	advance_in_place(0.0);
-	Dictionary result = load_report_dictionary(report);
-	result["input_document_count"] = p_files.size();
-	result["ignored_document_count"] = ignored_document_count;
+	Ref<godot::EffectLoadReport> result;
+	result.instantiate();
+	result->assign(report, static_cast<int>(p_files.size()),
+			static_cast<int>(ignored_document_count));
 	return result;
 }
 

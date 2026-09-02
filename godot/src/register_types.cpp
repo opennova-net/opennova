@@ -25,6 +25,7 @@
 #include "env/celestial.h"
 #include "env/environment_cube_capture.h"
 #include "mission/mission_object_placer.h"
+#include "mission/mission_placement_stats.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
 #include "env/sun_shadow.h"
@@ -43,6 +44,7 @@
 #include "particle/particle_def.h"
 #include "particle/particle_file.h"
 #include "lights/light_scene.h"
+#include "particle/effect_load_report.h"
 #include "particle/effect_scene.h"
 #include "particle/particle_compositor.h"
 #include "particle/particle_renderer.h"
@@ -110,6 +112,7 @@
 #include "network/host_session_options.h"
 #include "network/novaworld_server_row.h"
 #include "network/novaworld_host.h"
+#include "network/udp_datagram.h"
 #include "network/udp_pump.h"
 #include "network/lan_session.h"
 #include "network/net_protocol.h"
@@ -171,6 +174,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(Water);
 	GDREGISTER_CLASS(Celestial);
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
+	GDREGISTER_CLASS(MissionPlacementStats);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);
 	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
@@ -283,6 +287,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ParticleGraphicLayer);
 	GDREGISTER_CLASS(ParticleDef);
 	GDREGISTER_CLASS(ParticleFile);
+	GDREGISTER_CLASS(EffectLoadReport);
 	GDREGISTER_CLASS(EffectScene);
 	GDREGISTER_CLASS(LightScene);
 	GDREGISTER_CLASS(ParticleCompositorEffect);
@@ -311,6 +316,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaWorldServerRow);
 	GDREGISTER_CLASS(NovaWorldServerBrowser);
 	GDREGISTER_CLASS(NovaWorldHost);
+	GDREGISTER_CLASS(UdpDatagram);
 	GDREGISTER_CLASS(UdpPump);
 	GDREGISTER_CLASS(LanSession);
 	GDREGISTER_CLASS(NetProtocol);

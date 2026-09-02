@@ -94,7 +94,8 @@ func get_mcp_game_state() -> Variant:
 		"session": _session_facts(sim),
 		"runtime": runtime_state,
 		"player": player,
-		"mission": world.get_mission_stats() if world != null else {},
+		"mission": (world.get_mission_stats().to_json_value()
+				if world != null and world.get_mission_stats() != null else {}),
 		"performance": world.get_runtime_perf_counters() if world != null else {},
 		"audio_buses": _audio_bus_state(),
 	}

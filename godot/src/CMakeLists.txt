@@ -36,6 +36,7 @@ add_library(${TARGET_NAME} SHARED
     network/novaworld_identity.cpp
     network/nwu_lobby_session.cpp
     network/item_replication_catalog_adapter.cpp
+    network/udp_datagram.cpp
     network/udp_pump.cpp
     network/lan_session.cpp
     network/net_protocol.cpp
@@ -60,6 +61,7 @@ add_library(${TARGET_NAME} SHARED
     env/mission_environment.cpp
     mission/mission_catalog.cpp
     mission/mission_object_placer.cpp
+    mission/mission_placement_stats.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
     env/environment_cube_capture.cpp
@@ -81,6 +83,7 @@ add_library(${TARGET_NAME} SHARED
     particle/particle_def.cpp
     particle/particle_file.cpp
     lights/light_scene.cpp
+    particle/effect_load_report.cpp
     particle/effect_scene.cpp
     particle/particle_compositor.cpp
     particle/particle_renderer.cpp

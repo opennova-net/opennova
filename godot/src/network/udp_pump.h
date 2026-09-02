@@ -16,6 +16,8 @@
 
 namespace godot {
 
+class UdpDatagram;
+
 // A thin raw-UDP datagram pump for the co-op-LAN net path. It wraps ONE PacketPeerUDP and moves
 // RAW datagrams between the socket and the in-process net core — nothing more. Sockets + signals
 // live here (the Godot binding); the protocol framing + crypto live in libs (ADR 0010), so this
@@ -51,9 +53,9 @@ public:
 
 	bool has_inbound() const { return !inbound_.empty(); }
 	int inbound_count() const { return static_cast<int>(inbound_.size()); }
-	// Pop the next received datagram as {ip:String, port:int, bytes:PackedByteArray}; an empty
-	// Dictionary when none (the GDScript/test form).
-	Dictionary take_inbound();
+	// Pop the next received datagram as a UdpDatagram (network/udp_datagram.h);
+	// null when none (the GDScript/test form).
+	Ref<UdpDatagram> take_inbound();
 	// The native form the Simulation's datagram-socket adapter drains: the
 	// source address already packed at poll time. False when none is queued.
 	bool take_inbound_native(opennova::PeerAddr &from, PackedByteArray &bytes);

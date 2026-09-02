@@ -219,11 +219,11 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	# cache pages when the producer becomes live.
 	_world._terrain.set_static_shadow_placer(_world._placer)
 	print_verbose("GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
-		int(_world._mission_stats.placed),
-		int(_world._mission_stats.batched),
-		int(_world._mission_stats.animated),
-		int(_world._mission_stats.unresolved),
-		int(_world._mission_stats.markers),
+		_world._mission_stats.placed,
+		_world._mission_stats.batched,
+		_world._mission_stats.animated,
+		_world._mission_stats.unresolved,
+		_world._mission_stats.markers,
 	])
 
 
@@ -318,7 +318,7 @@ func unload() -> void:
 	# either the previous mission's override or its authored NONE state.
 	_world._viewmodel_weapon_override = ""
 	_world._viewmodel_weapon_cleared = false
-	_world._mission_stats = {}
+	_world._mission_stats = null
 
 
 func _load_environment(env_path: String) -> bool:
@@ -573,11 +573,11 @@ func _place_streamed_mission_objects(sim: Simulation) -> void:
 	if _world._light_director != null:
 		_world._light_director.reattach()
 	print_verbose("GameWorld: placed %d streamed mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
-		int(_world._mission_stats.placed),
-		int(_world._mission_stats.batched),
-		int(_world._mission_stats.animated),
-		int(_world._mission_stats.unresolved),
-		int(_world._mission_stats.markers),
+		_world._mission_stats.placed,
+		_world._mission_stats.batched,
+		_world._mission_stats.animated,
+		_world._mission_stats.unresolved,
+		_world._mission_stats.markers,
 	])
 
 
