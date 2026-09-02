@@ -803,15 +803,8 @@ float Celestial::_advance_water_glint(
 		const opennova::env::EnvironmentState &p_state,
 		const Vector3 &p_cam_pos, const Vector3 &p_sun_dir,
 		const Vector3 &p_forward, Body &p_body) {
-	// [orig: update_sun_glare @ 0x5ad130, once per main scene render from
-	// Terrain_RenderSceneWithReflection @ 0x5c96c0, see docs/env/env-tod-re.md]: one sample per frame —
-	// the reflected-sun point on the water (with the 0.25 * (frame & 3)
-	// reflected-height jitter and the +-2 point x/z jitter), visible when
-	// the point sees BOTH the sun (point -> camera + sun * 2048) and the
-	// camera over terrain (the entity ray keeps the documented sun-occlusion
-	// statics posture, like the sky glow) — then the +-16 chase toward
-	// popcount * 64 and the mirrored glare-model submit at camera +
-	// sun * 128 with the height term negated. No water = no glint.
+	// The glint law is the engine's advance_water_glint (celestial_frame.h);
+	// this leg owns the terrain rays and the model writes. No water = no glint.
 	if (p_body.model == nullptr) {
 		return 0.0f;
 	}
@@ -819,45 +812,19 @@ float Celestial::_advance_water_glint(
 		p_body.model->set_visible(false);
 		return 0.0f;
 	}
-	const opennova::env::Vec3 cam_m = godot_to_mission(p_cam_pos);
-	const opennova::env::Vec3 sun_m = godot_to_mission(p_sun_dir);
-	const float view_z_jitter =
-			0.25f * static_cast<float>(water_glint_.frame_index & 3u);
-	opennova::env::Vec3 point_m;
-	bool visible = opennova::env::water_glint_point(cam_m, sun_m,
-			p_state.water_height(), view_z_jitter, point_m);
-	if (visible) {
-		// The +-2 unit point jitter [orig: @ 0x5ad26a..0x5ad27e, see docs/env/env-tod-re.md] — mission
-		// x (godot x) and mission z = height (godot y).
-		point_m.x += (water_glint_.frame_index & 1u) ? 2.0f : -2.0f;
-		point_m.z += (water_glint_.frame_index & 2u) ? 2.0f : -2.0f;
-		const Vector3 point_g = mission_to_godot(point_m);
-		visible = _segment_clear(point_g,
-						  p_cam_pos + p_sun_dir * 2048.0f) &&
-				_segment_clear(point_g, p_cam_pos);
-	}
-	opennova::env::water_glint_tick(water_glint_, visible);
-
-	// Placement: camera + sun * 128 with the HEIGHT term negated (the
-	// mirrored glint below the eye [orig: @ 0x5ad1ba..0x5ad213 — the float
-	// matrix stores (-(camY + sunY*128), camZ - sunZ*128, camX + sunX*128),
-	// the mission -> render-float map of exactly that mirrored point, see docs/env/env-tod-re.md]).
-	const Vector3 mirrored(p_sun_dir.x, -p_sun_dir.y, p_sun_dir.z);
+	const opennova::env::WaterGlintFrame frame = opennova::env::advance_water_glint(
+			p_state, godot_to_mission(p_cam_pos), godot_to_mission(p_sun_dir),
+			godot_to_mission(p_forward), water_glint_,
+			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
+				return _segment_clear(mission_to_godot(a), mission_to_godot(b));
+			});
+	const Vector3 mirrored = mission_to_godot(frame.mirrored_sun);
 	p_body.model->set_global_position(p_cam_pos + mirrored * 128.0f);
 	_set_body_parameter(p_body, "u_anchor_camera_world", p_cam_pos);
 	_set_body_parameter(p_body, "u_tint", to_vector3(p_state.sun_color()));
-	// Alpha: the view dot of the MIRRORED sun direction [orig: @ 0x5ad384
-	// negates the height term before the view transform, see docs/env/env-tod-re.md] through the
-	// witnessed (dot^4 - 28672/65536) x brightness chain.
-	const int dot_fixed = static_cast<int>(
-			p_forward.dot(mirrored) * 65536.0f);
-	const float alpha = static_cast<float>(opennova::env::water_glint_alpha_fixed(
-			dot_fixed, water_glint_.brightness,
-			opennova::io::float_to_fp16_16(p_state.sun_dim_pct()))) /
-			65536.0f;
-	_set_body_parameter(p_body, "u_opacity", alpha);
-	p_body.model->set_visible(alpha > 0.0f && water_glint_.brightness > 0);
-	return alpha;
+	_set_body_parameter(p_body, "u_opacity", frame.alpha);
+	p_body.model->set_visible(frame.alpha > 0.0f && water_glint_.brightness > 0);
+	return frame.alpha;
 }
 
 // Terrain line-of-sight for the glare: the ported boolean raycast form over

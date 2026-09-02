@@ -542,37 +542,15 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.map_coords_y = static_cast<float>(map_coords.y);
 	layout_.map_coords_off = map_coords.z;
 
-	// The HUDDECLUT mask table from the parsed rows [orig:
-	// HUD_ParseHudposToken @0x59F370 -> byte_2723CE0, see
-	// docs/interface/hud-re.md]. A file that authors ANY known row is applied
-	// faithfully — an unauthored slot then stays hidden at every level, like
-	// retail's zeroed table. A file with NO declutter rows at all (the test
-	// harness's minimal layouts; retail never ships one) keeps the module's
-	// all-visible default instead of blanking the whole HUD.
+	// The HUDDECLUT mask table from the parsed rows: the engine's
+	// declutter_from_hudpos (see docs/interface/hud-re.md); a file with no
+	// declutter rows keeps the module's all-visible default.
 	{
-		opennova::hud::HudDeclutter authored;
-		authored.begin_authoring();
-		bool any_row = false;
-		for (int slot = 0; slot < opennova::hud::kDeclutterSlotCount; ++slot) {
-			const PackedByteArray row = p_hudpos->get_declutter_flags(
-					String(opennova::hud::declutter_token_name(slot)));
-			if (row.size() < 4) {
-				continue;
-			}
-			int flags[4];
-			for (int i = 0; i < 4; ++i) {
-				flags[i] = row[i] != 0 ? 1 : 0;
-			}
-			authored.set_mask(slot,
-					opennova::hud::HudDeclutter::mask_from_flags(flags));
-			any_row = true;
-		}
 		const int level = declutter_.level();
-		if (any_row) {
-			declutter_ = authored;
-		} else {
-			declutter_ = opennova::hud::HudDeclutter();
-		}
+		opennova::hud::HudDeclutter authored;
+		declutter_ = opennova::hud::declutter_from_hudpos(p_hudpos->native_file(), authored)
+				? authored
+				: opennova::hud::HudDeclutter();
 		declutter_.set_level(level);
 		apply_declutter_();
 	}
