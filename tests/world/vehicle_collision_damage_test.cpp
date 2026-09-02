@@ -73,6 +73,47 @@ void test_kill_fires_once_on_transition() {
 }
 
 // The collision damage flag and death cause are distinct, witnessed values.
+// The run-over kill's refusals [orig: @0x4b37c2..0x4b3901]: only a moving
+// vehicle that is not the victim's ride, on the authority, past 0x27B0 on both
+// its own and its relative displacement, across teams (or BERSERK), against a
+// live, destructible victim.
+void test_run_over_gates() {
+	const int32_t fast = kRunOverSpeedThreshold + 1;
+	const int32_t slow = kRunOverSpeedThreshold;
+	CHECK(run_over_kill_applies(true, false, false, 100, false, fast, fast, false, false, true, false),
+			"a moving enemy vehicle kills");
+	CHECK(!run_over_kill_applies(false, false, false, 100, false, fast, fast, false, false, true, false),
+			"a non-vehicle pusher never kills");
+	CHECK(!run_over_kill_applies(true, true, false, 100, false, fast, fast, false, false, true, false),
+			"the victim's own ride never crushes it");
+	CHECK(!run_over_kill_applies(true, false, true, 100, false, fast, fast, false, false, true, false),
+			"a dead hull never kills");
+	CHECK(!run_over_kill_applies(true, false, false, 0, false, fast, fast, false, false, true, false),
+			"a victim without health is skipped");
+	CHECK(!run_over_kill_applies(true, false, false, 100, true, fast, fast, false, false, true, false),
+			"a dead victim is skipped");
+	CHECK(!run_over_kill_applies(true, false, false, 100, false, fast, slow, false, false, true, false),
+			"relative displacement at the threshold does not kill");
+	CHECK(!run_over_kill_applies(true, false, false, 100, false, slow, fast, false, false, true, false),
+			"pusher displacement at the threshold does not kill");
+	CHECK(!run_over_kill_applies(true, false, false, 100, false, fast, fast, true, false, true, false),
+			"same team, no berserk: no kill");
+	CHECK(run_over_kill_applies(true, false, false, 100, false, fast, fast, true, true, true, false),
+			"same team with a berserk side kills");
+	CHECK(!run_over_kill_applies(true, false, false, 100, false, fast, fast, false, false, false, false),
+			"a joiner never kills");
+	CHECK(!run_over_kill_applies(true, false, false, 100, false, fast, fast, false, false, true, true),
+			"an indestructible victim survives");
+	// The approach quadrant: a hit from dead ahead (relative motion INTO the
+	// victim along its facing) is quadrant 2; from behind, 0.
+	// yaw 0 = +x; the relative delta is the pusher's motion minus the victim's.
+	CHECK(run_over_quadrant(0, 0x10000, 0) == 0, "moving along the facing: quadrant 0");
+	CHECK(run_over_quadrant(0, -0x10000, 0) == 2, "moving against the facing: quadrant 2");
+	CHECK(run_over_quadrant(0, 0, 0x10000) == 3, "quadrant 3");
+	CHECK(run_over_quadrant(0, 0, -0x10000) == 1, "quadrant 1");
+	CHECK(kRunOverDeathCause == 2 && kRunOverDeathBone == 2, "cause 2 at bone 2");
+}
+
 void test_constants() {
 	CHECK(kDamageFlagCollision == 0x400u, "the collision damage flag");
 	CHECK(kDeathCauseCollision == 3, "the death cause code");
@@ -88,6 +129,7 @@ int main() {
 	test_self_hit_guard();
 	test_attribution_walks_past_a_dead_parent();
 	test_kill_fires_once_on_transition();
+	test_run_over_gates();
 	test_constants();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

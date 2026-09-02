@@ -16,6 +16,9 @@
 
 #include "collision_detail.h"
 
+#include <runtime/world/ai.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/vehicle_collision_damage.h>
 #include <runtime/world/world.h>
 #include <base/io/fixed.h>
 
@@ -319,6 +322,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     int32_t total_force[3] = {0, 0, 0};
     LadderContact ladder;
     EntityHandle ladder_entity;
+    // The last candidate that pushed in the first force pass — the run-over
+    // kill's pusher [orig: the var_80 store @0x4b30a9].
+    EntityHandle pusher;
     // Retail leaves the global stale across SKIPPED resolves (the early ret
     // @ 0x4b2cfe precedes the store); zeroing at entry only diverges on skip
     // ticks, where no org1 climber runs anyway.
@@ -392,7 +398,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     }
                     pass_force[0] -= f[0];
                     pass_force[1] -= f[1];
-                    if (pass == 0) pass_force[2] -= f[2];
+                    if (pass == 0) {
+                        pass_force[2] -= f[2];
+                        pusher = ch; // [orig: @0x4b30a9]
+                    }
                     pass_contact = true;
                 }
                 if (pass == 0) {
@@ -615,6 +624,62 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     }
     if (replica_flags_ != nullptr && (blink.flags & kBlinkIndoorsBit) != 0)
         *replica_flags_ |= kEntityFlagIndoors;
+
+    // The run-over kill [orig: @0x4b37c2..0x4b39f7 — gates and the kill in
+    // vehicle_collision_damage.h]. The pusher's displacement is its mover-entry
+    // savedLivePose delta (+0x80); the victim's is measured from the resolver's
+    // previous-tick pose (its +0x80 stamp lives in the body motors' prologues).
+    if (pusher.valid() && ent != nullptr && is_authority) {
+        const Entity *p = world.registry.get(pusher);
+        if (p != nullptr && p->has_item_def) {
+            const int32_t pdx = p->saved_live_valid
+                    ? to_fixed(p->position.x) - p->saved_live_pos[0] : 0;
+            const int32_t pdy = p->saved_live_valid
+                    ? to_fixed(p->position.y) - p->saved_live_pos[1] : 0;
+            const int32_t vdx = pos[0] - state.prev_pos[0];
+            const int32_t vdy = pos[1] - state.prev_pos[1];
+            const int32_t rdx = pdx - vdx;
+            const int32_t rdy = pdy - vdy;
+            const double rl = std::sqrt(static_cast<double>(rdx) * rdx +
+                                        static_cast<double>(rdy) * rdy);
+            const double pl = std::sqrt(static_cast<double>(pdx) * pdx +
+                                        static_cast<double>(pdy) * pdy);
+            const int32_t rel_move = rl >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(rl);
+            const int32_t pusher_move = pl >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(pl);
+            bool berserk = false;
+            if (world.ai != nullptr) {
+                const AiEntity *pa = world.ai->for_handle(pusher);
+                const AiEntity *va = world.ai->for_handle(source);
+                berserk = (pa != nullptr && (pa->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0) ||
+                          (va != nullptr && (va->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0);
+            }
+            const uint32_t vflags = ent->flags | ent->engine_flags;
+            if (run_over_kill_applies(p->item_type == 1, ent->ground_target == pusher,
+                                      (p->flags & kEntityFlagDead) != 0, health,
+                                      (vflags & kEntityFlagDead) != 0, pusher_move, rel_move,
+                                      p->team == ent->team, berserk, is_authority,
+                                      (vflags & kEntityFlagIndestructible) != 0)) {
+                // A player victim: retail also exempts a spectating slot
+                // (@0x4b393f — the player-slot byte +0x188D7); the +0x124
+                // dword gate @0x4b391f is unmodeled (a deployed player's is
+                // non-zero).
+                const int quadrant = run_over_quadrant(
+                        bam_heading_from_mission_yaw_deg(static_cast<double>(ent->yaw)),
+                        rdx, rdy);
+                ent->death_anim_state = compute_death_anim_state(
+                        kRunOverDeathBone, quadrant, kRunOverDeathCause);
+                ent->last_attacker = p->primary_occupant; // [orig: +0x178 = pusher->occupantEntity]
+                health = 0;
+                RoundDeath d;
+                d.victim = source;
+                d.killer = p->primary_occupant;
+                d.victim_handle = source.packed;
+                d.killer_handle = p->primary_occupant.valid()
+                        ? p->primary_occupant.packed : 0xFFFFu;
+                world.round_sim.deaths.push_back(d);
+            }
+        }
+    }
 
     // Inter-entity sphere repulsion (no model contact only). [orig: @ 0x4b3a5c-0x4b3c52 —
     // threshold 30% of summed radii, push (thr - dist)/4 along the atan2 direction
