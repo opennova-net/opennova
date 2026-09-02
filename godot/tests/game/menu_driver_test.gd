@@ -231,7 +231,6 @@ func test_quit_and_url_actions() -> void:
 	assert_true(driver.dispatch_action_row({"type": "url", "target": "www.novalogic.com"}),
 			"url consumed")
 	assert_signal_emitted_with_parameters(driver, "url_requested", ["www.novalogic.com"])
-	assert_signal_emitted(driver, "shell_action_requested")
 
 
 func test_window_actions_show_hide_enable_disable_toggle() -> void:
@@ -275,34 +274,15 @@ func test_window_action_rejects_off_screen_target() -> void:
 			"an unknown target is rejected")
 
 
-func test_shell_verbs_emit_shell_action_requested() -> void:
+func test_service_verbs_are_not_driver_actions() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	watch_signals(driver)
 	var action := {"type": "lan_search", "target": "SERVER_ROWS", "source": "lan"}
-	assert_true(driver.dispatch_action_row(action), "shell verb consumed")
-	assert_signal_emitted(driver, "shell_action_requested")
-	var args: Array = get_signal_parameters(driver, "shell_action_requested", 0)
-	assert_eq(args[0], "lan_search", "verb type relayed")
-	var payload := args[1] as Dictionary
-	assert_eq(payload.get("target"), "SERVER_ROWS", "payload preserved")
-	assert_eq(payload.get("source"), "lan", "payload fields preserved")
+	assert_false(driver.dispatch_action_row(action),
+			"a service verb (menu-re.md: LAN_SEARCH) is not handled by the driver")
 	assert_eq(driver.get_current_screen(), "MAIN", "the driver invents no LAN effects")
-
-
-func test_action_dispatched_emits_first() -> void:
-	var driver := _frameless_driver(ACTIONS_XML)
-	var order: Array = []
-	driver.action_dispatched.connect(
-			func(type: String, _target: String) -> void: order.append("dispatched:" + type))
-	driver.shell_action_requested.connect(
-			func(type: String, _action: Dictionary) -> void: order.append("shell:" + type))
-	driver.screen_changed.connect(
-			func(name: String) -> void: order.append("screen:" + name))
-	driver.dispatch_action_row({"type": "lan_search", "target": "ROWS"})
-	driver.dispatch_action_row({"type": "screen", "target": "SUB", "file": ""})
-	assert_eq(order, ["dispatched:lan_search", "shell:lan_search",
-			"dispatched:screen", "screen:SUB"],
-			"action_dispatched precedes every effect signal")
+	assert_signal_not_emitted(driver, "screen_changed")
+	assert_signal_not_emitted(driver, "menu_requested")
 
 
 # The deliberate retail-order inversion (menu-re.md): widget_activated fires
@@ -316,12 +296,8 @@ func test_widget_activated_precedes_action_dispatch() -> void:
 				order.append("activated:" + name)
 				popup_shown_at_emit.append(
 						driver.is_widget_shown(driver.widget_id("POPUP"))))
-	driver.action_dispatched.connect(
-			func(type: String, _target: String) -> void:
-				order.append("dispatched:" + type))
 	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "GO consumed")
-	assert_eq(order, ["activated:GO", "dispatched:window"],
-			"widget_activated precedes the ACTION dispatch")
+	assert_eq(order, ["activated:GO"], "the activation observer ran once")
 	assert_eq(popup_shown_at_emit, [false],
 			"the observer runs before the ACTION list mutates the screen")
 	assert_true(driver.is_widget_shown(driver.widget_id("POPUP")),
@@ -333,39 +309,55 @@ func test_widget_activated_precedes_action_dispatch() -> void:
 # OLD widget id's ACTION list dispatched against the NEW document.
 func test_document_swap_during_activation_blocks_stale_dispatch() -> void:
 	var driver := _framed_driver(ACTION_BUTTON_XML)
+	# The swapped-in document authors the same hidden POPUP the stale GO
+	# ACTION would show: it stays hidden only if that ACTION list never ran.
 	driver.widget_activated.connect(
 			func(_id: int, _name: String) -> void:
 				assert_true(driver.open_document(
-						_doc(ACTIONS_XML), null, null, null, "other.mnu"),
+						_doc(ACTION_BUTTON_XML), null, null, null, "other.mnu"),
 						"observer swaps the document mid-activation"))
 	watch_signals(driver)
 	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "GO consumed")
 	assert_signal_emitted(driver, "widget_activated")
-	assert_signal_not_emitted(driver, "action_dispatched")
-	assert_eq(driver.get_current_screen(), "MAIN",
-			"the new document is live and untouched by the stale ACTION list")
+	assert_eq(driver.get_menu_file(), "other.mnu", "the new document is live")
+	assert_false(driver.is_widget_shown(driver.widget_id("POPUP")),
+			"the new document is untouched by the stale ACTION list")
 
 
-# --- (b) screen_changed + music_changed -----------------------------------------
+# --- (b) screen_changed + the MUSICVAR push -------------------------------------
 
 
-func test_screen_changed_and_music_changed_on_every_show() -> void:
+const MUS_SCRIPT_FIXTURE := "res://../fixtures/mus/synth_gamemus.bin"
+const MUSIC_VAR_INDEX := 4
+
+
+func test_screen_changed_and_music_var_push_on_every_show() -> void:
+	# A real director over the synthetic MUS script: the push lands in the
+	# music VM's variable, read back through get_var.
+	var script := MusicScript.new()
+	assert_eq(script.load_from_path(MUS_SCRIPT_FIXTURE), OK, "the MUS fixture loads")
+	var director := MusicDirector.new()
+	add_child_autofree(director)
+	director.load_mus_script(script)
+	director.auto_start = false
+	director.start()
 	var driver := MenuDriver.new()
+	driver.set_music_director(director)
+	driver.set_music_var_index(MUSIC_VAR_INDEX)
 	watch_signals(driver)
 	assert_true(driver.open_document(_doc(ACTIONS_XML), null, null, null, "menu.mnu"))
 	assert_signal_emitted_with_parameters(driver, "screen_changed", ["MAIN"])
-	assert_signal_emitted_with_parameters(driver, "music_changed", [3])
-	assert_signal_emit_count(driver, "music_changed", 1, "one push for the initial show")
+	assert_eq(director.get_var(MUSIC_VAR_INDEX), 3, "the authored MUSICVAR is pushed on show")
 
 	assert_true(driver.show_screen("SUB"))
 	# SUB authors no MUSICVAR: the push still fires with zero [orig:
 	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable @ 0x54eff4].
-	assert_signal_emitted_with_parameters(driver, "music_changed", [0])
-	assert_signal_emit_count(driver, "music_changed", 2, "a no-MUSICVAR screen resets to 0")
+	assert_eq(director.get_var(MUSIC_VAR_INDEX), 0, "a no-MUSICVAR screen resets to 0")
 	assert_signal_emit_count(driver, "screen_changed", 2)
 
+	director.set_var(MUSIC_VAR_INDEX, 7)
 	assert_true(driver.show_screen("SUB"))
-	assert_signal_emit_count(driver, "music_changed", 3, "repeated screen events repeat the push")
+	assert_eq(director.get_var(MUSIC_VAR_INDEX), 0, "repeated screen events repeat the push")
 	assert_signal_emit_count(driver, "screen_changed", 3)
 
 
