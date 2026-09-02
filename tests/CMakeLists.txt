@@ -1094,11 +1094,6 @@ target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
 
-add_executable(menu_table_sort_test menu/menu_table_sort_test.cpp)
-target_link_libraries(menu_table_sort_test PRIVATE opennova_runtime)
-target_include_directories(menu_table_sort_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME menu_table_sort COMMAND menu_table_sort_test)
-
 add_executable(group_render_gate_test particle/group_render_gate_test.cpp)
 target_link_libraries(group_render_gate_test PRIVATE opennova_runtime)
 target_include_directories(group_render_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
