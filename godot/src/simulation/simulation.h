@@ -210,7 +210,7 @@ public:
 	// A dying joiner sim ships the retail goodbye burst before the socket drops — retail sends
 	// its disconnect packets from the connection teardown that Destroy also runs, so freeing the
 	// sim (ESC abort, watchdog abort, return-to-menu) must not leak an admitted peer on the host.
-	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0, called by Destroy]
+	// (engine: net/npruntime/client_runtime.cpp)
 	~Simulation() override;
 
 	// Load + promote an in-memory bms::File. This remains a narrow fixture/tooling seam;
@@ -242,7 +242,7 @@ public:
 	// false when the session cannot take a direct local/test tick. Banking wall
 	// clock and dispatching 0..N ticks per render frame belongs to inmatch::Session
 	// (the Game_MainLoop @0x52b630 accumulator) — a render frame is NOT one tick.
-	// [orig: Game_ProcessMainFrame @0x5263f0 (one current_tick++ @0x24c1968)]
+	// (engine: formats/sph/sph.h)
 	bool step();
 
 	// Turn the sim into an SP in-process listen server (ADR 0011): the host serializes
@@ -302,8 +302,7 @@ public:
 	bool local_death_screen_active() const;
 	// True while a live net session owns this sim: the world tick is the ONLY pump for the
 	// session socket, so the Play/Step/Stop transport locks out (retail MP has no pause; a
-	// stopped listen host reaps every joiner at cs_dir0.timeout_ms [orig: CNapiNetwork_Init
-	// @ 0x4ca4a0]). The single home for the rule — F3 transport, MCP, and ESC pause read it.
+	// stopped listen host reaps every joiner at cs_dir0.timeout_ms (engine: net/novaworld/client_session.h)). The single home for the rule — F3 transport, MCP, and ESC pause read it.
 	bool is_transport_locked() const { return joiner_ || host_listen_; }
 	// The portable session's live role/state records (net/inmatch/session.h),
 	// re-exported so the debug/MCP shell derives authority and role labels from
@@ -426,7 +425,7 @@ public:
 	// landed since the last take, else {score, delta, tone} with the tone name
 	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
 	// 2D interface sound behind the enable_slotmachine setting
-	// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42a0b0, see hud/score_fanfare.h].
+	// (engine: net/netsim/client_state.h).
 	Dictionary take_score_feedback();
 	// Exact pre-world payloads retained by the joiner from retail's initial
 	// state stream. The mission header is exactly 616 bytes when available. TIL
@@ -442,9 +441,7 @@ public:
 	// way it surfaces a join failure. Two causes — the host's explicit close (the punt
 	// channel) and in-match silence past the reap window. Retail exits the mission with a
 	// mapped exit reason here and shows no in-world dialog.
-	// [orig: the cs_dir0.timeout_ms = 120000 reap installed by CNapiNetwork_Init @0x4ca4a0
-	//  and the punt record CNapiNPConnection_HandleDescriptionPacket @0x621ae0, both ->
-	//  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
+	// (engine: net/novaworld/client_session.h)
 	String get_session_loss_reason() const;
 	// The same edge as a state test rather than a presentation string: in-world surfaces
 	// (the deploy screen) need to know the session is gone, not what to tell the player.
@@ -481,13 +478,13 @@ public:
 	// The DEATH screen's SPAWNPOINTS_LIST rows: {param:int, letter:String,
 	// name_key:String} per team-owned secured deploy zone, letters/names keyed by the
 	// spawn-zone registry index. Row 0 (the Default Spawn, param 0) is the shell's.
-	// [orig: UI_UpdateDeathScreenContent @0x5536a0]
+	// (engine: net/netsim/client_state.h)
 	TypedArray<Dictionary> get_deploy_spawn_zones();
 	// The compiled SPAWNPOINTS_LIST rows {text, value}: the engine builder's two
 	// witnessed loops (world/deploy_screen_feed.h) over the zone rows above, the
 	// team colour tag, the Menu default-row tokens and the embedder-resolved
 	// WPNames strings (name_key -> text). value 0 = default, index+1 = zone,
-	// -1 = occupant/blank (never a pick). [orig: UI_UpdateDeathScreenContent @0x5536a0, see world/deploy_screen_feed.h]
+	// -1 = occupant/blank (never a pick). (engine: net/netsim/client_state.h)
 	TypedArray<Dictionary> get_deploy_list_rows(const String &p_default_key,
 			const String &p_default_home, const Dictionary &p_zone_names);
 	// The DEATH screen's STATIC facts: the 0x0A sub-block-0 timers, the queued
@@ -498,7 +495,7 @@ public:
 	String get_deploy_status_text(const Ref<RtxtStringFile> &p_gametext);
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
-	// [orig: Input_HandleActionBinding case 217 @0x49b4b4..0x49b51b, see docs/net/novaworld-net-re.md 0x2E]
+	// (engine: net/npruntime/client_runtime.h)
 	bool request_local_player_medic();
 	int local_medic_request_cooldown_ticks() const;
 	int local_medic_request_serial() const;
@@ -561,15 +558,14 @@ public:
 	// through the catalog's for_mission_mode map (no multiplayer bit -> stock Co-op 0x10020).
 	// The listen host seeds its GameConfig from it before the auto-spawn, the same word the
 	// LAN-host dialog derives on the GDScript side (HostSessionConfig.game_type_auto).
-	// [orig: AI_GetTaskTypeFromFlags @0x40DAE0 -> Game_StartMission @0x524360, see
-	// docs/net/novaworld-net-re.md 5.2c]
+	// (engine: net/npwire/game_type.h)
 	uint32_t mission_game_type() const;
 	// Spawn the host's own player at the mission's player-START marker, selected the way the
 	// original engine does — by game type, FARTHEST from the enemy set — NOT at any NPC's
 	// position (net-re §5.2c). A stock SP mission resolves the Co-op 6094 -> 6001 chain. Call AFTER a
 	// mission is loaded. Returns: 1 = spawned at a real start marker; 0 = no start marker, spawned
 	// at a safe fallback origin (never an NPC); -1 = failed (no mission / pool 0 full).
-	// [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
+	// (engine: net/npruntime/server_message_dispatch.cpp)
 	int spawn_local_player_at_start();
 	// True once a local player has been spawned (World::cached.local_player valid).
 	bool has_local_player() const;
@@ -583,23 +579,20 @@ public:
 	// keys (Q/E, catalog ids 6/7) + jump; stance and look are SIM-owned state
 	// (request_local_player_stance / add_local_player_look). There is no run key in the
 	// original's catalog — running is the automatic forward-walk promotion in the body
-	// selection [orig: @0x4b729d].
+	// selection (engine: formats/def/def.h).
 	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
 	                      bool p_lean_left, bool p_lean_right, bool p_jump);
 	// One frame of mouse pixels (screen sense: +x right, +y down) applied to the local
 	// player's look through the witnessed integer pipeline: sens = setting << 11,
 	// scoped zoom reduction, (px*sens+0x8000)>>16 per axis; yaw wraps; pitch clamps
-	// +-80 deg with the up-limit +40 deg while prone. [orig: Input_ProcessMouseAxisBindings
-	// @ 0x499680; axis cases 166/164 @ 0x4e109d/@ 0x4e0fed]
+	// +-80 deg with the up-limit +40 deg while prone. (engine: runtime/mission/mission_kernel.cpp)
 	void add_local_player_look(float p_dx_px, float p_dy_px);
 	// Mouse options: sensitivity [1,511], default 128; Y invert (flipmouse, default off).
-	// [orig: dword_24D207C / dword_24D2078; profile +0x590/+0x594; defaults @ 0x54bbc0]
+	// (engine: runtime/world/player_look.h)
 	void set_local_player_mouse(int p_sensitivity, bool p_invert_y);
 	// Stance SELECT request (0 stand / 1 crouch / 2 prone) — the 3-key semantics: each
 	// key selects its stance, mutual exclusion at apply, REFUSED while the equipped
-	// weapon has ForceCrouch (0x40000). Returns whether the stance changed. [orig:
-	// input cases 169/170/172 @ 0x4e0d77.. -> C2S 0x1D ->
-	// NapiNPServerMsg_HandleStanceChange @ 0x501c60]
+	// weapon has ForceCrouch (0x40000). Returns whether the stance changed. (engine: net/npruntime/client_runtime.h)
 	bool request_local_player_stance(int p_stance);
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
@@ -625,7 +618,7 @@ public:
 	float get_local_player_yaw_deg() const;
 	float get_local_player_pitch_deg() const;
 	// The local player's current/max health and team for the HUD, mirroring the original
-	// per-frame HUD info. [orig: HUD_BuildEntityInfo @0x4b8440 — health ratio +92, team +374]
+	// per-frame HUD info. (engine: runtime/hud/hud_frame.h)
 	int get_local_player_health() const;
 	int get_local_player_max_health() const;
 	// The gamemus Var7 projection (world/music_vars.h carries the witness).
@@ -637,7 +630,7 @@ public:
 	int get_local_player_character_id() const;
 	// Authoritative armory on-show state from the spawned entity. The class is
 	// playerClass +0x294; the name resolves equipped AdmDef index +0x2B0.
-	// [orig: Armory_ResolveSelectedClass @0x5642f0; Player_MountWeaponSlot @0x4dfa40]
+	// (engine: runtime/world/player_loadout.cpp)
 	int get_local_player_class() const;
 	String get_local_player_weapon_name() const;
 	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The shell
@@ -665,8 +658,7 @@ public:
 	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
 	//   body: Vector3 mission-euler degrees (pitch, yaw, roll) for the avatar node basis;
 	//   angles: PackedVector3Array[9] mission-euler degrees per anim::OverlayClass.
-	// The blends run in exact BAM int math [orig: Entity_BuildBoneTransformMatrices
-	// @0x4b1290; docs/world/world-wac-ai-re.md §14]; the shell converts each triple with
+	// The blends run in exact BAM int math (engine: runtime/anim/aim_overlay.cpp); the shell converts each triple with
 	// MissionObjectPlacer.bms_to_godot_basis (the single-sourced frame conversion) and
 	// feeds ObjectModel.set_aim_overlay. Empty/invalid when no player.
 	Dictionary get_local_player_aim_overlay() const;
@@ -680,8 +672,7 @@ public:
 	// PackedFloat32Array in .adm file order (SkeletalAnim.get_clip_variant_lengths;
 	// a plain float is accepted as a single-variant convenience). The lengths seed the
 	// per-slot rings and the Anim_InitActions bake consumes them ring-wise: one
-	// serve-then-advance read per 'auto' delay field [orig: @ 0x541fa0;
-	// Anim_GetDurationTicks @ 0x53ee10]. A normal install is a real mount and
+	// serve-then-advance read per 'auto' delay field (engine: runtime/world/player_weapon.cpp). A normal install is a real mount and
 	// resets the personal slot unless p_preserve_slot_state selects an already-live
 	// UseGun parent/personal slot.
 	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds,
@@ -689,10 +680,7 @@ public:
 	// The production mount (S6b, ADR 0028): find the row in the RETAINED
 	// weapon.def parse, bake the FSM def from it, and seed the clip rings from
 	// the rig's own .adm through the sim's mounted index — one step at ACCEPT
-	// time, no shell dictionary and no render dependency [orig: the ACCEPT
-	// chain rebuilds the slot table + mounts with no render dependency —
-	// WeaponSlotTable_LoadAllFromDefs @ 0x5414e0 + Player_MountWeaponSlot
-	// @ 0x4dfa40; Anim_InitActions @ 0x541fa0 bakes the delays]. Returns false
+	// time, no shell dictionary and no render dependency (engine: runtime/simassets/adm_clip_index.h). Returns false
 	// when the name is not in the retained table (caller keeps the current
 	// weapon, mirroring the armory guard). The Dictionary pair above survives
 	// as the GUT synthetic-def seam and retires with S7a.
@@ -700,22 +688,20 @@ public:
 	                                         bool p_preserve_slot_state = false);
 	// Render-side late binding of .adm clip lengths for the already-mounted def.
 	// This is the only path allowed to preserve a same-name live action slot and
-	// queued presentation [orig: FP model resolve @ 0x4ded60 is not a mount].
+	// queued presentation (engine: net/npruntime/joiner_world_bridge.cpp).
 	void rebake_local_player_weapon(const Dictionary &p_def,
 	                                const Dictionary &p_clip_seconds,
 	                                bool p_preserve_slot_state = false);
 	void clear_local_player_weapon();
 	void set_local_player_first_person_model_available(bool p_available);
 	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
-	// gate runs sim-side) [orig: the binding-149/reload input dispatch,
-	// Input_HandleActionBinding_0 @ 0x4e0420].
+	// gate runs sim-side) (engine: runtime/world/local_player_view.cpp).
 	void set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
 	                                   bool p_reload_pressed);
 	// The ADS toggle request: gated by the dispatcher rules (no toggle during
 	// RELOAD/SWITCHFROM, def Flags & 3 required), flips the sim-owned engaged bit
 	// and queues the scopeup/scopedown FSM states. Returns whether it toggled.
-	// [orig: input case 6 @ 0x4e0420; Player_ToggleWeaponScope @ 0x4df0c0;
-	//  WeaponSlot_TryQueueScopeUp @ 0x53f050 / ..ScopeDown @ 0x53f080]
+	// (engine: runtime/world/local_player_view.cpp)
 	bool request_local_player_scope_toggle();
 	// Retail action 26 (default B): toggles the persistent binocular request.
 	// The effective raised/view bits are derived each tick from movement, life,
@@ -729,7 +715,7 @@ public:
 	// Returns the clamped gain in [0,4].
 	int request_local_player_nvg_gain(int p_delta);
 	// The view actions' chase preference (view1st/viewwithgun -> false,
-	// viewchase -> true) [orig: g_camera_third_person_selected @ 0xA860DF]; the
+	// viewchase -> true) (engine: runtime/world/local_player_view.cpp); the
 	// camera mode itself is RESOLVED per tick by the arbiter from the
 	// preference and the seat (world/player_view.h player_view_resolve_mode).
 	void set_local_player_third_person_selected(bool p_selected);
@@ -743,7 +729,7 @@ public:
 	// tp_anchor (Godot space), tp_anchor_valid}. Read-only; ticked at 62.5 Hz.
 	Dictionary get_local_player_view() const;
 	// Horizontal -> vertical projection fov (degrees) through the aspect — the
-	// ONE conversion both cameras use [orig: @ 0x58d900].
+	// ONE conversion both cameras use (engine: runtime/world/player_view.cpp).
 	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
 	// The presentation frame's view forward for mission-euler angles, the aim
 	// ray's far point and the binocular rangefinder readout — the engine's
@@ -800,8 +786,7 @@ public:
 	Dictionary get_hud_map_grid_origin() const;
 	// The objectives-panel rows: an Array of {slot, text_id, shown, done} for
 	// header slots 1..8, terminated at the first 0/255 win-condition id —
-	// exactly the panel's row walk [orig: HUD_DrawWinConditions @0x5ba9e0..;
-	// shown = show-win bit, done = won bit].
+	// exactly the panel's row walk (engine: runtime/mission/promote.cpp).
 	Array get_objectives_view() const;
 	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
@@ -812,14 +797,13 @@ public:
 	Array drain_local_player_weapon_events();
 	// Destructively drain the flight sim's resolved round impacts, each row already
 	// mapped through the ammo effects_table to {position, direction, effect, sound}
-	// [orig: Projectile_SpawnImpactEffect @ 0x4e9b80; world/round_sim.h RoundImpact].
+	// (engine: runtime/world/ammo_table.h).
 	Array drain_round_impacts();
 	// Destructively drain permanent terrain-cache scorch insertions. Bounds are
 	// already folded from mission (x,y) to terrain/Godot horizontal (x,z).
 	Array drain_terrain_scorches();
 	// Drain this frame's folded S2C 0x1E game events as feed rows — one per
-	// line the original would post to its message feed [orig: the 0x426270
-	// handler]. Each row carries the actor NAMES (resolved here, where the
+	// line the original would post to its message feed (engine: net/netsim/client_replica_feed.cpp). Each row carries the actor NAMES (resolved here, where the
 	// decoded roster lives), the canned-message key (plus the camp rows'
 	// WPNames level key), and the witnessed line color; the embedder resolves
 	// the keys against gametext and calls the format helpers below.
@@ -863,8 +847,7 @@ public:
 	// witnessed channel table: [{text, argb, sink, channel}] where sink 0 =
 	// the SYSTEM ring, 1 = the CHAT ring, 2 = the message queue, 3 = channel 3.
 	Array drain_chat_lines();
-	// Substitute actor names into a canned template [orig: Chat_FormatMessage
-	// @0x422C60]: the STRCND48 bonus re-compose when `extra` names the local
+	// Substitute actor names into a canned template (engine: net/netsim/client_replica_feed.cpp): the STRCND48 bonus re-compose when `extra` names the local
 	// player, then $A/$B sequential case-insensitive replace-all. Exposed so
 	// the string lookup can live with the string table while the substitution
 	// rule stays in engine C++.
@@ -872,33 +855,31 @@ public:
 			const String &p_victim, const String &p_extra,
 			const String &p_bonus_template) const;
 	// Compose a camp line — the template's %s takes the level's WPNames string
-	// [orig: the case-59/60 sprintf @0x427327/@0x42736B].
+	// (engine: runtime/hud/feed_format.cpp).
 	String format_feed_camp_line(const String &p_template,
 			const String &p_wpname) const;
 
 	// --- the local player's loadout: slot pool, spawn kit, map rules -------------------
 	// (the 2026-07-18 loadout grill; witness map in docs/net/novaworld-net-re.md §5.57)
-	// The spawn kit [orig: the 2048-B tuple buffer 'restrictionData' @ 0x24D4E00]:
+	// The spawn kit (engine: formats/mission/bms.h):
 	// rows {name, ammo_primary, ammo_secondary, flags} (values default -1). When
 	// p_filter_by_availability, the kit is filtered through the availability table
-	// with the knife fallback — the SP .bms promote leg [orig: Mission_LoadBMSFile
-	// @ 0x40f7ae]; the armory/profile legs store unfiltered (the server validates).
-	// An empty kit resets to the engine default {WPN_M4AUTO} [orig: @ 0x5246be].
+	// with the knife fallback — the SP .bms promote leg (engine: runtime/world/player_loadout.cpp); the armory/profile legs store unfiltered (the server validates).
+	// An empty kit resets to the engine default {WPN_M4AUTO} (engine: runtime/mission/mission_kernel.cpp).
 	void set_spawn_loadout(const TypedArray<Dictionary> &p_kit, bool p_filter_by_availability);
 	// True only after a mission/profile explicitly supplied a spawn kit; the
 	// WPN_M4AUTO engine fallback created by load_weapon_table leaves this false.
 	bool has_explicit_spawn_loadout() const { return kernel_->loadout.spawn_kit_set; }
-	// The map weapon-availability rules [orig: g_armoryWeaponAvailability @ 0x24D5600]:
+	// The map weapon-availability rules (engine: net/npruntime/napi_np_server_ctx.h):
 	// reset to all-allowed, then apply {name, value} pairs (the .mis item_availability
 	// chunk shape; -1 maps to 3, sub-weapons inherit the parent's value)
-	// [orig: build_item_restriction_table @ 0x54DDB0 name-list mode].
+	// (engine: formats/mission/mission.h).
 	void set_weapon_availability(const TypedArray<Dictionary> &p_pairs);
 	// Availability by weapon name: 0 banned / 1 allowed / 2 armory-zone-only /
 	// 3 mission-allowed; unknown names read 1. The armory UI filter term
-	// [orig: populate_three_category_lists @ 0x566e6b nonzero test].
+	// (engine: runtime/world/weapon_inventory.h).
 	int get_weapon_availability(const String &p_weapon_name) const;
-	// The armory ACCEPT apply [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0 offline
-	// leg]: the accepted kit becomes the spawn kit, the slot pool refills from it
+	// The armory ACCEPT apply (engine: net/npruntime/loadout_submit.cpp): the accepted kit becomes the spawn kit, the slot pool refills from it
 	// (sub-weapons expanded), pools reseed + clips recalc, and the equipped slot
 	// re-selects. Rows whose weapon is availability-banned are refused (the server
 	// 0x2F validation shape, availability 2 requires the armory zone the ACCEPT is
@@ -912,9 +893,7 @@ public:
 	// "0211", then five 0x1080C profile-slot records; slot 0 becomes the active
 	// record and its class bytes are clamped to [5,9]. A missing or malformed file is
 	// NOT fatal — the shipped defaults stay installed and an Error is returned so the
-	// caller can warn. [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0 (the
-	// "expansion\\<g_ExpansionName>\\weapon.sav" path build @0x54f68c..@0x54f6b7);
-	// the session-start clamp apply_session_settings_to_globals @0x5516ab]
+	// caller can warn. (engine: base/gameprofile/required_resources.c)
 	Error load_weapon_profile(const String &p_path);
 	// Read slot 0's two character headers (raw bytes, no session clamp) without
 	// requiring a live Simulation. Returns {error, loaded, blue, red}; each side
@@ -933,12 +912,10 @@ public:
 			const Dictionary &p_profile);
 	// The profile file's path RULE relative to the mount root (playersav
 	// weapon_sav_relpath): with an active expansion retail looks ONLY under
-	// "expansion/<name>/", never the root [orig: the path build
-	// @0x54f68c..@0x54f6b7]. Static so shell path assembly stays a join.
+	// "expansion/<name>/", never the root (engine: formats/playersav/weapon_sav.cpp). Static so shell path assembly stays a join.
 	static String weapon_profile_relpath(const String &p_expansion_name);
 	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (simassets
-	// fp_viewmodel_spec [orig: Player_RenderFirstPersonViewModel @0x4ded60;
-	// the emplaced arms omission @0x4dedc7]). `character_arms` is the local
+	// fp_viewmodel_spec (engine: net/npruntime/joiner_world_bridge.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,
 	// the ONLY arms source — weapon.def gfx1a/gfx1b are discarded tokens);
 	// has_def=false is the bring-up path; an empty gun on a resolved def means
@@ -985,18 +962,14 @@ public:
 	//  red: {...}}. The kit array is the SELECTED page — the one the class byte picks.
 	Dictionary get_weapon_profile_summary() const;
 	// Rebuild the local player's slot pool from the spawn kit and select the spawn
-	// default — the Player_InitPlayer weapon leg [orig: @ 0x4e15f0: display list ->
-	// table fill -> pool seed -> clip recalc -> SelectWeaponSlot(195) ->
-	// SwitchToWeaponByHandle(195)]. Runs automatically after load_weapon_table; call
+	// default — the Player_InitPlayer weapon leg (engine: net/npruntime/host_session.h). Runs automatically after load_weapon_table; call
 	// again on respawn.
 	void respawn_local_player_loadout();
-	// The category keys [orig: input actions 200-210 @ 0x4e1144 ->
-	// Player_SwitchToWeaponByHandle((action-200)*65) @ 0x4e0170]. Category 1..9 =
+	// The category keys (engine: runtime/controls/controls.h). Category 1..9 =
 	// the retail Knife/Sidearm/Primary/Flashbang/Frag/Smoke/Accessory/Detonator/
 	// Medpack keys ('1'..'9').
 	void request_local_player_weapon_category(int p_category);
-	// Next/previous weapon [orig: input cases 212/214 -> Player_CycleWeaponSlot
-	// @ 0x4dfe70, direction +1/-1].
+	// Next/previous weapon (engine: runtime/controls/controls.h).
 	void request_local_player_weapon_cycle(int p_direction);
 	// Inventory snapshot for hosts/tests: {equipped_combo, equipped_name, slots:
 	// [{combo, name, clip}], pools: {class_name: rounds}, carry_flags}.
@@ -1065,15 +1038,13 @@ public:
 	// shooter_handle, is_local_player, ammo_index, sound_set, effect, mf_light} with
 	// the ammo-def 'ai_launch'/'ai_launcheffect' names resolved. The fire present
 	// pass plays/spawns per event, skipping the local player (whose action-slot
-	// presentation is already ported). [orig: WeaponSlot_FireAndSpawnEffects
-	// @0x53F440 — the firing host presents its own rounds inline at fire time;
-	// world-wac-ai-re §17.4]
+	// presentation is already ported). (engine: runtime/world/ai.h)
 	Array drain_fire_presentation_events();
 
 	// The fire-sound legs on the logic clock (world/fire_sound.h): the shell
 	// stamps the camera listener each frame before the tick batch, and drains
 	// the ready one-shots ({set, pos, source_bms_id} rows) each present.
-	// [orig: listener_pos @ 0x24D6630; Sound_TickPendingSlots @ 0x529310]
+	// (engine: runtime/world/collision.h)
 	void set_sound_listener(const Vector3 &p_listener_godot);
 	Array drain_fire_sounds();
 
@@ -1084,25 +1055,23 @@ public:
 	// z drop when the viewport frames 4:3 or narrower — the rig samples the
 	// viewport SIZE (device work) and the 3w<=4h rule itself is the engine's
 	// (world/player_view.h player_view_narrow_aspect). The rig maps view axes
-	// onto its camera frame. [orig: Player_UpdateFirstPersonCamera @ 0x4dd380
-	// — lead @ 0x4dd4f2..0x4dd56c, narrow-aspect drop @ 0x4dd571]
+	// onto its camera frame. (engine: runtime/world/local_player_view.cpp)
 	Vector3 local_player_viewmodel_bias_view_units(
 			const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units,
 			int p_viewport_w, int p_viewport_h);
 
-	// The sound-profile chain [orig: SoundProfile_LoadAll @ 0x527490 /
-	// Entity_GetProfileSlotSound @ 0x528300]: feed SndProf.def text (VFS
+	// The sound-profile chain (engine: base/gameprofile/required_resources.c): feed SndProf.def text (VFS
 	// bytes) — parsed into world.sound_profiles now and re-applied on
 	// reset_world; per-entity bindings resolve in the kernel boot's
 	// simassets::resolve_ai_weapons step.
 	void set_sound_profiles(const PackedByteArray &p_sndprof_text);
 	// The mission water plane (godot Y units) the footstep water pick and the
-	// landing legs compare feet against [orig: Env_WaterHeightFixed @ 0x26C6454].
+	// landing legs compare feet against (engine: net/netsim/client_replica_pipeline.h).
 	void set_water_z(double p_water_y);
 	// Drain the per-tick slot-sound emissions (footsteps/foley/landing/screams):
 	// one Dictionary per event — {set: String, pos: Vector3 (godot), handle,
 	// slot} — played by the fire present pass at full volume
-	// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20].
+	// (engine: net/npwire/ingame_decode.h).
 	Array drain_slot_sounds();
 
 	// Queue this frame's REMOTE-body footsteps and foley for one wire row.
@@ -1122,7 +1091,7 @@ public:
 	// LWF layers and owns keep-alive, spatial ranking, and physical voices.
 	// Rows are {source_spawn_id, handle, source_bms_id, pos, lane, slot,
 	// lifetime, emitted_tick, pitch_q16, volume_q8_8, source_only, set}.
-	// [orig: SoundEmitter_Register @0x529270]
+	// (engine: runtime/world/sound_emitter_mailbox.h)
 	Array drain_sound_emitters();
 
 	// The live tracer TRAIL channels — the per-round point rings behind every streak,
@@ -1130,12 +1099,7 @@ public:
 	// godot space; the friendly/enemy style is already selected at spawn vs the local
 	// team, and killed rounds' channels keep draining until empty. The fire present
 	// pass builds the camera-facing ribbons from these.
-	// [orig: the 256-channel pool g_TracerEmitterPool @ 0x2BF5270 — alloc
-	// RoundData_SpawnRound @0x4ec774, append Projectile_UpdatePhysics (pre-move,
-	// 1/tick), drain CEffectEmitterPool_Tick @0x5db830, draw
-	// CEffectChannel_RenderRibbon @0x5db8a0; non-tracer rounds have no channel and
-	// are invisible in flight (graphicModel zeroed @0x4ec900). The witness map lives
-	// in world/tracer_trails.h.]
+	// (engine: runtime/world/tracer_trails.h)
 	PackedFloat32Array get_tracer_trails() const;
 
 	// The in-flight round glows: one row per active round whose ammo authors
@@ -1148,7 +1112,7 @@ public:
 
 	// The styled ribbon compile over trail rows (renderer/tracer_frame.h owns
 	// the witnessed style tables and the camera-facing build
-	// [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0]). Static so the present
+	// (engine: runtime/renderer/tracer_frame.cpp)). Static so the present
 	// pass and stub-sim tests share the one native seam:
 	// {additive: {positions, colors}, alpha: {positions, colors}, channels} —
 	// each family one triangle-strip vertex run (channels joined by degenerate
@@ -1163,7 +1127,7 @@ public:
 	Dictionary drain_destruction_events();
 	// The live death-piece pool as dictionaries {slot, generation, item_id,
 	// section, type_index, scale, pos, heading, pitch, settled} — each piece renders as its single
-	// husk-model section. [orig: DeathPiece_TickAll @0x57b900; §24]
+	// husk-model section. (engine: runtime/world/destruction.cpp)
 	Array get_death_pieces() const;
 	// Per-entity destruction diagnostics by bms_id (probe/F3 seam): health,
 	// bound_radius, flags, traits presence, KZ/bridge-DEAD anchors — the damage
@@ -1179,7 +1143,7 @@ public:
 	int get_event_count() const;
 
 	// --- Read-only introspection (dev tools / MCP tooling) -----------------
-	// The world's logic tick counter [orig: current_tick @0x24c1968]. The
+	// The world's logic tick counter (engine: base/io/tick_rate.h). The
 	// pre-mission pass in finish_load already advanced it once, so a freshly
 	// loaded mission reads 1 — consumers should track deltas, not absolutes.
 	int64_t get_logic_tick() const;
@@ -1295,10 +1259,9 @@ public:
 	// team_kills_by_others, friendly_kills_by_others, enemy_kills_by_others, humans}.
 	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score
 	// screen and the WAC bluekills/greenkills builtins read (probe + HUD source).
-	// [orig: g_spawn_success_gate @0x24c1928 / g_round_winning_team @0x24c1924 /
-	// the 0xC846xx buckets]
+	// (engine: runtime/world/ai.h)
 	Dictionary get_round_outcome_debug() const;
-	// Human-readable AI state name, "?" for the id gaps [orig: Entity_LookupAIStateName @0x455cc0].
+	// Human-readable AI state name, "?" for the id gaps (engine: runtime/world/ai.h).
 	static String ai_state_name(int p_state);
 	// Infantry anim state id -> ADM clip key ("anim_<off_8135F0 name>"), empty for invalid gaps.
 	static String infantry_anim_key(int p_state);
@@ -1405,7 +1368,7 @@ public:
 	// attrib — gates the 0x0D AI-trailer, D-NET-97), net_class_code (§5.10b *_function class
 	// tag -> the 0x0A serialize class; an unresolved/ewep item must NOT be serialized as a
 	// vehicle or the client desyncs), and health_max/health (items.def hp = healthMax
-	// [orig: Entity_InitFromItemDef @0x49e550]). Idempotent; call after load (and again after
+	// (engine: runtime/simassets/item_traits.cpp)). Idempotent; call after load (and again after
 	// spawning the local player).
 	void resolve_item_traits(const Ref<class ItemDatabase> &p_item_db);
 
@@ -1421,8 +1384,7 @@ public:
 	// collision world, and attach the per-entity instance. From then on the infantry
 	// motor resolves against placed objects — CB wall push-out, standing on roofs,
 	// hurt/CA/BB triggers, and the CL ladder legs (frame extraction, entry gate,
-	// alignment chase, climb states, exits) [orig: collision resolver @0x4b2bd0
-	// + the query set; docs/world/world-wac-ai-re.md §15; D-INF-3].
+	// alignment chase, climb states, exits) (engine: net/netsim/client_replica_pipeline.cpp).
 	// Returns the instance count. Also attaches the render-occlusion portal
 	// models (buildings whose graphic carries OVRT/OPLN/OFAC/OOBJ records)
 	// with their def bits. Idempotent per load. Model extraction reads the
@@ -1436,15 +1398,15 @@ public:
 
 	// Mission-start portal init: register + weld + per-building flag stamp over
 	// the attached occlusion models. Call once after resolve_collision_instances.
-	// [orig: Terrain_InitBuildingPortals @ 0x5c7480 from Game_StartMission @ 0x525e11]
+	// (engine: runtime/mission/runtime_boot.h)
 	void occlusion_init_mission();
 
 	// The per-render-frame occlusion pipeline: building batch + portal slots +
 	// occluder planes + the section-mask build + the per-entity render gates
 	// (blink-hits + the outdoors three-ray latch). Camera in Godot space; fov_y in
 	// degrees; fog/water in mission units; force_indoors mirrors the mission
-	// attribute override [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
-	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 steps 1-4 + the collector gates]
+	// attribute override (engine: formats/mission/bms.h).
+	// (engine: runtime/world/occlusion.cpp)
 	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
 	                         double p_aspect, double p_near, double p_fog_dist_units,
 	                         double p_water_z_units, bool p_force_indoors);
@@ -1545,8 +1507,7 @@ public:
 	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
 	// rounds with a TrcrID model plus placed devices. Entries: {key, item_id,
 	// pos (godot), rotation_deg (pitch, yaw, roll — placer convention)}; the
-	// enemy-team item swap follows the viewer team [orig: the S2C 0x59 dual
-	// TrcrID words + the spawner's team pick @ 0x4ec79b; world-wac-ai-re §27].
+	// enemy-team item swap follows the viewer team (engine: runtime/world/round_sim.h).
 	Array get_throwable_visuals() const;
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
@@ -1605,8 +1566,7 @@ public:
 	// per horizontal axis (range <= 0 = everything), capped at 128 buildings.
 	Dictionary get_occlusion_portal_debug(const Vector3 &p_anchor, double p_range_units) const;
 
-	// Local-player blink state [orig: g_LocalPlayerBlinkFlags @0x24C1934; entity Flags
-	// 0x800000]. The render/audio hosts gate interior behavior on these.
+	// Local-player blink state (engine: runtime/world/collision.h). The render/audio hosts gate interior behavior on these.
 	bool local_player_indoors() const;
 	int local_player_blink_flags() const;
 	// items.def id of the pool-2 building encoded by blink_hits[0], or 0 when
@@ -1618,13 +1578,11 @@ public:
 	// The blink-box owner for a model-light spawn at a world point: retail runs
 	// ONE point query at the spawning entity's position before walking its LGHT
 	// records, and slot 0's packed hit names the containing building + section
-	// every unattached record binds to [orig: Entity_SpawnGlowEffects
-	// @0x56c7fc -> Entity_QueryBlinkBoxesAtPoint @0x4af350, decoded @0x56c8c9
-	// and @0x56c8db, see docs/render/render-lighting-re.md]. Returns
+	// every unattached record binds to (engine: runtime/renderer/light_scene.h). Returns
 	// [containing bms_id, section], or an empty array when the point sits in no
 	// blink volume (or the containing entity carries no bms identity). The
 	// caller applies retail's ItemDef-type gate: a BUILDING never runs the
-	// query at all [orig: @0x56c7ec].
+	// query at all (engine: runtime/renderer/light_scene.cpp).
 	PackedInt64Array query_blink_owner_at(const Vector3 &p_world);
 
 	// The per-drawn-entity interior light group: every placed entity currently
@@ -1643,9 +1601,7 @@ public:
 	// scopes interior lights onto the first-person arms and weapon.
 	PackedInt64Array local_player_interior_group() const;
 
-	// Sound-occlusion distance inflation for the audio host [orig:
-	// Sound_ApplyOcclusionDistance @0x529970 — two LOS rays through terrain +
-	// building solids; occluded sources sound farther]. Positions in Godot
+	// Sound-occlusion distance inflation for the audio host (engine: runtime/audio/ambient_mixer.h). Positions in Godot
 	// world space; distance in/out 16.16.
 	int64_t sound_occlusion_distance_q16(const Vector3 &listener_pos,
 	                                     const Vector3 &source_pos, int64_t distance_q16,
@@ -1667,21 +1623,16 @@ public:
 	// outdoor sample). All three samples reuse the local player's fixed
 	// proximity-candidate slice for blink classification, the nonzero-count sun
 	// gate, and both pool-1/pool-2 sun blockers.
-	// [orig: compute_ambient_light_along_direction @ 0x5c7a00;
-	//  terrain_sector_compute_lighting @ 0x5c7550; raycast_entity_collision @ 0x413760]
+	// (engine: formats/env/env_weather.h)
 	PackedInt32Array compute_iris_samples(const Vector3 &cam_pos, const Vector3 &cam_forward,
 	                                      const Vector3 &light_dir);
 
-	// Loadout-zone gates for the host's armory key [orig: input action 218 opens
-	// weapon.mnu WEAPON only while entity Flags & 0x400000 (a type-6 armory volume
-	// contact), vehicle.mnu VEHICLE on Flags & 0x800 (type-11);
-	// Input_HandleActionBinding @0x49b848/@0x49b858].
+	// Loadout-zone gates for the host's armory key (engine: formats/def/def.h).
 	bool local_player_in_armory_zone() const;
 
 	// The USE-ITEM mount toggle: weapon-busy gate + the witnessed toggle
 	// (deck best-seat / nearest-seat scan / seat-swap-or-detach). Returns true when a
-	// mount, swap or dismount applied. [orig: Input_ProcessFrame @0x49d6dc ->
-	// Entity_ToggleVehicleMount @0x436950]
+	// mount, swap or dismount applied. (engine: runtime/mission/mission_kernel.h)
 	bool local_player_toggle_mount();
 
 	// The floating attach labels around the local player, one Dictionary per label:
@@ -1690,8 +1641,7 @@ public:
 	// attach_text_key (the USEGUN weapon's attachtextid Overlays key, "" = absent ->
 	// the STROVER_USEGUN default). Armory mode rides the zone flag; the nearest-only
 	// gate consumes the same complete live fire verdict as body/HUD selection.
-	// [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 selection half;
-	//  Player_CanFireWeapon @0x5cf780]
+	// (engine: runtime/hud/hud_frame.cpp)
 	TypedArray<Dictionary> get_attach_labels() const;
 	TypedArray<Dictionary> get_friendly_tags() const;
 
@@ -1706,7 +1656,7 @@ public:
 	// Parse score.ini and install this session's scoring awards (world::World::score_rules).
 	// Retail builds 12 x 452-byte gametype rows with hardcoded defaults and then OVERLAYS
 	// the file onto them, writing the file out when it is absent
-	// [orig: GameType_CreateDefaultSettings @0x52DD00 -> ScoreConfig_LoadFile @0x52D8A0].
+	// (engine: net/npruntime/game_config.h).
 	// DECLARED GAP: the built-in defaults are NOT ported, so a missing score.ini leaves
 	// score_rules !valid (every award a no-op) where retail would still score from its
 	// defaults. The shipped file is the retail-parity path.
@@ -1718,7 +1668,7 @@ public:
 	// Parse ammo.def and install the ballistics/damage table (world::World::ammo), then
 	// resolve every armory entry's round_type to its ammo index — the authoritative round
 	// sim's data feed (§5.60). Call after load_weapon_table.
-	// [orig: Game_StartMission @0x52548a -> AmmoDef_LoadAll @0x40b0b0]
+	// (engine: base/gameprofile/required_resources.c)
 	Error load_ammo_table(const Ref<class ResourceRoot> &p_resource_root,
 	                      const String &p_name = "ammo.def");
 

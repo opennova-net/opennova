@@ -17,8 +17,8 @@ namespace godot {
 
 // Resource wrapper for a stock .env environment/TOD file.
 // Native data and all format behavior live in engine/formats/env; this class is the
-// Godot-facing equivalent of the [orig: Environment_LoadTimeOfDayConfig @ 0x57db30, see docs/env/env-tod-re.md] /
-// [orig: TimeOfDay_ParseProperty @ 0x57c590, see docs/env/env-tod-re.md] state plus save support (docs/env/env-tod-re.md).
+// Godot-facing equivalent of the (engine: formats/env/env.cpp) /
+// (engine: formats/env/env.cpp) state plus save support (docs/env/env-tod-re.md).
 class EnvFile : public Resource {
 	GDCLASS(EnvFile, Resource)
 
@@ -59,8 +59,7 @@ private:
 	bool loaded = false;
 	Ref<ResourceRoot> resource_root;
 
-	// Non-persistent BMS mission override layer [orig: Game_LoadTerrainDuringConnect
-	// @ 0x520710]: properties/getters show the overridden live view, while
+	// Non-persistent BMS mission override layer (engine: formats/env/env.h): properties/getters show the overridden live view, while
 	// save_to_path/to_bytes always write the base captured at apply time — a
 	// mission-opened env can never save contaminated values. Clear overrides
 	// before document editing. See docs/env/env-tod-re.md.
@@ -156,19 +155,18 @@ public:
 	Vector3 compute_sun_direction(float p_time) const;
 	Vector3 compute_moon_direction(float p_time) const;
 
-	// Engine fog policy [orig: Render_SetFogState @ 0x58a950 ->
-	// CD3DDevice_SetFogParameters @ 0x677960, see docs/env/env-tod-re.md]; overcast is the 0..1 weather
+	// Engine fog policy (engine: formats/env/env_render.cpp); overcast is the 0..1 weather
 	// blend (0 while no weather system drives it).
 	float get_fog_start(float p_overcast = 0.0f) const;
 	float get_fog_density() const;
 	float get_fog_end_distance(float p_overcast = 0.0f) const;
 	// The above-water overcast attenuation on a caller-supplied LIVE distance
-	// (env fog_end_above_water [orig: Environment_GetFogEndDistance @ 0x57e426, see docs/env/env-tod-re.md]).
+	// (env fog_end_above_water (engine: formats/env/env_render.cpp)).
 	static float fog_end_above_water(float p_fog_distance, float p_overcast);
 	float get_fog_end_underwater() const;
 
 	// Hardcoded sunrise/sunset windows; {"is_night": bool, "blend": float}
-	// [orig: Environment_ComputeTimeOfDayColors @ 0x57de99, see docs/env/env-tod-re.md].
+	// (engine: formats/env/env_render.cpp).
 	Dictionary get_day_phase(float p_time) const;
 
 	// Derived render colors [orig: Environment_UpdateWeatherTick tail, see docs/env/env-tod-re.md].
@@ -178,19 +176,19 @@ public:
 	// The frame-clear horizon blend: skyfog cross-faded toward fog when the
 	// smoothed fog distance drops below half the reference (distances in world
 	// units; converted to 16.16 internally). Operates on UNDOUBLED colors.
-	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend @ 0x57f037..0x57f0a1, see docs/env/env-tod-re.md]
+	// (engine: formats/env/env_render.cpp)
 	static Color horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 			float p_fog_distance, float p_fog_distance_reference);
 
 	// Sun glare intensity from view-sun alignment and occlusion brightness
-	// [orig: compute_sun_glare_and_fog_blend @ 0x5ad610, see docs/env/env-tod-re.md]; returns
+	// (engine: formats/env/env_celestial.h); returns
 	// {"glare": 0..255, "fog_whiten": 0..40}.
 	static Dictionary compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
 
 	// The mission time-of-day clock (env/tod_clock.h): the BMS Q8.8 start hour
-	// widened into the day-wrapped 8.24 accumulator [orig: @0x525371, see docs/env/env-tod-re.md], the
+	// widened into the day-wrapped 8.24 accumulator (engine: formats/env/env.h), the
 	// exact per-tick increment with retail's 60-minute day floor
-	// [orig: Env_TodAdvancePerTick @0x57d108; @0x57d170, see docs/env/env-tod-re.md], and the tick advance.
+	// (engine: formats/env/tod_clock.h), and the tick advance.
 	static int tod_start_fixed24(int p_start_time_q8_8);
 	static int tod_advance_per_tick(int p_minutes_per_day);
 	static int tod_advance(int p_time_fixed24, int p_ticks, int p_advance_per_tick);
@@ -198,34 +196,34 @@ public:
 	// The .til tile-overlay tint factor for a single-multiply shader:
 	// 2*HALF(terrain_rgb)/255 per channel — 254/255 at the default tint (the
 	// witnessed MODULATE2X-over-half combine is near-identity, not exact).
-	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d, see docs/env/env-tod-re.md]
+	// (engine: formats/env/env_render.cpp)
 	static Color tile_overlay_tint_factor(const Color &p_terrain_tint);
 
 	// The witnessed 21x21 sky dome mesh in Mesh.ARRAY_* layout (VERTEX /
 	// NORMAL / TEX_UV / TEX_UV2 / INDEX populated), built at p_sky_height
-	// [orig: build_sky_dome_mesh @ 0x578db0, see docs/env/env-tod-re.md]. The reimpl builds ONCE at
+	// (engine: formats/env/env_celestial.h). The reimpl builds ONCE at
 	// dome_reference_height() and folds the Y-only height scale into the
 	// vertex shader (env #20's ratified structure; retail re-bakes on
 	// smoothed-height change via SkyDome_SetHeightAndRebuild @ 0x579070).
 	static Array build_sky_dome_arrays(float p_sky_height);
 
 	// 3072 - sqrt(2^23) ~= 175.6906 — the exact apex reference height behind
-	// the shaders' rounded "175.69" divisor [orig: @ 0x578ed4, see docs/env/env-tod-re.md].
+	// the shaders' rounded "175.69" divisor (engine: formats/env/env_celestial.h).
 	static float dome_reference_height();
 
 	// Celestial bodies place at camera + direction * this distance (world
 	// units, full camera height, identity rotation)
-	// [orig: render_celestial_bodies @ 0x5acaa0, constant 64.0, see docs/env/env-tod-re.md].
+	// (engine: formats/env/env_celestial.h).
 	static float celestial_body_distance();
 
 	// Witnessed body alphas (0..1 out): sun = (1 - overcast) x (100 - dim)/100;
 	// moon = clamp01((fogDistInt - 400)/600) x (1 - overcast)
-	// [orig: @ 0x5acbc1..0x5acccd, see docs/env/env-tod-re.md]. overcast/dim in 0..1 / 0..100.
+	// (engine: formats/env/env_celestial.h). overcast/dim in 0..1 / 0..100.
 	static float celestial_sun_alpha(float p_overcast_blend, float p_sun_dim_pct);
 	static float celestial_moon_alpha(float p_fog_distance, float p_overcast_blend);
 
 	// The glare glow alpha (0..1): dot_view^4/2 x brightness(0..256)/256 x the
-	// overcast and SunDim folds [orig: render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9, see docs/env/env-tod-re.md].
+	// overcast and SunDim folds (engine: formats/env/env_celestial.h).
 	static float glare_glow_alpha(float p_view_dot_sun, int p_brightness,
 			float p_overcast_blend, float p_sun_dim_pct);
 
@@ -233,7 +231,7 @@ public:
 	// sky_speed (rate = sky_speed << 10 through 62 Hz x 2^-28) — the single
 	// home of the old "sky_speed * 1024 * 62 / 2^28" magic; owners with a live
 	// weather node read the RAMPING rate off it instead
-	// [orig: rate ramp @ 0x57eecc; accumulators @ 0x57f1a5, see docs/env/env-tod-re.md].
+	// (engine: formats/env/env_render.cpp).
 	static float cloud_uv_rate_per_second(float p_sky_speed);
 
 	// Field name -> renderer-consumption status for editor badging:
