@@ -27,8 +27,10 @@ std::string to_string_body(const std::vector<uint8_t> &body) {
 	return body.empty() ? std::string() : std::string(reinterpret_cast<const char *>(body.data()), body.size());
 }
 
-// Extract the message rendered in NovaWorld's message template.
-std::string extract_message(const std::vector<uint8_t> &body) {
+// Extract the message rendered in NovaWorld's message template. @MESSAGE@ is
+// optionally excluded because the login relay uses it for non-terminal progress.
+std::string extract_message(const std::vector<uint8_t> &body,
+                            bool include_progress_message = true) {
 	const std::string html = to_string_body(body);
 	if (html.empty()) return std::string();
 	const std::string lower = to_lower(html);
@@ -39,7 +41,8 @@ std::string extract_message(const std::vector<uint8_t> &body) {
 		const std::size_t tag_end = lower.find('>', at);
 		if (tag_end == std::string::npos) break;
 		const std::string tag = lower.substr(at, tag_end - at + 1);
-		if (tag.find("@generic@") != std::string::npos || tag.find("@message@") != std::string::npos) {
+		if (tag.find("@generic@") != std::string::npos ||
+		    (include_progress_message && tag.find("@message@") != std::string::npos)) {
 			begin = tag_end + 1;
 			end = lower.find("</ib3_subst", begin);
 			break;
@@ -270,6 +273,8 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 			const std::string *epask = jar_.find("EPASK");
 			if (epask == nullptr || epask->empty()) {
 				login_step_ = LoginStep::Idle;
+				const std::string message = extract_message(body);
+				if (!message.empty()) return login_fail(message);
 				return login_fail("server issued no EPASK cookie");
 			}
 			try {
@@ -295,8 +300,14 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 			}
 			return login_need(login_post_request());
 		}
-		case LoginStep::NwStart:
+		case LoginStep::NwStart: {
+			const std::string message = extract_message(body, false);
+			if (!message.empty()) {
+				login_step_ = LoginStep::Idle;
+				return login_fail(message);
+			}
 			return login_need(login_post_request());
+		}
 		case LoginStep::Post: {
 			const std::string *tag = jar_.find("LOGINSESSIONTAG");
 			if (tag == nullptr || tag->empty()) {
@@ -325,7 +336,9 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				r.pcid = (pc && !pc->empty()) ? *pc : std::string();
 				return r;
 			}
-			const std::string message = extract_message(body);
+			// The relay page's @MESSAGE@ text is progress, not rejection.
+			// Live .204 returns it while login is pending and needs another poll.
+			const std::string message = extract_message(body, false);
 			if (!message.empty()) {
 				login_step_ = LoginStep::Idle;
 				return login_fail(message);

@@ -148,6 +148,28 @@ static bool test_login_templated_nwstart() {
 	r = f.on_login_response(true, 200, {}, {});
 	expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
 	       "NWSTART -> POST /NWLogin.dll");
+	// Captured live .204 success needs two poll GETs. The first response is
+	// still the relay page, where @MESSAGE@ is progress rather than failure.
+	const std::string relay_page =
+			"<HTML><IB3_SUBST name=\"@MESSAGE@\">Contacting login databases..."
+			"<BR></IB3_SUBST></HTML>";
+	r = f.on_login_response(true, 200,
+			{"Set-Cookie: LOGINSESSIONTAG=live-tag", "Set-Cookie: NWHANDLE=",
+			 "Set-Cookie: PCID="},
+			bytes(relay_page));
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest,
+	            "templated POST with session tag -> first poll")) return false;
+	r = f.on_login_response(true, 200, {}, bytes(relay_page));
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest,
+	            "pending relay message keeps polling")) return false;
+	expect(contains(r.request.url, "/NWLogin.dll?tag=live-tag"),
+	       "second poll retains the login session tag");
+	r = f.on_login_response(true, 200,
+			{"Set-Cookie: NWHANDLE=ljim", "Set-Cookie: PCID=A-A02-085D18"}, {});
+	if (!expect(r.kind == nw::LoginResult::Kind::Succeeded,
+	            "second live-shaped poll completes login")) return false;
+	expect(r.nwhandle == "ljim" && r.pcid == "A-A02-085D18",
+	       "live-shaped poll captures account identity");
 	return g_fail == 0;
 }
 
@@ -157,9 +179,29 @@ static bool test_login_failures() {
 		nw::LobbyHttpFlow f;
 		f.set_context(concrete_ctx());
 		f.login("p", "s");
-		nw::LoginResult r = f.on_login_response(true, 200, {}, {});
+		const std::string page =
+				"<IB3_SUBST name=\"@GENERIC@\">The login service is unavailable.</IB3_SUBST>";
+		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
 		expect(r.kind == nw::LoginResult::Kind::Failed, "prepare with no EPASK -> Failed");
+		expect(r.reason == "The login service is unavailable.",
+		       "prepare failure preserves the rendered service message");
 		expect(!f.login_active(), "machine resets on failure");
+	}
+	// NWStart can return a 200 message page instead of the expected login form.
+	{
+		nw::LobbyHttpFlow f;
+		nw::LobbyHttpContext c;
+		c.startup_url = "http://[domainname]/prep";
+		c.web_domain = "gs.novaworld.net";
+		f.set_context(c);
+		f.login("p", "s");
+		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		const std::string page =
+				"<IB3_SUBST name=\"@GENERIC@\">Matchmaking is under maintenance.</IB3_SUBST>";
+		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
+		expect(r.kind == nw::LoginResult::Kind::Failed, "NWStart message page -> Failed");
+		expect(r.reason == "Matchmaking is under maintenance.",
+		       "NWStart failure preserves the rendered service message");
 	}
 	// HTTP non-200.
 	{
@@ -195,6 +237,20 @@ static bool test_login_failures() {
 		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
 		expect(r.reason == "This account is restricted & can't log in.",
 		       "message markup and HTML entities are normalized");
+	}
+	// Unlike @MESSAGE@ relay progress, @GENERIC@ during Poll is terminal.
+	{
+		nw::LobbyHttpFlow f;
+		f.set_context(concrete_ctx());
+		f.login("p", "s");
+		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), {});
+		const std::string page =
+				"<IB3_SUBST name=\"@GENERIC@\">This account cannot sign in.</IB3_SUBST>";
+		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
+		expect(r.kind == nw::LoginResult::Kind::Failed, "poll generic message -> Failed");
+		expect(r.reason == "This account cannot sign in.",
+		       "poll failure preserves the terminal message");
 	}
 	// Poll exhaustion (10 polls, no NWHANDLE).
 	{

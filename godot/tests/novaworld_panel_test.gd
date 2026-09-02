@@ -69,6 +69,18 @@ func test_server_browser_is_gated_until_login_succeeds() -> void:
 	assert_true(panel.browser_visible(), "only a successful account login reveals games")
 
 
+func test_authored_scene_is_matchmaking_and_fits_800_by_600() -> void:
+	var panel := _make_panel(PackedStringArray())
+	var title := panel.get_node("Center/Shell/Margin/RootVBox/Header/Brand/Title") as Label
+	var shell := panel.get_node("Center/Shell") as PanelContainer
+	var backdrop := panel.get_node("Backdrop") as ColorRect
+	assert_eq(title.text, "MATCHMAKING")
+	assert_lte(shell.custom_minimum_size.x, 768.0)
+	assert_lte(shell.custom_minimum_size.y, 568.0)
+	assert_eq(backdrop.mouse_filter, Control.MOUSE_FILTER_STOP,
+			"the transparent overlay blocks clicks into the authored menu")
+
+
 func test_login_failure_uses_novaworld_message_screen() -> void:
 	var panel := _make_panel(PackedStringArray())
 	panel.client_for_test().emit_signal("connected")
@@ -76,7 +88,34 @@ func test_login_failure_uses_novaworld_message_screen() -> void:
 			"login_failed", "The account name or password is incorrect.")
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
 	assert_eq(panel.message_text(), "The account name or password is incorrect.")
+	assert_eq(panel.status_text(), "Sign-in failed.", "the signing-in status cannot linger")
 	assert_false(panel.browser_visible(), "an authentication error cannot leak the browser")
+
+
+func test_server_list_failure_is_terminal_and_retryable() -> void:
+	var panel := _make_panel(PackedStringArray())
+	panel.client_for_test().emit_signal("connected")
+	panel.client_for_test().emit_signal("login_succeeded", "ljim")
+	panel.client_for_test().emit_signal("server_list_failed", "The request timed out.")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
+	assert_eq(panel.message_text(), "The request timed out.")
+	assert_eq(panel.status_text(), "Could not load games.")
+	assert_false(panel.browser_visible(), "a failed list never leaves a loading browser exposed")
+
+
+func test_connection_and_join_failures_reach_the_message_screen() -> void:
+	var connection_panel := _make_panel(PackedStringArray())
+	connection_panel.client_for_test().emit_signal("error_occurred", "DNS lookup failed.")
+	assert_eq(connection_panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
+	assert_string_contains(connection_panel.message_text(), "matchmaking service")
+	assert_string_contains(connection_panel.message_text(), "DNS lookup failed.")
+
+	var join_panel := _make_panel(PackedStringArray())
+	join_panel.client_for_test().emit_signal("connected")
+	join_panel.client_for_test().emit_signal("login_succeeded", "ljim")
+	join_panel.client_for_test().emit_signal("join_failed", "The host is no longer available.")
+	assert_eq(join_panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
+	assert_eq(join_panel.message_text(), "The host is no longer available.")
 
 
 func test_empty_and_filtered_states_are_not_fake_server_rows() -> void:

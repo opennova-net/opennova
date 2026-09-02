@@ -1,132 +1,141 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://game/novaworld_panel.gd" id="1_panel"]
 
 [sub_resource type="StyleBoxFlat" id="ShellStyle"]
-bg_color = Color(0.035, 0.133, 0.231, 0.98)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.31, 0.55, 0.74, 1)
-corner_radius_top_left = 4
-corner_radius_top_right = 4
-corner_radius_bottom_right = 4
-corner_radius_bottom_left = 4
-shadow_color = Color(0, 0, 0, 0.5)
-shadow_size = 14
+bg_color = Color(0.035, 0.047, 0.02, 0.97)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.44, 0.75, 1)
 
 [sub_resource type="StyleBoxFlat" id="CardStyle"]
-bg_color = Color(0.055, 0.2, 0.337, 1)
+bg_color = Color(0.075, 0.102, 0.032, 0.96)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.25, 0.47, 0.65, 1)
-corner_radius_top_left = 3
-corner_radius_top_right = 3
-corner_radius_bottom_right = 3
-corner_radius_bottom_left = 3
+border_color = Color(0.22, 0.25, 0.14, 1)
 
 [sub_resource type="StyleBoxFlat" id="ButtonNormal"]
-content_margin_left = 18.0
-content_margin_top = 9.0
-content_margin_right = 18.0
-content_margin_bottom = 9.0
-bg_color = Color(0.11, 0.32, 0.51, 1)
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(0.15, 0.17, 0.09, 0.96)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.35, 0.59, 0.77, 1)
-corner_radius_top_left = 2
-corner_radius_top_right = 2
-corner_radius_bottom_right = 2
-corner_radius_bottom_left = 2
+border_color = Color(0.29, 0.31, 0.19, 1)
 
 [sub_resource type="StyleBoxFlat" id="ButtonHover"]
-content_margin_left = 18.0
-content_margin_top = 9.0
-content_margin_right = 18.0
-content_margin_bottom = 9.0
-bg_color = Color(0.16, 0.43, 0.66, 1)
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(0.28, 0.18, 0.025, 0.98)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.55, 0.75, 0.9, 1)
-corner_radius_top_left = 2
-corner_radius_top_right = 2
-corner_radius_bottom_right = 2
-corner_radius_bottom_left = 2
+border_color = Color(1, 0.59, 0, 1)
 
 [sub_resource type="StyleBoxFlat" id="ButtonPressed"]
-content_margin_left = 18.0
-content_margin_top = 9.0
-content_margin_right = 18.0
-content_margin_bottom = 9.0
-bg_color = Color(0.055, 0.22, 0.37, 1)
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(0.18, 0.105, 0.01, 1)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.65, 0.82, 0.94, 1)
+border_color = Color(1, 0.59, 0, 1)
 
 [sub_resource type="StyleBoxFlat" id="InputStyle"]
-content_margin_left = 10.0
-content_margin_top = 8.0
-content_margin_right = 10.0
-content_margin_bottom = 8.0
-bg_color = Color(0.025, 0.105, 0.19, 1)
+content_margin_left = 8.0
+content_margin_top = 5.0
+content_margin_right = 8.0
+content_margin_bottom = 5.0
+bg_color = Color(0.018, 0.024, 0.01, 0.96)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.24, 0.46, 0.63, 1)
-corner_radius_top_left = 2
-corner_radius_top_right = 2
-corner_radius_bottom_right = 2
-corner_radius_bottom_left = 2
+border_color = Color(0.25, 0.28, 0.16, 1)
 
 [sub_resource type="StyleBoxFlat" id="InputFocus"]
-content_margin_left = 10.0
-content_margin_top = 8.0
-content_margin_right = 10.0
-content_margin_bottom = 8.0
-bg_color = Color(0.025, 0.105, 0.19, 1)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.46, 0.72, 0.91, 1)
+content_margin_left = 8.0
+content_margin_top = 5.0
+content_margin_right = 8.0
+content_margin_bottom = 5.0
+bg_color = Color(0.018, 0.024, 0.01, 0.98)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.44, 0.75, 1)
+
+[sub_resource type="StyleBoxFlat" id="SelectionStyle"]
+bg_color = Color(0.118, 0.427, 0.953, 0.5)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.44, 0.75, 1)
+
+[sub_resource type="StyleBoxLine" id="RuleStyle"]
+color = Color(0.22, 0.44, 0.75, 0.85)
+thickness = 1
 
 [sub_resource type="Theme" id="PanelTheme"]
-Button/colors/font_color = Color(0.92, 0.97, 1, 1)
-Button/colors/font_disabled_color = Color(0.47, 0.59, 0.68, 1)
-Button/font_sizes/font_size = 16
+Button/colors/font_color = Color(0.94, 0.94, 0.88, 1)
+Button/colors/font_hover_color = Color(1, 0.72, 0.25, 1)
+Button/colors/font_pressed_color = Color(1, 0.59, 0, 1)
+Button/colors/font_disabled_color = Color(0.33, 0.32, 0.32, 1)
+Button/font_sizes/font_size = 14
 Button/styles/normal = SubResource("ButtonNormal")
 Button/styles/hover = SubResource("ButtonHover")
 Button/styles/pressed = SubResource("ButtonPressed")
 Button/styles/focus = SubResource("ButtonHover")
-CheckBox/colors/font_color = Color(0.8, 0.89, 0.95, 1)
-CheckBox/font_sizes/font_size = 15
-Label/colors/font_color = Color(0.84, 0.92, 0.97, 1)
-Label/font_sizes/font_size = 16
-LineEdit/colors/font_color = Color(0.93, 0.97, 1, 1)
-LineEdit/colors/font_placeholder_color = Color(0.49, 0.63, 0.73, 1)
-LineEdit/font_sizes/font_size = 16
+CheckBox/colors/font_color = Color(0.88, 0.88, 0.81, 1)
+CheckBox/colors/font_hover_color = Color(1, 0.72, 0.25, 1)
+CheckBox/font_sizes/font_size = 13
+HSeparator/styles/separator = SubResource("RuleStyle")
+ItemList/colors/font_color = Color(0.9, 0.9, 0.84, 1)
+ItemList/font_sizes/font_size = 13
+ItemList/styles/panel = SubResource("InputStyle")
+ItemList/styles/focus = SubResource("InputFocus")
+ItemList/styles/selected = SubResource("SelectionStyle")
+ItemList/styles/selected_focus = SubResource("SelectionStyle")
+Label/colors/font_color = Color(0.9, 0.9, 0.84, 1)
+Label/font_sizes/font_size = 14
+LineEdit/colors/caret_color = Color(1, 0.59, 0, 1)
+LineEdit/colors/font_color = Color(0.94, 0.94, 0.88, 1)
+LineEdit/colors/font_placeholder_color = Color(0.48, 0.5, 0.38, 1)
+LineEdit/font_sizes/font_size = 14
 LineEdit/styles/normal = SubResource("InputStyle")
 LineEdit/styles/focus = SubResource("InputFocus")
-OptionButton/colors/font_color = Color(0.92, 0.97, 1, 1)
-OptionButton/font_sizes/font_size = 16
+OptionButton/colors/font_color = Color(0.94, 0.94, 0.88, 1)
+OptionButton/colors/font_hover_color = Color(1, 0.72, 0.25, 1)
+OptionButton/font_sizes/font_size = 14
 OptionButton/styles/normal = SubResource("ButtonNormal")
 OptionButton/styles/hover = SubResource("ButtonHover")
 OptionButton/styles/pressed = SubResource("ButtonPressed")
-Tree/colors/font_color = Color(0.84, 0.92, 0.97, 1)
+Tree/colors/font_color = Color(0.9, 0.9, 0.84, 1)
 Tree/colors/font_selected_color = Color(1, 1, 1, 1)
-Tree/colors/title_button_color = Color(0.77, 0.88, 0.95, 1)
-Tree/font_sizes/font_size = 15
-Tree/font_sizes/title_button_font_size = 14
+Tree/colors/title_button_color = Color(0.86, 0.86, 0.78, 1)
+Tree/font_sizes/font_size = 13
+Tree/font_sizes/title_button_font_size = 12
+Tree/styles/focus = SubResource("InputFocus")
+Tree/styles/panel = SubResource("InputStyle")
+Tree/styles/selected = SubResource("SelectionStyle")
+Tree/styles/selected_focus = SubResource("SelectionStyle")
+Tree/styles/title_button_normal = SubResource("ButtonNormal")
+Tree/styles/title_button_hover = SubResource("ButtonHover")
+Tree/styles/title_button_pressed = SubResource("ButtonPressed")
 
 [node name="NovaWorldPanel" type="Control"]
 layout_mode = 3
@@ -145,36 +154,36 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 2
-color = Color(0.018, 0.063, 0.118, 0.96)
+mouse_filter = 0
+color = Color(0, 0, 0, 0)
 
 [node name="Center" type="CenterContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 30.0
-offset_top = 24.0
-offset_right = -30.0
-offset_bottom = -24.0
+offset_left = 16.0
+offset_top = 14.0
+offset_right = -16.0
+offset_bottom = -14.0
 grow_horizontal = 2
 grow_vertical = 2
 
 [node name="Shell" type="PanelContainer" parent="Center"]
-custom_minimum_size = Vector2(1180, 720)
+custom_minimum_size = Vector2(768, 568)
 layout_mode = 2
 theme_override_styles/panel = SubResource("ShellStyle")
 
 [node name="Margin" type="MarginContainer" parent="Center/Shell"]
 layout_mode = 2
-theme_override_constants/margin_left = 24
-theme_override_constants/margin_top = 20
-theme_override_constants/margin_right = 24
-theme_override_constants/margin_bottom = 22
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 12
 
 [node name="RootVBox" type="VBoxContainer" parent="Center/Shell/Margin"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 6
 
 [node name="Header" type="HBoxContainer" parent="Center/Shell/Margin/RootVBox"]
 layout_mode = 2
@@ -186,15 +195,15 @@ theme_override_constants/separation = 0
 
 [node name="Title" type="Label" parent="Center/Shell/Margin/RootVBox/Header/Brand"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.92, 0.97, 1, 1)
-theme_override_font_sizes/font_size = 28
-text = "NOVAWORLD"
+theme_override_colors/font_color = Color(0.96, 0.96, 0.9, 1)
+theme_override_font_sizes/font_size = 23
+text = "MATCHMAKING"
 
 [node name="Subtitle" type="Label" parent="Center/Shell/Margin/RootVBox/Header/Brand"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.42, 0.65, 0.81, 1)
-theme_override_font_sizes/font_size = 13
-text = "ONLINE GAME SERVICE"
+theme_override_colors/font_color = Color(0.62, 0.64, 0.49, 1)
+theme_override_font_sizes/font_size = 11
+text = "ONLINE PLAY"
 
 [node name="Spacer" type="Control" parent="Center/Shell/Margin/RootVBox/Header"]
 layout_mode = 2
@@ -206,7 +215,7 @@ text = "SERVICE"
 vertical_alignment = 1
 
 [node name="TargetOption" type="OptionButton" parent="Center/Shell/Margin/RootVBox/Header"]
-custom_minimum_size = Vector2(205, 0)
+custom_minimum_size = Vector2(155, 0)
 layout_mode = 2
 
 [node name="BackButton" type="Button" parent="Center/Shell/Margin/RootVBox/Header"]
@@ -218,12 +227,12 @@ layout_mode = 2
 
 [node name="StatusLabel" type="Label" parent="Center/Shell/Margin/RootVBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.51, 0.73, 0.88, 1)
-theme_override_font_sizes/font_size = 14
-text = "Contacting NovaWorld..."
+theme_override_colors/font_color = Color(0.64, 0.66, 0.5, 1)
+theme_override_font_sizes/font_size = 12
+text = "Connecting..."
 
 [node name="Pages" type="Control" parent="Center/Shell/Margin/RootVBox"]
-custom_minimum_size = Vector2(0, 600)
+custom_minimum_size = Vector2(0, 450)
 layout_mode = 2
 size_flags_vertical = 3
 
@@ -241,14 +250,14 @@ theme_override_constants/separation = 12
 
 [node name="Heading" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/ConnectingView/ConnectingCopy"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 25
-text = "Contacting NovaWorld"
+theme_override_font_sizes/font_size = 21
+text = "Connecting"
 horizontal_alignment = 1
 
 [node name="Detail" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/ConnectingView/ConnectingCopy"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.53, 0.69, 0.79, 1)
-text = "Establishing a secure game-service session..."
+theme_override_colors/font_color = Color(0.62, 0.64, 0.49, 1)
+text = "Contacting the matchmaking service..."
 horizontal_alignment = 1
 
 [node name="LoginView" type="CenterContainer" parent="Center/Shell/Margin/RootVBox/Pages"]
@@ -261,31 +270,31 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="LoginCard" type="PanelContainer" parent="Center/Shell/Margin/RootVBox/Pages/LoginView"]
-custom_minimum_size = Vector2(500, 390)
+custom_minimum_size = Vector2(390, 304)
 layout_mode = 2
 theme_override_styles/panel = SubResource("CardStyle")
 
 [node name="LoginMargin" type="MarginContainer" parent="Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard"]
 layout_mode = 2
-theme_override_constants/margin_left = 42
-theme_override_constants/margin_top = 34
-theme_override_constants/margin_right = 42
-theme_override_constants/margin_bottom = 34
+theme_override_constants/margin_left = 26
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 26
+theme_override_constants/margin_bottom = 20
 
 [node name="LoginForm" type="VBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 7
 
 [node name="Heading" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 25
+theme_override_font_sizes/font_size = 20
 text = "Sign In"
 horizontal_alignment = 1
 
 [node name="Intro" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.62, 0.76, 0.85, 1)
-text = "Use your NovaWorld account to browse and join games."
+theme_override_colors/font_color = Color(0.66, 0.68, 0.54, 1)
+text = "Sign in to browse and join games."
 horizontal_alignment = 1
 autowrap_mode = 2
 
@@ -313,8 +322,8 @@ text = "Log In"
 
 [node name="SessionNote" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.45, 0.61, 0.72, 1)
-theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.5, 0.52, 0.4, 1)
+theme_override_font_sizes/font_size = 11
 text = "Credentials are used for this session only."
 horizontal_alignment = 1
 
@@ -326,25 +335,25 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 5
 
 [node name="PopulationLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.66, 0.82, 0.92, 1)
-text = "Retrieving NovaWorld games..."
+theme_override_colors/font_color = Color(0.68, 0.7, 0.56, 1)
+text = "Retrieving games..."
 
 [node name="Toolbar" type="HBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
 [node name="SearchEdit" type="LineEdit" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/Toolbar"]
-custom_minimum_size = Vector2(300, 0)
+custom_minimum_size = Vector2(220, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Find by server, mission, or mod..."
 
 [node name="TypeFilter" type="OptionButton" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/Toolbar"]
-custom_minimum_size = Vector2(170, 0)
+custom_minimum_size = Vector2(130, 0)
 layout_mode = 2
 
 [node name="RefreshButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/Toolbar"]
@@ -353,7 +362,7 @@ text = "Refresh"
 
 [node name="QuickFilters" type="HBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView"]
 layout_mode = 2
-theme_override_constants/separation = 18
+theme_override_constants/separation = 12
 
 [node name="FilterLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/QuickFilters"]
 layout_mode = 2
@@ -377,42 +386,42 @@ size_flags_vertical = 3
 
 [node name="EmptyLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.59, 0.73, 0.82, 1)
-theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.6, 0.62, 0.48, 1)
+theme_override_font_sizes/font_size = 14
 text = "Retrieving games..."
 horizontal_alignment = 1
 
 [node name="BrowserSplit" type="HSplitContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack"]
 layout_mode = 2
 size_flags_vertical = 3
-split_offset = 790
+split_offset = 510
 
 [node name="ServerTree" type="Tree" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit"]
 visible = false
-custom_minimum_size = Vector2(760, 380)
+custom_minimum_size = Vector2(500, 250)
 layout_mode = 2
 size_flags_horizontal = 3
 hide_root = true
 
 [node name="DetailsPanel" type="PanelContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit"]
-custom_minimum_size = Vector2(310, 0)
+custom_minimum_size = Vector2(200, 0)
 layout_mode = 2
 theme_override_styles/panel = SubResource("CardStyle")
 
 [node name="DetailsMargin" type="MarginContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel"]
 layout_mode = 2
-theme_override_constants/margin_left = 16
-theme_override_constants/margin_top = 14
-theme_override_constants/margin_right = 16
-theme_override_constants/margin_bottom = 14
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
 
 [node name="DetailsVBox" type="VBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin"]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 5
 
 [node name="DetailsTitle" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsVBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 15
 text = "GAME DETAILS"
 
 [node name="DetailsLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsVBox"]
@@ -427,7 +436,7 @@ layout_mode = 2
 text = "PLAYERS"
 
 [node name="RosterList" type="ItemList" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsVBox"]
-custom_minimum_size = Vector2(0, 130)
+custom_minimum_size = Vector2(0, 88)
 layout_mode = 2
 
 [node name="Actions" type="HBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView"]
@@ -460,29 +469,29 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="HostCard" type="PanelContainer" parent="Center/Shell/Margin/RootVBox/Pages/HostView"]
-custom_minimum_size = Vector2(590, 360)
+custom_minimum_size = Vector2(460, 286)
 layout_mode = 2
 theme_override_styles/panel = SubResource("CardStyle")
 
 [node name="HostMargin" type="MarginContainer" parent="Center/Shell/Margin/RootVBox/Pages/HostView/HostCard"]
 layout_mode = 2
-theme_override_constants/margin_left = 40
-theme_override_constants/margin_top = 34
-theme_override_constants/margin_right = 40
-theme_override_constants/margin_bottom = 34
+theme_override_constants/margin_left = 26
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 26
+theme_override_constants/margin_bottom = 20
 
 [node name="HostForm" type="VBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin"]
 layout_mode = 2
-theme_override_constants/separation = 14
+theme_override_constants/separation = 9
 
 [node name="Heading" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin/HostForm"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 25
+theme_override_font_sizes/font_size = 20
 text = "Host Game"
 
 [node name="Intro" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin/HostForm"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.61, 0.76, 0.85, 1)
+theme_override_colors/font_color = Color(0.66, 0.68, 0.54, 1)
 text = "Choose a mission. Your game will be advertised on OpenNova."
 autowrap_mode = 2
 
@@ -519,32 +528,32 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="MessageCard" type="PanelContainer" parent="Center/Shell/Margin/RootVBox/Pages/MessageView"]
-custom_minimum_size = Vector2(680, 400)
+custom_minimum_size = Vector2(480, 300)
 layout_mode = 2
 theme_override_styles/panel = SubResource("CardStyle")
 
 [node name="MessageMargin" type="MarginContainer" parent="Center/Shell/Margin/RootVBox/Pages/MessageView/MessageCard"]
 layout_mode = 2
-theme_override_constants/margin_left = 50
-theme_override_constants/margin_top = 40
-theme_override_constants/margin_right = 50
-theme_override_constants/margin_bottom = 40
+theme_override_constants/margin_left = 30
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 30
+theme_override_constants/margin_bottom = 24
 
 [node name="MessageForm" type="VBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages/MessageView/MessageCard/MessageMargin"]
 layout_mode = 2
-theme_override_constants/separation = 22
+theme_override_constants/separation = 14
 
 [node name="Heading" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/MessageView/MessageCard/MessageMargin/MessageForm"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 25
-text = "NovaWorld Message"
+theme_override_font_sizes/font_size = 20
+text = "Message"
 horizontal_alignment = 1
 
 [node name="MessageLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/MessageView/MessageCard/MessageMargin/MessageForm"]
-custom_minimum_size = Vector2(560, 190)
+custom_minimum_size = Vector2(410, 140)
 layout_mode = 2
 size_flags_vertical = 3
-text = "NovaWorld could not complete the request."
+text = "Could not complete the request."
 horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 2

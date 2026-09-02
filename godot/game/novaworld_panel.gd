@@ -105,11 +105,7 @@ var _suppress_client_messages := false
 
 func _ready() -> void:
 	_target = target_override if target_override >= 0 else NovaWorldSettings.load_target()
-	if has_node("Center/Shell"):
-		_bind_scene_ui()
-	else:
-		# Kept for compatibility with any code constructing the script directly.
-		_build_ui()
+	_bind_scene_ui()
 	_set_screen(Screen.CONNECTING)
 	_create_client(start_client_on_ready)
 
@@ -186,160 +182,6 @@ func _bind_scene_ui() -> void:
 	_populate_missions()
 
 
-func _build_ui() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-	var panel := PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_CENTER)
-	panel.custom_minimum_size = Vector2(960, 600)
-	add_child(panel)
-
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 8)
-	panel.add_child(box)
-
-	var title := Label.new()
-	title.text = "NovaWorld"
-	box.add_child(title)
-
-	var target_row := HBoxContainer.new()
-	box.add_child(target_row)
-	var target_label := Label.new()
-	target_label.text = "Server:"
-	target_row.add_child(target_label)
-	_target_option = OptionButton.new()
-	_target_option.add_item("OpenNova", NovaWorldSettings.Target.OPENNOVA)
-	_target_option.add_item("Original NovaWorld", NovaWorldSettings.Target.REAL)
-	_target_option.select(_target_option.get_item_index(_target))
-	_target_option.item_selected.connect(_on_target_selected)
-	target_row.add_child(_target_option)
-
-	_status_label = Label.new()
-	_status_label.text = "Connecting..."
-	box.add_child(_status_label)
-
-	# Account login (session-only — nothing is persisted).
-	var login_row := HBoxContainer.new()
-	box.add_child(login_row)
-	_username_edit = LineEdit.new()
-	_username_edit.placeholder_text = "Username"
-	_username_edit.custom_minimum_size = Vector2(150, 0)
-	login_row.add_child(_username_edit)
-	_password_edit = LineEdit.new()
-	_password_edit.placeholder_text = "Password"
-	_password_edit.secret = true
-	_password_edit.custom_minimum_size = Vector2(150, 0)
-	login_row.add_child(_password_edit)
-	_login_button = Button.new()
-	_login_button.text = "Log In"
-	_login_button.disabled = true
-	_login_button.pressed.connect(_on_login_pressed)
-	login_row.add_child(_login_button)
-
-	# The filter bar: a text search over name/map/mod, a game-type picker built
-	# from the rows in hand, the three quick filters, and Refresh.
-	var filter_row := HBoxContainer.new()
-	box.add_child(filter_row)
-	_filter_edit = LineEdit.new()
-	_filter_edit.placeholder_text = "Find a server..."
-	_filter_edit.custom_minimum_size = Vector2(180, 0)
-	_filter_edit.text_changed.connect(func(_t: String) -> void: _rebuild_view())
-	filter_row.add_child(_filter_edit)
-	_type_filter = OptionButton.new()
-	_type_filter.add_item("All modes")
-	_type_filter.item_selected.connect(func(_i: int) -> void: _rebuild_view())
-	filter_row.add_child(_type_filter)
-	_hide_full_check = CheckBox.new()
-	_hide_full_check.text = "Not full"
-	_hide_full_check.toggled.connect(func(_on: bool) -> void: _rebuild_view())
-	filter_row.add_child(_hide_full_check)
-	_hide_empty_check = CheckBox.new()
-	_hide_empty_check.text = "Has players"
-	_hide_empty_check.toggled.connect(func(_on: bool) -> void: _rebuild_view())
-	filter_row.add_child(_hide_empty_check)
-	_hide_locked_check = CheckBox.new()
-	_hide_locked_check.text = "No password"
-	_hide_locked_check.toggled.connect(func(_on: bool) -> void: _rebuild_view())
-	filter_row.add_child(_hide_locked_check)
-	_refresh_button = Button.new()
-	_refresh_button.text = "Refresh"
-	_refresh_button.pressed.connect(_on_refresh_pressed)
-	filter_row.add_child(_refresh_button)
-
-	# The browser split: the sortable table left, the selected server's details
-	# and player roster right.
-	var split := HSplitContainer.new()
-	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.add_child(split)
-
-	_server_tree = Tree.new()
-	_server_tree.custom_minimum_size = Vector2(600, 300)
-	_server_tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_server_tree.hide_root = true
-	_server_tree.select_mode = Tree.SELECT_ROW
-	_server_tree.columns = COLUMN_TITLES.size()
-	_server_tree.column_titles_visible = true
-	for c in COLUMN_TITLES.size():
-		_server_tree.set_column_title(c, COLUMN_TITLES[c])
-		_server_tree.set_column_expand(c, c == Column.NAME or c == Column.MISSION)
-	_server_tree.set_column_custom_minimum_width(Column.TYPE, 56)
-	_server_tree.set_column_custom_minimum_width(Column.PLAYERS, 64)
-	_server_tree.set_column_custom_minimum_width(Column.PING, 56)
-	_server_tree.set_column_custom_minimum_width(Column.ACCESS, 76)
-	_server_tree.column_title_clicked.connect(_on_column_title_clicked)
-	_server_tree.item_selected.connect(_on_server_selected)
-	_server_tree.item_activated.connect(_on_join_pressed)
-	split.add_child(_server_tree)
-
-	var details_box := VBoxContainer.new()
-	details_box.custom_minimum_size = Vector2(280, 0)
-	split.add_child(details_box)
-	_details_label = Label.new()
-	_details_label.text = "Select a server for details."
-	_details_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_details_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_details_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	details_box.add_child(_details_label)
-	var roster_title := Label.new()
-	roster_title.text = "Players"
-	details_box.add_child(roster_title)
-	_roster_list = ItemList.new()
-	_roster_list.custom_minimum_size = Vector2(0, 140)
-	details_box.add_child(_roster_list)
-
-	# Map to host: the install's .bms missions (from the mounted root MainGame injects). Empty when
-	# no root/missions — Host then reports it via host_failed instead of hanging.
-	var map_row := HBoxContainer.new()
-	box.add_child(map_row)
-	var map_label := Label.new()
-	map_label.text = "Map:"
-	map_row.add_child(map_label)
-	_mission_option = OptionButton.new()
-	_mission_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	map_row.add_child(_mission_option)
-	_populate_missions()
-
-	var buttons := HBoxContainer.new()
-	box.add_child(buttons)
-
-	_join_button = Button.new()
-	_join_button.text = "Join"
-	_join_button.disabled = true
-	_join_button.pressed.connect(_on_join_pressed)
-	buttons.add_child(_join_button)
-
-	_host_button = Button.new()
-	_host_button.text = "Host a Game"
-	_host_button.disabled = true
-	_host_button.tooltip_text = "Host a game and register it on the gate. Available on OpenNova servers only — we never advertise a host on NovaLogic's live service."
-	_host_button.pressed.connect(_on_host_pressed)
-	buttons.add_child(_host_button)
-
-	_close_button = Button.new()
-	_close_button.text = "Back"
-	_close_button.pressed.connect(_on_close_pressed)
-	buttons.add_child(_close_button)
-
-
 func _set_screen(next: int) -> void:
 	if next == Screen.LOBBY and not _logged_in:
 		next = Screen.LOGIN
@@ -358,7 +200,7 @@ func _show_message(text: String, button_text: String, action: Callable,
 	_message_action = action
 	if _message_label != null:
 		_message_label.text = text.strip_edges() if not text.strip_edges().is_empty() \
-				else "NovaWorld could not complete the request."
+				else "Could not complete the request."
 	if _message_button != null:
 		_message_button.text = button_text
 	_set_screen(Screen.MESSAGE)
@@ -374,6 +216,7 @@ func _on_message_action_pressed() -> void:
 
 
 func _return_to_login() -> void:
+	_set_status("Connected. Sign in to continue.")
 	_set_screen(Screen.LOGIN)
 	if _username_edit != null:
 		_username_edit.grab_focus()
@@ -470,7 +313,7 @@ func _reconnect() -> void:
 	_browser_loading = false
 	if _password_edit != null:
 		_password_edit.clear()
-	_set_status("Contacting NovaWorld...")
+	_set_status("Connecting to matchmaking...")
 	_set_screen(Screen.CONNECTING)
 	_create_client()
 
@@ -518,7 +361,7 @@ func _on_disconnected(reason: String) -> void:
 		return
 	_host_button.disabled = true
 	_logged_in = false
-	_show_message("The connection to NovaWorld was closed.\n\n%s" % reason,
+	_show_message("The connection to the matchmaking service was closed.\n\n%s" % reason,
 			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
 
@@ -527,7 +370,7 @@ func _on_error(message: String) -> void:
 		return
 	_host_button.disabled = true
 	_logged_in = false
-	_show_message("NovaWorld could not be reached.\n\n%s" % message,
+	_show_message("The matchmaking service could not be reached.\n\n%s" % message,
 			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
 
@@ -847,6 +690,7 @@ func _on_server_list_failed(reason: String) -> void:
 		return
 	_browser_loading = false
 	_rebuild_view()
+	_set_status("Could not load games.")
 	_show_message(reason, "Retry", Callable(self, "_retry_server_list"), Screen.LOBBY)
 
 
@@ -914,7 +758,7 @@ func _on_login_succeeded(nwhandle: String) -> void:
 	_rebuild_type_filter()
 	_rebuild_view()
 	if _population_label != null:
-		_population_label.text = "Retrieving NovaWorld games..."
+		_population_label.text = "Retrieving games..."
 	_set_status("Signed in as %s." % nwhandle)
 	_set_screen(Screen.LOBBY)
 
@@ -940,6 +784,7 @@ func _on_login_failed(reason: String) -> void:
 	_password_edit.clear()
 	if _can_login:
 		_login_button.disabled = false
+	_set_status("Sign-in failed.")
 	_show_message(reason, "Back to Sign In", Callable(self, "_return_to_login"), Screen.LOGIN)
 
 
@@ -1037,7 +882,7 @@ func _on_host_pressed() -> void:
 		_show_message("No missions are available to host. Check the game folder.",
 				"Back to Host Game", Callable(self, "_return_to_host"), Screen.HOST)
 		return
-	_set_status("Starting a NovaWorld host...")
+	_set_status("Starting host...")
 	var config := HostSessionConfig.new()
 	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
 	config.nw_gate_host = _resolved_host()
@@ -1065,12 +910,6 @@ func _populate_missions() -> void:
 ## through the same boundary used by the live client.
 func client_for_test() -> NovaWorldClient:
 	return _client
-
-
-## Build the panel's UI for `target` without entering the tree (no client).
-func build_ui_for_target(target: int) -> void:
-	_target = target
-	_build_ui()
 
 
 ## Install a literal row set (no client) and derive the view — the browser-table
