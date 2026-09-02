@@ -25,12 +25,6 @@ extends RefCounted
 ## touch sits well inside this radius.
 const QUERY_RADIUS := 512.0
 
-# Light owner zero is retail's unowned/world sentinel. A decoded wire handle
-# is an independent 16-bit domain in which zero is valid, so tag every wire
-# identity into a nonzero, non-ObjectID range before it reaches LightScene.
-const WIRE_OWNER_TAG := 1 << 48
-const STATIC_OWNER_TAG := 2 << 48
-
 var _world: GameWorld
 var _static_sources := Callable()
 var _static_draw_sources := Callable()
@@ -171,7 +165,7 @@ func reattach() -> void:
 		var mapped_source: StaticEffectSource = _static_sources_snapshot[source_index]
 		var bms_id := mapped_source.bms_id
 		if bms_id != 0:
-			_static_owner_by_bms[bms_id] = owner_id_for_static_source(source_index)
+			_static_owner_by_bms[bms_id] = LightScene.owner_id_for_static_source(source_index)
 	for source_index in range(_static_sources_snapshot.size()):
 		var source: StaticEffectSource = _static_sources_snapshot[source_index]
 		if _spawned_static.has(source_index):
@@ -188,7 +182,7 @@ func reattach() -> void:
 		# static resolves containment once at its placement origin.
 		var blink_owner: Array = [] if is_building else _blink_owner_at(xform.origin)
 		var handles := _spawn_model_lights(data, xform,
-				owner_id_for_static_source(source_index), blink_owner, is_building)
+				LightScene.owner_id_for_static_source(source_index), blink_owner, is_building)
 		if not handles.is_empty():
 			_spawned_static[source_index] = handles
 
@@ -203,15 +197,7 @@ func reattach() -> void:
 static func owner_id_for_node(node: ObjectModel) -> int:
 	var ref: EntityRef = node.entity_ref
 	var wire := ref.wire_handle if ref != null else -1
-	return owner_id_for_wire(wire) if wire >= 0 else node.get_instance_id()
-
-
-static func owner_id_for_wire(wire_handle: int) -> int:
-	return WIRE_OWNER_TAG | (wire_handle & 0xffff) if wire_handle >= 0 else 0
-
-
-static func owner_id_for_static_source(source_index: int) -> int:
-	return STATIC_OWNER_TAG | source_index if source_index >= 0 else 0
+	return LightScene.owner_id_for_wire(wire) if wire >= 0 else node.get_instance_id()
 
 
 func on_wire_node_spawned(node: ObjectModel, _kind: int, _item_id: int) -> void:
@@ -455,7 +441,7 @@ func _rebuild_static_light_rows() -> void:
 		bounds_position_size[atlas_row * 2] = world_bounds.position
 		bounds_position_size[atlas_row * 2 + 1] = world_bounds.size
 		active[atlas_row] = 1 if descriptor.active else 0
-		var static_owner := owner_id_for_static_source(source_index)
+		var static_owner := LightScene.owner_id_for_static_source(source_index)
 		var is_building := (descriptor.kind if descriptor.kind >= 0 else source.kind) \
 				== MissionData.KIND_BUILDING
 		if is_building:
@@ -545,7 +531,7 @@ func render_frame(camera: Camera3D, viewmodel_parts: Array[ObjectModel] = [],
 		if part == null or not part.is_visible_in_tree():
 			continue
 		_frame_models.append(part)
-		_frame_owners.append(owner_id_for_wire(viewmodel_wire_handle)
+		_frame_owners.append(LightScene.owner_id_for_wire(viewmodel_wire_handle)
 				if viewmodel_wire_handle >= 0 else part.get_instance_id())
 		_frame_robj_scoped.append(0)
 		_frame_interior_owners.append(int(viewmodel_interior[0]))
@@ -766,7 +752,7 @@ func advance_fixed_tick() -> void:
 ## left entity+0x1B4 nonzero, retail re-arms and moves that final authored
 ## lease instead of allocating the 1.5-unit muzzle-color light.
 func on_muzzle_fire(shooter_handle: int, world_pos: Vector3) -> void:
-	var owner_id := owner_id_for_wire(shooter_handle)
+	var owner_id := LightScene.owner_id_for_wire(shooter_handle)
 	var handle := int(_entity_effect_handles.get(owner_id, 0))
 	if handle == 0:
 		handle = int(_scene.spawn_glow(GlowSpawn.make(world_pos,

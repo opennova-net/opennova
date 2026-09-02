@@ -395,9 +395,9 @@ func test_director_selects_static_building_lght_into_its_exact_robj_row() -> voi
 	director.setup(world, func() -> Array: return [source],
 			func() -> Array: return [draw])
 	director.reattach()
-	assert_ne(EffectLightDirector.owner_id_for_static_source(0), 0)
-	assert_ne(EffectLightDirector.owner_id_for_static_source(0),
-			EffectLightDirector.owner_id_for_wire(0),
+	assert_ne(LightScene.owner_id_for_static_source(0), 0)
+	assert_ne(LightScene.owner_id_for_static_source(0),
+			LightScene.owner_id_for_wire(0),
 			"static and wire handle zero occupy distinct non-world owner domains")
 	var camera := Camera3D.new()
 	world.add_child(camera)

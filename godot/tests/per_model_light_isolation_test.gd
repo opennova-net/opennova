@@ -84,7 +84,7 @@ func test_owned_light_reaches_only_its_owner_model() -> void:
 	owner_model.entity_ref = EntityRef.make(-1, -1, 0, 0, 77)
 	var bystander := _placed_model(container, Vector3(4.0, 0.0, 0.0))
 	assert_eq(EffectLightDirector.owner_id_for_node(owner_model),
-			EffectLightDirector.owner_id_for_wire(77),
+			LightScene.owner_id_for_wire(77),
 			"a wire-stamped model owns its tagged wire identity")
 	assert_eq(EffectLightDirector.owner_id_for_node(bystander),
 			bystander.get_instance_id(),
@@ -171,7 +171,7 @@ func test_zero_wire_handle_remains_an_owned_light_identity() -> void:
 	var tagged_zero := EffectLightDirector.owner_id_for_node(owner_model)
 	assert_ne(tagged_zero, 0,
 			"wire H=0 never aliases LightScene's unowned sentinel")
-	assert_eq(tagged_zero, EffectLightDirector.owner_id_for_wire(0))
+	assert_eq(tagged_zero, LightScene.owner_id_for_wire(0))
 
 	var director := EffectLightDirector.new()
 	director.setup(world, Callable(), Callable())
