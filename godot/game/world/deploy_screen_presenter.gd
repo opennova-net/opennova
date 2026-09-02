@@ -293,8 +293,8 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	for zone: DeployZoneRow in sim.get_deploy_spawn_zones():
 		var key := zone.name_key
 		zone_names[key] = _game_text(Strings.SECTION_WPNAMES, key, "Spawn Point")
-	for row: DeployListRow in sim.get_deploy_list_rows(_menu_text("DEFAULT_SPAWN_KEY", "D"),
-			_menu_text("HOME", "Home Base"), zone_names):
+	for row: DeployListRow in sim.get_deploy_list_rows(Strings.menu_text("DEFAULT_SPAWN_KEY", "D"),
+			Strings.menu_text("HOME", "Home Base"), zone_names):
 		# The compiled list has no inline markup channel yet (the row-style
 		# residue in D-HUD-19): the engine text keeps retail's <cRRGGBB>/<b>
 		# tags, the list shows them stripped. The sort already ran over the
@@ -423,7 +423,7 @@ func _ensure_menu() -> bool:
 	_driver.set_music_var_index(MUSIC_VAR_INDEX)
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
 	var style := _load_style(root)
-	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
+	var menu_text: RtxtStringFile = Strings.get_table(Strings.TABLE_MENUTXT)
 	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
 		push_warning("DeployScreenPresenter: %s has no screens" % MENU_FILE)
 		teardown()
@@ -451,16 +451,6 @@ func _register_text_tables(root: ResourceRoot) -> void:
 		var loaded := RtxtStringFile.new()
 		if loaded.load_from_byte_array(bytes) == OK:
 			Strings.register_table(spec[0], loaded)
-
-
-func _menu_text(key: String, fallback: String) -> String:
-	# [orig: TextResource_GetStringWithFallback(g_TextMenuUi, "Menu", key) — the
-	#  DEFAULT_SPAWN_KEY / HOME row-0 tokens @0x5536a0]
-	for spec in [["menutxt", "Menu"], ["gameui", "Menu"]]:
-		var t: RtxtStringFile = Strings.get_table(spec[0])
-		if t != null and t.has_string_in_section(spec[1], key):
-			return t.get_string_in_section(spec[1], key)
-	return fallback
 
 
 func _game_text(section: String, key: String, fallback: String) -> String:
