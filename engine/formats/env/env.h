@@ -99,6 +99,12 @@ struct Config {
 // colors into the 16th slot [orig: TimeOfDay_ParseProperty @ 0x57c65b].
 inline constexpr int kMaxTodKeyframes = 16;
 
+// The HHMM clock's authored range; every time-of-day setter clamps into it.
+inline constexpr int kTodTimeMax = 2359;
+inline int clamp_tod_time(int time) {
+	return time < 0 ? 0 : (time > kTodTimeMax ? kTodTimeMax : time);
+}
+
 Config make_default_config();
 
 // Retail keeps negative authored values and clamps only the upper bound.

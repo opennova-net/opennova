@@ -3,9 +3,11 @@
 // variables, perf counters.
 // The class spans several TUs; see simulation_internal.h for the map.
 #include "simulation/simulation_internal.h"
+#include "env/env_axes.h"
 
 #include "env/weather.h"
 #include <runtime/environment/environment_state.h>
+#include <base/io/fixed.h>
 
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <net/npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
@@ -237,9 +239,9 @@ Dictionary Simulation::compile_precipitation_frame(const Vector3 &p_camera,
 	opennova::world::WeatherState &weather = kernel_->world.weather;
 	// Godot (x, y, z) -> mission 16.16 (x, -z, y).
 	const int32_t cam_q16[3] = {
-		static_cast<int32_t>(std::lround(static_cast<double>(p_camera.x) * 65536.0)),
-		static_cast<int32_t>(std::lround(static_cast<double>(-p_camera.z) * 65536.0)),
-		static_cast<int32_t>(std::lround(static_cast<double>(p_camera.y) * 65536.0)),
+		opennova::io::float_to_fp16_16_round_sat(p_camera.x),
+		opennova::io::float_to_fp16_16_round_sat(-p_camera.z),
+		opennova::io::float_to_fp16_16_round_sat(p_camera.y),
 	};
 	// The per-render update precedes the compile (retail the drawer calls
 	// update_weather_particle_positions first @ 0x5dee65).
@@ -508,7 +510,7 @@ Array Simulation::drain_sound_emitters() {
 		d["source_bms_id"] = ev.source_bms_id;
 		// Mission coordinates -> Godot (x, z, -y), matching every other
 		// positional presentation drain.
-		d["pos"] = Vector3(ev.pos.x, ev.pos.z, -ev.pos.y);
+		d["pos"] = mission_to_godot(ev.pos);
 		d["lane"] = ev.lane;
 		d["slot"] = ev.slot;
 		d["lifetime"] = ev.lifetime_ticks;

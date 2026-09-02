@@ -1,6 +1,7 @@
 #include "render/object_lod_frame.h"
 
 #include <godot_cpp/core/math.hpp>
+#include <base/io/fixed.h>
 
 #include <runtime/renderer/object_lod.h>
 
@@ -9,17 +10,6 @@
 #include <limits>
 
 namespace godot {
-
-namespace {
-
-int32_t world_to_q16(float p_value) {
-	const double scaled = Math::round(static_cast<double>(p_value) * 65536.0);
-	return static_cast<int32_t>(CLAMP(scaled,
-			static_cast<double>(std::numeric_limits<int32_t>::min()),
-			static_cast<double>(std::numeric_limits<int32_t>::max())));
-}
-
-} // namespace
 
 ObjectLodFrame ObjectLodFrame::make(const Transform3D &p_camera_transform,
 		float p_vertical_fov_degrees, float p_viewport_width,
@@ -83,7 +73,7 @@ bool ObjectLodFrame::project(const Vector3 &p_center, float p_radius,
 	}
 	const float depth = (p_center - origin).dot(forward);
 	r_radius_q16 = opennova::renderer::project_bound_sphere_radius_q16(
-			world_to_q16(p_radius), world_to_q16(depth), focal_pixels);
+			opennova::io::float_to_fp16_16_round_sat(p_radius), opennova::io::float_to_fp16_16_round_sat(depth), focal_pixels);
 	return true;
 }
 

@@ -22,6 +22,7 @@
 #pragma once
 
 #include <runtime/environment/environment_state.h>
+#include <base/io/fixed.h>
 
 #include <formats/env/env_celestial.h>
 
@@ -40,12 +41,6 @@ inline Vec3 celestial_body_position(const Vec3 &cam_pos, const Vec3 &dir) {
 			cam_pos.z + dir.z * kCelestialBodyDistance};
 }
 
-namespace detail {
-inline int to_fixed_16_16(float value) {
-	return static_cast<int>(value * 65536.0f);
-}
-} // namespace detail
-
 // Overcast and SunDim are live end-to-end (env #27 — spring-smoothed in the
 // weather core; target 0 in stock data).
 inline CelestialBodyFrame build_sun_frame(const EnvironmentState &env,
@@ -54,8 +49,8 @@ inline CelestialBodyFrame build_sun_frame(const EnvironmentState &env,
 	frame.position = celestial_body_position(cam_pos, env.sun_direction());
 	frame.tint = env.sun_color();
 	frame.opacity = static_cast<float>(celestial_sun_alpha_fixed(
-							detail::to_fixed_16_16(env.overcast_blend()),
-							detail::to_fixed_16_16(env.sun_dim_pct()))) /
+							io::float_to_fp16_16(env.overcast_blend()),
+							io::float_to_fp16_16(env.sun_dim_pct()))) /
 			65536.0f;
 	return frame;
 }
@@ -68,7 +63,7 @@ inline CelestialBodyFrame build_moon_frame(const EnvironmentState &env,
 	frame.tint = env.moon_color();
 	frame.opacity = static_cast<float>(celestial_moon_alpha_fixed(
 							env.fog_level(),
-							detail::to_fixed_16_16(env.overcast_blend()),
+							io::float_to_fp16_16(env.overcast_blend()),
 							false)) /
 			65536.0f;
 	return frame;
@@ -84,7 +79,7 @@ inline CelestialBodyFrame build_moon_frame(const EnvironmentState &env,
 // alpha @ 0x5acc37..0x5acc61); FrameFX_RenderBloomPass @ 0x582a77].
 inline float celestial_moon_q3_opacity(const EnvironmentState &env) {
 	return static_cast<float>(celestial_moon_alpha_fixed(env.fog_level(),
-				   detail::to_fixed_16_16(env.overcast_blend()), true)) /
+				   io::float_to_fp16_16(env.overcast_blend()), true)) /
 			65536.0f;
 }
 
@@ -101,9 +96,9 @@ inline CelestialBodyFrame build_glare_frame(const EnvironmentState &env,
 	// the witnessed quarter (the bloom re-adds the glare)
 	// [orig: FrameFX_QualityAtLeast3 @ 0x581f60; >>= 2 @ 0x5ad033..0x5ad03c].
 	frame.opacity = static_cast<float>(glare_glow_alpha_fixed(
-							detail::to_fixed_16_16(1.0f), occlusion_brightness,
-							detail::to_fixed_16_16(env.overcast_blend()),
-							detail::to_fixed_16_16(env.sun_dim_pct()),
+							io::float_to_fp16_16(1.0f), occlusion_brightness,
+							io::float_to_fp16_16(env.overcast_blend()),
+							io::float_to_fp16_16(env.sun_dim_pct()),
 							true)) /
 			65536.0f;
 	return frame;
@@ -117,9 +112,9 @@ inline CelestialBodyFrame build_glare_frame(const EnvironmentState &env,
 // the main glare.
 inline float glare_q3_peak_opacity(const EnvironmentState &env) {
 	return static_cast<float>(glare_q3_alpha_fixed(
-				   detail::to_fixed_16_16(1.0f), env.fog_level(),
-				   detail::to_fixed_16_16(env.overcast_blend()),
-				   detail::to_fixed_16_16(env.sun_dim_pct()), true)) /
+				   io::float_to_fp16_16(1.0f), env.fog_level(),
+				   io::float_to_fp16_16(env.overcast_blend()),
+				   io::float_to_fp16_16(env.sun_dim_pct()), true)) /
 			65536.0f;
 }
 

@@ -1,4 +1,5 @@
 #include <formats/env/env.h>
+#include <base/io/fixed.h>
 
 #include <algorithm>
 #include <cctype>
@@ -63,7 +64,7 @@ std::string number_to_string(float value) {
 }
 
 std::string format_tod_time(int time) {
-	const int normalized = clamp_int(time, 0, 2359);
+	const int normalized = clamp_tod_time(time);
 	std::ostringstream output;
 	output << std::setw(4) << std::setfill('0') << normalized;
 	return output.str();
@@ -155,7 +156,7 @@ int hhmm_to_hours_fp(float hhmm) {
 		minutes = 59.0f;
 	}
 	// Integer-exact for whole minutes: (m << 16) / 60 truncates the same way.
-	return (hours << 16) + static_cast<int>(minutes * (65536.0f / 60.0f));
+	return (hours << 16) + static_cast<int>(minutes * (io::kFp16One / 60.0f));
 }
 
 Config make_default_config() {
@@ -571,12 +572,12 @@ Vec3 compute_sun_direction(float tod_time) {
 	// computes in 16.16 fixed; we keep floats — sub-1e-4 quantization divergence,
 	// documented in docs/env/env-tod-re.md). Fixed vector (0.9397 sin, 0.342,
 	// -0.9397 cos) swizzled by the float getter to (-0.342, -0.9397 cos, +0.9397 sin).
-	const float hours = static_cast<float>(hhmm_to_hours_fp(tod_time)) / 65536.0f;
+	const float hours = static_cast<float>(hhmm_to_hours_fp(tod_time)) / io::kFp16One;
 	const float angle = 2.0f * 3.14159265358979323846f * hours / 24.0f;
 	Vec3 dir;
-	dir.x = -22414.0f / 65536.0f;
-	dir.y = -(61583.0f / 65536.0f) * std::cos(angle);
-	dir.z = (61583.0f / 65536.0f) * std::sin(angle);
+	dir.x = -22414.0f / io::kFp16One;
+	dir.y = -(61583.0f / io::kFp16One) * std::cos(angle);
+	dir.z = (61583.0f / io::kFp16One) * std::sin(angle);
 	// The getter exposes the fixed tuple directly; terrain byte-packs it without
 	// another normalization [orig: Environment_GetLightDirectionFloat @ 0x57d870,
 	// tuple copy @ 0x57d8be..0x57d8cd; PolyTrn_RenderTile @ 0x60e1d9..0x60e331].
@@ -586,12 +587,12 @@ Vec3 compute_sun_direction(float tod_time) {
 Vec3 compute_moon_direction(float tod_time) {
 	// [orig: Terrain_ComputeMoonDirection @ 0x57d760] — sun phase + pi, constants
 	// 56755/65536 = 0.866 and Y = 0x8000 = 0.5, hours space as for the sun.
-	const float hours = static_cast<float>(hhmm_to_hours_fp(tod_time)) / 65536.0f;
+	const float hours = static_cast<float>(hhmm_to_hours_fp(tod_time)) / io::kFp16One;
 	const float angle = 2.0f * 3.14159265358979323846f * hours / 24.0f + 3.14159265358979323846f;
 	Vec3 dir;
-	dir.x = -32768.0f / 65536.0f;
-	dir.y = -(56755.0f / 65536.0f) * std::cos(angle);
-	dir.z = (56755.0f / 65536.0f) * std::sin(angle);
+	dir.x = -32768.0f / io::kFp16One;
+	dir.y = -(56755.0f / io::kFp16One) * std::cos(angle);
+	dir.z = (56755.0f / io::kFp16One) * std::sin(angle);
 	// The active getter copies this selected moon tuple through the same
 	// direct path [orig: Environment_GetLightDirectionFloat @ 0x57d870].
 	return dir;

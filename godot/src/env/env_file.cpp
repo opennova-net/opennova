@@ -1,6 +1,7 @@
 #include "env/env_file.h"
 
 #include <godot_cpp/classes/file_access.hpp>
+#include <base/io/fixed.h>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -37,10 +38,6 @@ Vector3 to_vector3(const opennova::env::Rgb &rgb) {
 
 Vector3 to_vector3(const opennova::env::Vec3 &value) {
 	return Vector3(value.x, value.y, value.z);
-}
-
-int clamp_time(int time) {
-	return std::max(0, std::min(2359, time));
 }
 
 } // namespace
@@ -167,7 +164,7 @@ String EnvFile::get_source_path() const { return source_path; }
 IMPL_SET_GET(env_name, set_env_name, get_env_name, const String &, String)
 IMPL_SET_GET(timeofday, set_timeofday, get_timeofday, const String &, String)
 IMPL_SET_GET(envscale, set_envscale, get_envscale, float, float)
-void EnvFile::set_curtime(int p_value) { curtime = clamp_time(p_value); _notify_environment_changed(); }
+void EnvFile::set_curtime(int p_value) { curtime = opennova::env::clamp_tod_time(p_value); _notify_environment_changed(); }
 int EnvFile::get_curtime() const { return curtime; }
 IMPL_SET_GET(fog_level, set_fog_level, get_fog_level, float, float)
 IMPL_SET_GET(fog_type, set_fog_type, get_fog_type, int, int)
@@ -553,13 +550,10 @@ Color EnvFile::lit_water_color(const Color &p_water, const Color &p_light) {
 
 Color EnvFile::horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 		float p_fog_distance, float p_fog_distance_reference) {
-	const auto to_fixed = [](float units) {
-		if (units <= 0.0f) return 0u;
-		return static_cast<uint32_t>(units * 65536.0f);
-	};
 	return to_color(opennova::env::horizon_blend_skyfog(
 			to_rgb(p_fog), to_rgb(p_skyfog),
-			to_fixed(p_fog_distance), to_fixed(p_fog_distance_reference)));
+			opennova::io::float_to_fp16_16_nonneg(p_fog_distance),
+			opennova::io::float_to_fp16_16_nonneg(p_fog_distance_reference)));
 }
 
 Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
@@ -616,20 +610,17 @@ float EnvFile::celestial_body_distance() {
 
 namespace {
 
-int to_fixed_16_16(float value) {
-	return static_cast<int>(value * 65536.0f);
-}
 
 } // namespace
 
 float EnvFile::celestial_sun_alpha(float p_overcast_blend, float p_sun_dim_pct) {
 	return static_cast<float>(opennova::env::celestial_sun_alpha_fixed(
-			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct))) / 65536.0f;
+			opennova::io::float_to_fp16_16(p_overcast_blend), opennova::io::float_to_fp16_16(p_sun_dim_pct))) / 65536.0f;
 }
 
 float EnvFile::celestial_moon_alpha(float p_fog_distance, float p_overcast_blend) {
 	return static_cast<float>(opennova::env::celestial_moon_alpha_fixed(
-			p_fog_distance, to_fixed_16_16(p_overcast_blend), false)) / 65536.0f;
+			p_fog_distance, opennova::io::float_to_fp16_16(p_overcast_blend), false)) / 65536.0f;
 }
 
 float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
@@ -638,8 +629,8 @@ float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
 	// unscaled fold; the runtime frame builder owns the locked-profile
 	// quarter (celestial_frame.h).
 	return static_cast<float>(opennova::env::glare_glow_alpha_fixed(
-			to_fixed_16_16(p_view_dot_sun), p_brightness,
-			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct),
+			opennova::io::float_to_fp16_16(p_view_dot_sun), p_brightness,
+			opennova::io::float_to_fp16_16(p_overcast_blend), opennova::io::float_to_fp16_16(p_sun_dim_pct),
 			false)) / 65536.0f;
 }
 
