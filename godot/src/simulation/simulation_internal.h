@@ -7,6 +7,7 @@
 #pragma once
 
 #include "simulation/simulation.h"
+#include "env/env_axes.h"
 
 #include <base/io/perf_clock.h> // the opt-in profiling clock (opennova::io::perf_now_us)
 #include <runtime/simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)
@@ -330,11 +331,6 @@ inline bool resolve_client_eweap_attachment_pose(
 inline Vector3 godot_from_fixed3(const int32_t p[3]) {
 	return Vector3(static_cast<float>(p[0] / 65536.0), static_cast<float>(p[2] / 65536.0),
 	               static_cast<float>(-p[1] / 65536.0));
-}
-// Mission float Vec3 -> Godot world space: (x, y, z) -> (x, z, -y).
-// The ONE mission <-> presentation map (world/presentation_frame.h).
-inline Vector3 godot_from_mission_vec3(const opennova::world::Vec3 &p) {
-	return Vector3(p.x, p.z, -p.y);
 }
 // Render float world -> Godot world: the render frame is Godot with X/Z
 // swapped ((-my, mz, mx)/65536 == (gz, gy, gx)), so the inverse is the same swap.

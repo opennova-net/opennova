@@ -1,6 +1,6 @@
 #include "simulation/entity_row.h"
 
-#include "simulation/simulation_internal.h" // godot_from_mission_vec3, the ONE axis map
+#include "simulation/simulation_internal.h" // mission_to_godot, the ONE axis map
 
 namespace godot {
 
@@ -17,7 +17,7 @@ String EntityRow::get_state_name() const {
 }
 
 Vector3 EntityRow::get_world_position() const {
-	return sim_internal::godot_from_mission_vec3(value_.mission_position);
+	return sim_internal::mission_to_godot(value_.mission_position);
 }
 
 Vector3 EntityRow::get_mission_position() const {

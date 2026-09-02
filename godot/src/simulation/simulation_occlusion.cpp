@@ -1126,7 +1126,7 @@ Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
 	out["net_id"] = static_cast<int>(ent->net_id);
 	out["item_id"] = ent->item_id;
 	out["name"] = String(ent->name.c_str());
-	out["position_godot"] = godot_from_mission_vec3(ent->position);
+	out["position_godot"] = mission_to_godot(ent->position);
 	out["bound_radius"] = ent->bound_radius;
 	return out;
 }
@@ -1165,9 +1165,9 @@ Dictionary Simulation::get_round_debug() const {
 		d["ammo_index"] = ev.ammo_index;
 		d["husk"] = ev.husk;
 		d["t"] = ev.t;
-		d["p0"] = godot_from_mission_vec3(ev.p0);
-		d["p1"] = godot_from_mission_vec3(ev.p1);
-		d["hit"] = godot_from_mission_vec3(ev.hit);
+		d["p0"] = mission_to_godot(ev.p0);
+		d["p1"] = mission_to_godot(ev.p1);
+		d["hit"] = mission_to_godot(ev.hit);
 		// The struck entity's item name when it still resolves (wrecks keep
 		// their slot until cleanup) — display sugar for the F3 list.
 		String label;

@@ -1,6 +1,6 @@
 #include "simulation/entity_card.h"
 
-#include "simulation/simulation_internal.h" // godot_from_mission_vec3, the ONE axis map
+#include "simulation/simulation_internal.h" // mission_to_godot, the ONE axis map
 
 #include <godot_cpp/variant/array.hpp>
 
@@ -13,7 +13,7 @@ using opennova::world::inspect::SeatRow;
 using opennova::world::inspect::WorldDetail;
 
 Vector3 godot_from_mission(const opennova::world::Vec3 &p) {
-	return sim_internal::godot_from_mission_vec3(p);
+	return sim_internal::mission_to_godot(p);
 }
 
 Vector3 raw_mission(const opennova::world::Vec3 &p) {
