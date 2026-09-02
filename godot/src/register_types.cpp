@@ -61,6 +61,8 @@
 #include "object/avatar_records.h"
 #include "object/character_join_profile.h"
 #include "mission/player_visual_spec.h"
+#include "mission/mission_info.h"
+#include "env/mission_environment_overrides.h"
 #include "simulation/fp_viewmodel_spec.h"
 #include "simulation/player_aim_overlay.h"
 #include "simulation/player_local_view.h"
@@ -152,6 +154,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TerrainTileEntry);
 	GDREGISTER_CLASS(TerrainTileInfo);
 	GDREGISTER_CLASS(EnvKeyframe);
+	GDREGISTER_CLASS(MissionEnvironmentOverrides);
 	GDREGISTER_CLASS(EnvFile);
 	GDREGISTER_CLASS(ColorSmoother);
 	GDREGISTER_CLASS(MissionEnvironment);
@@ -207,6 +210,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HudPos);
 	GDREGISTER_CLASS(HudOverlay);
 	GDREGISTER_CLASS(FeedRow);
+	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);
 	GDREGISTER_CLASS(MissionCatalog);

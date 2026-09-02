@@ -277,30 +277,30 @@ func test_game_mode_single_select_and_priority() -> void:
 
 	# Deathmatch: exactly that mode bit, nothing else in the mode mask.
 	assert_true(m.set_game_mode(MissionData.ATTRIB_DEATHMATCH), "set deathmatch")
-	assert_eq(int(m.get_info()["attrib_flags"]) & mask, int(MissionData.ATTRIB_DEATHMATCH), "only DM mode bit set")
+	assert_eq(m.get_info().attrib_flags & mask, int(MissionData.ATTRIB_DEATHMATCH), "only DM mode bit set")
 	assert_eq(int(m.get_game_mode()), int(MissionData.ATTRIB_DEATHMATCH), "get_game_mode reports DM")
 
 	# Switch to Search & destroy (the high bit 0x80000000): replaces DM, no leftovers.
 	assert_true(m.set_game_mode(MissionData.ATTRIB_SEARCH_AND_DESTROY), "set S&D")
-	assert_eq(int(m.get_info()["attrib_flags"]) & mask, int(MissionData.ATTRIB_SEARCH_AND_DESTROY), "DM cleared, S&D set")
+	assert_eq(m.get_info().attrib_flags & mask, int(MissionData.ATTRIB_SEARCH_AND_DESTROY), "DM cleared, S&D set")
 	assert_eq(int(m.get_game_mode()), int(MissionData.ATTRIB_SEARCH_AND_DESTROY), "get reports S&D (high bit survives)")
 
 	# Single player (0) clears all mode bits.
 	assert_true(m.set_game_mode(0), "set single player")
-	assert_eq(int(m.get_info()["attrib_flags"]) & mask, 0, "no mode bits remain")
+	assert_eq(m.get_info().attrib_flags & mask, 0, "no mode bits remain")
 	assert_eq(int(m.get_game_mode()), 0, "get reports single player")
 
 	# Non-mode option bits survive a game-mode change.
 	assert_true(m.set_header_flag(MissionData.ATTRIB_ROTATE_MAP_180, true), "set rotate option")
 	assert_true(m.set_game_mode(MissionData.ATTRIB_COOP), "set coop")
-	assert_ne(int(m.get_info()["attrib_flags"]) & int(MissionData.ATTRIB_ROTATE_MAP_180), 0, "rotate option preserved across mode change")
+	assert_ne(m.get_info().attrib_flags & int(MissionData.ATTRIB_ROTATE_MAP_180), 0, "rotate option preserved across mode change")
 	assert_eq(int(m.get_game_mode()), int(MissionData.ATTRIB_COOP), "coop active")
 
 	# Invalid bits are rejected and change nothing.
-	var before := int(m.get_info()["attrib_flags"])
+	var before := m.get_info().attrib_flags
 	assert_false(m.set_game_mode(0x4), "an override bit is not a valid game mode")
 	assert_false(m.set_game_mode(int(MissionData.ATTRIB_COOP) | int(MissionData.ATTRIB_DEATHMATCH)), "two mode bits is invalid")
-	assert_eq(int(m.get_info()["attrib_flags"]), before, "rejected calls leave flags unchanged")
+	assert_eq(m.get_info().attrib_flags, before, "rejected calls leave flags unchanged")
 
 	# A mode set round-trips through save / reopen.
 	assert_true(m.set_game_mode(MissionData.ATTRIB_CAPTURE_THE_FLAG), "set CTF")
@@ -891,16 +891,16 @@ func test_set_header_string_and_int_round_trip() -> void:
 	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK)
 	var info := r.get_info()
-	assert_eq(String(info["mission_name"]), "Grill Test", "mission_name survives reload")
-	assert_eq(int(info["climate"]), 2, "climate survives reload")
+	assert_eq(info.mission_name, "Grill Test", "mission_name survives reload")
+	assert_eq(info.climate, 2, "climate survives reload")
 
 
 func test_set_header_flag_toggles_one_bit_and_preserves_others() -> void:
 	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before := int(m.get_info()["attrib_flags"])
+	var before := m.get_info().attrib_flags
 	assert_true(m.set_header_flag(MissionData.ATTRIB_COOP, true), "set COOP")
-	var after := int(m.get_info()["attrib_flags"])
+	var after := m.get_info().attrib_flags
 	assert_eq(after & MissionData.ATTRIB_COOP, MissionData.ATTRIB_COOP, "COOP bit is set")
 	var other_mask := ~MissionData.ATTRIB_COOP
 	assert_eq(after & other_mask, before & other_mask, "other attrib bits are preserved")

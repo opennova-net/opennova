@@ -336,14 +336,14 @@ func _make_cfg(index: int) -> EnvFile:
 			# Exercises: fog_type 1 (0.5-unit start) + the BMS mission
 			# override layer as a live view (env_file_test.gd precedent).
 			env.set_fog_type(1)
-			env.apply_mission_overrides({
-				"water_height": 2.0,
-				"fog_level": 300.0,
-				"fog_color": Color8(200, 180, 160),
-				"water_color": Color8(30, 60, 90),
-				"water_murk": 0.35,
-				"start_time": 630,
-			})
+			var overrides := MissionEnvironmentOverrides.new()
+			overrides.water_height = 2.0
+			overrides.fog_level = 300.0
+			overrides.fog_color = Color8(200, 180, 160)
+			overrides.water_color = Color8(30, 60, 90)
+			overrides.water_murk = 0.35
+			overrides.start_time = 630
+			env.apply_mission_overrides(overrides)
 	return env
 
 

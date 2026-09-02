@@ -158,4 +158,13 @@ struct BmsEnvOverrides {
 // globals; we mutate a copy so the base file stays authoritative).
 void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides);
 
+// The override layer a mission header authors: the water height (attrib bit
+// 0x1; file s16 half-units), the fog distance (0x2), the fog color (0x4, bytes
+// -> 0..1), and the ungated water color (any byte nonzero) and murk (byte
+// nonzero, * 0.01). start_time is local-play state the caller adds.
+// [orig: Game_LoadTerrainDuringConnect @ 0x520710 + Game_StartMission @ 0x525371]
+BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_override,
+                                              int fog_override, const int fog_color[3],
+                                              const int water_color[3], int water_murk);
+
 } // namespace opennova::env

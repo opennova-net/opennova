@@ -1,6 +1,10 @@
 #include "mission/mission_data.h"
 
 #include "resource_index/resource_root.h"
+#include "env/mission_environment_overrides.h"
+#include "mission/mission_info.h"
+
+#include <formats/env/env.h> // bms_env_overrides_from_header
 
 #include <formats/mission/bms.h>     // AttribFlags / AreaTrigger / Trigger bit names
 #include <formats/mission/mission.h> // kItemIdOffset (pins ITEM_ID_OFFSET below)
@@ -16,10 +20,6 @@
 using namespace godot;
 
 namespace {
-
-bool attrib_has(uint32_t attrib_flags, opennova::bms::AttribFlags bit) {
-	return (attrib_flags & static_cast<uint32_t>(bit)) != 0;
-}
 
 opennova::mission::EntityKind to_native_kind(MissionData::EntityKind kind) {
 	switch (kind) {
@@ -304,63 +304,20 @@ String MissionData::get_environment_ref() const {
 	return String(document.info().environment.c_str());
 }
 
-Dictionary MissionData::get_info() const {
-	const opennova::mission::MissionInfo info = document.info();
-	Dictionary out;
-	out["mission_name"] = String(info.mission_name.c_str());
-	out["designer"] = String(info.designer.c_str());
-	out["briefing"] = String(info.briefing.c_str());
-	out["terrain"] = String(info.terrain.c_str());
-	out["environment"] = String(info.environment.c_str());
-	out["climate"] = info.climate;
-	out["weather"] = info.weather;
-	out["mission_type"] = info.mission_type;
-	out["attrib_flags"] = info.attrib_flags;
-	out["game_mode"] = get_game_mode();
-	out["start_time"] = info.start_time;
-	out["minutes_per_day"] = info.minutes_per_day;
-	out["player_health"] = info.player_health;
-	out["max_saves"] = info.max_saves;
-	out["music"] = info.music;
-	out["reverb"] = info.reverb;
-	out["wind_speed"] = info.wind_speed;
-	out["wind_direction"] = info.wind_direction;
-	out["map_zoom"] = info.map_zoom;
-	out["water_override"] = info.water_override;
-	out["fog_override"] = info.fog_override;
-	out["fog_color"] = Color(info.fog_color[0] / 255.0f, info.fog_color[1] / 255.0f, info.fog_color[2] / 255.0f);
-	out["water_color"] = Color(info.water_color[0] / 255.0f, info.water_color[1] / 255.0f, info.water_color[2] / 255.0f);
-	out["water_murk"] = info.water_murk;
-	out["has_water_override"] = attrib_has(info.attrib_flags, opennova::bms::AttribFlags::WaterOverrideEnable);
-	out["has_fog_distance_override"] = attrib_has(info.attrib_flags, opennova::bms::AttribFlags::FogDistanceOverrideEnable);
-	out["has_fog_color_override"] = attrib_has(info.attrib_flags, opennova::bms::AttribFlags::FogColorOverrideEnable);
+Ref<MissionInfo> MissionData::get_info() const {
+	Ref<MissionInfo> out;
+	out.instantiate();
+	out->assign(document.info(), static_cast<int>(get_game_mode()));
 	return out;
 }
 
-Dictionary MissionData::get_environment_overrides() const {
-	// Builds the EnvFile.apply_mission_overrides() payload from the attrib-gated
-	// header fields [orig: Game_LoadTerrainDuringConnect @ 0x520710 +
-	// Game_StartMission @ 0x525371]. Keys present only when their gate is set.
+Ref<MissionEnvironmentOverrides> MissionData::get_environment_overrides() const {
 	const opennova::mission::MissionInfo info = document.info();
-	Dictionary out;
-	if (attrib_has(info.attrib_flags, opennova::bms::AttribFlags::WaterOverrideEnable)) {
-		out["water_height"] = static_cast<float>(info.water_override); // engine half-units
-		// The same override in WORLD units, so no shell converts (the header
-		// stores signed half-world-units; mission.h carries the note).
-		out["water_height_world"] = static_cast<float>(info.water_override) * 0.5f;
-	}
-	if (attrib_has(info.attrib_flags, opennova::bms::AttribFlags::FogDistanceOverrideEnable)) {
-		out["fog_level"] = static_cast<float>(info.fog_override);
-	}
-	if (attrib_has(info.attrib_flags, opennova::bms::AttribFlags::FogColorOverrideEnable)) {
-		out["fog_color"] = Color(info.fog_color[0] / 255.0f, info.fog_color[1] / 255.0f, info.fog_color[2] / 255.0f);
-	}
-	if (info.water_color[0] != 0 || info.water_color[1] != 0 || info.water_color[2] != 0) {
-		out["water_color"] = Color(info.water_color[0] / 255.0f, info.water_color[1] / 255.0f, info.water_color[2] / 255.0f);
-	}
-	if (info.water_murk != 0) {
-		out["water_murk"] = info.water_murk * 0.01f;
-	}
+	Ref<MissionEnvironmentOverrides> out;
+	out.instantiate();
+	out->assign(opennova::env::bms_env_overrides_from_header(
+			static_cast<uint32_t>(info.attrib_flags), info.water_override, info.fog_override,
+			info.fog_color, info.water_color, info.water_murk));
 	return out;
 }
 

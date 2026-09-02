@@ -316,6 +316,24 @@ int main() {
 		apply_bms_overrides(untouched, BmsEnvOverrides{});
 		if (!expect(near(untouched.fog_level, default_fog) && !untouched.water_height_set,
 		            "empty override set leaves the config alone")) return 1;
+
+		// The header builder: each attrib gate arms its field, the ungated
+		// water color/murk arm on any nonzero byte, bytes scale to 0..1.
+		const int fog_rgb[3] = {255, 0, 128};
+		const int water_rgb[3] = {0, 0, 0};
+		const BmsEnvOverrides gated = bms_env_overrides_from_header(0x1 | 0x4, -7, 900, fog_rgb, water_rgb, 0);
+		if (!expect(gated.has_water_height && near(gated.water_height, -7.0f), "attrib 0x1 arms the water height")) return 1;
+		if (!expect(!gated.has_fog_level, "no attrib 0x2: the fog distance stays unarmed")) return 1;
+		if (!expect(gated.has_fog_color && near(gated.fog_color.r, 1.0f) && near(gated.fog_color.b, 128.0f / 255.0f),
+		            "attrib 0x4 arms the fog color as bytes / 255")) return 1;
+		if (!expect(!gated.has_water_color && !gated.has_water_murk && !gated.has_start_time,
+		            "zero water bytes arm nothing")) return 1;
+		const int water_rgb2[3] = {0, 30, 0};
+		const BmsEnvOverrides ungated = bms_env_overrides_from_header(0x2, 0, 250, fog_rgb, water_rgb2, 35);
+		if (!expect(!ungated.has_water_height && ungated.has_fog_level && near(ungated.fog_level, 250.0f),
+		            "attrib 0x2 arms only the fog distance")) return 1;
+		if (!expect(ungated.has_water_color && near(ungated.water_color.g, 30.0f / 255.0f), "a nonzero water byte arms the color")) return 1;
+		if (!expect(ungated.has_water_murk && near(ungated.water_murk, 0.35f), "a nonzero murk byte arms murk * 0.01")) return 1;
 	}
 
 	// Horizon blend — the frame-clear cross-fade, byte-exact vs the witnessed
