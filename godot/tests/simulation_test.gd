@@ -834,8 +834,7 @@ func _aim_verdict_sim(flags: int) -> Simulation:
 
 
 func _aimed_shot_available(sim: Simulation) -> bool:
-	return bool(sim.get_local_player_weapon_state().get(
-			"aimed_shot_available", false))
+	return sim.get_local_player_weapon_state().aimed_shot_available
 
 
 func _present_field_for_origin(sim: Simulation, kind: int, index: int,
@@ -1108,21 +1107,21 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 	def_2.startrounds = 300
 	sim.set_local_player_weapon(def_2, {})
 	sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 2,
+	assert_eq(sim.get_local_player_weapon_state().hud_spread_row, 2,
 			"standing selects row 2")
 
 	assert_true(sim.request_local_player_stance(2))
 	sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 0,
+	assert_eq(sim.get_local_player_weapon_state().hud_spread_row, 0,
 			"prone selects row 0")
 
 	sim.set_water_z(1.0)
 	sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 2,
+	assert_eq(sim.get_local_player_weapon_state().hud_spread_row, 2,
 			"below-water source height forces the standing row")
 	sim.set_water_z(0.0)
 	sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 0,
+	assert_eq(sim.get_local_player_weapon_state().hud_spread_row, 0,
 			"leaving water restores the authored prone row")
 
 	assert_true(sim.request_local_player_scope_toggle())
@@ -1133,7 +1132,7 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 				"Scoped ADS never promotes before the ease endpoint")
 	for _i in range(9):
 		sim.step()
-		if int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)) == 3:
+		if sim.get_local_player_weapon_state().hud_spread_row == 3:
 			aimed_row_seen = true
 			break
 	assert_true(aimed_row_seen,
@@ -1141,7 +1140,7 @@ func test_hud_spread_row_tracks_stance_and_settled_aim_state() -> void:
 
 	sim.set_local_player_debug_third_person(true)
 	sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("hud_spread_row", -1)), 0,
+	assert_eq(sim.get_local_player_weapon_state().hud_spread_row, 0,
 			"third person clears aimed-shot availability without changing stance")
 	sim.free()
 
@@ -1229,8 +1228,8 @@ func test_forcescoped_overrides_ordinary_gates_but_not_card_switch_reload() -> v
 	var spent_round := false
 	for _i in range(12):
 		sim.step()
-		var state: Dictionary = sim.get_local_player_weapon_state()
-		if int(state.get("clip", 30)) == 29 and int(state.get("current", -1)) == 0:
+		var state := sim.get_local_player_weapon_state()
+		if state.clip == 29 and state.current_action == 0:
 			spent_round = true
 			break
 	assert_true(spent_round, "fixture reached idle with a partial magazine")
@@ -1240,7 +1239,7 @@ func test_forcescoped_overrides_ordinary_gates_but_not_card_switch_reload() -> v
 	var reload_seen := false
 	for _i in range(12):
 		sim.step()
-		if int(sim.get_local_player_weapon_state().get("current", -1)) == 4:
+		if sim.get_local_player_weapon_state().current_action == 4:
 			reload_seen = true
 			sim.step() # aimed verdict samples the already-current reload action
 			break
@@ -1303,17 +1302,17 @@ func test_local_fire_exports_recoil_camera_and_hud_spread() -> void:
 	sim.set_local_player_weapon_input(false, true, false)
 	for _i in range(4):
 		sim.step()
-		if int(sim.get_local_player_weapon_state().get("fired_serial", 0)) > 0:
+		if sim.get_local_player_weapon_state().fired_serial > 0:
 			break
 
 	var weapon_state := sim.get_local_player_weapon_state()
-	var recoil_pitch := int(weapon_state.get("recoil_pitch_bam", 0))
-	var weight_spread := int(weapon_state.get("weapon_weight_spread_bam", 0))
+	var recoil_pitch := weapon_state.recoil_pitch_bam
+	var weight_spread := weapon_state.weapon_weight_spread_bam
 	assert_gt(recoil_pitch, 0,
 			"the successful M4 round stamps the standing ammo recoil impulse")
-	assert_eq(int(weapon_state.get("hud_spread_row", -1)), 2,
+	assert_eq(weapon_state.hud_spread_row, 2,
 			"standing hip fire selects the first triplet's standing row")
-	assert_eq(int(weapon_state.get("hud_spread_fp16", -1)),
+	assert_eq(weapon_state.hud_spread_fp16,
 			0x4000 + (recoil_pitch >> 7) + (weight_spread >> 7),
 			"HUD spread preserves exact ERROR plus both live SAR terms")
 	var recoil_view := sim.get_local_player_view()
@@ -1332,8 +1331,8 @@ func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> voi
 
 	sim.set_local_player_weapon(_minimal_weapon("WPN_A", "shared.adm"), {})
 	sim.step()
-	var state: Dictionary = sim.get_local_player_weapon_state()
-	assert_eq(String(state.get("body_anim_key", "")), "anim_idle",
+	var state := sim.get_local_player_weapon_state()
+	assert_eq(state.body_anim_key, "anim_idle",
 		"equal state ids still export the secondary channel's independent playhead")
 	assert_gt(absf(_weapon_arm_pitch_deg(sim)), 1.0,
 		"the first AnimMap observed by this entity stamps the arms dip")
@@ -1393,9 +1392,9 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 		"anim_wpn_reload": PackedFloat32Array([0.5, 1.0, 0.25]),
 	})
 	sim.step()
-	var state: Dictionary = sim.get_local_player_weapon_state()
-	assert_eq(String(state.get("anim_key", "")), "anim_wpn_idle", "fresh slot idles")
-	assert_eq(int(state.get("anim_variant", -1)), 0, "single-entry rings always serve 0")
+	var state := sim.get_local_player_weapon_state()
+	assert_eq(state.anim_key, "anim_wpn_idle", "fresh slot idles")
+	assert_eq(state.anim_variant, 0, "single-entry rings always serve 0")
 
 	# Spend a round (letting the fire+recoil chain settle back to idle — the reload
 	# dispatch gate refuses the edge mid-FIRE), then reload: the bake left the reload
@@ -1403,16 +1402,16 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	sim.set_local_player_weapon_input(false, true, false)
 	for _i in range(6):
 		sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("clip", 0)), 29, "one round spent")
+	assert_eq(sim.get_local_player_weapon_state().clip, 29, "one round spent")
 	sim.set_local_player_weapon_input(false, false, true)
 	var reload_variant := -1
 	var first_reload_serial := -1
 	for _i in range(90):
 		sim.step()
 		state = sim.get_local_player_weapon_state()
-		if String(state.get("anim_key", "")) == "anim_wpn_reload":
-			reload_variant = int(state.get("anim_variant", -1))
-			first_reload_serial = int(state.get("play_serial", 0))
+		if state.anim_key == "anim_wpn_reload":
+			reload_variant = state.anim_variant
+			first_reload_serial = state.play_serial
 			break
 	assert_eq(reload_variant, 2,
 		"the first reload serves variant 2 — the both-auto bake consumed entries 0+1")
@@ -1429,8 +1428,8 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	for _i in range(90):
 		sim.step()
 		state = sim.get_local_player_weapon_state()
-		if String(state.get("anim_key", "")) == "anim_wpn_reload" 				and int(state.get("play_serial", 0)) != first_reload_serial:
-			reload_variant = int(state.get("anim_variant", -1))
+		if state.anim_key == "anim_wpn_reload" 				and state.play_serial != first_reload_serial:
+			reload_variant = state.anim_variant
 			break
 	assert_eq(reload_variant, 0, "the second reload wraps the ring back to variant 0")
 	sim.free()
@@ -1470,41 +1469,41 @@ func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
 	assert_eq(events.size(), 3, "FIRE, RECOIL, FIRE survive one three-tick catch-up")
 	if events.size() == 3:
 		assert_eq([
-			String((events[0] as Dictionary).get("anim_key", "")),
-			String((events[1] as Dictionary).get("anim_key", "")),
-			String((events[2] as Dictionary).get("anim_key", "")),
+			(events[0] as PlayerWeaponEvent).anim_key,
+			(events[1] as PlayerWeaponEvent).anim_key,
+			(events[2] as PlayerWeaponEvent).anim_key,
 		], ["anim_wpn_fire", "anim_wpn_recoil", "anim_wpn_fire"])
 		assert_eq([
-			int((events[0] as Dictionary).get("action_started", -1)),
-			int((events[1] as Dictionary).get("action_started", -1)),
-			int((events[2] as Dictionary).get("action_started", -1)),
+			(events[0] as PlayerWeaponEvent).action_started,
+			(events[1] as PlayerWeaponEvent).action_started,
+			(events[2] as PlayerWeaponEvent).action_started,
 		], [2, 3, 2])
 		assert_eq([
-			int((events[0] as Dictionary).get("action_finished", -1)),
-			int((events[1] as Dictionary).get("action_finished", -1)),
-			int((events[2] as Dictionary).get("action_finished", -1)),
+			(events[0] as PlayerWeaponEvent).action_finished,
+			(events[1] as PlayerWeaponEvent).action_finished,
+			(events[2] as PlayerWeaponEvent).action_finished,
 		], [2, -1, 2])
 		assert_eq([
-			int((events[0] as Dictionary).get("age_ticks", -1)),
-			int((events[1] as Dictionary).get("age_ticks", -1)),
-			int((events[2] as Dictionary).get("age_ticks", -1)),
+			(events[0] as PlayerWeaponEvent).age_ticks,
+			(events[1] as PlayerWeaponEvent).age_ticks,
+			(events[2] as PlayerWeaponEvent).age_ticks,
 		], [2, 1, 0])
 		assert_eq([
-			String((events[0] as Dictionary).get("action_soundset", "")),
-			String((events[1] as Dictionary).get("action_soundset", "")),
-			String((events[2] as Dictionary).get("action_soundset", "")),
+			(events[0] as PlayerWeaponEvent).action_soundset,
+			(events[1] as PlayerWeaponEvent).action_soundset,
+			(events[2] as PlayerWeaponEvent).action_soundset,
 		], ["FIRE_BEGIN", "RECOIL_BEGIN", "FIRE_BEGIN"],
 			"payloads are copied before a later tick or remount can overwrite them")
 		assert_eq([
-			String((events[0] as Dictionary).get("action_end_soundset", "")),
-			String((events[1] as Dictionary).get("action_end_soundset", "")),
-			String((events[2] as Dictionary).get("action_end_soundset", "")),
+			(events[0] as PlayerWeaponEvent).action_end_soundset,
+			(events[1] as PlayerWeaponEvent).action_end_soundset,
+			(events[2] as PlayerWeaponEvent).action_end_soundset,
 		], ["FIRE_END", "", "FIRE_END"])
-		assert_eq(int((events[1] as Dictionary).get("action_effect", -1)), 3,
+		assert_eq((events[1] as PlayerWeaponEvent).action_effect, 3,
 				"the recoil arbiter event survives the catch-up batch")
-		assert_eq(String((events[1] as Dictionary).get("effect_particle", "")),
+		assert_eq((events[1] as PlayerWeaponEvent).effect_particle,
 				"Effect_TestCas")
-		assert_eq(String((events[1] as Dictionary).get("effect_particle_userpoint", "")),
+		assert_eq((events[1] as PlayerWeaponEvent).effect_particle_userpoint,
 				"bcasing")
 	assert_true(sim.drain_local_player_weapon_events().is_empty(), "the drain is destructive")
 	sim.free()
@@ -1542,12 +1541,12 @@ func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
 	sim.step() # scope 14/15, RECOIL
 	sim.step() # scope 15/15, FIRE
 	var fire_events: Array = sim.drain_local_player_weapon_events().filter(
-			func(event: Dictionary) -> bool: return int(event.get("action_started", -1)) == 2)
+			func(event: PlayerWeaponEvent) -> bool: return event.action_started == 2)
 	assert_eq(fire_events.size(), 2)
 	if fire_events.size() == 2:
-		assert_false(bool((fire_events[0] as Dictionary).get("scope_settled", true)),
+		assert_false((fire_events[0] as PlayerWeaponEvent).scope_settled,
 				"the earlier catch-up tick still shows its muzzle")
-		assert_true(bool((fire_events[1] as Dictionary).get("scope_settled", false)),
+		assert_true((fire_events[1] as PlayerWeaponEvent).scope_settled,
 				"the 15/15 tick alone suppresses its muzzle")
 	sim.free()
 
@@ -1608,15 +1607,15 @@ func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void
 	sim.set_local_player_weapon_input(false, true, false)
 	for _i in range(6):
 		sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("clip", 0)), 29)
+	assert_eq(sim.get_local_player_weapon_state().clip, 29)
 	assert_true(sim.request_local_player_scope_toggle())
 	sim.step()
 	assert_lt(sim.get_local_player_view().scope_fraction, 1.0)
-	var before := int(sim.get_local_player_weapon_state().get("unscope_serial", 0))
+	var before := sim.get_local_player_weapon_state().unscope_serial
 	sim.set_local_player_weapon_input(false, false, true)
 	for _i in range(3):
 		sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("unscope_serial", 0)), before)
+	assert_eq(sim.get_local_player_weapon_state().unscope_serial, before)
 	assert_true(sim.get_local_player_view().scope_engaged)
 	sim.free()
 
@@ -1672,18 +1671,18 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 		impacts.append_array(sim.drain_round_impacts())
 
 	var weapon_state := sim.get_local_player_weapon_state()
-	assert_eq(int(weapon_state.get("round_ring_count", 0)), 1,
+	assert_eq(weapon_state.round_ring_count, 1,
 			"local FIRE appends exactly one tag-2 fan-out record")
 	# The fixture M4's first shot samples the pre-consume 30-round magazine, so
 	# ((30 & 3) << 4) | 2 produces 0x22, not a hard-coded 0x02 and not the
 	# unrelated category/rank weapon-slot combo.
 	# [orig: WeaponAction_Fire @ 0x542c11; net-re §5.9.1 capture cross-witness]
-	assert_eq(int(weapon_state.get("last_round_flags", 0)), 0x22)
-	assert_eq(int(weapon_state.get("last_round_subtype", 0)), 12,
+	assert_eq(weapon_state.last_round_flags, 0x22)
+	assert_eq(weapon_state.last_round_subtype, 12,
 			"ordinary on-foot hip fire carries the retail default zoom subtype")
-	assert_eq(int(weapon_state.get("last_round_slot_byte", -1)), 0,
+	assert_eq(weapon_state.last_round_slot_byte, 0,
 			"the sole modeled local weapon slot has retail slot id zero")
-	assert_eq(int(weapon_state.get("last_round_seq", 0)), 1)
+	assert_eq(weapon_state.last_round_seq, 1)
 	assert_eq(impacts.size(), 1, "one local shot reaches the target and emits one impact")
 	if impacts.size() == 1:
 		# The victim is a NON-LOCAL person, so the flesh row (23), not the local
@@ -1711,8 +1710,8 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	sim.set_local_player_weapon_input(false, true, false)
 	sim.step()
 	weapon_state = sim.get_local_player_weapon_state()
-	assert_eq(int(weapon_state.get("round_ring_count", 0)), 2)
-	assert_eq(int(weapon_state.get("last_round_seq", 0)), 2,
+	assert_eq(weapon_state.round_ring_count, 2)
+	assert_eq(weapon_state.last_round_seq, 2,
 			"weapon remount does not reset the shooter-lifetime sequence")
 	sim.free()
 
@@ -2108,15 +2107,15 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 
 	sim.set_local_player_weapon(def, clips)
 	sim.step()
-	var before_rebake: Dictionary = sim.get_local_player_weapon_state()
+	var before_rebake := sim.get_local_player_weapon_state()
 	# The FP model resolve explicitly rebakes the SAME weapon once its viewmodel
 	# loads. Queued presentation and the live action slot survive that late bind.
 	sim.rebake_local_player_weapon(def, clips)
-	var after_rebake: Dictionary = sim.get_local_player_weapon_state()
-	assert_eq(int(after_rebake.get("current", -1)), int(before_rebake.get("current", -2)))
-	assert_eq(int(after_rebake.get("next", -1)), int(before_rebake.get("next", -2)))
-	assert_eq(int(after_rebake.get("play_serial", -1)),
-		int(before_rebake.get("play_serial", -2)))
+	var after_rebake := sim.get_local_player_weapon_state()
+	assert_eq(after_rebake.current_action, before_rebake.current_action)
+	assert_eq(after_rebake.next_action, before_rebake.next_action)
+	assert_eq(after_rebake.play_serial,
+		before_rebake.play_serial)
 	assert_false(sim.drain_local_player_weapon_events().is_empty(),
 		"an explicit same-weapon rebake preserves queued presentation")
 	sim.step()
@@ -2124,10 +2123,10 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	sim.set_local_player_weapon(def, clips)
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
 		"a same-name real mount discards the previous epoch's presentation")
-	var remounted: Dictionary = sim.get_local_player_weapon_state()
-	assert_eq(int(remounted.get("current", -1)), 0)
-	assert_eq(int(remounted.get("next", -1)), 0)
-	assert_eq(int(remounted.get("play_serial", -1)), 0)
+	var remounted := sim.get_local_player_weapon_state()
+	assert_eq(remounted.current_action, 0)
+	assert_eq(remounted.next_action, 0)
+	assert_eq(remounted.play_serial, 0)
 	sim.step()
 	# A different-weapon mount has the same epoch boundary.
 	var def_b := def.copy()
@@ -2168,25 +2167,25 @@ func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
 	sim.set_local_player_weapon_input(true, true, false)
 	for _tick in range(5):
 		sim.step()
-	var wound: Dictionary = sim.get_local_player_weapon_state()
-	assert_true(bool(wound.get("windup_active", false)))
-	assert_gt(int(wound.get("windup_held_ticks", 0)), 0)
+	var wound := sim.get_local_player_weapon_state()
+	assert_true(wound.windup_active)
+	assert_gt(wound.windup_held_ticks, 0)
 
 	sim.reset_session()
-	var rewound: Dictionary = sim.get_local_player_weapon_state()
-	assert_false(bool(rewound.get("windup_active", true)))
-	assert_eq(int(rewound.get("windup_held_ticks", -1)), 0)
-	var fired_before := int(rewound.get("fired_serial", 0))
-	var rounds_before := int(rewound.get("round_ring_count", 0))
+	var rewound := sim.get_local_player_weapon_state()
+	assert_false(rewound.windup_active)
+	assert_eq(rewound.windup_held_ticks, 0)
+	var fired_before := rewound.fired_serial
+	var rounds_before := rewound.round_ring_count
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	sim.step() # stale held input must not recreate the windup
-	assert_false(bool(sim.get_local_player_weapon_state().get("windup_active", true)))
+	assert_false(sim.get_local_player_weapon_state().windup_active)
 	sim.set_local_player_weapon_input(false, false, false)
 	for _tick in range(6):
 		sim.step()
-	var settled: Dictionary = sim.get_local_player_weapon_state()
-	assert_eq(int(settled.get("fired_serial", -1)), fired_before)
-	assert_eq(int(settled.get("round_ring_count", -1)), rounds_before)
+	var settled := sim.get_local_player_weapon_state()
+	assert_eq(settled.fired_serial, fired_before)
+	assert_eq(settled.round_ring_count, rounds_before)
 	sim.free()
 
 
@@ -2258,11 +2257,11 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
 	sim.set_local_player_weapon(m4, {})
 	sim.step()
-	var full_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
+	var full_clip := sim.get_local_player_weapon_state().clip
 	sim.set_local_player_weapon_input(false, true, false)
 	sim.step()
 	sim.set_local_player_weapon_input(false, false, false)
-	var spent_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
+	var spent_clip := sim.get_local_player_weapon_state().clip
 	assert_lt(spent_clip, full_clip, "the live M4 spent a round before reopening armory")
 
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
@@ -2276,12 +2275,12 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 			break
 	assert_gt(rebuilt_clip, spent_clip, "ACCEPT rebuilt the same named slot at full clip")
 	sim.set_local_player_weapon(m4, {})
-	var mounted: Dictionary = sim.get_local_player_weapon_state()
-	assert_eq(int(mounted.get("clip", -1)), rebuilt_clip,
+	var mounted := sim.get_local_player_weapon_state()
+	assert_eq(mounted.clip, rebuilt_clip,
 		"same-name real mount reads the rebuilt authoritative inventory")
-	assert_eq(int(mounted.get("current", -1)), 0)
-	assert_eq(int(mounted.get("next", -1)), 0)
-	assert_false(bool(mounted.get("windup_active", true)))
+	assert_eq(mounted.current_action, 0)
+	assert_eq(mounted.next_action, 0)
+	assert_false(mounted.windup_active)
 	assert_false(sim.get_local_player_view().scope_engaged)
 	sim.free()
 
@@ -2359,7 +2358,7 @@ func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_colt45")
 	sim.set_local_player_weapon(weapons.get_weapon(secondary_index), {})
 	sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("current", -1)), 6,
+	assert_eq(sim.get_local_player_weapon_state().current_action, 6,
 		"the newly equipped secondary is drawing through SWITCHTO")
 
 	# One press during that draw must be remembered and committed after it settles.
@@ -2493,7 +2492,7 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	sim.set_local_player_weapon(
 			weapons.get_weapon(weapons.find_weapon("WPN_M4AUTO")), {})
 	for _tick in range(120):
-		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+		if sim.get_local_player_weapon_state().current_action < 2:
 			break
 		sim.step()
 	assert_true(sim.local_player_toggle_mount())
@@ -3056,7 +3055,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	sim.step()
 	var mount_event_found := false
 	for raw in sim.drain_local_player_weapon_events():
-		if String((raw as Dictionary).get("switch_to_weapon", "")) == "WPN_EMPLCD50":
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50":
 			mount_event_found = true
 	assert_true(mount_event_found)
 	sim.set_local_player_weapon(mounted, {}, true)
@@ -3076,7 +3075,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
 	for _tick in range(120):
-		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+		if sim.get_local_player_weapon_state().current_action < 2:
 			break
 		sim.step()
 	assert_true(sim.local_player_toggle_mount())
@@ -3165,8 +3164,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	sim.step()
 	var mounted_switch := false
 	for raw in sim.drain_local_player_weapon_events():
-		if String((raw as Dictionary).get(
-				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
 			mounted_switch = true
 	assert_true(mounted_switch)
 	sim.set_local_player_weapon(mounted, {}, true)
@@ -3182,8 +3180,7 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	var fp_heat_glow := 0
 	for _tick in range(3000):
 		sim.step()
-		fp_heat_glow = int(sim.get_local_player_weapon_state().get(
-				"heat_glow", 0))
+		fp_heat_glow = sim.get_local_player_weapon_state().heat_glow
 		if fp_heat_glow >= 0x10000:
 			break
 	sim.set_local_player_weapon_input(false, false, false)
@@ -3273,15 +3270,12 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	assert_lt(absf(wrapf(sim.get_local_player_yaw_deg(), -180.0, 180.0)),
 			0.01, 'UseGun attach pre-snaps a mismatched local look to the gun yaw')
 	for raw in sim.drain_local_player_weapon_events():
-		if String((raw as Dictionary).get(
-				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
 			sim.set_local_player_weapon(mounted, {}, true)
 	sim.debug_set_panm_time_ms(0)
-	var initial_weapon_state: Dictionary = sim.get_local_player_weapon_state()
-	assert_true(bool(initial_weapon_state.get(
-			"emplaced_controls_valid", false)))
-	var initial_yaw_control := int(initial_weapon_state.get(
-			"emplaced_gun_yaw", 0))
+	var initial_weapon_state := sim.get_local_player_weapon_state()
+	assert_true(initial_weapon_state.emplaced_controls_valid)
+	var initial_yaw_control := initial_weapon_state.emplaced_gun_yaw
 	assert_eq(initial_yaw_control, 0,
 			'the attach snap starts EWEAP_GUNYAW at its neutral phase')
 	var initial_overlay := sim.get_local_player_aim_overlay()
@@ -3297,8 +3291,7 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 				absf(wrapf(angle.y - initial_body.y, -180.0, 180.0)))
 	assert_lt(max_initial_twist_deg, 0.01,
 			'no segment retains the pre-attach look as a torso twist')
-	var initial_pitch_control := int(initial_weapon_state.get(
-			"emplaced_gun_pitch", 0))
+	var initial_pitch_control := initial_weapon_state.emplaced_gun_pitch
 
 	var before_entities: Array = sim.get_hitbox_debug().get("entities", [])
 	assert_eq(before_entities.size(), 1)
@@ -3314,8 +3307,7 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			0.001, "look yaw cannot move the player off the Usegun point")
 	assert_gt(absf(sim.get_local_player_yaw_deg() - yaw_before), 0.1,
 			"the mounted local player's authoritative yaw changed")
-	assert_ne(int(sim.get_local_player_weapon_state().get(
-			"emplaced_gun_yaw", initial_yaw_control)), initial_yaw_control,
+	assert_ne(sim.get_local_player_weapon_state().emplaced_gun_yaw, initial_yaw_control,
 			"look yaw reaches the retail EWEAP_GUNYAW phase")
 	var yaw_entities: Array = sim.get_hitbox_debug().get("entities", [])
 	var after_yaw: PackedVector3Array = (yaw_entities[0] as Dictionary).get(
@@ -3334,8 +3326,7 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			0.001, "look pitch cannot move the player off the Usegun point")
 	assert_gt(absf(sim.get_local_player_pitch_deg() - pitch_before), 0.1,
 			"the mounted local player's authoritative pitch changed")
-	assert_ne(int(sim.get_local_player_weapon_state().get(
-			"emplaced_gun_pitch", initial_pitch_control)),
+	assert_ne(sim.get_local_player_weapon_state().emplaced_gun_pitch,
 			initial_pitch_control,
 			"look pitch reaches the retail EWEAP_GUNPITCH phase")
 	var pitch_entities: Array = sim.get_hitbox_debug().get("entities", [])
@@ -3397,11 +3388,11 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	sim.set_local_player_weapon_input(true, true, false)
 	for _tick in range(5):
 		sim.step()
-	var wound_before_mount: Dictionary = sim.get_local_player_weapon_state()
-	assert_true(bool(wound_before_mount.get("windup_active", false)))
-	var personal_fired_before := int(wound_before_mount.get("fired_serial", 0))
-	var personal_rounds_before := int(wound_before_mount.get("round_ring_count", 0))
-	var personal_clip := int(sim.get_local_player_weapon_state().get("clip", -1))
+	var wound_before_mount := sim.get_local_player_weapon_state()
+	assert_true(wound_before_mount.windup_active)
+	var personal_fired_before := wound_before_mount.fired_serial
+	var personal_rounds_before := wound_before_mount.round_ring_count
+	var personal_clip := sim.get_local_player_weapon_state().clip
 	var inventory_clip := int(
 			sim.get_local_player_inventory().get("slots", [])[0].get("clip", -1))
 
@@ -3413,52 +3404,51 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	sim.set_local_player_weapon_input(true, true, false)
 	sim.step()
 	sim.set_local_player_weapon_input(false, false, false)
-	var mount_event: Dictionary = {}
+	var mount_event: PlayerWeaponEvent = null
 	for raw in sim.drain_local_player_weapon_events():
-		var event: Dictionary = raw
-		if String(event.get("switch_to_weapon", "")) == "WPN_AVENGER":
+		var event: PlayerWeaponEvent = raw
+		if event.switch_to_weapon == "WPN_AVENGER":
 			mount_event = event
-	assert_false(mount_event.is_empty(),
+	assert_false(mount_event == null,
 			"an Emplaced pending def takes retail's same-pump -901 commit")
-	assert_true(bool(mount_event.get("preserve_slot_state", false)),
+	assert_true(mount_event.preserve_slot_state,
 			"the host must not reset the emplacement's persistent slot")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER")
-	var handed_off: Dictionary = sim.get_local_player_weapon_state()
-	assert_false(bool(handed_off.get("windup_active", true)),
+	var handed_off := sim.get_local_player_weapon_state()
+	assert_false(handed_off.windup_active,
 			"UseGun input suppression cancels the outgoing PowerThrow windup")
-	assert_eq(int(handed_off.get("fired_serial", -1)), personal_fired_before)
-	assert_eq(int(handed_off.get("round_ring_count", -1)), personal_rounds_before,
+	assert_eq(handed_off.fired_serial, personal_fired_before)
+	assert_eq(handed_off.round_ring_count, personal_rounds_before,
 			"releasing through the handoff cannot leak a charged personal round")
 	sim.set_local_player_weapon(mounted_def, {}, true)
-	var mounted_before: Dictionary = sim.get_local_player_weapon_state()
-	assert_eq(int(mounted_before.get("clip", -1)),
+	var mounted_before := sim.get_local_player_weapon_state()
+	assert_eq(mounted_before.clip,
 			mounted_def.clipsize)
 	var mounted_slot_before_rebake := {
-		"current": int(mounted_before.get("current", -1)),
-		"next": int(mounted_before.get("next", -1)),
-		"phase": int(mounted_before.get("phase", -1)),
-		"clip": int(mounted_before.get("clip", -1)),
+		"current_action": mounted_before.current_action,
+		"next_action": mounted_before.next_action,
+		"phase": mounted_before.phase,
+		"clip": mounted_before.clip,
 	}
 	sim.rebake_local_player_weapon(mounted_def, {
 		"anim_wpn_idle": PackedFloat32Array([0.2]),
 	}, true)
-	var mounted_after_rebake: Dictionary = sim.get_local_player_weapon_state()
+	var mounted_after_rebake := sim.get_local_player_weapon_state()
 	for field in mounted_slot_before_rebake:
-		assert_eq(int(mounted_after_rebake.get(field, -2)),
+		assert_eq(int(mounted_after_rebake.get(field)),
 				int(mounted_slot_before_rebake[field]),
 				"late mounted-def rebake preserves parent slot %s" % field)
 
 	sim.set_local_player_weapon_input(true, true, false)
-	var fired_before := int(mounted_before.get("fired_serial", 0))
+	var fired_before := mounted_before.fired_serial
 	for _tick in range(120):
 		sim.step()
-		if int(sim.get_local_player_weapon_state().get(
-				"fired_serial", 0)) > fired_before:
+		if sim.get_local_player_weapon_state().fired_serial > fired_before:
 			break
 	sim.set_local_player_weapon_input(false, false, false)
 	var mounted_clip_after := int(
-			sim.get_local_player_weapon_state().get("clip", -1))
-	assert_eq(mounted_clip_after, int(mounted_before.get("clip", -1)) - 1,
+			sim.get_local_player_weapon_state().clip)
+	assert_eq(mounted_clip_after, mounted_before.clip - 1,
 			"local LMB consumes the parent's embedded weapon slot")
 	assert_eq(int(sim.get_local_player_inventory().get(
 			"slots", [])[0].get("clip", -1)), inventory_clip,
@@ -3466,7 +3456,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 
 	for _tick in range(180):
 		sim.step()
-		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+		if sim.get_local_player_weapon_state().current_action < 2:
 			break
 	assert_true(sim.local_player_toggle_mount())
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
@@ -3478,49 +3468,49 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	sim.set_local_player_weapon_input(true, true, false)
 	sim.step()
 	sim.set_local_player_weapon_input(false, false, false)
-	var detach_event: Dictionary = {}
+	var detach_event: PlayerWeaponEvent = null
 	for raw in sim.drain_local_player_weapon_events():
-		var event: Dictionary = raw
-		if String(event.get("switch_to_weapon", "")) == "WPN_M4AUTO":
+		var event: PlayerWeaponEvent = raw
+		if event.switch_to_weapon == "WPN_M4AUTO":
 			detach_event = event
-	assert_false(detach_event.is_empty(),
+	assert_false(detach_event == null,
 			"outgoing Emplaced detach also commits on the next pump")
-	assert_true(bool(detach_event.get("preserve_slot_state", false)))
+	assert_true(detach_event.preserve_slot_state)
 	sim.set_local_player_weapon(personal_def, {}, true)
-	assert_eq(int(sim.get_local_player_weapon_state().get("clip", -1)),
+	assert_eq(sim.get_local_player_weapon_state().clip,
 			personal_clip, "the personal slot resumes with its original magazine")
 
 	for _tick in range(120):
 		sim.step()
-		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+		if sim.get_local_player_weapon_state().current_action < 2:
 			break
 	assert_true(sim.local_player_toggle_mount())
-	var remount_event: Dictionary = {}
+	var remount_event: PlayerWeaponEvent = null
 	for _tick in range(120):
 		sim.step()
 		for raw in sim.drain_local_player_weapon_events():
-			var event: Dictionary = raw
-			if String(event.get("switch_to_weapon", "")) == "WPN_AVENGER":
+			var event: PlayerWeaponEvent = raw
+			if event.switch_to_weapon == "WPN_AVENGER":
 				remount_event = event
-		if not remount_event.is_empty():
+		if not remount_event == null:
 			break
-	assert_false(remount_event.is_empty())
+	assert_false(remount_event == null)
 	sim.set_local_player_weapon(mounted_def, {}, true)
-	assert_eq(int(sim.get_local_player_weapon_state().get("clip", -1)),
+	assert_eq(sim.get_local_player_weapon_state().clip,
 			mounted_clip_after,
 			"the emplacement keeps its own clip state while nobody is attached")
 
 	sim.reset_session()
-	var restart_event: Dictionary = {}
+	var restart_event: PlayerWeaponEvent = null
 	for raw in sim.drain_local_player_weapon_events():
-		var event: Dictionary = raw
-		if String(event.get("switch_to_weapon", "")) == "WPN_M4AUTO":
+		var event: PlayerWeaponEvent = raw
+		if event.switch_to_weapon == "WPN_M4AUTO":
 			restart_event = event
-	assert_false(restart_event.is_empty(),
+	assert_false(restart_event == null,
 			"restart explicitly restores the saved personal presentation")
-	assert_false(bool(restart_event.get("preserve_slot_state", true)),
+	assert_false(restart_event.preserve_slot_state,
 			"restart installs a fresh personal slot epoch")
-	assert_false(bool(sim.get_local_player_weapon_state().get("active", true)),
+	assert_false(sim.get_local_player_weapon_state().active,
 			"the mounted definition cannot pump the restored personal slot")
 	sim.free()
 
@@ -3574,7 +3564,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	# state. The cull verdict is produced against this decoded presentation view.
 	for _tick in range(80):
 		sim.step()
-		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+		if sim.get_local_player_weapon_state().current_action < 2:
 			break
 	var first_gun_index := int(first_gun["index"])
 	var second_gun_index := int(second_gun["index"])
@@ -3582,12 +3572,11 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 
 	assert_true(sim.local_player_toggle_mount())
 	sim.step()
-	var first_event: Dictionary = {}
+	var first_event: PlayerWeaponEvent = null
 	for raw in sim.drain_local_player_weapon_events():
-		if String((raw as Dictionary).get(
-				"switch_to_weapon", "")) == "WPN_AVENGER":
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_AVENGER":
 			first_event = raw
-	assert_false(first_event.is_empty())
+	assert_false(first_event == null)
 	sim.set_local_player_weapon(first_mount, {}, true)
 	# Even a host-side resolution report cannot manufacture fpModel on a Def that
 	# has none, and a different target Def must not inherit that model identity.
@@ -3600,7 +3589,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			"mounting AVENGER cannot suppress the unrelated 50-cal parent")
 	for _tick in range(80):
 		sim.step()
-		if int(sim.get_local_player_weapon_state().get("current", -1)) < 2:
+		if sim.get_local_player_weapon_state().current_action < 2:
 			break
 
 	assert_true(sim.local_player_toggle_mount(),
@@ -3614,12 +3603,11 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			second_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"pre-commit target is not culled before its MountSlot is equipped")
 	sim.step()
-	var swap_event: Dictionary = {}
+	var swap_event: PlayerWeaponEvent = null
 	for raw in sim.drain_local_player_weapon_events():
-		if String((raw as Dictionary).get(
-				"switch_to_weapon", "")) == "WPN_EMPLCD50":
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50":
 			swap_event = raw
-	assert_false(swap_event.is_empty(),
+	assert_false(swap_event == null,
 			"latest pending parent commits directly with no personal interlude")
 	sim.set_local_player_weapon(second_mount, {}, true)
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
@@ -3633,10 +3621,9 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			second_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
 			"the resolved EMPLCD50 replacement culls only its own world model")
 	sim.step()
-	assert_eq(int(sim.get_local_player_weapon_state().get("current", -1)), 0,
+	assert_eq(sim.get_local_player_weapon_state().current_action, 0,
 			"SWITCHRANK does not queue SWITCHTO onto the target parent slot")
-	assert_true(bool(sim.get_local_player_weapon_state().get(
-			"borrowed_usegun_slot", false)))
+	assert_true(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 
 	assert_true(sim.local_player_toggle_mount(),
 			"a closer third gun drives a second direct mounted-seat swap")
@@ -3647,12 +3634,11 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			third_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"the target parent stays visible before its slot is live")
 	sim.step()
-	var same_def_event: Dictionary = {}
+	var same_def_event: PlayerWeaponEvent = null
 	for raw in sim.drain_local_player_weapon_events():
-		if String((raw as Dictionary).get(
-				"switch_to_weapon", "")) == "WPN_EMPLCD50":
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50":
 			same_def_event = raw
-	assert_false(same_def_event.is_empty())
+	assert_false(same_def_event == null)
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
 			second_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0)
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
@@ -3692,34 +3678,30 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 
 	assert_true(sim.local_player_toggle_mount())
 	sim.step()
-	var mount_event: Dictionary = {}
+	var mount_event: PlayerWeaponEvent = null
 	for raw in sim.drain_local_player_weapon_events():
-		if String((raw as Dictionary).get(
-				"switch_to_weapon", "")) == "WPN_AVENGER":
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_AVENGER":
 			mount_event = raw
-	assert_false(mount_event.is_empty(),
+	assert_false(mount_event == null,
 			"the emplacement commits before its SWITCHTO draw")
 	sim.set_local_player_weapon(mounted_def, {}, true)
-	var fired_before := int(sim.get_local_player_weapon_state().get(
-			"fired_serial", 0))
+	var fired_before := sim.get_local_player_weapon_state().fired_serial
 	sim.set_local_player_weapon_input(true, true, false)
 	sim.debug_set_entity_health(0, 0)
-	var restore_event: Dictionary = {}
+	var restore_event: PlayerWeaponEvent = null
 	for _tick in range(160):
 		sim.step()
 		for raw in sim.drain_local_player_weapon_events():
-			if String((raw as Dictionary).get(
-					"switch_to_weapon", "")) == "WPN_M4AUTO":
+			if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_M4AUTO":
 				restore_event = raw
-		if not restore_event.is_empty():
+		if not restore_event == null:
 			break
-	assert_false(restore_event.is_empty(),
+	assert_false(restore_event == null,
 			"forced detach during SWITCHTO eventually restores the personal slot")
-	assert_eq(int(sim.get_local_player_weapon_state().get("fired_serial", 0)),
+	assert_eq(sim.get_local_player_weapon_state().fired_serial,
 			fired_before, "a dead local gunner cannot fire the emplacement")
 	sim.set_local_player_weapon(personal_def, {}, true)
-	assert_false(bool(sim.get_local_player_weapon_state().get(
-			"borrowed_usegun_slot", true)))
+	assert_false(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 	sim.free()
 
 

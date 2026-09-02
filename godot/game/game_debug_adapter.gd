@@ -81,7 +81,7 @@ func get_mcp_game_state() -> Variant:
 		player["team"] = sim.get_local_player_team()
 		player["class"] = sim.get_local_player_class()
 		player["weapon"] = sim.get_local_player_weapon_name()
-		player["weapon_state"] = sim.get_local_player_weapon_state()
+		player["weapon_state"] = sim.get_local_player_weapon_state().to_json_value()
 	return {
 		"shell": {
 			"state": String(_seams.shell_state_source.call()),

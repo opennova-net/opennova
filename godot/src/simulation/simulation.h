@@ -50,6 +50,8 @@ class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewm
 class HostSessionOptions;   // the hosted-session request (network/host_session_options.h)
 class PlayerLocalView;      // the local view-state snapshot (simulation/player_local_view.h)
 class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/player_aim_overlay.h)
+class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weapon_view.h)
+class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
@@ -807,10 +809,10 @@ public:
 	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
 	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.
-	Dictionary get_local_player_weapon_state() const;
+	Ref<PlayerWeaponView> get_local_player_weapon_state() const;
 	// Destructively drain the ordered presentation outputs accumulated since the
 	// previous render frame. Each Dictionary encodes one PlayerWeaponEvent.
-	Array drain_local_player_weapon_events();
+	TypedArray<PlayerWeaponEvent> drain_local_player_weapon_events();
 	// Destructively drain the flight sim's resolved round impacts, each row already
 	// mapped through the ammo effects_table to {position, direction, effect, sound}
 	// (engine: runtime/world/ammo_table.h).

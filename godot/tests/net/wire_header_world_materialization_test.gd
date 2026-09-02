@@ -553,10 +553,10 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
-	assert_lt(int(joiner.get_local_player_weapon_state().get("current", 99)), 2,
+	assert_lt(joiner.get_local_player_weapon_state().current_action, 2,
 			"personal weapon settled before the mount action")
 	assert_eq(_present_field_for_type(
 			joiner, DESIGNATED_G_CHILD_TYPE, Simulation.PF_ALIVE), 1)
@@ -596,7 +596,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
 
@@ -622,9 +622,9 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
 
-	var child_ammo: Dictionary = joiner.get_local_player_weapon_state()
-	var child_clip := int(child_ammo.get("clip", -999))
-	var child_reserve := int(child_ammo.get("reserve", -999))
+	var child_ammo := joiner.get_local_player_weapon_state()
+	var child_clip := child_ammo.clip
+	var child_reserve := child_ammo.reserve
 	assert_true(child_clip != 7 or child_reserve != 19,
 			"the direct child slot differs from the parent witness")
 
@@ -645,9 +645,9 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		var active: Dictionary = joiner.get_local_player_weapon_state()
-		if int(active.get("clip", -999)) == 7 \
-				and int(active.get("reserve", -999)) == 19:
+		var active := joiner.get_local_player_weapon_state()
+		if active.clip == 7 \
+				and active.reserve == 19:
 			parent_ammo_applied = true
 			break
 		OS.delay_msec(2)
@@ -661,9 +661,9 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		var active: Dictionary = joiner.get_local_player_weapon_state()
-		if int(active.get("clip", -999)) == child_clip \
-				and int(active.get("reserve", -999)) == child_reserve:
+		var active := joiner.get_local_player_weapon_state()
+		if active.clip == child_clip \
+				and active.reserve == child_reserve:
 			child_route_restored = true
 			break
 		OS.delay_msec(1)

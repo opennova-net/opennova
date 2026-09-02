@@ -73,8 +73,8 @@ static func write_native_model(dir: String, name: String, bytes: PackedByteArray
 ## mounted flag).
 static func apply_weapon_switch_events(sim: Simulation,
 		defs_by_name: Dictionary) -> void:
-	for value in sim.drain_local_player_weapon_events():
-		var name := String((value as Dictionary).get("switch_to_weapon", ""))
+	for value: PlayerWeaponEvent in sim.drain_local_player_weapon_events():
+		var name := value.switch_to_weapon
 		if name.is_empty() or not defs_by_name.has(name):
 			continue
 		sim.set_local_player_weapon(

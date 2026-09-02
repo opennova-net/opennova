@@ -1019,8 +1019,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_true(host.local_player_toggle_mount())
 	host.step()
 	for raw in host.drain_local_player_weapon_events():
-		if String((raw as Dictionary).get(
-				"switch_to_weapon", "")) == "WPN_EMPLCD50NA":
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
 			host.set_local_player_weapon(mounted, {}, true)
 	assert_true(host.entity_card_by_ai_index(0).is_mounted(),
 			"host player remains mounted after the local switch commit")
@@ -1173,7 +1172,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
 	assert_false(joiner.get_local_player_view().mounted)
@@ -1211,9 +1210,9 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		host.step()
 		joiner.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		var joined_ammo: Dictionary = joiner.get_local_player_weapon_state()
-		if int(joined_ammo.get("clip", -999)) == 7 \
-				and int(joined_ammo.get("reserve", -999)) == 19:
+		var joined_ammo := joiner.get_local_player_weapon_state()
+		if joined_ammo.clip == 7 \
+				and joined_ammo.reserve == 19:
 			phase8_ammo_applied = true
 			break
 		OS.delay_msec(1)
@@ -1227,7 +1226,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
 	var authority_yaw_before := float(host.entity_card_by_ai_index(
@@ -1302,7 +1301,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if int(joiner.get_local_player_weapon_state().get("current", -1)) < 2:
+		if joiner.get_local_player_weapon_state().current_action < 2:
 			break
 		OS.delay_msec(1)
 	assert_true(joiner.local_player_toggle_mount(),
@@ -1366,8 +1365,8 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	assert_gte(joiner_target, 0, "joiner retained its visual copy of the target")
 	var host_health_before := host.entity_card_by_ai_index(host_target).get_health()
 	var joiner_health_before := joiner.entity_card_by_ai_index(joiner_target).get_health()
-	var before_fire: Dictionary = joiner.get_local_player_weapon_state()
-	var fired_before := int(before_fire.get("fired_serial", 0))
+	var before_fire := joiner.get_local_player_weapon_state()
+	var fired_before := before_fire.fired_serial
 	joiner.drain_round_impacts()
 	host.drain_round_impacts()
 	joiner.drain_fire_presentation_events()
@@ -1384,8 +1383,8 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 		joiner_fire_events.append_array(joiner.drain_fire_presentation_events())
 		OS.delay_msec(2)
 
-	var after_fire: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(after_fire.get("fired_serial", 0)), fired_before + 1,
+	var after_fire := joiner.get_local_player_weapon_state()
+	assert_eq(after_fire.fired_serial, fired_before + 1,
 			"one local weapon action fired")
 	assert_lt(host.entity_card_by_ai_index(host_target).get_health(),
 			host_health_before,
@@ -1406,29 +1405,29 @@ func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 
 	# The joiner has spent one round. One reload action must queue one C2S 0x25;
 	# only the requester's echoed S2C 0x49 may refill it, and it is applied once.
-	var spent_clip := int(after_fire.get("clip", -1))
-	var reload_before := int(after_fire.get("reload_serial", 0))
-	var applied_before := int(after_fire.get("reload_applied_serial", 0))
+	var spent_clip := after_fire.clip
+	var reload_before := after_fire.reload_serial
+	var applied_before := after_fire.reload_applied_serial
 	assert_lt(spent_clip, 30, "the fire consumed one local magazine round")
 	joiner.set_local_player_weapon_input(false, false, true)
 	joiner.step()
-	var awaiting_echo: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(awaiting_echo.get("reload_serial", 0)), reload_before + 1,
+	var awaiting_echo := joiner.get_local_player_weapon_state()
+	assert_eq(awaiting_echo.reload_serial, reload_before + 1,
 			"the local action queued one C2S 0x25 before the host pumped")
-	assert_eq(int(awaiting_echo.get("reload_applied_serial", 0)), applied_before,
+	assert_eq(awaiting_echo.reload_applied_serial, applied_before,
 			"the request cannot eagerly apply its own refill")
-	assert_eq(int(awaiting_echo.get("clip", -1)), spent_clip,
+	assert_eq(awaiting_echo.clip, spent_clip,
 			"ammo remains spent until S2C 0x49 returns")
 	for _tick in range(120):
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var reloaded: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(reloaded.get("reload_serial", 0)), reload_before + 1,
+	var reloaded := joiner.get_local_player_weapon_state()
+	assert_eq(reloaded.reload_serial, reload_before + 1,
 			"one reload action queues exactly one C2S 0x25")
-	assert_eq(int(reloaded.get("reload_applied_serial", 0)), applied_before + 1,
+	assert_eq(reloaded.reload_applied_serial, applied_before + 1,
 			"the echoed S2C 0x49 applies exactly once")
-	assert_eq(int(reloaded.get("clip", -1)), 30,
+	assert_eq(reloaded.clip, 30,
 			"only the echoed reload notification refills the joiner's clip")
 
 	joiner.free()
@@ -1793,19 +1792,19 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	var before_base := int(remote_before["base"])
 	var host_anim_before := int(before_snap[
 			before_base + Simulation.PF_ANIM_STATE])
-	var host_weapon_before: Dictionary = host.get_local_player_weapon_state()
-	var host_fired_before := int(host_weapon_before.get("fired_serial", 0))
+	var host_weapon_before := host.get_local_player_weapon_state()
+	var host_fired_before := host_weapon_before.fired_serial
 	# The viewmodel clip channel is SEPARATE from the fire channel: the first-person
 	# parts are re-posed every tick from (anim_key, anim_variant, anim_advance_ticks) and
 	# a play event bumps play_serial without necessarily bumping fired_serial
 	# [play write site: Simulation weapon_fsm_tick play_anim leg]. A remote shot
 	# that perturbs any of these makes the host's own gun re-scrub its clip.
-	var host_play_before := int(host_weapon_before.get("play_serial", 0))
-	var host_anim_key_before := String(host_weapon_before.get("anim_key", ""))
-	var host_anim_variant_before := int(host_weapon_before.get("anim_variant", 0))
-	var host_anim_advance_before := int(host_weapon_before.get("anim_advance_ticks", 0))
+	var host_play_before := host_weapon_before.play_serial
+	var host_anim_key_before := host_weapon_before.anim_key
+	var host_anim_variant_before := host_weapon_before.anim_variant
+	var host_anim_advance_before := host_weapon_before.anim_advance_ticks
 	var joiner_play_before := int(
-			joiner.get_local_player_weapon_state().get("play_serial", 0))
+			joiner.get_local_player_weapon_state().play_serial)
 	var joiner_wire_handle := joiner.get_joiner_self_handle()
 	var host_wire_handle := host.get_local_player_wire_handle()
 	var joiner_player_position := joiner.get_local_player_position()
@@ -1835,31 +1834,29 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 		OS.delay_msec(2)
 	joiner.set_local_player_weapon_input(false, false, false)
 
-	assert_eq(int(host.get_local_player_weapon_state().get(
-			"fired_serial", 0)), host_fired_before,
+	assert_eq(host.get_local_player_weapon_state().fired_serial, host_fired_before,
 			"the joiner's C2S fire does not advance the host's local weapon FSM")
 	# The viewmodel channel, asserted independently of the fire channel. Falsifiability
 	# is carried by the joiner-side pin below: the shooter's OWN play channel must move
 	# in the same window, so a run where nothing fired cannot satisfy both.
-	var host_weapon_after: Dictionary = host.get_local_player_weapon_state()
-	assert_eq(int(host_weapon_after.get("play_serial", 0)), host_play_before,
+	var host_weapon_after := host.get_local_player_weapon_state()
+	assert_eq(host_weapon_after.play_serial, host_play_before,
 			"the joiner's shot does not play a clip on the host's own viewmodel")
-	assert_eq(String(host_weapon_after.get("anim_key", "")), host_anim_key_before,
+	assert_eq(host_weapon_after.anim_key, host_anim_key_before,
 			"the joiner's shot does not re-key the host's viewmodel clip")
-	assert_eq(int(host_weapon_after.get("anim_variant", 0)), host_anim_variant_before,
+	assert_eq(host_weapon_after.anim_variant, host_anim_variant_before,
 			"the joiner's shot does not consume a variant from the host's clip ring")
 	# anim_advance_ticks is the playhead the first-person parts are posed at every
 	# tick (the counter-gated channel position). It must keep advancing with the
 	# host's own pump; a remote shot that resets the advance count drops it back
 	# toward zero (re-scrubbing the clip), and an unsigned wrap sends it huge
 	# (clamping a one-shot to its tail).
-	var host_anim_advance_after := int(host_weapon_after.get("anim_advance_ticks", 0))
+	var host_anim_advance_after := host_weapon_after.anim_advance_ticks
 	assert_gte(host_anim_advance_after, host_anim_advance_before,
 			"the host's viewmodel playhead never rewinds when a remote player fires")
 	assert_lt(host_anim_advance_after - host_anim_advance_before, 1000,
 			"the host's viewmodel playhead advances by its own elapsed ticks, not a wrap")
-	assert_gt(int(joiner.get_local_player_weapon_state().get(
-			"play_serial", 0)), joiner_play_before,
+	assert_gt(joiner.get_local_player_weapon_state().play_serial, joiner_play_before,
 			"the SHOOTER's own viewmodel did play its fire clip (guards the pins above)")
 	assert_eq(observed_remote_states.size(), 1,
 			"the joiner's shot does not request a second body state on the remote host")
@@ -2079,47 +2076,46 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var spent: Dictionary = host.get_local_player_weapon_state()
-	assert_lt(int(spent.get("clip", -1)), 30,
+	var spent := host.get_local_player_weapon_state()
+	assert_lt(spent.clip, 30,
 			"the listen host spent a magazine round before reloading")
-	var host_reload_before := int(spent.get("reload_serial", 0))
-	var host_applied_before := int(spent.get("reload_applied_serial", 0))
+	var host_reload_before := spent.reload_serial
+	var host_applied_before := spent.reload_applied_serial
 	var expected_reload_combo := int(host.get_local_player_inventory().get(
 			"equipped_combo", -1))
-	var joiner_received_before := int(joiner.get_local_player_weapon_state().get(
-			"reload_received_serial", 0))
+	var joiner_received_before := joiner.get_local_player_weapon_state().reload_received_serial
 
 	host.set_local_player_weapon_input(false, false, true)
 	host.step()
-	var immediate: Dictionary = host.get_local_player_weapon_state()
-	assert_eq(int(immediate.get("reload_serial", 0)), host_reload_before + 1,
+	var immediate := host.get_local_player_weapon_state()
+	assert_eq(immediate.reload_serial, host_reload_before + 1,
 			"the listen-host action emitted one local reload request")
-	assert_eq(int(immediate.get("reload_applied_serial", 0)),
+	assert_eq(immediate.reload_applied_serial,
 			host_applied_before + 1,
 			"authority applied the local refill once at action start")
-	assert_eq(int(immediate.get("clip", -1)), 30,
+	assert_eq(immediate.clip, 30,
 			"the authority refill completed immediately")
 
 	for _tick in range(30):
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var host_after: Dictionary = host.get_local_player_weapon_state()
-	var joiner_after: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(host_after.get("reload_serial", 0)), host_reload_before + 1,
+	var host_after := host.get_local_player_weapon_state()
+	var joiner_after := joiner.get_local_player_weapon_state()
+	assert_eq(host_after.reload_serial, host_reload_before + 1,
 			"the loopback echo does not start another host reload")
-	assert_eq(int(host_after.get("reload_applied_serial", 0)),
+	assert_eq(host_after.reload_applied_serial,
 			host_applied_before + 1,
 			"the loopback S2C 0x49 does not refill the authority twice")
-	assert_eq(int(host_after.get("clip", -1)), 30,
+	assert_eq(host_after.clip, 30,
 			"the host magazine remains full after its loopback echo")
-	assert_eq(int(joiner_after.get("reload_received_serial", 0)),
+	assert_eq(joiner_after.reload_received_serial,
 			joiner_received_before + 1,
 			"the remote peer decoded exactly one relayed S2C 0x49")
-	assert_eq(int(joiner_after.get("reload_received_entity", -1)),
+	assert_eq(joiner_after.reload_received_entity,
 			host.get_local_player_wire_handle(),
 			"the relay names the listen host's player entity")
-	assert_eq(int(joiner_after.get("reload_received_param", -1)),
+	assert_eq(joiner_after.reload_received_param,
 			expected_reload_combo,
 			"the relay carries the retail category*65+rank slot combo")
 
@@ -2172,17 +2168,15 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
 			"the secondary starts with its independent full magazine")
 
-	var before_reload: Dictionary = joiner.get_local_player_weapon_state()
-	var reload_before := int(before_reload.get("reload_serial", 0))
-	var applied_before := int(before_reload.get("reload_applied_serial", 0))
+	var before_reload := joiner.get_local_player_weapon_state()
+	var reload_before := before_reload.reload_serial
+	var applied_before := before_reload.reload_applied_serial
 	joiner.set_local_player_weapon_input(false, false, true)
 	joiner.step()
 	joiner.set_local_player_weapon_input(false, false, false)
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_serial", 0)), reload_before + 1,
+	assert_eq(joiner.get_local_player_weapon_state().reload_serial, reload_before + 1,
 			"the M4 reload request was queued before the host pumped")
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_applied_serial", 0)), applied_before,
+	assert_eq(joiner.get_local_player_weapon_state().reload_applied_serial, applied_before,
 			"the joiner cannot apply the refill before the echo")
 
 	# Let the first reload action reach its retail DONE seam, but intercept it
@@ -2192,15 +2186,14 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	# weapon switch rather than that separate input-timing rule.
 	var reload_finished := false
 	for _tick in range(120):
-		var reload_state: Dictionary = joiner.get_local_player_weapon_state()
-		if (int(reload_state.get("current", -1)) == 4
-				and int(reload_state.get("phase", -1)) == 4):
+		var reload_state := joiner.get_local_player_weapon_state()
+		if (reload_state.current_action == 4
+				and reload_state.phase == 4):
 			reload_finished = true
 			break
 		joiner.step()
 	assert_true(reload_finished, "the first M4 reload action reached DONE without an echo")
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_serial", 0)), reload_before + 1,
+	assert_eq(joiner.get_local_player_weapon_state().reload_serial, reload_before + 1,
 			"the delayed host pump has not started a second reload request")
 
 	# Switch the authoritative inventory selection while the echo is withheld.
@@ -2227,8 +2220,8 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var after_echo: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(after_echo.get("reload_applied_serial", 0)), applied_before + 1,
+	var after_echo := joiner.get_local_player_weapon_state()
+	assert_eq(after_echo.reload_applied_serial, applied_before + 1,
 			"the delayed S2C 0x49 applies exactly once")
 	assert_eq(String(joiner.get_local_player_inventory().get(
 			"equipped_name", "")), "WPN_M9Beretta",
@@ -2276,15 +2269,15 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	# Empty the magazine through the real local FSM/C2S fire path. Stop pumping
 	# the host on the exact joiner frame that queues the empty-slot reload, so its
 	# one C2S 0x25 is present but the echoed S2C 0x49 cannot yet exist.
-	var before: Dictionary = joiner.get_local_player_weapon_state()
-	var reload_before := int(before.get("reload_serial", 0))
-	var applied_before := int(before.get("reload_applied_serial", 0))
+	var before := joiner.get_local_player_weapon_state()
+	var reload_before := before.reload_serial
+	var applied_before := before.reload_applied_serial
 	joiner.set_local_player_weapon_input(true, true, false)
 	var first_reload_queued := false
 	for _tick in range(400):
 		joiner.step()
-		var state: Dictionary = joiner.get_local_player_weapon_state()
-		if int(state.get("reload_serial", 0)) == reload_before + 1:
+		var state := joiner.get_local_player_weapon_state()
+		if state.reload_serial == reload_before + 1:
 			first_reload_queued = true
 			break
 		host.step()
@@ -2292,10 +2285,9 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	joiner.set_local_player_weapon_input(false, false, false)
 	assert_true(first_reload_queued,
 			"emptying the M4 queued its first automatic C2S 0x25")
-	assert_eq(int(joiner.get_local_player_weapon_state().get("clip", -1)), 0,
+	assert_eq(joiner.get_local_player_weapon_state().clip, 0,
 			"the regression reaches the empty-magazine reload path")
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_applied_serial", 0)), applied_before,
+	assert_eq(joiner.get_local_player_weapon_state().reload_applied_serial, applied_before,
 			"the withheld host cannot have echoed the refill")
 
 	# Hold the authority still while the first local reload animation reaches its
@@ -2304,16 +2296,15 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	# before weapon actions, as retail Client_ProcessNetworkFrame does.
 	var reload_finished := false
 	for _tick in range(160):
-		var state: Dictionary = joiner.get_local_player_weapon_state()
-		if int(state.get("current", -1)) == 4 \
-				and int(state.get("phase", -1)) == 4:
+		var state := joiner.get_local_player_weapon_state()
+		if state.current_action == 4 \
+				and state.phase == 4:
 			reload_finished = true
 			break
 		joiner.step()
 	assert_true(reload_finished,
 			"the first empty-magazine reload reached DONE with its echo withheld")
-	assert_eq(int(joiner.get_local_player_weapon_state().get(
-			"reload_serial", 0)), reload_before + 1,
+	assert_eq(joiner.get_local_player_weapon_state().reload_serial, reload_before + 1,
 			"only the original reload request exists at the DONE boundary")
 
 	# Let the host consume that one request and place its one 0x49 echo on the
@@ -2325,12 +2316,12 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	OS.delay_msec(2)
 	for _tick in range(4):
 		joiner.step()
-	var after_echo: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(after_echo.get("reload_applied_serial", 0)), applied_before + 1,
+	var after_echo := joiner.get_local_player_weapon_state()
+	assert_eq(after_echo.reload_applied_serial, applied_before + 1,
 			"the single delayed S2C 0x49 was applied")
-	assert_eq(int(after_echo.get("reload_serial", 0)), reload_before + 1,
+	assert_eq(after_echo.reload_serial, reload_before + 1,
 			"recv-before-actions prevents a second same-slot C2S 0x25")
-	assert_eq(int(after_echo.get("clip", -1)), 30,
+	assert_eq(after_echo.clip, 30,
 			"the payload-addressed magazine was refilled once")
 
 	joiner.free()
@@ -2607,38 +2598,38 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	assert_true(applied, "the pre-spawn kit apply must latch, not drop, the kit")
 	assert_true(inventory_valid,
 			"the pre-spawn inventory must be valid so the shell arms the FSM")
-	var at_spawn: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(at_spawn.get("fired_serial", 0)), 0,
+	var at_spawn := joiner.get_local_player_weapon_state()
+	assert_eq(at_spawn.fired_serial, 0,
 			"a join-wait click fires no phantom pre-spawn round")
-	assert_eq(int(at_spawn.get("clip", -1)), 30,
+	assert_eq(at_spawn.clip, 30,
 			"the joiner deploys with a full magazine")
 
-	var before_fire: Dictionary = joiner.get_local_player_weapon_state()
-	var fired_before := int(before_fire.get("fired_serial", 0))
+	var before_fire := joiner.get_local_player_weapon_state()
+	var fired_before := before_fire.fired_serial
 	joiner.set_local_player_weapon_input(false, true, false)
 	for _tick in range(20):
 		joiner.step()
 		host.step()
 		OS.delay_msec(2)
-	var after_fire: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(after_fire.get("fired_serial", 0)), fired_before + 1,
+	var after_fire := joiner.get_local_player_weapon_state()
+	assert_eq(after_fire.fired_serial, fired_before + 1,
 			"the joiner can fire with a kit applied before spawn")
-	var spent_clip := int(after_fire.get("clip", -1))
+	var spent_clip := after_fire.clip
 	assert_lt(spent_clip, 30, "the fire consumed one magazine round")
 
-	var reload_before := int(after_fire.get("reload_serial", 0))
-	var applied_before := int(after_fire.get("reload_applied_serial", 0))
+	var reload_before := after_fire.reload_serial
+	var applied_before := after_fire.reload_applied_serial
 	joiner.set_local_player_weapon_input(false, false, true)
 	for _tick in range(120):
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
-	var reloaded: Dictionary = joiner.get_local_player_weapon_state()
-	assert_eq(int(reloaded.get("reload_serial", 0)), reload_before + 1,
+	var reloaded := joiner.get_local_player_weapon_state()
+	assert_eq(reloaded.reload_serial, reload_before + 1,
 			"the joiner can reload with a kit applied before spawn")
-	assert_eq(int(reloaded.get("reload_applied_serial", 0)), applied_before + 1,
+	assert_eq(reloaded.reload_applied_serial, applied_before + 1,
 			"the echoed S2C 0x49 refilled the pre-spawn-kit joiner")
-	assert_eq(int(reloaded.get("clip", -1)), 30, "the clip refilled to capacity")
+	assert_eq(reloaded.clip, 30, "the clip refilled to capacity")
 
 	joiner.free()
 	host.free()
