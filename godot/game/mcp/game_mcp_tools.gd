@@ -209,9 +209,11 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 				return McpToolResult.error("game_debug op=invoke requires id.")
 			if _automation_confirmation_required(controls, id) and not confirmed:
 				return McpToolResult.error(_debug_error(id, ERR_UNAUTHORIZED))
-			var call_args: Variant = _debug_action_args(id, args.get("args"))
-			if call_args is McpToolResult:
-				return call_args
+			# The row's own arg schema marshals the JSON (by-name object,
+			# positional array or one scalar) and names the refused field.
+			var call_args: Variant = controls.marshal_invoke_args(id, args.get("args"))
+			if call_args is String:
+				return McpToolResult.error(call_args)
 			var outcome: Variant = controls.invoke_control(
 					id,
 					call_args,
@@ -362,158 +364,6 @@ static func _debug_error(id: StringName, err: Error) -> String:
 			return "Debug control '%s' failed: %s." % [id, error_string(err)]
 
 
-static func _debug_action_args(id: StringName, raw: Variant) -> Variant:
-	if raw is Array:
-		if id in [
-			&"teleport_local_player",
-			&"set_entity_health",
-			&"set_entity_position",
-			&"set_entity_item_attrib",
-			&"runtime_transport",
-			&"set_mission_variable",
-			&"set_audio_bus_volume",
-			&"set_audio_bus_mute",
-			&"set_audio_bus_solo",
-			&"set_audio_bus_bypass",
-			&"deploy_pick",
-			&"set_viewmodel_weapon",
-			&"kill_group",
-			&"crew_vehicle",
-			&"crew_local_player",
-			&"local_player_look",
-		]:
-			return McpToolResult.error(
-					"Debug action '%s' requires its documented args object." % id)
-		return raw
-	if raw == null:
-		return null
-	if not (raw is Dictionary):
-		return raw
-	var args: Dictionary = raw
-	match id:
-		&"teleport_local_player":
-			var position: Variant = _vector3_arg(args.get("position"))
-			var yaw: Variant = _finite_number(args.get("yaw_deg", 0.0))
-			var pitch: Variant = _finite_number(args.get("pitch_deg", 0.0))
-			if position == null or yaw == null or pitch == null:
-				return McpToolResult.error(
-						"teleport_local_player requires numeric position, yaw_deg, and pitch_deg.")
-			return [position, yaw, pitch]
-		&"set_entity_health":
-			if not args.has("entity") or not args.has("health"):
-				return McpToolResult.error(
-						"set_entity_health requires args.entity and args.health.")
-			var entity: Variant = _integer_number(args["entity"])
-			var health: Variant = _integer_number(args["health"])
-			if entity == null or health == null:
-				return McpToolResult.error(
-						"set_entity_health requires integer entity and health values.")
-			return [entity, health]
-		&"set_entity_position":
-			var position: Variant = _vector3_arg(args.get("position"))
-			var entity: Variant = _integer_number(args.get("entity"))
-			if entity == null or position == null:
-				return McpToolResult.error(
-						"set_entity_position requires an integer entity and numeric position=[x,y,z].")
-			return [entity, position]
-		&"set_entity_item_attrib":
-			if not args.has("entity") or not args.has("attrib") or not args.has("attrib2"):
-				return McpToolResult.error(
-						"set_entity_item_attrib requires args.entity (the row's wire_handle), args.attrib and args.attrib2.")
-			var entity: Variant = _integer_number(args["entity"])
-			var attrib: Variant = _integer_number(args["attrib"])
-			var attrib2: Variant = _integer_number(args["attrib2"])
-			if entity == null or attrib == null or attrib2 == null:
-				return McpToolResult.error(
-						"set_entity_item_attrib requires integer entity, attrib and attrib2 values.")
-			return [entity, attrib, attrib2]
-		&"runtime_transport":
-			var action: Variant = args.get("action")
-			if typeof(action) != TYPE_STRING or String(action).is_empty():
-				return McpToolResult.error(
-						"runtime_transport requires a string args.action.")
-			return action
-		&"set_mission_variable":
-			if not args.has("index") or not args.has("value"):
-				return McpToolResult.error(
-						"set_mission_variable requires args.index and args.value.")
-			var index: Variant = _integer_number(args["index"])
-			var value: Variant = _integer_number(args["value"])
-			if index == null or value == null:
-				return McpToolResult.error(
-						"set_mission_variable requires integer index and value fields.")
-			return [index, value]
-		&"set_audio_bus_volume":
-			var bus: Variant = _audio_bus_name(args)
-			var volume_db: Variant = _finite_number(args.get("volume_db"))
-			if bus == null or volume_db == null:
-				return McpToolResult.error(
-						"set_audio_bus_volume requires a non-empty string bus and numeric volume_db.")
-			return [bus, volume_db]
-		&"set_audio_bus_mute":
-			return _audio_bus_switch_args(
-					args, "muted", "set_audio_bus_mute")
-		&"set_audio_bus_solo":
-			return _audio_bus_switch_args(
-					args, "soloed", "set_audio_bus_solo")
-		&"set_audio_bus_bypass":
-			return _audio_bus_switch_args(
-					args, "bypassed", "set_audio_bus_bypass")
-		&"deploy_pick":
-			var zone: Variant = _integer_number(args.get("zone", 0))
-			if zone == null:
-				return McpToolResult.error("deploy_pick requires an integer zone (0 = Default Spawn).")
-			return [zone]
-		&"set_viewmodel_weapon":
-			var weapon: Variant = args.get("weapon")
-			if typeof(weapon) != TYPE_STRING or String(weapon).strip_edges().is_empty():
-				return McpToolResult.error("set_viewmodel_weapon requires a non-empty string weapon.")
-			return [String(weapon)]
-		&"kill_group":
-			var group: Variant = _integer_number(args.get("group"))
-			if group == null:
-				return McpToolResult.error("kill_group requires an integer group.")
-			return [group]
-		&"crew_vehicle":
-			var occupant: Variant = _integer_number(args.get("occupant_ssn"))
-			var vehicle: Variant = _integer_number(args.get("vehicle_ssn"))
-			if occupant == null or vehicle == null:
-				return McpToolResult.error(
-						"crew_vehicle requires integer occupant_ssn and vehicle_ssn.")
-			return [occupant, vehicle]
-		&"crew_local_player":
-			var seat_vehicle: Variant = _integer_number(args.get("vehicle_ssn"))
-			if seat_vehicle == null:
-				return McpToolResult.error("crew_local_player requires an integer vehicle_ssn.")
-			return [seat_vehicle]
-		&"local_player_look":
-			var dx: Variant = _finite_number(args.get("dx_px"))
-			var dy: Variant = _finite_number(args.get("dy_px"))
-			if dx == null or dy == null:
-				return McpToolResult.error("local_player_look requires numeric dx_px and dy_px.")
-			return [dx, dy]
-		_:
-			return args.get("values", null)
-
-
-static func _vector3_arg(value: Variant) -> Variant:
-	if value is Vector3:
-		return value if value.is_finite() else null
-	if value is Array and value.size() == 3:
-		var x: Variant = _finite_number(value[0])
-		var y: Variant = _finite_number(value[1])
-		var z: Variant = _finite_number(value[2])
-		return Vector3(x, y, z) \
-				if x != null and y != null and z != null else null
-	if value is Dictionary and value.has("x") and value.has("y") and value.has("z"):
-		var x: Variant = _finite_number(value["x"])
-		var y: Variant = _finite_number(value["y"])
-		var z: Variant = _finite_number(value["z"])
-		return Vector3(x, y, z) \
-				if x != null and y != null and z != null else null
-	return null
-
-
 static func _authority_confirmed(args: Dictionary) -> bool:
 	var value: Variant = args.get("confirm_authority", false)
 	return typeof(value) == TYPE_BOOL and bool(value)
@@ -546,23 +396,3 @@ static func _integer_number(value: Variant) -> Variant:
 	if number == null or float(number) != floorf(float(number)):
 		return null
 	return int(number)
-
-
-static func _audio_bus_name(args: Dictionary) -> Variant:
-	var bus: Variant = args.get("bus")
-	if typeof(bus) != TYPE_STRING or String(bus).is_empty():
-		return null
-	return String(bus)
-
-
-static func _audio_bus_switch_args(
-		args: Dictionary,
-		field: String,
-		action: String) -> Variant:
-	var bus: Variant = _audio_bus_name(args)
-	var enabled: Variant = args.get(field)
-	if bus == null or typeof(enabled) != TYPE_BOOL:
-		return McpToolResult.error(
-				"%s requires a non-empty string bus and boolean %s." % [
-					action, field])
-	return [bus, enabled]
