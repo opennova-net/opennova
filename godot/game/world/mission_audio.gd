@@ -342,6 +342,28 @@ func get_stats() -> Stats:
 	return _stats
 
 
+## The candidate ids the top-eight mixer holds a physical channel for, sorted.
+func active_ambient_candidate_ids() -> Array[int]:
+	var out: Array[int] = []
+	for channel in _channels:
+		if channel.candidate_id >= 0:
+			out.append(channel.candidate_id)
+	out.sort()
+	return out
+
+
+## The physical channel playing `candidate_id`, or null when the mixer holds
+## none for it.
+func ambient_player_for_candidate(candidate_id: int) -> AudioStreamPlayer3D:
+	if candidate_id < 0:
+		return null
+	for channel in _channels:
+		if channel.candidate_id == candidate_id \
+				and is_instance_valid(channel.player):
+			return channel.player
+	return null
+
+
 ## Read/drive seams (ADR 0018): tests and diagnostics go through these, never
 ## the private fields. set_markers injects fully-described Marker records so the
 ## mix tick can be driven without a mission. `container` supplies a SceneTree
@@ -717,7 +739,6 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 		player.stream = null
 		player.volume_db = SILENT_DB
 		player.process_mode = Node.PROCESS_MODE_DISABLED
-		player.remove_meta("ambient_candidate_id")
 		channel.candidate_id = -1
 		writes += 1
 
@@ -734,7 +755,6 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 			player.volume_db = SoundBank.volume_db_from_255(candidate.vol)
 			player.pitch_scale = _candidate_pitch_scale(candidate)
 			player.process_mode = Node.PROCESS_MODE_INHERIT
-			player.set_meta("ambient_candidate_id", candidate.candidate_id)
 			channel.candidate_id = candidate.candidate_id
 			player.play()
 			writes += 1
@@ -817,7 +837,6 @@ func _stop_all_ambient_channels() -> void:
 			player.stream = null
 			player.volume_db = SILENT_DB
 			player.process_mode = Node.PROCESS_MODE_DISABLED
-			player.remove_meta("ambient_candidate_id")
 		channel.candidate_id = -1
 
 

@@ -138,9 +138,9 @@ static func configure_ambient_player(
 ## layer's FIRST member — the emitter path does not run the selection machine
 ## [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528649 reads layer+16 = member 0].
 ## Voices spawn SILENT and paused; the caller's mix tick (MissionAudio)
-## owns audibility via the witnessed distance model, reading each voice's
-## layer/member params from its "layer_params" meta. Returns the holder Node3D,
-## or null if the set is unknown or no member resolves to audio.
+## owns audibility via the witnessed distance model over its own candidate
+## records. Returns the holder Node3D, or null if the set is unknown or no
+## member resolves to audio.
 func spawn_ambient(parent: Node3D, world_pos: Vector3, name: String, bus: StringName) -> Node3D:
 	var loc := _find_set(name)
 	if loc.is_empty():
@@ -164,12 +164,6 @@ func spawn_ambient(parent: Node3D, world_pos: Vector3, name: String, bus: String
 			holder.position = world_pos
 			parent.add_child(holder)
 		var player := _make_player(stream, member, bus, true, 0)
-		player.set_meta("layer_params", {
-			"falloff_radius": int(layer_d.get("falloff_radius", 0)),
-			"min_distance": int(layer_d.get("min_distance", 0)),
-			"volume": int(member.get("volume", 255)),
-			"clamp_volume": int(member.get("clamp_volume", 255)),
-		})
 		holder.add_child(player)
 		player.play()
 		# Ambient candidates are data until the top-eight mixer selects them.
