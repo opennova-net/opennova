@@ -639,16 +639,13 @@ func _apply_attach_labels() -> void:
 		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
 				if not labels.is_empty() else null
 		if camera != null:
-			for raw in labels:
-				var l: Dictionary = raw
-				var world_pos := MissionObjectPlacer.bms_to_godot_position(
-						Vector3(l.get("position", Vector3.ZERO)))
+			for l: AttachLabelRow in labels:
+				var world_pos := MissionObjectPlacer.bms_to_godot_position(l.position)
 				if camera.is_position_behind(world_pos):
 					continue # [orig: clip_point_to_frustum_and_project nonzero = clipped @0x5a3655]
 				screens.append(camera.unproject_position(world_pos))
-				texts.append(_attach_label_text(int(l.get("seat_type", 0)),
-						String(l.get("attach_text_key", ""))))
-				nearest.append(1 if bool(l.get("nearest", false)) else 0)
+				texts.append(_attach_label_text(l.seat_type, l.attach_text_key))
+				nearest.append(1 if l.nearest else 0)
 	_game_hud.set_attach_labels(screens, texts, nearest)
 
 
@@ -683,20 +680,18 @@ func _apply_friendly_tags() -> void:
 				if not tags.is_empty() else null
 		if camera != null:
 			var cam_pos := camera.global_position
-			for raw in tags:
-				var tag: Dictionary = raw
-				var world_pos := MissionObjectPlacer.bms_to_godot_position(
-						Vector3(tag.get("position", Vector3.ZERO)))
-				world_pos.y += float(tag.get("eye_height", 0.0)) + HudOverlay.friendly_tag_lift()
+			for tag: FriendlyTagRow in tags:
+				var world_pos := MissionObjectPlacer.bms_to_godot_position(tag.position)
+				world_pos.y += tag.eye_height + HudOverlay.friendly_tag_lift()
 				if camera.is_position_behind(world_pos):
 					continue # [orig: the nonzero-clip bail @0x5a3b80]
 				screens.append(camera.unproject_position(world_pos))
 				dists.append(cam_pos.distance_to(world_pos))
-				names.append(String(tag.get("name", "")))
-				ids.append(int(tag.get("entity_id", 0)))
-				ratios.append(int(tag.get("health_ratio_fp16", 0x10000)))
+				names.append(tag.name)
+				ids.append(tag.entity_id)
+				ratios.append(tag.health_ratio_fp16)
 				# The flag word is packed by the sim feed (hud/friendly_tag_flags.h).
-				flags.append(int(tag.get("flags", 0)))
+				flags.append(tag.flags)
 	var fog_distance := 0.0
 	var env: MissionEnvironment = _world.get_environment_node() \
 			if _world != null else null

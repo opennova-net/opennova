@@ -566,7 +566,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_eq(attach_labels.size(), 1,
 			"the decoded child contributes one in-range UseGun label")
 	if attach_labels.size() == 1:
-		assert_eq(int((attach_labels[0] as Dictionary).get("seat_type", 0)),
+		assert_eq((attach_labels[0] as AttachLabelRow).seat_type,
 				Simulation.SEAT_GUNNER)
 	assert_true(joiner.local_player_toggle_mount(),
 			"the decoded child exposes its authored UseGun seat")

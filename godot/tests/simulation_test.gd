@@ -2731,15 +2731,14 @@ end
 	assert_eq(labels.size(), 2, "both free seats label inside 4.0 u (armory points stay out of seat mode)")
 	var nearest_count := 0
 	var seat_types: Array = []
-	for raw in labels:
-		var l: Dictionary = raw
-		seat_types.append(int(l["seat_type"]))
-		if bool(l["nearest"]):
+	for l: AttachLabelRow in labels:
+		seat_types.append(l.seat_type)
+		if l.nearest:
 			nearest_count += 1
-		assert_false(bool(l["armory"]), "no armory labels out of the zone")
+		assert_false(l.armory, "no armory labels out of the zone")
 		# WPN_EMPLCD50 is not in a loaded weapon table here -> the key stays absent
 		# and the HUD falls to the STROVER_USEGUN default.
-		assert_eq(String(l["attach_text_key"]), "")
+		assert_eq(l.attach_text_key, "")
 	assert_eq(nearest_count, 1, "exactly the scan winner is highlighted")
 	assert_true(seat_types.has(1) and seat_types.has(3), "sit + UseGun seats both reported")
 	sim.free()
@@ -2843,7 +2842,7 @@ end
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
 	var labels: Array = sim.get_attach_labels()
 	assert_eq(labels.size(), 1, "the AI-occupied ctrlx seat never labels [orig: @0x5a348f]")
-	assert_eq(int((labels[0] as Dictionary)["seat_type"]), 1, "the free sitex remains")
+	assert_eq((labels[0] as AttachLabelRow).seat_type, 1, "the free sitex remains")
 	sim.free()
 
 

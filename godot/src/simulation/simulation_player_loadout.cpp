@@ -222,28 +222,29 @@ bool Simulation::local_player_toggle_mount() {
 	return changed;
 }
 
-TypedArray<Dictionary> Simulation::get_attach_labels() const {
-	TypedArray<Dictionary> out;
+TypedArray<AttachLabelRow> Simulation::get_attach_labels() const {
+	TypedArray<AttachLabelRow> out;
 	if (!kernel_) return out;
 	std::vector<opennova::world::AttachLabel> labels;
 	kernel_->collect_attach_labels(labels);
 	for (const opennova::world::AttachLabel &l : labels) {
-		Dictionary d;
-		d["position"] = Vector3(l.world_pos.x, l.world_pos.y, l.world_pos.z);
-		d["seat_type"] = static_cast<int>(l.type);
-		d["armory"] = l.armory;
-		d["nearest"] = l.nearest;
-		d["attach_text_key"] = String::utf8(l.attach_text_key.c_str());
-		out.push_back(d);
+		Ref<AttachLabelRow> row;
+		row.instantiate();
+		row->set_position(Vector3(l.world_pos.x, l.world_pos.y, l.world_pos.z));
+		row->set_seat_type(static_cast<int>(l.type));
+		row->set_armory(l.armory);
+		row->set_nearest(l.nearest);
+		row->set_attach_text_key(String::utf8(l.attach_text_key.c_str()));
+		out.push_back(row);
 	}
 	return out;
 }
 
-TypedArray<Dictionary> Simulation::get_friendly_tags() const {
+TypedArray<FriendlyTagRow> Simulation::get_friendly_tags() const {
 	// The friendly-tags gather (D-HUD-20): raw positions + per-entity facts; the
 	// presenter lifts, projects, and feeds the HUD compiler's element. The
 	// witnessed pass is cited at the engine gather (world/friendly_tags.cpp).
-	TypedArray<Dictionary> out;
+	TypedArray<FriendlyTagRow> out;
 	if (!kernel_) return out;
 	const opennova::world::Entity *player =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
@@ -283,27 +284,28 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 				[player_hp](uint16_t) { return player_hp; });
 	}
 	for (const opennova::world::FriendlyTagSource &t : tags) {
-		Dictionary d;
-		d["position"] = Vector3(t.position.x, t.position.y, t.position.z);
+		Ref<FriendlyTagRow> row;
+		row.instantiate();
+		row->set_position(Vector3(t.position.x, t.position.y, t.position.z));
 		// The eye height above the entity origin in mission units (16.16 ->
 		// float); the anchor witness lives at the gather (friendly_tags.h).
-		d["eye_height"] = static_cast<float>(t.eye_offset_z) / 65536.0f;
-		d["name"] = String::utf8(t.name.c_str());
-		d["entity_id"] = static_cast<int>(t.net_id);
-		d["health_ratio_fp16"] = t.health_ratio_fp16;
-		d["player"] = t.player;
-		d["medic"] = t.medic;
+		row->set_eye_height(static_cast<float>(t.eye_offset_z) / 65536.0f);
+		row->set_name(String::utf8(t.name.c_str()));
+		row->set_entity_id(static_cast<int>(t.net_id));
+		row->set_health_ratio_fp16(t.health_ratio_fp16);
+		row->set_player(t.player);
+		row->set_medic(t.medic);
 		// The downed legs (D-HUD-20 residue a): the compiler's recolor / count.
-		d["dead"] = t.dead;
-		d["has_slot"] = t.has_slot;
-		d["revive_seconds"] = static_cast<int>(t.revive_seconds);
-		d["medic_request"] = t.medic_request;
+		row->set_dead(t.dead);
+		row->set_has_slot(t.has_slot);
+		row->set_revive_seconds(static_cast<int>(t.revive_seconds));
+		row->set_medic_request(t.medic_request);
 		// The HudOverlay flag word (hud/friendly_tag_flags.h), packed here so
 		// the presenter forwards one int per tag; the speaking pulse is the
 		// overlay's own env feed, not a sim fact.
-		d["flags"] = friendly_tag_flags::pack(t.medic, false, t.player, t.dead,
-				t.has_slot, t.medic_request, t.revive_seconds);
-		out.push_back(d);
+		row->set_flags(friendly_tag_flags::pack(t.medic, false, t.player, t.dead,
+				t.has_slot, t.medic_request, t.revive_seconds));
+		out.push_back(row);
 	}
 	return out;
 }

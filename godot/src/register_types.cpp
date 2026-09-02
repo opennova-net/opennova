@@ -256,6 +256,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EndRoundStatistics);
 	GDREGISTER_CLASS(EndRoundColumn);
 	GDREGISTER_CLASS(EndRoundRow);
+	GDREGISTER_CLASS(AttachLabelRow);
+	GDREGISTER_CLASS(FriendlyTagRow);
 	GDREGISTER_CLASS(DeployStatus);
 	GDREGISTER_CLASS(DeployOccupantRow);
 	GDREGISTER_CLASS(DeployZoneRow);

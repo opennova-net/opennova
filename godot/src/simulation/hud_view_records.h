@@ -174,6 +174,62 @@ private:
 	END_ROUND_STATISTICS_FIELDS(HUD_VIEW_MEMBER)
 };
 
+// One attach label (Simulation::get_attach_labels): a free seat or armory
+// point inside the 4.0 u gate — its mission-space position, the seat type
+// (the bound SEAT_* codes), the armory-zone flag, the nearest-candidate
+// highlight and the USEGUN weapon's attachtextid Overlays key ("" = absent
+// -> the STROVER_USEGUN default). (engine: runtime/hud/hud_frame.cpp)
+#define ATTACH_LABEL_ROW_FIELDS(X) \
+	X(Vector3, position)           \
+	X(int, seat_type)              \
+	X(bool, armory)                \
+	X(bool, nearest)               \
+	X(String, attach_text_key)
+
+class AttachLabelRow : public RefCounted {
+	GDCLASS(AttachLabelRow, RefCounted)
+
+public:
+	ATTACH_LABEL_ROW_FIELDS(HUD_VIEW_ACCESSORS)
+
+protected:
+	static void _bind_methods();
+
+private:
+	ATTACH_LABEL_ROW_FIELDS(HUD_VIEW_MEMBER)
+};
+
+// One friendly tag (Simulation::get_friendly_tags): the tagged entity's
+// mission-space position and eye height above it (mission units), its name
+// and id, the health ratio (16.16), the downed / medic facts, and the packed
+// HudOverlay flag word (hud/friendly_tag_flags.h) the presenter forwards.
+#define FRIENDLY_TAG_ROW_FIELDS(X) \
+	X(Vector3, position)           \
+	X(float, eye_height)           \
+	X(String, name)                \
+	X(int, entity_id)              \
+	X(int, health_ratio_fp16)      \
+	X(bool, player)                \
+	X(bool, medic)                 \
+	X(bool, dead)                  \
+	X(bool, has_slot)              \
+	X(int, revive_seconds)         \
+	X(bool, medic_request)         \
+	X(int, flags)
+
+class FriendlyTagRow : public RefCounted {
+	GDCLASS(FriendlyTagRow, RefCounted)
+
+public:
+	FRIENDLY_TAG_ROW_FIELDS(HUD_VIEW_ACCESSORS)
+
+protected:
+	static void _bind_methods();
+
+private:
+	FRIENDLY_TAG_ROW_FIELDS(HUD_VIEW_MEMBER)
+};
+
 // One RESULTLIST column (Simulation::get_end_round_columns): the header text
 // resolved through the gametext Overlays table plus the engine column's key,
 // fallback, literal, width and field id (np::StatScreenColumn).
