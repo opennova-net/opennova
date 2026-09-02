@@ -1,6 +1,7 @@
 #include "object/avatar_database.h"
 
 #include "object/avatar_records.h"
+#include "object/character_join_profile.h"
 #include "object/object_model.h"
 #include "resource_index/resource_root.h"
 #include "util/data_format.h"
@@ -361,7 +362,7 @@ int AvatarDatabase::first_character_id(int alignment) const {
 	return character_registry().first_character_id(alignment);
 }
 
-Dictionary AvatarDatabase::character_join_profile(
+Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile(
 		const Dictionary &p_selection) const {
 	opennova::npruntime::JoinSideSelection saved[2];
 	const Array sides = p_selection.has("side_profiles")
@@ -382,22 +383,9 @@ Dictionary AvatarDatabase::character_join_profile(
 		saved[side].player_class = dict_int(sd, "player_class",
 				opennova::npruntime::kJoinDefaultPlayerClass);
 	}
-	const opennova::npruntime::JoinCharacterProfile profile =
-			opennova::npruntime::join_character_profile(character_registry(), saved);
-	Array ids;
-	ids.push_back(static_cast<int>(profile.character_ids[0]));
-	ids.push_back(static_cast<int>(profile.character_ids[1]));
-	Array classes;
-	classes.push_back(profile.player_classes[0]);
-	classes.push_back(profile.player_classes[1]);
-	Array avatars;
-	avatars.push_back(profile.avatars[0]);
-	avatars.push_back(profile.avatars[1]);
-	Dictionary out;
-	out["character_ids"] = ids;
-	out["player_classes"] = classes;
-	out["avatars"] = avatars;
-	out["team_request"] = profile.team_request;
+	Ref<CharacterJoinProfile> out;
+	out.instantiate();
+	out->assign(opennova::npruntime::join_character_profile(character_registry(), saved));
 	return out;
 }
 

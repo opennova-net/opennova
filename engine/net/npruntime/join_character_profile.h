@@ -14,7 +14,9 @@
 //  the same default by PlayerSession_InitFromProfile @0x50ca80]
 
 #include <net/npruntime/character_registry.h>
+#include <net/npruntime/napi_np_connection.h>
 
+#include <algorithm>
 #include <cstdint>
 
 namespace opennova::npruntime {
@@ -79,6 +81,23 @@ inline JoinCharacterProfile join_character_profile(
 			profile.player_classes[side] = saved[side].player_class;
 	}
 	return profile;
+}
+
+// The profile as the ClientAuth tag block carries it (CharacterJoinVars): the
+// two packed ids, the two class bytes and the two avatar bytes narrowed to
+// their wire widths; a side request outside {0, 1} is the absent 0xFF.
+inline np::CharacterJoinVars character_join_vars(const JoinCharacterProfile &profile) {
+	np::CharacterJoinVars vars{};
+	for (int side = 0; side < 2; ++side) {
+		vars.char_id[side] = profile.character_ids[side];
+		vars.char_class[side] = static_cast<uint8_t>(
+				std::clamp(profile.player_classes[side], 0, 0xFF));
+		vars.avatar[side] = static_cast<uint8_t>(std::clamp(profile.avatars[side], 0, 0xFF));
+	}
+	vars.team_request = (profile.team_request == 0 || profile.team_request == 1)
+			? static_cast<uint8_t>(profile.team_request)
+			: 0xFF;
+	return vars;
 }
 
 } // namespace opennova::npruntime

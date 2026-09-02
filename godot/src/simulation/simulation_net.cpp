@@ -3,6 +3,7 @@
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/simulation_internal.h"
 #include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
+#include "object/character_join_profile.h" // the two-side character selection record
 
 #include <cmath>
 #include <cstring>
@@ -37,37 +38,6 @@
 
 using namespace sim_internal;
 
-namespace {
-
-bool character_vars_from_profile(const Dictionary &p_profile,
-		opennova::np::CharacterJoinVars &r_vars) {
-	const Array ids = p_profile.get("character_ids", Array());
-	const Array classes = p_profile.get("player_classes", Array());
-	const Array avatars = p_profile.get("avatars", Array());
-	if (ids.size() < 2 || classes.size() < 2 || avatars.size() < 2) {
-		return false;
-	}
-
-	opennova::np::CharacterJoinVars vars{};
-	for (int side = 0; side < 2; ++side) {
-		vars.char_id[side] = static_cast<uint16_t>(std::clamp(
-				static_cast<int>(ids[side]), 0, 0xFFFF));
-		vars.char_class[side] = static_cast<uint8_t>(std::clamp(
-				static_cast<int>(classes[side]), 0, 0xFF));
-		vars.avatar[side] = static_cast<uint8_t>(std::clamp(
-				static_cast<int>(avatars[side]), 0, 0xFF));
-	}
-	const int requested_team =
-			static_cast<int>(p_profile.get("team_request", -1));
-	vars.team_request =
-			(requested_team == 0 || requested_team == 1)
-			? static_cast<uint8_t>(requested_team)
-			: 0xFF;
-	r_vars = vars;
-	return true;
-}
-
-} // namespace
 
 // P7: per-load host bring-up — the faithful §5.0 mode-3 in-process listen server
 // [orig: SinglePlayer_StartMission @0x561af0], mirroring apps/nw_server/main.cpp. The host's own
@@ -941,18 +911,16 @@ Dictionary Simulation::get_host_session_config() const {
 	return out;
 }
 
-void Simulation::set_join_character_profile(const Dictionary &p_profile) {
-	opennova::np::CharacterJoinVars vars{};
-	if (!character_vars_from_profile(p_profile, vars)) return;
-	join_character_vars_ = vars;
+void Simulation::set_join_character_profile(const Ref<CharacterJoinProfile> &p_profile) {
+	if (p_profile.is_null()) return;
+	join_character_vars_ = opennova::npruntime::character_join_vars(p_profile->value());
 	join_character_vars_set_ = true;
 	install_character_join_vars();
 }
 
-void Simulation::set_local_character_profile(const Dictionary &p_profile) {
-	opennova::np::CharacterJoinVars vars{};
-	if (!character_vars_from_profile(p_profile, vars)) return;
-	local_character_vars_ = vars;
+void Simulation::set_local_character_profile(const Ref<CharacterJoinProfile> &p_profile) {
+	if (p_profile.is_null()) return;
+	local_character_vars_ = opennova::npruntime::character_join_vars(p_profile->value());
 	local_character_vars_set_ = true;
 }
 

@@ -45,6 +45,7 @@ class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 00
 class EntityRow;      // one typed entity-directory row
 class FeedRow;        // one typed message-feed row (hud::FeedRow, ADR 0040 B3)
 class WeaponDef;      // one weapon.def row as a typed record (object/weapon_def.h)
+class CharacterJoinProfile; // the two-side character selection (object/character_join_profile.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
@@ -377,8 +378,10 @@ public:
 	int64_t get_last_session_sim_us() const { return frame_sim_us_; }
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
-	void set_join_character_profile(const Dictionary &p_profile);
-	void set_local_character_profile(const Dictionary &p_profile);
+	// The joiner's / the listen host's own two-side character selection
+	// (AvatarDatabase.character_join_profile); null installs nothing.
+	void set_join_character_profile(const Ref<CharacterJoinProfile> &p_profile);
+	void set_local_character_profile(const Ref<CharacterJoinProfile> &p_profile);
 	// Select a registered retail resource-corpus profile for S2C 0x30/0x31.
 	// Empty clears it; an unknown id also clears it and returns false.
 	bool set_join_integrity_profile(const String &p_profile_id);
