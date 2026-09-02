@@ -21,12 +21,6 @@ extends RefCounted
 # The engine volume byte ceiling and its dB law (engine/runtime/audio/volume_law.h).
 const VOLUME_BYTE_MAX := SoundSelector.VOLUME_BYTE_MAX
 
-# Mirrors LwfData / opennova::audio::SelectionMode selection-mode constants.
-const SELECTION_FIRST := 0
-const SELECTION_RANDOM := 1
-const SELECTION_SEQUENTIAL := 2
-const SELECTION_RANDOM_SEQ := 3
-
 var _resource_root: ResourceRoot  # null = menu/isolated-bank use (no VFS reads)
 # Occlusion provider (the Simulation, or null): one-shot fire distances
 # inflate through the witnessed two-ray LOS so occluded sources fire quieter /
@@ -412,7 +406,8 @@ func _pick_member(layer_d: Dictionary, bank: int, set_i: int, layer_i: int) -> D
 	var members: Array = layer_d.get("members", [])
 	if members.is_empty():
 		return {}
-	var mode := int(layer_d.get("selection_mode", SELECTION_RANDOM))
+	# The mode is LwfData.SelectionMode (the engine's opennova::audio::SelectionMode).
+	var mode := int(layer_d.get("selection_mode", LwfData.SELECTION_RANDOM))
 	var idx := int(_selector.select_member(bank, set_i, layer_i, members.size(), mode))
 	if idx < 0 or idx >= members.size():
 		return {}
