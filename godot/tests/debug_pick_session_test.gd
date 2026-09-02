@@ -38,16 +38,16 @@ class PolicyWorld:
 		return views
 
 
-func _pick(handle: int) -> Dictionary:
-	return {
-		"hit": true,
-		"entity_handle": handle,
-		"name": "thing",
-		"bms_id": 7,
-		"position_godot": Vector3.ZERO,
-		"bound_radius": 1.0,
-		"tick": 1,
-	}
+func _pick(handle: int) -> DebugPickCard:
+	var card := DebugPickCard.new()
+	card.hit = true
+	card.entity_handle = handle
+	card.name = "thing"
+	card.bms_id = 7
+	card.position_godot = Vector3.ZERO
+	card.bound_radius = 1.0
+	card.tick = 1
+	return card
 
 
 func test_a_landed_pick_selects_its_entities_row() -> void:

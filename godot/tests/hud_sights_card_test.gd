@@ -80,14 +80,8 @@ func test_multiplyat_preserves_scene_detail_and_discards_transparent_texels() ->
 
 
 func _configure_multiplyat(card: Control, root: ResourceRoot) -> void:
-	card.set_weapon_sights([{
-		"texture": "multiplyat.tga",
-		"x1": 0,
-		"y1": 0,
-		"x2": 1024,
-		"y2": 768,
-		"blend": 5,
-	}], root)
+	var sights: Array[WeaponSightRow] = [WeaponSightRow.make("multiplyat.tga", 0, 0, 1024, 768, 5)]
+	card.set_weapon_sights(sights, root)
 	card.set_card_up(true)
 
 

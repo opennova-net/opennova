@@ -129,17 +129,17 @@ end
 			or not sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1):
 		sim.free()
 		return _fail("could not start attach simulation")
-	sim.set_local_player_weapon({
-		"name": "WPN_LABEL_SCOPE",
-		"actions": [
-			{"name": "idle", "delaystart": 0, "delayend": 0},
-			{"name": "scopeup", "delaystart": 0, "delayend": 0},
-			{"name": "scopedown", "delaystart": 0, "delayend": 0},
-		],
-		"flags": 0x1,
-		"clipsize": 30,
-		"startrounds": 60,
-	}, {})
+	var weapon := WeaponDef.new()
+	weapon.name = "WPN_LABEL_SCOPE"
+	weapon.set_actions([
+		WeaponActionRow.make("idle", 0, 0),
+		WeaponActionRow.make("scopeup", 0, 0),
+		WeaponActionRow.make("scopedown", 0, 0),
+	])
+	weapon.flags = 0x1
+	weapon.clipsize = 30
+	weapon.startrounds = 60
+	sim.set_local_player_weapon(weapon, {})
 	sim.step()
 	var blocked: Array = sim.get_attach_labels()
 	if not sim.request_local_player_scope_toggle():
