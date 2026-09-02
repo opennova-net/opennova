@@ -264,7 +264,7 @@ func test_transform_presentation_advances_the_static_shadow_registry_once() -> v
 	assert_eq(rows.size(), 1)
 	if rows.size() != 1:
 		return
-	assert_eq((rows[0] as Dictionary).get("world_transform"), model.transform,
+	assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, model.transform,
 			"the shadow source follows the exact transform applied to ObjectModel")
 	revision = placer.get_static_terrain_shadow_source_revision()
 	_present(p, snap)
@@ -275,7 +275,7 @@ func test_transform_presentation_advances_the_static_shadow_registry_once() -> v
 	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
 			"a later real movement invalidates the source exactly once")
 	rows = placer.get_static_terrain_shadow_source_diagnostics()
-	assert_eq((rows[0] as Dictionary).get("world_transform"), model.transform)
+	assert_eq((rows[0] as StaticTerrainShadowSourceRow).world_transform, model.transform)
 
 
 func test_publication_ownership_writes_zero_and_releases_suppressed_channel() -> void:

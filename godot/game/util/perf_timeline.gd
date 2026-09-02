@@ -7,6 +7,9 @@ extends RefCounted
 ## timeline it cares about (GameWorld.last_load_timeline()); nothing global
 ## runs between operations: a timeline only costs while its operation does.
 
+const US_PER_MS := 1000.0
+const MS_PER_S := 1000.0
+
 var label := ""
 var _spans: Array[Span] = []
 var _open: Array[int] = []   # stack of indices into _spans
@@ -66,14 +69,14 @@ func finish() -> String:
 
 func total_ms() -> float:
 	var end := _end_us if _end_us > 0 else Time.get_ticks_usec()
-	return float(end - _start_us) / 1000.0
+	return float(end - _start_us) / US_PER_MS
 
 
 ## Milliseconds of the first completed span named `name` (0.0 when absent).
 func span_ms(name: String) -> float:
 	for s in _spans:
 		if s.name == name and s.end_us > 0:
-			return float(s.duration_us()) / 1000.0
+			return float(s.duration_us()) / US_PER_MS
 	return 0.0
 
 
@@ -107,7 +110,7 @@ func brief(top_n := 4) -> String:
 	var parts := PackedStringArray()
 	for i in range(mini(top_n, tops.size())):
 		var s := tops[i]
-		parts.append("%s %s" % [s.name, format_ms(float(s.duration_us()) / 1000.0)])
+		parts.append("%s %s" % [s.name, format_ms(float(s.duration_us()) / US_PER_MS)])
 	var head := format_ms(total_ms())
 	return head if parts.is_empty() else "%s — %s" % [head, ", ".join(parts)]
 
@@ -115,4 +118,4 @@ func brief(top_n := 4) -> String:
 ## The one duration rendering every perf surface shares (the summary line and
 ## the load status agree by construction).
 static func format_ms(ms: float) -> String:
-	return ("%.1fs" % (ms / 1000.0)) if ms >= 1000.0 else ("%dms" % int(roundf(ms)))
+	return ("%.1fs" % (ms / MS_PER_S)) if ms >= MS_PER_S else ("%dms" % int(roundf(ms)))

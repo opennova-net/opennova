@@ -310,7 +310,6 @@ private:
 	// The level the slots currently carry (-1 = none applied since the build).
 	int applied_lod_ = -1;
 	bool skeletal_scene_ = false;
-	HashMap<int64_t, Dictionary> material_defs_;
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
 	bool od_has_doc_ = false;
@@ -592,12 +591,13 @@ private:
 	bool advance_part_anims(double p_delta);
 
 	// --- materials/environment (object_model_materials.cpp) ---
-	void build_material_defs();
 	Ref<ShaderMaterial> material_for_index(int p_material_array_index);
 	Ref<ShaderMaterial> postmultiply_material_for_index(int p_material_array_index) const;
-	Ref<ShaderMaterial> create_material(int p_index, const Dictionary &p_material_def,
+	// Builds the surface material for the MTRL row at `p_array_index` (-1 = no
+	// row: the FF_ST_OP defaults); `p_material_index` is the surface's own
+	// index, which keys the missing-diffuse hash colour.
+	Ref<ShaderMaterial> create_material(int p_array_index, int p_material_index,
 			Ref<ShaderMaterial> &r_postmultiply);
-	Ref<Texture2D> load_texture_for_slot(const Dictionary &p_material_def, int p_slot);
 	void collect_anim_frames(int p_material_index);
 	Ref<Texture2D> load_texture_name(const String &p_texture_name);
 	static Color hash_color_for_index(int p_index);

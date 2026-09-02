@@ -61,7 +61,6 @@ void ObjectModel::rebuild_scene() {
 	anim_frames_by_mat_.clear();
 	material_cache_.clear();
 	postmultiply_cache_.clear();
-	material_defs_.clear();
 	body_pose_dirty_ = true;
 	bounds_dirty_ = true;
 	has_live_panm_ = false;
@@ -78,7 +77,6 @@ void ObjectModel::rebuild_scene() {
 	}
 	od_has_doc_ = true;
 
-	build_material_defs();
 	active_lod_ = clamp_lod_index(active_lod_);
 	const Threedi3di3 &native_model = object_data_->native_model();
 	authored_lod_thresholds_q16_.reserve(native_model.lod_count);
