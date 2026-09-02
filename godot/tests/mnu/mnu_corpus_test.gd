@@ -42,8 +42,8 @@ func test_all_shipped_menu_screens_compile() -> void:
 			var screen_name := doc.get_screen_name(screen_id)
 			assert_true(frame.configure(doc, screen_name, null, null, {}),
 					"%s/%s configures" % [menu_name, screen_name])
-			var stats: Dictionary = frame.get_draw_list_stats()
-			assert_gt(int(stats.get("widgets_drawn", 0)), 0,
+			var stats := frame.get_draw_list_stats()
+			assert_gt(stats.widgets_drawn, 0,
 					"%s/%s draws widgets" % [menu_name, screen_name])
 		gut.p("  %s: %d screens, %d unresolved assets" % [
 				menu_name, doc.get_screen_count(),

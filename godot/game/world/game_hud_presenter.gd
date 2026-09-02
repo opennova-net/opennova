@@ -959,16 +959,11 @@ func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
 	if _game_hud == null or not is_instance_valid(_game_hud):
 		witness.error = "gameplay HUD is unavailable"
 		return witness
-	var stats: Dictionary = _game_hud.get_draw_list_stats()
-	var gameplay_draw_count := 0
-	for key in [
-		"quads", "tris", "lines", "glyphs", "underlines", "elements_drawn",
-	]:
-		gameplay_draw_count += int(stats.get(key, 0))
-	var map_active := bool(stats.get("map_visible", false))
-	# Fail closed against a stale native extension: absence of the independent
-	# large-map field is treated as active, never as safely hidden.
-	var big_map_active := bool(stats.get("big_map_visible", true))
+	var stats: HudDrawListStats = _game_hud.get_draw_list_stats()
+	var gameplay_draw_count := stats.quads + stats.tris + stats.lines + stats.glyphs \
+			+ stats.underlines + stats.elements_drawn
+	var map_active := stats.map_visible
+	var big_map_active := stats.big_map_visible
 	witness.hud_detail_level = int(_game_hud.get_hud_detail_level())
 	witness.gameplay_hud_visible = gameplay_draw_count > 0 \
 			or map_active or big_map_active

@@ -78,15 +78,15 @@ func test_message_log_lane_shows_history() -> void:
 	var lane := MessageLogPresenter.new()
 	hud.push_chat_line("Taylor: moving to bravo", -1)
 	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0,
+	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"The feed has expired the line.")
 	lane.update(hud, null, true, false, true)
-	assert_gt(int(hud.get_draw_list_stats()["glyphs"]), 0,
+	assert_gt(hud.get_draw_list_stats().glyphs, 0,
 			"Opening the window through the lane lists the expired line.")
 	await get_tree().process_frame
 	lane.update(hud, null, false, false, true)
 	lane.update(hud, null, true, false, true)
-	assert_eq(int(hud.get_draw_list_stats()["glyphs"]), 0,
+	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"Closing through the lane hides the history.")
 
 
@@ -95,15 +95,15 @@ func test_message_log_lane_shows_history() -> void:
 # no sim.
 func test_vehicle_and_zone_lanes_null_paths() -> void:
 	var hud := _font_overlay()
-	var before: Dictionary = hud.get_draw_list_stats()
+	var before := hud.get_draw_list_stats()
 	var vehicle := VehiclePanelPresenter.new()
 	vehicle.update(hud, null, null, null, 0)
 	vehicle.update(null, null, null, null, 0)
 	var zones := LfpPanelPresenter.new()
 	zones.update(hud, null, 0)
 	zones.update(null, null, 0)
-	var after: Dictionary = hud.get_draw_list_stats()
-	assert_eq(int(after["elements_drawn"]), int(before["elements_drawn"]),
+	var after := hud.get_draw_list_stats()
+	assert_eq(after.elements_drawn, before.elements_drawn,
 			"The null paths draw nothing and crash nothing.")
 	vehicle.reset()
 	zones.reset()

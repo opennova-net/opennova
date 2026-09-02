@@ -38,18 +38,14 @@ class CaptureHudHarness:
 	func get_hud_detail_level() -> int:
 		return detail_level
 
-	func get_draw_list_stats() -> Dictionary:
+	func get_draw_list_stats() -> HudDrawListStats:
 		var hidden := detail_level == 3
-		return {
-			"quads": 0 if hidden else 2,
-			"tris": 0,
-			"lines": 0,
-			"glyphs": 0 if hidden else 8,
-			"underlines": 0,
-			"elements_drawn": 0 if hidden else 1,
-			"map_visible": false,
-			"big_map_visible": big_map_visible,
-		}
+		var stats := HudDrawListStats.new()
+		stats.quads = 0 if hidden else 2
+		stats.glyphs = 0 if hidden else 8
+		stats.elements_drawn = 0 if hidden else 1
+		stats.big_map_visible = big_map_visible
+		return stats
 
 
 class CapturePresenterHarness:

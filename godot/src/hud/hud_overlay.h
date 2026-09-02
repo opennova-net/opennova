@@ -25,6 +25,7 @@
 
 namespace godot {
 
+class HudDrawListStats;
 class Simulation;
 class VehicleHudBlock;
 
@@ -217,7 +218,7 @@ public:
 
 	// Debug/test accessor: compile at the current surface size and report the
 	// draw list's element counts.
-	Dictionary get_draw_list_stats();
+	Ref<HudDrawListStats> get_draw_list_stats();
 
 	// F3 Stats seam: _draw() runs inside Godot's deferred flush (outside every
 	// Node callback), so its compile + canvas-emit cost is timed here and
