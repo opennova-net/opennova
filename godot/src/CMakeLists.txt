@@ -149,6 +149,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_present.cpp
     simulation/simulation_scars.cpp
     simulation/simulation_hud_feeds.cpp
+    world/scar_draw_list.cpp
     world/scar_presenter.cpp
     wac/wac_program.cpp
     lwf/lwf_data.cpp

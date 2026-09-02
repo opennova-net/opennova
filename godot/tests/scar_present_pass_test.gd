@@ -94,54 +94,56 @@ func _strip_mode_words() -> PackedInt32Array:
 
 
 # One quad = six vertices in the witnessed order around `centre` (half-size 0.25).
-func _quad(draw: Dictionary, centre: Vector3) -> void:
+# The record's packed arrays are values, so the quad is appended to the local
+# arrays and stored back on the record.
+func _quad(draw: ScarDrawList, centre: Vector3) -> void:
 	var corners := [
 		centre + Vector3(-0.25, 0, -0.25), centre + Vector3(0.25, 0, -0.25),
 		centre + Vector3(-0.25, 0, 0.25), centre + Vector3(0.25, 0, 0.25),
 	]
 	var uv := [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]
+	var vertices := draw.vertices
+	var uvs := draw.uvs
+	var colors := draw.colors
 	for k in [0, 1, 2, 1, 3, 2]:
-		draw["vertices"].append(corners[k])
-		draw["uvs"].append(uv[k])
-		draw["colors"].append(Color(0.5, 0.5, 0.5, 1.0))
+		vertices.append(corners[k])
+		uvs.append(uv[k])
+		colors.append(Color(0.5, 0.5, 0.5, 1.0))
+	draw.vertices = vertices
+	draw.uvs = uvs
+	draw.colors = colors
 
 
-func _draw_list() -> Dictionary:
-	return {
-		"vertices": PackedVector3Array(),
-		"uvs": PackedVector2Array(),
-		"colors": PackedColorArray(),
-		"batch_owner": PackedInt32Array(),
-		"batch_texture": PackedInt32Array(),
-		"batch_section": PackedInt32Array(),
-		"batch_flags": PackedInt32Array(),
-		"batch_first": PackedInt32Array(),
-		"batch_count": PackedInt32Array(),
-		"batch_bms_id": PackedInt32Array(),
-		"batch_spawn_origin": PackedInt64Array(),
-		"strip_names": _strip_names(),
-		"strip_mode_words": _strip_mode_words(),
-		"slots_live": 0,
-		"slots_culled": 0,
-		"rings_leased": 0,
-	}
+func _draw_list() -> ScarDrawList:
+	var draw := ScarDrawList.new()
+	draw.strip_names = _strip_names()
+	draw.strip_mode_words = _strip_mode_words()
+	return draw
 
 
-func _batch(draw: Dictionary, owner: int, texture: int, section: int,
+static func _append_i32(values: PackedInt32Array, value: int) -> PackedInt32Array:
+	values.append(value)
+	return values
+
+
+func _batch(draw: ScarDrawList, owner: int, texture: int, section: int,
 		entity_local: bool, quads: int, bms_id: int = 0,
 		spawn_origin: int = SpawnOrigin.NONE) -> void:
-	var first: int = draw["vertices"].size()
+	var first := draw.vertices.size()
 	for q in range(quads):
 		_quad(draw, Vector3(q, 0, 0))
-	draw["batch_owner"].append(owner)
-	draw["batch_texture"].append(texture)
-	draw["batch_section"].append(section)
-	draw["batch_flags"].append(1 if entity_local else 0)
-	draw["batch_first"].append(first)
-	draw["batch_count"].append(quads * 6)
-	draw["batch_bms_id"].append(bms_id)
-	draw["batch_spawn_origin"].append(spawn_origin)
-	draw["slots_live"] = int(draw["slots_live"]) + quads
+	draw.batch_owner = _append_i32(draw.batch_owner, owner)
+	draw.batch_texture = _append_i32(draw.batch_texture, texture)
+	draw.batch_section = _append_i32(draw.batch_section, section)
+	draw.batch_flags = _append_i32(draw.batch_flags,
+			ScarDrawList.FLAG_ENTITY_LOCAL if entity_local else 0)
+	draw.batch_first = _append_i32(draw.batch_first, first)
+	draw.batch_count = _append_i32(draw.batch_count, quads * 6)
+	draw.batch_bms_id = _append_i32(draw.batch_bms_id, bms_id)
+	var origins := draw.batch_spawn_origin
+	origins.append(spawn_origin)
+	draw.batch_spawn_origin = origins
+	draw.slots_live += quads
 
 
 func _wire_resolver(nodes: Dictionary = {}) -> WirePresentPass:
@@ -412,25 +414,25 @@ func test_a_booted_simulation_publishes_an_empty_typed_list() -> void:
 	assert_not_null(sim, "the runtime boots a real simulation over the mission")
 	if sim == null:
 		return
-	var draw: Dictionary = sim.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
-	assert_true(draw.has("vertices"))
-	assert_eq((draw["vertices"] as PackedVector3Array).size(), 0)
-	assert_eq((draw["batch_owner"] as PackedInt32Array).size(), 0)
-	var names: PackedStringArray = draw["strip_names"]
+	var draw := sim.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
+	assert_not_null(draw)
+	assert_eq(draw.vertices.size(), 0)
+	assert_eq(draw.batch_owner.size(), 0)
+	var names := draw.strip_names
 	assert_eq(names.size(), 32)
 	assert_eq(names[0], "scorch1.tga")
 	assert_eq(names[3], "scorch4.tga")
 	assert_eq(names[BHOLE_STRIP], "bhole1.tga")
-	var words: PackedInt32Array = draw["strip_mode_words"]
+	var words := draw.strip_mode_words
 	assert_eq(words.size(), 32)
 	assert_eq(words[0], MODE_WORD_SCORCH, "scorch1 draws in the scorch state")
 	assert_eq(words[3], MODE_WORD_SCORCH)
 	assert_eq(words[BHOLE_STRIP], MODE_WORD_HOLE, "bhole1 draws in the alpha-tested state")
-	assert_eq(int(draw["rings_leased"]), 0)
+	assert_eq(draw.rings_leased, 0)
 	var stats := rt.get_scar_present_stats()
 	assert_not_null(stats, "the runtime owns the scar presentation pass")
 	var fresh := Simulation.new()
-	var fresh_draw: Dictionary = fresh.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
-	assert_eq((fresh_draw.get("batch_owner", PackedInt32Array()) as PackedInt32Array).size(), 0,
+	var fresh_draw := fresh.get_scar_draw_list(Vector3.ZERO, 0.0, Color.WHITE)
+	assert_eq(fresh_draw.batch_owner.size(), 0,
 			"an unbooted simulation lists no scars, never crashes")
 	fresh.free()

@@ -52,6 +52,7 @@ class PlayerLocalView;      // the local view-state snapshot (simulation/player_
 class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/player_aim_overlay.h)
 class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weapon_view.h)
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
+class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
 }
 
@@ -1545,7 +1546,7 @@ public:
 	//   batch_owner/texture/section/flags(bit0 entity_local, bit1 building)/
 	//   first/count, batch_bms_id, batch_spawn_origin, strip_names,
 	//   slots_live, slots_culled, rings_leased }. Empty without a world.
-	Dictionary get_scar_draw_list(const Vector3 &p_camera_godot, float p_fog_distance,
+	Ref<ScarDrawList> get_scar_draw_list(const Vector3 &p_camera_godot, float p_fog_distance,
 			const Color &p_terrain_light) const;
 	// The Scar_RenderCache owner gate over OcclusionWorld's section masks and
 	// the entity's blink-box quad (see simulation_scars.cpp).
