@@ -1,4 +1,5 @@
 #include <runtime/terrain/terrain_static_shadow_planner.h>
+#include <base/io/hash.h>
 
 #include <runtime/mission/placement_traits.h>
 
@@ -11,27 +12,12 @@
 namespace opennova::terrain {
 namespace {
 
-constexpr uint64_t kFnvOffset = UINT64_C(1469598103934665603);
-constexpr uint64_t kFnvPrime = UINT64_C(1099511628211);
 constexpr std::size_t kMaxUnsupportedAttribution = 128;
 // Bounded caches: page requests per frame are bounded by the composition
 // cache capacity; twice that comfortably covers epoch transitions.
 constexpr std::size_t kMaxCachedPlans =
 		2 * TerrainTileCompositionCache::kCapacity;
 constexpr std::size_t kMaxReceiverCacheEntries = 1024;
-
-uint64_t hash_bytes(uint64_t hash, const void *data, std::size_t size) {
-	const auto *bytes = static_cast<const uint8_t *>(data);
-	for (std::size_t i = 0; i < size; ++i) {
-		hash = (hash ^ bytes[i]) * kFnvPrime;
-	}
-	return hash;
-}
-
-template <typename T>
-uint64_t hash_value(uint64_t hash, const T &value) {
-	return hash_bytes(hash, &value, sizeof(value));
-}
 
 std::array<float, 3> transform_point(const std::array<float, 12> &transform,
 		const std::array<float, 3> &point) {
@@ -50,7 +36,7 @@ std::array<float, 3> transform_point(const std::array<float, 12> &transform,
 uint64_t hash_transform(uint64_t hash,
 		const std::array<float, 12> &transform) {
 	for (const float component : transform) {
-		hash = hash_value(hash, component);
+		hash = io::fnv1a64_value(hash, component);
 	}
 	return hash;
 }
@@ -58,7 +44,7 @@ uint64_t hash_transform(uint64_t hash,
 uint64_t hash_control_values(uint64_t hash,
 		const opennova::renderer::ControlRegisterValues &values) {
 	for (const int32_t value : values) {
-		hash = hash_value(hash, value);
+		hash = io::fnv1a64_value(hash, value);
 	}
 	return hash;
 }
@@ -67,8 +53,8 @@ uint64_t mix_content(uint64_t content, uint64_t config) {
 	uint64_t hash = content;
 	const uint8_t domain[] = {'s', 't', 'a', 't', 'i', 'c', '-', 'p', 'a',
 			'g', 'e'};
-	hash = hash_bytes(hash, domain, sizeof(domain));
-	return hash_value(hash, config);
+	hash = io::fnv1a64_bytes(hash, domain, sizeof(domain));
+	return io::fnv1a64_value(hash, config);
 }
 
 bool same_page(const TerrainTilePageKey &left,
@@ -87,27 +73,27 @@ bool same_page(const TerrainTilePageKey &left,
 uint64_t caster_set_stamp(
 		const std::vector<TerrainStaticShadowPlannerCaster> &casters,
 		bool admitted_geometry_missing) {
-	uint64_t hash = hash_value(kFnvOffset, admitted_geometry_missing);
+	uint64_t hash = io::fnv1a64_value(io::kFnv1a64Offset, admitted_geometry_missing);
 	for (const TerrainStaticShadowPlannerCaster &record : casters) {
 		if (record.geometry == nullptr) {
 			continue;
 		}
-		hash = hash_value(hash, record.bms_id);
-		hash = hash_value(hash, record.entity_kind);
-		hash = hash_value(hash, record.entity_index);
-		hash = hash_value(hash, record.team);
+		hash = io::fnv1a64_value(hash, record.bms_id);
+		hash = io::fnv1a64_value(hash, record.entity_kind);
+		hash = io::fnv1a64_value(hash, record.entity_index);
+		hash = io::fnv1a64_value(hash, record.team);
 		hash = hash_control_values(hash, record.control_values);
-		hash = hash_value(hash, record.entity_attrib);
-		hash = hash_value(hash, record.item_attrib);
-		hash = hash_value(hash, record.item_attrib2);
-		hash = hash_value(hash, record.active);
-		hash = hash_value(hash, record.graphic.size());
-		hash = hash_bytes(hash, record.graphic.data(), record.graphic.size());
+		hash = io::fnv1a64_value(hash, record.entity_attrib);
+		hash = io::fnv1a64_value(hash, record.item_attrib);
+		hash = io::fnv1a64_value(hash, record.item_attrib2);
+		hash = io::fnv1a64_value(hash, record.active);
+		hash = io::fnv1a64_value(hash, record.graphic.size());
+		hash = io::fnv1a64_bytes(hash, record.graphic.data(), record.graphic.size());
 		hash = hash_transform(hash, record.world_transform);
-		hash = hash_value(hash, record.geometry->key);
-		hash = hash_value(hash, record.geometry->bounds_exact);
-		hash = hash_value(hash, record.ground_y);
-		hash = hash_value(hash, record.caster_identity);
+		hash = io::fnv1a64_value(hash, record.geometry->key);
+		hash = io::fnv1a64_value(hash, record.geometry->bounds_exact);
+		hash = io::fnv1a64_value(hash, record.ground_y);
+		hash = io::fnv1a64_value(hash, record.caster_identity);
 	}
 	return hash == 0 ? 1 : hash;
 }
@@ -122,20 +108,20 @@ bool TerrainStaticShadowPlanner::PageKeyEq::operator()(
 
 std::size_t TerrainStaticShadowPlanner::PageKeyHash::operator()(
 		const TerrainTilePageKey &key) const noexcept {
-	uint64_t hash = hash_value(kFnvOffset, key.sector_origin_x);
-	hash = hash_value(hash, key.sector_origin_z);
-	hash = hash_value(hash, key.page_local_x);
-	hash = hash_value(hash, key.page_local_z);
-	hash = hash_value(hash, key.page_lod_level);
+	uint64_t hash = io::fnv1a64_value(io::kFnv1a64Offset, key.sector_origin_x);
+	hash = io::fnv1a64_value(hash, key.sector_origin_z);
+	hash = io::fnv1a64_value(hash, key.page_local_x);
+	hash = io::fnv1a64_value(hash, key.page_local_z);
+	hash = io::fnv1a64_value(hash, key.page_lod_level);
 	return static_cast<std::size_t>(hash);
 }
 
 uint64_t terrain_static_shadow_caster_key(int32_t entity_kind,
 		int32_t entity_index, int32_t bms_id) {
-	uint64_t hash = kFnvOffset;
-	hash = hash_value(hash, entity_kind);
-	hash = hash_value(hash, entity_index);
-	hash = hash_value(hash, bms_id);
+	uint64_t hash = io::kFnv1a64Offset;
+	hash = io::fnv1a64_value(hash, entity_kind);
+	hash = io::fnv1a64_value(hash, entity_index);
+	hash = io::fnv1a64_value(hash, bms_id);
 	return hash == 0 ? 1 : hash;
 }
 
@@ -186,9 +172,9 @@ void TerrainStaticShadowPlanner::bump_epoch() {
 }
 
 void TerrainStaticShadowPlanner::update_config_stamp() {
-	uint64_t hash = hash_value(kFnvOffset, enabled_);
+	uint64_t hash = io::fnv1a64_value(io::kFnv1a64Offset, enabled_);
 	for (const int32_t id : suppressed_ids_) {
-		hash = hash_value(hash, id);
+		hash = io::fnv1a64_value(hash, id);
 	}
 	config_stamp_ = hash;
 }
@@ -299,17 +285,17 @@ void TerrainStaticShadowPlanner::replace_casters(
 		candidate.geometry.geometry_key = record.geometry->key;
 		candidate.geometry.render_object_counts =
 				record.geometry->render_object_counts;
-		uint64_t revision = hash_transform(kFnvOffset,
+		uint64_t revision = hash_transform(io::kFnv1a64Offset,
 				record.world_transform);
-		revision = hash_value(revision, record.geometry->key);
-		revision = hash_value(revision, record.caster_identity);
+		revision = io::fnv1a64_value(revision, record.geometry->key);
+		revision = io::fnv1a64_value(revision, record.caster_identity);
 		// Team participates: TEX_TEAM flipbooks select alpha frames by team,
 		// so a team change must invalidate the caster's resident pages.
-		revision = hash_value(revision, record.team);
+		revision = io::fnv1a64_value(revision, record.team);
 		revision = hash_control_values(revision, record.control_values);
 		// Ground height participates: the raster subtracts caster_ground_y, so
 		// a terrain edit under the caster must recompose its resident pages.
-		revision = hash_value(revision, record.ground_y);
+		revision = io::fnv1a64_value(revision, record.ground_y);
 		candidate.transform_revision = revision == 0 ? 1 : revision;
 		candidates.push_back(candidate);
 		next->records[key] = std::move(record);

@@ -11,6 +11,7 @@
 #include "terrain/terrain_data.h"
 
 #include <runtime/terrain/terrain_static_shadow.h>
+#include <base/io/hash.h>
 #include <runtime/terrain/terrain_static_shadow_geometry.h>
 #include <runtime/terrain/terrain_static_shadow_planner.h>
 
@@ -31,26 +32,9 @@
 namespace godot {
 namespace {
 
-constexpr uint64_t kFnvOffset = UINT64_C(1469598103934665603);
-constexpr uint64_t kFnvPrime = UINT64_C(1099511628211);
-
-uint64_t hash_bytes(uint64_t p_hash, const void *p_data,
-		std::size_t p_size) noexcept {
-	const auto *bytes = static_cast<const uint8_t *>(p_data);
-	for (std::size_t i = 0; i < p_size; ++i) {
-		p_hash = (p_hash ^ bytes[i]) * kFnvPrime;
-	}
-	return p_hash;
-}
-
-template <typename T>
-uint64_t hash_value(uint64_t p_hash, const T &p_value) noexcept {
-	return hash_bytes(p_hash, &p_value, sizeof(p_value));
-}
-
 uint64_t hash_string(uint64_t p_hash, const String &p_value) noexcept {
 	const CharString bytes = p_value.to_lower().utf8();
-	return hash_bytes(p_hash, bytes.get_data(),
+	return opennova::io::fnv1a64_bytes(p_hash, bytes.get_data(),
 			static_cast<std::size_t>(bytes.length()));
 }
 
@@ -237,10 +221,10 @@ public:
 	std::shared_ptr<const opennova::terrain::TerrainStaticShadowResolvedGeometry>
 	geometry_for(const String &p_graphic, const Ref<ObjectData> &p_data) {
 		if (p_data.is_null()) return {};
-		uint64_t lookup = hash_string(kFnvOffset, p_graphic);
-		lookup = hash_value(lookup,
+		uint64_t lookup = hash_string(opennova::io::kFnv1a64Offset, p_graphic);
+		lookup = opennova::io::fnv1a64_value(lookup,
 				static_cast<uint64_t>(p_data->get_instance_id()));
-		lookup = hash_value(lookup, p_data->get_change_revision());
+		lookup = opennova::io::fnv1a64_value(lookup, p_data->get_change_revision());
 		const auto cached = geometry_cache.find(lookup);
 		if (cached != geometry_cache.end()) return cached->second;
 		const CharString graphic_bytes = p_graphic.to_lower().utf8();

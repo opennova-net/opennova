@@ -358,7 +358,7 @@ func test_provider_uses_page_local_point_receiver_state_and_complete_raster_stam
 	]:
 		assert_true(geometry.contains(token) or planner.contains(token),
 			"Raster-affecting input must participate in geometry content: %s" % token)
-	assert_true(planner.contains("hash_value(revision, record.team)"),
+	assert_true(planner.contains("fnv1a64_value(revision, record.team)"),
 		"Team selects TEX_TEAM alpha frames, so it must invalidate resident pages.")
 	assert_true(geometry.contains("::renderer::compute_anim_frame("),
 		"All time/control diffuse flipbooks must share ordinary object frame selection.")

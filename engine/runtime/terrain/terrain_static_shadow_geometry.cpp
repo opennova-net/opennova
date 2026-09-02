@@ -1,4 +1,5 @@
 #include <runtime/terrain/terrain_static_shadow_geometry.h>
+#include <base/io/hash.h>
 
 #include <base/io/strutil.h>
 #include <runtime/renderer/material_classify.h>
@@ -14,29 +15,13 @@
 namespace opennova::terrain {
 namespace {
 
-constexpr uint64_t kFnvOffset = UINT64_C(1469598103934665603);
-constexpr uint64_t kFnvPrime = UINT64_C(1099511628211);
-
-uint64_t hash_bytes(uint64_t hash, const void *data, std::size_t size) {
-	const auto *bytes = static_cast<const uint8_t *>(data);
-	for (std::size_t i = 0; i < size; ++i) {
-		hash = (hash ^ bytes[i]) * kFnvPrime;
-	}
-	return hash;
-}
-
-template <typename T>
-uint64_t hash_value(uint64_t hash, const T &value) {
-	return hash_bytes(hash, &value, sizeof(value));
-}
-
 // The binding hashed Godot Strings as to_lower().utf8() bytes; authored 3DI
 // names are ASCII, so ascii-lowering preserves the byte stream (and the page
 // content stamps built on it).
 uint64_t hash_lowered_string(uint64_t hash, std::string_view value) {
 	for (const char c : value) {
 		const char lowered = strutil::ascii_tolower(c);
-		hash = hash_bytes(hash, &lowered, 1);
+		hash = io::fnv1a64_bytes(hash, &lowered, 1);
 	}
 	return hash;
 }
@@ -45,19 +30,19 @@ uint64_t hash_alpha_pyramid(uint64_t hash,
 		const std::shared_ptr<const TerrainStaticShadowAlphaPyramid>
 				&pyramid) {
 	const bool present = pyramid != nullptr;
-	hash = hash_value(hash, present);
+	hash = io::fnv1a64_value(hash, present);
 	if (!present) return hash;
 	const auto filter = TerrainStaticShadowMipFilter::Linear;
-	hash = hash_value(hash, filter);
+	hash = io::fnv1a64_value(hash, filter);
 	for (const auto &mip : pyramid->mips) {
-		hash = hash_value(hash, mip.width);
-		hash = hash_value(hash, mip.height);
-		hash = hash_value(hash, mip.row_stride);
+		hash = io::fnv1a64_value(hash, mip.width);
+		hash = io::fnv1a64_value(hash, mip.height);
+		hash = io::fnv1a64_value(hash, mip.row_stride);
 	}
 	for (const std::vector<uint8_t> &alpha : pyramid->storage) {
-		hash = hash_value(hash, alpha.size());
+		hash = io::fnv1a64_value(hash, alpha.size());
 		if (!alpha.empty()) {
-			hash = hash_bytes(hash, alpha.data(), alpha.size());
+			hash = io::fnv1a64_bytes(hash, alpha.data(), alpha.size());
 		}
 	}
 	return hash;
@@ -252,7 +237,7 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 		std::string_view graphic,
 		TerrainStaticShadowTextureProvider &textures) {
 	auto geometry = std::make_shared<TerrainStaticShadowResolvedGeometry>();
-	uint64_t hash = hash_lowered_string(kFnvOffset, graphic);
+	uint64_t hash = hash_lowered_string(io::kFnv1a64Offset, graphic);
 	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr) {
 		return {};
 	}
@@ -358,51 +343,51 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 					static_diffuse_name(mat)));
 		}
 		hash = hash_lowered_string(hash, shader_tag);
-		hash = hash_value(hash, material_flags);
-		hash = hash_value(hash, alpha_ref);
-		hash = hash_value(hash, material.casts_projected_shadow);
-		hash = hash_value(hash, material.blend);
-		hash = hash_value(hash, material.alpha_test_enabled);
-		hash = hash_value(hash, material.alpha_test_inverted);
-		hash = hash_value(hash, material.two_sided);
-		hash = hash_value(hash, material.samples_diffuse_alpha);
-		hash = hash_value(hash, material.uses_material_alpha);
-		hash = hash_value(hash, material.unsupported_issues);
-		hash = hash_value(hash, mat.alpha_gen.style);
-		hash = hash_value(hash, mat.alpha_gen.phase);
-		hash = hash_value(hash, mat.alpha_gen.reg);
-		hash = hash_value(hash, mat.alpha_gen.rate);
-		hash = hash_value(hash, mat.alpha_gen.start);
-		hash = hash_value(hash, mat.alpha_gen.end);
+		hash = io::fnv1a64_value(hash, material_flags);
+		hash = io::fnv1a64_value(hash, alpha_ref);
+		hash = io::fnv1a64_value(hash, material.casts_projected_shadow);
+		hash = io::fnv1a64_value(hash, material.blend);
+		hash = io::fnv1a64_value(hash, material.alpha_test_enabled);
+		hash = io::fnv1a64_value(hash, material.alpha_test_inverted);
+		hash = io::fnv1a64_value(hash, material.two_sided);
+		hash = io::fnv1a64_value(hash, material.samples_diffuse_alpha);
+		hash = io::fnv1a64_value(hash, material.uses_material_alpha);
+		hash = io::fnv1a64_value(hash, material.unsupported_issues);
+		hash = io::fnv1a64_value(hash, mat.alpha_gen.style);
+		hash = io::fnv1a64_value(hash, mat.alpha_gen.phase);
+		hash = io::fnv1a64_value(hash, mat.alpha_gen.reg);
+		hash = io::fnv1a64_value(hash, mat.alpha_gen.rate);
+		hash = io::fnv1a64_value(hash, mat.alpha_gen.start);
+		hash = io::fnv1a64_value(hash, mat.alpha_gen.end);
 		// RGB itself is forced black in PROJSHAD, but retail evaluates RgbGen
 		// between AlphaGen and UV. A noise RgbGen therefore advances the shared
 		// waveform stream before a noise UV channel and remains a runtime input.
-		hash = hash_value(hash, mat.rgb_gen.style);
-		hash = hash_value(hash, mat.rgb_gen.phase);
-		hash = hash_value(hash, mat.rgb_gen.reg);
-		hash = hash_value(hash, mat.rgb_gen.rate);
+		hash = io::fnv1a64_value(hash, mat.rgb_gen.style);
+		hash = io::fnv1a64_value(hash, mat.rgb_gen.phase);
+		hash = io::fnv1a64_value(hash, mat.rgb_gen.reg);
+		hash = io::fnv1a64_value(hash, mat.rgb_gen.rate);
 		for (const float component : mat.rgb_gen.start_color) {
-			hash = hash_value(hash, component);
+			hash = io::fnv1a64_value(hash, component);
 		}
 		for (const float component : mat.rgb_gen.end_color) {
-			hash = hash_value(hash, component);
+			hash = io::fnv1a64_value(hash, component);
 		}
-		hash = hash_value(hash, mat.u_params.style);
-		hash = hash_value(hash, mat.u_params.phase);
-		hash = hash_value(hash, mat.u_params.reg);
-		hash = hash_value(hash, mat.u_params.gen_rate);
-		hash = hash_value(hash, mat.u_params.start);
-		hash = hash_value(hash, mat.u_params.end);
-		hash = hash_value(hash, mat.v_params.style);
-		hash = hash_value(hash, mat.v_params.phase);
-		hash = hash_value(hash, mat.v_params.reg);
-		hash = hash_value(hash, mat.v_params.gen_rate);
-		hash = hash_value(hash, mat.v_params.start);
-		hash = hash_value(hash, mat.v_params.end);
-		hash = hash_value(hash, anim_frames);
-		hash = hash_value(hash, anim_type);
-		hash = hash_value(hash, anim_control);
-		hash = hash_value(hash, material.diffuse_alpha_frames.size());
+		hash = io::fnv1a64_value(hash, mat.u_params.style);
+		hash = io::fnv1a64_value(hash, mat.u_params.phase);
+		hash = io::fnv1a64_value(hash, mat.u_params.reg);
+		hash = io::fnv1a64_value(hash, mat.u_params.gen_rate);
+		hash = io::fnv1a64_value(hash, mat.u_params.start);
+		hash = io::fnv1a64_value(hash, mat.u_params.end);
+		hash = io::fnv1a64_value(hash, mat.v_params.style);
+		hash = io::fnv1a64_value(hash, mat.v_params.phase);
+		hash = io::fnv1a64_value(hash, mat.v_params.reg);
+		hash = io::fnv1a64_value(hash, mat.v_params.gen_rate);
+		hash = io::fnv1a64_value(hash, mat.v_params.start);
+		hash = io::fnv1a64_value(hash, mat.v_params.end);
+		hash = io::fnv1a64_value(hash, anim_frames);
+		hash = io::fnv1a64_value(hash, anim_type);
+		hash = io::fnv1a64_value(hash, anim_control);
+		hash = io::fnv1a64_value(hash, material.diffuse_alpha_frames.size());
 		for (const auto &alpha : material.diffuse_alpha_frames) {
 			hash = hash_alpha_pyramid(hash, alpha);
 		}
@@ -436,9 +421,9 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 				static_cast<uint16_t>(render_objects);
 		auto &coverage = geometry->coverage[static_cast<std::size_t>(lod)];
 		coverage.resize(static_cast<std::size_t>(render_objects));
-		hash = hash_value(hash, lod);
-		hash = hash_value(hash, render_objects);
-		hash = hash_value(hash, lod_issues);
+		hash = io::fnv1a64_value(hash, lod);
+		hash = io::fnv1a64_value(hash, render_objects);
+		hash = io::fnv1a64_value(hash, lod_issues);
 
 		// Preserve the authored strip population independently of the curated
 		// triangle soup below: the soup correctly drops malformed strips, but
@@ -570,7 +555,7 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 		}
 
 		// The binding hashed Godot Array::size() — a 64-bit count.
-		hash = hash_value(hash, static_cast<int64_t>(surfaces.size()));
+		hash = io::fnv1a64_value(hash, static_cast<int64_t>(surfaces.size()));
 		auto &out_surfaces = geometry->surfaces[
 				static_cast<std::size_t>(lod)];
 		out_surfaces.reserve(surfaces.size());
@@ -588,21 +573,21 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 				surface_coverage.malformed_indices = true;
 				continue;
 			}
-			hash = hash_value(hash, resolved.render_object);
-			hash = hash_value(hash, resolved.render_object_offset[0]);
-			hash = hash_value(hash, resolved.render_object_offset[1]);
-			hash = hash_value(hash, resolved.render_object_offset[2]);
-			hash = hash_value(hash, resolved.material_index);
+			hash = io::fnv1a64_value(hash, resolved.render_object);
+			hash = io::fnv1a64_value(hash, resolved.render_object_offset[0]);
+			hash = io::fnv1a64_value(hash, resolved.render_object_offset[1]);
+			hash = io::fnv1a64_value(hash, resolved.render_object_offset[2]);
+			hash = io::fnv1a64_value(hash, resolved.material_index);
 			for (std::size_t vertex_index = 0;
 					vertex_index < resolved.vertices.size(); ++vertex_index) {
 				const std::array<float, 3> &vertex =
 						resolved.vertices[vertex_index];
 				const std::array<float, 2> &uv = resolved.uvs[vertex_index];
-				hash = hash_value(hash, uv[0]);
-				hash = hash_value(hash, uv[1]);
-				hash = hash_value(hash, vertex[0]);
-				hash = hash_value(hash, vertex[1]);
-				hash = hash_value(hash, vertex[2]);
+				hash = io::fnv1a64_value(hash, uv[0]);
+				hash = io::fnv1a64_value(hash, uv[1]);
+				hash = io::fnv1a64_value(hash, vertex[0]);
+				hash = io::fnv1a64_value(hash, vertex[1]);
+				hash = io::fnv1a64_value(hash, vertex[2]);
 			}
 			bool valid_indices = true;
 			for (const int32_t value : resolved.indices) {
@@ -611,7 +596,7 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 					valid_indices = false;
 					break;
 				}
-				hash = hash_value(hash, value);
+				hash = io::fnv1a64_value(hash, value);
 			}
 			if (!valid_indices) {
 				surface_coverage.malformed_indices = true;
@@ -635,10 +620,10 @@ resolve_terrain_static_shadow_geometry(const Threedi3di3 &model,
 			out_surfaces.push_back(std::move(resolved));
 		}
 		for (const auto &state : coverage) {
-			hash = hash_value(hash, state.authored_surface_count);
-			hash = hash_value(hash, state.valid_surface_count);
-			hash = hash_value(hash, state.malformed_indices);
-			hash = hash_value(hash, state.missing_required_uvs);
+			hash = io::fnv1a64_value(hash, state.authored_surface_count);
+			hash = io::fnv1a64_value(hash, state.valid_surface_count);
+			hash = io::fnv1a64_value(hash, state.malformed_indices);
+			hash = io::fnv1a64_value(hash, state.missing_required_uvs);
 		}
 	}
 	geometry->key = hash == 0 ? 1 : hash;

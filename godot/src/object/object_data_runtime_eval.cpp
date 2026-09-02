@@ -4,6 +4,7 @@
 #include "object/object_data_internal.h"
 
 #include <formats/env/env_weather.h>
+#include <base/io/hash.h>
 #include <runtime/renderer/light_runtime.h>
 #include <runtime/renderer/material_eval.h>
 #include <formats/threedi/threedi_panm_pose.h> // liveness / noise / clock (one impl with the engine)
@@ -360,15 +361,14 @@ Dictionary ObjectData::evaluate_panm(int p_lod_index, int64_t p_time_ms, const D
 // case variants, and duplicate aliases therefore share cache semantics with
 // the values PANM actually consumes.
 static uint64_t panm_ctrl_hash(const GlobalCtrlValues &values) {
-	uint64_t h = 1469598103934665603ull;
+	uint64_t h = opennova::io::kFnv1a64Offset;
 	bool any_nonzero = false;
 	for (size_t ordinal = 0; ordinal < values.size(); ++ordinal) {
 		const uint32_t bits = static_cast<uint32_t>(values[ordinal]);
 		any_nonzero |= bits != 0;
-		h = (h ^ static_cast<uint8_t>(ordinal)) * 1099511628211ull;
+		h = opennova::io::fnv1a64_byte(h, static_cast<uint8_t>(ordinal));
 		for (unsigned shift = 0; shift < 32; shift += 8) {
-			h = (h ^ static_cast<uint8_t>(bits >> shift)) *
-					1099511628211ull;
+			h = opennova::io::fnv1a64_byte(h, static_cast<uint8_t>(bits >> shift));
 		}
 	}
 	return any_nonzero ? h : 0;

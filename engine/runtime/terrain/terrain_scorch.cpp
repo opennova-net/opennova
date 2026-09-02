@@ -1,4 +1,5 @@
 #include <runtime/terrain/terrain_scorch.h>
+#include <base/io/hash.h>
 
 #include <algorithm>
 #include <array>
@@ -8,8 +9,6 @@
 namespace opennova::terrain {
 namespace {
 
-constexpr uint64_t kFnvOffset = UINT64_C(1469598103934665603);
-constexpr uint64_t kFnvPrime = UINT64_C(1099511628211);
 constexpr int kMaximumAnisotropy = 16;
 // Bucket cell: the 512-unit routed sector, the coarsest page span.
 constexpr int64_t kSectorCellQ16 = INT64_C(512) << 16;
@@ -29,19 +28,6 @@ uint64_t sector_cell_key(int64_t cell_x, int64_t cell_z) noexcept {
 }
 
 uint64_t mix_entry(uint64_t hash, const TerrainScorchEntry &entry) noexcept;
-
-uint64_t mix_byte(uint64_t hash, uint8_t value) noexcept {
-	return (hash ^ value) * kFnvPrime;
-}
-
-template <typename T>
-uint64_t mix_value(uint64_t hash, const T &value) noexcept {
-	const auto *bytes = reinterpret_cast<const uint8_t *>(&value);
-	for (std::size_t index = 0; index < sizeof(T); ++index) {
-		hash = mix_byte(hash, bytes[index]);
-	}
-	return hash;
-}
 
 int wrap(int value, int size) noexcept {
 	value %= size;
@@ -137,11 +123,11 @@ uint8_t unorm_byte(float value) noexcept {
 }
 
 uint64_t mix_entry(uint64_t hash, const TerrainScorchEntry &entry) noexcept {
-	hash = mix_value(hash, entry.texture_index);
-	hash = mix_value(hash, entry.minimum_x_q16);
-	hash = mix_value(hash, entry.minimum_z_q16);
-	hash = mix_value(hash, entry.maximum_x_q16);
-	hash = mix_value(hash, entry.maximum_z_q16);
+	hash = io::fnv1a64_value(hash, entry.texture_index);
+	hash = io::fnv1a64_value(hash, entry.minimum_x_q16);
+	hash = io::fnv1a64_value(hash, entry.minimum_z_q16);
+	hash = io::fnv1a64_value(hash, entry.maximum_x_q16);
+	hash = io::fnv1a64_value(hash, entry.maximum_z_q16);
 	return hash;
 }
 
@@ -236,7 +222,7 @@ bool TerrainScorchRegistry::collect(const TerrainTilePageKey &page,
 	const int span = TerrainTileCompositionCache::page_world_span(
 			page.page_lod_level);
 	if (span == 0) return false;
-	content_stamp = kFnvOffset;
+	content_stamp = io::kFnv1a64Offset;
 	count = 0;
 	const int64_t page_minimum_x =
 			(static_cast<int64_t>(page.sector_origin_x) + page.page_local_x) << 16;
@@ -304,7 +290,7 @@ bool TerrainScorchRegistry::collect(const TerrainTilePageKey &page,
 			emit(entries_[best_index]);
 		}
 	}
-	content_stamp = mix_value(content_stamp, count);
+	content_stamp = io::fnv1a64_value(content_stamp, count);
 	return true;
 }
 
