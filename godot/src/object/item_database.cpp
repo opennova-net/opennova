@@ -328,11 +328,6 @@ String ItemDatabase::get_ai_function(int id) const {
 	return it == items.end() ? String() : it->second.ai_function;
 }
 
-String ItemDatabase::get_default_aip(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.default_aip;
-}
-
 String ItemDatabase::get_move_function(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.move_function;

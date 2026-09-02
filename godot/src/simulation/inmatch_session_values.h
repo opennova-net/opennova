@@ -105,7 +105,6 @@ protected:
 public:
 	int get_status() const { return status_; }
 	int get_state() const { return state_; }
-	Array get_ticks() const { return ticks_; }
 	int get_ticks_run() const { return ticks_.size(); }
 	int64_t get_tick_us() const { return tick_us_; }
 	String get_error() const { return error_; }

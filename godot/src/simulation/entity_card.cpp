@@ -239,7 +239,6 @@ Vector3 EntityCardSeat::get_local() const {
 void EntityCardSeat::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_type"), &EntityCardSeat::get_type);
 	ClassDB::bind_method(D_METHOD("get_retail_slot"), &EntityCardSeat::get_retail_slot);
-	ClassDB::bind_method(D_METHOD("get_bone_index"), &EntityCardSeat::get_bone_index);
 	ClassDB::bind_method(D_METHOD("get_pose_index"), &EntityCardSeat::get_pose_index);
 	ClassDB::bind_method(D_METHOD("get_source_name"), &EntityCardSeat::get_source_name);
 	ClassDB::bind_method(D_METHOD("is_occupied"), &EntityCardSeat::is_occupied);
@@ -419,7 +418,6 @@ void EntityCard::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mount_seat_yaw_offset"), &EntityCard::get_mount_seat_yaw_offset);
 	ClassDB::bind_method(D_METHOD("is_mount_target_config_valid"), &EntityCard::is_mount_target_config_valid);
 	ClassDB::bind_method(D_METHOD("get_mount_target_config"), &EntityCard::get_mount_target_config);
-	ClassDB::bind_method(D_METHOD("get_mount_target_seat_count"), &EntityCard::get_mount_target_seat_count);
 	ClassDB::bind_method(D_METHOD("get_mount_target_seats"), &EntityCard::get_mount_target_seats);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon_clip"), &EntityCard::get_primary_weapon_clip);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon_reserve"), &EntityCard::get_primary_weapon_reserve);

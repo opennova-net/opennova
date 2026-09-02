@@ -368,7 +368,7 @@ int emplaced_apply_typed(ObjectModel *model, const PackedFloat32Array &snap,
 		return 2;
 	}
 	// Nodes persist across dismount/death: remove only the two controls this
-	// presenter owns — clear_ctrl_values() would also erase live WAC channels.
+	// presenter owns — a bulk CTRL clear would also erase live WAC channels.
 	if (clear_when_invalid) {
 		emplaced_clear_typed(model);
 	}

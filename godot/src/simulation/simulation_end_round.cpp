@@ -49,16 +49,6 @@ String resolve_column_header(const opennova::hud::EndRoundTextLookup &lookup,
 	return String::utf8(text.c_str());
 }
 
-Dictionary arg_to_dict(const opennova::hud::EndRoundArg &a) {
-	Dictionary d;
-	d["key"] = String::utf8(a.key.c_str());
-	d["fallback"] = String::utf8(a.fallback.c_str());
-	d["literal"] = String::utf8(a.literal.c_str());
-	d["number"] = a.number;
-	d["is_number"] = a.is_number;
-	return d;
-}
-
 } // namespace
 
 Ref<EndRoundState> Simulation::get_end_round_state() const {
@@ -131,33 +121,6 @@ opennova::hud::EndRoundOverlayInput Simulation::end_round_overlay_input() const 
 			? runtime_->state().round_time_remaining_ticks
 			: (kernel_ ? kernel_->world.match.remaining_ticks() : -1));
 	return in;
-}
-
-TypedArray<Dictionary> Simulation::get_end_round_lines() const {
-	// The overlay text ladder [orig: draw_endround_stats_overlay @0x5b7cd0, see hud/end_round_overlay.h]:
-	// {key, fallback, literal, args[{key, fallback, literal, number,
-	// is_number}], y, fold} per line — the unresolved form, for inspection;
-	// get_end_round_overlay is the resolved feed the presenter draws.
-	TypedArray<Dictionary> out;
-	if (!runtime_) return out;
-	if (!runtime_->state().end_round.header_known) return out;
-	for (const opennova::hud::EndRoundLine &line :
-			opennova::hud::end_round_overlay_lines(end_round_overlay_input())) {
-		Dictionary d;
-		d["key"] = String::utf8(line.key.c_str());
-		d["fallback"] = String::utf8(line.fallback.c_str());
-		d["literal"] = String::utf8(line.literal.c_str());
-		Array args;
-		for (const opennova::hud::EndRoundArg &a : line.args) args.push_back(arg_to_dict(a));
-		d["args"] = args;
-		d["y"] = line.y;
-		// The empty-resolve fold (hud::EndRoundEmptyFold): 1 = headline
-		// STROVER1 re-lookup, 2 = collapse the line and shift the ladder
-		// below it up 32 px.
-		d["fold"] = static_cast<int>(line.fold);
-		out.push_back(d);
-	}
-	return out;
 }
 
 Dictionary Simulation::get_end_round_overlay(const Ref<RtxtStringFile> &p_gametext) const {

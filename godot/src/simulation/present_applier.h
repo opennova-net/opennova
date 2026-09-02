@@ -149,7 +149,7 @@ public:
 
 	// Emplaced-weapon CTRL registers (bound statics = the coop_two_sim test's
 	// seam onto the native leg): EWEAP_GUNYAW/EWEAP_GUNPITCH only —
-	// clear_ctrl_values() would also erase live WAC channels.
+	// a bulk CTRL clear would also erase live WAC channels.
 	static int emplaced_apply(Object *node, const PackedFloat32Array &snap,
 			int base, bool clear_when_invalid);
 

@@ -136,13 +136,10 @@ public:
 	String get_glare_3di() const;
 	void set_star_3di(const String &p_value);
 	String get_star_3di() const;
-	void set_sky_map1_tex(const Ref<Texture2D> &p_tex);
 	Ref<Texture2D> get_sky_map1_tex() const;
-	void set_sky_map2_tex(const Ref<Texture2D> &p_tex);
 	Ref<Texture2D> get_sky_map2_tex() const;
 	void set_advanced_clouds(int p_value);
 	int get_advanced_clouds() const;
-	void set_tod_keyframes(const TypedArray<EnvKeyframe> &p_keyframes);
 	TypedArray<EnvKeyframe> get_tod_keyframes() const;
 
 	// C++-only: the live (mission-override-layered) engine config this

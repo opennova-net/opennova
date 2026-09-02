@@ -45,9 +45,6 @@ public:
 	bool is_header_known() const { return value_.header_known; }
 	bool is_board_known() const { return value_.board_known; }
 	int64_t get_game_type() const { return static_cast<int64_t>(value_.game_type); }
-	int get_team_score(int p_team) const {
-		return p_team == 0 ? value_.team_score_0 : (p_team == 1 ? value_.team_score_1 : 0);
-	}
 	bool is_team_mode() const { return value_.team_mode; }
 	bool is_session_open() const { return value_.session_open; }
 

@@ -148,24 +148,7 @@ String NovaWorldClient::get_player_name() const { return player_name_; }
 Dictionary NovaWorldClient::get_server_info() const { return server_info_; }
 
 void NovaWorldClient::trace(const String &line) {
-	if (trace_ring_.size() >= kTraceRingCap) {
-		trace_ring_.remove_at(0);
-	}
-	trace_ring_.push_back(line);
-}
-
-Dictionary NovaWorldClient::get_session_debug() const {
-	Dictionary out;
-	out["state"] = String(state_name(state_));
-	out["gate"] = host_ + String(":") + String::num_int64(gate_port_);
-	out["session_endpoint"] =
-			lobby_.nw_udp_host() + String(":") + String::num_int64(static_cast<int64_t>(lobby_.nw_udp_port()));
-	out["web_domain"] = nw_web_domain_;
-	out["server_rows"] = server_rows_.size();
-	out["gsb_in_flight"] = gsb_request_in_flight_;
-	out["authenticated"] = authenticated_;
-	out["trace"] = trace_ring_;
-	return out;
+	UtilityFunctions::print_verbose(line);
 }
 
 void NovaWorldClient::_ready() {
@@ -270,7 +253,7 @@ void NovaWorldClient::_process(double delta) {
 
 // The role-specific halves of the shared NwuLobbySession driver: what to do
 // with the gate response, which verify identity to ship, and the trace lines
-// that keep the retail _connectlog shape (get_session_debug()).
+// that keep the retail _connectlog shape (trace()).
 NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 	NwuLobbySession::Hooks hooks;
 	hooks.on_gate_response = [this](const opennova::GateResponse &parsed) {

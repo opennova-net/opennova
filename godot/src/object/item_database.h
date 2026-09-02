@@ -268,8 +268,6 @@ public:
 	// items.def *_function class tags (raw); empty if the item declares none. The
 	// net layer turns these into a wire dispatch class.
 	String get_ai_function(int id) const;
-	// items.def default_aip (+0x8B8); empty when unauthored or unknown id.
-	String get_default_aip(int id) const;
 	String get_move_function(int id) const;
 	// items.def hp (itemDef+0x17C healthMax); 0 if unknown/none declared.
 	int get_item_type(int id) const;

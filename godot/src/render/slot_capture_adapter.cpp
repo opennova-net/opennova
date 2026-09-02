@@ -1189,13 +1189,6 @@ SlotCaptureFrameCounters SlotCaptureAdapter::frame_counters() const {
 	return impl_->counters;
 }
 
-int SlotCaptureAdapter::compiled_surface_count(int p_order) const {
-	if (!impl_ || p_order < 0 || p_order >= kSlotCaptureCount)
-		return 0;
-	std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
-	return impl_->compiled_surfaces[static_cast<std::size_t>(p_order)];
-}
-
 Dictionary SlotCaptureAdapter::get_report() const {
 	return impl_ ? impl_->report() : Dictionary();
 }

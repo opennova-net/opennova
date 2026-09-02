@@ -481,7 +481,7 @@ func test_sector_and_zone_controls_preserve_write_validity_and_scoped_release() 
 	var model := _model()
 	# This unrelated writer is the stand-in for another semantic producer
 	# (DOOR_00 is a real retail register no presenter touches). Zone teardown
-	# must never use clear_ctrl_values().
+	# must never bulk-clear the CTRL registers.
 	model.set_ctrl_override("foreign", "DOOR_00", 77)
 	var p := _make_pass(_index_of({ 62: model }))
 	var snap := Snapshot.new()

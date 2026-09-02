@@ -26,7 +26,6 @@ public:
 	void assign(const opennova::world::inspect::SeatRow &p_value) { value_ = p_value; }
 	int get_type() const { return value_.type; }
 	int get_retail_slot() const { return value_.retail_slot; }
-	int get_bone_index() const { return value_.bone_index; }
 	int get_pose_index() const { return value_.pose_index; }
 	String get_source_name() const;
 	// The authored seat offset, raw mission components (Z-up).
@@ -102,7 +101,6 @@ public:
 	int get_mount_seat_yaw_offset() const { return value_.ai.mount_seat_yaw_offset; }
 	bool is_mount_target_config_valid() const { return value_.ai.mount_target_config_valid; }
 	int get_mount_target_config() const { return value_.ai.mount_target_config; }
-	int get_mount_target_seat_count() const { return value_.ai.mount_target_seat_count; }
 	TypedArray<EntityCardSeat> get_mount_target_seats() const;
 
 	// --- the world half -----------------------------------------------------

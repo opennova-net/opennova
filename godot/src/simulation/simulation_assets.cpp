@@ -151,16 +151,6 @@ void Simulation::install_join_cd_cookie() {
 	runtime_->set_join_cd_cookie(join_cd_cookie_);
 }
 
-// The D-AI-5 host weapon seed + per-body sound-profile bind, folded into the
-// engine (simassets::resolve_ai_weapons, ADR 0028) over the retained items.def
-// rows — the seed semantics and [orig] witnesses live there now. Ammo names
-// resolve against the mission ammo table, so call AFTER load_ammo_table.
-int Simulation::resolve_ai_weapons(const Ref<ItemDatabase> &p_item_db) {
-	if (!kernel_->world.ai || p_item_db.is_null()) return 0;
-	return opennova::simassets::resolve_ai_weapons(
-			kernel_->world, p_item_db->native_items());
-}
-
 int Simulation::set_character_avatar_database(
 		const Ref<AvatarDatabase> &p_avatar_db) {
 	character_sex_rows_.clear();

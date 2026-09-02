@@ -185,17 +185,6 @@ inline double bam_to_radians(int32_t value) {
 			(6.28318530717958647692 / 4294967296.0);
 }
 
-inline Basis godot_model_basis_from_overlay(
-		const opennova::anim::AimOverlayAngles &angles) {
-	// C++ twin of MissionObjectPlacer.bms_to_godot_basis. The first yaw
-	// simplifies to the BAM heading itself; the final +90 degree term is the
-	// .3di model-forward correction.
-	return Basis(Vector3(0.0, 1.0, 0.0), bam_to_radians(angles.yaw)) *
-			Basis(Vector3(0.0, 0.0, 1.0), bam_to_radians(angles.pitch)) *
-			Basis(Vector3(1.0, 0.0, 0.0), bam_to_radians(angles.roll)) *
-			Basis(Vector3(0.0, 1.0, 0.0), 1.57079632679489661923);
-}
-
 // Godot-type packer over the engine euler composition (the math lives in
 // npruntime client_replica_present.h).
 inline Vector3 mission_euler_from_overlay(

@@ -2996,8 +2996,8 @@ writer exists — it rides a struct copy). `Entity_InitHardpoints @ 0x4417d0` se
 resolves `ammo_closeattack → entity+0x2B4` and `ammo_marker3 → entity+0x2B8` (dwords,
 the hardpoint/close-attack consumers — NOT the anim-fire bytes). Port note: until the
 block-copy is witnessed, the host seeds ONE ammo id + clipsize per NPC from the def
-names at mission load (`Simulation::resolve_ai_weapons`, after the ammo table
-loads) — the D-AI-5 stand-in.
+names at mission load (the kernel boot's `simassets::resolve_ai_weapons` step,
+after the ammo table loads) — the D-AI-5 stand-in.
 
 ### 17.4b The sound legs — footsteps, foley, landing, screams (witnessed + ported 2026-07-17)
 

@@ -34,7 +34,6 @@ void ObjectData::_bind_methods() {
 	ClassDB::bind_static_method("ObjectData",
 			D_METHOD("part_anim_step", "phase", "dir", "rate"),
 			&ObjectData::part_anim_step);
-	ClassDB::bind_method(D_METHOD("get_ground_anchor", "lod_index"), &ObjectData::get_ground_anchor, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("has_collision"), &ObjectData::has_collision);
 	ClassDB::bind_method(D_METHOD("has_occlusion"), &ObjectData::has_occlusion);
 	ClassDB::bind_method(D_METHOD("get_collision_volumes"), &ObjectData::get_collision_volumes);
