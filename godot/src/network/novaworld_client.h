@@ -40,7 +40,6 @@ namespace godot {
 //   nw.player_name = "Taylor"
 //   nw.connected.connect(_on_connected)
 //   nw.disconnected.connect(_on_disconnected)
-//   nw.server_info_received.connect(_on_server_info)
 //   nw.start()
 //
 // State machine:

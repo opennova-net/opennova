@@ -199,7 +199,6 @@ void RtxtStringFile::remove_entry(int p_index) {
 void RtxtStringFile::set_entry_text(int p_index, const String &p_text) {
 	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
 	file_.entries[p_index].text = gd_to_std(p_text);
-	emit_signal("entry_text_changed", p_index);
 }
 
 int RtxtStringFile::_section_insert_index(uint32_t p_section_index) const {
@@ -236,7 +235,6 @@ int RtxtStringFile::add_section(const String &p_name) {
 	section.string_count = 0;
 	file_.sections.push_back(std::move(section));
 	_refresh();
-	emit_signal("sections_changed");
 	return static_cast<int>(file_.sections.size()) - 1;
 }
 
@@ -372,6 +370,4 @@ void RtxtStringFile::_bind_methods() {
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("lookup_with_override", "override_table", "table", "section", "key"), &RtxtStringFile::lookup_with_override);
 
 	ADD_SIGNAL(MethodInfo("entries_structure_changed"));
-	ADD_SIGNAL(MethodInfo("entry_text_changed", PropertyInfo(Variant::INT, "index")));
-	ADD_SIGNAL(MethodInfo("sections_changed"));
 }

@@ -85,21 +85,7 @@ void MusicDirector::_bind_methods() {
 	// Signals
 	ADD_SIGNAL(MethodInfo("section_entered",
 			PropertyInfo(Variant::STRING_NAME, "name")));
-	ADD_SIGNAL(MethodInfo("sound_triggered",
-			PropertyInfo(Variant::INT, "sbf_entry_index"),
-			PropertyInfo(Variant::STRING_NAME, "sound_name"),
-			PropertyInfo(Variant::BOOL, "wait")));
-	ADD_SIGNAL(MethodInfo("variable_changed",
-			PropertyInfo(Variant::INT, "var_index"),
-			PropertyInfo(Variant::INT, "value")));
-	// left/right are the script-domain 0..255 volumes (the VM hook's 16.16
-	// fixed is decoded at the trampoline; see _on_volume_changed).
-	ADD_SIGNAL(MethodInfo("volume_changed",
-			PropertyInfo(Variant::INT, "left"),
-			PropertyInfo(Variant::INT, "right")));
 	ADD_SIGNAL(MethodInfo("echo", PropertyInfo(Variant::INT, "arg")));
-	ADD_SIGNAL(MethodInfo("halted"));
-	ADD_SIGNAL(MethodInfo("vm_error", PropertyInfo(Variant::STRING, "message")));
 }
 
 // --- Witnessed music-pair naming (pure re-export) -----------------------
@@ -192,9 +178,7 @@ void MusicDirector::_process(double p_delta) {
 		_vm_running = false;
 		if (state == MUS_VM_ERROR) {
 			const char *msg = mus_vm_last_error(_vm);
-			emit_signal("vm_error", String(msg ? msg : ""));
-		} else {
-			emit_signal("halted");
+			UtilityFunctions::push_warning("MusicDirector: VM error: ", String(msg ? msg : ""));
 		}
 	}
 }
@@ -222,7 +206,7 @@ void MusicDirector::start() {
 	}
 	if (mus_vm_load_script(_vm, raw) != 0) {
 		const char *msg = mus_vm_last_error(_vm);
-		emit_signal("vm_error", String(msg ? msg : "mus_vm_load_script failed"));
+		UtilityFunctions::push_warning("MusicDirector: ", String(msg ? msg : "mus_vm_load_script failed"));
 		return;
 	}
 
@@ -230,8 +214,6 @@ void MusicDirector::start() {
 	hooks.user = this;
 	hooks.on_play_sound = _on_play_sound;
 	hooks.on_section_entered = _on_section_entered;
-	hooks.on_var_changed = _on_var_changed;
-	hooks.on_volume_changed = _on_volume_changed;
 	hooks.on_echo = _on_echo;
 	mus_vm_set_hooks(_vm, &hooks);
 
@@ -313,7 +295,6 @@ void MusicDirector::_on_play_sound(void *user, uint32_t sbf_entry_index, int wai
 		return;
 	}
 
-	String sound_name;
 	if (self->_bank.is_valid()) {
 		Ref<SbfAudioStream> stream = self->_bank->get_stream_at((int)sbf_entry_index);
 		if (stream.is_valid() && !self->_players.is_empty()) {
@@ -328,13 +309,7 @@ void MusicDirector::_on_play_sound(void *user, uint32_t sbf_entry_index, int wai
 				self->_active_play = p;
 			}
 		}
-		sound_name = self->_bank->get_entry_name((int)sbf_entry_index);
 	}
-
-	self->emit_signal("sound_triggered",
-			(int)sbf_entry_index,
-			StringName(sound_name),
-			wait != 0);
 }
 
 void MusicDirector::_on_section_entered(void *user, const char *name) {
@@ -345,26 +320,6 @@ void MusicDirector::_on_section_entered(void *user, const char *name) {
 	self->emit_signal("section_entered", StringName(name ? name : ""));
 }
 
-void MusicDirector::_on_var_changed(void *user, uint8_t idx, int32_t v) {
-	MusicDirector *self = (MusicDirector *)user;
-	if (self == nullptr) {
-		return;
-	}
-	self->emit_signal("variable_changed", (int)idx, (int)v);
-}
-
-void MusicDirector::_on_volume_changed(void *user, int32_t left_16_16, int32_t right_16_16) {
-	MusicDirector *self = (MusicDirector *)user;
-	if (self == nullptr) {
-		return;
-	}
-	// GSV/GSDV take the script's 0..255 volume argument and store it as 16.16
-	// fixed (value << 16; the witness lives at MusVMHooks::on_volume_changed
-	// in engine mus/mus.h). The signal re-emits the script-domain 0..255
-	// value (16.16 decoded at this device boundary); the name stays
-	// "volume_changed".
-	self->emit_signal("volume_changed", (int)(left_16_16 >> 16), (int)(right_16_16 >> 16));
-}
 
 void MusicDirector::_on_echo(void *user, int32_t arg) {
 	MusicDirector *self = (MusicDirector *)user;

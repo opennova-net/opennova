@@ -23,7 +23,7 @@ namespace godot {
 // pushes (the scene-pass block terrain/foliage/water read, and the object
 // family's lighting block — retail's per-pass RenderBatchCtx constants), the
 // terrain ShaderMaterial uniform pushes, the sky-map texture handles, and the
-// EnvLightState publication + env_generation_changed signal. Ported from environment.gd (2026-08-09 de-scripting); RE record:
+// EnvLightState publication. Ported from environment.gd (2026-08-09 de-scripting); RE record:
 // docs/env/env-tod-re.md.
 class MissionEnvironment : public Node {
 	GDCLASS(MissionEnvironment, Node)
@@ -193,9 +193,8 @@ public:
 	// engine-side writeback path cannot perform itself.
 	opennova::env::EnvironmentState &state() { return state_; }
 	const opennova::env::EnvironmentState &state() const { return state_; }
-	// Publish the typed light record, write the object lighting block globals,
-	// and emit env_generation_changed when the engine generation moved since
-	// the last publish.
+	// Publish the typed light record and write the object lighting block
+	// globals when the engine generation moved since the last publish.
 	void flush_publication(bool p_pass_changed = false);
 	// The standalone-owner full global refresh (the weather node owns the
 	// per-frame write while present).

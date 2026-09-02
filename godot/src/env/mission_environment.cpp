@@ -237,7 +237,6 @@ void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sky_map2_tex"),
 			&MissionEnvironment::get_sky_map2_tex);
 
-	ADD_SIGNAL(MethodInfo("env_generation_changed"));
 	ADD_SIGNAL(MethodInfo("underwater_overlay_changed"));
 
 	ClassDB::bind_integer_constant(get_class_static(), "", "HOURS_PER_DAY", 24);
@@ -355,7 +354,6 @@ void MissionEnvironment::flush_publication(bool p_pass_changed) {
 	const Ref<EnvLightValues> values = _build_light_values();
 	light_state_->publish(values, p_pass_changed);
 	_write_lighting_block_globals(values);
-	emit_signal("env_generation_changed");
 }
 
 MissionEnvironment *MissionEnvironment::lighting_block_writer_ = nullptr;

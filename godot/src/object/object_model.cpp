@@ -1509,7 +1509,6 @@ void ObjectModel::set_model_bounds(const AABB &p_bounds) {
 		return;
 	}
 	model_bounds_ = p_bounds;
-	emit_signal("bounds_changed", model_bounds_);
 }
 
 bool ObjectModel::aabb_equal_approx(const AABB &p_a, const AABB &p_b) {
@@ -1885,8 +1884,6 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::advance_body_animation, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("is_body_pose_dirty"),
 			&ObjectModel::is_body_pose_dirty);
-
-	ADD_SIGNAL(MethodInfo("bounds_changed", PropertyInfo(Variant::AABB, "bounds")));
 
 	BIND_ENUM_CONSTANT(AVATAR_PART_NONE);
 	BIND_ENUM_CONSTANT(AVATAR_PART_BODY);

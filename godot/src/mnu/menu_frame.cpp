@@ -764,7 +764,6 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	if (p_button_down && !mouse_button_down_ && claim.hovered >= 0 &&
 			claim.scroll_index < 0) {
 		press_claim_ = claim.hovered;
-		emit_signal("widget_pressed", claim.hovered);
 	} else if (!p_button_down && mouse_button_down_) {
 		if (press_claim_ >= 0 && press_claim_ == claim.hovered) {
 			emit_signal("widget_clicked", press_claim_);
@@ -1125,8 +1124,6 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::process_mouse_wheel);
 	ClassDB::bind_method(D_METHOD("widget_index", "name"),
 			&MenuFrame::widget_index);
-	ADD_SIGNAL(MethodInfo("widget_pressed",
-			PropertyInfo(Variant::INT, "index")));
 	ADD_SIGNAL(MethodInfo("widget_clicked",
 			PropertyInfo(Variant::INT, "index")));
 	// The engine pump's CScrollWnd interaction result: a standalone Scroll's
