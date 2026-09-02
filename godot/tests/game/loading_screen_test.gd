@@ -21,17 +21,17 @@ func after_each() -> void:
 # --- sidecar image name [orig: 0x521d66/0x521dab] -----------------------------
 
 func test_sidecar_name_replaces_bms_extension() -> void:
-	assert_eq(LoadingScreen.sidecar_image_name("00TRg.bms"), "00TRg.pcx")
-	assert_eq(LoadingScreen.sidecar_image_name("TDH_I5A.BMS"), "TDH_I5A.pcx")
+	assert_eq(HudPos.loading_sidecar_image_name("00TRg.bms"), "00TRg.pcx")
+	assert_eq(HudPos.loading_sidecar_image_name("TDH_I5A.BMS"), "TDH_I5A.pcx")
 
 
 func test_sidecar_name_appends_when_no_extension() -> void:
 	# Path_ReplaceOrAppendExtension appends when there is nothing to replace.
-	assert_eq(LoadingScreen.sidecar_image_name("dvxi5"), "dvxi5.pcx")
+	assert_eq(HudPos.loading_sidecar_image_name("dvxi5"), "dvxi5.pcx")
 
 
 func test_sidecar_name_uses_the_file_part_only() -> void:
-	assert_eq(LoadingScreen.sidecar_image_name("maps/ASH_I5A.bms"), "ASH_I5A.pcx")
+	assert_eq(HudPos.loading_sidecar_image_name("maps/ASH_I5A.bms"), "ASH_I5A.pcx")
 
 
 # --- background resolution [orig: exists probe @ 0x521db5, fallback @ 0x521e20] ---
@@ -89,26 +89,26 @@ func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> v
 # --- game-type -> LoadingText key [orig: switch @ 0x51f30b-0x51f3a6] -----------
 
 func test_gametype_keys_match_the_witnessed_switch() -> void:
-	assert_eq(LoadingScreen.gametype_text_key(0), "LTGT_DM")
-	assert_eq(LoadingScreen.gametype_text_key(0x10000), "LTGT_TDM")
-	assert_eq(LoadingScreen.gametype_text_key(0x10020), "LTGT_COOP")
-	assert_eq(LoadingScreen.gametype_text_key(0x30020), "LTGT_COOP",
+	assert_eq(HudPos.loading_gametype_text_key(0), "LTGT_DM")
+	assert_eq(HudPos.loading_gametype_text_key(0x10000), "LTGT_TDM")
+	assert_eq(HudPos.loading_gametype_text_key(0x10020), "LTGT_COOP")
+	assert_eq(HudPos.loading_gametype_text_key(0x30020), "LTGT_COOP",
 		"the 0x20000 bit is masked out of the coop compare")
-	assert_eq(LoadingScreen.gametype_text_key(0x00001), "LTGT_KOTH")
-	assert_eq(LoadingScreen.gametype_text_key(0x10001), "LTGT_TKOTH")
-	assert_eq(LoadingScreen.gametype_text_key(0x90002), "LTGT_SD")
-	assert_eq(LoadingScreen.gametype_text_key(0x10002), "LTGT_AD")
-	assert_eq(LoadingScreen.gametype_text_key(0x10004), "LTGT_CTF")
-	assert_eq(LoadingScreen.gametype_text_key(0x10008), "LTGT_FB")
-	assert_eq(LoadingScreen.gametype_text_key(0x10010), "LTGT_AAS")
-	assert_eq(LoadingScreen.gametype_text_key(0x50010), "LTGT_CAC")
+	assert_eq(HudPos.loading_gametype_text_key(0x00001), "LTGT_KOTH")
+	assert_eq(HudPos.loading_gametype_text_key(0x10001), "LTGT_TKOTH")
+	assert_eq(HudPos.loading_gametype_text_key(0x90002), "LTGT_SD")
+	assert_eq(HudPos.loading_gametype_text_key(0x10002), "LTGT_AD")
+	assert_eq(HudPos.loading_gametype_text_key(0x10004), "LTGT_CTF")
+	assert_eq(HudPos.loading_gametype_text_key(0x10008), "LTGT_FB")
+	assert_eq(HudPos.loading_gametype_text_key(0x10010), "LTGT_AAS")
+	assert_eq(HudPos.loading_gametype_text_key(0x50010), "LTGT_CAC")
 
 
 func test_unknown_gametype_yields_no_key() -> void:
 	# The original leaves the line empty for an unlisted type (LABEL_29 with a
 	# null lookup) — never a wrong label.
-	assert_eq(LoadingScreen.gametype_text_key(-1), "")
-	assert_eq(LoadingScreen.gametype_text_key(0xDEAD), "")
+	assert_eq(HudPos.loading_gametype_text_key(-1), "")
+	assert_eq(HudPos.loading_gametype_text_key(0xDEAD), "")
 
 
 # --- bar smoothing [orig: 0x586c3f] --------------------------------------------
@@ -118,23 +118,23 @@ func test_displayed_value_catches_up_to_reported() -> void:
 	# high-frequency pump, so the displayed value must catch up to reported in
 	# one draw or the bar never leaves ~10 (D-LOADSCR-1). A big jump lands ON
 	# reported, not one step past a stale value.
-	assert_eq(LoadingScreen.step_displayed(6, 26), 26, "a reported jump catches the bar up")
-	assert_eq(LoadingScreen.step_displayed(50, 100), 100, "a jump to 100 fills the bar")
+	assert_eq(HudPos.loading_bar_step(6, 26), 26, "a reported jump catches the bar up")
+	assert_eq(HudPos.loading_bar_step(50, 100), 100, "a jump to 100 fills the bar")
 
 
 func test_displayed_value_leads_reported_by_at_most_ten() -> void:
 	# Once caught up, the bar creeps +1 ahead per draw (the witnessed liveness
 	# lead for a grinding stage that pulses one reported value), capped at +10.
-	assert_eq(LoadingScreen.step_displayed(0, 0), 1, "creep ahead of a stalled 0")
-	assert_eq(LoadingScreen.step_displayed(26, 26), 27, "creep one point ahead")
-	assert_eq(LoadingScreen.step_displayed(9, 0), 10)
-	assert_eq(LoadingScreen.step_displayed(10, 0), 10, "cap at reported + 10")
-	assert_eq(LoadingScreen.step_displayed(36, 26), 36, "cap the lead at reported + 10")
+	assert_eq(HudPos.loading_bar_step(0, 0), 1, "creep ahead of a stalled 0")
+	assert_eq(HudPos.loading_bar_step(26, 26), 27, "creep one point ahead")
+	assert_eq(HudPos.loading_bar_step(9, 0), 10)
+	assert_eq(HudPos.loading_bar_step(10, 0), 10, "cap at reported + 10")
+	assert_eq(HudPos.loading_bar_step(36, 26), 36, "cap the lead at reported + 10")
 
 
 func test_displayed_value_caps_at_hundred() -> void:
-	assert_eq(LoadingScreen.step_displayed(99, 100), 100)
-	assert_eq(LoadingScreen.step_displayed(100, 100), 100)
+	assert_eq(HudPos.loading_bar_step(99, 100), 100)
+	assert_eq(HudPos.loading_bar_step(100, 100), 100)
 
 
 # --- bar fill arithmetic [orig: v8 @ 0x5d4c40] ----------------------------------
@@ -142,12 +142,12 @@ func test_displayed_value_caps_at_hundred() -> void:
 func test_bar_fill_span_matches_the_original_arithmetic() -> void:
 	var x := 368
 	var w := 286
-	var empty := LoadingScreen.bar_fill_span(x, w, 0)
+	var empty := HudPos.loading_bar_fill_span(x, w, 0)
 	assert_eq(empty.y, empty.x, "0%% -> empty fill")
-	var full := LoadingScreen.bar_fill_span(x, w, 100)
+	var full := HudPos.loading_bar_fill_span(x, w, 100)
 	assert_eq(full.x, x + 3)
 	assert_eq(full.y - full.x, w, "100%% fills exactly the inner width")
-	var half := LoadingScreen.bar_fill_span(x, w, 50)
+	var half := HudPos.loading_bar_fill_span(x, w, 50)
 	assert_eq(half.y - half.x, 144, "50%% of the 286 bar = 50*(286+2)/100 = 144")
 
 

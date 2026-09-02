@@ -867,11 +867,7 @@ func _load_text(file: String) -> RtxtStringFile:
 func _load_style(file: String) -> MnsStyleSheet:
 	if _root == null or file.is_empty():
 		return null
-	var bytes := _root.read_file(file)
-	if bytes.is_empty():
-		return null
-	var s := MnsStyleSheet.new()
-	return s if s.load_from_bytes(bytes) == OK and s.is_runtime_valid() else null
+	return MenuFrameSurface.load_style(_root, file)
 
 
 # The menu SFX profile (menu.lwf) loads by name through the VFS so it resolves

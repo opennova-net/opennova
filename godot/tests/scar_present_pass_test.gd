@@ -128,7 +128,7 @@ static func _append_i32(values: PackedInt32Array, value: int) -> PackedInt32Arra
 
 func _batch(draw: ScarDrawList, owner: int, texture: int, section: int,
 		entity_local: bool, quads: int, bms_id: int = 0,
-		spawn_origin: int = SpawnOrigin.NONE) -> void:
+		spawn_origin: int = Simulation.SPAWN_ORIGIN_NONE) -> void:
 	var first := draw.vertices.size()
 	for q in range(quads):
 		_quad(draw, Vector3(q, 0, 0))
@@ -341,7 +341,7 @@ func test_authored_owners_resolve_through_the_entity_index() -> void:
 	scar_pass.setup(null, null, index, null, null, Callable(), Callable(), presenter)
 	var section := int(model.get_render_part_nodes().keys()[0])
 	var draw := _draw_list()
-	_batch(draw, OWNER_A, 0, section, true, 1, 41, SpawnOrigin.NONE)
+	_batch(draw, OWNER_A, 0, section, true, 1, 41, Simulation.SPAWN_ORIGIN_NONE)
 
 	scar_pass.present_draw_list(draw)
 

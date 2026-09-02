@@ -328,7 +328,7 @@ func _ensure_menu() -> bool:
 	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MUSIC_VAR_INDEX)
 	_driver.widget_activated.connect(_on_widget_activated)
-	var style := _load_style(root)
+	var style := MenuFrameSurface.load_style(root, STYLESHEET_FILE)
 	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
 	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
 		push_warning("EndRoundPresenter: %s has no screens" % MENU_FILE)
@@ -341,10 +341,6 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 	if _driver == null or not is_open():
 		return
 	MenuFrameSurface.forward_gui_input(event, _driver, _frame)
-
-
-func _load_style(root: ResourceRoot) -> MnsStyleSheet:
-	return MenuFrameSurface.load_style(root, STYLESHEET_FILE)
 
 
 func _recompute_fit() -> void:

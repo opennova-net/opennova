@@ -65,44 +65,6 @@ var _splash_blink_on := true
 var _splash_frames_until_emit := 0
 
 
-## <mission>.bms -> <mission>.pcx: the sidecar image name for a mission file
-## (the engine's rule, hud/loading_screen.h; resolution is case-insensitive
-## through the VFS).
-static func sidecar_image_name(mission_file: String) -> String:
-	return HudPos.loading_sidecar_image_name(mission_file)
-
-
-## The LoadingText key for a numeric session game type, or "" for an unknown
-## type (the original leaves the line empty). The GAMETYPE -> key table is the
-## engine's; the witness lives at the engine home, hud/loading_screen.h
-## (HudPos.loading_gametype_text_key).
-static func gametype_text_key(game_type: int) -> String:
-	return HudPos.loading_gametype_text_key(game_type)
-
-
-## One smoothing step: catch the displayed value up to the reported progress,
-## then creep +1 per draw up to 10 points ahead as the witnessed liveness lead,
-## capped at 100 [orig: displayed this[9] += 1 up to min(progress+10, 100) per
-## draw, LoadingScreen_UpdateAndPresent @ 0x586c3f]. The original reaches the
-## catch-up for free because it pumps UpdateAndPresent at window-message
-## frequency — hundreds of calls per load (per-model + the per-subsystem slot++
-## 62..69). Our present() is driven by the coarser progress emits (D-LOADSCR-1),
-## so a literal +1-only step never leaves ~10 in 8 calls; the displayed value
-## must track reported here. The +1 lead-ahead past reported is preserved for
-## the per-object pulse phase where multiple draws share one reported value.
-static func step_displayed(displayed: int, reported: int) -> int:
-	return HudPos.loading_bar_step(displayed, reported)
-
-
-## The fill rect's horizontal span (left, right) for a bar whose outer frame
-## starts at `x` with inner fill width `w` — the original's exact arithmetic:
-## fill right edge = pct * (w + 2) / 100 + (left-after-two-insets) + 2, clamped
-## to the track, then one final 1px inset [orig: v8 @ 0x5d4c40; fill draw after
-## the last inset]. right <= left means an empty fill.
-static func bar_fill_span(x: int, w: int, displayed: int) -> Vector2i:
-	return HudPos.loading_bar_fill_span(x, w, displayed)
-
-
 ## The background image pick: the image name and whether it is the mission's
 ## own sidecar (the retail custom-background flag the SP splash gate reads).
 class BackgroundPick:
@@ -120,7 +82,7 @@ class BackgroundPick:
 ## stock fallback [orig: FileSystem_FileExists probe @ 0x521db5; fallback
 ## @ 0x521e20].
 static func resolve_background(root: ResourceRoot, mission_file: String) -> BackgroundPick:
-	var sidecar := sidecar_image_name(mission_file)
+	var sidecar := HudPos.loading_sidecar_image_name(mission_file)
 	# UI image probes force loose-first for this lookup, independent of /d.
 	# [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
 	if root != null and not sidecar.is_empty() and root.has_file(
@@ -159,7 +121,7 @@ func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	_title = info.server_name
 	_mission_name = info.mission_name
 	_custom_text = info.custom_text
-	_game_type_text = _lookup_loading_text(gametype_text_key(maxi(info.game_type, 0)), "")
+	_game_type_text = _lookup_loading_text(HudPos.loading_gametype_text_key(maxi(info.game_type, 0)), "")
 	_font_small = _load_font(root, HudPos.loading_font_small())
 	_font_large = _load_font(root, HudPos.loading_font_large())
 	queue_redraw()
@@ -185,7 +147,7 @@ func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 			_mission_name = info.mission_name
 		if info.game_type >= 0:
 			_game_type_text = _lookup_loading_text(
-					gametype_text_key(info.game_type), _game_type_text)
+					HudPos.loading_gametype_text_key(info.game_type), _game_type_text)
 	queue_redraw()
 
 
@@ -211,7 +173,7 @@ func present(force := false) -> void:
 		return
 	_last_present_ms = now
 	_last_drawn_reported = _reported
-	_displayed = step_displayed(_displayed, _reported)
+	_displayed = HudPos.loading_bar_step(_displayed, _reported)
 	queue_redraw()
 	# The original pumps window messages and presents mid-load; process_events
 	# + force_draw are the shell-side equivalents so the OS window stays live
@@ -542,7 +504,7 @@ func _draw_progress_bar() -> void:
 	draw_rect(Rect2(x, y, w + 6, h + 6), Color.BLACK)
 	draw_rect(Rect2(x + 1, y + 1, w + 4, h + 4), HudPos.loading_bar_border_gray())
 	draw_rect(Rect2(x + 2, y + 2, w + 2, h + 2), Color.BLACK)
-	var span := bar_fill_span(x, w, _displayed)
+	var span := HudPos.loading_bar_fill_span(x, w, _displayed)
 	if span.y > span.x:
 		draw_rect(Rect2(span.x, y + 3, span.y - span.x, h), HudPos.loading_bar_fill_color())
 

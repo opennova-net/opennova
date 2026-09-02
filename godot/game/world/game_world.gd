@@ -855,10 +855,6 @@ func local_player_character_id() -> int:
 	return int(sim.get_local_player_character_id()) if sim != null else 0
 
 
-func _prewarm_loaded_model_challenge_definitions() -> void:
-	_player_visuals._prewarm_loaded_model_challenge_definitions()
-
-
 # The armory-equipped weapon name; overrides the bring-up fallback/env once the
 # player accepts a loadout [orig: the equipped AdmDef drives the FP model pick,
 # Player_RenderFirstPersonViewModel @0x4ded60 via the mounted slot].
@@ -978,18 +974,6 @@ func route_mission_effects(effects: Array) -> void:
 # _load_stages._start_runtime's signal connects bind these GameWorld methods (a future
 # harness can override them here); the handler bodies live in
 # WorldEffectRouter (world_effect_router.gd).
-func _on_runtime_effects(effects: Array) -> void:
-	_effect_router._on_runtime_effects(effects)
-
-
-func _on_runtime_fixed_tick(logic_tick: int) -> void:
-	_effect_router._on_runtime_fixed_tick(logic_tick)
-
-
-func _on_runtime_simulation_restarted() -> void:
-	_effect_router._on_runtime_simulation_restarted()
-
-
 # The load-time effect warm pass (see the load-path call site): spawn every
 # catalog effect in front of the load camera, advance the fixed tick so fresh
 # emitters actually emit, force-draw two frames SYNCHRONOUSLY so every new

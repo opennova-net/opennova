@@ -484,8 +484,8 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 	var index := _index_of([_entry(first, 0, 255, 16777215)])
 	var events := DestructionDrain.make(
 			[
-					HuskSwapEvent.make(0, BUGGY_ITEM_ID, SpawnOrigin.NONE, 0x1004),
-					HuskSwapEvent.make(0, BUGGY_ITEM_ID, SpawnOrigin.NONE, 0x1005)])
+					HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1004),
+					HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1005)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, index, placer, _item_db, anchors,
 			Callable(), func(): return fx, resolver)
@@ -514,7 +514,7 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 	var authored_zero := ObjectModel.new()
 	add_child_autofree(authored_zero)
 	var index := _index_of([_entry(authored_zero, 0, 255, 16777215)])
-	var events := DestructionDrain.make([HuskSwapEvent.make(0, BUGGY_ITEM_ID, SpawnOrigin.NONE, 0x1004)])
+	var events := DestructionDrain.make([HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1004)])
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, index, placer, _item_db,
 			CaptureAnchors.new(), Callable(), Callable(), resolver)
@@ -545,12 +545,12 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 		for family in [1, 2, 3]:
 			effects.append(DestructionEffectEvent.make(
 					'Effect_Family%d' % family, Vector3(100, 100, 100),
-					family, Vector3.ZERO, 0, 0, wire_handle, SpawnOrigin.NONE))
+					family, Vector3.ZERO, 0, 0, wire_handle, Simulation.SPAWN_ORIGIN_NONE))
 	# Even when a payload happens to carry a valid dynamic identity, family zero
 	# remains the one-shot transient path.
 	effects.append(DestructionEffectEvent.make(
 			'Effect_Transient', Vector3(20, 30, 40),
-			0, Vector3.ZERO, 0, 0, 0x1004, SpawnOrigin.NONE))
+			0, Vector3.ZERO, 0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE))
 	var presenter := DestructionPresentPass.new()
 	presenter.setup(null, container, _index_of([]), _husk_placer(),
 			_item_db, anchors, Callable(), func(): return fx, resolver)

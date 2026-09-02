@@ -8,7 +8,7 @@ extends RefCounted
 # pattern (OcclusionFramePass / WorldDeviceFrame / WorldPlayerVisuals).
 #
 # GameWorld keeps a route_mission_effects delegate (tests drive it) plus thin
-# _on_runtime_effects/_on_runtime_fixed_tick/_on_runtime_simulation_restarted
+# on_runtime_effects/on_runtime_fixed_tick/on_runtime_simulation_restarted
 # delegates so _start_runtime's signal connects keep binding GameWorld methods
 # (a future harness can override them there). The mission_effects signal stays
 # declared on GameWorld; this router emits it through _world, and reaches the
@@ -112,7 +112,7 @@ func _route_terrain_scorches() -> void:
 # Consume render-internal lifecycle effects first, route "dialog" actions to
 # mission audio (resolved through the co-named .DBF + LWF set), then expose only
 # the remaining downstream effects to HUD consumers.
-func _on_runtime_effects(effects: Array) -> void:
+func on_runtime_effects(effects: Array) -> void:
 	var routed: Array = []
 	for effect_v in effects:
 		var effect := effect_v as MissionEffect
@@ -125,7 +125,7 @@ func _on_runtime_effects(effects: Array) -> void:
 	_world.mission_effects.emit(routed)
 
 
-func _on_runtime_fixed_tick(_logic_tick: int) -> void:
+func on_runtime_fixed_tick(_logic_tick: int) -> void:
 	var probe_enabled := _world._perf_probe_enabled
 	var skip_fixed_handlers := probe_enabled and _world._perf_probe_skip_fixed_handlers
 	if skip_fixed_handlers:
@@ -158,7 +158,7 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 			_world._effect_world.advance_fixed_tick(Simulation.tick_dt())
 
 
-func _on_runtime_simulation_restarted() -> void:
+func on_runtime_simulation_restarted() -> void:
 	# A Stop/restart can restore the saved personal slot while the presenter still
 	# owns an emplaced model. Consume that control event synchronously; no fixed
 	# tick runs while stopped.
