@@ -22,7 +22,7 @@ var _layer: CanvasLayer = null
 var _screen: LoadingScreen = null
 var _operation: WorldLoadOperation = null
 var _presentation_active := false
-var _load_info: Dictionary = {}
+var _load_info: LoadingScreenInfo = null
 
 
 func can_start() -> bool:
@@ -30,7 +30,7 @@ func can_start() -> bool:
 
 
 func start(owner: Node, root: ResourceRoot, world: GameWorld,
-		load_info: Dictionary, loader: Callable) -> WorldLoadOperation:
+		load_info: LoadingScreenInfo, loader: Callable) -> WorldLoadOperation:
 	if not can_start() or owner == null or world == null or not loader.is_valid():
 		return null
 	_owner = owner
@@ -81,7 +81,7 @@ func has_background() -> bool:
 ## half; SP `load_info` never sets `in_session`
 ## [orig: the !is_in_session leg of the splash gate @ 0x525d38].
 func is_session_load() -> bool:
-	return bool(_load_info.get("in_session", false))
+	return _load_info != null and _load_info.in_session
 
 
 ## The screen's custom-background flag (the retail g_loadscreen_has_custom_bg
@@ -185,7 +185,7 @@ func _settle(operation: WorldLoadOperation) -> void:
 		_operation = null
 
 
-func _show_screen(load_info: Dictionary) -> void:
+func _show_screen(load_info: LoadingScreenInfo) -> void:
 	dismiss()
 	_presentation_active = true
 	if _root == null:
@@ -212,7 +212,7 @@ func _show_screen(load_info: Dictionary) -> void:
 		_world.join_session_identified.connect(_on_join_session_identified)
 
 
-func _on_join_session_identified(info: Dictionary) -> void:
+func _on_join_session_identified(info: LoadingScreenInfo) -> void:
 	# The joiner's 0x7B record fills the same session strings retail resolves
 	# before its wire-header world load [orig: parse_server_session_variables
 	# @ 0x5202f0 -> loading title/mission buffers @ 0x51f533/0x51f53a].

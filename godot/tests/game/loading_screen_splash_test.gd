@@ -76,7 +76,7 @@ func test_fallback_background_reports_no_custom_flag() -> void:
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
-	screen.setup(root, {"mission_file": "NOSIDE.bms"})
+	screen.setup(root, LoadingScreenInfo.for_mission("NOSIDE.bms"))
 	assert_true(screen.has_background())
 	assert_false(screen.has_custom_background(),
 		"the stock loadscrn.pcx never sets the custom flag [orig: @ 0x521dcc]")
@@ -91,7 +91,7 @@ func test_missing_arrow_and_text_degrade_to_skipped_elements() -> void:
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
-	screen.setup(root, {"mission_file": "00TRg.bms"})
+	screen.setup(root, LoadingScreenInfo.for_mission("00TRg.bms"))
 	add_child(screen)
 	assert_true(screen.begin_start_mission_splash(root))
 	assert_false(screen.has_splash_arrow(), "no arrow art -> arrowless splash")
@@ -196,7 +196,7 @@ func test_coordinator_gate_seams_and_dismissal_forward() -> void:
 	var world: GameWorld = autofree(GameWorld.new())
 	var coordinator := WorldLoadCoordinator.new()
 	var operation := coordinator.start(owner, root, world,
-			{"mission_file": "00TRg.bms"}, func() -> int: return OK)
+			LoadingScreenInfo.for_mission("00TRg.bms"), func() -> int: return OK)
 	assert_not_null(operation, "the SP load starts")
 	await _pump_frames(4)
 	assert_false(coordinator.is_session_load(),
@@ -219,7 +219,7 @@ func test_coordinator_can_dismiss_an_active_splash_without_input_synthesis() -> 
 	var world: GameWorld = autofree(GameWorld.new())
 	var coordinator := WorldLoadCoordinator.new()
 	assert_not_null(coordinator.start(owner, root, world,
-			{"mission_file": "00TRg.bms"}, func() -> int: return OK))
+			LoadingScreenInfo.for_mission("00TRg.bms"), func() -> int: return OK))
 	await _pump_frames(4)
 	watch_signals(coordinator)
 	assert_true(coordinator.begin_start_mission_splash())
@@ -235,7 +235,7 @@ func test_coordinator_session_load_reports_the_session_flag() -> void:
 	var world: GameWorld = autofree(GameWorld.new())
 	var coordinator := WorldLoadCoordinator.new()
 	var operation := coordinator.start(owner, root, world,
-			{"mission_file": "00TRg.bms", "in_session": true},
+			LoadingScreenInfo.make("00TRg.bms", true, "", "", -1, ""),
 			func() -> int: return OK)
 	assert_not_null(operation)
 	await _pump_frames(4)
@@ -260,7 +260,7 @@ func test_maybe_begin_never_raises_headless() -> void:
 	var world: GameWorld = autofree(GameWorld.new())
 	var coordinator := WorldLoadCoordinator.new()
 	var operation := coordinator.start(owner, root, world,
-			{"mission_file": "00TRg.bms"}, func() -> int: return OK)
+			LoadingScreenInfo.for_mission("00TRg.bms"), func() -> int: return OK)
 	assert_not_null(operation)
 	await _pump_frames(4)
 	assert_true(coordinator.has_custom_background(),
@@ -280,7 +280,7 @@ func test_maybe_begin_positive_leg_raises_and_restores_the_cursor() -> void:
 	var world: GameWorld = autofree(GameWorld.new())
 	var coordinator := WorldLoadCoordinator.new()
 	var operation := coordinator.start(owner, root, world,
-			{"mission_file": "00TRg.bms"}, func() -> int: return OK)
+			LoadingScreenInfo.for_mission("00TRg.bms"), func() -> int: return OK)
 	assert_not_null(operation)
 	await _pump_frames(4)
 	watch_signals(coordinator)
@@ -303,7 +303,7 @@ func test_splash_survives_ready_after_pre_tree_begin() -> void:
 	# already-ACTIVE splash (the guard on _splash_state).
 	var root := _art_root()
 	var screen: LoadingScreen = LoadingScreen.new()
-	screen.setup(root, {"mission_file": "00TRg.bms"})
+	screen.setup(root, LoadingScreenInfo.for_mission("00TRg.bms"))
 	assert_true(screen.begin_start_mission_splash(root))
 	add_child_autofree(screen)
 	assert_true(screen.is_splash_active())
@@ -323,7 +323,7 @@ var _roots := {}
 func _setup_screen() -> LoadingScreen:
 	var root := _art_root()
 	var screen: LoadingScreen = autofree(LoadingScreen.new())
-	screen.setup(root, {"mission_file": "00TRg.bms"})
+	screen.setup(root, LoadingScreenInfo.for_mission("00TRg.bms"))
 	assert_true(screen.has_background(), "the test pcx decodes into a texture")
 	_roots[screen] = root
 	return screen

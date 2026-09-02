@@ -243,12 +243,10 @@ func _drive_join_preload_step() -> void:
 	# The authoritative session identity. None of it came from discovery; every
 	# value here came from 0x7B.
 	_join_preload_root = null
-	_world.join_session_identified.emit({
-		"server_name": String(_join_preload_sim.get_join_server_name()),
-		"mission_name": String(_join_preload_sim.get_join_mission_name()),
-		"mission_file": bms,
-		"game_type": int(_join_preload_sim.get_join_game_type()),
-	})
+	_world.join_session_identified.emit(LoadingScreenInfo.make(bms, true,
+			String(_join_preload_sim.get_join_server_name()),
+			String(_join_preload_sim.get_join_mission_name()),
+			int(_join_preload_sim.get_join_game_type()), ""))
 	var err: int = _load_mission_internal_cb.call(mission, bms, resource_root)
 	if err != OK:
 		# _load_mission_internal emitted the specific resource/load failure.

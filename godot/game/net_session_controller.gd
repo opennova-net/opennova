@@ -108,14 +108,8 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 	# JO), not a session template or a value copied from one capture.
 	var root := _resource_root()
 	config.expansion = root.get_expansion() if root != null else ""
-	var load_info := {
-		"mission_file": config.mission,
-		"in_session": true,
-		"server_name": config.server_name,
-		"mission_name": _resolve_mission_title(config.mission),
-		"game_type": config.game_type,
-		"custom_text": config.custom_text,
-	}
+	var load_info := LoadingScreenInfo.make(config.mission, true, config.server_name,
+			_resolve_mission_title(config.mission), config.game_type, config.custom_text)
 	_shell.start_world_load(
 		load_info,
 		_world.load_mission_as_host.bind(config))
@@ -167,12 +161,8 @@ func _start_lan_join(target: JoinTarget) -> void:
 	# (docs/interface/loading-screen-re.md, the load-flow case matrix).
 	if target.player_name.is_empty():
 		target.player_name = resolve_player_callsign()
-	var load_info := {
-		"mission_file": target.mission,
-		"in_session": true,
-		"server_name": target.server_name,
-		"game_type": target.game_type,
-	}
+	var load_info := LoadingScreenInfo.make(target.mission, true, target.server_name, "",
+			target.game_type, "")
 	_shell.start_world_load(
 		load_info,
 		_world.load_mission_as_joiner.bind(target))
@@ -455,14 +445,10 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	config.player_name = resolve_player_callsign()
 	if config.server_name.is_empty():
 		config.server_name = "OpenNova Host"
-	_shell.start_world_load({
-		"mission_file": mission,
-		"in_session": true,
-		"server_name": config.server_name,
-		"mission_name": _resolve_mission_title(mission),
-		"game_type": config.game_type,
-		"custom_text": config.custom_text,
-	}, _world.load_mission_as_host.bind(config))
+	_shell.start_world_load(
+			LoadingScreenInfo.make(mission, true, config.server_name,
+					_resolve_mission_title(mission), config.game_type, config.custom_text),
+			_world.load_mission_as_host.bind(config))
 
 
 # The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match

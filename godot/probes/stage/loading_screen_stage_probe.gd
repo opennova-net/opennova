@@ -53,14 +53,9 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 
 
 func _session_hold(root: ResourceRoot, hold_seconds: float, mission: String) -> ProbeVerdict:
-	_screen.setup(root, {
-		"mission_file": mission,
-		"in_session": true,
-		"server_name": "OPENNOVA HOST",
-		"mission_name": "Weapons Training: M203",
-		"game_type": 0x10010,  # AAS -> LTGT_AAS
-		"custom_text": "Welcome to the OpenNova test server. Play fair and have fun.",
-	})
+	_screen.setup(root, LoadingScreenInfo.make(mission, true, "OPENNOVA HOST",
+			"Weapons Training: M203", 0x10010,  # AAS -> LTGT_AAS
+			"Welcome to the OpenNova test server. Play fair and have fun."))
 	_screen.set_progress(45)
 	var deadline := Time.get_ticks_msec() + int(hold_seconds * 1000.0)
 	while Time.get_ticks_msec() < deadline and not _ctx.cancelled:
@@ -73,7 +68,7 @@ func _session_hold(root: ResourceRoot, hold_seconds: float, mission: String) -> 
 	# Retail's splash runs on the not-in-session screen; rebuild as the SP
 	# composite (image only) before raising it so the eyeball matches
 	# [orig: the splash draws over the SP background @ 0x5209ab].
-	_screen.setup(root, {"mission_file": mission})
+	_screen.setup(root, LoadingScreenInfo.for_mission(mission))
 	if not _screen.begin_start_mission_splash(root):
 		return ProbeVerdict.failed("the start-mission splash failed to raise")
 	await _ctx.wait_ms(int(SPLASH_SETTLE_SECONDS * 1000.0))
@@ -85,7 +80,7 @@ func _session_hold(root: ResourceRoot, hold_seconds: float, mission: String) -> 
 
 
 func _splash_capture(root: ResourceRoot, mission: String) -> ProbeVerdict:
-	_screen.setup(root, {"mission_file": mission})
+	_screen.setup(root, LoadingScreenInfo.for_mission(mission))
 	if not _screen.has_custom_background():
 		return ProbeVerdict.failed("%s resolved no sidecar art" % mission)
 	if not _screen.begin_start_mission_splash(root):

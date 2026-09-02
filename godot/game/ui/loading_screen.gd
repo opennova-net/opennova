@@ -103,17 +103,30 @@ static func bar_fill_span(x: int, w: int, displayed: int) -> Vector2i:
 	return HudPos.loading_bar_fill_span(x, w, displayed)
 
 
+## The background image pick: the image name and whether it is the mission's
+## own sidecar (the retail custom-background flag the SP splash gate reads).
+class BackgroundPick:
+	var name := ""
+	var custom := false
+
+	static func make(name: String, custom: bool) -> BackgroundPick:
+		var pick := BackgroundPick.new()
+		pick.name = name
+		pick.custom = custom
+		return pick
+
+
 ## Resolve the background image for a mission: the sidecar if present, else the
 ## stock fallback [orig: FileSystem_FileExists probe @ 0x521db5; fallback
-## @ 0x521e20]. Returns { "name": String, "custom": bool }.
-static func resolve_background(root: ResourceRoot, mission_file: String) -> Dictionary:
+## @ 0x521e20].
+static func resolve_background(root: ResourceRoot, mission_file: String) -> BackgroundPick:
 	var sidecar := sidecar_image_name(mission_file)
 	# UI image probes force loose-first for this lookup, independent of /d.
 	# [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
 	if root != null and not sidecar.is_empty() and root.has_file(
 			sidecar, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST):
-		return {"name": sidecar, "custom": true}
-	return {"name": HudPos.loading_fallback_image(), "custom": false}
+		return BackgroundPick.make(sidecar, true)
+	return BackgroundPick.make(HudPos.loading_fallback_image(), false)
 
 
 ## Public texture-load seam for owners/tests; avoids private-state inspection (ADR 0018).
@@ -124,28 +137,29 @@ static func load_background_texture(root: ResourceRoot, image_name: String) -> T
 	return root.load_texture(image_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 
 
-## Build the screen for a mission load. `info`:
-##   mission_file: String — the .bms name driving the sidecar lookup
-##   in_session: bool — MP session: draw the text overlay [orig: gate @ 0x521ebe]
-##   server_name / mission_name / custom_text: String — the session variables
+## Build the screen for a mission load (LoadingScreenInfo):
+##   mission_file — the .bms name driving the sidecar lookup
+##   in_session — MP session: draw the text overlay [orig: gate @ 0x521ebe]
+##   server_name / mission_name / custom_text — the session variables
 ##     [orig: SERVERNAME/MISSIONNAME/CUSTOMTEXT @ parse_server_session_variables
 ##      0x5202f0 / serialize_mission_info_to_datastream 0x523620]
-##   game_type: int — the numeric session game type [orig: GAMETYPE]
-func setup(root: ResourceRoot, info: Dictionary) -> void:
+##   game_type — the numeric session game type [orig: GAMETYPE]; not carried
+##     (negative) reads as 0
+func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
-	var bg := resolve_background(root, String(info.get("mission_file", "")))
-	_has_custom_bg = bool(bg["custom"])
-	_texture = load_background_texture(root, String(bg["name"]))
-	_in_session = bool(info.get("in_session", false))
+	var bg := resolve_background(root, info.mission_file)
+	_has_custom_bg = bg.custom
+	_texture = load_background_texture(root, bg.name)
+	_in_session = info.in_session
 	if not _in_session:
 		queue_redraw()
 		return
 	# MP only: the text overlay and its fonts [orig: fonts loaded only on the
 	# in-session path @ 0x521eec/0x521f5a].
-	_title = String(info.get("server_name", ""))
-	_mission_name = String(info.get("mission_name", ""))
-	_custom_text = String(info.get("custom_text", ""))
-	_game_type_text = _lookup_loading_text(gametype_text_key(int(info.get("game_type", 0))), "")
+	_title = info.server_name
+	_mission_name = info.mission_name
+	_custom_text = info.custom_text
+	_game_type_text = _lookup_loading_text(gametype_text_key(maxi(info.game_type, 0)), "")
 	_font_small = _load_font(root, HudPos.loading_font_small())
 	_font_large = _load_font(root, HudPos.loading_font_large())
 	queue_redraw()
@@ -157,24 +171,21 @@ func setup(root: ResourceRoot, info: Dictionary) -> void:
 ## Retail fills the same buffers from the connect stream during its load
 ## [orig: parse_server_session_variables @ 0x5202f0 -> the title/mission bufs
 ## @ 0x51f533/0x51f53a]. Empty values keep the current ones.
-func update_session_info(root: ResourceRoot, info: Dictionary) -> void:
-	var mission_file := String(info.get("mission_file", ""))
-	if not mission_file.is_empty():
-		var bg := resolve_background(root, mission_file)
-		var texture := load_background_texture(root, String(bg["name"]))
+func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
+	if not info.mission_file.is_empty():
+		var bg := resolve_background(root, info.mission_file)
+		var texture := load_background_texture(root, bg.name)
 		if texture != null:
-			_has_custom_bg = bool(bg["custom"])
+			_has_custom_bg = bg.custom
 			_texture = texture
 	if _in_session:
-		var title := String(info.get("server_name", ""))
-		if not title.is_empty():
-			_title = title
-		var mission_name := String(info.get("mission_name", ""))
-		if not mission_name.is_empty():
-			_mission_name = mission_name
-		if int(info.get("game_type", -1)) >= 0:
+		if not info.server_name.is_empty():
+			_title = info.server_name
+		if not info.mission_name.is_empty():
+			_mission_name = info.mission_name
+		if info.game_type >= 0:
 			_game_type_text = _lookup_loading_text(
-					gametype_text_key(int(info.get("game_type", 0))), _game_type_text)
+					gametype_text_key(info.game_type), _game_type_text)
 	queue_redraw()
 
 

@@ -34,7 +34,7 @@ signal load_failed(reason: String)
 ## to be constructed. The shell refreshes its loading screen from this — retail's
 ## connect stream fills the same session vars before its header-backed load
 ## [orig: parse_server_session_variables @ 0x5202f0].
-signal join_session_identified(info: Dictionary)
+signal join_session_identified(info: LoadingScreenInfo)
 ## A joiner crossed the authoritative admission edge. Wire-header world load
 ## completion is intentionally separate: the shell keeps the loading presentation
 ## raised until this edge (or until the host requests a deployment-zone pick).
