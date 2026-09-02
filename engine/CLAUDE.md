@@ -90,7 +90,13 @@
   retail-corpus byte diff by hand whenever you touch the CPT encoder. The BMS `Reader`
   (`engine/formats/mission/bms.cpp` since the mission-format move) is still its own
   class with a safe bound (`count <= remaining()`), so what remains is a mechanical
-  migration, not a hardening one.
+  migration, not a hardening one. Three more stay by design: `formats/bink`'s
+  `BitReader` is a fail-latching decoder contract (`peek`, `align32`, the first short
+  read poisons it), the `wire_cursor` posture rather than `io::BitReader`'s lenient
+  zero-fill; `net/npwire/wire/ingame_encode.cpp`'s `Writer` already rides
+  `io::append_*_le` and exists only for the witnessed `cstr`/`cstr_capped` wire string
+  forms over an external buffer; `formats/bad` and `formats/rtxt` read through
+  offset-indexed wrappers over `io::read_*_le` plus a NUL-string scanner, not cursors.
 - Ports are faithful structural translations of the original engine — implementing "our
   own version" of engine behavior is never allowed unless a tracked decision (ADR or an
   RE-record divergence entry) says otherwise. CRT/OS/platform primitives (strcpy/sprintf/
