@@ -60,11 +60,10 @@ func _authored_attachment_anchors(
 	# retail frame. Whole-name case-insensitive resolve, first match — the same
 	# rule the runtime applies, so the expected frames pair with produced rows.
 	var rows: Array = []
-	for raw in item_db.get_emplacement_attachments(item_id):
-		var authored: Dictionary = raw
-		var wanted := String(authored.get("userpoint", "")).strip_edges()
+	for authored: ItemEmplacementAttachment in item_db.get_emplacement_attachments(item_id):
+		var wanted := authored.userpoint.strip_edges()
 		var row := {
-			"item_id": int(authored.get("item_id", 0)),
+			"item_id": authored.item_id,
 			"source_name": wanted,
 			"subobject": -1,
 			"raw_position": Vector3.ZERO,

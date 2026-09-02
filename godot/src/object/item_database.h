@@ -17,6 +17,9 @@
 
 namespace godot {
 
+class EnvsMarkerRow;
+class ItemEmplacementAttachment;
+class ItemParticleFx;
 class ResourceRoot;
 
 // Thin GDExtension wrapper over engine/formats/def items.def parsing (def_parse_items).
@@ -197,10 +200,8 @@ private:
 			const ::DefItemDef &entry);
 
 	// Items in a stable display order (by display name, then id), since the backing
-	// store is unordered. Shared by get_item_ids() / get_items().
+	// store is unordered (get_item_ids()).
 	std::vector<const Item *> sorted_items() const;
-	// The one per-item dictionary shape get_item() and get_items() both publish.
-	Dictionary item_dictionary(const Item &item) const;
 
 protected:
 	static void _bind_methods();
@@ -257,6 +258,9 @@ public:
 	bool has_item(int id) const;
 	// Model basename without extension (e.g. "tank"); empty if unknown/none.
 	String get_graphic(int id) const;
+	// The items.def `sid` token, the key hudpos.def's VEHICLE_HUD blocks commit
+	// against; empty if unknown/none.
+	String get_sid(int id) const;
 	String get_anim_def(int id) const;
 	// items.def *_function class tags (raw); empty if the item declares none. The
 	// net layer turns these into a wire dispatch class.
@@ -299,52 +303,40 @@ public:
 	Dictionary extract_seat_specs_for_item(
 			const Ref<class ResourceRoot> &p_root, int p_item_id);
 	String get_launchups_closeattack(int id) const;
-	// Ordered child-emplacement records from addeweap/addeweapG/addeweapC.
-	// Every Dictionary retains the exact key variant plus source userpoint,
-	// child item id, and optional down/up/right/left limits.
-	Array get_emplacement_attachments(int id) const;
+	// Ordered child-emplacement records from addeweap/addeweapG/addeweapC (the
+	// key variant, source userpoint, child item id, optional limits, the
+	// designated G/C marks); empty for an unknown id.
+	TypedArray<ItemEmplacementAttachment> get_emplacement_attachments(int id) const;
 	// Last stored G/C attachment slot, 1-based; zero means absent.
-	Dictionary get_emplacement_attachment_markers(int id) const;
-	// {valid: bool, value: int} for the target definition's phrase_set +0x86C.
-	// Always returns both fields so absent and authored zero stay distinct.
+	int get_emplacement_g_slot(int id) const;
+	int get_emplacement_c_slot(int id) const;
+	// The target definition's phrase_set +0x86C (the mounted skeletal selector):
+	// presence is separate so an authored zero stays distinct from absent.
 	// (engine: formats/def/def.h)
-	Dictionary get_mount_config(int id) const;
+	bool has_mount_config(int id) const;
+	int get_mount_config(int id) const;
 	// items.def husk / huskfinal — the destroyed-model stages the render and
 	// collision swap to at death (Flags & 4); empty if none authored.
 	// (engine: runtime/simassets/collision_resolve.cpp)
 	String get_husk(int id) const;
 	String get_huskfinal(int id) const;
-	// The destruction traits as one bundle: {unit_type, kz, armor_impact,
-	// armor_blast, sounddeath, debris_scale, husk_sub_parts,
-	// husk_sub_part_types (PackedInt32Array), has_husk}. Empty Dictionary =
-	// unknown id. Feeds the sim's item-traits sweep (world::ItemDeathTraits).
-	// [docs/world/world-wac-ai-re.md §24]
 	// items.def soundloop_1..7 as a 7-entry array (empty strings for unused slots).
 	// These are the looping ambient sound-set names for "snd:" marker items.
 	PackedStringArray get_sound_loops(int id) const;
 	// S13 (ADR 0028): the envs-class ambient marker resolution over the
-	// retained items.def + the mission's native document
-	// (audio/envs_markers.h). Rows: {position: Vector3 (authored BMS units),
-	// bms_id: int, slot_sets: PackedStringArray(4, "" = silent slot)}.
-	TypedArray<Dictionary> resolve_envs_markers(
+	// retained items.def + the mission's native document (audio/envs_markers.h).
+	TypedArray<EnvsMarkerRow> resolve_envs_markers(
 			const Ref<class MissionData> &p_mission) const;
-	// The item's particle-effect keys as authored, keyed by the ITEMS.DEF key names
-	// ("particlefx"/"particlefxs"/"particlefxw1".."particlefxw4" -> {effect, userpoint,
-	// secondary_effect} sub-dictionaries; "particledeath"/"particleh2odeath"/
-	// "particlefire"/"particleother"/"particlespawn"/"particlefinale" -> effect name).
-	// Empty strings = key absent; empty Dictionary = unknown id. [orig:
-	// ItemDef_ParseProperty @ 0x49eb00; slot-A runtime attach witness
-	// resolve_item_materials_and_spawn_bone_trails @ 0x522ee0 ->
-	// Entity_SpawnBoneTrailEffect @ 0x43bef0]
-	Dictionary get_particle_effects(int id) const;
-	Dictionary get_item(int id) const;
+	// The item's slot-A particle effect ("particlefx", the always-on attached
+	// emitter the runtime effect-attach pass consumes); null = unknown id, empty
+	// effect = key absent. The other authored slots (particlefxs, particlefxw1..4,
+	// the death/fire/other family) are read engine-side from the retained parse.
+	Ref<ItemParticleFx> get_particle_fx(int id) const;
 
-	// Enumeration for UI (e.g. the mission editor's place-object palette). Both are
-	// sorted deterministically by (display_name, id) so the list is stable across
-	// loads (the backing store is an unordered_map). get_items() returns the same
-	// per-item dictionaries as get_item(); get_item_ids() is just the ids.
+	// Every item id in a stable display order (natural, case-insensitive
+	// display_name, then id), so an enumeration is reproducible across loads
+	// (the backing store is an unordered_map).
 	PackedInt32Array get_item_ids() const;
-	Array get_items() const;
 };
 
 } // namespace godot

@@ -29,8 +29,7 @@ func update(hud: HudOverlay, hud_pos: HudPos, item_db: ItemDatabase,
 	if not bool(view.get("shown", false)) or hud_pos == null or item_db == null:
 		_hide(hud)
 		return
-	var item: Dictionary = item_db.get_item(int(view.get("item_id", 0)))
-	var sid := String(item.get("sid", ""))
+	var sid := item_db.get_sid(int(view.get("item_id", 0)))
 	var block: Dictionary = hud_pos.get_vehicle_hud(sid) if not sid.is_empty() else {}
 	if block.is_empty():
 		# No authored block for this vehicle: retail draws no panel for it
