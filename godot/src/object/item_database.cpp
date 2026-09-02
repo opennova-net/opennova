@@ -91,6 +91,9 @@ ItemDatabase::~ItemDatabase() {
 }
 
 void ItemDatabase::release_native_items() {
+	// The index points into the parse: drop it before the rows go away.
+	index_.clear();
+	sorted_ids_ = PackedInt32Array();
 	if (items_file_loaded_) {
 		def_free_items(&items_file_);
 		items_file_loaded_ = false;
@@ -98,12 +101,53 @@ void ItemDatabase::release_native_items() {
 	items_file_ = {};
 }
 
+// Retain the parse (ADR 0028) and index it. The id index walks the rows in
+// file order so a duplicate id resolves to its LAST row; the rows themselves
+// are kept as parsed so the replication catalog can classify duplicates.
+void ItemDatabase::adopt_(const DefItemsFile &p_file) {
+	items_file_ = p_file;
+	items_file_loaded_ = true;
+
+	index_.reserve(items_file_.count);
+	for (size_t i = 0; i < items_file_.count; ++i) {
+		index_[items_file_.entries[i].id] = i;
+	}
+
+	// The index is unordered, so callers that enumerate get a stable order only
+	// if we impose one. Sort by display name (natural, case-insensitive, the
+	// order a user scans a palette), breaking ties by id so the order is total
+	// and reproducible.
+	struct SortKey {
+		String display_name;
+		int id;
+	};
+	std::vector<SortKey> keys;
+	keys.reserve(index_.size());
+	for (const auto &pair : index_) {
+		keys.push_back({String(items_file_.entries[pair.second].display_name), pair.first});
+	}
+	std::sort(keys.begin(), keys.end(), [](const SortKey &a, const SortKey &b) {
+		const int name_cmp = a.display_name.naturalnocasecmp_to(b.display_name);
+		if (name_cmp != 0) {
+			return name_cmp < 0;
+		}
+		return a.id < b.id;
+	});
+	sorted_ids_.resize(static_cast<int>(keys.size()));
+	for (size_t i = 0; i < keys.size(); ++i) {
+		sorted_ids_.set(static_cast<int>(i), keys[i].id);
+	}
+}
+
+const ::DefItemDef *ItemDatabase::row_(int p_id) const {
+	const auto it = index_.find(p_id);
+	return it == index_.end() ? nullptr : &items_file_.entries[it->second];
+}
+
 Error ItemDatabase::load(const String &path) {
 	++revision;
 	source_path = path;
 	last_error = String();
-	items.clear();
-	replication_definition_records.clear();
 	release_native_items();
 
 	PackedByteArray bytes;
@@ -118,149 +162,13 @@ Error ItemDatabase::load(const String &path) {
 		return ERR_CANT_OPEN;
 	}
 
-	replication_definition_records.reserve(file.count);
-	for (size_t i = 0; i < file.count; ++i) {
-		replication_definition_records.push_back(
-				replication_definition_from_entry(file.entries[i]));
-		items[file.entries[i].id] = item_from_entry(file.entries[i]);
-	}
-
-	// Retain the parse (ADR 0028): the engine-side trait fold reads these
-	// rows directly through native_items().
-	items_file_ = file;
-	items_file_loaded_ = true;
+	adopt_(file);
 	return OK;
-}
-
-ItemDatabase::Item ItemDatabase::item_from_entry(const ::DefItemDef &entry) {
-	Item item;
-	item.id = entry.id;
-	item.type = entry.type;
-	item.sid = String(entry.sid);
-	item.attrib = static_cast<uint32_t>(entry.attrib);
-	item.attrib2 = static_cast<uint32_t>(entry.attrib2);
-	item.display_name = String(entry.display_name);
-	item.graphic = String(entry.graphic);
-	item.anim_def = String(entry.anim_def);
-	item.sound_profile = String(entry.sound_profile);
-	item.ai_function = String(entry.ai_function);
-	item.move_function = String(entry.move_function);
-	item.render_function = String(entry.render_function);
-	item.disk_function = String(entry.disk_function);
-	item.default_aip = String(entry.default_aip);
-	item.hp = entry.hp;
-	item.shadow_texture = String(entry.shadow_texture);
-	item.shadow_width = entry.shadow_width;
-	item.shadow_length = entry.shadow_length;
-	item.shadow_offset_x = entry.shadow_offset_x;
-	item.shadow_offset_y = entry.shadow_offset_y;
-	item.light_transfer = entry.light_transfer;
-	item.damage_reduc_pp = entry.damage_reduc_pp;
-	item.damage_reduc_max = entry.damage_reduc_max;
-	item.physics = entry.physics;
-	item.acceleration = entry.acceleration;
-	item.deceleration = entry.deceleration;
-	item.player_speed = entry.player_speed;
-	item.water_speed = entry.water_speed;
-	item.climb_speed = entry.climb_speed;
-	item.turn_roll = entry.turn_roll;
-	item.speed_pitch = entry.speed_pitch;
-	item.max_slope = entry.max_slope;
-	item.slip_slope = entry.slip_slope;
-	item.mass = entry.mass;
-	item.lean = entry.lean;
-	item.lean_velocity = entry.lean_velocity;
-	item.pitch = entry.pitch;
-	item.pitch_velocity = entry.pitch_velocity;
-	item.bob = entry.bob;
-	item.flip = entry.flip;
-	item.turn_rate = entry.turn_rate;
-	item.turn_rate2 = entry.turn_rate2;
-	item.torque = entry.torque;
-	item.unit_type = entry.unit_type;
-	for (int s = 0; s < 7; ++s) {
-		item.soundloops[s] = String(entry.soundloops[s]);
-	}
-	// The per-item particle-effect keys [orig: ItemDef_ParseProperty @ 0x49eb00].
-	const auto copy_fx = [](Item::ParticleFx &dst, const DefItemParticleFx &src) {
-		dst.effect = String(src.effect);
-		dst.userpoint = String(src.userpoint);
-		dst.secondary_effect = String(src.secondary_effect);
-	};
-	copy_fx(item.particlefx, entry.particlefx);
-	copy_fx(item.particlefxs, entry.particlefxs);
-	copy_fx(item.particlefxw[0], entry.particlefxw1);
-	copy_fx(item.particlefxw[1], entry.particlefxw2);
-	copy_fx(item.particlefxw[2], entry.particlefxw3);
-	copy_fx(item.particlefxw[3], entry.particlefxw4);
-	item.particledeath = String(entry.particledeath);
-	item.particleh2odeath = String(entry.particleh2odeath);
-	item.particlefire = String(entry.particlefire);
-	item.particleother = String(entry.particleother);
-	item.particlespawn = String(entry.particlespawn);
-	item.particlefinale = String(entry.particlefinale);
-	// The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5).
-	item.ammo_closeattack = String(entry.ammo_closeattack);
-	item.launchups_closeattack = String(entry.launchups_closeattack);
-	item.clipsize = entry.clipsize;
-	item.deathtime_ticks = entry.deathtime_ticks;
-	item.primary_weapon = String(entry.primary_weapon);
-	item.emplacement_attachments.reserve(entry.emplacement_attachments_count);
-	for (size_t i = 0; i < entry.emplacement_attachments_count; ++i) {
-		const DefItemEmplacementAttachment &src = entry.emplacement_attachments[i];
-		Item::EmplacementAttachment dst;
-		dst.userpoint = String(src.userpoint);
-		dst.item_id = src.item_id;
-		dst.down_angle = src.down_angle;
-		dst.up_angle = src.up_angle;
-		dst.right_angle = src.right_angle;
-		dst.left_angle = src.left_angle;
-		dst.angle_count = src.angle_count;
-		dst.kind = src.kind;
-		item.emplacement_attachments.push_back(dst);
-	}
-	item.emplacement_g_slot = entry.emplacement_g_slot;
-	item.emplacement_c_slot = entry.emplacement_c_slot;
-	item.mount_config_valid = entry.phrase_set_valid != 0;
-	item.mount_config = entry.phrase_set;
-	// The destruction/husk block (world-wac-ai-re §24).
-	item.husk = String(entry.husk);
-	item.huskfinal = String(entry.huskfinal);
-	item.sounddeath = String(entry.sounddeath);
-	item.armor_impact = entry.armor_impact;
-	item.armor_blast = entry.armor_blast;
-	item.armor_kz = entry.armor_kz;
-	item.kz = entry.kz;
-	item.model_scale_q16 = entry.scale_q16;
-	item.debris_scale = entry.debris_scale;
-	item.husk_sub_parts = entry.husk_sub_parts;
-	for (int s = 0; s < 16; ++s) {
-		item.husk_sub_part_types[s] = entry.husk_sub_part_types[s];
-	}
-	return item;
-}
-
-ItemDatabase::ReplicationDefinitionRecord
-ItemDatabase::replication_definition_from_entry(
-		const ::DefItemDef &entry) {
-	ReplicationDefinitionRecord record;
-	record.definition_id = entry.id;
-	record.item_type = entry.type;
-	record.attrib = static_cast<uint32_t>(entry.attrib);
-	record.attrib2 = static_cast<uint32_t>(entry.attrib2);
-	record.physics = entry.physics;
-	record.ai_function = String(entry.ai_function);
-	record.move_function = String(entry.move_function);
-	record.render_function = String(entry.render_function);
-	record.disk_function = String(entry.disk_function);
-	return record;
 }
 
 Error ItemDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name) {
 	++revision;
 	last_error = String();
-	items.clear();
-	replication_definition_records.clear();
 	release_native_items();
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
 		last_error = "Resource root is not configured";
@@ -283,23 +191,13 @@ Error ItemDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resource_
 		return ERR_CANT_OPEN;
 	}
 
-	replication_definition_records.reserve(file.count);
-	for (size_t i = 0; i < file.count; ++i) {
-		replication_definition_records.push_back(
-				replication_definition_from_entry(file.entries[i]));
-		items[file.entries[i].id] = item_from_entry(file.entries[i]);
-	}
-
-	// Retain the parse (ADR 0028): the engine-side trait fold reads these
-	// rows directly through native_items().
-	items_file_ = file;
-	items_file_loaded_ = true;
+	adopt_(file);
 	source_path = file_name;
 	return OK;
 }
 
 bool ItemDatabase::is_loaded() const {
-	return !items.empty();
+	return !index_.empty();
 }
 
 String ItemDatabase::get_source_path() const {
@@ -311,184 +209,178 @@ String ItemDatabase::get_last_error() const {
 }
 
 int ItemDatabase::get_count() const {
-	return static_cast<int>(items.size());
+	return static_cast<int>(index_.size());
 }
 
 bool ItemDatabase::has_item(int id) const {
-	return items.find(id) != items.end();
+	return row_(id) != nullptr;
 }
 
 String ItemDatabase::get_graphic(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.graphic;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->graphic);
 }
 
 String ItemDatabase::get_sid(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.sid;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->sid);
 }
 
 String ItemDatabase::get_anim_def(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.anim_def;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->anim_def);
 }
 
 String ItemDatabase::get_ai_function(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.ai_function;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->ai_function);
 }
 
 String ItemDatabase::get_move_function(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.move_function;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->move_function);
 }
 
 int ItemDatabase::get_item_type(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? static_cast<int>(TYPE_UNKNOWN) : it->second.type;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? static_cast<int>(TYPE_UNKNOWN) : row->type;
 }
 
 int32_t ItemDatabase::get_model_scale_q16(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0 : it->second.model_scale_q16;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? 0 : row->scale_q16;
 }
 
 float ItemDatabase::get_light_transfer(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0.0f : it->second.light_transfer;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? 0.0f : row->light_transfer;
 }
 
 // items.def ItemDefAttrib & 0x100000 (AIData). Mirrors the stock 0x0D decoder's own gate
 // (itemDef.attrib & 0x100000 @0x433327) so the host emits the AI-trailer iff the item is
 // AI-capable. [docs/world/itemdef-re.md; docs/net/novaworld-net-re.md D-NET-97]
 bool ItemDatabase::is_ai_capable(int id) const {
-	const auto it = items.find(id);
-	return it != items.end() && (it->second.attrib & 0x100000u) != 0;
+	const ::DefItemDef *row = row_(id);
+	return row != nullptr && (static_cast<uint32_t>(row->attrib) & 0x100000u) != 0;
 }
 
 // The raw items.def ItemDefAttrib dword (itemDef+0x54); 0 for unknown ids. The AS zone
 // traits read bits 0x20000 "ChangeTeam" (capture trigger) and 0x40000 "SpawnPoint"
 // (deploy-selectable). [docs/world/itemdef-re.md; net-re §5.61]
 uint32_t ItemDatabase::get_attrib(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0u : it->second.attrib;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? 0u : static_cast<uint32_t>(row->attrib);
 }
 
 uint32_t ItemDatabase::get_attrib2(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0u : it->second.attrib2;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? 0u : static_cast<uint32_t>(row->attrib2);
 }
 
 bool ItemDatabase::get_shadow_decal(int id, String &r_texture,
 		Vector4 &r_dims) const {
-	const auto it = items.find(id);
-	if (it == items.end() || it->second.shadow_texture.is_empty()) {
+	const ::DefItemDef *row = row_(id);
+	if (row == nullptr || row->shadow_texture[0] == '\0') {
 		return false;
 	}
-	r_texture = it->second.shadow_texture;
-	r_dims = Vector4(it->second.shadow_width, it->second.shadow_length,
-			it->second.shadow_offset_x, it->second.shadow_offset_y);
+	r_texture = String(row->shadow_texture);
+	r_dims = Vector4(row->shadow_width, row->shadow_length,
+			row->shadow_offset_x, row->shadow_offset_y);
 	return true;
 }
 
 PackedInt32Array ItemDatabase::get_vehicle_physics(int id) const {
 	PackedInt32Array out;
-	const auto it = items.find(id);
-	if (it == items.end()) return out;
-	const Item &item = it->second;
-	out.push_back(item.physics);
-	out.push_back(item.player_speed);
-	out.push_back(item.acceleration);
-	out.push_back(item.deceleration);
-	out.push_back(item.turn_rate);
-	out.push_back(item.turn_rate2);
-	out.push_back(item.unit_type);
-	out.push_back(item.torque);
-	out.push_back(item.water_speed);
-	out.push_back(item.climb_speed);
-	out.push_back(item.turn_roll);
-	out.push_back(item.speed_pitch);
-	out.push_back(item.max_slope);
-	out.push_back(item.slip_slope);
-	out.push_back(item.mass);
-	out.push_back(item.lean);
-	out.push_back(item.lean_velocity);
-	out.push_back(item.pitch);
-	out.push_back(item.pitch_velocity);
-	out.push_back(item.bob);
-	out.push_back(item.flip);
+	const ::DefItemDef *row = row_(id);
+	if (row == nullptr) return out;
+	out.push_back(row->physics);
+	out.push_back(row->player_speed);
+	out.push_back(row->acceleration);
+	out.push_back(row->deceleration);
+	out.push_back(row->turn_rate);
+	out.push_back(row->turn_rate2);
+	out.push_back(row->unit_type);
+	out.push_back(row->torque);
+	out.push_back(row->water_speed);
+	out.push_back(row->climb_speed);
+	out.push_back(row->turn_roll);
+	out.push_back(row->speed_pitch);
+	out.push_back(row->max_slope);
+	out.push_back(row->slip_slope);
+	out.push_back(row->mass);
+	out.push_back(row->lean);
+	out.push_back(row->lean_velocity);
+	out.push_back(row->pitch);
+	out.push_back(row->pitch_velocity);
+	out.push_back(row->bob);
+	out.push_back(row->flip);
 	return out;
 }
 
 String ItemDatabase::get_display_name(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.display_name;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->display_name);
 }
 
 // The def-authored closeattack launch userpoint name — the AI muzzle point the
 // placer pushes onto the placed model (world-wac-ai-re §21.2). [orig:
 // ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB]
 String ItemDatabase::get_launchups_closeattack(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.launchups_closeattack;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->launchups_closeattack);
 }
 
 TypedArray<ItemEmplacementAttachment> ItemDatabase::get_emplacement_attachments(int id) const {
 	TypedArray<ItemEmplacementAttachment> out;
-	const auto it = items.find(id);
-	if (it == items.end()) {
+	const ::DefItemDef *row = row_(id);
+	if (row == nullptr) {
 		return out;
 	}
-	for (size_t i = 0; i < it->second.emplacement_attachments.size(); ++i) {
-		const Item::EmplacementAttachment &attachment =
-				it->second.emplacement_attachments[i];
+	for (size_t i = 0; i < row->emplacement_attachments_count; ++i) {
+		const ::DefItemEmplacementAttachment &attachment = row->emplacement_attachments[i];
 		const int stored_slot = static_cast<int>(i + 1);
-		Ref<ItemEmplacementAttachment> row;
-		row.instantiate();
-		row->assign(attachment.kind, attachment.userpoint, attachment.item_id, stored_slot,
-				attachment.angle_count, attachment.down_angle, attachment.up_angle,
-				attachment.right_angle, attachment.left_angle,
-				stored_slot == it->second.emplacement_g_slot,
-				stored_slot == it->second.emplacement_c_slot);
-		out.push_back(row);
+		Ref<ItemEmplacementAttachment> record;
+		record.instantiate();
+		record->assign(attachment.kind, String(attachment.userpoint), attachment.item_id,
+				stored_slot, attachment.angle_count, attachment.down_angle,
+				attachment.up_angle, attachment.right_angle, attachment.left_angle,
+				stored_slot == row->emplacement_g_slot,
+				stored_slot == row->emplacement_c_slot);
+		out.push_back(record);
 	}
 	return out;
 }
 
 int ItemDatabase::get_emplacement_g_slot(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0 : it->second.emplacement_g_slot;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? 0 : row->emplacement_g_slot;
 }
 
 int ItemDatabase::get_emplacement_c_slot(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? 0 : it->second.emplacement_c_slot;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? 0 : row->emplacement_c_slot;
 }
 
 bool ItemDatabase::has_mount_config(int id) const {
-	const auto it = items.find(id);
-	return it != items.end() && it->second.mount_config_valid;
+	const ::DefItemDef *row = row_(id);
+	return row != nullptr && row->phrase_set_valid != 0;
 }
 
 int ItemDatabase::get_mount_config(int id) const {
-	const auto it = items.find(id);
-	return it != items.end() && it->second.mount_config_valid ? it->second.mount_config : 0;
+	const ::DefItemDef *row = row_(id);
+	return row != nullptr && row->phrase_set_valid != 0 ? row->phrase_set : 0;
 }
 
 String ItemDatabase::get_husk(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.husk;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->husk);
 }
 
 String ItemDatabase::get_huskfinal(int id) const {
-	const auto it = items.find(id);
-	return it == items.end() ? String() : it->second.huskfinal;
+	const ::DefItemDef *row = row_(id);
+	return row == nullptr ? String() : String(row->huskfinal);
 }
 
-
-// items.def soundloop_1..7 looping ambient set names for "snd:" marker items
-// [orig: ItemDef_ParseProperty @ 0x49eb00, "soundloop_" prefix @ 0x49fec4; the
-// 7-slot count matches the engine's Soundloop_1..7 type table @ 0x7d0788].
 // S13 (ADR 0028): the envs-class dispatch + soundloop slot resolution runs in
 // engine/runtime/audio over the retained items.def parse and the mission's
 // native bms document. The shell applies its own bank-presence filtering.
@@ -508,59 +400,22 @@ TypedArray<EnvsMarkerRow> ItemDatabase::resolve_envs_markers(
 	return out;
 }
 
-PackedStringArray ItemDatabase::get_sound_loops(int id) const {
-	PackedStringArray out;
-	out.resize(7);
-	const auto it = items.find(id);
-	if (it != items.end()) {
-		for (int s = 0; s < 7; ++s) {
-			out.set(s, it->second.soundloops[s]);
-		}
-	}
-	return out;
-}
-
 // Slot A ("particlefx") as authored — the one the runtime effect-attach pass
 // consumes (item_records.h carries the witness).
 Ref<ItemParticleFx> ItemDatabase::get_particle_fx(int id) const {
-	const auto it = items.find(id);
-	if (it == items.end()) {
+	const ::DefItemDef *row = row_(id);
+	if (row == nullptr) {
 		return Ref<ItemParticleFx>();
 	}
 	Ref<ItemParticleFx> out;
 	out.instantiate();
-	out->assign(it->second.particlefx.effect, it->second.particlefx.userpoint,
-			it->second.particlefx.secondary_effect);
-	return out;
-}
-
-// The backing store is an unordered_map, so callers that enumerate get a stable
-// order only if we impose one. Sort by display name (case-insensitive, the order a
-// user scans a palette), breaking ties by id so the order is total and reproducible.
-std::vector<const ItemDatabase::Item *> ItemDatabase::sorted_items() const {
-	std::vector<const Item *> out;
-	out.reserve(items.size());
-	for (const auto &pair : items) {
-		out.push_back(&pair.second);
-	}
-	std::sort(out.begin(), out.end(), [](const Item *a, const Item *b) {
-		const int name_cmp = a->display_name.naturalnocasecmp_to(b->display_name);
-		if (name_cmp != 0) {
-			return name_cmp < 0;
-		}
-		return a->id < b->id;
-	});
+	out->assign(String(row->particlefx.effect), String(row->particlefx.userpoint),
+			String(row->particlefx.secondary_effect));
 	return out;
 }
 
 PackedInt32Array ItemDatabase::get_item_ids() const {
-	PackedInt32Array out;
-	const std::vector<const Item *> sorted = sorted_items();
-	out.resize(static_cast<int>(sorted.size()));
-	for (size_t i = 0; i < sorted.size(); ++i) {
-		out.set(static_cast<int>(i), sorted[i]->id);
-	}
-	return out;
+	return sorted_ids_;
 }
 
 Ref<ItemSeatCard> ItemDatabase::extract_seat_specs_for_item(
