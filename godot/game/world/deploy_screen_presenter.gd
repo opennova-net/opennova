@@ -283,7 +283,7 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	for value in sim.get_deploy_spawn_zones():
 		var zone := value as Dictionary
 		var key := String(zone.get("name_key", ""))
-		zone_names[key] = _game_text("WPNames", key, "Spawn Point")
+		zone_names[key] = _game_text(Strings.SECTION_WPNAMES, key, "Spawn Point")
 	for value in sim.get_deploy_list_rows(_menu_text("DEFAULT_SPAWN_KEY", "D"),
 			_menu_text("HOME", "Home Base"), zone_names):
 		var row := value as Dictionary
@@ -348,14 +348,14 @@ func _apply_statics(sim: Simulation) -> void:
 			# The three sprintf arms are the engine's deploy_status_text
 			# (world/deploy_screen_feed.h), resolved through gametext by the sim.
 			_driver.set_widget_text(respawn_id,
-					sim.get_deploy_status_text(Strings.get_table("gametext")))
+					sim.get_deploy_status_text(Strings.get_table(Strings.TABLE_GAMETEXT)))
 	var psp_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
 	if psp_id >= 0:
 		var show_psp := bool(status.get("show_psp_respawn", false))
 		_driver.set_widget_shown(psp_id, show_psp)
 		if show_psp:
 			_driver.set_widget_text(psp_id, "%s  <cFF4040>%d" % [
-					_game_text("Overlays", "STROVER_PSPRESPAWN", "Spawn point available in"),
+					_game_text(Strings.SECTION_OVERLAYS, "STROVER_PSPRESPAWN", "Spawn point available in"),
 					int(status.get("hold_seconds", 0))])
 	var medic_id := _driver.widget_id("STATIC_MEDIC_MSG1")
 	var call_id := _driver.widget_id("STATIC_CALLMEDIC_MSG")
@@ -365,10 +365,10 @@ func _apply_statics(sim: Simulation) -> void:
 		_driver.set_widget_shown(call_id, show_medic)
 		if show_medic:
 			_driver.set_widget_text(medic_id, "%s  <cFF4040>%d" % [
-					_game_text("Overlays", "STROVER_MEDICTIMER", "Medic time remaining"),
+					_game_text(Strings.SECTION_OVERLAYS, "STROVER_MEDICTIMER", "Medic time remaining"),
 					int(status.get("revive_seconds", 0))])
 			var key_label: String = ControlsBindings.model().display_text_for_token("MedicReq")
-			var call_format := _game_text("Overlays", "STROVER_CALLMEDIC", "Press %s to call a medic")
+			var call_format := _game_text(Strings.SECTION_OVERLAYS, "STROVER_CALLMEDIC", "Press %s to call a medic")
 			_driver.set_widget_text(call_id,
 					call_format % key_label if call_format.contains("%s") else call_format)
 
@@ -456,8 +456,8 @@ func _menu_text(key: String, fallback: String) -> String:
 
 
 func _game_text(section: String, key: String, fallback: String) -> String:
-	# [orig: GameText_GetString("WPNames", "STRWPNAME%03d") @0x5536a0]
-	var t: RtxtStringFile = Strings.get_table("gametext")
+	# [orig: GameText_GetString(Strings.SECTION_WPNAMES, "STRWPNAME%03d") @0x5536a0]
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if t != null and not key.is_empty() and t.has_string_in_section(section, key):
 		return t.get_string_in_section(section, key)
 	return fallback

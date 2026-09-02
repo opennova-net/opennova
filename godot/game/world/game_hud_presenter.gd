@@ -36,15 +36,17 @@ var _crosshair_spread: bool = PlayerOptions.DEFAULT_CROSSHAIR_SPREAD
 # than it can ever present (net spectators may never acquire a local-player HUD).
 const MAX_PENDING_HUD_MESSAGES := 40
 
-var _game_hud = null        # HudOverlay, built on the first frame a mission has a local player
+# HudOverlay, built on the first frame a mission has a local player; Variant
+# because the GUT files inject duck doubles for it (ADR 0018's open seam).
+var _game_hud: Variant = null
 var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _vehicle_panel := VehiclePanelPresenterScript.new()  # the mounted-vehicle panel lane
 var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) lane + chat drain
 var _end_round_stats := EndRoundStatisticsPresenterScript.new()  # the SP Show Score (F5) panel lane
 var _lfp_panel := LfpPanelPresenterScript.new()  # the AAS zone status panel lane
 var _hud_pos: HudPos = null  # the loaded hudpos.def (VEHICLE_HUD blocks for the panel lane)
-var _sights_card = null     # HudSightsCard child of the overlay (per-row blend controls)
-var _view_effects = null    # PlayerViewEffects child of the overlay (binocular/NVG stack)
+var _sights_card: HudSightsCard = null # child of the overlay (per-row blend controls)
+var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
 var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on change)
 # Latest player-facing mission text. Presentation rides the message feed; this is
@@ -170,11 +172,11 @@ func teardown() -> void:
 	_lfp_panel.reset()
 	_hud_pos = null
 	_pending_hud_messages.clear()
-	Strings.register_table("mission", null)
+	Strings.register_table(Strings.TABLE_MISSION, null)
 	_warned_no_player = false
 
 
-func get_hud():
+func get_hud() -> Variant:
 	return _game_hud
 
 
@@ -288,10 +290,10 @@ func _ensure_game_hud() -> void:
 	HudTextTables.register(root, _world)
 	# The objectives-panel header, resolved once against the freshly registered
 	# gametext table. [orig: STROVER_MISSIONOBJECTIVES @0x5ba986]
-	var t: RtxtStringFile = Strings.get_table("gametext")
-	if t != null and t.has_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES"):
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	if t != null and t.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"):
 		_game_hud.set_objectives_header(
-				t.get_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES"))
+				t.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"))
 	# The presenter-held friendly-tags mode survives the per-mission rebuild
 	# like retail's process-lifetime global [orig: g_friendlyTagsMode @0x24C18C4].
 	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
@@ -305,7 +307,7 @@ func _ensure_game_hud() -> void:
 
 
 # The string tables the HUD resolves against: the current root's gametext table
-# (weapon "WepDes" names), and the per-mission text table (<mission>.bin, falling
+# (weapon Strings.SECTION_WEPDES names), and the per-mission text table (<mission>.bin, falling
 # back to medmssn.bin) for WAC/BMS triggered text.
 # [orig: Game_InitSubsystems @0x4a6cd0 (gametext.bin);
 #  TextResource_LoadMissionTextBin @0x51ed90 (per mission start + medmssn fallback)]
@@ -611,15 +613,10 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 #  gametext WPNames/STRWPNAMEDEFAULT @0x59477b]
 func _resolve_waypoint_name(name_id: int) -> String:
 	var key := "STRWPNAME%03d" % name_id
-	var mission_table: RtxtStringFile = Strings.get_table("mission")
-	var name := ""
-	if mission_table != null and mission_table.has_string_in_section("WPNames", key):
-		name = mission_table.get_string_in_section("WPNames", key)
+	var name := Strings.lookup_or(Strings.TABLE_MISSION, Strings.SECTION_WPNAMES, key, "")
 	if name.is_empty() or name.nocasecmp_to("null") == 0:
-		var gametext: RtxtStringFile = Strings.get_table("gametext")
-		if gametext != null and gametext.has_string_in_section("WPNames", "STRWPNAMEDEFAULT"):
-			return gametext.get_string_in_section("WPNames", "STRWPNAMEDEFAULT")
-		return ""
+		return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_WPNAMES,
+				"STRWPNAMEDEFAULT", "")
 	return name
 
 
@@ -719,38 +716,35 @@ func _apply_friendly_tags() -> void:
 #  @0x544d87. The STROVER_USEARMORYD "Armory in %d Seconds" delay variant is the MP
 #  armory-delay state — deferred with it: docs/interface/hud-re.md (D-HUD-14).]
 func _attach_label_text(seat_type: int, attach_text_key: String) -> String:
-	var t: RtxtStringFile = Strings.get_table("gametext")
 	match seat_type:
-		1: # sitex [orig: dword_2723860]
-			return _overlays_string(t, "STROVER_SIT", "!sit")
-		2, 5: # ctrlx/drvrx share the Control label [orig: g_hudLabelTextControl @0x5a34db/0x5a34fb]
-			return _overlays_string(t, "STROVER_CONTROL", "!Control")
-		3: # UseGun [orig: def+0x3A0 else dword_2723868]
+		Simulation.SEAT_PASSENGER: # sitex [orig: dword_2723860]
+			return _overlay_text("STROVER_SIT", "!sit")
+		Simulation.SEAT_CONTROLLER, Simulation.SEAT_DRIVER:
+			# ctrlx/drvrx share the Control label [orig: g_hudLabelTextControl @0x5a34db/0x5a34fb]
+			return _overlay_text("STROVER_CONTROL", "!Control")
+		Simulation.SEAT_GUNNER: # UseGun [orig: def+0x3A0 else dword_2723868]
 			if attach_text_key.is_empty():
-				return _overlays_string(t, "STROVER_USEGUN", "!UseGun")
-			if t != null and t.has_string_in_section("Overlays", attach_text_key):
-				return t.get_string_in_section("Overlays", attach_text_key)
-			return "" # the witnessed empty-label quirk (parse-miss stores "")
-		4: # armory [orig: dword_272386C]
-			return _overlays_string(t, "STROVER_USEARMORY", "!UseArmory")
+				return _overlay_text("STROVER_USEGUN", "!UseGun")
+			# the witnessed empty-label quirk (parse-miss stores "")
+			return _overlay_text(attach_text_key, "")
+		Simulation.SEAT_ARMORY_POINT: # armory [orig: dword_272386C]
+			return _overlay_text("STROVER_USEARMORY", "!UseArmory")
 	return ""
 
 
-func _overlays_string(t: RtxtStringFile, key: String, fallback: String) -> String:
-	if t != null and t.has_string_in_section("Overlays", key):
-		return t.get_string_in_section("Overlays", key)
-	return fallback
+func _overlay_text(key: String, fallback: String) -> String:
+	return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, key, fallback)
 
 
 # The weapon's HUD display name: the raw weapon id resolved in the gametext table's
-# "WepDes" section; a miss is the empty string (the element then draws nothing).
-# [orig: GameText_GetString("WepDes", weapondef+20) @0x593b7f; miss "" @0x51ec00]
+# Strings.SECTION_WEPDES section; a miss is the empty string (the element then draws nothing).
+# [orig: GameText_GetString(Strings.SECTION_WEPDES, weapondef+20) @0x593b7f; miss "" @0x51ec00]
 func _resolve_weapon_display_name(weapon_name: String) -> String:
 	if weapon_name.is_empty():
 		return ""
-	var t: RtxtStringFile = Strings.get_table("gametext")
-	if t != null and t.has_string_in_section("WepDes", weapon_name):
-		return t.get_string_in_section("WepDes", weapon_name)
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	if t != null and t.has_string_in_section(Strings.SECTION_WEPDES, weapon_name):
+		return t.get_string_in_section(Strings.SECTION_WEPDES, weapon_name)
 	return ""
 
 
@@ -784,7 +778,7 @@ func apply_mission_effects(effects: Array) -> void:
 			# 'Misc' section like the original.
 			var key := String(e.get("str", ""))
 			if not key.is_empty():
-				var line := Strings.lookup_display("gametext", "Misc", key)
+				var line := Strings.lookup_display(Strings.TABLE_GAMETEXT, "Misc", key)
 				_endround_banner = line
 				_queue_hud_message(line, 0)
 		elif kind == "subgoal_won" or kind == "subgoal_lost":
@@ -798,7 +792,7 @@ func apply_mission_effects(effects: Array) -> void:
 				var msg_key := ("STRLOSEMSG%03d" if lost else "STRWINMSG%03d") \
 						% int(e.get("b", 0))
 				var section := "LoseConditions" if lost else "WinConditions"
-				var t: RtxtStringFile = Strings.get_table("mission")
+				var t: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
 				if t != null and t.has_string_in_section(section, msg_key):
 					var line := t.get_string_in_section(section, msg_key)
 					if not line.is_empty():
@@ -837,7 +831,7 @@ func cycle_friendly_tags() -> void:
 	if _game_hud == null:
 		return
 	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
-	var t: RtxtStringFile = Strings.get_table("gametext")
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	var key := FRIENDLY_TAG_TOAST_KEYS[_friendly_tag_mode]
 	if t != null and t.has_string_in_section("Misc", key):
 		_game_hud.push_message(t.get_string_in_section("Misc", key))
@@ -1077,7 +1071,7 @@ func _apply_objectives() -> void:
 	var done := PackedByteArray()
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if _objectives_visible and sim != null:
-		var table: RtxtStringFile = Strings.get_table("mission")
+		var table: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
 		for raw in sim.get_objectives_view():
 			var row: Dictionary = raw
 			if not bool(row.get("shown", false)):
@@ -1105,7 +1099,7 @@ func _queue_hud_message(text: String, text_id: int) -> void:
 
 ## The message feed: this frame's folded S2C 0x1E game events, each resolved
 ## into the game's own canned sentence and posted to the SYSTEM ring.
-## The sim hands over the actor names, the "Canned Msg" key and the witnessed
+## The sim hands over the actor names, the Strings.SECTION_CANNED_MSG key and the witnessed
 ## line color; here we look the keys up in gametext and run the witnessed
 ## substitution through the engine formatter, so the sentence is always the
 ## game's own text and never one we compose.
@@ -1120,7 +1114,7 @@ func _flush_feed_events() -> void:
 	var rows: Array = sim.drain_feed_events()
 	if rows.is_empty():
 		return
-	var table: RtxtStringFile = Strings.get_table("gametext")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if table == null:
 		return
 	# A missing actor formats as the Client fallback string
@@ -1131,9 +1125,9 @@ func _flush_feed_events() -> void:
 		unknown = table.get_string_in_section("Client", "STRCLI01")
 	for row in rows:
 		var key := String(row.get("key", ""))
-		if key.is_empty() or not table.has_string_in_section("Canned Msg", key):
+		if key.is_empty() or not table.has_string_in_section(Strings.SECTION_CANNED_MSG, key):
 			continue
-		var tmpl := table.get_string_in_section("Canned Msg", key)
+		var tmpl := table.get_string_in_section(Strings.SECTION_CANNED_MSG, key)
 		if tmpl.is_empty():
 			continue
 		var line := ""
@@ -1144,8 +1138,8 @@ func _flush_feed_events() -> void:
 			# [orig: sprintf @0x427327/@0x42736B].
 			var wpname_key := String(row.get("wpname_key", ""))
 			var wpname := ""
-			if table.has_string_in_section("WPNames", wpname_key):
-				wpname = table.get_string_in_section("WPNames", wpname_key)
+			if table.has_string_in_section(Strings.SECTION_WPNAMES, wpname_key):
+				wpname = table.get_string_in_section(Strings.SECTION_WPNAMES, wpname_key)
 			line = String(sim.format_feed_camp_line(tmpl, wpname))
 		else:
 			var attacker := String(row.get("attacker", ""))
@@ -1154,8 +1148,8 @@ func _flush_feed_events() -> void:
 			# the aux actor is the local player [orig: the sprintf @0x422CA2].
 			var extra := String(row.get("extra", ""))
 			var bonus_tmpl := ""
-			if not extra.is_empty() and table.has_string_in_section("Canned Msg", "STRCND48"):
-				bonus_tmpl = table.get_string_in_section("Canned Msg", "STRCND48")
+			if not extra.is_empty() and table.has_string_in_section(Strings.SECTION_CANNED_MSG, "STRCND48"):
+				bonus_tmpl = table.get_string_in_section(Strings.SECTION_CANNED_MSG, "STRCND48")
 			line = String(sim.format_feed_line(tmpl,
 					attacker if not attacker.is_empty() else unknown,
 					victim if not victim.is_empty() else unknown,
@@ -1183,7 +1177,7 @@ func _show_triggered_text(text_id: int) -> void:
 	if _game_hud == null:
 		return
 	var key := "ID%03d" % text_id
-	var table: RtxtStringFile = Strings.get_table("mission")
+	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_MISSION)
 	var text := ""
 	if table != null and table.has_string_in_section("Triggered Text", key):
 		text = table.get_string_in_section("Triggered Text", key)

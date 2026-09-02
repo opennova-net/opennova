@@ -325,14 +325,14 @@ func _selected_weapon(control: String) -> Dictionary:
 	return (defs[row] as Dictionary).duplicate(true)
 
 
-# Weapon display name = loadout_menu_textid resolved in gametext's "WepDes" section, else the
+# Weapon display name = loadout_menu_textid resolved in gametext's Strings.SECTION_WEPDES section, else the
 # raw weapon id [orig: populate_weapon_slot_lists @ 0x560430: entry+40 textid else entry+0].
 func _weapon_label(w: Dictionary) -> String:
 	var textid := String(w.get("display_textid", ""))
 	if not textid.is_empty():
-		var t: RtxtStringFile = Strings.get_table("gametext")
-		if t != null and t.has_string_in_section("WepDes", textid):
-			return t.get_string_in_section("WepDes", textid)
+		var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+		if t != null and t.has_string_in_section(Strings.SECTION_WEPDES, textid):
+			return t.get_string_in_section(Strings.SECTION_WEPDES, textid)
 	return String(w.get("name", ""))
 
 
@@ -475,13 +475,13 @@ func _populate_grenades(class_mask: int, team_mask: int) -> void:
 
 
 # "<rounds> - <round label>" [orig: sprintf "%d - %s" with i*clipsize + round_type
-# in every ammo fill; the label resolves through gametext "WepDes"].
+# in every ammo fill; the label resolves through gametext Strings.SECTION_WEPDES].
 func _ammo_row_label(w: Dictionary, clips: int) -> String:
 	var round_label := String(w.get("round_type", ""))
 	if not round_label.is_empty():
-		var gametext: RtxtStringFile = Strings.get_table("gametext")
-		if gametext != null and gametext.has_string_in_section("WepDes", round_label):
-			round_label = gametext.get_string_in_section("WepDes", round_label)
+		var gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+		if gametext != null and gametext.has_string_in_section(Strings.SECTION_WEPDES, round_label):
+			round_label = gametext.get_string_in_section(Strings.SECTION_WEPDES, round_label)
 	return "%d - %s" % [clips * int(w.get("clipsize", 0)), round_label]
 
 
