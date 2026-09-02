@@ -4,38 +4,12 @@ extends GutTest
 # the one forward that makes a landed pick the F3 Entities window's selection
 # through the DevTools seam. Headless: DevTools attaches no ImGui context, but
 # its selection state works (release flavour: compiled out, skipped). The
-# click policy is pinned against a typed GameWorld double that counts the
-# catcher installs.
+# click policy is pinned on a real GameWorld: the catcher node the session
+# installs under it is the observable.
 
 
-## Typed world double: IS a GameWorld whose debug views record the
-## click-catcher policy (the session reaches them through debug_views()).
-class PolicyViews:
-	extends DebugViewSet
-	var enabled_calls: Array[bool] = []
-	var pick_lists: Array = []
-
-	func set_pick_click_enabled(enabled: bool) -> void:
-		enabled_calls.append(enabled)
-
-	func set_pick_debug(pick_list: DebugPickList) -> void:
-		pick_lists.append(pick_list)
-
-
-class PolicyWorld:
-	extends GameWorld
-	var views := PolicyViews.new()
-
-	var enabled_calls: Array[bool]:
-		get:
-			return views.enabled_calls
-
-	var pick_lists: Array:
-		get:
-			return views.pick_lists
-
-	func debug_views() -> DebugViewSet:
-		return views
+func _catcher(world: GameWorld) -> PickClickCatcher:
+	return world.get_node_or_null(DebugPickSession.PICK_CATCHER_NAME) as PickClickCatcher
 
 
 func _pick(handle: int) -> DebugPickCard:
@@ -73,25 +47,28 @@ func test_click_policy_latches_on_the_edge_and_follows_a_new_world() -> void:
 	session.sync_click_policy(null, true)
 	assert_false(session.is_click_active(), "no world: nothing latched")
 
-	var world := PolicyWorld.new()
-	autofree(world)
+	# Out of the tree: a bare GameWorld's _ready wants its scene siblings, and
+	# the catcher install needs only the world node as a parent.
+	var world: GameWorld = autofree(GameWorld.new())
 	session.sync_click_policy(world, true)
+	var first := _catcher(world)
+	assert_not_null(first, "the edge installs the catcher under the world")
 	session.sync_click_policy(world, true)
-	assert_eq(world.enabled_calls, [true], "one install per transition, none on a repeat")
+	assert_eq(_catcher(world), first, "a repeat is a no-op")
 	assert_true(session.is_click_active())
 	session.sync_click_policy(world, false)
+	assert_null(_catcher(world), "the falling edge removes it")
+	assert_null(first.get_parent(), "...detaching it before its deferred destruction")
 	session.sync_click_policy(world, false)
-	assert_eq(world.enabled_calls, [true, false], "one removal per transition")
+	assert_null(_catcher(world))
 
-	# A new world under an active latch gets the list AND the catcher.
+	# A new world under an active latch gets the catcher.
 	session.sync_click_policy(world, true)
-	var next_world := PolicyWorld.new()
-	autofree(next_world)
+	var next_world: GameWorld = autofree(GameWorld.new())
 	session.begin_world(next_world)
-	assert_eq(next_world.pick_lists, [session.list], "the new world renders the shell's list")
-	assert_eq(next_world.enabled_calls, [true], "the catcher follows the latch onto the new world")
+	assert_not_null(_catcher(next_world), "the catcher follows the latch onto the new world")
 	session.sync_click_policy(next_world, false)
-	var idle_world := PolicyWorld.new()
-	autofree(idle_world)
+	var idle_world: GameWorld = autofree(GameWorld.new())
 	session.begin_world(idle_world)
-	assert_eq(idle_world.enabled_calls, [], "an inactive latch installs no catcher")
+	assert_null(_catcher(idle_world), "an inactive latch installs no catcher")
+	await get_tree().process_frame  # the detached catchers' queue_free lands

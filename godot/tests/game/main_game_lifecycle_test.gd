@@ -908,11 +908,8 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 	assert_gt(int(runtime.get_sim().get_logic_tick()), tick_before,
 			"the live world keeps ticking under the tools")
 
-	# The pick stack, end to end: the world load installed the highlight view
-	# for the shell's list, F3-open flipped the click catcher on, and the
+	# The pick stack, end to end: F3-open flipped the click catcher on, and the
 	# sim-authoritative ray is terrain-occluded exactly like a bullet.
-	assert_not_null(world.get_node_or_null("PickDebug"),
-			"the world renders the shell's pick list")
 	assert_not_null(world.get_node_or_null("PickClickCatcher"),
 			"dev tools open: world clicks ray-pick")
 	var pick_sim = runtime.get_sim()
@@ -1147,7 +1144,7 @@ func test_debug_controls_rows_resolve_over_a_loaded_world() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
-	assert_false(controls.get_control_state(&"show_collision").available,
+	assert_false(controls.get_control_state(&"hide_foliage").available,
 			"the world rows read unavailable again once the world is gone")
 
 

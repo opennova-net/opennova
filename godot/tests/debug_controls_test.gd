@@ -8,21 +8,8 @@ extends GutTest
 
 # The registration order IS the op=list wire order.
 const EXPECTED_IDS: Array[StringName] = [
-	&"show_skeletons",
-	&"show_user_points",
-	&"show_collision",
 	&"hide_foliage",
 	&"hide_particles",
-	&"show_effect_boxes",
-	&"show_portal_faces",
-	&"show_round_trails",
-	&"show_rays",
-	&"show_ai_overlay",
-	&"show_ai_labels",
-	&"show_ai_routes",
-	&"show_ai_targets",
-	&"show_ai_rings",
-	&"show_hit_meshes",
 	&"force_fp_arms",
 	&"body_in_first_person",
 	&"third_person_on_foot",
@@ -143,15 +130,15 @@ func test_the_table_registers_the_wire_catalog() -> void:
 				"'%s' keeps the legacy wire row keys" % id)
 	assert_eq(owner_counts[DebugControls.OWNER_ENGINE], 36,
 			"engine rows end in a Simulation/Terrain/Weather/environment call")
-	assert_eq(owner_counts[DebugControls.OWNER_DEVICE], 27,
-			"device rows are viewport/overlay/audio/shell state")
+	assert_eq(owner_counts[DebugControls.OWNER_DEVICE], 14,
+			"device rows are viewport/audio/shell state")
 	assert_ne(JSON.stringify(_controls.capture_snapshot()), "",
 			"the entire MCP snapshot is JSON-safe")
 
 
 func test_release_breaks_every_row_callable_cycle() -> void:
 	var retained_controls := _controls
-	var retained_row := _controls.control(&"show_skeletons")
+	var retained_row := _controls.control(&"hide_foliage")
 	assert_true(retained_row.availability.is_valid())
 	assert_true(retained_row.read.is_valid())
 	assert_true(retained_row.write.is_valid())
@@ -160,7 +147,7 @@ func test_release_breaks_every_row_callable_cycle() -> void:
 
 	assert_null(_adapter.get_debug_controls())
 	assert_true(retained_controls.row_ids().is_empty())
-	assert_null(retained_controls.control(&"show_skeletons"))
+	assert_null(retained_controls.control(&"hide_foliage"))
 	assert_false(retained_row.availability.is_valid())
 	assert_false(retained_row.read.is_valid())
 	assert_false(retained_row.write.is_valid())
@@ -181,7 +168,7 @@ func test_list_pairs_definitions_with_live_state_and_filters() -> void:
 	for row in rows:
 		assert_true(row.has("state"), "listed rows carry their live state")
 
-	assert_eq(_controls.list_controls(&"", "capsule").size(), 1,
+	assert_eq(_controls.list_controls(&"", "vegetation").size(), 1,
 			"the catalog filter searches descriptions as well as labels")
 	var snapshot: Dictionary = _controls.capture_snapshot()
 	assert_eq(snapshot["edit_unlocked"], false,
@@ -366,10 +353,10 @@ func test_reads_are_live_and_nothing_replays_across_an_owner_swap() -> void:
 
 
 func test_unavailable_owners_report_their_reason_rows() -> void:
-	var world_row := _controls.get_control_state(&"show_collision")
+	var world_row := _controls.get_control_state(&"hide_foliage")
 	assert_false(world_row.available)
 	assert_string_contains(world_row.reason, "No game world is loaded")
-	assert_eq(_controls.set_control_value(&"show_collision", true),
+	assert_eq(_controls.set_control_value(&"hide_foliage", true),
 			ERR_UNAVAILABLE)
 
 	assert_string_contains(_controls.get_control_state(&"force_fp_arms").reason,

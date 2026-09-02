@@ -26,8 +26,6 @@ const ResourceDirSettings := preload("res://game/resource_index/resource_dir_set
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const FirstPersonArmsWitness := preload(
 		"res://game/world/first_person_arms_witness.gd")
-const DebugViewStatus := preload(
-		"res://game/debug/debug_view_status.gd")
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -174,12 +172,6 @@ var _playable := true
 # net_session_drive.gd). The session signals live on THIS node — the shell
 # contract pins them here — and the drive emits them through its world reference.
 var _net_drive: NetSessionDrive
-# The F3 debug-view set: the world-space debug views + the pick stack, an
-# internal child node on the same pattern (see debug_view_set.gd). The views
-# it builds attach to THIS world node — hosts and tests pin them as
-# world-relative lookups — and the moved public toggles keep one-line
-# delegates below so the shell-facing surface never moved.
-var _debug_views: DebugViewSet
 # The per-item ITEMS.DEF effect director (item_effect_director.gd): the
 # attached/static/controller item emitters, the effect-anchor resolvers, and
 # the retail master particle switch, on the same internal pattern (plain
@@ -252,21 +244,6 @@ func _init() -> void:
 			_resolve_root,
 			func() -> Dictionary: return _local_player_spawn_loadout)
 	add_child(_net_drive)
-	# The debug-view set follows the same internal-child pattern. Its two
-	# Callables lend the private internals the views need without widening
-	# GameWorld's API: the placer's grouped static user-point sources, and a
-	# weakref-guarded effect-world getter (the ParticleDebugView outlives
-	# mission reloads, so it must never hold this world strongly).
-	_debug_views = DebugViewSet.new()
-	_debug_views.name = "DebugViewSet"
-	var ref: WeakRef = weakref(self)
-	var user_point_sources := func() -> Array:
-		return _placer.get_static_user_point_sources() if _placer != null else []
-	var effect_world_getter := func() -> EffectWorld:
-		var world: GameWorld = ref.get_ref()
-		return world.get_effect_world() if world != null else null
-	_debug_views.setup(self, user_point_sources, effect_world_getter)
-	add_child(_debug_views)
 	# The render-occlusion frame pass: plain RefCounted (no tree presence),
 	# direct-called from tick() every frame. Constructed exactly once — its two
 	# shared dictionaries must keep their identity for the mission present pass.
@@ -400,7 +377,6 @@ func load_world(dir: String = "") -> int:
 	_world_ready = true
 	_load_stages._prepare_autonomous_weather()
 	_load_stages._set_water_world_rendering_enabled(true)
-	_debug_views.on_loaded()
 	world_loaded.emit()
 	return OK
 
@@ -963,19 +939,6 @@ func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 
 func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	return _player_visuals.local_player_viewmodel_def()
-
-
-# --- F3 debug views (world-space overlays + the pick stack) ------------------
-# The build/teardown lifecycle lives in DebugViewSet (debug_view_set.gd), an
-# internal child constructed in _init; the views it builds still attach under
-# THIS node, so world-relative lookups (SkeletonDebug/PickDebug/...) are
-# unchanged.
-
-## The F3 debug views (world-space overlays + the pick stack): the typed
-## debug-control table, the dev-tool bridges, probes and tests drive
-## DebugViewSet directly through this handle.
-func debug_views() -> DebugViewSet:
-	return _debug_views
 
 
 ## The dev tools' Particles seams (the existing get_effect_world() is
