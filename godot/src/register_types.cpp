@@ -57,6 +57,7 @@
 #include "object/entity_index.h"
 #include "object/object_data.h"
 #include "object/object_model.h"
+#include "object/post_multiply_draw.h"
 #include "object/object_shader_cache.h"
 #include "object/item_database.h"
 #include "object/weapon_database.h"
@@ -201,6 +202,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvLightValues);
 	GDREGISTER_CLASS(EnvLightState);
 	GDREGISTER_CLASS(PanmClock);
+	GDREGISTER_CLASS(PostMultiplyDraw);
 	GDREGISTER_CLASS(ObjectModel);
 	GDREGISTER_CLASS(EntityIndex);
 	GDREGISTER_CLASS(ObjectShaderCache);

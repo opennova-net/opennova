@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "object/object_data.h"
+#include "object/post_multiply_draw.h"
 #include "object/skeletal_anim.h"
 
 namespace godot {
@@ -271,7 +272,7 @@ private:
 	// time a level's submesh k carries the pair and hidden otherwise.
 	struct SurfaceSlot {
 		MeshInstance3D *instance = nullptr;
-		MeshInstance3D *auxiliary = nullptr;
+		PostMultiplyDraw *auxiliary = nullptr;
 	};
 	// A visual another owner parented under this model and bound to one
 	// authored level (the placer's static shadow siblings): shown only while

@@ -419,7 +419,7 @@ void ObjectModel::apply_presentation_layer_below(Node *p_root) {
 		VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(child);
 		if (visual != nullptr) {
 			const bool auxiliary =
-					bool(visual->get_meta("_opennova_auxiliary_draw", false));
+					Object::cast_to<PostMultiplyDraw>(visual) != nullptr;
 			visual->set_layer_mask(presentation_layer_mask(auxiliary));
 			GeometryInstance3D *geometry =
 					Object::cast_to<GeometryInstance3D>(child);
