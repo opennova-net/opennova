@@ -96,8 +96,6 @@ private:
 	// signal emissions. Always called with `user` == MusicDirector*.
 	static void _on_play_sound(void *user, uint32_t sbf_entry_index, int wait);
 	static void _on_section_entered(void *user, const char *name);
-	static void _on_var_changed(void *user, uint8_t idx, int32_t v);
-	static void _on_volume_changed(void *user, int32_t left_16_16, int32_t right_16_16);
 	static void _on_echo(void *user, int32_t arg);
 
 	Ref<MusicScript> _script;

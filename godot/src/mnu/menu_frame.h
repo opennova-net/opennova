@@ -187,10 +187,10 @@ public:
 	// widget NAME; -1 = absent). Valid after configure().
 	int widget_index(const String &p_name) const;
 
-	// Activation edges, emitted by process_mouse: "widget_pressed(index)" on
-	// the button-down edge over a claimed widget; "widget_clicked(index)" on
-	// the release edge while the SAME widget still owns the claim (the
-	// standard control-activation contract the Control-tree buttons had).
+	// Activation edge, emitted by process_mouse: "widget_clicked(index)" on
+	// the release edge while the widget claimed on the button-down edge still
+	// owns the claim (the standard control-activation contract the
+	// Control-tree buttons had).
 
 	// Debug/test accessor: compile at the current size and report counts.
 	Ref<MenuDrawListStats> get_draw_list_stats();

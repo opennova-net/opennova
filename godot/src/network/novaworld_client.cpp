@@ -110,7 +110,6 @@ void NovaWorldClient::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT,    "gate_port"), "set_gate_port", "get_gate_port");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "player_name"), "set_player_name", "get_player_name");
 
-	ADD_SIGNAL(MethodInfo("server_info_received", PropertyInfo(Variant::DICTIONARY, "info")));
 	ADD_SIGNAL(MethodInfo("server_list_updated", PropertyInfo(Variant::ARRAY, "rows")));
 	ADD_SIGNAL(MethodInfo("server_list_failed", PropertyInfo(Variant::STRING, "reason")));
 	// One ping-sweep pass landed; read get_server_pings() for the rid -> ping map.
@@ -277,8 +276,8 @@ NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 	return hooks;
 }
 
-// The gate replied: surface the response to GDScript (server_info_received) and
-// stash the fields the lobby HTTP legs resolve their base URL from.
+// The gate replied: stash the fields the lobby HTTP legs resolve their base
+// URL from (get_server_info).
 void NovaWorldClient::on_gate_response(const opennova::GateResponse &parsed) {
 	Dictionary info;
 	info["post_ip"] = String(std::to_string(parsed.post_ip[0]).c_str()) + "." +
@@ -299,7 +298,6 @@ void NovaWorldClient::on_gate_response(const opennova::GateResponse &parsed) {
 	trace(String("gate response: udp_code1='")
 	    + String(parsed.udp_code1.c_str()) + "' udp_code2='"
 	    + String(parsed.udp_code2.c_str()) + "' (empty => live NW likely needs login)");
-	emit_signal("server_info_received", info);
 }
 
 // Verify "Cookie" var-list (NW-S5) — the identity set the 892B
